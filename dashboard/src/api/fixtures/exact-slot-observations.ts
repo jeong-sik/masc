@@ -1,6 +1,6 @@
 // Synthetic wire fixtures for the frozen historical binding/current route boundary.
 export function slotObservation(overrides: Record<string, unknown> = {}) {
-  return { slot_id: 'A', binding: ['Http', httpBinding('https://old.invalid/v1/responses')],
+  return { slot_id: 'A', lane_key: 'board_attention_exact', binding: ['Http', httpBinding('https://old.invalid/v1/responses')],
     call_id: 'call-A', flow_id: 'flow-1', visit_ordinal: 0, plan_fingerprint: 'a'.repeat(64),
     request_body_sha256: 'b'.repeat(64), catalog_generation: 'generation-1',
     catalog_evidence: 'c'.repeat(64), target_identity: 'd'.repeat(64),
@@ -13,7 +13,7 @@ export function httpBinding(endpoint: string) {
 }
 export function slotState(overrides: Record<string, unknown> = {}) {
   const retained = { run_id: 'original-run', observation: slotObservation() }
-  return { slot_id: 'A', transport: 'http', declared: true,
+  return { slot_id: 'A', lane_key: 'board_attention_exact', transport: 'http', declared: true,
     current_binding: httpBinding('https://new.invalid/v1/responses'), ordering_scope: 'dated_only',
     last_observation: retained, last_attempt: retained, last_success: null, last_failure: retained,
     undated_outcomes: [], ...overrides }

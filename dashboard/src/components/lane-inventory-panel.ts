@@ -102,7 +102,9 @@ function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snap
     ${stateLines(row, snapshot).map(line => html`<p>${line}</p>`)}
     ${row.state.kind === 'package' && row.state.declaration?.kind === 'valid'
       ? html`<${AddonModelRoutes} installation=${row.state.declaration.installation_id} outputs=${row.state.declaration.exact_outputs} />` : null}
-    ${exactLane ? html`<${ExactLaneSlotStates} value=${exactLane.slotStates} scope=${snapshot.exact_snapshot} />
+    ${exactLane ? html`<p>Builtin 설정: <code>runtime.exact_output_lanes.${exactLane.laneId}</code>.
+      Add-on이 실행한 기록과 설정은 해당 패키지의 출력별 경로에서 확인하세요.</p>
+      <${ExactLaneSlotStates} value=${exactLane.slotStates} scope=${snapshot.exact_snapshot} />
       <${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} />` : null}
     ${selection.kind === 'machine' ? html`<${MachineLaneActivityPanel} key=${selection.machine} lane=${selection.machine} title=${row.label} />` : null}
     ${selection.kind === 'exact' ? html`<div class="flex flex-wrap gap-3">

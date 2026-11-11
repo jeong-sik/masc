@@ -25,6 +25,7 @@ function Observation({ value, runId }: { value: ExactSlotObservation; runId?: st
   const binding = value.binding
   return html`<div class="space-y-1">
     <p>${outcomeLabel(value.outcome)} · 단계 <code>${value.phase}</code></p>
+    <p class="break-all">실행 설정 경로: <code>${value.laneKey ?? '미관측'}</code></p>
     ${binding.kind === 'http' ? html`<div aria-label="실행 당시 주소"><span>실행 당시 주소</span><${Binding} value=${binding.value} /></div>`
       : html`<p>${binding.kind === 'official_client' ? '공식 클라이언트 · 공급자 주소 미관측' : '실행 당시 HTTP 주소 미관측'}</p>`}
     <p>실행 진입: ${value.startedAt === null ? '시각 미관측' : formatDateTimeKo(value.startedAt)}
@@ -76,11 +77,12 @@ export function ExactLaneSlotStates({ value, scope }: {
     <p>마지막 관측은 실행 시각이 기록된 항목만 비교합니다. 실행 반환은 의미 검증 완료 시각과 다를 수 있습니다.</p>
     ${state.state === 'unobserved' ? html`<p>보관된 슬롯 관측 없음 · 실행 여부 미확인</p>`
       : state.state === 'unavailable' ? html`<p role="status">슬롯 관측을 읽지 못했습니다: ${state.detail}</p>`
-        : html`${state.unavailableRuns > 0 ? html`<p role="status">${state.unavailableRuns}개 run의 슬롯 관측을 읽지 못했습니다.</p>` : null}
+        : html`${state.unavailableRuns > 0 ? html`<p role="status">조회 범위에서 ${state.unavailableRuns}개 run의 슬롯 관측을 읽지 못했습니다.</p>` : null}
           ${state.slots.length === 0 ? html`<p>선언되거나 보관된 슬롯 관측 없음</p>` : state.slots.map(slot => html`
             <section key=${`${slot.transport}/${slot.slotId}`} aria-label=${`${slot.slotId} ${slot.transport}`} class=${card}>
               <h5 class="font-semibold"><code>${slot.slotId}</code> · ${slot.transport === 'http' ? 'HTTP' : '공식 클라이언트'}
                 · ${slot.declared ? '현재 선언' : '과거 기록만 보관'}</h5>
+              <p class="break-all">설정 경로: <code>${slot.laneKey}</code></p>
               <div aria-label="현재 설정 주소"><h6 class="font-semibold">현재 설정 주소</h6>
                 ${slot.currentBinding === null
                   ? html`<p>${slot.transport === 'official_client' ? '공식 클라이언트가 공급자 주소를 관리합니다.' : '현재 허용된 HTTP 주소 미관측'}</p>`

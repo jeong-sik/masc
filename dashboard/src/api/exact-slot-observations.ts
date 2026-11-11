@@ -14,6 +14,7 @@ export type SlotOutcome =
   | { kind: 'admission_rejected' | 'execution_failed' | 'cli_failed'; cause: string; httpStatus?: number }
 export interface ExactSlotObservation {
   slotId: string
+  laneKey: string | null
   binding: SlotBinding
   callId: string | null
   flowId: string | null
@@ -39,6 +40,7 @@ export interface RetainedSlotObservation {
 }
 export interface ExactSlotState {
   slotId: string
+  laneKey: string
   transport: 'http' | 'official_client'
   declared: boolean
   currentBinding: SlotHttpBinding | null
@@ -185,7 +187,7 @@ function observation(value: unknown): ExactSlotObservation {
   const startedAt = time(raw.started_at), finishedAt = time(raw.finished_at)
   if (finishedAt !== null && startedAt === null) invalid()
   const phase = nullary(raw.phase, ['Prepared', 'Before_dispatch', 'Dispatch_started', 'Response_received', 'Terminal'])
-  return { slotId: text(raw.slot_id), binding: observationBinding(raw.binding), callId: nullableText(raw.call_id),
+  return { slotId: text(raw.slot_id), laneKey: nullableText(raw.lane_key), binding: observationBinding(raw.binding), callId: nullableText(raw.call_id),
     flowId: nullableText(raw.flow_id), visitOrdinal: raw.visit_ordinal === null ? null : count(raw.visit_ordinal),
     planFingerprint: nullableText(raw.plan_fingerprint), requestBodySha256: nullableText(raw.request_body_sha256),
     catalogGeneration: nullableText(raw.catalog_generation), catalogEvidence: nullableText(raw.catalog_evidence),
@@ -206,15 +208,16 @@ export function parseSlotObservations(value: unknown): SlotObservationState {
     }
   } catch { return { state: 'unavailable', detail: '슬롯 관측 형식을 읽지 못했습니다.' } }
 }
-function slotState(value: unknown): ExactSlotState {
+function slotState(value: unknown, laneKey: string): ExactSlotState {
   const raw = object(value), slotId = text(raw.slot_id)
+  if (raw.lane_key !== laneKey) invalid()
   if (raw.transport !== 'http' && raw.transport !== 'official_client') invalid()
   const transport = raw.transport
   if (raw.ordering_scope !== 'dated_only') invalid()
   const retained = (value: unknown): RetainedSlotObservation => {
     const item = object(value), observed = observation(item.observation)
     const kind = observed.binding.kind === 'official_client' ? 'official_client' : 'http'
-    if (observed.slotId !== slotId || kind !== transport) invalid()
+    if (observed.slotId !== slotId || observed.laneKey !== laneKey || kind !== transport) invalid()
     return { runId: text(item.run_id), observation: observed }
   }
   const nullable = (value: unknown) => value === null ? null : retained(value)
@@ -229,13 +232,14 @@ function slotState(value: unknown): ExactSlotState {
   if (undatedOutcomes.some(item => item.observation.finishedAt !== null || item.observation.outcome.kind === 'unresolved')) invalid()
   const currentBinding = raw.current_binding === null ? null : binding(raw.current_binding)
   if (transport === 'official_client' && currentBinding !== null) invalid()
-  return { slotId, transport, declared: bool(raw.declared), currentBinding, lastObservation, lastAttempt,
+  return { slotId, laneKey, transport, declared: bool(raw.declared), currentBinding, lastObservation, lastAttempt,
     lastSuccess, lastFailure, undatedOutcomes }
 }
-export function parseSlotMatrix(value: unknown, unavailableRuns: unknown): SlotMatrixState {
+export function parseSlotMatrix(value: unknown, unavailableRuns: unknown, owner: unknown): SlotMatrixState {
   if (value === undefined) return { state: 'unobserved' }
   try {
-    const slots = array(value).map(slotState)
+    const laneKey = text(owner)
+    const slots = array(value).map(value => slotState(value, laneKey))
     if (new Set(slots.map(slot => `${slot.transport}/${slot.slotId}`)).size !== slots.length) invalid()
     return { state: 'available', slots, unavailableRuns: count(unavailableRuns) }
   } catch { return { state: 'unavailable', detail: '슬롯 관측 형식을 읽지 못했습니다.' } }

@@ -8,7 +8,7 @@ import { ExactLaneSlotStates, ExactRunSlotObservations } from './exact-slot-obse
 afterEach(cleanup)
 describe('exact-slot diagnostic views', () => {
   it('separates current and historical endpoints, preserves refusal, and exposes uncertain ordering', () => {
-    const screen = render(html`<${ExactLaneSlotStates} value=${parseSlotMatrix(slotMatrix(), 1)}
+    const screen = render(html`<${ExactLaneSlotStates} value=${parseSlotMatrix(slotMatrix(), 1, 'board_attention_exact')}
       scope=${{ exactRunProjectionCount: 10, exactRunSourceTotal: 20, exactRunProjectionTruncated: true }} />`)
     const a = within(screen.getByRole('region', { name: 'A http' }))
     expect(within(a.getByLabelText('현재 설정 주소')).getByText('https://new.invalid/v1/responses')).toBeTruthy()

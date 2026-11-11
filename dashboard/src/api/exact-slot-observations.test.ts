@@ -4,7 +4,7 @@ import { httpBinding, slotMatrix, slotObservation, slotState } from './fixtures/
 
 describe('passive exact-slot observations', () => {
   it('keeps predecessor refusal and successor acceptance with their original bindings and times', () => {
-    const state = parseSlotMatrix(slotMatrix(), 0)
+    const state = parseSlotMatrix(slotMatrix(), 0, 'board_attention_exact')
     expect(state.state).toBe('available')
     if (state.state !== 'available') throw new Error('fixture should decode')
     const [a, b, unknown, cli] = state.slots
@@ -23,16 +23,19 @@ describe('passive exact-slot observations', () => {
   })
   it('keeps missing metadata unknown and isolates unreadable metadata', () => {
     expect(parseSlotObservations(undefined)).toEqual({ state: 'unobserved' })
-    expect(parseSlotMatrix(undefined, undefined)).toEqual({ state: 'unobserved' })
+    expect(parseSlotMatrix(undefined, undefined, undefined)).toEqual({ state: 'unobserved' })
     expect(parseSlotObservations({ state: 'available', observations: [{}] }).state).toBe('unavailable')
-    expect(parseSlotMatrix([slotState({ ordering_scope: 'run_started_at' })], 0).state).toBe('unavailable')
+    expect(parseSlotMatrix([slotState({ ordering_scope: 'run_started_at' })], 0, 'board_attention_exact').state).toBe('unavailable')
   })
   it('refuses dated success/failure with no measured return and mismatched slot provenance', () => {
     const undated = { run_id: 'run', observation: slotObservation({ started_at: null, finished_at: null }) }
-    expect(parseSlotMatrix([slotState({ last_failure: undated })], 0).state).toBe('unavailable')
+    expect(parseSlotMatrix([slotState({ last_failure: undated })], 0, 'board_attention_exact').state).toBe('unavailable')
     const other = { run_id: 'run', observation: slotObservation({ slot_id: 'other' }) }
-    expect(parseSlotMatrix([slotState({ last_observation: other })], 0).state).toBe('unavailable')
-    expect(parseSlotMatrix([slotState(), slotState()], 0).state).toBe('unavailable')
+    expect(parseSlotMatrix([slotState({ last_observation: other })], 0, 'board_attention_exact').state).toBe('unavailable')
+    const otherOwner = { run_id: 'run', observation: slotObservation({ lane_key: 'other-installation/grade' }) }
+    expect(parseSlotMatrix([slotState({ last_observation: otherOwner })], 0, 'board_attention_exact').state).toBe('unavailable')
+    expect(parseSlotMatrix([slotState()], 0, 'other-installation/grade').state).toBe('unavailable')
+    expect(parseSlotMatrix([slotState(), slotState()], 0, 'board_attention_exact').state).toBe('unavailable')
   })
   it('never exposes credentials from an invalid endpoint through the decoder error', () => {
     const state = parseSlotObservations({ state: 'available', observations: [slotObservation({

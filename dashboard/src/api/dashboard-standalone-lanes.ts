@@ -191,7 +191,7 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
     configured: raw.configured as boolean | null,
     configurationState: configurationState as StandaloneLaneConfigurationState,
     jev,
-    slotStates: parseSlotMatrix(raw.slot_states, raw.slot_observation_unavailable_runs),
+    slotStates: parseSlotMatrix(raw.slot_states, raw.slot_observation_unavailable_runs, laneId),
     admittedSlots: raw.admitted_slots.map((slot, slotIndex) => string(slot, `${context}.admitted_slots[${slotIndex}]`)),
     cliSlots: raw.cli_slots.map((slot, slotIndex) => string(slot, `${context}.cli_slots[${slotIndex}]`)),
     droppedSlots: raw.dropped_slots.map((slot, slotIndex) => string(slot, `${context}.dropped_slots[${slotIndex}]`)),

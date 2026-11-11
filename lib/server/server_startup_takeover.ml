@@ -75,6 +75,17 @@ type base_path_lock_rejection =
       ; path : string
       ; reason : string
       }
+  | Announcement_port_invalid of { port : int }
+  | Announcement_already_made of
+      { path : string
+      ; port : int
+      }
+  | Announcement_lease_not_active of { path : string }
+  | Announcement_port_locked of
+      { path : string
+      ; port : int
+      ; holder : int option
+      }
 
 (* Only the process-local table establishes ownership identity. The recorded
    number is written after locking and may describe a previous owner or a
@@ -182,6 +193,30 @@ let base_path_lock_rejection_to_string = function
       operation
       path
       reason
+  | Announcement_port_invalid { port } ->
+    Printf.sprintf "account server announcement refused: %d is not a port" port
+  | Announcement_already_made { path; port } ->
+    Printf.sprintf
+      "account server announcement refused: this process already announces port %d path=%s"
+      port
+      path
+  | Announcement_lease_not_active { path } ->
+    Printf.sprintf
+      "account server announcement refused: the lease handle is not the active process owner \
+       path=%s"
+      path
+  | Announcement_port_locked { path; port; holder = Some holder } ->
+    Printf.sprintf
+      "account server announcement refused: the byte of port %d is locked by pid %d path=%s"
+      port
+      holder
+      path
+  | Announcement_port_locked { path; port; holder = None } ->
+    Printf.sprintf
+      "account server announcement refused: the byte of port %d is locked by another process \
+       path=%s"
+      port
+      path
 ;;
 
 let base_path_lease_mu = Mutex.create ()
@@ -1412,51 +1447,51 @@ let announce_account_server (lease : base_path_lease) ~port =
   let path = account_server_announcement_path lease.path in
   let failed = announcement_failed ~operation:"announce_account_server" ~path in
   match Workspace_connection.port port with
-  | Error (_ : Workspace_connection.error) -> failed (Printf.sprintf "%d is not a port" port)
+  | Error (_ : Workspace_connection.error) -> Error (Announcement_port_invalid { port })
   | Ok (_ : Workspace_connection.port) ->
     Mutex.protect base_path_lease_mu (fun () ->
       match Hashtbl.find_opt base_path_leases lease.path with
       | Some (Active_lease current) when current == lease ->
-        if Hashtbl.mem account_server_announcements lease.path
-        then failed "this process has already announced a port"
-        else (
-          (* The private directory was validated when the lease was taken.
-             The lease path must still name the file this process holds
-             locked: a directory that was moved or replaced since then holds
-             no announcement of this owner. *)
-          match Unix.fstat lease.fd, Unix.lstat lease.path with
-          | exception Unix.Unix_error (error, _, _) -> failed (Unix.error_message error)
-          | held, named when not (same_file_identity held named) ->
-            Error (Lease_identity_changed { path = lease.path })
-          | (_ : Unix.stats), (_ : Unix.stats) ->
-            (match open_announcement_to_lock path with
-             | Error rejection -> Error rejection
-             | Ok fd ->
-               (match
-                  let (_ : int) = Unix.lseek fd port Unix.SEEK_SET in
-                  Unix.lockf fd Unix.F_TLOCK 1
-                with
-                | () ->
-                  Hashtbl.replace account_server_announcements lease.path (fd, port);
-                  Ok ()
-                | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) ->
-                  (* Another process holds a lock over the byte. This
-                     descriptor holds none, so the kernel can be asked which
-                     process before it is closed. *)
-                  let reason =
-                    match Owner_process_identity.byte_holder fd ~byte:port with
-                    | Ok (Some holder) ->
-                      Printf.sprintf "the byte of port %d is locked by pid %d" port holder
-                    | Ok None | Error (_ : Owner_process_identity.error) ->
-                      Printf.sprintf "the byte of port %d is locked by another process" port
-                  in
-                  close_announcement_fd ~path fd;
-                  failed reason
-                | exception Unix.Unix_error (error, _, _) ->
-                  close_announcement_fd ~path fd;
-                  failed (Unix.error_message error))))
+        (match Hashtbl.find_opt account_server_announcements lease.path with
+         | Some ((_ : Unix.file_descr), announced) ->
+           Error (Announcement_already_made { path; port = announced })
+         | None ->
+           (* The private directory was validated when the lease was taken.
+              The lease path must still name the file this process holds
+              locked: a directory that was moved or replaced since then holds
+              no announcement of this owner. *)
+           (match Unix.fstat lease.fd, Unix.lstat lease.path with
+            | exception Unix.Unix_error (error, _, _) -> failed (Unix.error_message error)
+            | held, named when not (same_file_identity held named) ->
+              Error (Lease_identity_changed { path = lease.path })
+            | (_ : Unix.stats), (_ : Unix.stats) ->
+              (match open_announcement_to_lock path with
+               | Error rejection -> Error rejection
+               | Ok fd ->
+                 (match
+                    let (_ : int) = Unix.lseek fd port Unix.SEEK_SET in
+                    Unix.lockf fd Unix.F_TLOCK 1
+                  with
+                  | () ->
+                    Hashtbl.replace account_server_announcements lease.path (fd, port);
+                    Ok ()
+                  | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) ->
+                    (* Another process holds a lock over the byte. This
+                       descriptor holds none, so the kernel can be asked
+                       which process before it is closed. It names no process
+                       when the lock is not the write lock of that one byte. *)
+                    let holder =
+                      match Owner_process_identity.byte_holder fd ~byte:port with
+                      | Ok holder -> holder
+                      | Error (_ : Owner_process_identity.error) -> None
+                    in
+                    close_announcement_fd ~path fd;
+                    Error (Announcement_port_locked { path; port; holder })
+                  | exception Unix.Unix_error (error, _, _) ->
+                    close_announcement_fd ~path fd;
+                    failed (Unix.error_message error)))))
       | Some (Active_lease _) | Some (Failed_close _) | None ->
-        failed "the lease handle is not the active process owner")
+        Error (Announcement_lease_not_active { path = lease.path }))
 ;;
 
 (* How this process may ask the kernel about an announcement file. *)
@@ -1516,8 +1551,7 @@ let kernel_not_asked failed = failed "the kernel could not be asked about the lo
 let account_server_port_holder ~run_dir ~base_path ~port =
   let operation = "read_account_server_port_holder" in
   match Workspace_connection.port port with
-  | Error (_ : Workspace_connection.error) ->
-    announcement_failed ~operation ~path:base_path (Printf.sprintf "%d is not a port" port)
+  | Error (_ : Workspace_connection.error) -> Error (Announcement_port_invalid { port })
   | Ok (_ : Workspace_connection.port) ->
     read_announcement ~operation ~run_dir ~base_path ~absent:None (fun ~failed reader ->
       match reader with

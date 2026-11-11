@@ -296,10 +296,9 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - `aud`는 문자열이고 client ID와 같아야 한다. 목록이면 거절한다. 이 앱은 자기 client ID로만 요청하므로 목록이 올 일이 없고, 거절하면 `azp`를 따질 일도 없다.
     - `nonce`는 transaction의 값과 같아야 한다(`Eqaf.equal`). `sub`는 1~255자 ASCII 문자열이다.
     - `iat`·`nbf`는 보지 않는다. Google 문서의 검증 단계에 없다.
-  - C2a-2 로그인 transaction. 시작할 때 `state`·`nonce`·PKCE verifier를 OS CSPRNG로 뽑아 메모리 저장소에 둔다.
-    - 저장소의 키는 transaction ID다. C3이 이 ID를 `__Host-masc_oidc_txn`에 싣는다. callback은 키로 꺼낸 뒤 `state`를 `Eqaf.equal`로 비교한다.
-    - 꺼내기는 한 번이다. 맞든 틀리든 꺼낸 항목은 지운다. 만료는 10분이고 꺼낼 때 본다.
-    - 저장소에 든 항목 수에 상한을 둔다. 가득 차면 새 시작을 503으로 거절한다. 오래된 항목을 밀어내면 다른 사람이 진행 중인 로그인이 사라진다. 상한 값은 이 층이 정한다.
+  - C2a-2 로그인 transaction. 시작할 때 `state`·`nonce`·PKCE verifier를 OS CSPRNG로 뽑아 프로세스의 키로 봉인한다(S1a-3a-1). 서버는 진행 중인 로그인을 저장하지 않는다.
+    - C3이 봉인한 값을 `__Host-masc_oidc_txn`에 싣는다. callback은 그 값을 열고 `state`를 `Eqaf.equal`로 비교한다.
+    - 만료는 10분이고 열 때 본다. 같은 값은 만료 전까지 다시 열린다. 재사용은 provider의 일회용 code와 로그의 일회용 초대가 막는다.
     - 초대 링크(B3d-1의 `/accounts/invite#<token>`)가 폼 POST로 보낸 token은 transaction 안에만 둔다. token은 추상 타입이고, 밖으로 내는 함수는 digest뿐이다. 그래서 로그와 오류 문구에 실리지 않는다(§5.1-4).
     - `return_to`는 접두어로 거르지 않고 RFC 3986 상대 참조로 파싱해 닫힌 타입 `Local_path.t`로 바꾼다(§5.2). scheme과 authority가 없고 path가 `/`로 시작해야 한다. RFC 3986 path에 없는 글자(`\` 등)는 파싱에서 거절한다. 브라우저가 `\`를 `/`로 읽어 `/\host`를 다른 호스트로 보내기 때문이다. 리다이렉트는 `Local_path.t`로만 만든다.
   - C2a-3 Google과 주고받기. discovery 문서, JWKS, token 교환이다. token 교환은 code·verifier·client ID·client secret·redirect URI를 보내 `id_token`을 받는다.
@@ -314,11 +313,11 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 구역이 멈췄거나 `Uncertain`이면 입장시키지 않는다(§4.1 "ledger를 읽지 못하면 principal을 만들지 않는다").
     - 신원도 초대 token도 없으면 아무것도 쓰지 않고 거절한다. 1단계에는 입장 요청 (c)가 없다.
     - `previously_deleted`: `Authz_principal_state`가 `Deleted` 사건의 신원을 모은다. `authz.jsonl`을 읽어 만드는 값이고 principal 레코드에는 없다(§5.1-6). 입장 결과가 이 표지를 싣고, 화면은 C6 ③이 보인다.
-  - C2a-5 설정과 흐름. `auth_config.google` 설정과, 로그인 하나를 시작부터 입장 판정까지 도는 함수다. HTTP 경로는 C3이 만든다(2026-11-06 범위 조정). 경로는 transaction ID를 `__Host-masc_oidc_txn` 쿠키로 주고받는데 그 쿠키가 C3의 것이라, 이 층에 경로를 두면 callback이 transaction을 찾지 못한다.
+  - C2a-5 설정과 흐름. `auth_config.google` 설정과, 로그인 하나를 시작부터 입장 판정까지 도는 함수다. HTTP 경로는 C3이 만든다(2026-11-06 범위 조정). 경로는 봉인한 transaction을 `__Host-masc_oidc_txn` 쿠키로 주고받는데 그 쿠키가 C3의 것이라, 이 층에 경로를 두면 callback이 transaction을 찾지 못한다.
     - 설정은 `auth_config.google`다. client ID, redirect URI, client secret을 담은 환경 변수의 이름을 둔다. 멤버 이름은 프로토콜이 아니라 provider다. C2b의 GitHub client는 같은 모양의 `github` 멤버다. secret 값은 `config.json`에 두지 않는다. `save_auth_config`가 그 파일을 다시 쓰고, 백업에도 들어가기 때문이다. 이 필드를 쓰는 곳은 다계정 경로뿐이다.
     - client는 이 설정과 환경 변수로 만든다. redirect URI는 `https` URL이어야 한다. `__Host-` 쿠키는 `Secure`라서 다계정 로그인은 `https`에서만 돈다.
-    - start는 초대 token(선택)과 `return_to`를 받는다. discovery를 먼저 읽고 transaction을 만든다. discovery가 실패하면 저장소에 아무것도 남지 않는다. 결과는 transaction ID와 Google 인가 URL이다.
-    - callback은 C2a-2, 3, 1, 4 순서로 돈다. transaction을 먼저 꺼내므로, Google이 거절을 돌려보낸 callback도 transaction을 지운다. 결과는 입장 판정과 `return_to`다.
+    - start는 초대 token(선택)과 `return_to`를 받는다. discovery를 먼저 읽고 transaction을 만든다. 결과는 봉인한 transaction과 Google 인가 URL이다. `return_to`가 길어 봉인이 쿠키 하나에 들어가지 않으면 시작을 거절한다.
+    - callback은 C2a-2, 3, 1, 4 순서로 돈다. transaction을 먼저 열므로, 열리지 않는 callback은 Google에 묻지 않는다. 결과는 입장 판정과 `return_to`다.
     - 시험은 Google을 흉내 낸다. 인가 URL에서 `nonce`와 `code_challenge`를 읽고, 시험이 만든 RSA 키로 ID token에 서명하고, token 엔드포인트에서 `code_verifier`의 S256을 확인한다.
 - 시험 벡터는 표의 C2a 행을 따른다. C1이 서명을, C2a-1이 `iss`·`aud`·`nonce`를, C2a-2가 `state`를 맡는다. 만료됐거나 취소된 초대 token, 초대 동시 소비(409), `Disabled` 등록 사용자의 로그인, 미등록 사용자의 거절은 C2a-4가 맡는다.
 - 하지 않는 것: HTTP 경로·세션·쿠키·CSRF·완료 화면(C3), GitHub(C2b), 입장 요청(C2c), 화면(C6), 서버가 구역을 쥐는 일(S1).
@@ -343,7 +342,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 세 주소와 API 버전은 GitHub이 정한 값이라 추측이 아니다. GitHub에는 discovery 문서가 없다. 네 값은 한 곳(`Github_oauth` 선언)에만 둔다.
 - 층은 셋이다. C2b-1과 C2b-2는 구역에 닿지 않는다. HTTP 경로는 셋 다 만들지 않는다(C3).
   - C2b-1 공용 transaction과 전송.
-    - transaction이 시작한 흐름을 타입으로 든다(GADT `_ flow = Google : google flow | Github : unit flow`). Google transaction은 nonce를 들고, GitHub transaction은 들지 않는다. 꺼낼 때 부르는 쪽이 흐름을 대고, 다른 흐름이면 지우고 `Other_flow`로 거절한다.
+    - transaction이 시작한 흐름을 타입으로 든다(GADT `_ flow = Google : google flow | Github : unit flow`). Google transaction은 nonce를 들고, GitHub transaction은 들지 않는다. 열 때 부르는 쪽이 흐름을 대고, 다른 흐름이면 `Other_flow`로 거절한다.
     - 모듈 이름 `Oidc_login_transaction`은 그대로 둔다. 설계(§5.2.1)가 GitHub 흐름의 쿠키도 `__Host-masc_oidc_txn`이라고 부르기 때문이다.
     - 전송 함수 `get`이 헤더를 받는다. Google의 discovery와 JWKS는 빈 헤더로 부른다. 전송 타입은 두 흐름이 함께 쓰는 모듈 `Login_transport` 하나에 둔다.
     - PR은 둘로 나눈다. C2b-1a가 전송, C2b-1b가 transaction이다.
@@ -352,7 +351,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - `id`가 정수가 아니거나 `Authz_external_identity.github`가 거절하면(0 이하, 2^53-1 초과) 거절한다. `login`과 email은 읽지 않는다.
     - `User-Agent: masc`를 직접 보낸다. 전송을 바꿔도 GitHub이 거절하지 않게 하기 위해서다.
     - 응답 크기 상한은 C2a-3의 `max_document_bytes`(64 KiB)를 같이 쓴다.
-  - C2b-3 설정과 흐름. `auth_config.github`(타입 `login_client`, C2a-5a)와 `Github_login_flow`의 start·callback이다. callback은 transaction(C2b-1), 교환(C2b-2), 입장(C2a-4) 순서로 돈다. transaction을 먼저 꺼내므로, GitHub이 거절을 돌려보낸 callback도 transaction을 지운다.
+  - C2b-3 설정과 흐름. `auth_config.github`(타입 `login_client`, C2a-5a)와 `Github_login_flow`의 start·callback이다. callback은 transaction(C2b-1), 교환(C2b-2), 입장(C2a-4) 순서로 돈다. transaction을 먼저 열므로, 열리지 않는 callback은 GitHub에 묻지 않는다.
 - 시험은 표의 C2b 행을 따른다. GitHub은 C2a처럼 시험의 전송 함수가 흉내 낸다. `lib/auth`는 HTTP 클라이언트에 의존하지 않아서, 표의 "로컬 HTTP 서버"는 전송 함수로 바꾼다.
   - C2b-1: 다른 흐름의 transaction, `state` 불일치.
   - C2b-2: token 오류 응답(200과 400 모두), `GET /user` 실패, `id` 없는 응답, `id`가 문자열인 응답, 큰 `id`, 오류 문구에 token과 secret이 없음.
@@ -400,7 +399,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 브라우저 세션은 `authz.jsonl` 레코드다. 발급과 폐기를 레코드로 쓴다. 서버가 다시 시작해도 로그인이 남는다.
   - 세션은 발급하고 7일 뒤 끝난다. 쓰는 동안 늘리지 않는다.
 - 지금 있는 것.
-  - 로그인 흐름은 `Google_login_flow`(C2a-5)와 `Github_login_flow`(C2b-3c)다. 둘 다 start와 callback을 내고 쿠키는 보지 않는다. transaction 저장소(`Oidc_login_transaction`)는 흐름을 가린다. 다른 흐름이 시작한 transaction은 `Other_flow`로 거절한다.
+  - 로그인 흐름은 `Google_login_flow`(C2a-5)와 `Github_login_flow`(C2b-3c)다. 둘 다 start와 callback을 내고 쿠키는 보지 않는다. 봉인한 transaction(`Oidc_login_transaction`)은 시작한 흐름을 싣는다. 다른 흐름이 시작한 transaction은 `Other_flow`로 거절한다.
   - 세션 레코드는 없다. `Authz_records.Auth_binding_status`(Active·Revoked) 타입만 있다.
   - 경로는 `Http_server_eio`의 router에 `Server_route.get`·`post`로 단다(`lib/server/server_routes_http.ml:15-47`). 로그인 전에 오는 경로의 접근 표시는 `Self_authenticated Oauth_protocol`이다. 선례는 Keeper OAuth callback이다(`server_keeper_oauth_http.ml:30-39, 216`). HTML은 `Http.Response.html`로 낸다.
   - HTTP/2는 router의 `dispatch`를 거치지 않는다. `server_h2_gateway.ml`에 경로마다 손으로 쓴 갈래가 있고, 갈래가 없는 경로는 404다(`:2084-2085`).
@@ -420,8 +419,8 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - CSRF token은 저장하지 않고 secret에서 만든다(용도 이름을 붙인 SHA-256). 쿠키가 HttpOnly라서 화면은 secret을 읽지 못한다. 화면은 `GET /auth/session`의 답에서 CSRF token을 받는다.
   - 요청 검사는 함수 하나다. 다계정에서 세션 쿠키와 bearer가 함께 오면 401이다. 세션 쿠키가 있는 GET·HEAD 밖의 요청은 Origin이 같은 출처이고 CSRF 헤더가 맞아야 한다. Origin이 없으면 거절한다. 원격 query credential(`token`, `sse_kind=observer`, IDE LSP)은 다계정에서 401이다.
   - 이 함수를 요청 경로에 거는 일은 C4의 `Auth_gate.decide`가 한다.
-- 경로. 등록 함수 하나가 구역, transaction 저장소, 두 login client, 전송, 시계, 뽑기를 받는다. S1이 부팅에서 부른다.
-  - `POST /auth/oidc/start`, `POST /auth/github/start`. 폼으로 초대 token(선택)과 `return_to`를 받는다. 같은 출처 Origin을 요구한다. 남의 초대 token을 담은 로그인을 피해자 브라우저에서 시작시키지 못하게 하려는 것이다. transaction ID를 `__Host-masc_oidc_txn`에 싣고 인가 URL로 303을 보낸다.
+- 경로. 등록 함수 하나가 구역, transaction을 봉인하는 키, 두 login client, 전송, 시계, 뽑기를 받는다. S1이 부팅에서 부른다.
+  - `POST /auth/oidc/start`, `POST /auth/github/start`. 폼으로 초대 token(선택)과 `return_to`를 받는다. 같은 출처 Origin을 요구한다. 남의 초대 token을 담은 로그인을 피해자 브라우저에서 시작시키지 못하게 하려는 것이다. 봉인한 transaction을 `__Host-masc_oidc_txn`에 싣고 인가 URL로 303을 보낸다.
   - `GET /auth/oidc/callback`, `GET /auth/github/callback`. transaction 쿠키만 인증 입력이다. 다른 흐름의 transaction은 401이다.
     - 입장 판정이 로그인이면 세션을 발급한다. start가 transaction에 넣은 기존 세션이 아직 동작하면 `replaces`로 같이 끊는다.
     - 답은 비공개 데이터가 없는 200 HTML 완료 화면이다. 거절은 일반 문구의 HTML이고, 409(`Authz_login.is_conflict`)와 401·403·503을 가린다.
@@ -741,7 +740,8 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 | S1a-2d | 계정 서버가 자기가 듣는 포트를 host에 알린다. `masc restart`가 그 알림으로 계정 서버를 알아보고, 멈추고, 바꾼다. 세부는 표 아래 S1a-2d 범위다. | §5.1 | S1a-2c |
 | S1a-2e | 나머지 운영 명령(`masc setup-server`, `masc setup`, `masc setup-stop-previous-owner`)과 설치 스크립트가 계정 서버를 알아본다. 그 전까지 `masc setup-server`는 계정 서버가 듣는 포트를 `unknown_server`로 답하고, 설치 스크립트는 그 답을 다른 서비스로 읽어 다른 포트를 권한다. | §5.1 | S1a-2d |
 | S1a-3a | C3의 로그인 경로(로그인 시작·callback, 로그아웃, 세션, allowlist, PAT)를 계정 서버의 표에 단다. login client는 부팅이 판정한 `config.json`에서 읽는다. 세부는 표 아래 S1a-3a 범위다. | §5.1 | S1a-2e, F3a-3 |
-| S1a-3b | 사람의 화면과 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-3a |
+| S1a-3a-1 | 진행 중인 로그인을 서버에 저장하지 않고 transaction 쿠키에 봉인한다. 인증 없는 로그인 시작이 다른 사람의 로그인을 막지 못한다(#51394). 세부는 표 아래 S1a-3a-1 범위다. | §5.2 | S1a-3a |
+| S1a-3b | 사람의 화면과 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-3a-1 |
 | S1b | 사람에게 MCP·Board·WebSocket 경로를 연다. | §11.1 | S1a-3b, C4-11, C4-12, C6 |
 
 - S1이 D4 뒤인 까닭: 계정 층 없이 다계정 설치를 서빙하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙한다. 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 다계정 설치를 서빙하면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
@@ -1054,14 +1054,14 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - client는 `Login_client.of_environment`로 만든다. secret은 member가 이름을 적은 환경 변수에서 읽고, redirect는 `https` URL이어야 한다.
   - member가 있는데 client를 만들 수 없으면 부팅이 멈춘다(`Login_client_refused`). 그 provider만 빼고 뜨면 운영자가 설정한 로그인이 404로 답한다.
   - member가 없는 provider는 설정되지 않은 것이고, 그 시작과 callback은 404다. 둘 다 없으면 아무도 로그인하지 못한다. 부팅은 그 사실을 로그에 경고로 적고 뜬다. probe와 `masc restart`는 login client 없이도 돌아야 한다.
-- 조립. `Server_account_login.routes`가 `Login_routes.t`를 만든다(대기 중 로그인 16개, provider로 가는 전송, 벽시계, 32바이트 난수). 계정 서버와 `masc auth preview`가 같은 함수를 쓴다. 미리보기의 client는 전처럼 loopback(`Login_client.loopback`)이다.
+- 조립. `Server_account_login.routes`가 `Login_routes.t`를 만든다(transaction을 봉인하는 키, provider로 가는 전송, 벽시계, 32바이트 난수). 계정 서버와 `masc auth preview`가 같은 함수를 쓴다. 미리보기의 client는 전처럼 loopback(`Login_client.loopback`)이다.
 - 프로세스 준비. 로그인은 `Masc_http_client`로 provider에 닿는다. 그 client는 프로세스의 env와 switch(`Eio_context`)를 읽는다. 단일 사용자 부팅은 owner state를 만들며 둘을 채우고, 계정 서버는 owner state를 만들지 않는다. 그래서 `Server_accounts.run`이 마지막 거절 뒤에 채운다. 거절된 부팅은 둘을 남기지 않는다.
 - 거절 순서. `Login_client_refused`는 구역을 다시 읽은 뒤, 표를 만들기 전이다. 포트를 묶기 전이라 CLI가 읽는 포트 기록과 host에 알리는 포트가 남지 않는다.
 - 시험(`test_server_accounts`).
   - secret 변수가 없는 `github` member와 redirect가 `http`인 member에서 부팅이 `Login_client_refused`로 멈춘다.
   - `github` member가 있는 설치를 띄운다. Origin 없는 `POST /auth/github/start`는 403(경로까지 닿는다), member가 없는 `POST /auth/oidc/start`는 로그인 경로의 404다(라우터의 404와 본문이 다르다).
 - 독립 리뷰(2026-11-11). P0 없음.
-  - P1(이 층에서 고치지 않음). 로그인 시작은 credential 없이 받고, 대기 중 로그인 저장소는 16자리다. 자리가 차면 빠질 때까지(callback 또는 10분) 새 로그인이 503이다. 실제 바이너리에서 16번 시작한 뒤의 시작이 503이었다(15:10Z). 가용성 문제이고 저장소 설계(§5.2)를 바꾸는 일이라 #51394로 올렸다. 저장소가 요구하는 뒤로 가지 않는 시계 대신 벽시계를 넘기는 것도 같은 이슈에 적었다.
+  - P1(S1a-3a-1이 고친다). 로그인 시작은 credential 없이 받고, 대기 중 로그인 저장소는 16자리다. 자리가 차면 빠질 때까지(callback 또는 10분) 새 로그인이 503이다. 실제 바이너리에서 16번 시작한 뒤의 시작이 503이었다(15:10Z). 가용성 문제이고 저장소 설계(§5.2)를 바꾸는 일이라 #51394로 올렸다. 저장소가 요구하는 뒤로 가지 않는 시계 대신 벽시계를 넘기는 것도 같은 이슈에 적었다.
   - P2. provider 교환 실패가 로그에 남지 않았다. `Login_routes`가 상태로 바꾸는 세 곳에서 사유를 로그에 남긴다.
   - P2. 시험이 같은 origin의 시작과 전송 준비를 보지 않았다. 303·`Location`·거래 cookie와 `Eio_context`의 env·switch를 단언한다.
   - P3. env·switch 준비가 거절 여섯보다 앞이었다. 마지막 거절 뒤로 옮겼고, 전송이 읽지 않는 net과 난수원 준비는 뺐다.
@@ -1075,6 +1075,43 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - redirect가 이 서버의 주소·경로를 가리키는지는 보지 않는다. 다른 host나 경로를 적은 redirect는 provider에서, 또는 첫 callback에서 실패한다.
   - provider까지 가는 로그인(실제 GitHub·Google 왕복)은 시험하지 않는다.
   - HTTP/2로 온 로그인 요청은 시험하지 않는다. handler는 `Http_reqd`로 읽고 쓰므로 두 프로토콜이 같은 코드를 지난다.
+
+**S1a-3a-1 범위**
+
+- 고치는 문제(#51394). 로그인 시작은 credential 없이 받는다. 서버가 진행 중인 로그인을 16자리 저장소에 두었으므로, 시작만 16번 보내면 자리가 빌 때까지(callback 또는 10분) 다른 사람의 로그인이 503이었다. 사람의 화면을 여는 S1a-3b보다 먼저 고친다(2026-11-11 사용자 결정: 봉인 쿠키).
+- 방법. 서버는 진행 중인 로그인을 저장하지 않는다. 시작할 때 만든 값(흐름, 시작 시각, `state`, PKCE verifier, Google의 `nonce`, 초대 token의 digest, `return_to`, 대체할 세션 ID)을 봉인해 `__Host-masc_oidc_txn`의 값으로 준다. callback은 쿠키를 열어 그 값을 얻는다.
+  - 봉인은 ChaCha20-Poly1305다(`Mirage_crypto.Chacha20`, RFC 8439). 키는 프로세스가 뜰 때 OS CSPRNG에서 뽑은 32바이트이고 파일에 쓰지 않는다. 서버가 다시 시작하면 그 전의 봉인은 열리지 않고, 그 로그인은 다시 시작해야 한다.
+  - nonce 12바이트는 0 넷과 8바이트 counter다. counter는 `Atomic.fetch_and_add`로 올리므로 한 키에서 같은 nonce가 두 번 나오지 않는다. 난수 nonce는 96비트라 충돌 한계를 따져야 하고, counter는 따질 것이 없다.
+  - 연관 데이터는 용도 문자열(`masc-login-transaction-v1`)이다. 같은 키로 다른 용도의 봉인을 만들게 되어도 서로 열리지 않는다.
+  - 쿠키 값은 nonce, 암호문, tag를 이어 붙인 것의 base64url이고 4000자 이하다. 브라우저는 쿠키 하나에 4096바이트를 보장한다(RFC 6265 §6.1). `return_to`가 길어 넘으면 시작이 400이다.
+  - 초대 token은 digest로만 봉인한다. 입장 판정은 digest만 쓴다.
+- 달라지는 동작.
+  - 시작은 자리를 기다리지 않는다. 503(가득 참)이 없어졌다.
+  - 쿠키는 만료(10분) 전까지 여러 번 열린다. `state`가 틀린 callback은 401이고 그 로그인을 끝내지 않는다. 전에는 틀린 callback 하나가 진행 중인 로그인을 지웠다.
+  - 같은 callback이 두 번 오면 서버는 두 번 다 provider에 묻고, provider가 일회용 code를 거절한다(RFC 6749 §4.1.2, RFC 9700 §2.1.2 권고와 같은 방향). 초대는 로그에서 한 번만 소비되고(같은 초대의 두 번째 소비는 409), 세션 대체는 레코드 하나라 두 번 쓰이지 않는다.
+  - 열리지 않는 쿠키(다른 키, 바뀐 글자, 잘린 값, 다른 흐름, 만료)는 provider에 묻기 전에 401이다.
+- 시계. 만료는 봉인 안의 시작 시각과 지금의 벽시계를 비교한다. 시계가 뒤로 가면 그만큼 더 오래 열리고, 앞으로 가면 일찍 닫힌다. 여는 것만으로는 로그인이 되지 않으므로(code와 `state`가 맞아야 한다) 만료는 쿠키 수명(`Max-Age=600`)을 서버에서 한 번 더 보는 것이다.
+- 지운 것. `Oidc_login_transaction`의 저장소(`Id`, `create ~capacity`, `Full`, `take`, `live`)와 `Server_account_login`의 16.
+- 시험.
+  - `test_oidc_login_transaction`: 2000번 시작한 것이 전부 열린다. 두 번 열린다. 다른 키, 한 글자 바뀐 값(모든 자리), 한 글자 붙은 값, 잘린 값, 다른 흐름, 만료는 열리지 않는다. 봉인한 바이트에 `state`·nonce·`return_to`·token·필드 이름이 보이지 않는다. domain 넷이 500번씩 봉인한 nonce 2000개가 서로 다르다. 2048자 `return_to`는 들어가고 4096자는 `Too_long`이다.
+  - `test_login_flow`: 틀린 `state` 뒤에 맞는 `state`로 로그인된다. 같은 callback의 두 번째는 provider가 거절하고 로그에 쓰인 것이 없다.
+  - `test_login_routes`: 시작 64번이 모두 303이다. 쿠키에 안 들어가는 `return_to`는 두 흐름 모두 400이다.
+  - `test_authz_browser_request`: 가장 긴 봉인으로 만든 `Set-Cookie` 값이 4096바이트 이하다.
+- 독립 리뷰(2026-11-11). P0~P2 없음. P3 넷.
+  - 쿠키 글자열이 하나로 정해지지 않았다. 패딩 없는 base64 해석기는 읽지 않는 끝 글자와 끝 글자의 남는 비트를 그냥 지나간다. 그래서 같은 바이트로 읽히는 다른 글자열도 열렸다. 다시 인코딩한 것과 같은 글자열만 연다.
+  - HTTP/1 listener는 header 한 줄을 4096바이트까지 읽는다. callback의 `Cookie` 줄에는 브라우저가 이 host로 보내는 쿠키가 모두 실린다. 실제 바이너리에서 4089바이트 줄은 답을 받고 4099바이트 줄은 400이며 서버는 계속 답한다. 봉인은 `return_to`가 `/`일 때 400~650자다. `return_to`가 수천 자이고 브라우저가 다른 쿠키도 보내는 로그인은 callback에서 400이다. 고치지 않고 인터페이스 문서에 적었다. 세션 쿠키는 `SameSite=Strict`라 provider에서 돌아오는 callback에 실리지 않는다.
+  - nonce가 봉인 횟수라, 로그인을 시작한 사람은 이 프로세스가 시작한 로그인 수를 읽는다. 난수 nonce로 바꾸면 수는 가려지지만 같은 nonce가 두 번 나올 확률이 생긴다. 그대로 두고 인터페이스 문서에 적었다.
+  - 낡은 주석 넷을 고쳤다.
+- 결과(2026-11-11 16:01~16:22Z, OCaml 5.5.2). 빌드 exit 0. `test_oidc_login_transaction` 15/15, `test_login_flow` 16/16, `test_login_routes` 6/6, `test_server_login_http` 8/8, `test_server_accounts` 11/11, `test_oidc_google_exchange` 11/11, `test_github_oauth` 5/5, `test_authz_browser_request` 4/4, `test_login_pat_routes` 3/3, `test_login_allowlist_routes` 3/3.
+- 실제 바이너리(임시 폴더, 비운 환경, loopback 포트, 2026-11-11 16:22Z).
+  - 시작 40번이 모두 303이다(같은 서버가 S1a-3a에서는 17번째부터 503이었다).
+  - 쿠키 값은 이름까지 411바이트, `Set-Cookie` 줄은 476바이트다. 쿠키 값에 `state`가 보이지 않는다.
+  - `state`가 틀린 callback, 한 글자 바꾼 쿠키, 잘린 쿠키는 401이다. 서버를 다시 띄운 뒤 그 전의 쿠키와 맞는 `state`도 401이다.
+  - 4001자 `return_to`는 400, `/keepers`는 303이다.
+  - S1a-3a의 smoke가 본 답(404·401·403·413, 거절되는 부팅 둘, secret 값 0곳)은 그대로다.
+- 하지 않는 것.
+  - 키를 파일에 두거나 여러 프로세스가 나누지 않는다. 계정 서버는 프로세스 하나다. 재시작이 끊는 것은 그때 진행 중이던 로그인(최대 10분 치)뿐이고 세션은 로그에 있어 남는다.
+  - provider까지 가는 로그인 왕복은 시험하지 않는다(S1a-3a와 같다).
 
 ### E. official client 격리
 

@@ -34,6 +34,9 @@ type t
 val empty : t
 val find : t -> Authz_types.Service_credential_id.t -> credential option
 
+(** Every credential with its id, in the order of the ids. *)
+val bindings : t -> (Authz_types.Service_credential_id.t * credential) list
+
 (** Why a credential does not act. *)
 type inactive =
   | Unknown  (** No credential has this id. *)

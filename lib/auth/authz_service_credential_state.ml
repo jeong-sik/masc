@@ -20,6 +20,7 @@ type t = credential Credential_map.t
 
 let empty = Credential_map.empty
 let find t credential_id = Credential_map.find_opt credential_id t
+let bindings t = Credential_map.bindings t
 
 type inactive =
   | Unknown

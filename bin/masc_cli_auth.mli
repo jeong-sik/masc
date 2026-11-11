@@ -28,6 +28,18 @@ val bootstrap : base_path:string -> external_store:string -> int
     expired before it was spent, or whose link was lost. Same exit codes. *)
 val invite : base_path:string -> int
 
+(** [masc auth service-credential issue] (plan C4-9): issues a Service
+    credential for [service] while no server runs on the workspace, and prints
+    its token once. *)
+val service_credential_issue : base_path:string -> service:string -> int
+
+(** [masc auth service-credential revoke]: ends the credential [credential]. *)
+val service_credential_revoke : base_path:string -> credential:string -> int
+
+(** [masc auth service-credential list]: every credential with its service,
+    the time it was issued and whether it is open. No secret is printed. *)
+val service_credential_list : base_path:string -> int
+
 (** The environment variable that holds the client secret of the GitHub OAuth
     App of {!preview}: [MASC_GITHUB_CLIENT_SECRET]. *)
 val github_client_secret_env : string

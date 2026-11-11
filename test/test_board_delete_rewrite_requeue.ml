@@ -191,7 +191,17 @@ let test_individual_snapshot_failure path () =
   check_post_deleted "retry does not reload the doomed post" post_id;
   Alcotest.(check bool) "retry removes the doomed row from the actual posts file" false
     (row_has_post_id post_id (post_rows ()));
-  Alcotest.(check bool) "successful retry clears posts work" false active.Board.dirty_posts;
+  (* A source a refused write left unreadable stays refused. [require_readable]
+     answers from the recorded source state and never re-reads the file
+     (lib/board/board_votes_source.ml:73-74), so restoring the path does not let
+     the batch finish: the posts work stays pending and [dirty_posts] stays set.
+     The retry is still a retry -- the store is the original one and the deletion
+     stays applied -- it simply cannot clear the work while another source of the
+     same batch is refused. #47224 wrote this line expecting a successful retry
+     to clear it, which mixed posts retry with whole-batch recovery. *)
+  Alcotest.(check bool)
+    "retry keeps posts work while another source of the batch stays refused"
+    true active.Board.dirty_posts;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
@@ -456,8 +466,15 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
   with_blocked_reactions (fun () ->
     (* The hook runs after persistence unlock. A real subsequent append CAS
        observes the damaged source while the deletion model stays pending. *)
+    (* The deletion event this hook waits for arrives as [Board_changed] while the
+       post is not public: [emit_board_sse_event] narrows [Post_changed] to
+       [Board_changed] for every visibility but [Public]
+       (lib/board/board_dispatch.ml:262-268), and this fixture's posts take the
+       default [Internal] (lib/board/board_core_persist.ml:880). Matching only
+       [Post_changed] here left the hook silent, so the corruption below never
+       ran and the failure surfaced at the "did not reach" line instead. *)
     Board_dispatch.set_board_sse_hook (function
-      | Board_dispatch.Post_changed _ ->
+      | Board_dispatch.Post_changed _ | Board_dispatch.Board_changed ->
         let active = store () in
         let path = Board.persist_path active in
         let original = In_channel.with_open_bin path In_channel.input_all in

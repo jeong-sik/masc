@@ -941,22 +941,23 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
                    Ansi.reset)
                attachments
       in
-      let closure_lines = match post.bp_closed with
-        | None -> []
+      let closure_lines, closure_provenance = match post.bp_closed with
+        | None -> [], []
         | Some closed ->
             let field label value =
               Masc_tui_text_block.rows ~max_cells:(max 1 text_width) (label ^ value)
               |> List.map (fun line -> "  " ^ line) in
-            [Ansi.bold ^ words state "  종료 결론" "  Resolution" ^ Ansi.reset]
-            @ field (words state "종료한 사람 " "Closed by ") closed.bpc_closed_by
-            @ (match closed.bpc_closed_at with
+            let provenance =
+              field (words state "종료한 사람 " "Closed by ") closed.bpc_closed_by
+              @ (match closed.bpc_closed_at with
                | None -> []
                | Some at ->
                    (match Board_read_layout.close_time at with
                     | Ok time -> field (words state "종료 시각 " "Closed at ") time
                     | Error raw -> field (words state "종료 시각 미확인 · 원래 Unix 초 " "Close time unavailable · raw Unix seconds ")
-                        (Printf.sprintf "%.17g" raw)))
-            @ (match closed.bpc_successor_id with
+                        (Printf.sprintf "%.17g" raw))) in
+            let conclusion =
+              (match closed.bpc_successor_id with
                | None -> []
                | Some successor ->
                    field (if String.trim successor<>"" && not (String.equal successor post.bp_id)
@@ -966,10 +967,17 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
                | None -> []
                | Some summary ->
                    Message_layout.wrap_body ~markdown:board_document_markdown
-                     ~max_cells:(max 1 text_width) ~sanitize:Terminal_text.single_line summary)
-            @ [""] in
+                     ~max_cells:(max 1 text_width) ~sanitize:Terminal_text.single_line summary) in
+            let heading = Ansi.bold ^ words state "  종료 결론" "  Resolution" ^ Ansi.reset in
+            (* Read the outcome before the original; its provenance stays after it.
+               Without an outcome, retain the existing trailing closure record. *)
+            let has_conclusion = Option.is_some closed.bpc_successor_id
+              || Option.exists (fun summary -> String.trim summary <> "") closed.bpc_summary in
+            if has_conclusion then heading :: conclusion @ [""], "" :: provenance
+            else [], heading :: provenance @ conclusion @ [""] in
       let body_lines =
-        body_lines @ closure_lines @ attachment_lines @ reference_lines @ related_lines
+        closure_lines @ body_lines @ closure_provenance
+        @ attachment_lines @ reference_lines @ related_lines
         @ [""; "  " ^ words state "글 주소 · " "Post reference · "
             ^ Link.reference Board_post (Terminal_text.single_line post.bp_id)]
       in

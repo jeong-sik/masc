@@ -53,6 +53,12 @@ val summary_of_recommendations : actor:string -> recommended_action list -> Yojs
 
 val build_workspace_attention_items : Workspace.config -> attention_item list
 
+val build_workspace_attention_observation :
+  now:float -> Workspace.config -> attention_item list * float option
+(** Current workspace attention and the earliest selected tool-host or pending
+    confirmation deadline from the same reads. Snapshot summary assembly uses
+    this observation without rereading the underlying inputs. *)
+
 val tool_host_ring_change_affects_attention : Log.Ring.entry_change -> bool
 (** Non-I/O classifier for this projection's actual bounded module window.
     A new ToolHost row changes its selection even without a failure envelope;

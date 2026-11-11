@@ -92,6 +92,7 @@ val memory_action_reading :
   cols:int -> state -> action:Masc.Operator_action_reason.t -> Masc_tui_detail_reading.t option
 (** Capture the exact observed Keeper health without moving the live cursor.
     Keep the original action beside this separate health observation.
+    Lead with the requested Keeper's result, before fleet context.
     A missing exact Keeper observation and read errors remain in the capture;
     [None] means the action is not a Memory destination. *)
 

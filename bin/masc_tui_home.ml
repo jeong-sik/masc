@@ -296,7 +296,13 @@ let operator_action_label state (item : Masc.Operator_action_reason.t) =
       ^ Printf.sprintf (if state.ui_language=Lang_ko then "종료 보류 %d건" else "%d shutdown-fenced events") count
       ^ (if complete then text " · 대상 확인" " · inspect owners"
          else text " · 전체 미확인" " · coverage unknown")
-  | Other_reported -> text "진단 · 서버 조치 확인" "Reading · inspect reported server action"
+  | Other_reported ->
+      let component = match item.component with
+        | "keeper_memory_execution" -> text "기억 처리" "Memory execution"
+        | "skill_catalog" -> text "Skill 목록" "Skill catalog"
+        | "keeper_config_schema" -> text "Keeper 설정" "Keeper configuration"
+        | component -> clean (String.escaped component) in
+      component ^ text " · 진단 확인" " · inspect diagnostics"
 
 let operator_rows_of_state state =
   Option.value (Option.map (List.mapi (fun index item ->

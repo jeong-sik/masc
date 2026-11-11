@@ -1260,21 +1260,24 @@ let memory_health_reading ~cols (state : state) ~keeper ~original =
               (Terminal_text.single_line alert.ma_label) (Terminal_text.single_line alert.ma_message))
             keeper.mkh_alerts) snapshot.mhs_keepers
   in
-  Masc_tui_detail_reading.create
-    ~ko
-    ~title:(if ko then "기억 관측 상세" else "Memory observation details")
-    ([section (if ko then "전체 기억" else "Fleet memory")
-        (observed @ memory_fleet_header_rows ~cols state)]
-     @ (if warnings = [] then [] else
-          [section (if ko then "조회 경고" else "Read warnings") warnings])
-     @ (if fleet_alerts = [] then [] else
-          [section (if ko then "읽은 키퍼의 알림" else "Alerts from decoded Keepers") fleet_alerts])
-     @ target_notice @ keeper_section
-     @ (match original with
-        | None -> []
-        | Some action -> [section (if ko then "원래 조치 관측 · 별도 출처" else "Original action · separate source")
+  let fleet = [section (if ko then "전체 기억" else "Fleet memory")
+      (observed @ memory_fleet_header_rows ~cols state)] in
+  let warnings = if warnings = [] then [] else
+      [section (if ko then "조회 경고" else "Read warnings") warnings] in
+  let alerts = if fleet_alerts = [] then [] else
+      [section (if ko then "읽은 키퍼의 알림" else "Alerts from decoded Keepers") fleet_alerts] in
+  let title = if ko then "기억 관측 상세" else "Memory observation details" in
+  let title, sections = match original with
+    | None -> title, fleet @ warnings @ alerts @ target_notice @ keeper_section
+    | Some action ->
+        let title = match action.Masc.Operator_action_reason.cause with
+          | Memory_attention {keeper;_} -> Terminal_text.single_line keeper ^ " · " ^ title
+          | Shutdown_fenced_backlog _ | Other_reported -> title in
+        let original = [section (if ko then "원래 조치 관측 · 별도 출처" else "Original action · separate source")
             [Masc.Operator_action_reason.diagnostic action;
-             Yojson.Safe.pretty_to_string (Masc.Operator_action_reason.to_json action)]]))
+             Yojson.Safe.pretty_to_string (Masc.Operator_action_reason.to_json action)]] in
+        title, target_notice @ keeper_section @ warnings @ original @ fleet @ alerts in
+  Masc_tui_detail_reading.create ~ko ~title sections
 
 let memory_overview_reading ~cols state =
   memory_health_reading ~cols state ~keeper:(selected_memory_keeper state) ~original:None

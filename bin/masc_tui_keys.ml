@@ -566,7 +566,7 @@ let for_surface = function
       [ b ~ko:"조치 원인" Navigate "v" "action reasons"
           ~help:"read every reason in the last server rollup; scroll and search the captured reading; Esc returns without changing a decision or setting"
       ; b ~ko:"키퍼" Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
-      ; b ~ko:"선택" Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      ; b ~ko:"선택" Navigate "j/k" "choose" ~help:"select a destination"
       ; b ~ko:"열기" Navigate "Enter" "open" ~help:"open the selected destination; never approve"
       ; b ~ko:"승인·질문" Navigate "p" "requests" ~help:"approvals and questions"
       ; b ~ko:"퀴즈" Navigate "g" "quiz" ~help:"the operator quiz's Results: scorecard windows and wrong-answer notes"

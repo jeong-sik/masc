@@ -47,6 +47,8 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
      caller holding nothing. It answers with the readers. *)
   | ( Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
     | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+    (* A refused wait recorded nothing, so the model reads the refusal. *)
+    | Keeper_tool_descriptor.Tool_receipt_wait
     | Keeper_tool_descriptor.Tool_search_files
     | Keeper_tool_descriptor.Tool_read_file
     | Keeper_tool_descriptor.Tool_lane_status

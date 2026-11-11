@@ -1308,6 +1308,31 @@ let inspect_receipt_owners ~path =
 
 let receipt_owner owners ~request_id = Request_owners.find_opt request_id owners
 
+let pending_receipt_requests executions =
+  List.concat_map
+    (fun (execution : Semantic.t) ->
+      List.filter_map
+        (fun (obligation : Semantic.receipt_obligation) ->
+          match obligation.state with
+          | Semantic.Pending -> Some obligation.request_id
+          | Semantic.Arrived (Semantic.Receipt_in_outbox | Semantic.Source_lost) -> None)
+        execution.receipt_obligations)
+    executions
+;;
+
+let inspect_pending_receipt_requests ~path =
+  inspect_file ~path (fun db ->
+    let* () = exec db ~operation:"begin read-only inspection" "BEGIN" in
+    let* () = validate_schema db in
+    let* executions = semantic_rows db ~active_only:true in
+    let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
+    let* _ = receipt_owners_of_executions executions in
+    Ok (Some (pending_receipt_requests executions)))
+  |> Result.map (function
+    | None -> []
+    | Some requests -> requests)
+;;
+
 
 module Offline = struct
   type prepared_copy =

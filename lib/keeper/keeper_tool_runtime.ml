@@ -155,6 +155,7 @@ let handle_filesystem ?prepared_read ?prepared_edit ?prepared_write ctx descript
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
+  | Tool_receipt_wait
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -262,6 +263,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
+  | Tool_receipt_wait
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -556,6 +558,8 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~name
          ~args)
+  | Tool_receipt_wait ->
+    Some (Keeper_tool_receipt_wait.handle ~config:ctx.config ~meta:ctx.meta ~args)
   | Tool_masc_schedule_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_schedule_with_outcome

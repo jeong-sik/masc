@@ -1056,10 +1056,27 @@ let run_keeper_invocation_turn_admitted_inner
               in
               let checkpoint_yield = Keeper_turn_outcome.equal result.turn_outcome
                   Keeper_turn_outcome.Continuation_checkpoint in
-              let retained = match result.stop_reason with
+              (* The wait a [keeper_receipt_wait] call asked for. It is recorded
+                 in the transaction that retains the checkpoint, so a turn that
+                 asked for it and does not end on a checkpoint cannot keep it:
+                 that is an error, not a dropped wait. *)
+              let receipt_wait =
+                match result.terminal_effect_receipt with
+                | Some (Keeper_tool_execution.Receipt_wait_requested { request_id }) ->
+                  Result.map Option.some
+                    (Keeper_semantic_execution.receipt_obligation ~request_id
+                       ~state:Keeper_semantic_execution.Pending)
+                | Some (Keeper_tool_execution.Surface_post_completed _) | None -> Ok None in
+              let retained = match receipt_wait with
+                | Error detail -> Error detail
+                | Ok receipt_wait ->
+                match result.stop_reason with
                 | Runtime_agent.InputRequired {request;_} ->
                   let open Result.Syntax in
                   let owner result = Result.map_error Keeper_owner_registry.command_error_to_string result in
+                  let* () = match receipt_wait with
+                    | None -> Ok ()
+                    | Some _ -> Error "a turn cannot wait for a receipt and for input at once" in
                   let* _ = Keeper_owner_registry.defer_direct_input_wait
                       ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id ~request |> owner in
                   Ok ()
@@ -1068,7 +1085,7 @@ let run_keeper_invocation_turn_admitted_inner
                   match result.checkpoint with
                   | Some checkpoint -> Keeper_direct_checkpoint_continuation.defer
                       ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
-                      ~session_dir ~session_id ~checkpoint ~receipt_wait:None
+                      ~session_dir ~session_id ~checkpoint ~receipt_wait
                   | None ->
                     (match result.official_client_settlement with
                      | None -> Error "cooperative turn omitted its producer-owned continuation authority"
@@ -1077,8 +1094,10 @@ let run_keeper_invocation_turn_admitted_inner
                         | Error error -> Error (Keeper_repetition_snapshot.error_to_string error)
                         | Ok frame -> Keeper_direct_checkpoint_continuation.defer_official
                             ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
-                            ~settled_session ~frame ~receipt_wait:None))
-                else Ok () in
+                            ~settled_session ~frame ~receipt_wait))
+                else (match receipt_wait with
+                  | None -> Ok ()
+                  | Some _ -> Error "the turn asked to wait for a receipt but did not end on a checkpoint") in
               (match retained with
                | Error detail ->
                  dispatch_failed
@@ -1086,6 +1105,17 @@ let run_keeper_invocation_turn_admitted_inner
                    (Keeper_request_failure.Turn_continuation_unpersisted
                       { stage = Keeper_request_failure.Checkpoint_retain; detail })
                | Ok () ->
+              (* The receipt may have arrived while the turn was ending. A
+                 failure here leaves the wait to the next maintenance pass. *)
+              (match receipt_wait with
+               | Ok (Some _) ->
+                 (match Keeper_receipt_wait_sweep.after_wait
+                          ~base_path:ctx.config.base_path ~keeper_name:meta.name with
+                  | Ok () -> ()
+                  | Error detail ->
+                    Log.Keeper.warn ~keeper_name:meta.name
+                      "receipt wait not resolved after the turn: %s" detail)
+               | Ok None | Error _ -> ());
               restart_keepalive_after_message_turn ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();
@@ -1109,7 +1139,7 @@ let run_keeper_invocation_turn_admitted_inner
                           (Keeper_surface_post.delivery_target_of_post_target
                              target) )
                     ]
-                  | None -> []
+                  | Some (Keeper_tool_execution.Receipt_wait_requested _) | None -> []
                 in
                 `Assoc ([
                   ("reply", `String result.response_text);

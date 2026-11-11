@@ -429,6 +429,40 @@ let test_applied_gate_replay_seeds_terminal_settlement () =
     fail "applied connector replay selected the wrong yield boundary"
   | Error error -> fail (Agent_core.Error.to_string error)
 
+(* A turn that ends on a background receipt is not complete. The boundary
+   yields to the checkpoint path, so the turn's outcome is a continuation
+   checkpoint and the wait travels with it; a posted update completes the
+   turn. *)
+let test_receipt_wait_ends_the_turn_on_a_checkpoint () =
+  let receipt = Masc.Keeper_tool_execution.Receipt_wait_requested { request_id = "kmsg-awaited" } in
+  let waiting = Masc.Keeper_tools_agent_core.Terminal_effect_completed receipt in
+  (match Masc.Keeper_agent_run.terminal_effect_boundary_decision waiting with
+   | Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting) -> ()
+   | Ok Runtime_agent.Continue -> fail "a wait let the turn continue"
+   | Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed) ->
+     fail "a wait completed the turn instead of ending it on a checkpoint"
+   | Error error -> fail (Agent_core.Error.to_string error));
+  (match
+     Masc.Keeper_agent_run.For_testing.finalize_turn_surface
+       ~response_text:""
+       ~stop_reason:
+         (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 1; provider_turn_ordinal = 3 })
+       waiting
+   with
+   | Ok (turn_outcome, retained_receipt) ->
+     check outcome "the wait ends the turn on a checkpoint" TO.Continuation_checkpoint turn_outcome;
+     check bool "the wait reaches the turn result" true (retained_receipt = Some receipt)
+   | Error error -> fail (Agent_core.Error.to_string error));
+  let posted =
+    Masc.Keeper_tools_agent_core.Terminal_effect_completed
+      (Masc.Keeper_tool_execution.Surface_post_completed Masc.Keeper_surface_post.To_dashboard)
+  in
+  match Masc.Keeper_agent_run.terminal_effect_boundary_decision posted with
+  | Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed) -> ()
+  | Ok Runtime_agent.Continue | Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting) ->
+    fail "a posted update stopped completing the turn"
+  | Error error -> fail (Agent_core.Error.to_string error)
+
 let tool_call ?(input = Some "input") ?(output = Some "output") ?typed_outcome tool_name
     : Masc.Keeper_agent_result.tool_call_detail =
   { tool_name
@@ -1202,6 +1236,8 @@ let () =
           test_case "of_result_surface" `Quick test_of_result_surface;
           test_case "posted progress retains cooperative continuation" `Quick
             test_progress_post_keeps_typed_continuation;
+          test_case "a receipt wait ends the turn on a checkpoint" `Quick
+            test_receipt_wait_ends_the_turn_on_a_checkpoint;
           test_case "completed external effect has no direct reply error" `Quick
             test_external_effect_completed_has_no_direct_reply_error;
           test_case "external effect status survives server projection" `Quick

@@ -75,6 +75,92 @@ let ordinary_on_failed
   then mark_terminal_effect_failed failure
 ;;
 
+(* The wait tool is an ordinary call: Agent Core does not end the run after
+   it. Its completion carries the request the turn ends on, and the cooperative
+   boundary reads that from the terminal state
+   (Keeper_tool_terminal_boundary). A completed wait without its receipt is a
+   producer bug and fails the turn rather than ending it with no wait. *)
+let receipt_wait_on_completed
+      ~mark_terminal_effect_completed
+      ~mark_terminal_effect_failed
+      (descriptor : Keeper_tool_descriptor.t)
+  =
+  match descriptor.runtime_handler with
+  | Keeper_tool_descriptor.Tool_receipt_wait ->
+    Some
+      (function
+        | Some (Keeper_tool_execution.Receipt_wait_requested _ as receipt) ->
+          mark_terminal_effect_completed receipt
+        | Some (Keeper_tool_execution.Surface_post_completed _) | None ->
+          mark_terminal_effect_failed
+            { Keeper_tools_agent_core.failure_class = Tool_result.Runtime_failure
+            ; effect_disposition = Tool_result.Effect_outcome_unknown
+            ; detail =
+                Keeper_terminal_effect_detail.Terminal_tool_receipt_missing
+                  { internal_tool_name = descriptor.internal_name }
+            })
+  | Keeper_tool_descriptor.Tool_lane_addon _
+  | Keeper_tool_descriptor.Tool_execute
+  | Keeper_tool_descriptor.Tool_search_files
+  | Keeper_tool_descriptor.Tool_read_file
+  | Keeper_tool_descriptor.Tool_edit_file
+  | Keeper_tool_descriptor.Tool_write_file
+  | Keeper_tool_descriptor.Tool_lane_status
+  | Keeper_tool_descriptor.Tool_tools_list
+  | Keeper_tool_descriptor.Tool_capability_search
+  | Keeper_tool_descriptor.Tool_context_status
+  | Keeper_tool_descriptor.Tool_peer_artifact
+  | Keeper_tool_descriptor.Tool_artifact_read
+  | Keeper_tool_descriptor.Tool_skill_validate
+  | Keeper_tool_descriptor.Tool_artifact_draft
+  | Keeper_tool_descriptor.Tool_artifact_publish
+  | Keeper_tool_descriptor.Tool_skill_publish
+  | Keeper_tool_descriptor.Tool_workspace_memory_read
+  | Keeper_tool_descriptor.Tool_memory_search
+  | Keeper_tool_descriptor.Tool_memory_select
+  | Keeper_tool_descriptor.Tool_memory_retract
+  | Keeper_tool_descriptor.Tool_memory_write
+  | Keeper_tool_descriptor.Tool_constitution_write
+  | Keeper_tool_descriptor.Tool_constitution_read
+  | Keeper_tool_descriptor.Tool_constitution_remove
+  | Keeper_tool_descriptor.Tool_wiki_search
+  | Keeper_tool_descriptor.Tool_wiki_read
+  | Keeper_tool_descriptor.Tool_surface_read
+  | Keeper_tool_descriptor.Tool_surface_post
+  | Keeper_tool_descriptor.Tool_ide_annotate
+  | Keeper_tool_descriptor.Tool_voice_dispatch
+  | Keeper_tool_descriptor.Tool_task_dispatch
+  | Keeper_tool_descriptor.Tool_board_dispatch
+  | Keeper_tool_descriptor.Tool_masc_task_dispatch
+  | Keeper_tool_descriptor.Tool_masc_plan_dispatch
+  | Keeper_tool_descriptor.Tool_masc_run_dispatch
+  | Keeper_tool_descriptor.Tool_masc_agent_dispatch
+  | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
+  | Keeper_tool_descriptor.Tool_masc_misc_dispatch
+  | Keeper_tool_descriptor.Tool_web_search
+  | Keeper_tool_descriptor.Tool_web_fetch
+  | Keeper_tool_descriptor.Tool_browser_tabs
+  | Keeper_tool_descriptor.Tool_browser_read
+  | Keeper_tool_descriptor.Tool_browser_session
+  | Keeper_tool_descriptor.Tool_browser_goto
+  | Keeper_tool_descriptor.Tool_browser_act
+  | Keeper_tool_descriptor.Tool_browser_interact
+  | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
+  | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_job_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+  | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
+  | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
+  | Keeper_tool_descriptor.Tool_masc_fusion_status
+  | Keeper_tool_descriptor.Tool_masc_fusion_decision
+  | Keeper_tool_descriptor.Tool_masc_file_dispatch
+  | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
+  | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
+  | Keeper_tool_descriptor.Tool_analyze_image
+  | Keeper_tool_descriptor.Tool_read_image -> None
+;;
+
 let make_tool_bundle_for_descriptors_with_policy
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -379,7 +465,10 @@ let make_tool_bundle_for_descriptors_with_policy
              , Some mark_completed_terminal_externalization_failed )
            | Keeper_tool_descriptor.Ordinary
                (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) ->
-             ( None
+             ( receipt_wait_on_completed
+                 ~mark_terminal_effect_completed
+                 ~mark_terminal_effect_failed
+                 descriptor
              , Some
                  (ordinary_on_failed
                     ~mark_terminal_effect_failed

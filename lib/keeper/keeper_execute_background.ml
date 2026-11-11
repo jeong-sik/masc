@@ -332,6 +332,40 @@ let unfinished_entry (entry : Keeper_msg_async.entry) =
      | Some _ | None -> None)
 ;;
 
+let request_arguments entry = Option.map snd (unfinished_entry entry)
+
+type lost_source =
+  | Recorded_run of Yojson.Safe.t
+  | Arguments_unknown
+
+let source_lost_cause = function
+  | Recorded_run _ ->
+    "The run has no worker and left no receipt. " ^ effect_unknown
+  | Arguments_unknown ->
+    "The command of this run is not known, the run has no worker, and it left \
+     no receipt. "
+    ^ effect_unknown
+;;
+
+(* The wait that asked for this run is resolved by the caller afterwards, so
+   this does not wake the Keeper: a wake before the wait is resolved would
+   find the receipt owned and read nothing. *)
+let retain_source_lost_receipt ~base_path ~keeper_name ~request_id lost =
+  let arguments =
+    match lost with
+    | Recorded_run arguments -> arguments
+    | Arguments_unknown -> `Assoc []
+  in
+  match holds_receipt ~base_path ~keeper_name ~request_id with
+  | Error detail -> Error detail
+  | Ok true -> Ok ()
+  | Ok false ->
+    Outbox.retain
+      ~base_path
+      ~keeper_name
+      (receipt ~request_id ~arguments (Unfinished { cause = source_lost_cause lost }))
+;;
+
 let deliver_unfinished_runs ~base_path =
   match Keeper_msg_async.read_durable_active_inventory ~base_path with
   | Error _ ->

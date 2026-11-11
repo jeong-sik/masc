@@ -93,6 +93,11 @@ val inspect_receipt_owners : path:string -> (receipt_owners, error) result
 val receipt_owner : receipt_owners -> request_id:string -> Keeper_execution_scope_id.t option
 (** [None] when no unsettled execution owns the request. *)
 
+val inspect_pending_receipt_requests : path:string -> (string list, error) result
+(** The requests whose receipt an unsettled execution still waits for, from the
+    same read-only transaction as {!inspect_receipt_owners}. A missing database
+    is an empty list. *)
+
 type native_history =
   { execution_operation_id : Operation.Operation_id.t
       (** The execution leader, including when a batch member was requested. *)

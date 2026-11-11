@@ -112,6 +112,7 @@ let tag_of_runtime_handler
   | Tool_wiki_read
   | Tool_surface_read
   | Tool_surface_post
+  | Tool_receipt_wait
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_masc_keeper_dispatch
@@ -198,6 +199,7 @@ let runtime_schema_for_descriptor
     | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
     | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
     | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+    | Keeper_tool_descriptor.Tool_receipt_wait
     | Keeper_tool_descriptor.Tool_keeper_job_dispatch
     | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
     | Keeper_tool_descriptor.Tool_masc_fusion_dispatch

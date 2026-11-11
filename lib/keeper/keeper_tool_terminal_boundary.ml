@@ -11,8 +11,15 @@ let decision = function
      (Keeper_tools_agent_core_bundle). A repeated request is not evidence that
      the whole turn must stop; explicit Gate/effect authority owns the call. *)
   | Keeper_tools_agent_core.External_effect_deferred -> Ok Runtime_agent.Continue
-  | Keeper_tools_agent_core.Terminal_effect_completed _ ->
+  | Keeper_tools_agent_core.Terminal_effect_completed
+      (Keeper_tool_execution.Surface_post_completed _) ->
     Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
+  (* The turn ends on a receipt it has not received. It is not complete, so it
+     takes the checkpoint path that a deferred tool result takes, and the wait
+     is recorded with the checkpoint. *)
+  | Keeper_tools_agent_core.Terminal_effect_completed
+      (Keeper_tool_execution.Receipt_wait_requested _) ->
+    Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting)
   | Keeper_tools_agent_core.Terminal_effect_failed
       { failure_class; effect_disposition; detail } ->
     Error

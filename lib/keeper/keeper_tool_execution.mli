@@ -14,7 +14,12 @@ val deferred_kind_to_string : deferred_kind -> string
 
 type terminal_effect_receipt =
   | Surface_post_completed of Keeper_surface_post.post_target
-(** Producer-owned proof of the concrete terminal effect that completed. *)
+  | Receipt_wait_requested of { request_id : string }
+      (** The call asked the turn to end on the receipt of this background
+          request. Nothing has happened yet: the wait is recorded when the
+          turn's checkpoint is retained. *)
+(** Producer-owned proof of the concrete terminal effect that completed, or of
+    the wait the turn ends on. *)
 
 (** [disposition] uses the canonical {!Tool_result.disposition}; this module
     deliberately defines no parallel outcome enum.  [raw_output] is opaque
@@ -98,6 +103,9 @@ val with_gate_authorization : Keeper_gate.authorization -> t -> t
 
 val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
 (** Attach the resolved post target only to a completed execution. *)
+
+val with_receipt_wait_receipt : request_id:string -> t -> t
+(** Sets the wait receipt on a completed result only. *)
 
 val with_file_change_evidence : Keeper_file_change_evidence.t -> t -> t
 (** Attach producer-recorded line evidence only to a completed execution. *)

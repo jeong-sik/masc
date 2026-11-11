@@ -60,6 +60,28 @@ val deliver_unfinished_runs : base_path:string -> unit
     is logged and recovery settles the record anyway, so that run gets no
     receipt. *)
 
+val request_arguments : Keeper_msg_async.entry -> Yojson.Safe.t option
+(** The masked arguments a background run keeps in its request record. [None]
+    when the request is not a background Execute run. *)
+
+(** What is known of a run whose worker and receipt are both gone. *)
+type lost_source =
+  | Recorded_run of Yojson.Safe.t  (** The arguments its request record kept. *)
+  | Arguments_unknown
+      (** The request record is absent, or carries no arguments. The receipt
+          then echoes empty arguments and says so. *)
+
+val retain_source_lost_receipt
+  :  base_path:string
+  -> keeper_name:string
+  -> request_id:string
+  -> lost_source
+  -> (unit, string) result
+(** Writes one [unfinished] receipt for a run that has no worker and no
+    receipt, so a conversation that waits for it receives an answer. Writes
+    nothing when the outbox already holds a receipt for the request. It does not
+    wake the Keeper. *)
+
 (** Pure parts, exposed for tests. *)
 module For_testing : sig
   val receipt_of_unfinished

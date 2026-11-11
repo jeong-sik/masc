@@ -22,6 +22,7 @@ Keeper가 실제로 호출할 수 있는 이름과 인자는 매 turn에 제공�
 | Skill 조회 | `keeper_skill` | `lib/keeper/keeper_tool_descriptor.ml` |
 | 비동기 Keeper 메시지 | `keeper_msg`, `keeper_msg_result`, `keeper_msg_cancel`, `keeper_msg_list` | `lib/keeper/keeper_tool_descriptor.ml` |
 | 격리 Docker 백그라운드 Job | `keeper_job_start`, `keeper_job_status`, `keeper_job_result`, `keeper_job_cancel` | `lib/keeper/keeper_tool_descriptor.ml` |
+| 백그라운드 `Execute` 영수증 기다리기 | `keeper_receipt_wait` | `lib/keeper/keeper_tool_receipt_wait.ml`, `lib/keeper/keeper_tool_descriptor.ml` |
 | 다중 Keeper Composition | `keeper_composition_run`, `keeper_composition_status`, `keeper_composition_result`, `keeper_composition_cancel` | `lib/keeper/keeper_tool_descriptor.ml` |
 | 다중 판단 합성 | `masc_fusion`, `masc_fusion_status` | `lib/keeper/keeper_tool_descriptor.ml` |
 | 사용 가능한 capability 검색 | `keeper_tools_list`, `keeper_tool_search` | `lib/tool_surface/tool_shard_types_schemas_base.ml`, `lib/keeper/keeper_tool_descriptor.ml` |

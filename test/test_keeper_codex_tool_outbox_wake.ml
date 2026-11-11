@@ -61,7 +61,9 @@ let notify config =
   get (Keeper_client_tool_outbox_wake.notify ~base_path:config.Workspace.base_path ~keeper_name)
 let pulse config =
   Eio.Switch.run (fun sw ->
-    let recovery = Keeper_client_tool_outbox_wake.create ~config in
+    let recovery =
+      Keeper_client_tool_outbox_wake.create ~config
+        ~settle_lost_waits:Keeper_receipt_wait_sweep.settle_lost in
     Keeper_client_tool_outbox_wake.pulse ~sw recovery;
     Keeper_client_tool_outbox_wake.pulse ~sw recovery)
 

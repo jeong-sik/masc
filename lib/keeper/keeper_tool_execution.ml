@@ -13,6 +13,7 @@ let deferred_kind_to_string = function
 
 type terminal_effect_receipt =
   | Surface_post_completed of Keeper_surface_post.post_target
+  | Receipt_wait_requested of { request_id : string }
 
 type t =
   { retained_artifacts : Tool_output.artifact_ref list
@@ -165,6 +166,15 @@ let with_surface_post_receipt target result =
   | Tool_result.Completed () ->
     { result with
       terminal_effect_receipt = Some (Surface_post_completed target)
+    }
+  | Tool_result.Deferred () | Tool_result.Failed _ -> result
+;;
+
+let with_receipt_wait_receipt ~request_id result =
+  match result.disposition with
+  | Tool_result.Completed () ->
+    { result with
+      terminal_effect_receipt = Some (Receipt_wait_requested { request_id })
     }
   | Tool_result.Deferred () | Tool_result.Failed _ -> result
 ;;

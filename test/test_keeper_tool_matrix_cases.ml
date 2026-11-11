@@ -557,6 +557,11 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       (* A job id that was never issued: the reader has to look it up and
          refuse, which says more than an argument-parse rejection would. *)
       `Assoc [ ("job_id", `String "matrix-no-such-job") ]
+  | "keeper_receipt_wait" ->
+      (* A request id no background run was accepted under: the tool has to
+         look the request up and refuse, which says more than an
+         argument-parse rejection would. *)
+      `Assoc [ ("request_id", `String "matrix-no-such-request") ]
   | "keeper_task_cancel" ->
       (* Deliberately not [Generic.ensure_task]: cancelling or releasing the
          shared fixture task would decide the outcome of [keeper_task_done],
@@ -633,7 +638,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
 let keeper_expectation_for_name name =
   match name with
   | "keeper_analyze_image" | "keeper_skill_validate" | "keeper_skill_publish"
-  | "keeper_job_start" ->
+  | "keeper_job_start" | "keeper_receipt_wait" ->
     Expect_refusal
   | "keeper_voice_listen" -> Expect_no_audio
   | "keeper_artifact_transfer" | "keeper_constitution_write" | "keeper_constitution_remove"

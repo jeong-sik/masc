@@ -57,7 +57,7 @@ let checked register =
 ;;
 
 let route_count = Http.Router.route_count
-let is_websocket table request =
+let stays_with_connection table request =
   match Http.Router.resolve table request with
   | `Matched { Http.Router.handler = Http.Router.Ws _ | Http.Router.Serving _; _ } -> true
   | `Matched { Http.Router.handler = Http.Router.Owner _; _ }

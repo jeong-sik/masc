@@ -294,11 +294,11 @@ let serve_admitted ~admitted classification reqd =
    owner's (§3.4). A request no route matches is the owner's to refuse.
    [None] on the owner domain, which is every request while the serving
    domain is off. *)
-let owner_relay ~is_websocket reqd =
+let owner_relay ~stays_with_connection reqd =
   match Eio_context.owner_post () with
   | None -> None
   | Some post ->
-    if is_websocket () then None
+    if stays_with_connection () then None
     else Option.map (fun sw -> sw, post) (Http_reqd.relay_scope reqd)
 ;;
 
@@ -316,8 +316,8 @@ let reporting task () =
 
 (* The read mark of the request ([Pool_lane]) is bound to the connection's
    fiber and does not cross domains, so the handler's fiber takes it again. *)
-let serve_owned ~is_websocket ~admitted classification reqd =
-  match owner_relay ~is_websocket reqd with
+let serve_owned ~stays_with_connection ~admitted classification reqd =
+  match owner_relay ~stays_with_connection reqd with
   | None -> serve_admitted ~admitted classification reqd
   | Some (sw, post) ->
     let lane = Pool_lane.current () in
@@ -330,20 +330,29 @@ let serve_owned ~is_websocket ~admitted classification reqd =
 ;;
 
 let serve ~routes ~client_addr classification reqd =
-  let is_websocket () =
+  let stays_with_connection () =
     match Http.Router.resolve routes (Http_reqd.request reqd) with
     | `Matched { Http.Router.handler = Http.Router.Ws _ | Http.Router.Serving _; _ } -> true
     | `Matched { Http.Router.handler = Http.Router.Owner _; _ }
     | `Method_not_allowed
     | `Not_found -> false
   in
-  serve_owned ~is_websocket ~admitted:(admitted ~routes ~client_addr) classification reqd
+  serve_owned
+    ~stays_with_connection
+    ~admitted:(admitted ~routes ~client_addr)
+    classification
+    reqd
 ;;
 
 let serve_table ~table ~client_addr classification reqd =
-  let is_websocket () = Server_account_table.is_websocket table (Http_reqd.request reqd) in
-  serve_owned ~is_websocket ~admitted:(admitted_to_table ~table ~client_addr)
-    classification reqd
+  let stays_with_connection () =
+    Server_account_table.stays_with_connection table (Http_reqd.request reqd)
+  in
+  serve_owned
+    ~stays_with_connection
+    ~admitted:(admitted_to_table ~table ~client_addr)
+    classification
+    reqd
 ;;
 
 let http1 ~trust_policy ~serve client_addr gluten_reqd =

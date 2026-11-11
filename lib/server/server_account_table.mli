@@ -51,10 +51,12 @@ val checked
 
 val route_count : t -> int
 
-val is_websocket : t -> Httpun.Request.t -> bool
-(** Whether the matching route takes ownership of the connection. This read
-    lets the ingress keep an upgrade on its connection domain without
-    exposing the checked table's router. *)
+val stays_with_connection : t -> Httpun.Request.t -> bool
+(** Whether the request is handled on the domain of its connection: its
+    route is a WebSocket route, whose upgrade hands the socket to the
+    handler, or a [Serving] route, whose registration says its handler may
+    run beside the owner's. This read lets the ingress keep such a request
+    on its connection domain without exposing the checked table's router. *)
 
 (** Answers the request from the table: the handler of its route, or the
     404 or the 405 of the router. *)

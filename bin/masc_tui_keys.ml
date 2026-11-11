@@ -524,7 +524,7 @@ let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
 let tools_bracket_binding ~pane =
   let label = match pane with
     | Tools_surface -> "run"
-    | Tools_async | Tools_activations | Tools_usage
+    | Tools_async | Tools_activations | Tools_usage | Tools_storage
     | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> "Keeper"
   in
   b Navigate "[ / ]" label
@@ -1489,20 +1489,25 @@ let footer_hints_tools ~lang ~pane =
     List.map (fun (binding : binding) ->
        if String.equal binding.key bracket.key then bracket else binding)
        (for_surface Tools) in
+  (* What a reading with no selection takes: it scrolls and moves on. *)
+  let reading =
+    [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+    ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+    ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+    ; b ~ko:"다음 탭" Navigate "p" "section" ]
+  in
   match pane with
   | Tools_catalog (Tools_catalog_volumes _) ->
       hints_in_order ~lang
-        [ tools_volume_gc_binding
-        ; b ~ko:"스크롤" Navigate "j/k" "scroll"
-        ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
-        ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
-        ; b ~ko:"다음 탭" Navigate "p" "section"
-        ; b ~ko:"목록" Act "Esc" "catalog"
-        ; tools_refresh; listing_next; listing_quit ]
+        ((tools_volume_gc_binding :: reading)
+         @ [ b ~ko:"목록" Act "Esc" "catalog"
+           ; tools_refresh; listing_next; listing_quit ])
   | Tools_catalog Tools_catalog_list ->
       hints_in_order ~lang
         (tools_volume_gc_binding :: List.stable_sort
           (fun a b -> compare (group_rank a.group) (group_rank b.group)) bindings)
+  | Tools_storage ->
+      hints_in_order ~lang (reading @ [ tools_refresh; listing_next; listing_quit ])
   | Tools_surface | Tools_async | Tools_activations | Tools_usage ->
       hints_of_bindings ~lang bindings
 

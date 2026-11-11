@@ -1,0 +1,30 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  Keepers ▸ imp ▸ chat
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ ○  대기 입력 2건
+ › 전송 확인 중  first line
+
+ › 전송 대기  second line
+
+
+
+
+
+
+
+
+
+
+
+
+
+   Job · 관측된 예약 없음 · F9
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+   요청 처리 실패 · 내 메시지 2건 대기 · 1건 전송 대기 · 1건 전송 확인 중
+   History load failed · /errors
+   ! The Keeper owner is unavailable; the request was not accepted.
+   >
+
+ 아직 시작하지 않음  Context unavailable
+  조치 필요 3 · 운영에서 확인  Enter:update  ^T:queue  ^K:cancel  ^P:edit  Esc:interrupt turn  …?

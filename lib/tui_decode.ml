@@ -5374,6 +5374,10 @@ module Canonical_path = struct
   let is_empty path = String.equal path ""
 end
 
+type operator_action_observation =
+  | Operator_actions_observed of Operator_action_reason.t list
+  | Operator_actions_unavailable of { diagnostics : string list; error : string }
+
 type server_identity = {
   sid_version : string;
   sid_binary_commit : string;
@@ -5387,7 +5391,7 @@ type server_identity = {
   sid_sse_clients : int option;
   sid_gc : server_gc_health option;
   sid_scheduler : server_scheduler_health option;
-  sid_operator_action : string list option;
+  sid_operator_action : operator_action_observation option;
 }
 
 (* [/health] answers before the workspace is fully up, so every field here is
@@ -5511,7 +5515,11 @@ let decode_server_identity json =
         List.filter_map (function `String reason -> Some reason | _ -> None) values
       in
       if List.length reasons = List.length values && Bool.equal required (reasons <> [])
-      then Some reasons
+      then
+        (match Operator_action_reason.read_collection ~diagnostics:reasons
+                 (member "operator_actions" json) with
+         | Ok actions -> Some (Operator_actions_observed actions)
+         | Error error -> Some (Operator_actions_unavailable {diagnostics=reasons;error}))
       else None
     | _ -> None
   in

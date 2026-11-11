@@ -1,0 +1,30 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  /complete▌                                                                     │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│◆ Chat                                           ◇ Slash commands                                 │
+│  Tab / Shift-Tab  complete the /command being     /copy           send this Keeper's latest      │
+│                   typed, or its argument such                     completed reply to the         │
+│                   as a Keeper name; the chat                      terminal clipboard             │
+│                   composer keeps these keys,                                                     │
+│                   so they do not switch         ◇ Global                                         │
+│                   surface here                    Tab / Shift-Tab  next / previous surface; the  │
+│  /copy            send the selected Keeper's                       chat composer keeps them to   │
+│                   latest completed reply to                        complete a /command           │
+│                   the terminal clipboard via                                                     │
+│                   OSC 52                        ◇ Work                                           │
+│                                                   f                cycle all / active /          │
+│◇ Keepers                                                           completed / dropped           │
+│  !                read every current                                                             │
+│                   Keeper-list observation       ◇ Workspace                                      │
+│                   error and its complete          v                read the complete selected    │
+│                   reason; Esc returns                              path, Keeper assignments and  │
+│                                                                    errors                        │
+│◇ System                                                                                          │
+│  v                read complete account/model   ◇ Features & plugins                             │
+│  [lines 1-22/48]                                                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page
+ › to imp   (i to write)

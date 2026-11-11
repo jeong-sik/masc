@@ -4,6 +4,37 @@ The operator accepted the conversation-first preview in #41685 and asked to
 extend the same treatment consistently. This is the full scope of that work;
 completing one row does not complete the overall request.
 
+## 2026-11-11: Overview action destinations (source only)
+
+Overview receives one structured action observation from the health producer.
+Memory rows name the Keeper and the observed pending outcome using the shared
+Memory vocabulary; an unknown worker result does not establish stale memory or
+a source failure. Enter captures that exact Keeper's existing Memory health
+reading beside the original action. Missing health and read failures stay
+separate from the action's original request and observation time. This path
+does not move the live Memory cursor or start a new poll.
+
+A shutdown-fenced queue with complete, single-Keeper ownership opens the
+existing queue inspection. An incomplete or ambiguous aggregate opens its
+original diagnostics and cannot choose a Keeper. Generic reported reasons also
+open diagnostics. The routes grant no new replay, acknowledgement, cancellation
+or write permission. The captured reader stays fixed across source refreshes.
+
+The decoder admits targets only when the typed items agree with the original
+ordered reasons and required flag. If typed data is absent or malformed, valid
+original diagnostics and the decode cause remain readable with `v`; they grant
+no target. Unknown and observed-empty remain distinct in Home, the footer and
+the terminal title. Selection retains the workspace and complete original item,
+so another request at the same array index cannot replace its Enter target.
+The body projection reserves a destination before optional context, and both
+drawing and Enter consume that projection at small heights.
+
+Changed OCaml sources pass parsing with 5.5.1 and the patch passes
+`git diff --check`. Semantic decoder and request-identity cases were added but
+have not been run. No wording, layout, row-order or PTY assertion test was added.
+Type checking, matching-server native execution, installation and the complete
+six-family, 23-surface audit remain open.
+
 ## 2026-11-10: Runtime picker candidates
 
 [#51137](https://github.com/jeong-sik/masc/pull/51137) gives an open Runtime

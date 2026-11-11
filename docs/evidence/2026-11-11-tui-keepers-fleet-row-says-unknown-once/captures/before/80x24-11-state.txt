@@ -1,0 +1,24 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers (3)                                                HTTP [연결됨]
+   list  ▸state  cause  time  memory  age  runtime  24h
+ ? 3 unknown ???
+     fleet max ?        ??????????????? │              │ 일정 미확인      max ?
+   fleet blocked   running 0/2   turn capacity 0/2   no keeper can take a turn
+   awaiting verdict 1
+   not running: relay, scout
+
+     keeper             ◂ 7h30m     30m │ ● now        │ 예약 확인 · 7h3… due
+   ▾ Unknown 3                          │ 3            │ -
+   ● imp                기록 미확인     │ - unknown    │ -
+   ● relay              기록 미확인     │ - unknown    │ -
+   ● scout              기록 미확인     │ - unknown    │ -
+
+
+
+
+
+ imp - 미확인 · lag ?
+ ──────────────────────────────────────────────────────────────────────────────
+  조치 필요 3  v:view  Enter / Right:story / detail  Esc:dashboard  q:quit  …?
+ › to imp   (i to write)

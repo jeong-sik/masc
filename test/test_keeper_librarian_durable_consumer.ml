@@ -460,7 +460,7 @@ let test_undecodable_current_snapshot_routes_through_write_path_quarantine () =
         claims
     in
     match
-      Current.apply_disposition
+      Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable
         ~revisions:[]
         ~keepers_dir:memory_keepers_dir
         ~keeper_id:keeper_name
@@ -517,7 +517,7 @@ let test_undecodable_current_snapshot_routes_through_write_path_quarantine () =
     let input = Original.input original in
     incr commits;
     match
-      Current.apply_disposition
+      Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable
         ~revisions:[]
         ?durable_range_id:range_id
         ?official_range_id
@@ -657,7 +657,7 @@ let test_committed_range_recovers_after_progress_write_failure () =
     committed_inputs := !committed_inputs @ [ text_markers input ];
     attempted_range := range_id;
     match
-      Current.apply_disposition ~revisions:[]
+      Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
         ?durable_range_id:range_id
         ?official_range_id
         ~absorbed:[]
@@ -721,7 +721,7 @@ let test_committed_range_recovers_after_progress_write_failure () =
       ~origin:{ kind = Memory.Authored; trace_id }
   in
   (match
-     Current.upsert_fact
+     Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
        ~keepers_dir:memory_keepers_dir
        ~keeper_id:keeper_name
        ~now:3.0
@@ -799,7 +799,7 @@ let test_committed_wide_range_recovers_before_retry_narrowing () =
     let input = Original.input original in
     incr commits;
     match
-      Current.apply_disposition ~revisions:[]
+      Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
         ?durable_range_id:range_id
         ?official_range_id
         ~absorbed:[]
@@ -882,7 +882,7 @@ let test_memory_the_continuity_round_saved_is_not_sent_again ~batched () =
       | Error detail -> failf "continuity receipt identity: %s" detail
     in
     (match
-       Current.apply_disposition ~revisions:[]
+       Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
          ~durable_range_id:range_id
          ~absorbed:[]
          ~keepers_dir:memory_keepers_dir
@@ -980,7 +980,7 @@ let test_receipt_does_not_cross_restarted_history_with_repeated_endpoint () =
     let input = Original.input original in
     incr commits;
     match
-      Current.apply_disposition ~revisions:[]
+      Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[]
         ?durable_range_id:range_id
         ?official_range_id
         ~absorbed:[]
@@ -1130,7 +1130,7 @@ let seed_pending_memory config ~trace_id =
   let fact = Memory.observed ~claim:"Retain the current durable Memory fact."
       ~category:Memory.Fact ~now:1.
       ~origin:{kind=Memory.Authored;trace_id} in
-  (match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name
+  (match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~keepers_dir ~keeper_id:keeper_name
       ~now:1. ~source:{kind=Current.Librarian;trace_id}
       ~new_claims:[fact] ~absorbed:[] () with
    | Ok _ -> ()
@@ -1143,7 +1143,7 @@ let commit_pending_memory config ~expected_revision:_ ~range_id ~official_range_
   let module Current = Masc.Keeper_memory_os_current in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
       ~base_path:config.Workspace.base_path in
-  match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name
+  match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~keepers_dir ~keeper_id:keeper_name
       ~now:5. ~source:{kind=Current.Librarian;trace_id=Ids.Turn_ref.trace_id input.turn_ref}
       ?durable_range_id:range_id ?official_range_id ~new_claims:[] ~absorbed:[] () with
   | Ok _ -> Consumer.Memory_committed
@@ -2529,7 +2529,7 @@ let test_restart_cut_never_commits_a_current_unfinished_turn () =
   let write_claims claims =
     let facts = List.map (fun claim -> Memory.observed ~claim ~category:Memory.Fact
         ~now:1. ~origin:{ kind = Memory.Authored; trace_id }) claims in
-    match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1.
+    match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:1.
         ~source:{ kind = Current.Librarian; trace_id } ~new_claims:facts ~absorbed:[] () with
     | Ok (disposition : Current.disposition) -> disposition.snapshot
     | Error detail -> fail detail in
@@ -3469,7 +3469,7 @@ let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ?
         (Option.fold ~none:[] ~some:(fun (r : Current.durable_range_id) -> r.unread_messages) range_id)
         (Option.fold ~none:[] ~some:(fun (r : Current.official_range_id) -> r.unread_messages) official_range_id) |> get;
       range_id,official_range_id in
-    (match Current.apply_disposition ~revisions:[] ?durable_range_id:range_id ?official_range_id
+    (match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ?durable_range_id:range_id ?official_range_id
       ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:4.
       ~source:{ kind = Current.Librarian; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref }
       ~new_claims:[] () with
@@ -3525,7 +3525,7 @@ let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ?
       last_atom_digest=String.make 64 'a';end_boundary_line=5;boundary_lines_seen=5;unread_messages=[]} in
     let official_range_id = {Current.receipt_scope=Workspace.keepers_runtime_dir config;
       after_boundary_line=4;turns=[5,Ids.Turn_ref.make ~trace_id:"later-after-recovery" ~absolute_turn:1];unread_messages=[]} in
-    (match Current.apply_disposition ~revisions:[] ~durable_range_id ~official_range_id
+    (match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~durable_range_id ~official_range_id
       ~absorbed:[] ~keepers_dir ~keeper_id:keeper_name ~now:5.
       ~source:{kind=Current.Librarian;trace_id="later-after-recovery"} ~new_claims:[] () with
      | Ok _ -> () | Error detail -> fail detail);
@@ -4254,7 +4254,7 @@ let test_official_receipt_rejects_replaced_history ~bad_message_hash () =
       ~reasons:[Masc.Keeper_librarian_input_refusal.Request_body_refused] with
       | Ok hole -> hole | Error detail -> fail detail in
     {official_range_id with turns=[1,turn_ref];unread_messages=[hole]} in
-  (match Current.apply_disposition ~revisions:[] ~official_range_id ~absorbed:[] ~keepers_dir
+  (match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~official_range_id ~absorbed:[] ~keepers_dir
     ~keeper_id:keeper_name ~now:1. ~source:{ kind = Current.Librarian; trace_id }
     ~new_claims:[] () with
    | Ok _ -> ()
@@ -5025,7 +5025,7 @@ let test_memory_count_cleanup_without_history () =
   let first = fact Memory.Constraint "Production deployment requires approval." in
   let second = fact custom "Deploy production only with rollback assets ready." in
   let commit ?(absorbed=[]) new_claims =
-    match Current.apply_disposition ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:2.
+    match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~keepers_dir ~keeper_id:keeper_name ~now:2.
       ~source:{kind=Current.Librarian;trace_id="cleanup-trace"}
       ~absorbed ~new_claims () with
     | Ok _ -> true | Error detail -> fail detail in
@@ -5090,7 +5090,7 @@ let check_memory_cleanup_wakes ~category_cap ~item_cap ~initial ~decisions
       let memory_id = Memory.memory_id fact in
       if List.mem memory_id after_ids then None
       else Some {Memory.memory_id; reason="The fixture model chose to retire this memory."}) before in
-    match Current.apply_disposition ~revisions:[] ~absorbed:[] ~dropped_statements
+    match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~absorbed:[] ~dropped_statements
       ~keepers_dir ~keeper_id:keeper_name ~now:2.
       ~source:{kind=Current.Librarian;trace_id="cleanup-continuation"}
       ~new_claims:after () with

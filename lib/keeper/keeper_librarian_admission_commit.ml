@@ -230,7 +230,8 @@ let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
     let committed=ref None in
     let applied=io (fun () ->
       let* ()=live_owner owner in
-      Ok (Current.apply_disposition_guarded ~on_committed:(fun disposition -> committed:=Some disposition)
+      Ok (Current.apply_disposition_guarded ~pass:Keeper_memory_commit_pass.Admission
+        ~on_committed:(fun disposition -> committed:=Some disposition)
         ~dropped_statements:accepted.selection.dropped
         ~explicit_candidate_ids:accepted.explicit_candidate_ids
         ~admission_recall:{decided_at_revision=Capture.expected_revision capture;

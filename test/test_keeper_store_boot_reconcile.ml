@@ -475,7 +475,7 @@ let test_memory_quarantine_refuses_pending_publication () =
     ; basis = Types.Observed Types.Transcript
     }
   in
-  (match Current.upsert_fact ~keepers_dir ~keeper_id ~now:200.
+  (match Current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id ~now:200.
       ~source:{ Current.kind = Current.Explicit_write; trace_id = "boot-removal" }
       original with
    | Ok _ -> ()
@@ -485,7 +485,7 @@ let test_memory_quarantine_refuses_pending_publication () =
   Fs_compat.invalidate_cached_writer journal_path;
   Sys.remove journal_path;
   Unix.mkdir journal_path 0o700;
-  (match Current.retract_fact ~keepers_dir ~keeper_id ~now:300.
+  (match Current.retract_fact ~pass:Keeper_memory_commit_pass.Keeper_delete ~keepers_dir ~keeper_id ~now:300.
       ~source:{ Current.kind = Current.Explicit_retract; trace_id = "boot-removal" }
       ~memory_id:(Types.memory_id original) ~reason:"operator withdrew this exact rule" ()
    with

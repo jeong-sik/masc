@@ -14,7 +14,7 @@ The command palette is `:`.
 
 | Keys | What it does |
 |---|---|
-| `Tab / Shift-Tab` | next / previous surface |
+| `Tab / Shift-Tab` | next / previous surface; the chat composer keeps them to complete a /command |
 | `3` | jump to Keepers when the active field or panel does not use 3 |
 | `r` | refresh the current surface |
 | `i` | focus the composer; on Dashboard, choose a Keeper |
@@ -37,7 +37,7 @@ The command palette is `:`.
 |---|---|
 | `v` | read every reason in the last server rollup; scroll and search the captured reading; Esc returns without changing a decision or setting |
 | `Left` | open the Keeper list; Enter opens a chat; Right or Esc returns |
-| `j/k` | move between decision links and conversations |
+| `j/k` | select a destination |
 | `Enter` | open the selected destination; never approve |
 | `p` | approvals and questions |
 | `g` | the operator quiz's Results: scorecard windows and wrong-answer notes |
@@ -433,9 +433,10 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 |---|---|
 | `Left` | empty composer: open the Keeper list; with text: move the cursor left |
 | `Right` | roster focused: return focus to the chat composer |
-| `Up / Down` | roster focused: move; chat scrolled back: adjust by one line |
+| `Up / Down` | roster focused: move; chat scrolled back: adjust by one line; while a /command is typed: pick among its completions; otherwise walk the history of lines you sent: Up recalls the previous one (a line still waiting in the queue comes back as an edit of that line), Down steps back toward your draft |
 | `Enter` | send from chat, or open the selected Keeper from the roster |
-| `Ctrl-J` | newline in the draft |
+| `Ctrl-J` | newline in the draft; Shift-Enter does the same where the terminal reports it |
+| `Tab / Shift-Tab` | complete the /command being typed, or its argument such as a Keeper name; the chat composer keeps these keys, so they do not switch surface here |
 | `Ctrl-Y` | record into the draft; again to stop and keep what was said |
 | `Ctrl-A` | continuous capture on/off: each sentence starts the next capture |
 | `Ctrl-G` | next keeper with a chat open |
@@ -444,12 +445,14 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `F9` | fold or expand this Keeper's scheduled Jobs, pending occurrences, holds and latest result |
 | `Ctrl-T` | inspect and manage waiting turns |
 | `PgUp/PgDn` | scroll history by a page |
+| `Ctrl-E / End` | after reading back, jump to the newest row |
 | `Ctrl-R` | cycle reasoning hidden / folded / full |
 | `Ctrl-D` | cycle compact / results / full tool detail |
 | `Ctrl-S` | unfold the running turn's status rows, or fold them back to the progress line |
 | `Ctrl-N` | cycle Memory journal summary / full / hidden |
 | `Ctrl-F` | cycle no clock / inline clock / full timestamp and request id |
 | `Ctrl-O` | preview the newest image or Mermaid diagram; /images lists all; any key returns |
+| `Ctrl-V` | paste the clipboard image: it is staged for the next message and an [Image #1] marker lands in the draft |
 | `/approve /deny` | type a command and Enter to answer a tool approval |
 | `/copy` | send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52 |
 | `Q / Ctrl-Q` | Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting |
@@ -725,7 +728,7 @@ count is drawn beyond the available space.
 | Keys | What it does |
 |---|---|
 | `j/k` | move / scroll |
-| `PgUp/PgDn` | detail page |
+| `PgUp/PgDn` | page an open detail; in the media editor page declared slots; while typing a lane name, PgUp opens the complete draft/context reader and Esc returns to the unchanged field |
 | `Right / Enter` | show the full runtime, lane, dispatch, and probe fields |
 | `h` | toggle de-emphasis for exhausted, rate-limited, and spent runtimes |
 | `v` | read complete default and media routes, boot admission and probe diagnostics |
@@ -736,7 +739,7 @@ count is drawn beyond the available space.
 | `x` | take the candidate under the cursor out of its lane; the last one cannot go, remove the lane instead |
 | `J/K` | move the candidate under the cursor down or up its lane |
 | `f` | replace [runtime].default, what a keeper with no assignment walks |
-| `m` | edit [runtime].media_failover in the slot editor; refused while boot dropped one of its entries |
+| `m` | edit [runtime].media_failover: j/k, PgUp/PgDn and Home/End select declared slots; a appends, x drops, J/K reorder, 1 makes first, v reads all IDs/results without closing the editor. Admission and write refusals remain in the reading |
 | `R` | give the lane under the cursor another name; the assignments that route to it and [runtime].default, when it names it, are rewritten in the same write. The field opens on the name it has now |
 | `D` | remove the lane under the cursor; press twice. Refused while a keeper is assigned to it |
 | `Esc` | back to Config |

@@ -1,10 +1,28 @@
+(* What a response that times its own frames needs: the wait, and what its
+   stall line names. *)
+type own_timer =
+  { stall : unit -> unit
+  ; stalled_after_s : float
+  ; path : string
+  }
+
+(* What ends a frame the client does not take. On HTTP/2 the stream's flush
+   bound resets a stream whose oldest flush waits too long
+   (Http_h2_stream.Stream_end), and the reset ends the response under
+   [send]. That bound counts each 16 KiB slice of a frame, so a client that
+   drains a long frame steadily keeps its stream. A timer here would race the
+   reset with the same bound and also cut that client once the whole frame
+   took longer. HTTP/1.1 has no bound under the response, so the response
+   times its frames itself. *)
+type stall_bound =
+  | Stream_flush_bound
+  | Own_timer of own_timer
+
 type t =
   { writer : Http_reqd.Body_writer.t
   ; closed : unit Eio.Promise.t
   ; resolve_closed : unit Eio.Promise.u
-  ; stall : unit -> unit
-  ; stalled_after_s : float
-  ; path : string
+  ; stall_bound : stall_bound
   }
 
 type outcome =
@@ -19,21 +37,28 @@ let target_path target =
 
 let respond ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
   let closed, resolve_closed = Eio.Promise.create () in
-  { writer = Http_reqd.respond_with_streaming ?flush_headers_immediately reqd response
-  ; closed
-  ; resolve_closed
-  ; stall = (fun () -> Eio.Time.sleep clock stalled_after_s)
-  ; stalled_after_s
-  ; path = target_path (Http_reqd.request reqd).target
-  }
+  let writer = Http_reqd.respond_with_streaming ?flush_headers_immediately reqd response in
+  (* A writer with a stream end is an HTTP/2 stream's, and every flush of
+     such a writer waits under that stream's bound (Http_reqd.of_h2). *)
+  let stall_bound =
+    match Http_reqd.Body_writer.stream_end writer with
+    | Some _ -> Stream_flush_bound
+    | None ->
+      Own_timer
+        { stall = (fun () -> Eio.Time.sleep clock stalled_after_s)
+        ; stalled_after_s
+        ; path = target_path (Http_reqd.request reqd).target
+        }
+  in
+  { writer; closed; resolve_closed; stall_bound }
 ;;
 
 let is_closed t = Http_reqd.Body_writer.is_closed t.writer
 
 (* The transport can end the stream under the response before anything here
-   closes it: an h2 peer reset or connection end. httpun reports no such end,
-   so an HTTP/1.1 response closes only through [close] or a send that did not
-   end [Written]. *)
+   closes it: an h2 peer reset, a stalled flush or connection end. httpun
+   reports no such end, so an HTTP/1.1 response closes only through [close]
+   or a send that did not end [Written]. *)
 let await_closed t =
   match Http_reqd.Body_writer.stream_end t.writer with
   | None -> Eio.Promise.await t.closed
@@ -72,34 +97,45 @@ let send t frame =
     Http_reqd.Body_writer.write_string t.writer frame;
     let flushed, resolve = Eio.Promise.create () in
     Http_reqd.Body_writer.flush t.writer (Eio.Promise.resolve resolve);
+    let frame_flushed () =
+      match Eio.Promise.await flushed with
+      | `Written -> Written
+      | `Closed -> Closed
+    in
+    let response_closed () =
+      await_closed t;
+      Closed
+    in
     (* Both ways the response can end without the frame wait on the watcher
        side. A race nested inside the work would raise the outer race's
        cancellation even after the flush answered (eio core fiber.ml
        [any_gen]), and a frame that reached the socket as the time ran out
        would come back [Stalled]. *)
     let outcome =
-      Watched_work.run
-        ~watcher:(fun () ->
-          Eio.Fiber.first
-            (fun () ->
-               t.stall ();
-               Stalled)
-            (fun () ->
-               await_closed t;
-               Closed))
-        (fun () ->
-           match Eio.Promise.await flushed with
-           | `Written -> Written
-           | `Closed -> Closed)
+      match t.stall_bound with
+      | Stream_flush_bound -> Watched_work.run ~watcher:response_closed frame_flushed
+      | Own_timer { stall; stalled_after_s; path } ->
+        let outcome =
+          Watched_work.run
+            ~watcher:(fun () ->
+              Eio.Fiber.first
+                (fun () ->
+                   stall ();
+                   Stalled)
+                response_closed)
+            frame_flushed
+        in
+        (match outcome with
+         | Written | Closed -> ()
+         | Stalled ->
+           Log.Server.warn
+             "SSE response for %s closed: a frame did not reach the socket within %.0f seconds"
+             path
+             stalled_after_s);
+        outcome
     in
     (match outcome with
      | Written -> ()
-     | Closed -> close t
-     | Stalled ->
-       Log.Server.warn
-         "SSE response for %s closed: a frame did not reach the socket within %.0f seconds"
-         t.path
-         t.stalled_after_s;
-       close t);
+     | Closed | Stalled -> close t);
     outcome)
 ;;

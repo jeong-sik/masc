@@ -103,6 +103,7 @@ let update_locked_with_output
       ?official_range_id
       ?(explicit_candidate_ids = [])
       ?admission_recall
+      ~change_count
       ~equal_facts
       ~store_error
       ~keepers_dir
@@ -178,6 +179,9 @@ let update_locked_with_output
     let* () = recover_publication ~keepers_dir ~keeper_id |> Result.map_error store_error in
     let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
     let committed = ref None in
+    (* The snapshot and output of a commit that rewrote the snapshot, counted
+       once both locks are released. A kept snapshot is never counted. *)
+    let rewritten = ref None in
     let notify () =
       Option.iter (fun receipt ->
         match dispatch_publication ~sync_parent:Unix.fsync ~keepers_dir ~keeper_id receipt with
@@ -524,6 +528,10 @@ let update_locked_with_output
              (* The snapshot is durable now. Publish the original producer's
                 commit marker before any cancellable secondary I/O. *)
              observe next Rewritten;
+             (* In memory and under both locks, so the gauges of one keeper
+                follow its commit order. *)
+             Keeper_memory_os_current_change_metrics.set_gauges ~keeper_id change_count next;
+             rewritten := Some (next, output);
              let journal_result =
                match finalize_journal ~keepers_dir ~keeper_id publication with
                | Ok pending ->
@@ -563,33 +571,51 @@ let update_locked_with_output
               | Eio.Cancel.Cancelled _ ->
                 Printexc.raise_with_backtrace failure.exception_ failure.backtrace
               | _ ->
+             let failed outcome =
+               Error
+                 (store_error
+                    (Printf.sprintf
+                       "current Memory OS atomic write failed path=%s: %s: %s"
+                       snapshot_path
+                       outcome
+                       (Fs_compat.atomic_replace_failure_to_string failure)))
+             in
              match failure.stage with
              | Fs_compat.After_rename when
                  sync_snapshot snapshot_path = Ok () -> complete ()
-             | Fs_compat.Before_rename | Fs_compat.After_rename ->
-             let outcome =
-               match failure.stage with
-               | Fs_compat.Before_rename -> "snapshot replacement did not occur"
-               | Fs_compat.After_rename ->
+             | Fs_compat.After_rename ->
+               (* [After_rename] means the rename returned and only the
+                  directory sync failed. A running kernel shows the new bytes
+                  from then on, so the next writer's recovery finalizes this
+                  transition. Only an OS crash or power loss can bring back
+                  the prior bytes a rollback needs, and that also restarts the
+                  process and its counters. So the commit counts now. *)
+               Keeper_memory_os_current_change_metrics.set_gauges ~keeper_id change_count next;
+               rewritten := Some (next, output);
+               failed
                  "snapshot replacement occurred but durability is unconfirmed; prepared receipts remain for recovery"
-             in
-             Error
-               (store_error
-                  (Printf.sprintf
-                     "current Memory OS atomic write failed path=%s: %s: %s"
-                     snapshot_path
-                     outcome
-                     (Fs_compat.atomic_replace_failure_to_string failure))))
+             | Fs_compat.Before_rename -> failed "snapshot replacement did not occur")
          in
          protected commit))
     in
-    (* Dispatch only after BOTH locks unwind. The durable pending phase is
-       written after exact journal finalization. If interrupted, a subsequent
-       public read or writer resumes it without replaying the producer callback. *)
+    (* Count and dispatch only after BOTH locks unwind. The durable pending
+       phase is written after exact journal finalization. If interrupted, a
+       subsequent public read or writer resumes it without replaying the
+       producer callback. A commit that returns an error after its rename,
+       because its journal evidence is still pending or the directory sync
+       failed, rewrote the snapshot, so it is counted too. *)
+    let count () =
+      Option.iter
+        (fun (snapshot, output) ->
+           Keeper_memory_os_current_change_metrics.count_changes
+             ~keeper_id change_count snapshot output)
+        !rewritten
+    in
     match write () with
-    | result -> notify (); result
+    | result -> count (); notify (); result
     | exception exn ->
       let backtrace = Printexc.get_raw_backtrace () in
+      count ();
       notify ();
       Printexc.raise_with_backtrace exn backtrace)
 ;;
@@ -600,6 +626,7 @@ let update_locked_with_error
       ?clock
       ?dropped_statements
       ?retraction_plan
+      ~change_count
       ~store_error
       ~keepers_dir
       ~keeper_id
@@ -607,7 +634,7 @@ let update_locked_with_error
       build
   =
   update_locked_with_output
-    ?clock ?dropped_statements
+    ?clock ?dropped_statements ~change_count
     ~equal_facts:(Write_revision retraction_plan) ~store_error ~keepers_dir ~keeper_id ~now
     (fun ~snapshot_content previous ->
        let+ next = build ~snapshot_content previous in

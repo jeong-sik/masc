@@ -66,6 +66,7 @@ val apply_program_with_io :
                      result) ->
   ?on_committed:(program_commit -> unit) ->
   ?clock:float Eio.Time.clock_ty Eio.Time.clock_base ->
+  pass:Keeper_memory_commit_pass.t ->
   keepers_dir:string ->
   keeper_id:string ->
   now:float ->
@@ -77,6 +78,7 @@ val apply_program_with_io :
 val apply_program :
   ?on_committed:(program_commit -> unit) ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  pass:Keeper_memory_commit_pass.t ->
   keepers_dir:string -> keeper_id:string -> now:float ->
   anchor:program_anchor -> source:program_source ->
   validate_source:(unit -> (unit, string) result) ->
@@ -93,6 +95,7 @@ val apply_disposition_guarded :
                           list ->
   ?admission_recall:admission_recall ->
   ?required_memory_ids:string list ->
+  pass:Keeper_memory_commit_pass.t ->
   absorbed:absorbed_statement list ->
   revisions:revision list ->
   keepers_dir:string ->
@@ -115,6 +118,7 @@ val apply_disposition :
                           list ->
   ?admission_recall:admission_recall ->
   ?required_memory_ids:string list ->
+  pass:Keeper_memory_commit_pass.t ->
   absorbed:absorbed_statement list ->
   revisions:revision list ->
   keepers_dir:string ->

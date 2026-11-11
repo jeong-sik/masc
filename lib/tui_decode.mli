@@ -1609,6 +1609,12 @@ module Canonical_path : sig
   (** The server reported no path. *)
 end
 
+type operator_action_observation =
+  | Operator_actions_observed of Operator_action_reason.t list
+  | Operator_actions_unavailable of { diagnostics : string list; error : string }
+(** One immutable health observation. Unavailable typed evidence retains the
+    valid original diagnostics but grants no navigation target. *)
+
 type server_identity = {
   sid_version : string;
   sid_binary_commit : string;
@@ -1635,12 +1641,14 @@ type server_identity = {
       (** [/health] [gc] quick GC counters and heap sizes. *)
   sid_scheduler : server_scheduler_health option;
       (** [/health] [scheduler] scheduler latency probe distribution and stalls. *)
-  sid_operator_action : string list option;
+  sid_operator_action : operator_action_observation option;
       (** [/health] [operator_action_reasons], the server's last full-health
-          rollup (RFC-0484 §3.3). [Some []] when nothing needs the operator.
+          rollup (RFC-0484 §3.3). [Operator_actions_observed []] is observed empty.
           [None] when the probe carries no rollup: an older server, the time
           before its first snapshot, or a value that is not the rollup's
-          shape. *)
+          shape. The typed collection must agree with required and the full
+          ordered diagnostic list. Missing typed evidence grants no target;
+          its original valid diagnostic vector remains readable. *)
 }
 (** Which server the TUI is talking to, from [/health] or an attested scoped
     Observer response. Fields absent from the latter remain unknown.

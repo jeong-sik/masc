@@ -268,7 +268,9 @@ let begin_login t login ~invite ~return_to ~replaces =
        Google_login_flow.start ~get:t.get cache t.transactions client ~now:t.now ~invite ~return_to ~replaces
      with
      | Ok { Google_login_flow.id; authorization_url } -> Ok (id, authorization_url)
-     | Error (Google_login_flow.Google_unavailable (_ : Oidc_google_exchange.error)) -> Error Bad_gateway
+     | Error (Google_login_flow.Google_unavailable error) ->
+       Log.Auth.warn "login: Google did not start a login: %s" (Oidc_google_exchange.error_to_string error);
+       Error Bad_gateway
      | Error Google_login_flow.Transactions_full -> Error Unavailable)
   | Github_login client ->
     (match Github_login_flow.start t.transactions client ~now:t.now ~invite ~return_to ~replaces with
@@ -388,7 +390,9 @@ let complete t login id ~state returned =
      | Ok { Google_login_flow.outcome; return_to; replaces } -> Ok (user_of outcome, return_to, replaces)
      | Error (Google_login_flow.Transaction_refused error) -> Error (transaction_failure error)
      | Error Google_login_flow.Refused_at_google -> Error Unauthorized
-     | Error (Google_login_flow.Exchange_failed error) -> Error (google_failure error)
+     | Error (Google_login_flow.Exchange_failed error) ->
+       Log.Auth.warn "login: the exchange with Google failed: %s" (Oidc_google_exchange.error_to_string error);
+       Error (google_failure error)
      | Error (Google_login_flow.Login_refused refusal) -> Error (login_failure refusal))
   | Github_login client ->
     let answer =
@@ -412,7 +416,9 @@ let complete t login id ~state returned =
      | Ok { Github_login_flow.outcome; return_to; replaces } -> Ok (user_of outcome, return_to, replaces)
      | Error (Github_login_flow.Transaction_refused error) -> Error (transaction_failure error)
      | Error Github_login_flow.Refused_at_github -> Error Unauthorized
-     | Error (Github_login_flow.Exchange_failed error) -> Error (github_failure error)
+     | Error (Github_login_flow.Exchange_failed error) ->
+       Log.Auth.warn "login: the exchange with GitHub failed: %s" (Github_oauth.error_to_string error);
+       Error (github_failure error)
      | Error (Github_login_flow.Login_refused refusal) -> Error (login_failure refusal))
 ;;
 

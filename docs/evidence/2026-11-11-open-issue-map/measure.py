@@ -118,8 +118,15 @@ def print_totals(opened: list[OpenIssue], closed: list[ClosedIssue], snapshot: d
     for name in LABEL_FAMILIES:
         counts = collections.Counter(value for i in opened for value in family(i["labels"], name))
         missing = sum(1 for i in opened if not family(i["labels"], name))
-        print(name, dict(counts.most_common()), "none", missing)
-    print("no label at all:", sum(1 for i in opened if not i["labels"]))
+        print(name, dict(counts.most_common()), "none", missing, "issues with at least one", total - missing)
+    unlabelled = [i for i in opened if not i["labels"]]
+    newest_labelled = max(i["createdAt"] for i in opened if i["labels"])
+    print(
+        "no label at all:",
+        len(unlabelled),
+        f"of which created after the newest labelled issue ({newest_labelled}):",
+        sum(1 for i in unlabelled if i["createdAt"] > newest_labelled),
+    )
     promise = [i for i in opened if touches_promise(i)]
     with_impact = sum(1 for i in opened if family(i["labels"], "impact"))
     print(

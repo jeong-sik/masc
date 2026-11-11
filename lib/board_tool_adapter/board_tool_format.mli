@@ -50,6 +50,23 @@ val format_post : ?viewer_vote:Board.vote_direction -> replies:int -> Board.post
 
 val format_post_compact : replies:int -> Board.post -> string
 
+(** One search hit in the two shapes a result can carry it: the whole post, and the
+    one line [format_post_compact] gives it. *)
+type search_hit =
+  { full : string
+  ; one_line : string
+  }
+
+val join_search_hits : max_bytes:int -> header:string -> search_hit list -> string
+(** [join_search_hits ~max_bytes ~header hits] is [header] followed by the first [k]
+    hits in full, separated by a rule line, then a line saying how many were
+    shortened, then the one-line shape of the remaining hits, one per line. [k] is the
+    largest count for which the text is at most [max_bytes] bytes, and [0] when even
+    that is over, so the rows alone may pass [max_bytes]: a result of rows is what
+    a compact search returns. When every hit fits in full there is no note and the
+    text is [header] followed by every full hit. The order of [hits] is kept, so the
+    full ones are the earlier hits. *)
+
 val format_comment_tree
   :  ?viewer_vote_of:(Board.Comment_id.t -> Board.vote_direction option)
   -> Board.comment list

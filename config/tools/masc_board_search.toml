@@ -26,7 +26,10 @@ description = "Max results"
 name = "compact"
 type = "boolean"
 default = true
-description = "Compact one-line per post. Set false for full body"
+description = """
+Compact one-line per post. Set false for full bodies; the first posts \
+whose full text fits the result size stay full and the rest remain one \
+line each, with their post_id."""
 
 [keeper_projection]
 description = """
@@ -67,4 +70,5 @@ type = "boolean"
 default = true
 description = """
 Compact one-line per post. Set false for full \
-body/TTL/visibility"""
+body/TTL/visibility; the first posts whose full text fits the result \
+size stay full and the rest remain one line each, with their post_id."""

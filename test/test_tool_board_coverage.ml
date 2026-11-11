@@ -202,6 +202,107 @@ let test_format_timestamp_absolute () =
     "2023-11-14T22:13:20Z"
     (Board_tool_format.format_expiry 1_700_000_000.0)
 
+(* The rendering of a search that shows the first hits in full and the rest as one
+   line. Each hit's full text is a run of its own letter, so a letter run names the
+   hit it came from and no run is part of another. *)
+let search_hits_for_join =
+  List.init 5 (fun i ->
+    { Board_tool_format.full = String.make (90 + (10 * i)) (Char.chr (Char.code 'a' + i))
+    ; one_line = Printf.sprintf "row-%d" i
+    })
+
+let search_join_header = "H:\n\n"
+
+let occurrences haystack needle =
+  let rec count from found =
+    match Str.search_forward (Str.regexp_string needle) haystack from with
+    | position -> count (position + String.length needle) (found + 1)
+    | exception Not_found -> found
+  in
+  count 0 0
+
+let full_hits_shown text =
+  List.length
+    (List.filter
+       (fun (hit : Board_tool_format.search_hit) -> String_util.contains_substring text hit.full)
+       search_hits_for_join)
+
+let test_join_search_hits_keeps_every_full_hit_when_they_fit () =
+  let text =
+    Board_tool_format.join_search_hits ~max_bytes:max_int ~header:search_join_header
+      search_hits_for_join
+  in
+  Alcotest.(check string)
+    "header, then every full hit joined by a rule line"
+    (search_join_header
+     ^ String.concat "\n---\n"
+         (List.map (fun (hit : Board_tool_format.search_hit) -> hit.full) search_hits_for_join))
+    text;
+  Alcotest.(check int) "no hit was shortened" 0 (occurrences text "row-");
+  Alcotest.(check string) "no hits is just the header" search_join_header
+    (Board_tool_format.join_search_hits ~max_bytes:0 ~header:search_join_header [])
+
+(* For every ceiling from 0 to the size of the all-full text: the text is under the
+   ceiling unless not even one full hit fits, the count of full hits never falls as
+   the ceiling grows, it grows only when the text reaches the ceiling to the byte,
+   and each hit is in the text exactly once, in the order it was given. *)
+let test_join_search_hits_takes_the_most_full_hits_that_fit () =
+  let all_full_size =
+    String.length
+      (Board_tool_format.join_search_hits ~max_bytes:max_int ~header:search_join_header
+         search_hits_for_join)
+  in
+  let previous = ref 0 in
+  for max_bytes = 0 to all_full_size + 4 do
+    let text =
+      Board_tool_format.join_search_hits ~max_bytes ~header:search_join_header search_hits_for_join
+    in
+    let shown = full_hits_shown text in
+    let at = Printf.sprintf "ceiling %d" max_bytes in
+    if shown > 0 then
+      Alcotest.(check bool) (at ^ ": the text fits") true (String.length text <= max_bytes);
+    Alcotest.(check bool) (at ^ ": full hits never fall as the ceiling grows") true
+      (shown >= !previous);
+    if shown > !previous then
+      Alcotest.(check int) (at ^ ": a new full hit fits to the byte") max_bytes (String.length text);
+    List.iteri
+      (fun i (hit : Board_tool_format.search_hit) ->
+        let full = occurrences text hit.full and row = occurrences text hit.one_line in
+        let expected_full = if i < shown then 1 else 0 in
+        Alcotest.(check (pair int int))
+          (Printf.sprintf "%s: hit %d is full once or one line once" at i)
+          (expected_full, 1 - expected_full)
+          (full, row))
+      search_hits_for_join;
+    previous := shown
+  done;
+  Alcotest.(check int) "the last ceiling shows every hit in full"
+    (List.length search_hits_for_join) !previous
+
+let test_join_search_hits_says_how_many_were_shortened () =
+  let text =
+    Board_tool_format.join_search_hits ~max_bytes:500 ~header:search_join_header
+      search_hits_for_join
+  in
+  let shown = full_hits_shown text in
+  let total = List.length search_hits_for_join in
+  Alcotest.(check bool) "some hits are full and some are rows" true (shown > 0 && shown < total);
+  Alcotest.(check int) "the note counts the full hits and the rows" 1
+    (occurrences text
+       (Printf.sprintf "앞의 %d개만 실었어요. 나머지 %d개는" shown (total - shown)));
+  Alcotest.(check bool) "the note names masc_board_post_get" true
+    (String_util.contains_substring text "masc_board_post_get");
+  let position needle = Str.search_forward (Str.regexp_string needle) text 0 in
+  let last_full =
+    List.fold_left
+      (fun acc (hit : Board_tool_format.search_hit) ->
+        match position hit.full with
+        | at -> max acc at
+        | exception Not_found -> acc)
+      (-1) search_hits_for_join
+  in
+  Alcotest.(check bool) "the rows come after every full hit" true (position "row-" > last_full)
+
 let json_member_string json key =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
@@ -3726,6 +3827,65 @@ let test_search_no_results () =
   Alcotest.(check bool) "search ok" true ok;
   Alcotest.(check bool) "no results msg" true (String.length body > 0)
 
+(* Twelve posts of about 3.2 KB each, 38 KB together: over the official-client lane's
+   16,384-byte ceiling and under the agent-core lane's. *)
+let search_post_count = 12
+
+let create_search_posts () =
+  for i = 0 to search_post_count - 1 do
+    let ok, body =
+      dispatch
+        "masc_board_post"
+        (make_args
+           [ "title", `String (Printf.sprintf "Title-%02d" i)
+           ; "content", `String (Printf.sprintf "needle BODY-%02d %s" i (String.make 3_000 'x'))
+           ; "author", `String (Printf.sprintf "tester-%d" i)
+           ])
+    in
+    Alcotest.(check bool) (Printf.sprintf "post %d created: %s" i body) true ok
+  done
+
+let search_on_lane lane args =
+  let result =
+    Board_tool.handle_tool
+      ~reader:Masc_board_handlers.Board_access.Operator
+      ~result_boundary:lane
+      "masc_board_search"
+      (make_args args)
+  in
+  Alcotest.(check bool) "search ok" true (Tool_result.is_success result);
+  Tool_result.message result
+
+let test_search_full_bodies_stop_at_the_call_ceiling () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  create_search_posts ();
+  let full_args = [ "query", `String "needle"; "limit", `Int 20; "compact", `Bool false ] in
+  let bodies text = occurrences text "BODY-" in
+  let official = search_on_lane official_client_lane full_args in
+  Alcotest.(check bool) "the official-client lane's result fits its ceiling" true
+    (String.length official <= Common.max_tool_result_wire_bytes);
+  Alcotest.(check bool) "it starts with full bodies" true (bodies official >= 1);
+  Alcotest.(check bool) "the later posts are one line" true (bodies official < search_post_count);
+  Alcotest.(check bool) "the note says some were shortened" true
+    (String_util.contains_substring official "한 줄로 줄였어요");
+  for i = 0 to search_post_count - 1 do
+    let title = Printf.sprintf "Title-%02d" i in
+    Alcotest.(check int) (title ^ " is named once") 1 (occurrences official title)
+  done;
+  let agent_core = search_on_lane agent_core_lane full_args in
+  Alcotest.(check int) "the agent-core lane's ceiling keeps every body" search_post_count
+    (bodies agent_core);
+  Alcotest.(check bool) "with no note" false
+    (String_util.contains_substring agent_core "한 줄로 줄였어요");
+  Alcotest.(check bool) "that text is over the official-client ceiling" true
+    (String.length agent_core > Common.max_tool_result_wire_bytes);
+  let compact =
+    search_on_lane official_client_lane [ "query", `String "needle"; "limit", `Int 20 ]
+  in
+  Alcotest.(check int) "a compact search carries no body" 0 (bodies compact)
+
 let test_stats () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3956,6 +4116,12 @@ let () =
           Alcotest.test_case "sort_order_of_string" `Quick test_sort_order_of_string;
           Alcotest.test_case "board_error_to_string" `Quick test_board_error_to_string;
           Alcotest.test_case "format_timestamp_absolute" `Quick test_format_timestamp_absolute;
+          Alcotest.test_case "join_search_hits keeps every full hit that fits" `Quick
+            test_join_search_hits_keeps_every_full_hit_when_they_fit;
+          Alcotest.test_case "join_search_hits takes the most full hits that fit" `Quick
+            test_join_search_hits_takes_the_most_full_hits_that_fit;
+          Alcotest.test_case "join_search_hits says how many were shortened" `Quick
+            test_join_search_hits_says_how_many_were_shortened;
           Alcotest.test_case "board actor identity is registry backed"
             `Quick test_board_actor_identity_is_registry_backed;
           Alcotest.test_case "board actor identity keeps non-keeper agent"
@@ -4160,6 +4326,8 @@ let () =
         [
           Alcotest.test_case "search empty query" `Quick test_search_empty_query;
           Alcotest.test_case "search no results" `Quick test_search_no_results;
+          Alcotest.test_case "search full bodies stop at the call ceiling" `Quick
+            test_search_full_bodies_stop_at_the_call_ceiling;
           Alcotest.test_case "stats" `Quick test_stats;
           Alcotest.test_case "profile empty agent" `Quick test_profile_empty_agent;
           Alcotest.test_case "profile with posts" `Quick test_profile_with_posts;

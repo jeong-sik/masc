@@ -285,6 +285,33 @@ let test_cancelled_cleanup_releases_its_reservation () =
          (fun () -> reran := true)));
   Alcotest.(check bool) "next scope can schedule the Keeper again" true !reran
 
+let test_first_pass_waits_one_delay_and_later_ones_their_interval () =
+  Eio_main.run @@ fun _env ->
+  let clock = Eio_mock.Clock.make () in
+  let passes = ref 0 in
+  let passes_at time =
+    Eio_mock.Clock.set_time clock time;
+    (* The woken loop runs its pass and reaches its next sleep. *)
+    Eio.Fiber.yield ();
+    !passes
+  in
+  try
+    Eio.Switch.run (fun sw ->
+      Eio.Fiber.fork ~sw (fun () ->
+        Server_keeper_build_maintenance.run_passes ~clock ~first_delay_sec:60. (fun () ->
+          incr passes;
+          (* Each pass names its own wait. The second names a shorter one. *)
+          if !passes = 1 then 3600. else 600.));
+      Alcotest.(check int) "no pass before the first delay" 0 (passes_at 59.);
+      Alcotest.(check int) "the first pass at the first delay" 1 (passes_at 60.);
+      Alcotest.(check int) "no pass inside the interval" 1 (passes_at 3659.);
+      Alcotest.(check int) "the second pass one interval later" 2 (passes_at 3660.);
+      Alcotest.(check int) "no pass inside the second interval" 2 (passes_at 4259.);
+      Alcotest.(check int) "the third after the wait the second named" 3 (passes_at 4260.);
+      Eio.Switch.fail sw Stop_cleanup_fixture)
+  with
+  | Stop_cleanup_fixture -> ()
+
 let () =
   Alcotest.run "Keeper build maintenance admission"
     [ "metadata", [
@@ -300,4 +327,5 @@ let () =
       Alcotest.test_case "Server applies the workspace payload" `Quick test_server_always_applies_the_workspace_payload;
       Alcotest.test_case "Slow Keeper does not block another cleanup" `Quick test_slow_keeper_does_not_block_another_cleanup;
       Alcotest.test_case "Cancelled cleanup releases its reservation" `Quick test_cancelled_cleanup_releases_its_reservation;
+      Alcotest.test_case "The first pass waits one delay, later ones their interval" `Quick test_first_pass_waits_one_delay_and_later_ones_their_interval;
     ] ]

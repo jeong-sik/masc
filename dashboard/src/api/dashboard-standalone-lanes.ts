@@ -1,5 +1,6 @@
 import { isRecord } from '../components/common/normalize'
 import { get, type AbortableRequestOptions } from './core'
+import { parseSlotMatrix, type SlotMatrixState } from './exact-slot-observations'
 
 export type StandaloneLaneId =
   | 'board_attention_exact'
@@ -67,6 +68,7 @@ export interface StandaloneLaneSnapshotRow {
   lastOutcome: 'succeeded' | 'failed' | 'cancelled' | null
   p50ElapsedSeconds: number | null
   selectedSlots: StandaloneLaneSlotCount[]
+  slotStates?: SlotMatrixState
 }
 
 export interface StandaloneLanesSnapshot {
@@ -189,6 +191,7 @@ function parseLane(raw: unknown, index: number): StandaloneLaneSnapshotRow {
     configured: raw.configured as boolean | null,
     configurationState: configurationState as StandaloneLaneConfigurationState,
     jev,
+    slotStates: parseSlotMatrix(raw.slot_states, raw.slot_observation_unavailable_runs, laneId),
     admittedSlots: raw.admitted_slots.map((slot, slotIndex) => string(slot, `${context}.admitted_slots[${slotIndex}]`)),
     cliSlots: raw.cli_slots.map((slot, slotIndex) => string(slot, `${context}.cli_slots[${slotIndex}]`)),
     droppedSlots: raw.dropped_slots.map((slot, slotIndex) => string(slot, `${context}.dropped_slots[${slotIndex}]`)),

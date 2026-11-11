@@ -1152,6 +1152,9 @@ type host_attempt = Deliver of Yojson.Safe.t | Restore of Yojson.Safe.t | Wait o
    instance retired while the call ran, or the host could not keep its record. *)
 let exact_attempt_stopped = "stopped"
 let exact_attempt_record_failed = "record_failed"
+(* What the line shows for an output the package does not declare. A declared
+   name is a-z, 0-9 and _ (Lane_addon_manifest), so this is never one. *)
+let exact_attempt_undeclared_output = "-"
 
 let run_host_cycle m e (port : host_port) =
   let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
@@ -1190,10 +1193,18 @@ let run_host_cycle m e (port : host_port) =
                 overlap are counted from it. It carries no request body. *)
              let running_at_start = !exact_running in
              let stopwatch = Monotonic_deadline.start () in
+             (* The output name comes from the worker and can be any text, so
+                the line carries it only when the package declares it. *)
+             let output =
+               match List.find_opt
+                 (fun (declared : Lane_addon_types.exact_output) -> String.equal declared.name exact.output)
+                 e.package.exact_outputs with
+               | Some declared -> declared.name
+               | None -> exact_attempt_undeclared_output in
              let ended result =
                Log.Misc.info
                  "Lane Add-on exact attempt ended installation=%s output=%s result=%s elapsed_ms=%.0f running_at_start=%d"
-                 (installation_id e) exact.output result
+                 owner.id output result
                  (Monotonic_deadline.elapsed_seconds stopwatch *. 1000.) running_at_start in
              incr exact_running;
              let result =

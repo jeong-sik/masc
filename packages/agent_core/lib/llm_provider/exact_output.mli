@@ -596,6 +596,19 @@ type projection_target = private
   }
 
 val projection_target : admitted_target -> projection_target
+
+type binding_observation = Exact_output_plan.binding_observation = private
+  { provider_id : string option
+  ; model_id : string
+  ; provider_kind : Provider_config.provider_kind
+  ; endpoint : string
+  }
+
+val admitted_target_binding : admitted_target -> binding_observation
+(** Credential-free binding of this immutable admitted handle. Uses the
+    generation URL constructor, including Gemini's model path, and removes
+    userinfo, query and fragment. This is current admission evidence only;
+    use the generation snapshot for a historical execution's binding. *)
 (** The credential-free immutable request projection captured by
     {!admit_target_ref}. It carries the config the exact request will run on,
     including the [max_tokens] a lane's declared output budget set. *)
@@ -723,6 +736,20 @@ val generation_receipt_snapshot_plan_fingerprint : generation_receipt_snapshot -
 val generation_receipt_snapshot_request_body_sha256
   :  generation_receipt_snapshot
   -> string
+
+val generation_receipt_snapshot_binding
+  : generation_receipt_snapshot -> binding_observation
+(** Credential-free endpoint and provider/model frozen in this exact plan. *)
+
+val generation_receipt_snapshot_execution_started_at
+  : generation_receipt_snapshot -> float option
+val generation_receipt_snapshot_execution_finished_at
+  : generation_receipt_snapshot -> float option
+(** Host wall-clock seconds at entry to and return from the generation
+    executor, captured with phase/status in one immutable state read. [None]
+    means unobserved. A finish is not a remote terminal or semantic success;
+    cancellation may leave a start without a finish. These times do not
+    include admission/token measurement or imply that a POST was sent. *)
 
 (** One immutable outer-flow binding. The opaque candidate identity and one-shot
     execution receipt travel together; consumers do not rebuild that join from

@@ -4,9 +4,9 @@ module Upgrade = Server_upgrade_preparation
    single user says its workspace in [/health] and is asked to stop with the
    credential of its admin. The account server of a multi-account
    installation says nothing of the workspace to the network: the kernel says
-   which port the owner of this workspace announces
-   ([Server_startup_takeover.account_server_announcement]), and it is asked to
-   stop with the authority of the host ([Upgrade.stop_account_server]). *)
+   whether the owner of this workspace announces the port
+   ([Upgrade.account_server]), and it is asked to stop with the authority of
+   the host ([Upgrade.stop_account_server]). *)
 type incumbent =
   | Nothing_running
   | This_workspace of { version : string; pid : int option }
@@ -122,19 +122,24 @@ let observe_single_user ~clock ~run_dir ~base_path ~port =
      | Ok Upgrade.Port_busy -> Error Port_held_by_unknown_process
      | Error error -> Error (Owner_unverifiable (stop_error_message error)))
 
-(* The kernel is asked first. An owner that announces a port is an account
-   server; its answer on that port is read only to see that it serves and to
-   name its version. Without an announcement the workspace is a single
-   user's, or nobody's, and [/health] says which. *)
+(* The kernel is asked first. The owner of the lease that announces the port
+   is an account server; its answer on that port is read only to see that it
+   serves and to name its version. An owner that announces nothing is the
+   server of a single user, and with no owner the workspace is nobody's:
+   [/health] says which. *)
 let observe ~clock ~run_dir ~base_path ~port =
-  match Server_startup_takeover.account_server_announcement ~run_dir ~base_path with
-  | Error rejection ->
+  match Upgrade.account_server ~run_dir ~base_path ~port with
+  | Error (Server_startup_takeover.Owner_lease_rejected rejection) ->
     Error
       (Owner_unverifiable (Server_startup_takeover.base_path_lock_rejection_to_string rejection))
-  | Ok None -> observe_single_user ~clock ~run_dir ~base_path ~port
-  | Ok (Some { Server_startup_takeover.pid; port = announced }) when announced <> port ->
+  | Error
+      ( Server_startup_takeover.Owner_identity_unavailable _
+      | Server_startup_takeover.Current_process_owner ) ->
+    Error (Owner_unverifiable (stop_error_message Upgrade.Owner_unavailable))
+  | Ok Upgrade.No_account_server -> observe_single_user ~clock ~run_dir ~base_path ~port
+  | Ok (Upgrade.Account_server_on_another_port { pid; port = announced }) ->
     Error (Account_server_on_another_port { pid; port = announced })
-  | Ok (Some { Server_startup_takeover.pid; port = (_ : int) }) ->
+  | Ok (Upgrade.Account_server_on_port { pid }) ->
     (match get ~clock ~port Server_health_paths.health with
      | Ok (200, body) ->
        Ok (This_account_server { version = Server_accounts.health_version body; pid })
@@ -230,24 +235,35 @@ let describe_answer ~child_pid = function
 
 (* The replacement answers on the port the predecessor drains on, so a 200
    counts only once it is the replacement's. A single-user server says its pid
-   in the answer. The probes of an account server say nothing of the process,
-   so the kernel is asked who announces the port. *)
+   in the answer, so an answer with a pid is the replacement's or another
+   server's. The probes of an account server say nothing of the process, so
+   for an answer without a pid the kernel is asked who holds the
+   announcement lock of the port: the replacement takes it after the last
+   check that can stop its boot ([Server_accounts.run]).
+
+   The 200 is read on 127.0.0.1. A replacement bound to 0.0.0.0 can share
+   the port with a listener of another process on 127.0.0.1 where the host
+   allows both binds, and the answer is then that listener's: ready then
+   says that the replacement announced and that the port answers, not that
+   the replacement answered. *)
 let look ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
   let answer = fresh_get ~clock ~port Server_health_paths.readiness in
   match answer with
-  | Ok (200, body) when answered_pid body = Some child.pid -> Ready
-  | Ok (200, _) ->
-    (match Server_startup_takeover.account_server_announcement ~run_dir ~base_path with
-     | Ok (Some { Server_startup_takeover.pid; port = announced })
-       when pid = child.pid && announced = port -> Ready
-     | Ok (Some { Server_startup_takeover.pid; port = announced }) ->
-       Waiting (Some (Printf.sprintf "pid %d still holds the workspace on port %d" pid announced))
-     | Ok None -> Waiting (describe_answer ~child_pid:child.pid answer)
-     | Error rejection ->
-       Waiting
-         (Some
-            ("the owner lease cannot be read: "
-             ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection)))
+  | Ok (200, body) ->
+    (match answered_pid body with
+     | Some pid when pid = child.pid -> Ready
+     | Some (_ : int) -> Waiting (describe_answer ~child_pid:child.pid answer)
+     | None ->
+       (match Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port with
+        | Ok (Some holder) when holder = child.pid -> Ready
+        | Ok (Some holder) ->
+          Waiting (Some (Printf.sprintf "pid %d holds the announcement of port %d" holder port))
+        | Ok None -> Waiting (describe_answer ~child_pid:child.pid answer)
+        | Error rejection ->
+          Waiting
+            (Some
+               ("the owner lease cannot be read: "
+                ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection))))
   | Ok _ | Error _ -> Waiting (describe_answer ~child_pid:child.pid answer)
 
 let watch ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =

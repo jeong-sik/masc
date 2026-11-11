@@ -115,20 +115,46 @@ let replacement_readiness ~run_dir ~base_path ~port =
       (Server_startup_takeover.Owner_identity_unavailable
          (Owner_changed | Unsupported | Unavailable | Closed))
   | Error (Server_startup_takeover.Current_process_owner) -> Error Owner_unavailable
+type account_server =
+  | Account_server_on_port of { pid : int }
+  | Account_server_on_another_port of { pid : int; port : int }
+  | No_account_server
+let account_server ~run_dir ~base_path ~port =
+  match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
+  | Error (Owner_identity_unavailable No_owner) -> Ok No_account_server
+  | Error
+      ( Server_startup_takeover.Owner_lease_rejected _
+      | Server_startup_takeover.Owner_identity_unavailable
+          (Owner_changed | Unsupported | Unavailable | Closed)
+      | Server_startup_takeover.Current_process_owner as error ) -> Error error
+  | Ok owner ->
+    let pid = Owner_process_identity.pid owner in
+    Owner_process_identity.close owner;
+    let read answer =
+      Result.map_error (fun rejection -> Server_startup_takeover.Owner_lease_rejected rejection) answer in
+    let* holder = read (Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port) in
+    if holder = Some pid then Ok (Account_server_on_port { pid }) else
+    (* The owner does not announce this port. Which port it does announce is
+       for the refusal to name: the whole-file read can miss it behind the
+       lock of another process, and then the owner is taken for no account
+       server. *)
+    let* seen = read (Server_startup_takeover.account_server_announcement ~run_dir ~base_path) in
+    (match seen with
+     | Some { Server_startup_takeover.pid = announcer; port = announced } when announcer = pid ->
+       if announced = port then Ok (Account_server_on_port { pid })
+       else Ok (Account_server_on_another_port { pid; port = announced })
+     | Some (_ : Server_startup_takeover.account_server_announcement) | None -> Ok No_account_server)
 let stop_account_server ~run_dir ~base_path ~port =
   match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
   | Error (_ : Server_startup_takeover.owner_capture_error) -> Error Owner_unavailable
   | Ok owner ->
     Fun.protect ~finally:(fun () -> Owner_process_identity.close owner) (fun () ->
-      match Server_startup_takeover.account_server_announcement ~run_dir ~base_path with
+      match Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port with
       | Error (_ : Server_startup_takeover.base_path_lock_rejection) -> Error Owner_unavailable
-      | Ok (Some announcement)
-        when announcement.Server_startup_takeover.pid = Owner_process_identity.pid owner
-             && announcement.Server_startup_takeover.port = port ->
+      | Ok (Some holder) when holder = Owner_process_identity.pid owner ->
         (match Owner_process_identity.request_termination owner with
          | Ok () -> Ok ()
          | Error Owner_process_identity.Owner_changed -> Error Incumbent_changed
          | Error (Owner_process_identity.No_owner | Unsupported | Unavailable | Closed) ->
            Error Owner_unavailable)
-      | Ok (Some (_ : Server_startup_takeover.account_server_announcement)) | Ok None ->
-        Error Incumbent_changed)
+      | Ok (Some (_ : int)) | Ok None -> Error Incumbent_changed)

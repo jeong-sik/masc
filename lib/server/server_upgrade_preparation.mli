@@ -51,15 +51,42 @@ val replacement_readiness :
     graceful termination. Never signals or starts anything; errors are not exit
     proof. Availability is advisory, so replacement startup still owns conflicts. *)
 
+(** What the kernel says of the account server of a workspace, for a command
+    that was asked about one port. *)
+type account_server =
+  | Account_server_on_port of { pid : int }
+      (** The kernel owner of the lease holds the announcement lock of the
+          port ({!Server_startup_takeover.account_server_port_holder}). *)
+  | Account_server_on_another_port of { pid : int; port : int }
+      (** The kernel owner of the lease announces [port], not the one asked
+          about. *)
+  | No_account_server
+      (** Nothing holds the lease, or its owner announces nothing the kernel
+          showed: the server of a single user, or an account server that has
+          not announced yet. *)
+
+val account_server :
+  run_dir:string -> base_path:string -> port:int ->
+  (account_server, Server_startup_takeover.owner_capture_error) result
+(** Reads the kernel owner of the lease of [base_path] and compares it with
+    the holder of the announcement lock of [port]. A lock that a process
+    other than the owner holds on the announcement file is no account
+    server, whichever byte it is on. The other port is read over the whole
+    file ({!Server_startup_takeover.account_server_announcement}) and can be
+    missed behind such a lock; the answer is then [No_account_server]. It
+    signals nothing, and the pid is a number to show: {!stop_account_server}
+    reads the owner again. An [Error] when the lease or the announcement
+    cannot be read. *)
+
 val stop_account_server : run_dir:string -> base_path:string -> port:int -> (unit, error) result
 (** Asks the account server of a multi-account installation to stop: the
     identity-bound SIGTERM of {!request_termination}, sent to the kernel owner
-    of the lease of [base_path] when that same process announces [port]
-    ({!Server_startup_takeover.account_server_announcement}).
-    [Incumbent_changed] when the owner announces another port or none, or
-    changed between the reads. [Owner_unavailable] when nothing holds the
-    lease, or the owner or the announcement cannot be read. Success is a
-    request, not proof of drain.
+    of the lease of [base_path] when that same process holds the announcement
+    lock of [port] ({!Server_startup_takeover.account_server_port_holder}).
+    [Incumbent_changed] when the owner does not announce [port], or changed
+    between the reads. [Owner_unavailable] when nothing holds the lease, or
+    the owner or the announcement cannot be read. Success is a request, not
+    proof of drain.
 
     {b Authority.} An account server has no admin credential that a command
     line could present: its accounts are persons who sign in through a

@@ -345,6 +345,10 @@ let test_the_half_hours_draw_different_marks () =
 let test_nothing_read_needs_a_keeper_and_no_reading () =
   let unread = column ~fill:P.Half_hour_unknown [] in
   check_bool "no keeper" false (P.nothing_read []);
+  (* A keeper whose window holds no half hour at all (a band zero cells wide)
+     has no reading either: the label fitted to zero cells shows nothing, as
+     the marks did. *)
+  check_bool "one keeper, no half hour at all" true (P.nothing_read [ [] ]);
   check_bool "one keeper, every half hour unknown" true (P.nothing_read [ unread ]);
   check_bool "two keepers, every half hour unknown" true (P.nothing_read [ unread; unread ]);
   check_bool "one quiet half hour of the second keeper" false

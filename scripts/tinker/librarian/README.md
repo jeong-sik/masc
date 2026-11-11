@@ -107,7 +107,14 @@ endpoint applies its default.
 
 ## Order
 
-1. Write the E-real manifest and generate E-synth.
+1. Write the E-real manifest and generate E-synth. Besides planted stale facts
+   and duplicate pairs, a memory may hold records with a use time: notes for
+   one day, which carry that day's date. A record used on a day after the
+   candidates' is to stay; one used before them is planted stale, so the stale
+   drop recall counts it. On requests whose label asks for a change, the
+   E-synth numbers add `scheduled_ahead_keep_rate` and
+   `scheduled_past_drop_recall`. A record still ahead that an answer drops is
+   also an off-label drop (step 6).
 2. Run the base model on E-synth, audit the labels with a judge that sees
    neither the labels nor the answers, and keep the requests it confirms.
 3. Fix `pass_lines.json` and commit it before any training. The G6 merge lines
@@ -188,7 +195,9 @@ under the same rules. `judge.md` names
 its rules as `config/prompts/librarian.md`, and the folder holds a copy at that
 path; the merge judge's `judge.md` quotes the gate's slots from it. The key
 holds the label's classes and the dropped facts, or the absorbs each merge
-case stands for.
+case stands for. A label or drop case shows the time of the request, that of
+its last candidate: the prompt shows a candidate's time only in epoch seconds,
+and a record's use date tells which side of it the record is on.
 `--out/judge-files.json` holds the sha256 of the three files the judge was
 given. `apply` and `verdict` read the decisions only while those files are
 unchanged and the rules copy equals this checkout's `config/prompts/librarian.md`.

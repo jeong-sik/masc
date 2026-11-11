@@ -59,7 +59,8 @@ def synth_row(**counts: object) -> Row:
                  "dropped": 0, "absorbed": 0, "dropped_expected": 0, "planted": 1, "planted_dropped": 0,
                  "state_correct": 2, "state_by_kind": {"new": [2, 2]}, "dropped_unmerged": [],
                  "planted_absorbed": 0, "merges": 0, "merges_done": 0, "added": 0, "removed": 0,
-                 "expected_added": 0, "expected_removed": 0}
+                 "expected_added": 0, "expected_removed": 0, "scheduled_ahead": 0, "scheduled_ahead_dropped": 0,
+                 "scheduled_past": 0, "scheduled_past_dropped": 0}
     return {**base, **counts}
 
 
@@ -310,7 +311,8 @@ class ScoreTest(unittest.TestCase):
 
     def test_synth_drops_split_into_asked_and_off_label(self) -> None:
         label = S.RequestLabel((S.CandidateLabel("r1", "incorporated", "m1", None, None),
-                                S.CandidateLabel("r2", "not_durable", None, None, None)), frozenset({"m5"}), ())
+                                S.CandidateLabel("r2", "not_durable", None, None, None)), frozenset({"m5"}), (),
+                               frozenset(), frozenset())
         item = M.SynthItem("i1", make_prompt(), "", label)
         both = answer((("r1", "incorporated", "new"), ("r2", "not_durable", None)),
                       dropped=("m1", "m5", "m6"), added=("new",), revisions=(("m1", "new"),))
@@ -321,7 +323,8 @@ class ScoreTest(unittest.TestCase):
 
     def test_synth_new_fact_and_paraphrase_need_the_claim_their_kind_names(self) -> None:
         label = S.RequestLabel((S.CandidateLabel("r1", "incorporated", None, None, None),
-                                S.CandidateLabel("r2", "already_represented", None, None, "old")), frozenset(), ())
+                                S.CandidateLabel("r2", "already_represented", None, None, "old")), frozenset(), (),
+                               frozenset(), frozenset())
         item = M.SynthItem("i1", make_prompt(), "", label)
         right = answer((("r1", "incorporated", "new"), ("r2", "already_represented", "old")), added=("new",))
         # MASC accepts both: every named claim is in final memory.
@@ -330,7 +333,8 @@ class ScoreTest(unittest.TestCase):
         self.assertEqual(M.score_synth(item, wrong)["correct"], 0)
 
     def test_synth_absorbs_are_counted_apart_and_never_drops(self) -> None:
-        label = S.RequestLabel((S.CandidateLabel("r1", "incorporated", None, None, None),), frozenset({"m5"}), ())
+        label = S.RequestLabel((S.CandidateLabel("r1", "incorporated", None, None, None),), frozenset({"m5"}), (),
+                               frozenset(), frozenset())
         item = M.SynthItem("i1", make_prompt(), "", label)
         mine = answer((("r1", "incorporated", "new"),), added=("new",), absorbed=(("m5", "new"), ("m6", "new")))
         score = M.score_synth(item, mine)
@@ -360,6 +364,14 @@ class ScoreTest(unittest.TestCase):
         part = part_of(V.summarize("synth", [synth_row()]))
         self.assertEqual((part["drop_precision"], part["stale_drop_recall"]), (None, 0.0))
         self.assertIsNone(part_of(V.summarize("synth", [synth_row(planted=0)]))["stale_drop_recall"])
+
+    def test_records_ahead_are_kept_and_past_ones_dropped_over_the_rows(self) -> None:
+        rows = [synth_row(scheduled_ahead=2, scheduled_ahead_dropped=1, scheduled_past=1),
+                synth_row(scheduled_ahead=2, scheduled_past=3, scheduled_past_dropped=3)]
+        part = part_of(V.summarize("synth", rows))
+        self.assertEqual((part["scheduled_ahead_keep_rate"], part["scheduled_past_drop_recall"]), (0.75, 0.75))
+        none = part_of(V.summarize("synth", [synth_row()]))
+        self.assertEqual((none["scheduled_ahead_keep_rate"], none["scheduled_past_drop_recall"]), (None, None))
 
     def test_synth_memory_counts_sum_over_rows(self) -> None:
         rows = [synth_row(candidates=4, correct=1, state_correct=3, state_by_kind={"new": [3, 2], "restates": [1, 1]},

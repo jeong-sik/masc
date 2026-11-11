@@ -35,7 +35,10 @@ at verdict time (`audit_decisions`). These follow what each fact is. Stale
 drop recall, pair merges and the label's growth count only requests whose
 label asks for a change: on the others MASC refuses one unless a candidate is
 misjudged. Growth is the claims an answer adds minus the memory IDs it takes
-out, beside the label's.
+out, beside the label's. Records with a use time count on the same requests: a
+record still ahead is to stay, so its drop is the loss this counts on its own
+besides the off-label drop it also is, and a record already past is one of the
+planted stale facts, counted on its own as well.
 
 Text comparison cannot tell whether a merge keeps the knowledge it absorbs.
 A row names, for each merge the label expects and the answer made, the memory
@@ -200,9 +203,11 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
     ids = {claim: mid for mid, claim in claims.items()}
     texts = {c.request_id: c.proposed_fact.claim for c in item.prompt.candidates}
     stale = set(label.planted_stale)
-    # What the label asks of stale facts and pairs; MASC refuses those changes without support.
+    # What the label asks of stale facts, pairs and records; MASC refuses those changes without support.
     planted = stale if label.supports_change else set[str]()
     pairs = label.duplicates if label.supports_change else ()
+    ahead = label.scheduled_ahead if label.supports_change else frozenset[str]()
+    past = label.scheduled_past if label.supports_change else frozenset[str]()
     corrected = {c.supersedes for c in label.candidates if c.supersedes is not None}
     complemented = {c.absorbs for c in label.candidates if c.absorbs is not None}
     paired = {mid for pair in label.duplicates for mid in pair}
@@ -239,6 +244,8 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
             "absorbed": len(left.absorbed), "absorbs": {mid: labeled.get(mid, "other") for mid in sorted(left.absorbed)},
             "planted": len(planted), "planted_dropped": len(left.dropped & planted),
             "planted_absorbed": len(stale & left.absorbed.keys()),
+            "scheduled_ahead": len(ahead), "scheduled_ahead_dropped": len(left.dropped & ahead),
+            "scheduled_past": len(past), "scheduled_past_dropped": len(left.dropped & past),
             "pairs": len(pairs), "pairs_merged": len(pairs_done),
             "merges": len(complemented) + len(pairs), "merges_done": len(complements_done) + len(pairs_done),
             "merges_absorbed": complements_done + pairs_done,

@@ -13,6 +13,7 @@ runs with `uv run`.
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import random
 import sys
 import unittest
@@ -57,30 +58,54 @@ class HoldsTest(unittest.TestCase):
                                             S.Surface(S.date_text(WHEN, form), None, None)))
 
 
+TRAITS: dict[str, Callable[[S.Surface], str | None]] = {
+    "date": lambda s: s.date, "time": lambda s: s.time, "reference": lambda s: s.reference}
+
+
+def share(group: list[S.Surface], mark: Callable[[S.Surface], str | None]) -> float:
+    return sum(mark(s) is not None for s in group) / len(group)
+
+
+@functools.cache
+def planned_slots() -> tuple[tuple[G.MemoryPlan, ...], tuple[G.FactSlot, ...]]:
+    keeper = S.KeeperProfile("k", "synth-k", "role", "world", tuple(f"cat_{i}" for i in range(12)),
+                             S.GoalDraft("t", "m", "v"))
+    rng = random.Random(20261109)
+    plans = tuple(G.plan_memory(rng, keeper, i, True) for i in range(2000))
+    return plans, tuple(slot for plan in plans for slot in plan.slots)
+
+
 class IndependenceTest(unittest.TestCase):
     def test_planted_and_durable_slots_carry_marks_at_the_same_rates(self) -> None:
-        keeper = S.KeeperProfile("k", "synth-k", "role", "world", tuple(f"cat_{i}" for i in range(12)),
-                                 S.GoalDraft("t", "m", "v"))
-        rng = random.Random(20261109)
-        plans = [G.plan_memory(rng, keeper, i, True) for i in range(2000)]
-        slots = [slot for plan in plans for slot in plan.slots]
-        stale = [s.surface for s in slots if s.stale]
-        durable = [s.surface for s in slots if not s.stale]
+        """A record's date is its use date, so records are compared with each other below."""
+        plans, slots = planned_slots()
+        stale = [s.surface for s in slots if s.stale and s.use_at is None]
+        durable = [s.surface for s in slots if not s.stale and s.use_at is None]
         duplicates = [plan.duplicate.surface for plan in plans if plan.duplicate is not None]
         self.assertGreater(len(stale), 1500)
         self.assertEqual(len(duplicates), 2000)
-        traits: dict[str, Callable[[S.Surface], str | None]] = {
-            "date": lambda s: s.date, "time": lambda s: s.time, "reference": lambda s: s.reference}
-        def share(group: list[S.Surface], mark: Callable[[S.Surface], str | None]) -> float:
-            return sum(mark(s) is not None for s in group) / len(group)
-
-        for name, mark in traits.items():
+        for name, mark in TRAITS.items():
             for planted in (stale, duplicates):
                 self.assertLess(abs(share(planted, mark) - share(durable, mark)), 0.06, name)
 
+    def test_records_ahead_and_past_carry_marks_at_the_same_rates(self) -> None:
+        _, slots = planned_slots()
+        ahead = [s.surface for s in slots if s.use_at is not None and not s.stale]
+        past = [s.surface for s in slots if s.use_at is not None and s.stale]
+        self.assertGreater(min(len(ahead), len(past)), 600)
+        for name, mark in TRAITS.items():
+            self.assertLess(abs(share(ahead, mark) - share(past, mark)), 0.06, name)
+
+    def test_a_record_carries_the_date_of_its_use(self) -> None:
+        _, slots = planned_slots()
+        for s in slots:
+            if s.use_at is not None:
+                self.assertIn(s.surface.date, {S.date_text(s.use_at, form) for form, _ in S.DATE_FORMAT_WEIGHTS})
+                self.assertIn(s.surface.time, {None, s.use_at.strftime("%H:%M")})
+
 
 def fact(memory_id: str, chars: int) -> S.MemoryFact:
-    return S.MemoryFact(memory_id, "가" * chars, "c", None, "2026-10-14T05:30:00Z", False, None)
+    return S.MemoryFact(memory_id, "가" * chars, "c", None, "2026-10-14T05:30:00Z", False, None, None)
 
 
 class CandidatePlanTest(unittest.TestCase):

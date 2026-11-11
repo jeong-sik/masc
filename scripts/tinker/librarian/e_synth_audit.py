@@ -24,10 +24,13 @@ the text can miss the kind it was asked for. `cases` picks every request whose
 baseline answer was valid and disagreed with the label, plus `--sample` of the
 rest (answers that agreed, and answers that were not valid). A sample at least
 as large as the rest judges every request, so label errors the baseline shares
-are found as often as the ones it disagrees with. A case holds the Keeper's
-role material, the candidate claims, FULL_FACTS memory facts in full and the
-heads of the other facts in the candidates' categories. The facts in full are
-those the label or the answer refers to, the planted stale facts, and for every
+are found as often as the ones it disagrees with. A case holds the time of
+the request, the Keeper's role material, the candidate claims, FULL_FACTS memory
+facts in full and the heads of the other facts in the candidates' categories.
+The time is that of the last candidate, written as a fact's seen_at: the prompt
+shows it only in epoch seconds, and a record's use date tells which side of it
+the record is on. The facts in full are those the label or the answer refers
+to, the planted stale facts, the records with a use time, and for every
 candidate the SIMILAR facts whose wording overlaps most with it (character
 trigrams), filled up with random others (at least MIN_DISTRACTORS), so how many
 there are does not tell the judge which ones matter. On E-synth-2 the judges
@@ -71,6 +74,7 @@ decisions.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import random
 import sys
@@ -94,9 +98,9 @@ SIMILAR = 3
 HEAD = 90
 JUDGE = """# E-synth 라벨 감사 판정 기준
 
-한 case는 keeper-librarian admission 요청 하나입니다. Keeper 역할 자료(role), 이번 턴
-후보(k1, k2, …), 현재 기억 일부의 전문(facts), 후보 카테고리의 다른 기억 앞부분(context)이
-있습니다. 보이지 않는 기억은 판단하지 않습니다.
+한 case는 keeper-librarian admission 요청 하나입니다. 요청을 받은 시각(now, UTC), Keeper 역할
+자료(role), 이번 턴 후보(k1, k2, …), 현재 기억 일부의 전문(facts), 후보 카테고리의 다른 기억
+앞부분(context)이 있습니다. 보이지 않는 기억은 판단하지 않습니다.
 
 판단 규칙은 `config/prompts/librarian.md`의 「카테고리와 항목 정리」, 「유지·삭제·교정」,
 「남길 지식과 증거」, `admission_policy` 절입니다. 먼저 그 네 절을 읽고, 그 규칙대로 분류하세요.
@@ -116,9 +120,11 @@ JUDGE = """# E-synth 라벨 감사 판정 기준
 전문으로 보이는 기억(facts)마다 하나를 고릅니다.
 - "keep": 지금도 참이고 앞으로 기억할 가치가 있다. 다른 기억과 일부가 겹쳐도 같은 지식이 아니면 keep이다.
   지속되는 결정·제약·교훈에 날짜, PR 번호, 설정값 같은 부수 정보가 붙어 있어도 keep이다.
+  정해진 날에 쓸 기록(그날 할 일, 확인할 것, 전할 말)은 그날이 now의 날짜보다 뒤면 keep이다.
 - "restates:<m>": 보이는 다른 기억 <m>이 같은 지식을 담는다. 후보의 "restates"와 같은 기준으로 고른다.
   같은 지식을 담은 두 기억은 서로를 적는다. 예: m5에 "restates:m6", m6에 "restates:m5".
 - "drop": 항목 전체가 낡은 상태, 일시적 관측, 쉽게 유도하거나 권위 있는 원천에서 복구할 수 있는 세부다.
+  정해진 날에 쓸 기록은 그날이 now의 날짜보다 앞이면 drop이다.
 - "superseded:<k>": 이번 턴 후보 <k>가 이 기억의 값·조건·결정을 바꾼다.
 
 case마다 decisions.jsonl에 한 줄을 씁니다. 모든 후보와 모든 facts를 빠짐없이 분류합니다.
@@ -196,13 +202,16 @@ def label_class(candidate: S.Candidate) -> D.Classed[D.CandidateVerb]:
 
 def expected(request: Request) -> tuple[dict[str, D.Classed[D.CandidateVerb]], dict[str, D.Classed[D.FactVerb]]]:
     """What the label means in JUDGE's terms: the class of each candidate ref, and of each memory ID
-    the label fixes. A planted stale fact is dropped, a correction target is superseded by its
-    candidate, and the two facts of a duplicate pair restate each other; the label keeps the rest."""
+    the label fixes. A planted stale fact is dropped, a record whose use is still ahead is kept, a
+    correction target is superseded by its candidate, and the two facts of a duplicate pair
+    restate each other; the label keeps the rest. A fixed fact is always shown in full."""
     cands = {f"k{i + 1}": label_class(c) for i, c in enumerate(request.candidates)}
     fixed: dict[str, D.Classed[D.FactVerb]] = {}
     for f in request.facts:
         if f.planted_stale:
             fixed[f.memory_id] = D.Classed("drop", frozenset())
+        elif f.use_at is not None:
+            fixed[f.memory_id] = KEEP
         if f.duplicate_of is not None:
             fixed[f.memory_id] = D.Classed("restates", frozenset({f.duplicate_of}))
             fixed[f.duplicate_of] = D.Classed("restates", frozenset({f.memory_id}))
@@ -237,13 +246,19 @@ def answer_refs(request: Request, answer: AV.AdmissionAnswer | None) -> set[str]
                if j.memory_claim is not None and j.memory_claim in by_claim})
 
 
+def request_time(request: Request) -> str:
+    """The time of the request's last candidate, written as a fact's seen_at."""
+    last = max(c.seen_at for c in request.candidates)
+    return dt.datetime.fromtimestamp(last, dt.UTC).strftime(RW.TIME_FORMAT)
+
+
 def render_case(case_id: str, request: Request, full: set[str]) -> tuple[JsonObject, JsonObject]:
     """The judge's case showing the memory IDs `full` in full, and the key its decision is checked against."""
     cands, fixed = expected(request)
     categories = {c.category for c in request.candidates}
     order = sorted(request.facts, key=lambda f: int(f.memory_id[1:]))
     case: JsonObject = {
-        "case": case_id, "role": request.role,
+        "case": case_id, "now": request_time(request), "role": request.role,
         "candidates": [{"ref": f"k{i + 1}", "category": c.category, "claim": c.claim}
                        for i, c in enumerate(request.candidates)],
         "facts": [{"ref": f.memory_id, "category": f.category, "claim": f.claim} for f in order if f.memory_id in full],

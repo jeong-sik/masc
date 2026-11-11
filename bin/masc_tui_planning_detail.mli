@@ -142,7 +142,7 @@ val timeline_unavailability_detail : Tui_decode.goal_timeline_unavailability -> 
 (** Preserve the typed source failure's cause at the history read boundary. *)
 
 val timeline :
-  ko:bool -> width:int ->
+  ko:bool -> now:float -> width:int ->
   goal_id:string ->
   (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t ->
   line list
@@ -151,7 +151,9 @@ val timeline :
     loading, store unavailable, load failed, stale answer for another goal)
     says what it is instead of rendering as an empty history. Refresh failures
     retain the last observed rows with their stale reason; they do not certify
-    the goal's current work or turn a source-unavailable result into success. *)
+    the goal's current work or turn a source-unavailable result into success.
+    Each row's stamp is drawn in the operator's time zone; [now] decides how
+    much of its date the row still needs. *)
 
 val criterion_review_lines :
   width:int -> ko:bool -> Tui_decode.goal_criterion_review -> line list

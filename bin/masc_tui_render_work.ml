@@ -1036,7 +1036,10 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
   let measurement = planning_measurement_lines state goal in
   let criterion_review = Planning_detail.criterion_review_lines ~width
     ~ko:(state.ui_language = Lang_ko) goal.pg_criterion_review in
-  let timeline = Planning_detail.timeline ~ko ~width ~goal_id:goal.pg_id state.goal_timeline in
+  let timeline =
+    Planning_detail.timeline ~ko ~now:(Unix.gettimeofday ()) ~width
+      ~goal_id:goal.pg_id state.goal_timeline
+  in
   let candle =
     let open Candle_goal_observation in
     let coverage = field ~tone:Planning_detail.Quiet (text "후보 범위" "Candidate coverage")

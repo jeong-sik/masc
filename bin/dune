@@ -1457,7 +1457,9 @@
  (name masc_tui_planning_detail)
  (wrapped false)
  (modules masc_tui_planning_detail)
- (libraries masc masc.masc_goal masc_tui_message_layout masc_tui_fetched masc_tui_ansi masc_tui_text_block yojson))
+ ; masc.masc_types for the timestamp parser and masc_tui_value for the
+ ; notation, so a timeline stamp is a moment turned into text in one place.
+ (libraries masc masc.masc_goal masc.masc_types masc_tui_message_layout masc_tui_fetched masc_tui_ansi masc_tui_text_block masc_tui_value yojson))
 
 (library
  (name masc_tui_planning_selection)

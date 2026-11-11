@@ -14,11 +14,29 @@ val pid : t -> int
     with one the kernel gave for the same moment, such as the holder of a lock.
     It signals nothing, and it outlives the process it named. *)
 
+(** {1 Byte locks}
+
+    A byte lock is the write lock of exactly one byte that a process above
+    pid 1 holds on a file. The record is the lock: it ends with its holder,
+    and the caller says what a position means. The kernel reports what would
+    block the caller, so a lock of the calling process is never seen. *)
+
 type held_byte = { holder : int; byte : int }
 val held_byte : Unix.file_descr -> (held_byte option, error) result
-(** F_GETLK over the whole file: the first lock another process holds on it,
-    when that lock is a write lock of exactly one byte. [Ok None] when no other
-    process holds a lock; [Error Unavailable] when the probe fails or the lock
-    has another shape. The kernel reports what would block the caller, so a
-    lock of the calling process is not seen. The record is the lock: it ends
-    with its holder, and the caller says what a position means. *)
+(** F_GETLK over the whole file: the lock of another process that the kernel
+    names, when it is a byte lock. [Ok None] when the kernel names none, or
+    names one of another shape (a read lock, a longer range, a lock without
+    a process). [Error Unavailable] when the kernel could not be asked.
+
+    When several processes hold locks on the file the kernel names one of
+    them, and which one is not said, so a byte lock can stay unseen behind
+    another lock. A caller that knows the byte it asks about uses
+    {!byte_holder}. *)
+
+val byte_holder : Unix.file_descr -> byte:int -> (int option, error) result
+(** F_GETLK over [byte] alone: the other process that holds the byte lock at
+    [byte]. A write lock has one holder, so what other processes hold on
+    other bytes changes nothing in the answer. [Ok None] when no other
+    process holds a byte lock there, which includes a lock of another shape
+    over the byte. [Error Unavailable] when the kernel could not be asked,
+    as for a negative [byte]. *)

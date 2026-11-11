@@ -122,20 +122,24 @@ CAMLprim value masc_owner_identity_close(value raw) {
    the kernel is the record, so the answer never outlives the holder.
    Outcome 0: such a lock. 1: no other process holds a lock. 4: the probe
    failed, or the lock has another shape. */
-CAMLprim value masc_owner_identity_held_byte(value file) {
-  CAMLparam1(file); CAMLlocal1(result);
+CAMLprim value masc_owner_identity_held_byte(value file, value start, value length) {
+  CAMLparam3(file, start, length); CAMLlocal1(result);
   int fd = Int_val(file), outcome = 4;
   intnat holder = 0, byte = 0;
   struct flock lock;
   memset(&lock, 0, sizeof(lock));
   lock.l_type = F_WRLCK; lock.l_whence = SEEK_SET;
+  lock.l_start = Long_val(start); lock.l_len = Long_val(length);
   caml_enter_blocking_section();
   int rc = fcntl(fd, F_GETLK, &lock);
   caml_leave_blocking_section();
   if (rc == 0) {
-    if (lock.l_type == F_UNLCK) outcome = 1;
-    else if (lock.l_type == F_WRLCK && lock.l_whence == SEEK_SET
-             && lock.l_len == 1 && lock.l_start >= 0 && lock.l_pid > 1) {
+    /* 1: nothing blocks the range, or what blocks it is not the one-byte
+       write lock of a process (a read lock, a longer range, or a lock the
+       kernel names no process for). */
+    outcome = 1;
+    if (lock.l_type == F_WRLCK && lock.l_whence == SEEK_SET
+        && lock.l_len == 1 && lock.l_start >= 0 && lock.l_pid > 1) {
       outcome = 0; holder = lock.l_pid; byte = lock.l_start;
     }
   }

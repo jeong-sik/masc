@@ -172,10 +172,14 @@ related: ["0512", "0493", "0350"]
 
 ### D7. 응답이 생산자 수명을 가진다
 
-- `Server_sse_response.serve ~sw t produce` 를 더한다. 생산자를 `await_closed t` 와 겨루게 하고, 어느 쪽이 먼저 끝나든 응답을 닫는다.
+- `Server_sse_response.serve ~sw ?release t produce` 를 더한다. 생산자를 `await_closed t` 와 겨루게 한다.
+  - 응답이 먼저 닫히면 생산자를 취소한다. HTTP/2 는 상대의 reset, 정체, 연결 종료가 응답을 닫는다. HTTP/1.1 은 응답 밑의 끝을 알리지 않아서, 생산자가 다음 `send` 에서 안다(§7.7).
+  - 생산자가 돌아오면 응답을 완결로 닫는다.
+  - 생산자가 예외로 끝나면 닫지 않고 끊는다. 라우트 handler 가 응답 도중 실패했을 때와 같은 길(`Http_reqd.report_exn`)이다. HTTP/2 스트림은 RST_STREAM 을 받고 HTTP/1.1 은 본문을 멈추고 연결을 닫는다. 예외는 거기서 error 로 한 번 남고, 호출자의 switch 는 실패하지 않는다.
+  - `release` 는 생산자가 쥔 것(구독, 세션)을 놓는 정리다. 생산자가 끝나고 응답이 닫힌 뒤 한 번 부른다.
 - 생산자는 호출자의 switch 에 fork 하고, 그 fiber 안에 응답마다 자식 switch 를 연다. pump 가 이렇게 돈다(`server_mcp_transport_http_conn.ml` 313~331줄). 스트림 switch 로 옮기지 않으므로 생산자가 스트림 switch 를 붙잡는 순환 대기가 없다.
-- 호출자의 switch 에는 hook 을 걸지 않는다. 그 switch 는 서버 수명이다(`server_routes_http.ml` 9·42줄). eio 는 `on_release` hook 을 switch 가 끝날 때까지 쥔다(eio switch.ml 101~111줄). 응답마다 걸면 서버가 끝날 때까지 쌓인다.
-- fork 하기 전에 `Switch.get_error` 를 본다. 이미 끝나는 중이면 응답만 닫는다. 응답을 닫는 cleanup 은 자식 switch 의 `on_release` 에 건다.
+- 호출자의 switch 에는 hook 을 걸지 않는다. 그 switch 는 서버 수명이다. 라우터의 switch(`server_routes_http.ml` 9·42줄)이거나, 문서 초안 라우트처럼 서버 state 의 switch 다. eio 는 `on_release` hook 을 switch 가 끝날 때까지 쥔다(eio switch.ml 101~111줄). 응답마다 걸면 서버가 끝날 때까지 쌓인다.
+- fork 하기 전에 `Switch.get_error` 를 본다. 이미 끝나는 중이면 생산자를 돌리지 않고, 응답을 닫고 `release` 를 부른다. 그 밖에는 응답을 닫고 `release` 를 부르는 cleanup 을 자식 switch 의 `on_release` 에 건다.
 - 쓰는 곳은 셋이다: 로그(`server_routes_http_routes_log_stream.ml`), 문서 초안(`server_routes_http_routes_artifact_draft_live.ml`), 실행 출력(`server_routes_http_routes_dashboard.ml` `handle_execute_output_stream`).
 
 ### D8. TLS 쓰기 조각과 암호 순서
@@ -250,7 +254,9 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 릴리스를 기
 - 라우트가 스트리밍 응답 도중 예외를 내면, HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받고 HTTP/1.1 연결은 닫힌다. chunked 본문은 마지막 chunk 가 빠진다. masc 의 HTTP/1.1 SSE 는 연결 종료로 끝을 알리므로, 클라이언트에게는 끝난 스트림처럼 보인다. 전에는 스스로 닫지 않는 라우트의 응답이 열린 채 남았다. 라우트 예외는 error 로 한 번 남는다(늦은 응답 모양은 지금처럼 warn). 응답 전 예외는 전에는 500 본문에만 있었다.
 - HTTP/1.1 클라이언트가 요청 본문 도중 떠나면 라우트는 받은 데까지의 본문으로 돌지 않는다. 응답 전이면 httpun 이 400 으로 답한다. 응답이 시작됐으면 그 응답이 끊긴다. 전에는 잘린 본문이 온전한 본문처럼 라우트에 넘어갔다. 읽기가 EOF·reset 이 아닌 오류로 끝나면 gluten 이 보고하고 500 이 된다(gluten_eio.ml 149줄).
 - GitHub 로그인 스트림과 계정 로그인 스트림이 예외로 끝나면 HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받는다. 전에는 응답을 닫은 뒤 예외를 냈다. 그래서 쓴 바이트가 다 나간 스트림은 끝난 스트림처럼 보였다.
-- 필터를 건 로그 스트림도 30초마다 keepalive 한 줄을 받는다. 전에는 질의에 안 맞는 로그가 30초 안쪽 간격으로 이어지면 keepalive 가 나가지 않았다. 떠난 클라이언트의 로그 스트림은 다음 keepalive 때 끝난다.
+- 필터를 건 로그 스트림도 30초마다 keepalive 한 줄을 받는다. 전에는 질의에 안 맞는 로그가 30초 안쪽 간격으로 이어지면 keepalive 가 나가지 않았다. 떠난 클라이언트의 로그 스트림은 HTTP/2 면 스트림이 끝날 때, HTTP/1.1 이면 다음 keepalive 때 끝난다.
+- 로그·문서 초안·실행 출력 스트림은 HTTP/2 클라이언트가 스트림을 reset 하거나 연결을 끊으면 바로 끝난다. 구독과 편집 세션도 그때 놓는다. 전에는 다음 keepalive(30초, 실행 출력은 15초)를 쓸 때 알았다. HTTP/1.1 은 지금처럼 다음 쓰기 때 안다.
+- 이 세 스트림의 생산자가 예외로 끝나면 HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받고 HTTP/1.1 연결은 닫힌다. 예외는 error 로 한 번 남는다. 전에는 warn(초안은 debug) 한 줄을 남기고 응답을 끝난 것처럼 닫았다.
 - 소켓 쓰기가 90초 동안 끝나지 않는 연결은 닫힌다. 먼저 shutdown 이 FIN 을 보낸다. 연결을 놓으며 fd 를 닫을 때(`server_bootstrap_http.ml` 122~133줄) `SO_LINGER 0` 이라 RST 가 간다.
 - TLS 연결은 handshake 가 30초 안에 끝나지 않으면 닫힌다. 평문 연결은 30초 안에 첫 바이트를 보내지 않으면 닫힌다. TLS handshake 뒤의 첫 읽기에는 기한이 없다(§7.4).
 - 대시보드 asset 응답은 원장을 쓰지 않는다. 압축은 asset 판마다 한 번 한다.

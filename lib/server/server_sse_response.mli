@@ -33,8 +33,8 @@ type outcome =
       answering its flush (httpun reqd.ml [report_error], gluten-eio
       [writev]). An HTTP/2 frame that stalls is logged by the stream's flush
       bound, which resets the stream: a [send] on one of that stream's
-      fibers is cancelled with it, and a [send] from any other fiber ends
-      [Closed]. *)
+      fibers, or in a producer that {!serve} runs, is cancelled with it, and
+      a [send] from any other fiber ends [Closed]. *)
 
 val respond :
   clock:_ Eio.Time.clock ->
@@ -87,4 +87,36 @@ val await_closed : t -> unit
     {!Http_reqd.Body_writer.stream_end}).
     httpun reports no such end, so on HTTP/1.1 only the first two apply. A
     fiber that waits for events elsewhere races this to stop producing for a
-    client that is gone. *)
+    client that is gone; {!serve} does so for the producer it runs. *)
+
+val serve : sw:Eio.Switch.t -> ?release:(unit -> unit) -> t -> (unit -> unit) -> unit
+(** [serve ~sw t produce] runs [produce] in a fiber of [sw] and returns once
+    that fiber waits. From then on the response owns its producer (RFC-0518
+    D7):
+
+    - [produce] is cancelled once the response is closed ({!await_closed}).
+      On HTTP/2 that is when the peer resets the stream, the stream stalls or
+      the connection ends, so a producer that waits for its next event does
+      not outlive its client. HTTP/1.1 reports no such end: there the
+      producer meets the closed response at its next {!send}.
+    - When [produce] returns, the response is closed as complete.
+    - When [produce] raises, the response is not closed but cut, as the
+      response of a request handler that failed is ({!Http_reqd.report_exn}:
+      the HTTP/2 stream is reset, the HTTP/1.1 body stops and its connection
+      closes), and the exception is logged there. [sw] does not fail. A
+      producer that raises after its response ended is logged the same way;
+      nothing is left to cut.
+    - When [sw] is cancelled while [produce] runs, [produce] is cancelled
+      and the response is closed as complete. {!close_after} leaves a
+      cancelled response open; a served one is closed, since nothing else
+      would end it.
+    - [release] runs after the producer ended and the response closed.
+      When [sw] was already ending, [produce] does not run; the response is
+      closed and [release] runs all the same. What closing or [release]
+      raises is logged at warn and the other step still runs.
+
+    [sw] is a switch of the domain that calls [serve] and lives as long as
+    the server: the router's switch or the server state's. [Eio.Fiber.fork]
+    refuses a switch of another domain, and then nothing is closed or
+    released. The producer runs under a switch of its own inside its fiber,
+    so a response that ended leaves nothing on [sw]. *)

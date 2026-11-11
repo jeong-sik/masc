@@ -695,6 +695,11 @@ let event_stamp ~now (ts : string) =
         (Instant.cell_text event_stamp_precision ~now at)
   | None -> ts
 
+let moment_text ~now (ts : string) =
+  match Masc_domain.parse_iso8601_opt ts with
+  | Some at -> Instant.detail_text Instant.To_minute ~now at
+  | None -> ts
+
 let severity_tone = function
   | "ok" -> Quiet
   | "warn" -> Waiting

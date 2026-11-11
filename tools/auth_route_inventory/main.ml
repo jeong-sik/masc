@@ -13,8 +13,9 @@ let kind_to_string = function
 ;;
 
 let target_to_string = function
-  | Http.Router.Owner _ -> "owner"
-  | Http.Router.Serving _ -> "serving"
+  (* The transport parity diff reads "plain" for every in-band route; which
+     domain runs the handler does not change what the two transports answer. *)
+  | Http.Router.Owner _ | Http.Router.Serving _ -> "plain"
   | Http.Router.Ws _ -> "ws"
 ;;
 

@@ -232,12 +232,18 @@ document.getElementById("run-turn").addEventListener("click", async () => {
     : "run (" + answer.status + "): " + text;
 });
 async function listPats() {
+  function expiryLabel(milliseconds) {
+    const date = new Date(milliseconds);
+    return Number.isNaN(date.getTime())
+      ? String(milliseconds) + " ms since epoch"
+      : date.toISOString();
+  }
   const [answer, json] = await read("%s");
   pats.textContent = answer.ok
     ? (json.pats.length === 0 ? "none"
        : json.pats.map((p) =>
            p.pat_id + " " + p.status + " " + JSON.stringify(p.scope) +
-           (p.expires_at_ms === null ? "" : " until " + new Date(p.expires_at_ms).toISOString())).join("\n"))
+           (p.expires_at_ms === null ? "" : " until " + expiryLabel(p.expires_at_ms))).join("\n"))
     : "(" + answer.status + "): " + json.error;
 }
 document.getElementById("issue-pat").addEventListener("click", async () => {

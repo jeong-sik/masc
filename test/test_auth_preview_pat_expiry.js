@@ -26,6 +26,17 @@ async function exercise(value) {
   return { requests, message: patToken.textContent };
 }
 
+async function exerciseList(rows) {
+  const start = source.indexOf('async function listPats() {');
+  const end = source.indexOf('\ndocument.getElementById("issue-pat")', start);
+  assert(start >= 0 && end > start, 'list handler must be present');
+  const pats = { textContent: 'previous list' };
+  const read = async () => [{ ok: true }, { pats: rows }];
+  const list = new Function('read', 'pats', source.slice(start, end) + '\nreturn listPats;')(read, pats);
+  await list();
+  return pats.textContent;
+}
+
 (async () => {
   for (const value of ['', '  ']) {
     const { requests } = await exercise(value);
@@ -40,5 +51,23 @@ async function exercise(value) {
   const { requests } = await exercise('1730000000000');
   assert.equal(requests.length, 1);
   assert.equal(requests[0][1].expires_at_ms, 1730000000000);
-  console.log('PAT expiry handler: 7 cases passed');
+  const normalExpiry = 1730000000000;
+  const outsideDateRange = 8640000000000001;
+  assert(Number.isSafeInteger(outsideDateRange));
+  const row = (pat_id, expires_at_ms, status = 'open') =>
+    ({ pat_id, expires_at_ms, status, scope: {} });
+  const mixed = await exerciseList([
+    row('no-expiry', null), row('normal', normalExpiry),
+    row('date-edge', 8640000000000000), row('out-of-range', outsideDateRange)
+  ]);
+  for (const id of ['no-expiry', 'normal', 'date-edge', 'out-of-range']) {
+    assert(mixed.includes(id), id + ' must remain available');
+  }
+  assert(mixed.includes(new Date(normalExpiry).toISOString()));
+  assert(mixed.includes(String(outsideDateRange)), 'retain the stored expiry when Date cannot format it');
+  const revoked = await exerciseList([
+    row('revoked-large', outsideDateRange, 'revoked'), row('still-open', normalExpiry)
+  ]);
+  assert(revoked.includes('revoked-large') && revoked.includes('still-open'));
+  console.log('PAT expiry handlers: 9 cases passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -1142,7 +1142,6 @@ let () =
     in
     { response_text = "completed"
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
-    ; checkpoint_followup = Masc.Keeper_agent_result.Keep_cadence
     ; terminal_effect_receipt = None
     ; model_used = "test-model"
     ; runtime_id = "test-runtime"
@@ -3135,7 +3134,6 @@ max-concurrent = 1
   let answered_result : Masc.Keeper_agent_run.run_result =
     { response_text = "answered on the lane's second candidate"
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
-    ; checkpoint_followup = Masc.Keeper_agent_result.Keep_cadence
     ; terminal_effect_receipt = None
     ; model_used = "test-model"
     ; runtime_id = answering_runtime

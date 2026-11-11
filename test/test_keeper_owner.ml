@@ -4921,29 +4921,8 @@ let test_owner_linearizes_autonomous_and_chat_children () =
   Eio.Fiber.fork ~sw (fun () ->
     let result =
       Owner.run_autonomous_if_idle owner (fun () ->
-        check bool "empty chat queue does not checkpoint autonomous work" false
-          (owner_ok (Owner.autonomous_chat_handoff_ready owner));
         Eio.Promise.resolve resolve_autonomous_started ();
         Eio.Promise.await release_autonomous;
-        let handoff () = Owner.autonomous_chat_handoff_ready owner
-          |> Result.map_error (fun error -> Agent_core.Error.Internal (Owner.error_to_string error)) in
-        (match Keeper_agent_run.For_testing.tool_boundary_state
-           ~repetition_execution:None ~chat_handoff:handoff
-           Keeper_tools_agent_core.Terminal_effect_open with
-         | Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting) -> ()
-         | Ok (Runtime_agent.Continue | Runtime_agent.Yield Runtime_agent.Terminal_tool_completed) ->
-           fail "ready chat did not checkpoint the autonomous tool boundary"
-         | Error error -> fail (Agent_core.Error.to_string error));
-        (* A stale callback cannot use a different child's slot. *)
-        Keeper_turn_preview_owner.with_owner
-          ~interrupt_token:(Keeper_interrupt_token.fresh ())
-          ~observation:(Keeper_turn_preview_owner.create_turn_observation ())
-          (fun () -> check bool "another child cannot request a handoff" false
-             (owner_ok (Owner.autonomous_chat_handoff_ready owner)));
-        let queued = Option.get (owner_ok (Owner.exact_operation owner
-          (operation_id "kmsg-single-turn-owner"))) in
-        check bool "handoff decision leaves chat queued until the child settles" true
-          (queued.state = Chat_operation.Queued);
         42)
     in
     Eio.Stream.add autonomous_result result);
@@ -5021,10 +5000,7 @@ let test_unready_chat_queue_does_not_block_autonomous () =
           ~operation_id
           ~source:operation_source
           ~input:(operation_input "remain queued")));
-  (match Owner.run_autonomous_if_idle owner (fun () ->
-     check bool "an unready runner does not checkpoint autonomous work" false
-       (owner_ok (Owner.autonomous_chat_handoff_ready owner));
-     7) with
+  (match Owner.run_autonomous_if_idle owner (fun () -> 7) with
    | Ok (`Ran value) -> check int "autonomous callback ran" 7 value
    | Ok `Interrupted -> fail "nothing interrupted the autonomous callback"
    | Ok (`Busy block) ->

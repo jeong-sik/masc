@@ -733,20 +733,27 @@ val config_pane_title_head :
     off it. The reading is cut with a mark; the name is drawn whole or not at
     all, and when it does not fit the head is [""]. *)
 
+val here_path : Masc_tui_types.state -> path:string list -> string
+(** The path half of {!here_row}: the top-row screen the current one belongs
+    to, then each step of [path], none of them folded. For a row that lays out
+    what follows the path itself. *)
+
 val config_pane_title :
   cols:int ->
-  name:string ->
+  ?path:string list ->
   ?reading:string ->
   ?note:string ->
   Masc_tui_types.state ->
   string
-(** The whole title row a Config pane draws: its name, the strip, and the badge,
-    with the file it is reading between them where the pane has one. [reading] is whatever the pane adds beside its name -- a count, a
+(** The whole title row a Config pane draws: where it is, the strip, and the
+    badge, with the file it is reading between them where the pane has one.
+    The strip marks the pane, so [path] is empty for a pane and names only the
+    steps taken past one ({!here_path}). [reading] is whatever the pane adds beside its name -- a count, a
     warning -- and is the part that gives way. Ten panes spelled this row and
     nine of them spelled it identically, which is also why none could tell the
     strip to leave room for the badge. When those optional names and shortcuts
-    cannot leave room for the active pane, the existing localized pane name
-    precedes them and the connection observation. *)
+    cannot leave room for the active pane, the path names that pane in the
+    strip's place, ahead of the connection observation. *)
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list

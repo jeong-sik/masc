@@ -2149,15 +2149,19 @@ let here_screen_name (state : state) =
       Masc_tui_types.surface_ring_display_label ~lang:state.ui_language surface name
   | None -> ""
 
-let here_row ~cols (state : state) ~path ~readings ~position =
-  let screen = here_screen_name state in
+(* The path alone, every step drawn whole: for a row that lays out what
+   follows the path itself. *)
+let here_path (state : state) ~path =
   let step text = Ansi.dim ^ here_step_separator ^ Ansi.reset ^ text in
+  screen_title (" " ^ here_screen_name state)
+  ^ String.concat "" (List.map step path)
+
+let here_row ~cols (state : state) ~path ~readings ~position =
   let lead, id =
     match List.rev path with
-    | [] -> screen_title (" " ^ screen), ""
+    | [] -> here_path state ~path:[], ""
     | last :: before ->
-        ( screen_title (" " ^ screen)
-          ^ String.concat "" (List.rev_map step before)
+        ( here_path state ~path:(List.rev before)
           ^ Ansi.dim ^ here_step_separator ^ Ansi.reset,
           last )
   in
@@ -4179,7 +4183,8 @@ let config_pane_title_head ~room ~name ~reading =
    none of them could tell the strip to leave room for it: at a hundred
    columns the strip took the row and the frame cut the badge, the clock and
    half of "(load failed)" with it. Built once, the row knows both halves. *)
-let config_pane_title ~cols ~name ?(reading = "") ?(note = "") (state : state) =
+let config_pane_title ~cols ?(path = []) ?(reading = "") ?(note = "") (state : state) =
+  let name = here_path state ~path in
   let keys = config_pane_keys state in
   let piece text = if text = "" then "" else "  " ^ text in
   let cells text =
@@ -4208,11 +4213,17 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") (state : state) =
      cannot say it was cut that far; it has already spent its marks. *)
   let strip_floor = tab_strip_min_width (config_pane_tabs state) in
   if cells keys + strip_floor + cells tail > framed_inner_width cols then
+    (* The strip is what marks the pane the reader is on. Without it the path
+       says so, unless the caller's path already goes further than the pane. *)
     let active_name =
-      config_pane_tabs state
-      |> List.find_map (fun (label, active, _) -> if active then Some label else None)
-      |> Option.value ~default:name
-      |> fun label -> screen_title (" " ^ label)
+      match path with
+      | _ :: _ -> name
+      | [] ->
+          here_path state
+            ~path:
+              (config_pane_tabs state
+               |> List.filter_map (fun (label, active, _) ->
+                      if active then Some label else None))
     in
     let badge = surface_connection_badge state
         ~width:(max 0 (framed_inner_width cols - cells active_name - cells "  ")) in

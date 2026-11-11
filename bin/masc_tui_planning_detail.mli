@@ -144,7 +144,8 @@ val moment_text : now:float -> string -> string
     the year too in another one, all in the operator's zone
     ({!Masc_tui_value.Instant.detail_text}). The Goal screens printed the wire
     text itself, so "Created" read [2026-11-11T10:39:49Z] -- UTC, nine hours
-    off the clock in the corner, with only a trailing Z to say so. Text that
+    off every moment the other screens draw, with only a trailing Z to say
+    so. Text that
     does not parse is returned as it arrived. *)
 
 val timeline_unavailability_detail : Tui_decode.goal_timeline_unavailability -> string

@@ -1,6 +1,7 @@
 module Types = Masc_domain
 
 module Lib = Masc
+module Workspace = Lib.Workspace
 
 open Alcotest
 
@@ -1146,7 +1147,7 @@ let test_current_observation_reads_commits_inside_actor_ttls () =
     with_test_env (fun ~clock ~sw ->
       let cache_clock = Eio_mock.Clock.make () in
       Eio_mock.Clock.set_time cache_clock (Eio.Time.now clock);
-      Time_compat.set_clock cache_clock;
+      Time_compat.set_clock (cache_clock :> float Eio.Time.clock_ty Eio.Resource.t);
       Fun.protect ~finally:(fun () -> Time_compat.set_clock clock) (fun () ->
       let config = Workspace.default_config dir in
       ignore (Workspace.init config ~agent_name:None);

@@ -128,7 +128,13 @@ val record_attempt : keeper:string -> finished_at:float -> attempt -> t -> t
     [finished_at] for a [Reclaimed] attempt and keeps its earlier value
     otherwise. *)
 
-val envelope_field : string
-(** The dashboard tools envelope field that carries this value. *)
+(** What in an attempt asks for a look. *)
+type concern =
+  | Attempt_failed of string  (** The step's reason. *)
+  | Entries_left of int
+  (** The payload ran to its end and could not remove this many of the
+      entries it judged. *)
 
-val to_json : t -> Yojson.Safe.t
+val concern : attempt -> concern option
+(** [None] for a reclaim that left nothing behind, a deferral and a guest
+    that is not running: those are every pass's ordinary cases. *)

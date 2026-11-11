@@ -1411,6 +1411,7 @@ async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
   const requestGeneration = executionSnapshotRequestGeneration()
+  const rootRevision = shellRootCompletionRevision
   const requestEpoch = executionPublicationEpoch
   const requestPublicationGeneration = executionPublicationGenerationWatermark
   const requestCandleSequence = candleObservationSequenceWatermark
@@ -1434,7 +1435,7 @@ async function doFetchExecution(): Promise<void> {
       executionReadRecovery.waiting(() => { void executionScheduler.requestNow() })
       throw new ExecutionRefreshUnavailable('Execution projection is initializing')
     }
-    if (!hydrateExecutionSnapshot(data, { requestGeneration })) {
+    if (!hydrateExecutionSnapshot(data, { requestGeneration, rootRevision })) {
       throw new ExecutionRefreshUnavailable('Execution response was superseded by a newer observation')
     }
   } catch (err) {

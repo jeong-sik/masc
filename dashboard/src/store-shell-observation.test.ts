@@ -172,6 +172,41 @@ describe('App-owned Shell observation', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps accepted namespace HTTP status when an older independent execution HTTP completes later', async () => {
+    const older = delayed(), namespace = delayed()
+    const fetch = vi.fn((path: string, _init?: RequestInit) =>
+      path === '/api/v1/dashboard/project-snapshot' ? namespace.promise : older.promise)
+    vi.stubGlobal('fetch', fetch)
+    const { store } = await surface()
+    stop?.(); stop = undefined
+    store.hydrateExecutionSnapshot(execution())
+    const owner = store.executionWorkspaceAuthority.peek()
+    const pending = store.refreshExecution({ immediate: true })
+    await flush()
+    namespaceActions = await import('./namespace-truth-actions')
+    const namespaceRead = namespaceActions.refreshNamespaceTruth({ force: true })
+    await flush()
+    expect(fetch.mock.calls.map(([path]) => path)).toEqual([
+      '/api/v1/dashboard/execution',
+      '/api/v1/dashboard/project-snapshot',
+    ])
+    const current = { ...shell('accepted-namespace'), status: {
+      project: 'fixture-project', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:01Z',
+    }, counts: { agents: 5, tasks: 9, keepers: 7 }, configured_keepers: 13 }
+    namespace.resolve(json({ root: current }))
+    await namespaceRead
+    older.resolve(json({ ...execution(2), status: {
+      project: 'older-execution', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:00Z',
+    } }))
+    await pending
+    expect(store.serverStatus.value?.project).toBe('fixture-project')
+    expect(store.serverStatus.value?.generated_at).toBe('2026-11-10T00:00:01Z')
+    expect(store.tasks.peek().find(task => task.id === 'task-bootstrap-observation')?.title).toBe('execution-body-2')
+    expect(store.executionWorkspaceAuthority.peek()).toBe(owner)
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
   it('treats an accepted bootstrap namespace root as a completion before an older Shell read returns', async () => {
     const older = delayed(), bootstrap = delayed()
     const fetch = vi.fn((path: string, _init?: RequestInit) => path === '/api/v1/dashboard/bootstrap' ? bootstrap.promise : older.promise)

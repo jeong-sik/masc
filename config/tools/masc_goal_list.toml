@@ -2,9 +2,9 @@ name = "masc_goal_list"
 description = """
 List shared planning goals, optionally filtered by explicit lifecycle phase. \
 A row carries id, criterion_revision, title, priority, phase, created_at and \
-updated_at. detailed=true lists every Goal's whole row, and goal_id reads one \
-Goal's whole row: metric, target_value, due_date, last_review_note, and the \
-verification, criterion_review and measurement joins."""
+updated_at. A whole row adds the other Goal fields (metric, target_value, \
+due_date, review note) and the verification, criterion_review and measurement \
+joins: detailed=true lists whole rows, and goal_id reads one."""
 additional_properties = false
 
 # The enum mirrors Goal_phase.all (issue #8392: hand-rolled enums drop

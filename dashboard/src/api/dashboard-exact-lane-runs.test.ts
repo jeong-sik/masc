@@ -32,6 +32,15 @@ function boardJudgment(source: Record<string, unknown>, slotId: string) {
   }
 }
 
+it('keeps original run payloads readable when passive slot metadata is present', () => {
+  const run = parseExactLaneRunResponse(detailFixture({
+    slot_observations: { state: 'unavailable', detail: 'passive metadata unreadable' },
+  }))
+  expect(run.runId).toBe('payload-run')
+  expect(run.status).toBe('succeeded')
+  expect(run.output).toBeNull()
+})
+
 describe('fetchExactLaneRuns', () => {
   it('requests native filtering on both the initial and cursor page', async () => {
     const requests: URL[] = []

@@ -303,7 +303,7 @@ function parseRun(
       : status === 'failed'
         ? [...base, ...completion, 'code', 'detail']
         : [...base, ...completion]
-  exactFields(raw, required, [], context)
+  exactFields(raw, required, ['slot_observations'], context)
   const persistenceState = persistenceFailure
     ? string(raw.persistence_state, `${context}.persistence_state`)
     : undefined

@@ -83,6 +83,14 @@ let refusal_detail = function
 let usage (value : Exact.usage) : Runs.usage =
   {input_tokens=value.input_tokens;output_tokens=value.output_tokens;
    cache_creation_input_tokens=0;cache_read_input_tokens=0;cost_usd=None}
+(* The Candle worker's host_request projection, from this original snapshot.
+   This host-owned lookup never changes the worker request or dispatches. *)
+let exact_request intent =
+  let snapshot=Intent.to_worker_request intent in
+  Exact.request_of_json (`Assoc ["kind",`String "exact_output";
+    "request_id",`String (Intent.request_id intent);"output",`String (A.stage (Intent.request intent));
+    "messages",`List [`Assoc ["role",`String "user";"text",Yojson.Safe.Util.member "prompt" snapshot]];
+    "schema",Yojson.Safe.Util.member "schema" snapshot])
 let run_with ~registry ~base_path ~retain ~call ?(observe_slots=(fun _ -> None)) ~identity request =
   let key = prompt_key request in
   let resolution = Prompt_registry.resolve_prompt key in
@@ -212,7 +220,7 @@ let run ~config ~identity request =
         match installation with
         | Lane_addon_tool_request_owner.Manual _ -> Ok None
         | Configuration declaration_id ->
-          let* exact=Intent.exact_request intent in
+          let* exact=exact_request intent in
           Exact.read_latest_slot_observations ~store ~declaration_id
             ~schema:(A.schema (Intent.request intent)) exact) with
     | Ok observations -> observations

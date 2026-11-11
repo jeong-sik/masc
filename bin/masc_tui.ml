@@ -7596,6 +7596,35 @@ let open_lane_run_detail state ~mailbox ~(lane : Lane_run_identity.t) ~run_id =
   state.lane_run_detail_content_height <- 0;
   launch_lane_run_detail_load state ~mailbox ~run_id
 
+(* The run under the list cursor. Enter opens it from the list, and [ and ]
+   reopen through it after moving the cursor under an open detail, so a step
+   reads everything an open reads. *)
+let open_selected_lane_run state ~mailbox ~(lane : Lane_run_identity.t) =
+  match
+    Option.bind state.lane_runs (fun runs ->
+      List.nth_opt runs state.lane_runs_cursor)
+  with
+  | Some (run : Tui_decode.lane_run_summary) ->
+      open_lane_run_detail state ~mailbox ~lane ~run_id:run.lrs_run_id
+  | None -> ()
+
+(* Back from a run's detail to the list it was opened from. [ and ] move the
+   list cursor while the detail covers the list, so the window is brought to
+   the cursor here; without it the list came back showing the rows around the
+   run that was opened first, with no selected row on screen. *)
+let close_lane_run_detail state ~(lane : Lane_run_identity.t) =
+  state.lanes_mode <- Lanes_run_list lane;
+  state.lane_run_detail <- None;
+  state.lane_run_detail_error <- None;
+  state.lane_run_detail_scroll <- 0;
+  match scrolled_surface state state.view with
+  | None -> ()
+  | Some scrolled ->
+      let height = surface_body_height ~rows:(surface_rows state) scrolled in
+      state.lane_runs_scroll <-
+        Masc_tui_scroll.ensure_visible ~cursor:state.lane_runs_cursor ~height
+          state.lane_runs_scroll
+
 let launch_measurement_artifact_load state ~mailbox ~sha256 =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
@@ -38627,7 +38656,26 @@ Use relative paths for resources already held in the package. -->
                  state.lanes_exact_output <- Some (row.Masc.Tui_decode_lane_inventory.id, name)
                | None -> ()))
 
-       | Some "]" when state.view = Lanes ->
+       (* The run before or after the open one, with the detail left open:
+          what [ and ] mean on every other detail (RFC tui-one-screen-grammar,
+          section 3.1). On the run list they do nothing -- ] used to read the
+          older page there, and that is > now. *)
+       | Some (("[" | "]") as bracket) when state.view = Lanes ->
+           (match state.lanes_mode with
+            | Lanes_run_detail (lane, _) ->
+              step_detail_cursor
+                ~count:(List.length (Option.value state.lane_runs ~default:[]))
+                ~cursor:state.lane_runs_cursor
+                ~delta:(if bracket = "]" then 1 else -1)
+                ~set_cursor:(fun n -> state.lane_runs_cursor <- n)
+                ~reopen:(fun () ->
+                  open_selected_lane_run state ~mailbox:async_messages ~lane)
+            | Lanes_overview | Lanes_run_list _ | Lanes_measurement_detail _
+            | Lanes_inventory_detail _ -> ())
+       (* The next page the server holds, as > is on Schedules and
+          Verification. The page is appended, so there is no < to go back
+          to: the rows already read stay above. *)
+       | Some ">" when state.view = Lanes ->
            (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
             | Lanes_run_list lane, Some before, false ->
               launch_lane_runs_load ~before state ~mailbox:async_messages ~lane
@@ -40944,11 +40992,7 @@ Use relative paths for resources already held in the package. -->
                      state.measurement_report <- None;
                      state.lane_run_detail_error <- None;
                      state.lane_run_detail_scroll <- 0
-                 | Lanes_run_detail (lane, _) ->
-                     state.lanes_mode <- Lanes_run_list lane;
-                     state.lane_run_detail <- None;
-                     state.lane_run_detail_error <- None;
-                     state.lane_run_detail_scroll <- 0
+                 | Lanes_run_detail (lane, _) -> close_lane_run_detail state ~lane
                  | Lanes_run_list _ ->
                      state.lanes_mode <- Lanes_overview;
                      state.lane_runs <- None;
@@ -41127,11 +41171,7 @@ Use relative paths for resources already held in the package. -->
                      state.measurement_report <- None;
                      state.lane_run_detail_error <- None;
                      state.lane_run_detail_scroll <- 0
-                 | Lanes_run_detail (lane, _) ->
-                     state.lanes_mode <- Lanes_run_list lane;
-                     state.lane_run_detail <- None;
-                     state.lane_run_detail_error <- None;
-                     state.lane_run_detail_scroll <- 0
+                 | Lanes_run_detail (lane, _) -> close_lane_run_detail state ~lane
                  | Lanes_run_list _ ->
                      state.lanes_mode <- Lanes_overview;
                      state.lane_runs <- None;
@@ -41942,17 +41982,7 @@ Use relative paths for resources already held in the package. -->
             | Lanes ->
                 (match state.lanes_mode with
                  | Lanes_run_list lane ->
-                     (match state.lane_runs with
-                      | Some runs ->
-                          (match
-                             List.nth_opt runs state.lane_runs_cursor
-                           with
-                           | Some (run : Tui_decode.lane_run_summary) ->
-                               open_lane_run_detail state
-                                 ~mailbox:async_messages ~lane
-                                 ~run_id:run.lrs_run_id
-                           | None -> ())
-                      | None -> ())
+                     open_selected_lane_run state ~mailbox:async_messages ~lane
                  | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> ()
                  | Lanes_overview ->
                      (match state.slot_editor, state.runtime_lane_pick with

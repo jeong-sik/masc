@@ -781,7 +781,7 @@ let for_surface = function
       ; b Act "Esc" "back"
       ]
   | Lanes ->
-      [ b Navigate "j/k" "move" ~help:"move the lane cursor"
+      [ b ~ko:"선택" Navigate "j/k" "move" ~help:"move the lane cursor"
       (* One destination, two keys. [o] came from #35915 and [A] from #35761,
          and each arrived with its own binding and its own wording -- the
          footer then spent two of its items saying "Lane Add-ons" and
@@ -789,17 +789,17 @@ let for_surface = function
          dispatch was one arm the whole time ([Some "o" | Some "O" | Some "A"]
          on Lanes), so the table says so too. Both keys stay: a PTY walk
          presses [A] and the guide's first line names it. *)
-      ; b Navigate "o / A" "Plugins"
+      ; b ~ko:"플러그인" Navigate "o / A" "Plugins"
           ~help:"inspect Lane Add-on declarations, instances and observations"
-      ; b Navigate "d" "reading" ~help:"read the selected Lane's complete configuration and observation"
-      ; b Navigate "i" "read issues" ~help:"read inventory problems without hiding the Lane list"
-      ; b Act "Right / Enter" "open"
+      ; b ~ko:"전체 읽기" Navigate "d" "reading" ~help:"read the selected Lane's complete configuration and observation"
+      ; b ~ko:"문제 읽기" Navigate "i" "read issues" ~help:"read inventory problems without hiding the Lane list"
+      ; b ~ko:"열기" Act "Right / Enter" "open"
           ~help:"open exact runs, the selected Browser or machine, or a package configuration/instance"
-      ; b Act "a" "exact: add slot"
+      ; b ~ko:"exact 슬롯 추가" Act "a" "exact: add slot"
           ~help:"add a candidate to the selected exact-output lane's walk order"
-      ; b Act "Space" "activity"
+      ; b ~ko:"켜고 끄기" Act "Space" "activity"
           ~help:"open Exact or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off"
-      ; b Act "s" "exact: models"
+      ; b ~ko:"exact 모델" Act "s" "exact: models"
           ~help:"edit the model order: r replaces the selected model/effort, \
                  a adds a fallback, 1 makes it first within its HTTP/CLI group, \
                  x removes, J/K reorders, Enter/d opens the selected \
@@ -808,25 +808,25 @@ let for_surface = function
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)
-      ; b Navigate "e" "exact: config"
+      ; b ~ko:"exact 설정" Navigate "e" "exact: config"
           ~help:
             "open this lane's runtime.exact_output_lanes section in the \
              preview-checked runtime.toml editor; slots is a catalog-ref array \
              and cli_slots an official-client runtime-id array, either may be \
              left out, and an enabled lane needs one slot across the two"
-      ; b Navigate "[ / ]" "exact output"
+      ; b ~ko:"exact 출력" Navigate "[ / ]" "exact output"
           ~help:
             "on a Lane Add-on package row, choose one of its exact outputs; the \
              preview lists each with its binding: bound, unbound, off, or a \
              table the package does not declare. e then opens that output's \
              runtime.addon_exact_lanes table, or says runtime.toml has none yet"
-      ; b Navigate "p" "runtime"
+      ; b ~ko:"런타임" Navigate "p" "runtime"
           ~help:"open the Runtime surface"
-      ; b Act "Esc" "dashboard" ~help:"back to Dashboard"
-      ; b Search "/" "find"
+      ; b ~ko:"뒤로" Act "Esc" "dashboard" ~help:"back to Dashboard"
+      ; b ~ko:"찾기" Search "/" "find"
           ~help:"jump the cursor to a matching lane; the run list \
                  and a run's detail carry no searchable rows"
-      ; b Search "n / N" "next / previous match"
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match"
       ]
       @ row_list_jumps @ listing_meta
   | Clients ->
@@ -2286,35 +2286,45 @@ let footer_hints_fusion_detail =
 (* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
    masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
    name the drill-downs the same way the Fusion detail footer does. *)
-let footer_hints_lanes_run_list ~has_runs ~has_older =
-  hints_of_bindings
-    ((if has_runs then
-        [ b Navigate "j/k" "move" ~help:"move the run cursor"
-        ; b Act "Right / Enter" "prompt" ~help:"open the run's prompt and output"
-        ]
-      else [])
-     @ (if has_older then
-          [ b Act "]" "older" ~help:"load the next retained-run page from the server" ]
-        else [])
-     @ [ b Act "Left / Esc" "back" ~help:"back to the lane overview" ]
-     @ listing_meta)
-
-(* The position travels as [Masc_tui_footer.line]'s [?position], for the
-   reason spelled over [footer_hints_fusion_detail]. *)
-let footer_hints_lanes_run_detail =
-  hints_of_bindings
-    ([ b Navigate "j/k" "compare" ~help:"scroll Input and Output together"
-     ; b Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
-     ; b Act "Left / Esc" "back" ~help:"back to the run list"
+(* The run list's own keys. The footer, the [?] sheet and the key reference
+   all read this list: the sheet used to open on the Lanes overview's keys
+   here, whose Esc row said "back to Dashboard" on a screen where Esc goes
+   back to the overview, and it had no row at all for the older page. *)
+let lane_run_list_bindings ~has_runs ~has_older =
+  (if has_runs then
+     [ b ~ko:"선택" Navigate "j/k" "move" ~help:"move the run cursor"
+     ; b ~ko:"상세" Act "Right / Enter" "prompt"
+         ~help:"open the run's prompt and output"
      ]
-     @ listing_meta)
+   else [])
+  @ (if has_older then
+       [ b ~ko:"앞선 기록" Navigate ">" "older"
+           ~help:"load the next retained-run page from the server" ]
+     else [])
+  @ [ b ~ko:"뒤로" Act "Left / Esc" "back" ~help:"back to the lane overview" ]
+
+let footer_hints_lanes_run_list ~lang ~has_runs ~has_older =
+  hints_of_bindings ~lang
+    (lane_run_list_bindings ~has_runs ~has_older @ listing_meta)
 
 let preflight_detail_binding =
   b Act "d" "JEV evidence" ~help:"in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence"
 
-let footer_hints_lanes_run_detail_for ~preflight =
-  if preflight then hints_of_bindings [preflight_detail_binding] ^ "  " ^ footer_hints_lanes_run_detail
-  else footer_hints_lanes_run_detail
+let lane_run_detail_bindings =
+  [ b ~ko:"스크롤" Navigate "j/k" "compare" ~help:"scroll Input and Output together"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page" ~help:"page both evidence panes"
+  ; b ~ko:"이전 / 다음 실행" Navigate "[ / ]" "previous / next run"
+      ~help:"step to the run before or after this one in the list"
+  ; b ~ko:"뒤로" Act "Left / Esc" "back" ~help:"back to the run list"
+  ]
+
+(* The position travels as [Masc_tui_footer.line]'s [?position], for the
+   reason spelled over [footer_hints_fusion_detail]. The preflight key goes
+   first, ahead of the group order, so a narrow footer gives it up last. *)
+let footer_hints_lanes_run_detail_for ~lang ~preflight =
+  let detail = hints_of_bindings ~lang (lane_run_detail_bindings @ listing_meta) in
+  if preflight then hints_of_bindings ~lang [preflight_detail_binding] ^ "  " ^ detail
+  else detail
 
 let footer_hints_git_changes =
   hints_of_bindings
@@ -2859,7 +2869,14 @@ let located_sections ?current () =
                @ List.map
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)
-           | Lanes -> entries [preflight_detail_binding]
+           | Lanes ->
+               List.map
+                 (fun (key, help) -> (key, "in a lane's run list: " ^ help))
+                 (entries (lane_run_list_bindings ~has_runs:true ~has_older:true))
+               @ List.map
+                   (fun (key, help) -> (key, "in a run's detail: " ^ help))
+                   (entries lane_run_detail_bindings)
+               @ entries [preflight_detail_binding]
            | Planning -> entries work_task_detail_bindings
            | Tools -> entries tools_detail_bindings
            | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
@@ -3081,6 +3098,20 @@ let help_sections_for_state ~cols (state : state) =
       let context = Option.is_some state.workspace_activity_context_scroll in
       Some ((if context then "Activity context" else "Workspace Activity"),
             workspace_activity_bindings ~context)
+    else if state.view = Lanes then
+      (match state.lanes_mode with
+       | Lanes_run_list _ ->
+           Some
+             ( "Lane runs",
+               lane_run_list_bindings
+                 ~has_runs:
+                   (match state.lane_runs with
+                    | Some (_ :: _) -> true
+                    | Some [] | None -> false)
+                 ~has_older:(Option.is_some state.lane_runs_next) )
+       | Lanes_run_detail (_, _) ->
+           Some ("Lane run", lane_run_detail_bindings @ [preflight_detail_binding])
+       | Lanes_overview | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None)
     else None
   in
   match active with

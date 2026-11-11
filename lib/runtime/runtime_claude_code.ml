@@ -1384,7 +1384,8 @@ let assistant_scope ~stage fields =
    The text of an API diagnostic is not a model response. The terminal result
    classifies the failure; the diagnostic's [error] member adds the cause the
    client named, which the result frame does not repeat. Tool effects remain
-   independent evidence. *)
+   independent evidence. An [error] that is neither a string nor null is
+   refused, as every member of this envelope with an undeclared shape is. *)
 let assistant_origin ~stage fields =
   match List.assoc_opt "is_api_error_message" fields with
   | None | Some (`Bool false) -> Ok Model_response

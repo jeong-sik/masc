@@ -1884,7 +1884,6 @@ let test_a_host_that_exits_before_the_turn_reports_the_turn_as_not_accepted () =
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run
     "runtime_muse_serve"
     [ ( "turn"

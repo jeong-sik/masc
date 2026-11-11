@@ -86,25 +86,8 @@ let claude_account ?(home="/synthetic/claude-account") () =
 let codex_account ?(home="/synthetic/codex-account") () =
   official_account ~client:Codex ~home
 
-(** A CLI starts on an account only by the access its process published
-    ({!Runtime_account_access}), once per process. A test executable that
-    starts a client calls this once, before [Alcotest.run]: it publishes the
-    single user of a fresh base path never set up for accounts, as a host
-    tool publishes it. *)
-let publish_single_user_access () =
-  let root = Filename.temp_dir "masc-test-account-access-" "" in
-  let published =
-    Eio_main.run (fun _env ->
-      Runtime_account_access.publish_host_tool
-        ~base_path:root ~config_dir:(Some (Filename.concat root "config")))
-  in
-  Unix.rmdir root;
-  match published with
-  | Ok () -> ()
-  | Error (first, _) -> failwith first
-
-(** The sealed [account] authorized for an operator call, after
-    {!publish_single_user_access}. *)
+(** The sealed [account] authorized for an operator call, by the single-user
+    access the executable published when it started ([masc_test_host_access]). *)
 let authorized_account account =
   match Runtime_account_access.authorize Runtime_account_access.Operator_call account with
   | Ok authorized -> authorized
@@ -116,15 +99,15 @@ let muse_home home =
   | Ok declared -> declared
   | Error detail -> failwith detail
 
-(** A Muse account authorized for an operator call, by the access
-    {!publish_single_user_access} published. *)
+(** A Muse account authorized for an operator call, by the single-user access
+    the executable published when it started. *)
 let authorized_muse account =
   match Runtime_account_access.authorize_muse Runtime_account_access.Operator_call account with
   | Ok authorized -> authorized
   | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
 
-(** A start of a host client, by the access {!publish_single_user_access}
-    published. *)
+(** A start of a host client, by the single-user access the executable
+    published when it started. *)
 let host_account client =
   match Runtime_account_access.authorize_host client with
   | Ok host -> host

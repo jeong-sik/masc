@@ -199,7 +199,7 @@ let a_new_logins_home_is_found_again () = fixture (fun root _ ->
   check bool "none for Antigravity" true
     (Result.is_error (Login.account_home ~runtime_root:root ~account_id:"acct-1" ~client:Login.Antigravity)))
 
-let () = Masc_test_deps.publish_single_user_access (); run "official login adapters" ["selected accounts", [
+let () = run "official login adapters" ["selected accounts", [
   test_case "native login isolation" `Quick isolated_native_login;
   test_case "a login's email reaches the provider saved from it" `Quick login_email_reaches_the_saved_provider;
   test_case "native authentication without model calls" `Quick native_authentication_observation;

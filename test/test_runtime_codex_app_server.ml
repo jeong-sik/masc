@@ -9984,7 +9984,6 @@ let test_native_action_observer_keeps_exact_provider_identity () =
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run "runtime codex app-server"
     [ ( "reasoning", [test_case "Keeper retains reasoning before native tools and answer" `Quick
             test_keeper_preserves_codex_reasoning_and_tool_order

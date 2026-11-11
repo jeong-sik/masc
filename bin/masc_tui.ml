@@ -12001,6 +12001,9 @@ let start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox text =
    keeper selected, a roster this build could not read, a keeper that is no
    longer registered. *)
 let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
+  Stdlib.prerr_endline
+    ("TRACE-ENTER entry start_keeper_message len="
+     ^ string_of_int (String.length text));
   match
     match keeper_name with
     | Some _ -> keeper_name
@@ -15449,15 +15452,18 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       | Open_artifacts | Open_music | Open_music_midi | Music_invalid_arguments | Open_score _ | Score_invalid_index
       | Open_images _ | List_images | Images_invalid_index | Unknown _ -> true
   then
-    notice ~kind:Notice_failure
-      "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
+    (Stdlib.prerr_endline "TRACE-ENTER branch=queued_edit_active";
+     notice ~kind:Notice_failure
+       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it")
   else
   match command with
   | Masc_tui_command.Say _ when recovered_paste_send_locked_for state target ->
-      notice ~kind:Notice_failure
-        "Recovered draft protected; press Ctrl-G to enable Enter"
+      (Stdlib.prerr_endline "TRACE-ENTER branch=recovered_paste_send_locked";
+       notice ~kind:Notice_failure
+         "Recovered draft protected; press Ctrl-G to enable Enter")
   | Masc_tui_command.Say _ ->
-      start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text
+      (Stdlib.prerr_endline "TRACE-ENTER branch=start_keeper_message";
+       start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text)
   | Masc_tui_command.Task_missing_title ->
       report_action state "error" "/task needs a title on the same line"
   | Masc_tui_command.View_image_missing_path ->

@@ -433,7 +433,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 |---|---|
 | `Left` | empty composer: open the Keeper list; with text: move the cursor left |
 | `Right` | roster focused: return focus to the chat composer |
-| `Up / Down` | roster focused: move; chat scrolled back: adjust by one line; while a /command is typed: pick among its completions; otherwise Up recalls the previous line you sent (a line still waiting in the queue comes back as an edit of that line) and Down steps back toward your draft |
+| `Up / Down` | roster focused: move; chat scrolled back: adjust by one line; while a /command is typed: pick among its completions; otherwise walk the history of lines you sent: Up recalls the previous one (a line still waiting in the queue comes back as an edit of that line), Down steps back toward your draft |
 | `Enter` | send from chat, or open the selected Keeper from the roster |
 | `Ctrl-J` | newline in the draft; Shift-Enter does the same where the terminal reports it |
 | `Tab / Shift-Tab` | complete the /command being typed, or its argument such as a Keeper name; the chat composer keeps these keys, so they do not switch surface here |

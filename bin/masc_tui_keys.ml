@@ -696,9 +696,9 @@ let for_surface = function
           ~help:
             "roster focused: move; chat scrolled back: adjust by one line; \
              while a /command is typed: pick among its completions; \
-             otherwise Up recalls the previous line you sent (a line still \
-             waiting in the queue comes back as an edit of that line) and \
-             Down steps back toward your draft"
+             otherwise walk the history of lines you sent: Up recalls the \
+             previous one (a line still waiting in the queue comes back as \
+             an edit of that line), Down steps back toward your draft"
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline"

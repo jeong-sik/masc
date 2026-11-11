@@ -164,6 +164,7 @@ export function OverviewRuntimeStats() {
   }
   const clients = [...accounts.values()]
   const data = state.kind === 'ready' ? state.value : null
+  const readError = state.kind === 'ready' ? state.readError : state.kind === 'error' ? state.message : null
   const ledger = data?.cost_ledger_read
   const refresh = () => {
     setGeneration(value => value + 1)
@@ -194,7 +195,7 @@ export function OverviewRuntimeStats() {
       <p class="text-xs text-text-muted">로그인 확인은 지원되는 공식 CLI 계정에만 표시하며 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.</p>
     ` : null}
     ${state.kind === 'loading' ? html`<p role="status">런타임 통계를 읽고 있습니다.</p>` : null}
-    ${state.kind === 'error' ? html`<p role="alert">통계를 읽지 못했습니다: ${state.message}</p>` : null}
+    ${readError ? html`<p role="alert">통계를 읽지 못했습니다: ${readError}</p>` : null}
     ${data ? html`
       <p class="text-sm">서버 집계 창: ${data.window_minutes == null ? '미보고' : `${number(data.window_minutes)}분`} · 응답 수신 ${state.kind === 'ready' ? state.receivedAt.toLocaleString() : ''}</p>
       <p class="text-xs text-text-muted">응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.</p>

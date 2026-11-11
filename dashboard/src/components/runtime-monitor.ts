@@ -821,7 +821,8 @@ export function RuntimeMonitor() {
   const providers = current.data?.providers ?? null
   const metrics = metricsQuery.state.kind === 'ready' ? metricsQuery.state.value : null
   const loading = current.loading || metricsQuery.state.kind === 'loading'
-  const error = current.error ?? (metricsQuery.state.kind === 'error' ? metricsQuery.state.message : null)
+  const error = current.error ?? (metricsQuery.state.kind === 'error' ? metricsQuery.state.message
+    : metricsQuery.state.kind === 'ready' ? metricsQuery.state.readError : null)
   const probe = current.data?.probe ?? null
   const probeError = current.data?.probeError ?? null
   const providerProbes = providerProbeMap(probe)

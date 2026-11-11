@@ -2361,8 +2361,10 @@ let sidebar_row_lead_cells = Message_layout.display_width sidebar_caret_lead
    has no difference to report. *)
 let list_count_text ~loaded ~holding =
   match holding with
-  | Some holding when holding > loaded -> Printf.sprintf "(%d of %d)" loaded holding
-  | Some _ | None -> Printf.sprintf "(%d)" loaded
+  | Some holding when holding > loaded ->
+      Printf.sprintf "(%s of %s)" (Masc_tui_value.Count.grouped loaded)
+        (Masc_tui_value.Count.grouped holding)
+  | Some _ | None -> Printf.sprintf "(%s)" (Masc_tui_value.Count.grouped loaded)
 
 (* [holding] is what the surface holds when that is more than this index was
    given: the Board's own header reads "(50 of 198)" one keypress away, and

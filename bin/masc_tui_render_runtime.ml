@@ -1332,16 +1332,7 @@ let usage_lines ~cols ~rows (state : state) =
         let token_value row = Option.map float_of_int row.kur_tokens in
         let cost_value row = row.kur_cost_usd in
         let valid value = Float.is_finite value && value >= 0. in
-        let grouped_digits digits =
-          let start = if String.starts_with ~prefix:"-" digits then 1 else 0 in
-          let length = String.length digits in
-          let output = Buffer.create (length + length / 3) in
-          String.iteri (fun index digit ->
-            if index > start && (length - index) mod 3 = 0 then Buffer.add_char output ',';
-            Buffer.add_char output digit) digits;
-          Buffer.contents output
-        in
-        let count value = grouped_digits (string_of_int value) in
+        let count = Masc_tui_value.Count.grouped in
         let largest value = List.fold_left
             (fun highest row ->
               if readable row then
@@ -1398,7 +1389,7 @@ let usage_lines ~cols ~rows (state : state) =
         ; " Bars: relative to largest read value per metric; not quota."
         ; " Partial rows: no bars. Missing values can understate totals."
         ; Printf.sprintf " Scale: tokens %s · cost %s"
-            (scale token_value (fun value -> grouped_digits (Printf.sprintf "%.0f" value)) token_max)
+            (scale token_value (fun value -> count (Float.to_int (Float.round value))) token_max)
             (scale cost_value (Printf.sprintf "$%.4f") cost_max)
         ; "" ]
         @ (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]

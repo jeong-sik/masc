@@ -127,7 +127,9 @@ let render_verification_list (state : state) =
         let total = snapshot.Masc.Tui_decode.vs_total in
         let window =
           if total > 0 && shown >= total then ""
-          else Printf.sprintf " (%d of %d)" shown total
+          else
+            Printf.sprintf " (%s of %s)" (Masc_tui_value.Count.grouped shown)
+              (Masc_tui_value.Count.grouped total)
         in
         Printf.sprintf "%s  %s"
           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window
@@ -205,12 +207,15 @@ let render_verification_list (state : state) =
        let offset = snapshot.Masc.Tui_decode.vs_offset in
        let place =
          match snapshot.Masc.Tui_decode.vs_view with
-         | Masc.Tui_decode.Awaiting_queue -> Printf.sprintf "awaiting %d" total
+         | Masc.Tui_decode.Awaiting_queue ->
+             Printf.sprintf "awaiting %s" (Masc_tui_value.Count.grouped total)
          | Masc.Tui_decode.Full_history ->
-             if shown = 0 then Printf.sprintf "history 0 of %d" total
+             let total = Masc_tui_value.Count.grouped total in
+             if shown = 0 then Printf.sprintf "history 0 of %s" total
              else
-               Printf.sprintf "history %d-%d of %d" (offset + 1)
-                 (offset + shown) total
+               Printf.sprintf "history %s-%s of %s"
+                 (Masc_tui_value.Count.grouped (offset + 1))
+                 (Masc_tui_value.Count.grouped (offset + shown)) total
        in
        let rows_window =
          if shown > content_height then

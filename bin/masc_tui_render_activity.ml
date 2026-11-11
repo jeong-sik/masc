@@ -259,7 +259,9 @@ let render_system_logs (state : state) =
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         activity_heading state ~cols ~on_logs:true
           ~reading:
-            (Printf.sprintf "  (%d of %d)" total_entries snapshot.sys_total
+            (Printf.sprintf "  (%s of %s)"
+               (Masc_tui_value.Count.grouped total_entries)
+               (Masc_tui_value.Count.grouped snapshot.sys_total)
              :: (match snapshot.sys_latest_seq with
                  | None -> []
                  | Some seq -> [ Printf.sprintf "  seq %d" seq ])

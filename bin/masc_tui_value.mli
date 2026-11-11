@@ -40,3 +40,14 @@ module Instant : sig
   (** The moment where one value has a line to itself. As {!cell_text}, but
       another year keeps its clock ([2025-11-10 23:58]). *)
 end
+
+(** How many of something. *)
+module Count : sig
+  val grouped : int -> string
+  (** The whole number with a comma between each three digits: [8347] reads
+      [8,347] and [774273] reads [774,273]. A number under a thousand is its
+      digits alone, and a negative keeps its sign ahead of the first group
+      ([-1,250]). Three screens each carried a copy of this, and the titles
+      that count a long list -- [(50 of 8347)] -- carried none (RFC
+      tui-one-screen-grammar, section 6.3). *)
+end

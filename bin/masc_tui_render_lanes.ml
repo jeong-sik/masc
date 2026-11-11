@@ -1004,9 +1004,12 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     let count = match state.lane_runs_total with
       | Some total ->
           Printf.sprintf
-            (if korean then "%d개 읽음 · 보관 %d개" else "%d loaded · %d retained")
-            shown total
-      | None -> Printf.sprintf (if korean then "%d개 읽음" else "%d loaded") shown in
+            (if korean then "%s개 읽음 · 보관 %s개" else "%s loaded · %s retained")
+            (Masc_tui_value.Count.grouped shown)
+            (Masc_tui_value.Count.grouped total)
+      | None ->
+          Printf.sprintf (if korean then "%s개 읽음" else "%s loaded")
+            (Masc_tui_value.Count.grouped shown) in
     let continuation =
       if state.lane_runs_loading then text " · 읽는 중" " · loading"
       else match state.lane_runs_next with

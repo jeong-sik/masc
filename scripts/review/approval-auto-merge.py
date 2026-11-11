@@ -127,7 +127,13 @@ def reservation_reads(repo, number):
     stack = current.get('stack')
     if stack is not None:
         live = read(f'repos/{repo}/stacks/{stack["number"]}')
-        return None, [pull(repo, member['number']) for member in live['pull_requests']]
+        members = {member['number'] for member in live['pull_requests']}
+        # One walk of the open list carries each member's state and
+        # reservation, so the cost does not grow with the number of layers.
+        # `disable_reservation` acts only on an open pull request, so a
+        # merged or closed layer that the list omits needs no read at all.
+        opened = pages(f'repos/{repo}/pulls?state=open&per_page=100')
+        return None, [row for row in opened if row['number'] in members]
     if (current['state'] != 'open' or current['draft'] is not False or
             current['base']['ref'] != 'main' or current['head']['ref'].startswith('release/')):
         return None, [current]

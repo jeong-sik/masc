@@ -27,3 +27,4 @@
 50756  # already published in the v0.70.0 notes (freeze exception 1); fragment dropped to avoid a double entry
 50773  # already published in the v0.70.0 notes (freeze exception 2); fragment dropped to avoid a double entry
 50782  # already published in the v0.70.0 notes (freeze exception 2, continued); fragment dropped to avoid a double entry
+51435  # CI script only: approval-auto-merge reads a stack through one open-pull list instead of one read per layer; no user-facing behavior

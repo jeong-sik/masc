@@ -40,6 +40,7 @@ class FakeGitHub:
     def __init__(self, states=None):
         self.pulls, self.reviews, self.counts = {}, {}, {}
         self.mutations = []
+        self.list_page_size = 100
         self.merge_returncode = 0
         self.hook = lambda path, count: None
         self.rules = [{'type': 'pull_request', 'parameters': {
@@ -74,10 +75,20 @@ class FakeGitHub:
         path = next(part for part in command[2:] if part.startswith(PREFIX + '/'))
         self.counts[path] = self.counts.get(path, 0) + 1
         self.hook(path, self.counts[path])
+        link = ''
         if path == PREFIX + '/rules/branches/main':
             value = self.rules
         elif path == PREFIX + '/stacks/900':
             value = self.stack
+        elif path.startswith(PREFIX + '/pulls?'):
+            query = dict(part.split('=') for part in path.split('?', 1)[1].split('&'))
+            assert query['state'] == 'open' and query['per_page'] == '100', path
+            page = int(query.get('page', '1'))
+            opened = [row for _, row in sorted(self.pulls.items()) if row['state'] == 'open']
+            value = opened[(page - 1) * self.list_page_size:page * self.list_page_size]
+            if page * self.list_page_size < len(opened):
+                link = ('\nLink: <https://api.github.com/' + PREFIX + '/pulls?state=open'
+                        f'&per_page=100&page={page + 1}>; rel="next"')
         else:
             suffix = path.removeprefix(PREFIX + '/pulls/').split('/')
             number = int(suffix[0])
@@ -87,7 +98,7 @@ class FakeGitHub:
                 assert suffix[1] == 'reviews?per_page=100', path
                 value = self.reviews[number]
         body = json.dumps(value)
-        return ('HTTP/2.0 200 OK\nContent-Type: application/json\n\n' + body
+        return ('HTTP/2.0 200 OK\nContent-Type: application/json' + link + '\n\n' + body
                 if '--include' in command else body)
 
     def run(self, command, **kwargs):
@@ -240,6 +251,40 @@ class DefaultAutoMergeReservation(unittest.TestCase):
         self.assertEqual(github.mutations, [
             ['gh', 'pr', 'merge', '101', '--repo', REPO, '--disable-auto']])
         self.assertFalse(any('--auto' in command for command in github.mutations))
+
+    def test_stack_reads_do_not_grow_with_the_number_of_layers(self):
+        reads = {}
+        for layers in (3, 12):
+            with self.subTest(layers=layers), FakeGitHub(['open'] * layers) as github:
+                self.assertIsNone(MERGE.auto_merge_default(REPO, 101 + layers - 1))
+                reads[layers] = sum(github.counts.values())
+                single = [path for path in github.counts if path.startswith(PREFIX + '/pulls/')]
+                self.assertEqual(single, [f'{PREFIX}/pulls/{100 + layers}'])
+                self.assertEqual(github.counts[PREFIX + '/pulls?state=open&per_page=100'], 1)
+        self.assertEqual(reads[3], reads[12])
+
+    def test_reservations_on_every_page_of_the_open_list_are_disabled(self):
+        with FakeGitHub(['open'] * 5) as github:
+            github.list_page_size = 2
+            for number in (102, 105):
+                github.pulls[number]['auto_merge'] = {'merge_method': 'squash'}
+            self.assertIsNone(MERGE.auto_merge_default(REPO, 103))
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '102', '--repo', REPO, '--disable-auto'],
+            ['gh', 'pr', 'merge', '105', '--repo', REPO, '--disable-auto']])
+        pages_read = [path for path in github.counts if path.startswith(PREFIX + '/pulls?')]
+        self.assertEqual(len(pages_read), 3)
+
+    def test_merged_and_closed_layers_are_never_read_or_disabled(self):
+        with FakeGitHub(['merged', 'open', 'closed', 'open']) as github:
+            for number in (102, 103, 104):
+                github.pulls[number]['auto_merge'] = {'merge_method': 'squash'}
+            self.assertIsNone(MERGE.auto_merge_default(REPO, 104))
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '102', '--repo', REPO, '--disable-auto'],
+            ['gh', 'pr', 'merge', '104', '--repo', REPO, '--disable-auto']])
+        self.assertNotIn(PREFIX + '/pulls/101', github.counts)
+        self.assertNotIn(PREFIX + '/pulls/103', github.counts)
 
     def test_excluded_prs_drop_an_existing_reservation(self):
         for excluded in ('draft', 'non-main', 'release'):

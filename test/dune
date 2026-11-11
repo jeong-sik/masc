@@ -6803,6 +6803,11 @@
  (modules test_server_keeper_build_maintenance)
  (libraries alcotest masc masc_server masc_test_deps eio_main unix))
 
+(test
+ (name test_keeper_cleanup_pass)
+ (modules test_keeper_cleanup_pass)
+ (libraries alcotest masc yojson))
+
 ; Raw config edit recovery: isolated state flow and real terminal/API interaction.
 (test
  (name test_tui_runtime_config_edit)

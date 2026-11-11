@@ -876,28 +876,102 @@ let render_lanes_overview (state : state) =
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
-(* Status colours for standalone-lane runs, keyed on the decoded variant; a label
-   the producer adds later decodes to [Lane_run_other] and reads muted until
-   it is named here. *)
-let lane_run_status_style = function
+(* How a standalone-lane run stands, as the reader sorts it before reading the
+   word: it went well, it is going, it waits, it was called off, or it broke
+   or was turned down. One mark and one colour per standing, so the status
+   column is scanned by shape and the only red in it is a run that asks to be
+   read (RFC tui-one-screen-grammar, section 7.2). A label the producer adds
+   later decodes to [Lane_run_other] and reads muted, behind the unnamed
+   mark, until it is named here. *)
+type lane_run_standing =
+  | Run_done
+  | Run_active
+  | Run_waiting
+  | Run_stopped
+  | Run_failed
+  | Run_unnamed
+
+let lane_run_standing = function
   | Tui_decode.Lane_run_succeeded
   | Tui_decode.Lane_run_approved
   | Tui_decode.Lane_run_reviewed
-  | Tui_decode.Lane_run_committed -> Theme.ok ()
+  | Tui_decode.Lane_run_committed -> Run_done
+  | Tui_decode.Lane_run_running -> Run_active
+  | Tui_decode.Lane_run_deferred -> Run_waiting
   | Tui_decode.Lane_run_cancelled
-  | Tui_decode.Lane_run_rejected
   | Tui_decode.Lane_run_superseded
-  | Tui_decode.Lane_run_deferred
-  | Tui_decode.Lane_run_review_cancelled -> Theme.warn ()
+  | Tui_decode.Lane_run_review_cancelled -> Run_stopped
   | Tui_decode.Lane_run_failed
+  | Tui_decode.Lane_run_rejected
   | Tui_decode.Lane_run_completion_persistence_failed
   | Tui_decode.Lane_run_completion_durability_unknown
   | Tui_decode.Lane_run_infrastructure_unavailable
   | Tui_decode.Lane_run_not_reviewed
   | Tui_decode.Lane_run_commit_failed
-  | Tui_decode.Lane_run_raised -> Theme.bad ()
-  | Tui_decode.Lane_run_running -> Theme.info ()
-  | Tui_decode.Lane_run_other _ -> Theme.muted ()
+  | Tui_decode.Lane_run_raised -> Run_failed
+  | Tui_decode.Lane_run_other _ -> Run_unnamed
+
+(* The two ways a run stops short, told apart because a failure asks to be
+   read and a run called off does not: a heavy cross, and a pause bar. The
+   last is a status this build has no name for. *)
+let lane_run_failed_mark = "\xe2\x9c\x95"
+let lane_run_stopped_mark = "\xe2\x80\x96"
+let lane_run_unnamed_mark = "?"
+
+let lane_run_standing_mark = function
+  | Run_done -> Masc_tui_theme.Glyph.progress_done
+  | Run_active -> Masc_tui_theme.Glyph.progress_active
+  | Run_waiting -> Masc_tui_theme.Glyph.progress_waiting
+  | Run_stopped -> lane_run_stopped_mark
+  | Run_failed -> lane_run_failed_mark
+  | Run_unnamed -> lane_run_unnamed_mark
+
+let lane_run_standing_style = function
+  | Run_done -> Theme.ok ()
+  | Run_active -> Theme.info ()
+  | Run_failed -> Theme.bad ()
+  | Run_waiting | Run_stopped | Run_unnamed -> Theme.muted ()
+
+let lane_run_status_style status =
+  lane_run_standing_style (lane_run_standing status)
+
+(* The status in the language the screen is drawn in. The wire spelling
+   ([completion_durability_unknown]) was drawn as it arrived, in a column too
+   narrow for it. A status the decoder kept as [Lane_run_other] has no word
+   here, so its own spelling is drawn behind the unnamed mark. *)
+let lane_run_status_word ~language status =
+  let word ko en =
+    match language with
+    | Lang_ko -> ko
+    | Lang_en -> en
+  in
+  match status with
+  | Tui_decode.Lane_run_running -> word "실행 중" "running"
+  | Tui_decode.Lane_run_succeeded -> word "성공" "succeeded"
+  | Tui_decode.Lane_run_cancelled -> word "취소" "cancelled"
+  | Tui_decode.Lane_run_failed -> word "실패" "failed"
+  | Tui_decode.Lane_run_completion_persistence_failed ->
+      word "결과 저장 실패" "save failed"
+  | Tui_decode.Lane_run_completion_durability_unknown ->
+      word "결과 저장 불확실" "save unknown"
+  | Tui_decode.Lane_run_approved -> word "승인" "approved"
+  | Tui_decode.Lane_run_reviewed -> word "검토 끝" "reviewed"
+  | Tui_decode.Lane_run_committed -> word "반영됨" "committed"
+  | Tui_decode.Lane_run_superseded -> word "대체됨" "superseded"
+  | Tui_decode.Lane_run_rejected -> word "반려" "rejected"
+  | Tui_decode.Lane_run_deferred -> word "보류" "deferred"
+  | Tui_decode.Lane_run_review_cancelled -> word "검토 취소" "review cancelled"
+  | Tui_decode.Lane_run_infrastructure_unavailable ->
+      word "인프라 장애" "infra down"
+  | Tui_decode.Lane_run_not_reviewed -> word "검토 못 함" "not reviewed"
+  | Tui_decode.Lane_run_commit_failed -> word "반영 실패" "commit failed"
+  | Tui_decode.Lane_run_raised -> word "예외 발생" "raised"
+  | Tui_decode.Lane_run_other wire -> Terminal_text.single_line wire
+
+let lane_run_status_text ~language status =
+  lane_run_standing_mark (lane_run_standing status)
+  ^ " "
+  ^ lane_run_status_word ~language status
 
 let observed_lane_label (target : Lane_run_identity.t) =
   Lane_run_identity.label target
@@ -948,24 +1022,39 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  let identity_heading =
+  let text ko en = ui_text state ~ko ~en in
+  let subject_kind, subject_heading =
     match lane with
-    | Lane_run_identity.Verifier -> "SUBJECT"
+    | Lane_run_identity.Verifier ->
+        Render_schedule.Run_subject_id, text "대상" "Subject"
     | Lane_run_identity.Librarian
     | Lane_run_identity.Hitl_auto_judge
     | Lane_run_identity.Board_attention
     | Lane_run_identity.Workspace_curator
-    | Lane_run_identity.Candle_appraiser -> "ACTOR"
+    | Lane_run_identity.Candle_appraiser ->
+        Render_schedule.Run_actor_name, text "요청자" "Actor"
   in
-  (* The slot takes what the drawn columns leave. *)
-  let run_layout =
-    Render_schedule.lane_run_layout
+  let run_table =
+    Render_schedule.lane_run_table
+      ~headers:
+        { Render_schedule.lhead_started = text "시작" "Started"
+        ; lhead_subject = subject_heading
+        ; lhead_status = text "상태" "Status"
+        ; lhead_elapsed = text "걸린 시간" "Elapsed"
+        ; lhead_slot = text "슬롯" "Slot"
+        }
+      ~subject:subject_kind
+      ~subjects:
+        (List.map
+           (fun run -> Terminal_text.single_line (lane_run_subject run))
+           runs)
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
+  (* One reading of the clock for the whole list, so two rows of one frame
+     cannot disagree about which day today is. *)
+  let now = Unix.gettimeofday () in
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  "
-    ^ Render_schedule.lane_run_header_row ~identity_header:identity_heading
-        ~layout:run_layout);
+    ("  " ^ Render_schedule.lane_run_header_row run_table);
   box_divider buf cols;
   (match state.lane_runs_error with
    | None -> ()
@@ -1001,26 +1090,17 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
       match Rows.at runs_window (index + scroll) with
       | None -> box_empty buf cols
       | Some (run : Tui_decode.lane_run_summary) ->
-          let elapsed =
-            match run.lrs_elapsed_s with
-            | None -> Masc_tui_theme.Glyph.no_value
-            | Some seconds -> (
-                match Message_layout.elapsed_text seconds with
-                | Some text -> text
-                | None -> Masc_tui_theme.Glyph.no_value)
-          in
           let line =
             "  "
-            ^ Render_schedule.lane_run_row ~identity_header:identity_heading
+            ^ Render_schedule.lane_run_row run_table ~now
                 ~status_style:(lane_run_status_style run.lrs_status)
-                ~layout:run_layout
-                { Render_schedule.lrow_started =
-                    lane_run_clock run.lrs_started_at
+                { Render_schedule.lrow_started = run.lrs_started_at
                 ; lrow_subject =
                     Terminal_text.single_line (lane_run_subject run)
                 ; lrow_status =
-                    Tui_decode.lane_run_status_label run.lrs_status
-                ; lrow_elapsed = elapsed
+                    lane_run_status_text ~language:state.ui_language
+                      run.lrs_status
+                ; lrow_elapsed = run.lrs_elapsed_s
                 ; lrow_slot =
                     Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value
                       run.lrs_selected_slot
@@ -1298,7 +1378,8 @@ let lane_run_gate_judgment_summary = function
           "%sJUDGMENT%s  %sADVISORY %s%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN"
           Ansi.bold Ansi.reset style label Ansi.reset )
 
-let lane_run_summary_lines ~cols (detail : Tui_decode.lane_run_detail) =
+let lane_run_summary_lines ~cols ~language ~now
+    (detail : Tui_decode.lane_run_detail) =
   let subject =
     match detail.lrd_run_kind, detail.lrd_subject_id with
     | Tui_decode.Lane_run_task_verification, Some subject ->
@@ -1344,26 +1425,13 @@ let lane_run_summary_lines ~cols (detail : Tui_decode.lane_run_detail) =
             (Terminal_text.single_line failure.lrf_detail) ) ]
   in
   let decision_style, decision = lane_run_decision_badge detail in
+  (* A run that did not end well is coloured by how it ended, the way its row
+     in the list is; one that did is coloured by what it decided. *)
   let verdict_and_status_style =
-    match detail.lrd_status with
-    | Tui_decode.Lane_run_failed
-    | Tui_decode.Lane_run_completion_persistence_failed
-    | Tui_decode.Lane_run_completion_durability_unknown
-    | Tui_decode.Lane_run_infrastructure_unavailable
-    | Tui_decode.Lane_run_not_reviewed
-    | Tui_decode.Lane_run_commit_failed
-    | Tui_decode.Lane_run_raised -> Theme.bad ()
-    | Tui_decode.Lane_run_cancelled
-    | Tui_decode.Lane_run_rejected
-    | Tui_decode.Lane_run_superseded
-    | Tui_decode.Lane_run_deferred
-    | Tui_decode.Lane_run_review_cancelled -> Theme.warn ()
-    | Tui_decode.Lane_run_succeeded
-    | Tui_decode.Lane_run_approved
-    | Tui_decode.Lane_run_reviewed
-    | Tui_decode.Lane_run_committed
-    | Tui_decode.Lane_run_running
-    | Tui_decode.Lane_run_other _ ->
+    match lane_run_standing detail.lrd_status with
+    | (Run_failed | Run_stopped | Run_waiting) as standing ->
+        lane_run_standing_style standing
+    | Run_done | Run_active | Run_unnamed ->
       (match detail.lrd_decision with
        | Tui_decode.Lane_run_not_a_decision ->
          lane_run_status_style detail.lrd_status
@@ -1398,8 +1466,7 @@ let lane_run_summary_lines ~cols (detail : Tui_decode.lane_run_detail) =
   let left_rows =
     [ ( verdict_and_status_style
       , Printf.sprintf "판정: %s  ·  실행: %s" decision
-          (Terminal_text.single_line
-             (Tui_decode.lane_run_status_label detail.lrd_status)) )
+          (lane_run_status_text ~language detail.lrd_status) )
     ; ( Ansi.reset
       , Printf.sprintf "레인: %s  ·  %s%s"
           (Lane_run_identity.to_id detail.lrd_lane)
@@ -1414,7 +1481,9 @@ let lane_run_summary_lines ~cols (detail : Tui_decode.lane_run_detail) =
     ; ( Ansi.dim
       , Printf.sprintf "호출: %s  ·  시작 %s%s"
           (Terminal_text.single_line detail.lrd_actor)
-          (lane_run_clock detail.lrd_started_at) elapsed )
+          (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
+             ~now detail.lrd_started_at)
+          elapsed )
     ]
     @ contract_rows
   in
@@ -1775,8 +1844,8 @@ let temporal_output_lines ~width (report : Temporal.t) =
     | None -> [] | Some value -> [Measurement_text (Theme.warn (), value)] in
   measurement_output_preview ~width ~output_path:report.report_path (errors @ steps)
 
-let inspection_summary_lines ~cols = function
-  | Inspection_lane detail -> lane_run_summary_lines ~cols detail
+let inspection_summary_lines ~cols ~language ~now = function
+  | Inspection_lane detail -> lane_run_summary_lines ~cols ~language ~now detail
   | Inspection_measurement (_, Measurement.Snapshot measurement) -> measurement_summary_lines measurement.report
   | Inspection_measurement (_, Measurement.Temporal report) -> temporal_summary_lines report
 
@@ -1881,7 +1950,10 @@ let render_lane_run_detail (state : state) ~run_id =
       done;
       0, None, 0
     | Some detail, (Some _ | None) ->
-      let summary = inspection_summary_lines ~cols detail in
+      let summary =
+        inspection_summary_lines ~cols ~language:state.ui_language
+          ~now:(Unix.gettimeofday ()) detail
+      in
       let compact_preflight = match detail with
         | Inspection_lane {Tui_decode.lrd_librarian_preflight=Some _;_} -> not state.lane_run_preflight_details
         | Inspection_lane { lrd_librarian_preflight = None;_} | Inspection_measurement (_, _) -> false in

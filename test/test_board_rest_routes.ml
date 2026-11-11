@@ -135,9 +135,9 @@ let test_dashboard_board_routes_registered () =
         match Http.Router.resolve router request with
         | `Matched route -> (
           match route.Http.Router.handler with
-          | Http.Router.Plain _ -> ()
-          | Http.Router.Ws _ ->
-            fail (Printf.sprintf "%s must be a Plain POST route, not Ws" path))
+          | Http.Router.Owner _ -> ()
+          | Http.Router.Serving _ | Http.Router.Ws _ ->
+            fail (Printf.sprintf "%s must be an Owner POST route" path))
         | `Method_not_allowed ->
           fail (Printf.sprintf "%s exists but rejects POST" path)
         | `Not_found ->
@@ -1502,9 +1502,9 @@ let test_dashboard_board_reaction_routes_registered () =
       (fun (meth, path) ->
          let request = Httpun.Request.create meth path in
          match Http.Router.resolve router request with
-         | `Matched { Http.Router.handler = Plain _; _ } -> ()
-         | `Matched { Http.Router.handler = Ws _; _ } ->
-           fail (Printf.sprintf "%s must be a plain HTTP route" path)
+         | `Matched { Http.Router.handler = Owner _; _ } -> ()
+         | `Matched { Http.Router.handler = Serving _ | Ws _; _ } ->
+           fail (Printf.sprintf "%s must be an Owner HTTP route" path)
          | `Method_not_allowed ->
            fail (Printf.sprintf "%s rejects its dashboard HTTP method" path)
          | `Not_found ->

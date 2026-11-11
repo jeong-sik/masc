@@ -1,0 +1,259 @@
+(* E2 of RFC http-transport-runs-on-its-own-domain: a [Serving] route answers
+   while the owner domain is stuck, and an [Owner] route waits for it.
+
+   A real httpun connection runs through [Server_http_ingress.http1_handler]
+   over a socket pair. One task on the owner's queue then computes for
+   [block_s] without yielding. With the connection on a second domain the
+   [Serving] route answers during the block; with the connection on the
+   owner's domain the same route answers only after it, which is the
+   difference the RFC is for. The client is a bare socket on a second domain
+   in both placements, so the block never stops the client itself. *)
+
+let block_s = 0.5
+let serving_answer_bound_s = 0.05
+let serving_requests = 20
+let host = "localhost"
+let port = 8935
+
+let trust_policy () =
+  match
+    Server_request_authority.make_trust_policy
+      ~bind_host:host
+      ~bind_port:port
+      ~https_port:None
+      ~explicit_base_url:None
+  with
+  | Ok policy -> policy
+  | Error error -> Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+;;
+
+let respond_text body reqd =
+  Masc.Http_reqd.respond_with_string
+    reqd
+    (Httpun.Response.create
+       ~headers:
+         (Httpun.Headers.of_list
+            [ "content-type", "text/plain"
+            ; "content-length", string_of_int (String.length body)
+            ])
+       `OK)
+    body
+;;
+
+(* Each handler records the domain it ran on. *)
+let routes ~ran =
+  let record path = Atomic.set ran ((path, Domain.self ()) :: Atomic.get ran) in
+  Masc.Http_server_eio.Router.create ()
+  |> Server_route.Serving.get Server_route.Always_public "/beside" (fun _request reqd ->
+    record "/beside";
+    respond_text "beside" reqd)
+  |> Server_route.get Server_route.Always_public "/owner" (fun _request reqd ->
+    record "/owner";
+    respond_text "owner" reqd)
+;;
+
+(* The one error these exchanges meet is the client leaving, and nobody is
+   left to answer. *)
+let error_handler _client_addr ?request:_ _error _respond = ()
+
+(* The connection, on the calling domain, for as long as [sw] lives. *)
+let serve_connection ~sw ~routes server_fd =
+  let trust_policy = trust_policy () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Switch.run (fun conn_sw ->
+      let flow = Eio_unix.Net.import_socket_stream ~sw:conn_sw ~close_unix:true server_fd in
+      Masc.Http_reqd.with_connection_switch conn_sw (fun () ->
+        Httpun_eio.Server.create_connection_handler
+          ~sw:conn_sw
+          ~request_handler:(Server_http_ingress.http1_handler ~trust_policy routes)
+          ~error_handler
+          (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
+          flow));
+    `Stop_daemon)
+;;
+
+let read_response reader =
+  let status = Eio.Buf_read.line reader in
+  let rec content_length found =
+    match Eio.Buf_read.line reader with
+    | "" -> found
+    | line ->
+      (match String.index_opt line ':' with
+       | Some colon
+         when String.lowercase_ascii (String.sub line 0 colon) = "content-length" ->
+         let value = String.sub line (colon + 1) (String.length line - colon - 1) in
+         content_length (int_of_string_opt (String.trim value))
+       | Some _ | None -> content_length found)
+  in
+  match content_length None with
+  | Some length -> status, Eio.Buf_read.take length reader
+  | None -> Alcotest.failf "no content-length after %S" status
+;;
+
+type answer =
+  { body : string
+  ; elapsed_s : float
+  ; block_done : bool (* the owner's block had ended when this answer arrived *)
+  }
+
+type seen =
+  { owner_before : answer
+  ; beside : answer list (* asked while the owner was blocked *)
+  ; owner_after : answer (* asked right after them *)
+  }
+
+let client ~clock ~block_started ~block_done client_fd =
+  Eio.Switch.run
+  @@ fun sw ->
+  let flow = Eio_unix.Net.import_socket_stream ~sw ~close_unix:true client_fd in
+  let reader = Eio.Buf_read.of_flow flow ~max_size:(1 lsl 16) in
+  let ask path =
+    let asked = Eio.Time.now clock in
+    Eio.Flow.copy_string
+      (Printf.sprintf "GET %s HTTP/1.1\r\nhost: %s:%d\r\n\r\n" path host port)
+      flow;
+    let _status, body = read_response reader in
+    { body; elapsed_s = Eio.Time.now clock -. asked; block_done = Atomic.get block_done }
+  in
+  let owner_before = ask "/owner" in
+  let post =
+    match Eio_context.owner_post () with
+    | Some post -> post
+    | None -> Alcotest.fail "the client's domain has no owner to post to"
+  in
+  post (fun () ->
+    Atomic.set block_started true;
+    (* NDT-OK: a wall-clock busy wait is the stall under test. *)
+    let until = Unix.gettimeofday () +. block_s in
+    while Unix.gettimeofday () < until do
+      ()
+    done;
+    Atomic.set block_done true);
+  while not (Atomic.get block_started) do
+    Eio.Fiber.yield ()
+  done;
+  let beside = List.init serving_requests (fun _ -> ask "/beside") in
+  let owner_after = ask "/owner" in
+  { owner_before; beside; owner_after }
+;;
+
+type placement =
+  | Beside_the_owner (* the connection runs on a second domain *)
+  | On_the_owner (* the connection runs on the owner's domain *)
+
+type outcome =
+  { seen : seen
+  ; ran : (string * Domain.id) list
+  ; owner_domain : Domain.id
+  }
+
+let run placement =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  Eio.Time.with_timeout_exn clock 60.0
+  @@ fun () ->
+  Eio.Switch.run
+  @@ fun owner_sw ->
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env)
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw:owner_sw
+  @@ fun () ->
+  let ran = Atomic.make [] in
+  let routes = routes ~ran in
+  let block_started = Atomic.make false in
+  let block_done = Atomic.make false in
+  let server_fd, client_fd = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  let client () = client ~clock ~block_started ~block_done client_fd in
+  let seen =
+    match placement with
+    | On_the_owner ->
+      serve_connection ~sw:owner_sw ~routes server_fd;
+      Eio.Domain_manager.run domain_mgr client
+    | Beside_the_owner ->
+      Eio.Domain_manager.run domain_mgr (fun () ->
+        Eio.Switch.run (fun sw ->
+          serve_connection ~sw ~routes server_fd;
+          Eio.Domain_manager.run domain_mgr client))
+  in
+  { seen; ran = Atomic.get ran; owner_domain = Domain.self () }
+;;
+
+let domains_of path outcome =
+  List.filter_map
+    (fun (ran_path, domain) -> if String.equal ran_path path then Some domain else None)
+    outcome.ran
+;;
+
+let test_serving_route_answers_while_the_owner_is_blocked () =
+  let outcome = run Beside_the_owner in
+  let { owner_before; beside; owner_after } = outcome.seen in
+  Alcotest.(check string) "the owner route answers before the block" "owner" owner_before.body;
+  Alcotest.(check int) "every serving request is answered" serving_requests (List.length beside);
+  List.iteri
+    (fun index answer ->
+       Alcotest.(check string) (Printf.sprintf "serving answer %d" index) "beside" answer.body;
+       Alcotest.(check bool)
+         (Printf.sprintf "serving answer %d came while the owner was blocked" index)
+         false
+         answer.block_done;
+       Alcotest.(check bool)
+         (Printf.sprintf
+            "serving answer %d came within %.0f ms (took %.1f ms)"
+            index
+            (serving_answer_bound_s *. 1000.0)
+            (answer.elapsed_s *. 1000.0))
+         true
+         (answer.elapsed_s < serving_answer_bound_s))
+    beside;
+  Alcotest.(check string) "the owner route answers" "owner" owner_after.body;
+  Alcotest.(check bool)
+    "the owner route answered only after the block ended"
+    true
+    owner_after.block_done;
+  Alcotest.(check bool)
+    "the serving handler never ran on the owner's domain"
+    true
+    (List.for_all (fun domain -> domain <> outcome.owner_domain) (domains_of "/beside" outcome));
+  Alcotest.(check bool)
+    "the owner handler ran on the owner's domain"
+    true
+    (List.for_all (fun domain -> domain = outcome.owner_domain) (domains_of "/owner" outcome))
+;;
+
+let test_serving_route_waits_when_connections_run_on_the_owner () =
+  let outcome = run On_the_owner in
+  let { beside; owner_after; _ } = outcome.seen in
+  (match beside with
+   | first :: _ ->
+     Alcotest.(check string) "the serving route answers" "beside" first.body;
+     Alcotest.(check bool)
+       "its first answer came only after the block ended"
+       true
+       first.block_done
+   | [] -> Alcotest.fail "no serving request was answered");
+  Alcotest.(check string) "the owner route answers" "owner" owner_after.body;
+  Alcotest.(check bool)
+    "both handlers ran on the owner's domain"
+    true
+    (List.for_all (fun (_path, domain) -> domain = outcome.owner_domain) outcome.ran)
+;;
+
+let () =
+  Alcotest.run
+    "http_ingress_serving_route"
+    [ ( "owner blocked"
+      , [ Alcotest.test_case
+            "a Serving route answers while the owner is blocked"
+            `Quick
+            test_serving_route_answers_while_the_owner_is_blocked
+        ; Alcotest.test_case
+            "the same route waits when connections run on the owner's domain"
+            `Quick
+            test_serving_route_waits_when_connections_run_on_the_owner
+        ] )
+    ]
+;;

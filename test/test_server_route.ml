@@ -144,7 +144,7 @@ let test_ws_get_records_the_upgrade_reason () =
     (access_json route.Router.access);
   match route.Router.handler with
   | Router.Ws _ -> ()
-  | Router.Plain _ -> fail "ws_get registered a plain handler"
+  | Router.Owner _ | Router.Serving _ -> fail "ws_get registered an in-band handler"
 ;;
 
 let test_json_shape () =

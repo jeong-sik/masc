@@ -507,13 +507,15 @@ module Router = struct
   type ws_handler =
     upgrade:upgrade option -> Httpun.Request.t -> Http_reqd.t -> unit
 
-  (* A route either handles the request in-band ([Plain], the common
-     case) or upgrades the connection to WebSocket ([Ws]).  Encoding
-     this as a typed variant keeps the route table the single source of
-     truth for which paths upgrade, instead of a path-string match in
-     the connection handler.  RFC-0281 S3.3. *)
+  (* A route either handles the request in-band ([Owner], the common
+     case, and [Serving]) or upgrades the connection to WebSocket ([Ws]).
+     Encoding this as a typed variant keeps the route table the single
+     source of truth for which paths upgrade and for which domain a handler
+     runs on, instead of a path-string match in the connection handler.
+     RFC-0281 S3.3, RFC http-transport-runs-on-its-own-domain §3.2. *)
   type route_target =
-    | Plain of request_handler
+    | Owner of request_handler
+    | Serving of request_handler
     | Ws of ws_handler
 
   type route = {
@@ -741,6 +743,10 @@ module Router = struct
     val prefix_post : 'h auth -> string -> 'h -> t -> t
     val prefix_put : 'h auth -> string -> 'h -> t -> t
     val prefix_delete : 'h auth -> string -> 'h -> t -> t
+    module Serving : sig
+      val get : 'h auth -> string -> 'h -> t -> t
+    end
+
     val ws_get : string -> ws_handler -> t -> t
   end
 
@@ -811,7 +817,7 @@ module Router = struct
 
     let register auth ~kind ~path ~methods handler routes =
       add_kind kind ~access:(access auth) ~path ~methods
-        ~handler:(Plain (wrapped auth handler)) routes
+        ~handler:(Owner (wrapped auth handler)) routes
 
     let get auth path handler routes =
       register auth ~kind:Exact ~path ~methods:[`GET] handler routes
@@ -833,6 +839,12 @@ module Router = struct
 
     let prefix_delete auth prefix handler routes =
       register auth ~kind:Prefix ~path:prefix ~methods:[`DELETE] handler routes
+
+    module Serving = struct
+      let get auth path handler routes =
+        add_kind Exact ~access:(access auth) ~path ~methods:[`GET]
+          ~handler:(Serving (wrapped auth handler)) routes
+    end
 
     (* The handler checks the credential before it upgrades, so the only kind
        that applies is [Self_authenticated Websocket_upgrade]. *)
@@ -890,7 +902,7 @@ module Router = struct
     match resolve router request with
     | `Matched route -> (
         match route.handler with
-        | Plain handler -> handler request reqd
+        | Owner handler | Serving handler -> handler request reqd
         | Ws handler -> handler ~upgrade:(Http_reqd.upgrade reqd) request reqd)
     | `Not_found -> Response.not_found reqd
     | `Method_not_allowed -> Response.method_not_allowed reqd

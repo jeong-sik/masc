@@ -62,7 +62,7 @@ let format_addressing_hint ~max_cells kind =
   | Broadcast_all ->
       Printf.sprintf "%s%s[Broadcast: @@all -> wakes all active keepers]%s"
         Ansi.bold
-        (Masc_tui_theme.tone Masc_tui_theme.Accent)
+        (Theme.accent ())
         Ansi.reset
   | Mentions targets ->
       let target_str = String.concat ", @" targets in
@@ -76,7 +76,7 @@ let format_addressing_hint ~max_cells kind =
       in
       let line = prefix ^ fit target_str target_cells ^ suffix in
       Printf.sprintf "%s%s%s"
-        (Masc_tui_theme.tone Masc_tui_theme.Accent)
+        (Theme.accent ())
         (fit line (max 0 max_cells))
         Ansi.reset
   | Unsupported_broadcast selectors ->

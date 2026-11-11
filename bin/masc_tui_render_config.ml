@@ -218,7 +218,7 @@ let render_runtime_params (state : state) =
          | Some (`Header (id, description)) ->
            let label = if String.equal id "" then ui_text state ~ko:"(그룹 없음)" ~en:"(unfiled)" else id in
            box_line_styled buf cols
-             ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
+             ~style:(Theme.accent ())
              (Printf.sprintf "  %s %s"
                 (Terminal_text.single_line label)
                 (Ansi.dim ^ Terminal_text.single_line description ^ Ansi.reset))
@@ -239,7 +239,7 @@ let render_runtime_params (state : state) =
            if row_index = cursor then box_line_selected buf cols line
            else
              box_line_styled buf cols
-               ~style:(if row.rpr_has_override then (Masc_tui_theme.tone Masc_tui_theme.Accent) else Ansi.dim) line
+               ~style:(if row.rpr_has_override then (Theme.accent ()) else Ansi.dim) line
        done
      end);
   let scroll = Masc_tui_scroll.normalize ~count:(List.length selected_lines)

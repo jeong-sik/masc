@@ -9,7 +9,7 @@ let with_registry work=
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () ->
     let path=Filename.concat dir R.storage_filename in work dir path (R.replay path))
 let terminal ?(output=`Null) () : R.original_completion =
-  {outcome=R.Succeeded;elapsed_s=None;output;selected_slot=Some "actual-slot";usage=None}
+  {outcome=R.Succeeded;elapsed_s=None;output;selected_slot=Some "actual-slot";usage=None;slot_observations=None}
 let reconcile ?(id="original") ?(input=`Null) ?(started_at=123.) registry completion =
   R.reconcile_original registry ~run_id:id ~lane:R.Workspace_curator ~actor:"original-workspace"
     ~started_at ~input:(R.Exact_input input) ~completion

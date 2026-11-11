@@ -113,6 +113,7 @@ let execute_http ~before_dispatch ~admission_class ~note ~capture_http ~resolved
               Exact.Reject_and_advance detail
           in
           let flow =
+            Exact_lane_slot_capture.flow attempt (fun () ->
             Exact.execute_flow_once ~net ~clock
               ~before_measurement_dispatch:(fun _ -> Eio.Fiber.check (); before_dispatch ())
               ~on_measurement_terminal:(fun _ -> Ok ())
@@ -123,7 +124,7 @@ let execute_http ~before_dispatch ~admission_class ~note ~capture_http ~resolved
                  | Exact.Flow_candidate_execution_failed { candidate; cause } -> execution_failed candidate cause
                  | Exact.Flow_candidate_rejected rejection -> rejected rejection);
                 Ok ())
-              ~validate:check attempt
+              ~validate:check attempt)
           in
           capture_http (match flow with
             | Ok success -> Receipt.http_success success ~rejection_to_string:Fun.id
@@ -219,7 +220,7 @@ let call ~before_dispatch ~admission_class ~cli_runner ~base_path ~(resolved : R
         complete Receipt.Prompt_unavailable (ended ())
       | Ok prompt ->
       match
-        Keeper_lane_cli_oneshot.walk ?runner:cli_runner ~base_dir:base_path ~cli_slots
+        Exact_lane_slot_capture.walk_cli ?runner:cli_runner ~base_dir:base_path ~cli_slots
           ~system_prompt:(Option.value request.system ~default:"") ~requirement
           ~prompt ~validate
           ~observe:(function

@@ -104,6 +104,9 @@ let original_receipt ~store id =
   | Ok Exact.No_completed_original -> fail "actual original walk proof was not retained"
   | Error detail -> fail detail
 
+let original_slot_observations ~store id = Eio_unix.run_in_systhread (fun () ->
+  Exact.read_latest_slot_observations ~store ~declaration_id ~schema (request id))
+
 let answered_by = function
   | Exact.Final (Exact.Call_final (Exact.Answered { output; slot; usage })) -> Some (Exact.checked_json output, slot, usage)
   | Exact.Final _ | Exact.Not_final _ -> None
@@ -142,6 +145,35 @@ let test_original_response_observations_are_bound_to_each_visit () =
     check bool "second Responses visit answered" true
       (Option.is_some (answered_by (run_request ~base_path ~store "responses-v2")));
     let receipt=original_receipt ~store:(Lane_addon_store.create ~root:(Lane_addon_store.root store)) "responses-v2" in
+    let observations=match original_slot_observations ~store "responses-v2" with
+      | Ok (Some observations) -> observations | Ok None -> fail "original slot observations missing"
+      | Error detail -> fail detail in
+    check (list string) "passive capture retains both actual visited slots"
+      ["first";"second"] (List.map (fun (visit:Exact_lane_slot_observation.t) -> visit.slot_id) observations);
+    List.iter (fun (visit:Exact_lane_slot_observation.t) ->
+      check bool "actual executor times were retained" true
+        (visit.started_at<>None && visit.finished_at<>None)) observations;
+    publish_responses ~base_path [{F.id="first";base_url=right.base_url};{F.id="second";base_url=right.base_url}];
+    (match original_slot_observations ~store "responses-v2" with
+     | Ok (Some ({binding=Exact_lane_slot_observation.Http binding;_}::_)) ->
+       check string "republication cannot replace a historical endpoint"
+         (wrong.base_url^"/v1/responses") binding.endpoint
+     | Ok (None | Some _) -> fail "historical HTTP binding missing"
+     | Error detail -> fail detail);
+    let companion_dir=Filename.concat (Lane_addon_store.root store)
+      (Lane_addon_exact_observation.directory ~declaration_id) in
+    let companion=match Sys.readdir companion_dir with
+      | [|name|] -> Filename.concat companion_dir name | _ -> fail "one original companion expected" in
+    Fs_compat.save_file companion {|{"invalid":"diagnostic only"}|};
+    check bool "damaged passive data is an explicit diagnostic read error" true
+      (Result.is_error (original_slot_observations ~store "responses-v2"));
+    check bool "authoritative original receipt survives diagnostic damage" true
+      (Yojson.Safe.equal (Keeper_exact_walk_receipt.to_json receipt)
+         (Keeper_exact_walk_receipt.to_json (original_receipt ~store "responses-v2")));
+    check bool "retained answer still delivers without another provider call" true
+      (Option.is_some (answered_by (run_request ~base_path ~store "responses-v2")));
+    check (pair int int) "passive damage cannot replay either provider" (1,1)
+      (F.post_count wrong,F.post_count right);
     let module Receipt=Keeper_exact_walk_receipt in
     let digest body=Agent_core_sha256.(to_hex (digest_string body)) in
     (match Receipt.response_observations receipt with
@@ -1149,6 +1181,7 @@ let test_a_settled_curator_original_leaves_its_exact_files_to_the_sweep () =
     let live=swept curator_package in
     check (pair int int) "the live original keeps its Exact record and execution link" (1,1)
       (live.kept_exact_records,live.kept_proofs);
+    check int "live original also keeps its passive companion" 1 live.kept_observations;
     check (pair int int) "a live original loses nothing" (0,0) (live.removed_exact_records,live.removed_proofs);
     (match Owner.load ~store ~scope:Capture.scope ~request_id:request.request_id
            |> Result.map_error Owner.error_to_string |> get with
@@ -1174,6 +1207,7 @@ let test_a_settled_curator_original_leaves_its_exact_files_to_the_sweep () =
     let settled=swept curator_package in
     check (pair int int) "the sweep deletes the unowned link and record" (1,1)
       (settled.removed_proofs,settled.removed_exact_records);
+    check int "settled original's passive companion follows its retention" 1 settled.removed_observations;
     check (pair int int) "no Exact file is left" (0,0) (files records,files links);
     check bool "a rerun after the sweep is still refused" true (not_allowed ());
     check int "no rerun reached the provider" 1 (F.post_count server))

@@ -296,6 +296,14 @@ val read_latest_original_execution : store:Lane_addon_store.t -> declaration_id:
     Missing evidence remains unproven. This read performs no effect and grants
     no retry, partition, worker delivery, Memory or ACK authority. Offload the
     complete blocking scope in Eio contexts. *)
+
+val read_latest_slot_observations : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> (Exact_lane_slot_observation.t list option,string) result
+(** Validate the actual latest original execution first, then read only its
+    digest-bound passive companion. Old originals have [None]; current config,
+    another attempt or another request never fills a missing endpoint/time.
+    Diagnostic errors must not change dispatch, final delivery or domain ACK.
+    Offload the whole read to a system thread in Eio contexts. *)
 val proof_directory : declaration_id:string -> string
 (** The Store directory below {!Lane_addon_store.root} that holds the original
     execution link of every request [declaration_id] ran. *)

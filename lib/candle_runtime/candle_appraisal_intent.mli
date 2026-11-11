@@ -11,5 +11,8 @@ val request_id : t -> string
 val request : t -> Candle_appraisal.request
 (** The original request retained for full domain decoding of an answer. *)
 val to_worker_request : t -> Yojson.Safe.t
+val exact_request : t -> (Lane_addon_exact.request,string) result
+(** The original prompt/schema/stage projection used by the Candle worker's
+    host request. Pure read for diagnostic proof lookup; grants no dispatch. *)
 val submit_arguments : t -> Yojson.Safe.t
 val read_arguments : t -> Yojson.Safe.t

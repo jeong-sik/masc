@@ -184,10 +184,12 @@ let startup_sweep_unowned_exact (state : Mcp_server.server_state) =
     Log.Server.info
       "[Startup] unowned Exact sweep: declarations=%d live_originals=%d kept_exact_records=%d \
        kept_proofs=%d removed_proofs=%d removed_proof_bytes=%Ld removed_exact_records=%d \
-       removed_exact_record_bytes=%Ld"
+       removed_exact_record_bytes=%Ld kept_observations=%d removed_observations=%d \
+       removed_observation_bytes=%Ld"
       report.declarations report.live_originals report.kept_exact_records report.kept_proofs
       report.removed_proofs report.removed_proof_bytes report.removed_exact_records
-      report.removed_exact_record_bytes
+      report.removed_exact_record_bytes report.kept_observations report.removed_observations
+      report.removed_observation_bytes
 ;;
 
 (* RFC-0497 section 6, layer one: the pass counts instances every minute; the

@@ -719,7 +719,7 @@ let test_actual_observer_delivery_and_ack_retry ()=with_workspace (fun base_path
     ~actor:prepared.registration.actor ~started_at:prepared.registration.receipt.observed_at
     ~input:(Runs.Exact_input prepared.registration.input)
     ~completion:(Some {Runs.outcome=Runs.Succeeded;elapsed_s=None;selected_slot=completion.selected_slot;
-      usage=None;output=Receipt.to_json completion.receipt})
+      usage=None;slot_observations=None;output=Receipt.to_json completion.receipt})
     |> Result.map_error Runs.reconciliation_error_to_string |> get;
   let restarted=Runs.replay path in
   let bytes=Fs_compat.load_file path and stat=Unix.stat path in

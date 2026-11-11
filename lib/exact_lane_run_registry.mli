@@ -269,6 +269,7 @@ type original_completion = {
   output : Yojson.Safe.t;
   selected_slot : string option;
   usage : usage option;
+  slot_observations : Exact_lane_slot_observation.t list option;
 }
 type reconciliation_error =
   | Invalid_original of string

@@ -31,5 +31,11 @@ let make ~(identity : A.identity) ~prompt original =
 let request_id t = t.id
 let request t = t.original
 let to_worker_request t = t.snapshot
+let exact_request t =
+  Lane_addon_exact.request_of_json (`Assoc ["kind",`String "exact_output";
+    "request_id",`String t.id;"output",`String (A.stage t.original);
+    "messages",`List [`Assoc ["role",`String "user";
+      "text",Yojson.Safe.Util.member "prompt" t.snapshot]];
+    "schema",Yojson.Safe.Util.member "schema" t.snapshot])
 let submit_arguments t = `Assoc ["kind", `String "submit"; "request", t.snapshot]
 let read_arguments t = `Assoc ["kind", `String "read"; "request_id", `String t.id]

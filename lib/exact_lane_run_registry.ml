@@ -1043,6 +1043,7 @@ type run_page =
 type original_completion = {
   outcome:outcome; elapsed_s:float option; output:Yojson.Safe.t;
   selected_slot:string option; usage:usage option;
+  slot_observations:Exact_lane_slot_observation.t list option;
 }
 type reconciliation_error =
   | Invalid_original of string
@@ -1205,7 +1206,8 @@ let reconcile_original t ~run_id ~lane ~actor ~started_at ~input ~completion =
       let publish_completion (c:original_completion)=
         let* output_source=write Output_payload c.output in
         Ok {Payload.outcome=c.outcome;origin=Producer;elapsed_s=c.elapsed_s;output=c.output;
-          output_source;selected_slot=c.selected_slot;usage=c.usage;slot_observations=None} in
+          output_source;selected_slot=c.selected_slot;usage=c.usage;
+          slot_observations=Option.map slot_observations_to_json c.slot_observations} in
       match current,completion with
       | None,completion ->
         let* input_source=write Input_payload original_input in

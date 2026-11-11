@@ -178,7 +178,7 @@ let run_of_json target = function
   | _ -> Error "a run in the answer is not a JSON object"
 ;;
 
-let observation_of_runs_json target = function
+let observation_of_runs_json ?(allow_incomplete = false) target = function
   | `Assoc fields ->
     let* total =
       match List.assoc_opt "total_count" fields with
@@ -191,31 +191,24 @@ let observation_of_runs_json target = function
       | Some _ | None -> Error "the answer has no workflow_runs list"
     in
     let held = List.length items in
-    if total > held
-    then
-      Error
-        (Printf.sprintf
-           "GitHub holds %d runs of this commit and the answer carries %d"
-           total
-           held)
-    else (
-      let* runs =
-        List.fold_left
-          (fun acc item ->
-            let* acc = acc in
-            let* run = run_of_json target item in
-            Ok (run :: acc))
-          (Ok [])
-          items
-        |> Result.map List.rev
-      in
-      let checks = List.filter (fun (_, run) -> is_check_event run.event) runs in
-      match checks with
-      | [] -> Ok Not_settled
-      | _ :: _ ->
-        if List.for_all fst checks
-        then Ok (Settled (List.map snd checks))
-        else Ok Not_settled)
+    let* runs =
+      List.fold_left
+        (fun acc item ->
+          let* acc = acc in
+          let* run = run_of_json target item in
+          Ok (run :: acc))
+        (Ok [])
+        items
+      |> Result.map List.rev
+    in
+    let checks = List.filter (fun (_, run) -> is_check_event run.event) runs in
+    (match checks with
+     | [] -> Ok Not_settled
+     | _ :: _ when total > held && not allow_incomplete -> Ok Not_settled
+     | _ :: _ ->
+       if List.for_all fst checks
+       then Ok (Settled (List.map snd checks))
+       else Ok Not_settled)
   | _ -> Error "the runs answer is not a JSON object"
 ;;
 

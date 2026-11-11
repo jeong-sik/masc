@@ -74,14 +74,16 @@ type observation =
           them. They are not picked or merged: a run that was cancelled by a
           later one is in the list with its own conclusion. *)
 
-val observation_of_runs_json : target -> Yojson.Safe.t -> (observation, string) result
+val observation_of_runs_json : ?allow_incomplete:bool -> target -> Yojson.Safe.t -> (observation, string) result
 (** Reads the answer of
     [GET /repos/{owner}/{repo}/actions/runs?head_sha={sha}&per_page=100]. Every
     run must carry the [head_sha] of the target: an error body has no runs, and
-    a list for another commit must not read as this one. An answer whose
-    [total_count] is more than the runs it carries is an error, so a second page
-    that was not read never reads as "all completed". A run [status] that is
-    absent, null or not a string is an error. *)
+    a list for another commit must not read as this one. By default an answer whose
+    [total_count] is more than the runs it carries is {!Not_settled}: the reader
+    must fetch the remaining pages before deciding. With [~allow_incomplete:true],
+    only the runs in this page are judged; the caller must still cover
+    [total_count] and require every page to settle before returning {!Settled}.
+    A run [status] that is absent, null or not a string is an error. *)
 
 (** What the wake tells the Keeper. *)
 type settled =

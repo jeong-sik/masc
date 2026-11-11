@@ -164,8 +164,11 @@ let test_a_workflow_run_event_is_a_check () =
 
 let test_an_answer_that_cannot_be_trusted_is_an_error () =
   check_refused
-    "total_count is more than the runs carried: a second page was not read"
-    (answer ~total:101 runs_51286);
+    "an incomplete answer still rejects another commit"
+    (answer ~total:101 [ run_json ~head:(String.make 40 'a') ~name:"Test" ~event:"push" ~status:"completed" () ]);
+  check_refused
+    "an incomplete answer still rejects a missing status"
+    (answer ~total:101 [ `Assoc [ "name", `String "Test"; "event", `String "push"; "head_sha", `String sha; "status", `Null ] ]);
   check_refused "a run of another commit" (answer [ changelog; run_json ~head:(String.make 40 'a') ~name:"Test" ~event:"push" ~status:"completed" () ]);
   check_refused "an error body" (`Assoc [ "message", `String "Not Found" ]);
   check_refused "not an object" (`List []);
@@ -186,6 +189,13 @@ let test_an_answer_that_cannot_be_trusted_is_an_error () =
            ; "conclusion", `Int 1
            ]
        ])
+;;
+
+let test_a_short_page_is_not_an_error () =
+  check_observation
+    "total_count is more than the runs carried: wait for the next page"
+    "not settled"
+    (answer ~total:101 runs_51286)
 ;;
 
 let test_a_head_sha_in_upper_case_is_the_same_commit () =
@@ -730,6 +740,7 @@ let () =
         ; test_case "no conclusion" `Quick test_a_completed_run_may_have_no_conclusion
         ; test_case "workflow_run" `Quick test_a_workflow_run_event_is_a_check
         ; test_case "an untrustworthy answer" `Quick test_an_answer_that_cannot_be_trusted_is_an_error
+        ; test_case "a short page is not an error" `Quick test_a_short_page_is_not_an_error
         ; test_case "upper case sha" `Quick test_a_head_sha_in_upper_case_is_the_same_commit
         ] )
     ; ( "target"

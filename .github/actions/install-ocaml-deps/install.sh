@@ -41,17 +41,35 @@ install_os_packages() {
   log_elapsed "Installed OS packages" "${started_at}"
 }
 
+# A switch restored under its exact cache key was saved after the pins and
+# the install of this same lock (setup-ocaml-toolchain), so opam has nothing
+# to build. It still looks for each package's system packages, and a fresh
+# runner has none of conf-protoc's: opam then fetches libprotobuf-dev and
+# protobuf-compiler from the apt mirror on every run, and a run fails
+# whenever the mirror does not answer (issue #51372). A job that only
+# type-checks uses neither, so it may ask for no system packages
+# (--no-depexts). The answer is "no" for a switch that was not restored
+# exactly, and when the job asks for OS packages of its own.
+switch_restored_complete() {
+  [ "${SYSTEM_PACKAGES_ON_EXACT_RESTORE:-install}" = "skip" ] \
+    && [ "${MASC_OPAM_SWITCH_EXACT_RESTORE:-}" = "true" ] \
+    && [ -z "${OS_PACKAGES:-}" ]
+}
+
+# $1 names the attempt in the log lines; the rest are extra opam flags.
 run_opam_install_attempt() {
   local attempt="$1"
+  shift
   local started_at elapsed status opam_pid heartbeat_pid
   declare -a install_args=()
 
   if [ -n "${INSTALL_FLAGS:-}" ]; then
     read -r -a install_args <<< "${INSTALL_FLAGS}"
   fi
+  install_args+=("$@")
 
   started_at="$(date +%s)"
-  echo "Starting opam install attempt ${attempt}/3 (timeout: ${INSTALL_TIMEOUT_MINUTES}m)"
+  echo "Starting opam install attempt ${attempt} (timeout: ${INSTALL_TIMEOUT_MINUTES}m)"
 
   set +e
   # --locked: install what masc.opam.locked pins, not whatever the solver picks
@@ -72,7 +90,7 @@ run_opam_install_attempt() {
   (
     while kill -0 "${opam_pid}" 2>/dev/null; do
       elapsed="$(( $(date +%s) - started_at ))"
-      echo "opam install attempt ${attempt}/3 still running (${elapsed}s elapsed)"
+      echo "opam install attempt ${attempt} still running (${elapsed}s elapsed)"
       sleep "${HEARTBEAT_SECONDS}"
     done
   ) &
@@ -86,15 +104,15 @@ run_opam_install_attempt() {
 
   elapsed="$(( $(date +%s) - started_at ))"
   if [ "${status}" -eq 0 ]; then
-    echo "opam install attempt ${attempt}/3 succeeded in ${elapsed}s"
+    echo "opam install attempt ${attempt} succeeded in ${elapsed}s"
     return 0
   fi
   if [ "${status}" -eq 124 ]; then
-    echo "opam install attempt ${attempt}/3 timed out after ${elapsed}s"
+    echo "opam install attempt ${attempt} timed out after ${elapsed}s"
     return 124
   fi
 
-  echo "opam install attempt ${attempt}/3 failed with exit ${status} after ${elapsed}s"
+  echo "opam install attempt ${attempt} failed with exit ${status} after ${elapsed}s"
   return "${status}"
 }
 
@@ -107,11 +125,19 @@ main() {
   export OPAMCONFIRMLEVEL="${OPAMCONFIRMLEVEL:-unsafe-yes}"
   export OPAMYES="${OPAMYES:-1}"
 
+  if switch_restored_complete; then
+    echo "The switch was restored under its exact cache key; asking opam for no system packages."
+    if run_opam_install_attempt "on the restored switch" --no-depexts; then
+      return 0
+    fi
+    echo "::warning::opam install without system packages failed on the restored switch; installing them"
+  fi
+
   refresh_apt_index
   install_os_packages
 
   for attempt in 1 2 3; do
-    if run_opam_install_attempt "${attempt}"; then
+    if run_opam_install_attempt "${attempt}/3"; then
       return 0
     fi
 

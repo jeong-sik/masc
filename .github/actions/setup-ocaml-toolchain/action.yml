@@ -225,6 +225,11 @@ runs:
           echo "::notice::Cache hit — reusing opam switch ${switch_name}"
           bash scripts/ci/opam-cache-freshness.sh \
             --refresh "${OPAM_CACHE_EXACT_HIT:-}"
+          # install-ocaml-deps reads this: a switch restored under its exact
+          # key was saved after the pins and the install of the same lock.
+          if [[ "${OPAM_CACHE_EXACT_HIT:-}" == "true" ]]; then
+            echo "MASC_OPAM_SWITCH_EXACT_RESTORE=true" >> "${GITHUB_ENV}"
+          fi
           switch_prefix="$(opam var prefix --switch="${switch_name}")"
           echo "OPAMSWITCH=${switch_name}" >> "${GITHUB_ENV}"
           echo "${switch_prefix}/bin" >> "${GITHUB_PATH}"

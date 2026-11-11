@@ -130,9 +130,16 @@ jobs:
       - uses: ./.github/actions/setup-ocaml-toolchain
       - uses: ./.github/actions/pin-ocaml-deps
       # Test libraries must resolve: @check compiles the test tree.
+      #
+      # @check links nothing and runs nothing it builds, and no build rule
+      # calls protoc (proto/dune), so a switch restored under its exact cache
+      # key needs no system package. Without "skip", opam fetched
+      # conf-protoc's two apt packages on every run and every PR's type-check
+      # failed for as long as the apt mirror did not answer (issue #51372).
       - uses: ./.github/actions/install-ocaml-deps
         with:
           install-flags: --with-test
+          system-packages-on-exact-restore: skip
 
       - name: Reuse Dune build artifacts
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

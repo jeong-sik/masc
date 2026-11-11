@@ -989,9 +989,9 @@ let parse_typesafeai (toml : Otoml.t)
   | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error (error path "[typesafeai] must be a TOML table")
 ;;
 
-let parse_table (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
+let parse_table ~home (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let obsolete_namespaces_result = reject_obsolete_top_level_namespaces toml in
-  let providers_result = parse_providers toml in
+  let providers_result = parse_providers ~home toml in
   let models_result = parse_models toml in
   let runtime_section_result = parse_runtime_section toml in
   let assignments_result = parse_keeper_assignments toml in
@@ -1093,8 +1093,11 @@ let parse_table (toml : Otoml.t) : (Runtime_schema.config, parse_error list) res
         })
 ;;
 
-let parse_toml = function
-  | Otoml.TomlTable _ as toml -> parse_table toml
+(* [home] is what a ["~/"] credential path expands under. It is the one thing
+   outside the document that a config depends on, so it is an argument here
+   and read from the environment by the entry points below. *)
+let parse_document ~home = function
+  | Otoml.TomlTable _ as toml -> parse_table ~home toml
   | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
   | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
   | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
@@ -1102,10 +1105,65 @@ let parse_toml = function
       Error [{path="<parse>"; message="otoml returned a non-table document root"}]
 ;;
 
+let parse_toml toml = parse_document ~home:(Env_config_core.home_dir_opt ()) toml
+
+(* What one source text and one home come to. A syntax failure keeps what
+   Otoml raised, because {!parse_string} and {!parse_file} word it
+   differently. *)
+type source_reading =
+  | Interpreted of (Runtime_schema.config, parse_error list) result
+  | Syntax_refused of (int * int) option * string
+  | Duplicate_key_refused of string
+  | Otoml_failed of string
+
+let read_source ~home content =
+  match Otoml.Parser.from_string content with
+  | toml -> Interpreted (parse_document ~home toml)
+  | exception Otoml.Parse_error (position, message) -> Syntax_refused (position, message)
+  | exception Otoml.Duplicate_key message -> Duplicate_key_refused message
+  | exception Failure message -> Otoml_failed message
+;;
+
+(* The reading of the source text last parsed. A running server parses the
+   same runtime.toml again and again on the caller's domain, which is the
+   main one: a [Remote_ssh] Keeper on every Execute call, the repository
+   pulls reader on every refresh. One parse of a 74 KB runtime.toml took 12 to
+   183 ms and allocated 16 MB ([Otoml.Parser.from_file] alone, 30 runs on a
+   loaded host, 2026-11-11).
+
+   A reading is a function of the text and the home, so the same text under
+   the same home answers with the reading already made. Callers still read
+   the file on each call, so an edit applies to the next one. A warning the
+   parser logs for a value is logged when the text is parsed, not on each
+   call that reuses the reading. *)
+type kept_reading =
+  { content : string
+  ; home : string option
+  ; reading : source_reading
+  }
+
+let last_reading : kept_reading option Atomic.t = Atomic.make None
+
+let source_reading content =
+  let home = Env_config_core.home_dir_opt () in
+  match Atomic.get last_reading with
+  | Some last
+    when String.equal last.content content && Option.equal String.equal last.home home ->
+    last.reading
+  | Some _ | None ->
+    let reading = read_source ~home content in
+    Atomic.set last_reading (Some { content; home; reading });
+    reading
+;;
+
 let parse_string (content : string) : (Runtime_schema.config, parse_error list) result =
-  match Otoml.Parser.from_string_result content with
-  | Ok toml -> parse_toml toml
-  | Error msg -> Error [ { path = "<parse>"; message = msg } ]
+  let unparsable message = Error [ { path = "<parse>"; message } ] in
+  match source_reading content with
+  | Interpreted result -> result
+  | Syntax_refused (position, message) ->
+    unparsable (Otoml.Parser.format_parse_error position message)
+  | Duplicate_key_refused message -> unparsable message
+  | Otoml_failed message -> unparsable (Printf.sprintf "otoml internal error: %s" message)
 ;;
 
 let memory_recall_declaration_of_string (content : string)
@@ -1180,11 +1238,15 @@ let ignored_legacy_keys (content : string) : string list =
     |> List.sort_uniq String.compare
 ;;
 
+(* A duplicate key and an Otoml failure leave as the exceptions
+   [Otoml.Parser.from_file] raised for them. *)
 let parse_file (path : string) : (Runtime_schema.config, parse_error list) result =
-  try
-    let toml = Otoml.Parser.from_file path in
-    parse_toml toml
-  with
-  | Otoml.Parse_error (_, msg) -> Error [ { path; message = msg } ]
-  | Sys_error msg -> Error [ { path; message = msg } ]
+  match In_channel.with_open_bin path In_channel.input_all with
+  | exception Sys_error message -> Error [ { path; message } ]
+  | content ->
+    (match source_reading content with
+     | Interpreted result -> result
+     | Syntax_refused (_, message) -> Error [ { path; message } ]
+     | Duplicate_key_refused message -> raise (Otoml.Duplicate_key message)
+     | Otoml_failed message -> failwith message)
 ;;

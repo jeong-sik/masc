@@ -540,10 +540,12 @@ let claude_auth_status = function
   | Some _ | None -> None
 ;;
 
+let http_status_name status = Printf.sprintf "HTTP %d" status
+
 (* A child that inherits an environment credential runs on it before the
    signed-in account, so a refusal on that child names the credential's source
    as a candidate rather than the account the operator looks at first. *)
-let claude_auth_refusal ~account ~status detail =
+let claude_auth_refusal ~account ~named detail =
   let inherited =
     if Runtime_claude_code.runs_on_environment_credential
          (Runtime_official_account.Captured (Runtime_account_access.account account))
@@ -552,7 +554,7 @@ let claude_auth_refusal ~account ~status detail =
        before the signed-in account)"
     else ""
   in
-  Provider_auth_refused (Printf.sprintf "HTTP %d: %s%s" status detail inherited)
+  Provider_auth_refused (Printf.sprintf "%s: %s%s" named detail inherited)
 ;;
 
 let failure_of_agent_core_error error =
@@ -954,7 +956,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                      (fun status ->
                         claude_auth_refusal
                           ~account
-                          ~status
+                          ~named:(http_status_name status)
                           (Printf.sprintf
                              "Claude Code was retrying the provider request (retry %d of %d)"
                              retry.Runtime_claude_api_retry.attempt
@@ -1000,11 +1002,17 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
          | Error (Runtime_claude_code.Timeout _) -> Error (deadline_failure ())
          | Error
              (Runtime_claude_code.Turn_failed_with_observation
-                { api_error_status; detail; _ } as error) ->
-           (match claude_auth_status api_error_status with
-            | Some status ->
-              Error (claude_auth_refusal ~account ~status detail)
-            | None -> Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
+                { api_error_status; api_error_cause; detail; _ } as error) ->
+           (* The client refuses a login past its time limit before it sends
+              a request, so that refusal has a typed cause and no HTTP
+              status. *)
+           (match claude_auth_status api_error_status, api_error_cause with
+            | Some status, (Some _ | None) ->
+              Error (claude_auth_refusal ~account ~named:(http_status_name status) detail)
+            | None, Some Runtime_claude_code.Authentication_failed ->
+              Error (claude_auth_refusal ~account ~named:"authentication_failed" detail)
+            | None, (Some (Runtime_claude_code.Other_api_error_cause _) | None) ->
+              Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Quota_blocked { block; _ } as error) ->
            Error (claude_quota_failure block (Runtime_claude_code.error_to_string error))
          | Error

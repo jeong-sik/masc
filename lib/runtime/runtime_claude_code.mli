@@ -445,6 +445,16 @@ val dynamic_tool_bytes : dynamic_tool list -> int
     object for a tool that carries one. Not provider tokens: it bounds the
     request, it does not price it. *)
 
+(** The cause Claude Code names on an API diagnostic envelope, in the
+    [error] member next to [is_api_error_message]. *)
+type api_error_cause =
+  | Authentication_failed
+      (** The client's credential was refused or could not be renewed. The
+          result frame of such a turn can carry no HTTP status: a login past
+          its time limit is refused by the client before a request is sent. *)
+  | Other_api_error_cause of string
+      (** Any other value the client sent, kept as sent. *)
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -471,6 +481,10 @@ type error =
         (** The result frame's structured HTTP status, when present. Keep it
             separate from the diagnostic so callers can distinguish account
             access from a generic provider rejection without reading prose. *)
+      ; api_error_cause : api_error_cause option
+        (** The cause named by the root response's API diagnostic envelope
+            that ended the turn; [None] when no such envelope ended it or the
+            envelope named none. *)
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }

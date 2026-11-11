@@ -89,6 +89,13 @@ val respond_with_string : t -> Httpun.Response.t -> string -> unit
 (** {!try_respond_with_string} for a caller that does not record acceptance.
     The log line is the only trace of a rejected write. *)
 
+val respond_with_shared : t -> Httpun.Response.t -> Shared_body.t -> unit
+(** {!respond_with_string} for a body its owner keeps past the request
+    (RFC-0518 D5). On HTTP/2 nothing is reserved in the ledger, so the
+    response is never refused for capacity and a client that does not read
+    it holds none: the bytes go to h2 in the same 16 KiB slices, under the
+    stream's flush bound. HTTP/1.1 writes it as it writes a string. *)
+
 (** The body of a streaming response. *)
 module Body_writer : sig
   type t

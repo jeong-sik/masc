@@ -1,6 +1,7 @@
 module Pulls = Server_repository_pulls
 module Facts = Repository_pulls
 module Watch = Schedule_run_watch
+module Checks = Schedule_checks_watch
 
 let path_of_target (target : Watch.target) =
   let attempt =
@@ -13,6 +14,18 @@ let path_of_target (target : Watch.target) =
     (Watch.repo_to_string target.repo)
     target.run_id
     attempt
+;;
+
+(* One page of 100 runs. A commit with more runs than that is read as an
+   unreadable answer by {!Schedule_checks_watch.observation_of_runs_json}. *)
+let checks_runs_per_page = 100
+
+let checks_path_of_target (target : Checks.target) =
+  Printf.sprintf
+    "/repos/%s/actions/runs?head_sha=%s&per_page=%d"
+    (Watch.repo_to_string target.repo)
+    (Checks.sha_to_string target.sha)
+    checks_runs_per_page
 ;;
 
 let http_not_found = 404
@@ -43,15 +56,21 @@ let read_failure_of_status ~now_s response : Watch.read_failure option =
     Some (Watch.Response_unreadable "an HTTP status was read as a GraphQL failure")
 ;;
 
-let interpret ~now_s target (response : Pulls.response) =
+let interpret_with ~parse ~now_s (response : Pulls.response) =
   match read_failure_of_status ~now_s response with
   | Some failure -> Error failure
   | None ->
     (match Yojson.Safe.from_string response.body with
      | exception Yojson.Json_error message -> Error (Watch.Response_unreadable message)
-     | json ->
-       Watch.observation_of_run_json target json
-       |> Result.map_error (fun message -> Watch.Response_unreadable message))
+     | json -> parse json |> Result.map_error (fun message -> Watch.Response_unreadable message))
+;;
+
+let interpret ~now_s target response =
+  interpret_with ~parse:(Watch.observation_of_run_json target) ~now_s response
+;;
+
+let interpret_checks ~now_s target response =
+  interpret_with ~parse:(Checks.observation_of_runs_json target) ~now_s response
 ;;
 
 (* Why the reader cannot be used. A declaration that is absent stays absent
@@ -73,13 +92,31 @@ let failure_of_reader (reader : Facts.reader) : Watch.read_failure =
     Watch.Reader_not_ready (Printf.sprintf "%s is ready but its read was refused" keeper)
 ;;
 
-let read ~now ~http_get ~config target =
-  match Pulls.rest_get ~http_get ~config ~path:(path_of_target target) with
+let read_path ~now ~http_get ~config ~path ~interpret =
+  match Pulls.rest_get ~http_get ~config ~path with
   | Error (Pulls.Reader_not_ready reader) -> Error (failure_of_reader reader)
   | Error (Pulls.Reader_host_not_github host) ->
     Error
       (Watch.Reader_unavailable
          (Printf.sprintf "the pr_reader reads %s, and run reads go to github.com only" host))
   | Error (Pulls.Rest_transport_failed message) -> Error (Watch.Transport_failed message)
-  | Ok response -> interpret ~now_s:(now ()) target response
+  | Ok response -> interpret ~now_s:(now ()) response
+;;
+
+let read ~now ~http_get ~config target =
+  read_path
+    ~now
+    ~http_get
+    ~config
+    ~path:(path_of_target target)
+    ~interpret:(fun ~now_s response -> interpret ~now_s target response)
+;;
+
+let read_checks ~now ~http_get ~config target =
+  read_path
+    ~now
+    ~http_get
+    ~config
+    ~path:(checks_path_of_target target)
+    ~interpret:(fun ~now_s response -> interpret_checks ~now_s target response)
 ;;

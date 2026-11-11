@@ -4,6 +4,7 @@ module Pulls = Server_repository_pulls
 module Reader = Server_github_run_reader
 module Loop = Server_schedule_run_watch
 module Watch = Schedule_run_watch
+module Checks = Schedule_checks_watch
 
 (* One pass of the [until_github_run] loop over a real schedule store, and the
    pause it asks for. Every case answers from a stub transport; none reaches
@@ -239,6 +240,180 @@ let test_pass_wakes_early_when_the_reader_cannot_see_the_run () =
     (message_of woken)
 ;;
 
+(* --- The commit watch in the same loop --- *)
+
+let commit_sha = "8b666a19e3455100528bb90b861374c56e563f82"
+
+let commit_target =
+  match Checks.sha_of_string commit_sha with
+  | Ok sha -> { Checks.repo = repo_exn "jeong-sik/masc"; sha }
+  | Error detail -> fail detail
+;;
+
+let commit_runs_url =
+  "https://api.github.com/repos/jeong-sik/masc/actions/runs?head_sha=" ^ commit_sha ^ "&per_page=100"
+;;
+
+let run_url = "https://api.github.com/repos/jeong-sik/masc/actions/runs/41895911884"
+
+(* The answer for the commit: one approval run that ended, and one
+   [pull_request] run in [status]. *)
+let commit_runs status =
+  let conclusion = if String.equal status "completed" then {|"success"|} else "null" in
+  Printf.sprintf
+    {|{"total_count":2,"workflow_runs":[{"name":"Approval merge request","event":"pull_request_review","head_sha":%S,"status":"completed","conclusion":"success"},{"name":"PR type-check (dune build @check)","event":"pull_request","head_sha":%S,"status":%S,"conclusion":%s}]}|}
+    commit_sha
+    commit_sha
+    status
+    conclusion
+;;
+
+let checks_wake ~message =
+  `Assoc
+    [ "kind", `String Schedule_supported_kinds.keeper_wake
+    ; ( "body"
+      , `Assoc
+          [ "keeper_name", `String "k-1"
+          ; "message", `String message
+          ; Checks.watch_field, Checks.target_to_yojson commit_target
+          ] )
+    ]
+;;
+
+let create_checks_row config ~schedule_id =
+  match
+    Schedule_service.create
+      config
+      ~now:100.0
+      ~runner_tick_sec:1.0
+      ~schedule_id
+      ~requested_at:100.0
+      ~requested_by:(person "requester")
+      ~scheduled_by:(person "scheduler")
+      ~due_at:3600.0
+      ~payload:(checks_wake ~message:"merge if green")
+      ~source:Schedule_domain.Operator_request
+      ()
+  with
+  | Ok request -> request
+  | Error err -> fail (Schedule_service.service_error_to_string err)
+;;
+
+(* Answers each URL from the list; any other URL is an error that fails the
+   test, so a read the case did not expect cannot pass unnoticed. *)
+let routed_get routes =
+  let calls = ref [] in
+  let http_get ~url ~token:_ =
+    calls := url :: !calls;
+    match List.assoc_opt url routes with
+    | Some answer -> Ok answer
+    | None -> Error ("no route for " ^ url)
+  in
+  http_get, fun () -> List.rev !calls
+;;
+
+let test_pass_wakes_a_schedule_whose_commit_checks_completed () =
+  with_workspace
+  @@ fun config ->
+  declare_reader config "gho_reader";
+  ignore (create_checks_row config ~schedule_id:"s-1");
+  let http_get, calls = routed_get [ commit_runs_url, response 200 (commit_runs "completed") ] in
+  check (float 0.0) "the next pass is one interval away" Loop.poll_interval_sec (pass config http_get);
+  let woken = stored config "s-1" in
+  check (float 0.0) "due at the current second" 200.0 woken.Schedule_domain.due_at;
+  check
+    string
+    "the message lists the check run"
+    (Checks.wake_message
+       commit_target
+       (Checks.Checks_completed
+          [ { Checks.workflow = "PR type-check (dune build @check)"
+            ; event = Checks.Pull_request
+            ; conclusion = Some Watch.Success
+            }
+          ])
+       ~original:"merge if green")
+    (message_of woken);
+  check (list string) "one read of the commit" [ commit_runs_url ] (calls ());
+  check (float 0.0) "a second pass has nothing to read" Loop.poll_interval_sec (pass config http_get);
+  check int "still one read" 1 (List.length (calls ()))
+;;
+
+let test_pass_leaves_a_schedule_whose_commit_checks_are_going () =
+  with_workspace
+  @@ fun config ->
+  declare_reader config "gho_reader";
+  let before = create_checks_row config ~schedule_id:"s-1" in
+  let http_get, calls = routed_get [ commit_runs_url, response 200 (commit_runs "in_progress") ] in
+  check (float 0.0) "the next pass" Loop.poll_interval_sec (pass config http_get);
+  let after = stored config "s-1" in
+  check string "same instance" before.Schedule_domain.schedule_instance_id after.Schedule_domain.schedule_instance_id;
+  check (float 0.0) "same due time" 3600.0 after.Schedule_domain.due_at;
+  check int "read again at the next pass" 1 (List.length (calls ()))
+;;
+
+let test_pass_serves_a_run_watch_and_a_commit_watch_together () =
+  with_workspace
+  @@ fun config ->
+  declare_reader config "gho_reader";
+  ignore (create_row config ~schedule_id:"run" (target 41895911884));
+  ignore (create_checks_row config ~schedule_id:"commit");
+  let http_get, calls =
+    routed_get
+      [ run_url, response 200 completed_run
+      ; commit_runs_url, response 200 (commit_runs "completed")
+      ]
+  in
+  ignore (pass config http_get);
+  check (list string) "one read each" [ run_url; commit_runs_url ] (calls ());
+  check (float 0.0) "the run watch woke" 200.0 (stored config "run").Schedule_domain.due_at;
+  check (float 0.0) "the commit watch woke" 200.0 (stored config "commit").Schedule_domain.due_at
+;;
+
+(* Both watches read with one account, so after a limit the run watch met, the
+   commit is not asked for. *)
+let test_pass_skips_the_commit_read_after_a_rate_limit () =
+  with_workspace
+  @@ fun config ->
+  declare_reader config "gho_reader";
+  ignore (create_row config ~schedule_id:"run" (target 41895911884));
+  ignore (create_checks_row config ~schedule_id:"commit");
+  let limited = response 403 ~remaining:(Some 0) ~reset:(Some 2000.0) {|{"message":"rate limit"}|} in
+  let http_get, calls = routed_get [ run_url, limited; commit_runs_url, limited ] in
+  check (float 0.0) "until the time GitHub gave" (2000.0 -. 200.5) (pass config http_get);
+  check (list string) "the commit was not read" [ run_url ] (calls ());
+  check (float 0.0) "the commit watch keeps its fallback" 3600.0 (stored config "commit").Schedule_domain.due_at
+;;
+
+let test_pass_waits_out_a_rate_limit_met_on_the_commit () =
+  with_workspace
+  @@ fun config ->
+  declare_reader config "gho_reader";
+  ignore (create_checks_row config ~schedule_id:"commit");
+  let limited = response 403 ~remaining:(Some 0) ~reset:(Some 2000.0) {|{"message":"rate limit"}|} in
+  let http_get, _ = routed_get [ commit_runs_url, limited ] in
+  check (float 0.0) "until the time GitHub gave" (2000.0 -. 200.5) (pass config http_get)
+;;
+
+let test_pass_wakes_a_commit_watch_early_when_the_reader_cannot_see_the_repository () =
+  with_workspace
+  @@ fun config ->
+  declare_reader config "gho_reader";
+  ignore (create_checks_row config ~schedule_id:"commit");
+  let http_get, _ = routed_get [ commit_runs_url, response 404 not_found_body ] in
+  ignore (pass config http_get);
+  let woken = stored config "commit" in
+  check (float 0.0) "due at the current second" 200.0 woken.Schedule_domain.due_at;
+  check
+    string
+    "the message says the runs could not be read"
+    (Checks.wake_message
+       commit_target
+       (Checks.Checks_unreadable Watch.Not_visible)
+       ~original:"merge if green")
+    (message_of woken)
+;;
+
 (* --- The pause --- *)
 
 let outcome verdict : Watch.outcome =
@@ -283,6 +458,32 @@ let () =
             "wakes early when the reader cannot see the run"
             `Quick
             test_pass_wakes_early_when_the_reader_cannot_see_the_run
+        ] )
+    ; ( "commit watch"
+      , [ test_case
+            "wakes a schedule whose checks completed"
+            `Quick
+            test_pass_wakes_a_schedule_whose_commit_checks_completed
+        ; test_case
+            "leaves a schedule whose checks are going"
+            `Quick
+            test_pass_leaves_a_schedule_whose_commit_checks_are_going
+        ; test_case
+            "serves a run watch and a commit watch together"
+            `Quick
+            test_pass_serves_a_run_watch_and_a_commit_watch_together
+        ; test_case
+            "skips the commit read after a rate limit"
+            `Quick
+            test_pass_skips_the_commit_read_after_a_rate_limit
+        ; test_case
+            "waits out a rate limit met on the commit"
+            `Quick
+            test_pass_waits_out_a_rate_limit_met_on_the_commit
+        ; test_case
+            "wakes early when the reader cannot see the repository"
+            `Quick
+            test_pass_wakes_a_commit_watch_early_when_the_reader_cannot_see_the_repository
         ] )
     ; "pause", [ test_case "pause after" `Quick test_pause_after ]
     ]

@@ -1,4 +1,5 @@
-(** Reads one GitHub Actions run for {!Schedule_run_watch}.
+(** Reads GitHub Actions runs for {!Schedule_run_watch} and
+    {!Schedule_checks_watch}: one run by id, or the runs of one commit.
 
     The GET goes to [api.github.com] with the token of the Keeper named by
     runtime.toml [\[repositories\] pr_reader] ({!Server_repository_pulls.rest_get}),
@@ -7,6 +8,9 @@
 val path_of_target : Schedule_run_watch.target -> string
 (** [/repos/<owner>/<repo>/actions/runs/<id>], followed by [/attempts/<n>]
     when the target names an attempt. *)
+
+val checks_path_of_target : Schedule_checks_watch.target -> string
+(** [/repos/<owner>/<repo>/actions/runs?head_sha=<sha>&per_page=100]. *)
 
 val interpret :
   now_s:float ->
@@ -34,3 +38,25 @@ val read :
     could not be read is {!Schedule_run_watch.Reader_not_ready}, which can
     pass. A request that did not complete is
     {!Schedule_run_watch.Transport_failed}. *)
+
+val interpret_checks :
+  now_s:float ->
+  Schedule_checks_watch.target ->
+  Server_repository_pulls.response ->
+  (Schedule_checks_watch.observation, Schedule_run_watch.read_failure) result
+(** What a recorded answer says about the checks of the target commit. The
+    status rules are those of {!interpret}. GitHub answers 200 with no runs for
+    a commit it holds no run of, so that case is
+    {!Schedule_checks_watch.Not_settled}, not {!Schedule_run_watch.Not_visible}:
+    a schedule that waits for a commit no workflow ran on keeps its fallback
+    time. A body that is not JSON, is not a runs list or holds a run of another
+    commit is {!Schedule_run_watch.Response_unreadable}. *)
+
+val read_checks :
+  now:(unit -> float) ->
+  http_get:Server_repository_pulls.http_get ->
+  config:Workspace.config ->
+  Schedule_checks_watch.target ->
+  (Schedule_checks_watch.observation, Schedule_run_watch.read_failure) result
+(** One read of the runs of the target commit, with the account and the
+    failures of {!read}. *)

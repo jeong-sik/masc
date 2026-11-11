@@ -1,0 +1,24 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                               │
+├──────────────────────────────────────────────────────────┤
+│                   being read as text                     │
+│  proof            the ids behind a skill row: use= the   │
+│                   read call, turn= the turn, runtime= who│
+│                   ran it, rev= the skill text's revision │
+│  observed action  a tool call the server attributes to   │
+│                   the skill above it                     │
+│                                                          │
+│◇ Prompt marks                                            │
+│  *                your override; unmarked is the file    │
+│  ⊘                saved, not applied; the file is used   │
+│  !                no prompt file behind this key         │
+│                                                          │
+│◇ Param marks                                             │
+│  ●                set by you; default shown beside it    │
+│  ○                the registered default                 │
+│                                                          │
+│  [lines 1494-1509/1509]                                  │
+└──────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:filter  Esc:close  …
+ Choose a Keeper before writing · i:choose

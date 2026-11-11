@@ -1,0 +1,24 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                               │
+├──────────────────────────────────────────────────────────┤
+│                  below become the body)                  │
+│  /keeper <name>  switch this pane to another keeper      │
+│  /addons [inspect|attach JSON|observe ID|detach ID|slice │
+│  JSON|evidence JSON]                                     │
+│                  open optional cross-lane observations   │
+│                  and package actions                     │
+│  /play [invites|invite <name> <hours>|link [name]|revoke │
+│  <name>]                                                 │
+│                  list, issue or revoke shared DOS play   │
+│                  links                                   │
+│  /listen         play the newest audio or MIDI attachment│
+│                  in this conversation                    │
+│  /artifacts (/reports)  browse published Markdown and    │
+│                  HTML reports in a full-width reader     │
+│  /settings       open type-aware runtime settings        │
+│  /diff           open git changes and diff for the       │
+│  [lines 31-46/1509]                                      │
+└──────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:filter  Esc:close  …
+ Choose a Keeper before writing · i:choose

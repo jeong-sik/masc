@@ -150,6 +150,11 @@ let window_label ~cells full narrow =
   ^ Layout.fit_width (if Layout.display_width full <= cells then full else narrow) cells
   ^ Ansi.reset
 
+(* One label in place of a half-hour band that has nothing read to draw, in the
+   band's width; [?] when the label does not fit. *)
+let history_unknown_label ~ko ~cells =
+  window_label ~cells (if ko then "기록 미확인" else "history unknown") "?"
+
 let wake_summary ~ko slots =
   let cells = List.length slots in
   let known, unknown = List.fold_left (fun (known, unknown) -> function
@@ -206,15 +211,31 @@ let failed_count readings index =
     | Pulse.Half_hour_unknown -> count, true
     | Pulse.Half_hour_quiet | Pulse.Half_hour_ok -> count, unknown) (0, false) readings
 
+(* Every half hour of every Keeper is unread: the fleet has no history to
+   count, so its band says so once, as each Keeper's own band does. *)
+let no_history = function
+  | [] -> false
+  | _ :: _ as readings ->
+      List.for_all (List.for_all (function
+        | Pulse.Half_hour_unknown -> true
+        | Pulse.Half_hour_quiet | Pulse.Half_hour_ok | Pulse.Half_hour_failed
+        | Pulse.Half_hour_failed_and_ok -> false)) readings
+
+(* A grid with no band has no cells for the two maxima to scale, and the
+   maximum over no cells is not a reading: there is no row to draw. *)
 let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
+  if grid.side_cells <= 0 then None
+  else
   let readings = List.map (fun row ->
     let pulse = Option.bind (runtime row) (fun row -> row.Decode.kr_recent_turns) in
     Pulse.half_hours ~now ~count:grid.side_cells pulse) rows in
   let counts = List.init grid.side_cells (failed_count readings) in
   let peak = List.fold_left (fun p (n, _) -> max p n) 0 counts in
-  let pulse = String.concat "" (List.map (fun (n, unknown) ->
-    if n > 0 then Theme.warn () ^ Grid.level_glyph ~peak n ^ Ansi.reset
-    else if unknown then "?" else "·") counts) in
+  let pulse =
+    if no_history readings then history_unknown_label ~ko ~cells:grid.side_cells
+    else String.concat "" (List.map (fun (n, unknown) ->
+      if n > 0 then Theme.warn () ^ Grid.level_glyph ~peak n ^ Ansi.reset
+      else if unknown then "?" else "·") counts) in
   let active = List.filter (fun row -> match runtime row with
     | Some row -> not row.Decode.kr_paused | None -> true) rows in
   let future = match active with
@@ -231,7 +252,7 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
   let wake_max = if wake_peak = 0 && List.exists (function
     | Next.Wakes_unknown | Next.Wakes_with_unknown _ -> true
     | Next.Wakes _ -> false) future then "?" else string_of_int wake_peak in
-  { name = (if grid.name_cells >= 21 then "fleet fail/30m max " else "fleet max ") ^ pulse_max
+  Some { name = (if grid.name_cells >= 21 then "fleet fail/30m max " else "fleet max ") ^ pulse_max
   ; pulse; strip
   ; due = let label = "max " ^ wake_max in
       if Layout.display_width label <= Grid.due_cells then label else Layout.compact_count wake_peak }

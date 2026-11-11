@@ -27,16 +27,22 @@ val wake_strip :
     scales known counts. {!wake_summary} retains the partial-count notice.
     Narrow labels fall back to one [?] or [-]. *)
 
+val history_unknown_label : ko:bool -> cells:int -> string
+(** The past half-hour band when nothing in it was read: one label in the
+    band's width, [?] when the label does not fit, nothing for zero cells. *)
+
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 
 val fleet_cells :
   ko:bool -> now:float -> grid:Masc_tui_keeper_grid.t ->
   wakes:(Masc_tui_keeper_list_model.row -> Masc_tui_keeper_next_run.wake_slot list) ->
-  Masc_tui_keeper_list_model.row list -> fleet_cells
+  Masc_tui_keeper_list_model.row list -> fleet_cells option
 (** Half-hour failed-Keeper counts, not failed-turn counts; rested counts as
-    failure. Missing pulse readings remain [?]. The wake strip uses
+    failure. Missing pulse readings remain [?] per half hour; when no Keeper
+    has any reading the pulse is {!history_unknown_label}. The wake strip uses
     {!wake_strip}; an unknown maximum remains [?]. Paused Keepers do not
-    contribute wakes. Draw these fields on the shared grid. *)
+    contribute wakes. Draw these fields on the shared grid. [None] when the
+    grid has no band: the two maxima would scale cells that are not drawn. *)
 
 val selected_summary :
   now:float -> activity_cell:string ->

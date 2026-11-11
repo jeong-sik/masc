@@ -381,6 +381,8 @@ cd specs && java -XX:+UseParallelGC -Xmx2g -cp ~/.local/lib/tla/tla2tools-1.8.0.
 
 정석 쪽을 근거와 대가를 달아 먼저 써요.
 
+**결정(사용자, 2026-11-12).** 1, 2, 3, 5번은 아래 추천대로 정했어요: 소유 기록은 실행 기록의 새 필드(`receipt_obligations`), `load` 의 `~viewer` 는 필수 인자, 출처 없는 request 는 typed `Source_lost`, wait 는 별도 도구예요. 4, 6, 7번은 아직 정하지 않았고 추천이 기본이에요.
+
 1. **소유 기록을 어디에 적나.**
    - 추천: (i) 실행 기록의 새 필드(4.2).
    - 근거: 끝나는 길이 `Settle` 하나로 모여요. `gate_obligations` 선례가 있어요. 재개가 지금 있는 checkpoint continuation 이에요.

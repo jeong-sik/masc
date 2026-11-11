@@ -133,3 +133,17 @@ val binding_effect_observation : binding:binding -> Keeper_provider_attempt_effe
 type request_boundary
 val capture_request_boundary : binding -> (request_boundary, string) result
 val request_evidence : binding -> boundary:request_boundary -> runtime_id:string -> Request_observation.evidence
+
+val unreported_request_evidence :
+  binding:binding option ->
+  dispatch:Keeper_attempt_dispatch.t ->
+  checkpoint_owner:Runtime_execution.checkpoint_owner option ->
+  Request_observation.evidence
+(** Evidence for an attempt that reported none. A refused attempt is
+    [Not_dispatched]. An official client sends its provider requests itself
+    and no MASC journal holds them, so its attempt is [No_durable_scope] with
+    or without a [binding]. An Agent Core attempt under a [binding] reports
+    {!request_evidence}; one that did not is [Read_failed], and without a
+    [binding] it is [No_durable_scope]. [checkpoint_owner] is [None] for a
+    candidate that never resolved to a runtime. The walk refuses such a
+    candidate before dispatch; a dispatched one takes the Agent Core rows. *)

@@ -2018,12 +2018,12 @@ let observe_native_attempt ?on_request_observation binding run ~idx ~runtime_id 
     on_request_observation in
   let result, checkpoint, effect_disposition, dispatch = run ?on_request_evidence ~idx ~runtime_id candidate in
   if not !observed then Option.iter (fun observe ->
-    let evidence = match dispatch, binding with
-      | Keeper_attempt_dispatch.Rejected_before_dispatch, _ -> Request_observation.Not_dispatched
-      | Keeper_attempt_dispatch.Dispatched, None -> Request_observation.No_durable_scope
-      | Keeper_attempt_dispatch.Dispatched, Some _ ->
-        Request_observation.Read_failed "native API invocation returned no current request observation" in
-    observe evidence) on_request_evidence;
+    let checkpoint_owner = match candidate with
+      | Resolved_runtime runtime ->
+        Some (Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution)
+      | Missing_runtime _ -> None in
+    observe (Keeper_direct_native_continuation.unreported_request_evidence
+      ~binding ~dispatch ~checkpoint_owner)) on_request_evidence;
   let effect_disposition = match binding, effect_disposition with
     | Some binding, Keeper_provider_attempt_effect.No_effect_observed ->
       Keeper_direct_native_continuation.binding_effect_observation ~binding

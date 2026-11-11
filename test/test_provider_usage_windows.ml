@@ -1254,16 +1254,20 @@ let test_runtime_publication_is_visible_before_wait () =
 
 (* The [usage] object of a Muse Code [usage/changed] or [usage/read] answer,
    in the MSP field names. *)
-let muse_usage ~window_mins ~window_percent =
+let muse_usage_at ~observed_at_ms ~window_mins ~window_percent =
   let json =
     Printf.sprintf
-      {|{"usage":{"observedAtMs":1791250000000,"tier":"power","window":{"usedPercent":%d,"resetsAtMs":1791262200000,"windowDurationMins":%d},"weekly":{"usedPercent":12,"resetsAtMs":1791730800000}}}|}
-      window_percent window_mins
+      {|{"usage":{"observedAtMs":%d,"tier":"power","window":{"usedPercent":%d,"resetsAtMs":1791262200000,"windowDurationMins":%d},"weekly":{"usedPercent":12,"resetsAtMs":1791730800000}}}|}
+      observed_at_ms window_percent window_mins
   in
   match Runtime_muse_msp.parse_usage_read_result (Yojson.Safe.from_string json) with
   | Ok (Some usage) -> usage
   | Ok None -> fail "usage fixture parsed as absent"
   | Error error -> fail (Runtime_muse_msp.error_to_string error)
+;;
+
+let muse_usage ~window_mins ~window_percent =
+  muse_usage_at ~observed_at_ms:1791250000000 ~window_mins ~window_percent
 ;;
 
 let muse_window_rows (windows : Usage.window list) =
@@ -1341,7 +1345,7 @@ let test_muse_observe_records_and_rests_by_one_rule () =
     Runtime_muse_usage.observe ~scope:relength Runtime_muse_usage.Usage_changed
       (muse_usage ~window_mins:300 ~window_percent:37);
     Runtime_muse_usage.observe ~scope:relength Runtime_muse_usage.Usage_read
-      (muse_usage ~window_mins:180 ~window_percent:40);
+      (muse_usage_at ~observed_at_ms:1791250060000 ~window_mins:180 ~window_percent:40);
     (match Usage.state ~scope:relength with
      | Usage.Reported (first, rest) ->
        check (list string) "a read with a new rolling length replaces the pushed row"

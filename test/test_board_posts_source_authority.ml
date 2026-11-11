@@ -1,4 +1,4 @@
-(** Actual posts-source admission, all-writer CAS, and effect settlement.
+(** Actual posts-source admission, all-writer CAS, and unknown-write refusal.
     Fixtures load real files and use the public Board producers. No fabricated
     load result or cursor grants write authority. *)
 
@@ -676,6 +676,13 @@ let test_unknown_rewrite_cannot_be_read_clear base_path _workspace =
   let store, _, armed, _, fired = fault_store base_path in
   load_posts store 0;
   let post = require_post (create store "before unknown rewrite") in
+  let post_id = Board.Post_id.to_string post.id in
+  require_board (Board.set_thread_id store ~post_id ~thread_id:"pending-memory-canary");
+  load_votes store;
+  ignore (require_board (Board.vote store ~reader:Masc_board_handlers.Board_access.Operator
+    ~voter:"pending-memory-voter" ~post_id ~direction:Board.Up));
+  Alcotest.(check bool) "actual vote leaves a dirty parent snapshot" true
+    (Board.with_lock store (fun () -> store.dirty_posts));
   armed := true;
   require_io_refusal (edit store post "published but durability unknown");
   Alcotest.(check int) "actual post-rename parent-sync hook failed once" 1 !fired;
@@ -688,9 +695,18 @@ let test_unknown_rewrite_cannot_be_read_clear base_path _workspace =
   require_unknown_parent_sync store;
   require_pre_effect (create store "ordinary reload cannot authorize another write");
   require_io_refusal (edit store post "cannot overwrite an unsettled effect");
+  Alcotest.(check string) "display retains the old row without write authority"
+    "before unknown rewrite" (current store post).body;
+  Alcotest.(check bool) "unknown edit retains the pending dirty snapshot" true
+    (Board.with_lock store (fun () -> store.dirty_posts));
   Board.flush_dirty store;
   Alcotest.(check string) "unknown source cannot be overwritten or cleaned" bytes
-    (read_bytes (Board.persist_path store))
+    (read_bytes (Board.persist_path store));
+  require_unknown_parent_sync store;
+  Alcotest.(check bool) "refused flush keeps the pending snapshot dirty" true
+    (Board.with_lock store (fun () -> store.dirty_posts));
+  Alcotest.(check string) "fresh load keeps the actual new body after refused flush"
+    "published but durability unknown" (current (reloaded base_path 1) post).body
 
 let jsonl_row_count path =
   read_bytes path |> String.split_on_char '\n'
@@ -1023,261 +1039,6 @@ let test_non_eio_source_inspection () =
     Alcotest.(check string) "preflight never repairs the torn source"
       torn (read_bytes path))
 
-let settle store =
-  Board.with_persist_lock store (fun () -> Board.settle_posts_source store)
-
-let require_pending store =
-  match store.Board.posts_source with
-  | Board.Posts_unsettled { pending; _ } -> pending
-  | Board.Posts_unobserved | Board.Posts_readable _
-  | Board.Posts_refused _ ->
-    Alcotest.fail "the source is not unsettled"
-
-let require_settled_written outcome =
-  match outcome with
-  | Board.Posts_settled_written { observation; _ } -> observation
-  | Board.Posts_settled_not_written _ | Board.Posts_settle_superseded _
-  | Board.Posts_settle_inconclusive _ | Board.Posts_settle_nothing_to_settle ->
-    Alcotest.fail "landed bytes were not proven written"
-
-let test_settle_proves_landed_rewrite base_path _workspace =
-  let store, _, armed, _, fired = fault_store base_path in
-  load_posts store 0;
-  let post = require_post (create store "before unknown rewrite") in
-  armed := true;
-  require_io_refusal (edit store post "published but durability unknown");
-  Alcotest.(check int) "actual post-rename parent-sync hook failed once" 1 !fired;
-  require_unknown_parent_sync store;
-  let file_before = read_bytes (Board.persist_path store) in
-  let pending = require_pending store in
-  let pre_cursor = pending.expected.snapshot.cursor in
-  refuse_load store;
-  require_unknown_parent_sync store;
-  let observation = require_settled_written (settle store) in
-  Alcotest.(check string) "settled observation carries the published bytes"
-    file_before observation.snapshot.bytes;
-  Alcotest.(check bool) "proof rewrite replaced the undurable file" false
-    (Fs_compat.Private_jsonl_cursor.equal pre_cursor observation.snapshot.cursor);
-  Alcotest.(check string) "proof rewrite preserved every published byte"
-    file_before (read_bytes (Board.persist_path store));
-  (* Settle proves the source only: memory keeps the pre-write row until the
-     editor re-applies; no table was reloaded. *)
-  Alcotest.(check string) "memory still holds the pre-write row"
-    "before unknown rewrite" (current store post).body;
-  let disk_view = reloaded base_path 1 in
-  Alcotest.(check string) "fresh reload sees the proven post"
-    "published but durability unknown" (current disk_view post).body;
-  ignore (require_board (edit store post "next edit after settle"));
-  let next = reloaded base_path 1 in
-  Alcotest.(check string) "store accepts writes after settle"
-    "next edit after settle" (current next post).body
-
-let test_settle_absent_retry_stays_fenced base_path _workspace =
-  let store, _, armed, _, _ = fault_store base_path in
-  load_posts store 0;
-  let post = require_post (create store "before unknown rewrite") in
-  let path = Board.persist_path store in
-  let original = read_bytes path in
-  (* The edit below renames over the pre-write file, which frees its inode,
-     and ext4 gives a freed inode number to the next file it creates. This
-     descriptor keeps the number in use until the restored copy has its own. *)
-  let pre_write_file = Unix.openfile path [Unix.O_RDONLY] 0 in
-  Fun.protect ~finally:(fun () -> Unix.close pre_write_file) (fun () ->
-    armed := true;
-    require_io_refusal (edit store post "published but durability unknown");
-    require_unknown_parent_sync store;
-    (* An external actor restores the original content under a fresh identity:
-       bytes match the pre-write snapshot, but the cursor moved. *)
-    let restored_path = path ^ ".externally-restored" in
-    write_bytes restored_path original;
-    Unix.rename restored_path path);
-  let restored = match settle store with
-    | Board.Posts_settled_not_written { observation; _ } -> observation
-    | Board.Posts_settled_written _ | Board.Posts_settle_superseded _
-    | Board.Posts_settle_inconclusive _ | Board.Posts_settle_nothing_to_settle ->
-      Alcotest.fail "absent effect was not restored to its pre-write observation" in
-  Alcotest.(check string) "restored observation carries pre-write bytes"
-    original restored.snapshot.bytes;
-  let actual =
-    match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
-      |> Fs_compat.private_jsonl_snapshot_success_receipt with
-    | Ok receipt -> receipt.value
-    | Error error ->
-      Alcotest.fail ("restored file lost its locked readability: "
-        ^ Fs_compat.private_jsonl_transaction_error_to_string error) in
-  Alcotest.(check bool) "bytes match but the file identity moved" false
-    (Fs_compat.Private_jsonl_cursor.equal restored.snapshot.cursor actual.cursor);
-  (* The restored pre-write cursor fences the retry: bytes alone never
-     authorize it, and the failed retry touches nothing. *)
-  let snapshot = Board.with_persist_lock store (fun () ->
-    Board.with_lock store (fun () -> Board.capture_posts_snapshot store)) in
-  let outcome = Board.with_persist_lock store (fun () ->
-    Board.save_posts_snapshot store snapshot) in
-  (match outcome with
-   | Board.Posts_not_written {
-       failure = Board.Posts_transaction_failed (Fs_compat.Cursor_mismatch _); _ } -> ()
-   | Board.Posts_not_written _ | Board.Posts_written _ | Board.Posts_write_unknown _ ->
-     Alcotest.fail "fenced retry was not refused on cursor mismatch");
-  Alcotest.(check string) "fenced retry never touched the restored file"
-    original (read_bytes path);
-  (match store.Board.posts_source with
-   | Board.Posts_refused {
-       failure = Board.Posts_transaction_failed (Fs_compat.Cursor_mismatch _); _ } -> ()
-   | Board.Posts_unobserved | Board.Posts_readable _
-   | Board.Posts_refused _ | Board.Posts_unsettled _ ->
-     Alcotest.fail "fenced retry left no cursor-mismatch refusal");
-  let fresh = reloaded base_path 1 in
-  Alcotest.(check string) "restored file keeps the pre-write row"
-    "before unknown rewrite" (current fresh post).body;
-  ignore (require_board (edit fresh post "edit on the reloaded store"));
-  check_observed_bytes fresh
-
-let test_settle_preserves_memory_tables base_path _workspace =
-  let store, _, armed, _, _ = fault_store base_path in
-  load_posts store 0;
-  load_votes store;
-  let post = require_post (create store "memory canary post") in
-  let post_id = Board.Post_id.to_string post.id in
-  require_board (Board.set_thread_id store ~post_id ~thread_id:"canary-thread");
-  ignore (require_board (Board.vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"canary-voter" ~post_id ~direction:Board.Up));
-  let rows = Hashtbl.length store.Board.posts in
-  armed := true;
-  require_io_refusal (edit store post "memory survives unknown rewrite");
-  require_unknown_parent_sync store;
-  ignore (require_settled_written (settle store));
-  Alcotest.(check int) "settle reloaded no table rows" rows (Hashtbl.length store.Board.posts);
-  let kept = current store post in
-  Alcotest.(check string) "unstored pre-write row preserved" "memory canary post" kept.body;
-  Alcotest.(check (option string)) "memory-only canary preserved"
-    (Some "canary-thread") kept.thread_id;
-  Board.flush_dirty store;
-  let flushed = reloaded base_path 1 in
-  let saved = current flushed post in
-  Alcotest.(check string) "flushed row keeps the unstored body" "memory canary post" saved.body;
-  Alcotest.(check (pair int int)) "unstored vote persisted by later flush" (1, 0)
-    (saved.votes_up, saved.votes_down)
-
-let test_settle_superseded_on_third_party_rewrite base_path _workspace =
-  let store, _, armed, _, _ = fault_store base_path in
-  load_posts store 0;
-  let post = require_post (create store "before unknown rewrite") in
-  armed := true;
-  require_io_refusal (edit store post "published but durability unknown");
-  require_unknown_parent_sync store;
-  let peer = reloaded base_path 1 in
-  ignore (require_board (edit peer post "third-party rewrite wins"));
-  let third_party = read_bytes (Board.persist_path store) in
-  (match settle store with
-   | Board.Posts_settle_superseded { failure = Board.Posts_snapshot_stale; _ } -> ()
-   | Board.Posts_settled_written _ | Board.Posts_settled_not_written _
-   | Board.Posts_settle_inconclusive _ | Board.Posts_settle_nothing_to_settle
-   | Board.Posts_settle_superseded _ ->
-     Alcotest.fail "third-party state was not superseded as stale");
-  Alcotest.(check string) "superseding settle never touched third-party bytes"
-    third_party (read_bytes (Board.persist_path store));
-  (match store.Board.posts_source with
-   | Board.Posts_refused { failure = Board.Posts_snapshot_stale; _ } -> ()
-   | Board.Posts_unobserved | Board.Posts_readable _
-   | Board.Posts_refused _ | Board.Posts_unsettled _ ->
-     Alcotest.fail "superseded settle left no stale refusal");
-  load_posts store 1;
-  Alcotest.(check string) "refused store reloads the third-party state"
-    "third-party rewrite wins" (current store post).body;
-  ignore (require_board (edit store post "edit after superseded settle"));
-  check_observed_bytes store
-
-let direction_name = function
-  | Board.Direction_landed -> "landed"
-  | Board.Direction_absent -> "absent"
-  | Board.Direction_diverged -> "diverged"
-
-let test_settle_direction_needs_kind_and_bytes base_path _workspace =
-  let store, _, armed, _, _ = fault_store base_path in
-  load_posts store 0;
-  let post = require_post (create store "before unknown rewrite") in
-  armed := true;
-  require_io_refusal (edit store post "published but durability unknown");
-  let pending = require_pending store in
-  let observed_intended =
-    match Fs_compat.read_private_jsonl_durable_locked_result
-      (Board.persist_path store) ~after:None
-      |> Fs_compat.private_jsonl_snapshot_success_receipt with
-    | Ok receipt -> receipt.value
-    | Error error ->
-      Alcotest.fail ("published bytes lost their locked readability: "
-        ^ Fs_compat.private_jsonl_transaction_error_to_string error) in
-  let observed_as content = { observed_intended with bytes = content } in
-  let check_direction message kind content expected =
-    let verdict = Board.settle_direction_for_testing
-      ~pending:{ pending with kind } (observed_as content) in
-    Alcotest.(check string) message expected (direction_name verdict) in
-  let original = pending.expected.snapshot.bytes in
-  let intended = pending.intended_bytes in
-  let extended = intended ^ "{\"extra\":true}\n" in
-  check_direction "rewrite over original bytes is absent" Board.Rewrite_write original "absent";
-  check_direction "rewrite over intended bytes is landed" Board.Rewrite_write intended "landed";
-  check_direction "rewrite over third-party bytes is diverged" Board.Rewrite_write
-    (original ^ "{\"third\":1}\n") "diverged";
-  check_direction "append over original bytes is absent" Board.Append_write original "absent";
-  check_direction "append over intended bytes is landed" Board.Append_write intended "landed";
-  check_direction "append keeps its landed prefix under later bytes" Board.Append_write
-    extended "landed";
-  check_direction "rewrite demands exact bytes, not a prefix" Board.Rewrite_write
-    extended "diverged"
-
-let test_settle_missing_is_superseded base_path _workspace =
-  let store, _, armed, _, _ = fault_store base_path in
-  load_posts store 0;
-  let post = require_post (create store "before unknown rewrite") in
-  armed := true;
-  require_io_refusal (edit store post "published but durability unknown");
-  require_unknown_parent_sync store;
-  Unix.unlink (Board.persist_path store);
-  (match settle store with
-   | Board.Posts_settle_superseded { failure = Board.Posts_missing; _ } -> ()
-   | Board.Posts_settled_written _ | Board.Posts_settled_not_written _
-   | Board.Posts_settle_inconclusive _ | Board.Posts_settle_nothing_to_settle
-   | Board.Posts_settle_superseded _ ->
-     Alcotest.fail "missing file was not superseded as missing");
-  Alcotest.(check bool) "superseding settle recreated nothing" false
-    (Sys.file_exists (Board.persist_path store));
-  (match store.Board.posts_source with
-   | Board.Posts_refused { failure = Board.Posts_missing; _ } -> ()
-   | Board.Posts_unobserved | Board.Posts_readable _
-   | Board.Posts_refused _ | Board.Posts_unsettled _ ->
-     Alcotest.fail "superseded settle left no missing refusal");
-  refuse_load store
-
-let test_settle_nothing_to_settle_without_io base_path _workspace =
-  present_empty_posts base_path;
-  let posts_calls = ref 0 in
-  let store = Board.create_store_with_source_io_for_testing ~base_path
-    ~io:{ posts = Some (counting_io posts_calls) } () in
-  load_posts store 0;
-  ignore (require_post (create store "settled store"));
-  let before_posts = !posts_calls in
-  let retained = store.Board.posts_source in
-  (match settle store with
-   | Board.Posts_settle_nothing_to_settle -> ()
-   | Board.Posts_settled_written _ | Board.Posts_settled_not_written _
-   | Board.Posts_settle_superseded _ | Board.Posts_settle_inconclusive _ ->
-     Alcotest.fail "readable store had something to settle");
-  Alcotest.(check int) "settle on readable performs no posts IO" before_posts !posts_calls;
-  Alcotest.(check bool) "settle on readable keeps its state" true
-    (store.Board.posts_source == retained);
-  Unix.unlink (Board.persist_path store);
-  refuse_load store;
-  let refused_posts = !posts_calls in
-  let refused = store.Board.posts_source in
-  (match settle store with
-   | Board.Posts_settle_nothing_to_settle -> ()
-   | Board.Posts_settled_written _ | Board.Posts_settled_not_written _
-   | Board.Posts_settle_superseded _ | Board.Posts_settle_inconclusive _ ->
-     Alcotest.fail "refused store had something to settle");
-  Alcotest.(check int) "settle on refused performs no posts IO" refused_posts !posts_calls;
-  Alcotest.(check bool) "settle on refused keeps its state" true
-    (store.Board.posts_source == refused)
-
 let test_unknown_reserved_keeps_mutex_usable base_path _workspace =
   present_empty_posts base_path;
   let armed = ref false and fired = ref 0 in
@@ -1304,14 +1065,19 @@ let test_unknown_reserved_keeps_mutex_usable base_path _workspace =
    | Board.Posts_refused _ | Board.Posts_unsettled _ ->
      Alcotest.fail "reserved rename lost its unknown outcome");
   let file_before = read_bytes (Board.persist_path store) in
-  let observation = require_settled_written (settle store) in
-  Alcotest.(check string) "reserved unknown settles to its published bytes"
-    file_before observation.snapshot.bytes;
-  ignore (require_board (edit store post "next edit after reserved settle"));
+  ignore (Board.with_persist_lock store (fun () -> ()));
+  ignore (Board.with_lock store (fun () -> "state lock usable"));
+  require_io_refusal (edit store post "same-store retry remains refused");
+  Board.flush_dirty store;
+  require_unknown_parent_sync store;
+  Alcotest.(check string) "unknown retry and flush keep the published bytes"
+    file_before (read_bytes (Board.persist_path store));
   let next = reloaded base_path 1 in
-  Alcotest.(check string) "reserved settle kept the mutex usable"
-    "next edit after reserved settle" (current next post).body;
-  ignore (Board.with_lock store (fun () -> "state lock usable"))
+  Alcotest.(check string) "fresh load observes the published reserved rewrite"
+    "reserved rename published" (current next post).body;
+  ignore (require_board (edit next post "edit through the fresh store"));
+  Alcotest.(check string) "fresh store accepts a new edit without rearming the old one"
+    "edit through the fresh store" (current (reloaded base_path 1) post).body
 
 let test_explicit_raise_poisons_persist_only base_path _workspace =
   present_empty_posts base_path;
@@ -1330,10 +1096,7 @@ let test_explicit_raise_poisons_persist_only base_path _workspace =
     (store.Board.posts_source == retained);
   ignore (Board.with_lock store (fun () -> "state lock still usable"));
   Alcotest.(check string) "state reads still work"
-    "before explicit poison" (current store post).body;
-  (match Board.with_persist_lock store (fun () -> Board.settle_posts_source store) with
-   | _ -> Alcotest.fail "settle entry did not surface poison"
-   | exception Eio.Mutex.Poisoned _ -> ())
+    "before explicit poison" (current store post).body
 
 let () =
   let case name test = Alcotest.test_case name `Quick (with_workspace test) in
@@ -1380,17 +1143,8 @@ let () =
         ; case "delete cleanup preserves dependent deletion" test_delete_cleanup_preserves_dependents
         ; case "known nonwrite cleanup leaves reload usable" test_nonwrite_cleanup_preserves_reload
         ; case "Fusion cleanup leaves the origin mutex usable" test_fusion_cleanup_preserves_origin_mutex ]
-    ; "unknown write settlement",
-        [ case "settle proves a landed rewrite durable" test_settle_proves_landed_rewrite
-        ; case "settle restores absent effects behind a cursor fence"
-            test_settle_absent_retry_stays_fenced
-        ; case "settle preserves unstored memory tables" test_settle_preserves_memory_tables
-        ; case "settle supersedes third-party rewrites" test_settle_superseded_on_third_party_rewrite
-        ; case "settle direction needs kind and both byte strings"
-            test_settle_direction_needs_kind_and_bytes
-        ; case "settle supersedes a missing file" test_settle_missing_is_superseded
-        ; case "settle without unknown performs no IO" test_settle_nothing_to_settle_without_io
-        ; case "reserved unknown keeps the persistence mutex usable"
+    ; "unknown writes",
+        [ case "reserved unknown keeps the persistence mutex usable"
             test_unknown_reserved_keeps_mutex_usable
         ; case "explicit raise poisons only the persistence mutex"
             test_explicit_raise_poisons_persist_only ] ]

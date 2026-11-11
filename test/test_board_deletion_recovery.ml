@@ -333,7 +333,7 @@ let test_original_actor_rechecked_after_transfer base_path =
   check_bytes "same-store authorization refusal leaves all bytes intact" before;
   check_owner (fresh base_path) parent "next-owner"
 
-let test_settled_transfer_does_not_authorize_old_model base_path =
+let test_unknown_transfer_refuses_same_store_deletion base_path =
   let armed = ref false in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
     before_sync_parent = (fun _ -> if !armed then (
@@ -349,22 +349,28 @@ let test_settled_transfer_does_not_authorize_old_model base_path =
    | Error (Board.Io_error _) -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error)
    | Ok _ -> Alcotest.fail "real parent-sync failure did not leave the ownership write unknown");
-  (match Board.with_persist_lock store (fun () -> Board.settle_posts_source store) with
-   | Board.Posts_settled_written _ -> ()
-   | Board.Posts_settled_not_written _ | Board.Posts_settle_superseded _
-   | Board.Posts_settle_inconclusive _ | Board.Posts_settle_nothing_to_settle ->
-     Alcotest.fail "landed ownership transfer was not proven by the public settle path");
-  check_owner store parent "deletion-owner";
+  let displayed = match Board.read_post store ~post_id:(Board.Post_id.to_string parent.id) with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_read_error error) in
+  Alcotest.(check string) "display retains the old owner without source authority"
+    "deletion-owner" (Board.Agent_id.to_string displayed.author);
   let before = snapshots store in
   (match Board.delete_post store ~authorization:(author_authority ())
       ~post_id:(Board.Post_id.to_string parent.id) with
+   | Error (Board.Io_error _) -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | Ok _ -> Alcotest.fail "unknown source authorized a same-store deletion");
+  Alcotest.(check bool) "unknown source creates no deletion authority" false
+    (Sys.file_exists (marker store));
+  check_bytes "refusal preserves the published ownership change" before;
+  let restarted = fresh base_path in
+  check_owner restarted parent "next-owner";
+  (match Board.delete_post restarted ~authorization:(author_authority ())
+      ~post_id:(Board.Post_id.to_string parent.id) with
    | Error (Board.Unauthorized _) -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error)
-   | Ok _ -> Alcotest.fail "fresh settled source authorized stale model owner");
-  Alcotest.(check bool) "source-only settlement creates no deletion authority" false
-    (Sys.file_exists (marker store));
-  check_bytes "refusal preserves proven foreign ownership" before;
-  check_owner (fresh base_path) parent "next-owner"
+   | Ok _ -> Alcotest.fail "fresh ownership authorized the original actor");
+  check_bytes "fresh authorization refusal preserves all source bytes" before
 
 type readset_guard = Posts_guard | Comments_guard
 
@@ -573,8 +579,8 @@ let run_cases () = Alcotest.run "board_deletion_recovery"
       (with_fixture test_stale_author_refuses_before_record);
     Alcotest.test_case "original request actor is rechecked after same-store transfer" `Quick
       (with_fixture test_original_actor_rechecked_after_transfer);
-    Alcotest.test_case "source-only settled transfer cannot authorize stale model owner" `Quick
-      (with_fixture test_settled_transfer_does_not_authorize_old_model);
+    Alcotest.test_case "unknown ownership transfer refuses deletion until fresh loading" `Quick
+      (with_fixture test_unknown_transfer_refuses_same_store_deletion);
     Alcotest.test_case "reserved parent guard cleanup retains known decision before model" `Quick
       (with_fixture (test_readset_guard_cleanup_keeps_known_decision Posts_guard));
     Alcotest.test_case "reserved comments guard cleanup retains known decision before model" `Quick

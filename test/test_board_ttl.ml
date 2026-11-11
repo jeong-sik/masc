@@ -43,7 +43,16 @@ let load_sources store =
   List.iter (fun reload -> match reload store with
     | Ok _ -> ()
     | Error error -> Alcotest.fail (show_board_error error))
-    [reload_votes; reload_reactions]
+    [reload_votes; reload_reactions];
+  (* A scoped post asks the sub-board policy source, and [read_sub_boards] only
+     answers once that source has been read. A fixture that loads posts,
+     comments, votes and reactions alone leaves the source unobserved, so every
+     write with [?hearth] fails with [Io_error "Board data is unavailable."].
+     [reload_sub_boards] is what reads it; [read_sub_boards] never does. *)
+  (match reload_sub_boards store with
+   | Ok _ -> ()
+   | Error (path, cause) ->
+     Alcotest.failf "board fixture load failed: %s (%s)" path (Printexc.to_string cause))
 ;;
 
 let test_default_ttl () =

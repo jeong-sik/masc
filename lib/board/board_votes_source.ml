@@ -195,6 +195,14 @@ let rec contradicts_observation = function
 
 let not_written failure diagnostics = Not_written { failure; diagnostics }
 
+let observe_guard_refusal store observation failure = match store.votes_source with
+  | Votes_readable current when current == observation
+      && String.equal failure.Fs_compat.guard_path observation.vote_path
+      && contradicts_observation failure.guard_error ->
+    refuse store (Votes_transaction_failed failure.guard_error) [Vote_guard_diagnostic failure]
+  | Votes_readable _ | Votes_unobserved | Votes_publishing _
+  | Votes_refused _ | Votes_unsettled _ -> ()
+
 type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_transaction_error) result
 type write_io =
   | Direct_io of file_result

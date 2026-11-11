@@ -1,0 +1,176 @@
+{
+  "at": "2026-11-10T18:49:41.407742+00:00",
+  "base": "4a3f017e9880c8556c969d877cc835c9d38cb518",
+  "production_source": "b1a60af068bab0d53d83090a0cd6146e30d93468",
+  "case_source": "35584707bedb70a9a2e6bb5b4257c8067503dffc",
+  "scope": "Parsing only; no types/warnings/build/backend execution",
+  "compiler": "5.5.1",
+  "repository_target": "5.5.2",
+  "results": [
+    {
+      "path": "lib/board/board_deletion.ml",
+      "sha256": "01f3e75ea7f3f27fba0eb8a44500211077db3ac04657fe32db782e90bef54461",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/board/board_deletion.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_deletion.mli",
+      "sha256": "d1ea8dbd70dd62f9c3010daa59d9cc88711c7f73dcdeb67a6875a64203ff46e5",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/board/board_deletion.mli"
+      ],
+      "exit": 0,
+      "output": "",
+      "reused_from": "initial-production-parse.json"
+    },
+    {
+      "path": "lib/board/board_deletion_source.ml",
+      "sha256": "acbf31f45e1efae4da0046c49bfd285f38a3f088601e8beb562d6d5e7cf57620",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/board/board_deletion_source.ml"
+      ],
+      "exit": 0,
+      "output": "",
+      "reused_from": "initial-production-parse.json"
+    },
+    {
+      "path": "lib/board/board_deletion_source.mli",
+      "sha256": "f9be06a8bcf8def809a26e2ffc8713272c6528bf5841ece45b4e0d3b6240c851",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/board/board_deletion_source.mli"
+      ],
+      "exit": 0,
+      "output": "",
+      "reused_from": "initial-production-parse.json"
+    },
+    {
+      "path": "lib/board/board_votes.ml",
+      "sha256": "8341fd1af23effa3d389cab116b5ee4bf979b075cee3f4954fc582288d1e5c08",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/board/board_votes.ml"
+      ],
+      "exit": 0,
+      "output": "",
+      "reused_from": "initial-production-parse.json"
+    },
+    {
+      "path": "lib/board/board_votes.mli",
+      "sha256": "e79ca18c2d24c2024813f1f96af80ffebd8d4dab8e5e2efb97edf163bb49580f",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/board/board_votes.mli"
+      ],
+      "exit": 0,
+      "output": "",
+      "reused_from": "initial-production-parse.json"
+    },
+    {
+      "path": "lib/board/board_votes_source.ml",
+      "sha256": "2c57c1f19e8a81997872133972ef6879879abca2108b6a8a761247d5bc738539",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/board/board_votes_source.ml"
+      ],
+      "exit": 0,
+      "output": "",
+      "reused_from": "initial-production-parse.json"
+    },
+    {
+      "path": "lib/board/board_votes_source.mli",
+      "sha256": "f62dfedb759e0bce8a1b16d9969a386fc50a2b28e96d22511e6d5d958c446f52",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/board/board_votes_source.mli"
+      ],
+      "exit": 0,
+      "output": "",
+      "reused_from": "initial-production-parse.json"
+    },
+    {
+      "path": "lib/board_tool_adapter/board_tool_handlers.ml",
+      "sha256": "44a84d396f4249b9fc8ad7927367a0eb413ddf97b099c712a7fe7f9e7c21352f",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/board_tool_adapter/board_tool_handlers.ml"
+      ],
+      "exit": 0,
+      "output": "",
+      "reused_from": "initial-production-parse.json"
+    },
+    {
+      "path": "test/test_board_cleanup_admission.ml",
+      "sha256": "865287a0f95be77bb9e4bc2219d9fcdf7fc21a422db66368d321f75c83192c1f",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_board_cleanup_admission.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    }
+  ],
+  "new_parse_executions": [
+    "lib/board/board_deletion.ml",
+    "test/test_board_cleanup_admission.ml"
+  ],
+  "whitespace": {
+    "exit": 0,
+    "output": ""
+  },
+  "dune_source_census": {
+    "active_include_count": 948,
+    "new_include_count": 1,
+    "duplicate_includes": [],
+    "missing_includes": [],
+    "dune_executed": false
+  },
+  "backend_cases": {
+    "authored": 13,
+    "executed": 0
+  },
+  "not_run": [
+    "OCaml types/warnings",
+    "Dune/build",
+    "Backend tests",
+    "CI",
+    "Browser/live Board HTTP",
+    "Install/deploy"
+  ]
+}

@@ -215,7 +215,7 @@ let test_unknown_decision base =
   absent restarted board;
   Alcotest.(check (option string)) "fresh store completes the recorded unlink" None (read restarted parent).hearth
 
-let test_unknown_posts_never_resume_after_settlement base =
+let test_unknown_posts_require_fresh_recovery base =
   let armed = ref false and calls = ref 0 in
   let io : Fs_compat.private_jsonl_transaction_io_for_testing = {
     before_sync_parent = (fun _ -> if !armed then (
@@ -230,14 +230,10 @@ let test_unknown_posts_never_resume_after_settlement base =
    | Board.Deletion_persistence_pending _ -> ()
    | Board.Durable_deletion | Board.Deletion_decision_pending _ -> Alcotest.fail "unknown source progress lost");
   pending store Board.Sources_uncertain;
-  (match Board.with_persist_lock store (fun () -> Board.settle_posts_source store) with
-   | Board.Posts_settled_written _ -> ()
-   | Board.Posts_settled_not_written _ | Board.Posts_settle_superseded _
-   | Board.Posts_settle_inconclusive _ | Board.Posts_settle_nothing_to_settle -> Alcotest.fail "landed source was not settled");
   let calls_before = !calls and policy_before = bytes (Board.sub_boards_path store) in
   Board.flush_dirty store;
   pending store Board.Sources_uncertain;
-  Alcotest.(check int) "file settlement is not permission to replay the deletion" calls_before !calls;
+  Alcotest.(check int) "unknown source is not permission to replay the deletion" calls_before !calls;
   Alcotest.(check (option string)) "policy remains original until fresh recovery" policy_before (bytes (Board.sub_boards_path store));
   let restarted = fresh base in
   absent restarted board;
@@ -315,6 +311,6 @@ let () = Alcotest.run "Sub-board owned deletion recovery" ["real sources", List.
    "deleted winner restores restricted shadow policy", test_deleted_winner_restores_restricted_shadow;
    "fixed IDs after known-record interruption", test_fixed_ids_after_interruption;
    "unknown decision never replays", test_unknown_decision;
-   "unknown source stays owned after file settlement", test_unknown_posts_never_resume_after_settlement;
+   "unknown posts require fresh deletion recovery", test_unknown_posts_require_fresh_recovery;
    "pending policy refuses model reload", test_pending_policy_refuses_reload;
    "uncertain retirement preserves reused slug", test_unknown_retirement_preserves_reused_slug]]

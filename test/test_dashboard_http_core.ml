@@ -66,6 +66,7 @@ let checkout_root () =
 let checkout_file path = Filename.concat (checkout_root ()) path
 
 module Lib = Masc
+module Dashboard_projection_read = Lib.Dashboard_projection_read
 module Auth = Auth
 module Workspace = Masc.Workspace
 module Dashboard_http_keeper = Dashboard_http_keeper

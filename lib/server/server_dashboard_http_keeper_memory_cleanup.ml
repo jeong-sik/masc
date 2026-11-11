@@ -259,6 +259,7 @@ let handle_current_memory state ~actor request reqd keeper_name body =
     let now = Time_compat.now () in
     (match
        Current.retract_facts
+         ~pass:Keeper_memory_commit_pass.Operator_delete
          ~keepers_dir
          ~keeper_id:keeper_name
          ~expected_revision:parsed.expected_revision

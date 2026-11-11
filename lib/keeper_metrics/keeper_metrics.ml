@@ -177,6 +177,9 @@ type t =
   | MemoryRecallSelected        (* counter: candidates a recall judgment carried *)
   | MemoryRecallJudgmentSeconds (* histogram: seconds a recall judgment took, from its first request to its saved outcome *)
   | MemoryRecallPreparationFailures (* counter: recall preparation failures, by bounded reason; no judgment is implied *)
+  | MemoryChanges               (* counter: memory IDs a store commit added, absorbed, superseded or dropped, by keeper, pass and change *)
+  | MemoryFacts                 (* gauge: facts in a keeper's Memory after its last rewriting commit *)
+  | MemorySnapshotBytes         (* gauge: rendered fact bytes of a keeper's Memory after its last rewriting commit *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -365,6 +368,9 @@ let to_string = function
   | MemoryRecallSelected -> "masc_keeper_memory_recall_selected_total"
   | MemoryRecallJudgmentSeconds -> "masc_keeper_memory_recall_judgment_seconds"
   | MemoryRecallPreparationFailures -> "masc_keeper_memory_recall_preparation_failures_total"
+  | MemoryChanges -> "masc_keeper_memory_changes_total"
+  | MemoryFacts -> "masc_keeper_memory_facts"
+  | MemorySnapshotBytes -> "masc_keeper_memory_snapshot_bytes"
 ;;
 
 type collection =
@@ -419,7 +425,8 @@ let collection = function
   | HistoryFragmentFailures | WorkingStateNotCarried | WorkspaceMemoryBriefingBytes
   | WorkspaceMemoryLedgerClaims | MemoryRecallRequests | MemoryRecallInputBytes
   | MemoryRecallRequestSeconds | MemoryRecallTotal | MemoryRecallSelected
-  | MemoryRecallJudgmentSeconds | MemoryRecallPreparationFailures -> Metric_store
+  | MemoryRecallJudgmentSeconds | MemoryRecallPreparationFailures | MemoryChanges | MemoryFacts
+  | MemorySnapshotBytes -> Metric_store
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

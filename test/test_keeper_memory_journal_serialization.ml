@@ -187,7 +187,7 @@ let test_receipt_recovery_preserves_live_row () =
   let plan_id = "interrupted-removal" in
   let reason = "operator verified this original is obsolete" in
   let request () =
-    Current.retract_facts ~keepers_dir ~keeper_id
+    Current.retract_facts ~pass:Masc.Keeper_memory_commit_pass.Operator_delete ~keepers_dir ~keeper_id
       ~expected_revision:seeded.revision ~expected_snapshot_sha256:snapshot_sha256
       ~now:250.0 ~source:{ kind = Current.Explicit_retract; trace_id = plan_id }
       [ { Current.memory_id = Types.memory_id target; reason } ]

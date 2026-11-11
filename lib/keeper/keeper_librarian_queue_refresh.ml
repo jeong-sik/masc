@@ -648,7 +648,8 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       (
       let saved = ref false and cli_limit = ref None and cause = ref None in
       Runtime.run_best_effort ?cli_runner
-        ~write_scope:(if memory_committed then Runtime.Context_only else Context_and_memory)
+        ~write_scope:(if memory_committed then Runtime.Context_only
+                      else Context_and_memory Keeper_memory_commit_pass.Continuity)
         ~continuity:selected
         ?durable_range_id:(if memory_committed then None else Some range_id)
         ~on_cli_input_limit:(fun observed ->

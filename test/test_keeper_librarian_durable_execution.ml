@@ -1981,7 +1981,7 @@ let test_history_fence_retains_unknown_and_blocks_late_observations () = with_fi
     | Empty_atom_history | No_atom_history | Stale_noop -> fail "fixture prefix has no atom history" in
   let fact = Types.observed ~claim:"Independent Memory after the original capture" ~category:Types.Fact
     ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="independent-writer"} in
-  memory_action fixture (fun () -> io (fun () -> Current.apply_disposition
+  memory_action fixture (fun () -> io (fun () -> Current.apply_disposition ~pass:Keeper_memory_commit_pass.Durable
     ~durable_range_id:previous_range ~absorbed:[] ~revisions:[]
     ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
     ~source:{kind=Current.Librarian;trace_id} ~new_claims:[fact] () |> get)) |> ignore;
@@ -2028,7 +2028,7 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
 let test_history_fence_refuses_a_real_range_commit () = with_fixture (fun ~sw:_ fixture ->
   let original, request = retain_absent_history_original fixture in
   let source = Capture.source request in
-  memory_action fixture (fun () -> io (fun () -> Current.apply_disposition
+  memory_action fixture (fun () -> io (fun () -> Current.apply_disposition ~pass:Keeper_memory_commit_pass.Durable
     ?durable_range_id:(Source.range_id source) ?official_range_id:(Source.official_range_id source)
     ~absorbed:[] ~revisions:[] ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
     ~now:(Time_compat.now ()) ~source:{kind=Current.Librarian;trace_id} ~new_claims:[] () |> get)) |> ignore;
@@ -2142,7 +2142,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   let initial=submit preview.expected in
   let fact=Types.observed ~claim:"A concurrent fact changes the preview basis" ~category:Types.Fact
     ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="concurrent-writer"} in
-  io (fun () -> Current.upsert_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+  io (fun () -> Current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
     ~now:(Time_compat.now ()) ~source:{kind=Current.Explicit_write;trace_id="concurrent-writer"} fact
     |> Result.map_error Current.upsert_error_to_string |> get) |> ignore;
   let run_resolution ()=memory_action fixture (fun () -> Resolution_work.run_serialized
@@ -2246,7 +2246,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
     let request_before=Capture.to_json original and positions_before=progress fixture in
     let independent=Types.observed ~claim:"Independent explicit write" ~category:Types.Fact
       ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="concurrent-history-writer"} in
-    let written=io (fun () -> Current.upsert_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+    let written=io (fun () -> Current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
       ~now:(Time_compat.now ()) ~source:{kind=Current.Explicit_write;trace_id="concurrent-history-writer"}
       independent |> Result.map_error Current.upsert_error_to_string |> get) in
     let before_delivery= !(fixture.deliveries) in
@@ -2932,7 +2932,7 @@ let test_a_memory_that_changed_since_the_chain_began_supersedes_the_program () =
   let fin=finished (descend fixture candidate) in
   let independent=Types.observed ~claim:"Independent explicit write" ~category:Types.Fact
     ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="concurrent-floor-writer"} in
-  io (fun () -> Current.upsert_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+  io (fun () -> Current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
     ~now:(Time_compat.now ()) ~source:{kind=Current.Explicit_write;trace_id="concurrent-floor-writer"}
     independent |> Result.map_error Current.upsert_error_to_string |> get |> ignore);
   let position=progress fixture in
@@ -2977,7 +2977,7 @@ let test_a_commit_error_after_the_snapshot_was_renamed_does_not_hide_the_receipt
   fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
   let fin=finished (descend fixture candidate) in
   let apply ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
-    Current.For_testing.apply_program_with_publication_io
+    Current.For_testing.apply_program_with_publication_io ~pass:Keeper_memory_commit_pass.Durable
       ~write_snapshot:(Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
         ~sync_file:(fun _ -> ()) ~sync_parent:(fun _ -> failwith "after the snapshot rename"))
       ~sync_snapshot:(fun _ -> Error "snapshot durability deliberately unconfirmed")
@@ -3283,7 +3283,7 @@ let test_a_pass_starts_the_chain_again_when_memory_changed_under_it () = with_fi
   await_delivery fixture ~after:before;
   let independent=Types.observed ~claim:"Independent explicit write" ~category:Types.Fact
     ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="concurrent-floor-writer"} in
-  io (fun () -> Current.upsert_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+  io (fun () -> Current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
     ~now:(Time_compat.now ()) ~source:{kind=Current.Explicit_write;trace_id="concurrent-floor-writer"}
     independent |> Result.map_error Current.upsert_error_to_string |> get |> ignore);
   check bool "the chain that began on the old Memory is dropped, and a new one finishes" true
@@ -3375,7 +3375,7 @@ let test_a_stale_prefix_left_by_failed_cleanup_restarts_from_current_memory () =
   let fin=finished (descend fixture candidate) in
   let independent=Types.observed ~claim:"Independent explicit write" ~category:Types.Fact
     ~now:(Time_compat.now ()) ~origin:{kind=Types.Authored;trace_id="partial-floor-cleanup"} in
-  io (fun () -> Current.upsert_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+  io (fun () -> Current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
     ~now:(Time_compat.now ()) ~source:{kind=Current.Explicit_write;trace_id="partial-floor-cleanup"}
     independent |> Result.map_error Current.upsert_error_to_string |> get |> ignore);
   (match publish fixture candidate fin with

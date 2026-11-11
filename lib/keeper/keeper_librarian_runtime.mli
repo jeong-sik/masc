@@ -62,15 +62,26 @@ type served_slot =
 
 val served_slot_id : served_slot -> string
 
-type write_scope = Context_only | Context_and_memory | Memory_maintenance
+type write_scope =
+  | Context_only
+  | Context_and_memory of Keeper_memory_commit_pass.t
+  | Memory_maintenance of Keeper_memory_commit_pass.t
 (** The caller names the evidence's purpose. A durable range retains Memory
-    processing. [Context_only] never writes Memory, so it never asks for a
-    Memory judgment: with [continuity] it asks the [librarian.continuity]
-    prompt for the working state alone, and without it the
-    [librarian.working_context] prompt for the working contexts alone. Each
-    answer is refused if it carries any other field. *)
+    processing. A scope that writes Memory names the pass its commit is
+    counted under. [Context_only] never writes Memory, so it names no pass and
+    never asks for a Memory judgment: with [continuity] it asks the
+    [librarian.continuity] prompt for the working state alone, and without it
+    the [librarian.working_context] prompt for the working contexts alone.
+    Each answer is refused if it carries any other field. *)
 (* [Memory_maintenance] curates the current Memory snapshot without publishing
    a working-context or continuity snapshot or advancing history cursors. *)
+
+type memory_commit =
+  | Commit_with_contexts of Keeper_memory_commit_pass.t
+  | Commit_maintenance of Keeper_memory_commit_pass.t
+(** How an accepted Memory answer of a best-effort run commits: under the pass
+    its scope names, organizing the working contexts too unless the run is a
+    standalone Memory maintenance run. *)
 
 type input_capacity_evidence = No_input_capacity_refusal | Input_capacity_refused
 (** Admission partitioning evidence, distinct from the historical range-window
@@ -269,21 +280,21 @@ val fit_continuity :
     carries counts. Returns [None] if no safe source fits. Does not dispatch a
     provider or change Memory receipts. *)
 
-(** Standalone judgment {!run_best_effort} applies to its optional admission
-    arguments: an explicit admission batch rides only a standalone
-    [Memory_maintenance] pass with no continuity or range binding. Each boolean
-    is the presence of the corresponding optional argument. Exposed so tests
-    can pin the accepted and rejected combinations. *)
-val admission_mode_valid
-  :  has_admission:bool
-  -> write_scope:write_scope
+(** The commit {!run_best_effort} gives an explicit admission batch. Only a
+    standalone [Memory_maintenance] scope with no continuity or range binding
+    gives one, under that scope's pass; for every other combination the run
+    refuses the batch. Each boolean is the presence of the corresponding
+    optional argument. Exposed so tests can pin the accepted and rejected
+    combinations. *)
+val admission_commit
+  :  write_scope:write_scope
   -> has_continuity:bool
   -> has_durable_range_id:bool
   -> has_official_range_id:bool
-  -> bool
+  -> memory_commit option
 
 val run_best_effort
-  :  ?write_scope:write_scope
+  :  write_scope:write_scope
   -> ?admission:Keeper_memory_admission_queue.batch
        (** Explicit candidates use a separate strict judgment envelope. Any
            deferred candidate leaves the entire batch pending. This mode is

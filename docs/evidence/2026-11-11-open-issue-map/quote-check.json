@@ -1,0 +1,13 @@
+[
+ {"url": "https://githubnext.com/posts/dsyme-impact-automated-repo-maintenance/", "phrases": ["The rate at which human maintainers decide to act"]},
+ {"url": "https://raw.githubusercontent.com/githubnext/repo-assist-impact/main/report.md", "phrases": ["43 of 61 PRs (70%) remain in the review queue with an average wait of 18.2 days", "This analysis measures correlation, not strict causation."]},
+ {"url": "https://www.anthropic.com/research/redesigning-source-control", "phrases": ["The bottleneck, now, is all of the developer infrastructure built for human scale: source control, builds, and CI."]},
+ {"url": "https://arxiv.org/html/2605.02273", "phrases": ["61.38% (20,621) receive no recorded review activity"]},
+ {"url": "https://www.anthropic.com/engineering/claude-code-auto-mode", "phrases": ["in practice users accept 93% of them anyway"]},
+ {"url": "https://nextjs.org/blog/how-we-closed-1500-github-issues", "phrases": ["But inactivity turned out to be a poor stand-in for relevance.", "we'd closed 1,462 issues across the repository", "We read the evidence behind every result"]},
+ {"url": "https://ar5iv.labs.arxiv.org/html/2305.18150", "phrases": ["overall 14% fewer contributors were active each month during the first year of adoption"]},
+ {"url": "https://raw.githubusercontent.com/badlogic/pi-mono/main/CONTRIBUTING.md", "phrases": ["All issues and PRs from new contributors are auto-closed by default."]},
+ {"url": "https://raw.githubusercontent.com/ghostty-org/ghostty/main/CONTRIBUTING.md", "phrases": ["Pull requests should be associated with a previously accepted issue."]},
+ {"url": "https://tldraw.dev/blog/stay-away-from-my-trash", "phrases": ["My low-effort issues were becoming low-effort pull requests, with AI doing both sides of the work."]},
+ {"url": "https://arxiv.org/abs/2607.26819", "phrases": ["almost never proactively retrieve the contribution rules"]}
+]

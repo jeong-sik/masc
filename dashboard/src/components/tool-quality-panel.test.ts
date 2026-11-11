@@ -60,6 +60,8 @@ const payloadWithHourlyTrend = {
     calls: 100 + i * 5,
     success: 90 + i * 4,
     success_rate: 88 + (i % 6),
+    // Hour i returned (i + 1) * 100,000 bytes: 30,000,000 in all, 2,400,000 at most.
+    result_bytes: (i + 1) * 100_000,
   })),
 }
 
@@ -303,6 +305,52 @@ describe('ToolQualityPanel', () => {
     expect(tooltip?.textContent).toContain('92.0%')
     expect(tooltip?.textContent).toContain('150')
     expect(tooltip?.textContent).toContain('20')
+    // Hour 10 returned 11 * 100,000 = 1,100,000 bytes.
+    expect(container.querySelector('[data-testid="trend-tooltip-bytes"]')?.textContent?.trim()).toBe('1.0 MB')
+  })
+
+  it('draws one bar per hour of result bytes under the trend, with the window total', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithHourlyTrend))
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await import('./tool-quality-panel')
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const strip = container.querySelector('[data-testid="trend-bytes-svg"]')
+    expect(strip).not.toBeNull()
+    expect(strip?.querySelectorAll('rect').length).toBe(24)
+    // 30,000,000 bytes in all and 2,400,000 in the busiest hour.
+    expect(strip?.getAttribute('aria-label')).toContain('합계 28.6 MB')
+    expect(strip?.getAttribute('aria-label')).toContain('최대 2.3 MB')
+    // The busiest hour fills the strip and the first is a twenty-fourth of it.
+    const heights = Array.from(strip?.querySelectorAll('rect') ?? []).map(r => Number(r.getAttribute('height')))
+    expect(heights[23]).toBeGreaterThan(heights[0] ?? Infinity)
+    expect(heights[0]).toBeCloseTo((heights[23] ?? 0) / 24, 1)
+  })
+
+  it('scales the hourly bytes bars to the busiest hour', async () => {
+    const { hourlyBytesBars } = await import('./tool-quality-panel')
+    const { heights, total, max } = hourlyBytesBars(
+      [{ result_bytes: 0 }, { result_bytes: 1_000 }, { result_bytes: 4_000 }],
+      12,
+    )
+    expect(total).toBe(5_000)
+    expect(max).toBe(4_000)
+    expect(heights).toEqual([0, 3, 12])
+    // No result in any hour: no bar, and no division by zero.
+    expect(hourlyBytesBars([{ result_bytes: 0 }, { result_bytes: 0 }], 12).heights).toEqual([0, 0])
+    expect(hourlyBytesBars([], 12)).toEqual({ heights: [], total: 0, max: 0 })
+  })
+
+  it('formats result bytes as B, KB or MB', async () => {
+    const { formatResultBytes } = await import('./tool-quality-panel')
+    expect([0, 1023, 1024, 1536, 1024 * 1024, 5.5 * 1024 * 1024].map(formatResultBytes)).toEqual([
+      '0 B', '1023 B', '1.0 KB', '1.5 KB', '1.0 MB', '5.5 MB',
+    ])
   })
 
   it('renders tool-quality coverage gap provenance', async () => {

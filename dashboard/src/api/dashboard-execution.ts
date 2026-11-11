@@ -61,6 +61,8 @@ export type ToolQualityHourlyPoint = {
   calls: number
   success: number
   success_rate: number
+  /** Bytes of the results the hour's calls returned (the ledger rows' `result_bytes`). */
+  result_bytes: number
 }
 
 export type ToolQualityResponse = TelemetryFreshnessMetadata & {

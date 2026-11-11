@@ -52,6 +52,28 @@ interface HourlyPoint {
   calls: number
   success: number
   success_rate: number
+  result_bytes: number
+}
+
+/**
+ * One bar per hour of result bytes, scaled so the busiest hour fills `height`.
+ * An hour that returned nothing, or a window where no hour did, has height 0.
+ */
+export function hourlyBytesBars(
+  points: ReadonlyArray<{ result_bytes: number }>,
+  height: number,
+): { heights: number[]; total: number; max: number } {
+  const max = points.reduce((m, p) => Math.max(m, p.result_bytes), 0)
+  const total = points.reduce((sum, p) => sum + p.result_bytes, 0)
+  const heights = points.map(p => (max > 0 ? (p.result_bytes / max) * height : 0))
+  return { heights, total, max }
+}
+
+/** Bytes as B, KB or MB: an hour of results is megabytes, one call is bytes. */
+export function formatResultBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 type ToolQualityData = Omit<
@@ -228,6 +250,9 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
   const active = activeIdx != null ? points[activeIdx] : null
   const labelIndices = pickAxisLabelIndices(n)
 
+  const BYTES_H = 16
+  const bytesBars = hourlyBytesBars(points, BYTES_H - 2 * pad)
+
   return html`
     <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex items-baseline justify-between mb-1.5 gap-2">
@@ -296,6 +321,28 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
           })}
         </svg>
 
+        <!-- Same x scale as the chart above: one bar per hour, the bytes the
+             hour's results returned. A zero hour has no bar. -->
+        <svg
+          viewBox="0 0 ${W} ${BYTES_H}"
+          width="${W}"
+          height="${BYTES_H}"
+          class="rounded-[var(--r-1)] w-full mt-0.5"
+          role="img"
+          aria-label="시간별 결과 바이트 — 합계 ${formatResultBytes(bytesBars.total)}, 최대 ${formatResultBytes(bytesBars.max)}"
+          data-testid="trend-bytes-svg"
+          style="background:var(--bg-deepest); pointer-events:none;"
+        >
+          ${bytesBars.heights.map((barH, i) => {
+            return html`<rect
+              x="${(xOf(i) - barW / 2).toFixed(1)}" y="${(BYTES_H - pad - barH).toFixed(1)}"
+              width="${barW.toFixed(1)}" height="${barH.toFixed(1)}"
+              fill="var(--color-fg-disabled)"
+              opacity="${i === activeIdx ? '1' : '0.6'}"
+              rx="0.5" />`
+          })}
+        </svg>
+
         ${active && activeIdx != null ? html`
           <div
             class="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full -mt-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-mono shadow-lg whitespace-nowrap"
@@ -307,6 +354,9 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
             <div style="color:${rateColorVar(active.success_rate)}">${active.success_rate.toFixed(1)}%</div>
             <div class="text-[var(--color-fg-disabled)]">
               ${active.calls.toLocaleString()} calls · ${(active.calls - active.success).toLocaleString()} fail
+            </div>
+            <div class="text-[var(--color-fg-disabled)]" data-testid="trend-tooltip-bytes">
+              ${formatResultBytes(active.result_bytes)}
             </div>
           </div>
         ` : null}

@@ -941,8 +941,9 @@ let render_harness_detail (state : state) verdict =
              can name several verdicts recorded in the same second. *)
           snapshot.Tui_decode.hs_verdicts
           |> List.map (fun (row : Tui_decode.harness_verdict) ->
-               row.hv_task_id, lane_run_clock row.hv_at)
+               row.hv_task_id, row.hv_at)
           |> Render_schedule.verdict_sidebar_labels
+               ~now:(Unix.gettimeofday ())
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in

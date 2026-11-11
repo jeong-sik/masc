@@ -808,8 +808,6 @@ val models_source_account_reading : provider:string -> runtime_config_reading op
 val studio_panel : width:int -> title:string -> lines:string list -> string list
 (** Framed sub-panel box with a middle-truncated title header and cell-fitted rows. *)
 
-val lane_run_clock : float -> string
-(** Local [MM-DD HH:MM:SS] timestamp for lane run and harness verdict sidebars. *)
 
 val detail_section_heading : ?first:bool -> string -> (string * string) list
 (** Numbered/grouped section header [  [ Title ]] in [(style, text)] pairs for

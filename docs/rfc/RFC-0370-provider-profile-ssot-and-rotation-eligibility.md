@@ -3,7 +3,7 @@ rfc: "0370"
 title: "Provider profile SSOT, quota-as-state, rotation eligibility for Internal-carried failures"
 status: Draft
 created: 2026-08-11
-updated: 2026-11-10
+updated: 2026-11-11
 author: vincent + claude
 supersedes: []
 superseded_by: null
@@ -164,10 +164,11 @@ runtime은 후보 목록에 이름이 오르지 않고, `resets_at` 경과로 �
 복귀). `Usage_opaque`는 현행 사후 typed 에러 + rotation 경로를 그대로
 유지한다.
 
-> 2026-11-10 (RFC-exact-lane-waits-for-a-stated-reset): exact lane 은 이 문단대로 provider 가
-> 말한 리셋 전에는 그 runtime 을 부르지 않는다. 후보 구성 때 빼되 목록에서는 지우지 않고,
-> `resets_at` 이 지나면 다시 부른다. ollama_cloud 에는 이제 사용량 읽기(`Ollama_balance_read`)가
-> 있다. 이 문서의 ollama_cloud `Usage_opaque` 예시와 「API가 없다」 문장은 그 전의 사실이다.
+> 2026-11-11 제안(RFC-exact-lane-waits-for-a-stated-reset, Draft): L1에서는 exact lane이
+> provider가 말한 리셋 전에는 그 runtime을 부르지 않도록 바꾸는 안이다. 후보 구성 때 빼되
+> 목록에서는 지우지 않고, `resets_at`이 지나면 다시 부른다. L1 구현 전의 동작은 그대로다.
+> 이와 별개로 ollama_cloud에는 이미 사용량 읽기(`Ollama_balance_read`)가 있다.
+> 이 문서의 ollama_cloud `Usage_opaque` 예시와 「API가 없다」 문장은 그 전의 사실이다.
 
 기존 게이트 원칙과의 정합: 이것은 파생/장식 필드 guard가 아니라
 provider가 보고한 1차 사실이며, blast radius는 후보 구성 한 지점이다.

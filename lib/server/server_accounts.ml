@@ -105,12 +105,13 @@ let readiness zone (_ : Httpun.Request.t) reqd =
       reqd
 ;;
 
-let register ~login zone router =
+let register ~login ~env ~base_path zone router =
   router
   |> Server_route.get Server_route.Always_public Server_health_paths.health health
   |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness
   |> Server_route.get Server_route.Always_public Server_health_paths.readiness (readiness zone)
   |> Server_login_http.add_routes login
+  |> Server_login_http.add_person_routes login ~env ~base_path
 ;;
 
 (* A value of the HTTP mode that is not in its vocabulary stops the boot here,
@@ -214,7 +215,7 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
   let* table =
     Result.map_error
       (fun refusal -> Route_of_another_kind refusal)
-      (Table.checked (register ~login zone))
+      (Table.checked (register ~login ~env ~base_path zone))
   in
   let config = Server_bootstrap_http.make_http_config ~address ~port in
   let* https =

@@ -27,11 +27,16 @@
     listens ({!Route_of_another_kind}), so a registration of another kind
     stops the boot and is not served.
 
-    The table holds the three health probes and the login routes
+    The table holds the three health probes, the login routes
     ({!Server_login_http.add_routes}): the start and the callback of a
     Google and of a GitHub login, the logout, the session, the allowlist and
-    the personal access tokens. The pages and the routes of a person's
-    subscriptions and Keepers come with the layer after it.
+    the personal access tokens, and the pages and routes of a person
+    ({!Server_login_http.add_person_routes}): the home page and the page
+    of an invitation, who-am-I, the person's subscriptions and their
+    connection, the person's Keepers, and one turn of a Keeper on the
+    Runtime its owner gave it. A turn starts the official client of the
+    person's own subscription, on the home of that account, as a process of
+    the server ({!Server_preview_keeper_turn}).
 
     {b The login clients.} They are the [google] and the [github] member of
     the [config.json] that the boot judged

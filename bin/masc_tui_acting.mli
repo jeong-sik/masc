@@ -23,9 +23,6 @@ type filter =
 
 val next_filter : filter -> filter
 val filter_label : filter -> string
-val filter_explanation : filter -> string
-(** Short in-frame scope legend. It names what the current projection folds or
-    hides and explains the quiet rows that [Everything] adds. *)
 
 type entry = {
   ae_at : float;  (** when the TUI received it *)
@@ -290,18 +287,19 @@ val evidence_fields : entry -> (string * string option) list
 
 type columns = private {
   keeper_cells : int;
-  label_cells : int;
+  content_cells : int;
+  show_clock : bool;
 }
-(** The Activity table's two measured columns, in display cells. Private so a
-    row lays itself out on the widths {!columns} derived from the rows it
-    draws, never on a pair of numbers assembled at the call site. *)
+(** The event sentence and actor allocation, in display cells. Receipt time
+    follows them only when it leaves the event label readable. Header and
+    rows consume the same allocation. *)
 
 type measured = private {
   measured_keeper : string;
   measured_label : string;
 }
-(** What {!columns} reads off one entry: the two named columns, without the
-    detail sentence the third column draws. Private so a measurement comes
+(** What {!columns} reads off one entry: the actor and event label, without
+    spelling the detail sentence for off-screen entries. A measurement comes
     from an event or from a row that was drawn, never from a pair of strings
     assembled at the call site. *)
 
@@ -316,12 +314,7 @@ val measured_of_event :
     shows, once per frame, for every entry the feed still holds. *)
 
 val columns : inner_width:int -> measured list -> columns
-(** How wide the keeper and event columns have to be for [measures], counted
-    as the renderer draws each text: control bytes as their escapes.
-
-    Both were literals of 16. The agent_core family names its runtime lane as
-    the agent -- [agent_core-glm-coding.glm-5-turbo] is thirty cells -- so
-    those rows drew a cut name at every width, including the ones where the
-    detail column beside them was empty. Neither column goes under what it
-    drew before, and the two together take at most half of what the frame
-    leaves, because detail is the column that carries sentences. *)
+(** Content comes first, with an actor column using at most a third of the
+    available cells. The remaining cells carry label and detail together.
+    Optional receipt time never displaces the actor or the event label.
+    Measurements use the terminal-safe text the renderer draws. *)

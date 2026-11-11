@@ -607,9 +607,8 @@ let system_log_level_width = 7
 let system_log_module_width = 16
 let system_log_keeper_width = 12
 let system_log_category_width = 9
-(* The message is what the list is read for, so it is the last column to lose
-   cells. Thirty is the Board title's floor ([board_minimum_title_width]):
-   below it the table drops category, then keeper, then module. *)
+(* Prefer a readable sentence, then share the actual narrow width with its
+   severity once the optional metadata columns have all folded away. *)
 let system_log_minimum_message_width = 30
 
 type system_log_row_values = {
@@ -665,9 +664,16 @@ let system_log_column_width = function
   | Log_message -> system_log_minimum_message_width
 
 let system_log_layout ~inner_width =
-  Table.fit ~inner_width ~width:system_log_column_width ~flex:Log_message
-    ~drop_order:[ Log_category; Log_keeper; Log_module ]
-    [ Log_time; Log_level; Log_module; Log_keeper; Log_category; Log_message ]
+  let width = function
+    | Log_message ->
+        min system_log_minimum_message_width
+          (max 1 (inner_width - system_log_level_width - Table.cell_gap))
+    | (Log_time | Log_level | Log_module | Log_keeper | Log_category) as column ->
+        system_log_column_width column
+  in
+  Table.fit ~inner_width ~width ~flex:Log_message
+    ~drop_order:[ Log_time; Log_category; Log_keeper; Log_module ]
+    [ Log_message; Log_level; Log_module; Log_keeper; Log_category; Log_time ]
 
 let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
     ~(layout : system_log_column Table.layout) values =

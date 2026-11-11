@@ -669,7 +669,24 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 나머지 18곳은 읽기만 한다. capability, 요청 모양, `kind`·`model_id`·`base_url`을 읽는다. 원문 key, `headers`, `auth_scheme`, `credential_source`를 읽는 곳은 없다.
   - 읽는 곳 중 세 곳은 key의 identity(SHA-256)를 쓴다. binding identity(`runtime_instance.ml`의 materialize), admission 허용치(`Runtime.materialize_config`), dashboard의 admission snapshot이다. 보낼 때의 admission과 같은 key여야 한다.
   - 계정 인가를 하는 곳은 없다. `validate_dispatch_credential`은 key가 비었는지만 본다. vision, 사용량 읽기, exact-output은 그것도 하지 않는다.
-  - 실행 표 밖에서 운영자 key를 쓰는 곳이 네 곳 있다. 모델 탐색(`runtime_model_discovery.ml`), serving context(`runtime_serving_context.ml`), `masc_file_*` 도구의 `DEEPSEEK_API_KEY`(`keeper_tool_in_process_runtime.ml`), TypeSafeAI(`typesafeai_client.ml`)다.
+  - 실행 표 밖에서 호스트 key로 보내는 곳은 일곱 곳이다. D4b를 시작하며 D4a `3cd6d619bcc9`에서 key 변수 이름과 `api_key_env` 필드를 모두 세었다.
+    - 모델 목록 조회와 serving window 관찰(`runtime_model_discovery.ml`, `runtime_serving_context.ml`). 서버의 setup 경로(`POST /api/v1/setup/models`, `POST /api/v1/setup/context`)가 부른다.
+      - setup 경로는 HTTP 연결을 모두 거절한다.
+      - credential이 없는 `Anonymous_endpoint` 연결은 호스트 key를 쓰지 않는다. 그래도 같이 거절한다.
+      - 그런 로컬 연결을 열려면 판정을 연결의 credential로 나눈다.
+    - `masc_file_*` 도구의 `DEEPSEEK_API_KEY`(`keeper_tool_in_process_runtime.ml`).
+    - 교체 카탈로그(`AGENT_CORE_MODEL_CATALOG`). 카탈로그 파일이 provider와 key를 따로 들고, exact-output 등록표가 그 key로 보낸다.
+    - TypeSafe AI lane(`typesafeai_config.ml`). destination마다 key를 담은 변수 이름을 적는다.
+    - web search 도구(`tool_misc_web_search.ml`). Brave, Tavily, Exa, Bing, Ollama, Z.AI key를 쓴다.
+    - SystemOne 도구의 cloud backend(`tool_local_runtime_systemone.ml`, `OLLAMA_CLOUD_API_KEY`).
+    - voice endpoint(`voice_bridge_transport.ml`의 `resolve_api_key`). endpoint마다 `api_key_env`를 적고, ElevenLabs가 기본이다.
+  - 호스트 key로 보내지 않는 곳.
+    - GitHub token은 Keeper에게 넘어가지 않는다. exec는 token 변수를 지우고, 선언도 거절한다. Keeper마다 자기 로그인(`GH_CONFIG_DIR`)을 쓴다.
+    - MASC 자신의 token(`MASC_TOKEN`, admin token, internal MCP token)과 GitHub 로그인 앱 secret은 MASC의 인증이다. 호스트 계정이 아니다.
+    - official CLI 환경에서 지우는 변수 목록(Claude Code, Codex)은 보내는 곳이 아니다.
+    - Keeper OAuth token은 Keeper마다 따로 든다.
+    - Slack, Discord, Telegram bot token은 서버의 채널이다. 채널로 턴을 시작할 권한은 Keeper 턴 판정의 channel이 맡는다.
+  - `masc runtime-discover-models`와 `masc runtime-serving-context`는 판정하지 않는다. 운영자의 셸에서 운영자의 환경 변수와 절대 경로 파일로만 key를 읽고, 작업 공간을 읽지 않는다. 사람이 부를 수 있는 것은 서버의 setup 경로다.
 - 결정.
   - 실행 표의 provider 자격 증명은 호스트 계정이다. 사람의 계정이 아니므로 D3b처럼 다계정 프로세스는 아무것도 보내지 않는다. 단일 사용자에서는 지금처럼 보낸다. 판정에 요청은 쓰지 않는다. 1단계에서는 누가 묻든 같다.
   - `Runtime_execution.Agent_core`가 봉인한 설정(`Runtime_account_access.api_sealed`)을 든다.
@@ -679,7 +696,10 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 실행 표가 만들어지는 때에는 판정하지 않는다. 시험은 publish 없이 실행 표를 만든다. 판정은 보내기 직전에 한다. exact-output 등록표는 만들 때 판정한다. 서버는 publish 뒤에 등록표를 만든다.
 - 층.
   - D4a 실행 표 봉인. 위 26곳과 시험이다. 시험은 실제 경로(`masc runtime-token-sample`, verify)에서 다계정이면 요청이 나가지 않는다는 것을 본다.
-  - D4b 실행 표 밖의 네 곳. `authorize_host Api_provider`로 판정한다.
+  - D4b 모델 목록 조회(서버 setup 경로), `masc_file_*`, 교체 카탈로그.
+  - D4c TypeSafe AI lane. lane을 쓸 수 없는 이유에 호스트 계정을 나누지 않는다는 이유를 더한다. 흡수 gate, Board attention, memory recall과 그 TUI가 이 이유를 받는다.
+  - D4d MASC 도구의 호스트 key. web search, SystemOne cloud, voice.
+  - 판정은 모두 `authorize_host`다. 대상마다 `host_client`에 닫힌 variant를 더해서, 거절 문장이 무엇을 막았는지 말한다.
 - D4a에서 남긴 것.
   - 시험 프로세스는 시작할 때 단일 사용자 접근을 게시한다(하네스 #50867). 그래서 D4a는 시험에 게시 호출을 더하지 않는다. 다계정 시험은 실행 표가 만든 API 런타임으로 verify를 불러, 거절(`account_not_authorized`)과 연결 0건을 본다.
   - 다계정 서버 부팅: exact-output 대상 하나가 거절되면 등록표를 만들지 않고 설정 오류로 멈춘다. 지금은 전체 서버가 다계정으로 뜨지 않아서(`Multi_account_not_served`) 이 경로에 닿지 않는다. S1에서 정한다. 거절된 대상을 본문 시간 제한이 없는 slot처럼 gap으로 내리면, 그 slot만 가진 lane은 비고 부팅은 계속된다.

@@ -1,0 +1,316 @@
+{
+  "window": {
+    "since": "2026-11-08T05:40:00Z",
+    "end": "2026-11-11T05:40:00Z"
+  },
+  "params": {
+    "long_calls": 100,
+    "min_bytes": 2048,
+    "max_bytes": 65536
+  },
+  "turns": 8017,
+  "calls": 141353,
+  "calls_per_turn": {
+    "n": 8017,
+    "median": 6,
+    "p90": 43,
+    "max": 833
+  },
+  "long_turns": {
+    "turns": 164,
+    "calls": 32899,
+    "share_of_calls": 0.2327
+  },
+  "keepers_by_long_turn_calls": [
+    {
+      "keeper": "rondo",
+      "turns": 121,
+      "calls": 9702,
+      "long_turns": 24,
+      "long_turn_calls": 5702,
+      "long_turn_call_share": 0.5877,
+      "calls_per_turn": {
+        "n": 121,
+        "median": 45,
+        "p90": 141,
+        "max": 833
+      },
+      "prs_per_long_turn": {
+        "n": 24,
+        "median": 10,
+        "p90": 28,
+        "max": 176
+      },
+      "prs_per_short_turn": {
+        "n": 97,
+        "median": 4,
+        "p90": 12,
+        "max": 48
+      },
+      "short_turns_without_pr_mention": 10
+    },
+    {
+      "keeper": "context-reviewer",
+      "turns": 376,
+      "calls": 12926,
+      "long_turns": 23,
+      "long_turn_calls": 4853,
+      "long_turn_call_share": 0.3754,
+      "calls_per_turn": {
+        "n": 376,
+        "median": 14,
+        "p90": 71,
+        "max": 556
+      },
+      "prs_per_long_turn": {
+        "n": 23,
+        "median": 24,
+        "p90": 54,
+        "max": 69
+      },
+      "prs_per_short_turn": {
+        "n": 353,
+        "median": 3,
+        "p90": 18,
+        "max": 45
+      },
+      "short_turns_without_pr_mention": 87
+    },
+    {
+      "keeper": "wkbl-data",
+      "turns": 182,
+      "calls": 7680,
+      "long_turns": 22,
+      "long_turn_calls": 4421,
+      "long_turn_call_share": 0.5757,
+      "calls_per_turn": {
+        "n": 182,
+        "median": 12,
+        "p90": 109,
+        "max": 442
+      },
+      "prs_per_long_turn": {
+        "n": 22,
+        "median": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "prs_per_short_turn": {
+        "n": 160,
+        "median": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "short_turns_without_pr_mention": 160
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "turns": 148,
+      "calls": 7562,
+      "long_turns": 15,
+      "long_turn_calls": 3899,
+      "long_turn_call_share": 0.5156,
+      "calls_per_turn": {
+        "n": 148,
+        "median": 27.5,
+        "p90": 110,
+        "max": 600
+      },
+      "prs_per_long_turn": {
+        "n": 15,
+        "median": 13,
+        "p90": 25,
+        "max": 32
+      },
+      "prs_per_short_turn": {
+        "n": 133,
+        "median": 3,
+        "p90": 10,
+        "max": 37
+      },
+      "short_turns_without_pr_mention": 14
+    },
+    {
+      "keeper": "wkbl-front",
+      "turns": 212,
+      "calls": 8573,
+      "long_turns": 15,
+      "long_turn_calls": 3003,
+      "long_turn_call_share": 0.3503,
+      "calls_per_turn": {
+        "n": 212,
+        "median": 27,
+        "p90": 77,
+        "max": 444
+      },
+      "prs_per_long_turn": {
+        "n": 15,
+        "median": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "prs_per_short_turn": {
+        "n": 197,
+        "median": 0,
+        "p90": 0,
+        "max": 2
+      },
+      "short_turns_without_pr_mention": 194
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "turns": 225,
+      "calls": 5587,
+      "long_turns": 8,
+      "long_turn_calls": 2125,
+      "long_turn_call_share": 0.3803,
+      "calls_per_turn": {
+        "n": 225,
+        "median": 7,
+        "p90": 59,
+        "max": 611
+      },
+      "prs_per_long_turn": {
+        "n": 8,
+        "median": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "prs_per_short_turn": {
+        "n": 217,
+        "median": 0,
+        "p90": 0,
+        "max": 1
+      },
+      "short_turns_without_pr_mention": 209
+    },
+    {
+      "keeper": "code-reviewer-uncle",
+      "turns": 585,
+      "calls": 12723,
+      "long_turns": 13,
+      "long_turn_calls": 1994,
+      "long_turn_call_share": 0.1567,
+      "calls_per_turn": {
+        "n": 585,
+        "median": 15,
+        "p90": 44,
+        "max": 241
+      },
+      "prs_per_long_turn": {
+        "n": 13,
+        "median": 5,
+        "p90": 16,
+        "max": 20
+      },
+      "prs_per_short_turn": {
+        "n": 572,
+        "median": 1,
+        "p90": 4,
+        "max": 19
+      },
+      "short_turns_without_pr_mention": 37
+    },
+    {
+      "keeper": "msx-retro-mania",
+      "turns": 214,
+      "calls": 6307,
+      "long_turns": 8,
+      "long_turn_calls": 1350,
+      "long_turn_call_share": 0.214,
+      "calls_per_turn": {
+        "n": 214,
+        "median": 17.5,
+        "p90": 65,
+        "max": 288
+      },
+      "prs_per_long_turn": {
+        "n": 8,
+        "median": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "prs_per_short_turn": {
+        "n": 206,
+        "median": 0,
+        "p90": 0,
+        "max": 0
+      },
+      "short_turns_without_pr_mention": 206
+    }
+  ],
+  "superseded": {
+    "result_bytes_in_range": 346298022,
+    "superseded_bytes": 34686650,
+    "superseded_calls": 3085,
+    "superseded_share": 0.1002,
+    "by_tool": [
+      [
+        "masc_dos_press",
+        21360685
+      ],
+      [
+        "masc_dos_step",
+        3835748
+      ],
+      [
+        "masc_dos_screen",
+        2944629
+      ],
+      [
+        "keeper_artifact_read",
+        1887311
+      ],
+      [
+        "BrowserRead",
+        1180536
+      ],
+      [
+        "masc_board_post_get",
+        1010215
+      ],
+      [
+        "Execute",
+        620775
+      ],
+      [
+        "keeper_wiki_read",
+        268805
+      ]
+    ],
+    "by_keeper": [
+      [
+        "msx-retro-mania",
+        28326116
+      ],
+      [
+        "code-reviewer-uncle",
+        1668068
+      ],
+      [
+        "wkbl-front",
+        748081
+      ],
+      [
+        "ocaml-agent-ic",
+        612294
+      ],
+      [
+        "kidsnote-slack-reader",
+        564197
+      ],
+      [
+        "code-reviewer-sister",
+        410814
+      ],
+      [
+        "wkbl-web-leader",
+        307120
+      ],
+      [
+        "music-sensei",
+        268805
+      ]
+    ]
+  }
+}

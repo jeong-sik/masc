@@ -135,9 +135,11 @@ let pending_entry
   | None -> fail "pending approval disappeared"
 ;;
 
-let publish_lane ?(cli_slot_ids = []) ?(max_output_tokens = Some 4_096) slot_ids snapshot =
+let publish_lane ?(cli_slot_ids = []) ?(max_output_tokens = Some 4_096) ?runtime_observations
+      slot_ids snapshot =
   match
     Runtime.publish_exact_output_registry
+      ?runtime_observations
       ~lanes:
         [ { Runtime_schema.owner = Option.get (Runtime_schema.exact_lane_owner_of_key (Worker.For_testing.lane_id))
           ; enabled = true
@@ -3274,6 +3276,156 @@ let test_cli_walk_exhaustion_quarantines_the_last_cli_identity () =
        | _ -> fail "cli exhaustion did not quarantine under the last cli identity")
 ;;
 
+(* RFC-exact-lane-waits-for-a-stated-reset R5: a slot whose provider stated a
+   time is not called, and the entry settles as that slot, called and refused
+   for its account, would have left it -- quarantined as an execution failure.
+   Settling through an unbound entry would instead stop it as identity
+   unbound and withhold the owner's drain. *)
+
+let runtime_exn runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some runtime -> runtime
+  | None -> failf "the fixture runtime %s must exist" runtime_id
+;;
+
+let with_stated_reset (runtime : Runtime_instance.t) f =
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect
+    ~finally:Runtime_quota_window.reset_for_testing
+    (fun () ->
+       Runtime_quota_window.note_exhausted
+         ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
+         ~resets_at:(Time_compat.now () +. 3600.0);
+       f ())
+;;
+
+let refuse_every_cli_run ~runtime:{ Runtime_instance.id = runtime_id; _ }
+      ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  failf "a held cli slot must not run (%s)" runtime_id
+;;
+
+let check_settled_as_held ~id ~expected_slot ~failure =
+  match Q.For_testing.get_pending_entry_unchecked ~id with
+  | Some
+      { exact_attempt =
+          QT.Exact_bound
+            { slot_id
+            ; call_id
+            ; status = QT.Exact_quarantined QT.Exact_flow_execution_failed
+            ; _
+            }
+      ; summary_attempt_disposition = QT.Summary_attempt_settled
+      ; _
+      } ->
+    check string "the settled identity" expected_slot slot_id;
+    call_id
+  | _ -> fail failure
+;;
+
+let test_a_held_cli_slot_settles_without_a_call () =
+  run_eio @@ fun ~sw:_ ~net ~clock ->
+  with_temp_dir "hitl-cli-held" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       with_cli_runtimes @@ fun () ->
+       publish_unreachable_lane_with_cli ~cli_only:true
+         ~cli_slot_ids:[ cli_primary ]
+         ~source:"hitl-cli-held" ();
+       with_stated_reset (runtime_exn cli_primary) @@ fun () ->
+       let entry = pending_entry ~base_path () in
+       Worker.For_testing.execute_prepared_flow_with_queue_ops
+         ~queue_ops:(exact_queue_ops ())
+         ~cli_runner:refuse_every_cli_run
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> fail "a held walk delivered a summary")
+         (prepare_exn entry)
+       |> require_executed;
+       let call_id =
+         check_settled_as_held ~id:entry.id ~expected_slot:cli_primary
+           ~failure:"a held cli slot must settle the entry as an execution failure"
+       in
+       check bool "the settled identity was never dispatched" true
+         (Astring.String.is_prefix ~affix:"held-hitl-" call_id))
+;;
+
+let test_held_cli_slots_settle_the_catalog_binding () =
+  run_eio @@ fun ~sw:_ ~net ~clock ->
+  with_temp_dir "hitl-cli-held-after-http" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       with_cli_runtimes @@ fun () ->
+       publish_unreachable_lane_with_cli
+         ~cli_slot_ids:[ cli_primary ]
+         ~source:"hitl-cli-held-after-http" ();
+       with_stated_reset (runtime_exn cli_primary) @@ fun () ->
+       let entry = pending_entry ~base_path () in
+       Worker.For_testing.execute_prepared_flow_with_queue_ops
+         ~queue_ops:(exact_queue_ops ())
+         ~cli_runner:refuse_every_cli_run
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> fail "a held walk delivered a summary")
+         (prepare_exn entry)
+       |> require_executed;
+       ignore
+         (check_settled_as_held ~id:entry.id ~expected_slot:"hitl-cli-unreachable"
+            ~failure:"held cli slots must settle the exhausted catalog binding"
+          : string))
+;;
+
+let test_a_held_http_lane_settles_without_a_request () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-http-held" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       with_cli_runtimes @@ fun () ->
+       let server = F.start_server ~sw ~net ~clock (F.Reply "never-requested") in
+       let runtime = runtime_exn "stub-http.stub-model" in
+       let held_slot = "hitl-held" in
+       publish_lane
+         ~runtime_observations:
+           [ ( held_slot
+             , { Runtime_exact_output_registry.candidate =
+                   runtime.Runtime_instance.candidate_backpressure
+               ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime
+               } ) ]
+         [ held_slot ]
+         (F.resolver_snapshot ~source:"hitl held http lane"
+            [ { id = held_slot; base_url = server.base_url } ]);
+       with_stated_reset runtime @@ fun () ->
+       let entry = pending_entry ~base_path () in
+       let prepared = prepare_exn entry in
+       check bool "a held lane freezes no HTTP attempt" true
+         (Option.is_none (Worker.For_testing.flow_evidence prepared));
+       Worker.For_testing.execute_prepared_flow_with_queue_ops
+         ~queue_ops:(exact_queue_ops ())
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> fail "a held lane delivered a summary")
+         prepared
+       |> require_executed;
+       check int "the held slot received no request" 0 (F.post_count server);
+       let call_id =
+         check_settled_as_held ~id:entry.id ~expected_slot:held_slot
+           ~failure:"a held HTTP lane must settle the entry as an execution failure"
+       in
+       check bool "the settled identity was never dispatched" true
+         (Astring.String.is_prefix ~affix:"held-hitl-" call_id))
+;;
+
 
 (* The metric label text is the contract with anything reading the
    [HitlSummaryOutcomes] counter, so this suite keeps its own copy of every
@@ -3306,6 +3458,7 @@ let pinned_label : Worker.flow_outcome -> string = function
   | Cli_slots_exhausted -> "exact_cli_slots_exhausted"
   | Cli_released_without_binding -> "exact_cli_released_without_binding"
   | Cli_walk_fell_back -> "exact_cli_walk_fell_back"
+  | Slots_held -> "exact_slots_held"
   | Cli_release_unconfirmed -> "exact_cli_release_unconfirmed"
   | Cli_bind_unconfirmed -> "exact_cli_bind_unconfirmed"
   | Cli_bind_failed -> "exact_cli_bind_failed"
@@ -3337,6 +3490,7 @@ let all_outcomes =
     ; Cli_slots_exhausted
     ; Cli_released_without_binding
     ; Cli_walk_fell_back
+    ; Slots_held
     ; Cli_release_unconfirmed
     ; Cli_bind_unconfirmed
     ; Cli_bind_failed
@@ -3348,7 +3502,7 @@ let all_outcomes =
 let test_outcome_labels_are_stable () =
   Alcotest.(check int)
     "every flow_outcome is listed"
-    27
+    28
     (List.length all_outcomes);
   List.iter
     (fun outcome ->
@@ -3681,6 +3835,12 @@ let () =
             "cli exhaustion quarantines the last cli identity"
             `Quick
             test_cli_walk_exhaustion_quarantines_the_last_cli_identity
+        ; test_case "a held cli slot settles without a call" `Quick
+            test_a_held_cli_slot_settles_without_a_call
+        ; test_case "held cli slots settle the catalog binding" `Quick
+            test_held_cli_slots_settle_the_catalog_binding
+        ; test_case "a held HTTP lane settles without a request" `Quick
+            test_a_held_http_lane_settles_without_a_request
         ] )
     ; ( "flow_outcome_labels"
       , [ test_case

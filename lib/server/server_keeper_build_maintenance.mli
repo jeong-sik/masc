@@ -33,5 +33,10 @@ val current : unit -> Keeper_cleanup_status.t
 val envelope_json : unit -> Yojson.Safe.t
 (** [current] as the dashboard tools envelope carries it. *)
 
+val run_passes : clock:_ Eio.Time.clock -> first_delay_sec:float -> (unit -> float) -> 'a
+(** When passes run: waits [first_delay_sec], runs the pass, waits the
+    interval the pass returned, and runs it again, without end. *)
+
 val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> config:Workspace.config -> unit
-(** Forks the loop under [sw]. *)
+(** Forks the loop under [sw]. The first pass runs one maintenance pulse
+    after the start. *)

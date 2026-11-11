@@ -62,18 +62,10 @@ type vision_backend =
 
 let vision_runtime_candidates ~now =
   (* Only [runtime.media_failover] qualifies. Capability admission uses the
-     same predicate as the Keeper media reroute. *)
+     same predicate as the Keeper media reroute. A runtime whose provider
+     stated a time not to call it before is held, not walked
+     (RFC-exact-lane-waits-for-a-stated-reset). *)
   Runtime_agent.media_candidates ()
-  |> Runtime_candidate_standing.order ~now
-       ~policy:(Runtime_candidate_standing.Rate_rest_only
-         {rest_sec=(fun ~retry_after -> Keeper_runtime_failure_route.path_rest_sec
-           ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-           ~retry_class:Keeper_runtime_failure_route.Rate_limited
-           ~retry_after_hint:retry_after)})
-       ~quota_scope_of:(fun (rt : Runtime_instance.t) ->
-         Some (Runtime_instance.quota_scope_of_runtime rt))
-       ~candidate_backpressure_of:(fun (rt : Runtime_instance.t) ->
-         Some rt.candidate_backpressure)
   |> List.filter_map (fun (rt : Runtime_instance.t) ->
        let caps = Runtime_agent.input_capabilities_of_runtime rt in
        if not (Runtime_agent.caps_admit_required_modalities caps [ "image" ])
@@ -89,14 +81,33 @@ let vision_runtime_candidates ~now =
        | Runtime_execution.Muse_serve _ -> None
        (* Vibe takes text only, so the image check above already refused it. *)
        | Runtime_execution.Vibe_cli _ -> None)
+  |> Runtime_candidate_standing.order_exact ~now
+       ~quota_scope_of:(fun (_, (rt : Runtime_instance.t), _) ->
+         Some (Runtime_instance.quota_scope_of_runtime rt))
+       ~candidate_backpressure_of:(fun (_, (rt : Runtime_instance.t), _) ->
+         Some rt.candidate_backpressure)
+
+(* The first time any held runtime may be called again. *)
+let earliest_hold held =
+  List.fold_left (fun earliest (_, until) ->
+    Some (Option.fold ~none:until ~some:(Float.min until) earliest)) None held
+
+let held_detail until =
+  "image runtimes not called: their provider asked to wait until "
+  ^ Masc_domain.iso8601_of_unix_seconds until
 
 let vision_runtime_ids ~now : string list =
-  List.map (fun (runtime_id, _, _) -> runtime_id) (vision_runtime_candidates ~now)
+  List.map (fun (runtime_id, _, _) -> runtime_id)
+    (vision_runtime_candidates ~now).Runtime_candidate_standing.walk
 
 let first_vision_runtime_id ~now : (string, string) result =
-  match vision_runtime_ids ~now with
-  | id :: _ -> Ok id
-  | [] -> Error "no image-capable runtime configured"
+  let { Runtime_candidate_standing.walk; held } = vision_runtime_candidates ~now in
+  match walk with
+  | (runtime_id, _, _) :: _ -> Ok runtime_id
+  | [] ->
+    Error (match earliest_hold held with
+      | Some until -> held_detail until
+      | None -> "no image-capable runtime configured")
 
 (* Per-keeper content-addressed storage. Workspace callers keep publication,
    read and promotion on the same explicit config-root resolution. *)
@@ -420,6 +431,7 @@ type vision_outcome =
   | Vo_ok of vision_reading
   | Vo_invalid_request of string
   | Vo_no_runtime of string
+  | Vo_runtimes_held of { until : float }
   | Vo_timeout
   | Vo_invalid_structured_response of string
   | Vo_provider of
@@ -660,6 +672,7 @@ let run_candidates_outcome
     ~(req : Va.request)
     ~guidance
     ~prompt
+    ~held_until
     ~last_error
     ~attempt_index
     candidates
@@ -673,6 +686,12 @@ let run_candidates_outcome
   let candidate_count = List.length candidates in
   let rec loop ~last_error ~attempt_index = function
     | [] ->
+      (match held_until with
+       (* A held runtime stands where the walk would have called it last and
+          been refused for its account's rest, minus the call
+          (RFC-exact-lane-waits-for-a-stated-reset R5). *)
+       | Some until -> Vo_runtimes_held { until }
+       | None ->
       (* The walk's outcome is the last candidate's: what ended it. A verdict
          an earlier candidate gave and the walk moved past (a 400, a capacity
          refusal) is not the reason the image went unread, and it is already
@@ -691,7 +710,7 @@ let run_candidates_outcome
          Vo_provider
            { failure_class = failure_class_of_http_error err
            ; detail = Provider_http_error.to_message err
-           })
+           }))
     | (runtime_id, rt, Official_client) :: rest ->
       record_vision_candidate_start
         ?tool_use_id ?trace_id ~runtime_id ~attempt_index
@@ -895,7 +914,8 @@ let run_candidates_outcome
                continue_with
                  (Candidate_invalid_output
                     (Printf.sprintf "%s: %s" runtime_id detail))
-             | (Vo_timeout | Vo_invalid_request _ | Vo_no_runtime _ | Vo_provider _ | Vo_official_failure _) as outcome ->
+             | (Vo_timeout | Vo_invalid_request _ | Vo_no_runtime _ | Vo_runtimes_held _
+               | Vo_provider _ | Vo_official_failure _) as outcome ->
                record_vision_candidate_attempt
                  ?tool_use_id ?trace_id ~runtime_id ~result:"error"
                  ~reason:"structured_response_state" ~duration_ms:0.0
@@ -939,7 +959,7 @@ let run_vision
             with
             | Error msg -> Vo_invalid_request msg
             | Ok req ->
-              let all_candidates =
+              let { Runtime_candidate_standing.walk = all_walk; held = all_held } =
                 vision_runtime_candidates ~now:(Eio.Time.now clock)
               in
               (* Candidates the caller's own walk already spent this turn. The
@@ -947,15 +967,11 @@ let run_vision
                  behind the live ones but keeps it in the list, so without this
                  the delegation calls the accounts that just refused to pay one
                  more time before the text fallback starts (#34829). *)
-              let candidates =
-                match exclude_runtime_ids with
-                | [] -> all_candidates
-                | excluded ->
-                  List.filter
-                    (fun (id, _, _) -> not (List.mem id excluded))
-                    all_candidates
-              in
-              if List.is_empty candidates && not (List.is_empty all_candidates)
+              let unspent (id, _, _) = not (List.mem id exclude_runtime_ids) in
+              let walk = List.filter unspent all_walk in
+              let held = List.filter (fun (candidate, _) -> unspent candidate) all_held in
+              if List.is_empty walk && List.is_empty held
+                 && not (List.is_empty all_walk && List.is_empty all_held)
               then
                 (* Distinct from "none configured": there are capable runtimes
                    and the walk has already asked all of them. *)
@@ -963,17 +979,23 @@ let run_vision
                   "every capable image runtime was already attempted in this turn"
               else
               let selected = match runtime_id with
-                | None -> Ok candidates
+                | None -> Ok (walk, earliest_hold held)
                 | Some requested ->
-                    let matching = List.filter
-                      (fun (id, _, _) -> String.equal id requested) candidates in
-                    if List.is_empty matching then
-                      Error "requested runtime is not a configured capable image candidate"
-                    else Ok matching
+                  let is_requested (id, _, _) = String.equal id requested in
+                  (match List.filter is_requested walk,
+                         List.filter (fun (candidate, _) -> is_requested candidate) held with
+                   | (_ :: _ as matching), _ -> Ok (matching, None)
+                   | [], (_ :: _ as waiting) -> Ok ([], earliest_hold waiting)
+                   | [], [] ->
+                     Error "requested runtime is not a configured capable image candidate")
               in
               match selected with
               | Error detail -> Vo_invalid_request detail
-              | Ok candidates ->
+              (* Nothing callable now: the reader learns until when, instead
+                 of the held runtimes being called or reading as "none
+                 configured". *)
+              | Ok ([], Some until) -> Vo_runtimes_held { until }
+              | Ok (candidates, held_until) ->
                 (match load_guidance () with
                  | Error detail -> Vo_provider
                    {failure_class=Tool_result.Runtime_failure;
@@ -991,6 +1013,7 @@ let run_vision
                 ~req
                 ~guidance
                 ~prompt
+                ~held_until
                 ~last_error:None
                 ~attempt_index:0
                 candidates)))
@@ -1018,6 +1041,9 @@ let execution_of_vision_outcome = function
     failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_request"
   | Vo_no_runtime detail ->
     failed ~failure_class:Tool_result.Runtime_failure ~detail "no_capable_runtime"
+  | Vo_runtimes_held { until } ->
+    failed ~failure_class:Tool_result.Dependency_unavailable ~detail:(held_detail until)
+      "runtimes_held"
   | Vo_timeout -> failed ~failure_class:Tool_result.Dependency_unavailable "timeout"
   | Vo_invalid_structured_response detail ->
     failed
@@ -1155,7 +1181,7 @@ let handle_with_outcome
                         ~failure_class:Tool_result.Runtime_failure
                         ~detail
                         "artifact_store_failed")
-                 | (Vo_timeout | Vo_empty | Vo_truncated | Vo_invalid_request _ | Vo_no_runtime _ | Vo_invalid_structured_response _ | Vo_provider _ | Vo_official_failure _) as outcome -> execution_of_vision_outcome outcome)))))
+                 | (Vo_timeout | Vo_empty | Vo_truncated | Vo_invalid_request _ | Vo_no_runtime _ | Vo_runtimes_held _ | Vo_invalid_structured_response _ | Vo_provider _ | Vo_official_failure _) as outcome -> execution_of_vision_outcome outcome)))))
 
 let handle ?base_path ?complete ?tool_use_id ?trace_id ?sw ?clock ?net ~meta ~args () =
   (handle_with_outcome

@@ -1,6 +1,7 @@
 open Masc
 module Step = Keeper_cleanup_step
 module Status = Keeper_cleanup_status
+module Status_json = Keeper_cleanup_status_json
 
 let step =
   Alcotest.testable
@@ -183,36 +184,38 @@ let test_pass_keeps_only_the_rows_it_chose () =
 
 let json = Alcotest.testable (Yojson.Safe.pretty_print ~std:true) Yojson.Safe.equal
 
+(* A pass and one row of every outcome. *)
+let published =
+  let pass, _ = conclude ~enabled:every owners in
+  { Status.pass = Some pass
+  ; rows =
+      [ { Status.keeper = "a"; attempt = builds 2 1; finished_at = 10.5; reclaimed_at = Some 10.5 }
+      ; { Status.keeper = "b"
+        ; attempt = Status.Guest_builds (Status.Deferred "turn busy")
+        ; finished_at = 11.
+        ; reclaimed_at = Some 3.
+        }
+      ; { Status.keeper = "c"
+        ; attempt = Status.Guest_builds Status.Not_running
+        ; finished_at = 12.
+        ; reclaimed_at = None
+        }
+      ; { Status.keeper = "d"; attempt = workspace; finished_at = 14.; reclaimed_at = Some 14. }
+      ; { Status.keeper = "e"
+        ; attempt = Status.Remote_workspace (Status.Failed "exit=1: traceback")
+        ; finished_at = 15.
+        ; reclaimed_at = None
+        }
+      ]
+  }
+;;
+
 let test_envelope_json () =
   Alcotest.check
     json
     "before the first pass"
     (Yojson.Safe.from_string {|{"pass":null,"rows":[]}|})
-    (Status.to_json Status.empty);
-  let pass, _ = conclude ~enabled:every owners in
-  let value =
-    { Status.pass = Some pass
-    ; rows =
-        [ { Status.keeper = "a"; attempt = builds 2 1; finished_at = 10.5; reclaimed_at = Some 10.5 }
-        ; { Status.keeper = "b"
-          ; attempt = Status.Guest_builds (Status.Deferred "turn busy")
-          ; finished_at = 11.
-          ; reclaimed_at = Some 3.
-          }
-        ; { Status.keeper = "c"
-          ; attempt = Status.Guest_builds Status.Not_running
-          ; finished_at = 12.
-          ; reclaimed_at = None
-          }
-        ; { Status.keeper = "d"; attempt = workspace; finished_at = 14.; reclaimed_at = Some 14. }
-        ; { Status.keeper = "e"
-          ; attempt = Status.Remote_workspace (Status.Failed "exit=1: traceback")
-          ; finished_at = 15.
-          ; reclaimed_at = None
-          }
-        ]
-    }
-  in
+    (Status_json.to_json Status.empty);
   Alcotest.check
     json
     "a pass and every outcome"
@@ -250,7 +253,160 @@ let test_envelope_json () =
       "outcome": "failed", "reason": "exit=1: traceback" }
   ]
 }|})
-    (Status.to_json value)
+    (Status_json.to_json published)
+;;
+
+(* The published value as the reader meets it, with one part changed. *)
+let fields = function
+  | `Assoc fields -> fields
+  | _ -> Alcotest.fail "an object was expected"
+;;
+
+let set name value json = `Assoc ((name, value) :: List.remove_assoc name (fields json))
+let without name json = `Assoc (List.remove_assoc name (fields json))
+let published_json () = Status_json.to_json published
+
+let with_row keeper change json =
+  let rows =
+    match List.assoc "rows" (fields json) with
+    | `List rows -> rows
+    | _ -> Alcotest.fail "rows were expected"
+  in
+  set
+    "rows"
+    (`List
+        (List.map
+           (fun row ->
+             if List.assoc "keeper" (fields row) = `String keeper then change row else row)
+           rows))
+    json
+;;
+
+let with_pass change json = set "pass" (change (List.assoc "pass" (fields json))) json
+
+let reading label json =
+  match Status_json.read_json json with
+  | Ok reading -> reading
+  | Error reason -> Alcotest.failf "%s: the value was refused: %s" label reason
+;;
+
+let test_reader_reads_back_what_the_writer_wrote () =
+  let read = reading "published" (published_json ()) in
+  Alcotest.(check bool) "the pass" true (read.read_pass = Ok published.pass);
+  Alcotest.(check bool) "every row, in the order sent" true (read.read_rows = published.rows);
+  Alcotest.(check (list string)) "no row is left unread" [] read.unread_rows;
+  Alcotest.(check (list string)) "no field is unknown" [] read.unknown_fields;
+  let before = reading "empty" (Status_json.to_json Status.empty) in
+  Alcotest.(check bool) "no pass before the first one" true (before.read_pass = Ok None);
+  Alcotest.(check int) "and no row" 0 (List.length before.read_rows)
+;;
+
+let test_reader_keeps_the_rows_beside_one_it_cannot_read () =
+  List.iter
+    (fun (label, keeper, change) ->
+      let read = reading label (with_row keeper change (published_json ())) in
+      Alcotest.(check int) (label ^ ": one row is unread") 1 (List.length read.unread_rows);
+      Alcotest.(check bool)
+        (label ^ ": the other rows are read")
+        true
+        (read.read_rows
+         = List.filter (fun (row : Status.row) -> not (String.equal row.keeper keeper)) published.rows);
+      Alcotest.(check bool) (label ^ ": the pass is read") true (read.read_pass = Ok published.pass))
+    [ "a step this build does not know", "b", set "step" (`String "guest_trim")
+    ; "a field this build does not know", "c", set "host_bytes" (`Int 1)
+    ; "a reclaim with no report", "a", without "report"
+    ; "a deferral that carries a report", "b", set "report" (`Assoc [])
+    ; "an outcome this build does not know", "e", set "outcome" (`String "exploded")
+    ; ( "a negative count"
+      , "a"
+      , set "report" (`Assoc [ "cleaned", `Int (-1); "failed", `Int 0 ]) )
+    ; "a time that is not a number", "c", set "finished_at" (`String "soon")
+    ; ( "a repeated field"
+      , "c"
+      , fun row -> `Assoc (("keeper", `String "c") :: fields row) )
+    ; "a stopped guest that carries a reason", "c", set "reason" (`String "why")
+    ; ( "a report with a field this build does not know"
+      , "a"
+      , set "report" (`Assoc [ "cleaned", `Int 2; "failed", `Int 1; "bytes", `Int 5 ]) )
+    ; "a reason that is not text", "b", set "reason" (`Int 3)
+    ]
+;;
+
+let test_reader_keeps_the_rows_beside_a_summary_it_cannot_read () =
+  List.iter
+    (fun (label, change) ->
+      let read = reading label (with_pass change (published_json ())) in
+      Alcotest.(check bool) (label ^ ": the summary is unread") true (Result.is_error read.read_pass);
+      Alcotest.(check bool) (label ^ ": every row is read") true (read.read_rows = published.rows);
+      Alcotest.(check (list string)) (label ^ ": no row is unread") [] read.unread_rows)
+    ([ "a field this build does not know", set "trimmed" (`Int 3)
+     ; ( "a step this build does not know"
+       , set
+           "steps"
+           (`List
+               [ `Assoc
+                   [ "step", `String "guest_trim"; "enabled", `Bool true; "selected", `Int 1 ]
+               ]) )
+     ; "a missing count", without "owners"
+     ; ( "a switch that is neither on nor off"
+       , set
+           "steps"
+           (`List
+               [ `Assoc
+                   [ "step", `String "guest_builds"; "enabled", `String "yes"; "selected", `Int 1 ]
+               ]) )
+     ; ( "a reason that is not text"
+       , set "unreadable" (`List [ `Assoc [ "keeper", `String "broken-a"; "reason", `Int 3 ] ]) )
+     ; "a summary that is not an object", fun _ -> `String "later"
+     ]
+     @ List.map
+         (fun count -> "a negative " ^ count, set count (`Int (-1)))
+         [ "owners"; "without_meta"; "no_step"; "switched_off"; "scheduled" ])
+;;
+
+let test_reader_refuses_a_value_it_cannot_take_apart () =
+  List.iter
+    (fun (label, json) ->
+      Alcotest.(check bool) label true (Result.is_error (Status_json.read_json json)))
+    [ "not an object", `String "keeper_cleanup"
+    ; "no rows", without "rows" (published_json ())
+    ; "rows that are not a list", set "rows" (`Assoc []) (published_json ())
+    ; "a repeated field", `Assoc (("rows", `List []) :: fields (published_json ()))
+    ]
+;;
+
+let test_reader_names_the_fields_it_does_not_know () =
+  let read = reading "a newer server" (set "trim" (`List []) (published_json ())) in
+  Alcotest.(check (list string)) "the field is named" [ "trim" ] read.unknown_fields;
+  Alcotest.(check bool) "the pass is read" true (read.read_pass = Ok published.pass);
+  Alcotest.(check bool) "the rows are read" true (read.read_rows = published.rows)
+;;
+
+let test_concern () =
+  let left n = Some (Status.Entries_left n) in
+  List.iter
+    (fun (label, attempt, expected) ->
+      Alcotest.(check bool) label true (Status.concern attempt = expected))
+    [ "a guest step that failed"
+    , Status.Guest_builds (Status.Failed "exit=1")
+    , Some (Status.Attempt_failed "exit=1")
+    ; ( "a workspace step that failed"
+      , Status.Remote_workspace (Status.Failed "ssh: timeout")
+      , Some (Status.Attempt_failed "ssh: timeout") )
+    ; "builds it could not clean", builds 2 1, left 1
+    ; ( "entries it could not remove"
+      , Status.Remote_workspace
+          (Status.Reclaimed
+             { Status.removed = 3; skipped = 4; failed = 2; freed_kib = 0; available_kib = 600 })
+      , left 2 )
+    ; "a guest run that left nothing", builds 2 0, None
+    ; "a guest run that found nothing", builds 0 0, None
+    ; "a workspace run that left nothing", workspace, None
+    ; "a busy Keeper", Status.Guest_builds (Status.Deferred "turn busy"), None
+    ; "a stopped guest", Status.Guest_builds Status.Not_running, None
+    ; "a busy endpoint", Status.Remote_workspace (Status.Deferred "busy"), None
+    ; "a stopped endpoint", Status.Remote_workspace Status.Not_running, None
+    ]
 ;;
 
 let () =
@@ -277,7 +433,30 @@ let () =
             "A pass keeps only the rows it chose"
             `Quick
             test_pass_keeps_only_the_rows_it_chose
+        ; Alcotest.test_case "What in an attempt asks for a look" `Quick test_concern
         ] )
-    ; "json", [ Alcotest.test_case "The envelope field" `Quick test_envelope_json ]
+    ; ( "json"
+      , [ Alcotest.test_case "The envelope field" `Quick test_envelope_json
+        ; Alcotest.test_case
+            "The reader reads back what the writer wrote"
+            `Quick
+            test_reader_reads_back_what_the_writer_wrote
+        ; Alcotest.test_case
+            "The reader keeps the rows beside one it cannot read"
+            `Quick
+            test_reader_keeps_the_rows_beside_one_it_cannot_read
+        ; Alcotest.test_case
+            "The reader keeps the rows beside a summary it cannot read"
+            `Quick
+            test_reader_keeps_the_rows_beside_a_summary_it_cannot_read
+        ; Alcotest.test_case
+            "The reader refuses a value it cannot take apart"
+            `Quick
+            test_reader_refuses_a_value_it_cannot_take_apart
+        ; Alcotest.test_case
+            "The reader names the fields it does not know"
+            `Quick
+            test_reader_names_the_fields_it_does_not_know
+        ] )
     ]
 ;;

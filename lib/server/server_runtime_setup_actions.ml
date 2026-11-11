@@ -1,6 +1,7 @@
 type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection | Disabled_connection
   | Credential_unavailable | Discovery_failed of Runtime_model_discovery.error
   | Save_failed of Runtime_setup_batch.error
+  | Account_refused of Runtime_account_access.refusal
 let error_message = function
   | Invalid_request -> "Choose a connection and models with reported context metadata."
   | Configuration_unavailable -> "The workspace configuration could not be read."
@@ -10,10 +11,13 @@ let error_message = function
   | Credential_unavailable -> "The selected connection's credential could not be prepared."
   | Discovery_failed error -> Runtime_model_discovery.error_message error
   | Save_failed error -> Runtime_setup_batch.error_message error
+  | Account_refused refusal -> Runtime_account_access.refusal_to_string refusal
 (* 400: the request or the selected connection is wrong. 409: the workspace
    moved under the request. 502: the runtime or server behind the connection
-   answered badly. 503: this server cannot serve the request right now. *)
+   answered badly. 503: this server cannot serve the request right now. 403:
+   the access of this process refuses the account the request would use. *)
 let status_of_error : error -> Httpun.Status.t = function
+  | Account_refused _ -> `Forbidden
   | Invalid_request | Unsupported_connection | Disabled_connection | Credential_unavailable -> `Bad_request
   | Configuration_unavailable | Network_unavailable -> `Service_unavailable
   | Discovery_failed (Runtime_model_discovery.Invalid_connection
@@ -440,11 +444,24 @@ let mark_bound_models config template id choice = function
      | _ -> json)
   | json -> json
 
+(* HIGH-RISK-UNREVIEWED: an HTTP connection reads its model list and its
+   serving window with the credential its operator declared, an account of
+   the host. A multi-account server shares no account of its host (plan D4b),
+   so the request is refused before anything is sent. The client choices are
+   judged by the commands they run. *)
+let http_account choice =
+  if Runtime_setup_spec.http choice
+  then
+    Runtime_account_access.authorize_host Runtime_account_access.Model_list
+    |> Result.map (fun (_ : Runtime_account_access.host_account) -> ())
+    |> Result.map_error (fun refusal -> Account_refused refusal)
+  else Ok ()
 let discover ~binary ~sw:_ ~net ~base_path request =
   Eio.Switch.run (fun sw ->
     let* config=config ~base_path in
     let pending=ref [] in
     let* template,id,choice,_=source_template ~sw ~pending ~workspace:base_path config request in
+    let* () = http_account choice in
     let* json = match choice with
     | Runtime_setup_spec.Codex ->
       let* command=text (value "command" template) in
@@ -477,6 +494,9 @@ let context ~binary ~net ~base_path request =
     let* config=config ~base_path in
     let pending=ref [] in
     let* template,id,choice,_=source_template ~sw ~pending ~workspace:base_path config (value "source" request) in
+    (* Before the observation: a failed one falls back to the installed
+       catalog, which would answer in place of the refusal. *)
+    let* () = http_account choice in
     let observed = match choice with
       | Runtime_setup_spec.Antigravity ->
         let* command=text (value "command" template) in

@@ -19,11 +19,21 @@ let is_transient = function
   | Transient -> true
   | Auth_refused | Configuration_refused | Input_refused _ | Output_unusable | Output_limit -> false
 
-let refusal = function
+(* A quota or billing refusal that states when the account may be called
+   again is transient: the slot waits for that time, and a slot held for it
+   ends as this call did (RFC-exact-lane-waits-for-a-stated-reset R5).
+   Without a stated time the operator has to change the account. *)
+let account_refusal retry_after =
+  match Keeper_runtime_failure_route.usable_retry_after retry_after with
+  | Some _ -> Transient
+  | None -> Configuration_refused
+
+let refusal ~retry_after_s = function
   | Exact.Rate_limited | Exact.Overloaded | Exact.Server_error | Exact.Network_error | Exact.Timeout
   | Exact.Refusal_body_not_received -> Transient
   | Exact.Auth_failed | Exact.Authorization_refused -> Auth_refused
-  | Exact.Payment_required | Exact.Not_found -> Configuration_refused
+  | Exact.Payment_required -> account_refusal retry_after_s
+  | Exact.Not_found -> Configuration_refused
   | Exact.Request_body_refused -> Input_refused Request_body
   | Exact.Invalid_request -> Input_refused Invalid_request
   | Exact.Context_overflow -> Input_refused Context_overflow
@@ -40,10 +50,7 @@ let completion (error : Http.http_error) =
     else failure
   in
   match error with
-  | Http.ProviderFailure { kind = Http.Hard_quota { retry_after }; _ } ->
-    (match retry_after with
-     | Some seconds when Float.is_finite seconds && seconds > 0. -> Transient
-     | Some _ | None -> Configuration_refused)
+  | Http.ProviderFailure { kind = Http.Hard_quota { retry_after }; _ } -> account_refusal retry_after
   | Http.ProviderFailure
       { kind = Http.Capacity_exhausted _ | Http.Provider_interrupted | Http.Provider_reported_error _; _ } ->
     Transient
@@ -61,7 +68,8 @@ let completion (error : Http.http_error) =
   | Http.ProviderFailure { kind = Http.Context_overflow _; _ } -> unless_retryable (Input_refused Context_overflow)
 
 let execution = function
-  | Exact.Provider_response_refused { refusal = provider_refusal; _ } -> refusal provider_refusal
+  | Exact.Provider_response_refused { refusal = provider_refusal; retry_after_s; _ } ->
+    refusal ~retry_after_s provider_refusal
   | Exact.Completion_failed { error; _ } -> completion error
   | Exact.Response_body_deadline_exceeded -> Transient
   | Exact.Output_limit_reached -> Output_limit
@@ -182,6 +190,10 @@ let muse_error = function
   | Runtime_muse_serve.Timeout _ -> Transient
 
 let cli_failure = function
+  (* Not called before the time its provider stated. The same request may
+     pass after it with nothing changed: the class the account's own rest
+     refusal has (RFC-exact-lane-waits-for-a-stated-reset R5). *)
+  | Keeper_lane_cli_oneshot.Held _ -> Transient
   | Keeper_lane_cli_oneshot.Unknown_runtime _
   | Keeper_lane_cli_oneshot.Not_an_official_client _ -> Configuration_refused
   | Keeper_lane_cli_oneshot.Invalid_json_output _

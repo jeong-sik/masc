@@ -189,8 +189,8 @@ let test_structured_response_states_never_accept_valid_vision_json () =
        | Vt.Vo_provider { failure_class; _ } ->
          Alcotest.(check bool) "terminal response state retains failure class"
            true (failure_class = expected_class)
-       | Vt.Vo_ok _ | Vt.Vo_invalid_request _ | Vt.Vo_no_runtime _ | Vt.Vo_timeout
-       | Vt.Vo_invalid_structured_response _ | Vt.Vo_official_failure _
+       | Vt.Vo_ok _ | Vt.Vo_invalid_request _ | Vt.Vo_no_runtime _ | Vt.Vo_runtimes_held _
+       | Vt.Vo_timeout | Vt.Vo_invalid_structured_response _ | Vt.Vo_official_failure _
        | Vt.Vo_empty | Vt.Vo_truncated ->
          Alcotest.fail "response state became successful JSON or parse/budget failure")
     [ Agent_core.Types.Refusal, Tool_result.Policy_rejection
@@ -1075,8 +1075,9 @@ let with_vision_standing ?(runtime_text=vision_failover_runtime_toml) f =
       Runtime_candidate_backpressure.note_candidate_success ~candidate:rt.candidate_backpressure) [a;b];
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-        let run ?runtime_id complete =
-          Vt.run_vision ?runtime_id ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+        let run ?runtime_id ?exclude_runtime_ids complete =
+          Vt.run_vision ?runtime_id ?exclude_runtime_ids ~complete ~sw
+            ~clock:(Eio.Stdenv.clock env)
             ~net:(Eio.Stdenv.net env) ~query:"read the screenshot"
             ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" () in
         f ~a ~b ~run))))
@@ -1123,13 +1124,26 @@ let test_vision_rate_survives_other_answers_and_clears_before_validation () =
       Runtime_quota_window.note_observed_exhausted ~scope;
       Runtime_candidate_backpressure.note_failed_attempt ~candidate:a.candidate_backpressure
         ~failure:Server_error ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"vision-owner");
+      (* The 429 stated a Retry-After, so the head is held until it ends
+         (RFC-exact-lane-waits-for-a-stated-reset): choosing it by id does
+         not call it, and its evidence stays. *)
+      calls := [];
+      (match run ~runtime_id:a.id answer with
+       | Vt.Vo_runtimes_held _ -> ()
+       | _ -> Alcotest.fail "a head held by its Retry-After was not answered as held");
+      Alcotest.(check (list string)) "held head is not called by id" [] !calls;
+      Alcotest.(check bool) "held head keeps its refusal" true (vision_has_rate a);
+      (* A later rate limit without a usable Retry-After is a rest MASC
+         chooses, which a choice by id may call through. *)
+      Runtime_candidate_backpressure.note_rate_limit ~candidate:a.candidate_backpressure
+        ~retry_after:None;
       let actual_answer ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
         Ok (if valid_json then ok_response "head answered" else text_response "not JSON") in
       let outcome = run ~runtime_id:a.id actual_answer in
       Alcotest.(check bool) "transport answer has expected semantic result" valid_json
         (match outcome with
          | Vt.Vo_ok _ -> true
-         | Vt.Vo_invalid_request _ | Vt.Vo_no_runtime _ | Vt.Vo_timeout
+         | Vt.Vo_invalid_request _ | Vt.Vo_no_runtime _ | Vt.Vo_runtimes_held _ | Vt.Vo_timeout
          | Vt.Vo_invalid_structured_response _ | Vt.Vo_official_failure _
          | Vt.Vo_empty | Vt.Vo_truncated | Vt.Vo_provider _ -> false);
       Alcotest.(check bool) "answer clears rate and Fleet failure even if JSON is invalid" true
@@ -1161,6 +1175,16 @@ key = "VISION_SHARED_TEST_KEY"
         Alcotest.(check bool) "coarse 429 leaves shared account quota available" false
           (Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ()));
         Alcotest.(check bool) "coarse 429 affects only attempted candidate" false (vision_has_rate b);
+        (* The 429's Retry-After holds [a] until it ends
+           (RFC-exact-lane-waits-for-a-stated-reset): choosing it by id does
+           not call it. The typed quota cases below have to reach it, so the
+           hold is cleared after that is checked. *)
+        let must_not_call ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+          Alcotest.fail "a runtime held by its Retry-After was called" in
+        (match run ~runtime_id:a.id must_not_call with
+         | Vt.Vo_runtimes_held _ -> ()
+         | _ -> Alcotest.fail "a runtime held by its Retry-After was not answered as held");
+        Runtime_candidate_backpressure.note_candidate_success ~candidate:a.candidate_backpressure;
         List.iter (fun retry_after ->
           Runtime_quota_window.reset_for_testing ();
           let before = Time_compat.now () in
@@ -1201,6 +1225,77 @@ let test_vision_inflight_rate_stays_on_frozen_candidate () =
       (a.candidate_backpressure == replacement.candidate_backpressure);
     Alcotest.(check bool) "old response records the actual old candidate" true (vision_has_rate a);
     Alcotest.(check bool) "old response does not mark replacement candidate" false (vision_has_rate replacement))
+
+(* RFC-exact-lane-waits-for-a-stated-reset: an image runtime whose provider
+   stated a reset is not called before it. When every one waits, the tool
+   names the earliest time instead of answering "no runtime". *)
+let test_vision_every_runtime_held_answers_held () =
+  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      Runtime_quota_window.reset_for_testing ();
+      Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+        let now = Unix.gettimeofday () in
+        let hold id resets_at =
+          Runtime_quota_window.note_exhausted
+            ~scope:(Runtime_instance.quota_scope_of_runtime (vision_standing_runtime id))
+            ~resets_at in
+        let earliest = now +. 1800.0 in
+        hold "p1.vision-a" (now +. 3600.0);
+        hold "p2.vision-b" earliest;
+        Alcotest.(check (list string)) "held runtimes are not walked" []
+          (Vt.vision_runtime_ids ~now);
+        let meta = make_meta "vision-every-runtime-held" in
+        let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+          incr calls;
+          Ok (ok_response "a held runtime answered") in
+        let outcome, raw =
+          Eio_main.run (fun env ->
+            Eio.Switch.run (fun sw ->
+              let clock = Eio.Stdenv.clock env and net = Eio.Stdenv.net env in
+              let outcome =
+                Vt.run_vision ~complete ~sw ~clock ~net ~query:"read the screenshot"
+                  ~media_type:"image/png" ~bytes:"\x89PNG\r\n\x1a\nraw" () in
+              outcome, Vt.handle ~complete ~sw ~clock ~net ~meta ~args:(artifact_args handle) ()))
+        in
+        Alcotest.(check int) "no held runtime is called" 0 !calls;
+        (match outcome with
+         | Vt.Vo_runtimes_held { until } ->
+           Alcotest.(check (float 0.0)) "the earliest stated reset" earliest until
+         | _ -> Alcotest.fail "every runtime held was not answered as held");
+        let json = json_of_output raw in
+        Alcotest.(check string) "tool error names the hold" "runtimes_held"
+          (assoc_string "error" json);
+        Alcotest.(check string) "a hold is a dependency wait" "dependency_unavailable"
+          (assoc_string "failure_class" json))))
+
+(* RFC-exact-lane-waits-for-a-stated-reset R5: a held runtime stands where the
+   walk would have called it last and been refused, minus the call. Chosen by
+   id, or left alone after the turn's spent runtimes, it answers the same hold,
+   and a walk whose callable runtime fails ends on it. *)
+let test_vision_held_runtime_is_not_called_by_any_path () =
+  with_vision_standing (fun ~a ~b:_ ~run ->
+    let a_reset = Unix.gettimeofday () +. 3600.0 in
+    Runtime_quota_window.note_exhausted
+      ~scope:(Runtime_instance.quota_scope_of_runtime a) ~resets_at:a_reset;
+    let calls = ref [] in
+    let refuse ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =
+      calls := config.Llm_provider.Provider_config.model_id :: !calls;
+      Error (Llm_provider.Http_client.HttpError
+        { code = 400
+        ; body = Received {|{"error":{"code":"1210","message":"max_tokens illegal"}}|}
+        ; retry_after_header = None }) in
+    let held label outcome =
+      match outcome with
+      | Vt.Vo_runtimes_held { until } -> Alcotest.(check (float 0.0)) label a_reset until
+      | _ -> Alcotest.fail (label ^ ": the held runtime was not answered as held") in
+    held "chosen by id" (run ~runtime_id:a.id refuse);
+    held "left after the spent runtime" (run ~exclude_runtime_ids:[ "p2.vision-b" ] refuse);
+    Alcotest.(check (list string)) "neither path calls the held runtime" [] !calls;
+    held "a failed walk ends on the hold" (run refuse);
+    Alcotest.(check (list string)) "only the callable runtime is called" [ "vision-b" ]
+      (List.rev !calls))
 
 let test_vision_402_marks_the_account_exhausted_and_moves_on () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
@@ -1514,6 +1609,7 @@ let test_eager_eviction_reason_preserves_typed_outcome () =
   assert (reason Vt.Vo_truncated = Some "eager_truncated");
   assert (reason Vt.Vo_timeout = Some "eager_timeout");
   assert (reason (Vt.Vo_no_runtime "missing") = Some "eager_no_runtime");
+  assert (reason (Vt.Vo_runtimes_held { until = 0.0 }) = Some "eager_runtimes_held");
   assert (reason (Vt.Vo_invalid_request "bad") = Some "eager_invalid_request");
   assert
     (reason (Vt.Vo_invalid_structured_response "bad json")
@@ -2945,7 +3041,9 @@ let run_candidate_standing () =
   test_vision_dispatch_reads_existing_candidate_rate ();
   test_vision_rate_survives_other_answers_and_clears_before_validation ();
   test_vision_typed_quota_and_candidate_rate_have_distinct_scope ();
-  test_vision_inflight_rate_stays_on_frozen_candidate ()
+  test_vision_inflight_rate_stays_on_frozen_candidate ();
+  test_vision_every_runtime_held_answers_held ();
+  test_vision_held_runtime_is_not_called_by_any_path ()
 
 let run_all () =
   test_native_image_admission_continues_turn ();

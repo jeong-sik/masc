@@ -15,8 +15,15 @@ type failure =
       { runtime_id : string
       ; detail : string
       }
+  | Held of
+      { runtime_id : string
+      ; until : float
+      }
 
 let failure_to_string = function
+  | Held { runtime_id; until } ->
+    Printf.sprintf "cli lane slot %s not called: its provider stated it waits until %s"
+      runtime_id (Masc_domain.iso8601_of_unix_seconds until)
   | Invalid_domain_output { runtime_id; detail } ->
     Printf.sprintf "cli lane slot %s answered invalid domain output: %s" runtime_id detail
   | Unknown_runtime { runtime_id } ->
@@ -132,6 +139,9 @@ let muse_error_is_binding_rest : Runtime_muse_serve.error -> bool = function
 ;;
 
 let refused_for_binding_rest = function
+  (* A held slot is the refusal its account would answer, without the call
+     (RFC-exact-lane-waits-for-a-stated-reset R5). *)
+  | Held _ -> true
   | Execution_failed { cause = Fusion_official_client.Claude_failure error; runtime_id = _ }
   | Execution_failed
       { cause = Fusion_official_client.Claude_admission_failure error; runtime_id = _ } ->
@@ -246,7 +256,8 @@ let refused_for_input_size = function
   | Unknown_runtime _
   | Not_an_official_client _
   | Invalid_json_output _
-  | Invalid_domain_output _ -> false
+  | Invalid_domain_output _
+  | Held _ -> false
 ;;
 
 type input_size_refusal =
@@ -417,28 +428,36 @@ let run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prom
 
 let order_slots slots =
   let rows = List.map (fun id -> id, Runtime.get_runtime_by_id id) slots in
-  let policy = Runtime_candidate_standing.Rate_rest_only
-    { rest_sec = (fun ~retry_after ->
-        Keeper_runtime_failure_route.path_rest_sec
-          ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-          ~retry_class:Keeper_runtime_failure_route.Rate_limited
-          ~retry_after_hint:retry_after) } in
-  Runtime_candidate_standing.order
-    ~now:(Time_compat.now ()) ~policy
-    ~quota_scope_of:(fun (_, runtime) ->
-      Option.map Runtime_instance.quota_scope_of_runtime runtime)
-    ~candidate_backpressure_of:(fun (_, runtime) ->
-      Option.map (fun runtime -> runtime.Runtime_instance.candidate_backpressure) runtime)
-    rows
-  |> List.map fst
+  let split =
+    Runtime_candidate_standing.order_exact ~now:(Time_compat.now ())
+      ~quota_scope_of:(fun (_, runtime) ->
+        Option.map Runtime_instance.quota_scope_of_runtime runtime)
+      ~candidate_backpressure_of:(fun (_, runtime) ->
+        Option.map (fun runtime -> runtime.Runtime_instance.candidate_backpressure) runtime)
+      rows
+  in
+  { Runtime_candidate_standing.walk = List.map fst split.Runtime_candidate_standing.walk
+  ; held =
+      List.map (fun ((runtime_id, _), until) -> runtime_id, until)
+        split.Runtime_candidate_standing.held
+  }
 ;;
 
 let walk ?runner ?observe ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate ~on_failure () =
-  let rec reject failures rest failure =
+  let note failures failure =
     on_failure failure;
-    loop (failure :: failures) rest
-  and loop failures slots =
-    match order_slots slots with
+    failure :: failures
+  in
+  let rec loop failures slots =
+    let { Runtime_candidate_standing.walk = callable; held } = order_slots slots in
+    (* A held slot is reported once, where this read sets it aside, and
+       leaves the slots the next read orders: it is never called. *)
+    let failures =
+      List.fold_left
+        (fun failures (runtime_id, until) -> note failures (Held { runtime_id; until }))
+        failures held
+    in
+    match callable with
     | [] -> Error (List.rev failures)
     | runtime_id :: rest ->
       (match run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () with
@@ -446,8 +465,8 @@ let walk ?runner ?observe ~base_dir ~cli_slots ~system_prompt ~requirement ~prom
          (match validate value with
           | Ok accepted -> Ok (runtime_id, accepted)
           | Error detail ->
-            reject failures rest (Invalid_domain_output { runtime_id; detail }))
-       | Error failure -> reject failures rest failure)
+            loop (note failures (Invalid_domain_output { runtime_id; detail })) rest)
+       | Error failure -> loop (note failures failure) rest)
   in
   loop [] cli_slots
 ;;
@@ -473,5 +492,5 @@ let input_capacity = function
       ; _
       }
   | Unknown_runtime _ | Not_an_official_client _ | Invalid_json_output _
-  | Invalid_domain_output _ -> None
+  | Invalid_domain_output _ | Held _ -> None
 ;;

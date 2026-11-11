@@ -79,5 +79,64 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual([r.digest for r in E.answered_admissions(self.base)], ["d0"])
 
 
+class EarlierManifestTest(unittest.TestCase):
+    """A lost snapshot taken again from a store that still holds some of its manifest's records."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = Path(self.tmp.name)
+        self.live, self.base, self.manifest = root / "live", root / "snapshot", root / "manifest.json"
+        self.kept, self.later = record("d1"), record("d5")
+        write(self.live, "scope-a", "r1.json", self.kept)
+        write(self.live, "scope-a", "r5.json", self.later)
+
+    def earlier(self, pins: dict[str, bytes]) -> E.EarlierManifest:
+        """The manifest of an earlier snapshot that held the records `pins`, written to a file and read back."""
+        items = [{"digest": d, "sha256": hashlib.sha256(raw).hexdigest()} for d, raw in sorted(pins.items())]
+        self.manifest.write_text(json.dumps({"schema": E.MANIFEST_SCHEMA, "items": items}), encoding="utf-8")
+        return E.earlier_manifest(self.manifest)
+
+    def copies(self) -> list[str]:
+        return [r.digest for r in E.answered_admissions(self.base)]
+
+    def test_takes_the_listed_records_the_store_still_holds_and_names_the_ones_gone(self) -> None:
+        earlier = self.earlier({"d1": self.kept, "d0": record("d0"), "d9": record("d9")})
+        records = E.snapshot(self.live, self.base, earlier)
+        self.assertEqual(([r.digest for r in records], self.copies()), (["d1"], ["d1"]))
+        manifest = E.manifest_of(records, "2026-11-11T00:00:00Z", earlier)
+        self.assertEqual(manifest["of"], {"manifest_sha256": hashlib.sha256(self.manifest.read_bytes()).hexdigest(),
+                                          "items": 3, "gone": ["d0", "d9"]})
+        self.assertEqual(manifest["items"], [{"digest": "d1", "sha256": hashlib.sha256(self.kept).hexdigest()}])
+        self.assertEqual(manifest["selection"], E.SELECTION_OF_EARLIER)
+
+    def test_the_new_manifest_reads_back_as_the_records_left(self) -> None:
+        earlier = self.earlier({"d1": self.kept, "d9": record("d9")})
+        manifest = E.manifest_of(E.snapshot(self.live, self.base, earlier), "2026-11-11T00:00:00Z", earlier)
+        self.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        self.assertEqual([r.digest for r in E.records_for(self.manifest, self.base)], ["d1"])
+
+    def test_a_listed_record_with_other_bytes_stops_it_before_anything_is_written(self) -> None:
+        # r1.json is read first and matches, so a snapshot that copied as it read would leave d1 behind.
+        earlier = self.earlier({"d1": self.kept, "d5": self.later + b" "})
+        with self.assertRaises(SystemExit):
+            E.snapshot(self.live, self.base, earlier)
+        self.assertEqual(self.copies(), [])
+
+    def test_a_manifest_without_an_earlier_one_names_none(self) -> None:
+        manifest = E.manifest_of(E.snapshot(self.live, self.base), "2026-11-11T00:00:00Z")
+        self.assertNotIn("of", manifest)
+        self.assertEqual((manifest["selection"], self.copies()), (E.SELECTION_ANSWERED, ["d1", "d5"]))
+
+    def test_a_file_that_is_not_a_manifest_is_refused(self) -> None:
+        bodies: list[dict[str, object]] = [{"schema": "another", "items": []},
+                                           {"schema": E.MANIFEST_SCHEMA, "items": [{"digest": "d1"}]}]
+        for body in bodies:
+            with self.subTest(body=body):
+                self.manifest.write_text(json.dumps(body), encoding="utf-8")
+                with self.assertRaises(SystemExit):
+                    E.earlier_manifest(self.manifest)
+
+
 if __name__ == "__main__":
     unittest.main()

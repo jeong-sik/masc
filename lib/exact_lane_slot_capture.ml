@@ -20,7 +20,7 @@ let flow attempt run = match run () with
 let slot_of_failure = function
   | Cli.Unknown_runtime {runtime_id} | Not_an_official_client {runtime_id}
   | Execution_failed {runtime_id;_} | Invalid_json_output {runtime_id;_}
-  | Invalid_domain_output {runtime_id;_} -> runtime_id
+  | Invalid_domain_output {runtime_id;_} | Held {runtime_id;_} -> runtime_id
 let cli_outcome ~slot_id outcome = match Eio.Fiber.get key with
   | None -> ()
   | Some capture ->

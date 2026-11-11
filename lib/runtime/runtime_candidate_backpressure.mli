@@ -3,7 +3,9 @@
     A coarse HTTP 429 / provider rate limit names no credential scope, so it
     is held by the attempted runtime alone and read as ordering evidence by
     the lane walk (RFC-0370 §3.3, RFC-0433): a candidate under backpressure
-    is demoted behind its lane siblings, never excluded. A server error,
+    is demoted behind its lane siblings, never excluded. An Exact-output walk
+    also holds a candidate inside its own usable Retry-After, a time the
+    provider stated, and returns it as held (RFC-exact-lane-waits-for-a-stated-reset). A server error,
     provider capacity refusal, network failure or timeout is held the same way until the candidate
     answers (RFC-0458 §3.4). The observation cell lives on the materialized
     runtime; frozen attempts retain the same cell, and the runtime catalog
@@ -77,6 +79,8 @@ val note_candidate_success : candidate:candidate -> unit
 (** Clear this candidate's rate limit and failed attempt after it answered. *)
 
 val candidate_backpressure : now:float -> candidate:candidate -> candidate_backpressure option
-(** Ordering evidence only, [None] when the cell holds none. No candidate is
-    excluded. Retry-After is retained when usable; no-hint rate limits and
-    failed attempts have no invented deadline and are cleared by success. *)
+(** The evidence the walks read, [None] when the cell holds none. A Keeper
+    walk only orders on it; an Exact-output walk also holds a candidate inside
+    its usable Retry-After (RFC-exact-lane-waits-for-a-stated-reset).
+    Retry-After is retained when usable; no-hint rate limits and failed
+    attempts have no invented deadline and are cleared by success. *)

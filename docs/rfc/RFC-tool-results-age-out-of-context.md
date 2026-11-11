@@ -3,7 +3,7 @@ rfc: "tool-results-age-out-of-context"
 title: "도구 결과는 만든 턴에서만 원문이다 — 히스토리에 남은 누적을 닫는다"
 status: Draft
 created: 2026-09-03
-updated: 2026-11-06
+updated: 2026-11-11
 author: claude
 supersedes: []
 superseded_by: null
@@ -129,7 +129,33 @@ PY
    - 이 숫자는 앞 접두가 같으면 읽는 제공자를 가정해요. 위 24시간의 모델은 모두 `openai_compat`·`glm`·`ollama` 종류 제공자로 갔어요(`packages/agent_core/models.toml`). Anthropic API 는 breakpoint 마다 20칸까지만 일치하는 항목을 찾아요. 자동 캐싱도 같아요(Prompt caching 문서의 "How automatic prefix checking works"와 "Automatic caching", 11-06 원문 확인). 앞쪽 결과가 바뀌면 20칸 안에 이전 요청이 쓴 항목이 없을 때 메시지 부분을 다시 처리할 거예요. 문서에 이 경우의 예시는 없고 규칙에서 따진 추정이에요. `anthropic` 종류(`claude.claude-sonnet-5-5` 프로필)로 가는 Agent Core 시도는 11-05T03Z 이후 도구 호출 원장에 202턴(도구를 부른 턴 14,991개의 1.3%, 프로필 이름 기준)이고, 이 규칙의 손해는 재지 못했어요. 이 제공자에는 규칙을 나눌지 정해야 해요. `anthropic` 종류에는 손해가 하나 더 있어요. 서명된 thinking 블록은 만들어질 때의 prefix 와 달라지면 요청에서 빠져요(`reasoning_history_projection.mli` 의 `verify_prefix_binding`). 끝난 턴의 결과가 마커로 바뀌면 그 앞 턴들의 thinking 블록이 여기에 걸려요. 인자를 바꿀 때는 이 손실을 막는 점검이 있는데(`request_view` 의 `retained_prefix_reasoning_indices`) 결과에는 걸려 있지 않아요. 이 손해도 재지 못했어요.
 2. 모방. §3.4.2 의 `_blob` 모양 호출은 강등된 호출 인자에서 나왔어요. 이 RFC 는 결과만 바꿔요. 모델이 결과 마커를 따라 쓰는지는 아직 안 쟀어요.
 
-열린 질문 1(마커를 되읽는 빈도)도 아직 재지 않았어요.
+### 열린 질문 1: 끝난 턴의 마커를 되읽는 빈도 (11-08 ~ 11-10, UTC)
+
+규칙(#49185)이 켜진 뒤의 저장된 요청에서 쟀어요. 스크립트와 정의, 한계는 `docs/evidence/aged-tool-results-2026-11` 의 `measure_marker_rereads.py` 에 있어요. Agent Core 레인(`ollama_cloud`·`glm-coding`)이고 바이트예요.
+
+- 요청 2,619개에 실린 끝난 턴의 늙은 마커(원본 2 KB 이상 64 KB 이하) 17,829개 중 236개(1.32%)를 같은 Keeper 가 `keeper_artifact_read` 로 읽었어요. 원본 바이트로는 110.83 MB 중 1.74 MB(1.57%)이고, 읽기가 돌려준 바이트는 1.57 MB(1.42%)예요. 읽은 호출은 279번이에요.
+- 원본 크기별로 읽힌 몫은 2~4 KB 1.70%, 4~8 KB 0.73%, 8~16 KB 1.63%, 16~32 KB 2.48%, 32~64 KB 3.04%예요. Keeper별로는 `sangsu` 가 883개 중 41개(4.6%)로 가장 높고, `context-reviewer` 는 2,855개 중 4개(0.14%)예요.
+- 그래서 끝난 턴의 마커는 왕복을 뒤로 미룬 것이 아니에요. 늙은 마커를 다시 읽은 호출은 요청을 센 Keeper 의 `keeper_artifact_read` 3,788번 중 279번(7.4%)이에요.
+- 이 값은 끝난 턴에서 마커가 된 결과의 것이에요. 만든 턴 안에서 마커로 바꾸면 모델이 방금 만든 결과를 다시 찾는 몫이 달라질 수 있고, 그 몫은 못 쟀어요. 재려면 마커로 바꾼 사건과 그 뒤의 읽기를 typed 기록으로 남겨야 해요. 장부 행에는 둘을 잇는 칸이 없어요.
+
+## 턴이 길 때 (11-11 측정, 제안 아님)
+
+이 RFC 의 규칙은 턴이 끝나야 일해요. 한 턴이 오래 이어지면 그 턴이 만든 결과는 끝까지 원문이에요. 도구 호출 원장(`~/me/.masc/tool_calls`)의 11-08T05:40Z ~ 11-11T05:40Z(72시간)에서 본 모양이고, 스크립트와 정의는 `docs/evidence/tool-efficiency-1111-2026-11` 의 `long_turn_shapes.py` 에 있어요.
+
+- 원장 141,353행·8,017턴 중 100번 이상 부른 턴(긴 턴) 164개가 호출의 23.3%(32,899행)를 차지해요. 이 100은 보고서를 가르는 숫자일 뿐 어떤 규칙도 쓰지 않아요. 턴당 호출 수는 중앙값 6, p90 43, 최대 833이에요.
+- 긴 턴의 호출이 많은 Keeper 는 `rondo`(긴 턴 24개, 자기 호출의 58.8%), `context-reviewer`(23개, 37.5%), `wkbl-data`(22개, 57.6%), `masc-productor-owner`(15개, 51.6%), `wkbl-front`(15개, 35.0%)예요.
+- 도구 입력에서 PR 번호처럼 보이는 글(`#12345`, `/pull/12345`, `gh pr view 12345` 꼴)을 센 서로 다른 PR 수는 긴 턴에서 `context-reviewer` 가 중앙값 24개(p90 54, 최대 69), `masc-productor-owner` 13개, `rondo` 10개, `code-reviewer-uncle` 5개예요. `context-reviewer` 의 100번 미만 턴 353개는 중앙값 3개예요. 글자 세기라서 PR 마다 리뷰했는지는 몰라요. 이 Keeper 들은 긴 턴 하나가 PR 수십 개를 이어서 다뤄요.
+- `wkbl-data`·`wkbl-front`·`wkbl-web-leader`·`msx-retro-mania` 의 긴 턴(합 10,899행)에는 도구 입력에 PR 번호처럼 보이는 글이 없어요. 이 Keeper 들의 일의 단위가 무엇인지는 이 측정으로 못 가렸어요.
+- 같은 턴에서 같은 입력으로 다시 부른 호출이 앞 결과를 대신한 바이트는 2 KB 이상 64 KB 이하 결과 346.3 MB 중 34.7 MB(10.0%)예요. 그중 28.3 MB(82%)는 `msx-retro-mania` 의 `masc_dos_press`·`masc_dos_step`·`masc_dos_screen` 이고, `context-reviewer` 는 상위 여덟 Keeper 에 들지 않아요.
+
+고르지 않은 규칙: "마지막 K개만 원문"이나 "N바이트가 넘으면 마커"는 이 RFC 가 제안하지 않아요. K 와 N 은 재생으로 골라야 하는 숫자라서 근거가 없어요. `RFC-keeper-context-window-in-tokens` 의 §13.2 가 창 크기 숫자(100000/70000)를 같은 이유로 없애요. 제공자가 요청이 크다고 거절한 사건에 답하는 턴 안 강등(`Current_turn_demoted`)은 지금도 있어요.
+
+숫자 없이 갈 수 있는 구조 후보 둘이에요. 둘 다 아직 만들지 않았고 사용자가 정해요.
+
+1. 턴을 일의 단위에서 끝내요. 순찰 턴이 PR 마다 깨움을 만들고 그 턴은 끝내면, 이 RFC 의 끝난 턴 규칙이 PR 하나가 끝날 때마다 일해요. 새 숫자가 없고 단위는 PR 번호예요. `RFC-0379-keeper-monitor-event-wake` §6.6 의 PR head 깨움과 이어져요. 단위가 PR 인 Keeper 는 위 측정에서 `context-reviewer`·`rondo`·`masc-productor-owner`·`code-reviewer-uncle` 이고, 긴 턴의 호출 32,899행 중 16,448행(50.0%)이 이 넷의 것이에요. 나머지 긴 턴의 단위는 정해지지 않았어요. 대가는 둘이에요. 턴이 늘어서 턴마다 첫 요청에 시스템 프롬프트와 도구 스키마가 다시 실려요. 제공자 캐시 적중이 내려가는지는 못 쟀어요. 그리고 PR 사이에 이어지던 맥락이 끊겨요.
+2. 도구가 결과의 수명을 선언해요. `config/tools/<tool>.toml` 에 닫힌 값을 적고, 기준은 "같은 입력의 더 새 결과가 있다"는 사건이에요. 위 측정이 가리키는 곳은 `msx-retro-mania` 의 DOS 도구예요. `context-reviewer` 의 긴 턴에는 닿지 않아요.
+
+정해야 하는 것: (가) 후보 1을 만들지. RFC-0379 §6.6.2 의 결정과 겹쳐요. (나) 후보 2를 만들지. (다) 만든 턴 안의 되읽기율을 재는 typed 기록을 코드로 넣을지.
 
 ## 구현 방향 (RFC 승인 뒤)
 

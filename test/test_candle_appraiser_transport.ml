@@ -417,6 +417,33 @@ let test_capacity_wait_does_not_invent_a_retained_intent () =
     | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) -> fail "capacity must await admission") [();()];
   check (list string) "every retry reads first" ["read";"submit";"read";"submit"] !operations
 
+(* The Candle loop of 2026-11-09 (RFC-exact-lane-waits-for-a-stated-reset):
+   one Goal's appraisal went out 85 times in 86 minutes. The pulses never
+   submitted it again. Each one read the retained original, and the read woke
+   the Add-on host, which ran it again. Whether that run calls a provider is
+   the host's to decide (test_lane_addon_exact_runner: no wake before the
+   reset starts a call). This consumer's half: while the original is pending,
+   a pulse only reads it. *)
+let test_pulses_only_read_a_pending_original () =
+  with_workspace @@ fun base_path ->
+  let registry = Runs.create () in
+  let operations = ref [] and retained = ref false in
+  let call ~arguments =
+    let kind = operation arguments in
+    operations := !operations @ [kind];
+    let id = request_id arguments in
+    match kind, !retained with
+    | "read", false -> reply id "absent" []
+    | "submit", false -> retained := true; reply id "pending" []
+    | "read", true -> reply id "pending" []
+    | _ -> fail "a pending original must not be submitted again" in
+  List.iter (fun () -> match runner ~registry ~base_path ~call grade with
+    | Error (A.Transport_unavailable _) -> ()
+    | Ok _ | Error (A.Invalid_response _ | A.Execution_rejected _) ->
+      fail "a pending original must wait for its host result") [();();()];
+  check (list string) "after one submit every pulse only reads"
+    ["read";"submit";"read";"read"] !operations
+
 let test_malformed_worker_state_cannot_authorize_submission () =
   with_workspace @@ fun base_path ->
   let registry = Runs.create () in
@@ -463,5 +490,6 @@ let () = run "Candle Add-on consumer"
     test_case "replacement cannot replay an unknown original" `Quick test_a_replacement_cannot_replay_an_unknown_original;
     test_case "full Candle decoding checks every recipient" `Quick test_domain_decode_rejects_incomplete_recipient_weights;
     test_case "capacity admission always reads first" `Quick test_capacity_wait_does_not_invent_a_retained_intent;
+    test_case "pulses only read a pending original" `Quick test_pulses_only_read_a_pending_original;
     test_case "malformed state cannot authorize submit" `Quick test_malformed_worker_state_cannot_authorize_submission;
     test_case "missing prompt never reaches worker" `Quick test_missing_prompt_never_calls_the_worker]]

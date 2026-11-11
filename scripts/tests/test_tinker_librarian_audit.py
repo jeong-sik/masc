@@ -12,6 +12,7 @@ openai, so this file runs with `uv run`. The decision rules are tested in
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import itertools
 import json
@@ -204,6 +205,33 @@ class CaseTest(unittest.TestCase):
             rules.unlink()
             with self.assertRaisesRegex(SystemExit, "changed after"):
                 D.judge_decisions(out, synth_render.TEMPLATE)
+
+
+def row(item_id: str) -> JsonObject:
+    return {"request": {"item_id": item_id, "keeper": {"name": "문서지기"}}}
+
+
+class PoolTest(unittest.TestCase):
+    def test_batches_with_their_own_memory_numbers_pool_in_item_order(self) -> None:
+        first, second = [row("eval-k-01-007"), row("eval-k-00-002")], [row("eval-k-10-004"), row("eval-j-10-001")]
+        self.assertEqual([A.item_id_of(r) for r in A.pooled([first, second])],
+                         ["eval-j-10-001", "eval-k-00-002", "eval-k-01-007", "eval-k-10-004"])
+
+    def test_batches_that_share_a_memory_key_do_not_pool(self) -> None:
+        # A batch generated without --first-memory numbers its memories like the first batch: the
+        # key then names two memories, though no item ID is written twice.
+        with self.assertRaisesRegex(SystemExit, "batches 1 and 2 both hold requests on eval-k-00"):
+            A.pooled([[row("eval-k-00-002")], [row("eval-j-10-001"), row("eval-k-00-005")]])
+
+    def test_the_pooled_file_holds_every_row_as_its_batch_file_does(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = [Path(tmp) / "first.jsonl", Path(tmp) / "second.jsonl"]
+            A.write_jsonl(paths[0], [row("eval-k-00-002")])
+            A.write_jsonl(paths[1], [row("eval-k-10-004"), row("eval-j-10-001")])
+            final = Path(tmp) / "pooled" / "requests.jsonl"
+            self.assertEqual(A.pool(argparse.Namespace(batch=[str(p) for p in paths], final=str(final))), 0)
+            lines = [line for p in paths for line in p.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(final.read_text(encoding="utf-8").splitlines(), [lines[2], lines[0], lines[1]])
 
 
 class AnswersTest(unittest.TestCase):

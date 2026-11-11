@@ -83,7 +83,6 @@
 ;; GET /api/v1/tool-metrics/series reads the series from the store directly;
   ;; dune does not re-export it through the masc dep.
   masc.tool_metrics_store
-  masc.sse_event
   masc.masc_tool_surface
   ;; Server_person_mcp checks the arguments of a tool call against the tool's
   ;; definition; dune does not re-export the contract through the masc dep.

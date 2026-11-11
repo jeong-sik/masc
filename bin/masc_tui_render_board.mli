@@ -1,6 +1,10 @@
 (** Board screen entry points. Each returns a frame and optional normalized
     scroll for the caller to apply. *)
 
+val board_step : Masc_tui_types.state -> string
+(** The step the Board screens take from Work, for a title drawn outside this
+    module. *)
+
 val render_board_list : Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 val render_board_compose : Masc_tui_types.state ->

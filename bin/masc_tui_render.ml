@@ -563,7 +563,12 @@ let render_surface ~home (state : state) =
                 | None ->
                     let terminal_rows, cols = get_terminal_size () in
                     surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"board-read"
-                      ~title:(screen_title (ui_text state ~ko:" MASC 게시판 / " ~en:" MASC Board / " ^ Terminal_text.single_line post_id))
+                      ~title:
+                        (here_row ~cols state
+                           ~path:
+                             [ Masc_tui_render_board.board_step state
+                             ; Terminal_text.single_line post_id ]
+                           ~readings:[] ~position:None)
                       ~hints:(Masc_tui_keys.footer_hints_board_pending ~lang:state.ui_language)
                       ~body:(fun ~budget:_ c ->
                         match Board_detail.view_for state.board_detail ~post_id with

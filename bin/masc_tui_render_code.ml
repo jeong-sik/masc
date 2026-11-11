@@ -959,6 +959,6 @@ let render_code (state : state) =
   let code_pane = Masc_tui_keys.code_pane_of state in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(if Option.is_some (current_code_hover state) then Masc_tui_keys.footer_hints_code_hover
-               else Masc_tui_keys.footer_hints_code ~pane:code_pane));
+       ~hints:(if Option.is_some (current_code_hover state) then Masc_tui_keys.footer_hints_code_hover ~lang:state.ui_language
+               else Masc_tui_keys.footer_hints_code ~lang:state.ui_language ~pane:code_pane));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf

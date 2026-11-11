@@ -228,6 +228,12 @@ type owner_capture_error =
   | Owner_lease_rejected of base_path_lock_rejection
   | Owner_identity_unavailable of Owner_process_identity.error
   | Current_process_owner
+
+val owner_capture_error_to_string : owner_capture_error -> string
+(** Why the owner of a lease was not captured, as a clause for the sentence
+    of a command: the rejection of the lease in its own words, or what the
+    kernel did not give of the process that holds it. *)
+
 val capture_existing_owner :
   run_dir:string -> base_path:string -> (Owner_process_identity.t, owner_capture_error) result
 (** Validate the selected workspace's private lease and capture its kernel lock
@@ -239,6 +245,23 @@ val capture_existing_owner :
     authority of the host, the effective UID that could open this private
     lease ({!Server_upgrade_preparation.stop_account_server}). Does not close
     this process's own lease. *)
+
+val lease_file_present :
+  Host_config.base_path_lease_root -> base_path:string -> (bool, base_path_lock_rejection) result
+(** Whether the lease file of [base_path] is there for the effective user,
+    read without making anything. {!lease_run_dir} makes the run directory,
+    and {!capture_existing_owner} makes the private lease directory and an
+    empty lease file. A BasePath whose lease file was never made was never
+    held, so a command that must leave a BasePath as it found it asks this
+    first and reads the owner only on [true].
+
+    [false] when the BasePath, the run directory, the private lease directory
+    or the lease file is not there. [true] when the lease file is there, and
+    when an entry on the way is there and is no directory: the capture that
+    follows refuses such an entry in its own words. After a [true] the
+    capture finds nothing left to make. An [Error] when an entry could not be
+    read. The path is the one {!lease_run_dir} and the capture spell, and
+    nothing of an entry is judged here. *)
 
 (** {1 The account server announcement}
 

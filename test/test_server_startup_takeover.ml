@@ -703,6 +703,98 @@ let test_lease_root_beside_base_path_is_shared_by_every_spelling () =
             "a valid BasePath was rejected: %s"
             (Server_startup_takeover.base_path_lock_rejection_to_string rejection)))
 
+(* A command that only reads asks for the lease file before it reads the
+   owner: reading the owner makes the private lease directory and the lease
+   file when they are missing. *)
+let test_lease_file_presence_is_read_without_making_anything () =
+  if Sys.os_type <> "Unix" then Alcotest.skip ();
+  with_temp_dir "startup-takeover-lease-present" (fun dir ->
+    let rejected what rejection =
+      Alcotest.failf
+        "%s: %s"
+        what
+        (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+    in
+    let present root ~base_path =
+      match Server_startup_takeover.lease_file_present root ~base_path with
+      | Ok present -> present
+      | Error rejection -> rejected "the lease file could not be looked for" rejection
+    in
+    let lease_root base_path =
+      match
+        Server_startup_takeover.lease_run_dir Host_config.Beside_base_path ~base_path
+      with
+      | Ok run_dir -> run_dir
+      | Error rejection -> rejected "the lease root was refused" rejection
+    in
+    let entries path = List.sort String.compare (Array.to_list (Sys.readdir path)) in
+    let beside = Host_config.Beside_base_path in
+    let base_path = Filename.concat dir "workspace" in
+    Alcotest.(check bool) "a BasePath that is not there" false (present beside ~base_path);
+    Alcotest.(check (list string)) "and it was not made" [] (entries dir);
+    Unix.mkdir base_path 0o755;
+    Alcotest.(check bool) "a BasePath nothing started in" false (present beside ~base_path);
+    Alcotest.(check (list string)) "nothing was made in it" [] (entries base_path);
+    let run_dir = lease_root base_path in
+    Alcotest.(check bool) "a lease root with nothing in it" false (present beside ~base_path);
+    Alcotest.(check (list string)) "nothing was made in it" [] (entries run_dir);
+    (* The helper that names the lease file makes the private lease
+       directory, as a reader of the announcement does. *)
+    let lease_path =
+      Server_startup_takeover.For_testing.lease_path
+        ~run_dir:(Unix.realpath run_dir)
+        ~canonical_base_path:(Unix.realpath base_path)
+    in
+    Alcotest.(check bool)
+      "a private lease directory with no lease file"
+      false
+      (present beside ~base_path);
+    Alcotest.(check (list string))
+      "no lease file was made"
+      []
+      (entries (Filename.dirname lease_path));
+    (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+     | Server_startup_takeover.Base_path_acquired lease ->
+       Fun.protect
+         ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+         (fun () ->
+           Alcotest.(check bool) "the lease file of an owner" true (present beside ~base_path);
+           Alcotest.(check bool)
+             "under a root the host names"
+             true
+             (present (Host_config.Lease_dir_override run_dir) ~base_path);
+           Alcotest.(check bool)
+             "another root has no lease of it"
+             false
+             (present (Host_config.Lease_dir_override dir) ~base_path))
+     | Server_startup_takeover.Base_path_already_owned _ ->
+       Alcotest.fail "a fresh BasePath was already owned"
+     | Server_startup_takeover.Base_path_rejected rejection ->
+       rejected "a valid BasePath was rejected" rejection);
+    (* An entry on the way that is no directory answers [true]: the read of
+       the owner goes through the preparation an acquisition goes through,
+       which refuses the entry before it makes anything. *)
+    let blocked = Filename.concat dir "blocked" in
+    Unix.mkdir blocked 0o755;
+    let blocked_root = lease_root blocked in
+    Unix.rmdir blocked_root;
+    Out_channel.with_open_bin blocked_root (fun (_ : Out_channel.t) -> ());
+    Alcotest.(check bool) "a lease root that is a file" true (present beside ~base_path:blocked);
+    (match Server_startup_takeover.acquire_base_path_lock ~run_dir:blocked_root blocked with
+     | Server_startup_takeover.Base_path_rejected
+         (Server_startup_takeover.Run_directory_not_directory _) -> ()
+     | Server_startup_takeover.Base_path_rejected rejection ->
+       rejected "the file was refused for another reason" rejection
+     | Server_startup_takeover.Base_path_acquired lease ->
+       Server_startup_takeover.release_base_path_lease lease;
+       Alcotest.fail "a lease was acquired under a file"
+     | Server_startup_takeover.Base_path_already_owned _ ->
+       Alcotest.fail "a file was read as an owned lease");
+    Alcotest.(check (list string))
+      "the refusal made nothing"
+      [ Filename.basename blocked_root ]
+      (entries blocked))
+
 let test_stale_lease_release_preserves_new_active_lease () =
   with_base_and_run "startup-takeover-stale-release"
     (fun ~base_path ~run_dir ->
@@ -2022,6 +2114,9 @@ let () =
           Alcotest.test_case
             "a lease root beside the BasePath is shared by every spelling" `Quick
             test_lease_root_beside_base_path_is_shared_by_every_spelling;
+          Alcotest.test_case
+            "the presence of the lease file is read without making anything" `Quick
+            test_lease_file_presence_is_read_without_making_anything;
           Alcotest.test_case "stale lease release preserves active ownership"
             `Quick test_stale_lease_release_preserves_new_active_lease;
           Alcotest.test_case "linked runtime directory is rejected" `Quick

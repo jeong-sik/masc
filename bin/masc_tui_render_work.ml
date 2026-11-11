@@ -15,6 +15,13 @@ module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
 module Press = Masc_tui_press
 
+(* A moment the wire spells out as ISO-8601 text, drawn the way every other
+   moment on these screens is: in the operator's zone, with only as much of
+   the date as its distance from now needs. *)
+let wire_moment (ts : string) =
+  Terminal_text.single_line
+    (Planning_detail.moment_text ~now:(Unix.gettimeofday ()) ts)
+
 (* Board lives under Work. Both links use the existing destinations; the
    palette spelling also gives keyboard users a path without claiming [b],
    which already opens the Goal summary. This is one physical header row. *)
@@ -540,7 +547,7 @@ let planning_stale_notice_rows (state : state) ~cols =
       let rows text = Message_layout.wrap_words ~max_cells:width text
         |> List.map (fun line -> Theme.warn () ^ "  " ^ line ^ Ansi.reset) in
       rows (status ^ (if ko then " · 표시 중인 스냅샷 " else " · showing snapshot ")
-        ^ Terminal_text.single_line snapshot.pl_generated_at)
+        ^ wire_moment snapshot.pl_generated_at)
       @ (match Terminal_text.optional_single_line (Some error) with
          | None -> []
          (* Keep verbose diagnostics on the existing error row; a long
@@ -576,10 +583,10 @@ let planning_summary_reading ~cols (state : state) =
         (warning @ [text "목표 관측 없음" "No Goal observation"])]
     | Some p ->
         let stamps =
-          [ text "표시 중인 서버 스냅샷: " "Displayed server snapshot: " ^ Terminal_text.single_line p.pl_generated_at ]
+          [ text "표시 중인 서버 스냅샷: " "Displayed server snapshot: " ^ wire_moment p.pl_generated_at ]
           @ (match state.planning_baseline with
              | None -> [text "기준 스냅샷 없음" "No baseline snapshot"]
-             | Some first -> [text "기준 서버 스냅샷: " "Baseline server snapshot: " ^ Terminal_text.single_line first.pl_generated_at])
+             | Some first -> [text "기준 서버 스냅샷: " "Baseline server snapshot: " ^ wire_moment first.pl_generated_at])
         in
         let history = match p.pl_goal_history with
           | [] -> [text "목록 밖 이력 없음" "No unlisted Goal history"]
@@ -759,7 +766,7 @@ let render_planning_list (state : state) =
            let scope = " " ^ (if current then Theme.recede () else Theme.warn ())
              ^ text (if current then "현재 목표 관측 · " else "보존한 목표 관측 · ")
                     (if current then "Current Goal reading · " else "Retained Goal reading · ")
-             ^ Terminal_text.single_line snapshot.pl_generated_at ^ Ansi.reset in
+             ^ wire_moment snapshot.pl_generated_at ^ Ansi.reset in
            List.iter push_context (if current then [navigation] else [scope; navigation]);
            let available = max 0 (budget - !used) in
            (* Modes and a read failure can use spare space, but never replace
@@ -846,7 +853,7 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
                       ((text "측정 근거: " "Measured: ") ^ Terminal_text.single_line evidence)
                   ; line Planning_detail.Quiet
                       ((text "측정 주체: " "Measured by: ") ^ Terminal_text.single_line actor
-                       ^ " · " ^ (text "기록 시각: " "recorded: ") ^ Terminal_text.single_line recorded_at)
+                       ^ " · " ^ (text "기록 시각: " "recorded: ") ^ wire_moment recorded_at)
                   ; tasks ]))
 
 let planning_confirmation_view (state : state) ~goal_id =
@@ -969,11 +976,11 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
     @ field (text "기한" "Due") (optional goal.pg_due_date)
     @ field (text "우선순위" "Priority") (Printf.sprintf "P%d" goal.pg_priority)
     @ (List.concat_map (fun (label, value) -> match value with
-         | None -> [] | Some value -> field ~tone:Planning_detail.Quiet label value)
+         | None -> [] | Some value -> field ~tone:Planning_detail.Quiet label (wire_moment value))
          [(text "생성" "Created"), goal.pg_created_at; (text "갱신" "Updated"), goal.pg_updated_at; (text "검토" "Reviewed"), goal.pg_last_review_at])
     @ field ~tone:Planning_detail.Quiet (text "링크" "Link") (Link.reference Goal goal.pg_id)
     @ (match state.planning with None -> [] | Some snapshot ->
-      field ~tone:Planning_detail.Quiet (text "목록 관측 시각" "List observed") snapshot.pl_generated_at)
+      field ~tone:Planning_detail.Quiet (text "목록 관측 시각" "List observed") (wire_moment snapshot.pl_generated_at))
   in
   let request_results = (match List.assoc_opt goal.pg_id state.goal_action_errors with
        | Some error ->

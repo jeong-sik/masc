@@ -38,7 +38,8 @@ type response_observation = { visit:visit; call_id:string; family:response_famil
 [@@deriving yojson]
 type response_observations = response_observation list [@@deriving yojson]
 type http = { legacy:http_v1; response_observations:response_observations }
-type cli_result = Not_reached | Prompt_unavailable | Answered of string | Exhausted [@@deriving yojson]
+type cli_result = Not_reached | Prompt_unavailable | Answered of string | Exhausted
+  | Stopped_before_dispatch of string [@@deriving yojson]
 type cli = { visited:string list; dispatched:string list; failures:Failure.cli_observation list; result:cli_result }
 [@@deriving yojson]
 type walk = { version:int; declared_http:string list; excluded_http:string list;
@@ -156,15 +157,17 @@ let failure_evidence receipt =
   let prior = if receipt.http.semantic=[] then prior else Failure.with_invalid_output prior in
   let prior = match receipt.cli.result with
     | Not_reached -> prior
-    | Prompt_unavailable | Answered _ | Exhausted -> Failure.without_measured_cli_capacity prior in
+    | Prompt_unavailable | Answered _ | Exhausted | Stopped_before_dispatch _ ->
+      Failure.without_measured_cli_capacity prior in
   List.fold_left (fun acc observed -> Failure.combine acc (Failure.of_cli_observation observed)) prior receipt.cli.failures
 let generation_dispatch receipt =
   let receipt=receipt.walk in
   if receipt.http.generation_sent then Exact.Generation_dispatch_started else Exact.No_generation_dispatch
 let answered_slot receipt = let receipt=receipt.walk in match receipt.cli.result,receipt.http.terminal with
   | Answered slot,_ -> Some slot
-  | (Not_reached | Prompt_unavailable | Exhausted),Accepted visit -> Some visit.candidate_id
-  | (Not_reached | Prompt_unavailable | Exhausted),(Not_started _ | Execution_exhausted _
+  | (Not_reached | Prompt_unavailable | Exhausted | Stopped_before_dispatch _),Accepted visit ->
+    Some visit.candidate_id
+  | (Not_reached | Prompt_unavailable | Exhausted | Stopped_before_dispatch _),(Not_started _ | Execution_exhausted _
       | Candidates_exhausted _ | Execution_stopped _ | Semantic_exhausted | Locally_stopped _) -> None
 let dispatched_failure = function
   | Rejected _ -> false
@@ -290,7 +293,8 @@ let validate receipt =
     "CLI visits differ from the original declaration" in
   let expected_dispatch=List.filter_map (fun failure ->
     if Failure.cli_was_dispatched failure then Some (Failure.cli_observation_slot failure) else None) c.failures
-    @ (match c.result with Answered slot -> [slot] | Not_reached|Prompt_unavailable|Exhausted -> []) in
+    @ (match c.result with Answered slot -> [slot]
+       | Not_reached|Prompt_unavailable|Exhausted|Stopped_before_dispatch _ -> []) in
   let* ()=check (c.dispatched=expected_dispatch) "CLI dispatch differs from original ordered outcomes" in
   let* ()=check (match c.result with
     | Not_reached -> c.visited=[] && c.dispatched=[] && c.failures=[]
@@ -298,14 +302,18 @@ let validate receipt =
     | Answered slot -> List.mem slot receipt.declared_cli && not (List.mem slot failure_ids)
         && c.visited=failure_ids@[slot]
     | Exhausted -> receipt.declared_cli<>[] && c.visited=failure_ids
-        && List.sort String.compare c.visited=List.sort String.compare receipt.declared_cli)
+        && List.sort String.compare c.visited=List.sort String.compare receipt.declared_cli
+    | Stopped_before_dispatch slot -> List.mem slot receipt.declared_cli
+        && not (List.mem slot failure_ids) && c.visited=failure_ids@[slot])
     "incomplete or reordered CLI outcome" in
   check (match h.terminal,receipt.cli.result with
     | Accepted _,Not_reached -> true
-    | (Accepted _|Locally_stopped _|Execution_stopped _),(Prompt_unavailable|Answered _|Exhausted) -> false
+    | (Accepted _|Locally_stopped _|Execution_stopped _),
+      (Prompt_unavailable|Answered _|Exhausted|Stopped_before_dispatch _) -> false
     | (Locally_stopped _|Execution_stopped _),Not_reached -> true
     | (Not_started _|Execution_exhausted _|Candidates_exhausted _|Semantic_exhausted),
-      (Not_reached|Prompt_unavailable|Answered _|Exhausted) -> true) "CLI ran after a stopped HTTP flow"
+      (Not_reached|Prompt_unavailable|Answered _|Exhausted|Stopped_before_dispatch _) -> true)
+    "CLI ran after a stopped HTTP flow"
 
 let validate_observations walk observations =
   let h=walk.http in

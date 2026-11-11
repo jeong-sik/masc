@@ -204,6 +204,32 @@ val walk
     {!Agent_core.Exact_output.success}, which only an API slot's exact
     execution produces. *)
 
+type 'stop walk_end =
+  | Slots_exhausted of failure list
+      (** Every slot failed, in walk order. *)
+  | Stopped_before_dispatch of { runtime_id : string; failures : failure list; stop : 'stop }
+      (** The gate refused just before [runtime_id] was sent to. Nothing was
+          sent to it and no later slot was visited. [failures] are the slots
+          that failed before it, in walk order. *)
+
+val walk_gated
+  :  ?runner:runner
+  -> ?observe:(attempt_observation -> unit)
+  -> before_dispatch:(unit -> (unit, 'stop) result)
+  -> base_dir:string
+  -> cli_slots:string list
+  -> system_prompt:string
+  -> requirement:Agent_core.Exact_output.output_requirement
+  -> prompt:string
+  -> validate:(Yojson.Safe.t -> ('a, string) result)
+  -> on_failure:(failure -> unit)
+  -> unit
+  -> (string * 'a, 'stop walk_end) result
+(** {!walk} with a gate. [before_dispatch] runs once per admitted slot, after
+    runtime admission and before the [Dispatching] observation and the runner.
+    Its refusal ends the walk. It is not a slot failure: [on_failure] does not
+    see it and no other slot is tried. *)
+
 val prompt_with_schema :
   requirement:Agent_core.Exact_output.output_requirement -> prompt:string -> string
 (** The exact text [run] submits to a client that returns what the model

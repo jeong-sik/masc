@@ -22,7 +22,7 @@ module Position : sig
   (** A reading position with an explicit end selection. Normalizing a frame
       preserves that selection; only navigation or a new reading releases it. *)
   type t
-  type movement = First | Last | By of int
+  type movement = First | Last | By of int | Page_down | Page_up
   val first : t
   val is_end : t -> bool
   val at : int -> t
@@ -32,7 +32,8 @@ module Position : sig
   (** Clamp an absolute offset while retaining an end selection. *)
   val move : count:int -> height:int -> movement -> t -> t
   (** Relative navigation starts at the current bounded position and releases
-      the end selection. [First] releases it; [Last] selects it. *)
+      the end selection. [First] releases it; [Last] selects it. [Page_down] and
+      [Page_up] move by {!page_step}, so a reader never picks its own page. *)
 end
 
 val down : count:int -> height:int -> int -> int

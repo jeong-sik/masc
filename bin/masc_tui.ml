@@ -36493,7 +36493,7 @@ Use relative paths for resources already held in the package. -->
                 let movement=match k with
                   | "j" | "down" | "wheel-down" -> Masc_tui_detail_reading.By 1
                   | "k" | "up" | "wheel-up" -> By (-1)
-                  | "pagedown" -> By height | "pageup" -> By (-height)
+                  | "pagedown" -> Page_down | "pageup" -> Page_up
                   | "home" | "g" -> First | _ -> Last in
                 state.board_reader <- Masc_tui_board_reader.move ~count ~height movement reader
             | _ -> ())
@@ -36556,8 +36556,8 @@ Use relative paths for resources already held in the package. -->
                 let movement=match k with
                   | "j" | "down" | "wheel-down" -> Some (Masc_tui_detail_reading.By 1)
                   | "k" | "up" | "wheel-up" -> Some (Masc_tui_detail_reading.By (-1))
-                  | "pagedown" -> Some (Masc_tui_detail_reading.By height)
-                  | "pageup" -> Some (Masc_tui_detail_reading.By (-height))
+                  | "pagedown" -> Some Masc_tui_detail_reading.Page_down
+                  | "pageup" -> Some Masc_tui_detail_reading.Page_up
                   | "home" | "g" -> Some Masc_tui_detail_reading.First
                   | "end" | "G" -> Some Masc_tui_detail_reading.Last
                   | _ -> None in
@@ -36620,8 +36620,8 @@ Use relative paths for resources already held in the package. -->
                   let movement = match k with
                     | "j" | "down" | "wheel-down" -> Some (Masc_tui_detail_reading.By 1)
                     | "k" | "up" | "wheel-up" -> Some (Masc_tui_detail_reading.By (-1))
-                    | "pagedown" -> Some (Masc_tui_detail_reading.By height)
-                    | "pageup" -> Some (Masc_tui_detail_reading.By (-height))
+                    | "pagedown" -> Some Masc_tui_detail_reading.Page_down
+                    | "pageup" -> Some Masc_tui_detail_reading.Page_up
                     | "home" | "g" -> Some Masc_tui_detail_reading.First
                     | "end" | "G" -> Some Masc_tui_detail_reading.Last
                     | _ -> None in

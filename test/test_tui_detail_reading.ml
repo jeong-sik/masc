@@ -52,6 +52,22 @@ let test_navigation_normalizes_before_moving () =
   let first = Reading.move ~count:100 ~height:10 (Reading.By min_int) last in
   check int "large negative movement is bounded" 0 (Reading.scroll ~count:100 ~height:10 first)
 
+(* A page is the window less one row, so the row the reader stopped on is the
+   first row of the next page. The surfaces used to add the whole height. *)
+let test_a_page_keeps_one_row_of_the_window_it_leaves () =
+  let scroll reading = Reading.scroll ~count:100 ~height:10 reading in
+  let move movement reading = Reading.move ~count:100 ~height:10 movement reading in
+  let down = move Reading.Page_down (reading ()) in
+  check int "a page down starts on the row the window ended on" 9 (scroll down);
+  let twice = move Reading.Page_down down in
+  check int "the next page starts on the last row of the one before" 18 (scroll twice);
+  check int "a page up undoes a page down" 9 (scroll (move Reading.Page_up twice));
+  check int "a page up from the top stays at the top" 0 (scroll (move Reading.Page_up (reading ())));
+  let near_end = move (Reading.By 85) (reading ()) in
+  check int "a page down stops at the last window" 90 (scroll (move Reading.Page_down near_end));
+  let held = move Reading.Last (reading ()) in
+  check int "a page up leaves the end anchor from the last window" 81 (scroll (move Reading.Page_up held))
+
 let test_end_intent_survives_repreparation () =
   let held = Reading.move ~count:100 ~height:10 Reading.Last (reading ()) in
   check int "end stays selected when reflow expands the extent" 190
@@ -150,6 +166,7 @@ let () = run "detail reading ownership"
                  test_case "workspace revoke" `Quick test_workspace_revoke_cannot_resurrect_capture;
                  test_case "surface revoke" `Quick test_surface_change_releases_capture];
     "navigation", [test_case "resize and edges" `Quick test_navigation_normalizes_before_moving;
+                   test_case "a page keeps one row of the window it leaves" `Quick test_a_page_keeps_one_row_of_the_window_it_leaves;
                    test_case "end intent survives re-preparation" `Quick test_end_intent_survives_repreparation;
                    test_case "local search and replacement" `Quick test_local_search_and_replacement;
                    test_case "section visibility authority" `Quick test_section_authority_requires_complete_visibility] ]

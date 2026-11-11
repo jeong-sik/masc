@@ -12,9 +12,10 @@
 | `../tool-efficiency-before-after-2026-11/queue_wait_overlap.py` | 긴 Execute 와 같은 Keeper 의 채팅 작업 큐 대기가 겹친 시간 (정의는 그 스크립트 docstring) | `result-queue-wait-overlap-2026-11-08T05-40_11-11T05-40.json` | 같아요 |
 | `../execute-waits-2026-11/measure_execute_waits.py` | Execute 시간, 긴 호출이 기다리는 것, 일정으로 깨우는 호출 (정의는 그 스크립트 docstring) | `result-execute-waits-2026-11-08_11-11T05-40.json` | 11-08T00:00Z ~ 11-11T05:40Z (77.67시간) |
 | `../lane-time-2026-11/measure_lane_time.py` | 턴 시간이 어디로 가는지, 모델 요청의 승인 대기 (정의는 그 폴더 README) | `result-lane-time-2026-11-08_11-11T05-40.json` | 같아요 (77.67시간) |
+| `repeated_results.py` (이 폴더) | 같은 Keeper 가 1시간 안에 같은 입력으로 같은 결과를 다시 받은 호출과 바이트 | `result-repeated-results-baseline-2026-11-01T00-00_11-05T00-00.json`, `…-last72h-2026-11-08T13-00_11-11T13-00.json`, `…-after-50763-2026-11-10T16-00_11-11T13-00.json` | 11-01T00:00Z ~ 11-05T00:00Z (96시간), 11-08T13:00Z ~ 11-11T13:00Z (72시간), 11-10T16:00Z ~ 11-11T13:00Z (21시간) |
 
 뒤의 두 스크립트는 `--from-date` 의 자정(UTC)부터 읽어서 창이 5.67시간 길어요. 시작을 05:40Z 로 맞추는 인자가 없어요.
-`long_turn_shapes.py` 는 `../tool-efficiency-1110-2026-11/ledger_window.py` 의 장부 읽기를 써요. 시험은 합성 장부로 돌리는 18개예요.
+`long_turn_shapes.py` 와 `repeated_results.py` 는 `../tool-efficiency-1110-2026-11/ledger_window.py` 의 장부 읽기를 써요. 시험은 합성 장부로 돌리는 18개와 15개예요.
 
 ## 정의 (`long_turn_shapes.py`)
 
@@ -121,6 +122,29 @@
 - `masc_dos_*` 세 도구가 낡은 결과 바이트의 81.1%예요. 한 Keeper(msx-retro-mania)가 대부분이라서 다른 Keeper 의 일에는 옮겨지지 않아요.
 - 이 도구들이 바이트를 만드는 이유는 확인하지 못했어요. 이전 보고서의 측정(11-06 ~ 11-09)은 이 도구의 blob 을 읽은 호출이 0번이라고 적었어요.
 
+### 같은 결과 다시 받기 (`repeated_results.py`)
+
+정의는 [11-05 보고서](../../reports/2026-11-05-tool-efficiency.md) §1.2 와 같아요. 같은 Keeper 가 같은 도구에 같은 `input_fingerprint` 를 보내 같은 `output_fingerprint` 를 받았고, 같은 키의 가장 가까운 앞 호출이 3,600초 안(경계 포함)에 있으면 다시 받은 호출이에요. 앞 호출이 창 시작 전 1시간 안에 있어도 앞 호출로 세요(그 호출 자체는 창에 안 들어가요). 두 지문 중 하나라도 없는 행은 다시 받은 것으로 세지 않아요. 바이트는 장부의 `result_bytes` 예요. 1 MB 는 10^6 B 예요.
+
+| 창 (UTC) | 호출 | 결과 바이트 | 다시 받은 호출 | 다시 받은 바이트 | 하루로 환산한 다시 받은 바이트 | 하루로 환산한 결과 바이트 |
+|---|---:|---:|---:|---:|---:|---:|
+| 11-01T00:00 ~ 11-05T00:00 (96시간) | 151,787 | 977.2 MB | 34,513 (22.7%) | 313.1 MB (32.0%) | 78.3 MB | 244.3 MB |
+| 11-08T13:00 ~ 11-11T13:00 (72시간) | 142,925 | 618.6 MB | 5,498 (3.8%) | 22.1 MB (3.6%) | 7.4 MB | 206.2 MB |
+| 11-10T16:00 ~ 11-11T13:00 (21시간) | 38,036 | 112.7 MB | 1,633 (4.3%) | 3.3 MB (2.9%) | 3.7 MB | 128.8 MB |
+
+다시 받은 바이트가 가장 큰 도구예요. 괄호는 그 도구가 그 창에서 돌려준 결과 바이트 전체예요.
+
+- 96시간 창: `masc_schedule_notes_list` 153.3 MB (224.8 MB), `keeper_artifact_read` 120.6 MB (211.6 MB), `masc_dos_screen` 9.6 MB (177.6 MB), `masc_board_list` 6.8 MB (8.7 MB)
+- 72시간 창: `masc_dos_screen` 7.2 MB (165.0 MB), `keeper_skill` 2.7 MB (4.7 MB), `keeper_artifact_read` 2.6 MB (63.7 MB), `Execute` 2.3 MB (188.1 MB)
+- 21시간 창: `Execute` 0.87 MB (53.0 MB), `keeper_skill` 0.65 MB (0.87 MB), `keeper_wiki_read` 0.58 MB (2.29 MB), `keeper_artifact_read` 0.36 MB (20.9 MB)
+
+읽는 법:
+
+- 같은 정의가 11-05 보고서와 비슷한 값을 내요. 그 보고서의 창(11-01T00:00Z ~ 11-04T19:10Z, 91.17시간)은 33,848호출(23.5%)과 310 MB(33.2%)이고 이 스크립트의 96시간 창은 34,513호출(22.7%)과 313 MB(32.0%)예요. 창이 달라서 같은 값은 아니에요. 두 도구(`masc_schedule_notes_list`, `keeper_artifact_read`)의 다시 받은 바이트는 보고서의 153 MB, 121 MB 와 맞아요.
+- 다시 받은 바이트는 하루 78.3 MB 에서 7.4 MB 로 70.9 MB 줄었어요. 결과 바이트 전체는 하루 244.3 MB 에서 206.2 MB 로 38.1 MB(16%) 줄었어요. 처음 받은 결과의 바이트(전체에서 다시 받은 몫을 뺀 값)는 하루 166.0 MB 에서 198.8 MB 로 늘었어요. 남은 큰 몫은 다시 받은 결과가 아니라 처음 받은 큰 결과예요. 72시간 창에서 `Execute` 188.1 MB, `masc_dos_screen` 165.0 MB, `keeper_artifact_read` 63.7 MB 중 다시 받은 바이트는 각각 2.3, 7.2, 2.6 MB 예요.
+- `masc_schedule_notes_list` 는 72시간 창의 다시 받은 바이트 상위 8개에 없어요. 8위가 0.72 MB 라서 그 도구의 값은 0.72 MB 보다 작아요.
+- `Execute` 의 다시 받은 호출은 2,655개이고 바이트는 호출당 평균 853 B 예요. 호출 수는 많아도 컨텍스트에 실린 몫은 작아요.
+
 ## 스크립트 밖에서 센 값
 
 `keeper_skill` 도구의 description 크기예요. 저장소에 스크립트를 두지 않았어요.
@@ -137,10 +161,11 @@ python3 -I docs/evidence/tool-efficiency-1110-2026-11/github_wait_shapes.py 2026
 python3 docs/evidence/tool-efficiency-before-after-2026-11/queue_wait_overlap.py --base-path ~/me --since 2026-11-08T05:40:00 --end 2026-11-11T05:40:00 --hold-s 60 --json-out <경로>
 python3 -I docs/evidence/execute-waits-2026-11/measure_execute_waits.py --base-path ~/me --from-date 2026-11-08 --to-date 2026-11-11 --until 2026-11-11T05:40:00Z --json-out <경로>
 python3 -I docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me --from-date 2026-11-08 --to-date 2026-11-11 --until 2026-11-11T05:40:00Z --json-out <경로>
+python3 -I docs/evidence/tool-efficiency-1111-2026-11/repeated_results.py 2026-11-08T13:00:00Z 2026-11-11T13:00:00Z ~/me > <경로>
 python3 -B -m unittest discover -s docs/evidence/tool-efficiency-1111-2026-11
 ```
 
-`github_wait_shapes.py` 는 결과를 표준 출력에 찍어서 `> <경로>` 로 저장해요. `queue_wait_overlap.py` 는 같은 폴더의 `measure_before_after.py` 를 불러서 `-I` 로 못 돌려요.
+`github_wait_shapes.py` 와 `repeated_results.py` 는 결과를 표준 출력에 찍어서 `> <경로>` 로 저장해요. `repeated_results.py` 의 끝 시각이 지금보다 뒤면 아직 없는 시간이 창 길이에 들어가서 하루로 환산한 값이 작게 나와요. 처음에 끝을 13:30Z 로 줬다가 13:00Z 로 다시 냈어요. `queue_wait_overlap.py` 는 같은 폴더의 `measure_before_after.py` 를 불러서 `-I` 로 못 돌려요.
 장부는 오래된 날 파일을 지우므로 같은 창을 나중에 다시 재면 값이 달라질 수 있어요.
 
 ## 확인한 것
@@ -149,7 +174,9 @@ python3 -B -m unittest discover -s docs/evidence/tool-efficiency-1111-2026-11
 - 변이 35개(정규식 자릿수와 접두어, 바이트 경계, 마지막·처음 고르기, 정렬 키, 집계 키 바꾸기, 분모 바꾸기 등)를 로컬에서 하나씩 넣어 돌렸고 모두 시험이 잡았어요. 처음에는 5개가 살아남았고 시험을 더해 잡았어요. 변이를 넣는 스크립트는 저장소에 없어서 이 문장은 저자 보고예요.
 - 이 과정에서 `quantiles` 가 중앙값을 정수로 잘라 짝수 개수에서 0.5 낮게 적던 것을 고쳤어요. 영향은 `masc-productor-owner` 의 턴당 호출 수 중앙값(27에서 27.5)과 `msx-retro-mania` 의 것(17에서 17.5) 둘뿐이고 위 표의 값은 그대로예요.
 - `measure_lane_time.py` 의 `--until` 은 시간대 없는 값을 기기의 지역 시간(이 기기는 KST)으로 읽었어요. `measure_execute_waits.py` 는 UTC 로 읽어서 두 스크립트가 같은 인자에 다른 창을 줬어요. UTC 로 읽도록 고치고, `TZ=Asia/Seoul` 로 고정한 시험을 더했어요. 기존 결과 두 개(`result-2026-11-01_11-04.json`, `result-2026-11-01_11-05.json`)는 `Z` 를 붙여 돌려서 창이 맞아요(91.17시간, 101.0시간). 이번 결과도 `Z` 를 붙여 다시 냈어요. 처음 낸 값은 창이 68.67시간이어서 버렸어요.
-- `lane-time-2026-11` 의 시험 96개와 이 폴더의 시험 18개가 통과했어요.
+- `repeated_results.py` 의 시험 15개가 합성 호출에서 통과했어요. 1시간 경계(3,600초 포함, 3,601초 제외), 키의 네 부분(Keeper, 도구, 입력 지문, 출력 지문) 하나씩, 가장 가까운 앞 호출 기준(0, 3,000, 6,000초), 순서가 뒤집힌 입력, 창 시작 전 호출이 기억만 채우는 것, 창 끝 이후 호출 제외, 지문이 없는 호출, 도구별 집계, 필드가 빠진 행, 음수·불리언·문자열 바이트, 퍼센트와 하루 환산, 상위 도구 정렬 기준, 빈 창을 담아요.
+- 같은 스크립트에 변이 20개(경계 부등호, 키의 한 부분 빼기, 첫 호출 기준으로 바꾸기, 정렬 키, 분모, 바이트 판별 등)를 하나씩 넣어 돌렸어요. 처음에는 4개(정렬 키, 음수 바이트, 불리언 바이트, 상위 도구 정렬 기준)가 살아남았고 시험 3개를 더해 모두 잡았어요. 변이를 넣는 스크립트는 저장소에 없어서 이 문장은 저자 보고예요.
+- `lane-time-2026-11` 의 시험 96개와 이 폴더의 시험 33개(18개와 15개)가 통과했어요.
 
 ## 못 한 것과 모르는 것
 
@@ -163,4 +190,8 @@ python3 -B -m unittest discover -s docs/evidence/tool-efficiency-1111-2026-11
 - 승인 대기가 줄고(합 479.6 h 에서 204.6 h) 취소된 작업이 줄어든(106에서 2) 이유는 이 값들로 가르지 못해요. 창의 길이와 Keeper 의 일이 달라요.
 - GitHub 기다림의 모양은 명령 글자로만 갈랐어요. `gh` 를 거치지 않는 기다림은 세지 않아요(`../tool-efficiency-1110-2026-11/README.md` 의 「못 한 것과 모르는 것」과 같아요).
 - 이 값들만으로 비동기 Execute 가 줄이는 Keeper 시간은 정할 수 없어요.
+- 다시 받은 결과를 재는 세 창은 길이와 Keeper 의 일이 달라요. 하루로 환산한 값은 창 길이로 나눈 값이라 시간대별 일의 차이를 고치지 않아요. 21시간 창은 하루의 일부라서 하루 값으로 읽기 어려워요.
+- 다시 받은 바이트가 줄어든 이유를 특정 PR 로 가르지 못했어요. 11-05 보고서가 짚은 `masc_schedule_notes_list`(#48291)와 `keeper_artifact_read`(#48282)의 변경, `masc_dos_screen` 결과를 줄인 #50763 은 후보일 뿐이에요. 변경 전후로 같은 일을 시켜 본 값이 없어요.
+- 지문이 없는 행이 몇 개인지 안 셌어요. 그런 행은 다시 받은 것으로 세지 않아서 값이 작게 나올 수 있어요.
+- 필요해서 다시 읽은 호출과 불필요하게 다시 읽은 호출을 가르지 못해요. 이 값은 지문이 같았던 호출의 크기예요.
 - `Test` 워크플로는 안 돌렸어요. 스크립트 시험은 로컬에서 돌렸어요.

@@ -5868,6 +5868,7 @@
 (test
  (name test_installed_dashboard)
  (modules test_installed_dashboard)
+ (deps ../scripts/install-smoke.sh)
  (libraries masc_test_deps ptime masc.time_codec masc_core eio eio_main))
 
 (include stanzas/test_keeper_repetition_scope.inc)

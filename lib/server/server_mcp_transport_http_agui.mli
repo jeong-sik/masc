@@ -6,9 +6,8 @@
     format, and managing two background fibers (drain + ping).
 
     The internal surface is deliberately narrow.  All helpers
-    (`ag_ui_event_of_masc_event`, `sse_stream_headers` re-export, the
-    local `sse_ping_interval_s` shadow) stay private so the surface
-    stays auditable. *)
+    (`ag_ui_event_of_masc_event`, `sse_stream_headers` re-export) stay
+    private so the surface stays auditable. *)
 
 val handle_ag_ui_events :
   deps:Server_mcp_transport_http_types.deps ->
@@ -67,13 +66,11 @@ val handle_ag_ui_events :
 
     {1 Ping interval}
 
-    Pinned at 30 seconds (matches
-    {!Server_mcp_transport_http_headers.sse_ping_interval_s}).  The
-    duplicate constant is intentional: the headers module value is
-    the operator-visible constant for HTTP keep-alive negotiation,
-    while this handler uses a local shadow to keep the AG-UI fiber
-    independent of header-module evolution.  A future "let's unify"
-    refactor must touch the duplicate explicitly. *)
+    {!Server_mcp_transport_http_headers.sse_ping_interval_s}, the
+    keepalive interval of the SSE routes apart from the execute-output
+    stream. Its stall bound,
+    {!Server_mcp_transport_http_headers.sse_stalled_after_s}, is three of
+    those intervals, and clients count missed pings by the same value. *)
 
 val handle_presence_events :
   deps:Server_mcp_transport_http_types.deps ->

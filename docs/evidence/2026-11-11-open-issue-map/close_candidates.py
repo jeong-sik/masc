@@ -23,6 +23,7 @@ class Row(TypedDict):
     impact: str
     ask: str
     group: str
+    closed_after: bool
 
 
 class Issue(TypedDict):
@@ -72,7 +73,12 @@ def main(argv: list[str], rng: random.Random) -> None:
     print("candidates:", len(candidates))
     print("group:", dict(collections.Counter(groups[number] for number in candidates).most_common()))
     print("sample of", SAMPLE_SIZE, "with seed", str(SAMPLE_SEED) + ":", sorted(rng.sample(candidates, SAMPLE_SIZE)))
-    print("candidate numbers:", candidates)
+    closed = {row["number"] for row in rows if row["closed_after"]}
+    closed_candidates = [number for number in candidates if number in closed]
+    still_open = [number for number in candidates if number not in closed]
+    print("closed after classification:", len(closed_candidates), closed_candidates)
+    print("candidates still open:", len(still_open))
+    print("candidate numbers still open:", still_open)
 
 
 if __name__ == "__main__":

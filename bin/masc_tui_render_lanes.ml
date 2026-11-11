@@ -2137,8 +2137,9 @@ let render_clients (state : state) =
   (* Every row's span is a distance from the same read of the roster. *)
   let read_at = clients_read_at state in
   let header =
-    feature_child_heading state ~cols
-      ~title:(ui_text state ~ko:"클라이언트" ~en:"Clients")
+    here_row ~cols state
+      ~path:[ ui_text state ~ko:"클라이언트" ~en:"clients" ]
+      ~readings:[] ~position:None
   in
   box_top buf cols;
   box_line buf cols header;

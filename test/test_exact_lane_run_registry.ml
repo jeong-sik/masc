@@ -1692,8 +1692,8 @@ let test_slot_metadata_does_not_change_original_completion () =
         key,if key="slot_observations" then `String "damaged" else damage value) fields)
     | `List values -> `List (List.map damage values)
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value -> value in
-  let lines=String.split_on_char '\n' (Masc.Fs_compat.load_file path) in
-  Masc.Fs_compat.save_file path (String.concat "\n" (List.map (function
+  let lines=String.split_on_char '\n' (Fs_compat.load_file path) in
+  Fs_compat.save_file path (String.concat "\n" (List.map (function
     | "" -> "" | line -> Yojson.Safe.to_string (damage (Yojson.Safe.from_string line))) lines));
   let restored=check_original (R.replay path) in
   check bool "damaged diagnostics are unavailable without erasing the original" true

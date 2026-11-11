@@ -16,6 +16,7 @@
 // as the next one to run.
 
 import { html } from 'htm/preact'
+import { KeeperLaneInventoryWindow } from './keeper-lane-inventory-window'
 import { useEffect, useState } from 'preact/hooks'
 import { Fragment, type VNode } from 'preact'
 import type { Keeper } from '../../types'
@@ -293,6 +294,8 @@ export function LaneWaitingRow({
   axisMax,
   dev,
   actions,
+  expanded,
+  onExpandedChange,
 }: {
   row: DashboardKeeperWaitingRow
   /** Minutes waited, or null when the server recorded no timestamp. */
@@ -301,6 +304,8 @@ export function LaneWaitingRow({
   dev: boolean
   /** Admin operator actions; null renders the row read-only. */
   actions: LaneEventQueueActions | null
+  expanded?: boolean
+  onExpandedChange?: (open: boolean) => void
 }): VNode {
   const graphColor = LANE_SOURCE_GRAPH_COLORS[row.source]
   const width = age == null ? MIN_BAR_PERCENT : Math.max(MIN_BAR_PERCENT, axisPosition(age, axisMax))
@@ -308,6 +313,8 @@ export function LaneWaitingRow({
   const reading = dev ? row.waiting_on : row.what
   return html`
     <details
+      open=${expanded}
+      onToggle=${onExpandedChange ? (event: Event) => onExpandedChange((event.currentTarget as HTMLDetailsElement).open) : undefined}
       data-testid="keeper-lane-waiting-row"
       data-source=${row.source}
       data-waiting-on=${row.waiting_on}
@@ -374,7 +381,7 @@ export function KeeperLaneStrip({
   const rows = waitingRowsOldestFirst(entry?.waiting_on ?? [])
   const nowMs = Date.now()
   const ages = rows.map(row => ageMinutes(row, nowMs))
-  const axisMax = Math.max(DAY_MINUTES, ...ages.filter((age): age is number => age != null))
+  const axisMax = ages.reduce<number>((max, age) => age === null ? max : Math.max(max, age), DAY_MINUTES)
   const waitingCount = entry?.waiting_count ?? 0
   return html`
     <div class="ctx-sec" data-testid="keeper-lane-section">
@@ -409,18 +416,12 @@ export function KeeperLaneStrip({
                     <div class="grid gap-1">
                       <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
                       <${LaneAgeAxis} axisMax=${axisMax} />
-                      <div class="grid max-h-[30rem] gap-1 overflow-y-auto pr-1" data-testid="keeper-lane-graph" aria-label="대기 나이순 작업 흐름">
-                        ${rows.map((row, index) => html`
-                          <${LaneWaitingRow}
-                            key=${`${row.source}:${row.waiting_on}:${index}`}
-                            row=${row}
-                            age=${ages[index] ?? null}
-                            axisMax=${axisMax}
-                            dev=${dev}
-                            actions=${eventActions}
-                          />
-                        `)}
-                      </div>
+                      <${KeeperLaneInventoryWindow} key=${keeper.name} rows=${rows}
+                        renderRow=${(row: DashboardKeeperWaitingRow, index: number, expanded: boolean, onExpandedChange: (open: boolean) => void) => html`
+                          <${LaneWaitingRow} row=${row} age=${ages[index] ?? null}
+                            axisMax=${axisMax} dev=${dev} actions=${eventActions}
+                            expanded=${expanded} onExpandedChange=${onExpandedChange} />
+                        `} />
                     </div>
                   `
                 : null}

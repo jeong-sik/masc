@@ -61,7 +61,7 @@ let handle_ag_ui_events ~deps request reqd =
           let auth = { Sse.config = base_path; token } in
           (match check_sse_connect_guard session_id with
           | Error (reason, retry_after_s) ->
-              respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
+              respond_sse_rate_limited ~deps ~origin ~session_id:(Some session_id) ~protocol_version
                 ~reason ~retry_after_s reqd
           | Ok () ->
               stop_sse_session_preserve_guard session_id;
@@ -196,7 +196,7 @@ let handle_presence_events ~deps request reqd =
       let auth = { Sse.config = base_path; token } in
       (match check_sse_connect_guard session_id with
       | Error (reason, retry_after_s) ->
-          respond_sse_rate_limited ~deps ~origin ~session_id
+          respond_sse_rate_limited ~deps ~origin ~session_id:(Some session_id)
             ~protocol_version ~reason ~retry_after_s reqd
       | Ok () ->
           stop_sse_session_preserve_guard session_id;

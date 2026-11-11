@@ -22,6 +22,7 @@ val observe_comments :
 
 val add_comment :
   store ->
+  reader:Board_access.reader ->
   lookup:Recipient_lookup.t ->
   post_id:string ->
   author:string ->
@@ -33,6 +34,7 @@ val add_comment :
 
 val add_comment_with_audience :
   store ->
+  reader:Board_access.reader ->
   lookup:Recipient_lookup.t ->
   post_id:string ->
   author:string ->

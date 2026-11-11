@@ -38,7 +38,9 @@ val observe :
   unit
 (** When a window is spent, rest [scope] until it resets
     ({!Runtime_quota_window.note_exhausted}); then record the windows
-    ({!Runtime_provider_usage_window.record}, stamped with the time masc
-    heard them). The rest comes first so a cancelled record cannot skip it. A
+    ({!Runtime_provider_usage_window.record}, stamped with the observation
+    time the host stated in [observed_at_ms], so the report's own "is this
+    reset ahead of the moment we saw it" question is answered inside one
+    clock). The rest comes first so a cancelled record cannot skip it. A
     usage {!report} refuses is logged and not recorded; the rest still
     applies. *)

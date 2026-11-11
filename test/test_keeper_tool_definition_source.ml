@@ -25,13 +25,19 @@ let test_composition_tool_names_its_skill () =
   | None -> Alcotest.fail "a composition tool must name the SKILL.md that made it"
 ;;
 
-(* [Execute] ships neither a TOML nor a skill fence. [None] is the answer for
-   a built-in, not a lookup that gave up: a reader that renders "-" here is
-   telling the operator there is no file to open. *)
-let test_builtin_names_no_file () =
+(* A bare builtin ships a same-named TOML since #50516 (8a772f82d34): the five
+   pairs ([Read]; [Write]; [Edit]; [Grep]; [Execute]) were made complete
+   because an audit registry that read no [Execute] while the ledger recorded
+   it was invisible to a vocabulary test that only reads present files. So a
+   builtin now names its file like any other shipped tool. *)
+let test_builtin_names_its_toml () =
   match Source.resolve "Execute" with
-  | None -> ()
-  | Some rel -> Alcotest.failf "Execute ships no definition file, got %s" rel
+  | Some rel ->
+    Alcotest.(check string)
+      "builtin descriptor path"
+      "tools/Execute.toml"
+      rel
+  | None -> Alcotest.fail "a bare builtin must name the TOML it ships since #50516"
 ;;
 
 let test_unknown_name_names_no_file () =
@@ -59,13 +65,17 @@ let test_annotate_adds_the_path () =
 
 (* The field is absent rather than null or "-": a reader distinguishes "no
    file ships this" from "the projection did not run" by whether the key is
-   there at all, and a null would make those two look the same. *)
-let test_annotate_leaves_a_builtin_row_alone () =
-  let row = row_of "Execute" in
-  Alcotest.(check bool)
-    "builtin row is unchanged"
-    true
-    (Source.annotate_row row = row)
+   there at all, and a null would make those two look the same. Since #50516
+   a bare builtin does ship a TOML, so its row is annotated like any other;
+   the silence case is a name with no file, below. *)
+let test_annotate_adds_the_builtin_path () =
+  match definition_source_of (Source.annotate_row (row_of "Execute")) with
+  | Some (`String rel) ->
+    Alcotest.(check string)
+      "annotated builtin path"
+      "tools/Execute.toml"
+      rel
+  | Some _ | None -> Alcotest.fail "a row naming a bare builtin must carry its file"
 ;;
 
 let test_annotate_leaves_a_row_without_a_tool_alone () =
@@ -91,14 +101,14 @@ let () =
             test_shipped_tool_names_its_toml
         ; Alcotest.test_case "composition tool names its skill" `Quick
             test_composition_tool_names_its_skill
-        ; Alcotest.test_case "builtin names no file" `Quick test_builtin_names_no_file
+        ; Alcotest.test_case "builtin names its toml" `Quick test_builtin_names_its_toml
         ; Alcotest.test_case "unknown name names no file" `Quick
             test_unknown_name_names_no_file
         ] )
     ; ( "annotate_row"
       , [ Alcotest.test_case "adds the path" `Quick test_annotate_adds_the_path
-        ; Alcotest.test_case "builtin row unchanged" `Quick
-            test_annotate_leaves_a_builtin_row_alone
+        ; Alcotest.test_case "builtin row adds its path" `Quick
+            test_annotate_adds_the_builtin_path
         ; Alcotest.test_case "row without a tool unchanged" `Quick
             test_annotate_leaves_a_row_without_a_tool_alone
         ; Alcotest.test_case "non-object unchanged" `Quick

@@ -137,21 +137,6 @@ val publish_posts_read : store -> posts_source_read -> unit
 val read_posts_source : store -> posts_source_read
 (** Caller holds persistence; general reads never recover tails or settle an
     unknown write. Complete and partial reads retain the actual Fs snapshot. *)
-val settle_posts_source : store -> posts_settle_outcome
-(** Settle the retained unknown write of an unsettled store. Caller holds
-    persistence; revalidates the workspace of the pre-write observation,
-    performs one locked posts read and at most one durable proof rewrite, and
-    never touches the in-memory post tables. A store that is not unsettled
-    yields [Posts_settle_nothing_to_settle] with no IO. *)
-val settle_posts_diagnostics : posts_settle_outcome -> posts_source_diagnostic list
-type settle_direction = Board_posts_source.settle_direction =
-  | Direction_landed
-  | Direction_absent
-  | Direction_diverged
-val settle_direction_for_testing :
-  pending:posts_unsettled_write -> Fs_compat.private_jsonl_snapshot -> settle_direction
-(** Pure settlement direction; test and diagnostic entry only. Grants no
-    authority; see [Board_posts_source.settle_direction_for_testing]. *)
 val finish_posts_read : posts_source_read -> unit
 (** Count each observed read diagnostic before reserved propagation, without
     logging or further IO after an observed reserved cause. *)
@@ -196,7 +181,7 @@ val acknowledge_comments_recovery : store -> comments_recovery_receipt -> (unit,
     exceptions. Receive and acknowledge it under persistence, then fully reload
     comments before model authority. Does not replay the interrupted operation. *)
 type comment_append_receipt
-val append_comment : store -> comment -> (comment_append_receipt, board_error) result
+val append_comment : store -> reader:Board_access.reader -> comment -> (comment_append_receipt, board_error) result
 val publish_comment_append : store -> comment_append_receipt -> (unit, board_error) result
 (** Caller retains persistence through append and normal model publication.
     On a typed publication rejection, record the owned row's cleanup as dirty
@@ -234,10 +219,10 @@ val validate_sub_board_post_policy_unlocked :
   store -> author_id:Agent_id.t -> hearth:string option -> (unit, board_error) result
 (** Call while holding the state lock. A specified hearth requires a fully
     readable sub-board source; an unscoped post needs no sub-board policy.
-    Both comment policy checks and final post admission use this guard.
-    Post creation checks again under the same store's persistence lock before
-    append, serialized with runtime sub-board policy mutations. This does not
-    change the comment append ordering or establish durable receipt authority. *)
+    Staging uses this cached precheck. Final post/comment admission separately
+    decodes the exact canonical Policy snapshot under persistence and retains
+    it as an actual read dependency through append. This precheck alone does
+    not establish durable authority. *)
 
 module Post_publication_failure = Board_post_publication_failure
 

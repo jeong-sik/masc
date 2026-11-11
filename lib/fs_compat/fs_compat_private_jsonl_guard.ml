@@ -28,7 +28,7 @@ let with_guard ~io requested_path ~expected ~f =
   let perform () =
     with_private_jsonl_stable_lock ~io:guard_io
       ~success:(fun _ -> Snapshot_succeeded expected) requested_path
-      (fun ~dir:_ ~path ->
+      (fun ~dir ~path ->
         let* actual = Fs_compat_private_jsonl_write.read_private_jsonl_snapshot_locked ~io path ~after:None in
         let* () =
           if Private_jsonl_cursor.equal expected.cursor actual.cursor then Ok ()
@@ -36,7 +36,7 @@ let with_guard ~io requested_path ~expected ~f =
         let* () =
           if String.equal expected.bytes actual.bytes then Ok ()
           else Error (Transaction_content_changed { path }) in
-        Ok (f ())) in
+        Ok (f ~dir ~path)) in
   match perform () with
   | Ok value ->
     Guard_executed { value; cleanup_failures = List.rev_map (fun failure ->
@@ -51,7 +51,31 @@ let with_guard ~io requested_path ~expected ~f =
     Printexc.raise_with_backtrace exception_ backtrace
 
 let with_private_jsonl_snapshot_guard_result path ~expected ~f =
-  with_guard ~io:private_jsonl_transaction_unix_io path ~expected ~f
+  with_guard ~io:private_jsonl_transaction_unix_io path ~expected
+    ~f:(fun ~dir:_ ~path:_ -> f ())
 
 let with_private_jsonl_snapshot_guard_with_io_for_testing ~io path ~expected ~f =
-  with_guard ~io path ~expected ~f
+  with_guard ~io path ~expected ~f:(fun ~dir:_ ~path:_ -> f ())
+
+let append_with_dependency ~io ~dependency_io path ~expected
+    ~dependency_path ~dependency suffix =
+  with_guard ~io path ~expected ~f:(fun ~dir ~path ->
+    with_guard ~io:dependency_io dependency_path ~expected:dependency
+      ~f:(fun ~dir:_ ~path:_ ->
+        (* Keep the target's original IO: guard_io only collects stable-lock
+           cleanup and must never swallow data-descriptor failures. *)
+        Fs_compat_private_jsonl_write.append_private_jsonl_snapshot_locked
+          ~io ~dir path ~expected suffix))
+
+let append_private_jsonl_durable_locked_at_snapshot_with_dependency_result
+    path ~expected ~dependency_path ~dependency suffix =
+  append_with_dependency ~io:private_jsonl_transaction_unix_io
+    ~dependency_io:private_jsonl_transaction_unix_io
+    path ~expected ~dependency_path ~dependency suffix
+
+let append_private_jsonl_durable_locked_at_snapshot_with_dependency_with_io_for_testing
+    ?(io=private_jsonl_transaction_unix_io)
+    ?(dependency_io=private_jsonl_transaction_unix_io)
+    path ~expected ~dependency_path ~dependency suffix =
+  append_with_dependency ~io ~dependency_io
+    path ~expected ~dependency_path ~dependency suffix

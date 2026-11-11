@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   derivePostTitle,
   createSubBoard,
+  deleteSubBoard,
   createPost,
   fetchBoard,
   fetchBoardCuration,
@@ -1710,5 +1711,36 @@ describe('Board persisted audience wire boundary', () => {
       { kind: 'unavailable', reason: 'not_recorded' },
       { kind: 'unavailable', reason: 'invalid_payload' },
     ])
+  })
+})
+
+
+describe('sub-board deletion effect evidence', () => {
+  it.each([
+    { persistence: 'durable', applied: true, deleted: true },
+    { persistence: 'pending', applied: true, deleted: true, detail: 'pending sources' },
+    { persistence: 'decision_pending', applied: false, deleted: false, detail: 'pending decision' },
+  ])('preserves $persistence from the actual HTTP response', async payload => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: payload.persistence === 'durable' ? 200 : 202,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(deleteSubBoard('sb/owned')).resolves.toEqual(payload)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/board/sub-boards/sb%2Fowned')
+    expect(init.method).toBe('DELETE')
+  })
+
+  it.each([
+    { deleted: true },
+    { persistence: 'durable', applied: false, deleted: false },
+    { persistence: 'decision_pending', applied: true, deleted: true, detail: 'contradictory evidence' },
+  ])('rejects incomplete or contradictory completion evidence', async payload => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: 202, headers: { 'Content-Type': 'application/json' },
+    })))
+    await expect(deleteSubBoard('sb-owned')).rejects.toThrow('Malformed sub-board deletion result')
   })
 })

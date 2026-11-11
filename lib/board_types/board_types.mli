@@ -270,6 +270,7 @@ type reaction_summary = {
 }
 
 type reaction_toggle_result = {
+  post_id : Post_id.t; (** Canonical parent admitted for this exact write. *)
   target_type : reaction_target_type;
   target_id : string;
   user_id : string;
@@ -557,6 +558,7 @@ type posts_source_diagnostic =
       error : Fs_compat.private_jsonl_transaction_error;
     }
   | Workspace_diagnostic of Board_workspace_binding.rejection
+  | Posts_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
   | Raised_diagnostic of {
       stage : posts_source_stage;
       exception_ : exn;
@@ -623,34 +625,6 @@ type posts_write_outcome =
       diagnostics : posts_source_diagnostic list;
     }
 
-type posts_settle_outcome =
-  | Posts_settled_written of {
-      observation : posts_source_observation;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settled_not_written of {
-      observation : posts_source_observation;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settle_superseded of {
-      failure : posts_source_failure;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settle_inconclusive of {
-      failure : posts_source_failure;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settle_nothing_to_settle
-(** Outcome of settling an unknown posts write. [Posts_settled_written]
-    carries the fresh durable observation and the store is readable.
-    [Posts_settled_not_written] carries the restored pre-write observation
-    and the store is readable; the caller may retry once with its staged
-    bytes, fenced by that observation's cursor. [Posts_settle_superseded]
-    means a coherent third-party state was proven and the store is refused
-    (reloadable). [Posts_settle_inconclusive] keeps the store unsettled with
-    its pending evidence intact. [Posts_settle_nothing_to_settle] performs
-    no IO and changes nothing. *)
-
 type posts_source_read =
   | Posts_complete of {
       observation : posts_source_observation;
@@ -698,6 +672,7 @@ type comments_source_stage =
 
 type comments_source_diagnostic =
   | Comments_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Comments_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
   | Comments_workspace_diagnostic of Board_workspace_binding.rejection
   | Comments_display_diagnostic of Fs_compat.Private_jsonl_unique_fold.error
   | Comments_display_cleanup_diagnostic of Fs_compat.private_jsonl_operation_failure
@@ -849,6 +824,7 @@ type reactions_row_error =
 
 type reactions_source_diagnostic =
   | Reaction_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Reaction_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
   | Reaction_workspace_diagnostic of Board_workspace_binding.rejection
   | Reaction_raised_diagnostic of {
       exception_ : exn;
@@ -895,12 +871,35 @@ type reactions_source_state =
     publication require a fresh store; an ordinary reload cannot clear them. *)
 
 
+type deletion_outcome =
+  | Durable_deletion
+  | Deletion_decision_pending of string
+  | Deletion_persistence_pending of string
+(** Decision_pending does not establish model application. Persistence_pending
+    does; neither authorizes replay or claims durable completion. *)
+
+type sub_board_deletion_authorization =
+  | Operator_sub_board_deletion
+  | Owner_sub_board_deletion of Agent_id.t
+(** Authority supplied by the calling boundary, never decoded from a marker. *)
+
+type deletion_operation =
+  | Delete_post of {
+      deleted_post : Post_id.t;
+      deleted_comments : Comment_id.t list;
+    }
+  | Delete_sub_board of {
+      deleted_sub_board : Sub_board_id.t;
+      deleted_slug : string;
+      unlinked_posts : Post_id.t list;
+    }
+
 type deletion_plan = {
   decision_id : Deletion_id.t;
-  deleted_post : Post_id.t;
-  deleted_comments : Comment_id.t list;
+  operation : deletion_operation;
 }
-(** Fixed original identities. Recovery never adds newly observed children. *)
+(** Fixed original identities. Recovery never expands the selected children or
+    posts by looking up a slug again. Later boards and posts remain outside it. *)
 
 type deletion_observation = {
   decision_path : string;
@@ -932,7 +931,15 @@ type deletion_receipt = {
 }
 (** Known durable marker publication, retained before any model change. *)
 
-type deletion_progress = Decision_recorded | Model_applied | Sources_written
+type deletion_progress =
+  | Decision_recorded
+  | Model_applied
+  | Sources_uncertain
+  | Sources_written
+(** Sources_uncertain retains an unknown source effect and requires fresh-store
+    recovery. Same-store reload and ordinary flush do not replay that effect.
+    Sources_written means all sources selected by the recorded operation have
+    known durable receipts: four for a post, Posts and Policy for a sub-board. *)
 
 type deletion_work = {
   decision_receipt : deletion_receipt;
@@ -973,7 +980,7 @@ type deletion_state =
 (** Sole deletion owner under persist_mutex. Ordinary flush/reload cannot settle
     an unknown record/retirement or an exceptional model publication. A fresh
     initializer durably fences an observed decision before applying its fixed
-    IDs to fresh complete models. Four known source writes precede retirement. *)
+    IDs to fresh complete models. All selected known writes precede retirement. *)
 
 type votes_source_observation = {
   vote_path : string;
@@ -992,6 +999,7 @@ type votes_row_error =
 
 type votes_source_diagnostic =
   | Vote_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Vote_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
   | Vote_workspace_diagnostic of Board_workspace_binding.rejection
   | Vote_raised_diagnostic of {
       exception_ : exn;

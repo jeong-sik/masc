@@ -89,6 +89,32 @@ let test_an_observation_demotes_and_a_success_clears_it () =
     (Q.is_exhausted ~scope ~now:100.0)
 ;;
 
+(* The moment of an observation can be given, so a fixture that must sit on
+   one side of a stated reset does not have to be dated against the wall
+   clock. Same facts as [test_a_passed_window_gives_way_to_a_later_observation],
+   read from an injected clock. *)
+let test_an_injected_moment_dates_the_observation () =
+  reset ();
+  let scope = provider_scope "api_z_ai" in
+  let observed_at = 1_000_000.0 in
+  let cap = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+  Q.note_exhausted ~scope ~resets_at:(observed_at -. 10.0);
+  Q.note_observed_exhausted_at ~now:observed_at ~scope;
+  Alcotest.(check bool) "the observation rests the scope at the given moment" true
+    (Q.is_exhausted ~scope ~now:observed_at);
+  Alcotest.(check (option (float 0.0))) "and names no reset" None
+    (Q.active_until ~scope ~now:observed_at);
+  Alcotest.(check bool) "its rest ends at the given moment plus the cap" false
+    (Q.is_exhausted ~scope ~now:(observed_at +. cap +. 1.0));
+  (* A stated window still ahead of the given moment is not weakened. *)
+  let ahead = observed_at +. 60.0 in
+  Q.note_exhausted ~scope ~resets_at:ahead;
+  Q.note_observed_exhausted_at ~now:observed_at ~scope;
+  Alcotest.(check (option (float 0.0))) "a stated reset ahead of it still wins"
+    (Some ahead)
+    (Q.active_until ~scope ~now:observed_at)
+;;
+
 (* An observation compares a held reset with the wall clock, so a window it
    must keep ends after the wall clock: 2096-10-02. *)
 let reset_after_the_wall_clock = 4_000_000_000.0
@@ -438,6 +464,10 @@ let () =
             "a passed window gives way to a later observation"
             `Quick
             test_a_passed_window_gives_way_to_a_later_observation
+        ; Alcotest.test_case
+            "an injected moment dates the observation"
+            `Quick
+            test_an_injected_moment_dates_the_observation
         ; Alcotest.test_case
             "a read without reset answers what a refusal asks"
             `Quick

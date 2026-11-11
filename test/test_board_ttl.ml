@@ -10,7 +10,9 @@ let get_created = function
 
 let nobody_declared = Masc.Recipient_lookup.none_declared
 let create_post store = create_post store ~lookup:nobody_declared
-let add_comment store = add_comment store ~lookup:nobody_declared
+let add_comment store =
+  add_comment store ~reader:Masc_board_handlers.Board_access.Operator
+    ~lookup:nobody_declared
 
 (* Every writing fixture loads posts and comments explicitly. Give each case
    its own workspace so that load cannot adopt another case's persisted rows. *)
@@ -41,7 +43,16 @@ let load_sources store =
   List.iter (fun reload -> match reload store with
     | Ok _ -> ()
     | Error error -> Alcotest.fail (show_board_error error))
-    [reload_votes; reload_reactions]
+    [reload_votes; reload_reactions];
+  (* A scoped post asks the sub-board policy source, and [read_sub_boards] only
+     answers once that source has been read. A fixture that loads posts,
+     comments, votes and reactions alone leaves the source unobserved, so every
+     write with [?hearth] fails with [Io_error "Board data is unavailable."].
+     [reload_sub_boards] is what reads it; [read_sub_boards] never does. *)
+  (match reload_sub_boards store with
+   | Ok _ -> ()
+   | Error (path, cause) ->
+     Alcotest.failf "board fixture load failed: %s (%s)" path (Printexc.to_string cause))
 ;;
 
 let test_default_ttl () =
@@ -117,12 +128,12 @@ let test_sweep_removes_the_rows_of_an_expired_target () =
     | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
   in
   (match
-     toggle_reaction store ~target_type:Reaction_post ~target_id:post_id
+     toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_post ~target_id:post_id
        ~user_id:"reactor-agent" ~emoji:"👍"
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (show_board_error e));
-  (match vote store ~voter:"voter-agent" ~post_id ~direction:Up with
+  (match vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-agent" ~post_id ~direction:Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (show_board_error e));
   let post = Hashtbl.find store.posts post_id in
@@ -150,12 +161,12 @@ let test_sweep_keeps_rows_whose_target_is_not_loaded () =
     | Error e -> Alcotest.fail (Post_publication_failure.to_string e)
   in
   (match
-     toggle_reaction store ~target_type:Reaction_post ~target_id:post_id
+     toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_post ~target_id:post_id
        ~user_id:"reactor-agent" ~emoji:"👍"
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (show_board_error e));
-  (match vote store ~voter:"voter-agent" ~post_id ~direction:Up with
+  (match vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-agent" ~post_id ~direction:Up with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (show_board_error e));
   Hashtbl.remove store.posts post_id;
@@ -224,7 +235,7 @@ let test_sweep_cascades_an_expired_post_to_its_comments () =
     | Error e -> Alcotest.fail (show_board_error e)
   in
   (match
-     toggle_reaction store ~target_type:Reaction_comment
+     toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_comment
        ~target_id:comment_id ~user_id:"reactor-agent" ~emoji:"👍"
    with
    | Ok _ -> ()
@@ -300,17 +311,22 @@ let test_sweep_drains_a_post_larger_than_two_comment_batches () =
     comment_key
   in
   let comment_ids =
-    List.init comment_count (fun _ ->
-      let comment_id = insert_filler_comment () in
-      ignore (unwrap (toggle_reaction store ~target_type:Reaction_comment
-        ~target_id:comment_id ~user_id:"reactor-agent" ~emoji:"👍"));
-      ignore (unwrap (vote_comment store ~voter:"voter-agent" ~comment_id
-        ~direction:Up));
-      comment_id)
+    List.init comment_count (fun _ -> insert_filler_comment ())
   in
-  ignore (unwrap (toggle_reaction store ~target_type:Reaction_post
+  (* The large retained thread must exist in canonical Comments before new
+     votes/reactions can use it as a target. Keep the cap-bypass setup, then
+     persist it once before exercising the real mutation and sweep paths. *)
+  flush_dirty store;
+  List.iter
+    (fun comment_id ->
+      ignore (unwrap (toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_comment
+        ~target_id:comment_id ~user_id:"reactor-agent" ~emoji:"👍"));
+      ignore (unwrap (vote_comment store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-agent" ~comment_id
+        ~direction:Up)))
+    comment_ids;
+  ignore (unwrap (toggle_reaction store ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Reaction_post
     ~target_id:post_id ~user_id:"reactor-agent" ~emoji:"👍"));
-  ignore (unwrap (vote store ~voter:"voter-agent" ~post_id ~direction:Up));
+  ignore (unwrap (vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-agent" ~post_id ~direction:Up));
   let current = Hashtbl.find store.posts post_id in
   Hashtbl.replace store.posts post_id { current with expires_at = 1.0 };
   (* Only removals below may dirty these rows. *)

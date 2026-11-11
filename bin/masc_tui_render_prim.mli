@@ -323,6 +323,16 @@ val surface_chrome :
 
 val connection_badge : Masc_tui_types.state -> string
 
+val surface_title_row :
+  cols:int -> Masc_tui_types.state -> lead:string -> readings:string list -> string
+(** The title row of a surface drawn in [cols] columns: [lead], the [readings]
+    (each carrying its own leading gap) and the connection status last. The
+    full badge is kept when it fits; otherwise prioritized workspace/read,
+    observer-loss and HTTP notices are kept whole as space permits, with an
+    ellipsis for omitted context. A width too small for the first notice
+    shows [!] instead; a frame without a cell for status cannot show it.
+    Readings give way whole from the end, and the lead is cut last. *)
+
 type compact_connection_state =
   | Compact_workspace_mismatch
   | Compact_workspace_unconfirmed

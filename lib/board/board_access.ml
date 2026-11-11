@@ -26,3 +26,13 @@ let can_read_fields ~reader ~author ~visibility ~audience =
 
 let can_read ~reader (post : Board_types.post) =
   can_read_fields ~reader ~author:post.author ~visibility:post.visibility ~audience:post.audience
+
+let can_post_in_sub_board ~author_id (board : Board_types.sub_board) =
+  let author = Board_types.Agent_id.to_string author_id in
+  let owner = Board_types.Agent_id.to_string board.owner in
+  match board.access with
+  | Board_types.Open -> true
+  | Board_types.Owner_only -> String.equal author owner
+  | Board_types.Members_only ->
+    String.equal author owner || List.exists (fun member ->
+      String.equal author (Board_types.Agent_id.to_string member)) board.members

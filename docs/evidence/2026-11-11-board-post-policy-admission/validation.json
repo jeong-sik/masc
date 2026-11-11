@@ -1,0 +1,290 @@
+{
+  "at": "2026-11-10T16:26:33.125688+00:00",
+  "base": "9188d8050faf685b4614976f131d85832b6fdd39",
+  "lower_source": "36cdb66c69c0202ba3f36996548f716f1f7239ce",
+  "upper_source": "3e33991e21dd7137d916ea6151cffaa62152d00a",
+  "lower_paths": [
+    "docs/spec/11-board.md",
+    "lib/board/board_comment_admission.ml",
+    "lib/board/board_core_persist.ml",
+    "lib/board/board_core_persist.mli",
+    "lib/board/board_policy_admission.ml",
+    "lib/board/board_policy_admission.mli",
+    "lib/board/board_posts_source.ml",
+    "lib/board/board_posts_source.mli",
+    "lib/board/board_sub_boards.mli",
+    "lib/board/dune",
+    "lib/board_types/board_types.ml",
+    "lib/board_types/board_types.mli",
+    "lib/fs_compat/fs_compat.mli",
+    "lib/fs_compat/fs_compat_private_jsonl_guard.ml",
+    "lib/fs_compat/fs_compat_private_jsonl_guard.mli",
+    "lib/fs_compat/fs_compat_private_jsonl_write.ml",
+    "lib/fs_compat/fs_compat_private_jsonl_write.mli",
+    "test/test_board_posts_source_authority.ml"
+  ],
+  "upper_paths": [
+    "test/dune",
+    "test/stanzas/test_board_post_policy_admission.inc",
+    "test/test_board_post_policy_admission.ml"
+  ],
+  "compiler": "5.5.1",
+  "repository_target": "5.5.2",
+  "scope": "OCaml parsing and static source census only; no typing, warning check, build or backend execution.",
+  "ocaml_parse": [
+    {
+      "path": "lib/board/board_comment_admission.ml",
+      "sha256": "7e00496244aee1c979a84e39b34e73392bb7a8e285c0b121f3219c2191b6e978",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/board/board_comment_admission.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_core_persist.ml",
+      "sha256": "2c0096a27ade33dc9ed402e2313e36ec5ca487eb2e2d92f59583a4486186c4b1",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/board/board_core_persist.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_core_persist.mli",
+      "sha256": "246a0860cf3c0b3654b8b2d9a4b03bafb912f0d4532466d67896c7947bde3af4",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/board/board_core_persist.mli"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_policy_admission.ml",
+      "sha256": "09ea2030f85d2c31a72fb689790c90cdfbb861f7a935fb02d1cacec33c1416c9",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/board/board_policy_admission.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_policy_admission.mli",
+      "sha256": "f3b99e59ba6043029bd02eda3c89cb1ddb7ff352c476eed76fcc80f57f2e341c",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/board/board_policy_admission.mli"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_posts_source.ml",
+      "sha256": "6c71a801056cb97b8be24089a7a7faf6d3fa8284cc1c447f38f2fe0815e28bfe",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/board/board_posts_source.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_posts_source.mli",
+      "sha256": "f8f9ab2ddbfb9be56f0d36f4824563583c6777ab6046f5be3b68130c311931a8",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/board/board_posts_source.mli"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board/board_sub_boards.mli",
+      "sha256": "6cbbb32a52eeab29f1026cc60bce5923424f0a0d847001abb26f22cd46c590dc",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/board/board_sub_boards.mli"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board_types/board_types.ml",
+      "sha256": "876902a96079bd32f5fb1e15872410d3f999a527ab631e3bc675a061cd6e1fe4",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/board_types/board_types.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/board_types/board_types.mli",
+      "sha256": "857431064fc8761d6acbf7ce4f3fcb5fa8f6aaba4b2740b4412de747ebfab72c",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/board_types/board_types.mli"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/fs_compat/fs_compat.mli",
+      "sha256": "b60d3bceea04feb407160f049d6b8ede1b38a4408aa2cb34b2777cd034633406",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/fs_compat/fs_compat.mli"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/fs_compat/fs_compat_private_jsonl_guard.ml",
+      "sha256": "c76453477267846e513941b3e49057d910700624e5045b784d9f8cbfb0906356",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/fs_compat/fs_compat_private_jsonl_guard.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/fs_compat/fs_compat_private_jsonl_guard.mli",
+      "sha256": "7228229b3c4edaaffbbb55cf7bf6cec2a568d7d33786b88ab764815a30144f5e",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/fs_compat/fs_compat_private_jsonl_guard.mli"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/fs_compat/fs_compat_private_jsonl_write.ml",
+      "sha256": "9977e66d16cf8080b47adea0525eeec733704a86d15bbdd74021fe2bf01c534c",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/fs_compat/fs_compat_private_jsonl_write.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/fs_compat/fs_compat_private_jsonl_write.mli",
+      "sha256": "a1e86c6b5354cbf1df87684e61c1f6c1d10ebe803135edfb11de1240d357e9d8",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/fs_compat/fs_compat_private_jsonl_write.mli"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_post_policy_admission.ml",
+      "sha256": "b497ca0f7aa08b0146261eb862aba047ea41af26bd7d40cb5cc702368e92ffad",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_board_post_policy_admission.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_posts_source_authority.ml",
+      "sha256": "21ffb655542206669e7ff3603146e3c31e638b03d57645c3601ea113112d94df",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_board_posts_source_authority.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    }
+  ],
+  "whitespace": {
+    "exit": 0,
+    "output": ""
+  },
+  "test_registration": {
+    "kind": "include source census; no Dune execution",
+    "includes": 945,
+    "duplicates": {},
+    "new_suite_includes": 1
+  },
+  "backend_new_cases": {
+    "authored": 8,
+    "executed": 0,
+    "actual_unknown_fault_case": false
+  },
+  "frontend": {
+    "new_changes": false,
+    "new_execution": false,
+    "dashboard_tree": "7bb15ad1fcf789424d2077130511300ef144356f",
+    "prior_tree": "7bb15ad1fcf789424d2077130511300ef144356f",
+    "scope": "Exact unchanged Dashboard inputs allow retaining the prior named105-case/tsc/ESLint receipt; no new frontend/backend integration execution."
+  },
+  "reconstruction": "reconstruction-on-main.json",
+  "not_claimed": [
+    "OCaml typing/warnings/build",
+    "Backend case execution",
+    "Unknown fault execution",
+    "New browser/live HTTP",
+    "CI",
+    "Formal GitHub approval for this new unit",
+    "Merge/installation/deployment of this new unit",
+    "Root26378 completion"
+  ]
+}

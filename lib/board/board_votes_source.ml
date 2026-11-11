@@ -22,6 +22,7 @@ let unavailable_error () = Io_error "Board data is unavailable."
 
 let reserved_diagnostics = List.find_map (function
   | Vote_file_diagnostic error -> Board_posts_source.reserved_transaction error
+  | Vote_guard_diagnostic failure -> Board_posts_source.reserved_transaction failure.guard_error
   | Vote_workspace_diagnostic rejection ->
     Option.bind (Board_workspace_binding.raised rejection) Board_posts_source.reserved_exception
   | Vote_raised_diagnostic { exception_; backtrace } ->
@@ -194,28 +195,51 @@ let rec contradicts_observation = function
 
 let not_written failure diagnostics = Not_written { failure; diagnostics }
 
+let observe_guard_refusal store observation failure = match store.votes_source with
+  | Votes_readable current when current == observation
+      && String.equal failure.Fs_compat.guard_path observation.vote_path
+      && contradicts_observation failure.guard_error ->
+    refuse store (Votes_transaction_failed failure.guard_error) [Vote_guard_diagnostic failure]
+  | Votes_readable _ | Votes_unobserved | Votes_publishing _
+  | Votes_refused _ | Votes_unsettled _ -> ()
+
+type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_transaction_error) result
+type write_io =
+  | Direct_io of file_result
+  | Admitted_io of Board_target_admission.t * file_result Board_target_admission.guarded
+
+let guard_diagnostics failures = List.map (fun failure -> Vote_guard_diagnostic failure) failures
+
 let write store ~before ~kind ~bytes perform =
   let pending = { vote_before = before; vote_kind = kind; vote_intended_bytes = bytes } in
   let unknown failure diagnostics =
     store.votes_source <- Votes_unsettled {
       vote_pending = pending; vote_failure = failure; vote_diagnostics = diagnostics };
     Unknown { failure; diagnostics } in
-  try
-    match Fs_compat.private_jsonl_cursor_success_receipt (perform ()) with
+  let classify result parent_diagnostics =
+    match Fs_compat.private_jsonl_cursor_success_receipt result with
     | Ok receipt ->
-      let diagnostics = receipt_diagnostics receipt.settlement_error in
+      let diagnostics = receipt_diagnostics receipt.settlement_error @ parent_diagnostics in
       let publication = {
         vote_after = { before with vote_snapshot = { Fs_compat.bytes = bytes; cursor = receipt.value } };
         vote_cleanup = diagnostics } in
       store.votes_source <- Votes_publishing publication;
       Written { publication; diagnostics }
     | Error error ->
-      let diagnostics = [Vote_file_diagnostic error] in
+      let diagnostics = Vote_file_diagnostic error :: parent_diagnostics in
       let failure = Votes_transaction_failed error in
       if Board_posts_source.definitely_not_written error then (
         if contradicts_observation error then refuse store failure diagnostics;
         not_written failure diagnostics)
-      else unknown failure diagnostics
+      else unknown failure diagnostics in
+  try match perform () with
+    | Direct_io result -> classify result []
+    | Admitted_io (admission, Board_target_admission.Refused refusal) ->
+      let diagnostics = guard_diagnostics (refusal.failure :: refusal.cleanup_failures) in
+      Board_target_admission.observe_refusal store admission refusal;
+      not_written (Votes_transaction_failed refusal.failure.guard_error) diagnostics
+    | Admitted_io (_, Board_target_admission.Executed { value; cleanup_failures }) ->
+      classify value (guard_diagnostics cleanup_failures)
   with exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
     unknown (Votes_raised { exception_; backtrace }) [Vote_raised_diagnostic { exception_; backtrace }]
@@ -236,27 +260,87 @@ let before_write store f = match expected store with
       refuse store (Votes_raised { exception_; backtrace }) diagnostics;
       not_written (Votes_raised { exception_; backtrace }) diagnostics
 
-let append store row = before_write store (fun before ->
-  let encoded = try Ok (Yojson.Safe.to_string (Board_vote_row.to_yojson row) ^ "\n")
-    with exception_ -> Error (exception_, Printexc.get_raw_backtrace ()) in
-  match encoded with
-  | Error (exception_, backtrace) -> not_written (Votes_raised { exception_; backtrace })
-      [Vote_raised_diagnostic { exception_; backtrace }]
-  | Ok suffix ->
-    write store ~before ~kind:Vote_append ~bytes:(before.vote_snapshot.bytes ^ suffix)
-      (fun () -> match store.votes_source_io with
-       | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
-           before.vote_path ~expected:before.vote_snapshot suffix
-       | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
-           ~io before.vote_path ~expected:before.vote_snapshot suffix))
+let workspace_failure store rejection =
+  let failure = Votes_workspace_refused rejection in
+  let diagnostics = [Vote_workspace_diagnostic rejection] in
+  refuse store failure diagnostics;
+  not_written failure diagnostics
+
+let append store ~admission row = before_write store (fun before ->
+  match Board_target_admission.revalidate store admission with
+  | Error rejection -> workspace_failure store rejection
+  | Ok () ->
+    let encoded = try Ok (Yojson.Safe.to_string (Board_vote_row.to_yojson row) ^ "\n")
+      with exception_ -> Error (exception_, Printexc.get_raw_backtrace ()) in
+    match encoded with
+    | Error (exception_, backtrace) -> not_written (Votes_raised { exception_; backtrace })
+        [Vote_raised_diagnostic { exception_; backtrace }]
+    | Ok suffix ->
+      let io = store.votes_source_io in
+      let posts_io = store.posts_source_io.posts and comments_io = store.comments_source_io in
+      write store ~before ~kind:Vote_append ~bytes:(before.vote_snapshot.bytes ^ suffix)
+        (fun () -> Admitted_io (admission, Board_target_admission.guard admission ~posts_io ~comments_io
+          ~f:(fun () -> match io with
+            | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
+                before.vote_path ~expected:before.vote_snapshot suffix
+            | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+                ~io before.vote_path ~expected:before.vote_snapshot suffix))))
 
 let rewrite store bytes = before_write store (fun before ->
-  write store ~before ~kind:Vote_rewrite ~bytes (fun () -> match store.votes_source_io with
+  let io = store.votes_source_io in
+  write store ~before ~kind:Vote_rewrite ~bytes (fun () -> Direct_io (match io with
     | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
         before.vote_path ~expected:before.vote_snapshot bytes
     | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
         ~io ~before_sync_rewrite_parent:io.before_sync_parent
-        before.vote_path ~expected:before.vote_snapshot bytes))
+        before.vote_path ~expected:before.vote_snapshot bytes)))
+
+type admission_check = {
+  check_result : (unit, board_error) result;
+  check_diagnostics : votes_source_diagnostic list;
+}
+
+let check_admission store ~admission =
+  let failed diagnostics = { check_result = Error (unavailable_error ()); check_diagnostics = diagnostics } in
+  match expected store with
+  | Error _ -> failed []
+  | Ok before ->
+    let workspace = try
+      let open Result.Syntax in
+      let* () = Board_workspace_binding.revalidate store.workspace_binding before.vote_workspace in
+      Board_target_admission.revalidate store admission
+      with exception_ -> Error (Board_workspace_binding.Raised {
+        exception_; backtrace = Printexc.get_raw_backtrace () }) in
+    match workspace with
+    | Error rejection -> failed [Vote_workspace_diagnostic rejection]
+    | Ok () ->
+      let io = store.votes_source_io in
+      let posts_io = store.posts_source_io.posts and comments_io = store.comments_source_io in
+      try match Board_target_admission.guard admission ~posts_io ~comments_io ~f:(fun () ->
+          match io with
+          | None -> Fs_compat.with_private_jsonl_snapshot_guard_result
+              before.vote_path ~expected:before.vote_snapshot ~f:(fun () -> ())
+          | Some io -> Fs_compat.with_private_jsonl_snapshot_guard_with_io_for_testing ~io
+              before.vote_path ~expected:before.vote_snapshot ~f:(fun () -> ())) with
+      | Board_target_admission.Refused refusal ->
+        let diagnostics = guard_diagnostics (refusal.failure :: refusal.cleanup_failures) in
+        Board_target_admission.observe_refusal store admission refusal;
+        failed diagnostics
+      | Board_target_admission.Executed { value = Fs_compat.Guard_refused failure; cleanup_failures } ->
+        let diagnostics = guard_diagnostics (failure :: cleanup_failures) in
+        if contradicts_observation failure.guard_error then
+          refuse store (Votes_transaction_failed failure.guard_error) diagnostics;
+        failed diagnostics
+      | Board_target_admission.Executed {
+          value = Fs_compat.Guard_executed { value = (); cleanup_failures = vote_cleanup };
+          cleanup_failures = parent_cleanup } ->
+        { check_result = Ok (); check_diagnostics = guard_diagnostics (vote_cleanup @ parent_cleanup) }
+      with exception_ ->
+        failed [Vote_raised_diagnostic { exception_; backtrace = Printexc.get_raw_backtrace () }]
+
+let finish_check checked result =
+  let result = Result.bind checked.check_result (fun () -> result) in
+  finish result checked.check_diagnostics
 
 let acknowledge_publication store receipt = match store.votes_source with
   | Votes_publishing current when current == receipt ->

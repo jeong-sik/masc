@@ -222,7 +222,7 @@ let same_reaction_state (left : reaction option) (right : reaction option) =
   | None, Some _ | Some _, None -> false
 ;;
 
-let stage_reaction_toggle_unlocked store ~target_type ~target_id ~user_id ~emoji =
+let stage_reaction_toggle_unlocked store ~(admission : Board_target_admission.t) ~target_type ~target_id ~user_id ~emoji =
   match ensure_reaction_target_unlocked store ~target_type ~target_id with
   | Error _ as error -> error
   | Ok () ->
@@ -261,7 +261,8 @@ let stage_reaction_toggle_unlocked store ~target_type ~target_id ~user_id ~emoji
           ; desired
           ; snapshot
           ; outcome =
-              { target_type
+              { post_id = admission.post_id
+              ; target_type
               ; target_id
               ; user_id = user_id_string
               ; emoji
@@ -299,7 +300,7 @@ let commit_staged_reaction_unlocked store staged =
       Ok outcome)
 ;;
 
-let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
+let toggle_reaction store ~reader ~target_type ~target_id ~user_id ~emoji
   : (reaction_toggle_result, board_error) Result.t
   =
   let* target_id = canonical_reaction_target_id ~target_type target_id in
@@ -312,9 +313,11 @@ let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
       let module Source = Board_reactions_source in
       let* () = Source.require_readable store in
       let* () = require_posts_source_readable store in
-      let* staged = with_lock store (fun () ->
-        stage_reaction_toggle_unlocked store ~target_type ~target_id ~user_id ~emoji) in
-      let outcome = Source.rewrite store staged.snapshot in
+      let* admission, staged = with_lock store (fun () ->
+        let* admission = Board_target_admission.capture store ~reader ~target_type ~target_id in
+        let* staged = stage_reaction_toggle_unlocked store ~admission ~target_type ~target_id ~user_id ~emoji in
+        Ok (admission, staged)) in
+      let outcome = Source.rewrite_admitted store ~admission staged.snapshot in
       let result = match outcome with
         | Source.Written { publication; _ } ->
           let projected =

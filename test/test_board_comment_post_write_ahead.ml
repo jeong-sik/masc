@@ -341,7 +341,7 @@ let test_comment_append_failure_commits_nothing () =
   let post_id = Board.Post_id.to_string post.id in
   with_blocked_board_masc_dir (fun () ->
   (match
-     Board_dispatch.add_comment ~post_id ~author:"comment-wa-commenter"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"comment-wa-commenter"
        ~content:"must not survive a failed append" ()
    with
    | Ok _ -> Alcotest.fail "comment must not succeed when the append fails"
@@ -363,7 +363,7 @@ let test_comment_append_failure_commits_nothing () =
   (* Nothing was committed, so the retry starts clean once the disk is
      healthy again. *)
   (match
-     Board_dispatch.add_comment ~post_id ~author:"comment-wa-commenter"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"comment-wa-commenter"
        ~content:"retry lands durably" ()
    with
    | Ok _ -> ()
@@ -453,7 +453,7 @@ let test_restart_recomputes_reply_count_from_comment_wal () =
   in
   let post_id = Board.Post_id.to_string post.id in
   (match
-     Board_dispatch.add_comment ~post_id ~author:"restart-wa-commenter"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"restart-wa-commenter"
        ~content:"counted after restart" ()
    with
    | Ok _ -> ()
@@ -494,7 +494,7 @@ let test_flush_failure_keeps_the_post_bump_scheduled () =
   flush ();
   Alcotest.(check bool) "flushed clean before the comment" false store.Board.dirty_posts;
   (match
-     Board_dispatch.add_comment
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
        ~post_id:(Board.Post_id.to_string post.Board.id)
        ~author:"flush-retry-commenter"
        ~content:"a reply that bumps updated_at"
@@ -545,7 +545,7 @@ let test_creation_commits_before_releasing_persistence () =
              visible to the next snapshot writer before it can enter. *)
           released_states := counts store :: !released_states) };
     let post = create_post_exn ~author:"commit-author" ~content:"durable post" in
-    (match Board_dispatch.add_comment
+    (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
        ~post_id:(Board.Post_id.to_string post.id)
        ~author:"commit-commenter" ~content:"durable comment" () with
      | Ok _ -> ()
@@ -891,7 +891,7 @@ let test_partial_policy_source_refuses_comment_publication () =
   let policy_source = Fs_compat.load_file (Board.sub_boards_path (Board.global ())) in
   restart_board ();
   let observations = fanout_counts () in
-  (match Board_dispatch.add_comment ~post_id ~author:"policy-owner"
+  (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"policy-owner"
            ~content:"a comment needs a readable hearth policy" () with
    | Error (Board.Io_error _) -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error)
@@ -929,7 +929,9 @@ let test_queued_update_does_not_resurrect_a_deleted_policy () =
               (Eio.Promise.is_resolved updated)
           end) }
       (fun () ->
-        board_result_exn (Board_dispatch.delete_sub_board ~sub_board_id:"deleted-policy");
+        (match board_result_exn (Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:"deleted-policy") with
+         | Board.Durable_deletion -> ()
+         | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
         Eio.Promise.await updated))
   in
   (match updated with

@@ -241,7 +241,7 @@ let test_task_source_failure_boundaries () = with_fixture (fun config ->
 let test_submission_freezes_sources () = with_fixture (fun config ->
   let p = post ~author:"producer" ~visibility:Board.Internal "Original objection" in
   let id = Board.Post_id.to_string p.id in
-  let comment = Board_dispatch.add_comment ~post_id:id ~author:"peer" ~content:"Original criticism"
+  let comment = Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:id ~author:"peer" ~content:"Original criticism"
     ~ttl_hours:0 () |> require "original comment" in
   let run_id = "immutable-fusion" in
   let f = fusion ~author:"producer" ~visibility:Board.Unlisted ~source:"fusion" run_id in
@@ -251,7 +251,7 @@ let test_submission_freezes_sources () = with_fixture (fun config ->
   let original_fusion = read task "masc_fusion_status" (run_args run_id) in
   ignore (Board_dispatch.update_post ~post_id:id ~editor:"producer" ~content:"Rewritten claim"
     ~new_author:"peer" () |> require "rewrite and transfer");
-  ignore (Board_dispatch.add_comment ~post_id:id ~author:"peer" ~content:"Later friendly comment"
+  ignore (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:id ~author:"peer" ~content:"Later friendly comment"
     ~ttl_hours:0 () |> require "later comment");
   ignore (Board_dispatch.update_post ~post_id:(Board.Post_id.to_string f.id) ~editor:"producer"
     ~content:"New advice" ~new_author:"peer" () |> require "transfer Fusion");
@@ -531,7 +531,7 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
     "verification_source_access_denied";
   let first = bridge task "masc_board_post_get" (post_args board) in
   let cursor = member "next_cursor" first in
-  ignore (Board_dispatch.add_comment ~post_id:(Board.Post_id.to_string board.id)
+  ignore (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(Board.Post_id.to_string board.id)
     ~author:"producer" ~content:"New source revision" ~ttl_hours:0 () |> require "changed source");
   let continued = bridge task "masc_board_post_get" (cursor_args (post_args board) cursor) in
   check string "live edits cannot invalidate submission paging" "source_json_page"

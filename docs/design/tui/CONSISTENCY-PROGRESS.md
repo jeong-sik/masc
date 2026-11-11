@@ -4,6 +4,44 @@ The operator accepted the conversation-first preview in #41685 and asked to
 extend the same treatment consistently. This is the full scope of that work;
 completing one row does not complete the overall request.
 
+## 2026-11-10: Runtime picker candidates
+
+[#51137](https://github.com/jeong-sik/masc/pull/51137) gives an open Runtime
+picker the surface body. The ordinary probe summary, resolved default route and
+candidate table resume when the picker closes. Its count/filter, candidate page
+and wrapped catalogue/write/read-back diagnostics use the available body rows;
+the frame and page keys share the same page calculation. At the smallest height
+the selected candidate takes the single body row. The title retains the number
+of source notices even when no body row remains for them, and points to the
+existing complete routes/status reading after closing the picker. That reading
+also includes the catalogue observation, so a long first notice cannot hide a
+later failure. Partially displayed body diagnostics carry a leading ellipsis.
+The media editor stays open underneath that reading, preserving its selected
+slot and action result on return. While the reading is open, its keys cannot
+move or edit the hidden media slot.
+The footer names Enter's actual create, append or replace action and respects
+the filter's ownership of printable keys.
+
+The matching-server native baseline at `6157b06b` showed the failure: at 36×20,
+`f`, `j`, `j` moved the default-route selection without displaying any candidate;
+widening the same open picker to 120×36 revealed the changed selection. No Enter
+was submitted. Its footer advertised detail while Enter would replace the route.
+Those retained raw captures establish the baseline, not execution of this repair.
+
+The changed OCaml files parse and the patch passes `git diff --check`.
+No new screen-wording, layout, row-order or PTY assertion test was added; the
+existing footer test only receives the required `picker:None` API argument.
+Candidate execution, installed GUI, the rest of System and the full six-family,
+23-surface audit remain open. This slice does not change lane write admission,
+catalogue ownership or the Lanes editor.
+
+`Minimal manual checks` [run 42824710139](https://github.com/jeong-sik/masc/actions/runs/42824710139)
+ran workflow `main` at `0445441ef9f84d825e8f9ed0e2f93881deade90d` with
+native source `48b71feae7348a3a7e133e9fc291eeb1aef36da0` and concluded
+`failure`: an unsupported sanitizer argument stopped compilation. The source
+now uses the existing LF-preserving `sanitize_terminal_lines` API. That failed
+run does not establish compilation or execution of this later repair.
+
 ## Shared rules
 
 - Lead with the object or content being read. Use one stable content column and

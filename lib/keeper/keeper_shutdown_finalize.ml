@@ -123,11 +123,6 @@ let task_has_operation_receipt operation (task : Masc_domain.task) =
   | Masc_domain.Todo, None -> false
 ;;
 
-let strict_backlog ~config =
-  Workspace_backlog.read_backlog_r config
-  |> Result.map_error (fun detail -> detail)
-;;
-
 let find_task tasks task_id =
   let wire = Keeper_id.Task_id.to_string task_id in
   List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id wire) tasks
@@ -176,12 +171,12 @@ let append_unique_evidence_ref (refs : string list) (receipt_ref : string)
 ;;
 
 let release_handoff_context
+      ~now
       operation
       (previous : Masc_domain.task_handoff_context option)
   : Masc_domain.task_handoff_context
   =
   let receipt_ref = operation_evidence_ref operation in
-  let now = Masc_domain.now_iso () in
   match previous with
   | None ->
     { summary = shutdown_release_summary
@@ -213,230 +208,6 @@ let release_handoff_context
     }
 ;;
 
-let release_task ~config operation (owned : Keeper_current_task_reconcile.owned_active_task) =
-  let assignee =
-    match owned.task.task_status with
-    | Masc_domain.Claimed { assignee; _ }
-    | Masc_domain.InProgress { assignee; _ } -> Ok assignee
-    | Masc_domain.Todo
-    | Masc_domain.AwaitingVerification _
-    | Masc_domain.Done _
-    | Masc_domain.Cancelled _ ->
-      Error
-        (Masc_domain.Task
-           (Masc_domain.Task_error.InvalidState
-              "snapshotted task is no longer actively owned"))
-  in
-  let handoff_context =
-    release_handoff_context operation owned.task.handoff_context
-  in
-  match assignee with
-  | Error _ as error -> error
-  | Ok agent_name ->
-    Workspace.release_task_r
-      config
-      ~agent_name
-      ~task_id:(Keeper_id.Task_id.to_string owned.task_id)
-      ~expected_version:operation.expected_backlog_version
-      ~handoff_context
-      ()
-;;
-
-let rec settle_tasks ~config ~meta operation settled_task_ids =
-  match
-    Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
-      ~config
-      ~meta
-  with
-  | Error detail -> block ~config operation Task_settlement detail
-  | Ok active_snapshot ->
-    let active_tasks = active_snapshot.tasks in
-    let unexpected =
-      List.filter
-        (fun task -> not (task_id_mem task.Keeper_current_task_reconcile.task_id operation.owned_task_ids))
-        active_tasks
-    in
-    if unexpected <> []
-    then
-      let ids =
-        unexpected
-        |> List.map (fun task ->
-          Keeper_id.Task_id.to_string task.Keeper_current_task_reconcile.task_id)
-        |> String.concat ","
-      in
-      block ~config operation Task_settlement ("new active task ownership: " ^ ids)
-    else
-      let active_ids =
-        List.map
-          (fun task -> task.Keeper_current_task_reconcile.task_id)
-          active_tasks
-      in
-      let outstanding_ids =
-        List.filter
-          (fun task_id -> not (task_id_mem task_id settled_task_ids))
-          operation.owned_task_ids
-      in
-      let receipted_ids =
-        List.filter
-          (fun task_id ->
-             match find_task active_snapshot.backlog_tasks task_id with
-             | Some task -> task_has_operation_receipt operation task
-             | None -> false)
-          outstanding_ids
-      in
-      let outstanding_accounted_for accounted_task_ids =
-        List.for_all
-          (fun task_id ->
-             task_id_mem task_id accounted_task_ids || task_id_mem task_id active_ids)
-          outstanding_ids
-      in
-      if Int.equal active_snapshot.backlog_version operation.expected_backlog_version
-      then
-        if receipted_ids <> []
-        then
-          block
-            ~config
-            operation
-            Task_settlement
-            "shutdown receipt exists without a corresponding backlog version change"
-        else
-          let backlog = active_snapshot.backlog_tasks in
-          let rec loop current settled = function
-            | [] -> Ok (current, settled)
-            | task_id :: rest when task_id_mem task_id settled ->
-              loop current settled rest
-            | task_id :: rest ->
-              let settle_result =
-                if task_id_mem task_id active_ids
-                then
-                  (match
-                     List.find_opt
-                       (fun task ->
-                          task_id_equal
-                            task.Keeper_current_task_reconcile.task_id
-                            task_id)
-                       active_tasks
-                   with
-                   | None ->
-                     Error
-                       (Masc_domain.Task
-                          (Masc_domain.Task_error.InvalidState
-                             "active task snapshot disappeared"))
-                   | Some owned -> release_task ~config current owned)
-                else
-                  match find_task backlog task_id with
-                  | Some task when task_has_operation_receipt current task ->
-                    Ok "already released"
-                  | Some _ ->
-                    Error
-                      (Masc_domain.Task
-                         (Masc_domain.Task_error.InvalidState
-                            "snapshotted task changed without shutdown receipt"))
-                  | None ->
-                    Error
-                      (Masc_domain.Task
-                         (Masc_domain.Task_error.InvalidState
-                            "snapshotted task disappeared from the durable backlog"))
-              in
-              (match settle_result with
-               | Error
-                   (Masc_domain.Task
-                      (Masc_domain.Task_error.BacklogVersionConflict _)) ->
-                 (* The backlog lock refused this release before any effect.
-                    Re-read ownership and this operation's receipts through
-                    the same path used for a changed entry snapshot. Never
-                    promote the conflict's version into mutation authority. *)
-                 settle_tasks ~config ~meta current settled
-               | Error
-                   (( Masc_domain.Task
-                        ( Masc_domain.Task_error.NotFound _
-                        | Masc_domain.Task_error.AlreadyClaimed _
-                        | Masc_domain.Task_error.InvalidState _
-                        | Masc_domain.Task_error.InvalidId _
-                        | Masc_domain.Task_error.TransitionRejected _
-                        | Masc_domain.Task_error.VerificationSuperseded _ )
-                    | Masc_domain.Agent _
-                    | Masc_domain.Auth _
-                    | Masc_domain.System _ ) as error) ->
-                 block ~config current Task_settlement
-                   (Masc_domain.masc_error_to_string error)
-               | Ok _ ->
-                 (match strict_backlog ~config with
-                  | Error detail -> block ~config current Task_settlement detail
-                  | Ok latest_backlog ->
-                    if
-                      not
-                        (Int.equal
-                           latest_backlog.version
-                           (current.expected_backlog_version + 1))
-                    then
-                      settle_tasks ~config ~meta current settled
-                    else
-                      let settled = task_id :: settled in
-                      (match
-                         persist_settled
-                           ~config
-                           current
-                           ~settled_task_ids:settled
-                           ~expected_backlog_version:latest_backlog.version
-                       with
-                       | Error _ as error -> error
-                       | Ok persisted -> loop persisted settled rest)))
-          in
-          loop operation settled_task_ids operation.owned_task_ids
-      else if outstanding_accounted_for receipted_ids
-      then
-        (match receipted_ids with
-         | [] ->
-           (match
-              persist_settled
-                ~config
-                operation
-                ~settled_task_ids
-                ~expected_backlog_version:active_snapshot.backlog_version
-            with
-            | Error _ as error -> error
-            | Ok rebased -> settle_tasks ~config ~meta rebased settled_task_ids)
-         | [ receipted_id ] ->
-           let settled_task_ids = receipted_id :: settled_task_ids in
-           (match
-              persist_settled
-                ~config
-                operation
-                ~settled_task_ids
-                ~expected_backlog_version:active_snapshot.backlog_version
-            with
-            | Error _ as error -> error
-            | Ok recovered -> settle_tasks ~config ~meta recovered settled_task_ids)
-         | _ ->
-           block
-             ~config
-             operation
-             Task_settlement
-             "multiple uncommitted shutdown receipts require operator reconciliation")
-      else
-        block
-          ~config
-          operation
-          Task_settlement
-          (Printf.sprintf
-             "backlog changed and snapshotted task ownership diverged: expected version %d, actual %d"
-             operation.expected_backlog_version
-             active_snapshot.backlog_version)
-;;
-
-let paused_meta (meta : Keeper_meta_contract.keeper_meta) =
-  { meta with
-    current_task_id = None
-  ; paused = true
-  ; latched_reason =
-      Some
-        (Keeper_latched_reason.Operator_paused
-           { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
-  ; updated_at = Masc_domain.now_iso ()
-  }
-;;
-
 let read_operation_meta ~config operation =
   match
     Keeper_owner_registry.get
@@ -453,6 +224,137 @@ let read_operation_meta ~config operation =
          Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id
        then Ok meta
        else Error "Keeper metadata identity changed")
+;;
+
+let shutdown_release_plan ~config ~(meta : Keeper_meta_contract.keeper_meta)
+    ~updated_at operation settled_task_ids
+    (backlog : Masc_domain.backlog) (task : Masc_domain.task) =
+  let open Result.Syntax in
+  let refused detail = Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState detail)) in
+  let owned (task : Masc_domain.task) = match task.task_status with
+    | Masc_domain.Claimed { assignee; _ } | InProgress { assignee; _ } ->
+        Workspace_task_classify.same_task_actor config assignee meta.name
+    | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> false in
+  let original id = List.exists (fun recorded ->
+    String.equal id (Keeper_id.Task_id.to_string recorded)) operation.owned_task_ids in
+  let unexpected = List.filter_map (fun (task : Masc_domain.task) ->
+    if owned task && not (original task.id) then Some task.id else None) backlog.tasks in
+  let* () = if unexpected = [] then Ok () else
+    refused ("new active task ownership: " ^ String.concat "," unexpected) in
+  let outstanding = List.filter (fun id -> not (task_id_mem id settled_task_ids))
+      operation.owned_task_ids in
+  let* receipted = List.fold_left (fun result id ->
+    let* receipts = result in
+    let wire = Keeper_id.Task_id.to_string id in
+    match List.filter (fun (candidate : Masc_domain.task) -> String.equal candidate.id wire) backlog.tasks with
+    | [candidate] when owned candidate -> Ok receipts
+    | [candidate] when task_has_operation_receipt operation candidate -> Ok (id :: receipts)
+    | [_] -> refused "snapshotted task changed without shutdown receipt"
+    | [] -> refused "snapshotted task disappeared from the durable backlog"
+    | _ :: _ :: _ -> refused "snapshotted task identity is ambiguous in the durable backlog")
+      (Ok []) outstanding in
+  let* () = if receipted <> [] && Int.equal backlog.version operation.expected_backlog_version then
+      refused "shutdown receipt exists without a corresponding backlog version change"
+    else match receipted with
+      | [] | [_] -> Ok ()
+      | _ :: _ :: _ -> refused "multiple uncommitted shutdown receipts require operator reconciliation" in
+  match receipted with
+  | [id] -> Ok (Workspace.Already_receipted (Keeper_id.Task_id.to_string id))
+  | [] ->
+    if owned task then Ok (Workspace.Release_with_handoff
+      (release_handoff_context ~now:updated_at operation task.handoff_context))
+    else refused "snapshotted task changed without shutdown receipt"
+  | _ :: _ :: _ -> refused "multiple uncommitted shutdown receipts require operator reconciliation"
+;;
+
+let rec settle_tasks_observing ~before_release ~config ~meta operation settled_task_ids =
+  match Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict ~config ~meta with
+  | Error detail -> block ~config operation Task_settlement detail
+  | Ok snapshot ->
+    let unexpected = List.filter (fun owned ->
+      not (task_id_mem owned.Keeper_current_task_reconcile.task_id operation.owned_task_ids))
+        snapshot.tasks in
+    if unexpected <> [] then
+      block ~config operation Task_settlement ("new active task ownership: " ^
+        String.concat "," (List.map (fun owned ->
+          Keeper_id.Task_id.to_string owned.Keeper_current_task_reconcile.task_id) unexpected))
+    else
+      match List.filter (fun id -> not (task_id_mem id settled_task_ids)) operation.owned_task_ids with
+      | [] ->
+        if Int.equal snapshot.backlog_version operation.expected_backlog_version then
+          Ok (operation, settled_task_ids)
+        else persist_settled ~config operation ~settled_task_ids
+            ~expected_backlog_version:snapshot.backlog_version
+          |> Result.map (fun persisted -> persisted, settled_task_ids)
+      | task_id :: _ ->
+        (* The observer exercises the old gap. The transition below then reads,
+           validates and releases under one canonical backlog acquisition. *)
+        before_release ();
+        let released =
+          (* Metadata writers use lifecycle key -> owner mailbox. Keep that
+             key from the exact owner observation through the Task commit,
+             then release it before the shutdown Store CAS. The pure planner
+             never calls a mailbox under the canonical backlog lock. Release
+             projections update agent records/logs, not the Keeper owner; the
+             terminal/verification hooks do not run for Release. *)
+          Keeper_lifecycle_reservation.with_key_lock
+            ~base_path:config.Workspace.base_path ~keeper_name:operation.keeper_name
+            (fun () ->
+              match read_operation_meta ~config operation with
+              | Error _ as error -> error
+              | Ok meta ->
+                let updated_at = Masc_domain.now_iso () in
+                Workspace.release_task_for_shutdown_r config ~agent_name:meta.name
+                  ~task_id:(Keeper_id.Task_id.to_string task_id)
+                  ~plan:(shutdown_release_plan ~config ~meta ~updated_at operation settled_task_ids) ()
+                |> Result.map (fun receipt -> meta, receipt)
+                |> Result.map_error Masc_domain.masc_error_to_string)
+        in
+        (match released with
+         | Error detail -> block ~config operation Task_settlement detail
+         | Ok (meta, receipt) ->
+             (match receipt.post_commit_error with
+              | None -> ()
+              | Some error -> Log.Keeper.warn ~keeper_name:operation.keeper_name
+                  "shutdown Task release committed with degraded projection: %s"
+                  (Masc_domain.masc_error_to_string error));
+             let settled_id = List.find_opt (fun id ->
+               String.equal (Keeper_id.Task_id.to_string id) receipt.task_id)
+               operation.owned_task_ids in
+             (match settled_id with
+              | None -> block ~config operation Task_settlement
+                  "shutdown release returned a Task outside its original scope"
+              | Some settled_id when task_id_mem settled_id settled_task_ids ->
+                block ~config operation Task_settlement
+                  "shutdown release returned an already recorded Task"
+              | Some settled_id ->
+             let settled_task_ids = match receipt.release with
+               | Workspace.Shutdown_released | Workspace.Shutdown_receipted ->
+                 settled_id :: settled_task_ids in
+             (* This is the revision returned by the actual commit (or checked
+                receipt), never an inference from a later unlocked read. *)
+             match persist_settled ~config operation ~settled_task_ids
+                 ~expected_backlog_version:receipt.backlog_version with
+             | Error _ as error -> error
+             | Ok persisted ->
+               settle_tasks_observing ~before_release ~config ~meta persisted settled_task_ids))
+;;
+
+let settle_tasks ~config ~meta operation settled_task_ids =
+  settle_tasks_observing ~before_release:(fun () -> ()) ~config ~meta
+    operation settled_task_ids
+;;
+
+let paused_meta (meta : Keeper_meta_contract.keeper_meta) =
+  { meta with
+    current_task_id = None
+  ; paused = true
+  ; latched_reason =
+      Some
+        (Keeper_latched_reason.Operator_paused
+           { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
+  ; updated_at = Masc_domain.now_iso ()
+  }
 ;;
 
 let validate_registry_owner_exact ~config operation =
@@ -1239,6 +1141,13 @@ let plan_blocked_replay ~config operation replay =
 ;;
 
 module For_testing = struct
+  let settle_tasks ~before_release ~config operation =
+    match read_operation_meta ~config operation with
+    | Error detail -> block ~config operation Meta_read detail
+    | Ok meta ->
+      settle_tasks_observing ~before_release ~config ~meta operation []
+  ;;
+
   let paused_meta = paused_meta
   let remove_volumes_after_teardown = remove_volumes_after_teardown
 

@@ -4,6 +4,17 @@ open Result.Syntax
 let path store = Board_paths.store_file_path store Board_paths.Deletion
 let unavailable () = Io_error "Board deletion recovery is unavailable."
 
+type readset =
+  | Post_readset of {
+      parent : posts_source_observation;
+      comments : comments_source_observation;
+      votes : votes_source_observation option;
+    }
+  | Sub_board_readset of {
+      posts : posts_source_observation;
+      policy : sub_boards_source_observation;
+    }
+
 type write =
   | Recorded of deletion_receipt
   | Cleared of deletion_diagnostic list
@@ -34,12 +45,17 @@ let receipt_diagnostics = function
   | None -> [] | Some error -> [Deletion_file_diagnostic error]
 
 let encode plan =
-  Yojson.Safe.to_string (`Assoc [
+  let target = match plan.operation with
+    | Delete_post { deleted_post; deleted_comments } -> [
+        "post_id", `String (Post_id.to_string deleted_post);
+        "comment_ids", `List (List.map (fun id -> `String (Comment_id.to_string id)) deleted_comments) ]
+    | Delete_sub_board { deleted_sub_board; deleted_slug; unlinked_posts } -> [
+        "sub_board_id", `String (Sub_board_id.to_string deleted_sub_board);
+        "slug", `String deleted_slug;
+        "post_ids", `List (List.map (fun id -> `String (Post_id.to_string id)) unlinked_posts) ] in
+  Yojson.Safe.to_string (`Assoc ([
     "version", `Int 1;
-    "decision_id", `String (Deletion_id.to_string plan.decision_id);
-    "post_id", `String (Post_id.to_string plan.deleted_post);
-    "comment_ids", `List (List.map (fun id -> `String (Comment_id.to_string id)) plan.deleted_comments)
-  ]) ^ "\n"
+    "decision_id", `String (Deletion_id.to_string plan.decision_id) ] @ target)) ^ "\n"
 
 let decode bytes =
   let invalid () = Error (Deletion_invalid_decision "Invalid current Board deletion decision.") in
@@ -47,36 +63,56 @@ let decode bytes =
     match parse raw with
     | Ok value when String.equal raw (render value) -> Ok value
     | Ok _ | Error _ -> invalid () in
-  let rec comments seen reversed = function
-    | [] -> Ok (List.rev reversed)
-    | `String raw :: remaining ->
-      let* id = canonical Comment_id.of_string Comment_id.to_string raw in
-      if Set_util.StringSet.mem raw seen then invalid ()
-      else comments (Set_util.StringSet.add raw seen) (id :: reversed) remaining
-    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _
-      | `Tuple _ | `Variant _) :: _ -> invalid () in
+  let ids parse render rows =
+    let rec loop seen reversed = function
+      | [] -> Ok (List.rev reversed)
+      | `String raw :: remaining ->
+        let* id = canonical parse render raw in
+        if Set_util.StringSet.mem raw seen then invalid ()
+        else loop (Set_util.StringSet.add raw seen) (id :: reversed) remaining
+      | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _
+        | `Tuple _ | `Variant _) :: _ -> invalid () in
+    loop Set_util.StringSet.empty [] rows in
+  let row text = match Yojson.Safe.from_string text with
+    | `Assoc fields ->
+      let keys = List.sort String.compare (List.map fst fields) in
+      let field name = match List.assoc_opt name fields with
+        | Some value -> Ok value | None -> invalid () in
+      let* version = field "version" in
+      let* decision = field "decision_id" in
+      (match version, decision with
+       | `Int 1, `String raw ->
+         let* decision_id = canonical Deletion_id.of_string Deletion_id.to_string raw in
+         let* operation = match keys with
+           | ["comment_ids"; "decision_id"; "post_id"; "version"] ->
+             let* post = field "post_id" in
+             let* comments = field "comment_ids" in
+             (match post, comments with
+              | `String post, `List comments ->
+                let* deleted_post = canonical Post_id.of_string Post_id.to_string post in
+                let* deleted_comments = ids Comment_id.of_string Comment_id.to_string comments in
+                Ok (Delete_post { deleted_post; deleted_comments })
+              | _ -> invalid ())
+           | ["decision_id"; "post_ids"; "slug"; "sub_board_id"; "version"] ->
+             let* board = field "sub_board_id" in
+             let* slug = field "slug" in
+             let* posts = field "post_ids" in
+             (match board, slug, posts with
+              | `String board, `String deleted_slug, `List posts
+                when not (String.equal deleted_slug "")
+                  && String.equal deleted_slug (String.trim deleted_slug) ->
+                let* deleted_sub_board = canonical Sub_board_id.of_string Sub_board_id.to_string board in
+                let* unlinked_posts = ids Post_id.of_string Post_id.to_string posts in
+                Ok (Delete_sub_board { deleted_sub_board; deleted_slug; unlinked_posts })
+              | _ -> invalid ())
+           | _ -> invalid () in
+         Ok (Some { decision_id; operation })
+       | _ -> invalid ())
+    | _ -> invalid ()
+    | exception Yojson.Json_error detail -> Error (Deletion_invalid_decision detail) in
   if String.equal bytes "" then Ok None
   else match String.split_on_char '\n' bytes with
-    | [row; ""] ->
-      (match Yojson.Safe.from_string row with
-       | `Assoc fields when
-           List.sort String.compare (List.map fst fields)
-           = ["comment_ids"; "decision_id"; "post_id"; "version"] ->
-         let field name = match List.assoc_opt name fields with
-           | Some value -> Ok value | None -> invalid () in
-         let* version = field "version" in
-         let* decision = field "decision_id" in
-         let* post = field "post_id" in
-         let* ids = field "comment_ids" in
-         (match version, decision, post, ids with
-          | `Int 1, `String decision, `String post, `List ids ->
-            let* decision_id = canonical Deletion_id.of_string Deletion_id.to_string decision in
-            let* deleted_post = canonical Post_id.of_string Post_id.to_string post in
-            let* deleted_comments = comments Set_util.StringSet.empty [] ids in
-            Ok (Some { decision_id; deleted_post; deleted_comments })
-          | _ -> invalid ())
-       | _ -> invalid ()
-       | exception Yojson.Json_error detail -> Error (Deletion_invalid_decision detail))
+    | [text; ""] -> row text
     | [] | [_] | _ :: _ :: _ -> invalid ()
 
 let observe_workspace store =
@@ -168,10 +204,37 @@ let purge store before = match store.deletion_source_io with
       ~io before.decision_path ~expected:before.decision_snapshot
 
 type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_transaction_error) result
+type dependency =
+  | Posts_dependency of posts_source_observation
+  | Comments_dependency of comments_source_observation
+  | Votes_dependency of votes_source_observation
+  | Policy_dependency of sub_boards_source_observation
+type scope = {
+  dependency : dependency;
+  source_path : string;
+  snapshot : Fs_compat.private_jsonl_snapshot;
+  workspace : Board_workspace_binding.observation;
+  io : Fs_compat.private_jsonl_transaction_io_for_testing option;
+}
+type guarded =
+  | Readset_refused of {
+      dependency : dependency;
+      failure : Fs_compat.private_jsonl_guard_failure;
+      cleanup_failures : Fs_compat.private_jsonl_guard_failure list;
+    }
+  | Readset_executed of {
+      result : file_result;
+      cleanup_failures : Fs_compat.private_jsonl_guard_failure list;
+    }
 type io_result =
   | Direct_io of file_result
-  | Deletion_readset_io of
-      file_result Fs_compat.private_jsonl_guard_result Fs_compat.private_jsonl_guard_result
+  | Deletion_readset_io of guarded
+
+let observe_guard_refusal store dependency failure = match dependency with
+  | Posts_dependency observation -> Board_posts_source.observe_guard_refusal store observation failure
+  | Comments_dependency observation -> Board_comments_source.observe_guard_refusal store observation failure
+  | Votes_dependency observation -> Board_votes_source.observe_guard_refusal store observation failure
+  | Policy_dependency observation -> Board_sub_boards_source.observe_guard_refusal store observation failure
 
 let retain_guard_diagnostics store diagnostics = match store.deletion_state with
   | Deletion_readable readable ->
@@ -222,21 +285,14 @@ let perform store ~before ~attempt ~bytes operation =
       | Ok () ->
         match operation () with
         | Direct_io result -> classify result []
-        | Deletion_readset_io (Fs_compat.Guard_refused failure) ->
-          let diagnostics = [Deletion_guard_diagnostic failure] in
-          retain_guard_diagnostics store diagnostics;
-          Not_written diagnostics
-        | Deletion_readset_io (Fs_compat.Guard_executed {
-            value = Fs_compat.Guard_refused failure; cleanup_failures }) ->
+        | Deletion_readset_io (Readset_refused { dependency; failure; cleanup_failures }) ->
+          observe_guard_refusal store dependency failure;
           let diagnostics = List.map (fun failure -> Deletion_guard_diagnostic failure)
               (failure :: cleanup_failures) in
           retain_guard_diagnostics store diagnostics;
           Not_written diagnostics
-        | Deletion_readset_io (Fs_compat.Guard_executed {
-            value = Fs_compat.Guard_executed { value; cleanup_failures = comments_cleanup };
-            cleanup_failures = parent_cleanup }) ->
-          classify value (List.map (fun failure -> Deletion_guard_diagnostic failure)
-            (comments_cleanup @ parent_cleanup)) in
+        | Deletion_readset_io (Readset_executed { result; cleanup_failures }) ->
+          classify result (List.map (fun failure -> Deletion_guard_diagnostic failure) cleanup_failures) in
   try transact () with exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
     fail ~unknown:true (Deletion_raised { exception_; backtrace }) [Deletion_raised_diagnostic { exception_; backtrace }]
@@ -245,36 +301,77 @@ let guard_with_io io path ~expected ~f = match io with
   | None -> Fs_compat.with_private_jsonl_snapshot_guard_result path ~expected ~f
   | Some io -> Fs_compat.with_private_jsonl_snapshot_guard_with_io_for_testing ~io path ~expected ~f
 
-let record store ~(parent : posts_source_observation) ~(comments : comments_source_observation) plan = match store.deletion_state with
+let rec guard_readset scopes record = match scopes with
+  | [] -> Readset_executed { result = record (); cleanup_failures = [] }
+  | (scope : scope) :: remaining ->
+    match guard_with_io scope.io scope.source_path ~expected:scope.snapshot
+        ~f:(fun () -> guard_readset remaining record) with
+    | Fs_compat.Guard_refused failure ->
+      Readset_refused { dependency = scope.dependency; failure; cleanup_failures = [] }
+    | Fs_compat.Guard_executed { value = Readset_refused refusal; cleanup_failures } ->
+      Readset_refused { refusal with cleanup_failures = refusal.cleanup_failures @ cleanup_failures }
+    | Fs_compat.Guard_executed {
+        value = Readset_executed { result; cleanup_failures = inner_cleanup };
+        cleanup_failures = outer_cleanup } ->
+      Readset_executed { result; cleanup_failures = inner_cleanup @ outer_cleanup }
+
+let record store ~readset plan = match store.deletion_state with
   | Deletion_readable { observation; plan = None; _ } ->
-    let bytes = encode plan in
-    let workspace =
-      try
-        let* () = Board_workspace_binding.revalidate store.workspace_binding parent.workspace_observation in
-        Board_workspace_binding.revalidate store.workspace_binding comments.workspace_observation
-      with exception_ -> Error (Board_workspace_binding.Raised {
-        exception_; backtrace = Printexc.get_raw_backtrace () }) in
-    (match workspace with
-     | Error rejection ->
-       let diagnostics = [Deletion_workspace_diagnostic rejection] in
-       retain_guard_diagnostics store diagnostics;
-       Not_written diagnostics
-     | Ok () ->
-       if not (String.equal parent.source_path (Board_paths.persist_path store)
-               && String.equal comments.source_path (Board_paths.comments_path store)) then Not_written []
-       else
+    let sources = match plan.operation, readset with
+      | Delete_post _, Post_readset { parent; comments; votes } ->
+        if String.equal parent.source_path (Board_paths.persist_path store)
+           && String.equal comments.source_path (Board_paths.comments_path store) then
+          let votes = match votes with
+            | None -> Some []
+            | Some observation when String.equal observation.vote_path
+                (Board_paths.store_file_path store Board_paths.Votes) ->
+              Some [{ dependency = Votes_dependency observation; source_path = observation.vote_path;
+                snapshot = observation.vote_snapshot; workspace = observation.vote_workspace;
+                io = store.votes_source_io }]
+            | Some _ -> None in
+          Option.map (fun votes -> [
+            { dependency = Posts_dependency parent; source_path = parent.source_path;
+              snapshot = parent.snapshot; workspace = parent.workspace_observation; io = store.posts_source_io.posts };
+            { dependency = Comments_dependency comments; source_path = comments.source_path;
+              snapshot = comments.snapshot; workspace = comments.workspace_observation; io = store.comments_source_io }
+          ] @ votes) votes
+        else None
+      | Delete_sub_board _, Sub_board_readset { posts; policy } ->
+        if String.equal posts.source_path (Board_paths.persist_path store)
+           && String.equal policy.policy_path (Board_paths.sub_boards_path store) then
+          Some [
+            { dependency = Posts_dependency posts; source_path = posts.source_path;
+              snapshot = posts.snapshot; workspace = posts.workspace_observation; io = store.posts_source_io.posts };
+            { dependency = Policy_dependency policy; source_path = policy.policy_path;
+              snapshot = policy.policy_snapshot; workspace = policy.policy_workspace; io = store.sub_boards_source_io }
+          ]
+        else None
+      | Delete_post _, Sub_board_readset _ | Delete_sub_board _, Post_readset _ -> None in
+    (match sources with
+     | None -> Not_written []
+     | Some scopes ->
+       let workspace =
+         try
+           let rec revalidate = function
+             | [] -> Ok ()
+             | (scope : scope) :: remaining ->
+               let* () = Board_workspace_binding.revalidate store.workspace_binding scope.workspace in
+               revalidate remaining in
+           revalidate scopes
+         with exception_ -> Error (Board_workspace_binding.Raised {
+           exception_; backtrace = Printexc.get_raw_backtrace () }) in
+       match workspace with
+       | Error rejection ->
+         let diagnostics = [Deletion_workspace_diagnostic rejection] in
+         retain_guard_diagnostics store diagnostics;
+         Not_written diagnostics
+       | Ok () ->
+         let bytes = encode plan in
          let deletion_io = store.deletion_source_io in
-         let parent_io = store.posts_source_io.posts in
-         let comments_io = store.comments_source_io in
          perform store ~before:observation ~attempt:(Recording_decision plan) ~bytes
-         (fun () ->
-           (* The worker touches only immutable IO/path/snapshot values and
-              filesystem state. Source publication happens back in [classify]. *)
-           let record () = rewrite_with_io deletion_io observation bytes in
-           let guard_comments () = guard_with_io comments_io comments.source_path
-               ~expected:comments.snapshot ~f:record in
-           Deletion_readset_io (guard_with_io parent_io parent.source_path
-             ~expected:parent.snapshot ~f:guard_comments)))
+           (fun () ->
+             Deletion_readset_io (guard_readset scopes
+               (fun () -> rewrite_with_io deletion_io observation bytes))))
   | Deletion_unobserved | Deletion_readable { plan = Some _; _ }
   | Deletion_pending _ | Deletion_unsettled _ | Deletion_refused _ | Deletion_projection_failed _ -> Not_written []
 

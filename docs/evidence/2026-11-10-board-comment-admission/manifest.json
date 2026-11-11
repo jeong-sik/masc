@@ -1,0 +1,9 @@
+{
+  "production_source": "0b00cbce749dd2967f1837238133c3f40df72ddf",
+  "upper_source": "2c7fc482f4cd95a12732ceaf2cdc349fdfcacc94",
+  "payloads": {
+    "README.md": "c5d6beca5fdbebeb4d32db231c4efdfaffae02865d95652182512d7dbc108fa7",
+    "validation.json": "73aed1950dffca0b54a022b5671625f1d482df76ecc4de7ad052ebf08e40079a",
+    "local-source-reviews.txt": "76349f8965bc8e2770b11390cb1f68eef770e13a4ac8dea642326d4addd6ca6e"
+  }
+}

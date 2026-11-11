@@ -634,6 +634,7 @@ let startup_failure_disposition ~state_ready =
 type owner_initialization_error =
   | Runtime_config_read_failed of string
   | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
+  | Native_execution_runtime_unavailable
   | Domain_budget_exceeded of Domain_budget.error
   | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Admin_credential_bootstrap_failed of Masc_domain.masc_error
@@ -674,6 +675,8 @@ let owner_initialization_error_to_string = function
   | Native_execution_runtime_failed error ->
     "native execution runtime initialization failed: "
     ^ Runtime_agent_execution_runtime.initialization_error_to_string error
+  | Native_execution_runtime_unavailable ->
+    "initialized native execution runtime is unavailable"
   | Domain_budget_exceeded error ->
     "executor domain budget refused: " ^ Domain_budget.error_to_string error
   | Keeper_config_recovery_failed report ->
@@ -1176,6 +1179,16 @@ let initialize_owner_state_blocking
    | Ok () -> ()
    | Error error ->
      raise (Owner_initialization_failed (Native_execution_runtime_failed error)));
+  (* Owners are registered and shutdown fences restored, but no Keeper loop
+     has been claimed or started. Canonical journal projection now has its
+     application-owned runtime; its Eio reads run outside registry locks and
+     operation Store transactions. *)
+  let runtime = match Runtime_agent_execution_runtime.get () with
+    | Some runtime -> runtime
+    | None -> raise (Owner_initialization_failed Native_execution_runtime_unavailable) in
+  (match Keeper_direct_native_continuation.complete_restart_settlements ~runtime ~base_path with
+   | Ok count -> Log.Keeper.info "keeper_owner: completed startup journal settlement for %d owner(s)" count
+   | Error error -> raise (Keeper_owner_registry.Install_failed error));
   let log = if Domain_budget.within_limit budget then Log.Server.info else Log.Server.warn in
   log
     "Executor domains: %d shared pool + %d read pool + %d execution codec + %d fixed = %d (limit %d = recommended %d - 1)"
@@ -2221,8 +2234,17 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
             Server_bootstrap_http.listen_https_socket ~sw:serving_sw ~net ~address ~config https
           in
           let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
+          (* Handlers run on the main domain (RFC
+             http-transport-runs-on-its-own-domain §3.3), so the table is
+             built there, with the main switch for what handlers fork. *)
           let routes =
-            make_routes ~port:config.port ~host:config.host ~sw:serving_sw ~clock
+            Eio_context.run_on_owner_domain (fun () ->
+              make_routes
+                ~port:config.port
+                ~host:config.host
+                ~sw
+                ~transport_sw:serving_sw
+                ~clock)
           in
           let request_handler = make_request_handler ~trust_policy routes in
           let h2_request_handler = make_h2_request_handler ~trust_policy ~routes in
@@ -2239,7 +2261,9 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
     let socket = Server_bootstrap_http.listen_socket ~sw ~net ~address config in
     let https_listener = Server_bootstrap_http.listen_https_socket ~sw ~net ~address ~config https in
     let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
-    let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
+    let routes =
+      make_routes ~port:config.port ~host:config.host ~sw ~transport_sw:sw ~clock
+    in
     let request_handler = make_request_handler ~trust_policy routes in
     let h2_request_handler = make_h2_request_handler ~trust_policy ~routes in
     let h2_error_handler = make_h2_error_handler () in

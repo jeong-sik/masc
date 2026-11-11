@@ -843,9 +843,10 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
                   [ line Planning_detail.Proven
                       ((text "실제값: " "Actual: ") ^ Terminal_text.single_line value ^ (text " (보고된 값)" " (reported)"))
                   ; line Planning_detail.Note
-                      ((text "측정 근거: " "Measured: ") ^ Terminal_text.single_line evidence
-                       ^ " · " ^ Terminal_text.single_line actor
-                       ^ " · " ^ Terminal_text.single_line recorded_at)
+                      ((text "측정 근거: " "Measured: ") ^ Terminal_text.single_line evidence)
+                  ; line Planning_detail.Quiet
+                      ((text "측정 주체: " "Measured by: ") ^ Terminal_text.single_line actor
+                       ^ " · " ^ (text "기록 시각: " "recorded: ") ^ Terminal_text.single_line recorded_at)
                   ; tasks ]))
 
 let planning_confirmation_view (state : state) ~goal_id =
@@ -914,11 +915,22 @@ let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_g
                 (Terminal_text.single_line reason))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
 
+(* A verdict's reason runs to several wrapped rows. The first row keeps its
+   two-space lead; a continuation goes one step further in, so a long reason
+   reads as hanging under the row that began it instead of as rows the wrap
+   dropped at the same edge. The wrap happens at the continuation width --
+   the deeper of the two indents -- or a row wrapped at the full width and
+   then pushed four cells in would run past the frame and lose its tail to
+   the fitter, which does not carry the cut word to the next row. *)
 let planning_proof_rows ~width lines =
   List.concat_map (fun (line : Planning_detail.line) ->
-    match Masc_tui_text_block.rows ~max_cells:width line.text with
+    match Masc_tui_text_block.rows ~max_cells:(max 1 (width - 4)) line.text with
     | [] -> [{line with text=""}]
-    | rows -> List.map (fun text -> {line with text="  " ^ text}) rows) lines
+    | rows ->
+        List.mapi
+          (fun index text ->
+             { line with text = (if index = 0 then "  " else "    ") ^ text })
+          rows) lines
 
 let planning_detail_content (state : state) ~confirmation ~cols (goal : planning_goal) =
   let ko = state.ui_language = Lang_ko in
@@ -1498,10 +1510,8 @@ let render_schedule_list (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s  %s"
-    (screen_title " MASC Keepers / Schedules")
-    timestamp
-    (connection_badge state) in
+  let header = surface_title_row ~cols state
+    ~lead:(screen_title " MASC Keepers / Schedules") ~readings:[ "  " ^ timestamp ] in
 
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
     ~hints:

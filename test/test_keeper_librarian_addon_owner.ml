@@ -439,7 +439,9 @@ let test_foreign_closure_id_is_refused_before_publication ()=with_fixture (fun ~
       (Filename.concat Store.tool_request_bodies_directory (Store.digest (Closure.scope owner)))))))
 let test_preflight_rechecks_a_closure_created_after_an_empty_observation ()=with_fixture (fun ~sw:_ fixture ->
   drive_until fixture settled |> assert_settled;
-  let validate=Keeper_librarian_store_preflight.validator () in
+  let validate=Keeper_librarian_store_preflight.validator ()
+    ~read_fence:(Store.load_history_fence fixture.store)
+    ~read_resolution:(Store.load_history_resolution fixture.store) in
   let read ~scope ~request_id=Owner.load ~store:fixture.store ~scope ~request_id |> Result.map_error Owner.error_to_string in
   let read_scope ~scope=Owner.load_scope ~store:fixture.store ~scope |> Result.map_error Owner.error_to_string in
   let body=Owner.Published_reader.create ~read_body:(fun ~scope ~request_digest ->
@@ -852,9 +854,9 @@ let test_sparse_whole_candidate_partition_reads_fresh_memory ()=
     let forest_reads=ref 0 and closure_reads=ref 0 and validated=ref 0 in
     let counting ()=
       let validate=Keeper_librarian_store_preflight.validator () in
-      fun ~read ~read_scope ~read_body ~read_archive record ->
+      fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record ->
         incr validated;
-        validate ~read ~read_body ~read_archive record
+        validate ~read ~read_body ~read_archive ~read_fence ~read_resolution record
           ~read_scope:(fun ~scope ->
             if Keeper_librarian_admission_closure.is_scope scope then incr closure_reads
             else incr forest_reads;

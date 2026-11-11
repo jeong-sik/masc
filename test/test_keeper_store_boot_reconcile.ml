@@ -2080,8 +2080,28 @@ let test_board_partition_preflight_uses_production_replay ~keeper_name () =
     let module Partition = Keeper_board_attention_partition in
     let module Candidate = Partition.Candidate in
     let base_path = config.Workspace.base_path in
+    (* #50387: a post-created signal's candidate is filtered against the post it
+       names, so the fixture has to publish a real post instead of asserting on
+       an id no read can resolve. *)
+    Board.reset_global_for_test ();
+    Board_dispatch.reset_for_test ();
+    (match
+       Board_dispatch.init_jsonl ~base_path
+         ~recipient_lookup:Recipient_lookup.none_declared ()
+     with
+     | Ok () -> ()
+     | Error _ -> fail "fixture must initialize the Board backend");
+    let post =
+      match
+        Board_dispatch.create_post ~author:"external"
+          ~content:"Retained evidence" ~title:"Preflight"
+          ~post_kind:Board.Human_post ()
+      with
+      | Ok post -> post
+      | Error error -> fail (Board.Post_publication_failure.to_string error) in
+    let post_id = Board.Post_id.to_string post.Board.id in
     let signal : Board_dispatch.board_signal =
-      { kind = Board_dispatch.Board_post_created; post_id = "preflight-post"
+      { kind = Board_dispatch.Board_post_created; post_id
       ; author = "external"; title = "Preflight"; content = "Retained evidence"
       ; hearth = None; updated_at = Some 1.0 } in
     let candidate : Candidate.candidate =

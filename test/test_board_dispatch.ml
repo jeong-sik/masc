@@ -162,8 +162,8 @@ let test_content_update_time_survives_activity_and_reload () =
   Alcotest.(check (float 0.0)) "content starts at creation"
     post.created_at post.content_updated_at;
   Unix.sleepf 0.01;
-  ignore (get (Board_dispatch.add_comment ~post_id ~author:"peer" ~content:"reply" ()));
-  ignore (get (Board_dispatch.vote ~post_id ~voter:"peer" ~direction:Board.Up));
+  ignore (get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"peer" ~content:"reply" ()));
+  ignore (get (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~voter:"peer" ~direction:Board.Up));
   ignore (get (Board_dispatch.set_pinned ~post_id ~pinned:true));
   same post.content_updated_at;
   let edit ?new_author ~editor ~title ~body () =
@@ -852,7 +852,7 @@ let test_vote_returns_total_score_not_change () =
   in
   let post_id = Board.Post_id.to_string post.id in
   let vote_exn ~voter =
-    match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+    match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter ~post_id ~direction:Board.Up with
     | Ok score -> score
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
@@ -872,7 +872,7 @@ let test_recent_sort_bypasses_hot_cutoff () =
     | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   in
   let vote_up_exn ~post_id ~voter =
-    match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+    match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter ~post_id ~direction:Board.Up with
     | Ok _ -> ()
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
@@ -971,13 +971,13 @@ let test_list_posts_matches_comment_author () =
   let matching_post_id = Board.Post_id.to_string matching_post.id in
   let other_post_id = Board.Post_id.to_string other_post.id in
   (match
-     Board_dispatch.add_comment ~post_id:matching_post_id
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:matching_post_id
        ~author:"comment-match-agent" ~content:"I touched this thread" ()
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   (match
-     Board_dispatch.add_comment ~post_id:other_post_id
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:other_post_id
        ~author:"comment-other-agent" ~content:"Different author" ()
    with
    | Ok _ -> ()
@@ -1055,7 +1055,7 @@ let test_add_and_get_comments () =
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
-      (match Board_dispatch.add_comment ~post_id:pid ~author:"responder" ~content:"nice post" () with
+      (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid ~author:"responder" ~content:"nice post" () with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok _ -> ());
       match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid with
@@ -1078,7 +1078,7 @@ let test_comment_signal_preserves_comment_and_parent_identity () =
   let post_id = Board.Post_id.to_string post.id in
   let parent =
     match
-      Board_dispatch.add_comment
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
         ~post_id
         ~author:"first-responder"
         ~content:"parent comment"
@@ -1091,7 +1091,7 @@ let test_comment_signal_preserves_comment_and_parent_identity () =
   Board_dispatch.set_board_signal_hook (fun signal -> seen := Some signal);
   let reply =
     match
-      Board_dispatch.add_comment
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
         ~post_id
         ~author:"second-responder"
         ~content:"child comment"
@@ -1132,7 +1132,7 @@ let test_comment_persists_post_reply_count () =
   in
   let post_id = Board.Post_id.to_string post.id in
   (match
-     Board_dispatch.add_comment ~post_id ~author:"automation-commenter"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"automation-commenter"
        ~content:"automation/direct comment reply" ()
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1186,7 +1186,7 @@ let test_add_comment_persistence_failure_rolls_back_without_fanout () =
   with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
   check_source_io_error
-    (Board_dispatch.add_comment
+    (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
        ~post_id
        ~author:"comment-persist-fail-responder"
        ~content:"this comment must not survive a failed append"
@@ -1219,13 +1219,13 @@ let test_get_post_and_comments_atomic () =
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
       (match
-         Board_dispatch.add_comment ~post_id:pid ~author:"first"
+         Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid ~author:"first"
            ~content:"first comment" ()
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok _ -> ());
       (match
-         Board_dispatch.add_comment ~post_id:pid ~author:"second"
+         Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid ~author:"second"
            ~content:"second comment" ()
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1276,7 +1276,7 @@ let test_vote_post () =
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
-      match Board_dispatch.vote ~voter:"judge" ~post_id:pid ~direction:Board.Up with
+      match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"judge" ~post_id:pid ~direction:Board.Up with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok score ->
           Alcotest.(check int) "score after upvote" 1 score
@@ -1289,8 +1289,8 @@ let test_vote_dedup () =
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
-      ignore (Board_dispatch.vote ~voter:"same-voter" ~post_id:pid ~direction:Board.Up);
-      match Board_dispatch.vote ~voter:"same-voter" ~post_id:pid ~direction:Board.Up with
+      ignore (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"same-voter" ~post_id:pid ~direction:Board.Up);
+      match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"same-voter" ~post_id:pid ~direction:Board.Up with
       | Ok _ -> Alcotest.fail "Expected Already_voted error"
       | Error (Board.Already_voted _) -> ()
       | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1303,8 +1303,8 @@ let test_vote_flip () =
   | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
   | Ok post ->
       let pid = Board.Post_id.to_string post.id in
-      ignore (Board_dispatch.vote ~voter:"flipper" ~post_id:pid ~direction:Board.Up);
-      match Board_dispatch.vote ~voter:"flipper" ~post_id:pid ~direction:Board.Down with
+      ignore (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"flipper" ~post_id:pid ~direction:Board.Up);
+      match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"flipper" ~post_id:pid ~direction:Board.Down with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok score ->
           Alcotest.(check int) "score after flip" (-1) score
@@ -1323,14 +1323,14 @@ let test_current_vote_lookup () =
        | Ok vote ->
            Alcotest.(check (option string)) "post vote starts empty" None
              (vote_label vote));
-      ignore (Board_dispatch.vote ~voter:"reader" ~post_id:pid ~direction:Board.Up);
+      ignore (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader" ~post_id:pid ~direction:Board.Up);
       (match Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader" ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok vote ->
            Alcotest.(check (option string)) "post vote state" (Some "up")
              (vote_label vote));
       (match
-         Board_dispatch.add_comment ~post_id:pid ~author:"commenter"
+         Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid ~author:"commenter"
            ~content:"vote this comment" ()
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1345,7 +1345,7 @@ let test_current_vote_lookup () =
                 Alcotest.(check (option string)) "comment vote starts empty" None
                   (vote_label vote));
            ignore
-             (Board_dispatch.vote_comment ~voter:"reader" ~comment_id:cid
+             (Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader" ~comment_id:cid
                 ~direction:Board.Down);
            match
              Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"reader"
@@ -1414,7 +1414,7 @@ let test_vote_persisted_by_flusher_actor () =
           | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
           | Ok post -> Board.Post_id.to_string post.id
         in
-        (match Board_dispatch.vote ~voter:"judge" ~post_id ~direction:Board.Up with
+        (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"judge" ~post_id ~direction:Board.Up with
          | Error e -> Alcotest.fail (Board.show_board_error e)
          | Ok _ -> ());
         let store = Board_dispatch.backend () in
@@ -1540,7 +1540,7 @@ let test_comment_reaction_survives_restart () =
       let post_id = Board.Post_id.to_string post.id in
       let comment_id =
         match
-          Board_dispatch.add_comment ~post_id ~author:"commenter"
+          Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"commenter"
             ~content:"reactable comment" ()
         with
         | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1624,7 +1624,7 @@ let test_reaction_summary_batch () =
       let post_id = Board.Post_id.to_string post.id in
       let comment_id =
         match
-          Board_dispatch.add_comment ~post_id ~author:"commenter"
+          Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"commenter"
             ~content:"batch reaction child" ()
         with
         | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1721,7 +1721,7 @@ let test_dashboard_comment_context_contains_page_and_focus_ancestors () =
       ~content:"comment context" ~post_kind:Board.Human_post () with
     | Ok post -> post | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error) in
   let post_id = Board.Post_id.to_string post.id in
-  let add ?parent_id content = match Board_dispatch.add_comment ~post_id
+  let add ?parent_id content = match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id
       ~author:"context-reader" ~content ?parent_id () with
     | Ok comment -> Board.Comment_id.to_string comment.id
     | Error error -> Alcotest.fail (Board.show_board_error error) in
@@ -1752,7 +1752,7 @@ let test_dashboard_comment_context_contains_page_and_focus_ancestors () =
   let missing = read ~focused_comment:"deleted-comment" () in
   Alcotest.(check (list string)) "missing focus still returns the ordinary context"
     (ids "comment_context" latest) (ids "comment_context" missing);
-  (match Board_dispatch.vote_comment ~comment_id:newest_reply ~voter:"context-voter"
+  (match Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~comment_id:newest_reply ~voter:"context-voter"
       ~direction:Board.Up with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error));
@@ -1838,7 +1838,7 @@ let test_board_signal_reaction_changed_resolves_comment_parent () =
   let post_id = Board.Post_id.to_string post.id in
   let comment =
     match
-      Board_dispatch.add_comment ~post_id ~author:"comment-author"
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"comment-author"
         ~content:"comment target" ()
     with
     | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1894,7 +1894,7 @@ let test_board_signal_vote_cast_on_post () =
   in
   let post_id = Board.Post_id.to_string post.id in
   let signals = vote_signals_seen () in
-  (match Board_dispatch.vote ~voter:"voter-one" ~post_id ~direction:Board.Up with
+  (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-one" ~post_id ~direction:Board.Up with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ());
   (match signals () with
@@ -1920,7 +1920,7 @@ let test_board_signal_vote_cast_on_post () =
    | signals ->
      Alcotest.failf "expected exactly one board signal, got %d" (List.length signals));
   (* A same-direction duplicate is Already_voted: no store change, no signal. *)
-  (match Board_dispatch.vote ~voter:"voter-one" ~post_id ~direction:Board.Up with
+  (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-one" ~post_id ~direction:Board.Up with
    | Error (Board.Already_voted _) -> ()
    | Ok _ -> Alcotest.fail "expected Already_voted"
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -1938,7 +1938,7 @@ let test_board_signal_vote_cast_on_comment_names_comment_author () =
   let post_id = Board.Post_id.to_string post.id in
   let comment =
     match
-      Board_dispatch.add_comment ~post_id ~author:"vote-comment-author"
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"vote-comment-author"
         ~content:"comment vote target" ()
     with
     | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1947,7 +1947,7 @@ let test_board_signal_vote_cast_on_comment_names_comment_author () =
   let comment_id = Board.Comment_id.to_string comment.id in
   let signals = vote_signals_seen () in
   (match
-     Board_dispatch.vote_comment ~voter:"voter-two" ~comment_id ~direction:Board.Down
+     Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"voter-two" ~comment_id ~direction:Board.Down
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ());
@@ -2178,14 +2178,14 @@ let test_direct_comments_cannot_expand_readership () =
   let count () = List.length (Result.get_ok (Board.read_comments store ~post_id)) in
   let before = count () in
   List.iter (fun content ->
-    match Board.add_comment store ~lookup:every_name_declared ~post_id ~author:"writer" ~content () with
+    match Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store ~lookup:every_name_declared ~post_id ~author:"writer" ~content () with
     | Error (Board.Validation_error _) -> ()
     | Error error -> Alcotest.fail (Board.show_board_error error)
     | Ok _ -> Alcotest.fail "a comment enlarged the private thread's readers")
     ["@@all secret"; "@outsider secret"];
   Alcotest.(check int) "refused comments leave no rows" before (count ());
   List.iter (fun content ->
-    match Board.add_comment store ~lookup:every_name_declared ~post_id ~author:"writer" ~content () with
+    match Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store ~lookup:every_name_declared ~post_id ~author:"writer" ~content () with
     | Ok _ -> () | Error error -> Alcotest.fail (Board.show_board_error error))
     ["@reader allowed"; "@writer allowed"; "ordinary reply"];
   Alcotest.(check int) "existing readers and ordinary replies still work" (before + 3) (count ())
@@ -2720,9 +2720,9 @@ let test_comment_audience_survives_restart () =
   let post = get_created (Board_dispatch.create_post ~author:"audience-owner"
       ~content:"thread root" ~visibility:Board.Internal ~post_kind:Board.Human_post ()) in
   let post_id = Board.Post_id.to_string post.id in
-  let addressed = get (Board_dispatch.add_comment ~post_id ~author:"commenter"
+  let addressed = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"commenter"
       ~content:"@first-reader private evidence" ()) in
-  let plain = get (Board_dispatch.add_comment ~post_id ~author:"commenter"
+  let plain = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"commenter"
       ~content:"thread follow-up" ()) in
   Alcotest.(check (list string)) "creation retains audience" ["first-reader"]
     (targets addressed);
@@ -2814,9 +2814,10 @@ let test_sub_board_delete () =
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok sb ->
       let id = Board.Sub_board_id.to_string sb.Board.id in
-      (match Board_dispatch.delete_sub_board ~sub_board_id:id with
+      (match Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:id with
        | Error e -> Alcotest.fail (Board.show_board_error e)
-       | Ok () ->
+       | Ok (Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
+       | Ok Board.Durable_deletion ->
            (match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:id with
             | Error (Board.Invalid_id _) -> ()  (* expected after delete *)
             | Ok _ -> Alcotest.fail "expected not found after delete"
@@ -2844,9 +2845,10 @@ let test_sub_board_create_delete_persisted_snapshot () =
   in
   Alcotest.(check bool) "created slug persisted" true
     (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()));
-  (match Board_dispatch.delete_sub_board ~sub_board_id:id with
+  (match Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok () -> ());
+   | Ok (Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
+       | Ok Board.Durable_deletion -> ());
   Alcotest.(check bool) "deleted slug removed from persisted snapshot" false
     (List.exists (String.equal "persisted-team") (sub_board_slugs_from_disk ()))
 
@@ -2946,7 +2948,7 @@ let test_sub_board_members_only_comment_policy () =
       ~slug:"comment-policy-team" ~content:"seed post"
   in
   (match
-     Board_dispatch.add_comment ~post_id ~author:"agent-outsider"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"agent-outsider"
        ~content:"outsider reply" ()
    with
    | Error (Board.Validation_error _) -> ()
@@ -2956,13 +2958,13 @@ let test_sub_board_members_only_comment_policy () =
      Alcotest.fail
        "expected members-only sub-board to reject outsider comment");
   (match
-     Board_dispatch.add_comment ~post_id ~author:"agent-member"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"agent-member"
        ~content:"member reply" ()
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ());
   (match
-     Board_dispatch.add_comment ~post_id ~author:"agent-owner"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"agent-owner"
        ~content:"owner reply" ()
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -2978,7 +2980,7 @@ let test_sub_board_owner_only_comment_policy () =
       ~slug:"comment-owner-space" ~content:"seed"
   in
   (match
-     Board_dispatch.add_comment ~post_id ~author:"agent-member"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"agent-member"
        ~content:"member reply" ()
    with
    | Error (Board.Validation_error _) -> ()
@@ -2988,7 +2990,7 @@ let test_sub_board_owner_only_comment_policy () =
      Alcotest.fail
        "expected owner-only sub-board to reject member comment");
   (match
-     Board_dispatch.add_comment ~post_id ~author:"agent-owner"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"agent-owner"
        ~content:"owner reply" ()
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -3004,7 +3006,7 @@ let test_sub_board_open_comment_policy_allows_anyone () =
       ~slug:"comment-open" ~content:"seed"
   in
   (match
-     Board_dispatch.add_comment ~post_id ~author:"agent-random"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"agent-random"
        ~content:"random reply" ()
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -3053,9 +3055,10 @@ let test_sub_board_delete_clears_orphan_hearth () =
    | Ok post ->
        Alcotest.(check (option string)) "post has hearth before delete"
          (Some "orphan-hearth") post.Board.hearth);
-  (match Board_dispatch.delete_sub_board ~sub_board_id:sb_id with
+  (match Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:sb_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok () -> ());
+   | Ok (Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
+       | Ok Board.Durable_deletion -> ());
   (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post ->
@@ -3339,7 +3342,7 @@ let test_direct_reads_and_aggregates () =
       ~post_kind:Board.Human_post ()) in
   let public_id = Board.Post_id.to_string public.id in
   let private_id = Board.Post_id.to_string private_post.id in
-  let comment = Result.get_ok (Board_dispatch.add_comment ~post_id:private_id
+  let comment = Result.get_ok (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:private_id
       ~author:owner ~content:"private reply" ()) in
   List.iter (fun reader ->
     Alcotest.(check bool) "Direct lookup is absent" true
@@ -3361,8 +3364,8 @@ let test_direct_reads_and_aggregates () =
     [Masc_board_handlers.Board_access.named owner; target; Masc_board_handlers.Board_access.Operator];
   Alcotest.(check bool) "internal observation remains available" true
     (Result.is_ok (Board_dispatch.read_post_unchecked ~post_id:private_id));
-  ignore (Result.get_ok (Board_dispatch.vote ~voter:"peer" ~post_id:public_id ~direction:Board.Up));
-  ignore (Result.get_ok (Board_dispatch.vote_comment ~voter:"peer"
+  ignore (Result.get_ok (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"peer" ~post_id:public_id ~direction:Board.Up));
+  ignore (Result.get_ok (Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"peer"
     ~comment_id:(Board.Comment_id.to_string comment.id) ~direction:Board.Up));
   Alcotest.(check int) "operator sees both earned votes" 2
     (Board_dispatch.get_agent_karma ~reader:Masc_board_handlers.Board_access.Operator ~agent_name:owner);

@@ -1036,7 +1036,7 @@ let create_thread_fixture config ~keeper_name =
   in
   let post_id = Board.Post_id.to_string post.id in
   let add_comment ?parent_id ~author ~content () =
-    match Board_dispatch.add_comment ~post_id ~author ~content ?parent_id () with
+    match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author ~content ?parent_id () with
     | Error error -> fail (Board.show_board_error error)
     | Ok comment -> comment
   in
@@ -1114,7 +1114,7 @@ let create_self_post_fixture config ~keeper_name =
   let post_id = Board.Post_id.to_string post.id in
   let comment =
     match
-      Board_dispatch.add_comment
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
         ~post_id
         ~author:"external-author"
         ~content:"it is empty because the loader skips it"
@@ -1212,7 +1212,7 @@ let test_vote_on_own_post_wakes_the_author_once () =
            ~title:"keeper finding"
            ~content:"the loader skips empty fixtures"
        in
-       (match Board_dispatch.vote ~voter:"external-voter" ~post_id ~direction:Board.Up with
+       (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"external-voter" ~post_id ~direction:Board.Up with
         | Error error -> fail (Board.show_board_error error)
         | Ok _ -> ());
        check int "one vote is one stimulus for the author" 1
@@ -1234,14 +1234,14 @@ let test_vote_on_own_post_wakes_the_author_once () =
           check bool "author woken by the vote" true (Atomic.get entry.fiber_wakeup)
         | None -> fail "voterlane registry entry missing");
        (* Same voter, same direction: Already_voted, nothing new to act on. *)
-       (match Board_dispatch.vote ~voter:"external-voter" ~post_id ~direction:Board.Up with
+       (match Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"external-voter" ~post_id ~direction:Board.Up with
         | Error (Board.Already_voted _) -> ()
         | Ok _ -> fail "expected Already_voted"
         | Error error -> fail (Board.show_board_error error));
        check int "duplicate vote adds no stimulus" 1 (board_queue_length config meta.name);
        (* The keeper voting on its own post addresses no lane. *)
        (match
-          Board_dispatch.vote
+          Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator
             ~voter:meta.Keeper_meta_contract.name
             ~post_id
             ~direction:Board.Up
@@ -1274,7 +1274,7 @@ let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
        in
        let comment_id =
          match
-           Board_dispatch.add_comment
+           Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
              ~post_id
              ~author:commenter.Keeper_meta_contract.name
              ~content:"the loader skips it"
@@ -1287,7 +1287,7 @@ let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
        let poster_before = board_queue_length config poster.name in
        let commenter_before = board_queue_length config commenter.name in
        (match
-          Board_dispatch.vote_comment
+          Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator
             ~voter:"external-voter"
             ~comment_id
             ~direction:Board.Down
@@ -1400,10 +1400,10 @@ let test_comment_discovery_respects_parent_visibility () =
               | Ok post -> post
               | Error error -> fail (Board.Post_publication_failure.to_string error) in
             let post_id = Board.Post_id.to_string post.id in
-            let parent = get (Board_dispatch.add_comment ~post_id ~author:parent_author.name
+            let parent = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:parent_author.name
               ~content:"keeper was here" ()) in
             Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
-            ignore (get (Board_dispatch.add_comment ~post_id ~author:"external-author"
+            ignore (get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"external-author"
               ~parent_id:(Board.Comment_id.to_string parent.id) ~content:"follow up" ()));
             check int (label ^ ": direct parent receives its reply") 1
               (board_queue_length config parent_author.name);
@@ -1452,11 +1452,11 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
               | Ok post -> post
               | Error error -> fail (Board.Post_publication_failure.to_string error) in
             let post_id = Board.Post_id.to_string post.id in
-            let parent = get (Board_dispatch.add_comment ~post_id ~author:parent_author.name
+            let parent = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:parent_author.name
               ~content:"keeper was here" ()) in
             let last_signal = ref None in
             Board_dispatch.set_board_signal_hook (fun addressed -> last_signal := Some addressed);
-            let comment = get (Board_dispatch.add_comment ~post_id ~author:"external-author"
+            let comment = get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"external-author"
               ~parent_id:(Board.Comment_id.to_string parent.id)
               ~content:"@latealias research" ()) in
             check bool (label ^ ": unresolved name was stored as thread audience") true
@@ -1500,7 +1500,7 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
                    | Error unavailable ->
                      fail (KWOBS.unavailable_to_string unavailable))
                 | _ -> fail "expected exactly one queued stimulus for post author"));
-            ignore (get (Board_dispatch.add_comment ~post_id ~author:"external-author"
+            ignore (get (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"external-author"
               ~content:"@latealias explicit target" ()));
             let addressed_target = Option.get !last_signal in
             check bool (label ^ ": newly resolved name is a stored target") true
@@ -1525,11 +1525,66 @@ let test_unresolved_comment_name_cannot_become_a_recipient () =
                    | Error unavailable ->
                      fail (KWOBS.unavailable_to_string unavailable))
                 | _ -> fail "expected exactly one queued stimulus for bystander"))))
+    (* A Direct thread cannot reach the "later alias" step below: #50387 makes
+       a comment on a Direct post addressable only to the parent post's
+       readers (lib/board/board_comment_admission.ml), so replying with a name
+       resolved outside that set is refused instead of stored. The Direct
+       refusal is pinned by [test_direct_comment_cannot_address_a_non_reader]. *)
     [ "public", Board.Public, 1
     ; "internal", Board.Internal, 1
     ; "unlisted", Board.Unlisted, 0
-    ; "direct", Board.Direct, 0
     ]
+;;
+
+(* #50387: a comment on a Direct post may address only the parent post's
+   readers. A name resolved outside that set cannot be added by replying, so
+   the reply is refused and nothing is stored. *)
+let test_direct_comment_cannot_address_a_non_reader () =
+  Eio_main.run @@ fun _env ->
+  (* [latealias] stays unresolved for the first comment and resolves for the
+     second, so the two steps differ only in the name's state. *)
+  let resolved = ref false in
+  let recipient_lookup =
+    Recipient_lookup.make (fun candidate ->
+      let name = Recipient_lookup.Candidate.to_string candidate in
+      if String.equal name "latealias" && not !resolved
+      then Ok None
+      else Ok (Result.to_option (Board.Agent_id.parse name))) in
+  with_board_workspace ~recipient_lookup @@ fun config ->
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.set_board_signal_hook (fun _ -> ());
+      Keeper_registry.For_testing.clear ())
+    (fun () ->
+       let poster = make_board_resume_meta "posterlane" in
+       persist_and_register_board_lane config poster;
+       let post =
+         match
+           Board_dispatch.create_post ~author:poster.name ~content:"@posterlane direct topic"
+             ~title:"direct" ~post_kind:Board.Human_post ~visibility:Board.Direct ()
+         with
+         | Ok post -> post
+         | Error error -> fail (Board.Post_publication_failure.to_string error) in
+       let post_id = Board.Post_id.to_string post.id in
+       (match
+          Board_dispatch.add_comment
+            ~reader:Masc_board_handlers.Board_access.Operator ~post_id
+            ~author:"external-author" ~content:"@latealias research" ()
+        with
+        | Ok comment ->
+          Alcotest.(check bool) "unresolved name stays a thread audience" true
+            (comment.audience = Some Board.Thread_participants)
+        | Error error -> fail (Board.show_board_error error));
+       (* The name resolves now, so the reply addresses it directly. *)
+       resolved := true;
+       match
+         Board_dispatch.add_comment
+           ~reader:Masc_board_handlers.Board_access.Operator ~post_id
+           ~author:"external-author" ~content:"@latealias explicit target" ()
+       with
+       | Ok _ -> fail "a Direct comment addressed a name outside the parent's readers"
+       | Error (Board.Validation_error _) -> ()
+       | Error error -> fail (Board.show_board_error error))
 ;;
 
 (* RFC-provider-path-rest §3.3: a path's rest comes from the provider's answer
@@ -1641,7 +1696,7 @@ let test_comments_address_post_and_direct_parent_only () =
         | Ok post -> post | Error error -> fail (Board.Post_publication_failure.to_string error) in
       let post_id = Board.Post_id.to_string post.id in
       let add ?parent_id author =
-        match Board_dispatch.add_comment ~post_id ~author ~content:"same text" ?parent_id () with
+        match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author ~content:"same text" ?parent_id () with
         | Ok comment -> comment | Error error -> fail (Board.show_board_error error) in
       let parent = add parent_author.name in
       ignore (add participant.name);
@@ -1701,11 +1756,11 @@ let test_committed_board_action_retains_unavailable_routing action () =
      | Error _ -> () | Ok _ -> fail "missing primary was admitted");
     KKS.wakeup_relevant_keeper_for_board_signal ~config addressed);
   (match action with
-   | `Vote -> ignore (Result.get_ok (Board_dispatch.vote
+   | `Vote -> ignore (Result.get_ok (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator
        ~voter:"external-voter" ~post_id ~direction:Board.Up))
    | `Reaction -> ignore (Result.get_ok (Board_dispatch.toggle_reaction
        ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
-       ~target_id:post_id ~user_id:"external-reactor" ~emoji:"safe")));
+       ~target_id:post_id ~user_id:"external-reactor" ~emoji:"👍")));
   let addressed = Option.get !committed in
   let pending () = match Keeper_registry_event_queue.pending_selections_result
     ~base_path:config.base_path meta.name with
@@ -1803,6 +1858,8 @@ let () =
             test_comment_discovery_respects_parent_visibility
         ; test_case "later alias does not readdress stored thread comment" `Quick
             test_unresolved_comment_name_cannot_become_a_recipient
+        ; test_case "a Direct comment cannot address a name outside the parent's readers"
+            `Quick test_direct_comment_cannot_address_a_non_reader
         ; test_case "comment on own post wakes the author" `Quick
             test_comment_on_own_post_wakes_the_author
         ; test_case "vote on own post wakes the author once" `Quick

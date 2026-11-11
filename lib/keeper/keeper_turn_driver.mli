@@ -394,8 +394,9 @@ type attempt_input =
     without a direct-operation binding. Such calls require the application
     execution runtime, filesystem and a valid [keeper_name]. Journal setup or
     locator publication failure aborts before provider effects; readback failure
-    is explicit evidence rather than synthesized wire settings. Official-client
-    calls remain unobserved by [on_request_observation].
+    is explicit evidence rather than synthesized wire settings. An official
+    client sends its provider requests itself, so its call is observed as
+    [No_durable_scope] with or without a direct-operation binding.
     [on_request_execution_ready] confirms native ownership after locator
     publication and official-session ownership after admission, before provider
     effects. Its typed reference distinguishes these capabilities. A

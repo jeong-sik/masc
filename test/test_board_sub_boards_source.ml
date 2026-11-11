@@ -17,7 +17,7 @@ let reload store = match Board.reload_sub_boards store with
 
 let new_store base_path =
   let store = Board.create_store ~base_path () in
-  ignore (reload store);
+  require (Board.initialize_store store);
   store
 
 let create store slug = Board.create_sub_board store ~slug ~name:slug
@@ -79,10 +79,12 @@ let test_stale_append_and_delete_preserve_foreign_policy base_path =
   ignore (reload stale);
   ignore (require (Board.update_sub_board first ~sub_board_id:"existing" ~name:"newer policy" ()));
   let bytes = Fs_compat.load_file path in
-  require_unavailable (Board.delete_sub_board stale ~sub_board_id:"existing");
+  require_unavailable (Board.delete_sub_board ~authorization:Board.Operator_sub_board_deletion stale ~sub_board_id:"existing");
   Alcotest.(check string) "stale deletion preserves the newer policy" bytes (Fs_compat.load_file path);
   ignore (reload stale);
-  require (Board.delete_sub_board stale ~sub_board_id:"existing");
+  (match require (Board.delete_sub_board ~authorization:Board.Operator_sub_board_deletion stale ~sub_board_id:"existing") with
+   | Board.Durable_deletion -> ()
+   | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
   let restarted = new_store base_path in
   Alcotest.(check int) "only the explicitly deleted policy is removed" 1
     (List.length (require (Board.read_sub_boards restarted)));
@@ -127,7 +129,7 @@ let test_live_nonregular_source_invalidates_queries base_path =
   let bytes = Fs_compat.load_file path in
   Unix.rename path backup;
   Unix.mkdir path 0o700;
-  require_unavailable (Board.delete_sub_board store ~sub_board_id:"existing");
+  require_unavailable (Board.delete_sub_board ~authorization:Board.Operator_sub_board_deletion store ~sub_board_id:"existing");
   require_unavailable (Board.read_sub_boards store);
   require_unavailable (Board.get_sub_board store ~sub_board_id:"existing");
   Alcotest.(check string) "replaced source refusal preserves the original policy" bytes (Fs_compat.load_file backup);

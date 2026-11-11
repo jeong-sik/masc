@@ -1476,8 +1476,8 @@ let with_verdict_projection_recorders f =
   let notifications = ref [] in
   let previous_terminal =
     Atomic.exchange Workspace_hooks.task_terminal_committed_fn
-      (fun _config ~actor ~task_id ->
-        terminal := (actor, task_id) :: !terminal;
+      (fun _config ~actor ~(task : Masc_domain.task) ->
+        terminal := (actor, task.id) :: !terminal;
         Workspace_hooks.Task_terminal_delivered)
   in
   let previous_notification =

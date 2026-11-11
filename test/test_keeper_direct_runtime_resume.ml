@@ -168,6 +168,46 @@ let test_unbound_journal_unavailable_evidence () =
   check_unavailable ()
 ;;
 
+(* The classification reads no storage: nothing exists under the binding's
+   paths, and every row still has its answer. *)
+let test_unreported_attempt_evidence () =
+  let operation_id = Keeper_chat_operation.Operation_id.of_string "kmsg-unreported-attempt"
+    |> require "operation ID" in
+  let binding =
+    { Keeper_direct_native_continuation.base_path="/unreported-attempt-fixture"
+    ; keeper_name="unreported-attempt-fixture"; operation_id; execution_digest="fixture"
+    ; session_dir="/unreported-attempt-fixture/session"; session_id="fixture" } in
+  let evidence ?binding dispatch checkpoint_owner =
+    Keeper_direct_native_continuation.unreported_request_evidence
+      ~binding ~dispatch ~checkpoint_owner in
+  let official = Some Runtime_execution.Official_client
+  and agent_core = Some Runtime_execution.Masc_agent_core in
+  let no_durable_scope = function
+    | Request_observation.No_durable_scope -> true
+    | Not_dispatched | No_matching_call | Read_failed _ | Recorded _ -> false in
+  let read_failed = function
+    | Request_observation.Read_failed _ -> true
+    | Not_dispatched | No_durable_scope | No_matching_call | Recorded _ -> false in
+  let not_dispatched = function
+    | Request_observation.Not_dispatched -> true
+    | No_durable_scope | No_matching_call | Read_failed _ | Recorded _ -> false in
+  check bool "an official client under a direct-native binding has no journal to read" true
+    (no_durable_scope (evidence ~binding Keeper_attempt_dispatch.Dispatched official));
+  check bool "an official client without a binding reads the same" true
+    (no_durable_scope (evidence Keeper_attempt_dispatch.Dispatched official));
+  check bool "an Agent Core attempt that skipped its binding's journal is a failed read" true
+    (read_failed (evidence ~binding Keeper_attempt_dispatch.Dispatched agent_core));
+  check bool "an Agent Core attempt without a binding has no durable scope" true
+    (no_durable_scope (evidence Keeper_attempt_dispatch.Dispatched agent_core));
+  check bool "an unresolved candidate under a binding claims no known absence" true
+    (read_failed (evidence ~binding Keeper_attempt_dispatch.Dispatched None));
+  List.iter (fun checkpoint_owner ->
+    check bool "a refused attempt is not dispatched, whoever would have run it" true
+      (not_dispatched (evidence ~binding Keeper_attempt_dispatch.Rejected_before_dispatch checkpoint_owner)
+       && not_dispatched (evidence Keeper_attempt_dispatch.Rejected_before_dispatch checkpoint_owner)))
+    [official; agent_core; None]
+;;
+
 let test_http_effect_checkpoint_owner_restart_alternate ?(durable_native = false) ?(interleave = false) ?(lose_retained = false) ?(projection_failure = false) () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -391,6 +431,9 @@ is-default = true
           then Eio.Promise.resolve resolve_settled (Ok ()))} in
     Registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
       ~on_turn_slot_released:None config |> require "install owner" |> ignore;
+    Keeper_direct_native_continuation.complete_restart_settlements
+      ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path
+      |> require "complete startup native journal settlement" |> ignore;
     if not resume then Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source ~input
       |> require "submit original operation" |> ignore;
     (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail);
@@ -688,6 +731,9 @@ is-default = true
           Eio.Promise.resolve resolve_settled (Ok ()))} in
     Registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
       ~on_turn_slot_released:None config |> require "install owner" |> ignore;
+    Keeper_direct_native_continuation.complete_restart_settlements
+      ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path
+      |> require "complete startup native journal settlement" |> ignore;
     if not resume then Registry.submit_operation ~base_path ~keeper_name ~operation_id ~source ~input
       |> require "submit original operation" |> ignore;
     (match Eio.Promise.await settled with Ok () -> () | Error detail -> fail detail);
@@ -853,7 +899,9 @@ let test_committed_tool_events_match_the_append_ownership ~native () =
 
 let () = run "direct runtime continuation" [
   "request journal", [test_case "unavailable journal never fabricates request facts" `Quick
-    test_unbound_journal_unavailable_evidence];
+    test_unbound_journal_unavailable_evidence;
+    test_case "an attempt that reported no evidence is read by who sends its requests" `Quick
+    test_unreported_attempt_evidence];
   "http", [test_case
   "rate limit after tool result resumes same operation across owner restart" `Quick
   (test_http_effect_checkpoint_owner_restart_alternate ~interleave:false ~lose_retained:false ~projection_failure:false);

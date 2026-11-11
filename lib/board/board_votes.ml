@@ -263,15 +263,14 @@ let reopen store ~post_id : (unit, board_error) Result.t =
            finish_posts_write outcome))
 ;;
 
+type cleanup_conditions = Board_deletion.cleanup_conditions
+let cleanup_conditions = Board_deletion.cleanup_conditions
+let cleanup_candidate = Board_deletion.cleanup_candidate
+
 type deletion_authorization = Board_deletion.deletion_authorization =
   | Operator_deletion
   | Author_deletion of { reader : Board_access.reader; author : Agent_id.t }
-  | Cleanup_deletion of Board_access.reader
-
-type deletion_outcome = Board_deletion.deletion_outcome =
-  | Durable_deletion
-  | Deletion_decision_pending of string
-  | Deletion_persistence_pending of string
+  | Cleanup_deletion of { reader : Board_access.reader; conditions : cleanup_conditions }
 
 let delete_post = Board_deletion.delete_post
 let flush_dirty = Board_deletion.flush_dirty

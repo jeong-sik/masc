@@ -141,10 +141,52 @@ let controller_summary = function
   | Masc.Tui_decode.Play_controller_unobserved reason ->
       ["DOS controller unknown: " ^ Masc.Tui_terminal_text.sanitize_terminal_text reason]
 
-let lines ~height t =
-  let heading = ["Shared machines · observation does not send game input";
-    "m  Watch MSX     d  Watch DOS     g  Choose an MSX game"; ""; "DOS play links · invite a player to the shared game"] in
-  let form = match t.form with
+(* Prose wraps at the overlay's width instead of being cut at the frame's edge:
+   the end of a refusal, an error or a confirmation is the part that says what
+   to do. The text is sanitized first so the rows are as wide as the rows drawn. *)
+let wrap ~width text =
+  match Masc_tui_message_layout.wrap_words ~max_cells:width
+          (Masc.Tui_terminal_text.sanitize_terminal_text text) with
+  | [] -> [""]
+  | rows -> rows
+
+(* The three machine keys share one row while it fits and take a row each when
+   it does not. *)
+let machine_keys ~width =
+  let keys = ["m  Watch MSX"; "d  Watch DOS"; "g  Choose an MSX game"] in
+  let row = String.concat "     " keys in
+  if String.length row <= width then [row] else keys
+
+(* One invite as the rows it takes at [width]: the selection mark leads the
+   first row and a longer row hangs under the name. *)
+let invite_rows ~width t controller (row : Masc.Tui_decode.play_invite_row) =
+  let lead = "  " in
+  let mark = if Some row.pi_name = t.selected then "› " else lead in
+  wrap ~width:(max 1 (width - String.length lead))
+    (row.pi_name ^ controller_note controller row.pi_name
+     ^ (if row.pi_expired then " · expired" else "")
+     ^ " · " ^ (match row.pi_expires_at with Some date -> date | None -> "expiry not recorded"))
+  |> List.mapi (fun index text -> (if index = 0 then mark else lead) ^ text)
+
+(* The invites that fit [available] rows: the selected one always, the ones
+   above it first, the ones below with the rows that are left. *)
+let visible_invites ~available ~selected invites =
+  let rec fit room taken = function
+    | rows :: rest when List.length rows <= room -> fit (room - List.length rows) (rows :: taken) rest
+    | _ -> taken, room in
+  let above = List.filteri (fun index _ -> index < selected) invites in
+  let below = List.filteri (fun index _ -> index > selected) invites in
+  let current = Option.value (List.nth_opt invites selected) ~default:[] in
+  let above, room = fit (available - List.length current) [] (List.rev above) in
+  let below, _ = fit room [] below in
+  List.concat (above @ [current] @ List.rev below)
+
+let lines ~height ~width t =
+  let wrap_each = List.concat_map (wrap ~width) in
+  let keys = machine_keys ~width in
+  let heading = wrap ~width "Shared machines · observation does not send game input"
+    @ keys @ [""] @ wrap ~width "DOS play links · invite a player to the shared game" in
+  let form = wrap_each (match t.form with
     | Name value -> ["Player name: " ^ value ^ "▌"; "Lowercase letters and digits; start with a letter."]
     | Hours (name, value) -> ["Player: " ^ name; "Expires in hours: " ^ value ^ "▌"]
     | Confirm_revoke name -> ["Revoke " ^ name ^ "? Their link stops working and their controller is released."]
@@ -154,27 +196,36 @@ let lines ~height t =
         ; "Verify the original request cannot still complete (logs/server stop)."
         ; "Then inspect final invites. A refresh alone is not completion proof."
         ; "Enter: I verified this. Esc: keep changes blocked."]
-    | Browsing -> [] in
+    | Browsing -> []) in
   let access = match t.write_access with Writable -> []
     | Pending text | Read_only text | Uncertain {notice=text; _} -> [text] in
-  let message = access @ (match t.message with None -> [] | Some text -> [text]) in
-  let body = match t.inventory with
-    | Loading -> ["Reading invites…"]
-    | Failed error -> ["Could not read invites: " ^ error; "r retries the read; machine observation remains available."]
+  let message = wrap_each (access @ (match t.message with None -> [] | Some text -> [text])) in
+  let footer = wrap ~width "Links issued here remain in this TUI session. Enter opens the retained QR/link." in
+  (* [fixed] is the body outside the invite list, [invites] the rows of each
+     invite and [selected] the invite the list keeps in view. *)
+  let fixed, invites, selected = match t.inventory with
+    | Loading -> ["Reading invites…"], [], 0
+    | Failed error ->
+        wrap_each ["Could not read invites: " ^ error; "r retries the read; machine observation remains available."], [], 0
     | Listed {Masc.Tui_decode.pis_rows = []; pis_controller} ->
-        controller_summary pis_controller
-        @ [if t.write_access = Writable then "No invites. Press n to create a play link." else "No invites."]
+        wrap_each (controller_summary pis_controller
+          @ [if t.write_access = Writable then "No invites. Press n to create a play link." else "No invites."]), [], 0
     | Listed {Masc.Tui_decode.pis_rows = rows; pis_controller} ->
-        let summary = controller_summary pis_controller in
-        let available =
-          max 1 (height - List.length heading - List.length form - List.length message - List.length summary - 2) in
-        let index = match List.find_index (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) rows with
+        let selected = match List.find_index (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) rows with
           | Some index -> index | None -> 0 in
-        let first = max 0 (index - available + 1) in
-        summary @ (rows |> List.filteri (fun index _ -> index >= first && index < first + available)
-        |> List.map (fun row ->
-          (if Some row.Masc.Tui_decode.pi_name = t.selected then "› " else "  ") ^ row.pi_name
-          ^ controller_note pis_controller row.pi_name
-          ^ (if row.pi_expired then " · expired" else "")
-          ^ " · " ^ (match row.pi_expires_at with Some date -> date | None -> "expiry not recorded"))) in
-  heading @ form @ message @ body @ [""; "Links issued here remain in this TUI session. Enter opens the retained QR/link."]
+        wrap_each (controller_summary pis_controller), List.map (invite_rows ~width t pis_controller) rows, selected in
+  let kept = List.length form + List.length message + List.length fixed in
+  let everything = List.length heading + kept + List.length (List.concat invites) + 1 + List.length footer in
+  if everything <= height then heading @ form @ message @ fixed @ List.concat invites @ [""] @ footer
+  else begin
+    (* A short window gives up its static text first: the closing sentence,
+       then the two explanatory sentences, then the keys. The form, the messages
+       and the selected invite stay, and the invites take the rows that are
+       left. The frame says how many rows it cut, in a row of its own that is
+       kept free here. *)
+    let current = List.length (Option.value (List.nth_opt invites selected) ~default:[]) in
+    let room = height - kept - current - 1 in
+    let heading = Option.value (List.find_opt (fun rows -> List.length rows <= room) [heading; keys]) ~default:[] in
+    let available = max 1 (height - List.length heading - kept - 1) in
+    heading @ form @ message @ fixed @ visible_invites ~available ~selected invites @ [""] @ footer
+  end

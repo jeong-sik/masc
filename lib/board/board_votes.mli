@@ -60,7 +60,7 @@ val current_vote_for_post :
 
 val vote :
   store ->
-  voter:string ->
+  reader:Board_access.reader -> voter:string ->
   post_id:string ->
   direction:vote_direction ->
   (int, board_error) Result.t
@@ -90,7 +90,7 @@ val current_vote_for_comment :
 
 val vote_comment :
   store ->
-  voter:string ->
+  reader:Board_access.reader -> voter:string ->
   comment_id:string ->
   direction:vote_direction ->
   (int, board_error) Result.t
@@ -184,21 +184,22 @@ val reopen :
 (** Clears a post's [closed] state back to open. Idempotent: reopening an
     already-open post is [Ok ()]. Same permission boundary as [set_closed]. *)
 
+type cleanup_conditions
+val cleanup_conditions :
+  created_before:float -> require_no_comments:bool -> require_no_votes:bool ->
+  title_pattern:string option -> author_pattern:string option -> cleanup_conditions
+(** Fixed per-request cleanup filters. [None] omits that substring filter;
+    patterns are case-insensitive. These do not change a recorded decision. *)
+val cleanup_candidate :
+  conditions:cleanup_conditions -> has_comments:bool -> has_votes:bool -> post -> bool
+(** Pure candidate predicate; deletion rechecks it against canonical sources. *)
+
 type deletion_authorization =
   | Operator_deletion
   | Author_deletion of { reader : Board_access.reader; author : Agent_id.t }
-  | Cleanup_deletion of Board_access.reader
+  | Cleanup_deletion of { reader : Board_access.reader; conditions : cleanup_conditions }
 (** The calling boundary supplies authority. Author and cleanup requests retain
     their actual reader. The store rechecks it before recording any decision. *)
-
-type deletion_outcome =
-  | Durable_deletion
-  | Deletion_decision_pending of string
-      (** Decision recording is uncertain or known work has not reached model
-          publication. Do not report an applied deletion or replay the request. *)
-  | Deletion_persistence_pending of string
-      (** The deletion is applied in memory. Failed and unattempted rewrites
-          remain ordered work for [flush_dirty]. The detail names actual write failures. *)
 
 val delete_post :
   store -> authorization:deletion_authorization -> post_id:string ->
@@ -207,7 +208,9 @@ val delete_post :
     memory. Authority is checked against both current memory and the expected
     source's canonical parent under persistence. The exact parent source stays
     guarded through decision recording together with the exact comments source
-    that supplies the canonical child set. Four complete source
+    that supplies the canonical child set. Cleanup rechecks its fixed conditions
+    using canonical children and post votes, retaining a Votes guard only when
+    its no-votes condition requires one. Four complete source
     observations are required. Each snapshot uses
     its own exact CAS, and the decision is retired only after four known writes.
     [Error] is a pre-decision refusal. [Deletion_decision_pending] does not

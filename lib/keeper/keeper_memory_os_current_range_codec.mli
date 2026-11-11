@@ -50,6 +50,8 @@ val validate_unique_explicit_candidates :
 val durable_range_receipt_to_json :
   durable_range_receipt ->
   Yojson.Safe.t
+val durable_range_receipt_of_json :
+  Yojson.Safe.t -> (durable_range_receipt, wire_error) result
 
 val durable_range_receipts_to_json :
   durable_range_receipt list ->

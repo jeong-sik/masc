@@ -411,6 +411,8 @@ let recover_closure ~store ~owner ~after_settle =
     let* complete=committed_and_acknowledged ~owner (Closure.candidates closure) in
     let* ()=require complete "Admission closure lacks complete current candidate receipts or queue ACK" in
     let* ()=Keeper_librarian_store_preflight.validator () ~read ~read_scope ~read_body ~read_archive
+      ~read_fence:(Lane_addon_store.load_history_fence store)
+      ~read_resolution:(Lane_addon_store.load_history_resolution store)
       (Closure.record closure) in
     let* closure=match Closure.stage closure with
       | Closure.Captured ->

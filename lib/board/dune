@@ -5,6 +5,9 @@
  (public_name masc.board_handlers)
  (wrapped true)
  (private_modules
+  board_policy_admission
+  board_comment_admission
+  board_target_admission
   board_deletion
   board_deletion_source
   board_votes_source
@@ -26,6 +29,9 @@
   board_store_load
   board_store_lifecycle)
  (modules
+  board_policy_admission
+  board_comment_admission
+  board_target_admission
   board_deletion
   board_deletion_source
   board_votes_source

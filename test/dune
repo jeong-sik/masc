@@ -2112,6 +2112,8 @@
   ; The fallback descendant fixture uses the monotonic deadline owner.
   masc.monotonic_deadline
  masc_test_deps
+  masc.server
+  masc.config_dir_resolver
   masc.embedded_config
   masc.skill_config
   masc.skill_reference
@@ -2725,6 +2727,13 @@
 (include stanzas/test_board_delete_order.inc)
 (include stanzas/test_board_deletion_recovery.inc)
 (include stanzas/test_board_comments_source.inc)
+(include stanzas/test_board_comment_admission.inc)
+(include stanzas/test_board_post_policy_admission.inc)
+(include stanzas/test_board_target_admission.inc)
+(include stanzas/test_board_cleanup_admission.inc)
+
+(include stanzas/test_board_sub_board_deletion_recovery.inc)
+(include stanzas/test_fs_compat_snapshot_guard.inc)
 (include stanzas/test_board_sub_boards_source.inc)
 (include stanzas/test_board_votes_source.inc)
 (include stanzas/test_board_reactions_source.inc)
@@ -3042,7 +3051,6 @@
 (include stanzas/test_fs_compat_durable_append.inc)
 (include stanzas/test_fs_compat_unique_fold.inc)
 (include stanzas/test_fs_compat_missing_binding.inc)
-(include stanzas/test_fs_compat_snapshot_guard.inc)
 
 (include stanzas/test_fs_compat_home_guard.inc)
 (include stanzas/test_retention_directory.inc)
@@ -3441,6 +3449,7 @@
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)
+(include stanzas/test_keeper_shutdown_task_settlement_retry.inc)
 (include stanzas/test_keeper_shutdown_official_client_purge.inc)
 (include stanzas/test_keeper_portrait_http.inc)
 
@@ -5097,6 +5106,7 @@
 (include stanzas/test_keeper_memory_age_bins.inc)
 (include stanzas/test_tui_decode_workspace_memory.inc)
 (include stanzas/test_keeper_turn_pulse.inc)
+(include stanzas/test_keeper_decoded_rows.inc)
 (include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
@@ -7251,6 +7261,8 @@
 (include stanzas/test_endpoint_job_registry.inc)
 
 (include stanzas/test_domain_budget.inc)
+(include stanzas/test_domain_mailbox.inc)
+(include stanzas/test_http_reqd_relay.inc)
 (include stanzas/test_minor_heap.inc)
 
 (include stanzas/test_authz_scope.inc)

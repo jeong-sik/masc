@@ -7,9 +7,9 @@
     Vote appends and rewrites compare the exact loaded vote source. Known file
     success is acknowledged only after normal model publication. Refusal and
     uncertainty grant no mutation authority; unknown effects and interrupted
-    publication require a fresh store. The primary posts source must also be
-    authoritative before append admission. Parent/policy read-set consistency
-    across stores remains outside this own-source contract. *)
+    publication require a fresh store. Canonical parent snapshots and the original reader remain guarded through
+    append; a duplicate uses read-only parent/vote guards before returning.
+    No closed-thread or posting-policy restriction is added. *)
 
 open Board_types
 
@@ -27,7 +27,7 @@ val current_vote_for_post :
     returns [Post_not_found]. An unavailable vote source is refused before
     consulting cached targets or vote identities. *)
 val vote :
-  store -> voter:string -> post_id:string -> direction:vote_direction ->
+  store -> reader:Board_access.reader -> voter:string -> post_id:string -> direction:vote_direction ->
   (int, board_error) Result.t
 val current_vote_for_comment :
   store -> voter:string -> comment_id:string ->
@@ -35,7 +35,7 @@ val current_vote_for_comment :
 (** [None] means no recorded vote for an existing target. A missing target
     returns [Comment_not_found]. The vote-source rule is the same as for posts. *)
 val vote_comment :
-  store -> voter:string -> comment_id:string -> direction:vote_direction ->
+  store -> reader:Board_access.reader -> voter:string -> comment_id:string -> direction:vote_direction ->
   (int, board_error) Result.t
 
 val vote_log_jsonl : store -> string

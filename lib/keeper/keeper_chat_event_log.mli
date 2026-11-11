@@ -174,7 +174,11 @@ type terminal_error_segment = Existing_segment | Operation_settlement of operati
 val find_operation_terminal :
   journal -> settlement:operation_settlement -> (terminal_error_receipt option, string) result
 (** Read the matching final operation terminal. Missing or different settlement
-    metadata returns [None]; malformed metadata is an error. *)
+    metadata returns [None]. A terminal that is the last row is answered from
+    the bounded tail window, as {!record_terminal_error} answers it, and the
+    rows before it are then not decoded. Every other case reads the whole
+    journal, where a row that does not decode, malformed settlement metadata
+    included, is an error. *)
 
 val record_terminal_error :
   ?segment:terminal_error_segment -> journal -> ts:float -> message:string -> (terminal_error_receipt, string) result
@@ -188,12 +192,12 @@ val record_terminal_error :
     A fragment after the last newline (an append the crash cut) is not a row:
     the terminal takes the sequence after the last complete row and the append
     cuts the fragment, so a crashed append does not leave the journal without
-    its terminal. An [Operation_settlement] whose terminal is already the last
-    row and fits in a bounded tail window is answered from that tail. The rows
+    its terminal. A terminal that is already the last row and fits in a bounded
+    tail window is answered from that tail, for either segment. The rows
     before it are then not decoded or validated, since nothing is written: a
     journal whose earlier rows the full read would refuse still answers with
     its terminal. Every other case, including a failed tail read, reads the
-    whole journal. [Error] names a journal that could not be
+    whole journal once. [Error] names a journal that could not be
     read or appended; the caller decides whether that blocks anything. [ts] is
     the caller's clock, as for {!append}. *)
 

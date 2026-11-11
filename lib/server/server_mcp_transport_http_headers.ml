@@ -321,11 +321,14 @@ let get_last_event_id (request : Httpun.Request.t) =
   | [] -> Ok None
   | _ :: _ :: _ -> Error Duplicate_last_event_id
 
+let protocol_version_headers protocol_version =
+  [ ("mcp-protocol-version", protocol_version) ]
+
 let mcp_headers session_id protocol_version =
   if Mcp_transport_protocol.is_stateless_protocol_version protocol_version then
-    [ ("mcp-protocol-version", protocol_version) ]
+    protocol_version_headers protocol_version
   else
-    [ ("mcp-session-id", session_id); ("mcp-protocol-version", protocol_version) ]
+    ("mcp-session-id", session_id) :: protocol_version_headers protocol_version
 
 let session_cookie_header session_id =
   ( "set-cookie",
@@ -357,4 +360,9 @@ let sse_stream_headers ~(deps : deps) session_id protocol_version origin =
 let json_headers ~(deps : deps) session_id protocol_version origin =
   [ ("content-type", "application/json") ]
   @ mcp_headers session_id protocol_version
+  @ deps.cors_headers origin
+
+let sessionless_json_headers ~(deps : deps) protocol_version origin =
+  [ ("content-type", "application/json") ]
+  @ protocol_version_headers protocol_version
   @ deps.cors_headers origin

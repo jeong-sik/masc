@@ -833,7 +833,7 @@ let test_a_granted_board_is_read_oldest_first_and_retained () =
   with_installation ~declaration:board_granted (fun clock config worker _ root ->
     let first = post "first" in
     ignore (post ~visibility:Board.Internal "hidden");
-    (match Board_dispatch.add_comment ~post_id:first ~author:"operator" ~content:"reply" () with
+    (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:first ~author:"operator" ~content:"reply" () with
      | Ok _ -> () | Error error -> fail (Board.show_board_error error));
     ignore (post "second");
     worker.listing := [ read "p1" "board" ];

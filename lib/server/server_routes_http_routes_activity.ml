@@ -1139,13 +1139,27 @@ let add_routes ~sw ~clock router =
                      (sub_board_owner_error ~owner ~sub_board_id sb)
                      reqd
                | Ok _ ->
-              (match Board_dispatch.delete_sub_board ~sub_board_id with
-               | Ok () ->
-                   Http.Response.json_value (`Assoc [("deleted", `Bool true)]) reqd
+              (match Board.Agent_id.of_string owner with
+               | Error e ->
+                   Http.Response.json_value ~status:`Bad_request
+                     (`Assoc ["error", `String (Board_tool.board_error_to_string e)]) reqd
+               | Ok owner ->
+              (match Board_dispatch.delete_sub_board
+                 ~authorization:(Board.Owner_sub_board_deletion owner) ~sub_board_id with
+               | Ok outcome ->
+                   let status, persistence, applied, details = match outcome with
+                     | Board.Durable_deletion -> `OK, "durable", true, []
+                     | Board.Deletion_persistence_pending detail ->
+                       `Accepted, "pending", true, ["detail", `String detail]
+                     | Board.Deletion_decision_pending detail ->
+                       `Accepted, "decision_pending", false, ["detail", `String detail] in
+                   Http.Response.json_value ~status
+                     (`Assoc (["deleted", `Bool applied; "applied", `Bool applied;
+                       "persistence", `String persistence] @ details)) reqd
                | Error e ->
                    Http.Response.json_value ~status:(board_sub_board_error_status ~fallback:`Not_found e)
                      (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
-                     reqd)))
+                     reqd))))
          ))
 
   |> Server_route.prefix_put (Server_route.Tool_actor { tool_name = "masc_board_sub_board_update" }) "/api/v1/board/sub-boards/" (fun state agent_name request reqd ->

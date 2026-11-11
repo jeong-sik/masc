@@ -1724,7 +1724,7 @@ let test_board_detail_defaults_to_latest_comments_with_older_pages () =
   let post_id = Masc.Board.Post_id.to_string post.id in
   for n = 1 to 25 do
     match
-      Masc.Board_dispatch.add_comment
+      Masc.Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
         ~post_id ~author:"page-author"
         ~content:(Printf.sprintf "comment %02d" n) ()
     with

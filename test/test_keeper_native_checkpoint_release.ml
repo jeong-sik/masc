@@ -222,6 +222,9 @@ let run_call ~scenario root =
          Eio.Promise.resolve resolve_settled execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
     ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+  Keeper_direct_native_continuation.complete_restart_settlements
+    ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
+    |> require "complete startup native journal settlement" |> ignore;
   let input = Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
       ~turn_instructions:None ~surface_context:None ~attachments:[]
     |> Keeper_chat_operation.canonical_json |> require "canonical input" in

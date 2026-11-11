@@ -1542,6 +1542,64 @@ let acknowledge_absent_owner ~config ~keeper_name ~operation_id
           Ok (Ok (Absence_acknowledged acknowledged))))
 ;;
 
+type task_settlement_retry_plan =
+  { backlog_version : int
+  ; receipted_task_ids : Keeper_id.Task_id.t list
+  }
+
+type task_settlement_retry_result =
+  | Task_settlement_retry_prepared of Keeper_shutdown_types.t
+  | Task_settlement_retry_ineligible of Keeper_shutdown_types.t
+
+let task_settlement_retry_eligible operation =
+  let dormant = match operation.lane_ownership with
+    | Dormant_meta -> true | Registered_lane _ -> false in
+  let idle = match operation.turn_disposition with
+    | No_inflight_turn -> true | Inflight_effect_unknown _ -> false in
+  let blocked = match operation.phase with
+    | Blocked { stage = Task_settlement; _ } -> true
+    | Blocked { stage = (Task_discovery | Record_persist | Turn_cancel | Lane_cancel
+        | Turn_join | Lane_join | Record_update | Unhandled_worker
+        | Pending_confirm_cleanup | Approval_summary_retirement | Meta_read
+        | Meta_update | Meta_remove | Session_remove | Registry_unregister); _ }
+    | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+    | Reconciliation_required _ | Finalized _ | Owner_absent _
+    | Operator_absence_acknowledged _ | Superseded _ -> false in
+  dormant && idle && blocked
+;;
+
+let prepare_task_settlement_retry ~config ~keeper_name ~operation_id
+    ~expected_revision ~decide =
+  let* operation_path = path ~config ~keeper_name operation_id in
+  with_keeper_inventory_lock ~access:Write ~config ~keeper_name (fun () ->
+    let* inventory = scan_keeper_dir ~inventory_locked:true ~config ~keeper_name in
+    with_operation_lock ~access:Write operation_path (fun () ->
+      let* current = load_path_unlocked ~operation_path ~keeper_name ~operation_id in
+      if current.revision <> expected_revision then
+        Error (Revision_conflict { expected = expected_revision; actual = current.revision })
+      else if not (task_settlement_retry_eligible current) then
+        Ok (Ok (Task_settlement_retry_ineligible current))
+      else match decide current inventory with
+        | Error error -> Ok (Error error)
+        | Ok plan ->
+          let ids = plan.receipted_task_ids in
+          let valid_ids = List.for_all (fun id ->
+            List.exists (Keeper_id.Task_id.equal id) current.owned_task_ids) ids
+            && List.length ids = List.length (List.sort_uniq
+              (fun left right -> String.compare (Keeper_id.Task_id.to_string left)
+                (Keeper_id.Task_id.to_string right)) ids) in
+          if plan.backlog_version < 0 || not valid_ids then
+            Ok (Ok (Task_settlement_retry_ineligible current))
+          else
+            let prepared = { current with revision = current.revision + 1
+              ; expected_backlog_version = plan.backlog_version
+              ; phase = Finalizing_tasks ids; updated_at = Masc_domain.now_iso () } in
+            let* () = validate_operation prepared in
+            let* () = Keeper_fs.save_json_atomic operation_path (to_json prepared)
+              |> Result.map_error (fun detail -> Io_error detail) in
+            Ok (Ok (Task_settlement_retry_prepared prepared))))
+;;
+
 module For_testing = struct
   let with_operation_write_lock ~config ~keeper_name operation_id f =
     let* operation_path = path ~config ~keeper_name operation_id in

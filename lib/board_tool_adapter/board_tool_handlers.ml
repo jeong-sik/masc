@@ -162,7 +162,7 @@ let handle_vote ~reader ~tool_name ~start_time args =
     (match Board.vote_direction_of_string_opt direction_str with
      | None -> invalid_vote_direction ~tool_name ~start_time direction_str
      | Some direction ->
-       (match Board_dispatch.vote ~voter ~post_id ~direction with
+       (match Board_dispatch.vote ~reader ~voter ~post_id ~direction with
         | Ok new_score ->
           let arrow = if direction = Board.Up then "↑" else "↓" in
           Tool_result.make_ok
@@ -260,7 +260,7 @@ let handle_search ~reader ~tool_name ~start_time args : Tool_result.result =
 ;;
 
 (** Vote on comment. *)
-let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
+let handle_comment_vote ~reader ~tool_name ~start_time args : Tool_result.result =
   let comment_id = get_string args "comment_id" "" in
   let voter = get_string args "voter" "anonymous" in
   match Safe_ops.json_string_opt "direction" args with
@@ -277,7 +277,7 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         "comment_id required"
     else (
-      match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
+      match Board_dispatch.vote_comment ~reader ~voter ~comment_id ~direction with
       | Ok score ->
         Tool_result.make_ok
           ~tool_name
@@ -604,24 +604,16 @@ let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.resul
   let author_pattern = get_string_opt args "author_pattern" in
   let now = Time_compat.now () in
   let age_threshold = now -. (Stdlib.Float.of_int max_age_hours *. Masc_time_constants.hour) in
-  let title_needle = Option.map String.lowercase_ascii title_pattern in
-  let author_needle = Option.map String.lowercase_ascii author_pattern in
-  let matches_opt needle s =
-    match needle with
-    | None -> true
-    | Some n -> String_util.contains_substring (String.lowercase_ascii s) n
-  in
+  let conditions = Board.cleanup_conditions ~created_before:age_threshold
+    ~require_no_comments ~require_no_votes ~title_pattern ~author_pattern in
   let all_posts =
     Board_dispatch.list_posts ~reader ~sort_by:Board_tool_format.Recent ~limit:500 ()
   in
   let candidates =
     List.filter
       (fun (p : Board.post) ->
-         Stdlib.Float.compare p.created_at age_threshold < 0
-         && ((not require_no_comments) || p.reply_count = 0)
-         && ((not require_no_votes) || (p.votes_up = 0 && p.votes_down = 0))
-         && matches_opt title_needle p.title
-         && matches_opt author_needle (Board.Agent_id.to_string p.author))
+         Board.cleanup_candidate ~conditions ~has_comments:(p.reply_count <> 0)
+           ~has_votes:(p.votes_up <> 0 || p.votes_down <> 0) p)
       all_posts
   in
   let targets = List.filteri (fun i _ -> i < limit) candidates in
@@ -676,7 +668,8 @@ let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.resul
       (fun (p : Board.post) ->
          let pid = Board.Post_id.to_string p.id in
          try
-           match Board_dispatch.delete_post ~authorization:(Board.Cleanup_deletion reader) ~post_id:pid with
+           match Board_dispatch.delete_post
+             ~authorization:(Board.Cleanup_deletion { reader; conditions }) ~post_id:pid with
            | Ok Board.Durable_deletion -> Stdlib.incr deleted
            | Ok (Board.Deletion_decision_pending detail) ->
              decision_pending :=

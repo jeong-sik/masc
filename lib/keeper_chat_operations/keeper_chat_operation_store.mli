@@ -447,8 +447,8 @@ val resume_direct_runtime_retry :
 type running_settlement =
   | After_process_restart
       (** Boot: no executor survives a restart. An active native call resumes
-          from its checkpoint; rows that cannot resume fail as
-          [Interrupted_by_restart]. *)
+          from its checkpoint unless the journal already holds its terminal;
+          rows that cannot resume fail as [Interrupted_by_restart]. *)
   | After_store_recovery
       (** The store was reopened by the same process after an outage, with no
           chat child in flight. The child's terminal commit was lost to the
@@ -459,14 +459,38 @@ type running_settlement =
 
 (** Settle every [Running] operation that has no executor. A row with a durable
     continuation (checkpoint, runtime retry, Gate, and after a restart an
-    active native call) goes back to [Queued]; every other row fails with the
-    kind [cause] names. Returns
+    active native call whose journal holds no terminal) goes back to [Queued];
+    every other row fails with the kind [cause] names. Returns
     the failed operations as they were read, so the caller can leave an
     operator-visible failure row for each: without one, a request cut off this
     way vanished from the transcript with no answer (msx-retro-mania, three
     requests on 2026-09-14). *)
 val settle_running_without_executor :
   t -> cause:running_settlement -> now:float -> (Operation.t list, error) result
+type restart_native_call = private
+  { snapshot_store : t
+  ; operation : Operation.t
+  ; execution_revision : int64
+  ; call : Keeper_native_call.t
+  }
+
+val running_native_calls : t -> (restart_native_call list, error) result
+(** Exact Running operations with Active native calls. The Owner reads these
+    before journal I/O; they grant no dispatch authority. *)
+
+val settle_running_without_executor_with_journal_terminal :
+  observations:(restart_native_call *
+    (Agent_core.Agent.execution_terminal_disposition option, string) result) list ->
+  t -> cause:running_settlement -> now:float -> (Operation.t list, error) result
+(** Restart settlement from previously read journal observations. No callback
+    or journal I/O runs in its transaction. An Active call without an
+    observation remains Running, outside the interrupted result and batch
+    settlement. A supplied observation must still match the exact operation,
+    execution revision and native call or the transaction refuses unchanged.
+    Some terminal records the disposition then fails as Interrupted_by_restart;
+    None or journal read Error preserves the existing resume behavior.
+    After_store_recovery retains its unknown-effect policy. The ungated wrapper
+    above keeps its original immediate requeue contract. *)
 val error_to_string : error -> string
 
 module For_testing : sig

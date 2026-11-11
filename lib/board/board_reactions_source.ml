@@ -22,6 +22,7 @@ let unavailable_error () = Io_error "Board data is unavailable."
 
 let reserved_diagnostics = List.find_map (function
   | Reaction_file_diagnostic error -> Board_posts_source.reserved_transaction error
+  | Reaction_guard_diagnostic failure -> Board_posts_source.reserved_transaction failure.guard_error
   | Reaction_workspace_diagnostic rejection ->
     Option.bind (Board_workspace_binding.raised rejection) Board_posts_source.reserved_exception
   | Reaction_raised_diagnostic { exception_; backtrace } ->
@@ -194,28 +195,43 @@ let rec contradicts_observation = function
 
 let not_written failure diagnostics = Not_written { failure; diagnostics }
 
+type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_transaction_error) result
+type write_io =
+  | Direct_io of file_result
+  | Admitted_io of Board_target_admission.t * file_result Board_target_admission.guarded
+
+let guard_diagnostics failures = List.map (fun failure -> Reaction_guard_diagnostic failure) failures
+
 let write store ~before ~bytes perform =
   let pending = { reaction_before = before; reaction_intended_bytes = bytes } in
   let unknown failure diagnostics =
     store.reactions_source <- Reactions_unsettled {
       reaction_pending = pending; reaction_failure = failure; reaction_diagnostics = diagnostics };
     Unknown { failure; diagnostics } in
-  try
-    match Fs_compat.private_jsonl_cursor_success_receipt (perform ()) with
+  let classify result parent_diagnostics =
+    match Fs_compat.private_jsonl_cursor_success_receipt result with
     | Ok receipt ->
-      let diagnostics = receipt_diagnostics receipt.settlement_error in
+      let diagnostics = receipt_diagnostics receipt.settlement_error @ parent_diagnostics in
       let publication = {
         reaction_after = { before with reaction_snapshot = { Fs_compat.bytes = bytes; cursor = receipt.value } };
         reaction_cleanup = diagnostics } in
       store.reactions_source <- Reactions_publishing publication;
       Written { publication; diagnostics }
     | Error error ->
-      let diagnostics = [Reaction_file_diagnostic error] in
+      let diagnostics = Reaction_file_diagnostic error :: parent_diagnostics in
       let failure = Reactions_transaction_failed error in
       if Board_posts_source.definitely_not_written error then (
         if contradicts_observation error then refuse store failure diagnostics;
         not_written failure diagnostics)
-      else unknown failure diagnostics
+      else unknown failure diagnostics in
+  try match perform () with
+    | Direct_io result -> classify result []
+    | Admitted_io (admission, Board_target_admission.Refused refusal) ->
+      let diagnostics = guard_diagnostics (refusal.failure :: refusal.cleanup_failures) in
+      Board_target_admission.observe_refusal store admission refusal;
+      not_written (Reactions_transaction_failed refusal.failure.guard_error) diagnostics
+    | Admitted_io (_, Board_target_admission.Executed { value; cleanup_failures }) ->
+      classify value (guard_diagnostics cleanup_failures)
   with exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
     unknown (Reactions_raised { exception_; backtrace }) [Reaction_raised_diagnostic { exception_; backtrace }]
@@ -237,12 +253,31 @@ let before_write store f = match expected store with
       not_written (Reactions_raised { exception_; backtrace }) diagnostics
 
 let rewrite store bytes = before_write store (fun before ->
-  write store ~before ~bytes (fun () -> match store.reactions_source_io with
+  let io = store.reactions_source_io in
+  write store ~before ~bytes (fun () -> Direct_io (match io with
     | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
         before.reaction_path ~expected:before.reaction_snapshot bytes
     | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
         ~io ~before_sync_rewrite_parent:io.before_sync_parent
-        before.reaction_path ~expected:before.reaction_snapshot bytes))
+        before.reaction_path ~expected:before.reaction_snapshot bytes)))
+
+let rewrite_admitted store ~admission bytes = before_write store (fun before ->
+  match Board_target_admission.revalidate store admission with
+  | Error rejection ->
+    let failure = Reactions_workspace_refused rejection in
+    let diagnostics = [Reaction_workspace_diagnostic rejection] in
+    refuse store failure diagnostics;
+    not_written failure diagnostics
+  | Ok () ->
+    let io = store.reactions_source_io in
+    let posts_io = store.posts_source_io.posts and comments_io = store.comments_source_io in
+    write store ~before ~bytes (fun () -> Admitted_io (admission,
+      Board_target_admission.guard admission ~posts_io ~comments_io ~f:(fun () -> match io with
+        | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
+            before.reaction_path ~expected:before.reaction_snapshot bytes
+        | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+            ~io ~before_sync_rewrite_parent:io.before_sync_parent
+            before.reaction_path ~expected:before.reaction_snapshot bytes))))
 
 let acknowledge_publication store receipt = match store.reactions_source with
   | Reactions_publishing current when current == receipt ->

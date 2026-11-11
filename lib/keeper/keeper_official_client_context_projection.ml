@@ -916,7 +916,7 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context messages =
        | Some issued, Some sections ->
          not (List.exists (function
            | Keeper_context_assembly.Direct_input_source _ -> true
-           | Active_goals _ | Goals_awaiting_proof _ -> false) issued.observations)
+           | Current_norms _ | Active_goals _ | Goals_awaiting_proof _ -> false) issued.observations)
          && List.for_all (fun (section : Keeper_context_layers.section) ->
            match section.section_source with
            | Layer Direct_input_source | Unattributed Unprojected_input -> false

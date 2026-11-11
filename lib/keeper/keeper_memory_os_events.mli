@@ -39,6 +39,8 @@ type event =
 
 val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
+val suffix : string
+
 (** {1 Codec}
 
     One JSON object per line. [recorded_at], [memory_id], [trace_id], [kind]

@@ -19,6 +19,47 @@ let runtime_config_path ~base_path =
   if Sys.file_exists workspace_path then Some workspace_path else Runtime.config_path ()
 ;;
 
+(* The endpoint registry of the runtime.toml bytes last read. A [Remote_ssh]
+   Keeper resolves its endpoint on every Execute call, and each call parsed
+   the whole file on the caller's domain, which is the main one: 12 to 183 ms
+   and 16 MB of allocation for a 74 KB runtime.toml ([Otoml.Parser.from_file]
+   alone, 30 runs on a loaded host, 2026-11-11). On a live root that was the
+   run after each read of a Keeper's TOML, 680 ms of one 30 s window.
+
+   The file is still read on every call and compared byte for byte, so an
+   edit applies to the next call as it did. This module reads the endpoint
+   list of what is kept and nothing else: nothing in that list depends on
+   the process environment, which other parts of a parsed runtime.toml do. *)
+type registry_reading =
+  { config_path : string
+  ; bytes : string
+  ; parsed : (Runtime_schema.config, Runtime_toml.parse_error list) result
+  }
+
+let last_registry_reading : registry_reading option Atomic.t = Atomic.make None
+
+(* The errors [Runtime_toml.parse_file] gives for the same file. *)
+let parse_registry ~config_path bytes =
+  match Otoml.Parser.from_string bytes with
+  | toml -> Runtime_toml.parse_toml toml
+  | exception Otoml.Parse_error (_, message) ->
+    Error [ { Runtime_toml.path = config_path; message } ]
+;;
+
+let registry_of_file config_path =
+  match In_channel.with_open_bin config_path In_channel.input_all with
+  | exception Sys_error message -> Error [ { Runtime_toml.path = config_path; message } ]
+  | bytes ->
+    (match Atomic.get last_registry_reading with
+     | Some last
+       when String.equal last.config_path config_path && String.equal last.bytes bytes ->
+       last.parsed
+     | Some _ | None ->
+       let parsed = parse_registry ~config_path bytes in
+       Atomic.set last_registry_reading (Some { config_path; bytes; parsed });
+       parsed)
+;;
+
 let read_runtime_config ~base_path ~context =
   let* config_path =
     runtime_config_path ~base_path
@@ -28,7 +69,7 @@ let read_runtime_config ~base_path ~context =
               "remote_ssh_runtime_config_missing: %s cannot be resolved because runtime.toml is unavailable"
               context)
   in
-  Runtime_toml.parse_file config_path
+  registry_of_file config_path
     |> Result.map_error (fun errors ->
       let details =
         errors

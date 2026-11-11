@@ -37576,8 +37576,12 @@ Use relative paths for resources already held in the package. -->
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target
               && Option.is_none state.runtime_lane_pick
-              && Option.is_none state.slot_editor
+              && (match state.slot_editor with
+                  | None | Some { se_target = Masc_tui_types.Media_failover_slots; _ } -> true
+                  | Some { se_target = Masc_tui_types.Exact_lane_slots _; _ } -> false)
               && Option.is_none (Masc_tui_types.runtime_lane_prompt state) ->
+           (* Read above the media editor without closing it or retiring its
+              notice. The detail's Esc returns to the same editor selection. *)
            state.runtime_detail_target <- Some Runtime_routes;
            state.runtime_detail_scroll <- 0
        | Some "e" | Some "E"
@@ -37645,6 +37649,7 @@ Use relative paths for resources already held in the package. -->
            Masc_tui_types.dismiss_runtime_lane_notice state
        | Some "a"
          when state.view = Runtime
+              && Option.is_none state.runtime_detail_target
               && Option.is_some state.slot_editor
               && Option.is_none state.runtime_lane_pick ->
            Masc_tui_types.open_runtime_lane_pick state Masc_tui_types.Pick_media_failover;
@@ -37665,6 +37670,7 @@ Use relative paths for resources already held in the package. -->
           one, J/K move it, and Esc closes. *)
        | Some "r"
          when (state.view = Lanes || state.view = Runtime)
+              && (state.view = Lanes || Option.is_none state.runtime_detail_target)
               && (match state.slot_editor with
                   | Some { se_target = Masc_tui_types.Exact_lane_slots _; _ } -> true
                   | Some { se_target = Masc_tui_types.Media_failover_slots; _ } | None -> false)
@@ -37687,6 +37693,7 @@ Use relative paths for resources already held in the package. -->
             | None, _ -> ())
        | Some ("j" | "k" | "up" | "down" | "wheel-up" | "wheel-down" | "x" | "J" | "K" | "1" | "esc")
          when (state.view = Lanes || state.view = Runtime)
+              && (state.view = Lanes || Option.is_none state.runtime_detail_target)
               && Option.is_some state.slot_editor
               && Option.is_none state.runtime_lane_pick ->
            (match state.slot_editor, key with

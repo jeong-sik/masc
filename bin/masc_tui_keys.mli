@@ -345,9 +345,13 @@ val footer_hints_code : pane:code_pane -> string
     questions never appeared on the screen they work on, and why blame and
     the row search did not either when they arrived. *)
 
-val footer_hints_runtime : mode:Masc_tui_types.runtime_mode -> string
-(** The Runtime footer: {!for_surface} [Runtime] with [p] labelled for where it
-    goes from [mode], and [e] only on the keeper-lane reading. *)
+val footer_hints_runtime :
+  mode:Masc_tui_types.runtime_mode ->
+  picker:Masc_tui_types.runtime_picker_projection option ->
+  string
+(** The Runtime footer for the reading or its active picker. A picker names
+    Enter's create, append or replace action; while filtering, letters belong
+    to the query and only the picker's navigation and confirmation are shown. *)
 
 val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All

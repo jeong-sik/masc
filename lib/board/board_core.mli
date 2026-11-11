@@ -157,7 +157,7 @@ val put_post : store -> post -> unit
 val rebuild_hot_post_index : store -> unit
 
 type comment_append_receipt = Board_core_persist.comment_append_receipt
-val append_comment : store -> comment -> (comment_append_receipt, board_error) result
+val append_comment : store -> reader:Board_access.reader -> comment -> (comment_append_receipt, board_error) result
 val publish_comment_append : store -> comment_append_receipt -> (unit, board_error) result
 (** Append against the exact loaded comments observation while holding
     persistence. Retain the receipt through a normal model publication; typed
@@ -191,21 +191,6 @@ val publish_posts_read : store -> posts_source_read -> unit
 val read_posts_source : store -> posts_source_read
 (** Caller holds persistence; general reads never recover tails or settle an
     unknown write. Complete and partial reads retain the actual Fs snapshot. *)
-val settle_posts_source : store -> posts_settle_outcome
-(** Settle the retained unknown write of an unsettled store. Caller holds
-    persistence; revalidates the workspace of the pre-write observation,
-    performs one locked posts read and at most one durable proof rewrite, and
-    never touches the in-memory post tables. A store that is not unsettled
-    yields [Posts_settle_nothing_to_settle] with no IO. *)
-val settle_posts_diagnostics : posts_settle_outcome -> posts_source_diagnostic list
-type settle_direction = Board_core_persist.settle_direction =
-  | Direction_landed
-  | Direction_absent
-  | Direction_diverged
-val settle_direction_for_testing :
-  pending:posts_unsettled_write -> Fs_compat.private_jsonl_snapshot -> settle_direction
-(** Pure settlement direction; test and diagnostic entry only. Grants no
-    authority; see [Board_posts_source.settle_direction_for_testing]. *)
 val finish_posts_read : posts_source_read -> unit
 type posts_inspection_framing = Board_core_persist.posts_inspection_framing =
   | Complete_rows
@@ -479,6 +464,7 @@ val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
 
 val add_comment
   :  store
+  -> reader:Board_access.reader
   -> lookup:Recipient_lookup.t
   -> post_id:string
   -> author:string
@@ -490,6 +476,7 @@ val add_comment
 
 val add_comment_with_audience
   :  store
+  -> reader:Board_access.reader
   -> lookup:Recipient_lookup.t
   -> post_id:string
   -> author:string
@@ -550,7 +537,7 @@ val list_reactions_batch
 
 val toggle_reaction
   :  store
-  -> target_type:reaction_target_type
+  -> reader:Board_access.reader -> target_type:reaction_target_type
   -> target_id:string
   -> user_id:string
   -> emoji:string
@@ -599,9 +586,10 @@ val list_sub_boards : store -> sub_board list
 val read_sub_boards : store -> (sub_board list, board_error) result
 (** Capture policy completeness and rows under one persistence interval. *)
 
-(** Persist an exact-source-checked removal before publishing it in memory.
-    Post hearth unlinking remains dirty work, not a multi-source transaction. *)
-val delete_sub_board : store -> sub_board_id:string -> (unit, board_error) Result.t
+(** Durably record the original board and affected post IDs, then remove policy
+    and unlink only those posts. Pending outcomes retain their owned recovery. *)
+val delete_sub_board : store -> authorization:sub_board_deletion_authorization ->
+  sub_board_id:string -> (deletion_outcome, board_error) Result.t
 
 (** Updates an existing sub-board by ID or slug.
     Only provided fields are changed; owner and slug are immutable.

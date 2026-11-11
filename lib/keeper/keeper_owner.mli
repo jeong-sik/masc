@@ -256,6 +256,11 @@ val start
     removes, under it, the retained checkpoints that commit released
     ({!Keeper_chat_operation_store.take_released_checkpoints}).
 
+    Active calls inherited from another process remain Running until
+    {!complete_restart_settlement} reads their journals with the application
+    runtime. The composition must complete that step before starting Keeper
+    loops. These rows are not initial failed-operation projections.
+
     [on_turn_slot_released] fires when a turn ends, the slot is still unclaimed
     after queued chat has been offered it, and the autonomous lane has been
     refused the slot since the last notification. The
@@ -394,6 +399,20 @@ val exact_operation
     and earlier starts. The registry retries their idempotent journal and
     transcript projections; the owner has no transcript of its own. *)
 val failed_operations_at_start : t -> Chat_operation.t list
+
+val complete_restart_settlement :
+  t ->
+  journal_terminal:(Keeper_chat_operation_store.restart_native_call ->
+    (Agent_core.Agent.execution_terminal_disposition option, string) result) ->
+  (Chat_operation.t list, error) result
+(** Complete this Owner's deferred Active startup calls in its Eio mailbox,
+    after the application execution runtime is ready and before Keeper loops
+    start. Journal reads precede the identity-checked Store transaction. Repeat
+    completion returns no rows and never settles a later live child. Returns
+    the confirmed Failed batch rows for the registry's startup projections,
+    including compositions without a live operation runner. A failed
+    startup Store commit closes this actor; the registry fences its exact
+    handle as unavailable, independently of other Keepers. *)
 
 (** Durable cooperative checkpoint continuation, independent of provider retry. *)
 val direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> (Keeper_semantic_execution.gate_checkpoint option, error) result

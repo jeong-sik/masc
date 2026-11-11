@@ -186,6 +186,21 @@ val publish_history_fence : t -> scope:string -> request_id:string ->
     owner and publish one immutable history-only fence. Neither original nor
     body is rewritten. Different existing fence bytes refuse. Save failure may
     follow publication; only an exact subsequent read establishes the result. *)
+type history_resolution_publication =
+  | History_resolution_stored
+  | History_resolution_changed
+  | History_resolution_unconfirmed of string
+val load_history_resolution : t -> scope:string -> request_id:string ->
+  (Yojson.Safe.t option, string) result
+val history_resolution_path : scope:string -> request_id:string -> string
+val history_resolution_inventory : t -> scope:string ->
+  ((string * Yojson.Safe.t) list, string) result
+(** Complete owned scope inventory as filename and strict JSON pairs. *)
+val publish_history_resolution : t -> scope:string -> request_id:string ->
+  expected:Yojson.Safe.t option -> next:Yojson.Safe.t ->
+  (history_resolution_publication, string) result
+(** History-resolution envelope CAS under the same original-scope serializer.
+    A failed replacement remains uncertain and must be strictly reobserved. *)
 val tool_request_body_path : scope:string -> request_digest:string -> string
 (** One original request body, relative to {!root}: beside the scope's
     records, not inside their directory, which holds only records. *)

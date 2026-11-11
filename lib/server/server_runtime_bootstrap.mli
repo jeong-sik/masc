@@ -170,6 +170,7 @@ val startup_failure_disposition : state_ready:bool -> startup_failure_dispositio
 type owner_initialization_error =
   | Runtime_config_read_failed of string
   | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
+  | Native_execution_runtime_unavailable
   | Domain_budget_exceeded of Domain_budget.error
   | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Admin_credential_bootstrap_failed of Masc_domain.masc_error
@@ -290,6 +291,7 @@ val run :
   ?on_ready:(unit -> unit) ->
   accept_store_quarantine:bool ->
   make_routes:(port:int -> host:string -> sw:Eio.Switch.t ->
+               transport_sw:Eio.Switch.t ->
                clock:float Eio.Time.clock_ty Eio.Resource.t -> 'a) ->
   make_request_handler:(trust_policy:Server_request_authority.trust_policy ->
                         'a ->

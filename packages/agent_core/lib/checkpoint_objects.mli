@@ -116,11 +116,15 @@ type boundary =
   | Turn_continues
   | Turn_closes
 
-(** The encoded messages of earlier saves and loads, by message identity
-    ([==]), so a save encodes only messages it has not seen; and the chain
-    values over the messages of the last save or load, so a save whose
-    messages begin with those values hashes only what follows them. One memo
-    serves one sequence of saves of one checkpoint. *)
+(** The messages of the last save or load with the chain values over them, so
+    a save whose messages begin with those values ([==]) hashes only what
+    follows them. One memo serves one sequence of saves of one checkpoint.
+
+    What a message is written as does not live here. The process keeps it for
+    each message it has encoded, by identity ([==]), for as long as the
+    message is alive, so a save, a digest or another memo encodes only
+    messages no call has encoded. What a load read stays in the memo the
+    load filled: another memo encodes the loaded records once. *)
 type memo
 
 val create_memo : unit -> memo
@@ -159,8 +163,8 @@ val plan_save
   -> Checkpoint_types.t
   -> (plan, Error.t) result
 
-(** The content digest of a value, encoding only the messages [memo] does not
-    hold. [memo] is left as it was. Fails as {!plan_save} does. *)
+(** The content digest of a value, hashing only the messages after those
+    [memo] holds. [memo] is left as it was. Fails as {!plan_save} does. *)
 val content_digest : memo -> Checkpoint_types.t -> (digest, Error.t) result
 
 (** {1 Loading} *)
@@ -216,7 +220,8 @@ val segment_of_string : digest:digest -> string -> (segment, load_error) result
     such object, or why it could not be read. Every object is checked against
     its digest, every bundle against its turn's count and chain, the segments
     against the count and chain the head names. [memo] then holds the loaded
-    messages, so a save that follows writes none of them. *)
+    messages, so a save that follows writes none of them; a save of them
+    through another memo encodes none of them either. *)
 val load
   :  memo
   -> read_object:(digest -> (string option, string) result)
@@ -229,13 +234,16 @@ val system_prompt
   -> head
   -> (string option, load_error) result
 
-(** The first [Some] that [find] gives for [head]'s messages, last message
-    first. Objects are read only as far back as needed: the open messages,
-    then each turn's bundle from the last, then each segment and its turns.
-    Every object read is checked against its digest and every bundle against
-    its turn's message count; the chains are not, since they run from the
-    first message. So this is for showing a checkpoint, not for using it:
-    {!load} is. *)
+(** The first [Some] that [find] gives for [head]'s messages. [find] is asked
+    one message at a time, from the last message to the first, with none
+    skipped and none asked twice, and is not asked again once it gives
+    [Some]. Objects are read only as far back as needed: the open messages,
+    then each turn's bundle from the last, then each segment and its turns; a
+    bundle is read whole. Every object read is checked against its digest and
+    every bundle against its turn's message count. The chains are not
+    checked, since they run from the first message, and the header objects
+    are not read. So an answer says nothing about the messages [find] was not
+    asked, and a checkpoint to continue from comes from {!load}. *)
 val find_last
   :  read_object:(digest -> (string option, string) result)
   -> head

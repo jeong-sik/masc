@@ -265,31 +265,65 @@ let partition ?(quarantine = false) messages =
 
 let validate messages = Result.map (fun _partition -> ()) (partition messages)
 
+(* The ids [message] requests, newest first onto [requested_rev], and the ids
+   its results answer, into [completed]. *)
+let add_requested_and_completed (requested_rev, completed) (message : T.message) =
+  List.fold_left
+    (fun (requested_rev, completed) -> function
+       | T.ToolUse { id; _ } -> id :: requested_rev, completed
+       | T.ToolResult { tool_use_id; _ } ->
+         requested_rev, Id_set.add tool_use_id completed
+       | T.Text _
+       | T.Thinking _
+       | T.ReasoningDetails _
+       | T.RedactedThinking _
+       | T.Image _
+       | T.Document _
+       | T.Audio _ ->
+         requested_rev, completed)
+    (requested_rev, completed)
+    message.content
+;;
+
 let unresolved_tool_use_ids protected_suffix =
   let requested_rev, completed =
-    List.fold_left
-      (fun (requested_rev, completed) (message : T.message) ->
-         List.fold_left
-           (fun (requested_rev, completed) -> function
-              | T.ToolUse { id; _ } -> id :: requested_rev, completed
-              | T.ToolResult { tool_use_id; _ } ->
-                requested_rev, Id_set.add tool_use_id completed
-              | T.Text _
-              | T.Thinking _
-              | T.ReasoningDetails _
-              | T.RedactedThinking _
-              | T.Image _
-              | T.Document _
-              | T.Audio _ ->
-                requested_rev, completed)
-           (requested_rev, completed)
-           message.content)
-      ([], Id_set.empty)
-      protected_suffix
+    List.fold_left add_requested_and_completed ([], Id_set.empty) protected_suffix
   in
   requested_rev
   |> List.rev
   |> List.filter (fun tool_use_id -> not (Id_set.mem tool_use_id completed))
+;;
+
+(* The ids that results answer in the messages read so far, which are the
+   last messages of a history. *)
+type tail_reading = Id_set.t
+
+let tail_reading_start = Id_set.empty
+
+type tail_end =
+  | Every_request_answered
+  | Request_awaits_results
+
+type tail_step =
+  | Tail_end of tail_end
+  | Reads_message_before of tail_reading
+
+(* Once a cycle closes, no later verdict of [partition] depends on the
+   messages before it, and a cycle that is open admits no other request. So in
+   a history it accepts, the cycle of the last message that requests is the
+   only one that can be open, and it is open exactly when a requested id has
+   no result in the messages after it. The results of the requesting message
+   itself are not counted: [partition] refuses a request that carries one. *)
+let read_tail_message answered (message : T.message) =
+  let requested, answered_from_this_message =
+    add_requested_and_completed ([], answered) message
+  in
+  match requested with
+  | [] -> Reads_message_before answered_from_this_message
+  | _ :: _ ->
+    if List.for_all (fun tool_use_id -> Id_set.mem tool_use_id answered) requested
+    then Tail_end Every_request_answered
+    else Tail_end Request_awaits_results
 ;;
 
 let validate_provider_transcript messages =

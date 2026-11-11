@@ -16,3 +16,6 @@ val can_read_fields :
   reader:reader -> author:Board_types.Agent_id.t -> visibility:Board_types.visibility ->
   audience:Board_types.audience option -> bool
 val can_read : reader:reader -> Board_types.post -> bool
+
+val can_post_in_sub_board : author_id:Board_types.Agent_id.t -> Board_types.sub_board -> bool
+(** Existing Open/member/owner posting policy; reader privilege is separate. *)

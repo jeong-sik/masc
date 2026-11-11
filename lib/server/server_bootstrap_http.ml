@@ -191,7 +191,7 @@ let serve_h1_connection ~sw ~request_handler client_addr flow =
       ~request_handler:(h1_request_handler request_handler)
       ~error_handler:h1_error_handler
   in
-  conn_handler client_addr flow
+  Http_reqd.with_connection_switch sw (fun () -> conn_handler client_addr flow)
 ;;
 
 let shared_h2_resources () =

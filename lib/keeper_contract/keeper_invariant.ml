@@ -1,9 +1,5 @@
-module StringSet = Set.Make (String)
-
 type turn_id = string
 type sandbox_path = string
-
-type tool_name = string
 
 let normalize_path path =
   let rec collapse acc = function
@@ -57,19 +53,4 @@ let sandbox_isolation ~sandbox_roots ~sandbox_paths =
            "Sandbox isolation violation: path %s is outside all configured sandbox roots"
            violating_path)
     | None -> Ok ())
-;;
-
-let tool_surface_monotonicity ~before ~after =
-  let before_set = StringSet.of_list before in
-  let after_set = StringSet.of_list after in
-  let diff = StringSet.diff after_set before_set in
-  if StringSet.is_empty diff
-  then Ok ()
-  else (
-    let added = StringSet.elements diff in
-    Error
-      (Printf.sprintf
-         "Tool surface monotonicity violation: tools added without explicit \
-          configuration: %s"
-         (String.concat ", " added)))
 ;;

@@ -25,14 +25,10 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
-let temp_base_path prefix =
-  Filename.concat
-    (Filename.get_temp_dir_name ())
-    (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
-;;
-
+(* The directory exists before [f] runs: the blob store that holds the replay
+   artifacts of the fixture never creates its ownership root. *)
 let with_base_dir prefix f =
-  let base_dir = temp_base_path prefix in
+  let base_dir = Filename.temp_dir (prefix ^ "-") "" in
   Fun.protect
     ~finally:(fun () ->
       try remove_tree base_dir with

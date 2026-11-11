@@ -824,7 +824,7 @@ let test_proof_state_follows_the_runtime_execution_owner () =
       | None -> fail "the admitted source requires an issued System"
       | Some issued -> List.filter_map (function
           | Keeper_context_assembly.Direct_input_source text -> Some text
-          | Active_goals _ | Goals_awaiting_proof _ -> None) issued.observations in
+          | Current_norms _ | Active_goals _ | Goals_awaiting_proof _ -> None) issued.observations in
     check (list string) "the exact admitted source stays in System once" [source] sources;
     check bool "the actual issued System retains the exact source bytes" true
       (contains_in (issued_system assembly) source);

@@ -164,7 +164,7 @@ let scoped_keys =
   (* Runtime draws its two states from two builders, not from one table read
      twice: the readings' footer and the detail's own. *)
   @ back_keys "Runtime"
-      ~list:(Keys.footer_hints_runtime ~mode:Masc_tui_types.Runtime_lanes)
+      ~list:(Keys.footer_hints_runtime ~mode:Masc_tui_types.Runtime_lanes ~picker:None)
       ~detail:(Keys.footer_hints_runtime_detail ~ko:false ~routes:false ())
   (* Repositories draws Git changes from a footer of its own; the repository
      list under it has nothing for Left to close, so Esc alone returns to

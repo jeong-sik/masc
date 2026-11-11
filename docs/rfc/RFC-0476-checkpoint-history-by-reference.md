@@ -3,7 +3,7 @@ rfc: "0476"
 title: "Keeper checkpoint 를 참조로 저장한다: media 는 blob 으로, history 는 턴 묶음으로"
 status: Draft
 created: 2026-10-28
-updated: 2026-10-29
+updated: 2026-11-10
 author: vincent
 related: ["36690", "46396", "46541", "0265"]
 ---
@@ -177,14 +177,20 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 ### 3.5 읽기
 
 - 메시지 개수(heartbeat, `keeper_status`)는 head 로 답한다. 묶음마다 메시지 수를 head 에 같이 둔다. 요약 캐시에 없을 때도 head 만 해석한다.
-- 대시보드 checkpoint 목록은 head 와 몇 개의 객체만 읽는다. `system_prompt` 유무는 머리 객체 하나를 읽는다. 미리보기(글이 있는 가장 최근 메시지)는 열린 메시지, 마지막 턴의 묶음, segment 순으로 뒤에서부터 읽다가 찾으면 멈춘다. 읽은 객체마다 digest 와 묶음의 메시지 수는 확인하지만, 처음부터 이어지는 chain 은 확인하지 않는다. 그래서 이 읽기는 보여 주기용이고 load 를 대신하지 않는다.
+- 대시보드 checkpoint 목록은 head 와 몇 개의 객체만 읽는다. `system_prompt` 유무는 머리 객체 하나를 읽는다. 미리보기(글이 있는 가장 최근 메시지)는 열린 메시지, 마지막 턴의 묶음, segment 순으로 뒤에서부터 읽다가 찾으면 멈춘다. 읽은 객체마다 digest 와 묶음의 메시지 수는 확인하지만, 처음부터 이어지는 chain 은 확인하지 않고 머리 객체도 읽지 않는다. 그래서 이 읽기의 답은 물어본 메시지까지만 말한다. 이어서 쓸 checkpoint 는 load 로 얻는다.
 - 메시지마다의 chain 값은 `chain(0) = SHA-256("masc.rfc-0476.chain.v1")`, `chain(i+1) = SHA-256(hex(chain(i)) ‖ hex(digest(message i)))` 다. 저장도 hex 로 한다.
 - Librarian continuity 의 앞부분 비교는 덮은 메시지의 JSON 을 이어 붙인 한 덩어리의 SHA-256(`prefix_digest`, lib/librarian_continuity_snapshot.ml:224)을 그대로 쓴다.
   - 같은 바이트를 다시 읽은 라운드는 decode 도, 앞부분 digest 도 다시 하지 않는다. 바이트가 바뀐 라운드는 history 를 전부 다시 읽고 앞부분을 처음부터 해시한다.
   - 그 라운드에서 해시는 작은 몫이다. 2026-10-30 에 가장 큰 v18 history(메시지 4,683개, 인코딩 4.7MB, 객체 3,418개)의 사본에서, 해시는 0.036초, history 를 읽는 데는 0.8~1.7초가 걸렸다.
   - 그래서 라운드 비용은 해시가 아니라 history 읽기가 정한다. 이 history 는 10시간에 메시지 4,683개만큼 자랐고, 압축하지 않으니 계속 자란다. 줄일 것은 바뀐 바이트를 읽을 때 history 전체를 다시 읽는 비용이다(#46907).
 - 턴 하나를 쓰는 history 읽기는 지금처럼 전체를 메모리에 올린다. 다만 media 를 빼면 msx-retro-mania 가 179MB 에서 약 58MB 가 된다. 같은 프로세스 안에서는 메모리 사본을 그대로 쓴다.
-- 기동 tail 복구는 마지막 묶음과 진행 중 턴만 읽어도 되는지 `close_open_tail` 의 규칙을 확인해서 정한다. 이 RFC 에서 약속하지 않는다.
+- 기동 tail 복구는 history 를 마지막 메시지부터 거꾸로 읽는다. 도구 호출을 요청한 마지막 메시지에서 멈춘다. 읽는 방법은 위 미리보기와 같다. 이 읽기는 메시지를 마지막부터 하나씩 묻고, 빠뜨리거나 두 번 묻지 않는다. 복구는 이 순서에 기댄다.
+  - 그 요청의 결과가 뒤에 다 있으면 붙일 것이 없으니 거기서 끝낸다.
+  - 결과가 하나라도 빠져 있으면 history 를 전부 load 한다. 무엇을 붙일지는 `close_open_tail` 이 history 전체를 보고 정한다.
+  - `partition` 은 cycle 이 닫힌 뒤에는 그 앞 메시지에 기대어 판정하지 않는다. 열린 cycle 은 다른 요청을 받지 않는다. 그래서 `partition` 이 받는 history 에서는 두 읽기의 답이 같다. 끝만 읽고 끝낸 history 는 전부 읽어도 붙일 것이 없다.
+  - 끝이 닫힌 history 는 기동에서 구조 검사를 받지 않는다. 끝 읽기는 읽은 메시지의 역할, 겹친 id, 요청 없는 결과를 따지지 않는다. 마지막 요청 앞의 메시지와 머리 객체는 읽지 않고 chain 도 확인하지 않는다.
+  - 그래서 그런 history 의 결함은 어디에 있든 기동이 보고하지 않는다. 그 Keeper 의 다음 턴이 history 를 전부 load 하면서 만난다.
+  - 기동이 그런 Keeper 에 내는 결과는 `Nothing_to_close` 다. 닫을 것이 없다는 뜻이고, history 가 구조 검사를 통과했다는 뜻이 아니다.
 
 ### 3.6 정리와 기준점
 

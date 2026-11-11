@@ -52,7 +52,9 @@ val read_config : base_path:string -> Authz_boot_mode.requested * Authz_boot_mod
     nothing of activation: the log and the store are read under the lease, by
     {!boot}. [false] for a request that is not set, that asks for a single
     user, or that holds a value the table does not know; a boot refuses the
-    last in its own words. *)
+    last in its own words. [false] too for a file that is there and cannot be
+    read, or is no JSON object: {!read_config} takes no request from it and
+    logs a warning, and a boot judges it as a config that asks for nothing. *)
 val asks_for_multi_account : base_path:string -> bool
 
 (** The mode that the last mode event of the log made, and the external
@@ -99,10 +101,11 @@ val decide : Authz_boot_mode.input -> decision
     [masc auth bootstrap]. *)
 val turn_off_line : string
 
-(** What a base path that {!asks_for_multi_account} boots, and the two commands
-    that run it. One line, which names the config file, for the commands that
-    prepare or open the server of a single user: [masc doctor], [masc setup]
-    and the setup journey. *)
+(** What a boot of a base path that {!asks_for_multi_account} does, the
+    account server or a stop and never the server of a single user, and the
+    two commands that run it. One line, which names the config file, for the
+    commands that prepare or open the server of a single user: [masc doctor],
+    [masc setup] and the setup journey. *)
 val account_installation_line : base_path:string -> string
 
 (** One line per reason, the first apart, so a stop always has a reason. An

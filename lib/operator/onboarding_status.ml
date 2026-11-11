@@ -334,7 +334,7 @@ let to_json t =
 
 let heading t =
   match opening t with
-  | Account_installation -> "MASC — a multi-account installation"
+  | Account_installation -> "MASC — a workspace that asks for accounts"
   | Open_existing_history | Needs_journey -> "MASC — you and imp"
 
 let to_text t =

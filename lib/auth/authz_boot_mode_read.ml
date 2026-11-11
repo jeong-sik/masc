@@ -213,9 +213,9 @@ let turn_off_line =
 
 let account_installation_line ~base_path =
   Printf.sprintf
-    "%s asks for Multi_account, so a boot of this workspace runs the account server and no \
-     server of a single user: masc auth bootstrap activates the workspace while no server \
-     runs, and masc restart starts or replaces the account server"
+    "%s asks for Multi_account, so a boot of this workspace runs the account server or \
+     stops, and never runs the server of a single user: masc auth bootstrap activates the \
+     workspace while no server runs, and masc restart starts or replaces the account server"
     (Auth_credential_base.auth_config_file base_path)
 ;;
 

@@ -3768,6 +3768,10 @@ let test_startup_requeues_exact_native_call () =
       ~on_turn_slot_released:None ~keeper_name:"native-restart"
       ~initial_meta:(Some (make_meta "native-restart")) |> owner_ok in
     check int "witnessed native operation not interrupted" 0 (List.length (Owner.failed_operations_at_start owner));
+    (* The Owner keeps an Active call Running until its journal has been read.
+       A journal that holds no terminal puts the operation back in the queue. *)
+    check int "a journal without a terminal interrupts nothing" 0
+      (List.length (Owner.complete_restart_settlement owner ~journal_terminal:(fun _ -> Ok None) |> owner_ok));
     let resumed = Owner.claim_next_operation owner |> owner_ok |> Option.get in
     check bool "Owner claims original operation" true (Chat_operation.Operation_id.equal operation_id resumed.operation_id);
     check bool "Owner preserves input" true (operation.input = resumed.input);

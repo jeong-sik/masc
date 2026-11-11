@@ -79,15 +79,17 @@ type step =
   | Refused of Exact.provider_refusal
 
 (* A runner that counts the calls it sends and, on each send, reads what the
-   host has retained so far for that request. *)
+   host has retained so far for that request. It passes the generation guard
+   before it sends, as a call must. *)
 let counting_runner store steps =
   let sends = ref 0 and seen = ref [] in
-  let runner ~before_dispatch:_ ~admission_class:_ ~lane_key ~schema:_ (request : Exact.request) =
+  let runner ~before_dispatch ~admission_class:_ ~lane_key ~schema:_ (request : Exact.request) =
     match !steps with
     | [] -> fail "the runner was asked more often than the test expected"
     | step :: rest ->
       steps := rest;
       let sent () =
+        require (before_dispatch Exact.Generation);
         incr sends;
         seen := (lane_key, Store.load_exact_request store ~declaration_id ~request_id:request.request_id) :: !seen
       in
@@ -288,9 +290,10 @@ let test_a_request_in_flight_is_not_run_twice () =
   with_root (fun root ->
     let entered, enter = Eio.Promise.create () in
     let released, release = Eio.Promise.create () in
-    let blocking ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let blocking ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ =
       Ok
         (fun ~validate ->
+           require (before_dispatch Exact.Generation);
            Eio.Promise.resolve enter ();
            Eio.Promise.await released;
            match validate question with
@@ -318,7 +321,9 @@ let test_a_request_in_flight_is_not_run_twice () =
 let test_a_cancelled_call_leaves_its_attempt_started () =
   with_root (fun root ->
     let store = Store.create ~root in
-    let cancelled ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ -> raise (Eio.Cancel.Cancelled Exit)) in
+    let cancelled ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ ->
+      require (before_dispatch Exact.Generation);
+      raise (Eio.Cancel.Cancelled Exit)) in
     (match Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:cancelled (request "r10") with
      | _ -> fail "a cancellation must reach the caller"
      | exception Eio.Cancel.Cancelled _ -> ());
@@ -359,9 +364,10 @@ let test_confirmed_proof_recovers_lost_outcome_publication () =
   with_root (fun root ->
     let store = Store.create ~root in
     let directory = Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
-    let locking ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let locking ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ =
       Ok
         (fun ~validate ->
+           require (before_dispatch Exact.Generation);
            Unix.chmod directory 0o500;
            match validate question with
            | Ok output -> executed (Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None }))
@@ -400,8 +406,9 @@ let test_v2_proof_recovers_lost_outcome_publication () =
     let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
     let original=request "v2-publication-recovery" in
     let sent=ref 0 in
-    let locking ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let locking ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ =
       Ok (fun ~validate ->
+        require (before_dispatch Exact.Generation);
         incr sent;
         Unix.chmod directory 0o500;
         let output=require (validate question) in
@@ -690,7 +697,8 @@ let test_malformed_proof_refuses_publication_recovery () =
     let store=Store.create ~root in
     let original=request ("malformed-proof-"^label) in
     let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
-    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate ->
+    let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate ->
+      require (before_dispatch Exact.Generation);
       let output=require (validate question) in
       Unix.chmod directory 0o500;
       executed (Exact.Call_ended (Exact.Answered {output;slot="synthetic";usage=None}))) in
@@ -730,7 +738,8 @@ let test_recovery_refuses_malformed_earlier_attempt () =
     let first,_,_=counting_runner store (ref [Refused (Exact.Provider_unavailable {detail="first original refusal"})]) in
     ignore (run_request store first original);
     let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
-    let second ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate ->
+    let second ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate ->
+      require (before_dispatch Exact.Generation);
       let output=require (validate question) in
       Unix.chmod directory 0o500;
       executed (Exact.Call_ended (Exact.Answered {output;slot="second";usage=None}))) in
@@ -749,6 +758,157 @@ let test_recovery_refuses_malformed_earlier_attempt () =
       (Result.is_error (Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:unused original));
     check bool "failed recovery preserves the original record bytes" true
       (require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id)=Some broken))
+
+(* A call that waits for a provider admission permit has sent nothing. Cut off
+   there, it leaves the request retained with no started attempt, and the next
+   run sends it. *)
+let test_a_call_cut_off_before_its_dispatch_is_tried_again () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let original = request "cut-before-dispatch" in
+    let waiting ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+      Ok (fun ~validate:_ -> raise (Eio.Cancel.Cancelled Exit)) in
+    (match Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:waiting original with
+     | _ -> fail "a cancellation must reach the caller"
+     | exception Eio.Cancel.Cancelled _ -> ());
+    check bool "the request is retained" true (require (observe store original) = Exact.Retained_open);
+    check int "with no started attempt" 0 (List.length (attempts store original.request_id));
+    let restarted = Store.create ~root in
+    let runner, sends, _ = counting_runner restarted (ref [ Answer question ]) in
+    check bool "the next run sends it" true (answered_with question (run_request restarted runner original));
+    check int "once" 1 !sends;
+    check int "and one attempt is retained" 1 (List.length (attempts restarted original.request_id)))
+
+(* The started marker is written inside the first generation guard: not when
+   the call is entered, not at a token measurement, and once for a call that
+   reaches a second candidate. *)
+let test_the_started_marker_is_written_at_the_first_generation_dispatch () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let original = request "marker-at-dispatch" in
+    let retained () = require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
+    let entered = ref None and measured = ref [] and dispatched = ref [] and again = ref [] in
+    let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+      Ok (fun ~validate ->
+        entered := retained ();
+        require (before_dispatch Exact.Measurement);
+        measured := attempts store original.request_id;
+        require (before_dispatch Exact.Generation);
+        dispatched := attempts store original.request_id;
+        require (before_dispatch Exact.Generation);
+        again := attempts store original.request_id;
+        let output = require (validate question) in
+        executed (Exact.Call_ended (Exact.Answered { output; slot = "s"; usage = None }))) in
+    check bool "the call answers" true (answered_with question (run_request store runner original));
+    (match !entered with
+     | Some json ->
+       check int "the request is retained with no attempt when the call is entered" 0
+         (List.length Yojson.Safe.Util.(json |> member "attempts" |> to_list))
+     | None -> fail "the call was entered before the request was retained");
+    check int "a token measurement writes no attempt" 0 (List.length !measured);
+    check bool "the first generation dispatch writes the started marker" true (one_started_marker !dispatched);
+    check bool "a later dispatch of the same call keeps that marker" true (!again = !dispatched))
+
+(* A call that ends before any generation dispatch, as when no candidate is
+   admitted, still retains its attempt and its proof. *)
+let test_a_call_that_ends_without_a_dispatch_retains_its_proof () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let original = request "ended-without-dispatch" in
+    let resting = Exact.Provider_unavailable { detail = "no candidate was admitted" } in
+    let undispatched ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+      Ok (fun ~validate:_ -> executed (Exact.Call_refused resting)) in
+    check bool "the refusal does not end the request" true
+      (run_request store undispatched original = Exact.Not_final (Exact.Provider_refused resting));
+    check bool "its attempt is retained and not left started" true
+      (match attempts store original.request_id with
+       | [ `Assoc fields ] -> not (List.mem_assoc "started" fields)
+       | _ -> false);
+    (match require (original_execution store original) with
+     | Exact.Completed_original { outcome = Exact.Call_refused refusal; _ } ->
+       check bool "the proof holds the refusal" true (refusal = resting)
+     | Exact.Completed_original { outcome = Exact.Call_ended _; _ } | Exact.No_completed_original ->
+       fail "the refused call left no proof");
+    let runner, sends, _ = counting_runner store (ref [ Answer question ]) in
+    check bool "the next run sends it" true (answered_with question (run_request store runner original));
+    check int "once" 1 !sends)
+
+(* The host stops a call whose started marker it cannot write. The directory
+   refuses the write, so no marker is on disk and nothing was sent: the run is
+   an Error, whether the runner returns the stopped walk or raises through
+   it. *)
+let test_a_marker_that_cannot_be_written_is_an_error () =
+  List.iter (fun raises -> with_root (fun root ->
+    let store = Store.create ~root in
+    let original = request "unwritable-marker" in
+    let directory = Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
+    let sends = ref 0 in
+    let stopped ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+      Ok (fun ~validate:_ ->
+        Unix.chmod directory 0o500;
+        match before_dispatch Exact.Generation with
+        | Ok () -> incr sends; fail "the guard passed without its marker"
+        | Error detail ->
+          if raises then failwith detail
+          else executed (Exact.Call_refused (Exact.Provider_unavailable { detail }))) in
+    let result = Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:stopped original in
+    Unix.chmod directory 0o700;
+    check bool "the run reports the failed write" true (Result.is_error result);
+    check int "nothing was sent" 0 !sends;
+    check bool "the request stays open" true (require (observe store original) = Exact.Retained_open);
+    check int "with no attempt" 0 (List.length (attempts store original.request_id));
+    let runner, later, _ = counting_runner store (ref [ Answer question ]) in
+    check bool "the next run sends it" true (answered_with question (run_request store runner original));
+    check int "once" 1 !later)) [ false; true ]
+
+(* A call that ended without a generation dispatch writes its marker before
+   its proof. When that save reports a failure, the run is an Error: no
+   attempt and no proof are written, and the next run sends the request. *)
+let test_an_ended_call_whose_marker_cannot_be_written_is_an_error () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let original = request "ended-unwritable-marker" in
+    let directory = Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
+    let resting = Exact.Provider_unavailable { detail = "no candidate was admitted" } in
+    let undispatched ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+      Ok (fun ~validate:_ ->
+        Unix.chmod directory 0o500;
+        executed (Exact.Call_refused resting)) in
+    let result = Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:undispatched original in
+    Unix.chmod directory 0o700;
+    check bool "the run reports the failed write" true (Result.is_error result);
+    check int "no attempt is written" 0 (List.length (attempts store original.request_id));
+    check bool "and no proof" true (require (original_execution store original) = Exact.No_completed_original);
+    let runner, sends, _ = counting_runner store (ref [ Answer question ]) in
+    check bool "the next run sends it" true (answered_with question (run_request store runner original));
+    check int "once" 1 !sends)
+
+(* The marker of a call that ended without a generation dispatch is on disk
+   before its proof is written, because a proof is read against its started
+   attempt. When the proof cannot be written the run is an Error and the
+   marker stays, so the next run ends the request as unknown and sends
+   nothing. *)
+let test_an_ended_call_writes_its_marker_before_its_proof () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let original = request "ended-blocked-proof" in
+    let obstruction = Filename.concat root "host-results" in
+    let resting = Exact.Provider_unavailable { detail = "no candidate was admitted" } in
+    let undispatched ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+      Ok (fun ~validate:_ ->
+        Out_channel.with_open_bin obstruction (fun channel -> output_string channel "not a proof directory");
+        executed (Exact.Call_refused resting)) in
+    check bool "failed proof publication is an Error" true
+      (Result.is_error (Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:undispatched original));
+    check bool "the marker was written before the proof" true
+      (one_started_marker (attempts store original.request_id));
+    Sys.remove obstruction;
+    let unused, sends, _ = counting_runner store (ref []) in
+    check bool "the next run ends it as unknown" true
+      (run_request store unused original = Exact.Final Exact.Outcome_unknown);
+    check bool "cut off in this incarnation" true
+      (require (observe store original) = Exact.Retained_terminal (Exact.Retained_unknown Exact.Cut));
+    check int "and sends nothing" 0 !sends)
 
 let test_orphaned_proof_prevents_another_dispatch () =
   List.iter (fun preceded_by_unavailable -> with_root (fun root ->
@@ -777,7 +937,8 @@ let test_recovered_refusal_is_returned_before_a_later_retry () =
     let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
     let busy=Exact.Provider_unavailable {detail="original refusal before publication loss"} in
     let sends=ref 0 in
-    let first ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ ->
+    let first ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ ->
+      require (before_dispatch Exact.Generation);
       incr sends;
       Unix.chmod directory 0o500;
       executed (Exact.Call_refused busy)) in
@@ -960,7 +1121,8 @@ let test_observe_missing_and_original_terminal_without_another_call ()=with_root
 let test_observe_started_is_open_while_provider_is_running ()=with_root (fun root ->
   let store=Store.create ~root in
   let original=request "readonly-running" in
-  let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
+  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
+    require (before_dispatch Exact.Generation);
     let before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
     check bool "actual provider's started record remains open" true
       (require (observe (Store.create ~root) original)=Exact.Retained_open);
@@ -1250,6 +1412,18 @@ let () =
         ; test_case "selection hides but preserves a retained answer" `Quick test_selection_hides_but_preserves_a_retained_answer
         ; test_case "a request in flight is not run twice" `Quick test_a_request_in_flight_is_not_run_twice
         ; test_case "a cancelled call leaves its attempt started" `Quick test_a_cancelled_call_leaves_its_attempt_started
+        ; test_case "a call cut off before its dispatch is tried again" `Quick
+            test_a_call_cut_off_before_its_dispatch_is_tried_again
+        ; test_case "the started marker is written at the first generation dispatch" `Quick
+            test_the_started_marker_is_written_at_the_first_generation_dispatch
+        ; test_case "a call that ends without a dispatch retains its proof" `Quick
+            test_a_call_that_ends_without_a_dispatch_retains_its_proof
+        ; test_case "a marker that cannot be written is an error" `Quick
+            test_a_marker_that_cannot_be_written_is_an_error
+        ; test_case "an ended call whose marker cannot be written is an error" `Quick
+            test_an_ended_call_whose_marker_cannot_be_written_is_an_error
+        ; test_case "an ended call writes its marker before its proof" `Quick
+            test_an_ended_call_writes_its_marker_before_its_proof
         ; test_case "a retained answer is checked against the schema declared now" `Quick
             test_a_retained_answer_is_checked_against_the_schema_declared_now
         ; test_case "confirmed proof recovers lost outcome publication" `Quick

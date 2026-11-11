@@ -357,7 +357,9 @@ type call_outcome =
 type execution_result = { outcome : call_outcome; receipt : Keeper_exact_walk_receipt.t }
 type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_result
 type dispatch_guard = unit -> (unit, string) result
-type runner = before_dispatch:dispatch_guard -> admission_class:Agent_core.Llm_provider.Admission_class.t ->
+type dispatch = Measurement | Generation
+type runner = before_dispatch:(dispatch -> (unit, string) result) ->
+  admission_class:Agent_core.Llm_provider.Admission_class.t ->
   lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 
 type recorded_attempt =
@@ -1028,15 +1030,39 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
         | None, None -> authorization.with_execution (fun () ->
           Eio.Fiber.check ();
           let* ()=authorization.before_dispatch () in
-          match runner ~before_dispatch:authorization.before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema request with
+          (* The started marker says a generation request may have reached a
+             provider, or that a call which sent none is publishing its
+             proof. It is written when the call reaches its first generation
+             dispatch: after any provider admission wait, before the request
+             is sent. A call cut off while it waited leaves no marker, so the
+             next run tries the request again. *)
+          let started = ref false and marker_failure = ref None in
+          let mark_started () =
+            if !started then Ok ()
+            else
+              match save {previous with attempts = previous.attempts @ [Started (incarnation ())]} with
+              | Ok () -> started := true; marker_failure := None; Ok ()
+              | Error detail -> marker_failure := Some detail; Error detail in
+          let before_dispatch = function
+            | Measurement -> authorization.before_dispatch ()
+            | Generation ->
+              let* () = mark_started () in
+              (* The save yields. A retiring incarnation must not send after
+                 it returns. A cancelled started attempt remains unknown. *)
+              Eio.Fiber.check ();
+              authorization.before_dispatch () in
+          match runner ~before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema request with
           | Error unavailable ->
             let reason = Lane_unavailable unavailable in
             let* () = save {previous with attempts = previous.attempts @ [Deferred reason]} in
             Ok (Not_final reason)
           | Ok call ->
-            let* () = save {previous with attempts = previous.attempts @ [Started (incarnation ())]} in
-            (* The save yields. A retiring incarnation must not start a call
-               after it returns. A cancelled started attempt remains unknown. *)
+            (* The request is retained before the first provider call. *)
+            let* () = match retained with
+              | Some _ -> Ok ()
+              | None -> save previous in
+            (* The save yields. A retiring incarnation must not enter a call
+               after it returns. *)
             Eio.Fiber.check ();
             let attempt, recorded, execution =
               match call ~validate with
@@ -1047,10 +1073,22 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                   attempt_of_outcome execution.outcome, recorded, Some execution
               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
               | exception exn -> Final Outcome_unknown, Unknown_raised (Printexc.to_string exn), None in
+            match !marker_failure with
+            | Some detail ->
+              (* The marker save reported a failure, so the guard stopped the
+                 call before its dispatch. That is the host's own write
+                 failure, not an outcome of the call. *)
+              Error detail
+            | None ->
             Eio.Cancel.protect (fun () ->
               let* () = match execution with
                 | None -> Ok ()
-                | Some execution -> Eio_unix.run_in_systhread (fun () ->
+                | Some execution ->
+                  (* A proof is read against its started attempt, so a call
+                     that ended without a generation dispatch writes the
+                     marker before its proof. *)
+                  let* () = mark_started () in
+                  Eio_unix.run_in_systhread (fun () ->
                     retain_proof ~store ~declaration_id request ~schema
                       ~attempt_ordinal:(List.length previous.attempts + 1) execution) in
               let finished = match attempt with

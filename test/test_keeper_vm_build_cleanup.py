@@ -81,15 +81,12 @@ class GuestCleanup(unittest.TestCase):
             return iterdir(path)
 
         with (
-            patch.object(
-                cleaner,
-                "Path",
-                side_effect=lambda value: proc if value == "/proc" else Path(value),
-            ),
             patch.object(cleaner.os, "readlink", side_effect=read_descriptor),
             patch.object(Path, "iterdir", enumerate_paths),
         ):
-            report = cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
+            report = cleaner.guest_sweep(
+                self.root, 0, True, build_root=self.build_root, proc=proc
+            )
         self.assertEqual(report["entries"][0]["skip"], "live process uses checkout")
         self.assertTrue((self.build / "artifact").exists())
 
@@ -125,12 +122,189 @@ class GuestCleanup(unittest.TestCase):
 
     def test_unreadable_process_ownership_fails_closed(self) -> None:
         with patch.object(
-            cleaner, "process_paths", side_effect=PermissionError("denied")
+            cleaner, "process_paths", side_effect=cleaner.Unreadable("process 7: denied")
         ):
-            with self.assertRaises(PermissionError):
-                cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
+            report = cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
+        self.assertEqual(report["skip"], "process 7: denied")
         self.assertTrue((self.build / "artifact").exists())
 
+
+class LiveProcesses(unittest.TestCase):
+    """Which processes the sweep reads, on a fixture /proc. Needs no Dune."""
+
+    OWN_PID = 9000
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name).resolve()
+        self.root = base / "work"
+        self.build_root = base / "build"
+        self.repo = self.root / "checkout"
+        self.build = self.repo / "_build"
+        self.build.mkdir(parents=True)
+        self.build_root.mkdir()
+        (self.repo / "dune-project").write_text("(lang dune 3.20)\n")
+        (self.build / "artifact").write_text("generated output\n")
+        self.proc = base / "proc"
+        self.proc.mkdir()
+        # The sweep skips its own entry. Its PID is pinned so that no fixture
+        # process can share the PID this test happens to run under.
+        own = patch.object(cleaner.os, "getpid", return_value=self.OWN_PID)
+        own.start()
+        self.addCleanup(own.stop)
+        # The wrapper lock stays inside the fixture.
+        lock = patch.dict(os.environ, {"DUNE_LOCAL_LOCK": str(base / "wrapper.lock")})
+        lock.start()
+        self.addCleanup(lock.stop)
+        # No Dune on PATH: a build that reaches cleaning says so and stays.
+        no_dune = patch.object(cleaner.shutil, "which", return_value=None)
+        no_dune.start()
+        self.addCleanup(no_dune.stop)
+
+    def process(
+        self,
+        pid: int,
+        *,
+        cwd: Path,
+        state: str = "S",
+        name: str = "fixture",
+        parent: int = 1,
+        group: int | None = None,
+        session: int | None = None,
+    ) -> Path:
+        """A /proc entry. By default the process leads a session of its own,
+        as a command does once the agent's shim has started it."""
+        process = self.proc / str(pid)
+        (process / "fd").mkdir(parents=True)
+        group = pid if group is None else group
+        session = pid if session is None else session
+        (process / "stat").write_text(
+            f"{pid} ({name}) {state} {parent} {group} {session} 0 -1\n"
+        )
+        (process / "cwd").symlink_to(cwd)
+        (process / "exe").symlink_to("/usr/bin/true")
+        return process
+
+    def unreadable(self, process: Path):
+        """A patch under which [process] refuses its links, as the kernel does
+        for a process that turned inspection off or belongs to another user."""
+        readlink = os.readlink
+
+        def denied(path, *args, **kwargs):
+            if Path(path).parent == process:
+                raise PermissionError(13, "Permission denied", str(path))
+            return readlink(path, *args, **kwargs)
+
+        return patch.object(cleaner.os, "readlink", side_effect=denied)
+
+    def sweep(self) -> dict:
+        return cleaner.guest_sweep(
+            self.root, 0, True, build_root=self.build_root, proc=self.proc
+        )
+
+    def test_inspectable_process_reports_cwd_and_open_files(self) -> None:
+        process = self.process(4242, cwd=self.repo)
+        (process / "fd" / "3").symlink_to(self.build / "artifact")
+        (process / "fd" / "4").symlink_to("pipe:[77]")
+        paths = cleaner.process_paths(self.proc)
+        self.assertIn(self.repo, paths)
+        self.assertIn(self.build / "artifact", paths)
+        self.assertNotIn(Path("pipe:[77]"), paths)
+        self.assertEqual(self.sweep()["entries"][0]["skip"], "live process uses checkout")
+
+    def test_zombie_vanished_and_own_processes_are_passed_over(self) -> None:
+        self.process(4242, cwd=self.repo, state="Z")
+        (self.proc / "4243").mkdir()
+        (self.proc / "self").mkdir()
+        self.process(self.OWN_PID, cwd=self.repo)
+        self.assertEqual(cleaner.process_paths(self.proc), [])
+
+    def test_vanished_descriptor_keeps_later_descriptors(self) -> None:
+        process = self.process(4242, cwd=self.root)
+        vanished = process / "fd" / "0"
+        vanished.symlink_to(self.root / "closed-file")
+        (process / "fd" / "1").symlink_to(self.build / "artifact")
+        readlink = os.readlink
+
+        def read_descriptor(path, *args, **kwargs):
+            if Path(path) == vanished:
+                raise FileNotFoundError(path)
+            return readlink(path, *args, **kwargs)
+
+        with patch.object(cleaner.os, "readlink", side_effect=read_descriptor):
+            self.assertIn(self.build / "artifact", cleaner.process_paths(self.proc))
+
+    def test_unreadable_process_is_passed_over_only_in_the_first_process_session(
+        self,
+    ) -> None:
+        # Each row is one unreadable process with its cwd in the checkout:
+        # (pid, parent, process group, session, command name, passed over?)
+        cases = [
+            # The exec agent, and a relay it forked for one connection.
+            (1, 0, 1, 1, "masc-exec-shim", True),
+            (77, 1, 1, 1, "masc-exec-shim", True),
+            # Still the first session after moving to a process group of its own.
+            (78, 1, 78, 1, "masc-exec-shim", True),
+            # A command in the session its shim opened, and that command's child.
+            (4242, 90, 4242, 4242, "git", False),
+            (4243, 4242, 4242, 4242, "cc1", False),
+            # A daemon the first process inherited when its parent exited.
+            (4244, 1, 4244, 4244, "dune", False),
+            # A process whose session leader is outside the guest.
+            (4245, 0, 0, 0, "sh", False),
+            # A command name written to read as the first session.
+            (4246, 90, 4246, 4246, "x) S 1 1 1 (y", False),
+        ]
+        for pid, parent, group, session, name, passed in cases:
+            with self.subTest(pid=pid, session=session, name=name):
+                process = self.process(
+                    pid,
+                    cwd=self.repo,
+                    name=name,
+                    parent=parent,
+                    group=group,
+                    session=session,
+                )
+                with self.unreadable(process):
+                    report = self.sweep()
+                shutil.rmtree(process)
+                entry = report["entries"][0]
+                if passed:
+                    # The sweep went on to cleaning, which this fixture has no Dune for.
+                    self.assertNotIn("skip", report)
+                    self.assertEqual(entry["action"], "clean failed")
+                    self.assertEqual(entry["error"], "dune unavailable")
+                else:
+                    self.assertIn(f"process {pid}", report["skip"])
+                    self.assertEqual(entry["skip"], "live processes unreadable")
+                self.assertTrue((self.build / "artifact").exists())
+
+    def test_unreadable_process_stops_before_later_builds(self) -> None:
+        later = self.root / "later" / "_build"
+        later.mkdir(parents=True)
+        (later.parent / "dune-project").write_text("(lang dune 3.20)\n")
+        process = self.process(4242, cwd=self.root)
+        with self.unreadable(process):
+            report = self.sweep()
+        self.assertIn("process 4242", report["skip"])
+        self.assertEqual(len(report["entries"]), 1)
+
+    def test_missing_dune_is_silent_until_an_owned_idle_build_needs_it(self) -> None:
+        (self.build / "artifact").unlink()
+        self.build.rmdir()
+        report = self.sweep()
+        self.assertNotIn("skip", report)
+        self.assertEqual(report["entries"], [])
+        # A _build with no dune-project beside it is not Dune's to clean.
+        stray = self.root / "notes" / "_build"
+        stray.mkdir(parents=True)
+        report = self.sweep()
+        self.assertNotIn("skip", report)
+        self.assertEqual(
+            [entry["skip"] for entry in report["entries"]],
+            ["not a default Dune build directory"],
+        )
 
 
 @unittest.skipUnless(shutil.which("dune"), "needs native Dune targeted clean")
@@ -210,9 +384,10 @@ class ManagedBuildCleanup(unittest.TestCase):
     def test_dry_run_and_unknown_ownership_do_not_mutate(self):
         self.assertEqual(self.sweep(False)["entries"][0]["action"], "would clean")
         self.assertTrue((self.target / "artifact").exists())
-        with patch.object(cleaner, "process_paths", side_effect=PermissionError("denied")):
-            with self.assertRaises(PermissionError):
-                self.sweep()
+        with patch.object(
+            cleaner, "process_paths", side_effect=cleaner.Unreadable("process 7: denied")
+        ):
+            self.assertEqual(self.sweep()["skip"], "process 7: denied")
         self.assertTrue((self.target / "artifact").exists())
 
     def test_replaced_target_during_scan_does_not_clean_replacement(self):

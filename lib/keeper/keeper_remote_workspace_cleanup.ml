@@ -58,9 +58,6 @@ let report_of_string stdout =
 let payload_argv ~root ~retention_sec =
   [ "python3"; "-"; "--root"; root; "--retention-sec"; Float.to_string retention_sec; "--apply" ]
 
-let failure_detail stderr =
-  Exec_policy.truncate_for_log (Observability_redact.redact_text (String.trim stderr))
-
 (* Not [Keeper_sandbox_remote_lane.openssh_endpoint]: its [ready] runs the
    disk preflight, which refuses below 1 GiB free. A full disk is when this
    sweep has to run. *)
@@ -85,9 +82,8 @@ let run_payload ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keepe
       { status = (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status; stderr; _ }
     ->
     Error
-      (Printf.sprintf "Keeper workspace cleanup command failed (%s): %s"
-         (Keeper_sandbox_exec_failure.status_label status)
-         (failure_detail stderr))
+      (Keeper_sandbox_exec_failure.payload_failure_message
+         ~prefix:"Keeper workspace cleanup command failed" ~status ~stderr)
   | Masc_exec.Sandbox_target.Transport_failed { reason; _ } ->
     Error ("Keeper workspace cleanup transport failed: " ^ reason)
 

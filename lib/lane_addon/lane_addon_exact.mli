@@ -323,8 +323,19 @@ val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
     the full domain answer and rechecks authority before its separate effects.
     Run the complete blocking read/validation scope on a system thread in Eio. *)
 
+type recovery_error =
+  | Recovery_unavailable of string
+      (** The record could not be read at all. A later attempt may find it. *)
+  | Recovery_invalid of string
+      (** A record exists but is not a trustworthy original: it fails decoding,
+          schema or domain validation, or its proof does not belong to it.
+          Retrying cannot repair that, so the caller must refuse rather than
+          wait for a record that will never become valid. *)
+
+val describe_recovery_error : recovery_error -> string
+
 val recover_retained : store:Lane_addon_store.t -> declaration_id:string ->
-  schema:Yojson.Safe.t -> request -> (retained_observation, string) result
+  schema:Yojson.Safe.t -> request -> (retained_observation, recovery_error) result
 (** Restore a lost terminal publication from the latest started attempt's
     confirmed original host execution proof. The caller holds the workspace
     process lease. This operation claims the original request, rereads and

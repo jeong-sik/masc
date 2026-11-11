@@ -119,7 +119,8 @@ let observe store request = Eio_unix.run_in_systhread (fun () ->
   Exact.observe_retained ~store ~declaration_id ~schema request)
 let recover store request = Eio.Cancel.protect (fun () ->
   Eio_unix.run_in_systhread (fun () ->
-    Exact.recover_retained ~store ~declaration_id ~schema request))
+    Exact.recover_retained ~store ~declaration_id ~schema request)
+  |> Result.map_error Exact.describe_recovery_error)
 
 (* The run republishes its record while an observer reads it (#45134). The
    seam republishes a larger record once, after the reader opened the old one

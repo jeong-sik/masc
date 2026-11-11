@@ -815,39 +815,50 @@ let finish_record prior = function
   | Call_refused refusal ->
       {prior with attempts=prior.attempts @ [Deferred (Provider_refused refusal)]}
 
+let describe_recovery_error = function
+  | Recovery_unavailable detail -> detail
+  | Recovery_invalid detail -> detail
+;;
+
+(* A record this read could not reach may appear later; a record it reached and
+   refused cannot turn into a different record by waiting. Keeping the two
+   apart is what lets the caller refuse instead of retrying forever. *)
+let unreadable = Result.map_error (fun detail -> Recovery_unavailable detail)
+let invalid = Result.map_error (fun detail -> Recovery_invalid detail)
+
 let recover_retained ~store ~declaration_id ~schema request =
-  let* schema = original_schema ~declaration_id ~schema request in
+  let* schema = unreadable (original_schema ~declaration_id ~schema request) in
   let key = Lane_addon_store.root store, declaration_id, request.request_id in
-  if not (claim key) then observe_retained ~store ~declaration_id ~schema request
+  if not (claim key) then unreadable (observe_retained ~store ~declaration_id ~schema request)
   else Fun.protect ~finally:(fun () -> release key) (fun () ->
-    let* wire = Lane_addon_store.load_exact_request store ~declaration_id
-      ~request_id:request.request_id in
+    let* wire = unreadable (Lane_addon_store.load_exact_request store ~declaration_id
+      ~request_id:request.request_id) in
     match wire with
     | None ->
-        let* proofs = load_proofs ~store ~declaration_id request in
+        let* proofs = unreadable (load_proofs ~store ~declaration_id request) in
         if proofs = [] then Ok Retained_absent
-        else Error "original execution proof has no original Exact request"
+        else Error (Recovery_invalid "original execution proof has no original Exact request")
     | Some wire ->
-        let* record = bound_record ~declaration_id request wire in
-        let* observed = validate_record ~request ~schema:(Some schema) record in
-        let* proofs = bound_proofs ~store ~declaration_id request record in
+        let* record = invalid (bound_record ~declaration_id request wire) in
+        let* observed = invalid (validate_record ~request ~schema:(Some schema) record) in
+        let* proofs = invalid (bound_proofs ~store ~declaration_id request record) in
         match record.final, List.rev record.attempts with
         | None, Started _ :: earlier ->
             (match selected_proof ~attempt_ordinal:(List.length record.attempts) proofs with
              | None -> Ok observed
              | Some (retained_schema, execution) ->
                  if not (Yojson.Safe.equal schema retained_schema) then
-                   Error "original execution proof differs from the supplied original schema"
+                   Error (Recovery_invalid "original execution proof differs from the supplied original schema")
                  else
                    (match execution.outcome with
                     | Call_refused _ -> Ok observed
                     | Call_ended _ ->
                         let finished = finish_record
                           {record with attempts=List.rev earlier} execution.outcome in
-                        let* () = Lane_addon_store.save_exact_request store ~declaration_id
+                        let* () = unreadable (Lane_addon_store.save_exact_request store ~declaration_id
                           ~request_id:request.request_id
-                          (record_to_json ~declaration_id ~request_id:request.request_id finished) in
-                        observe_retained ~store ~declaration_id ~schema request))
+                          (record_to_json ~declaration_id ~request_id:request.request_id finished)) in
+                        unreadable (observe_retained ~store ~declaration_id ~schema request)))
         | None, ([] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
             | Unknown_raised _ | Delivery_refused _ | Reused) :: _)
         | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused), _ ->

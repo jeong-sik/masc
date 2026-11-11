@@ -195,6 +195,96 @@ let test_account_server_stop_needs_its_announced_port () =
        | Ok () -> ()
        | Error _ -> Alcotest.fail "the owner that announces the port was not asked to stop");
       Alcotest.(check bool) "SIGTERM, no escalation" true (reap () = Unix.WSIGNALED Sys.sigterm)))
+(* A process without the lease locks [byte] of the announcement file of the
+   workspace, as any process of this user can. It is killed at the end. *)
+let with_byte_locker ~run_dir ~base_path ~byte f =
+  let path =
+    Server_startup_takeover.For_testing.lease_path
+      ~run_dir:(Unix.realpath run_dir) ~canonical_base_path:(Unix.realpath base_path)
+    ^ ".account-server" in
+  let ready_read, ready_write = Unix.pipe () in
+  let child = Unix.fork () in
+  if child = 0 then (
+    Unix.close ready_read;
+    let locked =
+      match
+        let fd = Unix.openfile path [Unix.O_RDWR; Unix.O_CREAT] 0o600 in
+        ignore (Unix.lseek fd byte Unix.SEEK_SET);
+        Unix.lockf fd Unix.F_TLOCK 1
+      with
+      | () -> true
+      | exception Unix.Unix_error _ -> false in
+    ignore (Unix.write_substring ready_write (if locked then "r" else "x") 0 1);
+    Unix.close ready_write;
+    while true do Unix.pause () done);
+  Unix.close ready_write;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close ready_read;
+      (try Unix.kill child Sys.sigkill with Unix.Unix_error _ -> ());
+      ignore (retrying (fun () -> Unix.waitpid [] child)))
+    (fun () ->
+      let ready = Bytes.create 1 in
+      ignore (retrying (fun () -> Unix.read ready_read ready 0 1));
+      Alcotest.(check string) "the other process locked its byte" "r" (Bytes.to_string ready);
+      f child)
+let sighting_label = function
+  | Ok Server_upgrade_preparation.No_account_server -> "no account server"
+  | Ok (Account_server_on_port { pid }) -> Printf.sprintf "pid %d announces the port" pid
+  | Ok (Account_server_on_another_port { pid; port }) ->
+    Printf.sprintf "pid %d announces port %d" pid port
+  | Error (Server_startup_takeover.Owner_lease_rejected rejection) ->
+    "rejected: " ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection
+  | Error (Owner_identity_unavailable _) -> "the owner could not be read"
+  | Error Current_process_owner -> "this process holds the lease"
+(* The lock of a process that does not hold the lease is no account server,
+   on the byte of the port or on another one. The stop goes to the owner of
+   the lease only when the owner itself holds the byte of the port. *)
+let test_a_lock_without_the_lease_is_no_account_server () =
+  let root = Filename.temp_file "masc-upgrade-account-" "" in
+  Sys.remove root; Unix.mkdir root 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let base_path = Filename.concat root "workspace" and run_dir = Filename.concat root "run" in
+    Unix.mkdir base_path 0o700; Unix.mkdir run_dir 0o700;
+    let port = 9000 in
+    let stop port = Server_upgrade_preparation.stop_account_server ~run_dir ~base_path ~port in
+    let check_sighting message expected ~port =
+      Alcotest.(check string) message (sighting_label (Ok expected))
+        (sighting_label (Server_upgrade_preparation.account_server ~run_dir ~base_path ~port)) in
+    check_sighting "a workspace nobody holds" No_account_server ~port;
+    with_byte_locker ~run_dir ~base_path ~byte:port (fun (_ : int) ->
+      check_sighting "a lock on the port, and no owner" No_account_server ~port;
+      (* The owner of the lease is the server of a single user: it announces
+         nothing, and the byte of the port is another process's. *)
+      with_owner ~run_dir ~base_path ~announces:None (fun ~still_runs ~reap:_ ->
+        check_sighting "a lock on the port, and an owner that announces nothing"
+          No_account_server ~port;
+        (match stop port with
+         | Error Incumbent_changed -> ()
+         | _ -> Alcotest.fail "the owner was asked to stop for the lock of another process");
+        Alcotest.(check bool) "it was sent nothing" true (still_runs ())));
+    (* The lock of another process, taken before the server announced, is the
+       one a read of the whole file may name. *)
+    with_byte_locker ~run_dir ~base_path ~byte:(port - 1) (fun (_ : int) ->
+      with_owner ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap ->
+        let owner =
+          match Server_upgrade_preparation.account_server ~run_dir ~base_path ~port with
+          | Ok (Account_server_on_port { pid }) -> pid
+          | other -> Alcotest.failf "the account server was not seen: %s" (sighting_label other) in
+        (match Server_upgrade_preparation.account_server ~run_dir ~base_path ~port:(port + 1) with
+         | Ok (Account_server_on_another_port { pid; port = announced }) ->
+           Alcotest.(check int) "the owner is named" owner pid;
+           Alcotest.(check int) "with the port it announces" port announced
+         | Ok No_account_server -> ()
+         | other -> Alcotest.failf "another port named a server of its own: %s" (sighting_label other));
+        (match stop (port - 1) with
+         | Error Incumbent_changed -> ()
+         | _ -> Alcotest.fail "the owner was asked to stop on the byte of another process");
+        Alcotest.(check bool) "it was sent nothing" true (still_runs ());
+        (match stop port with
+         | Ok () -> ()
+         | Error _ -> Alcotest.fail "the owner that announces the port was not asked to stop");
+        Alcotest.(check bool) "SIGTERM, no escalation" true (reap () = Unix.WSIGNALED Sys.sigterm))))
 let () = Alcotest.run "upgrade preparation"
   ["owner checks",[Alcotest.test_case "initial login identity" `Quick test_initial_login_identity;Alcotest.test_case "admin and exact incumbent" `Quick test_admin_workspace_and_incarnation;
     Alcotest.test_case "workspace conflict" `Quick test_other_workspace_never_receives_credentials;
@@ -203,4 +293,6 @@ let () = Alcotest.run "upgrade preparation"
     Alcotest.test_case "refused request never observes" `Quick test_refused_termination_never_observes;
     Alcotest.test_case "duplicate health identity" `Quick test_duplicate_health_never_authorizes];
    "account server",[Alcotest.test_case "the stop goes to the owner that announces the port" `Quick
-     test_account_server_stop_needs_its_announced_port]]
+     test_account_server_stop_needs_its_announced_port;
+     Alcotest.test_case "a lock without the lease is no account server" `Quick
+       test_a_lock_without_the_lease_is_no_account_server]]

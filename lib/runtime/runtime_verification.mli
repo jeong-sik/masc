@@ -37,7 +37,10 @@ type failure =
           error. *)
   | Provider_auth_refused of string
       (** The provider refused the credential (HTTP 401) or account access
-          (HTTP 403). The status alone does not identify why access was refused. *)
+          (HTTP 403). The status alone does not identify why access was refused.
+          Also a Claude Code turn that ended with no HTTP status after the
+          client named [authentication_failed], as a login past its time
+          limit does. *)
   | Provider_unreachable of string
       (** The transport could not reach the provider. *)
   | Model_not_found of string

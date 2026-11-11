@@ -3121,6 +3121,23 @@ let test_login_past_its_time_limit_routes_as_auth_failed () =
              { rotate = Keeper_runtime_failure_route.Auth_failed })))
 ;;
 
+(* The cause reads as a sign-in failure only when the turn ended with no HTTP
+   status. A result that carries a status other than 401 or 403 keeps its own
+   reading, whatever diagnostic came before it. *)
+let test_auth_cause_with_another_http_status_is_not_auth_failed () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture [ Emit login_expired_diagnostic; Emit (access_rejection 400) ] (fun cli_path ->
+      match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_CAUSE_WITH_400" () with
+      | Ok _ -> fail "a rejected turn completed"
+      | Error error ->
+        let route = Keeper_runtime_failure_route.route_of_error
+            ~boundary:Keeper_runtime_failure_route.Agent_core_execution error in
+        check bool "a 400 after an authentication diagnostic is a provider failure" true
+          (route = Keeper_runtime_failure_route.Rotate_now
+             { rotate = Keeper_runtime_failure_route.Provider_reported_failure })))
+;;
+
 let test_access_refusal_after_native_tool_remains_fenced () =
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
@@ -7338,6 +7355,8 @@ let () =
             test_access_refusal_uses_status_and_keeps_pre_effect_rotation
         ; test_case "a login past its time limit routes as auth failed" `Quick
             test_login_past_its_time_limit_routes_as_auth_failed
+        ; test_case "an auth cause with another HTTP status is not auth failed" `Quick
+            test_auth_cause_with_another_http_status_is_not_auth_failed
         ; test_case "access refusal after native tool remains fenced" `Quick
             test_access_refusal_after_native_tool_remains_fenced
         ; test_case "quota after tool effect remains fenced" `Quick

@@ -3922,6 +3922,99 @@ let test_decode_tool_snapshot_reads_the_volume_gc_report () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "an unknown outcome is an error"
 
+(* The host disk and the cleanup results ride the same envelope and are read
+   apart from the tools: whatever shape they come in, the inventory is still
+   read, and what could not be read is a value that says so. *)
+let test_decode_tool_snapshot_reads_storage_apart_from_the_tools () =
+  let module T = Masc.Tui_decode_tools in
+  let with_fields extra =
+    match tool_snapshot_json [ tool_entry_json () ] with
+    | `Assoc fields ->
+        `Assoc (List.filter (fun (name, _) -> not (List.mem_assoc name extra)) fields @ extra)
+    | other -> other
+  in
+  let storage_of label json =
+    match T.decode_tool_snapshot json with
+    | Error err -> Alcotest.failf "%s: the snapshot was refused: %s" label err
+    | Ok snapshot ->
+        Alcotest.(check int) (label ^ ": the tools are read") 1 (List.length snapshot.T.ts_tools);
+        snapshot.T.ts_storage
+  in
+  let filesystem fields =
+    with_fields
+      [ ( "runtime_resolution"
+        , `Assoc [ ("disk_observation", `Assoc [ ("filesystem", `Assoc fields) ]) ] )
+      ]
+  in
+  let cleanup value = with_fields [ ("keeper_cleanup", value) ] in
+  let row =
+    `Assoc
+      [ ("keeper", `String "a")
+      ; ("step", `String "guest_builds")
+      ; ("finished_at", `Float 10.)
+      ; ("reclaimed_at", `Null)
+      ; ("outcome", `String "not_running")
+      ]
+  in
+  (match storage_of "an older server" (with_fields []) with
+   | { T.st_host_disk = T.Host_disk_absent; st_keeper_cleanup = T.Keeper_cleanup_absent } -> ()
+   | _ -> Alcotest.fail "an envelope with neither field has neither reading");
+  (match
+     (storage_of "warming" (with_fields [ ("runtime_resolution", `Assoc [ ("status", `String "warming") ]) ]))
+       .T.st_host_disk
+   with
+   | T.Host_disk_absent -> ()
+   | _ -> Alcotest.fail "the warming placeholder has no measurement");
+  (match
+     (storage_of "measured"
+        (filesystem
+           [ ("mounted_on", `String "/System/Volumes/Data")
+           ; ("total_bytes", `Int 4000)
+           ; ("available_bytes", `Int 100)
+           ]))
+       .T.st_host_disk
+   with
+   | T.Host_disk_measured { T.hd_mounted_on; hd_total_bytes; hd_available_bytes } ->
+       Alcotest.(check string) "where it is mounted" "/System/Volumes/Data" hd_mounted_on;
+       Alcotest.(check (pair int int)) "total and available" (4000, 100)
+         (hd_total_bytes, hd_available_bytes)
+   | _ -> Alcotest.fail "a df row is a measurement");
+  (match
+     (storage_of "probe failed" (filesystem [ ("error", `String "df -Pk exited 1") ])).T.st_host_disk
+   with
+   | T.Host_disk_probe_failed detail ->
+       Alcotest.(check string) "the server's words" "df -Pk exited 1" detail
+   | _ -> Alcotest.fail "a failed probe is the server's failure, not a measurement");
+  (match
+     (storage_of "an unknown disk shape"
+        (filesystem [ ("mounted_on", `String "/"); ("total_bytes", `String "4T") ]))
+       .T.st_host_disk
+   with
+   | T.Host_disk_unreadable _ -> ()
+   | _ -> Alcotest.fail "a row this build cannot read is not a measurement");
+  (match (storage_of "a cleanup field of another kind" (cleanup (`String "later"))).T.st_keeper_cleanup with
+   | T.Keeper_cleanup_unreadable _ -> ()
+   | _ -> Alcotest.fail "a field that cannot be taken apart is unreadable");
+  (match (storage_of "a null cleanup field" (cleanup `Null)).T.st_keeper_cleanup with
+   | T.Keeper_cleanup_unreadable _ -> ()
+   | _ -> Alcotest.fail "null is not a server without the loop");
+  match
+    (storage_of "one row read and one not"
+       (cleanup
+          (`Assoc
+              [ ("pass", `Null)
+              ; ("rows", `List [ row; `Assoc [ ("keeper", `String "b") ] ])
+              ])))
+      .T.st_keeper_cleanup
+  with
+  | T.Keeper_cleanup_read
+      { Masc.Keeper_cleanup_status_json.read_pass = Ok None
+      ; read_rows = [ { Masc.Keeper_cleanup_status.keeper = "a"; _ } ]
+      ; unread_rows = [ _ ]
+      ; unknown_fields = []
+      } -> ()
+  | _ -> Alcotest.fail "the row that reads is kept beside the one that does not"
+
 let test_decode_tool_projected_nowhere () =
   (* A registered tool on no surface is reachable by nothing. Kept as an empty
      list rather than dropped: that it exists and is projected nowhere is the
@@ -13904,6 +13997,8 @@ let () =
           test_decode_tool_snapshot_keeps_the_warming_flag;
         Alcotest.test_case "reads the server's volume GC report" `Quick
           test_decode_tool_snapshot_reads_the_volume_gc_report;
+        Alcotest.test_case "reads storage apart from the tools" `Quick
+          test_decode_tool_snapshot_reads_storage_apart_from_the_tools;
         Alcotest.test_case "usage rows keep calls, failures and p95" `Quick
           test_decode_tool_usage_reads_the_rows;
         Alcotest.test_case "usage without by_tool is no reading" `Quick

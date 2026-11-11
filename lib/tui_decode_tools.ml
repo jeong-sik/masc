@@ -152,6 +152,28 @@ type tool_usage_row = {
   tu_p95_ms : float option;
 }
 
+type host_disk = {
+  hd_mounted_on : string;
+  hd_total_bytes : int;
+  hd_available_bytes : int;
+}
+
+type host_disk_reading =
+  | Host_disk_absent
+  | Host_disk_probe_failed of string
+  | Host_disk_unreadable of string
+  | Host_disk_measured of host_disk
+
+type keeper_cleanup_reading =
+  | Keeper_cleanup_absent
+  | Keeper_cleanup_unreadable of string
+  | Keeper_cleanup_read of Keeper_cleanup_status_json.reading
+
+type storage = {
+  st_host_disk : host_disk_reading;
+  st_keeper_cleanup : keeper_cleanup_reading;
+}
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
@@ -159,6 +181,7 @@ type tool_snapshot = {
   ts_effective : effective_tool_surface option;
   ts_usage : tool_usage_row list option;
   ts_volume_gc_report : Keeper_volume_gc_periodic.t option;
+  ts_storage : storage;
 }
 
 let decode_tool_entry json =
@@ -1149,6 +1172,51 @@ let tool_usage_for rows ~name =
         (fun row -> List.exists (String.equal name) row.tu_public_names)
         rows
 
+(* [runtime_resolution.disk_observation.filesystem] is the server's df row
+   for the filesystem that holds its state, or [{"error": ...}] when its
+   probe failed. The warming placeholder has no observation, and a server
+   with no workspace sends null. *)
+let decode_host_disk json =
+  match member "disk_observation" (member "runtime_resolution" json) with
+  | `Null -> Host_disk_absent
+  | observation -> (
+      match member "filesystem" observation with
+      | `Assoc _ as filesystem -> (
+          match member "error" filesystem with
+          | `String detail -> Host_disk_probe_failed detail
+          | `Null -> (
+              let measured =
+                let* hd_mounted_on = required_string_field filesystem "mounted_on" in
+                let* hd_total_bytes =
+                  required_nonnegative_int_field filesystem "total_bytes"
+                in
+                let* hd_available_bytes =
+                  required_nonnegative_int_field filesystem "available_bytes"
+                in
+                Ok { hd_mounted_on; hd_total_bytes; hd_available_bytes }
+              in
+              match measured with
+              | Ok disk -> Host_disk_measured disk
+              | Error reason -> Host_disk_unreadable ("disk_observation.filesystem: " ^ reason))
+          | bad ->
+              Host_disk_unreadable
+                ("disk_observation.filesystem.error must be a string (received "
+                ^ Json_util.kind_name bad ^ ")"))
+      | bad ->
+          Host_disk_unreadable
+            ("disk_observation.filesystem must be an object (received "
+            ^ Json_util.kind_name bad ^ ")"))
+
+(* A server without the cleanup loop sends no field. One that has it always
+   sends an object, so null is a shape this build does not know. *)
+let decode_keeper_cleanup json =
+  match Json_util.assoc_member_opt Keeper_cleanup_status_json.envelope_field json with
+  | None -> Keeper_cleanup_absent
+  | Some value -> (
+      match Keeper_cleanup_status_json.read_json value with
+      | Ok reading -> Keeper_cleanup_read reading
+      | Error reason -> Keeper_cleanup_unreadable reason)
+
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the
      inventory; this reads the inventory and the per-tool call counts and
@@ -1189,6 +1257,10 @@ let decode_tool_snapshot json =
     ; ts_effective
     ; ts_usage
     ; ts_volume_gc_report
+    ; ts_storage =
+        { st_host_disk = decode_host_disk json
+        ; st_keeper_cleanup = decode_keeper_cleanup json
+        }
     }
 
 let skill_activation_keeper = function

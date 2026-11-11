@@ -283,6 +283,37 @@ type tool_usage_row = {
       (** [None] when the server sent no 95th percentile for this tool. *)
 }
 
+type host_disk = {
+  hd_mounted_on : string;
+  hd_total_bytes : int;
+  hd_available_bytes : int;
+}
+
+(** The server's own measurement of the filesystem that holds its state. *)
+type host_disk_reading =
+  | Host_disk_absent
+      (** The envelope carried no measurement: the warming placeholder, or a
+          server with no workspace to measure. *)
+  | Host_disk_probe_failed of string
+      (** The server's probe failed, in its words. *)
+  | Host_disk_unreadable of string
+      (** The envelope carried a measurement this build cannot read, and why. *)
+  | Host_disk_measured of host_disk
+
+(** What the server's storage cleanup last did. *)
+type keeper_cleanup_reading =
+  | Keeper_cleanup_absent  (** A server that publishes no such field. *)
+  | Keeper_cleanup_unreadable of string
+      (** The field could not be taken apart, and why. *)
+  | Keeper_cleanup_read of Keeper_cleanup_status_json.reading
+      (** Read part by part: the summary or a row this build cannot read is
+          kept inside the reading as its reason. *)
+
+type storage = {
+  st_host_disk : host_disk_reading;
+  st_keeper_cleanup : keeper_cleanup_reading;
+}
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
@@ -298,11 +329,17 @@ type tool_snapshot = {
       (** The server's last periodic [masc_sandbox_volume_gc] report. [None]
           until the server's first pass ends, and from a server that runs
           no pass. *)
+  ts_storage : storage;
+      (** The host disk and the cleanup results. Neither can fail the
+          snapshot: what could not be read is a value of its own. *)
 }
 
 val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
-(** Reads [tool_inventory], [tool_usage.by_tool] and
-    [sandbox_volume_gc_report] out of the /dashboard/tools envelope. *)
+(** Reads [tool_inventory], [tool_usage.by_tool],
+    [sandbox_volume_gc_report], [runtime_resolution.disk_observation] and
+    [keeper_cleanup] out of the /dashboard/tools envelope. The last two are
+    read apart from the rest: a server that sends them in a shape this build
+    cannot read still gives its tool inventory. *)
 
 val tool_usage_for : tool_usage_row list -> name:string -> tool_usage_row option
 (** The row for the tool the catalog lists as [name]. The server counts under

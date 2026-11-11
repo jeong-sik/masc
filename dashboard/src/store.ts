@@ -734,16 +734,17 @@ function hydrateDashboardBootstrap(
   }
 
   hydrateShellSnapshot(data.shell, { light: true, sentToken: authOwner.token, authOwner, rootRevision: shellRootRevision })
-  hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration })
+  hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration, rootRevision: shellRootRevision })
 
   if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)
-    && namespaceTruthReadRecovery.revision === namespaceRevision) {
+    && namespaceTruthReadRecovery.revision === namespaceRevision
+    && !namespaceTruthReadRecovery.isReading) {
     const normalized = normalizeNamespaceTruth(data.namespace_truth)
     namespaceTruth.value = normalized
     namespaceTruthError.value = null
     namespaceTruthInitializing.value = false
     namespaceTruthReadRecovery.succeeded()
-    hydrateShellRootSnapshot(normalized.root)
+    hydrateShellRootSnapshot(normalized.root, true)
   }
   // A bootstrap may omit Goal slices. Such a response must not take ownership
   // away from an explicit refresh already loading the combined Goal snapshot.
@@ -940,8 +941,8 @@ function recoverFromRejectedShellAuth(
 type ShellRootSnapshot = Pick<DashboardShellResponse, 'generated_at' | 'counts' | 'configured_keepers'>
   & { status?: ServerStatus | null }
 
-/** Shell and canonical project snapshots share this root projection. A push
- * completion fences reads already in flight without claiming their auth or
+/** Shell and namespace snapshots share this root projection. A namespace read
+ * or push completion fences reads already in flight without claiming their auth or
  * config/runtime-resolution slices were refreshed. */
 export function hydrateShellRootSnapshot(data: ShellRootSnapshot, completion = false): void {
   if (completion) shellRootCompletionRevision += 1
@@ -1268,7 +1269,7 @@ export function resetExecutionSnapshotGeneration(): void {
  *  Shared by doFetchExecution (HTTP) and SSE execution_snapshot handler. */
 export function hydrateExecutionSnapshot(
   data: DashboardExecutionResponse,
-  opts?: { requestGeneration?: number },
+  opts?: { requestGeneration?: number; rootRevision?: number },
 ): boolean {
   if (
     opts?.requestGeneration !== undefined
@@ -1336,11 +1337,12 @@ export function hydrateExecutionSnapshot(
   // for presentation; that root cannot admit account reads in this response.
   acceptExecutionWorkspace(identity?.epoch ?? null, normalizedStatus?.workspace_root, data.observer_instance_id)
   const previousProject = serverStatus.value?.project
-  if (normalizedStatus) {
+  const acceptsRoot = opts?.rootRevision === undefined || opts.rootRevision === shellRootCompletionRevision
+  if (normalizedStatus && acceptsRoot) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
   }
   const workspaceChanged =
-    previousProject != null
+    acceptsRoot && previousProject != null
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
   if (workspaceChanged) {

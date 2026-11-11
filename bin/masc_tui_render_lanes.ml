@@ -650,13 +650,10 @@ let render_lanes_overview (state : state) =
   let korean = state.ui_language = Lang_ko in
   let projection = Masc_tui_types.lanes_overview_projection state ~rows ~cols in
   let header =
-    let title = screen_title
-        (ui_text state ~ko:" MASC 기능·플러그인" ~en:" MASC Features & plugins") in
-    let reading = match state.lane_inventory with
-      | None -> [title_missing_reading ~error:state.standalone_lanes_error]
+    let readings = match state.lane_inventory with
+      | None -> [String.trim (title_missing_reading ~error:state.standalone_lanes_error)]
       | Some _ -> [] in
-    detail_heading ~cols ~lead:(Lead_text (title ^ " ")) ~id:""
-      ~after:reading ~tail:(connection_badge state)
+    here_row ~cols state ~path:[] ~readings ~position:None
   in
   box_top buf cols;
   box_line buf cols header;
@@ -999,34 +996,20 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   in
   let shown = List.length runs in
   let text ko en = ui_text state ~ko ~en in
-  let coverage =
-    let korean = state.ui_language = Lang_ko in
-    let count = match state.lane_runs_total with
-      | Some total ->
-          Printf.sprintf
-            (if korean then "%s개 읽음 · 보관 %s개" else "%s loaded · %s retained")
-            (Masc_tui_value.Count.grouped shown)
-            (Masc_tui_value.Count.grouped total)
-      | None ->
-          Printf.sprintf (if korean then "%s개 읽음" else "%s loaded")
-            (Masc_tui_value.Count.grouped shown) in
-    let continuation =
-      if state.lane_runs_loading then text " · 읽는 중" " · loading"
-      else match state.lane_runs_next with
-        (* The key the footer and the dispatcher name for the older page. *)
-        | Some _ -> text " · > 앞선 기록" " · > older"
-        | None -> if Option.is_some state.lane_runs then text " · 끝" " · end" else "" in
-    count ^ continuation in
-  (* Laid out like the other title rows that name one thing before the badge.
-     The label was padded to twenty cells here, so at eighty columns the
-     padding pushed the badge past the edge and the frame cut it to
-     "HTTP [co…". *)
+  (* How many rows were read and how many the server keeps is the position:
+     [3/50] of a list read whole, [3/50 · of 8,347] of one read in part. The
+     footer names the key for the older page while there is one. *)
+  let position : Masc_tui_value.Position.t =
+    let at = if shown = 0 then 0 else state.lane_runs_cursor + 1 in
+    match state.lane_runs_total with
+    | Some total when total > shown -> Partial { at; loaded = shown; total }
+    | Some _ | None -> Row { at; total = shown }
+  in
   let header =
-    detail_heading ~cols
-      ~lead:(Lead_text (screen_title " MASC Features" ^ " \xc2\xb7 "))
-      ~id:(observed_lane_label lane)
-      ~after:[ Printf.sprintf " (%s)" coverage ]
-      ~tail:(connection_badge state)
+    here_row ~cols state
+      ~path:[ observed_lane_label lane; text "실행" "runs" ]
+      ~readings:(if state.lane_runs_loading then [ text "읽는 중" "loading" ] else [])
+      ~position:(Some position)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -1920,14 +1903,15 @@ let render_lane_run_detail (state : state) ~run_id =
     | Some _ | None -> None
   in
   let header =
-    detail_heading ~cols
-      ~lead:
-        (Lead_text
-           (screen_title
-              (if measurement then measurement_detail_title
-               else lane_run_detail_title)
-           ^ "  "))
-      ~id:run_id ~after:[] ~tail:(connection_badge state)
+    let text ko en = ui_text state ~ko ~en in
+    let path =
+      match state.lanes_mode with
+      | Lanes_run_detail (lane, _) ->
+          [ observed_lane_label lane; text "실행" "runs"; run_id ]
+      | Lanes_measurement_detail _ -> [ text "측정" "measurement"; run_id ]
+      | Lanes_overview | Lanes_run_list _ | Lanes_inventory_detail _ -> [ run_id ]
+    in
+    here_row ~cols state ~path ~readings:[] ~position:None
   in
   box_top buf cols;
   box_line buf cols header;

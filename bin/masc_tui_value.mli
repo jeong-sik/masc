@@ -81,3 +81,18 @@ module Count : sig
       that count a long list -- [(50 of 8347)] -- carried none (RFC
       tui-one-screen-grammar, section 6.3). *)
 end
+
+(** Where the reader is in what the screen holds. *)
+module Position : sig
+  type t =
+    | Row of { at : int; total : int }
+        (** The selected row, counted from one, and how many rows there
+            are: [7/29]. Nothing selected is [at = 0]. *)
+    | Partial of { at : int; loaded : int; total : int }
+        (** A list read in part: the selected row among the rows read, and
+            how many the server holds: [1/50 · whole 8,347]. *)
+
+  val text : whole:string -> t -> string
+  (** [whole] is the word ahead of the server's total, in the screen's
+      language. *)
+end

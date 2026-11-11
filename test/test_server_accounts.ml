@@ -245,7 +245,31 @@ type installation =
    listener, no public identity and the default HTTP mode: the listener is
    the loopback port alone, whatever the shell of the run holds. An empty
    value is read as unset. *)
-let with_installation f =
+let no_login_client = {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|}
+
+(* The variable of the secret that the GitHub client of a case names. The
+   case that serves sets it; no case sets [unset_secret_env]. *)
+let github_secret_env = "MASC_TEST_ACCOUNTS_GITHUB_SECRET"
+let unset_secret_env = "MASC_TEST_ACCOUNTS_UNSET_SECRET"
+
+let with_github_client ~redirect_uri ~client_secret_env =
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "enabled", `Bool true
+        ; "require_token", `Bool true
+        ; "account_mode", `String "Multi_account"
+        ; ( "github"
+          , `Assoc
+              [ "client_id", `String "client-of-the-case"
+              ; "redirect_uri", `String redirect_uri
+              ; "client_secret_env", `String client_secret_env
+              ] )
+        ])
+;;
+
+let https_redirect = "https://masc.example" ^ Server_login_http.github_callback_path
+
+let with_installation ?(auth_config = no_login_client) f =
   Unix.putenv "MASC_HTTPS_PORT" "0";
   Unix.putenv "MASC_HTTP_BASE_URL" "";
   Unix.putenv "MASC_USE_H2" "auto";
@@ -270,9 +294,7 @@ let with_installation f =
          | Ok _ -> ()
          | Error error ->
            Alcotest.failf "bootstrap refused: %s" (Authz_bootstrap.error_to_string error));
-        write_file
-          (Auth.auth_config_file base)
-          {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+        write_file (Auth.auth_config_file base) auth_config;
         f env { base; config; store; multi_account = multi_account_of ~base ~config }))
 ;;
 
@@ -303,6 +325,19 @@ let refusal_label : Server_accounts.refusal -> string = function
   | Server_accounts.Zone_not_opened error -> "zone not opened: " ^ open_error_label error
   | Server_accounts.Zone_not_trusted uncertain -> "zone not trusted: " ^ uncertain_label uncertain
   | Server_accounts.Zone_not_multi_account mode -> "zone not multi-account: " ^ mode_label mode
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Github_client_refused (Login_client.Secret_variable_unset name)) ->
+    "github client refused: the variable " ^ name ^ " is not set"
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Github_client_refused
+         (Login_client.Client_refused Login_client.Redirect_uri_not_https)) ->
+    "github client refused: the redirect is not https"
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Github_client_refused
+         (Login_client.Client_refused
+            (Login_client.Client_id_empty | Login_client.Client_secret_empty)))
+  | Server_accounts.Login_client_refused (Server_account_login.Google_client_refused _) ->
+    "another login client refusal"
   | Server_accounts.Route_of_another_kind _ -> "route of another kind"
   | Server_accounts.Https_listener_refused _ -> "HTTPS listener refused"
   | Server_accounts.Listener_not_bound { host; port = _; reason = _ } ->
@@ -407,6 +442,27 @@ let test_stops_when_the_accounts_were_turned_off () =
       (boot_outcome env ~port:(free_port ()) multi_account))
 ;;
 
+(* A login client that config.json names and that cannot be built stops the
+   boot: the server does not come up with the login of that provider left
+   out. The port is not bound yet, so nothing is recorded for the CLI. *)
+let test_stops_when_a_login_client_is_refused () =
+  Unix.putenv github_secret_env "secret-of-the-case";
+  List.iter
+    (fun (auth_config, expected) ->
+      with_installation ~auth_config (fun env { base = _; config = _; store = _; multi_account } ->
+        Alcotest.(check string)
+          "the boot over a login client that is refused"
+          expected
+          (boot_outcome env ~port:(free_port ()) multi_account)))
+    [ ( with_github_client ~redirect_uri:https_redirect ~client_secret_env:unset_secret_env
+      , "github client refused: the variable " ^ unset_secret_env ^ " is not set" )
+    ; ( with_github_client
+          ~redirect_uri:("http://masc.example" ^ Server_login_http.github_callback_path)
+          ~client_secret_env:github_secret_env
+      , "github client refused: the redirect is not https" )
+    ]
+;;
+
 let recorded_port ~base =
   match Workspace_connection.read ~base_path:base with
   | Ok recorded -> Option.map Workspace_connection.to_int recorded
@@ -508,7 +564,11 @@ let json_of label body =
 ;;
 
 let test_serves_its_table_alone () =
-  with_installation (fun env { base; config = _; store = _; multi_account } ->
+  Unix.putenv github_secret_env "secret-of-the-case";
+  with_installation
+    ~auth_config:
+      (with_github_client ~redirect_uri:https_redirect ~client_secret_env:github_secret_env)
+    (fun env { base; config = _; store = _; multi_account } ->
     let port = free_port () in
     let net = Eio.Stdenv.net env in
     with_lease multi_account
@@ -590,6 +650,20 @@ let test_serves_its_table_alone () =
         ; "GET", "/ws"
         ; "GET", "/"
         ];
+      (* The login routes are in the table. GitHub is the client of
+         config.json: a start with no Origin gets as far as the route, which
+         refuses it. Google has no member, so its start is the 404 of the
+         route, in the words of the route. *)
+      Alcotest.(check int)
+        "the start of the configured provider, with no Origin"
+        403
+        (fst (request ~net ~port ~meth:"POST" "/auth/github/start"));
+      (let status, body = request ~net ~port ~meth:"POST" "/auth/oidc/start" in
+       Alcotest.(check int) "the start of a provider with no client" 404 status;
+       Alcotest.(check bool)
+         "the 404 is the answer of the login route and not of the router"
+         false
+         (String.equal body (snd (request ~net ~port ~meth:"POST" "/mcp"))));
       Alcotest.(check int)
         "a method the table does not hold for a path it holds"
         405
@@ -640,6 +714,10 @@ let () =
             "the boot stops when the accounts were turned off"
             `Quick
             test_stops_when_the_accounts_were_turned_off
+        ; Alcotest.test_case
+            "the boot stops when a login client is refused"
+            `Quick
+            test_stops_when_a_login_client_is_refused
         ; Alcotest.test_case "the boot stops when the port is taken" `Quick test_stops_when_the_port_is_taken
         ; Alcotest.test_case
             "the boot stops when the port cannot be announced"

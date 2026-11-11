@@ -12,6 +12,7 @@ type refusal =
   | Zone_not_opened of Authz_zone.open_error
   | Zone_not_trusted of Authz_zone.uncertain
   | Zone_not_multi_account of Authz_mode_state.t
+  | Login_client_refused of Server_account_login.refusal
   | Route_of_another_kind of Table.refusal
   | Https_listener_refused of string
   | Listener_not_bound of
@@ -35,6 +36,7 @@ let refusal_to_string = function
     Printf.sprintf
       "the authorization log changed since the boot judged it Multi_account: its mode is now %s"
       (Authz_mode_state.to_string mode)
+  | Login_client_refused refusal -> Server_account_login.refusal_to_string refusal
   | Route_of_another_kind refusal -> Table.refusal_to_string refusal
   | Https_listener_refused reason -> "HTTPS listener: " ^ reason
   | Listener_not_bound { host; port; reason } ->
@@ -103,11 +105,12 @@ let readiness zone (_ : Httpun.Request.t) reqd =
       reqd
 ;;
 
-let register zone router =
+let register ~login zone router =
   router
   |> Server_route.get Server_route.Always_public Server_health_paths.health health
   |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness
   |> Server_route.get Server_route.Always_public Server_health_paths.readiness (readiness zone)
+  |> Server_login_http.add_routes login
 ;;
 
 (* A value of the HTTP mode that is not in its vocabulary stops the boot here,
@@ -193,8 +196,33 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
          ~store_path:(M.multi_account_external_store multi_account))
   in
   let* () = judged_again zone in
+  let* login_clients =
+    Result.map_error
+      (fun refusal -> Login_client_refused refusal)
+      (Server_account_login.clients_of_config
+         ~getenv:Sys.getenv_opt
+         (M.multi_account_login_clients multi_account))
+  in
+  (* A login reaches its provider over [Masc_http_client], which reads the
+     environment, the switch and the network of the process, and over TLS,
+     which draws from the default random source. The single-user boot sets
+     them in its owner state, which this server does not build. *)
+  Crypto_rng.ensure_default ();
+  Eio_context.set_env env;
+  Eio_context.set_switch sw;
+  Eio_context.set_net net;
+  (match login_clients with
+   | { Server_account_login.google = None; github = None } ->
+     Log.Server.warn
+       "config.json names no login client (google, github): the login routes answer 404 and \
+        nobody logs in"
+   | { Server_account_login.google = Some _; github = Some _ | None }
+   | { Server_account_login.google = None; github = Some _ } -> ());
+  let login = Server_account_login.routes ~clock ~zone login_clients in
   let* table =
-    Result.map_error (fun refusal -> Route_of_another_kind refusal) (Table.checked (register zone))
+    Result.map_error
+      (fun refusal -> Route_of_another_kind refusal)
+      (Table.checked (register ~login zone))
   in
   let config = Server_bootstrap_http.make_http_config ~address ~port in
   let* https =

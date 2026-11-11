@@ -447,9 +447,13 @@ let with_official_client_runtimes f =
    lane that resolves, and an HTTP lane with no declared budget is refused. *)
 let fixture_max_output_tokens = 4_096
 
+(* [runtime_observations] binds an HTTP slot id to the backpressure cell and
+   quota scope a materialized runtime would freeze beside it, so a test can
+   put that slot at rest; without it no fixture slot carries rest evidence. *)
 let publish_registry
       ?(cli_slot_ids = [])
       ?(max_output_tokens = Some fixture_max_output_tokens)
+      ?(runtime_observations = [])
       ~lane_id
       ~slot_ids
       resolver_snapshot
@@ -462,7 +466,7 @@ let publish_registry
   let lane : Runtime_schema.exact_output_lane_decl =
     { owner; enabled = true; slot_ids; cli_slot_ids; max_output_tokens; thinking = None }
   in
-  match Runtime_exact_output_registry.publish ~lanes:[ lane ] resolver_snapshot with
+  match Runtime_exact_output_registry.publish ~runtime_observations ~lanes:[ lane ] resolver_snapshot with
   | Ok registry -> registry
   | Error error ->
     Alcotest.failf

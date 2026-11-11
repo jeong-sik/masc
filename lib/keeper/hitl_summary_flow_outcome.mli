@@ -34,6 +34,7 @@ type flow_outcome =
   | Cli_slots_exhausted
   | Cli_released_without_binding
   | Cli_walk_fell_back
+  | Slots_held
   | Cli_release_unconfirmed
   | Cli_bind_unconfirmed
   | Cli_bind_failed

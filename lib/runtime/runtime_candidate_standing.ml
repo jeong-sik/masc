@@ -9,37 +9,25 @@ type policy =
       { start : walk_start
       ; rest_sec : retry_after:float option -> float
       }
-  | Rate_rest_only of { rest_sec : retry_after:float option -> float }
 
 type demotion = Not_demoted | Failed_without_rest | Told_to_rest
 
-let order ~now ~policy ~quota_scope_of ~candidate_backpressure_of candidates =
-  let demotion candidate =
-    let quota_exhausted = Option.fold ~none:false
-      ~some:(fun scope -> Runtime_quota_window.is_exhausted ~scope ~now)
-      (quota_scope_of candidate) in
-    let observed = Option.bind (candidate_backpressure_of candidate)
-      (fun candidate -> Backpressure.candidate_backpressure ~now ~candidate) in
-    if quota_exhausted then Told_to_rest
-    else match observed with
-    | None -> Not_demoted
-    | Some {Backpressure.rate_limit; failed_attempt} ->
-      let rest_sec = match policy with
-        | Keeper_walk {rest_sec; start = _} | Rate_rest_only {rest_sec} -> rest_sec in
-      let rate_rests = match rate_limit with
-        | None -> false
-        | Some (Backpressure.Unknown_scope_rate_limit {noted_at; retry_after}) ->
-          Float.compare now (noted_at +. rest_sec ~retry_after) < 0 in
-      if rate_rests then Told_to_rest
-      else match policy, failed_attempt with
-        | Rate_rest_only _, (Some _ | None)
-        | Keeper_walk _, None -> Not_demoted
-        | Keeper_walk {start = walk; rest_sec = _},
-          Some (Backpressure.Failed_attempt {recorded_by; _}) ->
-          (match walk with
-           | Fresh_walk_by walker when Backpressure.same_recorder walker recorded_by -> Not_demoted
-           | Fresh_walk_by _ | Every_mark_demotes -> Failed_without_rest)
-  in
+let quota_rests ~now ~quota_scope_of candidate =
+  Option.fold ~none:false
+    ~some:(fun scope -> Runtime_quota_window.is_exhausted ~scope ~now)
+    (quota_scope_of candidate)
+
+let observed ~now ~candidate_backpressure_of candidate =
+  Option.bind (candidate_backpressure_of candidate)
+    (fun candidate -> Backpressure.candidate_backpressure ~now ~candidate)
+
+let rate_rests ~now ~rest_sec = function
+  | None -> false
+  | Some (Backpressure.Unknown_scope_rate_limit {noted_at; retry_after}) ->
+    Float.compare now (noted_at +. rest_sec ~retry_after) < 0
+
+(* Stable partition by demotion class, declared order kept inside each. *)
+let in_demotion_order demotion candidates =
   let placed = List.map (fun candidate -> demotion candidate, candidate) candidates in
   let in_place wanted = List.filter_map (fun (actual, candidate) ->
     match wanted, actual with
@@ -49,6 +37,78 @@ let order ~now ~policy ~quota_scope_of ~candidate_backpressure_of candidates =
     | Failed_without_rest, (Not_demoted | Told_to_rest)
     | Told_to_rest, (Not_demoted | Failed_without_rest) -> None) placed in
   in_place Not_demoted @ in_place Failed_without_rest @ in_place Told_to_rest
+
+let order ~now ~policy ~quota_scope_of ~candidate_backpressure_of candidates =
+  let (Keeper_walk {start = walk; rest_sec}) = policy in
+  let demotion candidate =
+    if quota_rests ~now ~quota_scope_of candidate then Told_to_rest
+    else match observed ~now ~candidate_backpressure_of candidate with
+    | None -> Not_demoted
+    | Some {Backpressure.rate_limit; failed_attempt} ->
+      if rate_rests ~now ~rest_sec rate_limit then Told_to_rest
+      else match failed_attempt with
+        | None -> Not_demoted
+        | Some (Backpressure.Failed_attempt {recorded_by; _}) ->
+          (match walk with
+           | Fresh_walk_by walker when Backpressure.same_recorder walker recorded_by -> Not_demoted
+           | Fresh_walk_by _ | Every_mark_demotes -> Failed_without_rest)
+  in
+  in_demotion_order demotion candidates
+
+type 'a exact_order =
+  { walk : 'a list
+  ; held : ('a * float) list
+  }
+
+(* A rate-limited candidate rests on the path rest a Keeper walk uses: its
+   usable Retry-After (at least one second), or the configured floor clamped
+   to the fallback cap. The three exact walks each passed this same rest. *)
+let exact_rate_rest_sec ~retry_after =
+  Keeper_runtime_failure_route.path_rest_sec
+    ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+    ~retry_class:Keeper_runtime_failure_route.Rate_limited
+    ~retry_after_hint:retry_after
+
+(* The time the provider stated for [candidate] while it is still ahead at
+   [now]: its quota scope's stated reset, or the end of its own usable
+   Retry-After, whichever is later. A rest MASC chose states no time. *)
+let stated_until ~now ~quota_scope_of ~candidate_backpressure_of candidate =
+  let scope_reset =
+    Option.bind (quota_scope_of candidate) (fun scope ->
+      match Runtime_quota_window.rest ~scope ~now with
+      | Some (Runtime_quota_window.Reset_stated resets_at) -> Some resets_at
+      | Some (Runtime_quota_window.Observed_until _) | None -> None) in
+  let retry_after_ends =
+    match observed ~now ~candidate_backpressure_of candidate with
+    | Some { Backpressure.rate_limit =
+               Some (Backpressure.Unknown_scope_rate_limit {noted_at; retry_after})
+           ; failed_attempt = _ } ->
+      Option.bind (Keeper_runtime_failure_route.usable_retry_after retry_after)
+        (fun hint ->
+           let ends = noted_at +. hint in
+           if Float.compare now ends < 0 then Some ends else None)
+    | Some {Backpressure.rate_limit = None; failed_attempt = _} | None -> None in
+  match scope_reset, retry_after_ends with
+  | Some reset, Some ends -> Some (Float.max reset ends)
+  | (Some _ as until), None | None, (Some _ as until) -> until
+  | None, None -> None
+
+let order_exact ~now ~quota_scope_of ~candidate_backpressure_of candidates =
+  let held, callable = List.partition_map (fun candidate ->
+    match stated_until ~now ~quota_scope_of ~candidate_backpressure_of candidate with
+    | Some until -> Either.Left (candidate, until)
+    | None -> Either.Right candidate) candidates in
+  (* Failed-attempt marks belong to Keeper walks; an exact walk does not
+     read them. *)
+  let demotion candidate =
+    if quota_rests ~now ~quota_scope_of candidate then Told_to_rest
+    else match observed ~now ~candidate_backpressure_of candidate with
+    | None -> Not_demoted
+    | Some {Backpressure.rate_limit; failed_attempt = _} ->
+      if rate_rests ~now ~rest_sec:exact_rate_rest_sec rate_limit then Told_to_rest
+      else Not_demoted
+  in
+  { walk = in_demotion_order demotion callable; held }
 
 type observation =
   | Answered

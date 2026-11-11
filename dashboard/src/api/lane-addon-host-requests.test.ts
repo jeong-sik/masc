@@ -23,6 +23,7 @@ describe('original worker host request observations', () => {
       { request_id: 'slots', reason: { reason: 'no_admitted_slots' } },
       { request_id: 'running', reason: { reason: 'attempt_in_progress' } },
       { request_id: 'registry', reason: { reason: 'lane_registry_unavailable', detail: 'registry replacing' } },
+      { request_id: 'held', reason: { reason: 'every_slot_held', until: 1762732800 } },
       { request_id: 'provider', reason: { reason: 'provider_unavailable', detail: 'quota window closed' } },
       { request_id: 'auth', reason: { reason: 'provider_auth_refused', detail: 'credentials rejected' } },
       { request_id: 'configuration', reason: { reason: 'provider_configuration_refused', detail: '' } },

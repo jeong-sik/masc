@@ -378,11 +378,12 @@ val badge_row : cols:int -> lead:string -> label:string -> badge:string -> strin
     drawn whole whenever [lead] and [badge] fit in the row; a row too narrow for
     those two is cut at its end like any other. *)
 
-val runtime_detail_title : string
+val runtime_step : Masc_tui_types.state -> string
+(** The step the Runtime screens take from System. *)
+
 val keeper_calls_lead : string
 (** What the headings laid out by {!Masc_tui_ansi.detail_heading} draw before
-    the id: one runtime's detail, and one keeper's
-    calls. *)
+    the id: one keeper's calls. *)
 
 val coordinator_status_row :
   Masc_tui_types.state -> style:string -> string -> string

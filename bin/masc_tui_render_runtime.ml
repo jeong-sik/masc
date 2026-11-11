@@ -535,9 +535,8 @@ let render_runtime_detail (state : state) target =
   in
   box_top buf cols;
   box_line buf cols
-    (detail_heading ~cols
-       ~lead:(Lead_text (screen_title (if state.ui_language = Lang_ko then " MASC 시스템 / 런타임 상세" else runtime_detail_title) ^ "  "))
-       ~id:target_label ~after:[] ~tail:(connection_badge state));
+    (here_row ~cols state ~path:[ runtime_step state; target_label ]
+       ~readings:[] ~position:None);
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (framed_inner_width cols - 4)) in
   let total = List.length lines in
@@ -706,9 +705,8 @@ let render_runtime_reading (state : state) =
           | None -> title_missing_reading ~error:None
           | Some _ -> ""
         in
-        Printf.sprintf "%s  %s  %s  %s"
-          (screen_title (if ko then " MASC 시스템 / 런타임" else " MASC System / Runtime")) reading_note timestamp
-          (connection_badge state)
+        here_row ~cols state ~path:[ runtime_step state ]
+          ~readings:[ String.trim reading_note; timestamp ] ~position:None
     | Some snapshot ->
         let probe_status =
           match snapshot.Masc.Tui_decode.rss_probe with
@@ -728,7 +726,7 @@ let render_runtime_reading (state : state) =
           | Masc_tui_types.Runtime_all -> `Runtime_all
         in
         runtime_substrate_heading state ~cols
-          ~title:(screen_title (if ko then " MASC 시스템 / 런타임" else " MASC System / Runtime"))
+          ~title:(here_path state ~path:[ runtime_step state ])
           ~current
           ~after:[ Printf.sprintf "  %s%s" probe_status probe_read; "  " ^ timestamp ]
   in

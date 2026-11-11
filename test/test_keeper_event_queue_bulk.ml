@@ -1,140 +1,184 @@
-(* The fleet bulk cancel plans rows once and cancels exactly those rows, so a
-   dry run and the execution it authorises can never disagree. These tests pin
-   the pure planning and execution seams; the durable per-Keeper transition
-   they call is covered by the event-queue suite. *)
-
 open Alcotest
 
 module Bulk = Server_dashboard_http_keeper_event_queue_bulk
 module Keeper_owner_registry = Masc.Keeper_owner_registry
+module Queue = Keeper_event_queue
+module State = Keeper_event_queue_state
+module Persistence = Keeper_event_queue_persistence
 
-let rm_rf dir =
-  let rec rm path =
-    if Sys.file_exists path
-    then
-      if Sys.is_directory path
-      then (
-        Sys.readdir path |> Array.iter (fun entry -> rm (Filename.concat path entry));
-        Unix.rmdir path)
-      else Sys.remove path
-  in
-  rm dir
-;;
+let require_ok = function Ok value -> value | Error detail -> fail detail
+let require_error = function Error _ -> () | Ok _ -> fail "request unexpectedly accepted"
 
-let rec mkdir_p path =
-  if not (Sys.file_exists path)
-  then (
-    mkdir_p (Filename.dirname path);
-    Unix.mkdir path 0o755)
-;;
-
+let rm_rf = Fs_compat.remove_tree
+let mkdir_p path = Fs_compat.mkdir_p path
 let write_file path contents =
-  let oc = open_out path in
-  output_string oc contents;
-  close_out oc
+  let channel = open_out_bin path in
+  Fun.protect ~finally:(fun () -> close_out_noerr channel)
+    (fun () -> output_string channel contents)
 ;;
 
-let row ?(source_ref = String.make 64 'a') ?(source_incarnation = 1L) ~keeper ~source ~since () =
-  { Bulk.keeper_name = keeper
-  ; source_ref
-  ; source_incarnation
-  ; source_label = source
-  ; since
-  }
+let row ?(source_ref = String.make 64 'a') ?(source_incarnation = 1L)
+      ~keeper ~source ~since () : Bulk.row =
+  { keeper_name = keeper; source_ref; source_incarnation; source_label = source
+  ; source_arrived_at = since -. 100.0; first_admitted_at = Some since }
 ;;
 
 let rows () =
   [ row ~keeper:"alpha" ~source:"board_signal" ~since:100.0 ()
-  ; row ~keeper:"alpha" ~source:"schedule_due" ~since:90.0 ()
-  ; row ~keeper:"beta" ~source:"board_signal" ~since:80.0 ()
-  ]
+  ; row ~source_ref:(String.make 64 'b') ~keeper:"alpha" ~source:"schedule_due" ~since:90.0 ()
+  ; row ~keeper:"beta" ~source:"board_signal" ~since:80.0 () ]
 ;;
 
-let test_parse_defaults_to_dry_run () =
-  let body =
-    {|{"schema":"keeper_event_queue.bulk.request.v1","action":"cancel","reason":"operator cleared the queue"}|}
-  in
-  match Bulk.parse body with
-  | Error detail -> fail detail
-  | Ok request ->
-    check bool "dry run by default" true request.Bulk.dry_run;
-    check (option string) "no confirm token" None request.confirm;
-    check (option (list string)) "no keeper filter" None request.filter.keepers
+let selection (row : Bulk.row) : Bulk.selection =
+  { keeper_name = row.keeper_name; source_ref = row.source_ref
+  ; source_incarnation = row.source_incarnation }
 ;;
 
-let test_parse_rejects_unknown_schema () =
-  let body = {|{"schema":"nope","action":"cancel","reason":"x"}|} in
-  match Bulk.parse body with
-  | Ok _ -> fail "unknown schema was accepted"
-  | Error _ -> ()
+let no_filter : Bulk.filter = { keepers = None; sources = None }
+let preview filter =
+  Yojson.Safe.to_string (`Assoc [ "schema", `String Bulk.schema
+                               ; "action", `String "preview"; "filter", filter ])
 ;;
 
-let test_parse_accepts_execution_with_confirm () =
-  let body =
-    {|{"schema":"keeper_event_queue.bulk.request.v1","action":"cancel","dry_run":false,"confirm":"cancel-pending-events","reason":"operator cleared the queue"}|}
-  in
-  match Bulk.parse body with
-  | Error detail -> fail detail
-  | Ok request ->
-    check bool "execution requested" false request.Bulk.dry_run;
-    check (option string) "confirm token" (Some "cancel-pending-events") request.confirm
+let test_preview () =
+  match require_ok (Bulk.parse (preview (`Assoc []))) with
+  | Bulk.Preview filter -> check (option (list string)) "all keepers" None filter.keepers
+  | Bulk.Cancel _ -> fail "preview became a mutation"
 ;;
 
-let test_plan_filters_by_keeper () =
-  let filter = { Bulk.keepers = Some [ "alpha" ]; sources = None } in
-  let planned = Bulk.plan_rows filter (rows ()) in
-  check int "only alpha rows" 2 (List.length planned);
-  check bool "every planned row is alpha" true
-    (List.for_all (fun r -> String.equal r.Bulk.keeper_name "alpha") planned)
+let cancel_body selections =
+  Yojson.Safe.to_string (`Assoc
+    [ "schema", `String Bulk.schema; "action", `String "cancel"
+    ; "reason", `String "operator disposition"; "filter", `Assoc []
+    ; "selections", `List selections ])
 ;;
 
-let test_plan_filters_by_source () =
-  let filter = { Bulk.keepers = None; sources = Some [ "schedule_due" ] } in
-  let planned = Bulk.plan_rows filter (rows ()) in
-  check int "only schedule rows" 1 (List.length planned);
-  check string "the schedule row's keeper" "alpha" (List.hd planned).Bulk.keeper_name
+let selection_json incarnation =
+  `Assoc [ "keeper_name", `String "alpha"; "source_ref", `String (String.make 64 'a')
+         ; "source_incarnation", `String incarnation ]
 ;;
 
-let test_plan_without_filter_keeps_every_row () =
-  let filter = { Bulk.keepers = None; sources = None } in
-  check int "all rows" 3 (List.length (Bulk.plan_rows filter (rows ())))
+let test_int64_selection () =
+  match require_ok (Bulk.parse (cancel_body [ selection_json "9007199254740993" ])) with
+  | Bulk.Cancel { selections = [ selected ]; _ } ->
+    check int64 "no JavaScript rounding" 9007199254740993L selected.source_incarnation
+  | Bulk.Cancel _ | Bulk.Preview _ -> fail "wrong exact selection"
 ;;
 
-(* The invariant the operator relies on: the number a dry run reports is the
-   number of rows the execution then cancels, and no filtered-out row is
-   touched. *)
-let test_execution_cancels_exactly_the_planned_rows () =
-  let filter = { Bulk.keepers = Some [ "alpha" ]; sources = None } in
-  let planned = Bulk.plan_rows filter (rows ()) in
-  let seen = ref [] in
-  let cancel ~operation_id:_ ~reason:_ r =
-    seen := r :: !seen;
-    `Assoc [ "keeper_name", `String r.Bulk.keeper_name; "ok", `Bool true ]
-  in
-  let results = Bulk.execute_rows ~cancel ~operation_id:"op" ~reason:"x" planned in
-  check int "dry-run count equals executed count" (List.length planned)
-    (List.length results);
-  check int "recorder saw every planned row" (List.length planned)
-    (List.length !seen);
-  check bool "no beta row was cancelled" true
-    (List.for_all (fun r -> not (String.equal r.Bulk.keeper_name "beta")) !seen)
+let test_reject_ambiguous_requests () =
+  List.iter (fun body -> Bulk.parse body |> require_error)
+    [ {|{"schema":"keeper_event_queue.bulk.request.v1","action":"cancel","dry_run":false,"confirm":"cancel-pending-events","reason":"x"}|}
+    ; preview (`Assoc [ "keeper", `List [ `String "alpha" ] ])
+    ; preview (`Assoc [ "keepers", `List []; "keepers", `List [ `String "alpha" ] ])
+    ; {|{"schema":"keeper_event_queue.bulk.request.v2","action":"preview","action":"cancel","filter":{}}|}
+    ; {|{"schema":"keeper_event_queue.bulk.request.v2","action":"cancel","reason":"x","filter":{}}|}
+    ; cancel_body []
+    ; cancel_body [ selection_json "1"; selection_json "1" ]
+    ; cancel_body [ selection_json "01" ]
+    ; cancel_body [ `Assoc [ "keeper_name", `String "alpha"; "source_ref", `String (String.make 64 'a')
+                          ; "source_incarnation", `Int 1 ] ]
+    ; cancel_body [ `Assoc [ "keeper_name", `String "alpha"; "source_ref", `String (String.make 64 'a')
+                          ; "source_incarnation", `String "1"; "all", `Bool true ] ] ]
 ;;
 
-let test_count_by_keeper () =
-  let counts = Bulk.count_by (fun r -> r.Bulk.keeper_name) (rows ()) in
-  check (list (pair string int)) "keeper counts"
-    [ "alpha", 2; "beta", 1 ]
-    counts
+let test_selection_does_not_expand () =
+  let original = List.hd (rows ()) in
+  let selected = require_ok (Bulk.select_rows no_filter [ selection original ] (rows ())) in
+  check int "only the previewed row" 1 (List.length selected);
+  check string "same source" original.source_ref (List.hd selected).source_ref;
+  Bulk.select_rows { keepers = Some [ "beta" ]; sources = None }
+    [ selection original ] (rows ()) |> require_error;
+  let advanced = { original with Bulk.source_incarnation = 2L } in
+  Bulk.select_rows no_filter [ selection original ] [ advanced ] |> require_error
 ;;
 
-let test_oldest_age_is_positive () =
-  match Bulk.oldest_age_seconds (rows ()) with
-  | None -> fail "expected an oldest age"
-  | Some age -> check bool "oldest age is positive" true (age > 0.0)
-;;
-
-let test_oldest_age_of_empty_is_none () =
+let test_filters_and_age () =
+  check int "keeper filter" 2
+    (List.length (Bulk.plan_rows { keepers = Some [ "alpha" ]; sources = None } (rows ())));
+  check int "source filter" 1
+    (List.length (Bulk.plan_rows { keepers = None; sources = Some [ "schedule_due" ] } (rows ())));
+  check (list (pair string int)) "keeper counts" [ "alpha", 2; "beta", 1 ]
+    (Bulk.count_by (fun (row : Bulk.row) -> row.keeper_name) (rows ()));
+  let unknown = { (List.hd (rows ())) with Bulk.first_admitted_at = None } in
+  check (option (float 0.0)) "source timestamp does not invent admission age" None
+    (Bulk.oldest_age_seconds [ unknown ]);
   check (option (float 0.0)) "empty has no age" None (Bulk.oldest_age_seconds [])
+;;
+
+let with_durable_queue f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool pool) (fun () ->
+    let base_path = Filename.temp_file "bulk-exact-selection" "" in
+    Sys.remove base_path;
+    Unix.mkdir base_path 0o700;
+    Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
+      let config = Workspace_core.default_config base_path in
+      ignore (Workspace_core.init config ~agent_name:(Some "test"));
+      f ~config ~base_path ~keeper_name:"bulk-orphan"))
+;;
+
+let enqueue ~base_path ~keeper_name id =
+  let source : Queue.stimulus =
+    { post_id = id; urgency = Queue.Normal; arrived_at = Time_compat.now (); payload = Queue.Bootstrap }
+  in
+  Persistence.update_result ~base_path ~keeper_name (fun queue -> Queue.enqueue queue source)
+  |> require_ok
+;;
+
+let read_pending ~base_path ~keeper_name =
+  Persistence.load_state_result ~base_path ~keeper_name |> require_ok
+;;
+
+let test_two_cancellations_project_before_next () =
+  with_durable_queue (fun ~config ~base_path ~keeper_name ->
+    enqueue ~base_path ~keeper_name "first";
+    enqueue ~base_path ~keeper_name "second";
+    let planned = Bulk.rows_for_keeper ~base_path keeper_name |> require_ok in
+    let results = Bulk.execute_rows ~cancel:(Bulk.cancel_row ~config)
+                    ~operation_id:"same-owner" ~reason:"operator cleared both" planned in
+    check int "both selected rows have outcomes" 2 (List.length results);
+    List.iter (fun (result : Bulk.row_result) -> match result.status with
+      | Bulk.Cancelled -> ()
+      | Bulk.Committed_followup_failed -> fail "projection did not complete"
+      | Bulk.Failed detail -> fail detail) results;
+    let state = read_pending ~base_path ~keeper_name in
+    check int "no pending work" 0 (List.length (State.pending_selections state));
+    check int "no occupied transition outbox" 0 (List.length (State.transition_outbox state)))
+;;
+
+let test_new_enqueue_survives_execution () =
+  with_durable_queue (fun ~config ~base_path ~keeper_name ->
+    enqueue ~base_path ~keeper_name "previewed";
+    let planned = Bulk.rows_for_keeper ~base_path keeper_name |> require_ok in
+    enqueue ~base_path ~keeper_name "arrived-after-preview";
+    let current = Bulk.rows_for_keeper ~base_path keeper_name |> require_ok in
+    let selected = Bulk.select_rows no_filter (List.map selection planned) current |> require_ok in
+    let results = Bulk.execute_rows ~cancel:(Bulk.cancel_row ~config)
+                    ~operation_id:"frozen-target" ~reason:"only previewed" selected in
+    check int "new row was not selected" 1 (List.length results);
+    let ids = State.pending_selections (read_pending ~base_path ~keeper_name)
+              |> List.map (fun (row : State.pending_selection) -> row.source.post_id) in
+    check (list string) "new arrival survives" [ "arrived-after-preview" ] ids)
+;;
+
+let test_committed_projection_failure_stays_visible () =
+  with_durable_queue (fun ~config ~base_path ~keeper_name ->
+    enqueue ~base_path ~keeper_name "selected";
+    let selected = Bulk.rows_for_keeper ~base_path keeper_name |> require_ok |> List.hd in
+    let ledger = Masc.Keeper_reaction_ledger.store_dir ~base_path ~keeper_name in
+    mkdir_p (Filename.dirname ledger);
+    write_file ledger "a file blocks the ledger directory";
+    let result = Bulk.cancel_row ~config ~operation_id:"projection-failure" ~reason:"operator" selected in
+    (match result.status with
+     | Bulk.Committed_followup_failed -> ()
+     | Bulk.Cancelled -> fail "failed ledger projection reported complete"
+     | Bulk.Failed detail -> fail ("committed cancellation became an unapplied error: " ^ detail));
+    let state = read_pending ~base_path ~keeper_name in
+    check int "primary cancellation remains committed" 0 (List.length (State.pending_selections state));
+    check int "exact outbox retained for recovery" 1 (List.length (State.transition_outbox state)))
 ;;
 
 (* The census must not turn a read failure into an empty fleet. The dry-run
@@ -233,46 +277,14 @@ let test_backup_is_written_on_a_workspace_without_the_folder () =
 ;;
 
 let () =
-  run
-    "keeper_event_queue_bulk"
-    [ ( "backup"
-      , [ test_case
-            "is written under .masc on a workspace without the folder"
-            `Quick
-            test_backup_is_written_on_a_workspace_without_the_folder
-        ] )
-    ; ( "parse"
-      , [ test_case "defaults to dry run" `Quick test_parse_defaults_to_dry_run
-        ; test_case "rejects unknown schema" `Quick test_parse_rejects_unknown_schema
-        ; test_case
-            "accepts execution with confirm"
-            `Quick
-            test_parse_accepts_execution_with_confirm
-        ] )
-    ; ( "plan"
-      , [ test_case "filters by keeper" `Quick test_plan_filters_by_keeper
-        ; test_case "filters by source" `Quick test_plan_filters_by_source
-        ; test_case
-            "without filter keeps every row"
-            `Quick
-            test_plan_without_filter_keeps_every_row
-        ] )
-    ; ( "execute"
-      , [ test_case
-            "cancels exactly the planned rows"
-            `Quick
-            test_execution_cancels_exactly_the_planned_rows
-        ] )
-    ; ( "counts"
-      , [ test_case "counts by keeper" `Quick test_count_by_keeper
-        ; test_case "oldest age is positive" `Quick test_oldest_age_is_positive
-        ; test_case "empty has no age" `Quick test_oldest_age_of_empty_is_none
-        ] )
-    ; ( "census"
-      , [ test_case
-            "a read failure is an error, not an empty fleet"
-            `Quick
-            test_census_read_failure_is_an_error
-        ] )
-    ]
-;;
+  run "keeper_event_queue_bulk"
+    [ "codec", [ test_case "preview is read-only" `Quick test_preview
+               ; test_case "int64 stays exact" `Quick test_int64_selection
+               ; test_case "rejects ambiguous or unbound mutations" `Quick test_reject_ambiguous_requests ]
+    ; "selection", [ test_case "selection cannot expand or cross filters" `Quick test_selection_does_not_expand
+                   ; test_case "filters and admission age" `Quick test_filters_and_age ]
+    ; "durable", [ test_case "two rows of one keeper finish their own outboxes" `Quick test_two_cancellations_project_before_next
+                 ; test_case "new enqueue outside preview survives" `Quick test_new_enqueue_survives_execution
+                 ; test_case "committed cancellation survives projection failure" `Quick test_committed_projection_failure_stays_visible ]
+    ; "census", [ test_case "read failure stays an error" `Quick test_census_read_failure_is_an_error ]
+    ; "backup", [ test_case "creates operation target record folder" `Quick test_backup_is_written_on_a_workspace_without_the_folder ] ]

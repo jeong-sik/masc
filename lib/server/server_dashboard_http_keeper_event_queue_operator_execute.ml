@@ -76,6 +76,16 @@ type audit_source =
   ; payload_kind : string
   }
 
+type completion =
+  | Complete
+  | Committed_followup_failed
+
+type outcome =
+  { audit_source : audit_source option
+  ; response : Yojson.Safe.t
+  ; completion : completion
+  }
+
 let audit_source_of_stimulus source =
   { post_id = source.Keeper_event_queue.post_id
   ; payload_kind = Keeper_event_queue.payload_kind_label source.payload
@@ -95,6 +105,25 @@ let projected_result_json witness =
     [ "status", `String "already_applied"
     ; "transition_id", `String witness.Keeper_event_queue_state.transition_id
     ]
+;;
+
+let transition_outcome source result =
+  { audit_source = Some (audit_source_of_stimulus source)
+  ; response = transition_result_json result
+  ; completion =
+      (match result with
+       | Keeper_registry_event_queue.Transition_applied _
+       | Keeper_registry_event_queue.Transition_already_applied _ -> Complete
+       | Keeper_registry_event_queue.Transition_committed_followup_failed _ ->
+         Committed_followup_failed)
+  }
+;;
+
+let projected_outcome witness =
+  { audit_source = Some (audit_source_of_witness witness)
+  ; response = projected_result_json witness
+  ; completion = Complete
+  }
 ;;
 
 let prior_cancellation_for_request
@@ -245,6 +274,43 @@ let fresh_transfer_for_request
   Ok { transfer; applied_at = Time_compat.now () }
 ;;
 
+let project_cancellation_result ~base_path ~keeper_name result =
+  let project (receipt : Keeper_event_queue_state.transition_receipt) =
+    Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name
+      ~expected_transition_id:receipt.Keeper_event_queue_state.transition_id
+  in
+  let finish receipt projected =
+    match projected with
+    | Ok () -> result
+    | Error detail ->
+      Keeper_registry_event_queue.Transition_committed_followup_failed
+        { receipt; stage = `Projection; detail }
+  in
+  match result with
+  | Keeper_registry_event_queue.Transition_committed_followup_failed _ -> result
+  | Keeper_registry_event_queue.Transition_applied receipt ->
+    finish receipt (project receipt)
+  | Keeper_registry_event_queue.Transition_already_applied receipt ->
+    (* A different head can only follow retirement of this receipt: the
+       canonical queue admits one transition at a time. Do not project a
+       later operation while replaying an already settled cancellation. *)
+    let projected =
+      let* state =
+        Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
+      in
+      match Keeper_event_queue_state.transition_outbox state with
+      | [] -> Ok ()
+      | [ entry ] ->
+        if String.equal entry.receipt.transition_id receipt.transition_id
+        then project receipt
+        else Ok ()
+      | _ :: _ :: _ -> Error "event queue transition outbox cardinality invalid"
+    in
+    finish receipt projected
+;;
+
 let execute_cancellation ~base_path ~keeper_name prepared =
   let cancellation = prepared.cancellation in
   Keeper_registry_event_queue.cancel_pending_accepted_result
@@ -253,7 +319,8 @@ let execute_cancellation ~base_path ~keeper_name prepared =
     ~applied_at:prepared.applied_at
     ~cancellation
   |> Result.map (fun result ->
-    Some (audit_source_of_stimulus cancellation.source), transition_result_json result)
+    project_cancellation_result ~base_path ~keeper_name result
+    |> transition_outcome cancellation.source)
 ;;
 
 let target_projection_failure_json source_result detail =
@@ -264,6 +331,13 @@ let target_projection_failure_json source_result detail =
     ; "stage", `String "target_projection"
     ; "detail", `String detail
     ]
+;;
+
+let target_projection_failure source source_result detail =
+  { audit_source = Some (audit_source_of_stimulus source)
+  ; response = target_projection_failure_json source_result detail
+  ; completion = Committed_followup_failed
+  }
 ;;
 
 let execute_transfer ~config ~base_path ~keeper_name prepared =
@@ -280,7 +354,7 @@ let execute_transfer ~config ~base_path ~keeper_name prepared =
     in
     match source_result with
     | Keeper_registry_event_queue.Transition_committed_followup_failed _ ->
-      Ok (Some (audit_source_of_stimulus transfer.source), transition_result_json source_result)
+      Ok (transition_outcome transfer.source source_result)
     | Keeper_registry_event_queue.Transition_applied _
     | Keeper_registry_event_queue.Transition_already_applied _ ->
       (match
@@ -298,26 +372,22 @@ let execute_transfer ~config ~base_path ~keeper_name prepared =
               ~base_path
               transfer.to_keeper :
               Keeper_registry.wakeup_outcome);
-         Ok (Some (audit_source_of_stimulus transfer.source), transition_result_json source_result)
+         Ok (transition_outcome transfer.source source_result)
        | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
-         Ok
-           ( Some (audit_source_of_stimulus transfer.source)
-           , target_projection_failure_json source_result detail )
+         Ok (target_projection_failure transfer.source source_result detail)
        | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
          Ok
-           ( Some (audit_source_of_stimulus transfer.source)
-           , target_projection_failure_json
-               source_result
-               (Keeper_registry_event_queue.transfer_target_error_to_string error) )
+           (target_projection_failure
+              transfer.source
+              source_result
+              (Keeper_registry_event_queue.transfer_target_error_to_string error))
        | Keeper_registry_event_queue.Transfer_projection_shutdown_reserved operation_id ->
          let detail =
            Printf.sprintf
              "target Keeper shutdown owns durable intake operation=%s"
              (Keeper_shutdown_types.Operation_id.to_string operation_id)
          in
-         Ok
-           ( Some (audit_source_of_stimulus transfer.source)
-           , target_projection_failure_json source_result detail ))
+         Ok (target_projection_failure transfer.source source_result detail))
   in
   match
     Keeper_shutdown_intake_fence.run_transfer_intake_if_open
@@ -368,11 +438,13 @@ let execute_reprioritization
        keeper_name :
        Keeper_registry.wakeup_outcome);
   Ok
-    ( Some (audit_source_of_stimulus selection.source)
-    , `Assoc
+    { audit_source = Some (audit_source_of_stimulus selection.source)
+    ; response = `Assoc
         [ "status", `String "applied"
         ; "revision", `String (Int64.to_string revision)
-        ] )
+        ]
+    ; completion = Complete
+    }
 ;;
 
 let validate_fresh_transfer_target config target_keeper =
@@ -408,7 +480,7 @@ let replay_committed_request ~config ~base_path ~keeper_name request =
     (match prepared with
      | None -> Ok None
      | Some (Cancellation_projected witness) ->
-       Ok (Some (Some (audit_source_of_witness witness), projected_result_json witness))
+       Ok (Some (projected_outcome witness))
      | Some (Cancellation_current prepared) ->
        execute_cancellation ~base_path ~keeper_name prepared
        |> Result.map Option.some)
@@ -435,7 +507,7 @@ let replay_committed_request ~config ~base_path ~keeper_name request =
     (match prepared with
      | None -> Ok None
      | Some (Transfer_projected witness) ->
-       Ok (Some (Some (audit_source_of_witness witness), projected_result_json witness))
+       Ok (Some (projected_outcome witness))
      | Some (Transfer_current prepared) ->
        execute_transfer ~config ~base_path ~keeper_name prepared
        |> Result.map Option.some)
@@ -481,7 +553,7 @@ let run_admitted_request
     in
     (match prepared with
      | Cancellation_projected witness ->
-       Ok (Some (audit_source_of_witness witness), projected_result_json witness)
+       Ok (projected_outcome witness)
      | Cancellation_current prepared ->
        execute_cancellation ~base_path ~keeper_name prepared)
   | Transfer
@@ -519,7 +591,7 @@ let run_admitted_request
       in
       (match prepared with
        | Transfer_projected witness ->
-         Ok (Some (audit_source_of_witness witness), projected_result_json witness)
+         Ok (projected_outcome witness)
        | Transfer_current prepared ->
          execute_transfer ~config ~base_path ~keeper_name prepared)
   | Reprioritize { source_ref; source_incarnation; urgency } ->

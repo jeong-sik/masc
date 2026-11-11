@@ -11,7 +11,7 @@
 | 호스트 | macOS, M3 Max 한 대. 측정하는 동안 다른 부하가 있었다 |
 | masc 서버 | 설치된 바이너리를 `scripts/harness/perf/http_multiplex_probe.py` 의 `OwnedServer` 로 띄웠다 |
 | 격리 | 새 base path(임시 디렉터리), loopback 빈 포트, Keeper 끔, gRPC·WS 끔, 빈 포트의 TLS 리스너 |
-| build | 각 탐침이 `/health` 에서 읽었다. run1 `0a7164246935`, run3~run6 `57b928783c0b`. run8 `eb22878fa756`, run9 `1c5524344b0f`. run2 는 기록하지 않았다. 두 build 의 전송 코드는 같다 |
+| build | 각 탐침이 `/health` 에서 읽었다. run1 `0a7164246935`, run3~run6 `57b928783c0b`. run8 `eb22878fa756`, run9 `1c5524344b0f`, run10·run12 `c9b8e1af3cbe`, run11 `379d483de91a`. run2 는 기록하지 않았다. 두 build 의 전송 코드는 같다 |
 | 인증 | 격리 서버가 loopback 운영자에게 주는 dashboard dev token(`/api/v1/dashboard/dev-token`). 어떤 파일에도 쓰지 않았다 |
 | 탐침 클라이언트 | `uv run --script` 로 돌렸다. PEP 723 의존성은 `httpx[http2]==0.28.1` 이다(python-h2 포함). Python 3.14.4, OpenSSL 3.6.4 |
 | TLS 벤치 | masc 밖 OCaml 실행 파일. OCaml 5.5.1 opam switch: eio 1.3, tls·tls-eio 2.1.2, x509 1.0.6, mirage-crypto 1.2.0, digestif 1.3.0. 인증서는 EC P-256 자체 서명(CN=127.0.0.1) |
@@ -33,6 +33,9 @@
 | 벤치 run3 | 11-11 11:55~12:05 | `tls-write-bench/harness3.py`, `tls-write-bench/goclient/main.go` | `tls-write-bench/run3.jsonl` | tls 2.1.5. 소켓 4종(`pieces` = 호출마다 버퍼) × suite 2종 × 쓰기 크기 4종 × 클라이언트 2종(OpenSSL, Go `crypto/tls`). 한 연결 5회 중앙값. 다른 빌드가 돌던 장비에서 한 번 돌았다 |
 | run8 | 11-11 10:17:01 | `h2_stall_probe.py` | `run8-stall.json` | run6 과 같은 장면을 RFC-0518 D1·D2 가 든 build `eb22878fa756` 에서 다시 돌림. 탐침이 스트림마다 RST 를 받은 시각과 서버의 reset 로그 줄 수를 더 적는다 |
 | run9 | 11-11 10:14:44 | `h2_sse_leak_probe.py` | `run9-runs.json`, `run9-samples.jsonl` | run1 과 같은 장면을 RFC-0518 D1·D2·D3·D7·D9 가 든 build `1c5524344b0f` 에서 다시 돌림 |
+| run10 | 11-11 13:02:09 | `ledger_starvation_probe.py` | `run10-ledger.json` | run5 와 같은 장면을 RFC-0518 D5 가 든 설치 build `c9b8e1af3cbe` 에서 다시 돌림 |
+| run11 | 11-11 13:08:59 | `tls_cpu_probe.py`, `tls_client.py` | `run11-tls-cpu-before.json` | run4 와 같은 장면. D8 이 없는 build `379d483de91a`(main `b88dd6902027` 위의 다른 branch 빌드, tls 2.1.5) |
+| run12 | 11-11 13:09:26 | `tls_cpu_probe.py`, `tls_client.py` | `run12-tls-cpu.json` | run11 바로 뒤에 같은 장면을 D4·D5·D6·D8 이 든 설치 build `c9b8e1af3cbe` 에서 돌림 |
 
 `summarize.py` 는 run1 의 출력 디렉터리를 표로 바꾼다.
 
@@ -128,7 +131,7 @@ TP_SCENES="8:65535:65535:frame:0:3" TP_LABEL=two ./test_h2_request_fibers.exe te
 
 ## run8·run9: RFC-0518 층이 들어간 설치 build 로 다시 돌린 결과, 2026-11-11
 
-설치된 바이너리를 run1·run6 과 같은 방식으로 격리해 띄웠다. 두 탐침 사이에 설치 바이너리가 바뀌어 build 가 다르다. 두 build 모두 #50765(D2·D3), #51049(D9), #51108, #51038, #51109(D7), #51218 을 담고 있고, #51208·#51209·#51228(D4·D6·D8)과 #51223(D5)은 담고 있지 않다. 그래서 원장 고갈(run5)과 TLS CPU(run4)는 다시 재지 않았다.
+설치된 바이너리를 run1·run6 과 같은 방식으로 격리해 띄웠다. 두 탐침 사이에 설치 바이너리가 바뀌어 build 가 다르다. 두 build 모두 #50765(D2·D3), #51049(D9), #51108, #51038, #51109(D7), #51218 을 담고 있고, #51208·#51209·#51228(D4·D6·D8)과 #51223(D5)은 담고 있지 않다. 원장 고갈과 TLS CPU 는 그 층이 설치된 뒤 run10~run12 로 쟀다.
 
 ### run8: 창 0 스트림은 90 s 에 끊긴다
 
@@ -161,6 +164,40 @@ TP_SCENES="8:65535:65535:frame:0:3" TP_LABEL=two ./test_h2_request_fibers.exe te
 - 로그 스트림을 reset 한 뒤 35 s 동안 live 는 run1 에서 37.7 MB 늘었고 run9 에서 6.4 MB 줄었다. 둘 다 아래에 적은 65 MB 흔들림 안이라 이 값으로 D7 을 판정하지 않는다.
 - 평문 200번은 1,005 s 걸렸다(run1 1,004 s). 연결 준비 상한(D6)은 이 build 에 없다.
 
+## run10~run12: D4·D5·D6·D8 이 든 설치 build 로 다시 돌린 결과, 2026-11-11
+
+설치 build `c9b8e1af3cbe` 는 #51208·#51209·#51228·#51223 을 모두 담고 있다. dashboard asset 은 같은 날 17:49 에 빌드된 묶음의 사본을 썼다(번들 866,369 B, run4·run5 때는 861,256 B).
+
+### run10: 번들을 쥔 느린 클라이언트가 다른 연결을 막지 않는다
+
+| 항목 | run5 (`57b928783c0b`) | run10 (`c9b8e1af3cbe`) |
+| --- | --- | --- |
+| 느린 클라이언트의 번들 스트림 90개 | 200 이 77개, 503 이 13개 | 200 이 90개 |
+| 그동안 다른 연결의 번들 3번 | 503 이 3개 | 200 이 3개 |
+| 5 s 뒤 다른 연결의 번들 3번 | 503 이 3개 | 200 이 3개 |
+| 그동안 `/health` | 200 | 200 |
+| 느린 클라이언트가 떠난 뒤 번들 3번 | 200 이 3개 | 200 이 3개 |
+
+### run11·run12: TLS 서버 CPU 는 연결 하나에서 49~62% 줄었다
+
+run11 을 끝내고 27 s 뒤에 run12 를 끝냈다. 값은 서버 CPU ms/MB 의 3회 중앙값이다.
+
+| 장면 | run4 (`57b928783c0b`) | run11 (D8 없음) | run12 (D8 있음) | run11 → run12 |
+| --- | --- | --- | --- | --- |
+| 평문, 연결 1개 | 2.50 | 2.48 | 2.49 | +0.4% |
+| AES-128-GCM, 연결 1개 | 11.49 | 12.00 | 4.59 | −61.7% |
+| AES-256-GCM, 연결 1개 | 11.79 | 12.01 | 6.12 | −49.0% |
+| ChaCha20-Poly1305, 연결 1개 | 9.66 | 8.74 | 3.45 | −60.5% |
+| 평문, 연결 4개 | 1.54 | 2.63 | 1.82 | −30.8% |
+| AES-128-GCM, 연결 4개 | 8.65 | 9.11 | 6.27 | −31.2% |
+| AES-256-GCM, 연결 4개 | 10.04 | 10.17 | 7.94 | −21.9% |
+| ChaCha20-Poly1305, 연결 4개 | 7.52 | 6.88 | 5.03 | −26.9% |
+
+- 연결 하나의 TLS 처리량은 49.6~66.4 MB/s 에서 153.7~274.5 MB/s 가 됐다. 처리량은 부하에 따라 크게 흔들리므로 판정은 CPU 로 한다.
+- 평문 연결 4개는 run11 과 run12 사이에 30.8% 움직였다. 두 build 의 평문 경로에서 달라진 것은 D4 의 소켓 감싸개와 D5 의 공유 본문인데 연결 하나에서는 차이가 없으므로, 이 줄은 흔들림으로 읽는다. 연결 4개의 TLS 줄에도 같은 크기의 흔들림이 섞였을 수 있다.
+- run12 를 재기 6분 전에 같은 설치 build 로 한 번 더 쟀다. 실행 직후 load average 가 245 였고 평문 연결 하나가 4.55 ms/MB, AES-128-GCM 연결 하나가 6.05 ms/MB 였다. run11·run12 때는 68~77 이었다. 그 실행은 파일로 남기지 않았다.
+- run11 의 build 는 main 의 커밋이 아니다. main `b88dd6902027` 위에 문서 커밋 둘을 얹은 다른 branch 의 작업 트리에서 14:48 에 빌드된 실행 파일의 사본이다. 그 커밋은 D2·D3·D9 를 담고 있고 D4·D5·D7·D8 을 담고 있지 않다. 빌드할 때 작업 트리에 커밋되지 않은 변경이 있었는지는 확인하지 못했다.
+
 ## 관찰과 한계
 
 - run1 의 descriptor, TCP descriptor, 리스너 활성 연결, `sse_clients` 는 모든 표본에서 warm 값이었다. 오래 연 연결을 닫은 뒤 cold 값이 됐다.
@@ -168,7 +205,7 @@ TP_SCENES="8:65535:65535:frame:0:3" TP_LABEL=two ./test_h2_request_fibers.exe te
 - run1 의 HTTP/1.1 대조(`h1_fleet_close`)는 200 을 하나도 받지 못했다. 탐침의 요청 모양 탓이다. run2 가 HTTP/1.1 대조를 대신한다.
 - run1 의 handshake 실패 200번은 1,004 s 걸렸다. 연결마다 탐침의 `recv` 가 5 s 기한을 다 썼다.
 - run5 의 느린 클라이언트는 데이터를 확인하지 않는다. 기본 창 65,535 B 만큼만 받는다.
-- run8·run9 는 각각 한 번 실행이다.
+- run8·run9·run10 은 각각 한 번 실행이다. run11·run12 는 탐침 한 번(줄마다 3회)씩이다.
 - run6 은 스트림 3개, 한 번 실행이다. 정체 로그 줄 수는 서버 로그에서 셌고 로그 원문은 남기지 않았다.
 - 처리량은 표본마다 2배까지 흔들렸다. 서버 CPU(ms/MB)는 안정적이었다.
 - 벤치 클라이언트는 harness 를 돌린 Python 이다. 판 문자열은 결과에 남기지 않았다.

@@ -3,9 +3,14 @@ let maximum ~count ~height = Int.max 0 (count - height)
 let normalize ~count ~height scroll =
   Int.max 0 (Int.min scroll (maximum ~count ~height))
 
+(* A page keeps one row from the window it leaves. Moving a full [height]
+   would put the row the reader stopped on just past the edge, so a long list
+   read page by page loses one row per press with nothing saying so. *)
+let page_step ~height = Int.max 1 (height - 1)
+
 module Position = struct
   type t = Offset of int | End
-  type movement = First | Last | By of int
+  type movement = First | Last | By of int | Page_down | Page_up
   let first = Offset 0
   let is_end = function End -> true | Offset _ -> false
   let at value = Offset (max 0 value)
@@ -15,15 +20,20 @@ module Position = struct
   let clamp ~count ~height = function
     | Offset value -> Offset (normalize ~count ~height value)
     | End -> End
-  let move ~count ~height movement position = match movement with
+  let move ~count ~height movement position =
+    let by delta =
+      let current = offset ~count ~height position in
+      Offset (if delta > 0 then
+        min (maximum ~count ~height)
+          (current + min delta (max_int - current))
+      else max 0 (current + delta))
+    in
+    match movement with
     | First -> first
     | Last -> End
-    | By delta ->
-        let current = offset ~count ~height position in
-        Offset (if delta > 0 then
-          min (maximum ~count ~height)
-            (current + min delta (max_int - current))
-        else max 0 (current + delta))
+    | By delta -> by delta
+    | Page_down -> by (page_step ~height)
+    | Page_up -> by (-(page_step ~height))
 end
 
 let down ~count ~height scroll =
@@ -34,11 +44,6 @@ let up ~count ~height scroll = Int.max 0 (normalize ~count ~height scroll - 1)
 let step_uncounted ~delta scroll =
   if delta > 0 && scroll > max_int - delta then max_int
   else Int.max 0 (scroll + delta)
-
-(* A page keeps one row from the window it leaves. Moving a full [height]
-   would put the row the reader stopped on just past the edge, so a long list
-   read page by page loses one row per press with nothing saying so. *)
-let page_step ~height = Int.max 1 (height - 1)
 
 let page_down ~count ~height scroll =
   Int.min

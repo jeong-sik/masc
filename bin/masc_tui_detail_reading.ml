@@ -7,7 +7,7 @@ type search_mark = No_match | Match | Current_match
 type search = { query : string; editing : bool; landing : (int * int) option }
 type t = { title : string; sections : section list; position : Position.t;
   kind : document_kind; prepared : (int * row list) option; hints : string option; search : search option }
-type movement = First | Last | By of int
+type movement = First | Last | By of int | Page_down | Page_up
 
 let create ?(ko = false) ~title sections = { title; sections; position = Position.first; kind = Captured ko; prepared=None; hints=None;search=None }
 let create_observation ~title sections = { title; sections; position = Position.first; kind = Observation; prepared=None; hints=None;search=None }
@@ -96,6 +96,8 @@ let move ~count ~height movement reading =
     | First -> Position.First
     | Last -> Position.Last
     | By delta -> Position.By delta
+    | Page_down -> Position.Page_down
+    | Page_up -> Position.Page_up
   in
   { reading with position = Position.move ~count ~height movement reading.position;
     search=forget_landing reading.search }

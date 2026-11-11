@@ -67,6 +67,36 @@ let test_an_uncounted_surface_holds_at_the_top () =
   check int "a page up that overshoots the top stops at it" 0
     (Masc_tui_scroll.step_uncounted ~delta:(-9) 4)
 
+(* A reader's page is the page a list keeps. Each reader used to be handed
+   [By height] and add the whole window, so readers and lists disagreed by a
+   row. [Position.move] now takes the page itself, and for every scroll, count
+   and height it lands where [page_down] and [page_up] land. *)
+let test_a_reading_page_is_the_page_a_list_keeps () =
+  let module Position = Masc_tui_scroll.Position in
+  let misses = ref [] in
+  for height = 1 to 12 do
+    for count = 0 to 30 do
+      for start = 0 to 30 do
+        let landed movement =
+          Position.offset ~count ~height (Position.move ~count ~height movement (Position.at start)) in
+        let note name expected got =
+          if expected <> got then
+            misses := Printf.sprintf "%s count %d height %d from %d: %d, not %d" name count height start got expected :: !misses in
+        note "page down" (Masc_tui_scroll.page_down ~count ~height start) (landed Position.Page_down);
+        note "page up" (Masc_tui_scroll.page_up ~count ~height start) (landed Position.Page_up)
+      done
+    done
+  done;
+  Alcotest.(check (list string)) "a reader's page and a list's page agree" [] !misses;
+  check int "a page down from the end anchor stays at the end" 90
+    (Position.offset ~count:100 ~height:10
+       (Position.move ~count:100 ~height:10 Position.Page_down
+          (Position.move ~count:100 ~height:10 Position.Last Position.first)));
+  check int "a page up from the end anchor leaves it by a page" 81
+    (Position.offset ~count:100 ~height:10
+       (Position.move ~count:100 ~height:10 Position.Page_up
+          (Position.move ~count:100 ~height:10 Position.Last Position.first)))
+
 (* End stores [max_int] on a reader the frame clamps, and the key that follows
    before the frame has drawn adds a page to it. The sum wrapped negative and
    the [max 0] threw the reader to the top. *)
@@ -258,8 +288,7 @@ let () =
             test_the_list_height_is_the_rows_that_are_left
         ] )
     ; ( "position"
-        (* Empty on purpose: Masc_tui_scroll.Position does not exist on main yet.
-           The stack that introduces it (starting at #44842) owns this group, so
-           filling it here would only collide. Delete this note with that stack. *)
-      , [] )
+      , [ Alcotest.test_case "a reader's page is the page a list keeps" `Quick
+            test_a_reading_page_is_the_page_a_list_keeps
+        ] )
     ]

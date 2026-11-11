@@ -240,6 +240,37 @@ def member_states(repo, scope):
     return states
 
 
+def open_pulls(repo):
+    return pages(f'repos/{repo}/pulls?state=open&per_page=100')
+
+
+def watched_member_states(repo, scope, settled):
+    """Poll a scope with one walk of the open list instead of one read per member.
+
+    A member still on the open list is not merged. Only a member that left the
+    list is read, once; a closed or merged answer is final and is kept in
+    `settled` so no later poll reads it again. The cost of a poll no longer
+    grows with the number of layers.
+    """
+    opened = {row['number'] for row in open_pulls(repo)}
+    states = {}
+    for member in scope['scope']:
+        number = member['number']
+        if number in settled:
+            states[number] = settled[number]
+        elif number in opened:
+            states[number] = {'merged': False, 'state': 'open', 'merge_commit_sha': None}
+        else:
+            row = pull(repo, number)
+            states[number] = {'merged': row['merged'] is True, 'state': row.get('state'),
+                              'merge_commit_sha': row.get('merge_commit_sha')}
+            final = row.get('state') == 'closed' and (
+                row['merged'] is not True or bool(row.get('merge_commit_sha')))
+            if final:
+                settled[number] = states[number]
+    return states
+
+
 def all_landed(states):
     return bool(states) and all(row['merged'] and row['merge_commit_sha']
                                 for row in states.values())
@@ -265,6 +296,7 @@ def follow(repo, result_endpoint, receipt, scope):
     try:
         observation = states = None
         error = None
+        settled = {}  # members whose closed or merged answer is already final
         if retry_at is not None:
             try:
                 CLIENT.wait_for_quota(GET.QuotaLimited(
@@ -288,7 +320,7 @@ def follow(repo, result_endpoint, receipt, scope):
                     return dict(receipt, status=status, observation=observation,
                                 member_states=states, reason=observation.get('details'))
                 try:
-                    states = member_states(repo, scope)
+                    states = watched_member_states(repo, scope, settled)
                 except GET.QuotaWaitCutShort as failure:
                     return dict(receipt, status='observation_unavailable', error=str(failure),
                                 retry_at=failure.retry_at, observation=observation, member_states=states)

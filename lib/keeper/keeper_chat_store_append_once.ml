@@ -3,6 +3,7 @@ open Keeper_chat_store_paths
 open Keeper_chat_store_redaction
 open Keeper_chat_store_row_codec
 open Keeper_chat_store_provenance_index
+open Keeper_chat_store_transcript_index
 open Keeper_chat_store_append_primitives
 
 module Row_route = struct
@@ -156,7 +157,7 @@ let append_lines_once_with_added_slots ?(reject_partial_after_result = false) pa
   | Error detail -> Error detail
   | Ok () ->
     (match
-       Fs_compat.update_private_file_durable_locked_result path (fun existing ->
+       update_indexed_transcript path (fun index ->
       let inspect index =
         let open Result.Syntax in
         let* () = validate_autonomous_candidates index ~delivery_key lines in
@@ -185,9 +186,7 @@ let append_lines_once_with_added_slots ?(reject_partial_after_result = false) pa
         in
         loop [] [] lines
       in
-      let inspected =
-        Result.bind (provenance_index_of_existing existing) inspect
-      in
+      let inspected = Result.bind index inspect in
       match inspected with
       | Error detail -> None, Error detail
       | Ok (rows, additions) ->

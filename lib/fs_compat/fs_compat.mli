@@ -1937,6 +1937,50 @@ val update_private_file_durable_locked_result :
   (string -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 
+type 'kept private_jsonl_rows_read =
+  | Rows_after_cursor of 'kept
+      (** The read started at the caller's cursor: the rows after it, with what
+          the caller kept with that cursor. *)
+  | Rows_from_start
+      (** There was no cursor, or it names another file, an offset past this
+          file's end, or an offset where no row of this file starts: every row
+          of the file, without what the caller kept. *)
+
+type 'kept private_jsonl_rows_from_cursor =
+  { read : 'kept private_jsonl_rows_read
+  ; rows : string
+    (** The bytes read, up to and including their last newline. *)
+  ; incomplete_tail : string
+    (** The bytes after that newline; [""] when the file ends with a row. *)
+  ; rows_end : Private_jsonl_cursor.t
+    (** This file at the end of [rows]. *)
+  }
+
+(** [update_private_jsonl_after_cursor_durable_locked_result path ~after decide]
+    is {!update_private_file_durable_locked_result} for an append-only JSONL
+    file whose caller keeps what it derived from the rows it has already read.
+    The lock, the append, the rollback and the binding checks are the same; the
+    read is not. With [after = Some (cursor, kept)], where [cursor] names this
+    file's device and inode and an offset no greater than its length at which
+    a row starts (the first byte, or the byte after a newline), the read starts
+    at that offset, and [decide] receives the rows after it together with
+    [kept]. Otherwise the read starts at the first byte, and [decide] receives
+    every row and not [kept]: what was derived from a file that has since been
+    replaced, shortened or rewritten across that offset does not describe this
+    one. When the caller has taken [rows] into what it keeps, it passes
+    [rows_end] with that as [after] next time.
+
+    Of the bytes before the cursor, only the last is read. A change below it
+    that keeps the device, the inode, at least the length and a row start at
+    the cursor is therefore not seen: the caller relies on the file being
+    appended to only, as every cursor of this module does. *)
+val update_private_jsonl_after_cursor_durable_locked_result :
+  ?create:bool ->
+  string ->
+  after:(Private_jsonl_cursor.t * 'kept) option ->
+  ('kept private_jsonl_rows_from_cursor -> string option * 'a) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+
 type 'a private_file_decision =
   | Refuse_update of 'a
   | Confirm_existing of 'a

@@ -128,6 +128,7 @@
 (include stanzas/test_server_login_http.inc)
 (include stanzas/test_github_oauth.inc)
 (include stanzas/test_keeper_chat_store_announces.inc)
+(include stanzas/test_keeper_chat_store_transcript_index.inc)
 (include stanzas/test_keeper_memory_journal_announces.inc)
 (include stanzas/test_keeper_composite_cleared_before_announce.inc)
 (include stanzas/test_runtime_blocker_classification.inc)
@@ -3070,6 +3071,7 @@
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)
 
 (include stanzas/test_fs_compat_durable_append.inc)
+(include stanzas/test_fs_compat_update_after_cursor.inc)
 (include stanzas/test_fs_compat_unique_fold.inc)
 (include stanzas/test_fs_compat_missing_binding.inc)
 

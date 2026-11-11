@@ -3,6 +3,7 @@ open Keeper_chat_store_paths
 open Keeper_chat_store_redaction
 open Keeper_chat_store_row_codec
 open Keeper_chat_store_provenance_index
+open Keeper_chat_store_transcript_index
 open Keeper_chat_store_append_primitives
 open Keeper_chat_store_turn_append
 open Keeper_chat_store_append_once
@@ -181,8 +182,8 @@ let append_settled_failures_once ~base_dir ~keeper_name failures =
            Ok results
        in
        match
-         Fs_compat.update_private_file_durable_locked_result path (fun existing ->
-           match provenance_index_of_existing existing with
+         update_indexed_transcript path (fun index ->
+           match index with
            | Error detail -> None, Error detail
            | Ok index ->
              let results, additions = inspect index in

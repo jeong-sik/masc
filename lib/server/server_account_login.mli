@@ -46,8 +46,10 @@ val pending_login_capacity : int
     {!pending_login_capacity} pending logins, the transport of
     {!Server_login_http.get} and {!Server_login_http.post} on [clock], the
     wall clock, and 32 random bytes per draw ({!Random_id.hex}). The
-    transport needs the environment of the process
-    ([Eio_context.set_env]) when a login reaches its provider. *)
+    transport needs the environment and the switch of the process
+    ([Eio_context.set_env], [Eio_context.set_switch]) when a login reaches
+    its provider; without them a login that reaches its provider answers
+    502. *)
 val routes
   :  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
   -> zone:Authz_zone.t

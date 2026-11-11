@@ -203,14 +203,6 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
          ~getenv:Sys.getenv_opt
          (M.multi_account_login_clients multi_account))
   in
-  (* A login reaches its provider over [Masc_http_client], which reads the
-     environment, the switch and the network of the process, and over TLS,
-     which draws from the default random source. The single-user boot sets
-     them in its owner state, which this server does not build. *)
-  Crypto_rng.ensure_default ();
-  Eio_context.set_env env;
-  Eio_context.set_switch sw;
-  Eio_context.set_net net;
   (match login_clients with
    | { Server_account_login.google = None; github = None } ->
      Log.Server.warn
@@ -280,6 +272,12 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
   in
   (* Nothing below refuses: a boot that stops records no port and leaves no
      fiber behind. *)
+  (* A login reaches its provider over [Masc_http_client], which makes its
+     connections from the environment and under the switch of the process
+     ([Eio_context]). The single-user boot sets the two in its owner state,
+     which this server does not build. *)
+  Eio_context.set_env env;
+  Eio_context.set_switch sw;
   record_port ~base_path config;
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   Log.Server.info

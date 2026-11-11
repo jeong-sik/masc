@@ -82,8 +82,8 @@ type refusal =
       (** The log that opened is not in the mode the boot judged. *)
   | Login_client_refused of Server_account_login.refusal
       (** A login client that [config.json] names was refused: the
-          environment variable of its secret is not set, or its redirect is
-          no [https] URL. *)
+          environment variable of its secret is not set or holds the empty
+          string, or its redirect is no [https] URL. *)
   | Route_of_another_kind of Server_account_table.refusal
       (** The table holds a route that is neither [Always_public] nor
           [Self_authenticated Browser_session]. *)
@@ -116,9 +116,10 @@ val health_version : string -> string option
     clients, makes the table, binds [address]:[port], binds the HTTPS listener of the environment,
     makes the trust policy, announces the port to the host under [lease]
     ({!Server_startup_takeover.announce_account_server}), publishes the
-    access, records the port for the CLI of the workspace
+    access, gives the environment and [sw] to the transport of a login
+    ([Eio_context]), records the port for the CLI of the workspace
     ([Workspace_connection]), calls [on_ready], and serves until [sw] is
-    cancelled. The cleartext listener follows the HTTP mode of the
+    cancelled. A refused boot has not set the two. The cleartext listener follows the HTTP mode of the
     environment, as the single-user server does. [lease] is the BasePath
     lease of the base path that was judged.
 

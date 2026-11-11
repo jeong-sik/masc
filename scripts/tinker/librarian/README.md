@@ -17,9 +17,13 @@ The exact-request store holds real Keeper memory. The server removes an
 admission's text once every candidate is committed and acknowledged, so
 `e_real_manifest.py --snapshot` copies the answered admission records into
 `artifacts/tinker/librarian/e-real-snapshot/`, readable by its owner alone,
-when E-real is pinned. E-real runs read that copy. Nothing from the store is
-copied into this repository: the E-real manifest holds only record digests and
-file sha256 values. E-real model answers stay in the run's
+when E-real is pinned. E-real runs read that copy. It is the only copy once the
+server removed a record's text. When the snapshot is lost,
+`e_real_manifest.py --of <manifest>` takes that manifest's records again from a
+base that still holds them. The manifest it writes names the earlier one and
+lists the records that are gone (`of.gone`), and E-real is the records left.
+Nothing from the store is copied into this repository: the E-real manifest
+holds only record digests and file sha256 values. E-real model answers stay in the run's
 `calls.jsonl` under `artifacts/`. The committed evidence holds numbers, IDs and
 verdicts. A GLM run sends E-real prompts to Z.AI, where MASC's GLM slot sends
 them.

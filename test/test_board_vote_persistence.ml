@@ -817,7 +817,7 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
        ~target_type:Board.Reaction_post
        ~target_id:post_id
        ~user_id:"blocked-reactor"
-       ~emoji:"safe");
+       ~emoji:"👍");
   expect_io_error
     "sub-board create"
     (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator
@@ -1015,7 +1015,7 @@ let test_refused_posts_source_blocks_vote_and_reaction_effects () =
   List.iter (fun (target_type,target_id) ->
     expect_io_error "reaction" (Board_dispatch.toggle_reaction
       ~reader:Masc_board_handlers.Board_access.Operator ~target_type ~target_id
-      ~user_id:"blocked-reactor" ~emoji:"safe"))
+      ~user_id:"blocked-reactor" ~emoji:"👍"))
     [Board.Reaction_post,post_id; Board.Reaction_comment,comment_id];
   Alcotest.(check int) "no signal follows a refused write" 0 !signals;
   Alcotest.(check int) "in-memory votes unchanged" 0 (Hashtbl.length store.vote_log);
@@ -1030,7 +1030,7 @@ let test_refused_posts_source_blocks_vote_and_reaction_effects () =
   ignore (Result.get_ok (Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"blocked-voter" ~comment_id ~direction:Board.Up));
   ignore (Result.get_ok (Board_dispatch.toggle_reaction
     ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
-    ~target_id:post_id ~user_id:"blocked-reactor" ~emoji:"safe"));
+    ~target_id:post_id ~user_id:"blocked-reactor" ~emoji:"👍"));
   Alcotest.(check int) "same operations work after source recovery" 3 !signals
 ;;
 

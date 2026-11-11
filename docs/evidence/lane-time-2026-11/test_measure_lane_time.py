@@ -8,10 +8,12 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import pathlib
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from datetime import date, datetime, timezone
 from typing import cast
@@ -939,6 +941,27 @@ def run_main(
         if status != 0:
             raise AssertionError(f"measure_lane_time.py returned {status}")
     return block(json.loads(out.getvalue())["turn_time"])
+
+
+class ParseUntilTest(unittest.TestCase):
+    def test_a_time_without_an_offset_is_utc_whatever_the_local_zone_is(self) -> None:
+        original = os.environ.get("TZ")
+        os.environ["TZ"] = "Asia/Seoul"
+        time.tzset()
+        try:
+            bare = lane.parse_until("2026-11-11T05:40:00")
+            zulu = lane.parse_until("2026-11-11T05:40:00Z")
+        finally:
+            if original is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = original
+            time.tzset()
+        self.assertEqual(bare, zulu)
+        self.assertEqual(zulu, datetime(2026, 11, 11, 5, 40, tzinfo=timezone.utc).timestamp())
+
+    def test_an_explicit_offset_is_kept(self) -> None:
+        self.assertEqual(lane.parse_until("2026-11-11T14:40:00+09:00"), lane.parse_until("2026-11-11T05:40:00Z"))
 
 
 class MainTest(unittest.TestCase):

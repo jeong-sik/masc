@@ -118,6 +118,12 @@ endpoint applies its default.
    also an off-label drop (step 6).
 2. Run the base model on E-synth, audit the labels with a judge that sees
    neither the labels nor the answers, and keep the requests it confirms.
+   E-synth can be made in batches. Generate each batch with its own seed and
+   with `--first-memory` at the number where the last batch's memories ended,
+   run and audit it by itself, and join the audited batches with
+   `e_synth_audit.py pool`. It writes the requests in item ID order and refuses
+   batches that share a memory key. `pass_lines.json` lists the batches and
+   their audits under `e_synth.batches`.
 3. Fix `pass_lines.json` and commit it before any training. The G6 merge lines
    come from the base model's merge numbers on the fixed E-synth:
    `eval_admission.py synth-numbers` prints them once the drop and merge judges
@@ -163,6 +169,11 @@ uv run scripts/tinker/librarian/e_synth_audit.py cases \
 uv run scripts/tinker/librarian/e_synth_audit.py apply \
   --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
   --audit artifacts/tinker/librarian/e-synth-audit \
+  --final artifacts/tinker/librarian/e-synth/requests.jsonl
+# E-synth in batches: the steps above once per batch, each `apply` to its own file, then
+uv run scripts/tinker/librarian/e_synth_audit.py pool \
+  --batch artifacts/tinker/librarian/e-synth-1/requests.jsonl \
+  --batch artifacts/tinker/librarian/e-synth-2/requests.jsonl \
   --final artifacts/tinker/librarian/e-synth/requests.jsonl
 MASC_BASE_PATH=artifacts/tinker/librarian/e-real-snapshot \
   uv run scripts/tinker/librarian/eval_admission.py run --set real \

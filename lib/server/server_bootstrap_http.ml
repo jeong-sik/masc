@@ -550,7 +550,10 @@ let serve_tls ~sw ~clock ~socket ~addr_label ~tls ~request_handler ~h2_request_h
          | Error () ->
            handshake_failed ~listener_tag client_addr "no active session after the handshake"
          | Ok epoch ->
-           let socket = Tls_stream_socket.wrap session in
+           let socket =
+             Tls_stream_socket.wrap session ~on_send_shutdown:(fun () ->
+               Server_connection_socket.send_side_closed connection)
+           in
            (match epoch.Tls.Core.alpn_protocol with
             | Some protocol when String.equal protocol Server_tls_material.alpn_h2 ->
               Https_listener_metrics.record_negotiated Alpn_h2;

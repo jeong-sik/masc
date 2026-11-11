@@ -152,7 +152,7 @@ related: ["0512", "0493", "0350"]
 - **EPIPE·ECONNRESET 도 `End_of_file` 로 바꾼다.** gluten 은 `End_of_file` 만 `` `Closed `` 로 바꾸고 writer 를 drain 한다(gluten_eio.ml 47줄). 다른 예외는 `report_exn` 으로 가서 flush 콜백이 오지 않는다(조사 §2.1).
 - **서버가 보내기 쪽을 닫은 뒤에도 같은 상한을 둔다.** 그 안에 상대가 닫지 않으면 연결을 끊는다. gluten 의 마지막 EOF 읽기에는 기한이 없다(gluten_eio.ml 122~145줄).
   - TLS 연결에서는 감싸개가 이 shutdown 을 보지 못한다. tls-eio 의 `shutdown` 은 close_notify 만 쓰고 아래 flow 를 닫지 않는다(tls_eio.ml 177~185줄). `Tls_stream_socket.shutdown` 도 tls 로만 넘긴다(tls_stream_socket.ml 11줄).
-  - 그래서 TLS 의 이 상한은 `Tls_stream_socket.shutdown` 이 감싸개에 알려서 건다. 평문 층 다음 층이다(§8 의 L4a2).
+  - 그래서 TLS 의 이 상한은 `Tls_stream_socket.shutdown` 이 감싸개에 알려서 건다. 리스너가 `Tls_stream_socket.wrap ~on_send_shutdown` 에 `Server_connection_socket.send_side_closed` 를 넘긴다.
 - **gRPC 리스너의 accept 루프는 D4·D6 밖이다**(`server_grpc_listener.ml` 40~57줄). D1 의 변화는 닿는다(§7.9).
 
 ### D5. 바뀌지 않는 본문은 참조로 보내고 원장을 쓰지 않는다
@@ -264,7 +264,7 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 릴리스를 기
 - 로그·문서 초안·실행 출력 스트림은 HTTP/2 클라이언트가 스트림을 reset 하거나 연결을 끊으면 바로 끝난다. 구독과 편집 세션도 그때 놓는다. 전에는 다음 keepalive(30초, 실행 출력은 15초)를 쓸 때 알았다. HTTP/1.1 은 지금처럼 다음 쓰기 때 안다.
 - 이 세 스트림의 생산자가 예외로 끝나면 HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받고 HTTP/1.1 연결은 닫힌다. 예외는 error 로 한 번 남는다. 전에는 warn(초안은 debug) 한 줄을 남기고 응답을 끝난 것처럼 닫았다.
 - 소켓 쓰기 조각 하나(256 KiB 이하)가 90초 안에 커널에 다 들어가지 않는 연결은 끊긴다. 리스너와 상대 주소가 든 warn 한 줄이 남는다. 상대는 RST 를 받고, 보내지 못한 바이트는 버려진다. shutdown 의 FIN 은 밀린 바이트 뒤에 줄을 서므로 나가지 않는다. 연결을 놓으며 fd 를 닫을 때(`server_bootstrap_http.ml` `on_connection_release`) `SO_LINGER 0` 이라 RST 가 간다.
-- 서버가 보내기 쪽을 닫은 뒤 90초 안에 닫지 않는 평문 연결은 끊긴다. info 한 줄이 남는다. TLS 연결은 다음 층에서 같아진다(D4).
+- 서버가 보내기 쪽을 닫은 뒤 90초 안에 닫지 않는 연결은 끊긴다. info 한 줄이 남는다. TLS 연결에서는 서버가 close_notify 를 보낸 때부터 센다(D4).
 - HTTP/1.1 SSE 프레임이 나가길 기다리는 동안 클라이언트가 떠나면, 그 `send` 는 바로 `Closed` 로 끝난다. 전에는 90초 뒤 `Stalled` 로 끝났고 warn 한 줄이 남았다. 쓰기가 EPIPE·ECONNRESET 으로 실패하면 이제 gluten 이 기다리던 flush 에 답하기 때문이다(D4).
 - TLS 연결은 handshake 가 30초 안에 끝나지 않으면 끊긴다. 평문 연결은 30초 안에 첫 바이트를 보내지 않으면 끊긴다. auto 리스너는 30초 안에 HTTP/1.1 요청 줄인지 HTTP/2 preface 인지 가릴 만큼 받지 못해도 끊는다. 셋 다 debug 한 줄이 남는다. TLS handshake 뒤의 첫 읽기에는 기한이 없다(§7.4).
 - 대시보드 asset 응답은 원장을 쓰지 않는다. 압축은 asset 판마다 한 번 한다.
@@ -336,6 +336,7 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 릴리스를 기
     - 준비 단계는 제때 온 첫 바이트를 통과시키고, 안 오면 상한에 끊는다. 상대가 먼저 떠난 연결에서 준비를 포기해도 예외가 나지 않는다.
     - HTTP/1.1 전용, h2c, auto 리스너에 아무것도 안 보내는 연결은 준비 상한에 끝난다. auto 리스너에 HTTP/2 preface 앞부분만 보낸 연결도 같다.
   - HTTP/1.1 SSE 프레임이 나가길 기다리는 동안 클라이언트가 떠나면 `send` 가 `Closed` 로 끝난다(`test_server_sse_response.ml`, 실제 리스너).
+  - TLS 리스너(`test_https_listener.ml`). ClientHello 를 보내지 않는 연결은 준비 상한에 끝나고 handshake 실패가 하나 늘어난다. 응답과 close_notify 를 받고도 자기 쪽을 열어 두는 클라이언트는 상한에 끊긴다.
   - 큰 프레임 뒤에 건 flush 는 마지막 조각이 나간 뒤에 답을 받는다.
   - 창이 조각 하나 반인 클라이언트가 프레임 하나를 읽고 창을 돌려주면, 다음 프레임은 조각 끝을 넘어 16 KiB 를 채운다.
   - 느린 소켓을 긴 응답과 짧은 응답이 나눠 쓰면, 짧은 응답은 긴 본문의 조각 둘 뒤에 나간다. 본문을 통째로 넣으면 긴 본문이 다 나갈 때까지 기다린다.
@@ -378,7 +379,7 @@ worktree `.worktrees/h2-backpressure` 에서 gh stack 으로 쌓는다. 맨 아�
 | L2b2 | `http/sse-h1-stall-timer` | D2 의 나머지: SSE `send` 타이머는 HTTP/1.1 에서만, 로그 스트림은 `Server_sse_response`, 로그 스트림 keepalive 시각, 핑 상수 하나 | |
 | L3 | `deps/tls-2.1.5` | D9 | |
 | L4a | `http/connection-socket-bounds` | D4, D6. TLS 연결의 보내기 쪽을 닫은 뒤 상한은 L4a2 |#51208 |
-| L4a2 | `http/tls-send-shutdown-bound` | D4 의 나머지: `Tls_stream_socket.shutdown` 이 감싸개에 알린다 | |
+| L4a2 | `http/tls-send-shutdown-bound` | D4 의 나머지: `Tls_stream_socket.shutdown` 이 감싸개에 알린다 |#51209 |
 | L4b | `http/tls-write-pieces` | D8 | |
 | L5 | `http/sse-producer-scope` | D7 | |
 | L6 | `http/shared-payloads` | D5 | |

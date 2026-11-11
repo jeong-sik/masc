@@ -94,7 +94,17 @@ val with_cleanups_on_release :
     cancellation honors the enclosing fiber.  Cleanups run in the
     order supplied. *)
 
-(** {1 Accept loops} *)
+(** {1 Accept loops}
+
+    The four loops below read and write every connection they accept through
+    {!Server_connection_socket} (RFC-0518 D4, D6). A connection is closed
+    when a write piece is not taken within
+    {!Server_connection_socket.write_bound_s}, when the peer keeps its side
+    open that long after the server closed its own, or when it is not ready
+    within {!Server_connection_socket.preparation_bound_s}: the first bytes
+    on the HTTP/1.1 and h2c loops, the protocol choice on the auto loop, the
+    TLS handshake on the TLS loop. A connection that was not ready is logged
+    at debug. *)
 
 val serve :
   sw:Eio.Switch.t ->
@@ -199,7 +209,7 @@ val serve_tls :
     connection handler: [h2] runs {!serve_h2_connection} with a payload
     capacity shared by this listener's HTTP/2 connections, [http/1.1] and no
     ALPN run httpun. A handshake that ends in an alert, a protocol failure or
-    a closed peer is counted in {!Https_listener_metrics} and logged at
-    debug. The listener's state is {!Https_listener_metrics}, never the
+    a closed peer, or that is not completed within the preparation bound, is
+    counted in {!Https_listener_metrics} and logged at debug. The listener's state is {!Https_listener_metrics}, never the
     cleartext listener's {!Transport_metrics} mode. [addr_label] is embedded
     as [[tls <addr_label>]] in log lines. *)

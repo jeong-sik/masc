@@ -32,7 +32,7 @@
     until the peer closes. A peer that keeps its side open past
     {!write_bound_s} is logged at info and the connection is cut. A TLS
     session's shutdown writes only its close_notify and leaves this socket
-    open, so this bound covers the cleartext listeners.
+    open, so {!Tls_stream_socket} reports it with {!send_side_closed}.
 
     {1 Preparation}
 
@@ -91,6 +91,12 @@ val prepare : t -> (unit -> 'a) -> 'a option
     {!preparation_bound_s}. Otherwise [step] is cancelled, the connection is
     cut and the result is [None]; the caller logs it, since only the caller
     knows what the step was. An exception of [step] is the caller's. *)
+
+val send_side_closed : t -> unit
+(** The server sends nothing more on this connection, although the socket's
+    own sending side stays open: a TLS session ends with a close_notify. The
+    peer then has {!write_bound_s} to close, as after a shutdown of the
+    sending side. Telling twice is the same as telling once. *)
 
 val await_first_bytes : t -> unit
 (** Returns once the peer's first bytes can be read, or its end. Nothing is

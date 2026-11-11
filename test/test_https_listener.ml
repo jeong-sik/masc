@@ -210,7 +210,8 @@ let tls_client ~sw ~net ~port ~alpn =
   let flow = Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
   let session = Tls_eio.client_of_flow config flow in
   match Tls_eio.epoch session with
-  | Ok epoch -> epoch.Tls.Core.alpn_protocol, Tls_stream_socket.wrap session
+  | Ok epoch ->
+    epoch.Tls.Core.alpn_protocol, Tls_stream_socket.wrap ~on_send_shutdown:ignore session
   | Error () -> fail "no session after the client handshake"
 ;;
 
@@ -367,6 +368,116 @@ let test_alpn_dispatch () =
   check int "one handshake failure" (failures + 1) (metric "handshake_failures_total")
 ;;
 
+(* A TLS listener on a loopback port whose bounds are counted on a mock
+   clock (RFC-0518 D4, D6). [run] is the client side. *)
+let with_bounded_listener run =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30.0 @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  with_tmp_dir @@ fun dir ->
+  let tls =
+    match Material.tls_config (self_signed ~now:(now ()) dir) with
+    | Ok tls -> tls
+    | Error reason -> fail reason
+  in
+  let clock = Eio_mock.Clock.make () in
+  let net = Eio.Stdenv.net env in
+  let socket =
+    Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:8 (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let port =
+    match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | `Unix _ -> fail "a TCP socket has a port"
+  in
+  let trust_policy = trust_policy ~port in
+  Eio.Fiber.first
+    (fun () ->
+      Eio.Switch.run (fun server_sw ->
+        Server_bootstrap_http.serve_tls
+          ~sw:server_sw
+          ~clock
+          ~socket
+          ~addr_label:(Printf.sprintf "127.0.0.1:%d" port)
+          ~tls
+          ~request_handler:(request_handler ~trust_policy)
+          ~h2_request_handler:(h2_request_handler ~trust_policy)
+          ~h2_error_handler;
+        fail "the accept loop returned"))
+    (fun () -> run ~sw ~net ~clock ~port)
+;;
+
+(* Moves the mock clock to its next sleeper, once there is one. *)
+let rec to_next_timer clock =
+  if not (Eio_mock.Clock.try_advance clock)
+  then (
+    Eio.Fiber.yield ();
+    to_next_timer clock)
+;;
+
+let rec until condition =
+  if not (condition ())
+  then (
+    Eio.Fiber.yield ();
+    until condition)
+;;
+
+(* A client that connects and sends no ClientHello. The first timer the
+   listener starts is the preparation bound; when it runs out the client
+   sees the connection end and the listener counts a handshake failure. *)
+let test_handshake_not_completed_is_given_up () =
+  with_bounded_listener @@ fun ~sw ~net ~clock ~port ->
+  let failures = metric "handshake_failures_total" in
+  let raw = Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+  to_next_timer clock;
+  check (float 0.0) "the first timer is the preparation bound"
+    Server_connection_socket.preparation_bound_s (Eio.Time.now clock);
+  (match Eio.Flow.single_read raw (Cstruct.create 16) with
+   | (_ : int) -> fail "the listener answered a client that sent nothing"
+   | exception End_of_file -> ()
+   | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ());
+  check int "one handshake failure" (failures + 1) (metric "handshake_failures_total")
+;;
+
+(* A client that asks for the connection to be closed, reads the answer to
+   the server's close_notify, and keeps its own side open. The session's
+   shutdown leaves the socket open both ways, so the connection lasts until
+   the peer has had the bound to close. *)
+let test_peer_that_keeps_a_closed_session_open_is_cut () =
+  with_bounded_listener @@ fun ~sw ~net ~clock ~port ->
+  let active = metric "active_connections" in
+  let config =
+    match Tls.Config.client ~authenticator ~alpn_protocols:[ "http/1.1" ] () with
+    | Ok config -> config
+    | Error (`Msg reason) -> fail reason
+  in
+  let session =
+    Tls_eio.client_of_flow
+      config
+      (Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)))
+  in
+  Eio.Flow.copy_string
+    (Printf.sprintf "GET / HTTP/1.1\r\nhost: localhost:%d\r\nconnection: close\r\n\r\n" port)
+    session;
+  let answer = Buffer.create 256 in
+  let chunk = Cstruct.create 4096 in
+  let rec read () =
+    match Eio.Flow.single_read session chunk with
+    | got ->
+      Buffer.add_string answer (Cstruct.to_string ~len:got chunk);
+      read ()
+    | exception End_of_file -> ()
+  in
+  read ();
+  check bool "the answer came whole before the close_notify" true
+    (String.ends_with ~suffix:"h1" (Buffer.contents answer));
+  check int "the connection is still open" (active + 1) (metric "active_connections");
+  to_next_timer clock;
+  check (float 0.0) "the timer is the bound a peer has to close"
+    Server_connection_socket.write_bound_s (Eio.Time.now clock);
+  until (fun () -> metric "active_connections" = active)
+;;
+
 let test_h2_settings () =
   let config = Server_bootstrap_http.h2_config () in
   check bool "server push is never advertised" false config.H2.Config.enable_server_push;
@@ -391,6 +502,10 @@ let () =
     ; ( "listener"
       , [ test_case "ALPN picks h2 or httpun" `Quick test_alpn_dispatch
         ; test_case "h2 settings: push off, library defaults" `Quick test_h2_settings
+        ; test_case "a handshake that is not completed is given up at the bound" `Quick
+            test_handshake_not_completed_is_given_up
+        ; test_case "a peer that keeps a closed session open is cut at the bound" `Quick
+            test_peer_that_keeps_a_closed_session_open_is_cut
         ] )
     ]
 ;;

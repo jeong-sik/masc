@@ -916,7 +916,9 @@ let render_acting (state : state) =
   let column_line ~glyph ~content ~actor ~clock =
     "  " ^ glyph ^ " "
     ^ fit_width content table_columns.Acting.content_cells ^ " "
-    ^ fit_width actor table_columns.Acting.keeper_cells
+    ^ fit_width
+        (Message_layout.fit_middle table_columns.Acting.keeper_cells actor)
+        table_columns.Acting.keeper_cells
     ^ (if table_columns.Acting.show_clock then " " ^ clock else "")
   in
   let col_hdr =

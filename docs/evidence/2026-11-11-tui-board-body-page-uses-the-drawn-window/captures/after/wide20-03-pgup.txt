@@ -1,0 +1,20 @@
+ 운영  ▸작업  키퍼  기능·플러그인  워크스페이스  시스템
+
+  게시판
+ > Example post: every highlighted word
+   @iso-fixture [작성자] · 2026-11-11 17:38:32 · 열린 글 · 댓글 3
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   (https://example.com/report) and the retries setting.                              댓글 (3)
+                                                                                      @iso-fixture [작성자]   0
+   ┌─ ocaml ────────────────────────────────────────────────────────────────────      2026-11-11 17:38:32
+   │ let greet name = "hello " ^ name                                                   Comment 1 on the notes. Neutral fixture
+   │ let limit : int = 12                                                               text.
+   └────────────────────────────────────────────────────────────────────────────      @iso-fixture [작성자]   0
+                                                                                      2026-11-11 17:38:32
+   ┌─ toml ─────────────────────────────────────────────────────────────────────        Comment 2 on the notes. Neutral fixture
+   │ retries = 3                                                                        text.
+   │ name = "fixture"                                                                 @iso-fixture [작성자]   0
+ 본문 행 2-11/20  ·  댓글 행 1-9/12
+
+  조치 필요 3 · 운영에서 확인  j/k:본문  b:본문 / 댓글  [/]:글  PgUp/PgDn:페이지  z:목록  v / V:추천 / 비추천  Left / Esc:뒤로  …?
+ › to imp   (i to write)

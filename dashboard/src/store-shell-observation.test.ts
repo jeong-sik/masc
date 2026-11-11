@@ -182,7 +182,7 @@ describe('App-owned Shell observation', () => {
     store.hydrateExecutionSnapshot(execution())
     const owner = store.executionWorkspaceAuthority.peek()
     const pending = store.refreshExecution({ immediate: true })
-    await flush()
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
     namespaceActions = await import('./namespace-truth-actions')
     const namespaceRead = namespaceActions.refreshNamespaceTruth({ force: true })
     await flush()
@@ -193,8 +193,12 @@ describe('App-owned Shell observation', () => {
     const current = { ...shell('accepted-namespace'), status: {
       project: 'fixture-project', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:01Z',
     }, counts: { agents: 5, tasks: 9, keepers: 7 }, configured_keepers: 13 }
-    namespace.resolve(json({ root: current }))
+    namespace.resolve(json({
+      projection_diagnostics: { read_completeness: 'complete', read_error: null },
+      root: current,
+    }))
     await namespaceRead
+    expect(store.serverStatus.value?.generated_at).toBe('2026-11-10T00:00:01Z')
     older.resolve(json({ ...execution(2), status: {
       project: 'older-execution', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:00Z',
     } }))

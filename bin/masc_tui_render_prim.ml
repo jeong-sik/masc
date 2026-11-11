@@ -2228,7 +2228,8 @@ let badge_row ~cols ~lead ~label ~badge =
    run, a measurement artifact named by its sha256, a Fusion run (whose list
    and launch form carry the same title), one runtime's detail, and one
    keeper's calls. *)
-let runtime_detail_title = " MASC System / Runtime detail"
+(* The step the Runtime screens take from System. *)
+let runtime_step (state : state) = ui_text state ~ko:"런타임" ~en:"runtime"
 let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 
 (* The coordinator's badge beside a reading of the surface's own. The badge

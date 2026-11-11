@@ -231,10 +231,8 @@ let overview_capacity_lines (state : state) =
       @ Option.to_list (Option.map quiet (Masc_tui_fleet_line.owner_scan_text fleet))
 
 let overview_header (state : state) ~cols =
-  badge_row ~cols
-    ~lead:(screen_title (ui_text state ~ko:" 운영" ~en:" Operations"))
-    ~label:(Terminal_text.single_line state.workspace)
-    ~badge:(connection_badge state)
+  here_row ~cols state ~path:[]
+    ~readings:[ Terminal_text.single_line state.workspace ] ~position:None
 
 let render_overview (state : state) home =
   let terminal_rows, full_cols = get_terminal_size () in

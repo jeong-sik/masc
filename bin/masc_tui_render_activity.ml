@@ -43,10 +43,6 @@ let system_log_optional_fact label = function
   | Some value -> system_log_fact label value
   | None -> system_log_missing_fact label
 
-let system_logs_status state = match System_logs_view.source state.system_logs with
-  | Server -> "Server  " ^ connection_badge state
-  | This_tui -> System_logs_view.source_label This_tui
-
 let system_log_detail_section = detail_section_heading
 
 let system_log_detail_lines (state : state) ~seq ~width =
@@ -109,8 +105,12 @@ let render_system_log_detail (state : state) seq =
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  seq %d  %s" (screen_title " MASC Log detail") seq
-       (system_logs_status state));
+    (here_row ~cols state
+       ~path:[ ui_text state ~ko:"로그" ~en:"logs"; Printf.sprintf "seq %d" seq ]
+       ~readings:
+         [ System_logs_view.source_label
+             (System_logs_view.source state.system_logs) ]
+       ~position:None);
   box_divider buf cols;
   let lines = system_log_detail_lines state ~seq ~width:(max 1 (framed_inner_width cols - 4)) in
   let content_height = max 1 (rows - 5) in

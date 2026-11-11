@@ -32,19 +32,17 @@ const SHORT_LIST_FOCUSED_ROW = 1
  *  above the focused one adds its five action buttons to the walk; this bounds
  *  the walk if something else takes focus first. */
 const MAX_TAB_PRESSES = 10
-/** VirtualList mounts every row of a list this long or shorter and windows a
- *  longer one (its ACTIVATION_THRESHOLD). */
-const UNWINDOWED_UP_TO_ROWS = 40
-// The batch step reads the windowed list, so the list has to stay windowed
-// once the batch is gone.
-if (ROWS <= CONSUMED_ROWS + UNWINDOWED_UP_TO_ROWS) {
-  throw new Error(`LANE_WINDOW_ROWS must be above ${CONSUMED_ROWS + UNWINDOWED_UP_TO_ROWS}`)
+if (ROWS <= CONSUMED_ROWS + SHORT_LIST_ROWS) {
+  throw new Error(`LANE_WINDOW_ROWS must be above ${CONSUMED_ROWS + SHORT_LIST_ROWS}`)
 }
 /** The dev server transforms the whole module graph on the first request. */
 const COLD_START_TIMEOUT_MS = 120_000
 const SELECTORS = {
   list: '[aria-label="대기 나이순 작업 흐름"]',
   axis: '[data-testid="keeper-lane-age-axis"]',
+  axisLabel: '[data-axis-tick]',
+  /** What VirtualList wraps the rows of a windowed list in. */
+  windowedRows: '.virtual-list-spacer',
   row: '[data-testid="keeper-lane-waiting-row"]',
   bar: '[data-testid="keeper-lane-waiting-bar"]',
   what: '[data-testid="keeper-lane-waiting-what"]',
@@ -152,6 +150,7 @@ try {
     { timeout: COLD_START_TIMEOUT_MS },
   )
   await list.waitFor()
+  await page.evaluate(() => document.fonts.ready)
   await frames()
 
   measurements.initial = {
@@ -165,6 +164,23 @@ try {
       document.querySelector(listSelector).getBoundingClientRect().top
       - document.querySelector(axis).getBoundingClientRect().bottom
     ), SELECTORS),
+    // How far below the axis box the ink of its labels reaches: the text
+    // baseline of each label plus the descent of its glyphs.
+    axisLabelInkBelowAxisPx: await page.evaluate(({ axis, axisLabel }) => {
+      const context = document.createElement('canvas').getContext('2d')
+      const inkBottoms = [...document.querySelectorAll(axisLabel)].map(label => {
+        // An empty inline block sits on the text baseline of its line.
+        const mark = document.createElement('span')
+        mark.style.cssText = 'display:inline-block;width:0;height:0'
+        label.append(mark)
+        const baseline = mark.getBoundingClientRect().bottom
+        mark.remove()
+        const style = getComputedStyle(label)
+        context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+        return baseline + context.measureText(label.textContent).actualBoundingBoxDescent
+      })
+      return Math.max(...inkBottoms) - document.querySelector(axis).getBoundingClientRect().bottom
+    }, SELECTORS),
     // Distance between the tops of the first two collapsed rows: row plus gap.
     collapsedRowPitchPx: await page.evaluate(row => {
       const [first, second] = document.querySelectorAll(row)
@@ -263,7 +279,7 @@ try {
   // queued for this same frame runs after this reading, so the reading can
   // only show the frame emptier than it is painted, never fuller.
   await scrollToEdge('end')
-  measurements.consumedBatch = await page.evaluate(({ count, list: listSelector, row }) => new Promise(resolve => {
+  measurements.consumedBatch = await page.evaluate(({ count, list: listSelector, row, windowedRows }) => new Promise(resolve => {
     window.laneFixture.consume(count)
     requestAnimationFrame(() => {
       const element = document.querySelector(listSelector)
@@ -274,6 +290,9 @@ try {
         .filter(rect => rect.bottom > top && rect.top < bottom)
       resolve({
         consumedRows: count,
+        // This step is about the windowed list; a list short enough to mount
+        // every row takes another path through VirtualList.
+        windowed: element.querySelector(windowedRows) !== null,
         rowsInViewNextFrame: shown.length,
         emptyAbovePx: shown.length === 0 ? bottom - top : Math.max(0, Math.min(...shown.map(rect => rect.top)) - top),
         emptyBelowPx: shown.length === 0 ? 0 : Math.max(0, bottom - Math.max(...shown.map(rect => rect.bottom))),
@@ -323,6 +342,8 @@ try {
   assert.equal(measurements.initial.farFromViewport, 0)
   assert.ok(measurements.initial.mounted < ROWS)
   checks.push('a large inventory mounts only the rows near the list viewport')
+  assert.ok(measurements.initial.listTopBelowAxisPx >= measurements.initial.axisLabelInkBelowAxisPx)
+  checks.push('a row cut at the top of the list stays clear of the age axis labels')
   assert.equal(measurements.end.farFromViewport, 0)
   assert.equal(measurements.end.scrollsToSettle, 1)
   assert.equal(measurements.end.lastRowInView, true)
@@ -347,6 +368,7 @@ try {
   checks.push('another Keeper starts at its first row with nothing open')
   // Less than one row's height may be empty at either edge: the gap between
   // rows is, a missing row is not.
+  assert.equal(measurements.consumedBatch.windowed, true, 'raise LANE_WINDOW_ROWS: the list stopped windowing once the batch was gone')
   assert.ok(measurements.consumedBatch.emptyAbovePx < measurements.initial.collapsedRowPitchPx)
   assert.ok(measurements.consumedBatch.emptyBelowPx < measurements.initial.collapsedRowPitchPx)
   checks.push('the frame after the Keeper consumes a batch shows rows across the list')

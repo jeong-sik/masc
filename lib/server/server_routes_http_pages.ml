@@ -394,23 +394,28 @@ let rec encoded_dashboard_asset name ~accept_encoding body slot =
          Http_response_payload.compress_encoded_body slot.codec (Shared_body.to_string source))
      with
      | payload, headers ->
+       (* A kept result is resolved before the lock is given up:
+          [dashboard_assets_have_room] counts an encoding only once it is
+          resolved, so the next request to take the lock sees these bytes. *)
        let kept =
          Mutex.protect dashboard_assets_lock (fun () ->
            match entry_running name slot encoding with
-           | None -> false
+           | None -> None
            | Some asset ->
-             let fits = dashboard_assets_have_room ~bytes:(String.length payload) in
-             if not fits then Hashtbl.replace dashboard_assets name (slot.set asset None);
-             fits)
+             if dashboard_assets_have_room ~bytes:(String.length payload)
+             then (
+               let shared = Shared_body.of_string payload in
+               Eio.Promise.resolve resolver (Kept (shared, headers));
+               Some shared)
+             else (
+               Hashtbl.replace dashboard_assets name (slot.set asset None);
+               None))
        in
-       if kept
-       then (
-         let shared = Shared_body.of_string payload in
-         Eio.Promise.resolve resolver (Kept (shared, headers));
-         Shared shared, headers)
-       else (
-         Eio.Promise.resolve resolver Not_kept;
-         Owned payload, headers)
+       (match kept with
+        | Some shared -> Shared shared, headers
+        | None ->
+          Eio.Promise.resolve resolver Not_kept;
+          Owned payload, headers)
      | exception exn ->
        let backtrace = Printexc.get_raw_backtrace () in
        Mutex.protect dashboard_assets_lock (fun () ->

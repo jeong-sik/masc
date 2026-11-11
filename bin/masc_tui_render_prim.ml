@@ -956,10 +956,10 @@ let connection_status_parts ~ko (status : Masc_tui_types.connection_status) =
       (if ko then "일부 관측" else "partial"),
       (if ko then ["HTTP 일부 관측", false; "일부 관측", true] else ["HTTP partial", false; "partial", true])
   | Connecting -> Theme.text_status Masc_tui_theme.Warn,
-      (if ko then "조회 중" else "loading..."),
+      (if ko then "조회 중" else "loading"),
       (if ko then ["HTTP 조회 중", false; "조회 중", true] else ["HTTP loading", false; "loading", true])
   | Booting -> Theme.text_status Masc_tui_theme.Warn,
-      (if ko then "서버 시작 중" else "server booting..."),
+      (if ko then "서버 시작 중" else "server booting"),
       (if ko then ["서버 시작 중", false; "시작 중", true] else ["server booting", false; "booting", true])
   | Disconnected -> Theme.text_status Masc_tui_theme.Bad,
       (if ko then "조회 실패" else "refresh failed"),
@@ -1058,9 +1058,16 @@ let strip_connection_reading (state : state) =
     | Compact_http Disconnected | Compact_workspace_mismatch
     | Compact_read_failed -> Failed
   in
-  let style, spellings, _ = compact_connection_wording ~ko compact in
-  let word =
-    List.fold_left (fun _ (spelling, _) -> spelling) "" spellings
+  let style, word =
+    match compact with
+    | Compact_http status ->
+        let style, word, _ = connection_status_parts ~ko status in
+        style, word
+    | Compact_workspace_mismatch | Compact_workspace_unconfirmed
+    | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
+    | Compact_read_interrupted | Compact_read_unfinished | Compact_reading ->
+        let style, spellings, _ = compact_connection_wording ~ko compact in
+        style, List.fold_left (fun _ (spelling, _) -> spelling) "" spellings
   in
   style, Masc_tui_value.Mark.glyph mark ^ " " ^ word
 
@@ -1945,18 +1952,10 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 
-let connection_status_badge ~ko status =
-  let style, label, _ = connection_status_parts ~ko status in
-  "HTTP " ^ style ^ "[" ^ label ^ "]" ^ Ansi.reset
-
-;;
-
-(* Every surface header ends with this, so a workspace the server does not
-   share is said on whichever screen the operator is reading. The footer
-   carries the two paths when the row has space for them; this is the part
-   that has to survive a full row of key hints, because the surfaces it
-   explains are the ones drawing nothing. *)
-let refresh_progress_badge (state : state) =
+(* What the reads under way and the reads that failed have to say, one piece
+   each. The connection itself and the workspace it serves are on the top row
+   ([strip_connection_reading]); these are the particulars behind its word. *)
+let refresh_progress_pieces (state : state) =
   let ko = state.ui_language = Lang_ko in
   let text = ui_text state in
   let surface_name source = if not ko then Surface_read_order.source_name source else
@@ -1983,30 +1982,32 @@ let refresh_progress_badge (state : state) =
     | Component_interrupted -> "조회 중단" | Component_unfinished -> "조회 미완료" in
   let foreground =
     match surface_reads_pending state with
-    | [] -> ""
-    | source :: rest -> " · " ^ text ~ko:"조회 중: " ~en:"reading " ^ surface_name source
-        ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))
+    | [] -> []
+    | source :: rest ->
+        [ text ~ko:"조회 중: " ~en:"reading " ^ surface_name source
+          ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) ]
   in
   match state.http_refresh_progress with
   | Some (authority, progress) when authority = state.workspace_authority ->
       let outcome_notice completion label =
         match Http_refresh_progress.settled_sources ~completion progress with
-        | [] -> ""
-        | source :: rest -> " · " ^ source_name source ^ " " ^ label
-            ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
+        | [] -> []
+        | source :: rest ->
+            [ source_name source ^ " " ^ label
+              ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) ] in
       let partials = match Http_refresh_progress.partial_readings progress with
-        | [] -> ""
+        | [] -> []
         | (_,parts) :: rest ->
             let names outcome = Http_refresh_progress.components parts
               |> List.filter_map (fun (component,observed) -> if observed=outcome
                 then Some (component_name component) else None)
               |> String.concat ", " in
-            " · " ^ text ~ko:"일부 관측: " ~en:"partial: " ^ names Http_refresh_progress.Part_failed
+            [ text ~ko:"일부 관측: " ~en:"partial: " ^ names Http_refresh_progress.Part_failed
               ^ text ~ko:" 조회 실패; " ~en:" failed; "
               ^ names Http_refresh_progress.Part_received ^ text ~ko:" 관측됨" ~en:" received"
-              ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
+              ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) ] in
       let notices = outcome_notice Http_refresh_progress.Failed_read (text ~ko:"조회 실패" ~en:"read failed")
-        ^ outcome_notice Http_refresh_progress.Interrupted_read (text ~ko:"조회 중단" ~en:"interrupted") ^ partials in
+        @ outcome_notice Http_refresh_progress.Interrupted_read (text ~ko:"조회 중단" ~en:"interrupted") @ partials in
       let component_reads = Http_refresh_progress.unreturned_component_reads progress in
       let component_notices = component_reads |> List.filter_map (fun part ->
         match part.Http_refresh_progress.cr_status with
@@ -2014,11 +2015,11 @@ let refresh_progress_badge (state : state) =
         | Http_refresh_progress.Component_settled (_,outcome) ->
             Some (component_name part.cr_component ^ " "
               ^ component_outcome outcome)) |> String.concat "; " in
-      let notices = notices ^ (if component_notices="" then "" else " · " ^ component_notices) in
+      let notices = notices @ (if component_notices="" then [] else [ component_notices ]) in
       (match progress.Http_refresh_progress.phase with
-       | Http_refresh_progress.Finished _ -> notices ^ foreground
+       | Http_refresh_progress.Finished _ -> notices @ foreground
        | Http_refresh_progress.In_flight ->
-           if foreground <> "" then notices ^ foreground else
+           if foreground <> [] then notices @ foreground else
            let pending_components = List.filter (fun part ->
              match part.Http_refresh_progress.cr_status with
              | Http_refresh_progress.Component_pending -> true
@@ -2032,39 +2033,26 @@ let refresh_progress_badge (state : state) =
                      | _ :: _ -> text ~ko:"조회 마무리 중" ~en:"finishing refresh")
                  | source :: rest -> text ~ko:"조회 중: " ~en:"reading " ^ source_name source
                      ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))) in
-           notices ^ " · " ^ pending)
+           notices @ [ pending ])
   | Some _ | None -> foreground
+
+let reading_separator = " \xc2\xb7 "
+
+let refresh_progress_badge (state : state) =
+  String.concat reading_separator (refresh_progress_pieces state)
 
 let observer_loss_badge (state : state) =
   if state.observer_source_loss then
     Some (Theme.warn () ^ ui_text state ~ko:"[이벤트 유실]" ~en:"[events lost]" ^ Ansi.reset)
   else None
 
+(* What a title row adds to the top row's one word: that the event feed lost
+   events, and which reads are under way or failed. Empty while the feed is
+   whole and nothing is being read -- the title then ends with its own
+   readings, and "connected" is said once, above. *)
 let connection_badge (state : state) =
-  let text = ui_text state in
-  let connection = connection_status_badge ~ko:(state.ui_language = Lang_ko) state.connection_status in
-  let connection = match state.workspace_identity with
-  | Masc_tui_types.Workspace_identity_mismatch _ ->
-      connection ^ " " ^ Theme.text_status Masc_tui_theme.Bad ^ text ~ko:"[작업 공간 불일치]" ~en:"[workspace mismatch]" ^ Ansi.reset
-  | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
-      connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ text ~ko:"[작업 공간 확인 대기]" ~en:"[workspace unconfirmed]" ^ Ansi.reset
-  | Masc_tui_types.Workspace_identity_unread
-  | Masc_tui_types.Workspace_identity_match -> connection in
-  let source_loss = match observer_loss_badge state with
-    | Some badge -> badge ^ " "
-    | None -> ""
-  in
-  source_loss ^ connection ^ refresh_progress_badge state
-
-let usage_connection_badge (state : state) =
-  let badge = connection_badge state in
-  match state.workspace_identity, state.connection_status with
-  | Workspace_identity_unread, (Connected | Degraded) ->
-      badge ^ " " ^ Theme.text_status Masc_tui_theme.Warn
-      ^ ui_text state ~ko:"[작업 공간 미조회]" ~en:"[workspace not observed]" ^ Ansi.reset
-  | (Workspace_identity_match | Workspace_identity_match_unconfirmed _
-    | Workspace_identity_mismatch _), _
-  | Workspace_identity_unread, (Connecting | Booting | Disconnected) -> badge
+  String.concat reading_separator
+    (Option.to_list (observer_loss_badge state) @ refresh_progress_pieces state)
 
 let reading_connection_notice (state : state) =
   let exceptional =
@@ -2076,7 +2064,11 @@ let reading_connection_notice (state : state) =
        | Compact_read_interrupted | Compact_read_unfinished
        | Compact_http (Degraded | Connecting | Booting | Disconnected) -> true
   in
-  if exceptional then Some (usage_connection_badge state) else None
+  if exceptional then
+    match connection_badge state with
+    | "" -> None
+    | particulars -> Some particulars
+  else None
 
 (* A narrow Usage title keeps a textual state visible while its longer
    workspace and refresh details remain available in the scrolled body. *)
@@ -2091,7 +2083,7 @@ let compact_connection_badge (state : state) ~width =
     compact_connection_wording ~ko (compact_connection_state state) in
   let label, needs_full_status = choose options in
   let details =
-    if needs_context || needs_full_status then usage_connection_badge state
+    if needs_context || needs_full_status then connection_badge state
     else refresh_progress_badge state in
   style ^ label ^ Ansi.reset, (if String.equal details "" then None else Some details)
 
@@ -2126,36 +2118,20 @@ let feature_child_heading (state : state) ~cols ~title =
           |> String.trim in
         detail_heading ~cols ~lead ~id:"" ~after:[] ~tail
 
-(* The full badge can itself exceed the title's width: at forty-four columns
-   HTTP, workspace mismatch and refresh details cannot all be kept whole.
-   Reuse the prioritized workspace/read observation, then keep observer loss
-   and HTTP when they fit. The ellipsis says that full context was omitted. *)
+(* The particulars can exceed the title's width. The feed's loss is kept
+   whole ahead of the reads, and the ellipsis says the rest was left out. *)
 let surface_connection_badge (state : state) ~width =
   let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
   let full = connection_badge state in
   if cells full <= width then full
   else if width < 1 then ""
   else
-    let omitted = " …" in
+    let omitted = " \xe2\x80\xa6" in
     let room = width - cells omitted in
-    let primary, _ = compact_connection_badge state ~width:room in
-    let loss = Option.to_list (observer_loss_badge state) in
-    let notices = match compact_connection_state state with
-      | Compact_http _ -> loss @ [primary]
-      | Compact_workspace_mismatch | Compact_workspace_unconfirmed
-      | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
-      | Compact_read_interrupted | Compact_read_unfinished | Compact_reading ->
-          primary :: loss @ [connection_status_badge ~ko:(state.ui_language = Lang_ko)
-                             state.connection_status]
-    in
     let warning = Theme.warn () ^ "!" ^ Ansi.reset in
-    if room < 1 then warning
-    else
-      let compact = match notices with
-        | first :: _ when cells first > room -> warning
-        | _ -> Message_layout.join_fitting ~sep:" " ~cells:room notices
-      in
-      compact ^ omitted
+    match observer_loss_badge state with
+    | Some loss when cells loss <= room -> loss ^ omitted
+    | Some _ | None -> if room < 1 then warning else String.trim omitted
 
 (* Reserve the two-cell gap added by [detail_heading] before sizing the
    status. Readings give way whole, then the title; an empty first reading

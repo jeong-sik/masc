@@ -322,16 +322,19 @@ val surface_chrome :
     A complete recovery notice may use the existing bottom row. *)
 
 val connection_badge : Masc_tui_types.state -> string
+(** What a title row adds to the top row's connection word: that the event
+    feed lost events, and which reads are under way or failed. Empty while
+    the feed is whole and nothing is being read. The connection and the
+    workspace it serves are named once, on the row above every screen. *)
 
 val surface_title_row :
   cols:int -> Masc_tui_types.state -> lead:string -> readings:string list -> string
 (** The title row of a surface drawn in [cols] columns: [lead], the [readings]
-    (each carrying its own leading gap) and the connection status last. The
-    full badge is kept when it fits; otherwise prioritized workspace/read,
-    observer-loss and HTTP notices are kept whole as space permits, with an
-    ellipsis for omitted context. A width too small for the first notice
-    shows [!] instead; a frame without a cell for status cannot show it.
-    Readings give way whole from the end, and the lead is cut last. *)
+    (each carrying its own leading gap) and {!connection_badge} last. The
+    badge is kept whole when it fits; otherwise the feed's loss is kept ahead
+    of an ellipsis for what was left out, and a width with no room for the
+    ellipsis shows [!]. Readings give way whole from the end, and the lead is
+    cut last. *)
 
 type compact_connection_state =
   | Compact_workspace_mismatch
@@ -347,12 +350,11 @@ type compact_connection_state =
 val compact_connection_state : Masc_tui_types.state -> compact_connection_state
 (** Select the highest-priority current workspace, read or HTTP observation. *)
 
-val usage_connection_badge : Masc_tui_types.state -> string
-
 val reading_connection_notice : Masc_tui_types.state -> string option
-(** Exceptional transport, workspace, refresh or observer-loss evidence.
-    Healthy HTTP and ordinary pending reads return [None]; each view keeps
-    its own pending-read indication. The notice retains the full context. *)
+(** The particulars behind an exceptional transport, workspace or refresh
+    state, and observer loss. Healthy HTTP and ordinary pending reads return
+    [None], as does an exceptional state with nothing to add to the top row's
+    word; each view keeps its own pending-read indication. *)
 
 val feature_child_heading : Masc_tui_types.state -> cols:int -> title:string -> string
 (** Short identity for a Features child, followed by exceptional connection

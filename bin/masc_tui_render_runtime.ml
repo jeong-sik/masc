@@ -1502,7 +1502,7 @@ let render_metrics (state : state) =
          ui_text state ~ko:" 운영 · 사용량 · 진단" ~en:" Operations · Usage · Telemetry"
        else ui_text state ~ko:" 운영 · 사용량" ~en:" Operations · Usage")
   in
-  let connection = usage_connection_badge state in
+  let connection = connection_badge state in
   let full_title = Printf.sprintf "%s  %s" heading connection in
   let width = framed_inner_width cols in
   let title, connection_rows =

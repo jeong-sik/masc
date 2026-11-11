@@ -30,8 +30,11 @@
 | run6 | 03:20:18 | `h2_stall_probe.py` | `run6-stall.json` | 창 0 을 알린 연결에서 로그 스트림 3개, 105 s 기다린 뒤 창을 엶 |
 | 벤치 run1 | 03:05:18 | `tls-write-bench/harness.py` | `tls-write-bench/run1.jsonl` | 소켓 3종 × suite 2종 × 쓰기 크기 2종. 한 연결은 3회 중앙값, 4연결은 동시 실행 1회 |
 | 벤치 run2 | 03:09:07 | `tls-write-bench/harness2.py` | `tls-write-bench/run2.jsonl` | 소켓 5종 × suite 2종 × 쓰기 크기 2종. 한 연결은 5회 중앙값, 4연결은 동시 실행 1회 |
+| 벤치 run3 | 11-11 11:55~12:05 | `tls-write-bench/harness3.py`, `tls-write-bench/goclient/main.go` | `tls-write-bench/run3.jsonl` | tls 2.1.5. 소켓 4종(`pieces` = 호출마다 버퍼) × suite 2종 × 쓰기 크기 4종 × 클라이언트 2종(OpenSSL, Go `crypto/tls`). 한 연결 5회 중앙값. 다른 빌드가 돌던 장비에서 한 번 돌았다 |
 
-`summarize.py` 는 run1 의 출력 디렉터리를 표로 바꾼다. run3 의 macOS `sample` 프로파일 두 개는 호스트 경로가 들어 있고 문서가 쓰지 않아서 남기지 않았다.
+`summarize.py` 는 run1 의 출력 디렉터리를 표로 바꾼다.
+
+run3 의 `bench_server.ml` 은 run1·run2 것에 `pieces` 소켓을 더한 것이다. tls 2.1.5 는 EC 인증서에 EC 키를 쓰는 suite 가 없으면 설정을 거절해서 TLS 1.2 suite 하나를 목록 끝에 붙였다. 리스너는 1.3 만 받으므로 고르지 않는다. Go 클라이언트는 `go build -o ../bench_client_go .` 로 만든다. run3 의 macOS `sample` 프로파일 두 개는 호스트 경로가 들어 있고 문서가 쓰지 않아서 남기지 않았다.
 
 ## 다시 돌리기
 

@@ -93,6 +93,13 @@ let notify_source_changed () =
 let record_sse_lifecycle_change = notify_source_changed
 let with_source_change update = Fun.protect ~finally:notify_source_changed update
 
+(* Writes a state cell and says whether its value moved. A writer that runs
+   once per connection notifies only when it moved the listener's state: the
+   counts it adds to are read by the next reader, and a notification per
+   connection would recompute and broadcast transport health at the rate
+   connections arrive. *)
+let cell_moved cell value = Atomic.exchange cell value <> value
+
 let source_gauge_mutex = Stdlib.Mutex.create ()
 let set_source_gauge metric value =
   (* Serialize read/commit so a concurrent count writer cannot make the
@@ -198,10 +205,10 @@ let inc_sse_reject ~reason =
    typed [auth_error_code] ("invalid_token", "missing_token", ...), not
    free-form message text, so the label set stays bounded. *)
 let inc_mcp_auth_reject ~endpoint ~reason =
-  with_source_change (fun () -> Otel_metric_store.inc_counter
+  Otel_metric_store.inc_counter
     Otel_metric_store.metric_mcp_auth_rejects
     ~labels:[ "endpoint", endpoint; "reason", reason ]
-    ())
+    ()
 ;;
 
 let inc_sse_reconnect () = Otel_metric_store.inc_counter Otel_metric_store.metric_sse_reconnects ()
@@ -354,10 +361,10 @@ let record_http_rate_limit_response ~acceptance ~protocol ~scope =
   match acceptance with
   | Rejected_by_writer -> ()
   | Accepted_by_writer ->
-    with_source_change (fun () -> Otel_metric_store.inc_counter
+    Otel_metric_store.inc_counter
       Otel_metric_store.metric_http_rate_limit_responses
       ~labels:(http_rate_limit_labels ~protocol ~scope)
-      ())
+      ()
 ;;
 
 let http_listener_mode_runtime : string Atomic.t = Atomic.make "unknown"
@@ -387,14 +394,14 @@ let record_http_listener_stopped ~mode =
 ;;
 
 let record_http_accept ~mode =
-  with_source_change (fun () ->
-    Atomic.set http_listener_mode_runtime mode;
-    Atomic.set http_listener_status "listening";
-    Atomic.set http_last_accept_unix (Some (Unix.gettimeofday ()));
-    Atomic.set http_last_accept_error None;
-    Otel_metric_store.inc_counter Otel_metric_store.metric_http_accepts ~labels:[ "mode", mode ] ();
-    let active = Atomic.fetch_and_add http_active_connections 1 + 1 in
-    set_http_connection_gauge active)
+  let mode_moved = cell_moved http_listener_mode_runtime mode in
+  let status_moved = cell_moved http_listener_status "listening" in
+  let error_cleared = cell_moved http_last_accept_error None in
+  Atomic.set http_last_accept_unix (Some (Unix.gettimeofday ()));
+  Otel_metric_store.inc_counter Otel_metric_store.metric_http_accepts ~labels:[ "mode", mode ] ();
+  let active = Atomic.fetch_and_add http_active_connections 1 + 1 in
+  set_http_connection_gauge active;
+  if mode_moved || status_moved || error_cleared then notify_source_changed ()
 ;;
 
 let rec dec_http_active_connections () =
@@ -406,18 +413,18 @@ let rec dec_http_active_connections () =
 ;;
 
 let record_http_connection_closed ~mode =
-  with_source_change (fun () ->
-    Atomic.set http_listener_mode_runtime mode;
-    let active = dec_http_active_connections () in
-    set_http_connection_gauge active)
+  let mode_moved = cell_moved http_listener_mode_runtime mode in
+  let active = dec_http_active_connections () in
+  set_http_connection_gauge active;
+  if mode_moved then notify_source_changed ()
 ;;
 
 let record_http_accept_error ~mode ~error =
-  with_source_change (fun () ->
-    Atomic.set http_listener_mode_runtime mode;
-    Atomic.set http_listener_status "accept_error";
-    Atomic.set http_last_accept_error (Some error);
-    Otel_metric_store.inc_counter Otel_metric_store.metric_http_accept_errors ~labels:[ "mode", mode ] ())
+  let mode_moved = cell_moved http_listener_mode_runtime mode in
+  let status_moved = cell_moved http_listener_status "accept_error" in
+  let error_moved = cell_moved http_last_accept_error (Some error) in
+  Otel_metric_store.inc_counter Otel_metric_store.metric_http_accept_errors ~labels:[ "mode", mode ] ();
+  if mode_moved || status_moved || error_moved then notify_source_changed ()
 ;;
 
 let accept_latency_metric = "masc_http_accept_latency_seconds"

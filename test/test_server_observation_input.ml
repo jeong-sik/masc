@@ -372,23 +372,29 @@ let test_transport_lifecycle_to_worker_without_delivery_feedback () =
             Eio.Stream.add reads json);
         Eio.Promise.await never))
       (fun () ->
-        let initial = Eio.Stream.take reads in
+        let (_ : Yojson.Safe.t) = Eio.Stream.take reads in
         Eio.Fiber.yield ();
         check bool "healthy transport observation arms no timer" false (Eio_mock.Clock.try_advance clock);
         let open Yojson.Safe.Util in
         let accepted json = json |> member "http_listener" |> member "accepted_total" |> to_int in
+        TM.record_http_listener_started ~mode:"h1";
+        let started = Eio.Stream.take reads in
+        check string "an actual listener transition reaches the production input" "listening"
+          (started |> member "http_listener" |> member "status" |> to_string);
         TM.record_http_accept ~mode:"h1";
-        let updated = Eio.Stream.take reads in
-        check int "actual connection commit reaches the production input" (accepted initial + 1) (accepted updated);
+        Eio.Fiber.yield ();
+        check int "a connection on a listening listener does not wake the worker" 2 !calls;
         Masc.Https_listener_metrics.record_started ();
         let tls = Eio.Stream.take reads in
         check string "HTTPS lifecycle reaches the same typed input" "listening"
           (tls |> member "https_listener" |> member "status" |> to_string);
+        check int "the next source change carries the connection count" (accepted started + 1)
+          (accepted tls);
         Eio.Fiber.yield ();
         check int "computed snapshots and mirror updates do not feed back" 3 !calls;
         check bool "the quiet worker has no periodic deadline" false (Eio_mock.Clock.try_advance clock));
     let before = !source_inputs in
-    TM.record_http_connection_closed ~mode:"h1";
+    TM.record_http_listener_stopped ~mode:"h1";
     Masc.Https_listener_metrics.record_stopped ();
     check int "normal switch release unsubscribes both source leaves" before !source_inputs)
 ;;

@@ -5,50 +5,51 @@
     "farFromViewport": 4977,
     "listClientHeightPx": 450,
     "listScrollHeightPx": 201246,
+    "listTopBelowAxisPx": 3.75,
     "collapsedRowPitchPx": 40.25
   },
   "refresh": {
     "samples": [
       {
-        "renderAndLayoutMs": 1009.9000000953674,
-        "mainThreadMs": 1096.2009999999998
+        "renderAndLayoutMs": 849.1000000238419,
+        "mainThreadMs": 925.591
       },
       {
-        "renderAndLayoutMs": 965.3999999761581,
-        "mainThreadMs": 1045.0220000000004
+        "renderAndLayoutMs": 785.4000000953674,
+        "mainThreadMs": 866.139
       },
       {
-        "renderAndLayoutMs": 935.4000000953674,
-        "mainThreadMs": 1007.5750000000002
+        "renderAndLayoutMs": 605.3000000715256,
+        "mainThreadMs": 668.6799999999997
       },
       {
-        "renderAndLayoutMs": 950.6000000238419,
-        "mainThreadMs": 1031.186
+        "renderAndLayoutMs": 596.8999999761581,
+        "mainThreadMs": 652.0519999999995
       },
       {
-        "renderAndLayoutMs": 929.2000000476837,
-        "mainThreadMs": 1033.524
+        "renderAndLayoutMs": 601,
+        "mainThreadMs": 774.8919999999995
       },
       {
-        "renderAndLayoutMs": 957.2000000476837,
-        "mainThreadMs": 1166.4470000000006
+        "renderAndLayoutMs": 587.1999999284744,
+        "mainThreadMs": 629.868
       },
       {
-        "renderAndLayoutMs": 941.5,
-        "mainThreadMs": 1036.9130000000002
+        "renderAndLayoutMs": 609.2999999523163,
+        "mainThreadMs": 667.3070000000001
       },
       {
-        "renderAndLayoutMs": 905,
-        "mainThreadMs": 1004.7669999999993
+        "renderAndLayoutMs": 642.8000000715256,
+        "mainThreadMs": 695.2660000000002
       },
       {
-        "renderAndLayoutMs": 915.7000000476837,
-        "mainThreadMs": 1009.0520000000005
+        "renderAndLayoutMs": 616.8000000715256,
+        "mainThreadMs": 662.6639999999995
       }
     ],
-    "medianRenderAndLayoutMs": 941.5,
-    "medianMainThreadMs": 1033.524,
-    "medianIdleMainThreadMs": 0.536000000000314
+    "medianRenderAndLayoutMs": 609.2999999523163,
+    "medianMainThreadMs": 668.6799999999997,
+    "medianIdleMainThreadMs": 0.41099999999971715
   },
   "end": {
     "scrollsToSettle": 1,
@@ -67,6 +68,8 @@
   "readdress": {
     "rowOpen": true,
     "focus": "row",
+    "currentSourceIncarnation": "1000000028",
+    "operationsSent": 1,
     "operatedSourceIncarnation": "1000000028"
   },
   "keeperSwitch": {
@@ -74,6 +77,22 @@
     "scrollTopAfterPx": 200947,
     "firstRowInView": false,
     "openRows": 2
+  },
+  "consumedBatch": {
+    "consumedRows": 200,
+    "rowsInViewNextFrame": 12,
+    "emptyAbovePx": 0,
+    "emptyBelowPx": 0.375
+  },
+  "shortList": {
+    "rows": 5,
+    "focusedRow": 2,
+    "keyboardFocused": true,
+    "focusRingReachPx": 2,
+    "roomAbovePx": 115.625,
+    "roomRightPx": 3.75,
+    "roomBelowPx": 124.5,
+    "firstRowRoomAbovePx": 0
   },
   "errors": []
 }

@@ -10,7 +10,7 @@ import type { QueryStreamSubscription } from './query-observation-stream'
 export type ModelMetricsReading =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; value: DashboardRuntimeModelMetricsResponse; receivedAt: Date }
+  | { kind: 'ready'; value: DashboardRuntimeModelMetricsResponse; receivedAt: Date; readError: string | null }
 
 export function useModelMetrics(query: ModelMetricsQuery, enabled = true) {
   const authority = executionWorkspaceAuthority.value
@@ -32,8 +32,14 @@ export function useModelMetrics(query: ModelMetricsQuery, enabled = true) {
     }
     const owner = subscribeModelMetricsStream(query, {
       onReset: () => publish({ kind: 'loading' }),
-      onFrame: value => publish({ kind: 'ready', value, receivedAt: new Date() }),
-      onError: error => publish({ kind: 'error', message: error.message }),
+      onFrame: value => publish({ kind: 'ready', value, receivedAt: new Date(), readError: null }),
+      onError: error => {
+        const previous = reading.peek()
+        if (previous?.authority === authority && previous.credential === credential && previous.key === key
+          && previous.state.kind === 'ready') {
+          publish({ ...previous.state, readError: error.message })
+        } else publish({ kind: 'error', message: error.message })
+      },
     })
     subscription.current = { owner, authority, credential, key }
     return () => {

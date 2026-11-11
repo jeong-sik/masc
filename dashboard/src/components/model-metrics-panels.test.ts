@@ -175,6 +175,92 @@ it('keeps the subscribed query immutable and preserves unreported versus zero us
   stop()
 })
 
+it('retains partial metric rows and their cost read failure through EOF and retry until a complete frame', async () => {
+  const fetch = vi.fn(async (path: string, init: RequestInit) => stream(path, init.signal!, false))
+  vi.stubGlobal('fetch', fetch)
+  const overview = render(html`<${OverviewRuntimeStats} />`)
+  const runtime = render(html`<${Boundary}><${RuntimeMonitor} /><//>`)
+  const cost = render(html`<${Boundary}><${CostDashboard} /><//>`)
+  const views = [overview, runtime, cost]
+  await act(async () => { await flush(); vi.advanceTimersToNextFrame(); await flush() })
+  const originalConnections = [...connections]
+  expect(originalConnections).toHaveLength(3)
+  await act(async () => {
+    for (const connection of originalConnections) {
+      const query = new URL(connection.path, window.location.origin).searchParams
+      send(connection, { ...frame(Number(query.get('window')), Number(query.get('bucket_min')), 'partial-decision-row'),
+        cost_ledger_read: { state: 'unavailable', detail: 'original cost ledger IO failure' } })
+      connection.source.close()
+    }
+    await flush()
+  })
+  await vi.waitFor(() => {
+    expect(renderErrors).toEqual([])
+    for (const view of views) {
+      expect(view.container.textContent).toContain('partial-decision-row')
+      expect(view.container.querySelector('[role="alert"]')).not.toBeNull()
+    }
+    expect(overview.container.textContent).toContain('original cost ledger IO failure')
+  })
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000); await flush() })
+  expect(fetch).toHaveBeenCalledTimes(6)
+  for (const view of views) expect(view.container.textContent).toContain('partial-decision-row')
+  await act(async () => {
+    for (const connection of connections.slice(originalConnections.length)) {
+      const query = new URL(connection.path, window.location.origin).searchParams
+      send(connection, frame(Number(query.get('window')), Number(query.get('bucket_min')), 'complete-after-cost-recovery'))
+    }
+    await flush()
+  })
+  await vi.waitFor(() => {
+    for (const view of views) {
+      expect(view.container.textContent).toContain('complete-after-cost-recovery')
+      expect(view.container.textContent).not.toContain('partial-decision-row')
+      expect(view.container.textContent).not.toContain('original cost ledger IO failure')
+      expect(view.container.querySelector('[role="alert"]')).toBeNull()
+    }
+  })
+})
+
+it('withdraws retained partial metrics when the query or workspace changes before another frame', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init: RequestInit) => stream(path, init.signal!, false)))
+  const view = render(html`<${Boundary}><${RuntimeMonitor} /><//>`)
+  await act(flush)
+  const first = connections[0]!
+  await act(async () => {
+    send(first, { ...frame(30, 5, 'query-A-partial-row'),
+      cost_ledger_read: { state: 'unavailable', detail: 'query-A-cost-failure' } })
+    first.source.close()
+    await flush()
+  })
+  await vi.waitFor(() => expect(view.container.textContent).toContain('query-A-partial-row'))
+  fireEvent.change(view.getByRole('combobox', { name: '시간 윈도우 선택' }), { target: { value: '60' } })
+  await act(flush)
+  expect(view.container.textContent).not.toContain('query-A-partial-row')
+  expect(view.container.textContent).not.toContain('query-A-cost-failure')
+  expect(first.signal.aborted).toBe(true)
+  const next = connections.at(-1)!
+  await act(async () => {
+    send(next, { ...frame(60, 5, 'workspace-A-partial-row'),
+      cost_ledger_read: { state: 'unavailable', detail: 'workspace-A-cost-failure' } })
+    next.source.close()
+    await flush()
+  })
+  await vi.waitFor(() => expect(view.container.textContent).toContain('workspace-A-partial-row'))
+  invalidateExecutionSnapshotGeneration('partial-workspace-B', 0)
+  await act(async () => {
+    hydrateExecutionSnapshot({ execution_publication_epoch: 'partial-workspace-B', execution_publication_generation: 1,
+      status: { project: 'B', workspace_root: '/partial-B' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
+    await flush()
+  })
+  expect(view.container.textContent).not.toContain('workspace-A-partial-row')
+  expect(view.container.textContent).not.toContain('workspace-A-cost-failure')
+  expect(next.signal.aborted).toBe(true)
+  await act(async () => { connections.at(-1)!.source.error(new Error('workspace-B-body-failed')); await flush() })
+  expect(view.container.textContent).not.toContain('workspace-A-partial-row')
+  expect(renderErrors).toEqual([])
+})
+
 it.each([401, 403])('keeps an actual %s refusal stopped across manual query refresh', async status => {
   setStoredToken(`refused-${status}`, { source: 'manual' })
   const fetch = vi.fn(async () => new Response(JSON.stringify({ error: 'refused', auth_error_code: 'invalid_token' }), {

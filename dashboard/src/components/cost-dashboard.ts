@@ -1133,6 +1133,8 @@ function CostDashboardContent({ view }: { view: CostView }) {
 
     return html`
       <section class="flex flex-col gap-4" aria-label="비용 / 지연 대시보드">
+        ${mode === 'model' && metrics.state.kind === 'ready' && metrics.state.readError
+          ? html`<${ErrorState} message=${metrics.state.readError} />` : null}
         <header class="flex flex-wrap items-baseline justify-between gap-3">
           <div>
             <h2 class="text-base font-semibold text-text-strong">비용 / 지연 대시보드</h2>

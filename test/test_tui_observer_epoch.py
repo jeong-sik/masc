@@ -53,8 +53,11 @@ class EpochHandler(WaitingHandler):
                     phase = server.record("/health")
         if phase is not None:
             if phase == "preflight":
+                # DIAG: only the first preflight /health holds; later polls answer at once.
+                first = not server.preflight_started.is_set()
                 server.preflight_started.set()
-                server.release_preflight.wait()
+                if first:
+                    server.release_preflight.wait()
             else:
                 server.replacement_health_started.set()
                 server.release_replacement_health.wait()

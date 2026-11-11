@@ -92,7 +92,7 @@ implementation_prs: []
 - **조용히 넘어간다.** 받는 쪽 기록 없이 상태가 앞으로 가요. `Candidate_absent` 정산(#38068), 커밋 안 된 산출물의 `Done`(#26914), 고정 문장으로 끝난 `Failed`(#45003).
 - **조용히 멈춘다.** 멈춘 사실이 로그와 기록 파일에만 있고, 움직일 수 있는 쪽이 읽지 않아요. Board 362건, 검증 19건, todo 456개, 게시되지 않은 판정.
 
-**[사실]** 헌법(`docs/constitution.xml`)은 첫째 꼴을 이미 금지해요. `failure_keeps_evidence` 는 "전달 실패는 증거를 남기고 대상을 소비하지 않는다. 실패가 상태를 조용히 진행시키지 않는다"예요. 둘째 꼴은 조항이 없어요. 증거는 남았고 상태도 그대로라서 어느 불변식도 깨지지 않아요. 그런데 실패 조건 "여러 Keeper 가 자기들끼리 커뮤니케이션하지 않는다"가 실제로 일어나는 곳은 둘째 꼴이에요.
+**[사실]** 헌법(`docs/constitution.xml`)은 첫째 꼴을 이미 금지해요. `failure_keeps_evidence` 는 "전달 실패는 증거를 남기고 대상을 소비하지 않는다. 실패가 상태를 조용히 진행시키지 않는다"예요. 둘째 꼴을 가리키는 조항은 찾지 못했어요(`stall`, `정체`, `멈춤`, `가시`, `projection` 으로 찾았어요). 증거는 남았고 상태도 그대로라서 적힌 불변식은 깨지지 않아요. 그런데 실패 조건 "여러 Keeper 가 자기들끼리 커뮤니케이션하지 않는다"가 실제로 일어나는 곳은 둘째 꼴이에요.
 
 ## 3. 지금 코드가 하는 일
 
@@ -174,7 +174,8 @@ type judgment_delivery_outcome =
   | Judgment_conflict of { recorded : judgment; offered : judgment }
 ```
 
-- `Candidate_absent` 는 `load_candidates_with_rejections` 가 거절 0을 돌려준 원장에서만 만들어요. 거절 행이 있으면 `Candidate_unreadable` 이에요.
+- `Candidate_absent` 는 `load_candidates_with_rejections` 가 거절 0을 돌려준 원장에서만 만들어요.
+- 거절 행에서 `candidate_id` 를 읽을 수 있으면 그 id 를 찾을 때만 `Candidate_unreadable` 이에요. id 도 읽지 못한 행이 있으면 찾지 못한 후보는 모두 `Candidate_unreadable` 이에요. 닫힌 PR #38041 은 깨진 줄 하나로 오래된 후보를 모두 붙잡았어요. id 를 읽을 수 있는 거절 행까지 원장 전체를 막으면 같은 일이 생겨요.
 - `Judgment_conflict` 는 지금 문자열 `Error` 인 갈래예요. 값이 되면 부르는 쪽이 `match` 에서 반드시 다뤄요.
 - `Error` 는 원장을 읽지 못한 것처럼 걸음 전체가 멈춰야 하는 실패에만 남아요.
 

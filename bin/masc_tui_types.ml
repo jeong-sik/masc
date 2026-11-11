@@ -6053,6 +6053,17 @@ type task_detail_presented =
   ; tdp_count : int
   ; tdp_height : int
   ; tdp_waiting : bool }
+(* What the last frame of an open Board post drew: the wrapped line count of
+   the body and of the comment thread, and the rows each got. PgUp and PgDn
+   page by these, so the key handler never guesses a window from the terminal
+   height; the thread takes rows from the body, so the guess was wrong
+   whenever a post had comments. *)
+type board_read_presented =
+  { brp_post_id : string
+  ; brp_body_count : int
+  ; brp_body_height : int
+  ; brp_comment_count : int
+  ; brp_comment_height : int }
 type tools_task_owner =
   { tto_source : tools_async_task_source; tto_reading : unit ref; tto_visit : unit ref }
 type tools_task_frame =
@@ -10454,6 +10465,7 @@ type state = {
   mutable board_scroll: int;
   mutable board_comment_scroll: int;
   mutable board_comments_focused: bool;
+  mutable board_read_presented: board_read_presented option;
   (* The selected comment while the comments have focus, by id so a refresh
      that adds, removes or rescores comments keeps it on the same one. It is
      read against the open post's thread: an id that thread does not hold
@@ -20691,6 +20703,7 @@ let create_state
   board_scroll = 0;
   board_comment_scroll = 0;
   board_comments_focused = false;
+  board_read_presented = None;
   board_comment_cursor = None;
   board_diagram_cursor = None;
   board_image_selection = None;
@@ -23147,6 +23160,43 @@ let board_read_focus (state : state) ~cols =
   match board_read_layout ~cols ~wide:state.board_detail_wide with
   | Board_read_split -> state.board_focus
   | Board_read_wide | Board_read_one_pane -> Right_pane
+;;
+
+(* The frame's windows, only while they belong to the post that is open: a
+   record written for another post says nothing about this one. *)
+let current_board_read_presented (state : state) =
+  match state.board_read_presented, state.board_mode with
+  | Some shown, Board_read post_id when String.equal shown.brp_post_id post_id ->
+      Some shown
+  | Some _, (Board_list | Board_read _ | Board_compose) | None, _ -> None
+;;
+
+let board_read_presented_frame (state : state) ~post_id ~body:(brp_body_count, brp_body_height)
+    ~comments:(brp_comment_count, brp_comment_height) =
+  state.board_read_presented <-
+    Some { brp_post_id = post_id; brp_body_count; brp_body_height;
+           brp_comment_count; brp_comment_height }
+;;
+
+(* PgUp and PgDn on the open post move the half that has the keys by one page
+   of the window the frame drew for it: one row of the window stays, as in
+   every other reading. Before the first frame of a post nothing says how big
+   its window is, so the key does nothing rather than move by a guessed size. *)
+let page_board_read (state : state) ~direction =
+  match current_board_read_presented state with
+  | None -> ()
+  | Some shown ->
+      let move =
+        if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up
+      in
+      if state.board_comments_focused then
+        state.board_comment_scroll <-
+          move ~count:shown.brp_comment_count ~height:shown.brp_comment_height
+            state.board_comment_scroll
+      else
+        state.board_scroll <-
+          move ~count:shown.brp_body_count ~height:shown.brp_body_height
+            state.board_scroll
 ;;
 
 (* What [board_focus] becomes when the Activity pane gives the keys back. The

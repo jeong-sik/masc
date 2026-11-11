@@ -40322,7 +40322,7 @@ Use relative paths for resources already held in the package. -->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(direction * page)
                       | Right_pane ->
-                          move_board_read_scroll state ~by:(direction * page))
+                          Masc_tui_types.page_board_read state ~direction)
                  | Board_compose -> ())
             | Fusion ->
                 (match state.fusion_mode with

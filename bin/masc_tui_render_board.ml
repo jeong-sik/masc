@@ -1204,6 +1204,9 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
    | None -> ());
   box_bottom buf cols;
   Masc_tui_frame_timing.finish_stage ~name:"board.frame_rows" rows_started;
+  Masc_tui_types.board_read_presented_frame state ~post_id:list_post.bp_id
+    ~body:(total_lines, body_lines_drawn)
+    ~comments:(detail_line_count, comment_lines_drawn);
   scroll.body_offset, scroll.comment_offset
 
 (* The post list beside the read: position context with the open post

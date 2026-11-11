@@ -337,7 +337,9 @@ val here_row :
 (** The row under the top row: the top-row screen this one belongs to, each
     step in [path] taken into it, the screen's own [readings], then
     {!reading_connection_notice} -- nothing while reads merely come and go --
-    and the [position] at the right-hand end. The last
+    and the [position] at the right-hand end. Readings are set off from the
+    path by a gap and from each other by {!reading_separator}; an empty one
+    is not drawn. The last
     step folds first when the row is narrow, readings give way whole from the
     end, and the position is never cut. The product name is not drawn. *)
 
@@ -384,12 +386,10 @@ val badge_row : cols:int -> lead:string -> label:string -> badge:string -> strin
     drawn whole whenever [lead] and [badge] fit in the row; a row too narrow for
     those two is cut at its end like any other. *)
 
-val fusion_title : string
 val runtime_detail_title : string
 val keeper_calls_lead : string
 (** What the headings laid out by {!Masc_tui_ansi.detail_heading} draw before
-    the id: a lane run, a measurement artifact, a Fusion run (its list and
-    launch form carry the same title), one runtime's detail, and one keeper's
+    the id: one runtime's detail, and one keeper's
     calls. *)
 
 val coordinator_status_row :

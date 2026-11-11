@@ -43,7 +43,7 @@ let facts_keeper_label ~ko = function
 
 (* What the title carries while the read is in flight and once it has landed.
    Typed so the two spellings cannot drift into each other's shape. The unread
-   word arrives rendered, like [screen] and [badge]: whether a read is still in
+   word arrives rendered: whether a read is still in
    flight or came back failed is the caller's reading, and
    [Masc_tui_types.title_missing_reading] is the one place that words it. *)
 type facts_reading =
@@ -54,28 +54,17 @@ type facts_reading =
       ; query_label : string
       }
 
-(* The facts title. Here beside the row under it so the two cannot disagree
-   about which fact each one carries: the title says the total and the filters,
-   the row says the breakdown and the sort. The title is the narrow line and the
-   connection badge sits at its end, so a fact spelled here and there goes off
-   the right edge.
-
-   [screen] and [badge] arrive rendered because colour and the connection
-   reading belong to the caller. The badge is the heading's tail and is
-   never shortened; when the row is narrow the keeper's name
-   folds to its floor, the counts and filters are cut at their end, and only
-   then the name goes further ([detail_heading]). *)
-let facts_title ~ko ~cols ~screen ~keeper ~reading ~badge =
-  let after =
-    match reading with
-    | Facts_unread { reading } -> "  " ^ reading
-    | Facts_loaded { total; filter_label; query_label } ->
-      Printf.sprintf " (%s \xc2\xb7 %s%s)"
-        (if ko then Printf.sprintf "목록 %d개" total else Masc_tui_message_layout.count_noun total "listed row") filter_label
-        query_label
-  in
-  detail_heading ~cols ~lead:(Lead_text (screen ^ " \xe2\x96\xb8 ")) ~id:keeper
-    ~after:[ after ] ~tail:badge
+(* What the facts title reads beside its path. Here beside the row under it
+   so the two cannot disagree about which fact each one carries: the title
+   says the total and the filters, the row says the breakdown and the sort.
+   The title is the narrow line, so a fact spelled here and there goes off the
+   right edge. *)
+let facts_title_reading ~ko = function
+  | Facts_unread { reading } -> reading
+  | Facts_loaded { total; filter_label; query_label } ->
+    Printf.sprintf "%s \xc2\xb7 %s%s"
+      (if ko then Printf.sprintf "목록 %d개" total else Masc_tui_message_layout.count_noun total "listed row") filter_label
+      query_label
 
 (* The row under the facts title. The title says the total and the filter; this
    says how that total breaks down and which sort produced the order, so each

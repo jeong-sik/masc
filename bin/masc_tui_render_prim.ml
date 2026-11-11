@@ -2186,7 +2186,12 @@ let here_row ~cols (state : state) ~path ~readings ~position =
   let left_cols = cols - position_cells in
   let left =
     detail_heading ~cols:left_cols ~lead:(Lead_text lead) ~id
-      ~after:(List.map (fun reading -> "  " ^ reading) readings)
+      ~after:
+        (* One gap ahead of the first reading, one mark between readings, and
+           an empty reading takes no room. *)
+        (List.filter (fun reading -> reading <> "") readings
+         |> List.mapi (fun index reading ->
+                (if index = 0 then "  " else reading_separator) ^ reading))
       ~tail:
         (* Reads come and go with every refresh, and a row that changed with
            them would never sit still. Each screen says what it is still
@@ -2231,7 +2236,6 @@ let badge_row ~cols ~lead ~label ~badge =
    run, a measurement artifact named by its sha256, a Fusion run (whose list
    and launch form carry the same title), one runtime's detail, and one
    keeper's calls. *)
-let fusion_title = " MASC Fusion"
 let runtime_detail_title = " MASC System / Runtime detail"
 let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 

@@ -7,11 +7,11 @@
     that kept the stored snapshot ([Unchanged]) moves neither: its snapshot
     still carries the change of the commit before it. *)
 
-type counts =
-  { added : int  (** IDs the result holds that the basis did not *)
-  ; absorbed : int  (** IDs that left through an applied absorption *)
-  ; superseded : int  (** IDs that left through an applied revision *)
-  ; dropped : int  (** every other ID that left, support invalidations included *)
+type counts = Keeper_memory_commit_change.counts =
+  { added : int
+  ; absorbed : int
+  ; superseded : int
+  ; dropped : int
   }
 
 val of_change :

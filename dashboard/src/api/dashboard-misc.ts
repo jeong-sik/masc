@@ -183,6 +183,52 @@ export const KEEPER_MEMORY_AGE_BIN_COUNT = 24
  */
 export type KeeperMemoryAgeBins = readonly number[]
 
+/** How many clock hours the server's fact-count trend covers (RFC-0517 §2.2). */
+const KEEPER_MEMORY_TREND_HOURS = 168
+
+const SECONDS_PER_HOUR = 3600
+
+/**
+ * The facts a Keeper held after the last commit of one clock hour, and when
+ * that commit was recorded. A commit that kept the stored snapshot counts the
+ * facts it kept, not new claims.
+ */
+export interface KeeperMemoryFactsAtHour {
+  recorded_at: number
+  facts: number
+}
+
+/** The passes a Keeper Memory commit is counted under, as the server labels them. */
+const KEEPER_MEMORY_COMMIT_PASSES = [
+  'admission',
+  'durable',
+  'continuity',
+  'cleanup',
+  'keeper_write',
+  'keeper_delete',
+  'operator_delete',
+] as const
+
+export type KeeperMemoryCommitPass = typeof KEEPER_MEMORY_COMMIT_PASSES[number]
+
+/** The memory IDs one pass's commits added, absorbed, superseded and dropped. */
+export interface KeeperMemoryChangeCounts {
+  added: number
+  absorbed: number
+  superseded: number
+  dropped: number
+}
+
+const KEEPER_MEMORY_CHANGES: readonly (keyof KeeperMemoryChangeCounts)[] = [
+  'added',
+  'absorbed',
+  'superseded',
+  'dropped',
+]
+
+/** Every pass's counts since the server started; the counter is not kept across restarts. */
+export type KeeperMemoryChangesByPass = Record<KeeperMemoryCommitPass, KeeperMemoryChangeCounts>
+
 export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
   revision: number
@@ -196,6 +242,9 @@ export interface KeeperMemoryHealthKeeperEntry {
   removed: number
   snapshot_present: boolean
   age_bins: KeeperMemoryAgeBins | null
+  /** Oldest first, one point per clock hour of the last {@link KEEPER_MEMORY_TREND_HOURS}. */
+  facts_by_hour: KeeperMemoryFactsAtHour[]
+  changes_since_start: KeeperMemoryChangesByPass
   librarian: KeeperMemoryHealthLibrarian
   context_cycle: ContextCycle
   librarian_failures: number
@@ -212,7 +261,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v13'
+  schema: 'keeper.memory_os.current_health.v14'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -625,6 +674,57 @@ function decodeKeeperMemoryAgeBins(raw: unknown, expectedFacts: number): KeeperM
   return counts
 }
 
+// Each point stands in a later clock hour than the one before it.
+function decodeKeeperMemoryFactsByHour(raw: unknown): KeeperMemoryFactsAtHour[] | null {
+  if (!Array.isArray(raw) || raw.length > KEEPER_MEMORY_TREND_HOURS) return null
+  const points: KeeperMemoryFactsAtHour[] = []
+  let previousHour: number | null = null
+  for (const item of raw) {
+    if (!isRecord(item) || !exactKeys(item, ['recorded_at', 'facts'])) return null
+    const recorded_at = finiteNumber(item.recorded_at)
+    const facts = nonNegativeInteger(item.facts)
+    if (recorded_at === null || facts === null) return null
+    const hour = Math.floor(recorded_at / SECONDS_PER_HOUR)
+    if (previousHour !== null && hour <= previousHour) return null
+    previousHour = hour
+    points.push({ recorded_at, facts })
+  }
+  return points
+}
+
+function decodeKeeperMemoryChangeCounts(raw: unknown): KeeperMemoryChangeCounts | null {
+  if (!isRecord(raw) || !exactKeys(raw, KEEPER_MEMORY_CHANGES)) return null
+  const added = nonNegativeInteger(raw.added)
+  const absorbed = nonNegativeInteger(raw.absorbed)
+  const superseded = nonNegativeInteger(raw.superseded)
+  const dropped = nonNegativeInteger(raw.dropped)
+  if (added === null || absorbed === null || superseded === null || dropped === null) return null
+  return { added, absorbed, superseded, dropped }
+}
+
+// Every pass the server counts, each with every change: a table from a build
+// that counts another pass is refused, not read in part.
+function decodeKeeperMemoryChangesByPass(raw: unknown): KeeperMemoryChangesByPass | null {
+  if (!isRecord(raw) || !exactKeys(raw, KEEPER_MEMORY_COMMIT_PASSES)) return null
+  const admission = decodeKeeperMemoryChangeCounts(raw.admission)
+  const durable = decodeKeeperMemoryChangeCounts(raw.durable)
+  const continuity = decodeKeeperMemoryChangeCounts(raw.continuity)
+  const cleanup = decodeKeeperMemoryChangeCounts(raw.cleanup)
+  const keeper_write = decodeKeeperMemoryChangeCounts(raw.keeper_write)
+  const keeper_delete = decodeKeeperMemoryChangeCounts(raw.keeper_delete)
+  const operator_delete = decodeKeeperMemoryChangeCounts(raw.operator_delete)
+  if (
+    admission === null
+    || durable === null
+    || continuity === null
+    || cleanup === null
+    || keeper_write === null
+    || keeper_delete === null
+    || operator_delete === null
+  ) return null
+  return { admission, durable, continuity, cleanup, keeper_write, keeper_delete, operator_delete }
+}
+
 function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEntry | null {
   if (!isRecord(raw) || !exactKeys(raw, [
     'keeper_id',
@@ -639,6 +739,8 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     'removed',
     'snapshot_present',
     'age_bins',
+    'facts_by_hour',
+    'changes_since_start',
     'librarian',
     'context_cycle',
     'librarian_failures',
@@ -666,6 +768,8 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   const snapshot_present = typeof raw.snapshot_present === 'boolean'
     ? raw.snapshot_present
     : null
+  const facts_by_hour = decodeKeeperMemoryFactsByHour(raw.facts_by_hour)
+  const changes_since_start = decodeKeeperMemoryChangesByPass(raw.changes_since_start)
   const context_cycle = decodeContextCycle(raw.context_cycle)
   const librarian = decodeKeeperMemoryHealthLibrarian(raw.librarian)
   const librarian_failures = nonNegativeInteger(raw.librarian_failures)
@@ -707,6 +811,8 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     || (updated_at !== null && updated_at < 0)
     || (updated_at !== null) !== snapshot_present
     || (raw.age_bins !== null && age_bins === null)
+    || facts_by_hour === null
+    || changes_since_start === null
     || context_cycle === null
     || librarian === null
     || librarian_failures === null
@@ -743,6 +849,8 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     removed,
     snapshot_present,
     age_bins,
+    facts_by_hour,
+    changes_since_start,
     librarian,
     context_cycle,
     librarian_failures,
@@ -767,7 +875,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     ? ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary', 'execution']
     : ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary']
   if (!exactKeys(raw, expectedKeys)) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v13') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v14') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)

@@ -12,6 +12,13 @@ import test_tui_chat_owed_history as owed
 
 
 HEALTH_PATH = "/api/v1/dashboard/keeper-memory-health"
+# Every pass and change the server counts, none moved since it started.
+NO_MEMORY_CHANGES = {
+    commit_pass: {change: 0 for change in ("added", "absorbed", "superseded", "dropped")}
+    for commit_pass in (
+        "admission", "durable", "continuity", "cleanup", "keeper_write", "keeper_delete", "operator_delete",
+    )
+}
 
 
 def health_payload() -> dict:
@@ -52,6 +59,8 @@ def health_payload() -> dict:
         "removed": 0,
         "snapshot_present": True,
         "age_bins": [1] + [0] * 23,
+        "facts_by_hour": [{"recorded_at": 1.0, "facts": 1}],
+        "changes_since_start": NO_MEMORY_CHANGES,
         "context_cycle": context_cycle,
         "librarian": librarian,
         "librarian_failures": 0,
@@ -67,7 +76,7 @@ def health_payload() -> dict:
         "alerts": [],
     }
     return {
-        "schema": "keeper.memory_os.current_health.v13",
+        "schema": "keeper.memory_os.current_health.v14",
         "generated_at": 1.0,
         "execution": {
             "schema": "keeper.memory_execution_availability.v1",

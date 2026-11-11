@@ -172,6 +172,13 @@ type memory_keeper_health = {
   mkh_removed : int;
   mkh_snapshot_present : bool;
   mkh_age_bins : Keeper_memory_age_bins.t option;
+  mkh_facts_by_hour : Keeper_memory_journal_outcome.facts_at_hour list;
+      (** Oldest first, one point per clock hour of the last
+          {!Keeper_memory_journal_outcome.trend_hours}: the facts after the
+          hour's last commit and when it was recorded (RFC-0517 §2.2). *)
+  mkh_changes_since_start : Keeper_memory_commit_change.by_pass;
+      (** The memory IDs the keeper's commits added, absorbed, superseded and
+          dropped since the server started, by the pass that committed. *)
   mkh_context_cycle : memory_context_cycle;
   mkh_librarian : memory_librarian_health;
   mkh_librarian_failures : int;

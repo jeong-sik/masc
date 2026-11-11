@@ -20,6 +20,20 @@ vi.mock('../../api/dashboard', () => ({
 import { KeeperMemoryHealth } from './keeper-memory-health'
 import { fetchKeeperMemoryHealth as fetchStrictKeeperMemoryHealth } from '../../api/dashboard-misc'
 
+// Every pass and change the server counts, none moved since it started.
+function noMemoryChanges(): KeeperMemoryHealthKeeperEntry['changes_since_start'] {
+  const none = () => ({ added: 0, absorbed: 0, superseded: 0, dropped: 0 })
+  return {
+    admission: none(),
+    durable: none(),
+    continuity: none(),
+    cleanup: none(),
+    keeper_write: none(),
+    keeper_delete: none(),
+    operator_delete: none(),
+  }
+}
+
 function makeEntry(
   overrides: Partial<KeeperMemoryHealthKeeperEntry> = {},
 ): KeeperMemoryHealthKeeperEntry {
@@ -36,6 +50,8 @@ function makeEntry(
     removed: 1,
     snapshot_present: true,
     age_bins: null,
+    facts_by_hour: [],
+    changes_since_start: noMemoryChanges(),
     context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
     librarian: { state: 'drained', detail: null, pending: null, admission_wait: null, operator_action_required: false, measured_at: 1_699_999_950,
       unread_atom_turns: 0, unread_official_turns: 0,
@@ -79,7 +95,7 @@ function makeResponse(
   alertSummary = makeAlertSummary(),
 ): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v13',
+    schema: 'keeper.memory_os.current_health.v14',
     generated_at: 1_700_000_000,
     keepers,
     totals: {

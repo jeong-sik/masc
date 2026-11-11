@@ -178,36 +178,36 @@ let scoped_keys =
   (* Code at the project root has no step for Left ([code_back_step]); a
      directory down, Left climbs one. *)
   @ back_keys "Code tree"
-      ~list:(Keys.footer_hints_code ~pane:(Keys.Code_root (Keys.File_current, project_scope)))
-      ~detail:(Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.File_current, project_scope)))
+      ~list:(Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.Code_root (Keys.File_current, project_scope)))
+      ~detail:(Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.Code_tree (Keys.File_current, project_scope)))
   (* Right and Enter open a tree row. An open file has nothing under them, so
      the file pane's footer is the tree's without that key. *)
   @ [ ( "Code Right / Enter",
-        Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
-        Keys.footer_hints_code ~pane:Keys.Code_file,
+        Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
+        Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:Keys.Code_file,
         [ "Right / Enter" ] )
     (* [h] and [l] move focus between the tree and a file, and only while a
        file read is current ([Keys.code_file_is_current]); with none the
        dispatcher ends in [()]. *)
     ; ( "Code h/l below the project root",
-        Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
-        Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.No_file, project_scope)),
+        Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
+        Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.Code_tree (Keys.No_file, project_scope)),
         [ "h/l" ] )
     ; ( "Code h/l at the project root",
-        Keys.footer_hints_code ~pane:(Keys.Code_root (Keys.File_current, project_scope)),
-        Keys.footer_hints_code ~pane:(Keys.Code_root (Keys.No_file, project_scope)),
+        Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.Code_root (Keys.File_current, project_scope)),
+        Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.Code_root (Keys.No_file, project_scope)),
         [ "h/l" ] )
     (* [d] on the list opens the project's Git changes, and only the project's
        own workspace has that arm ([Keys.code_tree_opens_changes]): a keeper's
        or a repository's tree ends in [()]. *)
     ; ( "Code d on a keeper's list",
-        Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
-        Keys.footer_hints_code
+        Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
+        Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en
           ~pane:(Keys.Code_tree (Keys.File_current, Masc_tui_types.Code_scope_keeper "scout")),
         [ "d" ] )
     ; ( "Code d on a repository's list",
-        Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
-        Keys.footer_hints_code
+        Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
+        Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en
           ~pane:(Keys.Code_tree (Keys.File_current, Masc_tui_types.Code_scope_repo "masc")),
         [ "d" ] ) ]
 
@@ -229,7 +229,7 @@ let test_a_scoped_key_is_named_only_where_it_answers () =
 let draft_keys = [ "e"; "S"; "V"; "X"; "A (draft)" ]
 
 let test_code_draft_keys_are_named_only_on_the_file_pane () =
-  let file = Keys.footer_hints_code ~pane:Keys.Code_file in
+  let file = Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:Keys.Code_file in
   List.iter
     (fun key ->
       check bool ("the file pane names " ^ key) true (names_item file key);
@@ -238,7 +238,7 @@ let test_code_draft_keys_are_named_only_on_the_file_pane () =
           check bool
             (pane_name ^ " pane does not name " ^ key)
             false
-            (names_item (Keys.footer_hints_code ~pane) key))
+            (names_item (Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane) key))
         [ ("tree", Keys.Code_tree (Keys.File_current, project_scope)); ("diff", Keys.Code_diff) ])
     draft_keys
 
@@ -327,7 +327,7 @@ let test_the_footer_pane_follows_the_ladder_rung () =
 let test_the_tree_names_h_l_once_a_file_read_is_current () =
   let state = T.create_state ~workspace:"test" ~port:8935 () in
   let names_h_l () =
-    names_item (Keys.footer_hints_code ~pane:(Keys.code_pane_of state)) "h/l"
+    names_item (Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.code_pane_of state)) "h/l"
   in
   check bool "no file read is current at first" false
     (Keys.code_file_is_current state);
@@ -354,7 +354,7 @@ let test_the_tree_names_d_where_the_list_opens_the_changes () =
       check bool
         (name ^ ": the tree footer names d where the arm answers")
         (Keys.code_tree_opens_changes scope)
-        (names_item (Keys.footer_hints_code ~pane:(Keys.code_pane_of state)) "d"))
+        (names_item (Keys.footer_hints_code ~lang:Masc_tui_types.Lang_en ~pane:(Keys.code_pane_of state)) "d"))
     [ ("the project", T.Code_scope_project)
     ; ("a keeper", T.Code_scope_keeper "scout")
     ; ("a repository", T.Code_scope_repo "masc") ]

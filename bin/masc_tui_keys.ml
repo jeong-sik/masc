@@ -1256,73 +1256,73 @@ let for_surface = function
          one directory level (the /workspace/children route is lazy). Claimed
          from those two facts rather than from the render, so the footer does
          not advertise a key nothing handles. *)
-      [ b Navigate "j/k" "move"
-      ; b Navigate "h/l" "pane" ~help:"focus the tree or open file"
-      ; b Search "Ctrl-P" "file finder"
+      [ b ~ko:"선택" Navigate "j/k" "move"
+      ; b ~ko:"창" Navigate "h/l" "pane" ~help:"focus the tree or open file"
+      ; b ~ko:"파일 찾기" Search "Ctrl-P" "file finder"
           ~help:"filter all tracked and nonignored files in the owning Git checkout; Enter opens, Esc returns"
-      ; b Search "Ctrl-R" "branches"
+      ; b ~ko:"브랜치" Search "Ctrl-R" "branches"
           ~help:"list the local branches of the owning Git checkout, newest tip first, with how each stands against its upstream; type to filter, Enter or Esc returns"
-      ; b Search "W" "worktrees"
+      ; b ~ko:"worktree" Search "W" "worktrees"
           ~help:"list the worktrees of the owning Git repository: each one's directory name, what it has checked out, and whether it is locked or prunable; type to filter, Enter or Esc returns"
-      ; b Search "Ctrl-G" "search in files"
+      ; b ~ko:"파일 안 검색" Search "Ctrl-G" "search in files"
           ~help:"type text and press Enter to find it in every tracked and nonignored file of the owning Git checkout; pick a match and Enter opens it at that line, Esc returns"
-      ; b Act "Right / Enter" "open" ~help:"drill in, or open the file"
+      ; b ~ko:"열기" Act "Right / Enter" "open" ~help:"drill in, or open the file"
         (* Esc walks back out the way Enter came in: it closes an open file
            first, and only climbs a directory once no file is open. From the
            project root, Esc alone leaves for Workspace, the ring parent --
            Left stays on the surface, the same convention as every other
            off-ring child. A key that works and is not listed is the same
            drift as a listed key that does nothing, pointing the other way. *)
-      ; b Act "Left / Esc" "back"
+      ; b ~ko:"뒤로" Act "Left / Esc" "back"
           ~help:"close the history, then the file, then climb one \
                  directory; Esc at the project root leaves for Workspace"
-      ; b Navigate "Shift-Left / Shift-Right" "pan"
+      ; b ~ko:"좌우 이동" Navigate "Shift-Left / Shift-Right" "pan"
           ~help:"with a file open, scroll it sideways one cell at a time"
-      ; b Search "/" "find"
+      ; b ~ko:"찾기" Search "/" "find"
           ~help:"jump the cursor to a match: the tree, or the open file's \
                  lines"
-      ; b Search "n / N" "next / previous match"
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match"
         (* The view actions come first among the file keys. Each answers on
            any open file and needs nothing configured. A row gives up keys from
            its back, and the language-server keys, which need a server, and the
            draft keys, which write, stood ahead of them: on the fixture server
            the file footer at 300 cells named K R D B e S V X and none of
            d H m b y. *)
-      ; b Act "d" "diff"
+      ; b ~ko:"diff" Act "d" "diff"
           ~help:"on the project tree, list every working-tree change; on an \
                  open file, show that file's diff against HEAD; in the file's \
                  history, on a commit row, show what that commit changed"
-      ; b Act "H" "history"
+      ; b ~ko:"이력" Act "H" "history"
           ~help:"the commits that touched the open file, newest first \
                  (H or Esc closes)"
-      ; b Act "b" "blame"
+      ; b ~ko:"blame" Act "b" "blame"
           ~help:"who last touched each run of lines, in the margin; b again \
                  drops it"
-      ; b Act "m" "notes"
+      ; b ~ko:"메모" Act "m" "notes"
           ~help:"the memos in the open file: comments on their own row \
                  reading masc(name): text, or masc(name) question: text; m \
                  again closes the list"
-      ; b Act "y" "copy source"
+      ; b ~ko:"원문 복사" Act "y" "copy source"
           ~help:"send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed"
-      ; b Act "K" "hover"
+      ; b ~ko:"이름 설명" Act "K" "hover"
           ~help:"ask the language server what a name on the cursor line is \
                  (one name asks at once; several open the palette as \
                  choices); read the complete answer with j/k or paging, Esc returns to code"
-      ; b Act "R" "references"
+      ; b ~ko:"쓰는 곳" Act "R" "references"
           ~help:"ask the language server where a name on the cursor line is \
                  used; needs the project's reference index, and says which \
                  command builds it when there is none"
-      ; b Act "D" "definition"
+      ; b ~ko:"정의" Act "D" "definition"
           ~help:"jump to where a name on the cursor line is defined (one \
                  name jumps at once; several open the palette as choices)"
-      ; b Act "B" "back"
+      ; b ~ko:"정의 뒤로" Act "B" "back"
           ~help:"walk back through the definition jumps, newest first"
-      ; b Act "e" "edit draft" ~help:"edit exact server source in $EDITOR; retain draft in this session"
-      ; b Act "S" "save draft" ~help:"explicitly save using the original revision; a conflict retains the draft"
-      ; b Act "V" "draft comparison" ~help:"compare original/current server source with the retained draft"
-      ; b Act "X" "discard draft" ~help:"discard only the local draft, after any submitted save settles"
-      ; b Act "A (draft)" "adopt revision" ~help:"after rereading and comparing a conflict, explicitly adopt the server revision"
-      ; b Act "Enter (history)" "open"
+      ; b ~ko:"초안 편집" Act "e" "edit draft" ~help:"edit exact server source in $EDITOR; retain draft in this session"
+      ; b ~ko:"초안 저장" Act "S" "save draft" ~help:"explicitly save using the original revision; a conflict retains the draft"
+      ; b ~ko:"초안 비교" Act "V" "draft comparison" ~help:"compare original/current server source with the retained draft"
+      ; b ~ko:"초안 버리기" Act "X" "discard draft" ~help:"discard only the local draft, after any submitted save settles"
+      ; b ~ko:"서버 판 받기" Act "A (draft)" "adopt revision" ~help:"after rereading and comparing a conflict, explicitly adopt the server revision"
+      ; b ~ko:"열기" Act "Enter (history)" "open"
           ~help:"a commit answers with its pull request, from its (#N) and \
                  the repository's remote"
       ]
@@ -1945,37 +1945,37 @@ let code_pane_of (state : state) =
   else if state.code_diff_open then Code_diff
   else Code_file
 
-let footer_hints_code_hover = hints_of_bindings
-  [ b Navigate "j/k" "scroll"
-  ; b Navigate "PgUp/PgDn" "page"
-  ; b Navigate "Home/End" "edges"
-  ; b Navigate "Esc / Left" "return to code"
-  ; b Meta "?" "help"
+let footer_hints_code_hover ~lang = hints_of_bindings ~lang
+  [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"처음/끝" Navigate "Home/End" "edges"
+  ; b ~ko:"코드로" Navigate "Esc / Left" "return to code"
+  ; b ~ko:"도움말" Meta "?" "help"
   ]
 
 let code_notes_bindings =
-  [ b Navigate "j/k" "scroll"
-  ; b Navigate "PgUp/PgDn" "page"
-  ; b Navigate "Home/End" "edges"
-  ; b Act "m" "close"
-  ; b Navigate "Esc" "back"
-  ; b Meta "?" "help"
+  [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"처음/끝" Navigate "Home/End" "edges"
+  ; b ~ko:"닫기" Act "m" "close"
+  ; b ~ko:"뒤로" Navigate "Esc" "back"
+  ; b ~ko:"도움말" Meta "?" "help"
   ]
 
 let code_history_bindings =
-  [ b Act "t" "Task" ~help:"inspect the Task named by the selected Keeper record; Esc returns to this history position"
-  ; b Act "d" "diff" ~help:"on a commit row, show what that commit changed in this file; on a Keeper record, expand or collapse its recorded text (failed calls show attempted text)"
-  ; b Meta "r" "refresh"
-  ; b Navigate "j/k" "scroll"
-  ; b Navigate "PgUp/PgDn" "page"
-  ; b Navigate "H" "close"
-  ; b Navigate "Home/End" "edges"
-  ; b Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
-  ; b Navigate "Left / Esc" "back"
-  ; b Meta "?" "help"
+  [ b ~ko:"Task" Act "t" "Task" ~help:"inspect the Task named by the selected Keeper record; Esc returns to this history position"
+  ; b ~ko:"diff" Act "d" "diff" ~help:"on a commit row, show what that commit changed in this file; on a Keeper record, expand or collapse its recorded text (failed calls show attempted text)"
+  ; b ~ko:"새로 조회" Meta "r" "refresh"
+  ; b ~ko:"스크롤" Navigate "j/k" "scroll"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"닫기" Navigate "H" "close"
+  ; b ~ko:"처음/끝" Navigate "Home/End" "edges"
+  ; b ~ko:"열기" Act "Enter" "open" ~help:"open the record owning the first visible row; metadata and failure rows have no target"
+  ; b ~ko:"뒤로" Navigate "Left / Esc" "back"
+  ; b ~ko:"도움말" Meta "?" "help"
   ]
 
-let footer_hints_code ~pane =
+let footer_hints_code ~lang ~pane =
   (* The draft keys ([e], [S], [V], [X], [A (draft)]) belong here too: the
      dispatcher answers them only with the file pane focused and no diff,
      history or notes drawn over it. *)
@@ -2043,21 +2043,23 @@ let footer_hints_code ~pane =
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
-         { b with label = (match pane with
-           | Code_tree _ | Code_root _ -> "move"
-           | Code_file | Code_diff | Code_notes | Code_history -> "scroll") }
+         (match pane with
+          | Code_tree _ | Code_root _ -> b
+          | Code_file | Code_diff | Code_notes | Code_history ->
+              { b with label = "scroll"; label_ko = Some "스크롤" })
        else if String.equal b.key "d" then
          (* On the list the key shows the project's changes; on an open file
             it shows that file's diff. *)
-         { b with label = (match pane with
-           | Code_tree _ | Code_root _ -> "changes"
-           | Code_file | Code_diff | Code_notes | Code_history -> b.label) }
+         (match pane with
+          | Code_tree _ | Code_root _ ->
+              { b with label = "changes"; label_ko = Some "변경" }
+          | Code_file | Code_diff | Code_notes | Code_history -> b)
        else b)
-  |> hints_of_bindings
+  |> hints_of_bindings ~lang
   |> fun hints ->
       match pane with
-      | Code_notes -> hints_of_bindings code_notes_bindings
-      | Code_history -> hints_of_bindings code_history_bindings
+      | Code_notes -> hints_of_bindings ~lang code_notes_bindings
+      | Code_history -> hints_of_bindings ~lang code_history_bindings
       | Code_tree _ | Code_root _ | Code_file | Code_diff -> hints
 
 (* The ordinary reading and its picker answer different Enter keys. The

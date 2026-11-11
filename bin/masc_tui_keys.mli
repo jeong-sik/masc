@@ -333,10 +333,10 @@ val code_pane_of : Masc_tui_types.state -> code_pane
     {!code_back_step} answers [Leave_code_for_workspace] with the tree focused,
     so the footer names Left only where Left has a step to take. *)
 
-val footer_hints_code_hover : string
+val footer_hints_code_hover : lang:Masc_tui_types.ui_language -> string
 (** Keys for the full hover reading over the current Code file. *)
 
-val footer_hints_code : pane:code_pane -> string
+val footer_hints_code : lang:Masc_tui_types.ui_language -> pane:code_pane -> string
 (** The Code footer, narrowed to what [pane] answers.
 
     Separate from {!footer_hints} because this surface has three modes and a

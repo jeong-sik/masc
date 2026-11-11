@@ -36,9 +36,7 @@ let render_runtime_params (state : state) =
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols
-    (config_pane_title ~cols
-       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·파라미터" ~en:" MASC Params"))
-       state);
+    (config_pane_title ~cols state);
   (* Where the overrides live leads, because it is the only thing on this row
      the reader cannot get anywhere else, and it was what the row cut first:
      at eighty columns it read "overrides persist in .masc/run\xe2\x80\xa6" and at
@@ -647,9 +645,7 @@ let render_prompt_registry (state : state) =
       Ansi.reset
   in
   box_line buf cols
-    (config_pane_title ~cols
-       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·프롬프트" ~en:" MASC Prompts"))
-       ~reading state);
+    (config_pane_title ~cols ~reading state);
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
@@ -736,7 +732,10 @@ let render_runtime_prompt_assets (state : state) =
   in
   box_line buf cols
     (config_pane_title ~cols
-       ~name:(screen_title (ui_text state ~ko:" MASC 런타임 프롬프트 자산" ~en:" MASC Runtime Prompt Assets")) ~reading state);
+       ~path:
+         [ ui_text state ~ko:"프롬프트" ~en:"prompts"
+         ; ui_text state ~ko:"런타임 자산" ~en:"runtime assets" ]
+       ~reading state);
   box_line_styled buf cols ~style:(Theme.recede ())
     (ui_text state ~ko:"  배포된 .txt 지시문 · 프롬프트 재정의 대상 아님"
        ~en:"  Distributed .txt instructions · not registry overrides");
@@ -1031,9 +1030,7 @@ let render_presets (state : state) =
   box_top buf cols;
   let reading = Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset in
   box_line buf cols
-    (config_pane_title ~cols
-       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·프리셋" ~en:" MASC Presets"))
-       ~reading state);
+    (config_pane_title ~cols ~reading state);
   box_divider buf cols;
   let detail = preset_detail_lines state ~cols ~selected in
   let count = List.length detail in
@@ -1194,7 +1191,6 @@ let render_themes (state : state) =
   box_top buf cols;
   box_line buf cols
     (config_pane_title ~cols
-       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·테마" ~en:" MASC Themes"))
        ~reading:
          (Printf.sprintf (if state.ui_language = Lang_ko then "%s테마 %d개 · 원래 대비 통과 %d개%s" else "%s%d themes · %d native-pass%s") Ansi.dim
             (List.length entries) native_count Ansi.reset)
@@ -1457,7 +1453,6 @@ let render_config_models (state : state) =
   let path_note = config_path_note state in
   box_line buf cols
     (config_pane_title ~cols
-       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·모델" ~en:" MASC Models"))
        ~reading:(if Option.is_none state.runtime_model_form
                     && Option.is_none state.runtime_model_jump
                     && Option.is_none (config_models_read_error state)
@@ -1717,8 +1712,7 @@ let render_runtime_config_status state =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
     ~surface_key:"config-status"
     ~title:(config_pane_title ~cols
-      ~name:(screen_title (ui_text state
-        ~ko:" 설정 상태" ~en:" Settings status")) state)
+      ~path:[ ui_text state ~ko:"설정 상태" ~en:"settings status" ] state)
     ~hints:(ui_text state
       ~ko:"v/Esc:설정 원문  j/k:스크롤  PgUp/PgDn:페이지  Home/End:처음/끝  r:새로고침"
       ~en:"v/Esc:settings source  j/k:scroll  PgUp/PgDn:page  Home/End:top/end  r:reload")
@@ -1849,7 +1843,11 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
   in
   box_top head cols;
   box_line head cols
-    (config_pane_title ~cols ~name:(screen_title (ui_text state ~ko:" MASC 음성 · 설정" ~en:" MASC Voice · setup")) state);
+    (config_pane_title ~cols
+       ~path:
+         [ ui_text state ~ko:"음성" ~en:"voice"
+         ; ui_text state ~ko:"설정" ~en:"setup" ]
+       state);
   voice_body_line buf cols "";
   voice_body_line buf cols
     (Printf.sprintf "  %s%s %s%s  %s" Ansi.dim (ui_text state ~ko:"단계" ~en:"step") position Ansi.reset step_prompt);
@@ -1988,7 +1986,11 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   in
   box_top head cols;
   box_line head cols
-    (config_pane_title ~cols ~name:(screen_title (ui_text state ~ko:" MASC 음성 · 키퍼 목소리" ~en:" MASC Voice · keeper voices")) state);
+    (config_pane_title ~cols
+       ~path:
+         [ ui_text state ~ko:"음성" ~en:"voice"
+         ; ui_text state ~ko:"키퍼 목소리" ~en:"keeper voices" ]
+       state);
   (* Both selected owners stay above the scrolling document. Enter therefore
      acts on the displayed pair even after paging through long metadata. *)
   selector (ui_text state ~ko:"키퍼" ~en:"keeper") session.vas_agents session.vas_agent_cursor
@@ -2089,9 +2091,7 @@ let render_voice (state : state) =
   in
   box_top head cols;
   box_line head cols
-    (config_pane_title ~cols
-       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·음성" ~en:" MASC Voice"))
-       state);
+    (config_pane_title ~cols state);
   let voice_section ?(first = false) title =
     List.iter (fun row -> voice_body_line buf cols row)
       (detail_section_lines ~first title)
@@ -2203,7 +2203,6 @@ let render_config (state : state) =
   let path_note = config_path_note state in
   let title =
     config_pane_title ~cols
-      ~name:(screen_title (ui_text state ~ko:" MASC 시스템·설정" ~en:" MASC System"))
       ~note:path_note
       state
   in

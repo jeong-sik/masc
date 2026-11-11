@@ -1,9 +1,14 @@
 (** Server IDE LSP Proxy — WebSocket bridge for Language Server Protocol. *)
 
 (** Add LSP proxy routes to the router.
-    Exposes [/api/v1/ide/lsp] WebSocket endpoint for LSP traffic. *)
+    Exposes [/api/v1/ide/lsp] WebSocket endpoint for LSP traffic.
+
+    A WebSocket handler runs on its connection's domain, and each connection
+    forks its writer, its dispatch workers and its language servers under
+    [transport_sw], so [transport_sw] is a switch of the domain that runs
+    the connections. *)
 val add_routes :
-  sw:Eio.Switch.t ->
+  transport_sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 

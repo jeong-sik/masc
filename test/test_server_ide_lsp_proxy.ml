@@ -401,7 +401,7 @@ let test_lsp_route_is_ws () =
     Eio.Switch.run (fun sw ->
       let clock = Eio.Stdenv.clock env in
       let router =
-        Server_ide_lsp_proxy.add_routes ~sw ~clock (Http.Router.create ())
+        Server_ide_lsp_proxy.add_routes ~transport_sw:sw ~clock (Http.Router.create ())
       in
       let request = Httpun.Request.create `GET "/api/v1/ide/lsp" in
       match Http.Router.resolve router request with

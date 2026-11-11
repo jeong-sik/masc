@@ -43,7 +43,7 @@ let make_routes_with_transport ~port:_ ~host:_ ~sw ~transport_sw ~clock =
   |> Server_routes_http_routes_repositories.add_routes
   |> Server_routes_http_routes_workspace.add_routes
   |> Server_ide_http.add_routes
-  |> Server_ide_lsp_proxy.add_routes ~sw ~clock
+  |> Server_ide_lsp_proxy.add_routes ~transport_sw ~clock
 
 let make_routes ~port ~host ~sw ~clock =
   make_routes_with_transport ~port ~host ~sw ~transport_sw:sw ~clock

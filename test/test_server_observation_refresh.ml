@@ -181,7 +181,8 @@ let test_actual_execution_worker_waits_for_original_store_writes () =
     Eio.Switch.run (fun sw ->
       subscribe_execution_frames ~state ~sw ~id:"execution-original-write" (fun kind payload ->
         match kind with `Execution -> Eio.Stream.add frames payload | `Project -> ());
-      Surfaces.start_execution_refresh_loop ~state ~sw ~clock
+      Surfaces.start_execution_refresh_loop ~state ~sw
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
         ~net:(Eio.Stdenv.net env) ~mono_clock:(Eio.Stdenv.mono_clock env);
       let initial = Eio.Stream.take frames in
       check int "real empty workspace starts with no active agent" 0

@@ -453,11 +453,17 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
   (store ()).Board.dirty_posts <- true;
   flush ();
   let repair_source = ref None in
+  (* DIAG: the event hook runs under [Safe_ops.protect], which swallows whatever
+     it raises. Without this ref an assertion failing inside the hook is
+     invisible and the test reports the later "did not reach the corruption
+     hook" line instead of the assertion that actually failed. *)
+  let hook_failure = ref None in
   with_blocked_reactions (fun () ->
     (* The hook runs after persistence unlock. A real subsequent append CAS
        observes the damaged source while the deletion model stays pending. *)
     Board_dispatch.set_board_sse_hook (function
       | Board_dispatch.Post_changed _ ->
+        (try
         let active = store () in
         let path = Board.persist_path active in
         let original = In_channel.with_open_bin path In_channel.input_all in
@@ -472,6 +478,7 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
              Board.require_posts_source_readable active)));
         repair_source := Some (fun () ->
           Out_channel.with_open_bin path (fun out -> output_string out original))
+         with e -> hook_failure := Some e)
       | _ -> ());
     let result =
       Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator ~result_boundary:Tool_output.Sent_to_client "masc_board_cleanup"
@@ -488,6 +495,11 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
     Alcotest.(check bool) "refused post remains readable" true
       (Result.is_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:refused_id)));
   Board_dispatch.set_board_sse_hook (fun _ -> ());
+  (* DIAG: surface the hook's own failure before the "did not reach" line, so
+     the reported assertion is the one that actually failed. *)
+  (match !hook_failure with
+   | Some e -> raise e
+   | None -> ());
   (match !repair_source with
    | Some repair -> repair ()
    | None -> Alcotest.fail "first applied deletion did not reach the corruption hook");

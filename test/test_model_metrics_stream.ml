@@ -14,7 +14,7 @@ let with_workspace f =
   let base_path = Filename.temp_dir "model-query-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
     let config = Masc.Workspace.default_config base_path in
-    let directory = Masc.Common.keepers_runtime_dir_of_base ~base_path in
+    let directory = Common.keepers_runtime_dir_of_base ~base_path in
     Fs_compat.mkdir_p directory;
     f config)
 

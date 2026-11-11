@@ -87,7 +87,7 @@ let websocket_upgrade_authorized ~base_path ~request_authority request =
        in
        Error (websocket_auth_error message))
 
-let websocket_handler ?sw ?clock ~upgrade request reqd =
+let websocket_handler ?clock ~upgrade request reqd =
   if is_websocket_upgrade_request request then
     match upgrade with
     | None ->
@@ -120,7 +120,6 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
          (match
             Server_mcp_transport_ws.upgrade_connection
               ~runtime_authority:(Sse.runtime_authority_exn ~base_path)
-              ?sw
               ?clock
               ~on_message:Server_mcp_transport_ws.dispatch_inbound_message
               ~upgrade
@@ -132,7 +131,7 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
   else
     websocket_discovery_handler request reqd
 
-let add_routes ?sw ?clock router =
+let add_routes ?clock router =
   router
   |> Server_route.get Server_route.Always_public Server_health_paths.health health_handler
   (* Liveness says the accept loop runs, so it is answered on the
@@ -151,7 +150,7 @@ let add_routes ?sw ?clock router =
          Http.Response.json_value
            (Runtime.agent_card_json ~request_authority req)
            reqd)
-  |> Server_route.ws_get "/ws" (websocket_handler ?sw ?clock)
+  |> Server_route.ws_get "/ws" (websocket_handler ?clock)
   |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/ag-ui/events" handle_ag_ui_events
   |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/events/presence" handle_presence_events
   |> Server_route.get Server_route.Public_read_open_when_strict "/favicon.ico" (fun _state req reqd ->

@@ -87,13 +87,15 @@ type dashboard_auth_state =
    [on_message] handler. The [max_inbound_*] size knobs are fed to
    [Endpoint.create]. *)
 
+type outbound
+(** A frame queued for the client of one session. *)
+
 type ws_session = {
   id : string;
   runtime_authority : Sse.runtime_authority;
       (** Bound by the HTTP upgrade; dashboard authentication cannot switch it. *)
-  wsd : Ws_direct_core.Endpoint.Wsd.t;
+  outbound : outbound Domain_mailbox.t;
   closed : bool Atomic.t;
-  write_mutex : Stdlib.Mutex.t;
   last_pong_at : float Atomic.t;
   dashboard_auth : dashboard_auth_state Atomic.t;
   dashboard_route : string option Atomic.t;
@@ -122,8 +124,10 @@ type ws_session = {
     the main domain (keeper / refresh broadcasts) and serving
     handlers; and [dashboard_route], written under concurrent
     per-session dispatch.  Plain mutable fields would race once
-    serving moves to its own domain (RFC-0204 Phase 3).  All writes
-    to [wsd] are serialized through [write_mutex]. *)
+    serving moves to its own domain (RFC-0204 Phase 3).  The writer of
+    the connection is not in the session: a send from any domain queues a
+    frame in [outbound], and a fiber of the connection's own scope writes
+    it (RFC http-transport-runs-on-its-own-domain §3.6). *)
 
 val dashboard_auth_is_authenticated : dashboard_auth_state -> bool
 (** [true] once [dashboard_hello] has authenticated the session. *)
@@ -187,7 +191,7 @@ val try_session_count : unit -> int option
     mutex was free, [None] when another domain holds it. For fatal paths
     (the scheduler-EINTR report) that must not hang. *)
 
-val new_session : runtime_authority:Sse.runtime_authority -> id:string -> wsd:Ws_direct_core.Endpoint.Wsd.t -> ws_session
+val new_session : runtime_authority:Sse.runtime_authority -> id:string -> ws_session
 (** Builds a fresh {!ws_session} with [closed = false]
     and the dashboard handshake state cleared.  Caller
     inserts the result into {!sessions} under
@@ -273,9 +277,28 @@ val respond_and_drive_upgrade :
     [max_message] / [max_frame]) to the Gluten runtime via [upgrade] as a
     drop-in for the former Httpun_ws.Server_connection.  RFC-0287 §4.1. *)
 
+val mcp_websocket_handler :
+  runtime_authority:Sse.runtime_authority ->
+  scope:Eio.Switch.t ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?on_close_log:(session_id:string -> code:int option -> reason:string -> unit) ->
+  ?on_eof:(session_id:string -> unit) ->
+  on_message:(string -> string -> unit) ->
+  origin_label:string ->
+  Ws_direct_core.Endpoint.Wsd.t ->
+  Ws_direct_core.Endpoint.handlers
+(** The MCP session of one upgraded connection: registers it, subscribes it
+    to broadcasts and answers its frames. Call on the connection's fiber.
+    [scope] is the connection's own switch. The one fiber that writes to the
+    connection runs under it, so a send from another domain reaches the
+    client through the connection's domain; when [scope] ends the session is
+    cleaned up and later sends answer {!Session_gone}. With [clock], a
+    heartbeat under [scope] pings the client and closes the session after a
+    configurable number of missed pongs. [on_message] is called on the
+    connection's fiber with the session id and each complete text message. *)
+
 val upgrade_connection :
   runtime_authority:Sse.runtime_authority ->
-  ?sw:Eio.Switch.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?on_message:(string -> string -> unit) ->
   upgrade:Http_reqd.upgrade ->
@@ -284,10 +307,9 @@ val upgrade_connection :
 (** Handles an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin using the
     shared MCP session protocol ([mcp_websocket_handler]) and attachment
     ({!respond_and_drive_upgrade}).  [upgrade] is the Gluten capability
-    threaded from the route via {!Server_route.ws_get}.  When [sw]
-    and [clock] are provided, forks the protocol-level heartbeat on a
-    per-connection switch (a child of [sw]) and closes the session after a
-    configurable number of missed pongs. [runtime_authority] is the canonical
+    threaded from the route via {!Server_route.ws_get}.  The session runs
+    under the connection's scope ({!Http_reqd.relay_scope}); a handle without
+    one is answered [Error]. [runtime_authority] is the canonical
     root used to authorize this HTTP upgrade and scopes its observer events. *)
 
 (** {1 Outbound delivery} *)

@@ -55,6 +55,61 @@ let test_a_page_keeps_one_row_of_the_window_it_leaves () =
   check int "page up from a stale scroll answers from the bound one page back" 62
     (Masc_tui_scroll.page_up ~count:81 ~height:10 999)
 
+let key_move_t =
+  Alcotest.testable
+    (fun ppf move ->
+      Format.pp_print_string ppf
+        (match move with
+         | Masc_tui_scroll.Line_down -> "Line_down"
+         | Masc_tui_scroll.Line_up -> "Line_up"
+         | Masc_tui_scroll.Page_down -> "Page_down"
+         | Masc_tui_scroll.Page_up -> "Page_up"
+         | Masc_tui_scroll.To_top -> "To_top"
+         | Masc_tui_scroll.To_end -> "To_end"))
+    ( = )
+
+(* The cheat sheet, the agenda and the context reader each matched their own
+   key names, and no two agreed on Home, End or the size of a page. One table
+   names the keys; Home and g are the same key to a reader, so are End and G. *)
+let test_a_key_names_one_move () =
+  let key name expected =
+    check (Alcotest.option key_move_t) (Printf.sprintf "key %S" name) expected
+      (Masc_tui_scroll.move_of_key name)
+  in
+  key "j" (Some Masc_tui_scroll.Line_down);
+  key "down" (Some Masc_tui_scroll.Line_down);
+  key "k" (Some Masc_tui_scroll.Line_up);
+  key "up" (Some Masc_tui_scroll.Line_up);
+  key "pagedown" (Some Masc_tui_scroll.Page_down);
+  key "pageup" (Some Masc_tui_scroll.Page_up);
+  key "g" (Some Masc_tui_scroll.To_top);
+  key "home" (Some Masc_tui_scroll.To_top);
+  key "G" (Some Masc_tui_scroll.To_end);
+  key "end" (Some Masc_tui_scroll.To_end);
+  key "x" None;
+  key "enter" None;
+  key "" None
+
+let test_a_move_travels_as_far_as_its_mover () =
+  let apply ?(count = 80) move scroll =
+    Masc_tui_scroll.apply_move ~count ~height:10 move scroll
+  in
+  check int "a line down" 6 (apply Masc_tui_scroll.Line_down 5);
+  check int "a line up" 4 (apply Masc_tui_scroll.Line_up 5);
+  check int "a page down keeps one row of the window it leaves" 14
+    (apply Masc_tui_scroll.Page_down 5);
+  check int "a page up keeps one row of the window it leaves" 11
+    (apply Masc_tui_scroll.Page_up 20);
+  check int "a page forward and back lands where it started" 20
+    (apply Masc_tui_scroll.Page_up (apply Masc_tui_scroll.Page_down 20));
+  check int "the top is the first row" 0 (apply Masc_tui_scroll.To_top 40);
+  check int "the end is the last scroll that still shows content" 70
+    (apply Masc_tui_scroll.To_end 0);
+  check int "a list shorter than its window has no end to scroll to" 0
+    (apply ~count:5 Masc_tui_scroll.To_end 0);
+  check int "a stale scroll answers from the bound" 70
+    (apply Masc_tui_scroll.Line_down 999)
+
 (* A surface no listing counts has no bound below to hold the scroll at, but a
    negative scroll is not a position either: the frame indexes the list with it.
    The Git-changes overlay opened over the Keepers surface was unlisted, and one
@@ -230,6 +285,9 @@ let () =
             test_the_bound_holds_a_stale_scroll
         ; Alcotest.test_case "a page keeps one row of the window it leaves"
             `Quick test_a_page_keeps_one_row_of_the_window_it_leaves
+        ; Alcotest.test_case "a key names one move" `Quick test_a_key_names_one_move
+        ; Alcotest.test_case "a move travels as far as its mover" `Quick
+            test_a_move_travels_as_far_as_its_mover
         ] )
     ; ( "moving"
       , [ Alcotest.test_case "an uncounted surface holds at the top" `Quick

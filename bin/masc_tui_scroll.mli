@@ -59,6 +59,19 @@ val page_up : count:int -> height:int -> int -> int
     it sits just past the new edge and nothing reports it. Same bound and same
     stale-value rule as {!down} and {!up}. *)
 
+(** The movement a scrolled body makes for a key name. Every sheet that scrolls
+    plain text matches the same names, so they are named once here. *)
+type key_move = Line_down | Line_up | Page_down | Page_up | To_top | To_end
+
+val move_of_key : string -> key_move option
+(** [j] and [Down] are one row down, [k] and [Up] one row up, [PageDown] and
+    [PageUp] a page ({!page_down}, {!page_up}), [g] and [Home] the top, [G]
+    and [End] the last row that still shows content. [None] for any other
+    key, which the caller keeps for itself. *)
+
+val apply_move : count:int -> height:int -> key_move -> int -> int
+(** The scroll after [move], bounded as {!down} and {!up} bound it. *)
+
 (** A row cursor over the same list. The cursor names a row, the scroll names
     a window; a keypress moves the cursor and the window follows with
     {!ensure_visible}. The same stale-value rule applies: moving normalises

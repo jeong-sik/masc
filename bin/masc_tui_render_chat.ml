@@ -4403,9 +4403,9 @@ let render_keeper_message (state : state) =
   | None ->
     box_top buf cols;
     box_line buf cols
-      (Printf.sprintf "%s  %s"
-         (screen_title " Keepers \xe2\x96\xb8 chat")
-         (connection_badge state));
+      (here_row ~cols state
+         ~path:[ ui_text state ~ko:"채팅" ~en:"chat" ]
+         ~readings:[] ~position:None);
     box_divider buf cols;
     box_line_styled buf cols ~style:(Theme.recede ()) "  No keeper selected.";
     for _ = 1 to max 0 (rows - 6) do
@@ -4458,8 +4458,8 @@ let render_keeper_message (state : state) =
          [Tui_types.chat_visibility_summary] for why. *)
       let modes = status_frame.kmsf_title_suffix in
       let title =
-        Printf.sprintf "%s Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat%s"
-          (Theme.recede ()) display_keeper_name Ansi.reset
+        here_path state
+          ~path:[ display_keeper_name; ui_text state ~ko:"채팅" ~en:"chat" ]
       in
       let mode_suffix =
         (if state.observer_source_loss then

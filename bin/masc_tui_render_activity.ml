@@ -401,24 +401,24 @@ let render_keeper_calls (state : state) =
     | Some keeper -> keeper.k_name
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let heading ~after =
-    detail_heading ~cols ~lead:(Lead_text keeper_calls_lead) ~id:keeper_name
-      ~after:[ after ] ~tail:(connection_badge state)
+  let heading ~readings =
+    here_row ~cols state
+      ~path:[ keeper_name; ui_text state ~ko:"호출" ~en:"calls" ]
+      ~readings ~position:None
   in
   let header =
     match state.keeper_calls with
     | Some snapshot when state.keeper_calls_loading ->
         heading
-          ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  refreshing..."
-               (List.length snapshot.Masc.Tui_decode.kcs_entries))
+          ~readings:
+            [ Masc_tui_message_layout.count_noun
+                (List.length snapshot.Masc.Tui_decode.kcs_entries) "call"
+            ; ui_text state ~ko:"다시 읽는 중" ~en:"refreshing" ]
     | None when state.keeper_calls_loading ->
-        heading ~after:" \xe2\x96\xb8 calls  (loading...)"
+        heading ~readings:[ ui_text state ~ko:"읽는 중" ~en:"loading" ]
     | None ->
         heading
-          ~after:
-            (" \xe2\x96\xb8 calls  "
-            ^ title_missing_reading ~error:state.keeper_calls_error)
+          ~readings:[ field_missing_reading ~error:state.keeper_calls_error ]
     | Some snapshot ->
         (* The verdict says what is wrong with the log; the reason says why,
            and it is not always the verdict said twice. Four of the words
@@ -445,13 +445,13 @@ let render_keeper_calls (state : state) =
           | None -> health ^ reason
         in
         heading
-          ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  %s"
-               (List.length snapshot.Masc.Tui_decode.kcs_entries)
-               freshness)
+          ~readings:
+            [ Masc_tui_message_layout.count_noun
+                (List.length snapshot.Masc.Tui_decode.kcs_entries) "call"
+            ; freshness ]
   in
   box_top buf cols;
-  box_line_styled buf cols ~style:Ansi.bold header;
+  box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
     "  j/k rows · exact fields: tool | input | output"

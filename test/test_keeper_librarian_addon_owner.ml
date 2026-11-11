@@ -439,7 +439,9 @@ let test_foreign_closure_id_is_refused_before_publication ()=with_fixture (fun ~
       (Filename.concat Store.tool_request_bodies_directory (Store.digest (Closure.scope owner)))))))
 let test_preflight_rechecks_a_closure_created_after_an_empty_observation ()=with_fixture (fun ~sw:_ fixture ->
   drive_until fixture settled |> assert_settled;
-  let validate=Keeper_librarian_store_preflight.validator () in
+  let validate=Keeper_librarian_store_preflight.validator ()
+    ~read_fence:(Store.load_history_fence fixture.store)
+    ~read_resolution:(Store.load_history_resolution fixture.store) in
   let read ~scope ~request_id=Owner.load ~store:fixture.store ~scope ~request_id |> Result.map_error Owner.error_to_string in
   let read_scope ~scope=Owner.load_scope ~store:fixture.store ~scope |> Result.map_error Owner.error_to_string in
   let body=Owner.Published_reader.create ~read_body:(fun ~scope ~request_digest ->
@@ -821,7 +823,7 @@ let test_sparse_whole_candidate_partition_reads_fresh_memory ()=
     io (fun () ->
       let batch=match pending fixture.keepers_dir with Some batch -> batch | None -> fail "missing original inputs" in
       let b=List.filter (fun (id:Current.explicit_candidate_id) -> id.request_id="b") (Queue.candidate_ids batch) in
-      Current.apply_disposition ~explicit_candidate_ids:b ~absorbed:[] ~revisions:[]
+      Current.apply_disposition ~pass:Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:b ~absorbed:[] ~revisions:[]
         ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:101.
         ~source:{kind=Current.Librarian;trace_id="previous-real-consumption"} ~new_claims:[fact "Durable B"] () |> get |> ignore;
       Queue.acknowledge_committed ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get);
@@ -852,9 +854,9 @@ let test_sparse_whole_candidate_partition_reads_fresh_memory ()=
     let forest_reads=ref 0 and closure_reads=ref 0 and validated=ref 0 in
     let counting ()=
       let validate=Keeper_librarian_store_preflight.validator () in
-      fun ~read ~read_scope ~read_body ~read_archive record ->
+      fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record ->
         incr validated;
-        validate ~read ~read_body ~read_archive record
+        validate ~read ~read_body ~read_archive ~read_fence ~read_resolution record
           ~read_scope:(fun ~scope ->
             if Keeper_librarian_admission_closure.is_scope scope then incr closure_reads
             else incr forest_reads;
@@ -1433,7 +1435,7 @@ let retire_fixture_fact (fixture:fixture) (original:Types.fact) =
     Current.replace ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~expected_revision:None
       ~now:100. ~source:{Current.kind=Current.Explicit_write;trace_id="retirement-policy-fixture"}
       ~facts:[original] () |> get |> ignore;
-    match Current.retract_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:200.
+    match Current.retract_fact ~pass:Keeper_memory_commit_pass.Keeper_delete ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:200.
       ~source:{Current.kind=Current.Explicit_retract;trace_id="retirement-policy-fixture"}
       ~memory_id:(Types.memory_id original) ~reason:"Retained original retirement reason" () with
     | Ok _ -> () | Error _ -> fail "the retirement fixture could not retract its source"))
@@ -1738,6 +1740,71 @@ let test_absorbing_admission_captures_both_context_policies ()=
        ["absorb_pair",Prompt_names.librarian_absorb_pair,empty;
         "absorb_observations",Prompt_names.librarian_absorb_observations,empty]) [false;true])
 
+(* RFC-0517 §2.2: a captured judgment counts once, when [resume] stores its
+   terminal. A resume of the retained record and a strict replay count nothing. *)
+let test_captured_judgment_counts_once_when_its_terminal_is_stored ()=with_fixture (fun ~sw fixture ->
+  let module Absorb=Keeper_librarian_absorb_gate in
+  let module T=Typesafeai_types in
+  let record,capture,final=retained_absorbing_answer_before_gate fixture in
+  let proposal=match final with Lane_addon_exact.Call_final (Answered {output;_}) -> Lane_addon_exact.checked_json output
+    | _ -> fail "the fixture requires its actual host answer" in
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let record=memory_action fixture (fun () -> retain_judgment fixture record final) in
+  let net=Eio_context.get_net_opt () |> Option.to_result ~none:"fixture network missing" |> get in
+  let jev=F.start_server ~sw ~net ~clock:fixture.clock (F.Reply_with (fun _ body ->
+    let request=Yojson.Safe.from_string body in
+    let forward=match member "state" request with
+      | `Assoc _ -> true | `String _ -> false | _ -> fail "unexpected evaluation state" in
+    let answers=member "questions" request |> Yojson.Safe.Util.to_assoc |> List.map (fun (id,_) ->
+      let answer=if forward then T.Choice_answer {choice="loses_knowledge";confidence=1.;
+        probabilities=List.map (fun label -> label,(if label="loses_knowledge" then 1. else 0.))
+          ["mergeable";"different_context";"loses_knowledge";"uncertain"]}
+        else T.Noul_answer {noul=0.} in id,T.answer_to_yojson answer) in
+    `OK,Yojson.Safe.to_string (`Assoc ["model",`String "count-fixture";"answers",`Assoc answers]))) in
+  (* Other cases in this binary move the same Keeper, so compare every cell before and after. *)
+  let cells=List.concat_map (fun outcome -> List.map (fun decision ->
+      Keeper_metrics.LibrarianAbsorbSources,outcome ^ "/" ^ decision,["outcome",outcome;"decision",decision])
+      ["mergeable";"different_context";"loses_knowledge";"uncertain";"none"])
+      ["conveyed";"left";"unjudged";"unjudgeable"]
+    @ List.map (fun verdict -> Keeper_metrics.LibrarianAbsorbCopyChecks,verdict,["verdict",verdict])
+      ["copy";"carries_new_statement";"not_judged"] in
+  let read ()=List.map (fun (metric,_,labels) -> Otel_metric_store.metric_value_or_zero
+    (Keeper_metrics.to_string metric) ~labels:(("keeper",keeper_name)::labels) ()) cells in
+  let moved before=List.filter_map (fun ((_,cell,_),(earlier,now)) ->
+    if Float.equal earlier now then None else Some (Printf.sprintf "%s %+g" cell (now -. earlier)))
+    (List.combine cells (List.combine before (read ()))) in
+  let one_judgment=["left/loses_knowledge +1";"carries_new_statement +1"] in
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "count-fixture-key") (fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=true;absorb_gate=true;
+     destinations=({endpoint=jev.base_url;model="count-fixture";api_key_env="TYPESAFEAI_API_KEY"},[])} (fun () ->
+      let authority=Absorb.resolve ~keeper_id:keeper_name in
+      let intent=io (fun () -> Gate.prepare_root ~store:fixture.store ~owner ~capture ~parent:record
+        ~proposal ~request_id:(Random_id.uuid_v7 ()) ~authority |> get) in
+      memory_action fixture (fun () -> match Commit.begin_gate ~store:fixture.store ~owner ~capture
+        ~record ~gate_root_id:intent.request_id ~authority |> get with
+        | Prepared _ -> () | Reload_original -> fail "new preparation expected");
+      let parent=memory_action fixture (fun () -> Gate.recover_root ~store:fixture.store ~owner ~capture |> get) in
+      let gate=io (fun () -> Gate.retain ~store:fixture.store ~owner ~capture ~parent ~proposal
+        ~request_id:intent.request_id ~authority ~predecessor:None |> get) in
+      let resume record=memory_action fixture (fun () -> match Gate.resume ~store:fixture.store ~owner ~capture
+        ~record ~live_authority:(Some authority) ~request_clock:(fun () -> Ok fixture.clock)
+        ~before_dispatch:(fun () -> Ok ()) |> get with
+        | Complete (result,record) -> result,record | Pending _ -> fail "the evaluation must complete") in
+      let before=read () in
+      let result,retained=resume gate in
+      check (list string) "storing the terminal counts the judgment once" one_judgment (moved before);
+      let requests=F.post_count jev in
+      let again,_=resume retained in
+      check json "a resume of the retained record returns its judgment" (Absorb.run_result_to_yojson result)
+        (Absorb.run_result_to_yojson again);
+      let replayed=io (fun () -> Gate.restore_latest_result ~store:fixture.store ~owner
+        ~parent_execution:capture ~gate_request_id:gate.request_id |> get) in
+      check json "strict replay returns the same judgment" (Absorb.run_result_to_yojson result)
+        (Absorb.run_result_to_yojson replayed);
+      check (list string) "a retained terminal is never counted again" one_judgment (moved before);
+      check int "neither the resume nor the replay asks again" requests (F.post_count jev))))
+
 let test_mismatched_retained_judgment_cannot_borrow_host_proof ()=with_fixture (fun ~sw:_ fixture ->
   let record,capture,final=retained_answer_before_gate fixture in
   let mismatched=match final with
@@ -2029,6 +2096,8 @@ let () =
   test_case "off and excluded gates capture and replay without unused policy" `Quick test_unused_absorb_policy_is_captured_and_replayed;
   test_case "enabled empty absorption captures and replays without unused policy" `Quick test_enabled_empty_absorptions_need_no_guidance;
   test_case "absorbing admission captures both context policies" `Quick test_absorbing_admission_captures_both_context_policies;
+  test_case "a captured judgment counts once when its terminal is stored" `Quick
+    test_captured_judgment_counts_once_when_its_terminal_is_stored;
   test_case "actual Memory lane, worker, HTTP, domain validation and receipt-backed ACK" `Quick test_actual_happy_path;
   test_case "a pass with no new input after the commit is Idle" `Quick test_pass_without_new_input_after_commit_is_idle;
   test_case "the production lane closes a completed Keeper without another external event" `Quick

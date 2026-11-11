@@ -57,7 +57,7 @@ let message_of_request ~prompt (req : Va.request) : Llm_provider.Types.message =
     ]
 
 type vision_backend =
-  | Api of Llm_provider.Provider_config.t
+  | Api of Runtime_account_access.api_sealed
   | Official_client
 
 let vision_runtime_candidates ~now =
@@ -79,7 +79,7 @@ let vision_runtime_candidates ~now =
        if not (Runtime_agent.caps_admit_required_modalities caps [ "image" ])
        then None
        else match rt.Runtime_instance.execution with
-       | Runtime_execution.Agent_core config -> Some (rt.id, rt, Api config)
+       | Runtime_execution.Agent_core sealed -> Some (rt.id, rt, Api sealed)
        | Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _ -> Some (rt.id, rt, Official_client)
        | Runtime_execution.Antigravity_cli _ -> None
@@ -540,6 +540,9 @@ type candidate_failure =
   | Candidate_output_limit
   | Candidate_invalid_output of string
   | Candidate_official_failure of { runtime_id : string; failure : Fusion_official_client.failure }
+  | Candidate_refused of { runtime_id : string; refusal : Runtime_account_access.refusal }
+      (** The candidate would send with the key its operator declared, and
+          this process does not share it (plan D4). *)
 
 (* Preserve the client error until the candidate walk has used its typed
    admission and effect observations. An accepted-but-unobserved timeout is
@@ -681,6 +684,9 @@ let run_candidates_outcome
        | Some Candidate_timeout -> Vo_timeout
        | Some Candidate_output_limit -> Vo_truncated
        | Some (Candidate_invalid_output detail) -> Vo_invalid_structured_response detail
+       | Some (Candidate_refused { runtime_id; refusal }) ->
+         Vo_no_runtime
+           (Printf.sprintf "%s: %s" runtime_id (Runtime_account_access.refusal_to_string refusal))
        | Some (Candidate_provider_error err) ->
          Vo_provider
            { failure_class = failure_class_of_http_error err
@@ -741,7 +747,7 @@ let run_candidates_outcome
             loop ~last_error:(Some (Candidate_invalid_output
               (Printf.sprintf "%s: %s" runtime_id detail)))
               ~attempt_index:(attempt_index + 1) rest))
-    | (runtime_id, rt, Api provider_config) :: rest ->
+    | (runtime_id, rt, Api sealed) :: rest ->
       record_vision_candidate_start
         ?tool_use_id ?trace_id ~runtime_id ~attempt_index
         ~candidate_count ();
@@ -753,6 +759,15 @@ let run_candidates_outcome
           ~attempt_index:(attempt_index + 1)
           rest
       in
+      (* HIGH-RISK-UNREVIEWED: the candidate sends the key its operator
+         declared, so a refused candidate is recorded and skipped (plan D4). *)
+      match Runtime_account_access.authorize_api sealed with
+      | Error refusal ->
+        record_vision_candidate_attempt
+          ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+          ~reason:"account_refused" ~duration_ms:0.0 ~success:false ();
+        continue_with (Candidate_refused { runtime_id; refusal })
+      | Ok provider_config ->
       let config = provider_for_vision provider_config in
         (match
            (try

@@ -62,22 +62,6 @@ let test_ring_caps_oldest_event () =
   check string "oldest reason pruned" "kept" reason;
   check int "kept count" max_ring_size count
 
-let test_approval_summary_empty () =
-  let summary =
-    match
-      GM.approval_queue_summary
-        ~now_ts:now
-        ~base_path:"/tmp/masc-gate-metrics-empty"
-        ()
-    with
-    | Ok summary -> summary
-    | Error _ ->
-      Alcotest.fail "empty workspace queue unexpectedly unavailable"
-  in
-  check int "empty queue depth" 0 summary.depth;
-  check bool "p50 None" true (Option.is_none summary.p50_wait_sec);
-  check bool "oldest None" true (Option.is_none summary.oldest_pending_sec)
-
 let test_json_shape () =
   inject ~tool:"bash" ~reason:"policy" ();
   let json =
@@ -149,9 +133,6 @@ let () =
       test_case "window filter" `Quick (with_fresh test_window_filter);
       test_case "deterministic sort" `Quick (with_fresh test_deterministic_sort);
       test_case "ring caps oldest event" `Quick (with_fresh test_ring_caps_oldest_event);
-    ];
-    "approval_queue", [
-      test_case "empty queue summary" `Quick test_approval_summary_empty;
     ];
     "json", [
       test_case "json shape" `Quick (with_fresh test_json_shape);

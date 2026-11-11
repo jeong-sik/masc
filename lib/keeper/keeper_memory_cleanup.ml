@@ -101,7 +101,7 @@ let run ~base_path ~keeper_name =
   let execute ~keepers_dir ~keeper_name ~expected_revision input =
     let committed = ref false in
     Keeper_librarian_runtime.run_best_effort
-      ~write_scope:Memory_maintenance
+      ~write_scope:(Memory_maintenance Keeper_memory_commit_pass.Cleanup)
       ~on_memory_committed:(fun () -> committed := true)
       ~base_path ~keepers_dir ~keeper_id:keeper_name
       ~expected_revision:(Some expected_revision) input;

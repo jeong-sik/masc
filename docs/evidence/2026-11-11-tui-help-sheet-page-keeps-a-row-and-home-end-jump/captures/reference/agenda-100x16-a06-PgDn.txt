@@ -1,0 +1,16 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Agenda                                                                                      │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  no keeper has asked a question                                                                  │
+│                                                                                                  │
+│Confirm a goal                                                                                    │
+│  no goal awaits confirmation                                                                     │
+│                                                                                                  │
+│Task owner routes                                                                                 │
+│  task-004 · Example tas…eld by iso-fixture, which has no Keeper queue  since 2026-11-11T06:21:20Z│
+│  task-005 · Example tas…eld by iso-fixture, which has no Keeper queue  since 2026-11-11T06:21:20Z│
+│  [lines 8-15/17]                                                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  j/k:move  PgUp/PgDn:page  g/G:first/last  Enter:open  Esc:close  …
+ Choose a Keeper before writing · i:choose

@@ -163,7 +163,7 @@ let test_a_capture_without_sox_says_what_to_install () =
    would send the operator to install something they already have. *)
 let test_other_refusals_keep_their_own_reason () =
   let message =
-    Masc.Voice_bridge.recorder_refusal_message
+    Masc.Voice_capture.recorder_refusal_message
       (Process_eio.Spawn_failed { executable = "rec"; error = Unix.EACCES })
   in
   Alcotest.(check bool)

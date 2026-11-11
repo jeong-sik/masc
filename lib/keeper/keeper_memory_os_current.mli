@@ -707,6 +707,7 @@ type program_commit =
 val apply_program :
   ?on_committed:(program_commit -> unit) ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  pass:Keeper_memory_commit_pass.t ->
   keepers_dir:string -> keeper_id:string -> now:float ->
   anchor:program_anchor -> source:program_source ->
   validate_source:(unit -> (unit, string) result) ->
@@ -726,7 +727,13 @@ val apply_program :
     without retaining its owning lock is not sufficient. Live on_committed
     runs once after durability before secondary I/O; recovery never reruns it.
     A later journal failure leaves a committed target with recoverable proof,
-    not a rejection of the already published Memory. *)
+    not a rejection of the already published Memory.
+
+    [pass] labels the change counts as in {!apply_disposition}; a program is
+    counted once from its initial to its final facts. Each initial ID follows
+    all applied successor branches and counts by its first exit kind when
+    any branch survives in the final snapshot, or as dropped otherwise.
+    Facts created and removed within the program are not counted. *)
 
 type disposition_basis =
   { expected_revision : int option
@@ -764,6 +771,7 @@ val apply_disposition_guarded
   -> ?explicit_candidate_ids:explicit_candidate_id list
   -> ?admission_recall:admission_recall
   -> ?required_memory_ids:string list
+  -> pass:Keeper_memory_commit_pass.t
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> revisions:Keeper_memory_os_types.revision list
   -> keepers_dir:string
@@ -792,6 +800,7 @@ val apply_disposition
   -> ?explicit_candidate_ids:explicit_candidate_id list
   -> ?admission_recall:admission_recall
   -> ?required_memory_ids:string list
+  -> pass:Keeper_memory_commit_pass.t
   -> absorbed:Keeper_memory_os_types.absorbed_statement list
   -> revisions:Keeper_memory_os_types.revision list
   -> keepers_dir:string
@@ -892,7 +901,16 @@ val apply_disposition
     another destination unsupported, support and removal checks repeat until
     every remaining absorption and successor-linked retirement has a current
     destination. A withdrawn removal stays withdrawn for this decision.
-    Plain retirements remain unconditional. *)
+    Plain retirements remain unconditional.
+
+    [pass] names the pass that calls the commit. Once the store locks are
+    released, a commit that rewrote the snapshot moves
+    [masc_keeper_memory_changes_total] under the keeper, the pass and the
+    change, by memory ID: [added] for IDs the basis did not hold, [absorbed]
+    for [absorbed_applied], [superseded] for [revisions_applied] and [dropped]
+    for every other ID that left. It also sets [masc_keeper_memory_facts] and
+    [masc_keeper_memory_snapshot_bytes] (rendered facts). An [Unchanged]
+    commit moves nothing (RFC-0517 §2.2). *)
 
 val replace
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -918,6 +936,9 @@ val replace
     quarantine, because a caller cannot have read a revision from a file that
     does not decode.
 
+    No pass calls [replace]; its commits are not counted in the Memory change
+    metrics.
+
     [dropped_statements], when present, is the writer's own account of the
     drops in this commit (the librarian's totality output). The journal line
     keeps a statement only for a memory the locked snapshot held and the
@@ -927,6 +948,7 @@ val replace
 
 val upsert_fact
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> pass:Keeper_memory_commit_pass.t
   -> keepers_dir:string
   -> keeper_id:string
   -> now:float
@@ -947,10 +969,13 @@ val upsert_fact
 
     A derived incoming fact commits only when it survives support maintenance
     in the same locked update. Missing support is a typed
-    [Unsupported_derivation] and writes no snapshot or journal revision. *)
+    [Unsupported_derivation] and writes no snapshot or journal revision.
+
+    [pass] labels the change counts as in {!apply_disposition}. *)
 
 val retract_fact
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> pass:Keeper_memory_commit_pass.t
   -> keepers_dir:string
   -> keeper_id:string
   -> now:float
@@ -966,10 +991,13 @@ val retract_fact
     its prepared receipt preserves the reason, and later writers cannot
     replace the removed original until finalization succeeds. Cascaded
     removals are represented by [change.invalidated]. Invalid input and a
-    missing target fail before any snapshot or journal write. *)
+    missing target fail before any snapshot or journal write.
+
+    [pass] labels the change counts as in {!apply_disposition}. *)
 
 val supersede_fact
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> pass:Keeper_memory_commit_pass.t
   -> keepers_dir:string
   -> keeper_id:string
   -> now:float
@@ -991,10 +1019,14 @@ val supersede_fact
     Librarian drop of an authored fact. That permits an ordinary upsert and
     returns [Target_already_dropped], with no new removal event. Snapshot
     membership, journal approval and insertion share the same store lock;
-    an explicit removal, injected target or unreadable journal is refused. *)
+    an explicit removal, injected target or unreadable journal is refused.
+
+    [pass] labels the change counts as in {!apply_disposition}; a current
+    target that leaves is counted [superseded]. *)
 
 val retract_facts
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> pass:Keeper_memory_commit_pass.t
   -> keepers_dir:string
   -> keeper_id:string
   -> expected_revision:int
@@ -1014,7 +1046,11 @@ val retract_facts
     durable before replacement. Ordinary success is returned only after the
     exact journal entry is durable and the receipt is cleared; an interruption
     after replacement returns [Retract_batch_plan_evidence_pending] and the
-    next locked writer reconciles that receipt before making another change. *)
+    next locked writer reconciles that receipt before making another change.
+
+    [pass] labels the change counts as in {!apply_disposition}. A batch that
+    returns [Retract_batch_plan_evidence_pending] rewrote the snapshot and is
+    counted. *)
 
 val to_json : t -> Yojson.Safe.t
 
@@ -1063,6 +1099,7 @@ module For_testing : sig
     write_snapshot:(string -> string -> (unit, Fs_compat.atomic_replace_failure) result) ->
     sync_snapshot:(string -> (unit, string) result) ->
     before_journal:(unit -> unit) -> on_committed:(program_commit -> unit) ->
+    pass:Keeper_memory_commit_pass.t ->
     keepers_dir:string -> keeper_id:string -> now:float -> anchor:program_anchor ->
     source:program_source -> validate_source:(unit -> (unit, string) result) ->
     Keeper_memory_os_program.t -> (program_commit, string) result

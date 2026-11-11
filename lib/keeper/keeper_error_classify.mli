@@ -68,11 +68,6 @@ val is_accept_no_usable_progress_error : Agent_core.Error.t -> bool
     severity only; it grants no retry, admission, pause, or blocker authority. *)
 val should_warn_keeper_cycle_failed : Agent_core.Error.t -> bool
 
-(** [true] for a typed API context overflow ([ContextOverflow]) only.  An
-    [Error.Agent (UnrecognizedStopReason _)] is not classified here even when it
-    carries an overflow token: see the note in the implementation. *)
-val is_context_overflow : Agent_core.Error.t -> bool
-
 (** [true] when the error is an AGENT_CORE [InputRequired] — the agent paused
     to request human input.  Not a failure; a special stop condition. *)
 val is_input_required_error : Agent_core.Error.t -> bool

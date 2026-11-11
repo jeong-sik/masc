@@ -99,7 +99,7 @@ module Theme = struct
     (* Six slots for an axis whose members are kinds, not degrees. A file
        type, a goal phase, a sandbox: nothing in such a set outranks its
        siblings and the reader's only job is to tell them apart, which is
-       neither what [ok]/[warn]/[bad] say nor what [tone] says. Without
+       neither what [ok]/[warn]/[bad] say nor what a weight says. Without
        them a surface reaches past the theme for a colour name, and a
        constant SGR does not move when the terminal palette answers -- so
        the rows saying "kind" were the ones a theme could not reach.
@@ -237,6 +237,13 @@ module Theme = struct
      their own names rather than borrowing [ok] and [bad]. *)
   let action_probe () = (resolved ()).probe
   let action_message () = (resolved ()).message
+
+  (* The frame's one accent: a key letter in a hint row, a label, a column the
+     reader scans for. Bright cyan reads under 4.5:1 against the page in 11 of
+     the 53 bundled themes, so it goes through the same lift as every other
+     colour here. It is the same cyan as [info] and [hue_cyan]: a screen that
+     drew two cyans would not say which one is the accent. *)
+  let accent () = (resolved ()).hue_cyan
   let selection = Masc_tui_theme.selection
   let sidebar_selection () =
     Masc_tui_terminal_palette.snapshot ()

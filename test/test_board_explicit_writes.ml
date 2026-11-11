@@ -62,7 +62,7 @@ let test_identical_comments_are_distinct_writes () =
   let post_id = Board.Post_id.to_string post.id in
   let add () =
     match
-      Board_dispatch.add_comment
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
         ~post_id
         ~author:"explicit-writer"
         ~content:"intentional duplicate comment"

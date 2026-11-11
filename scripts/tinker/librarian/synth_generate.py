@@ -11,11 +11,13 @@ Run from the repository root:
         --out artifacts/tinker/librarian/synth-eval --budget 6
 
 The seed fixes the plan: which Keepers, how many memories, fact counts,
-categories, claim lengths, planted stale facts, candidate kinds and targets,
+categories, claim lengths, planted stale facts, records with a use time and
+which side of the candidates that time falls on, candidate kinds and targets,
 and the date, time and number each claim carries (`synth_spec.py`). The
 candidates of the whole split are planned before any call, with their marks
 and lengths dealt out per label kind (`synth_candidate_plan.py`). A planted
-stale fact is written in the same call as the durable facts of its category.
+stale fact or a record is written in the same call as the durable facts of its
+category; the model is told a record's kind, never which side it is on.
 DUPLICATE_PAIR_SHARE of the memories get a planted duplicate, dealt over the
 split: after the other facts, the model restates one durable fact of the
 planned category with the duplicate's own marks, near the length of that fact.
@@ -39,7 +41,7 @@ import json
 import random
 import sys
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,6 +75,12 @@ ROLE_CHARS = ((0.0, 500.0), (0.1, 716.0), (0.5, 1144.0), (0.9, 2684.0), (1.0, 34
 EXISTING_HEAD = 90
 MEMORY_END = dt.datetime(2026, 11, 6, 23, 59, 59, tzinfo=dt.UTC)
 CANDIDATE_TIME_START = dt.datetime(2026, 11, 7, tzinfo=dt.UTC)
+# A request's candidates fall on 11-07 or, past midnight, 11-08 (`build_candidates`). A record
+# still ahead is used on a later day, and one already past on a day of its memory, after it was
+# written, so a claim that names only the date says which side it is on (`synth_rows.holds`).
+USE_AHEAD_START = dt.datetime(2026, 11, 9, tzinfo=dt.UTC)
+USE_AHEAD_DAYS = 4
+USE_PAST_AFTER = dt.timedelta(hours=1)
 SPLITS = {
     # split: (keepers, memories per keeper, requests)
     "eval": (tuple(k for k in S.KEEPER_SEEDS if k.key in S.EVAL_KEEPERS), 10, 150),
@@ -103,6 +111,15 @@ def head(claim: str) -> str:
     return claim[:EXISTING_HEAD].replace("\n", " ")
 
 
+def whole(claim: str) -> str:
+    """A claim on one line of a prompt's list, all of it."""
+    return claim.replace("\n", " ")
+
+
+def listed(claims: Sequence[str], show: Callable[[str], str]) -> str:
+    return "\n".join(f"- {show(c)}" for c in claims) or "(없음)"
+
+
 def profile_of(caller: Asks, seed: S.KeeperSeed, rng: random.Random) -> S.KeeperProfile | None:
     role_chars = int(round(S.sample_quantile(rng, ROLE_CHARS), -2))
     prompt = P.PROFILE_PROMPT.format(seed=seed.seed, role_chars=role_chars, style=P.STYLE)
@@ -118,14 +135,24 @@ def profile_of(caller: Asks, seed: S.KeeperSeed, rng: random.Random) -> S.Keeper
 
 @dataclass(frozen=True, slots=True)
 class FactSlot:
-    """One fact to write: its category, planned length, kind, the time it was seen, and the
-    date, time and number its text carries."""
+    """One fact to write: its category, planned length, kind, the time it was seen, the date,
+    time and number its text carries, and for a record with a use time that time."""
 
     category: str
     length: int
     stale: bool
     seen: dt.datetime
     surface: S.Surface
+    use_at: dt.datetime | None
+
+
+def planted(slot: FactSlot) -> bool:
+    """A slot the plan counts on: a stale fact or a record with a use time."""
+    return slot.stale or slot.use_at is not None
+
+
+def text_kind(slot: FactSlot) -> P.FactText:
+    return "scheduled" if slot.use_at is not None else "transient" if slot.stale else "durable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,8 +177,11 @@ class MemoryPlan:
 def plan_memory(rng: random.Random, keeper: S.KeeperProfile, index: int, duplicate: bool) -> MemoryPlan:
     """A planted stale fact lands in a category in proportion to its size, at a random place among
     the durable facts there, and draws its length, time and surface as a durable fact does. A
-    planted duplicate picks its category the same way and draws its own time and surface. A
-    category's planted facts take the places of durable ones, so it never holds more than
+    record with a use time lands the same way; SCHEDULED_AHEAD_SHARE of them are used on a day
+    after the candidates' and stay durable, the rest on a day of the memory after they were
+    written and are planted stale. A record's text always carries its use date. A planted
+    duplicate picks its category the same way and draws its own time and surface. A category's
+    planted facts take the places of durable ones, so it never holds more than
     FACTS_PER_CATEGORY_CAP facts: the prompt prints a count over the cap (`memory_variables`), and
     only a planted fact would put one there."""
     n_facts = round(S.sample_quantile(rng, S.FACTS_PER_MEMORY))
@@ -160,18 +190,34 @@ def plan_memory(rng: random.Random, keeper: S.KeeperProfile, index: int, duplica
     counts = S.allocate_counts(rng, n_facts, n_cats)
     names = names[: len(counts)]  # fewer facts than categories leaves the last categories empty
     stale_in = Counter(rng.choices(names, weights=counts, k=S.sample_weighted(rng, S.STALE_FACTS_PER_MEMORY_WEIGHTS)))
+    scheduled_in = Counter(rng.choices(names, weights=counts,
+                                       k=S.sample_weighted(rng, S.SCHEDULED_FACTS_PER_MEMORY_WEIGHTS)))
     pair_category = rng.choices(names, weights=counts)[0] if duplicate else None
     end = MEMORY_END - dt.timedelta(seconds=rng.randrange(86400))
     start = end - dt.timedelta(days=S.sample_quantile(rng, S.MEMORY_SPAN_DAYS))
     slots: list[FactSlot] = []
     for name, count in zip(names, counts, strict=True):
-        planted = stale_in[name] + (name == pair_category)
-        kinds = [False] * min(count, S.FACTS_PER_CATEGORY_CAP - planted) + [True] * stale_in[name]
+        plants = stale_in[name] + scheduled_in[name] + (name == pair_category)
+        per_kind: tuple[tuple[P.FactText, int], ...] = (
+            ("durable", min(count, S.FACTS_PER_CATEGORY_CAP - plants)), ("transient", stale_in[name]),
+            ("scheduled", scheduled_in[name]))
+        kinds: list[P.FactText] = [kind for kind, n in per_kind for _ in range(n)]
         rng.shuffle(kinds)
-        for stale in kinds:
-            seen = between(rng, start, end)
-            length = int(round(S.sample_quantile(rng, S.CLAIM_CHARS), -1))
-            slots.append(FactSlot(name, length, stale, seen, S.plan_surface(rng, S.FACT_SURFACE, seen)))
+        for kind in kinds:
+            match kind:
+                case "durable" | "transient":
+                    seen = between(rng, start, end)
+                    length = int(round(S.sample_quantile(rng, S.CLAIM_CHARS), -1))
+                    slots.append(FactSlot(name, length, kind == "transient", seen,
+                                          S.plan_surface(rng, S.FACT_SURFACE, seen), None))
+                case "scheduled":
+                    ahead = rng.random() < S.SCHEDULED_AHEAD_SHARE
+                    seen = between(rng, start, end if ahead else end - USE_PAST_AFTER)
+                    use_at = (between(rng, USE_AHEAD_START, USE_AHEAD_START + dt.timedelta(days=USE_AHEAD_DAYS))
+                              if ahead else between(rng, seen + USE_PAST_AFTER, end))
+                    length = int(round(S.sample_quantile(rng, S.CLAIM_CHARS), -1))
+                    slots.append(FactSlot(name, length, not ahead, seen,
+                                          S.plan_use_surface(rng, S.FACT_SURFACE, use_at), use_at))
     pair: DuplicateSlot | None = None
     if pair_category is not None:
         seen = between(rng, start, end)
@@ -180,7 +226,7 @@ def plan_memory(rng: random.Random, keeper: S.KeeperProfile, index: int, duplica
 
 
 def iso(t: dt.datetime) -> str:
-    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+    return t.strftime(RW.TIME_FORMAT)
 
 
 def between(rng: random.Random, start: dt.datetime, end: dt.datetime) -> dt.datetime:
@@ -188,18 +234,22 @@ def between(rng: random.Random, start: dt.datetime, end: dt.datetime) -> dt.date
 
 
 def claims_for(caller: Asks, plan: MemoryPlan, category: str, slots: tuple[FactSlot, ...],
-               existing: list[str]) -> list[tuple[FactSlot, str]] | None:
-    """Claims for `slots`, matched by position. A claim counts only when its text carries exactly
-    its slot's surface. An attempt is kept when every stale slot and DURABLE_KEEP_SHARE of the
-    durable ones came back: a stale fact that failed its marks would leave the kept stale facts
-    with other marks than the kept durable ones."""
-    items = "\n".join(P.fact_item(i + 1, slot.stale, int(round(slot.length * LENGTH_ASK, -1)), slot.surface)
+               same: Sequence[str], others: Sequence[str]) -> list[tuple[FactSlot, str]] | None:
+    """Claims for `slots`, matched by position. The prompt shows the facts already written in
+    `category` whole and those of other categories by their first EXISTING_HEAD chars: a category
+    takes several calls, and a later call that saw only the head of a long fact wrote its lesson
+    again as a short fact (27 of the 29 unplanted repeats the 11-10 dev label audit found).
+    A claim counts only when its text carries exactly its slot's surface. An attempt is kept when
+    every planted slot (stale, or with a use time) and DURABLE_KEEP_SHARE of the durable ones came
+    back: a planted fact that failed its marks would leave the kept planted facts with other marks
+    than the kept durable ones."""
+    items = "\n".join(P.fact_item(i + 1, text_kind(slot), int(round(slot.length * LENGTH_ASK, -1)), slot.surface)
                       for i, slot in enumerate(slots))
     prompt = P.FACTS_PROMPT.format(role=plan.keeper.role_material, world=plan.keeper.world, category=category,
-                                   n=len(slots), marks=P.MARKS, items=items,
-                                   existing="\n".join(f"- {head(c)}" for c in existing) or "(없음)", style=P.STYLE)
-    durable = sum(not s.stale for s in slots)
-    stale = len(slots) - durable
+                                   n=len(slots), marks=P.MARKS, items=items, same=listed(same, whole),
+                                   others=listed(others, head), style=P.STYLE)
+    durable = sum(not planted(s) for s in slots)
+    plants = len(slots) - durable
     for attempt in range(ATTEMPTS):
         answer = ask(caller, "facts", prompt, attempt)
         if answer is None:
@@ -207,27 +257,29 @@ def claims_for(caller: Asks, plan: MemoryPlan, category: str, slots: tuple[FactS
         claims = S.parse_claims(answer) if answer else None
         if claims is None:
             continue
-        texts = {c.strip() for c in existing}
+        texts = {c.strip() for c in (*same, *others)}
         kept: list[tuple[FactSlot, str]] = []
         for slot, claim in zip(slots, claims):
             if claim.strip() not in texts and S.surface_holds(claim, slot.surface):
                 texts.add(claim.strip())
                 kept.append((slot, claim))
-        kept_stale = sum(s.stale for s, _ in kept)
-        if kept_stale == stale and len(kept) - kept_stale >= round(DURABLE_KEEP_SHARE * durable):
+        kept_plants = sum(planted(s) for s, _ in kept)
+        if kept_plants == plants and len(kept) - kept_plants >= round(DURABLE_KEEP_SHARE * durable):
             return kept
     return None
 
 
 @dataclass(frozen=True, slots=True)
 class Written:
-    """A written fact before it gets its memory ID. `restates` is the claim a planted duplicate restates."""
+    """A written fact before it gets its memory ID. `restates` is the claim a planted duplicate
+    restates, and `use_at` the use time of a record."""
 
     seen: dt.datetime
     category: str
     stale: bool
     claim: str
     restates: str | None
+    use_at: dt.datetime | None
 
 
 def facts_of(rng: random.Random, written: list[Written]) -> tuple[S.MemoryFact, ...]:
@@ -237,7 +289,8 @@ def facts_of(rng: random.Random, written: list[Written]) -> tuple[S.MemoryFact, 
     return tuple(
         S.MemoryFact(ids[w.claim], w.claim, w.category,
                      S.board_ref(rng) if rng.random() < S.BOARD_BASIS_SHARE else None, iso(w.seen), w.stale,
-                     ids[w.restates] if w.restates is not None else None)
+                     ids[w.restates] if w.restates is not None else None,
+                     iso(w.use_at) if w.use_at is not None else None)
         for w in timed)
 
 
@@ -246,7 +299,7 @@ def duplicate_for(caller: Asks, rng: random.Random, plan: MemoryPlan, slot: Dupl
     """A restatement of one durable fact of the slot's category. It counts only when it carries the
     slot's marks and stays within the candidate length band of that fact. None when the category
     holds no durable fact or no attempt fits."""
-    originals = [w.claim for w in written if w.category == slot.category and not w.stale]
+    originals = [w.claim for w in written if w.category == slot.category and not w.stale and w.use_at is None]
     if not originals:
         return None
     original = rng.choice(originals)
@@ -262,7 +315,7 @@ def duplicate_for(caller: Asks, rng: random.Random, plan: MemoryPlan, slot: Dupl
         claim = S.parse_single_claim(answer) if answer else None
         if (claim is not None and claim.strip() not in texts and S.surface_holds(claim, slot.surface)
                 and C.length_holds(claim, len(original))):
-            return Written(slot.seen, slot.category, False, claim, original)
+            return Written(slot.seen, slot.category, False, claim, original, None)
     return None
 
 
@@ -272,10 +325,13 @@ def build_memory(caller: Asks, plan: MemoryPlan) -> tuple[S.MemoryFact, ...] | N
     for category, group in itertools.groupby(plan.slots, key=lambda slot: slot.category):
         slots = tuple(group)
         for start in range(0, len(slots), FACTS_PER_CALL):
-            got = claims_for(caller, plan, category, slots[start:start + FACTS_PER_CALL], [w.claim for w in written])
+            got = claims_for(caller, plan, category, slots[start:start + FACTS_PER_CALL],
+                             [w.claim for w in written if w.category == category],
+                             [w.claim for w in written if w.category != category])
             if got is None:
                 return None
-            written.extend(Written(slot.seen, slot.category, slot.stale, claim, None) for slot, claim in got)
+            written.extend(Written(slot.seen, slot.category, slot.stale, claim, None, slot.use_at)
+                           for slot, claim in got)
     if plan.duplicate is not None:
         restated = duplicate_for(caller, rng, plan, plan.duplicate, written)
         if restated is None:
@@ -286,10 +342,11 @@ def build_memory(caller: Asks, plan: MemoryPlan) -> tuple[S.MemoryFact, ...] | N
 
 def target_choices(facts: tuple[S.MemoryFact, ...]) -> list[S.MemoryFact]:
     """The facts a candidate may correct, complement or restate: durable facts outside a planted
-    pair, so that a candidate never targets a fact the label also expects to merge."""
+    pair, so that a candidate never targets a fact the label also expects to merge, and never a
+    record with a use time, whose label does not depend on the candidates."""
     paired = {f.memory_id for f in facts if f.duplicate_of is not None} | {
         f.duplicate_of for f in facts if f.duplicate_of is not None}
-    return [f for f in facts if not f.planted_stale and f.memory_id not in paired]
+    return [f for f in facts if not f.planted_stale and f.use_at is None and f.memory_id not in paired]
 
 
 def untargeted_category(rng: random.Random, targets: list[S.MemoryFact], planned: int) -> str | None:
@@ -328,8 +385,7 @@ def build_candidates(caller: Asks, rng: random.Random, keeper: S.KeeperProfile, 
                 if category is None:
                     return None
                 same = [f.claim for f in durable if f.category == category]
-                task = P.TASK_NEW.format(category=category,
-                                       existing="\n".join(f"- {head(c)}" for c in same) or "(없음)")
+                task = P.TASK_NEW.format(category=category, existing=listed(same, whole))
             case S.CandidateKind.TRANSIENT:
                 category = untargeted_category(rng, targets, plan.length)
                 if category is None:
@@ -440,6 +496,8 @@ def main() -> int:
                "memories": len({r.item_id.rsplit("-", 1)[0] for r in done}), **status,
                "candidates_by_kind": dict(sorted(kinds.items())),
                "memories_with_duplicate": sum(any(f.duplicate_of is not None for f in facts) for _, facts in built),
+               "records_by_side": dict(Counter("past" if f.planted_stale else "ahead"
+                                               for _, facts in built for f in facts if f.use_at is not None)),
                "requests_without_support": sum(not S.label_of(r).supports_change for r in done),
                "spent_usd": round(caller.spent, 4), "budget_usd": budget, "stopped": caller.stopped}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

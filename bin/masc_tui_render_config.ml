@@ -218,7 +218,7 @@ let render_runtime_params (state : state) =
          | Some (`Header (id, description)) ->
            let label = if String.equal id "" then ui_text state ~ko:"(그룹 없음)" ~en:"(unfiled)" else id in
            box_line_styled buf cols
-             ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
+             ~style:(Theme.accent ())
              (Printf.sprintf "  %s %s"
                 (Terminal_text.single_line label)
                 (Ansi.dim ^ Terminal_text.single_line description ^ Ansi.reset))
@@ -239,7 +239,7 @@ let render_runtime_params (state : state) =
            if row_index = cursor then box_line_selected buf cols line
            else
              box_line_styled buf cols
-               ~style:(if row.rpr_has_override then (Masc_tui_theme.tone Masc_tui_theme.Accent) else Ansi.dim) line
+               ~style:(if row.rpr_has_override then (Theme.accent ()) else Ansi.dim) line
        done
      end);
   let scroll = Masc_tui_scroll.normalize ~count:(List.length selected_lines)
@@ -1325,9 +1325,9 @@ let config_path_note (state : state) =
 
 (* A provider id such as [codex_727e6d05] does not say which account it is,
    and one account can sit under several ids. The Models pane names the
-   account from the account-email reading: a short label beside every
-   provider id, and the whole email on the selected binding. Drawing and
-   scroll arithmetic below use these same rows and these same detail lines. *)
+   account from the account-email reading: a short label on ambiguous rows,
+   and the whole email on the selected binding. Drawing and scroll arithmetic
+   below use the same published rows and wrapped item projection. *)
 let config_models_drawn_rows (state : state) =
   List.map
     (fun (row : Masc_tui_model_runtime_table.row) ->
@@ -1385,6 +1385,58 @@ let selected_model_reading (state : state) =
       Some (Masc_tui_detail_reading.create
         ~title:("System / Models / " ^ row.provider ^ " / " ^ row.model) sections))
 
+type model_scope_line = Model_identity of string | Model_observation of string
+
+type models_projection = {
+  model_document : string list;
+  model_starts : int list;
+  model_table : bool;
+  model_prefix : model_scope_line list;
+  model_height : int;
+  model_reading_hint : string;
+}
+
+(* Selection and values come from the same published reading. This prefix
+   names only the selected account; ambiguous binding names retain their
+   exact provider on every list row. Full provenance stays in [v]. *)
+let config_models_projection state ~terminal_rows ~cols =
+  let pane = max 1 (framed_inner_width cols - 2 - 2) in
+  let rows = config_models_drawn_rows state in
+  let content_height = max 1 (surface_body_rows state ~terminal_rows - 5) in
+  let wrap text = Message_layout.wrap_words ~max_cells:pane (Terminal_text.single_line text) in
+  let notes, scope = match List.nth_opt rows state.config_models_cursor with
+    | None -> [], []
+    | Some row ->
+        let email, notes = models_source_account_reading
+            ~provider:row.provider state.runtime_config_view in
+        let identity = row.provider ^ (match email with None -> "" | Some email -> " · " ^ email) in
+        notes, List.map (fun line -> Model_identity line) (wrap identity)
+  in
+  let prefix = List.concat_map (fun note ->
+      List.map (fun line -> Model_observation line) (wrap note)) notes @ scope in
+  (* Even a long diagnostic keeps one row for the selected binding. The
+     title points to the complete captured reading if any prefix is cut. *)
+  let prefix_room = max 0 (content_height - 1) in
+  let reading_hint =
+    if notes <> [] then Printf.sprintf
+        (if state.ui_language = Lang_ko then "v:안내 %d" else "v:%d notices") (List.length notes)
+    else if List.length prefix > prefix_room then
+      ui_text state ~ko:"v:계정 전체" ~en:"v:full account"
+    else ""
+  in
+  let prefix =
+    if List.length prefix <= prefix_room then prefix
+    else if prefix_room = 0 then []
+    else List.take (prefix_room - 1) prefix
+      @ [Model_observation (ui_text state ~ko:"… v:전체 안내·계정" ~en:"… v:all notices/account")]
+  in
+  let table = Masc_tui_model_runtime_table.fits ~width:pane rows in
+  { model_document = Masc_tui_model_runtime_table.render ~width:(max 40 pane) ~pane rows;
+    model_starts = if table then [] else Masc_tui_model_runtime_table.stacked_item_starts ~pane rows;
+    model_table = table; model_prefix = prefix;
+    model_height = max 1 (content_height - List.length prefix);
+    model_reading_hint = reading_hint }
+
 (* The model knobs sit in different tables -- [reasoning-effort] and
    [temperature] under [models.NAME], [max-tokens] under
    [PROVIDER.NAME] -- and runtime.toml is 2,300 lines, so reading it top to
@@ -1400,11 +1452,16 @@ let render_config_models (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let projection = config_models_projection state ~terminal_rows ~cols in
   box_top buf cols;
   let path_note = config_path_note state in
   box_line buf cols
     (config_pane_title ~cols
        ~name:(screen_title (ui_text state ~ko:" MASC 시스템·모델" ~en:" MASC Models"))
+       ~reading:(if Option.is_none state.runtime_model_form
+                    && Option.is_none state.runtime_model_jump
+                    && Option.is_none (config_models_read_error state)
+                 then projection.model_reading_hint else "")
        ~note:path_note state);
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
@@ -1430,51 +1487,20 @@ let render_config_models (state : state) =
          box_empty buf cols
        done
    | None, Some _ ->
-       let drawn_rows = config_models_drawn_rows state in
-       let detail =
-         List.nth_opt state.config_models_rows state.config_models_cursor
-         |> Option.map (config_models_detail state)
-         |> Option.value ~default:[]
-       in
-       (* Keep the explanation attached to the selected row. Five rows are
-          enough to name both owning sections without adding another modal or
-          another editor path. On a very short terminal the table still keeps
-          one visible row. *)
-       let detail_height = min (List.length detail) (max 0 (content_height - 2)) in
-       let table_height =
-         max 1 (content_height - detail_height - if detail_height > 0 then 1 else 0)
-       in
-       (* [box_line] spends the frame's margin either side, which
-          [framed_inner_width] already leaves out, and this pane adds two
-          more for its own indent. A
-          width that ignores them wraps the last column onto its own row,
-          which reads as a blank value. The pane is the truth the table is
-          fitted against: handing the table a floor of 40 on a terminal
-          narrower than that drew mandatory readings into cells the frame
-          then cut (#28905 review). [render] uses the pane to choose the
-          stacked layout before that cut can eat a value. *)
-       let table =
-         Masc_tui_model_runtime_table.render
-           ~width:(max 40 (framed_inner_width cols - 2 - 2))
-           ~pane:(max 1 (framed_inner_width cols - 2 - 2))
-           drawn_rows
-       in
+       List.iter (function
+         | Model_identity line -> box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ line)
+         | Model_observation line -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ line))
+         projection.model_prefix;
+       let table_height = projection.model_height in
+       let table = projection.model_document in
        let total = List.length table in
        (* The cursor walks bindings, not lines. In table mode line 0 is the
           header, so binding [i] is line [i+1] and that is what the window
           follows. In stacked mode the item's first line is the binding's
           line: the cursor still selects the same record it did before the
           resize, which is the whole point of the transition. *)
-       let pane_width = max 1 (framed_inner_width cols - 2 - 2) in
-       let table_mode =
-         Masc_tui_model_runtime_table.fits ~width:pane_width drawn_rows
-       in
-       let starts =
-         if table_mode then []
-         else
-           Masc_tui_model_runtime_table.stacked_item_starts ~pane:pane_width
-             drawn_rows
-       in
+       let table_mode = projection.model_table in
+       let starts = projection.model_starts in
        let cursor_line =
          if table_mode then state.config_models_cursor + 1
          else
@@ -1525,21 +1551,7 @@ let render_config_models (state : state) =
              in
              box_line buf cols marked
          | None -> box_empty buf cols
-       done;
-       if detail_height > 0
-       then (
-         box_divider buf cols;
-         List.iteri
-           (fun i line ->
-             if i < detail_height
-             then (
-               let line =
-                 "  " ^ fit_width (Terminal_text.single_line line) (max 1 (framed_inner_width cols - 3))
-               in
-               if i = 0
-               then box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) line
-               else box_line_styled buf cols ~style:(Theme.recede ()) line))
-           detail));
+       done);
   let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
     (footer_line ~recovery_in_slot state ~max_cells:cols
@@ -1550,11 +1562,11 @@ let render_config_models (state : state) =
    the stacked items when it does not, which only the pane width decides, so
    the pane owns the count the keys move through (as Tools and Memory do).
    Counting the table rows let the keys stop short of the stacked fields
-   (#41026 review). The chrome mirrors [render_config_models]: its own five
-   rows plus the detail block and its rule. *)
+   (#41026 review). The same pure projection supplies the account/notice
+   prefix and the actual list height to both rendering and scrolling. *)
 let config_models_scrolled (state : state) : scrolled =
   let chrome_error = listing_chrome ~error:state.runtime_config_view_error in
-  match state.runtime_config_view_error, state.runtime_config_view with
+  match config_models_read_error state, state.runtime_config_view with
   | Some _, _ | None, None ->
       { sc_count = 0
       ; sc_chrome = chrome_error
@@ -1563,32 +1575,17 @@ let config_models_scrolled (state : state) : scrolled =
       }
   | None, Some _ ->
       let terminal_rows, cols = get_terminal_size () in
-      let pane = max 1 (framed_inner_width cols - 2 - 2) in
-      let rows = config_models_drawn_rows state in
-      let document =
-        Masc_tui_model_runtime_table.render ~width:(max 40 pane) ~pane rows
-      in
-      let content_height =
-        max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5)
-      in
-      let detail_len =
-        List.nth_opt rows state.config_models_cursor
-        |> Option.map (fun r -> List.length (config_models_detail state r))
-        |> Option.value ~default:0
-      in
-      let detail_height = min detail_len (max 0 (content_height - 2)) in
-      { sc_count = List.length document
-      ; sc_chrome = 5 + detail_height + if detail_height > 0 then 1 else 0
+      let projection = config_models_projection state ~terminal_rows ~cols in
+      { sc_count = List.length projection.model_document
+      ; sc_chrome = 5 + List.length projection.model_prefix
       ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }
 
 (* Whether the pane draws stacked items at the current width. *)
 let config_models_stacked (state : state) =
-  let _, cols = get_terminal_size () in
-  not
-    (Masc_tui_model_runtime_table.fits ~width:(max 1 (framed_inner_width cols - 2 - 2))
-       (config_models_drawn_rows state))
+  let terminal_rows, cols = get_terminal_size () in
+  not (config_models_projection state ~terminal_rows ~cols).model_table
 
 let config_metadata_style = function
   | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()
@@ -2161,21 +2158,37 @@ let render_voice (state : state) =
   field (ui_text state ~ko:"장치" ~en:"device")
     (Option.value state.voice_input_device ~default:(ui_text state ~ko:"미확인" ~en:"unknown"));
   voice_body_line buf cols "";
-  (* Where the endpoints above come from. With no [voice] section the loader
-     reads the standalone JSON, and naming runtime.toml there sent a reader to a
-     file that declares nothing. *)
-  let declared_by =
-    match Option.map (member [ "source" ]) state.voice_setup with
-    | Some (Some (`Assoc source)) -> (
-        match List.assoc_opt "path" source with
-        | Some (`String path) -> Terminal_text.single_line path
-        | Some _ | None -> "runtime.toml [voice]")
-    | Some (Some _ | None) | None -> "runtime.toml [voice]"
+  let source =
+    match state.voice_setup_error, state.voice_setup with
+    | Some _, (Some _ | None) -> `Read_failed
+    | None, None -> `Unobserved
+    | None, Some json ->
+        (match member [ "source" ] json with
+         | Some `Null -> `Absent
+         | Some (`Assoc fields) ->
+             (match List.assoc_opt "kind" fields with
+              | Some (`String "runtime_toml") -> `Runtime_toml
+              | Some (`String "standalone_json") ->
+                  (match List.assoc_opt "path" fields with
+                   | Some (`String path) when not (String.equal path "") ->
+                       `Standalone_json (Terminal_text.single_line path)
+                   | Some _ | None -> `Unobserved)
+              | Some _ | None -> `Unobserved)
+         | Some _ | None -> `Unobserved)
+  in
+  let source_line =
+    match source with
+    | `Runtime_toml -> "runtime.toml [voice]"
+    | `Standalone_json path -> path
+    | `Absent -> ui_text state ~ko:"서버에 적용된 음성 설정 없음"
+        ~en:"No active voice configuration on the server"
+    | `Read_failed -> ui_text state ~ko:"확인하지 못함 · 조회 실패"
+        ~en:"Unconfirmed · read failed"
+    | `Unobserved -> ui_text state ~ko:"미확인" ~en:"Unknown"
   in
   voice_body_line buf cols
-    (Printf.sprintf (if state.ui_language = Lang_ko then "  %s선언: %s · 위 상태는 서버가 읽은 값%s"
-                     else "  %sDeclared in %s · status above is what the server loaded%s")
-       Ansi.dim declared_by Ansi.reset);
+    (Printf.sprintf "  %s%s: %s%s" Ansi.dim
+       (ui_text state ~ko:"설정 출처" ~en:"Config source") source_line Ansi.reset);
   (* The keys are the table's, as on every other Config pane. The row was
      written here and left out Esc and q, which the fitter keeps only when
      the hints name them, so the voice pane was the one Config pane that
@@ -2236,7 +2249,8 @@ let render_config (state : state) =
       match state.runtime_account_form with
       | Some form ->
           List.iter c.push
-            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols) form);
+            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols)
+               ~height:content_height form);
           (* The saved form stays open for its copy key, and the footer can
              lose it: the save notice leads that row and the fitter keeps only
              the way out, so CI run 36397938379 drew "Enter / Esc:close"

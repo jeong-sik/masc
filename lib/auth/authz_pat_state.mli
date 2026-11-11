@@ -35,6 +35,9 @@ type t
 val empty : t
 val find : t -> Authz_types.Pat_id.t -> pat option
 
+(** Every PAT of [user_id], open or not, in the order of the ids. *)
+val of_user : t -> Authz_types.User_id.t -> (Authz_types.Pat_id.t * pat) list
+
 (** Why a PAT does not act now. *)
 type inactive =
   | Unknown  (** No PAT has this id. *)
@@ -60,7 +63,9 @@ type refusal =
       { pat_id : Authz_types.Pat_id.t
       ; author : Authz_types.User_id.t
       }
-      (** A principal revokes only their own PAT. *)
+      (** A principal revokes only their own PAT. This refusal comes before
+          {!Already_revoked}, so it says nothing of the status of another's
+          PAT. *)
   | Not_a_human of Authz_types.Principal.t  (** A service has no PAT. *)
   | Not_a_pat_author of Authz_records.Author.t
       (** The local operator or a system author, which {!Authz_record.admits}

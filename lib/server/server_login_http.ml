@@ -127,6 +127,8 @@ let with_browser request reqd f =
 
 let allowlist_path = "/api/v1/auth/allowlist"
 let allowlist_entry_prefix = allowlist_path ^ "/"
+let pats_path = Login_pat_routes.path
+let pat_prefix = pats_path ^ "/"
 
 let start t provider request reqd =
   with_authority reqd (fun request_authority ->
@@ -162,16 +164,33 @@ let register t request reqd =
 
 (* The router matched the prefix, so the path holds it; the rest is the id,
    which the route reads. *)
-let remove t request reqd =
+let with_entry ~prefix request reqd f =
   let path = Http.Request.path request in
-  let prefix = String.length allowlist_entry_prefix in
-  if not (String.starts_with ~prefix:allowlist_entry_prefix path)
+  if not (String.starts_with ~prefix path)
   then Http.Response.not_found reqd
-  else (
-    let registration_id = String.sub path prefix (String.length path - prefix) in
+  else f (String.sub path (String.length prefix) (String.length path - String.length prefix))
+;;
+
+let remove t request reqd =
+  with_entry ~prefix:allowlist_entry_prefix request reqd (fun registration_id ->
     with_browser request reqd (fun browser ->
       with_body reqd (fun (_ : string) ->
         respond reqd (Login_allowlist_routes.remove t browser ~registration_id))))
+;;
+
+let issue_pat t request reqd =
+  with_browser request reqd (fun browser ->
+    with_body reqd (fun body -> respond reqd (Login_pat_routes.issue t browser ~body)))
+;;
+
+let list_pats t request reqd =
+  with_browser request reqd (fun browser -> respond reqd (Login_pat_routes.list t browser))
+;;
+
+let revoke_pat t request reqd =
+  with_entry ~prefix:pat_prefix request reqd (fun pat_id ->
+    with_browser request reqd (fun browser ->
+      with_body reqd (fun (_ : string) -> respond reqd (Login_pat_routes.revoke t browser ~pat_id))))
 ;;
 
 let access = Server_route.Self_authenticated Route_access.Browser_session
@@ -187,6 +206,9 @@ let add_routes t router =
   |> Server_route.get access "/auth/session" (session t)
   |> Server_route.post access allowlist_path (register t)
   |> Server_route.prefix_delete access allowlist_entry_prefix (remove t)
+  |> Server_route.post access pats_path (issue_pat t)
+  |> Server_route.get access pats_path (list_pats t)
+  |> Server_route.prefix_delete access pat_prefix (revoke_pat t)
 ;;
 
 (* ---- the localhost preview (plan, preview scope P3) ---- *)

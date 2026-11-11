@@ -1,0 +1,24 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                               │
+├──────────────────────────────────────────────────────────┤
+│                   confirmations and task owner routes    │
+│  m                account windows and Keeper usage       │
+│  s                phrases, arrangements and recorded     │
+│                   takes; no Keeper or score required     │
+│                                                          │
+│◇ Slash commands                                          │
+│  /login [client]  sign in to an official client and      │
+│                  verify a model connection               │
+│  /task-inspect   inspect this session's Task creations   │
+│                  without repeating them                  │
+│  /task-recover   restore a retained Task command for this│
+│                  Keeper; inspect Tasks before repeating  │
+│                  an unconfirmed creation                 │
+│  /task <title>   create a task for this keeper (lines    │
+│                  below become the body)                  │
+│  /keeper <name>  switch this pane to another keeper      │
+│  [lines 17-32/1509]                                      │
+└──────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:filter  Esc:close  …
+ Choose a Keeper before writing · i:choose

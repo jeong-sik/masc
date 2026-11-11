@@ -16,8 +16,10 @@ so a low limit hides whatever sorts last; check truncated in the response."""
 name = "detailed"
 type = "boolean"
 description = """
-Return keeper summaries (model/context) instead of names \
-only."""
+Without it, keepers lists the names and items carries one short row per \
+keeper: name, status, phase, health and paused. With true, keepers carries \
+each keeper's whole row: meta, last failure, runtime blocker and lane, \
+recent turns. A name argument returns that keeper's whole row either way."""
 
 [[params]]
 name = "fresh"

@@ -419,6 +419,26 @@ let all =
         ]
       ~category:Turn
       "No-progress threshold for a provider call attempt and a tool's provider sub-call"
+  ; (* The intake reads this at every turn, from a file that is read once at
+       server start: a change takes a restart, so the row leaves the reload
+       class at its default. *)
+    setting
+      ~range:
+        (int_range
+           ~min:Env_config_keeper.KeeperAdmissionBounds.max_events_floor
+           ~max:Env_config_keeper.KeeperAdmissionBounds.max_events_ceiling
+           ())
+      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperAdmissionBounds.max_events ())))
+      ~env_name:Env_config_keeper.KeeperAdmissionBounds.max_events_env_key
+      ~exposure:(Toml_only "turn.admission_max_events")
+      ~value_kind:Integer
+      ~default:(display_int Env_config_keeper.KeeperAdmissionBounds.max_events_default)
+      ~consumers:
+        [ "Env_config_keeper.KeeperAdmissionBounds"
+        ; "Keeper_heartbeat_stimulus_intake ready_batch"
+        ]
+      ~category:Turn
+      "Maximum durable queue selections admitted into one turn; the rest stay pending for a later turn (#29365)"
   ; setting
       ~range:
         (float_range
@@ -735,20 +755,6 @@ let all =
       ~consumers:[ "Keeper gRPC heartbeat client" ]
       ~category:Transport
       "Backoff between keeper gRPC reconnect attempts"
-  ; setting
-      ~range:(int_range ~min:1 ~max:256 ())
-      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperAdmissionBounds.max_events ())))
-      ~env_name:"MASC_KEEPER_ADMISSION_MAX_EVENTS"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"32"
-      ~reload_class:Next_turn
-      ~consumers:
-        [ "Env_config_keeper.KeeperAdmissionBounds"
-        ; "Keeper_heartbeat_stimulus_intake ready_batch"
-        ]
-      ~category:Turn
-      "Maximum durable queue selections admitted into one turn; the rest stay pending for a later turn (#29365)"
   ; (* The workspace default for a microVM guest's size. A keeper's own
        [microvm_memory] / [microvm_cpus] wins per dimension. runtime.toml is
        the only input and the process environment is not read: [masc restart]
@@ -1054,50 +1060,6 @@ let requires_restart setting =
   match setting.reload_class with
   | Next_turn -> false
   | Process_restart -> true
-;;
-
-module String_map = Map.Make (String)
-
-let duplicates ~identity rows =
-  let counts =
-    List.fold_left
-      (fun acc row ->
-         let key = identity row in
-         let next_count =
-           match String_map.find_opt key acc with
-           | None -> 1
-           | Some count -> count + 1
-         in
-         String_map.add key next_count acc)
-      String_map.empty rows
-  in
-  String_map.fold
-    (fun key count acc -> if count > 1 then key :: acc else acc)
-    counts
-    []
-;;
-
-let validate_registry () =
-  let duplicate_env =
-    duplicates ~identity:(fun row -> row.env_name) all
-    |> List.map (Printf.sprintf "duplicate env identity: %s")
-  in
-  let toml_rows = List.filter_map (fun row -> Option.map (fun key -> key, row) (toml_key_opt row)) all in
-  let duplicate_toml =
-    duplicates ~identity:fst toml_rows
-    |> List.map (Printf.sprintf "duplicate TOML identity: %s")
-  in
-  let consumer_errors =
-    toml_settings
-    |> List.filter (fun row -> row.consumers = [])
-    |> List.filter_map (fun row ->
-      Option.map
-        (Printf.sprintf "TOML setting has no runtime consumer: %s")
-        (toml_key_opt row))
-  in
-  match duplicate_env @ duplicate_toml @ consumer_errors with
-  | [] -> Ok ()
-  | errors -> Error errors
 ;;
 
 let json_of_int_opt = function

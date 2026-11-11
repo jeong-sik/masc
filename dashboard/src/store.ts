@@ -1,4 +1,6 @@
 import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'
+import { acceptedExecutionWorkspace } from './execution-workspace-authority'
+export { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from './execution-workspace-authority'
 import { decodeGoalProof } from './api/goal-proof'
 import { decodeGoalResumePhase } from './api/goal-lifecycle'
 import { fetchKeeperDeletions, type KeeperDeletionInventory } from './api/keeper-lifecycle'
@@ -42,6 +44,12 @@ import { WARM_MAX_RETRIES, warmRetryDelayFor } from './lib/warm-retry'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { currentCanonicalDashboardActor, managedCredentialNeedsRevalidation, managedDashboardRefusal, setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { sanitizeDashboardActorName } from './lib/dashboard-actor'
+import { ObservationPending, setupObservationRefresh } from './lib/observation-refresh'
+import {
+  captureDashboardObservationOwner,
+  dashboardObservationOwnerIsCurrent,
+  subscribeDashboardObservationOwnerChanges,
+} from './lib/observation-read-owner'
 import {
   captureDashboardCredentialOwner,
   dashboardCredentialOwnerIsCurrent,
@@ -564,8 +572,19 @@ export const tasksByStatus = computed(() => {
 // TTL values from config/constants.ts
 
 let inflightDashboardRefresh: Promise<void> | null = null
-let inflightShellRefresh: Promise<boolean> | null = null
-let inflightShellRefreshLight = false
+export type ShellReadOutcome =
+  | { readonly kind: 'ready' }
+  | { readonly kind: 'failed'; readonly cause: unknown }
+  | { readonly kind: 'cancelled' }
+interface ShellRefreshFlight {
+  readonly light: boolean
+  readonly controller: AbortController
+  promise: Promise<ShellReadOutcome>
+  waiters: number
+  settled: boolean
+  stopAuthorityWatch: () => void
+}
+let inflightShellRefresh: ShellRefreshFlight | null = null
 let inflightWorkspaceMessagesRefresh: Promise<void> | null = null
 let inflightWorkspaceMessagesRefreshProject: string | null = null
 let workspaceMessagesRefreshController: AbortController | null = null
@@ -974,45 +993,117 @@ export function hydrateShellSnapshot(
   return admitted
 }
 
-export async function refreshShell(opts?: RefreshOptions & { recoverAuth?: boolean }): Promise<boolean> {
+function retireShellRefresh(flight: ShellRefreshFlight): void {
+  flight.stopAuthorityWatch()
+  flight.controller.abort()
+  if (inflightShellRefresh === flight) {
+    inflightShellRefresh = null
+    lastShellRefreshAt = 0
+  }
+}
+
+/** A caller can leave a shared read without cancelling its other consumers. */
+function joinShellRefresh(flight: ShellRefreshFlight, signal?: AbortSignal): Promise<ShellReadOutcome> {
+  if (signal?.aborted || flight.controller.signal.aborted) {
+    if (!flight.settled && flight.waiters === 0) retireShellRefresh(flight)
+    return Promise.resolve({ kind: 'cancelled' })
+  }
+  flight.waiters += 1
+  return new Promise(resolve => {
+    let finished = false
+    const finish = (result: ShellReadOutcome) => {
+      if (finished) return
+      finished = true
+      signal?.removeEventListener('abort', abort)
+      flight.controller.signal.removeEventListener('abort', abort)
+      flight.waiters -= 1
+      if (!flight.settled && flight.waiters === 0) retireShellRefresh(flight)
+      resolve(result)
+    }
+    const abort = () => finish({ kind: 'cancelled' })
+    signal?.addEventListener('abort', abort, { once: true })
+    flight.controller.signal.addEventListener('abort', abort, { once: true })
+    void flight.promise.then(finish)
+  })
+}
+
+/** Mounted shell observers keep the exact outcome of their shared request. */
+export async function readShell(opts?: RefreshOptions & { recoverAuth?: boolean; signal?: AbortSignal }): Promise<ShellReadOutcome> {
+  if (opts?.signal?.aborted) return { kind: 'cancelled' }
   const wantsLight = opts?.light === true
   if (inflightShellRefresh) {
     // A forced refresh must observe state established by the caller before
     // this invocation (notably Settings clearing the browser token). Joining
     // an older request could otherwise hydrate auth from the pre-clear token
     // and falsely report that the cleared state was rechecked.
-    if (!opts?.force && (wantsLight || !inflightShellRefreshLight)) return inflightShellRefresh
-    await inflightShellRefresh
+    if (!opts?.force && (wantsLight || !inflightShellRefresh.light)) return joinShellRefresh(inflightShellRefresh, opts?.signal)
+    await joinShellRefresh(inflightShellRefresh, opts?.signal)
+    if (opts?.signal?.aborted) return { kind: 'cancelled' }
     // Another waiter may have started the required follow-up refresh while
     // this caller resumed. Join it only when it fetches at least as much as
     // this caller asked for. A light follow-up does not satisfy a full
     // request, so a full waiter that joined one would resolve without ever
     // fetching the full shell surface it asked for.
-    if (inflightShellRefresh && (wantsLight || !inflightShellRefreshLight)) {
-      return inflightShellRefresh
+    if (inflightShellRefresh && (wantsLight || !inflightShellRefresh.light)) {
+      return joinShellRefresh(inflightShellRefresh, opts?.signal)
     }
   }
-  if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return true
-  inflightShellRefreshLight = wantsLight
-  inflightShellRefresh = (async () => {
-    const authOwner = captureDashboardCredentialOwner()
+  if (!opts?.force && Date.now() - lastShellRefreshAt < SHELL_TTL_MS) return { kind: 'ready' }
+  const flight: ShellRefreshFlight = {
+    light: wantsLight, controller: new AbortController(), promise: Promise.resolve({ kind: 'cancelled' }), waiters: 0, settled: false,
+    stopAuthorityWatch: () => {},
+  }
+  inflightShellRefresh = flight
+  const authOwner = captureDashboardCredentialOwner()
+  const requestOwner = captureDashboardObservationOwner()
+  const stopAuthorityWatch = subscribeDashboardObservationOwnerChanges(() => retireShellRefresh(flight))
+  flight.stopAuthorityWatch = stopAuthorityWatch
+  const current = () => !flight.controller.signal.aborted
+    && dashboardObservationOwnerIsCurrent(requestOwner)
+  flight.promise = (async (): Promise<ShellReadOutcome> => {
     try {
-      const data = await fetchDashboardShell({ light: wantsLight })
-      return hydrateShellSnapshot(data, { light: wantsLight, sentToken: authOwner.token, authOwner, recoverAuth: opts?.recoverAuth })
+      if (!current()) return { kind: 'cancelled' }
+      const data = await fetchDashboardShell({ light: wantsLight, signal: flight.controller.signal })
+      if (!current()) return { kind: 'cancelled' }
+      // Hydration may itself update the canonical actor. That response-owned
+      // transition is checked by hydrateShellSnapshot's credential CAS.
+      stopAuthorityWatch()
+      const admitted = hydrateShellSnapshot(data, { light: wantsLight, sentToken: authOwner.token, authOwner,
+        recoverAuth: opts?.recoverAuth })
+      return { kind: admitted ? 'ready' : 'cancelled' }
     } catch (err) {
-      if (dashboardCredentialOwnerIsCurrent(authOwner)) {
-        setCanonicalDashboardActor(null)
-        shellAuthSummary.value = null
-        showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
-      }
+      if (!current() || isAbortError(err)) return { kind: 'cancelled' }
+      stopAuthorityWatch()
+      // A failed read does not attest a different actor. Its own managed401
+      // may retire strict hydration authority while the request headers stay
+      // the same; keep that original refusal and its retry policy intact.
+      shellAuthSummary.value = null
+      showToast('서버 연결 실패 — 데이터를 불러올 수 없습니다', 'error', 6000)
       console.warn('[Dashboard] shell fetch error:', err)
-      return false
+      return { kind: 'failed', cause: err }
     } finally {
-      inflightShellRefresh = null
-      inflightShellRefreshLight = false
+      stopAuthorityWatch()
+      flight.settled = true
+      if (inflightShellRefresh === flight) inflightShellRefresh = null
     }
   })()
-  return inflightShellRefresh
+  return joinShellRefresh(flight, opts?.signal)
+}
+
+export async function refreshShell(opts?: RefreshOptions & { recoverAuth?: boolean; signal?: AbortSignal }): Promise<boolean> {
+  const outcome = await readShell(opts)
+  return outcome.kind === 'ready'
+}
+
+/** App owns initial boot separately; successful quiet observation does no HTTP. */
+export function setupShellObservation(): () => void {
+  return setupObservationRefresh(async signal => {
+    const outcome = await readShell({ force: true, signal })
+    if (outcome.kind === 'failed') throw outcome.cause
+    if (outcome.kind === 'cancelled') throw new ObservationPending('Shell observation is pending')
+  }, {
+    topics: ['runtime_resolved'], initial: false,
+  })
 }
 
 let executionPublicationEpoch: string | null = null
@@ -1023,18 +1114,6 @@ let executionPublicationGenerationWatermark = -1
 let candleObservationSequenceWatermark = -1
 let executionHydrationRequestGeneration = 0
 const retiredExecutionPublicationEpochs = new Set<string>()
-
-export interface ExecutionWorkspaceAuthority {
-  readonly epoch: string
-  readonly workspaceRoot: string
-  readonly connectionGeneration: number
-}
-
-const acceptedExecutionWorkspace = signal<ExecutionWorkspaceAuthority | null>(null)
-/** Authority of an accepted execution response, not a retained display status.
- *  Object identity is the admission token: A → B → A cannot revive an old A read. */
-export const executionWorkspaceAuthority: ReadonlySignal<ExecutionWorkspaceAuthority | null>
-  = acceptedExecutionWorkspace
 
 function withdrawExecutionWorkspaceAuthority(): void {
   acceptedExecutionWorkspace.value = null

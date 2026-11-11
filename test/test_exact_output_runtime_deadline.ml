@@ -137,9 +137,9 @@ let with_runtime f =
     check (option (float 0.0)) "declared Exact body deadline" body
       runtime.provider.exact_body_timeout_s;
     (match runtime.Runtime_instance.execution with
-     | Runtime_execution.Agent_core config ->
+     | Runtime_execution.Agent_core sealed ->
        check (option (float 0.0)) "ordinary connection deadline is unchanged" connect
-         config.connect_timeout_s
+         (Runtime_account_access.api_declaration sealed).connect_timeout_s
      | _ -> fail "expected the API runtime");
     let inventory = Server_dashboard_http_runtime_info.runtime_inventory_json () in
     let open Yojson.Safe.Util in

@@ -18,6 +18,32 @@ let content_block (content : Mcp_protocol.Mcp_types.tool_content) =
       Llm_provider.Types.Text
         (Yojson.Safe.to_string (Mcp_protocol.Mcp_types.tool_content_to_yojson content))
 
+(* A worker's reply reaches the Keeper twice. Its content blocks become the
+   result's [content_blocks], which is what a model reads. The whole reply
+   becomes [data], which the ledger and the inline-size limit read. With the
+   PNG in both, a DOS screen read put its base64 into [data] too, past the
+   lane's inline limit (64 KiB for agent_core, 32 KiB for Claude Code, 16 KiB
+   for the others), so every read wrote the same PNG to the blob store again.
+   [data] keeps each media block's type, MIME type and size and drops its
+   bytes. A failed result has no [content_blocks]; the DOS and MSX workers
+   attach images to successful replies only. *)
+let data_of_worker_result (result : Mcp_protocol.Mcp_types.tool_result) =
+  let media ~type_ ~mime_type ~data =
+    `Assoc [ "type", `String type_; "mimeType", `String mime_type
+           ; "base64_chars", `Int (String.length data) ] in
+  let block (content : Mcp_protocol.Mcp_types.tool_content) =
+    match content with
+    | ImageContent { type_; data; mime_type; _ } -> media ~type_ ~mime_type ~data
+    | AudioContent { type_; data; mime_type; _ } -> media ~type_ ~mime_type ~data
+    | TextContent _ | ResourceContent _ | ResourceLinkContent _ ->
+        Mcp_protocol.Mcp_types.tool_content_to_yojson content in
+  match Mcp_protocol.Mcp_types.tool_result_to_yojson result with
+  | `Assoc fields ->
+      `Assoc (List.map (function
+        | "content", _ -> "content", `List (List.map block result.content)
+        | field -> field) fields)
+  | json -> json
+
 let call ~config ~keeper_name ~(export : Lane_addon_tool_export.t) ~arguments =
   let start_time = Tool_timing.start () in
   let tool_name = export.tool.name in
@@ -37,7 +63,7 @@ let call ~config ~keeper_name ~(export : Lane_addon_tool_export.t) ~arguments =
     | Error (Lane_addon_runtime.Outcome_unknown message) ->
         Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure message
     | Ok result ->
-        let data = Mcp_protocol.Mcp_types.tool_result_to_yojson result in
+        let data = data_of_worker_result result in
         match result.is_error with
         | Some true ->
             let class_, effect_disposition = Lane_addon_tool_result.failure result in

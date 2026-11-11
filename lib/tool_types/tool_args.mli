@@ -163,10 +163,6 @@ type field_error = {
 
 val validation_error_assoc : field_error list -> Yojson.Safe.t
 
-(** [{"status":"error","error_code":"validation_error",
-    "field_errors":[…],"message":"N field error(s)"}] *)
-val validation_error_response : field_error list -> string
-
 val validation_error_result :
   ?tool_name:string -> start_time:Tool_timing.started -> field_error list -> Tool_result.result
 (** {!validation_error_assoc} as a failed result. Class:
@@ -180,9 +176,6 @@ val validation_error_result :
 val validate_string_required :
   Yojson.Safe.t -> string -> (string, field_error) Result.t
 
-val validate_int_required :
-  Yojson.Safe.t -> string -> (int, field_error) Result.t
-
 val validate_int_range :
   Yojson.Safe.t ->
   string ->
@@ -190,13 +183,6 @@ val validate_int_range :
   max_v:int ->
   default:int ->
   (int, field_error) Result.t
-
-val validate_one_of :
-  Yojson.Safe.t ->
-  string ->
-  allowed:string list ->
-  default:string ->
-  (string, field_error) Result.t
 
 (** Collect any [Error]s from [results]; returns [Ok ()] when all pass. *)
 val validate_all :

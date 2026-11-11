@@ -2730,23 +2730,6 @@ let test_a_journal_built_log_holds_its_turn_in_the_timeline () =
 
 ;;
 
-(* A settled block goes after its request's last row of any phase before
-   output: a failed turn's words sit above its own error row and above the
-   turns that ran in between, not below both. The live block still follows
-   every committed row of its request. *)
-let test_a_settled_block_sits_before_its_requests_output_rows () =
-  let user_b = chat_entry ~request_id:"B" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None })) ~text:"uB" ~at:20. () in
-  let user_a = chat_entry ~request_id:"A" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None })) ~text:"uA" ~at:30. () in
-  let err_b = chat_entry ~request_id:"B" ~role:Tui_types.Message_error ~text:"errB" ~at:50. () in
-  let positioned = [ (user_b, Some 20.); (user_a, Some 30.); (err_b, Some 50.) ] in
-  check int "settled B goes after uB, before uA and errB" 1
-    (Tui_types.chat_settled_insertion_index ~request_id:"B" ~timeline_at:(Some 20.) positioned);
-  check int "live B goes after everything of B" 3
-    (Tui_types.chat_live_insertion_index ~request_id:"B" ~timeline_at:(Some 20.) positioned);
-  check int "settled A goes after uA" 2
-    (Tui_types.chat_settled_insertion_index ~request_id:"A" ~timeline_at:(Some 30.) positioned)
-;;
-
 (* The loaded tool row of a held turn leaves the timeline, and what it knew
    that the wire did not -- the call failed, and how long it took -- reaches
    the block through the log's transcript. *)
@@ -6115,8 +6098,6 @@ let () =
             test_a_failure_learned_only_from_the_record_keeps_the_log_partial
         ; test_case "a failure the stream reported still stands for the turn" `Quick
             test_a_failure_the_stream_reported_still_stands_for_the_turn
-        ; test_case "a settled block sits before its request's output rows" `Quick
-            test_a_settled_block_sits_before_its_requests_output_rows
         ; test_case "loaded tool facts are folded into the held log" `Quick
             test_loaded_tool_facts_are_folded_into_the_held_log
         ; test_case "loaded skill evidence is folded into the held log" `Quick

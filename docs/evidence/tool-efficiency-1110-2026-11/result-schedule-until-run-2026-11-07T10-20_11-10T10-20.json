@@ -1,0 +1,17 @@
+{
+  "window": {
+    "since": "2026-11-07T10:20:00Z",
+    "end": "2026-11-10T10:20:00Z",
+    "hours": 72.0
+  },
+  "with_until": 226,
+  "with_until_completed": 188,
+  "missing_due_refused": 24,
+  "missing_due_rate": 0.1062,
+  "carried_due_field": 0,
+  "next_create": {
+    "completed": 18,
+    "none": 4,
+    "failed": 2
+  }
+}

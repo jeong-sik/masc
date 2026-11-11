@@ -111,11 +111,11 @@ let reset () =
 (* Descriptor 복제: 기존 descriptor 를 record 복사로 교체한다           *)
 
 (* Plan.create 는 descriptor 를 id 로 정규화해 등록본으로 되돌린다
-   (keeper_tool_plan.ml:1001 canonicalize_descriptors), 그래서 테스트가
-   만든 수정 descriptor 는 plan 생성에 흡수되지 않는다. 실제 표면의
-   lane·search 쌍(keeper_lane_status → masc_board_search)이 이미
-   [Json_output] 데이터플로(lane.profile → search.query)를 제공하므로,
-   그 canonical descriptors 를 그대로 쓴다. *)
+   (canonicalize_descriptors). identity·이름·execution·input_schema 는
+   등록본이 소유하고, 선언된 [Json_output] composable_output 오버라이드만
+   plan 이 소유한다(task-3483). 이 테스트는 오버라이드 없이 실제 표면의
+   lane·search 쌍(keeper_lane_status → masc_board_search)이 이미 제공하는
+   [Json_output] 데이터플로(lane.profile → search.query)를 그대로 쓴다. *)
 let lane_descriptor () =
   match List.find_opt (fun d -> String.equal d.Descriptor.id "keeper.lane.status") (Descriptor.all_descriptors ()) with
   | Some d -> d

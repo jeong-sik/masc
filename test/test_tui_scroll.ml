@@ -55,6 +55,61 @@ let test_a_page_keeps_one_row_of_the_window_it_leaves () =
   check int "page up from a stale scroll answers from the bound one page back" 62
     (Masc_tui_scroll.page_up ~count:81 ~height:10 999)
 
+let key_move_t =
+  Alcotest.testable
+    (fun ppf move ->
+      Format.pp_print_string ppf
+        (match move with
+         | Masc_tui_scroll.Line_down -> "Line_down"
+         | Masc_tui_scroll.Line_up -> "Line_up"
+         | Masc_tui_scroll.Page_down -> "Page_down"
+         | Masc_tui_scroll.Page_up -> "Page_up"
+         | Masc_tui_scroll.To_top -> "To_top"
+         | Masc_tui_scroll.To_end -> "To_end"))
+    ( = )
+
+(* The cheat sheet, the agenda and the context reader each matched their own
+   key names, and no two agreed on Home, End or the size of a page. One table
+   names the keys; Home and g are the same key to a reader, so are End and G. *)
+let test_a_key_names_one_move () =
+  let key name expected =
+    check (Alcotest.option key_move_t) (Printf.sprintf "key %S" name) expected
+      (Masc_tui_scroll.move_of_key name)
+  in
+  key "j" (Some Masc_tui_scroll.Line_down);
+  key "down" (Some Masc_tui_scroll.Line_down);
+  key "k" (Some Masc_tui_scroll.Line_up);
+  key "up" (Some Masc_tui_scroll.Line_up);
+  key "pagedown" (Some Masc_tui_scroll.Page_down);
+  key "pageup" (Some Masc_tui_scroll.Page_up);
+  key "g" (Some Masc_tui_scroll.To_top);
+  key "home" (Some Masc_tui_scroll.To_top);
+  key "G" (Some Masc_tui_scroll.To_end);
+  key "end" (Some Masc_tui_scroll.To_end);
+  key "x" None;
+  key "enter" None;
+  key "" None
+
+let test_a_move_travels_as_far_as_its_mover () =
+  let apply ?(count = 80) move scroll =
+    Masc_tui_scroll.apply_move ~count ~height:10 move scroll
+  in
+  check int "a line down" 6 (apply Masc_tui_scroll.Line_down 5);
+  check int "a line up" 4 (apply Masc_tui_scroll.Line_up 5);
+  check int "a page down keeps one row of the window it leaves" 14
+    (apply Masc_tui_scroll.Page_down 5);
+  check int "a page up keeps one row of the window it leaves" 11
+    (apply Masc_tui_scroll.Page_up 20);
+  check int "a page forward and back lands where it started" 20
+    (apply Masc_tui_scroll.Page_up (apply Masc_tui_scroll.Page_down 20));
+  check int "the top is the first row" 0 (apply Masc_tui_scroll.To_top 40);
+  check int "the end is the last scroll that still shows content" 70
+    (apply Masc_tui_scroll.To_end 0);
+  check int "a list shorter than its window has no end to scroll to" 0
+    (apply ~count:5 Masc_tui_scroll.To_end 0);
+  check int "a stale scroll answers from the bound" 70
+    (apply Masc_tui_scroll.Line_down 999)
+
 (* A surface no listing counts has no bound below to hold the scroll at, but a
    negative scroll is not a position either: the frame indexes the list with it.
    The Git-changes overlay opened over the Keepers surface was unlisted, and one
@@ -66,6 +121,36 @@ let test_an_uncounted_surface_holds_at_the_top () =
     (Masc_tui_scroll.step_uncounted ~delta:(-1) 0);
   check int "a page up that overshoots the top stops at it" 0
     (Masc_tui_scroll.step_uncounted ~delta:(-9) 4)
+
+(* A reader's page is the page a list keeps. Each reader used to be handed
+   [By height] and add the whole window, so readers and lists disagreed by a
+   row. [Position.move] now takes the page itself, and for every scroll, count
+   and height it lands where [page_down] and [page_up] land. *)
+let test_a_reading_page_is_the_page_a_list_keeps () =
+  let module Position = Masc_tui_scroll.Position in
+  let misses = ref [] in
+  for height = 1 to 12 do
+    for count = 0 to 30 do
+      for start = 0 to 30 do
+        let landed movement =
+          Position.offset ~count ~height (Position.move ~count ~height movement (Position.at start)) in
+        let note name expected got =
+          if expected <> got then
+            misses := Printf.sprintf "%s count %d height %d from %d: %d, not %d" name count height start got expected :: !misses in
+        note "page down" (Masc_tui_scroll.page_down ~count ~height start) (landed Position.Page_down);
+        note "page up" (Masc_tui_scroll.page_up ~count ~height start) (landed Position.Page_up)
+      done
+    done
+  done;
+  Alcotest.(check (list string)) "a reader's page and a list's page agree" [] !misses;
+  check int "a page down from the end anchor stays at the end" 90
+    (Position.offset ~count:100 ~height:10
+       (Position.move ~count:100 ~height:10 Position.Page_down
+          (Position.move ~count:100 ~height:10 Position.Last Position.first)));
+  check int "a page up from the end anchor leaves it by a page" 81
+    (Position.offset ~count:100 ~height:10
+       (Position.move ~count:100 ~height:10 Position.Page_up
+          (Position.move ~count:100 ~height:10 Position.Last Position.first)))
 
 (* End stores [max_int] on a reader the frame clamps, and the key that follows
    before the frame has drawn adds a page to it. The sum wrapped negative and
@@ -100,6 +185,29 @@ let test_the_window_follows_the_row_that_left_it () =
     (Masc_tui_scroll.ensure_span_visible ~start:20 ~stop:25 ~height:5 10);
   check int "a run the window already shows leaves the window alone" 10
     (Masc_tui_scroll.ensure_span_visible ~start:12 ~stop:13 ~height:5 10)
+
+(* A row that opens a group brings the group's heading with it. The heading is
+   no row the cursor can name, so following the row alone left it above the
+   window whenever the cursor stood on the first row of a group. *)
+let test_a_row_that_opens_a_group_keeps_its_heading_in_the_window () =
+  let follow = Masc_tui_scroll.ensure_visible_with_lead ~lead:1 ~height:4 in
+  check int "a row above the window brings its heading up with it" 4
+    (follow ~cursor:5 7);
+  check int "a window that shows only the row moves up to show the heading" 4
+    (follow ~cursor:5 5);
+  check int "a window that shows both leaves the window alone" 3
+    (follow ~cursor:5 3);
+  check int "a row below the window comes down with its heading on screen" 3
+    (follow ~cursor:6 0);
+  check int "the first group's heading at the top of the list" 0
+    (follow ~cursor:1 7);
+  check int "no lead moves the window as ensure_visible does"
+    (Masc_tui_scroll.ensure_visible ~cursor:30 ~height:10 0)
+    (Masc_tui_scroll.ensure_visible_with_lead ~cursor:30 ~lead:0 ~height:10 0);
+  check int "a window of one row follows the row alone" 5
+    (Masc_tui_scroll.ensure_visible_with_lead ~cursor:5 ~lead:1 ~height:1 9);
+  check int "a lead taller than the window keeps the row on screen" 3
+    (Masc_tui_scroll.ensure_visible_with_lead ~cursor:6 ~lead:9 ~height:4 0)
 
 (* Rows of different heights: the Keepers views draw a second line under a
    failing Keeper alone. The window is counted in lines, and the scroll and
@@ -230,6 +338,9 @@ let () =
             test_the_bound_holds_a_stale_scroll
         ; Alcotest.test_case "a page keeps one row of the window it leaves"
             `Quick test_a_page_keeps_one_row_of_the_window_it_leaves
+        ; Alcotest.test_case "a key names one move" `Quick test_a_key_names_one_move
+        ; Alcotest.test_case "a move travels as far as its mover" `Quick
+            test_a_move_travels_as_far_as_its_mover
         ] )
     ; ( "moving"
       , [ Alcotest.test_case "an uncounted surface holds at the top" `Quick
@@ -238,6 +349,8 @@ let () =
             `Quick test_a_step_forward_from_the_end_value_stays_there
         ; Alcotest.test_case "the window follows the row that left it" `Quick
             test_the_window_follows_the_row_that_left_it
+        ; Alcotest.test_case "a row that opens a group keeps its heading in the window"
+            `Quick test_a_row_that_opens_a_group_keeps_its_heading_in_the_window
         ; Alcotest.test_case "a window of uneven rows shows the cursor whole" `Quick
             test_a_window_of_uneven_rows_shows_the_cursor_whole
         ] )
@@ -258,8 +371,7 @@ let () =
             test_the_list_height_is_the_rows_that_are_left
         ] )
     ; ( "position"
-        (* Empty on purpose: Masc_tui_scroll.Position does not exist on main yet.
-           The stack that introduces it (starting at #44842) owns this group, so
-           filling it here would only collide. Delete this note with that stack. *)
-      , [] )
+      , [ Alcotest.test_case "a reader's page is the page a list keeps" `Quick
+            test_a_reading_page_is_the_page_a_list_keeps
+        ] )
     ]

@@ -8,10 +8,17 @@
 
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
+(* What another domain queues for the owner domain. A caller of
+   [run_on_owner_domain] waits for an [Awaited] task's promise; nobody waits
+   for a [Posted] one. *)
+type owner_task =
+  | Awaited of (unit -> unit)
+  | Posted of (unit -> unit)
+
 type root_switch_binding =
   { switch : Eio.Switch.t
   ; owner_domain : Domain.id
-  ; dispatch_stream : (unit -> unit) Eio.Stream.t
+  ; dispatch_stream : owner_task Eio.Stream.t
   }
 
 type state_snapshot = {
@@ -91,25 +98,42 @@ let get_mono_clock_opt () =
 
 let set_switch sw =
   let owner_domain = Domain.self () in
-  let dispatch_stream = Eio.Stream.create 512 in
+  (* No bound: a post never waits. A request's connection posts from inside
+     its cleanup, shielded from cancellation, and a wait there would hold the
+     serving domain open once this domain no longer takes tasks. *)
+  let dispatch_stream = Eio.Stream.create max_int in
   let binding = { switch = sw; owner_domain; dispatch_stream } in
   let some_binding = Some binding in
   Atomic.set current_sw some_binding;
   Eio.Switch.on_release sw (fun () ->
     let _ = Atomic.compare_and_set current_sw some_binding None in
+    (* Every fiber under the switch has ended by now. An awaited task still
+       runs, here, so its caller on another domain gets an answer. A posted
+       one is dropped: it would start a request's handler, or answer a fiber
+       that no longer exists, inside this release hook, which cannot be
+       cancelled. *)
     let rec drain () =
       match Eio.Stream.take_nonblocking dispatch_stream with
-      | Some task ->
+      | Some (Awaited task) ->
         (try task () with _ -> ());  (* cancel-guard-ok: release-time drain; Cancelled is the expected teardown signal here and must not abort the drain. @observe-allowed: the switch is already releasing, so no caller is left to hand a task's failure to *)
         drain ()
+      | Some (Posted _) -> drain ()
       | None -> ()
     in
     drain ());
   Eio.Fiber.fork_daemon ~sw (fun () ->
     while true do
-      let task = Eio.Stream.take dispatch_stream in
+      let (Awaited task | Posted task) = Eio.Stream.take dispatch_stream in
       Eio.Fiber.fork ~sw (fun () ->
-        try task () with _ -> ())  (* cancel-guard-ok: daemon safety net; a task's own catch resolves its promise first, so this arm only sees fork-teardown noise the daemon must survive. @observe-allowed: same reason -- what reaches here was already reported by the task, or is teardown *)
+        try task () with _ -> ());  (* cancel-guard-ok: daemon safety net; a task's own catch resolves its promise first, so this arm only sees fork-teardown noise the daemon must survive. @observe-allowed: same reason -- what reaches here was already reported by the task, or is teardown *)
+      (* One task starts per pass of this domain's run queue. Without the
+         yield every queued task starts in this one run, and with the HTTP
+         serving domain on that is every request in flight: 32 keep-alive
+         connections held this domain's timers back 86 ms at the median
+         against 7 ms with the connections on this domain (2026-11-10, GET
+         /health, 15,000 requests). A queue that is otherwise empty passes
+         at once, so nothing waits while this domain is idle. *)
+      Eio.Fiber.yield ()
     done;
     `Stop_daemon)
 
@@ -144,6 +168,12 @@ let root_switch_on_current_domain () =
   | Some binding -> binding.owner_domain = Domain.self ()
   | None -> false
 
+let owner_post () =
+  match Atomic.get current_sw with
+  | None -> None
+  | Some binding when binding.owner_domain = Domain.self () -> None
+  | Some binding -> Some (fun task -> Eio.Stream.add binding.dispatch_stream (Posted task))
+
 let run_on_owner_domain (type a) (f : unit -> a) : a =
   match Atomic.get current_sw with
   | None -> f ()
@@ -158,7 +188,7 @@ let run_on_owner_domain (type a) (f : unit -> a) : a =
         let bt = Printexc.get_raw_backtrace () in
         Eio.Promise.resolve_error r (exn, bt)
     in
-    Eio.Stream.add binding.dispatch_stream task;
+    Eio.Stream.add binding.dispatch_stream (Awaited task);
     match Eio.Promise.await p with
     | Ok res -> res
     | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
@@ -233,67 +263,3 @@ let get_clock () : (float Eio.Time.clock_ty Eio.Resource.t, string) result =
   | Some clock -> Ok clock
   | None ->
       Error "Eio clock not initialized - ensure set_clock is called during server startup"
-
-let _https_connector_cache :
-  ((Uri.t ->
-     [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-     [> Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t),
-   string)
-  result
-  option
-  Atomic.t =
-  Atomic.make None
-
-let https_error message = Error message
-
-let build_https_connector_result () =
-  try
-    (* The TLS handshake draws from the process-global RNG default; guard
-       it here like llm_provider's tls_client_config does, so a binary
-       whose first TLS contact is this connector cannot die on
-       No_default_generator (#28896). *)
-    Crypto_rng.ensure_default ();
-    match Ca_certs.authenticator () with
-    | Error (`Msg msg) -> https_error ("CA certs unavailable: " ^ msg)
-    | Error _ -> https_error "CA certs unavailable: unknown error"
-    | Ok authenticator -> (
-        match Tls.Config.client ~authenticator () with
-        | Error (`Msg msg) -> https_error ("TLS config error: " ^ msg)
-        | Ok tls_config ->
-            Ok
-              (fun uri
-                    (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
-                  ->
-                let flow =
-                  (raw :>
-                    [> Eio.Flow.two_way_ty | Eio.Resource.close_ty ]
-                    Eio.Resource.t)
-                in
-                let host =
-                  match Uri.host uri with
-                  | None -> None
-                  | Some h -> (
-                      match Domain_name.of_string h with
-                      | Ok d -> Some (Domain_name.host_exn d)
-                      | Error _ -> None)
-                in
-                match host with
-                | None -> raise (Invalid_argument "TLS host missing/invalid")
-                | Some host -> Tls_eio.client_of_flow tls_config ~host flow))
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> https_error ("HTTPS connector build failed: " ^ Printexc.to_string exn)
-
-let get_https_connector_result () =
-  match Atomic.get _https_connector_cache with
-  | Some result -> result
-  | None -> (
-      let result = build_https_connector_result () in
-      match Atomic.compare_and_set _https_connector_cache None (Some result) with
-      | true -> result
-      | false -> (
-          (* Another domain published while we were building; return the
-             winner to keep the process-global connector deterministic. *)
-          match Atomic.get _https_connector_cache with
-          | Some other -> other
-          | None -> result))

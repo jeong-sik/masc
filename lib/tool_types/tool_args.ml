@@ -222,9 +222,6 @@ let validation_error_assoc (errors : field_error list) : Yojson.Safe.t =
       ("message", `String (Printf.sprintf "%d field error(s)" (List.length errors)));
     ]
 
-let validation_error_response errors =
-  validation_error_assoc errors |> Yojson.Safe.to_string
-
 let validation_error_result ?tool_name ~start_time errors =
   let data = validation_error_assoc errors in
   let tool_name = Option.value ~default:"" tool_name in
@@ -256,15 +253,6 @@ let validate_string_required args field : (string, field_error) Result.t =
             message = Printf.sprintf "%s is required" field;
             expected = Some "string"; received = None }
 
-(** Validate that an integer field is present. *)
-let validate_int_required args field : (int, field_error) Result.t =
-  match Safe_ops.json_int_opt field args with
-  | Some i -> Ok i
-  | None ->
-    Error { field; constraint_violated = Required;
-            message = Printf.sprintf "%s is required" field;
-            expected = Some "integer"; received = None }
-
 (** Validate that an integer field (if present) is within [min, max]. *)
 let validate_int_range args field ~min_v ~max_v ~default : (int, field_error) Result.t =
   let v = get_int args field default in
@@ -279,16 +267,6 @@ let validate_int_range args field ~min_v ~max_v ~default : (int, field_error) Re
             expected = Some (Printf.sprintf "<= %d" max_v);
             received = Some (Int.to_string v) }
   else Ok v
-
-(** Validate that a string field (if present) is one of allowed values. *)
-let validate_one_of args field ~allowed ~default : (string, field_error) Result.t =
-  let v = get_string args field default in
-  if List.mem v allowed then Ok v
-  else
-    Error { field; constraint_violated = One_of allowed;
-            message = Printf.sprintf "%s must be one of: %s" field (String.concat ", " allowed);
-            expected = Some (String.concat "|" allowed);
-            received = Some v }
 
 (** Collect all field errors from a list of validation results.
     Returns [Ok values] if all pass, [Error field_errors] otherwise. *)

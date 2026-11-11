@@ -23,6 +23,9 @@ include Fs_compat_jsonl_read
 include Fs_compat_durable_append
 include Fs_compat_private_jsonl_transaction
 include Fs_compat_private_jsonl_write
+include Fs_compat_private_jsonl_guard
 include Fs_compat_private_jsonl_read
 include Fs_compat_private_file_update
 
+
+module Systhread_host = Fs_compat_internal.Systhread_host

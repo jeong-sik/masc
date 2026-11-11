@@ -102,19 +102,6 @@ let test_detect_dimensions_webp () =
     (Option.map dims_pair (Vd.detect_dimensions "RIFF\x00\x00\x00\x00WEBPVP8 "))
 ;;
 
-let test_needs_downscale () =
-  check bool "within bounds (1000, 800) with max 1568" false
-    (Vd.needs_downscale ~max_dimension:1568 (png_header 1000 800));
-  check bool "exact bounds (1568, 1568) with max 1568" false
-    (Vd.needs_downscale ~max_dimension:1568 (png_header 1568 1568));
-  check bool "exceeding width (2000, 1000) with max 1568" true
-    (Vd.needs_downscale ~max_dimension:1568 (png_header 2000 1000));
-  check bool "exceeding height (1000, 2000) with max 1568" true
-    (Vd.needs_downscale ~max_dimension:1568 (png_header 1000 2000));
-  check bool "unknown format returns false" false
-    (Vd.needs_downscale ~max_dimension:1568 "not-an-image")
-;;
-
 (* {1 Media types} *)
 
 let test_media_type_round_trip () =
@@ -545,8 +532,7 @@ let () =
             test_detect_dimensions_webp
         ] )
     ; ( "decision"
-      , [ test_case "needs_downscale bounds logic" `Quick test_needs_downscale
-        ; test_case "media type closed set round trip" `Quick test_media_type_round_trip
+      , [ test_case "media type closed set round trip" `Quick test_media_type_round_trip
         ; test_case "scaler plans shape" `Quick test_scaler_plans_shape
         ] )
     ; ( "downscale"

@@ -30,6 +30,11 @@ let fresh_test_base_path () =
   dir
 ;;
 
+let load_reactions store = match Board.reload_reactions store with
+  | Ok _ -> ()
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+;;
+
 let load_sources store =
   List.iter (fun load ->
     match load store with
@@ -38,7 +43,11 @@ let load_sources store =
       Alcotest.failf "board fixture load failed: %s (%s)" path (Printexc.to_string cause))
     [Masc_board_handlers.Board_votes_json.load_persisted_posts;
      Masc_board_handlers.Board_votes_json.load_persisted_comments;
-     Board.reload_sub_boards]
+     Board.reload_sub_boards];
+  (match Board.reload_votes store with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  load_reactions store
 ;;
 
 let posts_source_health store =
@@ -153,7 +162,7 @@ let test_loader_keeps_only_current_rows () =
     (Masc_board_handlers.Board_votes_json.load_persisted_posts loaded_store = Ok 0);
   Alcotest.(check int) "old post is not trusted after empty reload" 0 (Hashtbl.length loaded_store.posts);
   Alcotest.(check int) "old post count is cleared" 0 !(loaded_store.post_count);
-  let comment = match Board_core.add_comment source_store ~lookup:nobody_declared
+  let comment = match Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator source_store ~lookup:nobody_declared
       ~post_id:(Board.Post_id.to_string post.id) ~author:"fixture-author"
       ~content:"retained partial comment" ~ttl_hours:0 () with
     | Ok comment -> Board_core.comment_to_yojson comment
@@ -191,6 +200,8 @@ let test_loader_keeps_only_current_rows () =
     (Masc_board_handlers.Board_votes_json.load_persisted_comments expired_store = Ok 1);
   Alcotest.(check bool) "expired comments remain a complete source" true
     (comments_source_health expired_store = Ok ());
+  ignore (Result.get_ok (Board.reload_votes expired_store));
+  load_reactions expired_store;
   Alcotest.(check (pair int int)) "sweeper owns expiry after reload" (1, 1)
     (Board_core.sweep expired_store)
 ;;
@@ -256,7 +267,7 @@ let test_partial_load_never_rewrites_the_file () =
   in
   let make_comment ~post_id content =
     match
-      Board_core.add_comment source_store ~lookup:nobody_declared ~post_id ~author:"partial-writer" ~content
+      Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator source_store ~lookup:nobody_declared ~post_id ~author:"partial-writer" ~content
         ~ttl_hours:0 ()
     with
     | Ok comment -> comment
@@ -292,6 +303,8 @@ let test_partial_load_never_rewrites_the_file () =
     (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
   Alcotest.(check bool) "comments load reports the damage" true
     (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_comments store));
+  ignore (Result.get_ok (Board.reload_votes store));
+  load_reactions store;
   Alcotest.(check bool) "posts after the damaged line are still served" true
     (Result.is_ok (Board_core.read_post store ~post_id:(Board.Post_id.to_string after.id)));
   let observed = match Board_core.observe_comments store
@@ -335,7 +348,7 @@ let test_partial_load_never_rewrites_the_file () =
       Board.save_comments_snapshot store snapshot)));
   unchanged "direct save";
   Alcotest.(check bool) "delete is refused before it touches memory" true
-    (Result.is_error (Board.delete_post store ~post_id:before_id));
+    (Result.is_error (Board.delete_post store ~authorization:Board.Operator_deletion ~post_id:before_id));
   Alcotest.(check bool) "the post is still in memory" true
     (Result.is_ok (Board_core.read_post store ~post_id:before_id));
   unchanged "delete";
@@ -466,10 +479,10 @@ let test_all_persistence_stays_in_captured_workspace () =
       let b = post_ok (Board.create_post store_b ~lookup:nobody_declared ~author:"b-owner"
         ~content:"B must survive untouched" ~post_kind:Board.Human_post ()) in
       let bid = Board.Post_id.to_string b.id in
-      ignore (board_ok (Board.add_comment store_b ~lookup:nobody_declared ~post_id:bid
+      ignore (board_ok (Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store_b ~lookup:nobody_declared ~post_id:bid
         ~author:"b-reader" ~content:"B comment" ~ttl_hours:0 ()));
-      ignore (board_ok (Board.vote store_b ~voter:"b-voter" ~post_id:bid ~direction:Board.Up));
-      ignore (board_ok (Board.toggle_reaction store_b ~target_type:Board.Reaction_post
+      ignore (board_ok (Board.vote store_b ~reader:Masc_board_handlers.Board_access.Operator ~voter:"b-voter" ~post_id:bid ~direction:Board.Up));
+      ignore (board_ok (Board.toggle_reaction store_b ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
         ~target_id:bid ~user_id:"b-reader" ~emoji:"🚀"));
       ignore (board_ok (Board.create_sub_board store_b ~slug:"b-room" ~name:"B room"
         ~description:"independent policy" ~owner:"b-owner" ()));
@@ -487,11 +500,11 @@ let test_all_persistence_stays_in_captured_workspace () =
       let post = post_ok (Board_dispatch.create_post ~author:"a-owner" ~content:"A post"
         ~hearth:"a-room" ~post_kind:Board.Human_post ()) in
       let pid = Board.Post_id.to_string post.id in
-      let comment = board_ok (Board_dispatch.add_comment ~post_id:pid ~author:"a-reader"
+      let comment = board_ok (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid ~author:"a-reader"
         ~content:"A comment" ~ttl_hours:0 ()) in
       let cid = Board.Comment_id.to_string comment.id in
-      ignore (board_ok (Board_dispatch.vote ~voter:"a-voter" ~post_id:pid ~direction:Board.Up));
-      ignore (board_ok (Board_dispatch.vote_comment ~voter:"a-voter" ~comment_id:cid
+      ignore (board_ok (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator ~voter:"a-voter" ~post_id:pid ~direction:Board.Up));
+      ignore (board_ok (Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"a-voter" ~comment_id:cid
         ~direction:Board.Down));
       ignore (board_ok (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
         ~target_id:pid ~user_id:"a-reader" ~emoji:"🚀"));
@@ -530,9 +543,10 @@ let test_all_persistence_stays_in_captured_workspace () =
         [Board.Reaction_post, pid; Board.Reaction_comment, cid];
       let room = board_ok (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:room_id) in
       Alcotest.(check bool) "updated policy reloaded" true (room.access = Board.Members_only);
-      ignore (board_ok (Board_dispatch.delete_sub_board ~sub_board_id:room_id));
-      (match board_ok (Board_dispatch.delete_post ~post_id:pid) with
+      ignore (board_ok (Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:room_id));
+      (match board_ok (Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id:pid) with
        | Board.Durable_deletion -> ()
+       | Board.Deletion_decision_pending detail -> Alcotest.fail detail
        | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
       Board.flush_dirty reloaded;
       b_unchanged "after deletion under EnvB";
@@ -572,7 +586,7 @@ let test_a_vote_does_not_move_updated_at_back () =
   Hashtbl.replace store.posts post_id
     { post with updated_at = edited_at; content_updated_at = edited_at };
   (match
-     Masc_board_handlers.Board_votes.vote store ~voter:"fixture-voter" ~post_id
+     Masc_board_handlers.Board_votes.vote store ~reader:Masc_board_handlers.Board_access.Operator ~voter:"fixture-voter" ~post_id
        ~direction:Board.Up
    with
    | Ok _ -> ()

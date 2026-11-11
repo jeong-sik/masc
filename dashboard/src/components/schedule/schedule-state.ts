@@ -14,12 +14,12 @@ import type {
   DashboardScheduledAutomationProjection,
 } from '../../api/dashboard'
 import { createManagedAsyncResource } from '../../lib/async-state'
-import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 
 // Managed (stale-while-revalidate) for the same reason tool-state is: the
 // surfaces poll on a timer, and a plain resource would blank the projection on
 // every cycle. The schedule-specific load wrapper below adds single-flight
-// semantics so a slow request is never aborted by the next polling tick.
+// semantics so a slow read retains the last snapshot until the next committed change.
 const scheduledAutomationResource =
   createManagedAsyncResource<DashboardScheduledAutomationProjection>()
 
@@ -52,13 +52,14 @@ export function loadScheduledAutomation(
     if (!fresh) return loadInFlight
     if (freshLoadQueued) return freshLoadQueued
 
-    freshLoadQueued = loadInFlight
+    const queued: Promise<void> = loadInFlight
       .catch(() => undefined)
-      .then(() => loadScheduledAutomation())
+      .then(() => freshLoadQueued === queued ? loadScheduledAutomation() : undefined)
       .finally(() => {
-        freshLoadQueued = null
+        if (freshLoadQueued === queued) freshLoadQueued = null
       })
-    return freshLoadQueued
+    freshLoadQueued = queued
+    return queued
   }
 
   let request: Promise<void>
@@ -72,26 +73,20 @@ export function loadScheduledAutomation(
   return request
 }
 
-export const SCHEDULED_AUTOMATION_REFRESH_MS = 15_000
+function cancelScheduledAutomationRead(): void {
+  scheduledAutomationResource.cancel()
+  loadInFlight = null
+  freshLoadQueued = null
+}
 
 let subscriberCount = 0
 let stopRefresh: (() => void) | null = null
 
-/** Share one visibility-aware poller across every mounted surface that shows
- *  schedule state, so two mounted surfaces do not run two timers. */
+/** Share one schedule observation across mounted surfaces. */
 export function subscribeScheduledAutomationRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    const projection = scheduledAutomationProjection.value
-    if (
-      (!projection || projection.state === 'unavailable')
-      && !scheduledAutomationLoading.value
-    ) {
-      void loadScheduledAutomation()
-    }
-    stopRefresh = setupVisibleAutoRefresh(() => {
-      void loadScheduledAutomation()
-    }, SCHEDULED_AUTOMATION_REFRESH_MS)
+    stopRefresh = setupObservationRefresh(() => loadScheduledAutomation(), { topics: ['scheduled_automation'], readError: () => scheduledAutomationResource.readError(), cancelRead: cancelScheduledAutomationRead, resetRead: () => { cancelScheduledAutomationRead(); scheduledAutomationResource.reset() } })
   }
   return () => {
     subscriberCount -= 1

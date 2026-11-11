@@ -23,26 +23,13 @@ let same_agent_id left right =
   String.equal (Board.Agent_id.to_string left) (Board.Agent_id.to_string right)
 ;;
 
-let require_post_author ~reader ~action ~post_id ~author =
-  match Board_dispatch.get_post ~reader ~post_id with
-  | Error _ as err -> err
-  | Ok post ->
-    if same_agent_id post.Board.author author
-    then Ok ()
-    else
-      Error
-        (Board.Unauthorized
-           (Printf.sprintf
-              "agent %s cannot %s post %s owned by %s"
-              (Board.Agent_id.to_string author)
-              action
-              post_id
-              (Board.Agent_id.to_string post.author)))
-;;
-
 let board_moderators_from_toml ~missing contents =
+  (* A malformed moderator configuration is an operator-side fault: no change
+     to the Board call arguments can repair it, so it travels as [Io_error]
+     (runtime failure at the tool boundary), not [Validation_error] (which
+     maps to a caller-correctable workflow rejection). *)
   let invalid reason =
-    Error (Board.Validation_error ("board.moderators configuration: " ^ reason))
+    Error (Board.Io_error ("board.moderators configuration: " ^ reason))
   in
   match Otoml.Parser.from_string_result contents with
   | Error _ -> invalid "runtime.toml is invalid TOML"
@@ -73,7 +60,7 @@ let default_board_moderators =
      | None -> Error (Board.Io_error "embedded runtime.toml is missing")
      | Some contents ->
        board_moderators_from_toml
-         ~missing:(Error (Board.Validation_error "embedded board.moderators is missing"))
+         ~missing:(Error (Board.Io_error "embedded board.moderators is missing"))
          contents)
 ;;
 
@@ -175,7 +162,7 @@ let handle_vote ~reader ~tool_name ~start_time args =
     (match Board.vote_direction_of_string_opt direction_str with
      | None -> invalid_vote_direction ~tool_name ~start_time direction_str
      | Some direction ->
-       (match Board_dispatch.vote ~voter ~post_id ~direction with
+       (match Board_dispatch.vote ~reader ~voter ~post_id ~direction with
         | Ok new_score ->
           let arrow = if direction = Board.Up then "↑" else "↓" in
           Tool_result.make_ok
@@ -228,8 +215,9 @@ let handle_stats ~reader ~tool_name ~start_time _args : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:stats ()
 ;;
 
-(** Search posts by keyword. *)
-let handle_search ~reader ~tool_name ~start_time args : Tool_result.result =
+(** Search posts by keyword. With compact=false the first hits are full and the
+    rest one line each once the full text would pass the call's inline ceiling. *)
+let handle_search ~reader ~result_boundary ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
@@ -252,28 +240,30 @@ let handle_search ~reader ~tool_name ~start_time args : Tool_result.result =
     else (
       (* A listing does not read threads; the stored count is its only
          source for how many replies each post has. *)
-      let fmt (post : Board.post) =
-        if compact
-        then Board_tool_format.format_post_compact ~replies:post.reply_count post
-        else Board_tool_format.format_post ~replies:post.reply_count post
+      let header = Printf.sprintf "'%s' 검색 결과 (%d개):\n\n" query (List.length results) in
+      let one_line (post : Board.post) =
+        Board_tool_format.format_post_compact ~replies:post.reply_count post
       in
-      let formatted = List.map fmt results in
-      let separator = if compact then "\n" else "\n---\n" in
-      Tool_result.make_ok
-        ~tool_name
-        ~start_time
-        ~data:
-          (`String
-             (Printf.sprintf
-                "'%s' 검색 결과 (%d개):\n\n%s"
-                query
-                (List.length results)
-                (String.concat separator formatted)))
-        ()))
+      let text =
+        if compact
+        then header ^ String.concat "\n" (List.map one_line results)
+        else
+          Board_tool_format.join_search_hits
+            ~max_bytes:(Tool_output.result_ceiling_bytes result_boundary)
+            ~header
+            (List.map
+               (fun (post : Board.post) ->
+                 { Board_tool_format.full =
+                     Board_tool_format.format_post ~replies:post.reply_count post
+                 ; one_line = one_line post
+                 })
+               results)
+      in
+      Tool_result.make_ok ~tool_name ~start_time ~data:(`String text) ()))
 ;;
 
 (** Vote on comment. *)
-let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
+let handle_comment_vote ~reader ~tool_name ~start_time args : Tool_result.result =
   let comment_id = get_string args "comment_id" "" in
   let voter = get_string args "voter" "anonymous" in
   match Safe_ops.json_string_opt "direction" args with
@@ -290,7 +280,7 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         "comment_id required"
     else (
-      match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
+      match Board_dispatch.vote_comment ~reader ~voter ~comment_id ~direction with
       | Ok score ->
         Tool_result.make_ok
           ~tool_name
@@ -471,16 +461,25 @@ let handle_delete ~reader ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"author" args with
     | Error e -> refused e
     | Ok author ->
-    match require_post_author ~reader ~action:"delete" ~post_id ~author with
-    | Error e -> refused e
-    | Ok () ->
-    match Board_dispatch.delete_post ~post_id with
+    match Board_dispatch.delete_post ~authorization:(Board.Author_deletion { reader; author }) ~post_id with
     | Ok Board.Durable_deletion ->
       Tool_result.make_ok
         ~tool_name
         ~start_time
         ~data:(`String (Printf.sprintf "Deleted post %s" post_id))
         ()
+    | Ok (Board.Deletion_decision_pending detail) ->
+      Tool_result.make_err
+        ~tool_name ~start_time
+        ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Effect_outcome_unknown
+        ~data:(`Assoc
+          [ "post_id", `String post_id
+          ; "applied", `Bool false
+          ; "persistence", `String "decision_pending"
+          ; "detail", `String detail
+          ])
+        "Deletion decision is pending. Do not repeat the deletion; check its state."
     | Ok (Board.Deletion_persistence_pending detail) ->
       Tool_result.make_err
         ~tool_name ~start_time
@@ -608,24 +607,16 @@ let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.resul
   let author_pattern = get_string_opt args "author_pattern" in
   let now = Time_compat.now () in
   let age_threshold = now -. (Stdlib.Float.of_int max_age_hours *. Masc_time_constants.hour) in
-  let title_needle = Option.map String.lowercase_ascii title_pattern in
-  let author_needle = Option.map String.lowercase_ascii author_pattern in
-  let matches_opt needle s =
-    match needle with
-    | None -> true
-    | Some n -> String_util.contains_substring (String.lowercase_ascii s) n
-  in
+  let conditions = Board.cleanup_conditions ~created_before:age_threshold
+    ~require_no_comments ~require_no_votes ~title_pattern ~author_pattern in
   let all_posts =
     Board_dispatch.list_posts ~reader ~sort_by:Board_tool_format.Recent ~limit:500 ()
   in
   let candidates =
     List.filter
       (fun (p : Board.post) ->
-         Stdlib.Float.compare p.created_at age_threshold < 0
-         && ((not require_no_comments) || p.reply_count = 0)
-         && ((not require_no_votes) || (p.votes_up = 0 && p.votes_down = 0))
-         && matches_opt title_needle p.title
-         && matches_opt author_needle (Board.Agent_id.to_string p.author))
+         Board.cleanup_candidate ~conditions ~has_comments:(p.reply_count <> 0)
+           ~has_votes:(p.votes_up <> 0 || p.votes_down <> 0) p)
       all_posts
   in
   let targets = List.filteri (fun i _ -> i < limit) candidates in
@@ -673,14 +664,19 @@ let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.resul
   else (
     let deleted = ref 0 in
     let persistence_pending = ref [] in
+    let decision_pending = ref [] in
     let failed = ref 0 in
     let unknown_failures = ref 0 in
     List.iter
       (fun (p : Board.post) ->
          let pid = Board.Post_id.to_string p.id in
          try
-           match Board_dispatch.delete_post ~post_id:pid with
+           match Board_dispatch.delete_post
+             ~authorization:(Board.Cleanup_deletion { reader; conditions }) ~post_id:pid with
            | Ok Board.Durable_deletion -> Stdlib.incr deleted
+           | Ok (Board.Deletion_decision_pending detail) ->
+             decision_pending :=
+               (`Assoc ["post_id", `String pid; "detail", `String detail]) :: !decision_pending
            | Ok (Board.Deletion_persistence_pending detail) ->
              persistence_pending :=
                (`Assoc ["post_id", `String pid; "detail", `String detail])
@@ -694,9 +690,10 @@ let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.resul
       targets;
     let message =
       Printf.sprintf
-        "Cleanup done: %d durable deletions, %d persistence pending, %d failed (scanned %d, age>%dh)"
+        "Cleanup done: %d durable deletions, %d persistence pending, %d decisions pending, %d failed (scanned %d, age>%dh)"
         !deleted
         (List.length !persistence_pending)
+        (List.length !decision_pending)
         !failed
         (List.length all_posts)
         max_age_hours
@@ -705,20 +702,25 @@ let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.resul
       if !persistence_pending = [] then message
       else message ^ ". Pending deletions are already applied; do not repeat them."
     in
+    let message =
+      if !decision_pending = [] then message
+      else message ^ ". Decision outcomes are pending; do not repeat these deletions."
+    in
     let data =
       `Assoc
         [ "message", `String message
         ; "durable_deletions", `Int !deleted
         ; "persistence_pending", `List (List.rev !persistence_pending)
+        ; "decision_pending", `List (List.rev !decision_pending)
         ; "failed", `Int !failed
         ; "refused_deletions", `Int (!failed - !unknown_failures)
-        ; "outcome_unknown", `Int !unknown_failures
+        ; "outcome_unknown", `Int (!unknown_failures + List.length !decision_pending)
         ]
     in
-    if !failed > 0 || !persistence_pending <> []
+    if !failed > 0 || !persistence_pending <> [] || !decision_pending <> []
     then
       let effect_disposition =
-        if !unknown_failures > 0 then Tool_result.Effect_outcome_unknown
+        if !unknown_failures > 0 || !decision_pending <> [] then Tool_result.Effect_outcome_unknown
         else if !deleted > 0 || !persistence_pending <> [] then Tool_result.Proven_post_effect
         else Tool_result.Proven_pre_effect
       in

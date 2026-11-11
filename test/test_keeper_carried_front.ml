@@ -299,11 +299,12 @@ let composer_t =
 let test_the_composer_is_read_from_the_execution_kind () =
   let agent_core =
     Runtime_execution.Agent_core
-      (Agent_core.Llm_provider.Provider_config.make
-         ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
-         ~model_id:"model-a"
-         ~base_url:"https://provider.example"
-         ())
+      (Runtime_account_access.seal_api
+         (Agent_core.Llm_provider.Provider_config.make
+            ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
+            ~model_id:"model-a"
+            ~base_url:"https://provider.example"
+            ()))
   in
   check composer_t "agent core composes from the history" Front.Composes_from_the_history
     (Front.composer_of_execution agent_core);

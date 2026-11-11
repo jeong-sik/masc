@@ -520,31 +520,6 @@ type context_observation =
 
 let ( let* ) = Result.bind
 
-let decode_status json =
-  match member "status" json with
-  | `String s -> Ok s
-  | `List (`String s :: _) -> Ok s
-  | `List [] -> Error "field 'status' list must not be empty"
-  | `List (bad :: _) ->
-      Error
-        (Printf.sprintf
-           "field 'status' list head must be a string (received %s)"
-           (Json_util.kind_name bad))
-  | `Null -> Error "missing required field 'status'"
-  | other ->
-      Error
-        (Printf.sprintf
-           "field 'status' must be a string or non-empty string array \
-            (received %s)"
-           (Json_util.kind_name other))
-
-let decode_agent json =
-  let* name = Json_util.require_string json "name" in
-  let* status = decode_status json in
-  let* current_task = optional_string json "current_task" in
-  let* last_seen = Json_util.require_string json "last_seen" in
-  Ok { name; status; current_task; last_seen }
-
 let task_of_domain ?(goal_ids = []) (task : Masc_domain.task) =
   {
     id = task.id;
@@ -1066,21 +1041,6 @@ let decode_context_observation ~expected_trace_id json =
         (Printf.sprintf
            "field 'context_metrics_unavailable' must be an object or null (received %s)"
            (Json_util.kind_name other))
-
-let trim = String.trim
-
-let split_headers_body response =
-  let marker = "\r\n\r\n" in
-  let rec find idx =
-    if idx + String.length marker > String.length response then None
-    else if String.sub response idx (String.length marker) = marker then
-      Some (idx + String.length marker)
-    else
-      find (idx + 1)
-  in
-  match find 0 with
-  | Some idx -> Some (String.sub response idx (String.length response - idx))
-  | None -> None
 
 let is_success_http_status status_code = status_code >= 200 && status_code < 300
 
@@ -5068,18 +5028,6 @@ let keeper_current_activity_of_turn = function
        | Keeper_turn_preview.Failed -> Keeper_activity_attempt_failed)
   | Keeper_turn_running _ -> Keeper_activity_running
 
-let keeper_failure_status_of_readings ~health ~turn ~runtime =
-  match health with
-  | Some value when keeper_health_reading value = Health_failing ->
-      Some
-        { kfs_current_activity =
-            (match turn with
-             | Some state -> keeper_current_activity_of_turn state
-             | None -> Keeper_activity_unknown)
-        ; kfs_last_failure = Option.bind runtime (fun row -> row.kr_last_failure)
-        }
-  | None | Some _ -> None
-
 let decode_keeper_turn_row json =
   let* ktr_keeper_name = required_string_field json "keeper_name" in
   let* ktr_chat_control_token = match Json_util.assoc_member_opt "chat_control_token" json with
@@ -5426,6 +5374,10 @@ module Canonical_path = struct
   let is_empty path = String.equal path ""
 end
 
+type operator_action_observation =
+  | Operator_actions_observed of Operator_action_reason.t list
+  | Operator_actions_unavailable of { diagnostics : string list; error : string }
+
 type server_identity = {
   sid_version : string;
   sid_binary_commit : string;
@@ -5439,7 +5391,7 @@ type server_identity = {
   sid_sse_clients : int option;
   sid_gc : server_gc_health option;
   sid_scheduler : server_scheduler_health option;
-  sid_operator_action : string list option;
+  sid_operator_action : operator_action_observation option;
 }
 
 (* [/health] answers before the workspace is fully up, so every field here is
@@ -5563,7 +5515,11 @@ let decode_server_identity json =
         List.filter_map (function `String reason -> Some reason | _ -> None) values
       in
       if List.length reasons = List.length values && Bool.equal required (reasons <> [])
-      then Some reasons
+      then
+        (match Operator_action_reason.read_collection ~diagnostics:reasons
+                 (member "operator_actions" json) with
+         | Ok actions -> Some (Operator_actions_observed actions)
+         | Error error -> Some (Operator_actions_unavailable {diagnostics=reasons;error}))
       else None
     | _ -> None
   in
@@ -7219,114 +7175,6 @@ let decode_lane_run_detail json =
     ; lrd_decision
     }
 ;;
-
-let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
-    ~(parent_id_of : 'a -> string option) (items : 'a list) (item : 'a) : int =
-  let module StringSet = Set.Make (String) in
-  let rec loop seen depth current =
-    if depth >= max_depth then depth
-    else
-      match parent_id_of current with
-      | None -> depth
-      | Some parent_id when StringSet.mem parent_id seen -> depth
-      | Some parent_id -> (
-          match List.find_opt (fun candidate -> id_of candidate = parent_id) items with
-          | Some parent ->
-              loop (StringSet.add parent_id seen) (depth + 1) parent
-          | None -> depth)
-  in
-  loop (StringSet.singleton (id_of item)) 0 item
-
-type chat_event =
-  | Delta of string
-  | Complete of string
-  | Ignore
-
-let decode_chat_event json =
-  let event_type = get_string json "type" in
-  match event_type with
-  | Some ("TEXT_MESSAGE_CONTENT" | "content_delta" | "delta") -> (
-      match get_string json "delta" with
-      | Some text -> Ok (Delta text)
-      | None -> Error "delta event missing string 'delta'")
-  | Some ("RUN_FINISHED" | "content_complete" | "complete") -> (
-      match get_string json "text" with
-      | Some text -> Ok (Complete text)
-      | None -> Ok (Complete ""))
-  | Some "RUN_ERROR" -> (
-      match get_string json "message" with
-      | Some message -> Error message
-      | None -> (
-          match get_object json "error" with
-          | Some err_json -> (
-              match get_string err_json "message" with
-              | Some message -> Error message
-              | None -> Error "RUN_ERROR payload missing string 'message'")
-          | None -> Error "RUN_ERROR payload missing string 'message'"))
-  | _ -> (
-      match get_object json "error" with
-      | Some err_json -> (
-          match get_string err_json "message" with
-          | Some message -> Error message
-          | None -> Error "error payload missing string 'message'")
-      | None -> Ok Ignore)
-
-let parse_keeper_chat_response response =
-  let body =
-    if String.starts_with ~prefix:"HTTP/" response then
-      match split_headers_body response with
-      | Some body -> body
-      | None -> response
-    else response in
-  let payloads = Sse_wire.data_payloads_of_stream body in
-  let result = Buffer.create 256 in
-  let completion_text = ref None in
-  let saw_terminal = ref false in
-  let rec consume_sse = function
-    | [] -> Ok ()
-    | raw_payload :: rest ->
-        let payload = trim raw_payload in
-        if payload = "" then consume_sse rest
-        else if payload = "[DONE]" then (saw_terminal := true; consume_sse rest)
-        else
-          let* json =
-            try Ok (Yojson.Safe.from_string payload)
-            with Yojson.Json_error msg -> Error ("invalid SSE JSON payload: " ^ msg) in
-          let* chunk = decode_chat_event json in
-          (match chunk with
-           | Delta text -> Buffer.add_string result text
-           | Complete text when Buffer.length result = 0 ->
-               saw_terminal := true;
-               if text <> "" then completion_text := Some text
-           | Complete _ -> saw_terminal := true
-           | Ignore -> ());
-          consume_sse rest
-  in
-  let* () = consume_sse payloads in
-  if Buffer.length result > 0 then
-    Ok (Buffer.contents result)
-  else
-    match !completion_text with
-    | Some text when text <> "" -> Ok text
-    | _ when !saw_terminal -> Ok ""
-    | _ -> (
-            let* json =
-              try Ok (Yojson.Safe.from_string (trim body))
-              with Yojson.Json_error msg ->
-                Error ("invalid response JSON: " ^ msg)
-            in
-            match get_object json "result" with
-            | Some result_json -> (
-                match get_string result_json "text" with
-                | Some text when text <> "" -> Ok text
-                | _ -> Error "response JSON missing result.text")
-            | None -> (
-                match get_object json "error" with
-                | Some err_json -> (
-                    match get_string err_json "message" with
-                    | Some message -> Error message
-                    | None -> Error "response JSON missing error.message")
-                | None -> Error "response JSON missing result"))
 
 type transport_health = {
   th_primary_path : Transport_metrics.primary_path_kind;

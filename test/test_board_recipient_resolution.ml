@@ -164,7 +164,7 @@ let test_a_comment_resolves_the_same_way =
     let { Board.post; _ } = creation (write "thread root") in
     let comment, unresolved =
       get
-        (Board_dispatch.add_comment_with_unresolved
+        (Board_dispatch.add_comment_with_unresolved ~reader:Masc_board_handlers.Board_access.Operator
            ~post_id:(post_id post)
            ~author:"other"
            ~content:"@a-team ping, not @check"
@@ -218,7 +218,7 @@ let test_a_lookup_failure_refuses_the_write_and_stores_nothing =
     check string "the post is as it was" "original text, no address" unchanged.body;
     check bool "the edit reached no disk" false (persisted_text_contains "zzmarker-edit");
     (match
-       Board_dispatch.add_comment_with_unresolved
+       Board_dispatch.add_comment_with_unresolved ~reader:Masc_board_handlers.Board_access.Operator
          ~post_id:(post_id post)
          ~author:"other"
          ~content:"@broken ping zzmarker-comment"
@@ -303,7 +303,7 @@ let test_the_write_asks_once_and_the_signal_carries_that_answer =
     armed := true;
     let comment, _ =
       get
-        (Board_dispatch.add_comment_with_unresolved
+        (Board_dispatch.add_comment_with_unresolved ~reader:Masc_board_handlers.Board_access.Operator
            ~post_id:(post_id post)
            ~author:"other"
            ~content:"@a-team ping"
@@ -396,7 +396,7 @@ let test_no_write_asks_the_lookup_while_a_lock_is_held =
     ignore (creation (write "@alice a new post"));
     ignore
       (get
-         (Board_dispatch.add_comment_with_unresolved
+         (Board_dispatch.add_comment_with_unresolved ~reader:Masc_board_handlers.Board_access.Operator
             ~post_id:(post_id post)
             ~author:"other"
             ~content:"@bob a comment"
@@ -776,7 +776,7 @@ let test_a_comment_during_the_lookup_does_not_make_the_edit_ask_again =
       (fun () ->
          ignore
            (get
-              (Board_dispatch.add_comment_with_unresolved
+              (Board_dispatch.add_comment_with_unresolved ~reader:Masc_board_handlers.Board_access.Operator
                  ~post_id:(post_id post)
                  ~author:"other"
                  ~content:"a plain comment"

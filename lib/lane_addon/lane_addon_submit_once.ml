@@ -94,7 +94,12 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~decode_f
         Error (Rejected ("Original " ^ label ^ " work requires its configured installation")) in
     Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread (fun () ->
       Exact.recover_retained ~store ~declaration_id ~schema request))
-    |> Result.map_error (fun detail -> Unavailable detail) in
+    |> Result.map_error (function
+         (* A record that exists but is not a trustworthy original can never
+            become one by waiting, so it is refused. Only a record this read
+            could not reach stays a retryable unavailability. *)
+         | Exact.Recovery_invalid detail -> Rejected detail
+         | Exact.Recovery_unavailable detail -> Unavailable detail) in
   let observe (original : Owner.retained) reason observation evidence =
     let observation = observation evidence in
     match Progress.phase original.progress with

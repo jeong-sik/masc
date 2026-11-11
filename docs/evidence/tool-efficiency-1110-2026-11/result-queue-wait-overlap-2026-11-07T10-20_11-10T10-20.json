@@ -1,0 +1,82 @@
+{
+  "window": [
+    "2026-11-07T10:20:00+00:00",
+    "2026-11-10T10:20:00+00:00"
+  ],
+  "hold_seconds": 60.0,
+  "files": 56,
+  "skipped": {
+    "bad_lines": 0
+  },
+  "holds": {
+    "calls": 676,
+    "keepers": 23,
+    "hours": 38.69,
+    "hours_with_a_waiting_operation": 6.473,
+    "share_with_a_waiting_operation": 0.1673
+  },
+  "queue_wait": {
+    "operations": 820,
+    "hours_all_keepers": 110.367,
+    "hours_holding_keepers": 107.736
+  },
+  "overlap": {
+    "hours": 12.383,
+    "share_of_all_keepers": 0.1122,
+    "share_of_holding_keepers": 0.1149
+  },
+  "top_keepers": [
+    {
+      "keeper": "rondo",
+      "overlap_hours": 5.808,
+      "hold_calls": 166,
+      "held_hours": 10.194,
+      "held_hours_with_a_waiting_operation": 3.852,
+      "queue_wait_hours": 10.788
+    },
+    {
+      "keeper": "code-reviewer-father",
+      "overlap_hours": 3.584,
+      "hold_calls": 30,
+      "held_hours": 1.785,
+      "held_hours_with_a_waiting_operation": 0.702,
+      "queue_wait_hours": 37.688
+    },
+    {
+      "keeper": "code-reviewer-brother",
+      "overlap_hours": 1.497,
+      "hold_calls": 28,
+      "held_hours": 1.667,
+      "held_hours_with_a_waiting_operation": 0.607,
+      "queue_wait_hours": 7.744
+    },
+    {
+      "keeper": "code-reviewer",
+      "overlap_hours": 0.676,
+      "hold_calls": 88,
+      "held_hours": 3.392,
+      "held_hours_with_a_waiting_operation": 0.676,
+      "queue_wait_hours": 2.612
+    },
+    {
+      "keeper": "context-reviewer",
+      "overlap_hours": 0.214,
+      "hold_calls": 12,
+      "held_hours": 0.393,
+      "held_hours_with_a_waiting_operation": 0.078,
+      "queue_wait_hours": 15.792
+    },
+    {
+      "keeper": "code-reviewer-mother",
+      "overlap_hours": 0.207,
+      "hold_calls": 23,
+      "held_hours": 0.82,
+      "held_hours_with_a_waiting_operation": 0.184,
+      "queue_wait_hours": 10.647
+    }
+  ],
+  "keepers_with_holds_and_no_store": [],
+  "unreadable_stores": [
+    "tool_usage"
+  ]
+}

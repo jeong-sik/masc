@@ -29,6 +29,11 @@ val create : ?interval_s:float -> ?window:int -> unit -> t
 val global : t
 (** The process-wide probe the server starts on its main domain. *)
 
+val serving : t
+(** The probe the server starts on its HTTP serving domain. A server whose
+    connections run on the main domain never starts it, so its [probe] field
+    stays "not_started" there. *)
+
 type summary =
   { samples : int
   ; p50_ms : float

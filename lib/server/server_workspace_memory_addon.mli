@@ -141,6 +141,7 @@ val settle_chains : config:Workspace.config -> Workspace_memory_execution_captur
     workspace process lease and serializes the entire pass. *)
 type observation = {
   original : Lane_addon_tool_request_owner.retained;
+  capture : Workspace_memory_execution_capture.t;
   registration : Workspace_memory_observation_receipt.registration;
   completion : Workspace_memory_observation_receipt.completion option;
 }

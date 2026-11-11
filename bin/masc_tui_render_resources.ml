@@ -194,7 +194,10 @@ let render_resources (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let split = resource_split state ~cols in
-  pane_surface_header buf cols state ~name:"Artifacts / Resources" ~split;
+  if not split then box_top buf cols;
+  box_line buf cols
+    (feature_child_heading state ~cols
+      ~title:(ui_text state ~ko:"리소스" ~en:"Resources"));
   let pane_rows = max 0 (pane_surface_content_height ~rows - save_prompt_height state) in
   Option.iter (fun prompt ->
     let input = prompt.rsp_path in
@@ -203,9 +206,20 @@ let render_resources (state : state) =
     let visible, cursor = Masc_tui_message_layout.input_window
       ~max_cells:(max 0 (cols - 10)) ~cursor:(String.length before) text in
     let left, right = Masc_tui_message_layout.split_at_cells visible cursor in
-    box_line buf cols ("Save original · " ^ Masc_tui_resource_export.label prompt.rsp_document);
+    box_line buf cols (ui_text state ~ko:"원본 파일 저장 · " ~en:"Save original · "
+      ^ Terminal_text.single_line (resource_save_document_title prompt.rsp_document));
     box_line buf cols ("Path: " ^ left ^ Ansi.reverse ^ " " ^ Ansi.reset ^ right);
-    box_line buf cols "Enter: create file · Ctrl-U: clear path · Esc: cancel · existing files are preserved")
+    let notice = match prompt.rsp_error with
+      | Some detail -> Theme.warn () ^ Terminal_text.single_line detail ^ Ansi.reset
+      | None ->
+        (match resource_save_prompt_receipt state prompt with
+         | Some receipt -> resource_save_summary state receipt.save_phase
+         | None when resource_save_pending_for_prompt state prompt ->
+             ui_text state ~ko:"기존 저장 요청 진행 중 · 결과는 본문에서 확인"
+               ~en:"An earlier save is pending · read its result below"
+         | None -> ui_text state ~ko:"경로 입력 중 · 이 입력은 아직 제출하지 않았습니다"
+             ~en:"Editing the path · this input has not been submitted") in
+    box_line buf cols notice)
     state.resource_save_prompt;
   let rows_list =
     match visible_resources state with Some rows -> rows | None -> []
@@ -394,7 +408,10 @@ let render_resources (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints_resources
-            ~detail_focus:(state.resource_focus = Right_pane)));
+         (match state.resource_save_prompt with
+          | Some prompt -> Masc_tui_keys.footer_hints_resource_save
+              ~pending:(resource_save_pending_for_prompt state prompt)
+          | None -> Masc_tui_keys.footer_hints_resources
+              ~detail_focus:(state.resource_focus = Right_pane)));
   finish_surface state ~clamped:(Resource_scroll !drawn_resource_scroll)
     ~surface_key:"resources" ~rows:terminal_rows ~cols buf

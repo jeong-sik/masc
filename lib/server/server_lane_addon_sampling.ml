@@ -157,7 +157,13 @@ let attempt ~sw ~net ~runtime_id ~runtime params =
   match runtime with
   | None -> Error (Runtime_unavailable ("configured candidate is unavailable: " ^ runtime_id))
   | Some runtime -> match runtime.Runtime_instance.execution with
-      | Runtime_execution.Agent_core provider -> native_attempt ~sw ~net ~runtime ~provider params
+      | Runtime_execution.Agent_core sealed ->
+        (* HIGH-RISK-UNREVIEWED: the sample sends the key the operator declared
+           (plan D4). *)
+        (match Runtime_account_access.authorize_api sealed with
+         | Error refusal ->
+           Error (Runtime_unavailable (Runtime_account_access.refusal_to_string refusal))
+         | Ok provider -> native_attempt ~sw ~net ~runtime ~provider params)
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
       | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _
       | Runtime_execution.Vibe_cli _ ->

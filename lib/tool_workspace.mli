@@ -38,12 +38,6 @@ type assertion_kind = Workspace_assertions.assertion_kind =
 
 (** {1 Dispatch} *)
 
-(** Tool names routed by {!dispatch}.  This list is derived from the
-    same binding table used by runtime dispatch, so schema/registry
-    tests can fail when a workspace schema is exposed without a handler
-    route or a handler route is added without a schema. *)
-val dispatchable_names : string list
-
 (** [dispatch ctx ~name ~args] routes [name] to the appropriate
     private handler ([handle_status], [handle_check], [handle_heartbeat],
     or a goal handler).  Returns [None] when [name] is not a

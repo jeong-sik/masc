@@ -13,6 +13,8 @@ module Descent = Keeper_librarian_floor_descent
 module Floor_chain = Keeper_librarian_floor_chain
 module Floor_cleanup = Keeper_librarian_floor_cleanup
 module Floor_publish = Keeper_librarian_floor_publish
+module Resolution_lineage = Keeper_librarian_history_resolution_lineage
+module Resolution_work = Keeper_librarian_history_resolution_work
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 let require condition detail = if condition then Ok () else Error detail
@@ -128,7 +130,7 @@ let completed_outcome request =
     Consumer.Official_advanced {atom;official={Keeper_librarian_official_progress.boundary_line}}
   | None,Some progress -> Consumer.Progress_advanced progress
   | None,None -> Consumer.Nothing_to_read
-let validate_lineage originals =
+let validate_lineage ~store originals =
   let find id=List.find_opt (fun ((record:Retained.retained),_) -> record.request_id=id) originals in
   let predecessors=List.filter_map (fun (_,request) -> Request.predecessor request) originals in
   let parent_ids=List.map (fun (parent:Request.predecessor) -> parent.request_id) predecessors in
@@ -143,6 +145,11 @@ let validate_lineage originals =
         (find predecessor.request_id) in
       let* ()=require (parent.request_digest=predecessor.request_digest && parent.request_id<>child.request_id)
         "Original history predecessor identity changed" in
+      let* fence=io (fun () -> Resolution_lineage.fenced_original ~store ~request:parent_request ~original:parent) in
+      (match fence with
+      | Some _ -> io (fun () -> Resolution_lineage.confirm_predecessor ~store
+          ~require_confirmed:(Progress.phase child.progress<>Progress.Captured) request)
+      | None ->
       let* superseded=Keeper_librarian_durable_commit.is_superseded ~request:parent_request ~record:parent in
       let* ()=require superseded "Original history successor has no known superseded basis" in
       let* intended,pending=match Progress.replacement parent.progress with
@@ -162,7 +169,7 @@ let validate_lineage originals =
         ~current:(Source.input child_source).current (Request.source parent_request)
         |> Result.map_error Source.error_to_string in
       require (Source.to_json expected=Source.to_json child_source)
-        "Original history successor changed its immutable source or acknowledgment frontier") (Ok ()) originals in
+        "Original history successor changed its immutable source or acknowledgment frontier")) (Ok ()) originals in
   let* ()=List.fold_left (fun result ((parent:Retained.retained),request) ->
     let* ()=result in match Progress.replacement parent.progress with
     | None -> Ok ()
@@ -184,11 +191,15 @@ let validate_lineage originals =
       ancestry (predecessor.request_id::seen) parent in
   let* ()=List.fold_left (fun result ((record:Retained.retained),request) ->
     let* ()=result in ancestry [record.request_id] request) (Ok ()) originals in
-  Ok (List.filter (fun ((record:Retained.retained),_) ->
+  let+ reversed=List.fold_left (fun result (((record:Retained.retained),request) as original) ->
+    let* values=result in
     match Progress.phase record.progress with
-    | Progress.Conflicted _ -> not (List.mem record.request_id parent_ids)
+    | Progress.Conflicted _ when not (List.mem record.request_id parent_ids) ->
+      let+ fence=io (fun () -> Resolution_lineage.fenced_original ~store ~request ~original:record) in
+      if Option.is_none fence then original::values else values
+    | Conflicted _
     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-    | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> false) originals)
+    | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok values) (Ok []) originals in List.rev reversed
 (* RFC-librarian-history-settles-finished-originals. A chain settles leaf
    first under the day its root was minted, as Workspace Curator chains do:
    each history record, then the gate records of that execution. Every body
@@ -312,7 +323,10 @@ let rec consume_one ~config ~keeper_name ~wake =
   let resume_original ((_,request) as original) =
     match resume ~store ~config ~reserved ~wake original with
     | Error detail -> error detail
-    | Ok (Owner.Finished _) -> Ok (completed_outcome request)
+    | Ok (Owner.Finished completed) ->
+      (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request ~completed with
+       | Ok () -> Ok (completed_outcome request)
+       | Error failure -> error (Keeper_librarian_history_resolution_intent.error_to_string failure))
     | Ok (Pending (wait, record)) ->
       Ok (Consumer.Pending (pending_worker wait record))
     | Ok (Publication_waiting detail) ->
@@ -327,6 +341,9 @@ let rec consume_one ~config ~keeper_name ~wake =
        | Error _ -> ()
        | Ok _ -> Consumer.mark_range_failed ~config ~keeper_name);
       refused in
+  match Resolution_work.run_serialized ~config ~keeper_name with
+  | Error failure -> error (Keeper_librarian_history_resolution_intent.error_to_string failure)
+  | Ok () ->
   (* Discovery does not initialize an epoch or create a replacement request.
      Any malformed old original fails the full inventory before fresh selection. *)
   let inventory_started=Mtime_clock.now () in
@@ -348,6 +365,10 @@ let rec consume_one ~config ~keeper_name ~wake =
           ~owner:(Request.physical_owner request)) in
         let* unfinished,settled=List.fold_left (fun result ((record,request) as original) ->
           let* unfinished,settled=result in
+          let* fence=io (fun () -> Resolution_lineage.fenced_original ~store ~request ~original:record) in
+          match fence with
+          | Some _ -> Ok (unfinished,settled)
+          | None ->
           let* frontier=io (fun () -> Commit.validate_inventory ~inventory ~store ~request ~record) in
           match frontier with
           | Commit.Unfinished -> Ok (original::unfinished,settled)
@@ -366,7 +387,7 @@ let rec consume_one ~config ~keeper_name ~wake =
          Keeper_librarian_durable_gate.Inventory.record_count inventory) observed)
       (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span inventory_started (Mtime_clock.now ())))
        /. 1_000_000.);
-    match validate_lineage originals with
+    match validate_lineage ~store originals with
     | Error detail -> error detail
     | Ok superseded ->
     match io (fun () -> Refusal.inventory (match observed with
@@ -497,7 +518,10 @@ let rec consume_one ~config ~keeper_name ~wake =
           | Ok original ->
             match resume ~store ~config ~reserved ~wake original with
             | Error detail -> stop detail
-            | Ok (Owner.Finished _) -> Consumer.Memory_committed
+            | Ok (Owner.Finished completed) ->
+              (match Resolution_work.record_completed_serialized ~config ~keeper_name ~request:(snd original) ~completed with
+               | Ok () -> Consumer.Memory_committed
+               | Error failure -> stop (Keeper_librarian_history_resolution_intent.error_to_string failure))
             | Ok (Pending (wait, record)) ->
               Consumer.Memory_pending (pending_worker wait record)
             | Ok (Publication_waiting detail) ->

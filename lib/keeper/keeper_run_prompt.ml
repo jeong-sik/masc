@@ -49,7 +49,10 @@ let assemble_extra_system_context = Keeper_context_assembly.assemble
    assembly drops the [Dynamic_context] it came from (#45853). Proof state
    remains visible too, but Agent Core keeps this recurring state out of the
    post-tool User tail by carrying it in the issued System. Official clients
-   retain their turn-scoped delivery, because their System outlives this turn. *)
+   retain their turn-scoped delivery of it, because their System outlives
+   this turn. The complete current norms ride the Agent Core System for the
+   same reason; an official client still receives them as the
+   [Constitution_amendments] block. *)
 let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) ~post_tool_round ~previous_assembly
     ~dynamic_context_partition ~existing_extra_system_context ~blocks =
   let observations, blocks, dynamic_context_partition, proof_state =
@@ -59,12 +62,15 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
       | Some (previous : Keeper_context_assembly.t) ->
         let observations = match previous.system_prompt with
           | None -> [] | Some issued -> issued.observations in
-        let observations = match previous.proof_state with
-          | None -> observations
-          | Some _ -> List.filter (function
-              | Keeper_context_assembly.Goals_awaiting_proof _ -> false
-              | Keeper_context_assembly.Active_goals _
-              | Keeper_context_assembly.Direct_input_source _ -> true) observations in
+        (* Proof state and the current norms are issued again below, from the
+           carried proof state and from [system], for the owner of this
+           request. A copy the previous round's System held is dropped. *)
+        let observations = List.filter (function
+            | Keeper_context_assembly.Current_norms _ -> false
+            | Keeper_context_assembly.Goals_awaiting_proof _ ->
+              Option.is_none previous.proof_state
+            | Keeper_context_assembly.Active_goals _
+            | Keeper_context_assembly.Direct_input_source _ -> true) observations in
         let carried = List.filter (fun (id, _) ->
             Prompt_block_id.equal id Prompt_block_id.Completion_authority
             || (Option.is_none previous.proof_state
@@ -112,12 +118,35 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
          observations, (Prompt_block_id.Goals_awaiting_proof, text) :: blocks)
     | None -> observations, blocks
   in
-  let amendments =
-    match List.filter_map Fun.id [system.amendments; system.current_norms] with
-    | [] -> []
-    | sections ->
-      [Prompt_block_id.Constitution_amendments,
-       Inference_utils.sanitize_text_utf8 (String.concat "\n" sections)] in
+  (* The complete current norms are the same text on every request of the
+     turn. Agent Core carries them in the issued System, in front of the
+     observations that change more often, so a request that follows tool
+     results still ends with those results. On a turn that has them, an
+     article write therefore changes the System a request sends, although
+     [system.text] stays equal (RFC-0491 §3.2). An official client keeps the
+     block: its projection sends a block the session holds again only when
+     the bytes change ([Prompt_block_id.resent_when_held]). A turn without
+     the complete list carries its delta as the end-context block for both
+     owners. *)
+  let constitution sections =
+    Inference_utils.sanitize_text_utf8 (String.concat "\n" sections) in
+  let observations, amendments =
+    match checkpoint_owner, system.current_norms with
+    | Runtime_execution.Masc_agent_core, Some norms ->
+      (* [Keeper_turn_system.with_current_norms] leaves no delta beside the
+         complete list. One that is there rides with it, in the order the
+         block joins the two. *)
+      ( Keeper_context_assembly.Current_norms
+          (constitution (Option.to_list system.amendments @ [ norms ]))
+        :: observations
+      , [] )
+    | Runtime_execution.Masc_agent_core, None
+    | Runtime_execution.Official_client, (Some _ | None) ->
+      (match Option.to_list system.amendments @ Option.to_list system.current_norms with
+       | [] -> observations, []
+       | sections ->
+         observations, [ Prompt_block_id.Constitution_amendments, constitution sections ])
+  in
   let blocks = amendments @ blocks
     |> List.filter (fun (id, _) -> not post_tool_round || Prompt_block_id.injected_on_post_tool_round id)
     |> List.stable_sort (fun (left, _) (right, _) ->

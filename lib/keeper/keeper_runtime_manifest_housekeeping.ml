@@ -95,57 +95,8 @@ let mandatory_clock_refs_for_event = function
   | Skill_preparation_observed | Preparation_observed
   | Event_bus_correlated | Checkpoint_loaded -> [ "edge_id"; "lane" ]
 
-let clock_refs_has_keys keys clock_refs_json =
-  match clock_refs_json with
-  | `Assoc fields ->
-    List.for_all
-      (fun key -> List.exists (fun (k, _) -> String.equal k key) fields)
-      keys
-  | _ -> false
-
-let validate_manifest_completeness manifest =
-  let required_keys = mandatory_clock_refs_for_event manifest.event in
-  match manifest.decision with
-  | `Assoc fields ->
-    (match List.assoc_opt "clock_refs" fields with
-    | Some clock_refs ->
-      if clock_refs_has_keys required_keys clock_refs then
-        Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "manifest for %s missing mandatory clock_refs keys: [%s]"
-             (event_kind_to_string manifest.event)
-             (String.concat ", "
-                (List.filter
-                   (fun key -> not (clock_refs_has_keys [ key ] clock_refs))
-                   required_keys)))
-    | None ->
-      Error
-        (Printf.sprintf "manifest for %s missing clock_refs entirely"
-           (event_kind_to_string manifest.event)))
-  | _ ->
-    Error
-      (Printf.sprintf "manifest for %s has non-assoc decision"
-         (event_kind_to_string manifest.event))
-
-(** A turn is "finished" when a [Turn_finished] event exists.
-    A turn is "complete" when it is finished AND has both a receipt link
-    and a checkpoint link, meaning all mandatory lane artifacts are present. *)
+(** A turn is "finished" when a [Turn_finished] event exists. *)
 let is_finished_turn manifests =
   List.exists
     (fun m -> m.event = Turn_finished)
     manifests
-
-let is_complete_turn manifests =
-  is_finished_turn manifests
-  && List.exists
-       (fun m ->
-         m.event = Receipt_appended
-         && Option.is_some m.links.receipt_path)
-       manifests
-  && List.exists
-       (fun m ->
-         m.event = Checkpoint_saved
-         && Option.is_some m.links.checkpoint_path)
-       manifests

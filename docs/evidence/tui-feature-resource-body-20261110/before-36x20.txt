@@ -1,0 +1,20 @@
+ ‹3 ▸기능·플러그인  워크스페이스 1›
+
+  리소스
+  ▸ Resource · Markdown · 격리 리 …
+ ──────────────────────────────────
+
+
+   Confirmation: No confirmation
+   for this exact report
+   revision.
+
+   External sharing: last
+   observed private (P: enable)
+
+   Text 1/1 · part 1
+
+
+
+  Enter:read  Esc:back  q:quit  …?
+ › no keeper selected

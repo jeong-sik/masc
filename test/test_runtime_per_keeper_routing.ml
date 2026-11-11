@@ -2615,8 +2615,8 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
 
 let provider_base_url_of_runtime_id runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
-  | Some { Runtime_instance.execution = Runtime_execution.Agent_core provider_config; _ } ->
-    provider_config.Llm_provider.Provider_config.base_url
+  | Some { Runtime_instance.execution = Runtime_execution.Agent_core sealed; _ } ->
+    (Runtime_account_access.api_declaration sealed).Llm_provider.Provider_config.base_url
   | Some rt ->
     Alcotest.failf "fixture runtime %s is not agent_core" rt.Runtime_instance.id
   | None -> Alcotest.failf "fixture runtime %s missing from catalog" runtime_id
@@ -3550,7 +3550,7 @@ let test_agent_core_provider_config_carries_effective_context_window () =
       match Runtime.get_runtime_by_id runtime_id with
       | Some (rt : Runtime_instance.t) ->
         (match rt.execution with
-         | Runtime_execution.Agent_core config -> config
+         | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
          | Runtime_execution.Codex_app_server _
          | Runtime_execution.Claude_code _
          | Runtime_execution.Antigravity_cli _

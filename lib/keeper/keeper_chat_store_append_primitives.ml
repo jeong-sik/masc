@@ -1,5 +1,6 @@
 open Keeper_chat_types
 open Keeper_chat_store_provenance_index
+open Keeper_chat_store_transcript_index
 
 let append_line_once path ~provenance ~row_id line =
   match provenance.Keeper_chat_delivery_identity.delivery_key with
@@ -8,8 +9,8 @@ let append_line_once path ~provenance ~row_id line =
   | Keeper_chat_delivery_identity.Operation _ | Operation_checkpoint _ | Operation_native _
   | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _ ->
   match
-    Fs_compat.update_private_file_durable_locked_result path (fun existing ->
-      match find_provenance existing ~provenance with
+    update_indexed_transcript path (fun index ->
+      match Result.bind index (fun index -> find_indexed_provenance index ~provenance) with
       | Error detail -> None, Error detail
       | Ok (Some existing_row_id) ->
         None, Ok (Already_present { row_id = existing_row_id })

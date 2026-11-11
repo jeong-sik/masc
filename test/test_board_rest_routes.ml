@@ -135,9 +135,9 @@ let test_dashboard_board_routes_registered () =
         match Http.Router.resolve router request with
         | `Matched route -> (
           match route.Http.Router.handler with
-          | Http.Router.Plain _ -> ()
-          | Http.Router.Ws _ ->
-            fail (Printf.sprintf "%s must be a Plain POST route, not Ws" path))
+          | Http.Router.Owner _ -> ()
+          | Http.Router.Serving _ | Http.Router.Ws _ ->
+            fail (Printf.sprintf "%s must be an Owner POST route" path))
         | `Method_not_allowed ->
           fail (Printf.sprintf "%s exists but rejects POST" path)
         | `Not_found ->
@@ -1502,9 +1502,9 @@ let test_dashboard_board_reaction_routes_registered () =
       (fun (meth, path) ->
          let request = Httpun.Request.create meth path in
          match Http.Router.resolve router request with
-         | `Matched { Http.Router.handler = Plain _; _ } -> ()
-         | `Matched { Http.Router.handler = Ws _; _ } ->
-           fail (Printf.sprintf "%s must be a plain HTTP route" path)
+         | `Matched { Http.Router.handler = Owner _; _ } -> ()
+         | `Matched { Http.Router.handler = Serving _ | Ws _; _ } ->
+           fail (Printf.sprintf "%s must be an Owner HTTP route" path)
          | `Method_not_allowed ->
            fail (Printf.sprintf "%s rejects its dashboard HTTP method" path)
          | `Not_found ->
@@ -1566,9 +1566,11 @@ let test_board_reaction_batch_answers_every_id_asked_about () =
   Fs_compat.mkdir_p base_path;
   with_board_store ~base_path (fun () ->
   let json =
-    Server_board_reaction_http.list_batch_json ~reader:Masc_board_handlers.Board_access.Operator
+    match Server_board_reaction_http.list_batch_json ~reader:Masc_board_handlers.Board_access.Operator
       ~actor:"tester"
-      (parsed_targets "p-one,p-two,p-three")
+      (parsed_targets "p-one,p-two,p-three") with
+    | Ok json -> json
+    | Error error -> fail (Yojson.Safe.to_string (Server_board_reaction_http.error_json error))
   in
   check
     (list string)
@@ -1722,7 +1724,7 @@ let test_board_detail_defaults_to_latest_comments_with_older_pages () =
   let post_id = Masc.Board.Post_id.to_string post.id in
   for n = 1 to 25 do
     match
-      Masc.Board_dispatch.add_comment
+      Masc.Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
         ~post_id ~author:"page-author"
         ~content:(Printf.sprintf "comment %02d" n) ()
     with

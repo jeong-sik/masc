@@ -104,6 +104,15 @@ val expand_home_prefix : string -> string
     other value, and a value with no [HOME] to read, unchanged. The one rule
     every config path that names a file under the operator's home shares. *)
 
+val home_dir_opt : unit -> string option
+(** [HOME] as {!expand_home_prefix} reads it: trimmed, [None] when unset or
+    blank. *)
+
+val expand_home_prefix_under : home:string option -> string -> string
+(** {!expand_home_prefix} against the given home instead of the one read
+    from the environment. A reader that keeps its result for later calls
+    reads the home once, passes it here, and keeps it beside the result. *)
+
 val normalize_path_lexically : string -> string
 (** Trim and expand the home prefix, then reduce slash-separated empty, dot and
     parent components without consulting the filesystem. Relative paths retain

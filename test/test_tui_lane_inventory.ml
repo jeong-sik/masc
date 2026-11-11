@@ -67,6 +67,22 @@ let complete_inventory () =
   Alcotest.(check bool) "connected clients are read as a count" true
     ((find "browser/live" snapshot).state = Decode.Browser_clients (Decode.Browser_observed 0))
 
+(* The scroll needs to know which row the heading sits directly above: the
+   first row of each category, and no other. *)
+let the_first_row_of_a_category_carries_its_heading () =
+  let rows = (ok (Decode.decode (snapshot [manual]))).Decode.rows in
+  let entries = Display.overview_entries rows in
+  let headings = List.length (List.filter (function
+    | Display.Category_header _ -> true | Display.Lane_row _ -> false) entries) in
+  let leads = List.filter_map (function
+    | Display.Category_header _ -> None
+    | Display.Lane_row row -> Some (Display.row_lead ~id:row.Decode.id entries)) entries in
+  Alcotest.(check int) "one opening row per heading" headings (List.fold_left (+) 0 leads);
+  Alcotest.(check bool) "a row has a heading above it or does not" true
+    (List.for_all (fun lead -> lead = 0 || lead = 1) leads);
+  Alcotest.(check int) "an ID that is not listed has no lead" 0
+    (Display.row_lead ~id:"absent" entries)
+
 let builtin_role_is_server_metadata () =
   let original = ok (Decode.decode (snapshot [])) in
   let first = List.hd original.rows in
@@ -263,6 +279,17 @@ let exact_outputs_are_chosen_by_name_and_open_their_table () =
 
 let exact_outputs_wire_is_strict () =
   let with_outputs outputs = snapshot [declared (quiz_declaration outputs)] in
+  let diagnostic = output "author" "declared" configuration
+    |> set "lane_key" (str "operator-quiz/author")
+    |> set "slot_states" (str "diagnostic unavailable")
+    |> set "slot_observation_unavailable_runs" (`Int 1) in
+  let decoded = find "declaration//config/broken.toml" (ok (Decode.decode (with_outputs [diagnostic]))) in
+  (match decoded.state with
+   | Decode.Package_state {declaration=Some (Decode.Valid {exact_outputs=[output];_});_} ->
+       Alcotest.(check bool) "optional diagnostics preserve the original configuration" true
+         (match output.configuration with Decode.Configured c -> c.admitted_slots=["account.model"]
+          | Disabled _ | Unconfigured _ | Registry_unavailable _ -> false)
+   | _ -> Alcotest.fail "original configured output missing");
   rejects "an output listed twice" (with_outputs [output "author" "declared" configuration; output "author" "table_only" configuration]);
   rejects "an unknown source" (with_outputs [output "author" "guessed" configuration]);
   rejects "an unknown lane state" (with_outputs [output "author" "declared" (object_ ["kind",str "maybe"])]);
@@ -428,6 +455,7 @@ let categories_are_strict_metadata () =
       Alcotest.fail "unclassified original worker was removed"
 
 let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
+  Alcotest.test_case "the first row of a category carries its heading" `Quick the_first_row_of_a_category_carries_its_heading;
   Alcotest.test_case "builtin role comes from the server without changing its target" `Quick builtin_role_is_server_metadata;
   Alcotest.test_case "category metadata is strict and preserves both owners" `Quick categories_are_strict_metadata;
   Alcotest.test_case "machine activity and publication remain independent" `Quick machine_activity_and_publication_are_independent;

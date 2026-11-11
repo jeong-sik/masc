@@ -146,3 +146,43 @@ val close_open_tail
     [structural_error] unchanged and must keep latching — only the open tail is
     recoverable. On [Ok], {!validate_provider_transcript} of [messages]
     returns [Ok ()]. *)
+
+(** {1 The end of a history, read from its last message}
+
+    Whether {!close_open_tail} appends anything can be told from the last
+    messages of a history {!partition} accepts: once a cycle closes, no later
+    verdict of {!partition} depends on the messages before it, and an open
+    cycle admits no other request. *)
+
+type tail_reading
+(** What the last messages of a history, read from the last one backwards,
+    leave for the message before them. *)
+
+val tail_reading_start : tail_reading
+(** Before the last message is read. *)
+
+type tail_end =
+  | Every_request_answered
+      (** {!close_open_tail} appends nothing to a history that {!partition}
+          accepts and that ends this way. *)
+  | Request_awaits_results
+      (** The last message that requests tool calls names an id that no
+          message after it answers. *)
+
+type tail_step =
+  | Tail_end of tail_end
+  | Reads_message_before of tail_reading
+      (** The message requests nothing, so the one before it is read next.
+          When the first message of a history is read this way, the history
+          requests nothing at all and its end is [Every_request_answered]. *)
+
+val read_tail_message : tail_reading -> Agent_core.Types.message -> tail_step
+(** [read_tail_message reading message] reads [message], the one directly
+    before the messages [reading] comes from.
+
+    For a history {!partition} accepts, reading from the last message this way
+    ends with [Request_awaits_results] exactly when {!close_open_tail} appends
+    a result. For a history {!partition} refuses it can end either way: the
+    reading does not judge the messages it reads (their roles, an id that
+    repeats, a result nobody requested) and reads none before the last
+    request. *)

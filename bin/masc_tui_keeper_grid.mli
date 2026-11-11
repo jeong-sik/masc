@@ -93,10 +93,11 @@ type strip_cell =
 val strip_cell : Masc_tui_keeper_next_run.wake_slot -> strip_cell
 (** [Wakes n] is [Strip_wake] for [n] of 1 or more, as the mock's
     [drawRuler]: a Keeper row draws one mark however many wakes the half hour
-    holds. *)
+    holds. [Wakes_with_unknown] draws [Strip_unknown]: the certain fact of
+    that slot is that it is not fully known, whatever it also holds. *)
 
 val strip_mark : strip_cell -> string
-(** [◷] a wake, [·] none, [?] unknown. *)
+(** [▁] a wake, a space for known empty, [─] unknown. *)
 
 val lag_fill : cells:int -> peak:int -> int -> int
 (** How many of [cells] cells the lag bar fills for [lag] unread turns against

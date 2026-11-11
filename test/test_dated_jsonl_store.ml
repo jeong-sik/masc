@@ -215,13 +215,25 @@ let check_files ~label ~removed files =
     files
 ;;
 
+(* The pass the server runs over one admitted root: bind the root, then walk
+   the declared stores. *)
+let prune_declared_stores root ~operator_window_days =
+  match
+    Store.with_retention_root root (fun held ->
+      Dated_jsonl.prune_listed_stores_bound root held ~operator_window_days
+        ~on_pruned:ignore)
+  with
+  | None -> 0
+  | Some count -> count
+;;
+
 let test_old_files_go_by_each_stores_rule () =
   with_workspace
   @@ fun root ->
   let old = write_every_store root ~age_days:400 in
   let today = write_every_store root ~age_days:0 in
   ignore
-    (Dated_jsonl.prune_listed_stores root ~operator_window_days:30
+    (prune_declared_stores root ~operator_window_days:30
      : int);
   check_files ~label:"old" old ~removed:(fun store ->
     match expected_rule store with
@@ -237,7 +249,7 @@ let test_a_zero_window_keeps_only_the_windows_stores () =
   @@ fun root ->
   let old = write_every_store root ~age_days:400 in
   ignore
-    (Dated_jsonl.prune_listed_stores root ~operator_window_days:0
+    (prune_declared_stores root ~operator_window_days:0
      : int);
   check_files ~label:"old" old ~removed:(fun store ->
     match expected_rule store with
@@ -252,7 +264,7 @@ let test_fixed_days_ignore_the_window () =
   let twenty = write_day_file location ~age_days:20 in
   let ten = write_day_file location ~age_days:10 in
   ignore
-    (Dated_jsonl.prune_listed_stores root ~operator_window_days:7
+    (prune_declared_stores root ~operator_window_days:7
      : int);
   check bool "20 days old is removed" false (Sys.file_exists twenty);
   check bool "10 days old stays under a 7-day window" true (Sys.file_exists ten)
@@ -274,7 +286,7 @@ let test_own_days_are_read_at_each_pass () =
   let five = write_day_file (Store.at root Wire_capture) ~age_days:5 in
   let prune () =
     ignore
-      (Dated_jsonl.prune_listed_stores root ~operator_window_days:30
+      (prune_declared_stores root ~operator_window_days:30
        : int)
   in
   with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "10" prune;
@@ -318,7 +330,7 @@ let test_every_keeper_directory_on_disk_is_pruned () =
   in
   Out_channel.with_open_text stray (fun oc -> output_string oc "x");
   let pruned =
-    Dated_jsonl.prune_listed_stores root ~operator_window_days:30
+    prune_declared_stores root ~operator_window_days:30
   in
   check int "every old file counted" 8 pruned;
   List.iter
@@ -345,7 +357,7 @@ let test_a_broken_keeper_link_does_not_stop_the_pass () =
   Unix.symlink (Filename.concat keepers_dir "gone") (Filename.concat keepers_dir "ghost");
   Unix.symlink (Filename.concat decision_dir "gone") (Filename.concat decision_dir "ghost");
   let pruned =
-    Dated_jsonl.prune_listed_stores root ~operator_window_days:30
+    prune_declared_stores root ~operator_window_days:30
   in
   check int "both old files counted" 2 pruned;
   check bool "keeper store pruned" false (Sys.file_exists metrics);
@@ -359,7 +371,7 @@ let test_a_missing_store_counts_nothing () =
     int
     "empty workspace"
     0
-    (Dated_jsonl.prune_listed_stores root ~operator_window_days:30)
+    (prune_declared_stores root ~operator_window_days:30)
 ;;
 
 let () =

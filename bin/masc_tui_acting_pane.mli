@@ -199,6 +199,11 @@ type keeper_context = {
   task : keeper_task;
   waiting : Masc_tui_keeper_list_model.waiting_reading;
   waiting_stale : bool;
+  waiting_revalidating : bool;
+      (** A change named this Keeper and the answering read has not landed;
+          the row shown is the last observed one. *)
+  waiting_failed : bool;
+      (** The waiting read failed; the row shown is the last observed one. *)
 }
 (** Facts already held by the roster for its selected Keeper. A waiting
     inventory is not a complete schedule or active delegation inventory. *)

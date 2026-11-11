@@ -1,0 +1,44 @@
+{
+  "kind": "curated filesystem readback from the preserved manual observation receipts",
+  "source_sha": "097b4c2d629498b18197de7da9c92765febab86e",
+  "original_report": {
+    "id": "artifact-5919ce0090322571120dccaecc0f075c",
+    "revision": 1,
+    "bytes": 393,
+    "sha256": "530df6a0954b941af19b12883d8a709a1562ece13b555d9192bba5cb7467d003"
+  },
+  "exclusive_creation": {
+    "destination_name": "fixture report saved candidate.md",
+    "readback": {
+      "size": 393,
+      "sha256": "530df6a0954b941af19b12883d8a709a1562ece13b555d9192bba5cb7467d003",
+      "mode": "0o600",
+      "inode": 4818585451,
+      "mtime_ns": 1794313719890488180
+    }
+  },
+  "existing_target_refusal": {
+    "destination_name": "fixture report saved baseline.md",
+    "before": {
+      "size": 393,
+      "sha256": "530df6a0954b941af19b12883d8a709a1562ece13b555d9192bba5cb7467d003",
+      "mode": "0o600",
+      "inode": 4811006124,
+      "mtime_ns": 1794299488168871863
+    },
+    "after": {
+      "size": 393,
+      "sha256": "530df6a0954b941af19b12883d8a709a1562ece13b555d9192bba5cb7467d003",
+      "mode": "0o600",
+      "inode": 4811006124,
+      "mtime_ns": 1794299488168871863
+    },
+    "metadata_and_bytes_unchanged": true
+  },
+  "submissions": "one explicit creation and one explicit attempt at an existing target; no automatic retry",
+  "not_claimed": [
+    "all filesystem failure modes",
+    "late-completion GUI observations",
+    "installed GUI"
+  ]
+}

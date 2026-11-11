@@ -76,9 +76,3 @@ let restore ~source ~target =
     then record target boundary;
     Ok boundary
 ;;
-
-let seed_beyond ~judged pairs =
-  let total = List.length pairs in
-  let keep = max 0 (total - judged) in
-  List.filteri (fun index _ -> index < keep) pairs
-;;

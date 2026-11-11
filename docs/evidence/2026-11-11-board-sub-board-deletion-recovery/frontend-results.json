@@ -1,0 +1,58 @@
+{
+  "frontend-final-tests": {
+    "at": "2026-11-10T15:06:54.761408+00:00",
+    "command": [
+      "pnpm",
+      "exec",
+      "vitest",
+      "run",
+      "--config",
+      "vitest.config.ts",
+      "--no-file-parallelism",
+      "--maxWorkers=1",
+      "src/api/board.test.ts",
+      "src/components/board/sub-board-surface.test.ts"
+    ],
+    "exit": 0
+  },
+  "frontend-exact-input-tsc": {
+    "at": "2026-11-10T15:11:42.639383+00:00",
+    "command": [
+      "pnpm",
+      "exec",
+      "tsc",
+      "--noEmit"
+    ],
+    "exit": 0,
+    "dashboard_tree": "7bb15ad1fcf789424d2077130511300ef144356f",
+    "source_inputs": {
+      "dashboard/src/api/board.ts": "827498a30c23cf6489cfe052bdff7cf848dc9b6d957166539bb8560366546256",
+      "dashboard/src/api/board.test.ts": "86c1471baca8fb12fb81a8030439a12f124293b6e2860ba643f87039aec0587d",
+      "dashboard/src/components/board/sub-board-surface.ts": "b7fef0d61ac453468f95e555a57ae82c7c864c6c92e2df5aa601ec8d2c746b15",
+      "dashboard/src/components/board/sub-board-surface.test.ts": "098e4089b1fa19cc7352ad7567c23fe323d4233d45d8a2375866bff8609e5fa9"
+    },
+    "unchanged": true,
+    "reason": "Confirm exact final frontend bytes after the source fix was moved to the lower layer; earlier tsc overlapped the restack."
+  },
+  "frontend-final-eslint": {
+    "at": "2026-11-10T15:08:39.930677+00:00",
+    "command": [
+      "pnpm",
+      "exec",
+      "eslint",
+      "src/api/board.ts",
+      "src/api/board.test.ts",
+      "src/components/board/sub-board-surface.ts",
+      "src/components/board/sub-board-surface.test.ts"
+    ],
+    "exit": 0
+  },
+  "tested_source_inputs": {
+    "dashboard/src/api/board.ts": "827498a30c23cf6489cfe052bdff7cf848dc9b6d957166539bb8560366546256",
+    "dashboard/src/api/board.test.ts": "86c1471baca8fb12fb81a8030439a12f124293b6e2860ba643f87039aec0587d",
+    "dashboard/src/components/board/sub-board-surface.ts": "b7fef0d61ac453468f95e555a57ae82c7c864c6c92e2df5aa601ec8d2c746b15",
+    "dashboard/src/components/board/sub-board-surface.test.ts": "098e4089b1fa19cc7352ad7567c23fe323d4233d45d8a2375866bff8609e5fa9"
+  },
+  "executed_cases": 105,
+  "browser_scope": "No browser execution for this new sub-board pending flow. Earlier vote screen captures do not certify it."
+}

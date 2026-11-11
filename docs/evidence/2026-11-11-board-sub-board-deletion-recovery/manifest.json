@@ -1,0 +1,47 @@
+{
+  "at": "2026-11-10T15:34:00.074296+00:00",
+  "source_base": "da220af2151d63ad50166edd251ac741d3333099",
+  "source_heads": {
+    "lower": "4d730fd9c0f9a90e6c670da1c683fa14eaddc201",
+    "upper": "542d8d8ee44b73ce9c4e02f1f013025e5ac1a4a7"
+  },
+  "copied_validation_sha256": "f8d53743ad7f830c6e8a2f45c54570c103bbe35c559197806ba7d4472f9d9fcf",
+  "frontend_log_derivatives": {
+    "frontend-baseline.txt": {
+      "original_sha256": "f5a362c254dce63c3c6a65a853ee76764ce50128727af38f50cd8ef9b218b703",
+      "derivative_sha256": "932de1b2b5d204d73f0a0519f812cddb3769402c6be37ba53c13c01a4faebf5d",
+      "transformation": "Replace candidate absolute Dashboard directory with <candidate>/dashboard; no other edit."
+    },
+    "frontend-review-baseline.txt": {
+      "original_sha256": "7f5758d44ff6bc5fedf2dcaca2d189b5e74f3a4c81e0d0682a30b380aa86807a",
+      "derivative_sha256": "b9c14da3ce9dd0a3f6bd64b04e3f4c008e1b3fdd8b8ee25349c66e099fb306c8",
+      "transformation": "Replace candidate absolute Dashboard directory with <candidate>/dashboard; no other edit."
+    },
+    "frontend-selector-failure.txt": {
+      "original_sha256": "231c3cb84bbec0ce1860e4434b54b8ba6e79cb6313bc9e27e1086b865e9bb2d9",
+      "derivative_sha256": "412097fd262a97166ab6f5ec77783c7a3a1ec146488d9c7de0f402e20282cb31",
+      "transformation": "Replace candidate absolute Dashboard directory with <candidate>/dashboard; no other edit."
+    },
+    "frontend-final-tests.txt": {
+      "original_sha256": "c05d3ebb2414ea4e4ec78920ec7233c67229841398b64da68c9d83f145ece29c",
+      "derivative_sha256": "70a8b9d543217754832f0441b8cb60acd58128bd2cb734b903afe93d346d0664",
+      "transformation": "Replace candidate absolute Dashboard directory with <candidate>/dashboard; no other edit."
+    }
+  },
+  "historical_admission_bundle_sha256": {
+    "docs/evidence/2026-11-10-board-comment-admission/README.md": "c5d6beca5fdbebeb4d32db231c4efdfaffae02865d95652182512d7dbc108fa7",
+    "docs/evidence/2026-11-10-board-comment-admission/local-source-reviews.txt": "76349f8965bc8e2770b11390cb1f68eef770e13a4ac8dea642326d4addd6ca6e",
+    "docs/evidence/2026-11-10-board-comment-admission/manifest.json": "157a4aef38cde82194722cd702fc99acd3c08efd6dadbbc627b8aa4500c8f867",
+    "docs/evidence/2026-11-10-board-comment-admission/validation.json": "73aed1950dffca0b54a022b5671625f1d482df76ecc4de7ad052ebf08e40079a"
+  },
+  "payloads": {
+    "README.md": "757cc11ce3427301e50a8481561163d4020983bb917493c1f70c9bad37c39a11",
+    "frontend-baseline.txt": "932de1b2b5d204d73f0a0519f812cddb3769402c6be37ba53c13c01a4faebf5d",
+    "frontend-final-tests.txt": "70a8b9d543217754832f0441b8cb60acd58128bd2cb734b903afe93d346d0664",
+    "frontend-results.json": "10436eaf5e1ce160969a8f38b7507985b0eab3fd3c1131586c4c10902a882cfe",
+    "frontend-review-baseline.txt": "b9c14da3ce9dd0a3f6bd64b04e3f4c008e1b3fdd8b8ee25349c66e099fb306c8",
+    "frontend-selector-failure.txt": "412097fd262a97166ab6f5ec77783c7a3a1ec146488d9c7de0f402e20282cb31",
+    "local-source-reviews.json": "3470289d16ff6f35ecaec1939ccefb2f308cd5ba4612f99c724e8c7b15f620ed",
+    "validation.json": "f8d53743ad7f830c6e8a2f45c54570c103bbe35c559197806ba7d4472f9d9fcf"
+  }
+}

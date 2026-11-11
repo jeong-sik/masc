@@ -5,7 +5,9 @@ import fixture from './fixtures/lane-inventory.json'
 describe('common Lane inventory wire', () => {
   it('preserves each installation output model reading independently of worker presence', () => {
     const exact_outputs = [
-      { output: 'classification', source: 'declared', configuration: { kind: 'configured',
+      { output: 'classification', source: 'declared', lane_key: 'custom-curator/classification',
+        slot_states: 'diagnostic unreadable', slot_observation_unavailable_runs: 0,
+        configuration: { kind: 'configured',
         admitted_slots: ['local.first'], cli_slots: ['cloud.cli'], declared_slots: ['local.first', 'unavailable'],
         declared_cli_slots: ['cloud.cli'], dropped_slots: ['unavailable'], admission_error: 'one runtime refused' } },
       { output: 'briefing', source: 'declared', configuration: { kind: 'unavailable', detail: 'registry unreadable' } },

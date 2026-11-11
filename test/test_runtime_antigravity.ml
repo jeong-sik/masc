@@ -2306,7 +2306,6 @@ let test_result_completes_when_the_cli_hangs_in_shutdown () =
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run
     "runtime_antigravity"
     [ ( "stream-json"

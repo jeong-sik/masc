@@ -1,0 +1,56 @@
+{
+  "created_at": "2026-11-10T10:13:01.821167+00:00",
+  "kind": "curated provenance derived from local capture records; captures themselves are unchanged",
+  "fixture": "API-published private Markdown sample explicitly describing isolated observation, not real Keeper work",
+  "fixture_body_bytes": 393,
+  "fixture_body_sha256": "530df6a0954b941af19b12883d8a709a1562ece13b555d9192bba5cb7467d003",
+  "observations": [
+    {
+      "name": "before",
+      "observed_at": "2026-11-10T09:09:57.062954+00:00",
+      "source": "d58145cf97b6c47fa81d1aa4d9723f98022a7185",
+      "native_run": 42782496683,
+      "kind": "native tmux PTY capture",
+      "terminal": "36x20",
+      "gui_screenshot": false,
+      "files": [
+        {
+          "path": "before-36x20.txt",
+          "sha256": "8293da1d8cf9b786beb402fe75450a72fa32f512cef0a2d1fec219552eb96d5c",
+          "bytes": 436,
+          "copied_without_editing": true
+        },
+        {
+          "path": "before-36x20.ansi",
+          "sha256": "9a86c96d6e32180dd66c05ec018f991072bb256de3e8e408ba0399cb0c10e88e",
+          "bytes": 522,
+          "copied_without_editing": true
+        }
+      ]
+    },
+    {
+      "name": "after",
+      "observed_at": "2026-11-10T10:00:59.135017+00:00",
+      "source": "6157b06b2b2c6b4f5ac1bfeb6a1c62c362e73005",
+      "native_run": 42789874637,
+      "kind": "native tmux PTY capture",
+      "terminal": "36x20",
+      "gui_screenshot": false,
+      "files": [
+        {
+          "path": "after-36x20.txt",
+          "sha256": "9353acc859f808fa79e6c2c2eecec7cd98309efe497770929ed2592c4cb69b16",
+          "bytes": 503,
+          "copied_without_editing": true
+        },
+        {
+          "path": "after-36x20.ansi",
+          "sha256": "0aac5b9e6605f5f57e2dda664accb2c380ee45576f14fb951d011a77313bfa95",
+          "bytes": 604,
+          "copied_without_editing": true
+        }
+      ]
+    }
+  ],
+  "validation_boundary": "Exact selected native sources only. No GUI screenshot, production installation, full regression, save-child execution or all-surface completion."
+}

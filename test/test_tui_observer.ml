@@ -153,6 +153,9 @@ let summary = function
          | Masc.Workspace_dataset_event.Play_room { machine } ->
              ":" ^ Masc.Machine_lane.to_wire machine
          | Masc.Workspace_dataset_event.Browser_observation _ -> ""
+         | Masc.Workspace_dataset_event.Dashboard_observation _
+         | Masc.Workspace_dataset_event.World_memory
+         | Masc.Workspace_dataset_event.Play_seats
          | Masc.Workspace_dataset_event.Repositories
          | Masc.Workspace_dataset_event.Verification_requests
          | Masc.Workspace_dataset_event.Harness_verdicts
@@ -886,8 +889,8 @@ let test_a_roster_push_names_the_row_or_every_row () =
   let changes frames =
     decode_all frames
     |> List.filter_map (function
-         | Observer.Event event -> Observer.roster_change event
-         | Observer.Undecodable _ -> None)
+         | Observer.Event (Observer.Keeper_roster_change change) -> Some change
+         | Observer.Event _ | Observer.Undecodable _ -> None)
     |> List.length
   in
   check int "both owe the roster a read" 2 (changes roster_frames);
@@ -986,7 +989,10 @@ let test_a_verification_or_run_push_reads_the_requests () =
                   | Masc.Workspace_dataset_event.Runtime_config
                   | Masc.Workspace_dataset_event.Connectors
                   | Masc.Workspace_dataset_event.Lanes
-                  | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Dashboard_observation _
+                  | Masc.Workspace_dataset_event.World_memory
+              | Masc.Workspace_dataset_event.Play_seats
+              | Masc.Workspace_dataset_event.Memory_health _
                   | Masc.Workspace_dataset_event.Machine_live _
                   | Masc.Workspace_dataset_event.Play_room _
                   | Masc.Workspace_dataset_event.Browser_observation _
@@ -1089,7 +1095,10 @@ let test_a_repository_push_reads_the_list () =
                   | Masc.Workspace_dataset_event.Runtime_config
                   | Masc.Workspace_dataset_event.Connectors
                   | Masc.Workspace_dataset_event.Lanes
-                  | Masc.Workspace_dataset_event.Memory_health _
+                  | Masc.Workspace_dataset_event.Dashboard_observation _
+                  | Masc.Workspace_dataset_event.World_memory
+              | Masc.Workspace_dataset_event.Play_seats
+              | Masc.Workspace_dataset_event.Memory_health _
                   | Masc.Workspace_dataset_event.Machine_live _
                   | Masc.Workspace_dataset_event.Play_room _
                   | Masc.Workspace_dataset_event.Browser_observation _
@@ -1123,6 +1132,9 @@ let test_a_repository_push_reads_the_list () =
               | Masc.Workspace_dataset_event.Runtime_config
               | Masc.Workspace_dataset_event.Connectors
               | Masc.Workspace_dataset_event.Lanes
+              | Masc.Workspace_dataset_event.Dashboard_observation _
+              | Masc.Workspace_dataset_event.World_memory
+              | Masc.Workspace_dataset_event.Play_seats
               | Masc.Workspace_dataset_event.Memory_health _
               | Masc.Workspace_dataset_event.Machine_live _
               | Masc.Workspace_dataset_event.Play_room _

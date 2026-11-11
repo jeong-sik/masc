@@ -43,7 +43,7 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store_with_source_io ~base_path posts_source_io comments_source_io sub_boards_source_io () =
+let create_store_with_source_io ~base_path posts_source_io comments_source_io sub_boards_source_io votes_source_io reactions_source_io deletion_source_io () =
   let workspace_binding = Board_workspace_binding.capture ~base_path in
   { posts_source = Posts_unobserved
   ; posts_source_io
@@ -51,8 +51,11 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io su
   ; comments_source_io
   ; sub_boards_source = Policy_unobserved
   ; sub_boards_source_io
-  ; votes_load_result = Ok ()
-  ; reactions_load_result = Ok ()
+  ; votes_source = Votes_unobserved
+  ; votes_source_io
+  ; reactions_source = Reactions_unobserved
+  ; reactions_source_io
+  ; deletion_source_io
   ; workspace_binding
   ; posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
@@ -69,7 +72,7 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io su
   ; reactions = Hashtbl.create 4096
   ; dirty_posts = false
   ; dirty_comments = false
-  ; snapshot_retry = Independent_snapshots
+  ; deletion_state = Deletion_unobserved
   ; dirty_post_ids = Hashtbl.create 256
   ; dirty_comment_ids = Hashtbl.create 512
   ; post_rows = Hashtbl.create 1024
@@ -84,13 +87,19 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io su
 ;;
 
 let create_store ~base_path () =
-  create_store_with_source_io ~base_path { posts = None } None None ()
+  create_store_with_source_io ~base_path { posts = None } None None None None None ()
 let create_store_with_source_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path io None None ()
+  create_store_with_source_io ~base_path io None None None None None ()
 let create_store_with_comments_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path { posts = None } (Some io) None ()
+  create_store_with_source_io ~base_path { posts = None } (Some io) None None None None ()
 let create_store_with_sub_boards_io_for_testing ~base_path ~io () =
-  create_store_with_source_io ~base_path { posts = None } None (Some io) ()
+  create_store_with_source_io ~base_path { posts = None } None (Some io) None None None ()
+let create_store_with_votes_io_for_testing ~base_path ~io () =
+  create_store_with_source_io ~base_path { posts = None } None None (Some io) None None ()
+let create_store_with_reactions_io_for_testing ~base_path ~io () =
+  create_store_with_source_io ~base_path { posts = None } None None None (Some io) None ()
+let create_store_with_deletion_io_for_testing ~base_path ~io () =
+  create_store_with_source_io ~base_path { posts = None } None None None None (Some io) ()
 
 let require_comments_source_readable = Board_comments_source.require_readable
 
@@ -99,10 +108,11 @@ let require_persisted_snapshot_readable = function
   | Error detail -> Error (Io_error detail)
 ;;
 
-let require_model_reload_allowed store ~path = match store.snapshot_retry with
-  | Independent_snapshots -> Ok ()
-  | Deletion_pending -> Error (path, Failure
-      "Pending Board deletion requires a fresh store before model reload.")
+let require_model_reload_allowed store ~path = match store.deletion_state with
+  | Deletion_unobserved | Deletion_readable { plan = None; _ } -> Ok ()
+  | Deletion_readable { plan = Some _; _ } | Deletion_pending _
+  | Deletion_unsettled _ | Deletion_refused _ | Deletion_projection_failed _ ->
+    Error (path, Failure "Pending Board deletion requires fresh-store initialization.")
 ;;
 
 (* RFC-0233 §7: maintain the origin secondary indexes. Shared by the create
@@ -260,7 +270,7 @@ let with_persist_lock_internal ~defer_settlement store f =
       | Error failure -> Error failure
       | Ok () ->
         (* Reserved settlement travels as a carrier and leaves the lock
-           cleanly so an uncertain store stays settleable. Only an explicit
+           cleanly so an uncertain store retains its evidence. Only an explicit
            non-reserved exception crossing [use_rw] poisons it. Observer
            exceptions leave normally before re-raising. *)
         let result =
@@ -310,7 +320,7 @@ let sweep store =
        of a target and its dependents until all four sources loaded fully.
        The loader retains the typed failures for diagnosis and healthy reload. *)
     match Board_posts_source.require_readable store, require_comments_source_readable store,
-          store.votes_load_result, store.reactions_load_result with
+          Board_votes_source.require_readable store, Board_reactions_source.require_readable store with
     | Error _, _, _, _ | _, Error _, _, _
     | _, _, Error _, _ | _, _, _, Error _ -> 0, 0
     | Ok (), Ok (), Ok (), Ok () ->
@@ -588,10 +598,6 @@ include Board_core_json
 
 (** {1 Rewrite Helpers} *)
 type posts_snapshot = Board_posts_source.snapshot
-type settle_direction = Board_posts_source.settle_direction =
-  | Direction_landed
-  | Direction_absent
-  | Direction_diverged
 let capture_posts_snapshot = Board_posts_source.capture
 let save_posts_snapshot = Board_posts_source.rewrite
 let append_post = Board_posts_source.append
@@ -599,9 +605,6 @@ let require_posts_source_readable = Board_posts_source.require_readable
 let posts_source_failure_to_board_error = Board_posts_source.failure_to_board_error
 let read_posts_source = Board_posts_source.read
 let publish_posts_read = Board_posts_source.publish_read
-let settle_posts_source = Board_posts_source.settle
-let settle_posts_diagnostics = Board_posts_source.settle_diagnostics
-let settle_direction_for_testing = Board_posts_source.settle_direction_for_testing
 let finish_posts_write outcome =
   let diagnostics = Board_posts_source.write_diagnostics outcome in
   match Board_posts_source.reserved_diagnostics diagnostics with
@@ -708,7 +711,10 @@ let save_comments_snapshot store snapshot =
   finish_comments_write (Board_comments_source.rewrite store snapshot)
 let settle_comments_source store = finish_comments_write (Board_comments_source.settle store)
 let acknowledge_comments_recovery = Board_comments_source.acknowledge_recovery
-let append_comment store comment = match Board_comments_source.append store comment with
+let append_comment store ~reader comment =
+  let* () = Board_comments_source.require_readable store in
+  let* admission = with_lock store (fun () -> Board_comment_admission.capture store ~reader comment) in
+  match Board_comments_source.append store ~admission comment with
   | Written { value; _ } -> Ok value
   | (Not_written _ | Unknown _) as outcome -> finish_comments_write outcome
 let publish_comment_append store receipt =
@@ -737,15 +743,25 @@ let reactions_jsonl_unlocked store =
     store.reactions;
   Buffer.contents buf
 ;;
+(* Deletion/flush captured an already-installed model in this persistence
+   interval. Acknowledge only the exact known-success file receipt. *)
 let save_reactions_jsonl_result store content =
+  let module Source = Board_reactions_source in
+  let outcome = Source.rewrite store content in
+  let result = match outcome with
+    | Source.Written { publication; _ } -> Source.acknowledge_publication store publication
+    | Source.Not_written _ | Source.Unknown _ -> Error (Io_error "Board data is unavailable.")
+  in
+  let result = Source.finish_write outcome result in
   try
-    let* () = ensure_masc_dir ~where:"rewrite_reactions" store in
-    let path = reactions_path store in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg -> persist_io_error ~where:"rewrite_reactions" msg
-  with
-  | Sys_error msg -> persist_io_error ~where:"rewrite_reactions" msg
+    (match result with
+     | Ok () -> ()
+     | Error error -> record_persist_error ~where:"rewrite_reactions" (show_board_error error));
+    result
+  with exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Board_posts_source.defer_reserved ~result exception_ backtrace;
+    Printexc.raise_with_backtrace exception_ backtrace
 ;;
 
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
@@ -782,17 +798,7 @@ let sub_board_with_post_count_unlocked store (sb : sub_board) =
 let sub_board_with_post_count counts (sb : sub_board) =
   { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
 ;;
-let sub_board_author_allowed (sb : sub_board) ~author_id =
-  let author = Agent_id.to_string author_id in
-  let owner = Agent_id.to_string sb.owner in
-  match sb.access with
-  | Open -> true
-  | Owner_only -> String.equal author owner
-  | Members_only ->
-    String.equal author owner
-    || List.exists
-         (fun member_id -> String.equal author (Agent_id.to_string member_id))
-         sb.members
+let sub_board_author_allowed sb ~author_id = Board_access.can_post_in_sub_board ~author_id sb
 ;;
 let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
   match hearth with
@@ -972,17 +978,26 @@ let create_post_with_audience_internal
       | Ok post ->
         let creation = { post; audience; unresolved } in
         with_persist_lock_internal ~defer_settlement store (fun () ->
-          (* Runtime sub-board mutations share this persistence lock. Check
-             their current policy before append; no policy rejection follows
-             a successful append. The state lock is released for I/O. *)
+          (* Capture canonical policy authority before IO. Scoped creation
+             retains Posts -> Policy locks through the append; same-store
+             persistence alone cannot serialize another store's policy write. *)
           match
             with_lock store (fun () ->
-              validate_sub_board_post_policy_unlocked store ~author_id ~hearth)
+              Board_policy_admission.capture store ~author_id ~hearth)
           with
           | Error _ as error -> error
-          | Ok () ->
+          | Ok policy ->
             phase := Append_started;
-            match append_post store post with
+            let outcome = match policy with
+              | None -> append_post store post
+              | Some policy ->
+                (match Board_posts_source.append_creation_with_policy store ~policy post with
+                 | Board_posts_source.Creation_append_outcome outcome -> outcome
+                 | Board_posts_source.Creation_policy_refused { failure; outcome } ->
+                   phase := Before_append;
+                   Board_sub_boards_source.observe_guard_refusal store policy failure;
+                   outcome) in
+            match outcome with
             | (Posts_not_written _ as outcome) ->
               phase := Before_append;
               finish_posts_write outcome |> Result.map (fun () -> creation)

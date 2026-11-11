@@ -208,7 +208,8 @@ let runtime_reading_walk_help =
 
 let runtime_keys =
   [ Every_reading (b Navigate "j/k" "move / scroll")
-  ; Every_reading (b Navigate "PgUp/PgDn" "detail page")
+  ; Every_reading (b Navigate "PgUp/PgDn" "detail page"
+      ~help:"page an open detail; in the media editor page declared slots; while typing a lane name, PgUp opens the complete draft/context reader and Esc returns to the unchanged field")
   ; Every_reading
       (b Act "Right / Enter" "detail"
          ~help:"show the full runtime, lane, dispatch, and probe fields")
@@ -237,8 +238,7 @@ let runtime_keys =
          ~help:"replace [runtime].default, what a keeper with no assignment walks")
   ; Keeper_lanes_only
       (b Act "m" "vision runtimes"
-         ~help:"edit [runtime].media_failover in the slot editor; refused while \
-                boot dropped one of its entries")
+         ~help:"edit [runtime].media_failover: j/k, PgUp/PgDn and Home/End select declared slots; a appends, x drops, J/K reorder, 1 makes first, v reads all IDs/results without closing the editor. Admission and write refusals remain in the reading")
   ; Keeper_lanes_only
       (b Act "R" "rename lane"
          ~help:"give the lane under the cursor another name; the assignments \
@@ -333,6 +333,7 @@ let mouse_toggle_label = "F2"
 
 let global =
   [ b Meta "Tab / Shift-Tab" "next / previous surface"
+      ~help:"next / previous surface; the chat composer keeps them to complete a /command"
   ; keepers_jump
   ; b Meta "r" "refresh the current surface"
   ; b Meta "i" "focus the composer; on Dashboard, choose a Keeper"
@@ -557,10 +558,16 @@ let metrics_bindings =
   ; b ~ko:"종료" Meta "q" "quit", Metrics_all
   ]
 
+let memory_browser_pages =
+  [ b ~ko:"최근 / 조회 / 변화 / 저장" Act "1 / 2 / 3 / 4" "recent / retrievals / changes / storage"
+      ~help:"one Memory browser; changes require an individual Keeper, while storage opens the fleet health view" ]
+
 let for_surface = function
   | Overview ->
-      [ b ~ko:"키퍼" Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
-      ; b ~ko:"선택" Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      [ b ~ko:"조치 원인" Navigate "v" "action reasons"
+          ~help:"read every reason in the last server rollup; scroll and search the captured reading; Esc returns without changing a decision or setting"
+      ; b ~ko:"키퍼" Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
+      ; b ~ko:"선택" Navigate "j/k" "choose" ~help:"select a destination"
       ; b ~ko:"열기" Navigate "Enter" "open" ~help:"open the selected destination; never approve"
       ; b ~ko:"승인·질문" Navigate "p" "requests" ~help:"approvals and questions"
       ; b ~ko:"퀴즈" Navigate "g" "quiz" ~help:"the operator quiz's Results: scorecard windows and wrong-answer notes"
@@ -584,7 +591,8 @@ let for_surface = function
          event, so the label was saying the surface's own subject back to the
          reader. The six cells it gives back are what lets [f] stay on the row
          beside it -- see the footer case in test_tui_keys. *)
-      ; b Act "Enter" "evidence" ~help:"Actions/Everything: exact selected event; Turns are aggregates"
+      ; b Act "Enter" "evidence" ~detail:List_only ~rows:Needs_reading
+          ~help:"Actions/Everything: exact selected event; Turns are aggregates"
       (* One key, one row. Esc closes the evidence pane when one is open
          (masc_tui.ml guards the close on acting_detail) and otherwise
          leaves the surface, so two rows read as two bindings. *)
@@ -620,10 +628,12 @@ let for_surface = function
       :: (b Act "W" "world"
             ~help:"select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper")
       :: (b Act "Right" "detail" ~help:"keeper detail")
+      :: (b ~ko:"관측 오류" Act "!" "read errors"
+            ~help:"read every current Keeper-list observation error and its complete reason; Esc returns")
       :: (b Act "Tab / s / m" "pages"
             ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")
-      :: (b Act "0 / 1 / 2 / 3 / 4 / [ / ]" "memory"
-            ~help:"with Keeper Memory open: overview / recent records / retrievals / committed changes / storage; brackets scroll the table")
+      :: (b Act "1 / 2 / 3 / 4" "memory"
+            ~help:"with Keeper Memory preview open: browse recent records / retrievals / committed changes / storage in the shared Memory browser; Enter also opens recent records")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
@@ -679,14 +689,26 @@ let for_surface = function
       [ b Navigate "Left" "roster" ~help:"empty composer: open the Keeper list; with text: move the cursor left"
       ; b Navigate "Right" "chat"
           ~help:"roster focused: return focus to the chat composer"
-      ; (* One key, two focuses: the roster when it holds focus, the history
-           when the chat is scrolled back. Listed once so the table keeps the
-           one-key-one-row contract (#33236). *)
+      ; (* One key, several jobs: the roster when it holds focus, the history
+           when the chat is scrolled back, the completions while a /command is
+           typed, and otherwise the lines the operator sent. Listed once so the
+           table keeps the one-key-one-row contract (#33236). *)
         b Navigate "Up / Down" "roster move / scroll"
-          ~help:"roster focused: move; chat scrolled back: adjust by one line"
+          ~help:
+            "roster focused: move; chat scrolled back: adjust by one line; \
+             while a /command is typed: pick among its completions; \
+             otherwise walk the history of lines you sent: Up recalls the \
+             previous one (a line still waiting in the queue comes back as \
+             an edit of that line), Down steps back toward your draft"
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
-      ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
+      ; b Act "Ctrl-J" "newline"
+          ~help:"newline in the draft; Shift-Enter does the same where the terminal reports it"
+      ; b Act "Tab / Shift-Tab" "complete"
+          ~help:
+            "complete the /command being typed, or its argument such as a \
+             Keeper name; the chat composer keeps these keys, so they do not \
+             switch surface here"
       ; b Act voice_speak_key "speak"
           ~help:"record into the draft; again to stop and keep what was said"
       ; b Act voice_listen_key "keep listening"
@@ -700,6 +722,8 @@ let for_surface = function
       ; b Act "Ctrl-T" "queue"
           ~help:"inspect and manage waiting turns"
       ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
+      ; b Navigate "Ctrl-E / End" "newest"
+          ~help:"after reading back, jump to the newest row"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"cycle compact / results / full tool detail"
       ; b Act expand_turn_label "turn detail"
@@ -716,6 +740,8 @@ let for_surface = function
           ~help:"cycle no clock / inline clock / full timestamp and request id"
       ; b Act "Ctrl-O" "image / diagram"
           ~help:"preview the newest image or Mermaid diagram; /images lists all; any key returns"
+      ; b Act "Ctrl-V" "paste image"
+          ~help:"paste the clipboard image: it is staged for the next message and an [Image #1] marker lands in the draft"
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "/copy" "copy reply"
           ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"
@@ -1070,6 +1096,7 @@ let for_surface = function
       ]
       @ row_list_edges @ listing_meta
   | Memory ->
+      memory_browser_pages @
       [ b ~ko:"선택" Navigate "j/k" "move" ~help:"move the keeper row"
       ; b ~ko:"기억 항목" Act "Enter" "facts"
           ~help:"browse what the selected keeper actually remembers"
@@ -1174,8 +1201,8 @@ let for_surface = function
       ; b Act "w" "layout" ~help:"switch full-width list/reader and side-by-side browsing"
       ; b Act "v" "document / source" ~detail:Detail_only
           ~help:"show the document or its original text syntax; copied bytes stay original"
-      ; b Act "i" "report info" ~detail:Detail_only
-          ~help:"expand the URI, type, size and complete report metadata"
+      ; b Act "i" "resource info" ~detail:Detail_only
+          ~help:"expand the source, URI, type, size and complete metadata for an MCP resource or report; the body is shown first by default"
       ; b Navigate "j/k" "move"
           ~help:"move the list; with the text focused, scroll it"
       ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
@@ -1199,7 +1226,7 @@ let for_surface = function
       ; b Navigate "( / )" "text part" ~detail:Detail_only
           ~help:"select the previous or next original text part for copying"
       ; b Act "s" "save original" ~detail:Detail_only
-          ~help:"choose a local destination; exclusively create the selected report revision's exact bytes"
+          ~help:"choose a local destination; Enter exclusively creates the selected report revision's exact bytes, Esc closes path input; the retained result stays with that original report"
       ; b Act "o" "open Dashboard" ~detail:Detail_only
           ~help:"open the selected fixed report revision; the browser uses its own authentication"
       ; b Act "P" "external sharing" ~detail:Detail_only
@@ -1305,7 +1332,22 @@ let for_surface = function
       ; b Navigate "PgUp/PgDn" "page"
       ; b Navigate "Home/End" "top/bottom"
       ; b Navigate "p" "section"
-          ~help:"available / async runs / receipts / usage / all tools"
+          ~help:"available / async runs / receipts / usage / all tools. \
+                 Available shows the selected Keeper's exposed tools and Skills; \
+                 ORIGIN names the tool source. Async runs shows workspace requests \
+                 and recovery: active counts active ledger requests, runtime-owned \
+                 means a current runtime owner, ownership-unknown is unconfirmed. \
+                 Receipts keeps current-session Skill evidence: triggered=invoked, \
+                 delivered/handed off=delivered, actions=later tool actions. \
+                 These are separate events; no record does not prove no use. \
+                 Usage aggregates recorded calls by exact Skill revision across \
+                 current Keeper sessions; last use is the ledger's recorded time, \
+                 and unread ledgers stay qualified. \
+                 All tools lists process-wide registrations, separately from \
+                 a Keeper's callable surface and observed calls. \
+                 DIRECT=direct calls allowed; SURFACES=exposure paths; \
+                 none=no exposure path. Use Skill receipts for usage evidence \
+                 and Activity for tool input/output."
       ; b Navigate "J/K" "Skill"
           ~help:"in async runs, select an original request; otherwise select \
                  a published Skill"
@@ -1427,7 +1469,11 @@ let footer_hints ?(lang = Lang_en) ?detail_open ?has_rows ?has_reading surface =
 let planning_goal_hints ~lang ~detail_open ~has_rows =
   let bindings = for_surface Planning
     |> List.filter (answers_in_state ~detail_open ?has_rows)
-    |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r")) in
+    |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r"))
+    |> List.map (fun binding ->
+      if detail_open && String.equal binding.key "j/k" then
+        {binding with label = "scroll"; label_ko = Some "스크롤"}
+      else binding) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
   hints_in_order ~lang (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
 
@@ -2014,17 +2060,76 @@ let footer_hints_code ~pane =
       | Code_history -> hints_of_bindings code_history_bindings
       | Code_tree _ | Code_root _ | Code_file | Code_diff -> hints
 
-(* The Runtime footer is the table's, with the two keys that depend on the
-   reading on screen: [p] names where it goes from here, and [e] names the edit
-   owned by the selected runtime or keeper lane. The renderer
-   used to spell its own line -- "j/k:scroll  Enter:detail  p:%s  Tab:next
-   q:quit  r:live refresh" -- which never named [c], the one key to Clients,
-   or [Esc], the way back to Config, and called the global refresh a live
-   one. *)
-let footer_hints_runtime ~(mode : runtime_mode) =
-  List.filter_map (runtime_footer_binding ~mode) runtime_keys
-  @ row_list_edges @ listing_meta
-  |> hints_of_bindings
+(* The ordinary reading and its picker answer different Enter keys. The
+   footer reads the same pick/filter state the dispatcher owns; printable
+   letters only belong to the surface while no filter is being typed. *)
+let runtime_parent_bindings ~ko parent =
+  let text korean english = if ko then korean else english in
+  let name_bindings enter =
+    [ b Act "Enter" enter
+    ; b Navigate "PgUp" (text "초안·안내 전체" "read draft/context")
+    ; b Act "Backspace" (text "지우기" "erase")
+    ; b Act "Esc" (text "취소" "cancel") ] in
+  match parent with
+  | Runtime_media_parent ->
+      [ b Act "v" (text "전체 읽기" "read all")
+          ~help:"read full IDs, admission and results without closing the editor; ! marks a declared slot not admitted in the last observation"
+      ; b Act "a" (text "추가" "add")
+      ; b Navigate "j/k" (text "선택" "select")
+      ; b Navigate "PgUp/PgDn" (text "페이지" "page")
+      ; b Navigate "Home/End" (text "처음/끝" "edges")
+      ; b Act "x" (text "제거" "drop")
+      ; b Act "J/K" (text "순서 변경" "reorder")
+      ; b Act "1" (text "맨 앞으로" "make first")
+      ; b Act "Esc" (text "닫기" "close")
+      ; b Meta "r" (text "새로고침" "refresh")
+      ; b Meta "?" (text "도움말" "help") ]
+  | Runtime_prompt_parent (Lane_name_prompt _) ->
+      name_bindings (text "첫 런타임 선택" "choose first runtime")
+  | Runtime_prompt_parent (Lane_rename_prompt _) ->
+      name_bindings (text "이름·참조 변경" "rename and rewrite references")
+  | Runtime_prompt_parent (Lane_remove_prompt _) ->
+      [ b Act "D" (text "제거 확인" "confirm removal")
+      ; b Act "v" (text "확인 해제·전체 읽기" "disarm and read all")
+      ; b Act "Esc" (text "뒤로" "back") ]
+
+let footer_hints_runtime_parent ~ko ~parent =
+  runtime_parent_bindings ~ko parent |> hints_of_bindings
+
+let footer_hints_runtime ~(mode : runtime_mode) ~picker =
+  match picker with
+  | None ->
+      List.filter_map (runtime_footer_binding ~mode) runtime_keys
+      @ row_list_edges @ listing_meta
+      |> hints_of_bindings
+  | Some picker ->
+      let pick = picker.rlp_pick in
+      let enter = match pick with
+        | Pick_new_lane _ -> "create"
+        | Pick_conversation_lane _ | Pick_exact_lane _ | Pick_media_failover -> "append"
+        | Pick_exact_lane_replacement _ | Pick_route_default -> "replace"
+      in
+      let controls = match picker.rlp_filter with
+        | None ->
+            [ b Act "e / E / Esc" "cancel"
+            ; b Navigate "j/k" "move"
+            ; b Navigate "PgUp/PgDn" "page"
+            ; b Search "/" "filter"
+            ] @ row_list_edges @ listing_meta
+        | Some query ->
+            let back = match pick with
+              | (Pick_exact_lane _ | Pick_exact_lane_replacement _)
+                when String.equal query "" -> "cancel"
+              | Pick_route_default | Pick_conversation_lane _ | Pick_exact_lane _
+              | Pick_exact_lane_replacement _ | Pick_new_lane _
+              | Pick_media_failover -> "clear filter"
+            in
+            [ b Act "Esc" back
+            ; b Navigate "↑/↓" "move"
+            ; b Navigate "PgUp/PgDn" "page"
+            ] @ row_list_edges
+      in
+      b Act "Enter" enter :: controls |> hints_of_bindings
 
 let footer_hints_resources ~detail_focus =
   for_surface Resources
@@ -2036,6 +2141,13 @@ let footer_hints_resources ~detail_focus =
          if String.equal binding.key "j/k" then
            { binding with label = (if detail_focus then "scroll text" else "move") }
          else binding)
+  |> hints_of_bindings
+
+let footer_hints_resource_save ~pending =
+  (if pending then [] else [b Act "Enter" "create file"])
+  @ [ b Navigate "Esc" "close input"
+    ; b Act "Ctrl-U" "clear path"
+    ; b Navigate "PgUp/PgDn" "read result" ]
   |> hints_of_bindings
 
 let opens_keepers ~message_mode key =
@@ -2230,7 +2342,23 @@ let footer_hints_git_diff =
    health row's under these names -- Enter opens the reading, s reorders
    instead of pausing a keeper -- so a reader who has not pressed them learns
    them only from [?], which is what [?] answers. *)
+let bindings_memory_changes =
+  memory_browser_pages @
+  [ b ~ko:"이동" Navigate "j/k" "move"
+  ; b ~ko:"전문" Act "Enter" "full reading"
+      ~help:"read all original and successor claims of the selected committed change"
+  ; b ~ko:"… 변화 카드" Act "." "… change cards"
+      ~help:"open only the selected change as before/change/after cards with wrapped claim excerpts; full text remains on Enter"
+  ; b ~ko:"연결 트리" Act "Ctrl-O" "connected tree"
+      ~help:"open the selected change's complete connected observed memory lineage with the offline Pele Mermaid preview"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"뒤로" Act "Esc" "back to facts" ]
+  @ row_list_edges @ listing_meta
+
+let footer_hints_memory_changes ~lang = hints_of_bindings ~lang bindings_memory_changes
+
 let bindings_memory_facts =
+  memory_browser_pages @
   [ b ~ko:"이동 / 스크롤" Navigate "j/k" "move" ~rows:Needs_row
   ; b ~ko:"상세" Act "Enter" "detail" ~rows:Needs_row
       ~help:"read the whole fact in a wide overlay that owns the terminal"
@@ -2721,6 +2849,8 @@ let located_sections ?current () =
                List.map
                  (fun (key, help) -> (key, "in the facts browser: " ^ help))
                  (entries bindings_memory_facts)
+               @ List.map (fun (key, help) -> (key, "in the changes browser: " ^ help))
+                   (entries bindings_memory_changes)
                @ List.map
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
                    (entries bindings_memory_fact_detail)
@@ -2929,6 +3059,10 @@ let help_sections_for_state ~cols (state : state) =
     else if state.view = Runtime && Option.is_some state.runtime_detail_target then
       let routes = state.runtime_detail_target = Some Runtime_routes in
       Some ("Runtime detail", runtime_detail_bindings_for ~ko:(state.ui_language = Lang_ko) ~routes)
+    else if state.view = Runtime && Option.is_some (runtime_parent state) then
+      Option.map (fun parent ->
+        "Runtime editor", runtime_parent_bindings ~ko:(state.ui_language = Lang_ko) parent)
+        (runtime_parent state)
     else if state.view = Acting && Option.is_some state.acting_detail then
       Some ("Event evidence", bindings_acting_evidence)
     else if state.view = Code && state.code_focus_file = Right_pane

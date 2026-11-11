@@ -14,7 +14,7 @@ The command palette is `:`.
 
 | Keys | What it does |
 |---|---|
-| `Tab / Shift-Tab` | next / previous surface |
+| `Tab / Shift-Tab` | next / previous surface; the chat composer keeps them to complete a /command |
 | `3` | jump to Keepers when the active field or panel does not use 3 |
 | `r` | refresh the current surface |
 | `i` | focus the composer; on Dashboard, choose a Keeper |
@@ -35,8 +35,9 @@ The command palette is `:`.
 
 | Keys | What it does |
 |---|---|
+| `v` | read every reason in the last server rollup; scroll and search the captured reading; Esc returns without changing a decision or setting |
 | `Left` | open the Keeper list; Enter opens a chat; Right or Esc returns |
-| `j/k` | move between decision links and conversations |
+| `j/k` | select a destination |
 | `Enter` | open the selected destination; never approve |
 | `p` | approvals and questions |
 | `g` | the operator quiz's Results: scorecard windows and wrong-answer notes |
@@ -86,8 +87,9 @@ The command palette is `:`.
 | `Enter` | open the selected Keeper Story or shared World window; Enter closes its story/world page |
 | `W` | select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper |
 | `Right` | keeper detail |
+| `!` | read every current Keeper-list observation error and its complete reason; Esc returns |
 | `Tab / s / m` | with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window |
-| `0 / 1 / 2 / 3 / 4 / [ / ]` | with Keeper Memory open: overview / recent records / retrievals / committed changes / storage; brackets scroll the table |
+| `1 / 2 / 3 / 4` | with Keeper Memory preview open: browse recent records / retrievals / committed changes / storage in the shared Memory browser; Enter also opens recent records |
 | `c` | chat with the keeper |
 | `l` | logs |
 | `t` | tool calls |
@@ -212,6 +214,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `w` | on Usage: cycle the exact UTC day window for provider report history and tool calls |
 | `1 / 2 / 3` | on Telemetry: Engine, Work, or Tools |
 | `Esc` | Dashboard |
+| `Tab` | next |
 
 ## Work / Board
 
@@ -305,7 +308,6 @@ data and paint. A missing finish record remains an unfinished observation.
 | `Esc` | back to Dashboard |
 | `r` | reload |
 | `Tab` | next |
-| `q` | quit |
 
 Runtime model and account form saves keep input and its opening revision while
 workspace checks, source reading, preview and guarded commit run outside the
@@ -362,6 +364,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Enter` | Actions/Everything: exact selected event; Turns are aggregates |
 | `Esc` | close event evidence; from the list, back to Dashboard |
 | `Home/End` | g and G as well; the ring counts back from the newest, so its top is now |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keeper detail
 
@@ -429,9 +433,10 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 |---|---|
 | `Left` | empty composer: open the Keeper list; with text: move the cursor left |
 | `Right` | roster focused: return focus to the chat composer |
-| `Up / Down` | roster focused: move; chat scrolled back: adjust by one line |
+| `Up / Down` | roster focused: move; chat scrolled back: adjust by one line; while a /command is typed: pick among its completions; otherwise walk the history of lines you sent: Up recalls the previous one (a line still waiting in the queue comes back as an edit of that line), Down steps back toward your draft |
 | `Enter` | send from chat, or open the selected Keeper from the roster |
-| `Ctrl-J` | newline in the draft |
+| `Ctrl-J` | newline in the draft; Shift-Enter does the same where the terminal reports it |
+| `Tab / Shift-Tab` | complete the /command being typed, or its argument such as a Keeper name; the chat composer keeps these keys, so they do not switch surface here |
 | `Ctrl-Y` | record into the draft; again to stop and keep what was said |
 | `Ctrl-A` | continuous capture on/off: each sentence starts the next capture |
 | `Ctrl-G` | next keeper with a chat open |
@@ -440,15 +445,14 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `F9` | fold or expand this Keeper's scheduled Jobs, pending occurrences, holds and latest result |
 | `Ctrl-T` | inspect and manage waiting turns |
 | `PgUp/PgDn` | scroll history by a page |
+| `Ctrl-E / End` | after reading back, jump to the newest row |
 | `Ctrl-R` | cycle reasoning hidden / folded / full |
 | `Ctrl-D` | cycle compact / results / full tool detail |
 | `Ctrl-S` | unfold the running turn's status rows, or fold them back to the progress line |
 | `Ctrl-N` | cycle Memory journal summary / full / hidden |
-| `/memory` | cycle Memory journal summary / full / hidden |
-| `/memory status` | read the selected Keeper's current memory health, including its last processing observation and waiting reason |
-| `/memory sync` | request catch-up on the existing Memory lane, including for a paused Keeper; acceptance does not mean completion |
 | `Ctrl-F` | cycle no clock / inline clock / full timestamp and request id |
 | `Ctrl-O` | preview the newest image or Mermaid diagram; /images lists all; any key returns |
+| `Ctrl-V` | paste the clipboard image: it is staged for the next message and an [Image #1] marker lands in the draft |
 | `/approve /deny` | type a command and Enter to answer a tool approval |
 | `/copy` | send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52 |
 | `Q / Ctrl-Q` | Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting |
@@ -626,6 +630,7 @@ count is drawn beyond the available space.
 
 | Keys | What it does |
 |---|---|
+| `1 / 2 / 3 / 4` | one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | move the keeper row |
 | `Enter` | browse what the selected keeper actually remembers |
 | `v` | read the complete fleet summary and selected keeper health in a scrollable capture |
@@ -638,6 +643,7 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `1 / 2 / 3 / 4` | in the facts browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | in the facts browser: move |
 | `Enter` | in the facts browser: read the whole fact in a wide overlay that owns the terminal |
 | `c / C` | in the facts browser: cycle category filter (forward / backward) |
@@ -651,6 +657,17 @@ count is drawn beyond the available space.
 | `r` | in the facts browser: refresh |
 | `Tab` | in the facts browser: next |
 | `q` | in the facts browser: quit |
+| `1 / 2 / 3 / 4` | in the changes browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
+| `j/k` | in the changes browser: move |
+| `Enter` | in the changes browser: read all original and successor claims of the selected committed change |
+| `.` | in the changes browser: open only the selected change as before/change/after cards with wrapped claim excerpts; full text remains on Enter |
+| `Ctrl-O` | in the changes browser: open the selected change's complete connected observed memory lineage with the offline Pele Mermaid preview |
+| `PgUp/PgDn` | in the changes browser: page |
+| `Esc` | in the changes browser: back to facts |
+| `Home/End` | in the changes browser: top/bottom |
+| `r` | in the changes browser: refresh |
+| `Tab` | in the changes browser: next |
+| `q` | in the changes browser: quit |
 | `j/k` | in the fact detail: scroll |
 | `PgUp/PgDn` | in the fact detail: page |
 | `g / G` | in the fact detail: jump to the first or last line of the fact |
@@ -711,7 +728,7 @@ count is drawn beyond the available space.
 | Keys | What it does |
 |---|---|
 | `j/k` | move / scroll |
-| `PgUp/PgDn` | detail page |
+| `PgUp/PgDn` | page an open detail; in the media editor page declared slots; while typing a lane name, PgUp opens the complete draft/context reader and Esc returns to the unchanged field |
 | `Right / Enter` | show the full runtime, lane, dispatch, and probe fields |
 | `h` | toggle de-emphasis for exhausted, rate-limited, and spent runtimes |
 | `v` | read complete default and media routes, boot admission and probe diagnostics |
@@ -722,7 +739,7 @@ count is drawn beyond the available space.
 | `x` | take the candidate under the cursor out of its lane; the last one cannot go, remove the lane instead |
 | `J/K` | move the candidate under the cursor down or up its lane |
 | `f` | replace [runtime].default, what a keeper with no assignment walks |
-| `m` | edit [runtime].media_failover in the slot editor; refused while boot dropped one of its entries |
+| `m` | edit [runtime].media_failover: j/k, PgUp/PgDn and Home/End select declared slots; a appends, x drops, J/K reorder, 1 makes first, v reads all IDs/results without closing the editor. Admission and write refusals remain in the reading |
 | `R` | give the lane under the cursor another name; the assignments that route to it and [runtime].default, when it names it, are rewritten in the same write. The field opens on the name it has now |
 | `D` | remove the lane under the cursor; press twice. Refused while a keeper is assigned to it |
 | `Esc` | back to Config |
@@ -741,7 +758,7 @@ count is drawn beyond the available space.
 | `t` | toggle the local publication day captured at this keypress |
 | `w` | switch full-width list/reader and side-by-side browsing |
 | `v` | show the document or its original text syntax; copied bytes stay original |
-| `i` | expand the URI, type, size and complete report metadata |
+| `i` | expand the source, URI, type, size and complete metadata for an MCP resource or report; the body is shown first by default |
 | `j/k` | move the list; with the text focused, scroll it |
 | `h/l` | focus the resource list or text |
 | `Ctrl-W` | cycle the resource list, the text, and the Activity pane when it is drawn |
@@ -754,7 +771,7 @@ count is drawn beyond the available space.
 | `, / .` | select the previous or next image or Mermaid diagram in the loaded resource |
 | `Ctrl-O` | open the selected image or Pele diagram from the retained resource bytes |
 | `( / )` | select the previous or next original text part for copying |
-| `s` | choose a local destination; exclusively create the selected report revision's exact bytes |
+| `s` | choose a local destination; Enter exclusively creates the selected report revision's exact bytes, Esc closes path input; the retained result stays with that original report |
 | `o` | open the selected fixed report revision; the browser uses its own authentication |
 | `P` | enable or revoke external access to all revisions of this report |
 | `U` | inspect the original recorded share operation |
@@ -766,6 +783,8 @@ count is drawn beyond the available space.
 | `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |
 | `r` | reload |
+| `Tab` | next |
+| `q` | quit |
 
 ## Features & plugins / Tools
 
@@ -774,7 +793,7 @@ count is drawn beyond the available space.
 | `j/k` | scroll |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
-| `p` | available / async runs / receipts / usage / all tools |
+| `p` | available / async runs / receipts / usage / all tools. Available shows the selected Keeper's exposed tools and Skills; ORIGIN names the tool source. Async runs shows workspace requests and recovery: active counts active ledger requests, runtime-owned means a current runtime owner, ownership-unknown is unconfirmed. Receipts keeps current-session Skill evidence: triggered=invoked, delivered/handed off=delivered, actions=later tool actions. These are separate events; no record does not prove no use. Usage aggregates recorded calls by exact Skill revision across current Keeper sessions; last use is the ledger's recorded time, and unread ledgers stay qualified. All tools lists process-wide registrations, separately from a Keeper's callable surface and observed calls. DIRECT=direct calls allowed; SURFACES=exposure paths; none=no exposure path. Use Skill receipts for usage evidence and Activity for tool input/output. |
 | `J/K` | in async runs, select an original request; otherwise select a published Skill |
 | `f` | outside async requests, select the next Composition and load its exact-revision performance charts |
 | `Ctrl-O` | outside async requests, preview the declared composition with Pele |
@@ -855,9 +874,9 @@ or completion.
 | `NOW` | what the keeper is doing at this moment |
 | `AGE` | time since it last moved: the open turn's latest update (its start before it reports one), else the later of its last turn and the start of its wait |
 | `LIFECYCLE` | the keeper process |
-| `◂ ┃ ● now ┃ next ▹ due lag` | every view but the list draws a keeper on the same columns, fixed from the right edge so the ┃ lines stand in one column: the row mark (! failing, ○ paused, ✓ recovered in the cause view, ● the rest), the name, the turn pulse, the NOW cell, the half hours ahead (◷ a scheduled wake, · none, ? unknown), the next scheduled run (its time within a day, late, held, held? from an earlier reading, ? unknown) and the librarian's unread turns with a level against the keeper furthest behind. The memory and age views pick their own columns. With two lines a failing keeper of the state and cause views adds a line: ◂ since when it fails, the attempts of the failed turn (✗━✗) and the failure word, and the runtime of the next dispatch (▹, or ◌ wait while the path rests) |
-| `◂ turns ┃ librarian ┃ lag ▹ digest gap` | the memory view: the turn pulse, how the librarian's last pass ended (no data without a memory row), the unread turns as a bar against the listed keeper furthest behind, the time since the last digest (— before the first) and the atoms requests skip; ? is a value the server did not measure, a pass this server has not seen yet too |
-| `facts by age ▸ ┃ saved ┃ lag ▹ stale facts` | the age view: the keeper's facts in the server's 24 age bins, 30d or older on the left and under 1h on the right, on log steps between the edges 1h, 1d, 7d, 30d, two or four bins to a cell on a narrow list; a cell is a level against the row's largest one, · when empty, in the info colour under 1d, the row's own to 7d and dim past that, and a group title adds up its keepers; + the time since its memory snapshot was saved (— no snapshot without one), the unread-turn bar, ×N invalidated sources and the fact count with a level against the keeper with the most facts; ? is a value the server did not measure |
+| `◂ │ ● now │ next ▹ due lag` | every view but the list draws a keeper on the same columns, fixed from the right edge so the │ lines stand in one column: the row mark (! failing, ○ paused, ✓ recovered in the cause view, ● the rest), the name, the turn pulse, the NOW cell, the state view's known wake count and any partial observation, or the other views' half hours ahead (▁ a scheduled wake, blank none, ─ an unknown range; entirely unknown or empty windows have one label), the next scheduled run (its time within a day, late, held, held? from an earlier reading, ? unknown) and the librarian's unread turns with a level against the keeper furthest behind. The memory and age views pick their own columns. With two lines a failing keeper of the state and cause views adds a line: ◂ since when it fails, the attempts of the failed turn (✗━✗) and the failure word, and the runtime of the next dispatch (▹, or ◌ wait while the path rests) |
+| `◂ turns │ librarian │ lag ▹ digest gap` | the memory view: the turn pulse, how the librarian's last pass ended (no data without a memory row), the unread turns as a bar against the listed keeper furthest behind, the time since the last digest (— before the first) and the atoms requests skip; ? is a value the server did not measure, a pass this server has not seen yet too |
+| `facts by age ▸ │ saved │ lag ▹ stale facts` | the age view: the keeper's facts in the server's 24 age bins, 30d or older on the left and under 1h on the right, on log steps between the edges 1h, 1d, 7d, 30d, two or four bins to a cell on a narrow list; a cell is a level against the row's largest one, · when empty, in the info colour under 1d, the row's own to 7d and dim past that, and a group title adds up its keepers; + the time since its memory snapshot was saved (— no snapshot without one), the unread-turn bar, ×N invalidated sources and the fact count with a level against the keeper with the most facts; ? is a value the server did not measure |
 | `· ▁ ▄ █ ?` | the views' turn pulse: autonomous turn results of the last half hours, one mark per half hour, newest on the right: · no turn / ▁ ok / ▄ failed and ok / █ failed / ? unknown; a rested turn counts as failed, chat turns are not counted, and a half hour from before the server's record of the keeper reads ?. The header names how long the marks span |
 | `◂` | a failing keeper's last failure: how long ago · cause · the runtime that ended it · candidates tried. The list draws it in place of its runtime or first in DETAIL |
 | `failing` | how long the keeper has been in the failing phase; ? when the server recorded no start, or the start is ahead of this screen's clock (Detailed second row) |

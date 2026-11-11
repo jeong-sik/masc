@@ -202,6 +202,107 @@ let test_format_timestamp_absolute () =
     "2023-11-14T22:13:20Z"
     (Board_tool_format.format_expiry 1_700_000_000.0)
 
+(* The rendering of a search that shows the first hits in full and the rest as one
+   line. Each hit's full text is a run of its own letter, so a letter run names the
+   hit it came from and no run is part of another. *)
+let search_hits_for_join =
+  List.init 5 (fun i ->
+    { Board_tool_format.full = String.make (90 + (10 * i)) (Char.chr (Char.code 'a' + i))
+    ; one_line = Printf.sprintf "row-%d" i
+    })
+
+let search_join_header = "H:\n\n"
+
+let occurrences haystack needle =
+  let rec count from found =
+    match Str.search_forward (Str.regexp_string needle) haystack from with
+    | position -> count (position + String.length needle) (found + 1)
+    | exception Not_found -> found
+  in
+  count 0 0
+
+let full_hits_shown text =
+  List.length
+    (List.filter
+       (fun (hit : Board_tool_format.search_hit) -> String_util.contains_substring text hit.full)
+       search_hits_for_join)
+
+let test_join_search_hits_keeps_every_full_hit_when_they_fit () =
+  let text =
+    Board_tool_format.join_search_hits ~max_bytes:max_int ~header:search_join_header
+      search_hits_for_join
+  in
+  Alcotest.(check string)
+    "header, then every full hit joined by a rule line"
+    (search_join_header
+     ^ String.concat "\n---\n"
+         (List.map (fun (hit : Board_tool_format.search_hit) -> hit.full) search_hits_for_join))
+    text;
+  Alcotest.(check int) "no hit was shortened" 0 (occurrences text "row-");
+  Alcotest.(check string) "no hits is just the header" search_join_header
+    (Board_tool_format.join_search_hits ~max_bytes:0 ~header:search_join_header [])
+
+(* For every ceiling from 0 to the size of the all-full text: the text is under the
+   ceiling unless not even one full hit fits, the count of full hits never falls as
+   the ceiling grows, it grows only when the text reaches the ceiling to the byte,
+   and each hit is in the text exactly once, in the order it was given. *)
+let test_join_search_hits_takes_the_most_full_hits_that_fit () =
+  let all_full_size =
+    String.length
+      (Board_tool_format.join_search_hits ~max_bytes:max_int ~header:search_join_header
+         search_hits_for_join)
+  in
+  let previous = ref 0 in
+  for max_bytes = 0 to all_full_size + 4 do
+    let text =
+      Board_tool_format.join_search_hits ~max_bytes ~header:search_join_header search_hits_for_join
+    in
+    let shown = full_hits_shown text in
+    let at = Printf.sprintf "ceiling %d" max_bytes in
+    if shown > 0 then
+      Alcotest.(check bool) (at ^ ": the text fits") true (String.length text <= max_bytes);
+    Alcotest.(check bool) (at ^ ": full hits never fall as the ceiling grows") true
+      (shown >= !previous);
+    if shown > !previous then
+      Alcotest.(check int) (at ^ ": a new full hit fits to the byte") max_bytes (String.length text);
+    List.iteri
+      (fun i (hit : Board_tool_format.search_hit) ->
+        let full = occurrences text hit.full and row = occurrences text hit.one_line in
+        let expected_full = if i < shown then 1 else 0 in
+        Alcotest.(check (pair int int))
+          (Printf.sprintf "%s: hit %d is full once or one line once" at i)
+          (expected_full, 1 - expected_full)
+          (full, row))
+      search_hits_for_join;
+    previous := shown
+  done;
+  Alcotest.(check int) "the last ceiling shows every hit in full"
+    (List.length search_hits_for_join) !previous
+
+let test_join_search_hits_says_how_many_were_shortened () =
+  let text =
+    Board_tool_format.join_search_hits ~max_bytes:500 ~header:search_join_header
+      search_hits_for_join
+  in
+  let shown = full_hits_shown text in
+  let total = List.length search_hits_for_join in
+  Alcotest.(check bool) "some hits are full and some are rows" true (shown > 0 && shown < total);
+  Alcotest.(check int) "the note counts the full hits and the rows" 1
+    (occurrences text
+       (Printf.sprintf "앞의 %d개만 실었어요. 나머지 %d개는" shown (total - shown)));
+  Alcotest.(check bool) "the note names masc_board_post_get" true
+    (String_util.contains_substring text "masc_board_post_get");
+  let position needle = Str.search_forward (Str.regexp_string needle) text 0 in
+  let last_full =
+    List.fold_left
+      (fun acc (hit : Board_tool_format.search_hit) ->
+        match position hit.full with
+        | at -> max acc at
+        | exception Not_found -> acc)
+      (-1) search_hits_for_join
+  in
+  Alcotest.(check bool) "the rows come after every full hit" true (position "row-" > last_full)
+
 let json_member_string json key =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
@@ -273,7 +374,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
    | Error e -> Alcotest.fail (Board.show_board_error e));
   let comment =
     match
-      Board_dispatch.add_comment ~post_id ~author:"commenter"
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"commenter"
         ~content:"reactable comment" ()
     with
     | Ok comment -> comment
@@ -290,7 +391,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
     Server_utils.board_reactions_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter:(Some "reactor") ~post_id
   in
   let post_json =
-    Server_utils.board_post_dashboard_json ~reactions:post_reactions
+    Server_utils.board_post_dashboard_json ?reactions:post_reactions
       ~author_karma:0 post
   in
   let post_summary =
@@ -310,7 +411,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
     Server_utils.board_reactions_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:(Some "reactor") ~comment_id
   in
   let comment_json =
-    Server_utils.board_comment_dashboard_json ~reactions:comment_reactions comment
+    Server_utils.board_comment_dashboard_json ?reactions:comment_reactions comment
   in
   let comment_summary =
     match json_member_list comment_json "reactions" with
@@ -394,8 +495,8 @@ let test_inline_board_post_author_rewrites_caller_claim () =
       ]
   in
   let normalized =
-    Mcp_tool_runtime_board.ensure_board_post_author
-      ~agent_name:"xi-hammer" args
+    Mcp_tool_runtime_board.enforce_caller_identity ~tool:"masc_board_post"
+      ~field:"author" ~agent_name:"xi-hammer" args
   in
   Alcotest.(check string) "author from ctx" "xi-hammer"
     Yojson.Safe.Util.(normalized |> member "author" |> to_string);
@@ -404,24 +505,6 @@ let test_inline_board_post_author_rewrites_caller_claim () =
       normalized |> member "meta" |> member "author_caller_claim" |> to_string);
   Alcotest.(check string) "existing meta preserved" "probe-10297"
     Yojson.Safe.Util.(normalized |> member "meta" |> member "trace" |> to_string)
-
-let test_inline_board_post_author_accepts_matching_alias () =
-  let args =
-    make_args
-      [
-        ("content", `String "ctx-owned post");
-        ("author", `String "delta");
-      ]
-  in
-  let normalized =
-    Mcp_tool_runtime_board.ensure_board_post_author ~agent_name:"delta" args
-  in
-  Alcotest.(check string) "author canonical" "delta"
-    Yojson.Safe.Util.(normalized |> member "author" |> to_string);
-  Alcotest.(check bool) "no mismatch claim" true
-    (match Yojson.Safe.Util.member "meta" normalized with
-     | `Null -> true
-     | meta -> Yojson.Safe.Util.member "author_caller_claim" meta = `Null)
 
 (** {2 Group 2: JSON helper functions} *)
 
@@ -1234,6 +1317,11 @@ let test_masc_board_configured_moderator_can_close_and_reopen () =
   Alcotest.(check bool) "invalid config is named" true
     (String_util.contains_substring (Tool_result.message invalid)
        "board.moderators configuration");
+  Alcotest.(check bool) "invalid config is a runtime failure" true
+    (match invalid with
+     | Tool_result.Failed { Tool_result.class_ = Tool_result.Runtime_failure; _ }
+       -> true
+     | _ -> false);
   match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok post -> Alcotest.(check bool) "refused closes leave post open" true
       (Option.is_none post.closed)
@@ -1601,7 +1689,15 @@ let test_committed_board_projection_failure_reaches_callers_as_completed () =
   let activity_path = Filename.concat (Workspace.masc_dir config) Activity_graph.store_dirname in
   Out_channel.with_open_bin activity_path (fun channel -> output_string channel "blocked activity store");
   let name = Tool_name.Board_name.to_string Tool_name.Board_name.Board_post in
-  let arguments = `Assoc ["content", `String "A committed post survives projection failure"] in
+  (* Posting defaults to internal, and only a Public post reaches the activity
+     graph (mcp_tool_runtime_board.ml, public_created_post). This test needs the
+     projection attempt to happen and fail, so the post asks to be Public. *)
+  let arguments =
+    `Assoc
+      [ ("content", `String "A committed post survives projection failure")
+      ; ("visibility", `String "public")
+      ]
+  in
   let request = Mcp_server_eio_call_request.decode
       (Some (`Assoc ["name", `String name; "arguments", arguments])) |> Result.get_ok in
   let observed = ref None and dispatches = ref 0 in
@@ -1678,10 +1774,15 @@ let test_board_activity_does_not_complete_tasks () =
     result
   in
   let id result = Yojson.Safe.Util.(Tool_result.data result |> member "id" |> to_string) in
+  (* Only a Public post reaches the activity graph (mcp_tool_runtime_board.ml
+     public_created_post / public_post). Posting defaults to internal, so this
+     test asks for Public where it counts Board actions as observable. *)
   let posted = runtime "masc_board_post"
-    (make_args ["content", `String "A Board post is not a Task"]) |> id in
+    (make_args ["content", `String "A Board post is not a Task";
+                "visibility", `String "public"]) |> id in
   let other_post = dispatch_result "masc_board_post"
-    (make_args ["author", `String "other-author"; "content", `String "Discussion target"]) in
+    (make_args ["author", `String "other-author"; "content", `String "Discussion target";
+                "visibility", `String "public"]) in
   Alcotest.(check bool) "other author's post created" true (Tool_result.is_success other_post);
   let post_id = id other_post in
   ignore (runtime "masc_board_comment"
@@ -2168,7 +2269,7 @@ let test_post_get_continued_read_shows_closed_state () =
   let post_id = Board.Post_id.to_string post.id in
   for i = 1 to 3 do
     match
-      Board_dispatch.add_comment ~post_id ~author:"commenter"
+      Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"commenter"
         ~content:(Printf.sprintf "comment %d" i) ()
     with
     | Ok _ -> ()
@@ -3184,12 +3285,23 @@ let test_vote_requires_explicit_direction () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* The direction is checked after the target exists. A missing post_id is
+     refused by the access pre-check, which can say nothing about the
+     direction, so the target has to be a real post and a real comment. *)
+  let parent = dispatch_result "masc_board_post"
+    (make_args [("author", `String "poster"); ("content", `String "vote direction")]) in
+  let post_id = Yojson.Safe.Util.(Tool_result.data parent |> member "id" |> to_string) in
+  let comment = dispatch_result "masc_board_comment"
+    (make_args
+       [ ("post_id", `String post_id); ("author", `String "poster")
+       ; ("content", `String "comment for vote direction") ]) in
+  let comment_id = Yojson.Safe.Util.(Tool_result.data comment |> member "id" |> to_string) in
   let empty_direction =
     dispatch_result
       "masc_board_vote"
       (make_args
          [
-           ("post_id", `String "missing");
+           ("post_id", `String post_id);
            ("voter", `String "v");
            ("direction", `String "");
          ])
@@ -3204,7 +3316,7 @@ let test_vote_requires_explicit_direction () =
   let missing_direction =
     dispatch_result
       "masc_board_vote"
-      (make_args [ ("post_id", `String "missing"); ("voter", `String "v") ])
+      (make_args [ ("post_id", `String post_id); ("voter", `String "v") ])
   in
   Alcotest.(check bool) "missing direction rejected" false (Tool_result.is_success missing_direction);
   check_failure_class
@@ -3220,7 +3332,7 @@ let test_vote_requires_explicit_direction () =
   let comment_missing_direction =
     dispatch_result
       "masc_board_comment_vote"
-      (make_args [ ("comment_id", `String "c-missing"); ("voter", `String "v") ])
+      (make_args [ ("comment_id", `String comment_id); ("voter", `String "v") ])
   in
   Alcotest.(check bool)
     "comment vote missing direction rejected"
@@ -3260,8 +3372,14 @@ let test_comment_add_missing_author_rejected () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* The post has to exist. A missing post_id is refused by the access
+     pre-check before the write ever looks at the author, so it can say
+     nothing about author validation. *)
+  let parent = dispatch_result "masc_board_post"
+    (make_args [("author", `String "poster"); ("content", `String "author check")]) in
+  let post_id = Yojson.Safe.Util.(Tool_result.data parent |> member "id" |> to_string) in
   let ok, body = dispatch "masc_board_comment"
-    (make_args [("post_id", `String "missing"); ("content", `String "hi")]) in
+    (make_args [("post_id", `String post_id); ("content", `String "hi")]) in
   Alcotest.(check bool) "missing author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
     (String_util.contains_substring body "author")
@@ -3270,9 +3388,12 @@ let test_comment_add_anonymous_author_rejected () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  let parent = dispatch_result "masc_board_post"
+    (make_args [("author", `String "poster"); ("content", `String "anonymous check")]) in
+  let post_id = Yojson.Safe.Util.(Tool_result.data parent |> member "id" |> to_string) in
   let ok, body = dispatch "masc_board_comment"
     (make_args
-       [("post_id", `String "missing"); ("content", `String "hi"); ("author", `String "anonymous")]) in
+       [("post_id", `String post_id); ("content", `String "hi"); ("author", `String "anonymous")]) in
   Alcotest.(check bool) "anonymous author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
     (String_util.contains_substring body "author")
@@ -3365,6 +3486,16 @@ let test_native_board_evidence_survives_lost_output ~cancelled () =
   Eio.Switch.run @@ fun sw ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* [cleanup] wipes the ledger directory, but the index keeps a store handle
+     per ledger directory in this process. A handle left from an earlier test
+     still holds cursor rows whose continuity file is gone, and this test's
+     first read then raises Continuity_unavailable instead of starting a fresh
+     generation. Drop the handle so the read opens the wiped directory. *)
+  Keeper_tool_call_index.forget_for_ledger
+    ~ledger_dir:
+      (Filename.concat
+         (Workspace.masc_dir (Workspace.default_config _test_base_path))
+         "tool_calls");
   let module Log = Keeper_tool_call_log in
   Keeper_registry.For_testing.clear ();
   Fun.protect ~finally:(fun () ->
@@ -3696,6 +3827,65 @@ let test_search_no_results () =
   Alcotest.(check bool) "search ok" true ok;
   Alcotest.(check bool) "no results msg" true (String.length body > 0)
 
+(* Twelve posts of about 3.2 KB each, 38 KB together: over the official-client lane's
+   16,384-byte ceiling and under the agent-core lane's. *)
+let search_post_count = 12
+
+let create_search_posts () =
+  for i = 0 to search_post_count - 1 do
+    let ok, body =
+      dispatch
+        "masc_board_post"
+        (make_args
+           [ "title", `String (Printf.sprintf "Title-%02d" i)
+           ; "content", `String (Printf.sprintf "needle BODY-%02d %s" i (String.make 3_000 'x'))
+           ; "author", `String (Printf.sprintf "tester-%d" i)
+           ])
+    in
+    Alcotest.(check bool) (Printf.sprintf "post %d created: %s" i body) true ok
+  done
+
+let search_on_lane lane args =
+  let result =
+    Board_tool.handle_tool
+      ~reader:Masc_board_handlers.Board_access.Operator
+      ~result_boundary:lane
+      "masc_board_search"
+      (make_args args)
+  in
+  Alcotest.(check bool) "search ok" true (Tool_result.is_success result);
+  Tool_result.message result
+
+let test_search_full_bodies_stop_at_the_call_ceiling () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  create_search_posts ();
+  let full_args = [ "query", `String "needle"; "limit", `Int 20; "compact", `Bool false ] in
+  let bodies text = occurrences text "BODY-" in
+  let official = search_on_lane official_client_lane full_args in
+  Alcotest.(check bool) "the official-client lane's result fits its ceiling" true
+    (String.length official <= Common.max_tool_result_wire_bytes);
+  Alcotest.(check bool) "it starts with full bodies" true (bodies official >= 1);
+  Alcotest.(check bool) "the later posts are one line" true (bodies official < search_post_count);
+  Alcotest.(check bool) "the note says some were shortened" true
+    (String_util.contains_substring official "한 줄로 줄였어요");
+  for i = 0 to search_post_count - 1 do
+    let title = Printf.sprintf "Title-%02d" i in
+    Alcotest.(check int) (title ^ " is named once") 1 (occurrences official title)
+  done;
+  let agent_core = search_on_lane agent_core_lane full_args in
+  Alcotest.(check int) "the agent-core lane's ceiling keeps every body" search_post_count
+    (bodies agent_core);
+  Alcotest.(check bool) "with no note" false
+    (String_util.contains_substring agent_core "한 줄로 줄였어요");
+  Alcotest.(check bool) "that text is over the official-client ceiling" true
+    (String.length agent_core > Common.max_tool_result_wire_bytes);
+  let compact =
+    search_on_lane official_client_lane [ "query", `String "needle"; "limit", `Int 20 ]
+  in
+  Alcotest.(check int) "a compact search carries no body" 0 (bodies compact)
+
 let test_stats () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3926,6 +4116,12 @@ let () =
           Alcotest.test_case "sort_order_of_string" `Quick test_sort_order_of_string;
           Alcotest.test_case "board_error_to_string" `Quick test_board_error_to_string;
           Alcotest.test_case "format_timestamp_absolute" `Quick test_format_timestamp_absolute;
+          Alcotest.test_case "join_search_hits keeps every full hit that fits" `Quick
+            test_join_search_hits_keeps_every_full_hit_when_they_fit;
+          Alcotest.test_case "join_search_hits takes the most full hits that fit" `Quick
+            test_join_search_hits_takes_the_most_full_hits_that_fit;
+          Alcotest.test_case "join_search_hits says how many were shortened" `Quick
+            test_join_search_hits_says_how_many_were_shortened;
           Alcotest.test_case "board actor identity is registry backed"
             `Quick test_board_actor_identity_is_registry_backed;
           Alcotest.test_case "board actor identity keeps non-keeper agent"
@@ -3938,8 +4134,6 @@ let () =
             test_board_dashboard_json_shows_closed_state_and_successor;
           Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
-          Alcotest.test_case "MCP runtime board post author accepts matching alias"
-            `Quick test_inline_board_post_author_accepts_matching_alias;
         ] );
       ( "json_helpers",
         [
@@ -4132,6 +4326,8 @@ let () =
         [
           Alcotest.test_case "search empty query" `Quick test_search_empty_query;
           Alcotest.test_case "search no results" `Quick test_search_no_results;
+          Alcotest.test_case "search full bodies stop at the call ceiling" `Quick
+            test_search_full_bodies_stop_at_the_call_ceiling;
           Alcotest.test_case "stats" `Quick test_stats;
           Alcotest.test_case "profile empty agent" `Quick test_profile_empty_agent;
           Alcotest.test_case "profile with posts" `Quick test_profile_with_posts;

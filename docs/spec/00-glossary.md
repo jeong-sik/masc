@@ -1668,6 +1668,13 @@ status: reference
     한 출처(`muse.subscription_usage`)이고, 어느 쪽이든 완전한 보고는 다른 쪽의 행을
     대체한다. 실패한 turn은 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
     가용성을 추론하는 것은 아니다.
+    거절 없이 한 직접 읽기(시작 때 읽기, `usage-read.refresh-s` 주기 읽기)도 같은 규칙을
+    따른다. 완전한 보고에서 모델 호출을 막는 창이 한도까지 소진됐을 때만
+    `Runtime_quota_window`에 기록한다(`Runtime_provider_usage_window.rest_scope`).
+    소진율만으로는 기록하지 않고, 보고의 남은 여유로 기록을 지우지도 않는다.
+    기록된 리셋을 Keeper turn walk는 그 시각까지 기다리는 쉼으로 읽는다(RFC-provider-path-rest §3.3).
+    exact lane의 호출도 그 시각까지 보류하자는 안은 Draft인
+    RFC-exact-lane-waits-for-a-stated-reset의 L1 구현안에 정의되어 있다.
   - **비영속·프로세스 로컬**: 프로세스 메모리에만 존재하며 저장소에 남지 않는다. 프로세스
     기동 후 통보가 한 번도 없었던 scope는 0이나 빈 창으로 꾸며내지 않고
     `Not_reported_since_start`로 명시한다.
@@ -2891,8 +2898,8 @@ status: reference
   - Goal 하나에 한 건: 새 관측이 같은 Goal의 이전 관측을 대신한다. 기준이 바뀌면
     (`criterion_revision`이 달라지면) 옛 관측은 새 기준의 값으로 보이지 않고
     `not_recorded`가 된다. Goal을 지우면 그 관측도 지운다.
-  - 화면: Goal 트리·상세와 `masc_goal_list`가 `reported`·`not_recorded`·`unavailable`·
-    `not_loaded` 중 하나로 보여 준다. `Dashboard Goals`의 진행 바는 이 값이
+  - 화면: Goal 트리·상세와 `masc_goal_list`의 전체 행(`detailed=true` 또는 `goal_id`)이
+    `reported`·`not_recorded`·`unavailable`·`not_loaded` 중 하나로 보여 준다. `Dashboard Goals`의 진행 바는 이 값이
     아니라 연결된 Task 완료 수다.
   → [Goal_measurement](../../lib/goal/goal_measurement.mli)
 
@@ -3960,16 +3967,22 @@ status: reference
   cycle을 일부러 남겨 두므로(어느 호출이 dispatch됐는지 마무리가 알 수 있게), 아무도
   닫지 않으면 provider가 매 reload마다 history를 거절해 lane이 영영 resume되지
   못한다. Keeper마다 독립이라 하나가 실패해도 나머지 sweep을 멈추지 않는다.
-  Keeper별 결과는 닫힌 여섯이다(`keeper_outcome`): `Already_dispatchable`(캐리어
-  없음 — 실을 metadata도, 아직 canonical checkpoint도, 열린 호출도 없음),
+  Keeper마다 history를 마지막 메시지부터 거꾸로 읽어 마지막 도구 요청에서 멈춘다.
+  그 요청이 결과를 기다릴 때만 history 전체를 읽어 닫는다(RFC-0476 §3.5).
+  Keeper별 결과는 닫힌 여섯이다(`keeper_outcome`): `Nothing_to_close`(캐리어
+  없음 — metadata가 없거나, canonical checkpoint가 아직 없거나, 이 빌드가 대체한
+  버전이거나, 마지막 도구 요청에 결과가 다 있음),
   `Closed`(캐리어 `{tool_use_ids : string list}` — 닫은 호출 id), `Unparseable`
   (캐리어 `Keeper_transcript_unit.structural_error` — 진짜 손상, 끊긴 호출만 닫을 수 있음),
   `Meta_unavailable`(캐리어 `string`), `Checkpoint_unavailable`(캐리어
-  `Keeper_checkpoint_store.checkpoint_ref_load_error`), `Commit_rejected`(캐리어
+  `Keeper_checkpoint_store.Saved_history.ref_error`), `Commit_rejected`(캐리어
   `Keeper_checkpoint_store.checkpoint_cas_error`).
   **경계**: `Checkpoint_unavailable`은 이름이 "checkpoint 없음"으로 읽히지만 실제로는
   checkpoint ref를 **못 읽은** 것이다(load error). checkpoint가 아직 없는 정상 상태는
-  `Already_dispatchable`이다 — checkpoint가 없는 것은 실패가 아니다. `Unparseable`도
+  `Nothing_to_close`이다 — checkpoint가 없는 것은 실패가 아니다. `Nothing_to_close`는
+  닫을 것이 없다는 뜻이고 history가 구조 검사를 통과했다는 뜻이 아니다. 마지막 요청에
+  결과가 다 있는 history는 기동에서 구조 검사를 받지 않고, `Unparseable`은 마지막
+  요청이 결과를 기다리는 history에서만 나온다. `Unparseable`도
   실패로 세지 않는다(정당한 거절). `failed`는 metadata·load·commit 실패만 센다.
   → [Keeper_transcript_tail_recovery](../../lib/keeper/keeper_transcript_tail_recovery.mli)
 

@@ -1,0 +1,30 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                                                                       │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                   routes                                          observations and package       │
+│  m                account windows and Keeper                      actions                        │
+│                   usage                           /play [invites|invite <name> <hours>|link      │
+│  s                phrases, arrangements and       [name]|revoke <name>]                          │
+│                   recorded takes; no Keeper or                    list, issue or revoke shared   │
+│                   score required                                  DOS play links                 │
+│                                                   /listen         play the newest audio or MIDI  │
+│◇ Global                                                           attachment in this             │
+│  Tab / Shift-Tab  next / previous surface; the                    conversation                   │
+│                   chat composer keeps them to     /artifacts (/reports)  browse published        │
+│                   complete a /command                             Markdown and HTML reports in   │
+│  3                jump to Keepers when the                        a full-width reader            │
+│                   active field or panel does      /settings       open type-aware runtime        │
+│                   not use 3                                       settings                       │
+│  r                refresh the current surface     /diff           open git changes and diff for  │
+│  i                focus the composer; on                          the workspace                  │
+│                   Dashboard, choose a Keeper      /patch (/review)  open the patch review for    │
+│  :                command palette                                 pending code changes           │
+│  ;                agenda: what is coming, and     /cost           open Usage for provider        │
+│                   who is waiting on you; Enter                    quotas and Keeper usage        │
+│                   opens a row                     /changes        open recorded file changes     │
+│  @                answering: who is mid-turn                      for this keeper                │
+│  [lines 22-43/990]                                                                               │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:close  …
+ Choose a Keeper before writing · i:choose

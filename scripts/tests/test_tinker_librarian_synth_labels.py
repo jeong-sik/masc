@@ -39,6 +39,7 @@ import teacher_sample as T
 from tinker_librarian_synth_fixtures import (
     KINDS,
     PLANTED,
+    SCHEDULED,
     accepted,
     answer_text,
     candidates_of,
@@ -57,6 +58,11 @@ class LabelTest(unittest.TestCase):
             self.assertEqual((label.planted_stale, label.duplicates), (frozenset({"m4"}), (("m5", "m6"),)))
         self.assertEqual((alone.supports_change, supported.supports_change), (False, True))
 
+    def test_a_label_keeps_a_record_ahead_and_drops_a_past_one(self) -> None:
+        label = S.label_of(request(SCHEDULED, candidates_of((S.CandidateKind.PARAPHRASE,))))
+        self.assertEqual((label.planted_stale, label.scheduled_ahead, label.scheduled_past),
+                         (frozenset({"m4", "m8"}), frozenset({"m7"}), frozenset({"m8"})))
+
     def test_a_complement_absorbs_its_target(self) -> None:
         [cl] = S.label_of(request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT,)))).candidates
         self.assertEqual((cl.outcome, cl.supersedes, cl.absorbs, cl.already_claim), ("incorporated", None, "m1", None))
@@ -64,24 +70,26 @@ class LabelTest(unittest.TestCase):
 
 class ContractTest(unittest.TestCase):
     def test_masc_accepts_the_answer_every_label_asks_for(self) -> None:
-        by_id = {f.memory_id: f for f in PLANTED}
-        for n in (1, 2, 3):
-            for kinds in itertools.product(KINDS, repeat=n):
-                with self.subTest(kinds=[k.value for k in kinds]):
-                    req = request(PLANTED, candidates_of(kinds))
-                    label = S.label_of(req)
-                    got = accepted(req, label_answer(req))
-                    by_request = {c.request_id: c for c in req.candidates}
-                    corrected = {cl.supersedes for cl in label.candidates if cl.supersedes is not None}
-                    complemented = {cl.absorbs: merged(by_id[cl.absorbs], by_request[cl.request_id])
-                                    for cl in label.candidates if cl.absorbs is not None}
-                    asks = label.supports_change
-                    self.assertEqual(set(got.dropped), (label.planted_stale if asks else frozenset[str]()) | corrected)
-                    self.assertEqual(dict(got.absorbed),
-                                     complemented | {gone: by_id[kept].claim for kept, gone in label.duplicates if asks})
-                    gone = set(got.dropped) | set(dict(got.absorbed))
-                    self.assertEqual(set(got.memory_after) - set(got.added_claims),
-                                     {f.claim for f in PLANTED if f.memory_id not in gone})
+        for facts in (PLANTED, SCHEDULED):
+            by_id = {f.memory_id: f for f in facts}
+            for n in (1, 2, 3):
+                for kinds in itertools.product(KINDS, repeat=n):
+                    with self.subTest(facts=len(facts), kinds=[k.value for k in kinds]):
+                        req = request(facts, candidates_of(kinds))
+                        label = S.label_of(req)
+                        got = accepted(req, label_answer(req))
+                        by_request = {c.request_id: c for c in req.candidates}
+                        corrected = {cl.supersedes for cl in label.candidates if cl.supersedes is not None}
+                        complemented = {cl.absorbs: merged(by_id[cl.absorbs], by_request[cl.request_id])
+                                        for cl in label.candidates if cl.absorbs is not None}
+                        asks = label.supports_change
+                        self.assertEqual(set(got.dropped),
+                                         (label.planted_stale if asks else frozenset[str]()) | corrected)
+                        self.assertEqual(dict(got.absorbed), complemented | {
+                            gone: by_id[kept].claim for kept, gone in label.duplicates if asks})
+                        gone = set(got.dropped) | set(dict(got.absorbed))
+                        self.assertEqual(set(got.memory_after) - set(got.added_claims),
+                                         {f.claim for f in facts if f.memory_id not in gone})
 
     def test_masc_refuses_planted_facts_taken_out_without_support(self) -> None:
         req = request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT,)))
@@ -97,8 +105,8 @@ class ContractTest(unittest.TestCase):
 
 
 def teacher_answer(req: S.SynthRequest, *, absorbs: tuple[str, ...], pair: bool, dropped: tuple[str, ...]) -> str:
-    """An answer MASC accepts on PLANTED with a complement of m1 (k1) and a new fact (k2). The
-    complement's claim joins m1 when `absorbs` holds m1; `pair` merges m6 into m5."""
+    """An answer MASC accepts on PLANTED or SCHEDULED with a complement of m1 (k1) and a new fact
+    (k2). The complement's claim joins m1 when `absorbs` holds m1; `pair` merges m6 into m5."""
     k1, k2 = req.candidates
     by_id = {f.memory_id: f for f in req.facts}
     first = merged(by_id["m1"], k1) if "m1" in absorbs else k1.claim
@@ -147,6 +155,18 @@ class TeacherTest(unittest.TestCase):
         for absorbs, pair, dropped, why in cases:
             answer = teacher_answer(req, absorbs=absorbs, pair=pair, dropped=dropped)
             self.assertEqual(teacher_rejection(req, answer), why, (absorbs, pair, dropped))
+
+    def test_an_answer_that_drops_a_record_ahead_or_keeps_a_past_one_is_not_kept(self) -> None:
+        req = request(SCHEDULED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE)))
+        self.assertIsNone(teacher_rejection(req, label_answer(req)))
+        # (complement's absorbs, dropped) -> why the answer is not kept; m7 is ahead, m8 past.
+        cases: tuple[tuple[tuple[str, ...], tuple[str, ...], str], ...] = (
+            (("m1",), ("m4", "m8", "m7"), "unexpected_drop"),
+            (("m1",), ("m4",), "stale_kept"),
+            (("m1", "m8"), ("m4",), "stale_absorbed"))
+        for absorbs, dropped, why in cases:
+            answer = teacher_answer(req, absorbs=absorbs, pair=True, dropped=dropped)
+            self.assertEqual(teacher_rejection(req, answer), why, (absorbs, dropped))
 
     def test_an_answer_that_misjudges_a_candidate_is_not_kept_though_its_memory_is_right(self) -> None:
         req = request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.NEW_DURABLE)))

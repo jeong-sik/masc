@@ -556,7 +556,7 @@ let render_code (state : state) =
                    | None -> state.code_lsp_note) in
             match (if hover_showing then None else note) with
             | Some note ->
-                base ^ "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                base ^ "  " ^ (Theme.accent ())
                 ^ Terminal_text.single_line note ^ Ansi.reset
             | None -> base
           in
@@ -589,7 +589,7 @@ let render_code (state : state) =
                     | Some word -> " (" ^ word ^ ")"
                   in
                   with_note ^ "  "
-                  ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                  ^ (Theme.accent ())
                   ^ "memo "
                   ^ Terminal_text.single_line memo.Ide_memo.author
                   ^ kind ^ Ansi.reset ^ " "
@@ -746,21 +746,9 @@ let render_code (state : state) =
                    state.code_diff_scroll
                in
                let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
-               (* An add or context row is the working tree's own line, so
-                  the lexed row the pane already holds is its exact
-                  colouring -- resolved by the row's new-line number, not by
-                  matching text. A delete row is the old blob's content,
-                  which was never lexed; it keeps the plain red band. Each
-                  lexed segment's reset is followed by re-opening the diff
-                  background, so the band survives the lexer's own resets. *)
-               let lexed_rows =
-                 match Masc_tui_fetched.current state.code_file with
-                 | Some (_, Masc_tui_fetched.Ready { cfd_rows = file_rows; _ }) ->
-                     Rows.of_array file_rows
-                 | Some (_, Masc_tui_fetched.Absent) | None | Some (_, Masc_tui_fetched.Loading)
-                 | Some (_, Masc_tui_fetched.Stale (_, _)) | Some (_, Masc_tui_fetched.Failed _) -> Rows.of_array [||]
-               in
-               let lexed_line index = Rows.at lexed_rows (index - 1) in
+               (* The open file is a separate observation. A diff line number
+                  cannot identify its text, for either a commit or a later
+                  working-tree read. Keep the diff's own body for every row. *)
                for i = 0 to content_height - 1 do
                  match Rows.at rows_window (scroll + i) with
                  | Some row ->
@@ -774,41 +762,19 @@ let render_code (state : state) =
                           | Gd_added -> "+"
                           | Gd_context -> " ")
                      in
-                     let lexed =
-                       match row.gdr_kind, row.gdr_new_line with
-                       | (Gd_added | Gd_context), Some line ->
-                           lexed_line line
-                       | ((Gd_added | Gd_context), None) | (Gd_removed, _) -> None
+                     let text =
+                       Terminal_text.single_line
+                         (fst
+                            (Message_layout.expand_tabs
+                               ~column:0 row.gdr_text))
                      in
                      let body =
-                       match lexed with
-                       | Some segments -> (
-                           match row.gdr_kind with
-                           | Gd_added ->
-                               let bg = Theme.Syntax.diff_added_bg in
-                               bg
-                               ^ String.concat ""
-                                   (List.map
-                                      (fun segment ->
-                                        span segment ^ bg)
-                                      segments)
-                               ^ Ansi.reset
-                           | Gd_context | Gd_removed ->
-                               String.concat "" (List.map span segments))
-                       | None -> (
-                           let text =
-                             Terminal_text.single_line
-                               (fst
-                                  (Message_layout.expand_tabs
-                                     ~column:0 row.gdr_text))
-                           in
-                           match row.gdr_kind with
-                           | Gd_removed ->
-                               Theme.Syntax.diff_removed_bg ^ text
-                               ^ Ansi.reset
-                           | Gd_added ->
-                               Theme.Syntax.diff_added_bg ^ text ^ Ansi.reset
-                           | Gd_context -> Ansi.dim ^ text ^ Ansi.reset)
+                       match row.gdr_kind with
+                       | Gd_removed ->
+                           Theme.Syntax.diff_removed_bg ^ text ^ Ansi.reset
+                       | Gd_added ->
+                           Theme.Syntax.diff_added_bg ^ text ^ Ansi.reset
+                       | Gd_context -> Ansi.dim ^ text ^ Ansi.reset
                      in
                      box_line pane_buf pane_cols
                        (Ansi.dim ^ gutter ^ Ansi.reset
@@ -920,20 +886,19 @@ let render_code (state : state) =
               block is what hides it. Continuation rows hold the same cells in
               blanks so the code stays in one column.
 
-              No colour of its own. The theme's three tones are Normal, Dim
-              and the single accent, and a colour outside them is a claim
-              about state -- blame carries no state, only who and when. So
-              the answer (the name) draws Normal and the qualifier (the age)
-              draws Dim, and nothing here competes with the lexer's own
-              colours in the code beside it. *)
+              No colour of its own. The frame draws plain, dim or the single
+              accent, and a colour outside them is a claim about state --
+              blame carries no state, only who and when. So the answer (the
+              name) draws plain and the qualifier (the age) draws dim, and
+              nothing here competes with the lexer's own colours in the code
+              beside it. *)
            let blame_cell line =
              match blame_blocks with
              | [] -> ""
              | _ -> (
                match Masc.Tui_decode.blame_block_at blame_blocks line with
                | Some (block, true) ->
-                   Printf.sprintf "%s%s %s%s%s "
-                     (Masc_tui_theme.tone Masc_tui_theme.Normal)
+                   Printf.sprintf "%s %s%s%s "
                      (Message_layout.fit_width block.bb_author
                         blame_author_cells)
                      Ansi.dim
@@ -963,7 +928,7 @@ let render_code (state : state) =
                  let mark =
                    let line = row_index + 1 in
                    if covers line note_spans then
-                     (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                     (Theme.accent ())
                      ^ "\xe2\x97\x8f" ^ Ansi.reset
                    else if covers line keeper_spans then Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
                    else " "

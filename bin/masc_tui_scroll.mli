@@ -22,7 +22,7 @@ module Position : sig
   (** A reading position with an explicit end selection. Normalizing a frame
       preserves that selection; only navigation or a new reading releases it. *)
   type t
-  type movement = First | Last | By of int
+  type movement = First | Last | By of int | Page_down | Page_up
   val first : t
   val is_end : t -> bool
   val at : int -> t
@@ -32,7 +32,8 @@ module Position : sig
   (** Clamp an absolute offset while retaining an end selection. *)
   val move : count:int -> height:int -> movement -> t -> t
   (** Relative navigation starts at the current bounded position and releases
-      the end selection. [First] releases it; [Last] selects it. *)
+      the end selection. [First] releases it; [Last] selects it. [Page_down] and
+      [Page_up] move by {!page_step}, so a reader never picks its own page. *)
 end
 
 val down : count:int -> height:int -> int -> int
@@ -58,6 +59,19 @@ val page_up : count:int -> height:int -> int -> int
     long list one page at a time otherwise drops the row the reader stopped on:
     it sits just past the new edge and nothing reports it. Same bound and same
     stale-value rule as {!down} and {!up}. *)
+
+(** The movement a scrolled body makes for a key name. Every sheet that scrolls
+    plain text matches the same names, so they are named once here. *)
+type key_move = Line_down | Line_up | Page_down | Page_up | To_top | To_end
+
+val move_of_key : string -> key_move option
+(** [j] and [Down] are one row down, [k] and [Up] one row up, [PageDown] and
+    [PageUp] a page ({!page_down}, {!page_up}), [g] and [Home] the top, [G]
+    and [End] the last row that still shows content. [None] for any other
+    key, which the caller keeps for itself. *)
+
+val apply_move : count:int -> height:int -> key_move -> int -> int
+(** The scroll after [move], bounded as {!down} and {!up} bound it. *)
 
 (** A row cursor over the same list. The cursor names a row, the scroll names
     a window; a keypress moves the cursor and the window follows with
@@ -86,6 +100,13 @@ val ensure_span_visible : start:int -> stop:int -> height:int -> int -> int
 
 val ensure_visible : cursor:int -> height:int -> int -> int
 (** The smallest move of [scroll] that keeps [cursor] inside the window. *)
+
+val ensure_visible_with_lead : cursor:int -> lead:int -> height:int -> int -> int
+(** {!ensure_visible} for a row that brings [lead] rows glued above it, such as
+    the heading of the group it opens. The window follows the row, then moves
+    up until the lead is on screen too. [lead] is held to at most [cursor] and
+    at most [height - 1], so the row stays in the window and a window of one
+    row behaves as {!ensure_visible} does. *)
 
 val window_of_heights : heights:int list -> cursor:int -> rows:int -> int -> int * int
 (** {!ensure_visible} for items that take different numbers of lines: item [i]

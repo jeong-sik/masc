@@ -2,8 +2,7 @@ import { html } from 'htm/preact'
 import { computed, signal } from '@preact/signals'
 import { useEffect, useState } from 'preact/hooks'
 import { type ToolQualityResponse } from '../api/dashboard'
-import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
-import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { Eyebrow } from './common/eyebrow'
@@ -13,6 +12,8 @@ import {
   refreshSharedToolQuality,
   sharedToolQuality,
   sharedToolQualityError,
+  readSharedToolQualityError,
+  prepareSharedToolQualityRead,
   sharedToolQualityLoading,
 } from './fleet-data-core'
 import { route } from '../router'
@@ -369,24 +370,10 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
 
 export function ToolQualityPanel() {
   useEffect(() => {
-    const lifecycleController = new AbortController()
-    const runRefresh = () =>
-      refreshSharedToolQuality({
-        signal: lifecycleController.signal,
-        windowHours: TOOL_QUALITY_WINDOW_HOURS,
-      })
-
-    void runRefresh()
-    const disposeAutoRefresh = setupVisibleAutoRefresh(() => {
-      if (lifecycleController.signal.aborted) return
-      void runRefresh()
-    }, TELEMETRY_AUTO_REFRESH_MS)
-
-    return () => {
-      lifecycleController.abort()
-      cancelSharedToolQuality()
-      disposeAutoRefresh()
-    }
+    const dispose = setupObservationRefresh(signal => refreshSharedToolQuality({
+      signal, windowHours: TOOL_QUALITY_WINDOW_HOURS,
+    }), { topics: ['tool_metrics'], readError: readSharedToolQualityError, cancelRead: cancelSharedToolQuality, resetRead: prepareSharedToolQualityRead })
+    return () => { dispose(); cancelSharedToolQuality() }
   }, [])
 
   const d = data.value
@@ -422,7 +409,7 @@ export function ToolQualityPanel() {
             onClick=${handleRefreshToolQualityClick}
             aria-label="도구 품질 새로고침"
           >새로고침</button>
-          <span class="text-3xs text-[var(--color-fg-disabled)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+          <span class="text-3xs text-[var(--color-fg-disabled)]">${'실시간 변경 반영'}</span>
         </div>
       </div>
 

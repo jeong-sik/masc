@@ -194,9 +194,12 @@ semantic/invalid output, missing/duplicate visits and local stop cannot grant
 that exhaustion authority. Measurement, actual HTTP generation and official
 client dispatch are separate observations.
 
-Under the existing original request claim and workspace lease, the broker saves
-its started marker, runs the call, then retains and strictly rereads a host result
-link before publishing the attempt outcome. One canonical host-built Store link binds declaration and original request
+Under the existing original request claim and workspace lease, the broker retains
+the request and enters the call. It saves its started marker at the call's first
+generation dispatch: after any provider admission wait, before the request is
+sent. It then retains and strictly rereads a host result link before publishing
+the attempt outcome. A call that ends without a generation dispatch saves the
+marker before that link. One canonical host-built Store link binds declaration and original request
 digest, retaining the sparse ordered completed attempts. Every attempt envelope
 binds its actual ordinal, original Store root, complete request, schema and
 outcome. An Exact record lost after a later ordinal cannot hide its earlier

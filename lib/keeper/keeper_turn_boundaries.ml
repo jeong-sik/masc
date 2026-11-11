@@ -375,7 +375,31 @@ let decode_line line =
   | exception Yojson.Json_error message -> Error (Not_json message)
 ;;
 
-let numbered_lines ~rows ~rows_end ~end_offset =
+(* The decoded lines of each store's bytes as last read. The store only grows
+   by appended lines, and every reader decoded all of it: two readers at the
+   start of each provider turn, on the turn's domain. Repeated reads of one
+   store took 19-63 ms at the median for 450 KB and 1,141 lines, and
+   205-455 ms for 6.6 MB and 11,661 lines (12 reads, three runs, on a loaded
+   host, 2026-11-11).
+
+   The bytes are still read under the writer's lock on every call. Lines
+   whose bytes are the ones read last time keep their decoding, and only
+   what follows them is decoded ({!Keeper_decoded_rows}). On the same stores
+   and host a read of unchanged bytes then took 0.8-1.3 ms and 3.5-4.0 ms at
+   the median, and 1.7-2.4 ms and 13.4 ms after one appended line.
+
+   The budget is store bytes over all Keepers; the decoded lines take about
+   as much again (6.6 MB of bytes decode to 6.7 MB). The 29 stores of that
+   installation held 48.2 MB. Past the budget the stores read longest ago
+   are decoded in full again by their next reader, as every store was. A
+   store that is gone when read is dropped here. *)
+let decoded_store_budget_bytes = 128 * 1024 * 1024
+
+let decoded_stores : (int * (record, read_error) result) Keeper_decoded_rows.t =
+  Keeper_decoded_rows.create ~budget_bytes:decoded_store_budget_bytes
+;;
+
+let decode_lines ~after rows =
   (* [rows] is every newline-terminated line, so what follows its last newline
      is the empty string and not a line. *)
   let complete =
@@ -383,18 +407,24 @@ let numbered_lines ~rows ~rows_end ~end_offset =
     | [] -> []
     | _after_last_newline :: reversed -> List.rev reversed
   in
-  let decoded = List.mapi (fun index line -> index + 1, decode_line line) complete in
+  List.mapi (fun index line -> after + index + 1, decode_line line) complete
+;;
+
+let numbered_lines ~path ~rows ~rows_end ~end_offset =
+  let decoded = Keeper_decoded_rows.lines decoded_stores ~path ~rows ~decode:decode_lines in
   if rows_end < end_offset
-  then decoded @ [ List.length complete + 1, Error Incomplete_line ]
+  then decoded @ [ List.length decoded + 1, Error Incomplete_line ]
   else decoded
 ;;
 
 let read ~keepers_dir ~keeper_id =
   let path = path_for_keepers_dir ~keepers_dir ~keeper_id in
   let of_rows = function
-    | Fs_compat.Private_jsonl_rows.Rows_missing -> Ok []
+    | Fs_compat.Private_jsonl_rows.Rows_missing ->
+      Keeper_decoded_rows.forget decoded_stores ~path;
+      Ok []
     | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
-      Ok (numbered_lines ~rows ~rows_end ~end_offset)
+      Ok (numbered_lines ~path ~rows ~rows_end ~end_offset)
   in
   let settled cleanup_failure =
     Log.Keeper.warn

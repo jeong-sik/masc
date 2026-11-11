@@ -35,11 +35,18 @@ type effect_phase =
   | Response_received
   | Terminal
 
+type observation =
+  { phase_state : state
+  ; execution_started_at : float option
+  ; execution_finished_at : float option
+  }
+
 type t =
-  { state : state Atomic.t
+  { state : observation Atomic.t
   ; call_id : call_id
   ; plan_fingerprint : string
   ; request_body_sha256 : string
+  ; binding : Exact_output_plan.binding_observation
   ; response_family : response_family
   ; catalog_generation : Exact_output_resolver.catalog_generation
   ; catalog_evidence : Exact_output_resolver.catalog_evidence
@@ -56,21 +63,30 @@ type snapshot =
   ; call_id : call_id
   ; plan_fingerprint : string
   ; request_body_sha256 : string
+  ; binding : Exact_output_plan.binding_observation
+  ; execution_started_at : float option
+  ; execution_finished_at : float option
   }
 
 let create
       ~call_id
       ~plan_fingerprint
       ~request_body_sha256
+      ~binding
       ~response_family
       ~catalog_generation
       ~catalog_evidence
       ~target_identity
   =
-  { state = Atomic.make Not_started_state
+  { state = Atomic.make
+      { phase_state = Not_started_state
+      ; execution_started_at = None
+      ; execution_finished_at = None
+      }
   ; call_id
   ; plan_fingerprint
   ; request_body_sha256
+  ; binding
   ; response_family
   ; catalog_generation
   ; catalog_evidence
@@ -81,15 +97,42 @@ let create
 (* An attempt is started once, by the flow step that allocated it; nothing
    else holds the attempt. A second start is a bug in that step, not an
    outcome a caller can act on. *)
-let start receipt =
-  if not (Atomic.compare_and_set receipt.state Not_started_state Before_dispatch_state)
-  then invalid_arg "Exact_output: generation attempt started twice"
+let rec start receipt =
+  let current = Atomic.get receipt.state in
+  match current.phase_state with
+  | Not_started_state ->
+    if not (Atomic.compare_and_set receipt.state current
+              { current with phase_state = Before_dispatch_state })
+    then start receipt
+  | Before_dispatch_state | Dispatch_started_state | Response_received_state _
+  | Terminal_state _ -> invalid_arg "Exact_output: generation attempt started twice"
+;;
+
+let rec update_observation receipt update =
+  let current = Atomic.get receipt.state in
+  let desired = update current in
+  if desired != current && not (Atomic.compare_and_set receipt.state current desired)
+  then update_observation receipt update
+;;
+
+let observe_execution_started receipt ~at =
+  update_observation receipt (fun current ->
+    match current.execution_started_at with
+    | Some _ -> current
+    | None -> { current with execution_started_at = Some at })
+;;
+
+let observe_execution_finished receipt ~at =
+  update_observation receipt (fun current ->
+    match current.execution_started_at, current.execution_finished_at with
+    | Some _, None -> { current with execution_finished_at = Some at }
+    | None, (None | Some _) | Some _, Some _ -> current)
 ;;
 
 let call_id (receipt : t) = receipt.call_id
 
 let phase receipt =
-  match Atomic.get receipt.state with
+  match (Atomic.get receipt.state).phase_state with
   | Not_started_state -> Not_started
   | Before_dispatch_state -> Before_dispatch
   | Dispatch_started_state -> Dispatch_started
@@ -98,7 +141,7 @@ let phase receipt =
 ;;
 
 let dispatch_count receipt =
-  match Atomic.get receipt.state with
+  match (Atomic.get receipt.state).phase_state with
   | Not_started_state | Before_dispatch_state -> 0
   | Dispatch_started_state | Response_received_state _ | Terminal_state _ -> 1
 ;;
@@ -106,14 +149,14 @@ let dispatch_count receipt =
 let generation_dispatched receipt = dispatch_count receipt = 1
 
 let http_status receipt =
-  match Atomic.get receipt.state with
+  match (Atomic.get receipt.state).phase_state with
   | Response_received_state received -> received.status
   | Terminal_state terminal -> Some terminal.status
   | Not_started_state | Before_dispatch_state | Dispatch_started_state -> None
 ;;
 
 let provider_trace receipt =
-  match Atomic.get receipt.state with
+  match (Atomic.get receipt.state).phase_state with
   | Terminal_state terminal -> terminal.provider_trace
   | Response_received_state received -> received.provider_trace
   | Not_started_state | Before_dispatch_state | Dispatch_started_state -> None
@@ -258,11 +301,12 @@ let rec advance_atomic
 
 let advance receipt desired =
   advance_atomic
-    ~rank:state_rank
-    ~merge:merge_state
-    ~equal:state_equal
+    ~rank:(fun observation -> state_rank observation.phase_state)
+    ~merge:(fun current desired ->
+      { current with phase_state = merge_state current.phase_state desired.phase_state })
+    ~equal:(fun left right -> state_equal left.phase_state right.phase_state)
     receipt.state
-    desired
+    { phase_state = desired; execution_started_at = None; execution_finished_at = None }
 ;;
 
 let%test "conflicting same-attempt response evidence fails closed" =
@@ -348,9 +392,10 @@ let synchronize receipt complete_receipt =
 
 let rec record_provider_trace receipt provider_trace =
   let current = Atomic.get receipt.state in
-  match current with
+  match current.phase_state with
   | Terminal_state ({ provider_trace = None; _ } as terminal) ->
-    let desired = Terminal_state { terminal with provider_trace = Some provider_trace } in
+    let desired = { current with
+      phase_state = Terminal_state { terminal with provider_trace = Some provider_trace } } in
     if not (Atomic.compare_and_set receipt.state current desired)
     then record_provider_trace receipt provider_trace
   | Terminal_state { provider_trace = Some recorded; _ } ->
@@ -358,7 +403,8 @@ let rec record_provider_trace receipt provider_trace =
     then raise (Conflicting_response_evidence Provider_trace_field)
   | Response_received_state ({ provider_trace = None; _ } as received) ->
     let desired =
-      Response_received_state { received with provider_trace = Some provider_trace }
+      { current with phase_state =
+          Response_received_state { received with provider_trace = Some provider_trace } }
     in
     if not (Atomic.compare_and_set receipt.state current desired)
     then record_provider_trace receipt provider_trace
@@ -370,9 +416,9 @@ let rec record_provider_trace receipt provider_trace =
 ;;
 
 let snapshot receipt =
-  let state = Atomic.get receipt.state in
+  let observation = Atomic.get receipt.state in
   let phase, dispatch_count, http_status, provider_trace =
-    match state with
+    match observation.phase_state with
     | Not_started_state -> Not_started, 0, None, None
     | Before_dispatch_state -> Before_dispatch, 0, None, None
     | Dispatch_started_state -> Dispatch_started, 1, None, None
@@ -389,6 +435,9 @@ let snapshot receipt =
   ; call_id = receipt.call_id
   ; plan_fingerprint = receipt.plan_fingerprint
   ; request_body_sha256 = receipt.request_body_sha256
+  ; binding = receipt.binding
+  ; execution_started_at = observation.execution_started_at
+  ; execution_finished_at = observation.execution_finished_at
   }
 ;;
 
@@ -405,3 +454,6 @@ let snapshot_responses_lifecycle (snapshot : snapshot) = snapshot.responses_life
 let snapshot_call_id (snapshot : snapshot) = snapshot.call_id
 let snapshot_plan_fingerprint (snapshot : snapshot) = snapshot.plan_fingerprint
 let snapshot_request_body_sha256 (snapshot : snapshot) = snapshot.request_body_sha256
+let snapshot_binding (snapshot : snapshot) = snapshot.binding
+let snapshot_execution_started_at (snapshot : snapshot) = snapshot.execution_started_at
+let snapshot_execution_finished_at (snapshot : snapshot) = snapshot.execution_finished_at

@@ -409,8 +409,31 @@ let claude_error_to_core_error = function
       { api_error_status = Some 403; detail; _ } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.AuthorizationError { provider = "claude_code"; detail })
+  (* A turn refused for a login past its time limit ends with no HTTP status;
+     the diagnostic envelope's typed cause is what says the account must sign
+     in. The cause decides only then: a result that carries any status keeps
+     that status's own reading, so a 400 or a 5xx after an earlier
+     authentication diagnostic stays a provider failure. *)
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = None
+      ; api_error_cause = Some Runtime_claude_code.Authentication_failed
+      ; detail
+      ; _
+      } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError { provider = "claude_code"; detail })
   | Runtime_claude_code.Turn_failed detail
-  | Runtime_claude_code.Turn_failed_with_observation { detail; _ } ->
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = Some _
+      ; api_error_cause = Some Runtime_claude_code.Authentication_failed
+      ; detail
+      ; _
+      }
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_cause = Some Runtime_claude_code.Other_api_error_cause | None
+      ; detail
+      ; _
+      } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
          { provider = "claude_code"; error_type = Some "turn_failed"; detail })

@@ -303,6 +303,12 @@ let authorize_host_account client =
   Runtime_account_access.authorize_host client |> Result.map_error account_refused
 ;;
 
+(* HIGH-RISK-UNREVIEWED: an Agent_core candidate sends with the key its
+   operator declared, which only a single-user process shares (plan D4). *)
+let authorize_api_provider sealed =
+  Runtime_account_access.authorize_api sealed |> Result.map_error account_refused
+;;
+
 (* How long a rate observation holds its path back: the provider's usable
    wait, or the throttle floor (RFC-provider-path-rest §3.3). The walk order
    and the path's release read this one rule, so a path rejoins its declared
@@ -2018,12 +2024,12 @@ let observe_native_attempt ?on_request_observation binding run ~idx ~runtime_id 
     on_request_observation in
   let result, checkpoint, effect_disposition, dispatch = run ?on_request_evidence ~idx ~runtime_id candidate in
   if not !observed then Option.iter (fun observe ->
-    let evidence = match dispatch, binding with
-      | Keeper_attempt_dispatch.Rejected_before_dispatch, _ -> Request_observation.Not_dispatched
-      | Keeper_attempt_dispatch.Dispatched, None -> Request_observation.No_durable_scope
-      | Keeper_attempt_dispatch.Dispatched, Some _ ->
-        Request_observation.Read_failed "native API invocation returned no current request observation" in
-    observe evidence) on_request_evidence;
+    let checkpoint_owner = match candidate with
+      | Resolved_runtime runtime ->
+        Some (Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution)
+      | Missing_runtime _ -> None in
+    observe (Keeper_direct_native_continuation.unreported_request_evidence
+      ~binding ~dispatch ~checkpoint_owner)) on_request_evidence;
   let effect_disposition = match binding, effect_disposition with
     | Some binding, Keeper_provider_attempt_effect.No_effect_observed ->
       Keeper_direct_native_continuation.binding_effect_observation ~binding
@@ -3557,7 +3563,7 @@ let run_named
         , None
         , claude_attempt.effect_disposition
         , official_client_dispatch ~provider_config_transform claude_attempt.result )
-      | Runtime_execution.Agent_core runtime_provider_config ->
+      | Runtime_execution.Agent_core sealed ->
        (* Held to this candidate's own rendering of the history, for the
           reason [official_client_librarian_front] states. *)
        let request_input = match Eio.Lazy.force continuity with
@@ -3569,9 +3575,12 @@ let run_named
                  ~messages:initial_messages continuity }
        in
        (match
-          match provider_config_transform with
-          | None -> Ok runtime_provider_config
-          | Some transform -> transform runtime_provider_config
+          match authorize_api_provider sealed with
+          | Error _ as refused -> refused
+          | Ok runtime_provider_config ->
+            (match provider_config_transform with
+             | None -> Ok runtime_provider_config
+             | Some transform -> transform runtime_provider_config)
         with
       | Error err ->
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;

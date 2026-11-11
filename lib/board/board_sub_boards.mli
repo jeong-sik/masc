@@ -2,9 +2,9 @@
 
     Runtime policy mutations take the store's persistence mutex before its
     state mutex. Policy writes compare the exact loaded file under the existing
-    stable file lock before publication. Stale writers refuse. This does not
-    validate another writer's policy changes atomically with post creation,
-    nor make policy deletion and post hearth unlinking one transaction. *)
+    stable file lock before publication. Stale writers refuse. Scoped post
+    creation separately guards its canonical Policy snapshot through the Posts
+    append. Deletion uses the shared durable decision owner for Policy and Posts. *)
 
 open Board_types
 
@@ -51,7 +51,8 @@ val update_sub_board :
     policy under a fresh state lock only after the save succeeds. *)
 
 val delete_sub_board :
-  store -> sub_board_id:string -> (unit, board_error) result
-(** Persist the policy removal before removing it from memory. The related
-    post hearth changes still become dirty work for the posts flusher; this
-    interface does not promise a transaction across those two sources. *)
+  store -> authorization:sub_board_deletion_authorization -> sub_board_id:string ->
+  (deletion_outcome, board_error) result
+(** Record the original board ID/slug and canonical affected post IDs before
+    model publication. Return durable only after both source writes and marker
+    retirement; retained pending/unknown work follows the shared deletion owner. *)

@@ -94,6 +94,14 @@ module Comment_id : sig
       schemas that take a comment id. *)
 end
 
+module Deletion_id : sig
+  type t
+  val of_string : string -> (t, board_error) result
+  val to_string : t -> string
+  val generate : unit -> t
+  (** One decision identity: [d-] and 32 lowercase hexadecimal characters. *)
+end
+
 module Agent_id : sig
   type t
   val parse : string -> (t, board_error) result
@@ -262,6 +270,7 @@ type reaction_summary = {
 }
 
 type reaction_toggle_result = {
+  post_id : Post_id.t; (** Canonical parent admitted for this exact write. *)
   target_type : reaction_target_type;
   target_id : string;
   user_id : string;
@@ -549,6 +558,7 @@ type posts_source_diagnostic =
       error : Fs_compat.private_jsonl_transaction_error;
     }
   | Workspace_diagnostic of Board_workspace_binding.rejection
+  | Posts_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
   | Raised_diagnostic of {
       stage : posts_source_stage;
       exception_ : exn;
@@ -615,34 +625,6 @@ type posts_write_outcome =
       diagnostics : posts_source_diagnostic list;
     }
 
-type posts_settle_outcome =
-  | Posts_settled_written of {
-      observation : posts_source_observation;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settled_not_written of {
-      observation : posts_source_observation;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settle_superseded of {
-      failure : posts_source_failure;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settle_inconclusive of {
-      failure : posts_source_failure;
-      diagnostics : posts_source_diagnostic list;
-    }
-  | Posts_settle_nothing_to_settle
-(** Outcome of settling an unknown posts write. [Posts_settled_written]
-    carries the fresh durable observation and the store is readable.
-    [Posts_settled_not_written] carries the restored pre-write observation
-    and the store is readable; the caller may retry once with its staged
-    bytes, fenced by that observation's cursor. [Posts_settle_superseded]
-    means a coherent third-party state was proven and the store is refused
-    (reloadable). [Posts_settle_inconclusive] keeps the store unsettled with
-    its pending evidence intact. [Posts_settle_nothing_to_settle] performs
-    no IO and changes nothing. *)
-
 type posts_source_read =
   | Posts_complete of {
       observation : posts_source_observation;
@@ -690,6 +672,7 @@ type comments_source_stage =
 
 type comments_source_diagnostic =
   | Comments_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Comments_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
   | Comments_workspace_diagnostic of Board_workspace_binding.rejection
   | Comments_display_diagnostic of Fs_compat.Private_jsonl_unique_fold.error
   | Comments_display_cleanup_diagnostic of Fs_compat.private_jsonl_operation_failure
@@ -824,15 +807,246 @@ type sub_boards_source_state =
     bytes or known-success receipt retained. Only a fresh store can reload
     them. This is not multi-source crash recovery; see #26378. *)
 
-type snapshot_retry = Independent_snapshots | Deletion_pending
-(** A failed deletion retains its cross-source ordering in subsequent flushes.
-    This process-local retry context does not durably record a deletion decision.
-    A proven nonwrite that preserves source authority can retry after repair.
-    A source refusal cannot be refreshed by these retries or a partial model
-    reload. Later obligations in the deletion batch remain pending; unrelated
-    writers retain their own source admission. A fresh store observes the files
-    without replaying the old memory-only intent, so an unwritten parent
-    deletion can reappear while completed file writes remain applied. *)
+type reactions_source_observation = {
+  reaction_path : string;
+  reaction_snapshot : Fs_compat.private_jsonl_snapshot;
+  reaction_workspace : Board_workspace_binding.observation;
+}
+
+type reactions_source_history =
+  | No_reactions_observation
+  | Reactions_observed of reactions_source_observation
+  | Reactions_present_without_snapshot
+
+type reactions_row_error =
+  | Invalid_reaction_json of { line : int; detail : string }
+  | Invalid_reaction_row of { line : int }
+
+type reactions_source_diagnostic =
+  | Reaction_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Reaction_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
+  | Reaction_workspace_diagnostic of Board_workspace_binding.rejection
+  | Reaction_raised_diagnostic of {
+      exception_ : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+  | Reaction_projection_diagnostic of board_error
+
+type reactions_source_failure =
+  | Reactions_not_observed
+  | Reactions_rows_rejected of reactions_row_error list
+  | Reactions_transaction_failed of Fs_compat.private_jsonl_transaction_error
+  | Reactions_missing
+  | Reactions_binding_mismatch
+  | Reactions_publication_pending
+  | Reactions_workspace_refused of Board_workspace_binding.rejection
+  | Reactions_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
+
+type reactions_pending_write = {
+  reaction_before : reactions_source_observation;
+  reaction_intended_bytes : string;
+}
+
+type reactions_publication = {
+  reaction_after : reactions_source_observation;
+  reaction_cleanup : reactions_source_diagnostic list;
+}
+
+type reactions_source_state =
+  | Reactions_unobserved
+  | Reactions_readable of reactions_source_observation
+  | Reactions_publishing of reactions_publication
+  | Reactions_refused of {
+      reaction_history : reactions_source_history;
+      reaction_failure : reactions_source_failure;
+      reaction_diagnostics : reactions_source_diagnostic list;
+    }
+  | Reactions_unsettled of {
+      reaction_pending : reactions_pending_write;
+      reaction_failure : reactions_source_failure;
+      reaction_diagnostics : reactions_source_diagnostic list;
+    }
+(** Reaction authority belongs to persist_mutex. Known file success remains owned
+    until model publication is acknowledged. Unknown writes and unfinished
+    publication require a fresh store; an ordinary reload cannot clear them. *)
+
+
+type deletion_outcome =
+  | Durable_deletion
+  | Deletion_decision_pending of string
+  | Deletion_persistence_pending of string
+(** Decision_pending does not establish model application. Persistence_pending
+    does; neither authorizes replay or claims durable completion. *)
+
+type sub_board_deletion_authorization =
+  | Operator_sub_board_deletion
+  | Owner_sub_board_deletion of Agent_id.t
+(** Authority supplied by the calling boundary, never decoded from a marker. *)
+
+type deletion_operation =
+  | Delete_post of {
+      deleted_post : Post_id.t;
+      deleted_comments : Comment_id.t list;
+    }
+  | Delete_sub_board of {
+      deleted_sub_board : Sub_board_id.t;
+      deleted_slug : string;
+      unlinked_posts : Post_id.t list;
+    }
+
+type deletion_plan = {
+  decision_id : Deletion_id.t;
+  operation : deletion_operation;
+}
+(** Fixed original identities. Recovery never expands the selected children or
+    posts by looking up a slug again. Later boards and posts remain outside it. *)
+
+type deletion_observation = {
+  decision_path : string;
+  decision_snapshot : Fs_compat.private_jsonl_snapshot;
+  decision_workspace : Board_workspace_binding.observation;
+}
+
+type deletion_diagnostic =
+  | Deletion_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Deletion_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
+  | Deletion_workspace_diagnostic of Board_workspace_binding.rejection
+  | Deletion_raised_diagnostic of {
+      exception_ : exn; backtrace : Printexc.raw_backtrace;
+    }
+
+type deletion_failure =
+  | Deletion_invalid_decision of string
+  | Deletion_transaction_failed of Fs_compat.private_jsonl_transaction_error
+  | Deletion_workspace_refused of Board_workspace_binding.rejection
+  | Deletion_marker_missing
+  | Deletion_binding_mismatch
+  | Deletion_projection_rejected of board_error
+  | Deletion_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
+
+type deletion_receipt = {
+  decision : deletion_plan;
+  decision_after : deletion_observation;
+  decision_cleanup : deletion_diagnostic list;
+}
+(** Known durable marker publication, retained before any model change. *)
+
+type deletion_progress =
+  | Decision_recorded
+  | Model_applied
+  | Sources_uncertain
+  | Sources_written
+(** Sources_uncertain retains an unknown source effect and requires fresh-store
+    recovery. Same-store reload and ordinary flush do not replay that effect.
+    Sources_written means all sources selected by the recorded operation have
+    known durable receipts: four for a post, Posts and Policy for a sub-board. *)
+
+type deletion_work = {
+  decision_receipt : deletion_receipt;
+  deletion_progress : deletion_progress;
+  deletion_last_failure : deletion_failure option;
+  deletion_diagnostics : deletion_diagnostic list;
+}
+
+type deletion_attempt =
+  | Recording_decision of deletion_plan
+  | Retiring_decision of deletion_receipt
+
+type deletion_state =
+  | Deletion_unobserved
+  | Deletion_readable of {
+      observation : deletion_observation;
+      plan : deletion_plan option;
+      diagnostics : deletion_diagnostic list;
+    }
+  | Deletion_pending of deletion_work
+  | Deletion_unsettled of {
+      before : deletion_observation;
+      attempt : deletion_attempt;
+      intended_bytes : string;
+      failure : deletion_failure;
+      diagnostics : deletion_diagnostic list;
+    }
+  | Deletion_refused of {
+      last_observed : deletion_observation option;
+      failure : deletion_failure;
+      diagnostics : deletion_diagnostic list;
+    }
+  | Deletion_projection_failed of {
+      receipt : deletion_receipt;
+      exception_ : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+(** Sole deletion owner under persist_mutex. Ordinary flush/reload cannot settle
+    an unknown record/retirement or an exceptional model publication. A fresh
+    initializer durably fences an observed decision before applying its fixed
+    IDs to fresh complete models. All selected known writes precede retirement. *)
+
+type votes_source_observation = {
+  vote_path : string;
+  vote_snapshot : Fs_compat.private_jsonl_snapshot;
+  vote_workspace : Board_workspace_binding.observation;
+}
+
+type votes_source_history =
+  | No_votes_observation
+  | Votes_observed of votes_source_observation
+  | Votes_present_without_snapshot
+
+type votes_row_error =
+  | Invalid_vote_json of { line : int; detail : string }
+  | Invalid_vote_row of { line : int }
+
+type votes_source_diagnostic =
+  | Vote_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Vote_guard_diagnostic of Fs_compat.private_jsonl_guard_failure
+  | Vote_workspace_diagnostic of Board_workspace_binding.rejection
+  | Vote_raised_diagnostic of {
+      exception_ : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+  | Vote_projection_diagnostic of board_error
+
+type votes_source_failure =
+  | Votes_not_observed
+  | Votes_rows_rejected of votes_row_error list
+  | Votes_transaction_failed of Fs_compat.private_jsonl_transaction_error
+  | Votes_missing
+  | Votes_binding_mismatch
+  | Votes_publication_pending
+  | Votes_workspace_refused of Board_workspace_binding.rejection
+  | Votes_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
+
+type votes_write_kind = Vote_append | Vote_rewrite
+
+type votes_pending_write = {
+  vote_before : votes_source_observation;
+  vote_kind : votes_write_kind;
+  vote_intended_bytes : string;
+}
+
+type votes_publication = {
+  vote_after : votes_source_observation;
+  vote_cleanup : votes_source_diagnostic list;
+}
+
+type votes_source_state =
+  | Votes_unobserved
+  | Votes_readable of votes_source_observation
+  | Votes_publishing of votes_publication
+  | Votes_refused of {
+      vote_history : votes_source_history;
+      vote_failure : votes_source_failure;
+      vote_diagnostics : votes_source_diagnostic list;
+    }
+  | Votes_unsettled of {
+      vote_pending : votes_pending_write;
+      vote_failure : votes_source_failure;
+      vote_diagnostics : votes_source_diagnostic list;
+    }
+(** Vote authority belongs to persist_mutex. Known file success remains owned
+    until model publication is acknowledged. Unknown writes and unfinished
+    publication require a fresh store; an ordinary reload cannot clear them. *)
 
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.
@@ -846,9 +1060,13 @@ type store = {
   (** None selects production comments IO. *)
   mutable sub_boards_source : sub_boards_source_state;
   sub_boards_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
-  (** Derived outcomes of the other two source loads. *)
-  mutable votes_load_result : (unit, string) result;
-  mutable reactions_load_result : (unit, string) result;
+  (** Vote-file observation and unfinished effects are owned by persist_mutex. *)
+  mutable votes_source : votes_source_state;
+  votes_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
+  (** None selects production vote-file IO. *)
+  mutable reactions_source : reactions_source_state;
+  reactions_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
+  deletion_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
   mutable workspace_binding : Board_workspace_binding.t;
   (** One explicit BasePath capture attempt, refined with actual Present
       state-directory observations under persist_mutex or quiescent loading.
@@ -876,8 +1094,7 @@ type store = {
   (** Unique reactions keyed by target type, target id, user id, and emoji. *)
   mutable dirty_posts : bool;
   mutable dirty_comments : bool;
-  mutable snapshot_retry : snapshot_retry;
-  (** Owned by persist_mutex and changed with dirty work under the state lock. *)
+  mutable deletion_state : deletion_state;
   dirty_post_ids : (string, unit) Hashtbl.t;
   dirty_comment_ids : (string, unit) Hashtbl.t;
   post_rows : (string, post * string) Hashtbl.t;

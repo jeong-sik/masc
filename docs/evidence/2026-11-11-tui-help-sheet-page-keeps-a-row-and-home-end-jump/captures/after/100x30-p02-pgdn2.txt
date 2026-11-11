@@ -1,0 +1,30 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                                                                       │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  @                answering: who is mid-turn                      for this keeper                │
+│                   or just finished; Enter         /queue [pause|resume|clear|cancel ID|last      │
+│                   opens their chat                ID|edit ID message]                            │
+│  ?                this help; `/` filters its                      open the queue panel or        │
+│                   keys and commands                               manage waiting work            │
+│  &                Collab: watch MSX/DOS and       /run-next       prioritize my queued message,  │
+│                   manage play links (also `:`                     stop the observed turn, and    │
+│                   go Collab)                                      resume                         │
+│  Ctrl-B           show or hide the Keeper         /priority [on|off] (/autonext)                 │
+│                   roster; it starts hidden and                    toggle or set automatic        │
+│                   the choice persists across                      next-turn promotion for user   │
+│                   navigation and resizing                         input                          │
+│  Ctrl-L           cycle the Activity pane         /approve        allow this keeper's held tool  │
+│                   narrow, wide or hidden; the                     call                           │
+│                   wheel over the pane scrolls     /deny           deny this keeper's held tool   │
+│                   the full list; a press picks                    call                           │
+│                   a keeper, a second press        /interrupt [keeper]  signal a streaming turn   │
+│                   opens its chat; /activity                       to stop: this pane's, or the   │
+│                   order turns the order of its                    named keeper's                 │
+│                   calls, /activity scroll         /steer <message>  submit this first, stop the  │
+│                   moves the pane                                  observed turn, and resume      │
+│  Ctrl-W           focus the Activity pane: a      /thinking [hidden|folded|full]                 │
+│  [lines 43-64/990]                                                                               │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:close  …
+ Choose a Keeper before writing · i:choose

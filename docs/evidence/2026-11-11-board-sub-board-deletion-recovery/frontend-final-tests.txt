@@ -1,0 +1,13 @@
+
+ RUN  v5.0.2 <candidate>/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  105 passed (105)
+   Start at  00:06:31
+   Duration  23.42s (transform 36%, import 24%, environment 20%, setup 13%, tests 6%, worker 1%)
+
+  Transform  transforming modules took 7.34s · 36% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns
+

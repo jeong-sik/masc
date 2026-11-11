@@ -1,25 +1,5 @@
 open Masc
 
-let test_resolve_commit_prefers_embedded () =
-  let probe_called = ref false in
-  let commit =
-    Build_identity.resolve_commit
-      ~embedded:(Some " feed0123 ")
-      ~probe:(fun () ->
-        probe_called := true;
-        Some "deadbeef")
-  in
-  Alcotest.(check (option string)) "embedded wins" (Some "feed0123") commit;
-  Alcotest.(check bool) "probe not called" false !probe_called
-
-let test_resolve_commit_uses_probe_when_embedded_missing () =
-  let commit =
-    Build_identity.resolve_commit
-      ~embedded:None
-      ~probe:(fun () -> Some "deadbeef")
-  in
-  Alcotest.(check (option string)) "probe used" (Some "deadbeef") commit
-
 let test_resolve_commit_details_prefers_embedded_binary () =
   let details =
     Build_identity.resolve_commit_details
@@ -833,12 +813,8 @@ let () =
         [
           Alcotest.test_case "path_is_in_worktree pins the convention" `Quick
             test_path_is_in_worktree_pins_the_convention;
-          Alcotest.test_case "resolve commit prefers embedded" `Quick
-            test_resolve_commit_prefers_embedded;
           Alcotest.test_case "resolve commit details prefers embedded binary"
             `Quick test_resolve_commit_details_prefers_embedded_binary;
-          Alcotest.test_case "resolve commit falls back to probe" `Quick
-            test_resolve_commit_uses_probe_when_embedded_missing;
           Alcotest.test_case
             "resolve commit details marks repo head fallback" `Quick
             test_resolve_commit_details_marks_repo_head_fallback;

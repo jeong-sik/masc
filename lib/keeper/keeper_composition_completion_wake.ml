@@ -47,6 +47,8 @@ let deliver ~not_before ~base_path ~keeper_name ~request_id ~composition_tool ~t
       match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result ~not_before ~base_path keeper_name stimulus with
       | Keeper_registry_event_queue.Stimulus_enqueued
       | Keeper_registry_event_queue.Stimulus_already_present -> Ok ()
+      | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+        Error (Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
       | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn

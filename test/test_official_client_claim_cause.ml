@@ -394,7 +394,6 @@ let check_remote_fence () =
   | _ -> Alcotest.fail "remote attempt fence was conflated with local claim refusal"
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   Alcotest.run "official-client claim cause"
     [ "typed contract", [ Alcotest.test_case "strict codec" `Quick check_codec
                         ; Alcotest.test_case "remote fence stays distinct" `Quick check_remote_fence

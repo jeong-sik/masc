@@ -195,13 +195,18 @@ let strip_path_trailing_slashes value =
   in
   if trimmed = "" then "" else loop trimmed
 
-let expand_home_prefix value =
+let home_dir_opt () =
+  raw_value_opt "HOME" |> trim_opt
+
+let expand_home_prefix_under ~home value =
   if String.length value >= 2 && value.[0] = '~' && value.[1] = '/' then
-    match raw_value_opt "HOME" |> trim_opt with
+    match home with
     | Some home -> Filename.concat home (String.sub value 2 (String.length value - 2))
     | None -> value
   else
     value
+
+let expand_home_prefix value = expand_home_prefix_under ~home:(home_dir_opt ()) value
 
 type lexical_path_form = Normal_form | Needs_normalization
 
@@ -269,9 +274,6 @@ let existing_dir path =
 
 let existing_file path =
   Sys.file_exists path && not (Sys.is_directory path)
-
-let home_dir_opt () =
-  raw_value_opt "HOME" |> trim_opt
 
 (** SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352).
     Defined here so in-process readers and out-of-process callers

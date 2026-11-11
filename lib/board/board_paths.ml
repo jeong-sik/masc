@@ -20,13 +20,14 @@ let capture_workspace_masc_dir workspace_masc_dir =
   Fs_compat.realpath_lenient workspace_masc_dir
 ;;
 
-type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes
+type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes | Deletion
 let persisted_filename = function
   | Posts -> "board_posts.jsonl"
   | Comments -> "board_comments.jsonl"
   | Reactions -> "board_reactions.jsonl"
   | Sub_boards -> "board_sub_boards.jsonl"
   | Votes -> "board_votes.jsonl"
+  | Deletion -> "board_deletion.jsonl"
 
 let file_path ~workspace_masc_dir file =
   Filename.concat workspace_masc_dir (persisted_filename file)

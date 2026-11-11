@@ -21,8 +21,6 @@ let espeak_catalogue_of_output = Voice_catalogue.espeak_catalogue_of_output
 type say_voice = Voice_catalogue.say_voice =
   | Say_has_it
   | Say_lacks_it of { installed : int }
-let say_voice_in_catalogue = Voice_catalogue.say_voice_in_catalogue
-let espeak_voice_in_catalogue = Voice_catalogue.espeak_voice_in_catalogue
 type transcriber = Voice_catalogue.transcriber =
   | Over_http
   | By_command
@@ -106,7 +104,6 @@ let agent_speak = Voice_speak.agent_speak
 let get_agent_voice = Voice_speak.get_agent_voice
 
 (* E09 Phase 2d re-exports: the capture pipeline lives in Voice_capture now. *)
-let db_of_amplitude = Voice_capture.db_of_amplitude
 let amplitude_of_db = Voice_capture.amplitude_of_db
 let measure_noise_floor = Voice_capture.measure_noise_floor
 let with_noise_reduced_audio = Voice_capture.with_noise_reduced_audio
@@ -143,7 +140,6 @@ type capture_outcome = Voice_capture.capture_outcome =
   | Unrecognized_status of string
   | Status_absent
 let capture_outcome_of_json = Voice_capture.capture_outcome_of_json
-let recorder_refusal_message = Voice_capture.recorder_refusal_message
 let resolved_audio_device = Voice_capture.resolved_audio_device
 let record_and_transcribe = Voice_capture.record_and_transcribe
 

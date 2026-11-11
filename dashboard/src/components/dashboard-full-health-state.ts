@@ -1,7 +1,7 @@
 import { computed } from '@preact/signals'
 import { fetchDashboardFullHealth, type DashboardFullHealthResponse } from '../api/dashboard'
 import { createManagedAsyncResource } from '../lib/async-state'
-import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 
 export const dashboardFullHealthResource = createManagedAsyncResource<DashboardFullHealthResponse>()
 
@@ -16,19 +16,14 @@ export function loadDashboardFullHealth(): Promise<void> {
     .then(() => undefined)
 }
 
-export const DASHBOARD_FULL_HEALTH_REFRESH_MS = 60_000
-
 let subscriberCount = 0
 let stopRefresh: (() => void) | null = null
 
-/** Share one visibility-aware /health poller between global chrome and Overview. */
+/** Share one health observation between global chrome and Overview. */
 export function subscribeDashboardFullHealthRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    void loadDashboardFullHealth()
-    stopRefresh = setupVisibleAutoRefresh(() => {
-      void loadDashboardFullHealth()
-    }, DASHBOARD_FULL_HEALTH_REFRESH_MS)
+    stopRefresh = setupObservationRefresh(loadDashboardFullHealth, { topics: ['health'], readError: () => dashboardFullHealthResource.readError(), cancelRead: () => dashboardFullHealthResource.cancel(), resetRead: () => dashboardFullHealthResource.reset() })
   }
   return () => {
     subscriberCount -= 1

@@ -1154,7 +1154,7 @@ let start_dispatch_workers cs =
 ;;
 
 (** Register the /api/v1/ide/lsp WebSocket endpoint. *)
-let add_routes ~sw ~clock router =
+let add_routes ~transport_sw:sw ~clock router =
   let router =
     Server_route.ws_get
       ide_lsp_upgrade_path

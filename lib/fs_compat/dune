@@ -36,6 +36,7 @@
   atomic_write
   blocking_write
   execution_context
+  systhread_host
   fd_write_all
   atomic_orphan_size_class
   durable_file_identity)
@@ -57,7 +58,7 @@
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))
- (libraries eio eio.unix unix yojson uuidm  masc.agent_core.digest optint cstruct
+ (libraries eio eio.unix eio_main unix yojson uuidm  masc.agent_core.digest optint cstruct
   masc_string_util)
  (foreign_stubs
   (language c)
@@ -79,6 +80,7 @@
   fs_compat_private_file_update
   fs_compat_private_jsonl_read
   fs_compat_private_jsonl_transaction
+  fs_compat_private_jsonl_guard
   fs_compat_private_jsonl_write)
  (private_modules
   fs_compat_base_io
@@ -92,6 +94,7 @@
   fs_compat_private_file_update
   fs_compat_private_jsonl_read
   fs_compat_private_jsonl_transaction
+  fs_compat_private_jsonl_guard
   fs_compat_private_jsonl_write)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags

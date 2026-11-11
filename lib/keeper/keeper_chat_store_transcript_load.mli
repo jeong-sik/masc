@@ -13,10 +13,15 @@
     [load_result] returns the window of [load] from the strict reader, and
     [load_history_page_result] returns a [history_page] in file append order
     with the cursor of the next page.
+    [purge_transcript] removes a transcript through the caller's [remove] and
+    forgets both things this process keeps from reading it: the [load_all]
+    cache and the provenance index of the append-once writers.
     [Keeper_chat_store] includes this module. *)
 open Keeper_chat_types
 open Keeper_chat_store_line_decode
 open Keeper_chat_store_transcript_rows
+
+val purge_transcript : string -> remove:(string -> 'a) -> 'a
 
 val load_all :
   base_dir:string -> keeper_name:string -> chat_message list

@@ -56,6 +56,7 @@ val update_locked_with_output :
   ?explicit_candidate_ids:explicit_candidate_id
                           list ->
   ?admission_recall:admission_recall ->
+  change_count:'a Keeper_memory_os_current_change_metrics.change_count ->
   equal_facts:'b equal_facts ->
   store_error:(string -> 'b) ->
   keepers_dir:string ->
@@ -67,11 +68,17 @@ val update_locked_with_output :
   (t *
    commit_effect * 'a, 'b)
   result
+(** For a commit that rewrote the snapshot, [change_count] sets the Memory
+    gauges under both locks, in commit order, and moves the change counter
+    after both locks are released. That includes a commit that returns an
+    error after its snapshot rename, because its journal evidence is still
+    pending or the directory sync failed. A kept snapshot is not counted. *)
 
 val update_locked_with_error :
   ?clock:float Eio.Time.clock_ty Eio.Time.clock_base ->
   ?dropped_statements:dropped_statement list ->
   ?retraction_plan:'a retraction_plan ->
+  change_count:unit Keeper_memory_os_current_change_metrics.change_count ->
   store_error:(string -> 'a) ->
   keepers_dir:string ->
   keeper_id:string ->

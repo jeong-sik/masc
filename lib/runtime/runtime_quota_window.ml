@@ -53,12 +53,14 @@ let note_exhausted ~scope ~resets_at =
       Hashtbl.replace windows scope (Until resets_at));
   Runtime_path_rest_signal.recorded ()
 
-let note_observed ~scope observation =
-  (* NDT-OK: the wall clock is the moment the observation is noted, which
-     dates its rest, and tells whether a held entry has passed. A passed
-     entry that no read has pruned yet names no rest, and keeping it over
-     this observation would leave the scope looking available. *)
-  let now = Unix.gettimeofday () in
+let note_observed_at ~now ~scope observation =
+  (* NDT-OK: the wall clock is the default moment an observation is noted,
+     not the only admissible one. It dates the rest, and tells whether a
+     held entry has passed. A caller that already holds the moment passes it
+     in, so a fixture is dated deterministically instead of against the
+     instant the test happens to run. A passed entry that no read has pruned
+     yet names no rest, and keeping it over this observation would leave the
+     scope looking available. *)
   let observed = Observed { observation; rests_until = now +. observed_rest_sec () } in
   Stdlib.Mutex.protect mu (fun () ->
     match Hashtbl.find_opt windows scope, observation with
@@ -74,8 +76,19 @@ let note_observed ~scope observation =
       Hashtbl.replace windows scope observed);
   Runtime_path_rest_signal.recorded ()
 
+(* Real provider paths keep the wall clock; a caller that already holds the
+   moment (a fixture, a replay) passes it in through the [_at] entry points. *)
+let note_observed ~scope observation =
+  note_observed_at ~now:(Unix.gettimeofday ()) ~scope observation
+
 let note_observed_exhausted ~scope = note_observed ~scope Refusal_named_no_reset
 let note_read_without_reset ~scope = note_observed ~scope Read_named_no_reset
+
+let note_observed_exhausted_at ~now ~scope =
+  note_observed_at ~now ~scope Refusal_named_no_reset
+
+let note_read_without_reset_at ~now ~scope =
+  note_observed_at ~now ~scope Read_named_no_reset
 
 let note_succeeded ~scope =
   Stdlib.Mutex.protect mu (fun () ->

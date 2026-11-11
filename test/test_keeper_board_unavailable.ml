@@ -246,8 +246,10 @@ let test_poison_durable_source_is_retired_during_intake () =
    the sources carried by one turn; these cases do not run a provider or claim
    that a full Keeper turn completed. *)
 let with_intake_sources ~max_events f =
-  Masc_test_deps.with_process_env "MASC_KEEPER_ADMISSION_MAX_EVENTS"
-    (Some (string_of_int max_events))
+  Masc_test_deps.with_file_owned_values
+    [ ( Env_config_keeper.KeeperAdmissionBounds.max_events_env_key
+      , string_of_int max_events )
+    ]
   @@ fun () ->
   Eio_main.run
   @@ fun env ->
@@ -526,7 +528,7 @@ let create_thread ~title content =
 
 let add_comment ~post_id ~author content =
   Unix.sleepf write_spacing_seconds;
-  match Board_dispatch.add_comment ~post_id ~author ~content () with
+  match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author ~content () with
   | Ok comment -> Board.Comment_id.to_string comment.id
   | Error error -> failf "comment: %s" (Board.show_board_error error)
 ;;
@@ -610,7 +612,7 @@ let test_board_replay_routes_exact_replies () =
   check int "past parent author does not receive unrelated reply" 0 (List.length (collect parent_author));
   check int "past participant does not receive unrelated reply" 0 (List.length (collect bystander));
   Unix.sleepf write_spacing_seconds;
-  (match Board_dispatch.add_comment ~post_id ~parent_id ~author:"external"
+  (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~parent_id ~author:"external"
            ~content:"direct answer" () with
    | Ok _ -> () | Error error -> fail (Board.show_board_error error));
   List.iter (fun meta ->
@@ -657,11 +659,11 @@ let test_missing_parent_comment_does_not_abort_later_comment_replay () =
   ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:parent_author);
   Unix.sleepf write_spacing_seconds;
   let expired_parent_id = "c-" ^ String.make 32 '1' in
-  (match Board_dispatch.add_comment ~post_id ~parent_id:expired_parent_id
+  (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~parent_id:expired_parent_id
            ~author:"external" ~content:"reply to expired comment" () with
    | Ok _ -> () | Error error -> fail (Board.show_board_error error));
   Unix.sleepf write_spacing_seconds;
-  (match Board_dispatch.add_comment ~post_id ~parent_id
+  (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~parent_id
            ~author:"external" ~content:"reply after expired-parent sibling" () with
    | Ok _ -> () | Error error -> fail (Board.show_board_error error));
   let events, _, _ =
@@ -762,7 +764,7 @@ let accepted_comment_identity_survives_queue_projection ~shape () =
   Fun.protect ~finally:(fun () -> Board_dispatch.set_board_signal_hook (fun _ -> ()))
   @@ fun () ->
   let accepted =
-    match Board_dispatch.add_comment ~post_id ?parent_id ~author:"reply-author"
+    match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ?parent_id ~author:"reply-author"
             ~content:"the queued reply" () with
     | Ok comment -> comment
     | Error error -> fail (Board.show_board_error error)
@@ -879,7 +881,7 @@ let test_direct_durable_intake_and_model_side_observers () =
     ~post_kind:Board.Human_post ~visibility:Board.Direct () with
     | Ok post -> post | Error error -> fail (Board.Post_publication_failure.to_string error) in
   let post_id = Board.Post_id.to_string post.id in
-  let comment = match Board_dispatch.add_comment ~post_id ~author:"external-author"
+  let comment = match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"external-author"
     ~content:"PRIVATE_COMMENT" () with
     | Ok comment -> comment | Error error -> fail (Board.show_board_error error) in
   let kinds = Keeper_event_queue.[Post_created; Post_updated {content_updated_at=post.created_at +. 1.};

@@ -403,6 +403,9 @@ type cleanup_directory = Fs_compat_internal.Owned_tree_cleanup.directory =
   }
 module Retention_directory : module type of Fs_compat_internal.Retention_directory
 
+module Systhread_host : module type of Fs_compat_internal.Systhread_host
+(** Where the blocking calls of this library run their system threads. *)
+
 val remove_owned_tree : cleanup_directory list -> (unit, string) result
 (** Remove an execution-owned stopped writer's tree beneath its frozen,
     descriptor-bound parent chain. Never follows links. Missing target recovery
@@ -960,19 +963,54 @@ val create_capability_directory_exclusive
 
 val capability_write_error_to_string : capability_write_error -> string
 
+type create_file_failure =
+  | Target_rejected of capability_publication_target_error
+  | Registry_failed of Publication_recovery.registry_error
+  | Lane_failed of Publication_recovery.lane_open_error
+  | Publication_failed of capability_write_error
+  | Lane_release_failed of {
+      value : (unit, capability_write_error) result;
+      release_failure : Publication_recovery.lane_release_failure;
+    }
+
+type create_file_error =
+  | Create_failed of create_file_failure
+  | Boundary_failed of {
+      observed : (unit, create_file_failure) result option;
+      failure : Eio.Exn.with_bt;
+    }
+
+val create_file_error_target_effect
+  : create_file_error -> capability_write_target_effect option
+(** [None] means no target-effect evidence was received. Preparation errors do
+    not establish the destination's state. Original publication results remain
+    available through lane-release and subsequent path-boundary failures. *)
+val create_file_error_to_string : create_file_error -> string
+
+type create_file_cancellation
+val create_file_cancellation : exn -> create_file_cancellation option
+(** Structural cancellation evidence retaining the original exception, including
+    nested publication/recovery/cleanup failures. This does not consume it. *)
+val create_file_cancellation_effect
+  : create_file_cancellation -> capability_write_target_effect option
+(** [None] is unobserved, never proof of an unchanged destination. *)
+val create_file_cancellation_to_string : create_file_cancellation -> string
+
 (** Path boundary for standalone file exports. The existing destination parent
     owns the durable [fs-publication-recovery] registry. [owner] is a stable
     caller identity reused on restart; recovery precedes publication. This uses
     the same mandatory recovery access and staged exclusive writer as capability
     callers. Recovery records are retained on uncertain outcomes, and cancellation
-    propagates. The destination parent is not created by this function. *)
+    propagates with the original backtrace. A returned write or lane-release
+    failure is preserved even if later path cleanup fails. The destination
+    parent is not created by this function. *)
 val create_file_exclusive
   : fs:Eio.Fs.dir_ty Eio.Path.t
   -> owner:string
   -> path:string
   -> permissions:int
   -> string
-  -> (unit, string) result
+  -> (unit, create_file_error) result
 
 val capability_write_operation_to_string : capability_write_operation -> string
 val capability_write_stage_to_string : capability_write_stage -> string
@@ -1586,6 +1624,19 @@ val private_jsonl_cursor_success_receipt :
   , private_jsonl_transaction_error )
   result
 
+type private_jsonl_guard_failure = {
+  guard_path : string;
+  guard_error : private_jsonl_transaction_error;
+}
+
+type 'a private_jsonl_guard_result =
+  | Guard_refused of private_jsonl_guard_failure
+  | Guard_executed of {
+      value : 'a;
+      cleanup_failures : private_jsonl_guard_failure list;
+    }
+
+
 val private_jsonl_transaction_error_to_string :
   private_jsonl_transaction_error -> string
 
@@ -1666,6 +1717,42 @@ type private_jsonl_transaction_io_for_testing =
   { before_sync_parent : string -> unit
   ; close_fd : Unix.file_descr -> unit
   }
+
+val with_private_jsonl_snapshot_guard_result :
+  string -> expected:private_jsonl_snapshot ->
+  f:(unit -> 'a) -> 'a private_jsonl_guard_result
+(** Exact snapshot validation and the existing stable lock span [f]. Refused
+    means the callback never ran. Executed retains its result before guard
+    cleanup, including reserved cleanup causes. The callback runs in the
+    blocking worker and performs filesystem effects only: no Eio effects,
+    model mutation or re-entry into this path. Callers consistently order any
+    nested guards and target locks. Directory/file binding still belongs to
+    the existing cooperative private JSONL protocol. *)
+
+val with_private_jsonl_snapshot_guard_with_io_for_testing :
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> expected:private_jsonl_snapshot ->
+  f:(unit -> 'a) -> 'a private_jsonl_guard_result
+
+val append_private_jsonl_durable_locked_at_snapshot_with_dependency_result :
+  string -> expected:private_jsonl_snapshot ->
+  dependency_path:string -> dependency:private_jsonl_snapshot -> string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+    private_jsonl_guard_result private_jsonl_guard_result
+(** Target stable lock, then a distinct read-dependency lock, retained through
+    the existing exact-snapshot append. Never re-enters the target. Outer/inner
+    refusal means no append; nested executed values preserve the append result
+    and both guard cleanup lists. Filesystem worker only, with no model effects.
+    This does not make arbitrary multi-file writes atomic. *)
+
+val append_private_jsonl_durable_locked_at_snapshot_with_dependency_with_io_for_testing :
+  ?io:private_jsonl_transaction_io_for_testing ->
+  ?dependency_io:private_jsonl_transaction_io_for_testing ->
+  string -> expected:private_jsonl_snapshot ->
+  dependency_path:string -> dependency:private_jsonl_snapshot -> string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+    private_jsonl_guard_result private_jsonl_guard_result
+
 
 val fold_private_jsonl_unique_regular_locked_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->
@@ -1851,6 +1938,50 @@ val update_private_file_durable_locked_result :
   ?create:bool ->
   string ->
   (string -> string option * 'a) ->
+  ('a, durable_append_error) private_file_transaction_outcome
+
+type 'kept private_jsonl_rows_read =
+  | Rows_after_cursor of 'kept
+      (** The read started at the caller's cursor: the rows after it, with what
+          the caller kept with that cursor. *)
+  | Rows_from_start
+      (** There was no cursor, or it names another file, an offset past this
+          file's end, or an offset where no row of this file starts: every row
+          of the file, without what the caller kept. *)
+
+type 'kept private_jsonl_rows_from_cursor =
+  { read : 'kept private_jsonl_rows_read
+  ; rows : string
+    (** The bytes read, up to and including their last newline. *)
+  ; incomplete_tail : string
+    (** The bytes after that newline; [""] when the file ends with a row. *)
+  ; rows_end : Private_jsonl_cursor.t
+    (** This file at the end of [rows]. *)
+  }
+
+(** [update_private_jsonl_after_cursor_durable_locked_result path ~after decide]
+    is {!update_private_file_durable_locked_result} for an append-only JSONL
+    file whose caller keeps what it derived from the rows it has already read.
+    The lock, the append, the rollback and the binding checks are the same; the
+    read is not. With [after = Some (cursor, kept)], where [cursor] names this
+    file's device and inode and an offset no greater than its length at which
+    a row starts (the first byte, or the byte after a newline), the read starts
+    at that offset, and [decide] receives the rows after it together with
+    [kept]. Otherwise the read starts at the first byte, and [decide] receives
+    every row and not [kept]: what was derived from a file that has since been
+    replaced, shortened or rewritten across that offset does not describe this
+    one. When the caller has taken [rows] into what it keeps, it passes
+    [rows_end] with that as [after] next time.
+
+    Of the bytes before the cursor, only the last is read. A change below it
+    that keeps the device, the inode, at least the length and a row start at
+    the cursor is therefore not seen: the caller relies on the file being
+    appended to only, as every cursor of this module does. *)
+val update_private_jsonl_after_cursor_durable_locked_result :
+  ?create:bool ->
+  string ->
+  after:(Private_jsonl_cursor.t * 'kept) option ->
+  ('kept private_jsonl_rows_from_cursor -> string option * 'a) ->
   ('a, durable_append_error) private_file_transaction_outcome
 
 type 'a private_file_decision =

@@ -1,15 +1,5 @@
 (** The Tools surface: what the selected Keeper's turn called, and what the
-    process has registered.
-
-    Lifted out of masc_tui_render.ml whole. The file that #3808 split out of
-    masc_tui.ml had grown back to 16,533 lines, and it could not be split
-    again while Ansi/Theme/Terminal_text lived inside the same executable
-    stanza -- any surface that draws has to reach them, so any surface that
-    moved had to stay. masc_tui_ansi is a library now, which is what makes a
-    per-surface module possible at all.
-
-    Twelve definitions moved; the interface exposes the two the rest of the
-    renderer actually calls. *)
+    process has registered. *)
 
 open Masc_tui_types
 open Tui_decode
@@ -672,9 +662,9 @@ let skill_statistics_lines ~cols = function
       @ [ Ansi.bold, "실행 결과 분포 · 분모는 보존된 원래 실행 수" ]
       @ (Masc_tui_chart.distribution_bars
            ~width:(max 1 (Masc_tui_frame.inner_width ~cols - 4))
-           [ { name = "completed"; count = stats.scst_completed.sds_samples; style = Some Masc_tui_theme.Ok }
-           ; { name = "failed"; count = stats.scst_failed.sds_samples; style = Some Masc_tui_theme.Bad }
-           ; { name = "deferred"; count = stats.scst_deferred; style = Some Masc_tui_theme.Warn } ]
+           [ { name = "completed"; count = stats.scst_completed.sds_samples; style = Masc_tui_theme.Ok }
+           ; { name = "failed"; count = stats.scst_failed.sds_samples; style = Masc_tui_theme.Bad }
+           ; { name = "deferred"; count = stats.scst_deferred; style = Masc_tui_theme.Warn } ]
          |> List.map (fun line -> "", line))
       @ [ Ansi.dim, "deferred는 실행 시간에서 제외 · queue/의존 대기/model 시간은 별도" ]
 ;;
@@ -1718,7 +1708,10 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     lazy begin
     match state.tools_inventory with
     | None ->
-        [ Theme.warn (), " Registered Catalog — no inventory reading" ]
+        [ Theme.warn (),
+          ui_text state
+            ~ko:" 전체 등록 도구 — 조회 자료 없음"
+            ~en:" All registered tools — no inventory reading" ]
     | Some { Masc.Tui_decode_tools.ts_usage; _ } ->
     let registered_rows = Tool_tree.rows registered_tools in
     let surfaces_text (tool : Masc.Tui_decode_tools.tool_entry) =
@@ -1749,9 +1742,12 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                 { calls = tu_calls; failures = tu_failures; p95_ms = tu_p95_ms })
     in
     let heading =
+      let count = List.length registered_tools in
       [ Ansi.bold,
-        Printf.sprintf " Registered Catalog — %s"
-          (Masc_tui_message_layout.count_noun (List.length registered_tools) "tool");
+        ui_text state
+          ~ko:(Printf.sprintf " 전체 등록 도구 — %d개" count)
+          ~en:(Printf.sprintf " All registered tools — %s"
+                 (Masc_tui_message_layout.count_noun count "tool"));
         Ansi.dim, Tool_table.catalog_tool_header layout ]
     in
     heading
@@ -1777,7 +1773,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
               let metadata =
                 if tool.tl_surfaces = [] then (Theme.warn ()) else Ansi.dim
               in
-              ( Masc_tui_theme.tone Masc_tui_theme.Normal,
+              ( "",
                 Tool_table.catalog_tool_line layout ~metadata
                   ~name:(Terminal_text.single_line (Masc.Tool_display.list_label tool.tl_name))
                   ~direct:(if tool.tl_direct_call then "yes" else "no")
@@ -2122,36 +2118,6 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
      the other four started past row 120 of a list a terminal shows twenty of.
      They were not missing; they were behind a section that never ends, with
      nothing saying so. *)
-  let explanation =
-    match state.tools_pane with
-    | Masc_tui_types.Tools_surface ->
-        [ Theme.info (), " 선택 Keeper의 도구·Skill 노출 범위입니다."
-        ; Ansi.dim, "   ORIGIN=도구 출처 · 전달 지원과 실제 호출은 별도입니다."
-        ; Ansi.dim, "   사용 증거: Skill 기록 · Tool 호출별 입출력: Acting"
-        ]
-    | Masc_tui_types.Tools_async ->
-        [ Theme.info (), " 워크스페이스의 비동기 요청·복구 상태입니다."
-        ; Theme.info (), "   J/K:요청 선택 · Enter:상세 · t:원본 Task · o:원본 ID · r:재조회 · Esc:뒤로"
-        ; Ansi.dim, "   active=활성 원장 요청 수 · runtime-owned=현재 런타임 소유"
-        ; Ansi.dim, "   ownership-unknown=소유 확인 안 됨 · 성공 여부는 개별 상태 확인"
-        ]
-    | Masc_tui_types.Tools_activations ->
-        [ Theme.info (), " 선택 Keeper의 현재 세션에 보존된 Skill 증거입니다."
-        ; Ansi.dim, "   triggered=호출 · delivered/handed off=전달 · actions=이후 Tool 행동"
-        ; Ansi.dim, "   호출·전달·이후 행동은 별도 증거이며, 기록 없음은 미사용 확정이 아닙니다."
-        ]
-    | Masc_tui_types.Tools_usage ->
-        [ Theme.info (), " 현재 Keeper 세션들에서 읽힌 Skill revision별 사용 집계입니다."
-        ; Ansi.dim, "   TRIGGERED/DELIVERED/ACTIONS=호출/전달/이후 행동 · 마지막 사용은 원장에 기록된 시각"
-        ; Ansi.dim, "   호출 기록이 있는 행만 표시합니다. 읽지 못한 원장은 아래에 표시합니다."
-        ]
-    | Masc_tui_types.Tools_catalog Tools_catalog_list ->
-        [ Theme.info (), " MASC 전체 등록 도구 목록입니다. 선택 Keeper의 호출 범위는 별도입니다."
-        ; Ansi.dim, "   DIRECT=직접 호출 허용 · SURFACES=도구가 노출되는 경로"
-        ; Ansi.dim, "   surfaces=none은 노출 경로 없음입니다. 등록만으로 사용을 뜻하지 않습니다."
-        ]
-    | Masc_tui_types.Tools_catalog (Tools_catalog_volumes _) -> []
-  in
   let pane_lines =
     match state.tools_pane with
     | Masc_tui_types.Tools_surface -> Lazy.force effective_lines
@@ -2228,7 +2194,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     (Printf.sprintf " Unpublished %s draft retained for %s · %s:resume in editor"
       (if draft.scd_composition then "Composition" else "Instruction") draft.scd_source_id
       (if draft.scd_composition then "C" else "c"))) (skill_create_drafts_for_current_workspace state) in
-  let prefix=tools_selection_document ~cols state @ drafts @ reading_lines @ error_lines @ explanation in
+  let prefix=tools_selection_document ~cols state @ drafts @ reading_lines @ error_lines in
   if Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
     wrap (pane_lines @ reading_lines @ error_lines)
   else if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then

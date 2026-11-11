@@ -41,6 +41,36 @@ Owner identity is eligible. Cleanup does not boot, stop, pause, repair or refres
 a guest's credentials. A paused Keeper without a running guest keeps its work
 volume. A source merge does not change the installed runtime.
 
+## What a pass leaves
+
+The cleanup steps are one closed list, `Keeper_cleanup_step`. A step applies
+to a Keeper by its declared sandbox: guest builds to a microVM on Apple
+Container, the workspace sweep to Remote_ssh. No step cleans a Docker sandbox
+or a microVM on another backend.
+
+A pass counts every Owner it looks at once: no stored meta, an unreadable
+declaration (with its reason), no step for its sandbox, every applicable step
+switched off, scheduled, or left alone because its earlier attempt had not
+returned. A pass runs with both switches off too, so "switched off" and "never
+ran" read differently.
+
+Each step's attempt for a Keeper ends in one outcome:
+
+| Outcome | Meaning |
+|---|---|
+| `reclaimed` | The payload ran to its end. Its report carries the counts, zero and failed entries included. |
+| `deferred` | The Keeper was busy, so nothing was sent. The Owner's reason is kept. |
+| `not_running` | There was no running guest to attach to. |
+| `failed` | Anything else, in the step's own words. |
+
+A step does not wait on the one before it. The server keeps the latest pass
+and, for every Keeper and step, the latest attempt and the time that step last
+ran to its end. `GET /api/v1/dashboard/tools` returns them as
+`keeper_cleanup`. The value lives in server memory: a restart starts empty and
+the next pass fills it again. The server log keeps one line per pass and one
+per attempt that ran its payload, and the guest build step writes its audit
+record.
+
 ## Owned output and safety
 
 The guest needs Python 3, readable Linux process ownership and Dune 3.24 or
@@ -54,8 +84,21 @@ process use. The existing wrapper lock and native Dune lock exclude builds.
 After inspection the target's ownership and directory identity are checked
 again. Targeted `dune clean` retains the native `.lock` inode and source files;
 it does not perform a whole-project clean that could remove promoted source.
-Unreadable process ownership refuses cleanup. It is never interpreted as no
-live process.
+Unreadable process ownership refuses cleanup, and the pass reports which
+process it could not read. It is never interpreted as no live process. An
+unreadable process is passed over in one session only: the one the guest's
+first process leads. That session is the exec agent and the relays it forks,
+and the agent turns inspection off when it drops to the Keeper user. The
+agent's shim starts every command in a session of its own, and a process can
+leave its session but never enter another, so Keeper shells, Git and builds
+are never in that session. An unreadable process in any other session, such
+as a command that turned inspection off itself or one started as another
+user, keeps every build.
+
+A guest without Dune reports nothing until an owned `_build` that passed
+every check above needs cleaning; that entry then counts as failed. A payload
+that exits non-zero is reported with its exit status and the redacted end of
+its stderr.
 
 A checkout containing `.masc-keep-build` retains output. Otherwise every entry
 must remain unmodified for the configured retention period. Store durable

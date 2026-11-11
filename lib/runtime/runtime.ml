@@ -308,7 +308,8 @@ let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t lis
            | Runtime_execution.Muse_serve _
            | Runtime_execution.Vibe_cli _ ), _ -> None
          | Runtime_execution.Agent_core _, Some _ -> None
-         | Runtime_execution.Agent_core provider_config, None ->
+         | Runtime_execution.Agent_core sealed, None ->
+           let provider_config = Runtime_account_access.api_declaration sealed in
            let provider_label =
              Llm_provider.Provider_config.capability_provider_label provider_config
            in
@@ -648,11 +649,11 @@ let materialize_config
   (* Every runtime on one provider account must declare the account's
      allowance alike: admission keeps one allowance per account. *)
   let* admission_allowances =
-    Llm_provider.Provider_admission.allowances_of_configs
+    Runtime_account_access.api_admission_allowances
       (List.filter_map
          (fun (runtime : t) ->
             match runtime.execution with
-            | Runtime_execution.Agent_core config -> Some (runtime.id, config)
+            | Runtime_execution.Agent_core sealed -> Some (runtime.id, sealed)
             | Runtime_execution.Codex_app_server _
             | Runtime_execution.Claude_code _
             | Runtime_execution.Antigravity_cli _
@@ -889,11 +890,15 @@ let exact_output_targets runtimes =
      by [command] — so declaring one as a target only to have the binding
      resolver reject it reports a missing catalog provider where the truth is
      that this kind of runtime does no exact output. *)
-  List.filter_map
-    (fun (rt : t) ->
-       match rt.execution with
-       | Runtime_execution.Agent_core config ->
-         Some
+  List.fold_right
+    (fun (rt : t) targets ->
+       match targets, rt.execution with
+       | (Error (_ : Runtime_account_access.refusal) as refused), _ -> refused
+       | Ok targets, Runtime_execution.Agent_core sealed ->
+         (* HIGH-RISK-UNREVIEWED: the slot keeps the key, so the registry is
+            where the key leaves the seal (plan D4). *)
+         Result.map
+           (fun config ->
            ({ target_ref = rt.id
             ; (* [enable_thinking] is a per-turn control the Keeper path sets as
                  it builds each request, so the binding config carries none yet.
@@ -949,12 +954,16 @@ let exact_output_targets runtimes =
                  | Error (_ : Runtime_exact_reads.t * Runtime_exact_reads.t list), (Some _ | None)
                    -> Agent_core.Exact_output.No_model_declaration)
             } : Agent_core.Exact_output.declared_target)
-       | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Claude_code _
-       | Runtime_execution.Antigravity_cli _
-       | Runtime_execution.Muse_serve _
-       | Runtime_execution.Vibe_cli _ -> None)
+             :: targets)
+           (Runtime_account_access.authorize_api sealed)
+       | ( Ok (_ : Agent_core.Exact_output.declared_target list)
+         , ( Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _
+           | Runtime_execution.Muse_serve _
+           | Runtime_execution.Vibe_cli _ ) ) -> targets)
     runtimes
+    (Ok [])
 ;;
 
 type exact_output_catalog =
@@ -979,29 +988,34 @@ let exact_output_resolver_catalog ~exact_output_lane_decls runtimes =
   in
   match target_source with
   | Replacement_catalog_targets { path } ->
-    { catalog_input = Agent_core.Exact_output.Full_replacement_file path
-    ; catalog_origin = target_source
-    ; catalog_description = " from full replacement " ^ path
-    ; catalog_exact_slots = exact_slots
-    }
+    Ok
+      { catalog_input = Agent_core.Exact_output.Full_replacement_file path
+      ; catalog_origin = target_source
+      ; catalog_description = " from full replacement " ^ path
+      ; catalog_exact_slots = exact_slots
+      }
   | Runtime_binding_targets ->
-    let targets =
-      exact_output_targets runtimes
-      |> List.filter (fun (target : Agent_core.Exact_output.declared_target) ->
-        not
-          (List.exists
-             (fun (gap : exact_slot_body_deadline_gap) ->
-                String.equal gap.slot_id target.target_ref)
-             exact_slots.gaps))
-    in
-    { catalog_input = Agent_core.Exact_output.Embedded_with_targets targets
-    ; catalog_origin = target_source
-    ; catalog_description =
-        Printf.sprintf
-          " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"
-          (List.length targets)
-    ; catalog_exact_slots = exact_slots
-    }
+    Result.map
+      (fun targets ->
+        let targets =
+          List.filter
+            (fun (target : Agent_core.Exact_output.declared_target) ->
+               not
+                 (List.exists
+                    (fun (gap : exact_slot_body_deadline_gap) ->
+                       String.equal gap.slot_id target.target_ref)
+                    exact_slots.gaps))
+            targets
+        in
+        { catalog_input = Agent_core.Exact_output.Embedded_with_targets targets
+        ; catalog_origin = target_source
+        ; catalog_description =
+            Printf.sprintf
+              " from AGENT_CORE embedded catalog with %d runtime binding(s) as targets"
+              (List.length targets)
+        ; catalog_exact_slots = exact_slots
+        })
+      (exact_output_targets runtimes)
 ;;
 
 let load_exact_output_resolver_snapshot catalog =
@@ -1229,12 +1243,15 @@ let dashboard_runtime_defaults_snapshot () =
    override to either. *)
 let verifier_runtime_admission (runtime : t) =
   match runtime.execution with
-  | Runtime_execution.Agent_core provider
-    when not (Provider_tool_support.provider_supports_inline_tools provider) ->
-    Error (runtime.id ^ ": completion verifier requires a binding that takes inline tools")
-  | Runtime_execution.Agent_core provider
+  | Runtime_execution.Agent_core sealed
     when not
-           (Provider_tool_support.agent_core_capabilities_of_config provider)
+           (Provider_tool_support.provider_supports_inline_tools
+              (Runtime_account_access.api_declaration sealed)) ->
+    Error (runtime.id ^ ": completion verifier requires a binding that takes inline tools")
+  | Runtime_execution.Agent_core sealed
+    when not
+           (Provider_tool_support.agent_core_capabilities_of_config
+              (Runtime_account_access.api_declaration sealed))
              .Llm_provider.Capabilities.supports_system_prompt ->
     Error (runtime.id ^ ": completion verifier requires a model that takes a system prompt")
   | Runtime_execution.Agent_core _ -> Ok ()
@@ -2383,7 +2400,19 @@ type exact_output_commit_plan =
       * exact_output_registry_application
 
 let prepare_exact_output_replacement ~runtimes ~lanes =
-  let catalog = exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes in
+  let ( let* ) = Result.bind in
+  let* catalog =
+    match exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes with
+    | Ok catalog -> Ok catalog
+    | Error refusal ->
+      (* No slot can be built, so there is no replacement. A process with no
+         registry has nothing to replace either, and says that first, as
+         [prepare_replacement] does. *)
+      (match Runtime_exact_output_registry.current () with
+       | Ok (_ : Runtime_exact_output_registry.t) ->
+         Error (Runtime_exact_output_registry.Targets_refused refusal)
+       | Error error -> Error error)
+  in
   Runtime_exact_output_registry.prepare_replacement
     ~runtime_observations:(exact_output_runtime_observations ~origin:catalog.catalog_origin runtimes)
     ~lanes
@@ -2439,7 +2468,8 @@ let plan_exact_output_commit ~config_path ~runtimes ~lanes =
        | Runtime_exact_output_registry.Lane_thinking_not_encodable _
        | Runtime_exact_output_registry.Required_lane_unavailable _
        | Runtime_exact_output_registry.Required_lane_disabled _
-       | Runtime_exact_output_registry.Resolver_snapshot_rejected _ ) as reason) ->
+       | Runtime_exact_output_registry.Resolver_snapshot_rejected _
+       | Runtime_exact_output_registry.Targets_refused _ ) as reason) ->
     if on_disk_text_rebuilds_exact_output_registry ~config_path
     then
       Error
@@ -3723,8 +3753,11 @@ let capability_of_runtime (rt : t) : runtime_capability =
     | Runtime_execution.Muse_serve _
     | Runtime_execution.Vibe_cli _ ->
       Prompted_json
-    | Runtime_execution.Agent_core provider_config ->
-      (match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
+    | Runtime_execution.Agent_core sealed ->
+      (match
+         Llm_provider.Provider_config.capabilities_for_config_model
+           (Runtime_account_access.api_declaration sealed)
+       with
        | Some caps
          when caps.Llm_provider.Capabilities.supports_response_format_json
               || caps.Llm_provider.Capabilities.supports_structured_output ->
@@ -3734,7 +3767,8 @@ let capability_of_runtime (rt : t) : runtime_capability =
   let supports_tool_free =
     match rt.execution with
     | Runtime_execution.Claude_code _ -> rt.model.tools_support
-    | Runtime_execution.Agent_core provider ->
+    | Runtime_execution.Agent_core sealed ->
+      let provider = Runtime_account_access.api_declaration sealed in
       Provider_tool_support.provider_supports_inline_tools provider
       && (Provider_tool_support.agent_core_capabilities_of_config provider)
            .Llm_provider.Capabilities.supports_system_prompt

@@ -2210,7 +2210,6 @@ let test_sweep_retains_orphaned_antigravity_process_group () =
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run
     "fusion official-client panel"
     [ ( "Claude native effort authority",

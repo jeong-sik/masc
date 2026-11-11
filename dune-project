@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.70.0)
+(version 0.71.0)
 
 ; Local-sandbox-only: vendor/ocaml-msx carries a copy of the pinned
 ; ocaml-msx package so sandboxes whose opam switch lacks the pin can still
@@ -109,8 +109,13 @@
   ;; It is a private MASC library, not an independently versioned package.
   angstrom
   (uri (>= 4.4))
-  (tls (>= 2.1.2))
-  (tls-eio (>= 2.1.2))
+  ; 2.1.5 is the floor for the HTTPS listener. Before 2.1.4 a ClientHello with
+  ; two SupportedVersion extensions raised Invalid_argument instead of failing
+  ; the handshake (ocaml-tls #531). Before 2.1.5 each TLS 1.3 key update a
+  ; peer sent added a session to a list the connection kept (#540), and data
+  ; that ended on a 2^14 boundary was followed by an empty record (#539).
+  (tls (>= 2.1.5))
+  (tls-eio (>= 2.1.5))
   (domain-name (>= 0.4))
   (ipaddr (>= 5.6))
   (ca-certs (>= 0.2))
@@ -123,10 +128,10 @@
   (mirage-crypto (>= 1.0))
   (mirage-crypto-rng (>= 1.0))
   (mirage-crypto-pk (>= 1.0))
-  ; Upper bound, not just a floor. x509 1.2.0 types the CN constructor as
-  ; Common_name.t; 1.0.6 (locked) through 1.1.1 take a string, which is what
-  ; packages/agent_core/test/test_tls_cancellability.ml passes.
-  (x509 (and (>= 1.0) (< 1.2)))
+  ; tls 2.1.4 and later need x509 1.2.0. Its CN constructor takes a
+  ; Common_name.t where 1.1.1 and earlier took a string, so the sources that
+  ; build a name (lib/server/server_tls_material.ml) compile against 1.2 only.
+  (x509 (>= 1.2))
   ; Upper bound, not just a floor. jose is below 1.0, so a minor release may
   ; change what lib/auth/oidc_id_token_signature.ml matches on. It verifies
   ; the RS256 signature of an OIDC ID token against the provider's JWKS.

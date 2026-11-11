@@ -37,6 +37,49 @@ let validate_rg_inputs ~pattern:_ ~file_type =
 
 let rg_type_list_max_bytes = 1_000_000
 
+(* [ -e path ] exits with this status when nothing can be found at the path. *)
+let path_missing_exit = 1
+
+let path_probe_max_bytes = 1_024
+
+(* The path is a positional argument of [sh], never spliced into the script, as
+   in [Keeper_sandbox_read_backend.read_window_argv]. *)
+let path_probe_argv path = [ "sh"; "-c"; {|[ -e "$1" ]|}; "sh"; path ]
+
+(* Only the exit status of the probe proves a path missing. A probe that failed
+   to run, or ended any other way, proves nothing. *)
+let proves_path_missing = function
+  | Ok (Unix.WEXITED code, _) -> code = path_missing_exit
+  | Ok ((Unix.WSIGNALED _ | Unix.WSTOPPED _), _) | Error _ -> false
+;;
+
+(* One wording for a Grep path that is not there; [where] says who looked. *)
+let path_not_found_message ~where path =
+  Printf.sprintf
+    "path_not_found: %s (%s; list your workspace root to see what is actually \
+     there before searching)"
+    path
+    where
+;;
+
+(* rg exits 2 for a pattern it cannot compile, and also for a missing path, an
+   unknown --type and a half-readable tree. [rg -e PATTERN /dev/null] searches
+   nothing, so it exits 1 when rg accepts the pattern and 2 when it does not.
+   [-e] keeps a pattern that starts with a dash a pattern, as in the search
+   itself. *)
+let pattern_invalid_exit = 2
+
+let pattern_probe_max_bytes = 1_024
+
+let pattern_probe_argv pattern = [ "rg"; "-e"; pattern; "/dev/null" ]
+
+(* Only the exit status of the probe proves a pattern invalid. A probe that
+   failed to run, or ended any other way, proves nothing. *)
+let proves_pattern_invalid = function
+  | Ok (Unix.WEXITED code, _) -> code = pattern_invalid_exit
+  | Ok ((Unix.WSIGNALED _ | Unix.WSTOPPED _), _) | Error _ -> false
+;;
+
 let rg_type_names listing =
   String.split_on_char '\n' listing
   |> List.filter_map (fun line ->
@@ -48,15 +91,27 @@ let rg_type_names listing =
 (* The failed rg and this inventory run on the same backend, so custom types
    from that backend's config are included. An incomplete or unavailable
    inventory cannot prove that the caller's type is invalid. *)
-let rg_error_class ~status ~file_type ~read_type_list =
+let type_is_unknown ~file_type ~read_type_list =
+  if String.equal file_type ""
+  then false
+  else (
+    match read_type_list () with
+    | Some listing when String.length listing < rg_type_list_max_bytes ->
+      (match rg_type_names listing with
+       | _ :: _ as names -> not (List.mem file_type names)
+       | [] -> false)
+    | Some _ | None -> false)
+;;
+
+(* Exit 2 is the caller's when the type is not one the backend knows or the
+   backend's own rg cannot compile the pattern. Any other exit 2 stays a
+   runtime failure: the caller's arguments are not proven wrong. *)
+let rg_error_class ~status ~file_type ~read_type_list ~pattern_is_invalid =
   match status with
-  | Unix.WEXITED 2 when not (String.equal file_type "") ->
-    (match read_type_list () with
-     | Some listing when String.length listing < rg_type_list_max_bytes ->
-       (match rg_type_names listing with
-        | _ :: _ as names when not (List.mem file_type names) -> Tool_result.Policy_rejection
-        | [] | _ :: _ -> Tool_result.Runtime_failure)
-     | Some _ | None -> Tool_result.Runtime_failure)
+  | Unix.WEXITED 2 ->
+    if type_is_unknown ~file_type ~read_type_list || pattern_is_invalid ()
+    then Tool_result.Policy_rejection
+    else Tool_result.Runtime_failure
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Tool_result.Runtime_failure
 ;;
 
@@ -151,10 +206,7 @@ let try_handle_with_authority
       Error
         ( Tool_result.Policy_rejection
         , sandbox_read_error ~target
-            (Printf.sprintf
-               "path_not_found: %s (host path does not exist; list your \
-                workspace root to see what is actually there before searching)"
-               target) )
+            (path_not_found_message ~where:"host path does not exist" target) )
     else
       (* An admitted path the backend cannot map, or a backend command that
          failed, is not claimed as the caller's: a declared endpoint path maps
@@ -195,6 +247,32 @@ let try_handle_with_authority
          | Ok () -> (
            let limit = shell_readonly_limit args in
            let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
+           (* The backend that ran rg is asked, so an endpoint-owned tree is
+              judged by the endpoint and not by this host's filesystem. *)
+           let backend_path_is_missing backend_path =
+             proves_path_missing
+               (run_command_with_status
+                  ~ok_exit_codes:[ 0; path_missing_exit ]
+                  ~config
+                  ~meta
+                  ~command_argv:(path_probe_argv backend_path)
+                  ~max_bytes:path_probe_max_bytes
+                  ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
+                  ())
+           in
+           (* Asked only after rg failed with exit 2, on the backend that ran
+              it, so the answer is that backend's own rg. *)
+           let backend_pattern_is_invalid () =
+             proves_pattern_invalid
+               (run_command_with_status
+                  ~ok_exit_codes:[ 1; pattern_invalid_exit ]
+                  ~config
+                  ~meta
+                  ~command_argv:(pattern_probe_argv pattern)
+                  ~max_bytes:pattern_probe_max_bytes
+                  ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
+                  ())
+           in
            let rg_in_sandbox target =
                let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
                let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
@@ -231,12 +309,16 @@ let try_handle_with_authority
                         , `String (cut_to_bytes ~max_bytes:search_result_max_bytes trimmed_out) )
                       ]
                   in
+                  let shown_path =
+                    match meta.sandbox_profile with
+                    | Remote_ssh -> cpath
+                    | Docker | Micro_vm -> target
+                  in
                   let payload =
                     `Assoc
                         ([ "ok", `Bool is_ok
                          ; "op", `String op
-                         ; "path", `String (match meta.sandbox_profile with
-                             | Remote_ssh -> cpath | Docker | Micro_vm -> target)
+                         ; "path", `String shown_path
                          ; "pattern", `String pattern
                          ; "via", `String (Keeper_sandbox_read_runner.backend_via ~meta)
                          ; "status", Keeper_alerting_path.process_status_to_json st
@@ -246,12 +328,32 @@ let try_handle_with_authority
                   in
                   if is_ok
                   then Keeper_tool_execution.success_data payload
+                  else if
+                    (* [ok_exit_codes] leaves exit 2 as the only failing status
+                       here. rg exits 2 for a missing path, a bad pattern and a
+                       half-readable tree alike, so only the backend's own
+                       answer about the path makes this the caller's path. *)
+                    (match st with
+                     | Unix.WEXITED 2 -> backend_path_is_missing cpath
+                     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false)
+                  then
+                    (* The same class and wording as the host-side check above. *)
+                    Keeper_tool_execution.failure
+                      ~class_:Tool_result.Policy_rejection
+                      (sandbox_read_error
+                         ~target:shown_path
+                         (path_not_found_message
+                            ~where:"nothing could be found or reached at that path on the sandbox backend"
+                            shown_path))
                   else
                     (* Preserve rg's own error payload. A missing --type can
-                       be established from this backend's type inventory;
-                       other exit-2 causes stay unclassified as caller errors. *)
+                       be established from this backend's type inventory and a
+                       pattern rg cannot compile from this backend's rg; other
+                       exit-2 causes stay runtime failures. *)
                     Keeper_tool_execution.failure
-                      ~class_:(rg_error_class ~status:st ~file_type ~read_type_list:(fun () ->
+                      ~class_:(rg_error_class ~status:st ~file_type
+                        ~pattern_is_invalid:backend_pattern_is_invalid
+                        ~read_type_list:(fun () ->
                         match
                           run_command_with_status
                             ~config ~meta ~command_argv:[ "rg"; "--type-list" ]

@@ -296,32 +296,6 @@ let test_schedule_hold_reads_as_of_its_time_unless_the_runner_is_ok () =
   Alcotest.(check bool) "a list kept after a failed reload: as of, even from an ok runner" true
     (reading Tui_decode.List_kept ok = Tui_decode.Hold_as_of 275.5)
 
-let test_decode_agent_success () =
-  let json =
-    `Assoc [
-      ("name", `String "alice");
-      ("status", `String "live");
-      ("current_task", `String "task-1");
-      ("last_seen", `String "2026-03-31T12:00:00Z");
-    ]
-  in
-  match Tui_decode.decode_agent json with
-  | Ok agent ->
-      Alcotest.(check string) "name" "alice" agent.name;
-      Alcotest.(check string) "status" "live" agent.status;
-      Alcotest.(check (option string)) "task" (Some "task-1") agent.current_task
-  | Error err -> Alcotest.fail err
-
-let test_decode_agent_missing_status_fails () =
-  let json =
-    `Assoc [
-      ("name", `String "alice");
-      ("last_seen", `String "2026-03-31T12:00:00Z");
-    ]
-  in
-  Alcotest.(check bool) "missing status rejected" true
-    (Result.is_error (Tui_decode.decode_agent json))
-
 let test_decode_task_missing_priority_defaults () =
   let json =
     `Assoc [
@@ -2687,86 +2661,6 @@ let test_context_observation_rejects_hybrids_and_prior_trace () =
     ; "ratio mismatch rejected", ratio_mismatch
     ]
 
-let test_parse_keeper_chat_response_sse_delta () =
-  let response =
-    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
-     data: {\"type\":\"content_delta\",\"delta\":\"hello\"}\n\n\
-     data: {\"type\":\"delta\",\"delta\":\" world\"}\n\n"
-  in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok text -> Alcotest.(check string) "delta text" "hello world" text
-  | Error err -> Alcotest.fail err
-
-let test_parse_keeper_chat_response_sse_framing () =
-  List.iter (fun newline ->
-    let response = "\239\187\191" ^ String.concat newline
-      [ ": comment"; "id: 42"; "event: message";
-        "data:{\"type\":\"delta\","; "data:\"delta\":\"hello\"}"; "";
-        "data"; "";
-        "data: {\"type\":\"delta\",\"delta\":\" world\"}"; "";
-        "data: [DONE]"; ""; "" ] in
-    match Tui_decode.parse_keeper_chat_response response with
-    | Ok text -> Alcotest.(check string) "multiline framed text" "hello world" text
-    | Error err -> Alcotest.fail err) [ "\n"; "\r\n"; "\r" ];
-  (match Tui_decode.parse_keeper_chat_response "data:[DONE]\n\n" with
-   | Ok text -> Alcotest.(check string) "empty terminal" "" text
-   | Error err -> Alcotest.fail err);
-  List.iter (fun response ->
-    match Tui_decode.parse_keeper_chat_response response with
-    | Error _ -> () | Ok _ -> Alcotest.fail "invalid or incomplete frame was dispatched")
-    [ "data:{\"type\":\"delta\",\"delta\":\"unfinished\"}\n";
-      " data:{\"type\":\"delta\",\"delta\":\"indented\"}\n\n";
-      "data:{invalid-json}\n\n" ];
-  match Tui_decode.parse_keeper_chat_response
-      "data:{\"type\":\"RUN_ERROR\",\"message\":\"boom\"}\r\r" with
-  | Error error -> Alcotest.(check string) "framed terminal error" "boom" error
-  | Ok _ -> Alcotest.fail "terminal error was lost"
-
-let test_parse_keeper_chat_response_ag_ui_sse () =
-  let response =
-    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
-     data: {\"type\":\"RUN_STARTED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n\
-     data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"default\",\"runId\":\"run-1\",\"delta\":\"hello\"}\n\n\
-     data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"default\",\"runId\":\"run-1\",\"delta\":\" world\"}\n\n\
-     data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n"
-  in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok text -> Alcotest.(check string) "AG-UI delta text" "hello world" text
-  | Error err -> Alcotest.fail err
-
-let test_parse_keeper_chat_response_ag_ui_error () =
-  let response =
-    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
-     data: {\"type\":\"RUN_ERROR\",\"threadId\":\"default\",\"runId\":\"run-1\",\"message\":\"boom\"}\n\n"
-  in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok text -> Alcotest.failf "expected RUN_ERROR failure, got %S" text
-  | Error err -> Alcotest.(check string) "AG-UI error message" "boom" err
-
-let test_parse_keeper_chat_response_ag_ui_empty_terminal () =
-  let response =
-    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
-     data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n"
-  in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok text -> Alcotest.(check string) "empty terminal response" "" text
-  | Error err -> Alcotest.fail err
-
-let test_parse_keeper_chat_response_body_json () =
-  let response = "{\"result\":{\"text\":\"hello body\"}}" in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok text -> Alcotest.(check string) "body text" "hello body" text
-  | Error err -> Alcotest.fail err
-
-let test_parse_keeper_chat_response_json_error () =
-  let response =
-    "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n\
-     {\"error\":{\"message\":\"boom\"}}"
-  in
-  match Tui_decode.parse_keeper_chat_response response with
-  | Ok _ -> Alcotest.fail "expected parse failure"
-  | Error err -> Alcotest.(check string) "error message" "boom" err
-
 let test_decode_json_response_body_rejects_error_status () =
   match
     Tui_decode.decode_json_response_body ~allow_empty:true ~status_code:400
@@ -3132,22 +3026,6 @@ let test_sgr_left_press_ignores_releases_chords_and_wheel () =
            Alcotest.failf "report %S should stay unclaimed, got %d;%d" params
              row column)
     cases
-
-type parent_node = {
-  node_id : string;
-  parent_id : string option;
-}
-
-let test_bounded_parent_depth_stops_on_cycle () =
-  let a = { node_id = "a"; parent_id = Some "b" } in
-  let b = { node_id = "b"; parent_id = Some "a" } in
-  let depth =
-    Tui_decode.bounded_parent_depth
-      ~id_of:(fun n -> n.node_id)
-      ~parent_id_of:(fun n -> n.parent_id)
-      [ a; b ] a
-  in
-  Alcotest.(check int) "cycle stops at first repeated parent" 1 depth
 
 let system_log_entry_json ?(seq = 774272) ?(level = "INFO")
     ?(source = "structured")
@@ -5334,10 +5212,6 @@ let test_decode_repository_requires_resolved_local_path () =
       Alcotest.fail
         "a repository without the server-resolved path must not be guessed"
 
-(* Ordinary current memory and source-bound memory are independent stores. A
-   failed Librarian with no ordinary snapshot may still have source evidence;
-   the decoder must keep both axes instead of collapsing that row to
-   memoryless. *)
 (* A keeper row that does not decode is refused on its own and the others
    still decode, so "the payload is not accepted" is either a whole-snapshot
    error or at least one refused row. *)
@@ -5355,727 +5229,31 @@ let empty_memory_context_cycle =
     "read_position_read_error", `Null; "rewriting_through", `Null;
     "prepared", `Null; "synthesis", `Null; "unread", empty_memory_unread_evidence]
 
+(* Every pass and change the server counts, none moved since it started. *)
+let no_memory_changes =
+  let changes = [ "added"; "absorbed"; "superseded"; "dropped" ] in
+  `Assoc
+    (List.map
+       (fun pass -> pass, `Assoc (List.map (fun change -> change, `Int 0) changes))
+       [ "admission"; "durable"; "continuity"; "cleanup"; "keeper_write"; "keeper_delete"
+       ; "operator_delete" ])
+
 let disabled_memory_execution =
   let module Execution = Masc.Keeper_memory_execution_availability in
   Masc.Keeper_librarian_addon.all
   |> List.map (fun operation -> operation, Execution.Disabled)
   |> Execution.to_json
 
-let test_decode_memory_health_keeps_ordinary_and_source_axes () =
-  let keeper id present failures source_present =
-    let ordinary_count value = if present then value else 0 in
-    `Assoc
-      [ ("keeper_id", `String id)
-      ; ("revision", `Int (ordinary_count 3))
-      ; ("facts", `Int (ordinary_count 12))
-      ; ("observed_facts", `Int (ordinary_count 10))
-      ; ("derived_facts", `Int (ordinary_count 2))
-      ; ("support_invalidations", `Int (ordinary_count 1))
-      ; ("snapshot_bytes", `Int (if present then 4096 else 0))
-      ; ("added", `Int (ordinary_count 2))
-      ; ("removed", `Int (ordinary_count 1))
-      ; ("snapshot_present", `Bool present)
-      ; ("updated_at", if present then `Float 1700000000. else `Null)
-      ; ( "age_bins"
-        , if present
-          then `List ([ `Int 3; `Int 4; `Int 3; `Int 2 ] @ List.init 20 (fun _ -> `Int 0))
-          else `Null )
-      ; ("context_cycle", empty_memory_context_cycle)
-      ; ( "librarian"
-        , `Assoc
-            [ ("state", `String "drained")
-            ; ("detail", `Null)
-            ; ("pending", `Null)
-            ; ("admission_wait", `Null); ("operator_action_required", `Bool false)
-            ; ("measured_at", `Float 1_775_000_000.0)
-            ; ("unread_atom_turns", `Int 0)
-            ; ("unread_official_turns", `Int 0)
-            ; ("continuity_unread_atoms", `Int 0)
-            ; ("last_success_at", `Null)
-            ; ("last_failure_kind", `Null)
-            ; ("stalled", `Null)
-            ] )
-      ; ("librarian_failures", `Int failures)
-      ; ("vision_ingest_errors", `Int (if id = "healthy" then 3 else 0))
-      ; ( "vision_ingest_error_reasons"
-        , if id = "healthy"
-          then
-            `List
-              [ `Assoc
-                  [ ("reason", `String "fetch_failed"); ("count", `Int 3) ]
-              ]
-          else `List [] )
-      ; ("read_error", `Null)
-      ; ("source_revision", `Int (if source_present then 7 else 0))
-      ; ("source_facts", `Int (if source_present then 2 else 0))
-      ; ("source_invalidations", `Int (if source_present then 1 else 0))
-      ; ("source_snapshot_bytes", `Int (if source_present then 1024 else 0))
-      ; ("source_snapshot_present", `Bool source_present)
-      ; ("source_read_error", `Null)
-      ; ( "alerts"
-        , if failures > 0
-          then
-            `List
-              [ `Assoc
-                  [ ("code", `String "librarian_starvation")
-                  ; ("severity", `String "error")
-                  ; ("target", `String "librarian_starvation")
-                  ; ("label", `String "Librarian")
-                  ; ( "message"
-                    , `String "running memoryless and cannot leave that state" )
-                  ]
-              ]
-          else `List [] )
-      ]
-  in
-  let json =
-    `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v13")
-      ; ("execution", disabled_memory_execution)
-      ; ("generated_at", `Float 1_775_000_000.0)
-      ; ( "keepers"
-        , `List
-            [ keeper "source-only" false 4 true
-            ; keeper "healthy" true 0 false
-            ] )
-      ; ( "totals"
-        , `Assoc
-            [ ("facts", `Int 12)
-            ; ("observed_facts", `Int 10)
-            ; ("derived_facts", `Int 2)
-            ; ("support_invalidations", `Int 1)
-            ; ("snapshot_bytes", `Int 4096)
-            ; ("added", `Int 2)
-            ; ("removed", `Int 1)
-            ; ("source_facts", `Int 2)
-            ; ("source_invalidations", `Int 1)
-            ; ("source_snapshot_bytes", `Int 1024)
-            ; ("librarian_unread_turns", `Int 0)
-            ; ("librarian_continuity_unread_atoms", `Int 0)
-            ; ("librarian_continuity_unmeasured", `Int 0)
-            ; ("librarian_failures", `Int 4)
-            ; ("vision_ingest_errors", `Int 3)
-            ; ("read_errors", `Int 0)
-            ; ("source_read_errors", `Int 0)
-            ] )
-      ; ( "alert_summary"
-        , `Assoc
-            [ ("total_alerts", `Int 1)
-            ; ("warn_alerts", `Int 0)
-            ; ("error_alerts", `Int 1)
-            ; ("keepers_with_alerts", `Int 1)
-            ; ("snapshot_read_error_keepers", `Int 0)
-            ; ("source_snapshot_read_error_keepers", `Int 0)
-            ; ("librarian_stopped_keepers", `Int 0); ("librarian_attention_required_keepers", `Int 0)
-            ; ("librarian_starving_keepers", `Int 1)
-            ] )
-      ]
-  in
-  let replace_field name value = function
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (field, current) ->
-              if String.equal field name then field, value else field, current)
-           fields)
-    | json -> json
-  in
-  let map_keeper target_index update = function
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (field, value) ->
-              if String.equal field "keepers"
-              then
-                match value with
-                | `List keepers ->
-                  field, `List (List.mapi (fun index keeper ->
-                    if index = target_index then update keeper else keeper) keepers)
-                | _ -> field, value
-              else field, value)
-           fields)
-    | json -> json
-  in
-  (* The age ladder is 24 counts that add up to the facts (RFC-0515
-     §2.4.5). The four-key object of the earlier ladder is not read. *)
-  let healthy_age_bins bins = map_keeper 1 (replace_field "age_bins" bins) json in
-  let ints counts = `List (List.map (fun n -> `Int n) counts) in
-  Alcotest.(check bool) "24 counts that add up to the facts decode" false
-    (memory_health_rejects (healthy_age_bins (ints ([ 12 ] @ List.init 23 (fun _ -> 0)))));
-  List.iter
-    (fun (label, bins) ->
-      Alcotest.(check bool) label true (memory_health_rejects (healthy_age_bins bins)))
-    [ ( "the four-key age_bins object is refused"
-      , `Assoc
-          [ ("under_hour", `Int 3); ("under_day", `Int 4); ("under_week", `Int 3)
-          ; ("older", `Int 2) ] )
-    ; "23 counts are refused", ints ([ 12 ] @ List.init 22 (fun _ -> 0))
-    ; "25 counts are refused", ints ([ 12 ] @ List.init 24 (fun _ -> 0))
-    ; "24 counts that miss a fact are refused", ints ([ 11 ] @ List.init 23 (fun _ -> 0))
-    ];
-  let frontier = `Assoc ["trace_id", `String "context-trace";
-    "end_atom", `Int 3; "boundary_line", `Int 5] in
-  let input = `Assoc ["kind", `String "summarized"; "frontier", frontier] in
-  let prepared = `Assoc ["prepared_at", `Float 1700000000.; "runtime_id", `String "fixture-runtime";
-    "input", input; "request_bytes", `Int 2048] in
-  let cycle = `Assoc ["saved", frontier; "saved_read_error", `Null;
-    "read_position", `Int 4; "read_position_read_error", `Null;
-    "rewriting_through", `Null; "prepared", prepared; "synthesis", `Null;
-    "unread", empty_memory_unread_evidence] in
-  let context_payload cycle = map_keeper 0 (replace_field "context_cycle" cycle) json in
-  let official_hole = Keeper_librarian_unread.for_official_turn
-    ~turn_ref:(Ids.Turn_ref.make ~trace_id:"context-trace" ~absolute_turn:1)
-    ~boundary_line:1 ~message_in_turn:0
-    ~messages:[Agent_core.Types.make_message ~role:Agent_core.Types.User [Agent_core.Types.Text "unread"]]
-    ~reasons:[Keeper_librarian_input_refusal.Input_capacity]
-    |> Result.get_ok in
-  let wrong_snapshot = `Assoc ["snapshot", `Assoc ["kind", `String "available";
-      "messages", Keeper_librarian_unread.list_to_json [official_hole]];
-    "memory", `Assoc ["kind", `String "available"; "messages", `List []]] in
-  Alcotest.(check bool) "snapshot evidence cannot contain official-turn coordinates" true
-    (memory_health_rejects (context_payload (replace_field "unread" wrong_snapshot cycle)));
-  let synthesis = `Assoc ["observed_at", `Float 1700000000.; "trace_id", `String "context-trace";
-    "state", `String "not_committed"; "stop_reason", `String "no_smaller_range_evidence";
-    "range", `Assoc ["start_atom", `Int 3;
-      "end_atom", `Int 5; "completed_end_atom", `Int 20]] in
-  let with_synthesis = replace_field "synthesis" synthesis cycle in
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (context_payload with_synthesis) with
-   | Ok snapshot ->
-     (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_synthesis with
-      | Some {state=Masc.Keeper_continuity_observation.Not_committed;
-          stop_reason=Some No_smaller_range_evidence;
-          range=Some {start_atom=3;end_atom=5;completed_end_atom=20};_} -> ()
-      | _ -> Alcotest.fail "synthesis stop or atom frontier lost")
-   | Error detail -> Alcotest.fail detail);
-  List.iter (fun invalid -> Alcotest.(check bool) "invalid synthesis cannot look caught up" true
-    (memory_health_rejects (
-      (context_payload (replace_field "synthesis" invalid cycle)))))
-    [replace_field "state" (`String "drained") synthesis;
-     replace_field "stop_reason" (`String "provider_quota") synthesis;
-     replace_field "stop_reason" (`String "source_read_failed") synthesis;
-     replace_field "stop_reason" `Null synthesis;
-     (match synthesis with `Assoc fields -> `Assoc (("stop_reason", `Null) :: fields) | value -> value);
-     replace_field "trace_id" `Null synthesis;
-     replace_field "state" (`String "running") (replace_field "range" `Null synthesis)];
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (context_payload cycle) with
-   | Ok snapshot ->
-     (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
-      | Some {mcp_input = Masc.Tui_decode_memory_health.Context_summarized {mcf_end_atom = 3; _}; mcp_request_bytes = 2048; _} -> ()
-      | _ -> Alcotest.fail "prepared frontier or bytes lost")
-   | Error detail -> Alcotest.fail detail);
-  let position = `Assoc ["trace_id", `String "context-trace"; "end_atom", `Int 7] in
-  let absorbed = `Assoc ["kind", `String "absorbed"; "frontier", position] in
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
-           (context_payload (replace_field "prepared" (replace_field "input" absorbed prepared) cycle)) with
-   | Ok snapshot ->
-     (match (List.hd snapshot.mhs_keepers).mkh_context_cycle.mcc_prepared with
-      | Some {mcp_input = Masc.Tui_decode_memory_health.Context_absorbed {mcpo_trace_id = "context-trace"; mcpo_end_atom = 7}; _} -> ()
-      | _ -> Alcotest.fail "absorbed position lost")
-   | Error detail -> Alcotest.fail detail);
-  List.iter (fun invalid -> Alcotest.(check bool) "invalid context observation rejected" true
-    (memory_health_rejects ((context_payload invalid))))
-    [ replace_field "prepared" (replace_field "input" (replace_field "frontier" frontier absorbed) prepared) cycle
-    ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null absorbed) prepared) cycle
-    ; replace_field "prepared" (replace_field "input" (replace_field "frontier" position input) prepared) cycle
-    ; replace_field "prepared" (replace_field "input"
-        (replace_field "frontier" (replace_field "end_atom" (`Int 0) position) absorbed) prepared) cycle
-    ; replace_field "saved_read_error" (`String "snapshot_unreadable") cycle
-    ; replace_field "saved" (replace_field "end_atom" (`Int (-1)) frontier) cycle
-    ; replace_field "prepared" (replace_field "request_bytes" (`Int (-1)) prepared) cycle
-    ; replace_field "prepared" (replace_field "prepared_at" (`Float nan) prepared) cycle
-    ; replace_field "prepared" (replace_field "input" (replace_field "kind" (`String "accepted") input) prepared) cycle
-    ; replace_field "prepared" (replace_field "input" (replace_field "frontier" `Null input) prepared) cycle
-    ];
-  (* How the last Librarian pass ended is a closed set on both sides: a
-     stopped or crashed pass keeps the server's cause on its constructor, and
-     a spelling this build does not know fails the decode instead of reaching
-     the screen as a raw word. *)
-  let with_librarian ~stopped_keepers updates =
-    let with_row =
-      map_keeper 0
-        (fun keeper -> match keeper with
-         | `Assoc fields ->
-           `Assoc (List.map (fun (key, value) -> key,
-             if key = "librarian"
-             then List.fold_left (fun row (name, v) -> replace_field name v row) value updates
-             else value) fields)
-         | _ -> keeper)
-        json
-    in
-    match with_row with
-    | `Assoc fields ->
-      `Assoc (List.map (fun (key, value) -> key,
-        if key = "alert_summary"
-        then replace_field "librarian_stopped_keepers" (`Int stopped_keepers) value
-        else value) fields)
-    | other -> other
-  in
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
-           (with_librarian ~stopped_keepers:1
-              [ "state", `String "stopped"
-              ; "detail", `String "the range could not be read"
-              ; "last_failure_kind", `String "exact_execution_failure"
-              ]) with
-   | Ok snapshot ->
-     let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
-     Alcotest.(check bool) "a stopped pass keeps its cause" true
-       (librarian.mlh_state = Some (Masc.Tui_decode_memory_health.Pass_stopped "the range could not be read"));
-     Alcotest.(check bool) "the failure kind is decoded" true
-       (librarian.mlh_last_failure_kind = Some Masc.Tui_decode_memory_health.Failure_exact_execution)
-   | Error detail -> Alcotest.fail detail);
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
-           (with_librarian ~stopped_keepers:0
-              [ "state", `String "yielded_to_waiting_unit"; "detail", `Null ]) with
-   | Ok snapshot ->
-     let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
-     Alcotest.(check bool) "a yielded pass is readable without a failure cause" true
-       (librarian.mlh_state = Some Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit)
-   | Error detail -> Alcotest.fail detail);
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
-           (with_librarian ~stopped_keepers:0
-              [ "state", `String "pending"; "detail", `Null;
-                "pending", Masc.Keeper_librarian_pending.to_json (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }) ]) with
-   | Ok snapshot ->
-     let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
-     Alcotest.(check bool) "suspended original work is a distinct nonfailure state" true
-       (librarian.mlh_state = Some (Masc.Tui_decode_memory_health.Pass_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })));
-     Alcotest.(check bool) "suspended work preserves its publication cause" true
-       (Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause
-          (Masc.Tui_decode_memory_health.Pass_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }))
-          = Some (Masc.Keeper_librarian_pending.description (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })))
-   | Error detail -> Alcotest.fail detail);
-  let admission_worker : Masc.Keeper_librarian_pending.worker =
-    { installation_id = "admission-installation"; request_id = "admission-request";
-      wait = Masc.Keeper_librarian_pending.Capacity } in
-  let admission_json = Masc.Keeper_librarian_pending.to_json (Worker admission_worker) in
-  let attention_alert = `Assoc ["code", `String "librarian_attention_required";
-    "severity", `String "warn"; "target", `String "librarian_attention_required";
-    "label", `String "Librarian"; "message", `String "Inspect the original outcome"] in
-  let attention_payload ~durable ~admission =
-    let updates = ["operator_action_required", `Bool true;
-      "admission_wait", Option.fold ~none:`Null
-        ~some:(fun worker -> Masc.Keeper_librarian_pending.to_json (Worker worker)) admission] in
-    let updates = match durable with
-      | None -> updates
-      | Some pending -> ("state", `String "pending") ::
-        ("pending", Masc.Keeper_librarian_pending.to_json pending) :: updates in
-    let payload = with_librarian ~stopped_keepers:0 updates in
-    let payload = map_keeper 0 (fun keeper ->
-      let alerts = Yojson.Safe.Util.(member "alerts" keeper |> to_list) in
-      replace_field "alerts" (`List (attention_alert :: alerts)) keeper) payload in
-    let summary = Yojson.Safe.Util.member "alert_summary" payload in
-    let increment key summary = replace_field key
-      (`Int (1 + Yojson.Safe.Util.(member key summary |> to_int))) summary in
-    replace_field "alert_summary"
-      (summary |> increment "total_alerts" |> increment "warn_alerts"
-       |> replace_field "librarian_attention_required_keepers" (`Int 1)) payload in
-  let attention_worker = { admission_worker with
-    request_id = "original-missing"; wait = Masc.Keeper_librarian_pending.Missing_after_dispatch } in
-  List.iter (fun (durable, admission) ->
-    let payload = attention_payload ~durable ~admission in
-    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot payload with
-    | Error detail -> Alcotest.fail detail
-    | Ok snapshot ->
-      Alcotest.(check int) "attention counts one Keeper for either or both observations" 1
-        snapshot.mhs_librarian_attention_required_keepers;
-      let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
-      Alcotest.(check bool) "attention row is accepted" true librarian.mlh_operator_action_required;
-      Alcotest.(check bool) "admission original identity is retained" true
-        (librarian.mlh_admission_wait = admission);
-      Alcotest.(check bool) "durable original observation is retained" true
-        (librarian.mlh_state = Option.fold
-          ~none:(Some Masc.Tui_decode_memory_health.Pass_drained)
-          ~some:(fun pending -> Some (Masc.Tui_decode_memory_health.Pass_pending pending)) durable);
-      let prior = Masc.Tui_decode_memory_health.decode_memory_health_snapshot json |> Result.get_ok in
-      (match Masc.Tui_decode_memory_health.with_keeper_row prior ~generated_at:1_775_000_001.
-          ~keeper_id:"source-only" (Some (List.hd snapshot.mhs_keepers)) with
-       | None -> Alcotest.fail "attention row did not merge"
-       | Some merged ->
-         Alcotest.(check int) "one-row refresh recomputes attention" 1
-           merged.mhs_librarian_attention_required_keepers;
-         Alcotest.(check bool) "an older normal row cannot clear a later original attention" true
-           (Option.is_none (Masc.Tui_decode_memory_health.with_keeper_row merged
-             ~generated_at:prior.mhs_generated_at ~keeper_id:"source-only"
-             (Some (List.hd prior.mhs_keepers))));
-         Alcotest.(check bool) "an older absence cannot retire an affected Keeper" true
-           (Option.is_none (Masc.Tui_decode_memory_health.with_keeper_row merged
-             ~generated_at:prior.mhs_generated_at ~keeper_id:"source-only" None));
-         (match Masc.Tui_decode_memory_health.with_keeper_row merged ~generated_at:1_775_000_002.
-             ~keeper_id:"source-only" None with
-          | None -> Alcotest.fail "attention row did not retire"
-          | Some retired -> Alcotest.(check int) "row retirement removes attention" 0
-              retired.mhs_librarian_attention_required_keepers)))
-    [ Some (Worker attention_worker), None
-    ; None, Some attention_worker
-    ; Some (Worker attention_worker), Some {attention_worker with request_id = "other-original"}
-    ; Some (Masc.Keeper_librarian_pending.Local_failure "recovery read failed"), None ];
-  let attention = attention_payload ~durable:(Some (Worker attention_worker)) ~admission:None in
-  let mutate_attention_row update = map_keeper 0 update attention in
-  List.iter (fun payload ->
-    Alcotest.(check bool) "contradictory attention evidence is refused" true
-      (memory_health_rejects payload))
-    [ mutate_attention_row (fun keeper ->
-        replace_field "librarian"
-          (replace_field "operator_action_required" (`Bool false)
-            (Yojson.Safe.Util.member "librarian" keeper)) keeper)
-    ; mutate_attention_row (replace_field "alerts" (`List []))
-    ; mutate_attention_row (fun keeper ->
-        let alerts = Yojson.Safe.Util.(member "alerts" keeper |> to_list) in
-        replace_field "alerts" (`List (attention_alert :: alerts)) keeper)
-    ; replace_field "alert_summary"
-        (replace_field "librarian_attention_required_keepers" (`Int 2)
-          (Yojson.Safe.Util.member "alert_summary" attention)) attention ];
-  List.iter (fun (label, updates, expected_state, expected_time, expected_unread_total) ->
-    let payload =
-      with_librarian ~stopped_keepers:0 (("admission_wait", admission_json) :: updates) in
-    let totals = Yojson.Safe.Util.member "totals" payload in
-    let payload = replace_field "totals"
-      (replace_field "librarian_unread_turns"
-         (Option.fold ~none:`Null ~some:(fun unread -> `Int unread) expected_unread_total)
-         totals) payload in
-    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot payload with
-    | Error detail -> Alcotest.failf "%s: %s" label detail
-    | Ok snapshot ->
-      let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
-      Alcotest.(check bool) (label ^ ": original admission owner retained") true
-        (librarian.mlh_admission_wait = Some admission_worker);
-      Alcotest.(check bool) (label ^ ": durable state retained") true
-        (librarian.mlh_state = expected_state);
-      Alcotest.(check (option (float 0.))) (label ^ ": durable measurement time retained")
-        expected_time librarian.mlh_measured_at;
-      Alcotest.(check (option int)) (label ^ ": fleet unread measurement retained")
-        expected_unread_total snapshot.mhs_total_librarian_unread_turns)
-    [ "measured durable pass", [], Some Masc.Tui_decode_memory_health.Pass_drained,
-      Some 1_775_000_000.0, Some 0
-    ; "unobserved durable pass",
-      [ "state", `Null; "measured_at", `Null; "unread_atom_turns", `Null;
-        "unread_official_turns", `Null ], None, None, None ];
-  List.iter (fun admission_wait ->
-    Alcotest.(check bool) "admission wait requires a supported original worker" true
-      (memory_health_rejects (with_librarian ~stopped_keepers:0 ["admission_wait", admission_wait])))
-    [ Masc.Keeper_librarian_pending.to_json
-        (Publication { request_id = "original"; detail = "settling" })
-    ; replace_field "wait" (`String "retry_anyway") admission_json
-    ; replace_field "installation_id" (`String "") admission_json
-    ; `Assoc ["kind", `String "worker"; "request_id", `String "original"] ];
-  (* A row this build cannot read is refused on its own: the other keeper
-     still decodes and the refusal names the keeper and the reason, so a newer
-     server does not blank the pane. *)
-  List.iter
-    (fun (label, stopped_keepers, updates, reason) ->
-       match
-         Masc.Tui_decode_memory_health.decode_memory_health_snapshot (with_librarian ~stopped_keepers updates)
-       with
-       | Error detail -> Alcotest.failf "%s: the whole snapshot was refused: %s" label detail
-       | Ok snapshot ->
-         Alcotest.(check (list string)) (label ^ ": the other keeper still decodes")
-           [ "healthy" ]
-           (List.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_keeper_id) snapshot.mhs_keepers);
-         (match snapshot.mhs_refused_keepers with
-          | [ { Masc.Tui_decode_memory_health.mkr_keeper_id = Some "source-only"; mkr_reason } ] ->
-            Alcotest.(check bool) (label ^ ": the refusal says why") true
-              (String_util.contains_substring mkr_reason reason)
-          | _ -> Alcotest.failf "%s: expected one refusal naming source-only" label))
-    [ "a state this build does not know is refused", 1, [ "state", `String "paused" ],
-      "unsupported librarian state: paused"
-    ; "a stopped pass without its cause is refused", 1, [ "state", `String "stopped" ],
-      "missing its detail"
-    ; "a caught-up pass with a cause is refused", 0, [ "detail", `String "stray" ],
-      "carries a detail"
-    ; "a failure kind this build does not know is refused", 0,
-      [ "last_failure_kind", `String "quota" ], "unsupported librarian failure kind: quota"
-    ];
-  let unknown_unread = map_keeper 0
-      (fun keeper -> match keeper with
-       | `Assoc fields ->
-         `Assoc (List.map (fun (key, value) -> key,
-           if key = "librarian" then replace_field "unread_atom_turns" `Null value else value) fields)
-       | _ -> keeper) json in
-  Alcotest.(check bool) "unknown unread cannot report a zero fleet total" true
-    (memory_health_rejects (unknown_unread));
-  let unknown_total = match unknown_unread with
-    | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key,
-        if key = "totals" then replace_field "librarian_unread_turns" `Null value else value) fields)
-    | _ -> unknown_unread in
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot unknown_total with
-   | Ok snapshot -> Alcotest.(check (option int)) "unknown fleet total retained" None
-       snapshot.mhs_total_librarian_unread_turns
-   | Error detail -> Alcotest.fail detail);
-  (* The continuity lag is a second, separate lag (RFC librarian-lifecycle
-     §4.9). A row the server could not take is [null] and the fleet has to
-     count it as unmeasured; a row it took is its number and the fleet has to
-     sum it. Neither total may be quietly zero. *)
-  let with_continuity value =
-    map_keeper 0 (fun keeper -> match keeper with
-      | `Assoc fields -> `Assoc (List.map (fun (key, current) -> key,
-          if key = "librarian" then replace_field "continuity_unread_atoms" value current else current) fields)
-      | _ -> keeper) json in
-  let with_continuity_totals ~behind ~unmeasured = function
-    | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key,
-        if key = "totals"
-        then replace_field "librarian_continuity_unmeasured" (`Int unmeasured)
-               (replace_field "librarian_continuity_unread_atoms" (`Int behind) value)
-        else value) fields)
-    | json -> json in
-  Alcotest.(check bool) "an unmeasured continuity lag cannot leave the fleet count at zero" true
-    (memory_health_rejects ((with_continuity `Null)));
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
-           (with_continuity_totals ~behind:0 ~unmeasured:1 (with_continuity `Null)) with
-   | Ok snapshot ->
-     Alcotest.(check (option int)) "an unmeasured continuity lag stays unknown" None
-       (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_continuity_unread_atoms;
-     Alcotest.(check int) "the fleet counts the keeper it could not measure" 1
-       snapshot.mhs_total_librarian_continuity_unmeasured;
-     Alcotest.(check int) "and sums nothing for it" 0
-       snapshot.mhs_total_librarian_continuity_unread_atoms
-   | Error detail -> Alcotest.fail detail);
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
-           (with_continuity_totals ~behind:4 ~unmeasured:0 (with_continuity (`Int 4))) with
-   | Ok snapshot ->
-     Alcotest.(check (option int)) "a measured continuity lag is the row's number" (Some 4)
-       (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_continuity_unread_atoms;
-     Alcotest.(check int) "and the fleet sums it" 4
-       snapshot.mhs_total_librarian_continuity_unread_atoms
-   | Error detail -> Alcotest.fail detail);
-  Alcotest.(check bool) "a continuity sum that disagrees with the rows is refused" true
-    (memory_health_rejects ((with_continuity (`Int 4))));
-  Alcotest.(check bool) "a negative continuity lag is refused" true
-    (memory_health_rejects (
-       (with_continuity_totals ~behind:(-1) ~unmeasured:0 (with_continuity (`Int (-1))))));
-  (* RFC librarian-lifecycle §4.10: the Librarian_stalled gap is the row's
-     own reading, from the Librarian point to the accepted start. A gap that
-     does not end after it starts is no gap and is refused. *)
-  let with_stalled value =
-    map_keeper 0 (fun keeper -> match keeper with
-      | `Assoc fields -> `Assoc (List.map (fun (key, current) -> key,
-          if key = "librarian" then replace_field "stalled" value current else current) fields)
-      | _ -> keeper) json in
-  let gap start_atom end_atom =
-    `Assoc
-      [ "kind", `String "gap"; "gap_start_atom", `Int start_atom; "gap_end_atom", `Int end_atom ]
-  in
-  let stalled_of payload =
-    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (with_stalled payload) with
-    | Ok snapshot -> (List.hd snapshot.mhs_keepers).mkh_librarian.mlh_stalled
-    | Error detail -> Alcotest.fail detail
-  in
-  (match stalled_of (gap 2 8) with
-   | Some (Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 }) -> ()
-   | _ -> Alcotest.fail "the gap (2, 8) must decode as that gap");
-  Alcotest.(check bool) "an empty gap is refused" true
-    (memory_health_rejects (with_stalled (gap 8 8)));
-  Alcotest.(check bool) "a gap with a field this build does not know is refused" true
-    (memory_health_rejects
-       (with_stalled
-          (`Assoc
-             [ "kind", `String "gap"; "gap_start_atom", `Int 2; "gap_end_atom", `Int 8
-             ; "bytes", `Int 1 ])));
-  (* A file the gap is read from that did not read decodes as its own state,
-     not as no gap. *)
-  let unmeasured cause =
-    `Assoc [ "kind", `String "unmeasured"; "cause", `String cause; "detail", `String "bad" ]
-  in
-  (match stalled_of (unmeasured "turn_records_unreadable") with
-   | Some
-       (Masc.Tui_decode_memory_health.Stalled_unmeasured
-          { mls_cause = Masc.Tui_decode_memory_health.Stall_turn_records_unreadable; mls_detail = "bad" }) -> ()
-   | _ -> Alcotest.fail "an unreadable turn record must decode as unmeasured, not as no gap");
-  Alcotest.(check bool) "a cause this build does not know is refused" true
-    (memory_health_rejects (with_stalled (unmeasured "disk_on_fire")));
-  Alcotest.(check bool) "a kind this build does not know is refused" true
-    (memory_health_rejects (with_stalled (`Assoc [ "kind", `String "maybe" ])));
-  let mismatched_totals =
-    match json with
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (field, value) ->
-              if String.equal field "totals"
-              then field, replace_field "facts" (`Int 13) value
-              else field, value)
-           fields)
-    | json -> json
-  in
-  let negative_unread =
-    map_keeper
-      0
-      (replace_field
-         "librarian"
-         (`Assoc
-            [ ("state", `String "drained")
-            ; ("detail", `Null)
-            ; ("pending", `Null)
-            ; ("admission_wait", `Null); ("operator_action_required", `Bool false)
-            ; ("measured_at", `Float 1_775_000_000.0)
-            ; ("unread_atom_turns", `Int (-1))
-            ; ("unread_official_turns", `Int 0)
-            ; ("continuity_unread_atoms", `Int 0)
-            ; ("last_success_at", `Null)
-            ; ("last_failure_kind", `Null)
-            ; ("stalled", `Null)
-            ]))
-      json
-  in
-  let unknown_librarian_state =
-    map_keeper
-      0
-      (replace_field
-         "librarian"
-         (`Assoc
-            [ ("state", `String "resting")
-            ; ("detail", `Null)
-            ; ("pending", `Null)
-            ; ("admission_wait", `Null); ("operator_action_required", `Bool false)
-            ; ("measured_at", `Float 1_775_000_000.0)
-            ; ("unread_atom_turns", `Int 0)
-            ; ("unread_official_turns", `Int 0)
-            ; ("continuity_unread_atoms", `Int 0)
-            ; ("last_success_at", `Null)
-            ; ("last_failure_kind", `Null)
-            ; ("stalled", `Null)
-            ]))
-      json
-  in
-  let unknown_field =
-    match json with
-    | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
-    | json -> json
-  in
-  let duplicate_keeper =
-    match json with
-    | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (field, value) ->
-              if String.equal field "keepers"
-              then
-                match value with
-                | `List (first :: _) -> field, `List [ first; first ]
-                | _ -> field, value
-              else field, value)
-           fields)
-    | json -> json
-  in
-  let wrong_alert_target =
-    map_keeper
-      0
-      (function
-        | `Assoc fields ->
-          `Assoc
-            (List.map
-               (fun (field, value) ->
-                  if String.equal field "alerts"
-                  then
-                    match value with
-                    | `List (first :: rest) ->
-                      field, `List (replace_field "target" (`String "librarian_failures") first :: rest)
-                    | _ -> field, value
-                  else field, value)
-               fields)
-        | json -> json)
-      json
-  in
-  let duplicate_vision_reason =
-    let reason count =
-      `Assoc [ "reason", `String "fetch_failed"; "count", `Int count ]
-    in
-    map_keeper
-      1
-      (replace_field
-         "vision_ingest_error_reasons"
-         (`List [ reason 1; reason 2 ]))
-      json
-  in
-  List.iter
-    (fun (label, invalid) ->
-       Alcotest.(check bool) label true
-         (memory_health_rejects (invalid)))
-    [ "fleet total mismatch rejects", mismatched_totals
-    ; "negative unread turn count rejects", negative_unread
-    ; "unknown librarian state rejects", unknown_librarian_state
-    ; "unknown root field rejects", unknown_field
-    ; "duplicate keeper identity rejects", duplicate_keeper
-    ; "alert target mismatch rejects", wrong_alert_target
-    ; "duplicate vision reason rejects", duplicate_vision_reason
-    ; "timestamp without readable snapshot rejects",
-      map_keeper 0 (replace_field "updated_at" (`Float 1700000000.)) json
-    ; "readable snapshot without timestamp rejects",
-      map_keeper 1 (replace_field "updated_at" `Null) json
-    ; "negative snapshot timestamp rejects",
-      map_keeper 1 (replace_field "updated_at" (`Float (-1.))) json
-    ; "nonfinite snapshot timestamp rejects",
-      map_keeper 1 (replace_field "updated_at" (`Float infinity)) json
-    ; "text snapshot timestamp rejects",
-      map_keeper 1 (replace_field "updated_at" (`String "1700000000")) json
-    ];
-  (* Rejecting is half the job. A nine-kilobyte payload with one key out of
-     place used to come back as "unknown, duplicate, or missing fields", and
-     that sentence is the whole of what the Memory surface drew -- nothing in
-     it says which key, so the operator diffs the payload against the decoder
-     by hand. These pin the named groups. *)
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot unknown_field with
-   | Ok _ -> Alcotest.fail "an unknown root field has to be refused"
-   | Error detail ->
-       Alcotest.(check string) "the refusal names the unknown field"
-         "memory health snapshot fields mismatch (unknown=[unexpected])" detail);
-  (let duplicated_root =
-     match json with
-     | `Assoc fields -> `Assoc (("schema", `String "twice") :: fields)
-     | json -> json
-   in
-   match Masc.Tui_decode_memory_health.decode_memory_health_snapshot duplicated_root with
-   | Ok _ -> Alcotest.fail "a duplicated root field has to be refused"
-   | Error detail ->
-       Alcotest.(check string) "the refusal names the duplicated field"
-         "memory health snapshot fields mismatch (duplicates=[schema])" detail);
-  match Masc.Tui_decode_memory_health.decode_memory_health_snapshot json with
-  | Error err -> Alcotest.failf "decode failed: %s" err
-  | Ok snapshot ->
-      Alcotest.(check int) "keepers" 2 (List.length snapshot.mhs_keepers);
-      Alcotest.(check (list (option (float 0.)))) "snapshot timestamps"
-        [None; Some 1700000000.]
-        (List.map (fun keeper -> keeper.Masc.Tui_decode_memory_health.mkh_updated_at) snapshot.mhs_keepers);
-      Alcotest.(check int) "starving keepers" 1 snapshot.mhs_starving_keepers;
-      Alcotest.(check int) "error alerts" 1 snapshot.mhs_error_alerts;
-      Alcotest.(check int) "source facts total" 2
-        snapshot.mhs_total_source_facts;
-      Alcotest.(check int) "derived facts total" 2
-        snapshot.mhs_total_derived_facts;
-      Alcotest.(check int) "support invalidations total" 1
-        snapshot.mhs_total_support_invalidations;
-      Alcotest.(check int) "source invalidations total" 1
-        snapshot.mhs_total_source_invalidations;
-      Alcotest.(check int) "vision ingest errors total" 3
-        snapshot.mhs_total_vision_ingest_errors;
-      (match snapshot.mhs_keepers with
-       | source_only :: _ ->
-           Alcotest.(check bool) "no ordinary snapshot" false
-             source_only.mkh_snapshot_present;
-           Alcotest.(check bool) "source snapshot remains" true
-             source_only.mkh_source_snapshot_present;
-           Alcotest.(check int) "source revision" 7
-             source_only.mkh_source_revision;
-           Alcotest.(check int) "source facts" 2 source_only.mkh_source_facts;
-           Alcotest.(check int) "source invalidations" 1
-             source_only.mkh_source_invalidations;
-           Alcotest.(check int) "failures" 4
-             source_only.mkh_librarian_failures;
-           (match source_only.mkh_alerts with
-            | [ { Masc.Tui_decode_memory_health.ma_code = Masc.Tui_decode_memory_health.Librarian_starvation; _ } ] ->
-                (match
-                   Masc.Tui_decode_memory_health.memory_alert_severity Masc.Tui_decode_memory_health.Librarian_starvation
-                 with
-                 | `Error -> ()
-                 | `Warn -> Alcotest.fail "starvation must carry error severity")
-            | _ -> Alcotest.fail "expected one starvation alert")
-       | [] -> Alcotest.fail "expected the source-only keeper row")
+(* The server memory-health tests decode production responses and check the
+   read-position and rewrite relationships there. This file retains stale
+   schema rejection, typed alert contracts, and memory-fact decoding. *)
 
 (* The alert's typed code is the only field the renderer reads: the wire's
    severity and target are functions of it, and the decoder refuses a payload
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v13")
+    [ ("schema", `String "keeper.memory_os.current_health.v14")
     ; ("execution", disabled_memory_execution)
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
@@ -6093,6 +5271,8 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
               ; ("snapshot_present", `Bool false)
               ; ("updated_at", `Null)
               ; ("age_bins", `Null)
+              ; ("facts_by_hour", `List [])
+              ; ("changes_since_start", no_memory_changes)
               ; ("context_cycle", empty_memory_context_cycle)
               ; ( "librarian"
                 , `Assoc
@@ -6166,6 +5346,75 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
 
 let memory_alert_snapshot = memory_alert_snapshot_with_extra []
 
+let test_decode_memory_health_reads_change_history () =
+  let json =
+    memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
+      ~target:"librarian_starvation"
+  in
+  let replace_field name value = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, current) ->
+              if String.equal field name then field, value else field, current)
+           fields)
+    | json -> json
+  in
+  let map_keeper update = function
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (field, value) ->
+              if String.equal field "keepers"
+              then
+                match value with
+                | `List [ keeper ] -> field, `List [ update keeper ]
+                | _ -> field, value
+              else field, value)
+           fields)
+    | json -> json
+  in
+  Alcotest.(check bool) "the unchanged current fixture decodes" false
+    (memory_health_rejects json);
+  (* Keep the v14 checks on the retained fixture after the large older
+     memory-health matrix moved to the server response tests. *)
+  let healthy_field name value = map_keeper (replace_field name value) json in
+  let point recorded_at facts =
+    `Assoc [ ("recorded_at", `Float recorded_at); ("facts", `Int facts) ]
+  in
+  Alcotest.(check bool) "a point in each later hour decodes" false
+    (memory_health_rejects
+       (healthy_field "facts_by_hour"
+          (`List [ point 1_699_996_400. 11; point 1_699_999_900. 12 ])));
+  let changes_without_first_pass =
+    match no_memory_changes with
+    | `Assoc (_ :: passes) -> `Assoc passes
+    | other -> other
+  in
+  let changes_with_another_pass =
+    match no_memory_changes with
+    | `Assoc ((_, counts) :: _ as passes) ->
+      `Assoc (passes @ [ ("later_pass", counts) ])
+    | other -> other
+  in
+  let changes_with_negative_count =
+    match no_memory_changes with
+    | `Assoc ((pass, counts) :: passes) ->
+      `Assoc ((pass, replace_field "dropped" (`Int (-1)) counts) :: passes)
+    | other -> other
+  in
+  List.iter
+    (fun (label, name, value) ->
+       Alcotest.(check bool) label true
+         (memory_health_rejects (healthy_field name value)))
+    [ ( "two points in one hour are refused"
+      , "facts_by_hour"
+      , `List [ point 1_699_999_200. 11; point 1_699_999_900. 12 ] )
+    ; "a change table without a pass is refused", "changes_since_start", changes_without_first_pass
+    ; "a change table with another pass is refused", "changes_since_start", changes_with_another_pass
+    ; "a negative change count is refused", "changes_since_start", changes_with_negative_count
+    ]
+
 let test_decode_memory_alert_keeps_the_code_contract () =
   (match
      Masc.Tui_decode_memory_health.decode_memory_health_snapshot
@@ -6202,158 +5451,6 @@ let test_decode_memory_alert_keeps_the_code_contract () =
     (memory_alert_snapshot_with_extra [ ("value", `Float 4.0) ]
        ~code:"librarian_starvation" ~severity:"error"
        ~target:"librarian_starvation")
-
-(* A snapshot that stopped moving while the Librarian kept reading is what a
-   request pays for: it starts at the cut and carries every atom up to the
-   position. The two numbers have to arrive together, or a reader cannot tell
-   an ordinary one-turn lag from rounds that have been failing for a day
-   (#37793). *)
-let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
-  let snapshot_with context_cycle =
-    `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v13")
-      ; ("execution", disabled_memory_execution)
-      ; ("generated_at", `Float 1_775_000_000.0)
-      ; ( "keepers"
-        , `List
-            [ `Assoc
-                [ ("keeper_id", `String "alpha")
-                ; ("revision", `Int 1)
-                ; ("facts", `Int 0)
-                ; ("observed_facts", `Int 0)
-                ; ("derived_facts", `Int 0)
-                ; ("support_invalidations", `Int 0)
-                ; ("snapshot_bytes", `Int 0)
-                ; ("added", `Int 0)
-                ; ("removed", `Int 0)
-                ; ("snapshot_present", `Bool true)
-                ; ("updated_at", `Float 1700000000.)
-                ; ("age_bins", `List (List.init 24 (fun _ -> `Int 0)))
-                ; ("context_cycle", context_cycle)
-                ; ( "librarian"
-                  , `Assoc
-                      [ ("state", `String "drained")
-                      ; ("detail", `Null)
-                      ; ("pending", `Null)
-                      ; ("admission_wait", `Null); ("operator_action_required", `Bool false)
-                      ; ("measured_at", `Float 1_775_000_000.0)
-                      ; ("unread_atom_turns", `Int 0)
-                      ; ("unread_official_turns", `Int 0)
-                      ; ("continuity_unread_atoms", `Int 0)
-                      ; ("last_success_at", `Null)
-                      ; ("last_failure_kind", `Null)
-                      ; ("stalled", `Null)
-                      ] )
-                ; ("librarian_failures", `Int 0)
-                ; ("vision_ingest_errors", `Int 0)
-                ; ("vision_ingest_error_reasons", `List [])
-                ; ("read_error", `Null)
-                ; ("source_revision", `Int 0)
-                ; ("source_facts", `Int 0)
-                ; ("source_invalidations", `Int 0)
-                ; ("source_snapshot_bytes", `Int 0)
-                ; ("source_snapshot_present", `Bool false)
-                ; ("source_read_error", `Null)
-                ; ("alerts", `List [])
-                ] ] )
-      ; ( "totals"
-        , `Assoc
-            [ ("facts", `Int 0); ("observed_facts", `Int 0); ("derived_facts", `Int 0)
-            ; ("support_invalidations", `Int 0); ("snapshot_bytes", `Int 0)
-            ; ("added", `Int 0); ("removed", `Int 0); ("source_facts", `Int 0)
-            ; ("source_invalidations", `Int 0); ("source_snapshot_bytes", `Int 0)
-            ; ("librarian_unread_turns", `Int 0); ("librarian_failures", `Int 0)
-            ; ("librarian_continuity_unread_atoms", `Int 0)
-            ; ("librarian_continuity_unmeasured", `Int 0)
-            ; ("vision_ingest_errors", `Int 0); ("read_errors", `Int 0)
-            ; ("source_read_errors", `Int 0)
-            ] )
-      ; ( "alert_summary"
-        , `Assoc
-            [ ("total_alerts", `Int 0); ("warn_alerts", `Int 0); ("error_alerts", `Int 0)
-            ; ("keepers_with_alerts", `Int 0); ("snapshot_read_error_keepers", `Int 0)
-            ; ("source_snapshot_read_error_keepers", `Int 0)
-            ; ("librarian_stopped_keepers", `Int 0); ("librarian_attention_required_keepers", `Int 0); ("librarian_starving_keepers", `Int 0)
-            ] )
-      ]
-  in
-  let cycle ?(saved = true) ~read_position ~read_error ~rewriting_through () =
-    `Assoc
-      [ ( "saved"
-        , if saved
-          then
-            `Assoc
-              [ ("trace_id", `String "trace-1"); ("end_atom", `Int 7694)
-              ; ("boundary_line", `Int 385) ]
-          else `Null )
-      ; ("saved_read_error", `Null)
-      ; ("read_position", match read_position with None -> `Null | Some value -> `Int value)
-      ; ( "read_position_read_error"
-        , match read_error with None -> `Null | Some value -> `String value )
-      ; ( "rewriting_through"
-        , match rewriting_through with None -> `Null | Some value -> `Int value )
-      ; ("prepared", `Null)
-      ; ("synthesis", `Null)
-      ; ("unread", empty_memory_unread_evidence)
-      ]
-  in
-  let cycle_of snapshot =
-    match snapshot.Masc.Tui_decode_memory_health.mhs_keepers with
-    | [ keeper ] -> keeper.Masc.Tui_decode_memory_health.mkh_context_cycle
-    | _ -> Alcotest.fail "the fixture holds one keeper"
-  in
-  (match
-     Masc.Tui_decode_memory_health.decode_memory_health_snapshot
-       (snapshot_with
-          (cycle ~read_position:(Some 12887) ~read_error:None
-             ~rewriting_through:(Some 12888) ()))
-   with
-   | Error detail -> Alcotest.failf "decode failed: %s" detail
-   | Ok snapshot ->
-     let cycle = cycle_of snapshot in
-     Alcotest.(check (option int)) "the read position is carried" (Some 12887)
-       cycle.Masc.Tui_decode_memory_health.mcc_read_position;
-     Alcotest.(check (option int)) "the rewrite target is carried" (Some 12888)
-       cycle.Masc.Tui_decode_memory_health.mcc_rewriting_through;
-     Alcotest.(check bool) "the position was readable" false
-       cycle.Masc.Tui_decode_memory_health.mcc_read_position_unreadable;
-     match cycle.Masc.Tui_decode_memory_health.mcc_saved with
-     | None -> Alcotest.fail "the fixture saves a cut"
-     | Some saved ->
-       Alcotest.(check int) "the cut the position is read against" 7694
-         saved.Masc.Tui_decode_memory_health.mcf_end_atom);
-  (* An unreadable position is why there is no number, not a keeper that has
-     read nothing. *)
-  (match
-     Masc.Tui_decode_memory_health.decode_memory_health_snapshot
-       (snapshot_with
-          (cycle ~read_position:None ~read_error:(Some "progress_unreadable")
-             ~rewriting_through:None ()))
-   with
-   | Error detail -> Alcotest.failf "decode failed: %s" detail
-   | Ok snapshot ->
-     Alcotest.(check bool) "an unreadable position says so" true
-       (cycle_of snapshot).Masc.Tui_decode_memory_health.mcc_read_position_unreadable);
-  (* Both halves of the disagreement: a marker with a number, and a rewrite
-     target the cut already reached. *)
-  Alcotest.(check bool) "a read error beside a position is refused" true
-    (memory_health_rejects
-       (
-          (snapshot_with
-             (cycle ~read_position:(Some 12887) ~read_error:(Some "progress_unreadable")
-                ~rewriting_through:None ()))));
-  Alcotest.(check bool) "a rewrite target at the cut is refused" true
-    (memory_health_rejects
-       (
-          (snapshot_with
-             (cycle ~read_position:(Some 12887) ~read_error:None
-                ~rewriting_through:(Some 7694) ()))));
-  Alcotest.(check bool) "a rewrite target without a cut is refused" true
-    (memory_health_rejects
-       (
-          (snapshot_with
-             (cycle ~saved:false ~read_position:(Some 12887) ~read_error:None
-                ~rewriting_through:(Some 12888) ()))))
 
 let test_decode_memory_health_rejects_stale_schema () =
   let current =
@@ -10567,18 +9664,41 @@ let test_decode_server_identity_reads_the_operator_rollup () =
     | `Assoc base -> `Assoc (base @ fields)
     | _ -> Alcotest.fail "the probe fixture is an object"
   in
-  let read json =
+  let observation json =
     match Tui_decode.decode_server_identity json with
     | Ok identity -> identity.Tui_decode.sid_operator_action
     | Error detail -> Alcotest.fail detail
   in
-  let reason = "typesafeai:payment_required https://api.typesafe.ai/v1/systemone since=2026-11-04T06:45:51Z" in
+  let read json = match observation json with
+    | Some (Tui_decode.Operator_actions_observed actions) ->
+        Some (List.map Masc.Operator_action_reason.diagnostic actions)
+    | Some (Tui_decode.Operator_actions_unavailable _) | None -> None in
+  let action = Masc.Operator_action_reason.other ~component:"typesafeai"
+      ~reason:"payment_required https://api.typesafe.ai/v1/systemone since=2026-11-04T06:45:51Z" in
+  let reason = Masc.Operator_action_reason.diagnostic action in
   Alcotest.(check (option (list string))) "the reasons when the operator has to act" (Some [ reason ])
     (read (with_rollup [ "operator_action_required", `Bool true
-                       ; "operator_action_reasons", `List [ `String reason ] ]));
+                       ; "operator_action_reasons", `List [ `String reason ]
+                       ; "operator_actions", `List [Masc.Operator_action_reason.to_json action] ]));
   Alcotest.(check (option (list string))) "nothing to do is an answer too" (Some [])
-    (read (with_rollup [ "operator_action_required", `Bool false; "operator_action_reasons", `List [] ]));
+    (read (with_rollup [ "operator_action_required", `Bool false; "operator_action_reasons", `List []; "operator_actions", `List [] ]));
   Alcotest.(check (option (list string))) "an older server cannot say" None (read health_probe);
+  Alcotest.(check (option (list string))) "raw text alone grants no typed target" None
+    (read (with_rollup ["operator_action_required",`Bool true;
+                       "operator_action_reasons",`List [`String reason]]));
+  List.iter (fun typed ->
+    let fields = ["operator_action_required",`Bool true;
+                  "operator_action_reasons",`List [`String reason]] @ typed in
+    match observation (with_rollup fields) with
+    | Some (Tui_decode.Operator_actions_unavailable {diagnostics;error}) ->
+        Alcotest.(check (list string)) "original diagnostics remain readable" [reason] diagnostics;
+        Alcotest.(check bool) "the decoder cause remains readable" true (error <> "")
+    | Some (Tui_decode.Operator_actions_observed _) | None ->
+        Alcotest.fail "missing or malformed typed evidence must retain original diagnostics")
+    [[]; ["operator_actions",`Null]; ["operator_actions",`List [`String "not a typed action"]]];
+  Alcotest.(check (option (list string))) "warming is not an observed empty collection" None
+    (read (with_rollup ["operator_action_required",`Bool false;
+                       "operator_action_reasons",`List [];"operator_actions",`Null]));
   Alcotest.(check (option (list string))) "a flag that disagrees with its list is not read" None
     (read (with_rollup [ "operator_action_required", `Bool true; "operator_action_reasons", `List [] ]))
 
@@ -14873,12 +13993,10 @@ let () =
           test_decode_repository_requires_resolved_local_path;
         Alcotest.test_case "repository changes keep Git axes" `Quick
           test_decode_repository_changes_keeps_git_axes;
-        Alcotest.test_case "memory health keeps ordinary and source axes" `Quick
-          test_decode_memory_health_keeps_ordinary_and_source_axes;
-        Alcotest.test_case "memory health reads the Librarian position beside the cut"
-          `Quick test_decode_memory_health_reads_the_librarian_position_beside_the_cut;
         Alcotest.test_case "memory health rejects stale schema" `Quick
           test_decode_memory_health_rejects_stale_schema;
+        Alcotest.test_case "memory health reads change history" `Quick
+          test_decode_memory_health_reads_change_history;
         Alcotest.test_case "memory alert keeps the code contract" `Quick
           test_decode_memory_alert_keeps_the_code_contract;
         Alcotest.test_case "standalone lane configuration is a closed set" `Quick
@@ -15075,12 +14193,6 @@ let () =
         Alcotest.test_case "message is required" `Quick
           test_decode_system_log_requires_the_message;
       ] );
-    ( "decode_agent",
-      [
-        Alcotest.test_case "success" `Quick test_decode_agent_success;
-        Alcotest.test_case "missing status fails" `Quick
-          test_decode_agent_missing_status_fails;
-      ] );
     ( "decode_task",
       [
         Alcotest.test_case "missing priority defaults" `Quick
@@ -15228,23 +14340,6 @@ let () =
         Alcotest.test_case "hybrid and prior trace fail closed" `Quick
           test_context_observation_rejects_hybrids_and_prior_trace;
       ] );
-    ( "parse_keeper_chat_response",
-      [
-        Alcotest.test_case "sse delta" `Quick
-          test_parse_keeper_chat_response_sse_delta;
-        Alcotest.test_case "keeper SSE framing" `Quick
-          test_parse_keeper_chat_response_sse_framing;
-        Alcotest.test_case "AG-UI SSE" `Quick
-          test_parse_keeper_chat_response_ag_ui_sse;
-        Alcotest.test_case "AG-UI error" `Quick
-          test_parse_keeper_chat_response_ag_ui_error;
-        Alcotest.test_case "AG-UI empty terminal" `Quick
-          test_parse_keeper_chat_response_ag_ui_empty_terminal;
-        Alcotest.test_case "body json" `Quick
-          test_parse_keeper_chat_response_body_json;
-        Alcotest.test_case "json error" `Quick
-          test_parse_keeper_chat_response_json_error;
-      ] );
     ( "structured_http_response",
       [
         Alcotest.test_case "body rejects error status" `Quick
@@ -15383,11 +14478,6 @@ let () =
           test_decode_server_identity_reads_the_startup_readiness;
         Alcotest.test_case "reads telemetry" `Quick
           test_decode_server_identity_reads_telemetry;
-      ] );
-    ( "bounded_parent_depth",
-      [
-        Alcotest.test_case "stops on cycle" `Quick
-          test_bounded_parent_depth_stops_on_cycle;
       ] );
     ( "runtime_params",
       [

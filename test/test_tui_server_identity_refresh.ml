@@ -3612,11 +3612,12 @@ let test_board_census_retains_values_through_retry_failure_and_missing_result ()
   Alcotest.(check bool) "received census supplies matching hearth total" true
     (board_census_holding state ~hearth:state.board_hearth=Some 2);
   let dispatch ()=
+    let started_ns = Int64.sub (Mtime_clock.elapsed_ns ()) pending_display_bar_ns in
     let reads,request=Surface_read_order.dispatch ~kind:Surface_read_order.Navigation
-      ~needs:{nothing with needs_board=true} ~started_ns:1L state.http_surface_reads in
+      ~needs:{nothing with needs_board=true} ~started_ns state.http_surface_reads in
     state.http_surface_reads <- reads;request in
   let retry=dispatch () in
-  Alcotest.(check bool) "reread keeps navigation candidates but does not lend an old total" true
+  Alcotest.(check bool) "a slow reread keeps navigation candidates but does not lend an old total" true
     (board_census_reading state=(Masc_tui_fetched.Ready census,true)
      && board_census_values state=census && board_census_holding state ~hearth:state.board_hearth=None);
   if not (take retry Surface_read_order.Board_hearths) then Alcotest.fail "retry census not owned";

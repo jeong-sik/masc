@@ -444,7 +444,7 @@ let test_build_embed_request_embeds_included () =
   | _ -> fail "expected Assoc"
 
 (* ---------------------------------------------------------------- *)
-(* split_at_codepoint / chunk_by_codepoint / truncate_to_limit       *)
+(* split_at_codepoint / truncate_to_limit                           *)
 (* ---------------------------------------------------------------- *)
 
 (* Count Unicode scalar values in a UTF-8 string by stepping the
@@ -483,23 +483,6 @@ let test_split_at_codepoint_short_fits () =
   let head, tail = R.split_at_codepoint s ~limit:2000 in
   check string "short head is the whole string" "hello" head;
   check string "short tail is empty" "" tail
-
-let test_chunk_by_codepoint_korean () =
-  let s = repeat_hangul 2500 in
-  let chunks = R.chunk_by_codepoint s ~limit:2000 in
-  check int "2500 codepoints split into 2 chunks" 2 (List.length chunks);
-  List.iter
-    (fun c ->
-      check bool "each chunk valid UTF-8" true (String.is_valid_utf_8 c);
-      check bool "each chunk <= 2000 codepoints" true
-        (count_codepoints c <= 2000))
-    chunks;
-  check string "concat of chunks reconstructs the original" s
-    (String.concat "" chunks)
-
-let test_chunk_by_codepoint_empty () =
-  check int "empty input yields no chunks" 0
-    (List.length (R.chunk_by_codepoint "" ~limit:2000))
 
 let test_truncate_to_limit_korean_valid_utf8 () =
   let s = repeat_hangul 2500 in
@@ -578,10 +561,6 @@ let () =
             test_split_at_codepoint_korean_head_valid_utf8
         ; test_case "short string fits without splitting" `Quick
             test_split_at_codepoint_short_fits
-        ; test_case "Korean chunk_by_codepoint: 2 valid chunks" `Quick
-            test_chunk_by_codepoint_korean
-        ; test_case "empty input => no chunks" `Quick
-            test_chunk_by_codepoint_empty
         ; test_case "truncate_to_limit keeps valid UTF-8" `Quick
             test_truncate_to_limit_korean_valid_utf8
         ] )

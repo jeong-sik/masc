@@ -144,7 +144,6 @@ let entry_put_bytes e =
            ~cols:e.e_cols ~crop:e.e_crop)
 
 let placement_bytes p = entry_bytes (entry_of_placement p)
-let put_bytes p = entry_put_bytes (entry_of_placement p)
 
 let display = ref No_picture
 let set_display d = display := d

@@ -276,7 +276,7 @@ let test_an_old_post_without_an_audience_costs_nothing () =
   let failures_before = board_event_failures () in
   let comment =
     get
-      (Board_dispatch.add_comment
+      (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
          ~post_id:(post_id old_post)
          ~author:"external-author"
          ~content:"@scanreader please look"
@@ -293,7 +293,7 @@ let test_an_old_post_without_an_audience_costs_nothing () =
   Unix.sleepf 0.01;
   ignore
     (get
-       (Board_dispatch.vote
+       (Board_dispatch.vote ~reader:Masc_board_handlers.Board_access.Operator
           ~voter:"someone"
           ~post_id:(post_id old_post)
           ~direction:Board.Up));
@@ -327,7 +327,7 @@ let test_a_post_without_an_audience_does_not_stop_its_comments () =
   in
   let comment =
     get
-      (Board_dispatch.add_comment
+      (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
          ~post_id:(post_id post)
          ~author:"external-author"
          ~content:"@scanreader please look"
@@ -374,7 +374,7 @@ let test_scan_follows_the_recorded_comment_audience () =
   in
   let comment content =
     get
-      (Board_dispatch.add_comment
+      (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
          ~post_id:(post_id post)
          ~author:"external-author"
          ~content

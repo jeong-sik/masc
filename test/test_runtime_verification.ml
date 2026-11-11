@@ -270,9 +270,11 @@ streaming = true
        | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
          match runtime.Runtime_instance.execution with
-         | Runtime_execution.Agent_core provider_config ->
+         | Runtime_execution.Agent_core sealed ->
+           let provider_config = Masc_test_deps.api_config sealed in
            { runtime with execution = Runtime_execution.Agent_core
-               { provider_config with api_key = Llm_provider.Secret.of_string "" } }
+               (Runtime_account_access.seal_api
+                  { provider_config with api_key = Llm_provider.Secret.of_string "" }) }
          | _ -> fail "credential fixture must materialize an HTTP execution")
   in
   let verify runtime =
@@ -549,7 +551,7 @@ let test_a_queued_readiness_run_ends_at_the_declared_timeout () =
   with_silent_endpoint_runtime ~binding_keys:"max-concurrent = 1" @@ fun ~env ~sw ~runtime ->
   let provider_cfg =
     match runtime.Runtime_instance.execution with
-    | Runtime_execution.Agent_core provider_cfg -> provider_cfg
+    | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
     | Runtime_execution.Antigravity_cli _
     | Runtime_execution.Claude_code _
     | Runtime_execution.Codex_app_server _
@@ -1085,8 +1087,10 @@ default = "fixture.%s"
    HTTP status N, [text] sends an assistant answer,
    [limit:STATUS:WINDOW:RESET] sends a rate-limit event for that window
    (an empty WINDOW sends no rateLimitType),
-   [terminal:N] ends the turn with a result carrying status N. After the
-   last step it goes quiet. *)
+   [diagnostic:CAUSE] sends an API diagnostic envelope naming CAUSE,
+   [terminal:N] ends the turn with a result carrying status N, and
+   [terminal:none] with a result carrying no status. After the last step it
+   goes quiet. *)
 let claude_refusal_fixture ~steps = Printf.sprintf {|#!/usr/bin/env python3
 import json
 import sys
@@ -1134,10 +1138,15 @@ for index, step in enumerate(%S.split(",")):
             info["rateLimitType"] = window
         emit({"type": "rate_limit_event", "session_id": session,
             "uuid": "refusal-limit-" + str(index), "rate_limit_info": info})
+    elif kind == "diagnostic":
+        emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session,
+            "uuid": "refusal-diagnostic-" + str(index), "error": value,
+            "is_api_error_message": True, "message": {"role": "assistant",
+            "model": "<synthetic>", "content": [{"type": "text", "text": "Failed to authenticate"}]}})
     elif kind == "terminal":
         emit({"type": "result", "subtype": "success", "is_error": True, "session_id": session,
             "uuid": "refusal-result", "result": "provider refused the request",
-            "api_error_status": int(value)})
+            "api_error_status": None if value == "none" else int(value)})
     else:
         raise SystemExit("unknown step " + step)
 for line in sys.stdin:
@@ -1208,6 +1217,7 @@ default = "fixture.selected"
 
 type refusal_expectation =
   | Refused of int
+  | Refused_for_cause of string
   | Deadline
   | Rejected
 
@@ -1223,6 +1233,14 @@ let test_claude_verification_names_a_refused_credential () =
     ; "a terminal 401 result", "terminal:401", Refused 401
     ; "a terminal 403 result", "terminal:403", Refused 403
     ; "a terminal 500 result stays a rejection", "terminal:500", Rejected
+    ; ( "a sign-in cause with no status"
+      , "diagnostic:authentication_failed,terminal:none"
+      , Refused_for_cause "authentication_failed" )
+    ; ( "a sign-in cause with another status stays a rejection"
+      , "diagnostic:authentication_failed,terminal:400"
+      , Rejected )
+    ; "another cause with no status stays a rejection", "diagnostic:server_error,terminal:none", Rejected
+    ; "no status and no cause stays a rejection", "terminal:none", Rejected
     ; "a later retry with another status clears the refusal", "retry:401,retry:529", Deadline
     ; "an answer after the retry clears the refusal", "retry:401,text", Deadline
     ] in
@@ -1233,9 +1251,13 @@ let test_claude_verification_names_a_refused_credential () =
        | Refused status, Some (Verify.Provider_auth_refused detail) ->
          check bool (label ^ " names the HTTP status") true
            (contains detail (Printf.sprintf "HTTP %d" status))
+       | Refused_for_cause cause, Some (Verify.Provider_auth_refused detail) ->
+         check bool (label ^ " names the cause") true (contains detail cause);
+         check bool (label ^ " names no HTTP status") false (contains detail "HTTP ")
        | Deadline, Some Verify.Timed_out -> ()
        | Rejected, Some (Verify.Provider_rejected _) -> ()
-       | (Refused _ | Deadline | Rejected), _ -> fail (label ^ ": " ^ refusal_summary failure))
+       | (Refused _ | Refused_for_cause _ | Deadline | Rejected), _ ->
+         fail (label ^ ": " ^ refusal_summary failure))
     cases
     failures
 ;;
@@ -1817,10 +1839,7 @@ streaming = true
     (Result.is_error (provider_config_for_binding unsafe_config binding))
 ;;
 
-(* The cases verify as [masc runtime-verify] does, which publishes the single
-   user of a base path never set up for accounts. *)
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run
     "runtime verification"
     [ ( "selected probe idle",

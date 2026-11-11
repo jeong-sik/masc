@@ -648,15 +648,23 @@ type memory_row_badge =
   | Badge_source
   | Badge_dropped
 
-let memory_fact_row_line ~ko ?(is_fleet = false) ~cols (row : memory_fact_row) =
+let memory_fact_row_line ~ko ?(is_fleet = false) ?(sort = Sort_recency) ~cols (row : memory_fact_row) =
   let inner_width = max 1 (framed_inner_width cols) in
-  let keeper, badge, claim, at, path = match row with
+  let usage, at = match row, sort with
+    | Memory_row_fact fact, (Sort_retrieved_count | Sort_last_retrieved) ->
+      (match fact.mf_events.mfe_retrieval with
+       | Retrieved {count; last_at; distinct_days = _} -> (Printf.sprintf "%d× " count, last_at)
+       | Never_retrieved -> ((if ko then "미조회 " else "unretrieved "), fact.mf_last_seen))
+    | Memory_row_fact fact, (Sort_recency | Sort_category | Sort_claim) -> ("", fact.mf_last_seen)
+    | Memory_row_source_fact fact, (Sort_recency | Sort_retrieved_count | Sort_last_retrieved | Sort_category | Sort_claim) -> ("", fact.msf_first_seen)
+    | Memory_row_invalidation fact, (Sort_recency | Sort_retrieved_count | Sort_last_retrieved | Sort_category | Sort_claim) -> ("", fact.mi_invalidated_at) in
+  let keeper, badge, claim, path = match row with
     | Memory_row_fact fact ->
-        fact.mf_keeper, Badge_category fact.mf_category, fact.mf_claim, fact.mf_last_seen, None
+        fact.mf_keeper, Badge_category fact.mf_category, fact.mf_claim, None
     | Memory_row_source_fact fact ->
-        fact.msf_keeper, Badge_source, fact.msf_claim, fact.msf_first_seen, Some fact.msf_path
+        fact.msf_keeper, Badge_source, fact.msf_claim, Some fact.msf_path
     | Memory_row_invalidation row ->
-        row.mi_keeper, Badge_dropped, row.mi_reason, row.mi_invalidated_at, Some row.mi_source_path in
+        row.mi_keeper, Badge_dropped, row.mi_reason, Some row.mi_source_path in
   let label = match badge with
     | Badge_category category -> memory_category_text ~ko category
     | Badge_source -> if ko then "원본" else "source"
@@ -667,7 +675,7 @@ let memory_fact_row_line ~ko ?(is_fleet = false) ~cols (row : memory_fact_row) =
     else "" in
   let label_room = min 10 (max 0 (inner_width / 5)) in
   let label = Message_layout.truncate_middle label_room label in
-  let prefix = "  " ^ owner ^ (if label = "" then "" else "[" ^ label ^ "] ") in
+  let prefix = "  " ^ owner ^ usage ^ (if label = "" then "" else "[" ^ label ^ "] ") in
   let room = max 0 (inner_width - Message_layout.display_width prefix) in
   let age = memory_fact_age_label at in
   let path = Option.map (fun path -> Message_layout.truncate_middle 16
@@ -1199,7 +1207,7 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
 (* The full fleet and selected Keeper readings remain reachable even when the
    small overview cannot fit them beside a useful list. This is a captured
    reading: selection and later refreshes do not change an open document. *)
-let memory_overview_reading ~cols (state : state) =
+let memory_health_reading ~cols (state : state) ~keeper ~original =
   let ko = state.ui_language = Lang_ko in
   let section heading lines : Masc_tui_detail_reading.section =
     { heading; body = String.concat "\n" lines }
@@ -1216,7 +1224,7 @@ let memory_overview_reading ~cols (state : state) =
       state.memory_health_error)
     @ memory_refused_keeper_lines state
   in
-  let keeper_section = match selected_memory_keeper state with
+  let keeper_section = match keeper with
     | None -> []
     | Some keeper ->
         let input = Masc_tui_fetched.view_for ~equal:String.equal state.memory_input
@@ -1228,6 +1236,15 @@ let memory_overview_reading ~cols (state : state) =
            ((if ko then "선택한 키퍼 · " else "Selected Keeper · ") ^ keeper.mkh_keeper_id)
            context.rows]
   in
+  let target_notice = match original, keeper with
+    | Some {Masc.Operator_action_reason.cause=Memory_attention {keeper;_};_}, None ->
+        [section (if ko then "대상 기억 미관측" else "Target memory unobserved")
+          [Terminal_text.single_line keeper;
+           (if ko then "이 Keeper의 기억 상태는 이 조회에서 확인하지 못했습니다."
+            else "This reading did not establish this Keeper's memory state.")]]
+    | Some {cause=(Memory_attention _ | Shutdown_fenced_backlog _ | Other_reported);_}, Some _
+    | Some {cause=(Shutdown_fenced_backlog _ | Other_reported);_}, None
+    | None, (Some _ | None) -> [] in
   let fleet_alerts = match state.memory_health with
     | None -> []
     | Some snapshot ->
@@ -1243,16 +1260,36 @@ let memory_overview_reading ~cols (state : state) =
               (Terminal_text.single_line alert.ma_label) (Terminal_text.single_line alert.ma_message))
             keeper.mkh_alerts) snapshot.mhs_keepers
   in
-  Masc_tui_detail_reading.create
-    ~ko
-    ~title:(if ko then "기억 관측 상세" else "Memory observation details")
-    ([section (if ko then "전체 기억" else "Fleet memory")
-        (observed @ memory_fleet_header_rows ~cols state)]
-     @ (if warnings = [] then [] else
-          [section (if ko then "조회 경고" else "Read warnings") warnings])
-     @ (if fleet_alerts = [] then [] else
-          [section (if ko then "읽은 키퍼의 알림" else "Alerts from decoded Keepers") fleet_alerts])
-     @ keeper_section)
+  let fleet = [section (if ko then "전체 기억" else "Fleet memory")
+      (observed @ memory_fleet_header_rows ~cols state)] in
+  let warnings = if warnings = [] then [] else
+      [section (if ko then "조회 경고" else "Read warnings") warnings] in
+  let alerts = if fleet_alerts = [] then [] else
+      [section (if ko then "읽은 키퍼의 알림" else "Alerts from decoded Keepers") fleet_alerts] in
+  let title = if ko then "기억 관측 상세" else "Memory observation details" in
+  let title, sections = match original with
+    | None -> title, fleet @ warnings @ alerts @ target_notice @ keeper_section
+    | Some action ->
+        let title = match action.Masc.Operator_action_reason.cause with
+          | Memory_attention {keeper;_} -> Terminal_text.single_line keeper ^ " · " ^ title
+          | Shutdown_fenced_backlog _ | Other_reported -> title in
+        let original = [section (if ko then "원래 조치 관측 · 별도 출처" else "Original action · separate source")
+            [Masc.Operator_action_reason.diagnostic action;
+             Yojson.Safe.pretty_to_string (Masc.Operator_action_reason.to_json action)]] in
+        title, target_notice @ keeper_section @ warnings @ original @ fleet @ alerts in
+  Masc_tui_detail_reading.create ~ko ~title sections
+
+let memory_overview_reading ~cols state =
+  memory_health_reading ~cols state ~keeper:(selected_memory_keeper state) ~original:None
+
+let memory_action_reading ~cols state ~(action : Masc.Operator_action_reason.t) =
+  match action.cause with
+  | Memory_attention {keeper;_} ->
+      let selected = Option.bind state.memory_health (fun snapshot ->
+        List.find_opt (fun row -> String.equal row.Masc.Tui_decode_memory_health.mkh_keeper_id keeper)
+          snapshot.mhs_keepers) in
+      Some (memory_health_reading ~cols state ~keeper:selected ~original:(Some action))
+  | Shutdown_fenced_backlog _ | Other_reported -> None
 
 (* A single row replaces an unfittable fleet header. It leads with any
    actionable read failures, then unmeasured coverage, and always names the
@@ -1778,7 +1815,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
       match Rows.at rows_window idx with
       | None -> push_empty ()
       | Some row ->
-          let line = memory_fact_row_line ~ko ~is_fleet ~cols row in
+          let line = memory_fact_row_line ~ko ~is_fleet ~sort:state.memory_facts_sort ~cols row in
           if idx = cursor then push_selected (Masc_tui_theme.strip_sgr line)
           else push line
     done;

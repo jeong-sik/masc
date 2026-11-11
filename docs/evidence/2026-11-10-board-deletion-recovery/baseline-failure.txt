@@ -1,0 +1,42 @@
+Selected failing assertions; checkout paths redacted. Original local log SHA-256: 23d70ec0af54ab945e4186a6795a555616c22c64ce92ac953d415fe8374000c6
+
+ FAIL  src/api/actions.test.ts > Board deletion persistence > keeps a pending decision separate from an applied deletion
+Error: Invalid Board deletion receipt
+ ❯ Module.deleteBoardPost src/api/actions.ts:148:11
+    146|   const receipt = value as Record<string, unknown>
+    147|   if (receipt.ok !== true || receipt.applied !== true || receipt.post_…
+    148|     throw new Error('Invalid Board deletion receipt')
+       |           ^
+    149|   }
+    150|   if (receipt.persistence === 'durable') return { status: 'deleted', p…
+ ❯ src/api/actions.test.ts:56:12
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/board/board-surface.test.ts > BoardSurface Component > keeps the selected thread visible for a pending decision without a success refresh
+AssertionError: expected "vi.fn()" to be called once with arguments: [ Any<String>, 'warning' ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   Any<String>,
+-   "warning",
++   "게시글을 삭제했습니다",
++   "success",
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/components/board/board-surface.test.ts:324:23
+    322|     await fireEvent.click(screen.getByRole('button', { name: `게시글 삭제: …
+    323|     await waitFor(() => expect(deleteBoardPost).toHaveBeenCalledExactl…
+    324|     expect(showToast).toHaveBeenCalledExactlyOnceWith(expect.any(Strin…
+       |                       ^
+    325|     expect(refreshBoard).not.toHaveBeenCalled()
+    326|     expect(boardPosts.value.map(value => value.id)).toEqual([post.id])
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+

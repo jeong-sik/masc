@@ -100,9 +100,6 @@ let runtime_assignment_label (assignment : runtime_assignment) =
       source
 ;;
 
-let runtime_assignment_targets = Masc_tui_types.runtime_assignment_targets
-;;
-
 let acting_pane_reserved_cols = ref 0
 
 
@@ -568,7 +565,7 @@ let search_marker_styled (state : state) =
   | Some marker ->
       Printf.sprintf "  %s%s%s"
         (match state.search with
-         | Some _ -> Masc_tui_theme.tone Masc_tui_theme.Accent
+         | Some _ -> Theme.accent ()
          | None -> Ansi.dim)
         marker Ansi.reset
 
@@ -774,9 +771,24 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
         @
         (* The server's rollup, from the probe it serves on every refresh. *)
         (match Masc_tui_types.operator_actions state with
-         | first :: rest ->
-           [ Masc_tui_footer.Operator_action { first; count = 1 + List.length rest } ]
-         | [] -> [])
+         | Some (_ :: rest) ->
+           let count = 1 + List.length rest in
+           let notice =
+             ui_text state
+               ~ko:(Printf.sprintf "조치 필요 %d" count)
+               ~en:(Printf.sprintf "Action needed %d" count)
+             |> pressable (Press_surface Overview)
+           in
+           [ Masc_tui_footer.Operator_action
+               { notice
+               ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations"
+               } ]
+         | Some [] -> []
+         | None ->
+             [ Masc_tui_footer.Operator_action
+                 { notice = pressable (Press_surface Overview)
+                     (ui_text state ~ko:"조치 원인 미관측" ~en:"Action reasons unobserved")
+                 ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations" } ])
         @
         (* This TUI's own embedded commit against the server's: the pair
            that told "restart masc" apart from "the feature is not merged"
@@ -830,7 +842,7 @@ let slash_hint_text ~restore draft =
   let paint (span : Masc_tui_command.hint_span) =
     match span with
     | Masc_tui_command.Typed text ->
-        Masc_tui_theme.tone Masc_tui_theme.Accent ^ text ^ restore
+        Theme.accent () ^ text ^ restore
     | Masc_tui_command.Wrong text -> Theme.bad () ^ text ^ restore
     | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
   in
@@ -1299,15 +1311,23 @@ let acting_pane_input (state : state) =
           state.workspace_identity = Workspace_identity_match
           && server_authority_ready state in
         let waiting =
-          if not workspace_ready || List.mem keeper.k_name state.keeper_waiting_unverified then
-            Masc_tui_keeper_list_model.Waiting_unavailable
-          else match state.keeper_waiting_failure with
-            | Some _ -> Masc_tui_keeper_list_model.Waiting_unavailable
+          (* A waiting change only marks the Keeper unverified until the read
+             that follows lands. Keeping the last observed row through that
+             window stops the pane line from flapping between the warning and
+             the count on every change burst; a Keeper never observed, or a
+             workspace that cannot answer, still shows the warning. *)
+          let last_row =
+            List.find_opt (fun (row : Tui_decode.keeper_waiting_row) ->
+              String.equal row.kwr_keeper_name keeper.k_name) state.keeper_waiting
+          in
+          if not workspace_ready then Masc_tui_keeper_list_model.Waiting_unavailable
+          else match last_row with
+            | Some row -> Masc_tui_keeper_list_model.Waiting_observed row
             | None ->
-                (match List.find_opt (fun (row : Tui_decode.keeper_waiting_row) ->
-                  String.equal row.kwr_keeper_name keeper.k_name) state.keeper_waiting with
-                 | Some row -> Masc_tui_keeper_list_model.Waiting_observed row
-                 | None -> Masc_tui_keeper_list_model.Waiting_unobserved) in
+                if List.mem keeper.k_name state.keeper_waiting_unverified
+                   || Option.is_some state.keeper_waiting_failure
+                then Masc_tui_keeper_list_model.Waiting_unavailable
+                else Masc_tui_keeper_list_model.Waiting_unobserved in
         let task_source = match state.local_keepers with
           | Local_workspace_unread -> Pane.Task_source_unread
           | Local_workspace_read -> Pane.Task_source_read
@@ -1316,7 +1336,10 @@ let acting_pane_input (state : state) =
           ~metadata_failed:(Option.is_some state.keepers_error)
           ~task_id:(Option.bind keeper.k_activity (fun activity -> activity.k_current_task_id)) in
         Some Pane.{ keeper_name = keeper.k_name; task;
-          waiting; waiting_stale = Option.is_some state.keeper_turns_error }
+          waiting; waiting_stale = Option.is_some state.keeper_turns_error;
+          waiting_revalidating = List.mem keeper.k_name state.keeper_waiting_unverified;
+          waiting_failed = Option.is_some state.keeper_waiting_failure
+                           || Option.is_some state.keeper_waiting_error }
     | (Keepers Keeper_list | Keepers (Keeper_detail | Keeper_logs | Keeper_calls
         | Keeper_message | Keeper_runtime_pick) | Overview | Acting | Metrics | Memory
       | Lanes | Clients | Board | Approvals | Planning | Schedules | Verification
@@ -1854,6 +1877,11 @@ let refresh_progress_badge (state : state) =
            notices ^ " · " ^ pending)
   | Some _ | None -> foreground
 
+let observer_loss_badge (state : state) =
+  if state.observer_source_loss then
+    Some (Theme.warn () ^ ui_text state ~ko:"[이벤트 유실]" ~en:"[events lost]" ^ Ansi.reset)
+  else None
+
 let connection_badge (state : state) =
   let text = ui_text state in
   let connection = connection_status_badge ~ko:(state.ui_language = Lang_ko) state.connection_status in
@@ -1864,9 +1892,9 @@ let connection_badge (state : state) =
       connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ text ~ko:"[작업 공간 확인 대기]" ~en:"[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
-  let source_loss =
-    if state.observer_source_loss then Theme.warn () ^ text ~ko:"[이벤트 유실] " ~en:"[events lost] " ^ Ansi.reset
-    else ""
+  let source_loss = match observer_loss_badge state with
+    | Some badge -> badge ^ " "
+    | None -> ""
   in
   source_loss ^ connection ^ refresh_progress_badge state
 
@@ -1931,6 +1959,18 @@ let usage_connection_badge (state : state) =
     | Workspace_identity_mismatch _), _
   | Workspace_identity_unread, (Connecting | Booting | Disconnected) -> badge
 
+let reading_connection_notice (state : state) =
+  let exceptional =
+    state.observer_source_loss
+    || match compact_connection_state state with
+       | Compact_http Connected | Compact_reading -> false
+       | Compact_workspace_mismatch | Compact_workspace_unconfirmed
+       | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
+       | Compact_read_interrupted | Compact_read_unfinished
+       | Compact_http (Degraded | Connecting | Booting | Disconnected) -> true
+  in
+  if exceptional then Some (usage_connection_badge state) else None
+
 (* A narrow Usage title keeps a textual state visible while its longer
    workspace and refresh details remain available in the scrolled body. *)
 let compact_connection_badge (state : state) ~width =
@@ -1959,6 +1999,76 @@ let compact_connection_badge (state : state) ~width =
     if needs_context || needs_full_status then usage_connection_badge state
     else refresh_progress_badge state in
   style ^ label ^ Ansi.reset, (if String.equal details "" then None else Some details)
+
+let reading_connection_summary ~width state =
+  let compact width = fst (compact_connection_badge state ~width:(max 0 width)) in
+  let summary =
+    if not state.observer_source_loss then compact width
+    else
+      let gap label =
+        let separator = " · " in
+        let remaining = width - Message_layout.display_width (label ^ separator) in
+        Theme.warn () ^ label ^ Ansi.reset ^ separator ^ compact remaining
+      in
+      let full = gap (ui_text state ~ko:"이벤트 유실" ~en:"events lost") in
+      if Message_layout.display_width full <= width then full
+      else gap (ui_text state ~ko:"유실" ~en:"gap")
+  in
+  fit_width summary (max 0 width)
+
+let feature_child_heading (state : state) ~cols ~title =
+  let lead = Lead_text (screen_title (" " ^ title)) in
+  match reading_connection_notice state with
+  | None -> detail_heading ~cols ~lead ~id:"" ~after:[] ~tail:""
+  | Some notice ->
+      let heading = detail_heading ~cols ~lead ~id:"" ~after:[] ~tail:notice in
+      let width = framed_inner_width cols in
+      if Message_layout.display_width heading <= width then heading
+      else
+        (* The summary pads a table cell; the heading owns this free space. *)
+        let tail = reading_connection_summary
+          ~width:(max 0 (width - Message_layout.display_width "  ")) state
+          |> String.trim in
+        detail_heading ~cols ~lead ~id:"" ~after:[] ~tail
+
+(* The full badge can itself exceed the title's width: at forty-four columns
+   HTTP, workspace mismatch and refresh details cannot all be kept whole.
+   Reuse the prioritized workspace/read observation, then keep observer loss
+   and HTTP when they fit. The ellipsis says that full context was omitted. *)
+let surface_connection_badge (state : state) ~width =
+  let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+  let full = connection_badge state in
+  if cells full <= width then full
+  else if width < 1 then ""
+  else
+    let omitted = " …" in
+    let room = width - cells omitted in
+    let primary, _ = compact_connection_badge state ~width:room in
+    let loss = Option.to_list (observer_loss_badge state) in
+    let notices = match compact_connection_state state with
+      | Compact_http _ -> loss @ [primary]
+      | Compact_workspace_mismatch | Compact_workspace_unconfirmed
+      | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
+      | Compact_read_interrupted | Compact_read_unfinished | Compact_reading ->
+          primary :: loss @ [connection_status_badge ~ko:(state.ui_language = Lang_ko)
+                             state.connection_status]
+    in
+    let warning = Theme.warn () ^ "!" ^ Ansi.reset in
+    if room < 1 then warning
+    else
+      let compact = match notices with
+        | first :: _ when cells first > room -> warning
+        | _ -> Message_layout.join_fitting ~sep:" " ~cells:room notices
+      in
+      compact ^ omitted
+
+(* Reserve the two-cell gap added by [detail_heading] before sizing the
+   status. Readings give way whole, then the title; an empty first reading
+   prevents the first real count or clock from being cut to a fragment. *)
+let surface_title_row ~cols (state : state) ~lead ~readings =
+  let width = max 0 (framed_inner_width cols - Message_layout.display_width "  ") in
+  detail_heading ~cols ~lead:(Lead_text lead) ~id:"" ~after:("" :: readings)
+    ~tail:(surface_connection_badge state ~width)
 
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says
    whether the screen can be trusted, so it is drawn whole and the label gives
@@ -2703,7 +2813,7 @@ let bracketed ~max_cells text =
   "[" ^ Message_layout.truncate_middle max_cells text ^ "]"
 
 (* The Board reader's title row: the screen, which post, its hearth, its score
-   and its replies. The id is folded at the list's ID column. Replies read "💬3"
+   and its replies. The id uses the compact reference width. Replies read "💬3"
    and then "c0" at zero -- a second spelling for the same count -- and are one
    spelling now, receding at zero. *)
 let board_read_title ~screen ~id ~hearth ~votes ~replies =
@@ -2715,7 +2825,7 @@ let board_read_title ~screen ~id ~hearth ~votes ~replies =
     | _ -> ""
   in
   Printf.sprintf "%s  %s%s%s%s  %s%s%s  %s💬%d%s" screen
-    (Masc_tui_theme.tone Masc_tui_theme.Accent) id Ansi.reset hearth_tag
+    (Theme.accent ()) id Ansi.reset hearth_tag
     (board_score_style votes) (board_score_text votes) Ansi.reset
     (if replies > 0 then Theme.ok () else Ansi.dim) replies Ansi.reset
 
@@ -2724,7 +2834,7 @@ let board_read_title ~screen ~id ~hearth ~votes ~replies =
    screen draws through. Emphasis only ever restates what the count beside it
    already says, so NO_COLOR costs a reader nothing they cannot read. *)
 let magnitude_tone = function
-  | Magnitude.Leading -> (Masc_tui_theme.tone Masc_tui_theme.Accent)
+  | Magnitude.Leading -> (Theme.accent ())
   | Magnitude.Ordinary -> Ansi.reset
   | Magnitude.Below_even_share -> Ansi.dim
 
@@ -2849,8 +2959,8 @@ let planning_phase_column ~ko =
    Completed and Dropped are how the goal is doing; Verifying is where it
    is, and a goal under review is neither well nor unwell. It used to keep a
    raw colour for want of anywhere else to put it -- the theme had [status]
-   for health, [tone] for weight and [Syntax] for what a token is, and
-   nothing for a kind.
+   for health, dim and the accent for weight and [Syntax] for what a token
+   is, and nothing for a kind.
 
    It takes a categorical slot now (RFC-0431). Slot 4 is magenta, the hue it
    already drew, and magenta is one of the two the status axis does not
@@ -3157,7 +3267,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      key that needs two presses does not read like the keys that need one. *)
   let hint action label =
     let key_color =
-      if Keeper_control.requires_confirmation action then (Theme.bad ()) else (Masc_tui_theme.tone Masc_tui_theme.Accent)
+      if Keeper_control.requires_confirmation action then (Theme.bad ()) else (Theme.accent ())
     in
     if List.mem action available then
       Printf.sprintf "%s%s%s:%s" key_color (Keeper_control.action_key action)
@@ -3175,7 +3285,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
     match reading with
     | Some reading
       when List.mem reading.Keeper_control.name state.keeper_yolo_names ->
-        (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "g" ^ Ansi.reset ^ ":auto"
+        (Theme.accent ()) ^ "g" ^ Ansi.reset ^ ":auto"
     | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ ":yolo"
   in
   let toggle_key =
@@ -3196,8 +3306,8 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      remote_ssh backend, and the row beside it still said "s:shutdown". *)
   let view_and_order =
     if state.view = Keepers Keeper_list then
-      [ "v", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "v" ^ Ansi.reset ^ ":view"
-      ; "o", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":order"
+      [ "v", (Theme.accent ()) ^ "v" ^ Ansi.reset ^ ":view"
+      ; "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":order"
       ]
     else []
   in
@@ -3206,7 +3316,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      spell them. The roster wrote [right/enter] in lowercase, which
      [Masc_tui_footer.never_dropped_keys] does not pin, and gave no way back
      to the Dashboard at all. *)
-  let accent key = (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ key ^ Ansi.reset in
+  let accent key = (Theme.accent ()) ^ key ^ Ansi.reset in
   (* The Story window belongs to the list. It takes Enter, Esc and Tab while it
      is open, and [s] and [m] with them. *)
   let story = if state.view = Keepers Keeper_list then state.keeper_story else None in
@@ -3232,7 +3342,8 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
           match story with
           | None -> "story"
           | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) -> "close"
-          | Some (Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) -> "story"
+          | Some Masc_tui_keeper_story.Schedule -> "story"
+          | Some Masc_tui_keeper_story.Memory -> "browse"
         in
         [ "Enter / Right", accent "Enter / Right" ^ ":" ^ enter ^ " / detail"; esc ]
   in
@@ -3253,7 +3364,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
           (* RFC tui-server-lifecycle: with no server up, "s" starts one
              rather than shutting a keeper down, so the hint follows suit. *)
           ; "s", (match state.connection_status with
-             | Disconnected -> (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "s" ^ Ansi.reset ^ ":start server"
+             | Disconnected -> (Theme.accent ()) ^ "s" ^ Ansi.reset ^ ":start server"
              | Connecting | Booting | Degraded | Connected ->
                  hint Keeper_control.Shutdown "shutdown")
             (* Delete is the only action a keeper whose configuration failed to
@@ -3262,21 +3373,21 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
                dimmed "p pause" and nothing else, so the one key that worked was
                the one key nothing named. *)
           ; Keeper_control.action_key Keeper_control.Delete, hint Keeper_control.Delete "delete"
-          ; "e", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "e" ^ Ansi.reset ^ ":settings"
-          ; "a", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "a" ^ Ansi.reset ^ ":new"
+          ; "e", (Theme.accent ()) ^ "e" ^ Ansi.reset ^ ":settings"
+          ; "a", (Theme.accent ()) ^ "a" ^ Ansi.reset ^ ":new"
           ; (if state.view = Keepers Keeper_detail then
-               "o", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "o" ^ Ansi.reset ^ ":logs"
-             else "l", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "l" ^ Ansi.reset ^ ":logs")
-          ; "t", (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "t" ^ Ansi.reset ^ ":calls"
+               "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":logs"
+             else "l", (Theme.accent ()) ^ "l" ^ Ansi.reset ^ ":logs")
+          ; "t", (Theme.accent ()) ^ "t" ^ Ansi.reset ^ ":calls"
           ; "g", gate_hint
           ; (if state.view = Keepers Keeper_detail then "U" else "u"),
-            (Masc_tui_theme.tone Masc_tui_theme.Accent)
+            (Theme.accent ())
             ^ (if state.view = Keepers Keeper_detail then "U" else "u")
             ^ Ansi.reset ^ ":runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
-          ; "c", (if offers_chat then (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ "c" ^ Ansi.reset ^ ":chat"
+          ; "c", (if offers_chat then (Theme.accent ()) ^ "c" ^ Ansi.reset ^ ":chat"
              else Ansi.dim ^ "c:chat" ^ Ansi.reset)
           ]
       @ way
@@ -3963,6 +4074,18 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
      read "@p@" and "@them@" where it meant prompts and themes. The strip
      cannot say it was cut that far; it has already spent its marks. *)
   let strip_floor = tab_strip_min_width (config_pane_tabs state) in
+  if cells keys + strip_floor + cells tail > framed_inner_width cols then
+    let active_name =
+      config_pane_tabs state
+      |> List.find_map (fun (label, active, _) -> if active then Some label else None)
+      |> Option.value ~default:name
+      |> fun label -> screen_title (" " ^ label)
+    in
+    let badge = surface_connection_badge state
+        ~width:(max 0 (framed_inner_width cols - cells active_name - cells "  ")) in
+    detail_heading ~cols ~lead:(Lead_text active_name) ~id:""
+      ~after:[piece reading; piece keys; piece note; piece clock] ~tail:badge
+  else
   (* What the title gives way with is its tail: the reading first, and then
      the name whole. [config_pane_title_head] owns that order. *)
   let before =
@@ -4018,7 +4141,7 @@ let config_metadata_summary (state : state) =
    Sheet, so on a 30-row terminal those rows came out of the keys the sheet is
    opened to read. *)
 let help_masthead (_state : state) =
-  [ "  " ^ Ansi.bold ^ Masc_tui_theme.tone Masc_tui_theme.Accent ^ "MASC"
+  [ "  " ^ Ansi.bold ^ Theme.accent () ^ "MASC"
     ^ Ansi.reset ^ Ansi.dim ^ " \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
   ; ""
   ]
@@ -4111,7 +4234,7 @@ let help_lines ~width (state : state) =
            in
            help_entry_rows ~width
              ~lead:
-               (Printf.sprintf "  %s%s%s " (Masc_tui_theme.tone Masc_tui_theme.Accent)
+               (Printf.sprintf "  %s%s%s " (Theme.accent ())
                   key_cell Ansi.reset)
              ~lead_cells:(2 + Message_layout.display_width key_cell + 1)
              ~column:(2 + help_key_cells + 1) action)
@@ -4206,7 +4329,7 @@ module Context_bars = Masc_tui_context_bars
 let context_source_style = function
   | Masc_tui_context_inspector.Turn_prompt_assembly -> Theme.warn ()
   | Masc_tui_context_inspector.Effective_tool_surface ->
-      Masc_tui_theme.tone Masc_tui_theme.Accent
+      Theme.accent ()
   | Masc_tui_context_inspector.Provider_message_list ->
       Theme.category Theme.Slot_2
 
@@ -6073,12 +6196,11 @@ let answering_preview_rows = 3
    sits above both panes, so each pane gives up one row to it. *)
 let pane_surface_title_rows = 1
 
-let pane_surface_title (state : state) ~name =
+let pane_surface_title (state : state) ~cols ~name =
   let now = Unix.localtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%s  %02d:%02d:%02d  %s"
-    (screen_title (" MASC " ^ name))
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
-    (connection_badge state)
+  surface_title_row ~cols state ~lead:(screen_title (" MASC " ^ name))
+    ~readings:
+      [ Printf.sprintf "  %02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec ]
 
 (* The row between the strip and the title, then the title. Every other
    surface draws that row first -- a gap on its own, the box's top edge beside
@@ -6090,7 +6212,7 @@ let pane_surface_title (state : state) ~name =
    so a split frame keeps it there. The row count is the same either way. *)
 let pane_surface_header buf cols (state : state) ~name ~split =
   if not split then box_top buf cols;
-  box_line buf cols (pane_surface_title state ~name)
+  box_line buf cols (pane_surface_title state ~cols ~name)
 
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)
@@ -6351,8 +6473,8 @@ let runtime_substrate_tabs (state : state)
     , Press_surface Clients )
   ]
 
-(* The title row of Runtime, Features and Clients: the title, the strip they
-   share, the pieces of [after] and the connection badge last. It is laid out
+(* The Runtime title, its related destinations, the pieces of [after] and the
+   connection badge last. It is laid out
    by [detail_heading] like the Activity row, so the badge stays whole, the
    pieces of [after] are left out whole from the end, and the strip draws in
    what they leave. The strip is whole or it is not drawn, and a strip that

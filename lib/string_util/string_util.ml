@@ -146,52 +146,6 @@ let query_tokens query =
   in
   loop 0 []
 
-let is_ascii_alnum_or_utf8_byte = function
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
-  | c ->
-    (* Non-ASCII UTF-8 bytes have the high bit set; keep them in tokens. *)
-    Char.code c land 0x80 <> 0
-
-let ascii_punctuation_tokens text =
-  let len = String.length text in
-  let rec skip_delimiters i =
-    if i < len && not (is_ascii_alnum_or_utf8_byte text.[i])
-    then skip_delimiters (i + 1)
-    else i
-  in
-  let rec take_token i =
-    if i < len && is_ascii_alnum_or_utf8_byte text.[i]
-    then take_token (i + 1)
-    else i
-  in
-  let rec loop i acc =
-    let start = skip_delimiters i in
-    if start >= len
-    then List.rev acc
-    else
-      let stop = take_token start in
-      let token = String.sub text start (stop - start) |> String.lowercase_ascii in
-      loop stop (token :: acc)
-  in
-  loop 0 []
-
-let contains_contiguous_token_sequence ~haystack ~needle =
-  let rec starts_with haystack needle =
-    match haystack, needle with
-    | _, [] -> true
-    | h :: hs, n :: ns when String.equal h n -> starts_with hs ns
-    | _ -> false
-  in
-  match needle with
-  | [] -> false
-  | _ ->
-    let rec loop = function
-      | [] -> false
-      | _ :: rest as tokens ->
-        if starts_with tokens needle then true else loop rest
-    in
-    loop haystack
-
 (* Trigram search cannot rank shorter terms. Short ASCII names use ASCII
    word boundaries: RC excludes source/SRC, while RC가 retains Korean suffixes.
    Longer and UTF-8 terms keep substring matching. Phrase endpoints obey the

@@ -1,0 +1,16 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 조치가 필요한 이유                                                                               │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  keeper_memory_execution:addon_unattached                                                        │
+│                                                                                                  │
+│  {                                                                                               │
+│    "schema": "masc.operator_action.v1",                                                          │
+│    "kind": "reported",                                                                           │
+│    "component": "keeper_memory_execution",                                                       │
+│    "reason": "addon_unattached"                                                                  │
+│  }                                                                                               │
+│  [lines 24-31/31]                                                                                │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:find  j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back
+ Choose a Keeper before writing · i:choose

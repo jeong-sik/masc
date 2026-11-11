@@ -7,7 +7,6 @@ type outcome =
   | Self_cancelled
   | No_author
   | Author_not_a_keeper of { author : string }
-  | Backlog_read_failed of { detail : string }
   | Author_lookup_failed of
       { author : string
       ; detail : string
@@ -28,7 +27,6 @@ let outcome_label = function
   | Self_cancelled -> "self_cancelled"
   | No_author -> "no_author"
   | Author_not_a_keeper _ -> "author_not_a_keeper"
-  | Backlog_read_failed _ -> "backlog_read_failed"
   | Author_lookup_failed _ -> "author_lookup_failed"
   | Canceller_lookup_failed _ -> "canceller_lookup_failed"
   | Enqueue_failed _ -> "enqueue_failed"
@@ -115,57 +113,36 @@ let enqueue ~config ~keeper_name ~(cancellation : Keeper_event_queue.task_cancel
     Delivered { keeper_name }
   | Keeper_registry_event_queue.Stimulus_already_present ->
     Already_present { keeper_name }
+  | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+    Enqueue_failed
+      { keeper_name
+      ; detail = Keeper_registry_event_queue.shutdown_reserved_detail operation_id
+      }
   | Keeper_registry_event_queue.Stimulus_storage_error detail ->
     Enqueue_failed { keeper_name; detail }
 ;;
 
-let notify_author ~config ~actor ~task_id =
-  match Workspace_backlog.read_prepared_backlog_r config with
-  | Error detail -> Backlog_read_failed { detail }
-  | Ok prepared ->
-    (match Workspace_backlog.Task_id_map.find_opt task_id prepared.tasks_by_id with
-     | None ->
-       (* The commit that triggered this wrote the task, so its absence is a
-          backlog disagreement, not a missing addressee. *)
-       Backlog_read_failed
-         { detail = Printf.sprintf "task %s absent from the committed backlog" task_id }
-     | Some task ->
-       (match cancellation_of_task task with
-        | None -> Not_cancelled
-        | Some (cancelled_by, reason) ->
-          (match task.created_by with
-           | None -> No_author
-           | Some author ->
-             (match keeper_of_author ~config ~author with
-              | Error detail -> Author_lookup_failed { author; detail }
-              | Ok None -> Author_not_a_keeper { author }
-              | Ok (Some author_keeper) ->
-                (* A failed agent lookup cannot decide self-cancellation.
-                   Operator/system actors deliberately do not use that lookup. *)
-                match
-                  keeper_of_canceller ~config ~actor
-                with
-                | Error (agent_name, detail) ->
-                  Canceller_lookup_failed { agent_name; detail }
-                | Ok canceller_keeper ->
-                  (* A canceller that resolves to no lane is not the author,
-                     who resolved to one. Comparing the raw actor string
-                     against [created_by] instead made any non-Keeper actor
-                     sharing the author's name read as a self-cancellation. *)
-                  let is_self =
-                    match canceller_keeper with
-                    | Some canceller -> String.equal canceller author_keeper
-                    | None -> false
-                  in
-                  if is_self
-                  then Self_cancelled
-                  else
-                    enqueue
-                      ~config
-                      ~keeper_name:author_keeper
-                      ~cancellation:
-                        { tc_task_id = task_id
-                        ; tc_cancelled_by = cancelled_by
-                        ; tc_reason = reason
-                        }))))
+let notify_author ~config ~actor ~(task : Masc_domain.task) =
+  match cancellation_of_task task with
+  | None -> Not_cancelled
+  | Some (cancelled_by, reason) ->
+    (match task.created_by with
+     | None -> No_author
+     | Some author ->
+       (match keeper_of_author ~config ~author with
+        | Error detail -> Author_lookup_failed { author; detail }
+        | Ok None -> Author_not_a_keeper { author }
+        | Ok (Some author_keeper) ->
+          (* The typed actor, not the task's current row or a raw name, decides
+             self-cancellation. Operator/system identities remain distinct. *)
+          match keeper_of_canceller ~config ~actor with
+          | Error (agent_name, detail) -> Canceller_lookup_failed { agent_name; detail }
+          | Ok canceller_keeper ->
+            let is_self = match canceller_keeper with
+              | Some canceller -> String.equal canceller author_keeper
+              | None -> false in
+            if is_self then Self_cancelled else
+              enqueue ~config ~keeper_name:author_keeper
+                ~cancellation:
+                  { tc_task_id = task.id; tc_cancelled_by = cancelled_by; tc_reason = reason }))
 ;;

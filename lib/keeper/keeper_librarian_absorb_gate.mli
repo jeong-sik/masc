@@ -356,7 +356,10 @@ val restore
     policy; an unrequested answer identity is rejected. No filesystem or
     model effects occur. This does not authenticate a caller-supplied input
     snapshot: original fact IDs and availability must already be bound to the
-    host's immutable original pass, never reconstructed from worker data. *)
+    host's immutable original pass, never reconstructed from worker data.
+    It moves no counter: readers replay a retained judgment on every read,
+    and its owner counted it with {!count_judgment} when it stored the
+    terminal. *)
 
 val absorbed_of_run : run_result -> Keeper_memory_os_types.absorbed_statement list
 
@@ -419,7 +422,7 @@ val run_captured
   -> run_result
 (** Execute only the captured live authority, using the original inputs.
     Current configuration and credentials are not reread. The Keeper identity
-    used for logging is captured by {!resolve}. Hooks, observation ordering,
+    used for logging and {!count_judgment} is captured by {!resolve}. Hooks, observation ordering,
     protected terminal recording and cancellation have the same contract as
     {!run}. Persist {!replay_authority} and {!guidance_of_authority}, including
     its explicit absence for unavailable authority, before calling this port; after restart
@@ -459,7 +462,9 @@ val continue_captured
     HTTP is admitted. An unavailable clock returns [Clock_unavailable] without
     changing the transcript. With a clock, the client's existing request time
     limit applies. Hooks retain requests before dispatch and protect
-    terminal/aborted recording exactly as run_captured does. *)
+    terminal/aborted recording exactly as run_captured does. It moves no
+    counter: the caller stores the judgment's terminal and then calls
+    {!count_judgment}. *)
 
 val run
   :  ?observe:(observation -> unit)
@@ -492,4 +497,15 @@ val run
     opaque token (which may pair its identity with a monotonic start value).
     [after_evaluate] receives that same token and closes the record after a provider result;
     [on_evaluation_aborted] closes it when dispatch raises. Cancellation is
-    propagated unchanged. *)
+    propagated unchanged. The result is counted once with {!count_judgment}
+    under the Keeper before it returns. *)
+
+val count_judgment : keeper_id:string -> run_result -> unit
+(** Move the absorb-gate counters by one finished judgment under [keeper_id]:
+    each absorbed source in [masc_keeper_librarian_absorb_sources_total] by
+    forward outcome and choice ([none] when never asked), and each copy check
+    in [masc_keeper_librarian_absorb_copy_checks_total] by reverse verdict.
+    [Skipped] moves nothing. {!run} calls it itself. A captured path calls it
+    only after it stores the judgment's terminal, so a transcript replayed
+    after a failed publication is counted once and a retained terminal is
+    never counted again. *)

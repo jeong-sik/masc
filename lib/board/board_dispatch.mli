@@ -147,7 +147,8 @@ val set_board_sse_hook : (board_sse_event -> unit) -> unit
     operation. {!update_post}, {!set_thread_id}, {!set_pinned},
     {!set_closed}, {!reopen} and {!delete_post} raise [Post_changed] once the
     store took the write, including an applied deletion whose snapshot
-    persistence remains pending. A write the store refuses raises nothing. *)
+    persistence remains pending. A write the store refuses or a deletion whose
+    decision has not established model removal raises nothing. *)
 
 val emit_board_sse_event : visibility:Board.visibility option -> board_sse_event -> unit
 (** Publish a public event, or a payload-free [Board_changed] invalidation for
@@ -341,6 +342,7 @@ val current_post_cursor : unit -> float * string option
     post history. *)
 
 val delete_post :
+  authorization:Board.deletion_authorization ->
   post_id:string -> (Board.deletion_outcome, Board.board_error) Result.t
 
 val set_thread_id :
@@ -383,6 +385,7 @@ val post_to_yojson_with_karma :
 (** {1 Comments} *)
 
 val add_comment :
+  reader:Board_access.reader ->
   post_id:string ->
   author:string ->
   content:string ->
@@ -392,6 +395,7 @@ val add_comment :
   (Board.comment, Board.board_error) Result.t
 
 val add_comment_with_unresolved :
+  reader:Board_access.reader ->
   post_id:string ->
   author:string ->
   content:string ->
@@ -434,7 +438,7 @@ val current_vote_for_post : reader:Board_access.reader ->
   (Board.vote_direction option, Board.board_error) Result.t
 
 val vote :
-  voter:string ->
+  reader:Board_access.reader -> voter:string ->
   post_id:string ->
   direction:Board.vote_direction ->
   (int, Board.board_error) Result.t
@@ -445,7 +449,7 @@ val current_vote_for_comment : reader:Board_access.reader ->
   (Board.vote_direction option, Board.board_error) Result.t
 
 val vote_comment :
-  voter:string ->
+  reader:Board_access.reader -> voter:string ->
   comment_id:string ->
   direction:Board.vote_direction ->
   (int, Board.board_error) Result.t
@@ -475,7 +479,7 @@ val list_reactions_batch : reader:Board_access.reader ->
   targets:(Board.reaction_target_type * string) list ->
   ?user_id:string ->
   unit ->
-  ((Board.reaction_target_type * string) * Board.reaction_summary list) list
+  (((Board.reaction_target_type * string) * Board.reaction_summary list) list, Board.board_error) Result.t
 
 (** {1 Karma} *)
 
@@ -569,8 +573,9 @@ val list_sub_boards : reader:Board_access.reader -> unit ->
   (Board.sub_board list, Board.board_error) result
 
 val delete_sub_board :
+  authorization:Board.sub_board_deletion_authorization ->
   sub_board_id:string ->
-  (unit, Board.board_error) Result.t
+  (Board.deletion_outcome, Board.board_error) Result.t
 
 val update_sub_board :
   reader:Board_access.reader ->

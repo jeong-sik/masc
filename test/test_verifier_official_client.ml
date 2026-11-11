@@ -384,7 +384,6 @@ let () =
   Prompt_registry.set_markdown_dir
     (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts");
   Workspace_metric_hooks.install ();
-  Masc_test_deps.publish_single_user_access ();
   Alcotest.run "official-client completion verifier"
     ["actual client dispatch", List.map (fun mode -> test_case mode `Quick (fun () -> test_review mode))
       ["valid"; "missing"; "duplicate"; "large-read"];

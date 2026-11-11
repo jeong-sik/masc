@@ -160,7 +160,7 @@ let gauge ~width ~value ~max_value ?label () =
 type bar_item = {
   name : string;
   count : int;
-  style : Masc_tui_theme.status option;
+  style : Masc_tui_theme.status;
 }
 
 type distribution_share = { percentage : int; filled_cells : int }
@@ -196,11 +196,7 @@ let distribution_bars ~width items =
       (fun it share ->
         let count = Stdlib.max 0 it.count in
         let pct = share.percentage in
-        let color =
-          match it.style with
-          | Some s -> Masc_tui_theme.status s
-          | None -> Masc_tui_theme.tone Accent
-        in
+        let color = Masc_tui_theme.status it.style in
         let padded_name = Layout.fit_width it.name name_col_width in
         if bar_width <= 0 then
           Layout.fit_width
@@ -217,7 +213,7 @@ let distribution_bars ~width items =
             padded_name
             color
             (repeat bar_full filled)
-            (Masc_tui_theme.Sgr.reset ^ Masc_tui_theme.tone Dim)
+            (Masc_tui_theme.Sgr.reset ^ Masc_tui_theme.Sgr.dim)
             (repeat bar_light unfilled)
             Masc_tui_theme.Sgr.reset
             count_width count

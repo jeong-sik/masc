@@ -74,7 +74,7 @@ let materialize cfg bindings =
     ["construction.first"; "construction.second"]
     (List.map (fun runtime -> runtime.Runtime_instance.id) runtimes);
   match List.map (fun runtime -> match runtime.Runtime_instance.execution with
-    | Runtime_execution.Agent_core config -> config
+    | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
     | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
       fail "reload fixture requires HTTP bindings") runtimes with
   | [first; second] -> first, second

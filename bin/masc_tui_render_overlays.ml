@@ -50,7 +50,7 @@ let render_about (state : state) =
           | Masc_tui_emblem_screen.Keepers_unreadable
           | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:
-          [ Masc_tui_theme.tone Masc_tui_theme.Accent
+          [ Theme.accent ()
             ^ "MASC \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
           ; Ansi.dim
             ^ Masc_tui_emblem_screen.about_facts ~theme keepers
@@ -533,7 +533,7 @@ let render_palette (state : state) =
     ~frame:Chrome_overlay
     ~title:
       (title ^ prompt ^ query
-       ^ Masc_tui_theme.tone Masc_tui_theme.Accent ^ caret ^ Ansi.reset)
+       ^ Theme.accent () ^ caret ^ Ansi.reset)
     (* [key:label] items, two spaces apart, the way every other footer is
        written. In the dotted form this row was one item with no colon, so
        {!Masc_tui_footer} could shed no whole key and keep no door: it fell
@@ -1245,7 +1245,7 @@ let render_answering (state : state) =
         let name_width = min (Masc_tui_message_layout.display_width (Terminal_text.single_line keeper_name))
           (max 0 ((preview_width - 2) / 2)) in
         [ Ansi.bold ^ fit_width (Terminal_text.single_line keeper_name) name_width
-          ^ Ansi.reset ^ "  " ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          ^ Ansi.reset ^ "  " ^ (Theme.accent ())
           ^ fit_width doing (max 0 (preview_width - name_width - 2))
           ^ Ansi.reset
         ; Ansi.dim ^ tail ^ Ansi.reset
@@ -1533,9 +1533,8 @@ let render_collab state view =
     ~surface_key:"collab" ~title:(screen_title " MASC Collab")
     ~hints:(Masc_tui_collab.hints view)
     ~body:(fun ~budget c ->
-      Masc_tui_collab.lines ~height:budget view
-      |> List.iter (fun line -> c.push (fit_width
-          (Masc.Tui_terminal_text.sanitize_terminal_text line) (framed_inner_width cols))))
+      Masc_tui_collab.lines ~height:budget ~width:(framed_inner_width cols) view
+      |> List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))))
 
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =
   let terminal_rows, cols = get_terminal_size () in

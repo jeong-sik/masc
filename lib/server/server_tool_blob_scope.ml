@@ -197,6 +197,69 @@ let config_keepers =
       { suffix = Keeper_librarian_context_recall.filename_suffix
       ; reason = M.Repairable_pointer
       }
+    (* The Memory OS stores in this directory carry claim text, timestamps,
+       memory and trace ids, request ids, revision numbers, original source
+       paths and message digests — never a tool blob key. The scan decodes only
+       normalized artifact references, so reading any of them adds nothing.
+       Leave them unclassified and the sweep's unclassified gate refuses every
+       deletion in a workspace where a Keeper has memory. *)
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.journal_suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_source_current.suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.epoch_suffix
+      ; reason = M.Writes_no_reference
+      }
+    (* The aggregate lock names its own [.lock]; the derived suffix resolves
+       once this base name is classified. *)
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_aggregate_lock.suffix
+      ; reason = M.Writes_no_reference
+      }
+    (* Receipts beside the snapshot: a publication marker, a retraction plan
+       and the Librarian range commit. They name store state, not a blob. *)
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.publication_receipt_suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.retraction_plan_receipt_suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_current_layout.durable_range_receipt_suffix
+      ; reason = M.Writes_no_reference
+      }
+    (* Memory history events name a memory id, a trace id and a query. *)
+  ; M.Keeper_files
+      { suffix = Keeper_memory_os_events.suffix
+      ; reason = M.Writes_no_reference
+      }
+    (* Absorbed rows, the pending admission queue and the Librarian unread
+       ledger live in this same directory. Their rows carry claim text, a
+       memory id, a trace id, a request id and a message digest — no tool blob
+       key. *)
+  ; M.Keeper_files
+      { suffix = Keeper_memory_absorbed.suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_memory_admission_queue.suffix
+      ; reason = M.Writes_no_reference
+      }
+  ; M.Keeper_files
+      { suffix = Keeper_librarian_unread_ledger.suffix
+      ; reason = M.Writes_no_reference
+      }
   ; finder_metadata
   ; unpublished_writes
   ]

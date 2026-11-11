@@ -11,6 +11,18 @@ open Keeper_memory_os_current_publication
 open Keeper_memory_os_current_read_anchor
 open Keeper_memory_os_current_update
 open Keeper_memory_os_current_program_apply
+module Change_metrics = Keeper_memory_os_current_change_metrics
+
+(* An explicit write or retraction names no absorption and no revision, so
+   every ID that leaves its commit is dropped. *)
+let explicit_change_count pass =
+  Change_metrics.Counted
+    { pass
+    ; count =
+        (fun (snapshot : t) () ->
+           Change_metrics.of_change ~absorbed:[] ~revisions:[] snapshot.change)
+    }
+;;
 
 let replace
       ?clock
@@ -26,6 +38,7 @@ let replace
   update_locked_with_error
     ?clock
     ?dropped_statements
+    ~change_count:Change_metrics.Not_counted
     ~store_error:Fun.id
     ~keepers_dir
     ~keeper_id
@@ -54,9 +67,10 @@ let replace
    bytes already present are a re-observation of that row. Shared by
    {!upsert_fact} and {!supersede_fact}, so both give a row the same
    [first_seen] and [last_seen]. *)
-let upsert_fact ?clock ~keepers_dir ~keeper_id ~now ~source incoming =
+let upsert_fact ?clock ~pass ~keepers_dir ~keeper_id ~now ~source incoming =
   update_locked_with_error
     ?clock
+    ~change_count:(explicit_change_count pass)
     ~store_error:(fun detail -> Upsert_persistence_failed detail)
     ~keepers_dir ~keeper_id ~now
     (fun ~snapshot_content:_ previous -> upsert_snapshot ~previous ~now ~source incoming)
@@ -92,6 +106,7 @@ let retract_current_facts ~target_ids current_facts =
 
 let retract_fact
       ?clock
+      ~pass
       ~keepers_dir
       ~keeper_id
       ~now
@@ -109,6 +124,7 @@ let retract_fact
       ?clock
       ~dropped_statements:
         [ { Keeper_memory_os_types.memory_id = target_memory_id; reason } ]
+      ~change_count:(explicit_change_count pass)
       ~store_error:(fun detail -> Retract_persistence_failed detail)
       ~keepers_dir
       ~keeper_id
@@ -142,6 +158,7 @@ let retract_fact
    does. *)
 let supersede_fact
       ?clock
+      ~pass
       ~keepers_dir
       ~keeper_id
       ~now
@@ -155,14 +172,24 @@ let supersede_fact
   else if String.equal incoming_identity superseded_memory_id
   then Error Supersede_self
   else
+    let revision : Keeper_memory_os_types.revision =
+      { superseded = superseded_memory_id; superseded_by = incoming_identity }
+    in
     update_locked_with_output
       ?clock
-      ~declared_revisions:[{superseded=superseded_memory_id; superseded_by=incoming_identity}]
+      ~declared_revisions:[ revision ]
       ~dropped_statements:
         [ { Keeper_memory_os_types.memory_id = superseded_memory_id
           ; reason = "superseded_by " ^ incoming_identity
           }
         ]
+      ~change_count:
+        (Change_metrics.Counted
+           { pass
+           ; count =
+               (fun (snapshot : t) (_ : supersession) ->
+                  Change_metrics.of_change ~absorbed:[] ~revisions:[ revision ] snapshot.change)
+           })
       ~equal_facts:(Write_revision None)
       ~store_error:(fun detail -> Supersede_persistence_failed detail)
       ~keepers_dir
@@ -239,6 +266,7 @@ let supersede_fact
 
 let retract_facts
       ?clock
+      ~pass
       ~keepers_dir
       ~keeper_id
       ~expected_revision
@@ -277,6 +305,7 @@ let retract_facts
     update_locked_with_error
       ?clock
       ~dropped_statements
+      ~change_count:(explicit_change_count pass)
       ~retraction_plan:
         ( source.trace_id
         , fun ~plan_id ~snapshot_revision ~snapshot_sha256 ~detail ->
@@ -374,8 +403,8 @@ module For_testing = struct
   let recover_publication_with_sync = recover_publication_with_sync
 
   let apply_program_with_publication_io ~write_snapshot ~sync_snapshot ~before_journal ~on_committed
-      ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
-    apply_program_with_io ~write_snapshot ~sync_snapshot ~on_committed
+      ~pass ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
+    apply_program_with_io ~write_snapshot ~sync_snapshot ~on_committed ~pass
       ~finalize_journal:(fun ~keepers_dir ~keeper_id receipt ->
         before_journal (); record_publication_journal ~keepers_dir ~keeper_id receipt)
       ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program
@@ -385,6 +414,7 @@ module For_testing = struct
     update_locked_with_output ~write_snapshot ~sync_snapshot ~on_committed
       ~finalize_journal:(fun ~keepers_dir ~keeper_id receipt ->
         before_journal (); record_publication_journal ~keepers_dir ~keeper_id receipt)
+      ~change_count:Change_metrics.Not_counted
       ~equal_facts:(Write_revision None)
       ~store_error:Fun.id ~keepers_dir ~keeper_id ~now
       (fun ~snapshot_content:_ previous ->

@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "source_base": "d0c7affcf6c564b550c1897d921a524527dfe58d",
+  "source_lower": "06489cbc5c038a98f87548a4314bfa56d71c4886",
+  "source_upper": "2e3ce7e7f1fd0fa68da89f91ae8b9beaaa0ffc49",
+  "frontend": {
+    "files": [
+      "src/api/actions.test.ts",
+      "src/components/board/board-surface.test.ts"
+    ],
+    "tests": 88,
+    "passed": 88,
+    "failed": 0,
+    "checked_inputs": {
+      "dashboard/src/api/actions.ts": "6f0d7bb28f9a6028396b1d420758dcead498b6efc91d665ca2eab92cccc796f5",
+      "dashboard/src/api/actions.test.ts": "18e062a0ce2958bdf35781a43c4872262ff812cb4dfdd65e8e0ff0987a182f67",
+      "dashboard/src/components/board/board-surface.ts": "10bc85554fca6e7ef6f23e12afaa48cca0dd797e5c7f86cd1d358cba4b7935da",
+      "dashboard/src/components/board/board-surface.test.ts": "0befdc7680f0c080e51d470d77e91dd787c9c5f75a23ae4cba3876b0bbabf995"
+    },
+    "test_command": [
+      "pnpm",
+      "test",
+      "src/api/actions.test.ts",
+      "src/components/board/board-surface.test.ts",
+      "--reporter=json",
+      "--outputFile=<artifact>/frontend-tests.json"
+    ],
+    "tsc": {
+      "command": [
+        "pnpm",
+        "exec",
+        "tsc",
+        "--noEmit"
+      ],
+      "start": "2026-11-10T09:41:04.440779+00:00",
+      "exit": 0
+    },
+    "eslint": {
+      "command": [
+        "pnpm",
+        "exec",
+        "eslint",
+        "src/api/actions.ts",
+        "src/api/actions.test.ts",
+        "src/components/board/board-surface.ts",
+        "src/components/board/board-surface.test.ts"
+      ],
+      "start": "2026-11-10T09:41:04.444334+00:00",
+      "exit": 0
+    },
+    "test_command_is_path_redacted": true
+  },
+  "ocaml": {
+    "compiler": "5.5.1",
+    "repository_target": "5.5.2",
+    "parse_inputs": [
+      {
+        "path": "lib/board/board_core.mli",
+        "sha256": "c9f3e4200508a70b21444e145b7f5932e674a1a6682419bc114f2dfa25bd23c3",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_core_persist.ml",
+        "sha256": "0084d0a0dd9d7e732a4d4d0f7e4bf5ca1efa25cf57781d64a3dcff5b872b3845",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_core_persist.mli",
+        "sha256": "f3623da9a7a279077085d8aa4f0624ee7d6010752f2d368fccd0cea2cdd80c90",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_deletion.ml",
+        "sha256": "5c45e8d47ff3540f540d4417b3b6204ea17a7d95aba1a669e1dece0b2014ef08",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_deletion.mli",
+        "sha256": "0e97b1ac6427e563bf087b27653ad8100ce034293141c235fe64fc34813668dc",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_deletion_source.ml",
+        "sha256": "706c9b1252b38b7e881ce3e67731da30f4d8b62dac5aa09d2c0b811a348ffaaa",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_deletion_source.mli",
+        "sha256": "3c745e56516734dfd9410af8a41387300dfa3ed1bbf9b0e70404ddd2a0461f82",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_dispatch.ml",
+        "sha256": "2a8e7e3f807b4c715fa5e0474b00e3fbbd57ea94e476c4f8bb7903186c7ed672",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_dispatch.mli",
+        "sha256": "53403b81872d4cc5688e079ce655ec06cb6776034f9a1418012795c624412af5",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_paths.ml",
+        "sha256": "d101bc1c4b73ec4b2743a7896a2d06caa1cdc4328474e04fd91c96b5f734ae48",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_paths.mli",
+        "sha256": "68c79ef47246a6056960c5af2cb678f698207c9b6188cff8c19725cb3dc8a5d4",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_store_lifecycle.ml",
+        "sha256": "53978c63a5a60429a56bdcbbecf9af08552faabf81c0fe7f3042a65e7f354cda",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_store_lifecycle.mli",
+        "sha256": "0d4b3ed79a7602a3a7f96f5d5a6f51b748509a1c41e5382d8a1437a417852248",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_votes.ml",
+        "sha256": "3a7cfdd5f4e2ee19b911ec158b44d1abeebd6dc7851bc42d4e007d176986d5f6",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_votes.mli",
+        "sha256": "e3e692907c46ba04667e79df0121ebc1d65abc4abf84a43e5de2b6101b6318a7",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board_tool_adapter/board_tool_handlers.ml",
+        "sha256": "c51480c9c3ebe27fa026d7229077c0ce0522bdd070d5ec225e30bb7b94fce7e9",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board_types/board_types.ml",
+        "sha256": "ffe76640a3047c4fe140ae55425e99ba48c9ba5023a22aa2be81f25a5e02b005",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board_types/board_types.mli",
+        "sha256": "858b0d7f4429f1a12016951ed91a60b4ec720fcb550249224c44f99bb69e1cca",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/server/server_dashboard_http_delete_actions.ml",
+        "sha256": "6624717be4cc0e0c9f4ebe44cec6a4d9d361702badd7d38c06710a07b0e2867c",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_delete_order.ml",
+        "sha256": "02e73e3a0db6e95fbbf1f3f83f7b2d00e85df317b2140093adb1d80f12741b65",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_delete_rewrite_requeue.ml",
+        "sha256": "c998023a37bcd8bdf0807ebcadf1853b17775e65a747f36be5e1d47da18b860e",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_deletion_recovery.ml",
+        "sha256": "c7d8659135d71351dbaa43a419ba66a998989b99d90fd26bc0c127ce5e3ac28d",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_karma_ledger.ml",
+        "sha256": "5ee8690ae564dee845297bfb715bc34589527e527152d5e3c46f68ac893f2fef",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_persistence_load_contract.ml",
+        "sha256": "dafd738b9dae17f80890e427fe265dabf281c58b8b9fe23218de5b1050df8b8f",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_posts_source_authority.ml",
+        "sha256": "019774bef7d6082937247b7b5e0b32303a9cce534c98819d2f98a7201f37d35b",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_vote_persistence.ml",
+        "sha256": "500b71f18fcf630151d2538a56f6a6af23f1813d384c589c7dbd847379ae25fe",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_votes_source.ml",
+        "sha256": "f9bc1a12e1c32f9c30477e46d4ef60a592bbaa0f1ed1ef131cfd017b2ce829e5",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_keeper_keepalive_helpers.ml",
+        "sha256": "5dd16b78df5847a43e383ddaa9a305af6a5bc7fce3ff32fb383a917f05b0ea3f",
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_verification_collaboration_evidence.ml",
+        "sha256": "e5110848ad4ea1968cc70cc85f8ea84c446c8894ffda132dfacdfc9930fb783a",
+        "exit": 0,
+        "output": ""
+      }
+    ],
+    "store_fields": 38,
+    "source_io_slots": [
+      "posts_source_io",
+      "comments_source_io",
+      "sub_boards_source_io",
+      "votes_source_io",
+      "reactions_source_io",
+      "deletion_source_io"
+    ],
+    "backend_cases_authored": 8,
+    "backend_cases_executed": 0,
+    "type_or_warning_check": false,
+    "dune": false
+  },
+  "baseline": {
+    "production": "d0c7affcf6c564b550c1897d921a524527dfe58d",
+    "new_cases": 2,
+    "failed": 2,
+    "skipped": 86,
+    "raw_log_sha256": "23d70ec0af54ab945e4186a6795a555616c22c64ce92ac953d415fe8374000c6",
+    "first_attempt": "Missing local node_modules; not a behavioral baseline. After borrowing existing dependencies, v2 reached both intended assertions."
+  },
+  "not_executed": [
+    "backend tests",
+    "OCaml typing or warning checks",
+    "Dune",
+    "server integration",
+    "CI",
+    "installation",
+    "deployment",
+    "browser flow for deletion pending"
+  ]
+}

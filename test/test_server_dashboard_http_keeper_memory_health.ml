@@ -52,7 +52,7 @@ let require_ok = function
   | Error detail -> Alcotest.fail detail
 ;;
 
-let write_snapshot ~keepers_dir ~keeper_id facts =
+let write_snapshot ?(now = test_now) ~keepers_dir ~keeper_id facts =
   Fs_compat.mkdir_p keepers_dir;
   let expected_revision =
     match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
@@ -64,7 +64,7 @@ let write_snapshot ~keepers_dir ~keeper_id facts =
     ~keepers_dir
     ~keeper_id
     ~expected_revision
-    ~now:test_now
+    ~now
     ~source
     ~facts
     ()
@@ -221,7 +221,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v13"
+    "keeper.memory_os.current_health.v14"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -478,6 +478,75 @@ let test_journal_outcome_waits_for_a_torn_line () =
     (failure_kind after_commit);
   Alcotest.(check bool) "the commit after the cut is read" true
     (Option.is_some after_commit.last_success_at)
+;;
+
+let test_journal_outcome_distinguishes_unreadable_from_empty () =
+  let module Outcome = Masc.Keeper_memory_journal_outcome in
+  let base = fresh_dir "masc-memory-health-journal-unreadable" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "unreadable" in
+  Fs_compat.mkdir_p keepers_dir;
+  let read () = Outcome.read ~keepers_dir ~keeper_id in
+  let missing = read () in
+  Alcotest.(check bool) "a confirmed missing journal is not a read error" true
+    (Option.is_none missing.read_error && missing.facts_by_hour = []);
+  let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  Unix.mkdir path 0o700;
+  Fun.protect ~finally:(fun () -> Unix.rmdir path) (fun () ->
+    let unavailable = read () in
+    Alcotest.(check bool) "an unreadable first journal is not an empty success" true
+      (Option.is_some unavailable.read_error && unavailable.facts_by_hour = []));
+  Fs_compat.save_file path "";
+  let empty = read () in
+  Alcotest.(check bool) "an actual empty journal clears the read error" true
+    (Option.is_none empty.read_error && empty.facts_by_hour = [])
+;;
+
+let test_journal_failure_keeps_evidence_and_recovers_without_another_commit () =
+  let base = fresh_dir "masc-memory-health-journal-recovery" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "journal-recovery" in
+  let write facts =
+    ignore (write_snapshot ~now:(Unix.gettimeofday ()) ~keepers_dir ~keeper_id facts)
+  in
+  let row () =
+    Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:keeper_id
+    |> member "keeper"
+  in
+  let latest_facts row =
+    match List.rev (list_field "facts_by_hour" row) with
+    | point :: _ -> int_field "facts" point
+    | [] -> Alcotest.fail "the journal trend has no retained commit"
+  in
+  write [ fact "one" ];
+  let first = row () in
+  Alcotest.(check int) "the first journal observation has one fact" 1 (latest_facts first);
+  Alcotest.(check bool) "the first journal read is healthy" true
+    (is_null (member "read_error" first));
+  (* A real commit invalidates the cached row before its journal is read. *)
+  write [ fact "one"; fact "two" ];
+  let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let held = path ^ ".held" in
+  Unix.rename path held;
+  Unix.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir path; Unix.rename held path)
+    (fun () ->
+      let unavailable = row () in
+      Alcotest.(check int) "the independently readable snapshot stays visible" 2
+        (int_field "facts" unavailable);
+      Alcotest.(check int) "the last successful journal evidence is retained" 1
+        (latest_facts unavailable);
+      Alcotest.(check bool) "retained journal points are marked incomplete" false
+        (is_null (member "read_error" unavailable));
+      let fleet = Health.keeper_memory_health_http_json ~base_path:base in
+      Alcotest.(check int) "the journal failure contributes to the read-error total" 1
+        (int_field "read_errors" (totals fleet)));
+  let recovered = row () in
+  Alcotest.(check bool) "an error row is reread after recovery without a new commit" true
+    (is_null (member "read_error" recovered));
+  Alcotest.(check int) "the previously unread append is now visible" 2
+    (latest_facts recovered)
 ;;
 
 (* A keeper's own [keeper_memory_write] journals a committed line too. It is
@@ -908,7 +977,7 @@ let test_unread_evidence_is_observed_without_publication () =
   Yojson.Safe.to_file path (S.to_json snapshot);
   let range : Current.official_range_id = {receipt_scope="health-fixture";
     after_boundary_line=0;turns=[2,turn_ref];unread_messages=[official]} in
-  ignore (Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:test_now
+  ignore (Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:keeper_name ~now:test_now
     ~source ~revisions:[] ~absorbed:[] ~official_range_id:range ~new_claims:[] () |> require_ok);
   ignore (Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> require_ok);
   let files = [path;ledger;Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name] in
@@ -960,6 +1029,7 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   let module S = Masc.Librarian_continuity_snapshot in
   let module B = Masc.Keeper_turn_boundaries in
   let module P = Masc.Keeper_librarian_progress in
+  let module D = Masc.Tui_decode_memory_health in
   let base = fresh_dir "masc-context-lag" in
   let config = Masc.Workspace.default_config base in
   let keeper_name = "context-lagging" in
@@ -973,12 +1043,24 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
        below is written straight to a file, though, and no writer announces
        that one, so the caller says which kind of read it is. *)
     if invalidate then Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
-    member "context_cycle"
-      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+    let json = Health.keeper_memory_health_http_json ~base_path:base in
+    json, member "context_cycle" (keeper_obj keeper_name json) in
+  let decoded_cycle json : D.memory_context_cycle =
+    let decoded = D.decode_memory_health_snapshot json |> require_ok in
+    match List.find_opt
+        (fun (row : D.memory_keeper_health) -> String.equal row.mkh_keeper_id keeper_name)
+        decoded.mhs_keepers with
+    | Some row -> row.mkh_context_cycle
+    | None -> Alcotest.fail "the production context cycle must reach the TUI" in
+  let initial_json, initial = cycle () in
   Alcotest.(check bool) "a keeper that has read nothing has no position" true
-    (is_null (member "read_position" (cycle ())));
+    (is_null (member "read_position" initial));
   Alcotest.(check bool) "and no read error to explain it" true
-    (is_null (member "read_position_read_error" (cycle ())));
+    (is_null (member "read_position_read_error" initial));
+  let initial_reading = decoded_cycle initial_json in
+  Alcotest.(check bool) "no progress is distinct from an unreadable progress file" true
+    (initial_reading.mcc_read_position = None
+     && not initial_reading.mcc_read_position_unreadable);
   let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
   let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
     [Agent_core.Types.Text "the turn the snapshot covers"]] in
@@ -1007,24 +1089,71 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   |> Result.map_error P.write_error_to_string |> get;
   (* No manual invalidation: [P.write] fires the commit observer for the
      runtime root, and that observer has to be what empties the row. *)
-  let observed = cycle ~invalidate:false () in
+  let observed_json, observed = cycle ~invalidate:false () in
   Alcotest.(check int) "the cut the request starts at" snapshot.S.end_atom
     (int_field "end_atom" (member "saved" observed));
   Alcotest.(check int) "the position that cut is read against" 12887
     (int_field "read_position" observed);
   Alcotest.(check bool) "a snapshot that is not being rewritten says nothing about it" true
     (is_null (member "rewriting_through" observed));
+  let reading = decoded_cycle observed_json in
+  Alcotest.(check (option int)) "the decoder preserves the durable read position"
+    (Some 12887) reading.mcc_read_position;
+  Alcotest.(check bool) "a readable position is confirmed" false
+    reading.mcc_read_position_unreadable;
+  Alcotest.(check (option int)) "a non-rewrite stays absent after decoding"
+    None reading.mcc_rewriting_through;
+  (* Mutate only the relationships this decoder owns, using the complete
+     production response above instead of a second schema fixture. *)
+  let replace_field name value = function
+    | `Assoc fields -> `Assoc ((name, value) :: List.remove_assoc name fields)
+    | _ -> Alcotest.fail "the production value must be an object" in
+  let rejects_cycle label invalid_cycle =
+    let row = keeper_obj keeper_name observed_json
+      |> replace_field "context_cycle" invalid_cycle in
+    let invalid_json = replace_field "keepers" (`List [row]) observed_json in
+    let decoded = D.decode_memory_health_snapshot invalid_json |> require_ok in
+    Alcotest.(check bool) label true
+      (List.exists
+         (fun (refusal : D.memory_keeper_refusal) ->
+           refusal.mkr_keeper_id = Some keeper_name)
+         decoded.mhs_refused_keepers
+       && not (List.exists
+         (fun (row : D.memory_keeper_health) -> String.equal row.mkh_keeper_id keeper_name)
+         decoded.mhs_keepers)) in
+  rejects_cycle "a position cannot also carry a read failure"
+    (replace_field "read_position_read_error" (`String "progress_unreadable") observed);
+  rejects_cycle "a rewrite target must be beyond its saved cut"
+    (replace_field "rewriting_through" (`Int snapshot.S.end_atom) observed);
+  rejects_cycle "a rewrite target needs its saved snapshot"
+    (observed |> replace_field "saved" `Null
+      |> replace_field "rewriting_through" (`Int 12887));
+  let rewriting = S.capture_checkpoint_prefix ~unread_messages:[]
+      ~catch_up_end_atom:(Some 12887) ~trace_id ~lines ~messages
+      ~working_state:"a snapshot being rewritten" ()
+    |> Result.map_error S.error_to_string |> get in
+  Yojson.Safe.to_file path (S.to_json rewriting);
+  let rewriting_json, _ = cycle () in
+  let rewriting_reading = decoded_cycle rewriting_json in
+  Alcotest.(check (option int)) "the production rewrite target survives decoding"
+    (Some 12887) rewriting_reading.mcc_rewriting_through;
+  Alcotest.(check (option int)) "the rewrite keeps the independent read position"
+    (Some 12887) rewriting_reading.mcc_read_position;
   (* An unreadable position file is why there is no number, which a keeper
      that has read nothing does not say. *)
   Out_channel.with_open_bin
     (P.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name)
     (fun oc -> output_string oc "{not json");
-  let unreadable = cycle () in
+  let unreadable_json, unreadable = cycle () in
   Alcotest.(check string) "an unreadable position says so" "progress_unreadable"
     (string_field "read_position_read_error" unreadable);
   Alcotest.(check bool) "and carries no number" true (is_null (member "read_position" unreadable));
   Alcotest.(check int) "the cut is read independently of it" snapshot.S.end_atom
-    (int_field "end_atom" (member "saved" unreadable))
+    (int_field "end_atom" (member "saved" unreadable));
+  let unreadable_reading = decoded_cycle unreadable_json in
+  Alcotest.(check bool) "the decoder retains why the number is absent" true
+    (unreadable_reading.mcc_read_position = None
+     && unreadable_reading.mcc_read_position_unreadable)
 (* RFC librarian-lifecycle §4.9: the durable round and the continuity round
    fall behind separately, so the screen carries both. A lag it cannot take
    reads as "cannot say" rather than as zero -- zero is what a caught-up
@@ -1287,7 +1416,7 @@ let test_one_keepers_row_is_its_fleet_row () =
   let fleet = Health.keeper_memory_health_http_json ~base_path:base in
   let answer = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"solo" in
   Alcotest.(check string) "the row answer names the fleet schema"
-    "keeper.memory_os.current_health.v13" (string_field "schema" answer);
+    "keeper.memory_os.current_health.v14" (string_field "schema" answer);
   Alcotest.(check bool) "the row is the fleet's row for the Keeper" true
     (Yojson.Safe.equal (keeper_obj "solo" fleet) (member "keeper" answer));
   let row_of keeper =
@@ -1297,6 +1426,163 @@ let test_one_keepers_row_is_its_fleet_row () =
     (Yojson.Safe.equal `Null (row_of "absent"));
   Alcotest.(check bool) "a path-shaped name answers no row" true
     (Yojson.Safe.equal `Null (row_of "../solo"))
+;;
+
+(* RFC-0517 §2.2: a commit moves its Keeper's since-start cells of the pass
+   that committed by exactly what it changed, and the hourly trend holds the
+   facts after each hour's last commit, from any source, for the last week. *)
+let test_a_commit_moves_its_pass_cells_and_the_hourly_trend () =
+  let module Pass = Masc.Keeper_memory_commit_pass in
+  let module Outcome = Masc.Keeper_memory_journal_outcome in
+  let base = fresh_dir "masc-memory-health-change-cells" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "change-cells" in
+  Fs_compat.mkdir_p keepers_dir;
+  let seconds_per_hour = 3600. in
+  let hour_of time = Float.floor (time /. seconds_per_hour) in
+  (* Every commit sits inside an hour that has already ended, so the clock
+     this test reads cannot move a commit across an hour's edge. *)
+  let current_hour = hour_of (Unix.gettimeofday ()) in
+  let at ~hours_ago ~minute =
+    ((current_hour -. float_of_int hours_ago) *. seconds_per_hour) +. (minute *. 60.)
+  in
+  let explicit kind = { source with Current.kind } in
+  let id = Types.memory_id in
+  let passes =
+    [ "admission"; "durable"; "continuity"; "cleanup"; "keeper_write"; "keeper_delete"
+    ; "operator_delete" ]
+  in
+  let changes = [ "added"; "absorbed"; "superseded"; "dropped" ] in
+  let row () = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:keeper_id in
+  let cells answer =
+    let table = member "changes_since_start" (member "keeper" answer) in
+    List.map (fun pass -> List.map (fun change -> int_field change (member pass table)) changes) passes
+  in
+  let absorbed_one = fact "absorbed one"
+  and absorbed_two = fact "absorbed two"
+  and absorbed_three = fact "absorbed three"
+  and revised_one = fact "revised one"
+  and revised_two = fact "revised two"
+  and retired = fact "retired claim"
+  and kept = fact "kept claim" in
+  ignore
+    (Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+       ~now:(at ~hours_ago:200 ~minute:15.) ~source
+       ~facts:
+         [ absorbed_one; absorbed_two; absorbed_three; revised_one; revised_two; retired; kept ]
+       ()
+     |> require_ok);
+  let written = fact "written claim" in
+  ignore
+    (Current.upsert_fact ~pass:Pass.Keeper_write ~keepers_dir ~keeper_id
+       ~now:(at ~hours_ago:168 ~minute:15.) ~source:(explicit Current.Explicit_write) written
+     |> Result.map_error Current.upsert_error_to_string
+     |> require_ok);
+  (match
+     Current.retract_fact ~pass:Pass.Keeper_delete ~keepers_dir ~keeper_id
+       ~now:(at ~hours_ago:167 ~minute:15.) ~source:(explicit Current.Explicit_retract)
+       ~memory_id:(id written) ~reason:"the Keeper withdrew it" ()
+   with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "the retraction failed");
+  let before = cells (row ()) in
+  (* One durable disposition: three absorptions, two revisions, a plain drop
+     and four new claims, so each change moves by its own amount. *)
+  let merged = fact "merged claim"
+  and successor_one = fact "successor one"
+  and successor_two = fact "successor two"
+  and fresh = fact "fresh claim" in
+  let drop value reason = { Types.memory_id = id value; reason } in
+  let absorb from = { Types.absorbed = id from; into = id merged } in
+  let revision from into = { Types.superseded = id from; superseded_by = id into } in
+  ignore
+    (Current.apply_disposition ~pass:Pass.Durable
+       ~dropped_statements:
+         [ drop revised_one "successor one restates it"
+         ; drop revised_two "successor two restates it"
+         ; drop retired "no longer true"
+         ]
+       ~absorbed:[ absorb absorbed_one; absorb absorbed_two; absorb absorbed_three ]
+       ~revisions:[ revision revised_one successor_one; revision revised_two successor_two ]
+       ~keepers_dir ~keeper_id ~now:(at ~hours_ago:3 ~minute:10.) ~source
+       ~new_claims:[ merged; successor_one; successor_two; fresh ]
+       ()
+     |> require_ok);
+  let moved = List.map2 (List.map2 (fun before after -> after - before)) before (cells (row ())) in
+  Alcotest.(check (list (pair string (list int))))
+    "the durable commit moves only its own pass, by each change it made"
+    (List.map
+       (fun pass -> pass, if String.equal pass "durable" then [ 4; 3; 2; 1 ] else [ 0; 0; 0; 0 ])
+       passes)
+    (List.combine passes moved);
+  (* A later commit of the same hour takes its point; a Librarian pass that
+     restates a held fact keeps the snapshot and adds no claim. *)
+  ignore
+    (Current.upsert_fact ~pass:Pass.Keeper_write ~keepers_dir ~keeper_id
+       ~now:(at ~hours_ago:3 ~minute:40.) ~source:(explicit Current.Explicit_write)
+       (fact "late claim")
+     |> Result.map_error Current.upsert_error_to_string
+     |> require_ok);
+  let before_restatement = cells (row ()) in
+  let restated =
+    Current.apply_disposition ~pass:Pass.Durable ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id
+      ~now:(at ~hours_ago:1 ~minute:15.) ~source ~new_claims:[ fresh ] ()
+    |> require_ok
+  in
+  Alcotest.(check bool) "the restatement keeps the snapshot" true
+    (restated.Current.commit = Current.Unchanged);
+  Alcotest.(check (list (list int))) "a kept snapshot moves no cell" before_restatement
+    (cells (row ()));
+  let points = List.map (fun (point : Outcome.facts_at_hour) -> point.recorded_at, point.facts) in
+  let journaled =
+    [ at ~hours_ago:168 ~minute:15., 8
+    ; at ~hours_ago:167 ~minute:15., 7
+    ; at ~hours_ago:3 ~minute:40., 6
+    ; at ~hours_ago:1 ~minute:15., 6
+    ]
+  in
+  Alcotest.(check (list (pair (float 0.) int)))
+    "the journal keeps the week of hours that ends with its newest commit"
+    journaled
+    (points (Outcome.read ~keepers_dir ~keeper_id).Outcome.facts_by_hour);
+  let answer = row () in
+  let generated_hour = hour_of (float_field "generated_at" answer) in
+  (* The answer reads the same clock a moment later: this hour, or the next
+     one when an hour ended in between. The hours it keeps are counted from
+     its own time below. *)
+  Alcotest.(check bool) "the answer was written in this test's hour or the next" true
+    (generated_hour = current_hour || generated_hour = current_hour +. 1.);
+  let in_trend (recorded_at, _) =
+    let hour = hour_of recorded_at in
+    hour >= generated_hour -. 167. && hour <= generated_hour
+  in
+  let trend = List.filter in_trend journaled in
+  Alcotest.(check (list (pair (float 0.) int)))
+    "the row keeps the hours of the week that ends with its own"
+    trend
+    (List.map
+       (fun point -> float_field "recorded_at" point, int_field "facts" point)
+       (list_field "facts_by_hour" (member "keeper" answer)));
+  Alcotest.(check (list (pair (float 0.) int)))
+    "a point after the answer's hour is left out" []
+    (points
+       (Outcome.within ~now:(float_field "generated_at" answer)
+          [ { Outcome.recorded_at = (generated_hour +. 1.) *. seconds_per_hour; facts = 1 } ]));
+  let module Decode = Masc.Tui_decode_memory_health in
+  match Decode.decode_memory_health_row ~keeper:keeper_id answer with
+  | Ok { Decode.mhr_keeper = Decode.Row_present decoded; _ } ->
+    Alcotest.(check (list (pair (float 0.) int))) "the TUI reads the same trend" trend
+      (points decoded.Decode.mkh_facts_by_hour);
+    Alcotest.(check (list (pair string (list int))))
+      "the TUI reads the same counts"
+      (List.combine passes (cells answer))
+      (List.map
+         (fun (pass, (counts : Masc.Keeper_memory_commit_change.counts)) ->
+            ( Pass.to_label pass
+            , [ counts.added; counts.absorbed; counts.superseded; counts.dropped ] ))
+         decoded.Decode.mkh_changes_since_start)
+  | Ok _ -> Alcotest.fail "the TUI did not read the row as present"
+  | Error detail -> Alcotest.fail detail
 ;;
 
 (* The totals count the rows: unread turns go unknown with one unmeasured
@@ -1463,7 +1749,11 @@ let test_a_merged_row_is_the_fleet_read_after_the_write () =
      Alcotest.(check bool) "it is observed when the row was" true
        (merged.Decode.mhs_generated_at >= answer.Decode.mhr_generated_at)
    | None -> Alcotest.fail "a row merges into an answer with no refused row");
-  (match Decode.with_keeper_row held ~generated_at:0.0 ~keeper_id:"beta" None with
+  (* A removal answer carries the time it was read, the same as a present one
+     ([masc_tui.ml] passes [mhr_generated_at] on both branches). Passing 0.0
+     here made this a stale answer, and [with_keeper_row] refuses a stale one
+     before it looks at the row at all (#50852). *)
+  (match Decode.with_keeper_row held ~generated_at:answer.Decode.mhr_generated_at ~keeper_id:"beta" None with
    | Some removed ->
      Alcotest.(check (list string)) "a Keeper that left loses its row" [ "alpha" ]
        (List.map (fun (keeper : Decode.memory_keeper_health) -> keeper.Decode.mkh_keeper_id)
@@ -1475,16 +1765,19 @@ let test_a_merged_row_is_the_fleet_read_after_the_write () =
        removed.Decode.mhs_total_facts
    | None -> Alcotest.fail "a removal merges into an answer with no refused row");
   let refused name = { Decode.mkr_keeper_id = Some name; mkr_reason = "refused" } in
+  (* These two read the answer just fetched, so they carry its time too. With
+     0.0 the first one was refused for staleness rather than for gamma's
+     refused row, and passed without ever reaching the check it names. *)
   Alcotest.(check bool) "another Keeper's refused row stops the merge" true
     (Option.is_none
        (Decode.with_keeper_row
           { held with Decode.mhs_refused_keepers = [ refused "gamma" ] }
-          ~generated_at:0.0 ~keeper_id:"alpha" (Some row)));
+          ~generated_at:answer.Decode.mhr_generated_at ~keeper_id:"alpha" (Some row)));
   Alcotest.(check bool) "the Keeper's own refused row is replaced by its row" true
     (Option.is_some
        (Decode.with_keeper_row
           { held with Decode.mhs_refused_keepers = [ refused "alpha" ] }
-          ~generated_at:0.0 ~keeper_id:"alpha" (Some row)));
+          ~generated_at:answer.Decode.mhr_generated_at ~keeper_id:"alpha" (Some row)));
   Alcotest.(check bool) "a row answer for another Keeper is refused" true
     (Result.is_error
        (Decode.decode_memory_health_row ~keeper:"beta"
@@ -1636,6 +1929,8 @@ let () =
             test_cold_health_read_and_commit_do_not_deadlock
         ; Alcotest.test_case "one Keeper's row is its fleet row" `Quick
             test_one_keepers_row_is_its_fleet_row
+        ; Alcotest.test_case "a commit moves its pass cells and the hourly trend" `Quick
+            test_a_commit_moves_its_pass_cells_and_the_hourly_trend
         ; Alcotest.test_case "the totals count the rows" `Quick test_totals_count_the_rows
         ; Alcotest.test_case "attention retains original observations" `Quick
             test_attention_retains_originals_and_clears_on_observation
@@ -1673,6 +1968,10 @@ let () =
             test_journal_outcome_reads_appended_lines
         ; Alcotest.test_case "journal outcome waits for a torn line" `Quick
             test_journal_outcome_waits_for_a_torn_line
+        ; Alcotest.test_case "journal unreadable is not empty" `Quick
+            test_journal_outcome_distinguishes_unreadable_from_empty
+        ; Alcotest.test_case "journal failure retains evidence and recovers" `Quick
+            test_journal_failure_keeps_evidence_and_recovers_without_another_commit
         ; Alcotest.test_case "librarian failure then explicit write" `Quick
             test_librarian_failure_then_explicit_write_keeps_both
         ; Alcotest.test_case "corrupt snapshot visible" `Quick

@@ -121,7 +121,7 @@ schema = "out.json"
   let d = match declarations.declarations with
     | [d] -> d
     | _ -> fail (String.concat "; " (List.map (fun (issue : Config.issue) -> issue.message) declarations.issues)) in
-  let configured = Server_standalone_lane_projection.Configured {admitted_slots=["a.m"];cli_slots=[];
+  let configured = Server_standalone_lane_projection.Configured {bindings=[];admitted_slots=["a.m"];cli_slots=[];
     declared_slots=["a.m"];declared_cli_slots=[];dropped_slots=[];admission_error=None} in
   let configuration (addon : Runtime_schema.addon_lane) = match addon.output with
     | "author" when addon.declaration_id = "quiz" -> configured
@@ -320,7 +320,7 @@ let h2_read ~sw ~clock ~state token =
     let server_flow,client_flow = Eio_unix.Net.socketpair_stream ~sw () in
     let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy in
     let server = Eio.Fiber.fork_promise ~sw (fun () -> Eio.Switch.run (fun conn_sw ->
-      Server_bootstrap_http.serve_h2_connection ~sw:conn_sw ~h2_request_handler:gateway
+      Server_bootstrap_http.serve_h2_connection ~clock ~sw:conn_sw ~h2_request_handler:gateway
         ~h2_error_handler:(Server_h2_gateway.make_error_handler ())
         (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) server_flow)) in
     let reply,resolve = Eio.Promise.create () in

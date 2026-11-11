@@ -14,6 +14,54 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export type DashboardObservationTopic =
+| { kind: 'Logs' /* JSON: "logs" */ }
+| { kind: 'Health' /* JSON: "health" */ }
+| { kind: 'Runtime_probe' /* JSON: "runtime_probe" */ }
+| { kind: 'Attribution' /* JSON: "attribution" */ }
+| { kind: 'Keeper_composite' /* JSON: "keeper_composite" */ }
+| { kind: 'Keeper_runtime_trace' /* JSON: "keeper_runtime_trace" */ }
+| { kind: 'Keeper_sandbox' /* JSON: "keeper_sandbox" */ }
+| { kind: 'Keeper_turns' /* JSON: "keeper_turns" */ }
+| { kind: 'Keeper_memory_health' /* JSON: "keeper_memory_health" */ }
+| { kind: 'Runtime_resolved' /* JSON: "runtime_resolved" */ }
+| { kind: 'Model_metrics' /* JSON: "model_metrics" */ }
+| { kind: 'Runtime_observables' /* JSON: "runtime_observables" */ }
+| { kind: 'Scheduled_automation' /* JSON: "scheduled_automation" */ }
+| { kind: 'Tools' /* JSON: "tools" */ }
+| { kind: 'Tool_metrics' /* JSON: "tool_metrics" */ }
+| { kind: 'Skills' /* JSON: "skills" */ }
+| { kind: 'Async_requests' /* JSON: "async_requests" */ }
+| { kind: 'Skill_usage' /* JSON: "skill_usage" */ }
+| { kind: 'Skill_activations' /* JSON: "skill_activations" */ }
+| { kind: 'Telemetry' /* JSON: "telemetry" */ }
+| { kind: 'Published_artifacts' /* JSON: "published_artifacts" */ }
+| { kind: 'Artifact_checks' /* JSON: "artifact_checks" */ }
+| { kind: 'Verification_requests' /* JSON: "verification_requests" */ }
+| { kind: 'Verification_specs' /* JSON: "verification_specs" */ }
+| { kind: 'Tlc_results' /* JSON: "tlc_results" */ }
+| { kind: 'Activity' /* JSON: "activity" */ }
+| { kind: 'Ide_presence' /* JSON: "ide_presence" */ }
+| { kind: 'Ide_events' /* JSON: "ide_events" */ }
+| { kind: 'Gate' /* JSON: "gate" */ }
+| { kind: 'Gate_tool_events' /* JSON: "gate_tool_events" */ }
+| { kind: 'Chat_operation' /* JSON: "chat_operation" */ }
+
+export type DashboardObservationOperation = {
+  keeper_name: string;
+  operation_id: string;
+}
+
+export type DashboardObservationScope =
+| { kind: 'Workspace' /* JSON: "workspace" */ }
+| { kind: 'Keeper' /* JSON: "keeper" */; value: string }
+| { kind: 'Operation' /* JSON: "operation" */; value: DashboardObservationOperation }
+
+export type DashboardObservationChangedPayload = {
+  topic: DashboardObservationTopic;
+  scope: DashboardObservationScope;
+}
+
 export type AgentStartedPayload = {
   agent_name: string;
   task_id: string;
@@ -107,6 +155,206 @@ export type AgentFailedPayload = {
   error_code: string;
   error_retryable: boolean;
   error_detail: JsonValue;
+}
+
+export function writeDashboardObservationTopic(x: DashboardObservationTopic, context: any = x): any {
+  switch (x.kind) {
+    case 'Logs':
+      return 'logs'
+    case 'Health':
+      return 'health'
+    case 'Runtime_probe':
+      return 'runtime_probe'
+    case 'Attribution':
+      return 'attribution'
+    case 'Keeper_composite':
+      return 'keeper_composite'
+    case 'Keeper_runtime_trace':
+      return 'keeper_runtime_trace'
+    case 'Keeper_sandbox':
+      return 'keeper_sandbox'
+    case 'Keeper_turns':
+      return 'keeper_turns'
+    case 'Keeper_memory_health':
+      return 'keeper_memory_health'
+    case 'Runtime_resolved':
+      return 'runtime_resolved'
+    case 'Model_metrics':
+      return 'model_metrics'
+    case 'Runtime_observables':
+      return 'runtime_observables'
+    case 'Scheduled_automation':
+      return 'scheduled_automation'
+    case 'Tools':
+      return 'tools'
+    case 'Tool_metrics':
+      return 'tool_metrics'
+    case 'Skills':
+      return 'skills'
+    case 'Async_requests':
+      return 'async_requests'
+    case 'Skill_usage':
+      return 'skill_usage'
+    case 'Skill_activations':
+      return 'skill_activations'
+    case 'Telemetry':
+      return 'telemetry'
+    case 'Published_artifacts':
+      return 'published_artifacts'
+    case 'Artifact_checks':
+      return 'artifact_checks'
+    case 'Verification_requests':
+      return 'verification_requests'
+    case 'Verification_specs':
+      return 'verification_specs'
+    case 'Tlc_results':
+      return 'tlc_results'
+    case 'Activity':
+      return 'activity'
+    case 'Ide_presence':
+      return 'ide_presence'
+    case 'Ide_events':
+      return 'ide_events'
+    case 'Gate':
+      return 'gate'
+    case 'Gate_tool_events':
+      return 'gate_tool_events'
+    case 'Chat_operation':
+      return 'chat_operation'
+  }
+}
+
+export function readDashboardObservationTopic(x: any, context: any = x): DashboardObservationTopic {
+  switch (x) {
+    case 'logs':
+      return { kind: 'Logs' }
+    case 'health':
+      return { kind: 'Health' }
+    case 'runtime_probe':
+      return { kind: 'Runtime_probe' }
+    case 'attribution':
+      return { kind: 'Attribution' }
+    case 'keeper_composite':
+      return { kind: 'Keeper_composite' }
+    case 'keeper_runtime_trace':
+      return { kind: 'Keeper_runtime_trace' }
+    case 'keeper_sandbox':
+      return { kind: 'Keeper_sandbox' }
+    case 'keeper_turns':
+      return { kind: 'Keeper_turns' }
+    case 'keeper_memory_health':
+      return { kind: 'Keeper_memory_health' }
+    case 'runtime_resolved':
+      return { kind: 'Runtime_resolved' }
+    case 'model_metrics':
+      return { kind: 'Model_metrics' }
+    case 'runtime_observables':
+      return { kind: 'Runtime_observables' }
+    case 'scheduled_automation':
+      return { kind: 'Scheduled_automation' }
+    case 'tools':
+      return { kind: 'Tools' }
+    case 'tool_metrics':
+      return { kind: 'Tool_metrics' }
+    case 'skills':
+      return { kind: 'Skills' }
+    case 'async_requests':
+      return { kind: 'Async_requests' }
+    case 'skill_usage':
+      return { kind: 'Skill_usage' }
+    case 'skill_activations':
+      return { kind: 'Skill_activations' }
+    case 'telemetry':
+      return { kind: 'Telemetry' }
+    case 'published_artifacts':
+      return { kind: 'Published_artifacts' }
+    case 'artifact_checks':
+      return { kind: 'Artifact_checks' }
+    case 'verification_requests':
+      return { kind: 'Verification_requests' }
+    case 'verification_specs':
+      return { kind: 'Verification_specs' }
+    case 'tlc_results':
+      return { kind: 'Tlc_results' }
+    case 'activity':
+      return { kind: 'Activity' }
+    case 'ide_presence':
+      return { kind: 'Ide_presence' }
+    case 'ide_events':
+      return { kind: 'Ide_events' }
+    case 'gate':
+      return { kind: 'Gate' }
+    case 'gate_tool_events':
+      return { kind: 'Gate_tool_events' }
+    case 'chat_operation':
+      return { kind: 'Chat_operation' }
+    default:
+      _atd_bad_json('DashboardObservationTopic', x, context)
+      throw new Error('impossible')
+  }
+}
+
+export function writeDashboardObservationOperation(x: DashboardObservationOperation, context: any = x): any {
+  return {
+    'keeper_name': _atd_write_required_field('DashboardObservationOperation', 'keeper_name', _atd_write_string, x.keeper_name, x),
+    'operation_id': _atd_write_required_field('DashboardObservationOperation', 'operation_id', _atd_write_string, x.operation_id, x),
+  };
+}
+
+export function readDashboardObservationOperation(x: any, context: any = x): DashboardObservationOperation {
+  return {
+    keeper_name: _atd_read_required_field('DashboardObservationOperation', 'keeper_name', _atd_read_string, x['keeper_name'], x),
+    operation_id: _atd_read_required_field('DashboardObservationOperation', 'operation_id', _atd_read_string, x['operation_id'], x),
+  };
+}
+
+export function writeDashboardObservationScope(x: DashboardObservationScope, context: any = x): any {
+  switch (x.kind) {
+    case 'Workspace':
+      return 'workspace'
+    case 'Keeper':
+      return ['keeper', _atd_write_string(x.value, x)]
+    case 'Operation':
+      return ['operation', writeDashboardObservationOperation(x.value, x)]
+  }
+}
+
+export function readDashboardObservationScope(x: any, context: any = x): DashboardObservationScope {
+  if (typeof x === 'string') {
+    switch (x) {
+      case 'workspace':
+        return { kind: 'Workspace' }
+      default:
+        _atd_bad_json('DashboardObservationScope', x, context)
+        throw new Error('impossible')
+    }
+  }
+  else {
+    _atd_check_json_tuple(2, x, context)
+    switch (x[0]) {
+      case 'keeper':
+        return { kind: 'Keeper', value: _atd_read_string(x[1], x) }
+      case 'operation':
+        return { kind: 'Operation', value: readDashboardObservationOperation(x[1], x) }
+      default:
+        _atd_bad_json('DashboardObservationScope', x, context)
+        throw new Error('impossible')
+    }
+  }
+}
+
+export function writeDashboardObservationChangedPayload(x: DashboardObservationChangedPayload, context: any = x): any {
+  return {
+    'topic': _atd_write_required_field('DashboardObservationChangedPayload', 'topic', writeDashboardObservationTopic, x.topic, x),
+    'scope': _atd_write_required_field('DashboardObservationChangedPayload', 'scope', writeDashboardObservationScope, x.scope, x),
+  };
+}
+
+export function readDashboardObservationChangedPayload(x: any, context: any = x): DashboardObservationChangedPayload {
+  return {
+    topic: _atd_read_required_field('DashboardObservationChangedPayload', 'topic', readDashboardObservationTopic, x['topic'], x),
+    scope: _atd_read_required_field('DashboardObservationChangedPayload', 'scope', readDashboardObservationScope, x['scope'], x),
+  };
 }
 
 export function writeAgentStartedPayload(x: AgentStartedPayload, context: any = x): any {

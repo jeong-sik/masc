@@ -93,24 +93,6 @@ val pending_messages_of_messages
   -> Keeper_chat_store.chat_message list
   -> pending_message list
 
-val pending_mentions_of_messages
-  :  ?ack_id:string
-  -> targets:string list
-  -> Keeper_chat_store.chat_message list
-  -> (string * string) list
-
-(** [pending_scope_of_messages ~targets messages] returns the [(speaker,
-    content)] of every unanswered Owner-authored user line that is {e not} a
-    mention — the operator addressing the keeper without an "@name". External
-    (connector) lines and lines already counted as mentions are excluded, so
-    this signal stays disjoint from mentions and does not flood on busy
-    channels. Same watermark as {!pending_mentions_of_messages}; pure. *)
-val pending_scope_of_messages
-  :  ?ack_id:string
-  -> targets:string list
-  -> Keeper_chat_store.chat_message list
-  -> (string * string) list
-
 (** [fleet_messages_of_messages ~limit ~targets messages] returns the newest
     [limit] keeper broadcasts projected into this transcript, in arrival order.
     A row qualifies when it is a user line on the [Surface_ref.Broadcast]

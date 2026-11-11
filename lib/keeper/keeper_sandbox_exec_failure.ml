@@ -28,6 +28,11 @@ let status_label = function
   | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
 ;;
 
+let payload_failure_message ~prefix ~status ~stderr =
+  Printf.sprintf "%s (%s): %s" prefix (status_label status)
+    (Exec_policy.truncate_for_log (Observability_redact.redact_text (String.trim stderr)))
+;;
+
 (* What a probe found by container name right after [docker run] failed. It
    reads [.State.Running] of a container of that name: [stopped] means one
    exists and is not running (a run that failed at create leaves one in

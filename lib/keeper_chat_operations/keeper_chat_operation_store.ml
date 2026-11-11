@@ -3306,23 +3306,75 @@ let running_settlement_unacknowledged_detail = function
     "the operation store became unavailable before Owner receipt acknowledgement"
 ;;
 
-let settle_running_without_executor store ~cause ~now =
+type restart_native_call =
+  { snapshot_store : t
+  ; operation : Operation.t
+  ; execution_revision : int64
+  ; call : Keeper_native_call.t
+  }
+
+let running_operations_with_db db =
+  with_statement db ~operation:"read interrupted direct operations"
+    ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'running'")
+    (fun statement ->
+      let rec read acc =
+        let rc = Sqlite3.step statement in
+        if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
+        else if rc = Sqlite3.Rc.ROW then
+          let* operation = decode_operation statement in read (operation :: acc)
+        else Error (Store_unavailable (sqlite_error db "read interrupted direct operations" rc)) in
+      read [])
+
+let running_native_calls store =
+  let* () = ensure_open store in
+  let* running = running_operations_with_db store.db in
+  let* calls = List.fold_left (fun result (operation : Operation.t) ->
+    let* calls = result in
+    let* execution = direct_execution_with_db store.db operation in
+    match execution with
+    | Some ({ native_call = Keeper_native_call.Active call; revision; _ } : Semantic.t) ->
+      Ok ({ snapshot_store = store; operation; execution_revision = revision; call } :: calls)
+    | Some { native_call = Keeper_native_call.No_native_call | Terminal_unacknowledged _; _ }
+    | None -> Ok calls) (Ok []) running in
+  Ok (List.rev calls)
+
+(* Journal I/O happens before this transaction, in the Owner's Eio mailbox.
+   Missing observations deliberately leave Active calls Running until the
+   application runtime is ready. Supplied observations must still name the
+   same Store handle, complete operation, semantic revision and native call. *)
+let settle_running_without_executor_with_journal_terminal
+    ~observations store ~cause ~now =
   let* () = ensure_open store in
   let* () =
     Operation.validate_timestamp ~field:"completed_at" now
     |> Result.map_error (fun detail -> Invalid_input detail)
   in
   with_transaction store (fun () ->
-    let* running = with_statement store.db ~operation:"read interrupted direct operations"
-      ("SELECT " ^ select_columns ^ " FROM operations WHERE state = 'running'")
-      (fun statement ->
-        let rec read acc =
-          let rc = Sqlite3.step statement in
-          if rc = Sqlite3.Rc.DONE then Ok (List.rev acc)
-          else if rc = Sqlite3.Rc.ROW then
-            let* operation = decode_operation statement in read (operation :: acc)
-          else Error (Store_unavailable (sqlite_error store.db "read interrupted direct operations" rc)) in
-        read []) in
+    let* running = running_operations_with_db store.db in
+    let* _validated = List.fold_left (fun result ((observed : restart_native_call), _) ->
+      let* seen = result in
+      let id = observed.operation.operation_id in
+      let* () =
+        if observed.snapshot_store == store
+           && not (List.exists (Operation.Operation_id.equal id) seen)
+        then Ok ()
+        else Error (Integrity_error "restart journal observation has another Store or duplicate operation") in
+      let* operation = match List.find_opt
+          (fun (operation : Operation.t) -> Operation.Operation_id.equal operation.operation_id id) running with
+        | Some operation when operation = observed.operation -> Ok operation
+        | Some _ | None -> Error (Integrity_error "restart journal operation changed after observation") in
+      let* execution = direct_execution_with_db store.db operation in
+      let* () = match execution with
+        | Some ({ native_call = Keeper_native_call.Active call; revision; _ } : Semantic.t)
+          when Int64.equal revision observed.execution_revision
+               && Keeper_native_call.equal call observed.call -> Ok ()
+        | Some
+            { native_call =
+                (Keeper_native_call.Active _ | No_native_call | Terminal_unacknowledged _)
+            ; _
+            }
+        | None -> Error (Integrity_error "restart journal native call changed after observation") in
+      Ok (id :: seen)) (Ok []) observations in
     (* A running operation with a durable continuation goes back to Queued and
        resumes; one without is a request whose executor ended without
        committing it, and only those are failed below. An active native call
@@ -3336,7 +3388,37 @@ let settle_running_without_executor store ~cause ~now =
       | Some (Keeper_native_call.Active call) ->
         (match cause with
          | After_process_restart ->
-           requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)
+           (match List.find_opt (fun ((observed : restart_native_call), _) ->
+              Operation.Operation_id.equal observed.operation.operation_id operation.operation_id) observations with
+            | None -> Ok interrupted
+            | Some (_, Ok (Some disposition)) ->
+              (* The Owner gate reports a journal terminal for this still-active
+                 receipt: record that terminal first, then settle. Settling an
+                 active receipt directly is refused with
+                 [Native_call_unsettled] — the receipt must name its
+                 disposition before the semantic layer accepts a terminal
+                 transition, the same path an After_store_recovery closure
+                 takes. Re-queueing would end in a bare string error on the
+                 next dispatch instead of one interrupted settlement the
+                 requester can read. *)
+              let* closed =
+                apply_direct_native_call_with_db store ~now ~operation_id:operation.operation_id
+                  ~execution_digest:operation.execution_digest
+                  (Keeper_native_call.Terminal
+                     { call_id = call.Keeper_native_call.call_id
+                     ; disposition
+                     })
+              in
+              let* next = semantic_transition ~now
+                (Semantic.Settle
+                   (Semantic.Failed (running_settlement_unacknowledged_detail cause)))
+                closed in
+              let* () = update_semantic store ~expected:closed next in
+              Ok (operation :: interrupted)
+            | Some (_, Ok None) ->
+              requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted)
+            | Some (_, Error _) ->
+              requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted))
          | After_store_recovery ->
            let* closed =
              apply_direct_native_call_with_db store ~now ~operation_id:operation.operation_id
@@ -3377,10 +3459,12 @@ let settle_running_without_executor store ~cause ~now =
            requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted))) (Ok []) running in
     let interrupted = List.rev interrupted in
     let* _reconciled = reconcile_semantic_running store ~now in
-    let* count = with_statement
+    let* count = List.fold_left (fun result (operation : Operation.t) ->
+      let* total = result in
+      let* count = with_statement
       store.db
       ~operation:"settle interrupted operations"
-      "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = ?, failure_detail = ? WHERE state = 'running'"
+      "UPDATE operations SET state = 'failed', input_json = NULL, completed_at = ?, failure_kind = ?, failure_detail = ? WHERE state = 'running' AND operation_id = ?"
       (fun stmt ->
          let failure_kind, failure_detail = running_settlement_failure cause in
          let* () = bind_float store.db stmt ~operation:"bind settlement time" 1 now in
@@ -3395,10 +3479,13 @@ let settle_running_without_executor store ~cause ~now =
          let* () =
            bind_text store.db stmt ~operation:"bind settlement failure detail" 3 failure_detail
          in
+         let* () = bind_text store.db stmt ~operation:"bind interrupted operation" 4
+             (Operation.Operation_id.to_string operation.operation_id) in
          let* () = expect_done store.db stmt ~operation:"settle interrupted operations" in
          Ok (Sqlite3.changes store.db)) in
+      Ok (total + count)) (Ok 0) interrupted in
     let* () = List.fold_left (fun result (operation : Operation.t) -> let* () = result in
-      settle_batch_members_with_db store.db ~execution_id:operation.operation_id) (Ok ()) running in
+      settle_batch_members_with_db store.db ~execution_id:operation.operation_id) (Ok ()) interrupted in
     let* () =
       if count = List.length interrupted then Ok ()
       else Error (Integrity_error (Printf.sprintf
@@ -3407,6 +3494,16 @@ let settle_running_without_executor store ~cause ~now =
        their identity and source to leave an operator-visible failure row,
        which the store cannot write itself. *)
     Ok interrupted)
+;;
+
+let settle_running_without_executor store ~cause ~now =
+  let* observations = match cause with
+    | After_store_recovery -> Ok []
+    | After_process_restart ->
+      let* calls = running_native_calls store in
+      Ok (List.map (fun call -> call, Ok None) calls) in
+  settle_running_without_executor_with_journal_terminal
+    ~observations store ~cause ~now
 ;;
 
 module For_testing = struct

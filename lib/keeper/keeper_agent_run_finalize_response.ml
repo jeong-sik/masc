@@ -169,7 +169,6 @@ let finalize
     ~history_assistant_source
     ~raw_response_text
     ~turn_outcome
-    ~checkpoint_followup
     ~terminal_effect_receipt
     ~capture_replay_response =
   let completion_contract_result = acc.receipt_completion_contract_result in
@@ -455,7 +454,6 @@ let finalize
       ; trace_ref = result.trace_ref
       ; run_validation = result.run_validation
       ; stop_reason = result.stop_reason
-      ; checkpoint_followup
       ; inference_telemetry = result.response.telemetry
       ; wire_prompt_tokens = acc.wire_prompt_tokens
       ; tool_surface = acc.tool_surface

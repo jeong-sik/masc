@@ -144,7 +144,8 @@ let registry_setup_error = function
   | Runtime_exact_output_registry.Lane_thinking_not_encodable _
   | Runtime_exact_output_registry.Required_lane_unavailable _
   | Runtime_exact_output_registry.Required_lane_disabled _
-  | Runtime_exact_output_registry.Resolver_snapshot_rejected _ ->
+  | Runtime_exact_output_registry.Resolver_snapshot_rejected _
+  | Runtime_exact_output_registry.Targets_refused _ ->
     Registry_unavailable
 ;;
 
@@ -477,7 +478,7 @@ let cli_tail_error_to_string = function
 
 let walk_cli_slots ?runner ~base_path ~cli_slots prepared =
   (match
-       Keeper_lane_cli_oneshot.walk
+       Exact_lane_slot_capture.walk_cli
          ?runner
          ~base_dir:base_path
          ~cli_slots
@@ -786,6 +787,7 @@ let execute_current
   let cli_selected_slot = ref None in
   (* Set only by an HTTP flow success; JEV and CLI transports report none. *)
   let observed_usage = ref None in
+  let slot_capture = Exact_lane_slot_capture.create ~owner:(Runtime_schema.Builtin Standalone_lane.Board_attention) () in
   let complete ?usage outcome output =
     (* A CLI answer after the HTTP slots failed leaves [bound] on the last
        failed HTTP slot; the slot that answered is the CLI one. *)
@@ -803,6 +805,7 @@ let execute_current
         ~elapsed_s:(Time_compat.now () -. started_at)
         ~selected_slot
         ?usage
+        ?slot_observations:(Exact_lane_slot_capture.observations slot_capture)
         ~output
         ()
     with
@@ -864,7 +867,7 @@ let execute_current
         (cli_tail_error_to_string error);
       Error (Cli_slots_exhausted { prior_error = Some prior_error; failures })
   in
-  let jev_first, result =
+  let jev_first, result = Exact_lane_slot_capture.with_capture slot_capture (fun () ->
     try
       let jev_first = ask_jev ~clock prepared in
       let result =
@@ -897,7 +900,8 @@ let execute_current
            | Jev_uncertain _
            | Jev_failed _ ->
              let flow =
-               Exact_output.execute_flow_once
+               Exact_lane_slot_capture.flow attempt (fun () ->
+                 Exact_output.execute_flow_once
                  ~net:prepared.net
                  ~clock
                  ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -905,7 +909,7 @@ let execute_current
                  ~before_dispatch:agent_core_before_dispatch
                  ~before_advance:agent_core_before_advance
                  ~validate
-                 attempt
+                 attempt)
              in
              Runtime_exact_lane_backpressure.observe ~resolved flow;
              (match flow with
@@ -958,7 +962,7 @@ let execute_current
         (Exact_lane_run_registry.Failed
            { code = "board_attention_raised"; detail = Printexc.to_string exn })
         `Null;
-      raise exn
+      raise exn)
   in
   (match result with
    | Ok judgment ->

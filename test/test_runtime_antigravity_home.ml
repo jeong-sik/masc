@@ -1700,7 +1700,6 @@ let test_a_removed_root_leaves_no_preparation_claim_behind () =
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run
     "runtime_antigravity_home"
     [ ( "setup", [test_case "explicit private account import" `Quick test_explicit_setup_import_and_login_home;

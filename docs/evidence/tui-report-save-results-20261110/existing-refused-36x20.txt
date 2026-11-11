@@ -1,0 +1,20 @@
+ ‹3 ▸기능·플러그인  워크스페이스 1›
+
+  리소스
+ 원본 파일 저장 · 격리 리소스 관측
+ Path: …report saved baseline.md
+ 이미 있는 파일 · 변경하지 않았습 …
+  ▸ Resource · Markdown · 격리 리 …
+ ──────────────────────────────────
+   이미 있는 파일 · 변경하지
+   않았습니다
+
+   ┌─ text ──────────────────────
+   │ /Users/dancer/me/workspace/y
+   │ ousleepwhen/masc/artifacts/t
+   │ ui-feature-children-reading-
+   │ 20261110/fixture report save
+   │ d baseline.md
+
+  Esc:close input  Enter:create fil…
+ › no keeper selected

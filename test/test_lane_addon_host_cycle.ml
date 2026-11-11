@@ -655,6 +655,11 @@ let test_category_edit_preserves_original_export_and_worker () =
        | _ -> fail "category rewrite lost the actual declaration");
       let after = Lane_addon_config.load_file ~path:source |> unwrap in
       check string "navigation edit preserves the configuration authority" before.revision after.revision;
+      let store = Lane_addon_store.create ~root:(Filename.concat root ".masc/lane-addons") in
+      (match Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:after.id
+          ~package_id:after.package.id ~configuration_revision:after.revision with
+       | Ok () -> ()
+       | Error detail -> fail ("category edit revoked the original Exact dispatch: " ^ detail));
       let updated = Option.to_result ~none:"category rewrite lost the original export" (current ()) |> unwrap in
       check string "navigation edit preserves the live incarnation" original.instance_id updated.instance_id;
       check bool "navigation edit preserves the exact tool owner" true
@@ -833,7 +838,7 @@ let test_a_granted_board_is_read_oldest_first_and_retained () =
   with_installation ~declaration:board_granted (fun clock config worker _ root ->
     let first = post "first" in
     ignore (post ~visibility:Board.Internal "hidden");
-    (match Board_dispatch.add_comment ~post_id:first ~author:"operator" ~content:"reply" () with
+    (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:first ~author:"operator" ~content:"reply" () with
      | Ok _ -> () | Error error -> fail (Board.show_board_error error));
     ignore (post "second");
     worker.listing := [ read "p1" "board" ];

@@ -80,6 +80,14 @@ type comment = {
 }
 ```
 
+댓글 작성은 호출 경계의 `reader`를 저장 경로까지 전달한다. `author`는 작성자와
+소게시판 쓰기 정책의 입력이며 읽기 권한을 대신하지 않는다. 저장 전에 원본의
+최신 부모 글에서 읽기 권한·닫힘·댓글 audience를 검사하고, hearth가 있으면
+소게시판 정책 원본도 확인한다. 미등록 hearth는 허용하되 그 부재를 확인한 정책
+snapshot을 함께 잠근다. 잠금 순서는 Posts → Policy → Comments이며 append가
+끝날 때까지 유지한다. 원본이 바뀌어 guard가 거절하면 댓글은 쓰지 않는다.
+실제 append 뒤 정리 실패는 저장 영수증과 함께 보존하고 모델 반영·ACK 뒤 전달한다.
+
 ### 2.4 에러 타입
 
 ```ocaml
@@ -134,10 +142,31 @@ Store mutation은 `Board_dispatch.*`를 경유하고, 타입/직렬화 접근은
 | `.masc/board_posts.jsonl` | 게시물 (줄 단위 JSON) |
 | `.masc/board_comments.jsonl` | 댓글 |
 | `.masc/board_votes.jsonl` | 투표 로그 |
+| `.masc/board_reactions.jsonl` | 리액션 |
+| `.masc/board_sub_boards.jsonl` | 하위 게시판 정책 |
+| `.masc/board_deletion.jsonl` | 진행 중인 삭제 결정과 원래 대상 ID |
 
 **저장 전략:**
-- 모든 mutation: expected version 아래 atomic current-state snapshot rewrite
-- persistence 실패: mutation을 완전한 durable 성공으로 위장하지 않고 typed error 반환. 특히 `delete_post` 등 인메모리 상태가 먼저 갱신된 뒤 스냅샷 재기록이 실패한 경우(`#43267`), 호출자에게 snapshot rewrite 미완료(pending snapshot persistence) 상태를 명시적으로 구분해 보고한다.
+- 각 원본의 쓰기는 관측한 파일 버전과 바이트를 검사한다. 추가 기록과 스냅샷 재기록은 해당 원본의 저장 경로를 따른다.
+- `delete_post`는 요청자의 권한과 부모 글 원본을 확인하고, 댓글 원본의 각 ID에 대한 마지막 행으로 원래 자식 ID를 정한다. 글→댓글 순서로 정확한 원본 snapshot을 잠그고 이 결정을 기록할 때까지 유지한다. 결정 전에 수락된 댓글은 대상에 포함하거나 오래된 요청을 기록 전에 거절한다. 이후 글·댓글·투표·리액션을 순서대로 저장하고 네 쓰기가 확인된 뒤 결정 파일을 정리한다.
+- Posts 쓰기 결과가 불확실하면 원래 관측과 의도한 바이트를 보존하고 같은 store의 원본 재조회·변경 승인을 거절한다. 새 store가 실제 원본을 읽는다. 파일만 readable로 바꾸는 별도 공개 settlement는 제공하지 않는다.
+- 결정이 기록되기 전 거절은 모델을 바꾸지 않는다. 결과가 불확실한 결정은 일반 요청이나 flush가 재실행하지 않는다. fresh store 초기화는 남아 있는 결정을 다시 확인하고 원래 ID의 삭제만 이어간다. 나중에 추가된 댓글과 그 표·리액션은 이 결정에 포함하지 않는다.
+- `delete_sub_board`도 같은 결정 파일을 소유한다. 원 요청자의 권한을 현재 정책에 다시 검사하고, 게시글→정책 원본을 잠근 채 원래 소게시판 ID·slug와 그때 속한 게시글 ID를 기록한다. 모델에서 정책과 해당 소속을 해제한 뒤 게시글→정책 두 원본만 저장한다. 댓글·투표·리액션과 그 미완료 저장 작업은 이 삭제가 정리하지 않는다.
+- 재시작 복구는 기록한 소게시판 ID만 지우고, 기록한 게시글 중 여전히 원래 hearth에 속한 글만 해제한다. 같은 slug의 새 소게시판, 나중에 추가된 글, 다른 hearth로 옮긴 글은 보존한다. 선택한 원본의 저장 결과가 불확실하면 같은 store의 reload나 일반 flush로 삭제를 재실행하지 않는다. fresh store가 원래 결정을 복구해야 한다.
+
+Dashboard 삭제 응답은 다음 세 조합을 구분한다. `decision_pending`에서는 행·선택·상세를 유지하고 경고한다. 두 pending 응답 모두 같은 삭제 POST를 반복하지 않는다.
+
+| HTTP | `applied` | `persistence` | 의미 |
+|------|-----------|---------------|------|
+| 200 | `true` | `durable` | 원본 저장과 결정 정리 완료 |
+| 202 | `true` | `pending` | 모델 삭제 적용, 원본 저장 또는 결정 정리 대기 |
+| 202 | `false` | `decision_pending` | 결정 결과 또는 적용이 미확인 |
+
+MCP 단건 삭제는 원래 author와 reader를 보관해 현재 모델과 관측 원본 양쪽에 다시 검사한다. Admin HTTP 경로만 operator 권한을 전달한다.
+
+일괄 cleanup은 실제 reader와 요청 때 고정한 생성시각 cutoff·댓글 없음·투표 없음·제목/작성자 substring 조건을 함께 보관한다. 후보 표시는 현재 조회 결과로 계산하고, 실제 삭제 결정 전에는 같은 조건을 canonical 글·댓글·투표 원본으로 다시 검사한다. 댓글은 마지막 ID 행 기준 자식 집합을, 투표는 해당 게시글 대상의 표 존재를 사용한다. Up과 Down의 순점수가 0이어도 표가 있으면 “투표 없음”이 아니며, 댓글 대상의 표는 이 게시글 필터에 포함하지 않는다.
+
+기존 Posts → Comments guard에 “투표 없음” 조건이 요청된 경우만 Votes guard를 추가하고, 그 범위를 삭제 결정 기록까지 유지한다. 실제 guard 거절은 해당 원본 소유자에게만 전달한다. 조건을 해제한 cleanup과 일반 삭제에 추가 Votes 승인 guard를 적용하지 않는다. 기록된 결정의 재시작 복구는 원래 ID 집합을 따르며, cleanup 조건을 다시 검사해 이미 승인한 결정을 취소하지 않는다. 별도 소게시판 정책 read-set은 이 조건에 포함하지 않는다.
 
 **캐시:**
 - `sorted_posts_cache` -- 정렬된 게시물 목록 (invalidated on post mutation)
@@ -178,8 +207,22 @@ vote_log 키: `"post:<pid>:<voter>"` 또는 `"comment:<cid>:<voter>"`
 | Up | Down | Flip: up -1, down +1, vote_log 갱신 |
 | Down | Up | Flip: down -1, up +1, vote_log 갱신 |
 
-Votes update the requested post/comment counters only. They do not change model
-selection, Keeper priority, reputation, credit, or authorization.
+투표는 대상 글·댓글의 카운터를 갱신한다. 모델 선택, Keeper 우선순위나 권한을
+결정하는 입력으로 쓰지는 않는다.
+
+새 투표와 반응은 요청의 실제 reader를 저장 경계까지 전달한다. voter/user_id는
+효과의 주체이며 읽기 권한을 대신하지 않는다. 글 대상은 canonical Posts를,
+댓글 대상은 canonical Comments의 댓글→글 연결과 Posts를 확인한다. 모델의
+권한·연결 필드가 이 원본과 다르면 쓰기 전에 거절한다. 잠금은 Posts → 필요한
+경우 Comments → Votes/Reactions 순서이며 실제 leaf 쓰기까지 유지한다.
+
+중복 투표도 부모와 투표 원본을 읽기 전용 guard로 확인한 뒤 `Already_voted`를
+반환한다. 새 append나 성공 쓰기 영수증을 만들지 않는다. 부모 guard의 거절은
+leaf 미실행이며, 실제 leaf 성공 뒤 정리 실패는 모델 반영·ACK 뒤 원인과 함께
+전달한다. 결과가 불확실하면 기존 unsettled 쓰기를 보존하고 임의 재실행하지 않는다.
+
+이미 저장된 orphan 행의 로드·보존은 이 신규 변경 승인과 별개다. 읽을 수 있는
+closed 글에도 투표·반응할 수 있으며 소게시판의 게시글 생성 정책을 적용하지 않는다.
 
 ---
 
@@ -332,9 +375,17 @@ POST 요청은 `with_tool_auth` (`tool_name: "board_sub_board_create"`)로 인�
 
 게시글의 `hearth`가 SubBoard slug와 일치하면 SubBoard 게시로 간주하고 위 접근 정책을 적용한다. 일치하는 SubBoard가 없는 hearth는 기존 topic hearth로 동작한다.
 
+게시글 생성은 캐시의 사전 검사 뒤 정확한 Policy 원본 snapshot에서 작성자 권한을
+다시 확인한다. 미등록 slug도 그 부재를 확인한 snapshot이 필요하다. Posts → Policy
+순서로 잠금을 잡고 실제 append가 끝날 때까지 유지하며, Posts 잠금을 다시 잡지 않는다.
+Policy guard가 거절하면 글과 모델을 바꾸지 않고 해당 정책 원본의 권위를 갱신한다.
+저장 성공 뒤 정리 실패는 실제 저장 영수증과 모델 반영을 보존한 뒤 전달한다.
+hearth가 없는 글은 Policy 원본에 의존하지 않는다. 기존 글의 pin·close·reopen은
+게시글 생성 정책과 별개의 작업이다. 댓글의 부모·정책 검사는 2.3절을 따른다.
+
 ### 11.4 영속성 (Persistence)
 
-JSONL 백엔드: `.masc/board_sub_boards.jsonl`. 각 줄은 `sub_board_to_yojson`의 현재 필드를 정확히 모두 포함하며, unknown/duplicate/missing field와 타입 불일치는 거부한다. `members`는 owner를 첫 원소로 정확히 한 번 포함하며 모든 원소가 canonical agent ID여야 한다. 저장 레코드의 `post_count`는 `0`이고, API view의 count는 현재 post store에서 slug/hearth 매칭으로 파생한다. 생성 시 `append_sub_board`, 수정/삭제 시 `rewrite_sub_boards`로 전체 재기록한다.
+JSONL 백엔드: `.masc/board_sub_boards.jsonl`. 각 줄은 `sub_board_to_yojson`의 현재 필드를 정확히 모두 포함하며, unknown/duplicate/missing field와 타입 불일치는 거부한다. `members`는 owner를 첫 원소로 정확히 한 번 포함하며 모든 원소가 canonical agent ID여야 한다. 저장 레코드의 `post_count`는 `0`이고, API view의 count는 현재 post store에서 slug/hearth 매칭으로 파생한다. 생성은 정책 원본에 추가하고 수정은 재기록한다. 삭제는 4.2절의 durable 결정과 게시글·정책 저장을 함께 소유한다.
 
 slug 중복 생성 시 `Already_exists` 에러.
 

@@ -28,6 +28,7 @@ import { Btn } from './btn'
 import { ErrorState } from './common/feedback-state'
 import type { StatusBadgeTone } from './common/status-badge'
 import { JsonViewerCard } from './common/json-viewer'
+import { ExactRunSlotObservations } from './exact-slot-observations'
 import type { ExactLanePayloadAvailability } from '../api/dashboard-exact-lane-runs'
 import { formatDateTimeKo, relativeTime } from '../lib/format-time'
 import { hashForRoute } from '../router'
@@ -594,6 +595,7 @@ function ExactRunDetail({ runId }: { runId: string }) {
             ? null
             : html`<p class="ia-err"><code>${run.code}</code>: ${run.detail}</p>`}
         </div>
+        <${ExactRunSlotObservations} value=${run.slotObservations} />
         <div class="ia-tool-io">
           <${ExactPayload} side="input" availability=${run.payloadAvailability.input} value=${run.input.payload} />
           <${ExactPayload} side="output" availability=${run.payloadAvailability.output} value=${run.output} />

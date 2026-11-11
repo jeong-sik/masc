@@ -40,6 +40,58 @@ let test_without_the_host_the_thread_is_the_callers () =
     check int "the caller's domain starts the thread" caller thread)
 ;;
 
+(* [Fs_compat]'s own blocking calls take the same route. A durable rewrite
+   calls its [decide] inside the blocking call, so [decide] names the domain
+   whose thread ran it. *)
+let fs_compat_thread () =
+  let dir = Filename.temp_dir "masc-systhread-host" "" in
+  let path = Filename.concat dir "store.json" in
+  let seen = ref None in
+  let outcome =
+    Fs_compat.rewrite_private_file_durable_locked_result path (fun _existing ->
+      seen := Some (domain ());
+      None, ())
+  in
+  (match outcome with
+   | Ok () -> ()
+   | Error message -> failf "the rewrite failed: %s" message);
+  match !seen with
+  | Some thread -> thread
+  | None -> fail "the rewrite never called decide"
+;;
+
+let test_without_the_host_a_fs_compat_call_is_the_callers () =
+  Eio_main.run (fun env ->
+    let caller = domain () in
+    let thread = bounded env 10.0 "the rewrite" fs_compat_thread in
+    check int "the caller's domain starts the thread" caller thread)
+;;
+
+let test_a_fs_compat_call_runs_on_the_host () =
+  Systhread_host.start ();
+  Eio_main.run (fun env ->
+    let caller = domain () in
+    let thread = bounded env 10.0 "the rewrite" fs_compat_thread in
+    let direct = bounded env 10.0 "the direct call" (fun () -> Systhread_host.run domain) in
+    check bool "the thread is not the caller's domain's" true (thread <> caller);
+    check int "it is the host that Systhread_host.run uses" direct thread)
+;;
+
+let test_a_fs_compat_call_from_pool_work_keeps_its_domain () =
+  Systhread_host.start ();
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+        let job, thread =
+          bounded env 10.0 "the pool job" (fun () ->
+            Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+              domain (), fs_compat_thread ()))
+        in
+        check int "the thread is the job's domain's" job thread)))
+;;
+
 let test_work_runs_on_the_host_outside_eio () =
   Systhread_host.start ();
   Eio_main.run (fun env ->
@@ -177,9 +229,15 @@ let () =
     [ ( "placement"
       , [ test_case "without the host the thread is the caller's" `Quick
             test_without_the_host_the_thread_is_the_callers
+        ; test_case "without the host a Fs_compat call's thread is the caller's" `Quick
+            test_without_the_host_a_fs_compat_call_is_the_callers
         ; test_case "work runs on the host, outside Eio" `Quick
             test_work_runs_on_the_host_outside_eio
         ; test_case "pool work keeps its own domain" `Quick test_pool_work_keeps_its_own_domain
+        ; test_case "a Fs_compat call runs on the host" `Quick
+            test_a_fs_compat_call_runs_on_the_host
+        ; test_case "a Fs_compat call from pool work keeps its domain" `Quick
+            test_a_fs_compat_call_from_pool_work_keeps_its_domain
         ] )
     ; ( "cancellation"
       , [ test_case "a cancelled caller starts work only when protected" `Quick

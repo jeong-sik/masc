@@ -30,17 +30,3 @@ type gesture =
 val drag_waypoints : start:point -> destination:point -> point list -> point list
 (** The supplied intermediate route, or its midpoint when empty. Does not
     include the destination or dispatch input; each adapter owns button release. *)
-
-(** Native WebDriver/BiDi input sources. A click presses and releases the
-    button's WebDriver pointer button: 0 for [Primary], 1 for [Middle], 2 for
-    [Secondary]. Drag visits every supplied waypoint
-    and moves over the destination twice before releasing. An empty path
-    visits the midpoint first, so activation and destination movement occur
-    at distinct positions when their CSS-pixel coordinates differ. This lets dragover
-    handlers observe the destination where the browser supports native HTML
-    drag-and-drop; it does not prove that the application accepted a drop. [duration_ms] applies to each drag move;
-    the initial positioning and the final repeated move have zero duration.
-    Callers retain ownership of release/cancellation and input validation. *)
-val input_sources :
-  pointer_id:string -> wheel_id:string -> viewport:viewport -> start:point ->
-  gesture -> Yojson.Safe.t

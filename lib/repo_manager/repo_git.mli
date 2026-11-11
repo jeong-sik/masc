@@ -111,12 +111,6 @@ val common_dir :
     an origin pointing at a Git directory. Read-only and bounded by the same
     inspection contract as {!checkout_identity}. *)
 
-val origin_head_branch : local_path:string -> (string, string) result
-(** [origin_head_branch ~local_path] returns the branch named by
-    [refs/remotes/origin/HEAD]. It does not fall back to guessed branch names;
-    callers that need an auditable repository-registration candidate should
-    surface [Error _] to the operator instead of inventing a default branch. *)
-
 val current_branch :
   ?timeout_sec:float -> repository:repository -> unit -> (string, string) result
 (** [current_branch ~repository] returns the short name of the checked-out

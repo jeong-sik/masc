@@ -2009,7 +2009,7 @@ class MissionRun:
         return None
 
     def read_goal(self, goal_id: str, label: str) -> dict[str, Any]:
-        observation = self.call(label, "masc_goal_list", {})
+        observation = self.call(label, "masc_goal_list", {"goal_id": goal_id})
         goal = self.find_goal(observation.data, goal_id)
         if goal is None:
             raise AcceptanceError(f"goal list did not contain {goal_id}")
@@ -3065,7 +3065,7 @@ class MissionRun:
             self.runtime_serving_evidence,
         )
         calls = {
-            "goals": ("masc_goal_list", {}),
+            "goals": ("masc_goal_list", {"detailed": True}),
             "tasks": ("masc_tasks", {"include_done": True, "include_cancelled": True}),
             "board-search": (
                 "masc_board_search",

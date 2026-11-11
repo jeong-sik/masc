@@ -437,9 +437,7 @@ type keeper_msg =
      the Keeper: an answer for one the cursor has left is dropped. *)
   | Keeper_story_turns_loaded of
       string Masc_tui_fetched.request * (Masc_tui_keeper_turns.turn list, string) result
-  | Keeper_story_memory_facts_loaded of string Masc_tui_fetched.request
-      * (Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option, string) result
-  | Keeper_story_memory_activity_loaded of string Masc_tui_fetched.request
+  | Keeper_memory_activity_loaded of string Masc_tui_fetched.request
       * (Masc.Keeper_memory_activity.t, string) result
   | Keeper_calls_loaded of
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
@@ -748,6 +746,7 @@ type resource_msg =
   | Resources_listed of
       unit ref * (Masc_tui_resource_catalog.listing, string) result
   | Resource_exported of string * (string, string) result
+  | Resource_saved of Masc_tui_types.resource_save_request * Masc_tui_types.resource_save_outcome
   | Resource_share_changed of Masc_tui_types.resource_share_request * (Masc_tui_types.resource_share_outcome, Masc_tui_types.resource_share_failure) result
   | Resource_share_recovery_loaded of Masc_tui_types.resource_share_recovery_lookup * (Masc_tui_artifact_share_pending.entry option, string) result
   | Resource_read of
@@ -1081,7 +1080,7 @@ let rec workspace_message_is_read = function
   | Original_msg answer ->
       (match Masc_tui_original_results.answer_kind answer with
        | Masc_tui_original_results.Read -> true)
-  | Board_msg (Board_attachment_saved _) | Resource_msg (Resource_exported _ | Resource_share_changed _) | Verification_msg (Verification_evidence_exported _) -> false
+  | Board_msg (Board_attachment_saved _) | Resource_msg (Resource_exported _ | Resource_saved _ | Resource_share_changed _) | Verification_msg (Verification_evidence_exported _) -> false
   | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) -> true
   | Chat_msg (Chat_search_finished _) -> true
   | Workspace_scoped (_, _, message)
@@ -1180,7 +1179,7 @@ let rec workspace_message_is_read = function
   | Goal_msg (Goal_confirmation_loaded _)
   | Schedule_msg (Schedules_loaded _
   | Schedule_wake_history_loaded _)
-  | Keeper_msg (Keeper_schedules_loaded _ | Keeper_story_turns_loaded _ | Keeper_story_memory_facts_loaded _ | Keeper_story_memory_activity_loaded _)
+  | Keeper_msg (Keeper_schedules_loaded _ | Keeper_story_turns_loaded _ | Keeper_memory_activity_loaded _)
   | System_log_streamed _
   | Ask_msg (Ask_followup_observed _ | Ask_followup_finished _)
   | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Keeper_msg (Keeper_calls_loaded _)
@@ -1370,7 +1369,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_creation_changed _ | Keeper_action_done _ | Keeper_memory_catch_up_done _)
   | Board_msg (Board_publication_done _ | Board_comment_done _ | Board_vote_done _) | Goal_msg (Goal_transition_done _
   | Goal_confirmation_submitted _ | Goal_confirmation_loaded _) | Schedule_msg (Schedules_loaded _
-  | Schedule_wake_history_loaded _) | Keeper_msg (Keeper_schedules_loaded _ | Keeper_story_turns_loaded _ | Keeper_story_memory_facts_loaded _ | Keeper_story_memory_activity_loaded _) | System_log_streamed _
+  | Schedule_wake_history_loaded _) | Keeper_msg (Keeper_schedules_loaded _ | Keeper_story_turns_loaded _ | Keeper_memory_activity_loaded _) | System_log_streamed _
   | Schedule_msg (Schedule_cancel_done _) | Verification_msg (Verification_verdict_done _) | Harness_msg (Harness_label_done _)
   | Chat_msg (Chat_call_loaded _) | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _)
   | Keeper_msg (Keeper_calls_loaded _) | Goal_msg (Goal_timeline_loaded _ | Goal_candle_loaded _)
@@ -1386,7 +1385,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Preset_deleted _) | Play_msg (Play_room_received _ | Play_invites_listed _ | Play_invite_issued _
   | Play_invite_revoked _) | Librarian_input_loaded _ | Artifact_msg (Artifact_checks_loaded _
   | Artifact_check_changed _) | Resource_msg (Resources_listed _)
-  | Acting_pane_changes_loaded _ | Resource_msg (Resource_exported _ | Resource_share_changed _)
+  | Acting_pane_changes_loaded _ | Resource_msg (Resource_exported _ | Resource_saved _ | Resource_share_changed _)
   | Github_msg (Github_identity_view_loaded _) | Identity_msg (Identity_providers_loaded _ | Identity_switch_set _
   | Identity_login_started _ | Identity_refreshed _ | Identity_app_saved _
   | Identity_disconnected _) | Account_msg (Account_login_event _ | Account_login_json _
@@ -1535,7 +1534,7 @@ let retired_operation_observation state ~authority ~reading message =
     | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _) | Board_msg (Board_publication_done _ | Board_comment_done _)
     | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _
     | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
-    | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _) | Keeper_story_memory_facts_loaded (_, _) | Keeper_story_memory_activity_loaded (_, _))
+    | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _) | Keeper_memory_activity_loaded (_, _))
     | System_log_streamed _ | Schedule_msg (Schedule_cancel_done (_, _))
     | Verification_msg (Verification_verdict_done _) | Harness_msg (Harness_label_done _)
     | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
@@ -1556,7 +1555,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _))
     | Librarian_input_loaded (_, _) | (Resource_msg (Resources_listed _) | Artifact_msg (Artifact_checks_loaded _))
     | Board_msg (Board_attachment_saved _) | Acting_pane_changes_loaded (_, _)
-    | Resource_msg (Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _)
+    | Resource_msg (Resource_exported _ | Resource_saved _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _)
     | Github_msg (Github_identity_view_loaded (_, _)) | Identity_msg (Identity_providers_loaded (_, _, _)
     | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
     | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
@@ -1680,7 +1679,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _) | Board_msg (Board_publication_done _ | Board_comment_done _) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _))
   | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _
   | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
-  | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _) | Keeper_story_memory_facts_loaded (_, _) | Keeper_story_memory_activity_loaded (_, _))
+  | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _) | Keeper_memory_activity_loaded (_, _))
   | System_log_streamed _ | Schedule_msg (Schedule_cancel_done (_, _))
   | Verification_msg (Verification_verdict_done _) | Harness_msg (Harness_label_done _)
   | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
@@ -1701,7 +1700,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Play_invite_issued (_, _, _) | Play_invite_revoked (_, _, _, _))
   | Librarian_input_loaded (_, _) | (Resource_msg (Resources_listed _) | Artifact_msg (Artifact_checks_loaded _))
   | Board_msg (Board_attachment_saved _) | Acting_pane_changes_loaded (_, _)
-  | Resource_msg (Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _)
+  | Resource_msg (Resource_exported _ | Resource_saved _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_, _, _) | Resource_diagram_ready _)
   | Github_msg (Github_identity_view_loaded (_, _)) | Identity_msg (Identity_providers_loaded (_, _, _)
   | Identity_switch_set (_, _, _, _) | Identity_login_started (_, _)
   | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)

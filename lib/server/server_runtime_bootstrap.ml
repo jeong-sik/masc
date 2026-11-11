@@ -6,7 +6,6 @@ module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Config_root_bootstrap = Server_runtime_config_root_bootstrap
 
-let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
@@ -210,7 +209,13 @@ let warn_catalog_absent_keeper_assignments _resolver_snapshot = ()
 let exact_output_catalog_for_lanes ~config_path lanes =
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
-  lanes, Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes, runtimes
+  match Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes with
+  | Ok catalog -> lanes, catalog, runtimes
+  | Error refusal ->
+    raise
+      (Env_config_core.Config_error
+         ("exact-output slots of the runtime table: "
+          ^ Runtime_account_access.refusal_to_string refusal))
 ;;
 
 let exact_output_lanes_and_catalog ?config_path ?config_root () =
@@ -635,6 +640,7 @@ let startup_failure_disposition ~state_ready =
 type owner_initialization_error =
   | Runtime_config_read_failed of string
   | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
+  | Native_execution_runtime_unavailable
   | Domain_budget_exceeded of Domain_budget.error
   | Keeper_config_recovery_failed of Keeper_config_journal.report
   | Admin_credential_bootstrap_failed of Masc_domain.masc_error
@@ -675,6 +681,8 @@ let owner_initialization_error_to_string = function
   | Native_execution_runtime_failed error ->
     "native execution runtime initialization failed: "
     ^ Runtime_agent_execution_runtime.initialization_error_to_string error
+  | Native_execution_runtime_unavailable ->
+    "initialized native execution runtime is unavailable"
   | Domain_budget_exceeded error ->
     "executor domain budget refused: " ^ Domain_budget.error_to_string error
   | Keeper_config_recovery_failed report ->
@@ -1177,6 +1185,16 @@ let initialize_owner_state_blocking
    | Ok () -> ()
    | Error error ->
      raise (Owner_initialization_failed (Native_execution_runtime_failed error)));
+  (* Owners are registered and shutdown fences restored, but no Keeper loop
+     has been claimed or started. Canonical journal projection now has its
+     application-owned runtime; its Eio reads run outside registry locks and
+     operation Store transactions. *)
+  let runtime = match Runtime_agent_execution_runtime.get () with
+    | Some runtime -> runtime
+    | None -> raise (Owner_initialization_failed Native_execution_runtime_unavailable) in
+  (match Keeper_direct_native_continuation.complete_restart_settlements ~runtime ~base_path with
+   | Ok count -> Log.Keeper.info "keeper_owner: completed startup journal settlement for %d owner(s)" count
+   | Error error -> raise (Keeper_owner_registry.Install_failed error));
   let log = if Domain_budget.within_limit budget then Log.Server.info else Log.Server.warn in
   log
     "Executor domains: %d shared pool + %d read pool + %d execution codec + %d fixed = %d (limit %d = recommended %d - 1)"
@@ -1915,7 +1933,16 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
           | Server_mcp_transport_ws.Inbound_dispatch_rejected rejection ->
               send_overloaded_response rejection
           | Server_mcp_transport_ws.Inbound_dispatch_admitted session ->
-              Eio.Fiber.fork ~sw (fun () ->
+              (* A message arrives on its connection's fiber, which runs on
+                 the HTTP serving domain when that is on. The request is
+                 handled on the domain of [sw] either way: the owner's queue
+                 gives each task a fiber of its own under the root switch. *)
+              let on_owner handle =
+                match Eio_context.owner_post () with
+                | None -> Eio.Fiber.fork ~sw handle
+                | Some post -> post handle
+              in
+              on_owner (fun () ->
                 Eio_guard.protect
                   ~finally:(fun () ->
                     Server_mcp_transport_ws.finish_inbound_dispatch session)
@@ -2214,6 +2241,15 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
          often, and a minor collection stops every other domain with it. *)
       Minor_heap.tune ();
       Eio.Switch.run (fun serving_sw ->
+        (* How late a ready fiber of a connection runs on this domain
+           ([scheduler.serving_lag] in /health). A daemon: the probe never
+           returns, and this switch ends when serving does. The clock comes
+           from the environment: this domain starts before the server state
+           publishes one through [Eio_context]. *)
+        Eio.Fiber.fork_daemon ~sw:serving_sw (fun () ->
+          Eio.Switch.run (fun probe_sw ->
+            Scheduler_lag.start ~sw:probe_sw ~mono_clock Scheduler_lag.serving);
+          `Stop_daemon);
         Eio_context.with_turn_switch serving_sw (fun () ->
           let socket =
             Server_bootstrap_http.listen_socket ~sw:serving_sw ~net ~address config
@@ -2222,8 +2258,17 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
             Server_bootstrap_http.listen_https_socket ~sw:serving_sw ~net ~address ~config https
           in
           let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
+          (* Handlers run on the main domain (RFC
+             http-transport-runs-on-its-own-domain §3.3), so the table is
+             built there, with the main switch for what handlers fork. *)
           let routes =
-            make_routes ~port:config.port ~host:config.host ~sw:serving_sw ~clock
+            Eio_context.run_on_owner_domain (fun () ->
+              make_routes
+                ~port:config.port
+                ~host:config.host
+                ~sw
+                ~transport_sw:serving_sw
+                ~clock)
           in
           let request_handler = make_request_handler ~trust_policy routes in
           let h2_request_handler = make_h2_request_handler ~trust_policy ~routes in
@@ -2240,7 +2285,9 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
     let socket = Server_bootstrap_http.listen_socket ~sw ~net ~address config in
     let https_listener = Server_bootstrap_http.listen_https_socket ~sw ~net ~address ~config https in
     let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
-    let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
+    let routes =
+      make_routes ~port:config.port ~host:config.host ~sw ~transport_sw:sw ~clock
+    in
     let request_handler = make_request_handler ~trust_policy routes in
     let h2_request_handler = make_h2_request_handler ~trust_policy ~routes in
     let h2_error_handler = make_h2_error_handler () in

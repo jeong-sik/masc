@@ -77,7 +77,7 @@ let load_single_link_regular_file_beneath ~root ?excluded_directory relative =
   match execution_context (), get_fs_opt () with
   | Non_eio, (Some _ | None) | Eio_fiber, None -> read ()
   | Eio_fiber, Some _ ->
-    let result = Eio_unix.run_in_systhread ~label:"fs-compat-read-beneath" read in
+    let result = Fs_compat_internal.Systhread_host.run ~label:"fs-compat-read-beneath" read in
     Eio.Fiber.check ();
     result
 ;;
@@ -112,7 +112,7 @@ let open_owned_reader ~sw ~parent ~leaf =
         | Error detail -> invalid_arg detail in
       let expected=Eio.Path.stat ~follow:false parent in
       let path=Eio.Path.native_exn parent in
-      let opened=Eio_unix.run_in_systhread ~label:"owned-reader-open" (fun () ->
+      let opened=Fs_compat_internal.Systhread_host.run ~label:"owned-reader-open" (fun () ->
         with_owned_inventory_root path (fun root ->
           if not (owned_reader_root_matches expected (owned_inventory_root_stat root))
           then owned_file_error (Filesystem_identity_changed {path})
@@ -139,7 +139,7 @@ let open_owned_reader ~sw ~parent ~leaf =
 ;;
 
 let owned_reader_stat reader =
-  let stat=Eio_unix.run_in_systhread ~label:"owned-reader-stat" (fun () ->
+  let stat=Fs_compat_internal.Systhread_host.run ~label:"owned-reader-stat" (fun () ->
     Eio_unix.Fd.use_exn "owned reader stat" reader Unix.LargeFile.fstat) in
   let kind=match stat.st_kind with
     | Unix.S_REG -> `Regular_file | S_DIR -> `Directory | S_CHR -> `Character_special
@@ -152,7 +152,7 @@ let owned_reader_stat reader =
 
 let owned_reader_pread reader ~offset ~length =
   if offset<0L || length<0 || length>Sys.max_string_length then invalid_arg "owned reader range";
-  Eio_unix.run_in_systhread ~label:"owned-reader-pread" (fun () ->
+  Fs_compat_internal.Systhread_host.run ~label:"owned-reader-pread" (fun () ->
     Eio_unix.Fd.use_exn "owned reader pread" reader (fun fd -> owned_reader_pread_unix fd offset length))
 ;;
 
@@ -166,7 +166,7 @@ let sync_owned_reader_with_hook ~before_sync ~parent ~leaf reader =
         | Ok relative -> relative | Error detail -> invalid_arg detail in
       let expected=Eio.Path.stat ~follow:false parent in
       let path=Eio.Path.native_exn parent in
-      let synced=Eio_unix.run_in_systhread ~label:"owned-reader-sync" (fun () ->
+      let synced=Fs_compat_internal.Systhread_host.run ~label:"owned-reader-sync" (fun () ->
         Eio_unix.Fd.use_exn "owned reader sync" reader (fun held ->
           let initial=Unix.fstat held in
           let same (stat : Unix.stats) = same_file_snapshot initial stat
@@ -225,7 +225,7 @@ let load_owned_regular_file_range_with_sha256
         ~ownership_root ~offset ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread
+         Fs_compat_internal.Systhread_host.run
            ~label:(labelled "fs-compat-load-owned-range-digest" path)
            (fun () ->
               load_owned_regular_file_range_with_sha256_blocking
@@ -249,7 +249,7 @@ let sha256_owned_regular_file ~ownership_root path =
   with_fs_or_fallback ~path
     ~fallback:(fun () -> sha256_owned_regular_file_blocking ~ownership_root path)
     (fun _fs ->
-      let result = Eio_unix.run_in_systhread ~label:(labelled "fs-compat-hash-owned-file" path)
+      let result = Fs_compat_internal.Systhread_host.run ~label:(labelled "fs-compat-hash-owned-file" path)
         (fun () -> sha256_owned_regular_file_blocking ~ownership_root path) in
       Eio.Fiber.check ();
       result)

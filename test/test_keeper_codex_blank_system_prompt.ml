@@ -468,7 +468,6 @@ let test_core_checkpoint_survives_codex_guidance_failure () =
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run
     "keeper_codex_blank_system_prompt"
     [ ( "developer instructions"

@@ -531,7 +531,7 @@ let discover ~config =
   discover_with ~store ~base_path:config.Workspace.base_path
 module Observation = Workspace_memory_observation_receipt
 module Receipt = Lane_addon_request_receipt
-type observation = {original:Owner.retained;registration:Observation.registration;
+type observation = {original:Owner.retained;capture:Capture.t;registration:Observation.registration;
   completion:Observation.completion option}
 let prepare_observation_with ~store ~base_path ~request_id ~now =
   let* original = Systhread_host.run (fun () -> Owner.load ~store ~scope:Capture.scope ~request_id) |> owned in
@@ -553,16 +553,16 @@ let prepare_observation_with ~store ~base_path ~request_id ~now =
   match (Progress.observer original.progress).completion with
   | Receipt.Pending receipt | Receipt.Acknowledged receipt ->
     let* completion = rejected (Observation.restore_completion ~capture ~original ~registration receipt) in
-    Ok {original;registration;completion=Some completion}
+    Ok {original;capture;registration;completion=Some completion}
   | Receipt.Unobserved ->
     match Progress.phase original.progress with
     | Progress.Captured | Progress.Admission_wait _ | Progress.Dispatch_pending _ | Progress.Judged _
-    | Progress.Committing _ | Progress.Commit_unknown _ -> Ok {original;registration;completion=None}
+    | Progress.Committing _ | Progress.Commit_unknown _ -> Ok {original;capture;registration;completion=None}
     | Progress.Finished _ | Progress.Conflicted _ | Progress.Rejected _
     | Progress.Subdividing _ | Progress.Subdivided _ ->
       let* completion = rejected (Observation.completion ~capture ~original ~registration ~observed_at:(now ())) in
       let* original = publish original (Receipt.Intended (Receipt.Completion,completion.receipt)) in
-      Ok {original;registration;completion=Some completion}
+      Ok {original;capture;registration;completion=Some completion}
 let prepare_observation ~config ~request_id =
   let store = Lane_addon_store.of_config config in
   prepare_observation_with ~store ~base_path:config.Workspace.base_path ~request_id ~now:Time_compat.now
@@ -588,8 +588,19 @@ let deliver_observation_with ~store ~base_path ~registry ~request_id ~now =
         | Domain_conflict _ -> Runs.Failed {code="domain_conflict";detail="Original domain state conflicts with the retained commit"}
         | Before_dispatch_refusal _ -> Runs.Failed {code="before_dispatch_refused";detail="Original Curator request was refused before dispatch"}
         | Execution_refusal _ -> Runs.Failed {code="execution_refused";detail="Original Curator execution was refused"} in
+      let slot_observations=match Systhread_host.run (fun () ->
+        let* installation=Owner.installation_of_id
+          (Capture.destination prepared.capture).installation_id in
+        match installation with
+        | Owner.Manual _ -> Ok None
+        | Configuration declaration_id ->
+          let* request=Binding.request prepared.capture in
+          Exact.read_latest_slot_observations ~store ~declaration_id
+            ~schema:(Capture.output_schema prepared.capture) request) with
+        | Ok observations -> observations
+        | Error detail -> Log.Misc.warn "Curator slot observations unavailable: %s" detail; None in
       Some {Runs.outcome;elapsed_s=None;output=Receipt.to_json completion.receipt;
-        selected_slot=completion.selected_slot;usage=None} in
+        selected_slot=completion.selected_slot;usage=None;slot_observations} in
   let* ()=Runs.reconcile_original registry ~run_id:registration.run_id ~lane:Runs.Workspace_curator
     ~actor:registration.actor ~started_at:registration.receipt.observed_at
     ~input:(Runs.Exact_input registration.input) ~completion:terminal

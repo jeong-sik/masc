@@ -6,10 +6,16 @@
     [reset] field: [true] when the client should replace its list (no
     [since_seq], entries it never got were evicted, or more matched than
     [limit]), [false] when the entries, newest first, are the ones newer than
-    the last frame. The first frame always goes out. Later frames go out when
-    a matching entry was pushed; a quiet ring sends an SSE comment every
-    keepalive interval. A client that takes no frame for three intervals is
-    closed. *)
+    the last frame. A client without [since_seq] gets its first frame at once.
+    One with a cursor gets it at once when a matching entry is newer than the
+    cursor or the ring evicted entries it never got, and otherwise when a
+    matching entry is pushed. Later frames go out when a matching entry was
+    pushed. A stream that sent nothing for a keepalive interval sends an SSE
+    comment, whether the ring was quiet or got only entries the query leaves
+    out. A frame the client does not take within
+    {!Server_mcp_transport_http_headers.sse_stalled_after_s} ends the stream
+    ({!Server_sse_response.send}): HTTP/1.1 closes the response, HTTP/2
+    resets the stream. *)
 
 val stream_path : string
 
@@ -22,6 +28,21 @@ type frame =
 
 val next_frame : Server_logs_query.t -> after:int option -> frame
 (** What the stream sends next for a client whose cursor is [after]. *)
+
+val serve :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  encode:(frame -> string) ->
+  query:Server_logs_query.t ->
+  Http_reqd.t ->
+  unit
+(** [serve ~sw ~clock ~encode ~query reqd] starts the response and, in [sw],
+    the fiber that sends [query]'s frames, each as the SSE bytes [encode]
+    gives for it. It returns once that fiber waits. The fiber ends with the
+    response ({!Server_sse_response.serve}): when a frame or a keepalive is
+    not taken, and on HTTP/2 as soon as the stream ends under it.
+    {!add_routes} encodes a frame as the [/logs] answer with [reset]. Exposed
+    so tests drive the loop the server runs. *)
 
 val add_routes :
   sw:Eio.Switch.t ->

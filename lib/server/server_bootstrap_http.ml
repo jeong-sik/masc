@@ -191,7 +191,7 @@ let serve_h1_connection ~sw ~request_handler client_addr flow =
       ~request_handler:(h1_request_handler request_handler)
       ~error_handler:h1_error_handler
   in
-  conn_handler client_addr flow
+  Http_reqd.with_connection_switch sw (fun () -> conn_handler client_addr flow)
 ;;
 
 let shared_h2_resources () =
@@ -207,8 +207,10 @@ let record_cleartext_accept ~mode latency_s =
 (* One accept loop. [record_accept latency_s] runs after every accepted
    connection and [record_accept_error error] after a failed accept, which
    is followed by a backoff sleep; [on_stop ()] runs once when the loop ends
-   by cancellation. [serve_connection ~conn_sw client_addr flow] runs in a
-   fiber of its own whose release records the close and closes the flow. *)
+   by cancellation. [serve_connection ~conn_sw client_addr connection] runs
+   in a fiber of its own whose release records the close and closes the
+   accepted flow. [connection] is that flow with the connection's bounds
+   (RFC-0518 D4, D6): no listener reads or writes the flow itself. *)
 let run_accept_loop
       ~sw
       ~clock
@@ -231,7 +233,10 @@ let run_accept_loop
       Eio.Fiber.fork ~sw (fun () ->
         Eio.Switch.run ~name:listener_tag (fun conn_sw ->
           on_connection_release conn_sw ~record_closed ~listener_tag flow;
-          try serve_connection ~conn_sw client_addr flow with
+          let connection =
+            Server_connection_socket.wrap ~sw:conn_sw ~clock ~listener_tag client_addr flow
+          in
+          try serve_connection ~conn_sw client_addr connection with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
             Log.Misc.error "[%s] connection error: %s"
@@ -255,6 +260,17 @@ let run_accept_loop
   accept_loop 0.05
 ;;
 
+let not_prepared ~listener_tag client_addr what =
+  Log.Http.debug
+    "[%s] %s %s within %.0fs: connection closed"
+    listener_tag
+    (Format.asprintf "%a" Eio.Net.Sockaddr.pp client_addr)
+    what
+    Server_connection_socket.preparation_bound_s
+;;
+
+let sent_nothing = "sent nothing"
+
 let serve ~sw ~clock ~socket ~addr_label ~request_handler =
   let mode = "h1" in
   (* Stable listener identity: the [h1 host:port] tag lets error log lines
@@ -272,8 +288,18 @@ let serve ~sw ~clock ~socket ~addr_label ~request_handler =
       Transport_metrics.record_http_accept_error ~mode ~error)
     ~record_closed:(fun () -> Transport_metrics.record_http_connection_closed ~mode)
     ~on_stop:mark_stopped
-    (fun ~conn_sw client_addr flow ->
-      serve_h1_connection ~sw:conn_sw ~request_handler client_addr flow)
+    (fun ~conn_sw client_addr connection ->
+      match
+        Server_connection_socket.prepare connection (fun () ->
+          Server_connection_socket.await_first_bytes connection)
+      with
+      | None -> not_prepared ~listener_tag client_addr sent_nothing
+      | Some () ->
+        serve_h1_connection
+          ~sw:conn_sw
+          ~request_handler
+          client_addr
+          (Server_connection_socket.socket connection))
 ;;
 
 exception Request_without_header_block
@@ -292,7 +318,11 @@ let h2_config () =
 ;;
 
 let serve_h2_connection
-      ?(streams = Server_h2_stream_registry.create ())
+      ~clock
+      ?(streams = Server_h2_stream_registry.create
+          ~clock
+          ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+          ())
       ?(resources = Http_h2_response_ledger.create
           ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()))
       ~sw
@@ -325,12 +355,14 @@ let serve_h2_connection
           match Server_h2_frame_tap.request_stream frames with
           | Some stream_id ->
             Server_h2_stream_registry.dispatch streams ~sw:request_sw ~stream_id reqd
-              (fun stream_sw ->
+              (fun stream_end ->
+                let stream_sw = Http_h2_stream.Stream_end.switch stream_end in
                 Http_h2_response_ledger.with_request resources ~sw:stream_sw
                   (fun () ->
                     try
-                      with_request_lane (H2.Reqd.request reqd).meth (fun () ->
-                        h2_request_handler ~request_sw:stream_sw addr reqd)
+                      with_request_lane
+                        (Http_h2_stream.Stream_end.request stream_end).meth
+                        (fun () -> h2_request_handler ~stream_end addr reqd)
                     with
                     | Eio.Cancel.Cancelled _ as exn -> raise exn
                     | exn ->
@@ -355,14 +387,21 @@ let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handle
       Transport_metrics.record_http_accept_error ~mode ~error)
     ~record_closed:(fun () -> Transport_metrics.record_http_connection_closed ~mode)
     ~on_stop:mark_stopped
-    (fun ~conn_sw client_addr flow ->
-      serve_h2_connection
-        ~resources
-        ~sw:conn_sw
-        ~h2_request_handler
-        ~h2_error_handler
-        client_addr
-        flow)
+    (fun ~conn_sw client_addr connection ->
+      match
+        Server_connection_socket.prepare connection (fun () ->
+          Server_connection_socket.await_first_bytes connection)
+      with
+      | None -> not_prepared ~listener_tag client_addr sent_nothing
+      | Some () ->
+        serve_h2_connection
+          ~clock
+          ~resources
+          ~sw:conn_sw
+          ~h2_request_handler
+          ~h2_error_handler
+          client_addr
+          (Server_connection_socket.socket connection))
 ;;
 
 (** Accept loop with automatic HTTP/1.1 vs HTTP/2 detection.
@@ -390,21 +429,26 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
       Log.Server.info "[%s] stats: h2=%d h1=%d"
         listener_tag (Atomic.get h2_count) (Atomic.get h1_count);
       mark_stopped ())
-    (fun ~conn_sw client_addr flow ->
-      match Http_protocol_detect.detect flow with
-      | Ok (Http_protocol_detect.Http2, detected_flow) ->
+    (fun ~conn_sw client_addr connection ->
+      match
+        Server_connection_socket.prepare connection (fun () ->
+          Http_protocol_detect.detect (Server_connection_socket.socket connection))
+      with
+      | None -> not_prepared ~listener_tag client_addr "sent no request line or HTTP/2 preface"
+      | Some (Ok (Http_protocol_detect.Http2, detected_flow)) ->
         ignore (Atomic.fetch_and_add h2_count 1);
         serve_h2_connection
+          ~clock
           ~resources
           ~sw:conn_sw
           ~h2_request_handler
           ~h2_error_handler
           client_addr
           detected_flow
-      | Ok (Http_protocol_detect.Http1, detected_flow) ->
+      | Some (Ok (Http_protocol_detect.Http1, detected_flow)) ->
         ignore (Atomic.fetch_and_add h1_count 1);
         serve_h1_connection ~sw:conn_sw ~request_handler client_addr detected_flow
-      | Error msg ->
+      | Some (Error msg) ->
         Log.Misc.debug "[%s] protocol detect skipped: %s" listener_tag msg)
 ;;
 
@@ -483,8 +527,11 @@ let serve_tls ~sw ~clock ~socket ~addr_label ~tls ~request_handler ~h2_request_h
     ~record_accept_error:(fun error -> Https_listener_metrics.record_accept_error ~error)
     ~record_closed:Https_listener_metrics.record_connection_closed
     ~on_stop:Https_listener_metrics.record_stopped
-    (fun ~conn_sw client_addr flow ->
-      match Tls_eio.server_of_flow tls flow with
+    (fun ~conn_sw client_addr connection ->
+      match
+        Server_connection_socket.prepare connection (fun () ->
+          Tls_eio.server_of_flow tls (Server_connection_socket.socket connection))
+      with
       | exception Tls_eio.Tls_alert alert ->
         handshake_failed ~listener_tag client_addr
           (Printf.sprintf "alert %s" (Tls.Packet.alert_type_to_string alert))
@@ -493,16 +540,25 @@ let serve_tls ~sw ~clock ~socket ~addr_label ~tls ~request_handler ~h2_request_h
           (Format.asprintf "%a" Tls.Engine.pp_failure failure)
       | exception End_of_file ->
         handshake_failed ~listener_tag client_addr "peer closed before the handshake completed"
-      | session ->
+      | None ->
+        handshake_failed ~listener_tag client_addr
+          (Printf.sprintf
+             "not completed within %.0fs"
+             Server_connection_socket.preparation_bound_s)
+      | Some session ->
         (match Tls_eio.epoch session with
          | Error () ->
            handshake_failed ~listener_tag client_addr "no active session after the handshake"
          | Ok epoch ->
-           let socket = Tls_stream_socket.wrap session in
+           let socket =
+             Tls_stream_socket.wrap session ~on_send_shutdown:(fun () ->
+               Server_connection_socket.send_side_closed connection)
+           in
            (match epoch.Tls.Core.alpn_protocol with
             | Some protocol when String.equal protocol Server_tls_material.alpn_h2 ->
               Https_listener_metrics.record_negotiated Alpn_h2;
               serve_h2_connection
+                ~clock
                 ~resources
                 ~sw:conn_sw
                 ~h2_request_handler

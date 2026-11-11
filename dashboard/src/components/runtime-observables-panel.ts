@@ -14,9 +14,8 @@ import {
   type RuntimeObservablesSnapshot,
 } from '../api/runtime-observables'
 import {
-  DEFAULT_PANEL_REFRESH_MS,
-  setupVisibleAutoRefresh,
-} from '../lib/auto-refresh'
+  setupObservationRefresh,
+} from '../lib/observation-refresh'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -131,29 +130,27 @@ export function RuntimeObservablesPanel() {
 
   useEffect(() => {
     // useEffect is appropriate here: external-system synchronization
-    // (periodic HTTP fetch from the MASC API), not derived state.
-    const controller = new AbortController()
+    // (committed runtime changes), not derived state.
 
-    const refresh = async () => {
+    const refresh = async (signal: AbortSignal) => {
       try {
-        const result = await fetchRuntimeObservables()
-        if (controller.signal.aborted) return
+        const result = await fetchRuntimeObservables({ signal })
+        if (signal.aborted) return
         setSnapshot(result)
         setError(null)
       } catch (err) {
-        if (controller.signal.aborted) return
+        if (signal.aborted) return
         setError(err instanceof Error ? err.message : 'runtime observables fetch failed')
+        throw err
       } finally {
-        if (!controller.signal.aborted) setLoading(false)
+        if (!signal.aborted) setLoading(false)
       }
     }
 
     setLoading(true)
-    void refresh()
-    const cleanup = setupVisibleAutoRefresh(() => { void refresh() }, DEFAULT_PANEL_REFRESH_MS)
+    const cleanup = setupObservationRefresh(refresh, { topics: ['runtime_observables'], resetRead: () => { setSnapshot(null); setError(null); setLoading(true) } })
 
     return () => {
-      controller.abort()
       cleanup()
     }
   }, [])

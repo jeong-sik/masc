@@ -17,6 +17,27 @@ type 'a private_jsonl_recovered =
 
 type private_file_locking = Wait_for_lock | Try_lock
 
+type 'kept private_jsonl_rows_read =
+  | Rows_after_cursor of 'kept
+  | Rows_from_start
+
+type 'kept private_jsonl_rows_from_cursor =
+  { read : 'kept private_jsonl_rows_read
+  ; rows : string
+  ; incomplete_tail : string
+  ; rows_end : Private_jsonl_cursor.t
+  }
+
+(* Where a locked update starts reading, and the decision it hands the bytes
+   to. One constructor per start, so a tail read cannot also name a cursor. *)
+type 'a private_file_read_plan =
+  | Read_whole_file of (string -> string option * 'a)
+  | Read_tail_rows of int * (string -> string option * 'a)
+  | Read_after_cursor :
+      (Private_jsonl_cursor.t * 'kept) option
+      * ('kept private_jsonl_rows_from_cursor -> string option * 'a)
+      -> 'a private_file_read_plan
+
 let with_private_path_lock ~locking ~path mutex f =
   match locking with
   | Wait_for_lock -> Stdlib.Mutex.protect mutex f
@@ -25,9 +46,9 @@ let with_private_path_lock ~locking ~path mutex f =
       raise (Sys_error ("private file is busy: " ^ path));
     Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) f
 
-let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for_lock) ?validate_prefix ?tail_bytes
+let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for_lock) ?validate_prefix
     ?(confirm_existing=(fun () -> false)) ?(verify_content=false)
-    ?(append_io=durable_append_unix_io) ~io path decide =
+    ?(append_io=durable_append_unix_io) ~io path (plan : _ private_file_read_plan) =
   test_exec_home_guard ~op:"update_private_file_durable_locked" path;
   let dir = Filename.dirname path in
   if create then mkdir_p_memoized dir;
@@ -87,18 +108,67 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for
            (match locking with Try_lock -> sync_parent () | Wait_for_lock -> ());
            (* See Unix.lseek: only the file-position side effect is required. *)
            ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-           let from =
-             match tail_bytes with
-             | None -> 0
-             | Some max_bytes ->
-               Int.max 0 ((Unix.fstat fd).Unix.st_size - max_bytes)
+           let before_read = Unix.fstat fd in
+           (* A row starts at the first byte of the file and after each
+              newline. *)
+           let row_starts_at offset =
+             offset = 0
+             || Char.equal (private_jsonl_read_byte fd (Bytes.create 1) (offset - 1)) '\n'
            in
-           let starts_at_row =
-             from = 0
-             || Char.equal (private_jsonl_read_byte fd (Bytes.create 1) (from - 1)) '\n'
+           (* Where the read starts, whether that byte starts a row, and the
+              decision over the bytes read from there. *)
+           let from, starts_at_row, decide =
+             match plan with
+             | Read_whole_file decide -> 0, true, decide
+             | Read_tail_rows (max_bytes, decide) ->
+               let from = Int.max 0 (before_read.Unix.st_size - max_bytes) in
+               (* Only a tail read may start inside a row; it drops that
+                  fragment. *)
+               from, row_starts_at from, decide
+             | Read_after_cursor (after, decide) ->
+               (* A cursor of another file, one past this file's end, or one
+                  where no row of this file starts is not the end of rows read
+                  from it: the read starts at the first byte, and what the
+                  caller kept with that cursor is not handed back. *)
+               let read, from =
+                 match after with
+                 | None -> Rows_from_start, 0
+                 | Some (cursor, kept) ->
+                   (match
+                      Private_jsonl_cursor.prefix_end_offset
+                        cursor
+                        ~device:before_read.Unix.st_dev
+                        ~inode:before_read.Unix.st_ino
+                        ~file_length:before_read.Unix.st_size
+                    with
+                    | Some end_offset when row_starts_at end_offset ->
+                      Rows_after_cursor kept, end_offset
+                    | Some _ | None -> Rows_from_start, 0)
+               in
+               ( from
+               , true
+               , fun existing ->
+                   let rows_length = private_jsonl_last_complete_row_length existing in
+                   let rows, incomplete_tail =
+                     if rows_length = String.length existing
+                     then existing, ""
+                     else
+                       ( String.sub existing 0 rows_length
+                       , String.sub existing rows_length (String.length existing - rows_length) )
+                   in
+                   decide
+                     { read
+                     ; rows
+                     ; incomplete_tail
+                     ; rows_end =
+                         Private_jsonl_cursor.Present
+                           { device = before_read.Unix.st_dev
+                           ; inode = before_read.Unix.st_ino
+                           ; end_offset = from + rows_length
+                           }
+                     } )
            in
            ignore (Unix.lseek fd from Unix.SEEK_SET : int);
-           let before_read = Unix.fstat fd in
            let existing = read_fd_chunks fd in
            let same_snapshot left right =
              left.Unix.st_dev=right.Unix.st_dev && left.st_ino=right.st_ino
@@ -184,11 +254,11 @@ let reconcile_private_file_durable_locked_with_append_io ~locking ~append_io pat
   let confirmation = ref false in
   update_private_file_durable_locked_with_io ~locking
     ~verify_content:true ~confirm_existing:(fun () -> !confirmation) ~append_io
-    ~io:private_jsonl_transaction_unix_io path (fun existing ->
+    ~io:private_jsonl_transaction_unix_io path (Read_whole_file (fun existing ->
       match decide existing with
       | Refuse_update result -> None,result
       | Confirm_existing result -> confirmation := true; None,result
-      | Append_confirmed (suffix,result) -> Some suffix,result)
+      | Append_confirmed (suffix,result) -> Some suffix,result))
 ;;
 
 let reconcile_private_file_durable_locked_with_append_io_for_testing ~append_io path decide =
@@ -204,29 +274,36 @@ let update_private_file_durable_locked_result ?(create=true) path decide =
   update_private_file_durable_locked_with_io ~create
     ~io:private_jsonl_transaction_unix_io
     path
-    decide
+    (Read_whole_file decide)
+;;
+
+let update_private_jsonl_after_cursor_durable_locked_result ?(create=true) path ~after decide =
+  update_private_file_durable_locked_with_io ~create
+    ~io:private_jsonl_transaction_unix_io
+    path
+    (Read_after_cursor (after, decide))
 ;;
 
 let update_private_file_tail_durable_locked_result path ~max_bytes decide =
   if max_bytes <= 0 then invalid_arg "update_private_file_tail_durable_locked_result";
-  update_private_file_durable_locked_with_io ~tail_bytes:max_bytes
-    ~io:private_jsonl_transaction_unix_io path decide
+  update_private_file_durable_locked_with_io
+    ~io:private_jsonl_transaction_unix_io path (Read_tail_rows (max_bytes, decide))
 ;;
 
 let update_private_file_tail_durable_locked_with_append_io_for_testing
     ~append_io path ~max_bytes decide =
   if max_bytes <= 0 then invalid_arg "update_private_file_tail_durable_locked_result";
-  update_private_file_durable_locked_with_io ~tail_bytes:max_bytes ~append_io
-    ~io:private_jsonl_transaction_unix_io path decide
+  update_private_file_durable_locked_with_io ~append_io
+    ~io:private_jsonl_transaction_unix_io path (Read_tail_rows (max_bytes, decide))
 ;;
 
 let recover_and_update_private_jsonl_durable_locked_result ?(create=true) ?(locking=Wait_for_lock) ~validate_prefix path decide =
   update_private_file_durable_locked_with_io ~create ~locking ~validate_prefix
-    ~io:private_jsonl_transaction_unix_io path decide
+    ~io:private_jsonl_transaction_unix_io path (Read_whole_file decide)
 ;;
 
 let update_private_file_durable_locked_with_io_for_testing ?(create=true) ~io path decide =
-  update_private_file_durable_locked_with_io ~create ~io path decide
+  update_private_file_durable_locked_with_io ~create ~io path (Read_whole_file decide)
 ;;
 
 let update_existing_private_file_durable_locked_with_io ~io path decide =
@@ -656,7 +733,7 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   match execution_context () with
   | Non_eio -> write ()
   | Eio_fiber ->
-    Eio_unix.run_in_systhread
+    Fs_compat_internal.Systhread_host.run
       ~label:(labelled "fs-compat-append-jsonl" path) write
 
 let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
@@ -676,7 +753,7 @@ let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
     match execution_context () with
     | Non_eio -> write ()
     | Eio_fiber ->
-      Eio_unix.run_in_systhread
+      Fs_compat_internal.Systhread_host.run
         ~label:(labelled "fs-compat-append-jsonl-batch" path) write
   end
 ;;

@@ -576,7 +576,7 @@ let test_nested_successor_has_no_root_sibling ()=with_workspace (fun base_path s
 let host_result base_path store capture output =
   let request=get (Server_workspace_memory_addon_validation.request capture) in
   let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
-    get (before_dispatch ());
+    get (before_dispatch Exact.Generation);
     match validate output with
     | Ok output -> executed (Exact.Call_ended (Exact.Answered {output;slot="original-host";usage=None}))
     | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output {detail}))) in
@@ -605,9 +605,14 @@ let test_bad_original_host_record_cannot_fall_back_to_a_worker ()=with_workspace
     | Some (`Assoc fields) -> `Assoc (("unknown",`Bool true)::fields)
     | Some _ | None -> fail "original Exact record" in
   get (Store.save_exact_request store ~declaration_id:"curator" ~request_id:record.request_id wire);
+  (* A stored original whose record cannot be decoded is not a record this read
+     failed to reach: it exists and is invalid, so it is refused. Waiting would
+     only reread the same bytes. Only a record the read could not reach stays a
+     retryable unavailability (lib/lane_addon/lane_addon_exact.mli,
+     [Recovery_invalid] / [Recovery_unavailable]). *)
   check bool "invalid host evidence refuses before the supplied worker edge" true
-    (match no_worker_resume base_path store record with Error (Consumer.Unavailable _) -> true
-     | Ok _ | Error (Consumer.Rejected _ | Consumer.Uncertain _) -> false);
+    (match no_worker_resume base_path store record with Error (Consumer.Rejected _) -> true
+     | Ok _ | Error (Consumer.Unavailable _ | Consumer.Uncertain _) -> false);
   check json "failed read leaves the original dispatch history unchanged" (Progress.to_json record.progress)
     (Progress.to_json (original store capture).progress))
 let test_observed_host_answer_still_requires_full_domain_validation ()=with_workspace (fun base_path store ->
@@ -719,7 +724,7 @@ let test_actual_observer_delivery_and_ack_retry ()=with_workspace (fun base_path
     ~actor:prepared.registration.actor ~started_at:prepared.registration.receipt.observed_at
     ~input:(Runs.Exact_input prepared.registration.input)
     ~completion:(Some {Runs.outcome=Runs.Succeeded;elapsed_s=None;selected_slot=completion.selected_slot;
-      usage=None;output=Receipt.to_json completion.receipt})
+      usage=None;slot_observations=None;output=Receipt.to_json completion.receipt})
     |> Result.map_error Runs.reconciliation_error_to_string |> get;
   let restarted=Runs.replay path in
   let bytes=Fs_compat.load_file path and stat=Unix.stat path in

@@ -29,6 +29,9 @@ type runtime_provider_status =
   | Runtime_provider_unknown_http_status
   | Runtime_provider_skipped_cli
   | Runtime_provider_skipped_native_auth
+  | Runtime_provider_refused
+      (** The process sends with no credential of the runtime table, so the
+          probe sent nothing (plan D4). *)
   | Runtime_provider_invalid_endpoint
   | Runtime_provider_invalid_execution_transport
 [@@deriving enumerate]
@@ -105,6 +108,7 @@ let runtime_provider_status_to_string = function
   | Runtime_provider_unknown_http_status -> "unknown_http_status"
   | Runtime_provider_skipped_cli -> "skipped_cli"
   | Runtime_provider_skipped_native_auth -> "skipped_native_auth"
+  | Runtime_provider_refused -> "refused"
   | Runtime_provider_invalid_endpoint -> "invalid_endpoint"
   | Runtime_provider_invalid_execution_transport ->
       "invalid_execution_transport"
@@ -167,7 +171,9 @@ let decode_runtime_provider_probe json =
   let expected_reachable =
     match rpp_status with
     | Runtime_provider_reachable -> Some true
-    | Runtime_provider_skipped_cli | Runtime_provider_skipped_native_auth -> None
+    | Runtime_provider_skipped_cli
+    | Runtime_provider_skipped_native_auth
+    | Runtime_provider_refused -> None
     | Runtime_provider_missing_auth
     | Runtime_provider_auth_failed
     | Runtime_provider_network_error
@@ -191,6 +197,7 @@ let decode_runtime_provider_probe json =
     | Runtime_probe_http,
       ( Runtime_provider_reachable
       | Runtime_provider_skipped_native_auth
+      | Runtime_provider_refused
       | Runtime_provider_missing_auth
       | Runtime_provider_auth_failed
       | Runtime_provider_network_error

@@ -68,10 +68,7 @@ type turn_failure =
 
 type turn_success =
   | Turn_completed of { meta : Keeper_meta_contract.keeper_meta }
-  | Turn_checkpointed of
-      { meta : Keeper_meta_contract.keeper_meta
-      ; followup : Keeper_agent_result.checkpoint_followup
-      }
+  | Turn_checkpointed of { meta : Keeper_meta_contract.keeper_meta }
       (** A newer durable stimulus arrived; the turn yielded so the next
           turn carries it. *)
   | Turn_input_required of Keeper_meta_contract.keeper_meta

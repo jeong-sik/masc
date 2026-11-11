@@ -328,14 +328,10 @@ let label_cells =
 let hint_lead = "  "
 let refusal_lead = "  ! "
 
-(* [text] after [lead], on as many rows of [width] cells as it takes. The pane
-   cuts a row at its edge: at 80 columns that cut the Antigravity hint to
-   "creden…", and a sign-in command with a long home the same way.
-   Continuation rows step in as far as [lead], so they read as one hint.
-   [wrap_words] breaks at spaces, and inside a word only where the word alone
-   is wider than the row -- a long quoted home -- so a command copied off the
-   screen differs from the printed one only where a space became a row
-   break. *)
+(* Prose after [lead], wrapped to [width] cells with indented continuation
+   rows. Long words may break inside a row. Shell commands use [command_rows]
+   below instead, so a wrapped or clipped command cannot be copied as though
+   it were the complete invocation. *)
 let wrapped ~width ~lead text =
   let lead_cells = Masc_tui_message_layout.display_width lead in
   let indent = String.make lead_cells ' ' in
@@ -377,27 +373,73 @@ let hint_rows ~width ~copy_available hints =
     hints
 ;;
 
-let filling_rows ~width t =
+let refusal_rows_in ~width ~room rows =
+  if List.length rows <= room then rows
+  else if room <= 0 then []
+  else if room = 1 then
+    List.map (fun row -> Masc_tui_message_layout.fit_width (row ^ " …") width)
+      (List.take 1 rows)
+  else
+    List.take (room - 1) rows
+    @ [ Masc_tui_message_layout.fit_width
+          (refusal_lead ^ "이유 계속 · 창을 키워 읽으세요") width ]
+;;
+
+let hints_in ~width ~room hints =
+  let rows = hint_rows ~width ~copy_available:false hints in
+  if List.length rows <= room then rows
+  else if room <= 0 then []
+  else
+    let notice = Masc_tui_message_layout.fit_width
+        (hint_lead ^ "로그인 안내 계속 · 창을 키워 읽으세요") width in
+    let copying =
+      if List.exists (function Run _ -> true | Say _ -> false) hints
+      then wrapped ~width ~lead:hint_lead "저장 후 y로 전체 명령을 복사하세요."
+      else []
+    in
+    notice :: (if List.length copying <= room - 1 then copying else [])
+;;
+
+let filling_rows ~width ~height t =
+  let height = max 0 height in
+  if height = 0 then [] else
   let mark field = if t.field = field then ">" else " " in
   let line field label value =
-    Printf.sprintf "  %s %s %s" (mark field)
+    let lead = if height = 1 && field = t.field && Option.is_some t.error then "! " else "  " in
+    Printf.sprintf "%s%s %s %s" lead (mark field)
       (Masc_tui_message_layout.fit_width label label_cells)
       (Terminal_text.single_line value)
   in
   let base = t.ring.chosen in
   let count = List.length t.ring.before + 1 + List.length t.ring.after in
-  wrapped ~width ~lead:hint_lead "계정 하나 더 · 고른 provider 를 복사하고 로그인 위치만 바꿉니다"
-  @ [ line Base base_label
+  let intro = wrapped ~width ~lead:hint_lead
+      "계정 하나 더 · 고른 provider 를 복사하고 로그인 위치만 바꿉니다" in
+  let fields = [ line Base base_label
         (Printf.sprintf "\xe2\x80\xb9 %s (%s) \xe2\x80\xba  %d/%d" base.display_name base.id
            (List.length t.ring.before + 1) count)
     ; line Id id_label t.id
     ; line Location (D.location_label base.client) t.location
-    ]
-  @ hint_rows ~width ~copy_available:false (sign_in_hints t)
-  @ (match t.error with
+    ] in
+  let hints = sign_in_hints t in
+  let errors = match t.error with
      | None -> []
-     | Some reason -> wrapped ~width ~lead:refusal_lead reason)
-  @ [ "" ]
+     | Some reason -> wrapped ~width ~lead:refusal_lead reason in
+  let full = intro @ fields @ hint_rows ~width ~copy_available:false hints @ errors @ [ "" ] in
+  if List.length full <= height then full else
+    (* Reserve the selected field before any wrapped information. As in the
+       other runtime forms, only the field window follows its cursor. *)
+    let error_minimum = if errors <> [] && height > 1 then 1 else 0 in
+    let hint_minimum = if hints <> [] && height > 1 + error_minimum then 1 else 0 in
+    let errors = refusal_rows_in ~width ~room:(height - 1 - hint_minimum) errors in
+    let hints = hints_in ~width ~room:(height - 1 - List.length errors) hints in
+    let room = height - List.length errors - List.length hints in
+    let shown = min room (List.length fields) in
+    let cursor = match t.field with Base -> 0 | Id -> 1 | Location -> 2 in
+    let first = max 0 (min (List.length fields - shown) (cursor - shown / 2)) in
+    let fields = List.take shown (List.drop first fields) in
+    let remaining = room - List.length fields in
+    let intro = if List.length intro <= remaining then intro else [] in
+    intro @ fields @ errors @ hints
 ;;
 
 (* The saved account and how to sign it in, drawn the way the form drew
@@ -409,8 +451,8 @@ let saved_rows ~width ~id sign_in =
   @ [ "" ]
 ;;
 
-let rows ~width t =
+let rows ~width ~height t =
   match t.phase with
-  | Filling -> filling_rows ~width t
+  | Filling -> filling_rows ~width ~height t
   | Saved { saved_id; saved_sign_in } -> saved_rows ~width ~id:saved_id saved_sign_in
 ;;

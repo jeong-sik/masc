@@ -1,0 +1,760 @@
+{
+  "at": "2026-11-10T13:59:28.098168+00:00",
+  "production_source": "0b00cbce749dd2967f1837238133c3f40df72ddf",
+  "upper_source": "2c7fc482f4cd95a12732ceaf2cdc349fdfcacc94",
+  "base": "fde2dc31e49c7d8e10b017e8e860be5fe2a94819",
+  "scope": "Source/syntax only. No typing/warning/build/backend/HTTP/CI/install/deployment execution.",
+  "lower_parse_capture": {
+    "at": "2026-11-10T13:35:19.237075+00:00",
+    "base": "fde2dc31e49c7d8e10b017e8e860be5fe2a94819",
+    "compiler": "5.5.1",
+    "scope": "Parsing only; no typing/warnings, Dune or backend execution.",
+    "checks": [
+      {
+        "path": "lib/board/board_access.ml",
+        "sha256": "a80907f444693429f1c889d179f775950178d773e4d026810ef8f3a3b20b2c62",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "lib/board/board_access.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_access.mli",
+        "sha256": "b3350ef1315a01bad50cd49b0bb0c15d06ca5cc63c933fd2ee10fdd8665b33b1",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-intf",
+          "lib/board/board_access.mli"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_comment_admission.ml",
+        "sha256": "623e73cee4a3c07a63903ecaec0a0f0630544ae6fef2eda28dd670aafe8f168d",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "lib/board/board_comment_admission.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_comment_admission.mli",
+        "sha256": "e9b8603a4d4a76a43d8c6756e8a68fb8982a48e4efd4f17d874a6bb49bf06bf8",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-intf",
+          "lib/board/board_comment_admission.mli"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_comments.ml",
+        "sha256": "d0ae77229de046a74360db173a15cb24e9931b12e2fd8475beec94812e70cafc",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "lib/board/board_comments.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_comments.mli",
+        "sha256": "ee7a90d0811c9cb0ec7a1e7ce59191d8614b52f73fc491c08305262a4e8c4007",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-intf",
+          "lib/board/board_comments.mli"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_comments_source.ml",
+        "sha256": "d1f00959aefe0a56c0764c3cc4e94c666be55f5899de2ae446b2ee6e4daa7839",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "lib/board/board_comments_source.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_comments_source.mli",
+        "sha256": "f06adf3209323ad5bfed2643b8a50d6bcbb827459da259501093d9b7d7201131",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-intf",
+          "lib/board/board_comments_source.mli"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_core.mli",
+        "sha256": "e83037aadf7d6e05216225b877bbc05670ccc669d9d5d4193c4ccb327a8685ef",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-intf",
+          "lib/board/board_core.mli"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_core_persist.ml",
+        "sha256": "bd61fdeafc985789444e9a106800959bf438f8c9ad3619c1f0a3610247ce7e43",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "lib/board/board_core_persist.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_core_persist.mli",
+        "sha256": "8b7a294123bf613cd79da195252f523b1c56cbe88dd953cacdb6d3299c9a536b",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-intf",
+          "lib/board/board_core_persist.mli"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_dispatch.ml",
+        "sha256": "f5c7f3b4398b80b13ea91d6c2a492cf37af840424d7fa543bf8ddc297959357f",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "lib/board/board_dispatch.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board/board_dispatch.mli",
+        "sha256": "2429b50a44ed5862217c7f94a7263b03a26d6804d219f50b2ea962cbc3d6620e",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-intf",
+          "lib/board/board_dispatch.mli"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board_tool_adapter/board_tool_post.ml",
+        "sha256": "a496ce683ef090666dffe9422799565747759e895d49c019ffdfb8ecde9be01f",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "lib/board_tool_adapter/board_tool_post.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board_types/board_types.ml",
+        "sha256": "7e1b996aea1c74c61bd35a19bcd7aac73198291e1222f1db910b9d04402e6177",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "lib/board_types/board_types.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "lib/board_types/board_types.mli",
+        "sha256": "014ddec2776b909a14a12bb3b9ed55dfce4fc7a534501e510c5e59c2d7117217",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-intf",
+          "lib/board_types/board_types.mli"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_close_state.ml",
+        "sha256": "946f64ab4c6ae39f5746b94ce5d319a8c358ea5debaf5494ac7f827a265b96b4",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_close_state.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_comment_post_write_ahead.ml",
+        "sha256": "cffcdc77b2a7ae888e4a17d4f0704f8a5d8026b9a56bb89bfbfc1bf61fe898ea",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_comment_post_write_ahead.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_comments_source.ml",
+        "sha256": "585aea19b17312202f88ef33eba8b863a249d512f7fcf05fd029207de563e8ba",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_comments_source.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_delete_order.ml",
+        "sha256": "63e110f49651968a93729826f24a44d0602b3814ee9bda428e19bc4b7ef64659",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_delete_order.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_delete_rewrite_requeue.ml",
+        "sha256": "a9d3d0d5a4a63187488ae858e860afd9e63cc7fbd4d418425e41c3d5082eca0a",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_delete_rewrite_requeue.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_dispatch.ml",
+        "sha256": "ae1452ceecca3588cab38f2be1764cd0f9ced9f8bee9113141de3304d113609a",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_dispatch.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_explicit_writes.ml",
+        "sha256": "b15949cf8a2927475a4383a0e2d781a04c19325f954d43d2a898d0ab96ae6c0f",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_explicit_writes.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_karma_ledger.ml",
+        "sha256": "3ec24aeb8f37406dfe42176957af55c5210f977e61df4fd22103690a98ff6bfb",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_karma_ledger.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_persistence_load_contract.ml",
+        "sha256": "a04178e2bbe9058cc32637a9f7550090073cbb6854750f668de4582f3c563d9c",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_persistence_load_contract.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_persistence_schema.ml",
+        "sha256": "93e11428938ebc2d4ebc21d2f8b0f265116be61f2a4cefc00f433e237496fb22",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_persistence_schema.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_posts_source_authority.ml",
+        "sha256": "6a91c1053a1a95733ed48a8ebbbf11d68376e40aca9fb3f26b64353d57b8fe33",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_posts_source_authority.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_recipient_resolution.ml",
+        "sha256": "948d4b0b132ec756bfed22f4608e71ebb97ea70b4f0a6e7ba722986ed71d94d0",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_recipient_resolution.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_rest_routes.ml",
+        "sha256": "0f34747881ca122812f1806eb0e2493915d12ad5ef31626b2f616b7a0b633ab1",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_rest_routes.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_board_vote_persistence.ml",
+        "sha256": "6e65aa48c6712d9ea598aa956f76bc1bc3095da55e20a5cfd8d4e9f4d4528f6b",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_board_vote_persistence.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_dashboard_snapshot.ml",
+        "sha256": "b4f181635772e44b2c1dd865de0c763f6e94fbfb051753270a84a4aed4e1b5fb",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_dashboard_snapshot.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_keeper_board_discoverable_cursor.ml",
+        "sha256": "6bec2206ad0d23b67b50ed82cd099246a249a1e009571aa0b24334219a00c010",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_keeper_board_discoverable_cursor.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_keeper_board_recorded_audience.ml",
+        "sha256": "97e29cca6125391821adb786288913609e65dec3f0902958a53d1c0b6c83437a",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_keeper_board_recorded_audience.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_keeper_board_turn_ack.ml",
+        "sha256": "da0aaccd75c44e5ca882a485331ff44db4e331202dcbdabb5343b010fd090585",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_keeper_board_turn_ack.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_keeper_board_unavailable.ml",
+        "sha256": "4afb3e85eacc8613c330f89f5f488f01ddbeb1000ade1323bb6a272a256c55e9",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_keeper_board_unavailable.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_keeper_keepalive_helpers.ml",
+        "sha256": "dd580b41584d1ca49f9c726702bafcf84f456c3d4fcd998a52087a8a10141a39",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_keeper_keepalive_helpers.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_keeper_librarian_context.ml",
+        "sha256": "62fe73f9514ff1b5a6730052ee146c135483432ed895cdd558c2af481846ac95",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_keeper_librarian_context.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_lane_addon_host_cycle.ml",
+        "sha256": "05057fac5fb6065b1a5129e7120328179e9caec5087b4639dcbb80cce6b6c662",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_lane_addon_host_cycle.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_tool_board_coverage.ml",
+        "sha256": "456218be2578b6b8776a1e2a6872574c3d7e84b2857ff8175fbd1003b1709ec6",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_tool_board_coverage.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      {
+        "path": "test/test_verification_collaboration_evidence.ml",
+        "sha256": "6223e1e9606a087ce5f73049c9ae0925a47d6c5993336954e6c44a69a80552fa",
+        "command": [
+          "ocamlc",
+          "-stop-after",
+          "parsing",
+          "-impl",
+          "test/test_verification_collaboration_evidence.ml"
+        ],
+        "exit": 0,
+        "output": ""
+      }
+    ],
+    "whitespace": {
+      "exit": 0,
+      "output": ""
+    }
+  },
+  "lower_hash_comparison_at_upper": [
+    {
+      "path": "lib/board/board_access.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_access.mli",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_comment_admission.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_comment_admission.mli",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_comments.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_comments.mli",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_comments_source.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_comments_source.mli",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_core.mli",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_core_persist.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_core_persist.mli",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_dispatch.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board/board_dispatch.mli",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board_tool_adapter/board_tool_post.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board_types/board_types.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "lib/board_types/board_types.mli",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_close_state.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_comment_post_write_ahead.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_comments_source.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_delete_order.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_delete_rewrite_requeue.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_dispatch.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_explicit_writes.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_karma_ledger.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_persistence_load_contract.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_persistence_schema.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_posts_source_authority.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_recipient_resolution.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_rest_routes.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_board_vote_persistence.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_dashboard_snapshot.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_keeper_board_discoverable_cursor.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_keeper_board_recorded_audience.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_keeper_board_turn_ack.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_keeper_board_unavailable.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_keeper_keepalive_helpers.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_keeper_librarian_context.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_lane_addon_host_cycle.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_tool_board_coverage.ml",
+      "matches_lower_capture": true
+    },
+    {
+      "path": "test/test_verification_collaboration_evidence.ml",
+      "matches_lower_capture": true
+    }
+  ],
+  "upper_parse": [
+    {
+      "path": "test/test_board_comment_admission.ml",
+      "sha256": "2028a3509a59664c64a0801a4fbc2a0912740968de8578bbfa18ace2e9eddd0e",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_board_comment_admission.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_board_deletion_recovery.ml",
+      "sha256": "1c63a71237d7b3e3096e5da199e2b81da1b54266c736c837afd36beed4b56459",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_board_deletion_recovery.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_fs_compat_snapshot_guard.ml",
+      "sha256": "b62e9407da3631a5ae0f7c4994e7f5775bb5e684cfb6b4397e71e50e2a049647",
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_fs_compat_snapshot_guard.ml"
+      ],
+      "exit": 0,
+      "output": ""
+    }
+  ],
+  "backend_scenarios": {
+    "new_admission": 9,
+    "retained_deletion": 16,
+    "retained_guard": 5,
+    "executed": 0
+  },
+  "known_P2": {
+    "trigger": "Successful public delete_sub_board leaves cached post.hearth=None dirty while canonical Posts keeps Some slug. Immediate same-store comment is rejected by admission coherence check.",
+    "source": "lib/board/board_comment_admission.ml:84 and lib/board/board_sub_boards.ml:240 at production_source",
+    "disposition": "Draft blocker. Resolve durable owned hearth unlink; do not waive mismatch with dirty flag or claim the root completed.",
+    "ninth_case": "Accepted sub-board deletion -> immediate comment -> fresh hearth/retained comment. Expected failure by source analysis only; never executed."
+  },
+  "fixture_review_corrections": [
+    "3dc used nonexistent close field; actual public IO close_fd was restored.",
+    "3dc used a before_sync_parent hook that does not run at real append. Final test seeds an existing comment and invokes actual exec contenders from the data-FD close boundary.",
+    "initialize_store actual Result is required; fresh post uses actual Board.read_post/error API."
+  ],
+  "source_reviews": "Two independent readers. One reports a real production P2. Initial no-new-findings is not the final candidate verdict."
+}

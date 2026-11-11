@@ -128,33 +128,36 @@ val board_voter_query : Httpun.Request.t -> string option
 val board_current_vote_for_post :
   reader:Masc_board_handlers.Board_access.reader ->
   voter:string option -> post_id:string -> Board.vote_direction option option
-(** [None] means no voter was supplied; [Some None] means a voter was
-    supplied but has not voted on this post. *)
+(** [None] omits vote-state fields when no voter was supplied or the vote is
+    unavailable. [Some None] is a known absence from a readable vote model. *)
 
 val board_current_vote_for_comment :
   reader:Masc_board_handlers.Board_access.reader ->
   voter:string option -> comment_id:string -> Board.vote_direction option option
+(** Same observation rule as {!board_current_vote_for_post}. *)
 
 val board_reactions_for_post :
   reader:Masc_board_handlers.Board_access.reader ->
-  voter:string option -> post_id:string -> Board.reaction_summary list
+  voter:string option -> post_id:string -> Board.reaction_summary list option
 
 val board_reactions_for_comment :
   reader:Masc_board_handlers.Board_access.reader ->
-  voter:string option -> comment_id:string -> Board.reaction_summary list
+  voter:string option -> comment_id:string -> Board.reaction_summary list option
+(** None preserves an unavailable reaction observation; Some [] is known empty. *)
 
 val board_reactions_batch :
   reader:Masc_board_handlers.Board_access.reader ->
   targets:(Board.reaction_target_type * string) list ->
   voter:string option ->
-  ((Board.reaction_target_type * string) * Board.reaction_summary list) list
-(** [board_reactions_batch ~targets ~voter] returns dashboard reaction
-    summaries for a request's target set using one board-store scan. *)
+  ((Board.reaction_target_type * string) * Board.reaction_summary list) list option
+(** One store scan. An unavailable source/parent observation is not an empty
+    summary. An empty requested target set requires no source observation. *)
 
 val board_reactions_lookup :
-  ((Board.reaction_target_type * string) * Board.reaction_summary list) list ->
+  ((Board.reaction_target_type * string) * Board.reaction_summary list) list option ->
   Board.reaction_target_type * string ->
-  Board.reaction_summary list
+  Board.reaction_summary list option
+(** Preserve unavailable rows through the optional dashboard serializer fields. *)
 
 (** {1 Dashboard helpers} *)
 

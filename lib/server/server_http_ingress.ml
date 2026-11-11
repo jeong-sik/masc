@@ -215,7 +215,7 @@ let admitted ~routes ~client_addr ~request_authority request reqd =
           try_internal_error_response reqd msg)))
 ;;
 
-let serve ~routes ~client_addr classification reqd =
+let serve_here ~routes ~client_addr classification reqd =
   let request = Http_reqd.request reqd in
   match classification with
   | Server_request_authority.Missing ->
@@ -252,6 +252,54 @@ let serve ~routes ~client_addr classification reqd =
          reqd
      | Server_auth.Missing_origin | Server_auth.Single_origin _ ->
        admitted ~routes ~client_addr ~request_authority request reqd)
+;;
+
+(* Where a request is handled when its connection runs on another domain
+   than the one that owns the server's root switch (the HTTP serving domain,
+   RFC http-transport-runs-on-its-own-domain §3.3): the owner's queue and the
+   scope its response is written under. A WebSocket route stays with its
+   connection: the upgrade hands the socket to the handler. A [Serving] route
+   stays there too: its registration says its handler may run beside the
+   owner's (§3.4). A request no route matches is the owner's to refuse.
+   [None] on the owner domain, which is every request while the serving
+   domain is off. *)
+let owner_relay ~routes reqd =
+  match Eio_context.owner_post () with
+  | None -> None
+  | Some post ->
+    (match Http.Router.resolve routes (Http_reqd.request reqd) with
+     | `Matched { Http.Router.handler = Http.Router.Ws _ | Http.Router.Serving _; _ } -> None
+     | `Matched { Http.Router.handler = Http.Router.Owner _; _ }
+     | `Method_not_allowed
+     | `Not_found ->
+       Option.map (fun sw -> sw, post) (Http_reqd.relay_scope reqd))
+;;
+
+(* The owner's queue drops what a task raises. [serve_here] answers its own
+   failures; this is for the body and flush callbacks of a handler, which on
+   the connection's domain would have raised into its fiber. *)
+let reporting task () =
+  try task () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Http.error
+      "http ingress: a relayed request's callback raised: %s"
+      (Printexc.to_string exn)
+;;
+
+(* The read mark of the request ([Pool_lane]) is bound to the connection's
+   fiber and does not cross domains, so the handler's fiber takes it again. *)
+let serve ~routes ~client_addr classification reqd =
+  match owner_relay ~routes reqd with
+  | None -> serve_here ~routes ~client_addr classification reqd
+  | Some (sw, post) ->
+    let lane = Pool_lane.current () in
+    let post task = post (reporting task) in
+    Http_reqd.relay reqd ~sw ~post (fun relayed ->
+      let handle () = serve_here ~routes ~client_addr classification relayed in
+      match lane with
+      | Pool_lane.Read -> Pool_lane.with_read handle
+      | Pool_lane.Background -> handle ())
 ;;
 
 let http1_handler ~trust_policy routes client_addr gluten_reqd =

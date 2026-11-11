@@ -2540,18 +2540,6 @@ let chat_live_insertion_index ?(member_ids = []) ~request_id ~timeline_at positi
     positioned_messages
 ;;
 
-(* A settled block holds the turn's progress, tools and words; the request's
-   output rows that stay committed -- a failure the strict decode wrote, a
-   local line -- came after all of that, so the block goes after the request's
-   last row of any earlier phase and before its output rows. Bounding on every
-   row put a failed turn's words under its own error and under whatever turns
-   ran in between. *)
-let chat_settled_insertion_index ?(member_ids = []) ~request_id ~timeline_at positioned_messages =
-  chat_block_insertion_index ~member_ids
-    ~bounds:(fun row -> row.me_turn_phase <> Turn_output)
-    ~request_id ~timeline_at positioned_messages
-;;
-
 let msg_anchor entry =
   { ma_identity = entry.me_identity
   ; ma_session_user_slot =
@@ -3522,6 +3510,7 @@ let runtime_probe_status_label ?(ko = false) status =
     | Runtime_provider_reachable -> "연결 가능"
     | Runtime_provider_skipped_cli -> "CLI 검사 안 함"
     | Runtime_provider_skipped_native_auth -> "ADC 검사 안 함"
+    | Runtime_provider_refused -> "운영자 key를 쓰지 않음"
     | Runtime_provider_missing_auth -> "인증 정보 없음"
     | Runtime_provider_auth_failed -> "인증 실패"
     | Runtime_provider_network_error -> "네트워크 오류"
@@ -3535,6 +3524,7 @@ let runtime_probe_status_label ?(ko = false) status =
     match status with
     | Runtime_provider_skipped_cli -> "CLI not probed"
     | Runtime_provider_skipped_native_auth -> "ADC not probed"
+    | Runtime_provider_refused -> "operator key not used"
     | (Runtime_provider_reachable | Runtime_provider_missing_auth | Runtime_provider_auth_failed
       | Runtime_provider_network_error | Runtime_provider_server_error | Runtime_provider_endpoint_not_found
       | Runtime_provider_http_error | Runtime_provider_unknown_http_status | Runtime_provider_invalid_endpoint
@@ -3544,7 +3534,8 @@ let runtime_probe_annotation ~status detail =
   Option.map (fun detail ->
     match status with
     | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli
-    | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_refused -> Runtime_probe_note detail
     | Masc.Tui_decode_runtime_probe.Runtime_provider_reachable
     | Masc.Tui_decode_runtime_probe.Runtime_provider_missing_auth
     | Masc.Tui_decode_runtime_probe.Runtime_provider_auth_failed
@@ -4837,6 +4828,10 @@ module Surface_read_order : sig
       the enclosing collector. A superseded dataset leaves the state intact. *)
   val owns_dataset : t -> request -> dataset -> bool
   val pending_dataset : t -> dataset -> bool
+  val pending_dataset_age : t -> dataset -> int64 option
+  (** How long the read owning this dataset has been running, monotonic ns.
+      [None] when the dataset is not pending. The pending flag alone cannot
+      tell a pane's ordinary poll from a stalled one; the age can. *)
   val finish : t -> request -> t
   val invalidate : t -> t
   val pending : needs:surface_needs -> t -> source list
@@ -4923,6 +4918,10 @@ end = struct
   let take current request = release_datasets current request, owned current request
   let owns_dataset current request dataset = List.mem dataset (owned current request)
   let pending_dataset current dataset = List.mem_assoc dataset current.owners
+  let pending_dataset_age current dataset =
+    Option.map
+      (fun (request : request) -> Int64.sub (Mtime_clock.elapsed_ns ()) request.started_ns)
+      (List.assoc_opt dataset current.owners)
   let take_dataset current request dataset =
     if owns_dataset current request dataset then
       {current with owners=List.filter (fun (candidate, _) -> candidate <> dataset) current.owners}, true
@@ -6057,6 +6056,17 @@ type task_detail_presented =
   ; tdp_count : int
   ; tdp_height : int
   ; tdp_waiting : bool }
+(* What the last frame of an open Board post drew: the wrapped line count of
+   the body and of the comment thread, and the rows each got. PgUp and PgDn
+   page by these, so the key handler never guesses a window from the terminal
+   height; the thread takes rows from the body, so the guess was wrong
+   whenever a post had comments. *)
+type board_read_presented =
+  { brp_post_id : string
+  ; brp_body_count : int
+  ; brp_body_height : int
+  ; brp_comment_count : int
+  ; brp_comment_height : int }
 type tools_task_owner =
   { tto_source : tools_async_task_source; tto_reading : unit ref; tto_visit : unit ref }
 type tools_task_frame =
@@ -6271,6 +6281,14 @@ let runtime_param_edit_value edit =
        let value = String.trim edit.rpe_draft in
        if String.equal value "" then Error "Choose a value" else Ok (`String value)
      | _ -> parse_json ())
+
+type memory_page = Memory_facts | Memory_changes
+
+type memory_return = {
+  mr_keeper : string;
+  mr_search : string option;
+  mr_search_last : string;
+}
 
 type memory_sort_order =
   | Sort_recency
@@ -6503,11 +6521,6 @@ type code_navigation_owner = {
   cno_action : code_navigation_action;
 }
 
-type code_navigation_reading = {
-  cnr_owner : code_navigation_owner;
-  cnr_file : (string, Tui_decode.workspace_file_source) Masc_tui_fetched.t;
-}
-
 type code_file_load_intent =
   | Open_code_file
   | Refresh_code_file
@@ -6525,6 +6538,21 @@ type code_file_document = {
   cfd_body : code_file_body;
   cfd_revision : string;
   cfd_rows : (string * string) list array;
+  cfd_max_width : int;
+  cfd_memos : Masc_tui_memo.found list;
+}
+
+(* Prepared without reading UI state, before the owned async reply is delivered.
+   The original response is retained for exact draft/revision observation; the
+   UI installs the document and its derived values without scanning the file. *)
+type code_prepared_file = {
+  cpf_source : Tui_decode.workspace_file_source;
+  cpf_document : code_file_document;
+}
+
+type code_navigation_reading = {
+  cnr_owner : code_navigation_owner;
+  cnr_file : (string, code_prepared_file) Masc_tui_fetched.t;
 }
 
 type code_save_request = {
@@ -8665,6 +8693,7 @@ type home_action =
   | Home_read_last of string
   | Home_choose_keeper
   | Home_create_keeper
+  | Home_operator_action of workspace_authority * int * Masc.Operator_action_reason.t
 
 (* Which request a Home row names. A question is compared by
    [Masc.Tui_decode_asks.equal_ask_key], so a package that changes its
@@ -8685,10 +8714,12 @@ let equal_home_action left right =
   | Home_request left, Home_request right -> equal_home_request left right
   | Home_resume left, Home_resume right | Home_read_last left, Home_read_last right ->
       String.equal left right
+  | Home_operator_action (left_scope, left_index, left), Home_operator_action (right_scope, right_index, right) ->
+      left_scope = right_scope && left_index = right_index && Masc.Operator_action_reason.equal left right
   | Home_approvals, Home_approvals | Home_agenda, Home_agenda
   | Home_choose_keeper, Home_choose_keeper | Home_create_keeper, Home_create_keeper -> true
   | ( Home_approvals | Home_request _ | Home_agenda | Home_resume _ | Home_read_last _
-    | Home_choose_keeper | Home_create_keeper ), _ -> false
+    | Home_choose_keeper | Home_create_keeper | Home_operator_action _ ), _ -> false
 
 type acting_pane_preference =
   | Default_acting_pane
@@ -9011,6 +9042,9 @@ type sent_image_read =
   ; sir_name : string
   ; sir_owner : image_read_owner
   ; sir_resource : (Masc_tui_resource_catalog.key * Masc_tui_mcp.resource_content list) option
+  ; sir_memory_activity : Masc.Keeper_memory_activity.t option
+      (** Immutable activity used by a Memory chart. A later read must match
+          this full observation, not merely name the same Keeper. *)
   ; sir_skill_reference : Skill_reference.t option
   ; sir_purpose : image_read_purpose
   }
@@ -9032,6 +9066,15 @@ type image_inspection = {
   ii_origin : sent_image_read option;
   ii_frame : image_inspection_frame;
 }
+
+type image_pixel_source = {
+  ips_workspace : workspace_authority;
+  ips_origin : sent_image_read;
+  ips_unconfirmed : bool;
+  ips_footer : string;
+}
+(** Memory PNGs retain their captured reading in both the Kitty inspection
+    and ordinary pixel paths. The footer follows that reading's freshness. *)
 
 type unsaved_remote_image = {
   uri_bytes : string;
@@ -9075,11 +9118,38 @@ type listen_request = {
   lr_destination : listen_destination;
 }
 
+type resource_save_request = {
+  save_form : unit ref;
+  save_document : Masc_tui_resource_export.t;
+  save_input_path : string;
+  save_path : string;
+  save_workspace : workspace_input_identity;
+}
+
+type resource_save_outcome =
+  | Resource_save_result of (unit, Masc_tui_resource_export.save_error) result
+  | Resource_save_not_started of string
+  | Resource_save_unconfirmed of { detail : string; cause : exn option }
+  | Resource_save_interrupted of Masc_tui_resource_export.cancellation option
+
+type resource_save_phase =
+  | Resource_save_pending
+  | Resource_save_settled of resource_save_outcome
+
+type resource_save_receipt = {
+  save_request : resource_save_request;
+  save_phase : resource_save_phase;
+}
+
 type resource_save_prompt = {
+  rsp_owner : unit ref;
   rsp_document : Masc_tui_resource_export.t;
   rsp_path : Masc_tui_message_input.t;
   rsp_authority : workspace_authority;
   rsp_read_authority : unit ref;
+  rsp_workspace : workspace_input_identity;
+  rsp_directory : string;
+  mutable rsp_error : string option;
 }
 
 type resource_share_request = {
@@ -9533,6 +9603,7 @@ type state = {
   mutable image_open: bool;
   mutable image_inspection : image_inspection option;
   mutable image_cell_view : image_cell_view option;
+  mutable image_pixel_source : image_pixel_source option;
   mutable browser_viewport : (Browser_lane_view.screenshot * string) option;
   mutable image_request_generation: int;
   mutable image_catalog: image_catalog option;
@@ -9682,6 +9753,10 @@ type state = {
   mutable resource_diagrams: Masc_tui_resource_diagrams.t option;
   mutable resource_text_cursor: int;
   mutable resource_save_prompt: resource_save_prompt option;
+  (* Original local-write receipts survive selection, form replacement and
+     workspace withdrawal; they do not authorize a later save. Newest request
+     first, with completion replacing only its own registered pending slot. *)
+  mutable resource_save_receipts: resource_save_receipt list;
   (* The Config surface owns the files the server reads. runtime.toml is one;
      the prompt registry is the other, and a prompt is edited the same way —
      $EDITOR over the effective text, the server persists what comes back. *)
@@ -10055,15 +10130,10 @@ type state = {
   (* The read those turns owe: drawing them, a push about the Keeper's turns, a
      revalidation and a failed read each owe it. *)
   mutable keeper_story_turns_owed: Masc_tui_owed_read.t;
-  (* Independently delivered, Keeper-keyed reads for the Memory dock. *)
-  mutable keeper_story_memory_facts:
-    (string, Masc.Tui_decode_memory_facts.memory_fact_snapshot * string option) Masc_tui_fetched.t;
-  mutable keeper_story_memory_activity: (string, Masc.Keeper_memory_activity.t) Masc_tui_fetched.t;
-  mutable keeper_story_memory_facts_owed: Masc_tui_owed_read.t;
-  mutable keeper_story_memory_activity_owed: Masc_tui_owed_read.t;
-  mutable keeper_story_memory_view: Masc_tui_keeper_story.memory_view;
-  mutable keeper_story_memory_offset: int;
-  mutable keeper_story_memory_owner: string option;
+  (* Shared Keeper-keyed observations for the Memory preview and browser. *)
+  mutable memory_activity: (string, Masc.Keeper_memory_activity.t) Masc_tui_fetched.t;
+  mutable memory_facts_owed: Masc_tui_owed_read.t;
+  mutable memory_activity_owed: Masc_tui_owed_read.t;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -10398,6 +10468,7 @@ type state = {
   mutable board_scroll: int;
   mutable board_comment_scroll: int;
   mutable board_comments_focused: bool;
+  mutable board_read_presented: board_read_presented option;
   (* The selected comment while the comments have focus, by id so a refresh
      that adds, removes or rescores comments keeps it on the same one. It is
      read against the open post's thread: an id that thread does not hold
@@ -10761,7 +10832,11 @@ type state = {
      it -- filtering is equality against the loaded rows, never a
      classification this side invents. *)
   mutable memory_facts_keeper: string option;
-  (* Keyed by [memory_facts_keeper] ("*" for every keeper). The answer
+  mutable memory_page: memory_page;
+  mutable memory_changes_cursor: int;
+  mutable memory_return: memory_return option;
+  (* One foreground source: keyed by the browser target ("*" for the fleet),
+     or the selected Keeper while Story draws its preview. The answer
      carries the keepers the fleet merge could not read beside the facts it
      could; a single keeper's answer has none. *)
   mutable memory_facts:
@@ -10826,7 +10901,7 @@ type state = {
   mutable code_catalog:
     (code_workspace_scope * string, Tui_decode.workspace_file_catalog) Masc_tui_fetched.t;
   mutable code_finder_file:
-    (code_workspace_scope * string, Tui_decode.workspace_file_source) Masc_tui_fetched.t;
+    (code_workspace_scope * string, code_prepared_file) Masc_tui_fetched.t;
   (* The branch list of the checkout that owns the key's directory. *)
   mutable code_branches:
     (code_workspace_scope * string, Tui_decode.git_branches) Masc_tui_fetched.t;
@@ -11035,6 +11110,7 @@ type state = {
           tools reuse it rather than minting one per attempt. Cleared when
           the server explicitly reports it missing or conflicting. *)
   mutable observer_cursor: Sse_wire.observer_cursor option;
+  mutable observer_revalidate_owed: bool;
       (** Last applied complete event, scoped to the responding process. *)
   mutable observer_replay: observer_replay_status;
   mutable observer_source_loss: bool;
@@ -11783,35 +11859,6 @@ let drain_http_progress (state : state) =
     (List.rev (Atomic.exchange state.http_refresh_progress_events []));
   before != state.http_refresh_progress
 
-(* One passive line for the operator quiz: the three window scores and the
-   count of open wrong answers. [None] while nothing has been read, which
-   is not an error. *)
-let quiz_scorecard_reading (state : state) =
-  match state.quiz_scorecard, state.quiz_scorecard_error with
-  | Some { quiz_scorecards = []; _ }, None ->
-      (* No scorecard rows at all means no live quiz installation was in the
-         inventory: no line, which is not the same as zero misses. *)
-      None
-  | Some quiz, None ->
-      let fraction subject =
-        List.find_opt (fun (row : Masc.Lane_addon_types.row) ->
-            String.ends_with row.lane_id ~suffix:"/quiz/scorecard" && row.subject_id = subject)
-          quiz.quiz_scorecards
-        |> Option.map (fun (row : Masc.Lane_addon_types.row) ->
-               match List.assoc_opt "score" row.fields with
-               | Some (`Assoc [ "n", `Int n; "d", `Int d ]) -> Printf.sprintf "%d/%d" n d
-               | _ -> "-")
-      in
-      let window label subject = match fraction subject with
-        | Some shown -> " · " ^ label ^ " " ^ shown
-        | None -> ""
-      in
-      Some (Printf.sprintf " Quiz:%s%s%s · unrecovered misses %d · g opens the notes"
-              (window "1일" "day") (window "7일" "7d") (window "30일" "30d")
-              (List.length quiz.quiz_reviews))
-  | Some _, Some _ | None, Some _ -> Some " Quiz: reading unavailable · g opens the lane"
-  | None, None -> None
-
 let finish_http_refresh_state ?finished_ns (state : state) =
   ignore (drain_http_progress state);
   let finished_ns = match finished_ns with
@@ -12196,9 +12243,29 @@ let board_census_values (state : state) =
   match Masc_tui_fetched.value state.board_census with
   | Some census -> census | None -> []
 
+(* A display bar, not a gate on the read. A pending read younger than this is
+   expected to settle before a person could read a line about it, so drawing
+   its phase only makes the header grow and shrink on every poll. Past the
+   bar the same line is a readable symptom: the phase word is stable at that
+   age and the elapsed seconds say how long it has been stuck. *)
+let pending_display_bar_ns = 1_000_000_000L
+
+let past_pending_display_bar age = Int64.compare age pending_display_bar_ns >= 0
+
+(* Totals stay borrowable while an ordinary poll is in flight -- the census
+   on screen is the last reading until a newer one lands, and dropping the
+   totals for every poll made the title's count flip "(N of M)"↔"(N)" at
+   read cadence. A read running past the pending display bar lets go of
+   them: totals gone stale are worth retiring, a poll is not. *)
 let board_census_holding (state : state) ~hearth =
   match board_census_reading state with
-  | Masc_tui_fetched.Ready census,false ->
+  | Masc_tui_fetched.Ready census, pending
+    when not pending
+         || (match
+              Surface_read_order.pending_dataset_age state.http_surface_reads
+                Surface_read_order.Board_hearths with
+             | Some age -> not (past_pending_display_bar age)
+             | None -> false) ->
       (match hearth with
        | Some hearth -> List.assoc_opt hearth census
        | None -> Some (List.fold_left (fun total (_,count) -> total+count) 0 census))
@@ -12307,15 +12374,6 @@ let local_source_pending state source =
   if Local_read_order.in_flight (local_source_order state source) then
     Option.map Local_read_observation.pending (local_source_observation state source)
   else None
-
-(* A display bar, not a gate on the read. A pending read younger than this is
-   expected to settle before a person could read a line about it, so drawing
-   its phase only makes the header grow and shrink on every poll. Past the
-   bar the same line is a readable symptom: the phase word is stable at that
-   age and the elapsed seconds say how long it has been stuck. *)
-let pending_display_bar_ns = 1_000_000_000L
-
-let past_pending_display_bar age = Int64.compare age pending_display_bar_ns >= 0
 
 let local_source_slow_pending state source =
   if Local_read_order.in_flight (local_source_order state source) then
@@ -15060,10 +15118,9 @@ let suspend_workspace_readings state =
   state.schedules_page_owed <- Masc_tui_owed_read.settled;
   state.keeper_schedules_owed <- None;
   state.keeper_story_turns <- Masc_tui_fetched.suspend state.keeper_story_turns;
-  state.keeper_story_memory_facts <- Masc_tui_fetched.suspend state.keeper_story_memory_facts;
-  state.keeper_story_memory_activity <- Masc_tui_fetched.suspend state.keeper_story_memory_activity;
-  state.keeper_story_memory_facts_owed <- Masc_tui_owed_read.settled;
-  state.keeper_story_memory_activity_owed <- Masc_tui_owed_read.settled;
+  state.memory_activity <- Masc_tui_fetched.suspend state.memory_activity;
+  state.memory_facts_owed <- Masc_tui_owed_read.settled;
+  state.memory_activity_owed <- Masc_tui_owed_read.settled;
   state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.chat_native_tasks_owed <- None;
   state.chat_child_content_owed <- None;
@@ -16102,7 +16159,8 @@ let text_input_target (state : state) ~compact_viewport =
     && state.config_pane = Config_presets
     && Option.is_some state.preset_save_draft
   then Some Text_preset_name
-  else if state.view = Runtime && Option.is_some state.runtime_lane_name_draft then
+  else if state.view = Runtime && Option.is_none state.runtime_detail_target
+          && Option.is_some state.runtime_lane_name_draft then
     Some Text_runtime_lane_name
   (* The account form draws on the runtime.toml pane only, and not on a
      viewport too small to draw that pane, the rule the voice wizard keeps. *)
@@ -18100,6 +18158,16 @@ let lane_inventory_visual_cursor (state : state) =
   Option.bind (selected_inventory_lane state) (fun row ->
     Masc_tui_lane_inventory.row_position ~id:row.Masc.Tui_decode_lane_inventory.id (lane_inventory_entries state))
 
+(* What the selected lane brings above itself: its category heading when it is
+   the first row of the category. The key handler and the frame both scroll
+   with it, so a keypress and the next frame agree on the window. *)
+let lane_inventory_lead (state : state) =
+  match selected_inventory_lane state with
+  | None -> 0
+  | Some row ->
+      Masc_tui_lane_inventory.row_lead ~id:row.Masc.Tui_decode_lane_inventory.id
+        (lane_inventory_entries state)
+
 (* Exact-only editors retain their current data contract. The inventory cursor
    names a row by identity, never by its position in the exact-only snapshot. *)
 let selected_standalone_lane (state : state) =
@@ -18518,8 +18586,11 @@ let keeper_message_availability (state : state) keeper_name =
   | Some keeper ->
       match state.workspace_identity with
       | Workspace_identity_unread -> Message_unavailable Message_workspace_unobserved
-      | Workspace_identity_match_unconfirmed _ -> Message_unavailable Message_workspace_unconfirmed
       | Workspace_identity_mismatch _ -> Message_unavailable Message_workspace_differs
+      (* A match that is merely unconfirmed keeps the last confirmed match:
+         the roster answer still names the keeper, so the composer may queue
+         the line; sending stays gated on a confirmed match. *)
+      | Workspace_identity_match_unconfirmed _
       | Workspace_identity_match ->
           match keeper.k_origin with
           | Tui_decode.Remote_keeper -> Message_unavailable Remote_keeper_observation
@@ -19112,7 +19183,8 @@ let tools_keeper_observation_confirmed (state : state) =
   && state.local_keepers = Local_workspace_read && Option.is_none state.keepers_error
 
 let image_keeper_is_current (state : state) ~view ~keeper_name =
-  view = Resources || view = Board || keeper_name = state.msg_target_keeper_name
+  if view = Memory then state.memory_page = Memory_changes && keeper_name = state.memory_facts_keeper
+  else view = Resources || view = Board || keeper_name = state.msg_target_keeper_name
 
 let image_request_keeper_is_current (state : state) (request : sent_image_read) =
   match request.sir_view, request.sir_skill_reference with
@@ -19310,10 +19382,21 @@ let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
         Effective_surface_unavailable _);_}) -> true in
   skill_unconfirmed || tools_skill_may_be_unread state origin || match origin.sir_owner with
   | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ -> false
-  | Peer_image_read _ ->
+  | Peer_image_read reading ->
       workspace_unconfirmed ||
       (if origin.sir_view = Resources then
          Option.is_none state.resource_content || Option.is_some state.resource_content_error
+       else if origin.sir_view = Memory then
+         state.view <> Memory || reading != state.workspace_read_authority
+         || not (image_request_keeper_is_current state origin)
+         || Masc_tui_fetched.in_flight state.memory_activity
+         || (match origin.sir_keeper, origin.sir_memory_activity with
+             | Some keeper, Some captured ->
+                 (match Masc_tui_fetched.view_for ~equal:String.equal state.memory_activity ~key:keeper with
+                  | Ready current ->
+                      not (current == captured || current = captured) || current.notes <> []
+                  | Absent | Loading | Stale _ | Failed _ -> true)
+             | None, (Some _ | None) | Some _, None -> true)
        else if origin.sir_view = Tools && Option.is_some origin.sir_skill_reference then
          not (tools_keeper_observation_confirmed state)
          || Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) <> origin.sir_keeper
@@ -19332,6 +19415,13 @@ let image_cell_source_unconfirmed (state : state) (origin : sent_image_read) =
                  | Board_diagram (Board_post_diagram _) -> false)
             | Absent | Loading | Failed _ -> true)
        | Board_list | Board_compose -> true)
+
+let image_pixel_source_for_redraw (state : state) (source : image_pixel_source) =
+  match image_cell_origin_for_redraw state ~workspace:source.ips_workspace source.ips_origin with
+  | None -> None
+  | Some origin ->
+      Some {source with ips_origin=origin;
+        ips_unconfirmed=image_cell_source_unconfirmed state origin}
 
 (* A completion belongs to the exact read that launched it, even if a later
    read happens to have the same name, surface and generation. *)
@@ -19922,15 +20012,105 @@ let ui_text (state : state) ~ko ~en =
   | Lang_ko -> ko
   | Lang_en -> en
 
-(* The server's own list of what needs the operator. The footer's ACTION
-   NEEDED row and the terminal title count it, and the Dashboard lists it. An
-   older server, or one before its first snapshot, cannot say and counts as
-   none. *)
-let operator_actions (state : state) =
-  match state.server_identity with
+let resource_save_path prompt =
+  let path = Masc_tui_message_input.contents prompt.rsp_path in
+  if Filename.is_relative path then Filename.concat prompt.rsp_directory path else path
+
+let resource_save_pending_for_prompt state prompt =
+  List.exists (fun receipt ->
+    let request = receipt.save_request in
+    (request.save_form == prompt.rsp_owner
+     || (request.save_workspace = prompt.rsp_workspace
+         && request.save_path = resource_save_path prompt
+         && Masc_tui_resource_export.same request.save_document prompt.rsp_document))
+    && match receipt.save_phase with
+       | Resource_save_pending -> true
+       | Resource_save_settled _ -> false) state.resource_save_receipts
+
+let resource_save_receipts_for state key =
+  match workspace_input_identity_of_server state.server_identity with
   | None -> []
-  | Some identity ->
-      Option.value identity.Tui_decode.sid_operator_action ~default:[]
+  | Some workspace -> List.filter (fun receipt ->
+      receipt.save_request.save_workspace = workspace
+      && Masc_tui_resource_export.matches_key receipt.save_request.save_document key)
+      state.resource_save_receipts
+
+let resource_save_prompt_receipt state prompt =
+  List.find_opt (fun receipt ->
+    receipt.save_request.save_form == prompt.rsp_owner
+    && receipt.save_request.save_input_path = Masc_tui_message_input.contents prompt.rsp_path)
+    state.resource_save_receipts
+
+let resource_save_document_title document =
+  match Masc_tui_resource_export.key document with
+  | Masc_tui_resource_catalog.Report_revision report -> report.revision.title
+  | Masc_tui_resource_catalog.Mcp_uri uri -> uri
+
+let resource_save_summary state phase =
+  let describe_effect ~interrupted = function
+    | Some Fs_compat.Target_unchanged ->
+        if interrupted then ui_text state ~ko:"저장 중단 · 대상 파일 변경 없음"
+          ~en:"Save interrupted · destination unchanged"
+        else ui_text state ~ko:"저장하지 못함 · 대상 파일 변경 없음"
+          ~en:"Not saved · destination unchanged"
+    | Some Fs_compat.Target_created ->
+        if interrupted then ui_text state ~ko:"파일 생성 후 중단 · 완료 확인 필요"
+          ~en:"Interrupted after file creation · completion unconfirmed"
+        else ui_text state ~ko:"파일 생성 후 오류 · 완료 확인 필요"
+          ~en:"File created · completion error"
+    | Some Fs_compat.Target_replaced ->
+        ui_text state ~ko:"대상 파일 교체됨 · 완료 확인 필요"
+          ~en:"Destination replaced · completion unconfirmed"
+    | Some Fs_compat.Target_state_unknown | None ->
+        ui_text state ~ko:"저장 결과 확인 필요 · 다시 저장하기 전 파일을 확인하세요"
+          ~en:"Save result unconfirmed · inspect the file before saving again"
+  in
+  match phase with
+  | Resource_save_pending -> ui_text state ~ko:"파일 저장 중" ~en:"Saving original"
+  | Resource_save_settled (Resource_save_result (Ok ())) ->
+      ui_text state ~ko:"원본 파일 저장됨" ~en:"Original file saved"
+  | Resource_save_settled (Resource_save_result (Error error)) ->
+      if Masc_tui_resource_export.refused_existing_target error then
+        ui_text state ~ko:"이미 있는 파일 · 변경하지 않았습니다"
+          ~en:"File already exists · left unchanged"
+      else describe_effect ~interrupted:false (Masc_tui_resource_export.error_target_effect error)
+  | Resource_save_settled (Resource_save_not_started _) ->
+      ui_text state ~ko:"저장 요청을 시작하지 않았습니다" ~en:"Save not started"
+  | Resource_save_settled (Resource_save_unconfirmed _) -> describe_effect ~interrupted:false None
+  | Resource_save_settled (Resource_save_interrupted cancellation) ->
+      describe_effect ~interrupted:true
+        (Option.bind cancellation Masc_tui_resource_export.cancellation_effect)
+
+let settle_resource_save state request outcome =
+  let accepted = ref false in
+  state.resource_save_receipts <- List.map (fun receipt ->
+    if receipt.save_request == request then
+      match receipt.save_phase with
+      | Resource_save_pending ->
+          accepted := true;
+          {receipt with save_phase=Resource_save_settled outcome}
+      | Resource_save_settled _ -> receipt
+    else receipt) state.resource_save_receipts;
+  if !accepted then begin
+    match outcome, state.resource_save_prompt with
+    | Resource_save_result (Ok ()), Some prompt
+      when prompt.rsp_owner == request.save_form
+        && Masc_tui_message_input.contents prompt.rsp_path = request.save_input_path ->
+        state.resource_save_prompt <- None
+    | (Resource_save_result (Ok () | Error _) | Resource_save_not_started _
+        | Resource_save_unconfirmed _ | Resource_save_interrupted _), (Some _ | None) -> ()
+  end;
+  !accepted
+
+(* The server's immutable observed collection. None must never count as an
+   observed empty rollup in a summary or a navigation target. *)
+let operator_action_observation (state : state) =
+  Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_operator_action)
+
+let operator_actions state =
+  match operator_action_observation state with
+  | Some (Tui_decode.Operator_actions_observed actions) -> Some actions
+  | Some (Tui_decode.Operator_actions_unavailable _) | None -> None
 
 let withdraw_detail_histories (state : state) =
   clear_task_documents state;
@@ -20100,6 +20280,7 @@ let create_state
   image_open = false;
   image_inspection = None;
   image_cell_view = None;
+  image_pixel_source = None;
   browser_viewport = None;
   image_request_generation = 0;
   image_catalog = None;
@@ -20181,6 +20362,7 @@ let create_state
   resource_diagrams = None;
   resource_text_cursor = 0;
   resource_save_prompt = None;
+  resource_save_receipts = [];
   config_pane = Config_runtime;
   tools_pane = Tools_surface;
   theme_choice = None;
@@ -20356,13 +20538,9 @@ let create_state
   keeper_story = None;
   keeper_story_turns = Masc_tui_fetched.initial;
   keeper_story_turns_owed = Masc_tui_owed_read.settled;
-  keeper_story_memory_facts = Masc_tui_fetched.initial;
-  keeper_story_memory_activity = Masc_tui_fetched.initial;
-  keeper_story_memory_facts_owed = Masc_tui_owed_read.settled;
-  keeper_story_memory_activity_owed = Masc_tui_owed_read.settled;
-  keeper_story_memory_view = Masc_tui_keeper_story.Memory_summary;
-  keeper_story_memory_offset = 0;
-  keeper_story_memory_owner = None;
+  memory_activity = Masc_tui_fetched.initial;
+  memory_facts_owed = Masc_tui_owed_read.settled;
+  memory_activity_owed = Masc_tui_owed_read.settled;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;
@@ -20542,6 +20720,7 @@ let create_state
   board_scroll = 0;
   board_comment_scroll = 0;
   board_comments_focused = false;
+  board_read_presented = None;
   board_comment_cursor = None;
   board_diagram_cursor = None;
   board_image_selection = None;
@@ -20757,6 +20936,9 @@ let create_state
   memory_input = Masc_tui_fetched.initial;
   memory_input_owed = Masc_tui_owed_read.settled;
   memory_facts_keeper = None;
+  memory_page = Memory_facts;
+  memory_changes_cursor = 0;
+  memory_return = None;
   memory_facts = Masc_tui_fetched.initial;
   memory_facts_cursor = 0;
   memory_facts_scroll = 0;
@@ -20887,6 +21069,7 @@ let create_state
   observer_scope_binding = Observer_scope_unbound;
   mcp_session = None;
   observer_cursor = None;
+  observer_revalidate_owed = false;
   observer_replay = Observer_replay_unobserved;
   observer_source_loss = false;
   observer_source_loss_sequences = [];
@@ -22997,6 +23180,43 @@ let board_read_focus (state : state) ~cols =
   | Board_read_wide | Board_read_one_pane -> Right_pane
 ;;
 
+(* The frame's windows, only while they belong to the post that is open: a
+   record written for another post says nothing about this one. *)
+let current_board_read_presented (state : state) =
+  match state.board_read_presented, state.board_mode with
+  | Some shown, Board_read post_id when String.equal shown.brp_post_id post_id ->
+      Some shown
+  | Some _, (Board_list | Board_read _ | Board_compose) | None, _ -> None
+;;
+
+let board_read_presented_frame (state : state) ~post_id ~body:(brp_body_count, brp_body_height)
+    ~comments:(brp_comment_count, brp_comment_height) =
+  state.board_read_presented <-
+    Some { brp_post_id = post_id; brp_body_count; brp_body_height;
+           brp_comment_count; brp_comment_height }
+;;
+
+(* PgUp and PgDn on the open post move the half that has the keys by one page
+   of the window the frame drew for it: one row of the window stays, as in
+   every other reading. Before the first frame of a post nothing says how big
+   its window is, so the key does nothing rather than move by a guessed size. *)
+let page_board_read (state : state) ~direction =
+  match current_board_read_presented state with
+  | None -> ()
+  | Some shown ->
+      let move =
+        if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up
+      in
+      if state.board_comments_focused then
+        state.board_comment_scroll <-
+          move ~count:shown.brp_comment_count ~height:shown.brp_comment_height
+            state.board_comment_scroll
+      else
+        state.board_scroll <-
+          move ~count:shown.brp_body_count ~height:shown.brp_body_height
+            state.board_scroll
+;;
+
 (* What [board_focus] becomes when the Activity pane gives the keys back. The
    cycle closes at the left pane, and only the split has one: elsewhere the
    stored choice stands, so a pane the operator never chose cannot take over
@@ -23297,7 +23517,10 @@ let memory_overview_query (state : state) =
 type memory_back = Memory_stays | Memory_leaves
 
 let memory_back (state : state) =
-  if Option.is_some state.search || state.search_last <> "" then begin
+  if state.memory_page = Memory_changes then begin
+    state.memory_page <- Memory_facts;
+    Memory_stays
+  end else if Option.is_some state.search || state.search_last <> "" then begin
     state.search <- None;
     state.search_last <- "";
     (match state.memory_facts_keeper with
@@ -23740,8 +23963,8 @@ type runtime_picker_projection = {
       (* The filter being typed, if one is. *)
 }
 
-(* How many runtimes the picker draws at once, and so how far PgUp/PgDn move
-   it. The listing under it gives these rows up while it is open. *)
+(* The picker's maximum page. Runtime reduces it to the frame's available
+   rows; rendering and PgUp/PgDn use [runtime_exact_picker_page] together. *)
 let runtime_picker_page = 3
 
 (* The text a runtime's picker row draws before its notes, made terminal
@@ -24019,8 +24242,54 @@ let runtime_picker_empty_note picker =
 let runtime_picker_keys enter = function
   | None -> Printf.sprintf "j/k move, PgUp/PgDn page, %s, e cancel" enter
   | Some _ -> Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter" enter
+
+let runtime_picker_choice_height = function
+  | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> 2
+  | Pick_route_default | Pick_conversation_lane _ | Pick_new_lane _
+  | Pick_media_failover -> 1
+
+(* The picker and the existing routes reader retain the same catalogue
+   observation, including an error after the last good catalogue. *)
+let runtime_picker_catalogue_notices (state : state) =
+  match state.runtime_catalog_reading with
+  | Runtime_catalog_read -> []
+  | (Runtime_catalog_unread | Runtime_catalog_loading
+    | Runtime_catalog_refreshing _ | Runtime_catalog_stale _
+    | Runtime_catalog_failed _) as reading ->
+      [ runtime_catalog_reading_suffix reading ]
+
+(* Count source notices before wrapping: a long first notice must not make
+   the following refusal or read error disappear from the title's count. *)
+let runtime_picker_notices (state : state) =
+  runtime_picker_catalogue_notices state
+  @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
+  @ runtime_lane_stale_lines state
+  @ Option.to_list state.runtime_surface_error
+
+(* Both the page calculation and drawing count these same wrapped rows. *)
+let runtime_picker_notice_rows ~cols state =
+  List.concat_map
+    (fun text ->
+      Masc_tui_message_layout.boxed_rows
+        ~inner:(Masc_tui_frame.inner_width ~cols)
+        (Masc.Tui_terminal_text.sanitize_terminal_lines text))
+    (runtime_picker_notices state)
+
 let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
   match state.view, state.slot_editor with
+  | Runtime, _ ->
+    (match state.runtime_lane_pick with
+     | None -> runtime_picker_page
+     | Some (pick, _) ->
+       let budget =
+         Masc_tui_frame.content_height
+           ~rows:(surface_body_rows state ~terminal_rows)
+       in
+       let summary_rows = if budget > 1 then 1 else 0 in
+       let notes = List.length (runtime_picker_notice_rows ~cols state) in
+       max 1
+         (min runtime_picker_page
+            ((budget - summary_rows - notes) / runtime_picker_choice_height pick)))
   | Lanes, Some { se_target = Exact_lane_slots _; _ } ->
     let extra =
       lanes_action_error_row_count ~cols state.lanes_action_error
@@ -24032,7 +24301,7 @@ let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
     (* Two lines per model, after the frame, search, selected ID and keys. *)
     max 1 ((surface_body_rows state ~terminal_rows - 10 - extra) / 2)
   | (Lanes, Some { se_target = Media_failover_slots;_}) | (Lanes, None)
-  | ((Overview | (Acting | (Metrics | (Memory | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> runtime_picker_page
+  | ((Overview | (Acting | (Metrics | (Memory | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Config | (Resources | (Tools | (System_logs | Keepers _)))))))))))))))))))), _) -> runtime_picker_page
 
 let runtime_model_picker_title (runtime : Tui_decode.runtime_option) =
   let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
@@ -24214,9 +24483,7 @@ let lanes_overview_projection (state : state) ~rows ~cols =
     lop_scroll = {sc_count = count; sc_chrome = rows - list_height;
       sc_overflow_takes_row = false; sc_preview_keep = None} }
 
-(* The one-line prompt the lane editor puts above the Runtime rows: a name
-   being typed for a new lane or for a rename, or the lane a second [D] would
-   remove. *)
+(* The active name field or second-[D] confirmation owns the Runtime body. *)
 type runtime_lane_prompt =
   | Lane_name_prompt of string
   | Lane_rename_prompt of string * string
@@ -24228,6 +24495,49 @@ let runtime_lane_prompt (state : state) =
   | Some (Renaming_lane { lane; draft }), _ -> Some (Lane_rename_prompt (lane, draft))
   | None, Some lane -> Some (Lane_remove_prompt lane)
   | None, None -> None
+
+(* Derived from the existing owners, never stored or used to admit a write.
+   A picker or full reader is above the parent it will return to. *)
+type runtime_parent =
+  | Runtime_media_parent
+  | Runtime_prompt_parent of runtime_lane_prompt
+
+let runtime_parent (state : state) =
+  match state.runtime_detail_target, state.runtime_lane_pick with
+  | Some _, _ | None, Some _ -> None
+  | None, None ->
+      (match runtime_lane_prompt state, state.slot_editor with
+       | Some prompt, _ -> Some (Runtime_prompt_parent prompt)
+       | None, Some { se_target = Media_failover_slots; _ } -> Some Runtime_media_parent
+       | None, (Some { se_target = Exact_lane_slots _; _ } | None) -> None)
+
+(* A parent replaces the listing, so keys for that hidden listing must be
+   consumed rather than fall through to its cursor or edit handlers. Name
+   fields already own every key; media keeps its own slot edits, and a lane
+   removal keeps only its second [D]. Surface navigation is not a list edit. *)
+let runtime_parent_blocks_listing_key parent key =
+  let listing_key =
+    match key with
+    | "e" | "E" | "f" | "h" | "p" | "P" | "/" | "n" | "N"
+    | "\r" | "\n" | "enter" | "right" -> true
+    | _ -> false
+  in
+  match parent with
+  | Runtime_prompt_parent (Lane_name_prompt _ | Lane_rename_prompt _) -> false
+  | Runtime_media_parent ->
+      listing_key
+      || (match runtime_lane_edit_of_key key with
+          | Some (Row_edit (Remove_lane | Rename_lane)) -> true
+          | Some (New_lane | Row_edit (Drop_candidate | Move_candidate _)) | None -> false)
+  | Runtime_prompt_parent (Lane_remove_prompt _) ->
+      listing_key
+      || (match key with
+          | "m" | "j" | "k" | "up" | "down" | "wheel-up" | "wheel-down"
+          | "pageup" | "pagedown" | "home" | "end" -> true
+          | _ ->
+              (match runtime_lane_edit_of_key key with
+               | Some (Row_edit Remove_lane) | None -> false
+               | Some (New_lane | Row_edit (Drop_candidate | Move_candidate _ | Rename_lane)) -> true))
 
 let runtime_lane_write_busy (state : state) =
   match state.runtime_lane_write with
@@ -24511,6 +24821,109 @@ let navigate_slot_editor state move =
       | Some index, Move_up -> max 0 (index - 1)
     in
     select_slot_editor_row state index
+;;
+
+type runtime_parent_line =
+  | Parent_focus of string
+  | Parent_text of string
+  | Parent_notice of runtime_lane_notice option * string
+
+type runtime_parent_projection =
+  { rpp_parent : runtime_parent
+  ; rpp_rows : runtime_parent_line list
+  ; rpp_notices : int
+  ; rpp_page : int
+  ; rpp_position : string option
+  }
+
+(* Drawing and page keys use this same current selection and physical budget.
+   Optional context/notice rows reserve the focused input or selected slot
+   first. Full values remain in Runtime_routes; no display row authorizes an
+   edit, and no window offset is kept across source/selection changes. *)
+let runtime_parent_projection ~terminal_rows ~cols (state : state) =
+  Option.map (fun parent ->
+    let ko = state.ui_language = Lang_ko in
+    let text korean english = if ko then korean else english in
+    let width = max 1 (Masc_tui_frame.inner_width ~cols) in
+    let budget = Masc_tui_frame.content_height
+        ~rows:(surface_body_rows state ~terminal_rows) in
+    let clean = Masc.Tui_terminal_text.sanitize_terminal_text in
+    let notices =
+      Option.to_list (Option.map
+        (fun notice -> Some notice, runtime_lane_notice_text notice) state.runtime_lane_notice)
+      @ List.map (fun line -> None, line) (runtime_lane_stale_lines state)
+      @ List.map (fun line -> None, line) (Option.to_list state.runtime_surface_error)
+      @ List.map (fun line -> None, line) (runtime_picker_catalogue_notices state)
+    in
+    let focus_rows = match parent with
+      | Runtime_prompt_parent (Lane_rename_prompt _) -> 2
+      | Runtime_media_parent | Runtime_prompt_parent (Lane_name_prompt _ | Lane_remove_prompt _) -> 1 in
+    let notice_rows = match notices with
+      | [] -> []
+      | (kind, line) :: _ when budget > focus_rows ->
+          let rows = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2)) (clean line) in
+          (match rows with
+           | [] -> []
+           | first :: rest ->
+               let first = match rest with
+                 | [] -> first
+                 | _ :: _ -> "… " ^ first in
+               [Parent_notice (kind, first)])
+      | _ :: _ -> [] in
+    let available = budget - List.length notice_rows in
+    match parent with
+    | Runtime_media_parent ->
+        let entries = slot_editor_rows state in
+        let count = List.length entries in
+        let selected = slot_editor_cursor_index state in
+        let context = if available > 1 then [Parent_text "[runtime].media_failover"] else [] in
+        let height = max 1 (available - List.length context) in
+        let first = max 0 (min (Option.value selected ~default:0) (max 0 (count - height))) in
+        let rows =
+          if count = 0 then
+            [Parent_focus (match state.runtime_surface with
+              | None -> text "슬롯 미관측 · v 전체 읽기" "Slots unobserved · v reads all"
+              | Some _ -> text "빈 순서 · a 추가" "Empty order · a adds a runtime")]
+          else if Option.is_none selected then
+            [Parent_focus (text "선택 없음 · j/k로 선택" "No selection · j/k selects")]
+          else
+            entries |> List.drop first |> List.take height
+            |> List.mapi (fun offset row ->
+              let index = first + offset in
+              let lead = Printf.sprintf "%s %d%s "
+                  (if Some index = selected then ">" else " ") (index + 1)
+                  (if row.sr_admitted then "" else " !") in
+              let line = lead ^ Masc_tui_message_layout.fit_middle
+                  (max 1 (width - Masc_tui_message_layout.display_width lead)) (clean row.sr_slot) in
+              if Some index = selected then Parent_focus line else Parent_text line) in
+        { rpp_parent = parent; rpp_rows = context @ rows @ notice_rows;
+          rpp_notices = List.length notices; rpp_page = height;
+          rpp_position = if Option.is_some selected && count > height then Some
+              (Masc_tui_scroll.window_text ~scroll:first ~height count) else None }
+    | Runtime_prompt_parent prompt ->
+        let input draft =
+          let label = text "새 이름 › " "Name › " in
+          label ^ Masc_tui_message_layout.input_viewport
+            ~max_cells:(max 1 (width - Masc_tui_message_layout.display_width label - 1))
+            (clean draft) ^ "_" in
+        let target label lane =
+          label ^ Masc_tui_message_layout.fit_middle
+            (max 1 (width - Masc_tui_message_layout.display_width label)) (clean lane) in
+        let focus, context = match prompt with
+          | Lane_name_prompt draft -> input draft,
+              [text "Enter: 첫 런타임 선택" "Enter: choose the first runtime"]
+          | Lane_rename_prompt (lane, draft) -> input draft,
+              [target (text "원래 › " "From › ") lane;
+               text "이름과 모든 참조를 함께 변경" "Rename the lane and all references together"]
+          | Lane_remove_prompt lane ->
+              target (text "D 다시: " "D again: ") lane, [] in
+        let context = List.concat_map
+            (Masc_tui_message_layout.wrap_words ~max_cells:width) context
+          |> List.take (max 0 (available - 1))
+          |> List.map (fun row -> Parent_text row) in
+        { rpp_parent = parent; rpp_rows = Parent_focus focus :: notice_rows @ context;
+          rpp_notices = List.length notices; rpp_page = 0; rpp_position = None }
+  ) (runtime_parent state)
 ;;
 
 type slot_edit =
@@ -25406,7 +25819,7 @@ let open_runtime_row_detail (state : state) =
 ;;
 
 let runtime_scrolled ~rows ~cols (state : state) : scrolled option =
-  if Option.is_some state.runtime_detail_target then None
+  if Option.is_some state.runtime_detail_target || Option.is_some (runtime_parent state) then None
   else
     Some
       { sc_count =
@@ -25527,6 +25940,7 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
           (match state.repositories with
            | None -> 0
            | Some s -> List.length s.Tui_decode.rs_repositories)
+  | Memory when state.memory_page = Memory_changes -> None
   | Memory ->
       if Option.is_some state.memory_facts_keeper then
         listing ~error:(memory_facts_failure state)

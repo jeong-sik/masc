@@ -256,13 +256,6 @@ let detect_dimensions bytes =
   | None -> webp_dimensions bytes
 ;;
 
-let needs_downscale ?max_dimension:max_dim_opt bytes =
-  let max_dim = Option.value max_dim_opt ~default:(max_dimension ()) in
-  match detect_dimensions bytes with
-  | Some { width; height } -> max width height > max_dim
-  | None -> false
-;;
-
 (* argv[0] is the bare program name: Process_eio's spawner resolves it on
    PATH and reports a program it cannot find, or cannot start, as a
    [Process_eio.spawn_refusal], which [attempt_plan] records as that

@@ -1163,7 +1163,29 @@ let canonicalize_descriptors descriptors =
                 ({ descriptor
                  ; model_names = Keeper_tool_descriptor.keeper_model_names descriptor
                  } :: resolved) rest)
-       | Some registered -> canonicalize (registered :: resolved) rest)
+       | Some registered ->
+         (* Identity, names, execution and input schema stay registry-owned.
+            A declared [Json_output] composable_output override travels with
+            the plan and governs typed dataflow, output validation and
+            exports, but only when it differs from the registered contract:
+            an override equal to the catalog contract, and [Opaque_output]
+            (the descriptor default, meaning "no declared contract"), keeps
+            the registered descriptor itself so plans supplied with catalog
+            copies stay physically identical to the registry and the
+            plan-identity contract
+            (test_plan_names_come_from_the_registered_descriptor) holds.
+            Write evidence stays identity-gated in Board_tool_evidence, so an
+            output override cannot turn a non-board write into board evidence
+            (task-3483). *)
+         let descriptor =
+           match descriptor.composable_output with
+           | Keeper_tool_descriptor.Opaque_output -> registered.descriptor
+           | Keeper_tool_descriptor.Json_output _ as override ->
+             if override = registered.descriptor.composable_output
+             then registered.descriptor
+             else { registered.descriptor with composable_output = override }
+         in
+         canonicalize ({ descriptor; model_names = registered.model_names } :: resolved) rest)
   in
   canonicalize [] descriptors
 ;;
@@ -1225,7 +1247,13 @@ let contract_for_node descriptors children arguments (node : node) =
        execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent}
   | Some (Descriptor_target _) -> invalid_arg "compiled target cannot own an ordinary descriptor"
   | None -> Option.map (fun (descriptor : Keeper_tool_descriptor.t) ->
-      {target=Descriptor_target descriptor;input_schema=descriptor.input_schema;
+      (* Runtime authority is the original registry object. The copied
+         plan-owned output contract must not cross the handler's physical
+         descriptor check; validation below still uses that declared output. *)
+      let target=match Descriptor_id_map.find_opt descriptor.id registered_by_id with
+        | Some registered -> registered.descriptor
+        | None -> descriptor in
+      {target=Descriptor_target target;input_schema=descriptor.input_schema;
        composable_output=descriptor.composable_output;execution=descriptor.execution})
       (descriptor_for_name descriptors node.tool_name)
 

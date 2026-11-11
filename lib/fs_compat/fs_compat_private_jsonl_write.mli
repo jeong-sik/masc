@@ -44,6 +44,12 @@ val read_private_jsonl_durable_locked_result :
   after:Private_jsonl_cursor.t option ->
   (private_jsonl_snapshot, private_jsonl_transaction_error) result
 
+val read_private_jsonl_snapshot_locked :
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> after:Private_jsonl_cursor.t option ->
+  (private_jsonl_snapshot, private_jsonl_transaction_error) result
+(** Filesystem worker only, under this path's already-held stable scope. *)
+
 val private_jsonl_last_complete_row_length : string -> int
 
 val recover_private_jsonl_durable_locked_result :
@@ -90,6 +96,15 @@ val append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing :
   io:private_jsonl_transaction_io_for_testing ->
   string -> expected:private_jsonl_snapshot -> string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+
+val append_private_jsonl_snapshot_locked :
+  io:private_jsonl_transaction_io_for_testing -> dir:string ->
+  string -> expected:private_jsonl_snapshot -> string ->
+  (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
+(** Internal filesystem worker only, inside the target's already-held stable
+    scope, using its normalized [dir/path]. Rechecks the full snapshot and data
+    binding before appending. The public [Fs_compat] interface does not expose
+    this unlocked helper. *)
 
 val rewrite_private_jsonl_durable_locked_at_cursor_result :
   string ->

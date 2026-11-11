@@ -116,7 +116,7 @@ let () =
 
 (** #10297: enforce that a board-tool caller cannot author / vote under
     a principal other than the runtime contract's [agent_name].  Pre-fix
-    [ensure_board_post_author] only consulted [agent_name] when the
+    the board post path only consulted [agent_name] when the
     caller's [author] field was empty, so any LLM that wrote a non-blank
     [author] argument bypassed identity verification.
     Board comment/vote paths also took caller fields without
@@ -176,12 +176,6 @@ let enforce_caller_identity ~tool ~field ~agent_name arguments =
             in
             `Assoc fields))
   | _ -> arguments
-
-let ensure_board_post_author ~agent_name arguments =
-  enforce_caller_identity
-    ~tool:(Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
-    ~field:"author"
-    ~agent_name arguments
 
 (* [sw] and [clock] used to sit here beside the others, under an [ignore] and a
    comment calling all five "unused params kept for interface contract with

@@ -95,14 +95,17 @@ val declared_muse_home : declared muse_authorized -> string
 
     Antigravity and Vibe start on accounts of the host, not of a person. The
     credential of Antigravity is a copy in the setup registry, which has no
-    owner, and Vibe reads the configuration of the host user. A
-    multi-account process shares no account of its host (plan D3b), so only
-    a single-user process starts them. *)
+    owner, and Vibe reads the configuration of the host user. An API provider
+    of the runtime table sends with the credential its operator declared. A
+    multi-account process shares no account of its host (plans D3b and D4),
+    so only a single-user process starts them. *)
 
 (** A client that starts on an account of the host. *)
 type host_client =
   | Antigravity
   | Vibe
+  | Api_provider
+      (** An Agent_core Runtime of the runtime table: see {!api_sealed}. *)
 
 (** A start of a host client that the published access allows. Only
     {!authorize_host} makes one. *)
@@ -190,6 +193,42 @@ val authorize_muse : request -> 'where muse_account -> ('where muse_authorized, 
 (** Allows a start of a host client in a single-user process, and refuses it
     in a multi-account process with {!Host_account}. *)
 val authorize_host : host_client -> (host_account, refusal) result
+
+(** {1 API providers}
+
+    An Agent_core Runtime sends with the credential that the operator declared
+    for its provider: in the declaration, an environment variable, the setup
+    registry or a file of the host (plan D4). *)
+
+(** The provider configuration of an Agent_core Runtime, its credential
+    included. The runtime table holds this, so a reader of the table cannot
+    send with the credential. *)
+type api_sealed
+
+val seal_api : Llm_provider.Provider_config.t -> api_sealed
+
+(** The configuration without its credential: [api_key] and [headers] are
+    empty. A reader takes the capabilities, the shape of a request and the
+    endpoint from it. *)
+val api_declaration : api_sealed -> Llm_provider.Provider_config.t
+
+(** The configuration to send with, by {!authorize_host} [Api_provider]. *)
+val authorize_api : api_sealed -> (Llm_provider.Provider_config.t, refusal) result
+
+(** The binding identity of the configuration. It names the credential by a
+    digest. *)
+val api_binding_identity : api_sealed -> (Agent_core.Binding_identity.t, string) result
+
+(** {!Llm_provider.Provider_admission.allowances_of_configs} of the
+    configurations, with the endpoint identity a send of each one has. *)
+val api_admission_allowances
+  :  (string * api_sealed) list
+  -> ( Llm_provider.Provider_admission.published_allowances
+     , Llm_provider.Provider_admission.allowance_disagreement list )
+     result
+
+(** {!Llm_provider.Provider_admission.snapshot_for} the configuration. *)
+val api_admission_snapshot : api_sealed -> Llm_provider.Slot_scheduler.snapshot option
 
 (** {1 Native tools}
 

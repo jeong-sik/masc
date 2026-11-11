@@ -643,8 +643,8 @@ let test_provider_for_vision_uses_runtime_temperature () =
           | Runtime_execution.Antigravity_cli _
           | Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _ ->
             failwith "selected vision runtime should be agent_core"
-          | Runtime_execution.Agent_core provider_config ->
-            let configured = Vt.provider_for_vision provider_config in
+          | Runtime_execution.Agent_core sealed ->
+            let configured = Vt.provider_for_vision (Masc_test_deps.api_config sealed) in
             assert (configured.temperature = Some 1.0))))
 
 let test_uncapped_vision_fallback_reaches_provider () =

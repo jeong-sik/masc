@@ -6,7 +6,7 @@ type section = { heading : string; body : string }
 type t
 type row = Heading of string | Content of string | Note of string
 type search_mark = No_match | Match | Current_match
-type movement = First | Last | By of int
+type movement = First | Last | By of int | Page_down | Page_up
 
 val create : ?ko:bool -> title:string -> section list -> t
 val create_observation : title:string -> section list -> t
@@ -39,7 +39,10 @@ val move : count:int -> height:int -> movement -> t -> t
 (** [Last] retains an end anchor across reflow and replacement of the same
     captured observation, including temporary preparation rows. [First] starts
     at zero. [By] leaves the anchor and moves from the current bounded position.
-    A newly created reading always starts at zero. *)
+    [Page_down] and [Page_up] do the same by a page that keeps one row of the
+    window being left ({!Masc_tui_scroll.page_step}); a caller never works out
+    a page from the height itself. A newly created reading always starts at
+    zero. *)
 
 val search_editing : t -> bool
 val search_query : t -> string option

@@ -177,6 +177,9 @@ let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settl
      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ -> ())} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
     ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+  Keeper_direct_native_continuation.complete_restart_settlements
+    ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
+    |> require "complete startup native journal settlement" |> ignore;
   let owner = Registry.get ~base_path:root ~keeper_name |> require "Owner handle" in
   let input = Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
       ~turn_instructions:None ~surface_context:None ~attachments:[]
@@ -288,6 +291,9 @@ let after_restart ~root ~workspace =
   Eio.Switch.run @@ fun sw ->
   Registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None
     workspace |> require "reinstall Owner" |> ignore;
+  Keeper_direct_native_continuation.complete_restart_settlements
+    ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
+    |> require "complete startup native journal settlement" |> ignore;
   Registry.exact_operation ~base_path:root ~keeper_name operation_id
   |> require "read restarted operation" |> Option.get
 

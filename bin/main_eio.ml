@@ -77,7 +77,7 @@ let run_server ~sw ~runtime_sw ~env ~address ~port ~base_path ~input_base_path ~
      cancelled service has finished its journal cleanup. *)
   try
     Server_runtime_bootstrap.run ~sw ~runtime_sw ~env ~address ~port ~base_path
-      ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes:Server_routes_http.make_routes
+      ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes:Server_routes_http.make_routes_with_transport
       ~make_request_handler:Server_http_ingress.http1_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
@@ -1271,7 +1271,56 @@ let auth_cmd =
         $ github_client_id)
   in
   let doc = "Set up multi-account authorization on this workspace." in
-  Cmd.group (Cmd.info "auth" ~doc) [ bootstrap_cmd; invite_cmd; preview_cmd ]
+  let service_credential_cmd =
+    let lease_note =
+      `P
+        "The workspace must be activated with masc auth bootstrap. The command \
+         takes the workspace lease, so stop the server first."
+    in
+    let normalized base_path = Env_config.normalize_masc_base_path_input base_path in
+    let issue_cmd =
+      let service =
+        let doc = "The id of the service the credential acts as." in
+        Arg.(required & opt (some string) None & info [ "service" ] ~docv:"SERVICE" ~doc)
+      in
+      let doc = "Issue a Service credential and print its token once." in
+      Cmd.v
+        (Cmd.info "issue" ~doc ~man:[ `S Manpage.s_description; lease_note ])
+        Term.(
+          const (fun base_path service ->
+            Masc_cli_auth.service_credential_issue ~base_path:(normalized base_path) ~service)
+          $ base_path
+          $ service)
+    in
+    let revoke_cmd =
+      let credential =
+        let doc = "The id of the credential, as masc auth service-credential list prints it." in
+        Arg.(required & opt (some string) None & info [ "credential" ] ~docv:"ID" ~doc)
+      in
+      let doc = "Revoke a Service credential." in
+      Cmd.v
+        (Cmd.info "revoke" ~doc ~man:[ `S Manpage.s_description; lease_note ])
+        Term.(
+          const (fun base_path credential ->
+            Masc_cli_auth.service_credential_revoke ~base_path:(normalized base_path) ~credential)
+          $ base_path
+          $ credential)
+    in
+    let list_cmd =
+      let doc = "List the Service credentials with their service and status, with no secret." in
+      Cmd.v
+        (Cmd.info "list" ~doc ~man:[ `S Manpage.s_description; lease_note ])
+        Term.(
+          const (fun base_path ->
+            Masc_cli_auth.service_credential_list ~base_path:(normalized base_path))
+          $ base_path)
+    in
+    let doc = "Issue, revoke and list the credentials of internal services (plan C4-9)." in
+    Cmd.group (Cmd.info "service-credential" ~doc) [ issue_cmd; revoke_cmd; list_cmd ]
+  in
+  Cmd.group
+    (Cmd.info "auth" ~doc)
+    [ bootstrap_cmd; invite_cmd; preview_cmd; service_credential_cmd ]
 
 let login_cmd =
   let doc =
@@ -2932,10 +2981,22 @@ let runtime_token_sample_cmd =
     Arg.(required & opt (some file) None & info [ "scenario" ] ~docv:"JSON"
            ~doc:"JSON with system_prompt and a nonempty prompts array. Makes live model calls.")
   in
+  (* HIGH-RISK-UNREVIEWED: the sample calls the API providers of the runtime
+     table with the credentials their operator declared. As a host tool it
+     publishes its access first, so a provider is called only as the single
+     user of a base path never set up for accounts (plan D4). *)
   let run base_path scenario_path runtime_ids =
-    Masc_cli_runtime_sample.run
-      ~config_path:(runtime_config_path_for_base_path base_path)
-      ~scenario_path ~runtime_ids
+    match
+      Runtime_account_access.publish_host_tool ~base_path
+        ~config_dir:(Env_config_core.masc_config_dir_opt ())
+    with
+    | Error (first, rest) ->
+      Printf.eprintf "runtime-token-sample: %s\n" (String.concat "; " (first :: rest));
+      1
+    | Ok () ->
+      Masc_cli_runtime_sample.run
+        ~config_path:(runtime_config_path_for_base_path base_path)
+        ~scenario_path ~runtime_ids
   in
   Cmd.v (Cmd.info "runtime-token-sample"
            ~doc:"Record configured Agent Core conversation usage as JSONL.")

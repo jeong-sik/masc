@@ -16,21 +16,6 @@ let filter_label = function
   | Actions -> "actions"
   | Everything -> "everything"
 
-let filter_explanation = function
-  | Turns ->
-      "scope turns · one row per Keeper turn · agent start/done = internal run"
-  | Actions ->
-      "scope actions · flat calls/returns/turn/chat · state pushes hidden"
-  | Everything ->
-      (* The middle dot left this line with the mark it named. #33691 took the
-         dot off a quiet row -- it read as the roster's idle glyph -- so
-         [glyph_text Quiet] draws a blank cell and gray is the only cue a
-         quiet row still carries. The legend went on naming the dot, on a row
-         whose own separator is that same dot, so the reader could not tell
-         which of the three was being explained. *)
-      "scope everything · gray = state/telemetry · composite = Keeper snapshot changed"
-;;
-
 (* One feed event as the screen holds it. The arrival time is here rather than
    read back off the event because the screen is a feed: rows are held and
    drawn in the order they arrived, and two event kinds carry no clock at all
@@ -454,6 +439,8 @@ let keeper_of_event ~traces (event : Observer.event) =
       | Masc.Workspace_dataset_event.Runtime_metrics | Masc.Workspace_dataset_event.Lanes
       | Masc.Workspace_dataset_event.Machine_live _ | Masc.Workspace_dataset_event.Browser_observation _
       | Masc.Workspace_dataset_event.Play_room _
+      | Masc.Workspace_dataset_event.Play_seats | Masc.Workspace_dataset_event.World_memory
+      | Masc.Workspace_dataset_event.Dashboard_observation _
       | Masc.Workspace_dataset_event.Lane_addons _ )
   | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
@@ -532,6 +519,9 @@ let label_of_event (event : Observer.event) =
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Machine_live _) -> "machine live"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation _) -> "browser observation"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Play_room _) -> "play room"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Play_seats -> "play seats"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.World_memory -> "world memory"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Dashboard_observation _) -> "dashboard observation"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons _) -> "add-ons"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health _) -> "memory health"
   | Observer.Keeper_event_queue_changed _ -> "event queue"
@@ -737,6 +727,12 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation { scope; _ }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = Printf.sprintf "%s/%d"
           (Browser_lane.Lane_name.to_wire scope.source) scope.tab_id }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Play_seats ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "Play seat authority changed" }
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Dashboard_observation _) ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "a web dashboard observation changed" }
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.World_memory ->
+      { at; keeper = "server"; glyph = Quiet; label; detail = "the workspace memory inventory changed" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Play_room { machine }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons { instance_id }) ->
@@ -1532,22 +1528,10 @@ let evidence_fields (entry : entry) =
 
 (* ── The Activity table's two measured columns ─────────────────────────── *)
 
-(* What every row spends before the columns below: the two leading cells, the
-   clock, the glyph, and the gap that brings each of the four fields. *)
-let table_fixed_cells = 15
+type columns = { keeper_cells : int; content_cells : int; show_clock : bool }
 
-(* What the two columns drew before they were measured. Neither goes under it,
-   so a narrow frame draws the table it drew yesterday. *)
-let keeper_minimum_cells = 16
-let label_minimum_cells = 16
-
-type columns = { keeper_cells : int; label_cells : int }
-
-(* What measuring reads: the two named columns and nothing else. A row is
-   more than this -- it carries the detail sentence the table's third column
-   draws -- and measuring every kept entry as a row spells that sentence for
-   entries the page never shows. [measured_of_event] builds this straight
-   from the event instead. *)
+(* Measuring needs the actor and label, without spelling the detail sentence
+   of every retained off-screen event. *)
 type measured = { measured_keeper : string; measured_label : string }
 
 let measured_of_row row =
@@ -1582,24 +1566,15 @@ let columns ~inner_width measures =
           max widest (drawn_cells text)))
       0 measures
   in
-  let keeper_needed =
-    max keeper_minimum_cells (widest (fun m -> m.measured_keeper))
-  in
-  let label_needed =
-    max label_minimum_cells (widest (fun m -> m.measured_label))
-  in
-  (* Detail is the column that carries sentences -- a tool name, a turn, a
-     cost -- so the two named ones together take at most half of what the
-     frame leaves. *)
-  let share =
-    max
-      (keeper_minimum_cells + label_minimum_cells)
-      (max 0 (inner_width - table_fixed_cells) / 2)
-  in
-  let keeper_cells =
-    max keeper_minimum_cells (min keeper_needed (share - label_minimum_cells))
-  in
-  let label_cells =
-    max label_minimum_cells (min label_needed (share - keeper_cells))
-  in
-  { keeper_cells; label_cells }
+  (* Two leading cells, a glyph, and the gaps before content and actor.
+     Content owns at least two thirds; receipt time uses only the space an
+     actor shorter than its allocation leaves behind. *)
+  let available = max 0 (inner_width - 5) in
+  let actor_budget = available / 3 in
+  let keeper_needed = max (drawn_cells "ACTOR") (widest (fun m -> m.measured_keeper)) in
+  let keeper_cells = min keeper_needed actor_budget in
+  let clock_cells = drawn_cells "00:00:00" + 1 in
+  let content_floor = max (available - actor_budget) (widest (fun m -> m.measured_label)) in
+  let show_clock = available - keeper_cells - clock_cells >= content_floor in
+  let content_cells = available - keeper_cells - (if show_clock then clock_cells else 0) in
+  { keeper_cells; content_cells; show_clock }

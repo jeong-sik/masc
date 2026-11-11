@@ -1773,7 +1773,7 @@ let test_refusal_says_whether_the_name_is_an_agent () =
           then [ runtime_agent "an-agent-not-a-keeper" ]
           else []);
         let agent_detail =
-          Masc.Keeper_tool_surface_ops.keeper_absent_detail
+          Masc.Keeper_turn_setup.keeper_absent_detail
             ~config
             "an-agent-not-a-keeper"
         in
@@ -1782,7 +1782,7 @@ let test_refusal_says_whether_the_name_is_an_agent () =
           true
           (str_contains agent_detail "is an agent, not a keeper");
         let unknown_detail =
-          Masc.Keeper_tool_surface_ops.keeper_absent_detail
+          Masc.Keeper_turn_setup.keeper_absent_detail
             ~config
             "nobody-knows-this-name"
         in
@@ -1795,6 +1795,45 @@ let test_refusal_says_whether_the_name_is_an_agent () =
           false
           (str_contains unknown_detail "is an agent"))
     )
+;;
+
+(* A refusal for a name that is no keeper lists the keepers the surface would
+   have accepted, so the caller's next call names one of them. *)
+let test_absent_roster_clause_is_empty_without_names () =
+  Alcotest.(check string)
+    "no registered keeper, no clause: the refusal reads as it did"
+    ""
+    (Masc.Keeper_turn_setup.absent_roster_clause [])
+;;
+
+let test_absent_roster_clause_sorts_and_drops_repeats () =
+  Alcotest.(check string)
+    "names come sorted and once each"
+    "; registered keepers: alpha, beta, gamma"
+    (Masc.Keeper_turn_setup.absent_roster_clause [ "gamma"; "alpha"; "beta"; "alpha" ])
+;;
+
+let test_absent_roster_clause_stops_at_the_limit_and_counts_the_rest () =
+  let limit = Masc.Keeper_turn_setup.absent_roster_name_limit in
+  let names = List.init (limit + 5) (fun index -> Printf.sprintf "keeper-%03d" index) in
+  let clause = Masc.Keeper_turn_setup.absent_roster_clause names in
+  Alcotest.(check bool)
+    "the last name that fits is listed"
+    true
+    (str_contains clause (Printf.sprintf "keeper-%03d" (limit - 1)));
+  Alcotest.(check bool)
+    "the first name past the limit is not"
+    false
+    (str_contains clause (Printf.sprintf "keeper-%03d" limit));
+  Alcotest.(check bool)
+    "the clause says how many were left out and where the rest are"
+    true
+    (str_contains clause "(+5 more, masc_keeper_list lists them all)");
+  let exactly_limit = List.init limit (fun index -> Printf.sprintf "keeper-%03d" index) in
+  Alcotest.(check bool)
+    "a roster of exactly the limit says nothing was left out"
+    false
+    (str_contains (Masc.Keeper_turn_setup.absent_roster_clause exactly_limit) "more")
 ;;
 
 let test_get_active_agents_filters_inactive_runtime_agents () =
@@ -3416,6 +3455,18 @@ let () =
             "refusal says whether the name is an agent"
             `Quick
             test_refusal_says_whether_the_name_is_an_agent
+        ; Alcotest.test_case
+            "refusal roster is empty without names"
+            `Quick
+            test_absent_roster_clause_is_empty_without_names
+        ; Alcotest.test_case
+            "refusal roster sorts and drops repeats"
+            `Quick
+            test_absent_roster_clause_sorts_and_drops_repeats
+        ; Alcotest.test_case
+            "refusal roster stops at the limit and counts the rest"
+            `Quick
+            test_absent_roster_clause_stops_at_the_limit_and_counts_the_rest
         ; Alcotest.test_case "get messages raw" `Quick test_get_messages_raw
         ; Alcotest.test_case "is agent joined" `Quick test_is_agent_session_bound
         ] )

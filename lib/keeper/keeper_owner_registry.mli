@@ -47,6 +47,23 @@ val get
   -> keeper_name:string
   -> (Keeper_owner.t, lookup_error) result
 
+val complete_restart_settlements :
+  base_path:string ->
+  journal_terminal:(keeper_name:string -> session_root:string ->
+    Keeper_chat_operation_store.restart_native_call ->
+    (Agent_core.Agent.execution_terminal_disposition option, string) result) ->
+  (int, install_error) result
+(** Retain the canonical reader for this BasePath pool's lifetime and snapshot
+    installed handles in the same registry critical section. Complete their
+    startup settlement without holding owners_mu; Owners registered afterwards
+    use that same reader before creation returns. Owners registered earlier
+    belong to the snapshot even if their metadata is still being created.
+    Call after application runtime initialization and before persistence
+    claim/start, also for standalone compositions. Individual failures close
+    and fence only that exact Owner as unavailable. Returns the count of
+    snapshot owners whose completion succeeded. No process-global reader is
+    installed. *)
+
 val operation_projection
   :  base_path:string
   -> keeper_name:string
@@ -145,7 +162,10 @@ val create_meta
     an empty actor is installed. When [intake_token] is supplied, the caller's
     already-open exact-name intake transaction is reused instead of reacquiring
     the same fence. [initial_input] uses the Owner's creation-only command;
-    ordinary metadata creation never infers a new-trace input authority. *)
+    ordinary metadata creation never infers a new-trace input authority. Once
+    the pool has its canonical restart reader, finish the new actor's retained
+    startup calls before committing metadata or a new input birth. A failed
+    completion returns the unavailable exact Owner instead of creation success. *)
 
 val batch_operations : base_path:string -> keeper_name:string ->
   Keeper_chat_operation.Operation_id.t ->

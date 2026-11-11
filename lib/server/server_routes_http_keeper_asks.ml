@@ -204,8 +204,13 @@ let stream_keeper_ask_followup ~clock ~base_path ~workspace ~state_ready ~keeper
         (Sse_wire.format_event_yojson ~event_type:"ask_followup" json) with
     | Server_sse_response.Written -> ()
     | Closed | Stalled -> raise Ask_followup_stream_closed in
+  (* A close says the response is complete, so only a stream that ran to its
+     end is closed. A [send] that did not go out has closed the response
+     itself. Any other exception leaves the response as it is and goes to
+     the request's error handling (Server_http_ingress): a 500 when nothing
+     was sent yet, a cut response after the first frame. *)
   let close () = Option.iter Server_sse_response.close !response in
-  try Fun.protect ~finally:close (fun () ->
+  match
     if not state_ready then
       respond_json_value_with_cors ~status:`Service_unavailable request reqd
         (Stream.keeper_chat_stream_error_json "workspace state is not ready")
@@ -217,12 +222,16 @@ let stream_keeper_ask_followup ~clock ~base_path ~workspace ~state_ready ~keeper
       respond_json_value_with_cors ~status:`Service_unavailable request reqd
         (Stream.keeper_chat_stream_error_json detail)
     | Ok followup -> send (Followup_completed
-        {answered_at=followup.answered_at;stimulus_id=followup.stimulus_id}))
+        {answered_at=followup.answered_at;stimulus_id=followup.stimulus_id})
   with
-  | Ask_followup_stream_closed -> ()
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Log.Keeper.warn ~keeper_name "ask followup stream ended ask_id=%s: %s"
-      ask.ask_id (Printexc.to_string exn)
+  | () -> close ()
+  | exception Ask_followup_stream_closed -> ()
+  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+  | exception exn ->
+    (* The request's error handling logs the exception without the Ask. *)
+    let backtrace = Printexc.get_raw_backtrace () in
+    Log.Keeper.warn "ask followup stream failed ask_id=%s: %s" ask.ask_id (Printexc.to_string exn);
+    Printexc.raise_with_backtrace exn backtrace
 
 let handle_keeper_asks_list ~clock state request reqd =
   let config = Mcp_server.workspace_config state in

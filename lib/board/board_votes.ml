@@ -3,6 +3,16 @@ include Board_voting
 
 open Result.Syntax
 
+let reload_votes store =
+  match Board_store_load.load_persisted_votes store with
+  | Ok rows -> Ok rows
+  | Error _ -> Error (Io_error "Board data is unavailable.")
+
+let reload_reactions store =
+  match Board_store_load.load_persisted_reactions store with
+  | Ok loaded -> Ok loaded
+  | Error _ -> Error (Io_error "Board data is unavailable.")
+
 (** {1 Stats} *)
 
 let stats store =
@@ -253,212 +263,20 @@ let reopen store ~post_id : (unit, board_error) Result.t =
            finish_posts_write outcome))
 ;;
 
-let reactions_jsonl_snapshot store =
-  let buf = Buffer.create 4096 in
-  Hashtbl.iter
-    (fun _ (reaction : reaction) ->
-       Buffer.add_string buf (Yojson.Safe.to_string (reaction_to_yojson reaction));
-       Buffer.add_char buf '\n')
-    store.reactions;
-  Buffer.contents buf
+type cleanup_conditions = Board_deletion.cleanup_conditions
+let cleanup_conditions = Board_deletion.cleanup_conditions
+let cleanup_candidate = Board_deletion.cleanup_candidate
 
-module Snapshot_batch = Board_snapshot_batch
+type deletion_authorization = Board_deletion.deletion_authorization =
+  | Operator_deletion
+  | Author_deletion of { reader : Board_access.reader; author : Agent_id.t }
+  | Cleanup_deletion of { reader : Board_access.reader; conditions : cleanup_conditions }
 
-(* Snapshot rendering updates the row caches, so callers hold the state lock. *)
-let capture_snapshot_batch store selection =
-  Snapshot_batch.capture selection
-    ~posts:(fun () -> capture_posts_snapshot store)
-    ~comments:(fun () -> capture_comments_snapshot store)
-    ~votes:(fun () -> vote_log_jsonl store)
-    ~reactions:(fun () -> reactions_jsonl_snapshot store)
-;;
-
-let write_snapshot store = function
-  | Snapshot_batch.Posts_payload snapshot -> finish_posts_write (save_posts_snapshot store snapshot)
-  | Snapshot_batch.Comments_payload content -> save_comments_snapshot store content
-  | Snapshot_batch.Votes_payload content ->
-    let* () = require_persisted_snapshot_readable store.votes_load_result in
-    save_vote_log_jsonl store content
-  | Snapshot_batch.Reactions_payload content ->
-    let* () = require_persisted_snapshot_readable store.reactions_load_result in
-    Board_core_persist.save_reactions_jsonl_result store content
-;;
-
-(* Re-mark everything dirty after a failed snapshot write, so the next flush
-   rewrites the file instead of skipping an empty queue — the missing half of
-   a log-and-continue failure (#26168). Callers hold the store lock. *)
-let remark_all_posts_dirty store =
-  store.dirty_posts <- true;
-  Hashtbl.iter (fun key _ -> Hashtbl.replace store.dirty_post_ids key ()) store.posts
-;;
-
-let remark_all_comments_dirty store =
-  store.dirty_comments <- true;
-  Hashtbl.iter
-    (fun key _ -> Hashtbl.replace store.dirty_comment_ids key ())
-    store.comments
-;;
-
-(* Called under the state lock; never clear concurrent edits after capture. *)
-let remark_snapshot_retry store = function
-  | Snapshot_batch.Retry_posts -> remark_all_posts_dirty store
-  | Snapshot_batch.Retry_comments -> remark_all_comments_dirty store
-;;
-
-type deletion_outcome =
-  | Durable_deletion
-  | Deletion_persistence_pending of string
-
-let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
-  (* Deleting rewrites every snapshot below after the post has left memory, so
-     each file it rewrites must have loaded fully first (#38595). *)
-  with_persist_lock store (fun () ->
-  let* () = require_posts_source_readable store in
-  let* () = require_comments_source_readable store in
-  let* () = require_persisted_snapshot_readable store.votes_load_result in
-  let* () = require_persisted_snapshot_readable store.reactions_load_result in
-  match Post_id.of_string post_id with
-  | Error e -> Error e
-  | Ok pid ->
-    let snapshot =
-      with_lock store (fun () ->
-      let post_key = Post_id.to_string pid in
-      match Hashtbl.find_opt store.posts post_key with
-      | None -> Error (Post_not_found post_id)
-      | Some post ->
-        store.snapshot_retry <- Deletion_pending;
-        let comment_ids =
-          Hashtbl.fold
-            (fun key (c : comment) acc ->
-               if String.equal (Post_id.to_string c.post_id) post_key then key :: acc else acc)
-            store.comments
-            []
-        in
-        unindex_post_origin store post;
-        unindex_hot_post store post;
-        Hashtbl.remove store.posts post_key;
-        Hashtbl.remove store.comments_by_post post_key;
-        List.iter (fun comment_key -> Hashtbl.remove store.comments comment_key) comment_ids;
-        let vote_keys =
-          Hashtbl.fold
-            (fun key _ acc ->
-               match Board_vote_key.of_string key with
-               | Some vote ->
-                 let target_id = Board_vote_key.target_id vote in
-                 (match Board_vote_key.target_kind vote with
-                  | Board_vote_key.Post when String.equal target_id post_key ->
-                    key :: acc
-                  | Board_vote_key.Comment
-                    when List.exists (String.equal target_id) comment_ids ->
-                    key :: acc
-                  | Board_vote_key.Post | Board_vote_key.Comment -> acc)
-               | None -> acc)
-            store.vote_log
-            []
-        in
-        let reaction_keys =
-          Hashtbl.fold
-            (fun key (reaction : reaction) acc ->
-               if
-                 ((=) reaction.target_type Reaction_post
-                  && String.equal reaction.target_id post_key)
-                 || ((=) reaction.target_type Reaction_comment
-                     && List.exists (String.equal reaction.target_id) comment_ids)
-               then key :: acc
-               else acc)
-            store.reactions
-            []
-        in
-        List.iter (fun key -> Hashtbl.remove store.vote_log key) vote_keys;
-        List.iter (fun key -> Hashtbl.remove store.reactions key) reaction_keys;
-        store.post_count := max 0 (!(store.post_count) - 1);
-        invalidate_post_caches store;
-        invalidate_comment_caches store;
-        store.dirty_posts <- false;
-        store.dirty_comments <- false;
-        Hashtbl.clear store.dirty_post_ids;
-        Hashtbl.clear store.dirty_comment_ids;
-        store.last_flush <- Time_compat.now ();
-        Ok (capture_snapshot_batch store Snapshot_batch.for_delete))
-    in
-    (match snapshot with
-     | Error _ as e -> e
-     | Ok batch ->
-       let outcome =
-         Snapshot_batch.persist batch ~write:(write_snapshot store)
-       in
-       (* The snapshot cleared dirty flags while holding the state lock.
-          Preserve failed writes for a later flush. *)
-       with_lock store (fun () ->
-         let retries = Snapshot_batch.retries outcome in
-         List.iter (remark_snapshot_retry store) retries;
-         match retries with
-         | [] -> store.snapshot_retry <- Independent_snapshots
-         | _ :: _ -> ());
-       Snapshot_batch.finish_settlement outcome;
-       let failures =
-         List.map show_board_error (Snapshot_batch.errors outcome)
-       in
-       match failures with
-       | [] -> Ok Durable_deletion
-       | _ :: _ -> Ok (Deletion_persistence_pending (String.concat "; " failures))))
-
-(** {1 Store lifecycle and flushing} *)
-
+let delete_post = Board_deletion.delete_post
+let flush_dirty = Board_deletion.flush_dirty
+let initialize_store = Board_store_lifecycle.initialize_store
 let global = Board_store_lifecycle.global
 let reset_global_for_test = Board_store_lifecycle.reset_global_for_test
-
-(** Flush any dirty state to disk. Call on shutdown to prevent data loss.
-
-    RFC-0091 (board persistence path unification): mutation/vote flushes
-    write a full snapshot instead of replaying
-    the dirty list through [append_post]/[append_comment]. The previous
-    [List.iter append_post posts] grew [board_posts.jsonl] by one line per
-    vote/mutation per post, sharing the same .id, producing the dup vector
-    that motivated the RFC. The snapshot path was already canonical for
-    restart-load ([Board_votes_json.load_persisted_posts]), so promoting it to the
-    flush-write path makes [board_posts.jsonl] a true snapshot file with
-    one line per id and atomic rewrite semantics. *)
-let flush_dirty store =
-  with_persist_lock store (fun () ->
-  let batch =
-    with_lock store (fun () ->
-      let selection =
-        match store.snapshot_retry with
-        | Deletion_pending -> Snapshot_batch.for_delete
-        | Independent_snapshots -> Snapshot_batch.for_flush
-          ~dirty_posts:store.dirty_posts
-          ~dirty_comments:store.dirty_comments
-          ~votes_readable:(Result.is_ok store.votes_load_result)
-          ~reactions_readable:(Result.is_ok store.reactions_load_result)
-      in
-      let batch = capture_snapshot_batch store selection in
-      Hashtbl.clear store.dirty_post_ids;
-      Hashtbl.clear store.dirty_comment_ids;
-      store.dirty_posts <- false;
-      store.dirty_comments <- false;
-      store.last_flush <- Time_compat.now ();
-      batch)
-  in
-  (* Flush requeues each failed write before attempting the next. Captured
-     empty snapshots still write, and later edits keep their own dirty flags. *)
-  let outcome = Snapshot_batch.persist batch ~write:(fun content ->
-       match write_snapshot store content with
-       | Ok () -> Ok ()
-       | Error _ as error ->
-         with_lock store (fun () ->
-           remark_snapshot_retry store (Snapshot_batch.retry_for_kind (Snapshot_batch.kind_of_payload content)));
-         error) in
-  (* A proven nonwrite may carry reserved descriptor cleanup as typed data,
-     bypassing the callback's normal returned-error retry arm. *)
-  with_lock store (fun () ->
-    let retries = Snapshot_batch.retries outcome in
-    List.iter (remark_snapshot_retry store) retries;
-    match retries with
-    | [] -> store.snapshot_retry <- Independent_snapshots
-    | _ :: _ -> ());
-  Snapshot_batch.finish_settlement outcome)
-
 
 (** {1 Karma & Flair - Reddit-style} *)
 

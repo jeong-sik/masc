@@ -41,6 +41,9 @@ type retained = private {
 }
 val request_digest : Yojson.Safe.t -> (string, string) result
 (** The digest a record names a request by: of its canonical JSON bytes. *)
+val to_json : retained -> Yojson.Safe.t
+(** Complete immutable binding and progress metadata, without the original
+    body. Used to preserve an exact pre-fence observation and compare it. *)
 val load : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   (retained option, error) result
 (** Read the record and the complete original canonical request it names

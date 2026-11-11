@@ -151,7 +151,7 @@ let test_comment_decoder_retains_nested_rejections () =
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let post = create_no_origin store ~content:"comment validation stages" in
-  let comment = match Board_core.add_comment store ~lookup:nobody_declared
+  let comment = match Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator store ~lookup:nobody_declared
       ~post_id:(Board.Post_id.to_string post.id) ~author:"reader"
       ~content:"canonical comment" () with
     | Ok comment -> comment
@@ -343,7 +343,7 @@ let test_current_comment_schema_is_exact () =
   let post = create_no_origin store ~content:"comment parent" in
   let comment =
     match
-      Board_core.add_comment
+      Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator
         store
         ~lookup:nobody_declared
         ~post_id:(Board.Post_id.to_string post.id)
@@ -647,6 +647,8 @@ let test_index_pruned_on_sweep () =
   let store = Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
+  ignore (Result.get_ok (Board.reload_votes store));
+  ignore (Result.get_ok (Board.reload_reactions store));
   let tr = Ids.Turn_ref.make ~trace_id:"sweep-trace" ~absolute_turn:5 in
   let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~fusion_run_id:"sweep-run" () in
   let post = create store ~origin ~content:"to be swept" in

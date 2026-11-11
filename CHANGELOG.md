@@ -2,6 +2,799 @@
 
 ## [Unreleased]
 
+## [0.71.0] - 2026-11-11
+
+### 요약
+
+1. 이번 0.71.0 은 0.70.0 이후 쌓인 조각 331개(PR 번호 기준)를 담았습니다. 사용자 대상 항목은 260건(Added 19·Changed 73·Removed 1·Fixed 153·Performance 14)이고 Documentation 11건, Internal 99건이 따로 있습니다.
+2. 다계정 인가가 이어집니다: `masc auth service-credential issue`·`revoke`·`list` 로 호스트 운영자가 서비스 자격증명을 발급·철회·조회하고(#50774), 브라우저 세션이 있는 사람이 범위와 만료를 정해 PAT 를 발급·조회·철회하는 라우트가 들어왔습니다(#50783).
+3. Keeper Memory: 최근 변경을 확정된 처리 기록으로 조회하고(#50849), 관리자가 Librarian history 원본 해결을 하나씩 검증해 제출할 수 있으며(#50972), 기억 건강 응답이 `keeper.memory_os.current_health.v14` 로 올라갑니다(#51142) — 서버·TUI·대시보드를 같은 빌드로 맞추세요.
+4. 설정 이동: 한 Keeper 턴이 가져가는 최대 대기 이벤트 수가 `runtime.toml` 의 `turn.admission_max_events`(기본 32, 1~256)로 옮겨졌고 환경변수 `MASC_KEEPER_ADMISSION_MAX_EVENTS` 는 더 읽지 않습니다(#50965).
+5. 소스 빌드는 `tls`·`tls-eio` 2.1.5 와 `x509` 1.2.0 이 필요합니다. 기존 opam switch 는 `scripts/opam-pin-external-deps.sh` 로 맞추고, Keeper 샌드박스 이미지는 새 `masc.opam.locked` 로 다시 만들 때까지 `sandbox_image_lock_mismatch` 를 보고합니다(#51049).
+6. 연결 안정성: 키 갱신을 끝없이 보내는 TLS 1.3 상대가 메모리를 키우지 않고(#51049), 바이트를 받지 않는 상대의 연결은 소켓 쓰기 조각마다 90초 뒤 끊습니다(#51208).
+7. 제거: 준비된 대기 채팅이 실행 중 자율 턴을 도구 경계에서 끝내고 Owner 슬롯을 가져가던 자율 턴 채팅 인계를 없앴습니다(#51221).
+8. 대시보드·SSE: World memory 와 Play-seat 변경이 타입 있는 SSE 관측 토픽으로 나가고(#50829), 마운트된 대시보드 관측이 범위 이벤트로 새로고침됩니다(#50830). Tools 시계열에 1분 이상 걸린 호출 수가 더해져 서버를 대시보드보다 먼저 설치해야 합니다(#50860). 플릿 화면에는 Keeper 대기열 취소 패널이 생겼습니다(#51258).
+9. 업그레이드 주의 4가지는 아래 Upgrade notes 를 읽으세요: Tools 시계열 응답 필드(#50860), `turn.admission_max_events` 이동(#50965), 소스 빌드 의존성(#51049), 기억 건강 v14(#51142).
+10. Known issues: 전체 `@runtest` 에서 빨강으로 기재된 시험 3건이 아래에 있습니다.
+11. 이번 컷의 노트 정리: v0.70.0 노트에 이미 실린 수리(#50659·#50721·#50756·#50773·#50782)는 조각을 접지 않고 제외해 이중 등재를 피했습니다. 조각이 없던 병합 PR 중 사용자 영향이 있는 6건(#50829·#50830·#50926·#50961·#50968·#51294)은 조각을 백필했고, 사용자 대면 변경이 없는 docs·시험 병합 16건은 exempt 목록에 사유와 함께 올렸습니다.
+
+
+### Upgrade notes
+
+- Install the server before the dashboard bundle. The tool series response
+  now carries `long_count`, `long_total_ms` and `long_call_ms`, and the new
+  bundle refuses a response that lacks them, so the Tools panel shows its load
+  error against an older server. An older bundle ignores the new fields (#50860).
+- The most queued events one Keeper turn takes is now set in `runtime.toml` as `turn.admission_max_events` (default 32, range 1 to 256, applied at the next restart). The server no longer reads the environment variable `MASC_KEEPER_ADMISSION_MAX_EVENTS`, so move an exported value into the file. A value outside the range fails the configuration load at startup; the environment variable's 0 used to be read as 1 and a value above 256 as 256. A build from before this change refuses a `runtime.toml` that holds the key as an unknown key, so delete the line before starting an older build. (#50965)
+- Building from source needs `tls` and `tls-eio` 2.1.5 and `x509` 1.2.0.
+  Bring an existing opam switch up with `scripts/opam-pin-external-deps.sh`
+  and `opam install ./masc.opam --deps-only --locked`; a switch that still
+  holds x509 1.1 stops at `Common_name` in `server_tls_material.ml`. The
+  Keeper sandbox image reports `sandbox_image_lock_mismatch` until it is
+  rebuilt from the new `masc.opam.locked` (#51049).
+- The memory health response schema is
+  `keeper.memory_os.current_health.v14`. A TUI or dashboard built before this
+  change refuses the v14 response and shows memory health as not read, and
+  this build refuses a v13 response. Install the server, the TUI and the
+  dashboard from the same build (#51142).
+
+### Added
+
+- Keeper Pulse의 World 줄과 창에 장부에 없는 ordinary 사실 수를 표시합니다. 모든 저장소를 읽은 정확한 수, 부분 집계의 하한, 읽기 실패를 구분합니다. (#50680)
+- Observer and fleet stream connection lifecycles are now measurable from the
+  transport logs: `tui_observer_opened replay=resumed|fresh|after_gap|reset_*`,
+  `tui_observer_closed lived_s=<s> reason=<why>`, and one
+  `tui_fleet_stream_connection_ended outcome=…` line on every fleet connection
+  end (the old debug-only `tui_fleet_stream_ended` is gone; the transport
+  failure warn stays). Reconnect cadence, resume quality and stream lifetime
+  were previously invisible (#50685).
+- `test_keeper_account_home_reach` shows that no Keeper lane reaches the account homes a multi-account process keeps under `.masc/accounts`: the Docker mount sources, the host directories and agent socket of the Apple boot plan, and the Read tool, which refuses another person's credential by path, by a parent escape and by a symlink in the playground. `test_keeper_sandbox_mount_warrant` refuses the accounts subtree and any path inside a refused subtree (#50770).
+- `masc auth service-credential issue`, `revoke` and `list` let the host-local operator issue a Service credential for an internal service, revoke it and list every credential with its service, issue time and status on an installation activated for multi-account use. Only `issue` prints the token, once; `list` and `revoke` print no secret. When the token does not reach the standard output, `issue` exits 1 and names the credential to revoke. The commands take the workspace lease, so they are refused while a server runs (#50774).
+- The multi-account PAT routes: a person with a browser session issues a scoped PAT with an explicit scope and expiry, lists their own PATs with their status, and revokes one. The token is in the issue answer once, and another person's PAT gets the same 404 as an id that names nothing. `masc auth preview` serves the routes, and its page issues, lists and revokes PATs (#50783).
+- Add MCP, HTTP and Keeper regression scenarios distinguishing complete empty comments from unavailable or partial sources, including hidden-target error handling. Scenarios are authored; execution remains unverified. (#50795)
+- Add real-filesystem regression scenarios for comments source edits, observed loss, torn-tail startup, unfinished publication and reserved append/recovery cleanup. (#50795)
+- World memory and Play-seat changes now publish typed SSE observation topics and scopes. The World memory inventory is invalidated before the durable ledger, briefing or Keeper-memory change is published, so a mounted consumer can wake after a successful write; workspace, Keeper and operation identities stay distinct in the event. The generated dashboard SSE schema carries the new types. This is the first member of Native Stack #50833 and does not by itself finish moving the dashboard off HTTP polling (#50829).
+- Keeper Memory의 최근 변경을 확정된 처리 기록으로 조회합니다. 생성·수정·흡수·삭제·무효화를 구분하고, 흡수된 원본과 후속 기억을 연결하며 미확인 관계와 읽기 오류를 남깁니다. (#50849)
+- The Tools series counts the calls that ran a minute or longer. Every total,
+  bucket and tool row of `GET /api/v1/tool-metrics/series` carries
+  `long_count` and `long_total_ms`, and the response carries the threshold as
+  `long_call_ms` (60000). The Tools panel adds two tiles, a dashed line in the
+  time chart and a column in the tool table. 가이드 없음(문서 없음) (#50860).
+- `prompt_compare.py` decides whether a keeper-librarian prompt draft goes in, and `prompt_lines.json` fixes its comparison before any draft runs, as RFC-0517 §2.3 asks: the two Inkling baseline runs of the current prompt, the runs per side and the noise widths (worse below -2.5σ, better above +2σ). A draft goes in when no metric of Inkling or GLM gets worse and memory state accuracy, stale drop recall or judged merge recall improves on Inkling; absorb precision remains a non-degradation check. It refuses runs of different drafts on different models, and a run listed twice or copied from another run. A metric with chances on only one side now leaves the comparison incomplete; no chances on either side supplies no improvement (#50876)
+- Added an internal exact-original fence for Librarian history results whose worker and host outcome cannot be found, preserving the original evidence and unread source while blocking late Memory application. This foundation does not submit a replacement or expose an HTTP mutation. (#50947)
+- Count every Keeper Memory commit that rewrites the snapshot.
+  `masc_keeper_memory_changes_total` moves by the memory IDs the commit added,
+  absorbed, superseded and dropped, labelled with the keeper and the pass that
+  committed. `masc_keeper_memory_facts` and `masc_keeper_memory_snapshot_bytes`
+  show the facts and rendered bytes after the commit. A commit that keeps the
+  snapshot counts nothing. (#50970)
+- Librarian history can retain an explicit exact-original resolution intent, fence its old result on the serialized Memory lane, and judge the same unread source once through a durable child. Restart preserves the same child and receipt-proved completion, including nested resolutions. (#50971)
+- Administrators can inspect and submit one guarded Librarian history-original resolution through an authenticated, workspace-bound API. Recorded acceptance, lane scheduling and actual Memory completion remain separately observable; the recovery guide documents the exact request and source range. (#50972)
+- Open a selected Memory change's observed formation tree with `.` or Ctrl-O through the existing offline Pele Mermaid preview. Recent records and retrievals use rounded cards, and change kinds carry semantic colours and icons. See [Memory keys](docs/guides/TUI-KEYS.md#memory). (#50984)
+- Count each absorb-gate judgment the Librarian finishes, on the runtime run
+  and on the admission, durable and floor captures.
+  `masc_keeper_librarian_absorb_sources_total` moves once per source the
+  answer absorbed, labelled with the keeper, the forward outcome (`conveyed`,
+  `left`, `unjudged`, `unjudgeable`) and the choice it got (`none` when it was
+  not asked). `masc_keeper_librarian_absorb_copy_checks_total` moves once per
+  reverse copy check, labelled with its verdict. A captured judgment counts
+  when its terminal is stored, so a resume after a failed publication counts
+  it once. Replaying a retained judgment counts nothing. 가이드 없음(문서 없음)
+  (#51059)
+- The Keeper memory health row carries `changes_since_start` and
+  `facts_by_hour`. `changes_since_start` holds, for every pass and change, the
+  memory IDs the Keeper's commits added, absorbed, superseded and dropped since
+  the server started: the values of `masc_keeper_memory_changes_total`.
+  `facts_by_hour` holds one point per clock hour of the last 168 hours: the
+  facts after that hour's last commit and the time it was recorded. It is read
+  from the memory journal, so it covers commits made before this change.
+  가이드 없음(문서 없음) (#51142)
+- Add a fleet Keeper queue cancellation panel with exact row selection, reason and confirmation, guarded workspace/auth ownership, row-level outcomes and pending-state readback. Retain uncertain requests across panel navigation without automatic replay. ([#51258](https://github.com/jeong-sik/masc/pull/51258))
+
+### Changed
+
+- Summarize Keeper groups, classify paused and recovered rows consistently, and preserve initial fold choices per workspace (#50594).
+- Sum group wake times and measured age ladders, and preserve unknown failure counts in the 24h wall (#50594).
+- Show Keeper fleet state and wake strips with a selected-row summary that shares the Story window space, simplifying the header by dropping the density/sort mode label and the `By_age` / `By_memory` prose counters (#50603).
+- Add a distinct workspace World selection and dock to the Keepers memory and age views without targeting Keeper actions (#50612).
+- Draw the World's measured age bins with the Keeper row's width merging, scale, and colours (#50612).
+- Retain scoped native terminal captures, same-width comparisons, and exact-source check records for the remaining Keeper views (#50612).
+- Simplified the TUI Work screen around the task request and owner, preserving backlog order and keeping verification identifiers in task details (#50671).
+- Simplified the TUI Features and plugins overview around purpose, current state, errors and actions, keeping detailed runtime and worker history in existing detail views (#50677).
+- Show Goal requests and declared success criteria before identifiers in TUI previews, preserving proof warnings and qualifying incomplete linked Task observations (#50688).
+- Lead the TUI settings status page with validation and application state, preserving stale-read warnings and full source identifiers in the same reading (#50690).
+- Reuse decoded TurnRecord snapshots during unchanged chat-history revalidation while preserving current storage and ownership checks. (#50691)
+- Keep observed feature configuration and current work ahead of secondary action hints in narrow TUI summaries (#50695).
+- Prepare only the visible compact tool summary when opening a Keeper conversation; expanded and single-call activity keep their full formatting. (#50696)
+- #50698: 목표·작업·게시판·기억에서 원문과 상태를 먼저 읽고, 앱 라벨과 키 도움말이 기존 한국어·영어 설정을 따르게 합니다. 기억의 읽기 실패·부분 관측 수량과 필터 밖 목표 선택도 바로잡습니다.
+- Build Keeper conversation execution links one canonical row at a time, retaining identity metadata instead of every Tool payload. (#50702)
+- Show the selected repository's last Git observation and assigned Keepers before paths and registered defaults; shorten Workspace list chrome and use the existing interface language for Repositories key hints. #50704
+- Simplify Operations request summaries and conversation entry points, localize their labels and key hints with the existing interface language, and omit redundant healthy fleet chrome while preserving retained observations and failures. #50707
+- The remote_ssh workspace cleanup now also removes old subfolders inside a top-level entry that was touched within the retention, such as source copies beside fresh review notes. Folders with `.git` or `dune-project`, and Git directories, are never entered and go only when wholly old; files, dot entries and symlinks inside stay (#50723).
+- Keeper 대화창을 처음 열 때 최신 확정 답변을 먼저 불러옵니다. 전체 기록은 별도로 계속 읽으며, 읽는 동안 상태를 표시하고 나중에 받은 도구 활동으로 같은 답변을 보완합니다. (#50724)
+- The keeper-librarian pass lines pin a new E-synth: seed 20261110 from the generator that plants complements and duplicate pairs, of which the blind label audit kept 67 of 137 requests. The pinned verdict files follow #50587, so `run`, `synth-numbers` and `verdict` start again; G6 has no lines yet (#50725)
+- 사용량 화면에서 현재 보기에 해당하는 키 안내만 표시하고, 반복 시계와 계정 한도 제목을 줄였습니다. (#50730)
+- Define normal admission forest closure and expose strict archived-owner metadata reads and complete structural candidate coverage for the closure producer (#50731).
+- 요청 목록은 원문과 현재 판단 상태를 먼저 표시하고, 작은 창에서도 승인 재확인 안내와 선택한 질문을 함께 남깁니다. (#50740)
+- 검증·판정 목록을 작업 제목과 실제 상태 중심으로 단순화하고, 창 크기·페이지 이동 뒤에도 선택을 보존합니다. (#50743)
+- 갱신 실패로 남은 검증 상세를 이전 관측으로 표시하고, 전체 집계와 식별자는 상세에서 읽습니다. (#50743)
+- 판정 목록에도 조회된 최근 판정 시각을 표시하고, 빈 페이지·미관측·이전 조회를 구분합니다. (#50743)
+- Preserve each approval's evidence identity during prompt projection and checkpoint admission, while keeping direct Gate continuations bound to their original approval. (#50744)
+- Keep each approval's grant, replay result and continuation source together during serial host replay. (#50749)
+- 디스크 경보가 `_build/.sandbox`를 포함해 두 단계의 사용량을 남깁니다. 관측은 별도 프로세스에서 실행해 테스트 제한 시간 감시를 막지 않으며, 시간 초과·오류·중단으로 불완전한 관측을 표시합니다. (#50760)
+- A multi-account process runs a model turn only without the native tools of the CLI (`Native_none`). An official CLI runs as the user of the server process, so its own tools could read the account homes of other people. `Runtime_account_access.authorize_native` judges the posture at the model turn entry of Claude Code, Codex and Muse; a single-user process keeps every posture. Codex and Muse have no `Native_none`, so their multi-account model turns, verification included, are refused until a measurement opens a posture, and the preview answers a Codex Keeper turn with 403 and the reason (#50764).
+- The HTTP/2 request handler takes the stream's `Http_h2_stream.Stream_end`
+  (`~stream_end`), and `Http_reqd.of_h2` takes it instead of the stream
+  switch. The stream registry reads the request once, inside h2's request
+  handler, and the stream's work reads it from `Stream_end.request`: h2 has
+  no request to give for a stream it closed (#50765).
+- Drain compatible fresh approvals in one heartbeat turn and acknowledge each only after its own continuation is recorded. (#50769)
+- Revoking a PAT checks its owner before its revoked status, so revoking another person's revoked PAT is refused as not theirs instead of as already revoked (#50783).
+- 과거 대화 페이지의 HTTP 수신·파싱 대기·반영·다음 프레임을 선택적 TUI 계측으로 구분하고, 반영 중 입력 revision과 스크롤 상태의 보존 여부를 기록합니다. (#50803)
+- 과거 대화 페이지나 새 관측이 들어와 행이 다시 만들어져도 출처·본문·표시 형식이 같으면 스크롤용 원문 매핑을 이어 씁니다. workspace와 표시 폭·테마·미리보기·producer 입력은 사용할 때 다시 확인합니다. (#50809)
+- Mounted dashboard observations subscribe before their first read and refresh from scoped source events. Replacing the credential or workspace retires the in-flight HTTP request and its result admission. Ordinary failures keep a bounded retry; a typed 401 or 403 stops until the owner changes. Selected artifact document bodies use the same lifecycle, so a transient body failure recovers without waiting for a later event. A decoded read-only workspace response completes viewing without granting workspace or sharing authority (#50830).
+- The keeper-librarian verdict gates merges at absorb precision 0.85 and judged merge recall 0.7, set from the untrained baseline's 0.41 and 0.14 on the E-synth pinned by #50725, so `train_sft.py` and `verdict` now read every gate (#50846)
+- The keeper-librarian E-real set is read from a snapshot: `e_real_manifest.py --snapshot` copies the answered admission records into a git-ignored folder only its owner can read, because the server now removes a finished admission's text (#50732), and the pass lines pin the snapshot's 52 records (#50846)
+- A keeper-librarian GLM evaluation run waits on one request at a time, because the GLM key's rate limit also counts the live Keepers' requests (#50846)
+- Keeper Story의 Memory를 최근 갱신한 기억·자주 조회된 기억·기억의 변화 표 중심으로 바꿉니다. 흡수 전후와 제외 사유를 표시하고, 저장 상태는 별도 보기로 남깁니다. (#50850)
+- 큰 TUI memory-health fixture 두 개를 제거하고, 위치·재작성의 decoder 계약은 기존 서버 생산자 시험에 연결했다. 고아 주석과 남은 시험 범위를 잘못 설명한 주석도 정리했다. (#50900)
+- Record the review-session rule in docs/constitution.xml: a session that put content-changing commits on a PR does not approve that PR, leaves the change and the new head as a comment, and passes the verdict to a session that changed nothing on that PR. (#50906)
+- Browse Keeper memory from one shared view, with recent records, recorded retrievals, committed changes and storage health. Story keeps a compact preview and shortcuts; search, categories, full claims and fleet coverage stay in the browser. See [TUI keys](docs/guides/TUI-KEYS.md). (#50909)
+- The TUI goal detail "related records" timeline lays each event out in three layers instead of one wrapped paragraph: a dim row with a short time (`MM-DD hh:mm:ss`) and the topic, a severity-coloured sentence row indented four cells with its wrapped continuation rows indented the same, and, when the summary holds a whole valid JSON value, one member per line. The JSON is shown as the validated original text with whitespace inserted, so number and string spellings are not rewritten. A summary that is not complete JSON, such as one the server cut, stays a sentence, and the repeated Keeper-name prefix on Keeper rows is dropped (#50926).
+- Keepers 목록 머리의 관측 오류를 최대 한 줄로 접고 실제 본문 폭에 맞춰 생략을 표시한다. 하나면 사유를, 여러 개면 종류를 요약하며 `!`로 모든 오류 종류와 사유 전체를 읽는다. (#50988)
+- Goal and Task lists in narrow terminals keep more selectable entries ahead of a compact preview. Goal actions show available requests, detail hints describe scrolling, and Task-state labels stay consistent between list and detail. (#50992)
+- Closed Board posts show their retained resolution and successor before the original body, with closure author and time afterward. Closure records without an outcome retain their original presentation. (#50993)
+- Draw the Plugins Records tab fields as syntax-coloured JSON with the code gutter the raw view already uses: keys, strings, numbers and literals take their lexer colours and punctuation is faint, while the text stays the same. The raw view's part renderer moves out of technical_lines into technical_rows, and the evidence line text, built in two places, is built by evidence_text (#50997).
+- Draw the Plugins help (`?`) with accent labels in one column: the title and the group labels (List, Detail, Both, Actions, Installation, Links, Records, Navigation, Advanced) take the label colour, the keys and the notes under a label start in the same column, and a line wraps at spaces instead of inside a word. The words stay the same, and the colon after each label is gone. In a window where the label column would take more than half the width, a label takes its own row and its keys and notes hang two cells under it, so no text is cut off. The help is a list of typed rows (`help_rows`) drawn by `help_lines`, and `led_rows` takes an optional `split` that defaults to the cell cut it used before (#51013).
+- Show a selected Memory change as readable before/change/after cards with more room for a combined successor. `.` opens the focused change, Ctrl-O opens connected history, and Enter retains the complete original text. The focused Mermaid fallback keeps the same scope when the terminal palette is unavailable. (#51021)
+- `/api/v1/dashboard/logs/stream` sends its frames through the shared SSE
+  response. A frame the client does not take within 90 seconds closes the
+  HTTP/1.1 response or resets the HTTP/2 stream, and the warn line is the
+  shared SSE or HTTP/2 stall line instead of `Log stream closed: the client
+  accepted no frame` (#51038).
+- Draw the Plugins Installation tab with accent labels in one column: the labels (Source, Revision, Instance, Incarnation, Current declaration, Desired, Applied, Issue, and the fields of each worker) and the group headings take the label colour, and the values of one indent start in the same column, so a long value hangs under itself instead of restarting at the left edge. In a window where the label column would take more than half the width, each label takes its own row and its value hangs two cells under it, fewer where a two-cell character would not fit beside the hang. The words stay the same. The tab is a list of typed rows (`fact_row`) drawn by `fact_spans` (#51047).
+- Outgoing TLS connections made through ocaml-tls check certificates as
+  x509 1.2.0 does: a host name matches SubjectAlternativeName entries only
+  (RFC 9525), so a server whose certificate names the host in its common
+  name alone is refused, name constraints are checked, and a CA certificate
+  that carries an extended key usage must allow server authentication
+  (#51049).
+- Draw the Plugins Links tab and full flow with bold headings and one label column. Shared Plugin labels use the reader's normal foreground instead of raw bright cyan, keeping emphasis without the low-contrast Accent path on light palettes. Narrow windows put labels above their values; wording, underlying observations and graph wiring are unchanged (#51103).
+- The log, artifact draft and execute output SSE streams end as soon as
+  their HTTP/2 stream does: when the client resets the stream, when the
+  stream stalls, or when the connection ends. Before, each lived until its
+  next keepalive (30 seconds for logs and drafts, 15 for execute output)
+  met the closed response, and kept its editing session seat or its output
+  subscription until then. On HTTP/1.1 a client that left is still noticed
+  at the next write (#51109).
+- A failure inside one of these three streams cuts the response instead of
+  closing it as complete: an HTTP/2 stream gets RST_STREAM (INTERNAL_ERROR),
+  an HTTP/1.1 response stops and its connection closes. The failure is
+  logged once at error, as `[h2] stream failed: …` or
+  `[http] request failed: …`. The lines `Log stream failed: …`,
+  `execute output stream loop failed: …` and
+  `Artifact draft stream closed: …` are gone (#51109).
+- Preserve connection status in the title row of Memory, Schedules, Fusion and Code. When the full badge exceeds the available width, prioritize workspace/read notices, then observer loss and HTTP, and mark omitted context. Counts and clocks give way whole before the title; a wide window keeps the full badge (#51114).
+- The shared `Eio_context` owner queue no longer has its previous 512-task
+  bound, and its dispatcher yields after starting each task. Both changes
+  apply with the serving domain enabled or disabled (#51139).
+- Wrap the Collab overlay's lines instead of cutting them at the frame's edge. Each line was drawn through `fit_width`, so at 80 columns the closing sentence ended in `…`, at 60 columns the controller note and the end of the revoke confirmation did too, and at 44 columns the notice under the title, the machine keys and the invite rows as well. Collab now wraps each text at spaces, puts the three machine keys on separate rows when they do not fit side by side, and lets each invite take the rows its text needs. In a window too short for all of it the closing sentence goes first, then the two explanatory sentences, then the keys; the form, the messages and the selected invite stay, and the frame says how many rows it cut. A window wide enough for everything shows the same text as before (#51143).
+- Cover real-file comment admission and sub-board deletion recovery, including fixed IDs, uncertain writes, later rows and reused slugs; preserve earlier evidence with its original source pins (#51147).
+- Cover real-file post creation against changed or newly registered policy, live source guards, cleanup receipts and existing curation; retain source review and parsing limits (#51157).
+- Cover vote and reaction admission against interrupted deletion, independent readers, changed canonical sources, known cleanup failures and retained unknown writes; retain source-review and parse-only evidence (#51163).
+- Cover cleanup candidates changed by actual comments, votes, title and author edits, canonical source checks, conditional vote guards, and retained deletion decisions after faults (#51176).
+- Cover real dirty vote snapshots across an unknown Posts edit, refused same-store
+  flush and fresh-store observation without reauthorizing the old cached model (#51179).
+- The keeper-librarian prompt states its purpose once: keep one correct memory per piece of knowledge, drop or absorb the wrong ones, and write tidy sentences. Passages that repeated each other now sit in one place each (the kept-sentence list, the `first_seen` and `last_seen` definitions, the rewrite rule). Stale state splits three ways: a point-in-time state is `dropped`, a changed lasting state is replaced through `supersedes`, and an event's history may be folded through `absorbs`. `admission_policy` keeps only what the body does not say. On the pinned comparison (`docs/evidence/research/2026-11-11-librarian-prompt-v9-pinned-comparison/`) Inkling-2-Small dropped 27 of 82 stale states (5 before), and no metric fell past its −2.5σ line; GLM absorb precision fell from 22/29 to 18/36 within it. A read of the drops that differ from the live answers found one memory removed on the day it was written while the next morning still needed it (#51190)
+- Retain planned use and unique useful knowledge before reproducible status-only cleanup. The comparison above describes the earlier prompt; this retention-priority clarification has not been re-evaluated. (#51190)
+- Give Activity event sentences and Logs messages the available width before secondary metadata. Preserve distinct actor names, source failures and retained-read notices, and route Activity paging through the viewport that is actually visible. ([#51207](https://github.com/jeong-sik/masc/pull/51207))
+- An HTTP/1.1 SSE frame that waits when its client goes away ends at once as closed. It used to end 90 seconds later with a stall warning (#51208).
+- The chat `?` sheet and `docs/guides/TUI-KEYS.md` now list the chat keys that worked but were not written down: Up and Down walk the history of lines you sent
+  (a line still waiting in the queue comes back as an edit), Tab and Shift-Tab complete a `/command` or a Keeper name, Ctrl-E and End jump to the newest
+  row, and Ctrl-V pastes the clipboard image. The Ctrl-J and global Tab rows say what else those keys do (#51225).
+- Make Operations alerts selectable destinations tied to the original Keeper, request and observation. Open captured Memory health or a verified single-owner queue inspection, preserve unreadable observations and original diagnostics, and keep the selected destination visible in short windows. ([#51234](https://github.com/jeong-sik/masc/pull/51234))
+- Put model bindings and declared settings first in the Models list, keep account identities for duplicate names, and retain the full source details in the reader. Narrow System titles keep the selected pane name visible. (#51260)
+- `masc_goal_list` returns a short row per Goal: `id`, `criterion_revision`,
+  `title`, `priority`, `phase`, `created_at` and `updated_at`. `detailed=true`
+  lists every Goal's whole row as before, and `goal_id` reads one Goal's whole
+  row, with `not_found` for an unknown id. A caller that reads `verification`,
+  `metric`, `target_value`, `last_review_note` or `measurement` from the list
+  passes `detailed=true` or `goal_id` (#51267).
+- The help sheet keeps one row between pages on PageDown and PageUp, as the agenda does, and Home and End jump to the first and last window like `g` and `G`. Scroll keys now come from one table, `Masc_tui_scroll.move_of_key`. (#51279)
+
+### Removed
+
+- Remove the autonomous-turn chat hand-off, where a ready queued chat ended the running autonomous turn at the next tool boundary and took the Owner slot, and the heartbeat re-entered at once after that checkpoint. A queued chat starts after the running turn ends. An operator stops a running autonomous or chat turn with the TUI `/interrupt` command. (#51221)
+
+### Fixed
+
+- The Keeper and Work headers no longer grow and shrink by one row on every
+  local source poll. The pending-read note waits out a 1s display bar
+  (`pending_display_bar_ns`) and then draws one stable recessed row naming
+  the read's stage and elapsed seconds; the composer metadata hint reads the
+  same gated pending. Millisecond stage detail stays in the `tui_local_read`
+  structured log (#50668).
+- Start Keepers arrival reads from its shortcut and restore shared Pulse strips, selected summary, and proactive interval in the plain list (#50669).
+- Preserve memory refresh failures and reserve short Story windows for source cautions before optional details (#50669).
+- Complete read-only World access from every Keepers list view with `W`, keeping lowercase `w` for wake; see [TUI keys](../docs/guides/TUI-KEYS.md#keepers) (#50669).
+- Reject unsupported tool input schemas with a typed configuration error before
+  starting a Keeper turn, preserving the affected tool's name instead of raising
+  `Invalid_argument` during tool construction. One invalid schema makes the
+  Keeper's entire effective tool surface unavailable (#50670).
+- The waiting-inventory refresh row no longer arrives and leaves with every
+  waiting change event. `Keeper_waiting_read` stamps the first change of a
+  burst (`awaiting_since`) and exposes `awaiting_age`; the header row, the axis
+  row and the detail-pane staleness words draw only past the shared
+  `pending_display_bar_ns`, carrying the elapsed seconds. The demand state
+  machine is unchanged (#50674, on top of #50668).
+- A cleanly resumed observer stream no longer re-reads every visible surface.
+  RFC-0480 §3.3 says a `Resumed` replay missed nothing while disconnected, but
+  `Observer_opened` still ran the waiting-inventory invalidation, the agenda,
+  local workspace and fusion revalidations on every open. They now sit behind
+  the same replay-incompleteness guard as the HTTP revalidation. A healthy
+  SSE resume re-reads nothing and replayed events owe their own reads. An idle
+  local source with unmet demand still reads once on resume. Failed
+  local work or Keeper metadata reads retain a recovery followup, including
+  failures that finish after the resume or return useful partial data; a
+  complete source observation adds none (#50679).
+- Distinguish a missing workspace root from a missing workspace-memory ledger in inventory and briefing observations (#50680).
+- Keep Goals awaiting proof visible in the Agent Core System across tool calls, without replaying the state as a new User message after every tool result. Official clients retain their current-turn Start/Resume input. (#50682)
+- Tool usage counts include `keeper_skill`, `keeper_tool_search` and
+  `keeper_compose_*` calls, which the metrics store previously recorded as
+  zero because they answer on the Agent-Core path (#50692).
+- Find Memory Keepers by canonical and Korean/English displayed states, and preserve refused health rows in fleet fact coverage instead of treating unread Keepers as an empty store. Clarify filtered listing counts. #50708
+- The dashboard's persisted tool metrics count a call whose arguments Agent Core refused before the tool ran. They counted neither its call nor its failure, so refused calls were missing from the call and failure series (#50716).
+- A transport-unsupported refusal no longer names the same connection twice: the message lists only the *other* live connections that serve the capability, and says so when none is left over. Previously a wire-supplied refusal could read "connected over ego_task_space, which does not serve touch_input; a ego_task_space connection does". The browser lane test that admits a tap now asserts the command reaches the connection as `page.interact` instead of merely observing that some command was queued (#50717).
+- Preserve the admitted operation and sender as a separate request-source
+  observation through direct Keeper tool rounds and official-client resume,
+  without changing original input metadata or granting authority (#50718).
+- Show admitted request source in the Dashboard memory inspector and explain
+  its operation scope and authority limits in the Keeper manual (#50719).
+- Open the authenticated Keeper waiting observer without first initializing an MCP session, so a fresh dashboard can receive queue updates. Keep supplied session IDs and agent streams subject to the existing session checks (#50729).
+- Resume interrupted admission record moves and body cleanup with exact archived metadata, preserve new queue input, and retain closure references during archive sweeps (#50732).
+- A keeper detail screen whose profile is invalid no longer dumps the whole
+  profile error into the portrait status row on top of the copy the Info
+  tab's failure section already wraps. The portrait row -- read on the Items
+  tab too, where no failure section exists -- now says only "invalid keeper
+  profile" (#50735).
+- Bind Execute approvals to their network mode and refuse replay when the resolved execution conditions change. (#50737)
+- Resume retained autonomous work after yielding to a fast queued chat. The heartbeat carries the ready-chat checkpoint observation and retries normal Owner admission after successful source retention, without waiting for a new event or the periodic cadence. (#50741)
+- Restored the completion and JSON-schema fixture boundaries in
+  `packages/agent_core` so `test_response_phase_replay` and
+  `test_exact_output_single_surface` pass again. The upcoming v0.70.0 notes
+  list these two coordinates in Known issues as resolved on main by this
+  repair (#50742).
+- Keep standalone Observer SSE reconnects free of invalid MCP session identifiers, and bound fresh registrations by the configured sliding window for each authenticated agent and admitted workspace instance. Concurrent tabs share that window without a per-session cooldown; connection cleanup does not reset it. Rate-limit responses retain Retry-After and the protocol version without advertising an internal connection id as an MCP session (#50745).
+- Keep recorded admission times from moving backwards when requests complete out of order. Expiry and retry decisions use timestamp extrema and the same half-open window, so maintenance retains later entries and an exactly expired entry frees its slot only once (#50745).
+- A composition can carry its own JSON output contract for a registered tool again: descriptor canonicalization keeps a declared `Json_output` composable_output override that differs from the catalog contract, so a stricter output contract governs node output validation and typed dataflow, while an override equal to the catalog contract — and the default `Opaque_output`, meaning "no declared contract" — keeps the registered descriptor itself so plan-supplied copies stay physically identical to the registry (#50746)
+- Four TUI signal tests reach Usage and Board through the command palette
+  (`:go Operations / Usage`, `:go Work / Board`) now that #50465 has taken
+  both surfaces off the Tab ring (#50752).
+- 자동 게시글과 검증 제출자를 Keeper로 단정하지 않고, 활동·로그 제목과 탭을 실제 화면과 언어에 맞춥니다. (#50754)
+- `decode_repositories` case 8 "memory health keeps ordinary and source axes" — #50642 의 "unobserved durable pass" fixture 가 행의 `librarian.unread_atom_turns`·`unread_official_turns` 를 `Null` 로 만들고 `totals.librarian_unread_turns` 를 `0` 으로 남겨, 행과 총계의 합의를 검사하는 디코더 계약("totals agree with rows")에 걸려 main 이 빨랐던 것을 고친다: unread 를 못 읽은 행이 있으면 fleet unread 총계도 unmeasured 로 보고해야 한다. 시험 계약 갱신만 있고 제품 코드 변경은 없다. (#50755)
+- `Keeper_sandbox_read_backend` `run_command` case 5 "an attached endpoint names the derived guest" — the in-process fake agent socket (`Eio.Net.listen`) that #50589 added to the Apple attach read case collided with the case's fixture cleanup order: the switch teardown's `ENOENT unlink` turned main red after every assertion had already passed. Fixed by moving the fixture cleanup outside the switch so the switch closes its socket while it still exists. Test-contract update only; no product code change. (#50757)
+- Withhold constitution articles affected by unresolved ledger moves and deliver the complete current norms when resuming a retained System (#50758).
+- Keep approval continuation tools under their actual turn, preserving each prepared input and announcing only newly stored execution ownership. (#50759)
+- A Keeper's record of an Add-on tool call keeps an image's type and size and not its bytes. A DOS screen read wrote the same PNG to the blob store again on every call (#50763).
+- An HTTP/2 stream whose client stops reading no longer holds its response,
+  its fibers and its response ledger reservation for as long as the
+  connection lives. When the oldest response flush of a stream goes 90
+  seconds without an answer, the stream is reset with RST_STREAM
+  (INTERNAL_ERROR) and one warn line names the request method and path,
+  without the query. Frames written behind bytes that wait, such as SSE
+  keepalives, do not extend the 90 seconds. A stalled error answer instead
+  ends with the bytes the client's window allowed and END_STREAM, then
+  RST_STREAM (#50765).
+- An HTTP/2 response body reaches the h2 library in 16 KiB slices, two at
+  most at a time: a slice is written when the socket took an earlier one,
+  and the 90-second bound runs from one slice to the next. A client that
+  reads slowly but steadily, behind a small window or over a slow link,
+  still gets a body that takes longer than 90 seconds in all. The bodies of
+  one connection take turns on the socket, up to two slices at a time;
+  before, a long body went out as far as the client's window allowed while
+  the other streams waited. A client that opens its window again only after
+  reading a batch has to read each batch within 90 seconds (#50765).
+- What the answer to an HTTP/2 response flush raises resets its own stream
+  and is logged at error. It used to reach the connection's write loop and
+  end it for every stream of the connection (#50765).
+- A response the HTTP/2 response ledger has no room for is logged at warn
+  with the request method and path: the empty 503 of a whole response and
+  the reset of a streaming one (#50765).
+- An HTTP/2 streaming body counts as closed from the moment its route closes
+  it. A write after that is dropped; before, it went out behind the close
+  (#50765).
+- Preserve the observed argument-validation duration when reporting a refused tool call to metrics observers (#50772).
+- Preview PAT lists keep every entry visible when a stored expiry is outside JavaScript's Date range, showing its original epoch-millisecond value instead of throwing during date formatting. Revoked entries use the same safe display. (#50783)
+- Within one Board store, retain persistence from vote staging through the durable append and fresh memory publication, so a snapshot rewrite cannot remove a successful post or comment vote before it enters the committed ledger (#50785).
+- Return sub-board policy snapshot errors before publishing an update or deletion in memory, preserving the current policy and post links when the write fails; related post hearth persistence after a successful deletion remains separate work (#50786).
+- Show the original post title, author and a one-line body preview while composing a Board reply, and retain its in-flight read across that transition and workspace reconfirmation. (#50791)
+- Keep draft send, discard and continue choices readable on narrow terminals, and offer help only when the current input owner opens it. (#50791)
+- Replace the lingering refresh notice with a localized save confirmation for the currently open Code file after its save commits. (#50792)
+- Bind comment appends and snapshots to the exact loaded JSONL bytes and cursor so stale stores cannot overwrite another store's comments. Preserve complete display rows before a torn tail, and retain completed recovery receipts through cleanup errors until acknowledgement; write authority still requires a full model reload. (#50794)
+- Refuse incomplete thread and comment-list reads instead of reporting missing comments, while preserving display rows with their source status. Return HTTP 503 for unavailable thread sources. (#50794)
+- The Board title and census row no longer flip their refresh words on every
+  poll. `Surface_read_order.pending_dataset_age` exposes how long the owning
+  request has run, and the census/posts "refreshing; last observed" words now
+  draw only past the shared `pending_display_bar_ns`, like the Keeper header
+  rows; first-read words are unchanged. The census totals the title borrows
+  follow the same rule, so the count no longer flips "(N of M)" for "(N)"
+  on every poll; totals let go only past the bar (#50797).
+- Keeper 상태 보기의 예약을 횟수와 미확인 여부로 요약하고, 자세한 시간표는 시간 보기에 둡니다. 반복 표식과 굵은 세로선을 줄이고 선택한 줄에는 차분한 배경을 사용합니다. 빈 구간과 미확인 구간은 구분합니다. (#50801)
+- Keep the current Requests question, approval decision notice and footer visible before last-answer and source summaries. Read the complete last-answer receipt and retained follow-up with `v`, including original error text, without changing answer input or Gate detail keys. (#50802)
+- Draw overlay frames (help, command palette, Agenda, Plugins, Collab) and the Code pane's left frame in the receded colour the pane borders use, not in SGR 90. On Nord the frame's contrast against the background goes from 1.69:1 to 4.66:1 (computed from the palette colours); on a terminal that reports no palette the frame is drawn in the default foreground (#50806).
+- Move `e:Events` ahead of `o:log origin` in the System / Logs key table. With an operator notice pending, the footer now names `e:Events` at widths 56, 60, 72, 76, 80 and 84, where it carried `o:log origin` or nothing before; `o:log origin` leaves the footer at 60, 76, 80 and 84 (#50808).
+- Show exact model routes with admitted candidates as configured, keeping model setup distinct from observed browser, machine and Add-on readiness in feature lists, counts and readings. (#50811)
+- Keeper shutdown now checks current Task ownership and exact release receipts under the canonical Task lock before returning its original Tasks through the existing lifecycle. Unrelated Task writes no longer force repeated version rebases. (#50814)
+- Ordinary Task transitions deliver captured cancellation notifications and workspace broadcasts after releasing the backlog lock, preserving committed data when the original Task is deleted. (#50814)
+- Reconcile Keeper shutdown task ownership and release receipts after a pre-effect backlog version conflict, preserving existing refusal and recovery boundaries (#50816).
+- Show current-head review submissions, including COMMENTED, separately from approval and routing decisions; clarify source counterevidence checks in the patrol skill (#50817).
+- Keeper shutdown waiting diagnostics now read the exact durable operation before suggesting an action, preserving blocked failure evidence and unreadable records instead of always advertising finalization (#50819).
+- Retained dormant shutdowns blocked at Task settlement can be explicitly retried by an administrator after checking the original owner, operation and backlog revisions, Task ownership and exact release receipts. Retry preparation, worker scheduling, audit recording and completion remain separately observable (#50831).
+- Refuse stale sub-board policy saves instead of overwriting another writer's accepted policies. Keep incomplete sources distinct from empty lists or missing IDs, and refuse policy operations after uncertain saves until the store is reopened. (#50840)
+- Recover confirmed original Exact terminal publications before reading the worker, without another provider call or submission. Unproven dispatches remain unresolved. #50843
+- Draw code comments, the `---` rule and the bottom edge of a code fence so they stay readable. A comment takes the lifted bright black the chat origin labels already use: a scheme whose bright black reads at 4.5:1 keeps SGR 90, and so does a terminal that reports no palette. The rule and the fence's bottom edge take the receded colour the pane borders use. SGR 90 is under 4.5:1 against the background in 51 of the 53 bundled themes and is 1.69:1 on Nord (#50848).
+- Expose unresolved Librarian outcomes as operator attention in Memory health v13 and full server health, preserving warnings across stale or failed refreshes. #50852
+- Return feature child screens to Features & plugins after closing their inner readings, using the same family as the navigation strip and key help. (#50855)
+- Official-client tool results (Claude Code, Codex, Antigravity, Muse) list the queue rows that arrived during a run through the reader the Agent Core round uses. A Board row of a post the Keeper cannot read now, or one whose routing is unresolved, is no longer listed. Without readable Keeper metadata a result lists no arrived rows. (#50856)
+- Refresh a Keeper's memory-health row when the Librarian commits its position
+  under the runtime keepers directory, not only under the config directory. The
+  dashboard kept answering from a row cached before the commit, so a Keeper that
+  had just read showed no read position until the cache expired. (#50858)
+- Keep failed Board deletion snapshots and their flush retries in source order, preserving dependent data when an earlier write refuses. Refuse partial model reload while deletion persistence is pending. A conflicting source requires reopening; an unwritten deletion can reappear. (#50864)
+- Draw the nine syntax colours (keyword, string, number, type, inline code, link, JSON key, JSON number and JSON literal) through the readability lift the status colours already use. When the terminal reports its palette and one of them reads under 4.5:1 against the background, only its Oklab lightness moves; a colour that already reads keeps its SGR code, and so does a terminal that reports no palette. Bright magenta, green, blue, cyan and yellow read under 4.5:1 in 10, 13, 9, 11 and 13 of the 53 bundled themes. In 256 colours a lifted colour can still land under 4.5:1, which #47482 tracks (#50868).
+- Keep retired Keeper volume reports in a separate reading opened with `V` from the tool catalog, with `Esc` returning to the original catalog position. (#50872)
+- Ask answer recovery no longer reports a Keeper whose shutdown holds its intake as a queue storage failure. The stimulus enqueue result names the shutdown operation, and a recovery pass holds those answers without one warning per answered ask on every maintenance tick. (#50873)
+- A Grep of a path that does not exist on a remote or microVM sandbox is
+  reported as `path_not_found`, a rejection the caller can fix, instead of a
+  runtime failure. When rg exits 2, Grep asks the sandbox backend whether
+  anything is at that path and reads only the exit status of that check. A
+  path under a directory the backend cannot search is reported the same way
+  (#50879).
+- Lead Board lists with post titles and authors, leaving exact post references to the existing copy action and removing repeated clocks and healthy connection badges. Transport, workspace, refresh and event-loss warnings remain visible in Board headings. (#50883)
+- Let manual source checks finish their tracked-tree credential scan (#50901).
+  A ten-minute job backstop allows a cold checkout without canceling at two.
+- #50865 가 main 에 넣은 board 삭제 순서 시험이 없는 \`Board.get_post\` 를 불러 main type-check 가 빨강이었다. \`Board_dispatch.get_post\` 로 바로잡는다. (#50905)
+- A Board refusal the caller can correct is reported as `workflow_rejection`
+  instead of `runtime_failure`: a comment on a thread at its comment cap or on
+  a closed thread, a body with an unsupported broadcast selector, empty
+  content, and the other `Validation_error` refusals. The model now sees the
+  guidance to correct the call or open the successor post, not the one to
+  report a runtime fault, and these refusals no longer log at error level
+  (#50907).
+- A malformed `[board] moderators` list in `runtime.toml` and a reaction toggle
+  that finds the reaction table changed before its commit are `Io_error`, not
+  `Validation_error`, because the request was valid in both. A close, reopen or
+  reaction tool call that hits them stays a `runtime_failure`, and the reaction
+  route answers 500 `io_error` instead of 400 `validation_error` (#50907).
+- Open every operator action reason in a captured, searchable Operations reading, preserve unavailable and empty observations separately, and show a localized action count with an Operations link in shared footers. (#50913)
+- Board vote writes compare the observed ledger before append or rewrite; unavailable personal vote state stays unavailable in the Dashboard (#50918).
+- Agent Core Keeper requests no longer end with the complete current norms as a User message after every tool result. The list rides the issued System for Agent Core and stays the `Constitution_amendments` block for official clients, so tool feedback is the newest message again. (#50921)
+- Draw the frame accent through the readability lift the status colours already use. `Masc_tui_theme.tone Accent` answered with the plain bright-cyan SGR code, so hint-row keys, help-sheet key columns and the Logs MODULE column skipped the lift. Bright cyan reads under 4.5:1 against the page in 11 of the 53 bundled themes, all of them light, and 1.91:1 in default-light. The 26 calls in `masc_tui_render_prim`, `masc_tui_render_overlays`, `masc_tui_render_repositories` and `masc_tui_render_activity` now use `Masc_tui_ansi.Theme.accent`, the lifted cyan `Theme.info` already draws. A colour that already reads keeps its SGR code, and so does a terminal that reports no palette. In 256 colours a lifted colour can still land under 4.5:1, which #47482 tracks (#50922).
+- Draw the accent of the Board reader and composer, chat, Code, runtime parameters, Fusion and Keepers screens through the readability lift. The 27 calls in `masc_tui_render_board`, `masc_tui_board_composer`, `masc_tui_render_chat`, `masc_tui_render_code`, `masc_tui_render_config`, `masc_tui_render_fusion` and `masc_tui_render_keepers` now use `Masc_tui_ansi.Theme.accent`. In default-light, Board post and comment authors, the hearth filter line and the reply title go from 1.91:1 to 4.52:1 in truecolor. In 256 colours the lifted colour reads 3.73:1, which #47482 tracks (#50923).
+- The runtime-trust summary of a failed turn now carries the failure cause whole instead of cutting it at 220 bytes. On the 14,578 receipt error messages measured on 2026-11-10, 47% ran past that cap and a third were JSON error bodies that a cut left unreadable. The operator digest still previews its own attention row at 160 bytes; the full cause stays in `evidence.runtime_blocker` (#50961).
+- Delete `Masc_tui_theme.tone` and its type, now that no caller is left. The distribution bar's `style` is a required `status` instead of an option whose `None` drew the accent, and the remaining `tone Normal` and `tone Dim` calls are written out as the empty string and `Sgr.dim`. No colour changes (#50964).
+- The Keeper detail "current blocker" block in the TUI unfolds a JSON error body embedded in the blocker summary into its own dimmed rows instead of wrapping it as one paragraph. A verdict reason that wraps onto several rows now hangs its continuation rows one step in, and the goal detail's measured evidence and its measuring actor with recorded time are shown on two rows instead of one (#50968).
+- Keep commit and working-tree diff bodies tied to their returned rows, and measure their expanded tabs so horizontal navigation reaches the complete change (#50969).
+- Keeper 상태 줄의 대기 목록이 변경 이벤트마다 경고 행과 횟수 행을 오가며 출렁였다. 다시 읽는 동안 마지막 관측 행을 유지한다. 관측 이력이 없거나 workspace 가 준비되지 않았을 때만 경고를 보여준다. (#50974)
+- Read the Plugins detail timeline in UTC and drop the repeated instance tag. The `Wall time` header prints the first and last observation as UTC date and time instead of epoch seconds, and prints one time when both ends match. Lane labels lose the last eight characters of the instance id that every lane repeated, the label column is as wide as the widest label up to the old cap, and the legend moves below the lanes. The axis grows from 86 to 108 cells at 120 columns and from 48 to 68 cells at 80 columns (#50987, #50967).
+- Calls to attached services (GitHub, Atlassian, Datadog, Railway, Cloudflare,
+  Supabase) are counted in the dashboard tool series. They answered Agent Core
+  directly and never reached the dispatch observers that write the series, so
+  it held only their refused calls and showed those tools as always failing.
+  A call now reaches the observers once, as completed, failed or deferred; the
+  service's own words stay in the tool-call row (#50990).
+- Put observed tools, requests and Skill evidence before fixed explanations in all five Tools panes; keep scope and column legends in the existing Help entry so narrow terminals can show the actual reading first. ([#50996](https://github.com/jeong-sik/masc/pull/50996))
+- Board reaction writes preserve the observed file and retain uncertain outcomes; unavailable reaction state disables Dashboard controls until a fresh read succeeds (#50998).
+- Delayed reaction batches cannot overwrite a later local read or toggle; failed observations retain historical counts without enabling controls (#50998).
+- Keep a Memory formation chart tied to its captured activity. A fresh matching read confirms it, including an identical successful reread; pending, changed or partial history stays unconfirmed. (#51001)
+- Show Resources bodies before full source metadata, which remains available through the existing info action. Remove empty status/part-selection spacing so narrow report readers reach the body sooner. Keep read failures, report confirmation and uncertain sharing/recovery visible, and give Resources, Clients, Channels and Tools short child titles without duplicate Runtime menus or render clocks. ([#51023](https://github.com/jeong-sik/masc/pull/51023))
+- A Grep whose pattern rg cannot compile is reported as a rejection the caller
+  can fix instead of a runtime failure. When rg exits 2 and neither a missing
+  path nor an unknown `type` explains it, Grep asks the sandbox backend that
+  ran rg to compile the pattern alone and reads only the exit status of that
+  check (#51033).
+- Preserve OCaml format types in the Memory change-card captions so the new card renderer compiles. (#51035)
+- On HTTP/2, a server-sent-events frame longer than one 16 KiB slice no
+  longer ends its response at 90 seconds while the client drains it
+  steadily. Only the stream's flush bound times the frame, slice by slice,
+  and a stalled frame logs one line, the stream's (#51038).
+- `/api/v1/dashboard/logs/stream` sends its keepalive comment once it sent
+  nothing for 30 seconds. Log entries the query leaves out no longer start
+  that time again, so a filtered stream on a busy server keeps its client,
+  and the stream of a client that left ends at its next keepalive (#51038).
+- The HTTPS listener counts a ClientHello with two SupportedVersion
+  extensions as a failed handshake. It used to log a connection error from
+  an `Invalid_argument` the TLS library raised (#51049).
+- A TLS 1.3 peer that keeps sending key updates no longer grows the memory
+  of its connection, and a write whose length is a multiple of 16,384 bytes
+  is no longer followed by an empty TLS record (#51049).
+- The `sha256` parameter of `keeper_artifact_read` says that a marker's `answer_sha256=` value is an answer fingerprint and names no artifact, and that the value written `sha256=` is the one to pass. In the ledger from 2026-11-07 09:30Z to 11-10 09:30Z, 102 of 4,342 reads (2.3%) passed a value equal to an earlier `output_fingerprint` of the same Keeper, which is the value of `answer_sha256=`, and were refused; whether the model took that value from the marker was not checked. Reads refused with `artifact does not exist` were 280 of 17,390 (1.6%) in the 149 hours before #49420 merged and 108 of 4,342 (2.5%) in the 72 hours after it. The Keeper mix, the work and the deploy time were not compared between the two windows, so this records no effect of #49420 (#51082).
+- Removing a Keeper deletes its transcript through the chat store, which forgets what the process read from that file, so a new transcript at the same path is read from its first row. ([#51101](https://github.com/jeong-sik/masc/pull/51101))
+- Keep each report-save destination and result with its original report. Show existing-file refusals, file creation followed by an error, and unconfirmed writes separately. Preserve path input after refusal or late completion, keep form keys accurate, and retain original results after workspace withdrawal without replaying the write. ([#51105](https://github.com/jeong-sik/masc/pull/51105))
+- The `until_github_run` parameter of `masc_schedule_create` says that a due time is still required, as the deadline for a run that never completes. Between 2026-11-07 10:20Z and 11-10 10:20Z, 24 of 226 calls that carried `until_github_run` (10.6%) were refused for having no due time (#51107).
+- An HTTP/2 streaming response (SSE, chunked MCP answers) sends its HEADERS
+  frame when the response starts. Before, the frame left with the first body
+  bytes, and a client whose stream window was zero did not get it until
+  something else made the connection write, such as a PING or a later
+  write on the connection, and at the latest the 90-second stall reset.
+  HTTP/1.1 responses are unchanged (#51108).
+- Fence the canonical post and comment sources before recording authorized Board deletions, resume the original targets after interruption, and keep unapplied decisions visible in the Dashboard (#51116).
+- The Board evidence testing hook in `keeper_tool_call_log` no longer calls `Invocation_table.fold`, which `Ephemeron.K1.Make` does not provide, so `pr-type-check` passes again on main (#51119).
+- Keep the current account-addition field visible in the available settings pane height, prioritizing refusals over introductions without clipping login command fragments. Show Voice configuration sources only when the server identifies them, preserving failed and unknown readings instead of inventing a runtime.toml declaration. ([#51121](https://github.com/jeong-sik/masc/pull/51121))
+- Keep Keeper checkpoints from recording a turn failure after a scheduled wake is withdrawn or superseded, while preserving strict validation of replacement events and retention of live sibling sources. #51132
+- Keep Runtime picker candidates visible by giving the open picker its own body and sharing its available page height with keyboard navigation. Preserve notice counts and access to their complete text at small heights. Show Enter's actual create, append or replace action, and avoid advertising letter shortcuts while a filter is being typed. ([#51137](https://github.com/jeong-sik/masc/pull/51137))
+- With `MASC_SERVING_DOMAIN_ENABLED=true`, `POST /mcp` `initialize` answered
+  500 (`Switch accessed from wrong domain!`): handlers ran on the serving
+  domain and forked on the main domain's switch. A request that arrives on
+  the serving domain now runs its admission and handler on the main domain,
+  and the handler's response goes back to the connection through an ordered
+  cross-domain queue. WebSocket routes stay with their connection. With the
+  serving domain off, requests stay on the main domain (#51139, #51080, #46410).
+- Keep journal read failures visible in memory-health rows and reread failed
+  rows after storage recovers. Retain the last observed trend with the error
+  instead of reporting a healthy empty or current history (#51142).
+- The tool blob sweep now classifies twelve Keeper Memory OS files that share the config keepers directory — the snapshot, journal, epoch, source snapshot, aggregate lock, the three receipts, history events, absorbed rows, the admission queue and the Librarian unread ledger — so those stores no longer make the sweep's unclassified gate refuse every deletion (#51144). Other entries are still unclassified on purpose (for example the `activity-events` dated store), and while any of them is present the gate keeps refusing deletion.
+- The startup pass over the settled tool request archive deletes unreferenced archive records and bodies again. It deleted nothing at the 11 boots from 2026-11-09 09:57Z to 2026-11-10 09:33Z: its scope table had no entry for the Candle appraiser's originals, while the install preflight kept a separate table that had one. The pass and the preflight match one closed type, `Server_tool_request_consumer`, so a scope the preflight accepts is a scope the pass classifies. An owner that keeps originals under a scope missing from the type still stops the pass until the next install preflight refuses its record (#51145).
+- Guard comment admission with the boundary reader and canonical parent/policy snapshots. Record sub-board deletion and its original post IDs before unlinking hearths, recover interrupted writes, and expose pending outcomes without reporting completion or repeating deletion (#51146).
+- Restart recovery keeps Active native calls Running until the application runtime is ready, then reads their canonical journal outside registry locks and SQLite transactions. The BasePath pool retains that reader so late metadata materialization also settles the exact original operation/call/revision before creation returns. Journal terminals become `Interrupted_by_restart`; a failed startup Store settlement isolates that Keeper (#51149).
+- Restore compilation of the shared connection heading by using the public SGR-stripping function when measuring terminal width. ([#51152](https://github.com/jeong-sik/masc/pull/51152))
+- Validate the canonical sub-board policy through post creation append, retaining Posts and Policy locks without re-entering Posts; preserve exact write and cleanup outcomes (#51156).
+- The policy-refusal classifier in `test_board_post_policy_admission` now names `Recipient_lookup_failed`, so `dune build @check` compiles with `-warn-error +a` again (#51161).
+- Guard canonical parent Posts and Comments through vote and reaction writes, including duplicate-vote checks, so stale or hidden targets cannot authorize new interactions after an interrupted deletion (#51162).
+- The keepalive fixture now covers the `#50387` rule instead of contradicting it: a Direct post's comment may address only the parent post's readers, so the case that replies with a name resolved outside that set asserts the refusal, and the surviving alias scenario runs on the non-Direct visibilities (#51165).
+- The restart-journal reconciliation names every `Keeper_native_call.state` constructor instead of covering the rest with a wildcard, so a new native-call state fails the build rather than being read as "the journal changed" (#51166).
+- Recheck the original cleanup age, text, comment and post-vote conditions against canonical sources through deletion decision recording, preserving newly active candidates and existing reader and replay contracts (#51175).
+- Retire unused source-only Posts settlement together with its repository callers,
+  preventing old cached data from being reauthorized after an unknown write (#51178).
+- The committed-reaction routing test now uses an emoji from the board's allowed
+  set, so it exercises the retained-routing path instead of failing on input
+  validation (#51183).
+- The Board TTL fixture now loads the sub-board policy source, so the
+  `post_kind` automation-contract case stops failing on `Io_error "Board data is
+  unavailable."` when it writes with `~hearth` (#51186).
+- With the HTTP serving domain on, five gaps of the owner relay are
+  closed: the IDE LSP WebSocket route forks under the connection domain's
+  switch, a rejected response no longer ends a streaming body that is still
+  open, what a body callback or a handler raises reaches the transport as a
+  failure, a request handed over on an ending connection posts no handler,
+  and a request handler still queued when the server stops is dropped
+  instead of run in the release hook (#51189, #51139, #46410).
+- A direct turn that ran on an official client is recorded with
+  `no_durable_scope` request evidence, the value an autonomous turn already
+  records for it, instead of `read_failed`, which the dashboard turn inspector
+  showed as a failed evidence read (#51194).
+- The tool definition source test now expects a bare builtin to name its
+  same-named TOML, matching the contract #50516 completed for the five pairs
+  (#51197).
+- `masc_ask_status` lists open asks first and the rest newest first, and
+  stops the rows where the result would no longer fit inline. The asks left out
+  keep their ids in `omitted_ask_ids`, so a Keeper that reads its asks with
+  `include_resolved` sees the open ones instead of a blob preview of the
+  oldest row, and reads any ask left out by its id (#51198).
+- Keep the active Runtime media-order or lane-name editor visible at small terminal sizes. Route paging and full-text reading to that editor while preserving its selected slot, original rename target and draft. ([#51206](https://github.com/jeong-sik/masc/pull/51206))
+- A connection whose peer takes no bytes is cut: each socket write piece (256 KiB at most) has 90 seconds, on every HTTP listener. Before, such a peer held the connection's writer for as long as it kept the socket open (#51208).
+- A cleartext connection whose peer stays open 90 seconds after the server closed its sending side is cut (#51208).
+- A connection has 30 seconds to complete its TLS handshake, to show whether it speaks HTTP/1.1 or HTTP/2, or to send its first bytes (#51208).
+- A TLS connection whose peer stays open 90 seconds after the server sent its close_notify is cut. Before, such a peer held the connection until it closed (#51209).
+- `masc_dashboard` cuts the Tasks section to the rows that keep the text under
+  the inline ceiling, so a Keeper on a 16 KB lane reads the dashboard instead
+  of a blob preview of its first lines. When the other sections alone pass the
+  ceiling, Tasks shrinks to its one "not shown" line and the text is still a
+  blob (#51212).
+- The ask follow-up stream no longer ends as complete when it fails: the response is cut after its first frame, and a failure before any frame answers 500 instead of nothing (#51218).
+- Keep sub-board reads on the state mutex only: drop the persist mutex #50840 added around `get_sub_board` and `read_sub_boards`. A read nested inside a persist holder re-acquired that mutex and froze the workflow_dispatch full regression in `test_board_comment_post_write_ahead` durability.006/007. The `require_readable` policy-source guard stays, now taken under the state lock. (#51226)
+- The board delete retry test no longer expects a successful retry to clear the
+  posts work while another source of the same batch stays refused, and its event
+  hook now takes the `Board_changed` the product actually emits for a non-public
+  post. Both were test-side mismatches: `#47224` had mixed posts retry with
+  whole-batch recovery, and the hook matched only `Post_changed` while
+  `emit_board_sse_event` narrows that to `Board_changed` for every visibility but
+  `Public` (#51230).
+- `masc_board_search` with `compact=false` keeps the first hits in full and
+  shows the rest as the one-line rows a compact search returns, so the text
+  stays under the result size the calling lane carries inline. A search used to
+  join every hit in full, and a result over that size became a blob that the
+  model read only a 200-character preview of. Each remaining row starts with
+  the post_id that `masc_board_post_get` reads (#51233).
+- Preserve frozen provider endpoints and execution entry/return times in exact generation receipts. (#51236)
+- A `masc_keeper_delegate` to a name that is no keeper is refused with
+  `keeper not found: <name>; registered keepers: a, b, c`, the first 40 names
+  and how many were left out, so the next call can name a keeper the server
+  accepts without reading the whole roster. The delegate preflight and the
+  message surface use one refusal: a name an active agent holds is called an
+  agent on both (#51242).
+- The Keepers header row (`fleet`) no longer prints one `?` per half hour when no Keeper has a history reading: it says the history is unknown once, the way each Keeper row already does. At widths where the roster has no pulse and strip columns the row is not drawn, instead of showing `max 0` for cells that are not there (#51244).
+- The 24h view of the Keepers screen says the history is unknown once per wall row, in the band's width, instead of drawing one `?` per half hour when no half hour was read. A partly read band keeps its marks (#51248).
+- Bind fleet queue cancellation to explicitly selected Keeper/source/incarnation tuples, reject ambiguous filters, require the confirmed workspace, and finish each cancellation receipt before processing the next row. Keep committed follow-up failures distinct from unapplied errors. ([#51257](https://github.com/jeong-sik/masc/pull/51257))
+- `masc_keeper_list` without `detailed=true` returns one short row per Keeper
+  in `items`: `name`, `status`, `phase`, `health` and `paused`. The other
+  fields, `portrait` included, are no longer in these rows. It used to return
+  each Keeper's whole row, about 58 KB for the median call that names no
+  Keeper. A call with `detailed=true` and a call that names a Keeper keep the
+  whole row, and `keepers`, `total`, `limit` and `truncated` are unchanged. A
+  caller that reads other fields of `items` rows passes `detailed=true`
+  (#51262).
+- A stored original that exists but is invalid — it fails decoding, schema or
+  domain validation, or its proof belongs to something else — is now refused
+  instead of being reported as a temporary unavailability. Only a record the read
+  could not reach stays retryable, so a Curator request no longer waits on a
+  record that can never become valid (#51263).
+- The guest `_build` cleanup passes over the exec agent and the relays it
+  forks: the unreadable processes of the session the guest's first process
+  leads. The payload used to end in a traceback at the agent, so no guest
+  build output was cleaned after 2026-11-09. An unreadable process in any
+  other session still keeps every build and is named in the report. A payload
+  that exits non-zero is now reported with its exit status and the redacted
+  end of its stderr, and a guest without Dune stays silent until an owned,
+  idle `_build` needs cleaning (#51275, #50266).
+- The Features list keeps a category heading in the window with the first row under it: Home and k no longer leave the selected row without its group name. (#51287)
+- A Claude Code turn that ends because the account's login passed its time
+  limit is read as an authentication failure. The client names the cause as
+  `authentication_failed` on its API diagnostic frame and sends no HTTP
+  status, so the turn was recorded as a generic provider failure. The
+  signed-out message for a declared account home now names `/login` in the
+  MASC TUI and `masc runtime-account-login`; it used to suggest exporting
+  credential variables, which a declared account home does not receive
+  (#51292).
+- The TUI keeps a Keeper message queued while the workspace match is only unconfirmed (it still holds the last confirmed match); only an unread or mismatched workspace refuses the line, and sending stays gated on a confirmed match (#51294).
+- After the observer stream reopens, the TUI runs one HTTP revalidation to cover the interval the stream was closed, because file-backed snapshots can change without an event. A first open that never carried readings owes nothing (#51294).
+- PageDown and PageUp in the detail reading, the task inspection and the Board attachment reader keep one row of the window they leave, as the lists and the Help sheet do. (#51295)
+- PageDown and PageUp in the chat call reader keep one row of the window they leave, as the other readers do. (#51296)
+- PageDown and PageUp in the Board post body page by the window the frame drew, keep one row of it and no longer skip rows when the post has comments. (#51298)
+- A Claude Code turn is read as an authentication failure from the client's
+  `authentication_failed` cause only when its result carries no HTTP status.
+  A result that ended on another status, such as 400 or a 5xx, after an
+  earlier authentication diagnostic keeps that status's own reading; it was
+  routed as a sign-in failure. A 401 or 403 is unchanged (#51301).
+
+### Performance
+
+- Close fully committed and acknowledged admission forests through a typed recoverable journal, so normal completed originals leave active discovery while stored-state checks and pending evidence remain intact (#50732).
+- Prepare Code file syntax, safe text, row widths and memos in the shared CPU
+  worker before the TUI admits an open, refresh, finder or navigation reply
+  (#50960). Original file bytes, revisions and request ownership are preserved.
+- Reuse the Code document after a workspace-validated reread returns the same
+  original text object, path and revision, including unchanged 304 responses
+  (#50975). Retired file, finder and navigation requests skip preparation before
+  CPU submission; final request admission and original draft bytes stay intact.
+- Build the durable Librarian round's original capture in the CPU pool and
+  read the committed Memory coverage and the continuity round's saved ranges
+  in the IO pool, instead of on the round's own fiber. On a live server one
+  round held the main Eio domain for 1.7 to 2.1 s per capture, during which
+  no HTTP, SSE or Keeper fiber of that domain ran (#51050, #46410).
+- Keep each checkpoint message's written bytes, digest and decoded record
+  once per process for the messages this process encoded, by message
+  identity with weak keys, instead of in the memo a caller passes. A content
+  digest or a compare-and-swap save of a history the process had already
+  encoded used to encode, validate, decode and hash every message again:
+  335 to 454 ms and 105 MB of allocation for 5,000 messages (11 MB of
+  text), now 10 to 15 ms and 5 MB. What a load read stays in that load's
+  memo (#51077, #46410).
+- Closing a failed chat operation reads that operation's event journal once instead of four times. One read now answers both the next sequence and whether the terminal is already recorded, and the check that reads only the journal's last rows also answers a recording without a settlement and `find_operation_terminal`. The 16 operations cut by four shutdowns on 2026-11-10 held 72.4 MiB of journals. ([#51078](https://github.com/jeong-sik/masc/pull/51078))
+- An append-once delivery to a Keeper transcript reads only the rows written since the previous one instead of the whole file. The server keeps each transcript's provenance index together with the place its reading ended; the first delivery after a start still reads the whole file. Reading and parsing a 31 MiB transcript took 1.38 s in a standalone probe before this change. ([#51101](https://github.com/jeong-sik/masc/pull/51101))
+- Server boot reads each Keeper's checkpoint history from its last message back to the last tool request, and loads the whole history only when that request awaits results. It loaded every Keeper's whole history before, 15 to 214 seconds a boot in 25 boots from 2026-11-08 to 2026-11-10. What boot appends is unchanged. A history whose last request has its results is not parsed at boot, so a defect in it is reported by the Keeper's next turn instead of the boot log, and its boot outcome is named `Nothing_to_close` (#51141).
+- Redact the text of wire-capture request and response rows on the CPU
+  pool instead of on the caller's domain. A request row redacts the system
+  prompt, the context and the tool schema array on every provider request:
+  on a live root the main domain ran 842 to 959 ms of each 30 s before
+  those appends, 218 ms at the longest, for 17 request rows of 78 to 188 KB.
+  The rows are unchanged, and total CPU is the same (#51168, #46410).
+- Reuse the parsed remote_ssh endpoint registry while runtime.toml holds
+  the same bytes. A Remote_ssh Keeper parsed the whole file on the main
+  domain on every Execute call: 12 to 183 ms and 16 MB of allocation for a
+  74 KB runtime.toml. The file is still read on each call, so an edit
+  applies to the next one (#51188, #46410).
+- Decode only the lines appended to a Keeper's turn boundary store since
+  the last read. Every read decoded the whole store, twice at the start of
+  each provider turn on the turn's domain: 19 to 63 ms at the median for a
+  450 KB store and 205 to 455 ms for a 6.6 MB one. A read of unchanged
+  bytes now takes 0.8 to 4.0 ms at the median (12 reads, three runs, on a
+  loaded host, 2026-11-11). The bytes are still read under the writer's
+  lock on each call.
+  The kept bytes and decoded lines take about twice the store's size:
+  about 96 MB for the 29 stores (48.2 MB) of that installation. What is
+  kept is bounded at 128 MB of store bytes over all Keepers; past it the
+  stores read longest ago are dropped and decoded in full by their next
+  reader. A store that is gone when read is dropped (#51195, #46410).
+- Keep the reading of the runtime.toml text parsed last, in `Runtime_toml`
+  itself. The server parsed the same file on the main domain for a
+  Remote_ssh Keeper's every Execute call and for every repository pulls
+  refresh: 12 to 183 ms and 16 MB of allocation for a 74 KB runtime.toml.
+  `parse_string` and `parse_file` now answer the same text under the same
+  `HOME` with the reading already made, so every caller is covered and the
+  copy the endpoint registry kept for itself (#51188) is gone. Callers still
+  read the file on each call, so an edit applies to the next one. A warning
+  the parser logs for a value is logged when the text is parsed, not on
+  each call that reuses the reading (#51202, #46410).
+- Validate the checkpoint transcript on the CPU pool. Each checkpoint save
+  walked every block of every message on the caller's domain, the main one
+  for a Keeper turn: 204 of 21,576 main-thread samples over 60 s on a live
+  root of 29 Keepers. The encoding that follows already ran on the pool
+  (#51203, #46410).
+- A TLS connection hands the socket its ciphertext through a 256 KiB buffer
+  instead of 4 KiB at a time. In the isolated bench the server CPU per MB
+  fell from 11.4-11.8 ms to 6.3-6.4 ms for a body written whole and from
+  15.1-15.9 ms to 10.0-10.5 ms for a write of one HTTP/2 slice. The cipher
+  order stays the default: with a Go client the combined CPU moved between
+  -9% and +3% (#51228, #50296).
+
+### Documentation
+
+- Document the content-first reading contract for Goal, Task, Board and Memory screens. (#50689)
+- Retain native observations and provenance for the Goal, Task, Board and Memory reading changes. (#50703)
+- Document memory-reading validation and the limits of source, native and installed evidence. (#50734)
+- Add the Draft RFC-exact-lane-waits-for-a-stated-reset, which proposes that an Exact-output lane wait until a provider-stated reset or Retry-After before calling a slot and return each caller's resting-refusal result; implementation is planned for a later PR. Mark the glossary and earlier RFC notes as proposals as well. Amend the walks-one-slot-list, 0433, 0370 and provider-path-rest RFCs and the Provider Usage Window glossary entry to match (#50766).
+- Add the RFC that keeps the HTTP transport on the serving domain and gives
+  each route a typed placement, `Owner` or `Serving`, with the evaluation it
+  must pass before the serving domain becomes the default (#51080, #46410).
+- `docs/evidence/tool-efficiency-1110-2026-11` holds read-only scripts, tests and fixed-window results for the tool-call ledger after the 2026-11-10 deploys: `keeper_artifact_read` refusals, `masc_schedule_create` refusals that carry `until_github_run`, and the long Execute calls that wait on GitHub. The 2026-11-08 tool-efficiency report gains a 11-10 update, and the refused-calls evidence gains the post-deploy comparison of the dashboard series with the ledger and a correction: a ledger row's `ts` is the time the row is built after the result arrives, not the start of the call, which `ts_position.py` checks on 173 Execute pairs (#51115).
+- The Collab overlay's `lines` documentation and comment now say how a short window gives up text: the closing sentence is always returned and the frame cuts it first with a "rows not shown" note, while the heading's two explanatory sentences and then the keys drop without any note when what is left fits; the evidence README for the Collab wrapping change states the real long-word rule, a break after the last `_ : / . -` when the row is at least half full and otherwise at the width, and gives a counted example of the silent drop (#51169)
+- The keeper-librarian training README says the roll-out saves 65,536 as the admission lane's `max_output_tokens` and declares 32,768 on the checkpoint's binding, so the checkpoint keeps its evaluated 32,768 and the GLM slot (catalog ceiling 131,072) receives 65,536. The live lane declares no value today, so its requests carry no `max_tokens`; harness GLM runs keep sending the 32,768 pinned in `pass_lines.json` (#51171)
+- Publish the multi-account source review and platform research, distinguishing the server's Codex login-file handling from the report's provider-policy interpretations. (#51172)
+- The evidence README for the narrow title-row connection chip now records the merged design measured at 44, 60 and 80 columns: the workspace-mismatch notice shows on all seven screens at every width, and the screen name shrinks to `MAS…` or `MASC …` where the chip is longest; the README no longer calls that follow-up unmeasured (#51191)
+- The evidence README for the narrow title-row connection chip now ships the measured title rows as `title-rows.tsv` (126 rows: 2 states, 3 widths, 3 builds, 7 screens) with a short script that recounts its count tables from that file, and its sentences on the proof tests and the screen-name counts say what they cover (#51204)
+
+### Internal
+
+- The `test_keeper_codex_current_context` suite records the current resume
+  contract instead of the pre-#47580 one: a resumed thread refreshes its
+  standing System through the acknowledged Developer injection path, one
+  `thread/inject_items` whose items carry only `developer` roles before
+  `turn/start`, and the context frontier retains one `Codex_system_prompt`
+  receipt alongside the two prompt blocks and the frozen unread identity.
+  Conversation history still never replays (#50666).
+- Delete `Runtime_store.select_run_windows`, `read_events`, `append_event`, `events_path` and the `run_window` type, which only tests call (#50710)
+- Delete the `Consumer` module (`run_agent`), which only its own test calls (#50711)
+- Delete `Mcp.convert_tools` and `Mcp_schema.mcp_tool_to_agent_core_tool`, which only tests call (#50712)
+- Delete `Structured.schema_extractor` and `Structured.response_json_extractor`, which only tests call (#50713)
+- Delete `Util.file_read_error`, which only a test calls (#50714)
+- Delete `Agent_card.supported_interfaces_of_list`, which only a test calls (#50715)
+- Delete six tests that only check that a removed alias, env var or field stays gone (#50727)
+- Delete seven tests that only check that a removed JSON shape or string match stays gone (#50728)
+- The browser lane test that checks a transport-unsupported refusal is now named for what it asserts: an unserved request never renames the transport that refused it, and names only the other connections. The previous name still described naming a serving transport, which is the opposite of the merged behaviour (#50736, #50717 P3).
+- The test that renders a direct turn context now passes the required `direct_input_source` to `Direct_context.prepare`, so `dune build @check` on main is green again. (#50739, #50718 follow-up)
+- `lib/tui_terminal_text.ml` is the boundary that keeps control bytes out of the terminal. It had no test file of its own: the module was exercised from five other test files, four of which call `sanitize_terminal_text` directly, 22 times in total, and `test_tui_decode.ml` already pinned that an escape keeps the visible text around it with an exact expected string. What was missing was a file whose every case is about this boundary. The new cases name the boundary's own values: no control byte reaches the terminal, an escape never costs the text around it, a C1 control takes the codepoint form, plain ASCII and Hangul come back unchanged, a multi-byte letter is not split, LF stays a line break while CR is drawn, and a second pass changes nothing. An implementation that dropped the whole string fails six of these seven, measured with a mutant (#50748).
+- The pre-bump missing-fragment report now refuses the release bump when a
+  merged pull request still lacks a changelog fragment (`missing --strict`,
+  with a narrow exemption file for changelog-work PRs), and its base
+  detection falls back to the tag itself when the release reflection commit
+  is absent, so the report no longer silently skips a release window (#50750).
+- The two failure messages in `check_timeout_phase`
+  (`test_stream_pre_header_budget`) now print `%.6f` instead of `%.2f`, so the
+  next failure shows the true elapsed value; the assertion windows are
+  unchanged (`%.2f` printed `0.50` for an elapsed value just under the `0.5s`
+  budget, so the window bound and the printed value read as self-contradictory)
+  (#50753).
+- In one passing run the `0.5s` budget elapsed `0.505351s`, about `5.4ms`
+  past the budget; the `%.6f` values will tell a genuinely early finish
+  apart from load when it next fails (#50753).
+- `evidence/task-3491/` carried compiled output after a Keeper commit used `git add -f`, which bypasses the `.gitignore` rule that ignores `_build/`. A 7.3 MiB `probe.exe` made this the only `.exe` in the repository, so it and the seven `_build/` byproducts are removed. The binary's bytes remain retrievable from git history (base `24d54a4a`, blob `fb99f6bb`), and `SHA256SUMS` is now a manifest of files that actually exist — `sha256sum -c` passes — with the removed binary's digest recorded as a comment that also states what that digest does not establish (#50761).
+- Cut the assertions about a `cited` row kind the decoder never read and a trim helper the boot path never starts from two tests that also check current behavior (#50767)
+- Fix the heading level of the changelog.d/50755.md fragment so the whole-directory changelog-fragments.py check passes (#50768)
+- Delete `Eio_context.get_https_connector_result` and its connector cache, which only a test calls (#50775)
+- Delete `Health_status.rank_string` and `Keeper_alerting_path.playground_path_of_keeper`, which only tests call (#50776)
+- Delete `Keeper_invariant.check_all`, which only tests call (#50777)
+- Delete `Keeper_lifecycle_gate.gate_to_string` and `Keeper_meta_json.canonical_keeper_meta_key_names`, which only tests call (#50778)
+- Delete `Keeper_runtime_manifest.comparable_for_latency` and `logical_ordering`, which only tests call (#50779)
+- Delete `Keeper_runtime_manifest.validate_manifest_completeness`, `is_complete_turn` and `Keeper_runtime_setting_registry.validate_registry`, which only tests call (#50780)
+- The RC cut gate reads the nightly verdict a cut sits on and refuses red
+  or unread nightlies unless the baseline records the decision (#50784).
+- Main type-check repair after #50759 and #50749 merged with their own type-check failures: `append_approval_lifecycle_at_slot_once` now annotates its `lifecycle` parameter as `approval_lifecycle` (`approval_id : string`), because #50759 added a same-named `approval_id : Request_id.t` field on the new `approval_input_binding` record in a module the function opens, pulling unqualified `lifecycle.approval_id` label resolution to the wrong record; the `Request_id.of_string` conversion stays as the required bridge to the `Request_id.t` delivery key. `test_keeper_loop_tool_projection` gains the missing `masc.keeper_runtime` and `yojson` library dependencies its new `Keeper_event_queue` and `Yojson.Safe` references need, and the `non_terminal_replay` fixture in `test_keeper_turn_outcome` becomes a type-annotated record literal instead of a `with`-clause listing every field (#50788).
+- A release companion consistency suite reads the four hand-maintained lists from their real files - the packager `NAMES` tuple, the install smoke executables loop and `ASSETS`, the publication gate `validate_distribution` expected set with `PLATFORMS`, and the receipt parser `parse_companions` allowlist - and fails on drift in either direction, the failure class that turned the v0.70.0 RC run 42689442386 installation builds red with `installed_release` `invalid_receipt` (#50790).
+- Delete the `Sessions_store` module (`make_store`, `get_raw_trace_runs`), whose only user was two statements of one test (#50820)
+- Delete `Mcp_schema.mcp_tool_to_agent_core_tool_result` (and its `Mcp` re-export) and the unused `Mcp.skipped_tool`, `transport` and `managed` types (#50822)
+- Delete `Structured.extract_response_json`, `json_extractor`, `text_extractor` and the `extractor` type, which only tests call (#50823)
+- Delete `Backend_glm.parse_response`, the raising wrapper of `parse_response_result`, which only tests call (#50824)
+- Delete `Tool_set.concat`, which only a test calls (#50825)
+- Delete `Periodic_suffix.cycle` and `Inline_reasoning_split.inside`, which only tests call (#50826)
+- Delete `Runtime_store.list_runs` and the run listing types and helpers only it used, which only tests call (#50827)
+- Delete `Progress.validate_task_id`, which only tests call, and the `is_valid_sha256` route alias, whose tests now call `Tool_blob_store.validate_sha256` (#50834)
+- Delete `Turn_fsm.any_state_label`, a one-line wrapper of `turn_state_label` that only tests call; the label tests now call `turn_state_label` (#50835)
+- Delete `Anti_rationalization.parse_review_verdict_from_json` (its tests now read the verdict through `step_verdict_call`) and the unused `Workspace_utils_ops.validate_task_id` and `validate_file_path` (#50836)
+- Regression scenarios for sub-board policy source changes, failed saves, incomplete queries and reserved cleanup through public handlers and real filesystem transactions. (#50839)
+- Qualify the `class_` label in the board comments source test so the type-check of main passes again (#50842)
+- Board deletion scenarios for stale parent and comment sources, dependent votes and reactions, and reserved cleanup across retries and fresh loads. (#50865)
+- A test executable that links `masc_test_deps` publishes the single-user
+  host-tool access once when it starts, so tests no longer call
+  `publish_single_user_access`; the three tests that publish another access
+  list their libraries without `masc_test_deps` (#50867).
+- Verify absorbed memory membership without depending on archive insertion order. (#50869)
+- Delete `Keeper_vision_downscale.needs_downscale` and `Keeper_volume_filesystem_watch.damage_appeared`, which only tests call, together with the private helper `damaged` and the two tests that called them (#50885)
+- Delete `Keeper_tool_shared_runtime.with_registry_meta` and `Keeper_turn_pulse.sample_of_decision_line`, which only tests call, and make the pulse line-parsing test read its rows through `seed_from_decision_log` (#50886)
+- Delete `Dated_jsonl.prune_listed_stores`, `Discord_rest_client.chunk_by_codepoint` and `Slack_lane.push_many`, which only tests call, and point the retention and lane tests at `prune_listed_stores_bound` and `Slack_lane.push` (#50887)
+- Delete `Keeper_sandbox_microvm_image_probe.image_probe_for`, which only tests call, and make its live test check the gate through `image_present_for` (#50888)
+- Delete `Keeper_error_classify.is_context_overflow`, which only tests call, and point its tests at `declared_lane_failure_of_error` (#50890)
+- Delete `Keeper_microvm_kata_vmm.vmm_of_choice`, `Keeper_repetition_judged.seed_beyond` and `Keeper_tool_surface_ops.direct_reply_visible_text`, which only tests call, together with the three tests that called them (#50891)
+- Delete `Server_runtime_bootstrap.config_bootstrap_mode`, an alias that only a test calls, and point that test at `Server_runtime_config_root_bootstrap.config_bootstrap_mode` (#50892)
+- Delete `String_util.ascii_punctuation_tokens`, `String_util.contains_contiguous_token_sequence` and `Telemetry_observe.observe_or_default`, which only tests call, together with the private helper `is_ascii_alnum_or_utf8_byte` and the tests that called them (#50893)
+- Delete `Masc_tui_portrait_view.put_bytes` and `Masc_tui_render_prim.runtime_assignment_targets`, which only tests call, and make their tests build the expected put bytes from `Masc_tui_graphics.put` and call `Masc_tui_types.runtime_assignment_targets` (#50896)
+- Delete `Mcp_tool_runtime_board.ensure_board_post_author` and `Otel_trace_context.of_headers`, which only tests call, and make the author-claim test call `enforce_caller_identity` instead (#50897)
+- Delete `Repo_git.origin_head_branch`, which only tests call, with its slash-branch test and the private helper `branch_of_origin_head_ref` that only it used (#50898)
+- Delete `Server_mcp_transport_http.inject_agent_name_into_body`, which only tests call, and make its three tests call `Server_mcp_actor_injection.inject_agent_name_into_body` directly (#50899)
+- Delete `Masc_error.category_for_tool` and `Masc_error.category_for_tool_opt`, which only tests call, together with the five tests that called them (#50902)
+- `scripts/ci/mli_val_caller_check.py` warns (never blocks) when a `.mli` val change leaves test callers un-updated: it diffs val blocks between two refs, greps `test/**` callers, and reports the symbol, `.mli` coordinates and stale caller lines, with `--selftest` covering the #50684/#50718 regressions (#50916)
+- Add real-file vote-source settlement scenarios and retain Dashboard vote-state browser evidence; classify test-only changelog fragments as internal (#50919).
+- Retain real-file reaction source scenarios and isolated Dashboard browser evidence for unavailable state, failed writes, read-only recovery, and readable footer actions (#50999).
+- Cover delayed feed batches, unseen loading, and successful or failed local GET/POST settlement (#50999).
+- Nine hand-rolled prefix tests (a length guard plus `String.sub` equality) in `mcp_client`, `repo_store`, `egress_host`, `fusion_judge_parse`, `keeper_image_dimensions`, `keeper_lane`, `keeper_shutdown_types`, `tool_local_runtime_http` and `tool_misc_web_fetch` now call `String.starts_with`; behavior is unchanged (#51017)
+- `Board_posts_source` drops its one-caller `bytes_have_prefix` for `String.starts_with`, and the ElevenLabs catalogue URL builder in `Voice_runtime_overlay` tests its `/v1` suffix with `String.ends_with`; behavior is unchanged (#51018)
+- Delete `Auth_credential_base.extract_agent_type_prefix` and `Backend_types.validate_ttl`, which only tests call, with five tests, and point the keeper-alias prefix test at `Auth_nickname.extract_agent_type_prefix` (#51026)
+- Delete `Browser_pointer.input_sources` and `Build_identity.resolve_commit`, which only tests call, with the private helper `button_number` and four tests (#51027)
+- Delete `Capability_registry.spawned_agent_prefixed_tools`, which only a test calls, with the private helper `prefixed_tool_names`, and point the spawned-agent surface test at `Tool_catalog_surfaces.spawned_agent_surface_tools` (#51028)
+- Delete `Channel_gate_metrics.error_kind_of_string` and `Config_dir_resolver.agent_runtime_dir`, which only tests call, with two tests (#51029)
+- Delete `Keeper_volume_ownership.interpret_marker_absent`, `Keeper_world_observation.actionable_signal_present` and `Keeper_world_observation.skip_reason_to_string`, which only tests call, together with the tests that only called them, and make the global gate test read skip reasons through `verdict_reasons_to_strings` (#51037)
+- Delete `Keeper_world_observation_message_scope.pending_mentions_of_messages` and `pending_scope_of_messages`, which only tests call, and make the lane tests in `test_keeper_mention_scope.ml` read the lanes through `pending_messages_of_messages` and `pairs_of_kind` (#51040)
+- Delete `Masc_runtime_events.with_turn_span`, which only tests call, together with its two tests and the header sentence that named it (#51042)
+- Delete `Masc_tui_observer.roster_change`, which only tests call, and let its one test match `Keeper_roster_change` directly (#51043)
+- Delete `Safe_ops.try_with_log`, `Safe_ops.get_env_int_logged`, `Server_dashboard_http_core.dashboard_message_json` and `Server_dashboard_http_core_cache.dashboard_query_cache_segment`, which only tests call, together with the tests that called them (#51044)
+- Delete `Tool_args.validate_int_required`, `Tool_args.validate_one_of`, `Tool_args.validation_error_response` and the `Tool_call_quality_benchmark.score_run` alias, which only tests call, and point their tests at the live functions (#51045)
+- Delete `Tool_telemetry.register_metrics` and `Tool_workspace.dispatchable_names`, which only tests call, together with their tests (#51046)
+- Delete `Tui_decode.decode_agent`, `Tui_decode.bounded_parent_depth`, `Tui_decode.parse_keeper_chat_response`, `Tui_decode.keeper_failure_status_of_readings` and `Vision_analyze.string_of_error`, which only tests call, together with the private helpers only they used and the tests that called them (#51048)
+- Delete the `Voice_bridge` re-exports `db_of_amplitude`, `recorder_refusal_message`, `say_voice_in_catalogue` and `espeak_voice_in_catalogue`, which only tests call, and make the tests that used them call `Voice_capture` and `Voice_catalogue` where the functions are defined (#51051)
+- Delete `Workspace_utils_backend_setup.env_opt` (with its private helper `is_unresolved_template`) and `Workspace_memory_reader.recover_corrupted_pending`, which only tests call, together with their tests (#51052)
+- `tools/rtev_trace/rtev_fibers` excludes known non-lock objects, keeps each
+  tracked lock under one holder and caps retained suspension reasons. An
+  older object's overlapping `Get` events retain one provisional holder
+  until `Put`, preserving an observed semaphore hold without growing the
+  ledger on every older stream read (#51054, #46762).
+- The browser task-capability test now expects what the capability table says: an ego connection serves `touch` through `tap_at`/`swipe` (`lib/browser_capabilities.ml`, `Touch` → `Conditional ~action:"tap_at" Interact`), so a touch-only request chooses that connection instead of finding none. The same file already asserted this in its touch table; two older assertions in the selection and explicit-browser cases said the opposite (#51057).
+- Delete `Masc_tui_types.chat_settled_insertion_index`, `Dashboard_gate_metrics.approval_queue_summary` and `Masc_tui_types.quiz_scorecard_reading`, which only tests call, with seven tests, the test file `test_tui_quiz_scorecard.ml` and its `test/dune` stanza (#51069)
+- The loop tool projection test creates its base directory before the tool blob store reads it, so 13 of its 16 cases no longer stop in the fixture. ([#51100](https://github.com/jeong-sik/masc/pull/51100))
+- Drop the register_metrics clause from the telemetry test comment in test/dune (#51110)
+- Fix the two failing cases in `test_browser_addon_live_ego`: the connection has served `tap_at`/`swipe` since #49295, so `Transport_unsupported` can no longer be produced by any issue path (`lib/browser_lane/browser_lane.ml:642-648`); the test now observes the tap arriving at ego as a `page.touch` step with `refsInvalidated` in the answer, and its fixture answers that step (#51113)
+- Add real-file Board deletion recovery and snapshot-guard scenarios, and retain the exact scope of frontend execution and source-only validation (#51117).
+- The play seat fixture now hands the controller over through the served worker and waits for the seat's own observation, so the seat-recovery cases stop asserting against a stale holder (#51123).
+- The keeper-librarian synthetic-request generator shows a memory's earlier facts of the same category whole when it writes more facts there, and other categories' facts by their first 90 chars. A new-knowledge candidate sees its category's durable facts whole. Before, a later call saw only the first 90 chars and wrote a long fact's lesson again; the 11-10 dev label audit dropped 74 of 134 requests, most for such repeats (#51133)
+- Delete `Keeper_invariant.tool_surface_monotonicity`, which only tests call, with its three tests and the `tool_name` type and `StringSet` module that served it alone (#51135)
+- The Board-attention partition fixture now publishes the Board post its signal names, so the post-created visibility filter (#50387) has something to read and the preflight replay cases stop failing on a fixture that never created one (#51153).
+- The workspace init parity fixture now files its message with the production `_broadcast.json` suffix, so the counter actually resumes and the parity check stops failing on a name the reader never accepted (#51154).
+- Every pull request now gets a PR type-check check context: the source path filter moved from the workflow trigger into a `changes` job, so an out-of-scope PR reports a skipped check instead of no check at all (#51155).
+- docs: type-check required 짝 승격의 2단계 기록과 docs-only 시험 — ruleset 등록 전 컨텍스트 관측용 (#51167).
+- docs: required status checks(changes·type-check) 등록 결과와 skip-required 측정 결과(#51181 20:18:45Z 병합 실측)를 rollout 문서에 기록했다 (#51182).
+- `approval-auto-merge` now dispatches the main build once its own run reports a
+  completed merge. Between 2026-11-10T21:07:49Z and 2026-11-11T01:51:07Z, none of
+  the thirteen merges whose `merged_by` was `github-actions[bot]` left a
+  push-triggered `Main minimal build` for its merge commit, while all four merges
+  by a person account did. Ten of those thirteen commits were built anyway: six by
+  the half-hourly schedule, eight by a manual dispatch, four of them by both, and
+  three had no build run at all. This is a record of those samples, not a rule
+  about every future merge (#51185).
+- Muse subscription usage windows are settled against the observation time the
+  host states, so a spent window keeps the reset the provider named instead of
+  resting the account on the fallback cap (#51187).
+- The provider quota window's observation path now takes the moment of
+  observation as a parameter, so a fixture can date a rest without depending
+  on the wall clock. Real provider paths keep the wall clock as the default
+  (#51201).
+- The comments on when an HTTP/2 HEADERS frame can wait for body bytes now match the code, and the #51108 entry no longer states an unverified history (#51213).
+- `/health` reports the scheduler lag of the HTTP serving domain as
+  `scheduler.serving_lag`, in the same shape as the main domain's ring. Its
+  `probe` field reads "not_started" when connections run on the main domain
+  (#51222).
+- A route now names the domain its handler runs on: `Owner` (every existing
+  registration) or `Serving` (`Server_route.Serving.get`), beside `Ws`. With
+  the HTTP serving domain on, a `Serving` request stays on its connection's
+  domain and does not wait for the main one. `GET /health/live` is the first
+  such route (#51224).
+- Complete the restart settlement step in the Owner restart test. `test_keeper_owner` failed on main since #51149 moved the return of a Running operation with an Active native call to that step. (#51229)
+- `Pulse.nothing_read`, the check that the fleet row and the 24h wall of the Keepers screen use to say an unread history once, has a table test. RFC-0515 §2.4.3 now says the failed-slot count and the peak keep their `?` when the band says unknown once (#51252).
+- `approval-auto-merge` now wakes the main build when it holds on a pull
+  request that auto-merge already merged. A bot merge emits no `push` event and
+  the held run never reported a merge, so the merge commit could reach main with
+  no build run at all (#51201 was such a case); the run now reads the pull
+  request back and dispatches when it is merged (#51255).
+
+### Known issues
+
+전체 `@runtest` 는 컷 시점에 아래 3건이 빨강으로 기재됩니다(ask2d364882 c1 게이트 문면). 이 노트는 원인을 단정하지 않습니다.
+
+- `test_tui_task_event` — `TaskEventTest.test_task_snapshot_reloads_local_work_without_polling` (1건)
+- `test_tui_observer_epoch` — `ObserverEpochTest.test_same_path_epoch_change_retires_old_reads_and_revalidates` (1건)
+- `test_waiting_event` — `WaitingEventTest.test_changes_while_reading_coalesce_without_cadence` (1건, 재현 1회 관측)
+
+앞의 두 시험이 닿는 좌표는 #51294 가 다룬 TUI 재연결·입력 큐 경로와 겹칩니다. 컷 시점 이후 전체 스위트 재실행으로 닫혔는지는 이 노트가 확인하지 않았습니다.
+
+
 ## [0.70.0] - 2026-11-09
 
 1. 이번 0.70.0 은 0.69.0 이후 쌓인 744건의 사용자 대상 변경(Added 89·Changed 100·Fixed 147·Removed 11)과 350건이 넘는 내부 정비를 담은 대형 릴리스입니다.

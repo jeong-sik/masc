@@ -33,6 +33,26 @@ val load : binding:binding -> (admission, string) result
     call is not a restartable provider attempt. No canonical-history fallback
     is used for missing or inconsistent retained evidence. *)
 
+val journal_terminal :
+  runtime:Agent_core.Agent.execution_runtime ->
+  base_path:string -> keeper_name:string -> session_root:string ->
+  Keeper_chat_operation_store.restart_native_call ->
+  (Agent_core.Agent.execution_terminal_disposition option, string) result
+(** Read the supplied exact call's canonical terminal using the application's
+    runtime in Eio context. Never looks up an Owner or mutates either journal.
+    The binding digest comes from the observed operation, not from the call
+    itself. Store settlement separately revalidates the complete observation.
+    None means no journal terminal; read failures remain Error. *)
+
+val complete_restart_settlements :
+  runtime:Agent_core.Agent.execution_runtime -> base_path:string ->
+  (int, Keeper_owner_registry.install_error) result
+(** Bind the canonical reader to the installed Owner inventory. Production
+    bootstrap and standalone compositions call this after their application
+    runtime is ready and before Keeper execution starts. The BasePath pool
+    retains that reader for later Owner creation under the same application
+    switch; a missing metadata snapshot does not skip journal settlement. *)
+
 val reconcile_after_dispatch : binding -> (unit -> 'a) -> 'a
 (** Run the native dispatch. When it ends, by return or by exception, and the
     Owner call is still Active, copy the Core journal's terminal disposition,
@@ -113,3 +133,17 @@ val binding_effect_observation : binding:binding -> Keeper_provider_attempt_effe
 type request_boundary
 val capture_request_boundary : binding -> (request_boundary, string) result
 val request_evidence : binding -> boundary:request_boundary -> runtime_id:string -> Request_observation.evidence
+
+val unreported_request_evidence :
+  binding:binding option ->
+  dispatch:Keeper_attempt_dispatch.t ->
+  checkpoint_owner:Runtime_execution.checkpoint_owner option ->
+  Request_observation.evidence
+(** Evidence for an attempt that reported none. A refused attempt is
+    [Not_dispatched]. An official client sends its provider requests itself
+    and no MASC journal holds them, so its attempt is [No_durable_scope] with
+    or without a [binding]. An Agent Core attempt under a [binding] reports
+    {!request_evidence}; one that did not is [Read_failed], and without a
+    [binding] it is [No_durable_scope]. [checkpoint_owner] is [None] for a
+    candidate that never resolved to a runtime. The walk refuses such a
+    candidate before dispatch; a dispatched one takes the Agent Core rows. *)

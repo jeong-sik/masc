@@ -42,12 +42,6 @@ val generate_node_id : unit -> string
     call. *)
 val default_config : unit -> config
 
-(** {1 Safety utilities} *)
-
-(** Clamp [ttl_seconds] to [1 .. Masc_time_constants.day_int]. Non-positive
-    inputs collapse to [1]; values above 24h collapse to [day_int]. *)
-val validate_ttl : int -> int
-
 (** {1 In-Memory Pub/Sub}
 
     Shared by the Memory and FileSystem backends. *)

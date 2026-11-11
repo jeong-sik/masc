@@ -698,7 +698,9 @@ let render_lanes_overview (state : state) =
   let scroll = Masc_tui_scroll.normalize ~count:layout.sc_count ~height state.lanes_scroll in
   let scroll = match selected_position with
     | None -> scroll
-    | Some cursor -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll in
+    | Some cursor ->
+        Masc_tui_scroll.ensure_visible_with_lead ~cursor
+          ~lead:(lane_inventory_lead state) ~height scroll in
   let standing row = match state.lane_inventory with
     | Some snapshot -> Masc_tui_lane_inventory.row_standing_in snapshot row
     | None -> Masc_tui_lane_inventory.row_standing row in
@@ -2062,27 +2064,11 @@ let render_clients (state : state) =
     | Some snapshot -> snapshot.Masc.Tui_decode.cls_clients
   in
   let shown = List.length clients in
-  (* One reading of the clock for the frame: the header and every row's span
-     are distances from the same instant, and two readings would put them a
-     render apart. *)
-  let now_s = Unix.gettimeofday () in
-  let now = Unix.localtime now_s in
   (* Every row's span is a distance from the same read of the roster. *)
   let read_at = clients_read_at state in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let header =
-    let title = screen_title " MASC Features & plugins / Clients" in
-    match state.clients_surface with
-    | None ->
-        Printf.sprintf "%s  %s  %s  %s"
-          title (title_missing_reading ~error:state.clients_surface_error) timestamp
-          (connection_badge state)
-    | Some _ ->
-        runtime_substrate_heading state ~cols ~title ~current:`Clients
-          ~after:[ "  " ^ timestamp ]
+    feature_child_heading state ~cols
+      ~title:(ui_text state ~ko:"클라이언트" ~en:"Clients")
   in
   box_top buf cols;
   box_line buf cols header;
@@ -2203,13 +2189,7 @@ let render_clients (state : state) =
           let line =
             "  " ^ Masc_tui_table.row (cells ~status ~name
               ~agent_type:(Terminal_text.single_line row.cr_agent_type) ~keeper ~task
-              (* How long ago, not when. The cell drew the clock alone on
-                 the reading that the header's clock gives it a distance,
-                 which holds only while the two are the same day: a dashboard
-                 session last seen on 2026-09-21 drew "11:49:28" under a
-                 header reading 09:31:39 on 2026-09-23, and the distance a
-                 reader could take from that pointed two hours ahead. A span
-                 carries its own day. *)
+              (* Age is relative to the roster observation, not render time. *)
               ~last_seen:(client_last_seen_text ~read_at row))
           in
           (* Inactive rows stay in the roster -- "who left" is part of the

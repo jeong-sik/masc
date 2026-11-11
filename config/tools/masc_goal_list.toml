@@ -1,6 +1,10 @@
 name = "masc_goal_list"
 description = """
-List shared planning goals, optionally filtered by explicit lifecycle phase."""
+List shared planning goals, optionally filtered by explicit lifecycle phase. \
+A row carries id, criterion_revision, title, priority, phase, created_at and \
+updated_at. A whole row adds the other Goal fields (metric, target_value, \
+due_date, review note) and the verification, criterion_review and measurement \
+joins: detailed=true lists whole rows, and goal_id reads one."""
 additional_properties = false
 
 # The enum mirrors Goal_phase.all (issue #8392: hand-rolled enums drop
@@ -14,3 +18,13 @@ name = "phase"
 type = "string"
 enum = ["executing", "verifying", "awaiting_confirmation", "completed", "dropped", "paused", "blocked"]
 description = "Optional explicit Goal lifecycle phase filter"
+
+[[params]]
+name = "goal_id"
+type = "string"
+description = "Read this one Goal's whole row. An unknown id answers not found, and phase cannot be combined with it."
+
+[[params]]
+name = "detailed"
+type = "boolean"
+description = "true lists every Goal's whole row instead of the short row. A goal_id read is always whole."

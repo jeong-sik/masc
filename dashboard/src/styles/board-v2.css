@@ -340,6 +340,7 @@
 
 .v2-board-surface .bd-post-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
   margin-top: 10px;
@@ -826,10 +827,6 @@
 }
 
 @media (max-width: 900px) {
-  .v2-board-surface .bd-post-foot {
-    flex-wrap: wrap;
-  }
-
   .v2-board-surface .bd-post-foot > * {
     min-width: 0;
   }

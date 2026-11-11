@@ -798,11 +798,11 @@ let log_board_error ~op ~ids (e : Board_types.board_error) =
 let log_signal_skip ~op ~read ~id detail =
   Log.BoardLog.warn "board %s skipped: %s failed for %s: %s" op read id detail
 
-let add_comment_with_unresolved ~post_id ~author ~content ?parent_id
+let add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
   let store = backend () in
       (match
-         Board.add_comment_with_audience store ~lookup:(recipient_lookup ())
+         Board.add_comment_with_audience store ~reader ~lookup:(recipient_lookup ())
            ~post_id ~author ~content ?parent_id ~ttl_hours ()
        with
       | Ok creation ->
@@ -833,8 +833,8 @@ let add_comment_with_unresolved ~post_id ~author ~content ?parent_id
           Ok (comment, creation.unresolved)
       | Error _ as err -> err)
 
-let add_comment ~post_id ~author ~content ?parent_id ?ttl_hours () =
-  add_comment_with_unresolved ~post_id ~author ~content ?parent_id ?ttl_hours ()
+let add_comment ~reader ~post_id ~author ~content ?parent_id ?ttl_hours () =
+  add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id ?ttl_hours ()
   |> Result.map fst
 
 let current_vote_for_post ~reader ~voter ~post_id =
@@ -861,10 +861,10 @@ let emit_vote_board_signal ~target ~target_author ~voter ~direction
     ; audience = Board.audience_for_vote
     }
 
-let vote ~voter ~post_id ~direction =
+let vote ~reader ~voter ~post_id ~direction =
   let result =
     let store = backend () in
-        (match Board.vote store ~voter ~post_id ~direction with
+        (match Board.vote store ~reader ~voter ~post_id ~direction with
          | Ok _score as ok ->
              (match Board.read_post store ~post_id with
               | Ok post ->
@@ -897,10 +897,10 @@ let current_vote_for_comment ~reader ~voter ~comment_id =
     | Error _ -> Error (Board.Comment_not_found comment_id)
     | Ok _ -> Board.current_vote_for_comment store ~voter ~comment_id
 
-let vote_comment ~voter ~comment_id ~direction =
+let vote_comment ~reader ~voter ~comment_id ~direction =
   let result =
     let store = backend () in
-        (match Board.vote_comment store ~voter ~comment_id ~direction with
+        (match Board.vote_comment store ~reader ~voter ~comment_id ~direction with
          | Ok _score as ok ->
              (match Board.get_comment store ~comment_id with
               | Error e ->
@@ -963,8 +963,8 @@ let require_readable_target ~reader ~target_type ~target_id =
 
 let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
   match
-    post_for_reaction_target store ~target_type:toggled.target_type
-      ~target_id:toggled.target_id
+    Board.read_post store ~post_id:(Board.Post_id.to_string toggled.post_id)
+    |> Result.map_error Board.board_error_of_read_error
   with
   | Ok post ->
       emit_board_signal
@@ -1001,10 +1001,10 @@ type reaction_write =
 let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
   match readable_reaction_target ~reader ~target_type ~target_id with
   | Error _ as error -> error
-  | Ok parent ->
+  | Ok _ ->
   let result =
     let store = backend () in
-        (match Board.toggle_reaction store ~target_type ~target_id ~user_id ~emoji with
+        (match Board.toggle_reaction store ~reader ~target_type ~target_id ~user_id ~emoji with
          | Ok toggled as ok ->
              emit_reaction_board_signal store toggled;
              ok
@@ -1013,14 +1013,14 @@ let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
   (match result with
    | Ok toggled ->
        let store = backend () in
-       let visibility = match post_for_reaction_target store ~target_type ~target_id with
+       let visibility = match Board.read_post store ~post_id:(Board.Post_id.to_string toggled.post_id) with
          | Ok post -> Some post.visibility
          | Error _ -> None in
        emit_board_sse_event ~visibility
          (Reaction_changed
             {
-              target_type;
-              target_id;
+              target_type = toggled.target_type;
+              target_id = toggled.target_id;
               user_id = toggled.user_id;
               emoji = toggled.emoji;
               reacted = toggled.reacted;
@@ -1030,7 +1030,7 @@ let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
          ~ids:(Printf.sprintf "target=%s:%s user=%s emoji=%s"
            (Board.reaction_target_type_to_string target_type)
            target_id user_id emoji) e);
-  Result.map (fun reaction -> { post_id = parent.Board.id; reaction }) result
+  Result.map (fun (reaction : Board.reaction_toggle_result) -> { post_id = reaction.post_id; reaction }) result
 
 let list_reactions ~reader ~target_type ~target_id ?user_id () =
   match require_readable_target ~reader ~target_type ~target_id with
@@ -1038,8 +1038,18 @@ let list_reactions ~reader ~target_type ~target_id ?user_id () =
   | Ok () -> let store = backend () in Board.list_reactions store ~target_type ~target_id ?user_id ()
 
 let list_reactions_batch ~reader ~targets ?user_id () =
-  let targets = List.filter (fun (target_type, target_id) ->
-    Result.is_ok (require_readable_target ~reader ~target_type ~target_id)) targets in
+  let rec visible acc = function
+    | [] -> Ok (List.rev acc)
+    | ((target_type, target_id) as target) :: rest ->
+      (match require_readable_target ~reader ~target_type ~target_id with
+       | Ok () -> visible (target :: acc) rest
+       | Error (Board.Invalid_id _ | Board.Post_not_found _ | Board.Comment_not_found _
+                | Board.Unauthorized _) -> visible acc rest
+       | Error ((Board.Io_error _ | Board.Recipient_lookup_failed _ | Board.Validation_error _
+                 | Board.Already_voted _ | Board.Already_exists _) as error) -> Error error)
+  in
+  let open Result.Syntax in
+  let* targets = visible [] targets in
   let store = backend () in
   Board.list_reactions_batch store ~targets ?user_id ()
 
@@ -1110,9 +1120,18 @@ let reopen ~post_id =
   let store = backend () in
     write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_reopened (fun post_id -> Board.reopen store ~post_id)
 
-let delete_post ~post_id =
+let delete_post ~authorization ~post_id =
   let store = backend () in
-    write_post ~visibility:(visibility_of_post store ~post_id) ~post_id Post_deleted (fun post_id -> Board.delete_post store ~post_id)
+  let open Result.Syntax in
+  let* pid = Board.Post_id.of_string post_id in
+  let post_id = Board.Post_id.to_string pid in
+  let visibility = visibility_of_post store ~post_id in
+  match Board.delete_post store ~authorization ~post_id with
+  | Ok ((Board.Durable_deletion | Board.Deletion_persistence_pending _) as outcome) ->
+    emit_board_sse_event ~visibility (Post_changed { post_id; change = Post_deleted });
+    Ok outcome
+  | Ok (Board.Deletion_decision_pending _) as pending -> pending
+  | Error _ as refused -> refused
 
 let search ~reader ~query ~limit =
   let store = backend () in
@@ -1225,8 +1244,14 @@ let list_sub_boards ~reader () =
     List.map (fun (board : Board.sub_board) ->
       { board with post_count = (match List.assoc_opt board.slug counts with None -> 0 | Some count -> count) }) boards)
 
-let delete_sub_board ~sub_board_id =
-  let store = backend () in Board.delete_sub_board store ~sub_board_id
+let delete_sub_board ~authorization ~sub_board_id =
+  let store = backend () in
+  match Board.delete_sub_board store ~authorization ~sub_board_id with
+  | Ok ((Board.Durable_deletion | Board.Deletion_persistence_pending _) as outcome) ->
+    emit_board_sse_event ~visibility:None Board_changed;
+    Ok outcome
+  | Ok (Board.Deletion_decision_pending _) as pending -> pending
+  | Error _ as refused -> refused
 
 let update_sub_board ~reader ~sub_board_id ?name ?description ?members ?access () =
   let store = backend () in Board.update_sub_board store ~sub_board_id ?name ?description ?members ?access ()

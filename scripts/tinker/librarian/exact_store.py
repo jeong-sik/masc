@@ -2,9 +2,15 @@
 """Read answered keeper-librarian admission records from the exact-request store.
 
 The store is <base>/.masc/lane-addons/exact-requests/<scope>/<digest>.json and
-belongs to the running server. This module only reads it. A record holds the
-request MASC sent (one user message and the output JSON Schema) and, once a
-slot answered, the accepted answer in `final.output`.
+belongs to the running server. A record holds the request MASC sent (one user
+message and the output JSON Schema) and, once a slot answered, the accepted
+answer in `final.output`.
+
+The server moves an admission's originals out of its store and removes their
+text once every candidate is committed and acknowledged (#50732). `snapshot`
+therefore copies the answered records, byte for byte, into a store of the same
+shape under another base, and E-real runs read that copy. This module never
+writes the server's store.
 
 The E-real manifest names records by digest and pins each file's bytes with
 sha256. It holds no request or answer text, so it can be committed.
@@ -71,12 +77,15 @@ def read_json(raw: bytes) -> W.Json | None:
 
 
 def read_record(path: Path) -> AnsweredAdmission | None:
-    """The record when it is an answered admission of keeper-librarian, else None.
-    A record that cannot be read stops the run."""
-    raw = path.read_bytes()
+    return record_of(path.read_bytes(), path.name)
+
+
+def record_of(raw: bytes, name: str) -> AnsweredAdmission | None:
+    """The record file `name` holding `raw` when it is an answered admission of keeper-librarian,
+    else None. A record that cannot be read stops the run."""
     rec = read_json(raw)
     if rec is None:
-        raise SystemExit(f"{path.name}: not a JSON record")
+        raise SystemExit(f"{name}: not a JSON record")
     if not isinstance(rec, W.JsonObject) or W.member(rec, "declaration_id") != DECLARATION:
         return None
     request, final = W.member(rec, "request"), W.member(rec, "final")
@@ -91,19 +100,40 @@ def read_record(path: Path) -> AnsweredAdmission | None:
     # Every admission request so far is one user message without a system field.
     # Another shape would reach the wire differently, so it stops the run.
     if not isinstance(W.member(request, "system"), W.Absent) or not isinstance(messages, tuple) or len(messages) != 1:
-        raise SystemExit(f"{path.name}: admission request is not one user message")
+        raise SystemExit(f"{name}: admission request is not one user message")
     message = messages[0]
     if not isinstance(message, W.JsonObject):
-        raise SystemExit(f"{path.name}: admission request is not one user message")
+        raise SystemExit(f"{name}: admission request is not one user message")
     text = W.member(message, "text")
     if W.member(message, "role") != "user" or not isinstance(text, str):
-        raise SystemExit(f"{path.name}: admission request is not one user message")
+        raise SystemExit(f"{name}: admission request is not one user message")
     return AnsweredAdmission(digest, hashlib.sha256(raw).hexdigest(), text, schema, answer, slot)
 
 
 def answered_admissions(base: Path) -> list[AnsweredAdmission]:
     found = (read_record(p) for p in sorted(store_dir(base).glob("*/*.json")))
     return sorted((r for r in found if r is not None), key=lambda r: r.digest)
+
+
+def snapshot(live: Path, base: Path) -> list[AnsweredAdmission]:
+    """Copy each answered admission record of `live`'s store into `base`'s store, the bytes it was
+    read with under the same scope and name, and return the copies as `answered_admissions(base)`
+    reads them. Other records are not copied. `base` is readable by its owner alone: the copies
+    hold Keeper memory. SystemExit when `base`'s store already holds a record, since a manifest
+    pins the records of one snapshot."""
+    target = store_dir(base)
+    if any(target.glob("*/*.json")):
+        raise SystemExit(f"{target} already holds records")
+    base.mkdir(parents=True, exist_ok=True)
+    base.chmod(0o700)
+    for path in sorted(store_dir(live).glob("*/*.json")):
+        raw = path.read_bytes()
+        if record_of(raw, path.name) is None:
+            continue
+        copy = target / path.parent.name / path.name
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_bytes(raw)
+    return answered_admissions(base)
 
 
 def manifest_of(records: list[AnsweredAdmission], created_at: str) -> JsonDict:

@@ -5,6 +5,11 @@ open Keeper_chat_store_line_decode
 open Keeper_chat_store_history_window
 open Keeper_chat_store_transcript_rows
 
+let purge_transcript path ~remove =
+  Keeper_chat_store_transcript_index.purge_indexed_transcript path ~remove:(fun path ->
+    Fun.protect ~finally:(fun () -> forget_transcript path) (fun () -> remove path))
+;;
+
 let load_transcript_fully ~path ~redaction =
   let before = transcript_identity path in
   match Fs_compat.read_private_jsonl_rows_locked_result path with
@@ -80,7 +85,11 @@ let load_all ~base_dir ~keeper_name : chat_message list =
                parse_transcript_rows ~path ~redaction bytes)
          in
          let messages_rev = List.rev_append fresh cache.messages_rev in
-         remember_transcript path { cache with parsed_end = end_offset; messages_rev };
+         (* The read and the parse above can suspend this fiber, and a purge of
+            the transcript can run meanwhile. These rows are then those of a
+            file that is gone, so they are registered only while the table
+            still holds the cache this load went on from. *)
+         advance_transcript path ~from:cache { cache with parsed_end = end_offset; messages_rev };
          List.rev messages_rev
        | Private_file_failed _ | Private_file_failed_with_cleanup_failure _ ->
          load_transcript_fully ~path ~redaction)

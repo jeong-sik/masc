@@ -33,7 +33,7 @@ let parse_or_fail content =
 
 let agent_core_provider_config (runtime : Runtime_instance.t) =
   match runtime.execution with
-  | Runtime_execution.Agent_core provider_config -> provider_config
+  | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
   | Runtime_execution.Antigravity_cli _
@@ -894,7 +894,10 @@ let with_config_runtimes ?(environment = []) ~label path read =
    this config disables has no slot here -- the same answer the server
    gives. *)
 let declared_targets_of_config_path ?environment ~label path =
-  with_config_runtimes ?environment ~label path Runtime.exact_output_targets
+  with_config_runtimes ?environment ~label path (fun runtimes ->
+    match Runtime.exact_output_targets runtimes with
+    | Ok targets -> targets
+    | Error refusal -> failf "%s: %s" label (Runtime_account_access.refusal_to_string refusal))
 ;;
 
 let snapshot_of_config ?environment ~label path =
@@ -1923,7 +1926,8 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
            | Runtime_execution.Antigravity_cli _
            | Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _ )
          , _ ) -> ()
-       | Runtime_execution.Agent_core config, Some declared ->
+       | Runtime_execution.Agent_core sealed, Some declared ->
+         let config = Masc_test_deps.api_config sealed in
          let provider_label =
            match config.Llm_provider.Provider_config.provider_id with
            | Some label -> label
@@ -3022,9 +3026,10 @@ let test_repo_glm_coding_runtimes_carry_the_priority_run_limit () =
       List.filter_map
         (fun (runtime : Runtime_instance.t) ->
            match runtime.execution with
-           | Runtime_execution.Agent_core config
-             when config.Llm_provider.Provider_config.provider_id = Some "glm-coding" ->
-             Some (runtime.id, config)
+           | Runtime_execution.Agent_core sealed
+             when (Runtime_account_access.api_declaration sealed).Llm_provider.Provider_config.provider_id
+                  = Some "glm-coding" ->
+             Some (runtime.id, Masc_test_deps.api_config sealed)
            | Runtime_execution.Agent_core _
            | Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
@@ -7341,7 +7346,8 @@ let test_context_declaration_precedence_and_http_agreement () =
         (Runtime_instance.resolve_max_context_of_runtime runtime
          |> Option.map (fun (tokens, source) -> tokens, Runtime_instance.max_context_source_to_string source));
       match runtime.execution with
-      | Runtime_execution.Agent_core config ->
+      | Runtime_execution.Agent_core sealed ->
+        let config = Masc_test_deps.api_config sealed in
         check (option int) "HTTP admission uses the same window" (Some expected) config.max_context;
         check (option int) "custom capability uses selected window, not model default" (Some expected)
           (Option.bind (Llm_provider.Provider_config.capabilities_for_config_model config)

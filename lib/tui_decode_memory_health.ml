@@ -5,7 +5,7 @@ open Tui_decode_fields
 open Result.Syntax
 
 (* The fleet response and the one-Keeper row carry the same schema. *)
-let current_health_schema = "keeper.memory_os.current_health.v13"
+let current_health_schema = "keeper.memory_os.current_health.v14"
 
 type memory_alert_code =
   | Snapshot_read_error
@@ -146,6 +146,8 @@ type memory_keeper_health = {
   mkh_removed : int;
   mkh_snapshot_present : bool;
   mkh_age_bins : Keeper_memory_age_bins.t option;
+  mkh_facts_by_hour : Keeper_memory_journal_outcome.facts_at_hour list;
+  mkh_changes_since_start : Keeper_memory_commit_change.by_pass;
   mkh_context_cycle : memory_context_cycle;
   mkh_librarian : memory_librarian_health;
   mkh_librarian_failures : int;
@@ -531,6 +533,8 @@ let decode_memory_keeper_health json =
       ; "removed"
       ; "snapshot_present"
       ; "age_bins"
+      ; "facts_by_hour"
+      ; "changes_since_start"
       ; "context_cycle"
       ; "librarian"
       ; "librarian_failures"
@@ -590,6 +594,12 @@ let decode_memory_keeper_health json =
         else Error "age_bins sum disagrees with total facts"
       in
       Ok (Some bins)
+  in
+  let* mkh_facts_by_hour =
+    Keeper_memory_journal_outcome.facts_by_hour_of_json (member "facts_by_hour" json)
+  in
+  let* mkh_changes_since_start =
+    Keeper_memory_commit_change.by_pass_of_json (member "changes_since_start" json)
   in
   let* mkh_context_cycle = decode_memory_context_cycle json in
   let* mkh_librarian = decode_memory_librarian_health json in
@@ -693,6 +703,8 @@ let decode_memory_keeper_health json =
     ; mkh_removed
     ; mkh_snapshot_present
     ; mkh_age_bins
+    ; mkh_facts_by_hour
+    ; mkh_changes_since_start
     ; mkh_context_cycle
     ; mkh_librarian
     ; mkh_librarian_failures

@@ -22,11 +22,6 @@ let test_roots_are_the_sandbox_root () =
   let expected = [ KAP.sandbox_path_of_meta ~meta ] in
   check (list string) "sandbox roots" expected (KAP.sandbox_roots ~meta)
 
-let test_playground_path_sanitizes_name () =
-  let path = KAP.playground_path_of_keeper "my keeper/../../etc" in
-  check string "special chars sanitized"
-    ".masc/playground/my_keeper_.._.._etc/" path
-
 let () =
   run "Keeper_sandbox_roots"
     [
@@ -34,7 +29,5 @@ let () =
         [
           test_case "roots are the sandbox root" `Quick
             test_roots_are_the_sandbox_root;
-          test_case "playground path sanitizes name" `Quick
-            test_playground_path_sanitizes_name;
         ] );
     ]

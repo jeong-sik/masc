@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "source_lower": "06489cbc5c038a98f87548a4314bfa56d71c4886",
+  "source_upper": "2e3ce7e7f1fd0fa68da89f91ae8b9beaaa0ffc49",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 2924,
+      "sha256": "261fda4062da65840c45c3a7c8f4b90501cc795f1e357befec72cc9da0444ed0"
+    },
+    {
+      "path": "validation.json",
+      "bytes": 8398,
+      "sha256": "b391d563f653fca25a03f57ca97c6e7f93e2b05a3ed1e263ddb0d9ef69301e3d"
+    },
+    {
+      "path": "baseline-failure.txt",
+      "bytes": 1774,
+      "sha256": "5f79dc9c25aa280725219d70a958fab52cb88dd8ffaacdc59d01c8a494bf0bfa"
+    }
+  ]
+}

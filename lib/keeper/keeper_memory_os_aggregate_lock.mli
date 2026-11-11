@@ -8,6 +8,8 @@
     with a strictly shorter invalidation rendering, so it never consumes a
     writer's reserved bytes. *)
 
+val suffix : string
+
 val with_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> keepers_dir:string

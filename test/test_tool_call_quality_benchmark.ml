@@ -231,7 +231,7 @@ let test_forbidden_selector_matches_descriptor_evidence () =
       ()
   in
   let run = selector_run [ selector_tool_call ~route_evidence "masc_agent_card" ] in
-  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  match Tool_call_quality_benchmark_scoring.score_run ~cases:[ case ] run with
   | Some score ->
       check bool "selector degrades pass" false score.passed;
       check (float 0.0001) "tool selection failed" 0.0 score.tool_selection;
@@ -253,7 +253,7 @@ let test_forbidden_selector_matches_eval_tag_evidence () =
       ()
   in
   let run = selector_run [ selector_tool_call ~route_evidence "renamed_agent_card" ] in
-  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  match Tool_call_quality_benchmark_scoring.score_run ~cases:[ case ] run with
   | Some score ->
       check bool "eval tag degrades pass" false score.passed;
       check (float 0.0001) "tool selection failed" 0.0 score.tool_selection
@@ -273,7 +273,7 @@ let test_required_selector_matches_eval_tag_evidence () =
       ()
   in
   let run = selector_run [ selector_tool_call ~route_evidence "renamed_surface_read" ] in
-  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  match Tool_call_quality_benchmark_scoring.score_run ~cases:[ case ] run with
   | Some score ->
       check bool "required eval tag permits pass" true score.passed;
       check (float 0.0001) "tool selection passed" 1.0 score.tool_selection
@@ -289,7 +289,7 @@ let test_missing_required_selector_degrades_selection () =
   let run =
     selector_run [ selector_tool_call ~route_evidence "keeper_tools_list" ]
   in
-  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  match Tool_call_quality_benchmark_scoring.score_run ~cases:[ case ] run with
   | Some score ->
       check bool "missing required selector fails pass" false score.passed;
       check (float 0.0001) "tool selection failed" 0.0 score.tool_selection
@@ -321,7 +321,7 @@ let test_arg_check_matches_descriptor_evidence () =
           "renamed_surface_read";
       ]
   in
-  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  match Tool_call_quality_benchmark_scoring.score_run ~cases:[ case ] run with
   | Some score ->
       check bool "descriptor arg check permits pass" true score.passed;
       check (float 0.0001) "arg validity passed" 1.0 score.arg_validity
@@ -352,7 +352,7 @@ let test_missing_arg_selector_degrades_arg_validity () =
           "keeper_tools_list";
       ]
   in
-  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  match Tool_call_quality_benchmark_scoring.score_run ~cases:[ case ] run with
   | Some score ->
       check bool "missing selector fails pass" false score.passed;
       check (float 0.0001) "arg validity failed" 0.0 score.arg_validity
@@ -460,7 +460,7 @@ let test_unavailable_route_evidence_excludes_run_from_scoring () =
       ()
   in
   let run = selector_run [ selector_tool_call "keeper_tools_list" ] in
-  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  match Tool_call_quality_benchmark_scoring.score_run ~cases:[ case ] run with
   | Some _ -> fail "score_run should return None when route evidence is unavailable"
   | None -> ()
 

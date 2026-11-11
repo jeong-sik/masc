@@ -156,61 +156,29 @@ let register_autonomous_inputs index provenance =
   | Fusion_run _ | Workspace_message _ | Connector_message _ | Approval_lifecycle _ -> ()
 ;;
 
-let provenance_index_of_existing existing =
-  let index =
-    { valid = Provenance_index.create 16
-    ; poisoned_delivery_keys = Poisoned_delivery_keys.create 16
-    ; tool_ordinals = Tool_ordinal_index.create 16
-    ; executions = Execution_index.create 16
-    ; autonomous_inputs = Poisoned_delivery_keys.create 16
-    }
-  in
-  let add_provenance (provenance, row_id) =
-    register_autonomous_inputs index provenance;
-    (match Provenance_index.find_opt index.valid provenance with
-     | None ->
-       Provenance_index.add index.valid provenance (Unique_provenance row_id)
-     | Some (Unique_provenance _ | Duplicate_provenance) ->
-       Provenance_index.replace index.valid provenance Duplicate_provenance;
-       poison_delivery_key index provenance.delivery_key
-         "duplicate Keeper chat delivery provenance rows");
-    let ordinal =
-      match provenance.Keeper_chat_delivery_identity.transcript_slot with
-      | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
-      | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
-      | Keeper_chat_delivery_identity.Accepted_user
-      | Keeper_chat_delivery_identity.Terminal_result
-      | Keeper_chat_delivery_identity.Settled_failure
-      | Keeper_chat_delivery_identity.Approval_request
-      | Keeper_chat_delivery_identity.Approval_resolution
-      | Keeper_chat_delivery_identity.Approval_replay
-      | Keeper_chat_delivery_identity.Approval_replay_correction
-      | Keeper_chat_delivery_identity.Approval_continuation
-      | Keeper_chat_delivery_identity.Autonomous_input_binding _ -> None
-    in
-    Option.iter
-      (fun ordinal ->
-         let key = provenance.delivery_key, ordinal in
-         match Tool_ordinal_index.find_opt index.tool_ordinals key with
-         | None ->
-           Tool_ordinal_index.add
-             index.tool_ordinals
-             key
-             (Unique_tool_ordinal (provenance.transcript_slot, row_id))
-         | Some (Unique_tool_ordinal _ | Duplicate_tool_ordinal) ->
-           Tool_ordinal_index.replace
-             index.tool_ordinals
-             key
-             Duplicate_tool_ordinal;
-           poison_delivery_key index provenance.delivery_key
-             "duplicate Keeper chat tool ordinal rows")
-      ordinal;
-    match provenance.transcript_slot with
-    | Keeper_chat_delivery_identity.Tool_call { execution_id; ordinal } ->
-      register_execution_identity index ~delivery_key:provenance.delivery_key
-        ~ordinal execution_id
+let empty_provenance_index () =
+  { valid = Provenance_index.create 16
+  ; poisoned_delivery_keys = Poisoned_delivery_keys.create 16
+  ; tool_ordinals = Tool_ordinal_index.create 16
+  ; executions = Execution_index.create 16
+  ; autonomous_inputs = Poisoned_delivery_keys.create 16
+  }
+;;
+
+let add_provenance index (provenance, row_id) =
+  register_autonomous_inputs index provenance;
+  (match Provenance_index.find_opt index.valid provenance with
+   | None ->
+     Provenance_index.add index.valid provenance (Unique_provenance row_id)
+   | Some (Unique_provenance _ | Duplicate_provenance) ->
+     Provenance_index.replace index.valid provenance Duplicate_provenance;
+     poison_delivery_key index provenance.delivery_key
+       "duplicate Keeper chat delivery provenance rows");
+  let ordinal =
+    match provenance.Keeper_chat_delivery_identity.transcript_slot with
+    | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
+    | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
     | Keeper_chat_delivery_identity.Accepted_user
-    | Keeper_chat_delivery_identity.Tool_delivery _
     | Keeper_chat_delivery_identity.Terminal_result
     | Keeper_chat_delivery_identity.Settled_failure
     | Keeper_chat_delivery_identity.Approval_request
@@ -218,36 +186,81 @@ let provenance_index_of_existing existing =
     | Keeper_chat_delivery_identity.Approval_replay
     | Keeper_chat_delivery_identity.Approval_replay_correction
     | Keeper_chat_delivery_identity.Approval_continuation
-      | Keeper_chat_delivery_identity.Autonomous_input_binding _ -> ()
+    | Keeper_chat_delivery_identity.Autonomous_input_binding _ -> None
   in
-  existing
-  |> String.split_on_char '\n'
-  |> List.mapi (fun offset line -> offset + 1, line)
-  |> List.fold_left
-       (fun result (line_number, line) ->
-          let open Result.Syntax in
-          let* () = result in
-          if String.equal line ""
-          then Ok ()
-          else
-            let* provenance = provenance_of_line ~line_number line in
-            (match provenance with
-             | No_provenance -> ()
-             | Valid_provenance (provenance, row_id) ->
-               add_provenance (provenance, row_id)
-             | Poisoned_delivery_key (delivery_key, detail) ->
-               Poisoned_delivery_keys.replace
-                 index.poisoned_delivery_keys
-                 delivery_key
-                 detail);
-            Ok ())
-       (Ok ())
-  |> Result.map (fun () ->
-       Poisoned_delivery_keys.iter (fun key -> function
-         | Tools_without_input_binding ->
-           poison_delivery_key index key "autonomous tool rows have no input binding"
-         | Bound_inputs _ | Conflicting_input_bindings -> ()) index.autonomous_inputs;
-       index)
+  Option.iter
+    (fun ordinal ->
+       let key = provenance.delivery_key, ordinal in
+       match Tool_ordinal_index.find_opt index.tool_ordinals key with
+       | None ->
+         Tool_ordinal_index.add
+           index.tool_ordinals
+           key
+           (Unique_tool_ordinal (provenance.transcript_slot, row_id))
+       | Some (Unique_tool_ordinal _ | Duplicate_tool_ordinal) ->
+         Tool_ordinal_index.replace
+           index.tool_ordinals
+           key
+           Duplicate_tool_ordinal;
+         poison_delivery_key index provenance.delivery_key
+           "duplicate Keeper chat tool ordinal rows")
+    ordinal;
+  match provenance.transcript_slot with
+  | Keeper_chat_delivery_identity.Tool_call { execution_id; ordinal } ->
+    register_execution_identity index ~delivery_key:provenance.delivery_key
+      ~ordinal execution_id
+  | Keeper_chat_delivery_identity.Accepted_user
+  | Keeper_chat_delivery_identity.Tool_delivery _
+  | Keeper_chat_delivery_identity.Terminal_result
+  | Keeper_chat_delivery_identity.Settled_failure
+  | Keeper_chat_delivery_identity.Approval_request
+  | Keeper_chat_delivery_identity.Approval_resolution
+  | Keeper_chat_delivery_identity.Approval_replay
+  | Keeper_chat_delivery_identity.Approval_replay_correction
+  | Keeper_chat_delivery_identity.Approval_continuation
+  | Keeper_chat_delivery_identity.Autonomous_input_binding _ -> ()
+;;
+
+let add_scanned_provenance index = function
+  | No_provenance -> ()
+  | Valid_provenance (provenance, row_id) -> add_provenance index (provenance, row_id)
+  | Poisoned_delivery_key (delivery_key, detail) ->
+    Poisoned_delivery_keys.replace index.poisoned_delivery_keys delivery_key detail
+;;
+
+type scanned_rows =
+  { scanned : scanned_provenance list
+  ; newlines : int
+  }
+
+(* Nothing is added to an index here: a row that cannot be read leaves every
+   index as it was, and the rows before it are not half in one. *)
+let scan_transcript_rows ~first_line text =
+  let lines = String.split_on_char '\n' text in
+  let rec scan line_number scanned = function
+    | [] -> Ok { scanned = List.rev scanned; newlines = List.length lines - 1 }
+    | "" :: rest -> scan (line_number + 1) scanned rest
+    | line :: rest ->
+      (match provenance_of_line ~line_number line with
+       | Error detail -> Error detail
+       | Ok row -> scan (line_number + 1) (row :: scanned) rest)
+  in
+  scan first_line [] lines
+;;
+
+(* Why every delivery to [delivery_key] is refused, when it is.
+
+   An autonomous turn whose tool rows have no input binding row is refused for
+   that reason while the binding row is absent, and a binding row that a later
+   append adds ends the refusal. So the reason is read from
+   [autonomous_inputs] at each lookup and is not stored in
+   [poisoned_delivery_keys], where it would stay after the binding row
+   arrives. When the key also has a stored reason, this one is the answer. *)
+let quarantine_of index delivery_key =
+  match Poisoned_delivery_keys.find_opt index.autonomous_inputs delivery_key with
+  | Some Tools_without_input_binding -> Some "autonomous tool rows have no input binding"
+  | Some (Bound_inputs _ | Conflicting_input_bindings) | None ->
+    Poisoned_delivery_keys.find_opt index.poisoned_delivery_keys delivery_key
 ;;
 
 let validate_indexed_autonomous_inputs index ~delivery_key inputs =
@@ -255,7 +268,7 @@ let validate_indexed_autonomous_inputs index ~delivery_key inputs =
   let* () = Keeper_chat_delivery_identity.validate_approval_input_bindings inputs in
   match delivery_key with
   | Keeper_chat_delivery_identity.Autonomous_turn _ ->
-    (match Poisoned_delivery_keys.find_opt index.poisoned_delivery_keys delivery_key with
+    (match quarantine_of index delivery_key with
      | Some detail -> Error ("autonomous input binding is quarantined: " ^ detail)
      | None ->
        match Poisoned_delivery_keys.find_opt index.autonomous_inputs delivery_key with
@@ -270,21 +283,18 @@ let validate_indexed_autonomous_inputs index ~delivery_key inputs =
     Error "approval input binding requires an autonomous turn owner"
 ;;
 
-(* The read every append-once delivery runs before it writes. A row this reads
-   as an error refuses every later delivery to the keeper, so the deploy
-   preflight asks the same question of a transcript on disk. *)
+(* The read every append-once delivery runs on the rows it has not read yet. A
+   row this reads as an error refuses every later delivery to the keeper, so
+   the deploy preflight asks the same question of a transcript on disk. *)
 let transcript_provenance_readable existing =
-  provenance_index_of_existing existing |> Result.map (fun (_ : provenance_index) -> ())
+  scan_transcript_rows ~first_line:1 existing
+  |> Result.map (fun (_ : scanned_rows) -> ())
 ;;
 
 let find_indexed_provenance index ~provenance =
   let open Result.Syntax in
   let* () = validate_delivery_slot_owner provenance in
-  match
-    Poisoned_delivery_keys.find_opt
-      index.poisoned_delivery_keys
-      provenance.Keeper_chat_delivery_identity.delivery_key
-  with
+  match quarantine_of index provenance.Keeper_chat_delivery_identity.delivery_key with
   | Some detail ->
     Error
       (Printf.sprintf
@@ -357,10 +367,4 @@ let find_indexed_provenance index ~provenance =
         | Some (Unique_provenance row_id) -> Ok (Some row_id)
         | Some Duplicate_provenance ->
           Error "duplicate Keeper chat delivery provenance rows"))
-;;
-
-let find_provenance existing ~provenance =
-  let open Result.Syntax in
-  let* index = provenance_index_of_existing existing in
-  find_indexed_provenance index ~provenance
 ;;

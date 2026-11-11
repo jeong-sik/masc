@@ -857,35 +857,6 @@ let test_file_paths_report_git_failure () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "a nonrepository must not become an empty catalog")
 
-let test_origin_head_branch_preserves_slash_branch () =
-  with_temp_dir (fun tmp ->
-      let source = Filename.concat tmp "source" in
-      init_local_repo source;
-      (match run_cmd ~cwd:source [ "git"; "branch"; "release/v1" ] with
-       | Ok () -> ()
-       | Error e -> Alcotest.fail ("git branch release/v1 failed: " ^ e));
-      (match
-         run_cmd
-           ~cwd:source
-           [ "git"; "update-ref"; "refs/remotes/origin/release/v1"; "HEAD" ]
-       with
-       | Ok () -> ()
-       | Error e -> Alcotest.fail ("git update-ref origin/release/v1 failed: " ^ e));
-      (match
-         run_cmd
-           ~cwd:source
-           [ "git"
-           ; "symbolic-ref"
-           ; "refs/remotes/origin/HEAD"
-           ; "refs/remotes/origin/release/v1"
-           ]
-       with
-       | Ok () -> ()
-       | Error e -> Alcotest.fail ("git origin HEAD failed: " ^ e));
-      match Repo_git.origin_head_branch ~local_path:source with
-      | Ok branch -> Alcotest.(check string) "origin HEAD branch" "release/v1" branch
-      | Error e -> Alcotest.fail ("origin_head_branch failed: " ^ e))
-
 let () =
   Alcotest.run "Repo_git"
     [
@@ -970,10 +941,5 @@ let () =
 	            test_grep_rows_refuse_what_they_cannot_read;
 	          Alcotest.test_case "reads a real checkout" `Quick
 	            test_grep_at_reads_a_checkout;
-	        ] );
-	      ( "origin_head_branch",
-	        [
-	          Alcotest.test_case "preserves slash branch" `Quick
-	            test_origin_head_branch_preserves_slash_branch;
 	        ] );
 	    ]

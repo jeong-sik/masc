@@ -271,6 +271,8 @@ let validate_inventory ~inventory ~store ~request ~record =
 
 type preparation = Ready of Owner.retained | Unavailable of string
 let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.retained) ~proposal:_ ~fresh_authority =
+  let* ()=io (fun () -> Keeper_librarian_history_resolution_state.check_unfenced
+    ~store ~request ~original) in
   let owner=Request.physical_owner request in
   let keeper_id=Request.keeper_id owner in
   let pending detail=Ok (Publication.Publication_pending detail) in
@@ -403,10 +405,13 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
           let applied=io (fun () ->
             Keeper_librarian_durable_source_lock.with_original ~request (fun () ->
               let* actual=reload ~store ~previous:record request in
+              let* ()=Keeper_librarian_history_resolution_state.check_unfenced
+                ~store ~request ~original:actual in
               let* ()=same (Progress.to_json actual.progress) (Progress.to_json record.Owner.progress) in
               let* proved=receipt_state request in
               let* ()=require (not proved) "Original history Memory effect is already receipt-proved" in
-              Ok (Current.apply_disposition_guarded ~on_committed:(fun disposition -> committed:=Some disposition)
+              Ok (Current.apply_disposition_guarded ~pass:Keeper_memory_commit_pass.Durable
+                ~on_committed:(fun disposition -> committed:=Some disposition)
                 ~expected_basis:(expected_basis request)
                 ~dropped_statements:accepted.selection.dropped
                 ?durable_range_id:(Source.range_id source) ?official_range_id:(Source.official_range_id source)
@@ -510,7 +515,8 @@ let settle_refused ~store ~request ~(record : Owner.retained) ~diagnosis =
       let* ()=same (Progress.to_json actual.progress) (Progress.to_json record.Owner.progress) in
       let* proved=receipt_state request in
       if proved then Ok () else
-      let* _=Current.apply_disposition ?durable_range_id:(Source.range_id source)
+      let* _=Current.apply_disposition ~pass:Keeper_memory_commit_pass.Durable
+        ?durable_range_id:(Source.range_id source)
         ?official_range_id:(Source.official_range_id source) ~absorbed:[] ~revisions:[]
         ~keepers_dir:(Request.keepers_dir owner) ~keeper_id ~now:(Time_compat.now ())
         ~source:{Current.kind=Current.Librarian;trace_id=Ids.Turn_ref.trace_id (Source.input source).turn_ref}

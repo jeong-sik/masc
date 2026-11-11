@@ -11,6 +11,10 @@ let dashboard_request_timeout_s = 30.0
     endpoints for stale-while-revalidate caching. *)
 let standard_cache_ttl_s = 60.0
 
+let workspace_memory_inventory_cache_key ~base_path =
+  "workspace_memory_inventory:" ^ base_path
+;;
+
 (** Deep dashboard surface cache TTL — 2 minutes. Used for mission
     and execution surfaces that involve multi-step compute. *)
 let deep_surface_cache_ttl_s = 120.0
@@ -109,13 +113,6 @@ let partition_cache_key ~partition prefix suffix =
 
 let dashboard_cache_key (config : Workspace.config) prefix suffix =
   partition_cache_key ~partition:(cache_partition_segment config) prefix suffix
-;;
-
-let dashboard_query_cache_segment = function
-  | Some raw ->
-    let value = String.trim raw in
-    if value = "" then "missing" else value
-  | None -> "missing"
 ;;
 
 let dashboard_query_cache_value_json = function

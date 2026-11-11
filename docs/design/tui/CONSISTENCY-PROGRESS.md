@@ -4,6 +4,75 @@ The operator accepted the conversation-first preview in #41685 and asked to
 extend the same treatment consistently. This is the full scope of that work;
 completing one row does not complete the overall request.
 
+## 2026-11-11: Overview action destinations (source only)
+
+Overview receives one structured action observation from the health producer.
+Memory rows name the Keeper and the observed pending outcome using the shared
+Memory vocabulary; an unknown worker result does not establish stale memory or
+a source failure. Enter captures that exact Keeper's existing Memory health
+reading beside the original action. Missing health and read failures stay
+separate from the action's original request and observation time. This path
+does not move the live Memory cursor or start a new poll.
+
+A shutdown-fenced queue with complete, single-Keeper ownership opens the
+existing queue inspection. An incomplete or ambiguous aggregate opens its
+original diagnostics and cannot choose a Keeper. Generic reported reasons also
+open diagnostics. The routes grant no new replay, acknowledgement, cancellation
+or write permission. The captured reader stays fixed across source refreshes.
+
+The decoder admits targets only when the typed items agree with the original
+ordered reasons and required flag. If typed data is absent or malformed, valid
+original diagnostics and the decode cause remain readable with `v`; they grant
+no target. Unknown and observed-empty remain distinct in Home, the footer and
+the terminal title. Selection retains the workspace and complete original item,
+so another request at the same array index cannot replace its Enter target.
+The body projection reserves a destination before optional context, and both
+drawing and Enter consume that projection at small heights.
+
+Changed OCaml sources pass parsing with 5.5.1 and the patch passes
+`git diff --check`. Semantic decoder and request-identity cases were added but
+have not been run. No wording, layout, row-order or PTY assertion test was added.
+Type checking, matching-server native execution, installation and the complete
+six-family, 23-surface audit remain open.
+
+## 2026-11-10: Runtime picker candidates
+
+[#51137](https://github.com/jeong-sik/masc/pull/51137) gives an open Runtime
+picker the surface body. The ordinary probe summary, resolved default route and
+candidate table resume when the picker closes. Its count/filter, candidate page
+and wrapped catalogue/write/read-back diagnostics use the available body rows;
+the frame and page keys share the same page calculation. At the smallest height
+the selected candidate takes the single body row. The title retains the number
+of source notices even when no body row remains for them, and points to the
+existing complete routes/status reading after closing the picker. That reading
+also includes the catalogue observation, so a long first notice cannot hide a
+later failure. Partially displayed body diagnostics carry a leading ellipsis.
+The media editor stays open underneath that reading, preserving its selected
+slot and action result on return. While the reading is open, its keys cannot
+move or edit the hidden media slot.
+The footer names Enter's actual create, append or replace action and respects
+the filter's ownership of printable keys.
+
+The matching-server native baseline at `6157b06b` showed the failure: at 36×20,
+`f`, `j`, `j` moved the default-route selection without displaying any candidate;
+widening the same open picker to 120×36 revealed the changed selection. No Enter
+was submitted. Its footer advertised detail while Enter would replace the route.
+Those retained raw captures establish the baseline, not execution of this repair.
+
+The changed OCaml files parse and the patch passes `git diff --check`.
+No new screen-wording, layout, row-order or PTY assertion test was added; the
+existing footer test only receives the required `picker:None` API argument.
+Candidate execution, installed GUI, the rest of System and the full six-family,
+23-surface audit remain open. This slice does not change lane write admission,
+catalogue ownership or the Lanes editor.
+
+`Minimal manual checks` [run 42824710139](https://github.com/jeong-sik/masc/actions/runs/42824710139)
+ran workflow `main` at `0445441ef9f84d825e8f9ed0e2f93881deade90d` with
+native source `48b71feae7348a3a7e133e9fc291eeb1aef36da0` and concluded
+`failure`: an unsupported sanitizer argument stopped compilation. The source
+now uses the existing LF-preserving `sanitize_terminal_lines` API. That failed
+run does not establish compilation or execution of this later repair.
+
 ## Shared rules
 
 - Lead with the object or content being read. Use one stable content column and
@@ -56,7 +125,7 @@ owns that rule; this table records the remaining scope.
 | Work | Planning, Approvals, Verification, Harness, Board; Goal, Task, request, proof and discussion details | #50671 simplifies the Task list; #50688 wraps the goal and declared success criterion, retaining exceptional proof/binding notices and keeping identifiers in detail. Linked Task details qualify partial or retained observations rather than claiming absence or a complete count. Goal/Task entry, detail and return were observed with native TUI 8ebbe020 against the older server | Matching-server observations; other Work readings, installation and input/confirmation ownership |
 | Keepers | Keepers, Memory, Schedules, Fusion, Changes; all six Keeper modes and detail tabs | Coordinate with existing Keeper Pulse and memory work (#50669, #50643) rather than duplicate it. #50708 aligns typed state/pass search and preserves refused fleet rows and retained observation scope; its b5655270 source was independently reread | Review those changes together in execution; chat, schedule, result and error states |
 | Features and plugins | Lanes, Clients, Connectors, Resources, Tools; plugins, browser, tools, skills and result details | #50677 simplifies feature overview around purpose, standing, errors and existing actions. #50695 repairs the narrow summary priority found in a00f8aab; native TUI 8ebbe020 observations at 150×40 and 80×24 showed current fields before secondary action hints, against the older server | Matching-server observations; the other feature surfaces, input overlays and installation |
-| Workspace | Repositories, Code; checkout, Git changes, files, history, diff and navigation overlays | #50704 leads repository selection with its scoped last Git observation and assigned Keepers, before registered defaults and the path. The normal explanatory question and repeated inner heading are removed; retained/failed reads remain visible. Rendering and cursor paging share the revised row budget. Two local agent source reviews found no P0–P2; their footer-language finding was repaired. These are local review results, not formal GitHub approvals | Candidate execution and navigation/return behavior; Code, history, diff and overlays |
+| Workspace | Repositories, Code; checkout, Git changes, files, history, diff and navigation overlays | #50704 leads repository selection with its scoped last Git observation and assigned Keepers, before registered defaults and the path. The normal explanatory question and repeated inner heading are removed; retained/failed reads remain visible. Rendering and cursor paging share the revised row budget. Two local agent source reviews found no P0–P2; their footer-language finding was repaired. These are local review results, not formal GitHub approvals. #50969 makes Code diff use each returned row instead of replacing its body with the independently read open file, and measures the displayed tab expansion for horizontal navigation. A matching 3a0737e3 native baseline showed a historical 1-to-2 change as 1-to-999, a changed server file as the earlier open contents, and a tabbed removal whose end was unreachable; those observations do not execute the repair | Candidate execution and navigation/return behavior; Code, history, diff and overlays |
 | System | Config, Runtime, Acting, System_logs; all settings tabs, account/model forms and diagnostic details | #50690 puts validation and application before full source identifiers and key lists, retaining failed-refresh notices before previous status facts; two independent source reviews found no P0–P2. Native TUI 8ebbe020 showed application facts before source identifiers at wide and narrow sizes, against the older server | Matching-server observations, other System readings and save/uncertain-result behavior |
 
 For each row, inspect wide and narrow native views, loading/empty/error and
@@ -312,6 +381,106 @@ observations stay private in `artifacts/native-tui-proof-42732829605/`.
 This confirms those observed candidate views only, without proving production
 installation, the new navigation repair, or the remaining child/input states.
 
+## Resources save results (#51105)
+
+The 072796b2 native baseline exclusively created the exact 393-byte fixture
+report, then refused an explicit second save to the same existing path. The
+36x20 success and refusal captures were identical: the footer had no space for
+the result. The refusal also closed the path form, whose footer advertised
+reader keys while printable keys still belonged to the path.
+
+The source now retains each original report/workspace/path and typed save
+outcome. The reader leads with the newest result for that exact report; `i`
+also exposes diagnostics and earlier saves. A failed save retains editable
+input, and a late result cannot close a replacement form or label an edited
+path as saved. Issued writes keep their own frozen destination. Closing input
+does not replay or cancel them, and their original receipt still settles after
+workspace read authority is withdrawn. The form footer reflects its actual
+keys; page keys can read a long result without editing the path.
+
+The canonical filesystem boundary preserves the original publication failure,
+target effect, lane-release value/failure and ordinary boundary exception.
+Existing files remain protected by the same staged exclusive writer, recovery
+registry and 0600 mode. None/unobserved and interrupted writes do not become
+unchanged or successful results. A nonblocking source-review limitation remains:
+plain cancellation after the wrapper observed creation can still be reported
+as unknown when that observation is not carried into the cancellation payload.
+
+Independent core/export and UI/state source reviews found no remaining P0-P2
+in their recorded scopes after three UI findings were repaired. Two subsequent
+compilation repairs were independently reread: enumerate the nested result
+constructors, and declare both direct input/export libraries in the published
+report test stanza. Their earlier failed runs remain in the working evidence.
+
+At source 097b4c2d, `Minimal manual checks` run 42808378032, workflow
+`main` at 8969425ef9ff430f3785998f7a31131011efbcc7 and `resource-reading`,
+completed successfully. Matching macOS server/TUI build commits and hashes,
+four complete unfiltered resource suites (20, 18, 37 and 12 cases), and the
+actual full key-generator output were verified. Its 60,306 bytes, SHA-256
+`e219ef686d1de8d862147b9dde70c11ebe061da618382e7874ce8d1c0ec911c5`,
+were copied unchanged into the guide. Separately, `Test` run 42802898140 on
+`fix/tui-report-save-receipts-20261110@af2391c4` succeeded with exactly
+`test_tui_resource_export,test_fs_compat_capability_write` (4 and 68 cases).
+That earlier-source scoped result was not repeated or called full regression.
+
+The matching 097b4c2d isolated native pair then showed distinct success and
+existing-file refusal at 36x20. Creation preserved all 393 original bytes with
+mode 0600; the existing baseline retained its measured bytes/mode/inode/mtime.
+Refusal kept the editable destination. Edited unsubmitted input, literal q,
+page navigation and retained original results were also observed. The actual
+original diagnostic and both results were readable in the wide expanded view.
+Selected raw captures, provenance and readbacks are preserved in
+`docs/evidence/tui-report-save-results-20261110/`.
+This is not installed GUI, native fault/late-completion coverage, whole-system
+health or completion of the full 23-surface audit; those remain open.
+
+## Feature child identity and resource body (#51023)
+
+The matching be3302c2 server/TUI baseline at 120x36 and 36x20 showed a
+Resources JSON body of `[]` entirely below fixed origin/About/URI/type metadata
+on the narrow first page. Clients lost its child name to the family prefix and
+Runtime menu, while Channels and Tools repeated render clocks and parent names.
+The baseline is retained in
+`artifacts/tui-feature-children-reading-20261110/baseline-observation.json`.
+
+[#51023](https://github.com/jeong-sik/masc/pull/51023) gives those four children
+short KO/EN titles beneath the existing family strip. Exceptional connection
+evidence and each body's own missing/failed/retained reading remain separate.
+Long connection evidence uses Board's existing bounded typed state/gap summary,
+now shared rather than copied, so the failure is not lost beyond the frame.
+Clients still derives row ages from its roster observation; channel state and
+binding decisions are unchanged.
+
+Resources now opens its admitted body with the selected original part target.
+Full MCP/report metadata, including a known public URL, expands with the existing
+`i` action. Read failures, report confirmation, unknown/uncertain sharing and
+share recovery precede the body; original copy/export/share authority and bytes
+are unchanged. Source anchors keep separate notice origins and continue at the
+first actual document block when preparation chrome disappears. A returned
+empty part list remains distinct from unread or failed content.
+
+The d58145cf matching server/TUI reached the JSON body on the narrow first page,
+and its report information/source actions remained readable. A nonempty private
+report still had no body on the 36x20 first page: generated leading status space
+and an absent image-selection paragraph occupied four rows. The source now omits
+those empty pieces while preserving every confirmation and sharing notice.
+The matching 6157b06b server/TUI now shows the report title and first body line
+at 36x20. The unchanged before/after captures are retained in
+[the evidence bundle](../../evidence/tui-feature-resource-body-20261110/README.md).
+
+Local OCaml 5.5.1 parsing and `git diff --check` pass. The changed Help registry
+now has its exact full generated key reference. `Minimal manual checks`
+(`pr-check.yml`, `main@f5876874`, `resource-reading`) run 42789874637 succeeded
+for source 6157b06b and its four existing targeted suites. The same native pair
+also displayed the four short child names at both widths. During a controlled
+fixture-server stop, the Clients title retained the failed/unconfirmed reading;
+after the same server source recovered, the normal empty roster returned.
+The narrow title reports workspace confirmation pending, while the wide title
+also shows the HTTP read failure. These are native PTY observations, not GUI.
+Independent review of the final documentation delta, remaining failed/retained
+cases, installation and GUI display remain separate work. No wording/layout/
+row-order tests were added, and the full 23-surface scope remains open.
+
 ## Tools catalog and volume reading (#50872)
 
 The catalog's long periodic volume report moves to an explicit child reading.
@@ -334,3 +503,166 @@ findings were repaired. Syntax parsing uses local OCaml 5.5.1; project type
 checking, candidate execution and installation remain separate. No new screen
 wording, layout or row-order tests were added. The full screen scope remains
 open.
+
+[#50996](https://github.com/jeong-sik/masc/pull/50996) follows the volume
+separation with the five panes' remaining fixed explanations. A matching be3302c2
+server/TUI at 36x20 showed eight wrapped explanation rows, then the count and
+part of the table header, with no tool name on the first page. The other four
+panes similarly put their fixed paragraphs before the observed reading. All
+five now start with their original readings; the catalog keeps its process-wide
+registered count. The existing section key's Help carries the scopes, recorded
+evidence meanings and column legends, including the distinction from a Keeper's
+callable surface and observed calls. Missing
+inventory remains a missing reading, and independent pending/failure/retained
+notices, Skill drafts and the volume child keep their existing owners.
+The committed key reference is the actual generator's complete output from
+source `072796b2`, SHA-256
+`40fe09893eca59360482bdb88e60bfeba7f967f734a4ee66bc47f7a8a85b3a16`.
+`Minimal manual checks` [run 42773110048](https://github.com/jeong-sik/masc/actions/runs/42773110048)
+completed successfully on workflow ref `main`, workflow head
+`fdde0336dd0166103aef3e470f0cacc85ee85c26`, selected source
+`072796b22fe3c289f6c5f476e238d55ecaff6fb8`. The receipt records matching
+server/TUI builds and the three workspace-file suites with zero suite/log exit
+codes; this is not Full CI. Manual native PTY observations of that matching
+server/TUI at 120x36 and 36x20 show all five panes leading with their actual
+readings. The narrow catalog exposes tool names on its first page, and Help
+search finds the relocated legends through its last page. A read-only volume
+report exposes the server's missing-base-image refusal; returning preserves
+catalog rows 10-19/451. Escape returns to Features with its selection intact.
+The observation ledger is
+`artifacts/native-tui-proof-42773110048/manual-coverage-tools.json`; it retains
+startup/key-batching miscues separately from the observations above. Subsequent
+changes add only generated/reference and progress/changelog documentation, not
+executable source. Nonempty Keeper/async/Skill states, induced failure/retained
+recovery, successful volume reclamation, installation and GUI display remain
+unverified. The full 23-surface scope stays open.
+
+## Operations action-reason reading (#50913)
+
+The f89b3e6f baseline was observed at 120x36 and 36x20 with two actual server
+reasons. The narrow Operations view showed the first and `+1 more`; Home
+selection did not include those reasons. The global footer repeated an internal
+code. This observation does not execute the following repair.
+
+Operations `v` opens every reason from the last server rollup in the existing
+immutable detail reader. Its original order and complete text are retained;
+scrolling, search and resize use that reader, and Esc returns without an
+approval, setting change or new request. Missing server/rollup observations do
+not become an empty list. The common footer names the observed action count in
+the selected UI language and points to Operations instead of repeating a raw
+diagnostic. Its existing press target opens that destination.
+
+The new key is in the canonical binding source and screen map. The committed
+key reference is the byte-for-byte output of the actual generator built from
+source `3a0737e3`, including previously stale rows from that registry.
+`Minimal manual checks` run `42758272437` completed successfully on workflow
+ref `main`, workflow head `4f1ac0e8`, selected source `3a0737e3`. It built the
+matching server, TUI and generator and passed the three selected workspace-file
+suites; this is not Full CI. The generated output's SHA-256 is
+`f87a7e316dd705c9818cc4d1f892ac80f07cd1430e1250bdbf87618e75b68ca5`.
+Operations interaction, installation, remaining Operations states and the full
+23-surface scope remain open. No new screen wording, layout, row-order or PTY
+assertion tests were added.
+
+## Board title-first reading (#50883)
+
+The Board list leads with each post's title and author. Compact technical IDs
+no longer occupy a list column; the existing exact-reference copy action keeps
+the selected post identity. The list, composer and reader use the same short
+Board heading, without a repeating wall clock or healthy connection badge.
+Exceptional transport, workspace, partial/interrupted/failed reads and event
+loss retain the shared typed notice. The existing header fitter reserves its
+width before the title, including in the composer and reader. Ordinary pending
+reads keep the Board's own indications. When the complete warning cannot fit,
+the existing typed compact state leads instead of clipping a failure word at
+the end of a healthy HTTP prefix. Event loss remains a separate label. Sort,
+hearth, observed counts, retained/failed reads, original timestamps, publication
+receipts and the one-row cursor budget keep their existing owners.
+
+The matching f89b3e6f baseline was observed with stored fixture posts, a comment
+and a multiline draft at 120x36 and 36x20. The draft survived resizing, and its
+explicit publication returned to the list with a published receipt. This
+baseline exposed the ID-first wide list and the clock/HTTP heading in a narrow
+list and composer; it does not execute this source change. Candidate execution
+and installation, remaining Board input states and the full 23-surface scope
+remain open.
+
+## Account input and Voice configuration source (#51121)
+
+The matching 6157b06b native fixture exposed two System defects. At 36x20,
+Config > runtime.toml > account addition > Tab twice kept the Location field
+outside the frame, although input still belonged to it. Widening the same
+form to 120x36 revealed the selected account-home field; it was cancelled
+without submitting. The Voice pane simultaneously showed a failed read that
+found neither voice source and a claim that runtime.toml declared voice.
+The preserved captures and source audit are under
+`artifacts/tui-system-audit-20261110/` and
+`artifacts/native-tui-proof-42789874637/observation/captures/`.
+
+Account filling now receives the pane's actual remaining height. When the
+complete form fits, its rows stay intact; otherwise the current field takes
+space before introductions, with a bounded surrounding field window and
+explicit continuation notices for long refusals or login instructions.
+Login commands are not split by the new vertical budget. With one row only,
+a refusal is signalled on the current field; its full retained reason needs
+a larger window. Saved-form rendering and command copying, drafts, revision
+checks, keyboard ownership and save/recovery authority are unchanged. Existing
+form tests only receive the new required height argument; no wording, layout,
+row-order, snapshot or PTY assertions were added.
+
+Voice configuration sources follow the setup response: runtime_toml names the
+TOML section, standalone_json needs its actual path, and a successful null
+source means neither source configures voice. Failed reads remain failed;
+missing, malformed and not-yet-observed sources remain unknown. Absence of a
+snapshot is not called an in-flight request. The independent config/setup
+reads and wizard/save/probe contracts are unchanged.
+
+This source change does not establish candidate rendering or installation.
+Runtime's separate narrow picker-prefix defect, Activity and both log sources,
+the other settings forms and failed/retained/uncertain outcomes remain in the
+full 6-family, 23-surface audit. No new key-reference output is claimed.
+
+## System Activity and Logs reading (source candidate, 2026-11-11)
+
+The matching `097b4c2d` native observation showed Activity's receipt clock and
+minimum-width Keeper/event columns consuming the 36x20 list before the event
+detail could be read. Server Logs similarly gave time and level priority over
+the message, and the heading's clock/HTTP strip displaced the selected source.
+Empty Turns still advertised individual event evidence. The preserved baseline
+is `artifacts/native-tui-proof-42808378032/observation/manual-coverage-system-activity-logs.json`;
+it does not execute this candidate, based on `90ec37b2`.
+
+Activity now reads the event sentence before its actual actor. Receipt time
+follows only when it leaves the content allocation intact; Actions/Everything
+still open the exact selected immutable event, including its original TUI
+receipt timestamp. Turns remain aggregates, without individual evidence.
+Normal live-feed/replay explanations no longer occupy body rows. Off, opening,
+closed and failed feeds, retained events, dropped/undecodable/unseen counts,
+replay uncertainty/reset/gaps/source loss and unavailable traces keep separate
+notice rows. The same notice projection sets the rendered body height and list
+PageUp/PageDown step in both the early flat-selection handler and the aggregate
+scroll handler. The immutable evidence reader uses its own shared intro/body
+budget for page keys. Existing flat selection, aggregate scrolling, follow and
+event attribution remain owned by their existing state.
+
+Logs lead with the original message and severity. Time and optional context
+columns fold before those two consume the actual narrow width. Server/This TUI
+stays in the heading; This TUI does not borrow server connection evidence.
+Exceptional server/workspace/read/source-loss notices remain bounded beside
+the identity. Full message, timestamp, category, Keeper/turn, module, producer
+source, owning source, exact sequence and structured details remain in the
+existing per-source detail reader. A retained failed read is qualified beside
+the original error, whose complete text is also in that reader.
+
+Activity's Enter footer follows a separate individual-reading predicate, rather
+than equating aggregate rows with readable event evidence. The canonical key
+binding gains only list/reading metadata; key/help text is unchanged and the
+reference producer does not consume that metadata. The generated key guide was
+not edited or regenerated. The existing detail-scope consumer list only gains
+Activity; no wording, layout, row-order or PTY assertions were added.
+
+Only OCaml 5.5.1 parsing and `git diff --check` have been performed for this
+candidate. Type checking, native rendering, wide/narrow page/resize interaction,
+failed/retained/uncertain source states, installation and GUI observation remain
+unverified. The full 6-family, 23-surface scope, including all children, forms
+and overlays, remains open.

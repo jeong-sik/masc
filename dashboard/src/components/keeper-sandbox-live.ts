@@ -4,7 +4,7 @@ import {
   fetchKeeperSandboxLiveStatus,
   type KeeperSandboxLiveStatus,
 } from '../api/keeper'
-import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { errorMessageOr } from '../lib/format-string'
 import { sandboxContainerCli } from '../types'
 import { DetailCard, DetailRow, MutedSpan } from './keeper-detail-kpi'
@@ -63,23 +63,21 @@ export function KeeperSandboxLivePanel({ keeperName }: { keeperName: string }) {
   const [state, setState] = useState<LoadState>({ kind: 'loading' })
 
   useEffect(() => {
-    const controller = new AbortController()
     let cancelled = false
-    const refresh = async () => {
+    const refresh = async (signal: AbortSignal) => {
       try {
-        const value = await fetchKeeperSandboxLiveStatus(keeperName, { signal: controller.signal })
-        if (!cancelled && !controller.signal.aborted) setState({ kind: 'ready', value })
+        const value = await fetchKeeperSandboxLiveStatus(keeperName, { signal: signal })
+        if (!cancelled && !signal.aborted) setState({ kind: 'ready', value })
       } catch (error) {
-        if (!cancelled && !controller.signal.aborted) {
+        if (!cancelled && !signal.aborted) {
           setState({ kind: 'error', detail: errorMessageOr(error, 'sandbox status load failed') })
+          throw error
         }
       }
     }
-    void refresh()
-    const cleanup = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
+    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_sandbox'], keeperName, resetRead: () => setState({ kind: 'loading' }) })
     return () => {
       cancelled = true
-      controller.abort()
       cleanup()
     }
   }, [keeperName])

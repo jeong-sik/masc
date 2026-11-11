@@ -645,7 +645,7 @@ let test_metadata_edit_survives_event_recording_failure () =
         ; "due_date", `Assoc [ "from", `String "2000-01-01"; "to", `String "2099-01-01" ]
         ; "priority", `Assoc [ "from", `Int 3; "to", `Int 1 ] ])
       edit_payload;
-    let listed = call "masc_goal_list" [] |> Yojson.Safe.Util.member "goals" |> Yojson.Safe.Util.to_list in
+    let listed = call "masc_goal_list" [ "detailed", `Bool true ] |> Yojson.Safe.Util.member "goals" |> Yojson.Safe.Util.to_list in
     (match listed with
      | [ stored ] ->
        check string "the successful edit is readable" "2099-01-01" (get_string_field stored "due_date");
@@ -849,6 +849,122 @@ let test_a_goal_edit_whose_row_cannot_be_appended_still_succeeds () =
       "with the new due date"
       "2026-10-15"
       (get_string_field (Yojson.Safe.Util.member "goal" json) "due_date")
+;;
+
+(* A list row names the Goal and says where it stands. The rest of the row is
+   read with [goal_id], or for every listed Goal with [detailed]. *)
+let short_row_fields =
+  [ "created_at"; "criterion_revision"; "id"; "phase"; "priority"; "title"; "updated_at" ]
+;;
+
+let seed_listed_goal config ~title =
+  match Goal_store.upsert_goal_with_events ~actor:"test" config ~title ~metric:"goals"
+          ~target_value:"1" () with
+  | Ok (goal, _, _) -> goal
+  | Error error -> fail (Goal_store.write_error_to_string error)
+;;
+
+let list_goals config args =
+  match Tool_workspace.dispatch (workspace_ctx config) ~name:"masc_goal_list"
+          ~args:(`Assoc args) with
+  | Some result -> parse_json_result result
+  | None -> fail "masc_goal_list not handled"
+;;
+
+let listed_rows json = Yojson.Safe.Util.(json |> member "goals" |> to_list)
+;;
+
+let sorted_field_names row =
+  Yojson.Safe.Util.to_assoc row |> List.map fst |> List.sort String.compare
+;;
+
+let test_goal_list_returns_short_rows () =
+  with_workspace @@ fun config ->
+  ignore (seed_listed_goal config ~title:"First goal");
+  ignore (seed_listed_goal config ~title:"Second goal");
+  let listed = list_goals config [] in
+  check int "both goals are listed" 2 (List.length (listed_rows listed));
+  List.iter
+    (fun row ->
+       check (list string) "a list row carries the short fields and nothing else"
+         short_row_fields (sorted_field_names row))
+    (listed_rows listed);
+  check int "the rollup still counts them" 2
+    Yojson.Safe.Util.(listed |> member "rollup" |> member "active_count" |> to_int)
+;;
+
+let test_goal_list_detailed_returns_whole_rows () =
+  with_workspace @@ fun config ->
+  ignore (seed_listed_goal config ~title:"Whole row goal");
+  match listed_rows (list_goals config [ "detailed", `Bool true ]) with
+  | [ row ] ->
+    List.iter
+      (fun field ->
+         check bool ("a whole row carries " ^ field) true
+           (List.mem_assoc field (Yojson.Safe.Util.to_assoc row)))
+      [ "metric"; "target_value"; "verification"; "criterion_review"; "measurement" ]
+  | _ -> fail "expected one listed goal"
+;;
+
+let test_goal_list_short_row_matches_the_whole_row () =
+  with_workspace @@ fun config ->
+  ignore (seed_listed_goal config ~title:"Matching goal");
+  match
+    ( listed_rows (list_goals config [])
+    , listed_rows (list_goals config [ "detailed", `Bool true ]) )
+  with
+  | [ short ], [ whole ] ->
+    List.iter
+      (fun field ->
+         check string (field ^ " is the same in both shapes")
+           (Yojson.Safe.to_string (Yojson.Safe.Util.member field whole))
+           (Yojson.Safe.to_string (Yojson.Safe.Util.member field short)))
+      short_row_fields
+  | _ -> fail "expected one goal in each shape"
+;;
+
+let test_goal_list_goal_id_reads_one_whole_row () =
+  with_workspace @@ fun config ->
+  let goal = seed_listed_goal config ~title:"Wanted goal" in
+  ignore (seed_listed_goal config ~title:"Other goal");
+  let read = list_goals config [ "goal_id", `String goal.id; "detailed", `Bool false ] in
+  check int "one goal is returned" 1 Yojson.Safe.Util.(read |> member "count" |> to_int);
+  match listed_rows read with
+  | [ row ] ->
+    check string "it is the named goal" goal.id (get_string_field row "id");
+    check bool "the row is whole whatever detailed says" true
+      (List.mem_assoc "verification" (Yojson.Safe.Util.to_assoc row));
+    check int "the rollup counts the returned goal" 1
+      Yojson.Safe.Util.(read |> member "rollup" |> member "active_count" |> to_int)
+  | _ -> fail "expected one goal"
+;;
+
+let test_goal_list_unknown_goal_id_is_not_found () =
+  with_workspace @@ fun config ->
+  ignore (seed_listed_goal config ~title:"Present goal");
+  let error = expect_error (Tool_workspace.dispatch (workspace_ctx config)
+      ~name:"masc_goal_list" ~args:(`Assoc [ "goal_id", `String "goal-does-not-exist" ])) in
+  check string "an unknown id on a readable store" "not_found"
+    (get_string_field error "error_code")
+;;
+
+let test_goal_list_goal_id_with_phase_is_refused () =
+  with_workspace @@ fun config ->
+  let goal = seed_listed_goal config ~title:"Present goal" in
+  let error = expect_error (Tool_workspace.dispatch (workspace_ctx config)
+      ~name:"masc_goal_list"
+      ~args:(`Assoc [ "goal_id", `String goal.id; "phase", `String "executing" ])) in
+  check string "goal_id with phase" "validation_error" (get_string_field error "error_code")
+;;
+
+let test_goal_list_goal_id_answers_unavailable_on_an_unreadable_store () =
+  with_workspace @@ fun config ->
+  let goal_id = seed_rows_without_criterion_revision config in
+  let result = Tool_workspace.dispatch (workspace_ctx config) ~name:"masc_goal_list"
+      ~args:(`Assoc [ "goal_id", `String goal_id ]) in
+  check_unavailable_envelope config ~reason:"schema_rejected"
+    ~field:(`String "criterion_revision") ~mirror_status:"mirror_rejected"
+    ~mirror_goal_count:`Null ~reset_step:"repair_field" (expect_unavailable result)
 ;;
 
 let test_goal_upsert_rejects_lifecycle_fields () =
@@ -1443,6 +1559,19 @@ let () =
             "list rejects status filter"
             `Quick
             test_goal_list_rejects_status_filter
+        ; test_case "list returns short rows" `Quick test_goal_list_returns_short_rows
+        ; test_case "list detailed returns whole rows" `Quick
+            test_goal_list_detailed_returns_whole_rows
+        ; test_case "list short row matches the whole row" `Quick
+            test_goal_list_short_row_matches_the_whole_row
+        ; test_case "list goal_id reads one whole row" `Quick
+            test_goal_list_goal_id_reads_one_whole_row
+        ; test_case "list answers not_found for an unknown goal_id" `Quick
+            test_goal_list_unknown_goal_id_is_not_found
+        ; test_case "list refuses goal_id together with phase" `Quick
+            test_goal_list_goal_id_with_phase_is_refused
+        ; test_case "list answers Unavailable for a goal_id on an unreadable store" `Quick
+            test_goal_list_goal_id_answers_unavailable_on_an_unreadable_store
         ; test_case
             "upsert rejects lifecycle fields"
             `Quick

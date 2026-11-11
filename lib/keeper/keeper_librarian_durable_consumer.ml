@@ -552,7 +552,8 @@ let continuity_saved_position
       ~messages
       lines
   =
-  continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    continuity_saved_ranges ~config ~keeper_name ~memory_keepers_dir)
   |> List.fold_left
        (fun furthest candidate ->
           if not
@@ -605,6 +606,19 @@ let current_memory ~keepers_dir ~keeper_name =
       "librarian routing undecodable current snapshot into write-path quarantine: %s"
       rejection;
     Ok (None, None)
+;;
+
+(* [Capture.create] writes every held checkpoint message as JSON, digests the
+   bytes and projects the source again to compare it with the input. It reads
+   no file and no shared state. On the caller's fiber that is one run with no
+   yield: 1.8 s on the server's main domain for one round on 2026-11-10
+   (#46410), during which no other fiber of that domain ran. As a pool job the
+   caller waits on a promise and its domain keeps scheduling. *)
+let capture_original ~runtime_keepers_dir ~extent ~boundaries ~positions ~source ~counterparts
+    ~external_before ~external_prepared ~expected_revision ~range_id ~official_range_id input =
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+    Capture.create ~runtime_keepers_dir ~extent ~boundaries ~positions ~source ~counterparts
+      ~external_before ~external_prepared ~expected_revision ~range_id ~official_range_id input)
 ;;
 
 let write_progress ~write ~keepers_dir ~keeper_name progress outcome =
@@ -772,7 +786,8 @@ let checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~
           let* () = Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir
             ~runtime_keepers_dir ~keeper_name external_cursor ~through:external_through
             ~atom:(Some range) ~official:None in
-          let* _ = Current.apply_program ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+          let* _ = Current.apply_program ~pass:Keeper_memory_commit_pass.Durable
+            ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
             ~anchor:inferred.anchor ~source ~validate_source:(fun () -> Ok ())
             ~on_committed:(fun _ -> committed := true) inferred.program in
           Ok ()))) in
@@ -850,7 +865,8 @@ let official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~of
           let* () = Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir
             ~runtime_keepers_dir ~keeper_name external_cursor ~through:external_through
             ~atom:None ~official:(Some range) in
-          let* _ = Current.apply_program ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+          let* _ = Current.apply_program ~pass:Keeper_memory_commit_pass.Durable
+            ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
             ~anchor:inferred.anchor ~source ~validate_source:(fun () -> Ok ())
             ~on_committed:(fun _ -> committed := true) inferred.program in
           Ok ()))) in
@@ -1318,10 +1334,11 @@ let consume_one_with_extent
       | None -> Ok None
       | Some (range, boundary_lines_seen, end_boundary_line, _, _) ->
         let* committed_range =
-          Keeper_memory_os_current.committed_durable_coverage
-            ~keepers_dir:memory_keepers_dir
-            ~keeper_id:keeper_name
-            ~receipt_scope:runtime_keepers_dir
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+            Keeper_memory_os_current.committed_durable_coverage
+              ~keepers_dir:memory_keepers_dir
+              ~keeper_id:keeper_name
+              ~receipt_scope:runtime_keepers_dir)
           |> Result.map_error (fun detail -> Memory_snapshot_unreadable detail)
         in
         let recovery_range, recovery_boundary_line, recovery_boundary_lines_seen =
@@ -1629,7 +1646,7 @@ let consume_one_with_extent
         ; counterpart_observations
         }
       in
-      let* original = Capture.create ~runtime_keepers_dir ~extent ~boundaries:lines
+      let* original = capture_original ~runtime_keepers_dir ~extent ~boundaries:lines
         ~positions:{Capture.current=progress;selection=selection_progress;counterpart=counterpart_progress;official=official_cursor}
         ~source ~counterparts ~external_before ~external_prepared ~expected_revision
         ~range_id:atom_next ~official_range_id input
@@ -1752,6 +1769,7 @@ let commit_with_runtime_runner
   let committed = ref false and reports = ref [] in
   Keeper_librarian_runtime.run_best_effort
     ?cli_runner
+    ~write_scope:(Context_and_memory Keeper_memory_commit_pass.Durable)
     ~on_memory_committed:(fun () -> committed := true)
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ?durable_range_id:range_id

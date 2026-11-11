@@ -16,7 +16,6 @@ import { CursorPagination } from '../common/pagination'
 import { route } from '../../router'
 import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
 import { fetchBoardReactionsBatch, votePost } from '../../api/board'
-import type { BoardReactionSummary } from '../../types'
 import { broadcastReceiptMessage, createPost, currentDashboardActor, sendBroadcast } from '../../api'
 import { deleteBoardPost, setBoardPostPinned } from '../../api/actions'
 import { dispatchOperatorAction, operatorActionBusy } from '../../operator-store'
@@ -29,7 +28,7 @@ import { extractMentionTargets, MentionInbox, MentionInboxPanel } from './mentio
 import { PostDetail, CommentThread, CommentForm } from './post-detail'
 import { PostAttachments } from './post-attachments'
 import { FusionBoardEvidence } from './fusion-evidence'
-import { ReactionBar } from './reaction-bar'
+import { ReactionBar, type ReactionBatchObservation } from './reaction-bar'
 import { PostShareActions } from './post-share-actions'
 import {
   appendVoiceTranscriptDraft,
@@ -306,17 +305,17 @@ function BdAuthor({ label, size = 24 }: { label: string; size?: number }) {
 }
 
 // ── Post card (v2 list item) ───────────────────────────────────────
-function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false }: {
+function PostCard({ post, batchObservation, getLatestBatchRevision }: {
   post: BoardPost
-  reactions?: BoardReactionSummary[]
-  supportedEmojis?: readonly string[]
-  reactionsArriving?: boolean
+  batchObservation: ReactionBatchObservation
+  getLatestBatchRevision: () => number
 }) {
   const isDeleting = deletingPostId.value === post.id
   const previewBody = dedupeLeadingHeading(post.title, post.body)
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorSigilLabel = boardActorSigilLabel(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const voteKnown = post.current_vote !== undefined
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
   const voteScoreLabel = String(post.votes)
@@ -327,6 +326,7 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
     event.stopPropagation()
+    if (!voteKnown) return
     try {
       await votePost(post.id, dir)
       refreshBoard()
@@ -347,6 +347,10 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
     deletingPostId.value = post.id
     try {
       const outcome = await deleteBoardPost(post.id)
+      if (outcome.status === 'decision_pending') {
+        showToast('삭제 처리 상태를 확인하지 못했습니다. 삭제를 다시 요청하지 말고 상태를 확인해 주세요.', 'warning')
+        return
+      }
       if (outcome.status === 'persistence_pending') {
         showToast('게시글 삭제를 적용했습니다. 저장이 아직 완료되지 않았습니다.', 'warning')
       } else {
@@ -445,26 +449,30 @@ function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false 
             targetType="post"
             targetId=${post.id}
             compact
-            initialSummaries=${reactions ?? post.reactions ?? []}
-            supportedEmojis=${supportedEmojis ?? post.supported_reaction_emojis}
-            summariesArriving=${reactionsArriving}
+            initialSummaries=${post.reactions}
+            supportedEmojis=${post.supported_reaction_emojis}
+            batchObservation=${batchObservation}
+            getLatestBatchRevision=${getLatestBatchRevision}
           />
         </div>
         <span class="karma" aria-label=${voteScoreAria} title=${voteScoreLabel}>karma <b>${voteScoreLabel}</b></span>
         <button type="button"
           aria-label="추천"
-          aria-pressed=${upvoteActive ? 'true' : 'false'}
-          disabled=${upvoteActive}
+          aria-pressed=${voteKnown ? String(upvoteActive) : undefined}
+          disabled=${!voteKnown || upvoteActive}
+          title=${voteKnown ? undefined : '내 투표 상태를 확인할 수 없습니다.'}
           class="bd-react ${upvoteActive ? 'mine' : ''}"
           onClick=${(event: Event) => handleVote('up', event)}
         >▲</button>
         <button type="button"
           aria-label="비추천"
-          aria-pressed=${downvoteActive ? 'true' : 'false'}
-          disabled=${downvoteActive}
+          aria-pressed=${voteKnown ? String(downvoteActive) : undefined}
+          disabled=${!voteKnown || downvoteActive}
+          title=${voteKnown ? undefined : '내 투표 상태를 확인할 수 없습니다.'}
           class="bd-react ${downvoteActive ? 'mine' : ''}"
           onClick=${(event: Event) => handleVote('down', event)}
         >▼</button>
+        ${!voteKnown ? html`<span class="text-2xs text-[var(--color-fg-muted)]">내 투표 확인 불가</span>` : null}
         <span class="replies">답글 ${post.comment_count}</span>
         <${PostShareActions} post=${post} compact />
         <span class="ml-auto hidden group-hover:inline-flex items-center gap-1">
@@ -1295,24 +1303,24 @@ function UnifiedBoardFeed({
   // that response -- and asking per row made twenty of the twenty-three
   // requests that opening the board sent.
   const drawnIds = posts.slice(0, visibleLimit).map(post => post.id).join(',')
-  const [batchedReactions, setBatchedReactions] = useState<{
-    byTargetId: Map<string, BoardReactionSummary[]>
-    supportedEmojis: readonly string[]
-  } | null>(null)
+  const batchRevision = useRef(0)
+  const getLatestBatchRevision = useCallback(() => batchRevision.current, [])
+  const [batchedReactions, setBatchedReactions] = useState<ReactionBatchObservation>({ state: 'loading', revision: 0 })
   useEffect(() => {
     const ids = drawnIds === '' ? [] : drawnIds.split(',')
+    const revision = ++batchRevision.current
     if (ids.length === 0) {
-      setBatchedReactions({ byTargetId: new Map(), supportedEmojis: [] })
+      setBatchedReactions({ state: 'ready', revision, byTargetId: new Map(), supportedEmojis: [] })
       return
     }
     let cancelled = false
-    setBatchedReactions(null)
+    setBatchedReactions({ state: 'loading', revision })
     void fetchBoardReactionsBatch('post', ids)
-      .then(next => { if (!cancelled) setBatchedReactions(next) })
+      .then(next => { if (!cancelled) setBatchedReactions({ state: 'ready', revision, ...next }) })
       .catch(err => {
         // Each bar falls back to fetching its own, which is what it did before.
         console.warn('[board] reaction batch failed', err instanceof Error ? err.message : err)
-        if (!cancelled) setBatchedReactions({ byTargetId: new Map(), supportedEmojis: [] })
+        if (!cancelled) setBatchedReactions({ state: 'unavailable', revision })
       })
     return () => { cancelled = true }
   }, [drawnIds])
@@ -1341,11 +1349,8 @@ function UnifiedBoardFeed({
       ${posts.slice(0, visibleLimit).map(post => html`<${PostCard}
         key=${post.id}
         post=${post}
-        reactions=${batchedReactions?.byTargetId.get(post.id)}
-        supportedEmojis=${batchedReactions && batchedReactions.supportedEmojis.length > 0
-          ? batchedReactions.supportedEmojis
-          : undefined}
-        reactionsArriving=${batchedReactions === null} />`)}
+        batchObservation=${batchedReactions}
+        getLatestBatchRevision=${getLatestBatchRevision} />`)}
     </div>
     ${hasMore ? html`
       <${ScrollMarker} onVisible=${expand} />

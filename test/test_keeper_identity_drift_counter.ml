@@ -53,12 +53,6 @@ let invalid_entry_counter_value ~operation ~name ~reason =
     ()
 ;;
 
-let is_error_json raw =
-  String.length raw > 0
-  && (String.starts_with ~prefix:"{\"ok\":false" raw
-      || String.starts_with ~prefix:"{\"error\"" raw)
-;;
-
 (* ── find_registry_meta tests ─────────────────────────────────────────── *)
 
 let test_find_registry_meta_missing () =
@@ -130,34 +124,6 @@ let test_find_registry_meta_match () =
          (counter_value ~source_layer:"test_layer" ~field:"name_mismatch"))
 ;;
 
-(* ── with_registry_meta tests ─────────────────────────────────────────── *)
-
-let test_with_registry_meta_missing () =
-  Keeper_registry.For_testing.clear ();
-  let result =
-    KES.with_registry_meta ~keeper_name:"missing-keeper" ~source_layer:"test_layer"
-      (fun _meta -> {|{"ok":true}|})
-  in
-  check bool "missing returns error JSON" true (is_error_json result)
-;;
-
-let test_with_registry_meta_match () =
-  Keeper_registry.For_testing.clear ();
-  let base = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base)
-    (fun () ->
-       let meta = make_meta "found-keeper" in
-       ignore (Keeper_registry.For_testing.register ~base_path:base "found-keeper" meta);
-       let result =
-         KES.with_registry_meta ~keeper_name:"found-keeper" ~source_layer:"test_layer"
-           (fun meta -> Printf.sprintf {|{"ok":true,"name":"%s"}|} meta.name)
-       in
-       check string "match returns f meta result"
-         {|{"ok":true,"name":"found-keeper"}|}
-         result)
-;;
-
 let () =
   run
     "Keeper_identity_drift_counter"
@@ -168,12 +134,6 @@ let () =
             test_find_registry_meta_mismatch
         ; test_case "matching entry does not increment counters" `Quick
             test_find_registry_meta_match
-        ] )
-    ; ( "with_registry_meta"
-      , [ test_case "missing entry returns error JSON" `Quick
-            test_with_registry_meta_missing
-        ; test_case "matching entry returns f result" `Quick
-            test_with_registry_meta_match
         ] )
     ]
 ;;

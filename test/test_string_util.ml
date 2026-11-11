@@ -260,45 +260,6 @@ let test_query_tokens_basic () =
   check (list string) "whitespace-only query has no tokens" []
     (SU.query_tokens " \t\n")
 
-let test_ascii_punctuation_tokens_basic () =
-  check (list string) "splits ASCII punctuation and lowercases"
-    [ "gate"; "2"; "src"; "main"; "ml"; "한글" ]
-    (SU.ascii_punctuation_tokens "Gate-2: src/main.ml 한글");
-  check (list string) "empty punctuation-only text has no tokens" []
-    (SU.ascii_punctuation_tokens " -- \t ./ ")
-
-let test_contains_contiguous_token_sequence () =
-  let tokens = SU.ascii_punctuation_tokens "Gate-2 checked src/main.ml and tests" in
-  check bool "contiguous sequence matches" true
-    (SU.contains_contiguous_token_sequence
-       ~haystack:tokens
-       ~needle:(SU.ascii_punctuation_tokens "src/main.ml"));
-  check bool "non-contiguous sequence rejects" false
-    (SU.contains_contiguous_token_sequence
-       ~haystack:tokens
-       ~needle:[ "src"; "tests" ]);
-  check bool "empty needle rejects" false
-    (SU.contains_contiguous_token_sequence ~haystack:tokens ~needle:[]);
-  check bool "empty haystack rejects" false
-    (SU.contains_contiguous_token_sequence ~haystack:[] ~needle:[ "src" ]);
-  check bool "single token needle matches" true
-    (SU.contains_contiguous_token_sequence ~haystack:tokens ~needle:[ "checked" ]);
-  check bool "needle longer than haystack rejects" false
-    (SU.contains_contiguous_token_sequence ~haystack:[ "src" ]
-       ~needle:[ "src"; "main" ]);
-  check bool "non-ASCII case is byte literal" false
-    (SU.contains_contiguous_token_sequence
-       ~haystack:(SU.ascii_punctuation_tokens "ΔΟΚΙΜΗ")
-       ~needle:(SU.ascii_punctuation_tokens "δοκιμη"));
-  let long_haystack =
-    List.init 20_000 (fun i ->
-      if i = 19_998 then "needle" else "tok" ^ string_of_int i)
-  in
-  check bool "long input remains stack safe" true
-    (SU.contains_contiguous_token_sequence
-       ~haystack:long_haystack
-       ~needle:[ "needle"; "tok19999" ])
-
 let test_short_query_terms_use_boundaries () =
   List.iter (fun text ->
     check bool ("RC excludes " ^ text) false (SU.contains_query_term_ci text "RC"))
@@ -723,10 +684,6 @@ let () =
             test_contains_substring_ci_empty_and_literal ] );
       ( "contains_all_tokens_ci",
         [ test_case "query_tokens basic" `Quick test_query_tokens_basic;
-          test_case "ascii punctuation tokens" `Quick
-            test_ascii_punctuation_tokens_basic;
-          test_case "contiguous token sequence" `Quick
-            test_contains_contiguous_token_sequence;
           test_case "order-independent token AND" `Quick
             test_contains_all_tokens_ci_order_independent;
           test_case "short free-text terms use boundaries" `Quick

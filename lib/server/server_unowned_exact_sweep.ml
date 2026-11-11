@@ -1,6 +1,7 @@
 module Store = Lane_addon_store
 module Owner = Lane_addon_tool_request_owner
 module Exact = Lane_addon_exact
+module Observation = Lane_addon_exact_observation
 module Ids = Set.Make (String)
 open Result.Syntax
 
@@ -9,6 +10,9 @@ type report =
   ; live_originals : int
   ; kept_exact_records : int
   ; kept_proofs : int
+  ; kept_observations : int
+  ; removed_observations : int
+  ; removed_observation_bytes : int64
   ; removed_proofs : int
   ; removed_proof_bytes : int64
   ; removed_exact_records : int
@@ -20,15 +24,16 @@ type error =
   | Removal_stopped of
       { removed_proofs : int
       ; removed_exact_records : int
+      ; removed_observations : int
       ; detail : string
       }
 
 let error_to_string = function
   | Sweep_refused detail -> "unowned Exact sweep deleted nothing: " ^ detail
-  | Removal_stopped { removed_proofs; removed_exact_records; detail } ->
+  | Removal_stopped { removed_proofs; removed_exact_records; removed_observations; detail } ->
     Printf.sprintf
-      "unowned Exact sweep stopped after deleting %d execution links and %d Exact records: %s"
-      removed_proofs removed_exact_records detail
+      "unowned Exact sweep stopped after deleting %d slot observations, %d execution links and %d Exact records: %s"
+      removed_observations removed_proofs removed_exact_records detail
 
 (* Parser errors can carry snippets of private records, so a refusal names
    only the class of failure. *)
@@ -80,12 +85,20 @@ type declaration_files =
   { declaration_id : string
   ; records : listed list
   ; links : link list
+  ; observations : link list
   }
 
-let list_declaration ~root (declaration : Lane_addon_config.declaration) =
+let list_declaration ~store ~root (declaration : Lane_addon_config.declaration) =
   let declaration_id = declaration.id in
   let* records = list_directory ~root (Store.exact_request_directory ~declaration_id) in
   let* links = list_directory ~root (Exact.proof_directory ~declaration_id) in
+  let* observations = list_directory ~root (Observation.directory ~declaration_id) in
+  let* observations = List.fold_left (fun acc (file:listed) ->
+    let* acc=acc in
+    let* json=read_json file.path in
+    let+ request_id=Observation.request_id ~store ~declaration_id ~file_name:file.file_name json
+      |> Result.map_error (refuse "a slot observation does not own its request/file") in
+    {request_id;file}::acc) (Ok []) observations in
   let+ links =
     List.fold_left
       (fun acc (file : listed) ->
@@ -98,13 +111,13 @@ let list_declaration ~root (declaration : Lane_addon_config.declaration) =
         { request_id; file } :: acc)
       (Ok []) links
   in
-  { declaration_id; records; links }
+  { declaration_id; records; links; observations }
 
-let list_declarations ~root declarations =
+let list_declarations ~store ~root declarations =
   List.fold_left
     (fun acc declaration ->
       let* acc = acc in
-      let+ files = list_declaration ~root declaration in
+      let+ files = list_declaration ~store ~root declaration in
       files :: acc)
     (Ok []) declarations
 
@@ -120,6 +133,8 @@ type plan =
   ; kept_links : int
   ; records : listed list
   ; links : listed list
+  ; observations : listed list
+  ; kept_observations : int
   }
 
 let plan_declaration ~live plan files =
@@ -138,11 +153,14 @@ let plan_declaration ~live plan files =
         else { plan with records = record :: plan.records })
       plan files.records
   in
-  List.fold_left
+  let plan = List.fold_left
     (fun plan link ->
       if Ids.mem link.request_id live then { plan with kept_links = plan.kept_links + 1 }
       else { plan with links = link.file :: plan.links })
-    plan files.links
+    plan files.links in
+  List.fold_left (fun plan link ->
+    if Ids.mem link.request_id live then {plan with kept_observations=plan.kept_observations+1}
+    else {plan with observations=link.file::plan.observations}) plan files.observations
 
 (* Deletes in order and stops at the first failure with how many it deleted. *)
 let remove doomed =
@@ -160,23 +178,30 @@ let sweep ~store ~declarations listed =
   let* live = guarded (fun () -> live_ids ~store) in
   let plan =
     List.fold_left (plan_declaration ~live)
-      { kept_records = 0; kept_links = 0; records = []; links = [] }
+      { kept_records = 0; kept_links = 0; kept_observations=0;
+        records = []; links = []; observations=[] }
       listed
   in
+  let* removed_observations,removed_observation_bytes = remove plan.observations
+    |> Result.map_error (fun (removed_observations,detail) ->
+      Removal_stopped {removed_proofs=0;removed_exact_records=0;removed_observations;detail}) in
   let* removed_proofs, removed_proof_bytes =
     remove plan.links
     |> Result.map_error (fun (removed_proofs, detail) ->
-      Removal_stopped { removed_proofs; removed_exact_records = 0; detail })
+      Removal_stopped { removed_proofs; removed_exact_records = 0; removed_observations; detail })
   in
   let+ removed_exact_records, removed_exact_record_bytes =
     remove plan.records
     |> Result.map_error (fun (removed_exact_records, detail) ->
-      Removal_stopped { removed_proofs; removed_exact_records; detail })
+      Removal_stopped { removed_proofs; removed_exact_records; removed_observations; detail })
   in
   { declarations
   ; live_originals = Ids.cardinal live
   ; kept_exact_records = plan.kept_records
   ; kept_proofs = plan.kept_links
+  ; kept_observations = plan.kept_observations
+  ; removed_observations
+  ; removed_observation_bytes
   ; removed_proofs
   ; removed_proof_bytes
   ; removed_exact_records
@@ -187,7 +212,7 @@ let run ~store ~declarations =
   let declarations = List.filter original_required declarations in
   (* Listed first: a record or link whose original is live by now was
      retained before it was written, so the read below sees that original. *)
-  let* listed = guarded (fun () -> list_declarations ~root:(Store.root store) declarations) in
+  let* listed = guarded (fun () -> list_declarations ~store ~root:(Store.root store) declarations) in
   match
     Store.with_tool_request_settlement_barrier store (fun () ->
       sweep ~store ~declarations:(List.length declarations) listed)

@@ -79,7 +79,7 @@ let boundary ~fresh number messages =
 
 let record_memory config prepared =
   let range_id = P.memory_range_id ~config ~keeper_name prepared |> get in
-  ignore (Masc.Keeper_memory_os_current.apply_disposition ~revisions:[] ~durable_range_id:range_id
+  ignore (Masc.Keeper_memory_os_current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~durable_range_id:range_id
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Masc.Workspace.base_path)
     ~keeper_id:keeper_name ~now:1000. ~source:{kind=Masc.Keeper_memory_os_current.Librarian;trace_id}
     ~absorbed:[] ~new_claims:[] () |> get)

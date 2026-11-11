@@ -1,10 +1,7 @@
-(** Reaction queries and durable toggles for one Board store.
-
-    Queries schedule the existing sweep before taking the state lock. A toggle
-    first rejects an unreadable reaction source, then keeps the persistence
-    lock across staging, snapshot write, state commit and any rollback write.
-    Staging restores the original memory state before the snapshot is written.
-    This private owner uses the canonical Board store and reaction types. *)
+(** Reaction queries require a complete observed reaction source. Toggles
+    retain persistence across staging, exact snapshot CAS, model publication
+    and receipt acknowledgement. Uncertain writes and failed publication do
+    not authorize a normal retry or blind rollback. *)
 
 open Board_types
 
@@ -24,15 +21,18 @@ val list_reactions_batch :
   targets:(reaction_target_type * string) list ->
   ?user_id:string ->
   unit ->
-  ((reaction_target_type * string) * reaction_summary list) list
+  (((reaction_target_type * string) * reaction_summary list) list, board_error) result
 (** One scan produces a row for each distinct requested target, in unspecified
     order. A target with no matching reaction rows receives an empty summary;
     target existence is not checked. *)
 
 val toggle_reaction :
   store ->
-  target_type:reaction_target_type ->
+  reader:Board_access.reader -> target_type:reaction_target_type ->
   target_id:string ->
   user_id:string ->
   emoji:string ->
   (reaction_toggle_result, board_error) result
+(** Retain the original reader independently of user_id and guard complete
+    canonical parent snapshots through rewrite. The result's post_id is that
+    exact admitted parent, including for a comment target. *)

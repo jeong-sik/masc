@@ -102,8 +102,6 @@ let interpret_marker_bytes ~probed_base_path (bytes : string) : t =
        else Owned_by_another_workspace { recorded = marker.base_path })
 ;;
 
-let interpret_marker_absent () : t = Unverified Unmarked
-
 let unverified_to_string = function
   | Inspect_failed detail -> "volume inspect failed: " ^ detail
   | Unmarked -> "volume predates ownership markers; owner unknown"

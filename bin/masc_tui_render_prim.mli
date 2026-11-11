@@ -36,9 +36,6 @@ val voice_meter_text : state -> string
     observed recording, unavailable input, processing or original-slot stopping.
     A missing level is not evidence of active recording. Presentation only. *)
 
-val runtime_assignment_targets : runtime_assignment -> string -> bool
-(** Whether an assignment resolves to the named lane or runtime. *)
-
 type planning_tab =
   Render_schedule.planning_tab =
     Planning_goals
@@ -326,6 +323,16 @@ val surface_chrome :
 
 val connection_badge : Masc_tui_types.state -> string
 
+val surface_title_row :
+  cols:int -> Masc_tui_types.state -> lead:string -> readings:string list -> string
+(** The title row of a surface drawn in [cols] columns: [lead], the [readings]
+    (each carrying its own leading gap) and the connection status last. The
+    full badge is kept when it fits; otherwise prioritized workspace/read,
+    observer-loss and HTTP notices are kept whole as space permits, with an
+    ellipsis for omitted context. A width too small for the first notice
+    shows [!] instead; a frame without a cell for status cannot show it.
+    Readings give way whole from the end, and the lead is cut last. *)
+
 type compact_connection_state =
   | Compact_workspace_mismatch
   | Compact_workspace_unconfirmed
@@ -342,8 +349,23 @@ val compact_connection_state : Masc_tui_types.state -> compact_connection_state
 
 val usage_connection_badge : Masc_tui_types.state -> string
 
+val reading_connection_notice : Masc_tui_types.state -> string option
+(** Exceptional transport, workspace, refresh or observer-loss evidence.
+    Healthy HTTP and ordinary pending reads return [None]; each view keeps
+    its own pending-read indication. The notice retains the full context. *)
+
+val feature_child_heading : Masc_tui_types.state -> cols:int -> title:string -> string
+(** Short identity for a Features child, followed by exceptional connection
+    evidence. Overflow uses the bounded typed summary and preserves observer
+    loss. The family strip supplies its parent; no clock or Runtime menu
+    competes with the child name. Read notices remain owned by each body. *)
+
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)
+
+val reading_connection_summary : width:int -> Masc_tui_types.state -> string
+(** Bounded connection/read state, retaining observer loss as a separate fact.
+    Shared by child headings and Board's existing overflow fallback. *)
 
 val badge_row : cols:int -> lead:string -> label:string -> badge:string -> string
 (** A header row of [lead], a bracketed [label] and [badge] for a surface drawn
@@ -716,7 +738,9 @@ val config_pane_title :
     those. [reading] is whatever the pane adds beside its name -- a count, a
     warning -- and is the part that gives way. Ten panes spelled this row and
     nine of them spelled it identically, which is also why none could tell the
-    strip to leave room for the badge. *)
+    strip to leave room for the badge. When those optional names and shortcuts
+    cannot leave room for the active pane, the existing localized pane name
+    precedes them and the connection observation. *)
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list
@@ -819,8 +843,8 @@ val runtime_substrate_heading :
   current:[ `Runtime_lanes | `Runtime_all | `Features | `Clients ] ->
   after:string list ->
   string
-(** The title row of [System / Runtime] ([Candidate orders] and [All runtimes]),
-    [Features] and [Clients]: [title], the clickable tab strip the three share,
+(** The title row of [System / Runtime] ([Candidate orders] and [All runtimes]):
+    [title], the clickable strip of related destinations,
     the pieces of [after] (each carrying its own leading gap) and the connection
     badge last. The badge stays whole, every piece of [after] is whole or left
     out (from the end, never cut), and the strip draws in the cells they

@@ -818,41 +818,26 @@ let scan_on_refusal = function
   | Lane_addon_scan store -> L.on_refusal store
 ;;
 
-(* The consumers that keep tool request originals, told apart by the scope
-   their records are stored under. Each check is the decoding that consumer's
-   own reader applies, so a hard cut of its records stops the install instead
-   of stopping that consumer on its first pass after the deploy (#49587). *)
-type tool_request_consumer =
-  | Librarian
-  | Workspace_curator
-  | Verifier_review
-  | Goal_proof_review
-  | Candle_appraisal
+module Tool_request_consumer = Server_tool_request_consumer
 
-let tool_request_consumer scope =
-  match Masc.Keeper_librarian_store_preflight.purpose scope with
-  | Some _ -> Some Librarian
-  | None ->
-    List.find_map
-      (fun (owned, consumer) -> if String.equal scope owned then Some consumer else None)
-      [ Masc.Workspace_memory_execution_capture.scope, Workspace_curator
-      ; Masc.Verifier_review_owner.scope, Verifier_review
-      ; Masc.Goal_verifier_worker.scope, Goal_proof_review
-      ; Server_candle_appraiser.scope, Candle_appraisal
-      ]
-;;
-
+(* Each check is the decoding that consumer's own reader applies, so a hard
+   cut of its records stops the install instead of stopping that consumer on
+   its first pass after the deploy (#49587). *)
 let validate_tool_request () =
   let librarian = Masc.Keeper_librarian_store_preflight.validator () in
-  fun ~read ~read_scope ~read_body ~read_archive (record : Masc.Lane_addon_tool_request_owner.retained) ->
-    match tool_request_consumer record.scope with
-    | Some Librarian -> librarian ~read ~read_scope ~read_body ~read_archive record
-    | Some Workspace_curator -> Masc.Workspace_memory_execution_capture.check_retained record
-    | Some Verifier_review -> Masc.Verifier_review_owner.check_retained record
-    | Some Goal_proof_review -> Masc.Goal_verifier_worker.check_retained record
+  fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution (record : Masc.Lane_addon_tool_request_owner.retained) ->
+    match Tool_request_consumer.of_scope record.scope with
+    | Some (Tool_request_consumer.Librarian (_ : Masc.Keeper_librarian_store_preflight.purpose)) ->
+      librarian ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record
+    | Some (Tool_request_consumer.One_scope Tool_request_consumer.Workspace_curator) ->
+      Masc.Workspace_memory_execution_capture.check_retained record
+    | Some (Tool_request_consumer.One_scope Tool_request_consumer.Completion_review) ->
+      Masc.Verifier_review_owner.check_retained record
+    | Some (Tool_request_consumer.One_scope Tool_request_consumer.Goal_proof_review) ->
+      Masc.Goal_verifier_worker.check_retained record
     (* Candle reads its originals back by request ID and decodes nothing of
        the owner record past what the scan's owner reader already checked. *)
-    | Some Candle_appraisal -> Ok ()
+    | Some (Tool_request_consumer.One_scope Tool_request_consumer.Candle_appraisal) -> Ok ()
     (* No reader of this build reads this scope, so fresh state deletes it. *)
     | None ->
       Error
@@ -888,8 +873,9 @@ let timed_scan ~base_path job =
 (* Every store [Keeper_durable_store.preflight_scan] names: a deploy is where
    the operator watches, so any file or row this build cannot read stops it.
    The Lane Add-on records follow, with current consumer payload checks for
-   the originals of each consumer [tool_request_consumer] names. Refusals name the file and its store-specific fresh
-   state requirements; a coupled original is not repaired by moving one file. *)
+   the originals of each consumer [Server_tool_request_consumer] names.
+   Refusals name the file and its store-specific fresh state requirements; a
+   coupled original is not repaired by moving one file. *)
 let validate_stores ~jobs base_path =
   (* The scans decode short-lived JSON like server and pool work. Reuse their
      shared heap policy; an operator's OCAMLRUNPARAM remains authoritative. *)
@@ -1146,6 +1132,16 @@ let exact_slot_degradation_to_string (degradation : Runtime_config_error.exact_s
 let judge_runtime_config ~base_path ~config_root path =
   let judged =
     try
+      (* HIGH-RISK-UNREVIEWED: boot builds the exact-output registry after it
+         publishes its account access, and the registry takes the credentials
+         of the runtime table only through that access (plan D4). This helper
+         judges what boot would do, so it publishes the access of a host tool
+         on the same BasePath first. Nothing is sent. *)
+      let* () =
+        Runtime_account_access.publish_host_tool ~base_path
+          ~config_dir:(Env_config_core.masc_config_dir_opt ())
+        |> Result.map_error (fun (first, rest) -> String.concat "; " (first :: rest))
+      in
       let (_ : string option) =
         Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
       in

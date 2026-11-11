@@ -453,6 +453,34 @@ remote_endpoint = "build-box"
     fail "expected SSH target"
 ;;
 
+(* Unchanged bytes are parsed once: the second read answers with the list
+   the first one built. An edit is read by the next call, and so is a return
+   to the earlier bytes. *)
+let test_registry_parse_is_reused_for_unchanged_bytes () =
+  let base_path = temp_dir () in
+  let config_dir = Filename.concat base_path ".masc/config" in
+  Fs_compat.mkdir_p config_dir;
+  let config_path = Filename.concat config_dir "runtime.toml" in
+  let read () =
+    match Keeper_sandbox_ssh.configured_endpoints ~base_path with
+    | Ok endpoints -> endpoints
+    | Error detail -> fail detail
+  in
+  let declared = Exec_ssh_endpoint.to_toml endpoint in
+  save config_path declared;
+  let first = read () in
+  check bool "the same bytes answer with the list already built" true (read () == first);
+  (match Keeper_sandbox_ssh.resolve_endpoint_name ~base_path ~name:endpoint.name with
+   | Ok found -> check bool "a lookup by name reads that list" true (List.memq found first)
+   | Error detail -> fail detail);
+  save config_path "";
+  check int "an edit is read by the next call" 0 (List.length (read ()));
+  save config_path declared;
+  (match read () with
+   | [ found ] -> check string "the earlier bytes are read again" endpoint.name found.name
+   | _ -> fail "the registry did not return the configured endpoint")
+;;
+
 let test_endpoint_namespace_roundtrip () =
   with_eio @@ fun ~clock:_ ->
   let base_path = temp_dir () in
@@ -633,5 +661,7 @@ let () =
               `Quick test_destination_validation_before_side_effects
           ; test_case "registry reading is not execution readiness" `Quick
               test_registry_read_does_not_create_execution_state
+          ; test_case "registry parse is reused for unchanged bytes" `Quick
+              test_registry_parse_is_reused_for_unchanged_bytes
           ] )
       ]

@@ -50,6 +50,4 @@ type turn_context =
 val retention_days : unit -> int option
 val maybe_prune_retention : base_dir:string -> unit
 val mandatory_clock_refs_for_event : event_kind -> string list
-val validate_manifest_completeness : t -> (unit, string) result
 val is_finished_turn : t list -> bool
-val is_complete_turn : t list -> bool

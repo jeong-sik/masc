@@ -51,11 +51,19 @@ describe('Board deletion persistence', () => {
     expect(await deleteBoardPost('post-9')).toEqual({ status: 'persistence_pending', postId: 'post-9', detail: 'snapshot write failed' })
   })
 
+  it('keeps a pending decision separate from an applied deletion', async () => {
+    vi.mocked(post).mockResolvedValueOnce({ ok: true, post_id: 'post-9', applied: false, persistence: 'decision_pending', detail: 'decision durability is unknown' })
+    expect(await deleteBoardPost('post-9')).toEqual({ status: 'decision_pending', postId: 'post-9', detail: 'decision durability is unknown' })
+  })
+
   it.each([
     { ok: true },
     { ok: true, post_id: 'different-post', applied: true, persistence: 'durable' },
     { ok: true, post_id: 'post-9', applied: false, persistence: 'pending', detail: 'not applied' },
     { ok: true, post_id: 'post-9', applied: true, persistence: 'pending', detail: '' },
+    { ok: true, post_id: 'post-9', applied: true, persistence: 'decision_pending', detail: 'contradictory applied state' },
+    { ok: true, post_id: 'post-9', applied: false, persistence: 'durable' },
+    { ok: true, post_id: 'post-9', applied: false, persistence: 'decision_pending', detail: '' },
   ])('rejects an unbound or contradictory receipt: %j', async value => {
     vi.mocked(post).mockResolvedValueOnce(value)
     await expect(deleteBoardPost('post-9')).rejects.toThrow('receipt')

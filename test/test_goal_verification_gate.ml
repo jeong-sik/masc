@@ -408,7 +408,7 @@ let test_goal_list_joins_the_ledger () =
          ])
   in
   let goal_id = json_state created [ "goal_id" ] in
-  let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" []) in
+  let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" [ "detailed", `Bool true ]) in
   let goals = Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list in
   (match goals with
    | [ goal_json ] ->
@@ -420,7 +420,7 @@ let test_goal_list_joins_the_ledger () =
     (match Goal_verification.mark_proof_pending config ~goal_id ~criterion:(current_criterion config goal_id) with
      | Ok _ -> ()
      | Error msg -> fail msg);
-  let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" []) in
+  let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" [ "detailed", `Bool true ]) in
   let goals = Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list in
   (match
      Goal_verification.load_records_by_goal_id_authoritative config
@@ -451,7 +451,7 @@ let test_goal_list_renders_a_ledger_error_state () =
           ; "target_value", `String "1"
           ]));
   poison_ledger config;
-  let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" []) in
+  let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" [ "detailed", `Bool true ]) in
   let goals = Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list in
   match goals with
   | [ goal_json ] ->
@@ -516,7 +516,7 @@ let test_measurement_requires_current_criterion_and_evidence () =
   check string "evidence survives" "artifact:measured-count"
     (json_state first_measurement [ "record"; "evidence" ]);
   let listed = must_succeed "goal list after measurement"
-      (dispatch ctx ~name:"masc_goal_list" []) in
+      (dispatch ctx ~name:"masc_goal_list" [ "detailed", `Bool true ]) in
   (match Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list with
    | [ goal_json ] ->
        check string "list reports actual state" "reported"
@@ -557,7 +557,7 @@ let test_measurement_requires_current_criterion_and_evidence () =
     (json_state (Goal_measurement.projection (Goal_measurement.load config) changed)
        [ "state" ]);
   let listed = must_succeed "goal list after criterion revision"
-      (dispatch ctx ~name:"masc_goal_list" []) in
+      (dispatch ctx ~name:"masc_goal_list" [ "detailed", `Bool true ]) in
   (match Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list with
    | [ goal_json ] ->
        check string "revised criterion has no actual" "not_recorded"

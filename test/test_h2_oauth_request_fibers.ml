@@ -63,14 +63,14 @@ let with_gateway run =
                     Eio.Promise.await released));
                 Eio.Promise.await occupied;
                 let reader_ready, mark_reader_ready = Eio.Promise.create () in
-                let handler ~request_sw addr reqd =
+                let handler ~stream_end addr reqd =
                   match (H2.Reqd.request reqd).target with
                   | "/fast" ->
                     Response.json ~compress:false "alive"
-                      (Masc.Http_reqd.of_h2 ~stream_sw:request_sw
+                      (Masc.Http_reqd.of_h2 ~stream_end
                          ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) reqd)
                   | "/oauth/register" ->
-                    gateway ~request_sw addr reqd;
+                    gateway ~stream_end addr reqd;
                     (* No DATA has been sent yet. Returning from the actual
                        gateway means its OAuth body reader is registered. *)
                     Eio.Promise.resolve mark_reader_ready ()
@@ -78,7 +78,7 @@ let with_gateway run =
                 let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
                 let server = Eio.Fiber.fork_promise ~sw (fun () ->
                   Eio.Switch.run @@ fun conn_sw ->
-                  Server_bootstrap_http.serve_h2_connection ~sw:conn_sw
+                  Server_bootstrap_http.serve_h2_connection ~clock:(Eio.Stdenv.clock env) ~sw:conn_sw
                     ~h2_request_handler:handler
                     ~h2_error_handler:(Server_h2_gateway.make_error_handler ())
                     (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) server_flow) in

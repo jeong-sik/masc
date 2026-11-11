@@ -3,8 +3,8 @@
 
     [transcript_caches] holds, per path, the messages parsed from the part of
     the transcript that was read so far ([transcript_cache]).
-    [remember_transcript] and [forget_transcript] change an entry under
-    [transcript_caches_mu], and [transcript_identity] gives the device, the
+    [remember_transcript], [advance_transcript] and [forget_transcript] change
+    an entry under [transcript_caches_mu], and [transcript_identity] gives the device, the
     inode and the size of the file, which say whether an entry still holds.
     [parse_transcript_row_permissive] reads one line to a redacted message and
     drops a line that does not parse. [parse_transcript_row_strict] reads it
@@ -48,6 +48,12 @@ val transcript_caches : (string, transcript_cache) Hashtbl.t
 val transcript_caches_mu : Mutex.t
 
 val remember_transcript : string -> transcript_cache -> unit
+
+val advance_transcript : string -> from:transcript_cache -> transcript_cache -> unit
+(** [advance_transcript path ~from cache] registers [cache] only while the
+    table still holds [from], the very entry a load went on from. After a
+    purge in between there is no entry, and after a load that finished first
+    there is another one; either way nothing is registered. *)
 
 val forget_transcript : string -> unit
 

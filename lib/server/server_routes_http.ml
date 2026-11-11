@@ -6,14 +6,14 @@ include Server_routes_http_keeper_stream
 
 module Http = Http_server_eio
 
-let make_routes ~port:_ ~host:_ ~sw ~clock =
+let make_routes_with_transport ~port:_ ~host:_ ~sw ~transport_sw ~clock =
   (* Register connectors before routes are wired up *)
   Channel_gate_connector.register (module Channel_gate_discord_state);
   Channel_gate_connector.register (module Channel_gate_imessage_state);
   Channel_gate_connector.register (module Channel_gate_slack_state);
   Channel_gate_connector.register (module Channel_gate_telegram_state);
   Http.Router.create ()
-  |> Server_routes_http_routes_frontend.add_routes ~sw ~clock
+  |> Server_routes_http_routes_frontend.add_routes ~clock
   |> Server_oauth_http.add_routes
   |> Server_keeper_oauth_http.add_routes ~clock
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
@@ -43,4 +43,8 @@ let make_routes ~port:_ ~host:_ ~sw ~clock =
   |> Server_routes_http_routes_repositories.add_routes
   |> Server_routes_http_routes_workspace.add_routes
   |> Server_ide_http.add_routes
-  |> Server_ide_lsp_proxy.add_routes ~sw ~clock
+  |> Server_ide_lsp_proxy.add_routes ~transport_sw ~clock
+
+let make_routes ~port ~host ~sw ~clock =
+  make_routes_with_transport ~port ~host ~sw ~transport_sw:sw ~clock
+;;

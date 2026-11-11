@@ -32,15 +32,15 @@ let create choices =
   { choices; cursor=0; choosing=true; fetched=Fetched.initial;
     document=selection_document choices 0 }
 type action = Close | Choose of int | Open | Retry | Move of Reading.movement | Ignore
-let action ~key ~height t =
+let action ~key t =
   match key with
   | "esc" -> Close
   | "j" | "down" when t.choosing -> Choose 1
   | "k" | "up" when t.choosing -> Choose (-1)
   | "\r" | "\n" | "enter" when t.choosing -> Open
   | "r" when not t.choosing -> Retry
-  | "pagedown" -> Move (Reading.By height)
-  | "pageup" -> Move (Reading.By (-height))
+  | "pagedown" -> Move Reading.Page_down
+  | "pageup" -> Move Reading.Page_up
   | "home" | "g" -> Move Reading.First
   | "end" | "G" -> Move Reading.Last
   | "j" | "down" | "wheel-down" when not t.choosing -> Move (Reading.By 1)

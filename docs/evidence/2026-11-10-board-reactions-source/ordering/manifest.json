@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "source": {
+    "upper": "269438e6e3158087a8ded0587bec03466d0f6190",
+    "lower": "68d96c32a0fb3182f7436afb181a62c7257c947d",
+    "base": "fdde0336dd0166103aef3e470f0cacc85ee85c26",
+    "dashboard_src_tree": "1d25509d0f9c8d9eecafb90179d433927d35ce25",
+    "fixture_tree": "d31468f4f574e2b87d9843663d7089fbb8bc355e"
+  },
+  "browser": {
+    "space": 65,
+    "page": "p1",
+    "transport": "Chromium via ego-browser 2.2.0",
+    "scope": "Synthetic HTTP, real API normalization and BoardSurface; no live Board write",
+    "post_count": 1,
+    "released_stale_batch_count": 0,
+    "displayed_count": 1,
+    "selected": true,
+    "votes_unknown_disabled": true,
+    "screenshot_visually_opened": true,
+    "screenshot_pixels": [
+      1536,
+      978
+    ],
+    "owned_vite_session": 21902,
+    "owned_vite_stop_exit": 130,
+    "page_after_capture": "about:blank"
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "da66195e5e6a8a72e5fcedc254ccaefb638920e2d0d386640b4b5a3d6b1e4606",
+      "bytes": 2938
+    },
+    {
+      "path": "baseline-failure.txt",
+      "sha256": "3fac91d2d2bb7be635484c86961a146317bd6e0d5d11bffa93bc5e225aa46923",
+      "bytes": 2197
+    },
+    {
+      "path": "confirmed.json",
+      "sha256": "94859c6bacbdb246aaa9abb5c8d0e8bdc3386fd4c3a43d707012b1801c0b4c25",
+      "bytes": 2342
+    },
+    {
+      "path": "initial.json",
+      "sha256": "0dc494919049867623761cddfe0460e3532bdd9f88b315c2bfa61e869ee8e680",
+      "bytes": 1395
+    },
+    {
+      "path": "late.json",
+      "sha256": "d4e6a35680d1c71de679d08b8f9eba212eb8b209af4ba1b5280afb90c88a3dff",
+      "bytes": 2850
+    },
+    {
+      "path": "late.png",
+      "sha256": "868a9b27e23192957fc52c4c7f27e490cad8c837815b4a8bb9c4ed9ec3d7185f",
+      "bytes": 57044
+    },
+    {
+      "path": "validation.json",
+      "sha256": "d51d0a7b1f677dc0f8b479e479873cfc1e010da28dd0e6229853f5bcbf1f8970",
+      "bytes": 10398
+    }
+  ]
+}

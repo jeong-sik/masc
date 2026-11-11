@@ -1,0 +1,24 @@
+ 운영  작업  ▸키퍼  기능·플러그인 2›
+
+  MASC Keepers (3)            HTTP [연결됨]
+   ‹3  time  ▸memory  age  runtime  24h
+ ? 3 unknown ???
+     fleet max 0     │              │ max 0
+   fleet blocked   running 0/2
+   awaiting verdict 1
+   not running: relay, scout
+
+     keeper          │ librarian    │ dige…
+ ▌ ■ world · shared  │ — no ledger  │ ?
+   ▸ NO MEMORY READ… │ 3            │ Σ la…
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────
+  조치 필요 3  Esc:dashboard  q:quit  …?
+ › no keeper selected

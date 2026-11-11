@@ -934,7 +934,7 @@ let tool_detail_palette () : Tool_detail.palette =
     (* A field's name and a document member's name are the same kind of
        thing, so they read in the same colour; the weight is what separates
        the tree's own labels from the names inside a payload. *)
-  ; label = Ansi.bold ^ Masc_tui_theme.tone Masc_tui_theme.Accent
+  ; label = Ansi.bold ^ Theme.accent ()
   ; separator = Theme.recede ()
   ; key = Theme.Syntax.json_key ()
   ; string_ = Theme.Syntax.string ()
@@ -4477,7 +4477,7 @@ let render_keeper_message (state : state) =
     let telemetry_cells = max 0 (cols - 1) in
     let telemetry_keeper =
       if state.msg_origin_display = Message_layout.Origin_bare then ""
-      else Masc_tui_theme.tone Masc_tui_theme.Accent
+      else Theme.accent ()
       ^ fit_runtime_id (telemetry_cells / 3) display_keeper_name ^ Ansi.reset ^ " · "
     in
     let telemetry_identity_cells =
@@ -4880,9 +4880,9 @@ let render_keeper_message (state : state) =
                              " · " ^ Masc_tui_keys.expand_turn_label ^ ":details"
                            else "") )
                     else
-                      ( Masc_tui_theme.tone Masc_tui_theme.Accent
+                      ( Theme.accent ()
                       , "  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
-                        ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                        ^ Ansi.reset ^ (Theme.accent ())
                         ^ " · " ^ text ^ queue_hint ^ fold_suffix ) in
                   (match Keeper_chat_transcript.phase live with
                    | Working -> Render_schedule.Activity_tick.note_motion_if_visible
@@ -5195,7 +5195,7 @@ let render_keeper_message (state : state) =
           | Voice_recording, Some db when not state.voice_capture_withdrawn ->
             Printf.sprintf
               "%s%s%s  %s%.0f dB%s"
-              (Masc_tui_theme.tone Masc_tui_theme.Accent)
+              (Theme.accent ())
               (Masc_tui_footer.voice_bar
                  ~width:Masc_tui_footer.voice_bar_width
                  ~db:(Some db))

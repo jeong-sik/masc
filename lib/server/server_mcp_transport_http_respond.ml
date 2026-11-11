@@ -203,11 +203,15 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
       ]
     |> Yojson.Safe.to_string
   in
+  let protocol_headers = match session_id with
+    | Some session_id -> json_headers ~deps session_id protocol_version origin
+    | None -> Server_mcp_transport_http_headers.sessionless_json_headers ~deps protocol_version origin
+  in
   let headers =
     Httpun.Headers.of_list
       (("content-length", string_of_int (String.length body))
       :: ("retry-after", retry_after_header)
-      :: json_headers ~deps session_id protocol_version origin)
+      :: protocol_headers)
   in
   let response = Httpun.Response.create ~headers `Too_many_requests in
   Transport_metrics.inc_sse_reject ~reason:reason_label;

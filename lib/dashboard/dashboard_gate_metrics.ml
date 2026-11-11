@@ -185,12 +185,6 @@ let approval_queue_summary_of_entries ~now_ts entries : approval_summary =
       oldest_pending_sec = Some oldest;
     }
 
-let approval_queue_summary ~now_ts ~base_path ()
-  : (approval_summary, Keeper_approval_queue_result.storage_error) result
-  =
-  Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
-  |> Result.map (approval_queue_summary_of_entries ~now_ts)
-
 (* ── JSON projection ─────────────────────────────────────── *)
 
 let tool_rejections_json ?(top_n = 20)

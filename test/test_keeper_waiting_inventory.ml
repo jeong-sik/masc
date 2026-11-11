@@ -6,6 +6,7 @@ module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_owner_registry = Masc.Keeper_owner_registry
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_shutdown_types = Masc.Keeper_shutdown_types
+module Keeper_shutdown_store = Masc.Keeper_shutdown_store
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Otel_metric_store = Masc.Otel_metric_store
 module Server_keeper_waiting_inventory = Masc.Server_keeper_waiting_inventory
@@ -499,6 +500,32 @@ let test_keeper_scoped_projection_excludes_other_keepers () =
     (Option.is_none (find_keeper json other_keeper))
 ;;
 
+let shutdown_operation_fixture config keeper_name operation_id phase =
+  let trace_id = (keeper_meta_exn config keeper_name).runtime.trace_id in
+  { Keeper_shutdown_types.schema_version = Keeper_shutdown_types.schema_version
+  ; revision = 1
+  ; operation_id
+  ; keeper_name
+  ; lane_ownership = Dormant_meta
+  ; trace_id
+  ; actor = "test"
+  ; cleanup_intent = { reason = Operator_stop_retain_meta; remove_session = false }
+  ; turn_disposition = No_inflight_turn
+  ; expected_backlog_version = 0
+  ; owned_task_ids = []
+  ; join_evidence = None
+  ; phase
+  ; created_at = Masc_domain.now_iso ()
+  ; updated_at = Masc_domain.now_iso ()
+  }
+;;
+
+let persist_shutdown_exn config operation =
+  match Keeper_shutdown_store.persist_new ~config operation with
+  | Ok () -> ()
+  | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+;;
+
 let test_owner_shutdown_row_is_deferred () =
   with_workspace
   @@ fun config ->
@@ -509,6 +536,8 @@ let test_owner_shutdown_row_is_deferred () =
     (fun () ->
       let base_path = config.Workspace_utils_backend_setup.base_path in
       let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+      persist_shutdown_exn config
+        (shutdown_operation_fixture config keeper_name operation_id Joined_idle);
       (match
          Keeper_owner_registry.begin_shutdown
            ~base_path
@@ -549,7 +578,7 @@ let test_owner_shutdown_row_is_deferred () =
               (json_string_member "waiting_on" row);
             check string "shutdown row wake producer" "keeper_owner_actor"
               (json_string_member "wake_producer" row);
-            check string "shutdown row next action" "keeper_shutdown_finalize"
+            check string "shutdown waits for its active worker" "wait_for_keeper_shutdown"
               (json_string_member "next_action" row);
             check string "shutdown operation is correlated"
               (Keeper_shutdown_types.Operation_id.to_string operation_id)
@@ -581,6 +610,129 @@ let test_owner_shutdown_row_is_deferred () =
           (json_string_member "state" keeper);
         check int "rollback removes shutdown row" 0
           (json_int_member "waiting_count" keeper))
+;;
+
+let with_shutdown_fence config keeper_name operation_id f =
+  let base_path = config.Masc.Workspace.base_path in
+  (match Keeper_owner_registry.begin_shutdown ~base_path ~keeper_name ~operation_id with
+   | Ok (Masc.Keeper_owner.Shutdown_reserved _) -> ()
+   | Ok (Masc.Keeper_owner.Shutdown_already_reserved _) -> fail "unexpected existing fence"
+   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+  Fun.protect
+    ~finally:(fun () ->
+      match Keeper_owner_registry.rollback_shutdown ~base_path ~keeper_name ~operation_id with
+      | Ok Masc.Keeper_owner.Shutdown_rolled_back -> ()
+      | Ok Masc.Keeper_owner.Shutdown_not_reserved
+      | Ok (Masc.Keeper_owner.Shutdown_reserved_by_other _) -> fail "shutdown fence changed"
+      | Error error -> fail (Keeper_owner_registry.command_error_to_string error))
+    f
+;;
+
+let test_shutdown_next_action_follows_durable_operation () =
+  with_workspace @@ fun config ->
+  let open Keeper_shutdown_types in
+  let keeper_name = "shutdown-guidance" in
+  ensure_keeper config keeper_name;
+  let cleanup =
+    { settled_task_ids = []; pending_confirms_removed = 0
+    ; meta_snapshot_digest = Masc.Keeper_meta_json.Snapshot_digest.of_meta
+        (keeper_meta_exn config keeper_name) }
+  in
+  let finalization completion =
+    { cleanup; meta_removed = true; session_removed = false
+    ; registry_unregistered = true; completion }
+  in
+  let active_turn =
+    { lane = Some Autonomous; admitted_at = Some 1.; observed_turn_id = None
+    ; observation_started_at = None }
+  in
+  let cases =
+    [ Prepared, Operator_stop_retain_meta, "wait_for_keeper_shutdown"
+    ; Joining_lanes, Operator_stop_retain_meta, "wait_for_keeper_shutdown"
+    ; Cleanup_ready cleanup, Operator_stop_retain_meta, "wait_for_keeper_shutdown"
+    ; Blocked { stage = Task_settlement; detail = "recorded settlement failure" },
+      Operator_stop_retain_meta, "inspect_blocked_keeper_shutdown"
+    ; Reconciliation_required active_turn, Operator_stop_retain_meta,
+      "inspect_keeper_shutdown_reconciliation"
+    ; Finalized (finalization (Completion_pending Dashboard_keeper_purged)),
+      Dashboard_keeper_purge { requested_name = keeper_name }, "retry_keeper_shutdown_completion"
+    ; Finalized (finalization (Completion_delivery_failed
+        { action = Dashboard_keeper_purged; detail = "delivery failed" })),
+      Dashboard_keeper_purge { requested_name = keeper_name }, "retry_keeper_shutdown_completion"
+    ; Finalized (finalization (Completion_pending Supervisor_cleaned)),
+      Supervisor_cleanup, "inspect_keeper_shutdown_completion"
+    ; Finalized (finalization (Completion_delivered Supervisor_cleaned)),
+      Supervisor_cleanup, "inspect_keeper_shutdown_fence"
+    ; Superseded (Operator_metadata_update { actor = "test" }),
+      Operator_stop_retain_meta, "inspect_keeper_shutdown_fence"
+    ]
+  in
+  List.iter (fun (phase, reason, expected_action) ->
+    let operation_id = Operation_id.generate () in
+    let operation = shutdown_operation_fixture config keeper_name operation_id phase in
+    let operation = { operation with cleanup_intent = { operation.cleanup_intent with reason } } in
+    persist_shutdown_exn config operation;
+    with_shutdown_fence config keeper_name operation_id (fun () ->
+      let json = Server_keeper_waiting_inventory.dashboard_json config in
+      let keeper = match find_keeper json keeper_name with
+        | Some keeper -> keeper | None -> fail "keeper missing" in
+      check string "fence remains deferred" "deferred" (json_string_member "state" keeper);
+      match U.(keeper |> member "waiting_on" |> to_list) with
+      | [ row ] ->
+        check string "action matches recorded operation capability" expected_action
+          (json_string_member "next_action" row);
+        let detail = U.member "detail" row in
+        check string "phase is the persisted observation" (phase_to_string phase)
+          (json_string_member "shutdown_phase" detail);
+        check int "revision is the persisted observation" operation.revision
+          (json_int_member "shutdown_revision" detail);
+        (match phase with
+         | Blocked failure ->
+           check string "blocked stage remains available" (failure_stage_to_string failure.stage)
+             (json_string_member "failure_stage" detail);
+           check string "blocked evidence remains available" failure.detail
+             (json_string_member "failure_detail" detail)
+         | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+         | Reconciliation_required _ | Finalized _ | Owner_absent _
+         | Operator_absence_acknowledged _ | Superseded _ -> ())
+      | rows -> failf "expected one shutdown row, got %d" (List.length rows))) cases
+;;
+
+let test_unreadable_shutdown_keeps_fence_and_read_error () =
+  with_workspace @@ fun config ->
+  let keeper_name = "shutdown-unreadable" in
+  ensure_keeper config keeper_name;
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  with_shutdown_fence config keeper_name operation_id (fun () ->
+    let observe () =
+      let json = Server_keeper_waiting_inventory.dashboard_json config in
+      let keeper = match find_keeper json keeper_name with
+        | Some keeper -> keeper | None -> fail "keeper missing" in
+      check string "unreadable record does not release the fence" "deferred"
+        (json_string_member "state" keeper);
+      let rows = U.(keeper |> member "waiting_on" |> to_list) in
+      check int "fence and storage failure remain separate" 2 (List.length rows);
+      let fence = List.find (fun row -> json_string_member "source" row = "owner_shutdown") rows in
+      check string "unknown phase cannot suggest finalization" "inspect_keeper_shutdown_record"
+        (json_string_member "next_action" fence);
+      check bool "unknown phase is not defaulted" true
+        U.(fence |> member "detail" |> member "shutdown_phase" = `Null);
+      let health = Server_keeper_waiting_inventory.health_json config in
+      check string "storage failure remains unavailable" "unavailable"
+        (json_string_member "status" health);
+      check bool "storage failure preserves unknown completeness" false
+        (json_bool_member "counts_known" health);
+      check bool "storage failure remains actionable" true
+        (json_bool_member "operator_action_required" health);
+      check int "one storage failure is observed" 1 (json_int_member "read_error_count" health)
+    in
+    observe ();
+    let path = match Keeper_shutdown_store.path ~config ~keeper_name operation_id with
+      | Ok path -> path | Error error -> fail (Keeper_shutdown_store.error_to_string error) in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    (match Fs_compat.save_file_atomic path "not-json" with
+     | Ok () -> () | Error detail -> fail detail);
+    observe ())
 ;;
 
 let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
@@ -1429,6 +1581,10 @@ let () =
             test_keeper_scoped_projection_excludes_other_keepers
         ; test_case "Owner shutdown row is deferred" `Quick
             test_owner_shutdown_row_is_deferred
+        ; test_case "shutdown next action follows the recorded operation" `Quick
+            test_shutdown_next_action_follows_durable_operation
+        ; test_case "unreadable shutdown preserves fence and storage failure" `Quick
+            test_unreadable_shutdown_keeps_fence_and_read_error
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
         ; test_case "scoped schedules preserve participants" `Quick test_scoped_schedules_keep_participant_identity

@@ -3,7 +3,7 @@ rfc: "main-domain-scheduler-latency"
 title: "Main domain scheduler latency: measure it, then remove what makes it wait"
 status: Draft
 created: 2026-09-05
-updated: 2026-09-05
+updated: 2026-11-11
 author: vincent
 related: ["0204", "0239", "0302"]
 ---
@@ -150,6 +150,92 @@ Phase 0·0b·1 이 머지된 빌드. 호스트는 오후의 load 80~300 상태�
 첫 구현 단위는 `Keeper_checkpoint_store.list_agent_core_history_files`다. 현재 `lib/keeper/keeper_checkpoint_store.ml:46-53`은 `Sys.readdir` 뒤의 배열 변환·필터·정렬까지 하나의 systhread 클로저에서 실행한다. 이 경로에는 Eio 효과나 공유 Eio 락이 없으므로 동일 파일의 체크포인트 JSON 변환처럼 도메인 풀로 옮길 수 있다. 이 함수는 대시보드 체크포인트 목록(`server_dashboard_http_keeper_api_checkpoints.ml:165`), 저장 뒤 보관 정리(`keeper_checkpoint_store.ml:122,184`), exact snapshot 탐색(`:1374`)에서 호출된다. `Domain_pool_ref.submit_io_or_inline`은 설치된 풀의 Eio fiber에서 작업을 제출하고, raw Domain이나 이미 풀에서 실행 중인 호출에서는 inline으로 유지한다. 기존 정렬 결과와 오류 전파를 유지하고, 실제 호출 경로를 거치는 테스트에서 파일 수를 고정해 main 도메인 지연을 수정 전후 같은 조건으로 잰다. 서버 전체의 `/health` 지연은 별도 라이브 계기이며, 이 한 경로의 개선만으로 #25893 전체가 해결됐다고 판정하지 않는다.
 
 그다음 구현 단위는 7.2의 파일 읽기·쓰기 루프와 7.3의 범용 systhread 래퍼다. 각 단위에서 Eio 효과·락·가변 상태를 먼저 추적해 순수 작업만 도메인 풀에 제출한다. 모든 호출을 하나의 래퍼 교체로 일괄 전환하지 않는다. 작업별 동일 입력의 전후 지연과 남은 호출부 재고를 기록한 뒤에만 #25893의 종료 여부를 판단한다.
+
+### 7.6 Phase 2 를 앞으로 — 메인 도메인이 내보내는 blocking 작업을 `Systhread_host` 로 (2026-11-11)
+
+4.3 은 "프로브가 stall 을 보이면 Phase 2 를 다시 앞으로" 라고 정했다. 지금이 그 경우다.
+
+#### 측정
+
+운영 서버의 메인 스레드를 `sample` 로 60초씩 두 번 봤다. 대기 표본은 부르는 쪽으로 나눴다.
+
+| | 11-11 10:25 KST, build `90ec37b2a344` | 11-11 14:02 KST, build `e531fa82d641` |
+|---|---|---|
+| 호스트 load1 | 기록 없음 | 168~292 |
+| 표본 | 21,576 | 10,106 |
+| 할 일 없음 (`poll`) | 39.5% | 5.3% |
+| 실행 중이거나 syscall 안 | 38.8% | 62.0% |
+| 도메인 락 대기 (`caml_thread_leave_blocking_section`·`thread_yield` → `__psynch_cvwait`) | 18.0% | 29.0% |
+| `Stdlib.Mutex` 대기 | 2.2% | 1.7% |
+| GC stop-the-world 대기 | 1.4% | 1.9% |
+
+- 둘째 창의 `/health` `scheduler.lag`(600 표본): p50 4.3 ms, p95 198.6 ms, p99 502.6 ms, 최대 1,100 ms. 같은 날 14:27(load1 121)에는 p50 29.3 ms, p99 1,128.8 ms, 최대 4,067.5 ms, 1초 이상 stall 10번이었다.
+- 두 창은 load 가 달라 서로 견주지 않는다. 메인 스레드는 첫 창 표본의 18%, 둘째 창 표본의 29% 에서 자기 도메인의 락을 기다리고 있었다.
+- 같은 날 runtime events 로 본 45초(load1 208~263) 동안 도메인 0 의 fiber 는 systhread 작업을 약 10,900번(초당 약 240번) 내보냈다. suspend 라벨로 셌다.
+
+| 진입점 | 45초 동안 | 많은 라벨 |
+|---|---|---|
+| `Fs_compat` 안의 `Eio_unix.run_in_systhread` (13파일 33곳) | 약 5,770 | `fs-compat-durable-append` 4,104, `fs-compat-load-file-opt` 569, `fs-compat-load-file` 227, `fs-compat-append-jsonl` 194 |
+| 그 밖의 masc 라벨. 대부분 `Eio_guard.run_in_systhread` (68파일 146곳) | 약 3,000 | `auth-credential-io` 2,071, `file-lock-op` 399 |
+| Eio 가 스스로 띄우는 것 (`eio_posix` 의 `in_worker_thread`) | 약 1,960 | `fstat` 1,384, `openat` 271, `mkdir` 211 |
+| 라벨 없음 (`systhread`) | 144 | piaf 와 라벨 없이 부르는 masc 코드 |
+
+- 두 60초 표본에서 systhread 는 3,400개와 2,827개가 잡혔다. Eio 의 thread pool 은 쉬는 스레드를 20 ms 뒤에 버린다(eio 1.3 `lib_eio/unix/thread_pool.ml`).
+- systhread 가 syscall 밖에서 돌린 코드의 잎은 `Yojson` 문자열 lex, SHA-256, `Yojson` 쓰기, blit 순이다. `sample` 은 OCaml 호출 사슬을 따라가지 못해서 어느 라벨의 클로저인지는 이 표본으로 못 가른다.
+- 7.4 가 비워 둔 값("클로저가 락을 얼마나 오래 쥐는가")은 위 표의 도메인 락 대기다.
+
+#### 원리
+
+- OCaml 매뉴얼(5.5, "The threads library"): "Only one thread at a time is allowed to run OCaml code on a particular domain." 병렬은 system 이나 C 라이브러리 코드를 도는 부분에서만 생긴다.
+- systhread 는 `Thread.create` 를 부른 도메인에 속한다. `Eio_unix.run_in_systhread` 는 부른 fiber 의 도메인에서 스레드를 띄운다.
+- 그래서 메인 도메인이 내보낸 클로저가 JSON 을 풀거나 해시를 내는 동안 메인 스케줄러는 선다. 클로저가 syscall 만 해도, 결과를 돌려주려고 락을 잡은 스레드가 OS 에 밀려나면 메인 스케줄러는 그 스레드가 다시 돌 때까지 선다. 호스트 load 가 높을수록 이 대기가 길다.
+
+#### 벤치
+
+fiber 12개가 "파일 읽기 → JSON 파싱 → 한 줄 append → fsync" 를 내보내고, 같은 도메인의 probe 가 5 ms 씩 자며 늦게 깬 시간을 잰다. 운영처럼 막혀 있는 도메인 13개를 둔다. 8초씩 세 번, 방식을 번갈아 돌렸다(load1 80~83, OCaml 5.5.2, eio 1.3). 값은 세 번의 범위다.
+
+| 파싱 크기 | 방식 | p50 ms | p95 ms | p99 ms |
+|---|---|---|---|---|
+| 16 KB | 부른 도메인의 systhread (지금) | 0.65~0.68 | 3.05~4.46 | 8.17~11.06 |
+| 16 KB | 다른 도메인의 fiber 가 띄운 systhread | 0.38~0.42 | 1.39~2.10 | 3.36~5.75 |
+| 256 KB | 부른 도메인의 systhread (지금) | 5.55~6.80 | 19.44~28.51 | 28.99~51.81 |
+| 256 KB | 다른 도메인의 fiber 가 띄운 systhread | 0.78~0.83 | 5.06~6.68 | 16.39~26.13 |
+| 작업 없음 | probe 만 | 0.64~0.65 | 1.12~1.28 | 2.97~3.38 |
+
+- 둘째 방식이 `Systhread_host.run` 이 하는 일이다(`lib/core/systhread_host.ml`, #46342).
+- 작업이 없어도 이 호스트의 이 load 에서는 p99 가 3 ms 다. 단계의 성공 기준은 4.3 대로 load 를 함께 적어 판정한다.
+- 처리량은 256 KB 에서 191~230 → 176~192 작업/초로 줄었다. 클로저끼리는 두 방식 모두 한 도메인의 락을 나눠 쓴다.
+
+#### 결정
+
+메인 도메인의 fiber 가 내보내는 blocking 클로저는 `Systhread_host` 의 도메인에서 돈다. 클로저가 도는 문맥은 지금과 같은 systhread 다(Eio handler 없음). 바뀌는 것은 그 스레드가 속한 도메인 하나다.
+
+- `Systhread_host` 는 이미 부팅 때 뜨고(`server_runtime_bootstrap.ml`) `Domain_budget` 이 그 도메인을 센다. 도메인 수는 늘지 않는다. 지금 부르는 곳은 16파일 56곳이고, 같은 45초 창에서 점유 0.1% 이하인 도메인이 넷 있었다.
+- 취소·예외·host 실패 때의 동작은 `Systhread_host.run` 의 계약 그대로다: 이미 취소된 호출자는 넘기지 않고, 넘긴 뒤에는 끝날 때까지 기다리고, 예외는 backtrace 와 함께 다시 던지고, host 가 죽으면 부른 도메인에서 돈다.
+- pool 도메인에서 부른 것은 지금처럼 자기 도메인의 스레드에서 돈다(`Executor_pool_ref.in_worker_context`).
+
+7.5 는 "하나의 래퍼 교체로 일괄 전환하지 않는다" 고 적었다. 그 문장은 클로저를 domain pool 의 **fiber** 로 옮기는 경우를 두고 쓴 것이다. 거기서는 클로저 안의 Eio 효과와 Eio 락이 다른 도메인의 문맥에서 돌게 되므로 하나씩 추적해야 했다. 여기서는 클로저가 여전히 systhread 에서 돌므로 Eio 효과는 지금처럼 쓸 수 없고, 클로저끼리는 지금처럼 한 도메인의 락으로 차례를 지킨다. 새로 생기는 것은 "클로저와 메인 도메인 fiber 가 동시에 돈다" 하나다. 7.5 가 같이 든 가변 상태는 여기서도 남는 위험이다. 그래서 진입점 단위로 옮기고, 아래 검사로 막는다.
+
+#### 순서
+
+1. **S1 `Fs_compat`**: `run_blocking_private_file_transaction` 과 load·save·append 의 `Eio_unix.run_in_systhread` 33곳이 한 함수로 모이고, 그 함수가 host 로 보낸다. `fs_compat` 은 `masc_core` 아래 라이브러리라 `Systhread_host` 를 볼 수 없다. `Systhread_host` 를 `eio`·`eio.unix`·`eio_main` 만 쓰는 leaf 라이브러리로 내리고, 지금 쓰는 `Eio_guard.execution_context`·`Executor_pool_ref.in_worker_context`·`Log`·`Minor_heap.tune` 은 leaf 로 같이 내리거나 `start` 의 인자로 받는다. 메인이 내보내는 작업의 약 53% 다.
+2. **S2 `Eio_guard.run_in_systhread`**: 본문이 `Systhread_host.run` 을 부른다. 호출부 146곳은 안 고친다. 약 28% 다.
+3. **S3 Eio 가 스스로 띄우는 것**: `Eio.Path` 호출을 `Fs_compat` 으로 바꾸는 일이라 S1·S2 의 결과를 본 뒤에 정한다.
+
+7.3 의 닫힌 syscall 타입(`Blocking_syscall.t`)은 이 순서 뒤에 다시 본다. 클로저가 메인 도메인의 락을 쥐지 않게 되면 그 타입이 막으려던 것이 메인 도메인에서는 사라진다.
+
+#### 검사
+
+- **도메인을 가리는 코드**: `Systhread_host.run` 의 계약대로 클로저는 자기가 도는 도메인에 기대면 안 된다. 각 단계에서 클로저가 닿는 `Domain.self`·`Domain.DLS`·`Eio_context.run_on_owner_domain` 을 찾아 PR 본문에 적는다.
+- **race**: ThreadSanitizer switch(`ocaml-option-tsan`, OCaml 5.5.2)로 그 단계가 건드리는 시험과 서버 기동 smoke 를 돌리고, 메인 도메인 스레드와 host 스레드가 짝인 보고를 0 으로 만든다. 단계 전후의 보고를 PR 본문에 싣는다.
+- **벤치**: 위 벤치를 저장소에 싣고(S1 PR) 같은 표를 다시 낸다.
+- **라이브**: 배포 뒤 같은 `sample` 분류에서 도메인 락 대기 비율과, runtime events 에서 도메인 0 이 내보내는 systhread 작업 수를 다시 잰다. load 를 함께 적는다.
+
+#### 하지 않는 것
+
+- 클로저를 고치지 않는다. 호출부도 고치지 않는다.
+- systhread 수나 동시 실행 수에 상한을 두지 않는다. `Systhread_host` 는 지금처럼 받은 작업마다 바로 스레드를 준다.
+- `auth-credential-io` 가 요청마다 인증 파일을 읽는 것(45초에 2,071번)은 이 절에서 줄이지 않는다. 인증 코드라 따로 설계하고 사람이 리뷰한다.
 
 ## 8. Phase 4 표적 — Memprof 실측 (2026-09-05 19:15 KST, build `c94f057edc`)
 

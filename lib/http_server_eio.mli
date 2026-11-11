@@ -124,6 +124,17 @@ module Response : sig
     -> Http_reqd.t
     -> unit
 
+  (** {!bytes} for a body its owner keeps past the request
+      ({!Http_reqd.respond_with_shared}): on HTTP/2 it takes nothing from the
+      response ledger. *)
+  val shared
+    :  ?status:Httpun.Status.t
+    -> ?headers:(string * string) list
+    -> content_type:string
+    -> Shared_body.t
+    -> Http_reqd.t
+    -> unit
+
   (** Empty response.  Default status [`No_content].  Sends no
       content-type header; always includes [content-length: 0] so
       keep-alive clients and proxies see an explicit end-of-body. *)
@@ -376,10 +387,19 @@ module Router : sig
   type ws_handler =
     upgrade:upgrade option -> Httpun.Request.t -> Http_reqd.t -> unit
 
-  (** A route either handles the request in-band ([Plain]) or upgrades
-      the connection to WebSocket ([Ws]).  RFC-0281 S3.3. *)
+  (** A route either handles the request in-band ([Owner], [Serving]) or
+      upgrades the connection to WebSocket ([Ws]).  RFC-0281 S3.3.
+
+      The two in-band targets say which domain the handler runs on when
+      connections run on another domain than the server's root switch (RFC
+      http-transport-runs-on-its-own-domain §3.2). An [Owner] handler runs on
+      the root switch's domain. A [Serving] handler runs on its connection's
+      domain, beside every handler of the other domain, so all it reaches
+      must be safe to share between domains (§3.4). When connections run on
+      the root switch's domain the two are the same place. *)
   type route_target =
-    | Plain of request_handler
+    | Owner of request_handler
+    | Serving of request_handler
     | Ws of ws_handler
 
   type route =
@@ -558,6 +578,13 @@ module Router : sig
     val prefix_post : 'h auth -> string -> 'h -> t -> t
     val prefix_put : 'h auth -> string -> 'h -> t -> t
     val prefix_delete : 'h auth -> string -> 'h -> t -> t
+
+    (** Routes whose handler runs on its connection's domain
+        ({!route_target}'s [Serving]). The functions above register [Owner]
+        routes. *)
+    module Serving : sig
+      val get : 'h auth -> string -> 'h -> t -> t
+    end
 
     (** A WebSocket-upgrade route. The handler checks the credential before it
         upgrades, so the only kind that applies is [Self_authenticated

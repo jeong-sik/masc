@@ -208,9 +208,28 @@ end
 (** {1 Keeper turn admission bounds} *)
 
 module KeeperAdmissionBounds : sig
-  (** Maximum durable queue selections admitted into one turn, clamped to
-      [1, 256]. Default 32. Selections past this bound stay pending for a later
-      turn (#29365). *)
+  (** The name the boot store keeps the runtime file's
+      [turn.admission_max_events] under. The registry row and {!max_events}
+      both read it from here. *)
+  val max_events_env_key : string
+
+  (** The default, and the range the runtime file's
+      [turn.admission_max_events] is accepted in. The registry row reads
+      them, so the loader and {!max_events} cannot disagree on the range. *)
+  val max_events_default : int
+
+  val max_events_floor : int
+  val max_events_ceiling : int
+
+  (** Maximum durable queue selections admitted into one turn, in [1, 256].
+      Default 32. Selections past this bound stay pending for a later turn
+      (#29365).
+
+      In a server the runtime file is its only input: the loader declares
+      {!max_events_env_key} file-owned before any turn runs and refuses a value
+      outside the range, so the clamp changes nothing there. A process that
+      never ran the loader still reads the environment variable of that name,
+      and the clamp keeps what it returns inside the range. *)
   val max_events : unit -> int
 end
 

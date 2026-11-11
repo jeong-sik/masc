@@ -88,7 +88,8 @@ let publish_with ~(apply : apply) ~candidate ~(finished : Machine.finished) =
 let publish ~candidate ~finished =
   publish_with ~candidate ~finished
     ~apply:(fun ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program ->
-      Current.apply_program ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program)
+      Current.apply_program ~pass:Keeper_memory_commit_pass.Durable
+        ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program)
 
 module For_testing = struct
   let publish_with = publish_with

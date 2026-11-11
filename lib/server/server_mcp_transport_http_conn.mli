@@ -244,3 +244,28 @@ val check_sse_connect_guard :
     [["window_limit"]]) are operator-visible — runbooks key
     off these to differentiate cooldown vs burst-limit
     rejections. *)
+
+val check_standalone_observer_connect_guard :
+  observer_instance_id:string ->
+  credential:Masc_domain.agent_credential ->
+  (unit, Sse_reject_reason.t * float) result
+(** Bound fresh standalone Observer registrations by the existing configured
+    sliding window, shared by the validated credential's agent and the admitted
+    workspace instance. Different agents and instances have independent windows.
+    Session cleanup does not reset this history. This includes concurrent first
+    subscriptions; it is not a reconnect-only limit. The per-session minimum
+    interval is not applied, so tabs can open concurrently within the window.
+    Use this as the required admission callback of
+    {!Sse.register_standalone_observer_with_client}, so the exact credential
+    charged is the one published. No raw bearer token is kept in the guard. *)
+
+module For_testing : sig
+  val check_standalone_observer_connect_guard :
+    now:float -> observer_instance_id:string -> credential:Masc_domain.agent_credential ->
+    (unit, Sse_reject_reason.t * float) result
+  val reap_stale_guards : now:float -> int
+end
+(** Deterministic timestamps for the same production guard, registry and
+    maintenance reaper. This neither seeds private state nor replaces policy.
+    It models captured request times completing out of order; it does not
+    establish a real multi-domain CAS interleaving. *)

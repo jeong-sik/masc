@@ -551,7 +551,7 @@ let test_completion_observation_survives_tool_reply approved () =
 
 (* Proof state remains visible through the tool loop without appending a
    new User-role state notice after every tool result. *)
-let test_goal_under_proof_survives_tool_reply () =
+let test_goal_under_proof_survives_tool_reply ~current_norms () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
@@ -568,13 +568,25 @@ let test_goal_under_proof_survives_tool_reply () =
   let mark = match Prompt_registry.render_prompt_template
       Prompt_names.keeper_world_goals_awaiting_proof_row [ "goal_id", goal.id ] with
     | Ok text -> text | Error detail -> fail detail in
+  (* The live world holds isolated ledger history, so its Systems carry the
+     complete current norms on every request. With them, a request that
+     follows a tool result must still end with that result. *)
+  let norm = match World_constitution_types.make
+      ~id:(World_constitution_types.Article_id.generate ())
+      ~text:"WIRE_FIXTURE_NORM stays in force." ~author:"proof-wire" ~at:1.0 ~evidence:[] with
+    | Ok article -> article
+    | Error invalid -> fail (World_constitution_types.invalid_to_string invalid) in
+  let norms_notice = Keeper_prompt.constitution_current_block [ norm ] in
+  let turn_system =
+    let base = system_of_text "BASE_PROOF_WIRE" in
+    if current_norms then Keeper_turn_system.with_current_norms [ norm ] base else base in
   let partition = Direct.project_partition (prepare config) ~workspace_memory_access:None in
   let dynamic = Keeper_context_layers.text partition in
   let previous = ref None in
   let issued_requests = ref [] in
   let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
     | Agent_core.Hooks.BeforeTurnParams {current_params;messages;_} ->
-      let issued = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core ~system:(system_of_text "BASE_PROOF_WIRE")
+      let issued = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Masc_agent_core ~system:turn_system
           ~post_tool_round:(Keeper_run_prompt.is_later_round_of_this_turn
             ~injected_this_turn:(Option.is_some !previous) messages)
           ~previous_assembly:!previous ~dynamic_context_partition:(Some partition)
@@ -628,9 +640,13 @@ let test_goal_under_proof_survives_tool_reply () =
       | newest :: _ -> newest
       | [] -> fail "the request must retain its conversation" in
     List.iter (fun message ->
-      if Json.member "role" message = `String "user" then
-        check bool "no User message repeats the proof notice" false
-          (contains ~needle:mark (Json.member "content" message |> Json.to_string))) messages;
+      if Json.member "role" message = `String "user" then (
+        let content = Json.member "content" message |> Json.to_string in
+        check bool "no User message repeats the proof notice" false (contains ~needle:mark content);
+        check bool "no User message carries the current norms" false
+          (contains ~needle:"WIRE_FIXTURE_NORM" content))) messages;
+    check bool "every request System carries the complete current norms it was given" current_norms
+      (contains ~needle:norms_notice system);
     check bool "the System names the Goal" true (contains ~needle:goal.id system);
     check bool "every request System carries the current proof mark" true (contains ~needle:mark system);
     let issued_system = match issued.Keeper_context_assembly.system_prompt with
@@ -639,6 +655,10 @@ let test_goal_under_proof_survives_tool_reply () =
     check int "the proof span is attributed to the actual System" 1
       (List.length (List.filter (fun (span : Keeper_context_assembly.span) ->
         span.kind = Keeper_context_assembly.Block Prompt_block_id.Goals_awaiting_proof)
+        issued_system.partition.spans));
+    check int "the norms span is attributed to the actual System" (if current_norms then 1 else 0)
+      (List.length (List.filter (fun (span : Keeper_context_assembly.span) ->
+        span.kind = Keeper_context_assembly.Block Prompt_block_id.Constitution_amendments)
         issued_system.partition.spans));
     if index > 0 then (
       check bool "the actual tool result is the request's newest message" true
@@ -669,4 +689,6 @@ let () = run "direct Goal context on actual provider wire"
     test_case "Task rejection survives the following tool reply" `Quick
       (test_completion_observation_survives_tool_reply false);
     test_case "a Goal under proof survives the following tool reply" `Quick
-      test_goal_under_proof_survives_tool_reply]]
+      (test_goal_under_proof_survives_tool_reply ~current_norms:false);
+    test_case "the complete current norms stay in the System and tool feedback stays newest" `Quick
+      (test_goal_under_proof_survives_tool_reply ~current_norms:true)]]

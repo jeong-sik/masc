@@ -192,7 +192,7 @@ let test_keeper_preference_reorders_the_librarian_lane () =
    | Ok _ -> ()
    | Error detail -> fail detail);
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  Runtime.run_best_effort
+  Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Keeper_memory_commit_pass.Durable)
     ~base_path
     ~keepers_dir
     ~keeper_id:"librarian-preference"
@@ -294,7 +294,7 @@ let test_context_commits_when_memory_store_fails () =
         { Keeper_librarian_context.empty with sources = [ source ] }
     }
   in
-  Runtime.run_best_effort
+  Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Keeper_memory_commit_pass.Durable)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None inp;
   check int "the exact provider ran" 1 (Fixture.post_count server);
   (match Keeper_librarian_context.read ~keepers_dir ~keeper_id with
@@ -416,7 +416,7 @@ let test_memory_commits_when_working_contexts_slip slip () =
         { Keeper_librarian_context.empty with sources = [ source ] }
     }
   in
-  Runtime.run_best_effort
+  Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Keeper_memory_commit_pass.Durable)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None inp;
   check int "the slot that answered is called once" 1 (Fixture.post_count answering);
   check int "the answer is not re-asked of the successor" 0

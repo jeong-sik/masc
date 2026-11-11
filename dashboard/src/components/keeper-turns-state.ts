@@ -1,8 +1,6 @@
-// Shared poller for /api/v1/keepers/turns — the roster's "answering now"
-// badge. Same shape as dashboard-full-health-state: one visibility-aware
-// interval shared by every subscriber, cancelled when the last one leaves.
-// 5s, not the health poll's 60s: a turn that starts and ends inside a
-// minute is exactly what the badge exists to show.
+// Shared observation for /api/v1/keepers/turns — the roster's "answering now"
+// badge. One event subscription is shared by every mounted subscriber and
+// retired when the last one leaves.
 
 import { computed, signal } from '@preact/signals'
 import {
@@ -11,7 +9,7 @@ import {
   type KeeperTurnsResponse,
 } from '../api/dashboard-keeper-turns'
 import { createManagedAsyncResource } from '../lib/async-state'
-import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 
 export const keeperTurnsResource = createManagedAsyncResource<KeeperTurnsResponse>()
 
@@ -24,9 +22,10 @@ export function loadKeeperTurns(): Promise<void> {
   const previousRows = keeperTurnsResource.state.value.data?.keepers ?? []
   return keeperTurnsResource
     .load(signal => fetchKeeperTurns({ signal }))
-    .then(() => {
-      const currentRows = keeperTurnsResource.state.value.data?.keepers
-      // A failed poll leaves data unchanged; advancing on it would fabricate
+    .then(snapshot => {
+      if (snapshot === undefined || keeperTurnsResource.state.peek().data !== snapshot) return
+      const currentRows = snapshot.keepers
+      // A failed read leaves data unchanged; advancing on it would fabricate
       // finishes out of the same snapshot compared with itself.
       if (currentRows && currentRows !== previousRows) {
         keeperFinishes.value = advanceFinishes(
@@ -36,18 +35,13 @@ export function loadKeeperTurns(): Promise<void> {
     })
 }
 
-export const KEEPER_TURNS_REFRESH_MS = 5_000
-
 let subscriberCount = 0
 let stopRefresh: (() => void) | null = null
 
 export function subscribeKeeperTurnsRefresh(): () => void {
   subscriberCount += 1
   if (subscriberCount === 1) {
-    void loadKeeperTurns()
-    stopRefresh = setupVisibleAutoRefresh(() => {
-      void loadKeeperTurns()
-    }, KEEPER_TURNS_REFRESH_MS)
+    stopRefresh = setupObservationRefresh(loadKeeperTurns, { topics: ['keeper_turns'], readError: () => keeperTurnsResource.readError(), cancelRead: () => keeperTurnsResource.cancel(), resetRead: () => { keeperTurnsResource.reset(); keeperFinishes.value = [] } })
   }
   return () => {
     subscriberCount -= 1
@@ -60,7 +54,7 @@ export function subscribeKeeperTurnsRefresh(): () => void {
 }
 
 /** The running turn for [keeperName], or null when it is idle, unavailable,
- *  or absent from the poll — the badge never guesses. */
+ *  or absent from the snapshot — the badge never guesses. */
 export function runningTurnFor(
   rows: readonly KeeperTurnRow[],
   keeperName: string,
@@ -72,10 +66,10 @@ export function runningTurnFor(
 // ── the finish glow ────────────────────────────────────────────────
 //
 // Same contract as the TUI's advance_finishes (#31208): two consecutive
-// polls are what "just finished" is made of — running in the previous,
+// observations are what "just finished" is made of — running in the previous,
 // idle in this one. Unavailable→idle is not a finish (an owner lookup
 // failure says nothing about the turn), a keeper missing from the current
-// poll is not a finish (removed, not answered), and a keeper that starts
+// observation is not a finish (removed, not answered), and a keeper that starts
 // running again drops its glow — one keeper must not read as both
 // answering and answered.
 
@@ -114,7 +108,7 @@ export function advanceFinishes(
 }
 
 /** The live glow for [keeperName], or null — expired entries filtered by the
- *  reader's own clock so the glow dies on time, not on the next poll. */
+ *  reader's own clock so the glow dies on time, not on the next observation. */
 export function finishGlowFor(
   finishes: readonly KeeperFinish[],
   keeperName: string,

@@ -1,0 +1,145 @@
+{
+  "window": {
+    "since": "2026-11-10T08:01:00Z",
+    "end": "2026-11-10T10:10:38Z"
+  },
+  "tools_compared": 59,
+  "tools_with_refusals": 4,
+  "tools_where_refusals_are_the_whole_gap": [],
+  "totals": {
+    "ledger_calls": 5099,
+    "ledger_refused": 6,
+    "store_calls": 5128,
+    "store_failed": 41,
+    "gap": -29,
+    "gap_minus_refused": -35
+  },
+  "days": [
+    {
+      "day": "2026-11-10",
+      "ledger_calls": 5099,
+      "ledger_refused": 6,
+      "store_calls": 5128,
+      "store_failed": 41,
+      "gap": -29,
+      "gap_minus_refused": -35
+    }
+  ],
+  "tools": [
+    {
+      "tool": "masc_browser_interact",
+      "ledger_calls": 25,
+      "ledger_refused": 2,
+      "store_calls": 25,
+      "store_failed": 7,
+      "gap": 0,
+      "gap_minus_refused": -2
+    },
+    {
+      "tool": "tool_execute",
+      "ledger_calls": 3643,
+      "ledger_refused": 2,
+      "store_calls": 3639,
+      "store_failed": 7,
+      "gap": 4,
+      "gap_minus_refused": 2
+    },
+    {
+      "tool": "masc_schedule_create",
+      "ledger_calls": 13,
+      "ledger_refused": 1,
+      "store_calls": 13,
+      "store_failed": 1,
+      "gap": 0,
+      "gap_minus_refused": -1
+    },
+    {
+      "tool": "masc_wiki_update",
+      "ledger_calls": 7,
+      "ledger_refused": 1,
+      "store_calls": 7,
+      "store_failed": 1,
+      "gap": 0,
+      "gap_minus_refused": -1
+    },
+    {
+      "tool": "masc_board_post",
+      "ledger_calls": 2,
+      "ledger_refused": 0,
+      "store_calls": 3,
+      "store_failed": 0,
+      "gap": -1,
+      "gap_minus_refused": -1
+    },
+    {
+      "tool": "masc_keeper_delegate_status",
+      "ledger_calls": 2,
+      "ledger_refused": 0,
+      "store_calls": 28,
+      "store_failed": 0,
+      "gap": -26,
+      "gap_minus_refused": -26
+    },
+    {
+      "tool": "masc_keeper_list",
+      "ledger_calls": 1,
+      "ledger_refused": 0,
+      "store_calls": 8,
+      "store_failed": 0,
+      "gap": -7,
+      "gap_minus_refused": -7
+    },
+    {
+      "tool": "tool_read_file",
+      "ledger_calls": 102,
+      "ledger_refused": 0,
+      "store_calls": 101,
+      "store_failed": 1,
+      "gap": 1,
+      "gap_minus_refused": 1
+    }
+  ],
+  "by_day_tool_with_refusals": [
+    {
+      "day": "2026-11-10",
+      "tool": "masc_browser_interact",
+      "ledger_calls": 25,
+      "ledger_refused": 2,
+      "store_calls": 25,
+      "store_failed": 7,
+      "gap": 0,
+      "gap_minus_refused": -2
+    },
+    {
+      "day": "2026-11-10",
+      "tool": "masc_schedule_create",
+      "ledger_calls": 13,
+      "ledger_refused": 1,
+      "store_calls": 13,
+      "store_failed": 1,
+      "gap": 0,
+      "gap_minus_refused": -1
+    },
+    {
+      "day": "2026-11-10",
+      "tool": "masc_wiki_update",
+      "ledger_calls": 7,
+      "ledger_refused": 1,
+      "store_calls": 7,
+      "store_failed": 1,
+      "gap": 0,
+      "gap_minus_refused": -1
+    },
+    {
+      "day": "2026-11-10",
+      "tool": "tool_execute",
+      "ledger_calls": 3643,
+      "ledger_refused": 2,
+      "store_calls": 3639,
+      "store_failed": 7,
+      "gap": 4,
+      "gap_minus_refused": 2
+    }
+  ],
+  "unmapped_ledger_tools": {}
+}

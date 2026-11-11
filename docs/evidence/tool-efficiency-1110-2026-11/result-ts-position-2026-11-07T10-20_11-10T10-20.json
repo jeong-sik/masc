@@ -1,0 +1,10 @@
+{
+  "window": {
+    "since": "2026-11-07T10:20:00Z",
+    "end": "2026-11-10T10:20:00Z",
+    "hours": 72.0
+  },
+  "pairs": 173,
+  "contradicts_ts_is_start": 116,
+  "contradicts_ts_is_end": 0
+}

@@ -1,3 +1,4 @@
+import { selectObservationReadFailure, setupObservationRefresh } from '../lib/observation-refresh'
 // Attribution Panel — Layer 4 observation surface.
 //
 // 관찰 대시보드. 4-field per event: 누가(gate) / 어디서(origin) / 뭘(outcome) /
@@ -23,7 +24,6 @@ import { highlightMatch } from '../lib/highlight-match'
 import { unixSecondsToDate } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 
-const POLL_INTERVAL_MS = 5_000
 const RECENT_LIMIT = 50
 
 // The gates the backend emits. Every Attribution constructor call in masc
@@ -243,38 +243,42 @@ export function AttributionPanel() {
 
   useEffect(() => {
     let cancelled = false
-    const ctl = new AbortController()
 
-    const load = async () => {
+    const load = async (signal: AbortSignal) => {
       try {
-        const [s, r] = await Promise.all([
-          fetchAttributionSummary({ signal: ctl.signal }),
+        const [s, r] = await Promise.allSettled([
+          fetchAttributionSummary({ signal: signal }),
           fetchAttributionRecent(
             {
               limit: RECENT_LIMIT,
               ...(filterGate.value ? { gate: filterGate.value } : {}),
             },
-            { signal: ctl.signal },
+            { signal: signal },
           ),
         ])
-        if (cancelled) return
-        summary.value = s
-        recent.value = r.events
+        if (cancelled || signal.aborted) return
+        if (s.status === 'rejected' || r.status === 'rejected') {
+          throw selectObservationReadFailure([
+            s.status === 'rejected' ? s.reason : null,
+            r.status === 'rejected' ? r.reason : null,
+          ])
+        }
+        summary.value = s.value
+        recent.value = r.value.events
         error.value = null
       } catch (e) {
-        if (cancelled || isAbortError(e)) return
+        if (cancelled || signal.aborted || isAbortError(e)) return
         error.value = (e as Error).message || 'attribution fetch failed'
+        throw e
       } finally {
-        if (!cancelled) loading.value = false
+        if (!cancelled && !signal.aborted) loading.value = false
       }
     }
 
-    load()
-    const iv = window.setInterval(load, POLL_INTERVAL_MS)
+    const dispose = setupObservationRefresh(load, { topics: ['attribution'], resetRead: () => { summary.value = null; recent.value = []; error.value = null; loading.value = true } })
     return () => {
       cancelled = true
-      ctl.abort()
-      window.clearInterval(iv)
+      dispose()
     }
   }, [filterGate.value])
 

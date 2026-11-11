@@ -389,6 +389,17 @@ let emit_stream_event on_stream_event event =
          (Printexc.to_string exn))
 ;;
 
+(* What Claude Code names as the cause on an API diagnostic envelope: the
+   [error] member next to [is_api_error_message] (SDKAssistantMessage.error in
+   code.claude.com/docs/en/agent-sdk/typescript, read 2026-11-11). Measured on
+   Claude Code 2.1.322 with a login past its time limit: the envelope carried
+   "error":"authentication_failed", and the result frame that followed said
+   only terminal_reason "api_error" with a null api_error_status. No reader
+   tells the other values apart, so they are one constructor. *)
+type api_error_cause =
+  | Authentication_failed
+  | Other_api_error_cause
+
 type error =
   | Invalid_config of string
   | Spawn_failed of string
@@ -412,6 +423,7 @@ type error =
   | Turn_failed_with_observation of
       { detail : string
       ; api_error_status : int option
+      ; api_error_cause : api_error_cause option
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
@@ -568,12 +580,32 @@ let login_environment ~account_home =
   |> Result.map_error (fun detail -> Invalid_config detail)
 ;;
 
-let parse_subscription json =
+(* What signs the CLI in depends on where its account came from.
+   [Runtime_claude_environment_projection.inherited_names] gives a declared
+   account home none of the credential or routing variables, so exporting one
+   in the server's environment changes nothing for it: only a sign-in on that
+   home does. An inherited account also runs on those variables. *)
+let not_signed_in_detail source =
+  match source with
+  | Runtime_official_account.Declared_directory ->
+    "Claude Code is not signed in on the account home this runtime declares. Sign that \
+     home in with /login in the MASC TUI, or with `masc runtime-account-login --client claude \
+     --account-home <the provider's account-home in runtime.toml>`. A declared account \
+     home receives no credential or routing variable from the server environment, so \
+     exporting one does not sign it in."
+  | Runtime_official_account.Inherited_directory
+  | Runtime_official_account.Inherited_user_home ->
+    "Claude Code is not signed in and the server environment carries no CLI credential. \
+     Sign in with `claude auth login`, or export the CLI credential/routing variables in \
+     the server environment; the CLI loads no settings layer, so a settings-only \
+     apiKeyHelper credential is not read."
+;;
+
+let parse_subscription ~source json =
   let stage = "auth status" in
   let* fields = assoc_at stage json in
   let* logged_in = required_bool stage "loggedIn" fields in
-  if not logged_in then
-    Error (Subscription_required "No supported CLI credential is available with the configured settings isolation. Export the CLI credential/routing variables or sign in with the CLI; the CLI loads no settings layer, so a settings-only apiKeyHelper credential is not read.")
+  if not logged_in then Error (Subscription_required (not_signed_in_detail source))
   else
     let* method_name = required_string stage "authMethod" fields in
     let* authentication = match method_name with
@@ -690,7 +722,9 @@ let probe_auth_status ~mgr ~cwd ~account config =
     let result =
       let* json = parsed in
       let* () = validate_unique_object_keys ~stage:"auth status" ~path:"$" json in
-      parse_subscription json
+      parse_subscription
+        ~source:(Runtime_official_account.source (Runtime_account_access.account account))
+        json
     in
     let result =
       if cut_document then note_cut_document ~bytes:(String.length stdout) result else result
@@ -1329,7 +1363,7 @@ type assistant_block =
 
 type assistant_origin =
   | Model_response
-  | Api_error_diagnostic
+  | Api_error_diagnostic of api_error_cause option
 
 type assistant_scope = Root_response | Child_response of string
 
@@ -1347,12 +1381,21 @@ let assistant_scope ~stage fields =
 
 (* Claude Code 2.1.263's assistant envelope declares this optional boolean;
    its producer maps isApiErrorMessage=true to is_api_error_message=true.
-   The text of an API diagnostic is not a model response. Only the terminal
-   result classifies the failure; tool effects remain independent evidence. *)
+   The text of an API diagnostic is not a model response. The terminal result
+   classifies the failure; the diagnostic's [error] member adds the cause the
+   client named, which the result frame does not repeat. Tool effects remain
+   independent evidence. An [error] that is neither a string nor null is
+   refused, as every member of this envelope with an undeclared shape is. *)
 let assistant_origin ~stage fields =
   match List.assoc_opt "is_api_error_message" fields with
   | None | Some (`Bool false) -> Ok Model_response
-  | Some (`Bool true) -> Ok Api_error_diagnostic
+  | Some (`Bool true) ->
+    (match List.assoc_opt "error" fields with
+     | None | Some `Null -> Ok (Api_error_diagnostic None)
+     | Some (`String "authentication_failed") ->
+       Ok (Api_error_diagnostic (Some Authentication_failed))
+     | Some (`String _) -> Ok (Api_error_diagnostic (Some Other_api_error_cause))
+     | Some _ -> protocol_error stage "field \"error\" must be a string or null")
   | Some _ -> protocol_error stage "field \"is_api_error_message\" must be a boolean"
 ;;
 
@@ -2149,8 +2192,8 @@ let quota_block ~api_error_status rate_limits =
   | true, [] -> Some Rate_throttled
 ;;
 
-let parse_result ~rate_limits ~tool_effect_attempted ~response_emitted ~turn_id ~usage
-    fields =
+let parse_result ~rate_limits ~api_error_cause ~tool_effect_attempted ~response_emitted
+    ~turn_id ~usage fields =
   let stage = "result message" in
   let* subtype = required_string stage "subtype" fields in
   let* is_error = required_bool stage "is_error" fields in
@@ -2239,6 +2282,7 @@ let parse_result ~rate_limits ~tool_effect_attempted ~response_emitted ~turn_id 
         (Turn_failed_with_observation
            { detail = terminal_failure_detail ()
            ; api_error_status
+           ; api_error_cause
            ; tool_effect_attempted
            ; response_emitted
            })
@@ -2515,7 +2559,7 @@ let observe_partial_input observer ~session_id fields =
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~expected_session_id
-    ~subscription ~resumed ~rate_limits ~assistant_model ~assistant_texts
+    ~subscription ~resumed ~rate_limits ~api_error_cause ~assistant_model ~assistant_texts
     ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
     ~input_observer ~partial_stream ~stream_started ~response_emitted =
   let* json = io.receive () in
@@ -2536,7 +2580,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limits ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~rate_limits ~api_error_cause ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_control_cancel_request ->
@@ -2544,7 +2588,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limits ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~rate_limits ~api_error_cause ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_control_response ->
@@ -2558,7 +2602,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | Child_response _ -> child_partial_stream_event ~expected_session_id fields in
     observe_partial_input input_observer ~session_id:expected_session_id fields;
     await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
-      ~expected_session_id ~subscription ~resumed ~rate_limits ~assistant_model
+      ~expected_session_id ~subscription ~resumed ~rate_limits ~api_error_cause ~assistant_model
       ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started
       ~on_stream_event ~input_observer ~partial_stream ~stream_started ~response_emitted
   | Frame_assistant ->
@@ -2569,9 +2613,20 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
      | Root_response -> observe_input input_observer ~session_id:expected_session_id
          ~frame:(Input_attribution.Assistant {uuid=Some uuid;message_id}) fields
      | Child_response _ -> ());
+    (* The result frame is read with the cause of the root diagnostic
+       envelope that ended the turn. A model response after a diagnostic
+       means the client went on, so the earlier cause no longer describes
+       how the turn ended. A child's envelope is that child's request, and
+       the root's result frame does not answer for it. *)
+    let api_error_cause =
+      match scope, origin with
+      | Root_response, Api_error_diagnostic cause -> cause
+      | Root_response, Model_response -> None
+      | Child_response _, (Model_response | Api_error_diagnostic _) -> api_error_cause
+    in
     let assistant_model =
       match scope, origin with
-      | (Root_response | Child_response _), Api_error_diagnostic
+      | (Root_response | Child_response _), Api_error_diagnostic _
       | Child_response _, Model_response -> assistant_model
       | Root_response, Model_response ->
         observe_assistant_usage assistant_usage ~message_id usage;
@@ -2582,7 +2637,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         Some model
     in
     let content_scope = match scope, origin with
-      | (Root_response | Child_response _), Api_error_diagnostic -> Diagnostic_content
+      | (Root_response | Child_response _), Api_error_diagnostic _ -> Diagnostic_content
       | Root_response, Model_response -> Root_model_content
       | Child_response parent_tool_use_id, Model_response ->
           Child_model_content {parent_tool_use_id; observation_id=Random_id.hex ~bytes:16} in
@@ -2629,7 +2684,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limits ~assistant_model
+      ~rate_limits ~api_error_cause ~assistant_model
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
@@ -2648,7 +2703,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limits:(Turn_rate_limits.note_rate_limit rate_limit rate_limits) ~assistant_model ~assistant_texts
+      ~rate_limits:(Turn_rate_limits.note_rate_limit rate_limit rate_limits) ~api_error_cause ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
   | Frame_result ->
@@ -2678,6 +2733,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     let parsed_result =
       parse_result
         ~rate_limits
+        ~api_error_cause
         ~tool_effect_attempted:(!tool_call_count > 0 || !native_tool_attempted)
         ~response_emitted:!response_emitted
         ~turn_id
@@ -2760,7 +2816,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limits ~assistant_model ~assistant_texts ~native_tool_calls
+      ~rate_limits ~api_error_cause ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_system ->
@@ -2783,7 +2839,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limits ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~rate_limits ~api_error_cause ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_tool_progress ->
@@ -2803,7 +2859,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limits ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~rate_limits ~api_error_cause ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_command_lifecycle ->
@@ -2815,7 +2871,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limits ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~rate_limits ~api_error_cause ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_other tag ->
@@ -3062,6 +3118,7 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
        | Start -> false
        | Resume _ -> true)
     ~rate_limits:Turn_rate_limits.empty
+    ~api_error_cause:None
     ~assistant_model:None
     ~assistant_texts:[]
     ~native_tool_calls:{invocation=Input_attribution.ticket input_observer.input_state;

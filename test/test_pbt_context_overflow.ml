@@ -128,11 +128,11 @@ let test_checkpoint_patch_updates_visible_text_and_clears_working_context () =
 (*
    @gospel — formal specification (Ortac runtime not available on 5.4)
 
-   val is_context_overflow : Error.t -> bool
-   (*@ b = is_context_overflow err
-       ensures b = match err with
-         | Api (ContextOverflow _) -> true
-         | _ -> false *)
+   val declared_lane_failure_of_error : Error.t -> declared_lane_failure
+   (*@ r = declared_lane_failure_of_error err
+       ensures r = match err with
+         | Api (ContextOverflow _) -> Provider_context_overflow
+         | _ -> Declared_runtime_lane_exhausted *)
 
    MASC owns keeper context maintenance. AGENT_CORE reports provider overflow as a
    typed error and does not invent a missing provider limit.

@@ -35,7 +35,7 @@ type vibe_cli =
   }
 
 type t =
-  | Agent_core of Llm_provider.Provider_config.t
+  | Agent_core of Runtime_account_access.api_sealed
   | Codex_app_server of codex_app_server
   | Antigravity_cli of antigravity_cli
   | Claude_code of claude_code
@@ -75,7 +75,8 @@ let supports_native_none = function
   | Muse_serve _ -> Runtime_native_tools.muse_none_supported
 
 let model_id = function
-  | Agent_core config -> Some config.Llm_provider.Provider_config.model_id
+  | Agent_core config ->
+    Some (Runtime_account_access.api_declaration config).Llm_provider.Provider_config.model_id
   | Codex_app_server config -> config.model
   | Antigravity_cli config -> Some config.model
   | Claude_code config -> config.model

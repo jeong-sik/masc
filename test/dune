@@ -1,3 +1,12 @@
+(rule
+ (alias runtest-test_auth_preview_pat_expiry)
+ (deps test_auth_preview_pat_expiry.js ../lib/auth_preview.ml)
+ (action (run node %{dep:test_auth_preview_pat_expiry.js} %{dep:../lib/auth_preview.ml})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_auth_preview_pat_expiry)))
+
 ; task-2245: the shared input table the TUI suite and the dashboard vitest
 ; suite both assert on (lib/tool_display.ml / dashboard toolDisplayLabel).
 (rule
@@ -59,6 +68,17 @@
  (name runtest)
  (deps (alias runtest-test_keeper_remote_workspace_cleanup)))
 
+; The fixture-/proc cases only: the other classes need a Linux guest with Dune.
+(rule
+ (alias runtest-test_keeper_vm_build_cleanup_live_processes)
+ (deps ../config/scripts/keeper-build-cleanup.py
+       test_keeper_vm_build_cleanup.py)
+ (action (run python3 %{dep:test_keeper_vm_build_cleanup.py} LiveProcesses)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_vm_build_cleanup_live_processes)))
+
 (test
  (name test_tui_board_reader)
  (modules test_tui_board_reader)
@@ -104,9 +124,11 @@
 (include stanzas/test_login_flow.inc)
 (include stanzas/test_login_routes.inc)
 (include stanzas/test_login_allowlist_routes.inc)
+(include stanzas/test_login_pat_routes.inc)
 (include stanzas/test_server_login_http.inc)
 (include stanzas/test_github_oauth.inc)
 (include stanzas/test_keeper_chat_store_announces.inc)
+(include stanzas/test_keeper_chat_store_transcript_index.inc)
 (include stanzas/test_keeper_memory_journal_announces.inc)
 (include stanzas/test_keeper_composite_cleared_before_announce.inc)
 (include stanzas/test_runtime_blocker_classification.inc)
@@ -372,7 +394,7 @@
  (name test_dos_vision)
  (modules test_dos_vision)
  (libraries machine_worker_fixture eio_main base64 masc.machine_configuration alcotest unix yojson fs_compat masc masc_test_deps
-   masc.dos_lane masc.tool_types))
+   masc.dos_lane masc.tool_types mcp_protocol))
 
 (test
  (name test_sse_observer_epoch)
@@ -393,7 +415,7 @@
 (test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
- (libraries alcotest masc masc.fs_compat masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
+ (libraries alcotest agent_core masc masc.fs_compat masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
 
 (test
  (name test_keeper_effective_tool_surface)
@@ -482,7 +504,6 @@
   test_keeper_lifecycle_global_gate
   test_keeper_memory_lane
   test_keeper_connector_attention_wake
-  test_keeper_raw_task_signal_wake
   test_broadcast_stores_raw_text
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -819,7 +840,6 @@
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_connector_attention_wake
-  test_keeper_raw_task_signal_wake
   test_broadcast_stores_raw_text
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -1734,7 +1754,7 @@
 (test
  (name test_systhread_host)
  (modules test_systhread_host)
- (libraries alcotest masc.masc_core eio eio_main unix threads.posix))
+ (libraries alcotest masc.masc_core masc.fs_compat eio eio_main unix threads.posix))
 
 (test
  (name test_pool_lane)
@@ -2114,6 +2134,8 @@
   ; The fallback descendant fixture uses the monotonic deadline owner.
   masc.monotonic_deadline
  masc_test_deps
+  masc.server
+  masc.config_dir_resolver
   masc.embedded_config
   masc.skill_config
   masc.skill_reference
@@ -2122,6 +2144,10 @@
   ; test_tui_decode names the schedule runner status the TUI decodes into
   masc.masc_schedule
   bigstringaf
+  ; test_ws_transport attaches a session to a ws-direct endpoint and reads
+  ; what reached its writer
+  ws-direct-core
+  faraday
   ; test_terminal_size reads the tty size through the ioctl stub
   terminal_size
   ; test_activity_graph checks its day file against the layout owner
@@ -2725,8 +2751,18 @@
 
 (include stanzas/test_board_posts_source_authority.inc)
 (include stanzas/test_board_delete_order.inc)
+(include stanzas/test_board_deletion_recovery.inc)
 (include stanzas/test_board_comments_source.inc)
+(include stanzas/test_board_comment_admission.inc)
+(include stanzas/test_board_post_policy_admission.inc)
+(include stanzas/test_board_target_admission.inc)
+(include stanzas/test_board_cleanup_admission.inc)
+
+(include stanzas/test_board_sub_board_deletion_recovery.inc)
+(include stanzas/test_fs_compat_snapshot_guard.inc)
 (include stanzas/test_board_sub_boards_source.inc)
+(include stanzas/test_board_votes_source.inc)
+(include stanzas/test_board_reactions_source.inc)
 (include stanzas/test_board_posts_preflight.inc)
 
 (include stanzas/test_board_snapshot_rows.inc)
@@ -2994,6 +3030,7 @@
 (include stanzas/test_fleet_stream_server_wiring.inc)
 
 (include stanzas/bench_fleet_stream.inc)
+(include stanzas/bench_systhread_host_fs_compat.inc)
 (include stanzas/bench_sse_pump_throughput.inc)
 
 (include stanzas/test_tui_fleet_stream.inc)
@@ -3039,6 +3076,7 @@
 (include stanzas/test_fs_compat_append_jsonl_atomicity.inc)
 
 (include stanzas/test_fs_compat_durable_append.inc)
+(include stanzas/test_fs_compat_update_after_cursor.inc)
 (include stanzas/test_fs_compat_unique_fold.inc)
 (include stanzas/test_fs_compat_missing_binding.inc)
 
@@ -3230,6 +3268,8 @@
 (include stanzas/test_keeper_memory_admission_queue.inc)
 (include stanzas/test_keeper_memory_write.inc)
 (include stanzas/test_keeper_memory_write_growth_probe.inc)
+(include stanzas/test_keeper_memory_change_metrics.inc)
+(include stanzas/test_keeper_librarian_absorb_gate_metrics.inc)
 (include stanzas/test_keeper_memory_recall_parts.inc)
 
 (include stanzas/test_keeper_memory_recall_flow.inc)
@@ -3439,6 +3479,7 @@
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 (include stanzas/test_keeper_shutdown_reconciliation_http.inc)
+(include stanzas/test_keeper_shutdown_task_settlement_retry.inc)
 (include stanzas/test_keeper_shutdown_official_client_purge.inc)
 (include stanzas/test_keeper_portrait_http.inc)
 
@@ -3525,7 +3566,7 @@
 ; RFC-0084 PR-3 — Tool_telemetry.with_span + Tool_dispatch.guarded_dispatch
 ; skeleton tests. Verifies 4-tuple emission wrapper invariants (callback
 ; invocation count, trace_id thunk callable, outcome label propagation,
-; idempotent register_metrics, result passthrough). Requires masc_test_deps
+; result passthrough). Requires masc_test_deps
 ; because it exercises Masc.Tool_telemetry.* directly.
 
 (test
@@ -4111,11 +4152,6 @@
  (libraries alcotest masc_tui_types))
 
 (test
- (name test_tui_quiz_scorecard)
- (modules test_tui_quiz_scorecard)
- (libraries alcotest masc masc_tui_types))
-
-(test
  (name test_tui_memory_fold)
  (modules test_tui_memory_fold)
  (libraries masc_tui_image_preview alcotest masc_tui_message_layout masc_tui_types))
@@ -4187,7 +4223,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries masc.runtime masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc))
+ (libraries masc.runtime masc_tui_palette masc_tui_pick_list alcotest masc.masc_types masc_tui_code_lexer masc_tui_types masc_tui_fetched masc_tui_code_results masc))
 
 (test
  (name test_tui_workspace_entries)
@@ -4710,6 +4746,11 @@
 ))
 
 (test
+ (name test_tui_memory_lineage)
+ (modules test_tui_memory_lineage)
+ (libraries alcotest masc masc_tui_memory_lineage))
+
+(test
  (name test_tui_memory_facts_explorer)
  (modules test_tui_memory_facts_explorer)
  (libraries alcotest masc masc_tui_fetched masc_tui_render_memory masc_tui_roster_pane masc_tui_types))
@@ -5095,6 +5136,7 @@
 (include stanzas/test_keeper_memory_age_bins.inc)
 (include stanzas/test_tui_decode_workspace_memory.inc)
 (include stanzas/test_keeper_turn_pulse.inc)
+(include stanzas/test_keeper_decoded_rows.inc)
 (include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
@@ -5585,6 +5627,7 @@
 (include stanzas/test_tui_fusion_workspace.inc)
 
 (include stanzas/test_runtime_toml_namespace.inc)
+(include stanzas/test_runtime_toml_source_reading.inc)
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
 
 (test
@@ -5930,6 +5973,7 @@
 
 (include stanzas/test_h2_json_worker.inc)
 (include stanzas/test_https_listener.inc)
+(include stanzas/test_server_connection_socket.inc)
 (include stanzas/test_h2_request_fibers.inc)
 (include stanzas/test_h2_oauth_request_fibers.inc)
 (include stanzas/test_dashboard_asset_worker.inc)
@@ -6760,6 +6804,11 @@
  (modules test_server_keeper_build_maintenance)
  (libraries alcotest masc masc_server masc_test_deps eio_main unix))
 
+(test
+ (name test_keeper_cleanup_status)
+ (modules test_keeper_cleanup_status)
+ (libraries alcotest masc yojson))
+
 ; Raw config edit recovery: isolated state flow and real terminal/API interaction.
 (test
  (name test_tui_runtime_config_edit)
@@ -7088,14 +7137,15 @@
  (name test_tui_resource_image_admission)
  (modules test_tui_resource_image_admission)
  (libraries masc masc.agent_core.digest masc.skill_reference masc_tui_loader masc_tui_image_requests masc_tui_input_reader masc_tui_resource_diagrams masc_tui_keeper_chat_projection masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images masc_tui_board_detail masc_tui_board_reader masc_tui_board_preview_work masc_tui_image_cache masc_tui_image_payload masc_tui_async_protocol masc_tui_attachment_action masc_tui_browser masc_tui_pele unix threads mtime.clock.os
-  masc_tui_image_preview masc_tui_image_viewport masc_tui_resources_updates
+  masc_tui_image_preview masc_tui_image_viewport masc_tui_resources_updates masc_tui_fetched
   masc_tui_workspace_result masc_eio_context eio eio_main))
 
 (test
  (name test_tui_published_reports)
  (modules test_tui_published_reports)
  (libraries masc.time_codec alcotest masc masc.masc_tool_blob_store  masc.agent_core.digest masc_tui_resource_catalog
-  masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_resources_updates masc_tui_mcp masc_tui_loader))
+  masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_resources_updates masc_tui_mcp masc_tui_loader
+  masc_tui_message_input masc_tui_resource_export))
 
 (test
  (name test_tui_resource_export)
@@ -7179,7 +7229,7 @@
  (deps ../config/prompts/librarian.md
        ../config/prompts/keeper.md
        (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py)
- (libraries masc_test_deps masc.server exact_output_fixture masc.masc_random_id))
+ (libraries masc masc_test_deps masc.server exact_output_fixture masc.masc_random_id))
 
 ; Not a test: prints one Librarian pass's allocation and stored bytes per
 ; already-read history size. Run by hand from _build/default/test.
@@ -7249,6 +7299,9 @@
 (include stanzas/test_endpoint_job_registry.inc)
 
 (include stanzas/test_domain_budget.inc)
+(include stanzas/test_domain_mailbox.inc)
+(include stanzas/test_http_reqd_relay.inc)
+(include stanzas/test_http_ingress_serving_route.inc)
 (include stanzas/test_minor_heap.inc)
 
 (include stanzas/test_authz_scope.inc)
@@ -7310,6 +7363,8 @@
 
 (include stanzas/test_authz_activation.inc)
 
+(include stanzas/test_authz_service_credential_host.inc)
+
 (include stanzas/test_authz_high_water.inc)
 
 (include stanzas/test_server_memory_recall_standing.inc)
@@ -7321,6 +7376,8 @@
 (include stanzas/test_task_history_page_cursor.inc)
 
 (include stanzas/test_list_util.inc)
+
+(include stanzas/test_release_companion_consistency.inc)
 
 (include stanzas/test_tui_code_msg.inc)
 (include stanzas/test_tui_context_msg.inc)

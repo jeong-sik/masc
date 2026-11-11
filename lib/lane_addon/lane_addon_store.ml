@@ -754,6 +754,92 @@ let tool_request_owner_record t ~scope ~request_id =
   Ok (Option.join result)
 let load_tool_request_owner t ~scope ~request_id =
   serialized_tool_request_read t ~scope (fun () -> tool_request_owner_record t ~scope ~request_id)
+type history_fence_publication =
+  | History_fence_stored
+  | History_fence_already_stored
+  | History_fence_owner_changed
+  | History_fence_unconfirmed of string
+let history_fences_directory = "keeper-librarian-history-fences"
+let history_fence_path ~scope ~request_id = Filename.concat history_fences_directory
+  (Filename.concat (digest scope) (digest request_id ^ ".json"))
+let history_fence_record t ~scope ~request_id =
+  let name = digest request_id ^ ".json" in
+  let* result = read_tool_request_scope ~namespace:history_fences_directory
+    ~sync_parent:Unix.fsync t ~scope (fun ~owner_uid held names ->
+      if not (List.mem name names) then Ok None
+      else read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+        ~owner_uid held name |> Result.map Option.some) in
+  Ok (Option.join result)
+let load_history_fence t ~scope ~request_id =
+  serialized_tool_request_read t ~scope (fun () -> history_fence_record t ~scope ~request_id)
+let publish_history_fence_with ~write_fence t ~scope ~request_id ~expected_owner ~fence =
+  protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
+    let* expected = Lane_addon_json.canonical expected_owner in
+    let* next = Lane_addon_json.canonical fence in
+    let* previous = history_fence_record t ~scope ~request_id in
+    match previous with
+    | Some previous ->
+      let* previous = Lane_addon_json.canonical previous in
+      if Yojson.Safe.equal previous next then Ok History_fence_already_stored
+      else Error "A different immutable history fence already owns this original"
+    | None ->
+      let* current = tool_request_owner_record t ~scope ~request_id in
+      match current with
+      | None -> Ok History_fence_owner_changed
+      | Some current ->
+        let* current = Lane_addon_json.canonical current in
+        if not (Yojson.Safe.equal expected current) then Ok History_fence_owner_changed
+        else
+          let saved = protect (fun () ->
+            let path = Filename.concat t.root (history_fence_path ~scope ~request_id) in
+            durable_directory t ~sync_parent:sync_parent_directory (Filename.dirname path);
+            write_fence path (Yojson.Safe.to_string fence)) in
+          match saved with
+          | Ok () -> Ok History_fence_stored
+          | Error detail -> Ok (History_fence_unconfirmed detail)))
+let publish_history_fence = publish_history_fence_with ~write_fence:Fs_compat.save_file_atomic_strict
+type history_resolution_publication =
+  | History_resolution_stored
+  | History_resolution_changed
+  | History_resolution_unconfirmed of string
+let history_resolutions_directory = "keeper-librarian-history-resolutions"
+let history_resolution_path ~scope ~request_id = Filename.concat history_resolutions_directory
+  (Filename.concat (digest scope) (digest request_id ^ ".json"))
+let history_resolution_record t ~scope ~request_id =
+  let name = digest request_id ^ ".json" in
+  let* result = read_tool_request_scope ~namespace:history_resolutions_directory
+    ~sync_parent:Unix.fsync t ~scope (fun ~owner_uid held names ->
+      if not (List.mem name names) then Ok None
+      else read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
+        ~owner_uid held name |> Result.map Option.some) in
+  Ok (Option.join result)
+let load_history_resolution t ~scope ~request_id =
+  serialized_tool_request_read t ~scope (fun () -> history_resolution_record t ~scope ~request_id)
+let history_resolution_inventory t ~scope =
+  let* rows = with_tool_request_scope ~namespace:history_resolutions_directory
+    ~sync_parent:Unix.fsync t ~scope (fun ~owner_uid held names ->
+      List.fold_left (fun result name ->
+        let* rows = result in
+        let+ json = read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name in
+        (name,json)::rows) (Ok []) names) in
+  Ok (Option.value ~default:[] rows)
+let publish_history_resolution t ~scope ~request_id ~expected ~next =
+  protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
+    let* current = history_resolution_record t ~scope ~request_id in
+    let canonical = function None -> Ok None | Some json ->
+      Result.map Option.some (Lane_addon_json.canonical json) in
+    let* current = canonical current in
+    let* expected = canonical expected in
+    if current<>expected then Ok History_resolution_changed else
+    let saved = protect (fun () ->
+      let* next = Lane_addon_json.canonical next in
+      let path=Filename.concat t.root (history_resolution_path ~scope ~request_id) in
+      let directory = Filename.dirname path in
+      durable_directory t ~sync_parent:sync_parent_directory directory;
+      Fs_compat.save_file_atomic_strict path
+        (Yojson.Safe.to_string next)) in
+    match saved with Ok () -> Ok History_resolution_stored
+    | Error detail -> Ok (History_resolution_unconfirmed detail)))
 let tool_request_body_path ~scope ~request_digest =
   Filename.concat tool_request_bodies_directory (Filename.concat (digest scope) (request_digest ^ ".json"))
 let tool_request_body t ~scope ~request_digest =
@@ -1513,6 +1599,7 @@ let publish_for_keeper ~base_path t frozen = protect (fun () ->
     :: List.remove_assoc "message" (List.remove_assoc "keeper_artifact" fields))))
 
 module For_testing = struct
+  let publish_history_fence = publish_history_fence_with
   let tool_request_owner_inventory = tool_request_owner_inventory_with
   let observe_tool_request_owner_metadata = observe_tool_request_owner_metadata_with
   let remove_binding = remove_binding_with

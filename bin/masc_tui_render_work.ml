@@ -48,25 +48,18 @@ let goal_receipt_authority_current (state : state) (receipt : goal_action_receip
         ~current_confirmation ~receipt:authority
 
 let task_status_word state (status : Masc_domain.task_status) =
-  let text ko en = ui_text state ~ko ~en in
-  match status with
-  | Masc_domain.Todo -> text "할 일" "todo"
-  | Claimed _ -> text "담당됨" "claimed"
-  | InProgress _ -> text "진행 중" "active"
-  | AwaitingVerification _ -> text "검증 대기" "awaiting review"
-  | Done _ -> text "완료" "done"
-  | Cancelled _ -> text "취소" "cancelled"
+  Masc_tui_task_document.status_label ~ko:(state.ui_language = Lang_ko) status
 
 type work_panels =
   { list_width : int
   ; preview_width : int
   ; list_rows : int
   ; preview_rows : int
-  ; arrangement : [ `Beside | `Stacked | `Plain ]
+  ; arrangement : [ `Beside | `Plain ]
   }
 
-(* A short frame spends its rows on the selected item, not on box edges.
-   Both list paging and drawing consume these exact dimensions. *)
+(* Narrow screens reserve a short preview and spend the remaining rows on
+   list entries. Paging and drawing use this same geometry. *)
 let work_panels ~inner ~rows =
   let inner = max 1 inner and rows = max 0 rows in
   let list_floor = 44 and preview_floor = 36 and gap = 2 in
@@ -76,14 +69,12 @@ let work_panels ~inner ~rows =
     { list_width = list_width - 4
     ; preview_width = inner - gap - list_width - 4
     ; list_rows = rows - 2; preview_rows = rows - 2; arrangement = `Beside }
-  else if rows >= 10 then
-    let list_rows = (rows - 4) / 2 in
-    { list_width = max 1 (inner - 4); preview_width = max 1 (inner - 4)
-    ; list_rows; preview_rows = rows - 4 - list_rows; arrangement = `Stacked }
   else
-    let list_rows = if rows >= 4 then max 1 (rows / 2) else rows in
+    let preview_rows = min 5 (rows / 3) in
+    let separator_rows = if preview_rows > 0 then 1 else 0 in
     { list_width = inner; preview_width = inner
-    ; list_rows; preview_rows = rows - list_rows; arrangement = `Plain }
+    ; list_rows = rows - preview_rows - separator_rows
+    ; preview_rows; arrangement = `Plain }
 
 let work_panel_lines geometry ~list_title ~list_lines ~preview_title ~preview_lines =
   let fill height lines =
@@ -92,10 +83,7 @@ let work_panel_lines geometry ~list_title ~list_lines ~preview_title ~preview_li
   let left = fill geometry.list_rows list_lines
   and right = fill geometry.preview_rows preview_lines in
   match geometry.arrangement with
-  | `Plain -> left @ right
-  | `Stacked ->
-      studio_panel ~width:(geometry.list_width + 4) ~title:list_title ~lines:left
-      @ studio_panel ~width:(geometry.preview_width + 4) ~title:preview_title ~lines:right
+  | `Plain -> if geometry.preview_rows = 0 then left else left @ ("" :: right)
   | `Beside ->
       let left = studio_panel ~width:(geometry.list_width + 4) ~title:list_title ~lines:left
       and right = studio_panel ~width:(geometry.preview_width + 4) ~title:preview_title ~lines:right in
@@ -722,9 +710,8 @@ let planning_preview_lines (state : state) ~cells ~rows (goal : planning_goal) =
     | Some metric, None -> text "성공 조건: " "Success criterion: " ^ metric
     | None, Some target -> text "목표값: " "Target: " ^ target
     | None, None -> text "성공 조건 미확인" "Success criterion not observed" in
-  let request = goal.pg_title ^ "\n\n" ^ criterion in
   let room = max 0 (rows - List.length header - List.length hint) in
-  header @ work_preview_body ~cells ~rows:room request @ hint
+  header @ work_preview_body ~cells ~rows:room criterion @ hint
 
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -856,9 +843,10 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
                   [ line Planning_detail.Proven
                       ((text "실제값: " "Actual: ") ^ Terminal_text.single_line value ^ (text " (보고된 값)" " (reported)"))
                   ; line Planning_detail.Note
-                      ((text "측정 근거: " "Measured: ") ^ Terminal_text.single_line evidence
-                       ^ " · " ^ Terminal_text.single_line actor
-                       ^ " · " ^ Terminal_text.single_line recorded_at)
+                      ((text "측정 근거: " "Measured: ") ^ Terminal_text.single_line evidence)
+                  ; line Planning_detail.Quiet
+                      ((text "측정 주체: " "Measured by: ") ^ Terminal_text.single_line actor
+                       ^ " · " ^ (text "기록 시각: " "recorded: ") ^ Terminal_text.single_line recorded_at)
                   ; tasks ]))
 
 let planning_confirmation_view (state : state) ~goal_id =
@@ -892,19 +880,21 @@ let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_g
   let text korean english = if ko then korean else english in
   let item action =
     let key = planning_action_key action and label = planning_action_label ~ko action in
-    let text = Printf.sprintf "[%s] %s" key label in
-    if planning_goal_offers_action goal action
-    then text else Ansi.dim ^ text ^ Ansi.reset
+    Printf.sprintf "[%s] %s" key label
   in
-  let actions = List.map item Goal_phase.Public_action.all
+  let actions = Goal_phase.Public_action.all
+    |> List.filter (planning_goal_offers_action goal)
+    |> List.map item in
+  let actions = actions
     @ (if not (planning_goal_has_valid_id goal) then []
        else if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
        then [(text "[a] 근거 최종 확인" "[a] Confirm proof")] else if goal.pg_phase = Goal_phase.Completed
        then [(text "[a] 저장된 확인 조회" "[a] Inspect confirmation")] else []) in
-  (* These are commands, so every action stays visible while its evidence is
-     read. Their physical rows are subtracted before the reader is allocated. *)
-  Message_layout.wrap_styled_words ~max_cells:(max 1 (framed_inner_width cols - 2))
-    ((text "행동: " "Actions: ") ^ String.concat "   " actions)
+  (* Keep available actions visible while reading; disabled lifecycle keys
+     remain refused by the dispatcher. Layout reserves these same rows. *)
+  (if actions = [] then [] else
+     Message_layout.wrap_styled_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+       ((text "행동: " "Actions: ") ^ String.concat "   " actions))
   |> List.map (fun line -> "  " ^ line)
   |> fun rows -> rows @ (if planning_goal_has_valid_id goal then [] else
        Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
@@ -925,11 +915,22 @@ let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_g
                 (Terminal_text.single_line reason))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
 
+(* A verdict's reason runs to several wrapped rows. The first row keeps its
+   two-space lead; a continuation goes one step further in, so a long reason
+   reads as hanging under the row that began it instead of as rows the wrap
+   dropped at the same edge. The wrap happens at the continuation width --
+   the deeper of the two indents -- or a row wrapped at the full width and
+   then pushed four cells in would run past the frame and lose its tail to
+   the fitter, which does not carry the cut word to the next row. *)
 let planning_proof_rows ~width lines =
   List.concat_map (fun (line : Planning_detail.line) ->
-    match Masc_tui_text_block.rows ~max_cells:width line.text with
+    match Masc_tui_text_block.rows ~max_cells:(max 1 (width - 4)) line.text with
     | [] -> [{line with text=""}]
-    | rows -> List.map (fun text -> {line with text="  " ^ text}) rows) lines
+    | rows ->
+        List.mapi
+          (fun index text ->
+             { line with text = (if index = 0 then "  " else "    ") ^ text })
+          rows) lines
 
 let planning_detail_content (state : state) ~confirmation ~cols (goal : planning_goal) =
   let ko = state.ui_language = Lang_ko in
@@ -1509,10 +1510,8 @@ let render_schedule_list (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s  %s"
-    (screen_title " MASC Keepers / Schedules")
-    timestamp
-    (connection_badge state) in
+  let header = surface_title_row ~cols state
+    ~lead:(screen_title " MASC Keepers / Schedules") ~readings:[ "  " ^ timestamp ] in
 
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
     ~hints:

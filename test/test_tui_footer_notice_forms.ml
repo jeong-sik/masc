@@ -1,5 +1,5 @@
 (* A notice that leads the footer row takes a step down before it is given up:
-   the operator-action notice is drawn whole while its first reason fits, as
+   the operator-action notice is drawn whole while its detail fits, as
    its count alone when only the count fits, and not at all only when not even
    the count fits beside the keys that cannot be dropped. A notice with no
    shorter text goes whole, as it did. These cases read the row the pure
@@ -28,8 +28,8 @@ let row_at ~status width =
   | _ -> Alcotest.failf "%d cells: the footer is not one line: %S" width line
 
 let first_reason = "keeper_fleet_safety:no_executable_keeper_fibers"
-let operator_notice = Masc_tui_footer.Operator_action { first = first_reason; count = 3 }
 let count_only = "ACTION NEEDED 3"
+let operator_notice = Masc_tui_footer.Operator_action { notice = count_only; detail = first_reason }
 let whole_notice = count_only ^ " \xc2\xb7 " ^ first_reason
 
 (* The narrowest row that can carry the count: the notice, the keys that

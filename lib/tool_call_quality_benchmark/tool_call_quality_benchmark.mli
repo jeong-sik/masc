@@ -27,9 +27,6 @@ val default_evidence_path : repo_root:string -> string
 val load_cases_from_file : string -> (benchmark_case list, string) Result.t
 val load_runs_from_file : string -> (evidence_run list, string) Result.t
 
-val score_run :
-  cases:benchmark_case list -> evidence_run -> case_score option
-
 val route_evidence_issues :
   cases:benchmark_case list -> runs:evidence_run list -> evidence_quality_issue list
 

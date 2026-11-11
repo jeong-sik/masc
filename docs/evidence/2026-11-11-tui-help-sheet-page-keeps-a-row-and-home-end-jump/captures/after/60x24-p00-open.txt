@@ -1,0 +1,24 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                               │
+├──────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                       │
+│                                                          │
+│◆ Operations                                              │
+│  v                read every reason in the last server   │
+│                   rollup; scroll and search the captured │
+│                   reading; Esc returns without changing a│
+│                   decision or setting                    │
+│  Left             open the Keeper list; Enter opens a    │
+│                   chat; Right or Esc returns             │
+│  j/k              select a destination                   │
+│  Enter            open the selected destination; never   │
+│                   approve                                │
+│  p                approvals and questions                │
+│  g                the operator quiz's Results: scorecard │
+│                   windows and wrong-answer notes         │
+│  ;                held calls, questions, Goal            │
+│  [lines 1-16/1509]                                       │
+└──────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:filter  Esc:close  …
+ Choose a Keeper before writing · i:choose

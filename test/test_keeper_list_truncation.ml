@@ -447,6 +447,101 @@ let test_default_limit_is_reported_not_assumed () =
       check bool "not truncated" false (bool_field json "truncated"))
 ;;
 
+(* A list without [detailed] answers which Keepers exist and whether each can
+   take work, so its rows carry the five fields that answer that. In the 240
+   hours to 2026-11-11 12:11 KST that answer was about 58 KB at the median
+   because every row was the whole detail row. *)
+let roster_fields = [ "health"; "name"; "paused"; "phase"; "status" ]
+
+let field_names row =
+  match row with
+  | `Assoc fields -> List.sort String.compare (List.map fst fields)
+  | other -> failf "expected a row object, got %s" (Yojson.Safe.to_string other)
+;;
+
+let items json =
+  match Yojson.Safe.Util.member "items" json with
+  | `List rows -> rows
+  | other -> failf "expected an items list, got %s" (Yojson.Safe.to_string other)
+;;
+
+let item_row name json =
+  match
+    List.find_opt
+      (fun row -> Yojson.Safe.Util.member "name" row = `String name)
+      (items json)
+  with
+  | Some row -> row
+  | None -> failf "items has no row for %s" name
+;;
+
+let test_default_list_carries_roster_rows () =
+  List.iter
+    (fun args ->
+      keeper_list ~names:[ "alpha"; "beta" ] ~args (fun json ->
+        check (list string) "keepers lists the names" [ "alpha"; "beta" ]
+          Yojson.Safe.Util.(json |> member "keepers" |> to_list |> List.map to_string);
+        let rows = items json in
+        check int "one row per Keeper" 2 (List.length rows);
+        List.iter
+          (fun row ->
+            check (list string) "a roster row carries the five fields and nothing else"
+              roster_fields (field_names row))
+          rows))
+    [ `Assoc []; `Assoc [ "detailed", `Bool false ] ]
+;;
+
+let test_roster_row_matches_the_detail_row () =
+  keeper_list ~names:[ "alpha"; "beta" ] ~args:(`Assoc [])
+    ~after_list_with_args:(fun _config read ->
+      let detailed = read (`Assoc [ "detailed", `Bool true ]) in
+      let roster = read (`Assoc []) in
+      List.iter
+        (fun name ->
+          let detail = roster_row name detailed in
+          let short = item_row name roster in
+          List.iter
+            (fun field ->
+              check string
+                (Printf.sprintf "%s of %s is the detail row's reading" field name)
+                (Yojson.Safe.to_string (Yojson.Safe.Util.member field detail))
+                (Yojson.Safe.to_string (Yojson.Safe.Util.member field short)))
+            roster_fields)
+        [ "alpha"; "beta" ])
+    (fun _ -> ())
+;;
+
+let test_named_compact_read_keeps_the_whole_row () =
+  keeper_list ~names:[ "alpha"; "beta" ] ~args:(`Assoc [])
+    ~after_list_with_args:(fun _config read ->
+      let named = read (named_args ~detailed:false "beta") in
+      match items named with
+      | [ row ] ->
+        List.iter
+          (fun field ->
+            check bool
+              (Printf.sprintf "the named row carries %s" field)
+              true
+              (List.mem field (field_names row)))
+          [ "next_action"; "last_failure"; "recent_turns"; "runtime_lane_observation" ]
+      | rows -> failf "expected one row, got %d" (List.length rows))
+    (fun _ -> ())
+;;
+
+let test_roster_keeps_the_error_row_of_an_unreadable_keeper () =
+  keeper_list ~names:[ "alpha" ] ~args:(`Assoc [])
+    ~before_list:(fun config ->
+      (* A snapshot without its TOML has no effective meta. *)
+      match Keeper_meta_store.replace_snapshot config (make_meta "broken") with
+      | Ok () -> ()
+      | Error error -> failf "replace_snapshot broken failed: %s" error)
+    (fun json ->
+      check (list string) "the healthy Keeper's row is a roster row" roster_fields
+        (field_names (item_row "alpha" json));
+      check bool "the unreadable Keeper's row still says why" true
+        (Yojson.Safe.Util.member "effective_meta_error" (item_row "broken" json) <> `Null))
+;;
+
 let test_detailed_row_carries_lifecycle_phase () =
   keeper_list
     ~names:[ "alpha" ]
@@ -1029,6 +1124,16 @@ let () =
             test_name_only_shape_carries_the_same_verdict
         ; test_case "default limit is reported" `Quick
             test_default_limit_is_reported_not_assumed
+        ] )
+    ; ( "roster rows"
+      , [ test_case "a list without detailed carries roster rows" `Quick
+            test_default_list_carries_roster_rows
+        ; test_case "a roster row is the detail row's reading" `Quick
+            test_roster_row_matches_the_detail_row
+        ; test_case "a named compact read keeps the whole row" `Quick
+            test_named_compact_read_keeps_the_whole_row
+        ; test_case "a roster keeps the error row of an unreadable Keeper" `Quick
+            test_roster_keeps_the_error_row_of_an_unreadable_keeper
         ] )
     ; ( "one Keeper"
       , [ test_case "a named read answers the roster's row" `Quick

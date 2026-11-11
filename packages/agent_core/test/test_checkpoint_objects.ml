@@ -369,6 +369,64 @@ let test_a_load_refuses_what_it_cannot_prove () =
   | Some _ | None -> Alcotest.fail "a head of another format must be Head_invalid"
 ;;
 
+(* A message is encoded once in the process: a plan made through another
+   memo answers with the records already decoded for those messages. Loaded
+   records are not taken as encoded: the first save through a memo the load
+   did not fill encodes them, and the next one does not. *)
+let test_a_value_is_encoded_once () =
+  let messages = turn 1 @ turn 2 in
+  let first = plan_ok (O.create_memo ()) O.Turn_closes (checkpoint messages) in
+  let second = plan_ok (O.create_memo ()) O.Turn_continues (checkpoint messages) in
+  Alcotest.(check bool) "another memo's plan decodes to the same records" true
+    (List.for_all2 ( == ) first.decoded.messages second.decoded.messages);
+  let store = store () in
+  write store first;
+  let loaded = load_ok store first in
+  let again = plan_ok (O.create_memo ()) O.Turn_closes loaded in
+  Alcotest.(check bool) "a loaded record is encoded before its bytes are kept" true
+    (List.for_all2 ( != ) loaded.messages again.decoded.messages);
+  let third = plan_ok (O.create_memo ()) O.Turn_continues loaded in
+  Alcotest.(check bool) "and encoded once" true
+    (List.for_all2 ( == ) again.decoded.messages third.decoded.messages)
+;;
+
+(* A store can hold a message as other bytes than this build's encoder
+   writes: here the same JSON with a space after it, named by the digest of
+   those bytes. A load reads it. What it read stays in the load's memo: the
+   digest of the loaded records through another memo is the digest of an
+   equal checkpoint that was never loaded. *)
+let test_loaded_bytes_stay_in_the_load_memo () =
+  let messages () = [ user "ask in other bytes"; assistant "answer in other bytes" ] in
+  let plan = plan_ok (O.create_memo ()) O.Turn_continues (checkpoint (messages ())) in
+  let written =
+    match plan.head.history.open_messages with
+    | first :: _ -> first
+    | [] -> Alcotest.fail "the open turn has no message"
+  in
+  let store = store () in
+  write store plan;
+  let other_bytes = Hashtbl.find store (written :> string) ^ " " in
+  let other = O.digest_of_bytes other_bytes in
+  Hashtbl.replace store (other :> string) other_bytes;
+  let rec renamed : Yojson.Safe.t -> Yojson.Safe.t = function
+    | `String text when String.equal text (written :> string) -> `String (other :> string)
+    | `Assoc fields -> `Assoc (List.map (fun (key, value) -> key, renamed value) fields)
+    | `List items -> `List (List.map renamed items)
+    | json -> json
+  in
+  let head_bytes = Yojson.Safe.to_string (renamed (Yojson.Safe.from_string plan.head_bytes)) in
+  let loaded = load_ok store { plan with head_bytes } in
+  same_messages "the other bytes load as the same messages" (messages ()) loaded;
+  let digest cp =
+    match O.content_digest (O.create_memo ()) cp with
+    | Ok digest -> (digest :> string)
+    | Error error -> Alcotest.fail (Error.to_string error)
+  in
+  Alcotest.(check string) "loaded or not, equal checkpoints have one digest"
+    (digest (checkpoint (messages ())))
+    (digest loaded)
+;;
+
 (* A value and every head written for it, whatever its turns, have one
    content digest; another header or another message gives another. *)
 let test_one_content_digest_for_every_layout () =
@@ -486,8 +544,8 @@ let test_a_rich_checkpoint_keeps_its_digest_and_bytes () =
 ;;
 
 (* A memo that saw the last plan or load takes the entries and chain values
-   of the messages that begin as before; a fresh memo encodes and hashes
-   everything. Over appends, edits, cuts, closed turns and a load, both give
+   of the messages that begin as before; a fresh memo hashes every message
+   and encodes those the process has not encoded. Over appends, edits, cuts, closed turns and a load, both give
    the same plan, byte for byte. *)
 let test_a_memo_gives_the_plan_a_fresh_memo_gives () =
   let random = Random.State.make [| 476 |] in
@@ -598,6 +656,42 @@ let test_a_list_reads_back_only_as_far_as_it_finds () =
   match O.system_prompt ~read_object:(read store) head with
   | Ok prompt -> Alcotest.(check (option string)) "and the system prompt" (Some "be brief") prompt
   | Error error -> Alcotest.fail (O.load_error_to_string error)
+;;
+
+(* [find] is asked every message once, from the last to the first, through
+   the open messages, the head's turns and both segments: what it has been
+   asked so far is what follows the message it is asked now. *)
+let test_find_last_asks_from_the_last_message_to_the_first () =
+  let store = store () in
+  let memo = O.create_memo () in
+  let plans, closed = close_turns ~store ~memo ((2 * O.turns_per_segment) + 3) in
+  let last = List.nth plans (List.length plans - 1) in
+  let messages = closed @ [ user "open ask"; assistant "open answer" ] in
+  let open_plan = plan_ok ~previous:last.head memo O.Turn_continues (checkpoint messages) in
+  write store open_plan;
+  let head =
+    match O.head_of_string open_plan.head_bytes with
+    | Ok head -> head
+    | Error error -> Alcotest.fail (O.load_error_to_string error)
+  in
+  Alcotest.(check bool) "the head has segments, turns and open messages" true
+    (Option.is_some head.history.segment
+     && head.history.turns <> []
+     && head.history.open_messages <> []);
+  let asked = ref [] in
+  let ask (message : Types.message) : unit option =
+    asked := Types.text_of_message message :: !asked;
+    None
+  in
+  (match O.find_last ~read_object:(read store) head ask with
+   | Ok None -> ()
+   | Ok (Some ()) -> Alcotest.fail "nothing answered, so nothing is found"
+   | Error error -> Alcotest.fail (O.load_error_to_string error));
+  (* Each asked message went to the front, so the first message asked last
+     leaves them in the history's own order. *)
+  Alcotest.(check (list string)) "every message once, the last one first"
+    (List.map Types.text_of_message messages)
+    !asked
 ;;
 
 (* However many turns close, a head names fewer than a segment's worth of
@@ -808,6 +902,9 @@ let () =
             test_a_turn_names_the_chain_of_its_prefix
         ; Alcotest.test_case "a loaded checkpoint saves unchanged" `Quick
             test_a_loaded_checkpoint_saves_unchanged
+        ; Alcotest.test_case "a value is encoded once" `Quick test_a_value_is_encoded_once
+        ; Alcotest.test_case "loaded bytes stay in the load's memo" `Quick
+            test_loaded_bytes_stay_in_the_load_memo
         ; Alcotest.test_case "one content digest for every layout" `Quick
             test_one_content_digest_for_every_layout
         ; Alcotest.test_case "an absent object is written again" `Quick
@@ -816,6 +913,8 @@ let () =
             test_a_rich_checkpoint_keeps_its_digest_and_bytes
         ; Alcotest.test_case "a memo gives the plan a fresh memo gives" `Quick
             test_a_memo_gives_the_plan_a_fresh_memo_gives
+        ; Alcotest.test_case "find_last asks from the last message to the first" `Quick
+            test_find_last_asks_from_the_last_message_to_the_first
         ; Alcotest.test_case "a list reads back only as far as it finds" `Quick
             test_a_list_reads_back_only_as_far_as_it_finds
         ; Alcotest.test_case "a head names fewer turns than a segment" `Quick

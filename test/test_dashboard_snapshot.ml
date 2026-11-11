@@ -192,7 +192,7 @@ let test_activity_events_revalidate_public_parents () =
   emit public_id "public body";
   emit private_id "private body from old runtime";
   emit "p-deleted" "orphaned old body";
-  let private_comment = Result.get_ok (Board_dispatch.add_comment ~post_id:private_id
+  let private_comment = Result.get_ok (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:private_id
     ~author:"writer" ~content:"private comment" ()) in
   ignore (Activity_graph.emit config ~kind:"board.voted"
     ~subject:(Activity_graph.entity ~kind:"comment" (Board.Comment_id.to_string private_comment.id))
@@ -223,7 +223,7 @@ let test_activity_events_revalidate_public_parents () =
   let second = refresh compute in
   Alcotest.(check bool) "warm projection is reused" true (first == second);
   Alcotest.(check int) "warm request does not rescan Activity" 1 !calls;
-  ignore (Result.get_ok (Board_dispatch.delete_post ~post_id:public_id));
+  ignore (Result.get_ok (Board_dispatch.delete_post ~authorization:Board.Operator_deletion ~post_id:public_id));
   Alcotest.check_raises "deleted parent cannot authorize fallback" (Failure "refresh failed")
     (fun () -> ignore (refresh (fun ~keep:_ -> failwith "refresh failed")));
   let after = refresh compute in

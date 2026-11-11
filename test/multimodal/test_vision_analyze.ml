@@ -70,10 +70,6 @@ let test_classify_never_ok_empty () =
       | Error _ -> ())
     [ true; false ]
 
-let test_string_of_error () =
-  assert (String.equal (V.string_of_error V.Empty_extraction) "empty_extraction");
-  assert (String.equal (V.string_of_error V.Truncated_extraction) "truncated_extraction")
-
 let () =
   test_make_request_ok ();
   test_make_request_rejects_blank_query ();
@@ -86,5 +82,4 @@ let () =
   test_classify_empty_not_truncated_is_empty ();
   test_classify_whitespace_not_truncated_is_empty ();
   test_classify_never_ok_empty ();
-  test_string_of_error ();
   print_endline "test_vision_analyze: all assertions passed"

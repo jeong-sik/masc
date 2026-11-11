@@ -8,7 +8,7 @@ including the date, time and number each claim must carry.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, assert_never
 
 import synth_spec as S
 
@@ -41,6 +41,7 @@ Keeper가 일하는 환경:
 종류:
 - 지속 지식: 다음 턴에도 쓸모 있는 지식입니다. 예: 결정과 그 이유, 적용 조건과 예외, 운영자가 정한 제약이나 선호, 반복되는 실패와 대처, 환경에 관한 사실, 사람·팀과 일하는 방식. 지금 진행 중이거나 기다리는 일, 특정 PR·CI·task의 현재 상태, 큐 길이, 깨움 시각, 턴 진행, 인사, 한 번 실행한 결과 그 자체는 쓰지 않습니다.
 - 일시적 상태: 장기 기억에 실수로 들어간 기록입니다. 예: 특정 PR이나 CI 실행이 지금 어떤 상태인지, 기다리는 중인 작업, 큐에 쌓인 개수, 다음 깨움 시각, 이번 턴의 진행 상황, 인사. 평서문으로 쓰고, 지속되는 교훈, 규칙, 결정은 넣지 않습니다.
+- 쓸 날이 있는 기록: 정해진 날에 할 일, 확인할 것, 전할 말을 미리 적어 둔 기록입니다. 예: 그날 회의에서 물을 것, 그날 배포 전에 다시 볼 설정, 그날 보고에 넣거나 뺄 내용. 표기의 날짜가 이 기록을 쓸 날입니다. 그날이 지나면 쓸 데가 없는 내용만 쓰고, 지속되는 교훈, 규칙, 결정은 넣지 않습니다. 스케줄러, CI, PR처럼 다른 곳에서 다시 읽을 수 있는 예약(다음 깨움 시각, 예약된 실행)은 쓰지 않습니다.
 
 {marks}
 기억끼리 같은 지식을 반복하지 마세요. 아래 이미 있는 기억과도 겹치지 않게 쓰세요. 긴 기억은 조건, 예외, 경위를 함께 담습니다.
@@ -48,8 +49,11 @@ Keeper가 일하는 환경:
 항목:
 {items}
 
-이미 있는 기억(앞부분만):
-{existing}
+같은 카테고리에 이미 있는 기억:
+{same}
+
+다른 카테고리에 이미 있는 기억(앞부분만):
+{others}
 
 {style}
 출력 모양: {{"facts": [{{"claim": "..."}}]}}. facts는 정확히 {n}개이고 항목 차례를 따릅니다."""
@@ -67,9 +71,24 @@ def surface_line(surface: S.Surface) -> str:
     return f"날짜: {show(surface.date)}. 시각: {show(surface.time)}. 번호: {show(surface.reference)}."
 
 
-def fact_item(index: int, stale: bool, length: int, surface: S.Surface) -> str:
-    kind = "일시적 상태" if stale else "지속 지식"
-    return f"{index}. 종류: {kind}. 길이: 약 {length}자. {surface_line(surface)}"
+type FactText = Literal["durable", "transient", "scheduled"]
+
+
+def fact_kind_word(kind: FactText) -> str:
+    """The kind as FACTS_PROMPT names it."""
+    match kind:
+        case "durable":
+            return "지속 지식"
+        case "transient":
+            return "일시적 상태"
+        case "scheduled":
+            return "쓸 날이 있는 기록"
+        case _:
+            assert_never(kind)
+
+
+def fact_item(index: int, kind: FactText, length: int, surface: S.Surface) -> str:
+    return f"{index}. 종류: {fact_kind_word(kind)}. 길이: 약 {length}자. {surface_line(surface)}"
 
 CANDIDATE_PROMPT = """아래 Keeper가 이번 턴에 장기 기억에 저장해 달라고 제안한 관측 하나를 만드세요.
 
@@ -88,9 +107,9 @@ Keeper가 일하는 환경:
 출력 모양: {{"claim": "..."}}"""
 
 TASK_NEW = """제안 내용: 카테고리 `{category}`에 들어갈 새 지속 지식 하나. 현재 기억에 없는 새로운 결정, 제약, 교훈, 환경 사실이어야 합니다.
-아래 같은 카테고리의 현재 기억과 다른 내용을 씁니다.
+아래 현재 기억이 다루는 대상과 다른 대상에 관한 지식을 씁니다. 현재 기억의 대상에 조건, 예외, 근거를 더하는 내용은 새 지식이 아닙니다.
 
-현재 기억(같은 카테고리, 앞부분만):
+현재 기억(같은 카테고리):
 {existing}"""
 
 TASK_CORRECTION = """제안 내용: 아래 현재 기억 하나를 바로잡는 새 관측. 그 기억이 말하는 값, 조건, 결정 가운데 하나가 바뀌었다는 사실을 분명히 쓰고, 왜 바뀌었는지 근거를 넣습니다.

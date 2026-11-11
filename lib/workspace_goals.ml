@@ -59,6 +59,24 @@ let parse_optional_goal_phase args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
+(* A Goal id is looked up as written: the id the lifecycle tools take has no
+   surrounding whitespace, so a padded one is a miss, not a trimmed match. A
+   missing key, an explicit [null] and a blank string count as not supplied,
+   the convention of [parse_optional_goal_phase]. *)
+let parse_optional_goal_id args field =
+  match Json_util.assoc_member_opt field args with
+  | None | Some `Null -> Ok None
+  | Some (`String raw) when String.trim raw = "" -> Ok None
+  | Some (`String raw) -> Ok (Some raw)
+  | Some json ->
+    Error
+      (make_type_field_error
+         ~field
+         ~constraint_violated:Type_string
+         ~expected:"string"
+         ~received:(Yojson.Safe.to_string json))
+;;
+
 let reject_retired_goal_list_status args =
   match args with
   | `Assoc fields ->
@@ -229,60 +247,115 @@ let notify_goal_verification_abandoned (ctx : context) ~goal_id =
       (Printexc.to_string exn)
 ;;
 
+(* What a list row carries. A short row names the Goal and says where it
+   stands: id, criterion_revision, title, priority, phase, created_at and
+   updated_at, the fields [Keeper_tool_descriptor.goal_list_output_schema]
+   requires. A whole row adds the criterion fields, the review note and the
+   verification, criterion review and measurement joins, which are most of
+   the bytes of a row. *)
+type goal_list_rows =
+  | Short_rows
+  | Whole_rows
+
+let goal_list_short_row (goal : Goal_store.goal) =
+  `Assoc
+    [ "id", `String goal.id
+    ; "criterion_revision", `String goal.criterion_revision
+    ; "title", `String goal.title
+    ; "priority", `Int goal.priority
+    ; "phase", `String (Goal_phase.to_string goal.phase)
+    ; "created_at", `String goal.created_at
+    ; "updated_at", `String goal.updated_at
+    ]
+;;
+
+let goal_list_whole_rows (ctx : context) (goals : Goal_store.goal list) =
+  (* RFC-0387 (stage 1): the verification ledger joins each goal here (not
+     in [Goal_store.goal_to_yojson], which is the persistence codec). The
+     ledger is loaded ONCE per request and joined in memory; a store that
+     does not decode renders the explicit [ledger_error] marker per goal —
+     never the pre-verification default, which would disguise corruption as
+     "not verified yet". *)
+  let records_by_goal_id =
+    Goal_verification.load_records_by_goal_id_authoritative ctx.config
+  in
+  let measurements = Goal_measurement.load ctx.config in
+  (* A row carries the review's verdict. The reviewer's evidence is left out:
+     it was 517,662 of the 941,529 bytes of one 62-goal result. *)
+  let criterion_review_for_goal =
+    Goal_criterion_review.summary_projector (Goal_criterion_review.load ctx.config)
+  in
+  let goal_json (goal : Goal_store.goal) =
+    let verification =
+      match records_by_goal_id with
+      | Error detail -> Goal_verification.ledger_error_to_yojson detail
+      | Ok records_by_goal_id ->
+        (match Goal_store.Goal_id_map.find_opt goal.id records_by_goal_id with
+         | Some record -> record
+         | None -> Goal_verification.default_record ~goal_id:goal.id)
+        |> Goal_verification.record_to_yojson_for_goal ~goal
+    in
+    match Goal_store.goal_to_yojson goal with
+    | `Assoc fields ->
+        `Assoc (fields @ [ "verification", verification
+                         ; "criterion_review", criterion_review_for_goal goal
+                         ; "measurement", Goal_measurement.projection measurements goal ])
+    | json -> json
+  in
+  List.map goal_json goals
+;;
+
+(* The short rows read only the goals, so they skip the verification ledger,
+   the criterion reviews and the measurements the whole rows join. *)
+let goal_list_answer ~tool_name ~start_time (ctx : context) ~rows
+    (goals : Goal_store.goal list) : Tool_result.result =
+  let rendered =
+    match rows with
+    | Short_rows -> List.map goal_list_short_row goals
+    | Whole_rows -> goal_list_whole_rows ctx goals
+  in
+  ok_result
+    ~tool_name
+    ~start_time
+    [ "generated_at", `String (Masc_domain.now_iso ())
+    ; "count", `Int (List.length goals)
+    ; "goals", `List rendered
+    ; "rollup", Goal_store.rollup_to_yojson (Goal_store.compute_rollup goals)
+    ]
+;;
+
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( reject_retired_goal_list_status args
-    , parse_optional_goal_phase args "phase" )
+    , parse_optional_goal_phase args "phase"
+    , parse_optional_goal_id args "goal_id" )
   with
-  | Error err, _ | _, Error err ->
+  | Error err, _, _ | _, Error err, _ | _, _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
-  | Ok (), Ok phase ->
-    match Goal_store.list_goals_result ctx.config ?kind:phase () with
-    (* RFC-0444 criterion 1: a store this build cannot read is the typed
-       envelope, never [goals:[]]. [Uninitialized] reads as [Ok []]. *)
-    | Error unavailable -> unavailable_result ~tool_name ~start_time unavailable
-    | Ok goals ->
-    let rollup = Goal_store.compute_rollup goals in
-    (* RFC-0387 (stage 1): the verification ledger joins each goal here (not
-       in [Goal_store.goal_to_yojson], which is the persistence codec). The
-       ledger is loaded ONCE per request and joined in memory; a store that
-       does not decode renders the explicit [ledger_error] marker per goal —
-       never the pre-verification default, which would disguise corruption as
-       "not verified yet". *)
-    let records_by_goal_id =
-      Goal_verification.load_records_by_goal_id_authoritative ctx.config
-    in
-    let measurements = Goal_measurement.load ctx.config in
-    (* A row carries the review's verdict. The reviewer's evidence is left out:
-       it was 517,662 of the 941,529 bytes of one 62-goal result. *)
-    let criterion_review_for_goal =
-      Goal_criterion_review.summary_projector (Goal_criterion_review.load ctx.config)
-    in
-    let goal_json (goal : Goal_store.goal) =
-      let verification =
-        match records_by_goal_id with
-        | Error detail -> Goal_verification.ledger_error_to_yojson detail
-        | Ok records_by_goal_id ->
-          (match Goal_store.Goal_id_map.find_opt goal.id records_by_goal_id with
-           | Some record -> record
-           | None -> Goal_verification.default_record ~goal_id:goal.id)
-          |> Goal_verification.record_to_yojson_for_goal ~goal
-      in
-      match Goal_store.goal_to_yojson goal with
-      | `Assoc fields ->
-          `Assoc (fields @ [ "verification", verification
-                           ; "criterion_review", criterion_review_for_goal goal
-                           ; "measurement", Goal_measurement.projection measurements goal ])
-      | json -> json
-    in
-    ok_result
-      ~tool_name
-      ~start_time
-      [ "generated_at", `String (Masc_domain.now_iso ())
-      ; "count", `Int (List.length goals)
-      ; "goals", `List (List.map goal_json goals)
-      ; "rollup", Goal_store.rollup_to_yojson rollup
-      ]
+  | Ok (), Ok phase, Ok goal_id ->
+    (match goal_id, phase with
+     | Some _, Some _ ->
+       error_result_typed ~tool_name ~start_time ~code:Validation_error
+         "goal_id reads one Goal and phase filters the list; pass one of them"
+     (* A read that names a Goal is a read of that one Goal, so it keeps the
+        whole row whatever [detailed] says. *)
+     | Some goal_id, None ->
+       (match Goal_store.find_goal ctx.config ~goal_id with
+        | Goal_store.Goal_absent ->
+          error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
+        (* A store this build cannot read is never "goal not found" (RFC-0444
+           S5, criterion 4): it answers the typed Unavailable envelope. *)
+        | Goal_store.Store_unavailable unavailable ->
+          unavailable_result ~tool_name ~start_time unavailable
+        | Goal_store.Goal_found goal ->
+          goal_list_answer ~tool_name ~start_time ctx ~rows:Whole_rows [ goal ])
+     | None, phase ->
+       let rows = if get_bool args "detailed" false then Whole_rows else Short_rows in
+       (match Goal_store.list_goals_result ctx.config ?kind:phase () with
+        (* RFC-0444 criterion 1: a store this build cannot read is the typed
+           envelope, never [goals:[]]. [Uninitialized] reads as [Ok []]. *)
+        | Error unavailable -> unavailable_result ~tool_name ~start_time unavailable
+        | Ok goals -> goal_list_answer ~tool_name ~start_time ctx ~rows goals))
 ;;
 (* "Supplied" follows this module's optional-field convention: a missing key,
    an explicit [null], and a blank string all count as not supplied — the same

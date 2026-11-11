@@ -436,16 +436,30 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
        anyway, because the health rollup hoisted every [status_reasons] entry
        of a section whose gate had opened for another reason (#34894). They
        still travel in [status_reasons], so the backlog stays on screen. *)
-    let operator_action_reasons =
-      storage_reasons
-      |> backlog_reason "recoverable_backlog" recoverable_backlog_count
-      |> backlog_reason "shutdown_fenced_backlog" shutdown_fenced_backlog_count
-      |> backlog_reason "unclassified_backlog" unclassified_backlog_count
+    let reported reason = Operator_action_reason.other ~component:"keeper_event_queue" ~reason in
+    let backlog_action name count actions =
+      if count > 0 then reported (Printf.sprintf "%s=%d" name count) :: actions else actions in
+    let operator_actions =
+      List.map reported storage_reasons
+      |> backlog_action "recoverable_backlog" recoverable_backlog_count
+      |> (fun actions ->
+          if shutdown_fenced_backlog_count <= 0 then actions
+          else
+            let keepers = Option.bind (List.assoc_opt "shutdown_fenced_by_keeper" fields)
+                (Operator_action_reason.queue_keepers ~count:shutdown_fenced_backlog_count) in
+            Operator_action_reason.shutdown_fenced_backlog
+              ~count:shutdown_fenced_backlog_count ~keepers
+              ~complete:(counts_complete && not source_unavailable) :: actions)
+      |> backlog_action "unclassified_backlog" unclassified_backlog_count
       |> List.rev
+    in
+    let operator_action_reasons =
+      List.map (fun action -> action.Operator_action_reason.reason) operator_actions
     in
     let without name fields = List.remove_assoc name fields in
     let fields =
       fields
+      |> without "operator_actions"
       |> without "schema"
       |> without "queue_residence"
       |> without "status_reasons"
@@ -459,6 +473,7 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
        ; "queue_residence", queue_residence
        ; "status", `String status
        ; "operator_action_required", `Bool operator_action_required
+       ; "operator_actions", `List (List.map Operator_action_reason.to_json operator_actions)
        ; "status_reasons", `List (List.map (fun reason -> `String reason) status_reasons)
        ; ( "operator_action_reasons"
          , `List (List.map (fun reason -> `String reason) operator_action_reasons) )

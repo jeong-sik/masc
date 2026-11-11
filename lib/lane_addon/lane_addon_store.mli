@@ -171,6 +171,36 @@ val load_tool_request_owner : t -> scope:string -> request_id:string -> (Yojson.
     throughout these checks; external changes still refuse. Large records are
     reread in bounded chunks against the complete first observation, including
     the final partial chunk and EOF, without another file-sized allocation. *)
+type history_fence_publication =
+  | History_fence_stored
+  | History_fence_already_stored
+  | History_fence_owner_changed
+  | History_fence_unconfirmed of string
+val load_history_fence : t -> scope:string -> request_id:string ->
+  (Yojson.Safe.t option, string) result
+val history_fence_path : scope:string -> request_id:string -> string
+val publish_history_fence : t -> scope:string -> request_id:string ->
+  expected_owner:Yojson.Safe.t -> fence:Yojson.Safe.t ->
+  (history_fence_publication, string) result
+(** Under the original scope's existing mutex, compare the complete expected
+    owner and publish one immutable history-only fence. Neither original nor
+    body is rewritten. Different existing fence bytes refuse. Save failure may
+    follow publication; only an exact subsequent read establishes the result. *)
+type history_resolution_publication =
+  | History_resolution_stored
+  | History_resolution_changed
+  | History_resolution_unconfirmed of string
+val load_history_resolution : t -> scope:string -> request_id:string ->
+  (Yojson.Safe.t option, string) result
+val history_resolution_path : scope:string -> request_id:string -> string
+val history_resolution_inventory : t -> scope:string ->
+  ((string * Yojson.Safe.t) list, string) result
+(** Complete owned scope inventory as filename and strict JSON pairs. *)
+val publish_history_resolution : t -> scope:string -> request_id:string ->
+  expected:Yojson.Safe.t option -> next:Yojson.Safe.t ->
+  (history_resolution_publication, string) result
+(** History-resolution envelope CAS under the same original-scope serializer.
+    A failed replacement remains uncertain and must be strictly reobserved. *)
 val tool_request_body_path : scope:string -> request_digest:string -> string
 (** One original request body, relative to {!root}: beside the scope's
     records, not inside their directory, which holds only records. *)
@@ -393,6 +423,10 @@ val publish_for_keeper : base_path:string -> t -> Yojson.Safe.t ->
     published bytes for [keeper_artifact_read]. No message is sent here. *)
 
 module For_testing : sig
+  val publish_history_fence :
+    write_fence:(string -> string -> (unit, string) result) ->
+    t -> scope:string -> request_id:string -> expected_owner:Yojson.Safe.t ->
+    fence:Yojson.Safe.t -> (history_fence_publication, string) result
   val tool_request_owner_inventory :
     after_listing:(string -> unit) -> sync_file:(Unix.file_descr -> unit) ->
     sync_parent:(Unix.file_descr -> unit) -> t -> scope:string ->

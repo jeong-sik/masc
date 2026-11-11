@@ -218,7 +218,16 @@ val enqueue_if_missing_durable_result :
 type enqueue_stimulus_durable_result =
   | Stimulus_enqueued
   | Stimulus_already_present
+  | Stimulus_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+      (** This shutdown operation holds the Keeper's intake, so the queue was
+          neither read nor written and its store is not at fault. The refusal
+          stands for as long as the operation holds the intake; no amount of
+          time clears it. The producer keeps its source. *)
   | Stimulus_storage_error of string
+
+val shutdown_reserved_detail : Keeper_shutdown_types.Operation_id.t -> string
+(** The words of a {!Stimulus_shutdown_reserved} refusal, for a caller that
+    reports it as text. *)
 
 type transfer_target_error =
   | Transfer_target_name_mismatch of
@@ -334,6 +343,8 @@ val retain_checkpoint_batch_result :
   ((Keeper_event_queue_state.pending_selection * string) list, string) result
 (** Retain the exact checkpoint batch and rotate it in one snapshot
     transaction. Connector conversations move with their unadmitted pending
-    suffix in FIFO order. Publish only after durable confirmation; per-source
-    failures remain explicit while independent valid work still progresses. *)
+    suffix in FIFO order. Withdrawn selections are skipped under the owner
+    lock without restoring their sources. Publish only after durable
+    confirmation; changed selections remain explicit failures while
+    independent valid work still progresses. *)
 

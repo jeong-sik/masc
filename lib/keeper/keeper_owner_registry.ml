@@ -23,6 +23,11 @@ type input_response_error =
 
 exception Install_failed of install_error
 
+type restart_journal_reader =
+  keeper_name:string -> session_root:string ->
+  Keeper_chat_operation_store.restart_native_call ->
+  (Agent_core.Agent.execution_terminal_disposition option, string) result
+
 type pool =
   { config : Workspace.config
   ; sw : Eio.Switch.t
@@ -33,6 +38,7 @@ type pool =
   ; stopping : bool Atomic.t
   ; operation_runner : Keeper_owner.operation_runner option
   ; on_turn_slot_released : (keeper_name:string -> unit) option
+  ; mutable restart_journal_reader : restart_journal_reader option
   }
 
 let pools : (string, pool) Hashtbl.t = Hashtbl.create 4
@@ -171,10 +177,10 @@ let prepare_operation_store_path pool keeper_name =
    process may stop after either append, so every start retries the same facts,
    not just failures whose cause happens to be Interrupted_by_restart. The
    transcript is read once for all of them, not once per failure. *)
-let record_failed_operations pool ~keeper_name owner =
+let record_failed_operation_rows pool ~keeper_name operations =
   Keeper_chat_failure_projection.persist_all
     ~base_path:pool.config.Workspace.base_path ~keeper_name
-    (Keeper_owner.failed_operations_at_start owner)
+    operations
   |> List.iter (fun ((operation : Keeper_chat_operation.t), outcome) ->
     let log_pending error =
       Log.Keeper.warn ~keeper_name
@@ -188,6 +194,9 @@ let record_failed_operations pool ~keeper_name owner =
       (match journal with Ok _ -> () | Error error -> log_pending error)
     | Error error -> log_pending error)
 ;;
+
+let record_failed_operations pool ~keeper_name owner =
+  record_failed_operation_rows pool ~keeper_name (Keeper_owner.failed_operations_at_start owner)
 
 let start_owner pool ~keeper_name ~initial_meta =
   match prepare_operation_store_path pool keeper_name with
@@ -241,11 +250,63 @@ let install_owner_projection pool keeper_name owner =
       owner)
 ;;
 
+type restart_completion_error =
+  | Restart_inventory_stopping
+  | Restart_owner_unavailable
+  | Restart_child_active of Keeper_owner.error
+
+let settle_restart_owner pool ~journal_terminal ~keeper_name owner =
+  if Atomic.get pool.stopping then Error Restart_inventory_stopping
+  else
+    let session_root = Keeper_fs.session_store_path pool.config in
+    match Keeper_owner.complete_restart_settlement owner
+        ~journal_terminal:(journal_terminal ~keeper_name ~session_root) with
+    | Ok failed ->
+      (match failed with
+       | [] -> ()
+       | _ :: _ -> record_failed_operation_rows pool ~keeper_name failed);
+      Ok ()
+    | Error error ->
+      (* The failed startup actor closes its Store. Preserve the existing child
+         drain before removing its receipt lookup from the registry. *)
+      ignore (Keeper_owner.begin_stopping owner : (unit, Keeper_owner.error) result);
+      if Option.is_some (Keeper_owner.turn_in_flight owner)
+      then Error (Restart_child_active error)
+      else (
+        let detail = Keeper_owner.error_to_string error in
+        Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+          match Hashtbl.find_opt pool.owners keeper_name with
+          | Some current when current == owner ->
+            Hashtbl.remove pool.owners keeper_name;
+            Hashtbl.replace pool.unavailable keeper_name detail;
+            Keeper_owner_projection.remove ~base_path:pool.config.base_path ~keeper_name owner;
+            refresh_owner_handles pool
+          | Some _ | None -> ());
+        Log.Keeper.error ~keeper_name "restart settlement unavailable: %s" detail;
+        Keeper_turn_broadcast.changed ~base_path:pool.config.base_path ~keeper_name;
+        Error Restart_owner_unavailable)
+;;
+
+let complete_registered_restart pool ~keeper_name owner =
+  (* Reader installation and registration use the same mutex. If the reader
+     is absent, the first completion snapshot must include this handle. If it
+     is present, complete outside the lock before returning it to creation. *)
+  let reader = Eio.Mutex.use_ro pool.owners_mu (fun () -> pool.restart_journal_reader) in
+  match reader with
+  | None -> if Atomic.get pool.stopping then Error Inventory_stopping else Ok owner
+  | Some journal_terminal ->
+    (match settle_restart_owner pool ~journal_terminal ~keeper_name owner with
+     | Ok () -> if Atomic.get pool.stopping then Error Inventory_stopping else Ok owner
+     | Error Restart_inventory_stopping -> Error Inventory_stopping
+     | Error Restart_owner_unavailable -> Error (Owner_unavailable keeper_name)
+     | Error (Restart_child_active error) -> Error (Owner_initialization_failed error))
+;;
+
 let ensure_in_pool pool meta =
   if Atomic.get pool.stopping
   then Error Inventory_stopping
   else
-    Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+    let installed = Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
       match Hashtbl.find_opt pool.owners meta.Keeper_meta_contract.name with
       | Some owner -> Ok owner
       | None ->
@@ -262,14 +323,17 @@ let ensure_in_pool pool meta =
            refresh_owner_handles pool;
            Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
              ~keeper_name:meta.name;
-           Ok owner))
+           Ok owner)) in
+    match installed with
+    | Error _ as error -> error
+    | Ok owner -> complete_registered_restart pool ~keeper_name:meta.name owner
 ;;
 
 let ensure_empty_in_pool pool keeper_name =
   if Atomic.get pool.stopping
   then Error Inventory_stopping
   else
-    Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+    let installed = Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
       match Hashtbl.find_opt pool.owners keeper_name with
       | Some owner -> Ok owner
       | None ->
@@ -286,7 +350,10 @@ let ensure_empty_in_pool pool keeper_name =
               refresh_owner_handles pool;
               Keeper_turn_broadcast.changed ~base_path:pool.config.Workspace.base_path
                 ~keeper_name;
-              Ok owner)))
+              Ok owner))) in
+    match installed with
+    | Error _ as error -> error
+    | Ok owner -> complete_registered_restart pool ~keeper_name owner
 ;;
 
 let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
@@ -304,6 +371,7 @@ let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
       ; stopping = Atomic.make false
       ; operation_runner
       ; on_turn_slot_released
+      ; restart_journal_reader = None
       }
     in
     let installed =
@@ -394,6 +462,30 @@ let find_owner ~purpose ~base_path ~keeper_name =
 ;;
 
 let get ~base_path ~keeper_name = find_owner ~purpose:Admission ~base_path ~keeper_name
+
+let complete_restart_settlements ~base_path ~journal_terminal =
+  let unavailable detail = Error (Inventory_load_failed { keeper_name = None; detail }) in
+  match find_pool ~purpose:Admission base_path with
+  | Error error -> unavailable (lookup_error_to_string error)
+  | Ok pool ->
+    let owners = Eio.Mutex.use_rw ~protect:true pool.owners_mu (fun () ->
+      pool.restart_journal_reader <- Some journal_terminal;
+      Hashtbl.to_seq pool.owners |> List.of_seq
+      |> List.sort (fun (left, _) (right, _) -> String.compare left right)) in
+    let rec complete count = function
+      | [] -> Ok count
+      | (keeper_name, owner) :: rest ->
+        (match settle_restart_owner pool ~journal_terminal ~keeper_name owner with
+         | Ok () -> complete (count + 1) rest
+         | Error Restart_inventory_stopping -> unavailable "inventory stopped during restart settlement"
+         | Error Restart_owner_unavailable -> complete count rest
+         | Error (Restart_child_active _) ->
+           Error (Inventory_load_failed
+             { keeper_name = Some keeper_name
+             ; detail = "startup settlement refused while an Owner child remains active" }))
+    in
+    complete 0 owners
+;;
 
 let operation_projection ~base_path ~keeper_name =
   match get ~base_path ~keeper_name with

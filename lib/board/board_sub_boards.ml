@@ -10,6 +10,7 @@ let sub_board_of_yojson = Board_sub_board_json.sub_board_of_yojson
 
 let reload_sub_boards store =
   with_persist_lock store (fun () ->
+    let* () = require_model_reload_allowed store ~path:(Board_paths.sub_boards_path store) in
     let outcome = Board_sub_boards_source.read store in
     let outcome = try
       with_lock store (fun () ->
@@ -31,24 +32,12 @@ let reload_sub_boards store =
     | Ok count -> Ok count
     | Error error -> Error (Board_paths.sub_boards_path store, Failure (show_board_error error)))
 
-type snapshot_change =
-  | Replace_sub_board of sub_board
-  | Remove_sub_board of Sub_board_id.t
-
-let changed_sub_boards_jsonl_unlocked store change =
+let changed_sub_boards_jsonl_unlocked store (updated : sub_board) =
   let buf = Buffer.create 1024 in
-  Hashtbl.iter
-    (fun id (sb : sub_board) ->
-       let row = match change with
-         | Replace_sub_board updated ->
-           Some (if String.equal id (Sub_board_id.to_string updated.id) then updated else sb)
-         | Remove_sub_board removed ->
-           if String.equal id (Sub_board_id.to_string removed) then None else Some sb
-       in
-       Option.iter (fun row ->
-         Buffer.add_string buf (Yojson.Safe.to_string (sub_board_to_yojson row));
-         Buffer.add_char buf '\n') row)
-    store.sub_boards;
+  Hashtbl.iter (fun id (board : sub_board) ->
+    let row = if String.equal id (Sub_board_id.to_string updated.id) then updated else board in
+    Buffer.add_string buf (Yojson.Safe.to_string (sub_board_to_yojson row));
+    Buffer.add_char buf '\n') store.sub_boards;
   Buffer.contents buf
 ;;
 
@@ -165,7 +154,7 @@ let update_sub_board
                }
              in
              Ok (updated, changed_sub_boards_jsonl_unlocked store
-               (Replace_sub_board updated))))
+               updated)))
     in
     match result with
     | Error _ as error -> error
@@ -178,9 +167,8 @@ let update_sub_board
 ;;
 
 let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
-  with_persist_lock store (fun () ->
-  let* () = Board_sub_boards_source.require_readable store in
   with_lock store (fun () ->
+  let* () = Board_sub_boards_source.require_readable store in
     match Hashtbl.find_opt store.sub_boards sub_board_id with
     | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
     | None ->
@@ -192,67 +180,27 @@ let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
           | None ->
             Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))
        | None ->
-         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))))
+         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))))
+;;
+
+let list_sub_boards_unlocked store : sub_board list =
+  let counts = sub_board_post_counts_unlocked store in
+  Hashtbl.fold
+    (fun _ sb acc -> sub_board_with_post_count counts sb :: acc)
+    store.sub_boards
+    []
+  |> List.sort (fun (a : sub_board) (b : sub_board) ->
+    compare a.created_at b.created_at)
 ;;
 
 let list_sub_boards store : sub_board list =
-  with_lock store (fun () ->
-    let counts = sub_board_post_counts_unlocked store in
-    Hashtbl.fold
-      (fun _ sb acc -> sub_board_with_post_count counts sb :: acc)
-      store.sub_boards
-      []
-    |> List.sort (fun (a : sub_board) (b : sub_board) ->
-      compare a.created_at b.created_at))
+  with_lock store (fun () -> list_sub_boards_unlocked store)
 ;;
 
 let read_sub_boards store =
-  with_persist_lock store (fun () ->
+  with_lock store (fun () ->
     let* () = Board_sub_boards_source.require_readable store in
-    Ok (list_sub_boards store))
+    Ok (list_sub_boards_unlocked store))
 ;;
 
-let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
-  with_persist_lock store (fun () ->
-    let* () = Board_sub_boards_source.require_readable store in
-    let snapshot =
-      with_lock store (fun () ->
-      let resolved_opt =
-        match Hashtbl.find_opt store.sub_boards sub_board_id with
-        | Some sb -> Some sb
-        | None ->
-          (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
-           | None -> None
-           | Some id ->
-             (match Hashtbl.find_opt store.sub_boards id with
-              | Some sb -> Some sb
-              | None -> None))
-      in
-      match resolved_opt with
-      | None ->
-        Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
-      | Some sb ->
-        Ok (sb, changed_sub_boards_jsonl_unlocked store (Remove_sub_board sb.id)))
-    in
-    match snapshot with
-    | Error _ as e -> e
-    | Ok (sb, content) ->
-      let outcome = Board_sub_boards_source.rewrite store content in
-      publish_policy store outcome (fun () ->
-      with_lock store (fun () ->
-        Hashtbl.remove store.sub_boards (Sub_board_id.to_string sb.id);
-        Hashtbl.remove store.sub_boards_by_slug sb.slug;
-        (* Orphan policy: clear hearth on posts that belonged to this sub-board *)
-        Hashtbl.iter
-          (fun _ (post : post) ->
-             match post.hearth with
-             | Some h when String.equal h sb.slug ->
-               let updated = { post with hearth = None } in
-               Hashtbl.replace store.posts (Post_id.to_string post.id) updated;
-               store.dirty_posts <- true;
-               Hashtbl.replace store.dirty_post_ids (Post_id.to_string post.id) ()
-             | _ -> ())
-          store.posts;
-        invalidate_post_caches store;
-        ())))
-;;
+let delete_sub_board = Board_deletion.delete_sub_board

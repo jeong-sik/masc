@@ -154,7 +154,8 @@ let run () =
     Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
       let encode () = Yojson.Safe.pretty_to_string (report ()) ^ "\n" in
       let* () = Fs_compat.create_file_exclusive ~fs:env#fs
-        ~owner:"librarian-preflight" ~path:output_path ~permissions:0o600 (encode ()) in
+        ~owner:"librarian-preflight" ~path:output_path ~permissions:0o600 (encode ())
+        |> Result.map_error Fs_compat.create_file_error_to_string in
       let save id observation =
         observations := (id, observation) :: List.remove_assoc id !observations;
         Keeper_fs.save_bytes_durable_atomic output_path (encode ())

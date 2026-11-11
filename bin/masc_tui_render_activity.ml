@@ -63,10 +63,10 @@ let system_log_detail_lines (state : state) ~seq ~width =
       ]
   | Some entry ->
       let core_facts =
-        [ Page_line.fact ~tone:(system_log_level_tone entry.sl_level) "Level"
+        [ system_log_fact "Message" entry.sl_message
+        ; Page_line.fact ~tone:(system_log_level_tone entry.sl_level) "Level"
             (system_log_level_mark entry.sl_level ^ " "
              ^ String.trim (Masc.Tui_decode.system_log_level_label entry.sl_level))
-        ; system_log_fact "Message" entry.sl_message
         ; system_log_fact "Timestamp" entry.sl_ts
         ; system_log_optional_fact "Category" entry.sl_category
         ]
@@ -83,7 +83,12 @@ let system_log_detail_lines (state : state) ~seq ~width =
         ]
       in
       let blocks =
-        [ "1. 로그 메시지 · 핵심 상태 (Message & Severity)", core_facts
+        (match (system_logs_page state).lp_error with
+         | None -> []
+         | Some error ->
+             [ ui_text state ~ko:"이전 관측 · 조회 실패" ~en:"Last read · refresh failed",
+               [ Page_line.note ~tone:Page_line.Failure error ] ])
+        @ [ "1. 로그 메시지 · 핵심 상태 (Message & Severity)", core_facts
         ; "2. 발생 위치 · 메타데이터 (Origin & Context)", metadata_facts
         ]
       in
@@ -140,31 +145,38 @@ let activity_tabs ~ko ~on_logs : (string * bool * surface) list =
   ; ((if ko then "로그" else "Logs"), on_logs, System_logs)
   ]
 
-(* The title row of both readings: the title, the strip, then what the reading
-   on screen holds after a dot, and the clock and the badge last. The count used
-   to follow the strip directly, so on Events it sat against the tab that is
-   not open -- "▸Events  Logs (0 rows · 0 events held)" -- and read as that
-   tab's count. It stays after the strip rather than moving before it, so the
-   tabs do not shift sideways when the count grows a digit.
-
-   [reading] is the pieces the row says after the strip, each with its own
-   leading gap. [tail] is what the row draws last, and it is laid out by
-   [detail_heading] like the other title rows: the badge stays whole, the
-   reading's pieces are left out whole from the end, and the strip draws in
-   what they leave. The strip is whole or it is not drawn, and a strip that
-   draws nothing takes its separator with it. *)
-let activity_heading ~ko ~cols ~on_logs ~reading ~tail =
+(* Keep the reading's identity, including the selected log source. Ordinary
+   HTTP and the wall clock need no repeated header; exceptional connection
+   evidence uses the shared bounded summary before it can displace identity. *)
+let activity_heading (state : state) ~cols ~on_logs ~reading =
+  let ko = state.ui_language = Lang_ko in
   let tabs = activity_tabs ~ko ~on_logs in
+  let source = System_logs_view.source state.system_logs in
   let title =
     screen_title
-      (if on_logs then (if ko then " MASC 로그" else " MASC Logs")
-       else if ko then " MASC 활동" else " MASC Activity")
+      (if on_logs then
+         " " ^ ui_text state ~ko:"로그" ~en:"Logs" ^ " · "
+         ^ (match source with
+            | Server -> ui_text state ~ko:"서버" ~en:"Server"
+            | This_tui -> "This TUI")
+       else if ko then " 활동" else " Activity")
   in
   let before = title ^ "  " and dot = "  \xc2\xb7" in
   let cells text =
     Message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
   let around = cells before + cells dot in
+  let tail =
+    match on_logs, source with
+    | true, This_tui -> ""
+    | (false, (Server | This_tui)) | (true, Server) ->
+        (match reading_connection_notice state with
+         | None -> ""
+         | Some notice ->
+             let room = max 0 (framed_inner_width cols - cells title - 2) in
+             if cells notice <= room then notice
+             else String.trim (reading_connection_summary ~width:room state))
+  in
   detail_heading ~cols
     ~lead:
       (Lead_strip
@@ -196,11 +208,6 @@ let render_system_logs (state : state) =
     match (system_logs_page state).lp_snapshot with
     | None -> 0
     | Some snapshot -> List.length snapshot.sys_entries
-  in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
   in
   (* The active filters ride in the header, so a page trimmed to twelve rows
      says why it is twelve rather than reading as a quiet ring.
@@ -245,20 +252,18 @@ let render_system_logs (state : state) =
           | None -> title_missing_reading ~error:None
           | Some _ -> ""
         in
-        activity_heading ~ko:(state.ui_language = Lang_ko) ~cols ~on_logs:true
+        activity_heading state ~cols ~on_logs:true
           ~reading:(("  " ^ reading_note) :: set_filter_pieces)
-          ~tail:(timestamp ^ "  " ^ system_logs_status state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
-        activity_heading ~ko:(state.ui_language = Lang_ko) ~cols ~on_logs:true
+        activity_heading state ~cols ~on_logs:true
           ~reading:
             (Printf.sprintf "  (%d of %d)" total_entries snapshot.sys_total
              :: (match snapshot.sys_latest_seq with
                  | None -> []
                  | Some seq -> [ Printf.sprintf "  seq %d" seq ])
              @ filter_pieces)
-          ~tail:(timestamp ^ "  " ^ system_logs_status state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -277,7 +282,11 @@ let render_system_logs (state : state) =
    | None -> ()
    | Some detail ->
        box_line_styled buf cols ~style:(Theme.bad ())
-         ("  " ^ Keeper_chat.terminal_safe_text detail);
+         ("  "
+          ^ (match (system_logs_page state).lp_snapshot with
+             | None -> ""
+             | Some _ -> ui_text state ~ko:"이전 관측 · " ~en:"Last read · ")
+          ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   (* The scroll row is a frame row while the page holds more entries than
      fit, and only then; the layout the keypress reads says so. *)
@@ -335,7 +344,7 @@ let render_system_logs (state : state) =
                 ~styles:
                   { Render_schedule.slog_time_style = Ansi.dim
                   ; slog_module_style =
-                      Masc_tui_theme.tone Masc_tui_theme.Accent
+                      Theme.accent ()
                   ; slog_keeper_style = Theme.keeper_origin ()
                   ; slog_category_style = Ansi.dim
                   }
@@ -361,7 +370,7 @@ let render_system_logs (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints ~detail_open:false
+         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false
             ~has_rows:(total_entries > 0) state.view));
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
@@ -622,22 +631,36 @@ let render_keeper_calls (state : state) =
    duration. Scrolling away from the newest row freezes the view and counts
    what arrives above it, so an operator reading the past is not pushed off
    it by the present. *)
+let acting_evidence_intro (state : state) =
+  [ Ansi.reset, screen_title " ACTING EVENT EVIDENCE" ^ "  " ^ connection_badge state
+  ; Ansi.dim, " Selected event snapshot; new arrivals do not replace this reading"
+  ; Ansi.dim, Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting)
+  ; Ansi.dim, " " ^ Terminal_text.single_line
+      (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay)
+  ]
+
+let acting_evidence_content_height ~rows ~intro =
+  (* Top and divider surround the same one-line intro the renderer consumes. *)
+  max 1 (rows - (2 + List.length intro + listing_rows_below_the_body))
+
+let acting_evidence_page_rows state ~terminal_rows =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let intro = acting_evidence_intro state in
+  Masc_tui_scroll.page_step ~height:(acting_evidence_content_height ~rows ~intro)
+
 let render_acting_evidence (state : state) entry =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  let intro = acting_evidence_intro state in
   box_top buf cols;
-  box_line buf cols (screen_title " ACTING EVENT EVIDENCE" ^ "  " ^ connection_badge state);
-  box_line_styled buf cols ~style:Ansi.dim " Selected event snapshot; new arrivals do not replace this reading";
-  box_line_styled buf cols ~style:Ansi.dim
-    (Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting));
-  box_line_styled buf cols ~style:Ansi.dim
-    (" " ^ Terminal_text.single_line
-       (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay));
+  List.iter (fun (style, line) -> box_line_styled buf cols ~style line) intro;
   box_divider buf cols;
   let lines =
     detail_section_lines ~first:true "1. 이벤트 식별 · 실행 컨텍스트 (Event Identity & Execution Context)"
-    @ (Masc_tui_acting.evidence_fields entry
+    @ (("TUI received at",
+         Some (Masc_domain.iso8601_of_unix_seconds entry.Masc_tui_acting.ae_at))
+       :: Masc_tui_acting.evidence_fields entry
        |> List.concat_map (fun (label, value) ->
            let prefix = "  " ^ label ^ ": " in
            let text = match value with
@@ -682,7 +705,7 @@ let render_acting_evidence (state : state) entry =
     | Masc_tui_observer.Lane_resource _ | Masc_tui_observer.Snapshot _ | Masc_tui_observer.Execution_snapshot | Masc_tui_observer.Other _ -> []
   in
   let lines = lines @ io_lines in
-  let content_height = max 1 (rows - count_frame_lines buf - listing_rows_below_the_body) in
+  let content_height = acting_evidence_content_height ~rows ~intro in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = min max_scroll (max 0 state.acting_detail_scroll) in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
@@ -700,6 +723,73 @@ let render_acting_evidence (state : state) entry =
   finish_surface state ~clamped:(Acting_detail_scroll scroll)
     ~surface_key:"acting-evidence" ~rows:terminal_rows ~cols buf
 
+(* Only exceptional feed/replay observations spend body rows. Each fact has
+   its own row, so a narrow feed failure cannot hide a dropped/unseen count.
+   Their number is also the paging projection; rendering does not guess it. *)
+let acting_notices (state : state) ~trace_unavailable =
+  let retained =
+    if state.acting = [] then ""
+    else ui_text state ~ko:" · 이전 사건" ~en:" · retained events"
+  in
+  let feed =
+    match state.observer with
+    | Observer_live _ -> None
+    | Observer_off -> Some (ui_text state ~ko:"수신 꺼짐" ~en:"Feed off" ^ retained)
+    | Observer_opening -> Some (ui_text state ~ko:"수신 연결 중" ~en:"Feed opening" ^ retained)
+    | Observer_closed_after_live { events; reason; _ } ->
+        Some (Printf.sprintf "%s %d%s · %s"
+          (ui_text state ~ko:"수신 닫힘" ~en:"Feed closed") events retained
+          (Terminal_text.single_line reason))
+    | Observer_closed_before_answer { reason; _ } ->
+        Some (ui_text state ~ko:"수신 시작 실패" ~en:"Feed failed to open"
+          ^ retained ^ " · " ^ Terminal_text.single_line reason)
+  in
+  let dropped =
+    if state.acting_dropped = 0 then None
+    else Some (Printf.sprintf "%s %d"
+      (ui_text state ~ko:"보관에서 빠진 사건" ~en:"Dropped events") state.acting_dropped)
+  in
+  let undecodable =
+    if state.acting_undecodable = 0 then None
+    else Some (Printf.sprintf "%s %d%s"
+      (ui_text state ~ko:"해석하지 못한 사건" ~en:"Undecodable events")
+      state.acting_undecodable
+      (match state.acting_undecodable_last with
+       | None -> ""
+       | Some reason -> " · " ^ Terminal_text.single_line reason))
+  in
+  let unseen =
+    if state.acting_unseen = 0 then None
+    else Some (Printf.sprintf "%s %d (g)"
+      (ui_text state ~ko:"위쪽 새 사건" ~en:"New above") state.acting_unseen)
+  in
+  let replay =
+    match state.observer_replay with
+    | Observer_replay_scoped { replay = (Sse_wire.Fresh | Sse_wire.Resumed); _ }
+      when not state.observer_source_loss -> None
+    | Observer_replay_unobserved | Observer_replay_unavailable _
+    | Observer_replay_rejected _
+    | Observer_replay_scoped
+        { replay = (Sse_wire.Fresh | Sse_wire.Resumed | Sse_wire.Resumed_after_gap _
+                   | Sse_wire.Reset (Sse_wire.Instance_changed | Sse_wire.Unscoped_cursor
+                                    | Sse_wire.Cursor_ahead)); _ } ->
+        Some (Terminal_text.single_line
+          (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay))
+  in
+  List.filter_map Fun.id
+    [ feed; dropped; undecodable; unseen; replay
+    ; Masc_tui_acting_pane.trace_unavailable_summary trace_unavailable ]
+
+let acting_content_height ~rows ~notices =
+  (* Top/title/divider, column heading, then overflow/bottom/footer. *)
+  max 1 (rows - (4 + List.length notices + listing_rows_below_the_body))
+
+let acting_page_rows state ~terminal_rows =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
+  let notices = acting_notices state ~trace_unavailable:trace_reading.unavailable in
+  Masc_tui_scroll.page_step ~height:(acting_content_height ~rows ~notices)
+
 let render_acting (state : state) =
   match state.acting_detail with
   | Some entry -> render_acting_evidence state entry
@@ -708,16 +798,12 @@ let render_acting (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let module Acting = Masc_tui_acting in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let held = List.length state.acting in
   (* The agent_core family names its runtime lane, not the keeper; the
      keeper is the one whose trace the event's correlation id carries. *)
   let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
   let traces = trace_reading.bindings in
+  let notices = acting_notices state ~trace_unavailable:trace_reading.unavailable in
   (* Visible entries, newest first, paired with the events older than each
      -- in a newest-first list, the tail after it -- so a completed call on
      the page can look up its start. Rows are built only for the page: the
@@ -796,63 +882,19 @@ let render_acting (state : state) =
     | Some rows -> List.nth_opt rows idx
     | None -> Option.map row_of (List.nth_opt visible idx)
   in
-  let feed =
-    match state.observer with
-    | Observer_off -> "feed: off"
-    | Observer_opening -> "feed: opening"
-    | Observer_live { events; _ } -> Printf.sprintf "feed: live %d" events
-    (* The count sits straight after the state word, so it reads as the count
-       its "live N" sibling above uses. *)
-    | Observer_closed_after_live { events; reason; _ } ->
-        Printf.sprintf "feed: closed %d (%s)" events
-          (Terminal_text.single_line reason)
-    (* No count: the stream never answered, so there is nothing it carried. *)
-    | Observer_closed_before_answer { reason; _ } ->
-        Printf.sprintf "feed: failed to open (%s)"
-          (Terminal_text.single_line reason)
-  in
-  (* Rows and events, each with its noun. This read "(3 of 120 held, turns)",
-     but under Turns a row is a folded turn and the held count is events, so
-     "3 of 120" compared two different things as if one were part of the
-     other. The scope name left with it: the row under the feed says it,
-     "scope turns · …", one line down. *)
   let header =
-    activity_heading ~ko:(state.ui_language = Lang_ko) ~cols ~on_logs:false
+    activity_heading state ~cols ~on_logs:false
       ~reading:
-        [ "  "
-          ^ Masc_tui_types.activity_title_reading ~observer:state.observer
-              ~shown ~held ]
-      ~tail:(timestamp ^ "  " ^ connection_badge state)
+        [ "  " ^ Acting.filter_label state.acting_filter
+        ; "  " ^ Masc_tui_types.activity_title_reading ~observer:state.observer
+            ~shown ~held ]
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  let dropped =
-    if state.acting_dropped = 0 then ""
-    else Printf.sprintf "  dropped %d" state.acting_dropped
-  in
-  let undecodable =
-    match state.acting_undecodable_last with
-    | None -> ""
-    | Some reason ->
-        Printf.sprintf "  undecodable %d (last: %s)" state.acting_undecodable
-          (Terminal_text.single_line reason)
-  in
-  let unseen =
-    if state.acting_unseen = 0 then ""
-    else Printf.sprintf "  %d new above (g)" state.acting_unseen
-  in
-  box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %s%s%s%s" feed dropped undecodable unseen);
-  box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Terminal_text.single_line
-       (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay));
-  box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Acting.filter_explanation state.acting_filter);
-  (match Masc_tui_acting_pane.trace_unavailable_summary trace_reading.unavailable with
-   | None -> ()
-   | Some summary -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ summary));
-  box_divider buf cols;
+  List.iter
+    (fun notice -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ notice))
+    notices;
   (* Measured over every row the filter keeps, not the page on screen, so the
      columns do not move while a reader scrolls. Only the two named columns
      are measured, so this asks the event for its keeper and its label rather
@@ -871,15 +913,21 @@ let render_acting (state : state) =
     in
     Acting.columns ~inner_width:(framed_inner_width cols) measured
   in
+  let column_line ~glyph ~content ~actor ~clock =
+    "  " ^ glyph ^ " "
+    ^ fit_width content table_columns.Acting.content_cells ^ " "
+    ^ fit_width
+        (Message_layout.fit_middle table_columns.Acting.keeper_cells actor)
+        table_columns.Acting.keeper_cells
+    ^ (if table_columns.Acting.show_clock then " " ^ clock else "")
+  in
   let col_hdr =
-    Printf.sprintf "  %-8s %-*s %s %-*s %s" "TIME"
-      table_columns.Acting.keeper_cells "KEEPER" " "
-      table_columns.Acting.label_cells "EVENT" "DETAIL"
+    column_line ~glyph:" "
+      ~content:(ui_text state ~ko:"사건" ~en:"EVENT")
+      ~actor:(ui_text state ~ko:"주체" ~en:"ACTOR") ~clock:"TIME"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
-  box_divider buf cols;
-  let chrome_rows = count_frame_lines buf + listing_rows_below_the_body in
-  let content_height = max 1 (rows - chrome_rows) in
+  let content_height = acting_content_height ~rows ~notices in
   let max_scroll = max 0 (shown - content_height) in
   let cursor = max 0 (min state.acting_cursor (shown - 1)) in
   let scroll =
@@ -926,36 +974,18 @@ let render_acting (state : state) =
             | Acting.Attention -> (Theme.warn ())
             | Acting.Quiet -> Ansi.dim
           in
-          (* Every row carries the moment the TUI received it, so there is no
-             longer a clockless row to draw a blank for. *)
+          let content =
+            Terminal_text.single_line row.Acting.label
+            ^ (if row.Acting.detail = "" then ""
+               else " · " ^ Terminal_text.single_line row.Acting.detail)
+          in
           let clock =
             Terminal_text.clock_timestamp
               (Masc_domain.iso8601_of_unix_seconds row.Acting.at)
           in
-          (* The Event column is sized for the two-word labels the taught
-             events carry ("agent start", "waiting queue"). A type this build
-             was not taught has no such label -- its name is all there is, and
-             it is a wire identifier, so it ran off the column at every width:
-             [approval:summar~], [transport_healt~]. Those rows have no detail
-             either, so the label takes the empty column rather than the
-             reader losing the only thing the row says. *)
-          let detail = Terminal_text.single_line row.Acting.detail in
-          let label = Terminal_text.single_line row.Acting.label in
           let line =
-            let keeper_cell =
-              fit_width
-                (Terminal_text.single_line row.Acting.keeper)
-                table_columns.Acting.keeper_cells
-            in
-            if detail = "" then
-              Printf.sprintf "  %-8s %s %s %s" clock keeper_cell
-                (Acting.glyph_text row.Acting.glyph)
-                label
-            else
-              Printf.sprintf "  %-8s %s %s %s %s" clock keeper_cell
-                (Acting.glyph_text row.Acting.glyph)
-                (fit_width label table_columns.Acting.label_cells)
-                detail
+            column_line ~glyph:(Acting.glyph_text row.Acting.glyph)
+              ~content ~actor:(Terminal_text.single_line row.Acting.keeper) ~clock
           in
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
           let line = if selected then "> " ^ String.sub line 2 (String.length line - 2) else line in
@@ -969,10 +999,9 @@ let render_acting (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (* Same straggler, same fix. The literal named five of this surface's
-            nine keys: 1/2 (Events / Logs), l (logs), Esc and q never reached
-            the screen they work on. *)
-         (Masc_tui_keys.footer_hints Acting));
+         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false
+            ~has_rows:(shown > 0)
+            ~has_reading:(state.acting_filter <> Acting.Turns && shown > 0) Acting));
   let clamped = match state.acting_filter with
     | Acting.Turns -> Acting scroll
     | Actions | Everything -> Acting_selection (scroll, cursor) in

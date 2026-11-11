@@ -36,15 +36,3 @@ val observe_silent :
     even when the logging/telemetry backend is the failing component.
     The [kind] label is still required at call sites so silent usage
     remains explicit in reviews. *)
-
-val observe_or_default :
-  kind:string ->
-  ?keeper_name:string ->
-  default:'a ->
-  (unit -> 'a) ->
-  'a
-(** [observe_or_default ~kind ~default f] runs [f ()] and returns
-    its result, or [default] on exception while emitting a
-    structured log and incrementing the failure counter.  For call
-    sites that genuinely need a value-returning silent fall-back but
-    want the failure surfaced in observability. *)

@@ -631,9 +631,9 @@ let change_kind_badge (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
   | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_2, "EDIT"
   | Masc.Tui_decode.Fc_inserted _ -> Theme.category Theme.Slot_2, "MEMO"
-  | Masc.Tui_decode.Fc_written _ -> (Masc_tui_theme.tone Masc_tui_theme.Accent), "WRITE"
+  | Masc.Tui_decode.Fc_written _ -> (Theme.accent ()), "WRITE"
   | Masc.Tui_decode.Fc_materialized _ ->
-    (Masc_tui_theme.tone Masc_tui_theme.Accent), "WRITE"
+    (Theme.accent ()), "WRITE"
 
 let change_result_badge (change : Masc.Tui_decode.file_change) =
   if change.Masc.Tui_decode.fc_succeeded then Theme.ok (), "APPLIED"

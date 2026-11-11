@@ -54,13 +54,6 @@ val terminal_effect_failure_error
     a bundle that recorded no failure, is returned unchanged. *)
 
 module For_testing : sig
-  val observe_chat_handoff :
-    observed:Keeper_agent_result.checkpoint_followup ref ->
-    (unit -> (bool, Agent_core.Error.t) result) ->
-    unit -> (bool, Agent_core.Error.t) result
-  val checkpoint_followup_of_stop_reason :
-    observed:Keeper_agent_result.checkpoint_followup ->
-    Runtime_agent.stop_reason -> Keeper_agent_result.checkpoint_followup
   val finalize_turn_surface :
     response_text:string ->
     stop_reason:Runtime_agent.stop_reason ->
@@ -69,12 +62,10 @@ module For_testing : sig
      Agent_core.Error.t) result
   val tool_boundary_state :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
-    chat_handoff:(unit -> (bool, Agent_core.Error.t) result) ->
     Keeper_tools_agent_core.terminal_effect_state ->
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val official_client_tool_boundary :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
-    chat_handoff:(unit -> (bool, Agent_core.Error.t) result) ->
     tool_name:string ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event

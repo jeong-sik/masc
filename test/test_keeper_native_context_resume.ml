@@ -151,6 +151,9 @@ let run_phase ~child root =
        Eio.Promise.resolve resolve_settled execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
     ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+  Keeper_direct_native_continuation.complete_restart_settlements
+    ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
+    |> require "complete startup native journal settlement" |> ignore;
   if child then (
     let input = Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
         ~turn_instructions:None ~surface_context:None ~attachments:[]
@@ -304,6 +307,9 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
        Eio.Promise.resolve resolve_settled execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
     ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+  Keeper_direct_native_continuation.complete_restart_settlements
+    ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
+    |> require "complete startup native journal settlement" |> ignore;
   let input = Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
       ~turn_instructions:None ~surface_context:None ~attachments:[]
     |> Keeper_chat_operation.canonical_json |> require "canonical input" in
@@ -422,6 +428,9 @@ let test_retired_input_history_cut () =
       Eio.Promise.resolve resolve_settled execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner) ~on_turn_slot_released:None workspace
     |> require "install Owner" |> ignore;
+  Keeper_direct_native_continuation.complete_restart_settlements
+    ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
+    |> require "complete startup native journal settlement" |> ignore;
   let input=Keeper_chat_operation_payload.input_to_json ~message:goal ~user_blocks:[]
       ~turn_instructions:None ~surface_context:None ~attachments:[]
     |> Keeper_chat_operation.canonical_json |> require "input" in

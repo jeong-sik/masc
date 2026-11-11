@@ -22,7 +22,7 @@ module Chart = Masc_tui_chart
 let fusion_run_summary run =
   match run.fur_status with
   | Fusion_running ->
-      ((Masc_tui_theme.tone Masc_tui_theme.Accent), fusion_run_progress_text run.fur_stage)
+      ((Theme.accent ()), fusion_run_progress_text run.fur_stage)
   | Fusion_completed ->
       (match run.fur_decision, run.fur_summary with
        | Some decision, Some summary ->
@@ -84,9 +84,8 @@ let render_fusion_list (state : state) =
           | None -> title_missing_reading ~error:None
           | Some _ -> ""
         in
-        Printf.sprintf "%s  %s  %s  %s"
-          (screen_title fusion_title) reading_note timestamp
-          (connection_badge state)
+        surface_title_row ~cols state ~lead:(screen_title fusion_title)
+          ~readings:[ "  " ^ reading_note; "  " ^ timestamp ]
     | Some _ ->
         let completed_count =
           List.fold_left
@@ -118,11 +117,11 @@ let render_fusion_list (state : state) =
              else "")
             (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
         in
-        Printf.sprintf "%s%s  %s  %s"
-          (screen_title fusion_title)
-          (stats_note ^ (if history_count = 0 then "" else
-             Printf.sprintf " · %d Board evidence" history_count)) timestamp
-          (connection_badge state)
+        surface_title_row ~cols state ~lead:(screen_title fusion_title)
+          ~readings:
+            [ stats_note ^ (if history_count = 0 then "" else
+                Printf.sprintf " · %d Board evidence" history_count)
+            ; "  " ^ timestamp ]
   in
   (* Measured from the rows, the way the Approvals table measures its own
      name column. Eighteen of twenty-eight keepers were cut at sixteen while
@@ -581,7 +580,7 @@ let fusion_tool_preview_lines ~width ~frame_width ~label preview =
 
 let fusion_tool_event_lines ~width ~frame_width = function
   | Fusion_tool_called event ->
-      [ ( (Masc_tui_theme.tone Masc_tui_theme.Accent)
+      [ ( (Theme.accent ())
         , Printf.sprintf "  [called] %s%s  %s  turn %d/%d  id=%s"
             (fusion_tool_actor_text event.fte_actor)
             (fusion_tool_agent_suffix event.fte_actor event.fte_agent_name)
@@ -765,7 +764,7 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
             Some
               { Chart.name = Terminal_text.single_line answer.fpa_model
               ; count = answer.fpa_input_tokens + answer.fpa_output_tokens
-              ; style = Some Masc_tui_theme.Ok
+              ; style = Masc_tui_theme.Ok
               }
         | Fusion_panel_failed _ -> None)
       evidence.fe_panel
@@ -970,7 +969,7 @@ let fusion_detail_lines ~width ~frame_width (detail : fusion_detail) =
             (Terminal_text.single_line run.fur_run_id) )
     ; ( Ansi.reset
       , Printf.sprintf "  Caller: %s@%s%s %s[Keeper]%s  \xc2\xb7  %s"
-          (Masc_tui_theme.tone Masc_tui_theme.Accent)
+          (Theme.accent ())
           (Terminal_text.single_line run.fur_keeper)
           Ansi.reset
           (Theme.warn ())

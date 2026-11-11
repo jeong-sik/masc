@@ -1,0 +1,521 @@
+{
+  "cancelled_turns": {
+    "cancelled_during_execute": 1,
+    "cancelled_during_long_execute": 0,
+    "execute_time_lost_s": 0.4,
+    "long_execute_time_lost_s": 0.0,
+    "turn_cancelled_operations": 2
+  },
+  "chat_operations": {
+    "by_origin": {
+      "channel:": {
+        "failure_kinds": {
+          "Interrupted_by_restart": 2,
+          "Turn_exception": 6
+        },
+        "operations": 67,
+        "run": {
+          "mean_s": 314.6,
+          "n": 67,
+          "p50_s": 72.0,
+          "p90_s": 990.2,
+          "sum_s": 21078.1
+        },
+        "states": {
+          "failed": 8,
+          "succeeded": 59
+        },
+        "wait": {
+          "mean_s": 691.7,
+          "n": 67,
+          "p50_s": 4.3,
+          "p90_s": 2841.8,
+          "sum_s": 46340.6
+        }
+      },
+      "channel:agent": {
+        "failure_kinds": {
+          "Interrupted_by_restart": 26,
+          "Turn_cancelled": 2,
+          "Turn_exception": 37
+        },
+        "operations": 527,
+        "run": {
+          "mean_s": 430.1,
+          "n": 521,
+          "p50_s": 267.6,
+          "p90_s": 984.3,
+          "sum_s": 224073.4
+        },
+        "states": {
+          "cancelled": 6,
+          "failed": 65,
+          "succeeded": 456
+        },
+        "wait": {
+          "mean_s": 530.9,
+          "n": 521,
+          "p50_s": 42.4,
+          "p90_s": 1979.3,
+          "sum_s": 276579.4
+        }
+      },
+      "delegate": {
+        "failure_kinds": {
+          "Interrupted_by_restart": 42,
+          "Turn_exception": 45
+        },
+        "operations": 880,
+        "run": {
+          "mean_s": 489.2,
+          "n": 878,
+          "p50_s": 199.9,
+          "p90_s": 1157.5,
+          "sum_s": 429531.6
+        },
+        "states": {
+          "cancelled": 2,
+          "failed": 87,
+          "succeeded": 791
+        },
+        "wait": {
+          "mean_s": 439.0,
+          "n": 878,
+          "p50_s": 0.4,
+          "p90_s": 1121.9,
+          "sum_s": 385399.1
+        }
+      }
+    },
+    "created_during_long_execute": {
+      "mean_s": 2369.1,
+      "n": 71,
+      "p50_s": 929.7,
+      "p90_s": 6129.0,
+      "sum_s": 168206.5
+    },
+    "operations": 1474,
+    "started": 1466,
+    "total_wait_s": 708319.1,
+    "wait_overlapping_a_run_of_the_same_keeper_s": 48225.5,
+    "wait_overlapping_long_execute_s": 152731.0
+  },
+  "provider_admission": {
+    "by_class_s": {
+      "background": 80184.6,
+      "priority": 38155.8,
+      "standard": 618206.1
+    },
+    "by_provider_model_s": {
+      "glm-coding/glm-5.3": 132838.8,
+      "glm-coding/glm-5.3-flash": 575478.3,
+      "kimi_coding/kimi-for-coding": 63.3,
+      "ollama_cloud/deepseek-v4.1-flash": 21508.9,
+      "opencode_go/deepseek-v4.1-flash": 6598.8,
+      "openrouter/nvidia/nemotron-3.5-super-vl:free": 58.4
+    },
+    "clock_hours_over_5_wait_hours": 15,
+    "clock_hours_with_events": 78,
+    "events": 17572,
+    "median_wait_hours_per_clock_hour": 2.05,
+    "wait": {
+      "mean_s": 41.9,
+      "n": 17572,
+      "p50_s": 9.9,
+      "p90_s": 126.3,
+      "sum_s": 736546.5
+    }
+  },
+  "schedule_wakes": {
+    "cancelled_in_queue": 0,
+    "created_during_long_execute": {
+      "n": 0
+    },
+    "latency": {
+      "n": 0
+    },
+    "no_turn_started": 0,
+    "stimuli": 0,
+    "total_wait_s": 0.0,
+    "turn_started": 0,
+    "wait_overlapping_a_run_of_the_same_keeper_s": 0.0,
+    "wait_overlapping_long_execute_s": 0.0,
+    "waited_at_least_30_min": {
+      "n": 0,
+      "sum_s": 0,
+      "top_keepers": []
+    }
+  },
+  "turn_time": {
+    "between_calls": {
+      "mean_s": 13.4,
+      "n": 135363,
+      "overlapping_pairs": 3636,
+      "p50_s": 4.6,
+      "p90_s": 24.0,
+      "sum_s": 1817114.6
+    },
+    "calls": 143494,
+    "calls_by_batch_size": {
+      "1": 139710,
+      "10": 10,
+      "14": 14,
+      "2": 1754,
+      "3": 561,
+      "4": 236,
+      "5": 85,
+      "6": 60,
+      "7": 1022,
+      "8": 24,
+      "9": 18
+    },
+    "calls_per_turn": {
+      "max": 833,
+      "mean": 17.6,
+      "n": 8131,
+      "p50": 6,
+      "p90": 43,
+      "p99": 156
+    },
+    "calls_without_trace_file": {
+      "by_turn_kind": {
+        "direct": {
+          "calls": 49681,
+          "execute_time_s": 195168.4,
+          "tool_time_s": 202420.0
+        }
+      },
+      "calls": 49681,
+      "execute_time_s": 195168.4,
+      "keepers_with_a_trace_file": {
+        "by_turn_kind": {
+          "direct": {
+            "calls": 49681,
+            "execute_time_s": 195168.4,
+            "tool_time_s": 202420.0
+          }
+        },
+        "calls": 49681,
+        "execute_time_s": 195168.4,
+        "tool_time_s": 202420.0
+      },
+      "keepers_without_any_trace_file": {
+        "by_turn_kind": {},
+        "calls": 0,
+        "execute_time_s": 0,
+        "keepers": [],
+        "tool_time_s": 0
+      },
+      "tool_time_inside_turns_s": 0.0,
+      "tool_time_s": 202420.0,
+      "turns": 2028,
+      "turns_by_kind_set": {
+        "autonomous": {
+          "turns": 6015,
+          "without_trace_file": 0
+        },
+        "autonomous+direct": {
+          "turns": 85,
+          "without_trace_file": 0
+        },
+        "direct": {
+          "turns": 2031,
+          "without_trace_file": 2028
+        }
+      },
+      "turns_in_window": 8131
+    },
+    "execute_time_s": 506002.1,
+    "execution_modes": {
+      "concurrent": {
+        "calls": 31095,
+        "time_s": 12476.8
+      },
+      "serial": {
+        "calls": 112399,
+        "time_s": 527863.0
+      }
+    },
+    "inside_turns": {
+      "between_calls_s": 1268809.1,
+      "execute_time_s": 303505.9,
+      "long_execute_time_s": 160141.9,
+      "other_turn_time_s": 757486.3,
+      "percent_of_turn_time": {
+        "between_calls": 53.8,
+        "execute": 12.9,
+        "long_execute": 6.8,
+        "other": 32.1,
+        "polling": 6.2,
+        "rereads_after_first_call": 2.5,
+        "tool": 14.0
+      },
+      "polling_by_keeper": {
+        "code-reviewer": {
+          "polling_s": 7470.6,
+          "turn_time_s": 94047.0
+        },
+        "code-reviewer-brother": {
+          "polling_s": 565.1,
+          "turn_time_s": 25358.3
+        },
+        "code-reviewer-father": {
+          "polling_s": 1934.1,
+          "turn_time_s": 28683.4
+        },
+        "code-reviewer-mother": {
+          "polling_s": 320.6,
+          "turn_time_s": 53809.8
+        },
+        "code-reviewer-uncle": {
+          "polling_s": 147.5,
+          "turn_time_s": 21242.2
+        },
+        "context-reviewer": {
+          "polling_s": 737.7,
+          "turn_time_s": 110906.6
+        },
+        "e-masc-the-leader": {
+          "polling_s": 1019.9,
+          "turn_time_s": 117555.0
+        },
+        "github-pr-checker": {
+          "polling_s": 1193.0,
+          "turn_time_s": 78188.8
+        },
+        "goo-yang-bong": {
+          "polling_s": 1071.5,
+          "turn_time_s": 232268.8
+        },
+        "masc-productor-owner": {
+          "polling_s": 54497.3,
+          "turn_time_s": 131215.5
+        },
+        "music-sensei": {
+          "polling_s": 76.3,
+          "turn_time_s": 58361.1
+        },
+        "pr-updater": {
+          "polling_s": 3887.0,
+          "turn_time_s": 121465.7
+        },
+        "rondo": {
+          "polling_s": 28175.0,
+          "turn_time_s": 179365.8
+        },
+        "sangsu": {
+          "polling_s": 1620.8,
+          "turn_time_s": 175151.7
+        },
+        "wkbl-data": {
+          "polling_s": 14387.2,
+          "turn_time_s": 67478.8
+        },
+        "wkbl-front": {
+          "polling_s": 8164.7,
+          "turn_time_s": 72184.2
+        },
+        "wkbl-growth": {
+          "polling_s": 674.0,
+          "turn_time_s": 41192.2
+        },
+        "wkbl-web-leader": {
+          "polling_s": 20487.0,
+          "turn_time_s": 165356.7
+        }
+      },
+      "polling_time_s": 146429.4,
+      "rereads_after_first_call_turn_time_s": 59351.0,
+      "tool_time_s": 330259.1
+    },
+    "long_execute": {
+      "calls": 1184,
+      "polling_calls": 1029,
+      "polling_time_s": 238920.0,
+      "time_s": 267730.6
+    },
+    "rereads_after_first_call": {
+      "calls": 6584,
+      "turn_time_s": 72285.2
+    },
+    "tool_time_s": 540339.8,
+    "tool_transitions": {
+      "cross_tool": {
+        "gap_s": 869333.5,
+        "pairs": 47981,
+        "top_by_gap": [
+          {
+            "from": "masc_dos_screen",
+            "gap_s": 68959.3,
+            "mean_gap_s": 41.5,
+            "pairs": 1661,
+            "to": "masc_dos_press"
+          },
+          {
+            "from": "Execute",
+            "gap_s": 56951.1,
+            "mean_gap_s": 22.1,
+            "pairs": 2579,
+            "to": "Write"
+          },
+          {
+            "from": "masc_dos_press",
+            "gap_s": 50480.9,
+            "mean_gap_s": 32.5,
+            "pairs": 1554,
+            "to": "masc_dos_screen"
+          },
+          {
+            "from": "Execute",
+            "gap_s": 45432.7,
+            "mean_gap_s": 24.1,
+            "pairs": 1882,
+            "to": "masc_board_comment"
+          },
+          {
+            "from": "Execute",
+            "gap_s": 30517.6,
+            "mean_gap_s": 14.7,
+            "pairs": 2083,
+            "to": "Read"
+          },
+          {
+            "from": "Read",
+            "gap_s": 29000.8,
+            "mean_gap_s": 16.3,
+            "pairs": 1780,
+            "to": "Execute"
+          },
+          {
+            "from": "Write",
+            "gap_s": 24936.1,
+            "mean_gap_s": 10.0,
+            "pairs": 2500,
+            "to": "Execute"
+          },
+          {
+            "from": "masc_board_post_get",
+            "gap_s": 24510.5,
+            "mean_gap_s": 20.6,
+            "pairs": 1191,
+            "to": "Execute"
+          },
+          {
+            "from": "masc_board_comment",
+            "gap_s": 20681.4,
+            "mean_gap_s": 14.8,
+            "pairs": 1393,
+            "to": "Execute"
+          },
+          {
+            "from": "Execute",
+            "gap_s": 16254.8,
+            "mean_gap_s": 9.0,
+            "pairs": 1799,
+            "to": "keeper_artifact_read"
+          }
+        ]
+      },
+      "same_tool": {
+        "gap_s": 947781.0,
+        "pairs": 87382,
+        "top_by_gap": [
+          {
+            "from": "Execute",
+            "gap_s": 816409.1,
+            "mean_gap_s": 11.3,
+            "pairs": 72391,
+            "to": "Execute"
+          },
+          {
+            "from": "masc_dos_press",
+            "gap_s": 27022.2,
+            "mean_gap_s": 25.4,
+            "pairs": 1062,
+            "to": "masc_dos_press"
+          },
+          {
+            "from": "Read",
+            "gap_s": 23593.7,
+            "mean_gap_s": 13.5,
+            "pairs": 1743,
+            "to": "Read"
+          },
+          {
+            "from": "keeper_artifact_read",
+            "gap_s": 17557.1,
+            "mean_gap_s": 3.7,
+            "pairs": 4768,
+            "to": "keeper_artifact_read"
+          },
+          {
+            "from": "Grep",
+            "gap_s": 11423.2,
+            "mean_gap_s": 4.8,
+            "pairs": 2394,
+            "to": "Grep"
+          },
+          {
+            "from": "BrowserRead",
+            "gap_s": 6324.0,
+            "mean_gap_s": 34.6,
+            "pairs": 183,
+            "to": "BrowserRead"
+          },
+          {
+            "from": "masc_board_post_get",
+            "gap_s": 5718.8,
+            "mean_gap_s": 17.1,
+            "pairs": 334,
+            "to": "masc_board_post_get"
+          },
+          {
+            "from": "Edit",
+            "gap_s": 4596.4,
+            "mean_gap_s": 5.4,
+            "pairs": 858,
+            "to": "Edit"
+          },
+          {
+            "from": "masc_board_search",
+            "gap_s": 4491.2,
+            "mean_gap_s": 6.2,
+            "pairs": 724,
+            "to": "masc_board_search"
+          },
+          {
+            "from": "BrowserInteract",
+            "gap_s": 4122.9,
+            "mean_gap_s": 19.8,
+            "pairs": 208,
+            "to": "BrowserInteract"
+          }
+        ]
+      }
+    },
+    "traced_calls_outside_turns": {
+      "by_turn_kind": {
+        "direct": {
+          "calls": 2231,
+          "execute_time_outside_turns_s": 7327.8,
+          "tool_time_outside_turns_s": 7660.7
+        }
+      },
+      "calls": 2231,
+      "calls_partly_inside_turn_time": 0,
+      "execute_time_outside_turns_s": 7327.8,
+      "tool_time_outside_turns_s": 7660.7,
+      "turns": 88,
+      "turns_that_also_have_autonomous_calls": 85
+    },
+    "turn_time_s": 2356554.6,
+    "turns": 8131
+  },
+  "window": {
+    "from": "2026-11-08",
+    "hours": 77.67,
+    "keepers_with_turn_traces": 28,
+    "to": "2026-11-11",
+    "until": "2026-11-11T05:40:00+00:00"
+  }
+}

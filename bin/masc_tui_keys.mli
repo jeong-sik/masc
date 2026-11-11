@@ -124,7 +124,8 @@ val cancels_two_press :
 val for_surface : Masc_tui_types.surface -> binding list
 (** The surface's own bindings, in declaration order within each group.
     Feeds both projections; a surface whose footer is not yet converted is
-    still read by the help overlay. *)
+    still read by the help overlay. Tools' section binding also explains the
+    panes' scope and evidence/column terms in Help and the key reference. *)
 
 val goal_candle_refresh_key : string
 (** Open or reread the selected Goal's Candle record without a Goal action. *)
@@ -344,13 +345,31 @@ val footer_hints_code : pane:code_pane -> string
     questions never appeared on the screen they work on, and why blame and
     the row search did not either when they arrived. *)
 
-val footer_hints_runtime : mode:Masc_tui_types.runtime_mode -> string
-(** The Runtime footer: {!for_surface} [Runtime] with [p] labelled for where it
-    goes from [mode], and [e] only on the keeper-lane reading. *)
+val footer_hints_runtime :
+  mode:Masc_tui_types.runtime_mode ->
+  picker:Masc_tui_types.runtime_picker_projection option ->
+  string
+(** The Runtime footer for the reading or its active picker. A picker names
+    Enter's create, append or replace action; while filtering, letters belong
+    to the query and only the picker's navigation and confirmation are shown. *)
+
+val footer_hints_runtime_parent :
+  ko:bool -> parent:Masc_tui_types.runtime_parent -> string
+(** The active media-order editor or lane prompt replaces the Runtime listing.
+    Name fields own printable keys; their footer does not advertise listing
+    actions or [v]. Their [PgUp] opens the full draft/context reader; its Esc
+    returns to the unchanged field. Media [v] reads complete routes/results
+    above the preserved editor. The removal arm retains its existing
+    second-[D] confirmation. *)
 
 val footer_hints_resources : detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
+
+val footer_hints_resource_save : pending:bool -> string
+(** The path form owns printable keys, including q. Enter creates a file only
+    while no matching save is pending; Esc closes input and does not cancel an
+    issued write. Page keys read the retained result below the form. *)
 
 val footer_hints_board_read :
   lang:Masc_tui_types.ui_language ->
@@ -408,6 +427,9 @@ val footer_hints_memory_facts : lang:Masc_tui_types.ui_language -> cols:int -> h
     the category cycle, search, and the way back to the table. Omits
     [d:Category pane] on narrow frames where the Category rail does not fit,
     and the keys that act on a fact when [has_rows] is false. *)
+
+val footer_hints_memory_changes : lang:Masc_tui_types.ui_language -> string
+(** Shared Memory browser navigation and selected change reading. *)
 
 val bindings_memory_facts : binding list
 (** The fact browser's own keys. Separate from {!for_surface} because they are

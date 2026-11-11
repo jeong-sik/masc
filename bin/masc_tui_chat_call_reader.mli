@@ -4,7 +4,7 @@ type t
 type request = string Masc_tui_fetched.request
 val path : keeper:string -> execution_id:string -> string
 type action = Close | Choose of int | Open | Retry | Move of Masc_tui_detail_reading.movement | Ignore
-val action : key:string -> height:int -> t -> action
+val action : key:string -> t -> action
 val create : choice list -> t
 val choices : t -> choice list
 val selected : t -> choice option

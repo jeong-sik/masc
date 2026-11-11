@@ -117,6 +117,16 @@ type dataset =
       (** An input of [keeper]'s row in
           [GET /api/v1/dashboard/keeper-memory-health] was written. A reader
           reads that row alone ([?keeper=]); a Keeper that left has no row. *)
+  | World_memory
+      (** The workspace memory inventory's durable ledger, briefing or
+          constituent Keeper memory changed. Readers revalidate the inventory
+          after this event rather than using a periodic HTTP read. *)
+  | Play_seats
+      (** A Play invitation or participation changed. The event carries no
+          credential or participant data; readers revalidate their own grant. *)
+  | Dashboard_observation of Sse_event.Types.dashboard_observation_changed_payload
+      (** A mounted Dashboard reader's input changed. Topics and optional
+          Keeper/operation scopes use the shared ATD contract. *)
   | Play_room of { machine : Machine_lane.t }
       (** A public Play room message or public membership changed. [machine]
           is the source, not a filter: the transcript is shared across machines. *)
@@ -153,6 +163,9 @@ module Kind : sig
     | Lanes
     | Machine_live
     | Memory_health
+    | World_memory
+    | Play_seats
+    | Dashboard_observation
     | Play_room
     | Lane_addons
     | Browser_observation
@@ -178,6 +191,12 @@ val announce : base_path:string -> dataset -> unit
     [keeper_sse_broadcast_failures] under the site
     [workspace_dataset_changed:<name>] and logged at WARN; the caller's next
     suspension point still sees a cancellation. *)
+
+val announce_dashboard_observation :
+  base_path:string -> scope:Sse_event.Types.dashboard_observation_scope ->
+  Sse_event.Types.dashboard_observation_topic -> unit
+(** Announce one typed input change through the existing runtime observer bus.
+    It carries no snapshot rows and follows {!announce}'s non-yielding contract. *)
 
 val announce_lane_addon :
   base_path:string -> instance_id:string -> visibility:Yojson.Safe.t -> unit

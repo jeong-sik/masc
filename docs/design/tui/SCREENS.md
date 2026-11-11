@@ -13,7 +13,7 @@ Tab 순환과 상단 선택 표시는 `surface_ring`과 `surface_ring_family`가
 
 | 소속 | 화면 / 생성자 | 하는 일과 상세 | 진입 경로 |
 |---|---|---|---|
-| 운영 | Operations / `Overview` | 운영자 결정과 대화 진입 | 첫 화면, Tab |
+| 운영 | Operations / `Overview` | 운영자 결정·대화 진입, 조치 원인 전체 읽기 | 첫 화면, Tab, `v`로 조치 원인 |
 | Work | Goals·Tasks / `Planning` | 목표·측정·Task, 완료 조건·증거·Candle 지급, 생성·전이 | Tab, `t`로 Goals/Tasks |
 | Work | Requests / `Approvals` | 보류한 도구, Gate, 운영자 승인, Keeper 질문·답변 | Work `p`, 팔레트 |
 | Work | Task Review / `Verification` | 제출한 증거, 자동 검증 진행, 운영자 승인·반려 | Work `v`, 팔레트 |
@@ -49,12 +49,13 @@ Keeper 상세의 Automation과 Channels는 해당 Keeper의 별도 읽기 탭이
 
 | 소속 | 목록 |
 |---|---|
+| 운영 | `v`: 열 때의 서버 조치 원인 전체를 보관한 읽기. 스크롤·검색, Esc로 복귀. 미관측과 정상 빈 목록 구분 |
 | Keeper 모드 | 목록, 상세, 대화, 로그, 호출, runtime 선택 |
 | Keeper 상세 탭 11개 | Info, Items, Sandbox, Settings, Secrets, GitHub, Identity, Channels, Automation, Runs, Terminal |
 | System 설정 탭 7개 | runtime.toml, models, params, prompts, presets, themes, voice |
 | Tools 탭 5개 | 유효 도구, 비동기 요청, Skill 활성화, Skill 사용, 전체 카탈로그 |
 | Tools 하위 읽기 | 전체 카탈로그의 `V`: 은퇴 Keeper 볼륨 보고·회수 결과, Esc로 원래 목록 위치 복귀 |
-| Runtime | lane 후보, 전체 runtime, 선택 runtime 상세·후보 선택·모델 편집 |
+| Runtime | lane 후보·전체 runtime·상세·모델 편집. 미디어 순서 편집은 선택 slot을 포함한 페이지, 이름 입력은 초안 끝을 먼저 표시. 미디어 `v`, 이름 입력 `PgUp`은 전체 원문 읽기 후 Esc로 복귀 |
 | Features | 기능 목록, inventory 상세, lane 실행 목록·원문, 측정 상세 |
 | Usage | Plan, Keepers, Calls, Trend, 계정 범위 선택·telemetry |
 | Board | 글 목록, 글·댓글, 작성 초안 |

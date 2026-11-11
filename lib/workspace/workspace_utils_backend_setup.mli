@@ -39,7 +39,6 @@ val runtime_base_path : base_path_source -> string
 (** Resolve the workspace path used for runtime state. Linked worktrees share
     the main checkout's state, while the temp-directory escape guard keeps a
     scratch request inside its requested directory. *)
-val env_opt : string -> string option
 val sanitize_namespace_segment : string -> string
 (** A bounded filesystem path segment for a logical name.
 

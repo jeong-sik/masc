@@ -3,6 +3,9 @@
 val dashboard_request_timeout_s : float
 val standard_cache_ttl_s : float
 
+val workspace_memory_inventory_cache_key : base_path:string -> string
+(** The inventory's read and commit invalidation share this exact cache key. *)
+
 val deep_surface_cache_ttl_s : float
 val shell_surface_cache_ttl_s : float
 val freshness_slo_s : float
@@ -30,7 +33,6 @@ val with_dashboard_timeout :
   clock:_ Eio.Time.clock -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 
 val dashboard_cache_key : Workspace.config -> string -> string -> string
-val dashboard_query_cache_segment : string option -> string
 val dashboard_query_cache_key :
   Workspace.config -> string -> (string * string option) list -> string
 

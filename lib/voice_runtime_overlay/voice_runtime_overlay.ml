@@ -469,8 +469,7 @@ let http_request_for_tts
 let elevenlabs_catalogue_url base_url =
   let version = "/v1" in
   let length = String.length base_url and version_length = String.length version in
-  if length >= version_length
-     && String.equal (String.sub base_url (length - version_length) version_length) version
+  if String.ends_with ~suffix:version base_url
   then String.sub base_url 0 (length - version_length) ^ "/v2/voices"
   else base_url ^ "/voices"
 ;;

@@ -3,9 +3,14 @@ let maximum ~count ~height = Int.max 0 (count - height)
 let normalize ~count ~height scroll =
   Int.max 0 (Int.min scroll (maximum ~count ~height))
 
+(* A page keeps one row from the window it leaves. Moving a full [height]
+   would put the row the reader stopped on just past the edge, so a long list
+   read page by page loses one row per press with nothing saying so. *)
+let page_step ~height = Int.max 1 (height - 1)
+
 module Position = struct
   type t = Offset of int | End
-  type movement = First | Last | By of int
+  type movement = First | Last | By of int | Page_down | Page_up
   let first = Offset 0
   let is_end = function End -> true | Offset _ -> false
   let at value = Offset (max 0 value)
@@ -15,15 +20,20 @@ module Position = struct
   let clamp ~count ~height = function
     | Offset value -> Offset (normalize ~count ~height value)
     | End -> End
-  let move ~count ~height movement position = match movement with
+  let move ~count ~height movement position =
+    let by delta =
+      let current = offset ~count ~height position in
+      Offset (if delta > 0 then
+        min (maximum ~count ~height)
+          (current + min delta (max_int - current))
+      else max 0 (current + delta))
+    in
+    match movement with
     | First -> first
     | Last -> End
-    | By delta ->
-        let current = offset ~count ~height position in
-        Offset (if delta > 0 then
-          min (maximum ~count ~height)
-            (current + min delta (max_int - current))
-        else max 0 (current + delta))
+    | By delta -> by delta
+    | Page_down -> by (page_step ~height)
+    | Page_up -> by (-(page_step ~height))
 end
 
 let down ~count ~height scroll =
@@ -35,11 +45,6 @@ let step_uncounted ~delta scroll =
   if delta > 0 && scroll > max_int - delta then max_int
   else Int.max 0 (scroll + delta)
 
-(* A page keeps one row from the window it leaves. Moving a full [height]
-   would put the row the reader stopped on just past the edge, so a long list
-   read page by page loses one row per press with nothing saying so. *)
-let page_step ~height = Int.max 1 (height - 1)
-
 let page_down ~count ~height scroll =
   Int.min
     (maximum ~count ~height)
@@ -47,6 +52,30 @@ let page_down ~count ~height scroll =
 
 let page_up ~count ~height scroll =
   Int.max 0 (normalize ~count ~height scroll - page_step ~height)
+
+type key_move = Line_down | Line_up | Page_down | Page_up | To_top | To_end
+
+(* Each sheet matched its own key names against these movers, and no two
+   agreed: the cheat sheet moved a page by the whole window and had no Home or
+   End, the agenda kept a row between pages, and the context reader scrolled
+   by page, Home and End on one tab and by line on the others. *)
+let move_of_key = function
+  | "j" | "down" -> Some Line_down
+  | "k" | "up" -> Some Line_up
+  | "pagedown" -> Some Page_down
+  | "pageup" -> Some Page_up
+  | "g" | "home" -> Some To_top
+  | "G" | "end" -> Some To_end
+  | _ -> None
+
+let apply_move ~count ~height move scroll =
+  match move with
+  | Line_down -> down ~count ~height scroll
+  | Line_up -> up ~count ~height scroll
+  | Page_down -> page_down ~count ~height scroll
+  | Page_up -> page_up ~count ~height scroll
+  | To_top -> 0
+  | To_end -> maximum ~count ~height
 
 let cursor_last ~count = Int.max 0 (count - 1)
 
@@ -78,6 +107,15 @@ let ensure_visible ~cursor ~height scroll =
   if cursor < scroll then cursor
   else if cursor > scroll + height - 1 then cursor - height + 1
   else Int.max 0 scroll
+
+(* A group heading is no row the cursor can name, so [ensure_visible] let it
+   scroll off the top whenever the cursor stood on the group's first row: Home
+   on a grouped list, and every k across a group boundary, showed a row whose
+   group name had just gone. The lead is held to what a window shows together
+   with the row, so the row itself never leaves. *)
+let ensure_visible_with_lead ~cursor ~lead ~height scroll =
+  let lead = Int.max 0 (Int.min lead (Int.min cursor (height - 1))) in
+  ensure_visible ~cursor:(cursor - lead) ~height (ensure_visible ~cursor ~height scroll)
 
 let window_of_heights ~heights ~cursor ~rows scroll =
   let heights = Array.of_list heights in

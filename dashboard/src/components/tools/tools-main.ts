@@ -10,7 +10,6 @@ import {
   toolsLoading,
   toolsError,
   subscribeToolsAutoRefresh,
-  KEEPER_WAITING_INVENTORY_REFRESH_MS,
 } from './tool-state'
 import { FullInventoryView } from './tool-full-inventory'
 import { ConfigResolutionPanel } from './config-resolution-panel'
@@ -22,6 +21,7 @@ import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 import { ToolSeriesPanel } from './tool-series-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
+import { KeeperEventQueuePanel } from './keeper-event-queue-panel'
 import { SkillActivationPanel, type KeeperSkillReceipt } from './skill-activation-panel'
 import {
   fetchDashboardTools,
@@ -29,7 +29,7 @@ import {
   type DashboardSkillActivationProjection,
   type DashboardToolsResponse,
 } from '../../api'
-import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
 import {
   scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh,
@@ -91,7 +91,7 @@ export function Tools() {
 
   useEffect(() => {
     // subscribeToolsAutoRefresh performs the first load itself and shares one
-    // visibility-aware poller across the surfaces that read this resource.
+    // observation across the surfaces that read this resource.
     // Loading once by hand left a cold read's warming envelope on screen for
     // the whole visit: nothing fetched the finished projection until the
     // operator refreshed the inventory by hand.
@@ -113,19 +113,25 @@ export function Tools() {
       return
     }
     let controller: AbortController | null = null
-    const refresh = () => {
+    const refresh = (signal: AbortSignal) => {
       controller?.abort()
       controller = new AbortController()
-      const current = controller
+      const current = { signal: AbortSignal.any([signal, controller.signal]) }
       setKeeperReceiptLoading(true)
       setKeeperReceiptError(null)
-      void Promise.all([
+      return Promise.allSettled([
         fetchDashboardTools({ keeperName: selectedKeeper, signal: current.signal }),
         fetchKeeperSkillActivations(selectedKeeper, { signal: current.signal }),
       ])
         .then(([response, activations]) => {
           if (current.signal.aborted) return
-          const receipt = keeperSkillReceipt(response, activations, selectedKeeper)
+          if (response.status === 'rejected' || activations.status === 'rejected') {
+            throw selectObservationReadFailure([
+              response.status === 'rejected' ? response.reason : null,
+              activations.status === 'rejected' ? activations.reason : null,
+            ])
+          }
+          const receipt = keeperSkillReceipt(response.value, activations.value, selectedKeeper)
           if (typeof receipt === 'string') {
             setKeeperReceipt(null)
             setKeeperReceiptError(receipt)
@@ -137,16 +143,16 @@ export function Tools() {
           if (current.signal.aborted) return
           setKeeperReceipt(null)
           setKeeperReceiptError(cause instanceof Error ? cause.message : String(cause))
+          throw cause
         })
         .finally(() => {
           if (!current.signal.aborted) setKeeperReceiptLoading(false)
         })
     }
-    refresh()
-    const stopRefresh = setupVisibleAutoRefresh(
-      refresh,
-      KEEPER_WAITING_INVENTORY_REFRESH_MS,
-    )
+    const stopRefresh = setupObservationRefresh(refresh, {
+      topics: ['tools', 'skill_activations'], keeperName: selectedKeeper,
+      resetRead: () => { setKeeperReceipt(null); setKeeperReceiptError(null); setKeeperReceiptLoading(true) },
+    })
     return () => {
       stopRefresh()
       controller?.abort()
@@ -201,6 +207,10 @@ export function Tools() {
                 ? scheduledAutomationProjection.value.data
                 : null}
             />`}
+      <//>
+
+      <${SectionCard} label="Keeper 대기열 취소" class="section v2-lab-panel mb-4">
+        <${KeeperEventQueuePanel} />
       <//>
 
       <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">

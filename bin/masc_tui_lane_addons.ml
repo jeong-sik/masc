@@ -811,35 +811,40 @@ let timeline_lines ?(instances=[]) ?selected ~width rows =
       let first : Row.row = first in
       let since, until = List.fold_left (fun (a, b) (row : Row.row) ->
         min a row.observed_at, max b row.observed_at) (first.observed_at, first.observed_at) rest in
-      let label_width = min 28 (max 8 (width / 3)) in
-      let axis_width = max 2 (width - label_width - 4) in
       let lanes = (List.map (fun (row : Row.row) -> row.lane_id) rows
         @ List.concat_map (fun instance -> List.concat_map (fun (_,selection) ->
             match selection with Row.All_lanes -> []
             | Row.Selected_lanes lanes -> List.map (fun lane -> instance.id ^ "/" ^ lane) lanes) instance.outputs) instances)
         |> List.sort_uniq String.compare in
-      let label lane =
+      (* A lane id is "<instance id>/<lane>". The detail screen draws one
+         instance, which its heading already names, so a lane is labelled by
+         the part after the slash and the label column is as wide as the
+         widest label, up to a cap. *)
+      let local lane =
         match String.index_opt lane '/' with
         | Some separator when separator > 0 ->
-            let instance = String.sub lane (max 0 (separator - 8)) (min 8 separator) in
-            let local = String.sub lane (separator + 1) (String.length lane - separator - 1) in
-            let suffix = " · " ^ instance in
-            let local_width = label_width - Masc_tui_message_layout.display_width suffix in
-            if local_width > 0 then Masc_tui_message_layout.fit_width local local_width ^ suffix
-            else Masc_tui_message_layout.fit_width local label_width
-        | _ -> Masc_tui_message_layout.fit_width lane label_width in
+            String.sub lane (separator + 1) (String.length lane - separator - 1)
+        | _ -> lane in
+      let label_width = List.fold_left (fun widest lane ->
+          max widest (Masc_tui_message_layout.display_width (local lane))) 1 lanes
+        |> min (min 28 (max 8 (width / 3))) in
+      let axis_width = max 2 (width - label_width - 4) in
+      let label lane = Masc_tui_message_layout.fit_width (local lane) label_width in
       let position time = if since = until then axis_width / 2 else
         let span = until -. since in
         let fraction = if Float.is_finite span then (time -. since) /. span
           else (time /. 2. -. since /. 2.) /. (until /. 2. -. since /. 2.) in
         max 0 (min (axis_width - 1) (int_of_float (fraction *. float_of_int (axis_width - 1)))) in
-      [Printf.sprintf "Wall time %.3f → %.3f · o event · v value · * relation" since until]
+      [Printf.sprintf "Wall time %s UTC"
+         (if since = until then utc_stamp since
+          else utc_stamp since ^ " → " ^ utc_stamp until)]
       @ List.map (fun lane ->
           let axis = Bytes.make axis_width '-' in
           List.iter (fun (row : Row.row) -> if row.lane_id = lane then
             Bytes.set axis (position row.observed_at) (match row.kind with Row.Event -> 'o' | Row.Value -> 'v' | Row.Relation -> '*')) rows;
           (match selected with Some (row : Row.row) when row.lane_id=lane -> ">" | _ -> " ")
           ^ label lane ^ " |" ^ Bytes.to_string axis ^ "|") lanes
+      @ ["o event · v value · * relation"]
       @ List.filter_map (fun instance ->
           if List.exists (fun (row : Row.row) ->
             String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) rows then None
@@ -894,6 +899,30 @@ type technical_part =
   | Technical_json of { value : Yojson.Safe.t; indent : int }
 
 let technical_text lines = List.map (fun line -> Technical_text line) lines
+
+let evidence_text (evidence : Row.evidence) =
+  "Evidence " ^ evidence.uri ^ " · sha256 " ^ Option.value ~default:"unknown" evidence.sha256
+
+(* One document part as screen rows. JSON is code: it takes the code gutter
+   and the lexer colours that every other JSON view draws. *)
+let technical_rows ~width = function
+  | Technical_text text -> document_rows ~width text
+  | Technical_json {value;indent} ->
+      let lines = Yojson.Safe.pretty_to_string value
+        |> String.split_on_char '\n'
+        |> List.map Masc.Tui_terminal_text.sanitize_terminal_text in
+      let source = String.concat "\n" lines in
+      (* The gutter and indentation must not take space from a grapheme
+         that would otherwise fit in the pane. *)
+      let palette = Masc_tui_markdown_theme.palette ~closing:"" in
+      let gutter = Masc_tui_message_layout.display_width palette.code_gutter in
+      let widest = List.fold_left (fun widest line ->
+        max widest (Masc_tui_message_layout.widest_grapheme_cells line)) 0 lines in
+      if width < gutter + widest then document_rows ~width source
+      else
+        let indent = min indent (width - gutter - widest) in
+        Masc_tui_markdown_theme.code ~language:"json" ~width:(width - indent) source
+        |> List.map (fun line -> String.make indent ' ' ^ line)
 
 let instance_parts view instances =
   List.concat (List.mapi (fun i item ->
@@ -1076,24 +1105,6 @@ let rec finite_values = function
 
 let technical_lines ?(height=24) ?(failed_note = "") ~width view =
   let _ = height in
-  let render = function
-    | Technical_text text -> document_rows ~width text
-    | Technical_json {value;indent} ->
-        let lines = Yojson.Safe.pretty_to_string value
-          |> String.split_on_char '\n'
-          |> List.map Masc.Tui_terminal_text.sanitize_terminal_text in
-        let source = String.concat "\n" lines in
-        (* The gutter and indentation must not take space from a grapheme
-           that would otherwise fit in the pane. *)
-        let palette = Masc_tui_markdown_theme.palette ~closing:"" in
-        let gutter = Masc_tui_message_layout.display_width palette.code_gutter in
-        let widest = List.fold_left (fun widest line ->
-          max widest (Masc_tui_message_layout.widest_grapheme_cells line)) 0 lines in
-        if width < gutter + widest then document_rows ~width source
-        else
-          let indent = min indent (width - gutter - widest) in
-          Masc_tui_markdown_theme.code ~language:"json" ~width:(width - indent) source
-          |> List.map (fun line -> String.make indent ' ' ^ line) in
   let raw_row (row : Row.row) =
     technical_text ([row.title; "Row " ^ row.id; "Lane " ^ row.lane_id;
      "Observed " ^ utc_stamp row.observed_at ^ " UTC";
@@ -1102,9 +1113,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     @ Option.to_list (Option.map (fun (clock : Row.clock) ->
         "Clock " ^ clock.domain ^ " · " ^ clock.value) row.clock))
     @ [Technical_json {value=`Assoc row.fields;indent=0}]
-    @ technical_text (List.map (fun (e : Row.evidence) ->
-        "Evidence " ^ e.uri ^ " · sha256 " ^ Option.value ~default:"unknown" e.sha256)
-        row.evidence
+    @ technical_text (List.map evidence_text row.evidence
     @ (if row.related_ids=[] then []
        else ["Related " ^ String.concat ", " row.related_ids])) in
   let content = match view.snapshot with
@@ -1153,7 +1162,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     | Some text -> [(if view.naming then "New TOML filename: " else "Plugin command: ") ^ text] in
   let document = match selected_document view with
     | None -> [] | Some session -> document_application_lines view session @ Document.summary session in
-  List.concat_map render
+  List.concat_map (technical_rows ~width)
     (technical_text (["?:help  Esc:back  J/K:scroll"] @ diagnostic_lines view)
      @ content @ technical_text (draft @ document) @ action_parts view @ receipt)
 
@@ -1430,23 +1439,63 @@ let value_indent_cells = 2
 
 module Span = Masc_tui_span
 
-(* Frame vocabulary ([Masc_tui_theme.tone]): a label is the accent, and the
-   keys, bullets and stamps around a value are dim. Nothing here colours a
-   value by what it means. *)
-let muted_style () = Span.fg (Masc_tui_theme.tone Masc_tui_theme.Dim)
-let label_style () =
-  Span.combine (Span.fg (Masc_tui_theme.tone Masc_tui_theme.Accent)) (Span.weight Masc_tui_theme.Sgr.bold)
+(* Labels use the reader's foreground with bold weight: the raw Accent hue
+   can be unreadable on a light palette. Keys, bullets and stamps stay dim;
+   values keep their plain style. *)
+let muted_style () = Span.fg Masc_tui_theme.Sgr.dim
 let bold_style () = Span.weight Masc_tui_theme.Sgr.bold
+let label_style () = bold_style ()
 
 (* Wrap [text] after a styled lead so continuation pieces start under the
-   text, not under the lead. *)
-let led_rows ~width ~lead ~text_style text =
+   text, not under the lead. [split] cuts the text to a width. By default it
+   cuts at the cell, which keeps the exact spaces of a value, and prose passes
+   a cut at spaces. *)
+let led_rows ?(split = fun ~width text -> document_rows ~width text) ~width ~lead ~text_style text =
   let lead_cells = Span.width lead in
-  let pieces = document_rows ~width:(max 1 (width - lead_cells)) text in
+  let pieces = split ~width:(max 1 (width - lead_cells)) text in
   let hang = Span.text Span.plain (String.make lead_cells ' ') in
   List.mapi (fun index piece ->
     Span.concat [ (if index = 0 then lead else hang); Span.text text_style piece ])
     (match pieces with [] -> [ "" ] | pieces -> pieces)
+
+(* A page that lists facts. A heading names a group and takes the label
+   weight. Fields are label and value pairs: the fields of one indent share a
+   label column across the page, so their values start under each other, and
+   a long value hangs under itself. Text is a sentence and keeps its own
+   indent. A label column wider than half the width leaves the values a
+   sliver, so every label then takes its own row and its value hangs two
+   cells under it, fewer where a two-cell character would not fit beside the
+   hang. *)
+type fact_row =
+  | Fact_heading of string
+  | Fact_fields of { indent : int; fields : (string * string) list }
+  | Fact_text of string
+
+let fact_spans ~width rows =
+  let label_cells indent = 1 + List.fold_left (fun widest -> function
+    | Fact_fields { indent = at; fields } when at = indent ->
+        List.fold_left (fun widest (label, _) ->
+          max widest (Masc_tui_message_layout.display_width label)) widest fields
+    | Fact_fields _ | Fact_heading _ | Fact_text _ -> widest) 0 rows in
+  let beside = List.for_all (function
+    | Fact_fields { indent; _ } -> 2 * (indent + label_cells indent) <= width
+    | Fact_heading _ | Fact_text _ -> true) rows in
+  let spaces cells = Span.text Span.plain (String.make (max 0 (min cells (width - 2))) ' ') in
+  let spans = function
+    | Fact_heading text -> led_rows ~width ~lead:Span.empty ~text_style:(label_style ()) text
+    | Fact_text text -> led_rows ~width ~lead:Span.empty ~text_style:Span.plain text
+    | Fact_fields { indent; fields } when beside ->
+        List.concat_map (fun (label, value) ->
+          let lead = Span.concat
+            [ Span.text Span.plain (String.make indent ' ')
+            ; Span.pad_to (label_cells indent) Span.plain (Span.text (label_style ()) label) ] in
+          led_rows ~width ~lead ~text_style:Span.plain value) fields
+    | Fact_fields { indent; fields } ->
+        List.concat_map (fun (label, value) ->
+          led_rows ~width ~lead:(spaces indent) ~text_style:(label_style ()) label
+          @ led_rows ~width ~lead:(spaces (indent + 2)) ~text_style:Span.plain value) fields in
+  List.concat_map (fun row ->
+    List.map (fun span -> Span.render (Span.truncate width span)) (spans row)) rows
 
 let value_row_spans ~width (row : value_row) =
   let indent = String.make (row.depth * value_indent_cells) ' ' in
@@ -1689,24 +1738,57 @@ let overview_lines ~width view =
     (texts (diagnostic_lines view) @ content
      @ texts ([""; overview_hints view] @ action_lines view))
 
-let help_lines = [
-  "Plugins keys · Esc:close";
-  "Install Plugins and switch them on/off. Lanes are their work and observation paths.";
-  "List: j/k select · Enter open · h history/current · i install · n new TOML";
-  "Detail: 1 Results · 2 Links · 3 Installation · 4 Records · Tab next";
-  "Both: ?:help · Esc back · q back · r refresh · J/K scroll";
-  "Actions: o observe/retry · d remove TOML/worker · a advertised actions";
-  "TOML-managed removal deletes the matching declaration from disk and cleans up its owned worker.";
-  "Manual attachments remove only the worker and its owned resources.";
-  "Declarations now owned by another instance are preserved; observations and evidence remain.";
-  "Actions: t check last request · D raw details · f flow";
-  "Installation: Space on/off draft · E edit · s save · l reload · u/U revision";
-  "Saving off keeps the TOML and evidence; r reads the actual worker cleanup state.";
-  "Links: S subscriptions · Left/Right lane";
-  "Records: Space mark row · e export marked rows";
-  "Navigation: : command palette · Esc returns to Plugins";
-  "Advanced: A opens Plugin commands · Enter submits (including act or detach ID)";
+(* One line of the Plugins help. [Help_keys] names the keys of a screen or a
+   task under a label, and [Help_note] explains the line above it. *)
+type help_row =
+  | Help_title of string
+  | Help_about of string
+  | Help_keys of { group : string; keys : string }
+  | Help_note of string
+
+let help_rows = [
+  Help_title "Plugins keys · Esc:close";
+  Help_about "Install Plugins and switch them on/off. Lanes are their work and observation paths.";
+  Help_keys { group = "List"; keys = "j/k select · Enter open · h history/current · i install · n new TOML" };
+  Help_keys { group = "Detail"; keys = "1 Results · 2 Links · 3 Installation · 4 Records · Tab next" };
+  Help_keys { group = "Both"; keys = "?:help · Esc back · q back · r refresh · J/K scroll" };
+  Help_keys { group = "Actions"; keys = "o observe/retry · d remove TOML/worker · a advertised actions" };
+  Help_note "TOML-managed removal deletes the matching declaration from disk and cleans up its owned worker.";
+  Help_note "Manual attachments remove only the worker and its owned resources.";
+  Help_note "Declarations now owned by another instance are preserved; observations and evidence remain.";
+  Help_keys { group = "Actions"; keys = "t check last request · D raw details · f flow" };
+  Help_keys { group = "Installation"; keys = "Space on/off draft · E edit · s save · l reload · u/U revision" };
+  Help_note "Saving off keeps the TOML and evidence; r reads the actual worker cleanup state.";
+  Help_keys { group = "Links"; keys = "S subscriptions · Left/Right lane" };
+  Help_keys { group = "Records"; keys = "Space mark row · e export marked rows" };
+  Help_keys { group = "Navigation"; keys = ": command palette · Esc returns to Plugins" };
+  Help_keys { group = "Advanced"; keys = "A opens Plugin commands · Enter submits (including act or detach ID)" };
 ]
+
+(* Labels share one column, as wide as the longest label and a two-cell gap,
+   so the keys and the notes start under each other. A column wider than half
+   the width leaves the keys a sliver, so the label then takes its own row and
+   the keys and the notes hang two cells under it. *)
+let help_lines ~width =
+  let label_cells = 2 + List.fold_left (fun widest -> function
+    | Help_keys { group; _ } -> max widest (Masc_tui_message_layout.display_width group)
+    | Help_title _ | Help_about _ | Help_note _ -> widest) 0 help_rows in
+  let beside = 2 * label_cells <= width in
+  let hang_cells = if beside then label_cells else max 0 (min 2 (width - 1)) in
+  let hang = Span.text Span.plain (String.make hang_cells ' ') in
+  let split ~width text = Masc_tui_message_layout.wrap_words ~max_cells:width text in
+  let rows = function
+    | Help_title text -> led_rows ~split ~width ~lead:Span.empty ~text_style:(label_style ()) text
+    | Help_about text -> led_rows ~split ~width ~lead:Span.empty ~text_style:Span.plain text
+    | Help_keys { group; keys } when beside ->
+        let lead = Span.pad_to label_cells Span.plain (Span.text (label_style ()) group) in
+        led_rows ~split ~width ~lead ~text_style:Span.plain keys
+    | Help_keys { group; keys } ->
+        led_rows ~split ~width ~lead:Span.empty ~text_style:(label_style ()) group
+        @ led_rows ~split ~width ~lead:hang ~text_style:Span.plain keys
+    | Help_note text -> led_rows ~split ~width ~lead:hang ~text_style:Span.plain text in
+  List.concat_map (fun row ->
+    List.map (fun span -> Span.render (Span.truncate width span)) (rows row)) help_rows
 
 type read_target =
   | Read_screen
@@ -1859,15 +1941,16 @@ let host_issue_text = function
   | Host_no_web_search_runner -> "this host has no web-search runner"
 let host_request_lines item = match item.host_requests with
   | None | Some (Ok { hr_cycles = 0; hr_waiting = []; hr_issue = None }) -> []
-  | Some (Error detail) -> [""; "Host requests: unreadable · " ^ detail]
+  | Some (Error detail) -> [Fact_text ""; Fact_text ("Host requests: unreadable · " ^ detail)]
   | Some (Ok { hr_cycles; hr_waiting; hr_issue }) ->
-      [""; Printf.sprintf "Host requests · last cycle (%d total)" hr_cycles]
-      @ (match hr_waiting, hr_issue with
-         | [], Some _ -> ["  waiting status incomplete"]
-         | [], None -> ["  nothing reported waiting"]
-         | waiting, _ -> List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) waiting)
-      @ (if hr_waiting <> [] && Option.is_some hr_issue then ["  waiting status incomplete"] else [])
-      @ Option.fold ~none:[] ~some:(fun issue -> ["  issue: " ^ host_issue_text issue]) hr_issue
+      Fact_text "" :: Fact_heading (Printf.sprintf "Host requests · last cycle (%d total)" hr_cycles)
+      :: List.map (fun line -> Fact_text line)
+        ((match hr_waiting, hr_issue with
+          | [], Some _ -> ["  waiting status incomplete"]
+          | [], None -> ["  nothing reported waiting"]
+          | waiting, _ -> List.map (fun (request_id, wait) -> "  " ^ request_id ^ ": " ^ host_wait_text wait) waiting)
+         @ (if hr_waiting <> [] && Option.is_some hr_issue then ["  waiting status incomplete"] else [])
+         @ Option.fold ~none:[] ~some:(fun issue -> ["  issue: " ^ host_issue_text issue]) hr_issue)
 
 let connection_workers (snapshot : snapshot) (item : instance) =
   match item.installation_id with
@@ -1889,21 +1972,22 @@ let connection_workers (snapshot : snapshot) (item : instance) =
 let connection_worker_lines (snapshot : snapshot) (item : instance) =
   let workers = connection_workers snapshot item in
   let lines (worker : instance) =
-    ["  " ^ worker.id ^ " · " ^ (match worker.runtime_presence with
+    [Fact_text ("  " ^ worker.id ^ " · " ^ (match worker.runtime_presence with
        | Live_entry -> "live" | Retained_binding -> "retained" | Presence_unknown -> "presence unknown")
-       ^ " · " ^ phase_label worker.phase;
-     "    installation " ^ Option.value ~default:"manual attachment" worker.installation_id;
-     "    incarnation " ^ worker.incarnation;
-     "    TOML " ^ Option.value ~default:"manual attachment" worker.source_path;
-     "    installed revision " ^ Option.value ~default:worker.revision worker.configuration_revision;
-     Printf.sprintf "    completed observation sequence %d · retained rows %d"
-       worker.observation_seq worker.rows_count]
-    @ (if worker.observation_seq=0 then ["    no completed observation received"] else []) in
-  [""; "Workers with this installation ID · each incarnation keeps its own results"]
+       ^ " · " ^ phase_label worker.phase);
+     Fact_fields { indent = 4; fields =
+       ["installation", Option.value ~default:"manual attachment" worker.installation_id;
+        "incarnation", worker.incarnation;
+        "TOML", Option.value ~default:"manual attachment" worker.source_path;
+        "installed revision", Option.value ~default:worker.revision worker.configuration_revision] };
+     Fact_text (Printf.sprintf "    completed observation sequence %d · retained rows %d"
+       worker.observation_seq worker.rows_count)]
+    @ (if worker.observation_seq=0 then [Fact_text "    no completed observation received"] else []) in
+  [Fact_text ""; Fact_heading "Workers with this installation ID · each incarnation keeps its own results"]
   @ List.concat_map lines workers.installation_workers
   @ (match workers.other_path_owners with
      | [] -> []
-     | owners -> [""; "Other installation IDs at this TOML path · separate owners, not the selected installation"]
+     | owners -> [Fact_text ""; Fact_heading "Other installation IDs at this TOML path · separate owners, not the selected installation"]
          @ List.concat_map lines owners)
 
 (* The Results list takes a third of the row, never less than
@@ -2045,52 +2129,40 @@ let detail_lines ~height ~width view =
             @ List.concat_map wrap ([""; "Activity timeline"]
                 @ timeline_lines ~width ~instances:[item] ?selected rows
                 @ snapshot_coverage_lines snapshot.output.coverage)
-      | Connections ->
-          let sources = match Masc.Lane_addon_sources.parse item.binding with
-            | Error detail -> ["Input binding: " ^ detail]
-            | Ok [] -> ["No bound inputs"]
-            | Ok sources -> List.map (fun source ->
-                let module S = Masc.Lane_addon_sources in
-                match source with
-                | S.Lane_output {installation_id;output_id;_} ->
-                    "Input: " ^ installation_id ^ "/" ^ Option.value ~default:"*" output_id
-                | S.Snapshot_file {id;path} -> "Input: " ^ id ^ " · " ^ path
-                | S.Fusion_run {id;run_id} -> "Input: " ^ id ^ " · Fusion " ^ run_id
-                | S.Msx_capture {id} | S.Dos_capture {id}
-                | S.Browser_document {id;_} -> "Input: " ^ id) sources in
-          List.concat_map wrap (sources @ List.map (fun (name,_) -> "Output: " ^ name) item.outputs)
-      | Configurations -> List.concat_map wrap (
-          ["Source: " ^ Option.value ~default:"not supplied" item.source_path;
-           "Revision: " ^ item.revision;
-           "Instance: " ^ item.id;
-           "Incarnation: " ^ item.incarnation]
+      | Connections -> []
+      | Configurations -> fact_spans ~width (
+          [Fact_fields { indent = 0; fields =
+             ["Source:", Option.value ~default:"not supplied" item.source_path;
+              "Revision:", item.revision;
+              "Instance:", item.id;
+              "Incarnation:", item.incarnation] }]
           @ (match snapshot.configuration with
-             | None -> ["Installation inventory unavailable"]
+             | None -> [Fact_text "Installation inventory unavailable"]
              | Some config ->
                  List.concat_map (fun (declaration : declaration) ->
                    if Some declaration.source_path = item.source_path
-                   then ["Current declaration: " ^ (match declaration.enabled with
-                           | Some true -> "configured on"
-                           | Some false -> "configured off"
-                           | None -> "desired activity unknown");
-                         "Desired: " ^ Option.value ~default:"unknown" declaration.desired;
-                         "Applied: " ^ Option.value ~default:"unknown" declaration.applied;
-                         declaration_application view declaration]
-                        @ List.map (fun issue -> "Issue: " ^ issue) declaration.issues
+                   then [Fact_fields { indent = 0; fields =
+                           ["Current declaration:", (match declaration.enabled with
+                              | Some true -> "configured on"
+                              | Some false -> "configured off"
+                              | None -> "desired activity unknown");
+                            "Desired:", Option.value ~default:"unknown" declaration.desired;
+                            "Applied:", Option.value ~default:"unknown" declaration.applied] };
+                         Fact_text (declaration_application view declaration);
+                         Fact_fields { indent = 0; fields = List.map (fun issue -> "Issue:", issue) declaration.issues }]
                    else []) config.declarations)
           @ host_request_lines item
           @ connection_worker_lines snapshot item)
-      | Rows -> List.concat_map wrap (
-          if record_rows=[] then empty_result_lines view item
+      | Rows ->
+          if record_rows=[] then List.concat_map wrap (empty_result_lines view item)
           else List.concat_map (fun (row : Row.row) ->
-            [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
+            technical_text [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
                  selected then "> " else "  ")
              ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
-             "Row " ^ row.id;
-             Yojson.Safe.pretty_to_string (`Assoc row.fields)]
-            @ List.map (fun (e : Row.evidence) ->
-              "Evidence " ^ e.uri ^ " · sha256 " ^
-              Option.value ~default:"unknown" e.sha256) row.evidence) record_rows) in
+             "Row " ^ row.id]
+            @ [Technical_json {value=`Assoc row.fields;indent=0}]
+            @ technical_text (List.map evidence_text row.evidence)
+            |> List.concat_map (technical_rows ~width)) record_rows in
       head @ body
   | Some _, None -> ["Reading Plugins…"]
 
@@ -2177,24 +2249,30 @@ let declared_layers ~identity workers =
         (ready :: layers) waiting in
   place [] [] nodes
 
-let flow_lines ?(embedded=false) view =
+(* The flow of one Plugin, for the Links tab and the full flow: a heading takes
+   the label style and a field shares the label column of [fact_spans]. The
+   lines under a heading stay plain text. *)
+let flow_rows ?(embedded=false) view =
+  let text line = Fact_text line in
   (match selected_instance view with
-   | None -> ["No selected Plugin action target"]
-   | Some instance -> ["Action target: " ^ instance.title ^ " · " ^ instance.id])
-  @ ["Declared Add-on layers · last received snapshot";
-     "Same layer: independent dependencies. Downward: declared upstream -> consumer.";
-     "Layer placement describes wiring; execution and delivery need their own receipts."]
+   | None -> [Fact_text "No selected Plugin action target"]
+   | Some instance ->
+       [Fact_fields { indent = 0; fields = ["Action target:", instance.title ^ " · " ^ instance.id] }])
+  @ [Fact_heading "Declared Add-on layers · last received snapshot";
+     Fact_text "Same layer: independent dependencies. Downward: declared upstream -> consumer.";
+     Fact_text "Layer placement describes wiring; execution and delivery need their own receipts."]
   @ (match view.error with
      | None -> []
      | Some ((Detail_read_failure _ | Request_failure _ | Input_failure _) as diagnostic) ->
-         [diagnostic_text diagnostic])
+         [Fact_text (diagnostic_text diagnostic)])
   @ (match view.snapshot_read_error, view.snapshot with
-     | Some detail, Some _ -> ["Read: " ^ detail ^ " · previous graph retained"]
-     | Some detail, None -> ["Read: " ^ detail]
+     | Some detail, Some _ ->
+         [Fact_fields { indent = 0; fields = ["Read:", detail ^ " · previous graph retained"] }]
+     | Some detail, None -> [Fact_fields { indent = 0; fields = ["Read:", detail] }]
      | None, (Some _ | None) -> [])
-  @ Option.to_list (detail_read_note view)
+  @ List.map text (Option.to_list (detail_read_note view))
   @ (match view.snapshot with
-     | None -> ["Connections unavailable: no snapshot read yet"]
+     | None -> [Fact_text "Connections unavailable: no snapshot read yet"]
      | Some snapshot ->
          let declarations = Option.fold ~none:[] ~some:(fun c -> c.declarations) snapshot.configuration in
          let name = installation_name in
@@ -2216,26 +2294,27 @@ let flow_lines ?(embedded=false) view =
            | Ok sources -> List.map (fun source ->
                "  " ^ source ^ " -> " ^ name worker
                ^ (if historical then " · stored binding" else "")) sources) workers in
-         let source_lines = [""; "Bound external inputs · declared sources"]
-           @ (if external_inputs=[] then ["  No external source bindings in this view"]
+         let source_lines = [Fact_text ""; Fact_heading "Bound external inputs · declared sources"]
+           @ List.map text (if external_inputs=[] then ["  No external source bindings in this view"]
               else external_inputs)
-           @ [""; "Add-on layers · worker state and latest completed result summary"] in
+           @ [Fact_text ""; Fact_heading "Add-on layers · worker state and latest completed result summary"] in
          let layers, unresolved = if historical then [], [] else declared_layers ~identity workers in
          let layer_lines = if historical then
-             ["Stored bindings · producer incarnations are not reconstructed as current layers"]
+             [Fact_text "Stored bindings · producer incarnations are not reconstructed as current layers"]
            else List.concat (List.mapi (fun index nodes ->
-             [(if index=0 then "" else "    ↓"); "Layer " ^ string_of_int index;
-              "  " ^ String.concat "  |  " (List.map (fun node -> "[" ^ name node.worker ^ "]") nodes)]
-             @ List.map (fun node -> "    " ^ name node.worker ^ ": " ^ flow_worker_state node.worker) nodes) layers)
+             [Fact_text (if index=0 then "" else "    ↓"); Fact_heading ("Layer " ^ string_of_int index)]
+             @ List.map text (
+               ["  " ^ String.concat "  |  " (List.map (fun node -> "[" ^ name node.worker ^ "]") nodes)]
+               @ List.map (fun node -> "    " ^ name node.worker ^ ": " ^ flow_worker_state node.worker) nodes)) layers)
              @ List.concat_map (fun node ->
-                 ["Layer unavailable: " ^ name node.worker]
-                 @ (match node.problems with
+                 Fact_heading ("Layer unavailable: " ^ name node.worker)
+                 :: List.map text (match node.problems with
                     | [] -> ["  Cyclic or unresolved upstream dependency"]
                     | problems -> List.map (fun detail -> "  " ^ detail) problems)) unresolved in
-         notices @ source_lines @ layer_lines
-         @ (if workers=[] then ["No current workers to place. Review installation issues or install a Plugin."] else [])
-         @ [""; "Declared inputs and outputs"]
-         @ List.concat_map (fun instance ->
+         List.map text notices @ source_lines @ layer_lines
+         @ (if workers=[] then [Fact_text "No current workers to place. Review installation issues or install a Plugin."] else [])
+         @ [Fact_text ""; Fact_heading "Declared inputs and outputs"]
+         @ List.map text (List.concat_map (fun instance ->
            let target = name instance in
            [(if Some instance.id = Option.map (fun i -> i.id) (selected_instance view) then "> " else "  ") ^ target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase]
            @ (match flow_inputs instance.binding with
@@ -2253,15 +2332,36 @@ let flow_lines ?(embedded=false) view =
                   @ (match input.output_id with
                     | None -> []
                     | Some port -> ["    Input " ^ input.source_id ^ ": " ^ input.installation_id ^ "/" ^ port])) upstream)
-           @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) workers)
-  @ [""; "Result -> retained evidence -> explicit Keeper / Broadcast sharing -> agent use";
-     "Delivery acceptance and agent reading are separate recorded stages."]
+           @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) workers))
+  @ [Fact_text ""; Fact_heading "Result -> retained evidence -> explicit Keeper / Broadcast sharing -> agent use";
+     Fact_text "Delivery acceptance and agent reading are separate recorded stages."]
   @ (match Option.map evidence_receipt_lines view.receipt with
-     | Some (_ :: _ as receipt) -> ["Last evidence sharing receipt · this session"] @ receipt
-     | Some [] | None -> ["No evidence sharing receipt in this session."])
-  @ [
+     | Some (_ :: _ as receipt) -> Fact_heading "Last evidence sharing receipt · this session" :: List.map text receipt
+     | Some [] | None -> [Fact_text "No evidence sharing receipt in this session."])
+  @ [Fact_text
      (if embedded then "f:open full flow  D:technical details  J/K:scroll"
       else "f:back to observations  D:technical details  J/K:scroll")]
+
+(* The Links tab: the selected Plugin's bound inputs and outputs, then its
+   flow. Inputs and outputs are fields, so they share a label column with the
+   fields of the flow. *)
+let links_lines ~width view =
+  let module S = Masc.Lane_addon_sources in
+  let bound = match selected_instance view, view.snapshot with
+    | Some item, Some _ ->
+        (match S.parse item.binding with
+         | Error detail -> [Fact_fields { indent = 0; fields = ["Input binding:", detail] }]
+         | Ok [] -> [Fact_text "No bound inputs"]
+         | Ok sources -> [Fact_fields { indent = 0; fields = List.map (function
+             | S.Lane_output {installation_id;output_id;_} ->
+                 "Input:", installation_id ^ "/" ^ Option.value ~default:"*" output_id
+             | S.Snapshot_file {id;path} -> "Input:", id ^ " · " ^ path
+             | S.Fusion_run {id;run_id} -> "Input:", id ^ " · Fusion " ^ run_id
+             | S.Msx_capture {id} | S.Dos_capture {id}
+             | S.Browser_document {id;_} -> "Input:", id) sources }])
+        @ [Fact_fields { indent = 0; fields = List.map (fun (name,_) -> "Output:", name) item.outputs }]
+    | Some _, None | None, (Some _ | None) -> [] in
+  fact_spans ~width (bound @ (Fact_text "" :: flow_rows ~embedded:true view))
 
 let lines ?(height=24) ?(failed_note = "") ~width view =
   match view.installer with
@@ -2295,9 +2395,8 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
       (diagnostic_lines view @ Masc_tui_lane_records.lines overlay)
       |> List.concat_map (document_rows ~width)
   | None,None,None ->
-      if view.help_open then List.concat_map (document_rows ~width) help_lines
-      else if view.presentation = Flow then flow_lines view |> List.concat_map
-        (document_rows ~width)
+      if view.help_open then help_lines ~width
+      else if view.presentation = Flow then fact_spans ~width (flow_rows view)
       else if view.presentation = Technical && view.screen=Overview && view.focus=Configurations
         && Option.is_none view.document_key && Option.is_none view.draft
       then installation_detail_lines ~width view
@@ -2314,8 +2413,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
         | Overview -> overview_lines ~width view @ receipt_lines
         | Detail _ -> receipt_lines @ detail_lines ~height:(height - List.length receipt_lines) ~width view
             @ (match view.focus with
-               | Connections -> [""] @ (flow_lines ~embedded:true view |> List.concat_map (fun line ->
-                   document_rows ~width line))
+               | Connections -> links_lines ~width view
                | Timeline | Configurations | Instances | Rows -> []))
 
 (* A TOML declaration may exist while no worker can run. Keep the file count,

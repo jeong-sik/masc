@@ -16,10 +16,6 @@ type extraction_error =
   | Empty_extraction
   | Truncated_extraction
 
-let string_of_error = function
-  | Empty_extraction -> "empty_extraction"
-  | Truncated_extraction -> "truncated_extraction"
-
 let classify ~truncated ~content =
   let trimmed = String.trim content in
   if String.length trimmed > 0 then Ok trimmed

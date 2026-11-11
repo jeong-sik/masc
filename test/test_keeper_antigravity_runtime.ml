@@ -2831,7 +2831,6 @@ let test_original_result_survives_a_vendor_session_change () =
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_antigravity_runtime"

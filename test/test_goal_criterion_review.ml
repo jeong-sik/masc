@@ -19,7 +19,7 @@ let goal config goal_id = match Goal_store.find_goal config ~goal_id with
 let current config goal_id = match R.current_for_goal (get (R.load config)) (goal config goal_id) with
   | Some record -> record | None -> Alcotest.fail "criterion request missing"
 let state config goal_id =
-  let json = tool config "masc_goal_list" [] in
+  let json = tool config "masc_goal_list" [ "detailed", `Bool true ] in
   let goals = Yojson.Safe.Util.(json |> member "goals" |> to_list) in
   let selected = List.find (fun json -> Yojson.Safe.Util.(json |> member "id" |> to_string) = goal_id) goals in
   Yojson.Safe.Util.(selected |> member "criterion_review" |> member "state" |> to_string)
@@ -232,8 +232,13 @@ let test_actual_goal_list_observation_fits_descriptor_output () = with_workspace
     ~input:(P.Json_template.literal (`Assoc [])) () in
   let plan = match P.create ~descriptors:(D.all_descriptors ()) [node] with
     | Ok plan -> plan | Error _ -> Alcotest.fail "Goal observation plan rejected" in
-  match P.validate_output plan ~run_id:(P.Run_id.fresh ()) ~node_id (tool config "masc_goal_list" []) with
-  | Ok _ -> () | Error _ -> Alcotest.fail "B2 observation broke the declared Goal output contract")
+  let validates args =
+    match P.validate_output plan ~run_id:(P.Run_id.fresh ()) ~node_id (tool config "masc_goal_list" args) with
+    | Ok _ -> true | Error _ -> false in
+  Alcotest.(check bool) "B2 observation keeps the declared Goal output contract in whole rows" true
+    (validates [ "detailed", `Bool true ]);
+  Alcotest.(check bool) "B2 observation keeps the declared Goal output contract in short rows" true
+    (validates []))
 
 (* A list row carries the verdict. The reviewer's result and the tool calls it
    made stay in the ledger and in the full projection the dashboard reads. *)
@@ -243,7 +248,7 @@ let test_goal_list_row_leaves_the_reviewer_evidence_out () = with_workspace (fun
   with_reviewer (reviewer config goal_id (ref 0) (fun () -> ()) (Some (AR.Approve reason))) (fun () ->
     get (Agent.For_testing.process config ~goal_id));
   let open Yojson.Safe.Util in
-  let row = tool config "masc_goal_list" [] |> member "goals" |> to_list
+  let row = tool config "masc_goal_list" [ "detailed", `Bool true ] |> member "goals" |> to_list
     |> List.find (fun json -> (json |> member "id" |> to_string) = goal_id)
     |> member "criterion_review" in
   Alcotest.(check (list string)) "a list row keeps the verdict"

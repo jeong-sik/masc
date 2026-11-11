@@ -341,7 +341,7 @@ let test_comment_append_failure_commits_nothing () =
   let post_id = Board.Post_id.to_string post.id in
   with_blocked_board_masc_dir (fun () ->
   (match
-     Board_dispatch.add_comment ~post_id ~author:"comment-wa-commenter"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"comment-wa-commenter"
        ~content:"must not survive a failed append" ()
    with
    | Ok _ -> Alcotest.fail "comment must not succeed when the append fails"
@@ -363,7 +363,7 @@ let test_comment_append_failure_commits_nothing () =
   (* Nothing was committed, so the retry starts clean once the disk is
      healthy again. *)
   (match
-     Board_dispatch.add_comment ~post_id ~author:"comment-wa-commenter"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"comment-wa-commenter"
        ~content:"retry lands durably" ()
    with
    | Ok _ -> ()
@@ -453,7 +453,7 @@ let test_restart_recomputes_reply_count_from_comment_wal () =
   in
   let post_id = Board.Post_id.to_string post.id in
   (match
-     Board_dispatch.add_comment ~post_id ~author:"restart-wa-commenter"
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"restart-wa-commenter"
        ~content:"counted after restart" ()
    with
    | Ok _ -> ()
@@ -494,7 +494,7 @@ let test_flush_failure_keeps_the_post_bump_scheduled () =
   flush ();
   Alcotest.(check bool) "flushed clean before the comment" false store.Board.dirty_posts;
   (match
-     Board_dispatch.add_comment
+     Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
        ~post_id:(Board.Post_id.to_string post.Board.id)
        ~author:"flush-retry-commenter"
        ~content:"a reply that bumps updated_at"
@@ -530,6 +530,16 @@ let test_creation_commits_before_releasing_persistence () =
       ])
   in
   let released_states = ref [] in
+  (* The state the creation in progress must already have reached. A creation
+     may pass through more than one persistence section -- adding a comment
+     writes, then reads the post back through [read_post_for_evidence] to pick
+     the event's visibility (lib/board/board_core.ml:17-20) -- and every one of
+     those sections must end with the new row already visible. Recording the
+     state each section ends with against this target catches a write whose
+     commit slipped outside the lock, which comparing only the final list
+     would not. *)
+  let expected = ref [ 0; 0; 0 ] in
+  let violations = ref [] in
   let noop : Board_metrics_hooks.observer =
     { observe_persist_lock_acquire_sec = (fun _ -> ())
     ; observe_persist_lock_held_sec = (fun _ -> ())
@@ -542,23 +552,51 @@ let test_creation_commits_before_releasing_persistence () =
       { noop with observe_persist_lock_held_sec = (fun _ ->
           (* This existing observer runs at the end of the persistence
              critical section. Every successful append must already be
-             visible to the next snapshot writer before it can enter. *)
-          released_states := counts store :: !released_states) };
+             visible to the next snapshot writer before it can enter, so the
+             section that performs a creation must end with the target state
+             already reached. A later section that only reads carries the same
+             target and passes. *)
+          let actual = counts store in
+          released_states := actual :: !released_states;
+          if actual <> !expected then
+            violations := (actual, !expected) :: !violations) };
+    expected := [ 1; 0; 0 ];
     let post = create_post_exn ~author:"commit-author" ~content:"durable post" in
-    (match Board_dispatch.add_comment
+    expected := [ 1; 1; 0 ];
+    (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
        ~post_id:(Board.Post_id.to_string post.id)
        ~author:"commit-commenter" ~content:"durable comment" () with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Board.show_board_error e));
+    expected := [ 1; 1; 1 ];
     (match Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"commit-board"
        ~name:"Commit board" ~description:"Persistence boundary"
        ~owner:"commit-author" () with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Board.show_board_error e)));
+  (* A creation is not the only path through the persistence section: adding a
+     comment reads the post back through [read_post_for_evidence] to decide the
+     event's visibility, and that read shares the same lock order
+     (lib/board/board_core.ml:17-20). A read-only section therefore ends with the
+     same counts as the write that preceded it, and the per-section check above
+     already admits it. What must not pass is a section that ends before the
+     creation it performs is visible, and that is what [violations] records. *)
+  Alcotest.(check (list (list (list int))))
+    "no persistence section ends before its creation is committed"
+    []
+    (List.rev
+       (List.map
+          (fun (actual, want) -> [ actual; want ])
+          !violations));
   Alcotest.(check (list (list int)))
     "post, comment and sub-board are committed before persistence unlock"
     [ [1; 0; 0]; [1; 1; 0]; [1; 1; 1] ]
-    (List.rev !released_states);
+    (let rec collapse previous acc = function
+       | [] -> List.rev acc
+       | counts :: rest when counts = previous -> collapse previous acc rest
+       | counts :: rest -> collapse counts (counts :: acc) rest
+     in
+     collapse [] [] (List.rev !released_states));
   flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
@@ -891,7 +929,7 @@ let test_partial_policy_source_refuses_comment_publication () =
   let policy_source = Fs_compat.load_file (Board.sub_boards_path (Board.global ())) in
   restart_board ();
   let observations = fanout_counts () in
-  (match Board_dispatch.add_comment ~post_id ~author:"policy-owner"
+  (match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id ~author:"policy-owner"
            ~content:"a comment needs a readable hearth policy" () with
    | Error (Board.Io_error _) -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error)
@@ -929,7 +967,9 @@ let test_queued_update_does_not_resurrect_a_deleted_policy () =
               (Eio.Promise.is_resolved updated)
           end) }
       (fun () ->
-        board_result_exn (Board_dispatch.delete_sub_board ~sub_board_id:"deleted-policy");
+        (match board_result_exn (Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:"deleted-policy") with
+         | Board.Durable_deletion -> ()
+         | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
         Eio.Promise.await updated))
   in
   (match updated with

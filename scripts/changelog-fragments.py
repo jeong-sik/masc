@@ -332,8 +332,10 @@ def _exempt_numbers() -> set[int]:
     """PR numbers the strict gate may not count as blocking findings.
 
     Numbers live in changelog-fragments-exempt.txt beside this script, one
-    per line, and only for pull requests whose own content is changelog
-    work (a backfill PR carries another PR's fragment as its payload).
+    per line, for pull requests whose own content is changelog work (a
+    backfill PR carries another PR's fragment as its payload) and, since
+    v0.71.0, for merges that change nothing a user can see (documentation,
+    tests, comments, compile repairs). Each entry carries its reason.
     """
     path = pathlib.Path(__file__).resolve().parent / "changelog-fragments-exempt.txt"
     if not path.exists():

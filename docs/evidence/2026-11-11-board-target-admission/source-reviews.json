@@ -1,0 +1,51 @@
+{
+  "at": "2026-11-10T17:49:57.446961+00:00",
+  "kind": "Independent local source review only",
+  "original_pins": {
+    "base": "4c16c718fa3c3ce02abd54f2868dc17bb9d6985d",
+    "production": "8431e4e06a8a495030eac41dcce369e0df9cc71b",
+    "cases": "34536a572b599f073896385c966dd472170d9159"
+  },
+  "final_source_pins": {
+    "base": "0e9718ca67e6132531614d5133cd836a2dc7aabc",
+    "production": "2b2d43780e36b43ff65579713baf68eafadfd638",
+    "cases": "a97dc61c76b6ecf425822ea2021627213a636152"
+  },
+  "corrections": [
+    {
+      "finding": "TTL large-thread comments existed only in the model before canonical target mutations.",
+      "disposition": "Persist the retained thread once before its vote/reaction loop; both readers inspected the repair."
+    },
+    {
+      "finding": "The new target-admission forwarding match omitted Recipient_lookup_failed. Both initial source reviews missed it.",
+      "disposition": "The author found the omission by reading the actual MLI and upstream delta. Add the named constructor; both readers independently rechecked all nine error constructors. No compiler or executed failure is claimed."
+    }
+  ],
+  "reviews": [
+    {
+      "agent": "/root/history_redaction_response",
+      "scope": "Complete original 43 lower-layer paths and 3 case paths; final delta including named error constructor, TTL wrapper/main integration and new changelog.",
+      "reuse": "44 of the original 46 changed paths are blob-equal. All MLIs and all three upper case/registration paths are identical. The two changed paths were reread; base has no Board/FS production changes.",
+      "verdict": "The omitted constructor is repaired at source; no additional confirmed P0-P2 found."
+    },
+    {
+      "agent": "/root/issue_disposition_review",
+      "scope": "Complete original 43 lower-layer paths and 3 case paths; final delta against main and related error/interface/publication contracts.",
+      "reuse": "41 of original 43 lower paths and all 3 upper paths are byte-equal. Target admission and TTL were reread; the 8-path main delta changes no Board/FS public API.",
+      "verdict": "The source-found P2 is resolved; no additional confirmed P0-P2 found."
+    }
+  ],
+  "backend_cases": {
+    "authored": 10,
+    "executed": 0
+  },
+  "formal_github_approval": false,
+  "cross_model_claimed": false,
+  "not_executed": [
+    "OCaml types/warnings",
+    "Dune/build",
+    "Backend tests",
+    "CI",
+    "Install/deploy"
+  ]
+}

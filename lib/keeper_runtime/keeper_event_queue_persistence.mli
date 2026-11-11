@@ -552,7 +552,9 @@ val retain_checkpoint_batch_result :
     transaction. Count only valid admitted selections, then rotate their
     sources within urgency lanes. Connector conversations include every
     pending member so an admitted prefix cannot move behind its own suffix.
-    Original payload, first admission and execution scope remain bound. Stale
+    Original payload, first admission and execution scope remain bound.
+    Selections withdrawn while the turn ran are skipped under the owner lock;
+    they are neither restored nor reported as retention failures. Changed
     selections appear in the failure list and prevent rotating their own
     conversation; valid siblings still retain their counts and independent
     conversations/results rotate. An outer Error means the batch commit was

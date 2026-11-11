@@ -4,6 +4,13 @@ open Keeper_meta_contract
 
 val status_label : Unix.process_status -> string
 
+val payload_failure_message :
+  prefix:string -> status:Unix.process_status -> stderr:string -> string
+(** The error a maintenance payload that exited non-zero reports:
+    ["<prefix> (<status label>): <stderr>"], with [stderr] trimmed, redacted
+    and cut to the log length. The exit status alone does not say why a
+    payload stopped; its traceback is on stderr. *)
+
 val docker_run_failure_message :
   ?base_path_hash:string ->
   ?keeper_name:string ->

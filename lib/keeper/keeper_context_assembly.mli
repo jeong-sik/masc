@@ -16,10 +16,20 @@ type receipt = private
   ; spans : span list
   }
 type system_observation =
+  | Current_norms of string
   | Active_goals of string
   | Direct_input_source of string
   | Goals_awaiting_proof of string
-(** Only these renderer-issued observations can become System suffixes.
+(** Only these issued observations can become System suffixes.
+    [Current_norms] is the complete article set of
+    {!Keeper_turn_system.t.current_norms}, under the
+    {!Prompt_block_id.Constitution_amendments} id. It is the same text on
+    every request of a turn, so Agent Core carries it here: as a User tail it
+    was answered again after every tool result. An official client receives
+    it as the block of that id instead; its projection sends a block the
+    session already holds again only when the bytes change
+    ({!Prompt_block_id.resent_when_held}).
+    The other three come from the renderer.
     The admitted operation source follows the Goal snapshot and is held across
     tool rounds independently of the remaining dynamic context. Agent Core
     keeps the current turn's proof state here so tool feedback remains the
@@ -39,8 +49,8 @@ type system_prompt = private
   ; text : string
   ; partition : receipt
   }
-(** One canonical issued System: the prior base/override followed by exact
-    renderer-issued observations, independently of the extra-context carrier.
+(** One canonical issued System: the prior base/override followed by the
+    exact issued observations, independently of the extra-context carrier.
     An official-client Resume may deliver a held observation in User; this
     issuer receipt is not that submitted packet. It is never a history row. *)
 type t = private

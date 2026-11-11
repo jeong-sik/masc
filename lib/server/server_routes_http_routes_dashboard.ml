@@ -160,7 +160,6 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
              ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
              inner_reqd (Httpun.Response.create ~headers `OK)
          in
-         let close_stream () = Server_sse_response.close response in
          let write_string data =
            match Server_sse_response.send response data with
            | Server_sse_response.Written -> true
@@ -170,60 +169,42 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
            write_string (Dashboard_execute_output.sse_frame json)
          in
          let subscriber = Dashboard_execute_output.subscribe ~keeper_name in
-         let cleanup () =
-           Option.iter Dashboard_execute_output.unsubscribe subscriber;
-           close_stream ()
-         in
          (* The handler must return to the HTTP driver before awaiting a
-            flush. The subscriber is installed first so that events arriving
-            while the first frame is in flight remain observable. *)
-         (try
-            Eio.Fiber.fork ~sw (fun () ->
-              Eio.Switch.run (fun stream_sw ->
-                Server_bootstrap_http.with_cleanups_on_release ~sw:stream_sw
-                  [ cleanup ];
-                try
-                  match subscriber with
-                  | None ->
-                    ignore (write_json (Dashboard_execute_output.event_json ~keeper_name))
-                  | Some subscriber ->
-                    let wrote_initial =
-                      write_string
-                        (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms)
-                      && write_json (Dashboard_execute_output.initial_event_json subscriber)
-                    in
-                    if wrote_initial then (
-                      let rec loop () =
-                        if not (Server_sse_response.is_closed response)
-                        then (
-                          (* An event taken as the heartbeat came due is that
-                             event: it has left the subscriber, and a heartbeat
-                             written in its place would drop it from the stream. *)
-                          match
-                            Watched_work.run
-                              ~watcher:(fun () ->
-                                Eio.Time.sleep clock execute_output_heartbeat_s;
-                                Error `Timeout)
-                              (fun () -> Ok (Dashboard_execute_output.take_event subscriber))
-                          with
-                          | Ok event ->
-                            if
-                              write_json
-                                (Dashboard_execute_output.stream_event_json event)
-                            then loop ()
-                          | Error `Timeout ->
-                            if write_string ": heartbeat\n\n" then loop ())
-                      in
-                      loop ())
-                with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                   Log.Dashboard.warn
-                     "execute output stream loop failed: %s"
-                     (Printexc.to_string exn)))
-          with exn ->
-            cleanup ();
-            raise exn)
+            flush, so the frames go out from a fiber of the response
+            ([Server_sse_response.serve]). The subscriber is installed first
+            so that events arriving while the first frame is in flight remain
+            observable. The response ends the loop when its client is gone,
+            and the subscriber goes once the loop has ended. *)
+         Server_sse_response.serve ~sw response
+           ~release:(fun () -> Option.iter Dashboard_execute_output.unsubscribe subscriber)
+           (fun () ->
+              match subscriber with
+              | None ->
+                ignore (write_json (Dashboard_execute_output.event_json ~keeper_name) : bool)
+              | Some subscriber ->
+                let wrote_initial =
+                  write_string
+                    (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms)
+                  && write_json (Dashboard_execute_output.initial_event_json subscriber)
+                in
+                if wrote_initial then (
+                  let rec loop () =
+                    (* An event taken as the heartbeat came due is that
+                       event: it has left the subscriber, and a heartbeat
+                       written in its place would drop it from the stream. *)
+                    match
+                      Watched_work.run
+                        ~watcher:(fun () ->
+                          Eio.Time.sleep clock execute_output_heartbeat_s;
+                          Error `Timeout)
+                        (fun () -> Ok (Dashboard_execute_output.take_event subscriber))
+                    with
+                    | Ok event ->
+                      if write_json (Dashboard_execute_output.stream_event_json event)
+                      then loop ()
+                    | Error `Timeout -> if write_string ": heartbeat\n\n" then loop ()
+                  in
+                  loop ()))
 
 module For_testing = struct
   include Server_routes_http_routes_runtime_config.For_testing
@@ -717,7 +698,8 @@ let add_routes ~sw ~clock router =
              Http.Response.json_value ~status:`Service_unavailable ~request:req
                (`Assoc [ "error", `String detail ]) reqd
            | Workspace_memory_ledger.Missing | Workspace_memory_ledger.Available _ ->
-             let cache_key = "workspace_memory_inventory:" ^ base_path in
+             let cache_key =
+               Server_dashboard_http_core_cache.workspace_memory_inventory_cache_key ~base_path in
              respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
                (Pool_work.io ~name:__FUNCTION__ (fun () ->
                  match Workspace_memory_ledger_view.inventory ~base_path () with

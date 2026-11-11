@@ -21,14 +21,25 @@ type watched =
   | Replacement_exited of Unix.process_status option
 
 (* How often the replacement's readiness answer is read again. Each read uses
-   its own client pool (see [fresh_get]), so this alone bounds how late a
-   ready server is noticed; the watch itself has no deadline. *)
+   its own client pool (see [fresh_get]) and ends within [answer_timeout_s],
+   so the two bound how late a ready server is noticed; the watch itself has
+   no deadline. *)
 let readiness_poll_interval_s = 0.25
 
 (* How much of the replacement's log is shown when it exits before ready. *)
 let failure_log_lines = 20
 
 let loopback_url port path = Masc_network_defaults.masc_http_loopback_origin ~port ^ path
+
+(* How long one answer of a loopback server is waited for. A server that
+   accepts the connection and then says nothing, because it is stopped or
+   stuck, would otherwise hold this command for ever: the client arms a
+   window only when it is given one. *)
+let answer_timeout_s = Masc_http_client.default_request_timeout_sec
+
+let get ~clock ~port path =
+  Masc_http_client.get_sync ~clock ~timeout_sec:answer_timeout_s ~headers:[]
+    ~url:(loopback_url port path) ()
 
 (* Restart reaches the running server and its replacement on 127.0.0.1, as
    setup does, so a replacement bound anywhere else would never be seen. A
@@ -51,7 +62,7 @@ let fresh_get ~clock ~port path =
   | Some env ->
     Eio.Switch.run (fun sw ->
       Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
-        Masc_http_client.get_sync ~clock ~headers:[] ~url:(loopback_url port path) ()))
+        get ~clock ~port path))
 
 let json_field name body =
   match Yojson.Safe.from_string body with
@@ -76,14 +87,12 @@ let stop_error_message = function
   | Port_unavailable -> "the port could not be inspected"
 
 let observe ~clock ~run_dir ~base_path ~port =
-  match Masc_http_client.get_sync ~clock ~headers:[]
-          ~url:(loopback_url port Server_health_paths.full) () with
+  match get ~clock ~port Server_health_paths.full with
   | Ok (200, body) ->
     (match Upgrade.decode_health body with
      | Ok identity when String.equal identity.base_path base_path ->
        let pid =
-         match Masc_http_client.get_sync ~clock ~headers:[]
-                 ~url:(loopback_url port Server_health_paths.readiness) () with
+         match get ~clock ~port Server_health_paths.readiness with
          | Ok (_, body) -> answered_pid body
          | Error _ -> None
        in

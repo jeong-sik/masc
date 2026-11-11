@@ -2,6 +2,7 @@ module Types = Masc_domain
 
 module Lib = Masc
 module Workspace = Lib.Workspace
+module Dashboard_projection_read = Lib.Dashboard_projection_read
 
 open Alcotest
 

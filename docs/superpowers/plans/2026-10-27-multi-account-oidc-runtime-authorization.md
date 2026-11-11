@@ -740,8 +740,9 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 | S1a-2c | 부팅이 계정 mode를 단일 사용자의 시작 정리보다 먼저 판정한다. 다계정 설치의 부팅과 거절된 부팅은 단일 사용자의 Keeper 상태를 정리하는 코드를 지나지 않는다. 세부는 표 아래 S1a-2c 범위다. | §5.1 | S1a-2b-1 |
 | S1a-2d | 계정 서버가 자기가 듣는 포트를 host에 알린다. `masc restart`가 그 알림으로 계정 서버를 알아보고, 멈추고, 바꾼다. 세부는 표 아래 S1a-2d 범위다. | §5.1 | S1a-2c |
 | S1a-2e | 나머지 운영 명령(`masc setup-server`, `masc setup`, `masc setup-stop-previous-owner`)과 설치 스크립트가 계정 서버를 알아본다. 그 전까지 `masc setup-server`는 계정 서버가 듣는 포트를 `unknown_server`로 답하고, 설치 스크립트는 그 답을 다른 서비스로 읽어 다른 포트를 권한다. | §5.1 | S1a-2d |
-| S1a-3 | C3의 로그인 경로와 사람의 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. login client는 서버 설정에서 읽는다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-2e, F3a-3 |
-| S1b | 사람에게 MCP·Board·WebSocket 경로를 연다. | §11.1 | S1a-3, C4-11, C4-12, C6 |
+| S1a-3a | C3의 로그인 경로(로그인 시작·callback, 로그아웃, 세션, allowlist, PAT)를 계정 서버의 표에 단다. login client는 부팅이 판정한 `config.json`에서 읽는다. 세부는 표 아래 S1a-3a 범위다. | §5.1 | S1a-2e, F3a-3 |
+| S1a-3b | 사람의 화면과 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-3a |
+| S1b | 사람에게 MCP·Board·WebSocket 경로를 연다. | §11.1 | S1a-3b, C4-11, C4-12, C6 |
 
 - S1이 D4 뒤인 까닭: 계정 층 없이 다계정 설치를 서빙하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙한다. 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 다계정 설치를 서빙하면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
 - S1이 F3a 뒤인 까닭: S1부터 다계정 설치는 계정이 가진 Runtime·Keeper 기록을 쌓는다. 그때 "지우고 설치"는 그 기록을 지운다. 끄는 길 없이 켜는 길만 열면 실제 설치가 되돌릴 수 없이 다계정으로 넘어간다(§6 결정 10).
@@ -1042,7 +1043,33 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - `masc-tui`를 직접 띄우는 길은 계정 서버를 알아보지 못한다.
   - `account_mode`가 표에 없는 값인 config와, 로그는 다계정인데 config가 청하지 않는 workspace는 doctor가 전처럼 읽는다. 둘 다 부팅이 자기 문장으로 거절한다. 앞의 것은 #51320이다.
   - 다른 포트를 물었을 때 주인이 알린 포트를 읽는 길은 같은 사용자의 다른 프로세스가 건 lock 뒤에서 주인을 놓칠 수 있다(S1a-2c의 한계). 그때는 `Held_without_announcement`다.
-  - `scripts/install.sh`는 journey 전에 `masc init --config-only`로 config를 심고, journey가 exit 0이면 "Setup finished"라고 적는다. 계정 설치에서도 같다.
+  - `scripts/install.sh`는 journey 전에 `masc init --config-only`로 config를 심고, journey가 exit 0이면 "Setup finished"라고 적는다. 계정 설치에서도 같다(#51362).
+
+**S1a-3a 범위**
+
+- 목표. 계정 서버가 로그인 경로를 연다. 그 전까지 계정 서버의 표는 probe 셋뿐이고, 로그인 경로는 `masc auth preview`만 열었다.
+- 표. `Server_accounts.register`가 probe 셋 뒤에 `Server_login_http.add_routes`를 단다. 더해지는 경로는 `POST /auth/oidc/start`, `GET /auth/oidc/callback`, `POST /auth/github/start`, `GET /auth/github/callback`, `POST /auth/logout`, `GET /auth/session`, allowlist 둘, PAT 셋이다. 모두 `Self_authenticated Browser_session`이라 표의 검사(`Server_account_table.checked`)를 지난다.
+- login client.
+  - 부팅 판정(`Authz_boot_mode_read.boot`)이 읽은 `config.json`의 `google`·`github` member를 `multi_account` 값에 싣는다(`multi_account_login_clients`). 파일을 두 번 읽지 않는다. 판정한 config와 사람을 로그인시키는 config가 같은 바이트다.
+  - client는 `Login_client.of_environment`로 만든다. secret은 member가 이름을 적은 환경 변수에서 읽고, redirect는 `https` URL이어야 한다.
+  - member가 있는데 client를 만들 수 없으면 부팅이 멈춘다(`Login_client_refused`). 그 provider만 빼고 뜨면 운영자가 설정한 로그인이 404로 답한다.
+  - member가 없는 provider는 설정되지 않은 것이고, 그 시작과 callback은 404다. 둘 다 없으면 아무도 로그인하지 못한다. 부팅은 그 사실을 로그에 경고로 적고 뜬다. probe와 `masc restart`는 login client 없이도 돌아야 한다.
+- 조립. `Server_account_login.routes`가 `Login_routes.t`를 만든다(대기 중 로그인 16개, provider로 가는 전송, 벽시계, 32바이트 난수). 계정 서버와 `masc auth preview`가 같은 함수를 쓴다. 미리보기의 client는 전처럼 loopback(`Login_client.loopback`)이다.
+- 프로세스 준비. 로그인은 `Masc_http_client`로 provider에 닿는다. 그 client는 프로세스의 env·switch·net(`Eio_context`)과 기본 난수원을 읽는다. 단일 사용자 부팅은 owner state를 만들며 그것들을 채우고, 계정 서버는 owner state를 만들지 않는다. 그래서 `Server_accounts.run`이 표를 만들기 전에 채운다.
+- 거절 순서. `Login_client_refused`는 구역을 다시 읽은 뒤, 표를 만들기 전이다. 포트를 묶기 전이라 CLI가 읽는 포트 기록과 host에 알리는 포트가 남지 않는다.
+- 시험(`test_server_accounts`).
+  - secret 변수가 없는 `github` member와 redirect가 `http`인 member에서 부팅이 `Login_client_refused`로 멈춘다.
+  - `github` member가 있는 설치를 띄운다. Origin 없는 `POST /auth/github/start`는 403(경로까지 닿는다), member가 없는 `POST /auth/oidc/start`는 로그인 경로의 404다(라우터의 404와 본문이 다르다).
+- 결과(2026-11-11 14:50~14:58Z, OCaml 5.5.2). 빌드 exit 0. `test_server_accounts` 11/11, `test_authz_boot_mode_read` 31/31.
+- 실제 바이너리(임시 폴더, 비운 환경, loopback 포트, 14:55Z).
+  - login client 없는 설치: 서버가 뜨고 `/health/ready` 200이다. `POST /auth/github/start`와 `POST /auth/oidc/start`는 로그인 경로의 404, `GET /auth/session`과 `GET /api/v1/auth/pats`는 401, `GET /`와 `POST /mcp`는 라우터의 404다. 서버 로그에 경고 한 줄이 남는다.
+  - `github` member와 secret 변수가 있는 설치: Origin이 서버 주소인 `POST /auth/github/start`는 303이고 `Location`이 GitHub의 authorize URL(config의 `client_id`와 `redirect_uri`, `state`, PKCE)이며 거래 cookie가 온다. Origin이 없거나 다른 host면 403, cookie 없는 callback은 401, 16 KiB를 넘는 본문은 413이다. secret 값은 답과 로그 어디에도 없다.
+  - secret 변수가 없는 설치와 redirect가 `http`인 설치: `masc restart`가 exit 1이고, 서버 로그의 `[FATAL]` 줄이 변수 이름 또는 redirect 규칙을 말한다.
+- 하지 않는 것.
+  - 화면(`GET /`, 초대 입장)과 사람의 경로는 S1a-3b다. 이 층만으로는 브라우저에서 로그인을 시작할 화면이 없다.
+  - redirect가 이 서버의 주소·경로를 가리키는지는 보지 않는다. 다른 host나 경로를 적은 redirect는 provider에서, 또는 첫 callback에서 실패한다.
+  - provider까지 가는 로그인(실제 GitHub·Google 왕복)은 시험하지 않는다.
+  - HTTP/2로 온 로그인 요청은 시험하지 않는다. handler는 `Http_reqd`로 읽고 쓰므로 두 프로토콜이 같은 코드를 지난다.
 
 ### E. official client 격리
 

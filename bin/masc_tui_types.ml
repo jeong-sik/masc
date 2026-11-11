@@ -24440,6 +24440,34 @@ let runtime_parent (state : state) =
        | None, Some { se_target = Media_failover_slots; _ } -> Some Runtime_media_parent
        | None, (Some { se_target = Exact_lane_slots _; _ } | None) -> None)
 
+(* A parent replaces the listing, so keys for that hidden listing must be
+   consumed rather than fall through to its cursor or edit handlers. Name
+   fields already own every key; media keeps its own slot edits, and a lane
+   removal keeps only its second [D]. Surface navigation is not a list edit. *)
+let runtime_parent_blocks_listing_key parent key =
+  let listing_key =
+    match key with
+    | "e" | "E" | "f" | "h" | "p" | "P" | "/" | "n" | "N"
+    | "\r" | "\n" | "enter" | "right" -> true
+    | _ -> false
+  in
+  match parent with
+  | Runtime_prompt_parent (Lane_name_prompt _ | Lane_rename_prompt _) -> false
+  | Runtime_media_parent ->
+      listing_key
+      || (match runtime_lane_edit_of_key key with
+          | Some (Row_edit (Remove_lane | Rename_lane)) -> true
+          | Some (New_lane | Row_edit (Drop_candidate | Move_candidate _)) | None -> false)
+  | Runtime_prompt_parent (Lane_remove_prompt _) ->
+      listing_key
+      || (match key with
+          | "m" | "j" | "k" | "up" | "down" | "wheel-up" | "wheel-down"
+          | "pageup" | "pagedown" | "home" | "end" -> true
+          | _ ->
+              (match runtime_lane_edit_of_key key with
+               | Some (Row_edit Remove_lane) | None -> false
+               | Some (New_lane | Row_edit (Drop_candidate | Move_candidate _ | Rename_lane)) -> true))
+
 let runtime_lane_write_busy (state : state) =
   match state.runtime_lane_write with
   | Lane_write_idle -> false

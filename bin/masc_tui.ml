@@ -19590,7 +19590,8 @@ let press_marked_target state ~mailbox (target : press_target) =
   | Press_ui_language ->
       apply_ui_language state (next_ui_language state.ui_language)
   | Press_runtime_mode mode ->
-      if mode <> state.runtime_mode || state.view <> Runtime then
+      if (state.view <> Runtime || Option.is_none (Masc_tui_types.runtime_parent state))
+         && (mode <> state.runtime_mode || state.view <> Runtime) then
         enter_runtime_mode state ~mailbox mode
   | Press_standalone_lanes ->
       if state.view <> Lanes then enter_standalone_lanes state ~mailbox
@@ -34471,6 +34472,11 @@ Use relative paths for resources already held in the package. -->
         (not compact_viewport) && view_is_chat state.view
         && not state.repository_changes_open
       in
+      (* An unrelated key disarms lane removal below, but must not then be
+         handed to the listing that the parent covered. *)
+      let runtime_parent_before_input =
+        if state.view = Runtime then Masc_tui_types.runtime_parent state else None
+      in
       (* The opening screen's help-door line retires on the first input of
          any kind: the reader is driving now, and the doors it named -- the
          footer item, the sheet -- stay on every screen without it. A paste
@@ -37565,6 +37571,12 @@ Use relative paths for resources already held in the package. -->
               own arm below. *)
            let terminal_rows, _ = get_terminal_size () in
            keeper_runtime_pick_key state ~terminal_rows k
+       | Some k
+         when state.view = Runtime
+              && Option.exists (fun parent ->
+                   Masc_tui_types.runtime_parent_blocks_listing_key parent k)
+                   runtime_parent_before_input ->
+           ()
        | Some ("home" | "end" as edge)
          when state.view = Runtime && Option.is_some state.runtime_detail_target ->
            state.runtime_detail_scroll <-

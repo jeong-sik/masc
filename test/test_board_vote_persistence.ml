@@ -321,15 +321,14 @@ let test_restart_loads_only_current_vote_rows () =
     "only one exact current row loaded"
     1
     (Hashtbl.length store.vote_log);
-  match
-    Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator
-      ~voter:"current-voter"
-      ~post_id
-  with
-  | Ok (Some Board.Up) -> ()
-  | Ok (Some Board.Down) -> Alcotest.fail "canonical vote direction changed"
-  | Ok None -> Alcotest.fail "canonical current vote row was not loaded"
-  | Error error -> Alcotest.fail (Board.show_board_error error)
+  (* The rejected rows leave the ledger partially read, so the vote source
+     stays refused: the canonical row is loaded into memory (checked above)
+     but reading a current vote through the store is unavailable. *)
+  expect_io_error
+    "current vote read after rejected rows"
+    (Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator
+       ~voter:"current-voter"
+       ~post_id)
 
 let test_namespaced_voter_survives_snapshot_and_restart () =
   let voter = "keeper:foo" in
@@ -817,7 +816,7 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
        ~target_type:Board.Reaction_post
        ~target_id:post_id
        ~user_id:"blocked-reactor"
-       ~emoji:"safe");
+       ~emoji:"👍");
   expect_io_error
     "sub-board create"
     (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator
@@ -1015,7 +1014,7 @@ let test_refused_posts_source_blocks_vote_and_reaction_effects () =
   List.iter (fun (target_type,target_id) ->
     expect_io_error "reaction" (Board_dispatch.toggle_reaction
       ~reader:Masc_board_handlers.Board_access.Operator ~target_type ~target_id
-      ~user_id:"blocked-reactor" ~emoji:"safe"))
+      ~user_id:"blocked-reactor" ~emoji:"👍"))
     [Board.Reaction_post,post_id; Board.Reaction_comment,comment_id];
   Alcotest.(check int) "no signal follows a refused write" 0 !signals;
   Alcotest.(check int) "in-memory votes unchanged" 0 (Hashtbl.length store.vote_log);
@@ -1030,7 +1029,7 @@ let test_refused_posts_source_blocks_vote_and_reaction_effects () =
   ignore (Result.get_ok (Board_dispatch.vote_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:"blocked-voter" ~comment_id ~direction:Board.Up));
   ignore (Result.get_ok (Board_dispatch.toggle_reaction
     ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
-    ~target_id:post_id ~user_id:"blocked-reactor" ~emoji:"safe"));
+    ~target_id:post_id ~user_id:"blocked-reactor" ~emoji:"👍"));
   Alcotest.(check int) "same operations work after source recovery" 3 !signals
 ;;
 

@@ -2155,14 +2155,17 @@ let here_step_separator = " \xe2\x80\xba "
 (* The cells kept clear ahead of the position. *)
 let here_position_gap_cells = 2
 
+(* The top-row screen the current one belongs to, by the name the top row
+   draws for it. *)
+let here_screen_name (state : state) =
+  let index = Masc_tui_surface_navigation.surface_ring_index state.view in
+  match List.nth_opt Masc_tui_types.surface_ring index with
+  | Some (surface, name) ->
+      Masc_tui_types.surface_ring_display_label ~lang:state.ui_language surface name
+  | None -> ""
+
 let here_row ~cols (state : state) ~path ~readings ~position =
-  let screen =
-    let index = Masc_tui_surface_navigation.surface_ring_index state.view in
-    match List.nth_opt Masc_tui_types.surface_ring index with
-    | Some (surface, name) ->
-        Masc_tui_types.surface_ring_display_label ~lang:state.ui_language surface name
-    | None -> ""
-  in
+  let screen = here_screen_name state in
   let step text = Ansi.dim ^ here_step_separator ^ Ansi.reset ^ text in
   let lead, id =
     match List.rev path with
@@ -3291,7 +3294,7 @@ type planning_tab = Render_schedule.planning_tab =
    half its clock. Callers build that tail once and hand the same value here
    and to the row, so the measurement and the drawing cannot disagree. *)
 let planning_workspace_lead (state : state) =
-  screen_title (if state.ui_language = Lang_ko then " MASC 작업" else " MASC Work") ^ "  "
+  screen_title (" " ^ here_screen_name state) ^ "  "
 
 let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in

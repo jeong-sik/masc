@@ -1517,11 +1517,14 @@ let render_schedule_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let refusal_rows = schedule_form_refusal_rows state ~cols in
 
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = surface_title_row ~cols state
-    ~lead:(screen_title " MASC Keepers / Schedules") ~readings:[ "  " ^ timestamp ] in
+  (* The title carried the current time to the second, so the row was
+     redrawn every second with nothing on the screen having changed. The top
+     row holds the clock. *)
+  let header =
+    here_row ~cols state
+      ~path:[ ui_text state ~ko:"일정" ~en:"schedules" ]
+      ~readings:[] ~position:None
+  in
 
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
     ~hints:
@@ -2147,10 +2150,15 @@ let schedule_detail_viewport (state : state) =
 let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row) buf =
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s[%s]%s"
-       (screen_title " MASC Keepers / Schedules ▸ details")
-       (schedule_status_color row.sch_status)
-       (Terminal_text.single_line row.sch_status) Ansi.reset);
+    (here_row ~cols state
+       ~path:
+         [ ui_text state ~ko:"일정" ~en:"schedules"
+         ; ui_text state ~ko:"상세" ~en:"details" ]
+       ~readings:
+         [ Printf.sprintf "%s[%s]%s"
+             (schedule_status_color row.sch_status)
+             (Terminal_text.single_line row.sch_status) Ansi.reset ]
+       ~position:None);
   box_divider buf cols;
   (* Source freshness governs every evidence row, so it stays visible while
      the reader moves. The complete warning also remains in the reader for
@@ -2256,7 +2264,10 @@ let render_planning (state : state) =
                let terminal_rows, cols = get_terminal_size () in
                surface_chrome ~overflow:Fits state ~terminal_rows ~cols
                  ~surface_key:"planning_detail"
-                 ~title:(ui_text state ~ko:"목표" ~en:"Goal")
+                 ~title:
+                   (here_row ~cols state
+                      ~path:[ ui_text state ~ko:"목표" ~en:"goal" ]
+                      ~readings:[] ~position:None)
                  ~status:[] ~hints:(ui_text state ~ko:"Esc:대시보드  r:새로고침" ~en:"Esc:Dashboard  r:refresh")
                  ~body:(fun ~budget:_ c ->
                    c.push (match state.planning_error with

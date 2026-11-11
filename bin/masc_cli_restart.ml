@@ -139,14 +139,10 @@ let observe_single_user ~clock ~run_dir ~base_path ~port =
    missing ([Upgrade.account_server]), the ones [masc start] makes. *)
 let observe ~clock ~run_dir ~base_path ~port =
   match Upgrade.account_server ~run_dir ~base_path ~port with
-  | Error (Server_startup_takeover.Owner_lease_rejected rejection) ->
-    Error
-      (Owner_unverifiable (Server_startup_takeover.base_path_lock_rejection_to_string rejection))
-  | Error
-      ( Server_startup_takeover.Owner_identity_unavailable _
-      | Server_startup_takeover.Current_process_owner ) ->
-    Error (Owner_unverifiable (stop_error_message Upgrade.Owner_unavailable))
-  | Ok Upgrade.No_account_server -> observe_single_user ~clock ~run_dir ~base_path ~port
+  | Error unread ->
+    Error (Owner_unverifiable (Server_startup_takeover.owner_capture_error_to_string unread))
+  | Ok (Upgrade.Owner_announces_nothing | Upgrade.No_owner) ->
+    observe_single_user ~clock ~run_dir ~base_path ~port
   | Ok (Upgrade.Account_server_on_another_port { pid; port = announced }) ->
     Error (Account_server_on_another_port { pid; port = announced })
   | Ok (Upgrade.Account_server_on_port { pid }) ->

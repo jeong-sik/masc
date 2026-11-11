@@ -229,7 +229,8 @@ let with_byte_locker ~run_dir ~base_path ~byte f =
       Alcotest.(check string) "the other process locked its byte" "r" (Bytes.to_string ready);
       f child)
 let sighting_label = function
-  | Ok Server_upgrade_preparation.No_account_server -> "no account server"
+  | Ok Server_upgrade_preparation.No_owner -> "nobody holds the workspace"
+  | Ok Owner_announces_nothing -> "the owner announces nothing"
   | Ok (Account_server_on_port { pid }) -> Printf.sprintf "pid %d announces the port" pid
   | Ok (Account_server_on_another_port { pid; port }) ->
     Printf.sprintf "pid %d announces port %d" pid port
@@ -251,14 +252,14 @@ let test_a_lock_without_the_lease_is_no_account_server () =
     let check_sighting message expected ~port =
       Alcotest.(check string) message (sighting_label (Ok expected))
         (sighting_label (Server_upgrade_preparation.account_server ~run_dir ~base_path ~port)) in
-    check_sighting "a workspace nobody holds" No_account_server ~port;
+    check_sighting "a workspace nobody holds" No_owner ~port;
     with_byte_locker ~run_dir ~base_path ~byte:port (fun (_ : int) ->
-      check_sighting "a lock on the port, and no owner" No_account_server ~port;
+      check_sighting "a lock on the port, and no owner" No_owner ~port;
       (* The owner of the lease is the server of a single user: it announces
          nothing, and the byte of the port is another process's. *)
       with_owner ~run_dir ~base_path ~announces:None (fun ~still_runs ~reap:_ ->
         check_sighting "a lock on the port, and an owner that announces nothing"
-          No_account_server ~port;
+          Owner_announces_nothing ~port;
         (match stop port with
          | Error Incumbent_changed -> ()
          | _ -> Alcotest.fail "the owner was asked to stop for the lock of another process");
@@ -275,7 +276,7 @@ let test_a_lock_without_the_lease_is_no_account_server () =
          | Ok (Account_server_on_another_port { pid; port = announced }) ->
            Alcotest.(check int) "the owner is named" owner pid;
            Alcotest.(check int) "with the port it announces" port announced
-         | Ok No_account_server -> ()
+         | Ok Owner_announces_nothing -> ()
          | other -> Alcotest.failf "another port named a server of its own: %s" (sighting_label other));
         (match stop (port - 1) with
          | Error Incumbent_changed -> ()
@@ -305,6 +306,46 @@ let test_another_port_names_the_port_the_owner_announces () =
         (sighting_label (Ok (Account_server_on_another_port { pid = owner; port })))
         (sighting_label (sighting (port + 1)));
       Alcotest.(check bool) "the reads sent it nothing" true (still_runs ())))
+let holder_label = function
+  | Ok Server_upgrade_preparation.Held_by_nobody -> "nobody"
+  | Ok Held_without_announcement -> "an owner that announces nothing"
+  | Ok (Held_by_account_server { port }) -> Printf.sprintf "an account server on port %d" port
+  | Error unread -> "unread: " ^ Server_startup_takeover.owner_capture_error_to_string unread
+(* A command that only reads asks who holds the workspace. Where no lease was
+   ever made the answer makes none, and an account server is named with the
+   port it announces, whichever port was asked about. *)
+let test_the_holder_is_read_without_making_anything () =
+  let root = Filename.temp_file "masc-upgrade-holder-" "" in
+  Sys.remove root; Unix.mkdir root 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let base_path = Filename.concat root "workspace" and run_dir = Filename.concat root "run" in
+    Unix.mkdir base_path 0o700; Unix.mkdir run_dir 0o700;
+    let port = 9000 in
+    let holder ?(lease_root = Host_config.Lease_dir_override run_dir) port =
+      holder_label (Server_upgrade_preparation.holder lease_root ~base_path ~port) in
+    let check message expected ~port =
+      Alcotest.(check string) message (holder_label (Ok expected)) (holder port) in
+    let entries path = Array.to_list (Sys.readdir path) in
+    check "a workspace nothing started in" Held_by_nobody ~port;
+    Alcotest.(check (list string)) "the read made nothing in the lease root" [] (entries run_dir);
+    Alcotest.(check string) "with the lease root beside the workspace"
+      (holder_label (Ok Held_by_nobody)) (holder ~lease_root:Host_config.Beside_base_path port);
+    Alcotest.(check (list string)) "no lease root was made" [] (entries base_path);
+    with_owner ~run_dir ~base_path ~announces:None (fun ~still_runs ~reap:_ ->
+      check "the server of a single user" Held_without_announcement ~port;
+      Alcotest.(check bool) "the read sent it nothing" true (still_runs ()));
+    check "a lease file nothing holds any more" Held_by_nobody ~port;
+    with_owner ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap:_ ->
+      check "an account server" (Held_by_account_server { port }) ~port;
+      check "asked about another port" (Held_by_account_server { port }) ~port:(port + 1);
+      Alcotest.(check bool) "the reads sent it nothing" true (still_runs ()));
+    (* A lease root that can hold no lease is an answer of its own: that
+       nobody holds the workspace is not known. *)
+    let file = Filename.concat root "file" in
+    Out_channel.with_open_bin file (fun (_ : Out_channel.t) -> ());
+    match Server_upgrade_preparation.holder (Host_config.Lease_dir_override file) ~base_path ~port with
+    | Error (Server_startup_takeover.Owner_lease_rejected _) -> ()
+    | other -> Alcotest.failf "a lease root that is a file was read: %s" (holder_label other))
 let replacement_sighting_label = function
   | Server_upgrade_preparation.Replacement_serves -> "the replacement serves"
   | Another_server_answers { pid } -> Printf.sprintf "pid %d answers" pid
@@ -354,5 +395,7 @@ let () = Alcotest.run "upgrade preparation"
        test_a_lock_without_the_lease_is_no_account_server;
      Alcotest.test_case "another port names the port the owner announces" `Quick
        test_another_port_names_the_port_the_owner_announces;
+     Alcotest.test_case "the holder is read without making anything" `Quick
+       test_the_holder_is_read_without_making_anything;
      Alcotest.test_case "ready is the answer of the replacement" `Quick
        test_ready_is_the_answer_of_the_replacement]]

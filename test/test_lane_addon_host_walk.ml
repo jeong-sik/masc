@@ -117,7 +117,8 @@ let test_a_propagating_exception_cancels_the_running_requests = in_eio (fun () -
   check bool "the running request is cancelled" true !cancelled)
 
 (* An instance that retires stops every running call, and each of them raises.
-   The walk lets the first one out and nothing else. *)
+   The walk lets one of them out and nothing else. Which fiber Eio wakes first
+   is not part of the contract. *)
 let test_fibers_stopped_together_leave_as_one_exception = in_eio (fun () ->
   let t = trace () in
   let released, release = Eio.Promise.create () in
@@ -127,8 +128,8 @@ let test_fibers_stopped_together_leave_as_one_exception = in_eio (fun () ->
   Eio.Fiber.both
     (fun () -> raised := raised_by (fun () -> walk ~propagates:on_stop 2 [ stopping "a"; stopping "b" ]))
     (fun () -> Eio.Promise.resolve release ());
-  check bool "the first exception, not a combination" true
-    (match !raised with Some (Stop_because name) -> String.equal name "a" | Some _ | None -> false))
+  check bool "one exception, not a combination" true
+    (match !raised with Some (Stop_because (_ : string)) -> true | Some _ | None -> false))
 
 (* A request raised and the walk waits for the one still running. That one is
    then stopped. The kept exception is the one that leaves. *)

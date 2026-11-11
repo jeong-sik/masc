@@ -459,9 +459,12 @@ let test_retirement_cancels_every_exact_call_running_side_by_side () =
       Sys.remove source;
       let sw = match Eio_context.get_switch_opt () with
         | Some sw -> sw | None -> fail "fixture switch is unavailable" in
+      let detached, detach = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
-        ignore (Runtime.reconcile_configuration ~config ~directory:(Filename.dirname source) |> unwrap));
+        Eio.Promise.resolve detach
+          (Runtime.reconcile_configuration ~config ~directory:(Filename.dirname source)));
       Eio.Promise.await both_ended;
+      ignore (Eio.Promise.await detached |> unwrap);
       (* A call the retirement did not cancel itself would be cancelled by the
          call beside it stopping the cycle, which is another cause. *)
       check bool "the retirement cancelled each call itself" true

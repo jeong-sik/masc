@@ -178,6 +178,29 @@ let test_ancestor_rename_and_recreation_preserve_coverage () =
       write source "MODULE Rebound\n";
       await (fun () -> !specs_count > before)))
 
+let test_live_symlink_retarget_preserves_destination_writes () =
+  fixture (fun ~root ~specs ~results:_ ~start ~await ~specs_count ~results_count:_ ->
+    let first = Filename.concat root "target-a" in
+    let second = Filename.concat root "target-b" in
+    let first_source = add_spec first in
+    let second_source = add_spec second in
+    Unix.symlink first specs;
+    Eio.Switch.run (fun sw ->
+      start sw;
+      await (fun () -> health_status () = `String "ok" && !specs_count > 0);
+      let before = !specs_count in
+      let replacement = Filename.concat root "next-specs-link" in
+      Unix.symlink second replacement;
+      Unix.rename replacement specs;
+      await (fun () -> !specs_count > before);
+      check string "the logical root now resolves to the second live target"
+        (Unix.realpath second) (Unix.realpath specs);
+      check bool "the original source still exists" true (Sys.file_exists first_source);
+      check bool "the replacement source already existed" true (Sys.file_exists second_source);
+      let before = !specs_count in
+      write second_source "MODULE Retargeted\n";
+      await (fun () -> !specs_count > before)))
+
 let () = run "tla_source_events" [ "source_to_hook", [
   test_case "actual spec and in-place TLC writes reach typed topics" `Quick test_actual_writes_reach_topics;
   test_case "dangling category target recreation resumes observation" `Quick test_dangling_category_recreation;
@@ -185,4 +208,5 @@ let () = run "tla_source_events" [ "source_to_hook", [
   test_case "missing root and renamed root recover through ancestors" `Quick test_missing_root_then_rename_recreation;
   test_case "unrelated processed guard hints skip full inventory" `Quick test_unrelated_guard_churn_does_not_rescan_inventory;
   test_case "ancestor rename and recreation preserve observation" `Quick test_ancestor_rename_and_recreation_preserve_coverage;
+  test_case "live symlink retarget observes subsequent destination writes" `Quick test_live_symlink_retarget_preserves_destination_writes;
 ] ]

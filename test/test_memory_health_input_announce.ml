@@ -550,7 +550,7 @@ let test_world_writes_invalidate_before_announcing () =
 
 let test_briefing_prompt_changes_invalidate_without_a_curator () =
   with_workspace
-  @@ fun ~config ~fleet_key:_ ~elsewhere:_ ~config_keepers_dir:_
+  @@ fun ~clock:_ ~mono_clock ~await_health:_ ~config ~fleet_key:_ ~elsewhere:_ ~config_keepers_dir:_
        ~runtime_keepers_dir:_ ~heard:_ ->
   let module Ledger = Workspace_memory_ledger in
   let module Briefing = Workspace_memory_briefing in
@@ -616,7 +616,7 @@ let test_briefing_prompt_changes_invalidate_without_a_curator () =
         end) ();
     Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
       Eio.Switch.run (fun sw ->
-        Server_memory_health_broadcast.install ~sw ~config;
+        Server_memory_health_broadcast.install ~sw ~mono_clock ~config;
         let unsubscribe_fault = Workspace_memory_changed.subscribe
           (fun ~directory:_ -> raise (Eio.Cancel.Cancelled (Failure "subscriber failure"))) in
         Eio.Switch.on_release sw unsubscribe_fault;

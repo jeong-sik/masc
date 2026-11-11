@@ -289,7 +289,7 @@ let render_verification_list (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
+         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false ~has_rows:(shown > 0)
             state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
@@ -546,7 +546,7 @@ let render_verification_detail (state : state) request =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:true state.view));
   finish_surface state
     ~clamped:(Verification_detail_scroll scroll)
     ~surface_key:"verification-detail" ~rows:terminal_rows ~cols buf
@@ -720,7 +720,7 @@ let render_harness_list (state : state) =
   box_bottom tail cols;
   Buffer.add_string tail
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
+       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false ~has_rows:(shown > 0)
          state.view));
   (* Drawing and cursor/page movement consume the same state-owned bound.
      The timestamp makes six head rows and two tail rows; aggregate ledger
@@ -970,7 +970,7 @@ let render_harness_detail (state : state) verdict =
        screen that exists for reading a ruling in full. It also left out
        [[ / ]], which the dispatcher answers here and only here. *)
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true Masc_tui_types.Harness));
+       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:true Masc_tui_types.Harness));
   finish_surface state ~clamped:(Harness_detail_scroll scroll)
     ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
 

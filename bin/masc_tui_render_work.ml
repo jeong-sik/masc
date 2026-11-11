@@ -1518,7 +1518,7 @@ let render_schedule_list (state : state) =
 
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
     ~hints:
-      (Masc_tui_keys.footer_hints ~detail_open:false
+      (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false
          ~has_rows:(schedule_list_has_rows state) Schedules)
     ~body:(fun ~budget c ->
   (* The refusal rows go first and take what the list's fixed rows leave;
@@ -2204,7 +2204,7 @@ let render_schedule_detail (state : state) ~runner (row : schedule_row) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true Schedules));
+       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:true Schedules));
   finish_surface state ~clamped:(Schedule_detail_scroll scroll)
     ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols buf
 

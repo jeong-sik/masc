@@ -815,6 +815,10 @@ let finish_record prior = function
   | Call_refused refusal ->
       {prior with attempts=prior.attempts @ [Deferred (Provider_refused refusal)]}
 
+type recovery_error =
+  | Recovery_unavailable of string
+  | Recovery_invalid of string
+
 let describe_recovery_error = function
   | Recovery_unavailable detail -> detail
   | Recovery_invalid detail -> detail

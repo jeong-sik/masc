@@ -974,6 +974,55 @@ class WakingTheMainBuild(unittest.TestCase):
             MERGE.main()
         self.assertEqual(self.dispatched, [])
 
+    def test_a_hold_on_an_already_merged_pull_request_wakes_the_build(self):
+        """A reservation let GitHub merge first, so the run holds on a closed PR.
+
+        The merge is real even though this run never saw a merged verdict, and
+        a bot merge emits no push event, so the commit would reach main with no
+        build. Reading the pull request back must find the merge and dispatch.
+        """
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': ''}
+        merged = {'number': 102, 'state': 'closed', 'merged': True,
+                  'merge_commit_sha': sha(102)}
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'auto_merge_default', return_value=None), \
+             patch.object(MERGE, 'pull', return_value=merged), \
+             patch.object(MERGE, 'prepare',
+                          side_effect=MERGE.Hold('#102 is not open and ready')), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            MERGE.main()
+        self.assertEqual(self.dispatched, [REPO])
+
+    def test_a_hold_on_an_unmerged_pull_request_does_not_wake_the_build(self):
+        """Holding for any other reason is still not a merge."""
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': ''}
+        still_open = {'number': 102, 'state': 'open', 'merged': False}
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'auto_merge_default', return_value=None), \
+             patch.object(MERGE, 'pull', return_value=still_open), \
+             patch.object(MERGE, 'prepare',
+                          side_effect=MERGE.Hold('#102 has 1/2 current-head account approvals')), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            MERGE.main()
+        self.assertEqual(self.dispatched, [])
+
+    def test_a_dry_run_does_not_wake_for_an_already_merged_pull_request(self):
+        """--dry-run must not dispatch even when the merge already happened."""
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': ''}
+        merged = {'number': 102, 'state': 'closed', 'merged': True,
+                  'merge_commit_sha': sha(102)}
+        with patch.dict(os.environ, environment), \
+             patch.object(sys, 'argv', ['auto-merge', '--dry-run']), \
+             patch.object(MERGE, 'pull', return_value=merged), \
+             patch.object(MERGE, 'prepare',
+                          side_effect=MERGE.Hold('#102 is not open and ready')), \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            MERGE.main()
+        self.assertEqual(self.dispatched, [])
+
 
 if __name__ == '__main__':
     unittest.main()

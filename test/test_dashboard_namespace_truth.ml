@@ -592,9 +592,7 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
 let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =
   let dir = test_dir () in
   Fun.protect
-    ~finally:(fun () ->
-      warm_execution_cache ~state ();
-      cleanup_dir dir)
+    ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);

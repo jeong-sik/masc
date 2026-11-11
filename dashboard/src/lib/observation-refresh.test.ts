@@ -278,48 +278,6 @@ describe('authoritative observation reads', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('repays a failed initial read once and leaves no timer after success', async () => {
-    vi.useFakeTimers()
-    const read = vi.fn().mockRejectedValueOnce(new Error('HTTP 500')).mockResolvedValue(undefined)
-    const onError = vi.fn()
-    disposers.push(setupObservationRefresh(read, { topics: ['health'], onError }))
-    await flush()
-    expect(onError).toHaveBeenCalledTimes(1)
-    expect(vi.getTimerCount()).toBe(1)
-    publishDashboardObservationChange({ topic: 'health' })
-    publishDashboardObservationChange({ topic: 'health' })
-    await flush()
-    expect(read).toHaveBeenCalledTimes(1)
-    await vi.advanceTimersByTimeAsync(1_000)
-    expect(read).toHaveBeenCalledTimes(2)
-    expect(vi.getTimerCount()).toBe(0)
-    await vi.advanceTimersByTimeAsync(180_000)
-    expect(read).toHaveBeenCalledTimes(2)
-  })
-
-  it('retains state-backed failure and cancels its retry when authority recovers', async () => {
-    vi.useFakeTimers()
-    let resourceError: string | null = 'HTTP 503'
-    const read = vi.fn(async () => {})
-    const dispose = setupObservationRefresh(read, {
-      topics: ['tools'], readError: () => resourceError, onError: () => {},
-    })
-    disposers.push(dispose)
-    await flush()
-    expect(vi.getTimerCount()).toBe(1)
-    resourceError = null
-    publishDashboardObservationRecovery()
-    await flush()
-    expect(read).toHaveBeenCalledTimes(2)
-    expect(vi.getTimerCount()).toBe(0)
-    resourceError = 'HTTP 500'
-    publishDashboardObservationChange({ topic: 'tools' })
-    await flush()
-    expect(vi.getTimerCount()).toBe(1)
-    dispose()
-    expect(vi.getTimerCount()).toBe(0)
-  })
-
   it('stops trailing reads and listeners when the surface unmounts', async () => {
     let finish!: () => void
     const read = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))

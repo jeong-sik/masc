@@ -13,14 +13,14 @@ implementation_prs: []
 
 # RFC: PR 의 check 가 끝나면 Keeper 를 깨우는 감시
 
-이 문서는 설계 후보와 재는 법을 적는다. 코드는 쓰지 않았다. 승인 전에는 구현하지 않는다.
+이 문서는 설계 후보와 재는 법을 적는다. (나)의 구현은 Draft PR #51338, #51339, #51340 에 있다.
 시각은 따로 적지 않으면 UTC 다. 코드 좌표는 `origin/main` `0cdf57159663` 에서 읽은 값이다.
 
 ## 0. 요약
 
 - **문제.** Keeper 는 PR 의 check 를 기다리느라 Execute 하나(`sleep` 반복, `…/check-runs` 읽기)를 쥐고 턴을 연 채 있다. 11-08T05:40Z~11-11T05:40Z(72시간)에 이런 60초 이상 호출이 308건, 18.946시간이다. 같은 길이의 앞 창은 184건, 8.925시간이었다.
 - **지금 코드.** 서버가 깨워 주는 것은 Actions run 하나가 끝날 때(`until_github_run`)뿐이다. PR head 가 바뀔 때(RFC-0379 §6.6 `Pull_heads`)와 자기 PR 의 check 가 실패할 때(world-state RFC §5)는 제안이고 코드에 없다. 어느 쪽도 "check 가 끝났다"로 깨우지 않는다.
-- **후보.** (가) `Pull_heads` 감시의 사건에 check 완료를 더한다. (나) commit 하나의 check 를 기다리는 감시를 새로 둔다. (다) 읽기를 서버 한 곳으로 모은다. (나)와 (다)를 묶고 "끝"은 B(Actions run 이 모두 끝남)로 시작하는 쪽을 정석으로 본다(§4.5).
+- **후보.** (가) `Pull_heads` 감시의 사건에 check 완료를 더한다. (나) commit 하나의 check 를 기다리는 감시를 새로 둔다. (다) 읽기를 서버 한 곳으로 모은다. (나)와 (다)를 묶는 쪽을 정석으로 보고(§4.5), "끝"은 B′(체크 run 이 모두 끝남)로 정했다(§7).
 - **측정으로 알게 된 것.** ① 기다림의 비용은 GitHub 읽기가 아니라 Keeper 시간이다. 읽기는 어림 711번/72시간이다. ② "check 가 끝났다"는 한 사건이 아니다. 같은 commit 의 `statusCheckRollup.state` 가 질의 모양에 따라 다르고, 뒤따르는 job 은 앞 job 이 끝나는 초에 만들어진다. ③ 필수 check 만 거르려면 "이름마다 최신 run" 을 고르는 규칙을 우리가 가져야 한다.
 - **사용자가 정할 것.** 후보, "끝"의 뜻, 읽기 예산의 주인이다(§7).
 
@@ -148,10 +148,11 @@ implementation_prs: []
 |---|---|---|---|
 | A | commit 의 합산 판정이 났다(`statusCheckRollup.state` 가 `SUCCESS`, `FAILURE`, `ERROR`) | GraphQL, `state` 만 | ① `contexts` 를 같이 고르면 같은 commit 이 `FAILURE` 로 바뀐다(§1.3 의 1). ② `needs` 로 이어진 job 이 만들어지기 전 1초 안쪽에 읽으면 "끝"으로 보인다(6). ③ `FAILURE` 가 `PENDING` 보다 앞서는지는 check run 쪽에서 확인하지 못했다 |
 | B | 그 commit 의 Actions run 이 하나 이상이고 모두 `completed` 다 | REST `GET /repos/{o}/{r}/actions/runs?head_sha=<sha>&per_page=100` 한 번 | Actions 가 아닌 check(commit status, 다른 앱)를 보지 않는다. run 이 아직 없는 때(push 직후)와 영영 없는 commit(경로 필터)을 구별하지 못해 둘 다 due 까지 기다린다. `workflow_run` 으로 뒤늦게 생기는 run 은 그 전에 못 본다. ②의 틈은 없다. job 이 이어지는 동안에도 run 은 계속 `in_progress` 다(6). 깨울 때 판정 대신 run 별 `conclusion` 을 준다 |
+| B′ | 그 commit 의 Actions run 중 `event` 가 `push`·`pull_request`·`workflow_run` 인 것(체크 run)이 하나 이상이고 모두 `completed` 다. 다른 `event`(리뷰·라벨·손으로 돌린 run)는 세지 않는다 | B 와 같다 | B 의 틈 중 체크가 시작하기 전에 깨우는 것을 막는다(아래 첫 항목, 60개 head 에서 B 6개, B′ 0개). B 와 같이 Actions 가 아닌 check 를 보지 않는다. 제품 코드가 `event` 를 닫힌 종류로 읽는다. 모르는 값은 `Other_event` 로 남기고 체크 run 으로 세지 않는다. 깨울 때 run 별 `conclusion` 을 준다 |
 | C | B 가 참이고, 그때 한 번 읽은 A 의 판정이 났다 | B 는 순서마다, A 는 B 가 참일 때만 | 읽기가 둘이다. ②를 B 가 막고 ①은 `state` 만 고르면 피한다. 판정이 `PENDING` 이면 B 가 참인 채 다음 순서에도 A 를 읽는다 |
 | D | 필수 check 만 | `isRequired` 나 ruleset 읽기와 "이름마다 최신 run" 고르기 | 후보에서 뺀다. 최신 run 을 고르는 규칙을 우리가 가져야 한다. REST 목록은 취소된 앞 run 을 함께 주고(2), `gh` 는 (workflow, 이름)으로 클라이언트에서 거른다(3). 이름만으로 거르면 틀린다. 51112 의 `contexts` 에 `request` 가 8개 있다 |
 
-- **B 는 체크가 시작하기 전에 깨울 수 있다.** 하네스 PR #51315 가 최근 PR 60개의 head(2026-11-11T09:55Z)에서 run 을 읽었다. 47개 head 에 "만들어진 run 이 모두 끝난" 순간이 있었고, 그중 6개(10.0%)는 그 뒤에 체크 run(`event` 가 `push`·`pull_request`·`workflow_run`)이 더 만들어졌다. 간격은 중앙값 56초, 최대 98초다. 승인 workflow(`Approval merge request`)가 먼저 끝나고 체크가 시작하는 경우다. 체크 run 끼리만 보면 끊김이 60개 head 모두에서 0이었다. 끝을 "체크 run 이 하나 이상이고 모두 끝났다"로 좁히면 이 표본에서 이른 깨움이 0이다. 대가는 제품 코드가 `event` 값을 닫힌 종류로 읽어야 한다는 것이다(모르는 값은 `Unrecognized` 로 남긴다). 표본이 한 저장소·한 시기이고 run 단위라서 job 단위 틈(②)은 보지 못했다.
+- **B 는 체크가 시작하기 전에 깨울 수 있다.** 하네스 PR #51315 가 최근 PR 60개의 head(2026-11-11T09:55Z)에서 run 을 읽었다. 47개 head 에 "만들어진 run 이 모두 끝난" 순간이 있었고, 그중 6개(10.0%)는 그 뒤에 체크 run(`event` 가 `push`·`pull_request`·`workflow_run`)이 더 만들어졌다. 간격은 중앙값 56초, 최대 98초다. 승인 workflow(`Approval merge request`)가 먼저 끝나고 체크가 시작하는 경우다. 체크 run 끼리만 보면 끊김이 60개 head 모두에서 0이었다. 끝을 "체크 run 이 하나 이상이고 모두 끝났다"로 좁히면 이 표본에서 이른 깨움이 0이다. 대가는 제품 코드가 `event` 값을 닫힌 종류로 읽어야 한다는 것이다(모르는 값은 `Other_event` 로 남기고 체크 run 으로 세지 않는다). 표본이 한 저장소·한 시기이고 run 단위라서 job 단위 틈(②)은 보지 못했다.
 - 이름을 골라 기다리는 호출이 66건(5.899 h)이다. check 이름은 job 이름이라 run 목록(B)으로는 고를 수 없다. `GET /commits/{sha}/check-runs?check_name=` 이 필요하다. v1 에 넣지 않고 §7 에 올린다.
 - "첫 실패에 깨운다"(`gh pr checks --fail-fast` 와 같은 뜻)는 이 표와 따로 정할 일이다. B 가 주는 run 별 `conclusion` 으로 표현은 되지만, 실패한 run 이 다시 돌아 덮이는지는 미리 알 수 없다.
 
@@ -213,10 +214,10 @@ implementation_prs: []
 | 최대 지연 | 75초 | 45초 |
 | 선행 | `Pull_heads`(코드 없음, 결정 열림) | 없음 |
 | 닿는 코드 | `Pull_heads` 전부 | 도구 정의 둘, `tool_schedule`, 투영, TUI 폼, 읽기 하나 |
-| 끝의 뜻 | A 로 고정 | A·B·C |
+| 끝의 뜻 | A 로 고정 | A·B·B′·C |
 | 새 상수 | 0 | 0 |
 
-정석으로는 (나)에 구조 2 를 묶고 끝을 B 로 시작하는 쪽을 본다. 이유는 측정에서 나온다.
+정석으로는 (나)에 구조 2 를 묶는 쪽을 본다. 끝은 B′로 정했다(§7). 이유는 측정에서 나온다.
 
 - 기다림의 54.5%(18.946 h 중 10.331 h)가 commit 읽기다. 표본 88건 중 9건은 어느 PR 에도 없는 commit 이다. PR 로 키를 잡으면 그 9건은 걸 수 없다.
 - 읽기 수가 대상 수로만 정해지고 측정한 동시 최대가 4다.
@@ -339,7 +340,7 @@ python3 -I docs/evidence/execute-waits-2026-11/measure_execute_waits.py --base-p
 ## 7. 사용자가 정할 것
 
 1. **후보.** (나)에 구조 2 를 묶은 쪽을 정석으로 본다(§4.5). 근거는 commit 읽기가 기다림의 54.5% 라는 것, 읽기 수가 대상 수로만 정해진다는 것, 새 상태·상수가 없다는 것이다. 대가는 읽기가 는다는 것과 인자가 다섯 곳에 닿는다는 것이다. (가)는 `Pull_heads` 결정 뒤로 미룬다.
-2. **"끝"의 뜻.** B(Actions run 이 모두 끝남)로 시작하는 쪽을 본다. 판정을 만들지 않아서 규칙이 필요 없고 틈 ②가 없다. Actions 가 아닌 check 를 놓친다. 하네스가 그런 거짓 깨움을 보이면 C 로 간다. 같이 정할 것은 셋이다. 첫 실패에 깨울지, 이름을 고른 check 만 기다리는 인자(66건, 5.899 h)를 v1 에 넣을지, 필수 check 만(D)을 영영 뺄지다.
+2. **"끝"의 뜻.** 결정(사용자, 2026-11-11): B′(체크 run 이 하나 이상이고 모두 끝남)다. 체크 run 은 `event` 가 `push`·`pull_request`·`workflow_run` 인 run 이다. 하네스 #51315 의 60개 head 에서 B 는 이른 깨움이 6개(10.0%)였고 B′ 는 0개였다(§4.1). 판정을 만들지 않아서 "이름마다 최신 run" 규칙이 필요 없고 틈 ②가 없다. Actions 가 아닌 check 를 놓친다. 하네스가 그런 거짓 깨움을 보이면 C 로 간다. 같이 정할 것은 셋이다. 첫 실패에 깨울지, 이름을 고른 check 만 기다리는 인자(66건, 5.899 h)를 v1 에 넣을지, 필수 check 만(D)을 영영 뺄지다.
 3. **읽기 예산의 주인.** 서버는 `[repositories] pr_reader`(라이브 `pr-updater`)의 토큰으로 REST 와 GraphQL 을 읽는다. 이 계정은 Keeper 12명이 `gh` 로 같이 쓰고 한도는 계정당 REST 5,000건/시간, GraphQL 5,000점/시간이다(§1.4). 선택지는 둘이다. 지금 계정을 그대로 쓰고 스냅숏·run 감시와 한도를 나눈다. 또는 감시 전용 읽는 계정이나 GitHub App 설치 토큰(`keeper-github-apps`; 최소 5,000건, 최대 12,500건/시간)을 따로 둔다. 한도에 걸리면 감시 루프는 GitHub 이 준 시각까지 쉬고 due 가 마감이다(지금 동작). Actions 의 `GITHUB_TOKEN` 한도(저장소당 1,000건/시간)는 이 기능이 쓰지 않는다. 그 한도는 #50434 가 다룬다. 이 기능은 읽기만 해서 워크플로를 돌리지 않는다.
 4. **깨움에 run 별 목록을 싣는가.** 싣지 않으면 Keeper 가 깬 뒤 `gh` 로 한 번 더 읽는다. 실으면 그 읽기가 줄지만 취소된 앞 run 이 함께 보인다(§1.3 의 2).
 5. **옛 commit 감시의 정리.** Keeper 가 `masc_schedule_update` 로 다시 거는 데 맡길지, 서버가 PR 의 새 head 를 알아 `Head_moved` 로 끝낼지다. 뒤쪽은 (가)의 읽기가 필요하다.

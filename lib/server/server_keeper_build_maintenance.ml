@@ -1,20 +1,9 @@
-(* Root-switch-owned maintenance. Scheduling is isolated across Keepers. A
-   guest build cleanup is admitted by the Owner mailbox, not a process
-   snapshot, and owns its Keeper's atomic Maintenance slot until it returns;
-   the guest payload supplies the separate build locks. The Remote_ssh
-   workspace step runs beside the Keeper's turns (see [step]). Host CLI
-   cancellation alone does not prove that a guest payload has terminated. *)
-let read_cleanup_meta ~(config : Workspace.config) ~keeper_name =
-  match Keeper_meta_store.read_effective_meta_resolved config keeper_name with
-  | Error _ as error -> error
-  | Ok None -> Ok None
-  | Ok (Some (resolved_name, meta)) ->
-    if String.equal resolved_name keeper_name && String.equal meta.name keeper_name
-    then Ok (Some meta)
-    else Error (Printf.sprintf
-      "Keeper cleanup identity mismatch: owner=%s resolved=%s payload=%s"
-      keeper_name resolved_name meta.name)
-
+(* Root-switch-owned maintenance. Scheduling is isolated across Keepers. What
+   a step cleans, how it shares the Keeper with its turns and how it runs are
+   answered in [Keeper_cleanup_step] and [Keeper_cleanup_attempt]; this loop
+   schedules each Keeper, keeps what its steps returned and publishes it.
+   Host CLI cancellation alone does not prove that a guest payload has
+   terminated. *)
 module Keeper_set = Set.Make (String)
 
 type running = Keeper_set.t Atomic.t
@@ -52,135 +41,112 @@ let schedule ~sw ~running ~keeper_name run =
       raise exn)
   else false
 
-(* One cleanup per Keeper per pass, chosen by where its tree lives: an
-   Apple microVM guest has stale _build directories, a Remote_ssh endpoint has
-   stale workspace entries (RFC-remote-keeper-workspace-entries-are-swept-on-
-   their-endpoint). Each step's own switch decides whether it runs.
-
-   Only [Guest_builds] waits for an idle Keeper: its turns and the payload
-   share the guest build locks. A workspace entry carries its own keep rules
-   on the endpoint (untouched within the retention, no live process inside,
-   no unpushed commit or stash), and review Keepers run turns back to back.
-   At the first pass on 2026-11-09 (00:08Z) at least five of the seven
-   running reviewers were mid-turn, so an idle-only sweep removed nothing
-   while a report run found 13,525 stale entries. *)
-type step = Guest_builds | Remote_workspace
-
-let step_for ~builds ~remote_workspace = function
-  | Keeper_types_profile.Remote_ssh -> if remote_workspace then Some Remote_workspace else None
-  | Keeper_types_profile.(Docker | Micro_vm) -> if builds then Some Guest_builds else None
-
 let step_label = function
-  | Guest_builds -> "Keeper build cleanup"
-  | Remote_workspace -> "Keeper workspace cleanup"
+  | Keeper_cleanup_step.Guest_builds -> "Keeper build cleanup"
+  | Keeper_cleanup_step.Remote_workspace -> "Keeper workspace cleanup"
 
-(* The step comes from the TOML-resolved meta. A projected or stored meta
-   carries the JSON decoder's placeholder profile, not the declaration, so
-   choosing from it sent every Remote_ssh Keeper to [Guest_builds], whose
-   Remote_ssh arm returns [Ok None]: the 2026-11-09 09:09Z pass logged
-   owners=34 builds=34 workspaces=0. *)
-type selection =
-  | Unreadable of string
-  | No_stored_meta
-  | Switched_off
-  | Selected of step
+(* The name each step has in the pass line. *)
+let step_count_label = function
+  | Keeper_cleanup_step.Guest_builds -> "builds"
+  | Keeper_cleanup_step.Remote_workspace -> "workspaces"
 
-let select ~config ~builds ~remote_workspace ~keeper_name =
-  match read_cleanup_meta ~config ~keeper_name with
-  | Error detail -> Unreadable detail
-  | Ok None -> No_stored_meta
-  | Ok (Some meta) ->
-    (match step_for ~builds ~remote_workspace meta.sandbox_profile with
-     | None -> Switched_off
-     | Some step -> Selected step)
+(* The latest result of every Keeper and step, and the latest pass. The loop
+   and the fibers it forks for each Keeper all write it, so every write is a
+   compare-and-set over the whole immutable value; the dashboard tools
+   envelope reads it. A restart starts empty, and the first pass fills it
+   again. *)
+let status : Keeper_cleanup_status.t Atomic.t = Atomic.make Keeper_cleanup_status.empty
 
-type report =
-  | Builds of Keeper_turn_sandbox_runtime.build_cleanup_report
-  | Workspace of Keeper_remote_workspace_cleanup.report
+let rec update_status change =
+  let current = Atomic.get status in
+  if not (Atomic.compare_and_set status current (change current)) then update_status change
 
-let run_step ~config ~meta = function
-  | Guest_builds ->
-    Keeper_turn_sandbox_runtime.cleanup_attached_builds ~config ~meta
-      ~retention_sec:(Runtime_params.get Runtime_settings.keeper_build_cleanup_retention_sec) ()
-    |> Result.map (Option.map (fun report -> Builds report))
-  | Remote_workspace ->
-    Keeper_remote_workspace_cleanup.cleanup ~config ~meta
-      ~retention_sec:(Runtime_params.get Runtime_settings.keeper_remote_workspace_cleanup_retention_sec)
-      ~timeout_sec:(Runtime_params.get Runtime_settings.keeper_remote_workspace_cleanup_timeout_sec) ()
-    |> Result.map (fun report -> Some (Workspace report))
+let current () = Atomic.get status
+let envelope_json () = Keeper_cleanup_status.to_json (current ())
 
-let log_report ~keeper_name = function
-  | Builds { Keeper_turn_sandbox_runtime.cleaned; failed } ->
-    if cleaned > 0 || failed > 0 then
-      Log.Server.info "Keeper build cleanup keeper=%s cleaned=%d failed=%d"
-        keeper_name cleaned failed
-  (* Every sweep leaves a line, removed=0 included: the passes at 00:08Z and
-     03:25Z on 2026-11-09 left none, and nothing showed whether the payload
-     had run. *)
-  | Workspace { Keeper_remote_workspace_cleanup.removed; skipped; failed; freed_kib; available_kib } ->
+(* Every attempt that ran its payload leaves an info line, zero removals
+   included: the passes at 00:08Z and 03:25Z on 2026-11-09 left none, and
+   nothing showed whether the payload had run. A busy Keeper and a stopped
+   guest are every pass's ordinary case; their rows carry them. *)
+let log_attempt ~keeper_name (attempt : Keeper_cleanup_status.attempt) =
+  let label = step_label (Keeper_cleanup_status.step attempt) in
+  match attempt with
+  | Keeper_cleanup_status.Guest_builds
+      (Keeper_cleanup_status.Reclaimed { Keeper_cleanup_status.cleaned; failed }) ->
+    Log.Server.info "%s keeper=%s cleaned=%d failed=%d" label keeper_name cleaned failed
+  | Keeper_cleanup_status.Remote_workspace
+      (Keeper_cleanup_status.Reclaimed
+        { Keeper_cleanup_status.removed; skipped; failed; freed_kib; available_kib }) ->
     Log.Server.info
-      "Keeper workspace cleanup keeper=%s removed=%d skipped=%d failed=%d freed_kib=%d available_kib=%d"
-      keeper_name removed skipped failed freed_kib available_kib
+      "%s keeper=%s removed=%d skipped=%d failed=%d freed_kib=%d available_kib=%d"
+      label keeper_name removed skipped failed freed_kib available_kib
+  | Keeper_cleanup_status.Guest_builds (Keeper_cleanup_status.Failed detail)
+  | Keeper_cleanup_status.Remote_workspace (Keeper_cleanup_status.Failed detail) ->
+    Log.Server.warn "%s keeper=%s: %s" label keeper_name detail
+  | Keeper_cleanup_status.Guest_builds (Keeper_cleanup_status.Deferred reason)
+  | Keeper_cleanup_status.Remote_workspace (Keeper_cleanup_status.Deferred reason) ->
+    Log.Server.debug "%s keeper=%s deferred: %s" label keeper_name reason
+  | Keeper_cleanup_status.Guest_builds Keeper_cleanup_status.Not_running
+  | Keeper_cleanup_status.Remote_workspace Keeper_cleanup_status.Not_running ->
+    Log.Server.debug "%s keeper=%s: no running guest" label keeper_name
+
+(* One Keeper's steps, in list order. A step does not wait on the one before
+   it: a deferred or failed step leaves its row and the next one still runs. *)
+let attempt_steps ~config ~keeper_name steps () =
+  List.iter
+    (fun step ->
+      let attempt = Keeper_cleanup_attempt.run ~config ~keeper_name step in
+      log_attempt ~keeper_name attempt;
+      update_status
+        (Keeper_cleanup_status.record_attempt ~keeper:keeper_name
+           ~finished_at:(Time_compat.now ()) attempt))
+    steps
 
 (* One line per pass says how many Keepers each step reached, so a step that
    never ran is told apart from one that found nothing. *)
-let sweep ~sw ~running ~(config : Workspace.config) ~builds ~remote_workspace () =
+let log_pass (pass : Keeper_cleanup_status.pass) =
+  List.iter
+    (fun ({ keeper; reason } : Keeper_cleanup_status.unreadable) ->
+      Log.Server.warn "Keeper cleanup keeper=%s: %s" keeper reason)
+    pass.unreadable;
+  Log.Server.info
+    "Keeper cleanup pass owners=%d without_meta=%d unreadable=%d no_step=%d switched_off=%d %s scheduled=%d still_running=%d"
+    pass.owners pass.without_meta (List.length pass.unreadable) pass.no_step
+    pass.switched_off
+    (String.concat " "
+       (List.map
+          (fun ({ step; selected; enabled = _ } : Keeper_cleanup_status.step_pass) ->
+            Printf.sprintf "%s=%d" (step_count_label step) selected)
+          pass.steps))
+    pass.scheduled (List.length pass.still_running)
+
+let sweep ~sw ~running ~(config : Workspace.config) ~enabled ~interval_sec () =
+  let started_at = Time_compat.now () in
   match Keeper_owner_registry.all_projections ~base_path:config.base_path with
   | Error error ->
     Log.Server.warn "Keeper cleanup pass: owner inventory unavailable: %s"
       (Keeper_owner_registry.lookup_error_to_string error)
   | Ok projections ->
-    let without_meta = ref 0 and unreadable = ref 0 and switched_off = ref 0
-    and still_running = ref 0 and guest_builds = ref 0 and workspaces = ref 0 in
-    List.iter
-      (fun (projection : Keeper_owner_reducer.projection) ->
-        match projection.meta with
-        | None -> incr without_meta
-        | Some meta ->
-          match select ~config ~builds ~remote_workspace ~keeper_name:meta.name with
-          | Unreadable detail ->
-            incr unreadable;
-            Log.Server.warn "Keeper cleanup keeper=%s: %s" meta.name detail
-          | No_stored_meta -> incr without_meta
-          | Switched_off -> incr switched_off
-          | Selected step ->
-            let label = step_label step in
-            let run () =
-              match read_cleanup_meta ~config ~keeper_name:meta.name with
-              | Error detail -> Error detail
-              | Ok None -> Ok None
-              | Ok (Some current) -> run_step ~config ~meta:current step
-            in
-            let settle = function
-              | Error detail -> Log.Server.warn "%s keeper=%s: %s" label meta.name detail
-              | Ok (Some report) -> log_report ~keeper_name:meta.name report
-              | Ok None ->
-                (match step with
-                 | Guest_builds -> ()
-                 | Remote_workspace ->
-                   Log.Server.warn "%s keeper=%s: no stored Keeper meta" label meta.name)
-            in
-            let attempt () =
-              try match step with
-              | Guest_builds ->
-                (match Keeper_owner_registry.run_maintenance_if_idle ~defer_to_chat:true
-                         ~base_path:config.base_path ~keeper_name:meta.name run with
-                 | Ok (`Ran result) -> settle result
-                 | Error _ | Ok (`Busy _) -> ())
-              | Remote_workspace -> settle (run ())
-              with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn -> Log.Server.warn "%s keeper=%s: %s"
-                         label meta.name (Printexc.to_string exn)
-            in
-            if schedule ~sw ~running ~keeper_name:meta.name attempt
-            then incr (match step with Guest_builds -> guest_builds | Remote_workspace -> workspaces)
-            else incr still_running)
-      projections;
-    Log.Server.info
-      "Keeper cleanup pass owners=%d without_meta=%d unreadable=%d switched_off=%d builds=%d workspaces=%d still_running=%d"
-      (List.length projections) !without_meta !unreadable !switched_off !guest_builds
-      !workspaces !still_running
+    let owner (projection : Keeper_owner_reducer.projection) =
+      match projection.meta with
+      | None -> Keeper_cleanup_status.Unnamed
+      | Some meta ->
+        let keeper_name = meta.name in
+        Keeper_cleanup_status.Named
+          ( keeper_name
+          , match Keeper_cleanup_attempt.select ~config ~enabled ~keeper_name with
+            | Error exclusion -> Keeper_cleanup_status.Excluded exclusion
+            | Ok steps ->
+              if schedule ~sw ~running ~keeper_name (attempt_steps ~config ~keeper_name steps)
+              then Keeper_cleanup_status.Scheduled steps
+              else Keeper_cleanup_status.Still_running steps )
+    in
+    let pass, record =
+      Keeper_cleanup_status.conclude_pass ~started_at ~interval_sec ~enabled
+        (List.map owner projections)
+    in
+    update_status record;
+    log_pass pass
 
 let start ~sw ~clock ~config =
   let running = create_running () in
@@ -188,12 +154,24 @@ let start ~sw ~clock ~config =
     ~on_error:(Server_bootstrap_loops_fiber.log_server_fiber_crash "keeper_build_cleanup")
     (fun () ->
       let rec tick () =
-        Eio.Time.sleep clock (Runtime_params.get Runtime_settings.keeper_build_cleanup_interval_sec);
-        let builds = Runtime_params.get Runtime_settings.keeper_build_cleanup_enabled
-        and remote_workspace =
-          Runtime_params.get Runtime_settings.keeper_remote_workspace_cleanup_enabled in
-        if builds || remote_workspace
-        then sweep ~sw ~running ~config ~builds ~remote_workspace ();
+        let interval_sec =
+          Runtime_params.get Runtime_settings.keeper_build_cleanup_interval_sec
+        in
+        Eio.Time.sleep clock interval_sec;
+        (* One reading of the switches serves the whole pass, so its summary
+           and its selection cannot disagree. A pass with every step off
+           still runs: it is what tells "switched off" from "never ran". *)
+        let switches =
+          List.map
+            (fun step -> step, Keeper_cleanup_attempt.enabled step)
+            Keeper_cleanup_step.all
+        in
+        let enabled step =
+          List.exists
+            (fun (candidate, on) -> on && Keeper_cleanup_step.equal candidate step)
+            switches
+        in
+        sweep ~sw ~running ~config ~enabled ~interval_sec ();
         tick ()
       in
       tick ())

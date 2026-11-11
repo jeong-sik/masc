@@ -388,13 +388,10 @@ export function LaneWaitingRows({
     const age = ageMinutes(row, nowMs)
     return age === null ? max : Math.max(max, age)
   }, DAY_MINUTES)
-  // No gap between the axis and the list: every row brings its own gap above.
   return html`
-    <div class="grid">
-      <div class="grid gap-1">
-        <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
-        <${LaneAgeAxis} axisMax=${axisMax} />
-      </div>
+    <div class="grid gap-1">
+      <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
+      <${LaneAgeAxis} axisMax=${axisMax} />
       <${KeeperLaneInventoryWindow}
         rows=${sorted}
         renderRow=${(

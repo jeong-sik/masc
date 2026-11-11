@@ -23,9 +23,15 @@ const REFRESH_SETTLE_MS = 100
 const CONSUMED_ROWS = 200
 /** Few enough rows that the list keeps every one of them mounted. */
 const SHORT_LIST_ROWS = 5
-/** The first row's bar is the next tab stop after the 기술 상세 toggle; this
- *  bounds the walk if something else takes focus first. */
-const MAX_TAB_PRESSES = 5
+/** Which row of the short list takes keyboard focus, counted from 0. The
+ *  second row stands for every row below the first: the first starts at the
+ *  list's top edge, which cuts the top of its focus ring whether or not the
+ *  list windows. */
+const SHORT_LIST_FOCUSED_ROW = 1
+/** The row bars are the tab stops after the 기술 상세 toggle. A row left open
+ *  above the focused one adds its five action buttons to the walk; this bounds
+ *  the walk if something else takes focus first. */
+const MAX_TAB_PRESSES = 10
 if (ROWS <= CONSUMED_ROWS + SHORT_LIST_ROWS) {
   throw new Error(`LANE_WINDOW_ROWS must be above ${CONSUMED_ROWS + SHORT_LIST_ROWS}`)
 }
@@ -33,6 +39,7 @@ if (ROWS <= CONSUMED_ROWS + SHORT_LIST_ROWS) {
 const COLD_START_TIMEOUT_MS = 120_000
 const SELECTORS = {
   list: '[aria-label="대기 나이순 작업 흐름"]',
+  axis: '[data-testid="keeper-lane-age-axis"]',
   row: '[data-testid="keeper-lane-waiting-row"]',
   bar: '[data-testid="keeper-lane-waiting-bar"]',
   what: '[data-testid="keeper-lane-waiting-what"]',
@@ -146,6 +153,13 @@ try {
     ...(await mountedRows()),
     listClientHeightPx: await list.evaluate(element => element.clientHeight),
     listScrollHeightPx: await list.evaluate(element => element.scrollHeight),
+    // A row scrolled past the list's top is cut at the list's top edge. The
+    // age axis above it draws its labels below its own box, so this distance
+    // is what keeps a cut row clear of them.
+    listTopBelowAxisPx: await page.evaluate(({ list: listSelector, axis }) => (
+      document.querySelector(listSelector).getBoundingClientRect().top
+      - document.querySelector(axis).getBoundingClientRect().bottom
+    ), SELECTORS),
     // Distance between the tops of the first two collapsed rows: row plus gap.
     collapsedRowPitchPx: await page.evaluate(row => {
       const [first, second] = document.querySelectorAll(row)
@@ -261,27 +275,30 @@ try {
   }), { count: CONSUMED_ROWS, ...SELECTORS })
 
   // Consume down to a list short enough to keep every row mounted. Such a list
-  // clips each row to its own box, so the first row's keyboard focus ring has
-  // to fit inside that box.
+  // clips each row to its own box, so a row's keyboard focus ring has to fit
+  // inside that box.
   const left = await page.evaluate(() => window.laneFixture.rowCount())
   await page.evaluate(count => window.laneFixture.consume(count), left - SHORT_LIST_ROWS)
   await frames()
   await page.getByTestId('keeper-lane-dev-toggle').focus()
-  const firstBarFocused = () => page.evaluate(
-    bar => document.activeElement === document.querySelector(bar), SELECTORS.bar,
+  const barFocused = () => page.evaluate(
+    ({ bar, index }) => document.activeElement === document.querySelectorAll(bar)[index],
+    { bar: SELECTORS.bar, index: SHORT_LIST_FOCUSED_ROW },
   )
-  for (let presses = 0; presses < MAX_TAB_PRESSES && !(await firstBarFocused()); presses += 1) {
+  for (let presses = 0; presses < MAX_TAB_PRESSES && !(await barFocused()); presses += 1) {
     await page.keyboard.press('Tab')
   }
-  measurements.shortList = await page.evaluate(({ list: listSelector, row, bar }) => {
-    const element = document.querySelector(bar)
+  measurements.shortList = await page.evaluate(({ list: listSelector, row, bar, index }) => {
+    const bars = [...document.querySelectorAll(bar)]
+    const element = bars[index]
     const style = getComputedStyle(element)
+    const listBox = document.querySelector(listSelector).getBoundingClientRect()
     // What clips the row: its own box in a short list, else the scroll list.
-    const clip = element.closest('.virtual-list-fallback-row') ?? document.querySelector(listSelector)
+    const box = element.closest('.virtual-list-fallback-row')?.getBoundingClientRect() ?? listBox
     const barBox = element.getBoundingClientRect()
-    const box = clip.getBoundingClientRect()
     return {
-      rows: document.querySelectorAll(bar).length,
+      rows: bars.length,
+      focusedRow: index + 1,
       keyboardFocused: document.activeElement === element && element.matches(':focus-visible'),
       focusRingReachPx: Number.parseFloat(style.outlineWidth) + Number.parseFloat(style.outlineOffset),
       roomAbovePx: barBox.top - box.top,
@@ -289,8 +306,9 @@ try {
       // stands for the widest bar.
       roomRightPx: box.right - element.closest(row).getBoundingClientRect().right,
       roomBelowPx: box.bottom - barBox.bottom,
+      firstRowRoomAbovePx: bars[0].getBoundingClientRect().top - listBox.top,
     }
-  }, SELECTORS)
+  }, { ...SELECTORS, index: SHORT_LIST_FOCUSED_ROW })
 
   measurements.errors = errors
   await writeFile(`${out}measurements.json`, `${JSON.stringify(measurements, null, 2)}\n`)
@@ -330,7 +348,7 @@ try {
   for (const room of ['roomAbovePx', 'roomRightPx', 'roomBelowPx']) {
     assert.ok(measurements.shortList[room] >= measurements.shortList.focusRingReachPx, room)
   }
-  checks.push("a short list leaves room for the first row's keyboard focus ring above, beside and below it")
+  checks.push("a short list leaves room for a row's keyboard focus ring above, beside and below it")
   assert.deepEqual(errors, [])
 
   const result = {

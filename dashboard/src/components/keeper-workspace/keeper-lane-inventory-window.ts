@@ -48,7 +48,12 @@ function listed(rows: readonly DashboardKeeperWaitingRow[]): { items: Item[]; ke
   return { items, keys: new Set(items.map(item => item.key)) }
 }
 
-function MountedRow({ host, children }: { host: RefObject<HTMLDivElement>; children: VNode }) {
+function MountedRow({ host, first, children }: {
+  host: RefObject<HTMLDivElement>
+  /** The first row of the list has no row above it and so no gap above. */
+  first: boolean
+  children: VNode
+}) {
   const ref = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const element = ref.current
@@ -68,12 +73,13 @@ function MountedRow({ host, children }: { host: RefObject<HTMLDivElement>; child
       })
     }
   }, [host])
-  // The list measures this wrapper, so the gap between rows is part of it.
+  // The list measures this wrapper, so the gap between two rows is part of it.
   // A short list clips each row to its wrapper, and the keyboard focus ring is
   // drawn just outside the row, so the room around a row belongs here: the
   // row gap above it and the list's right padding beside it. Below the row its
-  // own grid gap leaves the same room.
-  return html`<div ref=${ref} class="pr-1 pt-1">${children}</div>`
+  // own grid gap leaves the same room. The first row starts at the list's top
+  // edge, where the list has always cut the top of its ring.
+  return html`<div ref=${ref} class=${first ? 'pr-1' : 'pr-1 pt-1'}>${children}</div>`
 }
 
 /** Scroll position and open rows belong to one mounted instance. A caller
@@ -96,14 +102,13 @@ export function KeeperLaneInventoryWindow({ rows, renderRow }: Props): VNode {
       return next
     })
   }
-  const renderItem = (item: Item) => html`
-    <${MountedRow} host=${host}>
+  const renderItem = (item: Item, index: number) => html`
+    <${MountedRow} host=${host} first=${index === 0}>
       ${renderRow(item.row, open.has(item.key), expanded => setExpanded(item.key, expanded))}
     <//>
   `
   // min-w-0: a row wider than the list stays the list's problem, as it did
   // when the scroll list itself was the grid item, and does not widen the page.
-  // The height is 30rem of rows plus the gap above the first one.
   return html`
     <div ref=${host} class="min-w-0" data-testid="keeper-lane-graph">
       <${VirtualList}
@@ -111,7 +116,7 @@ export function KeeperLaneInventoryWindow({ rows, renderRow }: Props): VNode {
         getKey=${(item: Item) => item.key}
         renderItem=${renderItem}
         estimatedItemHeight=${COLLAPSED_ROW_PITCH_PX}
-        className="max-h-[30.25rem] overflow-y-auto"
+        className="max-h-[30rem] overflow-y-auto"
         tabIndex=${-1}
         ariaLabel=${LIST_LABEL}
       />

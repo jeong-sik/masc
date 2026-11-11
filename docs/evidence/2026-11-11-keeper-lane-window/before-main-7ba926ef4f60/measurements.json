@@ -3,23 +3,52 @@
   "initial": {
     "mounted": 5000,
     "farFromViewport": 4977,
-    "listClientHeightPx": 480,
-    "listScrollHeightPx": 213980,
-    "collapsedRowPitchPx": 42.796875
+    "listClientHeightPx": 450,
+    "listScrollHeightPx": 201246,
+    "collapsedRowPitchPx": 40.25
   },
   "refresh": {
-    "samplesMs": [
-      1103,
-      919.1999999284744,
-      952.6000000238419,
-      916.3999999761581,
-      948.8000000715256,
-      885.0999999046326,
-      877.3999999761581,
-      866.2999999523163,
-      894.6999999284744
+    "samples": [
+      {
+        "renderAndLayoutMs": 1009.9000000953674,
+        "mainThreadMs": 1096.2009999999998
+      },
+      {
+        "renderAndLayoutMs": 965.3999999761581,
+        "mainThreadMs": 1045.0220000000004
+      },
+      {
+        "renderAndLayoutMs": 935.4000000953674,
+        "mainThreadMs": 1007.5750000000002
+      },
+      {
+        "renderAndLayoutMs": 950.6000000238419,
+        "mainThreadMs": 1031.186
+      },
+      {
+        "renderAndLayoutMs": 929.2000000476837,
+        "mainThreadMs": 1033.524
+      },
+      {
+        "renderAndLayoutMs": 957.2000000476837,
+        "mainThreadMs": 1166.4470000000006
+      },
+      {
+        "renderAndLayoutMs": 941.5,
+        "mainThreadMs": 1036.9130000000002
+      },
+      {
+        "renderAndLayoutMs": 905,
+        "mainThreadMs": 1004.7669999999993
+      },
+      {
+        "renderAndLayoutMs": 915.7000000476837,
+        "mainThreadMs": 1009.0520000000005
+      }
     ],
-    "medianMs": 916.3999999761581
+    "medianRenderAndLayoutMs": 941.5,
+    "medianMainThreadMs": 1033.524,
+    "medianIdleMainThreadMs": 0.536000000000314
   },
   "end": {
     "scrollsToSettle": 1,
@@ -35,9 +64,14 @@
   "expansion": {
     "firstRowOpenAfterReturn": true
   },
+  "readdress": {
+    "rowOpen": true,
+    "focus": "row",
+    "operatedSourceIncarnation": "1000000028"
+  },
   "keeperSwitch": {
-    "scrollTopBeforePx": 213660,
-    "scrollTopAfterPx": 213660,
+    "scrollTopBeforePx": 200947,
+    "scrollTopAfterPx": 200947,
     "firstRowInView": false,
     "openRows": 2
   },

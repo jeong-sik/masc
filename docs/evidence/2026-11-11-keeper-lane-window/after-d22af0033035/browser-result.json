@@ -1,0 +1,92 @@
+{
+  "passed": true,
+  "scope": "Actual styled KeeperLaneStrip over a synthetic inventory in headless Chromium. No backend, live Keeper, inventory store, or SSE refresh.",
+  "browser": "149.0.7827.55",
+  "checks": [
+    "a large inventory mounts only the rows near the list viewport",
+    "the last server row is reachable by scrolling and acts on its own address",
+    "keyboard focus moves to the list when the focused row leaves the window",
+    "a row opened by the operator is still open after it leaves the window and returns",
+    "a row stays open and focused when the queue re-addresses its event, and acts on the new address",
+    "another Keeper starts at its first row with nothing open"
+  ],
+  "measurements": {
+    "rowsPerKeeper": 5000,
+    "initial": {
+      "mounted": 17,
+      "farFromViewport": 0,
+      "listClientHeightPx": 450,
+      "listScrollHeightPx": 204983,
+      "collapsedRowPitchPx": 40.25
+    },
+    "refresh": {
+      "samples": [
+        {
+          "renderAndLayoutMs": 8.900000095367432,
+          "mainThreadMs": 44.24
+        },
+        {
+          "renderAndLayoutMs": 6.299999952316284,
+          "mainThreadMs": 16.97000000000004
+        },
+        {
+          "renderAndLayoutMs": 5.099999904632568,
+          "mainThreadMs": 15.791999999999973
+        },
+        {
+          "renderAndLayoutMs": 8.899999976158142,
+          "mainThreadMs": 22.353999999999985
+        },
+        {
+          "renderAndLayoutMs": 6,
+          "mainThreadMs": 21.231
+        },
+        {
+          "renderAndLayoutMs": 4.899999976158142,
+          "mainThreadMs": 16.80999999999999
+        },
+        {
+          "renderAndLayoutMs": 5,
+          "mainThreadMs": 15.657000000000032
+        },
+        {
+          "renderAndLayoutMs": 6.100000023841858,
+          "mainThreadMs": 18.46800000000004
+        },
+        {
+          "renderAndLayoutMs": 6,
+          "mainThreadMs": 18.359000000000016
+        }
+      ],
+      "medianRenderAndLayoutMs": 6,
+      "medianMainThreadMs": 18.359000000000016,
+      "medianIdleMainThreadMs": 2.2999999999999687
+    },
+    "end": {
+      "scrollsToSettle": 1,
+      "mounted": 16,
+      "farFromViewport": 0,
+      "lastRowInView": true,
+      "firstRowMounted": false,
+      "operatedSourceIncarnation": "5027"
+    },
+    "focus": {
+      "afterFocusedRowLeft": "list"
+    },
+    "expansion": {
+      "firstRowOpenAfterReturn": true
+    },
+    "readdress": {
+      "rowOpen": true,
+      "focus": "row",
+      "operatedSourceIncarnation": "1000000028"
+    },
+    "keeperSwitch": {
+      "scrollTopBeforePx": 204672,
+      "scrollTopAfterPx": 0,
+      "firstRowInView": true,
+      "openRows": 0
+    },
+    "errors": []
+  }
+}

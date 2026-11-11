@@ -738,12 +738,10 @@ val config_pane_title :
   name:string ->
   ?reading:string ->
   ?note:string ->
-  ?clock:string ->
   Masc_tui_types.state ->
   string
 (** The whole title row a Config pane draws: its name, the strip, and the badge,
-    with the file it is reading and the clock between them where the pane has
-    those. [reading] is whatever the pane adds beside its name -- a count, a
+    with the file it is reading between them where the pane has one. [reading] is whatever the pane adds beside its name -- a count, a
     warning -- and is the part that gives way. Ten panes spelled this row and
     nine of them spelled it identically, which is also why none could tell the
     strip to leave room for the badge. When those optional names and shortcuts

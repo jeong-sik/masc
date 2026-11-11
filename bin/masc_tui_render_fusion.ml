@@ -71,11 +71,6 @@ let render_fusion_list (state : state) =
         state.fusion_launch_error
   in
   let now_epoch = Unix.gettimeofday () in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let header =
     match snapshot with
     | None ->
@@ -85,7 +80,7 @@ let render_fusion_list (state : state) =
           | Some _ -> ""
         in
         surface_title_row ~cols state ~lead:(screen_title fusion_title)
-          ~readings:[ "  " ^ reading_note; "  " ^ timestamp ]
+          ~readings:[ "  " ^ reading_note ]
     | Some _ ->
         let completed_count =
           List.fold_left
@@ -120,8 +115,7 @@ let render_fusion_list (state : state) =
         surface_title_row ~cols state ~lead:(screen_title fusion_title)
           ~readings:
             [ stats_note ^ (if history_count = 0 then "" else
-                Printf.sprintf " · %d Board evidence" history_count)
-            ; "  " ^ timestamp ]
+                Printf.sprintf " · %d Board evidence" history_count) ]
   in
   (* Measured from the rows, the way the Approvals table measures its own
      name column. Eighteen of twenty-eight keepers were cut at sixteen while

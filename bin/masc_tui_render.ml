@@ -359,11 +359,6 @@ let render_memory (state : state) =
     | Some s -> s.mhs_keepers
   in
   let shown = List.length keepers in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let lead = screen_title (if ko then " MASC 기억 · 전체 저장 상태" else " MASC Memory · fleet storage") in
   let title =
     match state.memory_health with
@@ -373,7 +368,7 @@ let render_memory (state : state) =
           | None -> ui_text state ~ko:"(미조회)" ~en:(title_missing_reading ~error:None)
           | Some _ -> ""
         in
-        surface_title_row ~cols state ~lead ~readings:[ "  " ^ reading_note; "  " ^ timestamp ]
+        surface_title_row ~cols state ~lead ~readings:[ "  " ^ reading_note ]
     | Some s ->
         surface_title_row ~cols state ~lead
           ~readings:
@@ -452,11 +447,6 @@ and render_memory_facts_list (state : state) =
   let keeper_name = Render_memory.facts_keeper_label ~ko state.memory_facts_keeper in
   let rows = Masc_tui_types.memory_fact_rows state in
   let total = List.length rows in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let filter_label =
     Render_memory.memory_category_filter_text ~ko state.memory_facts_category
   in
@@ -483,7 +473,6 @@ and render_memory_facts_list (state : state) =
                  ~en:(title_missing_reading ~error:(Masc_tui_types.memory_facts_failure state)) }
          | Some _ ->
            Render_memory.Facts_loaded { total; filter_label; query_label })
-      ~timestamp
       ~badge:(connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-facts"

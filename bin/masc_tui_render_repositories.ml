@@ -802,11 +802,6 @@ let render_changes_list (state : state) =
     | Some s -> s.Masc.Tui_decode.fcs_changes
   in
   let shown = List.length changes in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let whose =
     match state.changes_keeper with
     | None -> "(no keeper selected)"
@@ -816,7 +811,7 @@ let render_changes_list (state : state) =
     detail_heading ~cols
       ~lead:(Lead_text (screen_title " MASC Changes" ^ " "))
       ~id:whose ~after:[ after ]
-      ~tail:(timestamp ^ "  " ^ connection_badge state)
+      ~tail:(connection_badge state)
   in
   let header =
     match state.changes with

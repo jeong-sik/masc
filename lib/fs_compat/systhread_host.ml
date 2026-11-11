@@ -122,7 +122,13 @@ let fail_host exn =
 (* Each job gets its own fiber at once, so a long one never delays the next.
    The work's thread catches everything the work raises and answers the
    caller itself: a scheduler that dies under it cannot leave the caller
-   without the result. *)
+   without the result.
+
+   That rests on the host being a spawned domain. A domain that stops while
+   another still runs joins its threads first (caml_thread_domain_stop_hook
+   in the runtime's systhreads library), and the main domain outlives this
+   one. The last domain does not join, so a host run on the main domain
+   would lose the answer of work that had begun. *)
 let serve ~on_domain_start () =
   on_domain_start ();
   match

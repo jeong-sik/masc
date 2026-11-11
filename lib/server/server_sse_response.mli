@@ -33,8 +33,8 @@ type outcome =
       answering its flush (httpun reqd.ml [report_error], gluten-eio
       [writev]). An HTTP/2 frame that stalls is logged by the stream's flush
       bound, which resets the stream: a [send] on one of that stream's
-      fibers is cancelled with it, and a [send] from any other fiber ends
-      [Closed]. *)
+      fibers, or in a producer that {!serve} runs, is cancelled with it, and
+      a [send] from any other fiber ends [Closed]. *)
 
 val respond :
   clock:_ Eio.Time.clock ->
@@ -103,12 +103,20 @@ val serve : sw:Eio.Switch.t -> ?release:(unit -> unit) -> t -> (unit -> unit) ->
     - When [produce] raises, the response is not closed but cut, as the
       response of a request handler that failed is ({!Http_reqd.report_exn}:
       the HTTP/2 stream is reset, the HTTP/1.1 body stops and its connection
-      closes), and the exception is logged there. [sw] does not fail.
-    - [release] runs once, after the producer ended and the response closed.
+      closes), and the exception is logged there. [sw] does not fail. A
+      producer that raises after its response ended is logged the same way;
+      nothing is left to cut.
+    - When [sw] is cancelled while [produce] runs, [produce] is cancelled
+      and the response is closed as complete. {!close_after} leaves a
+      cancelled response open; a served one is closed, since nothing else
+      would end it.
+    - [release] runs after the producer ended and the response closed.
       When [sw] was already ending, [produce] does not run; the response is
-      closed and [release] runs all the same. What [release] raises is
-      logged at warn.
+      closed and [release] runs all the same. What closing or [release]
+      raises is logged at warn and the other step still runs.
 
-    [sw] is the switch a route is given, which lives as long as the server.
-    The producer runs under a switch of its own inside its fiber, so a
-    response that ended leaves nothing on [sw]. *)
+    [sw] is a switch of the domain that calls [serve] and lives as long as
+    the server: the router's switch or the server state's. [Eio.Fiber.fork]
+    refuses a switch of another domain, and then nothing is closed or
+    released. The producer runs under a switch of its own inside its fiber,
+    so a response that ended leaves nothing on [sw]. *)

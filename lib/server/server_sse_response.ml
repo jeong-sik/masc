@@ -140,40 +140,39 @@ let send t frame =
 ;;
 
 (* The end of a served response: closed, then the producer's own cleanup.
-   [release] is the route's code and runs in a release hook of a fiber on
-   the server's switch, so what it raises is logged here and goes no
-   further. *)
+   On a live switch this is the release hook of a fiber on the server's
+   switch, where an exception would fail that switch. Each step is guarded
+   by itself: what one raises is logged and the other still runs. A
+   cancellation goes on. *)
 let end_serving t ~release =
-  close t;
-  match release () with
-  | () -> ()
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn ->
-    Log.Server.warn
-      "SSE response for %s: the cleanup of its producer failed: %s"
-      (path t)
-      (Printexc.to_string exn)
+  let guarded step f =
+    match f () with
+    | () -> ()
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception exn ->
+      Log.Server.warn
+        "SSE response for %s: %s failed: %s"
+        (path t)
+        step
+        (Printexc.to_string exn)
+  in
+  guarded "closing it" (fun () -> close t);
+  guarded "the cleanup of its producer" release
 ;;
 
 (* A producer that raised did not finish its response, and a close would
    tell the client it did. The response is cut the way the request's own
    error handling cuts one whose handler failed
    (Server_http_ingress.handler_failed): [Http_reqd.report_exn] resets the
-   HTTP/2 stream or stops the HTTP/1.1 body, and logs the exception. A
-   response that had already ended has nothing left to cut. *)
-let producer_failed t exn =
-  if is_closed t
-  then
-    Log.Server.error
-      "SSE producer for %s raised after its response ended: %s"
-      (path t)
-      (Printexc.to_string exn)
-  else Http_reqd.report_exn t.reqd exn
-;;
+   HTTP/2 stream or stops the HTTP/1.1 body, and logs the exception. On a
+   response that had already ended the report cuts nothing and still logs. *)
+let producer_failed t exn = Http_reqd.report_exn t.reqd exn
 
 (* [Eio.Fiber.fork] runs nothing on a switch that is already off, so the
    response is ended here then. On a live switch the fork runs the fiber at
-   once, and its release hook is registered before [sw] can be cancelled.
+   once, and its release hook is registered before [sw] can be cancelled:
+   a [sw] that is cancelled while the producer runs ends the producer, and
+   the hook closes the response and runs the cleanup.
    The hook sits on a switch of the response's own: [sw] lives as long as
    the server and keeps every hook given to it until it ends (eio core
    switch.ml [on_release]). *)

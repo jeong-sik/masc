@@ -23,6 +23,7 @@ import synth_spec as S
 from tinker_librarian_synth_fixtures import (
     KINDS,
     PLANTED,
+    SCHEDULED,
     Judged,
     accepted,
     answer_text,
@@ -73,19 +74,22 @@ class MemoryStateTest(unittest.TestCase):
         self.assertEqual(s["state_by_kind"], {"new": [1, 1], "restates": [1, 0]})
 
     def test_the_answer_a_label_asks_for_is_right_on_every_count(self) -> None:
-        for n in (1, 2, 3):
-            for kinds in itertools.product(KINDS, repeat=n):
-                with self.subTest(kinds=[k.value for k in kinds]):
-                    req = request(PLANTED, candidates_of(kinds))
-                    s = scored(req, label_answer(req))
-                    self.assertEqual((s["correct"], s["state_correct"]), (s["candidates"], s["candidates"]))
-                    self.assertEqual(set(cast(dict[str, list[int]], s["state_by_kind"])),
-                                     {M.kind_of(cl) for cl in S.label_of(req).candidates})
-                    self.assertEqual((s["planted_dropped"], s["pairs_merged"], s["merges_done"]),
-                                     (s["planted"], s["pairs"], s["merges"]))
-                    self.assertEqual((s["dropped_expected"], s["dropped_unmerged"], s["dropped_off_label"],
-                                      s["planted_absorbed"]), (s["dropped"], [], [], 0))
-                    self.assertEqual((s["added"], s["removed"]), (s["expected_added"], s["expected_removed"]))
+        for facts in (PLANTED, SCHEDULED):
+            for n in (1, 2, 3):
+                for kinds in itertools.product(KINDS, repeat=n):
+                    with self.subTest(facts=len(facts), kinds=[k.value for k in kinds]):
+                        req = request(facts, candidates_of(kinds))
+                        s = scored(req, label_answer(req))
+                        self.assertEqual((s["correct"], s["state_correct"]), (s["candidates"], s["candidates"]))
+                        self.assertEqual(set(cast(dict[str, list[int]], s["state_by_kind"])),
+                                         {M.kind_of(cl) for cl in S.label_of(req).candidates})
+                        self.assertEqual((s["planted_dropped"], s["pairs_merged"], s["merges_done"]),
+                                         (s["planted"], s["pairs"], s["merges"]))
+                        self.assertEqual((s["dropped_expected"], s["dropped_unmerged"], s["dropped_off_label"],
+                                          s["planted_absorbed"]), (s["dropped"], [], [], 0))
+                        self.assertEqual((s["added"], s["removed"]), (s["expected_added"], s["expected_removed"]))
+                        self.assertEqual((s["scheduled_ahead_dropped"], s["scheduled_past_dropped"]),
+                                         (0, s["scheduled_past"]))
 
     def test_a_complement_kept_beside_its_target_is_not_merged(self) -> None:
         req, c = one(K.COMPLEMENT)
@@ -113,6 +117,25 @@ class MemoryStateTest(unittest.TestCase):
                                     claims=(claim_json(c.claim, absorbs=("m4",)),)))
         self.assertEqual((s["planted"], s["planted_dropped"], s["planted_absorbed"], s["absorbs"]),
                          (1, 0, 1, {"m4": "stale"}))
+
+
+class RecordTest(unittest.TestCase):
+    def test_a_record_ahead_that_is_dropped_counts_as_lost_and_off_label(self) -> None:
+        req = request(SCHEDULED, candidates_of((K.NEW_DURABLE,)))
+        [c] = req.candidates
+        right = scored(req, label_answer(req))
+        self.assertEqual((right["scheduled_ahead"], right["scheduled_ahead_dropped"], right["scheduled_past"],
+                          right["scheduled_past_dropped"], right["planted"]), (1, 0, 1, 1, 2))
+        judged: tuple[Judged, ...] = ((c.request_id, "incorporated", c.claim),)
+        swapped = scored(req, answer_text(judged, claims=(claim_json(c.claim), claim_json(M5, absorbs=("m5", "m6"))),
+                                          dropped=("m4", "m7")))
+        self.assertEqual((swapped["scheduled_ahead_dropped"], swapped["scheduled_past_dropped"],
+                          swapped["planted_dropped"], swapped["dropped_off_label"]), (1, 0, 1, ["m7"]))
+
+    def test_records_count_only_where_the_label_asks_for_a_change(self) -> None:
+        req = request(SCHEDULED, candidates_of((K.TRANSIENT,)))
+        s = scored(req, label_answer(req))
+        self.assertEqual((s["scheduled_ahead"], s["scheduled_past"], s["planted"]), (0, 0, 0))
 
 
 class KindTest(unittest.TestCase):

@@ -26,7 +26,8 @@ the noise widths. A metric counts hits over chances, summed over a side's runs. 
 minus the baseline's is d. Its noise σ is the binomial standard error of that difference at the
 pooled rate p: σ = sqrt(p(1 - p)(1/n_base + 1/n_draft)). A metric is worse when
 d < -worse_sigmas·σ and better when d > better_sigmas·σ. The draft goes in when no metric of any
-model is worse and a quality metric of a model in `better_from` is better.
+model is worse and memory state accuracy, stale drop recall or judged merge recall of a model
+in `better_from` is better.
 A metric with chances on only one side leaves the comparison incomplete. With
 no chances on either side it supplies neither degradation nor improvement.
 
@@ -67,9 +68,9 @@ class Metric(StrEnum):
     ABSORB_PRECISION = "absorb_precision"
 
 
-# RFC-0517 §2.3: the memory state, the stale drops or the merges must improve. Drop precision
-# and the valid rates only must not get worse.
-QUALITY = frozenset({Metric.MEMORY_STATE, Metric.STALE_RECALL, Metric.MERGE_RECALL, Metric.ABSORB_PRECISION})
+# RFC-0517 §2.3: only memory state, stale drop recall or judged merge recall can justify adoption.
+# Drop/absorb precision and the valid rates remain non-degradation checks.
+QUALITY = frozenset({Metric.MEMORY_STATE, Metric.STALE_RECALL, Metric.MERGE_RECALL})
 
 
 class Change(StrEnum):

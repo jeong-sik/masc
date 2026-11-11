@@ -142,11 +142,13 @@ class ComparedTest(unittest.TestCase):
         result = P.compared(LINES, sides({"stale_drop_recall": (9, 10)}, {"real_valid_rate": (0, 10)}))
         self.assertEqual((result["worse"], result["goes_in"]), (["glm.real_valid_rate"], False))
 
-    def test_better_validity_drop_precision_or_glm_is_not_the_improvement(self) -> None:
+    def test_better_guard_metric_or_glm_is_not_the_improvement(self) -> None:
         for inkling, glm in (({"synth_valid_rate": (10, 10)}, {}), ({"drop_precision": (10, 10)}, {}),
+                             ({"absorb_precision": (10, 10)}, {}),
                              ({}, {"stale_drop_recall": (10, 10)})):
             with self.subTest(inkling=inkling, glm=glm):
-                self.assertFalse(P.compared(LINES, sides(inkling, glm))["goes_in"])
+                result = P.compared(LINES, sides(inkling, glm))
+                self.assertEqual((result["better"], result["complete"], result["goes_in"]), ([], True, False))
 
     def test_a_draft_waiting_for_its_glm_runs_does_not_go_in(self) -> None:
         result = P.compared(LINES, sides({"stale_drop_recall": (9, 10)}))

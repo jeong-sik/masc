@@ -270,6 +270,26 @@ let test_bundle_keeps_the_wait_in_the_terminal_state () =
     Eio.Promise.resolve resolve_release ())
 ;;
 
+(* The wait ends a chat execution's turn on a retained checkpoint. A run that
+   serves no chat execution has none, so the tool is not on its surface. *)
+let names_of descriptors =
+  List.map (fun (descriptor : Keeper_tool_descriptor.t) -> descriptor.internal_name) descriptors
+;;
+
+let test_a_run_without_a_chat_execution_is_not_offered_the_wait () =
+  let all = Keeper_tool_descriptor.all_descriptors () in
+  check bool "the wait tool is registered" true
+    (List.mem "keeper_receipt_wait" (names_of all));
+  let without = Keeper_run_tools_setup.descriptors_for_run ~repetition_execution:None all in
+  check bool "a run that serves no chat execution does not get it" false
+    (List.mem "keeper_receipt_wait" (names_of without));
+  check int "and loses nothing else" (List.length all - 1) (List.length without);
+  let serving = Keeper_run_tools_setup.descriptors_for_run ~repetition_execution:(Some ()) all in
+  check bool "a run that serves one gets it" true
+    (List.mem "keeper_receipt_wait" (names_of serving));
+  check int "with every other tool" (List.length all) (List.length serving)
+;;
+
 let () =
   run
     "keeper receipt wait tool"
@@ -286,6 +306,10 @@ let () =
     ; ( "bundle"
       , [ test_case "the wait stays in the terminal state" `Quick
             test_bundle_keeps_the_wait_in_the_terminal_state
+        ] )
+    ; ( "surface"
+      , [ test_case "a run without a chat execution is not offered the wait" `Quick
+            test_a_run_without_a_chat_execution_is_not_offered_the_wait
         ] )
     ]
 ;;

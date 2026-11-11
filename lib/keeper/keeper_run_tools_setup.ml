@@ -218,6 +218,20 @@ let deferred_names_absent_from ~declared_names ~actual_names =
   absent
 ;;
 
+(* [keeper_receipt_wait] ends a chat execution's turn on a retained checkpoint
+   and records its wait with that checkpoint. A run that serves no chat
+   execution (autonomous, verifier, metric hook) has no checkpoint to end on,
+   so it is not offered the tool. *)
+let descriptors_for_run ~repetition_execution descriptors =
+  match repetition_execution with
+  | Some _ -> descriptors
+  | None ->
+    List.filter
+      (fun (descriptor : Keeper_tool_descriptor.t) ->
+         descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_receipt_wait)
+      descriptors
+;;
+
 let prepare_agent_setup
       ?preview
       ?observation_token
@@ -338,11 +352,12 @@ let prepare_agent_setup
   in
   let agent_name = meta.name in
   let* tool_descriptors = match Keeper_task_skill_turn.descriptors task_skill_selection with
-    | Some descriptors -> Ok descriptors
+    | Some descriptors -> Ok (descriptors_for_run ~repetition_execution descriptors)
     | None ->
         let snapshot = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:meta.name in
-        Ok (Keeper_tool_descriptor.all_descriptors ()
-          @ List.map Keeper_lane_addon_descriptor.create snapshot.exports) in
+        Ok (descriptors_for_run ~repetition_execution
+          (Keeper_tool_descriptor.all_descriptors ()
+          @ List.map Keeper_lane_addon_descriptor.create snapshot.exports)) in
   let* (task_skill_selection, preparation) =
     Keeper_skill_preparation_runtime_observation.with_turn_result
       ?preview

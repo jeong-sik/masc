@@ -913,13 +913,14 @@ let test_http_flow_preserves_host_admission_class ?(revoke_while_queued=false) a
     let remove=Admission.install_wait_observer (fun wait -> observed:=wait::!observed) in
     Eio.Switch.on_release sw remove;
     let original=request "actual-host-admission" in
-    let permitted=ref true and dispatch_checks=ref 0 in
+    let permitted=ref true and dispatch_checks=ref 0 and guarded=ref [] in
     let authorization : Exact.request_authorization =
       {admission_class; before_dispatch=(fun () -> incr dispatch_checks;
           if !permitted then Ok () else Error "original configuration changed while awaiting admission");
        with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let call=match Server_lane_addon_exact.runner ~base_path
-        ~before_dispatch:authorization.before_dispatch ~admission_class:authorization.admission_class ~lane_key:lane_id ~schema original with
+        ~before_dispatch:(fun dispatch -> guarded:=dispatch::!guarded; authorization.before_dispatch ())
+        ~admission_class:authorization.admission_class ~lane_key:lane_id ~schema original with
       | Ok call -> call | Error _ -> fail "actual HTTP runner refused the fixture lane" in
     let validate raw=match Exact.validate_answer ~output:(List.hd package.exact_outputs) original raw with
       | Error detail -> Error detail
@@ -938,10 +939,13 @@ let test_http_flow_preserves_host_admission_class ?(revoke_while_queued=false) a
         check int "one permit remains held" 1 state.active;
         check int "the real Exact flow queued before release" 1 state.queue_length;
         check int "a queued flow has not sent HTTP" 0 (F.post_count server);
+        check int "a queued flow has not reached its generation guard" 0 (List.length !guarded);
         if revoke_while_queued then permitted:=false);
     let result=F.await_within_fixture_budget ~clock
       ~failure:"actual host-class HTTP flow did not finish" finished in
     check int "actual dispatch rechecks after the permit wait" 1 !dispatch_checks;
+    check bool "the guard after the permit wait names the generation dispatch" true
+      (!guarded=[Exact.Generation]);
     check (option string) "only a permitted original names an accepted transport"
       (if revoke_while_queued then None else Some target.target_ref)
       (Keeper_exact_walk_receipt.answered_slot result.receipt);

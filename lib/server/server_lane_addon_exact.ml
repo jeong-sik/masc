@@ -114,9 +114,9 @@ let execute_http ~before_dispatch ~admission_class ~note ~capture_http ~resolved
           in
           let flow =
             Exact.execute_flow_once ~net ~clock
-              ~before_measurement_dispatch:(fun _ -> Eio.Fiber.check (); before_dispatch ())
+              ~before_measurement_dispatch:(fun _ -> Eio.Fiber.check (); before_dispatch Addon.Measurement)
               ~on_measurement_terminal:(fun _ -> Ok ())
-              ~before_dispatch:(fun _ -> Eio.Fiber.check (); before_dispatch ())
+              ~before_dispatch:(fun _ -> Eio.Fiber.check (); before_dispatch Addon.Generation)
               ~before_advance:(fun ~failed ~next:_ ->
                 Eio.Fiber.check ();
                 (match failed with
@@ -224,7 +224,7 @@ let call ~before_dispatch ~admission_class ~cli_runner ~base_path ~(resolved : R
           ~prompt ~validate
           ~observe:(function
             | Keeper_lane_cli_oneshot.Dispatching {runtime_id} ->
-                (match before_dispatch () with
+                (match before_dispatch Addon.Generation with
                  | Ok () -> dispatched:=runtime_id::!dispatched
                  | Error detail -> raise (Dispatch_authority_refused detail))
             | Raw_response _ -> ())

@@ -576,7 +576,7 @@ let test_nested_successor_has_no_root_sibling ()=with_workspace (fun base_path s
 let host_result base_path store capture output =
   let request=get (Server_workspace_memory_addon_validation.request capture) in
   let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
-    get (before_dispatch ());
+    get (before_dispatch Exact.Generation);
     match validate output with
     | Ok output -> executed (Exact.Call_ended (Exact.Answered {output;slot="original-host";usage=None}))
     | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output {detail}))) in

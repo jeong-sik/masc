@@ -8653,7 +8653,9 @@ let owe_dataset_read state (dataset : Masc.Workspace_dataset_event.dataset) =
       if Masc_tui_types.observer_browser_scope_of_state state = Some observation.scope then
         state.browser_observation_owed <- Masc_tui_owed_read.changed state.browser_observation_owed
   | Masc.Workspace_dataset_event.Memory_health { keeper } -> owe_memory_health_row state keeper
-  | Masc.Workspace_dataset_event.Play_room _ ->
+  | Masc.Workspace_dataset_event.World_memory
+  | Masc.Workspace_dataset_event.Dashboard_observation _ -> ()
+  | Masc.Workspace_dataset_event.Play_room _ | Masc.Workspace_dataset_event.Play_seats ->
       state.play_room <- Option.map Masc_tui_play_room.revalidate state.play_room
   | (Masc.Workspace_dataset_event.Lanes | Masc.Workspace_dataset_event.Lane_addons _) as dataset ->
       let module Decision = Masc_tui_lane_read_decision in

@@ -21,7 +21,8 @@ let memory_health_keeper (payload : Yojson.Safe.t) =
            | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing
            | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics | Lanes
            | Machine_live _ | Play_room _ | Lane_addons _ | Browser_observation _
-           | Keeper_oauth_attempts _ | Memory_health _ ))
+           | Keeper_oauth_attempts _ | Memory_health _ | World_memory | Play_seats
+           | Dashboard_observation _ ))
      | (Some _ | None), Error _ -> None)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
@@ -470,6 +471,64 @@ let test_a_notification_reloads_the_warm_row () =
               }))))
 ;;
 
+(* World inventory readers settle after a successful read. Each durable input
+   must therefore empty the cached inventory before announcing the change. *)
+let test_world_writes_invalidate_before_announcing () =
+  with_workspace
+  @@ fun ~config ~fleet_key:_ ~elsewhere ~config_keepers_dir:_
+       ~runtime_keepers_dir:_ ~heard:_ ->
+  let base_path = config.Workspace.base_path in
+  let key = Server_dashboard_http_core_cache.workspace_memory_inventory_cache_key ~base_path in
+  let seen = ref [] in
+  let id = "world-memory-write-announcement" in
+  let is_world (event : Sse.external_event) =
+    match event.ext_payload with
+    | `Assoc fields ->
+      (match Workspace_dataset_event.of_fields fields with
+       | Ok Workspace_dataset_event.World_memory -> true
+       | Ok Workspace_dataset_event.(
+           ( Repositories | Verification_requests | Harness_verdicts | Goals
+           | Runtime_config | Connectors | Keeper_metrics _ | Skill_activations _
+           | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing
+           | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics | Lanes
+           | Machine_live _ | Play_room _ | Lane_addons _ | Browser_observation _
+           | Keeper_oauth_attempts _ | Memory_health _ | Play_seats | Dashboard_observation _ ))
+       | Error _ -> false)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+  in
+  Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
+    ~callback:(fun event ->
+      if is_world event then
+        seen := (Option.is_some (Dashboard_cache.peek key),
+                 Result.is_ok (Workspace_memory_ledger.load ~base_path)) :: !seen)
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
+    let seed () =
+      Dashboard_cache.seed_stale_if_missing key ~stale_for:60.0 (`Assoc []);
+      check bool "the prior inventory is cached" true
+        (Option.is_some (Dashboard_cache.peek key))
+    in
+    Eio.Switch.run (fun sw ->
+      Server_memory_health_broadcast.install ~sw ~config;
+      seed ();
+      Workspace_memory_ledger.save ~base_path Workspace_memory_ledger.empty |> require;
+      check (list (pair bool bool)) "the ledger is readable and the inventory gone at notification"
+        [ false, true ] (List.rev !seen);
+      seed ();
+      Workspace_memory_briefing.save
+        ~directory:(Workspace_memory_ledger.directory ~base_path)
+        Workspace_memory_briefing.empty |> require;
+      check (list (pair bool bool)) "a briefing commit invalidates the same inventory"
+        [ false, true; false, true ] (List.rev !seen);
+      seed ();
+      Workspace_memory_changed.written ~directory:elsewhere;
+      check bool "another workspace leaves the cached answer alone" true
+        (Option.is_some (Dashboard_cache.peek key));
+      check int "another workspace is not announced here" 2 (List.length !seen));
+    Workspace_memory_ledger.save ~base_path Workspace_memory_ledger.empty |> require;
+    check int "a released server no longer announces" 2 (List.length !seen))
+;;
+
 let () =
   run "memory_health_input_announce"
     [ ( "workspace"
@@ -477,6 +536,8 @@ let () =
             test_writes_under_the_workspace_announce_their_keeper
         ; test_case "a notification reloads the warm row" `Quick
             test_a_notification_reloads_the_warm_row
+        ; test_case "world writes invalidate before announcing" `Quick
+            test_world_writes_invalidate_before_announcing
         ] )
     ; ( "stores"
       , [ test_case "each store write tells the signal once" `Quick

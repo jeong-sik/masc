@@ -1,6 +1,59 @@
 (* Typed payload schemas for Agent Core events relayed to Dashboard SSE. The
    envelope around a payload is built by [Keeper_event_bridge.wrap_event]. *)
 
+(* Observation topics are one closed contract shared by the server's commit
+   notifications and the Dashboard's mounted readers. No rows, credentials or
+   original request bodies travel in these invalidations. *)
+type dashboard_observation_topic = [
+  | Logs <json name="logs">
+  | Health <json name="health">
+  | Runtime_probe <json name="runtime_probe">
+  | Attribution <json name="attribution">
+  | Keeper_composite <json name="keeper_composite">
+  | Keeper_runtime_trace <json name="keeper_runtime_trace">
+  | Keeper_sandbox <json name="keeper_sandbox">
+  | Keeper_turns <json name="keeper_turns">
+  | Keeper_memory_health <json name="keeper_memory_health">
+  | Runtime_resolved <json name="runtime_resolved">
+  | Model_metrics <json name="model_metrics">
+  | Runtime_observables <json name="runtime_observables">
+  | Scheduled_automation <json name="scheduled_automation">
+  | Tools <json name="tools">
+  | Tool_metrics <json name="tool_metrics">
+  | Skills <json name="skills">
+  | Async_requests <json name="async_requests">
+  | Skill_usage <json name="skill_usage">
+  | Skill_activations <json name="skill_activations">
+  | Telemetry <json name="telemetry">
+  | Published_artifacts <json name="published_artifacts">
+  | Artifact_checks <json name="artifact_checks">
+  | Verification_requests <json name="verification_requests">
+  | Verification_specs <json name="verification_specs">
+  | Tlc_results <json name="tlc_results">
+  | Activity <json name="activity">
+  | Ide_presence <json name="ide_presence">
+  | Ide_events <json name="ide_events">
+  | Gate <json name="gate">
+  | Gate_tool_events <json name="gate_tool_events">
+  | Chat_operation <json name="chat_operation">
+]
+
+type dashboard_observation_operation = {
+  keeper_name: string;
+  operation_id: string;
+}
+
+type dashboard_observation_scope = [
+  | Workspace <json name="workspace">
+  | Keeper <json name="keeper"> of string
+  | Operation <json name="operation"> of dashboard_observation_operation
+]
+
+type dashboard_observation_changed_payload = {
+  topic: dashboard_observation_topic;
+  scope: dashboard_observation_scope;
+}
+
 type agent_started_payload = {
   agent_name: string;
   task_id: string;

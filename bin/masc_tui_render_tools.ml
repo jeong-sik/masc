@@ -662,9 +662,9 @@ let skill_statistics_lines ~cols = function
       @ [ Ansi.bold, "실행 결과 분포 · 분모는 보존된 원래 실행 수" ]
       @ (Masc_tui_chart.distribution_bars
            ~width:(max 1 (Masc_tui_frame.inner_width ~cols - 4))
-           [ { name = "completed"; count = stats.scst_completed.sds_samples; style = Some Masc_tui_theme.Ok }
-           ; { name = "failed"; count = stats.scst_failed.sds_samples; style = Some Masc_tui_theme.Bad }
-           ; { name = "deferred"; count = stats.scst_deferred; style = Some Masc_tui_theme.Warn } ]
+           [ { name = "completed"; count = stats.scst_completed.sds_samples; style = Masc_tui_theme.Ok }
+           ; { name = "failed"; count = stats.scst_failed.sds_samples; style = Masc_tui_theme.Bad }
+           ; { name = "deferred"; count = stats.scst_deferred; style = Masc_tui_theme.Warn } ]
          |> List.map (fun line -> "", line))
       @ [ Ansi.dim, "deferred는 실행 시간에서 제외 · queue/의존 대기/model 시간은 별도" ]
 ;;
@@ -1773,7 +1773,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
               let metadata =
                 if tool.tl_surfaces = [] then (Theme.warn ()) else Ansi.dim
               in
-              ( Masc_tui_theme.tone Masc_tui_theme.Normal,
+              ( "",
                 Tool_table.catalog_tool_line layout ~metadata
                   ~name:(Terminal_text.single_line (Masc.Tool_display.list_label tool.tl_name))
                   ~direct:(if tool.tl_direct_call then "yes" else "no")

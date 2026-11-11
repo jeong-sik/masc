@@ -764,7 +764,7 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
             Some
               { Chart.name = Terminal_text.single_line answer.fpa_model
               ; count = answer.fpa_input_tokens + answer.fpa_output_tokens
-              ; style = Some Masc_tui_theme.Ok
+              ; style = Masc_tui_theme.Ok
               }
         | Fusion_panel_failed _ -> None)
       evidence.fe_panel

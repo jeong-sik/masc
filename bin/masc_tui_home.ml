@@ -299,8 +299,8 @@ let operator_action_label state (item : Masc.Operator_action_reason.t) =
   | Other_reported ->
       let component = match item.component with
         | "keeper_memory_execution" -> text "기억 처리" "Memory execution"
-        | "skill_catalog" -> text "Skill 목록" "Skill catalog"
-        | "keeper_config_schema" -> text "Keeper 설정" "Keeper configuration"
+        | "skill_catalog" -> text "스킬 목록" "Skill catalog"
+        | "keeper_config_schema" -> text "키퍼 설정" "Keeper configuration"
         | component -> clean (String.escaped component) in
       component ^ text " · 진단 확인" " · inspect diagnostics"
 

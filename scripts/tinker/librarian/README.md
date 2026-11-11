@@ -211,7 +211,11 @@ chances, summed over a side's runs. Its noise σ is the binomial standard error
 of the difference at the pooled rate. A metric is worse below -2.5σ and better
 above +2σ. The draft goes in when no metric of either model is worse and an
 Inkling E-synth quality metric is better: memory state, stale drops, judged
-merges or absorb precision. A draft runs on GLM only after its
+merges or absorb precision. A metric with chances on only one side remains
+`uncounted` and appears in `uncompared`; the comparison is incomplete and the
+draft does not go in. With no chances on either side, that metric supplies
+neither degradation nor improvement; the other measured metrics still decide.
+A draft runs on GLM only after its
 Inkling runs pass. The drop and merge judges of steps 6 and 7 class the
 E-synth runs of both sides under the pinned template's rules. E-real outcome
 agreement and the drops of memories the live answer kept are recorded, not

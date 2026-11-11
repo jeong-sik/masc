@@ -27,6 +27,8 @@ minus the baseline's is d. Its noise σ is the binomial standard error of that d
 pooled rate p: σ = sqrt(p(1 - p)(1/n_base + 1/n_draft)). A metric is worse when
 d < -worse_sigmas·σ and better when d > better_sigmas·σ. The draft goes in when no metric of any
 model is worse and a quality metric of a model in `better_from` is better.
+A metric with chances on only one side leaves the comparison incomplete. With
+no chances on either side it supplies neither degradation nor improvement.
 
 E-real outcome agreement and the drops of memories the live answer kept are recorded for each
 side and not judged: the RFC leaves the changed drops to a person.
@@ -273,6 +275,7 @@ def compared(lines: Lines, sides: Mapping[str, tuple[list[Measured], list[Measur
     models: JsonObject = {}
     worse: list[str] = []
     better: list[str] = []
+    uncompared: list[str] = []
     for name, (base, draft) in sides.items():
         b, d = summed(base), summed(draft)
         metrics: JsonObject = {}
@@ -283,13 +286,16 @@ def compared(lines: Lines, sides: Mapping[str, tuple[list[Measured], list[Measur
                                      "d": diff, "sigma": sigma, "change": change.value}
             if change is Change.WORSE:
                 worse.append(f"{name}.{metric.value}")
+            if change is Change.UNCOUNTED and ((b[metric].chances == 0) != (d[metric].chances == 0)):
+                uncompared.append(f"{name}.{metric.value}")
             if change is Change.BETTER and metric in QUALITY and name in lines.better_from:
                 better.append(f"{name}.{metric.value}")
         models[name] = {"metrics": metrics, "real_record": {"base": [m.real_record for m in base],
                                                             "draft": [m.real_record for m in draft]}}
-    complete = set(sides) == set(lines.models)
+    complete = set(sides) == set(lines.models) and not uncompared
     templates = sorted({m.template_sha256 for _, draft in sides.values() for m in draft})
     return {"draft_template_sha256": templates, "models": models, "worse": worse, "better": better,
+            "uncompared": uncompared,
             "complete": complete, "goes_in": complete and not worse and bool(better)}
 
 
@@ -333,7 +339,7 @@ def main() -> int:
         raise SystemExit(problem)
     result = compared(lines, sides)
     Path(cast(str, args.out)).write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
-    print(json.dumps({k: result[k] for k in ("worse", "better", "complete", "goes_in")}))
+    print(json.dumps({k: result[k] for k in ("worse", "better", "uncompared", "complete", "goes_in")}))
     return 0
 
 

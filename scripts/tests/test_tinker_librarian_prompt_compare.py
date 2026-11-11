@@ -17,6 +17,7 @@ import math
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -151,6 +152,34 @@ class ComparedTest(unittest.TestCase):
         result = P.compared(LINES, sides({"stale_drop_recall": (9, 10)}))
         self.assertEqual((result["complete"], result["goes_in"]), (False, False))
         self.assertEqual(result["draft_template_sha256"], [DRAFT_T])
+
+    def test_precision_with_chances_on_only_one_side_cannot_prove_non_degradation(self) -> None:
+        for model in ("inkling", "glm"):
+            for zero_side in (0, 1):
+                for metric in (P.Metric.DROP_PRECISION, P.Metric.ABSORB_PRECISION):
+                    with self.subTest(model=model, zero_side=zero_side, metric=metric):
+                        plan = sides({"memory_state_accuracy": (10, 10)}, {})
+                        base, draft = plan[model]
+                        runs = base if zero_side == 0 else draft
+                        runs[:] = [replace(m, counts={**m.counts, metric: P.Count(0, 0)}) for m in runs]
+                        result = P.compared(LINES, plan)
+                        self.assertEqual(result["uncompared"], [f"{model}.{metric.value}"])
+                        self.assertEqual((result["worse"], result["complete"], result["goes_in"]),
+                                         ([], False, False))
+                        self.assertTrue(result["better"])
+
+    def test_no_actions_on_either_side_are_not_an_improvement_or_a_missing_comparison(self) -> None:
+        plan = sides({"memory_state_accuracy": (10, 10)}, {})
+        for base, draft in plan.values():
+            for runs in (base, draft):
+                runs[:] = [replace(m, counts={**m.counts, P.Metric.ABSORB_PRECISION: P.Count(0, 0)})
+                           for m in runs]
+        result = P.compared(LINES, plan)
+        self.assertEqual((result["uncompared"], result["complete"], result["goes_in"]), ([], True, True))
+        self.assertEqual(result["better"], ["inkling.memory_state_accuracy"])
+        for model in ("inkling", "glm"):
+            metrics = cast(dict[str, Row], cast(dict[str, Row], result["models"])[model]["metrics"])
+            self.assertEqual(metrics[P.Metric.ABSORB_PRECISION]["change"], P.Change.UNCOUNTED)
 
 
 class SideProblemTest(unittest.TestCase):

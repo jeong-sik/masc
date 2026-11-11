@@ -3,7 +3,7 @@ description = """
 Wait for the receipt of one background Execute run. The turn ends when this call \
 succeeds, and a later run of this conversation starts with the receipt of that run. \
 A receipt that is already waiting is read by the next run at once. A request_id that \
-Execute did not return, or that another conversation already waits for, is refused."""
+Execute did not return is refused."""
 additional_properties = false
 defer_loading = true
 

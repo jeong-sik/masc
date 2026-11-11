@@ -1703,30 +1703,31 @@ let fusion_sidebar_label ~status ~time ~keeper ~run_id =
 let task_history_sidebar_label ~task_id ~apart =
   match apart with None -> task_id | Some apart -> task_id ^ "  " ^ apart
 
-let verdict_sidebar_labels rows =
+let verdict_sidebar_labels ~now rows =
+  let to_second = Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_second ~now in
+  let to_minute = Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now in
+  let clocked = List.map (fun (task_id, at) -> (task_id, to_second at, at)) rows in
   List.mapi
-    (fun index (task_id, clock) ->
-      let same (other_id, other_clock) =
+    (fun index (task_id, clock, at) ->
+      let same (other_id, other_clock, _) =
         String.equal task_id other_id && String.equal clock other_clock
       in
-      let siblings = List.length (List.filter same rows) in
+      let siblings = List.length (List.filter same clocked) in
       let apart =
         if siblings = 1 then clock
         else
           let earlier =
-            List.filteri (fun other_index row -> other_index < index && same row) rows
+            List.filteri
+              (fun other_index row -> other_index < index && same row)
+              clocked
             |> List.length
           in
           (* A second-resolution clock can name several verdicts. Keep the
              date and minute, then number those rows within this snapshot. *)
-          let minute =
-            if String.length clock > 3 then String.sub clock 0 (String.length clock - 3)
-            else clock
-          in
-          Printf.sprintf "%s#%d" minute (earlier + 1)
+          Printf.sprintf "%s#%d" (to_minute at) (earlier + 1)
       in
       task_history_sidebar_label ~task_id ~apart:(Some apart))
-    rows
+    clocked
 
 let fusion_pipeline_diagram
     ?(glyph_done = "●")

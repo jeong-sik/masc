@@ -6286,11 +6286,6 @@ let studio_panel ~width ~title ~lines =
       ^ Theme.recede () ^ " │" ^ Ansi.reset) lines
   @ [ border "└" "┘" ]
 
-let lane_run_clock started_at =
-  let tm = Unix.localtime started_at in
-  Printf.sprintf "%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-
 let detail_heading_rows ~first lines =
   let heading =
     List.map (fun line -> Theme.info () ^ Ansi.bold, "  " ^ line) lines

@@ -2261,6 +2261,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
 type judged =
   { auth_config : Server_auth_config.t
   ; booted : Authz_boot_mode_read.booted
+  ; lease : Server_startup_takeover.base_path_lease
   }
 
 type judge_refusal =
@@ -2273,7 +2274,7 @@ let judge_refusal_to_string = function
     "the account mode refuses this boot: " ^ String.concat "; " (first :: rest)
 ;;
 
-let judge ~base_path =
+let judge ~lease ~base_path =
   match Server_auth_config.resolve (Server_auth_config.read_env ()) with
   | Error error -> Error (Auth_config_refused error)
   | Ok auth_config ->
@@ -2284,7 +2285,7 @@ let judge ~base_path =
          ~anonymous_mutations:(Server_auth_config.allow_anonymous_mutations auth_config)
      with
      | Error (first, rest) -> Error (Account_mode_refused (first, rest))
-     | Ok booted -> Ok { auth_config; booted })
+     | Ok booted -> Ok { auth_config; booted; lease })
 ;;
 
 let run ~sw ~runtime_sw ~env ~address ~port ~judged ?input_base_path ?on_ready
@@ -2301,7 +2302,9 @@ let run ~sw ~runtime_sw ~env ~address ~port ~judged ?input_base_path ?on_ready
      single-user server are not started for it. *)
   match judged.booted with
   | Authz_boot_mode_read.Multi_account multi_account ->
-    (match Server_accounts.run ~sw ~env ~address ~port ?on_ready multi_account with
+    (match
+       Server_accounts.run ~sw ~env ~address ~port ~lease:judged.lease ?on_ready multi_account
+     with
      | Ok () -> ()
      | Error refusal ->
        let message =

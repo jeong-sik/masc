@@ -74,22 +74,36 @@ type refusal =
       ; port : int
       ; reason : string
       }  (** The cleartext listener did not bind, for example a port in use. *)
+  | Port_not_announced of Server_startup_takeover.base_path_lock_rejection
+      (** The port that bound could not be announced to the host
+          ({!Server_startup_takeover.announce_account_server}). No command
+          could replace a server whose port the host cannot read. *)
   | Access_not_published of Runtime_account_access.publish_error
   | Trust_policy_refused of Server_request_authority.trust_policy_error
 
 val refusal_to_string : refusal -> string
 
+val health_version : string -> string option
+(** The release version in a body that [GET /health] of this server answered,
+    for a command line that names the server it is about to replace. [None]
+    for any other body. It identifies nothing: which workspace a port belongs
+    to is read from the kernel
+    ({!Server_startup_takeover.account_server_announcement}). *)
+
 (** Reads the HTTP mode, opens the zone and reads it again, makes the table,
-    binds [address]:[port], publishes the access, binds the HTTPS listener of
-    the environment, records the port for the CLI of the workspace
-    ([Workspace_connection]), calls [on_ready], and serves until [sw] is
-    cancelled. The cleartext listener follows the HTTP mode of the
-    environment, as the single-user server does.
+    binds [address]:[port], announces the port to the host under [lease]
+    ({!Server_startup_takeover.announce_account_server}), publishes the
+    access, binds the HTTPS listener of the environment, records the port for
+    the CLI of the workspace ([Workspace_connection]), calls [on_ready], and
+    serves until [sw] is cancelled. The cleartext listener follows the HTTP
+    mode of the environment, as the single-user server does. [lease] is the
+    BasePath lease of the base path that was judged.
 
     An [Error] comes before a connection is accepted and before the port is
     recorded, and the refusals come in the order of the constructors of
-    {!refusal}. {!Access_not_published} and {!Trust_policy_refused} come with
-    the port bound: the trust policy names the HTTPS port that bound.
+    {!refusal}. {!Port_not_announced}, {!Access_not_published} and
+    {!Trust_policy_refused} come with the port bound: the trust policy names
+    the HTTPS port that bound.
 
     On disk a refused boot leaves one thing, and only when the refusal comes
     after the table check: {!Server_bootstrap_http.https_listener_of_env}
@@ -99,8 +113,10 @@ val refusal_to_string : refusal -> string
     the host, the port and the URLs that
     {!Server_bootstrap_http.make_http_config} writes to the environment, the
     metrics of the HTTPS listener, the sockets that bound until [sw] ends,
-    and, at {!Trust_policy_refused}, the access that was published. The
-    caller ends the process on a refusal.
+    from {!Access_not_published} on the announcement of the port, which
+    ends with the lease or with the process, and, at
+    {!Trust_policy_refused}, the access that was published. The caller ends
+    the process on a refusal.
 
     The accept loop and the record of the port are the steps of the
     single-user boot ([run_serving] in [Server_runtime_bootstrap]), written a
@@ -110,6 +126,7 @@ val run
   -> env:Eio_unix.Stdenv.base
   -> address:Ipaddr.t
   -> port:int
+  -> lease:Server_startup_takeover.base_path_lease
   -> ?on_ready:(unit -> unit)
   -> Authz_boot_mode_read.multi_account
   -> (unit, refusal) result

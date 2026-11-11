@@ -14,11 +14,13 @@ type receipt =
   ; spans : span list
   }
 type system_observation =
+  | Current_norms of string
   | Active_goals of string
   | Direct_input_source of string
   | Goals_awaiting_proof of string
 
 let observation_block = function
+  | Current_norms text -> Prompt_block_id.Constitution_amendments, text
   | Active_goals text -> Prompt_block_id.Active_goals, text
   | Direct_input_source text -> Prompt_block_id.Direct_input_source, text
   | Goals_awaiting_proof text -> Prompt_block_id.Goals_awaiting_proof, text

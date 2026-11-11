@@ -41,7 +41,11 @@ type t = private
   ; current_norms : string option
         (** The complete current article set for native resumption or a
             projection containing isolated moves. Independent of the recorded System's basis; bounded by
-            the held articles rather than all inactive ids in history. *)
+            the held articles rather than all inactive ids in history.
+            Agent Core sends it behind [text] in the System of every request
+            ({!Keeper_run_prompt.assemble_request_context}), so on a turn that
+            has it an article write changes the System a request sends
+            although [text] stays equal. *)
   }
 
 (** The articles a System was rendered with, the ledger position they were

@@ -19,6 +19,7 @@ import {
 import { TurnInspectorDrawer } from './keeper-turn-inspector-drawer'
 import type { KeeperConversationEntry } from '../types'
 import type * as KeeperToolCallsApi from '../api/dashboard-keeper-tool-calls'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 
 vi.mock('../api/dashboard', () => {
   return {
@@ -241,10 +242,14 @@ function toolCallsForTurnWithoutDuration(): ToolCallsResponse {
 }
 
 beforeEach(() => {
+  // Reads run only for an accepted workspace that names its Observer instance.
+  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace',
+    connectionGeneration: 1, observerInstanceId: 'fixture-instance' }
   fetchKeeperToolCallsMock.mockResolvedValue(emptyToolCalls())
 })
 
 afterEach(() => {
+  acceptedExecutionWorkspace.value = null
   cleanup()
   vi.clearAllMocks()
 })

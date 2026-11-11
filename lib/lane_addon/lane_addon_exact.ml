@@ -566,7 +566,7 @@ let unreadable result =
 let invalid result =
   Result.map_error (fun detail -> Recovery_invalid detail) result
 
-let observe_retained ~store ~declaration_id ~schema request =
+let observe_retained_classified ~store ~declaration_id ~schema request =
   (* [original_schema] reads no record: it validates the caller's own schema and
      compares it with the grant kept in the request. A mismatch there cannot be
      cured by reading again, so it is an invalid original rather than an
@@ -579,6 +579,10 @@ let observe_retained ~store ~declaration_id ~schema request =
   | Some wire ->
     let* record = invalid (bound_record ~declaration_id request wire) in
     invalid (validate_record ~request ~schema:(Some schema) record)
+
+let observe_retained ~store ~declaration_id ~schema request =
+  Result.map_error describe_recovery_error
+    (observe_retained_classified ~store ~declaration_id ~schema request)
 
 (* The host link belongs to the original request owner, not to a worker
    evidence address. Canonical tagged tuples keep both ID spaces unambiguous. *)
@@ -862,7 +866,7 @@ let recover_retained ~store ~declaration_id ~schema request =
   let key = Lane_addon_store.root store, declaration_id, request.request_id in
   (* [observe_retained] already reports [recovery_error], so a concurrent claim
      is forwarded unchanged instead of being folded into one class. *)
-  if not (claim key) then observe_retained ~store ~declaration_id ~schema request
+  if not (claim key) then observe_retained_classified ~store ~declaration_id ~schema request
   else Fun.protect ~finally:(fun () -> release key) (fun () ->
     let* wire = unreadable (Lane_addon_store.load_exact_request store ~declaration_id
       ~request_id:request.request_id) in
@@ -897,7 +901,7 @@ let recover_retained ~store ~declaration_id ~schema request =
                         let* () = unreadable (Lane_addon_store.save_exact_request store ~declaration_id
                           ~request_id:request.request_id
                           (record_to_json ~declaration_id ~request_id:request.request_id finished)) in
-                        observe_retained ~store ~declaration_id ~schema request))
+                        observe_retained_classified ~store ~declaration_id ~schema request))
         | None, ([] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
             | Unknown_raised _ | Delivery_refused _ | Reused) :: _)
         | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused), _ ->

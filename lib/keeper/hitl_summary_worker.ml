@@ -67,6 +67,7 @@ let execute_prepared_flow_with_queue_ops_current
       Executed
     | Http_attempt (attempt, resolved) ->
     let flow =
+      Exact_lane_slot_capture.flow attempt (fun () ->
       Exact_output.execute_flow_once
         ~net
         ~clock
@@ -75,7 +76,7 @@ let execute_prepared_flow_with_queue_ops_current
         ~before_dispatch:guarded_before_dispatch
         ~before_advance:guarded_before_advance
         ~validate:(validate_success prepared)
-        attempt
+        attempt)
     in
     Runtime_exact_lane_backpressure.observe ~resolved flow;
     match flow with
@@ -410,6 +411,7 @@ let spawn_with
                | None -> `Null )
            ]));
     let observed_usage = ref None in
+    let slot_capture = Exact_lane_slot_capture.create ~owner:(Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge) () in
     let complete ?usage outcome output =
       match
         Exact_lane_run_registry.mark_completed
@@ -419,6 +421,7 @@ let spawn_with
           ~elapsed_s:(Time_compat.now () -. started_at)
           ~selected_slot:!selected_slot
           ?usage
+          ?slot_observations:(Exact_lane_slot_capture.observations slot_capture)
           ~output
           ()
       with
@@ -433,6 +436,8 @@ let spawn_with
     Eio.Fiber.fork ~sw (fun () ->
     let execution_outcome =
       with_outcome_sink observed_outcome
+      @@ fun () ->
+      Exact_lane_slot_capture.with_capture slot_capture
       @@ fun () ->
       try
         match

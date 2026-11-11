@@ -2891,8 +2891,8 @@ status: reference
   - Goal 하나에 한 건: 새 관측이 같은 Goal의 이전 관측을 대신한다. 기준이 바뀌면
     (`criterion_revision`이 달라지면) 옛 관측은 새 기준의 값으로 보이지 않고
     `not_recorded`가 된다. Goal을 지우면 그 관측도 지운다.
-  - 화면: Goal 트리·상세와 `masc_goal_list`가 `reported`·`not_recorded`·`unavailable`·
-    `not_loaded` 중 하나로 보여 준다. `Dashboard Goals`의 진행 바는 이 값이
+  - 화면: Goal 트리·상세와 `masc_goal_list`의 전체 행(`detailed=true` 또는 `goal_id`)이
+    `reported`·`not_recorded`·`unavailable`·`not_loaded` 중 하나로 보여 준다. `Dashboard Goals`의 진행 바는 이 값이
     아니라 연결된 Task 완료 수다.
   → [Goal_measurement](../../lib/goal/goal_measurement.mli)
 

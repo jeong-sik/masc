@@ -42,7 +42,8 @@ idle일 때만 이 객체에서 `request_id`를 생략한다. 상태·기준·�
 
 ## 실행 예시
 
-먼저 `masc_goal_list` 응답의 `goals`에서 같은 `id`의 Goal을 찾는다. 그 항목의
+먼저 `masc_goal_list`를 `goal_id`로 불러 그 Goal의 전체 행을 읽는다. 목록 행은
+`detailed=true`일 때만 `verification`을 싣는다. 그 항목의
 `phase`와 `criterion_revision`을 사용한다. `verification.completion.state`가
 `proof_pending`이면 같은 `completion`의 `request_id`를, 판정이 있으면
 `completion.verdict.request_id`를 확인한다. `verification.completion.state`의

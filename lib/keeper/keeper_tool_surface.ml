@@ -62,6 +62,13 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
   | Ok persisted_names ->
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
+  (* A list without [detailed] carries one roster row per Keeper. A read that
+     names a Keeper is a read of that one Keeper, so it keeps the whole row
+     whatever [detailed] says. *)
+  let row_shape = match detailed, named with
+    | false, None -> Roster_row
+    | true, (None | Some _) | false, Some _ -> Detail_row
+  in
   let cache_key =
     Printf.sprintf "%s:%d:%b" config.base_path limit detailed
   in
@@ -99,12 +106,12 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
         let rows =
           names
           |> List.filter_map (fun name ->
-               keeper_list_row_json ~runtime_class:"keeper" config name)
+               keeper_list_row_json_of_shape ~shape:row_shape ~runtime_class:"keeper" config name)
         in
         (* [truncated] answers "did [limit] drop names", nothing else. [count]
            can still be below [min total limit] in the detailed shape when a
-           listed name has no readable metadata and [keeper_list_row_json]
-           yields no row. *)
+           listed name has no readable metadata and
+           [keeper_list_row_json_of_shape] yields no row. *)
         let listing =
           [
             ("total", `Int total);
@@ -141,12 +148,13 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
       ~ttl_s:(keeper_list_cache_ttl_s ()) compute
   in
   (* Equipment bypasses the metadata TTL; one immutable ledger read serves
-     all rows, including failures, for this response. *)
-  let equipment = Candle_equipment.reader ~now:Time_compat.now ~base_path:config.base_path () in
+     all rows, including failures, for this response. A roster row carries no
+     portrait, so the read is lazy and a roster answer never makes it. *)
+  let equipment = lazy (Candle_equipment.reader ~now:Time_compat.now ~base_path:config.base_path ()) in
   let row = function
     | `Assoc fields as json ->
       let portrait = match Json_util.assoc_string_opt "name" json with
-        | Some keeper -> (match equipment ~keeper with
+        | Some keeper -> (match (Lazy.force equipment) ~keeper with
             | Ok value -> Keeper_portrait_equipment.Ready value
             | Error reason -> Keeper_portrait_equipment.Unavailable reason)
         | None -> Keeper_portrait_equipment.Unavailable "Keeper name unavailable" in
@@ -154,12 +162,13 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
         :: List.remove_assoc "candle_account_revision"
           (List.remove_assoc "candle_balance_milli" (List.remove_assoc "portrait" fields)))
     | json -> json in
-  let data = match data with
-    | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+  let data = match row_shape, data with
+    | Roster_row, _ -> data
+    | Detail_row, `Assoc fields -> `Assoc (List.map (fun (key, value) ->
         if key = (if detailed then "keepers" else "items") then
           match value with `List rows -> key, `List (List.map row rows) | value -> key, value
         else key, value) fields)
-    | json -> json in
+    | Detail_row, json -> json in
   let data = match cache_bypassed, data with
     | true, `Assoc fields ->
         `Assoc (("projection_cache_bypassed", `Bool true) :: fields)

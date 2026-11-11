@@ -1124,15 +1124,18 @@ async function hydrateTrackedKeeperChatOperation(
     pendingOperationWaiters.get(key)?.()
     pendingOperationWaiters.delete(key)
     hydratingKeeperChatOperations.delete(key)
-    if (current()) {
-      const observingAnother = trackedKeeperChatOperationsForKeeper(request.keeperName)
-        .some(candidate => hydratingKeeperChatOperations.has(`${candidate.keeperName}:${candidate.operationId}`))
-      if (!observingAnother && activeStreamEntryId(request.keeperName) === null) {
-        setRecordValue(keeperSending, request.keeperName, false)
-        setRecordValue(keeperStreamStartedAt, request.keeperName, null)
-        clearKeeperStreamSignal(request.keeperName)
-      }
-      if (lookupError !== null && !recoveryOwned) retainFailedOperationObservation(request, lookupError, current)
+    // This observation turned the sending state on, so it turns it off even after its
+    // owner (workspace, credential, actor) was replaced. Nothing else resets the state
+    // on an owner change, and the chat would keep showing an answer in progress.
+    const observingAnother = trackedKeeperChatOperationsForKeeper(request.keeperName)
+      .some(candidate => hydratingKeeperChatOperations.has(`${candidate.keeperName}:${candidate.operationId}`))
+    if (!observingAnother && activeStreamEntryId(request.keeperName) === null) {
+      setRecordValue(keeperSending, request.keeperName, false)
+      setRecordValue(keeperStreamStartedAt, request.keeperName, null)
+      clearKeeperStreamSignal(request.keeperName)
+    }
+    if (current() && lookupError !== null && !recoveryOwned) {
+      retainFailedOperationObservation(request, lookupError, current)
     }
   }
   return lookupError

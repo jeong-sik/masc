@@ -395,5 +395,6 @@ worktree `.worktrees/h2-backpressure` 에서 gh stack 으로 쌓는다. 맨 아�
 | L4a | `http/connection-socket-bounds` | D4, D6. TLS 연결의 보내기 쪽을 닫은 뒤 상한은 L4a2 |#51208 |
 | L4a2 | `http/tls-send-shutdown-bound` | D4 의 나머지: `Tls_stream_socket.shutdown` 이 감싸개에 알린다 |#51209 |
 | L4b | `http/tls-write-pieces` | D8: 쓰기 조각. 암호 순서는 측정 뒤 그대로 둠 | #51228 |
+| L4c | `deps/tls-eio-fork-write` | D8: tls-eio 포크 고정, 감싸개의 복사 버퍼 삭제 | #51374 |
 | L5 | `http/sse-producer-scope` | D7 | |
 | L6 | `http/shared-payloads` | D5 | |

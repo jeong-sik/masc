@@ -281,6 +281,37 @@ describe('Operator Snapshot actual HTTP and SSE ownership', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it.each(['generation', 'compute sequence', 'terminal sequence', 'retired epoch'] as const)(
+    'preserves displayed approvals and retries when HTTP has an older %s', async order => {
+      const current = publication('current approvals', 2, 7)
+      const stale = { ...current, root: { project: 'stale approvals' } }
+      if (order === 'generation') stale.snapshot_generation = 1
+      if (order === 'compute sequence') stale.snapshot_compute_sequence = 6
+      if (order === 'terminal sequence') stale.snapshot_terminal_sequence = 6
+      const epoch = order === 'retired epoch' ? 'replacement epoch' : current.snapshot_epoch
+      const fetch = vi.fn().mockResolvedValueOnce(json(current))
+        .mockResolvedValueOnce(json(stale))
+        .mockResolvedValue(json({ ...publication('recovered approvals', 2, 8), snapshot_epoch: epoch }))
+      vi.stubGlobal('fetch', fetch)
+      const s = await surface()
+      stop = s.setupOperatorSnapshotObservation()
+      await flush()
+      if (order === 'retired epoch') s.push({ ...current, snapshot_epoch: epoch })
+      await s.refreshOperatorSnapshot({ force: true })
+      expect(s.operatorSnapshot.value?.root.project).toBe('current approvals')
+      expect(s.operatorError.value).toBeNull()
+      expect(s.operatorErrorStatus.value).toBeNull()
+      expect(vi.getTimerCount()).toBe(1)
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(fetch).toHaveBeenCalledTimes(3)
+      expect(s.operatorSnapshot.value?.root.project).toBe('recovered approvals')
+      expect(s.operatorError.value).toBeNull()
+      await vi.advanceTimersByTimeAsync(300_000)
+      expect(fetch).toHaveBeenCalledTimes(3)
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
   it('retains owed recovery when a Current HTTP body precedes an accepted hard mutation', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(json(publication('baseline', 1, 1)))
       .mockResolvedValueOnce(json(publication('older HTTP', 1, 2)))

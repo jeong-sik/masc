@@ -10,7 +10,7 @@ import { projectionReadOutcome, type ProjectionReadOutcome } from './lib/project
 import { isRecord } from './lib/type-guards'
 import { normalizeOperatorSnapshot } from './operator-normalizers'
 import { operatorError, operatorErrorStatus, operatorLoading } from './operator-signals'
-import { clearOperatorSnapshot, publishOperatorSnapshot } from './operator-snapshot-state'
+import { clearOperatorSnapshot, operatorSnapshot, publishOperatorSnapshot } from './operator-snapshot-state'
 import { hasOperatorSnapshotPublication, operatorSnapshotPublication, operatorSnapshotQuery, sameOperatorSnapshotQuery,
   type OperatorSnapshotPublication, type OperatorSnapshotQuery } from './operator-snapshot-contract'
 
@@ -226,6 +226,13 @@ export async function refreshOperatorSnapshot(options?: { force?: boolean }): Pr
       // HTTP may repeat the immutable canonical identity; a newer installed
       // body or mutation has already fenced this flight by displayRevision.
       if (publication !== null && publicationOrder(original, publication) === 'older') {
+        if (operatorSnapshot.peek() !== null) {
+          // This response cannot replace accepted rows. Keep the owed read
+          // alive without treating an older replica as a new source failure.
+          original.lastReadAt = null
+          original.recovery.failed(() => readAgain(original))
+          return
+        }
         throw new Error('Operator Snapshot response precedes the accepted publication')
       }
       installBody(original, prepared)

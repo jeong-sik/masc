@@ -16,17 +16,23 @@ val home_decision_rows : prepared -> (Masc_tui_types.home_action * string) list
 val clear_ask_answering : Masc_tui_types.state -> unit
 val reconcile_home_request_detail : Masc_tui_types.state -> unit
 val home_continue_rows : prepared -> (Masc_tui_types.home_action * string) list
+val home_operator_rows : prepared -> (Masc_tui_types.home_action * string) list
+val operator_action_label : Masc_tui_types.state -> Masc.Operator_action_reason.t -> string
 val home_selected_action : prepared -> Masc_tui_types.home_action option
-val home_selection_changed : prepared -> bool
 val home_initial_reading_ready : prepared -> bool
 (** Action notices rendered before the decision window, in display order. *)
 val home_notice_lines : prepared -> string list
-val home_requests_budget : prepared -> chrome_budget:int -> int
-(** The rows left for the decision window out of the body's [chrome_budget]:
-    one less while the one-time help line is shown, and one less for the
-    requests link. Never negative. *)
-val home_decision_window : prepared -> scroll:int -> budget:int -> int * int
-(** [scroll] is the current viewport input, so a Build may store its clamped
-    window and render again against a changed terminal height using the same
-    immutable reading. *)
+type body = private {
+  hb_help : bool;
+  hb_shortcuts : bool;
+  hb_notices : string list;
+  hb_selection_changed : bool;
+  hb_rows : (Masc_tui_types.home_action * string) list;
+  hb_first : int;
+  hb_total : int;
+  hb_spare : int;
+}
+val home_body : prepared -> scroll:int -> budget:int -> body
+(** Renderer and loop share this body allocation. A positive available body
+    reserves a selected destination row before optional chrome and notices. *)
 val home_step : Masc_tui_types.state -> backwards:bool -> unit

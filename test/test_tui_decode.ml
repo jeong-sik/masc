@@ -9584,18 +9584,41 @@ let test_decode_server_identity_reads_the_operator_rollup () =
     | `Assoc base -> `Assoc (base @ fields)
     | _ -> Alcotest.fail "the probe fixture is an object"
   in
-  let read json =
+  let observation json =
     match Tui_decode.decode_server_identity json with
     | Ok identity -> identity.Tui_decode.sid_operator_action
     | Error detail -> Alcotest.fail detail
   in
-  let reason = "typesafeai:payment_required https://api.typesafe.ai/v1/systemone since=2026-11-04T06:45:51Z" in
+  let read json = match observation json with
+    | Some (Tui_decode.Operator_actions_observed actions) ->
+        Some (List.map Masc.Operator_action_reason.diagnostic actions)
+    | Some (Tui_decode.Operator_actions_unavailable _) | None -> None in
+  let action = Masc.Operator_action_reason.other ~component:"typesafeai"
+      ~reason:"payment_required https://api.typesafe.ai/v1/systemone since=2026-11-04T06:45:51Z" in
+  let reason = Masc.Operator_action_reason.diagnostic action in
   Alcotest.(check (option (list string))) "the reasons when the operator has to act" (Some [ reason ])
     (read (with_rollup [ "operator_action_required", `Bool true
-                       ; "operator_action_reasons", `List [ `String reason ] ]));
+                       ; "operator_action_reasons", `List [ `String reason ]
+                       ; "operator_actions", `List [Masc.Operator_action_reason.to_json action] ]));
   Alcotest.(check (option (list string))) "nothing to do is an answer too" (Some [])
-    (read (with_rollup [ "operator_action_required", `Bool false; "operator_action_reasons", `List [] ]));
+    (read (with_rollup [ "operator_action_required", `Bool false; "operator_action_reasons", `List []; "operator_actions", `List [] ]));
   Alcotest.(check (option (list string))) "an older server cannot say" None (read health_probe);
+  Alcotest.(check (option (list string))) "raw text alone grants no typed target" None
+    (read (with_rollup ["operator_action_required",`Bool true;
+                       "operator_action_reasons",`List [`String reason]]));
+  List.iter (fun typed ->
+    let fields = ["operator_action_required",`Bool true;
+                  "operator_action_reasons",`List [`String reason]] @ typed in
+    match observation (with_rollup fields) with
+    | Some (Tui_decode.Operator_actions_unavailable {diagnostics;error}) ->
+        Alcotest.(check (list string)) "original diagnostics remain readable" [reason] diagnostics;
+        Alcotest.(check bool) "the decoder cause remains readable" true (error <> "")
+    | Some (Tui_decode.Operator_actions_observed _) | None ->
+        Alcotest.fail "missing or malformed typed evidence must retain original diagnostics")
+    [[]; ["operator_actions",`Null]; ["operator_actions",`List [`String "not a typed action"]]];
+  Alcotest.(check (option (list string))) "warming is not an observed empty collection" None
+    (read (with_rollup ["operator_action_required",`Bool false;
+                       "operator_action_reasons",`List [];"operator_actions",`Null]));
   Alcotest.(check (option (list string))) "a flag that disagrees with its list is not read" None
     (read (with_rollup [ "operator_action_required", `Bool true; "operator_action_reasons", `List [] ]))
 

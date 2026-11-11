@@ -1207,7 +1207,7 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
 (* The full fleet and selected Keeper readings remain reachable even when the
    small overview cannot fit them beside a useful list. This is a captured
    reading: selection and later refreshes do not change an open document. *)
-let memory_overview_reading ~cols (state : state) =
+let memory_health_reading ~cols (state : state) ~keeper ~original =
   let ko = state.ui_language = Lang_ko in
   let section heading lines : Masc_tui_detail_reading.section =
     { heading; body = String.concat "\n" lines }
@@ -1224,7 +1224,7 @@ let memory_overview_reading ~cols (state : state) =
       state.memory_health_error)
     @ memory_refused_keeper_lines state
   in
-  let keeper_section = match selected_memory_keeper state with
+  let keeper_section = match keeper with
     | None -> []
     | Some keeper ->
         let input = Masc_tui_fetched.view_for ~equal:String.equal state.memory_input
@@ -1236,6 +1236,15 @@ let memory_overview_reading ~cols (state : state) =
            ((if ko then "선택한 키퍼 · " else "Selected Keeper · ") ^ keeper.mkh_keeper_id)
            context.rows]
   in
+  let target_notice = match original, keeper with
+    | Some {Masc.Operator_action_reason.cause=Memory_attention {keeper;_};_}, None ->
+        [section (if ko then "대상 기억 미관측" else "Target memory unobserved")
+          [Terminal_text.single_line keeper;
+           (if ko then "이 Keeper의 기억 상태는 이 조회에서 확인하지 못했습니다."
+            else "This reading did not establish this Keeper's memory state.")]]
+    | Some {cause=(Memory_attention _ | Shutdown_fenced_backlog _ | Other_reported);_}, Some _
+    | Some {cause=(Shutdown_fenced_backlog _ | Other_reported);_}, None
+    | None, (Some _ | None) -> [] in
   let fleet_alerts = match state.memory_health with
     | None -> []
     | Some snapshot ->
@@ -1260,7 +1269,24 @@ let memory_overview_reading ~cols (state : state) =
           [section (if ko then "조회 경고" else "Read warnings") warnings])
      @ (if fleet_alerts = [] then [] else
           [section (if ko then "읽은 키퍼의 알림" else "Alerts from decoded Keepers") fleet_alerts])
-     @ keeper_section)
+     @ target_notice @ keeper_section
+     @ (match original with
+        | None -> []
+        | Some action -> [section (if ko then "원래 조치 관측 · 별도 출처" else "Original action · separate source")
+            [Masc.Operator_action_reason.diagnostic action;
+             Yojson.Safe.pretty_to_string (Masc.Operator_action_reason.to_json action)]]))
+
+let memory_overview_reading ~cols state =
+  memory_health_reading ~cols state ~keeper:(selected_memory_keeper state) ~original:None
+
+let memory_action_reading ~cols state ~(action : Masc.Operator_action_reason.t) =
+  match action.cause with
+  | Memory_attention {keeper;_} ->
+      let selected = Option.bind state.memory_health (fun snapshot ->
+        List.find_opt (fun row -> String.equal row.Masc.Tui_decode_memory_health.mkh_keeper_id keeper)
+          snapshot.mhs_keepers) in
+      Some (memory_health_reading ~cols state ~keeper:selected ~original:(Some action))
+  | Shutdown_fenced_backlog _ | Other_reported -> None
 
 (* A single row replaces an unfittable fleet header. It leads with any
    actionable read failures, then unmeasured coverage, and always names the

@@ -18,31 +18,6 @@ val row_lines : cells:int -> string -> string list
     dropped: the lines joined without their spaces are the text without its
     spaces, and no line is wider than [cells]. *)
 
-val reason_lines : cells:int -> string -> string list
-(** One reason the server gives for needing the operator, as the lines it is
-    drawn on: wrapped like {!row_lines}, each line in the warning colour. The
-    Action needed card and the plain layout draw a reason through this. *)
-
-val reasons_title : title:string -> int -> string
-(** The caller's localized heading over the reasons, naming how many there are. *)
-
-val plain_reasons :
-  title:string ->
-  indent:string -> inner:int -> rows:int -> string list -> (string option * string) list
-(** The reasons as the plain layout draws them, one element to a row: the
-    heading, the lines of each reason that is drawn and, when some are left
-    out, a last row that says how many. A row is an optional style and its
-    text; the lines of a reason carry their own colour. The heading is
-    {!reasons_title} after the layout's one-space margin. [indent] begins each
-    reason line and the note, and a reason line is wrapped to the cells that
-    [inner] leaves after it.
-
-    The reasons drawn are the first ones, whole and in order. All of them are
-    drawn when they fit in [rows] rows; otherwise as many as fit together with
-    the note. The length of the list is the height drawn. It is empty when
-    there is no reason, or when the first one does not fit under the heading
-    (with the note, when there is more than one reason). *)
-
 type titles =
   { decisions : string
   ; continuation : string
@@ -61,17 +36,16 @@ val draw :
   decisions_whole:bool ->
   continuation:('action * string) list ->
   status:(cells:int -> string list) ->
-  actions:string list ->
+  actions:('action * string) list ->
   string list option
 (** The cards as lines of exactly [inner] cells, or [None] when they do not fit
     and the caller draws the plain rows instead: [inner] holds fewer than two
     columns, the cards need more than [rows] lines, or [decisions_whole] is
-    false. [decisions_whole] says the window holds every decision; a window
-    that holds only some is named by its row range in the plain layout's
-    heading, which the card title has no place for. The cards are as tall as
+    false. [decisions_whole] says the window holds every decision; a partial
+    window uses the plain selectable list instead. The cards are as tall as
     their rows and the two columns end on the same line.
 
     [actions] are the reasons the server gives for needing the operator, one
     row each, drawn as a card under the status readings. With none, there is
-    no card. When the card would make the cards need more than [rows] lines,
-    the cards are drawn without it: the footer still counts the reasons. *)
+    no card. An unfittable action card returns [None], so the plain window
+    retains its selected destination instead of silently dropping the card. *)

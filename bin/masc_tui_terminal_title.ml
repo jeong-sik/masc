@@ -4,7 +4,7 @@ type activity =
 
 type snapshot =
   { activity : activity
-  ; attention : int
+  ; attention : int option
   ; keeper_name : string option
   ; runtime_id : string option
   ; workspace : string
@@ -135,7 +135,10 @@ let text snapshot =
   let workspace = Option.value ~default:"MASC" (nonblank snapshot.workspace) in
   (* A tab strip cuts a title from the right, so the count leads. *)
   let attention =
-    if snapshot.attention > 0 then Printf.sprintf "(%d) " snapshot.attention else ""
+    match snapshot.attention with
+    | Some count when count > 0 -> Printf.sprintf "(%d) " count
+    | Some _ -> ""
+    | None -> "(?) "
   in
   let parts = activity_text snapshot.activity :: Option.to_list identity @ [ workspace ] in
   truncate_scalars (attention ^ String.concat " \xc2\xb7 " parts)

@@ -622,22 +622,6 @@ let test_an_open_question_keeps_the_badge_up_until_answered () =
   check string "the answered question leaves the badge" "" (label ())
 
 (* Every open ask is a row Enter can open, and only open asks are. *)
-(* The drawing and the key loop that stores the decision window's first row
-   read one number for the rows Home leaves the window. It is the chrome's body
-   budget less the requests link, and less the one-time help line while that
-   line is shown. *)
-let test_the_window_budget_follows_the_help_line () =
-  let state = agenda_state () in
-  state.help_hint_shown <- false;
-  check int "help line and requests link take two rows" 18
-    (Masc_tui_home.home_requests_budget (Masc_tui_home.prepare state) ~chrome_budget:20);
-  state.help_hint_shown <- true;
-  check int "requests link takes one row" 19
-    (Masc_tui_home.home_requests_budget (Masc_tui_home.prepare state) ~chrome_budget:20);
-  state.help_hint_shown <- false;
-  check int "never below zero" 0
-    (Masc_tui_home.home_requests_budget (Masc_tui_home.prepare state) ~chrome_budget:1)
-
 let test_each_open_question_is_a_row_enter_opens () =
   let state = agenda_state () in
   set_asks state
@@ -665,7 +649,7 @@ let home_questions state =
        match action with
        | Masc_tui_types.Home_request (Masc_tui_types.Home_question ask) -> Some ask
        | Masc_tui_types.Home_request _ | Home_approvals | Home_agenda | Home_resume _
-       | Home_read_last _ | Home_choose_keeper | Home_create_keeper -> None)
+       | Home_read_last _ | Home_choose_keeper | Home_create_keeper | Home_operator_action _ -> None)
     (Masc_tui_home.home_decision_rows (Masc_tui_home.prepare state))
 
 let asker_of (ask : Masc.Tui_decode_asks.ask_key) =
@@ -738,6 +722,36 @@ let test_home_approval_list_preserves_its_caller () =
   check string "navigation retains the operator's draft" "draft kept while reading requests"
     (Masc_tui_message_input.contents state.msg_input)
 
+let test_home_operator_target_keeps_original_request () =
+  let module A = Masc.Operator_action_reason in
+  let module P = Masc.Keeper_librarian_pending in
+  let state = agenda_state () in
+  let action request = A.memory_attention ~keeper:"keeper-a" ~durable:(Some (P.Worker
+      {installation_id="original";request_id=request;wait=P.Missing_after_dispatch}))
+      ~admission:None ~measured_at:(Some 123.) in
+  let install item =
+    match Masc.Tui_decode.decode_server_identity (`Assoc
+      ["operator_action_required",`Bool true;
+       "operator_action_reasons",`List [`String (A.diagnostic item)];
+       "operator_actions",`List [A.to_json item]]) with
+    | Ok identity -> state.server_identity <- Some identity
+    | Error error -> Alcotest.fail error in
+  let original = action "request-one" in
+  install original;
+  let target = match Masc_tui_home.home_operator_rows (Masc_tui_home.prepare state) with
+    | [(target,_)] -> target
+    | _ -> Alcotest.fail "one original observation is required" in
+  state.home_selected <- Some target;
+  check bool "the selected target retains the original request and scope" true
+    (match target with
+     | Masc_tui_types.Home_operator_action (authority,_,item) ->
+         authority=state.workspace_authority && A.equal original item
+     | Home_request _ | Home_approvals | Home_agenda | Home_resume _
+     | Home_read_last _ | Home_choose_keeper | Home_create_keeper -> false);
+  install (action "request-two");
+  check bool "the same array index cannot retarget to another original" true
+    (Option.is_none (Masc_tui_home.home_selected_action (Masc_tui_home.prepare state)))
+
 let () =
   run
     "tui agenda"
@@ -783,7 +797,9 @@ let () =
             test_a_goal_to_confirm_is_waiting_on_the_operator
         ;] )
     ; ( "questions waiting on the operator"
-      , [ test_case "an ask waits once however many questions it holds" `Quick
+      , [ test_case "operator target keeps the original request" `Quick
+            test_home_operator_target_keeps_original_request
+        ; test_case "an ask waits once however many questions it holds" `Quick
             test_an_ask_waits_once_however_many_questions_it_holds
         ; test_case "the total adds the questions" `Quick
             test_the_strip_count_adds_the_questions
@@ -791,8 +807,6 @@ let () =
             test_the_badge_tells_the_kinds_apart
         ; test_case "an open question keeps the badge up until answered" `Quick
             test_an_open_question_keeps_the_badge_up_until_answered
-        ; test_case "the window budget follows the help line" `Quick
-            test_the_window_budget_follows_the_help_line
         ; test_case "each open question is a row Enter opens" `Quick
             test_each_open_question_is_a_row_enter_opens
         ; test_case "two installations asking with one id are two targets" `Quick

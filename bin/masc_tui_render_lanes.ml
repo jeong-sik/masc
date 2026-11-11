@@ -998,15 +998,21 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     | Some runs -> runs
   in
   let shown = List.length runs in
+  let text ko en = ui_text state ~ko ~en in
   let coverage =
+    let korean = state.ui_language = Lang_ko in
     let count = match state.lane_runs_total with
-      | Some total -> Printf.sprintf "%d loaded / %d retained" shown total
-      | None -> Printf.sprintf "%d loaded" shown in
+      | Some total ->
+          Printf.sprintf
+            (if korean then "%d개 읽음 · 보관 %d개" else "%d loaded · %d retained")
+            shown total
+      | None -> Printf.sprintf (if korean then "%d개 읽음" else "%d loaded") shown in
     let continuation =
-      if state.lane_runs_loading then " · loading"
+      if state.lane_runs_loading then text " · 읽는 중" " · loading"
       else match state.lane_runs_next with
-        | Some _ -> " · ] older"
-        | None -> if Option.is_some state.lane_runs then " · end" else "" in
+        (* The key the footer and the dispatcher name for the older page. *)
+        | Some _ -> text " · > 앞선 기록" " · > older"
+        | None -> if Option.is_some state.lane_runs then text " · 끝" " · end" else "" in
     count ^ continuation in
   (* Laid out like the other title rows that name one thing before the badge.
      The label was padded to twenty cells here, so at eighty columns the
@@ -1022,7 +1028,6 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  let text ko en = ui_text state ~ko ~en in
   let subject_kind, subject_heading =
     match lane with
     | Lane_run_identity.Verifier ->
@@ -1078,7 +1083,8 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
       with
       | Page_failed -> page_failed_note
       | Page_unread -> page_unread_note_while ~reading:state.lane_runs_loading
-      | Page_empty -> "  (no retained runs for this lane)"
+      | Page_empty ->
+          text "  (보관된 실행이 없음)" "  (no retained runs for this lane)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -1112,7 +1118,9 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [runs %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
+      (Printf.sprintf
+         (if state.ui_language = Lang_ko then "  [실행 %s]" else "  [runs %s]")
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols

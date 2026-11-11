@@ -1975,7 +1975,7 @@ let test_actual_partition_write_metadata_follows_the_original_append () =
        | [change] ->
            Alcotest.(check string) "the original Keeper owns the source" "alpha" change.keeper_name;
            Alcotest.(check string) "source root is captured before the write"
-             (Fs_compat.realpath_lenient (Masc.Common.masc_dir_from_base_path ~base_path)) change.canonical_masc_root;
+             (Fs_compat.realpath_lenient (Common.masc_dir_from_base_path ~base_path)) change.canonical_masc_root;
            (match change.source with Partition -> () | Candidate -> Alcotest.fail "wrong ledger source")
        | [] | _ :: _ :: _ -> Alcotest.fail "actual root append did not notify once");
       Alcotest.(check int) "listener failure cannot undo the actual durable root" 1

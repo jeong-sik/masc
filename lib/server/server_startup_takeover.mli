@@ -72,6 +72,26 @@ type base_path_lock_rejection =
       ; path : string
       ; reason : string
       }
+  | Announcement_port_invalid of { port : int }
+      (** An account server announcement was asked for, or about, a number
+          outside 1..65535. *)
+  | Announcement_already_made of
+      { path : string
+      ; port : int
+      }
+      (** This process already announces [port] on the file; it announces
+          once. *)
+  | Announcement_lease_not_active of { path : string }
+      (** The handle is not the active lease of this process: it was
+          released, or it never was. *)
+  | Announcement_port_locked of
+      { path : string
+      ; port : int
+      ; holder : int option
+      }
+      (** Another process holds a lock over the byte of [port]. [holder] is
+          that process when its lock is the write lock of that one byte,
+          the shape of an announcement. *)
 
 (* Only the process-local table establishes ownership identity. The recorded
    number is written after locking and may describe a previous owner or a
@@ -248,14 +268,18 @@ val capture_existing_owner :
 
 val announce_account_server : base_path_lease -> port:int -> (unit, base_path_lock_rejection) result
 (** Announce [port] until the lease is released, or the process exits or
-    execs. Call it once, with the port bound. A handle that is not the
-    active lease of this process, a second call, a [port] outside 1..65535,
-    a lease path that no longer names the lease this process holds, an
-    announcement file that is not a regular file of this user with one
-    name, and a byte that another process holds a lock on are refused, and
-    nothing is announced. The file is made when it is missing, and is never
-    removed. The directory is not validated again as
-    {!acquire_base_path_lock} validated it (the boundary of #24344). *)
+    execs. Call it once, with the port bound. Each refusal says why, and
+    after one nothing more is announced than before the call: a [port]
+    outside 1..65535 ([Announcement_port_invalid]), a handle that is not the
+    active lease of this process ([Announcement_lease_not_active]), a second
+    call ([Announcement_already_made], and the first announcement stays), a
+    byte that another process holds a lock on ([Announcement_port_locked]),
+    a lease path that no longer names the lease this process holds
+    ([Lease_identity_changed]), and an announcement file that is not a
+    regular file of this user with one name (the [Lease_file_*] refusals).
+    The file is made when it is missing, and is never removed. The directory
+    is not validated again as {!acquire_base_path_lock} validated it (the
+    boundary of #24344). *)
 
 val account_server_port_holder :
   run_dir:string -> base_path:string -> port:int -> (int option, base_path_lock_rejection) result
@@ -270,8 +294,9 @@ val account_server_port_holder :
     no file. The announcing process is found by the identity of the file,
     under any spelling of [run_dir], and is answered through the descriptor
     that holds its lock, since closing a second one would drop the
-    announcement. A [port] outside 1..65535, and a kernel that cannot be
-    asked, are a [Lease_io_failed]. *)
+    announcement. A [port] outside 1..65535 is an
+    [Announcement_port_invalid], and a kernel that cannot be asked a
+    [Lease_io_failed]. *)
 
 type account_server_announcement =
   { pid : int  (** The holder of the lock, as the kernel names it. *)

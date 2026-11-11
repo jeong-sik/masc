@@ -260,6 +260,69 @@ let format_post_compact ~replies (p : Board.post) =
     replies
 ;;
 
+type search_hit =
+  { full : string
+  ; one_line : string
+  }
+
+let search_hit_separator = "\n---\n"
+
+(* A search with compact=false joins every hit in full. Past the ceiling the
+   caller's lane carries inline, that text is stored as a blob and the model
+   reads a 200-character preview of the first post. In the 240 hours to
+   2026-11-11 10:30 KST, 43 of 3,232 calls were over 16,384 bytes, all with
+   compact=false, and none was read back. The first hits whose full text fits
+   stay full; the rest shrink to the one-line rows a compact search returns,
+   and each row starts with the post_id that masc_board_post_get reads. *)
+let join_search_hits ~max_bytes ~header hits =
+  let total = List.length hits in
+  let full_lengths = Array.of_list (List.map (fun hit -> String.length hit.full) hits) in
+  let row_lengths = Array.of_list (List.map (fun hit -> String.length hit.one_line) hits) in
+  let separator_length = String.length search_hit_separator in
+  let note shown =
+    Printf.sprintf
+      "(본문은 앞의 %d개만 실었어요. 나머지 %d개는 결과 크기 상한 때문에 한 줄로 줄였어요. \
+       본문은 post_id 로 masc_board_post_get 을 불러서 읽어요.)"
+      shown
+      (total - shown)
+  in
+  let sum lengths ~from ~until =
+    let acc = ref 0 in
+    for i = from to until - 1 do
+      acc := !acc + lengths.(i)
+    done;
+    !acc
+  in
+  (* Bytes of the text that shows the first [shown] hits in full. *)
+  let length_with shown =
+    let fulls =
+      sum full_lengths ~from:0 ~until:shown
+      + if shown > 0 then (shown - 1) * separator_length else 0
+    in
+    if shown = total
+    then String.length header + fulls
+    else (
+      let rows = sum row_lengths ~from:shown ~until:total + (total - shown - 1) in
+      let lead = if shown > 0 then separator_length else 0 in
+      String.length header + fulls + lead + String.length (note shown) + 1 + rows)
+  in
+  let rec largest_fitting shown =
+    if shown = 0 || length_with shown <= max_bytes then shown else largest_fitting (shown - 1)
+  in
+  let shown = largest_fitting total in
+  let fulls = List.filteri (fun i _ -> i < shown) hits |> List.map (fun hit -> hit.full) in
+  let rows = List.filteri (fun i _ -> i >= shown) hits |> List.map (fun hit -> hit.one_line) in
+  match rows with
+  | [] -> header ^ String.concat search_hit_separator fulls
+  | _ :: _ ->
+    let lead =
+      match fulls with
+      | [] -> ""
+      | _ :: _ -> String.concat search_hit_separator fulls ^ search_hit_separator
+    in
+    String.concat "" [ header; lead; note shown; "\n"; String.concat "\n" rows ]
+;;
+
 let format_comment ?(indent = 0) ?viewer_vote ?reply_to (c : Board.comment) =
   let prefix = String.make indent ' ' in
   let tree_prefix = if indent > 0 then "└─ " else "" in

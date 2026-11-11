@@ -64,7 +64,7 @@ let handle_tool ~reader ~result_boundary name args : Tool_result.result =
   | Some B.Board_stats ->
     Board_tool_handlers.handle_stats ~reader ~tool_name:name ~start_time args
   | Some B.Board_search ->
-    Board_tool_handlers.handle_search ~reader ~tool_name:name ~start_time args
+    Board_tool_handlers.handle_search ~reader ~result_boundary ~tool_name:name ~start_time args
   | Some B.Board_comment_vote ->
     Board_tool_handlers.handle_comment_vote ~reader ~tool_name:name ~start_time args
   | Some B.Board_reaction ->

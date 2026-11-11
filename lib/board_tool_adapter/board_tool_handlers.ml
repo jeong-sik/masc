@@ -215,8 +215,9 @@ let handle_stats ~reader ~tool_name ~start_time _args : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:stats ()
 ;;
 
-(** Search posts by keyword. *)
-let handle_search ~reader ~tool_name ~start_time args : Tool_result.result =
+(** Search posts by keyword. With compact=false the first hits are full and the
+    rest one line each once the full text would pass the call's inline ceiling. *)
+let handle_search ~reader ~result_boundary ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
@@ -239,24 +240,26 @@ let handle_search ~reader ~tool_name ~start_time args : Tool_result.result =
     else (
       (* A listing does not read threads; the stored count is its only
          source for how many replies each post has. *)
-      let fmt (post : Board.post) =
-        if compact
-        then Board_tool_format.format_post_compact ~replies:post.reply_count post
-        else Board_tool_format.format_post ~replies:post.reply_count post
+      let header = Printf.sprintf "'%s' 검색 결과 (%d개):\n\n" query (List.length results) in
+      let one_line (post : Board.post) =
+        Board_tool_format.format_post_compact ~replies:post.reply_count post
       in
-      let formatted = List.map fmt results in
-      let separator = if compact then "\n" else "\n---\n" in
-      Tool_result.make_ok
-        ~tool_name
-        ~start_time
-        ~data:
-          (`String
-             (Printf.sprintf
-                "'%s' 검색 결과 (%d개):\n\n%s"
-                query
-                (List.length results)
-                (String.concat separator formatted)))
-        ()))
+      let text =
+        if compact
+        then header ^ String.concat "\n" (List.map one_line results)
+        else
+          Board_tool_format.join_search_hits
+            ~max_bytes:(Tool_output.result_ceiling_bytes result_boundary)
+            ~header
+            (List.map
+               (fun (post : Board.post) ->
+                 { Board_tool_format.full =
+                     Board_tool_format.format_post ~replies:post.reply_count post
+                 ; one_line = one_line post
+                 })
+               results)
+      in
+      Tool_result.make_ok ~tool_name ~start_time ~data:(`String text) ()))
 ;;
 
 (** Vote on comment. *)

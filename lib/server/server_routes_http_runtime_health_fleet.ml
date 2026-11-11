@@ -448,7 +448,8 @@ let keeper_event_queue_health_dimensions ~source_unavailable = function
             let keepers = Option.bind (List.assoc_opt "shutdown_fenced_by_keeper" fields)
                 (Operator_action_reason.queue_keepers ~count:shutdown_fenced_backlog_count) in
             Operator_action_reason.shutdown_fenced_backlog
-              ~count:shutdown_fenced_backlog_count ~keepers ~complete:counts_complete :: actions)
+              ~count:shutdown_fenced_backlog_count ~keepers
+              ~complete:(counts_complete && not source_unavailable) :: actions)
       |> backlog_action "unclassified_backlog" unclassified_backlog_count
       |> List.rev
     in

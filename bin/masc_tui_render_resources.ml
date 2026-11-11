@@ -196,8 +196,9 @@ let render_resources (state : state) =
   let split = resource_split state ~cols in
   if not split then box_top buf cols;
   box_line buf cols
-    (feature_child_heading state ~cols
-      ~title:(ui_text state ~ko:"리소스" ~en:"Resources"));
+    (here_row ~cols state
+       ~path:[ ui_text state ~ko:"리소스" ~en:"resources" ]
+       ~readings:[] ~position:None);
   let pane_rows = max 0 (pane_surface_content_height ~rows - save_prompt_height state) in
   Option.iter (fun prompt ->
     let input = prompt.rsp_path in

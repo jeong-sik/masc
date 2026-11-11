@@ -1041,7 +1041,7 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
     | Runtime_prompt_parent (Lane_remove_prompt lane) ->
         text "제거 확인 / " "Remove / " ^ Terminal_text.single_line lane in
   let header = if projection.rpp_notices = 0 then
-    feature_child_heading state ~cols ~title
+    here_row ~cols state ~path:[ title ] ~readings:[] ~position:None
   else
     let door = match projection.rpp_parent with
       | Runtime_media_parent | Runtime_prompt_parent (Lane_remove_prompt _) -> "v"
@@ -1130,8 +1130,9 @@ let render_tools (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let header =
-    feature_child_heading state ~cols
-      ~title:(ui_text state ~ko:"도구·스킬" ~en:"Tools & Skills")
+    here_row ~cols state
+      ~path:[ ui_text state ~ko:"도구·스킬" ~en:"tools & skills" ]
+      ~readings:[] ~position:None
   in
   box_top buf cols;
   box_line buf cols header;

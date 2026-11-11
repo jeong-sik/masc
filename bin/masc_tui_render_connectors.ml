@@ -397,8 +397,9 @@ let render_connectors (state : state) =
       Masc_tui_table.cell ~header ~width value) layout.shown
   in
   let title =
-    feature_child_heading state ~cols
-      ~title:(ui_text state ~ko:"채널" ~en:"Channels")
+    here_row ~cols state
+      ~path:[ ui_text state ~ko:"채널" ~en:"channels" ]
+      ~readings:[] ~position:None
   in
   let read_notice = connectors_read_notice state in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title

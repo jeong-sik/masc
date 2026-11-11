@@ -2103,21 +2103,6 @@ let reading_connection_summary ~width state =
   in
   fit_width summary (max 0 width)
 
-let feature_child_heading (state : state) ~cols ~title =
-  let lead = Lead_text (screen_title (" " ^ title)) in
-  match reading_connection_notice state with
-  | None -> detail_heading ~cols ~lead ~id:"" ~after:[] ~tail:""
-  | Some notice ->
-      let heading = detail_heading ~cols ~lead ~id:"" ~after:[] ~tail:notice in
-      let width = framed_inner_width cols in
-      if Message_layout.display_width heading <= width then heading
-      else
-        (* The summary pads a table cell; the heading owns this free space. *)
-        let tail = reading_connection_summary
-          ~width:(max 0 (width - Message_layout.display_width "  ")) state
-          |> String.trim in
-        detail_heading ~cols ~lead ~id:"" ~after:[] ~tail
-
 (* The particulars can exceed the title's width. The feed's loss is kept
    whole ahead of the reads, and the ellipsis says the rest was left out. *)
 let surface_connection_badge (state : state) ~width =
@@ -2199,8 +2184,15 @@ let here_row ~cols (state : state) ~path ~readings ~position =
     detail_heading ~cols:left_cols ~lead:(Lead_text lead) ~id
       ~after:(List.map (fun reading -> "  " ^ reading) readings)
       ~tail:
-        (surface_connection_badge state
-           ~width:(max 0 (framed_inner_width left_cols - 2)))
+        (* Reads come and go with every refresh, and a row that changed with
+           them would never sit still. Each screen says what it is still
+           reading in its own body; the row speaks up only for what went
+           wrong. *)
+        (match reading_connection_notice state with
+         | None -> ""
+         | Some _ ->
+             surface_connection_badge state
+               ~width:(max 0 (framed_inner_width left_cols - 2)))
   in
   match position with
   | None -> left

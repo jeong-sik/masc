@@ -336,7 +336,8 @@ val here_row :
   string
 (** The row under the top row: the top-row screen this one belongs to, each
     step in [path] taken into it, the screen's own [readings], then
-    {!connection_badge} and the [position] at the right-hand end. The last
+    {!reading_connection_notice} -- nothing while reads merely come and go --
+    and the [position] at the right-hand end. The last
     step folds first when the row is narrow, readings give way whole from the
     end, and the position is never cut. The product name is not drawn. *)
 
@@ -368,12 +369,6 @@ val reading_connection_notice : Masc_tui_types.state -> string option
     state, and observer loss. Healthy HTTP and ordinary pending reads return
     [None], as does an exceptional state with nothing to add to the top row's
     word; each view keeps its own pending-read indication. *)
-
-val feature_child_heading : Masc_tui_types.state -> cols:int -> title:string -> string
-(** Short identity for a Features child, followed by exceptional connection
-    evidence. Overflow uses the bounded typed summary and preserves observer
-    loss. The family strip supplies its parent; no clock or Runtime menu
-    competes with the child name. Read notices remain owned by each body. *)
 
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)

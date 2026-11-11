@@ -33,6 +33,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | --- | --- |
 | `pass_lines.json` | Fixed request shape, evaluation sets, baseline, candidates, gates and the files whose bytes they assume: every module `eval_admission.py`, `e_synth_audit.py` and `merge_cases.py` import, and the prompt template |
 | `e_real_manifest.json` | E-real: the answered admission records, by digest and sha256 |
+| `e_real_template.md` | The `config/prompts/librarian.md` the E-real records were drawn with (commit `7b026dc68ea0`); their prompt text is read with it |
 | `exact_store.py` | Reads answered admission records and copies them into the E-real snapshot; never writes the server's store |
 | `e_real_manifest.py` | Takes the E-real snapshot and writes its manifest |
 | `synth_spec.py` | Plan of a synthetic request: measured distributions, ID shapes, labels |
@@ -216,12 +217,14 @@ candidate's call and the baseline's call for the same item left more than
 `same_item_window_s` apart, so a baseline answered in an earlier run cannot
 stand in for the one G5 compares against.
 
-`run --template <librarian.md>` measures a prompt change on the same sets: it
-draws every prompt with that file's template from the same request data. An
-E-real prompt is first read with the pinned template, and its retirement
-evidence goes out under the new template's retirement policy. `summary.json`
-records the sha256 of the template the prompts were drawn with, and `verdict`
-refuses a run whose template is not the pinned one.
+Every prompt goes out drawn with the pinned template. An E-real record holds
+the prompt text MASC sent, so it is first read with the template of that day
+(`e_real_template.md`, pinned as `e_real.template_sha256`) and drawn again from
+the same data; its retirement evidence goes out under the retirement policy of
+the template it is drawn with. `run --template <librarian.md>` measures a
+prompt change on the same sets: it draws every prompt with that file's template
+instead. `summary.json` records the sha256 of the template the prompts were
+drawn with, and `verdict` refuses a run whose template is not the pinned one.
 
 `prompt_compare.py --runs <runs.json> --out <compare.json>` decides whether a
 draft of `config/prompts/librarian.md` goes in (RFC-0517 §2.3).

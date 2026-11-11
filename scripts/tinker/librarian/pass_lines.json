@@ -15,6 +15,8 @@
  "e_real": {
   "manifest": "e_real_manifest.json",
   "manifest_sha256": "d22c1150474a8d5bf261dbeb288d0b3b532245f545ee36099862262519594293",
+  "template": "e_real_template.md",
+  "template_sha256": "ec5cb66fa5a17d1c78844642123edc4e095aa0bc065d98c4e841162b3cd099c7",
   "items": 52
  },
  "e_synth": {

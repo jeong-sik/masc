@@ -26,13 +26,16 @@ baseline calls must leave next to the candidates' calls, which a call log from
 an earlier run cannot show. The request is the one MASC's exact lane sends: the
 admission prompt, then the schema instruction as the last user message.
 
-`run --template <librarian.md>` sends every prompt drawn with that file's
-template instead: an E-real prompt is read with the pinned template and drawn
-again from the same data, an E-synth prompt is drawn from its request. A
-prompt's retirement evidence goes out under the new template's retirement
-policy, and a template without one cannot draw it, as in MASC. The summary
-records the sha256 of the template the prompts were drawn with, and `verdict`
-refuses a run drawn with another template than the pinned one.
+Every prompt goes out drawn with the pinned template. An E-real record holds
+the prompt text MASC sent, drawn with the librarian.md of that day, so it is
+read with that file (`e_real.template` of the pass lines) and drawn again from
+the same data. An E-synth prompt is drawn from its request.
+`run --template <librarian.md>` draws every prompt with that file's template
+instead. A prompt's retirement evidence goes out under the retirement policy
+of the template it is drawn with, and a template without one cannot draw it,
+as in MASC. The summary records the sha256 of the template the prompts were
+drawn with, and `verdict` refuses a run drawn with another template than the
+pinned one.
 
 `run --provider glm` sends the same messages to Z.AI's GLM coding endpoint in
 the request MASC's GLM slot sends (`glm_chat`), with the pass lines'
@@ -210,12 +213,26 @@ def load_pass_lines() -> JsonObject:
     return lines
 
 
-def real_items(manifest: Path, base: Path) -> list[M.RealItem]:
-    """E-real items. A prompt this checkout's template cannot read, or a live answer the
-    checker refuses, stops the run: the checker would then not be MASC's."""
+def e_real_files(lines: JsonObject) -> tuple[Path, Path]:
+    """The E-real manifest and the librarian.md its records were drawn with, as the pass lines
+    pin them. SystemExit when either file holds other bytes."""
+    real = cast(JsonObject, lines["e_real"])
+    manifest, recorded = HERE / cast(str, real["manifest"]), HERE / cast(str, real["template"])
+    if sha256_file(manifest) != real["manifest_sha256"]:
+        raise SystemExit("the E-real manifest differs from pass_lines.json")
+    if sha256_file(recorded) != real["template_sha256"]:
+        raise SystemExit("the E-real template differs from pass_lines.json")
+    return manifest, recorded
+
+
+def real_items(manifest: Path, recorded: Path, base: Path) -> list[M.RealItem]:
+    """E-real items, each prompt read with `recorded`, the librarian.md its record was drawn
+    with. A prompt that template cannot read, or a live answer the checker refuses, stops the
+    run: the checker would then not be MASC's."""
+    template = synth_render.template_at(recorded)
     items: list[M.RealItem] = []
     for record in E.records_for(manifest, base):
-        prompt = R.parse(record.prompt, synth_render.template())
+        prompt = R.parse(record.prompt, template)
         if isinstance(prompt, R.ParseError):
             raise SystemExit(f"{record.digest[:16]}: prompt does not parse: {prompt.detail}")
         live = check(prompt, Y.write(record.answer))
@@ -254,12 +271,12 @@ def retemplated(item: Item, template: R.AdmissionTemplate) -> Item:
 
 
 def drawn_with(template: Path | None, items: list[Item]) -> tuple[Path, list[Item]]:
-    """The template file the prompts go out in, and the items: as read with the pinned template,
-    or each drawn again with the file `template` names."""
-    if template is None:
-        return synth_render.TEMPLATE, items
-    drawn = synth_render.template_at(template)
-    return template, [retemplated(i, drawn) for i in items]
+    """The template file the prompts go out in, the pinned one or the file `template` names, and
+    each item drawn with it. An E-real item was read with the template of its record, so the
+    pinned template draws it again too."""
+    path = synth_render.TEMPLATE if template is None else template
+    drawn = synth_render.template_at(path)
+    return path, [retemplated(i, drawn) for i in items]
 
 
 @dataclass(frozen=True, slots=True)
@@ -446,11 +463,8 @@ def run(args: argparse.Namespace) -> int:
     targets = [cast(tuple[str, str], tuple(t.split("=", 1))) for t in cast(list[str], args.target)]
     items: list[Item]
     if kind == "real":
-        real = cast(JsonObject, lines["e_real"])
-        manifest = HERE / cast(str, real["manifest"])
-        if sha256_file(manifest) != real["manifest_sha256"]:
-            raise SystemExit("the E-real manifest differs from pass_lines.json")
-        items = list(real_items(manifest, E.base_path(cast(str | None, args.base))))
+        manifest, recorded = e_real_files(lines)
+        items = list(real_items(manifest, recorded, E.base_path(cast(str | None, args.base))))
     else:
         requests = Path(cast(str, args.requests))
         if sha256_file(requests) != cast(JsonObject, lines["e_synth"])["requests_sha256"]:

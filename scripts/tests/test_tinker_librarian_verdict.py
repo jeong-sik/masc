@@ -17,7 +17,7 @@ import math
 import sys
 import tempfile
 import unittest
-from dataclasses import astuple
+from dataclasses import astuple, replace
 from pathlib import Path
 from typing import cast
 
@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import admission_request as R
 import admission_validator as AV
 import eval_admission as V
+import exact_store as E
 import memory_scores as M
 import synth_render
 import synth_rows as RW
@@ -441,6 +442,52 @@ class RetemplateTest(unittest.TestCase):
                          (item.prompt.current_memory, item.prompt.candidates))
         data = item.text.index(R.CANDIDATE_HEADER)
         self.assertTrue(other.text.endswith(item.text[data:]))
+
+    def test_an_e_real_record_is_read_with_its_own_template_and_goes_out_drawn_with_the_pinned_one(self) -> None:
+        rules = synth_render.TEMPLATE.read_text(encoding="utf-8")
+        added = "기록할 때만 있던 문장입니다."
+        first_slot = rules.index("\n### ")
+        deferred: dict[str, object] = {
+            "memory": {"new_claims": [], "dropped": [], "working_state": None, "working_contexts": []},
+            "candidates": [{"request_id": r, "outcome": "deferred", "memory_claim": None, "reason": "later"}
+                           for r in ("r1", "r2", "r3")],
+            "change_support": []}
+        with tempfile.TemporaryDirectory() as tmp:
+            recorded = Path(tmp) / "recorded.md"
+            recorded.write_text(rules[:first_slot] + "\n" + added + rules[first_slot:], encoding="utf-8")
+            sent = make_prompt(synth_render.template_at(recorded))
+            text = R.render(sent)
+            base = Path(tmp) / "base"
+            record = E.store_dir(base) / "scope" / ("d" * 64 + ".json")
+            record.parent.mkdir(parents=True)
+            record.write_text(json.dumps({
+                "declaration_id": E.DECLARATION, "digest": "d" * 64,
+                "request": {"output": E.OUTPUT, "schema": {"type": "object"},
+                            "messages": [{"role": "user", "text": text}]},
+                "final": {"status": "answered", "output": deferred, "slot": "slot"}}), encoding="utf-8")
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(json.dumps(E.manifest_of(E.answered_admissions(base), "2026-11-11T00:00:00Z")),
+                                encoding="utf-8")
+            [item] = V.real_items(manifest, recorded, base)
+            with self.assertRaises(SystemExit) as stop:
+                V.real_items(manifest, synth_render.TEMPLATE, base)
+        self.assertIn("prompt does not parse", str(stop.exception))
+        self.assertEqual((item.prompt, item.text), (sent, text))
+        path, [out] = V.drawn_with(None, [item])
+        self.assertEqual(path, synth_render.TEMPLATE)
+        self.assertIn(added, item.text)
+        self.assertNotIn(added, out.text)
+        self.assertEqual(out.prompt, replace(sent, template=synth_render.template()))
+        self.assertEqual(R.parse(out.text, synth_render.template()), out.prompt)
+
+    def test_the_e_real_manifest_and_template_are_the_files_the_pass_lines_pin(self) -> None:
+        lines = cast(dict[str, object], json.loads(V.PASS_LINES.read_text(encoding="utf-8")))
+        real = cast(dict[str, object], lines["e_real"])
+        self.assertEqual(V.e_real_files(lines), (V.HERE / "e_real_manifest.json", V.HERE / "e_real_template.md"))
+        for pin, name in (("manifest_sha256", "manifest"), ("template_sha256", "template")):
+            with self.assertRaises(SystemExit) as stop:
+                V.e_real_files({**lines, "e_real": {**real, pin: "0" * 64}})
+            self.assertEqual(str(stop.exception), f"the E-real {name} differs from pass_lines.json")
 
     def test_retirement_evidence_goes_out_under_the_new_templates_policy(self) -> None:
         payload = '{"evidence_kind":"exact_identity_retirement_history","status":"unavailable","detail":"x"}'

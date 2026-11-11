@@ -764,7 +764,7 @@ let test_a_held_api_lane_is_an_execution_failure () =
   let keepers_dir = Filename.concat base_path "keepers" in
   Unix.mkdir keepers_dir 0o700;
   let reports = ref [] in
-  Runtime.run_best_effort
+  Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Masc.Keeper_memory_commit_pass.Durable)
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input ());
   check int "the held API slot received no request" 0 (Fixture.post_count server);
@@ -814,7 +814,7 @@ let test_a_held_api_slot_keeps_an_admission_batch_whole () =
   let judge admission =
     sizes := List.length (Queue.candidates admission) :: !sizes;
     let outcome = ref (Worker.Deferred "missing runtime callback") in
-    Runtime.run_best_effort ~write_scope:Runtime.Memory_maintenance ~admission ~cli_runner:runner
+    Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission ~cli_runner:runner
       ~on_memory_committed:(fun () -> outcome := Worker.Committed)
       ~on_admission_deferred:(fun () -> outcome := Worker.Awaiting_evidence)
       ~on_not_committed:(fun reason -> reports := reason :: !reports;

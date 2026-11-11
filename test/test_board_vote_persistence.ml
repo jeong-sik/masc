@@ -321,15 +321,14 @@ let test_restart_loads_only_current_vote_rows () =
     "only one exact current row loaded"
     1
     (Hashtbl.length store.vote_log);
-  match
-    Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator
-      ~voter:"current-voter"
-      ~post_id
-  with
-  | Ok (Some Board.Up) -> ()
-  | Ok (Some Board.Down) -> Alcotest.fail "canonical vote direction changed"
-  | Ok None -> Alcotest.fail "canonical current vote row was not loaded"
-  | Error error -> Alcotest.fail (Board.show_board_error error)
+  (* The rejected rows leave the ledger partially read, so the vote source
+     stays refused: the canonical row is loaded into memory (checked above)
+     but reading a current vote through the store is unavailable. *)
+  expect_io_error
+    "current vote read after rejected rows"
+    (Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator
+       ~voter:"current-voter"
+       ~post_id)
 
 let test_namespaced_voter_survives_snapshot_and_restart () =
   let voter = "keeper:foo" in

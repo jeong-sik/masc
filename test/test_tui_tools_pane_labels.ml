@@ -63,7 +63,10 @@ let tools_state () =
          ; ts_freshness = Masc.Tui_decode_tools.Settled
          ; ts_effective = None
          ; ts_usage = None
-         ; ts_volume_gc_report = None };
+         ; ts_volume_gc_report = None
+         ; ts_storage =
+             { Masc.Tui_decode_tools.st_host_disk = Masc.Tui_decode_tools.Host_disk_absent
+             ; st_keeper_cleanup = Masc.Tui_decode_tools.Keeper_cleanup_absent } };
   state.tools_activations <-
     Some
       (Activations_read

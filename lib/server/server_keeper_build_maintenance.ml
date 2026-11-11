@@ -62,7 +62,7 @@ let rec update_status change =
   if not (Atomic.compare_and_set status current (change current)) then update_status change
 
 let current () = Atomic.get status
-let envelope_json () = Keeper_cleanup_status.to_json (current ())
+let envelope_json () = Keeper_cleanup_status_json.to_json (current ())
 
 (* Every attempt that ran its payload leaves an info line, zero removals
    included: the passes at 00:08Z and 03:25Z on 2026-11-09 left none, and

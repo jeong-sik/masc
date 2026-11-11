@@ -143,6 +143,12 @@ module Response = struct
       (response ~after_headers:headers ~content_type status body)
       body
 
+  let shared ?(status = `OK) ?(headers = []) ~content_type body reqd =
+    let headers = scoped_headers () @ headers in
+    Http_reqd.respond_with_shared reqd
+      (response ~after_headers:headers ~content_type status (Shared_body.to_string body))
+      body
+
   let empty ?(status = `No_content) reqd =
     let response =
       Httpun.Response.create

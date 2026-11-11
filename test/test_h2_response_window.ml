@@ -183,6 +183,20 @@ let test_exact_capacity_preserves_whole_body () =
   check int "exact capacity admitted" 200 reply.status;
   check string "whole body survives flow control" payload reply.body
 
+(* A shared body is kept by its owner, so a ledger with room for three bytes
+   still answers with all of it (RFC-0518 D5). The same bytes as an owned
+   body are refused in the case above. *)
+let test_shared_body_takes_no_capacity () =
+  let reply =
+    exchange ~capacity:3
+      ~handler:
+        (Response.shared ~content_type:"application/octet-stream"
+           (Masc.Shared_body.of_string payload))
+      "/shared"
+  in
+  check int "answered" 200 reply.status;
+  check string "whole body survives flow control" payload reply.body
+
 let test_error_payload_cannot_exceed_capacity () =
   Console_sink.For_testing.reset ();
   Console_sink.For_testing.set_writer (Some (fun _line -> ()));
@@ -229,6 +243,8 @@ let () =
             test_capacity_refusal_precedes_success_headers
         ; test_case "exact capacity preserves the complete body" `Quick
             test_exact_capacity_preserves_whole_body
+        ; test_case "a shared body takes no capacity" `Quick
+            test_shared_body_takes_no_capacity
         ; test_case "application error payload obeys the same capacity" `Quick
             test_error_payload_cannot_exceed_capacity
         ] )

@@ -25,16 +25,20 @@ type outcome =
   (** The response was closed before the frame reached the socket: by
       {!close}, by an earlier [send] that did not end [Written], by httpun
       when the connection failed, or by the transport ending the stream
-      (an HTTP/2 peer reset, a stalled flush, or connection end). *)
+      (an HTTP/2 peer reset, a stalled flush, or connection end). A client
+      that went away while the frame was waiting ends here: the connection's
+      write ends as a closed connection ({!Server_connection_socket}) and the
+      flush is answered. *)
   | Stalled
   (** HTTP/1.1 only: the frame did not reach the socket within
-      [stalled_after_s]. A client that went away while the frame was waiting
-      ends here too: httpun closes the body of a failed connection without
-      answering its flush (httpun reqd.ml [report_error], gluten-eio
-      [writev]). An HTTP/2 frame that stalls is logged by the stream's flush
-      bound, which resets the stream: a [send] on one of that stream's
-      fibers, or in a producer that {!serve} runs, is cancelled with it, and
-      a [send] from any other fiber ends [Closed]. *)
+      [stalled_after_s]. A frame waiting when the connection's write fails
+      for another reason than the peer's reset ends here too: httpun closes
+      the body of a failed connection without answering its flush (httpun
+      reqd.ml [report_error], gluten-eio [writev]). An HTTP/2 frame that
+      stalls is logged by the stream's flush bound, which resets the stream:
+      a [send] on one of that stream's fibers, or in a producer that {!serve}
+      runs, is cancelled with it, and a [send] from any other fiber ends
+      [Closed]. *)
 
 val respond :
   clock:_ Eio.Time.clock ->

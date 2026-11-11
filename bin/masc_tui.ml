@@ -7669,6 +7669,10 @@ let launch_verification_load state ~mailbox =
 type row_list = {
   rl_count : int;  (** rows the list holds *)
   rl_cursor : int;  (** the row the cursor is on *)
+  rl_window : int option;
+      (** rows the frame draws for the list with the cursor where it is.
+          [None] for a list the renderer windows around the cursor itself,
+          whose height the keys cannot read *)
   rl_place : int -> unit;
       (** put the cursor on a row and move the window to show it *)
 }
@@ -7698,16 +7702,20 @@ let schedule_detail_on_screen (state : state) =
   | Some _, None | None, _ -> None
 
 let row_list (state : state) : row_list option =
-  (* The window follows a named row the same way it follows a step, through
+  (* The rows the frame draws for the list, read through
      [surface_body_height] rather than [rows - sc_chrome]: a surface that
      gives half its rows to a preview says so in [sc_preview_keep], and a
      height that ignores it lands the cursor under the preview while
-     [ensure_visible] reports the row as already on screen. *)
+     [ensure_visible] reports the row as already on screen. The window
+     follows a named row and the page keys size their step from this one
+     height, so a jump and a page cannot disagree about what is drawn. *)
+  let window ~cursor =
+    Option.map (surface_body_height_at state ~cursor) (scrolled_surface state state.view)
+  in
   let follow ?(lead = 0) ~cursor scroll set_scroll =
-    match scrolled_surface state state.view with
+    match window ~cursor with
     | None -> ()
-    | Some scrolled ->
-        let height = surface_body_height_at state ~cursor scrolled in
+    | Some height ->
         set_scroll (Masc_tui_scroll.ensure_visible_with_lead ~cursor ~lead ~height scroll)
   in
   (* The count the keypress bound already uses, so a jump cannot land on a
@@ -7720,12 +7728,15 @@ let row_list (state : state) : row_list option =
   in
   (* A list whose rows the drawing windows around the cursor: nothing to
      scroll, so the landing is on screen as soon as the cursor names it. *)
-  let windowed ~count ~cursor place = Some { rl_count = count; rl_cursor = cursor; rl_place = place } in
+  let windowed ~count ~cursor place =
+    Some { rl_count = count; rl_cursor = cursor; rl_window = None; rl_place = place }
+  in
   (* A list with a scroll of its own, which follows the cursor. *)
   let scrolling ~count ~cursor ~scroll ~set_cursor ~set_scroll =
     Some
       { rl_count = count
       ; rl_cursor = cursor
+      ; rl_window = window ~cursor
       ; rl_place =
           (fun index ->
             set_cursor index;
@@ -7779,6 +7790,7 @@ let row_list (state : state) : row_list option =
        | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None
        | Lanes_overview ->
            Some {rl_count=lanes_inventory_count state;rl_cursor=state.lanes_cursor;
+             rl_window=None;
              rl_place=(fun index ->
                    if index <> state.lanes_cursor then
                      Masc_tui_types.dismiss_runtime_lane_notice state;
@@ -7865,6 +7877,7 @@ let row_list (state : state) : row_list option =
              Some
                { rl_count = Array.length rows
                ; rl_cursor = state.code_file_cursor
+               ; rl_window = None
                ; rl_place =
                    (fun index ->
                      state.code_file_cursor <- index;
@@ -8200,6 +8213,26 @@ let move_list_by_rows (state : state) ~delta =
   | Some r ->
       r.rl_place
         (Masc_tui_scroll.cursor_move ~count:r.rl_count ~delta r.rl_cursor)
+
+(* The page keys over a surface's list. A page is the rows the frame draws for
+   the list less the one that stays on screen, the step the Git changes
+   overlay and the readers already take, so the landing never lies past the
+   rows the window shows next. A list whose window only the renderer knows
+   ([rl_window = None]) keeps [fallback], the guess sized from the terminal.
+   That guess is a page of the whole body, which a surface that spends rows on
+   a header or a preview does not draw. *)
+let move_list_by_page (state : state) ~direction ~fallback =
+  match row_list state with
+  | None | Some { rl_count = 0; _ } -> ()
+  | Some r ->
+      let page =
+        match r.rl_window with
+        | Some height -> Masc_tui_scroll.page_step ~height
+        | None -> fallback
+      in
+      r.rl_place
+        (Masc_tui_scroll.cursor_move ~count:r.rl_count ~delta:(direction * page)
+           r.rl_cursor)
 
 
 (* Standalone rows never scroll, so an action notice only has to be retained
@@ -40232,11 +40265,6 @@ Use relative paths for resources already held in the package. -->
                Option.value
                  (Masc_tui_render_keepers.keeper_plain_page_rows state ~terminal_rows ~cols)
                  ~default:(surface_page_rows state)
-             else if state.view = Repositories then
-               let _, cols = get_terminal_size () in
-               Masc_tui_render.repository_studio_content_height state ~cols
-                 ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
-                 ~cursor:state.repositories_cursor
              else if state.view = Lanes && state.lanes_mode = Lanes_overview then
                let terminal_rows, cols = get_terminal_size () in
                let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -40493,13 +40521,15 @@ Use relative paths for resources already held in the package. -->
              (* The surfaces whose page key used to be silent. Each has a
                 row list, so a page moves the cursor and the window follows --
                 the same move Home and End make, by a page rather than to an
-                edge. [move_list_by_rows] finds the list itself and answers
+                edge. [move_list_by_page] finds the list itself and answers
                 to nothing when there is none; the arm below is where there
-                is none. *)
+                is none. A list with a window of its own pages by that
+                window, and [page] stays the step of the lists that have
+                none. *)
              | Keepers (Keeper_list | Keeper_calls | Keeper_message | Keeper_runtime_pick)
              | Approvals | Planning | Memory | Repositories
              | Changes | Connectors | Runtime | System_logs ->
-                 move_list_by_rows state ~delta:(direction * page)
+                 move_list_by_page state ~direction ~fallback:page
              (* Two panes, two meanings: the list moves a cursor like the
                 arm above, the reading scrolls. [move_list_by_rows] finds the
                 list only while the list is focused, so the reading's own

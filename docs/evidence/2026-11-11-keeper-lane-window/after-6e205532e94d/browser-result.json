@@ -4,6 +4,7 @@
   "browser": "149.0.7827.55",
   "checks": [
     "a large inventory mounts only the rows near the list viewport",
+    "a row cut at the top of the list stays clear of the age axis labels",
     "the last server row is reachable by scrolling and acts on its own address",
     "keyboard focus moves to the list when the focused row leaves the window",
     "a row opened by the operator is still open after it leaves the window and returns",
@@ -20,50 +21,51 @@
       "listClientHeightPx": 450,
       "listScrollHeightPx": 204980,
       "listTopBelowAxisPx": 3.75,
+      "axisLabelInkBelowAxisPx": 2.0500011444091797,
       "collapsedRowPitchPx": 40.25
     },
     "refresh": {
       "samples": [
         {
-          "renderAndLayoutMs": 4.300000071525574,
-          "mainThreadMs": 13.556999999999986
-        },
-        {
-          "renderAndLayoutMs": 3.8000000715255737,
-          "mainThreadMs": 10.636000000000006
-        },
-        {
-          "renderAndLayoutMs": 4,
-          "mainThreadMs": 11.557000000000011
-        },
-        {
-          "renderAndLayoutMs": 4.199999928474426,
-          "mainThreadMs": 13.543
-        },
-        {
-          "renderAndLayoutMs": 3.799999952316284,
-          "mainThreadMs": 13.075000000000003
-        },
-        {
-          "renderAndLayoutMs": 3.299999952316284,
-          "mainThreadMs": 10.115000000000041
+          "renderAndLayoutMs": 5.400000095367432,
+          "mainThreadMs": 14.821000000000002
         },
         {
           "renderAndLayoutMs": 3.600000023841858,
-          "mainThreadMs": 11.24200000000003
+          "mainThreadMs": 24.548000000000016
         },
         {
-          "renderAndLayoutMs": 3.6999999284744263,
-          "mainThreadMs": 11.224999999999985
+          "renderAndLayoutMs": 4.400000095367432,
+          "mainThreadMs": 12.687000000000005
         },
         {
-          "renderAndLayoutMs": 3.5999999046325684,
-          "mainThreadMs": 13.92199999999999
+          "renderAndLayoutMs": 3.799999952316284,
+          "mainThreadMs": 11.711000000000027
+        },
+        {
+          "renderAndLayoutMs": 5.700000047683716,
+          "mainThreadMs": 13.570000000000027
+        },
+        {
+          "renderAndLayoutMs": 3.399999976158142,
+          "mainThreadMs": 12.508000000000019
+        },
+        {
+          "renderAndLayoutMs": 3.399999976158142,
+          "mainThreadMs": 10.543999999999997
+        },
+        {
+          "renderAndLayoutMs": 3.3000000715255737,
+          "mainThreadMs": 10.753999999999985
+        },
+        {
+          "renderAndLayoutMs": 3.299999952316284,
+          "mainThreadMs": 10.670999999999985
         }
       ],
-      "medianRenderAndLayoutMs": 3.799999952316284,
-      "medianMainThreadMs": 11.557000000000011,
-      "medianIdleMainThreadMs": 1.4250000000000096
+      "medianRenderAndLayoutMs": 3.600000023841858,
+      "medianMainThreadMs": 12.508000000000019,
+      "medianIdleMainThreadMs": 1.5160000000000173
     },
     "end": {
       "scrollsToSettle": 1,
@@ -94,6 +96,7 @@
     },
     "consumedBatch": {
       "consumedRows": 200,
+      "windowed": true,
       "rowsInViewNextFrame": 11,
       "emptyAbovePx": 0,
       "emptyBelowPx": 11.25

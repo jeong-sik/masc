@@ -6,50 +6,51 @@
     "listClientHeightPx": 450,
     "listScrollHeightPx": 201246,
     "listTopBelowAxisPx": 3.75,
+    "axisLabelInkBelowAxisPx": 2.0500011444091797,
     "collapsedRowPitchPx": 40.25
   },
   "refresh": {
     "samples": [
       {
-        "renderAndLayoutMs": 849.1000000238419,
-        "mainThreadMs": 925.591
+        "renderAndLayoutMs": 674.8999999761581,
+        "mainThreadMs": 772.5030000000002
       },
       {
-        "renderAndLayoutMs": 785.4000000953674,
-        "mainThreadMs": 866.139
+        "renderAndLayoutMs": 632.1000000238419,
+        "mainThreadMs": 707.322
       },
       {
-        "renderAndLayoutMs": 605.3000000715256,
-        "mainThreadMs": 668.6799999999997
+        "renderAndLayoutMs": 623.5,
+        "mainThreadMs": 695.2060000000002
       },
       {
-        "renderAndLayoutMs": 596.8999999761581,
-        "mainThreadMs": 652.0519999999995
+        "renderAndLayoutMs": 650.5,
+        "mainThreadMs": 723.8249999999997
       },
       {
-        "renderAndLayoutMs": 601,
-        "mainThreadMs": 774.8919999999995
+        "renderAndLayoutMs": 632,
+        "mainThreadMs": 693.8879999999994
       },
       {
-        "renderAndLayoutMs": 587.1999999284744,
-        "mainThreadMs": 629.868
+        "renderAndLayoutMs": 627.5,
+        "mainThreadMs": 700.8900000000002
       },
       {
-        "renderAndLayoutMs": 609.2999999523163,
-        "mainThreadMs": 667.3070000000001
+        "renderAndLayoutMs": 671.2000000476837,
+        "mainThreadMs": 750.2819999999995
       },
       {
-        "renderAndLayoutMs": 642.8000000715256,
-        "mainThreadMs": 695.2660000000002
+        "renderAndLayoutMs": 699.8999999761581,
+        "mainThreadMs": 857.7889999999994
       },
       {
-        "renderAndLayoutMs": 616.8000000715256,
-        "mainThreadMs": 662.6639999999995
+        "renderAndLayoutMs": 646.9000000953674,
+        "mainThreadMs": 711.9940000000007
       }
     ],
-    "medianRenderAndLayoutMs": 609.2999999523163,
-    "medianMainThreadMs": 668.6799999999997,
-    "medianIdleMainThreadMs": 0.41099999999971715
+    "medianRenderAndLayoutMs": 646.9000000953674,
+    "medianMainThreadMs": 711.9940000000007,
+    "medianIdleMainThreadMs": 0.4249999999998977
   },
   "end": {
     "scrollsToSettle": 1,
@@ -80,6 +81,7 @@
   },
   "consumedBatch": {
     "consumedRows": 200,
+    "windowed": false,
     "rowsInViewNextFrame": 12,
     "emptyAbovePx": 0,
     "emptyBelowPx": 0.375

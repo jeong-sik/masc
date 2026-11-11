@@ -1099,7 +1099,14 @@ let test_callers_share_a_goal_without_private_delivery () =
       [ "owner"; "notified_refuted_key"; "notified_overdue_key" ];
     row in
   let listed ctx =
-    match member "goals" (call ctx "masc_goal_list" []) |> to_list with
+    (* #51267 made masc_goal_list return a short row (id, criterion_revision,
+       title, priority, phase, created_at, updated_at). This test reads the
+       shared Goal's whole visible row - the criterion fields and the
+       verification completion - which the documented [detailed] read
+       returns; a goal_id read is whole the same way. *)
+    match member "goals"
+            (call ctx "masc_goal_list" [ "detailed", `Bool true ])
+    |> to_list with
     | [ row ] -> shared_row "listed Goal" row
     | _ -> fail "the workspace must contain one shared Goal" in
   let incomplete = expect_error (Tool_workspace.dispatch creator

@@ -28,7 +28,15 @@ let requests =
   ]
 ;;
 
-let hosts = [ "Antigravity", Access.Antigravity; "Vibe", Access.Vibe ]
+let hosts =
+  [ "Antigravity", Access.Antigravity
+  ; "Vibe", Access.Vibe
+  ; "An API provider of the runtime table", Access.Api_provider
+  ; "A model-list request", Access.Model_list
+  ; "The Files API", Access.Files_api
+  ; "The replacement catalog", Access.Replacement_catalog
+  ]
+;;
 
 let postures =
   Runtime_native_tools.[ Native_none; Native_read; Native_full ]

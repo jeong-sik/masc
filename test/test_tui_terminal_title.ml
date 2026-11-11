@@ -12,7 +12,7 @@ let write sink value = sink.writes <- sink.writes @ [ value ]
 let flush sink () = sink.flushes <- sink.flushes + 1
 
 let snapshot ?(activity = Title.Working) ?(attention = 0) ?keeper_name ?runtime_id workspace =
-  Title.make ~activity ~attention ~keeper_name ~runtime_id ~workspace
+  Title.make ~activity ~attention:(Some attention) ~keeper_name ~runtime_id ~workspace
 ;;
 
 let test_leads_with_the_attention_count () =

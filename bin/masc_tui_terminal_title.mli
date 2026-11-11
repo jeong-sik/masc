@@ -12,11 +12,12 @@ type snapshot
     is waiting. *)
 val make
   :  activity:activity
-  -> attention:int
+  -> attention:int option
   -> keeper_name:string option
   -> runtime_id:string option
   -> workspace:string
   -> snapshot
+(** [None] preserves an unobserved rollup; [Some 0] is an observed empty one. *)
 
 (** The control-filtered, length-bounded title payload, without its OSC wrapper. *)
 val text : snapshot -> string

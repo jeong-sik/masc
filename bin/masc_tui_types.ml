@@ -8679,6 +8679,7 @@ type home_action =
   | Home_read_last of string
   | Home_choose_keeper
   | Home_create_keeper
+  | Home_operator_action of workspace_authority * int * Masc.Operator_action_reason.t
 
 (* Which request a Home row names. A question is compared by
    [Masc.Tui_decode_asks.equal_ask_key], so a package that changes its
@@ -8699,10 +8700,12 @@ let equal_home_action left right =
   | Home_request left, Home_request right -> equal_home_request left right
   | Home_resume left, Home_resume right | Home_read_last left, Home_read_last right ->
       String.equal left right
+  | Home_operator_action (left_scope, left_index, left), Home_operator_action (right_scope, right_index, right) ->
+      left_scope = right_scope && left_index = right_index && Masc.Operator_action_reason.equal left right
   | Home_approvals, Home_approvals | Home_agenda, Home_agenda
   | Home_choose_keeper, Home_choose_keeper | Home_create_keeper, Home_create_keeper -> true
   | ( Home_approvals | Home_request _ | Home_agenda | Home_resume _ | Home_read_last _
-    | Home_choose_keeper | Home_create_keeper ), _ -> false
+    | Home_choose_keeper | Home_create_keeper | Home_operator_action _ ), _ -> false
 
 type acting_pane_preference =
   | Default_acting_pane
@@ -20070,15 +20073,15 @@ let settle_resource_save state request outcome =
   end;
   !accepted
 
-(* The server's own list of what needs the operator. The footer's ACTION
-   NEEDED row and the terminal title count it, and the Dashboard lists it. An
-   older server, or one before its first snapshot, cannot say and counts as
-   none. *)
-let operator_actions (state : state) =
-  match state.server_identity with
-  | None -> []
-  | Some identity ->
-      Option.value identity.Tui_decode.sid_operator_action ~default:[]
+(* The server's immutable observed collection. None must never count as an
+   observed empty rollup in a summary or a navigation target. *)
+let operator_action_observation (state : state) =
+  Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_operator_action)
+
+let operator_actions state =
+  match operator_action_observation state with
+  | Some (Tui_decode.Operator_actions_observed actions) -> Some actions
+  | Some (Tui_decode.Operator_actions_unavailable _) | None -> None
 
 let withdraw_detail_histories (state : state) =
   clear_task_documents state;

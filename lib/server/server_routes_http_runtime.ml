@@ -562,7 +562,7 @@ let make_health_json ?(listener = default_listener) ?section_timings_ref
           ~config:(Mcp_server.workspace_config state))
   in
   (* The sections come first and the rollup reads them, rather than the rollup
-     being handed the eight it used to name. The three rollup fields are
+     being handed the eight it used to name. The rollup fields are
      appended after, so the payload's key order is unchanged. *)
   let sections = [
     ("server", `String "masc");
@@ -671,6 +671,8 @@ let make_health_json ?(listener = default_listener) ?section_timings_ref
            `Bool rollup.Server_health_rollup.operator_action_required );
          ( "operator_action_reasons",
            string_list rollup.Server_health_rollup.operator_action_reasons );
+         ( "operator_actions",
+           `List (List.map Operator_action_reason.to_json rollup.Server_health_rollup.operator_actions) );
          ( "overall_status_reasons",
            string_list rollup.Server_health_rollup.overall_status_reasons );
        ])
@@ -750,6 +752,7 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ("overall_status", `String status);
     ("operator_action_required", `Bool false);
     ("operator_action_reasons", `List []);
+    ("operator_actions", `Null);
     ("overall_status_reasons", `List []);
     ("keeper_fibers", `Int 0);
     ( "fd_observation",

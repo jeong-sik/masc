@@ -88,6 +88,13 @@ val memory_fleet_header_rows : cols:int -> state -> string list
 val memory_overview_reading : cols:int -> state -> Masc_tui_detail_reading.t
 (** A captured, scrollable fleet summary and selected Keeper health reading.
     It does not follow later selection or refreshes. *)
+val memory_action_reading :
+  cols:int -> state -> action:Masc.Operator_action_reason.t -> Masc_tui_detail_reading.t option
+(** Capture the exact observed Keeper health without moving the live cursor.
+    Keep the original action beside this separate health observation.
+    Lead with the requested Keeper's result, before fleet context.
+    A missing exact Keeper observation and read errors remain in the capture;
+    [None] means the action is not a Memory destination. *)
 
 val memory_overview_scrolled : cols:int -> budget:int -> ?cursor:int -> state -> scrolled
 (** The overview's scroll layout at [cols], with summary, rejected Keeper

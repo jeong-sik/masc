@@ -771,7 +771,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
         @
         (* The server's rollup, from the probe it serves on every refresh. *)
         (match Masc_tui_types.operator_actions state with
-         | _ :: rest ->
+         | Some (_ :: rest) ->
            let count = 1 + List.length rest in
            let notice =
              ui_text state
@@ -783,7 +783,12 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
                { notice
                ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations"
                } ]
-         | [] -> [])
+         | Some [] -> []
+         | None ->
+             [ Masc_tui_footer.Operator_action
+                 { notice = pressable (Press_surface Overview)
+                     (ui_text state ~ko:"조치 원인 미관측" ~en:"Action reasons unobserved")
+                 ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations" } ])
         @
         (* This TUI's own embedded commit against the server's: the pair
            that told "restart masc" apart from "the feature is not merged"

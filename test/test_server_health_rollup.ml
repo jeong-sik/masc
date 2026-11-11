@@ -348,12 +348,53 @@ let test_typesafeai_payment_refusal_reaches_the_operator () =
     reasons
 ;;
 
+let test_typed_original_observation_survives_rollup () =
+  let module A = Masc.Operator_action_reason in
+  let module P = Masc.Keeper_librarian_pending in
+  let worker : P.worker =
+    {installation_id="original-installation"; request_id="original-request"; wait=P.Missing_after_dispatch} in
+  let action = A.memory_attention ~keeper:"keeper-a" ~durable:(Some (P.Worker worker))
+      ~admission:None ~measured_at:(Some 123.) in
+  let r = rollup ~sections:["keeper_memory_attention", `Assoc
+    ["status", `String "degraded"; "operator_action_required", `Bool true;
+     "operator_action_reasons", `List [`String action.reason];
+     "operator_actions", `List [A.to_json action]]] () in
+  check bool "original request, Keeper and observation clock survive" true
+    (match r.R.operator_actions with [held] -> A.equal held action | _ -> false);
+  check (list string) "raw diagnostics derive from the same item"
+    [A.diagnostic action] r.operator_action_reasons;
+  check bool "the structured collection is copied into the cheap health probe" true
+    (R.is_cached "operator_actions" && List.mem "operator_actions" R.operator_field_names);
+  let changed = match A.to_json action with
+    | `Assoc fields -> `Assoc (("keeper_id", `String "different-keeper") :: List.remove_assoc "keeper_id" fields)
+    | _ -> Alcotest.fail "the action is an object" in
+  check bool "a changed target cannot borrow the original diagnostic" true
+    (Result.is_error (A.of_json changed))
+
+let test_queue_action_preserves_ambiguous_ownership () =
+  let module A = Masc.Operator_action_reason in
+  let owner name count = `Assoc ["keeper_name",`String name; "pending_count",`Int count] in
+  let observed = A.queue_keepers ~count:10 (`List [owner "keeper-a" 4;owner "keeper-b" 6]) in
+  check bool "complete aggregate retains both targets" true
+    (observed = Some ["keeper-a",4;"keeper-b",6]);
+  check bool "duplicate owners do not choose an arbitrary target" true
+    (A.queue_keepers ~count:10 (`List [owner "keeper-a" 4;owner "keeper-a" 6]) = None);
+  check bool "partial ownership does not prove an aggregate target" true
+    (A.queue_keepers ~count:10 (`List [owner "keeper-a" 4]) = None);
+  let action = A.shutdown_fenced_backlog ~count:10 ~keepers:None ~complete:false in
+  check bool "unknown ownership and incomplete observation survive the wire" true
+    (match A.of_json (A.to_json action) with Ok held -> A.equal action held | Error _ -> false)
+
 let () =
   run
     "server_health_rollup"
     [ ( "reach"
       , [ test_case "a cached grade moves the status" `Quick
             test_cached_grade_moves_the_status
+        ; test_case "typed original observation survives rollup" `Quick
+            test_typed_original_observation_survives_rollup
+        ; test_case "queue action preserves ambiguous ownership" `Quick
+            test_queue_action_preserves_ambiguous_ownership
         ; test_case "an uncached section is not reached" `Quick
             test_an_uncached_section_is_not_reached
         ; test_case "observability artifacts are rolled up" `Quick

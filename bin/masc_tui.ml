@@ -29819,7 +29819,7 @@ let terminal_title_runtime state keeper_name =
 ;;
 
 let terminal_title_attention state =
-  List.length (Masc_tui_types.operator_actions state)
+  Option.map List.length (Masc_tui_types.operator_actions state)
 ;;
 
 let terminal_title_snapshot state =
@@ -39085,6 +39085,28 @@ Use relative paths for resources already held in the package. -->
                 launch_keeper_history_load state ~mailbox:async_messages ~keeper_name
             | Home_choose_keeper ->
                 goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
+            | Home_operator_action (authority,_,item) ->
+                let original () = open_detail_reading state
+                    (Masc_tui_render.operator_action_reading state item) in
+                let terminal_rows, _ = get_terminal_size () in
+                let body = Masc_tui_home.home_body (Masc_tui_home.prepare state)
+                    ~scroll:state.home_decision_scroll
+                    ~budget:(Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
+                if not (List.exists (fun (current,_) -> equal_home_action action current) body.hb_rows) then
+                  report_action state "info" "Selected action is not visible; enlarge the window"
+                else if authority <> state.workspace_authority || not (server_authority_ready state) then original ()
+                else
+                  (match item.Masc.Operator_action_reason.cause with
+                   | Memory_attention _ ->
+                       (match Masc_tui_render_memory.memory_action_reading
+                                ~cols:terminal_columns state ~action:item with
+                        | Some reading -> open_detail_reading state reading
+                        | None ->
+                            original ();
+                            report_action state "info" "Memory observation unavailable; original action retained")
+                   | Shutdown_fenced_backlog {keepers=Some [(keeper,_)]; complete=true;_} ->
+                       open_keeper_queue_panel state ~mailbox:async_messages ~keeper_name:keeper
+                   | Shutdown_fenced_backlog _ | Other_reported -> original ())
             | Home_create_keeper -> handle_keeper_create ~return_to:Keeper_chat_return_home ()))
         | Some "s" when state.view = Overview ->
             (match open_music () with
@@ -43397,14 +43419,10 @@ Use relative paths for resources already held in the package. -->
                       if Option.is_none state.home_selected
                          && Masc_tui_home.home_initial_reading_ready prepared then
                         state.home_selected <- selected;
-                      (* The same budget the drawing gives the window: the
-                         help line and the requests link take body rows. *)
-                      let budget = Masc_tui_home.home_requests_budget prepared
-                          ~chrome_budget:
-                            (Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
-                      let first, _ = Masc_tui_home.home_decision_window prepared
-                          ~scroll:state.home_decision_scroll ~budget in
-                      state.home_decision_scroll <- first;
+                      let body = Masc_tui_home.home_body prepared
+                          ~scroll:state.home_decision_scroll
+                          ~budget:(Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows) in
+                      state.home_decision_scroll <- body.hb_first;
                       Masc_tui_frame_timing.finish_stage ~name:"home.selection" selection_started
                   | Overview, `Detail_reading _ -> ()
                   | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | (`Queue _ | `Patch))))))))))))))))

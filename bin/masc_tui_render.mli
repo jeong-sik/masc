@@ -62,6 +62,9 @@ val operator_actions_reading :
     Missing server/rollup observations remain distinct from a known empty
     list. Opening this read-only document neither refreshes nor acknowledges
     a reason; the existing workspace-owned reader owns its lifetime. *)
+val operator_action_reading :
+  Masc_tui_types.state -> Masc.Operator_action_reason.t -> Masc_tui_detail_reading.t
+(** Capture exactly this original item, independent of the current rollup. *)
 
 (** What a press on this terminal row opens in the chat history the last frame
     drew, and {!Masc_tui_message_layout.Action_none} for any row outside it.

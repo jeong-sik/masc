@@ -106,15 +106,23 @@ let an_exception_waits_for_the_running_request place = in_eio (fun () ->
 let test_a_fiber_exception_waits = an_exception_waits_for_the_running_request (fun run -> Walk.Beside run)
 let test_a_walk_exception_waits = an_exception_waits_for_the_running_request (fun run -> Walk.Here run)
 
-let test_a_propagating_exception_cancels_the_running_requests = in_eio (fun () ->
+(* A propagating exception leaves at once, whether the walk raised it where
+   it stands or a fiber beside it did. A walk that kept it would wait for the
+   running request, which only a cancellation ends. *)
+let a_propagating_exception_cancels_the_running_request place = in_eio (fun () ->
   let t = trace () in
   let cancelled = ref false in
-  let raised = raised_by (fun () -> walk ~propagates:on_stop 2
+  let raised = raised_by (fun () -> walk ~propagates:on_stop 3
     [ Walk.Beside (body t "running" (fun () ->
         try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled _ as exn -> cancelled := true; raise exn))
-    ; Walk.Here (body t "stopping" (fun () -> raise Stop)) ]) in
+    ; place (body t "stopping" (fun () -> raise Stop)) ]) in
   check bool "it leaves as itself" true (match raised with Some Stop -> true | Some _ | None -> false);
   check bool "the running request is cancelled" true !cancelled)
+
+let test_a_propagating_walk_exception_cancels =
+  a_propagating_exception_cancels_the_running_request (fun run -> Walk.Here run)
+let test_a_propagating_fiber_exception_cancels =
+  a_propagating_exception_cancels_the_running_request (fun run -> Walk.Beside run)
 
 (* An instance that retires stops every running call, and each of them raises.
    The walk lets one of them out and nothing else. Which fiber Eio wakes first
@@ -154,8 +162,10 @@ let () =
         ; test_case "a listing halt starts nothing after it" `Quick test_a_listing_halt_starts_nothing_after_it
         ; test_case "a fiber exception waits for the running request" `Quick test_a_fiber_exception_waits
         ; test_case "a walk exception waits for the running request" `Quick test_a_walk_exception_waits
-        ; test_case "a propagating exception cancels the running requests" `Quick
-            test_a_propagating_exception_cancels_the_running_requests
+        ; test_case "a propagating walk exception cancels the running request" `Quick
+            test_a_propagating_walk_exception_cancels
+        ; test_case "a propagating fiber exception cancels the running request" `Quick
+            test_a_propagating_fiber_exception_cancels
         ; test_case "fibers stopped together leave as one exception" `Quick
             test_fibers_stopped_together_leave_as_one_exception
         ; test_case "a kept exception outlives a later stop" `Quick test_a_kept_exception_outlives_a_later_stop ] ) ]

@@ -31,7 +31,10 @@ let walk ~max_in_flight ~propagates ~step requests =
           if not (!leaving || Option.is_some !raised) then (leaving := true; raise exn)
       | exception exn ->
           let backtrace = Printexc.get_raw_backtrace () in
-          if not (!leaving || Option.is_some !raised) then raised := Some (exn, backtrace) in
+          if !leaving || Option.is_some !raised then
+            Log.Misc.warn "Lane Add-on host walk dropped an exception raised after the one that leaves: %s"
+              (Printexc.to_string exn)
+          else raised := Some (exn, backtrace) in
     let start index request =
       match step request with
       | Skip -> ()
@@ -39,8 +42,10 @@ let walk ~max_in_flight ~propagates ~step requests =
       | Here run -> settle index (run ~running_at_start:!running)
       | Beside run ->
           let running_at_start = !running in
-          incr running;
+          (* The fiber counts itself: a switch that is already off runs no
+             fiber, and then nothing would take the count back. *)
           Eio.Fiber.fork ~sw (fun () ->
+            incr running;
             Fun.protect
               ~finally:(fun () -> decr running; Eio.Condition.broadcast changed)
               (fun () -> caught (fun () -> settle index (run ~running_at_start))));

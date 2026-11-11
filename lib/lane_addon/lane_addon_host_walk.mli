@@ -43,4 +43,5 @@ val walk :
     running fibers are cancelled. If the walk already keeps an exception, that
     one still leaves after the running requests end and the propagating one
     is dropped. While a propagating exception is leaving, what the cancelled
-    requests raise is dropped too. Cancellation always leaves at once. *)
+    requests raise is dropped too. A dropped exception that does not
+    propagate is logged as a warning. Cancellation always leaves at once. *)

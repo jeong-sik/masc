@@ -298,6 +298,8 @@ type action =
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
   | Discharge_gate of gate_obligation
+  | Await_receipt of receipt_obligation
+  | Resolve_receipt of { request_id : string; resolution : receipt_resolution }
   | Settle of terminal
 
 let error_to_string = function
@@ -589,7 +591,7 @@ let apply ~now action current =
          | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _
          | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _
          | Advance_input_branch _ | Reconcile_gate_binding _ | Resolve_gate _
-         | Resume_gate _ | Discharge_gate _ | Settle _) -> Ok ()
+         | Resume_gate _ | Discharge_gate _ | Await_receipt _ | Resolve_receipt _ | Settle _) -> Ok ()
       | Preparing_checkpoint _,
         (Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
          | Retry_preparation _ | Require_reconciliation _ | Suspend _
@@ -597,7 +599,7 @@ let apply ~now action current =
          | Update_runtime_retry_wait _ | Suspend_gate_reconciliation _ | Suspend_gate _
          | Suspend_input _ | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _
          | Advance_input_branch _ | Reconcile_gate_binding _ | Resolve_gate _
-         | Resume_gate _ | Discharge_gate _ | Settle Completed) -> reject () in
+         | Resume_gate _ | Discharge_gate _ | Await_receipt _ | Resolve_receipt _ | Settle Completed) -> reject () in
     let* phase = match action with
       | Confirm_sources ->
           (match current.phase with
@@ -829,6 +831,11 @@ let apply ~now action current =
            | Running | Preparing_checkpoint _ | Resuming_runtime_retry _ ->
              if List.mem obligation current.gate_obligations then unchanged current.phase else reject ()
            | Preparing | Ready | Recovering _ | Preparation_wait _ | Suspended _ | Settled _ -> reject ())
+      | Await_receipt _ ->
+          (match current.phase with
+           | Running | Resuming_runtime_retry _ | Resuming_gate _ -> unchanged current.phase
+           | Preparing | Ready | Preparing_checkpoint _ | Recovering _ | Preparation_wait _ | Suspended _ | Settled _ -> reject ())
+      | Resolve_receipt _ -> unchanged current.phase
       | Require_reconciliation diagnostic ->
           if String.trim diagnostic = "" then reject ()
           else (match recovery_origin current.phase with
@@ -856,7 +863,7 @@ let apply ~now action current =
          | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
          | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
          | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _ | Advance_input_branch _ | Reconcile_gate_binding _
-         | Resolve_gate _ | Resume_gate _ | Discharge_gate _ ->
+         | Resolve_gate _ | Resume_gate _ | Discharge_gate _ | Await_receipt _ | Resolve_receipt _ ->
            if phase <> current.phase then
              Error Native_call_unsettled
            else Ok current.native_call)
@@ -871,6 +878,7 @@ let apply ~now action current =
             | Enter_official_checkpoint | Wait_preparation _ | Retry_preparation _ | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
             | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
             | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _ | Advance_input_branch _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+            | Await_receipt _ | Resolve_receipt _
             | Settle (Completed | Cancelled | Failed _) -> Ok current.native_call)
          | Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown ->
            (match action with
@@ -884,6 +892,7 @@ let apply ~now action current =
             | Enter_official_checkpoint | Wait_preparation _ | Retry_preparation _ | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
             | Require_reconciliation _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
             | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _ | Advance_input_branch _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+            | Await_receipt _ | Resolve_receipt _
             | Settle (Cancelled | Failed _) -> Ok current.native_call)) in
     let gate_obligations = match action with
       | Suspend_gate_reconciliation (binding, _) -> binding.obligations
@@ -893,9 +902,22 @@ let apply ~now action current =
       | Enter_official_checkpoint | Wait_preparation _ | Retry_preparation _ | Confirm_sources | Begin_execution | Resume_checkpoint _
       | Resume_official_checkpoint _ | Suspend_official_checkpoint _
       | Require_reconciliation _ | Suspend _ | Suspend_input _ | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _ | Advance_input_branch _ | Suspend_runtime_retry _
-      | Resume_runtime_retry _ | Update_runtime_retry_wait _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
+      | Resume_runtime_retry _ | Update_runtime_retry_wait _ | Resolve_gate _ | Resume_gate _
+      | Await_receipt _ | Resolve_receipt _ -> current.gate_obligations in
     let receipt_obligations = match action with
       | Settle _ -> []
+      | Await_receipt obligation ->
+        if List.exists (fun (entry : receipt_obligation) -> String.equal entry.request_id obligation.request_id)
+            current.receipt_obligations
+        then current.receipt_obligations
+        else current.receipt_obligations @ [obligation]
+      | Resolve_receipt {request_id; resolution} ->
+        List.map (fun (entry : receipt_obligation) ->
+          if String.equal entry.request_id request_id
+          then (match entry.state with
+            | Pending -> {entry with state = Arrived resolution}
+            | Arrived _ -> entry)
+          else entry) current.receipt_obligations
       | Require_reconciliation _ ->
         (* A running execution that a restart interrupted is never resumed
            automatically, so it stops owning its requests as a settled one does. *)
@@ -921,7 +943,8 @@ let apply ~now action current =
       | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
       | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
       | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Reconcile_gate_binding _
-      | Advance_input_branch _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _ -> current.input_response_intent in
+      | Advance_input_branch _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+      | Await_receipt _ | Resolve_receipt _ -> current.input_response_intent in
     let input_branch : input_branch option = match action with
       | Resolve_input_branch {observed;checkpoint} ->
         let origin = match current.input_branch with None -> observed | Some branch -> branch.origin in
@@ -933,7 +956,8 @@ let apply ~now action current =
       | Require_reconciliation _ | Suspend _ | Suspend_official_checkpoint _
       | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
       | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _ | Prepare_input_response _
-      | Resolve_input _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _ -> current.input_branch in
+      | Resolve_input _ | Reconcile_gate_binding _ | Resolve_gate _ | Resume_gate _ | Discharge_gate _
+      | Await_receipt _ | Resolve_receipt _ -> current.input_branch in
     let* () = validate_input_branch ~id:current.id ~revision:(if current.revision = Int64.max_int then current.revision else Int64.succ current.revision)
         ~phase ~native_call ~intent:input_response_intent input_branch
       |> Result.map_error (fun detail -> Invalid_transition detail) in

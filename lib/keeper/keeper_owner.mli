@@ -475,8 +475,19 @@ val checkpoint_direct_native_call : t -> operation_id:Chat_operation.Operation_i
   call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t -> (unit, error) result
 val terminal_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, error) result
-val defer_direct_checkpoint : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
+val defer_direct_checkpoint : ?receipt_wait:Keeper_semantic_execution.receipt_obligation -> t ->
+  operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Chat_operation.t, error) result
+(** [receipt_wait] ends the turn on a background receipt: the request joins the
+    execution's owner record in the same transaction (see
+    {!Keeper_chat_operation_store.defer_direct_checkpoint}). *)
+val receipt_arrived : t -> request_id:string ->
+  resolution:Keeper_semantic_execution.receipt_resolution ->
+  (Keeper_chat_operation_store.receipt_resolution_outcome, error) result
+(** Tells the Owner that the request's receipt is in the outbox, or that its
+    source is gone. The Owner finds the execution that owns the request and
+    starts a claim when its last pending receipt arrived. A repeated or late
+    notice changes nothing. *)
 type input_response_error =
   | Response_owner_error of error
   | Response_installation_error of Keeper_input_wait_response.installation_error

@@ -427,8 +427,29 @@ val resolve_direct_input_wait : t -> now:float -> operation_id:Operation.Operati
     responses refuse; uncertain commit acknowledgement stays
     Error and grants no retry or retained-file deletion authority. *)
 
-val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
+val defer_direct_checkpoint : ?receipt_wait:Keeper_semantic_execution.receipt_obligation -> t -> now:float ->
+  operation_id:Operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
+(** With [receipt_wait], the same transaction first adds that request to the
+    execution (Await_receipt) and then ends the turn. A request another active
+    execution owns is [Invalid_input] and nothing changes, so the turn
+    continues. A repeated call after an uncertain commit confirms only when the
+    execution holds the request. Without it the call is the plain cooperative
+    yield. *)
+
+type receipt_resolution_outcome =
+  | Receipt_resolved
+      (** A [Pending] entry became [Arrived], so the task may be claimable. *)
+  | Receipt_already_arrived
+      (** The owner's entry was not [Pending]. Nothing changed. *)
+  | Receipt_without_owner
+      (** No active execution owns the request. Nothing changed. *)
+
+val resolve_receipt : t -> now:float -> request_id:string ->
+  resolution:Keeper_semantic_execution.receipt_resolution -> (receipt_resolution_outcome, error) result
+(** Records that the request's receipt arrived, in one transaction that reads
+    every active execution. The owner is found by the request, not named by the
+    caller, because the notification knows only the receipt. *)
 val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->
   observed:Keeper_semantic_execution.gate_checkpoint -> (unit, error) result
 

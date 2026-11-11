@@ -293,8 +293,12 @@ type _ command =
       {operation_id:Operation_id.t; execution_digest:string; change:Keeper_native_call.change} -> (unit, error) result command
   | Defer_direct_checkpoint :
       { operation_id : Operation_id.t; execution_digest : string;
-        checkpoint : Keeper_semantic_execution.gate_checkpoint } ->
+        checkpoint : Keeper_semantic_execution.gate_checkpoint;
+        receipt_wait : Keeper_semantic_execution.receipt_obligation option } ->
       (Chat_operation.t, error) result command
+  | Receipt_arrived :
+      { request_id : string; resolution : Keeper_semantic_execution.receipt_resolution } ->
+      (Chat_operation_store.receipt_resolution_outcome, error) result command
   | Resume_direct_checkpoint :
       { operation_id : Operation_id.t; observed : Keeper_semantic_execution.gate_checkpoint } ->
       (unit, error) result command
@@ -687,6 +691,7 @@ let answer : type response. response command -> answer = function
   | Begin_history_clear _ | Commit_history_clear _ -> In_its_drain_step
   | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
+  | Receipt_arrived _ -> In_its_drain_step
   | Resume_direct_checkpoint _ -> In_its_drain_step
   | Direct_runtime_retry _ -> In_its_drain_step
   | Defer_direct_runtime_retry _ -> In_its_drain_step
@@ -2468,11 +2473,23 @@ let start
                 "input waiting requires its original executing direct child")) in
           Eio.Promise.resolve resolve response;
           loop state
-        | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint}, resolve) ->
+        | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint; receipt_wait}, resolve) ->
           let response = run_operation_command t ~label:"defer direct cooperative checkpoint" (fun () ->
-            Chat_operation_store.defer_direct_checkpoint t.operation_store ~now:(t.now ())
+            Chat_operation_store.defer_direct_checkpoint ?receipt_wait t.operation_store ~now:(t.now ())
               ~operation_id ~execution_digest ~checkpoint) |> Result.map fst in
           Eio.Promise.resolve resolve response;
+          loop state
+        | Command (Receipt_arrived {request_id; resolution}, resolve) ->
+          let response = run_operation_command t ~label:"record a retained receipt arrival" (fun () ->
+            Chat_operation_store.resolve_receipt t.operation_store ~now:(t.now ())
+              ~request_id ~resolution) |> Result.map fst in
+          Eio.Promise.resolve resolve response;
+          (* A task whose last pending receipt arrived is claimable now. Any
+             other outcome changed nothing, so no claim is newly possible. *)
+          (match response with
+           | Ok Chat_operation_store.Receipt_resolved -> start_child_if_needed state shutdown_operation_id
+           | Ok (Chat_operation_store.Receipt_already_arrived | Chat_operation_store.Receipt_without_owner)
+           | Error _ -> ());
           loop state
         | Command (Resume_direct_checkpoint {operation_id; observed}, resolve) ->
           let response = run_operation_command t ~label:"resume direct cooperative checkpoint" (fun () ->
@@ -3112,8 +3129,11 @@ let wait_direct_preparation t ~operation_id ~execution_digest ~observed ~failure
 let retry_direct_preparation t ~operation_id ~expected_revision ~execution_digest =
   request t (Retry_direct_preparation {operation_id;expected_revision;execution_digest})
 let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_id)
-let defer_direct_checkpoint t ~operation_id ~execution_digest ~checkpoint =
-  request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint})
+let defer_direct_checkpoint ?receipt_wait t ~operation_id ~execution_digest ~checkpoint =
+  request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint; receipt_wait})
+
+let receipt_arrived t ~request_id ~resolution =
+  request t (Receipt_arrived {request_id; resolution})
 let direct_input_wait t ~operation_id = request t (Direct_input_wait operation_id)
 let defer_direct_input_wait t ~operation_id ~request:visible_request =
   match Keeper_turn_preview_owner.current () with

@@ -82,7 +82,7 @@ let consume ~base_path ~keeper_name ~operation_id admission =
   Owner.resume_direct_checkpoint ~base_path ~keeper_name ~operation_id
     ~observed:admission.observed |> owner
 
-let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~checkpoint =
+let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~checkpoint ~receipt_wait =
   let* expected_session_id = Keeper_id.Trace_id.of_string session_id in
   let* produced = Checkpoint.exact_snapshot_of_value ~expected_session_id checkpoint
     |> Result.map_error (fun _ -> "producer returned an invalid cooperative checkpoint") in
@@ -101,9 +101,10 @@ let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~checkp
   | None -> Error "direct operation disappeared before cooperative deferral"
   | Some operation -> Owner.defer_direct_checkpoint ~base_path ~keeper_name ~operation_id
       ~execution_digest:operation.execution_digest ~checkpoint:(Semantic.Agent_core (Checkpoint.exact_snapshot_reference snapshot))
+      ~receipt_wait
       |> owner |> Result.map (fun _ -> ())
 
-let defer_official ~base_path ~keeper_name ~operation_id ~(settled_session : Native.t) ~frame =
+let defer_official ~base_path ~keeper_name ~operation_id ~(settled_session : Native.t) ~frame ~receipt_wait =
   let* checkpoint = match settled_session.phase, Snapshot.active frame with
     | Native.Settled { session_id; turn_id }, Some scope
       when Keeper_execution_scope_id.equal scope (Keeper_execution_scope_id.direct_operation operation_id) ->
@@ -121,6 +122,7 @@ let defer_official ~base_path ~keeper_name ~operation_id ~(settled_session : Nat
   | None -> Error "direct operation disappeared before official cooperative deferral"
   | Some operation -> Owner.defer_direct_checkpoint ~base_path ~keeper_name ~operation_id
       ~execution_digest:operation.execution_digest ~checkpoint:(Semantic.Official_client checkpoint)
+      ~receipt_wait
       |> owner |> Result.map (fun _ -> ())
 
 module For_testing = struct

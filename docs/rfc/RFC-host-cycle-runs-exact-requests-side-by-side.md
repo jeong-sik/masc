@@ -77,6 +77,12 @@ Librarian 요청은 Background 등급으로 허가를 받는다(`lib/server/serv
 - 05:19Z 에 다시 읽으면 29명 가운데 23명이다.
 - 시간당 5~10건이면 맨 뒤 Keeper 는 2.5~5시간을 기다린다.
 
+07:01Z 에 끝나지 않은 original 25개의 진행 기록을 읽었다.
+
+- 접수되어 차례를 기다리는 것이 15개다. worker 가 접수를 거절한 것(`capacity_wait`)이 8개다. `worker_absent` 로 멈춘 것이 2개다.
+- worker 의 대기 목록은 frame 한도(2.1)에 닿아 있다. 25개 가운데 23개가 한 번 이상 거절됐다.
+- 기다리는 23개 가운데 거절이 가장 많은 것은 220번이다. 접수까지 가장 오래 걸린 것은 6시간 56분이다. 같은 때 3~6분 만에 접수된 것도 있다(#51280).
+
 ### 1.3 요청의 크기
 
 host 가 보관한 exact 요청 기록 가운데 24시간 안에 쓰인 `durable` 10건의 프롬프트는 중앙값이 139,640자다.
@@ -100,7 +106,7 @@ host 가 보관한 exact 요청 기록 가운데 24시간 안에 쓰인 `durable
 - opencode slot 이 쉬는 중인지. 허가 0번과 429 일곱 줄로 미뤄 본 것이다.
 - instance 가 물러난(detach, 선언 변경) 횟수. 세지 않았다.
 - 요청별 시간을 직접 적은 기록. host 의 요청 기록에는 시각이 없다. 1.4 는 앞 기록의 저장 시각으로 미뤄 본 값이다. §8 의 L0 가 시도마다 한 줄을 적는다.
-- worker 의 대기 목록이 frame 한도(2.1)에 닿았는지. 1.3 의 중앙값으로 23건이면 약 320만 자다. 바이트 수와 frame 에 실리는 크기는 재지 않았다.
+- worker 가 대기 요청 하나를 몇 바이트로 재는지. 1.2 의 거절 횟수는 Keeper 쪽 기록에서 셌다.
 - history 결과가 기준 변경으로 버려지는 횟수(2.3). 세지 않았다.
 - admission 요청 하나의 시간, 한 Keeper 가 history 요청과 admission 요청을 함께 들고 있는 빈도.
 
@@ -121,7 +127,7 @@ host 가 보관한 exact 요청 기록 가운데 24시간 안에 쓰인 `durable
 - `each`(1309행)가 목록을 앞에서부터 하나씩 처리한다. `exact_output` 이면 provider 호출이 끝날 때까지 다음 요청으로 가지 않는다.
 - 전달이 하나라도 있었으면 `pass` 를 다시 한다(1345행). 전달이 없는 목록에서 cycle 이 끝난다.
 - `host_status` 는 cycle 이 끝날 때만 쓴다(1347행).
-- `pass` 는 대기 요청 전체를 응답 frame 하나로 받는다. worker 는 대기 요청 전체가 frame(`max_reply_bytes`, keeper-librarian 은 4,194,304 B)에 들어갈 때만 새 요청을 받는다. 넘으면 `capacity_wait` 를 돌려주고, 그 요청은 Keeper 쪽에서 기다린다(`addons/exact_worker.py`).
+- `pass` 는 대기 요청 전체를 응답 frame 하나로 받는다. worker 는 대기 요청 전체가 frame(`max_reply_bytes`, keeper-librarian 은 4,194,304 B)에 들어갈 때만 새 요청을 받는다. 넘으면 `capacity_wait` 를 돌려주고, 그 요청은 Keeper 쪽에서 기다린다(`addons/exact_worker.py`). 거절된 요청 사이에는 순서가 없다. 자리가 났을 때 들어맞는 요청이 접수된다(#51280).
 
 instance 마다 fiber 하나가 action, host cycle, observation 을 차례로 돈다(같은 파일의 `loop`). cycle 이 도는 동안 그 instance 의 action 과 observation 도 기다린다. 요청이 끊이지 않으면 cycle 은 끝나지 않는다.
 
@@ -200,7 +206,11 @@ host 가 순서를 지켜 줄 필요는 없다. 다만 함께 실행하면 어�
 - keeper-librarian 의 binding 은 빈 `sources` 만 받는다(`addons/keeper-librarian/lane.toml` 의 `binding_schema`). 그래서 이 설치의 revision 은 `run_id` 나 package 가 바뀔 때 바뀐다.
 - `enabled` 는 revision 밖이다. 설치를 껐다 켜면 revision 이 같은 새 instance 가 붙는다.
 
-revision 이 바뀐 뒤 Keeper 쪽이 그 원본을 새 revision 으로 다시 준비하는지는 따라가지 않았다(§9).
+Keeper 쪽은 그 원본을 새 revision 으로 다시 준비하지 않는다(#51278).
+
+- 다음 pass 는 worker 를 부르기 전에 같은 비교에서 거절한다. worker 에 상태를 묻는 호출도 그 비교를 먼저 거친다(`keeper_librarian_durable_owner.ml` 의 `call`).
+- 끝나지 않은 원본이 있는 Keeper 는 새 범위를 고르지 않는다(`keeper_librarian_durable_execution.ml` 479행). 그 Keeper 의 durable Librarian 은 선언을 예전 값으로 되돌릴 때까지 멈춘다.
+- 1.2 의 상태에서 package 를 올리면 기다리던 23명이 그렇게 멈춘다.
 
 ## 3. 설계
 
@@ -389,7 +399,7 @@ revision 이 바뀌어 물러나는 경우다. 운영자가 package 를 올리�
 | N+k | 호출 셋의 상태는 위와 같다. 운영자가 선언의 `manifest_path` 를 새 package 로 바꾼다 |
 | 다음 reconcile | revision 이 달라서 instance 가 물러난다. 세 호출이 취소된다. 그 뒤의 reconcile 이 새 instance 를 붙인다 |
 | 새 instance 의 cycle | h1·h2 는 `cut` 으로 끝난다. host 는 시작 표시를 권한 검사보다 먼저 본다. h3 과 목록의 나머지는 보내기 전 검사에서 거절되고 `Exact_record_failed` 로 남는다(2.6) |
-| 그 뒤 | cycle 마다 같은 오류가 남는다. Keeper 쪽이 그 원본을 다시 준비하는지는 따라가지 않았다(§9) |
+| 그 뒤 | cycle 마다 같은 오류가 남는다. Keeper 쪽도 pass 마다 같은 비교에서 거절한다. 그 Keeper 의 durable Librarian 은 선언을 되돌릴 때까지 멈춘다(2.6) |
 
 - 이 경우 시작 표시가 없는 요청에 일어나는 일은 지금과 같다. 이 설계가 바꾸는 것은 `cut` 의 수다.
 
@@ -413,6 +423,8 @@ revision 이 바뀌어 물러나는 경우다. 운영자가 package 를 올리�
 - cycle 의 길이. 요청이 끊이지 않으면 cycle 은 지금처럼 끝나지 않고, 그 instance 의 action 과 observation 은 기다린다.
 - 포화된 계정. 계정이 내는 총량은 그대로다. 이 설치가 허가를 더 쥐는 만큼 Keeper 턴이 기다린다.
 - 쉬는 slot 다음이 느린 계정인 경우. lane 은 그 slot 에서 허가를 기다리고, body deadline 이 지나야 다음 slot 으로 간다. 뒤 slot 이 비어 있어도 먼저 가지 않는다(1.1 의 ollama 계열).
+- worker 대기 목록의 상한과 접수 순서. 대기 요청 전체가 frame 하나에 들어가야 하는 것은 그대로다(2.1). 함께 실행하면 목록에서 요청이 더 빨리 빠질 뿐이다. 접수가 온 순서가 아닌 것도 그대로다(#51280).
+- 끝나지 않은 원본의 본문을 pass 마다 다시 검증하는 비용(#51281). 원본이 기다리는 시간이 줄면 같이 준다.
 
 대가:
 
@@ -439,6 +451,8 @@ revision 이 바뀌어 물러나는 경우다. 운영자가 package 를 올리�
    - 요청별 시간. L0 의 줄에서 센다.
    - 같은 계정의 standard 대기 중앙값. `masc:provider_admission:waited` 이벤트에서 센다.
    - 기준 변경으로 버려진 history 결과. Keeper 쪽 원본 기록의 `Commit_conflicted` 사건에서 센다.
+
+이 순서의 어느 단계도 keeper-librarian package 를 올리지 않는다. L0~L2 는 host 쪽 변경이고, `max_exact_in_flight` 는 revision 밖이다(3.2). 원본이 기다리는 동안 package 를 올리면 그 원본들이 막힌다(2.6).
 
 5번 없이 6번을 하면 instance 가 물러날 때마다 멈추는 Keeper 가 는다. 1.5 의 기록으로는 `cut` 이 0개이고 keeper-librarian worker 가 스스로 끝난 적이 없다. 그래서 5번을 건너뛰는 선택도 있다. 그 선택의 대가는 4.6 의 첫째 표다.
 
@@ -481,7 +495,6 @@ revision 이 바뀌어 물러나는 경우다. 운영자가 package 를 올리�
 
 - official client 가 호출마다 프로세스 하나를 띄우는지. `keeper_lane_cli_oneshot.ml` 이 `Fusion_official_client.run_with_images` 를 부르는 데까지만 봤다.
 - 다계정에서 설치 선언이 계정 서버마다 따로인지. 따로라면 `max_exact_in_flight` 도 서버마다 따로다. `Provider_admission` 은 endpoint identity 로 세니 계정이 다르면 허가도 따로다.
-- revision 이 바뀐 뒤 `Exact_record_failed` 로 남는 원본을 Keeper 쪽이 새 revision 으로 다시 준비하는지(2.6). 다시 준비하지 않으면 package 를 올릴 때마다 대기 중이던 원본이 모두 남는다. 지금도 같은 조건이다.
 - admission 반영이 Memory 의 revision 이나 facts 를 매번 바꾸는지. 바꾸지 않는 반영은 history 결과를 버리게 하지 않는다.
 - 이 키를 모르는 빌드가 다시 떴을 때 그 설치가 붙지 않는지. 거절 문자열까지만 봤다.
 - 선언의 필드를 나열하는 자리(3.7)가 전부인지.

@@ -37,7 +37,7 @@ The command palette is `:`.
 |---|---|
 | `v` | read every reason in the last server rollup; scroll and search the captured reading; Esc returns without changing a decision or setting |
 | `Left` | open the Keeper list; Enter opens a chat; Right or Esc returns |
-| `j/k` | move between decision links and conversations |
+| `j/k` | select a destination |
 | `Enter` | open the selected destination; never approve |
 | `p` | approvals and questions |
 | `g` | the operator quiz's Results: scorecard windows and wrong-answer notes |

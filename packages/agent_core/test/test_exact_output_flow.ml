@@ -1104,7 +1104,7 @@ let test_fenced_text_json_advances_to_frozen_successor () =
    successor gets the request — the same shape as the fenced-JSON case. *)
 let test_missing_output_advances_to_frozen_successor () =
   let first_response = `OK, missing_output_response in
-  let (result, observed_advance, advances), posts =
+  let (result, observed_advance, advances, frozen_endpoint), posts =
     with_server ~first_response ~response:(openai_response {|{"name":"accepted"}|})
     @@ fun ~sw:_ ~net ~clock ~base_url ->
     with_catalog
@@ -1134,7 +1134,7 @@ let test_missing_output_advances_to_frozen_successor () =
             Ok ())
           (start_flow (frozen_flow snapshot [ "missing-text"; "present-text" ]))
       in
-      result, !observed_advance, !advances
+      result, !observed_advance, !advances, base_url ^ "/v1/chat/completions"
   in
   check int "missing then valid fallback performs two POSTs" 2 posts;
   check int "missing output fallback advances once" 1 advances;
@@ -1168,7 +1168,19 @@ let test_missing_output_advances_to_frozen_successor () =
       [ "missing-text"; "present-text" ]
       (List.map
          (fun (attempt : EO.flow_attempt_snapshot) -> attempt.visit.identity.candidate_id)
-         (EO.flow_success_evidence success).attempts)
+         (EO.flow_success_evidence success).attempts);
+    List.iter (fun (attempt : EO.flow_attempt_snapshot) ->
+      let receipt = attempt.receipt in
+      let binding = EO.generation_receipt_snapshot_binding receipt in
+      check string "each predecessor retains its frozen wire endpoint"
+        frozen_endpoint binding.endpoint;
+      check string "model identity is the original candidate's"
+        (attempt.visit.identity.candidate_id ^ "-model") binding.model_id;
+      check bool "each executed attempt has its own observed start" true
+        (Option.is_some (EO.generation_receipt_snapshot_execution_started_at receipt));
+      check bool "a returned failed or successful executor has an observed finish" true
+        (Option.is_some (EO.generation_receipt_snapshot_execution_finished_at receipt)))
+      (EO.flow_success_evidence success).attempts
   | Error _ -> fail "missing output did not advance to its frozen successor"
 ;;
 
@@ -6162,7 +6174,11 @@ let check_cancellation_terminalizes_outer_attempt ?(guarded=false) ~after_dispat
   if after_dispatch then (
     let receipt = (attempt_for evidence "cancel-flow").receipt in
     check int "published cancelled receipt records one dispatch" 1
-      (EO.generation_receipt_snapshot_dispatch_count receipt))
+      (EO.generation_receipt_snapshot_dispatch_count receipt);
+    check bool "cancelled generation retains its observed start" true
+      (Option.is_some (EO.generation_receipt_snapshot_execution_started_at receipt));
+    check (option (float 0.)) "cancellation does not invent a return time" None
+      (EO.generation_receipt_snapshot_execution_finished_at receipt))
 ;;
 
 let test_cancellation_before_dispatch_terminalizes_outer_attempt () =

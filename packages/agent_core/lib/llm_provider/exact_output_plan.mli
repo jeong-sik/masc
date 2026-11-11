@@ -8,6 +8,22 @@ type t
 type fingerprint
 type preflight
 
+type binding_observation = private
+  { provider_id : string option
+  ; model_id : string
+  ; provider_kind : Provider_config.provider_kind
+  ; endpoint : string
+  }
+(** Credential-free identity and HTTP endpoint. The endpoint is the actual
+    synchronous generation URL with userinfo, query and fragment removed.
+    It is a request binding, not evidence of dispatch or remote health. *)
+
+val binding_of_config : Provider_config.t -> binding_observation
+(** Pure projection using the same URL construction as preflight. *)
+
+val binding_observation : t -> binding_observation
+(** The original frozen wire's binding; never rereads a catalog. *)
+
 type output_admission_error =
   | Explicit_capability_snapshot_required
   | Unsupported_output_contract of

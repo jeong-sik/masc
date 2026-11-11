@@ -59,11 +59,19 @@ type frozen_wire_request =
   ; body_timeout_s : float option
   }
 
+type binding_observation =
+  { provider_id : string option
+  ; model_id : string
+  ; provider_kind : Provider_config.provider_kind
+  ; endpoint : string
+  }
+
 type t =
   { response_format : Types.response_format
   ; wire : frozen_wire_request
   ; dispatch_request : Http_client.validated_sync_request
   ; fingerprint : fingerprint
+  ; binding : binding_observation
   }
 
 type preflight =
@@ -384,6 +392,36 @@ let request_url (config : Provider_config.t) =
   | Provider_config.Glm -> config.base_url ^ config.request_path
 ;;
 
+let binding_for_url (config : Provider_config.t) url =
+  { provider_id = config.provider_id
+  ; model_id = config.model_id
+  ; provider_kind = config.kind
+  ; endpoint =
+      Uri.of_string url
+      |> Uri.with_uri ~userinfo:None ~query:None ~fragment:None
+      |> Uri.to_string
+  }
+;;
+
+let binding_of_config config = binding_for_url config (request_url config)
+let binding_observation (plan : t) = plan.binding
+
+let%test "binding observation omits URL credentials and query" =
+  let config = Provider_config.make ~kind:OpenAI_compat ~model_id:"binding-fixture"
+    ~base_url:"https://user:secret@binding.example"
+    ~request_path:"/v1/chat/completions?key=secret#secret" () in
+  let binding = binding_of_config config in
+  binding.endpoint = "https://binding.example/v1/chat/completions"
+  && binding.model_id = "binding-fixture"
+;;
+
+let%test "binding observation uses Gemini generation path" =
+  let config = Provider_config.make ~kind:Gemini ~model_id:"binding-fixture"
+    ~base_url:"https://binding.example/v1beta" ~request_path:"/unused" () in
+  (binding_of_config config).endpoint
+  = "https://binding.example/v1beta/models/binding-fixture:generateContent"
+;;
+
 type frozen_serialization =
   { response_codec : Provider_http_codec.t
   ; body : string
@@ -588,6 +626,7 @@ let finalize preflight admission_basis =
   ; wire = preflight.wire
   ; dispatch_request = preflight.dispatch_request
   ; fingerprint
+  ; binding = binding_for_url preflight.config preflight.wire.url
   }
 ;;
 

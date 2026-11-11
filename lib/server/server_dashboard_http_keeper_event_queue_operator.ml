@@ -238,9 +238,14 @@ let handle_post state ~actor request reqd ~keeper_name body =
           operation
       in
       (match result with
-       | Ok _ ->
+       | Ok { Execute.completion = Execute.Complete; _ } ->
          Log.Keeper.info
            "keeper_event_queue_operator: applied keeper=%s action=%s"
+           keeper_name
+           action
+       | Ok { Execute.completion = Execute.Committed_followup_failed; _ } ->
+         Log.Keeper.warn
+           "keeper_event_queue_operator: committed follow-up incomplete keeper=%s action=%s"
            keeper_name
            action
        | Error _ ->
@@ -252,11 +257,11 @@ let handle_post state ~actor request reqd ~keeper_name body =
         record_audit (fun () ->
           let source_details =
             match result with
-            | Ok (Some source, _) ->
+            | Ok { Execute.audit_source = Some source; _ } ->
               [ "post_id", `String source.Execute.post_id
               ; "payload_kind", `String source.payload_kind
               ]
-            | Ok (None, _) | Error _ -> []
+            | Ok { Execute.audit_source = None; _ } | Error _ -> []
           in
           Audit_log.log_action
             config
@@ -277,18 +282,20 @@ let handle_post state ~actor request reqd ~keeper_name body =
                  @ source_details))
             ~outcome:
               (match result with
-               | Ok _ -> Audit_log.Success
+               | Ok { Execute.completion = Execute.Complete; _ } -> Audit_log.Success
+               | Ok { Execute.completion = Execute.Committed_followup_failed; _ } ->
+                 Audit_log.Failure "transition committed; follow-up incomplete"
                | Error detail -> Audit_log.Failure detail)
             ())
       in
       match result with
-      | Ok (_, result) ->
+      | Ok outcome ->
         respond
           (`Assoc
             [ "schema", `String result_schema
             ; "ok", `Bool true
             ; "keeper_name", `String keeper_name
-            ; "result", result
+            ; "result", outcome.Execute.response
             ; "audit", audit
             ])
       | Error detail ->

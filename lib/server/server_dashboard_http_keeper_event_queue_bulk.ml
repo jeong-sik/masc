@@ -1,23 +1,14 @@
-(** Fleet-wide bulk cancel for the Keeper event queue.
-
-    Admin-only, the same boundary as the per-Keeper operator control
-    ([Server_dashboard_http_keeper_event_queue_operator]). The default is a
-    dry run: it reports the exact number of rows it would cancel, grouped by
-    keeper and source, plus the oldest age, and mutates nothing. Execution
-    requires an explicit confirm token and writes a backup of every row it is
-    about to cancel before it touches the queue. Each row is cancelled through
-    the same durable, fenced per-Keeper transition the single-row operator
-    boundary uses. A retry re-plans from current state, so a row cancelled by
-    an earlier attempt is no longer in the plan and is not cancelled twice. *)
+(** Admin-only fleet event-queue preview and exact-selection cancellation.
+    Execution revalidates the selected incarnations before writing its target
+    record. New arrivals outside that selection never acquire cancel authority.
+    The record contains identity metadata, not a restorable queue snapshot. *)
 
 module Http = Http_server_eio
 module Execute = Server_dashboard_http_keeper_event_queue_operator_execute
 
 let ( let* ) = Result.bind
-
-let schema = "keeper_event_queue.bulk.request.v1"
-let result_schema = "keeper_event_queue.bulk.result.v1"
-let confirm_token = "cancel-pending-events"
+let schema = "keeper_event_queue.bulk.request.v2"
+let result_schema = "keeper_event_queue.bulk.result.v2"
 let permission = Masc_domain.CanAdmin
 
 type filter =
@@ -25,19 +16,34 @@ type filter =
   ; sources : string list option
   }
 
-type request =
-  { dry_run : bool
-  ; confirm : string option
-  ; reason : string
-  ; filter : filter
+type selection =
+  { keeper_name : string
+  ; source_ref : string
+  ; source_incarnation : int64
   }
+
+type request =
+  | Preview of filter
+  | Cancel of { filter : filter; reason : string; selections : selection list }
 
 type row =
   { keeper_name : string
   ; source_ref : string
   ; source_incarnation : int64
   ; source_label : string
-  ; since : float
+  ; source_arrived_at : float
+  ; first_admitted_at : float option
+  }
+
+type row_status =
+  | Cancelled
+  | Committed_followup_failed
+  | Failed of string
+
+type row_result =
+  { row : row
+  ; status : row_status
+  ; response : Yojson.Safe.t option
   }
 
 let field name fields =
@@ -53,168 +59,217 @@ let string_field name fields =
   | _ -> Error (name ^ " must be a string")
 ;;
 
-let string_list_field name fields =
-  let* value = field name fields in
-  match value with
-  | `List items ->
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | `String item :: rest -> loop (item :: acc) rest
-      | _ -> Error (name ^ " must be a list of strings")
-    in
-    loop [] items
-  | _ -> Error (name ^ " must be a list of strings")
+let object_fields = function
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    if List.length keys = List.length (List.sort_uniq String.compare keys)
+    then Ok fields
+    else Error "object contains duplicate fields"
+  | _ -> Error "expected an object"
 ;;
 
-let parse_filter fields =
-  match List.assoc_opt "filter" fields with
-  | None -> Ok { keepers = None; sources = None }
-  | Some (`Assoc filter_fields) ->
-    let* keepers =
-      match List.assoc_opt "keepers" filter_fields with
-      | None -> Ok None
-      | Some _ -> Result.map Option.some (string_list_field "keepers" filter_fields)
+let exact_fields expected fields =
+  if List.sort String.compare (List.map fst fields) = List.sort String.compare expected
+  then Ok ()
+  else Error ("fields must be exactly [" ^ String.concat ", " expected ^ "]")
+;;
+
+let optional_strings name fields =
+  match List.assoc_opt name fields with
+  | None -> Ok None
+  | Some (`List values) ->
+    let rec loop seen = function
+      | [] -> Ok (Some (List.rev seen))
+      | `String value :: rest
+        when value <> "" && String.equal value (String.trim value)
+             && not (List.mem value seen) -> loop (value :: seen) rest
+      | _ -> Error (name ^ " must contain distinct, non-empty, trimmed strings")
     in
-    let* sources =
-      match List.assoc_opt "sources" filter_fields with
-      | None -> Ok None
-      | Some _ -> Result.map Option.some (string_list_field "sources" filter_fields)
+    loop [] values
+  | Some _ -> Error (name ^ " must be a list of strings")
+;;
+
+let parse_filter value =
+  let* fields = object_fields value in
+  let* () =
+    if List.for_all (fun (key, _) -> List.mem key [ "keepers"; "sources" ]) fields
+    then Ok ()
+    else Error "filter only accepts keepers and sources"
+  in
+  let* keepers = optional_strings "keepers" fields in
+  let* sources = optional_strings "sources" fields in
+  Ok { keepers; sources }
+;;
+
+let parse_selection value =
+  let* fields = object_fields value in
+  let* () = exact_fields [ "keeper_name"; "source_ref"; "source_incarnation" ] fields in
+  let* keeper_name = string_field "keeper_name" fields in
+  let* source_ref = string_field "source_ref" fields in
+  let* incarnation = string_field "source_incarnation" fields in
+  let* source_incarnation =
+    match Int64.of_string_opt incarnation with
+    | Some value when Int64.compare value 0L >= 0
+                      && String.equal incarnation (Int64.to_string value) -> Ok value
+    | Some _ | None -> Error "source_incarnation must be a non-negative decimal int64 string"
+  in
+  if not (Keeper_config.validate_name keeper_name)
+  then Error "invalid keeper_name"
+  else if String.length source_ref <> 64
+          || not (String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) source_ref)
+  then Error "source_ref must be exactly 64 lowercase hexadecimal characters"
+  else Ok { keeper_name; source_ref; source_incarnation }
+;;
+
+module Selection_map = Map.Make (struct
+    type t = string * string * int64
+    let compare = Stdlib.compare
+  end)
+
+let selection_key (selection : selection) =
+  selection.keeper_name, selection.source_ref, selection.source_incarnation
+;;
+
+let row_key (row : row) = row.keeper_name, row.source_ref, row.source_incarnation
+
+let parse_selections = function
+  | `List values when values <> [] ->
+    let rec loop seen acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        let* selection = parse_selection value in
+        let key = selection_key selection in
+        if Selection_map.mem key seen
+        then Error "selections contains a duplicate row"
+        else loop (Selection_map.add key () seen) (selection :: acc) rest
     in
-    Ok { keepers; sources }
-  | Some _ -> Error "filter must be an object"
+    loop Selection_map.empty [] values
+  | _ -> Error "selections must be a non-empty list"
 ;;
 
 let parse body =
-  let* fields =
-    match Yojson.Safe.from_string body with
-    | `Assoc fields -> Ok fields
-    | value ->
-      Error
-        (Printf.sprintf
-           "request body must be an object, received %s"
-           (Json_util.kind_name value))
-    | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
+  let* value =
+    try Ok (Yojson.Safe.from_string body)
+    with Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
   in
+  let* fields = object_fields value in
   let* request_schema = string_field "schema" fields in
   if not (String.equal request_schema schema)
   then Error ("unsupported schema: " ^ request_schema)
   else
     let* action = string_field "action" fields in
-    if not (String.equal action "cancel")
-    then Error ("unknown event queue bulk action: " ^ action)
-    else
-      let* dry_run =
-        match List.assoc_opt "dry_run" fields with
-        | None -> Ok true
-        | Some (`Bool value) -> Ok value
-        | Some _ -> Error "dry_run must be a boolean"
-      in
-      let* confirm =
-        match List.assoc_opt "confirm" fields with
-        | None -> Ok None
-        | Some (`String value) -> Ok (Some value)
-        | Some _ -> Error "confirm must be a string"
-      in
+    let* filter_value = field "filter" fields in
+    let* filter = parse_filter filter_value in
+    match action with
+    | "preview" ->
+      let* () = exact_fields [ "schema"; "action"; "filter" ] fields in
+      Ok (Preview filter)
+    | "cancel" ->
+      let* () = exact_fields [ "schema"; "action"; "filter"; "reason"; "selections" ] fields in
       let* reason = string_field "reason" fields in
       if reason = "" || not (String.equal reason (String.trim reason))
       then Error "reason must be non-empty and trimmed"
       else
-        let* filter = parse_filter fields in
-        Ok { dry_run; confirm; reason; filter }
+        let* selection_values = field "selections" fields in
+        let* selections = parse_selections selection_values in
+        Ok (Cancel { filter; reason; selections })
+    | _ -> Error ("unknown event queue bulk action: " ^ action)
 ;;
 
-(* A census that cannot read one queue must not report a smaller fleet. The
-   dry-run count and the executed set are the same plan, so a dropped keeper
-   would make both wrong: the operator would read a failed read as an empty
-   queue and cancel a subset while the inaccessible rows stay. Every failure
-   is an [Error] that aborts the whole request. *)
+(* Never report an unreadable queue as an empty fleet. *)
 let rows_for_keeper ~base_path keeper_name =
   match Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name with
-  | Error detail ->
-    Error (Printf.sprintf "keeper %s: queue read failed: %s" keeper_name detail)
+  | Error detail -> Error (Printf.sprintf "keeper %s: queue read failed: %s" keeper_name detail)
   | Ok state ->
-    Ok
-      (Keeper_event_queue_state.pending_selections state
-       |> List.map (fun (selection : Keeper_event_queue_state.pending_selection) ->
-         { keeper_name
-         ; source_ref = Keeper_event_queue_state.source_snapshot_ref selection.source
-         ; source_incarnation = selection.admitted_revision
-         ; source_label = Keeper_event_queue.payload_kind_label selection.source.payload
-         ; since = selection.source.arrived_at
-         }))
+    Ok (Keeper_event_queue_state.pending_selections state
+        |> List.map (fun (selection : Keeper_event_queue_state.pending_selection) ->
+          { keeper_name
+          ; source_ref = Keeper_event_queue_state.source_snapshot_ref selection.source
+          ; source_incarnation = selection.admitted_revision
+          ; source_label = Keeper_event_queue.payload_kind_label selection.source.payload
+          ; source_arrived_at = selection.source.arrived_at
+          ; first_admitted_at = selection.first_admitted_at
+          }))
 ;;
 
 let all_rows config =
   let base_path = config.Workspace.base_path in
-  match Keeper_meta_store.keeper_names_result config with
-  | Error detail -> Error ("keeper enumeration failed: " ^ detail)
-  | Ok keeper_names ->
-    let rec loop acc = function
-      | [] -> Ok (List.concat (List.rev acc))
-      | keeper_name :: rest ->
-        (match rows_for_keeper ~base_path keeper_name with
-         | Error detail -> Error detail
-         | Ok rows -> loop (rows :: acc) rest)
-    in
-    loop [] keeper_names
+  let* keeper_names = Keeper_meta_store.keeper_names_result config in
+  let rec loop acc = function
+    | [] -> Ok (List.concat (List.rev acc))
+    | keeper_name :: rest ->
+      let* rows = rows_for_keeper ~base_path keeper_name in
+      loop (rows :: acc) rest
+  in
+  loop [] keeper_names
 ;;
 
-let row_matches filter row =
-  let keeper_ok =
-    match filter.keepers with
-    | None -> true
-    | Some keepers -> List.mem row.keeper_name keepers
-  in
-  let source_ok =
-    match filter.sources with
-    | None -> true
-    | Some sources -> List.mem row.source_label sources
-  in
-  keeper_ok && source_ok
+let row_matches filter (row : row) =
+  (match filter.keepers with None -> true | Some names -> List.mem row.keeper_name names)
+  && (match filter.sources with None -> true | Some kinds -> List.mem row.source_label kinds)
 ;;
 
-(* The rows a request would act on. Dry-run counts these and execution
-   cancels exactly these, so the two can never disagree. *)
 let plan_rows filter rows = List.filter (row_matches filter) rows
+
+let select_rows filter selections rows =
+  let current =
+    List.fold_left (fun map row -> Selection_map.add (row_key row) row map)
+      Selection_map.empty rows
+  in
+  let rec loop seen acc = function
+    | [] -> Ok (List.rev acc)
+    | selection :: rest ->
+      let key = selection_key selection in
+      if Selection_map.mem key seen
+      then Error "selections contains a duplicate row"
+      else
+        match Selection_map.find_opt key current with
+        | Some row when row_matches filter row ->
+          loop (Selection_map.add key () seen) (row :: acc) rest
+        | Some _ -> Error "a selected row is outside the filter; preview again"
+        | None -> Error "a selected row changed or left the queue; preview again"
+  in
+  loop Selection_map.empty [] selections
+;;
 
 module String_map = Map.Make (String)
 
 let count_by key rows =
-  let counts =
-    List.fold_left
-      (fun acc row ->
-         let k = key row in
-         let seen = match String_map.find_opt k acc with Some n -> n | None -> 0 in
-         String_map.add k (seen + 1) acc)
-      String_map.empty
-      rows
-  in
-  String_map.bindings counts
+  List.fold_left
+    (fun acc row ->
+      let k = key row in
+      let seen = match String_map.find_opt k acc with Some n -> n | None -> 0 in
+      String_map.add k (seen + 1) acc)
+    String_map.empty rows
+  |> String_map.bindings
 ;;
 
 let oldest_age_seconds rows =
-  match rows with
-  | [] -> None
-  | _ ->
-    let oldest =
-      List.fold_left (fun acc row -> Float.min acc row.since) Float.max_float rows
-    in
-    Some (Float.max 0.0 (Time_compat.now () -. oldest))
+  let now = Time_compat.now () in
+  let rec oldest observed = function
+    | [] -> Option.map (fun at -> now -. at) observed
+    | { first_admitted_at = None; _ } :: _ -> None
+    | { first_admitted_at = Some at; _ } :: rest ->
+      if not (Float.is_finite at) || at > now
+      then None
+      else oldest (Some (match observed with None -> at | Some before -> Float.min before at)) rest
+  in
+  if Float.is_finite now then oldest None rows else None
 ;;
 
-let row_json row =
+let row_json (row : row) =
   `Assoc
     [ "keeper_name", `String row.keeper_name
     ; "source", `String row.source_label
     ; "source_ref", `String row.source_ref
     ; "source_incarnation", `String (Int64.to_string row.source_incarnation)
-    ; "since", `Float row.since
+    ; "state", `String "pending"
+    ; "source_arrived_at", `Float row.source_arrived_at
+    ; "first_admitted_at", Json_util.float_opt_to_json row.first_admitted_at
     ]
 ;;
 
-let counts_json counts =
-  `Assoc (List.map (fun (key, count) -> key, `Int count) counts)
-;;
+let counts_json counts = `Assoc (List.map (fun (key, count) -> key, `Int count) counts)
 
 (* The operation id is an opaque correlation identifier for one bulk request,
    not an authentication secret; [Random_id.uuid_v7] wraps the process crypto
@@ -241,143 +296,95 @@ let write_backup ~base_path ~operation_id backup =
     |> Result.map (fun () -> path)
 ;;
 
-let cancel_row ~config ~operation_id ~reason row =
+let cancel_row ~config ~operation_id ~reason (row : row) =
   let operator_operation_id =
-    Printf.sprintf
-      "bulk:%s:%s:%s:%s"
-      operation_id
-      row.keeper_name
-      row.source_ref
+    Printf.sprintf "bulk:%s:%s:%s:%s" operation_id row.keeper_name row.source_ref
       (Int64.to_string row.source_incarnation)
   in
-  let outcome =
-    Execute.run
-      ~config
-      ~keeper_name:row.keeper_name
-      (Execute.Cancel
-         { source_ref = row.source_ref
-         ; source_incarnation = row.source_incarnation
-         ; operator_operation_id
-         ; reason
-         })
-  in
-  match outcome with
-  | Ok _ -> `Assoc [ "keeper_name", `String row.keeper_name; "ok", `Bool true ]
-  | Error detail ->
-    `Assoc
-      [ "keeper_name", `String row.keeper_name
-      ; "ok", `Bool false
-      ; "error", `String detail
-      ]
+  match Execute.run ~config ~keeper_name:row.keeper_name
+          (Execute.Cancel { source_ref = row.source_ref
+                          ; source_incarnation = row.source_incarnation
+                          ; operator_operation_id; reason }) with
+  | Error detail -> { row; status = Failed detail; response = None }
+  | Ok outcome ->
+    { row
+    ; status = (match outcome.Execute.completion with
+                | Execute.Complete -> Cancelled
+                | Execute.Committed_followup_failed -> Committed_followup_failed)
+    ; response = Some outcome.response
+    }
 ;;
 
-(* Cancel exactly the planned rows through [cancel]. The real caller passes
-   {!cancel_row}; tests pass a recorder so the dry-run count and the executed
-   rows can be compared without the durable machinery. *)
 let execute_rows ~cancel ~operation_id ~reason rows =
   List.map (cancel ~operation_id ~reason) rows
+;;
+
+let row_result_json result =
+  let status, error =
+    match result.status with
+    | Cancelled -> "cancelled", []
+    | Committed_followup_failed -> "committed_followup_failed", []
+    | Failed detail -> "failed", [ "error", `String detail ]
+  in
+  `Assoc
+    ([ "row", row_json result.row; "status", `String status ]
+     @ error
+     @ (match result.response with None -> [] | Some response -> [ "result", response ]))
+;;
+
+let preview_json rows =
+  `Assoc
+    [ "schema", `String result_schema; "ok", `Bool true; "action", `String "preview"
+    ; "would_cancel", `Int (List.length rows)
+    ; "keeper_counts", counts_json (count_by (fun (row : row) -> row.keeper_name) rows)
+    ; "source_counts", counts_json (count_by (fun row -> row.source_label) rows)
+    ; "oldest_age_seconds", Json_util.float_opt_to_json (oldest_age_seconds rows)
+    ; "rows", `List (List.map row_json rows)
+    ]
 ;;
 
 let handle_post state ~actor:_ req reqd body =
   let respond ?(status = `OK) json =
     Http.Response.json_value ~status ~request:req json reqd
   in
+  let reject status detail =
+    respond ~status (`Assoc [ "schema", `String result_schema; "ok", `Bool false
+                            ; "error", `String detail ])
+  in
   match parse body with
-  | Error detail ->
-    respond
-      ~status:`Bad_request
-      (`Assoc
-        [ "schema", `String result_schema
-        ; "ok", `Bool false
-        ; "error", `String detail
-        ])
+  | Error detail -> reject `Bad_request detail
   | Ok request ->
     let config = Mcp_server.workspace_config state in
     (match all_rows config with
-     | Error detail ->
-       respond
-         ~status:`Internal_server_error
-         (`Assoc
-           [ "schema", `String result_schema
-           ; "ok", `Bool false
-           ; "error", `String detail
-           ])
+     | Error detail -> reject `Internal_server_error detail
      | Ok all ->
-       let rows = plan_rows request.filter all in
-       let keeper_counts = count_by (fun row -> row.keeper_name) rows in
-       let source_counts = count_by (fun row -> row.source_label) rows in
-       let oldest = oldest_age_seconds rows in
-       if request.dry_run
-       then
-         respond
-           (`Assoc
-             [ "schema", `String result_schema
-             ; "ok", `Bool true
-             ; "dry_run", `Bool true
-             ; "would_cancel", `Int (List.length rows)
-             ; "keeper_counts", counts_json keeper_counts
-             ; "source_counts", counts_json source_counts
-             ; "oldest_age_seconds", Json_util.float_opt_to_json oldest
-             ; "rows", `List (List.map row_json rows)
-             ])
-       else
-         match request.confirm with
-         | Some token when String.equal token confirm_token ->
+       match request with
+       | Preview filter -> respond (preview_json (plan_rows filter all))
+       | Cancel { filter; reason; selections } ->
+         match select_rows filter selections all with
+         | Error detail -> reject `Conflict detail
+         | Ok rows ->
            let operation_id = fresh_operation_id () in
            let backup =
-             `Assoc
-               [ "schema", `String result_schema
-               ; "operation_id", `String operation_id
-               ; "reason", `String request.reason
-               ; "rows", `List (List.map row_json rows)
-               ]
+             `Assoc [ "schema", `String result_schema; "operation_id", `String operation_id
+                    ; "reason", `String reason; "rows", `List (List.map row_json rows) ]
            in
-           (match
-              write_backup ~base_path:config.Workspace.base_path ~operation_id backup
-            with
-            | Error detail ->
-              respond
-                ~status:`Internal_server_error
-                (`Assoc
-                  [ "schema", `String result_schema
-                  ; "ok", `Bool false
-                  ; "error", `String ("backup write failed: " ^ detail)
-                  ])
-            | Ok path ->
-              let results =
-                execute_rows
-                  ~cancel:(cancel_row ~config)
-                  ~operation_id
-                  ~reason:request.reason
-                  rows
-              in
-              let cancelled =
-                List.fold_left
-                  (fun acc result ->
-                     match Json_util.assoc_member_opt "ok" result with
-                     | Some (`Bool true) -> acc + 1
-                     | _ -> acc)
-                  0
-                  results
-              in
-              respond
-                (`Assoc
-                  [ "schema", `String result_schema
-                  ; "ok", `Bool true
-                  ; "dry_run", `Bool false
-                  ; "operation_id", `String operation_id
-                  ; "backup_path", `String path
-                  ; "would_cancel", `Int (List.length rows)
-                  ; "cancelled", `Int cancelled
-                  ; "failed", `Int (List.length rows - cancelled)
-                  ; "results", `List results
-                  ]))
-         | _ ->
-           respond
-             ~status:`Bad_request
-             (`Assoc
-               [ "schema", `String result_schema
-               ; "ok", `Bool false
-               ; "error", `String "execution requires the confirm token"
-               ]))
+           match write_backup ~base_path:config.Workspace.base_path ~operation_id backup with
+           | Error detail -> reject `Internal_server_error ("backup write failed: " ^ detail)
+           | Ok path ->
+             let results = execute_rows ~cancel:(cancel_row ~config) ~operation_id ~reason rows in
+             let cancelled, followup_failed, failed =
+               List.fold_left (fun (cancelled, followup, failed) result ->
+                 match result.status with
+                 | Cancelled -> cancelled + 1, followup, failed
+                 | Committed_followup_failed -> cancelled, followup + 1, failed
+                 | Failed _ -> cancelled, followup, failed + 1)
+                 (0, 0, 0) results
+             in
+             respond (`Assoc
+               [ "schema", `String result_schema; "ok", `Bool true; "action", `String "cancel"
+               ; "operation_id", `String operation_id; "backup_path", `String path
+               ; "requested", `Int (List.length rows); "cancelled", `Int cancelled
+               ; "committed_followup_failed", `Int followup_failed; "failed", `Int failed
+               ; "results", `List (List.map row_result_json results) ]))
 ;;

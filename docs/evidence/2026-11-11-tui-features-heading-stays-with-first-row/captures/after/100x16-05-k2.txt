@@ -1,0 +1,16 @@
+ 운영  작업  키퍼  ▸기능·플러그인  워크스페이스  시스템
+
+  MASC 기능·플러그인   HTTP [연결됨]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ 도구·스킬 · 리소스 · 채널 · 클라이언트 · 플러그인 /addons
+ 기능 목록 관측 · 16:19:54 · 설정됨 3 · 대기 2 · 실패 1 · 미설정 2
+ ┌ 기능 ─────────────────────────────────────────────────┐  ┌ 선택한 기능 ────────────────────────┐
+ │ 브라우저                                              │  │ Browser Lane (live)                 │
+ │ ○ Browser Lane (live) · Reads and drives tab…  미설정 │  │ Reads and drives tabs in the        │
+ │ 실행 환경                                             │  │ operator's own browser, through the │
+ │ ◌ MSX · The one MSX machine in the server; m…  대기   │  │ browser-lane extension and host.    │
+ │   [lines 7-10/11]                                     │  │ … d: 전체 관측·설정 근거            │
+ └───────────────────────────────────────────────────────┘  └─────────────────────────────────────┘
+
+  조치 필요 3 · 운영에서 확인  j/k:move  Right / Enter:open  Esc:dashboard  q:quit  …?
+ › to imp   (i to write)

@@ -49,7 +49,10 @@ POLL_SECONDS = 10
 # members themselves, because the receipt never changes afterwards.
 IN_FLIGHT = frozenset({'pending'})
 ACCEPTED = frozenset({'merged', 'enqueued'})
-SUCCESS = frozenset({'merged', 'eligible_dry_run', 'resume_dispatched'})
+SUCCESS = frozenset({'merged', 'eligible_dry_run', 'resume_dispatched', 'following_elsewhere'})
+# A hand-off that cannot dispatch is tried once more after this pause. The chain
+# is the only reader of its receipt, so one lost dispatch would leave it unread.
+HAND_OFF_RETRY_SECONDS = 5
 UNSETTLED = frozenset({'still_pending', 'observation_unavailable'})
 UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SHA = re.compile(r'[0-9a-f]{40}')
@@ -320,10 +323,15 @@ def hand_off(repo, outcome):
     command = ['gh', 'workflow', 'run', 'approval-auto-merge.yml', '--repo', repo,
                '--ref', 'main', '-f', f'pr={receipt["pr"]}',
                '-f', f'receipt={json.dumps(receipt, separators=(",", ":"))}']
-    try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
-    except (subprocess.CalledProcessError, OSError) as error:
-        return dict(outcome, resume=f'dispatch_failed: {error}')
+    for attempt in range(2):
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            break
+        except (subprocess.CalledProcessError, OSError) as error:
+            if attempt == 0:
+                time.sleep(HAND_OFF_RETRY_SECONDS)
+                continue
+            return dict(outcome, resume=f'dispatch_failed: {error}')
     return dict(outcome, status='resume_dispatched', previous=outcome['status'],
                 resume='dispatched')
 
@@ -405,6 +413,12 @@ def submit(repo, selected, head, scope):
                'members': [member['number'] for member in scope['scope']],
                'since': time.time(), 'result_endpoint': result_endpoint}
     emit(receipt)  # Preserve the external effect before any fallible readback.
+    if operation.returncode:
+        # HTTP 409: an earlier run owns this request and follows it, and its
+        # hand-off chain carries the receipt until a terminal answer. A second
+        # chain would poll the same members for nothing, and every event that
+        # arrives while the merge is pending would start another one.
+        return dict(receipt, status='following_elsewhere')
     outcome = follow(repo, result_endpoint, receipt, scope)
     return hand_off(repo, outcome) if outcome['status'] in UNSETTLED else outcome
 

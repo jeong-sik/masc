@@ -17,6 +17,8 @@ import { artifactDirectory } from '../artifact-output.mjs'
 
 const ROWS = Number(process.env.LANE_WINDOW_ROWS ?? 5000)
 const REFRESH_SAMPLES = 9
+/** Idle time after a refresh in which the work it scheduled finishes. */
+const REFRESH_SETTLE_MS = 100
 /** The dev server transforms the whole module graph on the first request. */
 const COLD_START_TIMEOUT_MS = 120_000
 const SELECTORS = {
@@ -45,6 +47,14 @@ page.on('pageerror', error => errors.push(error.message))
 page.on('console', message => {
   if (message.type() === 'error') errors.push(message.text())
 })
+
+// Seconds the page's main thread has spent in tasks since it started.
+const devtools = await page.context().newCDPSession(page)
+await devtools.send('Performance.enable')
+const mainThreadTaskSeconds = async () => {
+  const { metrics } = await devtools.send('Performance.getMetrics')
+  return metrics.find(metric => metric.name === 'TaskDuration').value
+}
 
 const list = page.locator(SELECTORS.list)
 const rowNamed = text => page.locator(SELECTORS.row).filter({
@@ -97,6 +107,16 @@ const inView = text => page.evaluate(({ list: listSelector, row, what, text: wan
   return rect !== undefined && rect.top >= box.top - 1 && rect.top < box.bottom
 }, { ...SELECTORS, text })
 
+/** Where keyboard focus is: in a waiting row, on the list, or elsewhere. */
+const focusPlace = () => page.evaluate(({ list: listSelector, row }) => {
+  const active = document.activeElement
+  if (active === null || active === document.body) return 'body'
+  if (active.matches(listSelector)) return 'list'
+  return active.closest(row) ? 'row' : active.tagName.toLowerCase()
+}, SELECTORS)
+
+const median = values => [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)]
+
 const measurements = { rowsPerKeeper: ROWS }
 const checks = []
 try {
@@ -118,13 +138,31 @@ try {
     }, SELECTORS.row),
   }
 
-  const samplesMs = []
-  for (let sample = 0; sample < REFRESH_SAMPLES; sample += 1) {
-    samplesMs.push(await page.evaluate(() => window.laneFixture.refresh()))
+  // Two costs of one refresh. renderAndLayoutMs is what the fixture times:
+  // the synchronous render and the layout it forces. mainThreadMs is every
+  // task the page ran until it went idle again, which adds the effects, row
+  // measurement and paint that follow the render. The same wait without a
+  // refresh gives what this script itself adds to mainThreadMs.
+  const mainThreadMsOf = async step => {
+    const before = await mainThreadTaskSeconds()
+    const result = await step()
     await frames()
+    await page.waitForTimeout(REFRESH_SETTLE_MS)
+    return { result, mainThreadMs: (await mainThreadTaskSeconds() - before) * 1000 }
   }
-  const sorted = [...samplesMs].sort((left, right) => left - right)
-  measurements.refresh = { samplesMs, medianMs: sorted[Math.floor(sorted.length / 2)] }
+  const idle = []
+  const samples = []
+  for (let sample = 0; sample < REFRESH_SAMPLES; sample += 1) {
+    idle.push((await mainThreadMsOf(() => page.evaluate(() => 0))).mainThreadMs)
+    const refreshed = await mainThreadMsOf(() => page.evaluate(() => window.laneFixture.refresh()))
+    samples.push({ renderAndLayoutMs: refreshed.result, mainThreadMs: refreshed.mainThreadMs })
+  }
+  measurements.refresh = {
+    samples,
+    medianRenderAndLayoutMs: median(samples.map(sample => sample.renderAndLayoutMs)),
+    medianMainThreadMs: median(samples.map(sample => sample.mainThreadMs)),
+    medianIdleMainThreadMs: median(idle),
+  }
 
   const alpha = await serials()
   const scrollsToSettle = await scrollToEdge('end')
@@ -147,18 +185,25 @@ try {
   await first.locator('summary').click()
   await first.getByRole('button', { name: 'normal', exact: true }).focus()
   await scrollToEdge('end')
-  measurements.focus = {
-    afterFocusedRowLeft: await page.evaluate(({ list: listSelector, row }) => {
-      const active = document.activeElement
-      if (active === null || active === document.body) return 'body'
-      if (active.matches(listSelector)) return 'list'
-      return active.closest(row) ? 'row' : active.tagName.toLowerCase()
-    }, SELECTORS),
-  }
+  measurements.focus = { afterFocusedRowLeft: await focusPlace() }
   await scrollToEdge('start')
   measurements.expansion = {
-    firstRowOpenAfterReturn: await rowNamed(`alpha 작업 ${alpha.first}`).evaluate(element => element.open),
+    firstRowOpenAfterReturn: await first.evaluate(element => element.open),
   }
+
+  // The queue gives every pending event a new address while the operator has
+  // a row open with focus on one of its buttons.
+  await first.getByRole('button', { name: 'normal', exact: true }).focus()
+  await page.evaluate(() => window.laneFixture.readdress())
+  await frames()
+  measurements.readdress = {
+    rowOpen: await first.evaluate(element => element.open),
+    focus: await focusPlace(),
+  }
+  await page.keyboard.press('Enter')
+  measurements.readdress.operatedSourceIncarnation = await page.evaluate(
+    () => window.laneFixture.operations.at(-1)?.operation.sourceIncarnation ?? null,
+  )
 
   await scrollToEdge('end')
   const scrollTopBeforePx = await list.evaluate(element => element.scrollTop)
@@ -180,6 +225,7 @@ try {
   assert.ok(measurements.initial.mounted < ROWS)
   checks.push('a large inventory mounts only the rows near the list viewport')
   assert.equal(measurements.end.farFromViewport, 0)
+  assert.equal(measurements.end.scrollsToSettle, 1)
   assert.equal(measurements.end.lastRowInView, true)
   assert.equal(measurements.end.firstRowMounted, false)
   assert.equal(measurements.end.operatedSourceIncarnation, String(alpha.last + 1))
@@ -188,6 +234,10 @@ try {
   checks.push('keyboard focus moves to the list when the focused row leaves the window')
   assert.equal(measurements.expansion.firstRowOpenAfterReturn, true)
   checks.push('a row opened by the operator is still open after it leaves the window and returns')
+  assert.equal(measurements.readdress.rowOpen, true)
+  assert.equal(measurements.readdress.focus, 'row')
+  assert.notEqual(measurements.readdress.operatedSourceIncarnation, String(alpha.first + 1))
+  checks.push('a row stays open and focused when the queue re-addresses its event, and acts on the new address')
   assert.equal(measurements.keeperSwitch.scrollTopAfterPx, 0)
   assert.equal(measurements.keeperSwitch.firstRowInView, true)
   assert.equal(measurements.keeperSwitch.openRows, 0)

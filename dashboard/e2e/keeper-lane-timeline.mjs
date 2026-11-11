@@ -14,7 +14,6 @@ try {
 
   const graph = page.getByTestId('keeper-lane-graph')
   await graph.waitFor()
-  // The scroll list inside the graph: a row that is too wide overflows here.
   const list = graph.locator('[aria-label="대기 나이순 작업 흐름"]')
   const rows = page.getByTestId('keeper-lane-waiting-row')
   if (await rows.count() !== 3) throw new Error('the fixture did not render all queue rows')
@@ -59,9 +58,15 @@ try {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     if (overflow > 1) throw new Error(`the page overflows the ${width}px viewport by ${overflow}px`)
 
-    const internalOverflow = await list.evaluate((node) => node.scrollWidth - node.clientWidth)
-    if (internalOverflow > 1) {
-      throw new Error(`the timeline overflows its graph at ${width}px by ${internalOverflow}px`)
+    // A short list clips each row to its own box, so a row wider than the
+    // list is cut off instead of scrolling it. Compare the edges themselves.
+    const cutOffRow = await list.evaluate((node) => {
+      const edge = node.getBoundingClientRect().left + node.clientLeft + node.clientWidth
+      return [...node.querySelectorAll('[data-testid="keeper-lane-waiting-row"]')]
+        .findIndex((row) => row.getBoundingClientRect().right - edge > 1)
+    })
+    if (cutOffRow !== -1) {
+      throw new Error(`queue row ${cutOffRow} extends past the timeline at ${width}px`)
     }
 
     const overflowingRow = await rows.evaluateAll((nodes) =>

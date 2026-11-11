@@ -5,16 +5,23 @@
 // server row stays reachable by scrolling.
 //
 // A row unmounts when it scrolls away, so what the operator did to it cannot
-// live in its DOM. Which rows are open is kept here by row identity, and
-// keyboard focus returns to the list when the focused row leaves.
+// live in its DOM. Which rows are open is kept here, and keyboard focus
+// returns to the list when the focused row leaves.
 
 import { html } from 'htm/preact'
 import { useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type { RefObject, VNode } from 'preact'
-import { parseKeeperEventQueueSourceAddress, type DashboardKeeperWaitingRow } from '../../api'
+import type { DashboardKeeperWaitingRow } from '../../api'
 import { VirtualList } from '../common/virtual-list'
 
 const LIST_LABEL = '대기 나이순 작업 흐름'
+
+/** Height the list assumes for a row it has not measured yet: a collapsed row
+ *  with its gap, which measures 40.25px under the app's full style set, rounded
+ *  up. The list corrects each row once it mounts. An estimate above the real
+ *  height shrinks the list under a jump to its end, which leaves the jump at
+ *  the end; one below it grows the list and leaves the jump short of the end. */
+const COLLAPSED_ROW_PITCH_PX = 41
 
 interface Item {
   key: string
@@ -25,29 +32,19 @@ interface Props {
   rows: readonly DashboardKeeperWaitingRow[]
   renderRow: (
     row: DashboardKeeperWaitingRow,
-    index: number,
     expanded: boolean,
     onExpandedChange: (open: boolean) => void,
   ) => VNode
 }
 
-/** An event-queue row is identified by the exact-entry address the server
- *  gives it. Any other row has no server identity, so its whole content stands
- *  in for one. Rows with equal identities stay separate by their order. The
- *  key only tracks presentation state; it grants no action authority. */
-function itemsWithKeys(rows: readonly DashboardKeeperWaitingRow[]): Item[] {
-  const occurrences = new Map<string, number>()
-  return rows.map(row => {
-    const address = row.source === 'event_queue_pending'
-      ? parseKeeperEventQueueSourceAddress(row.detail)
-      : null
-    const identity = address === null
-      ? JSON.stringify(['observation', row])
-      : JSON.stringify(['event', row.keeper_name, address.sourceRef, address.sourceIncarnation])
-    const ordinal = occurrences.get(identity) ?? 0
-    occurrences.set(identity, ordinal + 1)
-    return { key: JSON.stringify([identity, ordinal]), row }
-  })
+/** A row is the same row while its kind and its place in the list hold, as it
+ *  was when every row had a DOM node of its own. The inventory names no row
+ *  across a refresh: the queue gives a pending event a new exact-entry address
+ *  each time it defers or reprioritizes that event, and an observation row
+ *  changes its content while it stays the same wait. */
+function listed(rows: readonly DashboardKeeperWaitingRow[]): { items: Item[]; keys: ReadonlySet<string> } {
+  const items = rows.map((row, index) => ({ key: `${row.source}:${row.waiting_on}:${index}`, row }))
+  return { items, keys: new Set(items.map(item => item.key)) }
 }
 
 function MountedRow({ host, children }: { host: RefObject<HTMLDivElement>; children: VNode }) {
@@ -71,35 +68,46 @@ function MountedRow({ host, children }: { host: RefObject<HTMLDivElement>; child
     }
   }, [host])
   // The list measures this wrapper, so the gap between rows is part of it.
-  return html`<div ref=${ref} class="pb-1">${children}</div>`
+  // The gap sits above the row: a short list clips each row to its wrapper,
+  // and the keyboard focus ring is drawn just outside the row. Below the row
+  // its own grid gap leaves the same room.
+  return html`<div ref=${ref} class="pt-1">${children}</div>`
 }
 
 /** Scroll position and open rows belong to one mounted instance. A caller
  *  that switches Keepers keys this component by Keeper so both start fresh. */
 export function KeeperLaneInventoryWindow({ rows, renderRow }: Props): VNode {
   const host = useRef<HTMLDivElement>(null)
-  const items = useMemo(() => itemsWithKeys(rows), [rows])
-  const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(() => new Set())
-  const setExpanded = (key: string, open: boolean) => {
-    setExpandedKeys(previous => {
-      if (previous.has(key) === open) return previous
+  const { items, keys } = useMemo(() => listed(rows), [rows])
+  const [openKeys, setOpenKeys] = useState<ReadonlySet<string>>(() => new Set())
+  // A row that left the list is forgotten here, in the render that sees it
+  // gone: the next row to take that place starts closed.
+  const stillListed = [...openKeys].filter(key => keys.has(key))
+  const open = stillListed.length === openKeys.size ? openKeys : new Set(stillListed)
+  if (open !== openKeys) setOpenKeys(open)
+  const setExpanded = (key: string, expanded: boolean) => {
+    setOpenKeys(previous => {
+      if (previous.has(key) === expanded) return previous
       const next = new Set(previous)
-      if (open) next.add(key)
+      if (expanded) next.add(key)
       else next.delete(key)
       return next
     })
   }
-  const renderItem = (item: Item, index: number) => html`
+  const renderItem = (item: Item) => html`
     <${MountedRow} host=${host}>
-      ${renderRow(item.row, index, expandedKeys.has(item.key), open => setExpanded(item.key, open))}
+      ${renderRow(item.row, open.has(item.key), expanded => setExpanded(item.key, expanded))}
     <//>
   `
+  // min-w-0: a row wider than the list stays the list's problem, as it did
+  // when the scroll list itself was the grid item, and does not widen the page.
   return html`
-    <div ref=${host} data-testid="keeper-lane-graph">
+    <div ref=${host} class="min-w-0" data-testid="keeper-lane-graph">
       <${VirtualList}
         items=${items}
         getKey=${(item: Item) => item.key}
         renderItem=${renderItem}
+        estimatedItemHeight=${COLLAPSED_ROW_PITCH_PX}
         className="max-h-[30rem] overflow-y-auto pr-1"
         tabIndex=${-1}
         ariaLabel=${LIST_LABEL}

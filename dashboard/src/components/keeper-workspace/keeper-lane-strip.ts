@@ -358,13 +358,14 @@ function LaneWaitingRow({
   `
 }
 
-/** The waiting-row block every lane surface draws (#29473): rows oldest first
- *  on a log age axis, each row the server's operator sentence (`what`) with
- *  the raw wire vocabulary behind the 기술 상세 toggle. The keeper workspace
- *  lane strip and the fleet surfaces share it, so a change lands on all of
- *  them. No client-side cap: every server row is reachable by scrolling.
- *  Scroll position and open rows belong to the mounted block; a surface that
- *  switches Keepers in place keys it by Keeper so the next one starts fresh. */
+/** The waiting-row block of the lane strip and the waiting-inventory panel
+ *  (#29473): rows oldest first on a log age axis, each row the server's
+ *  operator sentence (`what`) with the raw wire vocabulary behind the 기술 상세
+ *  toggle. The keeper workspace lane strip and the fleet surfaces share it, so
+ *  a change lands on all of them. No client-side cap: every server row is
+ *  reachable by scrolling. Scroll position and open rows belong to the mounted
+ *  block; a surface that switches Keepers in place keys it by Keeper so the
+ *  next one starts fresh. */
 export function LaneWaitingRows({
   rows,
   dev,
@@ -375,18 +376,17 @@ export function LaneWaitingRows({
   /** Admin operator actions; null renders every row read-only. */
   actions: LaneEventQueueActions | null
 }): VNode | null {
-  // The sorted array keeps its identity until the server sends new rows, so
-  // the list below re-keys its rows only when the inventory changes.
+  // Sorted once per inventory response. A re-render of the surface around it,
+  // such as the 기술 상세 toggle, reuses the array and with it the list's keys.
   const sorted = useMemo(() => waitingRowsOldestFirst(rows), [rows])
   if (sorted.length === 0) return null
   const nowMs = Date.now()
-  const ages = sorted.map(row => ageMinutes(row, nowMs))
   // Folded rather than spread into Math.max: one call argument per row
   // overflows the stack on a large enough inventory.
-  const axisMax = ages.reduce<number>(
-    (max, age) => (age === null ? max : Math.max(max, age)),
-    DAY_MINUTES,
-  )
+  const axisMax = sorted.reduce<number>((max, row) => {
+    const age = ageMinutes(row, nowMs)
+    return age === null ? max : Math.max(max, age)
+  }, DAY_MINUTES)
   return html`
     <div class="grid gap-1">
       <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
@@ -395,13 +395,12 @@ export function LaneWaitingRows({
         rows=${sorted}
         renderRow=${(
           row: DashboardKeeperWaitingRow,
-          index: number,
           expanded: boolean,
           onExpandedChange: (open: boolean) => void,
         ) => html`
           <${LaneWaitingRow}
             row=${row}
-            age=${ages[index] ?? null}
+            age=${ageMinutes(row, nowMs)}
             axisMax=${axisMax}
             dev=${dev}
             actions=${actions}

@@ -1,8 +1,9 @@
 // Keeper lane strip over a large synthetic waiting inventory (#26606).
 //
 // The actual KeeperLaneStrip with no backend: two Keepers, `?rows=` pending
-// events each, a Keeper switch and an inventory refresh. `browser.mjs` drives
-// this page; it also opens by hand through the dashboard dev server.
+// events each, a Keeper switch, an inventory refresh and a queue that gives
+// its events new addresses. `browser.mjs` drives this page; it also opens by
+// hand through the dashboard dev server.
 
 import { html } from 'htm/preact'
 import { render } from 'preact'
@@ -15,9 +16,14 @@ import type {
 import type { LaneEventQueueActions } from '../../src/components/keeper-workspace/keeper-lane-event-actions'
 import { KeeperLaneStrip } from '../../src/components/keeper-workspace/keeper-lane-strip'
 import type { Keeper } from '../../src/types'
+// The app's style order (main.ts). tokens.css sets the focus ring and
+// colors_and_type.css the root font size; both decide a row's height and how
+// far its ring reaches.
 import '../../src/styles/ds-theme-tokens.css'
 import '../../src/styles/global.css'
+import '../../src/styles/tokens.css'
 import '../../src/styles/keeper-workspace.css'
+import '../../src/styles/keeper-v2/colors_and_type.css'
 
 const KEEPER_NAMES = ['alpha', 'beta'] as const
 type KeeperName = (typeof KEEPER_NAMES)[number]
@@ -29,10 +35,15 @@ const SECONDS_PER_MINUTE = 60
 /** The newest row is already this old, so its bar is wide enough to read and a
  *  row added by a refresh still lies in the past. */
 const NEWEST_ROW_AGE_MINUTES = 120
+/** Distance between the addresses one event gets from two re-addressings, wide
+ *  enough that no two events share an address. */
+const READDRESS_STRIDE = 1_000_000_000
 
 const requestedRows = Number(new URLSearchParams(location.search).get('rows') ?? DEFAULT_ROWS)
 const rowsPerKeeper = Number.isInteger(requestedRows) && requestedRows > 0 ? requestedRows : DEFAULT_ROWS
 const startedAtSec = Math.floor(Date.now() / 1000)
+/** How many times the queue has re-addressed its pending events. */
+let readdressed = 0
 
 /** One pending event per minute, oldest first, each with its own address. */
 function eventRow(name: KeeperName, serial: number): DashboardKeeperWaitingRow {
@@ -48,7 +59,7 @@ function eventRow(name: KeeperName, serial: number): DashboardKeeperWaitingRow {
     next_action: 'keeper_drain_event_queue',
     detail: {
       source_ref: `${name === 'alpha' ? 'a' : 'b'}${serial.toString(16).padStart(63, '0')}`,
-      source_incarnation: String(serial + 1),
+      source_incarnation: String(serial + 1 + readdressed * READDRESS_STRIDE),
     },
   }
 }
@@ -144,16 +155,25 @@ function refresh(): number {
   return performance.now() - before
 }
 
+/** Gives every pending event a new exact-entry address, as the queue does
+ *  when it defers what a turn left unconsumed. Order and content stay. */
+function readdress(): void {
+  readdressed += 1
+  inventory = inventoryFrom(firstSerial)
+  draw()
+}
+
 declare global {
   interface Window {
     laneFixture: {
       /** Serial of the oldest row in the current inventory. */
       firstSerial: () => number
       refresh: () => number
+      readdress: () => void
       operations: typeof operations
     }
   }
 }
 
-window.laneFixture = { firstSerial: () => firstSerial, refresh, operations }
+window.laneFixture = { firstSerial: () => firstSerial, refresh, readdress, operations }
 draw()

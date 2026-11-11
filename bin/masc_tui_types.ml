@@ -11095,6 +11095,7 @@ type state = {
           tools reuse it rather than minting one per attempt. Cleared when
           the server explicitly reports it missing or conflicting. *)
   mutable observer_cursor: Sse_wire.observer_cursor option;
+  mutable observer_revalidate_owed: bool;
       (** Last applied complete event, scoped to the responding process. *)
   mutable observer_replay: observer_replay_status;
   mutable observer_source_loss: bool;
@@ -18560,8 +18561,11 @@ let keeper_message_availability (state : state) keeper_name =
   | Some keeper ->
       match state.workspace_identity with
       | Workspace_identity_unread -> Message_unavailable Message_workspace_unobserved
-      | Workspace_identity_match_unconfirmed _ -> Message_unavailable Message_workspace_unconfirmed
       | Workspace_identity_mismatch _ -> Message_unavailable Message_workspace_differs
+      (* A match that is merely unconfirmed keeps the last confirmed match:
+         the roster answer still names the keeper, so the composer may queue
+         the line; sending stays gated on a confirmed match. *)
+      | Workspace_identity_match_unconfirmed _
       | Workspace_identity_match ->
           match keeper.k_origin with
           | Tui_decode.Remote_keeper -> Message_unavailable Remote_keeper_observation
@@ -21039,6 +21043,7 @@ let create_state
   observer_scope_binding = Observer_scope_unbound;
   mcp_session = None;
   observer_cursor = None;
+  observer_revalidate_owed = false;
   observer_replay = Observer_replay_unobserved;
   observer_source_loss = false;
   observer_source_loss_sequences = [];

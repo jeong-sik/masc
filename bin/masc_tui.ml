@@ -12007,7 +12007,13 @@ let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
     | None -> state.msg_target_keeper_name
   with
   | None -> report_action state "error" "Cannot send: no Keeper is selected"
-  | Some _ when state.workspace_identity <> Workspace_identity_match ->
+  | Some _ when
+        (match state.workspace_identity with
+         | Workspace_identity_unread | Workspace_identity_mismatch _ -> true
+         | Workspace_identity_match_unconfirmed _ | Workspace_identity_match -> false) ->
+      (* Unread and mismatched workspaces refuse. An unconfirmed match keeps
+         the last confirmed match, so the line queues and waits for the
+         resume that a confirming read runs. *)
       report_action state "error"
         "Cannot send: workspace identity is unverified · draft retained"
   | Some target when Option.is_some state.keepers_error

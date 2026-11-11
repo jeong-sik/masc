@@ -57,15 +57,15 @@ type facts_reading =
 (* The facts title. Here beside the row under it so the two cannot disagree
    about which fact each one carries: the title says the total and the filters,
    the row says the breakdown and the sort. The title is the narrow line and the
-   clock and the connection badge sit at its end, so a fact spelled here and
-   there goes off the right edge.
+   connection badge sits at its end, so a fact spelled here and there goes off
+   the right edge.
 
    [screen] and [badge] arrive rendered because colour and the connection
-   reading belong to the caller. The clock and the badge are the heading's
-   tail and are never shortened; when the row is narrow the keeper's name
+   reading belong to the caller. The badge is the heading's tail and is
+   never shortened; when the row is narrow the keeper's name
    folds to its floor, the counts and filters are cut at their end, and only
    then the name goes further ([detail_heading]). *)
-let facts_title ~ko ~cols ~screen ~keeper ~reading ~timestamp ~badge =
+let facts_title ~ko ~cols ~screen ~keeper ~reading ~badge =
   let after =
     match reading with
     | Facts_unread { reading } -> "  " ^ reading
@@ -75,15 +75,15 @@ let facts_title ~ko ~cols ~screen ~keeper ~reading ~timestamp ~badge =
         query_label
   in
   detail_heading ~cols ~lead:(Lead_text (screen ^ " \xe2\x96\xb8 ")) ~id:keeper
-    ~after:[ after ] ~tail:(timestamp ^ "  " ^ badge)
+    ~after:[ after ] ~tail:badge
 
 (* The row under the facts title. The title says the total and the filter; this
    says how that total breaks down and which sort produced the order, so each
    fact is written in one place. The split runs in this direction because the
    title is the line with no room to spare: beside the Activity pane at the
    width it opens from, the title keeps only the pane's surface floor, less
-   the frame, for the screen name, the keeper, the total, both filters, the
-   clock and the badge.
+   the frame, for the screen name, the keeper, the total, both filters and
+   the badge.
 
    [grand_total] is not passed in because it is not drawn here. *)
 let facts_stats_row ~ko ~ordinary ~source ~dropped ~sort_label =

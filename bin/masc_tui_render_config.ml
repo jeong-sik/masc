@@ -2205,12 +2205,6 @@ let render_config (state : state) =
     config_pane_title ~cols
       ~name:(screen_title (ui_text state ~ko:" MASC 시스템·설정" ~en:" MASC System"))
       ~note:path_note
-      ~clock:
-        (Printf.sprintf "%s%s%s" Ansi.dim
-           (let now = Unix.localtime (Unix.gettimeofday ()) in
-            Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-              now.Unix.tm_sec)
-           Ansi.reset)
       state
   in
   (* The frame, its fill and the footer are the contract's. The surface

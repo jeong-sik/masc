@@ -4173,24 +4173,23 @@ let config_pane_title_head ~room ~name ~reading =
 
 
 (* The whole title row a Config pane draws: its name, the strip, and the badge
-   at the end -- with the file it is reading and the clock between them where
-   the pane has those to show. Eleven panes built this row and nine of them
+   at the end -- with the file it is reading between them where the pane has
+   one to show. Eleven panes built this row and nine of them
    spelled it identically, each appending the badge itself. That is also why
    none of them could tell the strip to leave room for it: at a hundred
    columns the strip took the row and the frame cut the badge, the clock and
    half of "(load failed)" with it. Built once, the row knows both halves. *)
-let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
-    (state : state) =
+let config_pane_title ~cols ~name ?(reading = "") ?(note = "") (state : state) =
   let keys = config_pane_keys state in
   let piece text = if text = "" then "" else "  " ^ text in
   let cells text =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
-  let tail = piece clock ^ "  " ^ connection_badge state in
+  let tail = "  " ^ connection_badge state in
   (* The note is the one part of this row whose width a workspace chooses: it
      is the path of the file the pane is reading. Everything else either
-     cannot give way or knows how to. The clock and the badge say whether the
-     screen is a live reading and have no way of saying they were shortened;
+     cannot give way or knows how to. The badge says whether the screen is a
+     live reading and has no way of saying it was shortened;
      the strip drops tabs and marks the cut. The note could do neither, so at
      eighty columns the row ran eighteen cells past the frame and the frame
      took them off the end -- the badge.
@@ -4218,7 +4217,7 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
     let badge = surface_connection_badge state
         ~width:(max 0 (framed_inner_width cols - cells active_name - cells "  ")) in
     detail_heading ~cols ~lead:(Lead_text active_name) ~id:""
-      ~after:[piece reading; piece keys; piece note; piece clock] ~tail:badge
+      ~after:[piece reading; piece keys; piece note] ~tail:badge
   else
   (* What the title gives way with is its tail: the reading first, and then
      the name whole. [config_pane_title_head] owns that order. *)
@@ -6338,16 +6337,13 @@ let answering_preview_rows = 3
 
 (* The two-pane surfaces -- Code and Resources -- opened on their list pane's
    header ("▸ /", "▸ Resources") with no row above it. Every other surface
-   opens on its name, the clock and the connection badge, and the badge is the
+   opens on its name and the connection badge, and the badge is the
    row that says the server has gone; on these two nothing did. The title row
    sits above both panes, so each pane gives up one row to it. *)
 let pane_surface_title_rows = 1
 
 let pane_surface_title (state : state) ~cols ~name =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  surface_title_row ~cols state ~lead:(screen_title (" MASC " ^ name))
-    ~readings:
-      [ Printf.sprintf "  %02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec ]
+  surface_title_row ~cols state ~lead:(screen_title (" MASC " ^ name)) ~readings:[]
 
 (* The row between the strip and the title, then the title. Every other
    surface draws that row first -- a gap on its own, the box's top edge beside

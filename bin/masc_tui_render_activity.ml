@@ -392,14 +392,9 @@ let render_keeper_calls (state : state) =
     | Some keeper -> keeper.k_name
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let heading ~after =
     detail_heading ~cols ~lead:(Lead_text keeper_calls_lead) ~id:keeper_name
-      ~after:[ after ] ~tail:(timestamp ^ "  " ^ connection_badge state)
+      ~after:[ after ] ~tail:(connection_badge state)
   in
   let header =
     match state.keeper_calls with

@@ -18,9 +18,11 @@ type t =
   { last_success_at : float option
   ; last_failure : Current_types.librarian_failure_kind option
   ; facts_by_hour : facts_at_hour list
+  ; read_error : Dated_jsonl.read_error option
   }
 
-let empty = { last_success_at = None; last_failure = None; facts_by_hour = [] }
+let empty =
+  { last_success_at = None; last_failure = None; facts_by_hour = []; read_error = None }
 
 type kept =
   { cursor : Dated_jsonl.append_cursor
@@ -70,7 +72,7 @@ let step outcome = function
        let facts_by_hour = after_commit ~recorded_at change outcome.facts_by_hour in
        (match source.kind with
         | Current_types.Librarian ->
-          { last_success_at = Some recorded_at; last_failure = None; facts_by_hour }
+          { outcome with last_success_at = Some recorded_at; last_failure = None; facts_by_hour }
         | Current_types.(Explicit_write | Explicit_retract) -> { outcome with facts_by_hour })
      | Ok (Current_types.Journal_failed { kind; _ }) -> { outcome with last_failure = Some kind }
      | Ok (Current_types.Journal_quarantined _)
@@ -85,19 +87,40 @@ let read ~keepers_dir ~keeper_id =
   let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let previous = Stdlib.Mutex.protect kept_mu (fun () -> Hashtbl.find_opt kept path) in
   let store value = Stdlib.Mutex.protect kept_mu (fun () -> Hashtbl.replace kept path value) in
+  let unavailable error =
+    let outcome = match previous with Some { outcome; _ } -> outcome | None -> empty in
+    { outcome with read_error = Some error }
+  in
   let from_start () =
     match fold path ~cursor:None ~init:empty with
     | Ok (Dated_jsonl.Appended (outcome, cursor)) ->
       store { cursor; outcome };
-      Some outcome
+      Ok outcome
     (* Only a passed cursor can be invalidated. *)
-    | Ok Dated_jsonl.Cursor_invalidated | Error _ -> None
+    | Ok Dated_jsonl.Cursor_invalidated ->
+      Error
+        (Dated_jsonl.Io_error
+           { operation = Dated_jsonl.Read_file
+           ; path
+           ; detail = "journal cursor was invalidated on its initial read"
+           })
+    | Error error -> Error error
   in
-  if not (Sys.file_exists path)
-  then (
+  let present =
+    match Unix.lstat path with
+    | _ -> Ok true
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+    | exception Unix.Unix_error (error, _, _) ->
+      Error
+        (Dated_jsonl.Io_error
+           { operation = Dated_jsonl.Inspect; path; detail = Unix.error_message error })
+  in
+  match present with
+  | Error error -> unavailable error
+  | Ok false ->
     Stdlib.Mutex.protect kept_mu (fun () -> Hashtbl.remove kept path);
-    empty)
-  else (
+    empty
+  | Ok true ->
     let read =
       match previous with
       | None -> from_start ()
@@ -105,14 +128,13 @@ let read ~keepers_dir ~keeper_id =
         (match fold path ~cursor:(Some cursor) ~init:outcome with
          | Ok (Dated_jsonl.Appended (outcome, cursor)) ->
            store { cursor; outcome };
-           Some outcome
+           Ok outcome
          | Ok Dated_jsonl.Cursor_invalidated -> from_start ()
-         | Error _ -> None)
+         | Error error -> Error error)
     in
-    match read, previous with
-    | Some outcome, _ -> outcome
-    | None, Some { outcome; _ } -> outcome
-    | None, None -> empty)
+    (match read with
+     | Ok outcome -> outcome
+     | Error error -> unavailable error)
 ;;
 
 let within ~now points =

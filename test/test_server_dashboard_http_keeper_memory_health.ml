@@ -52,7 +52,7 @@ let require_ok = function
   | Error detail -> Alcotest.fail detail
 ;;
 
-let write_snapshot ~keepers_dir ~keeper_id facts =
+let write_snapshot ?(now = test_now) ~keepers_dir ~keeper_id facts =
   Fs_compat.mkdir_p keepers_dir;
   let expected_revision =
     match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
@@ -64,7 +64,7 @@ let write_snapshot ~keepers_dir ~keeper_id facts =
     ~keepers_dir
     ~keeper_id
     ~expected_revision
-    ~now:test_now
+    ~now
     ~source
     ~facts
     ()
@@ -478,6 +478,75 @@ let test_journal_outcome_waits_for_a_torn_line () =
     (failure_kind after_commit);
   Alcotest.(check bool) "the commit after the cut is read" true
     (Option.is_some after_commit.last_success_at)
+;;
+
+let test_journal_outcome_distinguishes_unreadable_from_empty () =
+  let module Outcome = Masc.Keeper_memory_journal_outcome in
+  let base = fresh_dir "masc-memory-health-journal-unreadable" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "unreadable" in
+  Fs_compat.mkdir_p keepers_dir;
+  let read () = Outcome.read ~keepers_dir ~keeper_id in
+  let missing = read () in
+  Alcotest.(check bool) "a confirmed missing journal is not a read error" true
+    (Option.is_none missing.read_error && missing.facts_by_hour = []);
+  let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  Unix.mkdir path 0o700;
+  Fun.protect ~finally:(fun () -> Unix.rmdir path) (fun () ->
+    let unavailable = read () in
+    Alcotest.(check bool) "an unreadable first journal is not an empty success" true
+      (Option.is_some unavailable.read_error && unavailable.facts_by_hour = []));
+  Fs_compat.save_file path "";
+  let empty = read () in
+  Alcotest.(check bool) "an actual empty journal clears the read error" true
+    (Option.is_none empty.read_error && empty.facts_by_hour = [])
+;;
+
+let test_journal_failure_keeps_evidence_and_recovers_without_another_commit () =
+  let base = fresh_dir "masc-memory-health-journal-recovery" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let keeper_id = "journal-recovery" in
+  let write facts =
+    ignore (write_snapshot ~now:(Unix.gettimeofday ()) ~keepers_dir ~keeper_id facts)
+  in
+  let row () =
+    Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:keeper_id
+    |> member "keeper"
+  in
+  let latest_facts row =
+    match List.rev (list_field "facts_by_hour" row) with
+    | point :: _ -> int_field "facts" point
+    | [] -> Alcotest.fail "the journal trend has no retained commit"
+  in
+  write [ fact "one" ];
+  let first = row () in
+  Alcotest.(check int) "the first journal observation has one fact" 1 (latest_facts first);
+  Alcotest.(check bool) "the first journal read is healthy" true
+    (is_null (member "read_error" first));
+  (* A real commit invalidates the cached row before its journal is read. *)
+  write [ fact "one"; fact "two" ];
+  let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let held = path ^ ".held" in
+  Unix.rename path held;
+  Unix.mkdir path 0o700;
+  Fun.protect
+    ~finally:(fun () -> Unix.rmdir path; Unix.rename held path)
+    (fun () ->
+      let unavailable = row () in
+      Alcotest.(check int) "the independently readable snapshot stays visible" 2
+        (int_field "facts" unavailable);
+      Alcotest.(check int) "the last successful journal evidence is retained" 1
+        (latest_facts unavailable);
+      Alcotest.(check bool) "retained journal points are marked incomplete" false
+        (is_null (member "read_error" unavailable));
+      let fleet = Health.keeper_memory_health_http_json ~base_path:base in
+      Alcotest.(check int) "the journal failure contributes to the read-error total" 1
+        (int_field "read_errors" (totals fleet)));
+  let recovered = row () in
+  Alcotest.(check bool) "an error row is reread after recovery without a new commit" true
+    (is_null (member "read_error" recovered));
+  Alcotest.(check int) "the previously unread append is now visible" 2
+    (latest_facts recovered)
 ;;
 
 (* A keeper's own [keeper_memory_write] journals a committed line too. It is
@@ -1899,6 +1968,10 @@ let () =
             test_journal_outcome_reads_appended_lines
         ; Alcotest.test_case "journal outcome waits for a torn line" `Quick
             test_journal_outcome_waits_for_a_torn_line
+        ; Alcotest.test_case "journal unreadable is not empty" `Quick
+            test_journal_outcome_distinguishes_unreadable_from_empty
+        ; Alcotest.test_case "journal failure retains evidence and recovers" `Quick
+            test_journal_failure_keeps_evidence_and_recovers_without_another_commit
         ; Alcotest.test_case "librarian failure then explicit write" `Quick
             test_librarian_failure_then_explicit_write_keeps_both
         ; Alcotest.test_case "corrupt snapshot visible" `Quick

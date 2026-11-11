@@ -228,7 +228,8 @@ let continuity_unread_atoms ~runtime_keepers_dir ~keeper_id saved =
 ;;
 
 let librarian_health ~config keeper_id ~continuity_saved
-    ~journal:{ Keeper_memory_journal_outcome.last_success_at; last_failure; facts_by_hour = _ } =
+    ~journal:{ Keeper_memory_journal_outcome.last_success_at; last_failure; facts_by_hour = _;
+               read_error = _ } =
   let measurement = Keeper_librarian_queue_refresh.last_measurement ~config ~keeper_name:keeper_id in
   let last_failure_kind =
     Option.map Keeper_memory_os_journal_codec.librarian_failure_kind_to_string last_failure
@@ -378,6 +379,11 @@ let keeper_health ~config ~keepers_dir keeper_id =
   let source_health = source_health ~keepers_dir keeper_id in
   let context_cycle = context_cycle ~config ~keeper_name:keeper_id in
   let journal = Keeper_memory_journal_outcome.read ~keepers_dir ~keeper_id in
+  let journal_error =
+    Option.map
+      (fun error -> "memory journal: " ^ Dated_jsonl.read_error_to_string error)
+      journal.read_error
+  in
   let librarian =
     librarian_health ~config keeper_id ~continuity_saved:context_cycle.saved ~journal
   in
@@ -404,7 +410,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; vision_ingest_errors =
         vision_ingest_error_count_for_keeper keeper_id
     ; vision_ingest_error_reasons = vision_errors_for_keeper keeper_id
-    ; read_error = None
+    ; read_error = journal_error
     ; source_revision = source_health.revision
     ; source_facts = source_health.facts
     ; source_invalidations = source_health.invalidations
@@ -445,7 +451,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; vision_ingest_errors =
         vision_ingest_error_count_for_keeper keeper_id
     ; vision_ingest_error_reasons = vision_errors_for_keeper keeper_id
-    ; read_error = None
+    ; read_error = journal_error
     ; source_revision = source_health.revision
     ; source_facts = source_health.facts
     ; source_invalidations = source_health.invalidations
@@ -473,7 +479,8 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; vision_ingest_errors =
         vision_ingest_error_count_for_keeper keeper_id
     ; vision_ingest_error_reasons = vision_errors_for_keeper keeper_id
-    ; read_error = Some message
+    ; read_error =
+        Some (match journal_error with None -> message | Some journal -> message ^ "; " ^ journal)
     ; source_revision = source_health.revision
     ; source_facts = source_health.facts
     ; source_invalidations = source_health.invalidations

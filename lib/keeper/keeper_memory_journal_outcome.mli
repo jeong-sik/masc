@@ -32,12 +32,17 @@ type t =
           replaces the point of its hour. A commit that kept the stored
           snapshot journals the facts it kept and adds none, so its point is
           the snapshot's size and counts no new claim. *)
+  ; read_error : Dated_jsonl.read_error option
+      (** A failed inspection or read. The other fields retain the last
+          successful fold, if any, rather than describing a successful empty
+          journal. A later successful read clears this error. *)
   }
 
 val read : keepers_dir:string -> keeper_id:string -> t
-(** A missing journal is no commit and no failure. A read that fails keeps the
-    answer of the last read that succeeded, since the journal only grows, and
-    is retried on the next read; with none, it is no commit and no failure. *)
+(** A confirmed missing journal is no commit and no failure, without a read
+    error. Other inspection and read failures set [read_error] and retain the
+    answer of the last successful read, if any. They are retried on the next
+    read, without advancing the retained cursor. *)
 
 val within : now:float -> facts_at_hour list -> facts_at_hour list
 (** The points in the {!trend_hours} clock hours that end with [now]'s hour.

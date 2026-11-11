@@ -4590,7 +4590,7 @@ let test_tools_current_worker_bypasses_pending_private_cache () =
             check bool "current tools read remains on a worker" true
               ((Domain.self () :> int) <> owner_domain);
             match Server_dashboard_http_runtime_info.dashboard_tools_http_result
-                ~read_policy:Dashboard_projection_read.Current config with
+                ~read_policy:Masc.Dashboard_projection_read.Current config with
             | Dashboard_snapshot.Tools_ready json -> json
             | Tools_pending _ -> fail "current tools joined the unrelated pending HTTP fill"
             | Tools_error _ -> fail "current tools returned the unrelated HTTP fallback")) in

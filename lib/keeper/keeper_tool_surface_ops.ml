@@ -326,7 +326,16 @@ let runtime_path_rest_json ~now assignment_id =
       ; "release_basis", `String (Keeper_turn_driver.release_basis_to_wire release_basis)
       ]
 
-let keeper_list_row_json ~runtime_class config name =
+(* What one row of the Keeper list carries. A roster row answers which Keepers
+   exist and whether each can take work: name, status, phase, health and
+   paused. A detail row adds everything a Keeper pane shows: meta, last
+   failure, runtime blocker and lane, recent turns. A roster row also skips
+   the receipt, turn pulse and blocker reads the detail row needs. *)
+type keeper_list_row_shape =
+  | Roster_row
+  | Detail_row
+
+let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
   let effective_meta, persisted_meta =
     match read_meta_resolved config name with
     | Error err -> Error err, None
@@ -356,6 +365,50 @@ let keeper_list_row_json ~runtime_class config name =
          reading. The last recorded error is a different observation. *)
       let registry_entry = Keeper_registry.get ~base_path:config.base_path meta.name in
       let registry_phase = Option.map (fun entry -> entry.Keeper_registry.phase) registry_entry in
+      let diagnostic =
+        Keeper_status_runtime.keeper_diagnostic_json
+          ~meta
+          ~phase:registry_phase ~history_items:[] ~now_ts
+      in
+      (* One keeper is described by four separate readings, and each row
+         carries its own field for one of them rather than a single word that
+         answers for all four:
+
+           phase        lifecycle state machine  - which cell it is in
+           health       phase and turn history   - is it running, has it turned,
+                                                   are its turns failing
+           paused       operator override        - did a person stop it
+           next_action  what to do about it      - already derived from health
+
+         [status] is the display word for [health] ({!Keeper_status_runtime.
+         keeper_surface_status}). Both are published so a reader compares the
+         reading, not the word.
+
+         The diagnostic already carries health and next_action; this only stops
+         discarding them. *)
+      let status = Keeper_status_runtime.keeper_surface_status ~diagnostic in
+      let health =
+        Keeper_status_runtime.keeper_health_to_string
+          (Keeper_status_runtime.keeper_diagnostic_health
+             ~diagnostic
+             ~source:"keeper_list_row")
+      in
+      let phase =
+        match registry_phase with
+        | Some p -> Keeper_state_machine.phase_to_string p
+        | None -> "offline"
+      in
+      match shape with
+      | Roster_row ->
+        Some
+          (`Assoc
+            [ ("name", `String meta.name)
+            ; ("status", `String status)
+            ; ("phase", `String phase)
+            ; ("health", `String health)
+            ; ("paused", `Bool meta.paused)
+            ])
+      | Detail_row ->
       let last_failure =
         Option.bind registry_entry (fun entry ->
           Option.map
@@ -425,45 +478,12 @@ let keeper_list_row_json ~runtime_class config name =
       let keepalive_running =
         Keeper_status_runtime.keepalive_running_of_phase registry_phase
       in
-      let diagnostic =
-        Keeper_status_runtime.keeper_diagnostic_json
-          ~meta
-          ~phase:registry_phase ~history_items:[] ~now_ts
-      in
-      (* One keeper is described by four separate readings, and each row
-         carries its own field for one of them rather than a single word that
-         answers for all four:
-
-           phase        lifecycle state machine  - which cell it is in
-           health       phase and turn history   - is it running, has it turned,
-                                                   are its turns failing
-           paused       operator override        - did a person stop it
-           next_action  what to do about it      - already derived from health
-
-         [status] is the display word for [health] ({!Keeper_status_runtime.
-         keeper_surface_status}). Both are published so a reader compares the
-         reading, not the word.
-
-         The diagnostic already carries health and next_action; this only stops
-         discarding them. *)
-      let status = Keeper_status_runtime.keeper_surface_status ~diagnostic in
-      let health =
-        Keeper_status_runtime.keeper_health_to_string
-          (Keeper_status_runtime.keeper_diagnostic_health
-             ~diagnostic
-             ~source:"keeper_list_row")
-      in
       (* The action the diagnostic already derived. Absent means the diagnostic
          did not name one, which is a different thing from "nothing to do", so
          it publishes as null rather than as an empty string. *)
       let next_action =
         Json_util.string_opt_to_json
           (Json_util.get_string diagnostic "next_action_path")
-      in
-      let phase =
-        match registry_phase with
-        | Some p -> Keeper_state_machine.phase_to_string p
-        | None -> "offline"
       in
       Some
         (`Assoc (
@@ -490,6 +510,10 @@ let keeper_list_row_json ~runtime_class config name =
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]))
+
+let keeper_list_row_json ~runtime_class config name =
+  keeper_list_row_json_of_shape ~shape:Detail_row ~runtime_class config name
+
 let with_keeper_name args name =
   match args with
   | `Assoc fields ->

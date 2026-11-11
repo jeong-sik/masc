@@ -87,7 +87,8 @@ module Position : sig
   type t =
     | Row of { at : int; total : int }
         (** The selected row, counted from one, and how many rows there
-            are: [7/29]. Nothing selected is [at = 0]. *)
+            are: [7/29]. Nothing selected is [at = 0] and draws a dash in
+            the row's place. *)
     | Partial of { at : int; loaded : int; total : int }
         (** A list read in part: the selected row among the rows read, and
             how many the server holds: [1/50 · whole 8,347]. *)

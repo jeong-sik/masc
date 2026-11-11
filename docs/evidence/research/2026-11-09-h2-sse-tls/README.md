@@ -31,6 +31,7 @@
 | 벤치 run1 | 03:05:18 | `tls-write-bench/harness.py` | `tls-write-bench/run1.jsonl` | 소켓 3종 × suite 2종 × 쓰기 크기 2종. 한 연결은 3회 중앙값, 4연결은 동시 실행 1회 |
 | 벤치 run2 | 03:09:07 | `tls-write-bench/harness2.py` | `tls-write-bench/run2.jsonl` | 소켓 5종 × suite 2종 × 쓰기 크기 2종. 한 연결은 5회 중앙값, 4연결은 동시 실행 1회 |
 | 벤치 run3 | 11-11 11:55~12:05 | `tls-write-bench/harness3.py`, `tls-write-bench/goclient/main.go` | `tls-write-bench/run3.jsonl` | tls 2.1.5. 소켓 4종(`pieces` = 호출마다 버퍼) × suite 2종 × 쓰기 크기 4종 × 클라이언트 2종(OpenSSL, Go `crypto/tls`). 한 연결 5회 중앙값. 다른 빌드가 돌던 장비에서 한 번 돌았다 |
+| 벤치 run4 | 11-11 22:23~22:25 | `tls-write-bench/harness4.py` | `tls-write-bench/run4.jsonl` | tls 2.1.5. tls-eio 3종(릴리스, 릴리스 + `copy:262144` 소켓, `write_t` 를 고친 포크) × suite 2종 × 쓰기 크기 3종 × 클라이언트 2종. 한 연결 5회 중앙값. 다른 빌드가 돌던 장비에서 한 번 돌았다(load average 153→62) |
 | run8 | 11-11 10:17:01 | `h2_stall_probe.py` | `run8-stall.json` | run6 과 같은 장면을 RFC-0518 D1·D2 가 든 build `eb22878fa756` 에서 다시 돌림. 탐침이 스트림마다 RST 를 받은 시각과 서버의 reset 로그 줄 수를 더 적는다 |
 | run8b | 11-11 13:17:09 | `h2_stall_probe.py` | `run8b-stall.json` | run8 과 같은 장면을 D4·D5·D6·D8 까지 든 설치 build `c9b8e1af3cbe` 에서 한 번 더 돌림 |
 | run9 | 11-11 10:14:44 | `h2_sse_leak_probe.py` | `run9-runs.json`, `run9-samples.jsonl` | run1 과 같은 장면을 RFC-0518 D1·D2·D3·D7·D9 가 든 build `1c5524344b0f` 에서 다시 돌림 |
@@ -38,6 +39,8 @@
 `summarize.py` 는 run1 의 출력 디렉터리를 표로 바꾼다.
 
 run3 의 `bench_server.ml` 은 run1·run2 것에 `pieces` 소켓을 더한 것이다. tls 2.1.5 는 EC 인증서에 EC 키를 쓰는 suite 가 없으면 설정을 거절해서 TLS 1.2 suite 하나를 목록 끝에 붙였다. 리스너는 1.3 만 받으므로 고르지 않는다. Go 클라이언트는 `go build -o ../bench_client_go .` 로 만든다. run3 의 macOS `sample` 프로파일 두 개는 호스트 경로가 들어 있고 문서가 쓰지 않아서 남기지 않았다.
+
+run4 의 `patched` 서버는 같은 `bench_server.ml` 을 tls-eio 포크 커밋 `2c0f8615865a`(`jeong-sik/ocaml-tls`, v2.1.5 에 커밋 하나)의 `eio/` 소스에 링크한 것이다. 그 커밋은 `write_t` 가 암호문을 `Eio.Flow.write` 로 쓰게 한다. `harness4.py` 는 릴리스 쪽 서버를 `_build/default/bench_server.exe`, 포크 쪽을 `_build/default/p/bench_server.exe` 에서 찾는다. `p/dune` 은 `(copy_files ../bench_server.ml)` 로 같은 소스를 받고, 포크의 `eio/tls_eio.ml`·`x509_eio.ml` 과 그 `.mli` 로 만든 `(library (name tls_eio_patched) (wrapped false) (libraries tls eio ptime.clock.os))` 에 링크한다. 5.5.2 switch 에서 빌드했다.
 
 ## 다시 돌리기
 
@@ -161,6 +164,29 @@ run8b 는 같은 장면을 build `c9b8e1af3cbe` 에서 돌린 것이고 값이 �
 - 요청은 모두 200 이었다(fleet 4,500, 로그 4,500, MCP GET 300, h2c 2,250, 절단 연결의 스트림 1,000, 끝의 GET 300). `h1_fleet_close` 는 run1 과 같이 200 이 0개다.
 - 로그 스트림을 reset 한 뒤 35 s 동안 live 는 run1 에서 37.7 MB 늘었고 run9 에서 6.4 MB 줄었다. 둘 다 아래에 적은 65 MB 흔들림 안이라 이 값으로 D7 을 판정하지 않는다.
 - 평문 200번은 1,005 s 걸렸다(run1 1,004 s). 연결 준비 상한(D6)은 이 build 에 없다.
+
+## 벤치 run4: tls-eio 가 암호문을 소켓에 바로 쓸 때의 서버 CPU, 2026-11-11
+
+서버 CPU(ms/MB, 5회 중앙값). `릴리스` 는 tls-eio 2.1.5 를 accept 한 소켓에 그대로 얹은 것, `감싸개` 는 같은 라이브러리에 `copy:262144` 소켓, `포크` 는 고친 tls-eio 를 accept 한 소켓에 얹은 것이다.
+
+| 쓰기 크기(B) | suite | 클라이언트 | 릴리스 | 감싸개 | 포크 | 포크 대 릴리스 | 포크 대 감싸개 |
+|---|---|---|---|---|---|---|---|
+| 861,256 | AES-128-GCM | OpenSSL | 10.58 | 5.10 | 5.28 | −50.1% | +3.5% |
+| 861,256 | AES-128-GCM | Go | 9.69 | 5.13 | 5.31 | −45.2% | +3.5% |
+| 861,256 | ChaCha20 | OpenSSL | 8.01 | 3.96 | 4.14 | −48.3% | +4.5% |
+| 861,256 | ChaCha20 | Go | 7.94 | 4.22 | 4.15 | −47.7% | −1.7% |
+| 32,786 | AES-128-GCM | OpenSSL | 12.67 | 7.59 | 8.19 | −35.4% | +7.9% |
+| 32,786 | AES-128-GCM | Go | 12.75 | 7.59 | 7.29 | −42.8% | −4.0% |
+| 32,786 | ChaCha20 | OpenSSL | 10.93 | 5.26 | 6.01 | −45.0% | +14.3% |
+| 32,786 | ChaCha20 | Go | 8.32 | 6.23 | 5.65 | −32.1% | −9.3% |
+| 16,393 | AES-128-GCM | OpenSSL | 11.76 | 6.73 | 6.93 | −41.1% | +3.0% |
+| 16,393 | AES-128-GCM | Go | 12.39 | 7.12 | 6.47 | −47.8% | −9.1% |
+| 16,393 | ChaCha20 | OpenSSL | 8.66 | 5.41 | 5.61 | −35.2% | +3.7% |
+| 16,393 | ChaCha20 | Go | 10.38 | 5.40 | 4.91 | −52.7% | −9.1% |
+
+- 포크는 릴리스보다 32.1~52.7% 적게 썼다. 감싸개와는 −9.3~+14.3% 로 엇갈린다. 한 번 돈 값이라 둘 사이의 차이는 말할 수 없다.
+- 포크 쪽 소켓은 masc 의 연결 감싸개가 아니라 accept 한 소켓이다. masc 에서는 감싸개가 받은 쓰기를 256 KiB 조각으로 넘긴다. 포크를 넣은 masc 설치 build 로는 아직 재지 않았다.
+- 처리량(MB/s)은 장비 부하에 따라 출렁여서 쓰지 않는다.
 
 ## 관찰과 한계
 

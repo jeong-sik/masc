@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { isImeComposing } from '../lib/keyboard'
 // MASC Dashboard — Settings surface
 // Operator-facing settings only: runtime management, resolved paths, MCP server
@@ -28,7 +29,7 @@ import {
   type LogEntry,
   type LogsError,
 } from '../api/dashboard-logs'
-import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
+import { dashboardRuntime, DashboardTransportError, type DashboardHttp } from '../api/effect-http'
 import {
   patchRuntimeLane,
   patchRuntimeMediaFailover,
@@ -153,7 +154,6 @@ const SET_GROUPS: [string, SectionId[]][] = [
 // (no fabricated tool names).
 const MCP_PUBLIC_SURFACE = 'public_mcp'
 const SETTINGS_LOG_LIMIT = 50
-const SETTINGS_LOG_POLL_MS = 3000
 const DISPLAY_DENSITY_OPTIONS: Density[] = ['compact', 'regular', 'spacious']
 
 const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
@@ -1398,11 +1398,9 @@ function LogViewer() {
   const [filter, setFilter] = useState<LogFilter>('all')
 
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null
-
     const tick = () => {
       if (settingsLogsResource.state.value._tag === 'Loading') return
-      void settingsLogsResource.load(
+      return settingsLogsResource.load(
         fetchLogs({ limit: SETTINGS_LOG_LIMIT }).pipe(
           Effect.map(resp => [...resp.entries]
             .sort((a, b) => b.seq - a.seq)
@@ -1412,11 +1410,10 @@ function LogViewer() {
     }
 
     settingsLogsResource.reset()
-    tick()
-    timer = setInterval(tick, SETTINGS_LOG_POLL_MS)
+    const dispose = setupObservationRefresh(tick, { topics: ['logs'], cancelRead: () => settingsLogsResource.cancel(), resetRead: () => settingsLogsResource.reset(), readError: () => { const s = settingsLogsResource.state.peek(); return s._tag === 'Failure' ? (s.error instanceof DashboardTransportError ? s.error.cause : s.error) : null } })
 
     return () => {
-      if (timer) clearInterval(timer)
+      dispose()
       settingsLogsResource.cancel()
       settingsLogsResource.reset()
     }

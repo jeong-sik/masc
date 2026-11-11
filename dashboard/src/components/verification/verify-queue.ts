@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 // VerifyQueue — keeper-v2 verify-queue surface (검증 요청 큐).
 //
 // Design: prototypes/keeper-v2/verify-queue.jsx + styles/keeper-v2/verify.css.
@@ -34,7 +35,6 @@ import { relativeTime } from '../../lib/format-time'
 import { navigate } from '../../router'
 import { useManagedAsyncResource } from '../../lib/use-managed-async-resource'
 
-const AUTO_REFRESH_MS = 15_000
 const REQUESTS_LIMIT = 100
 
 type VqLayout = 'stack' | 'split' | 'triage'
@@ -535,10 +535,9 @@ export function VerifyQueue() {
 
   useEffect(() => {
     const load = () => resource.load(signal => fetchVerificationRequests({ view: 'awaiting', limit: REQUESTS_LIMIT, signal }))
-    void load()
-    const id = setInterval(() => void load(), AUTO_REFRESH_MS)
+    const dispose = setupObservationRefresh(load, { topics: ['verification_requests'], readError: () => resource.readError(), cancelRead: () => resource.cancel(), resetRead: () => resource.reset() })
     return () => {
-      clearInterval(id)
+      dispose()
       resource.cancel()
     }
   }, [resource])

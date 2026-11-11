@@ -35,12 +35,14 @@ const fleetMock = vi.hoisted(() => {
     sharedToolQualityError: { value: null as string | null },
     refreshSharedToolQuality: vi.fn(),
     cancelSharedToolQuality: vi.fn(),
+    prepareSharedToolQualityRead: vi.fn(),
+    readSharedToolQualityError: vi.fn(() => null),
   }
 })
 
 const storeMock = vi.hoisted(() => ({
   shellRuntimeResolution: { value: null as any },
-  refreshShell: vi.fn(() => Promise.resolve()),
+  readShell: vi.fn(async () => ({ kind: 'ready' as const })),
 }))
 
 vi.mock('../../router', () => ({
@@ -53,11 +55,13 @@ vi.mock('../fleet-data-core', () => ({
   get sharedToolQualityError() { return fleetMock.sharedToolQualityError },
   refreshSharedToolQuality: fleetMock.refreshSharedToolQuality,
   cancelSharedToolQuality: fleetMock.cancelSharedToolQuality,
+  prepareSharedToolQualityRead: fleetMock.prepareSharedToolQualityRead,
+  readSharedToolQualityError: fleetMock.readSharedToolQualityError,
 }))
 
 vi.mock('../../store', () => ({
   get shellRuntimeResolution() { return storeMock.shellRuntimeResolution },
-  refreshShell: storeMock.refreshShell,
+  readShell: storeMock.readShell,
 }))
 
 vi.mock('../../lib/auto-refresh', () => ({

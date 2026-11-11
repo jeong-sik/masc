@@ -1,3 +1,4 @@
+import { selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
 // MASC Dashboard — Overview (operations home)
 //
 // One screen of fleet state, top to bottom:
@@ -669,17 +670,26 @@ export function buildOverviewTelemetrySnapshot({
 
 const overviewTelemetryResource: AsyncResource<OverviewTelemetrySnapshot> = createAsyncResource()
 
-function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
+function loadOverviewTelemetry(nowMs = Date.now(), signal?: AbortSignal): Promise<void> {
   return overviewTelemetryResource.load(async () => {
     const sinceMs = nowMs - OVERVIEW_TELEMETRY_WINDOW_MINUTES * 60 * 1000
-    const [telemetry, summary] = await Promise.all([
+    const [telemetryRead, summaryRead] = await Promise.allSettled([
       fetchTelemetry({
         source: 'agent_core_event',
+        signal,
         since_ms: sinceMs,
         n: OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT,
       }),
-      fetchTelemetrySummary(),
+      fetchTelemetrySummary({ signal }),
     ])
+    if (telemetryRead.status === 'rejected' || summaryRead.status === 'rejected') {
+      throw selectObservationReadFailure([
+        telemetryRead.status === 'rejected' ? telemetryRead.reason : null,
+        summaryRead.status === 'rejected' ? summaryRead.reason : null,
+      ])
+    }
+    const telemetry = telemetryRead.value
+    const summary = summaryRead.value
     return buildOverviewTelemetrySnapshot({
       entries: telemetry.entries,
       sources: summary.sources,
@@ -1311,10 +1321,7 @@ function OverviewDomainSection({
 export function Overview() {
   useNowSecondsTicker()
   useEffect(() => {
-    void loadOverviewTelemetry()
-    const interval = window.setInterval(() => {
-      void loadOverviewTelemetry()
-    }, 60_000)
+    const dispose = setupObservationRefresh(signal => loadOverviewTelemetry(Date.now(), signal), { topics: ['telemetry'], cancelRead: () => overviewTelemetryResource.reset(), readError: () => overviewTelemetryResource.readError(), resetRead: () => overviewTelemetryResource.reset() })
     // Overview and the shell consume one shared full-health resource. The
     // subscriber owns ref-counted refresh lifetime, so mounting both surfaces
     // never creates a second backend poller.
@@ -1324,7 +1331,7 @@ export function Overview() {
     // surface fetched the whole tool registry.
     const stopScheduleRefresh = subscribeScheduledAutomationRefresh()
     return () => {
-      window.clearInterval(interval)
+      dispose()
       stopFullHealthRefresh()
       stopScheduleRefresh()
     }

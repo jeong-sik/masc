@@ -9,7 +9,7 @@ import { ExternalShareOutcomes } from './external-share-outcomes'
 import { PublicationOutcomes } from './publication-outcomes'
 import { artifactPublicationOutcomes, type ArtifactPublicationOwner } from '../../lib/artifact-publication-outcomes'
 import { fetchArtifactChecks, resolveArtifactCheck, type ArtifactCheckList, type ArtifactCheckState } from '../../api/published-artifact-checks'
-import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
 import { ArtifactReader, type ArtifactShareSelection } from './artifact-reader'
 import { ArtifactPreview } from './artifact-preview'
 import { ArtifactCheckControl, type ArtifactCheckOutcome } from './artifact-check-control'
@@ -240,151 +240,173 @@ function ArtifactsObservation({ authRevision, workspaceRoot, draftRetention, all
     && selectedId !== undefined && selectedArtifact(selectedId, revision)
   useEffect(() => () => { active.current = false }, [])
 
-  useEffect(() => setupVisibleAutoRefresh(() => setRefresh(n => n + 1), DEFAULT_PANEL_REFRESH_MS), [])
-  useEffect(() => {
-    const controller = new AbortController()
-    void fetchPublishedArtifacts(controller.signal).then(data => {
-      if (!controller.signal.aborted && current()) setCatalog({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
-    }, error => {
-      if (!controller.signal.aborted && current()) setCatalog({ key: catalogKey, kind: 'error', message: errorMessage(error) })
-    })
-    return () => controller.abort()
-  }, [authRevision, catalogKey, refresh])
-  useEffect(() => {
-    const controller = new AbortController()
-    setChecks(null)
-    void fetchArtifactChecks(controller.signal).then(data => {
-      if (!controller.signal.aborted && current()) setChecks({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
-    }, error => {
-      if (!controller.signal.aborted && current()) setChecks({ key: catalogKey, kind: 'error', message: errorMessage(error) })
-    })
-    return () => controller.abort()
-  }, [authRevision, catalogKey, refresh])
+  useEffect(() => setupObservationRefresh(async signal => {
+    const publishable = () => !signal.aborted && current()
+    const results = await Promise.allSettled([
+      fetchPublishedArtifacts(signal).then(data => {
+        if (publishable()) setCatalog({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
+      }, error => {
+        if (publishable()) setCatalog({ key: catalogKey, kind: 'error', message: errorMessage(error) })
+        throw error
+      }),
+      fetchArtifactChecks(signal).then(data => {
+        if (publishable()) setChecks({ key: catalogKey, kind: 'loaded', data, receivedAt: Date.now() })
+      }, error => {
+        if (publishable()) setChecks({ key: catalogKey, kind: 'error', message: errorMessage(error) })
+        throw error
+      }),
+    ])
+    if (!publishable()) return
+    const failure = selectObservationReadFailure(results.map(result => result.status === 'rejected' ? result.reason : null))
+    if (failure !== null) throw failure
+  }, { topics: ['published_artifacts', 'artifact_checks'], resetRead: () => { setCatalog(null); setChecks(null) } }), [authRevision, catalogKey, refresh])
   useEffect(() => {
     if (!selectedId || !currentDocument()) return
-    const controller = new AbortController()
+    let stopRead = () => {}
     const retire = () => {
       if (!currentDocument()) {
         if (!visit.retired) {
           visit.retired = true
           if (active.current) setVisitEpoch(epoch => epoch + 1)
         }
-        controller.abort()
+        stopRead()
         notifyShareWaiters(true)
       }
     }
     const unsubscribeRoute = route.subscribe(retire)
     const unsubscribeWorkspace = executionWorkspaceAuthority.subscribe(retire)
     const unsubscribeCredential = storedTokenRevision.subscribe(retire)
-    const publish = (next: DocumentRemote) => {
-      if (!controller.signal.aborted && currentDocument()) { documentRef.current = next; setDocument(next); notifyShareWaiters() }
-    }
-    const cleanup = () => { controller.abort(); notifyShareWaiters(true); unsubscribeRoute(); unsubscribeWorkspace(); unsubscribeCredential() }
-    const target = publicationTarget.current
-    if (target && (target.publication.artifact.id !== selectedId || String(target.publication.artifact.revision) !== revision)) {
-      publicationTarget.current = null
-    } else if (target) {
-      // A publication result belongs to its original workspace. Do not show an
-      // unbound or public response while opening that result: the server may
-      // have switched to another runtime with the same document id and revision.
-      const retained = () => {
-        const previous = documentRef.current
-        const data = previous?.key === documentKey && previous.kind !== 'public-loading'
-          && previous.data?.kind === 'operator' ? previous.data : undefined
-        return data?.workspace?.basePath === target.workspace.basePath && data.workspace.mascRoot === target.workspace.mascRoot
-          && data.document.artifact.id === target.publication.artifact.id && data.document.artifact.revision === target.publication.artifact.revision
-          && data.document.artifact.body._blob.sha256 === target.publication.artifact.body._blob.sha256 ? data : undefined
+    // A manual revalidation keeps this visit's editor/draft; an actual owner
+    // replacement withdraws its rows before the next scheduled read.
+    let initialReset = true
+    stopRead = setupObservationRefresh(async signal => {
+      if (!currentDocument()) return
+      const publish = (next: DocumentRemote) => {
+        if (!signal.aborted && currentDocument()) { documentRef.current = next; setDocument(next); notifyShareWaiters() }
       }
-      const failed = (message: string) => publish({ key: documentKey, kind: 'error', message, data: retained() })
-      const previous = retained()
-      if (previous) publish({ key: documentKey, kind: 'error', message: '작업 공간을 다시 확인하고 있습니다.', data: previous, revalidating: true })
-      const shareObservation = artifactExternalSharing.observe(selectedId, target.workspace)
-      void fetchWorkspacePublishedArtifact(selectedId, revision, target.workspace, controller.signal).then(document => {
-        if (document.artifact.id !== target.publication.artifact.id
-          || document.artifact.revision !== target.publication.artifact.revision
-          || document.artifact.body._blob.sha256 !== target.publication.artifact.body._blob.sha256) {
-          failed('게시한 문서의 내용이 달라 원래 버전을 열지 못했습니다.')
-          return
+      const target = publicationTarget.current
+      if (target && (target.publication.artifact.id !== selectedId || String(target.publication.artifact.revision) !== revision)) {
+        publicationTarget.current = null
+      } else if (target) {
+        // A publication result belongs to its original workspace. Do not show an
+        // unbound or public response while opening that result: the server may
+        // have switched to another runtime with the same document id and revision.
+        const retained = () => {
+          const previous = documentRef.current
+          const data = previous?.key === documentKey && previous.kind !== 'public-loading'
+            && previous.data?.kind === 'operator' ? previous.data : undefined
+          return data?.workspace?.basePath === target.workspace.basePath && data.workspace.mascRoot === target.workspace.mascRoot
+            && data.document.artifact.id === target.publication.artifact.id && data.document.artifact.revision === target.publication.artifact.revision
+            && data.document.artifact.body._blob.sha256 === target.publication.artifact.body._blob.sha256 ? data : undefined
         }
-        publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, workspace: target.workspace, shareObservation }, receivedAt: Date.now() })
-      }, error => failed(`게시 당시 작업 공간에서 문서를 열지 못했습니다: ${errorMessage(error)}`))
-      return cleanup
-    }
-    let boundApplied = false
-    let publicRequested = false
-    const readFailed = (error: unknown) => {
-      if (controller.signal.aborted || !currentDocument()) return
-      const previous = documentRef.current
-      const retained = previous?.key === documentKey && previous.kind !== 'public-loading'
-        && previous.data?.kind === 'operator' ? previous.data : undefined
-      if (retained || !(error instanceof ApiRequestError && (error.status === 401 || error.status === 403))) {
-        // Keep the same visit's editor and draft mounted after a failed refresh.
-        publish({ key: documentKey, kind: 'error', message: errorMessage(error), data: retained })
+        const failed = (message: string) => publish({ key: documentKey, kind: 'error', message, data: retained() })
+        const previous = retained()
+        if (previous) publish({ key: documentKey, kind: 'error', message: '작업 공간을 다시 확인하고 있습니다.', data: previous, revalidating: true })
+        const shareObservation = artifactExternalSharing.observe(selectedId, target.workspace)
+        await fetchWorkspacePublishedArtifact(selectedId, revision, target.workspace, signal).then(document => {
+          if (document.artifact.id !== target.publication.artifact.id
+            || document.artifact.revision !== target.publication.artifact.revision
+            || document.artifact.body._blob.sha256 !== target.publication.artifact.body._blob.sha256) {
+            failed('게시한 문서의 내용이 달라 원래 버전을 열지 못했습니다.')
+            return
+          }
+          publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, workspace: target.workspace, shareObservation }, receivedAt: Date.now() })
+        }, error => { failed(`게시 당시 작업 공간에서 문서를 열지 못했습니다: ${errorMessage(error)}`); throw error })
         return
       }
-      if (publicRequested) return
-      publicRequested = true
-      const publicOwner: DocumentRemote = { key: documentKey, kind: 'public-loading' }
-      publish(publicOwner)
-      void fetchPublicArtifact(selectedId, revision, controller.signal).then(document => {
-        if (!boundApplied && documentRef.current === publicOwner) publish({ key: documentKey, kind: 'loaded', data: { kind: 'public', document }, receivedAt: Date.now() })
-      }, publicError => {
-        if (!boundApplied && documentRef.current === publicOwner) publish({ key: documentKey, kind: 'error', message: errorMessage(publicError) })
-      })
-    }
-    const publishUnbound = (document: ArtifactDocument) => {
-      const previous = documentRef.current
-      const alreadyBound = previous?.key === documentKey && previous.kind !== 'public-loading'
-        && previous.data?.kind === 'operator' && previous.data.workspace !== undefined
-      if (boundApplied) return
-      if (alreadyBound && previous.kind === 'loaded') {
-        publish({ key: documentKey, kind: 'error', message: '작업 공간을 다시 확인하고 있습니다.', data: previous.data, revalidating: true })
-      } else if (!alreadyBound) publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document }, receivedAt: Date.now() })
-    }
-    const prior = documentRef.current
-    const priorBound = prior?.key === documentKey && prior.kind !== 'public-loading'
-      && prior.data?.kind === 'operator' && prior.data.workspace !== undefined
-    if (priorBound) {
-      publish({ key: documentKey, kind: 'error', message: '작업 공간을 다시 확인하고 있습니다.', data: prior.data, revalidating: true })
-    } else {
-      // Viewing does not wait for a slow health response. Until the bound
-      // read is admitted, this observation has no mutation authority.
-      void fetchPublishedArtifact(selectedId, revision, controller.signal).then(publishUnbound, error => {
-        if (!boundApplied) readFailed(error)
-      })
-    }
-    void captureArtifactWorkspace(workspaceRoot).then(async workspace => {
-      if (controller.signal.aborted || !currentDocument()) return
-      const shareObservation = artifactExternalSharing.observe(selectedId, workspace)
-      try {
-        const document = await fetchWorkspacePublishedArtifact(selectedId, revision, workspace, controller.signal)
-        if (!controller.signal.aborted && currentDocument()) {
-          const previous = documentRef.current
-          const priorData = previous?.key === documentKey && previous.kind !== 'public-loading'
-            && previous.data?.kind === 'operator' ? previous.data : undefined
-          if (priorData?.workspace && (priorData.workspace.basePath !== workspace.basePath
-            || priorData.workspace.mascRoot !== workspace.mascRoot)) {
-            publish({ key: documentKey, kind: 'error', message: '서버의 작업 공간이 바뀌었습니다. 문서를 닫고 연결을 확인해 주세요.', data: priorData })
-            return
-          }
-          if (priorData && !priorData.workspace && conflictsWithEarlierObservation(priorData.document, document)) {
-            publish({ key: documentKey, kind: 'error', message: '문서 조회 결과가 서로 달라 작업 공간을 확인하지 못했습니다. 다시 확인해 주세요.', data: priorData })
-            return
-          }
-          boundApplied = true
-          publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, workspace, shareObservation }, receivedAt: Date.now() })
+      const failures: unknown[] = []
+      const reads: Promise<void>[] = []
+      // Body completion does not grant the workspace authority held only by
+      // an attested response. Ordinary unbound viewing still owes the bound read.
+      const admission: { kind: 'pending' | 'readonly' | 'bound' } = { kind: 'pending' }
+      const isRefusal = (error: unknown) => error instanceof ApiRequestError && (error.status === 401 || error.status === 403)
+      let publicRequested = false
+      const readFailed = async (error: unknown) => {
+        failures.push(error)
+        if (signal.aborted || !currentDocument()) return
+        if (admission.kind === 'readonly' && !isRefusal(error)) return
+        const previous = documentRef.current
+        const retained = previous?.key === documentKey && previous.kind !== 'public-loading'
+          && previous.data?.kind === 'operator' ? previous.data : undefined
+        if (retained || !isRefusal(error)) {
+          // Keep the same visit's editor and draft mounted after a failed refresh.
+          publish({ key: documentKey, kind: 'error', message: errorMessage(error), data: retained })
+          return
         }
-      } catch (error) {
-        if (error instanceof ArtifactWorkspaceReadUnattested) {
-          const previous = documentRef.current
-          const alreadyBound = previous?.key === documentKey && previous.kind !== 'public-loading'
-            && previous.data?.kind === 'operator' && previous.data.workspace !== undefined
-          if (alreadyBound) readFailed(error)
-          else publishUnbound(error.document)
-        } else if (!boundApplied) readFailed(error)
+        if (publicRequested) return
+        publicRequested = true
+        const publicOwner: DocumentRemote = { key: documentKey, kind: 'public-loading' }
+        publish(publicOwner)
+        await fetchPublicArtifact(selectedId, revision, signal).then(document => {
+          if (admission.kind === 'pending' && documentRef.current === publicOwner) publish({ key: documentKey, kind: 'loaded', data: { kind: 'public', document }, receivedAt: Date.now() })
+        }, publicError => {
+          failures.push(publicError)
+          if (admission.kind === 'pending' && documentRef.current === publicOwner) publish({ key: documentKey, kind: 'error', message: errorMessage(publicError) })
+        })
       }
-    }, error => { if (priorBound) readFailed(error) })
-    return cleanup
+      const publishUnbound = (document: ArtifactDocument) => {
+        const previous = documentRef.current
+        const alreadyBound = previous?.key === documentKey && previous.kind !== 'public-loading'
+          && previous.data?.kind === 'operator' && previous.data.workspace !== undefined
+        if (admission.kind !== 'pending') return
+        if (alreadyBound && previous.kind === 'loaded') {
+          publish({ key: documentKey, kind: 'error', message: '작업 공간을 다시 확인하고 있습니다.', data: previous.data, revalidating: true })
+        } else if (!alreadyBound) publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document }, receivedAt: Date.now() })
+      }
+      const prior = documentRef.current
+      const priorBound = prior?.key === documentKey && prior.kind !== 'public-loading'
+        && prior.data?.kind === 'operator' && prior.data.workspace !== undefined
+      if (priorBound) {
+        publish({ key: documentKey, kind: 'error', message: '작업 공간을 다시 확인하고 있습니다.', data: prior.data, revalidating: true })
+      } else {
+        // Viewing does not wait for a slow health response. Until the bound
+        // read is admitted, this observation has no mutation authority.
+        reads.push(fetchPublishedArtifact(selectedId, revision, signal).then(publishUnbound, async error => {
+          if (admission.kind !== 'bound') await readFailed(error)
+        }))
+      }
+      reads.push(captureArtifactWorkspace(workspaceRoot, signal).then(async workspace => {
+        if (signal.aborted || !currentDocument()) return
+        const shareObservation = artifactExternalSharing.observe(selectedId, workspace)
+        try {
+          const document = await fetchWorkspacePublishedArtifact(selectedId, revision, workspace, signal)
+          if (!signal.aborted && currentDocument()) {
+            const previous = documentRef.current
+            const priorData = previous?.key === documentKey && previous.kind !== 'public-loading'
+              && previous.data?.kind === 'operator' ? previous.data : undefined
+            if (priorData?.workspace && (priorData.workspace.basePath !== workspace.basePath
+              || priorData.workspace.mascRoot !== workspace.mascRoot)) {
+              publish({ key: documentKey, kind: 'error', message: '서버의 작업 공간이 바뀌었습니다. 문서를 닫고 연결을 확인해 주세요.', data: priorData })
+              return
+            }
+            if (priorData && !priorData.workspace && conflictsWithEarlierObservation(priorData.document, document)) {
+              publish({ key: documentKey, kind: 'error', message: '문서 조회 결과가 서로 달라 작업 공간을 확인하지 못했습니다. 다시 확인해 주세요.', data: priorData })
+              return
+            }
+            admission.kind = 'bound'
+            publish({ key: documentKey, kind: 'loaded', data: { kind: 'operator', document, workspace, shareObservation }, receivedAt: Date.now() })
+          }
+        } catch (error) {
+          if (error instanceof ArtifactWorkspaceReadUnattested) {
+            const previous = documentRef.current
+            const alreadyBound = previous?.key === documentKey && previous.kind !== 'public-loading'
+              && previous.data?.kind === 'operator' && previous.data.workspace !== undefined
+            if (alreadyBound) await readFailed(error)
+            else { publishUnbound(error.document); admission.kind = 'readonly' }
+          } else if (admission.kind !== 'bound') await readFailed(error)
+        }
+      }, error => readFailed(error)))
+      await Promise.all(reads)
+      if (signal.aborted || !currentDocument() || admission.kind === 'bound') return
+      const failure = selectObservationReadFailure(failures)
+      if (failure !== null && (admission.kind !== 'readonly' || isRefusal(failure))) throw failure
+    }, { topics: ['published_artifacts'], resetRead: () => {
+      if (initialReset) { initialReset = false; return }
+      documentRef.current = null
+      setDocument(null)
+      notifyShareWaiters(true)
+    } })
+    return () => { stopRead(); notifyShareWaiters(true); unsubscribeRoute(); unsubscribeWorkspace(); unsubscribeCredential() }
   }, [authRevision, selectedId, revision, documentKey, visit, refresh, allowReader])
 
   const list = catalog?.key === catalogKey ? catalog : null

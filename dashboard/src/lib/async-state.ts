@@ -53,6 +53,7 @@ export function getData<T>(state: AsyncState<T>): T | undefined {
 
 export interface AsyncResource<T> {
   readonly state: Signal<AsyncState<T>>
+  readError(): unknown | null
   load(fn: () => Promise<T>): Promise<void>
   reset(): void
 }
@@ -65,6 +66,7 @@ interface ManagedAsyncState<T> {
 
 export interface ManagedAsyncResource<T> {
   readonly state: Signal<ManagedAsyncState<T>>
+  readError(): unknown | null
   load(fn: (signal: AbortSignal, previous: T | null) => Promise<T>): Promise<T | undefined>
   cancel(): void
   reset(nextData?: T | null): void
@@ -74,14 +76,17 @@ export function createAsyncResource<T>(): AsyncResource<T> {
   const state = signal<AsyncState<T>>(idle)
   let inflight: Promise<void> | null = null
   let generation = 0
+  let readFailure: unknown | null = null
 
   return {
     state,
+    readError: () => readFailure,
 
     load(fn: () => Promise<T>): Promise<void> {
       if (inflight) return inflight
 
       const gen = ++generation
+      readFailure = null
       state.value = loading
 
       let promise: Promise<T>
@@ -89,6 +94,7 @@ export function createAsyncResource<T>(): AsyncResource<T> {
         promise = fn()
       } catch (e) {
         if (gen === generation) {
+          readFailure = e
           state.value = failed(toErrorMessage(e))
         }
         return Promise.resolve()
@@ -99,7 +105,10 @@ export function createAsyncResource<T>(): AsyncResource<T> {
           if (gen === generation) state.value = loaded(data)
         })
         .catch(e => {
-          if (gen === generation) state.value = failed(toErrorMessage(e))
+          if (gen === generation) {
+            readFailure = e
+            state.value = failed(toErrorMessage(e))
+          }
         })
         .finally(() => {
           if (gen === generation) inflight = null
@@ -110,6 +119,7 @@ export function createAsyncResource<T>(): AsyncResource<T> {
 
     reset(): void {
       ++generation
+      readFailure = null
       state.value = idle
       inflight = null
     },
@@ -133,13 +143,16 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
   let inflight: Promise<T | undefined> | null = null
   let generation = 0
   let controller: AbortController | null = null
+  let readFailure: unknown | null = null
 
   return {
     state,
+    readError: () => readFailure,
 
     load(fn: (signal: AbortSignal, previous: T | null) => Promise<T>): Promise<T | undefined> {
       const previous = state.value.data
       const gen = ++generation
+      readFailure = null
       controller?.abort()
       const requestController = new AbortController()
       controller = requestController
@@ -153,6 +166,9 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
       try {
         promise = fn(requestController.signal, previous)
       } catch (error) {
+        if (gen !== generation || requestController.signal.aborted) return Promise.resolve(undefined)
+        readFailure = error
+        controller = null
         state.value = {
           data: previous,
           loading: false,
@@ -172,7 +188,8 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
           return data
         })
         .catch((error) => {
-          if (gen !== generation || isAbortError(error)) return undefined
+          if (gen !== generation || requestController.signal.aborted || isAbortError(error)) return undefined
+          readFailure = error
           state.value = {
             data: previous,
             loading: false,
@@ -203,6 +220,7 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
 
     reset(nextData: T | null = null): void {
       ++generation
+      readFailure = null
       controller?.abort()
       controller = null
       inflight = null

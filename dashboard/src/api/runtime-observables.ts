@@ -203,8 +203,8 @@ export function decodeRuntimeObservables(raw: unknown): RuntimeObservablesSnapsh
   }
 }
 
-export function fetchRuntimeObservables(): Promise<RuntimeObservablesSnapshot> {
-  return get<unknown>('/api/v1/dashboard/runtime-observables').then((raw) => {
+export function fetchRuntimeObservables(opts?: { signal?: AbortSignal }): Promise<RuntimeObservablesSnapshot> {
+  return get<unknown>('/api/v1/dashboard/runtime-observables', opts).then((raw) => {
     const decoded = decodeRuntimeObservables(raw)
     if (!decoded) throw new Error('유효하지 않은 runtime observables payload')
     return decoded

@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { signal } from '@preact/signals'
@@ -13,7 +14,7 @@ import {
   type LogsError,
   type LogsRequest,
 } from '../api/dashboard-logs'
-import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
+import { dashboardRuntime, DashboardTransportError, type DashboardHttp } from '../api/effect-http'
 import { VirtualList } from './common/virtual-list'
 import { asRecord, asNullableString, mergeRouteRecord, hasRouteContext, type MutableRouteContext } from './common/normalize'
 import { TextInput } from './common/input'
@@ -86,7 +87,6 @@ const expandedLogSeq = signal<number | null>(null)
 // every shown row plus genuinely-new rows so neither path evicts history the
 // operator paged into.
 
-const POLL_INTERVAL_MS = 3000
 const ESTIMATED_LOG_ROW_HEIGHT = 78
 const EMPTY_LOG_ENTRIES: readonly LogEntry[] = []
 
@@ -862,19 +862,17 @@ function renderLogProvenance(data: LogData | undefined) {
 
 export function LogViewer() {
   useEffect(() => {
-    let pollId: ReturnType<typeof setInterval> | null = null
+    let disposeObservation: (() => void) | null = null
 
     const restart = () => {
-      if (pollId) {
-        clearInterval(pollId)
-        pollId = null
-      }
+      disposeObservation?.()
+      disposeObservation = null
       logResource.reset()
-      void loadLogs('reset')
-      if (!autoRefresh.value) return
-      pollId = setInterval(() => {
-        void loadLogs('delta')
-      }, POLL_INTERVAL_MS)
+      if (!autoRefresh.value) { void loadLogs('reset'); return }
+      disposeObservation = setupObservationRefresh(
+        () => loadLogs(Option.isSome(remotePrevious(logResource.state.value)) ? 'delta' : 'reset'),
+        { topics: ['logs'], cancelRead: () => logResource.cancel(), resetRead: () => logResource.reset(), readError: () => { const s = logResource.state.peek(); return s._tag === 'Failure' ? (s.error instanceof DashboardTransportError ? s.error.cause : s.error) : null } },
+      )
     }
 
     restart()
@@ -887,9 +885,7 @@ export function LogViewer() {
     const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
 
     return () => {
-      if (pollId) {
-        clearInterval(pollId)
-      }
+      disposeObservation?.()
       unsubscribeLevel()
       unsubscribeModule()
       unsubscribeLimit()
@@ -1049,7 +1045,7 @@ export function LogViewer() {
               />
               자동
             </label>
-            <span class="v2-logs-live lg-live mono"><span class="dot" />${autoRefresh.value ? `masc-mcp · 3s polling · ${eventRatePerMinute(logEntries)}δ/min` : 'masc-mcp · WS paused'}</span>
+            <span class="v2-logs-live lg-live mono"><span class="dot" />${autoRefresh.value ? `masc-mcp · 실시간 · ${eventRatePerMinute(logEntries)}δ/min` : 'masc-mcp · WS paused'}</span>
             <button
               type="button"
               class="logs-refresh-btn v2-logs-refresh"

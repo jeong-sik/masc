@@ -10,8 +10,7 @@ import { TextInput } from './common/input'
 import { StatTile } from './common/stat-tile'
 import { isRecord } from './common/normalize'
 import { StatusChip } from './common/status-chip'
-import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
-import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { setupObservationRefresh } from '../lib/observation-refresh'
 import { useSavedSignal } from '../lib/saved-signal'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -149,8 +148,7 @@ export function GateMonitor() {
     resource.load(async (signal) => fetchGateToolEvents(windowMinutes.value, { signal }))
 
   useEffect(() => {
-    void load()
-    const disposeAutoRefresh = setupVisibleAutoRefresh(() => void load(), TELEMETRY_AUTO_REFRESH_MS)
+    const disposeAutoRefresh = setupObservationRefresh(load, { topics: ['gate_tool_events', 'gate'], readError: () => resource.readError(), cancelRead: () => resource.cancel(), resetRead: () => resource.reset() })
     return () => {
       disposeAutoRefresh()
       resource.cancel()
@@ -190,7 +188,7 @@ export function GateMonitor() {
           ariaLabel="Gate 메트릭 새로고침"
           onClick=${() => void load()}
         >새로고침<//>
-        <span class="text-xs text-[var(--color-fg-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">${'실시간 변경 반영'}</span>
         ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
       </div>
 

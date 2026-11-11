@@ -1,14 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolMetricsSeriesResponse } from '../../api/schemas/tool-metrics-series'
 
-const { fetchToolMetricsSeries, setupVisibleAutoRefresh, stopRefresh } = vi.hoisted(() => ({
-  fetchToolMetricsSeries: vi.fn(),
-  setupVisibleAutoRefresh: vi.fn(),
-  stopRefresh: vi.fn(),
-}))
+const { fetchToolMetricsSeries } = vi.hoisted(() => ({ fetchToolMetricsSeries: vi.fn() }))
 
 vi.mock('../../api', () => ({ fetchToolMetricsSeries }))
-vi.mock('../../lib/auto-refresh', () => ({ setupVisibleAutoRefresh }))
 
 type State = typeof import('./tool-series-state')
 let state: State
@@ -57,9 +52,6 @@ function series(overrides: Partial<ToolMetricsSeriesResponse> = {}): ToolMetrics
 beforeEach(async () => {
   vi.resetModules()
   fetchToolMetricsSeries.mockReset()
-  setupVisibleAutoRefresh.mockReset()
-  setupVisibleAutoRefresh.mockReturnValue(stopRefresh)
-  stopRefresh.mockReset()
   state = await import('./tool-series-state')
 })
 
@@ -230,17 +222,20 @@ describe('loading the picked window', () => {
 })
 
 describe('subscribeToolSeriesRefresh', () => {
-  it('loads at once and keeps refreshing until the disposer runs', async () => {
+  it('refreshes the selected request only when its source changes and stops on disposal', async () => {
+    const { publishDashboardObservationChange } = await import('../../lib/observation-refresh')
     fetchToolMetricsSeries.mockResolvedValue(series())
     const dispose = state.subscribeToolSeriesRefresh()
-    await vi.waitFor(() => expect(fetchToolMetricsSeries).toHaveBeenCalledTimes(1))
-    expect(setupVisibleAutoRefresh).toHaveBeenCalledWith(expect.any(Function), state.TOOL_SERIES_REFRESH_MS)
-
-    const refresh = setupVisibleAutoRefresh.mock.calls[0]?.[0] as () => void
-    refresh()
-    await vi.waitFor(() => expect(fetchToolMetricsSeries).toHaveBeenCalledTimes(2))
-
-    dispose()
-    expect(stopRefresh).toHaveBeenCalledTimes(1)
+    try {
+      await vi.waitFor(() => expect(fetchToolMetricsSeries).toHaveBeenCalledTimes(1))
+      publishDashboardObservationChange({ topic: 'logs' })
+      await Promise.resolve()
+      expect(fetchToolMetricsSeries).toHaveBeenCalledTimes(1)
+      publishDashboardObservationChange({ topic: 'tool_metrics' })
+      await vi.waitFor(() => expect(fetchToolMetricsSeries).toHaveBeenCalledTimes(2))
+    } finally { dispose() }
+    publishDashboardObservationChange({ topic: 'tool_metrics' })
+    await Promise.resolve()
+    expect(fetchToolMetricsSeries).toHaveBeenCalledTimes(2)
   })
 })

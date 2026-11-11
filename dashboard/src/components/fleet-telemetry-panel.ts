@@ -16,9 +16,8 @@ import {
   type ToolQualityResponse,
 } from '../api/dashboard'
 import { resetKeeper } from '../api/keeper'
-import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { telemetrySourceLabel } from '../config/telemetry-sources'
-import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { selectObservationReadFailure, setupObservationRefresh } from '../lib/observation-refresh'
 import { useSavedSignal } from '../lib/saved-signal'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { normalizeNamespaceTruth } from '../namespace-truth-normalizers'
@@ -28,7 +27,7 @@ import { requestConfirm } from './common/confirm-dialog'
 import { Sparkline } from './common/sparkline'
 import { TextInput } from './common/input'
 import { coverageGapDisplay, freshnessText, sourceHealthClass } from './common/source-health'
-import { pushSnapshot, getTrend, type MetricKey, type TrendDirection } from './fleet-trend-store'
+import { pushSnapshot, getTrend, resetTrendStore, type MetricKey, type TrendDirection } from './fleet-trend-store'
 import type { DashboardAttentionEvent, DashboardReadinessPillar } from '../types'
 import {
   EMPTY_TOOL_QUALITY,
@@ -620,14 +619,17 @@ function FailureCategoryPanel({ toolQuality }: { toolQuality: ToolQualityRespons
 
 export function FleetTelemetryPanel() {
   const latestRequestId = useRef(0)
+  const observationReadError = useRef<unknown | null>(null)
   const activeController = useRef<AbortController | null>(null)
   const state = useSignal<FleetTelemetryState>(emptyState())
   const [query] = useSavedSignal('dash:filter:fleet-telemetry:query', '')
 
-  const loadFleetTelemetry = async () => {
+  const loadFleetTelemetry = async (signal?: AbortSignal) => {
+    observationReadError.current = null
     activeController.current?.abort()
     const controller = new AbortController()
     activeController.current = controller
+    const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
     const requestId = ++latestRequestId.current
     state.value = {
       ...state.value,
@@ -638,15 +640,19 @@ export function FleetTelemetryPanel() {
 
     try {
       const [executionResult, executionTrustResult, toolQualityResult, telemetrySummaryResult, namespaceTruthResult] = await Promise.allSettled([
-        fetchDashboardExecution({ signal: controller.signal }),
-        fetchDashboardExecutionTrust({ signal: controller.signal }),
-        fetchToolQuality({ n: 5000, windowHours: 24, signal: controller.signal }),
-        fetchTelemetrySummary({ signal: controller.signal }),
-        fetchDashboardNamespaceTruth({ signal: controller.signal }),
+        fetchDashboardExecution({ signal: readSignal }),
+        fetchDashboardExecutionTrust({ signal: readSignal }),
+        fetchToolQuality({ n: 5000, windowHours: 24, signal: readSignal }),
+        fetchTelemetrySummary({ signal: readSignal }),
+        fetchDashboardNamespaceTruth({ signal: readSignal }),
       ])
 
-      if (controller.signal.aborted || requestId !== latestRequestId.current) return
+      if (readSignal.aborted || requestId !== latestRequestId.current) return
 
+      observationReadError.current = selectObservationReadFailure(
+        [executionResult, executionTrustResult, toolQualityResult, telemetrySummaryResult, namespaceTruthResult]
+          .map(result => result.status === 'rejected' ? result.reason : null),
+      )
       const warnings: string[] = []
 
       const keepers =
@@ -727,8 +733,17 @@ export function FleetTelemetryPanel() {
   }
 
   useEffect(() => {
-    void loadFleetTelemetry()
-    const disposeAutoRefresh = setupVisibleAutoRefresh(loadFleetTelemetry, TELEMETRY_AUTO_REFRESH_MS)
+    const disposeAutoRefresh = setupObservationRefresh(loadFleetTelemetry, {
+      topics: ['keeper_composite', 'keeper_turns', 'telemetry', 'tool_metrics', 'health'],
+      readError: () => observationReadError.current,
+      resetRead: () => {
+        activeController.current?.abort()
+        activeController.current = null
+        observationReadError.current = null
+        resetTrendStore()
+        state.value = emptyState()
+      },
+    })
     return () => {
       disposeAutoRefresh()
       activeController.current?.abort()
@@ -797,7 +812,7 @@ export function FleetTelemetryPanel() {
             onClick=${() => { void loadFleetTelemetry() }}
             aria-label="Keeper 텔레메트리 새로고침"
           >새로고침</button>
-          <span class="text-3xs text-[var(--color-fg-disabled)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
+          <span class="text-3xs text-[var(--color-fg-disabled)]">${'실시간 변경 반영'}</span>
         </div>
       </div>
 

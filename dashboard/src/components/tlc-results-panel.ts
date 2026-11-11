@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../lib/observation-refresh'
 // TlcResultsPanel — surfaces last-known TLC model-checking evidence.
 //
 // Consumes:
@@ -9,7 +10,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { TLA_POLL_INTERVAL_MS } from '../config/constants'
 import {
   fetchTlcResults,
   type TlaSpecCategory,
@@ -201,9 +201,8 @@ export function TlcResultsPanel() {
   const resource = useManagedAsyncResource<TlcResultsResponse>()
 
   useEffect(() => {
-    void loadTlcResults(resource)
-    const id = setInterval(() => void loadTlcResults(resource), TLA_POLL_INTERVAL_MS)
-    return () => { clearInterval(id); resource.cancel() }
+    const dispose = setupObservationRefresh(() => loadTlcResults(resource), { topics: ['tlc_results'], readError: () => resource.readError(), cancelRead: () => resource.cancel(), resetRead: () => resource.reset() })
+    return () => { dispose(); resource.cancel() }
   }, [resource])
 
   const current = resource.state.value

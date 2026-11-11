@@ -345,7 +345,7 @@ let test_repeated_browser_input_remains_deliverable () =
         let scope, _, target = prepare_direct_execution () in
         let on_tool_boundary = if with_boundary then
             Some (fun ~tool_name -> Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-              ~repetition_execution:(Some scope) ~chat_handoff:(fun () -> Ok false) ~tool_name) else None in
+              ~repetition_execution:(Some scope) ~tool_name) else None in
         let tool, terminal_error = one_dynamic_tool ~active ~runtime_label ~name:"BrowserInteract"
           ?on_tool_boundary
           ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
@@ -382,7 +382,7 @@ let test_scoped_boundary_spans_official_attempts () =
         ~on_tool_boundary:(fun ~tool_name ->
           incr boundary_calls;
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~chat_handoff:(fun () -> Ok false) ~tool_name)
+            ~repetition_execution:(Some execution) ~tool_name)
         (fun _ -> incr executions;
           Ok { Agent_core.Types.content = "same-output"; content_blocks = None; _meta = None })
       in
@@ -406,8 +406,7 @@ let test_scoped_boundary_error_stops_immediately () =
             { scoped_observation with input_fingerprint = Some "invalid-hash" })
         ~on_tool_boundary:(fun ~tool_name ->
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution)
-            ~chat_handoff:(fun () -> fail "scope failure must precede chat handoff") ~tool_name)
+            ~repetition_execution:(Some execution) ~tool_name)
         (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
       in
       let result = tool.call ~call_id:"invalid-scope-observation" (`Assoc []) in
@@ -568,14 +567,13 @@ let test_boundary_preserves_explicit_terminal_outcomes () =
       ~terminal_effect_state:(fun () -> terminal)
       ~on_tool_boundary:(fun ~tool_name ->
         Keeper_agent_run.For_testing.official_client_tool_boundary
-          ~repetition_execution:None ~chat_handoff:(fun () -> Ok true) ~tool_name)
+          ~repetition_execution:None ~tool_name)
       (fun _ -> Ok {Agent_core.Types.content = "settled"; content_blocks = None; _meta = None}) in
     let result = tool.call ~call_id:"terminal-effect" (`Assoc []) in
     match terminal, result.abort_turn with
     | Tools.Terminal_effect_completed _, Some (Terminal_tool_boundary {outcome = Terminal_completed; _})
     | Tools.Deferred_tool_result, Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
-    | Tools.External_effect_deferred,
-        Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
+    | Tools.External_effect_deferred, None -> ()
     | Tools.Terminal_effect_failed _, Some (Terminal_tool_boundary {outcome = Terminal_failed _; _}) -> ()
     | _ -> fail "the boundary replaced an explicit terminal outcome"))
     [ Tools.Terminal_effect_completed
@@ -591,7 +589,7 @@ let test_boundary_preserves_explicit_terminal_outcomes () =
 ;;
 
 let test_settled_official_tool_keeps_turn_running () =
-  List.iter (fun handoff_outcome -> with_active_raw_trace (fun ~path:_ ~active ->
+  with_active_raw_trace (fun ~path:_ ~active ->
     let handed_off = ref false in
     let boundary_calls = ref 0 in
     let tool, terminal_error =
@@ -601,7 +599,7 @@ let test_settled_official_tool_keeps_turn_running () =
           incr boundary_calls;
           check bool "tool result handed off before boundary decision" true !handed_off;
           Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:None ~chat_handoff:(fun () -> handoff_outcome) ~tool_name)
+            ~repetition_execution:None ~tool_name)
         (fun _ ->
           Ok { Agent_core.Types.content = "settled result"; content_blocks = None; _meta = None })
     in
@@ -610,14 +608,10 @@ let test_settled_official_tool_keeps_turn_running () =
     check string "settled content remains intact" "settled result" result.content;
     check int "one boundary decision" 1 !boundary_calls;
     check (option string) "no terminal failure" None !terminal_error;
-    match handoff_outcome, result.abort_turn with
-    | (Ok false | Error _), None
-    | Ok true, Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
-    | (Ok false | Error _), Some (Terminal_tool_boundary _)
-    | Ok true, (None | Some (Terminal_tool_boundary
-        {outcome = Terminal_completed | Terminal_failed _; _})) ->
-      fail "the official-client boundary did not preserve the chat handoff decision"))
-    [Ok false; Ok true; Error (Agent_core.Error.Internal "inventory stopping")]
+    match result.abort_turn with
+    | None -> ()
+    | Some (Terminal_tool_boundary _) ->
+      fail "the official-client turn stopped after its tool result")
 ;;
 
 let test_terminal_post_effect_failure_aborts_the_official_client_turn () =

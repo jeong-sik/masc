@@ -311,14 +311,6 @@ val wake_operation_drain : t -> (unit, error) result
 val turn_in_flight : t -> turn_in_flight option
 (** Lock-free immutable projection of the single Owner-owned child turn. *)
 
-val autonomous_chat_handoff_ready : t -> (bool, error) result
-(** At a durable tool boundary, ask whether queued chat could claim the slot
-    after this autonomous child settles. The mailbox checks the inherited child
-    token, lifecycle, shutdown, store health and runner readiness using the same
-    admission conditions as the chat drain. Other lanes and callers without an
-    inherited child return [false]. This neither cancels nor releases a child;
-    the caller must preserve its checkpoint and settle normally. *)
-
 val shutdown_operation_id : t -> Keeper_shutdown_types.Operation_id.t option
 (** Lock-free immutable projection of the lifecycle shutdown reservation. *)
 

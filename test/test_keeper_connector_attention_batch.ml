@@ -424,7 +424,7 @@ let test_scheduled_batches_preserve_result_delivery () =
       (Batch.for_turn ~reactive:true routed_a |> Batch.wake) in
     check bool "the origin reply route survives batching" true
       (Option.exists (Keeper_continuation_channel.same_route a) channel);
-    (* A chat handoff retains both original requests; it cannot certify their
+    (* A checkpoint retains both original requests; it cannot certify their
        completion just because the model reached a tool boundary. *)
     Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
       ~base_path ~keeper_name (Batch.selections routed_a) |> require;
@@ -1294,7 +1294,7 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
        (Some
-          (Keeper_heartbeat_loop_cycle.Checkpointed { meta; followup = Keeper_agent_result.Keep_cadence }))
+          (Keeper_heartbeat_loop_cycle.Checkpointed { meta }))
    with
    | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
    | _ ->

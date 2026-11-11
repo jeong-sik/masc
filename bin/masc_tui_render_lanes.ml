@@ -635,7 +635,7 @@ let render_exact_lane_provider_editor (state : state) editor =
   done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view));
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
 let render_lanes_overview (state : state) =
@@ -873,7 +873,7 @@ let render_lanes_overview (state : state) =
   done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view));
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
 (* How a standalone-lane run stands, as the reader sorts it before reading the

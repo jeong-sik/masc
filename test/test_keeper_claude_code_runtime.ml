@@ -3133,9 +3133,9 @@ let test_auth_cause_with_another_http_status_is_not_auth_failed () =
       | Error error ->
         let route = Keeper_runtime_failure_route.route_of_error
             ~boundary:Keeper_runtime_failure_route.Agent_core_execution error in
-        check bool "a 400 after an authentication diagnostic is not a sign-in failure" false
+        check bool "a 400 after an authentication diagnostic is a provider failure" true
           (route = Keeper_runtime_failure_route.Rotate_now
-             { rotate = Keeper_runtime_failure_route.Auth_failed })))
+             { rotate = Keeper_runtime_failure_route.Provider_reported_failure })))
 ;;
 
 let test_access_refusal_after_native_tool_remains_fenced () =

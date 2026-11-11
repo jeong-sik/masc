@@ -1113,6 +1113,42 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 키를 파일에 두거나 여러 프로세스가 나누지 않는다. 계정 서버는 프로세스 하나다. 재시작이 끊는 것은 그때 진행 중이던 로그인(최대 10분 치)뿐이고 세션은 로그에 있어 남는다.
   - provider까지 가는 로그인 왕복은 시험하지 않는다(S1a-3a와 같다).
 
+**S1a-3b 범위**
+
+- 목표. 초대받은 사람이 계정 서버에서 로그인하고, 자기 구독을 연결하고, 자기 Keeper를 만들어 한 턴을 돈다. 그 전까지 이 화면과 경로는 `masc auth preview`만 열었다.
+- 표. `Server_accounts.register`가 로그인 경로 뒤에 `Server_login_http.add_person_routes`를 단다. 더해지는 것은 화면 둘(`GET /`, `GET /accounts/invite`, `Always_public`)과 사람의 경로 열(who-am-I, 구독 목록, 구독 연결과 그 상태·조작, 구독 확인, Keeper 목록·만들기·배정·한 턴, 모두 `Self_authenticated Browser_session`)이다. 표의 검사를 지난다.
+- 이름. 이 경로를 다는 함수의 이름을 `add_person_routes`로 바꾼다. 전 이름은 미리보기를 가리켰고, 이제 계정 서버가 부른다. 모듈 이름(`Auth_preview`, `Auth_preview_keeper`, `Server_preview_keeper_turn`)은 그대로 둔다.
+- 화면.
+  - 화면은 GitHub 로그인만 시작한다. 서버에 GitHub client가 없으면 버튼이 눌리지 않고 화면이 그 사실을 말한다. 전에는 눌러서 404를 받았다.
+  - Google 로그인은 경로만 있고 화면에 버튼이 없다. 화면의 CSP `form-action`에 Google 인가 주소의 origin이 들어가야 하는데, 그 주소는 discovery가 준다.
+  - 제목은 `MASC accounts`다.
+- 프로세스 준비. 사람의 경로가 읽는 전역은 `Eio_context`의 env와 switch이고 S1a-3a가 이미 채운다. 턴은 official client를 서버의 프로세스로 띄운다(`Server_preview_keeper_turn`). net 전역을 읽는 경로는 없다(읽어서 확인).
+- 다른 사람의 Runtime. 턴은 `Runtime_account_access.authorize`가 허락한 계정에서만 시작한다. 다계정 프로세스에서 native 도구를 쓰는 자세는 `authorize_native`가 거절한다(D3c). 이 층은 그 판정을 바꾸지 않는다.
+- 안내문. `masc auth bootstrap`과 `masc auth invite`의 도움말이 "계정 서버는 아직 로그인 경로를 열지 않는다"고 적었다. 계정 서버가 여는 것으로 고친다.
+- 시험.
+  - `test_server_accounts`: 띄운 계정 서버에서 화면 둘이 200이고 답마다 script nonce가 있으며 GitHub 버튼이 눌린다. who-am-I, 구독 목록, Keeper 목록은 credential 없이 401이다. 단일 사용자 경로(`/api/v1/keepers` 등)는 404다.
+  - `test_server_login_http`: GitHub client 없는 표의 화면 둘은 버튼이 막혀 있고 그 사실을 말한다.
+  - `test_auth_gate`: `mat_` bearer는 `Read_auth`·`Manage_own_provider`·`Manage_own_keeper`에서 `Mcp_oauth_token_not_bound`다. 세션과 PAT이 같이 오면 `Manage_own_*`에서도 `Several_credentials`다.
+  - `test_authz_boot_mode_read`: `config.json`이 `enabled:false`이거나 `require_token:false`인 다계정 부팅은 파일에서 읽어 거절한다.
+- 설계 §11.1 증거(2026-11-11 조사, 코드와 시험을 읽음). 일곱 항목 가운데 문구 그대로 다 모인 것은 없다.
+  - 1항(경로 목록과 거절·CSRF·credential 단일성): 일부. 표 검사와 게이트·세션 검사의 거절은 시험이 있다. 로그인 경로 쪽은 세션 쿠키 둘을 거절하지 않는다(#51420). 구독 연결·확인·배정 경로를 HTTP로 거절까지 본 시험은 없고, 게이트 함수의 시험이 그 판정을 본다.
+  - 2항(legacy·agent credential 호출자 목록, 부팅 거부): 부팅 거부는 판정 표와 파일 경유 모두 시험이 있다(이 층이 파일 경유를 더했다). 호출자 목록 둘은 센 적이 없다. 계정 서버의 표에는 단일 사용자 종류의 경로가 없어서 그 credential로 닿는 경로가 없다는 것이 지금의 근거다.
+  - 3항(`Mcp_oauth_token` 거절): 있다(이 층이 게이트 시험을 더했다).
+  - 4항(`lib/runtime`의 string만으로 실행 객체를 얻는 경로 0): 일부. 실행 진입은 `authorize*`가 준 봉인 값만 받는다(타입). 남은 수를 세는 검사는 없다.
+  - 5항(두 계정 호출과 제3자 거부): 일부. 남의 Runtime 배정·실행 거부와 두 사람의 턴은 시험이 있다(client는 대역). 실제 Provider 계정 둘로 부른 기록은 없다.
+  - 6항(lane 종류마다 남의 account-home 읽기 시도): 일부. 호스트 프로세스는 시도한 결과가 있고, container와 microVM은 mount 목록을 본 것이지 시도가 아니다.
+  - 7항(통과 못 한 lane은 배정 못 함): 구현이 문구와 다르다. 배정은 되고 턴 시작이 거절된다. 설계 문구를 "실행하지 못한다"로 고칠지, 배정에서 막을지는 사용자 결정이다.
+- 결과(2026-11-11 16:56~16:58Z, OCaml 5.5.2). 빌드 exit 0. `test_server_accounts` 11/11, `test_server_login_http` 8/8, `test_login_routes` 6/6, `test_auth_gate` 2/2, `test_authz_boot_mode_read` 31/31, `test_server_preview_keeper_turn` 1/1.
+- 실제 바이너리(임시 폴더, 비운 환경, loopback 포트, 2026-11-11 16:55Z).
+  - 서버 로그가 표의 경로를 26개로 적는다(probe 셋, 로그인 경로 열하나, 화면 둘, 사람의 경로 열).
+  - login client 없는 설치: `GET /`와 `GET /accounts/invite`는 200이고 버튼이 막혀 있다. 사람의 경로 아홉(who-am-I, 구독 목록, Keeper 목록·만들기·배정·턴, 구독 연결·상태·확인)은 credential 없이 모두 401이다. `Authorization` 둘은 401(credential 여럿), 모르는 bearer는 401(legacy bearer 거절)이다. `POST /mcp`는 라우터의 404다.
+  - `github` member가 있는 설치: 화면의 버튼이 눌리고, 사람의 경로는 같은 401이다. S1a-3a-1의 측정(시작 40번 303, 열리지 않는 쿠키 401, 긴 `return_to` 400)은 그대로다.
+  - HTTPS listener(`MASC_HTTPS_PORT`)를 켠 같은 설치: TLS 1.3과 HTTP/2로 `GET /`·`GET /accounts/invite`는 200, who-am-I는 401이다. `https` origin에서 온 로그인 시작은 303과 쿠키 하나이고, cleartext origin을 댄 시작은 403이다.
+- 하지 않는 것.
+  - 화면의 Google 로그인 버튼.
+  - provider까지 가는 로그인 왕복과 실제 구독으로 도는 턴. 사용자가 직접 써 볼 대상이다.
+  - #51413(redirect가 이 서버의 callback인지), #51420, #51421.
+
 ### E. official client 격리
 
 | 층 | 결과 | 설계 | 선행 |

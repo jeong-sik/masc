@@ -184,7 +184,7 @@ let test_published_once () =
                     (Runtime_native_tools.to_string posture)
                     (Runtime_native_tools.to_string refused);
                   `Homes_remain
-                | Error (Access.Person_homes_unread { posture = refused; unread = _ }) ->
+                | Error (Access.Person_homes_unread { posture = refused; unread = (_ : Unix.error) }) ->
                   Alcotest.(check string)
                     (label ^ ": the refusal names the posture it refused")
                     (Runtime_native_tools.to_string posture)
@@ -211,21 +211,50 @@ let test_published_once () =
                   (Runtime_native_tools.to_string posture))
             postures
         in
-        (match Unix.mkdir (Filename.dirname persons) 0o700 with
+        let masc_dir = Filename.dirname persons in
+        (match Unix.mkdir masc_dir 0o700 with
          | () -> ()
          | exception Unix.Unix_error (Unix.EEXIST, _, _) -> ());
         Unix.mkdir persons 0o700;
-        native "an empty directory of the persons" `Allowed;
+        native "the directory of the persons, emptied" `Homes_remain;
         Unix.mkdir person_root 0o700;
         native "a runtime root of a person" `Homes_remain;
         (* The other decisions of a single user do not change with it. *)
         allowed_but_native ();
+        (* Vibe takes no posture from its caller and passes the same decision
+           before it starts anything. *)
+        (match Access.authorize_host Access.Vibe with
+         | Error refusal -> Alcotest.fail (Access.refusal_to_string refusal)
+         | Ok host ->
+           let config : Runtime_vibe_cli.config =
+             { cli_path = Filename.concat root "no-vibe"
+             ; workdir = root
+             ; trust_workdir = false
+             ; model = None
+             ; time_limit_s = None
+             }
+           in
+           (match Runtime_vibe_cli.run ~host config ~prompt:"unused" with
+            | Error
+                (Runtime_vibe_cli.Native_tools_refused
+                   (Access.Native_tools_reach_person_homes Runtime_native_tools.Native_full)) -> ()
+            | Error error ->
+              Alcotest.failf "Vibe ended otherwise: %s" (Runtime_vibe_cli.error_to_string error)
+            | Ok (_ : Runtime_vibe_cli.run) -> Alcotest.fail "Vibe ran beside a person root"));
         Unix.rmdir person_root;
-        native "the root removed" `Allowed;
+        native "the root removed and the directory left" `Homes_remain;
         Unix.rmdir persons;
+        native "the directory removed" `Allowed;
         Out_channel.with_open_bin persons (fun (_ : Out_channel.t) -> ());
-        native "a file where the directory of the persons is" `Unread;
+        native "a file of that name" `Homes_remain;
         Sys.remove persons;
+        (* A path to the name that cannot be read gives no answer. *)
+        let aside = masc_dir ^ ".aside" in
+        Unix.rename masc_dir aside;
+        Out_channel.with_open_bin masc_dir (fun (_ : Out_channel.t) -> ());
+        native "a file where the directory of MASC is" `Unread;
+        Sys.remove masc_dir;
+        Unix.rename aside masc_dir;
         allowed ()))
 ;;
 

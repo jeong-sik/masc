@@ -306,7 +306,7 @@ type native_refusal =
           ({!Runtime_account_home_layout.persons_remain}). *)
   | Person_homes_unread of
       { posture : Runtime_native_tools.posture
-      ; unread : Runtime_account_home_layout.persons_unread
+      ; unread : Unix.error
       }
       (** A single-user process could not read whether such roots remain. *)
 
@@ -317,6 +317,7 @@ val native_refusal_to_string : native_refusal -> string
     postures run only in a single-user process whose workspace keeps no
     runtime root of a person: after the accounts were turned off, or after
     their log was removed, the logins of the persons stay under
-    [.masc/accounts] until someone removes them, and the native tools of a CLI
-    could read them (plan F3a-3). The directory is read at each call. *)
+    [.masc/accounts] until the operator removes that directory, and the
+    native tools of a CLI could read them (plan F3a-3). Whether it is there is
+    read at each call. *)
 val authorize_native : Runtime_native_tools.posture -> (unit, native_refusal) result

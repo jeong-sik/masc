@@ -402,7 +402,7 @@ type native_refusal =
   | Native_tools_reach_person_homes of Runtime_native_tools.posture
   | Person_homes_unread of
       { posture : Runtime_native_tools.posture
-      ; unread : Layout.persons_unread
+      ; unread : Unix.error
       }
 
 let native_refusal_to_string = function
@@ -418,19 +418,19 @@ let native_refusal_to_string = function
       (Runtime_native_tools.to_string posture)
   | Native_tools_reach_person_homes posture ->
     Printf.sprintf
-      "this workspace keeps runtime roots of persons under .masc/accounts, and a model turn \
-       runs beside them only without native tools. This turn asks for the native posture \
-       %S: the CLI runs as the user of the server process, so its own tools could read the \
-       logins kept there. A Keeper whose client supports the posture none runs with \
-       keeper.tools.native = \"none\" in its profile; the other turns run once nothing is \
-       left under .masc/accounts"
+      "this workspace keeps .masc/accounts, where the runtime roots of persons are, and a \
+       model turn runs beside it only without native tools. This turn asks for the native \
+       posture %S: the CLI runs as the user of the server process, so its own tools could \
+       read the logins kept there. A Keeper whose client supports the posture none runs \
+       with keeper.tools.native = \"none\" in its profile; the other turns run once \
+       .masc/accounts is removed"
       (Runtime_native_tools.to_string posture)
   | Person_homes_unread { posture; unread } ->
     Printf.sprintf
-      "whether runtime roots of persons remain under .masc/accounts could not be read (%s), \
-       so no model turn with native tools starts, and this turn asks for the native \
-       posture %S"
-      (Layout.persons_unread_to_string unread)
+      "whether .masc/accounts, where the runtime roots of persons are, remains could not \
+       be read (%s), so no model turn with native tools starts, and this turn asks for the \
+       native posture %S"
+      (Unix.error_message unread)
       (Runtime_native_tools.to_string posture)
 ;;
 
@@ -439,8 +439,8 @@ let native_refusal_to_string = function
    it reads what the user of the server process can read: in a multi-account
    process the homes of the other persons (plan D3c), and in a single-user one
    the homes that persons left under the workspace, after Off or after their
-   log was removed (plan F3a-3). Whether homes remain is read from the
-   directory at each start, so a removal or a new home counts at the next one. *)
+   log was removed (plan F3a-3). Whether they remain is read from the
+   workspace at each start, so a removal or a first login counts at the next one. *)
 let authorize_native posture =
   match Atomic.get state, posture with
   | Unpublished, (Runtime_native_tools.Native_none | Native_read | Native_full) ->

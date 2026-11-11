@@ -232,7 +232,9 @@ before an install, since the count does not tell a lost memory from a stale
 one the live answer kept.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
-rest. A budget stop exits with status 2. `verdict` refuses a run where a
+rest. A budget stop exits with status 2. So does HTTP 402 from Tinker: the
+endpoint takes no call for the account until its billing changes, and the run
+ends there with the reason in `stopped`. `verdict` refuses a run where a
 candidate's call and the baseline's call for the same item left more than
 `same_item_window_s` apart, so a baseline answered in an earlier run cannot
 stand in for the one G5 compares against.

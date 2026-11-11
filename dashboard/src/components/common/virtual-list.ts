@@ -171,7 +171,9 @@ export function VirtualList<T>({
   // list that shrank slices past its end, and a list that crosses the
   // activation threshold keeps the range of an earlier, longer list. Either
   // leaves the top of the viewport, or all of it, without rows for a frame.
-  // Move the window to the scroll position before that paint.
+  // Move the window to the scroll position before that paint. Preact renders
+  // the state change below in a microtask, which is what keeps it in the same
+  // frame.
   useLayoutEffect(() => {
     if (!virtualize) return
     const el = containerRef.current

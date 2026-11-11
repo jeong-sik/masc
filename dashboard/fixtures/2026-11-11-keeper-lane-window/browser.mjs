@@ -32,8 +32,13 @@ const SHORT_LIST_FOCUSED_ROW = 1
  *  above the focused one adds its five action buttons to the walk; this bounds
  *  the walk if something else takes focus first. */
 const MAX_TAB_PRESSES = 10
-if (ROWS <= CONSUMED_ROWS + SHORT_LIST_ROWS) {
-  throw new Error(`LANE_WINDOW_ROWS must be above ${CONSUMED_ROWS + SHORT_LIST_ROWS}`)
+/** VirtualList mounts every row of a list this long or shorter and windows a
+ *  longer one (its ACTIVATION_THRESHOLD). */
+const UNWINDOWED_UP_TO_ROWS = 40
+// The batch step reads the windowed list, so the list has to stay windowed
+// once the batch is gone.
+if (ROWS <= CONSUMED_ROWS + UNWINDOWED_UP_TO_ROWS) {
+  throw new Error(`LANE_WINDOW_ROWS must be above ${CONSUMED_ROWS + UNWINDOWED_UP_TO_ROWS}`)
 }
 /** The dev server transforms the whole module graph on the first request. */
 const COLD_START_TIMEOUT_MS = 120_000
@@ -254,7 +259,9 @@ try {
 
   // The Keeper consumes a batch while the list sits at its end. What the next
   // frame shows is read inside the first animation frame after the change,
-  // before anything scheduled for after the paint has run.
+  // before anything scheduled for after the paint has run. Work the list
+  // queued for this same frame runs after this reading, so the reading can
+  // only show the frame emptier than it is painted, never fuller.
   await scrollToEdge('end')
   measurements.consumedBatch = await page.evaluate(({ count, list: listSelector, row }) => new Promise(resolve => {
     window.laneFixture.consume(count)

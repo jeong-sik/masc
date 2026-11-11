@@ -253,12 +253,12 @@ describe('App-owned Shell observation', () => {
       project: 'fixture-project', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:01Z',
     }, counts: { agents: 5, tasks: 9, keepers: 7 }, configured_keepers: 13 }
     const acceptOlder = async () => {
-      older.resolve(json(kind === 'shell' ? old : { shell: old, execution: execution(2), namespace_truth: { root: old } }))
+      older.resolve(json(kind === 'shell' ? old : { shell: old, execution: execution(2), namespace_truth: { projection_diagnostics: completeRead, root: old } }))
       const result = await pending
       if (kind === 'shell') expect(result).toBe(true)
     }
     const acceptNamespace = async () => {
-      namespace.resolve(json({ root: current }))
+      namespace.resolve(json({ projection_diagnostics: completeRead, root: current }))
       await namespaceRead
     }
     if (order === 'namespace-first') {
@@ -336,7 +336,7 @@ describe('App-owned Shell observation', () => {
     const old = { ...shell('older-shell'), status: {
       project: 'fixture-project', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:00Z',
     } }
-    bootstrap.resolve(json({ shell: old, execution: execution(2), namespace_truth: { root: current } }))
+    bootstrap.resolve(json({ shell: old, execution: execution(2), namespace_truth: { projection_diagnostics: completeRead, root: current } }))
     await bootstrapRead
     expect(store.executionWorkspaceAuthority.peek()).toBe(owner)
     expect(store.tasks.peek().find(task => task.id === 'task-bootstrap-observation')?.title).toBe('execution-body-2')

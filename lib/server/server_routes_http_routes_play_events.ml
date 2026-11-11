@@ -37,13 +37,26 @@ let credential_expiry (credential : Masc_domain.agent_credential) =
     | At second -> Some (second +. 1.0))
 
 let next_seat_expiry ~now credentials =
-  List.fold_left (fun result (credential : Masc_domain.agent_credential) ->
-    Result.bind result (fun next -> match credential.role with
-      | Masc_domain.Worker -> Ok next
+  List.fold_left (fun next (credential : Masc_domain.agent_credential) ->
+    match credential.role with
+      | Masc_domain.Worker -> next
       | Admin | Player ->
-        Result.map (fun expiry -> match expiry with
+        match credential_expiry credential with
+        | Error (Masc_domain.Credential_expiry.Invalid_timestamp stamp) ->
+          Log.Auth.warn "Play seat cannot read credential expiry for %s: %S"
+            credential.agent_name stamp;
+          next
+        | Ok expiry -> match expiry with
           | Some at when Float.compare at now > 0 -> Some (Option.fold ~none:at ~some:(Float.min at) next)
-          | Some _ | None -> next) (credential_expiry credential))) (Ok None) credentials
+          | Some _ | None -> next) None credentials
+
+let observe_seat_expiry ~base_path =
+  Auth.with_credential_transaction base_path
+    Auth.list_current_credentials_in_transaction
+  |> Result.join
+  |> Result.map_error (fun _ -> ())
+  |> Result.map (fun credentials ->
+       next_seat_expiry ~now:(Time_compat.now ()) credentials)
 
 let frame change =
   let fields = match change with
@@ -172,11 +185,7 @@ let serve ~state ~name ~request ~reqd ~sw ~clock ~machine ~presence (credential 
           keepalive (); `Stop_daemon);
         Eio.Fiber.fork_daemon ~sw:connection (fun () ->
           let rec deadlines () =
-            let observed = Auth.with_credential_transaction config.base_path
-                Auth.list_current_credentials_in_transaction |> Result.join in
-            match Result.map_error (fun _ -> ()) observed
-                  |> Result.bind (fun credentials ->
-                    next_seat_expiry ~now:(Time_compat.now ()) credentials |> Result.map_error (fun _ -> ())) with
+            match observe_seat_expiry ~base_path:config.base_path with
             | Error () ->
               ignore (Server_sse_response.send response unavailable);
               Server_sse_response.close response
@@ -226,4 +235,5 @@ let add_routes router =
 
 module For_testing = struct
   let next_seat_expiry = next_seat_expiry
+  let observe_seat_expiry = observe_seat_expiry
 end

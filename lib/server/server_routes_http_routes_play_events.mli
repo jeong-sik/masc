@@ -22,8 +22,15 @@ val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
 module For_testing : sig
   val next_seat_expiry :
     now:float -> Masc_domain.agent_credential list ->
-    (float option, Masc_domain.Credential_expiry.error) result
+    float option
   (** The first instant at which a currently live seat credential becomes
       expired, using the same whole-second boundary as bearer admission.
-      Worker credentials do not form Play seats. *)
+      Worker credentials and malformed expiry values do not supply a deadline.
+      Excluding a malformed deadline does not grant a seat or change bearer
+      admission; one damaged credential cannot retire unrelated observers. *)
+
+  val observe_seat_expiry : base_path:string -> (float option, unit) result
+  (** Read the actual credential transaction used by the stream's deadline
+      worker. An unreadable credential store remains [Error ()]; a malformed
+      expiry on one readable credential does not fail the store observation. *)
 end

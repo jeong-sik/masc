@@ -138,10 +138,13 @@ val respond_with_streaming
   -> Httpun.Response.t
   -> Body_writer.t
 (** Starts a streaming response. [flush_headers_immediately] is httpun's and
-    applies to HTTP/1.1: the head is written before the body's first bytes
-    instead of with them. On HTTP/2 the HEADERS frame always goes to the
-    connection at once: headers that wait for body bytes do not reach a
-    client whose stream window is zero.
+    applies to HTTP/1.1: the head is written when the response starts.
+    Without it httpun writes the head at the body's first flush or at its
+    close. On HTTP/2 the argument is not read and the HEADERS frame always
+    goes to the connection at once. Headers that wait for body bytes can
+    stay behind when the stream's or the connection's window is zero: no
+    byte moves, and they leave only when something else wakes the
+    connection's writer.
 
     An HTTP/2 stream that is already over gets
     a closed writer and h2 is not called: its switch failed or ended, or an

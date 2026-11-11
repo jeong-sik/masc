@@ -16,14 +16,15 @@
     pieces is never cut, however long the whole write lasts: the bound is a
     smallest rate, one piece per bound, not a longest response.
 
-    One write is in flight at a time. A second writer waits for its turn, so
-    what [copy] is given reaches the socket in one run: tls-eio writes a
-    record from its reading path as well as from its writing path, and the
-    two do not land inside each other.
-    [copy] keeps the turn while it reads its source, and the bound is taken
-    only while a piece is on its way to the kernel: a source that is slow to
-    read holds the other writers back with no bound. The one caller is
-    tls-eio, whose source is a string already in memory.
+    One write is in flight at a time, and a writer keeps its turn until
+    every piece of what it gave is with the kernel. A second writer waits for
+    that turn, so the bytes of one write reach the socket in one run: tls-eio
+    writes a record from its reading path as well as from its writing path,
+    and the two do not land inside each other.
+    [copy] keeps the turn the same way while it reads its source, and the
+    bound is taken only while a piece is on its way to the kernel: a source
+    that is slow to read holds the other writers back with no bound. Nothing
+    in the server copies into this socket.
 
     A write that fails because the peer reset or closed the connection ends
     with [End_of_file], which is what gluten takes for a closed connection: it

@@ -198,3 +198,9 @@ MASC는 incorporated나 already_represented 후보가 지지할 때만 기억 �
 - 일시 상태를 already_represented로 답한 142개가 정말 이미 있는 지식인지. 사람이 보지 않았다.
 - 금지 명령형 수는 표현 패턴으로 센 대리 값이다. 평서문으로 쓴 규칙은 빠지고, 설명 속 표현도 들어간다.
 - 참고 글 두 편의 숫자. Google 글은 관측 자료의 회귀 결과다. Anthropic 글의 실험은 Claude 모델만 썼다.
+
+## 2026-11-11에 바뀐 것
+
+- 위 「소스와 입력」 표의 run 파일이 있던 worktree가 2026-11-11 22:16 KST에 지워졌다. git이 무시하는 폴더라 같이 지워졌다.
+- 지금은 `e-synth-3/requests.jsonl`의 사본 하나만 남아 있다(`artifacts/tinker/librarian/scratch/final.jsonl`, sha256 `33060b5e…`). 나머지 파일의 줄 수와 sha256은 대조할 파일이 없다.
+- 이 폴더의 숫자와 `outputs.txt`는 지워지기 전에 낸 것이고 바뀌지 않았다. 위 명령은 그 run 없이는 다시 돌릴 수 없다.

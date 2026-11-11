@@ -252,8 +252,8 @@ module Make (F : Line_format) : sig
       line that never ended. A caller that needs a list to land whole or not at
       all appends one record per call.
 
-      If the call that runs the write on a system thread raises an exception (for
-      example [Systhread_host.Host_failed]), the lines may be in the file. The
+      If the call that runs the write on a system thread raises an exception,
+      the lines may be in the file. The
       file is stopped and the exception goes on to the caller. This holds even
       when the exception was raised before the file work began, because the
       module cannot tell the two cases apart. An exception raised while the

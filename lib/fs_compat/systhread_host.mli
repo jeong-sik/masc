@@ -12,10 +12,6 @@
     This library sits below the code that knows about logging and executor
     pools, so {!start} is told what it needs from them. *)
 
-exception Host_failed of exn
-(** Raised to a caller whose work the host had already taken when the host's
-    scheduler failed. The work may or may not have run. *)
-
 val domain_count : int
 (** Domains {!start} adds to the process: 1. *)
 
@@ -55,9 +51,10 @@ val run : ?label:string -> (unit -> 'a) -> 'a
     waits for it uncancellably and gets its result. Exceptions re-raise with
     their backtrace; the work is never re-run.
 
-    If the host fails, work it had not taken runs on the caller's domain
-    instead; work it had taken ends with {!Host_failed}. Later calls use the
-    caller's domain.
+    If the host fails, work that had not begun runs on the caller's domain
+    instead. Work that had begun is answered by its own thread: its caller
+    keeps waiting and gets its result, so a caller never runs beside its own
+    work. Later calls use the caller's domain.
 
     The work must not depend on which domain runs it: code that reads
     [Domain.self] or domain-local state sees the host, not the caller's

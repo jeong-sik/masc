@@ -4,8 +4,6 @@
    pool work. *)
 module Host = Fs_compat.Systhread_host
 
-exception Host_failed = Host.Host_failed
-
 let domain_count = Host.domain_count
 
 let start () =

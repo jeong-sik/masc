@@ -2,7 +2,7 @@ open Runtime_toml_base
 
 (* --- Layer 1: Providers --- *)
 
-let parse_credential (tbl : Otoml.t) (path : string)
+let parse_credential ~home (tbl : Otoml.t) (path : string)
   : (Runtime_schema.credential, parse_error list) result
   =
   match
@@ -33,7 +33,7 @@ let parse_credential (tbl : Otoml.t) (path : string)
           machine; expanding here keeps [Runtime_adapter]'s absolute-path
           rule true of the value it sees. *)
        Result.map
-         (fun path -> Runtime_schema.File (Env_config_core.expand_home_prefix path))
+         (fun path -> Runtime_schema.File (Env_config_core.expand_home_prefix_under ~home path))
          (required_non_empty_string
             ~trim_result:true
             tbl
@@ -466,7 +466,7 @@ let provider_keys =
   ] @ antigravity_cli_option_keys @ antigravity_forbidden_option_keys
 ;;
 
-let parse_provider (id : string) (tbl : Otoml.t)
+let parse_provider ~home (id : string) (tbl : Otoml.t)
   : (Runtime_schema.provider, parse_error list) result
   =
   let path = Ns.(path Providers) id in
@@ -542,7 +542,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
     let credentials_result =
       match Otoml.find_opt tbl Fun.id [ "credentials" ] with
       | Some cred_tbl ->
-        Result.map Option.some (parse_credential cred_tbl (path ^ ".credentials"))
+        Result.map Option.some (parse_credential ~home cred_tbl (path ^ ".credentials"))
       | None -> Ok None
     in
     let antigravity_cli_result = antigravity_cli_options ~path tbl api_format in
@@ -674,7 +674,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             }))
 ;;
 
-let parse_providers (toml : Otoml.t)
+let parse_providers ~home (toml : Otoml.t)
   : (Runtime_schema.provider list, parse_error list) result
   =
   match Otoml.find_opt toml Fun.id [ Ns.(key Providers) ] with
@@ -687,7 +687,7 @@ let parse_providers (toml : Otoml.t)
               validate_provider_id ~path:(Ns.(path Providers) id) id
             with
             | Error _ as error -> error
-            | Ok () -> parse_provider id tbl)
+            | Ok () -> parse_provider ~home id tbl)
          entries)
   | Some
       ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _

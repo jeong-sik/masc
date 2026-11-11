@@ -5595,6 +5595,7 @@
 (include stanzas/test_tui_fusion_workspace.inc)
 
 (include stanzas/test_runtime_toml_namespace.inc)
+(include stanzas/test_runtime_toml_source_reading.inc)
 (include stanzas/test_runtime_toml_wrong_typed_keys.inc)
 
 (test

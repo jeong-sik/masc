@@ -1085,7 +1085,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 1단계의 끄기다(§6 결정 10). bootstrap처럼 서버가 없을 때 BasePath lease를 쥐고 `off` 사건을 쓴다. 서버가 멈추면 진행 중이던 Keeper 턴도 끝나므로, 끄는 순간 진행 중인 다계정 실행이 없다. 그래서 §9-5의 lease 종결은 이 층에 없다. 1단계에는 lease 저장소가 없다(E1).
 - `off` 뒤 설정이 `Single_user`이면 multi-owned record를 읽기 전용으로 둔 `Single_user`로 부팅한다(4행). legacy 공유 token·admin으로 multi-owned record를 실행하지 않는다. 남은 account-home 점유는 `Release_pending`으로 바꾸고 unmount를 확인한 뒤에만 Released로 한다. 설정이 `Multi_account`이면 `reactivate` 요청이고, F3b 전에는 `Reactivation_not_ready`로 거부한다(9행).
 - 시험은 `off`가 있는 4·10행과, F3b 전의 9행 거부를 본다.
-- F3a는 두 층으로 나눈다. F3a-1은 끈 설치의 부팅과 실행 판정이고, F3a-2는 `masc auth off` 명령이다. 부팅부터 하는 까닭은 명령의 성공 문구가 끈 뒤의 부팅을 한 번에 말하게 하려는 것이다. 두 층은 따로 들어가도 안전하다. F3a-1만 있으면 `off`를 쓰는 길이 없다.
+- F3a는 세 층으로 나눈다. F3a-1은 끈 설치의 부팅과 실행 판정이고, F3a-2는 `masc auth off` 명령이고, F3a-3은 사람 홈이 남은 동안의 native 도구 판정이다. 부팅부터 하는 까닭은 명령의 성공 문구가 끈 뒤의 부팅을 한 번에 말하게 하려는 것이다. 앞의 두 층은 따로 들어가도 안전하다. F3a-1만 있으면 `off`를 쓰는 길이 없다.
 - F3a-1(2026-11-10).
   - 4행 판정은 로그를 다시 읽은 상태(`Authz_state.t`)를 싣고 온다(`Made_off`, `Single_user_after_off`). 그래서 끈 설치인데 기록이 없는 단일 사용자 값은 만들 수 없다. `Off_mode_not_supported`는 지운다.
   - 부팅은 그 상태를 `Authz_boot_mode_read.single_user`에 싣는다(`turned_off`). 서버와 stdio는 그 값으로 접근을 게시한다.
@@ -1104,6 +1104,15 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - `config.json`은 쓰지 않는다. 설정은 운영자의 요청이다(§5.1). 끈 뒤에도 설정이 `Multi_account`를 물으면 9행이다. 성공 문구가 `account_mode`를 빼라고 말한다.
   - bootstrap 도움말과 성공 문구는 `masc auth off`를 안내한다. 3행 거부 문구도 `masc auth off`를 말한다. 8행은 저장소를 믿을 수 없어 끌 수 없으므로 말하지 않는다.
   - 시험은 실제 활성화(`Authz_activation.activate`)로 만든 설치에서 7행과 3행의 끄기, 끈 뒤의 4행·9행, 두 번째 끄기, 쓰지 않는 네 경우를 본다. F3a-1의 시험 셋도 손으로 쓰던 `off` 기록 대신 `Authz_off.turn_off`를 부른다.
+- F3a-3(2026-11-11).
+  - 판정은 `Runtime_account_access.authorize_native` 한 곳이다. `Native_none`은 어느 mode에서나 돈다. 단일 사용자 프로세스의 `Native_read`·`Native_full`은 workspace의 `.masc/accounts`에 항목이 없을 때만 돈다. 항목이 있으면 `Native_tools_reach_person_homes`로 거절한다.
+  - 남았는지는 턴을 시작할 때마다 그 디렉터리를 읽는다(`Runtime_account_home_layout.persons_remain`). 로그의 끈 상태는 보지 않는다. 그래서 끈 설치와 로그만 지운 설치가 같은 답을 받는다. 운영자가 그 아래를 비우면 다음 턴부터 native 도구가 돈다. 다시 부팅하지 않는다.
+  - 항목의 안은 읽지 않는다. 빈 namespace 폴더도 남은 것으로 센다. 어느 파일이 로그인인지를 이름이나 내용으로 가리지 않는다.
+  - 디렉터리가 없으면 남은 것이 없다. 디렉터리가 아니거나 열 수 없으면 답하지 않고 거절한다(`Person_homes_unread`).
+  - Antigravity와 Vibe의 모델 턴도 이 판정을 지난다. 두 클라이언트는 다계정에서 host 계정 판정(D3b)이 통째로 막아서 native 판정을 부르지 않았고, 단일 사용자에서는 그대로 돌았다. Antigravity는 native 설정을 쓰는 `Runtime_antigravity_home.prepare_native_tools`가 workspace를 만들기 전에 판정한다. Keeper 턴, Fusion 패널, verify, capability probe가 모두 이 함수를 거친다. Vibe는 `Runtime_vibe_cli.run`이 판정한다. Vibe agent의 도구는 MASC가 정하지 않으므로 가장 넓은 자세(`Native_full`)로 판정한다.
+  - 사람 홈이 남은 동안 돌지 않는 것: Codex와 Muse의 모델 턴(두 클라이언트에는 `Native_none`이 없다), `keeper.tools.native`가 `none`이 아닌 Claude Code·Antigravity Keeper, Fusion의 Antigravity 패널(`Native_read`)과 Vibe 패널. 도는 것: `Native_none`인 Claude Code·Antigravity Keeper, API provider Runtime, 모델 턴이 아닌 호출(계정 확인, 사용량, 모델 목록).
+  - MASC 도구 쪽은 이 층이 바꾸지 않는다. Keeper 컨테이너 lane과 MASC Read가 `.masc/accounts`에 닿지 못한다는 D3c-1의 시험(`test_keeper_account_home_reach`)은 계정 mode를 읽지 않으므로 단일 사용자에서도 같다. `Remote_ssh`가 같은 host를 가리키는 경우는 그 시험 밖이고 결정 대기다.
+  - 시험: `test_runtime_account_access`가 실제로 게시한 단일 사용자 프로세스 하나에서 디렉터리 없음, 빈 디렉터리, 사람 root 하나, 지운 뒤, 디렉터리 자리의 파일을 차례로 본다. `Native_none`은 다섯 경우 모두 돈다.
 
 **F3b 범위**
 

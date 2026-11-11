@@ -7393,6 +7393,8 @@
 
 (include stanzas/test_schedule_run_watch_tick.inc)
 
+(include stanzas/test_schedule_checks_watch.inc)
+
 (include stanzas/test_server_github_run_reader.inc)
 
 (include stanzas/test_server_schedule_run_watch.inc)

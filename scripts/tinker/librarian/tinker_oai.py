@@ -7,6 +7,8 @@ resumes and pays only for calls that have no answer yet. A transient failure (no
 response, 408, 429, 5xx) is sent again up to TRANSIENT_RETRIES times after a
 pause. Each attempt is its own row and its own wall_s, so a returned call's
 wall_s never holds a retry. A failure left after that is sent again on a rerun.
+HTTP 402 stops the caller: the endpoint takes no call for the account until its
+billing changes, so every later call would be refused the same way.
 
 TINKER_API_KEY comes from the environment and is never written. The row shape
 is the harness's call log for every provider (`glm_chat` writes it too).
@@ -37,6 +39,8 @@ NO_RESPONSE = 0
 TIMEOUT_S = 900
 TRANSIENT_RETRIES = 2
 RETRY_PAUSE_S = 10.0
+# The endpoint's status for an account whose billing blocks it.
+HTTP_PAYMENT_REQUIRED = 402
 HTTP_REQUEST_TIMEOUT = 408
 HTTP_TOO_MANY_REQUESTS = 429
 HTTP_SERVER_ERROR = 500
@@ -122,7 +126,8 @@ def call_key(model: str, effort: str, max_tokens: int, attempt: int, messages: S
 
 
 class Caller:
-    """Thread-safe. `ask` returns None, and sets `stopped`, once a call could exceed the budget."""
+    """Thread-safe. `ask` returns None, and sets `stopped`, once a call could exceed the budget or
+    the endpoint has answered HTTP 402."""
 
     def __init__(self, log: Path, budget: float) -> None:
         self._log = log
@@ -145,7 +150,8 @@ class Caller:
             attempt: int = 0) -> Call | None:
         """Send user messages in order. A cached HTTP 200 call with the same key is returned without
         sending. Otherwise the last attempt is returned: an answer, a failure that is not transient,
-        or the transient failure that used up TRANSIENT_RETRIES."""
+        or the transient failure that used up TRANSIENT_RETRIES. An HTTP 402 attempt is logged and
+        not returned: the caller stops."""
         key = call_key(model, effort, max_tokens, attempt, messages)
         retry = 0
         while True:
@@ -166,6 +172,9 @@ class Caller:
                     self._cache[key] = call
                 with self._log.open("a", encoding="utf-8") as fh:
                     fh.write(json.dumps(asdict(call), ensure_ascii=False) + "\n")
+                if call.status == HTTP_PAYMENT_REQUIRED:
+                    self.stopped = self.stopped or "HTTP 402: the endpoint takes no call for the account's billing"
+                    return None
             if not transient(call.status) or retry == TRANSIENT_RETRIES:
                 return call
             retry += 1

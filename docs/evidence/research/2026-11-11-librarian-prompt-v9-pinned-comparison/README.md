@@ -127,3 +127,10 @@ v9에서 새로 생긴 것은 두 모델 합쳐 4건이다.
 - durable·cleanup 패스도 이 본문을 읽는다. 하네스는 admission만 잰다.
 - E-synth에는 "쓸 날이 남은 기록"이 없다. 그래서 위의 Inkling 손실 같은 경우는 고정 기준이 재지 못한다.
 - 라이브에서 지우기는 흡수 게이트를 거치지 않는다. 지우기 확인은 RFC-0517 §7.2가 정할 일로 남아 있다.
+
+## 2026-11-11 밤에 바뀐 것
+
+- 위 「run 파일」 표의 run 폴더와 판정 폴더가 있던 worktree가 2026-11-11 22:16 KST에 지워졌다. git이 무시하는 폴더라 같이 지워졌다. 표의 줄 수와 sha256은 대조할 파일이 없다.
+- `compare.json`, `runs.json`과 이 README의 숫자는 지워지기 전에 낸 것이고 바뀌지 않았다.
+- E-real 스냅샷도 같이 지워졌다. 기록 52건 가운데 2건은 서버가 이미 본문을 지운 뒤라 다시 뜨지 못했다. 지금 고정한 E-real은 남은 50건이고, 사라진 2건의 digest는 `scripts/tinker/librarian/e_real_manifest.json`의 `of.gone`에 있다.
+- 이때 `scripts/tinker/librarian/prompt_lines.json`이 sha256으로 고정하고 있던 기준선 `rows.jsonl`(`p0-*`)도 위 표의 파일이다.

@@ -425,6 +425,15 @@ class FollowingAcceptedMerges(unittest.TestCase):
         patcher = patch.object(MERGE, 'time', clock)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # An empty open list means every member is read once, as before.
+        self.open_list = []
+        self.open_reads = 0
+        def listing(repo):
+            self.open_reads += 1
+            return self.open_list
+        patcher = patch.object(MERGE, 'open_pulls', side_effect=listing)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.puts = []
 
     def advance(self, seconds):
@@ -441,6 +450,57 @@ class FollowingAcceptedMerges(unittest.TestCase):
     @staticmethod
     def landed(number):
         return {'merged': True, 'merge_commit_sha': sha(number + 5000)}
+
+    def receipt_for(self, members):
+        return {'uuid': UUID, 'pr': members[-1], 'head': sha(members[-1]),
+                'members': members, 'since': 1.0}
+
+    def test_a_poll_reads_the_open_list_and_no_member_while_every_layer_is_open(self):
+        reads = {}
+        for layers in (3, 12):
+            members = list(range(101, 101 + layers))
+            self.now, self.open_reads = 0.0, 0
+            self.open_list = [{'number': number} for number in members]
+            with self.subTest(layers=layers), \
+                 patch.object(MERGE, 'read', return_value={'status': 'pending'}) as read, \
+                 patch.object(MERGE, 'pull') as pull, patch.object(MERGE, 'WAIT_SECONDS', 30):
+                result = MERGE.resume(REPO, self.receipt_for(members), dispatch=False)
+            self.assertEqual(result['status'], 'still_pending')
+            pull.assert_not_called()
+            reads[layers] = (self.open_reads, read.call_count)
+        self.assertGreaterEqual(reads[3][0], 3)
+        self.assertEqual(reads[3], reads[12])
+
+    def test_only_a_member_that_left_the_open_list_is_read_and_only_once(self):
+        lists = [[{'number': 101}, {'number': 102}], [{'number': 102}], [], []]
+        seen = []
+        def pull(repo, number):
+            seen.append(number)
+            if number == 102 and seen.count(102) < 2:  # the first read of 102 is not final yet
+                return {'merged': False, 'state': 'open'}
+            return {'merged': True, 'state': 'closed', 'merge_commit_sha': sha(number + 5000)}
+        with patch.object(MERGE, 'open_pulls', side_effect=lists) as listing, \
+             patch.object(MERGE, 'read', return_value={'status': 'enqueued'}), \
+             patch.object(MERGE, 'pull', side_effect=pull):
+            result = MERGE.resume(REPO, self.receipt_for([101, 102]), dispatch=False)
+        self.assertEqual(result['status'], 'merged')
+        self.assertEqual(listing.call_count, 4)
+        # 101 left the list on poll 2 and was settled; it is never read again.
+        # 102 is read on every poll after it left until its closed answer is final.
+        self.assertEqual(seen, [101, 102, 102])
+
+    def test_a_member_missing_from_a_stale_list_but_still_open_is_read_again(self):
+        seen = []
+        def pull(repo, number):
+            seen.append(number)
+            if seen.count(number) < 3:
+                return {'merged': False, 'state': 'open'}
+            return {'merged': True, 'state': 'closed', 'merge_commit_sha': sha(number + 5000)}
+        with patch.object(MERGE, 'read', return_value={'status': 'enqueued'}), \
+             patch.object(MERGE, 'pull', side_effect=pull):
+            result = MERGE.resume(REPO, self.receipt_for([101]), dispatch=False)
+        self.assertEqual(result['status'], 'merged')
+        self.assertEqual(seen, [101, 101, 101])
 
     def test_pending_then_enqueued_is_final_and_members_decide_completion(self):
         statuses = iter([{'status': 'pending'}, {'status': 'pending'}, {'status': 'enqueued'}])
@@ -832,6 +892,8 @@ class QuotaGetIntegration(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0,
                     json.dumps({'status': 'pending', 'details': {'uuid': UUID}}), '')
             reads.append(command[-1])
+            if '/pulls?state=open' in command[-1]:
+                return http_response(200, [])  # nobody is on the open list: read each member once
             if command[-1] == endpoint:
                 return (http_response(429, {'message': 'limited'}, {'Retry-After': '12'})
                         if reads.count(endpoint) == 1 else http_response(200, {'status': 'enqueued'}))
@@ -882,6 +944,8 @@ class QuotaGetIntegration(unittest.TestCase):
                         return subprocess.CompletedProcess(command, 0,
                             json.dumps({'status': 'pending', 'details': {'uuid': UUID}}), '')
                     reads.append(command[-1])
+                    if '/pulls?state=open' in command[-1]:
+                        return http_response(200, [])  # nobody is on the open list: read each member once
                     limited = ((quota_path == 'endpoint' and command[-1] == endpoint) or
                                (quota_path == 'member' and command[-1] == member))
                     if limited:
@@ -930,6 +994,8 @@ class QuotaGetIntegration(unittest.TestCase):
                         return subprocess.CompletedProcess(command, 0,
                             json.dumps({'status': 'pending', 'details': {'uuid': UUID}}), '')
                     self.assertEqual(method, 'GET')
+                    if '/pulls?state=open' in command[-1]:
+                        return http_response(200, [])  # nobody is on the open list
                     if quotas:
                         self.assertGreaterEqual(clock.now, quotas[-1]['retry_at'])
                     reads.append((clock.now, command[-1]))

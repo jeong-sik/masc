@@ -4,9 +4,15 @@ import {
   type ToolMetricsSeriesRequest, type ToolMetricsSeriesResponse,
 } from './schemas/tool-metrics-series'
 import { createQueryObservationStream } from '../lib/query-observation-stream'
+import { isRecord } from '../lib/type-guards'
 
 export class ToolSeriesStreamError extends QueryStreamProtocolError {
   readonly name = 'ToolSeriesStreamError'
+}
+
+/** A valid server failure envelope is an owed source read, not bad protocol. */
+export class ToolSeriesReadError extends Error {
+  readonly name = 'ToolSeriesReadError'
 }
 
 export function toolSeriesStreamPath(request: ToolMetricsSeriesRequest): string {
@@ -18,6 +24,7 @@ export async function readToolSeriesStream(
   onFrame: (frame: ToolMetricsSeriesResponse) => void, onActivity?: () => void,
 ): Promise<void> {
   await readQueryObservationStream(toolSeriesStreamPath(request), signal, wire => {
+    if (isRecord(wire) && typeof wire.error === 'string') throw new ToolSeriesReadError(wire.error)
     let frame: ToolMetricsSeriesResponse
     try { frame = parseToolMetricsSeriesResponse(wire) }
     catch (cause) { throw new ToolSeriesStreamError(cause instanceof Error ? cause.message : String(cause)) }

@@ -1,0 +1,30 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  Keepers ▸ imp ▸ chat
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+   (no messages yet -- type below and press Enter)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   Job · 관측된 예약 없음 · F9
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+   History load failed · /errors
+   > first line
+
+ 아직 시작하지 않음  Context unavailable
+  조치 필요 3 · 운영에서 확인  /:commands  ?:help  Enter:send  Esc:list  Ctrl-J:newline

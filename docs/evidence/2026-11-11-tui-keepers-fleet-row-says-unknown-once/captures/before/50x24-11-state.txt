@@ -1,0 +1,24 @@
+ ‹1 작업  ▸키퍼  기능·플러그인  워크스페이스 1›
+
+  MASC Keepers (3)                  HTTP [연결됨]
+   list  ▸state  cause  time  memory  age  2›
+ ? 3 unknown ???
+     fleet fail/30m max 0  │              │ max 0
+   fleet blocked   running 0/2
+   awaiting verdict 1
+   not running: relay, scout
+
+     keeper                │ ● now        │ due
+   ▾ Unknown 3             │ 3            │
+   ● imp                   │ - unknown    │
+   ● relay                 │ - unknown    │
+   ● scout                 │ - unknown    │
+
+
+
+
+
+ imp - 미확인 · lag ?
+ ────────────────────────────────────────────────
+  Enter / Right:story / detail  Esc:dashboard  q…?
+ › to imp   (i to write)

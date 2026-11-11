@@ -1,0 +1,35 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers (3)                                                                                        HTTP [연결됨]
+   list  state  cause  time  memory  ▸age  runtime  24h
+ ? 3 unknown ???
+   fleet blocked   running 0/2   turn capacity 0/2   no keeper can take a turn   proactive every 5m
+   awaiting verdict 1
+   not running: relay, scout
+
+     keeper  facts by age ▸           30d   7d      1d      1h │ saved        │ lag · unread turns ▹      stale   facts
+ ▌ ■ world · shared                                          ? │ — no ledger  │ 0 absent                              0
+   ▸ UPDATE TIME UNKNOWN 3                                   ? │ 3            │ Σ ? facts · lag ?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  조치 필요 3 · 운영에서 확인  v:view  o:order  j/k:move  p:pause  w:wake  s:shutdown  Esc:dashboard  q:quit  …?
+ › no keeper selected

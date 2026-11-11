@@ -1,0 +1,35 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Keepers · 일과 도움                                                                                HTTP [연결됨]
+   운영 관측: blocked · no keeper can take a turn · 실행 0/2 · proactive every 5m
+   ▸list  state  cause  time  memory  age  runtime  24h
+ ? 3 unknown ???
+     fleet fail/30m max ?             기록 미확인              │              │ 일정 미확인               max ?
+ Keeper 목록 · 현재 상태 / 일과 대기            │ imp
+ ›  imp                            - 미확인     │
+    현재 작업 미관측                            │ 지금 하는 일
+    relay                          - 미확인     │   현재 작업 미관측
+    현재 작업 미관측                            │
+    scout                          - 미확인     │ 사람의 도움
+    현재 작업 미관측                            │   도움 요청 상태 미확인 · Approvals에서 확인
+                                                │
+                                                │ 최근 관측 결과
+                                                │   최근 자율 턴 결과 미관측 · 턴 종료 기록 미조회 · Enter:Story
+                                                │
+                                                │ c:대화·원래 요청   →:상세   Enter:Story
+                                                │ Enter→m:기억   J:일정   l:로그
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+ imp - 미확인 · lag ?
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  조치 필요 3 · 운영에서 확인  v:view  o:order  j/k:move  Enter / Right:story / detail  Esc:dashboard  q:quit  …?
+ › to imp   (i to write)

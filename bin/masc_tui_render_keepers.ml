@@ -742,10 +742,8 @@ let grid_half_hour_pulse state (grid : Grid.t) ~now pulse =
   else if List.for_all (function
     | Masc_tui_keeper_pulse.Half_hour_unknown -> true
     | Half_hour_quiet | Half_hour_ok | Half_hour_failed | Half_hour_failed_and_ok -> false) slots then
-    let label = if state.ui_language = Lang_ko then "기록 미확인" else "history unknown" in
-    Theme.recede () ^ fit_width
-      (if Message_layout.display_width label <= grid.side_cells then label else "?")
-      grid.side_cells ^ Ansi.reset
+    Masc_tui_keeper_strip.history_unknown_label ~ko:(state.ui_language = Lang_ko)
+      ~cells:grid.side_cells
   else String.concat ""
     (List.map
        (fun half_hour ->
@@ -2064,13 +2062,15 @@ let keeper_pulse_headers (state : state) ~now ~inner ~(grid : Grid.t) ~selected_
   header :: (match state.keeper_list_view with
   | Keeper_list_model.By_age -> []
   | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
-      let fleet = Masc_tui_keeper_strip.fleet_cells ~ko:(state.ui_language = Lang_ko) ~now ~grid
+      (match Masc_tui_keeper_strip.fleet_cells ~ko:(state.ui_language = Lang_ko) ~now ~grid
           ~wakes:(fun row -> Masc_tui_keeper_axis.wake_strip state ~now
-            ~ahead:grid.side_cells ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name) all_rows in
-      [(grid_line grid
-        { gutter = String.make Grid.gutter_cells ' '; name = fit_width fleet.name grid.name_cells
-        ; pulse = fleet.pulse; now_cell = still_row grid_blank_now; strip = fleet.strip
-        ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' }).text])
+            ~ahead:grid.side_cells ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name) all_rows with
+       | None -> []
+       | Some fleet ->
+           [(grid_line grid
+             { gutter = String.make Grid.gutter_cells ' '; name = fit_width fleet.name grid.name_cells
+             ; pulse = fleet.pulse; now_cell = still_row grid_blank_now; strip = fleet.strip
+             ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' }).text]))
 
 let keeper_selected_summary (state : state) ~now (row : Keeper_list_model.row) =
   let keeper_name = row.keeper.Tui_decode.k_name in

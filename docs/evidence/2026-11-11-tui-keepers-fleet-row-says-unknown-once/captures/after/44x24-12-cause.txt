@@ -1,0 +1,24 @@
+ 운영  작업  ▸키퍼  기능·플러그인 2›
+
+  MASC Keepers (3)            HTTP [연결됨]
+   list  state  ▸cause  time  memory  3›
+ ? 3 unknown ???
+   fleet blocked   running 0/2
+   awaiting verdict 1
+   not running: relay, scout
+
+     keeper          │ ● now        │ due
+   ▾ no current fai… │ ● 3          │
+   ● imp             │ - unknown    │
+   ● relay           │ - unknown    │
+   ● scout           │ - unknown    │
+
+
+
+
+
+
+ imp - 미확인 · lag ?
+ ──────────────────────────────────────────
+  Enter / Right:story / detail  Esc:dashbo…?
+ › to imp   (i to write)

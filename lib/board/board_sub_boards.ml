@@ -167,8 +167,9 @@ let update_sub_board
 ;;
 
 let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
-  with_lock store (fun () ->
+  with_persist_lock store (fun () ->
   let* () = Board_sub_boards_source.require_readable store in
+  with_lock store (fun () ->
     match Hashtbl.find_opt store.sub_boards sub_board_id with
     | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
     | None ->
@@ -180,27 +181,24 @@ let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
           | None ->
             Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))
        | None ->
-         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))))
-;;
-
-let list_sub_boards_unlocked store : sub_board list =
-  let counts = sub_board_post_counts_unlocked store in
-  Hashtbl.fold
-    (fun _ sb acc -> sub_board_with_post_count counts sb :: acc)
-    store.sub_boards
-    []
-  |> List.sort (fun (a : sub_board) (b : sub_board) ->
-    compare a.created_at b.created_at)
+         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))))
 ;;
 
 let list_sub_boards store : sub_board list =
-  with_lock store (fun () -> list_sub_boards_unlocked store)
+  with_lock store (fun () ->
+    let counts = sub_board_post_counts_unlocked store in
+    Hashtbl.fold
+      (fun _ sb acc -> sub_board_with_post_count counts sb :: acc)
+      store.sub_boards
+      []
+    |> List.sort (fun (a : sub_board) (b : sub_board) ->
+      compare a.created_at b.created_at))
 ;;
 
 let read_sub_boards store =
-  with_lock store (fun () ->
+  with_persist_lock store (fun () ->
     let* () = Board_sub_boards_source.require_readable store in
-    Ok (list_sub_boards_unlocked store))
+    Ok (list_sub_boards store))
 ;;
 
 let delete_sub_board = Board_deletion.delete_sub_board

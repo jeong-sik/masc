@@ -704,6 +704,57 @@ let test_category_edit_preserves_original_export_and_worker () =
            fail "invalid category was silently admitted");
       check int "refusals send no extra worker calls" 2 !calls)
 
+(* A declaration revision sorts object keys, so a schema saved with its keys in
+   another order names the same worker inputs. *)
+let reordered_author_schema = {|{"additionalProperties":false,"required":["question"],"properties":{"question":{"type":"string"}},"type":"object"}|}
+
+let test_schema_key_order_edit_preserves_original_export_and_worker () =
+  let tool = Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
+    "inputSchema",`Assoc ["type",`String "object"]]) |> unwrap in
+  let calls = ref 0 in
+  let invoke _ = incr calls; Ok (Mcp_protocol.Mcp_types.tool_result_of_text "original worker") in
+  with_installation ~manifest:(manifest ^ "[world.tools]\nexport=[\"queue_question\"]\n")
+    ~exported_tool:(tool,invoke)
+    (fun clock config _worker _state root ->
+      let access = Lane_addon_sources.Operator_configuration in
+      let current () = match (Runtime.tool_export_snapshot ~config ~access ~reserved:[]).exports with
+        | [export] -> Some export | _ -> None in
+      await clock (fun () -> Option.is_some (current ()));
+      let original = Option.get (current ()) in
+      let source = Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
+      let before = Lane_addon_config.load_file ~path:source |> unwrap in
+      let admit () = match Runtime.with_tool_request_destination ~config ~access ~reserved:[] ~export:original
+          ~publish:(fun destination -> Ok destination.configuration_revision) with
+        | Ok revision -> check string "original destination keeps its worker inputs" before.revision revision
+        | Error _ -> fail "schema key order revoked the original configured destination" in
+      let call () = match Runtime.call_exported_tool ~config ~access ~reserved:[] ~export:original
+          ~arguments:(`Assoc []) with
+        | Ok reply -> check bool "the original handler still reaches its worker" false (reply.is_error=Some true)
+        | Error _ -> fail "schema key order revoked the original tool handler" in
+      admit (); call ();
+      write (Filename.concat root ".masc/schemas/author.json") reordered_author_schema;
+      (* Fresh declaration admission happens before cached reconciliation too. *)
+      admit ();
+      let (_ : Yojson.Safe.t) = Runtime.reconcile_configuration ~config
+        ~directory:(Runtime.configuration_directory config) |> unwrap in
+      let after = Lane_addon_config.load_file ~path:source |> unwrap in
+      check string "key order keeps the configuration authority" before.revision after.revision;
+      let schema_text (declaration : Lane_addon_config.declaration) =
+        match declaration.package.exact_outputs with
+        | [output] -> Yojson.Safe.to_string output.Lane_addon_types.schema
+        | [] | _ :: _ :: _ -> fail "the fixture declares one exact output" in
+      check bool "the reread package holds the schema in its new key order" false
+        (String.equal (schema_text before) (schema_text after));
+      let store = Lane_addon_store.create ~root:(Filename.concat root ".masc/lane-addons") in
+      (match Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:after.id
+          ~package_id:after.package.id ~configuration_revision:after.revision with
+       | Ok () -> ()
+       | Error detail -> fail ("schema key order revoked the original Exact dispatch: " ^ detail));
+      let updated = Option.to_result ~none:"schema rewrite lost the original export" (current ()) |> unwrap in
+      check string "key order keeps the live incarnation" original.instance_id updated.instance_id;
+      admit (); call ();
+      check int "both original handler calls reached the original worker" 2 !calls)
+
 let test_export_reading_retains_typed_provider_wait_without_dispatch () =
   let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
     "inputSchema",`Assoc ["type",`String "object"]]) |> unwrap in
@@ -1682,6 +1733,8 @@ let () =
             test_capture_factory_uses_actual_live_declaration_before_any_rpc
         ; test_case "UI category edits preserve original workers and tool authority" `Quick
             test_category_edit_preserves_original_export_and_worker
+        ; test_case "schema key order edits preserve original workers and tool authority" `Quick
+            test_schema_key_order_edit_preserves_original_export_and_worker
         ; test_case "a request that is not final waits for the next event" `Quick
             test_a_request_that_is_not_final_waits_for_the_next_event
         ; test_case "live export preserves original provider wait without dispatch" `Quick

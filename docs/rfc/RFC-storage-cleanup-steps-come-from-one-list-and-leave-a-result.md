@@ -84,9 +84,9 @@ related: ["remote-keeper-workspace-entries-are-swept-on-their-endpoint", "idle-k
 
 | 근거 | 뜻 | 코드가 확인하는 것 |
 |---|---|---|
-| 파생물 | 도구가 원본에서 다시 만든다고 약속한 것 | `dune-project` 옆의 `_build`, 제품이 만든 빌드 링크. 원격에 모든 커밋이 있는 git 사본 |
+| 파생물 | 도구가 원본에서 다시 만든다고 약속한 것 | `dune-project` 옆의 `_build`, 제품이 만든 빌드 링크. 미커밋 변경이 없고 원격에 모든 커밋이 있는 git 사본 |
 | 돌려주지 않은 블록 | 파일 시스템이 이미 비운 자리 | 없음. trim 은 데이터를 건드리지 않는다 |
-| 임시 | FHS 3.0 3.18 `/tmp`: 프로그램은 다음 실행 때 파일이 남아 있다고 가정하면 안 된다 | 운영자가 그 endpoint 의 임시 폴더를 MASC 가 치운다고 선언했는가. 선언이 없으면 지우지 않고 크기만 보여 준다 |
+| 임시 | FHS 3.0 3.18 `/tmp`: 프로그램은 다음 실행 때 파일이 남아 있다고 가정하면 안 된다 | 운영자가 그 endpoint 의 임시 폴더를 MASC 가 치운다고 선언했는가. 선언이 없으면 지우지 않고 크기만 보여 준다. 선언이 있으면 운영자 정책 행과 같은 보존 기간을 쓴다 |
 | 운영자 정책 | 파생물도 임시도 아닌 Keeper 작업 폴더 항목을 얼마나 둘지 운영자가 정한 기간 | 보존 기간 설정(처음 값은 운영자가 2026-11-08 에 고른 48시간). 그 기간에 항목 안의 무엇도 바뀌지 않았는가 |
 | 정책으로도 지우지 않는 것 | 원격에 없는 커밋, stash, 주인을 모르는 볼륨 | 지우지 않는다. 화면에 보여 준다 |
 
@@ -139,16 +139,16 @@ val select :
   config:Workspace.config ->
   enabled:(Keeper_cleanup_step.t -> bool) ->
   keeper_name:string ->
-  (Keeper_cleanup_step.t list, Keeper_cleanup_pass.exclusion) result
+  (Keeper_cleanup_step.t list, Keeper_cleanup_status.exclusion) result
 
 val run :
   config:Workspace.config ->
   keeper_name:string ->
   Keeper_cleanup_step.t ->
-  Keeper_cleanup_pass.attempt
+  Keeper_cleanup_status.attempt
 ```
 
-- 모듈은 셋이다. `Keeper_cleanup_step` 은 목록과 대상·승인 방식이다. `Keeper_cleanup_attempt` 는 고르기와 실행이다(승인, payload, 결과로 옮기기, 예외는 `Failed`, 취소만 다시 던진다). `Keeper_cleanup_pass` 는 서버가 들고 있는 값이다. 서버 루프(`Server_keeper_build_maintenance`)에는 예약, 주기 시간, 값 보관, 로그만 남는다.
+- 모듈은 셋이다. `Keeper_cleanup_step` 은 목록과 대상·승인 방식이다. `Keeper_cleanup_attempt` 는 고르기와 실행이다(승인, payload, 결과로 옮기기, 예외는 `Failed`, 취소만 다시 던진다). `Keeper_cleanup_status` 는 서버가 들고 있는 값이다. 서버 루프(`Server_keeper_build_maintenance`)에는 예약, 주기 시간, 값 보관, 로그만 남는다.
 - 단계마다 대상(`applies_to`), 승인 방식(`admission`), 켜는 설정(`enabled`), 실행(`run`), 결과 모양을 빠짐없는 `match` 로 답한다. 새 단계는 생성자를 더하고, 빠진 답은 컴파일러가 잡는다.
 - 켜는 설정은 서버가 주기를 시작할 때 한 번 읽어 `~enabled` 로 넘긴다. 주기 요약과 고르기가 같은 값을 본다.
 - 한 Keeper 에 맞는 단계가 여럿이면 목록 순서(`all`, 생성자를 적은 순서)대로 하나씩 돈다. 지우는 단계가 먼저, trim 이 마지막이다. 지금 두 단계는 한 Keeper 에 같이 걸리지 않는다. B1 이 `Guest_trim` 을 더할 때 "같은 샌드박스에서 trim 이 마지막"을 시험으로 고정한다.
@@ -175,7 +175,7 @@ val run :
 단계가 Keeper 한 명에게 한 번 돈 것이 시도다. 시도는 아래 넷 중 하나로 끝난다.
 
 ```ocaml
-(* lib/keeper/keeper_cleanup_pass.mli *)
+(* lib/keeper/keeper_cleanup_status.mli *)
 type 'report outcome =
   | Reclaimed of 'report   (* payload 가 끝까지 돌았다. 지운 것이 0이어도, 못 지운 항목이 있어도 여기다 *)
   | Deferred of string     (* Keeper 가 바빠 넘겼다. Owner 가 말한 이유 *)
@@ -200,6 +200,7 @@ type attempt =
   - 모르는 값을 아는 값으로 바꿔 읽지 않는다.
 - 로그 줄은 그대로 둔다. `_build` 단계도 작업 폴더 단계처럼 지운 것이 0일 때 줄을 남긴다.
 - `Failed` 의 이유는 사람이 읽는 문장이다. 어떤 코드도 그 문장으로 갈래를 나누지 않는다.
+- 이 칸을 읽을 수 있는 사람은 `GET /api/v1/dashboard/tools` 를 읽을 수 있는 사람 전부다. 그 경로는 `Public_read` 다. strict auth 가 꺼져 있으면 자격 없이 읽히고, 켜져 있으면 읽기 자격으로 읽힌다. 이유 문장에는 서버의 경로와, 가린 stderr 끝부분이 들어갈 수 있다. 볼륨 GC 보고의 실패 이유가 이미 같은 길로 나간다. 다계정에서 이 경로를 누구에게 열지는 경로 권한 표가 정한다. 그 표가 운영자 아닌 사람에게 이 경로를 열면 이유 문장을 그대로 낼지 그때 다시 정한다.
 
 ### 2.4 첫 주기는 기동 직후에 돈다
 

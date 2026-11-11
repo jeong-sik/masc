@@ -66,6 +66,8 @@ Definitions:
 - E-real dropped_not_in_live (G2): memory IDs a valid answer drops that the
   live answer for the same record keeps. The live answer takes a fact out by
   `dropped` or by absorbing it into a new claim; either counts as not kept.
+  `verdict` lists each candidate's IDs by item, to be read before an install:
+  the count does not tell a lost memory from a stale one the live answer kept.
 - E-real absorbed_not_in_live: memory IDs a valid answer absorbs that the live
   answer keeps. Listed for human review with G2's IDs, not gated: absorbing
   merges a fact into a new claim, which MASC's absorb gate checks at commit.
@@ -608,6 +610,12 @@ def real_numbers(rows: list[JsonObject], base: str) -> tuple[dict[str, JsonObjec
     return numbers, sorted(refused)
 
 
+def off_live_drops(rows: list[JsonObject], name: str) -> dict[str, list[str]]:
+    """The memory IDs `name` dropped that the live answer keeps, by E-real item: the IDs G2 counts."""
+    return {cast(str, r["item"]): cast(list[str], r["dropped_not_in_live"]) for r in rows
+            if r["target"] == name and r["dropped_not_in_live"]}
+
+
 def gate_checks(gates: Gates, real: JsonObject, synth: JsonObject, merges: JsonObject, pair: JsonObject,
                 baseline_real: JsonObject) -> dict[str, bool]:
     """Each gate for one candidate: its E-real numbers (`real_numbers`), its E-synth numbers
@@ -758,7 +766,8 @@ def verdict(args: argparse.Namespace) -> int:
                                  "G5 would compare unlike cache states")
         result[name] = {**judged_candidate(gates, name, base, r_all, measure.by_target, m_all,
                                            paired(rows, base, name)),
-                        "widest_gap_s": round(gap, 1), "valid_rate_in_reach": r_all[name]["valid_rate_in_reach"]}
+                        "widest_gap_s": round(gap, 1), "valid_rate_in_reach": r_all[name]["valid_rate_in_reach"],
+                        "dropped_not_in_live": off_live_drops(rows, name)}
     result["e_real_refused"] = refused
     result["e_synth_drops"] = measure.drops
     result["e_synth_merges"] = measure.merges

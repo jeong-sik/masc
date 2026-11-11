@@ -257,6 +257,16 @@ class RealNumbersTest(unittest.TestCase):
         self.assertEqual((refused, numbers["A"]["valid_rate_in_reach"]), (["i1"], None))
 
 
+class OffLiveDropsTest(unittest.TestCase):
+    def test_the_verdict_lists_the_ids_g2_counts_for_one_target(self) -> None:
+        rows = [real_row(target="A", item="i1", dropped_not_in_live=["m3", "m9"]), real_row(target="A", item="i2"),
+                real_row(target="A", item="i3", dropped_not_in_live=["m1"]),
+                real_row(target="base", item="i1", dropped_not_in_live=["m7"])]
+        listed = V.off_live_drops(rows, "A")
+        self.assertEqual(listed, {"i1": ["m3", "m9"], "i3": ["m1"]})
+        self.assertEqual(sum(len(ids) for ids in listed.values()), part_of(V.summarize("real", rows))["dropped_not_in_live"])
+
+
 class MeasureSynthTest(unittest.TestCase):
     def rows(self) -> list[Row]:
         return [synth_row(target=t, item=f"eval-k1-m{m}-00{m}", dropped_off_label=[], absorbs={}, merges_absorbed=[])

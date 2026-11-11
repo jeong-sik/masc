@@ -1735,11 +1735,13 @@ let artifact_read_output_schema =
       ]
 ;;
 
-(* Producer: Workspace_goals.handle_goal_list over Goal_store.goal_to_yojson
-   and rollup_to_yojson, with the RFC-0387 verification ledger
-   (Goal_verification.record_to_yojson) joined per goal as [verification].
-   Option-carrying goal fields serialize as string-or-null and stay
-   undeclared; [verification] rides the items' additionalProperties:true. *)
+(* Producer: Workspace_goals.handle_goal_list over rollup_to_yojson. A short
+   row is the fields declared here and criterion_revision. A whole row
+   (detailed, or a goal_id read) is Goal_store.goal_to_yojson with the
+   RFC-0387 verification ledger (Goal_verification.record_to_yojson) joined
+   per goal as [verification]. Option-carrying goal fields serialize as
+   string-or-null and stay undeclared; [criterion_revision] and
+   [verification] ride the items' additionalProperties:true. *)
 let goal_list_output_schema =
   object_output_schema
     ~properties:

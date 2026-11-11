@@ -2205,13 +2205,9 @@ let here_row ~cols (state : state) ~path ~readings ~position =
           ' '
       ^ position
 
-(* What the headings laid out by [detail_heading] draw before the id: a lane
-   run, a measurement artifact named by its sha256, a Fusion run (whose list
-   and launch form carry the same title), one runtime's detail, and one
-   keeper's calls. *)
-(* The step the Runtime screens take from System. *)
+(* The step the Runtime screens take from System, and a keeper's runtime
+   takes from that keeper. *)
 let runtime_step (state : state) = ui_text state ~ko:"런타임" ~en:"runtime"
-let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 
 (* The coordinator's badge beside a reading of the surface's own. The badge
    brings its colour and its reset, so a style laid over the whole row painted

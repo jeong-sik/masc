@@ -4699,9 +4699,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        than the row beside the roster pane, and cut from the right the mark
        on Runs was the part that went. *)
     let before =
-      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s%s" Ansi.bold
-        (Terminal_text.single_line k.k_name)
-        Ansi.reset tab_strip_gap
+      here_path state ~path:[ Ansi.bold ^ Terminal_text.single_line k.k_name ^ Ansi.reset ]
+      ^ tab_strip_gap
     in
     let tabs =
       tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
@@ -4808,9 +4807,9 @@ let render_keeper_detail (state : state) =
     surface_chrome ~overflow:Fits state ~terminal_rows ~cols
       ~surface_key:"keeper-detail"
       ~title:
-        (Printf.sprintf "%s  %s"
-           (screen_title " Keepers \xe2\x96\xb8 detail")
-           (connection_badge state))
+        (here_row ~cols state
+           ~path:[ ui_text state ~ko:"상세" ~en:"detail" ]
+           ~readings:[] ~position:None)
       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
       ~body:(fun ~budget:_ c ->
         c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
@@ -4886,9 +4885,9 @@ let render_keeper_logs (state : state) =
     surface_chrome ~overflow:Fits state ~terminal_rows ~cols
       ~surface_key:"keeper-logs"
       ~title:
-        (Printf.sprintf "%s  %s"
-           (screen_title " Keepers \xe2\x96\xb8 logs")
-           (connection_badge state))
+        (here_row ~cols state
+           ~path:[ ui_text state ~ko:"로그" ~en:"logs" ]
+           ~readings:[] ~position:None)
       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
       ~body:(fun ~budget:_ c ->
         c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
@@ -4905,12 +4904,11 @@ let render_keeper_logs (state : state) =
 
     (* Header *)
     let header =
-      Printf.sprintf "%s  (%s)  %s"
-        (screen_title
-           (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 logs"
-              (Terminal_text.single_line k.k_name)))
-        reading_label
-        (connection_badge state)
+      here_row ~cols state
+        ~path:
+          [ Terminal_text.single_line k.k_name
+          ; ui_text state ~ko:"로그" ~en:"logs" ]
+        ~readings:[ reading_label ] ~position:None
     in
 
     box_top buf cols;

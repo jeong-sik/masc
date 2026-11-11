@@ -1621,6 +1621,17 @@ let check_announcement message expected ~run_dir base_path =
     (announcement_label
        (Server_startup_takeover.account_server_announcement ~run_dir ~base_path))
 
+let port_holder_label = function
+  | Ok None -> "no process holds the byte of the port"
+  | Ok (Some pid) -> Printf.sprintf "pid %d holds the byte of the port" pid
+  | Error rejection ->
+    "rejected: " ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection
+
+let check_port_holder message expected ~run_dir base_path ~port =
+  Alcotest.(check string) message (port_holder_label expected)
+    (port_holder_label
+       (Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port))
+
 (* The file the announcement lock is taken on. The suffix is written out here
    so that a change of the name in the library fails these cases. *)
 let announcement_path ~run_dir base_path =
@@ -1675,6 +1686,189 @@ let announcement_is_held_in_the_kernel ~run_dir base_path ~port =
      | Some (_, Unix.WEXITED 0) -> true
      | Some (_, _) | None -> false)
 
+(* The end of a child interrupts a read once an Eio loop left its SIGCHLD
+   handler in this process. *)
+let rec read_nointr fd buffer =
+  try Unix.read fd buffer 0 1 with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> read_nointr fd buffer
+
+(* A process without the lease locks one byte of the announcement file, as
+   any process of this user can. It leaves when the write end closes. *)
+let spawn_byte_locker ~run_dir base_path ~byte =
+  let path = announcement_path ~run_dir base_path in
+  let ready_read, ready_write = Unix.pipe () in
+  let release_read, release_write = Unix.pipe () in
+  match Unix.fork () with
+  | 0 ->
+    close_quietly ready_read;
+    close_quietly release_write;
+    (match
+       let fd = Unix.openfile path [ Unix.O_RDWR; Unix.O_CREAT ] 0o600 in
+       ignore (Unix.lseek fd byte Unix.SEEK_SET : int);
+       Unix.lockf fd Unix.F_TLOCK 1
+     with
+     | () ->
+       ignore (Unix.write_substring ready_write "1" 0 1 : int);
+       let buffer = Bytes.create 1 in
+       ignore (read_nointr release_read buffer : int);
+       Unix._exit 0
+     | exception Unix.Unix_error _ -> Unix._exit 4)
+  | locker_pid ->
+    close_quietly ready_write;
+    close_quietly release_read;
+    let buffer = Bytes.create 1 in
+    Alcotest.(check int) "the other process locked its byte" 1 (read_nointr ready_read buffer);
+    close_quietly ready_read;
+    (locker_pid, release_write)
+
+(* The lock of another process on another byte, taken before the owner
+   announced and after, changes nothing in who holds the byte of a port. The
+   read of the whole file names one lock and cannot say that it is the
+   owner's. *)
+let test_port_holder_is_exact_beside_the_locks_of_other_processes () =
+  with_base_and_run "startup-takeover-announcement-beside" (fun ~base_path ~run_dir ->
+    let port = 9000 and before = 7000 and after = 11000 in
+    check_port_holder "nothing before any file" (Ok None) ~run_dir base_path ~port;
+    Alcotest.(check bool) "a read makes no file" false
+      (Sys.file_exists (announcement_path ~run_dir base_path));
+    let first_pid, first_release = spawn_byte_locker ~run_dir base_path ~byte:before in
+    let owner_pid, owner_release = spawn_announcing_owner ~run_dir base_path ~port in
+    let second_pid, second_release = spawn_byte_locker ~run_dir base_path ~byte:after in
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter close_quietly [ first_release; owner_release; second_release ];
+        List.iter stop_process [ first_pid; owner_pid; second_pid ])
+      (fun () ->
+        check_port_holder "the owner holds the byte of its port" (Ok (Some owner_pid))
+          ~run_dir base_path ~port;
+        check_port_holder "the lock taken before it is on its own byte" (Ok (Some first_pid))
+          ~run_dir base_path ~port:before;
+        check_port_holder "the lock taken after it is on its own byte" (Ok (Some second_pid))
+          ~run_dir base_path ~port:after;
+        check_port_holder "a port between them" (Ok None) ~run_dir base_path ~port:(port + 1);
+        Alcotest.(check bool) "a number that is no port is refused" true
+          (Result.is_error
+             (Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port:0));
+        (match Server_startup_takeover.account_server_announcement ~run_dir ~base_path with
+         | Ok (Some { Server_startup_takeover.pid; port = named }) ->
+           Alcotest.(check bool) "the whole file names one of the three locks" true
+             (List.mem (pid, named) [ first_pid, before; owner_pid, port; second_pid, after ])
+         | Ok None -> Alcotest.fail "the whole file named no lock"
+         | Error rejection ->
+           Alcotest.fail (Server_startup_takeover.base_path_lock_rejection_to_string rejection))))
+
+(* A byte another process locked first is not announced over: the boot of a
+   server stops on it, and no reader takes that process for the server. *)
+let test_a_port_another_process_locked_is_not_announced () =
+  with_base_and_run "startup-takeover-announcement-taken" (fun ~base_path ~run_dir ->
+    let port = 9000 in
+    let locker_pid, locker_release = spawn_byte_locker ~run_dir base_path ~byte:port in
+    Fun.protect
+      ~finally:(fun () ->
+        close_quietly locker_release;
+        stop_process locker_pid)
+      (fun () ->
+        match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+        | Server_startup_takeover.Base_path_already_owned _
+        | Server_startup_takeover.Base_path_rejected _ ->
+          Alcotest.fail "the lease was not acquired"
+        | Server_startup_takeover.Base_path_acquired lease ->
+          Fun.protect
+            ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+            (fun () ->
+              Alcotest.(check bool) "the owner does not announce the port" true
+                (Result.is_error (Server_startup_takeover.announce_account_server lease ~port));
+              check_port_holder "the byte is still the other process's" (Ok (Some locker_pid))
+                ~run_dir base_path ~port;
+              Alcotest.(check bool) "another port is announced" true
+                (Result.is_ok
+                   (Server_startup_takeover.announce_account_server lease ~port:(port + 1))))))
+
+(* An announcement file with a second name is refused by the writer and by
+   the reader: the other name could be opened and closed outside the checks
+   of this directory. *)
+let test_a_linked_announcement_file_is_refused () =
+  with_base_and_run "startup-takeover-announcement-linked" (fun ~base_path ~run_dir ->
+    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_already_owned _
+    | Server_startup_takeover.Base_path_rejected _ ->
+      Alcotest.fail "the lease was not acquired"
+    | Server_startup_takeover.Base_path_acquired lease ->
+      let path = announcement_path ~run_dir base_path in
+      let is_link_refusal = function
+        | Error (Server_startup_takeover.Lease_file_multiply_linked { links = 2; _ }) -> true
+        | Error _ | Ok _ -> false
+      in
+      write_file path "";
+      Unix.chmod path 0o600;
+      Unix.link path (path ^ ".second-name");
+      Fun.protect
+        ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+        (fun () ->
+          Alcotest.(check bool) "the owner does not announce on a file with two names" true
+            (is_link_refusal (Server_startup_takeover.announce_account_server lease ~port:9000)));
+      Alcotest.(check bool) "a reader does not read a file with two names" true
+        (is_link_refusal
+           (Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port:9000)))
+
+(* The lease path names another file than the one this process holds locked:
+   the directory was replaced under the owner, so what it would announce
+   there is not read by a process that asks about the lease of the path. *)
+let test_a_replaced_lease_path_announces_nothing () =
+  with_base_and_run "startup-takeover-announcement-replaced" (fun ~base_path ~run_dir ->
+    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_already_owned _
+    | Server_startup_takeover.Base_path_rejected _ ->
+      Alcotest.fail "the lease was not acquired"
+    | Server_startup_takeover.Base_path_acquired lease ->
+      let lease_path =
+        Server_startup_takeover.For_testing.lease_path
+          ~run_dir:(Unix.realpath run_dir)
+          ~canonical_base_path:(Unix.realpath base_path)
+      in
+      Fun.protect
+        ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+        (fun () ->
+          Unix.rename lease_path (lease_path ^ ".moved");
+          write_file lease_path "";
+          (match Server_startup_takeover.announce_account_server lease ~port:9000 with
+           | Error (Server_startup_takeover.Lease_identity_changed _) -> ()
+           | Error rejection ->
+             Alcotest.fail (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+           | Ok () -> Alcotest.fail "a port was announced beside a lease path of another file");
+          Alcotest.(check bool) "no announcement file was made" false
+            (Sys.file_exists (announcement_path ~run_dir base_path))))
+
+(* One directory has two spellings on macOS, and the table of this process is
+   keyed by the one it took the lease under. A read under the other spelling
+   must find the announcement of this process by the file: opening a second
+   descriptor on it and closing it would drop the lock. A host with one
+   spelling has nothing to ask here. *)
+let test_owner_is_found_under_another_spelling_of_the_lease_root () =
+  with_base_and_run "startup-takeover-announcement-spelling" (fun ~base_path ~run_dir ->
+    match second_realpath_spelling (Unix.realpath run_dir) with
+    | None -> Alcotest.skip ()
+    | Some other_spelling ->
+      (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+       | Server_startup_takeover.Base_path_already_owned _
+       | Server_startup_takeover.Base_path_rejected _ ->
+         Alcotest.fail "the lease was not acquired"
+       | Server_startup_takeover.Base_path_acquired lease ->
+         let port = 9002 in
+         Fun.protect
+           ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+           (fun () ->
+             Alcotest.(check bool) "the port is announced" true
+               (Result.is_ok (Server_startup_takeover.announce_account_server lease ~port));
+             check_port_holder "under the other spelling, the holder is this process"
+               (Ok (Some (Unix.getpid ())))
+               ~run_dir:other_spelling base_path ~port;
+             check_announcement "under the other spelling, the announcement is this process's"
+               (Ok (Some { Server_startup_takeover.pid = Unix.getpid (); port }))
+               ~run_dir:other_spelling base_path;
+             Alcotest.(check bool) "the reads did not drop the lock" true
+               (announcement_is_held_in_the_kernel ~run_dir base_path ~port))))
+
 let test_announcement_names_the_owner_and_ends_with_it () =
   with_base_and_run "startup-takeover-announcement" (fun ~base_path ~run_dir ->
     let port = 9000 in
@@ -1725,6 +1919,10 @@ let test_owner_reads_its_own_announcement_and_keeps_it () =
         check_announcement "the owner reads its own announcement"
           (Ok (Some { Server_startup_takeover.pid = Unix.getpid (); port }))
           ~run_dir base_path;
+        check_port_holder "the owner holds the byte of its port"
+          (Ok (Some (Unix.getpid ())))
+          ~run_dir base_path ~port;
+        check_port_holder "and no other byte" (Ok None) ~run_dir base_path ~port:(port + 1);
         Alcotest.(check bool) "reading it did not drop the lock" true
           (announcement_is_held_in_the_kernel ~run_dir base_path ~port);
         Alcotest.(check bool) "a second announcement is refused" true
@@ -1756,7 +1954,10 @@ let test_announcement_on_a_directory_is_refused () =
                (Server_startup_takeover.announce_account_server lease ~port:9000)));
       Alcotest.(check bool) "a reader does not take a directory for an announcement" true
         (is_directory_refusal
-           (Server_startup_takeover.account_server_announcement ~run_dir ~base_path)))
+           (Server_startup_takeover.account_server_announcement ~run_dir ~base_path));
+      Alcotest.(check bool) "nor for the lock of a port" true
+        (is_directory_refusal
+           (Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port:9000)))
 
 let () =
   Alcotest.run "Server_startup_takeover"
@@ -1843,5 +2044,15 @@ let () =
             test_owner_reads_its_own_announcement_and_keeps_it;
           Alcotest.test_case "an announcement file that is a directory is refused" `Quick
             test_announcement_on_a_directory_is_refused;
+          Alcotest.test_case "the holder of a port is exact beside the locks of other processes"
+            `Quick test_port_holder_is_exact_beside_the_locks_of_other_processes;
+          Alcotest.test_case "a port another process locked is not announced" `Quick
+            test_a_port_another_process_locked_is_not_announced;
+          Alcotest.test_case "an announcement file with two names is refused" `Quick
+            test_a_linked_announcement_file_is_refused;
+          Alcotest.test_case "a lease path that names another file announces nothing" `Quick
+            test_a_replaced_lease_path_announces_nothing;
+          Alcotest.test_case "the owner is found under another spelling of the lease root"
+            `Quick test_owner_is_found_under_another_spelling_of_the_lease_root;
         ] );
     ]

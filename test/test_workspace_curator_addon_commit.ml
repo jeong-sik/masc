@@ -621,6 +621,12 @@ let test_observed_host_answer_still_requires_full_domain_validation ()=with_work
       `Assoc (List.map (fun (key,value) -> key,if key="final" then final else value) fields)
     | Some _ | None -> fail "original Exact record" in
   get (Store.save_exact_request store ~declaration_id:"curator" ~request_id:record.request_id wire);
+  let diag = match no_worker_resume base_path store record with
+    | Error (Consumer.Rejected d) -> "DIAG-REJECTED:" ^ d
+    | Error (Consumer.Unavailable d) -> "DIAG-UNAVAILABLE:" ^ d
+    | Error (Consumer.Uncertain d) -> "DIAG-UNCERTAIN:" ^ d
+    | Ok _ -> "DIAG-OK" in
+  prerr_endline diag;
   check bool "partial wire shape is never a valid original domain judgment" true
     (match no_worker_resume base_path store record with Error (Consumer.Rejected _) -> true
      | Ok _ | Error (Consumer.Unavailable _ | Consumer.Uncertain _) -> false);

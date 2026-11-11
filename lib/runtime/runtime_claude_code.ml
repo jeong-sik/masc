@@ -394,12 +394,11 @@ let emit_stream_event on_stream_event event =
    code.claude.com/docs/en/agent-sdk/typescript, read 2026-11-11). Measured on
    Claude Code 2.1.322 with a login past its time limit: the envelope carried
    "error":"authentication_failed", and the result frame that followed said
-   only terminal_reason "api_error" with a null api_error_status, because the
-   client refused before any request reached the API. Every other value is
-   kept for the reader and changes nothing here. *)
+   only terminal_reason "api_error" with a null api_error_status. No reader
+   tells the other values apart, so they are one constructor. *)
 type api_error_cause =
   | Authentication_failed
-  | Other_api_error_cause of string
+  | Other_api_error_cause
 
 type error =
   | Invalid_config of string
@@ -590,7 +589,7 @@ let not_signed_in_detail source =
   match source with
   | Runtime_official_account.Declared_directory ->
     "Claude Code is not signed in on the account home this runtime declares. Sign that \
-     home in with /login in the TUI, or with `masc runtime-account-login --client claude \
+     home in with /login in the MASC TUI, or with `masc runtime-account-login --client claude \
      --account-home <the provider's account-home in runtime.toml>`. A declared account \
      home receives no credential or routing variable from the server environment, so \
      exporting one does not sign it in."
@@ -1382,8 +1381,10 @@ let assistant_scope ~stage fields =
 
 (* Claude Code 2.1.263's assistant envelope declares this optional boolean;
    its producer maps isApiErrorMessage=true to is_api_error_message=true.
-   The text of an API diagnostic is not a model response. Only the terminal
-   result classifies the failure; tool effects remain independent evidence. *)
+   The text of an API diagnostic is not a model response. The terminal result
+   classifies the failure; the diagnostic's [error] member adds the cause the
+   client named, which the result frame does not repeat. Tool effects remain
+   independent evidence. *)
 let assistant_origin ~stage fields =
   match List.assoc_opt "is_api_error_message" fields with
   | None | Some (`Bool false) -> Ok Model_response
@@ -1392,7 +1393,7 @@ let assistant_origin ~stage fields =
      | None | Some `Null -> Ok (Api_error_diagnostic None)
      | Some (`String "authentication_failed") ->
        Ok (Api_error_diagnostic (Some Authentication_failed))
-     | Some (`String cause) -> Ok (Api_error_diagnostic (Some (Other_api_error_cause cause)))
+     | Some (`String _) -> Ok (Api_error_diagnostic (Some Other_api_error_cause))
      | Some _ -> protocol_error stage "field \"error\" must be a string or null")
   | Some _ -> protocol_error stage "field \"is_api_error_message\" must be a boolean"
 ;;

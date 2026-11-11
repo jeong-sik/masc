@@ -450,10 +450,9 @@ val dynamic_tool_bytes : dynamic_tool list -> int
 type api_error_cause =
   | Authentication_failed
       (** The client's credential was refused or could not be renewed. The
-          result frame of such a turn can carry no HTTP status: a login past
-          its time limit is refused by the client before a request is sent. *)
-  | Other_api_error_cause of string
-      (** Any other value the client sent, kept as sent. *)
+          result frame of such a turn can carry no HTTP status: measured
+          with a login past its time limit. *)
+  | Other_api_error_cause  (** Any other value the client sent. *)
 
 type error =
   | Invalid_config of string

@@ -88,7 +88,7 @@ let access_rejection status =
 
 (* Measured on Claude Code 2.1.322 (2026-11-11) with a login past its time
    limit: the diagnostic envelope names the cause, and the result frame has
-   no HTTP status because the client refused before sending a request. *)
+   no HTTP status. *)
 let login_expired_diagnostic =
   {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-login-expired","error":"authentication_failed","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Failed to authenticate: this login reached its time limit and cannot be renewed."}]}}|}
 ;;

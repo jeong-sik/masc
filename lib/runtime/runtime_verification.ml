@@ -1011,7 +1011,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
               Error (claude_auth_refusal ~account ~named:(http_status_name status) detail)
             | None, Some Runtime_claude_code.Authentication_failed ->
               Error (claude_auth_refusal ~account ~named:"authentication_failed" detail)
-            | None, (Some (Runtime_claude_code.Other_api_error_cause _) | None) ->
+            | None, (Some Runtime_claude_code.Other_api_error_cause | None) ->
               Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Quota_blocked { block; _ } as error) ->
            Error (claude_quota_failure block (Runtime_claude_code.error_to_string error))

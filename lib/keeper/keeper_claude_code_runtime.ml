@@ -418,7 +418,11 @@ let claude_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.AuthError { provider = "claude_code"; detail })
   | Runtime_claude_code.Turn_failed detail
-  | Runtime_claude_code.Turn_failed_with_observation { detail; _ } ->
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_cause = Some Runtime_claude_code.Other_api_error_cause | None
+      ; detail
+      ; _
+      } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
          { provider = "claude_code"; error_type = Some "turn_failed"; detail })

@@ -77,19 +77,31 @@ repository root.
 
 Every evaluation call sends what MASC's exact lane sends: the admission prompt,
 then the schema instruction as the last user message, with
-`reasoning_effort: "low"` and `max_tokens: 32768`.
+`reasoning_effort: "low"` and `max_tokens: 32768`. Both values are pinned in
+`pass_lines.json` under `request`.
 
 An exact request carries `max_tokens` only when its lane declares
 `max_output_tokens`. A binding's `max-tokens` does not reach it. MASC sends the
 lane's value to every slot of the lane, clamped to each slot's declared or
-catalog output ceiling. Rollout saves 32,768 as the lane's
-`max_output_tokens`, and the checkpoint's binding declares an output ceiling of
-32,768, so the checkpoint receives 32,768.
+catalog output ceiling (`output_token_ceiling` in
+`packages/agent_core/lib/llm_provider/backend_openai_request.ml`). The live
+admission lane declares no `max_output_tokens` today, so its requests carry no
+`max_tokens`.
 
-A GLM run sends what MASC's GLM slot then sends: the same two messages, with
-thinking enabled, a `json_object` response format and the same `max_tokens`
-(GLM's output ceiling is higher). The slot declares no effort, so the request
-carries none, and the endpoint applies its default.
+When the operator puts a checkpoint in the admission lane, the roll-out saves
+65,536 as the lane's `max_output_tokens` and declares an output ceiling of
+32,768 on the checkpoint's binding. The checkpoint then receives 32,768, the
+value these runs send. The GLM slot receives 65,536: its catalog row
+(`glm-5.3-flash` under `glm-coding` in `packages/agent_core/models.toml`) sets a
+ceiling of 131,072. Every other slot of the lane receives 65,536 clamped to its
+own ceiling.
+
+`glm_chat.py` sends the two messages as MASC's GLM slot does, with thinking
+enabled and a `json_object` response format. It sends the pinned
+`max_tokens: 32768` too, so a prompt draft and its baseline meet the same
+ceiling. The live GLM slot sends no `max_tokens` until the roll-out saves the
+lane value. The slot declares no effort, so the request carries none, and the
+endpoint applies its default.
 
 ## Order
 

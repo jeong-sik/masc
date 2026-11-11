@@ -1117,7 +1117,8 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints_lanes_run_list ~has_runs:(shown > 0)
+         (Masc_tui_keys.footer_hints_lanes_run_list ~lang:state.ui_language
+            ~has_runs:(shown > 0)
             ~has_older:
               (Option.is_some state.lane_runs_next && not state.lane_runs_loading)));
   finish_surface state ~surface_key:"lane-runs" ~rows:terminal_rows ~cols buf
@@ -2051,6 +2052,7 @@ let render_lane_run_detail (state : state) ~run_id =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ?position ~hints:(Masc_tui_keys.footer_hints_lanes_run_detail_for
+         ~lang:state.ui_language
          ~preflight:(match detail with
            | Some (Inspection_lane {Tui_decode.lrd_librarian_preflight=Some _;_}) -> true
            | Some (Inspection_lane { lrd_librarian_preflight = None;_})

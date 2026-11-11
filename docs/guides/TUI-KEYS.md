@@ -506,6 +506,14 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `j/k` | in a lane's run list: move the run cursor |
+| `Right / Enter` | in a lane's run list: open the run's prompt and output |
+| `>` | in a lane's run list: load the next retained-run page from the server |
+| `Left / Esc` | in a lane's run list: back to the lane overview |
+| `j/k` | in a run's detail: scroll Input and Output together |
+| `PgUp/PgDn` | in a run's detail: page both evidence panes |
+| `[ / ]` | in a run's detail: step to the run before or after this one in the list |
+| `Left / Esc` | in a run's detail: back to the run list |
 | `d` | in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence |
 
 ## Features & plugins / Clients

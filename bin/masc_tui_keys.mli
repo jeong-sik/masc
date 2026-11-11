@@ -402,13 +402,15 @@ val footer_hints_fusion_detail : string
     fitter gives up key items from the back, and a position is the one item
     on the row that [?] cannot recover. *)
 
-val footer_hints_lanes_run_list : has_runs:bool -> has_older:bool -> string
+val footer_hints_lanes_run_list :
+  lang:Masc_tui_types.ui_language -> has_runs:bool -> has_older:bool -> string
 (** The Lanes run-list footer: the drill-down under a standalone lane row. A
     key is drawn only while it can act: [j/k] and [Right / Enter] need a loaded
-    run, and [\]] needs the server to have named an older page. *)
+    run, and [>] needs the server to have named an older page. The [?] sheet
+    opens on the same bindings while this screen is up. *)
 
-val footer_hints_lanes_run_detail : string
-val footer_hints_lanes_run_detail_for : preflight:bool -> string
+val footer_hints_lanes_run_detail_for :
+  lang:Masc_tui_types.ui_language -> preflight:bool -> string
 (** The Lanes run-detail footer. The window the stacked Input/Output list drew
     travels the way the Fusion detail footer's does; the split panes name
     theirs in their own titles and pass none. *)

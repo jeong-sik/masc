@@ -10034,7 +10034,7 @@ let launch_owed_tools state ~mailbox =
                   (fun owed -> state.tools_activations_owed <- owed)
              then [ Tools_activations_read ]
              else [])
-      | Tools_surface
+      | Tools_surface | Tools_storage
       | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> inventory_parts ()
       | Tools_async -> []
     in
@@ -19354,6 +19354,9 @@ let enter_tools_pane state pane =
       owe_tools_catalog_read state;
       owe_every_skill_usage_read state
   | Tools_activations -> owe_tools_activations_read state
+  (* The cleanup results change with the server's passes, which push
+     nothing, so opening the pane reads the envelope again. *)
+  | Tools_storage -> owe_tools_inventory_read state
   | Tools_surface | Tools_async
   | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> ()
 ;;
@@ -42716,7 +42719,7 @@ Use relative paths for resources already held in the package. -->
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            goto_surface state ~mailbox:async_messages Runtime
        | Some "p" | Some "P" when state.view = Tools ->
-           (* Five sections, one at a time. Concatenated they ran to 326 rows
+           (* Six sections, one at a time. Concatenated the first five ran to 326 rows
               on this workspace and the terminal draws twenty, so four of
               them sat behind a per-tool list that never ends. [p] is the
               same key that moves between the Config surface's panes. *)
@@ -42726,7 +42729,8 @@ Use relative paths for resources already held in the package. -->
               | Tools_async -> Tools_activations
               | Tools_activations -> Tools_usage
               | Tools_usage -> Tools_catalog Tools_catalog_list
-              | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> Tools_surface)
+              | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> Tools_storage
+              | Tools_storage -> Tools_surface)
        | Some "p" | Some "P" when state.view = Config ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the

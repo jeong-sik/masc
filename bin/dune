@@ -1379,6 +1379,12 @@
  (libraries masc yojson))
 
 (library
+ (name masc_tui_storage)
+ (wrapped false)
+ (modules masc_tui_storage)
+ (libraries masc))
+
+(library
  (name masc_tui_keeper_mark)
  (wrapped false)
  (modules masc_tui_keeper_mark)
@@ -2308,6 +2314,7 @@
   masc_types
   masc_tui_ansi
   masc_tui_volume_gc
+  masc_tui_storage
   masc_tui_chart
   masc_tui_token_scale
   masc_tui_context_inspector

@@ -122,6 +122,7 @@ runs:
         OPAM_BINARY_CACHE_DIR: ${{ steps.opam-toolchain-key.outputs.opam-binary-path }}
         OPAM_CACHE_EXACT_HIT: ${{ steps.opam-toolchain-cache.outputs.cache-hit }}
         OPAM_CACHE_EXACT_HIT_STORE: ${{ steps.opam-toolchain-store.outputs.cache-hit }}
+        OPAM_CACHE_RESTORE_ONLY_KEY: ${{ steps.opam-toolchain-cache.outputs.cache-matched-key }}
         GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
@@ -225,10 +226,11 @@ runs:
           echo "::notice::Cache hit — reusing opam switch ${switch_name}"
           bash scripts/ci/opam-cache-freshness.sh \
             --refresh "${OPAM_CACHE_EXACT_HIT:-}"
-          # install-ocaml-deps reads this: a switch restored under its exact
-          # key was saved after the pins and the install of the same lock.
-          if [[ "${OPAM_CACHE_EXACT_HIT:-}" == "true" ]]; then
-            echo "MASC_OPAM_SWITCH_EXACT_RESTORE=true" >> "${GITHUB_ENV}"
+          # install-ocaml-deps reads this: the switch came from the cache
+          # and this run only restores, so nothing opam writes into the
+          # switch here is saved for another run.
+          if [[ -n "${OPAM_CACHE_RESTORE_ONLY_KEY:-}" ]]; then
+            echo "MASC_OPAM_SWITCH_RESTORE_ONLY=true" >> "${GITHUB_ENV}"
           fi
           switch_prefix="$(opam var prefix --switch="${switch_name}")"
           echo "OPAMSWITCH=${switch_name}" >> "${GITHUB_ENV}"

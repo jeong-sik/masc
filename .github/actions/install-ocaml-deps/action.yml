@@ -10,14 +10,6 @@ inputs:
     description: Space-separated list of additional apt packages
     required: false
     default: ""
-  system-packages-on-exact-restore:
-    description: >-
-      "install" (default) lets opam install the system packages its packages
-      name on every run. "skip" asks opam for none when the switch was
-      restored from the cache under its exact key and no os-packages are
-      requested; only for jobs that neither link nor run what they build.
-    required: false
-    default: install
   install-timeout-minutes:
     description: Timeout for each opam install attempt
     required: false
@@ -35,7 +27,6 @@ runs:
       env:
         INSTALL_FLAGS: ${{ inputs.install-flags }}
         OS_PACKAGES: ${{ inputs.os-packages }}
-        SYSTEM_PACKAGES_ON_EXACT_RESTORE: ${{ inputs.system-packages-on-exact-restore }}
         INSTALL_TIMEOUT_MINUTES: ${{ inputs.install-timeout-minutes }}
         HEARTBEAT_SECONDS: ${{ inputs.heartbeat-seconds }}
       run: |

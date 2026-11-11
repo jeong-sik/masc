@@ -41,19 +41,12 @@ install_os_packages() {
   log_elapsed "Installed OS packages" "${started_at}"
 }
 
-# A switch restored under its exact cache key was saved after the pins and
-# the install of this same lock (setup-ocaml-toolchain), so opam has nothing
-# to build. It still looks for each package's system packages, and a fresh
-# runner has none of conf-protoc's: opam then fetches libprotobuf-dev and
-# protobuf-compiler from the apt mirror on every run, and a run fails
-# whenever the mirror does not answer (issue #51372). A job that only
-# type-checks uses neither, so it may ask for no system packages
-# (--no-depexts). The answer is "no" for a switch that was not restored
-# exactly, and when the job asks for OS packages of its own.
-switch_restored_complete() {
-  [ "${SYSTEM_PACKAGES_ON_EXACT_RESTORE:-install}" = "skip" ] \
-    && [ "${MASC_OPAM_SWITCH_EXACT_RESTORE:-}" = "true" ] \
-    && [ -z "${OS_PACKAGES:-}" ]
+# shellcheck source=scripts/ci/opam-system-packages.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../../scripts/ci/opam-system-packages.sh"
+
+# A job that asks for OS packages of its own goes to apt anyway.
+restored_switch_may_skip_system_packages() {
+  opam_may_skip_system_packages && [ -z "${OS_PACKAGES:-}" ]
 }
 
 # $1 names the attempt in the log lines; the rest are extra opam flags.
@@ -125,8 +118,8 @@ main() {
   export OPAMCONFIRMLEVEL="${OPAMCONFIRMLEVEL:-unsafe-yes}"
   export OPAMYES="${OPAMYES:-1}"
 
-  if switch_restored_complete; then
-    echo "The switch was restored under its exact cache key; asking opam for no system packages."
+  if restored_switch_may_skip_system_packages; then
+    echo "The switch was restored from the cache; asking opam for no system packages."
     if run_opam_install_attempt "on the restored switch" --no-depexts; then
       return 0
     fi

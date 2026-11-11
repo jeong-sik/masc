@@ -457,8 +457,15 @@ if $do_install; then
       echo "::warning::apt package index refresh failed; attempting install with existing package index" >&2
     fi
   }
-  refresh_apt_index
-  opam install --yes "${pinned_pkgs[@]}"
+  # shellcheck source=scripts/ci/opam-system-packages.sh
+  source "${SCRIPT_DIR}/ci/opam-system-packages.sh"
+  if opam_may_skip_system_packages \
+     && opam install --yes --no-depexts "${pinned_pkgs[@]}"; then
+    echo "[opam-pin] the restored switch was asked for no system packages."
+  else
+    refresh_apt_index
+    opam install --yes "${pinned_pkgs[@]}"
+  fi
   echo "[opam-pin] install complete. Installed binaries now match the pins above."
 else
   echo ""

@@ -12009,7 +12009,13 @@ let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
     | None -> state.msg_target_keeper_name
   with
   | None -> report_action state "error" "Cannot send: no Keeper is selected"
-  | Some _ when state.workspace_identity <> Workspace_identity_match ->
+  | Some _ when
+        (match state.workspace_identity with
+         | Workspace_identity_unread | Workspace_identity_mismatch _ -> true
+         | Workspace_identity_match_unconfirmed _ | Workspace_identity_match -> false) ->
+      (* Unread and mismatched workspaces refuse. An unconfirmed match keeps
+         the last confirmed match, so the line queues and waits for the
+         resume that a confirming read runs. *)
       report_action state "error"
         "Cannot send: workspace identity is unverified · draft retained"
   | Some target when Option.is_some state.keepers_error
@@ -24997,12 +25003,27 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             Printf.sprintf "observer stream refused with %d: %s" status detail
       in
       record_observer_closed state ~workspace outcome ~reason ~at:(Unix.gettimeofday ());
+      (* A stream that carried readings cannot cover its closed interval with
+         a replay: file-backed snapshots may have moved without any event.
+         The reopen owes one revalidate; a first open that never answered
+         does not. *)
+      if not was_opening then state.observer_revalidate_owed <- true;
       let owner = ref () in
       state.observer_retry_owner <- Some owner;
       schedule_observer_retry state ~mailbox owner;
       if was_opening then resume_fusion_after_observer_failure state ~mailbox
       end
-  | Observer_msg (Observer_opened _ | Observer_received _) -> ()
+  | Observer_msg (Observer_opened _) ->
+      (* The reopen consumes the revalidate owed for its closed interval; a
+         first open owes nothing because nothing was carried before it. *)
+      if state.observer_revalidate_owed then begin
+        state.observer_revalidate_owed <- false;
+        start_http_refresh state ~host:server_peer_host ~port:state.port
+          ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+          ~scoped_refresh_inflight:http_scoped_refresh_inflight
+          ~scoped_refresh_followup ~mailbox
+      end
+  | Observer_msg (Observer_received _) -> ()
   | Observer_msg (Observer_retry_due (authority, expected)) ->
       if Masc_tui_async_protocol.observer_retry_owned state ~authority expected then
            (match state.workspace_identity, state.connection_status with

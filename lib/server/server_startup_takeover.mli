@@ -214,3 +214,47 @@ val capture_existing_owner :
     owner. This never signals a process or trusts the PID file. Before using the
     returned handle, the caller must authenticate as that workspace's admin and
     obtain explicit restart selection. Does not close this process's own lease. *)
+
+(** {1 The account server announcement}
+
+    Which port the account server of a workspace serves, told to the host
+    through the lock table of the kernel. The probes of that server say
+    nothing of the process or of the workspace
+    ({!Server_accounts}), so no HTTP answer tells a command line which
+    workspace a port belongs to. The server locks one byte of
+    [<lease>.account-server], a file beside its lease that stays empty: the
+    byte whose position is the port. Another process reads the holder and
+    the position with [F_GETLK].
+
+    The record is the lock. It is there while its holder lives and holds the
+    lease, and gone the moment either ends, so no number is left on disk to
+    go stale. A process of the same effective UID can take such a lock
+    without the lease, as it can signal the server: the readers compare the
+    holder with a process they know by other means, the kernel owner of the
+    lease ({!capture_existing_owner}) or a child they started. *)
+
+type account_server_announcement =
+  { pid : int  (** The holder of the lock, as the kernel names it. *)
+  ; port : int
+  }
+
+val announce_account_server : base_path_lease -> port:int -> (unit, base_path_lock_rejection) result
+(** Announce [port] for the life of the lease: {!release_base_path_lease}
+    withdraws it before it gives the lease up, and the kernel does at the
+    exit of the process. Call it once, with the port bound. A handle that is
+    not the active lease of this process, a second call, a [port] outside
+    1..65535, a lease path that no longer names the lease this process
+    holds, and an announcement file that is not a regular file of this user
+    with one name are refused, and nothing is announced. The directory is
+    not validated again as {!acquire_base_path_lock} validated it (the
+    boundary of #24344). *)
+
+val account_server_announcement :
+  run_dir:string -> base_path:string -> (account_server_announcement option, base_path_lock_rejection) result
+(** What is announced for [base_path] now. [Ok None] when no process holds
+    the announcement: no owner, an owner that is not an account server, or
+    one that has not bound its port. The file is opened with the checks of
+    the lease file and never made. A process asking about a lease it holds
+    itself is answered from its own table, since opening the file would
+    drop its lock. A lock that is not at a port, or that the kernel cannot
+    be asked about, is a [Lease_io_failed]. *)

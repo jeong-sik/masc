@@ -1607,6 +1607,157 @@ let test_rm_rf_unlinks_symlinks () =
   Alcotest.(check string) "the link target kept its contents" "kept"
     (read_file kept)
 
+(* The account server announcement. *)
+
+let announcement_label = function
+  | Ok None -> "nothing announced"
+  | Ok (Some { Server_startup_takeover.pid; port }) ->
+    Printf.sprintf "pid %d announces port %d" pid port
+  | Error rejection ->
+    "rejected: " ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection
+
+let check_announcement message expected ~run_dir base_path =
+  Alcotest.(check string) message (announcement_label expected)
+    (announcement_label
+       (Server_startup_takeover.account_server_announcement ~run_dir ~base_path))
+
+(* The file the announcement lock is taken on. The suffix is written out here
+   so that a change of the name in the library fails these cases. *)
+let announcement_path ~run_dir base_path =
+  Server_startup_takeover.For_testing.lease_path
+    ~run_dir:(Unix.realpath run_dir)
+    ~canonical_base_path:(Unix.realpath base_path)
+  ^ ".account-server"
+
+(* Another process holds the lease and announces [port]; it leaves when the
+   write end it is given back closes. *)
+let spawn_announcing_owner ~run_dir base_path ~port =
+  let ready_read, ready_write = Unix.pipe () in
+  let release_read, release_write = Unix.pipe () in
+  match Unix.fork () with
+  | 0 ->
+    close_quietly ready_read;
+    close_quietly release_write;
+    (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+     | Server_startup_takeover.Base_path_acquired lease ->
+       (match Server_startup_takeover.announce_account_server lease ~port with
+        | Ok () ->
+          ignore (Unix.write_substring ready_write "1" 0 1 : int);
+          let buffer = Bytes.create 1 in
+          ignore (Unix.read release_read buffer 0 1 : int);
+          Unix._exit 0
+        | Error _ -> Unix._exit 4)
+     | Server_startup_takeover.Base_path_already_owned _ -> Unix._exit 2
+     | Server_startup_takeover.Base_path_rejected _ -> Unix._exit 3)
+  | owner_pid ->
+    close_quietly ready_write;
+    close_quietly release_read;
+    let buffer = Bytes.create 1 in
+    Alcotest.(check int) "the owner announced its port" 1
+      (Unix.read ready_read buffer 0 1);
+    close_quietly ready_read;
+    (owner_pid, release_write)
+
+(* Asks the kernel from another process whether [port] is announced: a lock
+   is not inherited across fork, and the tables of this process are. *)
+let announcement_is_held_in_the_kernel ~run_dir base_path ~port =
+  let path = announcement_path ~run_dir base_path in
+  match Unix.fork () with
+  | 0 ->
+    let fd = Unix.openfile path [ Unix.O_RDWR ] 0o600 in
+    ignore (Unix.lseek fd port Unix.SEEK_SET : int);
+    (match Unix.lockf fd Unix.F_TEST 1 with
+     | () -> Unix._exit 1
+     | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) -> Unix._exit 0
+     | exception Unix.Unix_error _ -> Unix._exit 2)
+  | probe_pid ->
+    (match waitpid_nointr probe_pid with
+     | Some (_, Unix.WEXITED 0) -> true
+     | Some (_, _) | None -> false)
+
+let test_announcement_names_the_owner_and_ends_with_it () =
+  with_base_and_run "startup-takeover-announcement" (fun ~base_path ~run_dir ->
+    let port = 9000 in
+    check_announcement "nothing before any owner" (Ok None) ~run_dir base_path;
+    let owner_pid, release_write = spawn_announcing_owner ~run_dir base_path ~port in
+    let released = ref false in
+    let release () =
+      if not !released
+      then (
+        released := true;
+        close_quietly release_write)
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        release ();
+        stop_process owner_pid)
+      (fun () ->
+        check_announcement "the kernel names the owner and its port"
+          (Ok (Some { Server_startup_takeover.pid = owner_pid; port }))
+          ~run_dir base_path;
+        Alcotest.(check int) "the file stays empty" 0
+          (Unix.stat (announcement_path ~run_dir base_path)).Unix.st_size;
+        release ();
+        owner_exited_on_its_own owner_pid;
+        check_announcement "nothing once the owner is gone" (Ok None) ~run_dir base_path))
+
+let test_owner_reads_its_own_announcement_and_keeps_it () =
+  with_base_and_run "startup-takeover-announcement-own" (fun ~base_path ~run_dir ->
+    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_already_owned _
+    | Server_startup_takeover.Base_path_rejected _ ->
+      Alcotest.fail "the lease was not acquired"
+    | Server_startup_takeover.Base_path_acquired lease ->
+      let port = 9001 in
+      let released = ref false in
+      let release () =
+        if not !released
+        then (
+          released := true;
+          Server_startup_takeover.release_base_path_lease lease)
+      in
+      let announce port = Server_startup_takeover.announce_account_server lease ~port in
+      Fun.protect ~finally:release (fun () ->
+        check_announcement "an owner that announced nothing" (Ok None) ~run_dir base_path;
+        Alcotest.(check bool) "a number that is no port is refused" true
+          (Result.is_error (announce 65536));
+        Alcotest.(check bool) "the port is announced" true (Result.is_ok (announce port));
+        check_announcement "the owner reads its own announcement"
+          (Ok (Some { Server_startup_takeover.pid = Unix.getpid (); port }))
+          ~run_dir base_path;
+        Alcotest.(check bool) "reading it did not drop the lock" true
+          (announcement_is_held_in_the_kernel ~run_dir base_path ~port);
+        Alcotest.(check bool) "a second announcement is refused" true
+          (Result.is_error (announce (port + 1)));
+        release ();
+        Alcotest.(check bool) "the release of the lease withdrew it" false
+          (announcement_is_held_in_the_kernel ~run_dir base_path ~port);
+        check_announcement "nothing after the release" (Ok None) ~run_dir base_path;
+        Alcotest.(check bool) "a released lease announces nothing" true
+          (Result.is_error (announce port))))
+
+let test_announcement_on_a_directory_is_refused () =
+  with_base_and_run "startup-takeover-announcement-dir" (fun ~base_path ~run_dir ->
+    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_already_owned _
+    | Server_startup_takeover.Base_path_rejected _ ->
+      Alcotest.fail "the lease was not acquired"
+    | Server_startup_takeover.Base_path_acquired lease ->
+      let is_directory_refusal = function
+        | Error (Server_startup_takeover.Lease_file_non_regular { kind = Unix.S_DIR; _ }) -> true
+        | Error _ | Ok _ -> false
+      in
+      Unix.mkdir (announcement_path ~run_dir base_path) 0o700;
+      Fun.protect
+        ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+        (fun () ->
+          Alcotest.(check bool) "the owner does not announce on a directory" true
+            (is_directory_refusal
+               (Server_startup_takeover.announce_account_server lease ~port:9000)));
+      Alcotest.(check bool) "a reader does not take a directory for an announcement" true
+        (is_directory_refusal
+           (Server_startup_takeover.account_server_announcement ~run_dir ~base_path)))
+
 let () =
   Alcotest.run "Server_startup_takeover"
     [
@@ -1683,5 +1834,14 @@ let () =
             test_base_path_lock_rejects_run_directory_retarget;
           Alcotest.test_case "post-establish runtime retarget is rejected" `Quick
             test_base_path_lock_rejects_runtime_retarget_after_establish;
+        ] );
+      ( "account server announcement",
+        [
+          Alcotest.test_case "the kernel names the owner and its port while it lives"
+            `Quick test_announcement_names_the_owner_and_ends_with_it;
+          Alcotest.test_case "the owner reads its own announcement and keeps it" `Quick
+            test_owner_reads_its_own_announcement_and_keeps_it;
+          Alcotest.test_case "an announcement file that is a directory is refused" `Quick
+            test_announcement_on_a_directory_is_refused;
         ] );
     ]

@@ -1464,8 +1464,8 @@ let test_log_stream_pings_while_the_ring_always_holds_a_newer_entry () =
 
 (* A log stream whose client reads nothing. The first frame is longer than
    the client's window, so its flush waits, and at the bound the stream is
-   reset. The loop's [send] runs outside the stream: it answers [Closed],
-   the loop ends, and [sw] can end. The stream's line is the only stall
+   reset. The loop runs outside the stream, under [serve]: the reset cancels
+   it at its [send], and [sw] can end. The stream's line is the only stall
    line. *)
 let test_unread_log_stream_is_reset_at_the_bound () =
   let clock = Eio_mock.Clock.make () in
@@ -1503,7 +1503,8 @@ let test_unread_log_stream_is_reset_at_the_bound () =
 
 (* A log stream whose client resets the stream while the loop waits for the
    ring and for its keepalive time. The loop ends with the stream: [sw],
-   which the loop runs in, ends although the clock never moves. *)
+   which the loop runs in, ends. Nothing moves the clock, so a loop that
+   outlived the stream would hold [sw] until the harness gives up. *)
 let test_reset_log_stream_ends_its_loop () =
   let clock = Eio_mock.Clock.make () in
   let streams = registry ~clock () in
@@ -1521,8 +1522,7 @@ let test_reset_log_stream_ends_its_loop () =
       collect (Eio.Promise.await response_body) received;
       ping_until client (fun () -> Buffer.length received > 0 && loop.Loop_clock.sleeps > 0);
       Eio.Flow.copy_string (rst_stream_frame 1) client_flow;
-      ping_until client (fun () -> Server_h2_stream_registry.active_streams streams = 0));
-    check (float 0.0) "the loop ended on a clock that never moved" 0.0 (Eio.Time.now clock))
+      ping_until client (fun () -> Server_h2_stream_registry.active_streams streams = 0)))
 
 (* RFC-0518 D7. A response serves its producer in [outside], a switch that
    outlives the HTTP/2 stream, as the router's switch does. [produce] gets
@@ -1640,6 +1640,60 @@ let test_ending_switch_runs_no_producer () =
     check int "the cleanup ran once" 1 !released;
     check bool "the producer did not run" false !produced)
 
+(* [sw] ends while the producer waits for an event. The producer is
+   cancelled, not failed: the response ends whole, where a failed producer's
+   is reset, and the cleanup runs once. *)
+let test_ending_switch_ends_a_waiting_producer () =
+  let clock = Eio_mock.Clock.make () in
+  let released = ref 0 in
+  let outside, set_outside = Eio.Promise.create () in
+  let waiting, wait = Eio.Promise.create () in
+  let produce sse =
+    send_served sse;
+    Eio.Promise.resolve wait ();
+    Eio.Fiber.await_cancel () in
+  with_connection ~streams:(registry ~clock ()) Request_fibers
+    (served_handler ~clock ~outside ~released ~produce)
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let status, _, read_all = open_unread client "/served" in
+    (match
+       Eio.Switch.run (fun sw ->
+         Eio.Promise.resolve set_outside sw;
+         check int "the response started" 200 (Eio.Promise.await status);
+         Eio.Promise.await waiting;
+         check int "a waiting producer keeps what it holds" 0 !released;
+         Eio.Switch.fail sw Exit)
+     with
+     | () -> fail "the switch did not end with its failure"
+     | exception Exit -> ());
+    check int "the cleanup ran once" 1 !released;
+    check bool "the response ended whole" true (read_all () = Ok served_frame))
+
+(* A cleanup that raises. The response still ends whole and [sw], which
+   lives as long as the server, does not fail. *)
+let test_raising_cleanup_stays_off_the_switch () =
+  let clock = Eio_mock.Clock.make () in
+  let released = ref 0 in
+  let outside, set_outside = Eio.Promise.create () in
+  let handler ~stream_end _ h2_reqd =
+    let sse =
+      Server_sse_response.respond ~clock ~stalled_after_s (reqd_of_h2 ~stream_end h2_reqd)
+        (Httpun.Response.create `OK) in
+    Server_sse_response.serve ~sw:(Eio.Promise.await outside) sse
+      ~release:(fun () ->
+        incr released;
+        failwith "fixture cleanup failure")
+      (fun () -> send_served sse) in
+  with_connection ~streams:(registry ~clock ()) Request_fibers handler
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    Eio.Switch.run (fun sw ->
+      Eio.Promise.resolve set_outside sw;
+      let status, _, read_all = open_unread client "/served" in
+      check int "the response started" 200 (Eio.Promise.await status);
+      check bool "the client got the whole response" true (read_all () = Ok served_frame);
+      ping_until client (fun () -> !released > 0));
+    check int "the cleanup ran once" 1 !released)
+
 let () = run "H2 request fibers" ["connection progress", [
   test_case "direct reader reproduces occupied CPU stall" `Quick test_reader_control;
   test_case "GET preserves PING and WINDOW_UPDATE" `Quick (fun () -> test_multiplexed_progress `GET);
@@ -1711,5 +1765,9 @@ let () = run "H2 request fibers" ["connection progress", [
     test_raising_producer_cuts_its_response;
   test_case "a switch that is ending runs no producer" `Quick
     test_ending_switch_runs_no_producer;
+  test_case "a switch that ends cancels a waiting producer" `Quick
+    test_ending_switch_ends_a_waiting_producer;
+  test_case "a cleanup that raises stays off the switch" `Quick
+    test_raising_cleanup_stays_off_the_switch;
   test_case "a reset log stream ends its loop" `Quick test_reset_log_stream_ends_its_loop;
 ]]

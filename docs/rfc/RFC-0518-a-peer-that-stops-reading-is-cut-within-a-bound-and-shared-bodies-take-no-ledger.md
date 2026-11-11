@@ -178,7 +178,7 @@ related: ["0512", "0493", "0350"]
   - 생산자가 예외로 끝나면 닫지 않고 끊는다. 라우트 handler 가 응답 도중 실패했을 때와 같은 길(`Http_reqd.report_exn`)이다. HTTP/2 스트림은 RST_STREAM 을 받고 HTTP/1.1 은 본문을 멈추고 연결을 닫는다. 예외는 거기서 error 로 한 번 남고, 호출자의 switch 는 실패하지 않는다.
   - `release` 는 생산자가 쥔 것(구독, 세션)을 놓는 정리다. 생산자가 끝나고 응답이 닫힌 뒤 한 번 부른다.
 - 생산자는 호출자의 switch 에 fork 하고, 그 fiber 안에 응답마다 자식 switch 를 연다. pump 가 이렇게 돈다(`server_mcp_transport_http_conn.ml` 313~331줄). 스트림 switch 로 옮기지 않으므로 생산자가 스트림 switch 를 붙잡는 순환 대기가 없다.
-- 호출자의 switch 에는 hook 을 걸지 않는다. 그 switch 는 서버 수명이다(`server_routes_http.ml` 9·42줄). eio 는 `on_release` hook 을 switch 가 끝날 때까지 쥔다(eio switch.ml 101~111줄). 응답마다 걸면 서버가 끝날 때까지 쌓인다.
+- 호출자의 switch 에는 hook 을 걸지 않는다. 그 switch 는 서버 수명이다. 라우터의 switch(`server_routes_http.ml` 9·42줄)이거나, 문서 초안 라우트처럼 서버 state 의 switch 다. eio 는 `on_release` hook 을 switch 가 끝날 때까지 쥔다(eio switch.ml 101~111줄). 응답마다 걸면 서버가 끝날 때까지 쌓인다.
 - fork 하기 전에 `Switch.get_error` 를 본다. 이미 끝나는 중이면 생산자를 돌리지 않고, 응답을 닫고 `release` 를 부른다. 그 밖에는 응답을 닫고 `release` 를 부르는 cleanup 을 자식 switch 의 `on_release` 에 건다.
 - 쓰는 곳은 셋이다: 로그(`server_routes_http_routes_log_stream.ml`), 문서 초안(`server_routes_http_routes_artifact_draft_live.ml`), 실행 출력(`server_routes_http_routes_dashboard.ml` `handle_execute_output_stream`).
 

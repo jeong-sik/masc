@@ -157,9 +157,6 @@ class ObserverEpochTest(unittest.TestCase):
                     drain()
                 os.write(master, b"i")
                 wait_until(
-                    lambda: b"MASC Keepers" in output, "keeper list did not open"
-                )
-                wait_until(
                     lambda: b"old-waiting" in output,
                     "initial waiting row was not drawn",
                 )

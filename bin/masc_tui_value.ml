@@ -128,7 +128,11 @@ module Position = struct
     | Row of { at : int; total : int }
     | Partial of { at : int; loaded : int; total : int }
 
+  (* The mark for a value that is absent (RFC section 6.4). *)
+  let nothing_selected = "\xe2\x80\x94"
+
   let text ~whole = function
+    | Row { at = 0; total } -> nothing_selected ^ "/" ^ Count.grouped total
     | Row { at; total } -> Count.grouped at ^ "/" ^ Count.grouped total
     | Partial { at; loaded; total } ->
         Count.grouped at ^ "/" ^ Count.grouped loaded ^ " \xc2\xb7 " ^ whole

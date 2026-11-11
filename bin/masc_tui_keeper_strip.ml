@@ -211,16 +211,6 @@ let failed_count readings index =
     | Pulse.Half_hour_unknown -> count, true
     | Pulse.Half_hour_quiet | Pulse.Half_hour_ok -> count, unknown) (0, false) readings
 
-(* Every half hour of every Keeper is unread: the fleet has no history to
-   count, so its band says so once, as each Keeper's own band does. *)
-let no_history = function
-  | [] -> false
-  | _ :: _ as readings ->
-      List.for_all (List.for_all (function
-        | Pulse.Half_hour_unknown -> true
-        | Pulse.Half_hour_quiet | Pulse.Half_hour_ok | Pulse.Half_hour_failed
-        | Pulse.Half_hour_failed_and_ok -> false)) readings
-
 (* A grid with no band has no cells for the two maxima to scale, and the
    maximum over no cells is not a reading: there is no row to draw. *)
 let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
@@ -232,7 +222,7 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
   let counts = List.init grid.side_cells (failed_count readings) in
   let peak = List.fold_left (fun p (n, _) -> max p n) 0 counts in
   let pulse =
-    if no_history readings then history_unknown_label ~ko ~cells:grid.side_cells
+    if Pulse.nothing_read readings then history_unknown_label ~ko ~cells:grid.side_cells
     else String.concat "" (List.map (fun (n, unknown) ->
       if n > 0 then Theme.warn () ^ Grid.level_glyph ~peak n ^ Ansi.reset
       else if unknown then "?" else "·") counts) in

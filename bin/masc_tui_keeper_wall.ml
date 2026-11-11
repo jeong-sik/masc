@@ -69,17 +69,23 @@ let marks hours =
       | Pulse.Half_hour_quiet | Pulse.Half_hour_unknown -> Theme.recede () in
     tone ^ Pulse.half_hour_mark hour ^ Ansi.reset) hours)
 
-let row ~cols ~now ~name runtime =
+(* A band nothing was read for says so once in the band's width, as the roster's
+   history column does; a partly read band keeps one mark per half hour. *)
+let band ~ko ~count readings marks_of =
+  if Pulse.nothing_read readings then Masc_tui_keeper_strip.history_unknown_label ~ko ~cells:count
+  else marks_of ()
+
+let row ~ko ~cols ~now ~name runtime =
   let name_cells, count = dimensions cols in
   let hours = slots ~now ~count runtime in
   let mark = match Grid.verdict ~now runtime with
     | Grid.Failing _ -> "!"
     | Grid.Paused -> "○"
     | Grid.Recovered | Grid.Sound | Grid.Other -> "●" in
-  prefix name_cells mark name ^ marks hours ^ "┃ "
+  prefix name_cells mark name ^ band ~ko ~count [ hours ] (fun () -> marks hours) ^ "┃ "
   ^ Printf.sprintf "%s/%d" (count_text (Pulse.failure_count hours)) count
 
-let fleet ~cols ~now runtimes =
+let fleet ~ko ~cols ~now runtimes =
   let name_cells, count = dimensions cols in
   let all = List.map (slots ~now ~count) runtimes in
   let counts = List.init count (fun position ->
@@ -87,9 +93,10 @@ let fleet ~cols ~now runtimes =
       match List.nth_opt hours position with Some hour -> hour | None -> Pulse.Half_hour_unknown) all)) in
   let peak = Pulse.peak_failure_count counts in
   prefix name_cells " " "fleet"
-  ^ String.concat "" (List.map (function
-      | Pulse.Count_unknown -> Pulse.half_hour_mark Pulse.Half_hour_unknown
-      | Pulse.Exact 0 -> Pulse.half_hour_mark Pulse.Half_hour_quiet
-      | (Pulse.Exact n | Pulse.At_least n) ->
-          Grid.level_glyph ~peak:(Pulse.failure_lower_bound peak) n) counts)
+  ^ band ~ko ~count all (fun () ->
+      String.concat "" (List.map (function
+        | Pulse.Count_unknown -> Pulse.half_hour_mark Pulse.Half_hour_unknown
+        | Pulse.Exact 0 -> Pulse.half_hour_mark Pulse.Half_hour_quiet
+        | (Pulse.Exact n | Pulse.At_least n) ->
+            Grid.level_glyph ~peak:(Pulse.failure_lower_bound peak) n) counts))
   ^ "┃ peak " ^ count_text peak

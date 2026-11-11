@@ -117,6 +117,23 @@ class LinuxRuntimeProbe(unittest.TestCase):
         self.assertEqual(argv[1:3], ['-I', '-c'])
         return argv[3]
 
+    def test_linux_package_stages_every_smoke_executable(self):
+        smoke = SCRIPT.with_name('install-smoke.sh').read_text()
+        loops = [line for line in smoke.splitlines()
+                 if line.startswith('for a in ') and '$' not in line]
+        self.assertEqual(1, len(loops), 'expected one literal smoke executable loop')
+        words = shlex.split(loops[0])
+        self.assertEqual(['for', 'a', 'in'], words[:3])
+        self.assertEqual('do', words[-1])
+        self.assertTrue(words[-2].endswith(';'))
+        required = set(words[3:-2] + [words[-2][:-1]])
+        self.assertIn('masc', required)
+        original_copy = shutil.copy2
+        with patch.object(shutil, 'copy2', wraps=original_copy) as copy:
+            self.packaged_probe()
+        staged = {Path(call.args[1]).name for call in copy.call_args_list}
+        self.assertFalse(required - staged, f'Linux package did not stage: {sorted(required - staged)}')
+
     def test_linux_probe_validates_https_without_a_shipped_bundle(self):
         probe = self.packaged_probe()
         environ = {name: value for name, value in os.environ.items()

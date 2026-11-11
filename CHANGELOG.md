@@ -475,7 +475,7 @@
 - A connection whose peer takes no bytes is cut: each socket write piece (256 KiB at most) has 90 seconds, on every HTTP listener. Before, such a peer held the connection's writer for as long as it kept the socket open (#51208).
 - A cleartext connection whose peer stays open 90 seconds after the server closed its sending side is cut (#51208).
 - A connection has 30 seconds to complete its TLS handshake, to show whether it speaks HTTP/1.1 or HTTP/2, or to send its first bytes (#51208).
-- A TLS connection whose peer stays open 90 seconds after the server sent its close_notify is cut. Before, such a peer held the connection until it closed (#51209).
+- A TLS connection whose peer stays open 90 seconds after the server began sending its close_notify is cut. Before, such a peer held the connection until it closed (#51209).
 - `masc_dashboard` cuts the Tasks section to the rows that keep the text under
   the inline ceiling, so a Keeper on a 16 KB lane reads the dashboard instead
   of a blob preview of its first lines. When the other sections alone pass the
@@ -617,6 +617,12 @@
   15.1-15.9 ms to 10.0-10.5 ms for a write of one HTTP/2 slice. The cipher
   order stays the default: with a Go client the combined CPU moved between
   -9% and +3% (#51228, #50296).
+- A TLS connection that has written through that buffer keeps its 256 KiB
+  until it closes, and the slowest TLS peer the 90 second write bound lets
+  through is now 2.9 KiB/s, the same as a plaintext peer. The buffer size
+  and the bound are the ones `lib/server/server_connection_socket.mli`
+  states; the bench rows are in
+  `docs/evidence/research/2026-11-09-h2-sse-tls/tls-write-bench/` (#51228).
 
 ### Documentation
 

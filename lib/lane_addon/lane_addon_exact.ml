@@ -161,6 +161,7 @@ type lane_unavailable =
   | Lane_off
   | No_admitted_slots
   | Lane_registry_unavailable of { detail : string }
+  | Every_slot_held of { until : float }
 
 type provider_refusal =
   | Provider_unavailable of { detail : string }
@@ -320,6 +321,8 @@ let not_final_to_json = function
   | Lane_unavailable No_admitted_slots -> `Assoc [ "reason", `String "no_admitted_slots" ]
   | Lane_unavailable (Lane_registry_unavailable { detail }) ->
     `Assoc [ "reason", `String "lane_registry_unavailable"; "detail", `String detail ]
+  | Lane_unavailable (Every_slot_held { until }) ->
+    `Assoc [ "reason", `String "every_slot_held"; "until", `Float until ]
   | Provider_refused (Provider_unavailable { detail }) ->
     `Assoc [ "reason", `String "provider_unavailable"; "detail", `String detail ]
   | Provider_refused (Provider_auth_refused { detail }) ->
@@ -341,6 +344,19 @@ let not_final_of_json json =
   | Some (`String "attempt_in_progress") when only ["reason"] -> Ok Attempt_in_progress
   | Some (`String "lane_registry_unavailable") when only ["reason"; "detail"] ->
     let* detail = detail () in Ok (Lane_unavailable (Lane_registry_unavailable { detail }))
+  | Some (`String "every_slot_held") when only ["reason"; "until"] ->
+    (* The store writes a whole number as an integer
+       (Lane_addon_action.canonical), and a reset a provider states in whole
+       seconds, as Claude Code does, is one. *)
+    let seconds = match List.assoc_opt "until" fields with
+      | Some (`Float until) -> Some until
+      | Some (`Int until) -> Some (float_of_int until)
+      | Some (`Intlit digits) -> float_of_string_opt digits
+      | Some _ | None -> None in
+    (match seconds with
+     | Some until when Float.is_finite until && Float.compare until 0.0 > 0 ->
+       Ok (Lane_unavailable (Every_slot_held { until }))
+     | Some _ | None -> Error "every_slot_held needs until as a positive finite number of seconds")
   | Some (`String "provider_unavailable") when only ["reason"; "detail"] ->
     let* detail = detail () in Ok (Provider_refused (Provider_unavailable { detail }))
   | Some (`String "provider_auth_refused") when only ["reason"; "detail"] ->

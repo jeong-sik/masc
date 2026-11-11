@@ -198,6 +198,8 @@ type attempt =
   - `keeper_cleanup` 을 통째로 못 읽으면 TUI 는 그 칸에만 읽지 못한 이유를 보여 준다. 도구 목록과 사용량은 그대로 나온다.
   - 주기 요약과 행은 하나씩 읽는다. 이 TUI 가 모르는 단계나 칸이 든 행은 읽지 못한 행으로 세고 이유를 보여 준다. 읽은 행은 그대로 나온다.
   - 모르는 값을 아는 값으로 바꿔 읽지 않는다.
+  - 값 자체에 이 TUI 가 모르는 칸이 있으면 그 이름을 보여 준다. 주기 요약과 행은 그대로 읽는다.
+  - 쓰기와 읽기는 `Keeper_cleanup_status_json` 한 모듈에 있다. 칸 이름이 한 곳에만 있다.
 - 로그 줄은 그대로 둔다. `_build` 단계도 작업 폴더 단계처럼 지운 것이 0일 때 줄을 남긴다.
 - `Failed` 의 이유는 사람이 읽는 문장이다. 어떤 코드도 그 문장으로 갈래를 나누지 않는다.
 - 이 칸을 읽을 수 있는 사람은 `GET /api/v1/dashboard/tools` 를 읽을 수 있는 사람 전부다. 그 경로는 `Public_read` 다. strict auth 가 꺼져 있으면 자격 없이 읽히고, 켜져 있으면 읽기 자격으로 읽힌다. 이유 문장에는 서버의 경로와, 가린 stderr 끝부분이 들어갈 수 있다. 볼륨 GC 보고의 실패 이유가 이미 같은 길로 나간다. 다계정에서 이 경로를 누구에게 열지는 경로 권한 표가 정한다. 그 표가 운영자 아닌 사람에게 이 경로를 열면 이유 문장을 그대로 낼지 그때 다시 정한다.
@@ -214,7 +216,7 @@ type attempt =
 
 Tools 화면에 읽기 하나를 더한다. 세 가지를 보여 준다.
 
-- 호스트 디스크: 남은 공간과 전체. `runtime_resolution.disk_observation` 을 그대로 쓴다. 서버 쪽 변경은 없다.
+- 호스트 디스크: 남은 공간과 전체. `runtime_resolution.disk_observation` 을 그대로 쓴다. 서버 쪽 변경은 없다. tools 응답의 `runtime_resolution` 은 전체 판(`runtime_resolution_json`)이고, 가벼운 판(`light_runtime_resolution_json`)에도 같은 칸이 있다. 둘 다 `keeper_fleet_runtime_resolution_base_fields` 가 넣는다. 서버가 뜨는 중의 응답에는 이 칸이 없고, 그때 TUI 는 잰 값이 없다고 말한다.
 - 마지막 정리 주기: 언제 돌았고 Keeper 몇 명을 훑었는지. 서버가 뜬 뒤 아직 안 돌았으면 그렇게 말한다.
 - Keeper 별 행: 단계, 마지막 시도의 결과와 숫자, 마지막으로 끝까지 돈 때.
 - 먼저 나오는 것: 선언을 못 읽은 Keeper, `Failed` 인 행, 끝까지 돌았지만 못 지운 항목이 있는 행(보고의 `failed` 가 0보다 크다).

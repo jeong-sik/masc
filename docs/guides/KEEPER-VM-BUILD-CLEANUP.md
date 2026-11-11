@@ -7,6 +7,11 @@ The MASC server owns artifact cleanup through each Keeper's Owner mailbox.
 `keeper_build_cleanup_retention_sec` (one day). These are artifact-retention
 settings, not time limits on Keeper work or durable tasks.
 
+The first pass runs one maintenance pulse after the server starts
+(`MASC_MAINTENANCE_PULSE_INTERVAL_SEC`, one minute), and each later pass
+follows the one before it by the interval. A server restarted within the
+interval still passes once.
+
 The same pass sweeps each Remote_ssh Keeper's workspace root on its endpoint
 when `keeper_remote_workspace_cleanup_enabled` (default true) is on, with
 `keeper_remote_workspace_cleanup_retention_sec` (two days). Each Keeper's run
@@ -70,6 +75,15 @@ ran to its end. `GET /api/v1/dashboard/tools` returns them as
 the next pass fills it again. The server log keeps one line per pass and one
 per attempt that ran its payload, and the guest build step writes its audit
 record.
+
+The TUI shows the value on the Tools surface, in the `저장 공간` pane (`p`
+moves between panes): the host disk as the server measured it, the latest
+pass, and every Keeper's latest attempt. A Keeper whose declaration could not
+be read and a row that failed come first, then a row that ran to its end and
+left entries behind. The pane reads the envelope when it opens and on `r`. It
+shows how long the server has been up beside the results, because they start
+empty at every start. A summary or a row this TUI cannot read is shown as its
+reason, and the rest is still drawn.
 
 ## Owned output and safety
 

@@ -629,11 +629,13 @@ let authorize_captured_exact_dispatch ~store ~declaration_id ~package_id ~config
         | [] | [_] | _::_::_ -> Error "Original Exact semantic configuration no longer permits dispatch" in
       let live=List.filter (fun (e : entry) ->
         not e.stopping && Option.is_some e.connection
-        && same_execution_package declaration.package e.package
-        && match e.configuration with
+        && (match e.configuration with
           | Some owner -> owner.id=declaration_id && owner.source_path=declaration.source_path
             && owner.revision=configuration_revision
-          | None -> false) (entries m) in
+          | None -> false)
+        (* Last: it serializes both packages, so it runs only for an entry the
+           identity checks above already selected. *)
+        && same_execution_package declaration.package e.package) (entries m) in
       match live with
       | [_] -> Eio.Fiber.check (); Ok ()
       | [] | _::_::_ -> Error "Original Exact configured incarnation is unavailable or ambiguous"))

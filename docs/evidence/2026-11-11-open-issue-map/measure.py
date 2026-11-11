@@ -154,6 +154,8 @@ def print_clusters(opened: list[OpenIssue], clusters: dict[str, list[int]]) -> N
         print(name, len(members), len(members & promise_numbers), len(members & november))
     in_any = set().union(*(set(numbers) for numbers in clusters.values()))
     print("in any title cluster:", len(in_any))
+    root_numbers = {i["number"] for i in opened if family(i["labels"], "root")}
+    print("root-labelled outside title clusters:", len(root_numbers - in_any))
     body_n_of_m = sum(
         1 for i in opened if TITLE_CLUSTERS["n_of_m"].search((i["title"] or "") + "\n" + (i["body"] or ""))
     )

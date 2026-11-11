@@ -8,6 +8,7 @@ open Alcotest
    so [is_official_client] admits the cli ids without spawning a client. *)
 
 module Librarian = Masc.Keeper_librarian
+module Runtime_catalog = Runtime
 module Runtime = Masc.Keeper_librarian_runtime
 module Memory = Masc.Keeper_memory_os_types
 module Current = Masc.Keeper_memory_os_current
@@ -725,6 +726,112 @@ let test_admission_worker_requires_actual_input_capacity () =
       (Runtime.may_descend_messages reports))
     [Ok "{}",capacity_answer;capacity_answer,Ok "{}";
      Ok "not-json",capacity_answer;capacity_answer,Ok "not-json"]
+;;
+
+(* RFC-exact-lane-waits-for-a-stated-reset: an API slot whose provider stated
+   a time is not called. A held slot is its account's rest refusal without the
+   call (R5), so it never counts as evidence that a smaller input would pass. *)
+let held_api_slot = "librarian-held"
+
+let with_held_api_slot ~sw ~net ~clock ~cli_slot_ids f =
+  let server = Fixture.start_server ~sw ~net ~clock
+    (Fixture.Reply (Fixture.openai_response valid_selection_json)) in
+  let runtime = match Runtime_catalog.get_runtime_by_id "stub-http.stub-model" with
+    | Some runtime -> runtime
+    | None -> fail "the fixture HTTP runtime must exist" in
+  let scope = Runtime_instance.quota_scope_of_runtime runtime in
+  ignore (Fixture.publish_registry
+    ~runtime_observations:
+      [ held_api_slot,
+        { Runtime_exact_output_registry.candidate =
+            runtime.Runtime_instance.candidate_backpressure
+        ; quota_scope = scope } ]
+    ~cli_slot_ids ~lane_id:"librarian_exact" ~slot_ids:[held_api_slot]
+    (Fixture.resolver_snapshot ~source:"librarian held API slot"
+       [{ Fixture.id = held_api_slot; base_url = server.base_url }])
+    : Runtime_exact_output_registry.t);
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+    Runtime_quota_window.note_exhausted ~scope ~resets_at:(Unix.gettimeofday () +. 3600.0);
+    f server)
+;;
+
+let test_a_held_api_lane_is_an_execution_failure () =
+  with_eio @@ fun ~sw ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  with_held_api_slot ~sw ~net ~clock ~cli_slot_ids:[] @@ fun server ->
+  let keeper_id = Filename.basename base_path in
+  let keepers_dir = Filename.concat base_path "keepers" in
+  Unix.mkdir keepers_dir 0o700;
+  let reports = ref [] in
+  Runtime.run_best_effort ~write_scope:(Runtime.Context_and_memory Masc.Keeper_memory_commit_pass.Durable)
+    ~on_not_committed:(fun report -> reports := report :: !reports)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input ());
+  check int "the held API slot received no request" 0 (Fixture.post_count server);
+  (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+   | [Ok (Current.Journal_failed { kind; _ })] ->
+     check bool "a held lane is an execution failure, not a lane without transport" true
+       (kind = Current.Exact_execution_failure)
+   | _ -> fail "a held pass must write one decodable journal failure");
+  check bool "a held lane reports why it did not commit" true (!reports <> []);
+  check bool "a held lane gives no evidence to read a smaller input" true
+    (List.for_all (fun (r : Runtime.not_committed) ->
+       r.smaller_range_meets_same_failure && not r.walk_shows_size
+       && r.input_capacity_evidence = Runtime.No_input_capacity_refusal
+       && r.message_descent = Runtime.No_descent_evidence) !reports);
+  check bool "a held lane does not descend messages" false
+    (Runtime.may_descend_messages !reports);
+  match Current.read_for_keepers_dir ~keepers_dir ~keeper_id with
+  | Ok None -> ()
+  | Ok (Some _) | Error _ -> fail "a held pass must leave the current snapshot absent"
+;;
+
+(* The same CLI input refusal splits the batch when no slot waits
+   ([test_admission_worker_requires_actual_input_capacity]). Beside a held API
+   slot it does not: the held slot would have met a smaller batch the same way. *)
+let test_a_held_api_slot_keeps_an_admission_batch_whole () =
+  with_eio @@ fun ~sw ~net ~clock ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  let module Queue = Masc.Keeper_memory_admission_queue in
+  let module Worker = Masc.Keeper_memory_admission_worker in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  let keeper_id = "held-api-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let initial = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:1_000_000. ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
+    ~facts:[current_a;current_b] () |> require in
+  List.iter (fun id -> ignore (Queue.append ~keepers_dir ~keeper_id ~request_id:id
+    (fact ~claim:("candidate " ^ id)) |> Result.map_error Queue.append_error_to_string |> require))
+    ["a";"b";"c";"d"];
+  with_held_api_slot ~sw ~net ~clock ~cli_slot_ids:[Fixture.cli_primary_runtime] @@ fun server ->
+  let calls = ref 0 and sizes = ref [] and reports = ref [] in
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    incr calls;
+    Error (Masc.Fusion_official_client.Codex_failure
+      (Runtime_codex_app_server.Context_window_exceeded
+        {message="fixture explicit input refusal"; tool_effect_attempted=false})) in
+  let judge admission =
+    sizes := List.length (Queue.candidates admission) :: !sizes;
+    let outcome = ref (Worker.Deferred "missing runtime callback") in
+    Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission ~cli_runner:runner
+      ~on_memory_committed:(fun () -> outcome := Worker.Committed)
+      ~on_admission_deferred:(fun () -> outcome := Worker.Awaiting_evidence)
+      ~on_not_committed:(fun reason -> reports := reason :: !reports;
+        outcome := Worker.For_testing.judgment_of_not_committed reason)
+      ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
+    !outcome in
+  (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:keeper_id ~judge with
+   | Worker.Pending _ -> ()
+   | _ -> fail "a failed candidate batch must remain pending");
+  check int "the held API slot received no request" 0 (Fixture.post_count server);
+  check int "the CLI slot ran once" 1 !calls;
+  check (list int) "the admission batch is not split" [4] (List.rev !sizes);
+  check bool "the held slot counts as size-independent evidence" true
+    (!reports <> []
+     && List.for_all (fun (r : Runtime.not_committed) ->
+       r.input_capacity_evidence = Runtime.Input_capacity_refused
+       && r.smaller_range_meets_same_failure) !reports)
 ;;
 
 type native_capacity_source = Native_codex | Native_claude
@@ -1888,6 +1995,10 @@ let () =
               ~kind:Current.Exact_execution_failure ~calls:1 ())
         ; test_case "admission worker partitions only actual input capacity refusals" `Quick
             test_admission_worker_requires_actual_input_capacity
+        ; test_case "a held API lane is an execution failure" `Quick
+            test_a_held_api_lane_is_an_execution_failure
+        ; test_case "a held API slot keeps an admission batch whole" `Quick
+            test_a_held_api_slot_keeps_an_admission_batch_whole
         ; test_case "native Codex capacity permits message descent without unread authority" `Quick
             (test_native_capacity_message_descent Native_codex)
         ; test_case "native Claude capacity permits message descent without unread authority" `Quick

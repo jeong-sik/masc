@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import type { LaneAddonInstance } from '../api/lane-addons'
 import type { LaneAddonHostRequestCycle } from '../api/lane-addon-host-requests'
+import { formatLaneTime } from './lane-addons-timeline'
 
 function waitText(wait: LaneAddonHostRequestCycle['waiting'][number]['reason']): string {
   switch (wait.reason) {
@@ -14,6 +15,7 @@ function waitText(wait: LaneAddonHostRequestCycle['waiting'][number]['reason']):
     case 'provider_auth_refused': return `Provider refused authentication: ${wait.detail}`
     case 'provider_configuration_refused': return `Provider refused configuration: ${wait.detail}`
     case 'source_unavailable': return `Source unavailable: ${wait.detail}`
+    case 'every_slot_held': return `Every model slot waits for its provider until ${formatLaneTime(wait.until)}`
   }
 }
 function issueText(issue: NonNullable<LaneAddonHostRequestCycle['issue']>): string {

@@ -17,14 +17,18 @@ let observe_slot ~resolved ~slot_id observation =
     (observation_of_slot resolved slot_id)
 ;;
 
+type held_slot =
+  { slot_id : string
+  ; until : float
+  }
+
+type ordered =
+  { lane : Registry.resolved_lane
+  ; held_http : held_slot list
+  }
+
 let order_at ~now (resolved : Registry.resolved_lane) =
-  let policy = Standing.Rate_rest_only
-    { rest_sec = (fun ~retry_after ->
-        Keeper_runtime_failure_route.path_rest_sec
-          ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-          ~retry_class:Keeper_runtime_failure_route.Rate_limited
-          ~retry_after_hint:retry_after) } in
-  let selected_slots = Standing.order ~now ~policy
+  let split = Standing.order_exact ~now
     ~quota_scope_of:(fun (slot : Registry.selected_slot) ->
       Option.map (fun (observation : Registry.runtime_observation) -> observation.quota_scope)
         slot.runtime_observation)
@@ -32,12 +36,18 @@ let order_at ~now (resolved : Registry.resolved_lane) =
       Option.map (fun (observation : Registry.runtime_observation) -> observation.candidate)
         slot.runtime_observation)
     resolved.selected_slots in
-  { resolved with selected_slots }
+  { lane = { resolved with selected_slots = split.Standing.walk }
+  ; held_http =
+      List.map (fun ((slot : Registry.selected_slot), until) ->
+        { slot_id = slot.Registry.slot_id; until })
+        split.Standing.held
+  }
 ;;
 
 let order resolved =
-  (* NDT-OK: the wall clock only decides whether a slot's rest has run out; it
-     reorders candidates and never changes which ones a lane walks. *)
+  (* NDT-OK: the wall clock decides only whether a rest or a provider-stated
+     time has passed. A slot it sets aside comes back in [held_http] with its
+     time, so no slot leaves the lane unseen. *)
   order_at ~now:(Unix.gettimeofday ()) resolved
 ;;
 

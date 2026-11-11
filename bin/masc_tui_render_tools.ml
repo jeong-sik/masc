@@ -528,6 +528,52 @@ let volume_gc_lines (state : state) =
     (Masc_tui_volume_gc.lines ~server_report state.volume_gc)
 ;;
 
+(* The storage pane: the host disk and the server's cleanup results from the
+   inventory's envelope, then the server's periodic report on retired
+   Keepers' volumes, which the catalog's volume child acts on. Before the
+   first inventory reading there is nothing to draw but the frame's own
+   "reading" line. *)
+let storage_lines (state : state) =
+  match state.tools_inventory with
+  | None -> []
+  | Some (snapshot : Masc.Tui_decode_tools.tool_snapshot) ->
+    let timestamp = Terminal_text.short_timestamp_of_unix in
+    let uptime =
+      Option.bind state.server_identity (fun (identity : Masc.Tui_decode.server_identity) ->
+        identity.sid_uptime)
+    in
+    let reading =
+      List.map
+        (fun (tone, text) ->
+           let color =
+             match tone with
+             | Masc_tui_storage.Heading -> Ansi.bold
+             | Masc_tui_storage.Plain -> ""
+             | Masc_tui_storage.Dim -> Ansi.dim
+             | Masc_tui_storage.Warn -> Theme.warn ()
+             | Masc_tui_storage.Bad -> Theme.bad ()
+           in
+           color, " " ^ text)
+        (Masc_tui_storage.lines ~timestamp ~uptime snapshot.ts_storage)
+    in
+    let volumes =
+      let tone, text =
+        Masc_tui_volume_gc.server_report_line ~timestamp snapshot.ts_volume_gc_report
+      in
+      let color =
+        match tone with
+        | Masc_tui_volume_gc.Plain -> ""
+        | Masc_tui_volume_gc.Dim -> Ansi.dim
+        | Masc_tui_volume_gc.Bad -> Theme.bad ()
+      in
+      [ Ansi.bold, " 은퇴한 Keeper 의 볼륨"
+      ; color, "   " ^ text
+      ; Ansi.dim, "   회수는 전체 도구 탭에서 " ^ Masc_tui_volume_gc.key ^ " 로 합니다."
+      ]
+    in
+    reading @ volumes
+;;
+
 (* Through [tab_strip], the one drawing every in-screen strip shares. This one
    was left out when the others moved: a bar between names, a space before the
    unmarked ones and the mark without the information colour, so the Tools
@@ -535,7 +581,7 @@ let volume_gc_lines (state : state) =
 let tools_pane_strip ~cols (state : state) =
   let active_pane = match state.tools_pane with
     | Tools_catalog (Tools_catalog_volumes _) -> Tools_catalog Tools_catalog_list
-    | (Tools_surface | Tools_async | Tools_activations | Tools_usage
+    | (Tools_surface | Tools_async | Tools_activations | Tools_usage | Tools_storage
       | Tools_catalog Tools_catalog_list) as pane -> pane in
   tab_strip
     ~width:(tab_strip_width ~cols ~before:" " ~after:"")
@@ -547,6 +593,7 @@ let tools_pane_strip ~cols (state : state) =
        ; (Masc_tui_types.Tools_activations, "Skill 기록")
        ; (Masc_tui_types.Tools_usage, "Skill 사용 집계")
        ; (Masc_tui_types.Tools_catalog Tools_catalog_list, "전체 도구")
+       ; (Masc_tui_types.Tools_storage, "저장 공간")
        ])
 ;;
 
@@ -738,6 +785,8 @@ let tools_selection_line ~cols state =
       (if picker.ssp_composition then "Composition" else "Instruction")
   | None when Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) ->
       ui_text state ~ko:"은퇴한 Keeper의 볼륨" ~en:"Retired Keeper volumes"
+  | None when state.tools_pane = Tools_storage ->
+      ui_text state ~ko:"호스트 디스크와 Keeper 저장 공간 정리" ~en:"Host disk and Keeper storage cleanup"
   | None ->
   if state.tools_pane=Tools_async then
     (match state.tools_async_selection with
@@ -2126,11 +2175,13 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     | Masc_tui_types.Tools_usage -> Lazy.force usage_matrix_lines
     | Masc_tui_types.Tools_catalog Tools_catalog_list -> Lazy.force catalog_lines
     | Masc_tui_types.Tools_catalog (Tools_catalog_volumes _) -> volume_gc_lines state
+    | Masc_tui_types.Tools_storage -> storage_lines state
   in
   (* Each pane follows its own independent read. Retained rows are still
      useful during refresh; neither unread nor failed means a successful zero. *)
   let part, source, observed, error = match state.tools_pane with
-    | Tools_surface | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) ->
+    | Tools_surface | Tools_storage
+    | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) ->
         Tools_inventory_read, "tool inventory", Option.is_some state.tools_inventory,
         (selected_tools_error state)
     | Tools_activations ->
@@ -2150,7 +2201,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         (match pending with
          | Tools_catalog_read | Tools_usage_read _ -> true
          | Tools_inventory_read | Tools_activations_read | Tools_async_read -> false)
-    | Tools_surface | Tools_async | Tools_activations
+    | Tools_surface | Tools_async | Tools_activations | Tools_storage
     | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> pending = part
   in
   let pending =
@@ -2197,6 +2248,9 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
   let prefix=tools_selection_document ~cols state @ drafts @ reading_lines @ error_lines in
   if Option.is_some (tools_volume_gc_parent_scroll state.tools_pane) then
     wrap (pane_lines @ reading_lines @ error_lines)
+  else if state.tools_pane = Tools_storage then
+    (* No Skill is selected here, so the Skill heading stays out. *)
+    wrap (reading_lines @ error_lines @ pane_lines)
   else if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
     wrap prefix @ pane_lines
   else wrap (prefix @ pane_lines)

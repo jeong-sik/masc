@@ -21,9 +21,6 @@ type t =
         (** When the piece in flight started, as the clock read then. *)
   ; mutable watched : bool  (** A fiber watches the piece in flight. *)
   ; mutable peer_close_awaited : bool
-  ; mutable copy_buffer : Cstruct.t option
-        (** What [copy] reads its source into. Made by the first [copy]; used
-            with the write turn held. *)
   }
 
 let peer t = Format.asprintf "%a" Eio.Net.Sockaddr.pp t.client_addr
@@ -146,38 +143,31 @@ module Socket = struct
   let read_methods = []
   let single_read t dst = Eio.Flow.single_read t.flow dst
 
-  let single_write t bufs =
-    let piece = head_within ~room:write_piece_bytes bufs in
-    Eio.Mutex.use_ro t.write_turn (fun () -> write_piece t piece);
-    Cstruct.lenv piece
+  (* Called with the write turn held. *)
+  let rec write_pieces t = function
+    | [] -> ()
+    | bufs ->
+      let piece = head_within ~room:write_piece_bytes bufs in
+      write_piece t piece;
+      write_pieces t (Cstruct.shiftv bufs (Cstruct.lenv piece))
   ;;
 
-  (* WORKAROUND: tls-eio writes its ciphertext with [Eio.Flow.copy_string],
-     and a socket takes such a source through [Eio.Flow.Pi.simple_copy]: a
-     4096-byte buffer, so a write per 4 KiB of ciphertext. Here the source is
-     read into a buffer of a whole piece (RFC-0518 D8).
-     The connection keeps the buffer. A buffer made for each call cost more
-     than the 4 KiB path when a write was one HTTP/2 slice (RFC-0518 D8,
-     run3). A connection that never copies, a plaintext one, makes none.
-     Root fix: tls-eio handing the socket its ciphertext with a write. *)
+  (* All of [bufs] goes out in one turn. [Eio.Flow.write] asks again for what
+     a call left unwritten, and a turn given up between two pieces would let
+     another writer's bytes land inside this one's. *)
+  let single_write t bufs =
+    Eio.Mutex.use_ro t.write_turn (fun () -> write_pieces t bufs);
+    Cstruct.lenv bufs
+  ;;
+
+  (* The turn is kept for the whole source, as for a write. Nothing in the
+     server copies into this socket: the pinned tls-eio writes its ciphertext
+     (scripts/opam-pin-external-deps.sh, RFC-0518 D8). *)
   let copy t ~src =
     Eio.Mutex.use_ro t.write_turn (fun () ->
-      let buffer =
-        match t.copy_buffer with
-        | Some buffer -> buffer
-        | None ->
-          let buffer = Cstruct.create_unsafe write_piece_bytes in
-          t.copy_buffer <- Some buffer;
-          buffer
-      in
-      let rec copy_all () =
-        match Eio.Flow.single_read src buffer with
-        | exception End_of_file -> ()
-        | read ->
-          write_piece t [ Cstruct.sub buffer 0 read ];
-          copy_all ()
-      in
-      copy_all ())
+      Eio.Flow.Pi.simple_copy t ~src ~single_write:(fun t bufs ->
+        write_pieces t bufs;
+        Cstruct.lenv bufs))
   ;;
 
   let shutdown t command =
@@ -208,7 +198,6 @@ let wrap ~sw ~clock ~listener_tag client_addr flow =
   ; writing_since = None
   ; watched = false
   ; peer_close_awaited = false
-  ; copy_buffer = None
   }
 ;;
 

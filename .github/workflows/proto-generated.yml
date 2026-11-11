@@ -1,0 +1,42 @@
+name: Proto generated code (dune build @proto/generated)
+
+# proto/masc_workspace.ml is committed, so that no build calls protoc: a
+# build that needs protoc fails whenever the system package cannot be fetched
+# (issue #51372). This workflow is the one place that generates the file
+# again and compares it with the committed one. It runs when the .proto, the
+# committed file, or the pinned ocaml-protoc-plugin that generates it changes.
+#
+# It needs protoc, which opam installs from apt as conf-protoc's system
+# package. An apt outage therefore fails this workflow, and only pull
+# requests that touch the paths below wait for it.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - proto/**
+      - masc.opam.locked
+      - scripts/opam-pin-external-deps.sh
+      - .github/workflows/proto-generated.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proto-generated-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generated:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+
+      - name: Generate masc_workspace.ml again and compare
+        run: opam exec -- dune build --root . @proto/generated

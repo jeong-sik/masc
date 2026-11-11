@@ -40,8 +40,9 @@ def synth_row(item: str, **counts: object) -> Row:
                  "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
                  "prompt_tokens": 1, "cached_tokens": 1, "candidates": 2, "correct": 2, "dropped": 0,
                  "absorbed": 0, "dropped_expected": 0, "planted": 1, "planted_dropped": 0, "state_correct": 2,
-                 "state_by_kind": {"new": [2, 2]}, "dropped_unmerged": [], "planted_absorbed": 0, "merges": 0,
-                 "merges_done": 0, "added": 0, "removed": 0, "expected_added": 0, "expected_removed": 0,
+                 "state_by_kind": {"new": [2, 2]}, "dropped_unmerged": [], "planted_absorbed": 0,
+                 "scheduled_ahead": 0, "scheduled_ahead_dropped": 0, "scheduled_past": 0, "scheduled_past_dropped": 0,
+                 "merges": 0, "merges_done": 0, "added": 0, "removed": 0, "expected_added": 0, "expected_removed": 0,
                  "dropped_off_label": [], "absorbs": {}, "merges_absorbed": []}
     return {**base, **counts}
 

@@ -40,6 +40,7 @@ type flow_outcome =
   | Cli_slots_exhausted
   | Cli_released_without_binding
   | Cli_walk_fell_back
+  | Slots_held
   | Cli_release_unconfirmed
   | Cli_bind_unconfirmed
   | Cli_bind_failed
@@ -69,6 +70,7 @@ let outcome_label = function
   | Cli_slots_exhausted -> "exact_cli_slots_exhausted"
   | Cli_released_without_binding -> "exact_cli_released_without_binding"
   | Cli_walk_fell_back -> "exact_cli_walk_fell_back"
+  | Slots_held -> "exact_slots_held"
   | Cli_release_unconfirmed -> "exact_cli_release_unconfirmed"
   | Cli_bind_unconfirmed -> "exact_cli_bind_unconfirmed"
   | Cli_bind_failed -> "exact_cli_bind_failed"

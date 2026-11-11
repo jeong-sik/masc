@@ -142,7 +142,8 @@ let test_skill_image_owner () =
       ets_composition_skills=[]; ets_skill_profiles=List.map profile selected;
       ets_tool_surface_bytes=None; ets_skill_tool_surface_bytes=None; ets_skill_discovery_bytes=0;
       ets_skill_body_bytes=None; ets_tools=[]; ets_tool_surface_sha256=None });
-    ts_usage=None; ts_volume_gc_report=None } in
+    ts_usage=None; ts_volume_gc_report=None;
+    ts_storage={ st_host_disk=Host_disk_absent; st_keeper_cleanup=Keeper_cleanup_absent } } in
   let state=state () in
   state.view <- Types.Tools;
   state.local_keepers <- Types.Local_workspace_read;

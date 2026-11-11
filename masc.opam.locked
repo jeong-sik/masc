@@ -258,6 +258,10 @@ pin-depends: [
     "git+https://github.com/jeong-sik/ocaml-protoc-plugin.git#4ffa25b5174e811951e7b5192195214afe776ce9"
   ]
   [
+    "tls-eio.2.1.5"
+    "git+https://github.com/jeong-sik/ocaml-tls.git#2c0f8615865a8ae54188b706628d84474b26d8da"
+  ]
+  [
   "ws-direct-core.0.2.0"
   "git+https://github.com/jeong-sik/ws-direct.git#d812d6fec4153efc11235661e0d4b4d0d789c45b"
 ]

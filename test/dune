@@ -5065,6 +5065,11 @@
  (libraries alcotest masc masc_tui_volume_gc yojson))
 
 (test
+ (name test_tui_storage)
+ (modules test_tui_storage)
+ (libraries alcotest masc masc_tui_storage))
+
+(test
  (name test_tui_fleet_line)
  (modules test_tui_fleet_line)
  (libraries alcotest masc masc_tui_fleet_line masc_tui_fleet_stream))
@@ -5868,6 +5873,7 @@
 (test
  (name test_installed_dashboard)
  (modules test_installed_dashboard)
+ (deps ../scripts/install-smoke.sh)
  (libraries masc_test_deps ptime masc.time_codec masc_core eio eio_main))
 
 (include stanzas/test_keeper_repetition_scope.inc)
@@ -6801,7 +6807,7 @@
 (test
  (name test_server_keeper_build_maintenance)
  (modules test_server_keeper_build_maintenance)
- (libraries alcotest masc masc_server masc_test_deps eio_main unix))
+ (libraries alcotest masc masc_server masc_test_deps eio_main eio.mock unix))
 
 (test
  (name test_keeper_cleanup_status)

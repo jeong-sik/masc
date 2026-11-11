@@ -117,6 +117,7 @@ side_feature 31 2 8
 old_data 31 11 16
 n_of_m 31 2 12
 in any title cluster: 366
+root-labelled outside title clusters: 498
 n_of_m in title or body: 315
 
 == #number references in title and body ==
@@ -222,11 +223,11 @@ still open: [27944, 29578, 30673, 31364, 32504, 33057, 33841, 35309, 38068, 3870
 ```text
 == body classification: issues 940 ==
 observed true: 472 false: 468
-impact: {'degrades': 463, 'blinds-operator': 195, 'internal': 185, 'breaks-continuity': 68, 'breaks-collab': 29}
+impact: {'degrades': 463, 'blinds-operator': 195, 'internal': 186, 'breaks-continuity': 67, 'breaks-collab': 29}
 ask: {'fix': 501, 'decide': 182, 'build': 92, 'measure': 78, 'cleanup': 48, 'track': 39}
 unsure: 579
-happened / touches promise: 48
-happened / lighter: 424
+happened / touches promise: 47
+happened / lighter: 425
 no record / touches promise: 49
 no record / lighter: 419
 == group: issues | happened | touches promise | both | fix decide measure build cleanup track ==
@@ -242,7 +243,7 @@ growth 47 31 0 0 | 30 9 3 4 0 1
 stall 45 31 5 3 | 26 7 10 0 0 2
 docs-refactor 36 5 0 0 | 0 4 0 0 30 2
 review-collab 28 20 14 8 | 8 9 5 6 0 0
-turn-loop 28 20 6 5 | 17 6 2 1 0 2
+turn-loop 28 20 5 4 | 17 6 2 1 0 2
 side-feature 24 11 0 0 | 7 7 2 7 0 1
 other 18 3 1 0 | 9 5 1 2 0 1
 old-data 14 8 3 2 | 8 4 0 0 2 0
@@ -250,7 +251,7 @@ old-data 14 8 3 2 | 8 4 0 0 2 0
 context 17 [32802, 35971, 37079, 38418, 38548, 39191, 39195, 42073, 42597, 44102, 46507, 46556, 48999, 49165, 49435, 49910, 50828]
 review-collab 8 [26914, 28401, 39782, 41311, 41343, 45003, 49171, 51232]
 provider 6 [40765, 40793, 42672, 47009, 47020, 49686]
-turn-loop 5 [29064, 30803, 42666, 46210, 50927]
+turn-loop 4 [30803, 42666, 46210, 50927]
 swallowed-error 3 [28072, 38402, 50804]
 tools-sandbox 3 [29962, 40915, 50995]
 stall 3 [36195, 51261, 51273]
@@ -262,7 +263,7 @@ impact: {'degrades': 248, 'blinds-operator': 99, 'internal': 72}
 == impact label the issue carried: issues | happened | touches promise | both | same grade as the label ==
 degrades 469 253 64 34 315
 blinds-operator 179 91 7 4 119
-internal 168 74 4 1 113
+internal 168 74 3 0 114
 none 124 54 22 9 0
 == recheck of two whole batches in a new order: issues 106 ==
 same observed: 103
@@ -271,35 +272,35 @@ same side of the promise line: 102
 same ask: 104
 same group: 100
 == every recheck, by first-pass cell: issues | second pass says happened and touches promise ==
-happened / lighter 66 2
-happened / touches promise 48 37
+happened / lighter 67 2
+happened / touches promise 47 36
 no record / lighter 79 0
 no record / touches promise 49 0
-happened and touches promise in both passes: 37 [26914, 28072, 29064, 29962, 30803, 32802, 35971, 36195, 38402, 38418, 39195, 40793, 41311, 41343, 42073, 42597, 42666, 42672, 44102, 45003, 45126, 46210, 46507, 46556, 46719, 47020, 48087, 48999, 49435, 49686, 49910, 50804, 50828, 50927, 50995, 51261, 51273]
+happened and touches promise in both passes: 36 [26914, 28072, 29962, 30803, 32802, 35971, 36195, 38402, 38418, 39195, 40793, 41311, 41343, 42073, 42597, 42666, 42672, 44102, 45003, 45126, 46210, 46507, 46556, 46719, 47020, 48087, 48999, 49435, 49686, 49910, 50804, 50828, 50927, 50995, 51261, 51273]
 first pass only: 11 [28401, 37079, 38548, 39191, 39782, 40765, 40915, 47009, 49165, 49171, 51232]
 second pass only: 2 [47257, 48214]
 == in both passes, by group ==
 context 13 [32802, 35971, 38418, 39195, 42073, 42597, 44102, 46507, 46556, 48999, 49435, 49910, 50828]
-turn-loop 5 [29064, 30803, 42666, 46210, 50927]
 review-collab 4 [26914, 41311, 41343, 45003]
+turn-loop 4 [30803, 42666, 46210, 50927]
 provider 4 [40793, 42672, 47020, 49686]
 swallowed-error 3 [28072, 38402, 50804]
 stall 3 [36195, 51261, 51273]
 tools-sandbox 2 [29962, 50995]
 old-data 2 [45126, 48087]
 auth-boundary 1 [46719]
-of those, closed after classification: []
-impact label they carried: {'degrades': 25, 'none': 7, 'blinds-operator': 4, 'internal': 1}
+of those, closed after classification: [41311]
+impact label they carried: {'degrades': 25, 'none': 7, 'blinds-operator': 4}
 ```
 
 읽을 때 주의할 점이 있다.
 
 - 판정자는 본문만 읽었다. "일어난 기록이 없다"는 "본문에 기록이 적혀 있지 않다"이다. 로그를 붙이지 않은 실제 사건은 "기록 없음"으로 떨어진다.
 - 일치율은 재확인 1에서만 읽는다. 재확인 2는 약속에 닿는 쪽을 골라 모은 표본이라 비율을 전체로 옮길 수 없다.
-- 다시 매기지 않은 698개에도 두 번째 판정이 "일어났고 약속에 닿는다"로 올릴 것이 있을 수 있다. 다시 매긴 가벼운 쪽 145개 가운데 2개가 그랬다.
+- 다시 매기지 않은 698개에도 두 번째 판정이 "일어났고 약속에 닿는다"로 올릴 것이 있을 수 있다. 다시 매긴 가벼운 쪽 146개 가운데 2개가 그랬다.
 - `unsure` 는 579개에 붙었고 묶음마다 12~42개로 고르지 않다. 판정자마다 쓰는 정도가 달라서 집계에 쓰지 않았다.
-- 2차 재판정의 판정자는 `claude-fable-5-2` 둘이고 본문 분류의 판정자는 `claude-opus-5-5` 다. 보고서 8절의 67개는 두 모델의 목록을 합친 것이다.
-- `label` 은 그 이슈에 붙어 있던 `impact` 라벨이다. 판정자는 보지 못했다. `closed_after` 는 분류한 뒤에 닫은 이슈다.
+- 2차 재판정의 판정자는 `claude-fable-5-2` 둘이고 본문 분류의 판정자는 `claude-opus-5-5` 다. 보고서 8절의 66개는 두 모델의 목록을 합친 것이다.
+- `label` 은 그 이슈에 붙어 있던 `impact` 라벨이다. 판정자는 보지 못했다. `closed_after` 는 분류한 뒤에 닫힌 이슈다(2026-11-12 02:39 KST 의 상태).
 
 ## 본문 분류에서 고른 닫기 후보
 
@@ -307,7 +308,7 @@ impact label they carried: {'degrades': 25, 'none': 7, 'blinds-operator': 4, 'in
 
 - 열린 PR 은 2026-11-11 22:00 KST 에 받은 `xrefs.jsonl` 의 상태다. 그 뒤에 열린 PR 은 들어 있지 않다.
 - 표본은 씨앗 7777 로 20개를 뽑았다.
-- 아래 출력의 `closed after classification` 은 2026-11-12 01:59 KST 에 닫혀 있는 것이다. 닫았다가 다시 연 것은 `candidates still open` 에 들어 있다. 결과는 다음 절에 있다.
+- 아래 출력의 `closed after classification` 은 2026-11-12 02:39 KST 에 닫혀 있는 것이다. 닫았다가 다시 연 것은 `candidates still open` 에 들어 있다. 결과는 다음 절에 있다.
 
 ```text
 == no record and lighter, ask fix or cleanup: 248 ==
@@ -392,15 +393,15 @@ umbrella issues: [(27751, 7), (27792, 1), (35579, 1)]
 - 대상은 둘이다. 이전 판정 장부의 닫기 후보 120개(`set` 이 `ledger`)와, 병합된 PR 제목에 그 번호가 적힌 열린 이슈(`pr-title`)다. 뒤쪽은 25개이고 장부 후보와 겹치는 5개를 뺀 20개를 전부 봤다.
 - 판정자는 저장소와 GitHub 을 읽기만 하는 독립 에이전트(`claude-fable-5-2`)다. 20개씩 맡아 이슈 본문·댓글, 인용된 PR, `origin/main` `fe4399c0395a` 를 읽고 `CLOSE_FIXED`, `CLOSE_NOT_PLANNED`, `KEEP_OPEN` 가운데 하나를 냈다. 애매하면 `KEEP_OPEN` 이다.
 - 닫기 판정은 내가 근거를 다시 읽고, 닫는 댓글을 고친 뒤 닫았다. 닫기 직전에 이슈가 열려 있는지와 스냅숏 뒤에 댓글 수가 바뀌었는지 봤다.
-- `close-verification.json` 의 `action` 은 다섯이다. `closed_completed`, `closed_not_planned`, `held_for_operator`(닫기 판정이지만 닫지 않았다. 이유는 `note`), `left_open`, `reopened_after_review`(닫았다가 다른 세션이 다시 열었다. 이유는 `note`).
-- `action` 은 2026-11-12 01:59 KST 의 상태다. 판정이 `KEEP_OPEN` 인데 닫힌 행은 이 검증이 아니라 다른 경로로 닫힌 것이고, 경로는 `note` 에 있다.
+- `close-verification.json` 의 `action` 은 넷이다. `closed_completed`, `closed_not_planned`, `held_for_operator`(닫기 판정이지만 닫지 않았다. 이유는 `note`), `left_open`.
+- `action` 은 2026-11-12 02:39 KST 의 상태다. 판정이 `KEEP_OPEN` 인데 닫힌 행은 이 검증이 아니라 다른 경로로 닫힌 것이고, 경로는 `note` 에 있다.
 
 `audit_counts.py` 의 출력 뒷부분:
 
 ```text
 == close verification: ledger 120 ==
-verifier verdict: {'CLOSE_FIXED': 49, 'CLOSE_NOT_PLANNED': 23, 'KEEP_OPEN': 48}
-action: {'closed_completed': 44, 'closed_not_planned': 28, 'held_for_operator': 5, 'left_open': 40, 'reopened_after_review': 3}
+verifier verdict: {'CLOSE_FIXED': 46, 'CLOSE_NOT_PLANNED': 23, 'KEEP_OPEN': 51}
+action: {'closed_completed': 44, 'closed_not_planned': 28, 'held_for_operator': 5, 'left_open': 43}
 == close verification: pr-title 20 ==
 verifier verdict: {'CLOSE_FIXED': 2, 'KEEP_OPEN': 18}
 action: {'closed_completed': 2, 'closed_not_planned': 2, 'left_open': 16}
@@ -411,7 +412,7 @@ action: {'closed_completed': 2, 'closed_not_planned': 2, 'left_open': 16}
 - 처음 닫은 68개 가운데 49개는 근거로 든 심볼과 파일을 `git grep` 으로 `origin/main` 에서 직접 찾아봤다. 나머지는 검증 에이전트가 적은 근거를 읽고 닫았다.
 - 마지막에 닫은 9개는 댓글에 적은 운영 설치 쪽 값(로그 줄 수, 파일 수, 설정 키)도 내가 다시 셌다.
 - "완료"로 닫은 47개(장부 45, PR 제목 2) 가운데 27개는 요구 항목 하나 이상이 main 에 없거나 확인하지 못한 채였다. 제목의 결함은 고쳐졌고, 남은 항목은 본문이나 댓글이 뒤로 미뤘거나 다른 열린 이슈가 다룬다고 보고 닫았다. 닫는 댓글에 남은 항목을 적었다(27개 중 6개를 다시 읽어 확인했다).
-- 다른 세션이 그 가운데 3개(#46470, #47385, #47538)를 2026-11-11 16:27Z 에 다시 열었다. 셋 다 본문이 완료 조건으로 요구한 회귀 시험이 main 에 없다. 표에는 `reopened_after_review` 로 들어 있다. 지금 이 검증으로 닫혀 있는 것은 67개다.
+- 다른 세션이 그 가운데 3개(#46470, #47385, #47538)를 2026-11-11 16:27Z 에 다시 열었다. 셋 다 본문이 완료 조건으로 요구한 시험이 main 에 없다. 표에는 판정 `KEEP_OPEN`, 조치 `left_open` 으로 들어 있고 빠진 시험은 `note` 에 있다. 지금 이 검증으로 닫혀 있는 것은 67개다.
 - 장부 표의 `closed_completed` 44개에는 이 검증이 닫지 않은 2개(#26702, #46725)가 들어 있고, `closed_not_planned` 28개에는 "지금 안 함" 묶음이 닫은 5개와 #46384 가 들어 있다. PR 제목 표의 `closed_not_planned` 2개도 그 묶음이 닫았다.
 
 ## 확인하지 않은 것

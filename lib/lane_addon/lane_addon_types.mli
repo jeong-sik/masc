@@ -145,8 +145,12 @@ val coverage_to_json : coverage -> Yojson.Safe.t
 val phase_to_json : phase -> Yojson.Safe.t
 val phase_of_json : Yojson.Safe.t -> (phase, string) result
 val package_to_json : package -> Yojson.Safe.t
+val execution_package_json : package -> Yojson.Safe.t
+(** The package as a declaration revision reads it: every field except
+    [ui_category], object keys sorted. *)
 val same_execution_package : package -> package -> bool
-(** Compare every package field except [ui_category]. Callers retain their
+(** [Yojson.Safe.equal] on {!execution_package_json}. Two packages a declaration
+    revision cannot tell apart are the same package. Callers retain their
     original owner, configuration and invocation checks; this is not admission. *)
 val output_selection_to_json : output_selection -> Yojson.Safe.t
 val output_ports_to_json : output_ports -> Yojson.Safe.t

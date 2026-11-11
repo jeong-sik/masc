@@ -72,8 +72,6 @@ type package = {
 }
 let host_requests_tool = "lane_host_requests"
 let operator_tool = "lane_operator"
-let same_execution_package left right =
-  {left with ui_category=None} = {right with ui_category=None}
 let host_result_tool = "lane_host_result"
 let uses_host_requests package = package.exact_outputs <> [] || package.operator_asks
   || package.web_search
@@ -225,6 +223,14 @@ let output_selection_to_json = function
 let output_ports_to_json ports =
   `Assoc (List.map (fun (id, selection) -> id, output_selection_to_json selection) ports)
 let package_to_json (p : package) =
+  (* Every field is named here, so a field added to [package] stops the build
+     until it is written below. A declaration revision and
+     [same_execution_package] see a package only through this value. *)
+  let ({ id = _; revision = _; title = _; ui_category = _; contributions = _; execution = _;
+         worker_service = _; command = _; directory = _; action_tool = _; state_storage = _;
+         tool_invocation = _; exported_tools = _; tool_hooks = _; outputs = _;
+         refresh_policy = _; model_access = _; binding_schema = _; presentation = _;
+         skills_directory = _; exact_outputs = _; operator_asks = _; web_search = _ } : package) = p in
   (* runtime, exact_outputs and operator_asks are written only when they differ from what a
      package without the key means, so such a package keeps its revision. *)
   let runtime, image, resources = match p.execution with
@@ -269,3 +275,10 @@ let package_to_json (p : package) =
     "skills_directory", (match p.skills_directory with None -> `Null
       | Some path -> string (Skill_resource_path.to_string path));
     "resources", resources])
+(* The worker inputs a declaration revision names: every package field except
+   the navigation category, with object keys sorted. A schema saved with its
+   keys in another order is the same inputs. *)
+let execution_package_json package =
+  Yojson.Safe.sort (package_to_json {package with ui_category=None})
+let same_execution_package left right =
+  Yojson.Safe.equal (execution_package_json left) (execution_package_json right)

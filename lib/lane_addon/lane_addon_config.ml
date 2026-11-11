@@ -174,7 +174,7 @@ let decode ~manifest_scope ~source_path ~source_revision ~id fields =
   let canonical =
     `Assoc ["id", `String id; "run_id", `String run_id;
       "manifest_path", `String manifest_path;
-      "package", Lane_addon_types.package_to_json {package with ui_category=None}; "binding", binding]
+      "package", Lane_addon_types.execution_package_json package; "binding", binding]
     |> Yojson.Safe.sort |> Yojson.Safe.to_string
   in
   let revision = Agent_core_sha256.(to_hex (digest_string canonical)) in

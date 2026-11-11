@@ -27,7 +27,7 @@ val csrf_header : string
 val set_session_cookie : Authz_browser_session.Cookie.t -> string
 
 val clear_session_cookie : string
-val set_transaction_cookie : Oidc_login_transaction.Id.t -> string
+val set_transaction_cookie : Oidc_login_transaction.Sealed.t -> string
 val clear_transaction_cookie : string
 
 type method_ =

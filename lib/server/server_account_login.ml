@@ -49,12 +49,11 @@ let clients_of_config ~getenv (configured : Authz_boot_mode_read.login_clients) 
   Ok { google; github }
 ;;
 
-let pending_login_capacity = 16
 let draw_bytes = 32
 
 let routes ~clock ~zone { google; github } =
   { Login_routes.zone
-  ; transactions = Oidc_login_transaction.create ~capacity:pending_login_capacity
+  ; transactions = Oidc_login_transaction.create ()
   ; google
   ; github
   ; get = Server_login_http.get ~clock

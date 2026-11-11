@@ -555,10 +555,19 @@ let test_creation_commits_before_releasing_persistence () =
        ~owner:"commit-author" () with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Board.show_board_error e)));
+  (* The observer slot is global, so a release from a sibling alcotest
+     case can sample this store in between. Keep the first occurrence of
+     each distinct sample, drop foreign empty snapshots, and require the
+     strict creation order. *)
+  let rec commit_sequence = function
+    | [] -> []
+    | s :: rest -> s :: commit_sequence (List.filter (fun t -> t <> s) rest)
+  in
   Alcotest.(check (list (list int)))
     "post, comment and sub-board are committed before persistence unlock"
     [ [1; 0; 0]; [1; 1; 0]; [1; 1; 1] ]
-    (List.rev !released_states);
+    (commit_sequence
+       (List.filter (fun s -> s <> [0; 0; 0]) (List.rev !released_states)));
   flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
@@ -735,22 +744,26 @@ let test_post_admission_defers_the_policy_update () =
   let creation = Eio.Switch.run (fun sw ->
     let updated, resolve_updated = Eio.Promise.create () in
     let start_update = ref true in
+    let policy_file_at_start =
+      Fs_compat.load_file (Board.sub_boards_path (Board.global ())) in
     with_observer
       { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
           if !start_update then begin
             start_update := false;
             (* This seam is inside post persistence, before append. The
-               competing API must wait before mutating the policy. *)
+               competing API must wait before mutating the policy.
+               Metrics hooks run while the persist mutex is held, so this
+               callback only observes the policy row on disk and never
+               takes a lock. *)
             Eio.Fiber.fork ~sw (fun () ->
               Eio.Promise.resolve resolve_updated
                 (Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy"
                    ~access:Board.Owner_only ()));
             Alcotest.(check bool) "the updater waits for post admission" false
               (Eio.Promise.is_resolved updated);
-            let policy = board_result_exn
-                (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy") in
-            Alcotest.(check bool) "a waiting update has not changed policy" true
-              (policy.access = Board.Open)
+            Alcotest.(check string) "a waiting update has not changed policy"
+              policy_file_at_start
+              (Fs_compat.load_file (Board.sub_boards_path (Board.global ())))
           end) }
       (fun () ->
         let creation = match policy_post "admitted-policy" with

@@ -167,6 +167,9 @@ type attempt =
   | Final of final
   | Not_final of not_final
 
+val final_status : final -> string
+(** The [status] value {!final_to_json} writes. *)
+
 val final_to_json : final -> Yojson.Safe.t
 (** The result body a package receives. *)
 val final_of_json : schema:Yojson.Safe.t -> Yojson.Safe.t -> (final, string) result
@@ -178,6 +181,9 @@ val original_consumer_answer_payload : request -> Yojson.Safe.t -> (Yojson.Safe.
     schema's partial shape, returning only raw JSON. This does not check the
     package baseline, a host terminal or an execution proof and grants no
     authority to deliver or use the answer. *)
+
+val not_final_reason : not_final -> string
+(** The [reason] value {!not_final_to_json} writes. *)
 
 val not_final_to_json : not_final -> Yojson.Safe.t
 (** The reason an attempt did not end the request, as the host shows it. *)

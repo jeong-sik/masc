@@ -7703,12 +7703,12 @@ let row_list (state : state) : row_list option =
      gives half its rows to a preview says so in [sc_preview_keep], and a
      height that ignores it lands the cursor under the preview while
      [ensure_visible] reports the row as already on screen. *)
-  let follow ~cursor scroll set_scroll =
+  let follow ?(lead = 0) ~cursor scroll set_scroll =
     match scrolled_surface state state.view with
     | None -> ()
     | Some scrolled ->
         let height = surface_body_height_at state ~cursor scrolled in
-        set_scroll (Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
+        set_scroll (Masc_tui_scroll.ensure_visible_with_lead ~cursor ~lead ~height scroll)
   in
   (* The count the keypress bound already uses, so a jump cannot land on a
      row a step cannot reach. [None] here means the state does not own the
@@ -7784,8 +7784,10 @@ let row_list (state : state) : row_list option =
                      Masc_tui_types.dismiss_runtime_lane_notice state;
                    state.lanes_action_error <- None;
                    select_inventory_lane state index;
-                   Option.iter (fun cursor -> follow ~cursor state.lanes_scroll
-                     (fun scroll -> state.lanes_scroll <- scroll)) (lane_inventory_visual_cursor state))})
+                   Option.iter (fun cursor ->
+                     follow ~lead:(lane_inventory_lead state) ~cursor state.lanes_scroll
+                       (fun scroll -> state.lanes_scroll <- scroll))
+                     (lane_inventory_visual_cursor state))})
   | Clients ->
       of_counted (fun count ->
           scrolling ~count ~cursor:state.clients_surface_cursor

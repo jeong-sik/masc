@@ -18142,6 +18142,16 @@ let lane_inventory_visual_cursor (state : state) =
   Option.bind (selected_inventory_lane state) (fun row ->
     Masc_tui_lane_inventory.row_position ~id:row.Masc.Tui_decode_lane_inventory.id (lane_inventory_entries state))
 
+(* What the selected lane brings above itself: its category heading when it is
+   the first row of the category. The key handler and the frame both scroll
+   with it, so a keypress and the next frame agree on the window. *)
+let lane_inventory_lead (state : state) =
+  match selected_inventory_lane state with
+  | None -> 0
+  | Some row ->
+      Masc_tui_lane_inventory.row_lead ~id:row.Masc.Tui_decode_lane_inventory.id
+        (lane_inventory_entries state)
+
 (* Exact-only editors retain their current data contract. The inventory cursor
    names a row by identity, never by its position in the exact-only snapshot. *)
 let selected_standalone_lane (state : state) =

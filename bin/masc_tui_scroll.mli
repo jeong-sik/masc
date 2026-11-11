@@ -100,6 +100,13 @@ val ensure_span_visible : start:int -> stop:int -> height:int -> int -> int
 val ensure_visible : cursor:int -> height:int -> int -> int
 (** The smallest move of [scroll] that keeps [cursor] inside the window. *)
 
+val ensure_visible_with_lead : cursor:int -> lead:int -> height:int -> int -> int
+(** {!ensure_visible} for a row that brings [lead] rows glued above it, such as
+    the heading of the group it opens. The window follows the row, then moves
+    up until the lead is on screen too. [lead] is held to at most [cursor] and
+    at most [height - 1], so the row stays in the window and a window of one
+    row behaves as {!ensure_visible} does. *)
+
 val window_of_heights : heights:int list -> cursor:int -> rows:int -> int -> int * int
 (** {!ensure_visible} for items that take different numbers of lines: item [i]
     takes the [i]th of [heights] and the window holds [rows] lines. The first

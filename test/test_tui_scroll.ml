@@ -156,6 +156,29 @@ let test_the_window_follows_the_row_that_left_it () =
   check int "a run the window already shows leaves the window alone" 10
     (Masc_tui_scroll.ensure_span_visible ~start:12 ~stop:13 ~height:5 10)
 
+(* A row that opens a group brings the group's heading with it. The heading is
+   no row the cursor can name, so following the row alone left it above the
+   window whenever the cursor stood on the first row of a group. *)
+let test_a_row_that_opens_a_group_keeps_its_heading_in_the_window () =
+  let follow = Masc_tui_scroll.ensure_visible_with_lead ~lead:1 ~height:4 in
+  check int "a row above the window brings its heading up with it" 4
+    (follow ~cursor:5 7);
+  check int "a window that shows only the row moves up to show the heading" 4
+    (follow ~cursor:5 5);
+  check int "a window that shows both leaves the window alone" 3
+    (follow ~cursor:5 3);
+  check int "a row below the window comes down with its heading on screen" 3
+    (follow ~cursor:6 0);
+  check int "the first group's heading at the top of the list" 0
+    (follow ~cursor:1 7);
+  check int "no lead moves the window as ensure_visible does"
+    (Masc_tui_scroll.ensure_visible ~cursor:30 ~height:10 0)
+    (Masc_tui_scroll.ensure_visible_with_lead ~cursor:30 ~lead:0 ~height:10 0);
+  check int "a window of one row follows the row alone" 5
+    (Masc_tui_scroll.ensure_visible_with_lead ~cursor:5 ~lead:1 ~height:1 9);
+  check int "a lead taller than the window keeps the row on screen" 3
+    (Masc_tui_scroll.ensure_visible_with_lead ~cursor:6 ~lead:9 ~height:4 0)
+
 (* Rows of different heights: the Keepers views draw a second line under a
    failing Keeper alone. The window is counted in lines, and the scroll and
    the rows drawn are counted in items. *)
@@ -296,6 +319,8 @@ let () =
             `Quick test_a_step_forward_from_the_end_value_stays_there
         ; Alcotest.test_case "the window follows the row that left it" `Quick
             test_the_window_follows_the_row_that_left_it
+        ; Alcotest.test_case "a row that opens a group keeps its heading in the window"
+            `Quick test_a_row_that_opens_a_group_keeps_its_heading_in_the_window
         ; Alcotest.test_case "a window of uneven rows shows the cursor whole" `Quick
             test_a_window_of_uneven_rows_shows_the_cursor_whole
         ] )

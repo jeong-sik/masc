@@ -1090,15 +1090,23 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                after it returns. *)
             Eio.Fiber.check ();
             let slot_capture=Exact_lane_slot_capture.create ~owner:(Runtime_schema.Addon lane) () in
-            let attempt, recorded, execution =
+            let called =
               match Exact_lane_slot_capture.with_capture slot_capture (fun () -> call ~validate) with
               | execution ->
                   let recorded = match execution.outcome with
                     | Call_ended final -> Completed_call final
                     | Call_refused refusal -> Deferred (Provider_refused refusal) in
-                  attempt_of_outcome execution.outcome, recorded, Some execution
+                  Ok (attempt_of_outcome execution.outcome, recorded, Some execution)
               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-              | exception exn -> Final Outcome_unknown, Unknown_raised (Printexc.to_string exn), None in
+              | exception exn ->
+                  let raised = Printexc.to_string exn in
+                  (* The marker is what says a generation request may have
+                     reached a provider. A call that raised before this run
+                     saved it sent none, so there is no outcome to be unsure
+                     of: the run fails and writes no attempt, and the next
+                     run reads the record as it was. *)
+                  if !started then Ok (Final Outcome_unknown, Unknown_raised raised, None)
+                  else Error ("the Exact call raised before its first generation dispatch: " ^ raised) in
             match !marker_failure with
             | Some detail ->
               (* The marker save reported a failure, so the guard stopped the
@@ -1106,6 +1114,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                  failure, not an outcome of the call. *)
               Error detail
             | None ->
+            let* attempt, recorded, execution = called in
             Eio.Cancel.protect (fun () ->
               let* () = match execution with
                 | None -> Ok ()

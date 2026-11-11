@@ -2132,6 +2132,10 @@
   ; test_tui_decode names the schedule runner status the TUI decodes into
   masc.masc_schedule
   bigstringaf
+  ; test_ws_transport attaches a session to a ws-direct endpoint and reads
+  ; what reached its writer
+  ws-direct-core
+  faraday
   ; test_terminal_size reads the tty size through the ioctl stub
   terminal_size
   ; test_activity_graph checks its day file against the layout owner

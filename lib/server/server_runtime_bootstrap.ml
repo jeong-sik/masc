@@ -1927,7 +1927,16 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
           | Server_mcp_transport_ws.Inbound_dispatch_rejected rejection ->
               send_overloaded_response rejection
           | Server_mcp_transport_ws.Inbound_dispatch_admitted session ->
-              Eio.Fiber.fork ~sw (fun () ->
+              (* A message arrives on its connection's fiber, which runs on
+                 the HTTP serving domain when that is on. The request is
+                 handled on the domain of [sw] either way: the owner's queue
+                 gives each task a fiber of its own under the root switch. *)
+              let on_owner handle =
+                match Eio_context.owner_post () with
+                | None -> Eio.Fiber.fork ~sw handle
+                | Some post -> post handle
+              in
+              on_owner (fun () ->
                 Eio_guard.protect
                   ~finally:(fun () ->
                     Server_mcp_transport_ws.finish_inbound_dispatch session)

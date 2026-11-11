@@ -55,16 +55,25 @@ type dashboard_auth_state =
    Endpoint [on_message] handler. The size-cap knobs are fed to
    [Endpoint.create] as [max_message] / [max_frame]. *)
 
+(** A frame for the client. The writer of a connection ([Ws_wsd.t]) has no
+    lock and the connection's own fiber reads from it, so only a fiber of the
+    connection's domain writes to it: every other fiber queues one of these
+    (RFC http-transport-runs-on-its-own-domain §3.6). *)
+type outbound =
+  | Text_frame of Bigstringaf.t
+  | Ping_frame
+  | Close_frame
+
 (** Active WebSocket session state. *)
 type ws_session = {
   id: string;
   runtime_authority: Sse.runtime_authority;
-  wsd: Ws_wsd.t;
+  (** Frames for the client, in the order they were sent, from any domain.
+      The connection's fiber takes them ({!serve_outbound}). Once that fiber
+      has ended a send is refused, which is how a sender learns the
+      connection is gone. *)
+  outbound: outbound Domain_mailbox.t;
   closed: bool Atomic.t;
-  (** All writes to [wsd] (text frames, pings, pongs, close) are serialized
-      through [write_mutex] so fibers sharing one connection cannot interleave
-      frames or race with a concurrent close. *)
-  write_mutex: Stdlib.Mutex.t;
   (** Last time a WebSocket pong frame was received from the client (or the
       time the connection opened, before any pong).  The heartbeat closes the
       session once it has gone [threshold] whole intervals without a pong; a
@@ -197,11 +206,8 @@ let __test_slice_index_remove ~session_id ~slice =
 let __test_slice_index_remove_session session_id =
   with_sessions_rw (fun () -> slice_index_remove_session_locked session_id)
 
-(** Detach a session from the global registry before doing any wire-level
-    shutdown.  Closing [Ws_wsd.t] takes the per-session [write_mutex]
-    and may run transport code; doing that while [sessions_mutex] is held can
-    stall every session lookup, fanout snapshot, and cleanup path behind one
-    slow or wedged socket. *)
+(** Detach a session from the global registry before queueing its close
+    frame, so [sessions_mutex] is held only across the table operations. *)
 let detach_session_for_close session_id =
   with_sessions_rw (fun () ->
       match Hashtbl.find_opt sessions session_id with
@@ -212,15 +218,10 @@ let detach_session_for_close session_id =
           slice_index_remove_session_locked session_id;
           Some session)
 
-let close_detached_session_wsd ?(code : int option) ~context session =
-  try
-    Stdlib.Mutex.protect session.write_mutex (fun () ->
-        if not (Ws_wsd.is_closed session.wsd) then Ws_wsd.send_close ?code session.wsd ())
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      Log.Server.warn "WS %s failed for %s: %s" context session.id
-        (Printexc.to_string exn)
+(* Refused when the connection's fiber has ended: there is nobody left to
+   close. *)
+let close_detached_session session =
+  ignore (Domain_mailbox.send session.outbound Close_frame : bool)
 
 let update_ws_session_count_metric () =
   Transport_metrics.set_ws_sessions
@@ -236,16 +237,15 @@ let next_id =
 let log_ws_delivery_dropped ~context session_id =
   Log.Transport.warn "WS %s not delivered for session=%s" context session_id
 
-let new_session ~runtime_authority ~id ~wsd =
+let new_session ~runtime_authority ~id =
   (* NDT-OK: session creation stamps wall-clock liveness/ACK metadata only;
      message ordering and protocol output still come from explicit sequence IDs. *)
   let now = Unix.gettimeofday () in
   {
     id;
     runtime_authority;
-    wsd;
+    outbound = Domain_mailbox.create ();
     closed = Atomic.make false;
-    write_mutex = Stdlib.Mutex.create ();
     last_pong_at = Atomic.make now;
     dashboard_auth = Atomic.make Unauthenticated;
     dashboard_route = Atomic.make None;
@@ -259,11 +259,9 @@ let new_session ~runtime_authority ~id ~wsd =
     inbound_dispatches = Atomic.make 0;
   }
 
-(** [true] when the session has been closed locally or the httpun-ws writer has
-    shut down.  Reads the atomic [closed] flag and the WSD state; safe from any
-    fiber. *)
-let is_session_closed session =
-  Atomic.get session.closed || Ws_wsd.is_closed session.wsd
+(** [true] once the session was cleaned up or a send to it was refused.
+    Safe from any domain. *)
+let is_session_closed session = Atomic.get session.closed
 
 (** Record a client pong: refresh [last_pong_at].  Called from the WS frame
     handler on every [Pong] frame; this is the liveness signal the heartbeat
@@ -279,27 +277,18 @@ let record_pong session =
     server-mode fanout can therefore reuse one immutable payload across
     sessions without allocating a per-session payload string. *)
 let send_text_bigstring session payload =
-  let len = Bigstringaf.length payload in
-  if is_session_closed session then begin
+  if is_session_closed session
+  then false
+  else if Domain_mailbox.send session.outbound (Text_frame payload)
+  then begin
+    let len = Bigstringaf.length payload in
+    Transport_metrics.inc_ws_bytes_sent ~bytes:len;
+    Transport_metrics.observe_ws_message_bytes_sent len;
+    true
+  end
+  else begin
     Atomic.set session.closed true;
     false
-  end else begin
-    Stdlib.Mutex.protect session.write_mutex (fun () ->
-      if is_session_closed session then false
-      else begin
-        try
-          Ws_wsd.send_text_bigstring session.wsd payload;
-          Transport_metrics.inc_ws_bytes_sent ~bytes:len;
-          Transport_metrics.observe_ws_message_bytes_sent len;
-          true
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Transport.warn "WS text send failed for session=%s: %s" session.id
-            (Printexc.to_string exn);
-          Atomic.set session.closed true;
-          false
-      end)
   end
 
 (** WebSocket text frames must contain valid UTF-8.  Raw SSE broadcasts can
@@ -941,7 +930,7 @@ let cleanup_session session_id =
   match detached with
   | None -> ()
   | Some session ->
-    close_detached_session_wsd ~context:"close" session;
+    close_detached_session session;
     (* #10875: see server_ws_standalone — per-session lifecycle is DEBUG
        to avoid logging amplification during WS storm (#10701). *)
     Log.Server.debug "WebSocket session %s closed" session_id
@@ -996,63 +985,76 @@ let __test_dashboard_delta_payload_text_for_event (ev : Sse.external_event) =
   dashboard_delta_payload_text_for_parsed ev.Sse.ext_frame
     (dashboard_event_of_external ev)
 
-let start_upgrade_heartbeat ?sw ?clock session_id session =
-  match sw, clock with
-  | Some server_sw, Some clock ->
+(* Writes the session's frames to [wsd], in the order they were sent. Runs
+   on the connection's fiber scope, so the writer is touched from the
+   connection's domain only. Ends after the close frame, when the writer has
+   closed, or when the connection's scope ends; the session is cleaned up
+   then, whichever way the connection went. *)
+let serve_outbound ~scope session_id session wsd =
+  let write frame =
+    if Ws_wsd.is_closed wsd
+    then `Finished
+    else (
+      match frame with
+      | Text_frame payload ->
+        Ws_wsd.send_text_bigstring wsd payload;
+        `Continue
+      | Ping_frame ->
+        Ws_wsd.send_ping wsd ();
+        `Continue
+      | Close_frame ->
+        Ws_wsd.send_close wsd ();
+        `Finished)
+  in
+  let serving = ref false in
+  Eio.Fiber.fork_daemon ~sw:scope (fun () ->
+    serving := true;
+    Fun.protect
+      ~finally:(fun () -> Eio.Cancel.protect (fun () -> cleanup_session session_id))
+      (fun () ->
+        Domain_mailbox.serve session.outbound ~handle:write ~unhandled:(fun _frame -> ()));
+    `Stop_daemon);
+  (* A cancelled scope starts no fiber: the connection is ending and nobody
+     would take this session's frames. *)
+  if not !serving then cleanup_session session_id
+;;
+
+(* A daemon of the connection's scope: it stops with the connection. *)
+let start_upgrade_heartbeat ~scope ?clock session_id session =
+  match clock with
+  | Some clock ->
     let threshold = missed_pong_threshold () in
-    Eio.Fiber.fork ~sw:server_sw (fun () ->
-      (* Per-connection switch: the heartbeat fiber must not be anchored to the
-         server-wide switch.  When the connection closes the loop exits and this
-         switch cleans up with it. *)
-      Eio.Switch.run (fun _conn_sw ->
-        let rec loop () =
-          Eio.Time.sleep clock heartbeat_interval_s;
-          if is_session_closed session
-          then ()
-          else if
-            (* NDT-OK: wall-clock compared for liveness only, not output *)
-            heartbeat_should_close
-              ~now:(Unix.gettimeofday ())
-              ~last_pong_at:(Atomic.get session.last_pong_at)
-              ~threshold
-              ~interval_s:heartbeat_interval_s
-          then begin
-            Log.Server.debug
-              "[ws-upgrade] session %s pong timeout (no pong in %d intervals); closing"
-              session_id
-              threshold;
-            cleanup_session session_id
-          end
-          else begin
-            let send_failed = ref false in
-            (try
-               Stdlib.Mutex.protect session.write_mutex (fun () ->
-                 if not (is_session_closed session) then
-                   Ws_wsd.send_ping session.wsd ())
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               send_failed := true;
-               (match Http_reqd.Late_response.classify_write_failure exn with
-                | Some _ ->
-                  Log.Server.debug
-                    "[ws-upgrade] session %s heartbeat skipped (writer closed during \
-                     cancel race)"
-                    session_id
-                | None ->
-                  Log.Server.warn
-                    "[ws-upgrade] session %s heartbeat send_ping failed: %s"
-                    session_id
-                    (Printexc.to_string exn)));
-            if !send_failed
-            then cleanup_session session_id
-            else loop ()
-          end
-        in
-        loop ()))
-  | _ ->
+    Eio.Fiber.fork_daemon ~sw:scope (fun () ->
+      let rec loop () =
+        Eio.Time.sleep clock heartbeat_interval_s;
+        if is_session_closed session
+        then `Stop_daemon
+        else if
+          (* NDT-OK: wall-clock compared for liveness only, not output *)
+          heartbeat_should_close
+            ~now:(Unix.gettimeofday ())
+            ~last_pong_at:(Atomic.get session.last_pong_at)
+            ~threshold
+            ~interval_s:heartbeat_interval_s
+        then begin
+          Log.Server.debug
+            "[ws-upgrade] session %s pong timeout (no pong in %d intervals); closing"
+            session_id
+            threshold;
+          cleanup_session session_id;
+          `Stop_daemon
+        end
+        else if Domain_mailbox.send session.outbound Ping_frame
+        then loop ()
+        else begin
+          cleanup_session session_id;
+          `Stop_daemon
+        end
+      in
+      loop ())
+  | None ->
     Log.Server.debug
-      "[ws-upgrade] session %s heartbeat disabled (missing switch or clock)"
+      "[ws-upgrade] session %s heartbeat disabled (missing clock)"
       session_id
 
 (* RFC-0287: ping->pong is automatic in the ws-direct Endpoint, so the former
@@ -1066,13 +1068,17 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
     same-origin HTTP upgrade in [Server_routes_http_routes_frontend].
     RFC-0281 S3.2.
 
+    [scope] is the connection's own switch: the fiber that writes to [wsd]
+    and the heartbeat run under it, on the connection's domain, and end with
+    it.
+
     [on_connection_close] and [on_eof] are observability hooks invoked
     before {!cleanup_session}.  The defaults close the close-frame
     payload and ignore the eof error.  Cleanup runs regardless of the
     hook. *)
 let mcp_websocket_handler
     ~runtime_authority
-    ?sw
+    ~scope
     ?clock
     ?(on_close_log = fun ~session_id:_ ~code:_ ~reason:_ -> ())
     ?(on_eof = fun ~session_id:_ -> ())
@@ -1081,7 +1087,7 @@ let mcp_websocket_handler
     (wsd : Ws_wsd.t)
   : Ws_endpoint.handlers =
   let session_id = next_id () in
-  let session = new_session ~runtime_authority ~id:session_id ~wsd in
+  let session = new_session ~runtime_authority ~id:session_id in
   with_sessions_rw (fun () -> Hashtbl.replace sessions session_id session);
   Transport_metrics.set_ws_sessions
     (with_sessions_rw (fun () -> Hashtbl.length sessions));
@@ -1093,7 +1099,8 @@ let mcp_websocket_handler
          && not (send_dashboard_or_raw_sse session sse_event)
       then cleanup_session session_id)
     ();
-  start_upgrade_heartbeat ?sw ?clock session_id session;
+  serve_outbound ~scope session_id session wsd;
+  start_upgrade_heartbeat ~scope ?clock session_id session;
   (* #10875: see cleanup_session — per-session lifecycle is DEBUG to
      avoid logging amplification during WS storm (#10701). *)
   Log.Server.debug "WebSocket session %s connected (%s)" session_id origin_label;
@@ -1192,17 +1199,19 @@ let respond_and_drive_upgrade
       Default: ignore. *)
 let upgrade_connection
     ~runtime_authority
-    ?sw
     ?clock
     ?(on_message = fun _session_id _text -> ())
     ~(upgrade : Http_reqd.upgrade)
     (reqd : Http_reqd.t)
   : (unit, string) result =
-  respond_and_drive_upgrade ~upgrade ~reqd
-    ~max_message:(max_inbound_message_bytes ())
-    ~max_frame:(max_inbound_frame_bytes ())
-    ~handler:
-      (mcp_websocket_handler ~runtime_authority ?sw ?clock ~on_message ~origin_label:"same-origin /ws")
+  match Http_reqd.relay_scope reqd with
+  | None -> Error "websocket upgrade needs the scope of its connection"
+  | Some scope ->
+    respond_and_drive_upgrade ~upgrade ~reqd
+      ~max_message:(max_inbound_message_bytes ())
+      ~max_frame:(max_inbound_frame_bytes ())
+      ~handler:
+        (mcp_websocket_handler ~runtime_authority ~scope ?clock ~on_message ~origin_label:"same-origin /ws")
 
 (** Outcome of {!send_to_session_result}.  [Sent] is the happy path;
     [Session_gone] is the expected case where the session has already

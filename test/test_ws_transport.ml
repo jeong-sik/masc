@@ -499,7 +499,7 @@ let test_backpressure_gate_stale_ack_throttles_delivery () =
   Ws.__test_reset_env_caches ();
   with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0.001" (fun () ->
     let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
-      ~base_path:(Filename.get_temp_dir_name ())) ~id:"stale-ack" ~wsd:(Obj.magic ()) in
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"stale-ack" in
     Atomic.set session.dashboard_auth (Ws.Authenticated { agent = None });
     Atomic.set session.dashboard_last_delta_seq 1;
     Atomic.set session.dashboard_last_delta_at (Unix.gettimeofday () -. 10.0);
@@ -539,7 +539,7 @@ let test_dashboard_hello_keeps_upgrade_runtime_authority () =
     let auth_a = Masc_test_deps.make_sse_auth base_a "same-reader" in
     let auth_b = Masc_test_deps.make_sse_auth base_b "same-reader" in
     let id = "ws-runtime-authority" in
-    let session = Ws.new_session ~id ~wsd:(Obj.magic ())
+    let session = Ws.new_session ~id
       ~runtime_authority:(Sse.runtime_authority_exn ~base_path:base_a) in
     let hello (auth : Sse.registration_auth) request_id =
       let state = Masc.Mcp_server.For_testing.create_state ~base_path:auth.config in
@@ -579,12 +579,110 @@ let test_dashboard_hello_keeps_upgrade_runtime_authority () =
 
 let with_registered_test_session sid f =
   let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
-      ~base_path:(Filename.get_temp_dir_name ())) ~id:sid ~wsd:(Obj.magic ()) in
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:sid in
   Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions sid session);
   Fun.protect
     ~finally:(fun () ->
       Ws.with_sessions_rw (fun () -> Hashtbl.remove Ws.sessions sid))
     (fun () -> f session)
+
+(* The MCP session of one connection whose scope is [scope], attached to a
+   real endpoint that no socket drives: what the session writes stays in the
+   endpoint's writer, where [pending_output] reads it. *)
+let attach_session ~scope =
+  let session_ids () =
+    Ws.with_sessions_rw (fun () -> Hashtbl.fold (fun id _ ids -> id :: ids) Ws.sessions [])
+  in
+  let before = session_ids () in
+  let endpoint =
+    Ws_direct_core.Endpoint.create
+      Ws_direct_core.Endpoint.Server
+      (Ws.mcp_websocket_handler
+         ~runtime_authority:
+           (Sse.runtime_authority_exn ~base_path:(Filename.get_temp_dir_name ()))
+         ~scope
+         ~on_message:(fun _session_id _text -> ())
+         ~origin_label:"test")
+  in
+  match List.filter (fun id -> not (List.mem id before)) (session_ids ()) with
+  | [ id ] -> endpoint, id
+  | ids -> Alcotest.failf "expected one new session, got %d" (List.length ids)
+;;
+
+let pending_output endpoint =
+  match Ws_direct_core.Endpoint.next_write_operation endpoint with
+  | `Write iovecs ->
+    String.concat
+      ""
+      (List.map
+         (fun { Faraday.buffer; off; len } -> Bigstringaf.substring buffer ~off ~len)
+         iovecs)
+  | `Yield | `Close _ -> ""
+;;
+
+let index_of ~sub s =
+  let n = String.length sub in
+  let rec find i =
+    if i + n > String.length s
+    then None
+    else if String.equal (String.sub s i n) sub
+    then Some i
+    else find (i + 1)
+  in
+  find 0
+;;
+
+let test_frames_from_another_domain_are_written_on_the_connection_domain () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun scope ->
+      let endpoint, id = attach_session ~scope in
+      (* The endpoint calls this from the fiber that writes the first frame. *)
+      let written_on = Atomic.make None in
+      Ws_direct_core.Endpoint.yield_writer endpoint (fun () ->
+        Atomic.set written_on (Some (Domain.self ())));
+      let frames = List.init 50 (Printf.sprintf "{\"frame\":%d}") in
+      let outcomes =
+        Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+          List.map (Ws.send_to_session_result id) frames)
+      in
+      Alcotest.(check bool)
+        "every send from the other domain is accepted"
+        true
+        (List.for_all (fun outcome -> outcome = Ws.Sent) outcomes);
+      let last = List.nth frames 49 in
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5.0 (fun () ->
+        while Option.is_none (index_of ~sub:last (pending_output endpoint)) do
+          Eio.Fiber.yield ()
+        done);
+      Alcotest.(check bool)
+        "the connection's domain wrote the first frame"
+        true
+        (Atomic.get written_on = Some (Domain.self ()));
+      let output = pending_output endpoint in
+      let positions = List.filter_map (fun frame -> index_of ~sub:frame output) frames in
+      Alcotest.(check int) "every frame reached the writer" 50 (List.length positions);
+      Alcotest.(check bool)
+        "in the order they were sent"
+        true
+        (List.sort compare positions = positions)))
+;;
+
+let test_session_ends_with_the_scope_of_its_connection () =
+  Eio_main.run (fun _env ->
+    let id =
+      Eio.Switch.run (fun scope ->
+        let _endpoint, id = attach_session ~scope in
+        Alcotest.(check bool)
+          "registered while the connection lives"
+          true
+          (Ws.with_sessions_rw (fun () -> Hashtbl.mem Ws.sessions id));
+        id)
+    in
+    Alcotest.(check bool)
+      "a send after the connection's scope ended finds no session"
+      true
+      (Ws.send_to_session_result id "{}" = Ws.Session_gone))
+;;
 
 let test_inbound_dispatch_default_limit () =
   with_env_var "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION" "" (fun () ->
@@ -895,7 +993,7 @@ let test_dashboard_auth_authenticated_tokenless () =
 
 let test_new_session_initializes_pong_state () =
   let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
-      ~base_path:(Filename.get_temp_dir_name ())) ~id:"pong-state-init" ~wsd:(Obj.magic ()) in
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"pong-state-init" in
   Alcotest.(check bool) "closed starts false" false (Atomic.get session.closed);
   Alcotest.(check bool) "last_pong_at is in the recent past"
     true
@@ -913,7 +1011,7 @@ let test_new_session_initializes_pong_state () =
 
 let test_record_pong_refreshes_last_pong_at () =
   let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
-      ~base_path:(Filename.get_temp_dir_name ())) ~id:"pong-refresh" ~wsd:(Obj.magic ()) in
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"pong-refresh" in
   let before = Atomic.get session.last_pong_at in
   Unix.sleepf 0.005;
   Ws.record_pong session;
@@ -996,7 +1094,7 @@ let test_dashboard_seq_no_lost_updates_across_domains () =
   if Domain.recommended_domain_count () < 2 then ()
   else
   let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
-      ~base_path:(Filename.get_temp_dir_name ())) ~id:"seq-xdomain" ~wsd:(Obj.magic ()) in
+      ~base_path:(Filename.get_temp_dir_name ())) ~id:"seq-xdomain" in
   let iters = 1_000_000 in
   (* Two-way start barrier: each domain announces arrival and spins until both
      are present, so the increment loops run in true overlap.  Without it the
@@ -1165,6 +1263,12 @@ let () =
         test_dashboard_auth_authenticated_with_agent;
       Alcotest.test_case "tokenless Authenticated has no agent" `Quick
         test_dashboard_auth_authenticated_tokenless;
+    ]);
+    ("connection_domain", [
+      Alcotest.test_case "frames sent from another domain are written on the connection's domain" `Quick
+        test_frames_from_another_domain_are_written_on_the_connection_domain;
+      Alcotest.test_case "a session ends with the scope of its connection" `Quick
+        test_session_ends_with_the_scope_of_its_connection;
     ]);
     ("pong_state", [
       Alcotest.test_case "new session initializes pong atomics" `Quick

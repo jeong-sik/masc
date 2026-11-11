@@ -13,7 +13,7 @@ let make_routes_with_transport ~port:_ ~host:_ ~sw ~transport_sw ~clock =
   Channel_gate_connector.register (module Channel_gate_slack_state);
   Channel_gate_connector.register (module Channel_gate_telegram_state);
   Http.Router.create ()
-  |> Server_routes_http_routes_frontend.add_routes ~sw:transport_sw ~clock
+  |> Server_routes_http_routes_frontend.add_routes ~clock
   |> Server_oauth_http.add_routes
   |> Server_keeper_oauth_http.add_routes ~clock
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock

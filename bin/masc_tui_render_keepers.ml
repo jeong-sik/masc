@@ -4328,7 +4328,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | Render_schedule.Page_capped { shown; total } ->
                 let of_total =
                   match total with
-                  | Some total -> Printf.sprintf " -- %d of %d requests" shown total
+                  | Some total ->
+                      Printf.sprintf " -- %s of %s requests"
+                        (Masc_tui_value.Count.grouped shown)
+                        (Masc_tui_value.Count.grouped total)
                   | None -> ""
                 in
                 let next_step = match state.keeper_schedules_page with

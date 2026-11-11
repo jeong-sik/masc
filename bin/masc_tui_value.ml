@@ -50,3 +50,23 @@ module Instant = struct
     | Same_year -> within_year precision tm
     | Other_year -> year_month_day tm ^ " " ^ clock precision tm
 end
+
+module Count = struct
+  (* Digits between two separators. *)
+  let group_size = 3
+
+  let grouped value =
+    let digits = string_of_int value in
+    (* A minus sign is not a digit: counting it put the first separator one
+       place early, and [-123456] read [-,123,456]. *)
+    let sign = if value < 0 then 1 else 0 in
+    let length = String.length digits in
+    let text = Buffer.create (length + (length / group_size)) in
+    String.iteri
+      (fun index digit ->
+        if index > sign && (length - index) mod group_size = 0 then
+          Buffer.add_char text ',';
+        Buffer.add_char text digit)
+      digits;
+    Buffer.contents text
+end

@@ -369,6 +369,7 @@
  (modules masc_tui_usage_calls)
  (libraries
   masc
+  masc_tui_value
   masc_tui_ansi
   masc_tui_chart
   masc_tui_message_layout
@@ -1217,7 +1218,7 @@
  (name masc_tui_observation_layout)
  (wrapped false)
  (modules masc_tui_observation_layout)
- (libraries masc masc_tui_message_layout masc_tui_table))
+ (libraries masc masc_tui_message_layout masc_tui_table masc_tui_value))
 
 (library
  (name masc_tui_tool_table)
@@ -2491,7 +2492,7 @@
  (name masc_tui_render_prim)
  (wrapped false)
  (modules masc_tui_render_prim)
- (libraries masc_tui_page_line masc_tui_page_reading masc_tui_nav_trace_log masc_tui_execute_terminal masc_tui_action_notice masc_tui_resource_export masc_tui_markdown_theme masc_tui_system_logs masc_tui_task_dispatch masc_tui_local_read_observation masc_tui_account_login masc_tui_message_input masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
+ (libraries masc_tui_value masc_tui_page_line masc_tui_page_reading masc_tui_nav_trace_log masc_tui_execute_terminal masc_tui_action_notice masc_tui_resource_export masc_tui_markdown_theme masc_tui_system_logs masc_tui_task_dispatch masc_tui_local_read_observation masc_tui_account_login masc_tui_message_input masc_tui_surface_search masc_tui_approvals_model masc_tui_surface_navigation
   masc_tui_candle
   masc_tui_frame_timing
   masc_tui_next_request_band

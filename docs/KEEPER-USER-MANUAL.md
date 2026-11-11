@@ -959,10 +959,6 @@ MASC does not ask the running turn to stop. The turn finishes on its own, and
 the Owner then starts the waiting message. Use the interrupt controls to stop
 the running turn sooner.
 
-An autonomous turn can yield its Owner slot to runnable chat at a completed
-MASC tool boundary. It retains unfinished work for resumption. This does not
-interrupt a shell command or a vendor built-in tool that is still running.
-
 A direct operation can also end at a checkpoint instead of an answer, for
 example when a tool result arrives later. The retained continuation survives
 restart while queued or claimed before resume admission. A crash after resume

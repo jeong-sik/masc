@@ -91,6 +91,7 @@ import {
   upsertTrackedKeeperChatOperation,
 } from './keeper-chat-operations-local'
 import { ApiRequestError, clearStoredToken, setStoredToken } from './api/core'
+import { acceptedExecutionWorkspace } from './execution-workspace-authority'
 import {
   lookupToolCallOutput,
   resetToolCallOutputs,
@@ -110,6 +111,9 @@ beforeEach(() => {
   fetchKeeperChatHistoryPage.mockReset().mockResolvedValue({ messages: [], nextCursor: null, hasMore: false })
   clearStoredToken()
   shellAuthSummary.value = { effective_role: 'admin' }
+  // Chat operations are read only for an accepted workspace that names its Observer instance.
+  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace',
+    connectionGeneration: 1, observerInstanceId: 'fixture-instance' }
   fetchKeeperToolCalls.mockReset()
   fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
   resetToolCallOutputs()
@@ -118,6 +122,7 @@ beforeEach(() => {
 
 afterEach(() => {
   _resetChatHydrationForTests()
+  acceptedExecutionWorkspace.value = null
   vi.useRealTimers()
 })
 

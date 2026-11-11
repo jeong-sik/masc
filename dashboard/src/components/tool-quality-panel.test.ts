@@ -111,7 +111,8 @@ async function flushUi(): Promise<void> {
  * module registry, so it is seeded in the registry that the panel is loaded from. */
 async function importPanel() {
   const { acceptedExecutionWorkspace } = await import('../execution-workspace-authority')
-  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace', connectionGeneration: 1 }
+  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace', connectionGeneration: 1,
+    observerInstanceId: 'fixture-instance' }
   return import('./tool-quality-panel')
 }
 

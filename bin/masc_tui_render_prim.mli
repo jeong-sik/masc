@@ -738,7 +738,9 @@ val config_pane_title :
     those. [reading] is whatever the pane adds beside its name -- a count, a
     warning -- and is the part that gives way. Ten panes spelled this row and
     nine of them spelled it identically, which is also why none could tell the
-    strip to leave room for the badge. *)
+    strip to leave room for the badge. When those optional names and shortcuts
+    cannot leave room for the active pane, the existing localized pane name
+    precedes them and the connection observation. *)
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list

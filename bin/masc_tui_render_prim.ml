@@ -4074,6 +4074,18 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
      read "@p@" and "@them@" where it meant prompts and themes. The strip
      cannot say it was cut that far; it has already spent its marks. *)
   let strip_floor = tab_strip_min_width (config_pane_tabs state) in
+  if cells keys + strip_floor + cells tail > framed_inner_width cols then
+    let active_name =
+      config_pane_tabs state
+      |> List.find_map (fun (label, active, _) -> if active then Some label else None)
+      |> Option.value ~default:name
+      |> fun label -> screen_title (" " ^ label)
+    in
+    let badge = surface_connection_badge state
+        ~width:(max 0 (framed_inner_width cols - cells active_name - cells "  ")) in
+    detail_heading ~cols ~lead:(Lead_text active_name) ~id:""
+      ~after:[piece reading; piece keys; piece note; piece clock] ~tail:badge
+  else
   (* What the title gives way with is its tail: the reading first, and then
      the name whole. [config_pane_title_head] owns that order. *)
   let before =

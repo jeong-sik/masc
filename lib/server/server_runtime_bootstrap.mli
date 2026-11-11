@@ -276,14 +276,42 @@ val start_post_ready_owner_lanes :
 
 (** {1 Main Entry Point} *)
 
-(** Judges the account mode of [base_path] ({!Authz_boot_mode_read.boot}) and
-    runs what it names. A single user gets the owner state and the routes of
-    [make_routes]. An active multi-account installation gets
+(** What one boot decided about a base path before anything that belongs to
+    one kind of server ran: the auth settings of the environment, and the
+    account mode with the base path it was read from
+    ({!Authz_boot_mode_read.boot}). Only {!judge} makes one and {!run} takes
+    one, so a boot that skips the judgment does not compile. *)
+type judged = private
+  { auth_config : Server_auth_config.t
+  ; booted : Authz_boot_mode_read.booted
+  }
+
+(** Why a boot does not go on. *)
+type judge_refusal =
+  | Auth_config_refused of Server_auth_config.resolve_error
+  | Account_mode_refused of string * string list
+      (** The messages of {!Authz_boot_mode_read.boot}, the first apart. *)
+
+val judge_refusal_to_string : judge_refusal -> string
+
+(** Reads the auth settings of the environment and judges the account mode of
+    [base_path]. The caller holds the BasePath lease and calls this once per
+    boot, inside an Eio event loop ({!Authz_boot_mode_read.boot}), before the
+    startup work of a single user and before {!run}. It starts nothing and
+    writes nothing but what opening the authorization log and the external
+    store writes ({!Authz_boot_mode_read}). *)
+val judge : base_path:string -> (judged, judge_refusal) result
+
+(** Runs what [judged] names. A single user gets the owner state and the
+    routes of [make_routes]. An active multi-account installation gets
     {!Server_accounts.run} on the same [address] and [port], with its own
     route table: no owner state, no Keeper and no route of [make_routes] is
     started for it, and [runtime_sw], [accept_store_quarantine] and the
-    handler makers are not used. A judgment that stops the boot, and an
-    account server that does not start, raise [Env_config_core.Config_error].
+    handler makers are not used. An account server that does not start
+    raises [Env_config_core.Config_error]. Either runs on the base path that
+    [judged] was read from. [input_base_path] is that path as the operator
+    typed it, before it was made canonical: the diagnostics of a single user
+    show it, nothing opens it, and the account server does not use it.
 
     [on_ready] runs once the owner is ready and the HTTP listener is bound;
     for the account server, once its listener is bound.
@@ -296,7 +324,7 @@ val run :
   env:Eio_unix.Stdenv.base ->
   address:Ipaddr.t ->
   port:int ->
-  base_path:string ->
+  judged:judged ->
   ?input_base_path:string ->
   ?on_ready:(unit -> unit) ->
   accept_store_quarantine:bool ->

@@ -2254,38 +2254,53 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
       ~h2_request_handler
       ~h2_error_handler)
 
-let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_ready ~accept_store_quarantine
-    ~make_routes ~make_request_handler ~make_h2_request_handler ~make_h2_error_handler () =
-  let resolved_auth_config =
-    match Server_auth_config.resolve (Server_auth_config.read_env ()) with
-    | Ok config -> config
-    | Error error ->
-      raise
-        (Env_config_core.Config_error
-           (Server_auth_config.resolve_error_to_string error))
-  in
-  (match Server_auth.configure resolved_auth_config with
+(* HIGH-RISK-UNREVIEWED: the account mode is decided here, once per boot,
+   after the BasePath lease and before anything that belongs to one kind of
+   server runs (multi-account A2, S1a-2c): the startup sweeps of a single
+   user, the owner state, the Keepers and the listeners. *)
+type judged =
+  { auth_config : Server_auth_config.t
+  ; booted : Authz_boot_mode_read.booted
+  }
+
+type judge_refusal =
+  | Auth_config_refused of Server_auth_config.resolve_error
+  | Account_mode_refused of string * string list
+
+let judge_refusal_to_string = function
+  | Auth_config_refused error -> Server_auth_config.resolve_error_to_string error
+  | Account_mode_refused (first, rest) ->
+    "the account mode refuses this boot: " ^ String.concat "; " (first :: rest)
+;;
+
+let judge ~base_path =
+  match Server_auth_config.resolve (Server_auth_config.read_env ()) with
+  | Error error -> Error (Auth_config_refused error)
+  | Ok auth_config ->
+    (match
+       Authz_boot_mode_read.boot
+         ~base_path
+         ~config_dir:(Env_config_core.masc_config_dir_opt ())
+         ~anonymous_mutations:(Server_auth_config.allow_anonymous_mutations auth_config)
+     with
+     | Error (first, rest) -> Error (Account_mode_refused (first, rest))
+     | Ok booted -> Ok { auth_config; booted })
+;;
+
+let run ~sw ~runtime_sw ~env ~address ~port ~judged ?input_base_path ?on_ready
+    ~accept_store_quarantine ~make_routes ~make_request_handler ~make_h2_request_handler
+    ~make_h2_error_handler () =
+  (match Server_auth.configure judged.auth_config with
    | Ok () -> ()
    | Error error ->
      raise
        (Env_config_core.Config_error
           (Server_auth.configure_error_to_string error)));
-  (* HIGH-RISK-UNREVIEWED: the account mode is decided here, once per boot,
-     after the BasePath lease and before anything serves (multi-account A2).
-     A multi-account installation gets the account server and its own route
+  (* A multi-account installation gets the account server and its own route
      table (plan S1a); the owner state, the Keepers and the routes of the
      single-user server are not started for it. *)
-  match
-    Authz_boot_mode_read.boot
-      ~base_path
-      ~config_dir:(Env_config_core.masc_config_dir_opt ())
-      ~anonymous_mutations:(Server_auth_config.allow_anonymous_mutations resolved_auth_config)
-  with
-  | Error (first, rest) ->
-    let message = "the account mode refuses this boot: " ^ String.concat "; " (first :: rest) in
-    Log.Server.error "[FATAL] %s" message;
-    raise (Env_config_core.Config_error message)
-  | Ok (Authz_boot_mode_read.Multi_account multi_account) ->
+  match judged.booted with
+  | Authz_boot_mode_read.Multi_account multi_account ->
     (match Server_accounts.run ~sw ~env ~address ~port ?on_ready multi_account with
      | Ok () -> ()
      | Error refusal ->
@@ -2294,14 +2309,14 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
        in
        Log.Server.error "[FATAL] %s" message;
        raise (Env_config_core.Config_error message))
-  | Ok (Authz_boot_mode_read.Single_user single_user) ->
+  | Authz_boot_mode_read.Single_user single_user ->
     run_single_user
       ~sw
       ~runtime_sw
       ~env
       ~address
       ~port
-      ~base_path
+      ~base_path:(Authz_boot_mode_read.single_user_base_path single_user)
       ~single_user
       ?input_base_path
       ?on_ready

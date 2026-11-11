@@ -47,8 +47,8 @@ let write_notification_failures = Atomic.make 0
 
 let subscribe_written notify =
   let listener = {notify} in
-  Atomic.update write_listeners (fun listeners -> listener :: listeners);
-  fun () -> Atomic.update write_listeners
+  Lockfree_atomic.update write_listeners (fun listeners -> listener :: listeners);
+  fun () -> Lockfree_atomic.update write_listeners
     (List.filter (fun current -> current != listener))
 
 let failed_write_notifications () = Atomic.get write_notification_failures
@@ -283,7 +283,7 @@ module Key_map = Map.Make (String)
 let latest_by_key config =
   load_all config
   |> List.fold_left
-       (fun table value ->
+       (fun table (value : record) ->
           let key =
             key_of ~surface:value.surface ~target_type:value.target_type
               ~target_id:value.target_id

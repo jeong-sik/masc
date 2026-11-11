@@ -305,8 +305,8 @@ module Ring = struct
 
   let subscribe_published published =
     let listener = {published} in
-    Atomic.update publication_listeners (fun listeners -> listener :: listeners);
-    fun () -> Atomic.update publication_listeners
+    Lockfree_atomic.update publication_listeners (fun listeners -> listener :: listeners);
+    fun () -> Lockfree_atomic.update publication_listeners
       (List.filter (fun current -> current != listener))
 
   let failed_publication_notifications () = Atomic.get publication_notification_failures

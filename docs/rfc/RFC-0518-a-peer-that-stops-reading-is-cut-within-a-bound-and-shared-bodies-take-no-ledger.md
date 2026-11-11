@@ -377,7 +377,7 @@ worktree `.worktrees/h2-backpressure` 에서 gh stack 으로 쌓는다. 맨 아�
 | L2b | `http/h2-flush-bound` | D2, D3(한 PR) | #50765 |
 | L2b2 | `http/sse-h1-stall-timer` | D2 의 나머지: SSE `send` 타이머는 HTTP/1.1 에서만, 로그 스트림은 `Server_sse_response`, 로그 스트림 keepalive 시각, 핑 상수 하나 | |
 | L3 | `deps/tls-2.1.5` | D9 | |
-| L4a | `http/connection-socket-bounds` | D4, D6. TLS 연결의 보내기 쪽을 닫은 뒤 상한은 L4a2 | |
+| L4a | `http/connection-socket-bounds` | D4, D6. TLS 연결의 보내기 쪽을 닫은 뒤 상한은 L4a2 |#51208 |
 | L4a2 | `http/tls-send-shutdown-bound` | D4 의 나머지: `Tls_stream_socket.shutdown` 이 감싸개에 알린다 | |
 | L4b | `http/tls-write-pieces` | D8 | |
 | L5 | `http/sse-producer-scope` | D7 | |

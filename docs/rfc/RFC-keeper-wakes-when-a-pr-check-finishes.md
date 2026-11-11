@@ -45,7 +45,7 @@ implementation_prs: []
 
 - 합 18.946 h 는 창 A GitHub 기다림 61.342 h 의 30.9% 다. 72시간으로 나누면 평균 0.263개가 동시에 붙들려 있다.
 - 창 A 는 창 B 의 2.12배다. 두 창의 Keeper 와 일이 달라서 이 증가를 어떤 변경의 효과로 읽지 않는다.
-- 같은 Keeper 의 채팅 작업이 큐에서 기다린 시간과의 겹침은 모든 60초 이상 Execute 로 쟀다(`queue_wait_overlap.py --hold-s 60`, 창 A, #51284 의 `result-queue-wait-overlap-…json`). 1,183호출 74.214 h 중 15.519 h(20.9%)가 겹쳤다. 위 표의 60초 이상 1,181건과 2건 다르고 원인은 확인하지 않았다. check 기다림만의 몫은 가르지 않았다.
+- 같은 Keeper 의 채팅 작업이 큐에서 기다린 시간과의 겹침은 모든 60초 이상 Execute 로 쟀다(`queue_wait_overlap.py --hold-s 60`, 창 A, #51284 의 `result-queue-wait-overlap-…json`). 1,183호출 74.214 h 중 15.519 h(20.9%)가 겹쳤다. 위 표의 60초 이상 1,181건과 2건 다르다. `github_wait_shapes.py` 는 행의 `ts` 가 창 안인 호출을 세고 `queue_wait_overlap.py` 는 호출 구간이 창과 닿는 호출을 센다(#51284 README). 이 RFC 는 check 기다림만의 몫을 가르지 않았다. #51303 이 같은 15.519 h 를 턴 종류와 명령으로 가른다. 직접 턴에서 `sleep` 뒤에 GitHub 확인 상태를 읽는 호출 중 같은 Keeper 의 채팅 작업이 기다린 시간이 10.629 h 다. 그쪽 분류는 `sleep` 이 든 호출이고 `actions/runs` 읽기도 세서, 위 표의 `pr_checks`·`commit_checks` 와 집합이 다르다.
 - 18.946 h 는 check 를 기다린 시간의 상한이다. §1.2 의 "읽는 것" 줄처럼 `gh pr view` 로 리뷰나 병합을 기다린 호출이 섞여 있다.
 
 ### 1.2 기다림이 쓰인 모양 (스크립트 밖에서 센 값)
@@ -331,7 +331,7 @@ python3 -I docs/evidence/execute-waits-2026-11/measure_execute_waits.py --base-p
 - 필수 check 만 거르기(끝 D).
 - Ready 나 병합을 판정하는 일. 깨움은 사실을 알린다.
 - world-state RFC 의 S8(자기 PR 실패에 깨움)과 `Pull_heads` 를 이 RFC 에서 만드는 일.
-- `run_in_background` 길을 고치는 일. `execute-background-through-the-tool-outbox` 가 다룬다.
+- `run_in_background` 길을 고치는 일. `execute-background-through-the-tool-outbox` 가 다룬다. #51303 은 영수증을 기다리며 턴이 끝나는 길을 후보로 낸다.
 
 ## 7. 사용자가 정할 것
 

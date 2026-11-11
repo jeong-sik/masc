@@ -6,9 +6,12 @@
 
 (** [handle_goal_list ctx args] handles [masc_goal_list].
     Optional filter: [phase] (executing / verifying / awaiting_confirmation / completed / dropped).
-    Returns the goal list with a
-    rollup summary.  Validation errors return
-    [(false, error_json)] without touching the store. *)
+    Returns the goal list with a rollup summary. A row is short (id,
+    criterion_revision, title, priority, phase, created_at, updated_at) unless
+    [detailed] is true. [goal_id] reads that one Goal's whole row: an unknown
+    id is [not_found] and a [goal_id] together with [phase] is a validation
+    error. Validation errors return [(false, error_json)] without touching
+    the store. *)
 val handle_goal_list
   :  tool_name:string
   -> start_time:Tool_timing.started

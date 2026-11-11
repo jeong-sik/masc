@@ -50,7 +50,11 @@ let save_agent_core_classified_typed
     ~boundary
     (ckpt : Agent_core.Checkpoint.t)
   : (save_agent_core_outcome, save_agent_core_error) result =
-  match Keeper_transcript_unit.validate ckpt.messages with
+  (* The validation reads every block of every message. On the caller's
+     domain, which for a Keeper turn is the main one, it was 204 of 21,576
+     main-thread samples over 60 s on a live root of 29 Keepers (about 0.6 s,
+     2026-11-11). It is pure, so it runs where the encoding below runs. *)
+  match offload_checkpoint_cpu (fun () -> Keeper_transcript_unit.validate ckpt.messages) with
   | Error structural -> Error (Structurally_invalid structural)
   | Ok () ->
   match Keeper_id.Trace_id.of_string ckpt.session_id with

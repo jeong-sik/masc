@@ -19590,7 +19590,8 @@ let press_marked_target state ~mailbox (target : press_target) =
   | Press_ui_language ->
       apply_ui_language state (next_ui_language state.ui_language)
   | Press_runtime_mode mode ->
-      if mode <> state.runtime_mode || state.view <> Runtime then
+      if (state.view <> Runtime || Option.is_none (Masc_tui_types.runtime_parent state))
+         && (mode <> state.runtime_mode || state.view <> Runtime) then
         enter_runtime_mode state ~mailbox mode
   | Press_standalone_lanes ->
       if state.view <> Lanes then enter_standalone_lanes state ~mailbox
@@ -34471,6 +34472,11 @@ Use relative paths for resources already held in the package. -->
         (not compact_viewport) && view_is_chat state.view
         && not state.repository_changes_open
       in
+      (* An unrelated key disarms lane removal below, but must not then be
+         handed to the listing that the parent covered. *)
+      let runtime_parent_before_input =
+        if state.view = Runtime then Masc_tui_types.runtime_parent state else None
+      in
       (* The opening screen's help-door line retires on the first input of
          any kind: the reader is driving now, and the doors it named -- the
          footer item, the sheet -- stay on every screen without it. A paste
@@ -35999,6 +36005,11 @@ Use relative paths for resources already held in the package. -->
               in
               (match k with
                | "esc" -> state.runtime_lane_name_draft <- None
+               | "pageup" ->
+                   (* Read the complete draft, original target and diagnostics
+                      above this field. Esc returns without submitting it. *)
+                   state.runtime_detail_target <- Some Runtime_routes;
+                   state.runtime_detail_scroll <- 0
                | "\r" | "\n" | "enter" ->
                  let name = String.trim draft in
                  if not (String.equal name "") then begin
@@ -37560,11 +37571,37 @@ Use relative paths for resources already held in the package. -->
               own arm below. *)
            let terminal_rows, _ = get_terminal_size () in
            keeper_runtime_pick_key state ~terminal_rows k
+       | Some k
+         when state.view = Runtime
+              && Option.exists (fun parent ->
+                   Masc_tui_types.runtime_parent_blocks_listing_key parent k)
+                   runtime_parent_before_input ->
+           ()
        | Some ("home" | "end" as edge)
          when state.view = Runtime && Option.is_some state.runtime_detail_target ->
            state.runtime_detail_scroll <-
              (if String.equal edge "home" then 0
               else Masc_tui_types.clamped_scroll_end)
+       | Some ("home" | "end" | "pageup" | "pagedown" as key)
+         when state.view = Runtime
+              && (match Masc_tui_types.runtime_parent state with
+                  | Some Runtime_media_parent -> true
+                  | Some (Runtime_prompt_parent _) | None -> false) ->
+           let terminal_rows, cols = get_terminal_size () in
+           (match Masc_tui_types.runtime_parent_projection state ~terminal_rows ~cols with
+            | None -> ()
+            | Some projection ->
+                let count = List.length (Masc_tui_types.slot_editor_rows state) in
+                if count > 0 then begin
+                  let selected = Masc_tui_types.slot_editor_cursor_index state in
+                  let next = match key, selected with
+                    | "home", _ | "pagedown", None -> 0
+                    | "end", _ | "pageup", None -> count - 1
+                    | "pageup", Some current -> max 0 (current - projection.rpp_page)
+                    | "pagedown", Some current -> min (count - 1) (current + projection.rpp_page)
+                    | _, (Some _ | None) -> Option.value selected ~default:0 in
+                  Masc_tui_types.select_slot_editor_row state next
+                end)
        | Some "h"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target
@@ -42016,7 +42053,11 @@ Use relative paths for resources already held in the package. -->
                         state.code_focus_file <- Left_pane;
                         state.view <- Code;
                         Masc_tui_code_requests.launch_entries_load state ~host:server_peer_host ~deliver:(deliver_code state async_messages)))
-            | Runtime -> Masc_tui_types.open_runtime_row_detail state
+            | Runtime ->
+                (* A media slot has no row-detail action. Its [v] reader owns
+                   complete IDs/results; Enter must not open a hidden lane. *)
+                if Option.is_none (Masc_tui_types.runtime_parent state) then
+                  Masc_tui_types.open_runtime_row_detail state
             | System_logs -> open_selected_system_log state
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message

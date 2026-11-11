@@ -16140,7 +16140,8 @@ let text_input_target (state : state) ~compact_viewport =
     && state.config_pane = Config_presets
     && Option.is_some state.preset_save_draft
   then Some Text_preset_name
-  else if state.view = Runtime && Option.is_some state.runtime_lane_name_draft then
+  else if state.view = Runtime && Option.is_none state.runtime_detail_target
+          && Option.is_some state.runtime_lane_name_draft then
     Some Text_runtime_lane_name
   (* The account form draws on the runtime.toml pane only, and not on a
      viewport too small to draw that pane, the rule the voice wizard keeps. *)
@@ -24411,9 +24412,7 @@ let lanes_overview_projection (state : state) ~rows ~cols =
     lop_scroll = {sc_count = count; sc_chrome = rows - list_height;
       sc_overflow_takes_row = false; sc_preview_keep = None} }
 
-(* The one-line prompt the lane editor puts above the Runtime rows: a name
-   being typed for a new lane or for a rename, or the lane a second [D] would
-   remove. *)
+(* The active name field or second-[D] confirmation owns the Runtime body. *)
 type runtime_lane_prompt =
   | Lane_name_prompt of string
   | Lane_rename_prompt of string * string
@@ -24425,6 +24424,49 @@ let runtime_lane_prompt (state : state) =
   | Some (Renaming_lane { lane; draft }), _ -> Some (Lane_rename_prompt (lane, draft))
   | None, Some lane -> Some (Lane_remove_prompt lane)
   | None, None -> None
+
+(* Derived from the existing owners, never stored or used to admit a write.
+   A picker or full reader is above the parent it will return to. *)
+type runtime_parent =
+  | Runtime_media_parent
+  | Runtime_prompt_parent of runtime_lane_prompt
+
+let runtime_parent (state : state) =
+  match state.runtime_detail_target, state.runtime_lane_pick with
+  | Some _, _ | None, Some _ -> None
+  | None, None ->
+      (match runtime_lane_prompt state, state.slot_editor with
+       | Some prompt, _ -> Some (Runtime_prompt_parent prompt)
+       | None, Some { se_target = Media_failover_slots; _ } -> Some Runtime_media_parent
+       | None, (Some { se_target = Exact_lane_slots _; _ } | None) -> None)
+
+(* A parent replaces the listing, so keys for that hidden listing must be
+   consumed rather than fall through to its cursor or edit handlers. Name
+   fields already own every key; media keeps its own slot edits, and a lane
+   removal keeps only its second [D]. Surface navigation is not a list edit. *)
+let runtime_parent_blocks_listing_key parent key =
+  let listing_key =
+    match key with
+    | "e" | "E" | "f" | "h" | "p" | "P" | "/" | "n" | "N"
+    | "\r" | "\n" | "enter" | "right" -> true
+    | _ -> false
+  in
+  match parent with
+  | Runtime_prompt_parent (Lane_name_prompt _ | Lane_rename_prompt _) -> false
+  | Runtime_media_parent ->
+      listing_key
+      || (match runtime_lane_edit_of_key key with
+          | Some (Row_edit (Remove_lane | Rename_lane)) -> true
+          | Some (New_lane | Row_edit (Drop_candidate | Move_candidate _)) | None -> false)
+  | Runtime_prompt_parent (Lane_remove_prompt _) ->
+      listing_key
+      || (match key with
+          | "m" | "j" | "k" | "up" | "down" | "wheel-up" | "wheel-down"
+          | "pageup" | "pagedown" | "home" | "end" -> true
+          | _ ->
+              (match runtime_lane_edit_of_key key with
+               | Some (Row_edit Remove_lane) | None -> false
+               | Some (New_lane | Row_edit (Drop_candidate | Move_candidate _ | Rename_lane)) -> true))
 
 let runtime_lane_write_busy (state : state) =
   match state.runtime_lane_write with
@@ -24708,6 +24750,109 @@ let navigate_slot_editor state move =
       | Some index, Move_up -> max 0 (index - 1)
     in
     select_slot_editor_row state index
+;;
+
+type runtime_parent_line =
+  | Parent_focus of string
+  | Parent_text of string
+  | Parent_notice of runtime_lane_notice option * string
+
+type runtime_parent_projection =
+  { rpp_parent : runtime_parent
+  ; rpp_rows : runtime_parent_line list
+  ; rpp_notices : int
+  ; rpp_page : int
+  ; rpp_position : string option
+  }
+
+(* Drawing and page keys use this same current selection and physical budget.
+   Optional context/notice rows reserve the focused input or selected slot
+   first. Full values remain in Runtime_routes; no display row authorizes an
+   edit, and no window offset is kept across source/selection changes. *)
+let runtime_parent_projection ~terminal_rows ~cols (state : state) =
+  Option.map (fun parent ->
+    let ko = state.ui_language = Lang_ko in
+    let text korean english = if ko then korean else english in
+    let width = max 1 (Masc_tui_frame.inner_width ~cols) in
+    let budget = Masc_tui_frame.content_height
+        ~rows:(surface_body_rows state ~terminal_rows) in
+    let clean = Masc.Tui_terminal_text.sanitize_terminal_text in
+    let notices =
+      Option.to_list (Option.map
+        (fun notice -> Some notice, runtime_lane_notice_text notice) state.runtime_lane_notice)
+      @ List.map (fun line -> None, line) (runtime_lane_stale_lines state)
+      @ List.map (fun line -> None, line) (Option.to_list state.runtime_surface_error)
+      @ List.map (fun line -> None, line) (runtime_picker_catalogue_notices state)
+    in
+    let focus_rows = match parent with
+      | Runtime_prompt_parent (Lane_rename_prompt _) -> 2
+      | Runtime_media_parent | Runtime_prompt_parent (Lane_name_prompt _ | Lane_remove_prompt _) -> 1 in
+    let notice_rows = match notices with
+      | [] -> []
+      | (kind, line) :: _ when budget > focus_rows ->
+          let rows = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 2)) (clean line) in
+          (match rows with
+           | [] -> []
+           | first :: rest ->
+               let first = match rest with
+                 | [] -> first
+                 | _ :: _ -> "… " ^ first in
+               [Parent_notice (kind, first)])
+      | _ :: _ -> [] in
+    let available = budget - List.length notice_rows in
+    match parent with
+    | Runtime_media_parent ->
+        let entries = slot_editor_rows state in
+        let count = List.length entries in
+        let selected = slot_editor_cursor_index state in
+        let context = if available > 1 then [Parent_text "[runtime].media_failover"] else [] in
+        let height = max 1 (available - List.length context) in
+        let first = max 0 (min (Option.value selected ~default:0) (max 0 (count - height))) in
+        let rows =
+          if count = 0 then
+            [Parent_focus (match state.runtime_surface with
+              | None -> text "슬롯 미관측 · v 전체 읽기" "Slots unobserved · v reads all"
+              | Some _ -> text "빈 순서 · a 추가" "Empty order · a adds a runtime")]
+          else if Option.is_none selected then
+            [Parent_focus (text "선택 없음 · j/k로 선택" "No selection · j/k selects")]
+          else
+            entries |> List.drop first |> List.take height
+            |> List.mapi (fun offset row ->
+              let index = first + offset in
+              let lead = Printf.sprintf "%s %d%s "
+                  (if Some index = selected then ">" else " ") (index + 1)
+                  (if row.sr_admitted then "" else " !") in
+              let line = lead ^ Masc_tui_message_layout.fit_middle
+                  (max 1 (width - Masc_tui_message_layout.display_width lead)) (clean row.sr_slot) in
+              if Some index = selected then Parent_focus line else Parent_text line) in
+        { rpp_parent = parent; rpp_rows = context @ rows @ notice_rows;
+          rpp_notices = List.length notices; rpp_page = height;
+          rpp_position = if Option.is_some selected && count > height then Some
+              (Masc_tui_scroll.window_text ~scroll:first ~height count) else None }
+    | Runtime_prompt_parent prompt ->
+        let input draft =
+          let label = text "새 이름 › " "Name › " in
+          label ^ Masc_tui_message_layout.input_viewport
+            ~max_cells:(max 1 (width - Masc_tui_message_layout.display_width label - 1))
+            (clean draft) ^ "_" in
+        let target label lane =
+          label ^ Masc_tui_message_layout.fit_middle
+            (max 1 (width - Masc_tui_message_layout.display_width label)) (clean lane) in
+        let focus, context = match prompt with
+          | Lane_name_prompt draft -> input draft,
+              [text "Enter: 첫 런타임 선택" "Enter: choose the first runtime"]
+          | Lane_rename_prompt (lane, draft) -> input draft,
+              [target (text "원래 › " "From › ") lane;
+               text "이름과 모든 참조를 함께 변경" "Rename the lane and all references together"]
+          | Lane_remove_prompt lane ->
+              target (text "D 다시: " "D again: ") lane, [] in
+        let context = List.concat_map
+            (Masc_tui_message_layout.wrap_words ~max_cells:width) context
+          |> List.take (max 0 (available - 1))
+          |> List.map (fun row -> Parent_text row) in
+        { rpp_parent = parent; rpp_rows = Parent_focus focus :: notice_rows @ context;
+          rpp_notices = List.length notices; rpp_page = 0; rpp_position = None }
+  ) (runtime_parent state)
 ;;
 
 type slot_edit =
@@ -25603,7 +25748,7 @@ let open_runtime_row_detail (state : state) =
 ;;
 
 let runtime_scrolled ~rows ~cols (state : state) : scrolled option =
-  if Option.is_some state.runtime_detail_target then None
+  if Option.is_some state.runtime_detail_target || Option.is_some (runtime_parent state) then None
   else
     Some
       { sc_count =

@@ -725,7 +725,7 @@ count is drawn beyond the available space.
 | Keys | What it does |
 |---|---|
 | `j/k` | move / scroll |
-| `PgUp/PgDn` | detail page |
+| `PgUp/PgDn` | page an open detail; in the media editor page declared slots; while typing a lane name, PgUp opens the complete draft/context reader and Esc returns to the unchanged field |
 | `Right / Enter` | show the full runtime, lane, dispatch, and probe fields |
 | `h` | toggle de-emphasis for exhausted, rate-limited, and spent runtimes |
 | `v` | read complete default and media routes, boot admission and probe diagnostics |
@@ -736,7 +736,7 @@ count is drawn beyond the available space.
 | `x` | take the candidate under the cursor out of its lane; the last one cannot go, remove the lane instead |
 | `J/K` | move the candidate under the cursor down or up its lane |
 | `f` | replace [runtime].default, what a keeper with no assignment walks |
-| `m` | edit [runtime].media_failover in the slot editor; refused while boot dropped one of its entries |
+| `m` | edit [runtime].media_failover: j/k, PgUp/PgDn and Home/End select declared slots; a appends, x drops, J/K reorder, 1 makes first, v reads all IDs/results without closing the editor. Admission and write refusals remain in the reading |
 | `R` | give the lane under the cursor another name; the assignments that route to it and [runtime].default, when it names it, are rewritten in the same write. The field opens on the name it has now |
 | `D` | remove the lane under the cursor; press twice. Refused while a keeper is assigned to it |
 | `Esc` | back to Config |

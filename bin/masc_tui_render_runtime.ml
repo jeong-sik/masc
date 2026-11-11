@@ -1669,7 +1669,7 @@ let render_runtime_pick (state : state) =
          (screen_title
             (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 runtime" keeper_name))
          Ansi.dim current Ansi.reset)
-    ~hints:(Masc_tui_keys.footer_hints (Keepers Keeper_runtime_pick))
+    ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language (Keepers Keeper_runtime_pick))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())
         ("  " ^ Masc_tui_types.keeper_runtime_picker_summary view

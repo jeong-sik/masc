@@ -204,7 +204,7 @@ let test_a_restart_takes_its_start_from_the_first_step () = with_fixture (fun fi
   let elsewhere : Chain.fresh =
     { transaction_id = "another-transaction"; current = Some { Keeper_librarian.facts = [ stale_fact ] };
       previous_state = Some "a state from another moment"; unread_messages = [ other_hole ] } in
-  let again = finished (drive fixture ~owner ~range ~fresh:elsewhere ()) in
+  let again = finished (drive fixture ~owner ~range ~fresh:elsewhere ~current:fresh.current ()) in
   check bool "another start changes nothing a first step retained" true
     (Yojson.Safe.equal (Program.to_json again.program) (Program.to_json first.program));
   check string "the transaction is the first step's" fresh.transaction_id again.program.transaction_id;

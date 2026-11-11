@@ -14,7 +14,7 @@ The command palette is `:`.
 
 | Keys | What it does |
 |---|---|
-| `Tab / Shift-Tab` | next / previous surface |
+| `Tab / Shift-Tab` | next / previous surface; the chat composer keeps them to complete a /command |
 | `3` | jump to Keepers when the active field or panel does not use 3 |
 | `r` | refresh the current surface |
 | `i` | focus the composer; on Dashboard, choose a Keeper |
@@ -433,9 +433,10 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 |---|---|
 | `Left` | empty composer: open the Keeper list; with text: move the cursor left |
 | `Right` | roster focused: return focus to the chat composer |
-| `Up / Down` | roster focused: move; chat scrolled back: adjust by one line |
+| `Up / Down` | roster focused: move; chat scrolled back: adjust by one line; while a /command is typed: pick among its completions; otherwise Up recalls the previous line you sent (a line still waiting in the queue comes back as an edit of that line) and Down steps back toward your draft |
 | `Enter` | send from chat, or open the selected Keeper from the roster |
-| `Ctrl-J` | newline in the draft |
+| `Ctrl-J` | newline in the draft; Shift-Enter does the same where the terminal reports it |
+| `Tab / Shift-Tab` | complete the /command being typed, or its argument such as a Keeper name; the chat composer keeps these keys, so they do not switch surface here |
 | `Ctrl-Y` | record into the draft; again to stop and keep what was said |
 | `Ctrl-A` | continuous capture on/off: each sentence starts the next capture |
 | `Ctrl-G` | next keeper with a chat open |
@@ -444,12 +445,14 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `F9` | fold or expand this Keeper's scheduled Jobs, pending occurrences, holds and latest result |
 | `Ctrl-T` | inspect and manage waiting turns |
 | `PgUp/PgDn` | scroll history by a page |
+| `Ctrl-E / End` | after reading back, jump to the newest row |
 | `Ctrl-R` | cycle reasoning hidden / folded / full |
 | `Ctrl-D` | cycle compact / results / full tool detail |
 | `Ctrl-S` | unfold the running turn's status rows, or fold them back to the progress line |
 | `Ctrl-N` | cycle Memory journal summary / full / hidden |
 | `Ctrl-F` | cycle no clock / inline clock / full timestamp and request id |
 | `Ctrl-O` | preview the newest image or Mermaid diagram; /images lists all; any key returns |
+| `Ctrl-V` | stage the clipboard image for the next message; an [Image #1] marker lands in the draft |
 | `/approve /deny` | type a command and Enter to answer a tool approval |
 | `/copy` | send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52 |
 | `Q / Ctrl-Q` | Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting |

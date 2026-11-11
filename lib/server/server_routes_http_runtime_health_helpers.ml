@@ -126,7 +126,11 @@ let scheduler_json () =
      fiber there ran over the last minute. [pool_domains] is carried next to
      it because a stall on the main domain while the pool is idle and a stall
      while every worker is busy are different findings. [pool_wait] splits a
-     pool-routed request's time into waiting for a worker and running. *)
+     pool-routed request's time into waiting for a worker and running.
+     [serving_lag] is the same ring for the HTTP serving domain: how late a
+     ready fiber of a connection ran. Its probe is "not_started" when
+     connections run on the main domain, where the fields above already say
+     it. *)
   let pool_domains =
     match Domain_pool_ref.domain_count_opt () with
     | Some count -> `Int count
@@ -141,4 +145,5 @@ let scheduler_json () =
     (("pool_domains", pool_domains)
      :: ("read_pool_domains", read_pool_domains)
      :: ("pool_wait", Pool_wait.to_json ())
+     :: ("serving_lag", `Assoc (Scheduler_lag.to_fields Scheduler_lag.serving))
      :: Scheduler_lag.to_fields Scheduler_lag.global)

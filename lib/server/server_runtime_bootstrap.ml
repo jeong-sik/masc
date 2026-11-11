@@ -2226,6 +2226,15 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
          often, and a minor collection stops every other domain with it. *)
       Minor_heap.tune ();
       Eio.Switch.run (fun serving_sw ->
+        (* How late a ready fiber of a connection runs on this domain
+           ([scheduler.serving_lag] in /health). A daemon: the probe never
+           returns, and this switch ends when serving does. The clock comes
+           from the environment: this domain starts before the server state
+           publishes one through [Eio_context]. *)
+        Eio.Fiber.fork_daemon ~sw:serving_sw (fun () ->
+          Eio.Switch.run (fun probe_sw ->
+            Scheduler_lag.start ~sw:probe_sw ~mono_clock Scheduler_lag.serving);
+          `Stop_daemon);
         Eio_context.with_turn_switch serving_sw (fun () ->
           let socket =
             Server_bootstrap_http.listen_socket ~sw:serving_sw ~net ~address config

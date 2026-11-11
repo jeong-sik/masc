@@ -1,0 +1,45 @@
+{
+  "rowsPerKeeper": 5000,
+  "initial": {
+    "mounted": 5000,
+    "farFromViewport": 4977,
+    "listClientHeightPx": 480,
+    "listScrollHeightPx": 213980,
+    "collapsedRowPitchPx": 42.796875
+  },
+  "refresh": {
+    "samplesMs": [
+      1103,
+      919.1999999284744,
+      952.6000000238419,
+      916.3999999761581,
+      948.8000000715256,
+      885.0999999046326,
+      877.3999999761581,
+      866.2999999523163,
+      894.6999999284744
+    ],
+    "medianMs": 916.3999999761581
+  },
+  "end": {
+    "scrollsToSettle": 1,
+    "mounted": 5000,
+    "farFromViewport": 4977,
+    "lastRowInView": true,
+    "firstRowMounted": true,
+    "operatedSourceIncarnation": "5027"
+  },
+  "focus": {
+    "afterFocusedRowLeft": "row"
+  },
+  "expansion": {
+    "firstRowOpenAfterReturn": true
+  },
+  "keeperSwitch": {
+    "scrollTopBeforePx": 213660,
+    "scrollTopAfterPx": 213660,
+    "firstRowInView": false,
+    "openRows": 2
+  },
+  "errors": []
+}

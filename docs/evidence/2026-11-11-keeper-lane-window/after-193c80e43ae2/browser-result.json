@@ -1,0 +1,57 @@
+{
+  "passed": true,
+  "scope": "Actual styled KeeperLaneStrip over a synthetic inventory in headless Chromium. No backend, live Keeper, inventory store, or SSE refresh.",
+  "browser": "149.0.7827.55",
+  "checks": [
+    "a large inventory mounts only the rows near the list viewport",
+    "the last server row is reachable by scrolling and acts on its own address",
+    "keyboard focus moves to the list when the focused row leaves the window",
+    "a row opened by the operator is still open after it leaves the window and returns",
+    "another Keeper starts at its first row with nothing open"
+  ],
+  "measurements": {
+    "rowsPerKeeper": 5000,
+    "initial": {
+      "mounted": 17,
+      "farFromViewport": 0,
+      "listClientHeightPx": 480,
+      "listScrollHeightPx": 200051,
+      "collapsedRowPitchPx": 42.796875
+    },
+    "refresh": {
+      "samplesMs": [
+        12.299999952316284,
+        9.300000071525574,
+        9.300000071525574,
+        10.5,
+        8.399999976158142,
+        8.5,
+        8.700000047683716,
+        8.600000023841858,
+        8
+      ],
+      "medianMs": 8.700000047683716
+    },
+    "end": {
+      "scrollsToSettle": 2,
+      "mounted": 16,
+      "farFromViewport": 0,
+      "lastRowInView": true,
+      "firstRowMounted": false,
+      "operatedSourceIncarnation": "5027"
+    },
+    "focus": {
+      "afterFocusedRowLeft": "list"
+    },
+    "expansion": {
+      "firstRowOpenAfterReturn": true
+    },
+    "keeperSwitch": {
+      "scrollTopBeforePx": 199780,
+      "scrollTopAfterPx": 0,
+      "firstRowInView": true,
+      "openRows": 0
+    },
+    "errors": []
+  }
+}

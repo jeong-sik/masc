@@ -79,6 +79,15 @@ let ensure_visible ~cursor ~height scroll =
   else if cursor > scroll + height - 1 then cursor - height + 1
   else Int.max 0 scroll
 
+(* A group heading is no row the cursor can name, so [ensure_visible] let it
+   scroll off the top whenever the cursor stood on the group's first row: Home
+   on a grouped list, and every k across a group boundary, showed a row whose
+   group name had just gone. The lead is held to what a window shows together
+   with the row, so the row itself never leaves. *)
+let ensure_visible_with_lead ~cursor ~lead ~height scroll =
+  let lead = Int.max 0 (Int.min lead (Int.min cursor (height - 1))) in
+  ensure_visible ~cursor:(cursor - lead) ~height (ensure_visible ~cursor ~height scroll)
+
 let window_of_heights ~heights ~cursor ~rows scroll =
   let heights = Array.of_list heights in
   let count = Array.length heights in

@@ -16,6 +16,10 @@ val ordered_rows : Masc.Tui_decode_lane_inventory.row list -> Masc.Tui_decode_la
 val category_label : Masc.Lane_addon_category.t option -> string
 val row_position : id:string -> overview_entry list -> int option
 (** Visual position of the exact row ID, including headers, or [None] if absent. *)
+val row_lead : id:string -> overview_entry list -> int
+(** The entries glued above the row [id]: 1 for the first row of a category,
+    whose heading is the entry just before it, and 0 for every other row and
+    for an ID that is not listed. *)
 type identity
 val identity : Masc.Tui_decode_lane_inventory.row -> identity
 val find_identity : identity -> Masc.Tui_decode_lane_inventory.row list -> Masc.Tui_decode_lane_inventory.row option

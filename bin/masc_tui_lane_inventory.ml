@@ -39,6 +39,13 @@ let ordered_rows rows = overview_entries rows |> List.filter_map (function
   | Category_header _ -> None | Lane_row row -> Some row)
 let row_position ~id entries = List.find_index (function
   | Category_header _ -> false | Lane_row row -> String.equal row.id id) entries
+let row_lead ~id entries =
+  match row_position ~id entries with
+  | None | Some 0 -> 0
+  | Some position ->
+      (match List.nth_opt entries (position - 1) with
+       | Some (Category_header _) -> 1
+       | Some (Lane_row _) | None -> 0)
 type identity = {row_id:string;target:selection;installation_id:string option}
 let identity (row : row) =
   let installation_id=match row.selection with

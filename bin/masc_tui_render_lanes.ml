@@ -698,7 +698,9 @@ let render_lanes_overview (state : state) =
   let scroll = Masc_tui_scroll.normalize ~count:layout.sc_count ~height state.lanes_scroll in
   let scroll = match selected_position with
     | None -> scroll
-    | Some cursor -> Masc_tui_scroll.ensure_visible ~cursor ~height scroll in
+    | Some cursor ->
+        Masc_tui_scroll.ensure_visible_with_lead ~cursor
+          ~lead:(lane_inventory_lead state) ~height scroll in
   let standing row = match state.lane_inventory with
     | Some snapshot -> Masc_tui_lane_inventory.row_standing_in snapshot row
     | None -> Masc_tui_lane_inventory.row_standing row in

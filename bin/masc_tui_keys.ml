@@ -970,41 +970,41 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Schedules ->
-      [ b Navigate "j/k" "move" ~rows:Needs_row
+      [ b ~ko:"선택" Navigate "j/k" "move" ~rows:Needs_row
           ~help:"move; in details, scroll the payload"
-      ; b Navigate "PgUp/PgDn" "page" ~rows:Needs_row
-      ; b Navigate "< / >" "schedule pages" ~detail:List_only
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page" ~rows:Needs_row
+      ; b ~ko:"이전 / 다음 쪽" Navigate "< / >" "schedule pages" ~detail:List_only
           ~help:"previous / next server page; pages are separate observations"
-      ; b Act "Right / Enter" "details" ~detail:List_only ~rows:Needs_row
+      ; b ~ko:"상세" Act "Right / Enter" "details" ~detail:List_only ~rows:Needs_row
           ~help:"open schedule details"
-      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
-      ; b Act "Left / Esc" "back" ~detail:Detail_only
+      ; b ~ko:"뒤로" Act "Esc" "back" ~detail:List_only ~help:"back to Work"
+      ; b ~ko:"뒤로" Act "Left / Esc" "back" ~detail:Detail_only
           ~help:"back to the schedule list"
-      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+      ; b ~ko:"이전 / 다음" Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Act "n" "new" ~help:"create a schedule through a $EDITOR JSON form"
-      ; b Act "e" "modify" ~rows:Needs_row
+      ; b ~ko:"새 일정" Act "n" "new" ~help:"create a schedule through a $EDITOR JSON form"
+      ; b ~ko:"편집" Act "e" "modify" ~rows:Needs_row
           ~help:"edit the selected active schedule; running/finished rows refuse"
-      ; b Act "x" "cancel" ~rows:Needs_row ~help:"arm / confirm cancellation"
-      ; b Act "Y" "copy link" ~rows:Needs_row
+      ; b ~ko:"취소" Act "x" "cancel" ~rows:Needs_row ~help:"arm / confirm cancellation"
+      ; b ~ko:"링크 복사" Act "Y" "copy link" ~rows:Needs_row
           ~help:"copy the selected schedule reference"
       ]
       @ row_list_edges @ listing_meta
   | Verification ->
-      [ b Navigate "j/k" "move" ~rows:Needs_row
+      [ b ~ko:"선택" Navigate "j/k" "move" ~rows:Needs_row
           ~help:"move; in details, scroll the evidence"
-      ; b Navigate "v" "next Work tab"
+      ; b ~ko:"다음 작업 탭" Navigate "v" "next Work tab"
           ~help:"on to Task Verdicts, then back to Goals"
-      ; b Navigate "h" "queue / history"
+      ; b ~ko:"대기 / 기록" Navigate "h" "queue / history"
           ~help:"the queue is what a task is still waiting on; the history is \
                  every request ever submitted, which nothing removes"
-      ; b Act "Right / Enter" "details" ~detail:List_only ~rows:Needs_row
+      ; b ~ko:"상세" Act "Right / Enter" "details" ~detail:List_only ~rows:Needs_row
           ~help:"read the request and evidence"
-      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
-      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"back to the list"
-      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+      ; b ~ko:"뒤로" Act "Esc" "back" ~detail:List_only ~help:"back to Work"
+      ; b ~ko:"뒤로" Act "Left / Esc" "back" ~detail:Detail_only ~help:"back to the list"
+      ; b ~ko:"이전 / 다음" Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
-      ; b Navigate "< / >" "newer / older"
+      ; b ~ko:"최근 / 앞선 쪽" Navigate "< / >" "newer / older"
           ~help:"step either list a page at a time; one page holds two \
                  hundred rows, so a shorter queue arrives whole"
       (* One item, spelled the way Approvals spells its own pair. Apart, the
@@ -1013,36 +1013,36 @@ let for_surface = function
          surface exists for. [Masc_tui_footer.never_dropped_keys] pins the
          pair whole; pinning [a] or [x] alone would pin the [a] that creates
          a keeper and the [x] that deletes one. *)
-      ; b Navigate "e / E" "다음 / 이전 증거" ~detail:Detail_only
+      ; b ~ko:"다음 / 이전 증거" Navigate "e / E" "next / previous evidence" ~detail:Detail_only
           ~help:"read one submitted evidence item at a time"
-      ; b Act "i" "증거 목록 접기/펼치기" ~detail:Detail_only
-      ; b Act "o" "증거 열기" ~detail:Detail_only
+      ; b ~ko:"증거 목록 접기/펼치기" Act "i" "fold / unfold the evidence list" ~detail:Detail_only
+      ; b ~ko:"증거 열기" Act "o" "open evidence" ~detail:Detail_only
           ~help:"download the retained copy and open it with a local application"
-      ; b Act "s" "증거 사본 저장" ~detail:Detail_only
+      ; b ~ko:"증거 사본 저장" Act "s" "save an evidence copy" ~detail:Detail_only
           ~help:"save this exact evidence item privately on this machine; its local path stays in the detail"
-      ; b Act "a / x" "approve / reject" ~rows:Needs_row
+      ; b ~ko:"승인 / 반려" Act "a / x" "approve / reject" ~rows:Needs_row
           ~help:"a approves the row under the cursor (press twice); x rejects \
                  with a reason ($EDITOR form)"
       (* The row search reads the list's rows. An open detail has none, so the
          footer drawn for it leaves the pair out. *)
-      ; b Search "/" "find" ~detail:List_only
+      ; b ~ko:"찾기" Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching task id, title, or submitter; \
                  the queue answers this, an open detail does not"
-      ; b Search "n / N" "next / previous match" ~detail:List_only
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~detail:List_only
           ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Harness ->
-      [ b Navigate "j/k" "move" ~rows:Needs_row
+      [ b ~ko:"선택" Navigate "j/k" "move" ~rows:Needs_row
           ~help:"move; in a verdict, scroll"
-      ; b Navigate "v" "next Work tab" ~help:"back round to Goals"
-      ; b Navigate "PgUp/PgDn" "page" ~rows:Needs_row
-      ; b Act "Right / Enter" "verdict" ~detail:List_only ~rows:Needs_row
+      ; b ~ko:"다음 작업 탭" Navigate "v" "next Work tab" ~help:"back round to Goals"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page" ~rows:Needs_row
+      ; b ~ko:"판정" Act "Right / Enter" "verdict" ~detail:List_only ~rows:Needs_row
           ~help:"open the full evaluator verdict"
-      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
-      ; b Act "Left / Esc" "back" ~detail:Detail_only
+      ; b ~ko:"뒤로" Act "Esc" "back" ~detail:List_only ~help:"back to Work"
+      ; b ~ko:"뒤로" Act "Left / Esc" "back" ~detail:Detail_only
           ~help:"back to the verdict list"
-      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+      ; b ~ko:"이전 / 다음" Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
         (* One item, spelled the way Verification spells its own pair. Apart,
            the fitter gives them up one at a time, and the screen that loses
@@ -1053,17 +1053,17 @@ let for_surface = function
 
            [x], not [n]: this surface answers the row search, and [n] / [N]
            step it. *)
-      ; b Act "y / x" "agree / overrule" ~rows:Needs_row
+      ; b ~ko:"동의 / 뒤집기" Act "y / x" "agree / overrule" ~rows:Needs_row
           ~help:"y records the machine's verdict as yours; x records the \
                  opposite, with $EDITOR taking the reason"
-      ; b Act "Y" "copy task" ~rows:Needs_row
+      ; b ~ko:"작업 복사" Act "Y" "copy task" ~rows:Needs_row
           ~help:"copy a link to the task in Work"
-      ; b Search "/" "find" ~detail:List_only
+      ; b ~ko:"찾기" Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching task id or title"
       (* [/] opens its prompt on a read list with no row, so it stays; the
          jump has no match to step to and ends in [()] -- the same split
          Task Review draws. *)
-      ; b Search "n / N" "next / previous match" ~detail:List_only
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~detail:List_only
           ~rows:Needs_row
       ]
       @ row_list_edges @ listing_meta

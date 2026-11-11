@@ -342,9 +342,7 @@ let with_lease multi_account f =
     Alcotest.fail "the lease of the installation was not acquired"
 ;;
 
-let boot_outcome env ~port multi_account =
-  with_lease multi_account
-  @@ fun lease ->
+let boot_outcome_under lease env ~port multi_account =
   match
     Eio.Switch.run (fun sw ->
       Eio.Fiber.first
@@ -358,6 +356,10 @@ let boot_outcome env ~port multi_account =
   with
   | outcome -> outcome
   | exception Still_serving -> "still serving"
+;;
+
+let boot_outcome env ~port multi_account =
+  with_lease multi_account @@ fun lease -> boot_outcome_under lease env ~port multi_account
 ;;
 
 (* The judgment read a store that matched the log. A store that is gone when
@@ -467,6 +469,35 @@ let test_stops_when_the_port_cannot_be_announced () =
       "the boot whose port cannot be announced"
       "port not announced"
       (boot_outcome env ~port:(free_port ()) multi_account);
+    Alcotest.(check (option int)) "no port is recorded" None (recorded_port ~base))
+;;
+
+(* The base URL of the process names no HTTP(S) identity, so the trust policy
+   is refused after the port bound. The boot stops before it announces: a
+   command that reads the announcement reads a server that goes on to serve.
+   The kernel is asked while the lease is still held, because the release of
+   the lease withdraws an announcement. *)
+let test_stops_before_it_announces_when_the_trust_policy_refuses () =
+  with_installation (fun env { base; config = _; store = _; multi_account } ->
+    Unix.putenv "MASC_HTTP_BASE_URL" "ftp://127.0.0.1";
+    let port = free_port () in
+    with_lease multi_account
+    @@ fun lease ->
+    Alcotest.(check string)
+      "the boot under a base URL that names no HTTP identity"
+      "trust policy refused"
+      (boot_outcome_under lease env ~port multi_account);
+    (match
+       Server_startup_takeover.account_server_port_holder
+         ~run_dir:(owner_dir multi_account)
+         ~base_path:base
+         ~port
+     with
+     | Ok None -> ()
+     | Ok (Some pid) ->
+       Alcotest.failf "pid %d holds the announcement of the port of a boot that stopped" pid
+     | Error rejection ->
+       Alcotest.fail (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
     Alcotest.(check (option int)) "no port is recorded" None (recorded_port ~base))
 ;;
 
@@ -614,6 +645,10 @@ let () =
             "the boot stops when the port cannot be announced"
             `Quick
             test_stops_when_the_port_cannot_be_announced
+        ; Alcotest.test_case
+            "the boot stops before it announces when the trust policy refuses"
+            `Quick
+            test_stops_before_it_announces_when_the_trust_policy_refuses
         ; Alcotest.test_case "it serves its table alone" `Quick test_serves_its_table_alone
         ] )
     ]

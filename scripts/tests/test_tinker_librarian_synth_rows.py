@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librari
 
 import synth_rows as RW
 import synth_spec as S
-from tinker_librarian_synth_fixtures import KINDS, PLANTED, candidates_of, request
+from tinker_librarian_synth_fixtures import KINDS, PLANTED, SCHEDULED, candidates_of, request
 
 type JsonObject = dict[str, object]
 type Change = Callable[[JsonObject], None]
@@ -81,6 +81,7 @@ BASE = request(PLANTED, candidates_of((S.CandidateKind.CORRECTION, S.CandidateKi
                                        S.CandidateKind.NEW_DURABLE)))
 REFUSED: tuple[tuple[str, Change], ...] = (
     ("a fact without duplicate_of", removing("facts", 0, "duplicate_of")),
+    ("a fact without use_at", removing("facts", 0, "use_at")),
     ("a fact with another field", setting("facts", 0, "note", "x")),
     ("two facts with one memory ID", setting("facts", 2, "memory_id", "m1")),
     ("two facts with one claim", setting("facts", 1, "claim", PLANTED[0].claim)),
@@ -110,25 +111,40 @@ REFUSED: tuple[tuple[str, Change], ...] = (
     ("a board with another field", setting("facts", 0, "board", {"post_id": "p-1", "comment_id": None, "x": 1})),
     ("facts that are not a list", replacing("facts", {})),
 )
+# The same request with m7 used ahead (11-09) and m8 used on 10-02; the candidates fall on 11-07.
+WITH_RECORDS = request(SCHEDULED, BASE.candidates)
+REFUSED_RECORDS: tuple[tuple[str, Change], ...] = (
+    ("a use time not written as seen_at is", setting("facts", 6, "use_at", "2026-11-09")),
+    ("a record ahead on the candidates' day", setting("facts", 6, "use_at", "2026-11-07T23:00:00Z")),
+    ("a record ahead planted stale", setting("facts", 6, "planted_stale", True)),
+    ("a past record on the candidates' day", setting("facts", 7, "use_at", "2026-11-07T00:30:00Z")),
+    ("a past record used before it was written", setting("facts", 7, "use_at", "2026-09-30T09:00:00Z")),
+    ("a past record left durable", setting("facts", 7, "planted_stale", False)),
+    ("a target on a record", setting("candidates", 0, "target_memory_id", "m7")),
+    ("a duplicate of a record", setting("facts", 5, "duplicate_of", "m7")),
+    ("a record that restates a fact", setting("facts", 6, "duplicate_of", "m3")),
+)
 
 
 class RowTest(unittest.TestCase):
     def test_a_stored_row_reads_back_as_its_request_and_label(self) -> None:
         boarded = (dataclasses.replace(PLANTED[0], board=S.BoardRef("p-1", "c-1")),) + PLANTED[1:]
-        for n in (1, 2, 3):
-            for kinds in itertools.product(KINDS, repeat=n):
-                req = request(boarded, candidates_of(kinds))
-                row = stored(req)
-                self.assertEqual(RW.parts_of(row), (req.facts, req.candidates), kinds)
-                self.assertEqual(RW.label_of_row(row), S.label_of(req), kinds)
+        for facts in (boarded, SCHEDULED):
+            for n in (1, 2, 3):
+                for kinds in itertools.product(KINDS, repeat=n):
+                    req = request(facts, candidates_of(kinds))
+                    row = stored(req)
+                    self.assertEqual(RW.parts_of(row), (req.facts, req.candidates), kinds)
+                    self.assertEqual(RW.label_of_row(row), S.label_of(req), kinds)
 
     def test_a_row_the_generator_cannot_write_is_refused(self) -> None:
-        self.assertIsNotNone(RW.label_of_row(stored(BASE)))
-        for name, change in REFUSED:
-            row = copy.deepcopy(stored(BASE))
-            change(row)
-            self.assertIsNone(RW.parts_of(row), name)
-            self.assertIsNone(RW.label_of_row(row), name)
+        for base, refused in ((BASE, REFUSED), (WITH_RECORDS, REFUSED_RECORDS)):
+            self.assertIsNotNone(RW.label_of_row(stored(base)))
+            for name, change in refused:
+                row = copy.deepcopy(stored(base))
+                change(row)
+                self.assertIsNone(RW.parts_of(row), name)
+                self.assertIsNone(RW.label_of_row(row), name)
 
 
 if __name__ == "__main__":

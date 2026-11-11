@@ -1032,7 +1032,7 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
   let ko = state.ui_language = Lang_ko in
   let text korean english = if ko then korean else english in
   let title = match projection.rpp_parent with
-    | Runtime_media_parent -> "media_failover"
+    | Runtime_media_parent -> text "미디어 호출 순서" "Media call order"
     | Runtime_prompt_parent (Lane_name_prompt _) -> text "Runtime / 새 경로 이름" "Runtime / new lane name"
     | Runtime_prompt_parent (Lane_rename_prompt (lane, _)) ->
         text "이름 변경 / " "Rename / " ^ Terminal_text.single_line lane

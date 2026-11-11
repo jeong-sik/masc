@@ -55,38 +55,39 @@ let step_count_label = function
    compare-and-set over the whole immutable value; the dashboard tools
    envelope reads it. A restart starts empty, and the first pass fills it
    again. *)
-let status : Keeper_cleanup_pass.t Atomic.t = Atomic.make Keeper_cleanup_pass.empty
+let status : Keeper_cleanup_status.t Atomic.t = Atomic.make Keeper_cleanup_status.empty
 
 let rec update_status change =
   let current = Atomic.get status in
   if not (Atomic.compare_and_set status current (change current)) then update_status change
 
-let envelope_json () = Keeper_cleanup_pass.to_json (Atomic.get status)
+let current () = Atomic.get status
+let envelope_json () = Keeper_cleanup_status.to_json (current ())
 
 (* Every attempt that ran its payload leaves an info line, zero removals
    included: the passes at 00:08Z and 03:25Z on 2026-11-09 left none, and
    nothing showed whether the payload had run. A busy Keeper and a stopped
    guest are every pass's ordinary case; their rows carry them. *)
-let log_attempt ~keeper_name (attempt : Keeper_cleanup_pass.attempt) =
-  let label = step_label (Keeper_cleanup_pass.step attempt) in
+let log_attempt ~keeper_name (attempt : Keeper_cleanup_status.attempt) =
+  let label = step_label (Keeper_cleanup_status.step attempt) in
   match attempt with
-  | Keeper_cleanup_pass.Guest_builds
-      (Keeper_cleanup_pass.Reclaimed { Keeper_cleanup_pass.cleaned; failed }) ->
+  | Keeper_cleanup_status.Guest_builds
+      (Keeper_cleanup_status.Reclaimed { Keeper_cleanup_status.cleaned; failed }) ->
     Log.Server.info "%s keeper=%s cleaned=%d failed=%d" label keeper_name cleaned failed
-  | Keeper_cleanup_pass.Remote_workspace
-      (Keeper_cleanup_pass.Reclaimed
-        { Keeper_cleanup_pass.removed; skipped; failed; freed_kib; available_kib }) ->
+  | Keeper_cleanup_status.Remote_workspace
+      (Keeper_cleanup_status.Reclaimed
+        { Keeper_cleanup_status.removed; skipped; failed; freed_kib; available_kib }) ->
     Log.Server.info
       "%s keeper=%s removed=%d skipped=%d failed=%d freed_kib=%d available_kib=%d"
       label keeper_name removed skipped failed freed_kib available_kib
-  | Keeper_cleanup_pass.Guest_builds (Keeper_cleanup_pass.Failed detail)
-  | Keeper_cleanup_pass.Remote_workspace (Keeper_cleanup_pass.Failed detail) ->
+  | Keeper_cleanup_status.Guest_builds (Keeper_cleanup_status.Failed detail)
+  | Keeper_cleanup_status.Remote_workspace (Keeper_cleanup_status.Failed detail) ->
     Log.Server.warn "%s keeper=%s: %s" label keeper_name detail
-  | Keeper_cleanup_pass.Guest_builds (Keeper_cleanup_pass.Deferred reason)
-  | Keeper_cleanup_pass.Remote_workspace (Keeper_cleanup_pass.Deferred reason) ->
+  | Keeper_cleanup_status.Guest_builds (Keeper_cleanup_status.Deferred reason)
+  | Keeper_cleanup_status.Remote_workspace (Keeper_cleanup_status.Deferred reason) ->
     Log.Server.debug "%s keeper=%s deferred: %s" label keeper_name reason
-  | Keeper_cleanup_pass.Guest_builds Keeper_cleanup_pass.Not_running
-  | Keeper_cleanup_pass.Remote_workspace Keeper_cleanup_pass.Not_running ->
+  | Keeper_cleanup_status.Guest_builds Keeper_cleanup_status.Not_running
+  | Keeper_cleanup_status.Remote_workspace Keeper_cleanup_status.Not_running ->
     Log.Server.debug "%s keeper=%s: no running guest" label keeper_name
 
 (* One Keeper's steps, in list order. A step does not wait on the one before
@@ -97,15 +98,15 @@ let attempt_steps ~config ~keeper_name steps () =
       let attempt = Keeper_cleanup_attempt.run ~config ~keeper_name step in
       log_attempt ~keeper_name attempt;
       update_status
-        (Keeper_cleanup_pass.record_attempt ~keeper:keeper_name
+        (Keeper_cleanup_status.record_attempt ~keeper:keeper_name
            ~finished_at:(Time_compat.now ()) attempt))
     steps
 
 (* One line per pass says how many Keepers each step reached, so a step that
    never ran is told apart from one that found nothing. *)
-let log_pass (pass : Keeper_cleanup_pass.pass) =
+let log_pass (pass : Keeper_cleanup_status.pass) =
   List.iter
-    (fun ({ keeper; reason } : Keeper_cleanup_pass.unreadable) ->
+    (fun ({ keeper; reason } : Keeper_cleanup_status.unreadable) ->
       Log.Server.warn "Keeper cleanup keeper=%s: %s" keeper reason)
     pass.unreadable;
   Log.Server.info
@@ -114,7 +115,7 @@ let log_pass (pass : Keeper_cleanup_pass.pass) =
     pass.switched_off
     (String.concat " "
        (List.map
-          (fun ({ step; selected; enabled = _ } : Keeper_cleanup_pass.step_pass) ->
+          (fun ({ step; selected; enabled = _ } : Keeper_cleanup_status.step_pass) ->
             Printf.sprintf "%s=%d" (step_count_label step) selected)
           pass.steps))
     pass.scheduled (List.length pass.still_running)
@@ -128,20 +129,20 @@ let sweep ~sw ~running ~(config : Workspace.config) ~enabled ~interval_sec () =
   | Ok projections ->
     let owner (projection : Keeper_owner_reducer.projection) =
       match projection.meta with
-      | None -> Keeper_cleanup_pass.Unnamed
+      | None -> Keeper_cleanup_status.Unnamed
       | Some meta ->
         let keeper_name = meta.name in
-        Keeper_cleanup_pass.Named
+        Keeper_cleanup_status.Named
           ( keeper_name
           , match Keeper_cleanup_attempt.select ~config ~enabled ~keeper_name with
-            | Error exclusion -> Keeper_cleanup_pass.Excluded exclusion
+            | Error exclusion -> Keeper_cleanup_status.Excluded exclusion
             | Ok steps ->
               if schedule ~sw ~running ~keeper_name (attempt_steps ~config ~keeper_name steps)
-              then Keeper_cleanup_pass.Scheduled steps
-              else Keeper_cleanup_pass.Still_running steps )
+              then Keeper_cleanup_status.Scheduled steps
+              else Keeper_cleanup_status.Still_running steps )
     in
     let pass, record =
-      Keeper_cleanup_pass.conclude_pass ~started_at ~interval_sec ~enabled
+      Keeper_cleanup_status.conclude_pass ~started_at ~interval_sec ~enabled
         (List.map owner projections)
     in
     update_status record;

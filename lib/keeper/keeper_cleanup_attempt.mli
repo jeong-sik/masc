@@ -21,7 +21,7 @@ val select :
   config:Workspace.config ->
   enabled:(Keeper_cleanup_step.t -> bool) ->
   keeper_name:string ->
-  (Keeper_cleanup_step.t list, Keeper_cleanup_pass.exclusion) result
+  (Keeper_cleanup_step.t list, Keeper_cleanup_status.exclusion) result
 (** The steps that apply to the Keeper's declared sandbox and that [enabled]
     answers [true] for, in the order of the step list. Never [Ok []]. *)
 
@@ -29,7 +29,7 @@ val outcome_of_admission :
   ( [< `Ran of ('report option, string) result | `Busy of Keeper_owner.autonomous_block ]
     , Keeper_owner_registry.command_error )
     result ->
-  'report Keeper_cleanup_pass.outcome
+  'report Keeper_cleanup_status.outcome
 (** How an idle-only step's admission reads as an outcome. A busy Owner is
     [Deferred] with its reason. A payload that found no running guest
     ([Ok None]) is [Not_running]. A refused command and a payload error are
@@ -39,7 +39,7 @@ val run :
   config:Workspace.config ->
   keeper_name:string ->
   Keeper_cleanup_step.t ->
-  Keeper_cleanup_pass.attempt
+  Keeper_cleanup_status.attempt
 (** One attempt of one step. It reads the Keeper's meta again when the step
     is admitted, because an idle-only step can wait in the Owner's mailbox
     while the declaration changes. An exception is a [Failed] attempt; only

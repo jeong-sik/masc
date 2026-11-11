@@ -6804,8 +6804,8 @@
  (libraries alcotest masc masc_server masc_test_deps eio_main unix))
 
 (test
- (name test_keeper_cleanup_pass)
- (modules test_keeper_cleanup_pass)
+ (name test_keeper_cleanup_status)
+ (modules test_keeper_cleanup_status)
  (libraries alcotest masc yojson))
 
 ; Raw config edit recovery: isolated state flow and real terminal/API interaction.

@@ -156,13 +156,13 @@ let test_each_step_takes_its_own_switch () =
         "remote-owner", remote_ssh_profile;
         "docker-owner", docker_profile ];
     let module Step = Keeper_cleanup_step in
-    let module Pass = Keeper_cleanup_pass in
+    let module Status = Keeper_cleanup_status in
     let selection = Alcotest.testable
         (fun ppf selection -> Format.pp_print_string ppf (match selection with
-           | Error (Pass.Unreadable detail) -> "unreadable: " ^ detail
-           | Error Pass.Without_meta -> "without meta"
-           | Error Pass.No_step -> "no step"
-           | Error Pass.Switched_off -> "switched off"
+           | Error (Status.Unreadable detail) -> "unreadable: " ^ detail
+           | Error Status.Without_meta -> "without meta"
+           | Error Status.No_step -> "no step"
+           | Error Status.Switched_off -> "switched off"
            | Ok steps -> String.concat "," (List.map Step.to_string steps)))
         ( = ) in
     let only wanted candidate = Step.equal candidate wanted in
@@ -172,37 +172,37 @@ let test_each_step_takes_its_own_switch () =
         (Keeper_cleanup_attempt.select ~config ~enabled ~keeper_name))
       [ "guest step on", "guest-owner", only Step.Guest_builds, Ok [ Step.Guest_builds ];
         "guest step off", "guest-owner", only Step.Remote_workspace,
-        Error Pass.Switched_off;
+        Error Status.Switched_off;
         "workspace step on", "remote-owner", only Step.Remote_workspace,
         Ok [ Step.Remote_workspace ];
         "workspace step off", "remote-owner", only Step.Guest_builds,
-        Error Pass.Switched_off;
-        "no step cleans a docker sandbox", "docker-owner", every, Error Pass.No_step;
-        "a Keeper with no stored meta", "absent-owner", every, Error Pass.Without_meta ])
+        Error Status.Switched_off;
+        "no step cleans a docker sandbox", "docker-owner", every, Error Status.No_step;
+        "a Keeper with no stored meta", "absent-owner", every, Error Status.Without_meta ])
 
 let test_admission_result_becomes_an_outcome () =
   let module M = Keeper_cleanup_attempt in
-  let module Pass = Keeper_cleanup_pass in
-  let report = { Pass.cleaned = 2; failed = 1 } in
+  let module Status = Keeper_cleanup_status in
+  let report = { Status.cleaned = 2; failed = 1 } in
   Alcotest.(check bool) "a run to its end carries the report" true
-    (M.outcome_of_admission (Ok (`Ran (Ok (Some report)))) = Pass.Reclaimed report);
+    (M.outcome_of_admission (Ok (`Ran (Ok (Some report)))) = Status.Reclaimed report);
   Alcotest.(check bool) "no running guest" true
     (M.outcome_of_admission (Ok (`Ran (Ok None)))
-     = (Pass.Not_running : Pass.builds Pass.outcome));
+     = (Status.Not_running : Status.builds Status.outcome));
   Alcotest.(check bool) "a payload failure keeps its words" true
     (M.outcome_of_admission (Ok (`Ran (Error "exit=1: traceback")))
-     = (Pass.Failed "exit=1: traceback" : Pass.builds Pass.outcome));
+     = (Status.Failed "exit=1: traceback" : Status.builds Status.outcome));
   (match (M.outcome_of_admission (Ok (`Busy Keeper_owner.Admission_paused))
-          : Pass.builds Pass.outcome) with
-   | Pass.Deferred _ -> ()
-   | Pass.Reclaimed _ | Pass.Not_running | Pass.Failed _ ->
+          : Status.builds Status.outcome) with
+   | Status.Deferred _ -> ()
+   | Status.Reclaimed _ | Status.Not_running | Status.Failed _ ->
      Alcotest.fail "a busy Keeper was not deferred");
   match (M.outcome_of_admission
            (Error (Keeper_owner_registry.Command_lookup_failed
                      (Keeper_owner_registry.Owner_not_found "gone")))
-         : Pass.builds Pass.outcome) with
-  | Pass.Failed _ -> ()
-  | Pass.Reclaimed _ | Pass.Deferred _ | Pass.Not_running ->
+         : Status.builds Status.outcome) with
+  | Status.Failed _ -> ()
+  | Status.Reclaimed _ | Status.Deferred _ | Status.Not_running ->
     Alcotest.fail "a refused command was not recorded as failed"
 
 (* No Owner inventory is installed for the fixture's base path and no meta is
@@ -211,22 +211,22 @@ let test_admission_result_becomes_an_outcome () =
 let test_refused_attempt_leaves_a_failed_row () =
   with_fixture (fun config _profile _seed ->
     let module M = Server_keeper_build_maintenance in
-    let module Pass = Keeper_cleanup_pass in
+    let module Status = Keeper_cleanup_status in
     let module Step = Keeper_cleanup_step in
     M.attempt_steps ~config ~keeper_name:"absent-owner" Step.all ();
     let rows = List.filter
-        (fun (row : Pass.row) -> String.equal row.keeper "absent-owner")
-        (Atomic.get M.status).rows in
+        (fun (row : Status.row) -> String.equal row.keeper "absent-owner")
+        (M.current ()).rows in
     let names steps = List.sort String.compare (List.map Step.to_string steps) in
     Alcotest.(check (list string)) "every step left a row" (names Step.all)
-      (names (List.map (fun (row : Pass.row) -> Pass.step row.attempt) rows));
-    List.iter (fun (row : Pass.row) ->
+      (names (List.map (fun (row : Status.row) -> Status.step row.attempt) rows));
+    List.iter (fun (row : Status.row) ->
       (match row.attempt with
-       | Pass.Guest_builds (Pass.Failed _) | Pass.Remote_workspace (Pass.Failed _) -> ()
-       | Pass.Guest_builds (Pass.Reclaimed _ | Pass.Deferred _ | Pass.Not_running)
-       | Pass.Remote_workspace (Pass.Reclaimed _ | Pass.Deferred _ | Pass.Not_running) ->
+       | Status.Guest_builds (Status.Failed _) | Status.Remote_workspace (Status.Failed _) -> ()
+       | Status.Guest_builds (Status.Reclaimed _ | Status.Deferred _ | Status.Not_running)
+       | Status.Remote_workspace (Status.Reclaimed _ | Status.Deferred _ | Status.Not_running) ->
          Alcotest.failf "%s was not recorded as failed"
-           (Step.to_string (Pass.step row.attempt)));
+           (Step.to_string (Status.step row.attempt)));
       Alcotest.(check bool) "nothing ran to its end" true
         (Option.is_none row.reclaimed_at))
       rows)

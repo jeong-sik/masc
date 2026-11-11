@@ -115,10 +115,10 @@ Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다
   - `freed_kib` 는 정리 뒤 여유 공간에서 정리 전 여유 공간을 뺀 값이다. 볼륨을 같이 쓰는 다른 Keeper 가 그사이 쓰면 음수일 수 있다.
   - payload 가 정리를 거절하거나(`skip`) 실패하면 경고 줄을 남긴다. 저장된 meta 가 없거나 저장된 profile 이 remote_ssh 가 아니어도 경고 줄을 남긴다.
   - 정리 주기마다 한 줄을 더 남긴다: `Keeper cleanup pass owners= without_meta= unreadable= no_step= switched_off= builds= workspaces= scheduled= still_running=`. 단계가 아예 안 돈 것과, 돌았지만 지울 것이 없던 것을 이 두 줄로 가른다.
-    - `builds=`·`workspaces=` 는 예약한 수다. 끝난 결과는 Keeper 별 줄이 보여 준다. 예약한 시도가 서버 종료로 취소되면 Keeper 별 줄 없이 끝난다.
+    - `builds=`·`workspaces=` 는 그 단계를 고른 Keeper 수다. 앞선 시도가 아직 안 끝난 Keeper 도 들어간다. 이번 주기에 예약한 Keeper 수는 `scheduled=` 다. 끝난 결과는 Keeper 별 줄이 보여 준다. 예약한 시도가 서버 종료로 취소되면 Keeper 별 줄 없이 끝난다.
     - 단계는 TOML 을 반영한 meta 로 고르고, 실행할 때 meta 를 한 번 더 읽는다. 그 사이에 TOML 의 profile 이 바뀌면 작업 폴더 단계는 profile 불일치 경고를 남기고, 다음 주기가 새 profile 로 고른다.
   - 11-09 첫 주기 두 번(00:08Z, 03:25Z)은 아무 줄도 남기지 않았다. 리뷰 컨테이너의 shim 요청 기록에도 payload 요청이 없었다. 같은 날 04:05Z 에 같은 payload 를 손으로 `--apply` 로 돌려 13,581개를 지웠고, 사용률이 54% 에서 42% 로 내려갔다.
-  - 원인은 단계 고르기였다. 서버는 owner projection 의 meta 로 단계를 골랐는데, 그 `sandbox_profile` 은 JSON 디코더가 늘 넣는 `Docker` 다(`lib/keeper/keeper_meta_json_parse.ml:336`). 그래서 모든 Keeper 가 `_build` 정리로 갔고, 그 단계는 Remote_ssh 를 `Ok None` 으로 넘겼다. 11-09 09:09Z 주기 줄: `owners=34 without_meta=0 switched_off=0 builds=34 workspaces=0`. 지금은 TOML 을 반영한 meta(`read_cleanup_meta`)로 고른다.
+  - 원인은 단계 고르기였다. 서버는 owner projection 의 meta 로 단계를 골랐는데, 그 `sandbox_profile` 은 JSON 디코더가 늘 넣는 `Docker` 다(`lib/keeper/keeper_meta_json_parse.ml:336`). 그래서 모든 Keeper 가 `_build` 정리로 갔고, 그 단계는 Remote_ssh 를 `Ok None` 으로 넘겼다. 11-09 09:09Z 주기 줄: `owners=34 without_meta=0 switched_off=0 builds=34 workspaces=0`. 지금은 TOML 을 반영한 meta(`Keeper_cleanup_attempt.read_meta`)로 고른다.
 
 커밋 안 한 변경과 untracked 파일은 보지 않는다. 운영자 결정이다.
 

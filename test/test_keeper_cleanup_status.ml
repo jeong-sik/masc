@@ -1,6 +1,6 @@
 open Masc
 module Step = Keeper_cleanup_step
-module Pass = Keeper_cleanup_pass
+module Status = Keeper_cleanup_status
 
 let step =
   Alcotest.testable
@@ -44,80 +44,80 @@ let test_wire_names_round_trip () =
   Alcotest.(check (option step)) "a name outside the list" None (Step.of_string "no-such-step")
 ;;
 
-let builds cleaned failed = Pass.Guest_builds (Pass.Reclaimed { Pass.cleaned; failed })
+let builds cleaned failed = Status.Guest_builds (Status.Reclaimed { Status.cleaned; failed })
 
 let workspace =
-  Pass.Remote_workspace
-    (Pass.Reclaimed
-       { Pass.removed = 3; skipped = 4; failed = 0; freed_kib = -5; available_kib = 600 })
+  Status.Remote_workspace
+    (Status.Reclaimed
+       { Status.removed = 3; skipped = 4; failed = 0; freed_kib = -5; available_kib = 600 })
 ;;
 
-let row (t : Pass.t) ~keeper wanted =
+let row (t : Status.t) ~keeper wanted =
   List.find_opt
-    (fun (candidate : Pass.row) ->
-      String.equal candidate.keeper keeper && Step.equal (Pass.step candidate.attempt) wanted)
+    (fun (candidate : Status.row) ->
+      String.equal candidate.keeper keeper && Step.equal (Status.step candidate.attempt) wanted)
     t.rows
 ;;
 
 let time = Alcotest.(option (float 0.))
 
 let test_latest_attempt_replaces_the_row_and_keeps_the_last_success () =
-  let busy = Pass.Guest_builds (Pass.Deferred "turn busy") in
+  let busy = Status.Guest_builds (Status.Deferred "turn busy") in
   let t =
-    Pass.empty
-    |> Pass.record_attempt ~keeper:"polisher" ~finished_at:10. (builds 2 1)
-    |> Pass.record_attempt ~keeper:"polisher" ~finished_at:20. busy
-    |> Pass.record_attempt ~keeper:"reviewer" ~finished_at:21. workspace
-    |> Pass.record_attempt
+    Status.empty
+    |> Status.record_attempt ~keeper:"polisher" ~finished_at:10. (builds 2 1)
+    |> Status.record_attempt ~keeper:"polisher" ~finished_at:20. busy
+    |> Status.record_attempt ~keeper:"reviewer" ~finished_at:21. workspace
+    |> Status.record_attempt
          ~keeper:"fresh"
          ~finished_at:22.
-         (Pass.Guest_builds (Pass.Failed "exit=1"))
+         (Status.Guest_builds (Status.Failed "exit=1"))
   in
   Alcotest.(check int) "one row per Keeper and step" 3 (List.length t.rows);
   (match row t ~keeper:"polisher" Step.Guest_builds with
    | None -> Alcotest.fail "polisher row missing"
-   | Some (found : Pass.row) ->
+   | Some (found : Status.row) ->
      Alcotest.(check bool) "the latest attempt is the row" true (found.attempt = busy);
      Alcotest.(check (float 0.)) "with its own time" 20. found.finished_at;
      Alcotest.check time "beside the last run to the end" (Some 10.) found.reclaimed_at);
   (match row t ~keeper:"reviewer" Step.Remote_workspace with
    | None -> Alcotest.fail "reviewer row missing"
-   | Some (found : Pass.row) ->
+   | Some (found : Status.row) ->
      Alcotest.check time "a run to the end is its own last success" (Some 21.) found.reclaimed_at);
   match row t ~keeper:"fresh" Step.Guest_builds with
   | None -> Alcotest.fail "fresh row missing"
-  | Some (found : Pass.row) ->
+  | Some (found : Status.row) ->
     Alcotest.check time "a step that never ran to the end has none" None found.reclaimed_at
 ;;
 
 (* One Owner of every kind a pass can meet, and two unreadable ones so their
    order shows. *)
 let owners =
-  [ Pass.Unnamed
-  ; Pass.Named ("no-meta", Pass.Excluded Pass.Without_meta)
-  ; Pass.Named ("broken-a", Pass.Excluded (Pass.Unreadable "toml: line 3"))
-  ; Pass.Named ("docker", Pass.Excluded Pass.No_step)
-  ; Pass.Named ("off", Pass.Excluded Pass.Switched_off)
-  ; Pass.Named ("guest", Pass.Scheduled [ Step.Guest_builds ])
-  ; Pass.Named ("remote", Pass.Scheduled [ Step.Remote_workspace ])
-  ; Pass.Named ("slow", Pass.Still_running [ Step.Remote_workspace ])
-  ; Pass.Named ("broken-b", Pass.Excluded (Pass.Unreadable "identity mismatch"))
+  [ Status.Unnamed
+  ; Status.Named ("no-meta", Status.Excluded Status.Without_meta)
+  ; Status.Named ("broken-a", Status.Excluded (Status.Unreadable "toml: line 3"))
+  ; Status.Named ("docker", Status.Excluded Status.No_step)
+  ; Status.Named ("off", Status.Excluded Status.Switched_off)
+  ; Status.Named ("guest", Status.Scheduled [ Step.Guest_builds ])
+  ; Status.Named ("remote", Status.Scheduled [ Step.Remote_workspace ])
+  ; Status.Named ("slow", Status.Still_running [ Step.Remote_workspace ])
+  ; Status.Named ("broken-b", Status.Excluded (Status.Unreadable "identity mismatch"))
   ]
 ;;
 
 let conclude ~enabled owners =
-  Pass.conclude_pass ~started_at:30. ~interval_sec:3600. ~enabled owners
+  Status.conclude_pass ~started_at:30. ~interval_sec:3600. ~enabled owners
 ;;
 
 let every _ = true
 
-let switches (pass : Pass.pass) =
+let switches (pass : Status.pass) =
   List.map
-    (fun ({ step; enabled; selected } : Pass.step_pass) -> step, enabled, selected)
+    (fun ({ step; enabled; selected } : Status.step_pass) -> step, enabled, selected)
     pass.steps
 ;;
 
-let accounted (pass : Pass.pass) =
+let accounted (pass : Status.pass) =
   pass.without_meta
   + List.length pass.unreadable
   + pass.no_step
@@ -133,7 +133,7 @@ let test_pass_counts_every_owner_once () =
   Alcotest.(check (list (pair string string)))
     "unreadable Keepers keep their reasons, in the order met"
     [ "broken-a", "toml: line 3"; "broken-b", "identity mismatch" ]
-    (List.map (fun ({ keeper; reason } : Pass.unreadable) -> keeper, reason) pass.unreadable);
+    (List.map (fun ({ keeper; reason } : Status.unreadable) -> keeper, reason) pass.unreadable);
   Alcotest.(check int) "no step" 1 pass.no_step;
   Alcotest.(check int) "switched off" 1 pass.switched_off;
   Alcotest.(check int) "scheduled" 2 pass.scheduled;
@@ -151,7 +151,7 @@ let test_pass_reports_each_switch () =
   let pass, _ =
     conclude
       ~enabled:(Step.equal Step.Guest_builds)
-      [ Pass.Named ("off", Pass.Excluded Pass.Switched_off) ]
+      [ Status.Named ("off", Status.Excluded Status.Switched_off) ]
   in
   Alcotest.(check (list (triple step bool int)))
     "a switched-off step stays in the summary"
@@ -161,14 +161,14 @@ let test_pass_reports_each_switch () =
 
 let test_pass_keeps_only_the_rows_it_chose () =
   let before =
-    Pass.empty
-    |> Pass.record_attempt ~keeper:"guest" ~finished_at:10. (builds 0 0)
-    |> Pass.record_attempt ~keeper:"slow" ~finished_at:11. workspace
+    Status.empty
+    |> Status.record_attempt ~keeper:"guest" ~finished_at:10. (builds 0 0)
+    |> Status.record_attempt ~keeper:"slow" ~finished_at:11. workspace
        (* This pass chose another step for [remote]. *)
-    |> Pass.record_attempt ~keeper:"remote" ~finished_at:12. (builds 1 0)
+    |> Status.record_attempt ~keeper:"remote" ~finished_at:12. (builds 1 0)
        (* The pass did not meet [left]. *)
-    |> Pass.record_attempt ~keeper:"left" ~finished_at:13. workspace
-    |> Pass.record_attempt ~keeper:"off" ~finished_at:14. workspace
+    |> Status.record_attempt ~keeper:"left" ~finished_at:13. workspace
+    |> Status.record_attempt ~keeper:"off" ~finished_at:14. workspace
   in
   let pass, record = conclude ~enabled:every owners in
   let after = record before in
@@ -178,7 +178,7 @@ let test_pass_keeps_only_the_rows_it_chose () =
     [ "guest", Step.Guest_builds; "slow", Step.Remote_workspace ]
     (List.sort
        compare
-       (List.map (fun (found : Pass.row) -> found.keeper, Pass.step found.attempt) after.rows))
+       (List.map (fun (found : Status.row) -> found.keeper, Status.step found.attempt) after.rows))
 ;;
 
 let json = Alcotest.testable (Yojson.Safe.pretty_print ~std:true) Yojson.Safe.equal
@@ -188,25 +188,25 @@ let test_envelope_json () =
     json
     "before the first pass"
     (Yojson.Safe.from_string {|{"pass":null,"rows":[]}|})
-    (Pass.to_json Pass.empty);
+    (Status.to_json Status.empty);
   let pass, _ = conclude ~enabled:every owners in
   let value =
-    { Pass.pass = Some pass
+    { Status.pass = Some pass
     ; rows =
-        [ { Pass.keeper = "a"; attempt = builds 2 1; finished_at = 10.5; reclaimed_at = Some 10.5 }
-        ; { Pass.keeper = "b"
-          ; attempt = Pass.Guest_builds (Pass.Deferred "turn busy")
+        [ { Status.keeper = "a"; attempt = builds 2 1; finished_at = 10.5; reclaimed_at = Some 10.5 }
+        ; { Status.keeper = "b"
+          ; attempt = Status.Guest_builds (Status.Deferred "turn busy")
           ; finished_at = 11.
           ; reclaimed_at = Some 3.
           }
-        ; { Pass.keeper = "c"
-          ; attempt = Pass.Guest_builds Pass.Not_running
+        ; { Status.keeper = "c"
+          ; attempt = Status.Guest_builds Status.Not_running
           ; finished_at = 12.
           ; reclaimed_at = None
           }
-        ; { Pass.keeper = "d"; attempt = workspace; finished_at = 14.; reclaimed_at = Some 14. }
-        ; { Pass.keeper = "e"
-          ; attempt = Pass.Remote_workspace (Pass.Failed "exit=1: traceback")
+        ; { Status.keeper = "d"; attempt = workspace; finished_at = 14.; reclaimed_at = Some 14. }
+        ; { Status.keeper = "e"
+          ; attempt = Status.Remote_workspace (Status.Failed "exit=1: traceback")
           ; finished_at = 15.
           ; reclaimed_at = None
           }
@@ -250,7 +250,7 @@ let test_envelope_json () =
       "outcome": "failed", "reason": "exit=1: traceback" }
   ]
 }|})
-    (Pass.to_json value)
+    (Status.to_json value)
 ;;
 
 let () =

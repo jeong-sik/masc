@@ -659,7 +659,7 @@ let set_open_file_permissions ~before_stage file permissions =
     match Eio_unix.Resource.fd_opt file with
     | None -> raise_failure Apply_permissions Posix_descriptor_unavailable
     | Some fd ->
-      Eio_unix.run_in_systhread ~label:"fs-compat-capability-fchmod" (fun () ->
+      Systhread_host.run ~label:"fs-compat-capability-fchmod" (fun () ->
         Eio_unix.Fd.use_exn "fs-compat-capability-fchmod" fd (fun unix_fd ->
           Unix.fchmod unix_fd permissions));
       Eio.Fiber.check ())
@@ -673,7 +673,7 @@ let set_open_directory_permissions ~before_stage directory_file =
         Apply_staging_directory_permissions
         Posix_descriptor_unavailable
     | Some fd ->
-      Eio_unix.run_in_systhread
+      Systhread_host.run
         ~label:"fs-compat-capability-staging-directory-fchmod"
         (fun () ->
            Eio_unix.Fd.use_exn
@@ -689,7 +689,7 @@ let sync_open_directory_file ~before_stage ~stage directory_file =
     match Eio_unix.Resource.fd_opt directory_file with
     | None -> raise_failure stage Posix_descriptor_unavailable
     | Some fd ->
-      Eio_unix.run_in_systhread
+      Systhread_host.run
         ~label:"fs-compat-capability-staging-directory-fsync"
         (fun () ->
            Eio_unix.Fd.use_exn
@@ -749,7 +749,7 @@ let sync_parent_capability ~before_stage ~stage ~sw parent =
     (match Eio_unix.Resource.fd_opt file with
      | None -> raise_failure stage Posix_descriptor_unavailable
      | Some fd ->
-       Eio_unix.run_in_systhread ~label:"fs-compat-capability-dir-fsync" (fun () ->
+       Systhread_host.run ~label:"fs-compat-capability-dir-fsync" (fun () ->
          Eio_unix.Fd.use_exn "fs-compat-capability-dir-fsync" fd Unix.fsync));
     let close_failures = close_directory () in
     (match close_failures with
@@ -1249,7 +1249,7 @@ let publish_exclusive ~sw ~source_directory ~source_leaf ~parent ~leaf =
   match Eio_unix.Resource.fd_opt source_directory,
         Eio_unix.Resource.fd_opt destination_directory with
   | Some source_fd, Some destination_fd ->
-    Eio_unix.run_in_systhread ~label:"fs-compat-publish-exclusive" (fun () ->
+    Systhread_host.run ~label:"fs-compat-publish-exclusive" (fun () ->
       Eio_unix.Fd.use_exn "fs-compat-publish-exclusive-source" source_fd (fun source ->
         Eio_unix.Fd.use_exn "fs-compat-publish-exclusive-target" destination_fd (fun destination ->
           rename_noreplace_at source source_leaf destination leaf)))

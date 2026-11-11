@@ -207,14 +207,25 @@ let configuration_json = function
       "dropped_slots",strings c.dropped_slots;"admission_error",optional str c.admission_error]
   | Exact_projection.Unconfigured detail -> `Assoc ["kind",str "unconfigured";"detail",str detail]
   | Exact_projection.Registry_unavailable detail -> `Assoc ["kind",str "unavailable";"detail",str detail]
-let exact_output_json {output;source;configuration} = `Assoc ["output",str output;
+let exact_output_json ?observation ~declaration_id {output;source;configuration} =
+  let diagnostics = match observation with
+    | None -> []
+    | Some observation -> (match Runtime_schema.addon_lane ~declaration_id ~output with
+        | Error _ -> [] (* An invalid manifest output has no configured route owner. *)
+        | Ok addon ->
+          let owner = Runtime_schema.Addon addon in
+          ["lane_key",str (Runtime_schema.exact_lane_key owner);
+           "slot_states",Exact_projection.slot_states observation owner;
+           "slot_observation_unavailable_runs",`Int
+             (Exact_projection.slot_observation_unavailable_run_count observation)]) in
+  `Assoc (["output",str output;
   "source",str (match source with Declared -> "declared" | Table_only -> "table_only");
-  "configuration",configuration_json configuration]
-let declaration_json = function
+  "configuration",configuration_json configuration] @ diagnostics)
+let declaration_json ?observation = function
   | Valid {declaration=d;exact_outputs;application} -> `Assoc (["kind",str "valid";"enabled",`Bool d.enabled;"installation_id",str d.id;
       "run_id",str d.run_id;"package_id",str d.package.id;"title",str d.package.title;"desired_revision",str d.revision;
       "source_revision",str d.source_revision;"application",Lane_addon_application.to_json application;
-      "exact_outputs",`List (List.map exact_output_json exact_outputs)]
+      "exact_outputs",`List (List.map (exact_output_json ?observation ~declaration_id:d.id) exact_outputs)]
       @ (match d.package.ui_category with None -> []
          | Some category -> ["ui_category",Lane_addon_category.to_json category]))
   | Invalid messages -> `Assoc ["kind",str "invalid";"messages",strings messages]
@@ -234,7 +245,7 @@ let browser_reading_json fields = function
   | Browser_addon_off -> `Assoc ["kind",str "off"]
   | Browser_addon_not_running -> `Assoc ["kind",str "not_running"]
   | Browser_addon_unavailable detail -> `Assoc ["kind",str "unavailable";"detail",str detail]
-let state_json = function
+let state_json ?observation = function
   | Exact_state configuration -> `Assoc ["kind",str "exact";"configuration",configuration_json configuration]
   | Browser_clients reading -> `Assoc ["kind",str "browser_clients";
       "addon",browser_reading_json (fun count -> ["connected_clients",`Int count]) reading]
@@ -242,7 +253,7 @@ let state_json = function
       "activity",str (Machine_configuration.activity_to_wire activity);
       "publication",str (match publication with No_screen -> "no_screen" | Stable -> "stable" | Running -> "running" | Publication_unavailable -> "unavailable")]
   | Package_state {declaration;instances} -> `Assoc ["kind",str "package";
-      "declaration",optional declaration_json declaration;"instances",`List (List.map instance_json instances)]
+      "declaration",optional (declaration_json ?observation) declaration;"instances",`List (List.map instance_json instances)]
 (* This is display metadata only. Selection and state retain their independent
    contracts; clients must not reconstruct a role from their technical names. *)
 let builtin_category = function
@@ -251,12 +262,13 @@ let builtin_category = function
   | Browser _ -> Some Lane_addon_category.Browser
   | Machine _ -> Some Lane_addon_category.Execution_environment
   | Declaration _ | Manual_instance _ -> None
-let row_to_json row = `Assoc (["id",str row.id;"label",str row.label;"purpose",str row.purpose;
-  "selection",selection_json row.selection;"state",state_json row.state]
+let row_to_json_with ?observation row = `Assoc (["id",str row.id;"label",str row.label;"purpose",str row.purpose;
+  "selection",selection_json row.selection;"state",state_json ?observation row.state]
   @ (match builtin_category row.selection with None -> []
      | Some category -> ["ui_category",Lane_addon_category.to_json category]))
+let row_to_json row = row_to_json_with row
 let inventory_fields t = ["schema",str "masc.lane-inventory/v1";"observed_at",`Float t.observed_at;
-  "rows",`List (List.map row_to_json t.rows);"exact_snapshot",Exact_projection.observation_to_json t.exact;
+  "rows",`List (List.map (row_to_json_with ~observation:t.exact) t.rows);"exact_snapshot",Exact_projection.observation_to_json t.exact;
   "package_read",`Assoc ["directory",str t.directory;"complete",`Bool t.complete;
     "owner_present",`Bool t.owner_present;"issues",`List (List.map (fun (path,detail) ->
       `Assoc ["source_path",str path;"message",str detail]) t.issues)]]

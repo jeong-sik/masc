@@ -47,7 +47,7 @@ let file_size (path : string) : int option =
       try Some (Unix.stat path).st_size with
       | Unix.Unix_error _ -> None)
     (fun _fs ->
-       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-size" path) (fun () -> (Unix.stat path).st_size)) with
+       try Some (Fs_compat_internal.Systhread_host.run ~label:(labelled "fs-compat-file-size" path) (fun () -> (Unix.stat path).st_size)) with
        | Unix.Unix_error _ -> None)
 ;;
 
@@ -138,7 +138,7 @@ let remove_tree (path : string) : unit =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> remove_tree_unix path)
-    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-remove-tree" path) (fun () -> remove_tree_unix path))
+    (fun _fs -> Fs_compat_internal.Systhread_host.run ~label:(labelled "fs-compat-remove-tree" path) (fun () -> remove_tree_unix path))
 ;;
 
 let subdirectory_names_unix dir =
@@ -166,7 +166,7 @@ let subdirectory_names (dir : string) : string list =
     ~path:dir
     ~fallback:(fun () -> subdirectory_names_unix dir)
     (fun _fs ->
-       Eio_unix.run_in_systhread
+       Fs_compat_internal.Systhread_host.run
          ~label:(labelled "fs-compat-subdirectory-names" dir)
          (fun () -> subdirectory_names_unix dir))
 ;;
@@ -175,7 +175,7 @@ let realpath (path : string) : string =
   with_fs_or_fallback
     ~path
     ~fallback:(fun () -> Unix.realpath path)
-    (fun _fs -> Eio_unix.run_in_systhread ~label:(labelled "fs-compat-realpath" path) (fun () -> Unix.realpath path))
+    (fun _fs -> Fs_compat_internal.Systhread_host.run ~label:(labelled "fs-compat-realpath" path) (fun () -> Unix.realpath path))
 ;;
 
 let realpath_lenient (path : string) : string =

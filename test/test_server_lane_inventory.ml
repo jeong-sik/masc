@@ -121,7 +121,7 @@ schema = "out.json"
   let d = match declarations.declarations with
     | [d] -> d
     | _ -> fail (String.concat "; " (List.map (fun (issue : Config.issue) -> issue.message) declarations.issues)) in
-  let configured = Server_standalone_lane_projection.Configured {admitted_slots=["a.m"];cli_slots=[];
+  let configured = Server_standalone_lane_projection.Configured {bindings=[];admitted_slots=["a.m"];cli_slots=[];
     declared_slots=["a.m"];declared_cli_slots=[];dropped_slots=[];admission_error=None} in
   let configuration (addon : Runtime_schema.addon_lane) = match addon.output with
     | "author" when addon.declaration_id = "quiz" -> configured

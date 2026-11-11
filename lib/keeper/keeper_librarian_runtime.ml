@@ -1132,7 +1132,7 @@ let try_cli_slots
      | None -> Error Fitted_prompt_unavailable
      | Some prompt ->
        (match
-          Keeper_lane_cli_oneshot.walk
+          Exact_lane_slot_capture.walk_cli
             ?runner:cli_runner
             ~base_dir:base_path
             ~cli_slots
@@ -1220,7 +1220,8 @@ let execute_answer
     | Error error -> Exact_output.Reject_and_advance error
   in
   let flow =
-    Exact_output.execute_flow_once
+    Exact_lane_slot_capture.flow attempt (fun () ->
+      Exact_output.execute_flow_once
       ~net
       ~clock
       ~before_measurement_dispatch:(fun _ -> Ok ())
@@ -1228,7 +1229,7 @@ let execute_answer
       ~before_dispatch:(fun _ -> Ok ())
       ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
       ~validate:validate_flow
-      attempt
+      attempt)
   in
   Runtime_exact_lane_backpressure.observe
     ~resolved:Runtime_exact_output_registry.{ selected_slots; cli_slots } flow;
@@ -1784,6 +1785,7 @@ let run_pass
         (* Only an API attempt's own success reports usage; a CLI tail never
            fires the observer, so a CLI-answered run completes with [None]. *)
         let observed_usage = ref None in
+        let slot_capture = Exact_lane_slot_capture.create ~owner:(Runtime_schema.Builtin Standalone_lane.Librarian) () in
         let complete ?selected_slot ?usage outcome output =
           let selected_slot = if !full_llm_skipped then None else selected_slot in
           let usage = if !full_llm_skipped then None else usage in
@@ -1843,6 +1845,7 @@ let run_pass
               ~elapsed_s
               ~selected_slot
               ?usage
+              ?slot_observations:(Exact_lane_slot_capture.observations slot_capture)
               ~output
               ()
           in
@@ -1977,14 +1980,15 @@ let run_pass
                observed_preflight := Some observation;
                let execute_full () =
                  full_lane_entered := true;
-                 execute_answer ~selected_slots ~cli_slots
+                 Exact_lane_slot_capture.with_capture slot_capture (fun () ->
+                   execute_answer ~selected_slots ~cli_slots
                    ~requirement
                    ~validate
                    ?cli_runner ~clock ~net ~base_path ~keeper_id
                    ~messages:[ message Agent_core.Types.User prompt ]
                    ~usage_observer:(fun usage ->
                       observed_usage := usage)
-                   ()
+                   ())
                  |> Result.map (fun (accepted, source) -> (accepted, Some source)) in
                if Typesafeai_librarian_preflight.keeps_current observation then (
                  let output = `Assoc

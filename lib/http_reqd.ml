@@ -37,6 +37,7 @@ type relay_started =
 
 type relay_op =
   | Relay_respond of Httpun.Response.t * string * acceptance Eio.Promise.u
+  | Relay_respond_shared of Httpun.Response.t * Shared_body.t * acceptance Eio.Promise.u
   | Relay_start of
       { flush_headers_immediately : bool option
       ; response : Httpun.Response.t
@@ -276,6 +277,21 @@ let h2_respond_with_string ~stream_end reqd ledger response body =
        Accepted_by_writer)
 ;;
 
+(* A shared body is held by its owner whether or not this response is being
+   sent, so it takes nothing from the ledger (RFC-0518 D5). It goes through
+   the same queue as an owned body: h2 holds two slices of it at most, and
+   the stream's flush bound covers each. *)
+let h2_respond_with_shared ~stream_end reqd response body =
+  H2.Body.Reader.discard (H2.Reqd.request_body reqd);
+  let writer =
+    H2.Reqd.respond_with_streaming reqd ~flush_headers_immediately:true (h2_response_of response)
+  in
+  let out = Response_body.create stream_end writer in
+  Response_body.write out ~sent:ignore (Shared_body.to_string body);
+  Response_body.close out;
+  Accepted_by_writer
+;;
+
 (* A stream masc already ended, or one that already carries an error, takes no
    response, and h2 is not asked: it raises [Failure] once an error was
    reported on the stream and hits [assert false] once the stream is closed
@@ -316,6 +332,34 @@ let try_respond_with_string t response body =
 
 let respond_with_string t response body =
   match try_respond_with_string t response body with
+  | Accepted_by_writer | Rejected_by_writer -> ()
+;;
+
+let try_respond_with_shared t response body =
+  Cancel_safe.protect
+    ~on_exn:(fun exn ->
+      log_rejected_write exn;
+      Rejected_by_writer)
+    (fun () ->
+       match t with
+       | Http1 { reqd; _ } ->
+         Httpun.Reqd.respond_with_string reqd response (Shared_body.to_string body);
+         Accepted_by_writer
+       | Http2 { reqd; stream_end; _ } ->
+         if h2_stream_over ~stream_end reqd
+         then (
+           Log.Http.debug "[http] response skipped, the HTTP/2 stream is already over";
+           Rejected_by_writer)
+         else h2_respond_with_shared ~stream_end reqd response body
+       | Relayed relay ->
+         let answer, resolver = Eio.Promise.create () in
+         if Domain_mailbox.send relay.mailbox (Relay_respond_shared (response, body, resolver))
+         then Eio.Promise.await answer
+         else Rejected_by_writer)
+;;
+
+let respond_with_shared t response body =
+  match try_respond_with_shared t response body with
   | Accepted_by_writer | Rejected_by_writer -> ()
 ;;
 
@@ -670,7 +714,7 @@ let relay_scope = function
 (* An operation the connection's fiber never applied still owes its sender
    an answer: the one a request that is over gives. *)
 let relay_unhandled relay ~post = function
-  | Relay_respond (_, _, answer) ->
+  | Relay_respond (_, _, answer) | Relay_respond_shared (_, _, answer) ->
     ignore (Eio.Promise.try_resolve answer Rejected_by_writer : bool)
   | Relay_start { started; _ } -> ignore (Eio.Promise.try_resolve started Relay_ended : bool)
   | Relay_flush f -> post (fun () -> f `Closed)
@@ -723,6 +767,11 @@ let serve_relay t relay ~post =
        that was open is still the handler's to close. *)
     | Relay_respond (response, body, answer) ->
       let acceptance = try_respond_with_string t response body in
+      let next = look () in
+      Eio.Promise.resolve answer acceptance;
+      next
+    | Relay_respond_shared (response, body, answer) ->
+      let acceptance = try_respond_with_shared t response body in
       let next = look () in
       Eio.Promise.resolve answer acceptance;
       next

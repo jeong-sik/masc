@@ -415,7 +415,7 @@
 (test
  (name test_server_standalone_lane_projection)
  (modules test_server_standalone_lane_projection)
- (libraries alcotest masc masc.fs_compat masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
+ (libraries alcotest agent_core masc masc.fs_compat masc.masc_goal masc.runtime masc.server masc.tool_types yojson))
 
 (test
  (name test_keeper_effective_tool_surface)
@@ -1754,7 +1754,7 @@
 (test
  (name test_systhread_host)
  (modules test_systhread_host)
- (libraries alcotest masc.masc_core eio eio_main unix threads.posix))
+ (libraries alcotest masc.masc_core masc.fs_compat eio eio_main unix threads.posix))
 
 (test
  (name test_pool_lane)
@@ -2144,6 +2144,10 @@
   ; test_tui_decode names the schedule runner status the TUI decodes into
   masc.masc_schedule
   bigstringaf
+  ; test_ws_transport attaches a session to a ws-direct endpoint and reads
+  ; what reached its writer
+  ws-direct-core
+  faraday
   ; test_terminal_size reads the tty size through the ioctl stub
   terminal_size
   ; test_activity_graph checks its day file against the layout owner
@@ -3026,6 +3030,7 @@
 (include stanzas/test_fleet_stream_server_wiring.inc)
 
 (include stanzas/bench_fleet_stream.inc)
+(include stanzas/bench_systhread_host_fs_compat.inc)
 (include stanzas/bench_sse_pump_throughput.inc)
 
 (include stanzas/test_tui_fleet_stream.inc)
@@ -5863,6 +5868,7 @@
 (test
  (name test_installed_dashboard)
  (modules test_installed_dashboard)
+ (deps ../scripts/install-smoke.sh)
  (libraries masc_test_deps ptime masc.time_codec masc_core eio eio_main))
 
 (include stanzas/test_keeper_repetition_scope.inc)
@@ -6796,7 +6802,12 @@
 (test
  (name test_server_keeper_build_maintenance)
  (modules test_server_keeper_build_maintenance)
- (libraries alcotest masc masc_server masc_test_deps eio_main unix))
+ (libraries alcotest masc masc_server masc_test_deps eio_main eio.mock unix))
+
+(test
+ (name test_keeper_cleanup_status)
+ (modules test_keeper_cleanup_status)
+ (libraries alcotest masc yojson))
 
 ; Raw config edit recovery: isolated state flow and real terminal/API interaction.
 (test

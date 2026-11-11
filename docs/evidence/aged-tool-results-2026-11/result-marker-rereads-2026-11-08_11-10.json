@@ -1,0 +1,107 @@
+{
+  "requests": 2619,
+  "tool_messages": 265685,
+  "tool_messages_with_marker": 53067,
+  "missing_message_blobs": 0,
+  "markers": 17914,
+  "aged_markers": 17829,
+  "creation_markers": 85,
+  "markers_under_minimum": 0,
+  "aged_markers_read": 236,
+  "aged_markers_read_share": 0.013237,
+  "aged_original_bytes": 110833455,
+  "read_aged_original_bytes": 1740089,
+  "read_aged_original_share": 0.0157,
+  "read_aged_returned_bytes": 1574129,
+  "read_aged_returned_share_of_aged_original": 0.014203,
+  "read_calls_on_aged_markers": 279,
+  "creation_markers_read": 33,
+  "reads_total": 6593,
+  "reads_by_keepers_with_scanned_requests": 3788,
+  "reads_without_sha256": 23,
+  "reads_on_known_markers": 392,
+  "bands": [
+    {
+      "from_bytes": 2048,
+      "to_bytes_exclusive": 4096,
+      "markers": 7417,
+      "read": 126
+    },
+    {
+      "from_bytes": 4096,
+      "to_bytes_exclusive": 8192,
+      "markers": 7640,
+      "read": 56
+    },
+    {
+      "from_bytes": 8192,
+      "to_bytes_exclusive": 16384,
+      "markers": 1898,
+      "read": 31
+    },
+    {
+      "from_bytes": 16384,
+      "to_bytes_exclusive": 32768,
+      "markers": 644,
+      "read": 16
+    },
+    {
+      "from_bytes": 32768,
+      "to_bytes_exclusive": 65537,
+      "markers": 230,
+      "read": 7
+    }
+  ],
+  "keepers_by_aged_markers": [
+    {
+      "keeper": "msx-retro-mania",
+      "aged_markers": 3705,
+      "read": 1
+    },
+    {
+      "keeper": "context-reviewer",
+      "aged_markers": 2855,
+      "read": 4
+    },
+    {
+      "keeper": "code-reviewer-brother",
+      "aged_markers": 2123,
+      "read": 14
+    },
+    {
+      "keeper": "code-reviewer-father",
+      "aged_markers": 1973,
+      "read": 12
+    },
+    {
+      "keeper": "rondo",
+      "aged_markers": 943,
+      "read": 8
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "aged_markers": 932,
+      "read": 11
+    },
+    {
+      "keeper": "sangsu",
+      "aged_markers": 883,
+      "read": 41
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "aged_markers": 855,
+      "read": 14
+    }
+  ],
+  "bad_request_lines": 0,
+  "bad_ledger_lines": 0,
+  "window": {
+    "from": "2026-11-08",
+    "to": "2026-11-10"
+  },
+  "profile_prefixes": [
+    "ollama_cloud.",
+    "glm-coding."
+  ]
+}

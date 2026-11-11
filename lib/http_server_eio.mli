@@ -124,6 +124,17 @@ module Response : sig
     -> Http_reqd.t
     -> unit
 
+  (** {!bytes} for a body its owner keeps past the request
+      ({!Http_reqd.respond_with_shared}): on HTTP/2 it takes nothing from the
+      response ledger. *)
+  val shared
+    :  ?status:Httpun.Status.t
+    -> ?headers:(string * string) list
+    -> content_type:string
+    -> Shared_body.t
+    -> Http_reqd.t
+    -> unit
+
   (** Empty response.  Default status [`No_content].  Sends no
       content-type header; always includes [content-length: 0] so
       keep-alive clients and proxies see an explicit end-of-body. *)

@@ -119,7 +119,7 @@ let sync_directory ~subject directory =
     match Eio_unix.Resource.fd_opt file with
     | None -> raise Internal_posix_descriptor_unavailable
     | Some fd ->
-      Eio_unix.run_in_systhread
+      Systhread_host.run
         ~label:"fs-compat-recovery-directory-fsync"
         (fun () ->
            Eio_unix.Fd.use_exn
@@ -150,7 +150,7 @@ let set_directory_permissions ~subject directory =
     match Eio_unix.Resource.fd_opt file with
     | None -> raise Internal_posix_descriptor_unavailable
     | Some fd ->
-      Eio_unix.run_in_systhread
+      Systhread_host.run
         ~label:"fs-compat-recovery-directory-fchmod"
         (fun () ->
            Eio_unix.Fd.use_exn

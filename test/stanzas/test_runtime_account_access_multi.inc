@@ -11,4 +11,13 @@
 (test
  (name test_runtime_account_access_multi)
  (modules test_runtime_account_access_multi)
- (libraries alcotest eio_main masc.auth masc.fs_compat masc.runtime unix))
+ (libraries
+  alcotest
+  eio
+  eio.unix
+  eio_main
+  masc.agent_core.llm_provider
+  masc.auth
+  masc.fs_compat
+  masc.runtime
+  unix))

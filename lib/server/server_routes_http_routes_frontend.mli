@@ -8,7 +8,6 @@
     contract independently of the route pipeline. *)
 
 val add_routes :
-  ?sw:Eio.Switch.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 

@@ -111,6 +111,7 @@ type publication_error =
   | Required_lane_unavailable of { lane_id : string }
   | Required_lane_disabled of { lane_id : string }
   | Resolver_snapshot_rejected of Exact_output.resolver_snapshot_error
+  | Targets_refused of Runtime_account_access.refusal
 
 type selected_slot =
   { slot_id : string
@@ -812,6 +813,8 @@ let publication_error_to_string = function
       lane_id
   | Resolver_snapshot_rejected error ->
     "exact-output resolver snapshot: " ^ resolver_snapshot_error_to_string error
+  | Targets_refused refusal ->
+    "exact-output slots of the runtime table: " ^ Runtime_account_access.refusal_to_string refusal
 ;;
 
 let lane_resolution_error_to_string = function

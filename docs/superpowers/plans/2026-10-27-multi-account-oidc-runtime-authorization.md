@@ -658,6 +658,32 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - D3c-1 lane 증거. Keeper 컨테이너 lane(docker, Apple)과 MASC Read 도구가 다른 owner의 홈을 마운트하지도 읽지도 못한다는 시험이다.
     - D3c-3 측정. 실제 CLI에게 다른 owner의 홈에 둔 표지 파일을 읽게 시키는 스크립트다. 표지를 못 읽는다고 나온 자세만 D3c-2의 허용 목록에 더한다. 구독을 쓰므로 사용자가 돌린다.
 
+**D4 범위** (API provider, 2026-11-10)
+
+- 조사(main `11d29814fddd`).
+  - Agent_core Runtime은 실행 표에 provider 설정(`Llm_provider.Provider_config.t`)을 통째로 든다(`Runtime_execution.Agent_core`). 그 안의 `api_key`는 운영자가 선언한 자격 증명이다. 선언, 환경 변수, setup registry, 파일 중 하나에서 온다. `Secret.t`는 `private string`이라 coercion으로 원문을 읽을 수 있다.
+  - 이 설정을 꺼내는 곳은 lib 26곳이다. 요청을 보내는 곳이 8곳이다.
+    - Keeper 턴(`keeper_turn_driver.ml`의 `run_named`), verify(`runtime_verification.ml`), Agent_core runner(`runtime_agent_core_runner.ml`)는 Fusion, capability probe, `masc runtime-token-sample`, `masc-librarian-continuity`가 거쳐 간다.
+    - exact-output 등록표(`Runtime.exact_output_targets`)는 HITL 요약, Board attention, librarian, lane exact가 쓴다.
+    - lane add-on sampling, vision 도구, 사용량 읽기(`runtime_provider_usage_read.ml`), dashboard probe.
+  - 나머지 18곳은 읽기만 한다. capability, 요청 모양, `kind`·`model_id`·`base_url`을 읽는다. 원문 key, `headers`, `auth_scheme`, `credential_source`를 읽는 곳은 없다.
+  - 읽는 곳 중 세 곳은 key의 identity(SHA-256)를 쓴다. binding identity(`runtime_instance.ml`의 materialize), admission 허용치(`Runtime.materialize_config`), dashboard의 admission snapshot이다. 보낼 때의 admission과 같은 key여야 한다.
+  - 계정 인가를 하는 곳은 없다. `validate_dispatch_credential`은 key가 비었는지만 본다. vision, 사용량 읽기, exact-output은 그것도 하지 않는다.
+  - 실행 표 밖에서 운영자 key를 쓰는 곳이 네 곳 있다. 모델 탐색(`runtime_model_discovery.ml`), serving context(`runtime_serving_context.ml`), `masc_file_*` 도구의 `DEEPSEEK_API_KEY`(`keeper_tool_in_process_runtime.ml`), TypeSafeAI(`typesafeai_client.ml`)다.
+- 결정.
+  - 실행 표의 provider 자격 증명은 호스트 계정이다. 사람의 계정이 아니므로 D3b처럼 다계정 프로세스는 아무것도 보내지 않는다. 단일 사용자에서는 지금처럼 보낸다. 판정에 요청은 쓰지 않는다. 1단계에서는 누가 묻든 같다.
+  - `Runtime_execution.Agent_core`가 봉인한 설정(`Runtime_account_access.api_sealed`)을 든다.
+    - 보내는 곳은 `Runtime_account_access.authorize_api`로만 설정을 꺼낸다. 다계정은 `Host_account Api_provider`로 거절한다.
+    - 읽는 곳은 `api_declaration`을 읽는다. `api_key`와 `headers`를 비운 설정이다.
+    - identity를 쓰는 세 곳은 봉인 모듈이 계산한 값만 받는다(`api_binding_identity`, `api_admission_allowances`, `api_admission_snapshot`). 값에 비밀이 없다.
+  - 실행 표가 만들어지는 때에는 판정하지 않는다. 시험은 publish 없이 실행 표를 만든다. 판정은 보내기 직전에 한다. exact-output 등록표는 만들 때 판정한다. 서버는 publish 뒤에 등록표를 만든다.
+- 층.
+  - D4a 실행 표 봉인. 위 26곳과 시험이다. 시험은 실제 경로(`masc runtime-token-sample`, verify)에서 다계정이면 요청이 나가지 않는다는 것을 본다.
+  - D4b 실행 표 밖의 네 곳. `authorize_host Api_provider`로 판정한다.
+- D4a에서 남긴 것.
+  - 시험 프로세스는 시작할 때 단일 사용자 접근을 게시한다(하네스 #50867). 그래서 D4a는 시험에 게시 호출을 더하지 않는다. 다계정 시험은 실행 표가 만든 API 런타임으로 verify를 불러, 거절(`account_not_authorized`)과 연결 0건을 본다.
+  - 다계정 서버 부팅: exact-output 대상 하나가 거절되면 등록표를 만들지 않고 설정 오류로 멈춘다. 지금은 전체 서버가 다계정으로 뜨지 않아서(`Multi_account_not_served`) 이 경로에 닿지 않는다. S1에서 정한다. 거절된 대상을 본문 시간 제한이 없는 slot처럼 gap으로 내리면, 그 slot만 가진 lane은 비고 부팅은 계속된다.
+
 **D6 범위**
 
 - 사람 initiator가 없는 dispatch(autonomous, system)가 만든 상태는 `Service(system)` 표시를 달고 `Read_state`가 허용된 initiator에게만 보인다(§3-11).

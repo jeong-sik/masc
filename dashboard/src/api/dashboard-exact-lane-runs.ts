@@ -1,5 +1,6 @@
 import { isRecord } from '../components/common/normalize'
 import { get, type AbortableRequestOptions } from './core'
+import { parseSlotObservations, type SlotObservationState } from './exact-slot-observations'
 
 export const EXACT_LANE_IDS = [
   'librarian_exact',
@@ -77,6 +78,7 @@ export interface ExactLaneRunSummary {
   // Opaque configured exact-lane slot. This is not separately authoritative
   // provider/model attribution. Running rows have no terminal value yet.
   selectedSlot?: string | null
+  slotObservations?: SlotObservationState
 }
 
 // One opened run, payloads included.
@@ -303,7 +305,7 @@ function parseRun(
       : status === 'failed'
         ? [...base, ...completion, 'code', 'detail']
         : [...base, ...completion]
-  exactFields(raw, required, [], context)
+  exactFields(raw, required, ['slot_observations'], context)
   const persistenceState = persistenceFailure
     ? string(raw.persistence_state, `${context}.persistence_state`)
     : undefined
@@ -360,6 +362,7 @@ function parseRun(
     persistenceState: persistenceState as ExactLanePersistenceState | undefined,
     selectedSlot,
     answerSource,
+    slotObservations: parseSlotObservations(raw.slot_observations),
   }
 }
 

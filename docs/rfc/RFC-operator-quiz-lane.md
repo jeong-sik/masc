@@ -3,7 +3,7 @@ rfc: "operator-quiz-lane"
 title: "Operator quiz: a Lane Add-on writes and grades through its own exact-output lanes"
 status: Draft
 created: 2026-10-20
-updated: 2026-10-20
+updated: 2026-11-11
 author: claude
 related: ["0471", "0465", "cli-runtimes-as-lane-slots", "every-lane-is-one-row-in-one-registry", "schedule-history-and-outcome"]
 ---
@@ -331,14 +331,14 @@ slots = ["ollama_cloud.ollama-cloud-deepseek-v4-1-flash"]
   Revoking it refuses delivery without overwriting a retained answer or unknown
   outcome. Installation selection preserves package authority.
 
-**Retention.** The host retains the request in the Lane store before the first provider call, and every attempt's outcome after it, keyed by declaration id and request id with a digest of the request. This is the same order `Lane_addon_sampling` already keeps (`lib/lane_addon/lane_addon_sampling.mli:1-7`; `docs/design/lane-addon-model-boundary.md:65-86`). A request listed again after a restart gets its retained final result. The model is not called twice for a request that already has one.
+**Retention.** The host retains the request in the Lane store before the first provider call, keyed by declaration id and request id with a digest of the request, and retains every attempt's outcome after it. This is the same order `Lane_addon_sampling` already keeps (`lib/lane_addon/lane_addon_sampling.mli:1-7`; `docs/design/lane-addon-model-boundary.md:65-86`). Between the two the host writes a started marker when the call reaches its first generation dispatch: after any wait for a provider admission permit, before the request is sent. A token-count request writes none. A request listed again after a restart gets its retained final result. The model is not called twice for a request that already has one.
 
 **Final results, delivered to the package** (closed sum):
 - `answered {output; slot; usage?}`;
 - `invalid_output {detail}`: every slot answered and no answer matched the schema;
 - `input_refused {kind}`: a provider refused this input itself (input capacity, context overflow, invalid request, request body refused). The same input cannot succeed, so the package must change it;
 - `output_limit_reached {detail}`: an actual provider output limit exhausted the original candidate walk; this is distinct from malformed JSON, schema rejection, incomplete output and a transport response-size refusal. The original request stays terminal. Operator Quiz preserves its existing author failure / waiting-grade policy and does not reduce material for this result;
-- `outcome_unknown`: a call may have been sent and no outcome was retained. This includes a request the host retained before a restart and never finished: the host cannot tell whether the provider received it, so it does not call again.
+- `outcome_unknown`: no outcome was retained for a call that may have sent a generation request, or the call raised an exception. With a started marker and no outcome after it, the host cannot tell whether the provider received the request, so it does not call again. A request retained with no started marker and no final result has no call whose outcome is unknown, and the host runs it on the next trigger.
 
 **Not final, so not delivered:** the lane is unconfigured, off or has no admitted slots; a provider refusal that may pass (rate limit, overload, network, timeout); an authentication or authorization refusal. The request stays listed, the Host requests view (K6) shows the reason, and the host tries it again on the next trigger (§4.4). Each attempt is retained as evidence. This follows `failure_keeps_evidence`: a failed delivery leaves evidence and does not consume the request (`docs/constitution.xml:250-253`).
 
@@ -399,7 +399,8 @@ A trigger that arrives during a cycle becomes one more cycle, as observation hin
 |---|---|---|---|
 | The package wrote `Exact_requested` R and died before the host listed R | Package: `Exact_requested` R and R's body, no outcome event. Host: nothing for R | Event 1, the new worker's initialization | The package folds its log, sees R without an outcome and lists R from the stored body, so the digest is D again. The host has no record of R. It retains R, calls the lane once and delivers the result. |
 | The host retained R's final result and died before delivering it | Host: R and its final outcome in the Lane store. Package: `Exact_requested` R, no outcome event | Event 1 after the server restarts | The package lists R with digest D. The host finds the retained final result for this declaration id, R and D and delivers it without calling a provider (§4.3 Retention). |
-| The host retained R, may have sent the call, and died before retaining an outcome | Host: R, no outcome. Package: as above | Event 1 | The host delivers `outcome_unknown` and does not call again (§4.3). The package writes `Session_failed {author_outcome_unknown}`. The next `compose` is the next try. |
+| The host retained R and died before it wrote R's started marker, for example while the call waited for a provider admission permit | Host: R, no started marker, no outcome. Package: as above | Event 1 | The package lists R with digest D. The host finds R with no started marker, calls the lane once and delivers the result. |
+| The host wrote R's started marker, may have sent the call, and died before retaining an outcome | Host: R and its started marker, no outcome. Package: as above | Event 1 | The host delivers `outcome_unknown` and does not call again (§4.3). The package writes `Session_failed {author_outcome_unknown}`. The next `compose` is the next try. |
 | The host delivered R's result and the package died before writing its event | Host: R and its final outcome. Package: as above | Event 1 | Same as the second row. The package had not answered `accepted`, so nothing was consumed. |
 
 No row needs a pending list on the host, an attempt counter or a timer.
@@ -604,7 +605,7 @@ There is no limit on how many sessions can be `asked` at once. Each `compose` ad
 | Fact | Where | Why |
 |---|---|---|
 | Record bytes a question cites | Lane store blobs (K3) | The citation must stay checkable after an edit or a release deletes the source |
-| Exact request and outcome | Lane store (K1) | Persist before the model call (`docs/constitution.xml:240-243`); a restart must not call the model again |
+| Exact request and outcome | Lane store (K1) | Persist before the model call (`docs/constitution.xml:240-243`); a restart must not call the model again for a request whose started marker is retained |
 | Question text and the operator's answer | Installation question store (K4) | The answer reaches the host, possibly while the worker is down |
 | Key, topic, review item, sources | Package log on `/state` | Must exist before the answer; only the package knows what they mean |
 | Free-text verdict | Package log `Judged`, plus the retained `grade` outcome | The package's acceptance and the model's output are different facts |

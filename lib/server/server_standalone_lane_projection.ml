@@ -1,6 +1,7 @@
 type lane_configuration =
   | Configured of
       { admitted_slots : string list
+      ; bindings : (string * Agent_core.Exact_output.binding_observation) list
       ; cli_slots : string list
       ; dropped_slots : string list
       ; declared_slots : string list
@@ -675,6 +676,7 @@ let lane_json
       ~now:_
       ~resolve_lane
       ~jev_readiness
+      ~exact_runs
       (all_runs : observed_run list)
       (spec : lane_spec)
   =
@@ -717,7 +719,7 @@ let lane_json
   let configuration = resolve_lane lane_id in
   let configured, config_state, admitted_slots, admission_error =
     match configuration with
-    | Configured { admitted_slots; cli_slots; dropped_slots; declared_slots; declared_cli_slots; admission_error } ->
+    | Configured { admitted_slots; bindings=_; cli_slots; dropped_slots; declared_slots; declared_cli_slots; admission_error } ->
       Some true,
       (if Option.is_some admission_error || admitted_slots = [] && cli_slots = []
        then "degraded" else "ready"),
@@ -775,6 +777,18 @@ let lane_json
     ; ( "declared_cli_slots"
       , `List (List.map (fun slot -> `String slot) declared_cli_slots) )
     ; "admission_error", json_string_opt admission_error
+    ; "slot_states", Server_exact_slot_projection.slots_json ~owner:(Runtime_schema.Builtin spec.lane)
+        ~current_http:(match configuration with Configured configured -> configured.bindings
+          | Disabled _ | Unconfigured _ | Registry_unavailable _ -> [])
+        ~declared_http:declared_slots ~declared_cli:declared_cli_slots
+        ~runs:(List.filter (fun (run:Exact_lane_run_registry.run) ->
+          Exact_lane_run_registry.lane_id run.lane=lane_id) exact_runs)
+    ; "slot_observation_unavailable_runs", `Int (List.fold_left
+        (fun count (run:Exact_lane_run_registry.run) ->
+          if Exact_lane_run_registry.lane_id run.lane=lane_id then
+            match run.slot_observations with Some (Error _) -> count+1
+              | None | Some (Ok _) -> count
+          else count) 0 exact_runs)
     ; "status", `String status
     ; "retained_run_count", `Int (List.length runs)
     ; "running_count", `Int running_count
@@ -827,7 +841,7 @@ let snapshot_json_with
     ; ( "lanes"
       , `List
           (List.map
-             (lane_json ~now ~resolve_lane ~jev_readiness all_runs)
+             (lane_json ~now ~resolve_lane ~jev_readiness ~exact_runs all_runs)
              lane_specs) )
     ]
 ;;
@@ -900,6 +914,10 @@ let live_lane_configuration registry lane_id =
     in
     Configured
       { admitted_slots = admitted_catalog_slots
+      ; bindings = List.filter_map (fun (slot:Runtime_exact_output_registry.selected_slot) ->
+          if List.mem slot.slot_id admitted_catalog_slots then
+            Some (slot.slot_id,Agent_core.Exact_output.admitted_target_binding slot.admitted_target)
+          else None) selected_slots
       ; cli_slots = admitted_cli_slots
       ; dropped_slots
       ; declared_slots
@@ -925,6 +943,7 @@ let live_lane_configuration registry lane_id =
   | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
     Configured
       { admitted_slots = []
+      ; bindings = []
       ; cli_slots = []
       ; dropped_slots
       ; declared_slots
@@ -997,6 +1016,20 @@ let observe () =
 
 let configuration observation lane = observation.resolve_lane (Standalone_lane.to_id lane)
 let addon_configuration observation addon = observation.resolve_addon addon
+let slot_states observation owner =
+  let configuration = match owner with
+    | Runtime_schema.Builtin lane -> configuration observation lane
+    | Addon addon -> addon_configuration observation addon in
+  let current_http,declared_http,declared_cli = match configuration with
+    | Configured c -> c.bindings,c.declared_slots,c.declared_cli_slots
+    | Disabled c -> [],c.declared_slots,c.declared_cli_slots
+    | Unconfigured _ | Registry_unavailable _ -> [],[],[] in
+  Server_exact_slot_projection.slots_json ~owner ~current_http ~declared_http ~declared_cli
+    ~runs:observation.exact_runs
+let slot_observation_unavailable_run_count observation =
+  List.fold_left (fun count (run:Exact_lane_run_registry.run) ->
+    match run.slot_observations with Some (Error _) -> count+1
+      | None | Some (Ok _) -> count) 0 observation.exact_runs
 let addon_tables observation ~declaration_id =
   List.filter_map (fun (addon : Runtime_schema.addon_lane) ->
     if String.equal addon.declaration_id declaration_id then Some addon.output else None) observation.addon_lanes

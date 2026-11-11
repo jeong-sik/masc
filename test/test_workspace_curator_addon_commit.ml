@@ -576,7 +576,7 @@ let test_nested_successor_has_no_root_sibling ()=with_workspace (fun base_path s
 let host_result base_path store capture output =
   let request=get (Server_workspace_memory_addon_validation.request capture) in
   let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
-    get (before_dispatch ());
+    get (before_dispatch Exact.Generation);
     match validate output with
     | Ok output -> executed (Exact.Call_ended (Exact.Answered {output;slot="original-host";usage=None}))
     | Error detail -> executed (Exact.Call_ended (Exact.Invalid_output {detail}))) in
@@ -724,7 +724,7 @@ let test_actual_observer_delivery_and_ack_retry ()=with_workspace (fun base_path
     ~actor:prepared.registration.actor ~started_at:prepared.registration.receipt.observed_at
     ~input:(Runs.Exact_input prepared.registration.input)
     ~completion:(Some {Runs.outcome=Runs.Succeeded;elapsed_s=None;selected_slot=completion.selected_slot;
-      usage=None;output=Receipt.to_json completion.receipt})
+      usage=None;slot_observations=None;output=Receipt.to_json completion.receipt})
     |> Result.map_error Runs.reconciliation_error_to_string |> get;
   let restarted=Runs.replay path in
   let bytes=Fs_compat.load_file path and stat=Unix.stat path in

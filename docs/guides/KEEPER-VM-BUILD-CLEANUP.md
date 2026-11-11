@@ -7,6 +7,11 @@ The MASC server owns artifact cleanup through each Keeper's Owner mailbox.
 `keeper_build_cleanup_retention_sec` (one day). These are artifact-retention
 settings, not time limits on Keeper work or durable tasks.
 
+The first pass runs one maintenance pulse after the server starts
+(`MASC_MAINTENANCE_PULSE_INTERVAL_SEC`, one minute), and each later pass
+follows the one before it by the interval. A server restarted within the
+interval still passes once.
+
 The same pass sweeps each Remote_ssh Keeper's workspace root on its endpoint
 when `keeper_remote_workspace_cleanup_enabled` (default true) is on, with
 `keeper_remote_workspace_cleanup_retention_sec` (two days). Each Keeper's run
@@ -40,6 +45,36 @@ Only an already running Apple guest with a matching effective TOML profile and
 Owner identity is eligible. Cleanup does not boot, stop, pause, repair or refresh
 a guest's credentials. A paused Keeper without a running guest keeps its work
 volume. A source merge does not change the installed runtime.
+
+## What a pass leaves
+
+The cleanup steps are one closed list, `Keeper_cleanup_step`. A step applies
+to a Keeper by its declared sandbox: guest builds to a microVM on Apple
+Container, the workspace sweep to Remote_ssh. No step cleans a Docker sandbox
+or a microVM on another backend.
+
+A pass counts every Owner it looks at once: no stored meta, an unreadable
+declaration (with its reason), no step for its sandbox, every applicable step
+switched off, scheduled, or left alone because its earlier attempt had not
+returned. A pass runs with both switches off too, so "switched off" and "never
+ran" read differently.
+
+Each step's attempt for a Keeper ends in one outcome:
+
+| Outcome | Meaning |
+|---|---|
+| `reclaimed` | The payload ran to its end. Its report carries the counts, zero and failed entries included. |
+| `deferred` | The Keeper was busy, so nothing was sent. The Owner's reason is kept. |
+| `not_running` | There was no running guest to attach to. |
+| `failed` | Anything else, in the step's own words. |
+
+A step does not wait on the one before it. The server keeps the latest pass
+and, for every Keeper and step, the latest attempt and the time that step last
+ran to its end. `GET /api/v1/dashboard/tools` returns them as
+`keeper_cleanup`. The value lives in server memory: a restart starts empty and
+the next pass fills it again. The server log keeps one line per pass and one
+per attempt that ran its payload, and the guest build step writes its audit
+record.
 
 ## Owned output and safety
 

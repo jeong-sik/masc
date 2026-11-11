@@ -357,7 +357,9 @@ type call_outcome =
 type execution_result = { outcome : call_outcome; receipt : Keeper_exact_walk_receipt.t }
 type call = validate:(Yojson.Safe.t -> (checked, string) result) -> execution_result
 type dispatch_guard = unit -> (unit, string) result
-type runner = before_dispatch:dispatch_guard -> admission_class:Agent_core.Llm_provider.Admission_class.t ->
+type dispatch = Measurement | Generation
+type runner = before_dispatch:(dispatch -> (unit, string) result) ->
+  admission_class:Agent_core.Llm_provider.Admission_class.t ->
   lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
 
 type recorded_attempt =
@@ -840,6 +842,15 @@ let read_latest_original_execution ~store ~declaration_id ~schema request =
       if Yojson.Safe.equal schema retained_schema then Ok (Completed_latest {attempt_ordinal;execution})
       else Error "original execution proof differs from the supplied original schema"
 
+let read_latest_slot_observations ~store ~declaration_id ~schema request =
+  let* latest=read_latest_original_execution ~store ~declaration_id ~schema request in
+  match latest with
+  | No_completed_latest -> Ok None
+  | Completed_latest {attempt_ordinal;execution} ->
+    let proof=proof_to_json ~store ~declaration_id request ~schema ~attempt_ordinal execution in
+    Lane_addon_exact_observation.read ~store ~declaration_id ~request_id:request.request_id
+      ~attempt_ordinal ~proof
+
 (* Requests this process is running, by store root, declaration and request.
    Only the base-path lease holder runs requests (see the interface), so a
    started attempt that is not here was cut off by a crash or a cancellation. *)
@@ -1028,18 +1039,43 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
         | None, None -> authorization.with_execution (fun () ->
           Eio.Fiber.check ();
           let* ()=authorization.before_dispatch () in
-          match runner ~before_dispatch:authorization.before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema request with
+          (* The started marker says a generation request may have reached a
+             provider, or that a call which sent none is publishing its
+             proof. It is written when the call reaches its first generation
+             dispatch: after any provider admission wait, before the request
+             is sent. A call cut off while it waited leaves no marker, so the
+             next run tries the request again. *)
+          let started = ref false and marker_failure = ref None in
+          let mark_started () =
+            if !started then Ok ()
+            else
+              match save {previous with attempts = previous.attempts @ [Started (incarnation ())]} with
+              | Ok () -> started := true; marker_failure := None; Ok ()
+              | Error detail -> marker_failure := Some detail; Error detail in
+          let before_dispatch = function
+            | Measurement -> authorization.before_dispatch ()
+            | Generation ->
+              let* () = mark_started () in
+              (* The save yields. A retiring incarnation must not send after
+                 it returns. A cancelled started attempt remains unknown. *)
+              Eio.Fiber.check ();
+              authorization.before_dispatch () in
+          match runner ~before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema request with
           | Error unavailable ->
             let reason = Lane_unavailable unavailable in
             let* () = save {previous with attempts = previous.attempts @ [Deferred reason]} in
             Ok (Not_final reason)
           | Ok call ->
-            let* () = save {previous with attempts = previous.attempts @ [Started (incarnation ())]} in
-            (* The save yields. A retiring incarnation must not start a call
-               after it returns. A cancelled started attempt remains unknown. *)
+            (* The request is retained before the first provider call. *)
+            let* () = match retained with
+              | Some _ -> Ok ()
+              | None -> save previous in
+            (* The save yields. A retiring incarnation must not enter a call
+               after it returns. *)
             Eio.Fiber.check ();
+            let slot_capture=Exact_lane_slot_capture.create ~owner:(Runtime_schema.Addon lane) () in
             let attempt, recorded, execution =
-              match call ~validate with
+              match Exact_lane_slot_capture.with_capture slot_capture (fun () -> call ~validate) with
               | execution ->
                   let recorded = match execution.outcome with
                     | Call_ended final -> Completed_call final
@@ -1047,12 +1083,36 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                   attempt_of_outcome execution.outcome, recorded, Some execution
               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
               | exception exn -> Final Outcome_unknown, Unknown_raised (Printexc.to_string exn), None in
+            match !marker_failure with
+            | Some detail ->
+              (* The marker save reported a failure, so the guard stopped the
+                 call before its dispatch. That is the host's own write
+                 failure, not an outcome of the call. *)
+              Error detail
+            | None ->
             Eio.Cancel.protect (fun () ->
               let* () = match execution with
                 | None -> Ok ()
-                | Some execution -> Eio_unix.run_in_systhread (fun () ->
+                | Some execution ->
+                  (* A proof is read against its started attempt, so a call
+                     that ended without a generation dispatch writes the
+                     marker before its proof. *)
+                  let* () = mark_started () in
+                  Eio_unix.run_in_systhread (fun () ->
                     retain_proof ~store ~declaration_id request ~schema
                       ~attempt_ordinal:(List.length previous.attempts + 1) execution) in
+              (* Optional observations have their own proof-bound link. A
+                 failed diagnostic write cannot undo accepted original work. *)
+              (match execution,Exact_lane_slot_capture.observations slot_capture with
+               | Some execution,Some observations ->
+                 let attempt_ordinal=List.length previous.attempts+1 in
+                 let proof=proof_to_json ~store ~declaration_id request ~schema ~attempt_ordinal execution in
+                 (match Eio_unix.run_in_systhread (fun () ->
+                    Lane_addon_exact_observation.retain ~store ~declaration_id
+                      ~request_id:request.request_id ~attempt_ordinal ~proof observations) with
+                  | Ok () -> ()
+                  | Error detail -> Log.Misc.warn "Exact slot observations were not retained: %s" detail)
+               | None,_ | Some _,None -> ());
               let finished = match attempt with
                 | Final final ->
                     {previous with attempts = previous.attempts @ [recorded]; final = Some final}

@@ -306,9 +306,53 @@ python3 docs/evidence/aged-tool-results-2026-11/measure_turn_requests.py \
   --json-out docs/evidence/aged-tool-results-2026-11/result-with-rules-turn-requests-2026-11-06T09_52_to_11-07T09_52.json
 ```
 
+## 끝난 턴의 마커를 다시 읽는 몫 (11-08 ~ 11-10, UTC)
+
+RFC `tool-results-age-out-of-context` 의 열린 질문 1이에요. 위 재생은 바이트만 셌고 모델이 마커를 되읽는 일은 재지 않았어요.
+`measure_marker_rereads.py` 가 저장된 요청에 실린 마커와 `keeper_artifact_read` 장부 행을 (Keeper, sha256) 쌍으로 이어요. 창은 UTC 로 하루가 다 찬 3일이고 읽은 때는 2026-11-11T06:52Z 예요.
+센 레인은 `config/runtime.toml` 에서 제공자로 선언된 `ollama_cloud.`, `glm-coding.` 프로필이에요. 규칙이 켜진 뒤의 값이라서 위 절들과 달리 원문이 아니라 마커가 실린 요청을 읽어요.
+
+| 항목 | 값 |
+|---|---:|
+| 센 요청 | 2,619 |
+| 도구 메시지 / 마커가 든 메시지 | 265,685 / 53,067 |
+| 마커 (Keeper, sha256) 쌍 | 17,914 |
+| 늙은 마커 (원본 2,048 B 이상 65,536 B 이하) | 17,829 |
+| 만들 때부터 마커 (원본 65,536 B 초과) / 2,048 B 미만 | 85 / 0 |
+| 늙은 마커 중 한 번이라도 읽힌 것 | 236 (1.32%) |
+| 늙은 마커의 원본 바이트 | 110.83 MB |
+| 읽힌 늙은 마커의 원본 바이트 | 1.74 MB (1.57%) |
+| 그 읽기가 돌려준 바이트 | 1.57 MB (늙은 마커 원본의 1.42%) |
+| 늙은 마커를 읽은 호출 | 279 |
+| 같은 기간 `keeper_artifact_read` 호출 / 그중 요청을 센 Keeper 의 호출 | 6,593 / 3,788 |
+| 요청을 센 Keeper 의 호출 중 저장된 요청에 마커로 실린 sha256 을 읽은 호출 | 392 (10.3%), 늙은 마커를 읽은 279 (7.4%) 포함 |
+
+원본 크기별로 읽힌 몫이에요.
+
+| 원본 크기 | 마커 | 읽힘 |
+|---|---:|---:|
+| 2,048 ~ 4,095 B | 7,417 | 126 (1.70%) |
+| 4,096 ~ 8,191 B | 7,640 | 56 (0.73%) |
+| 8,192 ~ 16,383 B | 1,898 | 31 (1.63%) |
+| 16,384 ~ 32,767 B | 644 | 16 (2.48%) |
+| 32,768 ~ 65,536 B | 230 | 7 (3.04%) |
+
+늙은 마커가 많은 Keeper 여덟이에요(마커/읽힘): `msx-retro-mania` 3,705/1, `context-reviewer` 2,855/4, `code-reviewer-brother` 2,123/14, `code-reviewer-father` 1,973/12, `rondo` 943/8, `masc-productor-owner` 932/11, `sangsu` 883/41, `wkbl-web-leader` 855/14.
+
+- 늙은 마커의 두 한계는 코드가 정한 값이에요. 2,048 B 는 `Keeper_turn_driver_try_provider.aged_result_min_bytes`, 65,536 B 는 `Common.max_agent_core_inline_result_bytes` 예요. Agent Core 결과는 이보다 크면 만들 때 마커가 되므로, 그 사이 크기의 마커는 끝난 턴이 바꾼 것이에요. 시험이 두 값을 OCaml 소스와 맞춰 봐요.
+- 마커는 JSON 문자열의 첫머리에 있는 것만 쳐요. 결과 본문 중간에 마커 글자가 인용된 경우(장부 행을 출력하는 명령 등)를 빼려는 거예요. 앵커를 빼고 돌린 값은 마커 19,253개 중 늙은 마커 17,943개, 읽힌 것 237개(1.32%)이고, 늘어난 몫은 대부분 만들 때부터 마커 쪽(1,310개)이에요. 읽힌 몫은 거의 같아요.
+- 읽힌 몫은 끝난 턴에서 마커가 된 결과의 값이에요. 만든 턴 안에서 바꿨을 때 모델이 방금 만든 결과를 다시 찾는 몫은 이 측정으로 알 수 없어요.
+- 저장된 요청은 한 시도가 마지막으로 보낸 요청이라서, 그 시도가 싣고 있던 마커만 보여요.
+- 요청을 센 Keeper 의 `keeper_artifact_read` 3,788번 중 90% 가까이는 저장된 요청에 마커로 실린 적 없는 sha256 을 읽어요. 모델이 그 sha256 을 어디서 받았는지는 가리지 못했어요. 23번은 `sha256` 칸이 없어서(`answer_sha256` 오입력 등) 어느 마커의 읽기인지 이을 수 없었어요.
+- 읽기는 시각으로 가르지 않았어요. 그 3일 안의 읽기면 마커가 실린 요청의 앞이든 뒤든 세요.
+- 시험 14개가 통과하고, 계산을 일부러 틀리게 바꾼 변형 11개를 모두 잡아요. 변형은 복사본에서 돌렸어요. 시험은 두 한계 값(OCaml 소스와 맞춤), 앵커, 다른 Keeper 의 읽기를 세지 않는 것, 같은 마커를 여러 요청에서 한 번만 세는 것, 크기 구간의 끝을 확인해요.
+
 ## 다시 만들기
 
 ```bash
+python3 docs/evidence/aged-tool-results-2026-11/measure_marker_rereads.py \
+  --base-path ~/me --from-date 2026-11-08 --to-date 2026-11-10 \
+  --json-out docs/evidence/aged-tool-results-2026-11/result-marker-rereads-2026-11-08_11-10.json
 python3 docs/evidence/aged-tool-results-2026-11/measure_aged_tool_results.py \
   --base-path ~/me --from-date 2026-11-01 --to-date 2026-11-05 \
   --json-out docs/evidence/aged-tool-results-2026-11/result-2026-11-01_11-05.json

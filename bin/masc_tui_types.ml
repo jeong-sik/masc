@@ -3510,6 +3510,7 @@ let runtime_probe_status_label ?(ko = false) status =
     | Runtime_provider_reachable -> "연결 가능"
     | Runtime_provider_skipped_cli -> "CLI 검사 안 함"
     | Runtime_provider_skipped_native_auth -> "ADC 검사 안 함"
+    | Runtime_provider_refused -> "운영자 key를 쓰지 않음"
     | Runtime_provider_missing_auth -> "인증 정보 없음"
     | Runtime_provider_auth_failed -> "인증 실패"
     | Runtime_provider_network_error -> "네트워크 오류"
@@ -3523,6 +3524,7 @@ let runtime_probe_status_label ?(ko = false) status =
     match status with
     | Runtime_provider_skipped_cli -> "CLI not probed"
     | Runtime_provider_skipped_native_auth -> "ADC not probed"
+    | Runtime_provider_refused -> "operator key not used"
     | (Runtime_provider_reachable | Runtime_provider_missing_auth | Runtime_provider_auth_failed
       | Runtime_provider_network_error | Runtime_provider_server_error | Runtime_provider_endpoint_not_found
       | Runtime_provider_http_error | Runtime_provider_unknown_http_status | Runtime_provider_invalid_endpoint
@@ -3532,7 +3534,8 @@ let runtime_probe_annotation ~status detail =
   Option.map (fun detail ->
     match status with
     | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_cli
-    | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth -> Runtime_probe_note detail
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_skipped_native_auth
+    | Masc.Tui_decode_runtime_probe.Runtime_provider_refused -> Runtime_probe_note detail
     | Masc.Tui_decode_runtime_probe.Runtime_provider_reachable
     | Masc.Tui_decode_runtime_probe.Runtime_provider_missing_auth
     | Masc.Tui_decode_runtime_probe.Runtime_provider_auth_failed

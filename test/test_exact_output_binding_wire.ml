@@ -152,7 +152,7 @@ let with_runtime ?(publication = Boot_config) ?(provider_headers = []) f =
            match Runtime.get_runtimes () with
            | [ runtime ] ->
              (match runtime.Runtime_instance.execution with
-              | Runtime_execution.Agent_core config -> config
+              | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
               | Runtime_execution.Codex_app_server _
               | Runtime_execution.Claude_code _
               | Runtime_execution.Antigravity_cli _

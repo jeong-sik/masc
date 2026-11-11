@@ -658,11 +658,13 @@ supports-multimodal-inputs = true
           provider premise real. Its model declaration remains unchanged:
           an unknown explicit provider otherwise has conservative defaults. *)
        (match runtime.Runtime_instance.execution with
-        | Runtime_execution.Agent_core provider ->
+        | Runtime_execution.Agent_core sealed ->
+          let provider = Masc_test_deps.api_config sealed in
           let provider = {provider with
             Llm_provider.Provider_config.model_capabilities_override =
               Some (Llm_provider.Capabilities.capabilities_of_kind provider.kind)} in
-          {runtime with Runtime_instance.execution = Runtime_execution.Agent_core provider}
+          {runtime with Runtime_instance.execution =
+             Runtime_execution.Agent_core (Runtime_account_access.seal_api provider)}
         | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
           fail "fixture must materialize an Agent Core runtime")
      | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason))
@@ -681,7 +683,7 @@ let test_per_candidate_image_projection () =
   check string "the same runtime id can carry different immutable declarations"
     text_runtime.id image_runtime.id;
   let provider = match text_runtime.execution with
-    | Runtime_execution.Agent_core provider -> provider
+    | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
     | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
       fail "fixture must use the Agent Core transport" in
   check bool "the provider preset alone advertises images" true

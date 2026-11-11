@@ -29,7 +29,7 @@ import e_synth_audit as A
 import synth_render
 import synth_rows as RW
 import synth_spec as S
-from tinker_librarian_synth_fixtures import KINDS, PLANTED, candidates_of
+from tinker_librarian_synth_fixtures import KINDS, PLANTED, RECORD_AHEAD, RECORD_PAST, SCHEDULED, candidates_of
 from tinker_librarian_synth_fixtures import request as synth_request
 
 type JsonObject = dict[str, object]
@@ -44,13 +44,14 @@ def request(candidates: tuple[S.Candidate, ...], stale: frozenset[str] = frozens
             claims: dict[str, str] | None = None, item_id: str = "eval-k-0") -> A.Request:
     return A.Request(item_id, "role", tuple(
         S.MemoryFact(f"m{i}", (claims or {}).get(f"m{i}", f"fact {i}"), "c", None, "2026-10-01T00:00:00Z",
-                     f"m{i}" in stale, None)
+                     f"m{i}" in stale, None, None)
         for i in range(1, facts + 1)), candidates)
 
 
-def planted(kinds: tuple[S.CandidateKind, ...]) -> A.Request:
-    """A request on the synth fixtures' memory: m4 is stale and m6 restates m5."""
-    return A.Request("eval-k-0", "role", PLANTED, candidates_of(kinds))
+def planted(kinds: tuple[S.CandidateKind, ...], facts: tuple[S.MemoryFact, ...] = PLANTED) -> A.Request:
+    """A request on the synth fixtures' memory: m4 is stale and m6 restates m5. On SCHEDULED, m7 is
+    a record used after the candidates and m8 one used before them."""
+    return A.Request("eval-k-0", "role", facts, candidates_of(kinds))
 
 
 def full_refs(case: JsonObject) -> list[str]:
@@ -92,11 +93,27 @@ class CaseTest(unittest.TestCase):
         self.assertTrue({"m4", "m5", "m6"} <= set(full_refs(case)))
 
     def test_a_decision_that_says_what_the_key_says_fits_for_every_mix_of_kinds(self) -> None:
-        for n in (1, 2, 3):
-            for kinds in itertools.product(KINDS, repeat=n):
-                with self.subTest(kinds=[k.value for k in kinds]):
-                    _, key = A.case_of("c001", planted(kinds), set(), random.Random(1))
-                    self.assertEqual(D.misfits(key, key), ([], []))
+        for facts in (PLANTED, SCHEDULED):
+            for n in (1, 2, 3):
+                for kinds in itertools.product(KINDS, repeat=n):
+                    with self.subTest(facts=len(facts), kinds=[k.value for k in kinds]):
+                        _, key = A.case_of("c001", planted(kinds, facts), set(), random.Random(1))
+                        self.assertEqual(D.misfits(key, key), ([], []))
+
+    def test_the_key_keeps_a_record_ahead_and_drops_a_past_one_and_both_are_shown_in_full(self) -> None:
+        many = request((candidate(K.NEW_DURABLE),), stale=frozenset({"m18"}), facts=40)
+        uses = {"m17": RECORD_AHEAD, "m18": RECORD_PAST}
+        req = dataclasses.replace(many, facts=tuple(dataclasses.replace(f, use_at=uses.get(f.memory_id))
+                                                    for f in many.facts))
+        for seed in range(20):
+            case, key = A.case_of("c001", req, set(), random.Random(seed))
+            facts = cast(dict[str, str], key["facts"])
+            self.assertEqual((facts["m17"], facts["m18"]), ("keep", "drop"), seed)
+            self.assertTrue({"m17", "m18"} <= set(full_refs(case)), seed)
+
+    def test_a_case_shows_the_time_of_the_last_candidate(self) -> None:
+        case, _ = A.case_of("c001", planted((K.TRANSIENT, K.NEW_DURABLE), SCHEDULED), set(), random.Random(1))
+        self.assertEqual(case["now"], "2026-11-07T09:00:02Z")
 
     def test_every_row_is_read_before_any_is_picked(self) -> None:
         written = RW.row_of(synth_request(PLANTED, candidates_of((K.COMPLEMENT,))))

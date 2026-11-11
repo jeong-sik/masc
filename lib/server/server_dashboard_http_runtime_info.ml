@@ -966,7 +966,7 @@ let dashboard_runtime_provider_probe_json
           "Vertex Gemini authenticates with Google Application Default Credentials; \
            this probe holds no such credential and does not test reachability"
         ()
-     | Runtime_execution.Agent_core provider_config, Probe_url probe_url ->
+     | Runtime_execution.Agent_core sealed, Probe_url probe_url ->
       let probe_url_json = dashboard_runtime_url_for_json probe_url in
       if not (dashboard_runtime_http_url_valid probe_url)
       then
@@ -979,6 +979,20 @@ let dashboard_runtime_provider_probe_json
           ~error:"runtime endpoint is not an absolute http(s) URL"
           ()
       else (
+      (* HIGH-RISK-UNREVIEWED: the probe sends the credential its operator
+         declared, so it asks the seal first (plan D4); a refused probe sends
+         nothing. *)
+      match Runtime_account_access.authorize_api sealed with
+      | Error refusal ->
+        make
+          ~probe_url:probe_url_json
+          ~auth_present:false
+          ~status:"refused"
+          ~reachable:None
+          ~skipped:true
+          ~error:(Runtime_account_access.refusal_to_string refusal)
+          ()
+      | Ok provider_config ->
       match
         dashboard_runtime_probe_headers ~provider_config rt
       with
@@ -1469,8 +1483,11 @@ let effective_capabilities_json (rt : Runtime_instance.t) =
       ; "execution", `String (Runtime_execution.label rt.execution)
       ; "verified", `Bool false
       ]
-  | Runtime_execution.Agent_core provider_config ->
-   (match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
+  | Runtime_execution.Agent_core sealed ->
+   (match
+      Llm_provider.Provider_config.capabilities_for_config_model
+        (Runtime_account_access.api_declaration sealed)
+    with
   | None -> `Null
   | Some caps ->
     let accepted_reasoning_efforts =
@@ -1559,7 +1576,8 @@ let runtime_parameter_policy_json (rt : Runtime_instance.t) =
       [ "source", `String "official-client-owned"
       ; "execution", `String (Runtime_execution.label rt.execution)
       ]
-  | Runtime_execution.Agent_core provider_config ->
+  | Runtime_execution.Agent_core sealed ->
+    let provider_config = Runtime_account_access.api_declaration sealed in
     let dialect = RD.for_provider_config provider_config in
     let sampling_candidates = RD.sampling_params_ignored_when_thinking dialect in
     let ignored_sampling_params =
@@ -1584,8 +1602,9 @@ let runtime_parameter_policy_json (rt : Runtime_instance.t) =
 
 let runtime_admission_json (rt : Runtime_instance.t) =
   match rt.execution with
-  | Runtime_execution.Agent_core config ->
-    let snapshot = Llm_provider.Provider_admission.snapshot_for ~config in
+  | Runtime_execution.Agent_core sealed ->
+    let config = Runtime_account_access.api_declaration sealed in
+    let snapshot = Runtime_account_access.api_admission_snapshot sealed in
     `Assoc
       [ "scope", `String "process_endpoint_credential"
       ; "declared_max", Json_util.int_opt_to_json config.max_concurrent_requests
@@ -2285,6 +2304,8 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
            ; "keeper_waiting_inventory", keeper_waiting_inventory
            ; ( Keeper_volume_gc_periodic.envelope_field
              , Server_sandbox_volume_gc_report.envelope_json () )
+           ; ( Keeper_cleanup_status.envelope_field
+             , Server_keeper_build_maintenance.envelope_json () )
            ])
     | other -> other
   in

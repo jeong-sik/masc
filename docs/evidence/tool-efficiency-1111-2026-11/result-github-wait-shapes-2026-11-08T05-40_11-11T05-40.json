@@ -1,0 +1,180 @@
+{
+  "window": {
+    "since": "2026-11-08T05:40:00Z",
+    "end": "2026-11-11T05:40:00Z",
+    "hours": 72.0
+  },
+  "execute": {
+    "calls": 89771,
+    "run_in_background": 124,
+    "long_calls": 1181,
+    "long_run_in_background": 0
+  },
+  "github_wait": {
+    "calls": 926,
+    "hours": 61.342,
+    "shapes": {
+      "single_run": {
+        "calls": 340,
+        "hours": 24.88,
+        "share_of_hours": 0.4056,
+        "top_keepers": [
+          [
+            "rondo",
+            189
+          ],
+          [
+            "masc-productor-owner",
+            70
+          ],
+          [
+            "wkbl-data",
+            27
+          ],
+          [
+            "wkbl-front",
+            20
+          ]
+        ]
+      },
+      "api_other": {
+        "calls": 272,
+        "hours": 17.172,
+        "share_of_hours": 0.2799,
+        "top_keepers": [
+          [
+            "masc-productor-owner",
+            83
+          ],
+          [
+            "rondo",
+            61
+          ],
+          [
+            "pr-updater",
+            24
+          ],
+          [
+            "code-reviewer-mother",
+            18
+          ]
+        ]
+      },
+      "commit_checks": {
+        "calls": 140,
+        "hours": 10.331,
+        "share_of_hours": 0.1684,
+        "top_keepers": [
+          [
+            "masc-productor-owner",
+            33
+          ],
+          [
+            "rondo",
+            32
+          ],
+          [
+            "wkbl-web-leader",
+            28
+          ],
+          [
+            "code-reviewer-brother",
+            15
+          ]
+        ]
+      },
+      "pr_checks": {
+        "calls": 168,
+        "hours": 8.615,
+        "share_of_hours": 0.1404,
+        "top_keepers": [
+          [
+            "code-reviewer",
+            70
+          ],
+          [
+            "wkbl-data",
+            38
+          ],
+          [
+            "rondo",
+            31
+          ],
+          [
+            "sangsu",
+            9
+          ]
+        ]
+      },
+      "other": {
+        "calls": 3,
+        "hours": 0.197,
+        "share_of_hours": 0.0032,
+        "top_keepers": [
+          [
+            "wkbl-data",
+            2
+          ],
+          [
+            "wkbl-web-leader",
+            1
+          ]
+        ]
+      },
+      "run_list": {
+        "calls": 3,
+        "hours": 0.147,
+        "share_of_hours": 0.0024,
+        "top_keepers": [
+          [
+            "github-pr-checker",
+            1
+          ],
+          [
+            "rondo",
+            1
+          ],
+          [
+            "e-masc-the-leader",
+            1
+          ]
+        ]
+      }
+    }
+  },
+  "single_run_polls": {
+    "calls": 340,
+    "hours": 24.88,
+    "watched_by_same_keeper": {
+      "calls": 16,
+      "hours": 1.326
+    },
+    "not_watched": {
+      "calls": 324,
+      "hours": 23.554,
+      "top_keepers": [
+        [
+          "rondo",
+          187
+        ],
+        [
+          "masc-productor-owner",
+          64
+        ],
+        [
+          "wkbl-data",
+          25
+        ],
+        [
+          "wkbl-front",
+          14
+        ]
+      ]
+    },
+    "schedule_create_in_prior_15_min": {
+      "any": 24,
+      "with_until_github_run": 19,
+      "refused_missing_due": 2
+    }
+  }
+}

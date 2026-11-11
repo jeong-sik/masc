@@ -56,7 +56,10 @@ type vibe_cli =
   }
 
 type t =
-  | Agent_core of Llm_provider.Provider_config.t
+  | Agent_core of Runtime_account_access.api_sealed
+      (** The provider configuration, credential included. A sender takes it
+          from {!Runtime_account_access.authorize_api}, and a reader from
+          {!Runtime_account_access.api_declaration}. *)
   | Codex_app_server of codex_app_server
   | Antigravity_cli of antigravity_cli
   | Claude_code of claude_code

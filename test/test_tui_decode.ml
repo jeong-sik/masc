@@ -5334,10 +5334,6 @@ let test_decode_repository_requires_resolved_local_path () =
       Alcotest.fail
         "a repository without the server-resolved path must not be guessed"
 
-(* Ordinary current memory and source-bound memory are independent stores. A
-   failed Librarian with no ordinary snapshot may still have source evidence;
-   the decoder must keep both axes instead of collapsing that row to
-   memoryless. *)
 (* A keeper row that does not decode is refused on its own and the others
    still decode, so "the payload is not accepted" is either a whole-snapshot
    error or at least one refused row. *)
@@ -5361,13 +5357,9 @@ let disabled_memory_execution =
   |> List.map (fun operation -> operation, Execution.Disabled)
   |> Execution.to_json
 
-(* The memory-health decode surface used to carry a per-axis snapshot test
-   here and a Librarian-position test below it. Every memory schema revision
-   rewrote their fixtures — the per-axis test alone was rewritten 28 times in
-   three weeks — without ever catching a decoder bug the server ledger missed.
-   The authoritative ledger lives in
-   test_server_dashboard_http_keeper_memory_health; this surface keeps only
-   the stale-schema rejection, so a schema change stops rewriting this file. *)
+(* The server memory-health tests decode production responses and check the
+   read-position and rewrite relationships there. This file retains stale
+   schema rejection, typed alert contracts, and memory-fact decoding. *)
 
 (* The alert's typed code is the only field the renderer reads: the wire's
    severity and target are functions of it, and the decoder refuses a payload

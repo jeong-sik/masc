@@ -960,6 +960,7 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   let module S = Masc.Librarian_continuity_snapshot in
   let module B = Masc.Keeper_turn_boundaries in
   let module P = Masc.Keeper_librarian_progress in
+  let module D = Masc.Tui_decode_memory_health in
   let base = fresh_dir "masc-context-lag" in
   let config = Masc.Workspace.default_config base in
   let keeper_name = "context-lagging" in
@@ -973,12 +974,24 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
        below is written straight to a file, though, and no writer announces
        that one, so the caller says which kind of read it is. *)
     if invalidate then Health.For_testing.invalidate ~base_path:base ~keeper:keeper_name;
-    member "context_cycle"
-      (keeper_obj keeper_name (Health.keeper_memory_health_http_json ~base_path:base)) in
+    let json = Health.keeper_memory_health_http_json ~base_path:base in
+    json, member "context_cycle" (keeper_obj keeper_name json) in
+  let decoded_cycle json : D.memory_context_cycle =
+    let decoded = D.decode_memory_health_snapshot json |> require_ok in
+    match List.find_opt
+        (fun (row : D.memory_keeper_health) -> String.equal row.mkh_keeper_id keeper_name)
+        decoded.mhs_keepers with
+    | Some row -> row.mkh_context_cycle
+    | None -> Alcotest.fail "the production context cycle must reach the TUI" in
+  let initial_json, initial = cycle () in
   Alcotest.(check bool) "a keeper that has read nothing has no position" true
-    (is_null (member "read_position" (cycle ())));
+    (is_null (member "read_position" initial));
   Alcotest.(check bool) "and no read error to explain it" true
-    (is_null (member "read_position_read_error" (cycle ())));
+    (is_null (member "read_position_read_error" initial));
+  let initial_reading = decoded_cycle initial_json in
+  Alcotest.(check bool) "no progress is distinct from an unreadable progress file" true
+    (initial_reading.mcc_read_position = None
+     && not initial_reading.mcc_read_position_unreadable);
   let get = function Ok value -> value | Error detail -> Alcotest.fail detail in
   let messages = [Agent_core.Types.make_message ~role:Agent_core.Types.User
     [Agent_core.Types.Text "the turn the snapshot covers"]] in
@@ -1007,24 +1020,71 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   |> Result.map_error P.write_error_to_string |> get;
   (* No manual invalidation: [P.write] fires the commit observer for the
      runtime root, and that observer has to be what empties the row. *)
-  let observed = cycle ~invalidate:false () in
+  let observed_json, observed = cycle ~invalidate:false () in
   Alcotest.(check int) "the cut the request starts at" snapshot.S.end_atom
     (int_field "end_atom" (member "saved" observed));
   Alcotest.(check int) "the position that cut is read against" 12887
     (int_field "read_position" observed);
   Alcotest.(check bool) "a snapshot that is not being rewritten says nothing about it" true
     (is_null (member "rewriting_through" observed));
+  let reading = decoded_cycle observed_json in
+  Alcotest.(check (option int)) "the decoder preserves the durable read position"
+    (Some 12887) reading.mcc_read_position;
+  Alcotest.(check bool) "a readable position is confirmed" false
+    reading.mcc_read_position_unreadable;
+  Alcotest.(check (option int)) "a non-rewrite stays absent after decoding"
+    None reading.mcc_rewriting_through;
+  (* Mutate only the relationships this decoder owns, using the complete
+     production response above instead of a second schema fixture. *)
+  let replace_field name value = function
+    | `Assoc fields -> `Assoc ((name, value) :: List.remove_assoc name fields)
+    | _ -> Alcotest.fail "the production value must be an object" in
+  let rejects_cycle label invalid_cycle =
+    let row = keeper_obj keeper_name observed_json
+      |> replace_field "context_cycle" invalid_cycle in
+    let invalid_json = replace_field "keepers" (`List [row]) observed_json in
+    let decoded = D.decode_memory_health_snapshot invalid_json |> require_ok in
+    Alcotest.(check bool) label true
+      (List.exists
+         (fun (refusal : D.memory_keeper_refusal) ->
+           refusal.mkr_keeper_id = Some keeper_name)
+         decoded.mhs_refused_keepers
+       && not (List.exists
+         (fun (row : D.memory_keeper_health) -> String.equal row.mkh_keeper_id keeper_name)
+         decoded.mhs_keepers)) in
+  rejects_cycle "a position cannot also carry a read failure"
+    (replace_field "read_position_read_error" (`String "progress_unreadable") observed);
+  rejects_cycle "a rewrite target must be beyond its saved cut"
+    (replace_field "rewriting_through" (`Int snapshot.S.end_atom) observed);
+  rejects_cycle "a rewrite target needs its saved snapshot"
+    (observed |> replace_field "saved" `Null
+      |> replace_field "rewriting_through" (`Int 12887));
+  let rewriting = S.capture_checkpoint_prefix ~unread_messages:[]
+      ~catch_up_end_atom:(Some 12887) ~trace_id ~lines ~messages
+      ~working_state:"a snapshot being rewritten" ()
+    |> Result.map_error S.error_to_string |> get in
+  Yojson.Safe.to_file path (S.to_json rewriting);
+  let rewriting_json, _ = cycle () in
+  let rewriting_reading = decoded_cycle rewriting_json in
+  Alcotest.(check (option int)) "the production rewrite target survives decoding"
+    (Some 12887) rewriting_reading.mcc_rewriting_through;
+  Alcotest.(check (option int)) "the rewrite keeps the independent read position"
+    (Some 12887) rewriting_reading.mcc_read_position;
   (* An unreadable position file is why there is no number, which a keeper
      that has read nothing does not say. *)
   Out_channel.with_open_bin
     (P.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name)
     (fun oc -> output_string oc "{not json");
-  let unreadable = cycle () in
+  let unreadable_json, unreadable = cycle () in
   Alcotest.(check string) "an unreadable position says so" "progress_unreadable"
     (string_field "read_position_read_error" unreadable);
   Alcotest.(check bool) "and carries no number" true (is_null (member "read_position" unreadable));
   Alcotest.(check int) "the cut is read independently of it" snapshot.S.end_atom
-    (int_field "end_atom" (member "saved" unreadable))
+    (int_field "end_atom" (member "saved" unreadable));
+  let unreadable_reading = decoded_cycle unreadable_json in
+  Alcotest.(check bool) "the decoder retains why the number is absent" true
+    (unreadable_reading.mcc_read_position = None
+     && unreadable_reading.mcc_read_position_unreadable)
 (* RFC librarian-lifecycle §4.9: the durable round and the continuity round
    fall behind separately, so the screen carries both. A lag it cannot take
    reads as "cannot say" rather than as zero -- zero is what a caught-up

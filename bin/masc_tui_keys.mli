@@ -255,7 +255,7 @@ val footer_hints_voice_agent : lang:Masc_tui_types.ui_language -> ?saving:bool -
     write and the way out. Its keys are not the Config pane's, so the row is
     the screen's rather than the pane's. *)
 
-val footer_hints_runtime_account_form : unit -> string
+val footer_hints_runtime_account_form : lang:Masc_tui_types.ui_language -> string
 (** The runtime.toml account form's row: the provider axis, the fields, the
     save and the way out. The form takes every other key as typing, so the
     pane's row would name keys that no longer do what it says. *)
@@ -270,7 +270,7 @@ val footer_hints_typesafeai_exclusion_form : unit -> string
     the way out. The form takes every key, so the pane's row would name keys
     that no longer do what it says. *)
 
-val footer_hints_runtime_account_saved : unit -> string
+val footer_hints_runtime_account_saved : lang:Masc_tui_types.ui_language -> string
 (** The account form's row after a save: the copy of the sign-in command
     and the way out. *)
 
@@ -346,6 +346,7 @@ val footer_hints_code : lang:Masc_tui_types.ui_language -> pane:code_pane -> str
     the row search did not either when they arrived. *)
 
 val footer_hints_runtime :
+  lang:Masc_tui_types.ui_language ->
   mode:Masc_tui_types.runtime_mode ->
   picker:Masc_tui_types.runtime_picker_projection option ->
   string

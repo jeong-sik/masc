@@ -207,64 +207,64 @@ let runtime_reading_walk_help =
   "walk the three substrate readings; the third is the Features surface"
 
 let runtime_keys =
-  [ Every_reading (b Navigate "j/k" "move / scroll")
-  ; Every_reading (b Navigate "PgUp/PgDn" "detail page"
+  [ Every_reading (b ~ko:"이동 / 스크롤" Navigate "j/k" "move / scroll")
+  ; Every_reading (b ~ko:"상세 페이지" Navigate "PgUp/PgDn" "detail page"
       ~help:"page an open detail; in the media editor page declared slots; while typing a lane name, PgUp opens the complete draft/context reader and Esc returns to the unchanged field")
   ; Every_reading
-      (b Act "Right / Enter" "detail"
+      (b ~ko:"상세" Act "Right / Enter" "detail"
          ~help:"show the full runtime, lane, dispatch, and probe fields")
   ; Every_reading
-      (b Act "h" "dim refusals"
+      (b ~ko:"거절 흐리게" Act "h" "dim refusals"
          ~help:"toggle de-emphasis for exhausted, rate-limited, and spent runtimes")
   ; Every_reading
-      (b Act "v" "routes / status"
+      (b ~ko:"라우트 / 상태" Act "v" "routes / status"
          ~help:"read complete default and media routes, boot admission and probe diagnostics")
   ; Reading_walk
   ; Every_reading
-      (b Navigate "c" "clients"
+      (b ~ko:"클라이언트" Navigate "c" "clients"
          ~help:"everyone attached to this workspace, off the ring under Runtime")
   ; Reading_edit
   ; Keeper_lanes_only
-      (b Act "a" "new lane"
+      (b ~ko:"새 레인" Act "a" "new lane"
          ~help:"name a new lane, then pick its first runtime; e adds the rest")
   ; Keeper_lanes_only
-      (b Act "x" "drop candidate"
+      (b ~ko:"후보 빼기" Act "x" "drop candidate"
          ~help:"take the candidate under the cursor out of its lane; the last one \
                 cannot go, remove the lane instead")
   ; Keeper_lanes_only
-      (b Act "J/K" "move candidate" ~help:"move the candidate under the cursor down or up its lane")
+      (b ~ko:"후보 순서" Act "J/K" "move candidate" ~help:"move the candidate under the cursor down or up its lane")
   ; Keeper_lanes_only
-      (b Act "f" "default runtime"
+      (b ~ko:"기본 런타임" Act "f" "default runtime"
          ~help:"replace [runtime].default, what a keeper with no assignment walks")
   ; Keeper_lanes_only
-      (b Act "m" "vision runtimes"
+      (b ~ko:"비전 런타임" Act "m" "vision runtimes"
          ~help:"edit [runtime].media_failover: j/k, PgUp/PgDn and Home/End select declared slots; a appends, x drops, J/K reorder, 1 makes first, v reads all IDs/results without closing the editor. Admission and write refusals remain in the reading")
   ; Keeper_lanes_only
-      (b Act "R" "rename lane"
+      (b ~ko:"레인 이름 변경" Act "R" "rename lane"
          ~help:"give the lane under the cursor another name; the assignments \
                 that route to it and [runtime].default, when it names it, are \
                 rewritten in the same write. The field opens on the name it \
                 has now")
   ; Keeper_lanes_only
-      (b Act "D" "remove lane"
+      (b ~ko:"레인 제거" Act "D" "remove lane"
          ~help:"remove the lane under the cursor; press twice. Refused while a keeper is \
                 assigned to it")
-  ; Every_reading (b Act "Esc" "back" ~help:"back to Config")
+  ; Every_reading (b ~ko:"뒤로" Act "Esc" "back" ~help:"back to Config")
   ; Detail_reading
-      (b Act "Left / Esc" "list" ~help:"close the open detail, back to the list")
+      (b ~ko:"목록" Act "Left / Esc" "list" ~help:"close the open detail, back to the list")
   ; Every_reading
-      (b Search "/" "find" ~help:"jump the cursor to a matching lane id or runtime id")
-  ; Every_reading (b Search "n / N" "next / previous match")
+      (b ~ko:"찾기" Search "/" "find" ~help:"jump the cursor to a matching lane id or runtime id")
+  ; Every_reading (b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match")
   ]
 
 let runtime_sheet_binding = function
   | Every_reading binding | Detail_reading binding | Keeper_lanes_only binding -> binding
   | Reading_edit ->
-    b Act "e" "model settings / add candidate"
+    b ~ko:"모델 설정 / 후보 추가" Act "e" "model settings / add candidate"
       ~help:"on all runtimes, open the selected binding in Config Models; \
              on keeper lanes, append a candidate to the lane under the cursor"
   | Reading_walk ->
-    b Navigate "p" "keeper lanes / all runtimes / service lanes"
+    b ~ko:"키퍼 레인 / 전체 런타임 / 서비스 레인" Navigate "p" "keeper lanes / all runtimes / service lanes"
       ~help:runtime_reading_walk_help
 
 let runtime_footer_binding ~(mode : runtime_mode) = function
@@ -278,18 +278,18 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
     Some
       (match mode with
        | Runtime_all ->
-         b Act "e" "model settings"
+         b ~ko:"모델 설정" Act "e" "model settings"
            ~help:"open the selected binding in Config Models; Esc then c copies a variant"
        | Runtime_lanes ->
-         b Act "e" "add candidate"
+         b ~ko:"후보 추가" Act "e" "add candidate"
            ~help:"append a candidate to the candidate order of the lane under the cursor")
   | Reading_walk ->
     Some
-      (b Navigate "p"
-         (match mode with
-          | Runtime_lanes -> "all runtimes"
-          | Runtime_all -> "service lanes")
-         ~help:runtime_reading_walk_help)
+      (match mode with
+       | Runtime_lanes ->
+         b ~ko:"전체 런타임" Navigate "p" "all runtimes" ~help:runtime_reading_walk_help
+       | Runtime_all ->
+         b ~ko:"서비스 레인" Navigate "p" "service lanes" ~help:runtime_reading_walk_help)
 
 (* Ctrl-S folds the turn dashboard back to its progress line, and unfolds it.
    The terminal used to take this byte for flow control -- raw mode clears
@@ -1788,16 +1788,16 @@ let footer_hints_voice_agent ~lang ?(saving = false) () =
    pane's row -- [e], [r], [Tab], [q] -- would name keys that now type into a
    field. The form's row names only what the form reads. *)
 let runtime_account_form_bindings =
-  [ b Navigate "\xe2\x86\x90/\xe2\x86\x92" "provider"
+  [ b ~ko:"제공자" Navigate "\xe2\x86\x90/\xe2\x86\x92" "provider"
       ~help:"on the provider field, the next or previous provider to copy"
-  ; b Navigate "\xe2\x86\x91/\xe2\x86\x93" "field"
-  ; b Act "Enter" "next / save"
+  ; b ~ko:"항목" Navigate "\xe2\x86\x91/\xe2\x86\x93" "field"
+  ; b ~ko:"다음 / 저장" Act "Enter" "next / save"
       ~help:"move to the next field; on the last one, declare the account and save"
-  ; b Act "Esc" "cancel" ~help:"close the form; nothing is written"
+  ; b ~ko:"취소" Act "Esc" "cancel" ~help:"close the form; nothing is written"
   ]
 
-let footer_hints_runtime_account_form () =
-  hints_of_bindings runtime_account_form_bindings
+let footer_hints_runtime_account_form ~lang =
+  hints_of_bindings ~lang runtime_account_form_bindings
 
 (* The recall form takes every key while it is open, so the pane's row --
    [e], [r], [Tab], [q] -- would name keys the form reads as its own. The row
@@ -1834,13 +1834,13 @@ let footer_hints_typesafeai_exclusion_form () =
 (* After a save the form shows the sign-in command and types nothing, so
    [y] copies it as it does in the link and browser views. *)
 let runtime_account_saved_bindings =
-  [ b Act "y" "copy sign-in"
+  [ b ~ko:"로그인 명령 복사" Act "y" "copy sign-in"
       ~help:"send the sign-in command to the terminal clipboard (OSC 52)"
-  ; b Act "Enter / Esc" "close"
+  ; b ~ko:"닫기" Act "Enter / Esc" "close"
   ]
 
-let footer_hints_runtime_account_saved () =
-  hints_of_bindings runtime_account_saved_bindings
+let footer_hints_runtime_account_saved ~lang =
+  hints_of_bindings ~lang runtime_account_saved_bindings
 
 (* The prompts pane's read-only half. [o] swaps the registry for the assets
    shipped with the binary, and there [a], [i], [e] and [x] answer with a
@@ -2084,7 +2084,7 @@ let runtime_parent_bindings ~ko parent =
       ; b Act "J/K" (text "순서 변경" "reorder")
       ; b Act "1" (text "맨 앞으로" "make first")
       ; b Act "Esc" (text "닫기" "close")
-      ; b Meta "r" (text "새로고침" "refresh")
+      ; b Meta "r" (text "새로 조회" "refresh")
       ; b Meta "?" (text "도움말" "help") ]
   | Runtime_prompt_parent (Lane_name_prompt _) ->
       name_bindings (text "첫 런타임 선택" "choose first runtime")
@@ -2098,40 +2098,42 @@ let runtime_parent_bindings ~ko parent =
 let footer_hints_runtime_parent ~ko ~parent =
   runtime_parent_bindings ~ko parent |> hints_of_bindings
 
-let footer_hints_runtime ~(mode : runtime_mode) ~picker =
+let footer_hints_runtime ~lang ~(mode : runtime_mode) ~picker =
   match picker with
   | None ->
       List.filter_map (runtime_footer_binding ~mode) runtime_keys
       @ row_list_edges @ listing_meta
-      |> hints_of_bindings
+      |> hints_of_bindings ~lang
   | Some picker ->
       let pick = picker.rlp_pick in
       let enter = match pick with
-        | Pick_new_lane _ -> "create"
-        | Pick_conversation_lane _ | Pick_exact_lane _ | Pick_media_failover -> "append"
-        | Pick_exact_lane_replacement _ | Pick_route_default -> "replace"
+        | Pick_new_lane _ -> b ~ko:"만들기" Act "Enter" "create"
+        | Pick_conversation_lane _ | Pick_exact_lane _ | Pick_media_failover ->
+            b ~ko:"덧붙이기" Act "Enter" "append"
+        | Pick_exact_lane_replacement _ | Pick_route_default ->
+            b ~ko:"바꾸기" Act "Enter" "replace"
       in
       let controls = match picker.rlp_filter with
         | None ->
-            [ b Act "e / E / Esc" "cancel"
-            ; b Navigate "j/k" "move"
-            ; b Navigate "PgUp/PgDn" "page"
-            ; b Search "/" "filter"
+            [ b ~ko:"취소" Act "e / E / Esc" "cancel"
+            ; b ~ko:"선택" Navigate "j/k" "move"
+            ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+            ; b ~ko:"필터" Search "/" "filter"
             ] @ row_list_edges @ listing_meta
         | Some query ->
             let back = match pick with
               | (Pick_exact_lane _ | Pick_exact_lane_replacement _)
-                when String.equal query "" -> "cancel"
+                when String.equal query "" -> b ~ko:"취소" Act "Esc" "cancel"
               | Pick_route_default | Pick_conversation_lane _ | Pick_exact_lane _
               | Pick_exact_lane_replacement _ | Pick_new_lane _
-              | Pick_media_failover -> "clear filter"
+              | Pick_media_failover -> b ~ko:"필터 지우기" Act "Esc" "clear filter"
             in
-            [ b Act "Esc" back
-            ; b Navigate "↑/↓" "move"
-            ; b Navigate "PgUp/PgDn" "page"
+            [ back
+            ; b ~ko:"선택" Navigate "↑/↓" "move"
+            ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
             ] @ row_list_edges
       in
-      b Act "Enter" enter :: controls |> hints_of_bindings
+      enter :: controls |> hints_of_bindings ~lang
 
 let footer_hints_resources ~lang ~detail_focus =
   for_surface Resources

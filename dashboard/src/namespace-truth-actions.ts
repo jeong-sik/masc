@@ -37,7 +37,7 @@ async function doFetchNamespaceTruth(): Promise<void> {
     namespaceTruthInitializing.value = false
     const normalized = normalizeNamespaceTruth(raw)
     namespaceTruth.value = normalized
-    hydrateShellRootSnapshot(normalized.root)
+    hydrateShellRootSnapshot(normalized.root, true)
     namespaceTruthReadRecovery.succeeded()
   } catch (err) {
     if (!current()) return

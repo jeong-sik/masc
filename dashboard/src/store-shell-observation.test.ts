@@ -23,6 +23,15 @@ function shell(version = 'first') {
     },
   }
 }
+function execution(generation = 1) {
+  return {
+    observer_instance_id: 'shell-A', execution_publication_epoch: 'shell-process', execution_publication_generation: generation,
+    generated_at: '2026-11-10T00:00:00Z',
+    status: { project: 'fixture-project', workspace_root: '/workspace' },
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
+    tasks: [{ id: 'task-bootstrap-observation', title: `execution-body-${generation}`, status: 'todo' }],
+  }
+}
 function delayed() {
   let resolve!: (value: Response) => void
   let reject!: (error: Error) => void
@@ -32,6 +41,7 @@ function delayed() {
 
 let stop: (() => void) | undefined
 let store: typeof import('./store') | undefined
+let namespaceActions: typeof import('./namespace-truth-actions') | undefined
 beforeEach(() => {
   vi.resetModules(); vi.useFakeTimers(); sessionStorage.clear(); localStorage.clear()
   vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -39,6 +49,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   stop?.(); stop = undefined
+  namespaceActions?.disposeNamespaceTruthScheduler(); namespaceActions = undefined
   store?.disposeExecutionReadRecovery(); store = undefined
   await flush()
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.clearAllMocks()
@@ -106,6 +117,93 @@ describe('App-owned Shell observation', () => {
     expect(store.shellAuthSummary.value).not.toBeNull()
     await vi.advanceTimersByTimeAsync(300_000)
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['shell', 'namespace-first'], ['shell', 'shell-first'],
+    ['bootstrap', 'namespace-first'], ['bootstrap', 'shell-first'],
+  ] as const)('keeps accepted namespace HTTP counts across an older %s response with %s delivery', async (kind, order) => {
+    const older = delayed(), namespace = delayed()
+    const fetch = vi.fn((path: string, _init?: RequestInit) => path === '/api/v1/dashboard/project-snapshot' ? namespace.promise : older.promise)
+    vi.stubGlobal('fetch', fetch)
+    const { store } = await surface()
+    stop?.(); stop = undefined
+    store.hydrateExecutionSnapshot(execution())
+    const owner = store.executionWorkspaceAuthority.peek()
+    const pending = kind === 'shell' ? store.refreshShell({ force: true }) : store.refreshDashboard({ force: true })
+    await flush()
+    namespaceActions = await import('./namespace-truth-actions')
+    const namespaceRead = namespaceActions.refreshNamespaceTruth({ force: true })
+    await flush()
+    expect(fetch.mock.calls.map(([path]) => path)).toEqual([
+      kind === 'shell' ? '/api/v1/dashboard/shell' : '/api/v1/dashboard/bootstrap',
+      '/api/v1/dashboard/project-snapshot',
+    ])
+    const old = { ...shell('older-shell'), status: {
+      project: 'fixture-project', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:00Z',
+    } }
+    const current = { ...shell('accepted-namespace'), status: {
+      project: 'fixture-project', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:01Z',
+    }, counts: { agents: 5, tasks: 9, keepers: 7 }, configured_keepers: 13 }
+    const acceptOlder = async () => {
+      older.resolve(json(kind === 'shell' ? old : { shell: old, execution: execution(2), namespace_truth: { root: old } }))
+      const result = await pending
+      if (kind === 'shell') expect(result).toBe(true)
+    }
+    const acceptNamespace = async () => {
+      namespace.resolve(json({ root: current }))
+      await namespaceRead
+    }
+    if (order === 'namespace-first') {
+      await acceptNamespace()
+      expect(store.shellCounts.value?.tasks).toBe(9)
+      await acceptOlder()
+    } else {
+      await acceptOlder()
+      await acceptNamespace()
+    }
+    expect(store.serverStatus.value?.generated_at).toBe('2026-11-10T00:00:01Z')
+    expect(store.shellCounts.value).toEqual({ agents: 5, tasks: 9, keepers: 7, total_runtimes: 12, configured_keepers: 13 })
+    expect(store.shellAuthSummary.value).not.toBeNull()
+    expect(store.shellConfigResolution.value?.config_root.path).toBe('older-shell')
+    expect(store.executionWorkspaceAuthority.peek()).toBe(owner)
+    if (kind === 'bootstrap') expect(store.tasks.peek().find(task => task.id === 'task-bootstrap-observation')?.title).toBe('execution-body-2')
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('treats an accepted bootstrap namespace root as a completion before an older Shell read returns', async () => {
+    const older = delayed(), bootstrap = delayed()
+    const fetch = vi.fn((path: string, _init?: RequestInit) => path === '/api/v1/dashboard/bootstrap' ? bootstrap.promise : older.promise)
+    vi.stubGlobal('fetch', fetch)
+    const { store } = await surface()
+    stop?.(); stop = undefined
+    store.hydrateExecutionSnapshot(execution())
+    const owner = store.executionWorkspaceAuthority.peek()
+    const shellRead = store.refreshShell({ force: true })
+    await flush()
+    const bootstrapRead = store.refreshDashboard({ force: true })
+    await flush()
+    const current = { ...shell('bootstrap-namespace'), status: {
+      project: 'fixture-project', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:01Z',
+    }, counts: { agents: 5, tasks: 9, keepers: 7 }, configured_keepers: 13 }
+    const old = { ...shell('older-shell'), status: {
+      project: 'fixture-project', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:00Z',
+    } }
+    bootstrap.resolve(json({ shell: old, execution: execution(2), namespace_truth: { root: current } }))
+    await bootstrapRead
+    expect(store.executionWorkspaceAuthority.peek()).toBe(owner)
+    expect(store.tasks.peek().find(task => task.id === 'task-bootstrap-observation')?.title).toBe('execution-body-2')
+    expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(false)
+    expect(store.shellCounts.value?.tasks).toBe(9)
+    older.resolve(json(old))
+    expect(await shellRead).toBe(true)
+    expect(store.serverStatus.value?.generated_at).toBe('2026-11-10T00:00:01Z')
+    expect(store.shellCounts.value?.tasks).toBe(9)
+    expect(store.shellCounts.value?.configured_keepers).toBe(13)
+    expect(store.shellConfigResolution.value?.config_root.path).toBe('older-shell')
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
   })
 
   it.each(['shell', 'bootstrap'] as const)('retains a read owed by canonical completion when the older %s says initializing', async kind => {

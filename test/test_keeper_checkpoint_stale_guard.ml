@@ -215,6 +215,51 @@ let checkpoint_with_orphan_tool_result ~session_id =
   }
 ;;
 
+(* Pool jobs whose name ends with [suffix], over every lane: [Pool_wait]
+   records a job when a worker takes it, so work run in place is not counted. *)
+let pool_jobs_named suffix =
+  let open Yojson.Safe.Util in
+  let json = Pool_wait.to_json () in
+  List.fold_left
+    (fun acc lane ->
+       match member lane json with
+       | `Null -> acc
+       | lane_json ->
+         List.fold_left
+           (fun acc entry ->
+              if String.ends_with ~suffix (to_string (member "name" entry))
+              then acc + to_int (member "count" entry)
+              else acc)
+           acc
+           (to_list (member "by_name" lane_json)))
+    0
+    [ "read"; "background" ]
+;;
+
+(* A refused transcript ends the save before anything is encoded, so the one
+   pool job such a save runs is the validation itself. *)
+let test_transcript_is_validated_on_the_pool () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let suffix = "offload_checkpoint_cpu" in
+  let jobs_before = pool_jobs_named suffix in
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+       ~history_retained:(history_retained ())
+       ~session_dir
+       (checkpoint_with_orphan_tool_result ~session_id:"structural-guard-pool")
+   with
+   | Ok _ -> fail "a structurally invalid checkpoint was saved"
+   | Error _ -> ());
+  check int "the refusal came from one pool job" 1 (pool_jobs_named suffix - jobs_before)
+;;
+
 let test_structurally_invalid_checkpoint_is_refused_at_the_store () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -3401,6 +3446,8 @@ let () =
             test_pooled_saves_and_loads_derive_the_digest_of_the_file;
           test_case "structurally invalid checkpoint is refused at the store" `Quick
             test_structurally_invalid_checkpoint_is_refused_at_the_store;
+          test_case "the transcript is validated on the pool" `Quick
+            test_transcript_is_validated_on_the_pool;
           test_case "a valid checkpoint still saves" `Quick
             test_valid_checkpoint_still_saves;
           test_case "stage saves sharing the store's encoding memo write canonical bytes" `Quick

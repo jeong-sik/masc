@@ -217,7 +217,7 @@ let client_of ~client_id ~redirect_uri ~secret =
   | Error error -> Alcotest.fail (Login_client.error_to_string error)
 ;;
 
-let with_installation ?(capacity = 8) f =
+let with_installation f =
   Eio_main.run (fun _env ->
     let root = Filename.temp_dir "login-routes-" "" in
     Fun.protect
@@ -273,7 +273,7 @@ let with_installation ?(capacity = 8) f =
           let fresh = ref 0 in
           let routes =
             { R.zone
-            ; transactions = T.create ~capacity
+            ; transactions = T.create ()
             ; google =
                 Some { R.client = client_of ~client_id ~redirect_uri ~secret:client_secret; cache = X.cache () }
             ; github =
@@ -502,8 +502,11 @@ let a_new_sign_in_ends_the_session_of_the_browser () =
     Alcotest.(check string) "leaves the real session open" "open" (session_status t second))
 ;;
 
+(* More starts than any store of logins in flight held (16, issue #51394). *)
+let starts_in_a_row = 64
+
 let a_start_that_is_refused () =
-  with_installation ~capacity:1 (fun t ->
+  with_installation (fun t ->
     let refused label ?(origin = Q.Same_origin) ?(routes = t.routes) ?(fields = []) provider expected =
       let answer = R.start routes provider ~origin ~session_cookie:None ~fields in
       Alcotest.(check int) label expected (code answer);
@@ -522,8 +525,15 @@ let a_start_that_is_refused () =
     t.providers.discovery_up := false;
     refused "Google does not answer" R.Google 502;
     t.providers.discovery_up := true;
-    Alcotest.(check int) "one login under way" 303 (code (start t (browser ()) R.Github));
-    refused "the store is full" R.Google 503)
+    (* The server holds nothing of a login under way, so one start does not
+       wait for another. A return path that does not fit in the cookie is
+       refused as the request it is. *)
+    for _ = 1 to starts_in_a_row do
+      Alcotest.(check int) "a start after a start" 303 (code (start t (browser ()) R.Github))
+    done;
+    let too_long = [ "return_to", "/" ^ String.make T.max_sealed_length 'a' ] in
+    refused "a return path longer than a cookie (Google)" ~fields:too_long R.Google 400;
+    refused "a return path longer than a cookie (GitHub)" ~fields:too_long R.Github 400)
 ;;
 
 let a_callback_that_is_refused () =

@@ -69,7 +69,7 @@ let current_for_config (config : Workspace.config) =
 
 let update publisher change =
   let generated_at = Unix.gettimeofday () in
-  Atomic.update publisher.state (fun previous ->
+  Lockfree_atomic.update publisher.state (fun previous ->
     let next = change previous in
     match next.shell, next.tools, next.telemetry with
     | Some (shell, shell_light), Some tools, Some telemetry_summary ->
@@ -92,9 +92,6 @@ let publish_telemetry publisher json =
   update publisher (fun state -> {state with telemetry = Some json})
 ;;
 
-type 'a projection_cache_entry = { refreshed_at : float; value : 'a }
-type 'a projection_cache = 'a projection_cache_entry option Atomic.t
-let make_projection_cache () : 'a projection_cache = Atomic.make None
 let should_reuse_projection ~now ~ttl ~refreshed_at =
   let age = now -. refreshed_at in age >= 0.0 && age < ttl
 ;;
@@ -155,7 +152,7 @@ let public_activity_events config =
 ;;
 
 let invalidate_public_activity_events ~base_path =
-  Atomic.update public_activity_cache (function
+  Lockfree_atomic.update public_activity_cache (function
     | Some entry -> if String.equal entry.base_path base_path then None else Some entry
     | None -> None)
 ;;

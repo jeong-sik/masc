@@ -57,7 +57,8 @@ type error =
       }
   | Native_tools_refused of Runtime_account_access.native_refusal
       (** {!prepare_native_tools} was asked for a posture this process runs no
-          model turn with. Nothing was prepared. *)
+          model turn with. No native rule was written, and the settings of an
+          earlier turn stay as they were. *)
 
 type keychain_state =
   | Present

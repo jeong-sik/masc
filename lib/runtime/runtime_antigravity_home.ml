@@ -1076,8 +1076,10 @@ let refuse_root_inside_runtime_root t root =
 
 let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
   (* HIGH-RISK-UNREVIEWED: these settings are what gives a model turn of
-     Antigravity its native tools, so the posture is judged before a workspace
-     or a rule is made (plans D3c and F3a-3). *)
+     Antigravity its native tools, so the posture is judged before a rule is
+     written (plans D3c and F3a-3). A refusal leaves the settings of an earlier
+     turn in place and starts nothing: every caller of
+     [Runtime_antigravity.run_turn] prepares the tools of its turn here first. *)
   let* () =
     Runtime_account_access.authorize_native posture
     |> Result.map_error (fun refusal -> Native_tools_refused refusal)

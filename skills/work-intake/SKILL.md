@@ -38,9 +38,13 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 뿐이다. 이 
 - `status` 없이 `owner = "self"`만 주면 종료된 예약도 `schedule_id` 순서의 첫 페이지에
   포함될 수 있다. 2026-09-15 저장소에서 `code-reviewer`는 자기 행 256건 중 `due`가 1건이었다.
 - claim 할 수 있는 todo 는 턴 프레임이 "next to claim / Newly added" 로 이미 보여 준다.
-- `masc_ask_status` 는 `include_resolved = true` 면 답이 끝난 질문 기록 전체를 돌려주고,
-  개수를 줄이는 인자가 없다. 이 조합은 열린 질문만 읽는다. 목록에서 사라진 질문은
-  답변과 철회를 구분할 수 없으므로, 확인이 필요하면 해당 ID로 `include_resolved = true`를 쓴다.
+- `masc_ask_status` 는 `include_resolved = true` 면 열린 질문 다음에 답이 끝난 질문을
+  최신순으로 돌려주고, 결과가 인라인 상한(`Common.max_tool_result_wire_bytes`)에 닿는 곳에서
+  행을 멈춘다(`matching` 이 전체 수). 행에 못 담은 질문의 id 는 `omitted_ask_ids` 에 같은
+  순서로 남고, 그 id 를 `ask_id` 로 주면 질문 하나를 통째로 읽는다. 열린 질문만 읽는
+  호출도 같다. 개수를 줄이는 인자는 없다. 이 조합은 열린 질문만 읽는다.
+  목록에서 사라진 질문은 답변과 철회를 구분할 수 없으므로, 확인이 필요하면 해당 ID로
+  `include_resolved = true`를 쓴다.
 - 샌드박스·체크아웃 상태(`keeper_context_status`)는 넣지 않는다. 크기를 줄이는 입력이 없고
   체크아웃 수에 따라 결과가 달라진다.
 - 브로드캐스트는 이 호출이 읽지 않는다.

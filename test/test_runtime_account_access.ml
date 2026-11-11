@@ -6,6 +6,7 @@
 
 module Access = Runtime_account_access
 module Account = Runtime_official_account
+module Layout = Runtime_account_home_layout
 
 let rec remove_tree path =
   match Unix.lstat path with
@@ -117,7 +118,7 @@ let test_published_once () =
         (match Access.publish (Access.Single_user single_user) with
          | Ok () -> ()
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
-        let allowed () =
+        let allowed_but_native () =
           List.iter
             (fun (label, request) ->
               match Access.authorize request sealed with
@@ -140,9 +141,13 @@ let test_published_once () =
           (match Access.host_access () with
            | Ok (_ : Access.host_account) -> ()
            | Error (Access.Host_unpublished | Access.Host_not_shared) ->
-             Alcotest.fail "a single user does not share the accounts of the host");
+             Alcotest.fail "a single user does not share the accounts of the host")
+        in
+        let allowed () =
+          allowed_but_native ();
           (* The one person of a single-user process owns every home its
-             native tools can read (plan D3c). *)
+             native tools can read (plan D3c), while no person left a runtime
+             root under the workspace. *)
           List.iter
             (fun posture ->
               match Access.authorize_native posture with
@@ -158,6 +163,69 @@ let test_published_once () =
         (match Access.publish (Access.Single_user single_user) with
          | Error Access.Already_published -> ()
          | Ok () -> Alcotest.fail "a second publication was taken");
+        allowed ();
+        (* Plan F3a-3: what a person left under the workspace is read at each
+           start. The same published process answers by the directory. *)
+        let person_root =
+          match Authz_types.Account_home_namespace.of_string "ns-left-behind" with
+          | Ok namespace -> Layout.person_runtime_root ~base_path ~namespace
+          | Error (_ : Authz_id.error) -> Alcotest.fail "the namespace is no id"
+        in
+        let persons = Filename.dirname person_root in
+        let native label expected =
+          List.iter
+            (fun posture ->
+              let answer =
+                match Access.authorize_native posture with
+                | Ok () -> `Allowed
+                | Error (Access.Native_tools_reach_person_homes refused) ->
+                  Alcotest.(check string)
+                    (label ^ ": the refusal names the posture it refused")
+                    (Runtime_native_tools.to_string posture)
+                    (Runtime_native_tools.to_string refused);
+                  `Homes_remain
+                | Error (Access.Person_homes_unread { posture = refused; unread = _ }) ->
+                  Alcotest.(check string)
+                    (label ^ ": the refusal names the posture it refused")
+                    (Runtime_native_tools.to_string posture)
+                    (Runtime_native_tools.to_string refused);
+                  `Unread
+                | Error
+                    ((Access.Native_unpublished | Access.Native_tools_reach_other_homes _) as
+                     refusal) ->
+                  Alcotest.failf
+                    "%s: a single user got the refusal of another process: %s"
+                    label
+                    (Access.native_refusal_to_string refusal)
+              in
+              let wanted =
+                match posture with
+                | Runtime_native_tools.Native_none -> `Allowed
+                | Runtime_native_tools.Native_read | Runtime_native_tools.Native_full -> expected
+              in
+              if answer <> wanted
+              then
+                Alcotest.failf
+                  "%s: a turn with native %s tools was judged otherwise"
+                  label
+                  (Runtime_native_tools.to_string posture))
+            postures
+        in
+        (match Unix.mkdir (Filename.dirname persons) 0o700 with
+         | () -> ()
+         | exception Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+        Unix.mkdir persons 0o700;
+        native "an empty directory of the persons" `Allowed;
+        Unix.mkdir person_root 0o700;
+        native "a runtime root of a person" `Homes_remain;
+        (* The other decisions of a single user do not change with it. *)
+        allowed_but_native ();
+        Unix.rmdir person_root;
+        native "the root removed" `Allowed;
+        Unix.rmdir persons;
+        Out_channel.with_open_bin persons (fun (_ : Out_channel.t) -> ());
+        native "a file where the directory of the persons is" `Unread;
+        Sys.remove persons;
         allowed ()))
 ;;
 

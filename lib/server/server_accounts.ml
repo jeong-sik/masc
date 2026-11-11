@@ -19,9 +19,9 @@ type refusal =
       ; port : int
       ; reason : string
       }
+  | Trust_policy_refused of Server_request_authority.trust_policy_error
   | Port_not_announced of Server_startup_takeover.base_path_lock_rejection
   | Access_not_published of Runtime_account_access.publish_error
-  | Trust_policy_refused of Server_request_authority.trust_policy_error
 
 let refusal_to_string = function
   | Http_mode_refused reason -> reason
@@ -39,11 +39,11 @@ let refusal_to_string = function
   | Https_listener_refused reason -> "HTTPS listener: " ^ reason
   | Listener_not_bound { host; port; reason } ->
     Printf.sprintf "%s:%d is not listened on: %s" host port reason
+  | Trust_policy_refused error -> Server_request_authority.trust_policy_error_to_string error
   | Port_not_announced rejection ->
     "the port is not announced to the host, so no command could replace this server: "
     ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection
   | Access_not_published error -> Runtime_account_access.publish_error_to_string error
-  | Trust_policy_refused error -> Server_request_authority.trust_policy_error_to_string error
 ;;
 
 (* The release version and the mode, and nothing of the host or the
@@ -208,24 +208,6 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
       (fun reason -> Listener_not_bound { host = config.host; port = config.port; reason })
       (Server_bootstrap_http.listen_socket_result ~sw ~net ~address config)
   in
-  (* The host reads the port of this server from the kernel
-     ([Server_startup_takeover.announce_account_server]). The probes say
-     nothing of the workspace, so [masc restart] stops only an owner that
-     announces the port it was asked about, and takes a replacement for
-     ready only once it announces. A server that cannot announce could not
-     be replaced by a command, so its boot stops. *)
-  let* () =
-    Result.map_error
-      (fun rejection -> Port_not_announced rejection)
-      (Server_startup_takeover.announce_account_server lease ~port:config.port)
-  in
-  let* () =
-    Result.map_error
-      (fun error -> Access_not_published error)
-      (Runtime_account_access.publish
-         (Runtime_account_access.Multi_account
-            { zone; base_path; now = (fun () -> Eio.Time.now clock) }))
-  in
   let https_listener =
     Server_bootstrap_http.listen_https_socket ~sw ~net ~address ~config https
   in
@@ -244,6 +226,29 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
          ~bind_port:config.port
          ~https_port
          ~explicit_base_url:(Env_config_core.masc_http_base_url_opt ()))
+  in
+  (* The host reads the port of this server from the kernel
+     ([Server_startup_takeover.announce_account_server]). The probes say
+     nothing of the workspace, so [masc restart] stops only an owner that
+     announces the port it was asked about, and takes a replacement for
+     ready only once it announces. A server that cannot announce could not
+     be replaced by a command, so its boot stops.
+
+     It comes after every check that can stop a boot: a command that reads
+     the announcement reads a server that goes on to serve. The one step
+     after it that can refuse is the publication, which refuses a process
+     that published before, and a boot publishes once. *)
+  let* () =
+    Result.map_error
+      (fun rejection -> Port_not_announced rejection)
+      (Server_startup_takeover.announce_account_server lease ~port:config.port)
+  in
+  let* () =
+    Result.map_error
+      (fun error -> Access_not_published error)
+      (Runtime_account_access.publish
+         (Runtime_account_access.Multi_account
+            { zone; base_path; now = (fun () -> Eio.Time.now clock) }))
   in
   (* Nothing below refuses: a boot that stops records no port and leaves no
      fiber behind. *)

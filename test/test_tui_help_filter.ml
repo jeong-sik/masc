@@ -72,15 +72,23 @@ let pp_filter ppf = function
   | Masc_tui_help.Typing query -> Format.fprintf ppf "Typing %S" query
   | Masc_tui_help.Kept query -> Format.fprintf ppf "Kept %S" query
 
+let pp_key_move ppf move =
+  Format.pp_print_string ppf
+    (match move with
+     | Masc_tui_scroll.Line_down -> "Line_down"
+     | Masc_tui_scroll.Line_up -> "Line_up"
+     | Masc_tui_scroll.Page_down -> "Page_down"
+     | Masc_tui_scroll.Page_up -> "Page_up"
+     | Masc_tui_scroll.To_top -> "To_top"
+     | Masc_tui_scroll.To_end -> "To_end")
+
 let pp_step ppf = function
   | Masc_tui_help.Set_filter { filter; scroll_to_top } ->
       Format.fprintf ppf "Set_filter (%a, scroll_to_top=%b)" pp_filter filter
         scroll_to_top
   | Masc_tui_help.Close -> Format.pp_print_string ppf "Close"
   | Masc_tui_help.Toggle_hints -> Format.pp_print_string ppf "Toggle_hints"
-  | Masc_tui_help.Scroll -> Format.pp_print_string ppf "Scroll"
-  | Masc_tui_help.Scroll_to_top -> Format.pp_print_string ppf "Scroll_to_top"
-  | Masc_tui_help.Scroll_to_end -> Format.pp_print_string ppf "Scroll_to_end"
+  | Masc_tui_help.Scroll move -> Format.fprintf ppf "Scroll %a" pp_key_move move
   | Masc_tui_help.Ignore -> Format.pp_print_string ppf "Ignore"
 
 let step_t = Alcotest.testable pp_step ( = )
@@ -118,14 +126,16 @@ let test_off_keys () =
     ; ("?", Close)
     ; ("esc", Close)
     ; ("h", Toggle_hints)
-    ; ("j", Scroll)
-    ; ("k", Scroll)
-    ; ("down", Scroll)
-    ; ("up", Scroll)
-    ; ("pageup", Scroll)
-    ; ("pagedown", Scroll)
-    ; ("g", Scroll_to_top)
-    ; ("G", Scroll_to_end)
+    ; ("j", Scroll Masc_tui_scroll.Line_down)
+    ; ("k", Scroll Masc_tui_scroll.Line_up)
+    ; ("down", Scroll Masc_tui_scroll.Line_down)
+    ; ("up", Scroll Masc_tui_scroll.Line_up)
+    ; ("pageup", Scroll Masc_tui_scroll.Page_up)
+    ; ("pagedown", Scroll Masc_tui_scroll.Page_down)
+    ; ("g", Scroll Masc_tui_scroll.To_top)
+    ; ("G", Scroll Masc_tui_scroll.To_end)
+    ; ("home", Scroll Masc_tui_scroll.To_top)
+    ; ("end", Scroll Masc_tui_scroll.To_end)
     ; ("x", Ignore)
     ; ("\r", Ignore)
     ; ("tab", Ignore)
@@ -166,7 +176,11 @@ let test_typing_backspace_drops_one_character () =
 
 let test_typing_scrolls_with_the_arrows_and_pages () =
   check_steps "typing ab" (Masc_tui_help.Typing "ab")
-    [ ("down", Scroll); ("up", Scroll); ("pageup", Scroll); ("pagedown", Scroll) ]
+    [ ("down", Scroll Masc_tui_scroll.Line_down)
+    ; ("up", Scroll Masc_tui_scroll.Line_up)
+    ; ("pageup", Scroll Masc_tui_scroll.Page_up)
+    ; ("pagedown", Scroll Masc_tui_scroll.Page_down)
+    ]
 
 let test_typing_ignores_control_keys () =
   check_steps "typing ab" (Masc_tui_help.Typing "ab")
@@ -178,9 +192,10 @@ let test_kept_keys () =
     ; ("/", settled (Typing "ab"))
     ; ("?", Close)
     ; ("h", Toggle_hints)
-    ; ("j", Scroll)
-    ; ("g", Scroll_to_top)
-    ; ("G", Scroll_to_end)
+    ; ("j", Scroll Masc_tui_scroll.Line_down)
+    ; ("g", Scroll Masc_tui_scroll.To_top)
+    ; ("G", Scroll Masc_tui_scroll.To_end)
+    ; ("end", Scroll Masc_tui_scroll.To_end)
     ; ("x", Ignore)
     ; ("\r", Ignore)
     ]

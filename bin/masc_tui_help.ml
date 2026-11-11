@@ -107,9 +107,7 @@ type step =
   | Set_filter of { filter : filter; scroll_to_top : bool }
   | Close
   | Toggle_hints
-  | Scroll
-  | Scroll_to_top
-  | Scroll_to_end
+  | Scroll of Masc_tui_scroll.key_move
   | Ignore
 
 (* A key name that stands for text: one printable ASCII character, or a
@@ -119,6 +117,11 @@ let names_text key =
   || (String.length key > 1 && Char.code key.[0] >= 0x80)
 
 let retyped query = Set_filter { filter = Typing query; scroll_to_top = true }
+
+let scrolled key =
+  match Masc_tui_scroll.move_of_key key with
+  | Some move -> Scroll move
+  | None -> Ignore
 
 let step filter ~key =
   match filter with
@@ -130,7 +133,7 @@ let step filter ~key =
           Set_filter { filter = settled; scroll_to_top = false }
       | "\127" | "\b" ->
           retyped (Masc_tui_message_layout.drop_last_utf8_scalar query)
-      | "down" | "up" | "pageup" | "pagedown" -> Scroll
+      | "down" | "up" | "pageup" | "pagedown" -> scrolled key
       | text when names_text text ->
           retyped (query ^ Masc_tui_key_ime.latin_text text)
       | _ -> Ignore)
@@ -142,7 +145,4 @@ let step filter ~key =
           Set_filter { filter = Typing (filter_query filter); scroll_to_top = false }
       | "?" | "esc" -> Close
       | "h" -> Toggle_hints
-      | "j" | "down" | "k" | "up" | "pageup" | "pagedown" -> Scroll
-      | "g" -> Scroll_to_top
-      | "G" -> Scroll_to_end
-      | _ -> Ignore)
+      | _ -> scrolled key)

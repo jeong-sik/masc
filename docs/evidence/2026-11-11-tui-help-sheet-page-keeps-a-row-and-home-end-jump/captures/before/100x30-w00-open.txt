@@ -1,0 +1,30 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                                                                       │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│◆ Operations                                     ◇ Slash commands                                 │
+│  v                read every reason in the        /login [client]  sign in to an official        │
+│                   last server rollup; scroll                      client and verify a model      │
+│                   and search the captured                         connection                     │
+│                   reading; Esc returns without    /task-inspect   inspect this session's Task    │
+│                   changing a decision or                          creations without repeating    │
+│                   setting                                         them                           │
+│  Left             open the Keeper list; Enter     /task-recover   restore a retained Task        │
+│                   opens a chat; Right or Esc                      command for this Keeper;       │
+│                   returns                                         inspect Tasks before           │
+│  j/k              select a destination                            repeating an unconfirmed       │
+│  Enter            open the selected                               creation                       │
+│                   destination; never approve      /task <title>   create a task for this keeper  │
+│  p                approvals and questions                         (lines below become the body)  │
+│  g                the operator quiz's Results:    /keeper <name>  switch this pane to another    │
+│                   scorecard windows and                           keeper                         │
+│                   wrong-answer notes              /addons [inspect|attach JSON|observe           │
+│  ;                held calls, questions, Goal     ID|detach ID|slice JSON|evidence JSON]         │
+│                   confirmations and task owner                    open optional cross-lane       │
+│                   routes                                          observations and package       │
+│  [lines 1-22/990]                                                                                │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:close  …
+ Choose a Keeper before writing · i:choose

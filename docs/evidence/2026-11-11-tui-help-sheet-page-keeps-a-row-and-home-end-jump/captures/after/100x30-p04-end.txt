@@ -1,0 +1,30 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                                                                       │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                   it, rev= the skill text's                        is memory health not read     │
+│                   revision                                         yet, or a refused row that    │
+│  observed action  a tool call the server                           may be this keeper's; mem !   │
+│                   attributes to the skill                          is this keeper's row,         │
+│                   above it                                         refused; — is a keeper with   │
+│                                                                    no memory snapshot            │
+│◇ Prompt marks                                     facts            ordinary memory facts by      │
+│  *                your override; unmarked is                       time since first seen, one    │
+│                   the file                                         bar per group oldest first    │
+│  ⊘                saved, not applied; the file                     (over 7d, 1–7d, under 1d);    │
+│                   is used                                          bar height is relative to     │
+│  !                no prompt file behind this                       the largest group of the      │
+│                   key                                              same strip, 0 is none, ? is   │
+│                                                                    not measured (Detailed        │
+│◇ Param marks                                                       second row; the age view      │
+│  ●                set by you; default shown                        draws the bins under facts    │
+│                   beside it                                        by age ▸, · for an empty      │
+│  ○                the registered default                           one)                          │
+│                                                   사람 몫 / 효과 확인 / 분류 안 됨               │
+│                                                                    requires human operator       │
+│                                                                    action, effect review, or     │
+│                                                                    unmapped fault (NOW column)   │
+│  [lines 969-990/990]                                                                             │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:close  …
+ Choose a Keeper before writing · i:choose

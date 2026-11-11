@@ -66,11 +66,10 @@ type step =
           so [scroll_to_top] is set when the query changed or cleared. *)
   | Close  (** Close the sheet. *)
   | Toggle_hints  (** Show or hide the footer hints for this session. *)
-  | Scroll
-      (** Move the sheet by the key itself: one row, or a page for the page
-          keys, up or down. *)
-  | Scroll_to_top
-  | Scroll_to_end
+  | Scroll of Masc_tui_scroll.key_move
+      (** Move the sheet by what the key asks of every scrolled body: a row, a
+          page, or the top or the end. While a query is typed the arrows and
+          the page keys scroll; every other key is text or does nothing. *)
   | Ignore  (** The key does nothing in this state. *)
 
 val step : filter -> key:string -> step

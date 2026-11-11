@@ -34782,31 +34782,6 @@ Use relative paths for resources already held in the package. -->
       (* The cheat sheet's keys. [Masc_tui_help.step] says what a key does in
          the filter's current state; this applies it to the sheet. *)
       let handle_help_key k =
-           let scroll_help () =
-             (* Bounded against the sheet the frame draws, which folds to
-                two columns on a wide terminal and so holds half the rows
-                the lines were written as. A page moves by the viewport
-                height the sheet itself claims, so one press lands the
-                reader where the last visible line was the first. *)
-             let count, height = Masc_tui_render.help_viewport state in
-             let step =
-               match k with
-               | "pageup" | "pagedown" -> max 1 height
-               | _ -> 1
-             in
-             let move =
-               match k with
-               | "j" | "down" | "pagedown" -> Masc_tui_scroll.down
-               | _ -> Masc_tui_scroll.up
-             in
-             (* [down]/[up] move by one; the page keys repeat the single
-                step so the bound stays the scroll module's, not a
-                re-derived one. *)
-             let rec repeat n scroll =
-               if n <= 0 then scroll else repeat (n - 1) (move ~count ~height scroll)
-             in
-             state.help_scroll <- repeat step state.help_scroll
-           in
            (match Masc_tui_help.step state.help_filter ~key:k with
             | Masc_tui_help.Set_filter { filter; scroll_to_top } ->
                 state.help_filter <- filter;
@@ -34820,11 +34795,14 @@ Use relative paths for resources already held in the package. -->
                    runtime.toml, named on the help sheet itself. *)
                 state.hints_visible <- not state.hints_visible;
                 note_session_key state Masc.Tui_preference.Key.Hints_visible
-            | Masc_tui_help.Scroll -> scroll_help ()
-            | Masc_tui_help.Scroll_to_top -> state.help_scroll <- 0
-            | Masc_tui_help.Scroll_to_end ->
+            | Masc_tui_help.Scroll move ->
+                (* Bounded against the sheet the frame draws, which folds to
+                   two columns on a wide terminal and so holds half the rows
+                   the lines were written as. *)
                 let count, height = Masc_tui_render.help_viewport state in
-                state.help_scroll <- Masc_tui_scroll.maximum ~count ~height
+                state.help_scroll <-
+                  Masc_tui_scroll.apply_move ~count ~height move
+                    state.help_scroll
             | Masc_tui_help.Ignore -> ())
       in
       let toggle_roster_chrome () =

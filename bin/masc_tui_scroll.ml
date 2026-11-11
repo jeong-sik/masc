@@ -48,6 +48,30 @@ let page_down ~count ~height scroll =
 let page_up ~count ~height scroll =
   Int.max 0 (normalize ~count ~height scroll - page_step ~height)
 
+type key_move = Line_down | Line_up | Page_down | Page_up | To_top | To_end
+
+(* Each sheet matched its own key names against these movers, and no two
+   agreed: the cheat sheet moved a page by the whole window and had no Home or
+   End, the agenda kept a row between pages, and the context reader scrolled
+   by page, Home and End on one tab and by line on the others. *)
+let move_of_key = function
+  | "j" | "down" -> Some Line_down
+  | "k" | "up" -> Some Line_up
+  | "pagedown" -> Some Page_down
+  | "pageup" -> Some Page_up
+  | "g" | "home" -> Some To_top
+  | "G" | "end" -> Some To_end
+  | _ -> None
+
+let apply_move ~count ~height move scroll =
+  match move with
+  | Line_down -> down ~count ~height scroll
+  | Line_up -> up ~count ~height scroll
+  | Page_down -> page_down ~count ~height scroll
+  | Page_up -> page_up ~count ~height scroll
+  | To_top -> 0
+  | To_end -> maximum ~count ~height
+
 let cursor_last ~count = Int.max 0 (count - 1)
 
 (* Not in the interface: every mover below normalises through it, and an

@@ -324,6 +324,11 @@ let test_reader_keeps_the_rows_beside_one_it_cannot_read () =
     ; ( "a repeated field"
       , "c"
       , fun row -> `Assoc (("keeper", `String "c") :: fields row) )
+    ; "a stopped guest that carries a reason", "c", set "reason" (`String "why")
+    ; ( "a report with a field this build does not know"
+      , "a"
+      , set "report" (`Assoc [ "cleaned", `Int 2; "failed", `Int 1; "bytes", `Int 5 ]) )
+    ; "a reason that is not text", "b", set "reason" (`Int 3)
     ]
 ;;
 
@@ -334,18 +339,29 @@ let test_reader_keeps_the_rows_beside_a_summary_it_cannot_read () =
       Alcotest.(check bool) (label ^ ": the summary is unread") true (Result.is_error read.read_pass);
       Alcotest.(check bool) (label ^ ": every row is read") true (read.read_rows = published.rows);
       Alcotest.(check (list string)) (label ^ ": no row is unread") [] read.unread_rows)
-    [ "a field this build does not know", set "trimmed" (`Int 3)
-    ; ( "a step this build does not know"
-      , set
-          "steps"
-          (`List
-              [ `Assoc
-                  [ "step", `String "guest_trim"; "enabled", `Bool true; "selected", `Int 1 ]
-              ]) )
-    ; "a missing count", without "owners"
-    ; "a negative count", set "scheduled" (`Int (-1))
-    ; "a summary that is not an object", fun _ -> `String "later"
-    ]
+    ([ "a field this build does not know", set "trimmed" (`Int 3)
+     ; ( "a step this build does not know"
+       , set
+           "steps"
+           (`List
+               [ `Assoc
+                   [ "step", `String "guest_trim"; "enabled", `Bool true; "selected", `Int 1 ]
+               ]) )
+     ; "a missing count", without "owners"
+     ; ( "a switch that is neither on nor off"
+       , set
+           "steps"
+           (`List
+               [ `Assoc
+                   [ "step", `String "guest_builds"; "enabled", `String "yes"; "selected", `Int 1 ]
+               ]) )
+     ; ( "a reason that is not text"
+       , set "unreadable" (`List [ `Assoc [ "keeper", `String "broken-a"; "reason", `Int 3 ] ]) )
+     ; "a summary that is not an object", fun _ -> `String "later"
+     ]
+     @ List.map
+         (fun count -> "a negative " ^ count, set count (`Int (-1)))
+         [ "owners"; "without_meta"; "no_step"; "switched_off"; "scheduled" ])
 ;;
 
 let test_reader_refuses_a_value_it_cannot_take_apart () =

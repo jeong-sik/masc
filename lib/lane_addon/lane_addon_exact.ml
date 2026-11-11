@@ -897,7 +897,7 @@ let recover_retained ~store ~declaration_id ~schema request =
                         let* () = unreadable (Lane_addon_store.save_exact_request store ~declaration_id
                           ~request_id:request.request_id
                           (record_to_json ~declaration_id ~request_id:request.request_id finished)) in
-                        unreadable (observe_retained ~store ~declaration_id ~schema request)))
+                        observe_retained ~store ~declaration_id ~schema request))
         | None, ([] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
             | Unknown_raised _ | Delivery_refused _ | Reused) :: _)
         | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused), _ ->

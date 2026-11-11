@@ -5,6 +5,7 @@ import { fetchLaneInventory, type AddonExactOutput, type LaneInventory, type Lan
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 import { RouteLink } from './common/route-link'
 import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
+import { ExactLaneSlotStates } from './exact-slot-observations'
 import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
 import { machineLaneObservationRevision } from '../lib/machine-lane-observation'
@@ -101,7 +102,8 @@ function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snap
     ${stateLines(row, snapshot).map(line => html`<p>${line}</p>`)}
     ${row.state.kind === 'package' && row.state.declaration?.kind === 'valid'
       ? html`<${AddonModelRoutes} installation=${row.state.declaration.installation_id} outputs=${row.state.declaration.exact_outputs} />` : null}
-    ${exactLane ? html`<${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} />` : null}
+    ${exactLane ? html`<${ExactLaneSlotStates} value=${exactLane.slotStates} scope=${snapshot.exact_snapshot} />
+      <${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} />` : null}
     ${selection.kind === 'machine' ? html`<${MachineLaneActivityPanel} key=${selection.machine} lane=${selection.machine} title=${row.label} />` : null}
     ${selection.kind === 'exact' ? html`<div class="flex flex-wrap gap-3">
       <${RouteLink} tab="monitoring" params=${laneTargetParams(target, true)}>Exact runs and diagnostics<//>

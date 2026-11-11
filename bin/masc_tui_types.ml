@@ -9592,6 +9592,9 @@ type state = {
      a reader looking for one key types a piece of its name or of what it
      does. *)
   mutable help_filter: Masc_tui_help.filter;
+  (* How much the sheet lists. [Here] whenever the sheet is closed, so it
+     opens on the reader's own screen every time. *)
+  mutable help_scope: Masc_tui_help.scope;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
      it in its own layer, and the frame presenter redraws only the rows that
@@ -19865,6 +19868,7 @@ let close_key_modals (state : state) =
   state.help_open <- false;
   state.help_scroll <- 0;
   state.help_filter <- Masc_tui_help.Off;
+  state.help_scope <- Masc_tui_help.Here;
   state.queue_panel <- None;
   close_detail_reading state;
   state.about_open <- false;
@@ -20277,6 +20281,7 @@ let create_state
      else Workspace_identity_unread);
   help_scroll = 0;
   help_filter = Masc_tui_help.Off;
+  help_scope = Masc_tui_help.Here;
   image_open = false;
   image_inspection = None;
   image_cell_view = None;

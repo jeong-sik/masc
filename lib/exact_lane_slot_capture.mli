@@ -20,6 +20,17 @@ val walk_cli :
   validate:(Yojson.Safe.t -> ('a,string) result) ->
   on_failure:(Keeper_lane_cli_oneshot.failure -> unit) -> unit ->
   (string * 'a, Keeper_lane_cli_oneshot.failure list) result
+val walk_cli_gated :
+  ?runner:Keeper_lane_cli_oneshot.runner ->
+  ?observe:(Keeper_lane_cli_oneshot.attempt_observation -> unit) ->
+  before_dispatch:(unit -> (unit,'stop) result) ->
+  base_dir:string -> cli_slots:string list -> system_prompt:string ->
+  requirement:Agent_core.Exact_output.output_requirement -> prompt:string ->
+  validate:(Yojson.Safe.t -> ('a,string) result) ->
+  on_failure:(Keeper_lane_cli_oneshot.failure -> unit) -> unit ->
+  (string * 'a, 'stop Keeper_lane_cli_oneshot.walk_end) result
+(** {!walk_cli} over {!Keeper_lane_cli_oneshot.walk_gated}. A slot the gate
+    stopped before its dispatch leaves no visit. *)
 val run_cli :
   ?runner:Keeper_lane_cli_oneshot.runner ->
   ?observe:(Keeper_lane_cli_oneshot.attempt_observation -> unit) ->

@@ -133,6 +133,7 @@
   (re_export masc.keeper_registry)
   (re_export masc.skill_snapshot)
   (re_export masc.sse_event)
+  (re_export masc.sse_wire)
   (re_export masc.keeper_metrics)
   (re_export masc.keeper_failure_taxonomy)
   (re_export masc.keeper_paste_naming)

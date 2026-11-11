@@ -13,7 +13,8 @@ let kind_to_string = function
 ;;
 
 let target_to_string = function
-  | Http.Router.Plain _ -> "plain"
+  | Http.Router.Owner _ -> "owner"
+  | Http.Router.Serving _ -> "serving"
   | Http.Router.Ws _ -> "ws"
 ;;
 

@@ -146,6 +146,12 @@ let configuration json =
   | other -> error ("unknown exact configuration " ^ other)
 
 let exact_output json =
+  (* Passive slot diagnostics belong to their own Dashboard decoder. Keep the
+     original strict configuration readable when those optional fields exist. *)
+  let json = match json with
+    | `Assoc values -> `Assoc (List.filter (fun (name,_) ->
+        not (List.mem name ["lane_key";"slot_states";"slot_observation_unavailable_runs"])) values)
+    | value -> value in
   let* f = fields ["output";"source";"configuration"] json in
   let* output = get nonblank "output" f in
   let* source = get (function

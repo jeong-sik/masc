@@ -13,7 +13,10 @@ const configuration = Schema.Union(
     declared_slots: texts, declared_cli_slots: texts, dropped_slots: texts, admission_error: Schema.NullOr(Schema.String) }),
   Schema.Struct({ kind: Schema.Literal('unconfigured', 'unavailable'), detail: Schema.String }),
 )
-const exactOutput = Schema.Struct({ output: text, source: Schema.Literal('declared', 'table_only'), configuration })
+const exactOutput = Schema.Struct({ output: text, source: Schema.Literal('declared', 'table_only'), configuration,
+  // Passive diagnostics decode independently so they cannot reject an original inventory reading.
+  lane_key: Schema.optional(Schema.Unknown), slot_states: Schema.optional(Schema.Unknown),
+  slot_observation_unavailable_runs: Schema.optional(Schema.Unknown) })
 export type AddonExactOutput = Schema.Schema.Type<typeof exactOutput>
 const exactOutputs = Schema.Array(exactOutput).pipe(Schema.filter(outputs =>
   new Set(outputs.map(output => output.output)).size === outputs.length,

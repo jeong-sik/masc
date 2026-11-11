@@ -263,6 +263,17 @@ let exact_outputs_are_chosen_by_name_and_open_their_table () =
 
 let exact_outputs_wire_is_strict () =
   let with_outputs outputs = snapshot [declared (quiz_declaration outputs)] in
+  let diagnostic = output "author" "declared" configuration
+    |> set "lane_key" (str "operator-quiz/author")
+    |> set "slot_states" (str "diagnostic unavailable")
+    |> set "slot_observation_unavailable_runs" (`Int 1) in
+  let decoded = find "declaration//config/broken.toml" (ok (Decode.decode (with_outputs [diagnostic]))) in
+  (match decoded.state with
+   | Decode.Package_state {declaration=Some (Decode.Valid {exact_outputs=[output];_});_} ->
+       Alcotest.(check bool) "optional diagnostics preserve the original configuration" true
+         (match output.configuration with Decode.Configured c -> c.admitted_slots=["account.model"]
+          | Disabled _ | Unconfigured _ | Registry_unavailable _ -> false)
+   | _ -> Alcotest.fail "original configured output missing");
   rejects "an output listed twice" (with_outputs [output "author" "declared" configuration; output "author" "table_only" configuration]);
   rejects "an unknown source" (with_outputs [output "author" "guessed" configuration]);
   rejects "an unknown lane state" (with_outputs [output "author" "declared" (object_ ["kind",str "maybe"])]);

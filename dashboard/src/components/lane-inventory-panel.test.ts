@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/pr
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseLaneInventory } from '../api/lane-inventory'
 import fixture from '../api/fixtures/lane-inventory.json'
+import { slotObservation, slotState } from '../api/fixtures/exact-slot-observations'
 import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { replaceRoute, route } from '../router'
 const api = vi.hoisted(() => ({ fetchLaneInventory: vi.fn() }))
@@ -72,6 +73,8 @@ describe('operator Lane inventory', () => {
     replaceRoute('overview', {})
   })
   it('shows original installation model routes while the package is off and no worker is present', async () => {
+    const prior = { run_id: 'curator-original', observation: slotObservation({
+      slot_id: 'http.first', lane_key: 'custom-curator/classification' }) }
     const row = {
       id: 'declaration//fixture/curator.toml', label: 'Curator installation', purpose: 'Curator',
       selection: { kind: 'declaration', source_path: '/fixture/curator.toml' },
@@ -79,10 +82,15 @@ describe('operator Lane inventory', () => {
         installation_id: 'custom-curator', run_id: 'scope-not-observation', package_id: 'workspace-curator',
         title: 'Curator', source_revision: 'source', desired_revision: 'desired', application: { kind: 'inactive' },
         exact_outputs: [
-          { output: 'classification', source: 'declared', configuration: { kind: 'configured',
+          { output: 'classification', source: 'declared', lane_key: 'custom-curator/classification',
+            slot_observation_unavailable_runs: 0, slot_states: [slotState({
+              slot_id: 'http.first', lane_key: 'custom-curator/classification',
+              last_observation: prior, last_attempt: prior, last_failure: prior })], configuration: { kind: 'configured',
             admitted_slots: ['http.first'], cli_slots: ['cli.fallback'], declared_slots: ['http.first', 'refused'],
             declared_cli_slots: ['cli.fallback'], dropped_slots: ['refused'], admission_error: 'runtime refused' } },
-          { output: 'briefing', source: 'declared', configuration: { kind: 'unavailable', detail: 'registry unavailable' } },
+          { output: 'briefing', source: 'declared', lane_key: 'custom-curator/briefing',
+            slot_states: 'damaged', slot_observation_unavailable_runs: 0,
+            configuration: { kind: 'unavailable', detail: 'registry unavailable' } },
           { output: 'removed-output', source: 'table_only', configuration: { kind: 'off',
             declared_slots: ['retained'], declared_cli_slots: [] } },
         ] } },
@@ -97,8 +105,16 @@ describe('operator Lane inventory', () => {
       'Declared HTTP: http.first → refused', 'Declared CLI: cli.fallback', 'Dropped HTTP: refused', 'runtime refused']) {
       expect(classification.getByText(text)).toBeTruthy()
     }
+    const slot = within(classification.getByRole('region', { name: 'http.first http' }))
+    expect(within(slot.getByLabelText('현재 설정 주소')).getByText('https://new.invalid/v1/responses')).toBeTruthy()
+    const historical = within(slot.getByRole('region', { name: '날짜가 확인된 마지막 관측' }))
+    expect(historical.getByText('https://old.invalid/v1/responses')).toBeTruthy()
+    expect(historical.getByText('curator-original')).toBeTruthy()
+    expect(historical.getByText('custom-curator/classification')).toBeTruthy()
     expect(routes.getByRole('region', { name: 'Model route for briefing' }).textContent)
       .toContain('unavailable: registry unavailable')
+    expect(within(routes.getByRole('region', { name: 'Model route for briefing' }))
+      .getByText(/슬롯 관측을 읽지 못했습니다/)).toBeTruthy()
     const removed = routes.getByRole('region', { name: 'Model route for removed-output' })
     expect(removed.textContent).toContain('Table only')
     expect(removed.textContent).toContain('Model route off')

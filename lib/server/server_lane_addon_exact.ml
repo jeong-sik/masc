@@ -171,11 +171,6 @@ let cli_prompt messages =
   in
   texts [] messages
 
-(* The shared CLI walker has no local-stop receipt. Do not turn an authority
-   veto into a provider failure/exhaustion or advance to another client. Exact
-   retains Outcome_unknown under its existing exception boundary instead. *)
-exception Dispatch_authority_refused of string
-
 let call ~before_dispatch ~admission_class ~cli_runner ~base_path ~(resolved : Registry.resolved_lane) ~schema (request : Addon.request) ~validate =
   let resolved=Runtime_exact_lane_backpressure.order resolved in
   let http=ref (Receipt.http_not_started ~detail:"no HTTP generation flow started") in
@@ -219,14 +214,11 @@ let call ~before_dispatch ~admission_class ~cli_runner ~base_path ~(resolved : R
         complete Receipt.Prompt_unavailable (ended ())
       | Ok prompt ->
       match
-        Keeper_lane_cli_oneshot.walk ?runner:cli_runner ~base_dir:base_path ~cli_slots
+        Keeper_lane_cli_oneshot.walk_gated ?runner:cli_runner ~before_dispatch ~base_dir:base_path ~cli_slots
           ~system_prompt:(Option.value request.system ~default:"") ~requirement
           ~prompt ~validate
           ~observe:(function
-            | Keeper_lane_cli_oneshot.Dispatching {runtime_id} ->
-                (match before_dispatch () with
-                 | Ok () -> dispatched:=runtime_id::!dispatched
-                 | Error detail -> raise (Dispatch_authority_refused detail))
+            | Keeper_lane_cli_oneshot.Dispatching {runtime_id} -> dispatched:=runtime_id::!dispatched
             | Raw_response _ -> ())
           ~on_failure:(fun failure ->
             visited:=cli_failure_slot failure::!visited;
@@ -238,7 +230,14 @@ let call ~before_dispatch ~admission_class ~cli_runner ~base_path ~(resolved : R
         visited:=slot::!visited;
         complete (Receipt.Answered slot)
           (Addon.Call_ended (Addon.Answered { output; slot; usage = None }))
-      | Error _cli_failures -> complete Receipt.Exhausted (ended ())
+      | Error (Keeper_lane_cli_oneshot.Slots_exhausted _cli_failures) -> complete Receipt.Exhausted (ended ())
+      | Error (Keeper_lane_cli_oneshot.Stopped_before_dispatch { runtime_id; failures = _; stop = detail }) ->
+        (* The guard refused before this slot was sent to. Nothing was sent and
+           no other client is tried, so the request stays open, as it does when
+           the guard refuses an HTTP slot. *)
+        visited:=runtime_id::!visited;
+        note runtime_id Failure.Transient detail;
+        complete (Receipt.Stopped_before_dispatch runtime_id) (ended ())
 
 let resolve ~lane_key =
   match Registry.current () with

@@ -284,6 +284,44 @@ let test_walk_exhaustion_returns_every_failure () =
     | Error failures -> failf "expected two failures, got %d" (List.length failures))
 ;;
 
+let test_a_gate_refusal_stops_the_walk_before_the_runner () =
+  with_runtime (fun () ->
+    let runs = ref 0 and gates = ref 0 and dispatching = ref 0 and observed = ref [] in
+    let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      incr runs;
+      Ok {|{"verdict":"pass"}|}
+    in
+    match
+      Cli_oneshot.walk_gated ~validate:Result.ok
+        ~on_failure:(fun failure -> observed := !observed @ [failure])
+        ~observe:(function
+          | Cli_oneshot.Dispatching _ -> incr dispatching
+          | Cli_oneshot.Raw_response _ -> ())
+        ~before_dispatch:(fun () -> incr gates; Error "the gate refused")
+        ~runner
+        ~base_dir:"/tmp"
+        ~cli_slots:[ "nope.not-configured"; official_client_runtime; "later.not-configured" ]
+        ~system_prompt:""
+        ~requirement
+        ~prompt:"Judge this."
+        ()
+    with
+    | Ok _ -> fail "a refused gate must not answer"
+    | Error (Cli_oneshot.Slots_exhausted _) -> fail "a gate refusal is not exhaustion"
+    | Error (Cli_oneshot.Stopped_before_dispatch { runtime_id; failures; stop }) ->
+      check string "the walk stops at the admitted slot" official_client_runtime runtime_id;
+      check string "the gate's own refusal is returned" "the gate refused" stop;
+      (match failures, !observed with
+       | ( [ Cli_oneshot.Unknown_runtime { runtime_id = returned_id } ]
+         , [ Cli_oneshot.Unknown_runtime { runtime_id = observed_id } ] ) ->
+         check string "the earlier failure is returned" "nope.not-configured" returned_id;
+         check string "the earlier failure was observed" "nope.not-configured" observed_id
+       | _ -> fail "only the failure before the stop is kept, and the stop is not a failure");
+      check int "the gate runs once, for the admitted slot" 1 !gates;
+      check int "no dispatch is observed" 0 !dispatching;
+      check int "the runner is not called" 0 !runs)
+;;
+
 let test_an_empty_walk_is_an_empty_error () =
   with_runtime (fun () ->
     match
@@ -1270,6 +1308,10 @@ let () =
             "walk exhaustion returns every failure"
             `Quick
             test_walk_exhaustion_returns_every_failure
+        ; test_case
+            "a gate refusal stops the walk before the runner"
+            `Quick
+            test_a_gate_refusal_stops_the_walk_before_the_runner
         ; test_case
             "an empty walk is an empty error"
             `Quick

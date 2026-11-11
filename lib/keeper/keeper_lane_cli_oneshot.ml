@@ -364,6 +364,15 @@ let prompt_for_execution ~(execution : Runtime_execution.t) ~requirement ~prompt
   | Runtime_execution.Agent_core _ -> prompt_with_schema ~requirement ~prompt
 ;;
 
+(* A gate refusal is not a slot failure: nothing was sent, so the walk ends
+   there instead of advancing to another client. *)
+type 'stop gated_failure = Slot_failed of failure | Stopped of 'stop
+
+(* The stop of a walk that has no gate. It has no value, so that walk cannot
+   end with a stop. *)
+type no_stop = |
+let never_stops () : (unit, no_stop) result = Ok ()
+
 (* [Unknown_runtime] and [Not_an_official_client] used to be one case
    ([Fusion_official_client.is_official_client] answers [false] for both: no
    such runtime, and a runtime that is not an official client), so every
@@ -375,12 +384,12 @@ let prompt_for_execution ~(execution : Runtime_execution.t) ~requirement ~prompt
    config; it stays a distinct, correctly-labeled case rather than folding
    back into [Not_an_official_client] for a caller that dispatches a
    [runtime_id] the loader never validated (e.g. a test-injected value). *)
-let run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
+let run_gated ?runner ?observe ~before_dispatch ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
   match Runtime.get_runtime_by_id runtime_id with
-  | None -> Error (Unknown_runtime { runtime_id })
+  | None -> Error (Slot_failed (Unknown_runtime { runtime_id }))
   | Some runtime ->
     (match Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution with
-     | Runtime_execution.Masc_agent_core -> Error (Not_an_official_client { runtime_id })
+     | Runtime_execution.Masc_agent_core -> Error (Slot_failed (Not_an_official_client { runtime_id }))
      | Runtime_execution.Official_client ->
        let runner =
          match runner with
@@ -397,22 +406,36 @@ let run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prom
        let prompt =
          prompt_for_execution ~execution:runtime.Runtime_instance.execution ~requirement ~prompt
        in
-       Option.iter (fun f -> f (Dispatching {runtime_id})) observe;
-       (match
-          runner
-            ~runtime
-            ~system_prompt
-            ~output_schema:(Exact_output.domain_schema requirement)
-            ~prompt
-        with
-        | Error cause -> Error (Execution_failed { runtime_id; cause })
-        | Ok answer ->
-          Option.iter (fun f -> f (Raw_response {runtime_id; text=answer})) observe;
-          (* Strict on purpose: Agent Core parses a [Json_syntax_only] HTTP body
-             with exactly [Yojson.Safe.from_string] and no repair, and a lane
-             slot changes transport, not contract. *)
-          (try Ok (Yojson.Safe.from_string answer) with
-           | Yojson.Json_error detail -> Error (Invalid_json_output { runtime_id; detail }))))
+       (match before_dispatch () with
+        | Error stop -> Error (Stopped stop)
+        | Ok () ->
+          Option.iter (fun f -> f (Dispatching {runtime_id})) observe;
+          (match
+             runner
+               ~runtime
+               ~system_prompt
+               ~output_schema:(Exact_output.domain_schema requirement)
+               ~prompt
+           with
+           | Error cause -> Error (Slot_failed (Execution_failed { runtime_id; cause }))
+           | Ok answer ->
+             Option.iter (fun f -> f (Raw_response {runtime_id; text=answer})) observe;
+             (* Strict on purpose: Agent Core parses a [Json_syntax_only] HTTP body
+                with exactly [Yojson.Safe.from_string] and no repair, and a lane
+                slot changes transport, not contract. *)
+             (try Ok (Yojson.Safe.from_string answer) with
+              | Yojson.Json_error detail ->
+                Error (Slot_failed (Invalid_json_output { runtime_id; detail }))))))
+;;
+
+let run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
+  match
+    run_gated ?runner ?observe ~before_dispatch:never_stops ~base_dir ~runtime_id ~system_prompt
+      ~requirement ~prompt ()
+  with
+  | Ok value -> Ok value
+  | Error (Slot_failed failure) -> Error failure
+  | Error (Stopped stop) -> (match stop with _ -> .)
 ;;
 
 let order_slots slots =
@@ -433,23 +456,42 @@ let order_slots slots =
   |> List.map fst
 ;;
 
-let walk ?runner ?observe ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate ~on_failure () =
+type 'stop walk_end =
+  | Slots_exhausted of failure list
+  | Stopped_before_dispatch of { runtime_id : string; failures : failure list; stop : 'stop }
+
+let walk_gated ?runner ?observe ~before_dispatch ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate ~on_failure () =
   let rec reject failures rest failure =
     on_failure failure;
     loop (failure :: failures) rest
   and loop failures slots =
     match order_slots slots with
-    | [] -> Error (List.rev failures)
+    | [] -> Error (Slots_exhausted (List.rev failures))
     | runtime_id :: rest ->
-      (match run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () with
+      (match
+         run_gated ?runner ?observe ~before_dispatch ~base_dir ~runtime_id ~system_prompt
+           ~requirement ~prompt ()
+       with
        | Ok value ->
          (match validate value with
           | Ok accepted -> Ok (runtime_id, accepted)
           | Error detail ->
             reject failures rest (Invalid_domain_output { runtime_id; detail }))
-       | Error failure -> reject failures rest failure)
+       | Error (Slot_failed failure) -> reject failures rest failure
+       | Error (Stopped stop) ->
+         Error (Stopped_before_dispatch { runtime_id; failures = List.rev failures; stop }))
   in
   loop [] cli_slots
+;;
+
+let walk ?runner ?observe ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate ~on_failure () =
+  match
+    walk_gated ?runner ?observe ~before_dispatch:never_stops ~base_dir ~cli_slots ~system_prompt
+      ~requirement ~prompt ~validate ~on_failure ()
+  with
+  | Ok accepted -> Ok accepted
+  | Error (Slots_exhausted failures) -> Error failures
+  | Error (Stopped_before_dispatch { stop; _ }) -> (match stop with _ -> .)
 ;;
 
 type input_capacity =

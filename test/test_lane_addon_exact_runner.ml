@@ -981,6 +981,8 @@ let test_returned_answer_survives_dispatch_authority_change () =
       (Option.is_some (answered_by (execute ())));
     check int "neither result validation nor replay resends" 1 (F.post_count server))
 
+(* The guard runs once when the execution starts and once before each CLI
+   dispatch. Its second answer here is the one before the first CLI slot. *)
 let test_cli_dispatch_veto_never_advances () =
   with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ~store ->
     publish ~base_path ~cli_slots:[F.cli_primary_runtime;F.cli_secondary_runtime] [];
@@ -988,7 +990,7 @@ let test_cli_dispatch_veto_never_advances () =
     let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
       Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Background;
         before_dispatch=(fun () -> incr checks;
-          if !checks=1 then Ok () else Error "original configuration changed before CLI");
+          if !checks=2 then Error "original configuration changed before CLI" else Ok ());
         with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let cli_runner : Keeper_lane_cli_oneshot.runner =
       fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
@@ -996,12 +998,41 @@ let test_cli_dispatch_veto_never_advances () =
     let original=request "cli-authority-veto" in
     let execute ()=get (Exact.run ~store ~declaration_id ~package ~authorize_request
       ~runner:(Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner) original) in
-    check bool "a CLI local veto preserves conservative terminal uncertainty" true
-      (execute ()=Exact.Final Exact.Outcome_unknown);
-    check int "neither original nor fallback CLI dispatches" 0 !calls;
-    let before= !checks in
-    check bool "retained uncertainty cannot resend" true (execute ()=Exact.Final Exact.Outcome_unknown);
-    check int "retained uncertainty does not ask execution authority again" before !checks)
+    (match execute () with
+     | Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _)) -> ()
+     | Exact.Final _ | Exact.Not_final _ ->
+       fail "a guard refusal before a CLI dispatch leaves the request open, as it does before HTTP");
+    check int "neither the refused slot nor the later slot is sent to" 0 !calls;
+    check (option string) "the retained walk names no answering slot" None
+      (Keeper_exact_walk_receipt.answered_slot (original_receipt ~store "cli-authority-veto"));
+    (match answered_by (execute ()) with
+     | Some (_,slot,_) -> check string "the first declared slot answers once the guard allows" F.cli_primary_runtime slot
+     | None -> fail "the same request must run again once the guard allows");
+    check int "the allowed run sends once" 1 !calls;
+    check bool "the retained answer is delivered" true (Option.is_some (answered_by (execute ())));
+    check int "delivery does not send again" 1 !calls)
+
+let test_cli_stop_before_dispatch_receipt () =
+  let module Receipt = Keeper_exact_walk_receipt in
+  let failed=Keeper_lane_cli_oneshot.Unknown_runtime {runtime_id="unresolved"} in
+  let make ~visited ~dispatched ~stopped =
+    Receipt.make ~declared_http:[] ~excluded_http:[] ~declared_cli:["unresolved";"stopped";"later"]
+      ~http:(Receipt.http_not_started ~detail:"explicit synthetic CLI trace")
+      ~cli:(Receipt.cli ~visited ~dispatched ~failures:[failed] ~result:(Receipt.Stopped_before_dispatch stopped)) in
+  (match make ~visited:["unresolved";"stopped"] ~dispatched:[] ~stopped:"stopped" with
+   | Error detail -> fail detail
+   | Ok receipt ->
+     check bool "a stop before dispatch survives its strict encoding" true
+       (match Receipt.of_json (Receipt.to_json receipt) with
+        | Ok decoded -> Yojson.Safe.equal (Receipt.to_json decoded) (Receipt.to_json receipt)
+        | Error _ -> false);
+     check (option string) "a stop names no answering slot" None (Receipt.answered_slot receipt));
+  check bool "the stopped slot was not sent to" true
+    (Result.is_error (make ~visited:["unresolved";"stopped"] ~dispatched:["stopped"] ~stopped:"stopped"));
+  check bool "no slot is visited after the stop" true
+    (Result.is_error (make ~visited:["unresolved";"stopped";"later"] ~dispatched:[] ~stopped:"stopped"));
+  check bool "the stopped slot is itself a visit" true
+    (Result.is_error (make ~visited:["unresolved"] ~dispatched:[] ~stopped:"stopped"))
 
 let test_worker_names_do_not_grant_background () =
   with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ~store ->
@@ -1188,7 +1219,8 @@ let () =
         ; test_case "queued generation rechecks execution authority after permit" `Quick
             (test_http_flow_preserves_host_admission_class ~revoke_while_queued:true Agent_core.Llm_provider.Admission_class.Background)
         ; test_case "returned output survives later configuration changes" `Quick test_returned_answer_survives_dispatch_authority_change
-        ; test_case "a CLI authority veto cannot advance or resend" `Quick test_cli_dispatch_veto_never_advances
+        ; test_case "a CLI authority veto sends nothing and leaves the request open" `Quick test_cli_dispatch_veto_never_advances
+        ; test_case "a CLI stop before dispatch keeps its visit order" `Quick test_cli_stop_before_dispatch_receipt
         ; test_case "an answer that matches the schema is answered" `Quick test_an_answer_that_matches_the_schema_is_answered
         ; test_case "original response observations follow each visit" `Quick test_original_response_observations_are_bound_to_each_visit
         ; test_case "original Responses parse failure keeps wire status" `Quick test_original_responses_parse_failure_keeps_wire_status

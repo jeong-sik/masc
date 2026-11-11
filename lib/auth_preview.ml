@@ -49,14 +49,22 @@ let page ~nonce ~title ~body ~script =
   }
 ;;
 
-let start_form ~invite =
+(* The form is the same whether the server has a GitHub login client or
+   not, so the scripts of the pages find its elements either way. Without a
+   client the start is a 404, and the button cannot be pressed. *)
+let no_github_login = "This server has no GitHub login."
+
+let start_form ~invite ~github =
   String.concat
     "\n"
     [ "<form method=\"post\" action=\"/auth/github/start\">"
     ; (if invite then "<input type=\"hidden\" id=\"invite\" name=\"invite\">" else "")
     ; "<input type=\"hidden\" name=\"return_to\" value=\"/\">"
-    ; "<button id=\"go\">Sign in with GitHub</button>"
+    ; (if github
+       then "<button id=\"go\">Sign in with GitHub</button>"
+       else "<button id=\"go\" disabled>Sign in with GitHub</button>")
     ; "</form>"
+    ; (if github then "" else "<p>" ^ no_github_login ^ "</p>")
     ]
 ;;
 
@@ -72,13 +80,13 @@ if (token === "") {
 }|}
 ;;
 
-let invite_page ~nonce =
+let invite_page ~nonce ~github =
   page
     ~nonce
     ~title:"Invitation"
     ~body:
       ("<h1>Invitation</h1>\n<p id=\"note\">Sign in with GitHub to join this workspace.</p>\n"
-       ^ start_form ~invite:true)
+       ^ start_form ~invite:true ~github)
     ~script:invite_script
 ;;
 
@@ -297,13 +305,13 @@ show().then(listAccounts).then(listKeepers).then(listPats);|}
     Authz_browser_request.csrf_header
 ;;
 
-let home_page ~nonce =
+let home_page ~nonce ~github =
   page
     ~nonce
-    ~title:"Multi-account preview"
+    ~title:"MASC accounts"
     ~body:
-      ("<h1>Multi-account preview</h1>\n<pre id=\"out\">reading</pre>\n"
-       ^ start_form ~invite:false
+      ("<h1>MASC accounts</h1>\n<pre id=\"out\">reading</pre>\n"
+       ^ start_form ~invite:false ~github
        ^ "\n<button id=\"signout\" hidden>Sign out</button>\n"
        ^ String.concat
            "\n"

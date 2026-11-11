@@ -8,9 +8,10 @@ let now_ms () = int_of_float (Unix.gettimeofday () *. 1000.)
 
 let account_server_line =
   "a server boots the workspace as a multi-account installation: the account server, which \
-   answers the health probes (GET /health, /health/live and /health/ready) and no route that \
-   reads the credentials of a single user. It does not serve the login routes yet; masc auth \
-   preview serves them on 127.0.0.1 while no server runs"
+   answers the health probes (GET /health, /health/live and /health/ready), the login routes \
+   of the login clients in config.json, and the pages where a person connects their own \
+   subscription and runs their own Keepers. It answers no route that reads the credentials \
+   of a single user"
 ;;
 
 let with_lease ~base_path f =
@@ -316,7 +317,7 @@ let serve_preview ~base_path ~store ~port github =
       let router =
         Masc.Http_server_eio.Router.create ()
         |> Server_login_http.add_routes routes
-        |> Server_login_http.add_preview_routes routes ~env ~base_path
+        |> Server_login_http.add_person_routes routes ~env ~base_path
       in
       let address = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
       match

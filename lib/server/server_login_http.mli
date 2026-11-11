@@ -44,8 +44,8 @@ val add_routes : Login_routes.t -> Http_server_eio.Router.t -> Http_server_eio.R
     path on the address of the server. *)
 val github_callback_path : string
 
-(** The routes of the localhost preview (plan, preview scope P3), on top of
-    {!add_routes}:
+(** The pages and the routes of a person (plan, preview scope P3, and
+    S1a-3b), on top of {!add_routes}:
     - [GET /] and [GET /accounts/invite], the pages of {!Auth_preview}, open
       ([Always_public]); each page gets a fresh nonce from [draw]
     - [GET /api/v1/auth/whoami], judged by {!Auth_gate.decide} on one
@@ -80,10 +80,10 @@ val github_callback_path : string
     {!Auth_preview.keeper_owner_person}, which gives the namespace of the
     person as well.
 
-    Only the preview command registers them; {!add_routes} is what the
-    account server registers (S1a-3a). [env] is the environment of the preview process, from
-    which a turn starts the client. *)
-val add_preview_routes
+    The account server ({!Server_accounts}) and the preview command
+    register them. [env] is the environment of the process, from which a
+    turn starts the client. *)
+val add_person_routes
   :  Login_routes.t
   -> env:Eio_unix.Stdenv.base
   -> base_path:string

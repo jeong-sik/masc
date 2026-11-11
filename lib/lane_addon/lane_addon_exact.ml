@@ -827,8 +827,13 @@ let describe_recovery_error = function
 (* A record this read could not reach may appear later; a record it reached and
    refused cannot turn into a different record by waiting. Keeping the two
    apart is what lets the caller refuse instead of retrying forever. *)
-let unreadable = Result.map_error (fun detail -> Recovery_unavailable detail)
-let invalid = Result.map_error (fun detail -> Recovery_invalid detail)
+(* Written as functions, not as [Result.map_error] values: a partially applied
+   [map_error] is not generalized, so the first use would pin the error type and
+   every other call site would fail to type. *)
+let unreadable result =
+  Result.map_error (fun detail -> Recovery_unavailable detail) result
+let invalid result =
+  Result.map_error (fun detail -> Recovery_invalid detail) result
 
 let recover_retained ~store ~declaration_id ~schema request =
   let* schema = unreadable (original_schema ~declaration_id ~schema request) in

@@ -156,7 +156,6 @@
   (re_export masc.operator)
   (re_export masc.lsp_client)
   (re_export masc.server)
-  (re_export masc.sse_event)
   (re_export masc.runtime)
   (re_export masc.provider_tool_support)
   (re_export masc.pool_metrics)

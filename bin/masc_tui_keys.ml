@@ -740,7 +740,7 @@ let for_surface = function
       ; b Act "Ctrl-O" "image / diagram"
           ~help:"preview the newest image or Mermaid diagram; /images lists all; any key returns"
       ; b Act "Ctrl-V" "paste image"
-          ~help:"stage the clipboard image for the next message; an [Image #1] marker lands in the draft"
+          ~help:"paste the clipboard image: it is staged for the next message and an [Image #1] marker lands in the draft"
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "/copy" "copy reply"
           ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"

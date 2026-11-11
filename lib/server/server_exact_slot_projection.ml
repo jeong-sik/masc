@@ -19,15 +19,18 @@ let slots_json ~current_http ~declared_http ~declared_cli ~runs =
   let slots=List.fold_left (fun seen key -> if List.mem key seen then seen else seen@[key])
     [] (declared@historical) in
   let latest ~attempt predicate observations =
-    let anchor ((run:Exact_lane_run_registry.run),index,(observation:Observation.t)) =
-      (if attempt then Option.value observation.started_at ~default:run.started_at
-       else Option.value observation.finished_at
-         ~default:(Option.value observation.started_at ~default:run.started_at)),run.run_id,index in
+    let at (observation:Observation.t) =
+      if attempt then observation.started_at else
+        match observation.finished_at with Some _ as at -> at | None -> observation.started_at in
+    let anchor ((run:Exact_lane_run_registry.run),index,_) time = time,run.run_id,index in
     List.fold_left (fun latest ((_,_,observation) as candidate) ->
-      if not (predicate observation) then latest else match latest with
-      | None -> Some candidate
-      | Some previous -> if Stdlib.compare (anchor candidate) (anchor previous)>0
-        then Some candidate else latest) None observations in
+      match predicate observation,at observation with
+      | false,_ | true,None -> latest
+      | true,Some time -> (match latest with
+          | None -> Some (candidate,time)
+          | Some (previous,previous_time) ->
+            if Stdlib.compare (anchor candidate time) (anchor previous previous_time)>0
+            then Some (candidate,time) else latest)) None observations |> Option.map fst in
   let observed_json = function
     | None -> `Null
     | Some ((run:Exact_lane_run_registry.run),_,observation) ->
@@ -40,11 +43,19 @@ let slots_json ~current_http ~declared_http ~declared_cli ~runs =
       | Http,None | Official_client,(None | Some _) -> `Null in
     `Assoc ["slot_id",`String slot_id;"transport",`String (transport_string kind);
       "declared",`Bool (List.mem (kind,slot_id) declared);"current_binding",current_binding;
+      "ordering_scope",`String "dated_only";
       "last_observation",observed_json (latest ~attempt:false (fun _ -> true) history);
       "last_attempt",observed_json (latest ~attempt:true (fun observation -> observation.Observation.started_at<>None) history);
-      "last_success",observed_json (latest ~attempt:false (fun observation -> match observation.Observation.outcome with
+      "last_success",observed_json (latest ~attempt:false (fun observation -> observation.Observation.finished_at<>None &&
+        match observation.outcome with
         | Accepted -> true
         | Unresolved | Semantic_rejected | Admission_rejected _ | Execution_failed _ | Cli_failed _ -> false) history);
-      "last_failure",observed_json (latest ~attempt:false (fun observation -> match observation.Observation.outcome with
+      "last_failure",observed_json (latest ~attempt:false (fun observation -> observation.Observation.finished_at<>None &&
+        match observation.outcome with
         | Semantic_rejected | Admission_rejected _ | Execution_failed _ | Cli_failed _ -> true
-        | Accepted | Unresolved -> false) history)]) slots)
+        | Accepted | Unresolved -> false) history);
+      "undated_outcomes",`List (List.filter_map (fun ((_,_,(observation:Observation.t)) as value) ->
+        match observation.finished_at,observation.outcome with
+        | None,(Accepted | Semantic_rejected | Admission_rejected _ | Execution_failed _ | Cli_failed _) ->
+          Some (observed_json (Some value))
+        | Some _,_ | None,Unresolved -> None) history)]) slots)

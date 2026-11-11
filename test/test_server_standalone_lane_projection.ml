@@ -1153,9 +1153,22 @@ body_timeout_s=30.0
       output=`Null;selected_slot=Some "B";usage=None}) in
   let run={run with slot_observations=Some (Ok
     [observation "A" failed 10. 11.;observation "B" Accepted 12. 13.])} in
+  let undated=observation "A" (Admission_rejected Preparation_failed) 0. 0.
+    |> O.to_yojson |> function
+      | `Assoc fields -> O.of_yojson (`Assoc (List.map (fun (key,value) ->
+          key,(match key with
+            | "started_at" | "finished_at" | "call_id" | "plan_fingerprint" | "request_body_sha256" -> `Null
+            | "binding" -> O.binding_to_yojson Http_unobserved
+            | "phase" -> O.phase_to_yojson Prepared
+            | "generation_dispatched" -> `Bool false
+            | _ -> value)) fields))
+      | _ -> fail "observation object" in
+  let undated=match undated with Ok value -> value | Error error -> fail error in
+  let overlapping={run with run_id="slow-admission";started_at=999.;
+    slot_observations=Some (Ok [undated])} in
   let rows=Masc.Server_exact_slot_projection.slots_json
     ~current_http:["A",E.admitted_target_binding admitted]
-    ~declared_http:["A";"B";"C"] ~declared_cli:["A"] ~runs:[run]
+    ~declared_http:["A";"B";"C"] ~declared_cli:["A"] ~runs:[overlapping;run]
     |> Yojson.Safe.Util.to_list in
   let field=Yojson.Safe.Util.member in
   let a=List.hd rows in
@@ -1168,6 +1181,10 @@ body_timeout_s=30.0
   check (float 0.) "slot time is not the whole-run start" 10.
     (field "started_at" original |> Yojson.Safe.Util.to_float);
   check bool "a successful successor cannot make A successful" true (field "last_success" a=`Null);
+  check string "known dates are never a claim about unknown failure order" "dated_only"
+    (field "ordering_scope" a |> Yojson.Safe.Util.to_string);
+  check int "overlapping undated admission remains visible without borrowing run start" 1
+    (field "undated_outcomes" a |> Yojson.Safe.Util.to_list |> List.length);
   check bool "no retained observation is explicit" true (field "last_observation" (List.nth rows 2)=`Null);
   check bool "official client never borrows same-name HTTP history" true
     (field "last_observation" (List.nth rows 3)=`Null)

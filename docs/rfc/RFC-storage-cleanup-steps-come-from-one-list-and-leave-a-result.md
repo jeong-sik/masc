@@ -39,8 +39,9 @@ related: ["remote-keeper-workspace-entries-are-swept-on-their-endpoint", "idle-k
 - 게스트 대부분은 11-09 10:21~12:25 에 다시 만들어졌다(`container list` 의 STARTED). 첫 실패는 그 직후 주기(12:25)다.
 - 경고에는 종료 코드와 stderr 가 없다(`lib/keeper/keeper_turn_sandbox_runtime_maintenance.ml:190`, 이슈 #50266). 그래서 로그만으로는 원인을 알 수 없다.
 - 추정 원인: 게스트 네 곳(polisher, you-never-change, glossary-maniac, rondo)에서 Keeper uid 로 본 `/proc/1/cwd` 의 소유자가 root 다. PID 1 은 권한을 내린 exec-shim agent 다. payload 의 `process_paths` 는 `FileNotFoundError` 만 잡는다(`config/scripts/keeper-build-cleanup.py:35-58`). `PermissionError` 는 잡지 않으니 payload 가 예외로 끝난다. 이 경로는 후보 `_build` 가 하나라도 있을 때만 탄다. 확정은 종료 코드와 stderr 를 남긴 뒤에 한다.
-- 11-11 17시에 떠 있는 게스트 14곳을 다시 쟀다. 13곳에서 읽지 못하는 프로세스는 PID 1 하나였다(`masc-exec-shim --serve`, uid 502, 세션 1, `/proc/1/cwd` 의 소유자 root). 11-02 에 만든 한 곳(msx-retro-mania)은 PID 1 이 `tail` 이고 읽힌다. 잴 때 게스트마다 다른 프로세스는 없었다.
+- 11-11 16시(KST)에 떠 있는 게스트 14곳을 다시 쟀다. 13곳에서 읽지 못하는 프로세스는 PID 1 하나였다(`masc-exec-shim --serve`, uid 502, 세션 1, `/proc/1/cwd` 의 소유자 root). 11-02 에 만든 한 곳(msx-retro-mania)은 PID 1 이 `tail` 이고 읽힌다. 잴 때 게스트마다 다른 프로세스는 없었다.
 - agent 는 root 에서 Keeper uid 로 내려오면서 스스로 dumpable 을 끈다(`lib/exec_shim/agent_stub.c:118`). 연결마다 exec 없이 relay 를 포크하고(`lib/exec_shim/shim_agent.ml:442`), relay 는 그 표시를 물려받는다. payload 는 relay 아래에서 돈다. 그래서 payload 가 도는 동안에는 PID 1 과 자기 relay, 적어도 둘이 읽히지 않는다.
+- 11-11 16:25~16:28(KST)에 명령이 돌고 있는 게스트 셋을 Keeper uid 로 읽기만 해서 표본 8개를 모았다. 읽지 못하는 16행이 모두 세션 1 이다(agent 8행, 부모가 PID 1 인 relay 8행). 요청마다 뜨는 shim 6행은 세션 1 에 있고 읽힌다. 명령과 그 자식 10행은 자기 세션에 있고 읽힌다. `container exec` 로 띄운 프로세스는 부모가 0 이고 자기 세션이다(게스트 둘).
 
 **주기가 재시작마다 처음부터 다시 기다린다.**
 

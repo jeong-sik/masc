@@ -103,8 +103,9 @@ let with_runtime f = Eio_main.run (fun env ->
   let previous_clock = Eio_context.get_clock_opt () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Masc_test_deps.setup_test_workspace () in
-  let clock = Eio_mock.Clock.make () in
-  Eio_mock.Clock.set_time clock (Unix.gettimeofday ());
+  let mock_clock = Eio_mock.Clock.make () in
+  let clock = (mock_clock :> float Eio.Time.clock_ty Eio.Resource.t) in
+  Eio_mock.Clock.set_time mock_clock (Unix.gettimeofday ());
   Fun.protect ~finally:(fun () ->
     Eio_context.restore_state previous_context;
     (match previous_clock with Some clock -> Time_compat.set_clock clock | None -> Time_compat.clear_clock ());
@@ -118,9 +119,9 @@ let with_runtime f = Eio_main.run (fun env ->
           let state = Mcp_server.For_testing.create_state ~base_path in
           let scope = Mcp_server.workspace_scope state in
           ignore (Workspace.init scope.config ~agent_name:None);
-          f ~env ~sw ~clock ~state ~scope)))))
+          f ~env ~sw ~clock ~mock_clock ~state ~scope)))))
 
-let test_actual_cold_read_and_source_deadline () = with_runtime (fun ~env ~sw ~clock ~state ~scope ->
+let test_actual_cold_read_and_source_deadline () = with_runtime (fun ~env ~sw ~clock ~mock_clock ~state ~scope ->
   let cold = match Server_dashboard_http_core_operator_digest_http.operator_digest_http_json
       ~state ~sw ~clock (Httpun.Request.create `GET "/api/v1/operator/digest") with
     | Ok json -> json | Error _ -> fail "cold Digest read failed" in
@@ -160,7 +161,7 @@ let test_actual_cold_read_and_source_deadline () = with_runtime (fun ~env ~sw ~c
   check bool "retention does not invent a healthy refresh interval" true
     Yojson.Safe.Util.(initial |> member "retention" |> member "background_refresh_interval_s" = `Null);
   Eio.Fiber.yield ();
-  check bool "healthy empty Digest has no timer" false (Eio_mock.Clock.try_advance clock);
+  check bool "healthy empty Digest has no timer" false (Eio_mock.Clock.try_advance mock_clock);
   let now = Time_compat.now () in
   let confidence = match Operator_judgment.Confidence.of_float 0.91 with
     | Some value -> value | None -> fail "invalid fixture confidence" in
@@ -176,15 +177,15 @@ let test_actual_cold_read_and_source_deadline () = with_runtime (fun ~env ~sw ~c
   let owner = Owner.owner_for_scope ~state scope in
   check (option (float 0.0)) "same read owns the exact recorded deadline"
     (Some judgment.fresh_until_unix) (Owner.next_deadline_unix owner);
-  Eio_mock.Clock.set_time clock judgment.fresh_until_unix;
+  Eio_mock.Clock.set_time mock_clock judgment.fresh_until_unix;
   let expired = ready_after changed in
   check bool "the actual deadline retires the old recommended action" true
     Yojson.Safe.Util.(expired |> member "recommended_actions" = `List []);
   Eio.Fiber.yield ();
-  check bool "settled expiry and own output leave no cadence" false (Eio_mock.Clock.try_advance clock))
+  check bool "settled expiry and own output leave no cadence" false (Eio_mock.Clock.try_advance mock_clock))
 
 let test_parameter_cache_is_bound_to_the_original_workspace () =
-  with_runtime (fun ~env:_ ~sw ~clock ~state ~scope ->
+  with_runtime (fun ~env:_ ~sw ~clock ~mock_clock:_ ~state ~scope ->
     let other_base = Masc_test_deps.setup_test_workspace () in
     Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace other_base) (fun () ->
       let other = Workspace.default_config other_base in

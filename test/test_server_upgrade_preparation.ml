@@ -285,6 +285,62 @@ let test_a_lock_without_the_lease_is_no_account_server () =
          | Ok () -> ()
          | Error _ -> Alcotest.fail "the owner that announces the port was not asked to stop");
         Alcotest.(check bool) "SIGTERM, no escalation" true (reap () = Unix.WSIGNALED Sys.sigterm))))
+(* Asked about a port the owner does not announce, the answer names the one
+   it does. That is all the read of the whole file gives, and with no lock of
+   another process on the file it cannot miss the owner. *)
+let test_another_port_names_the_port_the_owner_announces () =
+  let root = Filename.temp_file "masc-upgrade-account-" "" in
+  Sys.remove root; Unix.mkdir root 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let base_path = Filename.concat root "workspace" and run_dir = Filename.concat root "run" in
+    Unix.mkdir base_path 0o700; Unix.mkdir run_dir 0o700;
+    let port = 9000 in
+    let sighting port = Server_upgrade_preparation.account_server ~run_dir ~base_path ~port in
+    with_owner ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap:_ ->
+      let owner =
+        match sighting port with
+        | Ok (Account_server_on_port { pid }) -> pid
+        | other -> Alcotest.failf "the account server was not seen: %s" (sighting_label other) in
+      Alcotest.(check string) "asked about another port"
+        (sighting_label (Ok (Account_server_on_another_port { pid = owner; port })))
+        (sighting_label (sighting (port + 1)));
+      Alcotest.(check bool) "the reads sent it nothing" true (still_runs ())))
+let replacement_sighting_label = function
+  | Server_upgrade_preparation.Replacement_serves -> "the replacement serves"
+  | Another_server_answers { pid } -> Printf.sprintf "pid %d answers" pid
+  | Another_process_announces { pid } -> Printf.sprintf "pid %d announces the port" pid
+  | Nobody_announces -> "nobody announces the port"
+  | Announcement_unreadable (_ : Server_startup_takeover.base_path_lock_rejection) ->
+    "the announcement cannot be read"
+  | No_ready_answer -> "no ready answer"
+(* The rule [masc restart] waits on. A 200 on the port is the predecessor's
+   until it is the replacement's own: by the pid in the answer, or, for an
+   answer that names no process, by who holds the announcement lock. The
+   kernel is asked only for an answer that names no process. *)
+let test_ready_is_the_answer_of_the_replacement () =
+  let child_pid = 4242 and predecessor = 77 in
+  let row message answer holder ~asked expected =
+    let asks = ref 0 in
+    let sighting =
+      Server_upgrade_preparation.replacement_sighting ~child_pid answer
+        ~port_holder:(fun () -> incr asks; holder) in
+    Alcotest.(check string) message expected (replacement_sighting_label sighting);
+    Alcotest.(check int) (message ^ ": times the kernel was asked") asked !asks in
+  row "an answer that names the replacement" (Ready_named child_pid) (Ok None)
+    ~asked:0 "the replacement serves";
+  row "an answer that names the predecessor, while the replacement announces"
+    (Ready_named predecessor) (Ok (Some child_pid)) ~asked:0 "pid 77 answers";
+  row "an answer that names no process, and the replacement announces"
+    Ready_unnamed (Ok (Some child_pid)) ~asked:1 "the replacement serves";
+  row "an answer that names no process, and the predecessor still announces"
+    Ready_unnamed (Ok (Some predecessor)) ~asked:1 "pid 77 announces the port";
+  row "an answer that names no process, and nobody announces"
+    Ready_unnamed (Ok None) ~asked:1 "nobody announces the port";
+  row "an answer that names no process, and an announcement that cannot be read"
+    Ready_unnamed (Error (Server_startup_takeover.Announcement_port_invalid { port = 0 }))
+    ~asked:1 "the announcement cannot be read";
+  row "no ready answer, while the replacement announces"
+    Not_ready (Ok (Some child_pid)) ~asked:0 "no ready answer"
 let () = Alcotest.run "upgrade preparation"
   ["owner checks",[Alcotest.test_case "initial login identity" `Quick test_initial_login_identity;Alcotest.test_case "admin and exact incumbent" `Quick test_admin_workspace_and_incarnation;
     Alcotest.test_case "workspace conflict" `Quick test_other_workspace_never_receives_credentials;
@@ -295,4 +351,8 @@ let () = Alcotest.run "upgrade preparation"
    "account server",[Alcotest.test_case "the stop goes to the owner that announces the port" `Quick
      test_account_server_stop_needs_its_announced_port;
      Alcotest.test_case "a lock without the lease is no account server" `Quick
-       test_a_lock_without_the_lease_is_no_account_server]]
+       test_a_lock_without_the_lease_is_no_account_server;
+     Alcotest.test_case "another port names the port the owner announces" `Quick
+       test_another_port_names_the_port_the_owner_announces;
+     Alcotest.test_case "ready is the answer of the replacement" `Quick
+       test_ready_is_the_answer_of_the_replacement]]

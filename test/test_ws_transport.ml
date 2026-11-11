@@ -684,6 +684,32 @@ let test_session_ends_with_the_scope_of_its_connection () =
       (Ws.send_to_session_result id "{}" = Ws.Session_gone))
 ;;
 
+(* The writer fiber cannot start under a scope that has finished: Eio refuses
+   the fork. The session must not stay registered then, because nothing
+   would take its frames and every broadcast would queue one more. *)
+let test_scope_that_cannot_start_the_writer_leaves_no_session () =
+  Eio_main.run (fun _env ->
+    let count () = Ws.with_sessions_rw (fun () -> Hashtbl.length Ws.sessions) in
+    let before = count () in
+    let finished = Eio.Switch.run (fun scope -> scope) in
+    let refused =
+      match
+        Ws_direct_core.Endpoint.create
+          Ws_direct_core.Endpoint.Server
+          (Ws.mcp_websocket_handler
+             ~runtime_authority:
+               (Sse.runtime_authority_exn ~base_path:(Filename.get_temp_dir_name ()))
+             ~scope:finished
+             ~on_message:(fun _session_id _text -> ())
+             ~origin_label:"test")
+      with
+      | (_ : Ws_direct_core.Endpoint.t) -> false
+      | exception Invalid_argument _ -> true
+    in
+    Alcotest.(check bool) "the fork under a finished scope is refused" true refused;
+    Alcotest.(check int) "no session is left registered" before (count ()))
+;;
+
 let test_inbound_dispatch_default_limit () =
   with_env_var "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION" "" (fun () ->
     Alcotest.(check int) "default concurrent dispatch cap"
@@ -1269,6 +1295,8 @@ let () =
         test_frames_from_another_domain_are_written_on_the_connection_domain;
       Alcotest.test_case "a session ends with the scope of its connection" `Quick
         test_session_ends_with_the_scope_of_its_connection;
+      Alcotest.test_case "a scope that cannot start the writer leaves no session" `Quick
+        test_scope_that_cannot_start_the_writer_leaves_no_session;
     ]);
     ("pong_state", [
       Alcotest.test_case "new session initializes pong atomics" `Quick

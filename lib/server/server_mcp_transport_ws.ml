@@ -989,7 +989,9 @@ let __test_dashboard_delta_payload_text_for_event (ev : Sse.external_event) =
    on the connection's fiber scope, so the writer is touched from the
    connection's domain only. Ends after the close frame, when the writer has
    closed, or when the connection's scope ends; the session is cleaned up
-   then, whichever way the connection went. *)
+   then, whichever way the connection went. [false] when no fiber started:
+   a cancelled scope starts none, the connection is ending, and nobody would
+   take this session's frames. *)
 let serve_outbound ~scope session_id session wsd =
   let write frame =
     if Ws_wsd.is_closed wsd
@@ -1014,9 +1016,7 @@ let serve_outbound ~scope session_id session wsd =
       (fun () ->
         Domain_mailbox.serve session.outbound ~handle:write ~unhandled:(fun _frame -> ()));
     `Stop_daemon);
-  (* A cancelled scope starts no fiber: the connection is ending and nobody
-     would take this session's frames. *)
-  if not !serving then cleanup_session session_id
+  !serving
 ;;
 
 (* A daemon of the connection's scope: it stops with the connection. *)
@@ -1088,22 +1088,33 @@ let mcp_websocket_handler
   : Ws_endpoint.handlers =
   let session_id = next_id () in
   let session = new_session ~runtime_authority ~id:session_id in
-  with_sessions_rw (fun () -> Hashtbl.replace sessions session_id session);
-  Transport_metrics.set_ws_sessions
-    (with_sessions_rw (fun () -> Hashtbl.length sessions));
-  (* Register as SSE external subscriber for broadcast events. *)
-  Sse.subscribe_external ~runtime_authority ~id:session_id
-    ~is_alive:(fun () -> not (is_session_closed session))
-    ~callback:(fun sse_event ->
-      if not (is_session_closed session)
-         && not (send_dashboard_or_raw_sse session sse_event)
-      then cleanup_session session_id)
-    ();
-  serve_outbound ~scope session_id session wsd;
-  start_upgrade_heartbeat ~scope ?clock session_id session;
-  (* #10875: see cleanup_session — per-session lifecycle is DEBUG to
-     avoid logging amplification during WS storm (#10701). *)
-  Log.Server.debug "WebSocket session %s connected (%s)" session_id origin_label;
+  (* The writer fiber starts first, so a session that is registered always
+     has one taking its frames. Were it started after, a start that raised or
+     did not happen would leave a registered session whose queue only
+     grows. *)
+  if serve_outbound ~scope session_id session wsd
+  then begin
+    with_sessions_rw (fun () -> Hashtbl.replace sessions session_id session);
+    Transport_metrics.set_ws_sessions
+      (with_sessions_rw (fun () -> Hashtbl.length sessions));
+    (* Register as SSE external subscriber for broadcast events. *)
+    Sse.subscribe_external ~runtime_authority ~id:session_id
+      ~is_alive:(fun () -> not (is_session_closed session))
+      ~callback:(fun sse_event ->
+        if not (is_session_closed session)
+           && not (send_dashboard_or_raw_sse session sse_event)
+        then cleanup_session session_id)
+      ();
+    start_upgrade_heartbeat ~scope ?clock session_id session;
+    (* #10875: see cleanup_session — per-session lifecycle is DEBUG to
+       avoid logging amplification during WS storm (#10701). *)
+    Log.Server.debug "WebSocket session %s connected (%s)" session_id origin_label
+  end
+  else
+    Log.Server.debug
+      "WebSocket session %s not started (%s): its connection is ending"
+      session_id
+      origin_label;
   (* RFC-0287: ws-direct reassembles fragments + validates UTF-8 + enforces the
      size caps internally, so [on_message] receives a complete message and a
      protocol/size violation surfaces as [on_close]/[on_error] with the right

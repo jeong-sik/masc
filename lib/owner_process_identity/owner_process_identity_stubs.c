@@ -117,11 +117,12 @@ CAMLprim value masc_owner_identity_terminate(value raw) {
 CAMLprim value masc_owner_identity_close(value raw) {
   CAMLparam1(raw); close_identity(raw); CAMLreturn(Val_unit);
 }
-/* The first lock another process holds on the file, when it is a write lock of
-   exactly one byte: its holder and the position of the byte. The lock table of
-   the kernel is the record, so the answer never outlives the holder.
-   Outcome 0: such a lock. 1: no other process holds a lock. 4: the probe
-   failed, or the lock has another shape. */
+/* The first lock another process holds on the range of the file, when it is a
+   write lock of exactly one byte: its holder and the position of the byte.
+   The lock table of the kernel is the record, so the answer never outlives
+   the holder.
+   Outcome 0: such a lock. 1: nothing another process holds blocks the range,
+   or what blocks it has another shape. 4: the kernel could not be asked. */
 CAMLprim value masc_owner_identity_held_byte(value file, value start, value length) {
   CAMLparam3(file, start, length); CAMLlocal1(result);
   int fd = Int_val(file), outcome = 4;

@@ -371,13 +371,6 @@ val reading_connection_summary : width:int -> Masc_tui_types.state -> string
 (** Bounded connection/read state, retaining observer loss as a separate fact.
     Shared by child headings and Board's existing overflow fallback. *)
 
-val badge_row : cols:int -> lead:string -> label:string -> badge:string -> string
-(** A header row of [lead], a bracketed [label] and [badge] for a surface drawn
-    in [cols] columns. The label is cut with an ellipsis to the cells left after
-    [lead] and [badge], and its brackets go when none are left, so the badge is
-    drawn whole whenever [lead] and [badge] fit in the row; a row too narrow for
-    those two is cut at its end like any other. *)
-
 val runtime_step : Masc_tui_types.state -> string
 (** The step the Runtime screens take from System. *)
 

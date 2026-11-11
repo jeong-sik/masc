@@ -28,6 +28,7 @@ type topic = Sse_event.Types.dashboard_observation_topic
 type access = Metadata_only | Readable_directory | Access_denied of Unix.error
 type path_binding =
   | Absent
+  | Symbolic_link of (int * int) * int * string
   | Bound of (int * int) * Unix.file_kind * int * access
 (* Spec directories discover names; result log paths already come from the
    inventory. Ancestors retain coverage for rebinding, not roster discovery. *)
@@ -44,6 +45,8 @@ let both : topic list = [ `Verification_specs; `Tlc_results ]
 
 let path_binding path =
   match Unix.lstat path with
+  | status when status.Unix.st_kind = Unix.S_LNK ->
+    Symbolic_link ((status.st_dev, status.st_ino), status.st_perm, Unix.readlink path)
   | status ->
     let access =
       if status.Unix.st_kind <> Unix.S_DIR then Metadata_only

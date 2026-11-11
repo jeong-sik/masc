@@ -15,7 +15,8 @@ val start :
 (** Own one daemon and its sealed native watch generations. Scans run only for
     initial setup, changed spec rosters or guarded path bindings, and
     loss/recovery. Ancestor/result directory hints first check only their
-    relevant path identities and access; unrelated churn does not enumerate
+    relevant path identities, symbolic-link destinations and access;
+    unrelated churn does not enumerate
     the inventory. Content hints emit the relevant process observation topics.
     Failed setup/observation alone has
     bounded retry delays; available idle has no timer or scan.

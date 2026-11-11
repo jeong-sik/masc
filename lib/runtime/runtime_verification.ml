@@ -641,6 +641,12 @@ let authorize_host client =
   Runtime_account_access.authorize_host client |> Result.map_error not_authorized
 ;;
 
+(* HIGH-RISK-UNREVIEWED: an API provider sends with the credential its
+   operator declared, whoever asks for the check: only a single-user process shares it (plan D4). *)
+let authorize_api sealed =
+  Runtime_account_access.authorize_api sealed |> Result.map_error not_authorized
+;;
+
 let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~account_request (runtime : Runtime_instance.t) =
   (* The refusal the client's latest report amounts to. Whichever ends the
      run first -- this window or the client's own timeout -- reads it. *)
@@ -794,7 +800,10 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
               | Runtime_antigravity.Unhandled_exception _ ) as err)) ->
            Error (Provider_rejected (Runtime_antigravity.error_to_string err))))
       | Runtime_execution.Vibe_cli _ -> Error (Unavailable Unsupported_runtime)
-      | Runtime_execution.Agent_core provider_cfg ->
+      | Runtime_execution.Agent_core sealed ->
+        (match authorize_api sealed with
+         | Error failure -> Error failure
+         | Ok provider_cfg ->
         (match
            Runtime_instance.validate_dispatch_credential ~provider_config:provider_cfg runtime
          with
@@ -928,7 +937,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                       { model = result.response.model
                       ; text = Agent_core.Types.text_of_response result.response
                       }
-                  | (Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _) as stop_reason -> Error (Provider_rejected (unfinished_run_reason stop_reason))))))
+                  | (Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _) as stop_reason -> Error (Provider_rejected (unfinished_run_reason stop_reason)))))))
       | Runtime_execution.Claude_code execution ->
         (match authorize ~account_request execution.account_home with
          | Error failure -> Error failure

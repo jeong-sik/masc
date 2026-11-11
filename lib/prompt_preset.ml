@@ -1022,7 +1022,8 @@ let unavailable_assignments content assignments =
         | (Runtime_execution.Codex_app_server _ | Claude_code _
           | Antigravity_cli _ | Muse_serve _ | Vibe_cli _), _ -> None
         | Runtime_execution.Agent_core _, Some _ -> None
-        | Runtime_execution.Agent_core provider_config, None ->
+        | Runtime_execution.Agent_core sealed, None ->
+          let provider_config = Runtime_account_access.api_declaration sealed in
           let missing : Runtime.missing_catalog_model =
             { runtime_id = runtime.id; provider_id = runtime.provider.id
             ; provider_label = Llm_provider.Provider_config.capability_provider_label provider_config

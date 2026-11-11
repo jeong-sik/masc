@@ -437,7 +437,8 @@ let runtime_tool_delivery (runtime : Runtime_instance.t) =
     if runtime.model.tools_support
     then Tools_delivered
     else Tools_suppressed_runtime_unsupported
-  | Runtime_execution.Agent_core provider_config ->
+  | Runtime_execution.Agent_core sealed ->
+    let provider_config = Runtime_account_access.api_declaration sealed in
     let capabilities =
       match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
       | Some capabilities -> capabilities

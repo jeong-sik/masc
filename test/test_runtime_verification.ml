@@ -270,9 +270,11 @@ streaming = true
        | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason)
        | Ok runtime ->
          match runtime.Runtime_instance.execution with
-         | Runtime_execution.Agent_core provider_config ->
+         | Runtime_execution.Agent_core sealed ->
+           let provider_config = Masc_test_deps.api_config sealed in
            { runtime with execution = Runtime_execution.Agent_core
-               { provider_config with api_key = Llm_provider.Secret.of_string "" } }
+               (Runtime_account_access.seal_api
+                  { provider_config with api_key = Llm_provider.Secret.of_string "" }) }
          | _ -> fail "credential fixture must materialize an HTTP execution")
   in
   let verify runtime =
@@ -549,7 +551,7 @@ let test_a_queued_readiness_run_ends_at_the_declared_timeout () =
   with_silent_endpoint_runtime ~binding_keys:"max-concurrent = 1" @@ fun ~env ~sw ~runtime ->
   let provider_cfg =
     match runtime.Runtime_instance.execution with
-    | Runtime_execution.Agent_core provider_cfg -> provider_cfg
+    | Runtime_execution.Agent_core sealed -> Masc_test_deps.api_config sealed
     | Runtime_execution.Antigravity_cli _
     | Runtime_execution.Claude_code _
     | Runtime_execution.Codex_app_server _

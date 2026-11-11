@@ -18,8 +18,8 @@ let signal_observer_failures () = Atomic.get signal_failures
 
 let subscribe_signal_changed notify =
   let listener = { notify } in
-  Atomic.update signal_listeners (fun listeners -> listener :: listeners);
-  fun () -> Atomic.update signal_listeners
+  Lockfree_atomic.update signal_listeners (fun listeners -> listener :: listeners);
+  fun () -> Lockfree_atomic.update signal_listeners
     (List.filter (fun current -> current != listener))
 ;;
 

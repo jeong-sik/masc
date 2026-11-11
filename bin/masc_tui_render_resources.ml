@@ -412,6 +412,7 @@ let render_resources (state : state) =
           | Some prompt -> Masc_tui_keys.footer_hints_resource_save
               ~pending:(resource_save_pending_for_prompt state prompt)
           | None -> Masc_tui_keys.footer_hints_resources
+              ~lang:state.ui_language
               ~detail_focus:(state.resource_focus = Right_pane)));
   finish_surface state ~clamped:(Resource_scroll !drawn_resource_scroll)
     ~surface_key:"resources" ~rows:terminal_rows ~cols buf

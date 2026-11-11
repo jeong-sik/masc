@@ -362,7 +362,8 @@ val footer_hints_runtime_parent :
     above the preserved editor. The removal arm retains its existing
     second-[D] confirmation. *)
 
-val footer_hints_resources : detail_focus:bool -> string
+val footer_hints_resources :
+  lang:Masc_tui_types.ui_language -> detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
 

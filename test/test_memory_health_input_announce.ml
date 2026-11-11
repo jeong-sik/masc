@@ -529,6 +529,119 @@ let test_world_writes_invalidate_before_announcing () =
     check int "a released server no longer announces" 2 (List.length !seen))
 ;;
 
+let test_briefing_prompt_changes_invalidate_without_a_curator () =
+  with_workspace
+  @@ fun ~config ~fleet_key:_ ~elsewhere:_ ~config_keepers_dir:_
+       ~runtime_keepers_dir:_ ~heard:_ ->
+  let module Ledger = Workspace_memory_ledger in
+  let module Briefing = Workspace_memory_briefing in
+  let base_path = config.Workspace.base_path in
+  let key = Prompt_names.workspace_memory_briefing in
+  let prompts = Filename.concat base_path "prompts" in
+  Fs_compat.mkdir_p prompts;
+  Out_channel.with_open_text (Filename.concat prompts (key ^ ".md")) (fun channel ->
+    output_string channel
+      "---\ndescription: briefing fixture\ncategory: test\n---\nBriefing fixture contract");
+  Prompt_registry.clear ();
+  Fun.protect ~finally:Prompt_registry.clear (fun () ->
+    Prompt_registry.set_markdown_dir prompts;
+    let claim = "The workspace has one saved claim" in
+    let fact = Ledger.Ordinary {
+      keeper_id = "fixture";
+      claim_sha256 = Agent_core_sha256.(digest_string claim |> to_hex);
+    } in
+    let ledger =
+      Ledger.apply Ledger.empty ~selected:[{ Ledger.fact = fact; claim }]
+        [{ Ledger.fact = fact; decision = Ledger.Create_claim claim }]
+      |> Result.map_error Ledger.apply_error_to_string |> require in
+    Ledger.save ~base_path ledger |> require;
+    let contract = Briefing.contract ~template:(Prompt_registry.get_prompt key) in
+    let saved =
+      match Briefing.prepare ~sources:(Ledger.briefing_sources ledger) ~contract
+          ~render:(fun json -> Ok (Yojson.Safe.to_string json)) Briefing.empty |> require with
+      | Briefing.Prepared batch -> Briefing.accept batch ~text:"Saved briefing" |> require
+      | Briefing.Unchanged | Briefing.Cleanup _ -> fail "the claim prepared no briefing" in
+    Briefing.save ~directory:(Ledger.directory ~base_path) saved |> require;
+    let status () =
+      match Ledger.observe ~base_path with
+      | Ledger.Missing -> fail "the saved ledger disappeared"
+      | Ledger.Unavailable detail -> fail detail
+      | Ledger.Available { briefing; _ } ->
+        match briefing with
+        | Error detail -> fail detail
+        | Ok Briefing.Missing -> fail "the saved briefing disappeared"
+        | Ok (Briefing.Current _) -> "current"
+        | Ok (Briefing.Stale _) -> "stale"
+    in
+    check string "the original contract is current" "current" (status ());
+    let cache_key =
+      Server_dashboard_http_core_cache.workspace_memory_inventory_cache_key ~base_path in
+    let seed () =
+      Dashboard_cache.seed_stale_if_missing cache_key ~stale_for:60.0 (`Assoc []);
+      check bool "the prior inventory is warm" true
+        (Option.is_some (Dashboard_cache.peek cache_key)) in
+    let seen = ref 0 in
+    let waiting = ref None in
+    let id = "world-memory-prompt-contract" in
+    Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path)
+      ~id ~callback:(fun (event : Sse.external_event) ->
+        let world = match event.ext_payload with
+          | `Assoc fields ->
+            Workspace_dataset_event.of_fields fields = Ok Workspace_dataset_event.World_memory
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false in
+        if world then begin
+          incr seen;
+          let observation = Option.is_some (Dashboard_cache.peek cache_key), status () in
+          Option.iter (fun resolve -> Eio.Promise.resolve resolve observation) !waiting;
+          waiting := None
+        end) ();
+    Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () ->
+      Eio.Switch.run (fun sw ->
+        Server_memory_health_broadcast.install ~sw ~config;
+        let unsubscribe_fault = Workspace_memory_changed.subscribe
+          (fun ~directory:_ -> raise (Eio.Cancel.Cancelled (Failure "subscriber failure"))) in
+        Eio.Switch.on_release sw unsubscribe_fault;
+        let applied request =
+          match Server_prompt_override_mutation.apply ~base_path request with
+          | Error (Validation detail | Persistence detail) -> fail detail
+          | Ok result ->
+            check bool "there is no curator owner" true
+              (result.curator_refresh = Some Server_workspace_memory_curator.No_owner) in
+        let change request expected =
+          let observed, resolve = Eio.Promise.create () in
+          waiting := Some resolve;
+          applied request;
+          let cached, actual = Eio.Promise.await observed in
+          check bool "inventory invalidated before World notification" false cached;
+          check string "the same durable briefing follows the effective contract" expected actual in
+        seed ();
+        change (Server_prompt_override_request.Set { key; value = "Changed briefing contract" }) "stale";
+        seed ();
+        applied (Server_prompt_override_request.Set { key; value = "Changed briefing contract" });
+        Eio.Fiber.yield ();
+        check int "an identical effective contract does not announce" 1 !seen;
+        check bool "an identical contract keeps the inventory warm" true
+          (Option.is_some (Dashboard_cache.peek cache_key));
+        let overrides = Filename.concat (Common.masc_dir_from_base_path ~base_path)
+            "prompt_overrides.json" in
+        Sys.remove overrides;
+        Unix.mkdir overrides 0o700;
+        (match Server_prompt_override_mutation.apply ~base_path
+            (Server_prompt_override_request.Set { key; value = "Cannot be persisted" }) with
+         | Error (Persistence _) -> ()
+         | Error (Validation detail) -> fail detail
+         | Ok _ -> fail "a directory accepted the prompt override file");
+        Eio.Fiber.yield ();
+        check int "a failed persistence with unchanged live contract does not announce" 1 !seen;
+        check string "the failed write preserves the live contract" "Changed briefing contract"
+          (Prompt_registry.get_prompt key);
+        check bool "the failed unchanged contract keeps the cached inventory" true
+          (Option.is_some (Dashboard_cache.peek cache_key));
+        Unix.rmdir overrides;
+        change (Server_prompt_override_request.Clear { key }) "current";
+        check int "set and clear each announce once without a curator" 2 !seen)))
+;;
+
 let () =
   run "memory_health_input_announce"
     [ ( "workspace"
@@ -538,6 +651,8 @@ let () =
             test_a_notification_reloads_the_warm_row
         ; test_case "world writes invalidate before announcing" `Quick
             test_world_writes_invalidate_before_announcing
+        ; test_case "briefing contract invalidates without a curator" `Quick
+            test_briefing_prompt_changes_invalidate_without_a_curator
         ] )
     ; ( "stores"
       , [ test_case "each store write tells the signal once" `Quick

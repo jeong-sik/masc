@@ -55,6 +55,9 @@ type error =
       { path : string
       ; detail : string
       }
+  | Native_tools_refused of Runtime_account_access.native_refusal
+      (** {!prepare_native_tools} was asked for a posture this process runs no
+          model turn with. Nothing was prepared. *)
 
 type keychain_state =
   | Present

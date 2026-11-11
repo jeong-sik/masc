@@ -26,7 +26,7 @@
   - 로그인 시작 자리가 인증 없이 다 찬다.
   - Keeper 턴의 당사자가 늘 주인이다.
 - 바깥 제품과 방향이 같다. harness 는 sandbox 밖에 두고, 구독 로그인은 모델이 닿지 않는 곳에 둔다(§4).
-- Anthropic 문서는 각자 자기 구독으로 로그인하는 호스팅을 조건부로 허용한다. 서버가 자격증명을 모으거나 보관하거나 중개하는 것은 허용하지 않는다. OpenAI 문서는 자동화에 API 키를 권한다. Google 소비자 플랜은 다른 앱이 CLI 를 감싸는 것을 지원하지 않는다(§4.8).
+- 보고서는 Anthropic 의 구독 로그인 호스팅을 조건부 허용으로, OpenAI 의 자동화 인증을 API 키 권장으로, Google 소비자 플랜의 CLI 감싸기를 미지원으로 해석했다. 이 해석이 masc 의 운영 형태를 허용한다는 결론은 아니다. Codex 는 서버가 로그인 파일을 읽고 복사하므로 「서버는 토큰을 다루지 않는다」는 공통 전제로 판단할 수 없다(§4.8).
 - MCP(Model Context Protocol) 2026-07-28 개정이 세션을 없앴다. 계획 C4-12 의 세션 cookie 결속은 고쳐야 한다(§4.4).
 - 순서는 W1~W5 로 제안한다. W1 은 팀원이 실제 서버에 로그인해 자기 구독으로 자기 Keeper 에게 묻는 것이다(§6).
 
@@ -341,7 +341,7 @@ masc 의 지금 상태는 이렇다.
 
 출처는 research-identity-authz 다. 새 시스템이 맞춰야 할 기준선 10개 가운데 이 구현과 닿는 것을 옮긴다.
 
-- 로그인은 authorization code 와 PKCE S256 으로 한다. redirect URI 는 정확히 일치해야 한다([RFC 9700](https://datatracker.ietf.org/doc/rfc9700/)).
+- 로그인은 authorization code 와 PKCE S256 으로 한다. redirect URI 는 정확히 일치해야 한다. native 앱의 `localhost` redirect URI 포트 번호는 예외다([RFC 9700 §2.1](https://www.rfc-editor.org/rfc/rfc9700.html#section-2.1)).
 - IdP(Identity Provider)가 둘 이상이면 `iss` 를 검증한다. 또는 IdP 마다 redirect URI 를 나눈다(RFC 9700, RFC 9207).
 - Google 의 사용자 키는 `sub` 다.
 - GitHub 는 PKCE 를 S256 만 받는다. OAuth app 도 2026-08-14 부터 8시간 access token 과 6개월 refresh token 을 쓴다. 새로 만든 앱의 기본값이다([GitHub Changelog](https://github.blog/changelog/2026-08-14-multiple-redirect-uris-and-token-refresh-for-oauth-apps)).
@@ -547,13 +547,13 @@ OpenAI 쪽은 읽은 범위에서 날짜가 있는 변경을 찾지 못했다. �
 - 자기 계정으로 자동화를 돌리는 길은 조건이 붙은 고급 workflow 다. runner 가 신뢰할 수 있는 사설 인프라여야 한다. `auth.json` 하나는 기계 하나만 쓴다(위 CI/CD auth 문서).
 - 다른 앱이 ChatGPT 플랜 사용량을 쓰는 공식 경로가 따로 있다. Sign in with ChatGPT 의 plan usage 다. open-source·로컬 호스팅 앱이 대상이다. 유료이거나 원격에서 호스팅하는 앱은 따로 신청한다([OpenAI 문서](https://developers.openai.com/siwc/llms-full.txt)).
 
-약관 문장이 masc 의 코드에 닿는 곳도 보고서가 적었다. 보고서는 코드를 `9424cc7b5394` 에서 읽었다. 아래는 모두 보고다.
+약관 문장이 masc 의 코드에 닿는 곳도 보고서가 적었다. 보고서는 코드를 `9424cc7b5394` 에서 읽었다. 아래는 보고 내용이며, Codex 파일 읽기·복사 경로는 2026-11-11 후속 검토에서도 같은 고정 소스로 대조했다. 실제 자격증명 파일 내용은 읽지 않았다.
 
-- 로그인은 사람이 `claude` 안에서 끝낸다. 서버는 `CLAUDE_CONFIG_DIR` 경로만 정한다. `lib` 와 `bin` 에 `credentials.json` 을 이름으로 부르는 코드는 없다(`rg` 0건).
+- Claude 로그인은 사람이 `claude` 안에서 끝낸다. 서버는 `CLAUDE_CONFIG_DIR` 을 정하고, 계정 이메일 표시는 `.claude.json` 의 `oauthAccount.emailAddress` 에서 읽는다(`lib/runtime/runtime_account_email.mli:10-11`). 보고서의 `credentials.json` 이름 검색 0건만으로 서버가 모든 인증 정보를 다루지 않는다고 증명할 수는 없다.
 - 계정 디렉터리를 선언하면 Claude child 는 `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` 을 물려받지 않는다(`lib/runtime/runtime_claude_environment_projection.ml:44-45`, `lib/runtime/runtime_official_account.ml:129-136`). 그래서 운영자의 API 키가 사람의 구독을 덮지 못한다. Codex 도 같다(`lib/runtime/runtime_codex_environment_projection.ml:41-47`).
 - 확인이 필요한 것 하나. Claude child 는 `HOME` 과 `XDG_CONFIG_HOME` 을 물려받는다(`lib/runtime/runtime_claude_environment_projection.ml:5-9`). 문서로는 Anthropic profile 이 계정 디렉터리 밖에 있다. 서버 OS 사용자에게 profile 이 있으면 사람의 턴이 그 profile 의 조직으로 돌 수 있다. 재지 않았다. 이슈 #51053 이다.
 - 확인이 필요한 것 둘. 문서는 bare mode 가 구독 로그인을 읽지 않는다고 적는다. 앞으로 `-p` 의 기본이 된다고도 적는다([headless](https://code.claude.com/docs/en/headless)). 그 release 에서 구독 경로가 끊길 수 있다. 이슈 #51055 다.
-- 확인이 필요한 것 셋. `Runtime_verification_codex_home.prepare` 가 `auth.json` 을 임시 `CODEX_HOME` 으로 복사한다(`lib/runtime/runtime_verification_codex_home.mli:9-13`). 사본에서 token 이 갱신되고 사본이 버려지면 원본 로그인이 끊길 수 있다.
+- Codex 파일 읽기·복사는 코드에서 확인된다. `Runtime_verification_codex_home.prepare` 는 원본 `auth.json` 이 있으면 `Fs_compat.load_file` 로 전체를 읽어 임시 `CODEX_HOME` 에 쓴다. 디렉터리는 `0700`, 사본은 `0600` 이다(`lib/runtime/runtime_verification_codex_home.ml:81-103`). 검증과 모델 목록 갱신이 이 경로를 부른다(`runtime_verification.ml:1029-1035`, `runtime_codex_model_refresh.ml:23-25`). 계정 이메일 표시도 `auth.json` 의 `tokens.id_token` 을 읽는다(`runtime_account_email.ml:82-88,113-151`). 공식 CLI 에 사람이 직접 로그인하는 것과 서버가 자격증명 파일을 읽거나 복사하지 않는 것은 별개다. 사본에서 token 이 갱신된 뒤 사본이 버려질 때의 로그인 영향은 재지 않았다.
 - 로그인이 만료되면 사람이 다시 로그인해야 한다. 서버가 대신 갱신할 길이 없다.
 - Codex 는 사람마다 `CODEX_HOME` 하나를 두고 `auth.json` 을 한 기계에만 둔다. 스케일아웃하면 그 사람의 Codex 턴은 그 파일이 있는 node 에 묶인다.
 - 코드는 다계정에서 Antigravity HOME 을 만들지 않는다(`lib/runtime/runtime_antigravity_home.mli:11-13`). 보고서는 Google AI Pro 와 Ultra 로그인을 다계정 Runtime 종류에서 빼자고 적는다.
@@ -568,7 +568,7 @@ OpenAI 쪽은 읽은 범위에서 날짜가 있는 변경을 찾지 못했다. �
 종합과 보고서가 여기서 읽은 것은 넷이다.
 
 - 종합은 구독 약관이 이 설계의 모양을 요구한다고 적는다. 사람마다 자기 구독으로 로그인하는 모양이다.
-- 보고서는 masc 의 모양이 Claude 와 Codex 의 조건과 맞는다고 적는다. 조건은 셋이다. 로그인은 사람이 한다. 실행은 수정하지 않은 공식 CLI 가 한다. 서버는 token 을 만지지 않는다. 이 판단은 보고서의 해석이다. 벤더에 물어야 닫히는 질문 둘이 남아 있다(위).
+- 보고서는 사람의 로그인, 수정하지 않은 공식 CLI, 서버의 token 미취급을 공통 조건으로 두고 Claude 와 Codex 에 맞는다고 해석했다. 그중 token 미취급 전제는 위 Codex 코드와 맞지 않는다. Claude 의 제한과 Codex 의 파일 읽기·복사를 나누어 판단해야 한다. 이 후속 정정은 Codex 사본이 약관 위반이라는 판정도, 현재 운영 형태가 허용된다는 판정도 하지 않는다. 벤더 문서의 적용 범위와 위 질문 둘은 미확인으로 남긴다.
 - §2.1 의 5 는 보안 문제이면서 약관 문제다. 주인이 아닌 사람이 넣은 메시지로 주인의 구독이 돌기 때문이다(종합).
 - 2단계의 Runtime 공유는 구독 Runtime 에는 열 수 없다. API key Runtime 에만 열 수 있다(종합, research-landscape-terms).
 

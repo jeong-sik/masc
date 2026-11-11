@@ -125,3 +125,9 @@
 - research-landscape-terms 의 `[An1]`, `[Oa1]`, `[Go1]` 같은 표기는 그 보고서 출처 표의 키다.
 - 보고서의 「계획」과 「설계」는 `docs/superpowers/plans/2026-10-27-multi-account-oidc-runtime-authorization.md` 와 `docs/superpowers/specs/2026-10-27-multi-account-oidc-runtime-authorization-design.md` 다.
 - 보고서의 「미리보기」는 `masc auth preview` 가 loopback 에 띄우는 화면과 경로다.
+
+## 후속 정정, 2026-11-11
+
+위 손질 내역과 좌표 점검은 2026-11-10 판본의 기록이다. 이후 `research-landscape-terms.md` 의 코드 경계와 결론 1 을 정정했다. 고정 코드 `9424cc7b5394` 에서 Codex 검증·모델 갱신은 `auth.json` 을 읽어 임시 HOME 에 복사하고, 계정 표시도 `tokens.id_token` 을 읽는다. 따라서 Claude 와 Codex 에 「서버는 토큰을 다루지 않는다」는 공통 전제를 적용하지 않는다.
+
+이 정정은 공개 소스만 대조했다. 실제 자격증명 파일을 읽거나 실행하지 않았고, 접근하지 못했던 약관을 다시 받지 않았다. 공급자 정책의 허용·위반 판단을 새로 내리지 않는다.

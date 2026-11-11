@@ -4,6 +4,8 @@
 
 research-landscape-terms · 2026-11-10 KST · 하위 보고 셋의 내용은 옮기지 않았다
 
+2026-11-11 후속 정정: 아래 벤더 표는 원래 조사의 정책 해석이다. masc 의 적합성 판정과는 구분한다. 고정 코드 `9424cc7b5394` 의 Codex 로그인 파일 읽기·복사를 다시 대조해 「약관 문장이 설계와 코드에 닿는 곳」과 결론 1 을 고쳤다. 실제 자격증명 파일과 접근하지 못했던 약관 원문은 읽지 않았다.
+
 ## 질문과 답
 
 질문: 팀원이 각자 자기 유료 구독으로 로그인한다. self-hosted 팀 서버가 그 사람 몫으로 벤더의 공식 CLI를 subprocess로 띄운다. 벤더가 이것을 허용하는가.
@@ -186,22 +188,22 @@ research-landscape-terms · 2026-11-10 KST · 하위 보고 셋의 내용은 옮
 
 코드는 worktree `authz-d1-1-20261108`의 HEAD `9424cc7b5394`에서 읽기만 했다. 빌드와 실행은 하지 않았다.
 
-1. Claude 로그인은 사람이 `claude` 안에서 끝낸다. 서버는 `CLAUDE_CONFIG_DIR` 경로만 정한다. `.credentials.json`은 Claude Code가 그 디렉터리에 쓴다. 서버 코드가 그 파일을 읽거나 토큰을 넘기면, 자격증명을 모으거나 보관하거나 중개하지 말라는 금지 문장에 걸릴 수 있다. 허용 문장과 금지 문장을 같이 읽은 내 해석이다. `lib`와 `bin`에 `credentials.json`을 이름으로 부르는 코드는 없다(rg 0건). 계정 이메일은 `.claude.json`의 `oauthAccount.emailAddress`에서 읽는다(`lib/runtime/runtime_account_email.mli:11`). 자격증명이 아니다.
+1. Claude 로그인은 사람이 `claude` 안에서 끝낸다. 서버는 `CLAUDE_CONFIG_DIR` 을 정하고, 계정 이메일 표시는 `.claude.json` 의 `oauthAccount.emailAddress` 에서 읽는다(`lib/runtime/runtime_account_email.ml:86-88,132-157`). 그 이메일은 인증이나 라우팅 입력이 아니다(같은 `.mli:1-5`). 원래 조사는 `.credentials.json` 읽기나 token 중개가 Anthropic 의 금지 문장에 걸릴 수 있다고 해석했다. `lib` 와 `bin` 의 `credentials.json` 이름 검색 0건은 서버의 모든 인증 정보 미취급을 증명하지는 않는다.
 2. `claude setup-token`으로 만든 토큰을 서버가 받아 보관하는 방식은 쓰지 않는다. 같은 금지 문장에 걸린다(내 해석). 조직 제한도 이 명령은 비켜 간다 [An2].
 3. 사람 하나에 구독 하나다. Runtime 공유는 API 키 Runtime에만 열 수 있다. 근거는 조건 2와 계정 공유 조항, 그리고 API 키 예외 문장이다.
 4. 확인함: 계정 디렉터리를 선언하면 Claude child는 기본 이름만 물려받는다(`lib/runtime/runtime_claude_environment_projection.ml:44-45`, `lib/runtime/runtime_official_account.ml:129-136`). `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`이 넘어가지 않는다. 운영자의 API 키가 사람의 구독을 덮는 일을 이미 막는다. Codex도 같다(`lib/runtime/runtime_codex_environment_projection.ml:41-47`).
 5. 확인 필요(실측 안 함): `lib/runtime/runtime_claude_environment_projection.ml:5-9`가 `HOME`과 `XDG_CONFIG_HOME`을 물려준다. 문서상 Anthropic profile은 `~/.config/anthropic`에 있고 `CLAUDE_CONFIG_DIR` 밖이다. 서버 OS 사용자에게 profile이 있으면 `oidc_federation`은 사람의 `/login`보다 앞서고, `user_oauth`는 사람의 로그인이 만료됐을 때 대신 쓰인다. 그러면 운영자 조직이 그 사람의 사용량을 낸다. 조건 2와 반대다. 확인 방법: profile이 있는 host에서 빈 `CLAUDE_CONFIG_DIR`로 `claude`를 띄우고 `/status`에 `Profile` 행이 뜨는지 본다.
 6. `-p`의 기본이 bare로 바뀌는 release에서 구독 경로가 끊길 수 있다. Claude Code 버전마다 "구독 로그인으로 `-p`가 도는가"를 탐침한다.
 7. 로그인이 만료되면 사람이 다시 로그인해야 한다. 서버가 대신 갱신할 길이 없다. 만료를 Keeper 상태로 보여 준다.
-8. Codex는 사람마다 `CODEX_HOME` 하나를 두고 `auth.json`을 한 기계에만 둔다. 스케일아웃하면 그 사람의 Codex 턴은 그 파일이 있는 node에 묶인다. 원격 로그인은 device code가 문서의 첫 길이다. 계정 이메일은 `auth.json`의 `tokens.id_token`에서 읽는다(`lib/runtime/runtime_account_email.mli:10`). 토큰 파일을 여는 코드다. 이를 막는 문장은 OpenAI 문서에서 못 찾았다.
-9. 확인 필요: `Runtime_verification_codex_home.prepare`가 `auth.json`을 임시 `CODEX_HOME`으로 복사한다(`lib/runtime/runtime_verification_codex_home.mli:9-13`, 부르는 곳 `lib/runtime/runtime_codex_model_refresh.ml:24`, `lib/runtime/runtime_verification.ml:1033`). 사본에서 토큰이 갱신되고 사본이 버려지면 원본 로그인이 끊길 수 있다. [Oa2]가 다시 로그인해야 하는 경우로 든 것, 곧 다른 기계나 동시에 돈 job 이 token 을 먼저 교체한 경우가 이것이다.
+8. 원래 조사는 Codex 의 로그인 파일을 한 기계나 순서대로 도는 job 흐름 하나에 두라는 문서 안내를 인용했다. 이것이 masc 의 파일 수명을 검증한 결과는 아니다. 계정 이메일 표시는 `auth.json` 의 `tokens.id_token` 을 실제로 읽는다(`lib/runtime/runtime_account_email.ml:82-84,113-151`). 이 독자는 이메일만 표시하고 인증 권한을 주지 않지만, 서버가 token 을 담은 파일을 읽는 경로다. 이를 막는 문장을 찾지 못했다는 것만으로 허용을 확정할 수는 없다.
+9. 파일 복사도 확인된다. `Runtime_verification_codex_home.prepare` 는 원본 `auth.json` 이 있으면 `Fs_compat.load_file` 로 전체를 읽어 임시 `CODEX_HOME` 에 쓴다. 디렉터리는 `0700`, 사본은 `0600` 이다(`lib/runtime/runtime_verification_codex_home.ml:81-103`). 검증과 모델 목록 갱신이 부른다(`lib/runtime/runtime_codex_model_refresh.ml:23-25`, `lib/runtime/runtime_verification.ml:1029-1035`). 사본에서 token 이 갱신된 뒤 버려질 때 원본 로그인에 생기는 영향은 실행으로 확인하지 않았다. [Oa2] 에 대한 원래 조사의 해석과 이 미측정 위험은 구분한다.
 10. Google AI Pro와 Ultra 로그인은 다계정 Runtime 종류에서 뺀다. 코드는 이미 다계정에서 Antigravity HOME을 만들지 않는다(`lib/runtime/runtime_antigravity_home.mli:11-13`). Gemini를 쓰려면 API 키 경로다.
 11. 확인 필요(운영자 몫): 단일 사용자 서버의 Antigravity Runtime은 운영자의 로그인 사본을 관리 HOME에 두고 `agy`를 띄운다(같은 파일 1~13줄). 운영자 계정이 소비자 플랜이면 [Go2]가 소비자 플랜에서 지원하지 않는다고 적은 경우에 해당한다. 계정 종류는 내가 알 수 없다. [Go8]은 두 번째 위반을 영구 차단이라고 적는다.
 12. 벤더에 물어야 닫히는 것 둘: 자기 팀만 쓰는 서버가 문서가 말하는 고객의 제품이나 서비스에 드는가. 보통의 개인 사용이 상시 실행 agent를 품는가. 문의처는 legal 문서가 적은 contact sales다.
 
 ## 하위 보고 셋을 묶은 결론
 
-1. 구독으로 팀 서버를 돌릴 길은 Claude(조건부)와 Codex(비권장 경로) 둘이다. 조건은 같다. 로그인은 사람이 하고, 실행은 수정 없는 공식 CLI가 하고, 서버는 토큰을 만지지 않는다. masc의 "사람이 소유한 구독 Runtime을 서버가 띄운다"는 이 모양과 맞는다.
+1. Claude 와 Codex 가 같은 조건을 충족한다고 결론낼 수는 없다. 사람이 공식 CLI 에 직접 로그인해도 Codex 경로에서 서버는 `auth.json` 을 읽고 복사한다. 「서버는 토큰을 다루지 않는다」는 원래 공통 전제는 이 코드와 맞지 않는다. Claude 의 자격증명 제한에 대한 해석과 Codex 의 파일 처리를 나누어 검토해야 하며, 이 정정은 어느 쪽의 현재 운영 형태에 대한 허용·위반 판정을 새로 하지 않는다.
 2. 벤더 플랫폼(Claude Code, Managed Agents, Cursor, Devin, OpenAI Agents API)은 같은 스케일아웃 모양을 쓴다. loop은 중앙에 있고, 실행기는 밖에서 붙어 일감을 가져간다. Claude Code와 Devin은 lease로 쥔다. 구독 CLI는 제약을 하나 더한다. 로그인 파일이 있는 기계에 그 사람의 턴이 묶인다.
 3. 조사한 오픈소스 오케스트레이터 가운데 무료 판에서 팀 계정과 사람별 벤더 자격증명을 같이 주는 곳을 못 찾았다. 구독 계정별 한도를 아는 스케줄링도 비어 있다. masc가 가려는 자리다.
 4. 커뮤니티(HN 위주 표본)에서 가장 자주 나온 불만 둘이 비용 귀속과 약관 불안이다. 사람별 구독은 비용 귀속을 구조로 푼다. 약관 불안은 설치 문서에 "어느 문장에 기대는가"를 적어야 풀린다. 위 Anthropic 허용 문장들이 그 재료다.

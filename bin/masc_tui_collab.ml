@@ -218,11 +218,13 @@ let lines ~height ~width t =
   let everything = List.length heading + kept + List.length (List.concat invites) + 1 + List.length footer in
   if everything <= height then heading @ form @ message @ fixed @ List.concat invites @ [""] @ footer
   else begin
-    (* A short window gives up its static text first: the closing sentence,
-       then the two explanatory sentences, then the keys. The form, the messages
-       and the selected invite stay, and the invites take the rows that are
-       left. The frame says how many rows it cut, in a row of its own that is
-       kept free here. *)
+    (* A short window gives up its static text first. The heading is whole while
+       it fits in what the form, the messages, the fixed text and the selected
+       invite leave, less the frame's note row; else the keys alone; else
+       nothing. The closing sentence is not counted: it stays last, the frame
+       cuts it first and says how many rows it cut, in a row of its own that is
+       kept free here. A heading that gave way is not reported when what is
+       left fits without a cut. The invites take the rows that are left. *)
     let current = List.length (Option.value (List.nth_opt invites selected) ~default:[]) in
     let room = height - kept - current - 1 in
     let heading = Option.value (List.find_opt (fun rows -> List.length rows <= room) [heading; keys]) ~default:[] in

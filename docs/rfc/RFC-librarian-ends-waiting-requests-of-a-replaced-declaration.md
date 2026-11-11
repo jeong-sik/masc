@@ -12,7 +12,7 @@ related: ["0489", "0500", "librarian-history-unknown-resolution", "librarian-his
 
 # 선언이 교체되면 그 선언으로 만든 대기 요청을 끝내고 새 선언으로 다시 만든다
 
-이슈 #51278 의 설계 문서다. 코드 위치는 main `3c876bd23e9d` 기준이다.
+이슈 #51278 의 설계 문서다. 코드 위치는 main `3c876bd23e9d` 기준이다. 시작 표시를 저장하는 때와 guard 를 부르는 순서(1.3, 3.2, 3.5, 4.1)는 #51269 가 들어간 main `b6fb3b3ee07e` 기준이고, 그 대목은 줄 번호 대신 함수 이름으로 가리킨다.
 
 ## 0. 요약
 
@@ -71,7 +71,7 @@ related: ["0489", "0500", "librarian-history-unknown-resolution", "librarian-his
 |---|---|---|
 | `Captured`, `Admission_wait` (worker 에 접수되지 않음) | worker 에 묻기 전에 목적지 확인에서 거절된다. pass 마다 오류다 | `lib/lane_addon/lane_addon_submit_once.ml` 200~206행 |
 | `Dispatch_pending`, host 기록에 결과가 없고 실행 중이 아님 | Keeper 는 host 기록을 먼저 읽는다. 열려 있으면 worker 에 물으려다 같은 거절을 받는다. host 는 cycle 마다 원본 본문을 다시 읽어 확인한 뒤 거절한다 | 같은 파일 207~218행, `lib/lane_addon/lane_addon_exact.ml` 976행 |
-| `Dispatch_pending`, host 가 실행 중이었음 | Runtime 이 worker 를 물릴 때 실행을 취소한다. 시작 표시만 남는다. 다음 cycle 이 그 시도를 `outcome_unknown` 으로 끝내고 원인을 `cut` 으로 남긴다. Keeper 는 그 원본을 pass 마다 기다린다. 끝내는 길이 없다 | `lane_addon_runtime.ml` 213행·1180~1186행, `lane_addon_exact.ml` 919~926행·994행, `lib/keeper/keeper_librarian_durable_commit.ml` 246행 |
+| `Dispatch_pending`, host 가 실행 중이었음 | Runtime 이 worker 를 물릴 때 실행을 취소한다. 첫 생성 요청을 보내기 직전까지 간 실행은 시작 표시가 남는다(`lane_addon_exact.ml` 의 `mark_started`). 다음 cycle 이 그 시도를 `outcome_unknown` 으로 끝내고 원인을 `cut` 으로 남긴다. Keeper 는 그 원본을 pass 마다 기다린다. 끝내는 길이 없다. 첫 생성 요청의 허가를 기다리다 취소된 실행은 시작 표시가 없다(#51269). 그 요청은 윗줄과 같다 | `lane_addon_runtime.ml` 213행·1180~1186행, `lane_addon_exact.ml` 919~926행·994행, `lib/keeper/keeper_librarian_durable_commit.ml` 246행 |
 | `Dispatch_pending`, host 기록이 끝남 | Keeper 가 host 기록의 결과로 원본을 끝낸다. worker 를 부르지 않고 목적지도 확인하지 않는다 | `lane_addon_submit_once.ml` 208~210행 |
 | `Judged`, 반영이 남음 | gate 가 이미 끝났으면 목적지를 보지 않고 반영한다. gate 를 시작하거나 이어서 실행해야 하면 목적지 비교에 막혀 기다린다 | `keeper_librarian_durable_commit.ml` 312~317행, 350~352행 |
 
@@ -197,9 +197,11 @@ type dispatch_guard = unit -> (unit, dispatch_veto) result
   - 답이 있는 요청은 지금 package 가 그 output 과 schema 를 그대로 선언하는 한, 선언이 교체된 뒤에도 그 답을 전달한다.
   - 선언하지 않으면 지금처럼 전달을 거절한다(940~942행). 그 규칙은 바꾸지 않는다.
 - 실행 중인 walk 도 slot 마다 보내기 직전에 같은 guard 를 부른다. guard 는 선언 파일을 그때 새로 읽는다(`lane_addon_runtime.ml` 619~629행). 운영자가 파일을 고친 뒤 Runtime 이 앞 worker 를 물리기 전에도 거절이 나온다.
-  - HTTP slot 에서 거절되면 walk 가 그 자리에서 멈춘다. 그 시도는 미뤄진 시도(`Deferred`)로 남는다(`lib/server/server_lane_addon_exact.ml` 117~119행, 146~157행). 다음 cycle 에 위 갈래로 온다.
-  - CLI slot 에서 거절되면 예외로 끝나 `raised` 가 된다(같은 파일 174~177행, 225~229행, `lane_addon_exact.ml` 995행). CLI walker 의 관찰 함수가 값을 돌려주지 못해서다(`lib/keeper/keeper_lane_cli_oneshot.ml` 400행). `raised` 원본은 끝내는 길이 없다.
-  - guard 가 거절했다는 것은 그 slot 에 보내지 않았다는 뜻이다. 결과를 모르는 것이 아니다. CLI walker 가 보내기 전의 거절을 값으로 받아 그 자리에서 멈추게 한다. 그 시도는 HTTP 와 같이 `Deferred` 로 남고 다음 cycle 에 위 갈래로 온다(7절의 L1b).
+  - guard 를 부르는 자리는 둘이다. `run` 이 실행을 시작하기 전에 한 번 부르고, walk 가 slot 마다 부른다(`run` 안의 `before_dispatch`).
+  - 생성 요청(`Generation`) 앞에서는 시작 표시를 먼저 저장하고 그 뒤에 guard 를 부른다(#51269). 계량 요청(`Measurement`) 앞에서는 guard 만 부른다.
+  - HTTP slot 에서 거절되면 walk 가 그 자리에서 멈춘다. 끝 저장이 그 시도를 미뤄진 시도(`Deferred`)로 적는다(`lib/server/server_lane_addon_exact.ml` 117~119행, 146~157행). 방금 쓴 시작 표시는 그 저장에서 `Deferred` 로 바뀐다. 다음 cycle 에 위 갈래로 온다.
+  - CLI slot 에서 거절되면 예외로 끝나고, 끝 저장이 그 시도를 `raised` 로 적는다(같은 파일 174~177행, 225~229행, `lane_addon_exact.ml` 995행). CLI walker 의 관찰 함수가 값을 돌려주지 못해서다(`lib/keeper/keeper_lane_cli_oneshot.ml` 400행). `raised` 원본은 끝내는 길이 없다.
+  - guard 가 거절했다는 것은 그 slot 에 보내지 않았다는 뜻이다. 결과를 모르는 것이 아니다. CLI walker 가 보내기 전의 거절을 값으로 받아 그 자리에서 멈추게 한다. 그 시도는 HTTP 와 같이 `Deferred` 로 남고 다음 cycle 에 위 갈래로 온다(7절의 L1b, #51343).
   - walk 안의 guard 에는 두 결과를 글자로 바꿔 넘긴다. walk 안에서는 어느 쪽이든 멈추기만 한다.
 - 실행이 취소되어 끊긴 요청은 3.5 에 있다.
 - `authorize_captured_exact_dispatch` 는 3.1 의 조건으로 셋 가운데 하나를 돌려준다. 허가, `Declaration_replaced`, `Not_now` 다.
@@ -277,7 +279,9 @@ type replaced = { captured : Lane_addon_captured_destination.t; current : Lane_a
 - `raised` 는 바꾸지 않는다. 같은 선언에서 끊긴 원본도 그대로다(5절).
   - 선언을 바꿀 때 `raised` 가 생기는 길은 CLI slot 의 guard 거절 하나다. 그 길은 3.2 가 `raised` 를 만들지 않게 고친다. 이미 `raised` 로 끝난 원본은 남는다.
 - 이 규칙은 history 원본의 것이다. floor step 은 끊긴 시도를 원인과 상관없이 기다린다(`lib/keeper/keeper_librarian_floor_step_owner.ml` 49~51행). 서버가 멈춰 끊긴 것도 그렇다. 이 문서는 그 동작을 바꾸지 않는다(5절).
-- host 는 시작 표시를 provider 허가를 기다리기 전에 저장한다(#51250). 허가를 기다리던 요청도 선언이 바뀌면 끊긴 것으로 남는다. 이 규칙이 그 원본도 푼다.
+- 이 규칙이 푸는 것은 시작 표시가 남은 원본이다. host 는 시작 표시를 첫 생성 요청을 보내기 직전에 저장한다(#51269).
+  - 첫 생성 요청의 허가를 기다리다 취소된 실행은 시작 표시가 없다. 그 요청은 host 기록에 결과도 실행 중 표시도 없으므로 다음 cycle 에 3.2 의 갈래로 온다. 선언이 교체됐으면 거기서 `Not_allowed` 로 끝난다.
+  - 앞 slot 에 생성 요청을 보낸 뒤 뒤 slot 의 허가를 기다리다 취소된 실행은 시작 표시가 있다. 그 원본은 이 규칙으로 풀린다.
 
 ### 3.6 교체된 선언의 원본을 끝낸 pass 는 자기 Keeper 를 깨운다
 
@@ -318,7 +322,7 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 | 틱 | 일 | A | B | C |
 |---|---|---|---|---|
 | N | 운영자가 선언을 고친다 | 대기 | 대기 | 실행 중 |
-| N+1 | Runtime 이 바뀐 선언을 관찰하고 앞 worker 를 물린다 | | | 실행이 취소된다. 시작 표시만 남는다 |
+| N+1 | Runtime 이 바뀐 선언을 관찰하고 앞 worker 를 물린다 | | | 실행이 취소된다. 첫 생성 요청을 보내기 직전까지 갔으면 시작 표시가 남는다 |
 | N+2 | 새 worker 가 붙고 대기 목록을 이어받는다. export 목록이 바뀌어 저장된 Keeper 가 모두 깬다 | | | |
 | N+3 | host cycle 이 목록을 돈다 | 선언이 교체됐다. `Not_allowed` 를 저장하고 전달한다. A 가 깬다 | 목록에 없다 | 끊긴 시도를 `outcome_unknown` 으로 끝내고 전달한다. C 가 깬다 |
 | N+4 | 각 Keeper 의 pass | host 기록의 `Not_allowed` 로 원본을 끝낸다. 좁히지 않는다. 자기를 깨운다 | 접수되지 않았고 선언이 교체됐다. `Refused {Before_dispatch}`. 자기를 깨운다 | 끊긴 거절을 남긴다. 선언이 교체됐으므로 자기를 깨운다 |
@@ -327,6 +331,7 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 - D 와 E 는 지금처럼 남는다(5절).
 - 깨움 사건은 N 과 N+2 사이에 세 번 나온다. 바뀐 선언을 관찰할 때, 앞 worker 를 물릴 때, 새 worker 가 붙을 때다(`lane_addon_runtime.ml` 4566행, 3407행, 1394행). 깨는 것은 저장된 Keeper 전부, admission 큐의 Keeper, 원본을 든 Keeper 다(`server_librarian_addon_wake.ml` 71~104행). 앞의 둘은 새 worker 가 붙기 전이라 그 pass 들은 지금처럼 오류로 끝난다.
 - N+2 의 신호로 깬 Keeper pass 가 host 의 N+3 보다 먼저 오면 A 는 지금처럼 거절 오류를 한 번 낸다. host 가 끝낸 뒤의 pass 가 정리한다.
+- 위 표의 C 는 시작 표시가 남은 경우다. C 가 첫 생성 요청의 허가를 기다리다 취소됐으면 시작 표시가 없다(#51269). 그 C 는 N+3 에 A 와 같은 길로 간다.
 - C 가 취소로만 끝나지는 않는다. N 과 N+1 사이에 walk 가 다음 slot 으로 넘어가면 guard 가 고친 파일을 읽고 거절한다(3.2). 그 시도는 미뤄진 시도로 남고 C 는 N+3 에 A 와 같은 길로 간다.
 - 앞 worker 가 container 를 기다리는 중이면 Runtime 은 그 worker 를 물리지 않는다(`lane_addon_runtime.ml` 4270~4274행). N+1 이 그만큼 늦어진다.
 - 지금은 한 번에 하나를 실행한다. C 는 선언을 바꿀 때마다 많아야 하나다. 함께 실행하는 수를 늘리면(#51272) 그만큼 는다.
@@ -391,7 +396,7 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 |---|---|---|
 | L0 | 목적지 관계 타입(3.1). history 의 좁히기 규칙(3.4)과 깨움 규칙의 첫 자리(3.6). 그 계약 문장 | 8절의 좁히기·깨움 시험 |
 | L1 | guard 결과 타입, `run` 의 갈래, Runtime 의 판정, history·floor step guard(3.2). 계약 문장 둘(`lane_addon_exact.mli`, `lane_addon_runtime.mli`)과 설명서 982~987행 | 8절의 host 시험 |
-| L1b | CLI walker 가 보내기 전의 guard 거절을 값으로 받아 멈춘다. walk receipt 에 "보내기 전에 멈춤"을 더한다(3.2) | 8절의 CLI 시험 |
+| L1b | CLI walker 가 보내기 전의 guard 거절을 값으로 받아 멈춘다. walk receipt 에 "보내기 전에 멈춤"을 더한다(3.2). 구현은 #51343 이다 | 8절의 CLI 시험 |
 | L2a | 목적지 확인 두 벌을 하나로, `Submit.resume` 의 접수 전 갈래, 증거 타입, history 가 읽는 자리 둘, 깨움 규칙의 둘째 자리(3.3) | 8절의 Keeper 시험 |
 | L2b | 같은 규칙을 floor step 에. step owner 와 chain 의 결과에 갈래 하나씩(3.3) | 8절의 floor 시험 |
 | L3 | 교체된 선언에서 끊긴 원본, inventory 검사에 지금 목적지 인자, 깨움 규칙의 셋째 자리(3.5) | 8절의 끊김 시험 |
@@ -473,7 +478,9 @@ Keeper 다섯이 서로 다른 phase 에 있다.
 - #51280: worker 가 요청을 온 순서로 받지 않는다. 그 수리는 package 를 올려야 해서 이 문서의 층 뒤에 온다.
 - #51199, #51272: 한 번에 하나씩 실행해서 대기 목록이 느리게 빈다.
 - #50828: 끊긴 원본과 worker 에 기록이 없는 원본.
-- #51250: host 가 시작 표시를 provider 허가 대기 전에 저장한다.
+- #51250, #51269: host 는 시작 표시를 첫 생성 요청을 보내기 직전에 저장한다. 그 허가를 기다리다 끊긴 요청은 표시 없이 남고 다음 cycle 에 다시 실행된다.
+- #51326: 기다리는 원본의 pass 가 본문을 다시 읽지 않게 하는 설계다. 그 문서도 `Submit.resume` 의 접수 전 갈래를 바꾼다. 순서는 이 문서의 관계 판정(3.3)이 먼저고 그 문서의 `load` 가 뒤다. 판정은 원본 기록의 목적지와 지금 목적지만 읽는다. 그래서 본문을 읽지 못하는 원본도 선언이 교체됐으면 끝난다. `load` 는 `Same` 일 때만, 접수 의도를 저장하기 전에 부른다. 나중에 들어가는 쪽이 이 순서로 맞춘다.
+- #51343: L1b 의 구현이다.
 - #51300: `ui_category` 만 바꾸면 host 와 Keeper 의 package 비교가 갈린다.
 - RFC-0489 2.5절: Goal 검증도 접수 전 원본을 같은 사건으로 끝내기로 했다. 그쪽은 다음 시도를 잇는 전이를 더 넓힌다. Librarian 은 읽은 위치에서 다시 고르므로 그 전이가 필요 없다. 증거 타입은 소비자마다 자기 것을 쓴다.
 - RFC-0500: 서버가 멈춰 끊긴 원본을 정리하고 다시 고르는 길. 이 문서의 3.5 가 같은 길에 조건 하나를 더한다.

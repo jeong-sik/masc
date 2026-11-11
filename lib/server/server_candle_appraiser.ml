@@ -83,7 +83,15 @@ let refusal_detail = function
 let usage (value : Exact.usage) : Runs.usage =
   {input_tokens=value.input_tokens;output_tokens=value.output_tokens;
    cache_creation_input_tokens=0;cache_read_input_tokens=0;cost_usd=None}
-let run_with ~registry ~base_path ~retain ~call ~identity request =
+(* The Candle worker's host_request projection, from this original snapshot.
+   This host-owned lookup never changes the worker request or dispatches. *)
+let exact_request intent =
+  let snapshot=Intent.to_worker_request intent in
+  Exact.request_of_json (`Assoc ["kind",`String "exact_output";
+    "request_id",`String (Intent.request_id intent);"output",`String (A.stage (Intent.request intent));
+    "messages",`List [`Assoc ["role",`String "user";"text",Yojson.Safe.Util.member "prompt" snapshot]];
+    "schema",Yojson.Safe.Util.member "schema" snapshot])
+let run_with ~registry ~base_path ~retain ~call ?(observe_slots=(fun _ -> None)) ~identity request =
   let key = prompt_key request in
   let resolution = Prompt_registry.resolve_prompt key in
   let* prompt = Prompt_registry.render_resolved_prompt_template key resolution
@@ -114,9 +122,10 @@ let run_with ~registry ~base_path ~retain ~call ~identity request =
       recorded_outcome = outcome && Yojson.Safe.equal recorded_output output
       && recorded_slot = slot && recorded_usage = usage in
     let write elapsed_s =
+      let slot_observations=observe_slots intent in
       (match elapsed_s with
-       | Some elapsed_s -> Runs.mark_completed registry ~run_id ~outcome ~elapsed_s ~selected_slot:slot ?usage ~output ()
-       | None -> Runs.mark_completed_unmeasured registry ~run_id ~outcome ~selected_slot:slot ?usage ~output ())
+       | Some elapsed_s -> Runs.mark_completed registry ~run_id ~outcome ~elapsed_s ~selected_slot:slot ?usage ?slot_observations ~output ()
+       | None -> Runs.mark_completed_unmeasured registry ~run_id ~outcome ~selected_slot:slot ?usage ?slot_observations ~output ())
       |> Result.map_error (fun error -> A.Transport_unavailable (Runs.completion_error_to_string error)) in
     let readable = function
       | Some Runs.Available -> Ok ()
@@ -195,5 +204,29 @@ let run ~config ~identity request =
   let retain ~request_id ~request = Lane_addon_runtime.retain_tool_request_owner
     ~config ~access:Lane_addon_sources.Operator_configuration ~reserved ~export
     ~scope ~request_id ~summary:`Null ~request in
-  run_with ~registry:(Runs.global ()) ~base_path:config.base_path ~retain ~call ~identity request
-module For_testing = struct let run = run_with end
+  let observe_slots intent =
+    let store=Lane_addon_store.of_config config in
+    match Systhread_host.run (fun () ->
+      let* owner=Lane_addon_tool_request_owner.load ~store ~scope ~request_id:(Intent.request_id intent)
+        |> Result.map_error Lane_addon_tool_request_owner.error_to_string in
+      match owner with
+      | None -> Ok None
+      | Some owner ->
+        let* actual=Lane_addon_action.canonical owner.request in
+        let* expected=Lane_addon_action.canonical (Intent.to_worker_request intent) in
+        let* ()=if Yojson.Safe.equal actual expected then Ok ()
+          else Error "Candle diagnostic original request differs" in
+        let* installation=Lane_addon_tool_request_owner.installation_of_id owner.installation_id in
+        match installation with
+        | Lane_addon_tool_request_owner.Manual _ -> Ok None
+        | Configuration declaration_id ->
+          let* exact=exact_request intent in
+          Exact.read_latest_slot_observations ~store ~declaration_id
+            ~schema:(A.schema (Intent.request intent)) exact) with
+    | Ok observations -> observations
+    | Error detail -> Log.Misc.warn "Candle slot observations unavailable: %s" detail; None in
+  run_with ~registry:(Runs.global ()) ~base_path:config.base_path ~retain ~call ~observe_slots ~identity request
+module For_testing = struct
+  let run ~registry ~base_path ~retain ~call ~identity request =
+    run_with ~registry ~base_path ~retain ~call ~identity request
+end

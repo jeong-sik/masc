@@ -15,13 +15,18 @@
     and the files deleted inside the barrier. An original is retained before
     its Exact run starts, so a listed file whose original is live is seen
     owned. Every link goes before any record: a link left without its record
-    stops a rerun with an error, a record left without its link does not. *)
+    stops a rerun with an error, a record left without its link does not.
+    Passive slot companions use the same original-owner fence and are removed
+    before links, with separate counts; live originals retain them. *)
 
 type report =
   { declarations : int
   ; live_originals : int
   ; kept_exact_records : int
   ; kept_proofs : int
+  ; kept_observations : int
+  ; removed_observations : int
+  ; removed_observation_bytes : int64
   ; removed_proofs : int
   ; removed_proof_bytes : int64
   ; removed_exact_records : int
@@ -37,6 +42,7 @@ type error =
   | Removal_stopped of
       { removed_proofs : int
       ; removed_exact_records : int
+      ; removed_observations : int
       ; detail : string
       }
       (** A deletion failed. The counts say how many went before it. *)

@@ -842,6 +842,15 @@ let read_latest_original_execution ~store ~declaration_id ~schema request =
       if Yojson.Safe.equal schema retained_schema then Ok (Completed_latest {attempt_ordinal;execution})
       else Error "original execution proof differs from the supplied original schema"
 
+let read_latest_slot_observations ~store ~declaration_id ~schema request =
+  let* latest=read_latest_original_execution ~store ~declaration_id ~schema request in
+  match latest with
+  | No_completed_latest -> Ok None
+  | Completed_latest {attempt_ordinal;execution} ->
+    let proof=proof_to_json ~store ~declaration_id request ~schema ~attempt_ordinal execution in
+    Lane_addon_exact_observation.read ~store ~declaration_id ~request_id:request.request_id
+      ~attempt_ordinal ~proof
+
 (* Requests this process is running, by store root, declaration and request.
    Only the base-path lease holder runs requests (see the interface), so a
    started attempt that is not here was cut off by a crash or a cancellation. *)
@@ -1064,8 +1073,9 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
             (* The save yields. A retiring incarnation must not enter a call
                after it returns. *)
             Eio.Fiber.check ();
+            let slot_capture=Exact_lane_slot_capture.create ~owner:(Runtime_schema.Addon lane) () in
             let attempt, recorded, execution =
-              match call ~validate with
+              match Exact_lane_slot_capture.with_capture slot_capture (fun () -> call ~validate) with
               | execution ->
                   let recorded = match execution.outcome with
                     | Call_ended final -> Completed_call final
@@ -1091,6 +1101,18 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                   Eio_unix.run_in_systhread (fun () ->
                     retain_proof ~store ~declaration_id request ~schema
                       ~attempt_ordinal:(List.length previous.attempts + 1) execution) in
+              (* Optional observations have their own proof-bound link. A
+                 failed diagnostic write cannot undo accepted original work. *)
+              (match execution,Exact_lane_slot_capture.observations slot_capture with
+               | Some execution,Some observations ->
+                 let attempt_ordinal=List.length previous.attempts+1 in
+                 let proof=proof_to_json ~store ~declaration_id request ~schema ~attempt_ordinal execution in
+                 (match Eio_unix.run_in_systhread (fun () ->
+                    Lane_addon_exact_observation.retain ~store ~declaration_id
+                      ~request_id:request.request_id ~attempt_ordinal ~proof observations) with
+                  | Ok () -> ()
+                  | Error detail -> Log.Misc.warn "Exact slot observations were not retained: %s" detail)
+               | None,_ | Some _,None -> ());
               let finished = match attempt with
                 | Final final ->
                     {previous with attempts = previous.attempts @ [recorded]; final = Some final}

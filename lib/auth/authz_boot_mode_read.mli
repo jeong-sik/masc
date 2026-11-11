@@ -44,6 +44,17 @@ val requested_of_json : Yojson.Safe.t -> Authz_boot_mode.requested
     fields. *)
 val read_config : base_path:string -> Authz_boot_mode.requested * Authz_boot_mode.settings
 
+(** Whether [config.json] under [base_path] asks for [Multi_account]: what a
+    command that holds no lease reads of the account mode. To such a request
+    {!Authz_boot_mode.judge} answers an activation, the account server, an
+    uncertainty or a refusal, and never a single user, so a command that
+    prepares or opens the server of a single user stops on [true]. It says
+    nothing of activation: the log and the store are read under the lease, by
+    {!boot}. [false] for a request that is not set, that asks for a single
+    user, or that holds a value the table does not know; a boot refuses the
+    last in its own words. *)
+val asks_for_multi_account : base_path:string -> bool
+
 (** The mode that the last mode event of the log made, and the external
     high-water mark. *)
 val read_log_and_store
@@ -87,6 +98,12 @@ val decide : Authz_boot_mode.input -> decision
     of the accounts read-only ({!Authz_off}). One line for the texts of
     [masc auth bootstrap]. *)
 val turn_off_line : string
+
+(** What a base path that {!asks_for_multi_account} boots, and the two commands
+    that run it. One line, which names the config file, for the commands that
+    prepare or open the server of a single user: [masc doctor], [masc setup]
+    and the setup journey. *)
+val account_installation_line : base_path:string -> string
 
 (** One line per reason, the first apart, so a stop always has a reason. An
     {!Authorization_uncertain} stop also says what the high-water mark

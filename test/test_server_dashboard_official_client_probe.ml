@@ -230,7 +230,6 @@ let test_cli_unavailable_is_measured_login_evidence () =
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run
     "server_dashboard_official_client_probe"
     [ ( "probe"

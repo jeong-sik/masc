@@ -1,0 +1,100 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  hints on                                                                       │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│◆ Chat                                           ◇ Slash commands                                 │
+│  Left             empty composer: open the        /login [client]  sign in to an official        │
+│                   Keeper list; with text: move                    client and verify a model      │
+│                   the cursor left                                 connection                     │
+│  Right            roster focused: return focus    /task-inspect   inspect this session's Task    │
+│                   to the chat composer                            creations without repeating    │
+│  Up / Down        roster focused: move; chat                      them                           │
+│                   scrolled back: adjust by one    /task-recover   restore a retained Task        │
+│                   line                                            command for this Keeper;       │
+│  Enter            send from chat, or open the                     inspect Tasks before           │
+│                   selected Keeper from the                        repeating an unconfirmed       │
+│                   roster                                          creation                       │
+│  Ctrl-J           newline in the draft            /task <title>   create a task for this keeper  │
+│  Ctrl-Y           record into the draft; again                    (lines below become the body)  │
+│                   to stop and keep what was       /keeper <name>  switch this pane to another    │
+│                   said                                            keeper                         │
+│  Ctrl-A           continuous capture on/off:      /addons [inspect|attach JSON|observe           │
+│                   each sentence starts the        ID|detach ID|slice JSON|evidence JSON]         │
+│                   next capture                                    open optional cross-lane       │
+│  Ctrl-G           next keeper with a chat open                    observations and package       │
+│  Ctrl-U           clear the draft                                 actions                        │
+│  Ctrl-K / Ctrl-P  cancel / edit the last          /play [invites|invite <name> <hours>|link      │
+│                   queued line                     [name]|revoke <name>]                          │
+│  F9               fold or expand this Keeper's                    list, issue or revoke shared   │
+│                   scheduled Jobs, pending                         DOS play links                 │
+│                   occurrences, holds and          /listen         play the newest audio or MIDI  │
+│                   latest result                                   attachment in this             │
+│  Ctrl-T           inspect and manage waiting                      conversation                   │
+│                   turns                           /artifacts (/reports)  browse published        │
+│  PgUp/PgDn        scroll history by a page                        Markdown and HTML reports in   │
+│  Ctrl-R           cycle reasoning hidden /                        a full-width reader            │
+│                   folded / full                   /settings       open type-aware runtime        │
+│  Ctrl-D           cycle compact / results /                       settings                       │
+│                   full tool detail                /diff           open git changes and diff for  │
+│  Ctrl-S           unfold the running turn's                       the workspace                  │
+│                   status rows, or fold them       /patch (/review)  open the patch review for    │
+│                   back to the progress line                       pending code changes           │
+│  Ctrl-N           cycle Memory journal summary    /cost           open Usage for provider        │
+│                   / full / hidden                                 quotas and Keeper usage        │
+│  Ctrl-F           cycle no clock / inline         /changes        open recorded file changes     │
+│                   clock / full timestamp and                      for this keeper                │
+│                   request id                      /queue [pause|resume|clear|cancel ID|last      │
+│  Ctrl-O           preview the newest image or     ID|edit ID message]                            │
+│                   Mermaid diagram; /images                        open the queue panel or        │
+│                   lists all; any key returns                      manage waiting work            │
+│  /approve /deny   type a command and Enter to     /run-next       prioritize my queued message,  │
+│                   answer a tool approval                          stop the observed turn, and    │
+│  /copy            send the selected Keeper's                      resume                         │
+│                   latest completed reply to       /priority [on|off] (/autonext)                 │
+│                   the terminal clipboard via                      toggle or set automatic        │
+│                   OSC 52                                          next-turn promotion for user   │
+│  Q / Ctrl-Q       Q on an active turn with an                     input                          │
+│                   empty draft or hidden           /approve        allow this keeper's held tool  │
+│                   composer; Ctrl-Q always                         call                           │
+│                   leaves without interrupting     /deny           deny this keeper's held tool   │
+│  Esc              roster focused: return to                       call                           │
+│                   the composer; chat focused:     /interrupt [keeper]  signal a streaming turn   │
+│                   back, and during a turn                         to stop: this pane's, or the   │
+│                   interrupt it                                    named keeper's                 │
+│                                                   /steer <message>  submit this first, stop the  │
+│◇ Global                                                           observed turn, and resume      │
+│  Tab / Shift-Tab  next / previous surface         /thinking [hidden|folded|full]                 │
+│  3                jump to Keepers when the                        set or cycle reasoning         │
+│                   active field or panel does                      visibility                     │
+│                   not use 3                       /calls          choose an original             │
+│  r                refresh the current surface                     conversation execution and     │
+│  i                focus the composer; on                          read its entire result         │
+│                   Dashboard, choose a Keeper      /tools [compact|results|full]                  │
+│  :                command palette                                 cycle or set tool summary,     │
+│  ;                agenda: what is coming, and                     short results, or full detail  │
+│                   who is waiting on you; Enter    /memory [status|sync]  cycle journal rows,     │
+│                   opens a row                                     read the last measured drain,  │
+│  @                answering: who is mid-turn                      or request catch-up            │
+│                   or just finished; Enter         /fleet-memory   browse consolidated facts      │
+│                   opens their chat                                across the entire keeper       │
+│  ?                this help; `/` filters its                      fleet                          │
+│                   keys and commands               /find [text]    go to the newest message       │
+│  &                Collab: watch MSX/DOS and                       holding text; again for the    │
+│                   manage play links (also `:`                     next                           │
+│                   go Collab)                      /copy           send this Keeper's latest      │
+│  Ctrl-B           show or hide the Keeper                         completed reply to the         │
+│                   roster; it starts hidden and                    terminal clipboard             │
+│                   the choice persists across      /measurement <sha256>  inspect a published     │
+│                   navigation and resizing                         meaning-preservation           │
+│  Ctrl-L           cycle the Activity pane                         measurement                    │
+│                   narrow, wide or hidden; the     /context        inspect the last observed      │
+│                   wheel over the pane scrolls                     provider input                 │
+│                   the full list; a press picks    /music [midi]   open the music library, or     │
+│                   a keeper, a second press                        edit the newest chat MIDI and  │
+│                   opens its chat; /activity                       choose its instrument          │
+│  [lines 1-92/973]                                                                                │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:close  …
+ › to imp   (i to write)

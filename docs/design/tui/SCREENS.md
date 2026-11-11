@@ -55,7 +55,7 @@ Keeper 상세의 Automation과 Channels는 해당 Keeper의 별도 읽기 탭이
 | System 설정 탭 7개 | runtime.toml, models, params, prompts, presets, themes, voice |
 | Tools 탭 5개 | 유효 도구, 비동기 요청, Skill 활성화, Skill 사용, 전체 카탈로그 |
 | Tools 하위 읽기 | 전체 카탈로그의 `V`: 은퇴 Keeper 볼륨 보고·회수 결과, Esc로 원래 목록 위치 복귀 |
-| Runtime | lane 후보, 전체 runtime, 선택 runtime 상세·후보 선택·모델 편집 |
+| Runtime | lane 후보·전체 runtime·상세·모델 편집. 미디어 순서 편집은 선택 slot을 포함한 페이지, 이름 입력은 초안 끝을 먼저 표시. 미디어 `v`, 이름 입력 `PgUp`은 전체 원문 읽기 후 Esc로 복귀 |
 | Features | 기능 목록, inventory 상세, lane 실행 목록·원문, 측정 상세 |
 | Usage | Plan, Keepers, Calls, Trend, 계정 범위 선택·telemetry |
 | Board | 글 목록, 글·댓글, 작성 초안 |

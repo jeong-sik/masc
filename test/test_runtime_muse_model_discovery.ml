@@ -121,7 +121,6 @@ let check_selected_account_metadata ~notify_before_reply () =
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run "Muse model discovery"
   [ "metadata", [test_case "source and projection" `Quick test_sources_and_projection
                 ; test_case "nullable and old host" `Quick test_nullable_limits_and_old_host

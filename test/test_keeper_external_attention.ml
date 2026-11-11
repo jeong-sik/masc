@@ -476,7 +476,7 @@ let test_external_cursor_recovers_memory_receipt ~with_unread () =
   Cursor.prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name initial ~through:2
     ~atom:(Some range) ~official:None |> get;
   Alcotest.(check int) "preparation without Memory commit does not consume" 0 (Cursor.offset (read ()));
-  ignore (Current.apply_disposition ~revisions:[] ~durable_range_id:range ~official_range_id:official
+  ignore (Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~revisions:[] ~durable_range_id:range ~official_range_id:official
     ~absorbed:[] ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name ~now:1.
     ~source:{kind=Current.Librarian;trace_id="cursor-trace"} ~new_claims:[] () |> get);
   (* No acknowledge call: simulate interruption after the real Memory WAL

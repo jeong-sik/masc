@@ -4015,7 +4015,6 @@ let () =
   (* The Muse start prompt uses the shared Antigravity framing assets. Pin
      their source directory so selected cases also run outside Dune. *)
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
-  Masc_test_deps.publish_single_user_access ();
   run
     "keeper_muse_runtime"
     [ ( "MSP reasoning authority"

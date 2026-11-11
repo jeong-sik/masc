@@ -344,7 +344,6 @@ let test_cancelled_queued_frame_store_does_not_start () =
         (Sys.file_exists (V.frames_dir ~keeper_name:"vision-fixture" ())))
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run "Keeper standalone official-client vision"
   [ "artifact pool", [test_case "frame store" `Quick test_frame_store_in_pool;
                        test_case "cancelled frame store" `Quick test_cancelled_frame_store_does_not_start;

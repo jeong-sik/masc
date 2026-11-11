@@ -9,6 +9,16 @@ module Generation_receipt = Exact_output_generation_receipt
 include Exact_output_resolver
 include Exact_output_ready_admission
 
+type binding_observation = Plan.binding_observation = private
+  { provider_id : string option
+  ; model_id : string
+  ; provider_kind : Provider_config.provider_kind
+  ; endpoint : string
+  }
+
+let admitted_target_binding target =
+  Plan.binding_of_config (projection_target target).config
+
 let project_request_body ~target ~messages requirement =
   Exact_output_ready_admission.project_request_body
     ~target:(Exact_output_resolver.projection_target target)
@@ -472,6 +482,7 @@ let start_attempt (ready : ready_plan) =
         ~call_id:(Call_id id)
         ~plan_fingerprint:ready.plan_fingerprint
         ~request_body_sha256:ready.request_body_sha256
+        ~binding:(Plan.binding_observation ready.plan)
         ~response_family:(match Plan.response_codec ready.plan with
           | Provider_http_codec.Openai_responses -> Openai_responses_codec
           | Anthropic_messages | Openai_chat | Ollama_chat | Gemini_generate_content | Glm_chat -> Other_http_codec)
@@ -599,6 +610,9 @@ let generation_receipt_snapshot_http_status = Generation_receipt.snapshot_http_s
 let generation_receipt_snapshot_response_family = Generation_receipt.snapshot_response_family
 let generation_receipt_snapshot_response_body_sha256 = Generation_receipt.snapshot_response_body_sha256
 let generation_receipt_snapshot_responses_lifecycle = Generation_receipt.snapshot_responses_lifecycle
+let generation_receipt_snapshot_binding = Generation_receipt.snapshot_binding
+let generation_receipt_snapshot_execution_started_at = Generation_receipt.snapshot_execution_started_at
+let generation_receipt_snapshot_execution_finished_at = Generation_receipt.snapshot_execution_finished_at
 
 let generation_receipt_snapshot_dispatch_count =
   Generation_receipt.snapshot_dispatch_count
@@ -956,6 +970,8 @@ let execution_error_cause ~http_status ~dispatch = function
 let execute_once_with_publication ~publish ~net ~clock (attempt : attempt) =
   let ready = attempt.ready in
   let receipt = attempt.receipt in
+  Generation_receipt.observe_execution_started receipt ~at:(Eio.Time.now clock);
+  publish ();
   match
     Exec.execute_once_with_evidence
       ~net
@@ -968,6 +984,7 @@ let execute_once_with_publication ~publish ~net ~clock (attempt : attempt) =
   | Error
       ({ receipt = complete_receipt; cause; raw_response = evidence } :
         Exec.execute_once_error_with_evidence) ->
+    Generation_receipt.observe_execution_finished receipt ~at:(Eio.Time.now clock);
     synchronize_receipt receipt complete_receipt;
     publish ();
     Option.iter
@@ -988,6 +1005,7 @@ let execute_once_with_publication ~publish ~net ~clock (attempt : attempt) =
       ; raw_response = Option.map raw_response evidence
       }
   | Ok { outcome; raw_response = evidence } ->
+    Generation_receipt.observe_execution_finished receipt ~at:(Eio.Time.now clock);
     synchronize_receipt receipt outcome.receipt;
     publish ();
     let provider_trace =

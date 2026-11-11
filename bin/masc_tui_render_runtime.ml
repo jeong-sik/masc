@@ -241,6 +241,18 @@ let runtime_routes_detail_lines state ~width =
     @ runtime_items ~tone:Page_line.Attention (text "이전 설정 관측" "Stale configuration")
         (Masc_tui_types.runtime_lane_stale_lines state)
   in
+  let parent_fields = match Masc_tui_types.runtime_lane_prompt state with
+    | None -> []
+    | Some (Lane_name_prompt draft) ->
+        fact (text "편집" "Editing") (text "새 경로 이름 초안" "New lane name draft")
+        @ fact (text "초안" "Draft") draft
+    | Some (Lane_rename_prompt (lane, draft)) ->
+        fact (text "원래 경로" "Original lane") lane
+        @ fact (text "이름 초안" "Name draft") draft
+        @ fact (text "변경 범위" "Rename scope")
+            (text "이름과 모든 참조를 함께 변경" "The lane name and all references change together")
+    | Some (Lane_remove_prompt lane) -> fact (text "제거 확인 대상" "Removal target") lane in
+  let notice_and_stale = parent_fields @ notice_and_stale in
   let default_routes = text "1. 기본 라우트 · 진입 런타임" "1. Default routes" in
   match state.runtime_surface with
   | None ->
@@ -859,55 +871,6 @@ let render_runtime_reading (state : state) =
               ("  " ^ Keeper_chat.terminal_safe_text line))
          lines;
        c.push_divider ());
-  (* Counted in [runtime_surface_listing_chrome] as two rows, like the refusal
-     above, so the footer keeps its row while the prompt is up. *)
-  (match Masc_tui_types.runtime_lane_prompt state with
-   | None -> ()
-   | Some (Masc_tui_types.Lane_rename_prompt (lane, draft)) ->
-       c.push_styled ~style:(Theme.info ())
-         (Printf.sprintf
-            "  rename lane %s to: %s_  — Enter renames it and every reference, Esc cancel"
-            (Terminal_text.single_line lane)
-            (Terminal_text.single_line draft));
-       c.push_divider ()
-   | Some (Masc_tui_types.Lane_name_prompt draft) ->
-       c.push_styled ~style:(Theme.info ())
-         (Printf.sprintf "  new lane name: %s_  — Enter pick its first runtime, Esc cancel"
-            (Terminal_text.single_line draft));
-       c.push_divider ()
-   | Some (Masc_tui_types.Lane_remove_prompt lane) ->
-       c.push_styled ~style:(Theme.warn ())
-         (Printf.sprintf "  press D again to remove lane %s"
-            (Terminal_text.single_line lane));
-       c.push_divider ());
-  (* The route editor, drawn here when it was opened on media_failover. The
-     Lanes surface draws the same editor for an exact lane's slots; both show
-     one ordered list of runtime ids and take the same keys. *)
-  (match state.slot_editor with
-   | None | Some { Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } -> ()
-   | Some { se_target = Masc_tui_types.Media_failover_slots; _ } ->
-       c.push_styled ~style:(Theme.info ())
-         "  [runtime].media_failover — the order the vision runtimes are called in";
-       let entries = Masc_tui_types.slot_editor_rows state in
-       let selected_index = Masc_tui_types.slot_editor_cursor_index state in
-       if entries = [] then
-         c.push_styled ~style:(Theme.recede ())
-           "  (empty — no vision runtimes; a adds the first runtime)"
-       else
-         List.iteri
-           (fun index (row : Masc_tui_types.slot_editor_row) ->
-              c.push
-                (Printf.sprintf "  %s %d  %s"
-                   (if Some index = selected_index then ">" else " ")
-                   (index + 1)
-                   (Terminal_text.single_line row.Masc_tui_types.sr_slot)))
-           entries;
-       if entries <> [] && Option.is_none (selected_index) then
-         c.push_styled ~style:(Theme.warn ())
-           "  no slot selected; j/k selects a current slot";
-       c.push_styled ~style:(Theme.recede ())
-         "  j/k move · a add · x drop · J/K reorder · Esc close";
-       c.push_divider ());
   if shown = 0 then begin
     let empty =
       match
@@ -1065,13 +1028,62 @@ let render_runtime_reading (state : state) =
 )
 ;;
 
-(* An open picker owns the body. The inactive reading's probe, route table
-   and selection summary cannot push the candidate under the cursor away. *)
+let render_runtime_parent state ~terminal_rows ~cols projection =
+  let ko = state.ui_language = Lang_ko in
+  let text korean english = if ko then korean else english in
+  let title = match projection.rpp_parent with
+    | Runtime_media_parent -> text "미디어 호출 순서" "Media call order"
+    | Runtime_prompt_parent (Lane_name_prompt _) -> text "Runtime / 새 경로 이름" "Runtime / new lane name"
+    | Runtime_prompt_parent (Lane_rename_prompt (lane, _)) ->
+        text "이름 변경 / " "Rename / " ^ Terminal_text.single_line lane
+    | Runtime_prompt_parent (Lane_remove_prompt lane) ->
+        text "제거 확인 / " "Remove / " ^ Terminal_text.single_line lane in
+  let header = if projection.rpp_notices = 0 then
+    feature_child_heading state ~cols ~title
+  else
+    let door = match projection.rpp_parent with
+      | Runtime_media_parent | Runtime_prompt_parent (Lane_remove_prompt _) -> "v"
+      | Runtime_prompt_parent (Lane_name_prompt _ | Lane_rename_prompt _) -> "PgUp" in
+    let lead = Printf.sprintf (if ko then "안내 %d · %s · " else "%d notices · %s · ")
+        projection.rpp_notices door in
+    let width = framed_inner_width cols in
+    let available = max 0 (width - Message_layout.display_width lead) in
+    let connection = match reading_connection_notice state with
+      | None -> ""
+      | Some _ -> reading_connection_summary
+          ~width:(max 0 (available - Message_layout.display_width " ")) state |> String.trim in
+    let connection = if Message_layout.display_width connection = 0 then "" else connection in
+    let separator = if String.equal connection "" then "" else " " in
+    let label_width = max 0 (available - Message_layout.display_width (separator ^ connection)) in
+    (* Own notice count/reader key survive a one-row body even when a global
+       connection warning also needs the title. Identity uses what is left. *)
+    screen_title lead ^ Message_layout.fit_middle label_width title ^ separator ^ connection in
+  let position = match projection.rpp_position with
+    | None -> ""
+    | Some position -> Printf.sprintf "[%s]  " position in
+  let hints = position ^ Masc_tui_keys.footer_hints_runtime_parent
+      ~ko ~parent:projection.rpp_parent in
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
+    ~surface_key:"runtime-parent"
+    ~title:header ~hints
+    ~body:(fun ~budget:_ c ->
+      List.iter (function
+        | Parent_focus line -> c.push_selected line
+        | Parent_text line -> c.push line
+        | Parent_notice (Some notice, line) -> c.push_styled ~style:(runtime_lane_notice_style notice) line
+        | Parent_notice (None, line) -> c.push_styled ~style:(Theme.warn ()) line)
+        projection.rpp_rows)
+
+(* The active picker or parent owns the body; the inactive listing cannot
+   consume its input, selected-slot or diagnostic row budget. *)
 let render_runtime (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let page = runtime_exact_picker_page state ~terminal_rows ~cols in
   match runtime_picker_projection ~page state with
-  | None -> render_runtime_reading state
+  | None ->
+      (match runtime_parent_projection state ~terminal_rows ~cols with
+       | None -> render_runtime_reading state
+       | Some projection -> render_runtime_parent state ~terminal_rows ~cols projection)
   | Some picker ->
       let ko = state.ui_language = Lang_ko in
       let notices = runtime_picker_notices state in

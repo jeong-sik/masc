@@ -447,6 +447,32 @@ def reports_a_completed_merge(result):
     return isinstance(inner, dict) and inner.get('status') == 'merged'
 
 
+def wake_if_already_merged(repo, number):
+    '''Wake the main build for a merge that finished before this run looked.
+
+    An auto-merge reservation lets GitHub merge on its own schedule. This run
+    then finds the pull request already closed and holds with "is not open and
+    ready", so `reports_a_completed_merge` stays false and nothing dispatches.
+    A bot merge emits no push event either, so the merge commit reaches main
+    with no build run at all.
+
+    The merge is real regardless of which check noticed it, so read the pull
+    request back and dispatch for it. A read that cannot run, and a pull
+    request that is not merged, record nothing: holding is still not a merge.
+    '''
+    try:
+        current = pull(repo, number)
+    except (ValueError, TypeError, KeyError, OSError,
+            subprocess.SubprocessError) as error:
+        # This runs while unwinding a hold. An unreadable pull request must
+        # stay a recorded miss and never replace the hold with a crash.
+        return {'dispatched': False, 'exit_code': None,
+                'stderr': f'{type(error).__name__}: {error}'[:300]}
+    if current.get('merged') is not True:
+        return None
+    return wake_main_build(repo)
+
+
 def requested_pr():
     if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
         raw = os.environ['DISPATCH_PR']
@@ -505,6 +531,10 @@ def main():
             exit_code = 1  # merged is the only success; everything else is visible red
     except Hold as error:
         result = {'status': 'held', 'reason': str(error)}
+        if _WAKE['enabled']:
+            woken = wake_if_already_merged(_WAKE['repo'], number)
+            if woken is not None:
+                result['main_build'] = woken
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
         print(f'approval-auto-merge: cannot establish or submit merge: {error}', file=sys.stderr)
         return 1

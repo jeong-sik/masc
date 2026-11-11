@@ -1,13 +1,6 @@
 let stream_path = "/api/v1/dashboard/logs/stream"
 let ping_interval_s = Server_mcp_transport_http_headers.sse_ping_interval_s
 
-(* A client that reads takes a frame at once. One that has not accepted a
-   frame after this many keepalive intervals has stopped reading. *)
-let stalled_after_ping_intervals = 3.0
-let stalled_after_s = stalled_after_ping_intervals *. ping_interval_s
-
-let keepalive_frame = ": keepalive\n\n"
-
 let response_headers () =
   Httpun.Headers.of_list
     (Http_server_eio.Response.scoped_headers ()
@@ -65,75 +58,62 @@ let worth_sending frame =
   | _ :: _ -> true
 ;;
 
-type ending =
-  | Client_gone
-  | Stalled
-
-let serve ~sw ~clock ~config ~(query : Server_logs_query.t) reqd =
+let serve ~sw ~clock ~encode ~(query : Server_logs_query.t) reqd =
   let response = Httpun.Response.create ~headers:(response_headers ()) `OK in
-  let writer =
-    Http_reqd.respond_with_streaming ~flush_headers_immediately:true reqd response
+  (* A frame waits until its bytes reach the socket, so a client that stops
+     reading holds the loop at its send instead of the response's buffer
+     growing, and a frame the client does not take ends the stream. The loop
+     writes no log entry of its own: an entry would wake it again. *)
+  let sse =
+    Server_sse_response.respond ~clock
+      ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
+      ~flush_headers_immediately:true reqd response
   in
-  (* Waits until the bytes reach the socket, so a client that stops reading
-     holds the loop here instead of the writer's buffer growing. Nothing in
-     this path writes a log entry: an entry would wake the loop again. *)
-  let send data =
-    if Http_reqd.Body_writer.is_closed writer
-    then false
-    else (
-      Http_reqd.Body_writer.write_string writer data;
-      let flushed, resolve = Eio.Promise.create () in
-      Http_reqd.Body_writer.flush writer (Eio.Promise.resolve resolve);
-      match Eio.Promise.await flushed with
-      | `Written -> true
-      | `Closed -> false)
-  in
-  let send_within data =
-    match Eio.Time.with_timeout clock stalled_after_s (fun () -> Ok (send data)) with
-    | Ok true -> Ok ()
-    | Ok false -> Error Client_gone
-    | Error `Timeout -> Error Stalled
-  in
-  let rec deliver after =
+  (* A keepalive is due once nothing was sent for a ping interval. The ring
+     wakes the loop for every entry, also for the ones the query leaves out,
+     and such a wake sends nothing: the time of the next keepalive is kept
+     across it. A timer started again at each wake would never run out on a
+     ring that gets an entry more often than the interval, and the stream
+     would go silent for a client that still reads. [deliver] looks at the
+     time itself: when the ring already holds a newer entry each time the
+     loop comes back to wait, the wait for the ring returns at once and the
+     wait for the time never gets its turn. *)
+  let next_ping () = Eio.Time.now clock +. ping_interval_s in
+  let keepalive () = Server_sse_response.send sse Server_sse_pump.keepalive_frame in
+  let rec deliver ~ping_at after =
     let frame = next_frame query ~after in
-    let sent =
-      if worth_sending frame then send_within (sse_frame (frame_json ~config query frame))
-      else Ok ()
-    in
-    match sent with
-    | Error ending -> ending
-    | Ok () -> wait frame.after
-  and wait after =
+    if worth_sending frame
+    then sent ~after:frame.after (Server_sse_response.send sse (encode frame))
+    else if Eio.Time.now clock >= ping_at
+    then sent ~after:frame.after (keepalive ())
+    else wait ~ping_at frame.after
+  and sent ~after = function
+    | Server_sse_response.Written -> wait ~ping_at:(next_ping ()) after
+    | Closed | Stalled -> ()
+  and wait ~ping_at after =
+    (* [ping_at] is a reading of the wall clock. Had the clock been set back
+       since, the keepalive would be that much later than a ping interval;
+       the time kept across a wake is at most one interval from now. *)
+    let ping_at = Float.min ping_at (next_ping ()) in
     match
       Eio.Fiber.first
         (fun () ->
           Log.Ring.await_newer_than after;
           `Appended)
         (fun () ->
-          Eio.Time.sleep clock ping_interval_s;
+          Eio.Time.sleep_until clock ping_at;
           `Quiet)
     with
-    | `Appended -> deliver (Some after)
-    | `Quiet ->
-      (match send_within keepalive_frame with
-       | Ok () -> wait after
-       | Error ending -> ending)
+    | `Appended -> deliver ~ping_at (Some after)
+    | `Quiet -> sent ~after (keepalive ())
   in
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run (fun stream_sw ->
-      Server_bootstrap_http.with_cleanups_on_release ~sw:stream_sw
-        [ (fun () ->
-            if not (Http_reqd.Body_writer.is_closed writer) then Http_reqd.Body_writer.close writer)
-        ];
-      (* One line when the stream ends badly; the loop has stopped, so it
-         wakes only the other streams, once. *)
-      match deliver query.since_seq with
-      | Client_gone -> ()
-      | Stalled ->
-        Log.Server.warn "Log stream closed: the client accepted no frame for %.0f seconds"
-          stalled_after_s
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn -> Log.Server.warn "Log stream failed: %s" (Printexc.to_string exn)))
+  (* A frame that stalled is logged once: by [Server_sse_response.send] on
+     HTTP/1.1, by the stream's flush bound on HTTP/2. This loop is held at
+     that frame's send then, so the line wakes only the other streams. The
+     response ends the loop when its client is gone: a wait for the ring or
+     for the keepalive time is cancelled with the HTTP/2 stream. *)
+  Server_sse_response.serve ~sw sse (fun () ->
+    deliver ~ping_at:(next_ping ()) query.since_seq)
 ;;
 
 let add_routes ~sw ~clock router =
@@ -142,5 +122,8 @@ let add_routes ~sw ~clock router =
     match Server_logs_query.of_request request with
     | Error json ->
       Http_server_eio.Response.json_value ~status:`Bad_request ~request json reqd
-    | Ok query -> serve ~sw ~clock ~config:(Mcp_server.workspace_config state) ~query reqd)
+    | Ok query ->
+      let config = Mcp_server.workspace_config state in
+      serve ~sw ~clock ~query reqd
+        ~encode:(fun frame -> sse_frame (frame_json ~config query frame)))
 ;;

@@ -17,8 +17,9 @@ val is_cached : string -> bool
     an export with no caller is one the dead-surface ratchet counts. *)
 
 val operator_field_names : string list
-(** The three rollup fields that say whether the operator has to act:
-    [overall_status], [operator_action_required], [operator_action_reasons].
+(** The rollup fields that say whether the operator has to act:
+    [overall_status], [operator_action_required], [operator_action_reasons]
+    and the same observation's typed [operator_actions].
     Cached like the rest; the [/health] probe also carries the snapshot's copy
     so the TUI, which reads the probe on every refresh, can show them
     (RFC-0484 §3.3). *)
@@ -27,12 +28,15 @@ type t =
   { overall_status : string
   ; operator_action_required : bool
   ; operator_action_reasons : string list
+  ; operator_actions : Operator_action_reason.t list
   ; overall_status_reasons : string list
   }
 (** Two lists, because they answer two questions.
 
     [operator_action_reasons] is what somebody has to answer, and
-    [operator_action_required] is whether that list holds anything.
+    [operator_action_required] is whether that list holds anything. Both raw
+    reasons and required derive from [operator_actions], the same immutable
+    typed observations. Unrecognized causes retain a diagnostic-only item.
 
     [overall_status_reasons] is what moved [overall_status] off ok, whether or
     not anyone has to answer it. Every section above rank 0 leaves a line

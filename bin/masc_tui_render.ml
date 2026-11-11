@@ -131,32 +131,48 @@ let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols ~
   else Some (recent_chunk_projection state)
 ;;
 
+let operator_action_section state item : Masc_tui_detail_reading.section =
+  { heading = Masc_tui_home.operator_action_label state item
+  ; body = Masc.Operator_action_reason.diagnostic item ^ "\n\n"
+      ^ Yojson.Safe.pretty_to_string (Masc.Operator_action_reason.to_json item) }
+
+let operator_notice_sections state =
+  match Masc_tui_home.home_notice_lines (Masc_tui_home.prepare state) with
+  | [] -> []
+  | notices -> [{ Masc_tui_detail_reading.heading = ui_text state ~ko:"운영 알림 · 별도 관측" ~en:"Operations notices · separate observations"
+                ; body=String.concat "\n" notices }]
+
+let operator_action_reading state item =
+  Masc_tui_detail_reading.create ~ko:(state.ui_language=Lang_ko)
+    ~title:(ui_text state ~ko:"원래 조치 관측" ~en:"Original action observation")
+    (operator_action_section state item :: operator_notice_sections state)
+
 let operator_actions_reading (state : state) =
   let text ko en = ui_text state ~ko ~en in
-  let sections =
-    match state.server_identity with
+  let sections = match operator_action_observation state with
     | None ->
-        [{ Masc_tui_detail_reading.heading = text "서버 관측" "Server observation"
-         ; body = text "서버 응답을 아직 읽지 못했습니다."
-             "The server response has not been read yet." }]
-    | Some identity ->
-        (match identity.Tui_decode.sid_operator_action with
-         | None ->
-             [{ Masc_tui_detail_reading.heading = text "조치 원인 미확인" "Reasons unavailable"
-              ; body = text "서버 응답에 조치 원인 목록이 없거나 읽을 수 없는 형식입니다."
-                  "The server response has no readable action-reason list." }]
-         | Some [] ->
-             [{ Masc_tui_detail_reading.heading = text "조치 원인" "Action reasons"
-              ; body = text "이 서버 관측에는 조치가 필요한 이유가 없습니다."
-                  "This server observation reports no reason requiring action." }]
-         | Some reasons ->
-             let count = List.length reasons in
-             List.mapi (fun index reason ->
-               { Masc_tui_detail_reading.heading = Printf.sprintf "%d / %d" (index + 1) count
-               ; body = reason }) reasons)
-  in
-  Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko)
-    ~title:(text "조치가 필요한 이유" "Why action is needed") sections
+        [{ Masc_tui_detail_reading.heading = text "조치 원인 미확인" "Reasons unavailable"
+         ; body = text "서버의 구조화된 조치 관측을 아직 확인하지 못했습니다."
+             "The server's structured action observation has not been confirmed." }]
+    | Some (Tui_decode.Operator_actions_unavailable {diagnostics;error}) ->
+        [{ Masc_tui_detail_reading.heading = text "원래 서버 진단 · 이동 대상 미확인" "Original server diagnostics · targets unknown"
+         ; body = String.concat "\n" diagnostics ^ "\n\n"
+             ^ text "구조화된 관측을 읽지 못함: " "Structured observation unavailable: " ^ error }]
+    | Some (Tui_decode.Operator_actions_observed []) ->
+        [{ Masc_tui_detail_reading.heading = text "조치 원인" "Action reasons"
+         ; body = text "이 서버 관측에는 조치가 필요한 이유가 없습니다."
+             "This server observation reports no reason requiring action." }]
+    | Some (Tui_decode.Operator_actions_observed items) -> List.map (operator_action_section state) items in
+  Masc_tui_detail_reading.create ~ko:(state.ui_language=Lang_ko)
+    ~title:(text "조치가 필요한 이유" "Why action is needed")
+    (let retained = match state.home_selected with
+      | Some (Home_operator_action (authority,_,original)) when authority=state.workspace_authority
+          && not (Option.exists (List.exists (Masc.Operator_action_reason.equal original)) (operator_actions state)) ->
+          let section = operator_action_section state original in
+          [{section with heading=ui_text state ~ko:"이전 선택 · " ~en:"Prior selection · " ^ section.heading}]
+      | Some (Home_operator_action _ | Home_request _ | Home_approvals | Home_agenda
+          | Home_resume _ | Home_read_last _ | Home_choose_keeper | Home_create_keeper) | None -> [] in
+     retained @ sections @ operator_notice_sections state)
 
 (* Requests and capacity have separate observation paths. In particular a
    working HTTP connection does not make a retained fleet reading current. *)
@@ -256,153 +272,54 @@ let render_overview (state : state) home =
             else Masc_tui_keys.footer_hints ~lang:state.ui_language Overview)
     ~body:(fun ~budget:chrome_budget c ->
       let rows_started = Masc_tui_frame_timing.start_stage () in
-      (* The one-time door line: the first screen a reader meets names the
-         sheet's key, because a footer item is easy to read past before the
-         habit of reading footers exists. The first input of any kind
-         retires it and writes [tui].help_hint_shown. *)
-      if not state.help_hint_shown then
-        c.push
-          (" " ^ Ansi.dim
-           ^ Masc_tui_footer.help_hint_item
-           ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys"
-           ^ Ansi.reset);
-      c.push
-        (" " ^ Ansi.dim ^ ui_text state ~ko:"v:조치 원인" ~en:"v:action reasons" ^ Ansi.reset
-         ^ "  " ^ pressable (Press_surface Approvals)
-           (Ansi.dim ^ ui_text state ~ko:"p:승인·질문" ~en:"p:Requests" ^ Ansi.reset)
-         ^ "  " ^ pressable (Press_surface Metrics)
-           (Ansi.dim ^ ui_text state ~ko:"m:사용량" ~en:"m:Usage" ^ Ansi.reset));
-      (* The key loop stores the window's first row from the same number. *)
-      let budget = Masc_tui_home.home_requests_budget home ~chrome_budget in
-      let row_indent = "  " in
-      let draw_row (action, label) =
-        let line = row_indent ^ label in
-        if Option.equal equal_home_action (Some action) selected then c.push_selected line else c.push line
-      in
-      let operator_actions = Masc_tui_types.operator_actions state in
-      let empty_decisions = ui_text state
-          ~ko:"대기 중인 요청이 없습니다." ~en:"No decision is waiting on you." in
-      let titles : Masc_tui_overview_cards.titles =
-        { decisions = ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
-        ; continuation = ui_text state ~ko:"대화" ~en:"Conversations"
-        ; capacity = ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
-        ; actions = ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed"
-        }
-      in
-      let selection_changed =
-        Masc_tui_home.home_selection_changed home
-      in
-      let warning_rows = if selection_changed then 1 else 0 in
-      (* Keep continuation and new work visible while the request window
-         follows the selected identity. All rows remain reachable with j/k. *)
-      let first, capacity = Masc_tui_home.home_decision_window home
-          ~scroll:state.home_decision_scroll ~budget in
-      let notices = Masc_tui_home.home_notice_lines home
-        |> List.take (max 0 (budget - warning_rows)) in
-      List.iter c.push notices;
-      let budget = max 0 (budget - List.length notices) in
-      let decisions = List.drop first all_decisions |> List.take capacity in
-      let actions = decisions @ continuation in
-      (* Headers and action destinations take precedence over health/history
-         context. The request window preserves continuation below it even
-         when the queue contains more rows than the viewport. *)
-      let essential_rows = List.length actions + 2 + warning_rows in
-      if budget >= essential_rows && (all_decisions = [] || capacity > 0) then begin
-        let card_rows =
-          let status ~cells =
-            List.concat_map
-              (Message_layout.wrap_styled_words ~max_cells:(max 1 cells))
-              capacity_lines
-          in
-          Masc_tui_overview_cards.draw ~titles ~empty_decisions ~inner:(framed_inner_width cols)
-            ~rows:(budget - warning_rows)
-            ~is_selected:(fun action -> Some action = selected)
-            ~decisions
-            ~decisions_whole:(List.length decisions = List.length all_decisions)
-            ~continuation ~status
-            ~actions:operator_actions
-        in
-        match card_rows with
-        | Some rows ->
-            List.iter c.push rows;
-            (* Under the cards, and only while two rows are spare: a blank row
-               and the line. *)
-            if budget - warning_rows - List.length rows >= 2 then begin
-              c.push_empty ();
-              c.push (tool_calls_line ~cells:(framed_inner_width cols))
-            end
-        | None ->
-        (* Action outcomes stay above the destinations they affect. What the
-           server says needs the operator comes right after the destinations
-           and passive health/history context follows it. Both use only spare
-           rows, so opening Home starts with a decision or a place to resume. *)
-        let reasons =
-          Masc_tui_overview_cards.plain_reasons ~title:titles.actions ~indent:row_indent
-            ~inner:(framed_inner_width cols) ~rows:(budget - essential_rows)
-            operator_actions
-        in
-        let spare = budget - essential_rows - List.length reasons in
-        let readings =
-          (Some Ansi.bold, " " ^ titles.capacity)
-          :: List.map (fun line -> None, " " ^ line) capacity_lines
-          @ [None, tool_calls_line ~cells:(framed_inner_width cols)] in
-        let shown_readings = List.take spare readings in
-        let draw_rows = List.iter (function
-          | None, text -> c.push text
-          | Some style, text -> c.push_styled ~style text) in
-        (* A blank row sets off each block, as far as the spare rows go. *)
-        let blank_rows_left = ref (spare - List.length shown_readings) in
-        let blank_row () =
-          if !blank_rows_left > 0 then begin
-            decr blank_rows_left;
-            c.push_empty ()
-          end
-        in
-        (match decisions with
-         | [] -> c.push_styled ~style:(Theme.recede ())
-             (if all_decisions = [] then " " ^ empty_decisions
-              else ui_text state ~ko:" 다른 요청 · j/k:선택" ~en:" Decision rows above · j/k to choose")
-         | _ :: _ ->
+      let body = Masc_tui_home.home_body home ~scroll:state.home_decision_scroll ~budget:chrome_budget in
+      if body.hb_help then
+        c.push (" " ^ Ansi.dim ^ Masc_tui_footer.help_hint_item
+          ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys" ^ Ansi.reset);
+      if body.hb_shortcuts then
+        c.push (" " ^ ui_text state ~ko:"v:조치 원인" ~en:"v:action reasons"
+          ^ "  " ^ pressable (Press_surface Approvals)
+              (ui_text state ~ko:"p:승인·질문" ~en:"p:Requests")
+          ^ "  " ^ pressable (Press_surface Metrics)
+              (ui_text state ~ko:"m:사용량" ~en:"m:Usage"));
+      List.iter c.push body.hb_notices;
+      if body.hb_selection_changed then
+        c.push_styled ~style:(Theme.warn ())
+          (ui_text state ~ko:" 선택한 관측이 바뀌었습니다 · j/k:다시 선택"
+             ~en:" Selected observation changed · j/k to choose again");
+      let draw_row (action,label) =
+        let line = "  " ^ label in
+        if Option.equal equal_home_action (Some action) selected then c.push_selected line
+        else c.push line in
+      let available = List.length body.hb_rows + body.hb_spare in
+      let card_rows =
+        if List.length body.hb_rows <> body.hb_total then None
+        else
+          let titles : Masc_tui_overview_cards.titles =
+            { decisions=ui_text state ~ko:"확인할 일" ~en:"Needs your decision"
+            ; continuation=ui_text state ~ko:"대화" ~en:"Conversations"
+            ; capacity=ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
+            ; actions=ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed" } in
+          let status ~cells = List.concat_map
+              (Message_layout.wrap_styled_words ~max_cells:(max 1 cells)) capacity_lines in
+          Masc_tui_overview_cards.draw ~titles
+            ~empty_decisions:(ui_text state ~ko:"대기 중인 요청이 없습니다." ~en:"No decision is waiting on you.")
+            ~inner:(framed_inner_width cols) ~rows:available
+            ~is_selected:(fun action -> Option.equal equal_home_action (Some action) selected)
+            ~decisions:all_decisions ~decisions_whole:true ~continuation ~status
+            ~actions:(Masc_tui_home.home_operator_rows home) in
+      (match card_rows with
+       | Some rows ->
+           List.iter c.push rows;
+           if available > List.length rows then c.push (tool_calls_line ~cells:(framed_inner_width cols))
+       | None ->
+           if body.hb_spare > 0 then
              c.push_styled ~style:Ansi.bold
-               (if List.length decisions = List.length all_decisions then " " ^ titles.decisions
-                else Printf.sprintf " %s · %d-%d/%d · j/k"
-                  titles.decisions (first + 1) (first + List.length decisions) (List.length all_decisions));
-             List.iter draw_row decisions);
-        blank_row ();
-        c.push_styled ~style:Ansi.bold (" " ^ titles.continuation);
-        List.iter draw_row continuation;
-        if reasons <> [] then blank_row ();
-        draw_rows reasons;
-        if shown_readings <> [] then blank_row ();
-        draw_rows shown_readings
-      end else begin
-        (* Extremely short terminals show destinations around the selected
-           identity. j/k reaches every destination; this is a viewport limit,
-           never a limit on requests or execution. *)
-        let actions = all_decisions @ continuation in
-        let available = max 0 (budget - warning_rows) in
-        let count = List.length actions in
-        let index =
-          match List.find_index (fun (action, _) -> Some action = selected) actions with
-          | Some index -> index
-          | None -> 0
-        in
-        let show_position = available > 1 in
-        let height = max 0 (available - if show_position then 1 else 0) in
-        let first = max 0 (min index (count - height)) in
-        let window = List.drop first actions |> List.take height in
-        if show_position then
-          c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf (if state.ui_language = Lang_ko then
-                " 바로가기 · %d-%d/%d · j/k:선택"
-              else " Home destinations · %d-%d/%d · j/k to choose")
-               (first + 1) (first + List.length window) count);
-        List.iter draw_row window
-      end;
-      (if selection_changed then
-         c.push_styled ~style:(Theme.warn ())
-           (ui_text state ~ko:" 선택한 항목이 바뀌었습니다 · j/k:다시 선택"
-              ~en:" Selection changed · j/k to choose again"));
+               (ui_text state ~ko:" 바로가기" ~en:" Destinations");
+           List.iter draw_row body.hb_rows;
+           let spare = max 0 (body.hb_spare - 1) in
+           List.take spare (capacity_lines @ [tool_calls_line ~cells:(framed_inner_width cols)])
+           |> List.iter c.push);
       Masc_tui_frame_timing.finish_stage ~name:"overview.rows" rows_started)
 
 

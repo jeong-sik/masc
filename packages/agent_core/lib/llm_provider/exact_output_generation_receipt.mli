@@ -24,6 +24,7 @@ val create
   :  call_id:call_id
   -> plan_fingerprint:string
   -> request_body_sha256:string
+  -> binding:Exact_output_plan.binding_observation
   -> response_family:response_family
   -> catalog_generation:Exact_output_resolver.catalog_generation
   -> catalog_evidence:Exact_output_resolver.catalog_evidence
@@ -31,6 +32,11 @@ val create
   -> t
 
 val start : t -> unit
+val observe_execution_started : t -> at:float -> unit
+val observe_execution_finished : t -> at:float -> unit
+(** Host wall-clock boundaries of the generation executor. A finish is only
+    recorded after a start; cancellation can leave it absent. Neither time
+    proves dispatch, provider acceptance or remote termination. *)
 val call_id : t -> call_id
 val phase : t -> effect_phase
 val dispatch_count : t -> int
@@ -56,3 +62,6 @@ val snapshot_responses_lifecycle : snapshot -> Backend_openai_responses.lifecycl
 val snapshot_call_id : snapshot -> call_id
 val snapshot_plan_fingerprint : snapshot -> string
 val snapshot_request_body_sha256 : snapshot -> string
+val snapshot_binding : snapshot -> Exact_output_plan.binding_observation
+val snapshot_execution_started_at : snapshot -> float option
+val snapshot_execution_finished_at : snapshot -> float option

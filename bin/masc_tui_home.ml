@@ -38,7 +38,7 @@ let ordered_decision_rows rows =
           (match action with
            | Home_agenda -> held := !held ^ "; " ^ label
            | Home_approvals | Home_request _ | Home_resume _ | Home_read_last _
-           | Home_choose_keeper | Home_create_keeper -> ());
+           | Home_choose_keeper | Home_create_keeper | Home_operator_action _ -> ());
           reversed) [] rows
   in
   List.rev_map (fun (action, label) -> action, !label) reversed
@@ -276,9 +276,42 @@ let continue_rows_of_state (state : state) =
 (* Frame preparation pins only an authoritative initial reading; transient
    boot destinations must remain free to settle. Drawing shares these pure
    projections but does not store either selection or viewport state. *)
+let operator_action_label state (item : Masc.Operator_action_reason.t) =
+  let text ko en = ui_text state ~ko ~en in
+  let clean = Masc_tui_ansi.Terminal_text.single_line in
+  match item.cause with
+  | Masc.Operator_action_reason.Memory_attention {keeper;durable;admission;_} ->
+      let pending = Option.to_list durable @ Option.to_list
+          (Option.map (fun worker -> Masc.Keeper_librarian_pending.Worker worker) admission) in
+      let causes = List.filter Masc.Keeper_librarian_pending.needs_attention pending
+          |> List.map (fun pending -> memory_pass_text ~ko:(state.ui_language=Lang_ko)
+              (Masc.Tui_decode_memory_health.Pass_pending pending)) in
+      "Memory · " ^ clean keeper ^ " · " ^ String.concat " · " causes
+      ^ text " · Enter:상세" " · Enter:details"
+  | Shutdown_fenced_backlog {count; keepers=Some [(keeper,_)]; complete=true} ->
+      text "대기 목록 · " "Queue · " ^ clean keeper
+      ^ Printf.sprintf (if state.ui_language=Lang_ko then " · 종료 보류 %d건" else " · %d shutdown-fenced events") count
+  | Shutdown_fenced_backlog {count;complete;_} ->
+      text "진단 · " "Reading · "
+      ^ Printf.sprintf (if state.ui_language=Lang_ko then "종료 보류 %d건" else "%d shutdown-fenced events") count
+      ^ (if complete then text " · 대상 확인" " · inspect owners"
+         else text " · 전체 미확인" " · coverage unknown")
+  | Other_reported ->
+      let component = match item.component with
+        | "keeper_memory_execution" -> text "기억 처리" "Memory execution"
+        | "skill_catalog" -> text "스킬 목록" "Skill catalog"
+        | "keeper_config_schema" -> text "키퍼 설정" "Keeper configuration"
+        | component -> clean (String.escaped component) in
+      component ^ text " · 진단 확인" " · inspect diagnostics"
+
+let operator_rows_of_state state =
+  Option.value (Option.map (List.mapi (fun index item ->
+    Home_operator_action (state.workspace_authority,index,item), operator_action_label state item))
+    (operator_actions state)) ~default:[]
+
 let initial_reading_ready state selected =
   match selected with
-  | Some (Home_request _ | Home_resume _ | Home_read_last _) -> true
+  | Some (Home_request _ | Home_resume _ | Home_read_last _ | Home_operator_action _) -> true
   | Some Home_approvals -> approvals_reading_current state
   | Some (Home_choose_keeper | Home_create_keeper) ->
       approvals_reading_current state
@@ -297,6 +330,9 @@ let notice_lines_of_state state =
   @ (match state.opening_notice with
    | None -> []
    | Some notice -> [" " ^ clean notice])
+  @ (match operator_actions state with
+     | None -> [text " 조치 원인 미관측 · v:진단" " Action reasons unobserved · v:reading"]
+     | Some _ -> [])
   @ (match state.home_decision_receipt with
      | None -> []
      | Some (_, receipt) -> [text " 최근 응답 · " " Last decision receipt · " ^ clean receipt])
@@ -304,6 +340,7 @@ let notice_lines_of_state state =
 type prepared = {
   decisions : (home_action * string) list;
   continuation : (home_action * string) list;
+  operator_rows : (home_action * string) list;
   selected : home_action option;
   selection_changed : bool;
   notices : string list;
@@ -314,20 +351,21 @@ type prepared = {
 let prepare (state : state) =
   let decisions = decision_rows_of_state state in
   let continuation = continue_rows_of_state state in
+  let operator_rows = operator_rows_of_state state in
   let first = function [] -> None | (action, _) :: _ -> Some action in
   let selected = match state.home_selected with
     | None ->
         (match first decisions with
          | Some _ as action -> action
-         | None -> first continuation)
+         | None -> (match first operator_rows with Some _ as action -> action | None -> first continuation))
     | Some action ->
         let find rows = Option.map fst
           (List.find_opt (fun (current, _) -> equal_home_action action current) rows) in
         (match find decisions with
          | Some _ as action -> action
-         | None -> find continuation)
+         | None -> (match find operator_rows with Some _ as action -> action | None -> find continuation))
   in
-  { decisions; continuation; selected;
+  { decisions; continuation; operator_rows; selected;
     selection_changed = Option.is_some state.home_selected && Option.is_none selected;
     notices = notice_lines_of_state state;
     help_hint_shown = state.help_hint_shown;
@@ -335,36 +373,45 @@ let prepare (state : state) =
 
 let home_decision_rows prepared = prepared.decisions
 let home_continue_rows prepared = prepared.continuation
+let home_operator_rows prepared = prepared.operator_rows
 let home_selected_action prepared = prepared.selected
-let home_selection_changed prepared = prepared.selection_changed
 let home_initial_reading_ready prepared = prepared.initial_ready
 let home_notice_lines prepared = prepared.notices
 
-(* The rows Home gives its decision window: the body budget less the one-time
-   help line while it is shown and the requests link that always takes the
-   first body row. The drawing and the key loop that stores the window's first
-   row both read this, so they cannot disagree by the help line. *)
-let home_requests_budget prepared ~chrome_budget =
-  let help_line = if prepared.help_hint_shown then 0 else 1 in
-  max 0 (chrome_budget - help_line - 1)
-
-let home_decision_window prepared ~scroll ~budget =
-  let decisions = prepared.decisions in
-  let selected = prepared.selected in
-  let warning_rows = if prepared.selection_changed then 1 else 0 in
-  let capacity = max 0 (budget - List.length prepared.notices
-      - List.length prepared.continuation - 2 - warning_rows) in
-  let first = max 0 (min scroll (List.length decisions - capacity)) in
-  let first = match List.find_index (fun (action, _) -> Option.equal equal_home_action (Some action) selected) decisions with
-    | Some index when index < first -> index
-    | Some index when index >= first + capacity -> max 0 (index - capacity + 1)
-    | Some _ | None -> first
-  in
-  first, capacity
+type body = {
+  hb_help : bool; hb_shortcuts : bool; hb_notices : string list;
+  hb_selection_changed : bool; hb_rows : (home_action * string) list;
+  hb_first : int; hb_total : int; hb_spare : int;
+}
+let home_body prepared ~scroll ~budget =
+  let destinations = prepared.decisions @ prepared.operator_rows @ prepared.continuation in
+  let budget = max 0 budget in
+  let reserve = if destinations = [] then 0 else min 1 budget in
+  let extra = max 0 (budget - reserve) in
+  let hb_selection_changed = prepared.selection_changed && extra > 0 in
+  let extra = extra - if hb_selection_changed then 1 else 0 in
+  let hb_notices = List.take extra prepared.notices in
+  let extra = extra - List.length hb_notices in
+  let hb_help = not prepared.help_hint_shown && extra > 0 in
+  let extra = extra - if hb_help then 1 else 0 in
+  let hb_shortcuts = extra > 0 in
+  let room = budget - (if hb_help then 1 else 0) - (if hb_shortcuts then 1 else 0)
+      - (if hb_selection_changed then 1 else 0) - List.length hb_notices in
+  let hb_total = List.length destinations in
+  let height = min hb_total room in
+  let first = max 0 (min scroll (hb_total - height)) in
+  let first = match List.find_index (fun (action,_) ->
+      Option.equal equal_home_action (Some action) prepared.selected) destinations with
+    | Some index when height > 0 && index < first -> index
+    | Some index when height > 0 && index >= first + height -> index - height + 1
+    | Some _ | None -> first in
+  {hb_help;hb_shortcuts;hb_notices;hb_selection_changed;
+   hb_rows=List.drop first destinations |> List.take height;
+   hb_first=first;hb_total;hb_spare=room-height}
 
 let home_step state ~backwards =
   let prepared = prepare state in
-  let actions = List.map fst (prepared.decisions @ prepared.continuation) in
+  let actions = List.map fst (prepared.decisions @ prepared.operator_rows @ prepared.continuation) in
   let current = prepared.selected in
   let index =
     match List.find_index (fun action -> Option.equal equal_home_action (Some action) current) actions with

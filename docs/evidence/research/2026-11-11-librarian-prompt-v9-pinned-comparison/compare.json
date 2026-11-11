@@ -1,0 +1,245 @@
+{
+ "draft_template_sha256": [
+  "575a68497f00d3171d00a298d816e6ade8c0a5b7c4e2329364e725e90861d623"
+ ],
+ "models": {
+  "inkling": {
+   "metrics": {
+    "synth_valid_rate": {
+     "base": [
+      126,
+      134
+     ],
+     "draft": [
+      128,
+      134
+     ],
+     "d": 0.01492537313432829,
+     "sigma": 0.027183707016861094,
+     "change": "same"
+    },
+    "real_valid_rate": {
+     "base": [
+      93,
+      104
+     ],
+     "draft": [
+      94,
+      104
+     ],
+     "d": 0.009615384615384581,
+     "sigma": 0.04177971218486721,
+     "change": "same"
+    },
+    "memory_state_accuracy": {
+     "base": [
+      156,
+      194
+     ],
+     "draft": [
+      162,
+      194
+     ],
+     "d": 0.030927835051546393,
+     "sigma": 0.039043162406221237,
+     "change": "same"
+    },
+    "stale_drop_recall": {
+     "base": [
+      5,
+      82
+     ],
+     "draft": [
+      27,
+      82
+     ],
+     "d": 0.2682926829268293,
+     "sigma": 0.06189081167704916,
+     "change": "better"
+    },
+    "judged_merge_recall": {
+     "base": [
+      7,
+      58
+     ],
+     "draft": [
+      6,
+      58
+     ],
+     "d": -0.017241379310344834,
+     "sigma": 0.05857783283365367,
+     "change": "same"
+    },
+    "drop_precision": {
+     "base": [
+      30,
+      30
+     ],
+     "draft": [
+      55,
+      55
+     ],
+     "d": 0.0,
+     "sigma": 0.0,
+     "change": "same"
+    },
+    "absorb_precision": {
+     "base": [
+      14,
+      41
+     ],
+     "draft": [
+      11,
+      39
+     ],
+     "d": -0.05941213258286432,
+     "sigma": 0.10367692880278977,
+     "change": "same"
+    }
+   },
+   "real_record": {
+    "base": [
+     {
+      "agree": 47,
+      "candidates": 68,
+      "dropped_not_in_live": 1
+     },
+     {
+      "agree": 53,
+      "candidates": 70,
+      "dropped_not_in_live": 1
+     }
+    ],
+    "draft": [
+     {
+      "agree": 48,
+      "candidates": 64,
+      "dropped_not_in_live": 3
+     },
+     {
+      "agree": 52,
+      "candidates": 71,
+      "dropped_not_in_live": 0
+     }
+    ]
+   }
+  },
+  "glm": {
+   "metrics": {
+    "synth_valid_rate": {
+     "base": [
+      59,
+      67
+     ],
+     "draft": [
+      54,
+      67
+     ],
+     "d": -0.07462686567164178,
+     "sigma": 0.06280896938223614,
+     "change": "same"
+    },
+    "real_valid_rate": {
+     "base": [
+      42,
+      52
+     ],
+     "draft": [
+      40,
+      52
+     ],
+     "d": -0.038461538461538436,
+     "sigma": 0.08009368092533468,
+     "change": "same"
+    },
+    "memory_state_accuracy": {
+     "base": [
+      77,
+      97
+     ],
+     "draft": [
+      75,
+      97
+     ],
+     "d": -0.020618556701030855,
+     "sigma": 0.05913898138659184,
+     "change": "same"
+    },
+    "stale_drop_recall": {
+     "base": [
+      25,
+      41
+     ],
+     "draft": [
+      28,
+      41
+     ],
+     "d": 0.07317073170731714,
+     "sigma": 0.10559567990185391,
+     "change": "same"
+    },
+    "judged_merge_recall": {
+     "base": [
+      8,
+      29
+     ],
+     "draft": [
+      12,
+      29
+     ],
+     "d": 0.13793103448275862,
+     "sigma": 0.12482305324148119,
+     "change": "same"
+    },
+    "drop_precision": {
+     "base": [
+      43,
+      43
+     ],
+     "draft": [
+      41,
+      41
+     ],
+     "d": 0.0,
+     "sigma": 0.0,
+     "change": "same"
+    },
+    "absorb_precision": {
+     "base": [
+      22,
+      29
+     ],
+     "draft": [
+      18,
+      36
+     ],
+     "d": -0.2586206896551724,
+     "sigma": 0.12139284012153828,
+     "change": "same"
+    }
+   },
+   "real_record": {
+    "base": [
+     {
+      "agree": 40,
+      "candidates": 47,
+      "dropped_not_in_live": 1
+     }
+    ],
+    "draft": [
+     {
+      "agree": 39,
+      "candidates": 45,
+      "dropped_not_in_live": 2
+     }
+    ]
+   }
+  }
+ },
+ "worse": [],
+ "better": [
+  "inkling.stale_drop_recall"
+ ],
+ "complete": true,
+ "goes_in": true
+}

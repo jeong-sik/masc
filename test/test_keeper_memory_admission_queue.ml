@@ -19,7 +19,7 @@ let pending keepers_dir = Queue.read_pending ~keepers_dir ~keeper_id:"keeper" |>
 let batch keepers_dir = match pending keepers_dir with Some batch -> batch | None -> fail "missing candidates"
 let acknowledge keepers_dir = Queue.acknowledge_committed ~keepers_dir ~keeper_id:"keeper" |> require
 let commit keepers_dir range new_claims =
-  Current.apply_disposition ~explicit_candidate_ids:range ~absorbed:[] ~revisions:[]
+  Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:range ~absorbed:[] ~revisions:[]
     ~keepers_dir ~keeper_id:"keeper" ~now:200.
     ~source:{kind = Current.Librarian; trace_id = "admission-judge"} ~new_claims () |> require
 
@@ -180,7 +180,7 @@ let test_removed_destination_cannot_consume () = with_store (fun keepers_dir ->
   ignore (Current.replace ~keepers_dir ~keeper_id:"keeper"
     ~expected_revision:(Some initial.revision) ~now:200.
     ~source:{kind=Current.Librarian; trace_id="retire"} ~facts:[] () |> require);
-  (match Current.apply_disposition ~explicit_candidate_ids:selected
+  (match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:selected
      ~required_memory_ids:[Types.memory_id destination] ~absorbed:[] ~revisions:[]
      ~keepers_dir ~keeper_id:"keeper" ~now:300.
      ~source:{kind=Current.Librarian; trace_id="admission"} ~new_claims:[] () with
@@ -206,7 +206,7 @@ let test_stale_retirement_after_source_reobservation () = with_store (fun keeper
     ~facts:[retained] () |> require in
   let reobserved = {original with last_seen=300.;
     origin={kind=Types.Authored; trace_id="reobserved"}} in
-  let restored = Current.upsert_fact ~keepers_dir ~keeper_id ~now:300.
+  let restored = Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write ~keepers_dir ~keeper_id ~now:300.
     ~source:{kind=Current.Explicit_write; trace_id="reobserve"} reobserved
     |> Result.map_error Current.upsert_error_to_string |> require in
   check bool "reobservation is a new durable revision" true
@@ -214,7 +214,7 @@ let test_stale_retirement_after_source_reobservation () = with_store (fun keeper
   check bool "the exact reobserved source is current before the stale decision" true
     (List.mem reobserved restored.facts);
   let callbacks = ref 0 in
-  let committed = Current.apply_disposition ~keepers_dir ~keeper_id ~now:400.
+  let committed = Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~keepers_dir ~keeper_id ~now:400.
     ~on_committed:(fun _ -> incr callbacks) ~explicit_candidate_ids:selected
     ~source:{kind=Current.Librarian; trace_id="stale-retirement"}
     ~dropped_statements:[stale_drop] ~absorbed:[] ~revisions:[] ~new_claims:[] () |> require in
@@ -263,7 +263,7 @@ let test_destination_lost_during_support_maintenance_preserves_publication () =
        Queue.path ~keepers_dir ~keeper_id] in
     let before = List.map Fs_compat.load_file_opt paths in
     let callbacks = ref 0 in
-    (match Current.apply_disposition ~keepers_dir ~keeper_id ~now:200.
+    (match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~keepers_dir ~keeper_id ~now:200.
       ~on_committed:(fun _ -> incr callbacks) ~explicit_candidate_ids:selected
       ~required_memory_ids:[Types.memory_id destination]
       ~source:{kind=Current.Librarian; trace_id="support-loss"}
@@ -336,7 +336,7 @@ let test_sparse_consumption_retains_gap_and_append () = with_store (fun keepers_
     (List.map (fun (row : Queue.candidate) -> row.sequence) (Queue.candidates (batch keepers_dir)));
   acknowledge keepers_dir;
   check int "append never reuses consumed sequence" 4 (append keepers_dir "d" "new D").sequence;
-  (match Current.apply_disposition ~explicit_candidate_ids:[b] ~absorbed:[] ~revisions:[]
+  (match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:[b] ~absorbed:[] ~revisions:[]
       ~keepers_dir ~keeper_id:"keeper" ~now:400.
       ~source:{kind=Current.Librarian; trace_id="stale"} ~new_claims:[fact "settled B"] () with
    | Error _ -> () | Ok _ -> fail "consumed B resurrected after retirement");
@@ -358,7 +358,7 @@ let test_unverifiable_memory_authority_refuses_judgment () =
       (Queue.candidates selected)).fact in
     let target=fact "settled B" in
     let binding={Current.candidate_id=b;source_fact;target_memory_id=Types.memory_id target} in
-    ignore(Current.apply_disposition ~explicit_candidate_ids:[b]
+    ignore(Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:[b]
       ~admission_recall:{Current.decided_at_revision=None; bindings=[binding]}
       ~absorbed:[] ~revisions:[]
       ~keepers_dir ~keeper_id:"keeper" ~now:200.

@@ -771,7 +771,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
         @
         (* The server's rollup, from the probe it serves on every refresh. *)
         (match Masc_tui_types.operator_actions state with
-         | _ :: rest ->
+         | Some (_ :: rest) ->
            let count = 1 + List.length rest in
            let notice =
              ui_text state
@@ -783,7 +783,12 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
                { notice
                ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations"
                } ]
-         | [] -> [])
+         | Some [] -> []
+         | None ->
+             [ Masc_tui_footer.Operator_action
+                 { notice = pressable (Press_surface Overview)
+                     (ui_text state ~ko:"조치 원인 미관측" ~en:"Action reasons unobserved")
+                 ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations" } ])
         @
         (* This TUI's own embedded commit against the server's: the pair
            that told "restart masc" apart from "the feature is not merged"
@@ -4069,6 +4074,18 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
      read "@p@" and "@them@" where it meant prompts and themes. The strip
      cannot say it was cut that far; it has already spent its marks. *)
   let strip_floor = tab_strip_min_width (config_pane_tabs state) in
+  if cells keys + strip_floor + cells tail > framed_inner_width cols then
+    let active_name =
+      config_pane_tabs state
+      |> List.find_map (fun (label, active, _) -> if active then Some label else None)
+      |> Option.value ~default:name
+      |> fun label -> screen_title (" " ^ label)
+    in
+    let badge = surface_connection_badge state
+        ~width:(max 0 (framed_inner_width cols - cells active_name - cells "  ")) in
+    detail_heading ~cols ~lead:(Lead_text active_name) ~id:""
+      ~after:[piece reading; piece keys; piece note; piece clock] ~tail:badge
+  else
   (* What the title gives way with is its tail: the reading first, and then
      the name whole. [config_pane_title_head] owns that order. *)
   let before =

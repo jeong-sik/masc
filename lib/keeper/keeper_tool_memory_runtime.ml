@@ -1479,7 +1479,8 @@ let upsert_explicit_fact
     { kind = Keeper_memory_os_current.Explicit_write; trace_id }
   in
   let upsert () =
-    Keeper_memory_os_current.upsert_fact ~keepers_dir ~keeper_id ~now ~source fact
+    Keeper_memory_os_current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write
+      ~keepers_dir ~keeper_id ~now ~source fact
     |> Result.map_error (function
       | Keeper_memory_os_current.Unsupported_derivation invalidation ->
         Write_unsupported_derivation invalidation
@@ -1492,6 +1493,7 @@ let upsert_explicit_fact
     | Some superseded_memory_id ->
       (match
          Keeper_memory_os_current.supersede_fact
+           ~pass:Keeper_memory_commit_pass.Keeper_write
            ~keepers_dir
            ~keeper_id
            ~now
@@ -2020,6 +2022,7 @@ let keeper_memory_retract_with_outcome
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     (match
        Keeper_memory_os_current.retract_fact
+         ~pass:Keeper_memory_commit_pass.Keeper_delete
          ~keepers_dir
          ~keeper_id:meta.name
          ~now

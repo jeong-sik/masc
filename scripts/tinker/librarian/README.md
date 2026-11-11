@@ -63,6 +63,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
 | `teacher_sample.py` | Keeps teacher answers that leave the memory their training labels ask for, and those that absorb a memory once the merge judge finds each absorb mergeable |
 | `train_sft.py` | Trains the candidate A on the teacher's answers |
+| `prompt_lines.json` | A prompt draft's comparison, fixed before the draft runs: the baseline runs, the runs per side and the noise widths |
+| `prompt_compare.py` | Decides whether a prompt draft goes in, from runs of the pinned template and of the draft |
 
 The tests are `scripts/tests/test_tinker_librarian_*.py`. They read only
 invented rows and the invented Keepers in
@@ -77,19 +79,31 @@ repository root.
 
 Every evaluation call sends what MASC's exact lane sends: the admission prompt,
 then the schema instruction as the last user message, with
-`reasoning_effort: "low"` and `max_tokens: 32768`.
+`reasoning_effort: "low"` and `max_tokens: 32768`. Both values are pinned in
+`pass_lines.json` under `request`.
 
 An exact request carries `max_tokens` only when its lane declares
 `max_output_tokens`. A binding's `max-tokens` does not reach it. MASC sends the
 lane's value to every slot of the lane, clamped to each slot's declared or
-catalog output ceiling. Rollout saves 32,768 as the lane's
-`max_output_tokens`, and the checkpoint's binding declares an output ceiling of
-32,768, so the checkpoint receives 32,768.
+catalog output ceiling (`output_token_ceiling` in
+`packages/agent_core/lib/llm_provider/backend_openai_request.ml`). The live
+admission lane declares no `max_output_tokens` today, so its requests carry no
+`max_tokens`.
 
-A GLM run sends what MASC's GLM slot then sends: the same two messages, with
-thinking enabled, a `json_object` response format and the same `max_tokens`
-(GLM's output ceiling is higher). The slot declares no effort, so the request
-carries none, and the endpoint applies its default.
+When the operator puts a checkpoint in the admission lane, the roll-out saves
+65,536 as the lane's `max_output_tokens` and declares an output ceiling of
+32,768 on the checkpoint's binding. The checkpoint then receives 32,768, the
+value these runs send. The GLM slot receives 65,536: its catalog row
+(`glm-5.3-flash` under `glm-coding` in `packages/agent_core/models.toml`) sets a
+ceiling of 131,072. Every other slot of the lane receives 65,536 clamped to its
+own ceiling.
+
+`glm_chat.py` sends the two messages as MASC's GLM slot does, with thinking
+enabled and a `json_object` response format. It sends the pinned
+`max_tokens: 32768` too, so a prompt draft and its baseline meet the same
+ceiling. The live GLM slot sends no `max_tokens` until the roll-out saves the
+lane value. The slot declares no effort, so the request carries none, and the
+endpoint applies its default.
 
 ## Order
 
@@ -199,6 +213,27 @@ E-real prompt is first read with the pinned template, and its retirement
 evidence goes out under the new template's retirement policy. `summary.json`
 records the sha256 of the template the prompts were drawn with, and `verdict`
 refuses a run whose template is not the pinned one.
+
+`prompt_compare.py --runs <runs.json> --out <compare.json>` decides whether a
+draft of `config/prompts/librarian.md` goes in (RFC-0517 §2.3).
+`prompt_lines.json` fixes the comparison before the draft runs: the pass
+lines, the template and rows of each baseline run, two runs per side on
+Inkling and one on GLM, and the noise widths. Each metric counts hits over
+chances, summed over a side's runs. Its noise σ is the binomial standard error
+of the difference at the pooled rate. A metric is worse below -2.5σ and better
+above +2σ. The draft goes in when no metric of either model is worse and an
+Inkling E-synth quality metric is better: memory state accuracy, stale drop
+recall or judged merge recall. Drop and absorb precision and the valid rates
+remain non-degradation checks; their improvement alone does not admit a draft.
+A metric with chances on only one side remains
+`uncounted` and appears in `uncompared`; the comparison is incomplete and the
+draft does not go in. With no chances on either side, that metric supplies
+neither degradation nor improvement; the other measured metrics still decide.
+A draft runs on GLM only after its
+Inkling runs pass. The drop and merge judges of steps 6 and 7 class the
+E-synth runs of both sides under the pinned template's rules. E-real outcome
+agreement and the drops of memories the live answer kept are recorded, not
+judged: a person reads the drops that changed.
 
 `run --provider glm --target glm=<model> --max-calls <n>` measures the same
 sets on GLM (`glm_chat.py`). It sends no warm call, and its rows cost nothing

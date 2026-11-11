@@ -208,7 +208,8 @@ let runtime_reading_walk_help =
 
 let runtime_keys =
   [ Every_reading (b Navigate "j/k" "move / scroll")
-  ; Every_reading (b Navigate "PgUp/PgDn" "detail page")
+  ; Every_reading (b Navigate "PgUp/PgDn" "detail page"
+      ~help:"page an open detail; in the media editor page declared slots; while typing a lane name, PgUp opens the complete draft/context reader and Esc returns to the unchanged field")
   ; Every_reading
       (b Act "Right / Enter" "detail"
          ~help:"show the full runtime, lane, dispatch, and probe fields")
@@ -237,8 +238,7 @@ let runtime_keys =
          ~help:"replace [runtime].default, what a keeper with no assignment walks")
   ; Keeper_lanes_only
       (b Act "m" "vision runtimes"
-         ~help:"edit [runtime].media_failover in the slot editor; refused while \
-                boot dropped one of its entries")
+         ~help:"edit [runtime].media_failover: j/k, PgUp/PgDn and Home/End select declared slots; a appends, x drops, J/K reorder, 1 makes first, v reads all IDs/results without closing the editor. Admission and write refusals remain in the reading")
   ; Keeper_lanes_only
       (b Act "R" "rename lane"
          ~help:"give the lane under the cursor another name; the assignments \
@@ -333,6 +333,7 @@ let mouse_toggle_label = "F2"
 
 let global =
   [ b Meta "Tab / Shift-Tab" "next / previous surface"
+      ~help:"next / previous surface; the chat composer keeps them to complete a /command"
   ; keepers_jump
   ; b Meta "r" "refresh the current surface"
   ; b Meta "i" "focus the composer; on Dashboard, choose a Keeper"
@@ -566,7 +567,7 @@ let for_surface = function
       [ b ~ko:"조치 원인" Navigate "v" "action reasons"
           ~help:"read every reason in the last server rollup; scroll and search the captured reading; Esc returns without changing a decision or setting"
       ; b ~ko:"키퍼" Navigate "Left" "Keepers" ~help:"open the Keeper list; Enter opens a chat; Right or Esc returns"
-      ; b ~ko:"선택" Navigate "j/k" "choose" ~help:"move between decision links and conversations"
+      ; b ~ko:"선택" Navigate "j/k" "choose" ~help:"select a destination"
       ; b ~ko:"열기" Navigate "Enter" "open" ~help:"open the selected destination; never approve"
       ; b ~ko:"승인·질문" Navigate "p" "requests" ~help:"approvals and questions"
       ; b ~ko:"퀴즈" Navigate "g" "quiz" ~help:"the operator quiz's Results: scorecard windows and wrong-answer notes"
@@ -688,14 +689,26 @@ let for_surface = function
       [ b Navigate "Left" "roster" ~help:"empty composer: open the Keeper list; with text: move the cursor left"
       ; b Navigate "Right" "chat"
           ~help:"roster focused: return focus to the chat composer"
-      ; (* One key, two focuses: the roster when it holds focus, the history
-           when the chat is scrolled back. Listed once so the table keeps the
-           one-key-one-row contract (#33236). *)
+      ; (* One key, several jobs: the roster when it holds focus, the history
+           when the chat is scrolled back, the completions while a /command is
+           typed, and otherwise the lines the operator sent. Listed once so the
+           table keeps the one-key-one-row contract (#33236). *)
         b Navigate "Up / Down" "roster move / scroll"
-          ~help:"roster focused: move; chat scrolled back: adjust by one line"
+          ~help:
+            "roster focused: move; chat scrolled back: adjust by one line; \
+             while a /command is typed: pick among its completions; \
+             otherwise walk the history of lines you sent: Up recalls the \
+             previous one (a line still waiting in the queue comes back as \
+             an edit of that line), Down steps back toward your draft"
       ; b Act "Enter" "send / open"
           ~help:"send from chat, or open the selected Keeper from the roster"
-      ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
+      ; b Act "Ctrl-J" "newline"
+          ~help:"newline in the draft; Shift-Enter does the same where the terminal reports it"
+      ; b Act "Tab / Shift-Tab" "complete"
+          ~help:
+            "complete the /command being typed, or its argument such as a \
+             Keeper name; the chat composer keeps these keys, so they do not \
+             switch surface here"
       ; b Act voice_speak_key "speak"
           ~help:"record into the draft; again to stop and keep what was said"
       ; b Act voice_listen_key "keep listening"
@@ -709,6 +722,8 @@ let for_surface = function
       ; b Act "Ctrl-T" "queue"
           ~help:"inspect and manage waiting turns"
       ; b Navigate "PgUp/PgDn" "history" ~help:"scroll history by a page"
+      ; b Navigate "Ctrl-E / End" "newest"
+          ~help:"after reading back, jump to the newest row"
       ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
       ; b Act "Ctrl-D" "tool detail" ~help:"cycle compact / results / full tool detail"
       ; b Act expand_turn_label "turn detail"
@@ -725,6 +740,8 @@ let for_surface = function
           ~help:"cycle no clock / inline clock / full timestamp and request id"
       ; b Act "Ctrl-O" "image / diagram"
           ~help:"preview the newest image or Mermaid diagram; /images lists all; any key returns"
+      ; b Act "Ctrl-V" "paste image"
+          ~help:"paste the clipboard image: it is staged for the next message and an [Image #1] marker lands in the draft"
       ; b Act "/approve /deny" "approval" ~help:"type a command and Enter to answer a tool approval"
       ; b Act "/copy" "copy reply"
           ~help:"send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52"
@@ -2046,6 +2063,39 @@ let footer_hints_code ~pane =
 (* The ordinary reading and its picker answer different Enter keys. The
    footer reads the same pick/filter state the dispatcher owns; printable
    letters only belong to the surface while no filter is being typed. *)
+let runtime_parent_bindings ~ko parent =
+  let text korean english = if ko then korean else english in
+  let name_bindings enter =
+    [ b Act "Enter" enter
+    ; b Navigate "PgUp" (text "초안·안내 전체" "read draft/context")
+    ; b Act "Backspace" (text "지우기" "erase")
+    ; b Act "Esc" (text "취소" "cancel") ] in
+  match parent with
+  | Runtime_media_parent ->
+      [ b Act "v" (text "전체 읽기" "read all")
+          ~help:"read full IDs, admission and results without closing the editor; ! marks a declared slot not admitted in the last observation"
+      ; b Act "a" (text "추가" "add")
+      ; b Navigate "j/k" (text "선택" "select")
+      ; b Navigate "PgUp/PgDn" (text "페이지" "page")
+      ; b Navigate "Home/End" (text "처음/끝" "edges")
+      ; b Act "x" (text "제거" "drop")
+      ; b Act "J/K" (text "순서 변경" "reorder")
+      ; b Act "1" (text "맨 앞으로" "make first")
+      ; b Act "Esc" (text "닫기" "close")
+      ; b Meta "r" (text "새로고침" "refresh")
+      ; b Meta "?" (text "도움말" "help") ]
+  | Runtime_prompt_parent (Lane_name_prompt _) ->
+      name_bindings (text "첫 런타임 선택" "choose first runtime")
+  | Runtime_prompt_parent (Lane_rename_prompt _) ->
+      name_bindings (text "이름·참조 변경" "rename and rewrite references")
+  | Runtime_prompt_parent (Lane_remove_prompt _) ->
+      [ b Act "D" (text "제거 확인" "confirm removal")
+      ; b Act "v" (text "확인 해제·전체 읽기" "disarm and read all")
+      ; b Act "Esc" (text "뒤로" "back") ]
+
+let footer_hints_runtime_parent ~ko ~parent =
+  runtime_parent_bindings ~ko parent |> hints_of_bindings
+
 let footer_hints_runtime ~(mode : runtime_mode) ~picker =
   match picker with
   | None ->
@@ -3009,6 +3059,10 @@ let help_sections_for_state ~cols (state : state) =
     else if state.view = Runtime && Option.is_some state.runtime_detail_target then
       let routes = state.runtime_detail_target = Some Runtime_routes in
       Some ("Runtime detail", runtime_detail_bindings_for ~ko:(state.ui_language = Lang_ko) ~routes)
+    else if state.view = Runtime && Option.is_some (runtime_parent state) then
+      Option.map (fun parent ->
+        "Runtime editor", runtime_parent_bindings ~ko:(state.ui_language = Lang_ko) parent)
+        (runtime_parent state)
     else if state.view = Acting && Option.is_some state.acting_detail then
       Some ("Event evidence", bindings_acting_evidence)
     else if state.view = Code && state.code_focus_file = Right_pane

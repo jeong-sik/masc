@@ -6,6 +6,7 @@ open Keeper_memory_os_current_range_codec
 open Keeper_memory_os_current_receipt_store
 open Keeper_memory_os_current_read_anchor
 open Keeper_memory_os_current_update
+module Change_metrics = Keeper_memory_os_current_change_metrics
 
 (* Apply a librarian's disposition to whatever the snapshot holds when the
    lock is taken.
@@ -87,7 +88,7 @@ let prepare_program_source source (program : Keeper_memory_os_program.t) =
       after_boundary_line=range.after_boundary_line;
       turns=List.map (fun (line,turn_ref,messages) -> line,turn_ref,messages_sha256 messages) selected_turns})
 
-let apply_program_with_io ?write_snapshot ?sync_snapshot ?finalize_journal ?on_committed ?clock ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
+let apply_program_with_io ?write_snapshot ?sync_snapshot ?finalize_journal ?on_committed ?clock ~pass ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
   let module P = Keeper_memory_os_program_types in
   let* () =
     if Keeper_identity.Keeper_id.to_string program.Keeper_memory_os_program.keeper_id=keeper_id
@@ -97,6 +98,8 @@ let apply_program_with_io ?write_snapshot ?sync_snapshot ?finalize_journal ?on_c
     ~program_of_output:Fun.id
     ?observe_output:(Option.map (fun observe snapshot (_ : commit_effect) proof ->
       observe {snapshot;proof}) on_committed)
+    ~change_count:(Change_metrics.Counted
+      {pass; count=(fun (_ : t) proof -> Change_metrics.of_publication proof)})
     ~equal_facts:(Write_revision None) ~store_error:Fun.id ~keepers_dir ~keeper_id ~now
     (fun ~snapshot_content previous ->
       let* () = validate_source () in
@@ -109,8 +112,8 @@ let apply_program_with_io ?write_snapshot ?sync_snapshot ?finalize_journal ?on_c
       Ok (next,({execution;captured=anchor.anchor_identity;locked_prior;boundary} : P.publication)))
   |> Result.map (fun (snapshot,(_ : commit_effect),proof) -> {snapshot;proof})
 
-let apply_program ?on_committed ?clock ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
-  apply_program_with_io ?on_committed ?clock ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program
+let apply_program ?on_committed ?clock ~pass ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program =
+  apply_program_with_io ?on_committed ?clock ~pass ~keepers_dir ~keeper_id ~now ~anchor ~source ~validate_source program
 
 let apply_disposition_guarded
       ?expected_basis
@@ -122,6 +125,7 @@ let apply_disposition_guarded
       ?(explicit_candidate_ids = [])
       ?admission_recall
       ?(required_memory_ids = [])
+      ~pass
       ~absorbed
       ~revisions
       ~keepers_dir
@@ -227,6 +231,17 @@ let apply_disposition_guarded
     ?admission_recall
     ~declared_revisions:revisions
     ~before_replace:write_absorbed_rows
+    ~change_count:
+      (Change_metrics.Counted
+         { pass
+         ; count =
+             (fun (snapshot : t) () ->
+                let (absorbed_applied, _), _, revisions_applied = !outcome in
+                Change_metrics.of_change
+                  ~absorbed:absorbed_applied
+                  ~revisions:revisions_applied
+                  snapshot.change)
+         })
     ~equal_facts:Keep_stored
     ~store_error
     ~keepers_dir
@@ -260,10 +275,10 @@ let disposition_error_to_string = function
 let apply_disposition
       ?expected_basis ?on_committed ?clock ?dropped_statements ?durable_range_id
       ?official_range_id ?explicit_candidate_ids ?admission_recall ?required_memory_ids
-      ~absorbed ~revisions ~keepers_dir ~keeper_id ~now ~source ~new_claims () =
+      ~pass ~absorbed ~revisions ~keepers_dir ~keeper_id ~now ~source ~new_claims () =
   apply_disposition_guarded
     ?expected_basis ?on_committed ?clock ?dropped_statements ?durable_range_id
     ?official_range_id ?explicit_candidate_ids ?admission_recall ?required_memory_ids
-    ~absorbed ~revisions ~keepers_dir ~keeper_id ~now ~source ~new_claims ()
+    ~pass ~absorbed ~revisions ~keepers_dir ~keeper_id ~now ~source ~new_claims ()
   |> Result.map_error disposition_error_to_string
 ;;

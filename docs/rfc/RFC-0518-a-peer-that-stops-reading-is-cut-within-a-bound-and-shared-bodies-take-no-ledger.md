@@ -104,8 +104,9 @@ related: ["0512", "0493", "0350"]
 - **원장 예약은 범위가 끝나면 풀린다.** `with_request` 의 release hook 이 남은 예약을 모두 푼다(`http_h2_response_ledger.ml` 52~60줄). 그래서 D1 이 범위를 끝내면 예약도 풀린다. 원장의 `write_reserved` 가 거는 flush 는 `Stream_end` 를 거치지 않는다(69줄). 이 함수는 gateway 의 오류 진단 한 줄만 쓴다(D3).
 - **gRPC 응답의 flush 도 `Stream_end` 를 거치지 않는다.** gRPC 리스너의 응답은 `Grpc_eio` 가 h2 에 바로 쓴다. 그 flush 는 D2 상한을 받지 않는다. 스트림 switch 는 레지스트리가 주므로, D1 으로 스트림이 끝나면 그 fiber 도 끝난다.
 - **h2 가 연결 reader fiber 에서 여는 오류 응답은 masc 범위 밖이다.** 프레임 해석 중 오류에 h2 는 reader fiber 에서 error handler 를 부른다(server_connection.ml 157~160줄). 그 `close_after_flush` 에는 `Stream_end` 가 묶이지 않는다. 본문은 고정 진단 문구 하나다(`server_h2_gateway.ml` 17~24줄). 창을 열지 않는 상대가 쥐는 이 응답은 연결 단위 상한(§7.4)에 맡긴다.
-- **SSE `send` 의 자체 타이머는 HTTP/1.1 에서만 돈다(L2b2).** HTTP/2 에서 같은 상한의 타이머 둘이 겨루지 않는다. 로그 스트림의 자체 send 와 정체 판정은 지우고 `Server_sse_response` 를 쓴다.
-- **상한은 lib/ 의 상수 하나다.** 값은 지금과 같은 90초다. `sse_stalled_after_s`(`server_mcp_transport_http_headers.ml` 294줄)다. HTTP/2 리스너의 레지스트리가 이 값을 기본으로 쓰고, `observer_idle_timeout_ms`(299줄)와 SSE 응답, 로그 스트림의 `stalled_after_s` 도 이 값을 쓴다. 이름은 SSE 에서 왔다. 이 값을 바꾸면 HTTP/2 응답 전체의 최소 배출 속도(§5)도 같이 바뀐다. `server_mcp_transport_http_agui.ml` 16줄의 따로 적은 `30.0` 은 `sse_ping_interval_s` 로 바꾼다. 핑 간격(30초)은 상한보다 짧아서 읽는 클라이언트는 상한 안에 늘 프레임을 받는다.
+- **SSE `send` 의 자체 타이머는 HTTP/1.1 에서만 돈다.** HTTP/2 에서 같은 상한의 타이머 둘이 겨루지 않는다. 로그 스트림의 자체 send 와 정체 판정은 지우고 `Server_sse_response` 를 쓴다.
+- **상한은 lib/ 의 상수 하나다.** 값은 지금과 같은 90초다. `sse_stalled_after_s`(`server_mcp_transport_http_headers.ml` 294줄)다. HTTP/2 리스너의 레지스트리가 이 값을 기본으로 쓰고, `observer_idle_timeout_ms`(299줄)와 SSE 응답도 이 값을 쓴다. 로그 스트림은 `Server_sse_response` 를 거쳐 같은 값을 쓴다. 이름은 SSE 에서 왔다. 이 값을 바꾸면 HTTP/2 응답 전체의 최소 배출 속도(§5)도 같이 바뀐다. `server_mcp_transport_http_agui.ml` 16줄의 따로 적은 `30.0` 은 `sse_ping_interval_s` 로 바꾼다. 핑 간격(30초)은 상한보다 짧다.
+- **로그 스트림의 keepalive 는 보낸 것이 없는 30초마다 나간다.** 로그 스트림은 질의에 안 맞는 로그에도 깨어난다. 그때마다 30초를 처음부터 다시 세서, 그런 로그가 30초 안쪽 간격으로 이어지면 keepalive 가 나가지 않았다. 읽는 클라이언트는 조용한 스트림과 죽은 연결을 가를 수 없었고, 떠난 클라이언트의 fiber 는 다음 `send` 가 없어 남았다. 다음 keepalive 시각을 보낸 것이 없는 깨어남 너머로 유지한다. 그 시각은 벽시계 값이다. 시계가 뒤로 가면 그만큼 늦어지므로, 깨어날 때마다 지금부터 핑 간격 안으로 당긴다. 떠난 상대는 길어도 핑 간격 뒤에 `send` 를 만난다. 멈춘 상대에게는 keepalive 13 B 가 창이나 소켓 버퍼에 들어가는 동안 `send` 가 답을 받고, 상한은 더 들어가지 못한 프레임부터 센다.
 
 ### D3. 응답 본문은 h2 에 16 KiB 조각 둘까지 넣는다
 
@@ -135,7 +136,6 @@ related: ["0512", "0493", "0350"]
 - **90초는 본문 전체가 아니라 조각에 걸린다.** 앞 조각이 답을 받은 때부터 잰다(D2). 조각이 하나씩 90초 안에 나가면 본문 전체가 90초보다 오래 걸려도 끝까지 간다. 소켓이 병목이면 쓰기 한 번에 조각 둘이 같이 들어가고, 두 조각은 그 쓰기가 끝나야 답을 받는다. 그때는 조각 둘이 90초 안에 들어가야 한다. 창을 몰아서 돌려주는 클라이언트는 꾸준히 읽어도 한 번에 돌려주는 양을 90초 안에 읽어야 한다. 그동안 다음 조각이 나갈 창이 없기 때문이다(§5). 아무것도 읽지 않는 클라이언트는 첫 창 뒤의 조각에서 90초에 끊긴다. 조각의 flush 는 조각 전체가 나가야 답을 받으므로 1바이트 WINDOW_UPDATE 로는 늘어나지 않는다(§3.3).
 - **원장 예약은 지금처럼 payload 전체다.** 문자열이 다 나갈 때까지 큐에 있기 때문이다. payload 의 마지막 조각이 소켓에 들어가면 예약을 푼다. h2 가 쥐는 사본은 조각 둘까지다.
 - **원장이 거절하면 warn 한 줄을 남긴다.** 통째 본문은 빈 503 으로, 스트리밍 쓰기는 reset 으로 끝난다. 줄에는 요청 메서드와 경로, 거절한 바이트 수를 적는다. 응답이 시작된 뒤의 reset 은 error handler 를 거치지 않아 다른 흔적이 없다.
-- **SSE `send` 의 자체 타이머는 L2b2 전까지 HTTP/2 에서도 돈다.** 그동안 큰 프레임을 천천히 읽는 HTTP/2 클라이언트에는 `send` 가 90초에 `Stalled` 로 답하고 응답을 닫는다. 닫기는 남은 조각이 다 나간 뒤라서 클라이언트는 그 프레임을 끝까지 받는다. 지금도 그렇다(`server_sse_response.ml` 87~95줄).
 - **헤더를 보내기 전의 예외는 지금처럼 예약을 풀고 다시 낸다.** `http_reqd.ml` 231~249줄은 예약한 뒤 `H2.Reqd.respond_with_streaming` 을 부른다. `error_code` 가 이미 있으면 h2 는 헤더를 쓰기 전에 `currently handling error` 를 낸다(reqd.ml 280~285줄). 그때 예약을 풀지 않으면 최대 32 MiB(`tool_blob_store.ml` 343줄)가 응답 없이 남는다.
 - **헤더를 보낸 뒤의 예외는 D1 reset 으로 끝낸다.** 그 자리의 `release; raise` 만 지운다.
 
@@ -172,10 +172,14 @@ related: ["0512", "0493", "0350"]
 
 ### D7. 응답이 생산자 수명을 가진다
 
-- `Server_sse_response.serve ~sw t produce` 를 더한다. 생산자를 `await_closed t` 와 겨루게 하고, 어느 쪽이 먼저 끝나든 응답을 닫는다.
+- `Server_sse_response.serve ~sw ?release t produce` 를 더한다. 생산자를 `await_closed t` 와 겨루게 한다.
+  - 응답이 먼저 닫히면 생산자를 취소한다. HTTP/2 는 상대의 reset, 정체, 연결 종료가 응답을 닫는다. HTTP/1.1 은 응답 밑의 끝을 알리지 않아서, 생산자가 다음 `send` 에서 안다(§7.7).
+  - 생산자가 돌아오면 응답을 완결로 닫는다.
+  - 생산자가 예외로 끝나면 닫지 않고 끊는다. 라우트 handler 가 응답 도중 실패했을 때와 같은 길(`Http_reqd.report_exn`)이다. HTTP/2 스트림은 RST_STREAM 을 받고 HTTP/1.1 은 본문을 멈추고 연결을 닫는다. 예외는 거기서 error 로 한 번 남고, 호출자의 switch 는 실패하지 않는다.
+  - `release` 는 생산자가 쥔 것(구독, 세션)을 놓는 정리다. 생산자가 끝나고 응답이 닫힌 뒤 한 번 부른다.
 - 생산자는 호출자의 switch 에 fork 하고, 그 fiber 안에 응답마다 자식 switch 를 연다. pump 가 이렇게 돈다(`server_mcp_transport_http_conn.ml` 313~331줄). 스트림 switch 로 옮기지 않으므로 생산자가 스트림 switch 를 붙잡는 순환 대기가 없다.
-- 호출자의 switch 에는 hook 을 걸지 않는다. 그 switch 는 서버 수명이다(`server_routes_http.ml` 9·42줄). eio 는 `on_release` hook 을 switch 가 끝날 때까지 쥔다(eio switch.ml 101~111줄). 응답마다 걸면 서버가 끝날 때까지 쌓인다.
-- fork 하기 전에 `Switch.get_error` 를 본다. 이미 끝나는 중이면 응답만 닫는다. 응답을 닫는 cleanup 은 자식 switch 의 `on_release` 에 건다.
+- 호출자의 switch 에는 hook 을 걸지 않는다. 그 switch 는 서버 수명이다. 라우터의 switch(`server_routes_http.ml` 9·42줄)이거나, 문서 초안 라우트처럼 서버 state 의 switch 다. eio 는 `on_release` hook 을 switch 가 끝날 때까지 쥔다(eio switch.ml 101~111줄). 응답마다 걸면 서버가 끝날 때까지 쌓인다.
+- fork 하기 전에 `Switch.get_error` 를 본다. 이미 끝나는 중이면 생산자를 돌리지 않고, 응답을 닫고 `release` 를 부른다. 그 밖에는 응답을 닫고 `release` 를 부르는 cleanup 을 자식 switch 의 `on_release` 에 건다.
 - 쓰는 곳은 셋이다: 로그(`server_routes_http_routes_log_stream.ml`), 문서 초안(`server_routes_http_routes_artifact_draft_live.ml`), 실행 출력(`server_routes_http_routes_dashboard.ml` `handle_execute_output_stream`).
 
 ### D8. TLS 쓰기 조각과 암호 순서
@@ -250,6 +254,9 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 릴리스를 기
 - 라우트가 스트리밍 응답 도중 예외를 내면, HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받고 HTTP/1.1 연결은 닫힌다. chunked 본문은 마지막 chunk 가 빠진다. masc 의 HTTP/1.1 SSE 는 연결 종료로 끝을 알리므로, 클라이언트에게는 끝난 스트림처럼 보인다. 전에는 스스로 닫지 않는 라우트의 응답이 열린 채 남았다. 라우트 예외는 error 로 한 번 남는다(늦은 응답 모양은 지금처럼 warn). 응답 전 예외는 전에는 500 본문에만 있었다.
 - HTTP/1.1 클라이언트가 요청 본문 도중 떠나면 라우트는 받은 데까지의 본문으로 돌지 않는다. 응답 전이면 httpun 이 400 으로 답한다. 응답이 시작됐으면 그 응답이 끊긴다. 전에는 잘린 본문이 온전한 본문처럼 라우트에 넘어갔다. 읽기가 EOF·reset 이 아닌 오류로 끝나면 gluten 이 보고하고 500 이 된다(gluten_eio.ml 149줄).
 - GitHub 로그인 스트림과 계정 로그인 스트림이 예외로 끝나면 HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받는다. 전에는 응답을 닫은 뒤 예외를 냈다. 그래서 쓴 바이트가 다 나간 스트림은 끝난 스트림처럼 보였다.
+- 필터를 건 로그 스트림도 30초마다 keepalive 한 줄을 받는다. 전에는 질의에 안 맞는 로그가 30초 안쪽 간격으로 이어지면 keepalive 가 나가지 않았다. 떠난 클라이언트의 로그 스트림은 HTTP/2 면 스트림이 끝날 때, HTTP/1.1 이면 다음 keepalive 때 끝난다.
+- 로그·문서 초안·실행 출력 스트림은 HTTP/2 클라이언트가 스트림을 reset 하거나 연결을 끊으면 바로 끝난다. 구독과 편집 세션도 그때 놓는다. 전에는 다음 keepalive(30초, 실행 출력은 15초)를 쓸 때 알았다. HTTP/1.1 은 지금처럼 다음 쓰기 때 안다.
+- 이 세 스트림의 생산자가 예외로 끝나면 HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받고 HTTP/1.1 연결은 닫힌다. 예외는 error 로 한 번 남는다. 전에는 warn(초안은 debug) 한 줄을 남기고 응답을 끝난 것처럼 닫았다.
 - 소켓 쓰기가 90초 동안 끝나지 않는 연결은 닫힌다. 먼저 shutdown 이 FIN 을 보낸다. 연결을 놓으며 fd 를 닫을 때(`server_bootstrap_http.ml` 122~133줄) `SO_LINGER 0` 이라 RST 가 간다.
 - TLS 연결은 handshake 가 30초 안에 끝나지 않으면 닫힌다. 평문 연결은 30초 안에 첫 바이트를 보내지 않으면 닫힌다. TLS handshake 뒤의 첫 읽기에는 기한이 없다(§7.4).
 - 대시보드 asset 응답은 원장을 쓰지 않는다. 압축은 asset 판마다 한 번 한다.
@@ -340,9 +347,10 @@ worktree `.worktrees/h2-backpressure` 에서 gh stack 으로 쌓는다. 맨 아�
 |---|---|---|---|
 | L0 | `research/h2-sse-stalled-responses` | 조사 문서와 실측 기록 | #50417 |
 | L1 | `rfc/0518-stalled-peer-bounds` | 이 RFC | #50428 |
-| L2a | `http/h2-stream-reset` | D1: `Http_h2_stream` 의 reset 함수, 내보낸 RST_STREAM 규칙 | |
-| L2a2 | `http/h2-ended-writer` | D1 의 나머지: `http_reqd.ml` 의 보고 두 곳(295·474줄), `Ended` writer | |
-| L2b | `http/h2-flush-bound` | D2, D3(한 PR) | |
+| L2a | `http/h2-stream-reset` | D1: `Http_h2_stream` 의 reset 함수, 내보낸 RST_STREAM 규칙 | #50489 |
+| L2a2 | `http/h2-ended-writer` | D1 의 나머지: `http_reqd.ml` 의 보고 두 곳(295·474줄), `Ended` writer | #50505 |
+| L2b | `http/h2-flush-bound` | D2, D3(한 PR) | #50765 |
+| L2b2 | `http/sse-h1-stall-timer` | D2 의 나머지: SSE `send` 타이머는 HTTP/1.1 에서만, 로그 스트림은 `Server_sse_response`, 로그 스트림 keepalive 시각, 핑 상수 하나 | |
 | L3 | `deps/tls-2.1.5` | D9 | |
 | L4 | `http/connection-socket-bounds` | D4, D6, D8 | |
 | L5 | `http/sse-producer-scope` | D7 | |

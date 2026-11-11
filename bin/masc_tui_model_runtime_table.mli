@@ -46,8 +46,11 @@ val parse : ?account_groups:string list list -> string list -> (row list, string
     skipped: it names no lane and has no [max-tokens] column to show. *)
 
 val render : width:int -> ?pane:int -> row list -> string list
-(** Fixed-column table when every mandatory reading fits, and a stacked
-    item layout when one does not.
+(** Binding/model names and declared field values, in a fixed-column table
+    when they fit and wrapped items otherwise. Exact provider/account labels
+    accompany every binding name shared by more than one provider. The caller
+    also names the selected provider/account; API aliases and TOML provenance
+    remain in {!detail_lines}.
 
     [width] is the width the table may spend. [pane], when given, is the
     number of cells the drawing surface actually offers the table after its
@@ -59,8 +62,9 @@ val render : width:int -> ?pane:int -> row list -> string list
 
 val fits : width:int -> row list -> bool
 (** [fits ~width rows] reports whether the fixed-column table renders every
-    mandatory reading (provider, model, effort, temperature, max-tokens) in
-    [width] cells. The pane needs this to decide between the table and the
+    mandatory reading (binding/model, effort, temperature, max-tokens and any
+    ambiguous provider/account qualifier) in [width] cells. The pane needs
+    this to decide between the table and the
     stacked layout before drawing; the table itself always renders, so this
     is a query, not a precondition. *)
 

@@ -22,6 +22,7 @@ import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 import { ToolSeriesPanel } from './tool-series-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
+import { KeeperEventQueuePanel } from './keeper-event-queue-panel'
 import { SkillActivationPanel, type KeeperSkillReceipt } from './skill-activation-panel'
 import {
   fetchDashboardTools,
@@ -201,6 +202,10 @@ export function Tools() {
                 ? scheduledAutomationProjection.value.data
                 : null}
             />`}
+      <//>
+
+      <${SectionCard} label="Keeper 대기열 취소" class="section v2-lab-panel mb-4">
+        <${KeeperEventQueuePanel} />
       <//>
 
       <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">

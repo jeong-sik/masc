@@ -186,21 +186,31 @@ let keepers_on_login ~rows ~assignments row =
     then Some keeper else None) assignments
   |> List.sort_uniq String.compare
 
-let provider_width_of rows =
-  List.fold_left
-    (fun acc r -> max acc (Masc_tui_message_layout.display_width (provider_text r)))
-    (Masc_tui_message_layout.display_width "provider")
-    rows
+module Model_names = Map.Make (String)
 
-(* The model column shows the binding name, and the api-name override when
-   there is one: they are what identifies a row to a reader who wants to fix
-   it in runtime.toml. Measuring from the same text the row draws keeps the
-   fit decision and the drawing honest with each other. *)
+(* A binding name can exist on several accounts. Keep the exact owner on
+   every such row; unique names use the selected account scope once. *)
+let row_qualifier rows =
+  let counts = List.fold_left (fun counts row ->
+    Model_names.update row.model (function None -> Some 1 | Some n -> Some (n + 1)) counts)
+    Model_names.empty rows in
+  fun row ->
+    match Model_names.find_opt row.model counts with
+    | Some n when n > 1 -> Some (provider_text row)
+    | Some _ | None -> None
+
+let provider_width_of ~qualifier rows =
+  let width = List.fold_left (fun width row ->
+    match qualifier row with
+    | None -> width
+    | Some owner -> max width (Masc_tui_message_layout.display_width owner)) 0 rows in
+  if width = 0 then 0 else max width (String.length "provider")
+
+(* The exact binding name is the selection identity. The full API-name
+   alias remains in the explicit detail reading rather than repeating beside
+   every model. Context here is declared, not resolved catalogue capacity. *)
 let model_text r =
-  let name = match r.api_name with
-  | Some api when not (String.equal api r.model) -> r.model ^ " (" ^ api ^ ")"
-  | Some _ | None -> r.model in
-  name ^ (match r.context with None -> "" | Some (_, n) -> Printf.sprintf " [%d ctx]" n)
+  r.model ^ (match r.context with None -> "" | Some (_, n) -> Printf.sprintf " [%d ctx]" n)
 
 (* The cells one complete row spends: every mandatory reading at its own
    measured width plus the gutters between. The header reserves fixed widths
@@ -210,27 +220,31 @@ let model_text r =
 let row_cells ~provider_width ~model_width r =
   (* [pad] fills a short knob to its reservation and never clips a long one,
      so each cell is the wider of the two. *)
-  provider_width + gutter + model_width + gutter
+  model_width + gutter
   + max effort_width
       (Masc_tui_message_layout.display_width (effort_text r.reasoning_effort))
   + gutter
   + max temperature_width
       (Masc_tui_message_layout.display_width (value_or_absent r.temperature))
-  + gutter + Masc_tui_message_layout.display_width (tokens_text r.max_tokens)
+  + gutter
+  + (let width = Masc_tui_message_layout.display_width (tokens_text r.max_tokens) in
+     if provider_width = 0 then width else max tokens_width width)
+  + (if provider_width = 0 then 0 else gutter + provider_width)
 
-(* What [render] reserves before the model column, and the model column it
+(* What [render] reserves outside the model column, and the model column it
    then draws. [fits] measures this same allocation: measuring natural widths
    accepted tables that [render] clipped (#41026 review). *)
 let fixed_cells ~provider_width =
-  provider_width + gutter + effort_width + gutter + temperature_width
-  + gutter + tokens_width + gutter
+  gutter + effort_width + gutter + temperature_width + gutter + tokens_width
+  + (if provider_width = 0 then 0 else gutter + provider_width)
 
 let model_column ~width ~provider_width =
   max 8 (width - fixed_cells ~provider_width)
 
 let header_cells ~provider_width ~model_width =
-  provider_width + gutter + model_width + gutter + effort_width + gutter
-  + temperature_width + gutter + String.length "max-tokens"
+  model_width + gutter + effort_width + gutter + temperature_width + gutter
+  + (if provider_width = 0 then String.length "max-tokens"
+     else tokens_width + gutter + provider_width)
 
 let model_width_of rows =
   max 8
@@ -238,11 +252,11 @@ let model_width_of rows =
        (fun acc r -> max acc (Masc_tui_message_layout.display_width (model_text r)))
        (Masc_tui_message_layout.display_width "model") rows)
 
-let fits ~width rows =
+let fits_rows ~width ~qualifier rows =
   match rows with
   | [] -> true
   | _ ->
-    let provider_width = provider_width_of rows in
+    let provider_width = provider_width_of ~qualifier rows in
     let model_width = model_column ~width ~provider_width in
     model_width_of rows <= model_width
     && header_cells ~provider_width ~model_width <= width
@@ -250,28 +264,35 @@ let fits ~width rows =
          (fun r -> row_cells ~provider_width ~model_width r <= width)
          rows
 
+let fits ~width rows = fits_rows ~width ~qualifier:(row_qualifier rows) rows
+
 (* One binding as named, wrapped lines. A label wider than the pane goes on
    its own line and wraps; a value keeps its complete characters because
    [wrap_words] splits at cell boundaries. No number is shortened into a
    different number on the way through. *)
-let stacked_lines ~pane rows =
+let stacked_items ~pane rows =
   let wrap text = Masc_tui_message_layout.wrap_words ~max_cells:pane text in
+  let qualifier = row_qualifier rows in
   let item r =
-    wrap (Printf.sprintf "%s %s" (provider_text r) (model_text r))
+    wrap (model_text r)
     @ wrap
         (Printf.sprintf
            "effort %s · temperature %s · max-tokens %s"
            (effort_text r.reasoning_effort)
            (value_or_absent r.temperature)
            (tokens_text r.max_tokens))
+    @ (match qualifier r with None -> [] | Some owner -> wrap owner)
   in
+  List.map item rows
+
+let stacked_lines ~pane rows =
   match rows with
   | [] -> [ "no model bindings in runtime.toml" ]
   | _ ->
     (* Items are separated by a blank line: on a pane this narrow the reader
        is scanning one binding at a time, and unseparated wrapped runs read
        as one record. *)
-    List.concat_map (fun r -> item r @ [ "" ]) rows
+    List.concat_map (fun item -> item @ [ "" ]) (stacked_items ~pane rows)
     |> fun lines ->
     (match List.rev lines with
      | _ :: rest -> List.rev rest  (* drop the trailing separator *)
@@ -280,48 +301,36 @@ let stacked_lines ~pane rows =
 (* Where each binding's item starts in the stacked document -- the line the
    pane marks when its cursor (a binding index) is on that row. *)
 let stacked_item_starts ~pane rows =
-  let wrap_len text =
-    List.length (Masc_tui_message_layout.wrap_words ~max_cells:pane text)
-  in
-  let item_len r =
-    wrap_len (Printf.sprintf "%s %s" (provider_text r) (model_text r))
-    + wrap_len
-        (Printf.sprintf
-           "effort %s · temperature %s · max-tokens %s"
-           (effort_text r.reasoning_effort)
-           (value_or_absent r.temperature)
-           (tokens_text r.max_tokens))
-  in
   let rec starts acc at = function
     | [] -> List.rev acc
-    | r :: rest -> starts (at :: acc) (at + item_len r + 1) rest
+    | item :: rest -> starts (at :: acc) (at + List.length item + 1) rest
   in
-  starts [] 0 rows
+  starts [] 0 (stacked_items ~pane rows)
 
 let render ~width ?pane rows =
-  let provider_width = provider_width_of rows in
+  let qualifier = row_qualifier rows in
+  let provider_width = provider_width_of ~qualifier rows in
   let model_width = model_column ~width ~provider_width in
+  let owner text = if provider_width = 0 then ""
+    else String.make gutter ' ' ^ pad text provider_width in
+  let tokens text = if provider_width = 0 then text else pad text tokens_width in
   let header =
-    pad "provider" provider_width
-    ^ String.make gutter ' '
-    ^ pad "model" model_width
+    pad "model" model_width
     ^ String.make gutter ' '
     ^ pad "effort" effort_width
     ^ String.make gutter ' '
     ^ pad "temperature" temperature_width
     ^ String.make gutter ' '
-    ^ "max-tokens"
+    ^ tokens "max-tokens" ^ owner "provider"
   in
   let line r =
-    pad (provider_text r) provider_width
-    ^ String.make gutter ' '
-    ^ pad (clip (model_text r) model_width) model_width
+    pad (clip (model_text r) model_width) model_width
     ^ String.make gutter ' '
     ^ pad (effort_text r.reasoning_effort) effort_width
     ^ String.make gutter ' '
     ^ pad (value_or_absent r.temperature) temperature_width
     ^ String.make gutter ' '
-    ^ tokens_text r.max_tokens
+    ^ tokens (tokens_text r.max_tokens) ^ owner (Option.value ~default:"" (qualifier r))
   in
   match rows with
   | [] -> [ "no model bindings in runtime.toml" ]
@@ -331,7 +340,7 @@ let render ~width ?pane rows =
        draw one named, wrapped item per binding instead: every reading stays
        reachable, and no number is shortened into a different number. *)
     (match pane with
-     | Some pane when not (fits ~width:pane rows) -> stacked_lines ~pane rows
+     | Some pane when not (fits_rows ~width:pane ~qualifier rows) -> stacked_lines ~pane rows
      | _ -> header :: List.map line rows)
 
 let find_runtime ~runtime_id rows =

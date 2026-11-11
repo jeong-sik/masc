@@ -177,6 +177,16 @@ let half_hour_mark = function
   | Half_hour_failed_and_ok -> Mark.grid_pulse_failed_and_ok_mark
 ;;
 
+let nothing_read = function
+  | [] -> false
+  | _ :: _ as readings ->
+      List.for_all
+        (List.for_all (function
+           | Half_hour_unknown -> true
+           | Half_hour_quiet | Half_hour_ok | Half_hour_failed | Half_hour_failed_and_ok -> false))
+        readings
+;;
+
 type failure_count = Exact of int | At_least of int | Count_unknown
 
 let failure_count hours =

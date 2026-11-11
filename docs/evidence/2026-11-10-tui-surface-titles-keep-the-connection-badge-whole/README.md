@@ -58,7 +58,7 @@ Channels(기존 Connectors), Tools & Skills, Resources는 main의 #51023에서 �
 - 작업 공간 불일치: 고정 서버 앞의 프록시가 `/health` 응답의 작업 공간 경로를 지어낸 다른 경로로 고쳐요. 다른 읽기 응답은 9초 늦춰요. 칩은 `HTTP [일부 관측] [작업 공간 불일치]` 예요.
 - 이벤트 유실 + 작업 공간 불일치: 위 상태에서 읽기 지연 없이, 관측 스트림이 열린 직후 프록시가 `relay_subscription_loss` 프레임 하나를 끼워 넣어요. 칩이 `[이벤트 유실] HTTP [일부 관측] [작업 공간 불일치] · 승인 조회 실패 +3` 까지 길어져요.
 
-증명 빌드 셋으로 같은 일곱 화면(Memory, Schedules, Fusion, Code, Channels, Tools & Skills, Resources)을 찍었어요. 셋 모두 안의 시험 3개가 통과했어요. 기본 팔레트, truecolor 이고 창은 44x24, 60x24, 80x24 예요. 프록시 스크립트는 저장소에 안 넣었어요.
+증명 빌드 셋으로 같은 일곱 화면(Memory, Schedules, Fusion, Code, Channels, Tools & Skills, Resources)을 찍었어요. 셋 모두 증명 빌드가 돌리는 시험 3개(`test_repo_git`, `test_tui_workspace_entries`, `test_workspace_file_confidentiality`)가 종료 코드 0 으로 끝났어요. 세 시험 파일에는 `surface_title_row`, `surface_connection_badge`, `detail_heading` 이 한 번도 안 나와요. 제목 줄을 확인하는 시험이 아니에요. 기본 팔레트, truecolor 이고 창은 44x24, 60x24, 80x24 예요. 프록시 스크립트는 저장소에 안 넣었어요.
 
 | 빌드 | 커밋 | run |
 |---|---|---|
@@ -66,7 +66,40 @@ Channels(기존 Connectors), Tools & Skills, Resources는 main의 #51023에서 �
 | 리뷰 중 | #51114 가 리뷰를 받던 때의 head `fc3d13e1ed66` | `42819685640` |
 | 병합 | main `90ec37b2a344`(#51114 병합 `67a03f102d3b` 과 컴파일 고침 #51152 가 들어 있어요) | `42875786677` |
 
-센 방법은 이래요. 제목 줄(셋째 줄)을 각 장의 `.ansi`(그림의 원본)에서 글자만 뽑아 읽어요. 작업 공간 불일치는 `[작업 공간 불일치]` 나 줄인 말 `공간 불일치` 가 줄에 있으면, 이벤트 유실은 `이벤트 유실` 이 있으면, HTTP 상태는 `HTTP [상태]` 가 통째로 있으면 센 거예요. 화면 이름은 제목 줄을 짜는 네 화면(Memory, Schedules, Fusion, Code)만 세고, 줄이 화면 이름 전체로 시작하면 온전하다고 봤어요.
+센 방법은 이래요. 제목 줄(셋째 줄)을 각 장의 `.ansi`(그림의 원본)에서 글자만 뽑아 읽어요. 작업 공간 불일치는 `[작업 공간 불일치]` 나 줄인 말 `공간 불일치` 가 줄에 있으면, 이벤트 유실은 `이벤트 유실` 이 있으면, HTTP 상태는 `HTTP [상태]` 가 통째로 있으면 센 거예요. 화면 이름은 제목 줄을 짜는 네 화면(Memory, Schedules, Fusion, Code)만 세고, 줄이 화면 이름 전체로 시작하면 온전하다고 봤어요. 아래 「다시 세는 법」 에서 같은 숫자를 다시 셀 수 있어요.
+
+### 다시 세는 법
+
+`title-rows.tsv` 는 아래 표의 숫자를 센 제목 줄을 글자로 모은 파일이에요. 각 장의 `.ansi` 에서 셋째 줄만 뽑았어요. 머리글 한 줄 아래에 데이터가 126줄 있어요(2 상태 × 3 폭 × 3 빌드 × 7 화면). 열 이름과 뜻은 이래요.
+
+- `fixture`: `lost` 는 이벤트 유실 + 작업 공간 불일치, `mismatch` 는 작업 공간 불일치만이에요.
+- `width`: 창 폭이에요(44, 60, 80).
+- `build`: `old` 는 앞 빌드, `prev` 는 리뷰 중 head, `merged` 는 병합된 main 이에요.
+- `screen`, `row`: 화면 이름과 그 화면의 제목 줄이에요.
+
+아래 코드는 위 세는 방법을 옮긴 것이에요. 이 폴더에서 돌리면 18줄이 나와요. 한 줄은 `fixture 폭 빌드 불일치 유실 HTTP 이름` 순서이고, 불일치·유실·HTTP 는 7곳 중, 이름은 네 화면 중 센 값이에요. `lost` 9줄은 「이벤트 유실 + 작업 공간 불일치」 표와, `mismatch` 9줄은 「작업 공간 불일치만」 표와 같은 창·빌드끼리 숫자가 같아요. 「작업 공간 불일치만」 표에는 유실 칸이 없어서 그 숫자(코드 출력은 모두 0)만 비교에서 빠져요.
+
+```python
+import csv
+import re
+from collections import defaultdict
+
+LEAD = {"Memory": "MASC 기억 · 전체 저장 상태", "Schedules": "MASC Keepers / Schedules",
+        "Fusion": "MASC Fusion", "Code": "MASC Workspace / Code"}
+BUILDS = ["old", "prev", "merged"]
+count = defaultdict(lambda: [0, 0, 0, 0])  # 불일치, 유실, HTTP, 이름
+with open("title-rows.tsv", encoding="utf-8") as handle:
+    for r in csv.DictReader(handle, delimiter="\t", quoting=csv.QUOTE_NONE):
+        c = count[(r["fixture"], int(r["width"]), r["build"])]
+        c[0] += "공간 불일치" in r["row"]
+        c[1] += "이벤트 유실" in r["row"]
+        c[2] += re.search(r"HTTP \[[^\]]+\]", r["row"]) is not None
+        c[3] += r["screen"] in LEAD and r["row"].startswith(LEAD[r["screen"]])
+for key in sorted(count, key=lambda k: (k[0] == "mismatch", k[1], BUILDS.index(k[2]))):
+    print(*key, *count[key])
+```
+
+`.ansi` 원본과 프록시·캡처 스크립트는 저장소에 없어요. 그래서 이 파일이 `.ansi` 에서 제대로 뽑혔는지는 이 폴더만으로 확인할 수 없어요.
 
 ### 이벤트 유실 + 작업 공간 불일치
 
@@ -86,9 +119,9 @@ Channels(기존 Connectors), Tools & Skills, Resources는 main의 #51023에서 �
 - 리뷰 중 head 는 44칸에서 불일치가 일곱 화면 모두 `[작업 공…` 처럼 잘리고(0곳) 화면 이름이 네 곳 모두 사라져요. 60칸과 80칸에서는 불일치가 일곱 곳 모두 보여요.
 - 병합된 설계는 세 폭 모두 불일치가 일곱 곳 모두 보여요. 44칸과 60칸에서는 줄인 말 `공간 불일치` 로 보여요. 칩이 다 들어가는 80칸에서는 통째로 보여요.
 - 대신 HTTP 상태가 44칸에서 일곱 곳 모두 빠지고(0곳), 60칸에서는 일곱 곳 가운데 넷에만 남아요.
-- 화면 이름이 온전한 곳은 44칸과 60칸에서 하나(Fusion)이고, 80칸에서는 0곳이에요. 80칸에서 가장 긴 칩이 붙으면 `MASC …` 만 남아요.
+- 제목 줄을 짜는 네 화면 가운데 화면 이름이 온전한 곳은 44칸과 60칸에서 하나(Fusion)이고, 80칸에서는 0곳이에요. 80칸에서 가장 긴 칩이 붙으면 `MASC …` 만 남아요. 나머지 세 화면(Channels, Tools & Skills, Resources)은 44칸과 60칸에서 이름이 모두 온전하고, 80칸에서는 Channels(`채널`)와 Resources(`리소스`)만 온전해요. Tools & Skills 는 `도구·…` 로 잘려요.
 
-병합된 빌드의 제목 줄은 이래요. 이 상태에서는 읽을거리(개수, 시계)가 모두 밀려나요.
+병합된 빌드의 제목 줄은 이래요. 이 상태(이벤트 유실 + 작업 공간 불일치)에서는 세 폭 모두 읽을거리(개수, 시계)가 밀려나요.
 
 | 화면 | 44칸 | 60칸 | 80칸 |
 |---|---|---|---|

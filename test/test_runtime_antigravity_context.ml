@@ -259,7 +259,6 @@ sys.exit(3)
 ;;
 
 let () =
-  Masc_test_deps.publish_single_user_access ();
   run
     "Antigravity context"
     [ ( "status-line authority"

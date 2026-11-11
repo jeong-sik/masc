@@ -1,0 +1,16 @@
+ ▸운영  작업  키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 조치가 필요한 이유                                                                               │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│    "kind": "reported",                                                                           │
+│    "component": "keeper_fleet_safety",                                                           │
+│    "reason": "no_executable_keeper_fibers"                                                       │
+│  }                                                                                               │
+│                                                                                                  │
+│  keeper_identity_drift · 진단 확인                                                               │
+│  keeper_identity_drift:configured_keeper_without_runtime_meta                                    │
+│                                                                                                  │
+│  [lines 8-15/31]                                                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  /:find  j/k:scroll  PgUp/PgDn:page  Home/End:edges  Esc:back
+ Choose a Keeper before writing · i:choose

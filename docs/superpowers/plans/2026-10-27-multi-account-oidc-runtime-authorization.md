@@ -738,8 +738,9 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 | S1a-2b | 계정 서버가 연 구역을 한 번 더 읽고, 믿을 수 없으면 부팅을 멈춘다. 준비 상태를 probe로 답한다. 표는 검사를 거친 타입으로만 ingress에 간다. 세부는 표 아래 S1a-2b 범위다. | §5.1, §8.2 | S1a-2 |
 | S1a-2b-1 | 구역이 기록하지 못한 사유를 사람에게 답할 때 서버의 파일 경로를 싣지 않는다. 사유는 구역이 로그에 쓴다. 세부는 표 아래 S1a-2b-1 범위다. | §5.1, §8.2 | S1a-2b |
 | S1a-2c | 부팅이 계정 mode를 단일 사용자의 시작 정리보다 먼저 판정한다. 다계정 설치의 부팅과 거절된 부팅은 단일 사용자의 Keeper 상태를 정리하는 코드를 지나지 않는다. 세부는 표 아래 S1a-2c 범위다. | §5.1 | S1a-2b-1 |
-| S1a-2d | 운영 명령(`masc restart`, `masc setup`, `masc setup-stop-previous-owner`)이 다계정 설치를 알아본다. 계정 서버는 base path lease의 주인으로 알아보고 멈춘다. | §5.1 | S1a-2c |
-| S1a-3 | C3의 로그인 경로와 사람의 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. login client는 서버 설정에서 읽는다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-2d, F3a-3 |
+| S1a-2d | 계정 서버가 자기가 듣는 포트를 host에 알린다. `masc restart`가 그 알림으로 계정 서버를 알아보고, 멈추고, 바꾼다. 세부는 표 아래 S1a-2d 범위다. | §5.1 | S1a-2c |
+| S1a-2e | 나머지 운영 명령(`masc setup-server`, `masc setup`, `masc setup-stop-previous-owner`)과 설치 스크립트가 계정 서버를 알아본다. 그 전까지 `masc setup-server`는 계정 서버가 듣는 포트를 `unknown_server`로 답하고, 설치 스크립트는 그 답을 다른 서비스로 읽어 다른 포트를 권한다. | §5.1 | S1a-2d |
+| S1a-3 | C3의 로그인 경로와 사람의 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. login client는 서버 설정에서 읽는다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-2e, F3a-3 |
 | S1b | 사람에게 MCP·Board·WebSocket 경로를 연다. | §11.1 | S1a-3, C4-11, C4-12, C6 |
 
 - S1이 D4 뒤인 까닭: 계정 층 없이 다계정 설치를 서빙하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙한다. 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 다계정 설치를 서빙하면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
@@ -872,6 +873,60 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 옮긴 뒤에는 같은 부하 조건에서 거절된 부팅 44번이 모두 콘솔에 줄을 썼다.
 - 남는 한계. 서버 loop 안의 `[FATAL]` 자리들은 mirror를 지나므로 같은 유실이 날 수 있다. 계정 서버가 뜨지 못한 때의 줄이 그렇다. 로그 파일에는 exit 때 남은 줄을 마저 쓴다(`at_exit`).
 - 하지 않는 것: 운영 명령(S1a-2d), 판정보다 먼저 도는 로그 파일 정리를 옮기는 일, 시작 정리 넷을 `bin` 밖으로 옮기는 일, 신호 처리기와 샘플러를 판정 앞으로 옮기는 일.
+
+**S1a-2d 범위**
+
+- 고치는 것. `masc restart`가 다계정 설치의 계정 서버를 알아보지 못했다.
+  - 고치기 전 측정(2026-11-11 01:58~01:59Z, 임시 설치). 계정 서버가 떠 있으면 "Port N is held by a process that is not this workspace's MASC server."로 거절했다(exit 1). 서버가 없으면 계정 서버를 띄운 뒤 끝나지 않았다. 띄운 서버는 `/health/ready`에 200으로 답하고 있었다.
+  - 까닭. `masc restart`는 `/health`가 싣는 workspace로 서버를 알아보고, `/health/ready`가 싣는 pid로 대체 서버가 떴는지 본다. 계정 서버의 probe는 둘 다 싣지 않는다(S1a-1, S1a-2b). 누구나 닿는 답이기 때문이다.
+- 알림. 계정 서버는 자기가 듣는 포트를 kernel의 잠금 표로 host에 알린다.
+  - 모양. lease 파일 옆의 파일(`<lease>.account-server`)에서 바이트 하나를 잠근다. 잠근 자리가 포트 번호다. 파일은 비어 있다. 다른 프로세스는 `F_GETLK`으로 잠근 프로세스의 pid와 자리를 받는다(`Owner_process_identity.held_byte`, `Server_startup_takeover.account_server_announcement`).
+  - 기록이 곧 잠금이다. 쥔 프로세스가 끝나면 kernel이 잠금을 푼다. 디스크에 남아서 낡는 숫자가 없다. lease 모듈이 이미 같은 원칙을 쓴다. lease 파일에 적힌 pid는 참고이고 kernel의 잠금이 사실이다.
+  - 실험(macOS 27.2 arm64, 2026-11-11). 읽기 전용으로 연 다른 프로세스가 잠근 pid와 자리를 받았다. 파일 크기는 0으로 남았다. 쥔 프로세스를 SIGKILL로 끝낸 직후에는 잠금이 없다고 답했다.
+  - 계정 서버만 알린다. 단일 사용자 서버는 `/health`가 workspace를 싣고 admin credential로 멈춘다. 그 길은 바꾸지 않았다.
+  - 알리는 자리. `Server_accounts.run`에서 cleartext listener가 포트를 묶은 직후다. 알리지 못하면 `Port_not_announced`로 부팅을 멈춘다. 알리지 못한 서버는 명령으로 바꿀 수 없다. access를 publish하기 전에 알리므로, 알림 거절은 다른 거절처럼 같은 시험 실행 파일 안에서 잰다.
+  - 한 프로세스가 그 파일의 fd를 하나라도 닫으면 POSIX 잠금이 풀린다. 그래서 알린 프로세스는 그 파일을 다시 열지 않는다. 자기 알림을 물으면 자기 표에서 답한다. lease를 놓을 때는 알림을 먼저 거둔다.
+  - 알림 파일은 lease 파일의 검사를 받는다. 읽는 쪽은 lease 파일을 열 때의 검사를 그대로 쓰고 파일을 만들지 않는다. 알리는 쪽은 자기가 쥔 lease 파일이 지금도 그 경로의 파일인지 본 뒤, 이 사용자의 이름 하나짜리 보통 파일만 받는다.
+- 타입. `judged`가 lease를 싣는다(`judge ~lease`). `run`은 그 lease를 계정 서버에 넘긴다. 판정받은 부팅의 lease 없이는 알릴 수 없다.
+- `masc restart`.
+  - 관찰. kernel에 먼저 묻는다. 주인이 청한 포트를 알리고 `/health`가 200이면 멈출 계정 서버다. `/health`의 답은 떠 있는지 보고 버전을 읽는 데만 쓴다. 알린 포트가 청한 포트와 다르면 거절하고 알린 포트를 말해 준다. 알린 포트에서 답이 없으면 거절하고 pid를 말해 준다. 알림이 없으면 전과 같은 단일 사용자의 길이다.
+  - 멈춤(`Server_upgrade_preparation.stop_account_server`). kernel이 증명하는 lease 주인을 잡는다(`capture_existing_owner`). 같은 pid가 청한 포트를 알리는지 본다. 그 프로세스에 묶인 SIGTERM을 보낸다. pid가 다시 쓰였으면 보내지 않는다.
+  - 준비. `/health/ready`가 200이고, 알림을 쥔 pid가 `masc restart`가 띄운 자식의 pid이고, 알린 포트가 청한 포트일 때다. 단일 사용자의 판정(답이 싣는 pid가 자식의 pid)은 그대로다.
+- 결정: 계정 서버를 멈추는 권한은 host다.
+  - 계정 서버에는 명령줄이 낼 admin credential이 없다. 계정은 브라우저로 로그인하는 사람이다. 그래서 `masc auth`의 명령들과 같은 권한을 쓴다. private lease 폴더를 가진 effective UID다. kernel이 lease 파일을 열 때와 신호를 보낼 때 그 UID를 검사한다.
+  - `capture_existing_owner`의 계약은 "admin으로 인증한 뒤에 쓴다"였다. 서버 종류별로 고쳐 적었다. 단일 사용자 서버는 admin 인증, 계정 서버는 host 권한이다.
+  - 대가. host에서 같은 UID로 도는 프로세스는 이 명령으로 계정 서버를 멈춘다. 그 프로세스는 이 명령 없이도 신호를 보낼 수 있다. 사람의 계정으로는 서버를 멈추지 못한다. Admin role도 같다. 그런 경로가 표에 없다.
+- 택하지 않은 길.
+  - `connection.toml`의 포트를 믿기. 그 값은 운영자가 바라는 포트이고, 지금 듣는 포트의 증거가 아니다.
+  - lease 폴더에 pid와 포트를 적은 파일. 쓴 프로세스가 죽어도 내용이 남는다. 읽는 쪽이 낡았는지 다시 판정해야 한다.
+  - `/health`에 base path의 digest를 싣기. 누구나 닿는 답에 workspace의 것을 싣게 된다.
+  - 요청마다 nonce 파일을 증명하는 경로. 표에 경로가 하나 늘고, 그 경로가 요청마다 파일을 읽는다.
+  - control Unix socket. 멈춤·상태·drain을 한 통로로 내는 장기 방향이다. 지금 넣으면 프로토콜 하나와 `sun_path` 길이 한도가 같이 든다.
+  - 어느 프로세스가 어느 포트를 듣는지 kernel에서 열거하기. 플랫폼마다 방법이 다르다.
+- 같은 UID의 프로세스. 같은 UID의 다른 프로세스도 그 파일의 바이트를 잠글 수 있다. 그래서 읽는 쪽은 잠근 pid를 다른 길로 아는 프로세스와 맞춰 본다. 멈출 때는 kernel의 lease 주인과, 준비를 볼 때는 자기가 띄운 자식과 맞춘다. 흉내 낸 잠금은 거절만 만든다. 신호는 kernel의 lease 주인에게만 간다.
+- 남는 한계.
+  - `masc restart`는 대체 서버가 뜰 수 있는지 미리 보지 않는다. 대체 서버의 부팅이 거절되면 서버가 없는 채로 끝난다. 명령은 exit 1로 끝나고 로그의 마지막 줄들을 보여 준다. 단일 사용자 서버도 같다.
+  - 답하지 않는 계정 서버는 멈추지 않는다. 문구가 pid를 말해 준다.
+  - 이 층 전의 바이너리로 뜬 계정 서버는 알림이 없다. `masc restart`는 전과 같은 문장으로 거절한다. 그 서버는 신호로 한 번 멈춘다.
+  - pid가 1인 프로세스는 주인으로 잡지 않는다. 기존 lease 주인 판정과 같다.
+- 답을 기다리는 시간. HTTP client는 받은 시간 창만 건다. `masc restart`의 GET은 창을 주지 않았다. 연결은 받고 답은 하지 않는 서버에서 명령이 끝나지 않았다. 고치기 전 바이너리로 SIGSTOP으로 멈춰 둔 단일 사용자 서버에 재면 60초 뒤에도 끝나지 않았다(2026-11-11 04:25Z). 이 층은 이 명령의 GET 다섯 자리를 창 10초짜리 함수 하나(`get`)로 모았다. 단일 사용자의 관찰과 준비 확인도 그 함수를 쓴다. `masc setup-server`와 단일 사용자 서버를 멈추는 요청에는 아직 창이 없다(#51253).
+- 확인(실제 바이너리, 임시 폴더, 비운 환경, 2026-11-11 04:28~04:30Z, OCaml 5.5.2).
+  - 알림. 뜬 계정 서버의 알림 파일에 kernel이 답한 잠금은 한 바이트다. 자리가 포트이고 pid가 서버의 pid다. 파일 크기는 0이다.
+  - 다른 포트를 청하면 "serves port P, not port Q"로 거절하고(exit 1) 서버는 그대로 돈다.
+  - 떠 있는 계정 서버를 바꾼다. "Asked the account server masc 0.70.0 (pid N) on port P to stop." 뒤에 "Ready after 2.0 s"로 끝난다(exit 0). 멈춘 서버는 exit 0으로 끝났다. 알림의 pid가 새 서버의 pid다.
+  - SIGSTOP으로 멈춰 둔 계정 서버는 약 10초 뒤 "announces port P and does not answer there"로 거절한다(exit 1). SIGCONT 뒤 그 서버는 그대로 답한다.
+  - SIGKILL로 끝낸 직후 lease와 알림의 잠금이 둘 다 없다. 그 뒤 `masc restart`는 서버를 띄우고 "Ready after 3.6 s"로 끝난다(exit 0). 고치기 전에는 끝나지 않았다.
+  - 알림 자리에 폴더를 두면 부팅이 "the port is not announced to the host"로 멈춘다(exit 1). 포트는 듣지 않는다. 폴더를 치우면 다시 뜨고 알린다.
+  - 이 층 전의 바이너리로 띄운 계정 서버는 알림이 없다. `masc restart`는 전과 같은 문장으로 거절하고(exit 1) 그 서버는 그대로 돈다.
+  - 단일 사용자 설치(04:29Z). 서버가 없을 때 띄우고(Ready 3.2 s), 떠 있는 서버를 바꾼다(Ready 3.1 s). 고치기 전 바이너리와 같은 줄들이다(04:02Z, 5.1 s와 3.5 s). 알림 파일은 생기지 않는다. SIGSTOP으로 멈춰 둔 서버에는 11초 만에 "does not answer"로 거절한다.
+- 시험.
+  - `test_owner_process_identity`: 잠기지 않은 파일은 `None`이다. 자식이 바이트 9000을 잠그면 그 pid와 자리를 받는다. 자식을 끝내면 `None`이다. 파일 크기는 0이다. 두 바이트짜리 잠금은 거절한다. 잡은 주인의 `pid`는 자식의 pid다.
+  - `test_server_startup_takeover`: 다른 프로세스가 알린 포트와 pid를 읽고, 그 프로세스가 끝나면 알림이 없다. 포트 65536과 두 번째 알림은 거절한다. 알린 프로세스가 자기 알림을 읽어도 잠금이 남는다. lease를 놓으면 알림이 없다. 알림 자리에 폴더가 있으면 알리는 쪽과 읽는 쪽 둘 다 거절한다.
+  - `test_server_accounts`: 뜬 계정 서버의 알림이 그 포트와 그 pid다. 알림 자리에 폴더가 있으면 `Port_not_announced`로 멈추고 포트가 기록되지 않는다. `/health`의 답에서 버전을 읽는다.
+  - `test_server_upgrade_preparation`: lease를 쥔 프로세스가 없으면 `Owner_unavailable`이다. 주인이 알리지 않았거나 다른 포트를 알리면 `Incumbent_changed`이고 그 프로세스는 계속 돈다. 청한 포트를 알리면 SIGTERM으로 끝난다.
+  - `masc restart`의 흐름은 실제 바이너리로 봤다. 그 명령은 프로세스를 띄우고 기다린다.
+  - `test_server_startup_takeover`의 기존 시험 셋은 macOS에서 `EINTR`로 실패한다. 이 층 전의 트리에서도 같다(#51254). 새 시험 셋은 통과한다.
+- 하지 않는 것: `masc setup-server`의 상태, `masc setup-stop-previous-owner`, `masc setup`의 거절, 설치 스크립트(S1a-2e). 답하지 않는 계정 서버를 멈추는 일. 대체 서버의 판정을 미리 보는 일.
 
 ### E. official client 격리
 

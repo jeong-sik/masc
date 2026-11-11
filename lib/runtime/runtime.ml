@@ -988,12 +988,17 @@ let exact_output_resolver_catalog ~exact_output_lane_decls runtimes =
   in
   match target_source with
   | Replacement_catalog_targets { path } ->
-    Ok
-      { catalog_input = Agent_core.Exact_output.Full_replacement_file path
-      ; catalog_origin = target_source
-      ; catalog_description = " from full replacement " ^ path
-      ; catalog_exact_slots = exact_slots
-      }
+    (* HIGH-RISK-UNREVIEWED: a full replacement catalog carries its own
+       providers with the credentials its operator declared, an account of the
+       host, and the registry sends with them (plan D4b). *)
+    Result.map
+      (fun (_ : Runtime_account_access.host_account) ->
+         { catalog_input = Agent_core.Exact_output.Full_replacement_file path
+         ; catalog_origin = target_source
+         ; catalog_description = " from full replacement " ^ path
+         ; catalog_exact_slots = exact_slots
+         })
+      (Runtime_account_access.authorize_host Runtime_account_access.Replacement_catalog)
   | Runtime_binding_targets ->
     Result.map
       (fun targets ->

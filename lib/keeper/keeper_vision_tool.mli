@@ -69,17 +69,21 @@ val sniff_image_media_type : string -> (string, string) result
     can measure an attachment without this tool's dependency cone. *)
 
 val vision_runtime_ids : now:float -> string list
-(** Ordered image-capable runtime ids: [\[runtime\].media_failover] order,
-    with shared quota and candidate rate-limit rest from
-    {!Runtime_candidate_standing} moved behind the rest in the same relative
-    order. Fleet failed-attempt marks are not created by this ownerless call. The handler tries these candidates in order
+(** Ordered image-capable runtime ids the handler may call at [now]:
+    [\[runtime\].media_failover] order, with shared quota and candidate
+    rate-limit rest that states no time moved behind the rest in the same
+    relative order. A runtime whose provider stated a time not to call it
+    before (a quota reset, a usable Retry-After) is held and absent until that
+    time ({!Runtime_candidate_standing.order_exact}). Fleet failed-attempt
+    marks are not created by this ownerless call. The handler tries these candidates in order
     for timeout/provider failures and output-token truncation. Capacity and
     output-token failures advance immediately; transient failures retain the
     configured backoff. There is no tool-owned cumulative deadline. *)
 
 val first_vision_runtime_id : now:float -> (string, string) result
 (** Compatibility helper returning the first entry of {!vision_runtime_ids}, or
-    [Error] when none is configured. *)
+    [Error] when none is configured or every configured one is held; the held
+    error names the earliest stated time. *)
 
 val vision_keepers_dir : ?base_path:string -> unit -> string
 (** The keepers directory the vision stores live under. Workspace-bound callers
@@ -134,6 +138,12 @@ type vision_outcome =
   | Vo_ok of vision_reading
   | Vo_invalid_request of string
   | Vo_no_runtime of string
+  | Vo_runtimes_held of { until : float }
+      (** No image runtime was called because the ones left wait for a time
+          their provider stated; [until] is the earliest of those times. A
+          held runtime stands where the walk would have called it last and
+          been refused for its account's rest, minus the call
+          (RFC-exact-lane-waits-for-a-stated-reset R5). *)
   | Vo_timeout
   | Vo_invalid_structured_response of string
   | Vo_provider of { failure_class : Tool_result.tool_failure_class; detail : string }
@@ -188,13 +198,19 @@ val run_vision
     When [runtime_id] is supplied, only that configured image candidate is used;
     unavailable candidates are invalid requests, and no other runtime is tried.
     Omitting it preserves automatic candidate selection and failover.
+    A runtime whose provider stated a time not to call it before is never
+    called before that time, whichever way it is reached. When it is chosen by
+    [runtime_id], when it is all that is left after [exclude_runtime_ids], or
+    when the callable runtimes all advance past their failures while one is
+    held, the answer is [Vo_runtimes_held].
     Non-cancellation exceptions are converted to
     [Vo_provider]; provider success whose text is malformed structured output
     is [Vo_invalid_structured_response] — unless the stop reason is a MaxTokens
     cut. A [MaxTokens] response advances to the next candidate with the same
     image and query, including when a partial JSON object cannot be parsed.
     Each candidate is attempted at most once; exhausting output-limited
-    candidates returns [Vo_truncated]. Other invalid structured responses and
+    candidates returns [Vo_truncated] unless a runtime is held, as above.
+    Other invalid structured responses and
     local transport wiring rejections do not trigger this output-limit failover.
     A provider 4xx that is neither transient (408/409/429) nor capacity (413)
     is candidate-local and advances without backoff. Before each candidate is
@@ -238,8 +254,9 @@ val handle_with_outcome
     one of [invalid_args | invalid_artifact | artifact_not_found |
     eio_context_unavailable | artifact_load_failed | artifact_store_failed |
     image_too_large | invalid_media_type | invalid_request |
-    no_capable_runtime | timeout | provider_error | empty_extraction |
-    truncated_extraction]. [complete] defaults to the live provider call (inject
+    no_capable_runtime | runtimes_held | timeout | provider_error |
+    empty_extraction | truncated_extraction]. [runtimes_held] is
+    [Dependency_unavailable] and its detail names the time to wait for. [complete] defaults to the live provider call (inject
     in tests). Malformed artifact handles are [Policy_rejection], absent artifacts
     are [Workflow_rejection], and read/integrity or promotion failures remain
     [Runtime_failure]. A successful frame analysis first stores the verified

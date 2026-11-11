@@ -10,27 +10,43 @@
 
     This module lets an Exact lane read that evidence before it freezes its
     candidate order, and write what its own flow observed back to the same
-    cell. A resting slot is demoted behind its siblings, never removed: the
-    lane keeps every admitted slot, so a demoted slot still answers when the
-    others cannot, and its answer clears the evidence (RFC-0370 §3.3). *)
+    cell. A slot resting on a rest MASC chose is demoted behind its siblings,
+    never removed: a demoted slot still answers when the others cannot, and
+    its answer clears the evidence (RFC-0370 §3.3). A slot whose provider
+    stated a time is held: the lane does not call it before that time, and
+    returns it with the time so a caller can tell a resting lane from a lane
+    without slots (RFC-exact-lane-waits-for-a-stated-reset). *)
 
-val order :
-  Runtime_exact_output_registry.resolved_lane ->
-  Runtime_exact_output_registry.resolved_lane
-(** Move every slot whose runtime is resting -- a rate limit inside its path
-    rest (a usable provider Retry-After is preserved; without one, the
-    configured floor is clamped to the fallback cap), or an exhausted quota
-    window -- behind the slots that are not, keeping
-    declaration (or operator preference) order inside each group. A slot id
-    that names no runtime carries no evidence and stays in place. CLI slots
-    are not reordered here: [Keeper_lane_cli_oneshot.walk] reads the same
-    quota/rate standing before each dispatch. Read at the wall clock
-    of the call. *)
+type held_slot =
+  { slot_id : string
+  ; until : float  (** The provider-stated time, Unix epoch seconds. *)
+  }
+
+type ordered =
+  { lane : Runtime_exact_output_registry.resolved_lane
+      (** The lane to walk. [selected_slots] holds only the HTTP slots that
+          may be called now; [cli_slots] is carried verbatim. *)
+  ; held_http : held_slot list
+      (** The HTTP slots not to be called before their time, in declared
+          order. *)
+  }
+
+val order : Runtime_exact_output_registry.resolved_lane -> ordered
+(** Split the lane's HTTP slots at the wall clock of the call. A slot whose
+    provider stated a time -- its quota scope's stated reset, or the end of
+    its own usable Retry-After, whichever is later -- is held until then. A
+    slot resting on a rest MASC chose -- a quota observation without a reset,
+    or a rate limit inside the configured floor because it carried no usable
+    Retry-After -- goes behind the slots nothing rests, keeping declaration
+    (or operator preference) order inside each group. A slot id that names
+    no runtime carries no evidence: it stays in place and is never held. CLI
+    slots are not split here: [Keeper_lane_cli_oneshot.walk] reads the same
+    standing before each dispatch. *)
 
 val order_at :
   now:float ->
   Runtime_exact_output_registry.resolved_lane ->
-  Runtime_exact_output_registry.resolved_lane
+  ordered
 (** {!order} read at [now] instead of the wall clock. *)
 
 val observe :

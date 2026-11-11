@@ -11,9 +11,11 @@
     after it was noted or at the next success.
 
     This module remembers that fact and lets candidate ordering act on it.
-    It is an ordering preference, not an admission gate — a demoted
-    candidate is still attempted when it is all the lane has left, so no
-    new fail-closed path exists.  Sibling of {!Runtime_candidate_backpressure};
+    For a Keeper walk it is an ordering preference, not an admission gate — a
+    demoted candidate is still attempted when it is all the lane has left.
+    An Exact-output lane does not call a candidate before a reset the
+    provider stated; it returns that candidate as held instead of dropping it
+    (RFC-exact-lane-waits-for-a-stated-reset).  Sibling of {!Runtime_candidate_backpressure};
     the table is shared across keepers on purpose because provider quota
     windows are account-scoped.
 

@@ -84,6 +84,14 @@ type extraction_error =
       { prior_error : extraction_error option
       }
   | No_transport_declared
+  | Slots_held of
+      { until : float
+      ; after : extraction_error option
+      }
+      (* HTTP slots that wait for a time their provider stated were not
+         called (RFC-exact-lane-waits-for-a-stated-reset). [until] is the
+         earliest such time. [after] is how the slots that could be called
+         failed; [None] when the lane declares no other slot. *)
   | Domain_output_invalid of string
   | Absorb_judgment_failed of
       { reason : string
@@ -107,6 +115,8 @@ let rec extraction_error_kind : extraction_error -> Keeper_memory_os_current.lib
   | Cli_prompt_unavailable { prior_error = None } ->
     Exact_execution_failure
   | No_transport_declared -> Exact_setup_failure
+  | Slots_held { after = Some error; _ } -> extraction_error_kind error
+  | Slots_held { after = None; _ } -> Exact_execution_failure
   | Domain_output_invalid _ -> Domain_output_invalid
   | Absorb_judgment_failed _ -> Absorb_judgment_failure
   | Memory_snapshot_write_failed _ -> Memory_snapshot_write_failure
@@ -171,6 +181,15 @@ let rec extraction_error_to_string = function
      | Some error -> extraction_error_to_string error ^ "; " ^ cli_detail)
   | No_transport_declared ->
     "lane declares no API or official-client slots"
+  | Slots_held { until; after } ->
+    let held_detail =
+      "API slots waiting for their provider until "
+      ^ Masc_domain.iso8601_of_unix_seconds until
+      ^ " were not called"
+    in
+    (match after with
+     | None -> held_detail
+     | Some error -> extraction_error_to_string error ^ "; " ^ held_detail)
   | Domain_output_invalid detail ->
     "domain output invalid: " ^ detail
   | Absorb_judgment_failed { reason; selected_slot = _ } ->
@@ -179,9 +198,11 @@ let rec extraction_error_to_string = function
     "current snapshot write failed: " ^ detail
 ;;
 
-let selected_slot_of_extraction_error = function
+let rec selected_slot_of_extraction_error = function
   | Absorb_judgment_failed { selected_slot; _ }
   | Memory_snapshot_write_failed { selected_slot; _ } -> Some selected_slot
+  | Slots_held { after = Some error; _ } -> selected_slot_of_extraction_error error
+  | Slots_held { after = None; _ } -> None
   | Prompt_render_failed _
   | Exact_setup_failed _
   | Exact_execution_failed _
@@ -706,7 +727,7 @@ let resolve_librarian_slots ~base_path ~keeper_id =
     |> Result.map_error (fun error ->
       Exact_setup_failed (Exact_lane_unavailable error))
   in
-  let* resolved =
+  let* (ordered : Runtime_exact_lane_backpressure.ordered) =
     Keeper_exact_lane_preference.apply
       ~base_path
       ~keeper_name:keeper_id
@@ -718,8 +739,9 @@ let resolve_librarian_slots ~base_path ~keeper_id =
     |> Result.map Runtime_exact_lane_backpressure.order
   in
   Ok
-    ( resolved.Runtime_exact_output_registry.selected_slots
-    , resolved.Runtime_exact_output_registry.cli_slots )
+    ( ordered.lane.Runtime_exact_output_registry.selected_slots
+    , ordered.lane.Runtime_exact_output_registry.cli_slots
+    , ordered.held_http )
 ;;
 
 let prepare_attempt ~requirement ~selected_slots messages =
@@ -766,6 +788,12 @@ let rec extraction_failure_evidence = function
         Failure_evidence.without_measured_cli_capacity
           (extraction_failure_evidence error))
       prior_error
+  | Slots_held { after; _ } ->
+    (* A held slot is its account's rest refusal without the call, so it
+       stays size-independent evidence however the other slots failed. *)
+    Failure_evidence.combine
+      (Option.fold ~none:Failure_evidence.empty ~some:extraction_failure_evidence after)
+      Failure_evidence.held
   | Absorb_judgment_failed _
   | Prompt_render_failed _ | Exact_setup_failed _ | No_transport_declared
   | Memory_snapshot_write_failed _ -> Failure_evidence.empty
@@ -827,7 +855,7 @@ let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =
 
 let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
   let open Result.Syntax in
-  let* _, cli_slots = resolve_librarian_slots ~base_path ~keeper_id
+  let* _, cli_slots, _ = resolve_librarian_slots ~base_path ~keeper_id
     |> Result.map_error extraction_error_to_string in
   if not (List.mem capacity.Keeper_lane_cli_oneshot.runtime_id cli_slots)
   then Ok (Some prepared)
@@ -1165,8 +1193,9 @@ let with_cli_failure prior_error = function
     Cli_prompt_unavailable { prior_error = Some prior_error }
 ;;
 
-let execute_answer
+let execute_callable
       ~selected_slots
+      ~held_ids
       ~cli_slots
       ~requirement
       ~validate
@@ -1246,6 +1275,16 @@ let execute_answer
      | None -> ());
     Ok (success.accepted, Api_slot selected_slot)
   | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
+    (* A held slot is declared but not walked, like a slot the pre-flight
+       excluded, so the receipt still checks the walk against the lane. *)
+    let declared_http =
+      List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+        selected_slots
+      @ held_ids
+    in
+    let excluded_http =
+      List.map (fun (slot : slot_refusal) -> slot.slot_id) preflight.unusable @ held_ids
+    in
     (* A semantic rejection does not enter the walk's advances. Preserve it
        separately so a later capacity failure cannot turn invalid output
        into permission to split an admission partition. *)
@@ -1253,8 +1292,8 @@ let execute_answer
       Error
         (Exact_execution_failed
            (exact_execution_error
-              ~declared_http:(List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id) selected_slots)
-              ~excluded_http:(List.map (fun (slot : slot_refusal) -> slot.slot_id) preflight.unusable)
+              ~declared_http
+              ~excluded_http
               ~declared_cli:cli_slots
               ~semantic_rejections:prior_rejections cause))
     in
@@ -1279,8 +1318,8 @@ let execute_answer
             (with_cli_failure
                (Exact_execution_failed
                   (exact_execution_error
-                     ~declared_http:(List.map (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id) selected_slots)
-                     ~excluded_http:(List.map (fun (slot : slot_refusal) -> slot.slot_id) preflight.unusable)
+                     ~declared_http
+                     ~excluded_http
                      ~declared_cli:cli_slots
                      ~semantic_rejections:prior_rejections cause))
                cli_failure))
@@ -1314,6 +1353,48 @@ let execute_answer
             cli_failure))
 ;;
 
+(* HTTP slots whose provider stated a time are not called
+   (RFC-exact-lane-waits-for-a-stated-reset). A lane whose every slot waits
+   ends as an execution failure, not as a lane without transport; otherwise
+   the slots that can be called are walked, and a failure keeps the held
+   slots as size-independent evidence (R5). *)
+let execute_answer
+      ~selected_slots
+      ~held_http
+      ~cli_slots
+      ~requirement
+      ~validate
+      ?cli_runner
+      ~clock
+      ~net
+      ~base_path
+      ~keeper_id
+      ~messages
+      ?usage_observer
+      ()
+  =
+  let held_ids =
+    List.map (fun (held : Runtime_exact_lane_backpressure.held_slot) -> held.slot_id) held_http
+  in
+  let callable () =
+    execute_callable ~selected_slots ~held_ids ~cli_slots ~requirement ~validate ?cli_runner
+      ~clock ~net ~base_path ~keeper_id ~messages ?usage_observer ()
+  in
+  match held_http with
+  | [] -> callable ()
+  | (first : Runtime_exact_lane_backpressure.held_slot) :: rest ->
+    let until =
+      List.fold_left
+        (fun until (held : Runtime_exact_lane_backpressure.held_slot) -> Float.min until held.until)
+        first.until
+        rest
+    in
+    (match selected_slots, cli_slots with
+     | [], [] -> Error (Slots_held { until; after = None })
+     | _ :: _, _ | [], _ :: _ ->
+       callable () |> Result.map_error (fun error -> Slots_held { until; after = Some error }))
+;;
+
 (* The Memory pass alone, for the tests that walk its answer contract. *)
 let execute_exact_output_classified
       ~continuity
@@ -1327,8 +1408,8 @@ let execute_exact_output_classified
       ()
   =
   let open Result.Syntax in
-  let* selected_slots, cli_slots = resolve_librarian_slots ~base_path ~keeper_id in
-  execute_answer ~selected_slots ~cli_slots
+  let* selected_slots, cli_slots, held_http = resolve_librarian_slots ~base_path ~keeper_id in
+  execute_answer ~selected_slots ~held_http ~cli_slots
     ~requirement:(output_requirement_of_pass (Memory_pass (continuity, ())))
     ~validate:(validate_selection ?continuity selected_input)
     ?cli_runner ~clock ~net ~base_path ~keeper_id ~messages ()
@@ -1667,6 +1748,7 @@ let run_pass
                | Exact_request_projection_failed _ ))
          | Error (Exact_execution_failed _) | Error (Cli_slots_exhausted _)
          | Error (Cli_prompt_unavailable _) | Error (No_transport_declared)
+         | Error (Slots_held _)
          | Error (Domain_output_invalid _) | Error (Absorb_judgment_failed _)
          | Error (Memory_snapshot_write_failed _) ->
         let registry = Exact_lane_run_registry.global () in
@@ -1951,7 +2033,7 @@ let run_pass
         (try
            let result =
              let open Result.Syntax in
-             let* selected_slots, cli_slots = acquired in
+             let* selected_slots, cli_slots, held_http = acquired in
              let* prompt =
                prompt_material
                |> Result.map (fun material -> material.rendered)
@@ -1981,7 +2063,7 @@ let run_pass
                let execute_full () =
                  full_lane_entered := true;
                  Exact_lane_slot_capture.with_capture slot_capture (fun () ->
-                   execute_answer ~selected_slots ~cli_slots
+                   execute_answer ~selected_slots ~held_http ~cli_slots
                    ~requirement
                    ~validate
                    ?cli_runner ~clock ~net ~base_path ~keeper_id
@@ -2359,8 +2441,9 @@ let run_pass
              let exhausted_input_refusals = match error with
                | Exact_execution_failed failure -> failure.exhausted_input_refusals
                | Prompt_render_failed _ | Exact_setup_failed _ | Cli_slots_exhausted _
-               | Cli_prompt_unavailable _ | No_transport_declared | Domain_output_invalid _
-               | Absorb_judgment_failed _ | Memory_snapshot_write_failed _ -> None in
+               | Cli_prompt_unavailable _ | No_transport_declared | Slots_held _
+               | Domain_output_invalid _ | Absorb_judgment_failed _
+               | Memory_snapshot_write_failed _ -> None in
              on_not_committed ~exhausted_input_refusals
                (not_committed_of_failure ~detail evidence);
              complete

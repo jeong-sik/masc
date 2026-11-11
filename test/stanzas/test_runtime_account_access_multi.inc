@@ -16,8 +16,13 @@
   eio
   eio.unix
   eio_main
+  masc
   masc.agent_core.llm_provider
   masc.auth
   masc.fs_compat
+  masc.masc_core
+  masc.masc_eio_context
   masc.runtime
-  unix))
+  masc.server
+  unix
+  yojson))

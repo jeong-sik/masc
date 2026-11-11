@@ -5914,10 +5914,13 @@ type tools_pane =
   | Tools_activations
   | Tools_usage
   | Tools_catalog of tools_catalog_view
+  | Tools_storage
+      (** The host disk and what the server's storage cleanup last did. It
+          reads the same envelope as the inventory. *)
 
 let tools_volume_gc_parent_scroll = function
   | Tools_catalog (Tools_catalog_volumes {catalog_scroll}) -> Some catalog_scroll
-  | Tools_surface | Tools_async | Tools_activations | Tools_usage
+  | Tools_surface | Tools_async | Tools_activations | Tools_usage | Tools_storage
   | Tools_catalog Tools_catalog_list -> None
 
 type tools_read_part =

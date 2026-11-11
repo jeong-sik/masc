@@ -18,6 +18,7 @@ let test_every_eager_outcome_reason_is_declared () =
     ; KVT.Vo_truncated
     ; KVT.Vo_timeout
     ; KVT.Vo_no_runtime "no image-capable runtime configured"
+    ; KVT.Vo_runtimes_held { until = 0.0 }
     ; KVT.Vo_invalid_request "bad request"
     ; KVT.Vo_invalid_structured_response "{}"
     ; KVT.Vo_official_failure

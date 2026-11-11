@@ -152,113 +152,20 @@ let record_attempt ~keeper ~finished_at attempt t =
   { t with rows = ({ keeper; attempt; finished_at; reclaimed_at } : row) :: others }
 ;;
 
-let envelope_field = "keeper_cleanup"
-let pass_field = "pass"
-let rows_field = "rows"
-let started_at_field = "started_at"
-let interval_sec_field = "interval_sec"
-let owners_field = "owners"
-let without_meta_field = "without_meta"
-let unreadable_field = "unreadable"
-let no_step_field = "no_step"
-let switched_off_field = "switched_off"
-let scheduled_field = "scheduled"
-let still_running_field = "still_running"
-let steps_field = "steps"
-let enabled_field = "enabled"
-let selected_field = "selected"
-let keeper_field = "keeper"
-let step_field = "step"
-let finished_at_field = "finished_at"
-let reclaimed_at_field = "reclaimed_at"
-let outcome_field = "outcome"
-let report_field = "report"
-let reason_field = "reason"
-let reclaimed_name = "reclaimed"
-let deferred_name = "deferred"
-let not_running_name = "not_running"
-let failed_name = "failed"
-let cleaned_field = "cleaned"
-let removed_field = "removed"
-let skipped_field = "skipped"
-let failed_field = "failed"
-let freed_kib_field = "freed_kib"
-let available_kib_field = "available_kib"
+type concern =
+  | Attempt_failed of string
+  | Entries_left of int
 
-let builds_to_json ({ cleaned; failed } : builds) : Yojson.Safe.t =
-  `Assoc [ cleaned_field, `Int cleaned; failed_field, `Int failed ]
-;;
+let left_behind failed = if failed > 0 then Some (Entries_left failed) else None
 
-let workspace_to_json ({ removed; skipped; failed; freed_kib; available_kib } : workspace)
-  : Yojson.Safe.t
-  =
-  `Assoc
-    [ removed_field, `Int removed
-    ; skipped_field, `Int skipped
-    ; failed_field, `Int failed
-    ; freed_kib_field, `Int freed_kib
-    ; available_kib_field, `Int available_kib
-    ]
-;;
-
-let outcome_to_fields (report_to_json : 'report -> Yojson.Safe.t)
-  : 'report outcome -> (string * Yojson.Safe.t) list
-  = function
-  | Reclaimed report ->
-    [ outcome_field, `String reclaimed_name; report_field, report_to_json report ]
-  | Deferred reason -> [ outcome_field, `String deferred_name; reason_field, `String reason ]
-  | Not_running -> [ outcome_field, `String not_running_name ]
-  | Failed reason -> [ outcome_field, `String failed_name; reason_field, `String reason ]
-;;
-
-let row_to_json (row : row) : Yojson.Safe.t =
-  let outcome =
-    match row.attempt with
-    | Guest_builds outcome -> outcome_to_fields builds_to_json outcome
-    | Remote_workspace outcome -> outcome_to_fields workspace_to_json outcome
-  in
-  `Assoc
-    ([ keeper_field, `String row.keeper
-     ; step_field, `String (Keeper_cleanup_step.to_string (step row.attempt))
-     ; finished_at_field, `Float row.finished_at
-     ; reclaimed_at_field, Json_util.float_opt_to_json row.reclaimed_at
-     ]
-     @ outcome)
-;;
-
-let step_pass_to_json ({ step; enabled; selected } : step_pass) : Yojson.Safe.t =
-  `Assoc
-    [ step_field, `String (Keeper_cleanup_step.to_string step)
-    ; enabled_field, `Bool enabled
-    ; selected_field, `Int selected
-    ]
-;;
-
-let unreadable_to_json ({ keeper; reason } : unreadable) : Yojson.Safe.t =
-  `Assoc [ keeper_field, `String keeper; reason_field, `String reason ]
-;;
-
-let pass_to_json (pass : pass) : Yojson.Safe.t =
-  `Assoc
-    [ started_at_field, `Float pass.started_at
-    ; interval_sec_field, `Float pass.interval_sec
-    ; owners_field, `Int pass.owners
-    ; without_meta_field, `Int pass.without_meta
-    ; unreadable_field, `List (List.map unreadable_to_json pass.unreadable)
-    ; no_step_field, `Int pass.no_step
-    ; switched_off_field, `Int pass.switched_off
-    ; scheduled_field, `Int pass.scheduled
-    ; ( still_running_field
-      , `List (List.map (fun keeper -> `String keeper) pass.still_running) )
-    ; steps_field, `List (List.map step_pass_to_json pass.steps)
-    ]
-;;
-
-let to_json t : Yojson.Safe.t =
-  let pass =
-    match t.pass with
-    | None -> `Null
-    | Some pass -> pass_to_json pass
-  in
-  `Assoc [ pass_field, pass; rows_field, `List (List.map row_to_json t.rows) ]
+let concern = function
+  | Guest_builds (Failed reason) | Remote_workspace (Failed reason) ->
+    Some (Attempt_failed reason)
+  | Guest_builds (Reclaimed ({ failed; cleaned = _ } : builds)) -> left_behind failed
+  | Remote_workspace
+      (Reclaimed
+        ({ failed; removed = _; skipped = _; freed_kib = _; available_kib = _ } : workspace))
+    -> left_behind failed
+  | Guest_builds (Deferred _ | Not_running) | Remote_workspace (Deferred _ | Not_running) ->
+    None
 ;;

@@ -106,6 +106,7 @@ let not_final_json reason =
     | Lane_unavailable Lane_off -> "lane_off"
     | Lane_unavailable No_admitted_slots -> "no_admitted_slots"
     | Lane_unavailable (Lane_registry_unavailable _) -> "lane_registry_unavailable"
+    | Lane_unavailable (Every_slot_held _) -> "every_slot_held"
     | Provider_refused (Provider_unavailable _) -> "provider_unavailable"
     | Provider_refused (Provider_auth_refused _) -> "provider_auth_refused"
     | Provider_refused (Provider_configuration_refused _) -> "provider_configuration_refused"
@@ -133,7 +134,8 @@ let problem_json = function
   | Tool_missing name -> "tool_missing",true,`String name
   | Output_not_selected name -> "output_not_selected",false,`String name
   | Route_unavailable reason ->
-    let action = match reason with Exact.Lane_off -> false
+    (* A stated wait ends at its own time; an operator has nothing to change. *)
+    let action = match reason with Exact.Lane_off | Every_slot_held _ -> false
       | Lane_unconfigured | No_admitted_slots | Lane_registry_unavailable _ -> true in
     "route_unavailable",action,not_final_json (Exact.Lane_unavailable reason)
   | Export_unavailable reason ->
@@ -168,7 +170,7 @@ let state_json = function
     let status = match reason with
       | Addon_off _ | Output_not_selected _ | Route_unavailable Exact.Lane_off -> "disabled"
       | Configuration_unreadable _ | Addon_unattached | Multiple_installations _ | Tool_missing _
-      | Route_unavailable (Lane_unconfigured | No_admitted_slots | Lane_registry_unavailable _)
+      | Route_unavailable (Lane_unconfigured | No_admitted_slots | Lane_registry_unavailable _ | Every_slot_held _)
       | Export_unavailable _ | Declaration_not_applied -> if action then "degraded" else "warning" in
     status,action,code,Option.fold ~none:`Null ~some:binding_json binding,["detail",detail]
   | Serving (binding,entry) ->

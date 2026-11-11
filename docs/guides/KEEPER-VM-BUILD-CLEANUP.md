@@ -76,6 +76,15 @@ the next pass fills it again. The server log keeps one line per pass and one
 per attempt that ran its payload, and the guest build step writes its audit
 record.
 
+The TUI shows the value on the Tools surface, in the `저장 공간` pane (`p`
+moves between panes): the host disk as the server measured it, the latest
+pass, and every Keeper's latest attempt. A Keeper whose declaration could not
+be read and a row that failed come first, then a row that ran to its end and
+left entries behind. The pane reads the envelope when it opens and on `r`. It
+shows how long the server has been up beside the results, because they start
+empty at every start. A summary or a row this TUI cannot read is shown as its
+reason, and the rest is still drawn.
+
 ## Owned output and safety
 
 The guest needs Python 3, readable Linux process ownership and Dune 3.24 or

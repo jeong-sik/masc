@@ -5,7 +5,7 @@ open Fs_compat_durable_append
 let run_blocking_private_file_transaction ~label ~path:_ f =
   match execution_context () with
   | Non_eio -> f ()
-  | Eio_fiber -> Eio_unix.run_in_systhread ~label f
+  | Eio_fiber -> Fs_compat_internal.Systhread_host.run ~label f
 ;;
 
 module Private_jsonl_cursor = struct

@@ -249,8 +249,8 @@ let mkdir_p_unix (path : string) : unit =
    primitives therefore run their Unix implementation on a system thread;
    outside Eio they run it inline, as before. *)
 (* The label reaches the runtime-events ring as the fiber's suspend reason
-   ([Eio_unix.run_in_systhread] calls [Trace.suspend_fiber label]), and a
-   trace reads a long run as "resumed from X, suspended on Y". With the file
+   ([Systhread_host.run] suspends the caller under it, whichever domain runs
+   the thread), and a trace reads a long run as "resumed from X, suspended on Y". With the file
    named, X and Y identify the code: a run between
    [fs-compat-append-file chat.jsonl] and [fs-compat-load-file memory.json]
    needs no further instrumentation to place. The basename alone keeps the
@@ -258,7 +258,7 @@ let mkdir_p_unix (path : string) : unit =
 let labelled operation path = operation ^ " " ^ Filename.basename path
 
 let on_systhread ~label f =
-  let result = Eio_unix.run_in_systhread ~label f in
+  let result = Fs_compat_internal.Systhread_host.run ~label f in
   Eio.Fiber.check ();
   result
 ;;

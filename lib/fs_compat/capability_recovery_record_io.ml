@@ -237,7 +237,7 @@ let apply_record_permissions ~subject file =
     match Eio_unix.Resource.fd_opt file with
     | None -> raise Internal_posix_descriptor_unavailable
     | Some fd ->
-      Eio_unix.run_in_systhread
+      Systhread_host.run
         ~label:"fs-compat-recovery-record-fchmod"
         (fun () ->
            Eio_unix.Fd.use_exn

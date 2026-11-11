@@ -6,7 +6,7 @@ module Retention_directory = struct
   let blocking_io = { run = (fun f ->
     match execution_context () with
     | Non_eio -> f ()
-    | Eio_fiber -> Eio_unix.run_in_systhread ~label:"retention-directory" f) }
+    | Eio_fiber -> Fs_compat_internal.Systhread_host.run ~label:"retention-directory" f) }
   let with_root ?(io = blocking_io) path f = with_root ~io path f
 end
 
@@ -194,7 +194,7 @@ let read_owned_directory_listing ?owner_uid ?inventory_root
     ~fallback:(fun () -> read_owned_directory_blocking ?owner_uid ?inventory_root
       ?sync_directory ~allow_initial_absence ~before_read ~after_read ~visit_directory ~ownership_root path)
     (fun _fs ->
-      let result = Eio_unix.run_in_systhread
+      let result = Fs_compat_internal.Systhread_host.run
         ~label:(labelled "fs-compat-read-owned-directory" path)
         (fun () -> read_owned_directory_blocking ?owner_uid ?inventory_root
           ?sync_directory ~allow_initial_absence ~before_read ~after_read ~visit_directory ~ownership_root path) in
@@ -267,7 +267,7 @@ let load_owned_regular_file_prefix ~ownership_root ~max_bytes path =
         ~ownership_root ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-prefix" path) (fun () ->
+         Fs_compat_internal.Systhread_host.run ~label:(labelled "fs-compat-load-owned-prefix" path) (fun () ->
            load_owned_regular_file_prefix_blocking
              ~ownership_root ~max_bytes path)
        in
@@ -323,7 +323,7 @@ let load_owned_regular_file_range
         ~ownership_root ~offset ~max_bytes path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-range" path) (fun () ->
+         Fs_compat_internal.Systhread_host.run ~label:(labelled "fs-compat-load-owned-range" path) (fun () ->
            load_owned_regular_file_range_blocking
              ~ownership_root ~offset ~max_bytes path)
        in

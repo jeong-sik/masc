@@ -5,7 +5,11 @@
     only one thread of a domain runs OCaml at a time. Called from the main
     domain, a closure that parses, hashes or encodes keeps HTTP accept and
     every request handler waiting for the domain lock until it yields. The
-    host domain does nothing else, so its threads wait only for each other. *)
+    host domain does nothing else, so its threads wait only for each other.
+
+    [Fs_compat]'s own blocking calls take the same route: the mechanism is
+    [Fs_compat.Systhread_host], and {!start} here supplies its log, its
+    minor-heap tuning and which fibers are pool work. *)
 
 exception Host_failed of exn
 (** Raised to a caller whose work the host had already taken when the host's

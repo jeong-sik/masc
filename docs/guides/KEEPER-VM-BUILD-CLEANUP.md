@@ -54,8 +54,17 @@ process use. The existing wrapper lock and native Dune lock exclude builds.
 After inspection the target's ownership and directory identity are checked
 again. Targeted `dune clean` retains the native `.lock` inode and source files;
 it does not perform a whole-project clean that could remove promoted source.
-Unreadable process ownership refuses cleanup. It is never interpreted as no
-live process.
+Unreadable process ownership refuses cleanup, and the pass reports which
+process it could not read. It is never interpreted as no live process. One
+process is passed over: a process of the Keeper's own user whose `/proc` links
+belong to root. The kernel does that to a program that changed its
+credentials, which is the guest's exec agent (PID 1) once it drops to the
+Keeper user. Keeper shells, Git and builds stay inspectable.
+
+A guest without Dune reports nothing until an owned `_build` that passed
+every check above needs cleaning; that entry then counts as failed. A payload
+that exits non-zero is reported with its exit status and the redacted end of
+its stderr.
 
 A checkout containing `.masc-keep-build` retains output. Otherwise every entry
 must remain unmodified for the configured retention period. Store durable

@@ -183,11 +183,14 @@ let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
                    Error "Keeper guest cleanup exit receipt missing"
                  | Masc_exec.Sandbox_target.Ran
                      { status =
-                         (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _)
+                         (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status
+                     ; stderr
                      ; _
                      },
                    Some (Keeper_sandbox_remote.Execution_observed _) ->
-                   Error "Keeper guest cleanup command failed"))
+                   Error
+                     (Keeper_sandbox_exec_failure.payload_failure_message
+                        ~prefix:"Keeper guest cleanup command failed" ~status ~stderr)))
          | Ok (Keeper_sandbox_runtime.Docker_container_stopped
               | Keeper_sandbox_runtime.Docker_container_absent) -> Ok None
          | Error detail -> Error detail))

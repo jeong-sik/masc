@@ -59,6 +59,17 @@
  (name runtest)
  (deps (alias runtest-test_keeper_remote_workspace_cleanup)))
 
+; The fixture-/proc cases only: the other classes need a Linux guest with Dune.
+(rule
+ (alias runtest-test_keeper_vm_build_cleanup_live_processes)
+ (deps ../config/scripts/keeper-build-cleanup.py
+       test_keeper_vm_build_cleanup.py)
+ (action (run python3 %{dep:test_keeper_vm_build_cleanup.py} LiveProcesses)))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_vm_build_cleanup_live_processes)))
+
 (test
  (name test_tui_board_reader)
  (modules test_tui_board_reader)

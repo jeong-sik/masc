@@ -32,10 +32,23 @@ def tree_stats(root: Path) -> tuple[int, float]:
     return size, newest
 
 
-def process_paths() -> list[Path]:
-    """Fail closed on unreadable live process ownership, excluding ourselves."""
+class Unreadable(Exception):
+    """A fact the sweep needs could not be read, so nothing more is cleaned."""
+
+
+def process_paths(proc: Path) -> list[Path]:
+    """cwd, exe and open files of every other live process.
+
+    A process of our own user whose /proc links belong to root has given up
+    being inspectable: the kernel does that for a program that changed its
+    credentials, such as the guest's exec agent (PID 1) once it drops to the
+    Keeper user. Keeper work (shells, git, builds) runs inspectable, so such
+    a process is passed over; the remote workspace payload passes it over for
+    the same reason. Any other unreadable process keeps every build.
+    """
+    me = os.getuid()
     paths: list[Path] = []
-    for process in Path("/proc").iterdir():
+    for process in proc.iterdir():
         if not process.name.isdecimal() or int(process.name) == os.getpid():
             continue
         try:
@@ -43,16 +56,21 @@ def process_paths() -> list[Path]:
             state = (process / "stat").read_text().rsplit(")", 1)[1].split()[0]
             if state == "Z":
                 continue
-            for name in ("cwd", "exe"):
-                paths.append(Path(os.readlink(process / name)))
-            for descriptor in (process / "fd").iterdir():
-                try:
-                    target = os.readlink(descriptor)
-                except FileNotFoundError:
-                    # This descriptor closed; later ones may still own a checkout.
+            try:
+                for name in ("cwd", "exe"):
+                    paths.append(Path(os.readlink(process / name)))
+                for descriptor in (process / "fd").iterdir():
+                    try:
+                        target = os.readlink(descriptor)
+                    except FileNotFoundError:
+                        # This descriptor closed; later ones may still own a checkout.
+                        continue
+                    if target.startswith("/"):
+                        paths.append(Path(target))
+            except PermissionError as error:
+                if process.stat().st_uid == me and (process / "cwd").lstat().st_uid != me:
                     continue
-                if target.startswith("/"):
-                    paths.append(Path(target))
+                raise Unreadable(f"process {process.name}: {error}") from error
         except FileNotFoundError:
             # The process exited while its ownership was being inspected.
             continue
@@ -80,7 +98,12 @@ def owned_build_target(repo: Path, root: Path, build_root: Path) -> Path | None:
 
 
 def guest_sweep(
-    root: Path, idle_hours: float, apply: bool, *, build_root: Path
+    root: Path,
+    idle_hours: float,
+    apply: bool,
+    *,
+    build_root: Path,
+    proc: Path = Path("/proc"),
 ) -> dict[str, Any]:
     if not root.is_dir() or root.is_symlink():
         raise ValueError(f"not a real Keeper work directory: {root}")
@@ -93,9 +116,6 @@ def guest_sweep(
     dune = shutil.which("dune")
     report: dict[str, Any] = {"root": str(root), "apply": apply, "entries": []}
     before = shutil.disk_usage(root).free
-    if dune is None:
-        report["skip"] = "dune unavailable"
-        return report
     cutoff = time.time() - idle_hours * 3600
 
     def fail(error: OSError) -> None:
@@ -137,9 +157,16 @@ def guest_sweep(
             except BlockingIOError:
                 entry["skip"] = "wrapper build lock held"
                 continue
+            try:
+                in_use = process_paths(proc)
+            except Unreadable as error:
+                # Who uses the later builds is as unknown as for this one.
+                entry["skip"] = "live processes unreadable"
+                report["skip"] = str(error)
+                break
             if any(
                 path.is_relative_to(repo) or path.is_relative_to(target)
-                for path in process_paths()
+                for path in in_use
             ):
                 entry["skip"] = "live process uses checkout"
                 continue
@@ -147,6 +174,12 @@ def guest_sweep(
             entry["allocated_bytes"] = size
             if newest > cutoff:
                 entry["skip"] = "recent build output"
+                continue
+            if dune is None:
+                # An owned, idle Dune output is here and nothing can clean it.
+                # A guest without Dune and without such output reports nothing.
+                entry["action"] = "clean failed"
+                entry["error"] = "dune unavailable"
                 continue
             if not apply:
                 entry["action"] = "would clean"

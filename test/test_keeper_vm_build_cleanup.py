@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -81,15 +82,12 @@ class GuestCleanup(unittest.TestCase):
             return iterdir(path)
 
         with (
-            patch.object(
-                cleaner,
-                "Path",
-                side_effect=lambda value: proc if value == "/proc" else Path(value),
-            ),
             patch.object(cleaner.os, "readlink", side_effect=read_descriptor),
             patch.object(Path, "iterdir", enumerate_paths),
         ):
-            report = cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
+            report = cleaner.guest_sweep(
+                self.root, 0, True, build_root=self.build_root, proc=proc
+            )
         self.assertEqual(report["entries"][0]["skip"], "live process uses checkout")
         self.assertTrue((self.build / "artifact").exists())
 
@@ -125,12 +123,163 @@ class GuestCleanup(unittest.TestCase):
 
     def test_unreadable_process_ownership_fails_closed(self) -> None:
         with patch.object(
-            cleaner, "process_paths", side_effect=PermissionError("denied")
+            cleaner, "process_paths", side_effect=cleaner.Unreadable("process 7: denied")
         ):
-            with self.assertRaises(PermissionError):
-                cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
+            report = cleaner.guest_sweep(self.root, 0, True, build_root=self.build_root)
+        self.assertEqual(report["skip"], "process 7: denied")
         self.assertTrue((self.build / "artifact").exists())
 
+
+class LiveProcesses(unittest.TestCase):
+    """Which processes the sweep reads, on a fixture /proc. Needs no Dune."""
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name).resolve()
+        self.root = base / "work"
+        self.build_root = base / "build"
+        self.repo = self.root / "checkout"
+        self.build = self.repo / "_build"
+        self.build.mkdir(parents=True)
+        self.build_root.mkdir()
+        (self.repo / "dune-project").write_text("(lang dune 3.20)\n")
+        (self.build / "artifact").write_text("generated output\n")
+        self.proc = base / "proc"
+        self.proc.mkdir()
+        # The wrapper lock stays inside the fixture.
+        lock = patch.dict(os.environ, {"DUNE_LOCAL_LOCK": str(base / "wrapper.lock")})
+        lock.start()
+        self.addCleanup(lock.stop)
+        # No Dune on PATH: a build that reaches cleaning says so and stays.
+        no_dune = patch.object(cleaner.shutil, "which", return_value=None)
+        no_dune.start()
+        self.addCleanup(no_dune.stop)
+
+    def process(self, pid: int, *, cwd: Path, state: str = "S") -> Path:
+        process = self.proc / str(pid)
+        (process / "fd").mkdir(parents=True)
+        (process / "stat").write_text(f"{pid} (fixture) {state} 1 1\n")
+        (process / "cwd").symlink_to(cwd)
+        (process / "exe").symlink_to("/usr/bin/true")
+        return process
+
+    def unreadable(self, process: Path, *, owner: int, links: int):
+        """Patches under which [process] refuses its links to this user."""
+        readlink = os.readlink
+        stat_of, lstat_of = Path.stat, Path.lstat
+
+        def denied(path, *args, **kwargs):
+            if Path(path).parent == process:
+                raise PermissionError(13, "Permission denied", str(path))
+            return readlink(path, *args, **kwargs)
+
+        def owned(path, *args, **kwargs):
+            if path == process:
+                return SimpleNamespace(st_uid=owner)
+            return stat_of(path, *args, **kwargs)
+
+        def linked(path, *args, **kwargs):
+            if path == process / "cwd":
+                return SimpleNamespace(st_uid=links)
+            return lstat_of(path, *args, **kwargs)
+
+        return (
+            patch.object(cleaner.os, "readlink", side_effect=denied),
+            patch.object(Path, "stat", owned),
+            patch.object(Path, "lstat", linked),
+        )
+
+    def sweep(self) -> dict:
+        return cleaner.guest_sweep(
+            self.root, 0, True, build_root=self.build_root, proc=self.proc
+        )
+
+    def test_inspectable_process_reports_cwd_and_open_files(self) -> None:
+        process = self.process(4242, cwd=self.repo)
+        (process / "fd" / "3").symlink_to(self.build / "artifact")
+        (process / "fd" / "4").symlink_to("pipe:[77]")
+        paths = cleaner.process_paths(self.proc)
+        self.assertIn(self.repo, paths)
+        self.assertIn(self.build / "artifact", paths)
+        self.assertNotIn(Path("pipe:[77]"), paths)
+        self.assertEqual(self.sweep()["entries"][0]["skip"], "live process uses checkout")
+
+    def test_zombie_and_vanished_processes_are_passed_over(self) -> None:
+        self.process(4242, cwd=self.repo, state="Z")
+        (self.proc / "4243").mkdir()
+        (self.proc / "self").mkdir()
+        self.assertEqual(cleaner.process_paths(self.proc), [])
+
+    def test_vanished_descriptor_keeps_later_descriptors(self) -> None:
+        process = self.process(4242, cwd=self.root)
+        vanished = process / "fd" / "0"
+        vanished.symlink_to(self.root / "closed-file")
+        (process / "fd" / "1").symlink_to(self.build / "artifact")
+        readlink = os.readlink
+
+        def read_descriptor(path, *args, **kwargs):
+            if Path(path) == vanished:
+                raise FileNotFoundError(path)
+            return readlink(path, *args, **kwargs)
+
+        with patch.object(cleaner.os, "readlink", side_effect=read_descriptor):
+            self.assertIn(self.build / "artifact", cleaner.process_paths(self.proc))
+
+    @unittest.skipIf(os.getuid() == 0, "root reads every process, so none is unreadable")
+    def test_unreadable_process_is_passed_over_only_when_it_gave_up_inspection(self) -> None:
+        me = os.getuid()
+        other = me + 1
+        # (process owner, owner of its /proc links, passed over?)
+        cases = [
+            (me, 0, True),  # the exec agent after it dropped to the Keeper user
+            (me, me, False),  # our own inspectable process we cannot read
+            (other, other, False),  # another user's process
+            (0, 0, False),  # a root process, such as a root exec in the guest
+        ]
+        process = self.process(4242, cwd=self.repo)
+        for owner, links, passed in cases:
+            with self.subTest(owner=owner, links=links):
+                readlink, stat, lstat = self.unreadable(process, owner=owner, links=links)
+                with readlink, stat, lstat:
+                    report = self.sweep()
+                entry = report["entries"][0]
+                if passed:
+                    # The sweep went on to cleaning, which this fixture has no Dune for.
+                    self.assertNotIn("skip", report)
+                    self.assertEqual(entry["action"], "clean failed")
+                    self.assertEqual(entry["error"], "dune unavailable")
+                else:
+                    self.assertIn("process 4242", report["skip"])
+                    self.assertEqual(entry["skip"], "live processes unreadable")
+                self.assertTrue((self.build / "artifact").exists())
+
+    def test_unreadable_process_stops_before_later_builds(self) -> None:
+        later = self.root / "later" / "_build"
+        later.mkdir(parents=True)
+        (later.parent / "dune-project").write_text("(lang dune 3.20)\n")
+        process = self.process(4242, cwd=self.root)
+        readlink, stat, lstat = self.unreadable(process, owner=0, links=0)
+        with readlink, stat, lstat:
+            report = self.sweep()
+        self.assertIn("process 4242", report["skip"])
+        self.assertEqual(len(report["entries"]), 1)
+
+    def test_missing_dune_is_silent_until_an_owned_idle_build_needs_it(self) -> None:
+        (self.build / "artifact").unlink()
+        self.build.rmdir()
+        report = self.sweep()
+        self.assertNotIn("skip", report)
+        self.assertEqual(report["entries"], [])
+        # A _build with no dune-project beside it is not Dune's to clean.
+        stray = self.root / "notes" / "_build"
+        stray.mkdir(parents=True)
+        report = self.sweep()
+        self.assertNotIn("skip", report)
+        self.assertEqual(
+            [entry["skip"] for entry in report["entries"]],
+            ["not a default Dune build directory"],
+        )
 
 
 @unittest.skipUnless(shutil.which("dune"), "needs native Dune targeted clean")
@@ -210,9 +359,10 @@ class ManagedBuildCleanup(unittest.TestCase):
     def test_dry_run_and_unknown_ownership_do_not_mutate(self):
         self.assertEqual(self.sweep(False)["entries"][0]["action"], "would clean")
         self.assertTrue((self.target / "artifact").exists())
-        with patch.object(cleaner, "process_paths", side_effect=PermissionError("denied")):
-            with self.assertRaises(PermissionError):
-                self.sweep()
+        with patch.object(
+            cleaner, "process_paths", side_effect=cleaner.Unreadable("process 7: denied")
+        ):
+            self.assertEqual(self.sweep()["skip"], "process 7: denied")
         self.assertTrue((self.target / "artifact").exists())
 
     def test_replaced_target_during_scan_does_not_clean_replacement(self):

@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -133,6 +132,8 @@ class GuestCleanup(unittest.TestCase):
 class LiveProcesses(unittest.TestCase):
     """Which processes the sweep reads, on a fixture /proc. Needs no Dune."""
 
+    OWN_PID = 9000
+
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -147,6 +148,11 @@ class LiveProcesses(unittest.TestCase):
         (self.build / "artifact").write_text("generated output\n")
         self.proc = base / "proc"
         self.proc.mkdir()
+        # The sweep skips its own entry. Its PID is pinned so that no fixture
+        # process can share the PID this test happens to run under.
+        own = patch.object(cleaner.os, "getpid", return_value=self.OWN_PID)
+        own.start()
+        self.addCleanup(own.stop)
         # The wrapper lock stays inside the fixture.
         lock = patch.dict(os.environ, {"DUNE_LOCAL_LOCK": str(base / "wrapper.lock")})
         lock.start()
@@ -156,39 +162,41 @@ class LiveProcesses(unittest.TestCase):
         no_dune.start()
         self.addCleanup(no_dune.stop)
 
-    def process(self, pid: int, *, cwd: Path, state: str = "S") -> Path:
+    def process(
+        self,
+        pid: int,
+        *,
+        cwd: Path,
+        state: str = "S",
+        name: str = "fixture",
+        parent: int = 1,
+        group: int | None = None,
+        session: int | None = None,
+    ) -> Path:
+        """A /proc entry. By default the process leads a session of its own,
+        as a command does once the agent's shim has started it."""
         process = self.proc / str(pid)
         (process / "fd").mkdir(parents=True)
-        (process / "stat").write_text(f"{pid} (fixture) {state} 1 1\n")
+        group = pid if group is None else group
+        session = pid if session is None else session
+        (process / "stat").write_text(
+            f"{pid} ({name}) {state} {parent} {group} {session} 0 -1\n"
+        )
         (process / "cwd").symlink_to(cwd)
         (process / "exe").symlink_to("/usr/bin/true")
         return process
 
-    def unreadable(self, process: Path, *, owner: int, links: int):
-        """Patches under which [process] refuses its links to this user."""
+    def unreadable(self, process: Path):
+        """A patch under which [process] refuses its links, as the kernel does
+        for a process that turned inspection off or belongs to another user."""
         readlink = os.readlink
-        stat_of, lstat_of = Path.stat, Path.lstat
 
         def denied(path, *args, **kwargs):
             if Path(path).parent == process:
                 raise PermissionError(13, "Permission denied", str(path))
             return readlink(path, *args, **kwargs)
 
-        def owned(path, *args, **kwargs):
-            if path == process:
-                return SimpleNamespace(st_uid=owner)
-            return stat_of(path, *args, **kwargs)
-
-        def linked(path, *args, **kwargs):
-            if path == process / "cwd":
-                return SimpleNamespace(st_uid=links)
-            return lstat_of(path, *args, **kwargs)
-
-        return (
-            patch.object(cleaner.os, "readlink", side_effect=denied),
-            patch.object(Path, "stat", owned),
-            patch.object(Path, "lstat", linked),
-        )
+        return patch.object(cleaner.os, "readlink", side_effect=denied)
 
     def sweep(self) -> dict:
         return cleaner.guest_sweep(
@@ -205,10 +213,11 @@ class LiveProcesses(unittest.TestCase):
         self.assertNotIn(Path("pipe:[77]"), paths)
         self.assertEqual(self.sweep()["entries"][0]["skip"], "live process uses checkout")
 
-    def test_zombie_and_vanished_processes_are_passed_over(self) -> None:
+    def test_zombie_vanished_and_own_processes_are_passed_over(self) -> None:
         self.process(4242, cwd=self.repo, state="Z")
         (self.proc / "4243").mkdir()
         (self.proc / "self").mkdir()
+        self.process(self.OWN_PID, cwd=self.repo)
         self.assertEqual(cleaner.process_paths(self.proc), [])
 
     def test_vanished_descriptor_keeps_later_descriptors(self) -> None:
@@ -226,23 +235,40 @@ class LiveProcesses(unittest.TestCase):
         with patch.object(cleaner.os, "readlink", side_effect=read_descriptor):
             self.assertIn(self.build / "artifact", cleaner.process_paths(self.proc))
 
-    @unittest.skipIf(os.getuid() == 0, "root reads every process, so none is unreadable")
-    def test_unreadable_process_is_passed_over_only_when_it_gave_up_inspection(self) -> None:
-        me = os.getuid()
-        other = me + 1
-        # (process owner, owner of its /proc links, passed over?)
+    def test_unreadable_process_is_passed_over_only_in_the_first_process_session(
+        self,
+    ) -> None:
+        # Each row is one unreadable process with its cwd in the checkout:
+        # (pid, parent, process group, session, command name, passed over?)
         cases = [
-            (me, 0, True),  # the exec agent after it dropped to the Keeper user
-            (me, me, False),  # our own inspectable process we cannot read
-            (other, other, False),  # another user's process
-            (0, 0, False),  # a root process, such as a root exec in the guest
+            # The exec agent, and a relay it forked for one connection.
+            (1, 0, 1, 1, "masc-exec-shim", True),
+            (77, 1, 1, 1, "masc-exec-shim", True),
+            # Still the first session after moving to a process group of its own.
+            (78, 1, 78, 1, "masc-exec-shim", True),
+            # A command in the session its shim opened, and that command's child.
+            (4242, 90, 4242, 4242, "git", False),
+            (4243, 4242, 4242, 4242, "cc1", False),
+            # A daemon the first process inherited when its parent exited.
+            (4244, 1, 4244, 4244, "dune", False),
+            # A process whose session leader is outside the guest.
+            (4245, 0, 0, 0, "sh", False),
+            # A command name written to read as the first session.
+            (4246, 90, 4246, 4246, "x) S 1 1 1 (y", False),
         ]
-        process = self.process(4242, cwd=self.repo)
-        for owner, links, passed in cases:
-            with self.subTest(owner=owner, links=links):
-                readlink, stat, lstat = self.unreadable(process, owner=owner, links=links)
-                with readlink, stat, lstat:
+        for pid, parent, group, session, name, passed in cases:
+            with self.subTest(pid=pid, session=session, name=name):
+                process = self.process(
+                    pid,
+                    cwd=self.repo,
+                    name=name,
+                    parent=parent,
+                    group=group,
+                    session=session,
+                )
+                with self.unreadable(process):
                     report = self.sweep()
+                shutil.rmtree(process)
                 entry = report["entries"][0]
                 if passed:
                     # The sweep went on to cleaning, which this fixture has no Dune for.
@@ -250,7 +276,7 @@ class LiveProcesses(unittest.TestCase):
                     self.assertEqual(entry["action"], "clean failed")
                     self.assertEqual(entry["error"], "dune unavailable")
                 else:
-                    self.assertIn("process 4242", report["skip"])
+                    self.assertIn(f"process {pid}", report["skip"])
                     self.assertEqual(entry["skip"], "live processes unreadable")
                 self.assertTrue((self.build / "artifact").exists())
 
@@ -259,8 +285,7 @@ class LiveProcesses(unittest.TestCase):
         later.mkdir(parents=True)
         (later.parent / "dune-project").write_text("(lang dune 3.20)\n")
         process = self.process(4242, cwd=self.root)
-        readlink, stat, lstat = self.unreadable(process, owner=0, links=0)
-        with readlink, stat, lstat:
+        with self.unreadable(process):
             report = self.sweep()
         self.assertIn("process 4242", report["skip"])
         self.assertEqual(len(report["entries"]), 1)

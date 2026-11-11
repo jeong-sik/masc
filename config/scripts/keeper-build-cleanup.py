@@ -36,25 +36,34 @@ class Unreadable(Exception):
     """A fact the sweep needs could not be read, so nothing more is cleaned."""
 
 
+# /proc/<pid>/stat after the command name: state, parent, process group, session.
+STATE, SESSION = 0, 3
+# The first process of the guest. A session's id is the PID of its leader.
+INIT_PID = 1
+
+
 def process_paths(proc: Path) -> list[Path]:
     """cwd, exe and open files of every other live process.
 
-    A process of our own user whose /proc links belong to root has given up
-    being inspectable: the kernel does that for a program that changed its
-    credentials, such as the guest's exec agent (PID 1) once it drops to the
-    Keeper user. Keeper work (shells, git, builds) runs inspectable, so such
-    a process is passed over; the remote workspace payload passes it over for
-    the same reason. Any other unreadable process keeps every build.
+    A process that cannot be read is passed over only in the session the
+    guest's first process leads. That session is the exec agent and the
+    relays it forks: the agent turns inspection off when it drops to the
+    Keeper user (agent_stub.c, PR_SET_DUMPABLE), and a relay is a fork of
+    it. The agent's shim starts every command in a new session
+    (exec_shim.mli, Supervision), and a process can leave its session but
+    never enter another, so nothing a Keeper runs is in that session. Any
+    other unreadable process keeps every build.
     """
-    me = os.getuid()
     paths: list[Path] = []
     for process in proc.iterdir():
         if not process.name.isdecimal() or int(process.name) == os.getpid():
             continue
         try:
+            # A process chooses its command name, parentheses included. The
+            # kernel's own fields start after the last ")".
+            fields = (process / "stat").read_text().rsplit(")", 1)[1].split()
             # Zombies have no cwd/exe. Other live processes must be inspectable.
-            state = (process / "stat").read_text().rsplit(")", 1)[1].split()[0]
-            if state == "Z":
+            if fields[STATE] == "Z":
                 continue
             try:
                 for name in ("cwd", "exe"):
@@ -68,7 +77,7 @@ def process_paths(proc: Path) -> list[Path]:
                     if target.startswith("/"):
                         paths.append(Path(target))
             except PermissionError as error:
-                if process.stat().st_uid == me and (process / "cwd").lstat().st_uid != me:
+                if int(fields[SESSION]) == INIT_PID:
                     continue
                 raise Unreadable(f"process {process.name}: {error}") from error
         except FileNotFoundError:

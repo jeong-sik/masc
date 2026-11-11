@@ -235,21 +235,83 @@ let test_arrived_is_safe_to_repeat () =
     get (Keeper_receipt_wait_resolution.arrived ~base_path:config.base_path ~keeper_name))
 ;;
 
-(* A wait whose run is gone is settled by state: the request has ended, or
-   never existed, and no receipt is in the outbox. *)
+(* A background Execute request as the Keeper records it: the arguments are in
+   its request record. [settled] resolves when the worker has finished and the
+   request has its final status. *)
+let recorded_command = `Assoc [ "command", `String "sleep 30" ]
+
+let submit_background_request ~sw (config : Workspace.config) ~f =
+  let settled, resolve_settled = Eio.Promise.create () in
+  let request_id =
+    match
+      Keeper_msg_async.submit_with_request_id
+        ~request_context:[ "execute_background", `Assoc [ "arguments", recorded_command ] ]
+        ~on_worker_settled:(fun _ ->
+          if not (Eio.Promise.is_resolved settled) then Eio.Promise.resolve resolve_settled ())
+        ~background_sw:sw
+        ~base_path:config.base_path
+        ~caller:keeper_name
+        ~f
+        ~keeper_name
+        ()
+    with
+    | Ok { acceptance = Keeper_msg_async.Durably_accepted; request_id } -> request_id
+    | Ok _ | Error _ -> fail "the request was not accepted"
+  in
+  request_id, settled
+;;
+
+(* A run that ended and left no receipt is settled by state. The receipt it
+   gets echoes the arguments its request record kept. *)
 let test_run_without_worker_or_receipt_is_settled () =
   with_workspace (fun ~sw ~clock config ->
-    let request_id = "kmsg-never-recorded" in
+    let request_id, settled =
+      submit_background_request ~sw config ~f:(fun ~request_id:_ _ ->
+        Keeper_types_profile.tool_result_ok "done")
+    in
+    await ~clock settled;
     let task = start_waiting_task ~sw ~clock config ~request_id in
     check bool "no receipt before the sweep" false
       (outbox_has config ~viewer:Outbox.Every_receipt request_id);
     get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
     await ~clock task.finished;
     check int "the task resumed" 2 !(task.attempts);
-    check bool "the sweep wrote an unfinished receipt for the resumed run" true
-      (outbox_has config ~viewer:Outbox.Every_receipt request_id);
+    let receipt_text =
+      String.concat ""
+        (Outbox.developer_context
+           (get
+              (Outbox.load
+                 ~base_path:config.base_path
+                 ~keeper_name
+                 ~viewer:Outbox.Every_receipt)))
+    in
+    check bool "the unfinished receipt shows the recorded command" true
+      (Astring.String.is_infix ~affix:"sleep 30" receipt_text);
     get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
     check int "a second pass resumes nothing more" 2 !(task.attempts))
+;;
+
+(* No record of the request means no arguments to echo. No value stands in for
+   them: the wait stays pending, no receipt is written, and every sweep reports
+   the request. *)
+let test_run_without_a_record_stays_waiting () =
+  with_workspace (fun ~sw ~clock config ->
+    let request_id = "kmsg-never-recorded" in
+    let task = start_waiting_task ~sw ~clock config ~request_id in
+    let swept =
+      Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name
+    in
+    (match swept with
+     | Ok () -> fail "a wait without arguments to echo was settled"
+     | Error detail ->
+       check bool "the error names the request" true
+         (Astring.String.is_infix ~affix:request_id detail));
+    check int "the wait stays pending" 1 !(task.attempts);
+    check bool "and no receipt was written" false
+      (outbox_has config ~viewer:Outbox.Every_receipt request_id);
+    check bool "the next sweep reports it again" true
+      (Result.is_error
+         (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name)))
 ;;
 
 (* A request a worker may still own is not lost. The sweep reads the request
@@ -257,24 +319,10 @@ let test_run_without_worker_or_receipt_is_settled () =
 let test_run_with_a_worker_is_left_waiting () =
   with_workspace (fun ~sw ~clock config ->
     let release, resolve_release = Eio.Promise.create () in
-    let request_id =
-      match
-        Keeper_msg_async.submit_with_request_id
-          ~request_context:
-            [ ( "execute_background"
-              , `Assoc [ "arguments", `Assoc [ "command", `String "sleep 30" ] ] )
-            ]
-          ~background_sw:sw
-          ~base_path:config.base_path
-          ~caller:keeper_name
-          ~f:(fun ~request_id:_ _ ->
-            Eio.Promise.await release;
-            Keeper_types_profile.tool_result_ok "done")
-          ~keeper_name
-          ()
-      with
-      | Ok { acceptance = Keeper_msg_async.Durably_accepted; request_id } -> request_id
-      | Ok _ | Error _ -> fail "the request was not accepted"
+    let request_id, _ =
+      submit_background_request ~sw config ~f:(fun ~request_id:_ _ ->
+        Eio.Promise.await release;
+        Keeper_types_profile.tool_result_ok "done")
     in
     let task = start_waiting_task ~sw ~clock config ~request_id in
     get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
@@ -295,6 +343,8 @@ let () =
     ; ( "lost run"
       , [ test_case "a run without worker or receipt is settled" `Quick
             test_run_without_worker_or_receipt_is_settled
+        ; test_case "a run without a record stays waiting" `Quick
+            test_run_without_a_record_stays_waiting
         ; test_case "a run with a worker is left waiting" `Quick
             test_run_with_a_worker_is_left_waiting
         ] )

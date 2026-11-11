@@ -10,7 +10,12 @@ val settle_lost : base_path:string -> keeper_name:string -> (unit, string) resul
     resolves the wait with {!Keeper_semantic_execution.Source_lost}. A request
     a worker may still own is left alone. The state decides, never a time
     limit. Every request is tried even when one fails; the error lists the
-    failures. *)
+    failures.
+
+    The receipt echoes the arguments the request record kept. A request with
+    no record, or whose record is not a background Execute run's, has none to
+    echo: no receipt is written, the wait stays pending, and the error names
+    the request. *)
 
 val after_wait : base_path:string -> keeper_name:string -> (unit, string) result
 (** Run once a wait is recorded: the receipt, or the end of the run, may have

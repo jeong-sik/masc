@@ -1192,63 +1192,63 @@ let for_surface = function
          than per row: with the list focused the cursor moves and [/] lands
          it on a match; with the text focused the same keys move the reading.
          Both ends answer to Home and End. *)
-      [ b Act "f" "format" ~help:"cycle all resources, artifacts, Markdown and HTML"
-      ; b Act "c" "check / uncheck"
+      [ b ~ko:"형식" Act "f" "format" ~help:"cycle all resources, artifacts, Markdown and HTML"
+      ; b ~ko:"체크 / 해제" Act "c" "check / uncheck"
           ~help:"explicitly toggle shared confirmation for the selected exact report revision"
-      ; b Navigate "u" "next unchecked"
+      ; b ~ko:"다음 미체크" Navigate "u" "next unchecked"
           ~help:"select the next unchecked report in this format/day scope; open it when the reader is focused"
-      ; b Act "t" "today" ~help:"toggle the local publication day captured at this keypress"
-      ; b Act "w" "layout" ~help:"switch full-width list/reader and side-by-side browsing"
-      ; b Act "v" "document / source" ~detail:Detail_only
+      ; b ~ko:"오늘" Act "t" "today" ~help:"toggle the local publication day captured at this keypress"
+      ; b ~ko:"배치" Act "w" "layout" ~help:"switch full-width list/reader and side-by-side browsing"
+      ; b ~ko:"문서 / 원문" Act "v" "document / source" ~detail:Detail_only
           ~help:"show the document or its original text syntax; copied bytes stay original"
-      ; b Act "i" "resource info" ~detail:Detail_only
+      ; b ~ko:"리소스 정보" Act "i" "resource info" ~detail:Detail_only
           ~help:"expand the source, URI, type, size and complete metadata for an MCP resource or report; the body is shown first by default"
-      ; b Navigate "j/k" "move"
+      ; b ~ko:"선택" Navigate "j/k" "move"
           ~help:"move the list; with the text focused, scroll it"
-      ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
-      ; b Navigate "Ctrl-W" "focus"
+      ; b ~ko:"창" Navigate "h/l" "pane" ~help:"focus the resource list or text"
+      ; b ~ko:"초점" Navigate "Ctrl-W" "focus"
           ~help:"cycle the resource list, the text, and the Activity pane when it is drawn"
-      ; b Navigate "J/K" "scroll text"
-      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+      ; b ~ko:"본문 스크롤" Navigate "J/K" "scroll text"
+      ; b ~ko:"이전 / 다음" Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while the detail is focused, read the adjacent resource"
-      ; b Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
           ~help:"a page of the list, or of the text when it is focused"
-      ; b Navigate "Home/End" "top/bottom"
+      ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
           ~help:"the first or last resource, or the ends of the text when it \
                  is focused"
-      ; b Act "Enter" "read" ~help:"read the selected resource"
-      ; b Navigate "{ / }" "older / newer revision" ~detail:Detail_only
+      ; b ~ko:"읽기" Act "Enter" "read" ~help:"read the selected resource"
+      ; b ~ko:"이전 / 다음 판" Navigate "{ / }" "older / newer revision" ~detail:Detail_only
           ~help:"read the adjacent published report revision from its validated history"
-      ; b Navigate ", / ." "image" ~detail:Detail_only
+      ; b ~ko:"그림" Navigate ", / ." "image" ~detail:Detail_only
           ~help:"select the previous or next image or Mermaid diagram in the loaded resource"
-      ; b Act "Ctrl-O" "preview image" ~detail:Detail_only
+      ; b ~ko:"그림 미리보기" Act "Ctrl-O" "preview image" ~detail:Detail_only
           ~help:"open the selected image or Pele diagram from the retained resource bytes"
-      ; b Navigate "( / )" "text part" ~detail:Detail_only
+      ; b ~ko:"본문 조각" Navigate "( / )" "text part" ~detail:Detail_only
           ~help:"select the previous or next original text part for copying"
-      ; b Act "s" "save original" ~detail:Detail_only
+      ; b ~ko:"원본 저장" Act "s" "save original" ~detail:Detail_only
           ~help:"choose a local destination; Enter exclusively creates the selected report revision's exact bytes, Esc closes path input; the retained result stays with that original report"
-      ; b Act "o" "open Dashboard" ~detail:Detail_only
+      ; b ~ko:"Dashboard 열기" Act "o" "open Dashboard" ~detail:Detail_only
           ~help:"open the selected fixed report revision; the browser uses its own authentication"
-      ; b Act "P" "external sharing" ~detail:Detail_only
+      ; b ~ko:"외부 공유" Act "P" "external sharing" ~detail:Detail_only
           ~help:"enable or revoke external access to all revisions of this report"
-      ; b Act "U" "reconcile share" ~detail:Detail_only
+      ; b ~ko:"공유 맞추기" Act "U" "reconcile share" ~detail:Detail_only
           ~help:"inspect the original recorded share operation"
-      ; b Act "!" "confirm share recovery" ~detail:Detail_only
+      ; b ~ko:"공유 복구 확인" Act "!" "confirm share recovery" ~detail:Detail_only
           ~help:"confirm the displayed original operation after its preview is shown"
-      ; b Act "Y" "copy public link" ~detail:Detail_only
+      ; b ~ko:"공개 링크 복사" Act "Y" "copy public link" ~detail:Detail_only
           ~help:"copy the selected revision's link when external sharing is enabled"
-      ; b Act "R" "reread revision" ~detail:Detail_only
+      ; b ~ko:"판 다시 읽기" Act "R" "reread revision" ~detail:Detail_only
           ~help:"reread the exact open resource, including an older report revision"
-      ; b Act "y" "copy source" ~detail:Detail_only
+      ; b ~ko:"원문 복사" Act "y" "copy source" ~detail:Detail_only
           ~help:"send the selected text part's original bytes via OSC 52; terminal support is unconfirmed"
-      ; b Act "Esc" "back"
+      ; b ~ko:"뒤로" Act "Esc" "back"
           ~help:"the text hands back to the list; the list returns to Features & plugins"
-      ; b Search "/" "find"
+      ; b ~ko:"찾기" Search "/" "find"
           ~help:"find a resource name in the list, or text in the loaded detail"
-      ; b Search "n / N" "next / previous match"
-      ; b Meta "r" "reload"
-      ; b Meta "Tab" "next"
-      ; b Meta "q" "quit"
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match"
+      ; b ~ko:"다시 읽기" Meta "r" "reload"
+      ; b ~ko:"다음 화면" Meta "Tab" "next"
+      ; b ~ko:"종료" Meta "q" "quit"
       ]
   | Code ->
       (* A row surface: masc_tui_types gives it a searchable row list
@@ -1328,10 +1328,10 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Tools ->
-      [ b Navigate "j/k" "scroll"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Navigate "Home/End" "top/bottom"
-      ; b Navigate "p" "section"
+      [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+      ; b ~ko:"다음 탭" Navigate "p" "section"
           ~help:"available / async runs / receipts / usage / all tools. \
                  Available shows the selected Keeper's exposed tools and Skills; \
                  ORIGIN names the tool source. Async runs shows workspace requests \
@@ -1348,24 +1348,24 @@ let for_surface = function
                  DIRECT=direct calls allowed; SURFACES=exposure paths; \
                  none=no exposure path. Use Skill receipts for usage evidence \
                  and Activity for tool input/output."
-      ; b Navigate "J/K" "Skill"
+      ; b ~ko:"스킬" Navigate "J/K" "Skill"
           ~help:"in async runs, select an original request; otherwise select \
                  a published Skill"
-      ; b Act "f" "Composition performance"
+      ; b ~ko:"조합 성능" Act "f" "Composition performance"
           ~help:"outside async requests, select the next Composition and load its exact-revision performance charts"
-      ; b Act "Ctrl-O" "Skill graph" ~help:"outside async requests, preview the declared composition with Pele"
+      ; b ~ko:"스킬 그래프" Act "Ctrl-O" "Skill graph" ~help:"outside async requests, preview the declared composition with Pele"
       (* Enter's Skill-evidence role (outside async runs, masc_tui.ml: the
          "\r" arm) is named on the sheet's Enter row only. The footer table
          cannot carry Enter -- the fitter never drops it -- so advertising it
          here squeezed the action diagnosis out of the 98-cell row and broke
          the sheet-only contract (test_tui_keys, tools_detail_bindings). *)
       ; tools_bracket_binding ~pane:Tools_surface
-      ; b Act "c / C" "new Skill"
+      ; b ~ko:"새 스킬" Act "c / C" "new Skill"
           ~help:"open $EDITOR on a template for a new Skill; c starts an \
                  instruction Skill, C starts a composition Skill"
-      ; b Act "e" "edit Skill"
+      ; b ~ko:"스킬 편집" Act "e" "edit Skill"
           ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
-      ; b Act "d" "delete Skill"
+      ; b ~ko:"스킬 삭제" Act "d" "delete Skill"
           ~help:"remove the selected published package; press d again on the \
                  same row to confirm"
       ; b ~ko:"기능" Act "Esc" "features"
@@ -2136,7 +2136,7 @@ let footer_hints_runtime ~(mode : runtime_mode) ~picker =
       in
       b Act "Enter" enter :: controls |> hints_of_bindings
 
-let footer_hints_resources ~detail_focus =
+let footer_hints_resources ~lang ~detail_focus =
   for_surface Resources
   (* The focused pane is this surface's two states: [[ / ]] reads the
      adjacent resource and the dispatcher answers it only with the text
@@ -2144,9 +2144,11 @@ let footer_hints_resources ~detail_focus =
   |> List.filter (answers_in_state ~detail_open:detail_focus)
   |> List.map (fun binding ->
          if String.equal binding.key "j/k" then
-           { binding with label = (if detail_focus then "scroll text" else "move") }
+           if detail_focus then
+             { binding with label = "scroll text"; label_ko = Some "본문 스크롤" }
+           else { binding with label = "move"; label_ko = Some "선택" }
          else binding)
-  |> hints_of_bindings
+  |> hints_of_bindings ~lang
 
 let footer_hints_resource_save ~pending =
   (if pending then [] else [b Act "Enter" "create file"])

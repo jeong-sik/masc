@@ -94,6 +94,12 @@ val half_hour_mark : half_hour -> string
 (** The mark one half hour draws: [·] quiet, [▁] ok, [█] failed, [▄] failed
     and ok, {!Masc_tui_keeper_mark.unknown_mark} unknown. *)
 
+val nothing_read : half_hour list list -> bool
+(** One list per keeper. True when there is a keeper and every half hour of
+    every keeper is {!Half_hour_unknown}: the views then say so once, where a
+    partly read history keeps one mark per half hour. No keeper reads nothing
+    to say, so it is false. *)
+
 (** A failed-reading count never turns an unread slot into a known zero. *)
 type failure_count = Exact of int | At_least of int | Count_unknown
 

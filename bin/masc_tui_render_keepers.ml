@@ -2696,8 +2696,8 @@ let render_keeper_axes (state : state) =
        box_line_styled buf cols ~style:(Theme.recede ()) (matrix_header matrix)
    | None, Axis_row.Wall_columns ->
        box_line buf cols (Masc_tui_keeper_wall.header ~cols:inner ~now:now_unix);
-       box_line buf cols (Masc_tui_keeper_wall.fleet ~cols:inner ~now:now_unix
-         (List.map keeper_row_runtime model_rows))
+       box_line buf cols (Masc_tui_keeper_wall.fleet ~ko:(state.ui_language = Lang_ko)
+         ~cols:inner ~now:now_unix (List.map keeper_row_runtime model_rows))
    | None, Axis_row.List_columns ->
        box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns)
    | None, Axis_row.Grid grid_columns -> box_line buf cols (grid_header state grid grid_columns));
@@ -2908,7 +2908,8 @@ let render_keeper_axes (state : state) =
             | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
                 still_row (matrix_keeper_row matrix ~now:now_unix row)
             | None, Axis_row.Wall_columns ->
-                still_row (Masc_tui_keeper_wall.row ~cols:inner ~now:now_unix
+                still_row (Masc_tui_keeper_wall.row ~ko:(state.ui_language = Lang_ko)
+                  ~cols:inner ~now:now_unix
                   ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row))
             | None, Axis_row.List_columns ->
                 keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame ~yolo

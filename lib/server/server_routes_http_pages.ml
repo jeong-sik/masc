@@ -246,24 +246,28 @@ let is_compressible_asset name =
 
    The file is still read and checked on every request (Installed_dashboard
    [load]). An entry is used only while the bytes just read equal the bytes
-   it was made from, and is replaced when they differ; the bytes just read
-   are dropped after that comparison. Requests of several domains reach the
-   table, so it has a lock, and nothing waits while holding it.
+   it was made from; the bytes just read are dropped after that comparison.
+   Requests of several domains reach the table, so it has a lock, and nothing
+   waits while holding it.
 
-   Only files the dashboard holds get an entry, with two encodings at most,
-   so what the table holds is bounded by the dashboard on disk and no request
-   can add to it. A dashboard rebuilt under a running server brings new
-   names and contents: the table is emptied when it passes
-   [dashboard_asset_cache_max_bytes], about four times the 66.3 MB of the
-   bundle measured in RFC-0518. A response under way keeps the strings it
-   started with, so an earlier build's bytes last as long as its responses
-   do. *)
+   The table holds [dashboard_asset_cache_max_bytes] at most, about four
+   times the 66.3 MB of the bundle measured in RFC-0518, and nothing leaves
+   it to make room. What does not fit is answered as before this table: a
+   body of the request, compressed for it and reserved in the ledger. So the
+   bytes responses hold outside the ledger are the table's, under its bound.
+   The one exception is a file whose content changed under a running server:
+   its entry is replaced, and responses under way keep the earlier bytes
+   until they end. An installed release cannot do that, its digests are
+   checked on every read. *)
 type encoded_asset = Shared_body.t * (string * string) list
 
-(* One compression, shared by every request that wants its result. It
-   resolves to [None] when the request that ran it was cancelled or failed:
-   whoever waited then starts over. *)
-type encoding = encoded_asset option Eio.Promise.t
+type encoding_result =
+  | Kept of encoded_asset
+  | Not_kept  (** No room in the table, or its entry went away meanwhile. *)
+  | Abandoned  (** The request that ran it was cancelled or failed. *)
+
+(* One compression, shared by every request that wants its result. *)
+type encoding = encoding_result Eio.Promise.t
 
 type dashboard_asset =
   { identity : Shared_body.t
@@ -299,8 +303,8 @@ let encoding_bytes = function
   | None -> 0
   | Some encoding ->
     (match Eio.Promise.peek encoding with
-     | Some (Some (body, _)) -> Shared_body.length body
-     | Some None | None -> 0)
+     | Some (Kept (body, _)) -> Shared_body.length body
+     | Some (Not_kept | Abandoned) | None -> 0)
 ;;
 
 let dashboard_asset_bytes asset =
@@ -308,36 +312,45 @@ let dashboard_asset_bytes asset =
 ;;
 
 (* Called with the lock held. *)
-let enforce_dashboard_asset_bound () =
+let dashboard_assets_have_room ~bytes =
   let held =
     Hashtbl.fold (fun _ asset total -> total + dashboard_asset_bytes asset) dashboard_assets 0
   in
-  if held > dashboard_asset_cache_max_bytes then Hashtbl.reset dashboard_assets
+  held + bytes <= dashboard_asset_cache_max_bytes
 ;;
 
 (* Called with the lock held: the entry of these bytes, made if the table
-   has none or one of other bytes. *)
+   has none. [None] when the table has no room for them. An entry of other
+   bytes under the name goes first. *)
 let dashboard_asset_of name body =
   match Hashtbl.find_opt dashboard_assets name with
-  | Some asset when String.equal (Shared_body.to_string asset.identity) body -> asset
+  | Some asset when String.equal (Shared_body.to_string asset.identity) body -> Some asset
   | Some _ | None ->
-    let asset = { identity = Shared_body.of_string body; zstd = None; gzip = None } in
-    Hashtbl.replace dashboard_assets name asset;
-    enforce_dashboard_asset_bound ();
-    asset
+    Hashtbl.remove dashboard_assets name;
+    if dashboard_assets_have_room ~bytes:(String.length body)
+    then (
+      let asset = { identity = Shared_body.of_string body; zstd = None; gzip = None } in
+      Hashtbl.replace dashboard_assets name asset;
+      Some asset)
+    else None
 ;;
 
 type encoding_turn =
+  | No_entry
   | Wait_for of encoding
   | Encode of
       { source : Shared_body.t
       ; encoding : encoding
-      ; resolver : encoded_asset option Eio.Promise.u
+      ; resolver : encoding_result Eio.Promise.u
       }
 
-(* Called with the lock held, by the request that ran [encoding]: true when
-   the table still holds it. *)
-let still_holds name slot encoding =
+type dashboard_body =
+  | Shared of Shared_body.t
+  | Owned of string
+
+(* Called with the lock held, by the request that ran [encoding]: the entry
+   while the table still holds that encoding in it. *)
+let entry_running name slot encoding =
   match Hashtbl.find_opt dashboard_assets name with
   | None -> None
   | Some asset ->
@@ -346,42 +359,65 @@ let still_holds name slot encoding =
      | Some _ | None -> None)
 ;;
 
+(* The body of the request itself, as every response was before the table. *)
+let owned_dashboard_asset ~accept_encoding body =
+  let payload, headers = Http_response_payload.compress_body_on_cpu ~accept_encoding body in
+  Owned payload, headers
+;;
+
 (* The compression runs on the CPU pool, as it did when every request
    compressed. The first request to ask runs it; the others wait for that
    one result, so no request holds a compressed copy of its own. *)
-let rec encoded_dashboard_asset name body slot =
+let rec encoded_dashboard_asset name ~accept_encoding body slot =
   let turn =
     Mutex.protect dashboard_assets_lock (fun () ->
-      let asset = dashboard_asset_of name body in
-      match slot.get asset with
-      | Some encoding -> Wait_for encoding
-      | None ->
-        let encoding, resolver = Eio.Promise.create () in
-        Hashtbl.replace dashboard_assets name (slot.set asset (Some encoding));
-        Encode { source = asset.identity; encoding; resolver })
+      match dashboard_asset_of name body with
+      | None -> No_entry
+      | Some asset ->
+        (match slot.get asset with
+         | Some encoding -> Wait_for encoding
+         | None ->
+           let encoding, resolver = Eio.Promise.create () in
+           Hashtbl.replace dashboard_assets name (slot.set asset (Some encoding));
+           Encode { source = asset.identity; encoding; resolver }))
   in
   match turn with
+  | No_entry -> owned_dashboard_asset ~accept_encoding body
   | Wait_for encoding ->
     (match Eio.Promise.await encoding with
-     | Some encoded -> encoded
-     | None -> encoded_dashboard_asset name body slot)
+     | Kept (payload, headers) -> Shared payload, headers
+     | Not_kept -> owned_dashboard_asset ~accept_encoding body
+     | Abandoned -> encoded_dashboard_asset name ~accept_encoding body slot)
   | Encode { source; encoding; resolver } ->
     (match
        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
          Http_response_payload.compress_encoded_body slot.codec (Shared_body.to_string source))
      with
      | payload, headers ->
-       let encoded = Shared_body.of_string payload, headers in
-       Eio.Promise.resolve resolver (Some encoded);
-       Mutex.protect dashboard_assets_lock enforce_dashboard_asset_bound;
-       encoded
+       let kept =
+         Mutex.protect dashboard_assets_lock (fun () ->
+           match entry_running name slot encoding with
+           | None -> false
+           | Some asset ->
+             let fits = dashboard_assets_have_room ~bytes:(String.length payload) in
+             if not fits then Hashtbl.replace dashboard_assets name (slot.set asset None);
+             fits)
+       in
+       if kept
+       then (
+         let shared = Shared_body.of_string payload in
+         Eio.Promise.resolve resolver (Kept (shared, headers));
+         Shared shared, headers)
+       else (
+         Eio.Promise.resolve resolver Not_kept;
+         Owned payload, headers)
      | exception exn ->
        let backtrace = Printexc.get_raw_backtrace () in
        Mutex.protect dashboard_assets_lock (fun () ->
-         match still_holds name slot encoding with
+         match entry_running name slot encoding with
          | Some asset -> Hashtbl.replace dashboard_assets name (slot.set asset None)
          | None -> ());
-       Eio.Promise.resolve resolver None;
+       Eio.Promise.resolve resolver Abandoned;
        Printexc.raise_with_backtrace exn backtrace)
 ;;
 
@@ -390,9 +426,11 @@ let rec encoded_dashboard_asset name body slot =
    a format that is compressed already goes out as it is, and an asset under
    the codec's minimum size, or a client that takes no encoding, never waits
    for the CPU pool. *)
-let shared_dashboard_asset name ~accept_encoding body =
+let dashboard_asset_body name ~accept_encoding body =
   let identity () =
-    (Mutex.protect dashboard_assets_lock (fun () -> dashboard_asset_of name body)).identity
+    match Mutex.protect dashboard_assets_lock (fun () -> dashboard_asset_of name body) with
+    | Some asset -> Shared asset.identity
+    | None -> Owned body
   in
   if not (is_compressible_asset name)
   then identity (), []
@@ -403,8 +441,10 @@ let shared_dashboard_asset name ~accept_encoding body =
     else (
       match Http_response_payload.negotiate_encoding accept_encoding with
       | Http_response_payload.Identity_only -> identity (), vary
-      | Http_response_payload.Prefer_zstd -> encoded_dashboard_asset name body zstd_slot
-      | Http_response_payload.Prefer_gzip -> encoded_dashboard_asset name body gzip_slot))
+      | Http_response_payload.Prefer_zstd ->
+        encoded_dashboard_asset name ~accept_encoding body zstd_slot
+      | Http_response_payload.Prefer_gzip ->
+        encoded_dashboard_asset name ~accept_encoding body gzip_slot))
 ;;
 
 let serve_dashboard_static name request reqd =
@@ -419,13 +459,15 @@ let serve_dashboard_static name request reqd =
           "public, max-age=31536000, immutable"
       in
       let final_body, encoding_headers =
-        shared_dashboard_asset
+        dashboard_asset_body
           name
           ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
           body
       in
       let headers = ("cache-control", cache_control) :: encoding_headers in
-      Http.Response.shared ~headers ~content_type final_body reqd
+      (match final_body with
+       | Shared shared -> Http.Response.shared ~headers ~content_type shared reqd
+       | Owned owned -> Http.Response.bytes ~headers ~content_type owned reqd)
   | Error error ->
     (match Web_dashboard.asset_error_http_status error with
      | `Not_found -> Http.Response.not_found reqd

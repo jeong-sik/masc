@@ -89,6 +89,20 @@ with its GitHub reader account; when that account cannot see the run, the \
 wake comes early and says so. Works with recurrence_kind one_shot only."""
 
 [[params]]
+name = "until_github_checks"
+type = "string"
+description = """
+A GitHub commit URL: https://github.com/<owner>/<repo>/commit/<40 hexadecimal \
+digits>. The wake comes when every check run of that commit has completed, \
+whatever the conclusions, or at the due time, whichever is first. Checks are \
+the runs made by a push, pull_request or workflow_run event; runs made by an \
+approval, a label or a hand are not waited for. The due time is still \
+required: give due_in_sec as the deadline for a commit whose checks never \
+complete. The wake message lists each check run with its conclusion. Give it \
+instead of until_github_run when you know the commit and not the run ids. \
+Works with recurrence_kind one_shot only."""
+
+[[params]]
 name = "schedule_id"
 type = "string"
 description = "Optional stable schedule id."
@@ -170,7 +184,7 @@ description = """
 For a Lane action instead of a Keeper wake: the declared Lane Add-on \
 installation (its declaration id) whose live worker runs action at each due \
 time. Give it with action, and without keeper_name, message, title, urgency, \
-allow_unregistered_keeper or until_github_run."""
+allow_unregistered_keeper, until_github_run or until_github_checks."""
 
 [[params]]
 name = "action"
@@ -187,5 +201,5 @@ description = "Wake a Keeper with this message."
 
 [[one_of]]
 required = ["installation_id", "action"]
-forbidden = ["keeper_name", "message", "title", "urgency", "allow_unregistered_keeper", "until_github_run"]
+forbidden = ["keeper_name", "message", "title", "urgency", "allow_unregistered_keeper", "until_github_run", "until_github_checks"]
 description = "Hand this action to a declared Lane installation's live worker."

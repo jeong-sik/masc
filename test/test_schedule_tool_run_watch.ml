@@ -1,6 +1,7 @@
 open Alcotest
 open Masc
 module Watch = Schedule_run_watch
+module Checks = Schedule_checks_watch
 
 (* [until_github_run] at the tool boundary: what masc_schedule_create and
    masc_schedule_update store from it, what they refuse, and that the row they
@@ -519,6 +520,292 @@ let test_a_row_the_tool_created_is_woken_and_still_dispatchable () =
     (Result.is_ok (Schedule_payload_projection.dispatch_view_detailed woken))
 ;;
 
+(* --- The commit watch: [until_github_checks] --- *)
+
+let commit_sha = "8b666a19e3455100528bb90b861374c56e563f82"
+let commit_url = "https://github.com/jeong-sik/masc/commit/" ^ commit_sha
+
+let checks_watch_of_row request =
+  match Checks.watch_of_body (body_of request) with
+  | Ok watch -> watch
+  | Error detail -> fail detail
+;;
+
+let describe_checks_watch = function
+  | None -> "no watch"
+  | Some target -> Checks.target_url target
+;;
+
+let test_commit_create_stores_the_commit_as_a_typed_field () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"merge if green"
+          ~extra:[ "until_github_checks", `String (commit_url ^ "?diff=split#diff-1") ]
+          ()));
+  let stored = stored_exn config "watched" in
+  check
+    string
+    "the stored field is the parsed commit, not the URL"
+    (Printf.sprintf {|{"repo":"jeong-sik/masc","sha":"%s"}|} commit_sha)
+    (Yojson.Safe.to_string (List.assoc Checks.watch_field (body_of stored)));
+  check bool "no run watch beside it" true (not (List.mem_assoc Watch.watch_field (body_of stored)));
+  check (float 0.0) "the due time is the fallback" future_due_at stored.Schedule_domain.due_at
+;;
+
+let test_commit_create_refuses_a_url_that_is_not_a_full_commit () =
+  with_config
+  @@ fun config ->
+  List.iter
+    (fun url ->
+      check_refused
+        url
+        ~mentioning:[ Checks.watch_field; "commit" ]
+        (dispatch
+           config
+           ~name:create_name
+           (create_fields ~message:"check" ~extra:[ "until_github_checks", `String url ] ()));
+      check bool (url ^ ": nothing stored") true
+        (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"watched")))
+    [ "https://github.com/jeong-sik/masc/commit/8b666a19e345"
+    ; "https://github.com/jeong-sik/masc/pull/51286"
+    ; "https://gitlab.com/jeong-sik/masc/commit/" ^ commit_sha
+    ; commit_sha
+    ]
+;;
+
+let test_commit_create_refuses_a_recurring_schedule () =
+  with_config
+  @@ fun config ->
+  check_refused
+    "interval"
+    ~mentioning:[ Checks.watch_field; "one_shot" ]
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"check"
+          ~extra:
+            [ "until_github_checks", `String commit_url
+            ; "recurrence_kind", `String "interval"
+            ; "recurrence_interval_sec", `Int 3600
+            ]
+          ()));
+  check bool "nothing stored" true
+    (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"watched"))
+;;
+
+let test_commit_create_refuses_both_watches () =
+  with_config
+  @@ fun config ->
+  check_refused
+    "both"
+    ~mentioning:[ Checks.watch_field; Watch.watch_field ]
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"check"
+          ~extra:[ "until_github_checks", `String commit_url; "until_github_run", `String run_url ]
+          ()));
+  check bool "nothing stored" true
+    (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"watched"))
+;;
+
+let test_commit_create_refuses_a_lane_action_with_a_commit () =
+  with_config
+  @@ fun config ->
+  let result =
+    dispatch
+      config
+      ~name:create_name
+      [ "schedule_id", `String "lane-watched"
+      ; "due_at_unix", `Float future_due_at
+      ; "installation_id", `String "inst-1"
+      ; "action", `Assoc [ "kind", `String "compose" ]
+      ; "until_github_checks", `String commit_url
+      ]
+  in
+  check bool "refused" false (Tool_result.is_success result);
+  check bool "nothing stored" true
+    (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"lane-watched"))
+;;
+
+let test_commit_update_replaces_the_watch_with_what_it_is_given () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields ~message:"first" ~extra:[ "until_github_checks", `String commit_url ] ()));
+  let update ~message extra =
+    dispatch
+      config
+      ~name:update_name
+      ([ "schedule_id", `String "watched"; "keeper_name", `String wake_keeper; "message", `String message ]
+       @ extra)
+  in
+  check_success "update without the commit" (update ~message:"second" []);
+  check
+    string
+    "the watch is gone"
+    "no watch"
+    (describe_checks_watch (checks_watch_of_row (stored_exn config "watched")));
+  let other = "https://github.com/jeong-sik/wkbl/commit/" ^ String.make 40 'c' in
+  check_success "update with another commit" (update ~message:"third" [ "until_github_checks", `String other ]);
+  check
+    string
+    "the new watch"
+    other
+    (describe_checks_watch (checks_watch_of_row (stored_exn config "watched")));
+  check_success "update swaps the commit for a run" (update ~message:"fourth" [ "until_github_run", `String run_url ]);
+  let swapped = stored_exn config "watched" in
+  check string "no commit watch" "no watch" (describe_checks_watch (checks_watch_of_row swapped));
+  check string "the run watch" run_url (describe_watch (watch_of_row swapped))
+;;
+
+let test_commit_update_refuses_a_commit_on_a_recurring_schedule () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"every hour"
+          ~extra:[ "recurrence_kind", `String "interval"; "recurrence_interval_sec", `Int 3600 ]
+          ()));
+  check_refused
+    "update"
+    ~mentioning:[ Checks.watch_field; "one_shot" ]
+    (dispatch
+       config
+       ~name:update_name
+       [ "schedule_id", `String "watched"
+       ; "keeper_name", `String wake_keeper
+       ; "message", `String "every hour"
+       ; "until_github_checks", `String commit_url
+       ]);
+  check string "the stored row has no watch" "no watch"
+    (describe_checks_watch (checks_watch_of_row (stored_exn config "watched")))
+;;
+
+let test_commit_schemas_declare_the_param_and_keep_it_out_of_a_lane_action () =
+  List.iter
+    (fun (label, action, extra) ->
+      (match
+         validate
+           action
+           ([ "due_at_unix", `Float future_due_at
+            ; "keeper_name", `String wake_keeper
+            ; "message", `String "check"
+            ; "until_github_checks", `String commit_url
+            ]
+            @ extra)
+       with
+       | Ok _ -> ()
+       | Error rejection -> failf "%s: %s" label (Tool_result.message rejection));
+      let lane_action =
+        [ "due_at_unix", `Float future_due_at
+        ; "installation_id", `String "inst-1"
+        ; "action", `Assoc [ "kind", `String "compose" ]
+        ]
+        @ extra
+      in
+      match validate action (lane_action @ [ "until_github_checks", `String commit_url ]) with
+      | Ok _ -> failf "%s: a Lane action with until_github_checks was accepted" label
+      | Error _ -> ())
+    [ "create", Tool_schemas_schedule.Create_request, []
+    ; "update", Tool_schemas_schedule.Update_request, [ "schedule_id", `String "watched" ]
+    ]
+;;
+
+let keeper_wake_payload_with fields =
+  `Assoc
+    [ "kind", `String Schedule_supported_kinds.keeper_wake
+    ; "body", `Assoc ([ "keeper_name", `String wake_keeper; "message", `String "m" ] @ fields)
+    ]
+;;
+
+let test_commit_payload_contract_checks_the_watch () =
+  let creation payload =
+    Schedule_payload_projection.validate_request_payload_for_creation_detailed ~payload
+  in
+  let well_formed = `Assoc [ "repo", `String "jeong-sik/masc"; "sha", `String commit_sha ] in
+  check bool "a well-formed watch" true
+    (Result.is_ok (creation (keeper_wake_payload_with [ Checks.watch_field, well_formed ])));
+  List.iter
+    (fun (label, fields) ->
+      check bool label true (Result.is_error (creation (keeper_wake_payload_with fields))))
+    [ "the URL as a string", [ Checks.watch_field, `String commit_url ]
+    ; "a short sha", [ Checks.watch_field, `Assoc [ "repo", `String "jeong-sik/masc"; "sha", `String "8b666a1" ] ]
+    ; "no sha", [ Checks.watch_field, `Assoc [ "repo", `String "jeong-sik/masc" ] ]
+    ; ( "an unknown field"
+      , [ Checks.watch_field
+        , `Assoc [ "repo", `String "jeong-sik/masc"; "sha", `String commit_sha; "url", `String commit_url ]
+        ] )
+    ; ( "both watches"
+      , [ Checks.watch_field, well_formed
+        ; Watch.watch_field, `Assoc [ "repo", `String "jeong-sik/masc"; "run_id", `Int 5 ]
+        ] )
+    ]
+;;
+
+let test_a_commit_row_the_tool_created_is_woken_and_still_dispatchable () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"merge if green"
+          ~extra:[ "until_github_checks", `String commit_url; "urgency", `String "low" ]
+          ()));
+  let now = future_due_at -. 3600.5 in
+  let runs =
+    [ { Checks.workflow = "PR type-check"
+      ; event = Checks.Pull_request
+      ; conclusion = Some Watch.Failure
+      }
+    ]
+  in
+  let outcomes =
+    match Checks.tick config ~now ~runner_tick_sec ~read:(fun _ -> Ok (Checks.Settled runs)) with
+    | Ok outcomes -> outcomes
+    | Error detail -> fail detail
+  in
+  check int "one watched row" 1 (List.length outcomes);
+  (match outcomes with
+   | [ { Checks.verdict = Checks.Woken (Checks.Checks_completed _); _ } ] -> ()
+   | _ -> fail "the row was not woken for settled checks");
+  let woken = stored_exn config "watched" in
+  check (float 0.0) "due at the current second" (Float.floor now) woken.Schedule_domain.due_at;
+  check string "no watch left" "no watch" (describe_checks_watch (checks_watch_of_row woken));
+  (match String.split_on_char '\n' (message_of woken) with
+   | [ headline; line; url; ""; original ] ->
+     check bool "the outcome leads" true (String_util.contains_substring headline "1 check runs completed");
+     check string "one line per check run" "- PR type-check (pull_request): failure" line;
+     check string "then the commit URL" commit_url url;
+     check string "then the Keeper's own message" "merge if green" original
+   | _ -> fail "the message is the outcome, a line per run, the commit URL, an empty line, then the Keeper's own");
+  check string "urgency is kept" "low"
+    (match List.assoc_opt "urgency" (body_of woken) with
+     | Some (`String urgency) -> urgency
+     | Some _ | None -> fail "urgency lost");
+  check bool "the consumer still accepts the payload" true
+    (Result.is_ok (Schedule_payload_projection.dispatch_view_detailed woken))
+;;
+
 let () =
   run
     "schedule_tool_run_watch"
@@ -560,6 +847,18 @@ let () =
             "a row the tool created is woken and still dispatchable"
             `Quick
             test_a_row_the_tool_created_is_woken_and_still_dispatchable
+        ] )
+    ; ( "commit watch"
+      , [ test_case "create stores the commit as a typed field" `Quick test_commit_create_stores_the_commit_as_a_typed_field
+        ; test_case "create refuses a URL that is not a full commit" `Quick test_commit_create_refuses_a_url_that_is_not_a_full_commit
+        ; test_case "create refuses a recurring schedule" `Quick test_commit_create_refuses_a_recurring_schedule
+        ; test_case "create refuses both watches" `Quick test_commit_create_refuses_both_watches
+        ; test_case "create refuses a Lane action with a commit" `Quick test_commit_create_refuses_a_lane_action_with_a_commit
+        ; test_case "update replaces the watch with what it is given" `Quick test_commit_update_replaces_the_watch_with_what_it_is_given
+        ; test_case "update refuses a commit on a recurring schedule" `Quick test_commit_update_refuses_a_commit_on_a_recurring_schedule
+        ; test_case "schemas declare the param and keep it out of a Lane action" `Quick test_commit_schemas_declare_the_param_and_keep_it_out_of_a_lane_action
+        ; test_case "the payload contract checks the watch" `Quick test_commit_payload_contract_checks_the_watch
+        ; test_case "a row the tool created is woken and still dispatchable" `Quick test_a_commit_row_the_tool_created_is_woken_and_still_dispatchable
         ] )
     ]
 ;;

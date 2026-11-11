@@ -275,6 +275,54 @@ let test_schedule_update_form_keeps_the_run_watch () =
      |> member Masc.Schedule_run_watch.watch_field
      = `Null)
 
+(* The same holds for the commit watch: an edit of the message must not remove
+   the wait for the commit's checks. *)
+let test_schedule_update_form_keeps_the_commit_watch () =
+  let open Yojson.Safe.Util in
+  let url =
+    "https://github.com/jeong-sik/masc/commit/8b666a19e3455100528bb90b861374c56e563f82"
+  in
+  let target =
+    match Masc.Schedule_checks_watch.target_of_commit_url url with
+    | Ok target -> target
+    | Error detail -> Alcotest.fail detail
+  in
+  let body_with fields =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; ( "body"
+        , `Assoc
+            ([ "keeper_name", `String "edgar.a.poe"
+             ; "message", `String "inspect the latest work"
+             ]
+             @ fields) )
+      ]
+  in
+  let form = update_form in
+  let watched =
+    form
+      { schedule_form_row with
+        sch_recurrence = Ok Schedule_domain.One_shot
+      ; sch_payload =
+          body_with
+            [ ( Masc.Schedule_checks_watch.watch_field
+              , Masc.Schedule_checks_watch.target_to_yojson target )
+            ]
+      }
+  in
+  let carried =
+    watched |> member Masc.Schedule_checks_watch.watch_field |> to_string_option
+  in
+  check (Alcotest.option str) "the form carries the commit URL" (Some url) carried;
+  check Alcotest.bool "the URL parses back to the stored commit" true
+    (Option.map Masc.Schedule_checks_watch.target_of_commit_url carried = Some (Ok target));
+  check Alcotest.bool "a commit watch does not add a run watch field" true
+    (watched |> member Masc.Schedule_run_watch.watch_field = `Null);
+  check Alcotest.bool "a row without a watch gets no field" true
+    (form { schedule_form_row with sch_payload = body_with [] }
+     |> member Masc.Schedule_checks_watch.watch_field
+     = `Null)
+
 (* The update replaces the whole definition, so a form built without the
    row's recurrence would save a default over it. The same row with a
    recurrence that reads opens, so the refusal is the recurrence's. *)
@@ -2333,6 +2381,8 @@ let () =
             test_schedule_update_form_preserves_exact_editable_definition
         ; Alcotest.test_case "schedule update form keeps the run watch" `Quick
             test_schedule_update_form_keeps_the_run_watch
+        ; Alcotest.test_case "schedule update form keeps the commit watch" `Quick
+            test_schedule_update_form_keeps_the_commit_watch
         ; Alcotest.test_case
             "modify refuses a recurrence this build cannot read" `Quick
             test_modify_refuses_a_recurrence_this_build_cannot_read

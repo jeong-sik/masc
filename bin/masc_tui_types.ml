@@ -3055,9 +3055,9 @@ let schedule_modify_form (row : schedule_row) recurrence =
     Option.bind row.sch_expires_at_iso Time_codec.parse_rfc3339_opt
     |> Option.fold ~none:[] ~some:(fun value -> [ "expires_at_unix", `Float value ])
   in
-  (* The update replaces the whole definition, so a form without the run watch
-     removes it on save. Creation refuses a body whose watch does not decode, so
-     only a hand-edited store file reaches the [Error] arm. *)
+  (* The update replaces the whole definition, so a form without the run or
+     commit watch removes it on save. Creation refuses a body whose watch does
+     not decode, so only a hand-edited store file reaches the [Error] arm. *)
   let run_watch =
     match body with
     | `Assoc fields ->
@@ -3065,6 +3065,16 @@ let schedule_modify_form (row : schedule_row) recurrence =
          | Ok (Some target) ->
              [ ( Masc.Schedule_run_watch.watch_field
                , `String (Masc.Schedule_run_watch.target_url target) ) ]
+         | Ok None | Error _ -> [])
+    | _ -> []
+  in
+  let checks_watch =
+    match body with
+    | `Assoc fields ->
+        (match Masc.Schedule_checks_watch.watch_of_body fields with
+         | Ok (Some target) ->
+             [ ( Masc.Schedule_checks_watch.watch_field
+               , `String (Masc.Schedule_checks_watch.target_url target) ) ]
          | Ok None | Error _ -> [])
     | _ -> []
   in
@@ -3082,7 +3092,7 @@ let schedule_modify_form (row : schedule_row) recurrence =
      ; "source", `String row.sch_source
      ; "allow_unregistered_keeper", `Bool false
      ]
-     @ run_watch @ recurrence_fields @ expires)
+     @ run_watch @ checks_watch @ recurrence_fields @ expires)
   |> Yojson.Safe.pretty_to_string
 
 (** The form the modify editor opens with, or why it does not open.

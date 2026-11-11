@@ -21,6 +21,9 @@ type t =
         (** When the piece in flight started, as the clock read then. *)
   ; mutable watched : bool  (** A fiber watches the piece in flight. *)
   ; mutable peer_close_awaited : bool
+  ; mutable copy_buffer : Cstruct.t option
+        (** What [copy] reads its source into. Made by the first [copy]; used
+            with the write turn held. *)
   }
 
 let peer t = Format.asprintf "%a" Eio.Net.Sockaddr.pp t.client_addr
@@ -149,13 +152,32 @@ module Socket = struct
     Cstruct.lenv piece
   ;;
 
-  (* The source is read through a buffer of [Eio.Flow.Pi.simple_copy], which
-     is what the socket itself does with a source it cannot read in place. *)
+  (* WORKAROUND: tls-eio writes its ciphertext with [Eio.Flow.copy_string],
+     and a socket takes such a source through [Eio.Flow.Pi.simple_copy]: a
+     4096-byte buffer, so a write per 4 KiB of ciphertext. Here the source is
+     read into a buffer of a whole piece (RFC-0518 D8).
+     The connection keeps the buffer. A buffer made for each call cost more
+     than the 4 KiB path when a write was one HTTP/2 slice (RFC-0518 D8,
+     run3). A connection that never copies, a plaintext one, makes none.
+     Root fix: tls-eio handing the socket its ciphertext with a write. *)
   let copy t ~src =
     Eio.Mutex.use_ro t.write_turn (fun () ->
-      Eio.Flow.Pi.simple_copy t ~src ~single_write:(fun t piece ->
-        write_piece t piece;
-        Cstruct.lenv piece))
+      let buffer =
+        match t.copy_buffer with
+        | Some buffer -> buffer
+        | None ->
+          let buffer = Cstruct.create_unsafe write_piece_bytes in
+          t.copy_buffer <- Some buffer;
+          buffer
+      in
+      let rec copy_all () =
+        match Eio.Flow.single_read src buffer with
+        | exception End_of_file -> ()
+        | read ->
+          write_piece t [ Cstruct.sub buffer 0 read ];
+          copy_all ()
+      in
+      copy_all ())
   ;;
 
   let shutdown t command =
@@ -186,6 +208,7 @@ let wrap ~sw ~clock ~listener_tag client_addr flow =
   ; writing_since = None
   ; watched = false
   ; peer_close_awaited = false
+  ; copy_buffer = None
   }
 ;;
 

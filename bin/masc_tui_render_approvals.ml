@@ -890,7 +890,8 @@ let render_approvals (state : state) =
   let reading = Masc_tui_approvals_model.approvals_reading state in
   let source_notices = approval_source_notices state ~reading in
   let count_text =
-    if Masc_tui_approvals_model.approvals_reading_current state then string_of_int count
+    if Masc_tui_approvals_model.approvals_reading_current state then
+      Printf.sprintf (if state.ui_language = Lang_ko then "대기 %d" else "%d pending") count
     else Printf.sprintf (if state.ui_language = Lang_ko then
         "관측 %d · 조회 미확인 %d곳" else "%d observed · %d sources not current")
       count (List.length source_notices) in
@@ -900,11 +901,15 @@ let render_approvals (state : state) =
           else ", %d confirmations hidden · filter %s") snapshot.aps_hidden_count
           (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value snapshot.aps_actor_filter)
     | Some _ | None -> "" in
-  let action_badge = if action_inflight then
-      ui_text state ~ko:"  [제출 중]" ~en:"  [submitting]" else "" in
-  let header = Printf.sprintf "%s (%s%s)  %s%s"
-      (screen_title (ui_text state ~ko:" 작업 · 요청" ~en:" Work · Requests"))
-      count_text hidden_note (connection_badge state) action_badge in
+  let header =
+    here_row ~cols state
+      ~path:[ ui_text state ~ko:"요청" ~en:"requests" ]
+      ~readings:
+        [ count_text ^ hidden_note
+        ; (if action_inflight then ui_text state ~ko:"제출 중" ~en:"submitting"
+           else "") ]
+      ~position:None
+  in
   box_top buf cols;
   box_line buf cols header;
   let policy_buf = Buffer.create 512 in

@@ -29,7 +29,7 @@ implementation_prs: []
 ### 1.1 긴 Execute 가 check 를 기다린 시간
 
 창 A 는 11-08T05:40Z~11-11T05:40Z, 창 B 는 11-07T10:20Z~11-10T10:20Z 다. 둘 다 72시간이다.
-출처는 창 A 가 #51284(Draft)의 `docs/evidence/tool-efficiency-1111-2026-11/result-github-wait-shapes-2026-11-08T05-40_11-11T05-40.json`, 창 B 가 `docs/evidence/tool-efficiency-1110-2026-11/result-github-wait-shapes-2026-11-07T10-20_11-10T10-20.json` 이다.
+출처는 창 A 가 #51284 의 `docs/evidence/tool-efficiency-1111-2026-11/result-github-wait-shapes-2026-11-08T05-40_11-11T05-40.json`, 창 B 가 `docs/evidence/tool-efficiency-1110-2026-11/result-github-wait-shapes-2026-11-07T10-20_11-10T10-20.json` 이다.
 모양은 명령 글자로 가른다(`github_wait_shapes.py` 의 `shape_of`). 측정용이고 제품 규칙이 아니다.
 
 | | 창 B | 창 A |
@@ -124,7 +124,7 @@ implementation_prs: []
 - `Pull_heads`·`until_github_pr_heads`·`Pull_request_changed` 는 lib, config, bin, test 에 0건이다(`rg`).
 - GitHub webhook 을 받는 경로가 없다. `X-GitHub-Event`·`X-Hub-Signature` 가 lib 과 config 에 0건이다. world-state RFC §3.1 의 A 가 이유와 함께 쓰지 않기로 했다.
 - RFC-0379 §6.6.2 의 1번은 스냅숏 레코드에 head 가 없다고 적는다. 지금은 `head_oid` 가 있다(#50214).
-- #51284(Draft)가 RFC-0379 에 같은 정정을 더한다. `Pull_heads` 는 head 변경·닫힘·병합에 깨우고 check 완료에는 깨우지 않는다.
+- #51284 가 RFC-0379 에 같은 정정을 더한다. `Pull_heads` 는 head 변경·닫힘·병합에 깨우고 check 완료에는 깨우지 않는다.
 
 이 서버가 오늘 `until_github_run` 으로 깨운 기록은 로그에 있다(`masc-start-20261111T073312Z.log`, `schedule_run_watch: woke` 줄 2개, 17:13:23 와 17:24:39 KST).
 

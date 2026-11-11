@@ -151,6 +151,7 @@ let test_original_response_observations_are_bound_to_each_visit () =
     check (list string) "passive capture retains both actual visited slots"
       ["first";"second"] (List.map (fun (visit:Exact_lane_slot_observation.t) -> visit.slot_id) observations);
     List.iter (fun (visit:Exact_lane_slot_observation.t) ->
+      check (option string) "the physical Add-on output owns each visit" (Some lane_id) visit.lane_key;
       check bool "actual executor times were retained" true
         (visit.started_at<>None && visit.finished_at<>None)) observations;
     publish_responses ~base_path [{F.id="first";base_url=right.base_url};{F.id="second";base_url=right.base_url}];

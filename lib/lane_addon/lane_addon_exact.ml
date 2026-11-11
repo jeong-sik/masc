@@ -993,7 +993,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
             (* The save yields. A retiring incarnation must not start a call
                after it returns. A cancelled started attempt remains unknown. *)
             Eio.Fiber.check ();
-            let slot_capture=Exact_lane_slot_capture.create () in
+            let slot_capture=Exact_lane_slot_capture.create ~owner:(Runtime_schema.Addon lane) () in
             let attempt, recorded, execution =
               match Exact_lane_slot_capture.with_capture slot_capture (fun () -> call ~validate) with
               | execution ->

@@ -6,7 +6,9 @@ import type { Keeper } from '../../types'
 import { KeeperLaneStrip } from './keeper-lane-strip'
 import type { LaneEventQueueActions } from './keeper-lane-event-actions'
 
-function rows(name: string, count = 2000): DashboardKeeperWaitingRow[] {
+type EventRow = DashboardKeeperWaitingRow & { detail: { source_ref: string; source_incarnation: string } }
+
+function rows(name: string, count = 2000): EventRow[] {
   return Array.from({ length: count }, (_, index) => ({
     keeper_name: name, source: 'event_queue_pending', waiting_on: 'workspace_message',
     what: `${name}-event-${index}`, since: 1000 + index, next_action: 'keeper_drain_event_queue',

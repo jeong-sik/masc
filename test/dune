@@ -6802,7 +6802,7 @@
 (test
  (name test_server_keeper_build_maintenance)
  (modules test_server_keeper_build_maintenance)
- (libraries alcotest masc masc_server masc_test_deps eio_main unix))
+ (libraries alcotest masc masc_server masc_test_deps eio_main eio.mock unix))
 
 (test
  (name test_keeper_cleanup_status)

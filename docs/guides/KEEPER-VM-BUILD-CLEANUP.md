@@ -7,6 +7,11 @@ The MASC server owns artifact cleanup through each Keeper's Owner mailbox.
 `keeper_build_cleanup_retention_sec` (one day). These are artifact-retention
 settings, not time limits on Keeper work or durable tasks.
 
+The first pass runs one maintenance pulse after the server starts
+(`MASC_MAINTENANCE_PULSE_INTERVAL_SEC`, one minute), and each later pass
+follows the one before it by the interval. A server restarted within the
+interval still passes once.
+
 The same pass sweeps each Remote_ssh Keeper's workspace root on its endpoint
 when `keeper_remote_workspace_cleanup_enabled` (default true) is on, with
 `keeper_remote_workspace_cleanup_retention_sec` (two days). Each Keeper's run

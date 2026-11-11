@@ -5282,6 +5282,7 @@
 (include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_pick_list.inc)
 (include stanzas/test_tui_help_filter.inc)
+(include stanzas/test_tui_value.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)

@@ -3,11 +3,11 @@ rfc: "provider-path-rest"
 title: "사용량 제한은 그 경로만 쉬게 하고, Keeper 는 다음에 보낼 경로의 쉼만 기다린다"
 status: Draft
 created: 2026-09-15
-updated: 2026-11-06
+updated: 2026-11-10
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0433", "0370"]
+related: ["0433", "0370", "exact-lane-waits-for-a-stated-reset"]
 ---
 
 # RFC: 사용량 제한은 그 경로만 쉬게 한다 (provider-path-rest)
@@ -356,6 +356,10 @@ Phase 1 뒤에도 P 가 안 닿는 곳이 셋 있다. 모두 지금도 있는 �
 Phase 2 는 walk 가 쉬는 후보를 건너뛰고, 모두 쉬면 호출 없이 "모든 경로가 쉼" 을 typed
 terminal 로 끝내게 한다. RFC-0433 의 "새 fail-closed 경로를 만들지 않는다" 와 부딪히므로
 따로 설계한다.
+
+> 2026-11-10: exact lane 부분은 RFC-exact-lane-waits-for-a-stated-reset 이 정한다. provider 가
+> 말한 시각 전에는 그 slot 을 부르지 않고, 모두 기다리면 호출 없이 typed 결과로 끝낸다.
+> 시각 없는 쉼은 순서만 바꾼다. Keeper turn walk 부분은 이 절에 남는다.
 
 ## 7. 고르지 않은 대안
 

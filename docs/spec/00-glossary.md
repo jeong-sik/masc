@@ -1668,6 +1668,13 @@ status: reference
     한 출처(`muse.subscription_usage`)이고, 어느 쪽이든 완전한 보고는 다른 쪽의 행을
     대체한다. 실패한 turn은 재전송하지 않는다. 소진율이나 리셋 시각만으로 일반
     가용성을 추론하는 것은 아니다.
+    거절 없이 한 직접 읽기(시작 때 읽기, `usage-read.refresh-s` 주기 읽기)도 같은 규칙을
+    따른다. 완전한 보고에서 모델 호출을 막는 창이 한도까지 소진됐을 때만
+    `Runtime_quota_window`에 기록한다(`Runtime_provider_usage_window.rest_scope`).
+    소진율만으로는 기록하지 않고, 보고의 남은 여유로 기록을 지우지도 않는다.
+    기록된 리셋을 Keeper turn walk는 그 시각까지 기다리는 쉼으로 읽는다(RFC-provider-path-rest §3.3).
+    exact lane의 호출도 그 시각까지 보류하자는 안은 Draft인
+    RFC-exact-lane-waits-for-a-stated-reset의 L1 구현안에 정의되어 있다.
   - **비영속·프로세스 로컬**: 프로세스 메모리에만 존재하며 저장소에 남지 않는다. 프로세스
     기동 후 통보가 한 번도 없었던 scope는 0이나 빈 창으로 꾸며내지 않고
     `Not_reported_since_start`로 명시한다.

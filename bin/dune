@@ -2832,7 +2832,7 @@
   masc_tui_frame_presenter masc_tui_keeper_chat_projection masc_tui_keys
   masc_tui_message_layout masc_tui_render_prim masc_tui_render_schedule
   masc_tui_rows masc_tui_scroll masc_tui_span masc_tui_table masc_tui_text_block
-  masc_tui_theme masc_tui_types unix))
+  masc_tui_theme masc_tui_types masc_tui_value unix))
 
 ;; The real Board request path is linkable by route/transport integration
 ;; scenarios, using the same workspace result and HTTP owners as the UI.

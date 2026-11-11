@@ -88,16 +88,22 @@ let workspace_activity_cells ~cols ~date ~keeper ~task ~result ~path =
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows, cursor, selected = workspace_activity_selection state in
+  let activity_path =
+    [ ui_text state ~ko:"활동" ~en:"activity"; Terminal_text.single_line repo_id ]
+  in
   let title = match state.workspace_activity_context_scroll with
-    | None -> " MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id
+    | None -> here_row ~cols state ~path:activity_path ~readings:[] ~position:None
     | Some requested ->
         let count = List.length (workspace_activity_context_lines state ~cols) in
         let height = workspace_activity_context_height state
           ~surface_rows:(surface_body_rows state ~terminal_rows) in
         let scroll = max 0 (min requested (max 0 (count - height))) in
-        " Context [" ^ Masc_tui_scroll.window_text ~scroll ~height count ^ "]" in
+        here_row ~cols state
+          ~path:(activity_path @ [ ui_text state ~ko:"맥락" ~en:"context" ])
+          ~readings:[ Masc_tui_scroll.window_text ~scroll ~height count ]
+          ~position:None in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"workspace-activity"
-    ~title:(screen_title title)
+    ~title
     ~hints:(match state.workspace_activity_context_scroll with
       | None -> "v:context  j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:back"
       | Some _ -> "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Enter:file  r:refresh  Esc:list")
@@ -305,9 +311,8 @@ let render_repository_list (state : state) =
   in
   let shown = List.length repos in
   let title =
-    badge_row ~cols
-      ~lead:(screen_title (ui_text state ~ko:" MASC 워크스페이스" ~en:" MASC Workspace"))
-      ~label:(Terminal_text.single_line state.workspace) ~badge:(connection_badge state)
+    here_row ~cols state ~path:[]
+      ~readings:[ Terminal_text.single_line state.workspace ] ~position:None
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
     ~title
@@ -509,15 +514,23 @@ let render_repository_changes (state : state) =
         | None, _ -> "Git workspace"
       in
       let title =
-        detail_heading ~cols ~lead:(Lead_text " MASC Git Changes — ")
-          ~id:scope_name
-          ~after:[ Printf.sprintf " (%d)%s%s" (List.length changes)
-            (match state.repository_changes with
-             | Some snapshot ->
-                 " · " ^ repository_branch_label snapshot.Masc.Tui_decode.rcs_branch
-             | None -> "")
-            (if Option.is_some state.repository_changes_error then " · read failed" else "") ]
-          ~tail:(connection_badge state)
+        here_row ~cols state ~path:[ git_changes_step state; scope_name ]
+          ~readings:
+            [ (match state.repository_changes with
+               | Some snapshot ->
+                   repository_branch_label snapshot.Masc.Tui_decode.rcs_branch
+               | None -> "")
+            ; (if Option.is_some state.repository_changes_error then
+                 ui_text state ~ko:"조회 실패" ~en:"read failed"
+               else "") ]
+          ~position:
+            (match changes with
+             | [] -> None
+             | _ :: _ ->
+                 Some
+                   (Masc_tui_value.Position.Row
+                      { at = state.repository_changes_cursor + 1
+                      ; total = List.length changes }))
       in
       let recorded_changes = current_keeper_chat_file_changes state in
       surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repository-changes"
@@ -995,7 +1008,9 @@ let render_changes_list (state : state) =
 let render_changes_tree_diff (state : state)
     (change : Masc.Tui_decode.file_change) =
   render_diff_surface state
-    { ds_title = " MASC Tree"
+    { ds_path =
+        [ ui_text state ~ko:"변경" ~en:"changes"
+        ; ui_text state ~ko:"파일 상태" ~en:"tree" ]
     ; ds_address = Terminal_text.single_line (change_row_address change)
     ; ds_context_lines = []
     ; ds_diff = state.changes_tree_diff

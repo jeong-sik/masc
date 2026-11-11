@@ -555,10 +555,23 @@ let test_creation_commits_before_releasing_persistence () =
        ~owner:"commit-author" () with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Board.show_board_error e)));
+  (* A creation is not the only path through the persistence section: adding a
+     comment reads the post back through [read_post_for_evidence] to decide the
+     event's visibility, and that read shares the same lock order
+     (lib/board/board_core.ml:17-18). So the observer sees one more release than
+     there are creations, carrying the state the preceding write already
+     established. Collapsing runs of the same counts keeps this assertion about
+     what it names -- each creation is visible before the section that follows it
+     ends -- without pinning how many reads share the section. *)
+  let rec collapse previous acc = function
+    | [] -> List.rev acc
+    | counts :: rest when counts = previous -> collapse previous acc rest
+    | counts :: rest -> collapse counts (counts :: acc) rest
+  in
   Alcotest.(check (list (list int)))
     "post, comment and sub-board are committed before persistence unlock"
     [ [1; 0; 0]; [1; 1; 0]; [1; 1; 1] ]
-    (List.rev !released_states);
+    (collapse [] [] (List.rev !released_states));
   flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();

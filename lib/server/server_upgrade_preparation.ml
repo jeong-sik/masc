@@ -115,3 +115,20 @@ let replacement_readiness ~run_dir ~base_path ~port =
       (Server_startup_takeover.Owner_identity_unavailable
          (Owner_changed | Unsupported | Unavailable | Closed))
   | Error (Server_startup_takeover.Current_process_owner) -> Error Owner_unavailable
+let stop_account_server ~run_dir ~base_path ~port =
+  match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
+  | Error (_ : Server_startup_takeover.owner_capture_error) -> Error Owner_unavailable
+  | Ok owner ->
+    Fun.protect ~finally:(fun () -> Owner_process_identity.close owner) (fun () ->
+      match Server_startup_takeover.account_server_announcement ~run_dir ~base_path with
+      | Error (_ : Server_startup_takeover.base_path_lock_rejection) -> Error Owner_unavailable
+      | Ok (Some announcement)
+        when announcement.Server_startup_takeover.pid = Owner_process_identity.pid owner
+             && announcement.Server_startup_takeover.port = port ->
+        (match Owner_process_identity.request_termination owner with
+         | Ok () -> Ok ()
+         | Error Owner_process_identity.Owner_changed -> Error Incumbent_changed
+         | Error (Owner_process_identity.No_owner | Unsupported | Unavailable | Closed) ->
+           Error Owner_unavailable)
+      | Ok (Some (_ : Server_startup_takeover.account_server_announcement)) | Ok None ->
+        Error Incumbent_changed)

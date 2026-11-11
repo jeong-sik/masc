@@ -50,3 +50,20 @@ val replacement_readiness :
 (** Observe kernel lease release and loopback bind availability after requesting
     graceful termination. Never signals or starts anything; errors are not exit
     proof. Availability is advisory, so replacement startup still owns conflicts. *)
+
+val stop_account_server : run_dir:string -> base_path:string -> port:int -> (unit, error) result
+(** Asks the account server of a multi-account installation to stop: the
+    identity-bound SIGTERM of {!request_termination}, sent to the kernel owner
+    of the lease of [base_path] when that same process announces [port]
+    ({!Server_startup_takeover.account_server_announcement}).
+    [Incumbent_changed] when the owner announces another port or none, or
+    changed between the reads. [Owner_unavailable] when nothing holds the
+    lease, or the owner or the announcement cannot be read. Success is a
+    request, not proof of drain.
+
+    {b Authority.} An account server has no admin credential that a command
+    line could present: its accounts are persons who sign in through a
+    browser. This stop rests on the authority of the host, as [masc auth]
+    does: the effective UID that owns the private lease directory, which the
+    kernel checks when the lease is opened and when the signal is sent. Call
+    it only after the operator chose the replacement. *)

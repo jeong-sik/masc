@@ -1055,13 +1055,18 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - member가 있는데 client를 만들 수 없으면 부팅이 멈춘다(`Login_client_refused`). 그 provider만 빼고 뜨면 운영자가 설정한 로그인이 404로 답한다.
   - member가 없는 provider는 설정되지 않은 것이고, 그 시작과 callback은 404다. 둘 다 없으면 아무도 로그인하지 못한다. 부팅은 그 사실을 로그에 경고로 적고 뜬다. probe와 `masc restart`는 login client 없이도 돌아야 한다.
 - 조립. `Server_account_login.routes`가 `Login_routes.t`를 만든다(대기 중 로그인 16개, provider로 가는 전송, 벽시계, 32바이트 난수). 계정 서버와 `masc auth preview`가 같은 함수를 쓴다. 미리보기의 client는 전처럼 loopback(`Login_client.loopback`)이다.
-- 프로세스 준비. 로그인은 `Masc_http_client`로 provider에 닿는다. 그 client는 프로세스의 env·switch·net(`Eio_context`)과 기본 난수원을 읽는다. 단일 사용자 부팅은 owner state를 만들며 그것들을 채우고, 계정 서버는 owner state를 만들지 않는다. 그래서 `Server_accounts.run`이 표를 만들기 전에 채운다.
+- 프로세스 준비. 로그인은 `Masc_http_client`로 provider에 닿는다. 그 client는 프로세스의 env와 switch(`Eio_context`)를 읽는다. 단일 사용자 부팅은 owner state를 만들며 둘을 채우고, 계정 서버는 owner state를 만들지 않는다. 그래서 `Server_accounts.run`이 마지막 거절 뒤에 채운다. 거절된 부팅은 둘을 남기지 않는다.
 - 거절 순서. `Login_client_refused`는 구역을 다시 읽은 뒤, 표를 만들기 전이다. 포트를 묶기 전이라 CLI가 읽는 포트 기록과 host에 알리는 포트가 남지 않는다.
 - 시험(`test_server_accounts`).
   - secret 변수가 없는 `github` member와 redirect가 `http`인 member에서 부팅이 `Login_client_refused`로 멈춘다.
   - `github` member가 있는 설치를 띄운다. Origin 없는 `POST /auth/github/start`는 403(경로까지 닿는다), member가 없는 `POST /auth/oidc/start`는 로그인 경로의 404다(라우터의 404와 본문이 다르다).
-- 결과(2026-11-11 14:50~14:58Z, OCaml 5.5.2). 빌드 exit 0. `test_server_accounts` 11/11, `test_authz_boot_mode_read` 31/31.
-- 실제 바이너리(임시 폴더, 비운 환경, loopback 포트, 14:55Z).
+- 독립 리뷰(2026-11-11). P0 없음.
+  - P1(이 층에서 고치지 않음). 로그인 시작은 credential 없이 받고, 대기 중 로그인 저장소는 16자리다. 자리가 차면 빠질 때까지(callback 또는 10분) 새 로그인이 503이다. 실제 바이너리에서 16번 시작한 뒤의 시작이 503이었다(15:10Z). 가용성 문제이고 저장소 설계(§5.2)를 바꾸는 일이라 #51394로 올렸다. 저장소가 요구하는 뒤로 가지 않는 시계 대신 벽시계를 넘기는 것도 같은 이슈에 적었다.
+  - P2. provider 교환 실패가 로그에 남지 않았다. `Login_routes`가 상태로 바꾸는 세 곳에서 사유를 로그에 남긴다.
+  - P2. 시험이 같은 origin의 시작과 전송 준비를 보지 않았다. 303·`Location`·거래 cookie와 `Eio_context`의 env·switch를 단언한다.
+  - P3. env·switch 준비가 거절 여섯보다 앞이었다. 마지막 거절 뒤로 옮겼고, 전송이 읽지 않는 net과 난수원 준비는 뺐다.
+- 결과(2026-11-11 15:10~15:12Z, OCaml 5.5.2). 빌드 exit 0. `test_server_accounts` 11/11, `test_login_routes` 6/6, `test_authz_boot_mode_read` 31/31.
+- 실제 바이너리(임시 폴더, 비운 환경, loopback 포트, 15:12Z).
   - login client 없는 설치: 서버가 뜨고 `/health/ready` 200이다. `POST /auth/github/start`와 `POST /auth/oidc/start`는 로그인 경로의 404, `GET /auth/session`과 `GET /api/v1/auth/pats`는 401, `GET /`와 `POST /mcp`는 라우터의 404다. 서버 로그에 경고 한 줄이 남는다.
   - `github` member와 secret 변수가 있는 설치: Origin이 서버 주소인 `POST /auth/github/start`는 303이고 `Location`이 GitHub의 authorize URL(config의 `client_id`와 `redirect_uri`, `state`, PKCE)이며 거래 cookie가 온다. Origin이 없거나 다른 host면 403, cookie 없는 callback은 401, 16 KiB를 넘는 본문은 413이다. secret 값은 답과 로그 어디에도 없다.
   - secret 변수가 없는 설치와 redirect가 `http`인 설치: `masc restart`가 exit 1이고, 서버 로그의 `[FATAL]` 줄이 변수 이름 또는 redirect 규칙을 말한다.

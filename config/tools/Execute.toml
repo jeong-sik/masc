@@ -8,8 +8,10 @@ meaning. A call runs to completion or stops at timeout_sec, and a sleep loop hol
 the turn for the whole wait. With run_in_background true the call returns a \
 request_id at once and the result arrives later as a tool-result receipt \
 that wakes the Keeper; a server restart ends the run and the receipt says \
-so. A GitHub Actions run is waited for with masc_schedule_create \
-until_github_run, which wakes the Keeper when the run ends. intent is one \
+so. A GitHub Actions run, or all pages of a commit's push, pull_request and \
+workflow_run checks, is waited for with masc_schedule_create until_github_run or \
+until_github_checks, which wakes the Keeper when they end. Checks outside GitHub \
+Actions and downstream runs not registered yet are not covered. intent is one \
 of auto (the default) or \
 request_effect. In auto mode an observation-only run returns its \
 actual exit status and output, including failed writes; auto never authorizes \

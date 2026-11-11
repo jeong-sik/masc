@@ -146,6 +146,19 @@ streaming = false
       ?agent_core_checkpoint:checkpoint ~continue_from_checkpoint:(Option.is_some checkpoint)
       ?cooperative_yield_probe:probe
       ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk ~sw ~net:env#net () in
+  let selected_source = match scenario with
+    | Deferred ->
+      let receipt_id = match original_ids with
+        | [id] -> id | [] | _ :: _ :: _ -> fail "expected one original result" in
+      let source : Keeper_event_queue.stimulus =
+        {post_id="keeper-tool-result:" ^ receipt_id;urgency=Immediate;
+         arrived_at=Time_compat.now ();payload=Tool_result_ready receipt_id} in
+      get (Keeper_registry_event_queue.enqueue_durable_result ~base_path keeper_name source);
+      (match get (Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name) with
+       | [selection] -> Some selection
+       | [] | _ :: _ :: _ -> fail "expected one original pending source")
+    | Completed | Projection_failed | Provider_failed | Rejected | Save_failed
+    | Stale_save | Noop_sink | No_sink | Review -> None in
   let result = run ?probe:(match scenario with Deferred ->
       Some (fun _ -> Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting))
     | Completed | Projection_failed | Provider_failed | Rejected | Save_failed
@@ -163,12 +176,32 @@ streaming = false
         fail "consumer did not yield at its settled tool boundary");
      check (list string) "checkpoint keeps the original result pending" original_ids
        (Outbox.receipt_ids (snapshot ()));
+     let selected = match selected_source with
+       | Some selection -> selection | None -> fail "the deferred case admits its original source" in
+     get (Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+       ~base_path ~keeper_name [selected]);
+     let retained = match get (Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name) with
+      | [retained] ->
+        check int "the original source has one durable checkpoint retention" 1 retained.checkpoint_retentions;
+        check bool "retention preserves the original source" true (selected.source = retained.source);
+        check int64 "retention preserves original arrival" selected.arrival retained.arrival;
+        check bool "retention rotates the admitted incarnation" true
+          (Int64.compare retained.admitted_revision selected.admitted_revision > 0);
+        retained
+      | [] | _ :: _ :: _ -> fail "checkpoint lost or added an admitted source" in
      let checkpoint = match result.run_result.checkpoint with
        | Some value -> value | None -> fail "yield lost the original checkpoint" in
      ignore (core (run ~checkpoint ()));
      check int "the completed local effect is not replayed" 1 !effects;
      check (list string) "completed resumed consumer ACKs original result" []
-       (Outbox.receipt_ids (snapshot ()))
+       (Outbox.receipt_ids (snapshot ()));
+     (match get (Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+       ~base_path keeper_name ~applied_at:(Time_compat.now ()) ~selection:retained) with
+      | Turn_source_acked (Acked _) -> ()
+      | Turn_source_acked (Already_acked _ | Ack_committed_followup_failed _) | Turn_selection_withdrawn ->
+        fail "completed continuation did not settle its exact original source");
+     check int "the single original source drains with no new stimulus" 0
+       (List.length (get (Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name)))
    | Completed ->
      let result = core result in
      check bool "consumer completion was persisted" true (!saved_assistants > 0);

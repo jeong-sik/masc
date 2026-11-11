@@ -2002,7 +2002,7 @@ let credential_subscriptions env ~port ~expected =
         ~expected_workspace:expected ~on_chunk : (unit, Http.observer_error) result))
   ; "system-log", (fun ~on_chunk ->
       ignore (Http.observe_system_log_stream ~clock ~host:"127.0.0.1" ~port
-        ~level:"info" ~since_seq:17 ~limit:10 ~on_chunk () : string))
+        ~instance:"held-instance" ~level:"info" ~since_seq:17 ~limit:10 ~on_chunk () : string))
   ]
 ;;
 

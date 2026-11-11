@@ -765,7 +765,9 @@ let render_runtime_reading (state : state) =
     else ""
   in
   let hints =
-    scroll_hint ^ Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode ~picker:None
+    scroll_hint
+    ^ Masc_tui_keys.footer_hints_runtime ~lang:state.ui_language
+        ~mode:state.runtime_mode ~picker:None
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
     ~body:(fun ~budget:_ c ->
@@ -1089,8 +1091,8 @@ let render_runtime (state : state) =
       let notices = runtime_picker_notices state in
       let notes = runtime_picker_notice_rows ~cols state in
       let hints =
-        Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode
-          ~picker:(Some picker)
+        Masc_tui_keys.footer_hints_runtime ~lang:state.ui_language
+          ~mode:state.runtime_mode ~picker:(Some picker)
       in
       surface_chrome ~overflow:Fits state ~terminal_rows ~cols
         ~surface_key:"runtime" ~title:(runtime_picker_title ~ko ~notices picker.rlp_pick)

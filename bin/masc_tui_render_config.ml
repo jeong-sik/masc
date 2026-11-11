@@ -2220,8 +2220,8 @@ let render_config (state : state) =
        | Some _ when runtime_form_input_locked state ->
          "Esc back · input retained · Ctrl-X closes recovery after receipt"
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
-         Masc_tui_keys.footer_hints_runtime_account_saved ()
-       | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ()
+         Masc_tui_keys.footer_hints_runtime_account_saved ~lang:state.ui_language
+       | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ~lang:state.ui_language
        | None when Option.is_some state.memory_recall_form ->
          Masc_tui_keys.footer_hints_memory_recall_form ()
        | None when Option.is_some state.typesafeai_exclusion_form ->
@@ -2250,7 +2250,7 @@ let render_config (state : state) =
              without [y]. The card names its keys itself, as the link card
              does. *)
           if Masc_tui_runtime_account_form.is_saved form then
-            c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ())
+            c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ~lang:state.ui_language)
       | None ->
       match state.memory_recall_form with
       | Some form ->

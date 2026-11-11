@@ -34,17 +34,29 @@ let settings_of (config : Masc_domain.auth_config) =
   B.Settings_read { enabled = config.enabled; require_token = config.require_token }
 ;;
 
+type login_clients =
+  { google : Masc_domain.login_client option
+  ; github : Masc_domain.login_client option
+  }
+
+let no_login_clients = { google = None; github = None }
+
+let login_clients_of (config : Masc_domain.auth_config) =
+  { google = config.google; github = config.github }
+;;
+
 (* The file is read once, and the member and the other fields come from the
    same bytes. *)
-let read_config ~base_path =
+let read_config_and_clients ~base_path =
   let file = Auth_credential_base.auth_config_file base_path in
   let absent detail =
     Log.Auth.warn "%s is read as absent for the account mode: %s" file detail;
-    B.Not_set, B.Settings_unreadable detail
+    B.Not_set, B.Settings_unreadable detail, no_login_clients
   in
   match P.of_path file with
   | P.Cannot_check detail -> absent detail
-  | P.Not_there -> B.Not_set, settings_of Masc_domain.default_auth_config
+  | P.Not_there ->
+    B.Not_set, settings_of Masc_domain.default_auth_config, no_login_clients
   | P.There ->
     (match Auth_credential_base.read_regular_auth_file file with
      | Error error -> absent (Masc_domain.masc_error_to_string error)
@@ -52,14 +64,19 @@ let read_config ~base_path =
        (match Yojson.Safe.from_string content with
         | exception Yojson.Json_error detail -> absent ("not JSON: " ^ detail)
         | `Assoc _ as json ->
-          let settings =
+          let settings, login_clients =
             match Masc_domain.auth_config_of_yojson json with
-            | Ok config -> settings_of config
-            | Error detail -> B.Settings_unreadable detail
+            | Ok config -> settings_of config, login_clients_of config
+            | Error detail -> B.Settings_unreadable detail, no_login_clients
           in
-          requested_of_json json, settings
+          requested_of_json json, settings, login_clients
         | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as json ->
           absent ("not a JSON object: " ^ Yojson.Safe.to_string json)))
+;;
+
+let read_config ~base_path =
+  let requested, settings, (_ : login_clients) = read_config_and_clients ~base_path in
+  requested, settings
 ;;
 
 let asks_for_multi_account ~base_path =
@@ -162,13 +179,25 @@ let read_log_and_store ~base_path ~config_dir =
   log_mode, high_water
 ;;
 
-let input_of_files ~base_path ~anonymous_mutations { store = _; log_mode; high_water } =
-  let requested, settings = read_config ~base_path in
-  { B.requested; log_mode; high_water; settings; anonymous_mutations }
+(* The config is read once: the input of the judgment and the login clients
+   come from the same bytes. *)
+let input_and_clients_of_files
+      ~base_path
+      ~anonymous_mutations
+      { store = _; log_mode; high_water }
+  =
+  let requested, settings, login_clients = read_config_and_clients ~base_path in
+  { B.requested; log_mode; high_water; settings; anonymous_mutations }, login_clients
 ;;
 
 let input ~base_path ~config_dir ~anonymous_mutations =
-  input_of_files ~base_path ~anonymous_mutations (read_files ~base_path ~config_dir)
+  let input, (_ : login_clients) =
+    input_and_clients_of_files
+      ~base_path
+      ~anonymous_mutations
+      (read_files ~base_path ~config_dir)
+  in
+  input
 ;;
 
 type stop =
@@ -253,12 +282,17 @@ let turned_off = function
 type multi_account =
   { base_path : string
   ; external_store : I.Store_path.t
+  ; login_clients : login_clients
   }
 
-let multi_account_base_path { base_path; external_store = _ } = base_path
+let multi_account_base_path { base_path; external_store = _; login_clients = _ } = base_path
 
-let multi_account_external_store { base_path = _; external_store } =
+let multi_account_external_store { base_path = _; external_store; login_clients = _ } =
   (external_store : I.Store_path.t :> string)
+;;
+
+let multi_account_login_clients { base_path = _; external_store = _; login_clients } =
+  login_clients
 ;;
 
 type booted =
@@ -267,14 +301,16 @@ type booted =
 
 let boot ~base_path ~config_dir ~anonymous_mutations =
   let files = read_files ~base_path ~config_dir in
-  let input = input_of_files ~base_path ~anonymous_mutations files in
+  let input, login_clients =
+    input_and_clients_of_files ~base_path ~anonymous_mutations files
+  in
   match decide input, files.store with
   | Boot_single_user, (Store_unreadable _ | No_store | Store_read _) ->
     Ok (Single_user (Never_set_up base_path))
   | Boot_after_off state, (Store_unreadable _ | No_store | Store_read _) ->
     Ok (Single_user (Turned_off { base_path; state }))
   | Boot_multi_account, Store_read { path; state = _ } ->
-    Ok (Multi_account { base_path; external_store = path })
+    Ok (Multi_account { base_path; external_store = path; login_clients })
   | Boot_multi_account, (Store_unreadable _ | No_store) ->
     (* The table gives Multi_account only for a store that matches the log
        ([B.Judged H.Matches]), which [read_files] makes only from a store it

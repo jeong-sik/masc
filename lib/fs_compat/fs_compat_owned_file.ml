@@ -424,7 +424,7 @@ let load_owned_regular_file_with_snapshot ?owner_uid ?single_link ~ownership_roo
       load_owned_regular_file_with_snapshot_blocking ?owner_uid ?single_link ~ownership_root path)
     (fun _fs ->
        let result =
-         Eio_unix.run_in_systhread ~label:(labelled "fs-compat-load-owned-file" path) (fun () ->
+         Fs_compat_internal.Systhread_host.run ~label:(labelled "fs-compat-load-owned-file" path) (fun () ->
            load_owned_regular_file_with_snapshot_blocking
              ?owner_uid ?single_link ~ownership_root
              path)

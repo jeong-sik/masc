@@ -38,13 +38,13 @@ let fsync_path_strict = fsync_path_with ~allow_unsupported:false
    main-domain-scheduler-latency §8.8). Outside Eio it runs inline. The
    injected [save_file] must be a blocking writer: it is called inside the
    job, where no Eio effect can be performed.
-   [Eio_unix.run_in_systhread] re-raises the job's exception in the fiber
-   with the backtrace captured in the thread (eio/unix/thread_pool.ml), so
-   the failure stage and cancellation reporting below are unchanged. *)
+   [Systhread_host.run] re-raises the job's exception in the fiber with the
+   backtrace captured in the thread, so the failure stage and cancellation
+   reporting below are unchanged. *)
 let blocking_syscalls ~label f =
   match Execution_context.current () with
   | Execution_context.Non_eio -> f ()
-  | Execution_context.Eio_fiber -> Eio_unix.run_in_systhread ~label f
+  | Execution_context.Eio_fiber -> Systhread_host.run ~label f
 ;;
 
 let open_atomic_temp_file ~temp_dir () =

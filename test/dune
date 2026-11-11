@@ -1732,7 +1732,7 @@
 (test
  (name test_systhread_host)
  (modules test_systhread_host)
- (libraries alcotest masc.masc_core eio eio_main unix threads.posix))
+ (libraries alcotest masc.masc_core masc.fs_compat eio eio_main unix threads.posix))
 
 (test
  (name test_pool_lane)
@@ -3004,6 +3004,7 @@
 (include stanzas/test_fleet_stream_server_wiring.inc)
 
 (include stanzas/bench_fleet_stream.inc)
+(include stanzas/bench_systhread_host_fs_compat.inc)
 (include stanzas/bench_sse_pump_throughput.inc)
 
 (include stanzas/test_tui_fleet_stream.inc)

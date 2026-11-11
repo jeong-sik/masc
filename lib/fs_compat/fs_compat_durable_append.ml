@@ -412,7 +412,7 @@ let append_capability_observed_with ~after_write file content =
                   ()
               | Some fd ->
                 (try
-                   Eio_unix.run_in_systhread
+                   Fs_compat_internal.Systhread_host.run
                      ~label:"fs-compat-open-file-append"
                      (fun () ->
                         Eio_unix.Fd.use_exn

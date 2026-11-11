@@ -656,7 +656,7 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   match execution_context () with
   | Non_eio -> write ()
   | Eio_fiber ->
-    Eio_unix.run_in_systhread
+    Fs_compat_internal.Systhread_host.run
       ~label:(labelled "fs-compat-append-jsonl" path) write
 
 let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
@@ -676,7 +676,7 @@ let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
     match execution_context () with
     | Non_eio -> write ()
     | Eio_fiber ->
-      Eio_unix.run_in_systhread
+      Fs_compat_internal.Systhread_host.run
         ~label:(labelled "fs-compat-append-jsonl-batch" path) write
   end
 ;;

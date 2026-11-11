@@ -110,7 +110,7 @@ let with_observer_instance ~scope = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as json -> json
 ;;
 
-let dashboard_namespace_truth_for_scope ~state ~scope ~sw ~clock _request =
+let dashboard_namespace_truth_for_scope ~state ~(scope : Mcp_server.workspace_scope) ~sw ~clock _request =
   let config = scope.config in
   let execution_cache = Execution_surfaces.execution_cache_for_scope ~state scope in
   (* Fast-path: if the proactive execution refresh hasn't produced a result

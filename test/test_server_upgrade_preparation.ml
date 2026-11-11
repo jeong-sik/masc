@@ -119,10 +119,88 @@ let test_refused_termination_never_observes () =
       ~observe:(fun () -> Alcotest.fail "observation after refused termination") with
     | Not_requested Admin_required -> ()
     | Not_requested _ | Requested _ -> Alcotest.fail "refused request reported as sent"))
+(* A process that ran an Eio loop keeps the SIGCHLD handler of the posix
+   backend, and the end of a child then interrupts the call that waits for it. *)
+let rec retrying f =
+  match f () with
+  | result -> result
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> retrying f
+(* A child holds the lease of [base_path] and announces [announces] when it is
+   a port. It ends by the signal it is sent: [still_runs] says whether one has
+   ended it, and [reap] waits for the end and says which. *)
+let with_owner ~run_dir ~base_path ~announces f =
+  let ready_read, ready_write = Unix.pipe () in
+  let child = Unix.fork () in
+  if child = 0 then (
+    Unix.close ready_read;
+    Sys.set_signal Sys.sigterm Sys.Signal_default;
+    let holds =
+      match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+      | Server_startup_takeover.Base_path_acquired lease ->
+        (match announces with
+         | None -> true
+         | Some port ->
+           Result.is_ok (Server_startup_takeover.announce_account_server lease ~port))
+      | Server_startup_takeover.Base_path_already_owned _
+      | Server_startup_takeover.Base_path_rejected _ -> false in
+    ignore (Unix.write_substring ready_write (if holds then "r" else "x") 0 1);
+    Unix.close ready_write;
+    while true do Unix.pause () done);
+  Unix.close ready_write;
+  let status = ref None in
+  let reap () = match !status with
+    | Some ended -> ended
+    | None ->
+      let _, ended = retrying (fun () -> Unix.waitpid [] child) in
+      status := Some ended; ended in
+  let still_runs () = match !status with
+    | Some (_ : Unix.process_status) -> false
+    | None ->
+      (match retrying (fun () -> Unix.waitpid [Unix.WNOHANG] child) with
+       | 0, _ -> true
+       | _, ended -> status := Some ended; false) in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close ready_read;
+      if Option.is_none !status then (
+        (try Unix.kill child Sys.sigkill with Unix.Unix_error _ -> ());
+        ignore (reap ())))
+    (fun () ->
+      let ready = Bytes.create 1 in
+      ignore (retrying (fun () -> Unix.read ready_read ready 0 1));
+      Alcotest.(check string) "the owner holds the workspace" "r" (Bytes.to_string ready);
+      f ~still_runs ~reap)
+let test_account_server_stop_needs_its_announced_port () =
+  let root = Filename.temp_file "masc-upgrade-account-" "" in
+  Sys.remove root; Unix.mkdir root 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let base_path = Filename.concat root "workspace" and run_dir = Filename.concat root "run" in
+    Unix.mkdir base_path 0o700; Unix.mkdir run_dir 0o700;
+    let port = 9000 in
+    let stop port = Server_upgrade_preparation.stop_account_server ~run_dir ~base_path ~port in
+    (match stop port with
+     | Error Owner_unavailable -> ()
+     | _ -> Alcotest.fail "a workspace nobody holds was asked to stop");
+    with_owner ~run_dir ~base_path ~announces:None (fun ~still_runs ~reap:_ ->
+      (match stop port with
+       | Error Incumbent_changed -> ()
+       | _ -> Alcotest.fail "an owner that announces no port was asked to stop");
+      Alcotest.(check bool) "it was sent nothing" true (still_runs ()));
+    with_owner ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap ->
+      (match stop (port + 1) with
+       | Error Incumbent_changed -> ()
+       | _ -> Alcotest.fail "the owner of another port was asked to stop");
+      Alcotest.(check bool) "it was sent nothing" true (still_runs ());
+      (match stop port with
+       | Ok () -> ()
+       | Error _ -> Alcotest.fail "the owner that announces the port was not asked to stop");
+      Alcotest.(check bool) "SIGTERM, no escalation" true (reap () = Unix.WSIGNALED Sys.sigterm)))
 let () = Alcotest.run "upgrade preparation"
   ["owner checks",[Alcotest.test_case "initial login identity" `Quick test_initial_login_identity;Alcotest.test_case "admin and exact incumbent" `Quick test_admin_workspace_and_incarnation;
     Alcotest.test_case "workspace conflict" `Quick test_other_workspace_never_receives_credentials;
     Alcotest.test_case "kernel lease and port drain" `Quick test_drain_requires_lease_and_port_release;
     Alcotest.test_case "request and observation stay distinct" `Quick test_termination_request_survives_observation_failure;
     Alcotest.test_case "refused request never observes" `Quick test_refused_termination_never_observes;
-    Alcotest.test_case "duplicate health identity" `Quick test_duplicate_health_never_authorizes]]
+    Alcotest.test_case "duplicate health identity" `Quick test_duplicate_health_never_authorizes];
+   "account server",[Alcotest.test_case "the stop goes to the owner that announces the port" `Quick
+     test_account_server_stop_needs_its_announced_port]]

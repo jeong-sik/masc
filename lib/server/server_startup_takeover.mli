@@ -212,8 +212,13 @@ val capture_existing_owner :
   run_dir:string -> base_path:string -> (Owner_process_identity.t, owner_capture_error) result
 (** Validate the selected workspace's private lease and capture its kernel lock
     owner. This never signals a process or trusts the PID file. Before using the
-    returned handle, the caller must authenticate as that workspace's admin and
-    obtain explicit restart selection. Does not close this process's own lease. *)
+    returned handle to signal, the caller must have an explicit restart
+    selection and the authority the server takes its stop from. For the server
+    of a single user that is authentication as the admin of that workspace.
+    For the account server of a multi-account installation it is the
+    authority of the host, the effective UID that could open this private
+    lease ({!Server_upgrade_preparation.stop_account_server}). Does not close
+    this process's own lease. *)
 
 (** {1 The account server announcement}
 

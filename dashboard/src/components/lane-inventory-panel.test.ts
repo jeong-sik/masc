@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/pr
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseLaneInventory } from '../api/lane-inventory'
 import fixture from '../api/fixtures/lane-inventory.json'
-import { slotObservation, slotState } from '../api/fixtures/exact-slot-observations'
+import { httpBinding, slotObservation, slotState } from '../api/fixtures/exact-slot-observations'
 import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { replaceRoute, route } from '../router'
 const api = vi.hoisted(() => ({ fetchLaneInventory: vi.fn() }))
@@ -75,6 +75,8 @@ describe('operator Lane inventory', () => {
   it('shows original installation model routes while the package is off and no worker is present', async () => {
     const prior = { run_id: 'curator-original', observation: slotObservation({
       slot_id: 'http.first', lane_key: 'custom-curator/classification' }) }
+    const foreign = { run_id: 'foreign-original', observation: slotObservation({
+      lane_key: 'other-installation/briefing' }) }
     const row = {
       id: 'declaration//fixture/curator.toml', label: 'Curator installation', purpose: 'Curator',
       selection: { kind: 'declaration', source_path: '/fixture/curator.toml' },
@@ -88,8 +90,10 @@ describe('operator Lane inventory', () => {
               last_observation: prior, last_attempt: prior, last_failure: prior })], configuration: { kind: 'configured',
             admitted_slots: ['http.first'], cli_slots: ['cli.fallback'], declared_slots: ['http.first', 'refused'],
             declared_cli_slots: ['cli.fallback'], dropped_slots: ['refused'], admission_error: 'runtime refused' } },
-          { output: 'briefing', source: 'declared', lane_key: 'custom-curator/briefing',
-            slot_states: 'damaged', slot_observation_unavailable_runs: 0,
+          { output: 'briefing', source: 'declared', lane_key: 'other-installation/briefing',
+            slot_states: [slotState({ lane_key: 'other-installation/briefing',
+              current_binding: httpBinding('https://foreign.invalid/v1/responses'),
+              last_observation: foreign, last_attempt: foreign, last_failure: foreign })], slot_observation_unavailable_runs: 0,
             configuration: { kind: 'unavailable', detail: 'registry unavailable' } },
           { output: 'removed-output', source: 'table_only', configuration: { kind: 'off',
             declared_slots: ['retained'], declared_cli_slots: [] } },
@@ -115,6 +119,8 @@ describe('operator Lane inventory', () => {
       .toContain('unavailable: registry unavailable')
     expect(within(routes.getByRole('region', { name: 'Model route for briefing' }))
       .getByText(/슬롯 관측을 읽지 못했습니다/)).toBeTruthy()
+    expect(within(routes.getByRole('region', { name: 'Model route for briefing' }))
+      .queryByText('https://foreign.invalid/v1/responses')).toBeNull()
     const removed = routes.getByRole('region', { name: 'Model route for removed-output' })
     expect(removed.textContent).toContain('Table only')
     expect(removed.textContent).toContain('Model route off')

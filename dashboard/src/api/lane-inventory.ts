@@ -3,6 +3,7 @@ import { get } from './core'
 import { laneAddonApplicationSchema } from './lane-addons'
 import { LANE_IDS, parseStandaloneLanesSnapshot } from './dashboard-standalone-lanes'
 import { optionalLaneAddonCategory } from './lane-addon-category'
+import { parseSlotMatrix, type SlotMatrixState } from './exact-slot-observations'
 
 const text = Schema.NonEmptyString
 const texts = Schema.Array(text)
@@ -18,6 +19,14 @@ const exactOutput = Schema.Struct({ output: text, source: Schema.Literal('declar
   lane_key: Schema.optional(Schema.Unknown), slot_states: Schema.optional(Schema.Unknown),
   slot_observation_unavailable_runs: Schema.optional(Schema.Unknown) })
 export type AddonExactOutput = Schema.Schema.Type<typeof exactOutput>
+export function parseAddonSlotMatrix(installation: string, output: AddonExactOutput): SlotMatrixState {
+  // Runtime_schema.exact_lane_key(Addon): output names cannot contain '/'.
+  const owner = `${installation}/${output.output}`
+  if (output.slot_states !== undefined && output.lane_key !== owner) {
+    return { state: 'unavailable', detail: '슬롯 관측의 설정 경로가 이 설치의 출력과 다릅니다.' }
+  }
+  return parseSlotMatrix(output.slot_states, output.slot_observation_unavailable_runs, owner)
+}
 const exactOutputs = Schema.Array(exactOutput).pipe(Schema.filter(outputs =>
   new Set(outputs.map(output => output.output)).size === outputs.length,
 { message: () => 'An exact output is listed twice' }))

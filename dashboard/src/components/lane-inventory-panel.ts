@@ -1,12 +1,11 @@
 import { html } from 'htm/preact'
 import { laneAddonApplicationText } from './lane-addon-connection'
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { fetchLaneInventory, type AddonExactOutput, type LaneInventory, type LaneInventoryRow } from '../api/lane-inventory'
+import { fetchLaneInventory, parseAddonSlotMatrix, type AddonExactOutput, type LaneInventory, type LaneInventoryRow } from '../api/lane-inventory'
 import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceAuthority } from '../store'
 import { RouteLink } from './common/route-link'
 import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 import { ExactLaneSlotStates } from './exact-slot-observations'
-import { parseSlotMatrix } from '../api/exact-slot-observations'
 import type { StandaloneLanesSnapshot } from '../api/dashboard-standalone-lanes'
 import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
@@ -87,7 +86,7 @@ function AddonModelRoutes({ installation, outputs, scope }: {
           <p>Declared CLI: ${config.declared_cli_slots.join(' → ') || 'none'}</p>
         ` : html`<p role="status">${config.kind}: ${config.detail}</p>`}
         <${ExactLaneSlotStates} scope=${scope}
-          value=${parseSlotMatrix(output.slot_states, output.slot_observation_unavailable_runs, output.lane_key)} />
+          value=${parseAddonSlotMatrix(installation, output)} />
       </section>`
     })}
     <${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Open Runtime configuration<//>

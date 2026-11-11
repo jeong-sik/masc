@@ -152,6 +152,27 @@ let rec redact_json_strings
     `List (List.map (redact_json_strings redaction) values)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value
 
+(* Redaction reads every byte of what it is given, so the text rows redact on
+   the CPU pool and the caller keeps the snapshot lookup and the writes. A
+   request row redacts the tool schema array and the prompts on every
+   provider request: on a live root 17 request rows in 30 s, a system prompt
+   of 45 KB, 18 KB of context and 127 KB of tool schemas on average. On the
+   caller's domain, the main one, the turn fibers ran 842-959 ms of each 30 s
+   before those appends, 218 ms at the longest (2026-11-10, runtime-events
+   trace, three windows). The worker redacts with its own copy of the
+   snapshot, as [Keeper_execute_output_files.publish] does. *)
+let redact_on_cpu_pool ~name redaction redact_with =
+  Domain_pool_ref.submit_cpu_or_inline ~name (fun () ->
+    redact_with (Keeper_secret_redaction.copy_for_current_domain redaction))
+
+type request_text =
+  { tool_schema_bytes : int
+  ; redacted_tools : string
+  ; system_prompt : string
+  ; extra_system_context : Yojson.Safe.t
+  ; user_message : string
+  }
+
 let capture_request ~base_path ~keeper_name ~turn_id ~agent_core_turn
     ~system_prompt ~extra_system_context ~user_message ~history_messages ~tools
     ?trace_id () =
@@ -163,11 +184,16 @@ let capture_request ~base_path ~keeper_name ~turn_id ~agent_core_turn
       let raw_tools =
         List.map Agent_core.Tool.schema_to_json tools
       in
-      let tool_schema_bytes =
-        Yojson.Safe.to_string (`List raw_tools) |> String.length
-      in
-      let redacted_tools =
-        List.map (redact_json_strings redaction) raw_tools
+      let text =
+        redact_on_cpu_pool ~name:__FUNCTION__ redaction (fun redaction ->
+          { tool_schema_bytes = Yojson.Safe.to_string (`List raw_tools) |> String.length
+          ; redacted_tools =
+              Yojson.Safe.to_string
+                (`List (List.map (redact_json_strings redaction) raw_tools))
+          ; system_prompt = redact redaction system_prompt
+          ; extra_system_context = json_string_opt redaction extra_system_context
+          ; user_message = redact redaction user_message
+          })
       in
       (* The redacted schema array is stored once in the shared content-addressed
          blob store and referenced from the row. The array is identical across
@@ -183,7 +209,7 @@ let capture_request ~base_path ~keeper_name ~turn_id ~agent_core_turn
         let blob_store = Tool_blob_store.create ~base_path in
         Tool_blob_store.put_durable
           blob_store
-          ~bytes:(Yojson.Safe.to_string (`List redacted_tools))
+          ~bytes:text.redacted_tools
           ~mime:"application/json"
       in
       (* The replayed conversation is not copied into this record. It is
@@ -209,9 +235,8 @@ let capture_request ~base_path ~keeper_name ~turn_id ~agent_core_turn
               | Some t -> `String (Keeper_id.Trace_id.to_string t)
               | None -> `Null )
           ; ("agent_core_turn", `Int agent_core_turn)
-          ; ("system_prompt", `String (redact redaction system_prompt))
-          ; ( "extra_system_context"
-            , json_string_opt redaction extra_system_context )
+          ; ("system_prompt", `String text.system_prompt)
+          ; ("extra_system_context", text.extra_system_context)
           ; ( "extra_system_context_present"
             , `Bool (Option.is_some extra_system_context) )
           ; ( "extra_system_context_bytes"
@@ -219,9 +244,9 @@ let capture_request ~base_path ~keeper_name ~turn_id ~agent_core_turn
               | Some context -> `Int (String.length context)
               | None -> `Null )
           ; ("tool_count", `Int (List.length tools))
-          ; ("tool_schema_bytes", `Int tool_schema_bytes)
+          ; ("tool_schema_bytes", `Int text.tool_schema_bytes)
           ; ("tools_ref", Tool_output.normalized_artifact_ref_to_json tools_ref)
-          ; ("user_message", `String (redact redaction user_message))
+          ; ("user_message", `String text.user_message)
           ; ("history_message_count", `Int (List.length history_messages))
           ; ("history_messages_digest", `String history_messages_digest)
           ]
@@ -235,6 +260,10 @@ let capture_response ~base_path ~keeper_name ~turn_id ~agent_core_turn
     let masc_root = Common.masc_dir_from_base_path ~base_path in
     best_effort ~site:Response_capture ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) (fun () ->
       let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let response_text =
+        redact_on_cpu_pool ~name:__FUNCTION__ redaction (fun redaction ->
+          redact redaction response_text)
+      in
       let payload : Yojson.Safe.t =
         `Assoc
           [ ("ts", `String (Masc_domain.now_iso ()))
@@ -246,7 +275,7 @@ let capture_response ~base_path ~keeper_name ~turn_id ~agent_core_turn
               | Some t -> `String (Keeper_id.Trace_id.to_string t)
               | None -> `Null )
           ; ("agent_core_turn", `Int agent_core_turn)
-          ; ("response_text", `String (redact redaction response_text))
+          ; ("response_text", `String response_text)
           ]
       in
       write_payload ~masc_root ~keeper_name ~turn_label:(string_of_int turn_id) payload)

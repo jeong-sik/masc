@@ -12,6 +12,8 @@
 type lane_configuration =
   | Configured of
       { admitted_slots : string list
+      ; bindings : (string * Agent_core.Exact_output.binding_observation) list
+          (** Current immutable admission only, never a historical join. *)
       ; cli_slots : string list
             (** Official-client runtime ids the lane walks as one-shot
                 fallbacks after catalog exhaustion (declaration order). *)

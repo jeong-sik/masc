@@ -116,6 +116,9 @@ type run =
   ; started_at : float
   ; input : run_input
   ; status : run_status
+  ; slot_observations : (Exact_lane_slot_observation.t list, string) result option
+      (** [None]: no retained slot observations. [Error]: diagnostic metadata
+          is unreadable; the original run's outcome/output remain intact. *)
   ; input_availability : payload_availability
   ; output_availability : payload_availability option
       (** [None] only while [Running]. Every terminal status states whether
@@ -220,6 +223,7 @@ val mark_completed
   -> elapsed_s:float
   -> selected_slot:string option
   -> ?usage:usage
+  -> ?slot_observations:Exact_lane_slot_observation.t list
   -> output:Yojson.Safe.t
   -> unit
   -> (unit, completion_error) result
@@ -247,6 +251,7 @@ val mark_completed_unmeasured
   -> outcome:outcome
   -> selected_slot:string option
   -> ?usage:usage
+  -> ?slot_observations:Exact_lane_slot_observation.t list
   -> output:Yojson.Safe.t
   -> unit
   -> (unit, completion_error) result

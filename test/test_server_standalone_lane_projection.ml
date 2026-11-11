@@ -15,6 +15,7 @@ let exact_run ~run_id ~lane ~started_at ~status : Exact.run =
   ; started_at
   ; input = Exact.Exact_input (`Assoc [])
   ; status
+  ; slot_observations = None
   ; input_availability = Exact.Available
   ; output_availability =
       (match status with
@@ -84,7 +85,7 @@ let test_runs_without_a_slot_are_split_by_why () =
       ~now:110.
       ~resolve_lane:(fun lane_id ->
         Projection.Configured
-          { admitted_slots = [ lane_id ^ "-primary" ]
+          { bindings = []; admitted_slots = [ lane_id ^ "-primary" ]
           ; cli_slots = []
           ; dropped_slots = []
           ; declared_slots = [ lane_id ^ "-primary" ]
@@ -174,7 +175,7 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
   in
   let resolve_lane lane_id =
     Projection.Configured
-      { admitted_slots = [ lane_id ^ "-primary" ]
+      { bindings = []; admitted_slots = [ lane_id ^ "-primary" ]
       ; cli_slots = []
       ; dropped_slots = []
       ; declared_slots = [ lane_id ^ "-primary" ]
@@ -240,7 +241,7 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
 let test_board_lane_projects_credential_free_jev_readiness () =
   let http_lane =
     Projection.Configured
-      { admitted_slots = [ "primary" ]; cli_slots = []; dropped_slots = []
+      { bindings = []; admitted_slots = [ "primary" ]; cli_slots = []; dropped_slots = []
       ; declared_slots = [ "primary" ]; declared_cli_slots = []; admission_error = None }
   in
   let snapshot ?(configuration = http_lane) jev_readiness =
@@ -291,10 +292,10 @@ let test_board_lane_projects_credential_free_jev_readiness () =
        in
        check string "readiness follows the resolved transport" expected actual)
     [ (Projection.Configured
-         { admitted_slots = []; cli_slots = [ "cli" ]; dropped_slots = []
+         { bindings = []; admitted_slots = []; cli_slots = [ "cli" ]; dropped_slots = []
          ; declared_slots = []; declared_cli_slots = [ "cli" ]; admission_error = None }, "cli_only")
     ; (Projection.Configured
-         { admitted_slots = []; cli_slots = []; dropped_slots = []
+         { bindings = []; admitted_slots = []; cli_slots = []; dropped_slots = []
          ; declared_slots = []; declared_cli_slots = []; admission_error = None }, "lane_unavailable")
     ; Projection.Unconfigured "no lane", "lane_unavailable"
     ; Projection.Registry_unavailable "no registry", "lane_unavailable"
@@ -364,7 +365,7 @@ let test_no_verdict_is_failed_and_unmeasured_elapsed_skips_p50 () =
   in
   let resolve_lane lane_id =
     Projection.Configured
-      { admitted_slots =
+      { bindings = []; admitted_slots =
           (if String.equal lane_id "hitl_auto_judge" then [] else [ "slot" ])
       ; cli_slots =
           (if String.equal lane_id "hitl_auto_judge"
@@ -490,7 +491,7 @@ let test_latest_terminal_uses_completion_time () =
       ~now:120.
       ~resolve_lane:(fun lane_id ->
         Projection.Configured
-          { admitted_slots = [ lane_id ^ "-primary" ]
+          { bindings = []; admitted_slots = [ lane_id ^ "-primary" ]
       ; cli_slots = []
       ; dropped_slots = []
       ; declared_slots = [ lane_id ^ "-primary" ]
@@ -1005,7 +1006,7 @@ let test_detail_preserves_outcome_when_original_payloads_are_unavailable () =
 let test_a_lane_that_could_not_admit_reads_degraded () =
   let resolve_lane lane_id =
     Projection.Configured
-      { admitted_slots = [ lane_id ^ "-primary" ]
+      { bindings = []; admitted_slots = [ lane_id ^ "-primary" ]
       ; cli_slots = [ lane_id ^ "-cli" ]
       ; dropped_slots = []
       ; declared_slots = [ lane_id ^ "-primary" ]
@@ -1033,7 +1034,7 @@ let test_a_lane_that_could_not_admit_reads_degraded () =
   (* And a lane with the same shape and no error keeps the word it had. *)
   let clean_lane lane_id =
     Projection.Configured
-      { admitted_slots = [ lane_id ^ "-primary" ]
+      { bindings = []; admitted_slots = [ lane_id ^ "-primary" ]
       ; cli_slots = [ lane_id ^ "-cli" ]
       ; dropped_slots = []
       ; declared_slots = [ lane_id ^ "-primary" ]
@@ -1106,6 +1107,72 @@ let test_off_lane_keeps_declarations_and_running_observation () =
     (lane |> member "declared_slots" |> to_list |> List.map to_string)
 ;;
 
+let test_slot_history_keeps_original_binding_after_republication () =
+  let module E = Agent_core.Exact_output in
+  let module O = Masc.Exact_lane_slot_observation in
+  let catalog={|[[providers]]
+id="fixture"
+kind="openai_compat"
+capabilities_base="models_only"
+base_url="https://new.example"
+request_path="/v1/chat/completions"
+auth="none"
+[[models]]
+model_id="model"
+provider_name="fixture"
+max_context_tokens=8192
+max_output_tokens=1024
+[[targets]]
+id="A"
+provider_ref="fixture"
+model_id="model"
+connect_timeout_s=30.0
+body_timeout_s=30.0
+|} in
+  let snapshot=match E.load_resolver_snapshot
+    ~catalog:(E.Full_replacement {source="slot-binding fixture";contents=catalog}) () with
+    | Ok snapshot -> snapshot | Error _ -> fail "fixture catalog rejected" in
+  let admitted=match E.admit_target_ref snapshot "A" with
+    | Ok admitted -> admitted | Error _ -> fail "fixture target rejected" in
+  let observation slot_id outcome start finish =
+    let json=`Assoc ["slot_id",`String slot_id;
+      "binding",O.binding_to_yojson (O.Http {provider_id=Some "fixture";model_id="model";
+        provider_kind="openai_compat";endpoint="https://old.example/v1/chat/completions"});
+      "call_id",`String ("call-"^slot_id);"flow_id",`String "original-flow";
+      "visit_ordinal",`Int (if slot_id="A" then 1 else 2);
+      "plan_fingerprint",`String (String.make 64 'a');"request_body_sha256",`String (String.make 64 'b');
+      "catalog_generation",`String (String.make 64 'c');"catalog_evidence",`String (String.make 64 'd');
+      "target_identity",`String (String.make 64 'e');"phase",O.phase_to_yojson Terminal;
+      "generation_dispatched",`Bool true;"started_at",`Float start;"finished_at",`Float finish;
+      "outcome",O.outcome_to_yojson outcome] in
+    match O.of_yojson json with Ok observation -> observation | Error error -> fail error in
+  let failed=O.Execution_failed (Masc.Keeper_exact_walk_failure.api_observation
+    (E.Provider_response_refused {http_status=429;refusal=E.Rate_limited;retry_after_s=None})) in
+  let run=exact_run ~run_id:"original" ~lane:Exact.Librarian ~started_at:1.
+    ~status:(Exact.Completed {origin=Producer;outcome=Succeeded;elapsed_s=Some 20.;
+      output=`Null;selected_slot=Some "B";usage=None}) in
+  let run={run with slot_observations=Some (Ok
+    [observation "A" failed 10. 11.;observation "B" Accepted 12. 13.])} in
+  let rows=Masc.Server_exact_slot_projection.slots_json
+    ~current_http:["A",E.admitted_target_binding admitted]
+    ~declared_http:["A";"B";"C"] ~declared_cli:["A"] ~runs:[run]
+    |> Yojson.Safe.Util.to_list in
+  let field=Yojson.Safe.Util.member in
+  let a=List.hd rows in
+  check string "current binding is the newly published endpoint" "https://new.example/v1/chat/completions"
+    (field "endpoint" (field "current_binding" a) |> Yojson.Safe.Util.to_string);
+  let original=field "observation" (field "last_failure" a) in
+  check string "failed predecessor keeps the old endpoint" "https://old.example/v1/chat/completions"
+    (field "binding" original |> Yojson.Safe.Util.to_list |> List.tl |> List.hd
+     |> field "endpoint" |> Yojson.Safe.Util.to_string);
+  check (float 0.) "slot time is not the whole-run start" 10.
+    (field "started_at" original |> Yojson.Safe.Util.to_float);
+  check bool "a successful successor cannot make A successful" true (field "last_success" a=`Null);
+  check bool "no retained observation is explicit" true (field "last_observation" (List.nth rows 2)=`Null);
+  check bool "official client never borrows same-name HTTP history" true
+    (field "last_observation" (List.nth rows 3)=`Null)
+;;
+
 let () =
   run
     "server standalone lane projection"
@@ -1120,6 +1187,8 @@ let () =
             test_snapshot_names_every_lane_and_keeps_observed_truth
         ; test_case "off retains declarations and accepted running work" `Quick
             test_off_lane_keeps_declarations_and_running_observation
+        ; test_case "slot history preserves binding, phase and per-attempt time" `Quick
+            test_slot_history_keeps_original_binding_after_republication
         ; test_case
             "runs without a slot are split by why"
             `Quick

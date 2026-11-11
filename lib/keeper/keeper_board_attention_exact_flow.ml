@@ -786,7 +786,7 @@ let execute_current
   let cli_selected_slot = ref None in
   (* Set only by an HTTP flow success; JEV and CLI transports report none. *)
   let observed_usage = ref None in
-  let slot_capture = Exact_lane_slot_capture.create () in
+  let slot_capture = Exact_lane_slot_capture.create ~owner:(Runtime_schema.Builtin Standalone_lane.Board_attention) () in
   let complete ?usage outcome output =
     (* A CLI answer after the HTTP slots failed leaves [bound] on the last
        failed HTTP slot; the slot that answered is the CLI one. *)

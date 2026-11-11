@@ -44,6 +44,10 @@ val configuration : observation -> Standalone_lane.t -> lane_configuration
 val addon_configuration : observation -> Runtime_schema.addon_lane -> lane_configuration
 (** A Lane Add-on exact output's lane, read from the same capture as the
     built-in lanes: [Unconfigured] when runtime.toml has no table for it. *)
+val slot_states : observation -> Runtime_schema.exact_lane_owner -> Yojson.Safe.t
+(** Current binding and retained visits joined only by the actual route owner. *)
+val slot_observation_unavailable_run_count : observation -> int
+(** Unreadable diagnostic runs in the entire captured bounded window. *)
 
 val addon_tables : observation -> declaration_id:string -> string list
 (** The outputs runtime.toml has a [runtime.addon_exact_lanes] table for under

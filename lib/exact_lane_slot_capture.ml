@@ -1,10 +1,12 @@
 module Observation = Exact_lane_slot_observation
 module Cli = Keeper_lane_cli_oneshot
-type t = { mutable visits : Observation.t list option }
-let create () = {visits=None}
+type t = { owner : Runtime_schema.exact_lane_owner option; mutable visits : Observation.t list option }
+let create ?owner () = {owner;visits=None}
 let key : t Eio.Fiber.key = Eio.Fiber.create_key ()
 let with_capture capture run = Eio.Fiber.with_binding key capture run
-let observations capture = Option.map List.rev capture.visits
+let observations capture = Option.map (fun visits ->
+  List.rev_map (fun visit -> match capture.owner with
+    | None -> visit | Some owner -> Observation.with_owner owner visit) visits) capture.visits
 let record observations = match Eio.Fiber.get key with
   | None -> ()
   | Some capture -> capture.visits <- Some

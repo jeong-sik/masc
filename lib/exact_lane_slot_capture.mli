@@ -2,7 +2,7 @@
     scope is supplied by that run's producer; lane names never select a sink.
     No provider call, durable write or decision is introduced by the capture. *)
 type t
-val create : unit -> t
+val create : ?owner:Runtime_schema.exact_lane_owner -> unit -> t
 val with_capture : t -> (unit -> 'a) -> 'a
 val observations : t -> Exact_lane_slot_observation.t list option
 val flow : Agent_core.Exact_output.flow_attempt ->

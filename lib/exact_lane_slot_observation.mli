@@ -19,7 +19,7 @@ type outcome =
 [@@deriving yojson]
 
 type t = private
-  { slot_id:string; binding:binding; call_id:string option; flow_id:string option;
+  { slot_id:string; lane_key:string option; binding:binding; call_id:string option; flow_id:string option;
     visit_ordinal:int option; plan_fingerprint:string option; request_body_sha256:string option;
     catalog_generation:string option; catalog_evidence:string option; target_identity:string option;
     phase:phase; generation_dispatched:bool;
@@ -29,6 +29,8 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t,string) result
 (** Checks diagnostic data only. A malformed observation must never invalidate
     the original domain completion or an authoritative execution receipt. *)
+val with_owner : Runtime_schema.exact_lane_owner -> t -> t
+(** Freeze the producing route's typed owner. Logical run labels cannot supply it. *)
 
 val of_evidence : Agent_core.Exact_output.flow_evidence -> t list
 (** Retain reached visits and typed predecessor failures after cancellation.

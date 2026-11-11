@@ -1135,7 +1135,7 @@ body_timeout_s=30.0
   let admitted=match E.admit_target_ref snapshot "A" with
     | Ok admitted -> admitted | Error _ -> fail "fixture target rejected" in
   let observation slot_id outcome start finish =
-    let json=`Assoc ["slot_id",`String slot_id;
+    let json=`Assoc ["slot_id",`String slot_id;"lane_key",`String "librarian_exact";
       "binding",O.binding_to_yojson (O.Http {provider_id=Some "fixture";model_id="model";
         provider_kind="openai_compat";endpoint="https://old.example/v1/chat/completions"});
       "call_id",`String ("call-"^slot_id);"flow_id",`String "original-flow";
@@ -1166,9 +1166,15 @@ body_timeout_s=30.0
   let undated=match undated with Ok value -> value | Error error -> fail error in
   let overlapping={run with run_id="slow-admission";started_at=999.;
     slot_observations=Some (Ok [undated])} in
+  let addon = match Masc.Runtime_schema.addon_lane ~declaration_id:"other-installation" ~output:"grade" with
+    | Ok addon -> addon | Error error -> fail error in
+  let other_owner={run with run_id="other-owner";
+    slot_observations=Some (Ok [O.with_owner (Masc.Runtime_schema.Addon addon)
+      (observation "A" Accepted 1000. 1001.)])} in
   let rows=Masc.Server_exact_slot_projection.slots_json
+    ~owner:(Masc.Runtime_schema.Builtin Standalone_lane.Librarian)
     ~current_http:["A",E.admitted_target_binding admitted]
-    ~declared_http:["A";"B";"C"] ~declared_cli:["A"] ~runs:[overlapping;run]
+    ~declared_http:["A";"B";"C"] ~declared_cli:["A"] ~runs:[other_owner;overlapping;run]
     |> Yojson.Safe.Util.to_list in
   let field=Yojson.Safe.Util.member in
   let a=List.hd rows in

@@ -411,7 +411,7 @@ let spawn_with
                | None -> `Null )
            ]));
     let observed_usage = ref None in
-    let slot_capture = Exact_lane_slot_capture.create () in
+    let slot_capture = Exact_lane_slot_capture.create ~owner:(Runtime_schema.Builtin Standalone_lane.Hitl_auto_judge) () in
     let complete ?usage outcome output =
       match
         Exact_lane_run_registry.mark_completed

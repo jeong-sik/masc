@@ -1785,7 +1785,7 @@ let run_pass
         (* Only an API attempt's own success reports usage; a CLI tail never
            fires the observer, so a CLI-answered run completes with [None]. *)
         let observed_usage = ref None in
-        let slot_capture = Exact_lane_slot_capture.create () in
+        let slot_capture = Exact_lane_slot_capture.create ~owner:(Runtime_schema.Builtin Standalone_lane.Librarian) () in
         let complete ?selected_slot ?usage outcome output =
           let selected_slot = if !full_llm_skipped then None else selected_slot in
           let usage = if !full_llm_skipped then None else usage in

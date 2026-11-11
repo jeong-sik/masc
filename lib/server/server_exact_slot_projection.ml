@@ -8,10 +8,13 @@ let binding_json (binding:Agent_core.Exact_output.binding_observation) =
     "model_id",`String binding.model_id;
     "provider_kind",`String (Llm_provider.Provider_config.string_of_provider_kind binding.provider_kind);
     "endpoint",`String binding.endpoint]
-let slots_json ~current_http ~declared_http ~declared_cli ~runs =
+let slots_json ~owner ~current_http ~declared_http ~declared_cli ~runs =
+  let lane_key = Runtime_schema.exact_lane_key owner in
   let retained=List.concat_map (fun (run:Exact_lane_run_registry.run) ->
     match run.slot_observations with None | Some (Error _) -> []
-    | Some (Ok observations) -> List.mapi (fun index observation -> run,index,observation) observations) runs in
+    | Some (Ok observations) -> List.filter_map (fun (index,(observation:Observation.t)) ->
+        if observation.lane_key=Some lane_key then Some (run,index,observation) else None)
+        (List.mapi (fun index observation -> index,observation) observations)) runs in
   let declared=List.map (fun id -> Http,id) declared_http
     @ List.map (fun id -> Official_client,id) declared_cli in
   let historical=List.map (fun (_,_,(observation:Observation.t)) ->
@@ -41,7 +44,7 @@ let slots_json ~current_http ~declared_http ~declared_cli ~runs =
     let current_binding=match kind,List.assoc_opt slot_id current_http with
       | Http,Some binding -> binding_json binding
       | Http,None | Official_client,(None | Some _) -> `Null in
-    `Assoc ["slot_id",`String slot_id;"transport",`String (transport_string kind);
+    `Assoc ["slot_id",`String slot_id;"lane_key",`String lane_key;"transport",`String (transport_string kind);
       "declared",`Bool (List.mem (kind,slot_id) declared);"current_binding",current_binding;
       "ordering_scope",`String "dated_only";
       "last_observation",observed_json (latest ~attempt:false (fun _ -> true) history);

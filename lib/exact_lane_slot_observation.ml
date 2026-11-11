@@ -15,7 +15,7 @@ type outcome = Unresolved | Accepted | Semantic_rejected
   | Cli_failed of Failure.cli_observation
 [@@deriving yojson]
 type t =
-  { slot_id:string; binding:binding; call_id:string option; flow_id:string option;
+  { slot_id:string; lane_key:string option; binding:binding; call_id:string option; flow_id:string option;
     visit_ordinal:int option; plan_fingerprint:string option; request_body_sha256:string option;
     catalog_generation:string option; catalog_evidence:string option; target_identity:string option;
     phase:phase; generation_dispatched:bool;
@@ -35,10 +35,15 @@ let of_yojson json =
        | _ -> false)
       && Uri.userinfo uri=None && Uri.query uri=[] && Uri.fragment uri=None
     | Http_unobserved | Official_client -> true in
-  if original=encoded && String.trim value.slot_id<>"" && valid_binding
+  let valid_owner = match value.lane_key with None -> true
+    | Some key -> Option.is_some (Runtime_schema.exact_lane_owner_of_key key) in
+  if original=encoded && String.trim value.slot_id<>"" && valid_binding && valid_owner
      && valid_time value.started_at && valid_time value.finished_at
      && (value.finished_at=None || value.started_at<>None)
   then Ok value else Error "invalid exact slot observation"
+
+let with_owner owner observation =
+  { observation with lane_key=Some (Runtime_schema.exact_lane_key owner) }
 
 let phase = function
   | Exact.Not_started -> Prepared | Before_dispatch -> Before_dispatch
@@ -89,7 +94,7 @@ let capture (evidence:Exact.flow_evidence) outcomes =
          Exact.generation_receipt_snapshot_generation_dispatched receipt,
          Exact.generation_receipt_snapshot_execution_started_at receipt,
          Exact.generation_receipt_snapshot_execution_finished_at receipt) in
-    {slot_id=identity.candidate_id;binding;call_id;flow_id=Some (Exact.flow_id_to_string visit.flow_id);
+    {slot_id=identity.candidate_id;lane_key=None;binding;call_id;flow_id=Some (Exact.flow_id_to_string visit.flow_id);
      visit_ordinal=Some (Exact.flow_visit_ordinal_to_int visit.ordinal);plan_fingerprint;request_body_sha256;
      catalog_generation=Some (Exact.catalog_generation_fingerprint identity.catalog_generation);
      catalog_evidence=Some (Exact.catalog_evidence_sha256 identity.catalog_evidence);
@@ -120,7 +125,7 @@ let of_result = function
     capture evidence (terminal @ List.map semantic prior_rejections)
 
 let cli ~slot_id ~started_at ~finished_at ~generation_dispatched ~outcome =
-  {slot_id;binding=Official_client;call_id=None;flow_id=None;visit_ordinal=None;
+  {slot_id;lane_key=None;binding=Official_client;call_id=None;flow_id=None;visit_ordinal=None;
    plan_fingerprint=None;request_body_sha256=None;catalog_generation=None;catalog_evidence=None;
    target_identity=None;phase=(if generation_dispatched then Dispatch_started else Prepared);
    generation_dispatched;started_at;finished_at;outcome}

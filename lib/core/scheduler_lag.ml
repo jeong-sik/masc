@@ -35,6 +35,7 @@ let create ?(interval_s = default_interval_s) ?(window = default_window) () =
 ;;
 
 let global = create ()
+let serving = create ()
 let milliseconds_per_second = 1000.0
 let nanoseconds_per_second = 1e9
 

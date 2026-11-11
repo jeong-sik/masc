@@ -171,6 +171,22 @@ let test_a_smooth_rise_and_fall_costs_about_one_sort () =
     (summary_s <= summary_cost_in_sorts *. sort_s)
 ;;
 
+(* [/health] reports the two domains side by side, so a sample of one must
+   not show in the other. Neither probe runs in this process. *)
+let test_serving_ring_is_apart_from_the_main_one () =
+  Scheduler_lag.For_testing.record Scheduler_lag.serving ~lag_s:0.25;
+  check
+    bool
+    "the main ring holds no sample"
+    true
+    (Option.is_none (Scheduler_lag.summarize Scheduler_lag.global));
+  match Scheduler_lag.summarize Scheduler_lag.serving with
+  | Some { samples; max_ms; _ } ->
+    check int "the serving ring holds the one sample" 1 samples;
+    check (float 0.001) "at its value" 250.0 max_ms
+  | None -> fail "the serving ring holds no sample"
+;;
+
 let test_empty_ring_has_no_percentiles () =
   let t = Scheduler_lag.create () in
   let fields = Scheduler_lag.to_fields t in
@@ -277,6 +293,7 @@ let () =
             `Quick
             test_a_smooth_rise_and_fall_costs_about_one_sort
         ; test_case "empty" `Quick test_empty_ring_has_no_percentiles
+        ; test_case "the serving ring is apart from the main one" `Quick test_serving_ring_is_apart_from_the_main_one
         ; test_case "shape" `Quick test_invalid_shape_is_refused
         ] )
     ; ( "probe"

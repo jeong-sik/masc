@@ -6,6 +6,7 @@ open Alcotest
 module Page = Server_routes_http_routes_play_page
 module Guide = Server_routes_http_routes_play_guide
 module Events = Server_routes_http_routes_play_events
+module Machine_lane = Masc.Machine_lane
 
 let remove_tree path =
   let rec go path =

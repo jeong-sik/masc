@@ -58,5 +58,10 @@ val read_checks :
   config:Workspace.config ->
   Schedule_checks_watch.target ->
   (Schedule_checks_watch.observation, Schedule_run_watch.read_failure) result
-(** One read of the runs of the target commit, with the account and the
-    failures of {!read}. *)
+(** All pages of the runs of the target commit, with the account and the
+    failures of {!read}. Every run has an integer [id]. Pages are fetched until
+    [total_count] is covered, then every page is read again to check that its
+    membership has not changed. A changed [total_count], duplicate id, excess id
+    count, changed membership in any page, incomplete page, or an empty set of
+    actual check runs keeps {!Schedule_checks_watch.Not_settled}. Only unique
+    completed check runs from every page become {!Schedule_checks_watch.Settled}. *)

@@ -54,18 +54,19 @@ let affects_execution input =
   | Agent_core _ | Telemetry_sample | Transport_state | Operator_judgment _ | Tool_host_attention -> false
 ;;
 
+(* Transport health reads this process's transport state and nothing a
+   workspace writes. [Transport_state] is every transition that state
+   announces: the sources of Transport_metrics and Https_listener_metrics.
+   Keeper, Board, Store and dataset inputs change none of it. The delivery
+   counts they move (queue depth, broadcast and relay counts) are mirrors:
+   an explicit HTTP read computes them, and they are no reason to recompute
+   and broadcast the surface for every Keeper tool call or chat message. *)
 let affects_transport_health = function
-  | Input.Dataset (Dashboard_observation _) -> false
-  | Dataset (Repositories | Verification_requests | Harness_verdicts | Goals
-      | Runtime_config | Connectors | Keeper_metrics _ | Skill_activations _
-      | Skill_catalog | Clients | Account_emails | Provider_usage | Provider_standing
-      | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics | Lanes
-      | Machine_live _ | Play_room _ | Lane_addons _ | Browser_observation _
-      | Keeper_oauth_attempts _ | Memory_health _ | World_memory | Play_seats)
-  | Keeper _ | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _
-  | Board | Board_attention _ | Execution_invalidated | Agent_core _ | Telemetry_sample | Transport_state
+  | Input.Transport_state -> true
+  | Dataset _ | Keeper _ | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _
+  | Board | Board_attention _ | Execution_invalidated | Agent_core _ | Telemetry_sample
   | Telemetry_gap _ | Keeper_tool_call _ | Keeper_approval_audit _
-  | Workspace_agent_signal _ | Workspace_messages _ | Operator_judgment _ | Tool_host_attention -> true
+  | Workspace_agent_signal _ | Workspace_messages _ | Operator_judgment _ | Tool_host_attention -> false
 ;;
 
 let affects_mission input = match input with

@@ -121,11 +121,12 @@ let pending promise =
 ;;
 
 (* A write longer than a piece, given as buffers a piece's end falls inside
-   of, and a copy after it: the peer gets every byte once and in order. *)
+   of, and a copy after it that is longer than a piece too and ends inside
+   one: the peer gets every byte once and in order. *)
 let test_bytes_arrive_whole_and_in_order () =
   with_connection @@ fun ~clock:_ _connection socket peer ->
   let written = patterned (600 * kib) in
-  let copied = patterned (10 * kib + 3) in
+  let copied = patterned (600 * kib + 3) in
   let third = String.length written / 3 in
   let buffers =
     List.init 3 (fun i -> Cstruct.of_string (String.sub written (i * third) third))

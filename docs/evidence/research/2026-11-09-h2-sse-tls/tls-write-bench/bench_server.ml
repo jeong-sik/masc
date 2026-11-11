@@ -4,7 +4,10 @@
    line. The sink decides what tls-eio copies its ciphertext into:
    "stock" is the accepted socket itself (Eio's 4096-byte copy fallback),
    "copy:<bytes>" wraps the socket so each copy reaches it in writes of up to
-   <bytes>. *)
+   <bytes>, through one buffer kept for the connection. "pieces" is the
+   policy of RFC-0518 D8: every copy call makes its own buffer of one TLS 1.3
+   record (16,384 + 22 bytes) and, when the first read fills it, goes on with
+   one of 256 KiB. *)
 
 module Chunked = struct
   type tag = [ `Generic ]
@@ -32,6 +35,34 @@ module Chunked = struct
 end
 
 let chunked_handler = Eio.Net.Pi.stream_socket (module Chunked)
+
+module Pieces = struct
+  type tag = [ `Generic ]
+  type t = [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t
+
+  let record_bytes = 16_384 + 22
+  let piece_bytes = 256 * 1024
+  let read_methods = []
+  let single_read t dst = Eio.Flow.single_read t dst
+  let single_write t bufs = Eio.Flow.single_write t bufs
+
+  let copy t ~src =
+    let rec go buf =
+      match Eio.Flow.single_read src buf with
+      | exception End_of_file -> ()
+      | got ->
+        Eio.Flow.write t [ Cstruct.sub buf 0 got ];
+        if got = Cstruct.length buf && got < piece_bytes
+        then go (Cstruct.create_unsafe piece_bytes)
+        else go buf
+    in
+    go (Cstruct.create_unsafe record_bytes)
+
+  let shutdown t cmd = Eio.Flow.shutdown t cmd
+  let close t = Eio.Resource.close t
+end
+
+let pieces_handler = Eio.Net.Pi.stream_socket (module Pieces)
 
 let cpu () =
   let t = Unix.times () in
@@ -65,7 +96,10 @@ let () =
         Tls.Config.server
           ~certificates:(`Single (certs, key))
           ~version:(`TLS_1_3, `TLS_1_3)
-          ~ciphers
+          (* tls 2.1.5 refuses an EC certificate without a suite that names EC
+             keys, and the TLS 1.3 suites name none. The listener speaks 1.3
+             only, so the 1.2 suite is never chosen. *)
+          ~ciphers:(ciphers @ [ `ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 ])
           ()
       with
       | Ok c -> c
@@ -77,6 +111,7 @@ let () =
       match String.split_on_char ':' sink with
       | [ "stock" ] -> `Stock
       | [ "copy"; bytes ] -> `Copy (int_of_string bytes)
+      | [ "pieces" ] -> `Pieces
       | _ -> failwith ("sink: " ^ sink)
     in
     Eio_main.run
@@ -102,6 +137,8 @@ let () =
           let flow =
             match sink with
             | `Stock -> (socket :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t)
+            | `Pieces ->
+              (Eio.Resource.T ((socket :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t), pieces_handler) :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t)
             | `Copy bytes ->
               (Eio.Resource.T ({ Chunked.socket = (socket :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t); buf = Cstruct.create bytes }, chunked_handler) :> [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t)
           in
@@ -131,5 +168,5 @@ let () =
     accept ()
   | _ ->
     prerr_endline
-      "usage: bench_server <port> <cert.pem> <key.pem> <stock|copy:BYTES> <aes128|aes256|chacha> <payload> <write>";
+      "usage: bench_server <port> <cert.pem> <key.pem> <stock|copy:BYTES|pieces> <aes128|aes256|chacha> <payload> <write>";
     exit 2

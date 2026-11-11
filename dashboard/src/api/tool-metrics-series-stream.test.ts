@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readToolSeriesStream, subscribeToolSeriesStream } from './tool-metrics-series-stream'
 import type { ToolMetricsSeriesRequest } from './schemas/tool-metrics-series'
 import { publishDashboardObservationChange } from '../lib/observation-refresh'
+import { TRANSPORT_RETRY_BASE_MS } from '../config/constants'
 
 vi.mock('./dev-token', () => ({ ensureDevToken: vi.fn(async () => {}), refreshDevTokenAfterAuthError: vi.fn(async () => false) }))
 const request: ToolMetricsSeriesRequest = { sinceHours: 1, bucket: 'hour', utcOffsetMin: 0, tool: null }
@@ -15,9 +16,10 @@ afterEach(() => {
 
 function snapshot(count: number, tool: string | null = null) {
   const stat = { call_count: count, failure_count: 0, deferred_count: 0, total_ms: count,
-    p50_ms: count ? 1 : null, p95_ms: count ? 1 : null, max_ms: count ? 1 : null }
+    p50_ms: count ? 1 : null, p95_ms: count ? 1 : null, max_ms: count ? 1 : null,
+    long_count: 0, long_total_ms: 0 }
   return { generated_at: 3600, window: { since: 0, until: 3600, bucket: 'hour', bucket_seconds: 3600,
-    utc_offset_min: 0 }, tool, total: stat, buckets: [{ start: 0, ...stat }], top_by_time: [] }
+    utc_offset_min: 0 }, tool, long_call_ms: 60_000, total: stat, buckets: [{ start: 0, ...stat }], top_by_time: [] }
 }
 
 describe('native series query', () => {
@@ -63,6 +65,65 @@ describe('native series query', () => {
     await expect(readToolSeriesStream(request, new AbortController().signal, apply))
       .rejects.toMatchObject({ name: 'ToolSeriesStreamError' })
     expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('recovers a server read-error frame without a later event and keeps the recovered stream quiet', async () => {
+    vi.useFakeTimers()
+    let recovered!: ReadableStreamDefaultController<Uint8Array>
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(
+      `data: ${JSON.stringify({ error: 'original SQLite busy' })}\n\n`, { headers },
+    )).mockImplementation(() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+      start: writer => {
+        recovered = writer
+        writer.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(snapshot(3))}\n\n`))
+      },
+    }), { headers })))
+    vi.stubGlobal('fetch', fetch)
+    const onFrame = vi.fn(), onError = vi.fn()
+    releases.push(subscribeToolSeriesStream(request, { onFrame, onError, onReset: vi.fn() }))
+    await flush(); await flush()
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError.mock.lastCall![0].message).toBe('original SQLite busy')
+    await vi.advanceTimersByTimeAsync(TRANSPORT_RETRY_BASE_MS)
+    await flush(); await flush()
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(onFrame.mock.lastCall![0].total.call_count).toBe(3)
+    for (let i = 0; i < 3; i++) {
+      recovered.enqueue(new TextEncoder().encode(': keepalive\n\n'))
+      await vi.advanceTimersByTimeAsync(30_000)
+    }
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(onError).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([401, 403])('keeps actual HTTP %i terminal while ordinary source events arrive', async status => {
+    vi.useFakeTimers()
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(Response.json({ error: 'refused' }, { status })))
+    vi.stubGlobal('fetch', fetch)
+    const onError = vi.fn(), onFrame = vi.fn()
+    releases.push(subscribeToolSeriesStream(request, { onFrame, onError, onReset: vi.fn() }))
+    await flush(); await flush()
+    expect(onError).toHaveBeenCalledTimes(1)
+    publishDashboardObservationChange({ topic: 'tool_metrics' })
+    window.dispatchEvent(new Event('focus'))
+    await vi.advanceTimersByTimeAsync(180_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(onFrame).not.toHaveBeenCalled()
+  })
+
+  it('keeps a malformed series payload terminal', async () => {
+    vi.useFakeTimers()
+    const fetch = vi.fn().mockImplementation(() => Promise.resolve(new Response(
+      `data: ${JSON.stringify({ error: 503 })}\n\n`, { headers },
+    )))
+    vi.stubGlobal('fetch', fetch)
+    const onError = vi.fn(), onFrame = vi.fn()
+    releases.push(subscribeToolSeriesStream(request, { onFrame, onError, onReset: vi.fn() }))
+    await flush(); await flush()
+    await vi.advanceTimersByTimeAsync(180_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onFrame).not.toHaveBeenCalled()
   })
 
   it('retires the previous query fetch when the picked tool changes', async () => {

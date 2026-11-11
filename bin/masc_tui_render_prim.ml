@@ -945,8 +945,131 @@ let composer_row state ~rows ~cols =
    nothing to count -- and eight flat bars said "nothing finished" for a read
    that had not been made or had been refused. The shared words say which. *)
 
+let connection_status_parts ~ko (status : Masc_tui_types.connection_status) =
+  (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
+     can fail while the independent Recent event feed remains live. *)
+  match status with
+  | Connected -> Theme.text_status Masc_tui_theme.Ok,
+      (if ko then "연결됨" else "connected"),
+      (if ko then ["HTTP 연결됨", false; "연결됨", true] else ["HTTP connected", false; "connected", true; "HTTP up", true])
+  | Degraded -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "일부 관측" else "partial"),
+      (if ko then ["HTTP 일부 관측", false; "일부 관측", true] else ["HTTP partial", false; "partial", true])
+  | Connecting -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "조회 중" else "loading..."),
+      (if ko then ["HTTP 조회 중", false; "조회 중", true] else ["HTTP loading", false; "loading", true])
+  | Booting -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "서버 시작 중" else "server booting..."),
+      (if ko then ["서버 시작 중", false; "시작 중", true] else ["server booting", false; "booting", true])
+  | Disconnected -> Theme.text_status Masc_tui_theme.Bad,
+      (if ko then "조회 실패" else "refresh failed"),
+      (if ko then ["HTTP 조회 실패", false; "조회 실패", true] else ["HTTP refresh failed", false; "HTTP failed", true; "failed", true])
+
+type compact_connection_state =
+  | Compact_workspace_mismatch
+  | Compact_workspace_unconfirmed
+  | Compact_workspace_unread
+  | Compact_read_failed
+  | Compact_read_partial
+  | Compact_read_interrupted
+  | Compact_read_unfinished
+  | Compact_reading
+  | Compact_http of connection_status
+
+let compact_connection_state (state : state) =
+  let progress = match state.http_refresh_progress with
+    | Some (authority, progress) when authority = state.workspace_authority -> Some progress
+    | Some _ | None -> None in
+  let failed, partial, interrupted, unfinished, in_flight =
+    match progress with
+    | None -> false, false, false, false, false
+    | Some progress ->
+        let counts = Http_refresh_progress.counts progress in
+        let failed, interrupted, unfinished =
+          Http_refresh_progress.unreturned_component_reads progress
+          |> List.fold_left (fun (failed, interrupted, unfinished) reading ->
+               match reading.Http_refresh_progress.cr_status with
+               | Component_pending | Component_settled (_, Component_returned Part_received) ->
+                   failed, interrupted, unfinished
+               | Component_settled (_, (Component_returned Part_failed | Component_exception)) ->
+                   true, interrupted, unfinished
+               | Component_settled (_, Component_interrupted) -> failed, true, unfinished
+               | Component_settled (_, Component_unfinished) -> failed, interrupted, true)
+               (false, false, false) in
+        failed || counts.failed > 0, counts.partial > 0,
+        interrupted || counts.interrupted > 0, unfinished,
+        (match progress.phase with In_flight -> true | Finished _ -> false) in
+  let scoped_reading = surface_reads_pending state <> [] in
+  match state.workspace_identity with
+  | Workspace_identity_mismatch _ -> Compact_workspace_mismatch
+  | Workspace_identity_match_unconfirmed _ -> Compact_workspace_unconfirmed
+  | Workspace_identity_unread when state.connection_status = Connected
+                                   || state.connection_status = Degraded ->
+      Compact_workspace_unread
+  | Workspace_identity_unread | Workspace_identity_match ->
+      if state.connection_status = Disconnected then Compact_http Disconnected
+      else if failed then Compact_read_failed
+      else if partial then Compact_read_partial
+      else if interrupted then Compact_read_interrupted
+      else if unfinished then Compact_read_unfinished
+      else match state.connection_status with
+        | Connected when in_flight || scoped_reading -> Compact_reading
+        | Connected | Degraded | Connecting | Booting | Disconnected as status -> Compact_http status
+
+(* The words for each connection state, longest first, with whether a
+   spelling leaves out what the full badge says and whether the state needs
+   the full badge beside it whatever the spelling. *)
+let compact_connection_wording ~ko compact =
+  let options ko_label en_labels = if ko then [ko_label, true] else en_labels in
+  match compact with
+  | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, options "공간 불일치" ["WS mismatch", true; "mismatch", true], true
+  | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, options "공간 확인 대기" ["WS unconfirmed", true; "unconfirmed", true], true
+  | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, options "공간 미조회" ["WS unread", true; "unread", true], true
+  | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, options "조회 실패" ["read failed", true; "failed", true], true
+  | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, options "일부 관측" ["read partial", true; "partial", true], true
+  | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, options "조회 중단" ["read interrupted", true; "interrupted", true], true
+  | Compact_read_unfinished -> Theme.text_status Masc_tui_theme.Warn, options "조회 미완료" ["read unfinished", true; "unfinished", true], true
+  | Compact_reading -> Theme.text_status Masc_tui_theme.Warn, options "조회 중" ["reading data", true; "reading", true], true
+  | Compact_http status ->
+      let style, _, options = connection_status_parts ~ko status in
+      style, options, false
+
+(* What the top row says about the connection: one mark and the shortest
+   word for the state. A refresh in flight is not a state of the connection --
+   it comes and goes with every read, and the row every screen starts with
+   would change with it -- so it reads as the HTTP status under it. *)
+let strip_connection_reading (state : state) =
+  let ko = state.ui_language = Lang_ko in
+  let compact =
+    match compact_connection_state state with
+    | Compact_reading -> Compact_http state.connection_status
+    | ( Compact_workspace_mismatch | Compact_workspace_unconfirmed
+      | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
+      | Compact_read_interrupted | Compact_read_unfinished | Compact_http _ ) as
+      compact -> compact
+  in
+  let mark : Masc_tui_value.Mark.t =
+    match compact with
+    | Compact_http Connected -> Settled
+    | Compact_http (Connecting | Booting) | Compact_reading -> Under_way
+    | Compact_http Degraded | Compact_workspace_unconfirmed
+    | Compact_workspace_unread | Compact_read_partial
+    | Compact_read_interrupted | Compact_read_unfinished -> Caution
+    | Compact_http Disconnected | Compact_workspace_mismatch
+    | Compact_read_failed -> Failed
+  in
+  let style, spellings, _ = compact_connection_wording ~ko compact in
+  let word =
+    List.fold_left (fun _ (spelling, _) -> spelling) "" spellings
+  in
+  style, Masc_tui_value.Mark.glyph mark ^ " " ^ word
+
 (* The gap between the last ring entry and the waiting badge. *)
 let waiting_badge_gap_cells = 3
+
+(* The cells ahead of the connection reading at the right-hand end of the
+   strip, and between it and the clock. *)
+let strip_reading_gap_cells = 2
 
 (* The strip above every surface: the Tab ring with the active family
    highlighted, then what waits on the operator. Wider terminals see the whole
@@ -988,7 +1111,43 @@ let surface_strip (state : state) ~cols =
     if badge = "" then 0
     else Message_layout.display_width badge + waiting_badge_gap_cells
   in
-  let budget = max 8 (cols - 1 - badge_reserved) in
+  (* The right-hand end: the connection, then the clock and the zone every
+     moment on the screen is drawn in. The clock is drawn while the whole ring
+     still fits beside it; a row too narrow for both keeps the ring, which is
+     how the operator moves. The mark and its word are always drawn, because
+     a screen that draws nothing is explained by them. *)
+  let connection_style, connection = strip_connection_reading state in
+  let wall_clock = Masc_tui_value.Instant.wall_clock ~now:(Unix.gettimeofday ()) in
+  let ring_cells =
+    let cells = ref 0 in
+    Array.iteri
+      (fun i (surface, name) ->
+        cells :=
+          !cells
+          + Message_layout.display_width
+              (Masc_tui_types.surface_ring_display_label ~lang:state.ui_language
+                 surface name
+               ^ badge_of_surface surface)
+          + (if i = active then 1 else 0)
+          + (if i > 0 then 2 else 0))
+      ring;
+    !cells
+  in
+  let reading_clock =
+    if 1 + ring_cells + badge_reserved + strip_reading_gap_cells
+       + Message_layout.display_width connection + strip_reading_gap_cells
+       + Message_layout.display_width wall_clock <= cols
+    then Some wall_clock
+    else None
+  in
+  let reading_cells =
+    Message_layout.display_width connection
+    + (match reading_clock with
+       | Some clock -> strip_reading_gap_cells + Message_layout.display_width clock
+       | None -> 0)
+  in
+  let reading_reserved = reading_cells + strip_reading_gap_cells in
+  let budget = max 8 (cols - 1 - badge_reserved - reading_reserved) in
   let active_hidden_cells =
     (if active > 0 then Message_layout.display_width (hidden_before_mark active) + 1 else 0)
     + (if active < n - 1 then
@@ -1076,6 +1235,25 @@ let surface_strip (state : state) ~cols =
   if badge <> "" then
     Buffer.add_string parts
       (String.make waiting_badge_gap_cells ' ' ^ Theme.bad () ^ badge ^ Ansi.reset);
+  (* Flush right: the clock keeps its column whatever the ring shows, and the
+     ring keeps its column whatever the connection says. *)
+  let drawn_cells =
+    1
+    + (if lo > 0 then Message_layout.display_width (hidden_before_mark lo) + 1 else 0)
+    + window_width lo hi
+    + (if hi < n - 1 then
+         Message_layout.display_width (hidden_after_mark (n - 1 - hi)) + 1
+       else 0)
+    + badge_reserved
+  in
+  Buffer.add_string parts
+    (String.make (max strip_reading_gap_cells (cols - drawn_cells - reading_cells)) ' ');
+  Buffer.add_string parts (connection_style ^ connection ^ Ansi.reset);
+  (match reading_clock with
+   | Some clock ->
+       Buffer.add_string parts
+         (String.make strip_reading_gap_cells ' ' ^ Ansi.dim ^ clock ^ Ansi.reset)
+   | None -> ());
   Buffer.contents parts
 
 
@@ -1767,26 +1945,6 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 
-let connection_status_parts ~ko (status : Masc_tui_types.connection_status) =
-  (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
-     can fail while the independent Recent event feed remains live. *)
-  match status with
-  | Connected -> Theme.text_status Masc_tui_theme.Ok,
-      (if ko then "연결됨" else "connected"),
-      (if ko then ["HTTP 연결됨", false; "연결됨", true] else ["HTTP connected", false; "connected", true; "HTTP up", true])
-  | Degraded -> Theme.text_status Masc_tui_theme.Warn,
-      (if ko then "일부 관측" else "partial"),
-      (if ko then ["HTTP 일부 관측", false; "일부 관측", true] else ["HTTP partial", false; "partial", true])
-  | Connecting -> Theme.text_status Masc_tui_theme.Warn,
-      (if ko then "조회 중" else "loading..."),
-      (if ko then ["HTTP 조회 중", false; "조회 중", true] else ["HTTP loading", false; "loading", true])
-  | Booting -> Theme.text_status Masc_tui_theme.Warn,
-      (if ko then "서버 시작 중" else "server booting..."),
-      (if ko then ["서버 시작 중", false; "시작 중", true] else ["server booting", false; "booting", true])
-  | Disconnected -> Theme.text_status Masc_tui_theme.Bad,
-      (if ko then "조회 실패" else "refresh failed"),
-      (if ko then ["HTTP 조회 실패", false; "조회 실패", true] else ["HTTP refresh failed", false; "HTTP failed", true; "failed", true])
-
 let connection_status_badge ~ko status =
   let style, label, _ = connection_status_parts ~ko status in
   "HTTP " ^ style ^ "[" ^ label ^ "]" ^ Ansi.reset
@@ -1898,57 +2056,6 @@ let connection_badge (state : state) =
   in
   source_loss ^ connection ^ refresh_progress_badge state
 
-type compact_connection_state =
-  | Compact_workspace_mismatch
-  | Compact_workspace_unconfirmed
-  | Compact_workspace_unread
-  | Compact_read_failed
-  | Compact_read_partial
-  | Compact_read_interrupted
-  | Compact_read_unfinished
-  | Compact_reading
-  | Compact_http of connection_status
-
-let compact_connection_state (state : state) =
-  let progress = match state.http_refresh_progress with
-    | Some (authority, progress) when authority = state.workspace_authority -> Some progress
-    | Some _ | None -> None in
-  let failed, partial, interrupted, unfinished, in_flight =
-    match progress with
-    | None -> false, false, false, false, false
-    | Some progress ->
-        let counts = Http_refresh_progress.counts progress in
-        let failed, interrupted, unfinished =
-          Http_refresh_progress.unreturned_component_reads progress
-          |> List.fold_left (fun (failed, interrupted, unfinished) reading ->
-               match reading.Http_refresh_progress.cr_status with
-               | Component_pending | Component_settled (_, Component_returned Part_received) ->
-                   failed, interrupted, unfinished
-               | Component_settled (_, (Component_returned Part_failed | Component_exception)) ->
-                   true, interrupted, unfinished
-               | Component_settled (_, Component_interrupted) -> failed, true, unfinished
-               | Component_settled (_, Component_unfinished) -> failed, interrupted, true)
-               (false, false, false) in
-        failed || counts.failed > 0, counts.partial > 0,
-        interrupted || counts.interrupted > 0, unfinished,
-        (match progress.phase with In_flight -> true | Finished _ -> false) in
-  let scoped_reading = surface_reads_pending state <> [] in
-  match state.workspace_identity with
-  | Workspace_identity_mismatch _ -> Compact_workspace_mismatch
-  | Workspace_identity_match_unconfirmed _ -> Compact_workspace_unconfirmed
-  | Workspace_identity_unread when state.connection_status = Connected
-                                   || state.connection_status = Degraded ->
-      Compact_workspace_unread
-  | Workspace_identity_unread | Workspace_identity_match ->
-      if state.connection_status = Disconnected then Compact_http Disconnected
-      else if failed then Compact_read_failed
-      else if partial then Compact_read_partial
-      else if interrupted then Compact_read_interrupted
-      else if unfinished then Compact_read_unfinished
-      else match state.connection_status with
-        | Connected when in_flight || scoped_reading -> Compact_reading
-        | Connected | Degraded | Connecting | Booting | Disconnected as status -> Compact_http status
-
 let usage_connection_badge (state : state) =
   let badge = connection_badge state in
   match state.workspace_identity, state.connection_status with
@@ -1975,25 +2082,13 @@ let reading_connection_notice (state : state) =
    workspace and refresh details remain available in the scrolled body. *)
 let compact_connection_badge (state : state) ~width =
   let ko = state.ui_language = Lang_ko in
-  let options ko_label en_labels = if ko then [ko_label, true] else en_labels in
   let choose options =
     match List.find_opt (fun (label, _) -> Message_layout.display_width label <= width) options with
     | Some choice -> choice
     | None -> List.hd (List.rev options)
   in
   let style, options, needs_context =
-    match compact_connection_state state with
-    | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, options "공간 불일치" ["WS mismatch", true; "mismatch", true], true
-    | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, options "공간 확인 대기" ["WS unconfirmed", true; "unconfirmed", true], true
-    | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, options "공간 미조회" ["WS unread", true; "unread", true], true
-    | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, options "조회 실패" ["read failed", true; "failed", true], true
-    | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, options "일부 관측" ["read partial", true; "partial", true], true
-    | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, options "조회 중단" ["read interrupted", true; "interrupted", true], true
-    | Compact_read_unfinished -> Theme.text_status Masc_tui_theme.Warn, options "조회 미완료" ["read unfinished", true; "unfinished", true], true
-    | Compact_reading -> Theme.text_status Masc_tui_theme.Warn, options "조회 중" ["reading data", true; "reading", true], true
-    | Compact_http status ->
-        let style, _, options = connection_status_parts ~ko status in
-        style, options, false in
+    compact_connection_wording ~ko (compact_connection_state state) in
   let label, needs_full_status = choose options in
   let details =
     if needs_context || needs_full_status then usage_connection_badge state

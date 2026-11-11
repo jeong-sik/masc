@@ -39,6 +39,36 @@ module Instant : sig
   val detail_text : precision -> now:float -> float -> string
   (** The moment where one value has a line to itself. As {!cell_text}, but
       another year keeps its clock ([2025-11-10 23:58]). *)
+
+  val offset_minutes : utc:Unix.tm -> local:Unix.tm -> int
+  (** How far the operator's zone runs ahead of UTC, from the two breakdowns
+      of one moment. Negative west of Greenwich. *)
+
+  val zone_label : offset_minutes:int -> string
+  (** The zone as its distance from UTC: [UTC+9], [UTC-8], [UTC+5:30], and
+      [UTC] alone at zero. A zone's abbreviation would need a table this
+      program does not have; its offset is what the breakdown already holds. *)
+
+  val wall_clock : now:float -> string
+  (** The current time with the zone every other moment on the screen is
+      drawn in ([15:43 UTC+9]). The one place a screen names the zone. *)
+end
+
+(** The mark ahead of a state word. One mark has one meaning on every screen
+    (RFC tui-one-screen-grammar, section 7.2); the word beside it says which
+    state of that kind it is. *)
+module Mark : sig
+  type t =
+    | Settled  (** in order, finished, succeeded *)
+    | Under_way
+    | Waiting  (** waiting or resting *)
+    | Paused  (** paused or cancelled *)
+    | Caution  (** needs a look; stale *)
+    | Failed  (** failed or rejected *)
+    | Yours  (** the operator's turn *)
+
+  val glyph : t -> string
+  (** One display cell. *)
 end
 
 (** How many of something. *)

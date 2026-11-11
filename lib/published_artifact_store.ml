@@ -303,14 +303,14 @@ let lookup_receipt ~base_path ~id ~state ~operation_id =
   | Some receipt when String.equal receipt.request.operation_id operation_id -> Ok (Some receipt)
   | Some _ | None -> load_archived_receipt ~base_path ~id ~state ~operation_id
 
-let observed_save save ~ownership_root path json =
+let observed_save ~ownership_root save =
   Fun.protect ~finally:(fun () ->
     Dashboard_observation_commit.written ~base_path:ownership_root
       ~scope:`Workspace `Published_artifacts)
-    (fun () -> save ~ownership_root path json)
+    save
 
 let durable_metadata_save ~ownership_root path json =
-  observed_save Keeper_fs.save_json_durable_atomic ~ownership_root path json
+  observed_save ~ownership_root (fun () -> Keeper_fs.save_json_durable_atomic ~ownership_root path json)
 
 let publication_matches (artifact : Published_artifact.t) (request : Share.request) =
   match artifact.revisions with
@@ -594,6 +594,7 @@ module For_testing = struct
   let read_with_share_after_select = read_with_share_after_select
   let change_share_before_stage ~before_stage ~base_path ~id request =
     let save ~ownership_root path json =
-      observed_save (Keeper_fs.For_testing.save_json_durable_atomic ~before_stage) ~ownership_root path json in
+      observed_save ~ownership_root (fun () ->
+        Keeper_fs.For_testing.save_json_durable_atomic ~before_stage ~ownership_root path json) in
     change_share_with_save ~save ~base_path ~id request
 end

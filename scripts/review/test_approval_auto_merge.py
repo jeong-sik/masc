@@ -342,18 +342,46 @@ class AutomaticMergeReceipts(unittest.TestCase):
     def operation(self, returncode=0):
         return subprocess.CompletedProcess([], returncode, json.dumps(self.receipt), '')
 
-    def test_pending_conflict_observes_the_existing_receipt_without_resubmitting(self):
+    def test_pending_conflict_reports_the_existing_receipt_without_following_or_resubmitting(self):
         with patch.object(MERGE.subprocess, 'run', return_value=self.operation(1)) as command, \
-             patch.object(MERGE, 'read', return_value={'status': 'pending'}) as read, \
-             patch.object(MERGE, 'pull', return_value={'merged': False}), \
-             redirect_stdout(io.StringIO()):
+             patch.object(MERGE, 'read') as read, \
+             patch.object(MERGE, 'pull') as pull, \
+             patch.object(MERGE, 'follow') as follow, \
+             patch.object(MERGE, 'hand_off') as hand_off, \
+             redirect_stdout(io.StringIO()) as output:
             result = MERGE.submit(REPO, 102, sha(102), self.scope)
         self.assertEqual(command.call_count, 1)
         self.assertIn(PREFIX + '/pulls/102/merge-async', command.call_args.args[0])
         self.assertIn('-F', command.call_args.args[0])
         self.assertIn('bypass_rules=false', command.call_args.args[0])
-        read.assert_called_once_with(PREFIX + f'/pulls/102/merge-async/{UUID}')
-        self.assertIn(UUID, json.dumps(result))
+        for forbidden in (read, pull, follow, hand_off):
+            forbidden.assert_not_called()
+        self.assertEqual(result['status'], 'following_elsewhere')
+        self.assertEqual(result['uuid'], UUID)
+        self.assertIn(UUID, output.getvalue())
+
+    def test_a_fresh_acceptance_still_follows_its_own_receipt(self):
+        with patch.object(MERGE.subprocess, 'run', return_value=self.operation(0)), \
+             patch.object(MERGE, 'follow', return_value={'status': 'merged'}) as follow, \
+             redirect_stdout(io.StringIO()):
+            result = MERGE.submit(REPO, 102, sha(102), self.scope)
+        follow.assert_called_once()
+        self.assertEqual(result['status'], 'merged')
+
+    def test_following_elsewhere_is_not_a_red_run(self):
+        self.assertIn('following_elsewhere', MERGE.SUCCESS)
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': ''}
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'auto_merge_default', return_value=None), \
+             patch.object(MERGE, 'prepare', return_value=(102, sha(102), self.scope)), \
+             patch.object(MERGE.subprocess, 'run', return_value=self.operation(1)), \
+             patch.object(MERGE, 'follow') as follow, \
+             redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            code = MERGE.main()
+        follow.assert_not_called()
+        self.assertEqual(code, 0)
+        self.assertIn('following_elsewhere', output.getvalue())
 
     def test_receipt_is_visible_before_a_readback_failure(self):
         output = io.StringIO()
@@ -616,10 +644,24 @@ class FollowingAcceptedMerges(unittest.TestCase):
             old = MERGE.hand_off(REPO, outcome)  # submitted 50 hours ago in this test
         self.assertEqual(old['status'], 'resume_dispatched')
         self.assertEqual(run.call_count, 1)
-        with patch.object(MERGE.subprocess, 'run', side_effect=OSError('gh missing')):
+        with patch.object(MERGE.subprocess, 'run', side_effect=OSError('gh missing')) as run, \
+             patch.object(MERGE.time, 'sleep') as pause:
             failed = MERGE.hand_off(REPO, outcome)
         self.assertEqual(failed['status'], 'still_pending')
         self.assertIn('dispatch_failed', failed['resume'])
+        # One bounded retry after a pause, never an open loop.
+        self.assertEqual(run.call_count, 2)
+        pause.assert_called_once_with(MERGE.HAND_OFF_RETRY_SECONDS)
+
+    def test_a_dispatch_that_fails_once_is_retried_and_lands(self):
+        outcome = {'status': 'still_pending', 'uuid': UUID, 'pr': 102, 'head': sha(102),
+                   'members': [101, 102], 'since': 0}
+        ok = subprocess.CompletedProcess([], 0, '', '')
+        with patch.object(MERGE.subprocess, 'run', side_effect=[OSError('flaky'), ok]) as run, \
+             patch.object(MERGE.time, 'sleep') as pause:
+            result = MERGE.hand_off(REPO, outcome)
+        self.assertEqual(result['status'], 'resume_dispatched')
+        self.assertEqual((run.call_count, pause.call_count), (2, 1))
 
     def resume_environment(self, **extra):
         receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1.0}

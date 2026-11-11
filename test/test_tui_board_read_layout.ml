@@ -142,6 +142,36 @@ let test_focus_follows_the_layout () =
   Alcotest.(check bool) "a choice of the post stays the post at any width" true
     (focus ~cols:split_cols = Right_pane && focus ~cols:(split_cols - 1) = Right_pane)
 
+(* PageDown and PageUp move by the window the last frame drew for this post:
+   [Masc_tui_scroll.page_step] of that height, so one row of the old page stays
+   on screen. Nothing here pins how the screen looks; the inputs are the counts
+   and heights the frame reported. *)
+let test_paging_uses_the_window_the_frame_drew () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  let page direction = page_board_read state ~direction in
+  state.board_mode <- Board_read "p1";
+  page 1;
+  Alcotest.(check int) "before any frame there is no window to page by" 0 state.board_scroll;
+  board_read_presented_frame state ~post_id:"p1" ~body:(20, 6) ~comments:(30, 4);
+  page 1;
+  Alcotest.(check int) "a page down moves the window less the kept row" 5 state.board_scroll;
+  page 1;
+  page 1;
+  Alcotest.(check int) "the last page stops at the end" 14 state.board_scroll;
+  page (-1);
+  Alcotest.(check int) "a page up from the end" 9 state.board_scroll;
+  state.board_comments_focused <- true;
+  page 1;
+  Alcotest.(check int) "focused comments page by their own window" 3 state.board_comment_scroll;
+  Alcotest.(check int) "the body keeps its place while the comments are paged" 9 state.board_scroll;
+  state.board_comments_focused <- false;
+  state.board_mode <- Board_read "p2";
+  page 1;
+  Alcotest.(check int) "a frame drawn for another post pages nothing" 9 state.board_scroll;
+  state.board_mode <- Board_list;
+  page 1;
+  Alcotest.(check int) "outside the reader nothing is paged" 9 state.board_scroll
+
 let () = Alcotest.run "Board document layout"
   ["scroll and refresh", [
     Alcotest.test_case "128 comments scroll without re-layout" `Quick test_long_thread_scroll_reuses_rows;
@@ -149,4 +179,6 @@ let () = Alcotest.run "Board document layout"
     Alcotest.test_case "failed rendering and one document ownership" `Quick test_failed_render_and_single_document;
     Alcotest.test_case "keys follow the pane the layout draws" `Quick test_focus_follows_the_layout;
     Alcotest.test_case "leaving the acting pane keeps a choice the layout hides" `Quick
-      test_leaving_the_acting_pane_keeps_a_choice_the_layout_hides]]
+      test_leaving_the_acting_pane_keeps_a_choice_the_layout_hides;
+    Alcotest.test_case "paging uses the window the frame drew" `Quick
+      test_paging_uses_the_window_the_frame_drew]]

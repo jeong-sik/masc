@@ -200,8 +200,8 @@ let test_individual_snapshot_failure path () =
      same batch is refused. #47224 wrote this line expecting a successful retry
      to clear it, which mixed posts retry with whole-batch recovery. *)
   Alcotest.(check bool)
-    "retry keeps posts work while another source of the batch stays refused"
-    true active.Board.dirty_posts;
+    "retry keeps posts work only for an admitted deletion whose batch cannot finish"
+    (not admission_source_obstructed) active.Board.dirty_posts;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl

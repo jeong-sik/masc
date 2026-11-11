@@ -49,6 +49,58 @@ module Instant = struct
     | Same_day -> clock precision tm
     | Same_year -> within_year precision tm
     | Other_year -> year_month_day tm ^ " " ^ clock precision tm
+
+  let minutes_per_hour = 60
+  let minutes_per_day = 24 * minutes_per_hour
+
+  (* The two breakdowns are of one moment, so they are at most a day apart,
+     and which side of midnight each fell on is the only thing the calendar
+     fields add to the clock fields. *)
+  let offset_minutes ~(utc : Unix.tm) ~(local : Unix.tm) =
+    let day_delta =
+      if local.Unix.tm_year <> utc.Unix.tm_year then
+        compare local.Unix.tm_year utc.Unix.tm_year
+      else compare local.Unix.tm_yday utc.Unix.tm_yday
+    in
+    let of_day (tm : Unix.tm) =
+      (tm.Unix.tm_hour * minutes_per_hour) + tm.Unix.tm_min
+    in
+    (day_delta * minutes_per_day) + of_day local - of_day utc
+
+  let zone_label ~offset_minutes =
+    if offset_minutes = 0 then "UTC"
+    else
+      let sign = if offset_minutes < 0 then '-' else '+' in
+      let distance = abs offset_minutes in
+      let hours = distance / minutes_per_hour in
+      match distance mod minutes_per_hour with
+      | 0 -> Printf.sprintf "UTC%c%d" sign hours
+      | minutes -> Printf.sprintf "UTC%c%d:%02d" sign hours minutes
+
+  let wall_clock ~now =
+    let local = Unix.localtime now in
+    clock To_minute local ^ " "
+    ^ zone_label ~offset_minutes:(offset_minutes ~utc:(Unix.gmtime now) ~local)
+end
+
+module Mark = struct
+  type t =
+    | Settled
+    | Under_way
+    | Waiting
+    | Paused
+    | Caution
+    | Failed
+    | Yours
+
+  let glyph = function
+    | Settled -> "\xe2\x97\x8f"
+    | Under_way -> "\xe2\x97\x90"
+    | Waiting -> "\xe2\x97\x8b"
+    | Paused -> "\xe2\x80\x96"
+    | Caution -> "\xe2\x96\xb2"
+    | Failed -> "\xe2\x9c\x95"
+    | Yours -> "\xe2\x97\x86"
 end
 
 module Count = struct

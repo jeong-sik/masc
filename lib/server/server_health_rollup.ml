@@ -5,11 +5,12 @@ type t =
   { overall_status : string
   ; operator_action_required : bool
   ; operator_action_reasons : string list
+  ; operator_actions : Operator_action_reason.t list
   ; overall_status_reasons : string list
   }
 
 let operator_field_names =
-  [ "overall_status"; "operator_action_required"; "operator_action_reasons" ]
+  [ "overall_status"; "operator_action_required"; "operator_action_reasons"; "operator_actions" ]
 ;;
 
 let cached_field_names =
@@ -79,6 +80,21 @@ let operator_summary ~sections ~runtime_startup_degradation
   let prefixed component component_reasons =
     List.map (fun reason -> Printf.sprintf "%s:%s" component reason) component_reasons
   in
+  let component_actions component component_reasons json =
+    let generic () = List.map (fun reason ->
+      Operator_action_reason.other ~component ~reason) component_reasons in
+    let structured = match json with
+      | `Assoc fields -> List.assoc_opt "operator_actions" fields
+      | _ -> None in
+    match structured with
+    | None -> generic ()
+    | Some items ->
+        (match Operator_action_reason.read_collection
+                 ~diagnostics:(prefixed component component_reasons) items with
+         | Ok actions when List.for_all (fun action ->
+             String.equal action.Operator_action_reason.component component) actions -> actions
+         | Ok _ | Error _ -> generic ())
+  in
   let note_status component json =
     match Json_util.assoc_string_opt "status" json with
     | None -> ()
@@ -140,7 +156,7 @@ let operator_summary ~sections ~runtime_startup_degradation
                 | [] -> [ fallback_reason json component_status ]
                 | values -> values)
            in
-           reasons := List.rev_append (prefixed component component_reasons) !reasons
+           reasons := List.rev_append (component_actions component component_reasons json) !reasons
          end)
   in
   List.iter
@@ -157,12 +173,15 @@ let operator_summary ~sections ~runtime_startup_degradation
   if keeper_config_operator_action_required || keeper_config_schema_blocking
   then
     reasons :=
-      Printf.sprintf "keeper_config_schema:%s" keeper_config_schema_terminal_reason
+      Operator_action_reason.other ~component:"keeper_config_schema"
+        ~reason:keeper_config_schema_terminal_reason
       :: !reasons;
-  let operator_action_reasons = List.rev !reasons in
+  let operator_actions = List.rev !reasons in
+  let operator_action_reasons = List.map Operator_action_reason.diagnostic operator_actions in
   { overall_status = !status
   ; operator_action_required = operator_action_reasons <> []
   ; operator_action_reasons
+  ; operator_actions
   ; overall_status_reasons = List.rev !status_lines
   }
 ;;

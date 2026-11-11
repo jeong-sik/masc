@@ -151,9 +151,11 @@ let attention_health_json ~config =
         else None) names in
       List.length durable_names, List.length admission_names, observations)
   in
-  let required = observations <> [] in
-  let reasons = List.map (fun (keeper, _, _, _) ->
-    `String (keeper ^ ":librarian_attention_required")) observations in
+  let actions = List.map (fun (keeper, measured, durable, admission) ->
+    Operator_action_reason.memory_attention ~keeper ~durable ~admission
+      ~measured_at:(Option.map (fun value -> value.measured_at) measured)) observations in
+  let required = actions <> [] in
+  let reasons = List.map (fun action -> `String action.Operator_action_reason.reason) actions in
   let rows = List.map (fun (keeper, measured, durable, admission) ->
     `Assoc ["keeper_id", `String keeper;
       "durable_measured_at", (match measured with
@@ -169,6 +171,7 @@ let attention_health_json ~config =
       else if durable_count = 0 && admission_count = 0 then "snapshot_not_ready" else "ok");
     "operator_action_required", `Bool required;
     "status_reasons", `List reasons; "operator_action_reasons", `List reasons;
+    "operator_actions", `List (List.map Operator_action_reason.to_json actions);
     "observed_durable_keepers", `Int durable_count;
     "observed_admission_wait_keepers", `Int admission_count;
     "attention_required_keepers", `Int (List.length observations);

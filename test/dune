@@ -7290,6 +7290,7 @@
 (include stanzas/test_domain_budget.inc)
 (include stanzas/test_domain_mailbox.inc)
 (include stanzas/test_http_reqd_relay.inc)
+(include stanzas/test_http_ingress_serving_route.inc)
 (include stanzas/test_minor_heap.inc)
 
 (include stanzas/test_authz_scope.inc)

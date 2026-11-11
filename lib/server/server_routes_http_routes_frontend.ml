@@ -135,7 +135,11 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
 let add_routes ?sw ?clock router =
   router
   |> Server_route.get Server_route.Always_public Server_health_paths.health health_handler
-  |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness_handler
+  (* Liveness says the accept loop runs, so it is answered on the
+     connection's domain and does not wait for the main one. It reads the
+     startup state, which is atomics (RFC
+     http-transport-runs-on-its-own-domain §3.4). *)
+  |> Server_route.Serving.get Server_route.Always_public Server_health_paths.liveness liveness_handler
   |> Server_route.get Server_route.Always_public Server_health_paths.readiness readiness_handler
   |> Server_route.get Server_route.Public_read "/.well-known/agent.json" (fun _state req reqd ->
          let request_authority = Server_request_authority.current_exn () in

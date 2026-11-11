@@ -173,14 +173,15 @@ let test_frontend_transport_routes_present () =
   (* RFC-0281: /ws must be a typed WebSocket-upgrade route ([Router.Ws]),
      not a plain route.  Only a Ws route receives the Gluten [upgrade]
      capability and thus actually drives the post-101 connection.  A
-     regression to [Router.Plain] (or to a main_eio special-case that
+     regression to an in-band route (or to a main_eio special-case that
      bypasses the router) silently reintroduces the undriven-socket
      flicker bug — this assertion guards the consolidation. *)
   (match Router.resolve routes (Httpun.Request.create `GET "/ws") with
    | `Matched route ->
      (match route.handler with
       | Router.Ws _ -> ()
-      | Router.Plain _ -> Alcotest.fail "/ws must be a Router.Ws route, not Plain")
+      | Router.Owner _ | Router.Serving _ ->
+        Alcotest.fail "/ws must be a Router.Ws route, not an in-band one")
    | `Method_not_allowed | `Not_found -> Alcotest.fail "/ws route must resolve");
   Alcotest.(check bool)
     "GET /api/v1/voice/config route"
@@ -190,9 +191,11 @@ let test_frontend_transport_routes_present () =
 
 (* RFC-0281: typed WebSocket-upgrade routes.  [ws_get] registers a
    [Router.Ws] route (carrying the Gluten upgrade capability); [get]
-   registers a [Router.Plain] route.  The variant is what lets
-   [Router.dispatch] thread the optional [upgrade] capability to WS routes;
-   their handlers can answer discovery without upgrading. *)
+   registers a [Router.Owner] route and [Serving.get] a [Router.Serving]
+   one.  The variant is what lets [Router.dispatch] thread the optional
+   [upgrade] capability to WS routes, whose handlers can answer discovery
+   without upgrading, and what tells the ingress which in-band handlers stay
+   on their connection's domain. *)
 let test_router_ws_get_registers_ws_route () =
   let handler ~upgrade:_ _req _reqd = () in
   let routes = Router.create () |> Server_route.ws_get "/ws" handler in
@@ -200,19 +203,36 @@ let test_router_ws_get_registers_ws_route () =
   | `Matched route ->
     (match route.handler with
      | Router.Ws _ -> ()
-     | Router.Plain _ -> Alcotest.fail "ws_get must register a Router.Ws route")
+     | Router.Owner _ | Router.Serving _ ->
+       Alcotest.fail "ws_get must register a Router.Ws route")
   | `Method_not_allowed | `Not_found -> Alcotest.fail "ws_get route must resolve"
 ;;
 
-let test_router_get_registers_plain_route () =
+let test_router_get_registers_owner_route () =
   let handler _req _reqd = () in
   let routes = Router.create () |> Server_route.get Server_route.Always_public "/plain" handler in
   match Router.resolve routes (Httpun.Request.create `GET "/plain") with
   | `Matched route ->
     (match route.handler with
-     | Router.Plain _ -> ()
-     | Router.Ws _ -> Alcotest.fail "get must register a Router.Plain route")
+     | Router.Owner _ -> ()
+     | Router.Serving _ | Router.Ws _ ->
+       Alcotest.fail "get must register a Router.Owner route")
   | `Method_not_allowed | `Not_found -> Alcotest.fail "get route must resolve"
+;;
+
+let test_router_serving_get_registers_serving_route () =
+  let handler _req _reqd = () in
+  let routes =
+    Router.create ()
+    |> Server_route.Serving.get Server_route.Always_public "/beside" handler
+  in
+  match Router.resolve routes (Httpun.Request.create `GET "/beside") with
+  | `Matched route ->
+    (match route.handler with
+     | Router.Serving _ -> ()
+     | Router.Owner _ | Router.Ws _ ->
+       Alcotest.fail "Serving.get must register a Router.Serving route")
+  | `Method_not_allowed | `Not_found -> Alcotest.fail "Serving.get route must resolve"
 ;;
 
 let with_env name value_opt f =
@@ -518,7 +538,8 @@ let router_tests =
     , test_router_method_index_preserves_exact_405 )
   ; "frontend transport routes present", `Quick, test_frontend_transport_routes_present
   ; "ws_get registers a Ws route", `Quick, test_router_ws_get_registers_ws_route
-  ; "get registers a Plain route", `Quick, test_router_get_registers_plain_route
+  ; "get registers an Owner route", `Quick, test_router_get_registers_owner_route
+  ; "Serving.get registers a Serving route", `Quick, test_router_serving_get_registers_serving_route
   ; ( "frontend websocket upgrade waits for dispatcher"
     , `Quick
     , test_frontend_websocket_upgrade_waits_for_dispatcher )

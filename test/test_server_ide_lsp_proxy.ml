@@ -392,7 +392,7 @@ let test_dispatch_workers_are_parallelized () =
 
 (* RFC-0281 Phase 2: [/api/v1/ide/lsp] must be a typed WebSocket-upgrade
    route ([Router.Ws]).  Only a Ws route receives the Gluten [upgrade]
-   capability, so a regression to [Router.Plain] would silently
+   capability, so a regression to an in-band route would silently
    reintroduce the undriven-socket defect (frames never read).  [add_routes]
    only registers the closure here — no process is spawned — so the
    [Eio_main.run] just supplies the switch + clock it captures. *)
@@ -408,8 +408,8 @@ let test_lsp_route_is_ws () =
       | `Matched route ->
         (match route.Http.Router.handler with
          | Http.Router.Ws _ -> ()
-         | Http.Router.Plain _ ->
-           fail "/api/v1/ide/lsp must be a Router.Ws route, not Plain")
+         | Http.Router.Owner _ | Http.Router.Serving _ ->
+           fail "/api/v1/ide/lsp must be a Router.Ws route, not an in-band one")
       | `Method_not_allowed | `Not_found ->
         fail "/api/v1/ide/lsp route must resolve"))
 ;;

@@ -258,16 +258,19 @@ let serve_here ~routes ~client_addr classification reqd =
    than the one that owns the server's root switch (the HTTP serving domain,
    RFC http-transport-runs-on-its-own-domain §3.3): the owner's queue and the
    scope its response is written under. A WebSocket route stays with its
-   connection: the upgrade hands the socket to the handler. [None] on the
-   owner domain, which is every request while the serving domain is off. *)
+   connection: the upgrade hands the socket to the handler. A [Serving] route
+   stays there too: its registration says its handler may run beside the
+   owner's (§3.4). A request no route matches is the owner's to refuse.
+   [None] on the owner domain, which is every request while the serving
+   domain is off. *)
 let owner_relay ~routes reqd =
   match Eio_context.owner_post () with
   | None -> None
   | Some post ->
     (match Http.Router.resolve routes (Http_reqd.request reqd) with
-     | `Matched { Http.Router.handler = Http.Router.Ws _; _ } -> None
-     | `Matched { Http.Router.handler = Http.Router.Plain _; _ }
-      | `Method_not_allowed
+     | `Matched { Http.Router.handler = Http.Router.Ws _ | Http.Router.Serving _; _ } -> None
+     | `Matched { Http.Router.handler = Http.Router.Owner _; _ }
+     | `Method_not_allowed
      | `Not_found ->
        Option.map (fun sw -> sw, post) (Http_reqd.relay_scope reqd))
 ;;

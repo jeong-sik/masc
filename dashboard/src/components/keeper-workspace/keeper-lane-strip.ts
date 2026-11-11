@@ -16,8 +16,7 @@
 // as the next one to run.
 
 import { html } from 'htm/preact'
-import { KeeperLaneInventoryWindow } from './keeper-lane-inventory-window'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import { Fragment, type VNode } from 'preact'
 import type { Keeper } from '../../types'
 import {
@@ -44,6 +43,7 @@ import {
   useLaneEventQueueActions,
   type LaneEventQueueActions,
 } from './keeper-lane-event-actions'
+import { KeeperLaneInventoryWindow } from './keeper-lane-inventory-window'
 
 const LANE_STATE_LABELS: Record<string, string> = {
   idle: '비어 있음',
@@ -110,7 +110,7 @@ const LANE_SOURCE_STAGE: Record<DashboardKeeperWaitingSource, LaneStage> = {
 
 const SECONDS_PER_MINUTE = 60
 const HOUR_MINUTES = 60
-export const DAY_MINUTES = 24 * HOUR_MINUTES
+const DAY_MINUTES = 24 * HOUR_MINUTES
 /** A bar never shrinks below this so a fresh row stays clickable. */
 const MIN_BAR_PERCENT = 6
 
@@ -149,7 +149,7 @@ function rowSince(row: DashboardKeeperWaitingRow): number | null {
 
 /** Oldest observation first. Equal/missing timestamps keep their server order,
  * and missing timestamps stay visible at the end. */
-export function waitingRowsOldestFirst(rows: readonly DashboardKeeperWaitingRow[]): DashboardKeeperWaitingRow[] {
+function waitingRowsOldestFirst(rows: readonly DashboardKeeperWaitingRow[]): DashboardKeeperWaitingRow[] {
   return rows
     .map((row, serverIndex) => ({ row, serverIndex, since: rowSince(row) }))
     .sort((left, right) => {
@@ -161,7 +161,7 @@ export function waitingRowsOldestFirst(rows: readonly DashboardKeeperWaitingRow[
     .map(({ row }) => row)
 }
 
-export function ageMinutes(row: DashboardKeeperWaitingRow, nowMs: number): number | null {
+function ageMinutes(row: DashboardKeeperWaitingRow, nowMs: number): number | null {
   const since = rowSince(row)
   if (since == null) return null
   return Math.max(0, (nowMs / 1000 - since) / SECONDS_PER_MINUTE)
@@ -259,7 +259,7 @@ function LanePipeline({ entry, dev }: { entry: DashboardKeeperWaitingKeeper; dev
   `
 }
 
-export function LaneAgeAxis({ axisMax }: { axisMax: number }): VNode {
+function LaneAgeAxis({ axisMax }: { axisMax: number }): VNode {
   const ticks: Array<{ label: string; at: number }> = [
     { label: '지금', at: 0 },
     { label: '1시간', at: axisPosition(HOUR_MINUTES, axisMax) },
@@ -288,7 +288,7 @@ export function LaneAgeAxis({ axisMax }: { axisMax: number }): VNode {
   `
 }
 
-export function LaneWaitingRow({
+function LaneWaitingRow({
   row,
   age,
   axisMax,
@@ -304,8 +304,10 @@ export function LaneWaitingRow({
   dev: boolean
   /** Admin operator actions; null renders the row read-only. */
   actions: LaneEventQueueActions | null
-  expanded?: boolean
-  onExpandedChange?: (open: boolean) => void
+  /** Open state lives in the list: a row that scrolls out of the window
+   *  unmounts and has to come back the way the operator left it. */
+  expanded: boolean
+  onExpandedChange: (open: boolean) => void
 }): VNode {
   const graphColor = LANE_SOURCE_GRAPH_COLORS[row.source]
   const width = age == null ? MIN_BAR_PERCENT : Math.max(MIN_BAR_PERCENT, axisPosition(age, axisMax))
@@ -314,7 +316,7 @@ export function LaneWaitingRow({
   return html`
     <details
       open=${expanded}
-      onToggle=${onExpandedChange ? (event: Event) => onExpandedChange((event.currentTarget as HTMLDetailsElement).open) : undefined}
+      onToggle=${(event: Event) => onExpandedChange((event.currentTarget as HTMLDetailsElement).open)}
       data-testid="keeper-lane-waiting-row"
       data-source=${row.source}
       data-waiting-on=${row.waiting_on}
@@ -356,6 +358,62 @@ export function LaneWaitingRow({
   `
 }
 
+/** The waiting-row block every lane surface draws (#29473): rows oldest first
+ *  on a log age axis, each row the server's operator sentence (`what`) with
+ *  the raw wire vocabulary behind the 기술 상세 toggle. The keeper workspace
+ *  lane strip and the fleet surfaces share it, so a change lands on all of
+ *  them. No client-side cap: every server row is reachable by scrolling.
+ *  Scroll position and open rows belong to the mounted block; a surface that
+ *  switches Keepers in place keys it by Keeper so the next one starts fresh. */
+export function LaneWaitingRows({
+  rows,
+  dev,
+  actions,
+}: {
+  rows: readonly DashboardKeeperWaitingRow[]
+  dev: boolean
+  /** Admin operator actions; null renders every row read-only. */
+  actions: LaneEventQueueActions | null
+}): VNode | null {
+  // The sorted array keeps its identity until the server sends new rows, so
+  // the list below re-keys its rows only when the inventory changes.
+  const sorted = useMemo(() => waitingRowsOldestFirst(rows), [rows])
+  if (sorted.length === 0) return null
+  const nowMs = Date.now()
+  const ages = sorted.map(row => ageMinutes(row, nowMs))
+  // Folded rather than spread into Math.max: one call argument per row
+  // overflows the stack on a large enough inventory.
+  const axisMax = ages.reduce<number>(
+    (max, age) => (age === null ? max : Math.max(max, age)),
+    DAY_MINUTES,
+  )
+  return html`
+    <div class="grid gap-1">
+      <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
+      <${LaneAgeAxis} axisMax=${axisMax} />
+      <${KeeperLaneInventoryWindow}
+        rows=${sorted}
+        renderRow=${(
+          row: DashboardKeeperWaitingRow,
+          index: number,
+          expanded: boolean,
+          onExpandedChange: (open: boolean) => void,
+        ) => html`
+          <${LaneWaitingRow}
+            row=${row}
+            age=${ages[index] ?? null}
+            axisMax=${axisMax}
+            dev=${dev}
+            actions=${actions}
+            expanded=${expanded}
+            onExpandedChange=${onExpandedChange}
+          />
+        `}
+      />
+    </div>
+  `
+}
+
 /** Pure presentational part; tests feed it fixtures. */
 export function KeeperLaneStrip({
   keeper,
@@ -378,10 +436,6 @@ export function KeeperLaneStrip({
 }): VNode {
   const [dev, setDev] = useState(false)
   const entry = inventoryEntry(inventory, keeper)
-  const rows = waitingRowsOldestFirst(entry?.waiting_on ?? [])
-  const nowMs = Date.now()
-  const ages = rows.map(row => ageMinutes(row, nowMs))
-  const axisMax = ages.reduce<number>((max, age) => age === null ? max : Math.max(max, age), DAY_MINUTES)
   const waitingCount = entry?.waiting_count ?? 0
   return html`
     <div class="ctx-sec" data-testid="keeper-lane-section">
@@ -411,20 +465,12 @@ export function KeeperLaneStrip({
               ${eventActions === null
                 ? null
                 : html`<${LaneEventRecoveries} actions=${eventActions} />`}
-              ${rows.length > 0
-                ? html`
-                    <div class="grid gap-1">
-                      <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
-                      <${LaneAgeAxis} axisMax=${axisMax} />
-                      <${KeeperLaneInventoryWindow} key=${keeper.name} rows=${rows}
-                        renderRow=${(row: DashboardKeeperWaitingRow, index: number, expanded: boolean, onExpandedChange: (open: boolean) => void) => html`
-                          <${LaneWaitingRow} row=${row} age=${ages[index] ?? null}
-                            axisMax=${axisMax} dev=${dev} actions=${eventActions}
-                            expanded=${expanded} onExpandedChange=${onExpandedChange} />
-                        `} />
-                    </div>
-                  `
-                : null}
+              <${LaneWaitingRows}
+                key=${keeper.name}
+                rows=${entry.waiting_on}
+                dev=${dev}
+                actions=${eventActions}
+              />
             </div>
           `
         : inventory

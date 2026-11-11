@@ -4,8 +4,8 @@
 
 # TUI key reference
 
-Press `?` in the TUI to read this sheet on screen; the surface you are
-on is the first section there. Every footer row names `?:help` where the
+Press `?` in the TUI to read the keys of the surface you are on, and
+`?` again to read this whole sheet. Every footer row names `?:help` where the
 key answers. In a chat, `?` opens the sheet only while the draft is
 empty -- once a sentence has started it is an ordinary question mark.
 The command palette is `:`.
@@ -21,7 +21,7 @@ The command palette is `:`.
 | `:` | command palette |
 | `;` | agenda: what is coming, and who is waiting on you; Enter opens a row |
 | `@` | answering: who is mid-turn or just finished; Enter opens their chat |
-| `?` | this help; `/` filters its keys and commands |
+| `?` | the keys of this screen; `?` again lists every screen, the global keys and the slash commands, and `/` finds a key or a command among them all |
 | `&` | Collab: watch MSX/DOS and manage play links (also `:` go Collab) |
 | `Ctrl-B` | show or hide the Keeper roster; it starts hidden and the choice persists across navigation and resizing |
 | `Ctrl-L` | cycle the Activity pane narrow, wide or hidden; the wheel over the pane scrolls the full list; a press picks a keeper, a second press opens its chat; /activity order turns the order of its calls, /activity scroll moves the pane |

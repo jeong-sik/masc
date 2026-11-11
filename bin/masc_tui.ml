@@ -34810,14 +34810,21 @@ Use relative paths for resources already held in the package. -->
       (* The cheat sheet's keys. [Masc_tui_help.step] says what a key does in
          the filter's current state; this applies it to the sheet. *)
       let handle_help_key k =
-           (match Masc_tui_help.step state.help_filter ~key:k with
+           (match
+              Masc_tui_help.step state.help_filter ~scope:state.help_scope
+                ~key:k
+            with
             | Masc_tui_help.Set_filter { filter; scroll_to_top } ->
                 state.help_filter <- filter;
                 if scroll_to_top then state.help_scroll <- 0
+            | Masc_tui_help.Widen ->
+                state.help_scope <- Masc_tui_help.Everything;
+                state.help_scroll <- 0
             | Masc_tui_help.Close ->
                 state.help_open <- false;
                 state.help_scroll <- 0;
-                state.help_filter <- Masc_tui_help.Off
+                state.help_filter <- Masc_tui_help.Off;
+                state.help_scope <- Masc_tui_help.Here
             | Masc_tui_help.Toggle_hints ->
                 (* Session toggle; the persistent form is [tui].hints_visible in
                    runtime.toml, named on the help sheet itself. *)

@@ -4193,7 +4193,10 @@ let help_lines ~width (state : state) =
         (String.length title - String.length Masc_tui_keys.here_marker)
     else title
   in
-  let section (title, entries) =
+  (* A section's heading and each key's rows, a wrapped sentence kept with
+     its key so a caller that parts the section does not part a key from the
+     end of its own sentence. *)
+  let section_parts (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
     in
@@ -4215,8 +4218,8 @@ let help_lines ~width (state : state) =
        themselves -- sat on neighbouring rows looking like the same key. The
        column already sets the key apart, and the footer and the slash
        commands below draw theirs without brackets. *)
-    header_line
-    :: List.concat_map
+    ( header_line
+    , List.map
          (fun (key, action) ->
            (* Padded in cells, not bytes. [%-*s] counts bytes, and the five
               legend sections put a glyph in this column, and a glyph is one
@@ -4238,8 +4241,11 @@ let help_lines ~width (state : state) =
                   key_cell Ansi.reset)
              ~lead_cells:(2 + Message_layout.display_width key_cell + 1)
              ~column:(2 + help_key_cells + 1) action)
-         entries
-    @ [ "" ]
+         entries )
+  in
+  let section titled =
+    let header_line, entry_rows = section_parts titled in
+    (header_line :: List.concat entry_rows) @ [ "" ]
   in
   let commands =
     List.filter
@@ -4308,7 +4314,14 @@ let help_lines ~width (state : state) =
        with
        | [] -> slash_commands
        | first :: rest ->
-           section first @ slash_commands @ List.concat_map section rest)
+           if Masc_tui_help.shows_everything state.help_filter state.help_scope
+           then section first @ slash_commands @ List.concat_map section rest
+           else
+             (* The reader's own screen and nothing behind it. The sections
+                after it are another screen's keys, and they followed the
+                first with no line between a reader could stop at. *)
+             let header_line, entry_rows = section_parts first in
+             Masc_tui_help.one_section ~cols ~heading:header_line entry_rows)
   in
   match rows with
   | _ :: _ -> rows

@@ -40,7 +40,9 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 뿐이다. 이 
 - claim 할 수 있는 todo 는 턴 프레임이 "next to claim / Newly added" 로 이미 보여 준다.
 - `masc_ask_status` 는 `include_resolved = true` 면 열린 질문 다음에 답이 끝난 질문을
   최신순으로 돌려주고, 결과가 인라인 상한(`Common.max_tool_result_wire_bytes`)에 닿는 곳에서
-  멈춘다(`matching` 이 전체 수). 개수를 줄이는 인자는 없다. 이 조합은 열린 질문만 읽는다.
+  행을 멈춘다(`matching` 이 전체 수). 행에 못 담은 질문의 id 는 `omitted_ask_ids` 에 같은
+  순서로 남고, 그 id 를 `ask_id` 로 주면 질문 하나를 통째로 읽는다. 열린 질문만 읽는
+  호출도 같다. 개수를 줄이는 인자는 없다. 이 조합은 열린 질문만 읽는다.
   목록에서 사라진 질문은 답변과 철회를 구분할 수 없으므로, 확인이 필요하면 해당 ID로
   `include_resolved = true`를 쓴다.
 - 샌드박스·체크아웃 상태(`keeper_context_status`)는 넣지 않는다. 크기를 줄이는 입력이 없고

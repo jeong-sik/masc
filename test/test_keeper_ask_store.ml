@@ -507,7 +507,33 @@ let asked_ids json =
   Yojson.Safe.Util.(json |> member "asks" |> to_list
     |> List.map (fun row -> row |> member "ask_id" |> to_string))
 
+let omitted_ids json =
+  Yojson.Safe.Util.(json |> member "omitted_ask_ids" |> to_list |> List.map to_string)
+
 let count json key = Yojson.Safe.Util.(json |> member key |> to_int)
+
+(* What showing an ask's row in place of its id adds to a result. *)
+let extra_bytes_of_row base_path ask_id =
+  let json =
+    status_json base_path (`Assoc ["ask_id", `String ask_id; "include_resolved", `Bool true]) in
+  match Yojson.Safe.Util.(json |> member "asks" |> to_list) with
+  | [row] ->
+      String.length (Yojson.Safe.to_string row)
+      - String.length (Yojson.Safe.to_string (`String ask_id))
+  | _ -> Alcotest.fail "the ask was not read by its id"
+
+(* The cut counts one comma per item and the digits of matching for returned,
+   so it can be a few bytes above the real size. *)
+let estimate_margin_bytes = 8
+
+(* Every omitted ask is read by its id, resolved or not. *)
+let check_omitted_asks_are_readable base_path json =
+  List.iter
+    (fun ask_id ->
+      let one =
+        status_json base_path (`Assoc ["ask_id", `String ask_id; "include_resolved", `Bool true]) in
+      Alcotest.(check (list string)) "an omitted ask is read by its id" [ask_id] (asked_ids one))
+    (omitted_ids json)
 
 (* The store keeps rows oldest first. A Keeper that reads its asks wants the
    open ones in the order it asked them, and after them the newest answers, so
@@ -528,6 +554,7 @@ let ask_status_lists_open_asks_first_then_the_newest_resolved () =
     (asked_ids everything);
   Alcotest.(check int) "every ask matched" 5 (count everything "matching");
   Alcotest.(check int) "every ask fit" 5 (count everything "returned");
+  Alcotest.(check (list string)) "no ask is left out" [] (omitted_ids everything);
   let open_only = status_json base_path (`Assoc []) in
   Alcotest.(check (list string)) "without include_resolved only the open asks, in the order asked"
     ["old-open"; "new-open"] (asked_ids open_only);
@@ -572,17 +599,76 @@ let ask_status_stops_under_the_inline_ceiling_and_keeps_the_open_ask_first () =
   Alcotest.(check int) "matching counts the rows left out too" 41 (count json "matching");
   let returned = count json "returned" in
   Alcotest.(check bool) "some rows were left out" true (returned < 41);
-  Alcotest.(check int) "returned counts the rows shown" returned (List.length (asked_ids json))
+  Alcotest.(check int) "returned counts the rows shown" returned (List.length (asked_ids json));
+  let newest_first_after_the_open_ask =
+    "the-oldest-is-open" :: List.init 40 (fun index -> Printf.sprintf "resolved-%02d" (40 - index)) in
+  Alcotest.(check (list string)) "every ask is shown or named, in list order"
+    newest_first_after_the_open_ask (asked_ids json @ omitted_ids json);
+  (match omitted_ids json with
+   | next :: _ ->
+       Alcotest.(check bool) "the next ask would not have fit" true
+         (String.length message + extra_bytes_of_row base_path next + estimate_margin_bytes
+          > Common.max_tool_result_wire_bytes)
+   | [] -> Alcotest.fail "no ask was named as left out");
+  check_omitted_asks_are_readable base_path json
 
-(* A result that named no ask would answer nothing, so one row stays even when
-   it alone is over the ceiling. *)
-let ask_status_keeps_one_row_when_it_alone_is_over_the_ceiling () =
+(* The oldest open ask is longer than the whole ceiling and a second open ask
+   waits behind it. Both ids reach the Keeper, and each ask is read by its id. *)
+let ask_status_names_the_asks_behind_one_that_alone_is_over_the_ceiling () =
   let base_path = temp_dir () in
-  record_at base_path ~ask_id:"long-context" ~asked_at:1000.
-    ~context:(String.make (2 * Common.max_tool_result_wire_bytes) 'y');
-  let json = status_json base_path (`Assoc ["ask_id", `String "long-context"]) in
-  Alcotest.(check (list string)) "the ask is still named" ["long-context"] (asked_ids json);
-  Alcotest.(check int) "nothing that matched was left out" 1 (count json "matching")
+  let long_context = String.make (2 * Common.max_tool_result_wire_bytes) 'y' in
+  record_at base_path ~ask_id:"long-open" ~asked_at:1000. ~context:long_context;
+  record_at base_path ~ask_id:"short-open" ~asked_at:2000. ~context:"why";
+  record_at base_path ~ask_id:"short-done" ~asked_at:3000. ~context:"why";
+  answer_ask base_path "short-done";
+  let listing = ask_status base_path (`Assoc ["include_resolved", `Bool true]) in
+  Alcotest.(check bool) "the list stays under the inline ceiling" true
+    (String.length (Tool_result.message listing) <= Common.max_tool_result_wire_bytes);
+  let json = Yojson.Safe.from_string (Tool_result.message listing) in
+  Alcotest.(check (list string)) "no row fits" [] (asked_ids json);
+  Alcotest.(check (list string)) "every ask is named, the open ones first"
+    ["long-open"; "short-open"; "short-done"] (omitted_ids json);
+  Alcotest.(check int) "matching counts all three" 3 (count json "matching");
+  Alcotest.(check int) "returned counts the rows shown" 0 (count json "returned");
+  check_omitted_asks_are_readable base_path json;
+  let long = status_json base_path (`Assoc ["ask_id", `String "long-open"]) in
+  match Yojson.Safe.Util.(long |> member "asks" |> to_list) with
+  | [row] ->
+      Alcotest.(check int) "the long ask comes back whole" (String.length long_context)
+        (String.length Yojson.Safe.Util.(row |> member "context" |> to_string))
+  | _ -> Alcotest.fail "the long ask was not read by its id"
+
+(* Ten open asks of about 2 KB each are over the ceiling together, though none
+   is alone. The ones that do not fit are named, in the order they were asked. *)
+let ask_status_names_every_open_ask_that_does_not_fit_with_the_others () =
+  let base_path = temp_dir () in
+  let context = String.make 2000 'z' in
+  let open_ids = List.init 10 (fun index -> Printf.sprintf "open-%02d" index) in
+  List.iteri
+    (fun index ask_id ->
+      record_at base_path ~ask_id ~asked_at:(1000. +. float_of_int index) ~context)
+    open_ids;
+  let json = status_json base_path (`Assoc []) in
+  Alcotest.(check bool) "some open asks are shown" true (asked_ids json <> []);
+  Alcotest.(check bool) "some open asks are named only" true (omitted_ids json <> []);
+  Alcotest.(check (list string)) "each open ask is shown or named, in the order asked"
+    open_ids (asked_ids json @ omitted_ids json);
+  Alcotest.(check int) "open_count is every open ask" 10 (count json "open_count");
+  check_omitted_asks_are_readable base_path json
+
+(* 160 ids of 100 characters take more than the ceiling by themselves. No row
+   is shown, and no id is dropped. *)
+let ask_status_names_every_ask_even_when_the_ids_alone_fill_the_ceiling () =
+  let base_path = temp_dir () in
+  let ids =
+    List.init 160 (fun index -> Printf.sprintf "%s-%03d" (String.make 100 'i') index) in
+  List.iteri
+    (fun index ask_id ->
+      record_at base_path ~ask_id ~asked_at:(1000. +. float_of_int index) ~context:"why")
+    ids;
+  let json = status_json base_path (`Assoc []) in
+  Alcotest.(check (list string)) "no row fits beside the ids" [] (asked_ids json);
+  Alcotest.(check (list string)) "no id is dropped" ids (omitted_ids json)
 
 let withdrawal_storage_failures_are_runtime_failures () =
   let base_path = temp_dir () in
@@ -666,7 +752,11 @@ let () =
             ask_status_breaks_a_tie_on_asked_at_by_ask_id;
           Alcotest.test_case "the list stops under the inline ceiling" `Quick
             ask_status_stops_under_the_inline_ceiling_and_keeps_the_open_ask_first;
-          Alcotest.test_case "one row stays even when it is over the ceiling" `Quick
-            ask_status_keeps_one_row_when_it_alone_is_over_the_ceiling;
+          Alcotest.test_case "names the asks behind one that alone is over the ceiling" `Quick
+            ask_status_names_the_asks_behind_one_that_alone_is_over_the_ceiling;
+          Alcotest.test_case "names every open ask that does not fit with the others" `Quick
+            ask_status_names_every_open_ask_that_does_not_fit_with_the_others;
+          Alcotest.test_case "names every ask when the ids alone fill the ceiling" `Quick
+            ask_status_names_every_ask_even_when_the_ids_alone_fill_the_ceiling;
         ] );
     ]

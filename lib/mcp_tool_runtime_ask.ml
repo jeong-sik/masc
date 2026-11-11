@@ -301,26 +301,47 @@ let compare_rows (id_left, ((left : Keeper_ask.ask), resolution_left))
   | true, true -> tie_break_on_ask_id (Float.compare left.asked_at right.asked_at)
   | false, false -> tie_break_on_ask_id (Float.compare right.asked_at left.asked_at)
 
-(* What the keeper name and the three counts around the rows take, with room
-   to spare (about 100 bytes). *)
-let envelope_slack_bytes = 512
+let result_json ~keeper_name ~open_count ~matching ~returned ~asks ~omitted_ask_ids =
+  `Assoc
+    [
+      ("keeper_name", `String keeper_name);
+      ("open_count", `Int open_count);
+      ("matching", `Int matching);
+      ("returned", `Int returned);
+      ("asks", `List asks);
+      ("omitted_ask_ids", `List (List.map (fun ask_id -> `String ask_id) omitted_ask_ids));
+    ]
 
-(* The longest prefix of [rows] whose serialized form, one comma between rows,
-   fits under Common.max_tool_result_wire_bytes, the lowest inline ceiling of
-   any lane, so the newest rows arrive inline everywhere. The first row is kept
-   even when it alone is over: a result that names no ask would answer
-   nothing. *)
-let rows_within_inline_ceiling rows =
-  let budget = Common.max_tool_result_wire_bytes - envelope_slack_bytes in
-  let rec take ~used shown = function
-    | [] -> List.rev shown
-    | row :: rest ->
-        let size = String.length (Yojson.Safe.to_string row) + 1 in
-        (match shown with
-         | _ :: _ when used + size > budget -> List.rev shown
-         | [] | _ :: _ -> take ~used:(used + size) (row :: shown) rest)
+(* Splits [sorted], the matching asks in list order, into the rows that go in
+   the result and the ids of the asks left out, also in list order.
+
+   The rows are the longest prefix whose result fits under
+   Common.max_tool_result_wire_bytes, the lowest inline ceiling of any lane, so
+   the result arrives inline everywhere. An ask left out keeps its id in the
+   result, and a Keeper passes that id as ask_id to read the ask whole. The ids
+   count against the ceiling too: a row is shown only while the rows shown and
+   the ids of the asks left out still fit. When the ids alone are over the
+   ceiling no row is shown, every id stays, and the result is over the ceiling.
+
+   [envelope_bytes] is what the result takes around the rows and ids. Each row
+   and id is counted with one comma, one more than the result holds for the
+   last of each, so the size counted is never under the real size. *)
+let split_within_inline_ceiling ~envelope_bytes sorted =
+  let serialized_size json = String.length (Yojson.Safe.to_string json) + 1 in
+  let entries =
+    List.map
+      (fun ((ask_id, _) as row) -> (ask_id, serialized_size (`String ask_id), row_json row))
+      sorted
   in
-  take ~used:0 [] rows
+  let budget = Common.max_tool_result_wire_bytes - envelope_bytes in
+  let rec take ~used shown = function
+    | [] -> (List.rev shown, [])
+    | (_, id_size, row) :: rest as left_out ->
+        let used = used - id_size + serialized_size row in
+        if used > budget then (List.rev shown, List.map (fun (ask_id, _, _) -> ask_id) left_out)
+        else take ~used (row :: shown) rest
+  in
+  take ~used:(List.fold_left (fun sum (_, id_size, _) -> sum + id_size) 0 entries) [] entries
 
 let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let base_path = ctx.config.base_path in
@@ -352,20 +373,29 @@ let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.resul
         id_matches && (include_resolved || is_open resolution))
       rows
   in
-  let shown =
-    rows_within_inline_ceiling (List.map row_json (List.sort compare_rows selected))
+  let matching = List.length selected in
+  let sorted = List.sort compare_rows selected in
+  (* An ask read by its id is returned whole, however long its context is. A
+     result over the lane's ceiling then becomes a blob the Keeper reads in
+     pages, as before. *)
+  let asks, omitted_ask_ids =
+    match wanted_ask_id with
+    | Some _ -> (List.map row_json sorted, [])
+    | None ->
+        (* [returned] is at most [matching], so it has no more digits. *)
+        let envelope_bytes =
+          String.length
+            (Yojson.Safe.to_string
+               (result_json ~keeper_name ~open_count ~matching ~returned:matching ~asks:[]
+                  ~omitted_ask_ids:[]))
+        in
+        split_within_inline_ceiling ~envelope_bytes sorted
   in
   Some
     (Tool_result.ok ~tool_name ~start_time
        (Yojson.Safe.to_string
-          (`Assoc
-            [
-              ("keeper_name", `String keeper_name);
-              ("open_count", `Int open_count);
-              ("matching", `Int (List.length selected));
-              ("returned", `Int (List.length shown));
-              ("asks", `List shown);
-            ])))
+          (result_json ~keeper_name ~open_count ~matching ~returned:(List.length asks) ~asks
+             ~omitted_ask_ids)))
 
 (* masc_ask_withdraw: taking back a question that stopped mattering.
 

@@ -8,9 +8,11 @@ indicates whether a question is open, answered, or withdrawn, including choice \
 ids.
 
 Open asks come first in the order they were asked, and the resolved asks \
-follow newest first. The list stops where the result would no longer fit \
-inline: returned counts the rows shown and matching counts every ask that \
-fits the request. Pass ask_id to read one ask in full."""
+follow newest first. The rows stop where the result would no longer fit \
+inline. returned counts the rows shown, matching counts every ask that fits \
+the request, and omitted_ask_ids names the asks left out, in the same order. \
+Pass ask_id to read one ask whole; an answered or withdrawn ask also needs \
+include_resolved."""
 additional_properties = false
 # RFC-0403 후속. 이 셋은 2026-08-03 ~ 09-02 31일간 fleet 전체에서 호출 0회이고,
 # 그 사이 agent-core keeper 4곳의 요청마다 5,498 B 를 싣고 있었다. 지연의

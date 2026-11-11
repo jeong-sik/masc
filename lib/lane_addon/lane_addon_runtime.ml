@@ -628,7 +628,8 @@ let authorize_captured_exact_dispatch ~store ~declaration_id ~package_id ~config
         | [d] when d.enabled && d.revision=configuration_revision && d.package.id=package_id -> Ok d
         | [] | [_] | _::_::_ -> Error "Original Exact semantic configuration no longer permits dispatch" in
       let live=List.filter (fun (e : entry) ->
-        not e.stopping && Option.is_some e.connection && e.package=declaration.package
+        not e.stopping && Option.is_some e.connection
+        && same_execution_package declaration.package e.package
         && match e.configuration with
           | Some owner -> owner.id=declaration_id && owner.source_path=declaration.source_path
             && owner.revision=configuration_revision

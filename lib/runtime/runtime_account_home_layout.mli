@@ -44,6 +44,21 @@ val person_runtime_root
     and makes nothing. *)
 val under_persons : base_path:string -> string -> bool
 
+(** Why {!persons_remain} has no answer. *)
+type persons_unread =
+  | Not_a_directory  (** {!accounts_dir}, or a part of the path to it, is no directory. *)
+  | Unreadable of Unix.error  (** The directory could not be opened or listed. *)
+
+(** Names no path. *)
+val persons_unread_to_string : persons_unread -> string
+
+(** Whether {!accounts_dir} of [base_path] holds an entry, which is the runtime
+    root of a person or what is left of one. [Ok false] when the directory is
+    not there or is empty. The entries are not read: a login made them, and
+    only their owner or the operator removes them. It lists one directory and
+    makes nothing. *)
+val persons_remain : base_path:string -> (bool, persons_unread) result
+
 (** The home of [account_id] of [client] under [runtime_root], spelled from the
     real path of [runtime_root]. It reads only that real path and makes
     nothing. [runtime_root] is absolute and [account_id] is one path leaf. *)

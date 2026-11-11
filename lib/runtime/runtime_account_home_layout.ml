@@ -61,6 +61,36 @@ let under_persons ~base_path home =
     (spellings persons)
 ;;
 
+type persons_unread =
+  | Not_a_directory
+  | Unreadable of Unix.error
+
+let persons_unread_to_string = function
+  | Not_a_directory -> "it is not a directory"
+  | Unreadable error -> Unix.error_message error
+;;
+
+let persons_remain ~base_path =
+  let persons = Filename.concat (Common.masc_dir_from_base_path ~base_path) accounts_dir in
+  match Unix.opendir persons with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (Unix.ENOTDIR, _, _) -> Error Not_a_directory
+  | exception Unix.Unix_error (error, _, _) -> Error (Unreadable error)
+  | handle ->
+    let rec entry () =
+      match Unix.readdir handle with
+      | "." | ".." -> entry ()
+      | (_ : string) -> Ok true
+      | exception End_of_file -> Ok false
+      | exception Unix.Unix_error (error, _, _) -> Error (Unreadable error)
+    in
+    let answer = entry () in
+    (* The answer was read before the close, so a failed close changes nothing. *)
+    (try Unix.closedir handle with
+     | Unix.Unix_error _ -> ());
+    answer
+;;
+
 let home ~runtime_root client ~account_id =
   if not (Fs_compat.is_capability_leaf account_id)
   then Error "Invalid login account identity."

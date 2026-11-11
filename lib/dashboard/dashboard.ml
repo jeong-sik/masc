@@ -134,10 +134,12 @@ let split_tasks (tasks : Masc_domain.task list) =
   let pending = List.filter (fun task -> (=) task.Masc_domain.task_status Masc_domain.Todo) tasks in
   (active, pending)
 
-let task_lines (tasks : Masc_domain.task list) =
+(* The rows of the Tasks section and how many pending tasks the pending cap
+   left out. *)
+let task_rows (tasks : Masc_domain.task list) =
   let (active, pending) = split_tasks tasks in
   let pending_limit = max_pending_tasks () in
-  let content =
+  let rows =
     (List.map (fun (task : Masc_domain.task) ->
       let assignee =
         match task.task_status with
@@ -152,11 +154,26 @@ let task_lines (tasks : Masc_domain.task list) =
        |> List.map (fun (task : Masc_domain.task) ->
               Printf.sprintf "[P%d] %s (pending)" task.priority task.title))
   in
-  let pending_more = List.length pending - pending_limit in
-  if pending_more > 0 then
-    content @ [Printf.sprintf "   ... +%d more pending" pending_more]
-  else
-    content
+  (rows, List.length pending - pending_limit)
+
+(* Rows past [max_rows] collapse into one line that counts them together with
+   the pending tasks the pending cap already left out. *)
+let cap_task_rows ?max_rows ~pending_more rows =
+  let hidden_pending = max 0 pending_more in
+  match Option.map (max 0) max_rows with
+  | Some limit when limit < List.length rows ->
+      let shown = List.filteri (fun index _ -> index < limit) rows in
+      shown
+      @ [Printf.sprintf "   ... +%d more not shown" (List.length rows - limit + hidden_pending)]
+  | Some _ | None ->
+      if hidden_pending > 0 then
+        rows @ [Printf.sprintf "   ... +%d more pending" hidden_pending]
+      else
+        rows
+
+let task_lines (tasks : Masc_domain.task list) =
+  let (rows, pending_more) = task_rows tasks in
+  cap_task_rows ~pending_more rows
 
 let message_lines (messages : Masc_domain.message list) =
   List.map (fun (message : Masc_domain.message) ->
@@ -405,7 +422,20 @@ let attention_section now ~operator_tasks (snapshots : workspace_snapshot list) 
   let content = Dashboard_attention.format_items items in
   { title = "Attention Required"; content; empty_msg = "No action needed" }
 
-let generate ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : string =
+(* [render max_rows] is the whole text with the Tasks section cut to
+   [max_rows] rows. The full text is returned when it fits [limit]; otherwise
+   the text with the most rows that fits, or with none when even that is over.
+   Tasks is the longest section and the only one that grows with the backlog,
+   so it gives up rows first and the other sections stay whole. *)
+let render_within ~limit ~row_count render =
+  let rec fit shown =
+    let text = render (Some shown) in
+    if shown <= 0 || String.length text <= limit then text else fit (shown - 1)
+  in
+  let full = render None in
+  if String.length full <= limit then full else fit (row_count - 1)
+
+let generate ?(scope = Dashboard_scope_all) ?max_bytes (config : Workspace_utils.config) : string =
   let now = Time_compat.now () in
   let timestamp =
     let tm = Unix.localtime now in
@@ -427,16 +457,26 @@ let generate ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : 
       workspace_id
       (List.length all_agents)
   in
-  (* Operator-first section order *)
-  let sections =
-    [
-      attention_section now ~operator_tasks snapshots;
-      agents_grouped_section now all_agents;
-      keepers_section now;
-      tasks_section all_tasks;
-      messages_section
-        (List.concat_map (fun s -> s.messages) snapshots);
-    ]
+  (* Operator-first section order: attention, agents, keepers, tasks,
+     messages. Tasks is built apart so that its rows can be cut to a size. *)
+  let before_tasks =
+    List.map format_section
+      [
+        attention_section now ~operator_tasks snapshots;
+        agents_grouped_section now all_agents;
+        keepers_section now;
+      ]
+  in
+  let after_tasks =
+    List.map format_section
+      [ messages_section (List.concat_map (fun s -> s.messages) snapshots) ]
+  in
+  let (task_row_list, pending_more) = task_rows all_tasks in
+  let tasks_text max_rows =
+    format_section
+      { title = "Tasks";
+        content = cap_task_rows ?max_rows ~pending_more task_row_list;
+        empty_msg = "(no tasks)" }
   in
   let tempo = Tempo.get_tempo config in
   let total_locks =
@@ -446,8 +486,13 @@ let generate ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : 
     Printf.sprintf "-- Tempo: %.0fs | Locks: %d"
       tempo.Tempo.current_interval_s total_locks
   in
-  let section_strs = List.map format_section sections in
-  String.concat "\n\n" ([header] @ section_strs @ [footer])
+  let render max_rows =
+    String.concat "\n\n"
+      ([header] @ before_tasks @ [tasks_text max_rows] @ after_tasks @ [footer])
+  in
+  match max_bytes with
+  | None -> render None
+  | Some limit -> render_within ~limit ~row_count:(List.length task_row_list) render
 
 let generate_compact ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : string =
   let _scope = scope in
@@ -570,7 +615,7 @@ let () =
     | Some scope ->
         let output =
           if compact then generate_compact ~scope ctx.config
-          else generate ~scope ctx.config
+          else generate ~scope ~max_bytes:Common.max_tool_result_wire_bytes ctx.config
         in
         make_ok ~tool_name:tool_name_arg ~start_time ~data:(`String output) ()
   )

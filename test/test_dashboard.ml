@@ -266,6 +266,105 @@ let test_keepers_section_with_error_truncated () =
   Lib.Keeper_registry.For_testing.clear ();
   cleanup_dir dir
 
+(* ===== Tasks row cap ===== *)
+
+(* In the 72 hours before 2026-11-11 08:40 KST, 80 of the 137 masc_dashboard
+   calls came back as a blob preview because the text was 16,388 to 18,719
+   bytes against the 16,384 byte inline ceiling. The Tasks section was 8,985
+   of 17,424 bytes in a sample, one row per active task. *)
+let test_cap_task_rows_without_a_cap () =
+  let rows = [ "a"; "b"; "c" ] in
+  Alcotest.(check (list string)) "no cap and no pending left out" rows
+    (Dashboard.cap_task_rows ~pending_more:0 rows);
+  Alcotest.(check (list string)) "pending tasks the pending cap left out are counted"
+    [ "a"; "b"; "c"; "   ... +4 more pending" ]
+    (Dashboard.cap_task_rows ~pending_more:4 rows);
+  Alcotest.(check (list string)) "a cap above the row count changes nothing" rows
+    (Dashboard.cap_task_rows ~max_rows:3 ~pending_more:0 rows);
+  Alcotest.(check (list string)) "a negative pending count is no pending line" rows
+    (Dashboard.cap_task_rows ~pending_more:(-2) rows)
+
+let test_cap_task_rows_counts_what_it_cuts () =
+  let rows = [ "a"; "b"; "c"; "d"; "e" ] in
+  Alcotest.(check (list string)) "three rows cut, two pending tasks left out earlier"
+    [ "a"; "b"; "   ... +5 more not shown" ]
+    (Dashboard.cap_task_rows ~max_rows:2 ~pending_more:2 rows);
+  Alcotest.(check (list string)) "a zero cap keeps nothing and counts everything"
+    [ "   ... +5 more not shown" ]
+    (Dashboard.cap_task_rows ~max_rows:0 ~pending_more:0 rows);
+  Alcotest.(check (list string)) "a negative cap is a zero cap"
+    [ "   ... +5 more not shown" ]
+    (Dashboard.cap_task_rows ~max_rows:(-3) ~pending_more:0 rows)
+
+let test_render_within () =
+  let rows = List.init 10 (fun index -> Printf.sprintf "row-%05d" index) in
+  let render max_rows =
+    String.concat "\n"
+      ([ "head" ] @ Dashboard.cap_task_rows ?max_rows ~pending_more:0 rows @ [ "tail" ])
+  in
+  let full = render None in
+  Alcotest.(check string) "a text that fits is returned whole" full
+    (Dashboard.render_within ~limit:(String.length full) ~row_count:10 render);
+  let six = render (Some 6) in
+  let fitted = Dashboard.render_within ~limit:(String.length six) ~row_count:10 render in
+  Alcotest.(check string) "the most rows that fit are kept" six fitted;
+  Alcotest.(check bool) "one more row would not have fit" true
+    (String.length (render (Some 7)) > String.length six);
+  Alcotest.(check string) "when nothing fits no row is kept" (render (Some 0))
+    (Dashboard.render_within ~limit:1 ~row_count:10 render)
+
+let test_generate_max_bytes_keeps_the_other_sections () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = test_dir () in
+  let config = Workspace_utils.default_config dir in
+  setup_workspace config;
+  let output = Dashboard.generate ~max_bytes:1 config in
+  Alcotest.(check bool) "header stays" true (contains output "MASC Dashboard");
+  Alcotest.(check bool) "attention section stays" true (contains output "Attention Required");
+  Alcotest.(check bool) "agents section stays" true (contains output "Agents");
+  Alcotest.(check bool) "footer stays" true (contains output "Tempo:");
+  cleanup_dir dir
+
+let count_of text substr =
+  let rec from position found =
+    match Str.search_forward (Str.regexp_string substr) text position with
+    | at -> from (at + String.length substr) (found + 1)
+    | exception Not_found -> found
+  in
+  from 0 0
+
+(* Four pending tasks with 300 character titles, and a limit 400 bytes under
+   the whole text: the Tasks section gives up rows from its tail, says how many,
+   and the other sections stay. A limit above the text changes nothing. *)
+let test_generate_max_bytes_cuts_the_task_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = test_dir () in
+  let config = Workspace_utils.default_config dir in
+  setup_workspace config;
+  for index = 1 to 4 do
+    ignore
+      (Lib.Workspace.add_task config
+         ~title:(Printf.sprintf "long-task-%d %s" index (String.make 300 'w'))
+         ~priority:3 ~description:"d")
+  done;
+  let full = Dashboard.generate config in
+  let limit = String.length full - 400 in
+  let cut = Dashboard.generate ~max_bytes:limit config in
+  Alcotest.(check bool) "the text fits the limit" true (String.length cut <= limit);
+  Alcotest.(check bool) "the Tasks section lists fewer tasks" true
+    (count_of cut "(pending)" < count_of full "(pending)");
+  Alcotest.(check bool) "it says how many rows it left out" true (contains cut "more not shown");
+  Alcotest.(check bool) "the other sections stay" true
+    (contains cut "Attention Required" && contains cut "Tempo:");
+  let roomy = Dashboard.generate ~max_bytes:(String.length full + 1000) config in
+  Alcotest.(check int) "a limit above the text keeps every task row"
+    (count_of full "(pending)") (count_of roomy "(pending)");
+  Alcotest.(check bool) "and adds no line about rows left out" false
+    (contains roomy "more not shown");
+  cleanup_dir dir
+
 (* ===== Test Suite ===== *)
 
 let format_tests = [
@@ -281,6 +380,16 @@ let timestamp_tests = [
 let generate_tests = [
   "generate compact", `Quick, test_generate_compact;
   "generate full", `Quick, test_generate_full;
+]
+
+let task_cap_tests = [
+  "cap_task_rows without a cap", `Quick, test_cap_task_rows_without_a_cap;
+  "cap_task_rows counts what it cuts", `Quick, test_cap_task_rows_counts_what_it_cuts;
+  "render_within keeps the most rows that fit", `Quick, test_render_within;
+  "generate max_bytes keeps the other sections", `Quick,
+  test_generate_max_bytes_keeps_the_other_sections;
+  "generate max_bytes cuts the task rows", `Quick,
+  test_generate_max_bytes_cuts_the_task_rows;
 ]
 
 let section_tests = [
@@ -306,5 +415,6 @@ let () =
     "Timestamp", timestamp_tests;
     "Generate", generate_tests;
     "Sections", section_tests;
+    "Task cap", task_cap_tests;
     "Keepers", keepers_tests;
   ]

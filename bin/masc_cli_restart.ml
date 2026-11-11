@@ -122,11 +122,21 @@ let observe_single_user ~clock ~run_dir ~base_path ~port =
      | Ok Upgrade.Port_busy -> Error Port_held_by_unknown_process
      | Error error -> Error (Owner_unverifiable (stop_error_message error)))
 
-(* The kernel is asked first. The owner of the lease that announces the port
-   is an account server; its answer on that port is read only to see that it
-   serves and to name its version. An owner that announces nothing is the
-   server of a single user, and with no owner the workspace is nobody's:
-   [/health] says which. *)
+(* The kernel is asked first: which stop a server gets is decided by what its
+   owner announces, not by what the port answers. The owner of the lease that
+   announces the port is an account server; its answer on that port is read
+   only to see that it serves and to name its version. An owner that
+   announces nothing is the server of a single user, and with no owner the
+   workspace is nobody's: [/health] says which.
+
+   The order keeps an answer of the network from choosing the stop. Were the
+   port asked first, a listener there that names this workspace would send
+   the command through the sign-in and the bearer of a single user while an
+   account server owns the workspace.
+
+   The price is paid by a command that ends in a refusal: reading the owner
+   makes the private lease directory and an empty lease file when they are
+   missing ([Upgrade.account_server]), the ones [masc start] makes. *)
 let observe ~clock ~run_dir ~base_path ~port =
   match Upgrade.account_server ~run_dir ~base_path ~port with
   | Error (Server_startup_takeover.Owner_lease_rejected rejection) ->
@@ -233,13 +243,18 @@ let describe_answer ~child_pid = function
      | _, _, Some (`String error) -> Some (Printf.sprintf "answered %d: %s" status error)
      | _ -> Some (Printf.sprintf "answered %d" status))
 
-(* The replacement answers on the port the predecessor drains on, so a 200
-   counts only once it is the replacement's. A single-user server says its pid
-   in the answer, so an answer with a pid is the replacement's or another
-   server's. The probes of an account server say nothing of the process, so
-   for an answer without a pid the kernel is asked who holds the
-   announcement lock of the port: the replacement takes it after the last
-   check that can stop its boot ([Server_accounts.run]).
+let readiness_answer = function
+  | Ok (200, body) ->
+    (match answered_pid body with
+     | Some pid -> Upgrade.Ready_named pid
+     | None -> Upgrade.Ready_unnamed)
+  | Ok ((_ : int), (_ : string)) | Error (_ : string) -> Upgrade.Not_ready
+
+(* Whether the 200 is the replacement's is [Upgrade.replacement_sighting]: by
+   the pid a single-user server says in the answer, or, for the probes of an
+   account server that say nothing of the process, by the holder of the
+   announcement lock of the port. The replacement takes that lock after the
+   last check that can stop its boot ([Server_accounts.run]).
 
    The 200 is read on 127.0.0.1. A replacement bound to 0.0.0.0 can share
    the port with a listener of another process on 127.0.0.1 where the host
@@ -248,23 +263,22 @@ let describe_answer ~child_pid = function
    the replacement answered. *)
 let look ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
   let answer = fresh_get ~clock ~port Server_health_paths.readiness in
-  match answer with
-  | Ok (200, body) ->
-    (match answered_pid body with
-     | Some pid when pid = child.pid -> Ready
-     | Some (_ : int) -> Waiting (describe_answer ~child_pid:child.pid answer)
-     | None ->
-       (match Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port with
-        | Ok (Some holder) when holder = child.pid -> Ready
-        | Ok (Some holder) ->
-          Waiting (Some (Printf.sprintf "pid %d holds the announcement of port %d" holder port))
-        | Ok None -> Waiting (describe_answer ~child_pid:child.pid answer)
-        | Error rejection ->
-          Waiting
-            (Some
-               ("the owner lease cannot be read: "
-                ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection))))
-  | Ok _ | Error _ -> Waiting (describe_answer ~child_pid:child.pid answer)
+  match
+    Upgrade.replacement_sighting ~child_pid:child.pid (readiness_answer answer)
+      ~port_holder:(fun () ->
+        Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port)
+  with
+  | Upgrade.Replacement_serves -> Ready
+  | Upgrade.Another_process_announces { pid } ->
+    Waiting (Some (Printf.sprintf "pid %d holds the announcement of port %d" pid port))
+  | Upgrade.Announcement_unreadable rejection ->
+    Waiting
+      (Some
+         ("the owner lease cannot be read: "
+          ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection))
+  | Upgrade.Another_server_answers { pid = (_ : int) }
+  | Upgrade.Nobody_announces
+  | Upgrade.No_ready_answer -> Waiting (describe_answer ~child_pid:child.pid answer)
 
 let watch ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
   let rec ready last =

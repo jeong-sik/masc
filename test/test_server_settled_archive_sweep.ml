@@ -3,6 +3,7 @@ module Owner = Lane_addon_tool_request_owner
 module Store = Lane_addon_store
 module Progress = Lane_addon_request_progress
 module Sweep = Server_settled_archive_sweep
+module Consumer = Server_tool_request_consumer
 
 let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let owned value = get (Result.map_error Owner.error_to_string value)
@@ -117,6 +118,51 @@ let test_archived_body_is_deleted () = with_store (fun root store ->
   Alcotest.(check int) "the archived body is deleted" 1 report.removed_bodies;
   Alcotest.(check bool) "the body file is gone" false (Sys.file_exists body))
 
+(* A consumer that settles nothing still has live records, and the pass reads
+   every live record. Each consumer of one scope is asked, so one added to the
+   type is asked too. *)
+let test_every_one_scope_consumer_lets_the_pass_run () =
+  List.iter (fun consumer -> with_store (fun root store ->
+    let scope = Consumer.scope consumer in
+    ignore (retain store ~scope "original");
+    settle_stray store ~scope:curator;
+    let report = run store in
+    Alcotest.(check int) (scope ^ ": its live record is read") 1 report.live_records;
+    Alcotest.(check int) (scope ^ ": the record no live record names is deleted") 1
+      report.removed_records;
+    Alcotest.(check bool) (scope ^ ": the stray record is gone") false
+      (archived root ~scope:curator "stray")))
+    Consumer.all_of_one_scope
+
+let consumer_name = function
+  | Consumer.Workspace_curator -> "Workspace_curator"
+  | Consumer.Completion_review -> "Completion_review"
+  | Consumer.Goal_proof_review -> "Goal_proof_review"
+  | Consumer.Candle_appraisal -> "Candle_appraisal"
+
+let found_name scope = match Consumer.of_scope scope with
+  | Some (Consumer.One_scope found) -> consumer_name found
+  | Some (Consumer.Librarian _) -> "a Librarian producer"
+  | None -> "no consumer"
+
+(* No two consumers share a scope, and no Librarian producer claims the scope
+   of another consumer. *)
+let test_a_one_scope_consumer_is_found_by_its_scope () =
+  List.iter (fun consumer ->
+    Alcotest.(check string) (Consumer.scope consumer) (consumer_name consumer)
+      (found_name (Consumer.scope consumer)))
+    Consumer.all_of_one_scope
+
+(* The scope each owner module retains its originals under. *)
+let test_an_owner_scope_has_its_consumer () =
+  List.iter (fun (scope, consumer) ->
+    Alcotest.(check string) scope (consumer_name consumer) (found_name scope))
+    [ Workspace_memory_execution_capture.scope, Consumer.Workspace_curator
+    ; Verifier_review_owner.scope, Consumer.Completion_review
+    ; Goal_verifier_worker.scope, Consumer.Goal_proof_review
+    ; Server_candle_appraiser.scope, Consumer.Candle_appraisal
+    ]
+
 let test_unclaimed_scope_refuses () = with_store (fun root store ->
   settle_stray store ~scope:curator;
   ignore (retain store ~scope:"an-owner-no-sweep-knows" "original");
@@ -137,6 +183,12 @@ let () = Alcotest.run "settled archive sweep" ["sweep", [
   Alcotest.test_case "a floor step gate keeps its settled execution" `Quick
     (gate_names_its_execution ~gate_scope:floor_gate ~kind:"librarian-floor-step-gate" ~execution_scope:floor);
   Alcotest.test_case "an archived body is deleted" `Quick test_archived_body_is_deleted;
+  Alcotest.test_case "a live record of each one-scope consumer lets the pass run" `Quick
+    test_every_one_scope_consumer_lets_the_pass_run;
   Alcotest.test_case "a scope no owner claims refuses the pass" `Quick test_unclaimed_scope_refuses;
   Alcotest.test_case "an unknown archive directory refuses the pass" `Quick test_unknown_archive_directory_refuses;
+]; "consumers", [
+  Alcotest.test_case "a one-scope consumer is found by its scope" `Quick
+    test_a_one_scope_consumer_is_found_by_its_scope;
+  Alcotest.test_case "an owner's scope has its consumer" `Quick test_an_owner_scope_has_its_consumer;
 ]]

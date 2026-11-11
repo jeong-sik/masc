@@ -2,6 +2,7 @@ module Store = Lane_addon_store
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Preflight = Keeper_librarian_store_preflight
+module Consumer = Server_tool_request_consumer
 module Names = Set.Make (String)
 open Result.Syntax
 
@@ -30,21 +31,6 @@ let error_to_string = function
       "settled archive sweep stopped after deleting %d records and %d bodies: %s"
       removed_records removed_bodies detail
 
-(* Every owner that keeps records under tool-request-owners. The review
-   owners and the Curator each keep one fixed scope; a Librarian scope is
-   named by the producer that owns its kind. *)
-type kind =
-  | Librarian of Preflight.purpose
-  | Workspace_curator
-  | Completion_review
-  | Goal_proof_review
-
-let kind_of_scope scope =
-  if String.equal scope Workspace_memory_execution_capture.scope then Some Workspace_curator
-  else if String.equal scope Verifier_review_owner.scope then Some Completion_review
-  else if String.equal scope Goal_verifier_worker.scope then Some Goal_proof_review
-  else Option.map (fun purpose -> Librarian purpose) (Preflight.purpose scope)
-
 let progress_ids progress =
   List.concat_map
     (function
@@ -62,24 +48,30 @@ let progress_ids progress =
       | Progress.Observer _ -> [])
     (Progress.events progress)
 
-(* The function each gate inventory groups its records by. *)
+(* The function each gate inventory groups its records by. [None] for a
+   record that names only the request IDs of its progress events. *)
 let payload_ids =
   let gate parent original=Result.map (fun id -> [id]) (parent original) in
   function
-  | Librarian Preflight.Admission_gate -> Some (gate Keeper_librarian_admission_gate.parent_execution_id)
-  | Librarian Preflight.History_gate -> Some (gate Keeper_librarian_durable_gate.parent_execution_id)
-  | Librarian Preflight.Floor_gate -> Some (gate Keeper_librarian_floor_step_gate.parent_execution_id)
-  | Librarian Preflight.Admission_closure -> Some (fun (original:Owner.retained) ->
+  | Consumer.Librarian Preflight.Admission_gate ->
+    Some (gate Keeper_librarian_admission_gate.parent_execution_id)
+  | Consumer.Librarian Preflight.History_gate ->
+    Some (gate Keeper_librarian_durable_gate.parent_execution_id)
+  | Consumer.Librarian Preflight.Floor_gate ->
+    Some (gate Keeper_librarian_floor_step_gate.parent_execution_id)
+  | Consumer.Librarian Preflight.Admission_closure -> Some (fun (original:Owner.retained) ->
       let* owner=match original.request with
         | `Assoc fields -> Option.to_result ~none:"Closure has no captured owner" (List.assoc_opt "owner" fields)
         | _ -> Error "Closure payload is not an object" in
       let* owner=Keeper_librarian_admission_capture.owner_of_json owner in
       let+ closure=Keeper_librarian_admission_closure.restore ~owner original in
       Keeper_librarian_admission_closure.named_ids closure)
-  | Librarian
+  | Consumer.Librarian
       ( Preflight.Admission_execution | Preflight.Admission_part | Preflight.Admission_partition
       | Preflight.History_execution | Preflight.Floor_execution )
-  | Workspace_curator | Completion_review | Goal_proof_review -> None
+  | Consumer.One_scope
+      ( Consumer.Workspace_curator | Consumer.Completion_review | Consumer.Goal_proof_review
+      | Consumer.Candle_appraisal ) -> None
 
 (* Parser errors can carry snippets of private records or bodies, so a
    refusal names only the class of failure. *)
@@ -97,12 +89,12 @@ let live_names ~store =
     List.fold_left
       (fun names record ->
         let* names = names in
-        let* kind =
+        let* consumer =
           Option.to_result ~none:(Sweep_refused "a live record is in a scope no owner claims")
-            (kind_of_scope (Owner.Record.scope record))
+            (Consumer.of_scope (Owner.Record.scope record))
         in
         let* parent =
-          match payload_ids kind with
+          match payload_ids consumer with
           | None -> Ok []
           | Some named_ids ->
             let* original =

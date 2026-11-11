@@ -61,7 +61,8 @@ type context_pane_body =
     }
 
 type diff_surface =
-  { ds_title : string  (** the screen title *)
+  { ds_path : string list
+        (** the steps from the top-row screen to this reading's list *)
   ; ds_address : string  (** what the header names beside "vs HEAD" *)
   ; ds_context_lines : string list
         (** drawn under the header, each followed by a divider *)
@@ -342,15 +343,6 @@ val here_row :
     is not drawn. The last
     step folds first when the row is narrow, readings give way whole from the
     end, and the position is never cut. The product name is not drawn. *)
-
-val surface_title_row :
-  cols:int -> Masc_tui_types.state -> lead:string -> readings:string list -> string
-(** The title row of a surface drawn in [cols] columns: [lead], the [readings]
-    (each carrying its own leading gap) and {!connection_badge} last. The
-    badge is kept whole when it fits; otherwise the feed's loss is kept ahead
-    of an ellipsis for what was left out, and a width with no room for the
-    ellipsis shows [!]. Readings give way whole from the end, and the lead is
-    cut last. *)
 
 type compact_connection_state =
   | Compact_workspace_mismatch
@@ -688,6 +680,9 @@ val tree_diff_gutter : Masc.Tui_decode.git_diff_row -> string
 val tree_diff_row_span :
   ?hscroll:int -> width:int -> Masc.Tui_decode.git_diff_row -> Span.t
 
+val git_changes_step : Masc_tui_types.state -> string
+(** The step the Git Changes list and its diffs take from Workspace. *)
+
 val render_diff_surface :
   Masc_tui_types.state ->
   diff_surface ->
@@ -808,7 +803,7 @@ val answering_preview_rows : int
 
 (** Common title and content geometry for surfaces with two panes. *)
 val pane_surface_header : Buffer.t -> int -> Masc_tui_types.state ->
-  name:string -> split:bool -> unit
+  path:string list -> split:bool -> unit
 val pane_surface_content_height : rows:int -> int
 
 val models_account_reading : provider:string -> overview_account_emails_reading -> string option * string list

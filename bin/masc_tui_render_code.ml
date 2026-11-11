@@ -335,7 +335,7 @@ let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
   let split = cols >= keeper_split_threshold_cols in
-  pane_surface_header buf cols state ~name:"Workspace / Code" ~split;
+  pane_surface_header buf cols state ~path:[ ui_text state ~ko:"코드" ~en:"code" ] ~split;
   let list_rows_budget = code_pane_content_height state in
   let entries = code_entries state in
   let total = List.length entries in

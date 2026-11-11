@@ -2118,14 +2118,6 @@ let surface_connection_badge (state : state) ~width =
     | Some loss when cells loss <= room -> loss ^ omitted
     | Some _ | None -> if room < 1 then warning else String.trim omitted
 
-(* Reserve the two-cell gap added by [detail_heading] before sizing the
-   status. Readings give way whole, then the title; an empty first reading
-   prevents the first real count or clock from being cut to a fragment. *)
-let surface_title_row ~cols (state : state) ~lead ~readings =
-  let width = max 0 (framed_inner_width cols - Message_layout.display_width "  ") in
-  detail_heading ~cols ~lead:(Lead_text lead) ~id:"" ~after:("" :: readings)
-    ~tail:(surface_connection_badge state ~width)
-
 (* The row under the top row: where this screen is -- the top-row screen it
    belongs to, then each step taken into it -- then what the screen has to
    say about its own reading, and how far down it the reader is. One function
@@ -3865,7 +3857,8 @@ let tree_diff_row_span ?(hscroll = 0) ~width (row : Masc.Tui_decode.git_diff_row
    listed once here and the frame is drawn once below; each copy used to
    count its own chrome by hand. *)
 type diff_surface =
-  { ds_title : string  (** the screen title *)
+  { ds_path : string list
+        (** the steps from the top-row screen to this reading's list *)
   ; ds_address : string  (** what the header names beside "vs HEAD" *)
   ; ds_context_lines : string list
         (** drawn under the header, each followed by a divider *)
@@ -3910,6 +3903,9 @@ let diff_surface_geometry ~rows ~context_lines ~has_error =
     dsg_content_height = content_height }
 
 
+(* The step the Git Changes list and its diffs take from Workspace. *)
+let git_changes_step (state : state) = ui_text state ~ko:"Git 변경" ~en:"git changes"
+
 let render_diff_surface (state : state) (ds : diff_surface) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -3921,8 +3917,8 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   in
   let total = List.length diff_rows in
   let header =
-    detail_heading ~cols ~lead:(Lead_text (screen_title ds.ds_title ^ " "))
-      ~id:ds.ds_address ~after:[ "  vs HEAD" ] ~tail:(connection_badge state)
+    here_row ~cols state ~path:(ds.ds_path @ [ ds.ds_address ])
+      ~readings:[ "vs HEAD" ] ~position:None
   in
   if rows < diff_surface_minimum_rows then begin
     Buffer.add_string buf (Message_layout.fit_width
@@ -4012,7 +4008,7 @@ let render_repository_changes_diff (state : state) ~path =
   let _, cols = get_terminal_size () in
   let change_ctx = resolve_change_context state ~path_opt:(Some path) in
   render_diff_surface state
-    { ds_title = " MASC Git Diff"
+    { ds_path = [ git_changes_step state ]
     ; ds_address = Terminal_text.single_line path
     ; ds_context_lines = build_change_context_lines ~cols change_ctx
     ; ds_diff =
@@ -6357,8 +6353,8 @@ let answering_preview_rows = 3
    sits above both panes, so each pane gives up one row to it. *)
 let pane_surface_title_rows = 1
 
-let pane_surface_title (state : state) ~cols ~name =
-  surface_title_row ~cols state ~lead:(screen_title (" MASC " ^ name)) ~readings:[]
+let pane_surface_title (state : state) ~cols ~path =
+  here_row ~cols state ~path ~readings:[] ~position:None
 
 (* The row between the strip and the title, then the title. Every other
    surface draws that row first -- a gap on its own, the box's top edge beside
@@ -6368,9 +6364,9 @@ let pane_surface_title (state : state) ~cols ~name =
    than on every other screen, and the heading read as a second, detached
    block. Beside the other pane the list's box draws its top edge on that row,
    so a split frame keeps it there. The row count is the same either way. *)
-let pane_surface_header buf cols (state : state) ~name ~split =
+let pane_surface_header buf cols (state : state) ~path ~split =
   if not split then box_top buf cols;
-  box_line buf cols (pane_surface_title state ~cols ~name)
+  box_line buf cols (pane_surface_title state ~cols ~path)
 
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)

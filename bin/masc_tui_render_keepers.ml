@@ -4804,7 +4804,7 @@ let render_keeper_detail (state : state) =
         (Printf.sprintf "%s  %s"
            (screen_title " Keepers \xe2\x96\xb8 detail")
            (connection_badge state))
-      ~hints:(Masc_tui_keys.footer_hints state.view)
+      ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
       ~body:(fun ~budget:_ c ->
         c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
   end else begin
@@ -4882,7 +4882,7 @@ let render_keeper_logs (state : state) =
         (Printf.sprintf "%s  %s"
            (screen_title " Keepers \xe2\x96\xb8 logs")
            (connection_badge state))
-      ~hints:(Masc_tui_keys.footer_hints state.view)
+      ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
       ~body:(fun ~budget:_ c ->
         c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
   end else begin
@@ -4945,7 +4945,7 @@ let render_keeper_logs (state : state) =
 
     Buffer.add_string buf
       (footer_line state ~max_cells:cols
-         ~hints:(Masc_tui_keys.footer_hints state.view));
+         ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view));
 
     finish_surface state ~clamped:(Keeper_logs_scroll { scroll; cols })
       ~surface_key:"keeper-logs" ~rows:terminal_rows

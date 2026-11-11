@@ -989,7 +989,7 @@ let render_changes_list (state : state) =
     (* The footer is the key table's (for_surface Changes); never a literal here. *)
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
+         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false ~has_rows:(shown > 0)
             Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 

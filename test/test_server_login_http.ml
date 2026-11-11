@@ -317,7 +317,7 @@ let with_installation f =
           let github = { grants = Hashtbl.create 4; tokens = Hashtbl.create 4; issued = ref 0 } in
           let routes =
             { R.zone
-            ; transactions = Oidc_login_transaction.create ~capacity:4
+            ; transactions = Oidc_login_transaction.create ()
             ; google = None
             ; github = Some client
             ; get = github_get github

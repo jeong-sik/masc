@@ -1,0 +1,30 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  /shift▌                                                                        │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│◆ Chat                                           ◇ Global                                         │
+│  Ctrl-J           newline in the draft;           Tab / Shift-Tab  next / previous surface; the  │
+│                   Shift-Enter does the same                        chat composer keeps them to   │
+│                   where the terminal reports                       complete a /command           │
+│                   it                                                                             │
+│  Tab / Shift-Tab  complete the /command being   ◇ Workspace / Code                               │
+│                   typed, or its argument such     Shift-Left / Shift-Right with a file open,     │
+│                   as a Keeper name; the chat                       scroll it sideways one cell   │
+│                   composer keeps these keys,                       at a time                     │
+│                   so they do not switch                                                          │
+│                   surface here                                                                   │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page
+ › to imp   (i to write)

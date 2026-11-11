@@ -823,7 +823,7 @@ let test_sparse_whole_candidate_partition_reads_fresh_memory ()=
     io (fun () ->
       let batch=match pending fixture.keepers_dir with Some batch -> batch | None -> fail "missing original inputs" in
       let b=List.filter (fun (id:Current.explicit_candidate_id) -> id.request_id="b") (Queue.candidate_ids batch) in
-      Current.apply_disposition ~explicit_candidate_ids:b ~absorbed:[] ~revisions:[]
+      Current.apply_disposition ~pass:Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:b ~absorbed:[] ~revisions:[]
         ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:101.
         ~source:{kind=Current.Librarian;trace_id="previous-real-consumption"} ~new_claims:[fact "Durable B"] () |> get |> ignore;
       Queue.acknowledge_committed ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get);
@@ -1435,7 +1435,7 @@ let retire_fixture_fact (fixture:fixture) (original:Types.fact) =
     Current.replace ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~expected_revision:None
       ~now:100. ~source:{Current.kind=Current.Explicit_write;trace_id="retirement-policy-fixture"}
       ~facts:[original] () |> get |> ignore;
-    match Current.retract_fact ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:200.
+    match Current.retract_fact ~pass:Keeper_memory_commit_pass.Keeper_delete ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name ~now:200.
       ~source:{Current.kind=Current.Explicit_retract;trace_id="retirement-policy-fixture"}
       ~memory_id:(Types.memory_id original) ~reason:"Retained original retirement reason" () with
     | Ok _ -> () | Error _ -> fail "the retirement fixture could not retract its source"))

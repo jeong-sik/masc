@@ -786,7 +786,8 @@ let checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~
           let* () = Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir
             ~runtime_keepers_dir ~keeper_name external_cursor ~through:external_through
             ~atom:(Some range) ~official:None in
-          let* _ = Current.apply_program ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+          let* _ = Current.apply_program ~pass:Keeper_memory_commit_pass.Durable
+            ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
             ~anchor:inferred.anchor ~source ~validate_source:(fun () -> Ok ())
             ~on_committed:(fun _ -> committed := true) inferred.program in
           Ok ()))) in
@@ -864,7 +865,8 @@ let official_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~of
           let* () = Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir
             ~runtime_keepers_dir ~keeper_name external_cursor ~through:external_through
             ~atom:None ~official:(Some range) in
-          let* _ = Current.apply_program ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
+          let* _ = Current.apply_program ~pass:Keeper_memory_commit_pass.Durable
+            ~keepers_dir ~keeper_id:keeper_name ~now:(Time_compat.now ())
             ~anchor:inferred.anchor ~source ~validate_source:(fun () -> Ok ())
             ~on_committed:(fun _ -> committed := true) inferred.program in
           Ok ()))) in
@@ -1767,6 +1769,7 @@ let commit_with_runtime_runner
   let committed = ref false and reports = ref [] in
   Keeper_librarian_runtime.run_best_effort
     ?cli_runner
+    ~write_scope:(Context_and_memory Keeper_memory_commit_pass.Durable)
     ~on_memory_committed:(fun () -> committed := true)
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ?durable_range_id:range_id

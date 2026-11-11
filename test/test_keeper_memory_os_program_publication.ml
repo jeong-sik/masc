@@ -44,7 +44,7 @@ let fixture f = with_store @@ fun keepers_dir ->
   let anchor=Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper |> require in
   f keepers_dir anchor
 let publish ?on_committed ~keepers_dir ~anchor program =
-  Current.apply_program ?on_committed ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source
+  Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Durable ?on_committed ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source
     ~validate_source:(fun () -> Ok ()) program
 let read ~keepers_dir = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper |> require
 let rewrite ~keepers_dir facts =
@@ -127,10 +127,10 @@ let test_source_and_keeper_binding () = fixture @@ fun keepers_dir anchor ->
   let before=Fs_compat.load_file (snapshot_path ~keepers_dir) in
   let other=Masc_test_deps.keeper_id_fixture "other-keeper" in
   publish ~keepers_dir ~anchor {(program ()) with keeper_id=other} |> refused;
-  Current.apply_program ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor
+  Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor
     ~source:(Current.Official_program_source {range;selected_turns=[1,turn_ref,List.rev messages]})
     ~validate_source:(fun () -> Ok ()) (program ()) |> refused;
-  Current.apply_program ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source
+  Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source
     ~validate_source:(fun () -> Error "original cursor changed") (program ()) |> refused;
   check string "failed source admission leaves Memory unchanged" before (Fs_compat.load_file (snapshot_path ~keepers_dir))
 
@@ -149,7 +149,7 @@ let test_atom_original_boundary () = fixture @@ fun keepers_dir anchor ->
   let range : Current.durable_range_id = {receipt_scope="original-atom-range";trace_id="program-source";
     history_start_boundary_line=1;start_atom=0;end_atom=1;last_atom_digest;
     end_boundary_line=2;boundary_lines_seen=2;unread_messages=[]} in
-  let apply checkpoint=Current.apply_program ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor
+  let apply checkpoint=Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor
     ~source:(Current.Atom_program_source {range;checkpoint}) ~validate_source:(fun () -> Ok ()) program in
   apply (List.rev messages) |> refused;
   let committed=apply messages |> require in
@@ -160,7 +160,7 @@ let test_atom_original_boundary () = fixture @@ fun keepers_dir anchor ->
       |> require = Some range)
 
 let injected ~keepers_dir ~anchor ~write_snapshot ~before_journal ~on_committed program =
-  Current.For_testing.apply_program_with_publication_io ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor
+  Current.For_testing.apply_program_with_publication_io ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor
     ~source ~validate_source:(fun () -> Ok ()) ~write_snapshot ~sync_snapshot:(fun _ -> Error "not yet confirmed")
     ~before_journal ~on_committed program
 
@@ -239,7 +239,7 @@ let test_quarantine_and_empty_incarnation () =
     let empty_program=Program.create ~transaction_id:"absent-incarnation" ~keeper_id ~turn_ref
       ~sources:[List.hd sources] ~unread:[] ~initial_current:None ~decisions:[initial] |> require in
     let single=Current.Official_program_source {range;selected_turns=[1,turn_ref,[List.hd messages]]} in
-    Current.apply_program ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source:single
+    Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source:single
       ~validate_source:(fun () -> Ok ()) empty_program |> refused)
 
 type hole_boundary = Hole_atom | Hole_official
@@ -309,7 +309,7 @@ let test_hole_publication_recovers_external_cursor boundary fault () =
       Sys.remove (journal ~keepers_dir);Unix.mkdir (journal ~keepers_dir) 0o700
     | Hole_ledger_corrupt -> Fs_compat.save_file ledger_path "{"
     | Hole_before_rename | Hole_after_rename -> () in
-  let attempted=Current.For_testing.apply_program_with_publication_io
+  let attempted=Current.For_testing.apply_program_with_publication_io ~pass:Masc.Keeper_memory_commit_pass.Durable
     ~keepers_dir ~keeper_id:keeper ~now:30. ~anchor ~source ~validate_source:(fun () -> Ok ())
     ~write_snapshot ~sync_snapshot:(fun _ -> Error "snapshot durability deliberately unconfirmed")
     ~before_journal ~on_committed program in
@@ -354,7 +354,7 @@ let test_hole_publication_recovers_external_cursor boundary fault () =
        (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper |> require=[]);
      check string "an uncommitted program leaves its external range pending" pending (Fs_compat.load_file cursor_path);
      check int "rollback recovery never invokes the producer" 0 (List.length !callbacks);
-     ignore (Current.apply_program ~on_committed ~keepers_dir ~keeper_id:keeper ~now:30.
+     ignore (Current.apply_program ~pass:Masc.Keeper_memory_commit_pass.Durable ~on_committed ~keepers_dir ~keeper_id:keeper ~now:30.
        ~anchor ~source ~validate_source:(fun () -> Ok ()) program |> require : Current.program_commit)
    | Hole_after_rename | Hole_journal_blocked | Hole_ledger_corrupt -> ());
   check int "ordinary recovery acknowledges only the exact complete program boundary" 1

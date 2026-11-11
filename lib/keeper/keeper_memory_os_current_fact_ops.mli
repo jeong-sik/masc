@@ -24,6 +24,7 @@ val replace :
 
 val upsert_fact :
   ?clock:float Eio.Time.clock_ty Eio.Time.clock_base ->
+  pass:Keeper_memory_commit_pass.t ->
   keepers_dir:string ->
   keeper_id:string ->
   now:float ->
@@ -35,6 +36,7 @@ val upsert_fact :
 
 val retract_fact :
   ?clock:float Eio.Time.clock_ty Eio.Time.clock_base ->
+  pass:Keeper_memory_commit_pass.t ->
   keepers_dir:string ->
   keeper_id:string ->
   now:float ->
@@ -48,6 +50,7 @@ val retract_fact :
 
 val supersede_fact :
   ?clock:float Eio.Time.clock_ty Eio.Time.clock_base ->
+  pass:Keeper_memory_commit_pass.t ->
   keepers_dir:string ->
   keeper_id:string ->
   now:float ->
@@ -61,6 +64,7 @@ val supersede_fact :
 
 val retract_facts :
   ?clock:float Eio.Time.clock_ty Eio.Time.clock_base ->
+  pass:Keeper_memory_commit_pass.t ->
   keepers_dir:string ->
   keeper_id:string ->
   expected_revision:int ->
@@ -98,6 +102,7 @@ module For_testing :
       before_journal:(unit -> 'a) ->
       on_committed:(program_commit ->
                     unit) ->
+      pass:Keeper_memory_commit_pass.t ->
       keepers_dir:string ->
       keeper_id:string ->
       now:float ->

@@ -53,7 +53,7 @@ let capture () =
     {Current.candidate_id;source_fact=candidate.fact;target_memory_id=Memory.memory_id target})
     (List.combine candidates ids) targets in
   let source={Current.kind=Current.Librarian;trace_id} in
-  ignore (Current.apply_disposition ~keepers_dir ~keeper_id ~now ~source
+  ignore (Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~keepers_dir ~keeper_id ~now ~source
     ~explicit_candidate_ids:ids
     ~admission_recall:{Current.decided_at_revision=None; bindings}
     ~absorbed:[] ~revisions:[] ~new_claims:[a;u] () |> require : Current.disposition);
@@ -66,7 +66,7 @@ let capture () =
   let revise old successors reason =
     let revisions=List.map (fun successor ->
       {Memory.superseded=Memory.memory_id old;superseded_by=Memory.memory_id successor}) successors in
-    ignore (Current.apply_disposition ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
+    ignore (Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id ~now:(Time_compat.now ()) ~source
       ~dropped_statements:[{Memory.memory_id=Memory.memory_id old;reason}]
       ~absorbed:[] ~revisions ~new_claims:successors () |> require : Current.disposition) in
   revise a [b;c] "Authored fixture: E17 owner separates the production and staging policy records.";

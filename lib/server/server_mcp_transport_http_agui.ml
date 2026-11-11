@@ -13,8 +13,6 @@ let ag_ui_event_of_masc_event (delivery : Sse.delivery) =
     delivery.payload
   |> Ag_ui.event_to_sse ~id:delivery.event_id
 
-let sse_ping_interval_s = 30.0
-
 let presence_stream_headers ~deps raw_session_id protocol_version origin =
   Httpun.Headers.of_list
     ([
@@ -148,7 +146,7 @@ let handle_ag_ui_events ~deps request reqd =
                         ~ping:(fun () ->
                           let rec loop () =
                             if not (Atomic.get info.stop) then (
-                              (try Eio.Time.sleep clock sse_ping_interval_s
+                              (try Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s
                                with Eio.Cancel.Cancelled _ as exn -> raise exn
                                   | exn -> Log.Server.debug "SSE ping sleep interrupted: %s" (Printexc.to_string exn));
                               (try
@@ -268,7 +266,7 @@ let handle_presence_events ~deps request reqd =
                 ~ping:(fun () ->
                   let rec loop () =
                     if not (Atomic.get info.stop) then (
-                      (try Eio.Time.sleep clock sse_ping_interval_s
+                      (try Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s
                        with
                        | Eio.Cancel.Cancelled _ as e -> raise e
                        | exn ->

@@ -1,0 +1,24 @@
+ ‹1 작업  ▸키퍼  기능·플러그인  워크스페이스 1›
+
+  MASC Keepers (3)                  HTTP [연결됨]
+   ‹2  cause  time  memory  age  ▸runtime  24h
+ ? 3 unknown ???
+   fleet blocked   running 0/2
+   awaiting verdict 1
+   not running: relay, scout
+
+     keeper                   last ◂ 4h
+    no failing Keepers
+
+
+
+
+
+
+
+
+
+ ✗ failed in last walk · ▹ next head · ◌ resting…
+ ────────────────────────────────────────────────
+  Enter / Right:story / detail  Esc:dashboard  q…?
+ › no keeper selected

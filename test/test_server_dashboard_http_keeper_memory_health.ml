@@ -908,7 +908,7 @@ let test_unread_evidence_is_observed_without_publication () =
   Yojson.Safe.to_file path (S.to_json snapshot);
   let range : Current.official_range_id = {receipt_scope="health-fixture";
     after_boundary_line=0;turns=[2,turn_ref];unread_messages=[official]} in
-  ignore (Current.apply_disposition ~keepers_dir ~keeper_id:keeper_name ~now:test_now
+  ignore (Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable ~keepers_dir ~keeper_id:keeper_name ~now:test_now
     ~source ~revisions:[] ~absorbed:[] ~official_range_id:range ~new_claims:[] () |> require_ok);
   ignore (Current.committed_unread_messages ~keepers_dir ~keeper_id:keeper_name |> require_ok);
   let files = [path;ledger;Current.durable_range_receipt_path ~keepers_dir ~keeper_id:keeper_name] in

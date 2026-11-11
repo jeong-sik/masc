@@ -1,0 +1,30 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  /history▌                                                                      │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│◆ Chat                                           ◇ Slash commands                                 │
+│  PgUp/PgDn        scroll history by a page        /errors         read current history and       │
+│                                                                   memory loading errors in full  │
+│◇ Work                                                                                            │
+│  b                read captured Goal totals,    ◇ Operations / Usage                             │
+│                   the global Task backlog,        w                on Usage: cycle the exact     │
+│                   history, and snapshot                            UTC day window for provider   │
+│                   changes                                          report history and tool       │
+│  H                in Task detail, extend the                       calls                         │
+│                   observed history with its                                                      │
+│                   known earlier page            ◇ System                                         │
+│                                                   A                event history under System    │
+│◇ Work / Task Review                                                                              │
+│  h                the queue is what a task is   ◇ Workspace / Code                               │
+│                   still waiting on; the           Left / Esc       close the history, then the   │
+│                   history is every request                         file, then climb one          │
+│                   ever submitted, which                            directory; Esc at the         │
+│                   nothing removes                                  project root leaves for       │
+│                                                                    Workspace                     │
+│◇ Features & plugins / Resources                   d                on the project tree, list     │
+│  [lines 1-22/38]                                                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page
+ › to imp   (i to write)

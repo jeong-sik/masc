@@ -1756,6 +1756,8 @@
  (modules test_systhread_host)
  (libraries alcotest masc.masc_core masc.fs_compat eio eio_main unix threads.posix))
 
+(include stanzas/bench_systhread_cpu_work.inc)
+
 (test
  (name test_pool_lane)
  (modules test_pool_lane)

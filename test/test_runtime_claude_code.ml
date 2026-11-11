@@ -2042,7 +2042,7 @@ let test_api_diagnostic_preserves_terminal_error_detail () =
     match run_fixture path with
     | Error
         (Runtime_claude_code.Turn_failed_with_observation
-           { detail; api_error_status = Some 400
+           { detail; api_error_status = Some 400; api_error_cause = None
            ; tool_effect_attempted = false; response_emitted = false }) ->
       check
         string
@@ -2052,6 +2052,38 @@ let test_api_diagnostic_preserves_terminal_error_detail () =
         detail
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "diagnostic generic failure completed")
+;;
+
+(* The result frame is read with the cause of the root diagnostic that ended
+   the turn. A model response after the diagnostic means the client went on,
+   so the earlier cause no longer says how the turn ended. *)
+let test_api_diagnostic_cause_reaches_the_terminal_error () =
+  let named_cause =
+    match Yojson.Safe.from_string api_error_assistant with
+    | `Assoc fields ->
+      Yojson.Safe.to_string (`Assoc (("error", `String "authentication_failed") :: fields))
+    | _ -> fail "assistant fixture must be an object"
+  in
+  let cause_of frames =
+    with_fixture frames (fun path ->
+      match run_fixture path with
+      | Error (Runtime_claude_code.Turn_failed_with_observation { api_error_cause; _ }) ->
+        api_error_cause
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "a refused turn completed")
+  in
+  (match cause_of [ Emit named_cause; Emit generic_400_result ] with
+   | Some Runtime_claude_code.Authentication_failed -> ()
+   | Some Runtime_claude_code.Other_api_error_cause | None ->
+     fail "the cause the diagnostic named did not reach the terminal error");
+  (match cause_of [ Emit api_error_assistant; Emit generic_400_result ] with
+   | None -> ()
+   | Some (Runtime_claude_code.Authentication_failed | Runtime_claude_code.Other_api_error_cause)
+     -> fail "a diagnostic that named no cause produced one");
+  match cause_of [ Emit named_cause; Emit assistant; Emit generic_400_result ] with
+  | None -> ()
+  | Some (Runtime_claude_code.Authentication_failed | Runtime_claude_code.Other_api_error_cause)
+    -> fail "a cause outlived the model response that followed it"
 ;;
 
 let assistant_api_flag flag =
@@ -5027,6 +5059,10 @@ let () =
             "terminal error detail survives"
             `Quick
             test_api_diagnostic_preserves_terminal_error_detail
+        ; test_case
+            "the named cause reaches the terminal error"
+            `Quick
+            test_api_diagnostic_cause_reaches_the_terminal_error
         ; test_case
             "identical ordinary prose remains response"
             `Quick

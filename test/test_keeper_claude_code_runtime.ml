@@ -86,6 +86,17 @@ let access_rejection status =
     status
 ;;
 
+(* Measured on Claude Code 2.1.322 (2026-11-11) with a login past its time
+   limit: the diagnostic envelope names the cause, and the result frame has
+   no HTTP status. *)
+let login_expired_diagnostic =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-login-expired","error":"authentication_failed","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Failed to authenticate: this login reached its time limit and cannot be renewed."}]}}|}
+;;
+
+let login_expired_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-login-expired","result":"Failed to authenticate: this login reached its time limit and cannot be renewed.","api_error_status":null,"terminal_reason":"api_error"}|}
+;;
+
 let prompt_too_long_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400,"terminal_reason":"prompt_too_long"}|}
 ;;
@@ -3094,6 +3105,20 @@ let test_access_refusal_uses_status_and_keeps_pre_effect_rotation () =
            | Recovery_required { failure = Provider_rejected; _ } -> ()
            | _ -> fail "account refusal lost the durable provider rejection"))))
     [401; 403; 400]
+;;
+
+let test_login_past_its_time_limit_routes_as_auth_failed () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture [ Emit login_expired_diagnostic; Emit login_expired_result ] (fun cli_path ->
+      match run_keeper_turn ~base_path ~cli_path ~goal:"LOGIN_EXPIRED" () with
+      | Ok _ -> fail "a refused login completed the turn"
+      | Error error ->
+        let route = Keeper_runtime_failure_route.route_of_error
+            ~boundary:Keeper_runtime_failure_route.Agent_core_execution error in
+        check bool "the diagnostic's cause selects the sign-in route" true
+          (route = Keeper_runtime_failure_route.Rotate_now
+             { rotate = Keeper_runtime_failure_route.Auth_failed })))
 ;;
 
 let test_access_refusal_after_native_tool_remains_fenced () =
@@ -7311,6 +7336,8 @@ let () =
             test_a_fenced_dated_quota_refusal_is_a_turn_failure
         ; test_case "access refusal preserves structured status and rotation" `Quick
             test_access_refusal_uses_status_and_keeps_pre_effect_rotation
+        ; test_case "a login past its time limit routes as auth failed" `Quick
+            test_login_past_its_time_limit_routes_as_auth_failed
         ; test_case "access refusal after native tool remains fenced" `Quick
             test_access_refusal_after_native_tool_remains_fenced
         ; test_case "quota after tool effect remains fenced" `Quick

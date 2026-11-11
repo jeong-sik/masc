@@ -101,7 +101,7 @@ let parse_filter value =
   Ok { keepers; sources }
 ;;
 
-let parse_selection value =
+let parse_selection value : (selection, string) result =
   let* fields = object_fields value in
   let* () = exact_fields [ "keeper_name"; "source_ref"; "source_incarnation" ] fields in
   let* keeper_name = string_field "keeper_name" fields in
@@ -332,9 +332,10 @@ let row_result_json result =
      @ (match result.response with None -> [] | Some response -> [ "result", response ]))
 ;;
 
-let preview_json rows =
+let preview_json ~workspace rows =
   `Assoc
     [ "schema", `String result_schema; "ok", `Bool true; "action", `String "preview"
+    ; "workspace_root", `String workspace
     ; "would_cancel", `Int (List.length rows)
     ; "keeper_counts", counts_json (count_by (fun (row : row) -> row.keeper_name) rows)
     ; "source_counts", counts_json (count_by (fun row -> row.source_label) rows)
@@ -355,11 +356,22 @@ let handle_post state ~actor:_ req reqd body =
   | Error detail -> reject `Bad_request detail
   | Ok request ->
     let config = Mcp_server.workspace_config state in
-    (match all_rows config with
+    let paths = Server_base_path_diagnostics.detect
+        ~effective_base_path:config.Workspace.base_path
+        ~effective_masc_root:(Workspace.masc_dir config) () in
+    let workspace = paths.effective_base_path in
+    let matches =
+      match Server_utils.query_param req "expected_workspace" with
+      | Some expected -> String.equal expected workspace
+      | None -> false
+    in
+    if not matches
+    then reject `Conflict "server workspace is unconfirmed or changed; refresh before queue operations"
+    else (match all_rows config with
      | Error detail -> reject `Internal_server_error detail
      | Ok all ->
        match request with
-       | Preview filter -> respond (preview_json (plan_rows filter all))
+       | Preview filter -> respond (preview_json ~workspace (plan_rows filter all))
        | Cancel { filter; reason; selections } ->
          match select_rows filter selections all with
          | Error detail -> reject `Conflict detail
@@ -383,6 +395,7 @@ let handle_post state ~actor:_ req reqd body =
              in
              respond (`Assoc
                [ "schema", `String result_schema; "ok", `Bool true; "action", `String "cancel"
+               ; "workspace_root", `String workspace
                ; "operation_id", `String operation_id; "backup_path", `String path
                ; "requested", `Int (List.length rows); "cancelled", `Int cancelled
                ; "committed_followup_failed", `Int followup_failed; "failed", `Int failed

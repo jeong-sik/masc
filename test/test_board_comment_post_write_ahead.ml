@@ -555,6 +555,14 @@ let test_creation_commits_before_releasing_persistence () =
        ~owner:"commit-author" () with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Board.show_board_error e)));
+  (* DIAG: the assertion below compares a list, and a failure prints only the
+     expected side. Dump what the observer actually saw, in order. *)
+  prerr_endline
+    ("DIAG-STATES:" ^
+     String.concat "|"
+       (List.map
+          (fun counts -> String.concat "," (List.map string_of_int counts))
+          (List.rev !released_states)));
   Alcotest.(check (list (list int)))
     "post, comment and sub-board are committed before persistence unlock"
     [ [1; 0; 0]; [1; 1; 0]; [1; 1; 1] ]

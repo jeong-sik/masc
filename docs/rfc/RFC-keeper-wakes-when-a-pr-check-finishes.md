@@ -151,6 +151,7 @@ implementation_prs: []
 | C | B 가 참이고, 그때 한 번 읽은 A 의 판정이 났다 | B 는 순서마다, A 는 B 가 참일 때만 | 읽기가 둘이다. ②를 B 가 막고 ①은 `state` 만 고르면 피한다. 판정이 `PENDING` 이면 B 가 참인 채 다음 순서에도 A 를 읽는다 |
 | D | 필수 check 만 | `isRequired` 나 ruleset 읽기와 "이름마다 최신 run" 고르기 | 후보에서 뺀다. 최신 run 을 고르는 규칙을 우리가 가져야 한다. REST 목록은 취소된 앞 run 을 함께 주고(2), `gh` 는 (workflow, 이름)으로 클라이언트에서 거른다(3). 이름만으로 거르면 틀린다. 51112 의 `contexts` 에 `request` 가 8개 있다 |
 
+- **B 는 체크가 시작하기 전에 깨울 수 있다.** 하네스 PR #51315 가 최근 PR 60개의 head(2026-11-11T09:55Z)에서 run 을 읽었다. 47개 head 에 "만들어진 run 이 모두 끝난" 순간이 있었고, 그중 6개(10.0%)는 그 뒤에 체크 run(`event` 가 `push`·`pull_request`·`workflow_run`)이 더 만들어졌다. 간격은 중앙값 56초, 최대 98초다. 승인 workflow(`Approval merge request`)가 먼저 끝나고 체크가 시작하는 경우다. 체크 run 끼리만 보면 끊김이 60개 head 모두에서 0이었다. 끝을 "체크 run 이 하나 이상이고 모두 끝났다"로 좁히면 이 표본에서 이른 깨움이 0이다. 대가는 제품 코드가 `event` 값을 닫힌 종류로 읽어야 한다는 것이다(모르는 값은 `Unrecognized` 로 남긴다). 표본이 한 저장소·한 시기이고 run 단위라서 job 단위 틈(②)은 보지 못했다.
 - 이름을 골라 기다리는 호출이 66건(5.899 h)이다. check 이름은 job 이름이라 run 목록(B)으로는 고를 수 없다. `GET /commits/{sha}/check-runs?check_name=` 이 필요하다. v1 에 넣지 않고 §7 에 올린다.
 - "첫 실패에 깨운다"(`gh pr checks --fail-fast` 와 같은 뜻)는 이 표와 따로 정할 일이다. B 가 주는 run 별 `conclusion` 으로 표현은 되지만, 실패한 run 이 다시 돌아 덮이는지는 미리 알 수 없다.
 
@@ -314,6 +315,8 @@ python3 -I docs/evidence/execute-waits-2026-11/measure_execute_waits.py --base-p
 - 기다림이 줄었다는 것만으로는 성공이 아니다. 줄었는데 거짓 깨움이 늘었으면 Keeper 는 깬 뒤에 다시 기다린다.
 
 ### 5.3 고정하는 것
+
+- 하네스 PR 은 #51315 다. 정의(`check_wake_scoring.py`), 실제 head 에서 줄인 fixture 와 변이 8개, 감시가 없을 때의 값을 재는 프로브가 들어 있다.
 
 - 위 표의 정의와 합성 fixture 를 하네스 PR 로 구현 PR 보다 먼저 병합한다. 구현 PR 은 그 파일을 바꾸지 않는다. 리뷰에서 확인한다. `.github/CODEOWNERS` 는 전부 한 사람이라서 기계로 막지 못한다.
 - fixture 는 실제 값에서 줄인다. 51112 head 의 run 목록(취소된 앞 suite 와 뒤따른 suite), `PR type-check` run 의 job 시각(틈), 리뷰 이벤트가 뒤늦게 붙인 run 이다.

@@ -999,17 +999,18 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   (* How many rows were read and how many the server keeps is the position:
      [3/50] of a list read whole, [3/50 · of 8,347] of one read in part. The
      footer names the key for the older page while there is one. *)
-  let position : Masc_tui_value.Position.t =
-    let at = if shown = 0 then 0 else state.lane_runs_cursor + 1 in
+  let position : Masc_tui_value.Position.t option =
+    let at = state.lane_runs_cursor + 1 in
     match state.lane_runs_total with
-    | Some total when total > shown -> Partial { at; loaded = shown; total }
-    | Some _ | None -> Row { at; total = shown }
+    | _ when shown = 0 -> None
+    | Some total when total > shown -> Some (Partial { at; loaded = shown; total })
+    | Some _ | None -> Some (Row { at; total = shown })
   in
   let header =
     here_row ~cols state
       ~path:[ observed_lane_label lane; text "실행" "runs" ]
       ~readings:(if state.lane_runs_loading then [ text "읽는 중" "loading" ] else [])
-      ~position:(Some position)
+      ~position
   in
   box_top buf cols;
   box_line buf cols header;

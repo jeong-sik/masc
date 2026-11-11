@@ -2152,6 +2152,9 @@ let surface_title_row ~cols (state : state) ~lead ~readings =
    of the thing being read, and the steps before it are how to get back. *)
 let here_step_separator = " \xe2\x80\xba "
 
+(* The cells kept clear ahead of the position. *)
+let here_position_gap_cells = 2
+
 let here_row ~cols (state : state) ~path ~readings ~position =
   let screen =
     let index = Masc_tui_surface_navigation.surface_ring_index state.view in
@@ -2179,23 +2182,32 @@ let here_row ~cols (state : state) ~path ~readings ~position =
         ^ Ansi.reset)
       position
   in
+  let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+  (* The position ends the row: the path and the readings are laid out in the
+     cells left of it, then padded, so it keeps its column whatever the path
+     says. *)
   let position_cells =
     match position with
-    | Some text -> Message_layout.display_width (Masc_tui_theme.strip_sgr text) + 2
+    | Some text -> cells text + here_position_gap_cells
     | None -> 0
   in
-  let particulars =
-    surface_connection_badge state
-      ~width:(max 0 (framed_inner_width cols - position_cells - 2))
+  let left_cols = cols - position_cells in
+  let left =
+    detail_heading ~cols:left_cols ~lead:(Lead_text lead) ~id
+      ~after:(List.map (fun reading -> "  " ^ reading) readings)
+      ~tail:
+        (surface_connection_badge state
+           ~width:(max 0 (framed_inner_width left_cols - 2)))
   in
-  let tail =
-    String.concat "  "
-      (List.filter (fun piece -> piece <> "") [ particulars ]
-       @ Option.to_list position)
-  in
-  detail_heading ~cols ~lead:(Lead_text lead) ~id
-    ~after:(List.map (fun reading -> "  " ^ reading) readings)
-    ~tail
+  match position with
+  | None -> left
+  | Some position ->
+      left
+      ^ String.make
+          (max here_position_gap_cells
+             (framed_inner_width cols - cells left - cells position))
+          ' '
+      ^ position
 
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says
    whether the screen can be trusted, so it is drawn whole and the label gives

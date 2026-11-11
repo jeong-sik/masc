@@ -178,11 +178,23 @@ let test_actual_enter_bytes () =
     match Masc_tui_input_decoder.feed decoder byte with
     | [Masc_tui_input_decoder.Key key] ->
         check bool "decoded terminal Enter opens selected original" true
-          (Reader.action ~key ~height:10 reader = Reader.Open)
+          (Reader.action ~key reader = Reader.Open)
     | [] | (Masc_tui_input_decoder.Key _ | Paste _ | Mouse_wheel _
               | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
               | Reply _) :: _ ->
         fail "terminal byte did not decode to a single key") ['\r';'\n']
+(* The page keys name a page and carry no height, so this reader cannot page by
+   a different amount than the other readers; the movement resolves the page. *)
+let test_page_keys_name_the_page () =
+  let chooser=Reader.create [choice "original"] in
+  let reading,_=start chooser in
+  check bool "start leaves the chooser" false (Reader.choosing reading);
+  List.iter (fun (key,page) ->
+    List.iter (fun (where,reader) ->
+      check bool (key ^ " names its page " ^ where) true
+        (Reader.action ~key reader = Reader.Move page))
+      ["in the chooser",chooser; "in the result",reading])
+    ["pagedown",Reading.Page_down; "pageup",Reading.Page_up]
 let test_plain_t_and_explicit_command () =
   check bool "ordinary t remains chat text" true
     (Masc_tui_command.parse "t" = Masc_tui_command.Say "t");
@@ -213,5 +225,6 @@ let () = run "original chat call reader"
                test_case "workspace and original conversation" `Quick test_workspace_and_draft;
                test_case "replacement authority" `Quick test_replacement_and_authority];
   "input",[test_case "actual CR/LF selects an original" `Quick test_actual_enter_bytes;
+           test_case "page keys name the page" `Quick test_page_keys_name_the_page;
            test_case "ordinary t and explicit calls" `Quick test_plain_t_and_explicit_command;
            test_case "captured document search scope" `Quick test_captured_search_scope]]

@@ -36508,7 +36508,7 @@ Use relative paths for resources already held in the package. -->
               match Masc_tui_chat_call_reader.search_key
                 ~width:(Masc_tui_render_overlays.detail_reading_width cols) ~height ~key:k reader with
               | Some reader -> update reader
-              | None -> match Masc_tui_chat_call_reader.action ~key:k ~height reader with
+              | None -> match Masc_tui_chat_call_reader.action ~key:k reader with
               | Close ->
                   if Masc_tui_chat_call_reader.choosing reader then close_chat_call_reader state
                   else begin cancel_chat_call_pending state;

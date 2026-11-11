@@ -1539,7 +1539,7 @@ let test_actual_write_metadata_preserves_the_store_result () =
       (match !changes with
        | [change] ->
            Alcotest.(check string) "the actual write captures its original canonical root"
-             (Fs_compat.realpath_lenient (Masc.Common.masc_dir_from_base_path ~base_path)) change.canonical_masc_root;
+             (Fs_compat.realpath_lenient (Common.masc_dir_from_base_path ~base_path)) change.canonical_masc_root;
            Alcotest.(check string) "the actual Keeper owns the source" "alpha" change.keeper_name;
            (match change.source with Candidate -> () | Partition -> Alcotest.fail "wrong ledger source")
        | [] | _ :: _ :: _ -> Alcotest.fail "actual append did not notify once");

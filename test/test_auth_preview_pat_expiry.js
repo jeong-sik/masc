@@ -2,7 +2,7 @@
 // Exercise the issue handler embedded in the actual preview, not a copy of it.
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
-const source = fs.readFileSync('lib/auth_preview.ml', 'utf8');
+const source = fs.readFileSync(process.argv[2] || 'lib/auth_preview.ml', 'utf8');
 const start = source.indexOf('document.getElementById("issue-pat").addEventListener("click", async () => {');
 const end = source.indexOf('\ndocument.getElementById("revoke-pat")', start);
 assert(start >= 0 && end > start, 'issue handler must be present');

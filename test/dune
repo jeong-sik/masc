@@ -1,3 +1,12 @@
+(rule
+ (alias runtest-test_auth_preview_pat_expiry)
+ (deps test_auth_preview_pat_expiry.js ../lib/auth_preview.ml)
+ (action (run node %{dep:test_auth_preview_pat_expiry.js} %{dep:../lib/auth_preview.ml})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_auth_preview_pat_expiry)))
+
 ; task-2245: the shared input table the TUI suite and the dashboard vitest
 ; suite both assert on (lib/tool_display.ml / dashboard toolDisplayLabel).
 (rule

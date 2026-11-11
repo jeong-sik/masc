@@ -59,7 +59,20 @@ val keepers_section : float -> section
 
 (** {1 Generation} *)
 
-val generate : ?scope:scope -> Workspace_utils.config -> string
+val cap_task_rows : ?max_rows:int -> pending_more:int -> string list -> string list
+(** The Tasks rows with those past [max_rows] collapsed into one line that
+    counts them, together with the [pending_more] pending tasks the pending cap
+    already left out. Without [max_rows] only the pending line is added. *)
+
+val render_within : limit:int -> row_count:int -> (int option -> string) -> string
+(** [render_within ~limit ~row_count render]: [render None] when it is at most
+    [limit] bytes, else [render (Some n)] for the largest [n < row_count] that
+    fits, else [render (Some 0)]. *)
+
+val generate : ?scope:scope -> ?max_bytes:int -> Workspace_utils.config -> string
+(** With [max_bytes] the Tasks section gives up rows from its tail until the
+    text is at most that many bytes; the other sections stay whole. *)
+
 val generate_compact : ?scope:scope -> Workspace_utils.config -> string
 
 val force_link : unit

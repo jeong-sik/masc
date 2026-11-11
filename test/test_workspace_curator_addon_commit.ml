@@ -605,9 +605,14 @@ let test_bad_original_host_record_cannot_fall_back_to_a_worker ()=with_workspace
     | Some (`Assoc fields) -> `Assoc (("unknown",`Bool true)::fields)
     | Some _ | None -> fail "original Exact record" in
   get (Store.save_exact_request store ~declaration_id:"curator" ~request_id:record.request_id wire);
+  (* A stored original whose record cannot be decoded is not a record this read
+     failed to reach: it exists and is invalid, so it is refused. Waiting would
+     only reread the same bytes. Only a record the read could not reach stays a
+     retryable unavailability (lib/lane_addon/lane_addon_exact.mli,
+     [Recovery_invalid] / [Recovery_unavailable]). *)
   check bool "invalid host evidence refuses before the supplied worker edge" true
-    (match no_worker_resume base_path store record with Error (Consumer.Unavailable _) -> true
-     | Ok _ | Error (Consumer.Rejected _ | Consumer.Uncertain _) -> false);
+    (match no_worker_resume base_path store record with Error (Consumer.Rejected _) -> true
+     | Ok _ | Error (Consumer.Unavailable _ | Consumer.Uncertain _) -> false);
   check json "failed read leaves the original dispatch history unchanged" (Progress.to_json record.progress)
     (Progress.to_json (original store capture).progress))
 let test_observed_host_answer_still_requires_full_domain_validation ()=with_workspace (fun base_path store ->

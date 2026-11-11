@@ -546,14 +546,43 @@ let check_retained_record wire =
   let* _ = validate_record ~request:original ~schema:None stored in
   Ok ()
 
-let observe_retained ~store ~declaration_id ~schema request =
-  let* schema = original_schema ~declaration_id ~schema request in
-  let* wire = Lane_addon_store.load_exact_request store ~declaration_id ~request_id:request.request_id in
+type recovery_error =
+  | Recovery_unavailable of string
+  | Recovery_invalid of string
+
+let describe_recovery_error = function
+  | Recovery_unavailable detail -> detail
+  | Recovery_invalid detail -> detail
+;;
+
+(* A record this read could not reach may appear later; a record it reached and
+   refused cannot turn into a different record by waiting. Keeping the two
+   apart is what lets the caller refuse instead of retrying forever.
+   Written as functions, not as [Result.map_error] values: a partially applied
+   [map_error] is not generalized, so the first use would pin the error type and
+   every other call site would fail to type. *)
+let unreadable result =
+  Result.map_error (fun detail -> Recovery_unavailable detail) result
+let invalid result =
+  Result.map_error (fun detail -> Recovery_invalid detail) result
+
+let observe_retained_classified ~store ~declaration_id ~schema request =
+  (* [original_schema] reads no record: it validates the caller's own schema and
+     compares it with the grant kept in the request. A mismatch there cannot be
+     cured by reading again, so it is an invalid original rather than an
+     unreachable one. *)
+  let* schema = invalid (original_schema ~declaration_id ~schema request) in
+  let* wire = unreadable (Lane_addon_store.load_exact_request store ~declaration_id
+    ~request_id:request.request_id) in
   match wire with
   | None -> Ok Retained_absent
   | Some wire ->
-    let* record = bound_record ~declaration_id request wire in
-    validate_record ~request ~schema:(Some schema) record
+    let* record = invalid (bound_record ~declaration_id request wire) in
+    invalid (validate_record ~request ~schema:(Some schema) record)
+
+let observe_retained ~store ~declaration_id ~schema request =
+  Result.map_error describe_recovery_error
+    (observe_retained_classified ~store ~declaration_id ~schema request)
 
 (* The host link belongs to the original request owner, not to a worker
    evidence address. Canonical tagged tuples keep both ID spaces unambiguous. *)
@@ -650,10 +679,15 @@ let proofs_to_json ~store ~declaration_id request proofs =
     "executions",`List (List.map (fun (attempt_ordinal,schema,execution) ->
       proof_to_json ~store ~declaration_id request ~schema ~attempt_ordinal execution) proofs)]
 
-let load_proofs ~store ~declaration_id request =
+(* The proof link is read from disk and then decoded. Callers that must tell a
+   transient read failure from a permanently invalid link use these two steps
+   apart; [load_proofs] keeps them together for callers that need only the
+   result. *)
+let load_proof_wire ~store ~declaration_id request =
   let instance_id,request_id=proof_key ~declaration_id request in
-  let* wire=Lane_addon_store.load_host_result store ~instance_id ~request_id in
-  match wire with
+  Lane_addon_store.load_host_result store ~instance_id ~request_id
+
+let decode_proofs ~store ~declaration_id request = function
   | None -> Ok []
   | Some wire ->
     let* normalized=Lane_addon_action.canonical wire in
@@ -676,6 +710,10 @@ let load_proofs ~store ~declaration_id request =
     let* encoded=Lane_addon_action.canonical (proofs_to_json ~store ~declaration_id request proofs) in
     if Yojson.Safe.equal normalized encoded then Ok proofs
     else Error "original execution link has unknown or conflicting fields"
+
+let load_proofs ~store ~declaration_id request =
+  let* wire=load_proof_wire ~store ~declaration_id request in
+  decode_proofs ~store ~declaration_id request wire
 
 let proof_request_id ~declaration_id ~file_name json =
   let* request = match json with
@@ -715,9 +753,15 @@ let proof_matches_attempt record (ordinal,_schema,execution) =
      | Call_ended _, (None | Some (Outcome_unknown | Not_allowed _ | Request_id_reused)) ->
        Error "completed terminal attempt has no matching original final")
 
+(* Binding a proof to its attempt compares two values that are already decoded,
+   so a mismatch is permanent: reading the same two records again cannot make
+   them agree. *)
+let bind_proofs record proofs =
+  List.fold_left (fun state proof -> let* ()=state in proof_matches_attempt record proof) (Ok ()) proofs
+
 let bound_proofs ~store ~declaration_id request record =
   let* proofs=load_proofs ~store ~declaration_id request in
-  let* ()=List.fold_left (fun state proof -> let* ()=state in proof_matches_attempt record proof) (Ok ()) proofs in
+  let* ()=bind_proofs record proofs in
   Ok proofs
 
 let retain_proof ~store ~declaration_id request ~schema ~attempt_ordinal execution =
@@ -816,38 +860,48 @@ let finish_record prior = function
       {prior with attempts=prior.attempts @ [Deferred (Provider_refused refusal)]}
 
 let recover_retained ~store ~declaration_id ~schema request =
-  let* schema = original_schema ~declaration_id ~schema request in
+  (* Same split as [observe_retained]: the schema is the caller's own, so a
+     mismatch is permanent. *)
+  let* schema = invalid (original_schema ~declaration_id ~schema request) in
   let key = Lane_addon_store.root store, declaration_id, request.request_id in
-  if not (claim key) then observe_retained ~store ~declaration_id ~schema request
+  (* [observe_retained] already reports [recovery_error], so a concurrent claim
+     is forwarded unchanged instead of being folded into one class. *)
+  if not (claim key) then observe_retained_classified ~store ~declaration_id ~schema request
   else Fun.protect ~finally:(fun () -> release key) (fun () ->
-    let* wire = Lane_addon_store.load_exact_request store ~declaration_id
-      ~request_id:request.request_id in
+    let* wire = unreadable (Lane_addon_store.load_exact_request store ~declaration_id
+      ~request_id:request.request_id) in
+    (* The proof link is read from disk and then decoded. A read that fails may
+       succeed later; a link that decodes to something else never will. *)
+    let proofs () =
+      let* wire = unreadable (load_proof_wire ~store ~declaration_id request) in
+      invalid (decode_proofs ~store ~declaration_id request wire) in
     match wire with
     | None ->
-        let* proofs = load_proofs ~store ~declaration_id request in
+        let* proofs = proofs () in
         if proofs = [] then Ok Retained_absent
-        else Error "original execution proof has no original Exact request"
+        else Error (Recovery_invalid "original execution proof has no original Exact request")
     | Some wire ->
-        let* record = bound_record ~declaration_id request wire in
-        let* observed = validate_record ~request ~schema:(Some schema) record in
-        let* proofs = bound_proofs ~store ~declaration_id request record in
+        let* record = invalid (bound_record ~declaration_id request wire) in
+        let* observed = invalid (validate_record ~request ~schema:(Some schema) record) in
+        let* proofs = proofs () in
+        let* () = invalid (bind_proofs record proofs) in
         match record.final, List.rev record.attempts with
         | None, Started _ :: earlier ->
             (match selected_proof ~attempt_ordinal:(List.length record.attempts) proofs with
              | None -> Ok observed
              | Some (retained_schema, execution) ->
                  if not (Yojson.Safe.equal schema retained_schema) then
-                   Error "original execution proof differs from the supplied original schema"
+                   Error (Recovery_invalid "original execution proof differs from the supplied original schema")
                  else
                    (match execution.outcome with
                     | Call_refused _ -> Ok observed
                     | Call_ended _ ->
                         let finished = finish_record
                           {record with attempts=List.rev earlier} execution.outcome in
-                        let* () = Lane_addon_store.save_exact_request store ~declaration_id
+                        let* () = unreadable (Lane_addon_store.save_exact_request store ~declaration_id
                           ~request_id:request.request_id
-                          (record_to_json ~declaration_id ~request_id:request.request_id finished) in
-                        observe_retained ~store ~declaration_id ~schema request))
+                          (record_to_json ~declaration_id ~request_id:request.request_id finished)) in
+                        observe_retained_classified ~store ~declaration_id ~schema request))
         | None, ([] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
             | Unknown_raised _ | Delivery_refused _ | Reused) :: _)
         | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused), _ ->

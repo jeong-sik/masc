@@ -226,6 +226,12 @@ let stream_keeper_ask_followup ~clock ~base_path ~workspace ~state_ready ~keeper
   with
   | () -> close ()
   | exception Ask_followup_stream_closed -> ()
+  | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+  | exception exn ->
+    (* The request's error handling logs the exception without the Ask. *)
+    let backtrace = Printexc.get_raw_backtrace () in
+    Log.Keeper.warn "ask followup stream failed ask_id=%s: %s" ask.ask_id (Printexc.to_string exn);
+    Printexc.raise_with_backtrace exn backtrace
 
 let handle_keeper_asks_list ~clock state request reqd =
   let config = Mcp_server.workspace_config state in

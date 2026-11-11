@@ -577,37 +577,37 @@ let for_surface = function
       ]
       @ listing_meta
   | Acting ->
-      [ b Navigate "e / l" "Events / Logs"
+      [ b ~ko:"이벤트 / 로그" Navigate "e / l" "Events / Logs"
           ~help:"Events, or the server's own log lines"
-      ; b Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
+      ; b ~ko:"선택" Navigate "j/k" "move" ~help:"select an event / scroll its evidence"
       (* [Navigate], not [Act]: the group is documented as "doing something to
          the thing under the cursor", and this key does nothing to the event
          the cursor is on -- it chooses which events the list holds at all,
          the way Planning spells its own filter. The group is also the
          retention order, so in [Act] this key was given up before
          [Home/End]. *)
-      ; b Navigate "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
+      ; b ~ko:"거르기" Navigate "f" "filter" ~help:"cycle Turns / Actions / Everything; Turns has no individual event evidence"
       (* "evidence", not "event evidence": every row on this surface is an
          event, so the label was saying the surface's own subject back to the
          reader. The six cells it gives back are what lets [f] stay on the row
          beside it -- see the footer case in test_tui_keys. *)
-      ; b Act "Enter" "evidence" ~detail:List_only ~rows:Needs_reading
+      ; b ~ko:"증거" Act "Enter" "evidence" ~detail:List_only ~rows:Needs_reading
           ~help:"Actions/Everything: exact selected event; Turns are aggregates"
       (* One key, one row. Esc closes the evidence pane when one is open
          (masc_tui.ml guards the close on acting_detail) and otherwise
          leaves the surface, so two rows read as two bindings. *)
-      ; b Act "Esc" "back"
+      ; b ~ko:"뒤로" Act "Esc" "back"
           ~help:"close event evidence; from the list, back to Dashboard"
       (* One row per action. g and G reach the ends Home and End reach, and
          l the tab 2 opens; a row for each spent two of the footer's places
          on actions it already showed, and at 120 columns the fitter dropped
          Enter -- the key that opens an event -- to keep them. The rows are
          the spellings every other reader shares; the extras are in help. *)
-      ; b Navigate "Home/End" "newest / oldest"
+      ; b ~ko:"최신 / 처음" Navigate "Home/End" "newest / oldest"
           ~help:"g and G as well; the ring counts back from the newest, so \
                  its top is now"
-      ; b Meta "Tab" "next"
-      ; b Meta "q" "quit"
+      ; b ~ko:"다음 화면" Meta "Tab" "next"
+      ; b ~ko:"종료" Meta "q" "quit"
       ]
   | Metrics ->
       List.map fst metrics_bindings
@@ -673,16 +673,16 @@ let for_surface = function
          tail window), and the table named none of them. Rows are drawn newest
          first, so these two are not the top and bottom of a list: Home is
          now and End is the oldest row the tail window holds. *)
-      [ b Navigate "j/k" "scroll"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Navigate "Home/End" "now / oldest"
-      ; b Act "Left / Esc" "back"
+      [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"지금 / 처음" Navigate "Home/End" "now / oldest"
+      ; b ~ko:"뒤로" Act "Left / Esc" "back"
       ]
       @ listing_meta
   | Keepers Keeper_calls ->
-      [ b Navigate "j/k" "scroll"
-      ; b Navigate "Home/End" "top/bottom"
-      ; b Act "Left / Esc" "back"
+      [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+      ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+      ; b ~ko:"뒤로" Act "Left / Esc" "back"
       ]
       @ listing_meta
   | Keepers Keeper_message ->
@@ -830,14 +830,14 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Clients ->
-      [ b Navigate "j/k" "move" ~rows:Needs_row ~help:"move the roster cursor"
-      ; b Act "Enter" "detail" ~rows:Needs_row
+      [ b ~ko:"선택" Navigate "j/k" "move" ~rows:Needs_row ~help:"move the roster cursor"
+      ; b ~ko:"상세" Act "Enter" "detail" ~rows:Needs_row
           ~help:"read the client's full identity and observation"
       ; b ~ko:"기능" Act "p / Esc" "features"
           ~help:"back to Features & plugins"
-      ; b Search "/" "find" ~rows:Needs_row
+      ; b ~ko:"찾기" Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching attached name"
-      ; b Search "n / N" "next / previous match" ~rows:Needs_row
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Board ->
@@ -1071,28 +1071,28 @@ let for_surface = function
       (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
          footer is [footer_hints_fusion_detail], which also appends the live
          scroll position this static table cannot know. *)
-      [ b Navigate "j/k" "move" ~rows:Needs_row
-      ; b Navigate "PgUp/PgDn" "page" ~rows:Needs_row
-      ; b Act "Enter" "open" ~rows:Needs_row
+      [ b ~ko:"선택" Navigate "j/k" "move" ~rows:Needs_row
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page" ~rows:Needs_row
+      ; b ~ko:"열기" Act "Enter" "open" ~rows:Needs_row
           ~help:"open a retained run or its historical Board evidence"
-      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+      ; b ~ko:"이전 / 다음" Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; fusion_caller_key
       ; fusion_board_key
         (* Spelled as Keepers spells its own [a]: new. The form is the
            schema form the Lane Add-ons action uses, so its keys are that
            form's; the footer names them while it is open. *)
-      ; b Act "a" "new run"
+      ; b ~ko:"새 실행" Act "a" "new run"
           ~help:"launch a Fusion run from the list: pick the Keeper, preset \
                  and topology, type the prompt, then Ctrl-S reviews and \
                  Enter starts it"
-      ; b Act "Y" "copy" ~rows:Needs_row
+      ; b ~ko:"복사" Act "Y" "copy" ~rows:Needs_row
           ~help:"copy the selected Fusion run reference"
-      ; b Search "/" "find" ~rows:Needs_row
+      ; b ~ko:"찾기" Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching run id, Keeper or preset; an \
                  open run's detail carries no searchable rows"
-      ; b Search "n / N" "next / previous match" ~rows:Needs_row
-      ; b Act "Esc" "back" ~help:"leave detail, or return to Dashboard"
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~rows:Needs_row
+      ; b ~ko:"뒤로" Act "Esc" "back" ~help:"leave detail, or return to Dashboard"
       ]
       @ row_list_edges @ listing_meta
   | Memory ->
@@ -1137,10 +1137,10 @@ let for_surface = function
       ; b ~ko:"뒤로" Act "Esc" "back"
           ~help:"return to Dashboard; inside Git changes, close the diff, \
                  then Git changes (Left does the same there)"
-      ; b Search "/" "find"
+      ; b ~ko:"찾기" Search "/" "find"
           ~help:"jump the cursor to a matching repository, or to a changed \
                  path while Git changes is open"
-      ; b Search "n / N" "next / previous match" ~rows:Needs_row
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Changes ->
@@ -1150,37 +1150,37 @@ let for_surface = function
          A keeper that wrote nothing in the window has no row. The keys that
          read the row under the cursor answer with a notice or do nothing;
          [ / ] still switches to the next keeper, so it stays. *)
-      [ b Navigate "j/k" "move" ~rows:Needs_row
-      ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper"
-      ; b Act "Right / Enter" "written diff" ~rows:Needs_row
+      [ b ~ko:"선택" Navigate "j/k" "move" ~rows:Needs_row
+      ; b ~ko:"키퍼" Navigate "[ / ]" "keeper" ~help:"previous / next keeper"
+      ; b ~ko:"쓴 변경" Act "Right / Enter" "written diff" ~rows:Needs_row
           ~help:"what the call wrote, as a diff"
         (* Left closes an open diff and does nothing on the list; Esc closes
            the diff too and, on the list, goes back to the Keeper screen the
            list was opened from. The diff footers are their own strings, so
            this table's footer is the list's. *)
-      ; b Act "Esc" "back" ~detail:List_only
+      ; b ~ko:"뒤로" Act "Esc" "back" ~detail:List_only
           ~help:"back to the Keeper screen this list was opened from"
-      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the diff"
-      ; b Act "d" "tree diff" ~rows:Needs_row ~help:"what the tree holds now"
-      ; b Act "v" "view code" ~rows:Needs_row
+      ; b ~ko:"뒤로" Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the diff"
+      ; b ~ko:"트리 diff" Act "d" "tree diff" ~rows:Needs_row ~help:"what the tree holds now"
+      ; b ~ko:"코드 보기" Act "v" "view code" ~rows:Needs_row
           ~help:"the file on the Code surface, read from the keeper's own \
                  workspace"
-      ; b Search "/" "find" ~rows:Needs_row
+      ; b ~ko:"찾기" Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching written path"
-      ; b Search "n / N" "next / previous match" ~rows:Needs_row
-      ; b Act "o" "editor" ~rows:Needs_row ~help:"open in $EDITOR / $NVIM"
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~rows:Needs_row
+      ; b ~ko:"편집기" Act "o" "editor" ~rows:Needs_row ~help:"open in $EDITOR / $NVIM"
       ]
       @ row_list_jumps @ listing_meta
   | Connectors ->
-      [ b Navigate "B" "Browser Lane"
+      [ b ~ko:"브라우저" Navigate "B" "Browser Lane"
           ~help:"read browser tabs and page text; choose Automatic or a connected browser"
-      ; b Act "Ctrl-O" "Browser screenshot"
+      ; b ~ko:"브라우저 화면" Act "Ctrl-O" "Browser screenshot"
           ~help:"inside Browser Lane: preview the selected tab; any key returns"
-      ; b Navigate "j/k" "scroll"
-      ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
+      ; b ~ko:"스크롤" Navigate "j/k" "scroll"
+      ; b ~ko:"연결 / 해제" Act "b / u" "bind / unbind" ~help:"bind / unbind a channel"
       ; b ~ko:"기능" Act "Esc" "features" ~help:"back to Features & plugins"
-      ; b Search "/" "find" ~help:"jump the cursor to a matching transport"
-      ; b Search "n / N" "next / previous match"
+      ; b ~ko:"찾기" Search "/" "find" ~help:"jump the cursor to a matching transport"
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match"
       ]
       @ row_list_jumps @ listing_meta
   | Runtime ->
@@ -1379,33 +1379,33 @@ let for_surface = function
          columns it does not on either reading, so this row is the one place
          that names the other. With [o] first, 80 and 84 columns under an
          ACTION NEEDED notice kept [o:log origin] and dropped [e:Events]. *)
-      [ b Navigate "e" "Events"
-      ; b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
-      ; b Navigate "j/k" "move / scroll" ~rows:Needs_row
+      [ b ~ko:"이벤트" Navigate "e" "Events"
+      ; b ~ko:"로그 출처" Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
+      ; b ~ko:"이동 / 스크롤" Navigate "j/k" "move / scroll" ~rows:Needs_row
       ; row_list_page
-      ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
+      ; b ~ko:"이전 / 다음" Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while detail is open, inspect the adjacent visible log entry"
       (* The three filter keys put the cursor back on the first row. An open
          entry keeps its place, so [ and ] would then step from the wrong row
          and closing the entry would land on a list nobody saw change. They
          answer on the list only. *)
-      ; b Act "l" "level floor" ~detail:List_only
+      ; b ~ko:"최소 수준" Act "l" "level floor" ~detail:List_only
           ~help:"raise the minimum level; after error, back to everything"
-      ; b Act "v" "verbose" ~detail:List_only
+      ; b ~ko:"자세히" Act "v" "verbose" ~detail:List_only
           ~help:"toggle DEBUG rows directly; off uses the INFO floor"
-      ; b Act "c" "category" ~detail:List_only
+      ; b ~ko:"분류" Act "c" "category" ~detail:List_only
           ~help:"cycle through the categories this page carries"
       (* Opens the entry under the cursor. Inside the detail the dispatcher
          has nothing left to open, and a list the filters emptied has no
          entry. *)
-      ; b Act "Right / Enter" "detail" ~detail:List_only ~rows:Needs_row
+      ; b ~ko:"상세" Act "Right / Enter" "detail" ~detail:List_only ~rows:Needs_row
           ~help:"show the full message, source, category, turn, and JSON details"
-      ; b Act "Esc" "back" ~detail:List_only ~help:"back to Activity"
-      ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the detail"
-      ; b Search "/" "find" ~detail:List_only
+      ; b ~ko:"뒤로" Act "Esc" "back" ~detail:List_only ~help:"back to Activity"
+      ; b ~ko:"뒤로" Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the detail"
+      ; b ~ko:"찾기" Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching module, keeper, or message, \
                  over the rows the level and category filters leave"
-      ; b Search "n / N" "next / previous match" ~detail:List_only ~rows:Needs_row
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~detail:List_only ~rows:Needs_row
       ]
       @ row_list_edges @ listing_meta
 

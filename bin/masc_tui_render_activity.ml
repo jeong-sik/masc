@@ -126,7 +126,7 @@ let render_system_log_detail (state : state) seq =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~position:(Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines))
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true System_logs));
+       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:true System_logs));
   finish_surface state ~clamped:(System_log_detail_scroll scroll)
     ~surface_key:"system-log-detail" ~rows:terminal_rows ~cols buf
 
@@ -624,7 +624,7 @@ let render_keeper_calls (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view));
   finish_surface state ~clamped:(Keeper_calls scroll) ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
 
 (* The runtime's event feed, newest first, for watching every keeper act at

@@ -39,6 +39,7 @@ class ZeroWindow(H2Conn):
         self.flush()
         self.data: dict[int, int] = {}
         self.ended: set[int] = set()
+        self.reset_at: dict[int, float] = {}
         self.pump(lambda: False, 0.5)
 
     def pump(self, done, timeout: float) -> bool:
@@ -60,6 +61,7 @@ class ZeroWindow(H2Conn):
                     self.ended.add(ev.stream_id)
                 elif isinstance(ev, h2.events.StreamReset):
                     self.server_reset.add(ev.stream_id)
+                    self.reset_at.setdefault(ev.stream_id, time.monotonic())
             self.flush()
         return done()
 
@@ -85,7 +87,10 @@ def main() -> int:
         opened = time.monotonic()
         conn.pump(lambda: False, STALL_BOUND_S + args.margin_s)
         waited = time.monotonic() - opened
-        stall_lines = server.log_path.read_text(errors="replace").count("accepted no frame")
+        log_text = server.log_path.read_text(errors="replace")
+        # The wording before RFC-0518 D2, and the one the stream bound logs since.
+        stall_lines = log_text.count("accepted no frame")
+        reset_lines = log_text.count("resetting the stream")
         reset_while_stalled = sorted(conn.server_reset & set(sids))
         data_while_stalled = {s: conn.data.get(s, 0) for s in sids}
         for s in sids:
@@ -97,6 +102,8 @@ def main() -> int:
             "streams": len(sids), "statuses": [conn.status.get(s) for s in sids],
             "waited_s": round(waited, 1), "stall_bound_s": STALL_BOUND_S,
             "server_stall_log_lines": stall_lines,
+            "server_reset_log_lines": reset_lines,
+            "reset_after_s": {s: round(conn.reset_at[s] - opened, 1) for s in sids if s in conn.reset_at},
             "reset_by_server_while_stalled": reset_while_stalled,
             "data_bytes_while_stalled": data_while_stalled,
             "after_window_opened": {s: {"data_bytes": conn.data.get(s, 0), "ended": s in conn.ended,

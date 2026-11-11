@@ -13,6 +13,10 @@ module Socket = struct
   let single_write t bufs = Eio.Flow.single_write t.tls bufs
   let copy t ~src = Eio.Flow.copy src t.tls
 
+  (* tls-eio treats [`All] as [`Send]: it writes close_notify and leaves the
+     flow below open, so the peer still has to close after either. A plain
+     socket's [`All] closes both directions itself and has nothing to wait
+     for. *)
   let shutdown t command =
     (match command with
      | `Send | `All -> t.on_send_shutdown ()

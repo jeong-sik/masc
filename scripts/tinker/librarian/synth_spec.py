@@ -22,7 +22,10 @@ A request carries labels by construction:
 A memory fact with `planted_stale=True` is a transient state that slipped into
 memory; the expected answer drops it without a superseding claim. A fact with
 `duplicate_of` restates another fact of its memory in other words; the expected
-answer keeps one of the two and absorbs the other into it. MASC accepts a Memory
+answer keeps one of the two and absorbs the other into it. A fact with `use_at`
+is a record of something to do or pass on at that time, known only from memory.
+Its use time falls on a day after every candidate's, and the expected answer
+keeps it; or on a day before them, and it is planted stale. MASC accepts a Memory
 change only when an incorporated or already_represented candidate supports it
 (`keeper_memory_admission_judgment.ml` `verify_support`), so in a request whose
 candidates are all transient the planted facts stay too.
@@ -30,7 +33,8 @@ candidates are all transient the planted facts stay too.
 What a claim carries besides its meaning (a date, a time, a PR/issue/task
 number) is planned from shares measured on the retained records, and
 `surface_holds` checks the written text against the plan. A memory fact draws
-its marks one by one with `plan_surface`, the same way stale or durable.
+its marks one by one with `plan_surface`, the same way stale or durable. A
+record with a use time always carries the date of that time (`plan_use_surface`).
 Candidates are planned for a whole split at once by `synth_candidate_plan`,
 which deals each mark and the length out within each label kind. A label then
 leaves no mark in those strings.
@@ -79,6 +83,12 @@ STALE_FACTS_PER_MEMORY_WEIGHTS = ((0, 0.3), (1, 0.4), (2, 0.3))
 # holds enough to measure. Complements match live per candidate (below), and are fewer per
 # request because a planned request carries 1.55 candidates on average and these records 2.35.
 DUPLICATE_PAIR_SHARE = 0.2
+# Records with a use time per memory, and the share whose day is still ahead. No live share was
+# measured. On 11-11 an answer under the #51190 prompt dropped, on a live record, a note on the day
+# it was written while the next morning still needed it. The records are planted, as the pairs
+# are, so E-synth holds enough of both sides to measure.
+SCHEDULED_FACTS_PER_MEMORY_WEIGHTS = ((0, 0.4), (1, 0.4), (2, 0.2))
+SCHEDULED_AHEAD_SHARE = 0.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,6 +227,7 @@ class MemoryFact:
     seen_at: str  # MASC writes first_seen and last_seen equal; both render from this
     planted_stale: bool
     duplicate_of: str | None  # a planted duplicate: the memory ID of the fact it restates
+    use_at: str | None  # a planted record: when it is to be used, written as seen_at is
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,11 +290,15 @@ class RequestLabel:
     """`planted_stale` are the planted stale facts and `duplicates` pairs a fact with its planted
     duplicate, whatever the candidates. The answer drops the stale facts and keeps one fact of each
     pair, absorbing the other into it, only when a candidate can support a Memory change
-    (`supports_change`): MASC refuses any other change (`verify_support`)."""
+    (`supports_change`): MASC refuses any other change (`verify_support`). `scheduled_ahead` are
+    the records whose use is still ahead, which the answer keeps, and `scheduled_past` the records
+    whose use has passed, which are among the stale facts."""
 
     candidates: tuple[CandidateLabel, ...]
     planted_stale: frozenset[str]
     duplicates: tuple[tuple[str, str], ...]
+    scheduled_ahead: frozenset[str]
+    scheduled_past: frozenset[str]
 
     @property
     def supports_change(self) -> bool:
@@ -322,7 +337,8 @@ def labeled(facts: tuple[MemoryFact, ...], candidates: tuple[Candidate, ...]) ->
     labels = tuple(candidate_label(c, by_id) for c in candidates)
     stale = frozenset(f.memory_id for f in facts if f.planted_stale)
     pairs = tuple((f.duplicate_of, f.memory_id) for f in facts if f.duplicate_of is not None)
-    return RequestLabel(labels, stale, pairs)
+    scheduled = frozenset(f.memory_id for f in facts if f.use_at is not None)
+    return RequestLabel(labels, stale, pairs, scheduled - stale, scheduled & stale)
 
 
 def label_of(request: SynthRequest) -> RequestLabel:
@@ -395,14 +411,23 @@ def reference_text(rng: random.Random, form: ReferenceFormat) -> str:
             assert_never(form)
 
 
-def plan_surface(rng: random.Random, shares: SurfaceShares, when: dt.datetime) -> Surface:
-    """Surface traits for one claim written about `when`. The caller passes no label."""
-    dated = rng.random() < shares.date
+def surface_of(rng: random.Random, shares: SurfaceShares, when: dt.datetime, dated: bool) -> Surface:
     timed = dated and rng.random() < shares.time_given_date
     cited = rng.random() < shares.reference
     return Surface(date_text(when, sample_weighted(rng, DATE_FORMAT_WEIGHTS)) if dated else None,
                    when.strftime("%H:%M") if timed else None,
                    reference_text(rng, sample_weighted(rng, REFERENCE_FORMAT_WEIGHTS)) if cited else None)
+
+
+def plan_surface(rng: random.Random, shares: SurfaceShares, when: dt.datetime) -> Surface:
+    """Surface traits for one claim written about `when`. The caller passes no label."""
+    return surface_of(rng, shares, when, rng.random() < shares.date)
+
+
+def plan_use_surface(rng: random.Random, shares: SurfaceShares, use_at: dt.datetime) -> Surface:
+    """Surface traits for a record to be used at `use_at`: always the date of that time, and a time
+    and a number as often as any claim of `shares` carries them. Ahead or past alike."""
+    return surface_of(rng, shares, use_at, True)
 
 
 def mark_holds(claim: str, pattern: re.Pattern[str], planned: str | None) -> bool:

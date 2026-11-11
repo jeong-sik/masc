@@ -400,6 +400,12 @@ def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int]
             part["state_by_kind"] = by_kind(mine)
             part["dropped_unmerged"] = sum(len(cast(list[str], r["dropped_unmerged"])) for r in mine)
             part["planted_absorbed"] = sum(cast(int, r["planted_absorbed"]) for r in mine)
+            ahead = sum(cast(int, r["scheduled_ahead"]) for r in mine)
+            part["scheduled_ahead_keep_rate"] = (
+                1 - sum(cast(int, r["scheduled_ahead_dropped"]) for r in mine) / ahead if ahead else None)
+            past = sum(cast(int, r["scheduled_past"]) for r in mine)
+            part["scheduled_past_drop_recall"] = (
+                sum(cast(int, r["scheduled_past_dropped"]) for r in mine) / past if past else None)
             merges = sum(cast(int, r["merges"]) for r in mine)
             part["merge_recall"] = sum(cast(int, r["merges_done"]) for r in mine) / merges if merges else None
             part["net_per_item"] = (sum(cast(int, r["added"]) for r in mine)

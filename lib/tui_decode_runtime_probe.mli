@@ -30,6 +30,9 @@ type runtime_provider_status =
   | Runtime_provider_unknown_http_status
   | Runtime_provider_skipped_cli
   | Runtime_provider_skipped_native_auth
+  | Runtime_provider_refused
+      (** The process sends with no credential of the runtime table, so the
+          probe sent nothing (plan D4). *)
   | Runtime_provider_invalid_endpoint
   | Runtime_provider_invalid_execution_transport
 

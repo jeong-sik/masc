@@ -41,6 +41,7 @@ let declared_muse_home (authorized : declared muse_authorized) =
 type host_client =
   | Antigravity
   | Vibe
+  | Api_provider
 
 (* The proof carries nothing: a single-user process shares every account of
    its host, so one start of a host client is as allowed as another. *)
@@ -49,6 +50,7 @@ type host_account = Shared_by_single_user
 let host_client_name = function
   | Antigravity -> "Antigravity"
   | Vibe -> "Vibe"
+  | Api_provider -> "An API provider of the runtime table"
 ;;
 
 type t =
@@ -140,7 +142,12 @@ let refusal_to_string = function
     Printf.sprintf
       "the account was captured from another home than the one of %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
-  | Host_account client ->
+  | Host_account Api_provider ->
+    Printf.sprintf
+      "%s sends with the credential its operator declared, which is an account of the \
+       host, and a multi-account process shares no account of its host"
+      (host_client_name Api_provider)
+  | Host_account ((Antigravity | Vibe) as client) ->
     Printf.sprintf
       "%s starts on an account of the host, and a multi-account process shares no \
        account of its host"
@@ -253,6 +260,29 @@ let authorize_host client =
   | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Ok Shared_by_single_user
   | Published (Multi_account { zone = _; base_path = _; now = _ }) -> Error (Host_account client)
 ;;
+
+(* HIGH-RISK-UNREVIEWED: an API provider of the runtime table sends with the
+   credential its operator declared, an account of the host (plan D4). The
+   whole config leaves the seal only through [authorize_api]; a reader gets
+   [api_declaration], without the key and the headers. *)
+type api_sealed = Llm_provider.Provider_config.t
+
+let seal_api config = config
+
+let api_declaration (config : api_sealed) =
+  { config with Llm_provider.Provider_config.api_key = Llm_provider.Secret.empty; headers = [] }
+;;
+
+let authorize_api config =
+  authorize_host Api_provider |> Result.map (fun Shared_by_single_user -> config)
+;;
+
+let api_binding_identity config =
+  Agent_core.Binding_identity.of_provider_config ~transport:Agent_core.Binding_identity.Http config
+;;
+
+let api_admission_allowances entries = Llm_provider.Provider_admission.allowances_of_configs entries
+let api_admission_snapshot config = Llm_provider.Provider_admission.snapshot_for ~config
 
 type native_refusal =
   | Native_unpublished

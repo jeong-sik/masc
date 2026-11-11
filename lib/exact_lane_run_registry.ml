@@ -200,9 +200,24 @@ type run =
   ; started_at : float
   ; input : run_input
   ; status : run_status
+  ; slot_observations : (Exact_lane_slot_observation.t list, string) result option
   ; input_availability : payload_availability
   ; output_availability : payload_availability option
   }
+
+let slot_observations_of_json = Option.map (function
+  | `List values ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | value::rest ->
+        (match Exact_lane_slot_observation.of_yojson value with
+         | Ok value -> decode (value::acc) rest
+         | Error detail -> Error detail) in
+    decode [] values
+  | _ -> Error "exact slot observations must be a list")
+
+let slot_observations_to_json values =
+  `List (List.map Exact_lane_slot_observation.to_yojson values)
 
 let lane_of_key key =
   match Lane_run_identity.of_id key with
@@ -280,6 +295,7 @@ module Payload = struct
     ; output_source : payload_source
     ; selected_slot : string option
     ; usage : usage option
+    ; slot_observations : Yojson.Safe.t option
     }
 
   let name = "exact_lane_run_registry"
@@ -303,6 +319,7 @@ module Payload = struct
          ; output_source = In_row
          ; selected_slot = None
          ; usage = None
+         ; slot_observations = None
          })
   ;;
 
@@ -404,7 +421,9 @@ module Payload = struct
            | None -> `Null
            | Some usage -> usage_to_yojson usage )
        ]
-       @ detail)
+       @ detail
+       @ (match completion.slot_observations with
+          | None -> [] | Some value -> ["slot_observations",value]))
   ;;
 
   let completion_of_yojson json =
@@ -421,6 +440,7 @@ module Payload = struct
     let* () =
       Run_registry_core.Json.exact_fields
         ~required:([ "outcome"; "origin"; "elapsed_s"; "output"; "selected_slot"; "usage" ] @ detail_fields)
+        ~optional:["slot_observations"]
         fields
     in
     let* origin = match List.assoc_opt "origin" fields with
@@ -478,7 +498,8 @@ module Payload = struct
         if valid_outcome && inline && selected_slot=None && usage=None
            && Yojson.Safe.equal (Yojson.Safe.sort output) (Yojson.Safe.sort expected) then Ok ()
         else Error "restart completion does not match the original replay observation" in
-    Ok { outcome; origin; elapsed_s; output; output_source; selected_slot; usage }
+    let slot_observations=List.assoc_opt "slot_observations" fields in
+    Ok { outcome; origin; elapsed_s; output; output_source; selected_slot; usage; slot_observations }
   ;;
 end
 
@@ -490,6 +511,7 @@ type failed_completion =
   ; output : Yojson.Safe.t
   ; selected_slot : string option
   ; usage : usage option
+  ; slot_observations : Yojson.Safe.t option
   ; failure : persistence_failure
   }
 
@@ -638,6 +660,11 @@ let projected_run_of_entry failed_completions (entry : Store.entry) =
   ; started_at = entry.started_at
   ; input = Exact_input `Null
   ; status
+  ; slot_observations = slot_observations_of_json
+      (match entry.status,List.assoc_opt entry.id failed_completions with
+       | Store.Completed completion,_ -> completion.slot_observations
+       | Store.Running,Some failed -> failed.slot_observations
+       | Store.Running,None -> None)
   ; input_availability = Not_loaded
   ; output_availability =
       (match status with Running -> None | Completed _ | Completion_persistence_failed _ -> Some Not_loaded)
@@ -675,6 +702,11 @@ let full_run_of_entry failed_completions (entry : Store.entry) =
   ; started_at = entry.started_at
   ; input = entry.registration.input
   ; status
+  ; slot_observations = slot_observations_of_json
+      (match entry.status,List.assoc_opt entry.id failed_completions with
+       | Store.Completed completion,_ -> completion.slot_observations
+       | Store.Running,Some failed -> failed.slot_observations
+       | Store.Running,None -> None)
   ; input_availability = Available
   ; output_availability =
       (match status with Running -> None | Completed _ | Completion_persistence_failed _ -> Some Available)
@@ -922,7 +954,8 @@ let register_running t ~run_id ~lane ~actor ~started_at ~input =
   notify_changed ()
 ;;
 
-let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage ~output =
+let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage ~slot_observations ~output =
+  let slot_observations=Option.map slot_observations_to_json slot_observations in
   (* Outside the lock, as in [register_running]. A run that stops being known
      before the lock is taken leaves this file for the replay sweep. *)
   let stored =
@@ -945,7 +978,7 @@ let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage 
         match stored with
         | Error _ as error -> error
         | Ok output_source ->
-          let completion = { Payload.outcome; origin=Producer; elapsed_s; output; output_source; selected_slot; usage } in
+          let completion = { Payload.outcome; origin=Producer; elapsed_s; output; output_source; selected_slot; usage; slot_observations } in
           (match Store.complete t.store ~id:run_id ~completion with
            | `Completed -> Ok ()
            | (`Unknown | `Persistence_failed _) as error -> Error error)
@@ -964,7 +997,7 @@ let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage 
         in
         let failure = { detail = failure.detail; state } in
         let failed =
-          { intended_outcome = outcome; elapsed_s; output; selected_slot; usage; failure }
+          { intended_outcome = outcome; elapsed_s; output; selected_slot; usage; slot_observations; failure }
         in
         Atomic.set
           t.failed_completions
@@ -984,19 +1017,19 @@ let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage 
     Error error
 ;;
 
-let mark_completed t ~run_id ~outcome ~elapsed_s ~selected_slot ?usage ~output () =
+let mark_completed t ~run_id ~outcome ~elapsed_s ~selected_slot ?usage ?slot_observations ~output () =
   if not (Float.is_finite elapsed_s) || elapsed_s < 0. then Error Invalid_elapsed_duration else
   match selected_slot with
   | Some selected_slot when String.trim selected_slot = "" -> Error Invalid_selected_slot
   | None | Some _ ->
-    mark_completed_internal t ~run_id ~outcome ~elapsed_s:(Some elapsed_s) ~selected_slot ~usage ~output
+    mark_completed_internal t ~run_id ~outcome ~elapsed_s:(Some elapsed_s) ~selected_slot ~usage ~slot_observations ~output
 ;;
 
-let mark_completed_unmeasured t ~run_id ~outcome ~selected_slot ?usage ~output () =
+let mark_completed_unmeasured t ~run_id ~outcome ~selected_slot ?usage ?slot_observations ~output () =
   match selected_slot with
   | Some selected_slot when String.trim selected_slot = "" -> Error Invalid_selected_slot
   | None | Some _ ->
-    mark_completed_internal t ~run_id ~outcome ~elapsed_s:None ~selected_slot ~usage ~output
+    mark_completed_internal t ~run_id ~outcome ~elapsed_s:None ~selected_slot ~usage ~slot_observations ~output
 ;;
 
 (* [total] counts every retained run, not the page, so a caller can say
@@ -1010,6 +1043,7 @@ type run_page =
 type original_completion = {
   outcome:outcome; elapsed_s:float option; output:Yojson.Safe.t;
   selected_slot:string option; usage:usage option;
+  slot_observations:Exact_lane_slot_observation.t list option;
 }
 type reconciliation_error =
   | Invalid_original of string
@@ -1172,7 +1206,8 @@ let reconcile_original t ~run_id ~lane ~actor ~started_at ~input ~completion =
       let publish_completion (c:original_completion)=
         let* output_source=write Output_payload c.output in
         Ok {Payload.outcome=c.outcome;origin=Producer;elapsed_s=c.elapsed_s;output=c.output;
-          output_source;selected_slot=c.selected_slot;usage=c.usage} in
+          output_source;selected_slot=c.selected_slot;usage=c.usage;
+          slot_observations=Option.map slot_observations_to_json c.slot_observations} in
       match current,completion with
       | None,completion ->
         let* input_source=write Input_payload original_input in
@@ -1413,6 +1448,11 @@ let run_summary_fields run =
     ; "actor", `String run.actor
     ; "started_at", `Float run.started_at
     ; "status", `String (status_label run.status)
+    ; "slot_observations", (match run.slot_observations with
+        | None -> `Assoc ["state",`String "unobserved"]
+        | Some (Error detail) -> `Assoc ["state",`String "unavailable";"detail",`String detail]
+        | Some (Ok observations) -> `Assoc ["state",`String "available";
+            "observations",slot_observations_to_json observations])
     ]
   in
   let completion =

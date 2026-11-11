@@ -1662,6 +1662,45 @@ let test_unreferenced_leaf_link_never_unlinks_its_target () =
       (retained.input_availability = R.Available))
 ;;
 
+let test_slot_metadata_does_not_change_original_completion () =
+  let module Observation = Masc.Exact_lane_slot_observation in
+  let path=fresh_log_path "exact-slot-observations-" in
+  let registry=R.create ~path () in
+  let output=`Assoc ["original_receipt",`String "unchanged"] in
+  let observation=Observation.cli ~slot_id:"client" ~started_at:(Some 12.)
+    ~finished_at:(Some 13.) ~generation_dispatched:true ~outcome:Accepted in
+  R.register_running registry ~run_id:"original" ~lane:R.Librarian ~actor:"keeper"
+    ~started_at:10. ~input:(R.Exact_input `Null);
+  (match R.mark_completed registry ~run_id:"original" ~outcome:R.Succeeded
+    ~elapsed_s:4. ~selected_slot:(Some "client") ~slot_observations:[observation] ~output () with
+   | Ok () -> () | Error error -> fail (R.completion_error_to_string error));
+  let check_original registry =
+    let run=R.get registry ~run_id:"original" |> Option.get in
+    (match run.status with
+     | R.Completed {outcome=R.Succeeded;output=actual;_} ->
+       check string "diagnostics preserve exact original output"
+         (Yojson.Safe.to_string output) (Yojson.Safe.to_string actual)
+     | R.Running | R.Completed _ | R.Completion_persistence_failed _ -> fail "original outcome changed");
+    run in
+  let restored=check_original (R.replay path) in
+  check bool "slot times survive restart" true
+    (match restored.slot_observations with
+     | Some (Ok [visit]) -> visit.started_at=Some 12. && visit.finished_at=Some 13.
+     | None | Some (Error _) | Some (Ok _) -> false);
+  let rec damage = function
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        key,if key="slot_observations" then `String "damaged" else damage value) fields)
+    | `List values -> `List (List.map damage values)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value -> value in
+  let lines=String.split_on_char '\n' (Fs_compat.load_file path) in
+  Fs_compat.save_file path (String.concat "\n" (List.map (function
+    | "" -> "" | line -> Yojson.Safe.to_string (damage (Yojson.Safe.from_string line))) lines));
+  let restored=check_original (R.replay path) in
+  check bool "damaged diagnostics are unavailable without erasing the original" true
+    (match restored.slot_observations with Some (Error _) -> true | None | Some (Ok _) -> false);
+  remove_if_exists path
+;;
+
 let () =
   run
     "exact_lane_run_registry"
@@ -1681,6 +1720,8 @@ let () =
         ; test_case "startup sweep reports unavailable root" `Quick
             test_startup_sweep_reports_unavailable_root
         ; test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence
+        ; test_case "slot metadata preserves original completion through damage" `Quick
+            test_slot_metadata_does_not_change_original_completion
         ; test_case "memory and disk preserve available JSON null" `Quick
             test_memory_only_and_disk_null_are_available_values
         ; test_case "missing payload files preserve terminal identity" `Quick

@@ -2,7 +2,10 @@ open Alcotest
 
 type response = { status : int; headers : (string * string) list; body : string }
 
-let asset_body = String.concat "" (List.init 1000 (fun _ -> "export const text = '한글🙂';\n"))
+(* The server keeps the compressed form of an asset by name and content, and
+   the cases share one process, so each case serves bytes of its own. *)
+let asset_body_of case =
+  String.concat "" (List.init 1000 (fun _ -> "export const text = '한글🙂 " ^ case ^ "';\n"))
 let tiny_body = "export {};"
 let slow_path = "/dashboard/assets/slow.js"
 
@@ -12,7 +15,7 @@ let rec remove_tree path =
     Unix.rmdir path)
   else Sys.remove path
 
-let with_assets f =
+let with_assets ~asset_body f =
   let root = Filename.temp_file "masc-asset-worker" "" in
   Sys.remove root;
   Unix.mkdir root 0o700;
@@ -35,6 +38,9 @@ let with_assets f =
     Fs_compat.clear_fs ();
     Masc_test_deps.with_process_env "MASC_ASSETS_DIR" (Some root) f)
 
+(* The pool's one worker is held until [release ()]. [hold_next ()] puts a
+   second hold in the pool's queue, behind what was submitted before it and
+   ahead of what comes after; it lasts until the end of the case. *)
 let with_occupied_pool f =
   Eio_main.run @@ fun env ->
   Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 @@ fun () ->
@@ -46,17 +52,23 @@ let with_occupied_pool f =
     | None -> Domain_pool_ref.clear_for_tests ()
     | Some pool -> Domain_pool_ref.set pool);
   Domain_pool_ref.set pool;
-  let occupied, occupy = Eio.Promise.create () in
-  let released, release_worker = Eio.Promise.create () in
-  let release () =
-    if not (Eio.Promise.is_resolved released) then Eio.Promise.resolve release_worker () in
-  Fun.protect ~finally:release (fun () ->
+  let releases = ref [] in
+  let hold () =
+    let occupied, occupy = Eio.Promise.create () in
+    let released, release_worker = Eio.Promise.create () in
+    let release () =
+      if not (Eio.Promise.is_resolved released) then Eio.Promise.resolve release_worker () in
+    releases := release :: !releases;
     Eio.Fiber.fork ~sw (fun () ->
       Domain_pool.submit_cpu ~name:__FUNCTION__ pool (fun () ->
         Eio.Promise.resolve occupy ();
         Eio.Promise.await released));
+    occupied, release in
+  Fun.protect ~finally:(fun () -> List.iter (fun release -> release ()) !releases) (fun () ->
+    let occupied, release = hold () in
     Eio.Promise.await occupied;
-    f ~sw ~release)
+    let hold_next () = ignore (hold () : unit Eio.Promise.t * (unit -> unit)) in
+    f ~sw ~release ~hold_next)
 
 let gunzip payload =
   let input = De.bigstring_create De.io_buffer_size in
@@ -95,7 +107,7 @@ let check_response ~encoding ~content_type expected response =
     | Some other -> failf "unsupported fixture encoding %s" other in
   check string "exact decoded asset" expected decoded
 
-let exercise ~encoding ~send ~progress ~started ~finished ~release =
+let exercise ~asset_body ~encoding ~send ~progress ~started ~finished ~release ~hold_next =
   let slow = send slow_path encoding in
   Eio.Promise.await started;
   (* The route has no earlier suspension (see with_assets). A direct codec
@@ -103,6 +115,11 @@ let exercise ~encoding ~send ~progress ~started ~finished ~release =
   check bool "asset compression waits off the request domain" false
     (Eio.Promise.is_resolved finished);
   progress ();
+  (* A second request of the same asset, behind a hold that queued after the
+     first one's compression. It is answered by that one compression; one of
+     its own would wait behind the hold until the case's timeout. *)
+  hold_next ();
+  let second = send slow_path encoding in
   List.iter (fun (name, accept, body, content_type, vary) ->
     let response = Eio.Promise.await_exn (send ("/dashboard/assets/" ^ name) accept) in
     check_response ~encoding:None ~content_type body response;
@@ -119,10 +136,20 @@ let exercise ~encoding ~send ~progress ~started ~finished ~release =
   check_response ~encoding:(Some encoding)
     ~content_type:"application/javascript; charset=utf-8" asset_body response;
   check (option string) "compressed asset Vary" (Some "Accept-Encoding")
-    (List.assoc_opt "vary" response.headers)
+    (List.assoc_opt "vary" response.headers);
+  check_response ~encoding:(Some encoding)
+    ~content_type:"application/javascript; charset=utf-8" asset_body
+    (Eio.Promise.await_exn second);
+  (* The worker is held again by now, so a request after the compression is
+     answered from what it left. *)
+  check_response ~encoding:(Some encoding)
+    ~content_type:"application/javascript; charset=utf-8" asset_body
+    (Eio.Promise.await_exn (send slow_path encoding))
 
-let test_h1 encoding () = with_assets @@ fun () ->
-  with_occupied_pool @@ fun ~sw ~release ->
+let test_h1 encoding () =
+  let asset_body = asset_body_of ("HTTP/1 " ^ encoding) in
+  with_assets ~asset_body @@ fun () ->
+  with_occupied_pool @@ fun ~sw ~release ~hold_next ->
   let started, start = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
   let send path encoding = Eio.Fiber.fork_promise ~sw (fun () ->
@@ -133,10 +160,10 @@ let test_h1 encoding () = with_assets @@ fun () ->
         ~request_handler:(fun _ wrapped ->
           let request = Httpun.Reqd.request wrapped.Gluten.Reqd.reqd in
           let reqd = Masc.Http_reqd.of_gluten wrapped in
-          if String.equal path slow_path then Eio.Promise.resolve start ();
+          if String.equal path slow_path then ignore (Eio.Promise.try_resolve start () : bool);
           Server_routes_http_pages.serve_dashboard_static
             ("assets/" ^ Filename.basename path) request reqd;
-          if String.equal path slow_path then Eio.Promise.resolve finish ())
+          if String.equal path slow_path then ignore (Eio.Promise.try_resolve finish () : bool))
         ~error_handler:(fun _ ?request:_ _ _ -> fail "unexpected HTTP/1 server error")
         (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) server_flow;
       `Stop_daemon);
@@ -159,20 +186,22 @@ let test_h1 encoding () = with_assets @@ fun () ->
     let response = Eio.Promise.await reply in
     Eio.Promise.await (Httpun_eio.Client.shutdown client);
     response) in
-  exercise ~encoding ~send ~progress:(fun () -> ()) ~started ~finished ~release
+  exercise ~asset_body ~encoding ~send ~progress:(fun () -> ()) ~started ~finished ~release ~hold_next
 
-let test_h2 encoding () = with_assets @@ fun () ->
-  with_occupied_pool @@ fun ~sw ~release ->
+let test_h2 encoding () =
+  let asset_body = asset_body_of ("HTTP/2 " ^ encoding) in
+  with_assets ~asset_body @@ fun () ->
+  with_occupied_pool @@ fun ~sw ~release ~hold_next ->
   let started, start = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
   let handler ~stream_end _ h2_reqd =
     let path = (H2.Reqd.request h2_reqd).target in
-    if String.equal path slow_path then Eio.Promise.resolve start ();
+    if String.equal path slow_path then ignore (Eio.Promise.try_resolve start () : bool);
     let reqd = Masc.Http_reqd.of_h2 ~stream_end
       ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd in
     Server_routes_http_pages.serve_dashboard_static
       ("assets/" ^ Filename.basename path) (Masc.Http_reqd.request reqd) reqd;
-    if String.equal path slow_path then Eio.Promise.resolve finish () in
+    if String.equal path slow_path then ignore (Eio.Promise.try_resolve finish () : bool) in
   let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
   let server = Eio.Fiber.fork_promise ~sw (fun () ->
     Eio.Switch.run @@ fun conn_sw ->
@@ -204,7 +233,7 @@ let test_h2 encoding () = with_assets @@ fun () ->
   let progress () =
     match Eio.Promise.await (H2_eio.Client.ping client) with
     | Ok () -> () | Error `EOF -> fail "H2 closed before PING acknowledgement" in
-  exercise ~encoding ~send ~progress ~started ~finished ~release;
+  exercise ~asset_body ~encoding ~send ~progress ~started ~finished ~release ~hold_next;
   closing := true;
   (* The client reader owns an in-flight read. Shutdown reaches the peer
      immediately; close alone can wait for that read before closing the FD. *)

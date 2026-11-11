@@ -403,6 +403,9 @@ type cleanup_directory = Fs_compat_internal.Owned_tree_cleanup.directory =
   }
 module Retention_directory : module type of Fs_compat_internal.Retention_directory
 
+module Systhread_host : module type of Fs_compat_internal.Systhread_host
+(** Where the blocking calls of this library run their system threads. *)
+
 val remove_owned_tree : cleanup_directory list -> (unit, string) result
 (** Remove an execution-owned stopped writer's tree beneath its frozen,
     descriptor-bound parent chain. Never follows links. Missing target recovery

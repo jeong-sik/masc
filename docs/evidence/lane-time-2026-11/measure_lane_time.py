@@ -862,7 +862,10 @@ def parse_day(text: str) -> date:
 
 
 def parse_until(text: str) -> float:
-    return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc).timestamp()
+    moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.timestamp()
 
 
 def main() -> int:
@@ -870,7 +873,7 @@ def main() -> int:
     parser.add_argument("--base-path", default=None, help="directory that contains .masc; MASC_BASE_PATH when omitted")
     parser.add_argument("--from-date", type=parse_day, required=True, help="first UTC day, YYYY-MM-DD")
     parser.add_argument("--to-date", type=parse_day, required=True, help="last UTC day, YYYY-MM-DD")
-    parser.add_argument("--until", type=parse_until, required=True, help="ignore anything after this ISO-8601 time")
+    parser.add_argument("--until", type=parse_until, required=True, help="ignore anything after this ISO-8601 time (UTC when it has no offset)")
     parser.add_argument("--json-out", default=None, help="write the summary to this file")
     args = parser.parse_args()
     base = masc_base_path.require(parser, args.base_path, "--base-path")

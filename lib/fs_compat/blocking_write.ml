@@ -10,7 +10,7 @@ let write_string ~label resource content =
   match Eio_unix.Resource.fd_opt resource with
   | None -> Error Open_file_posix_descriptor_unavailable
   | Some fd ->
-    Eio_unix.run_in_systhread ~label (fun () ->
+    Systhread_host.run ~label (fun () ->
       Eio_unix.Fd.use_exn label fd (fun unix_fd ->
         match
           Fd_write_all.run

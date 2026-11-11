@@ -1,0 +1,368 @@
+{
+  "days_without_file": [],
+  "execute": {
+    "by_day": [
+      {
+        "calls": 5617,
+        "day": "2026-11-08",
+        "hours": 12.16,
+        "long_calls": 115,
+        "long_hours": 4.4,
+        "sleeping_long_hours": 1.82
+      },
+      {
+        "calls": 35547,
+        "day": "2026-11-09",
+        "hours": 45.74,
+        "long_calls": 333,
+        "long_hours": 19.79,
+        "sleeping_long_hours": 13.83
+      },
+      {
+        "calls": 41372,
+        "day": "2026-11-10",
+        "hours": 68.09,
+        "long_calls": 617,
+        "long_hours": 41.55,
+        "sleeping_long_hours": 37.2
+      },
+      {
+        "calls": 8607,
+        "day": "2026-11-11",
+        "hours": 14.57,
+        "long_calls": 119,
+        "long_hours": 8.63,
+        "sleeping_long_hours": 8.27
+      }
+    ],
+    "calls": 91143,
+    "calls_without_command": 952,
+    "duration_buckets": [
+      {
+        "calls": 32507,
+        "hours": 5.26,
+        "hours_percent": 3.7,
+        "label": "<1s"
+      },
+      {
+        "calls": 37635,
+        "hours": 17.92,
+        "hours_percent": 12.8,
+        "label": "1-3s"
+      },
+      {
+        "calls": 16315,
+        "hours": 22.1,
+        "hours_percent": 15.7,
+        "label": "3-10s"
+      },
+      {
+        "calls": 3502,
+        "hours": 20.9,
+        "hours_percent": 14.9,
+        "label": "10-60s"
+      },
+      {
+        "calls": 909,
+        "hours": 40.37,
+        "hours_percent": 28.7,
+        "label": "60-300s"
+      },
+      {
+        "calls": 275,
+        "hours": 34.0,
+        "hours_percent": 24.2,
+        "label": ">=300s"
+      }
+    ],
+    "hours": 140.56,
+    "long_calls": {
+      "by_kind": [
+        {
+          "calls": 342,
+          "hours": 25.0,
+          "hours_percent_of_long": 33.6,
+          "kind": "names_a_run",
+          "sleeping_calls": 333,
+          "sleeping_hours": 24.41,
+          "sleeping_hours_percent_of_sleeping": 39.9
+        },
+        {
+          "calls": 606,
+          "hours": 37.31,
+          "hours_percent_of_long": 50.2,
+          "kind": "gh_without_run",
+          "sleeping_calls": 429,
+          "sleeping_hours": 31.72,
+          "sleeping_hours_percent_of_sleeping": 51.9
+        },
+        {
+          "calls": 17,
+          "hours": 1.08,
+          "hours_percent_of_long": 1.5,
+          "kind": "build_or_test",
+          "sleeping_calls": 0,
+          "sleeping_hours": 0.0,
+          "sleeping_hours_percent_of_sleeping": 0.0
+        },
+        {
+          "calls": 219,
+          "hours": 10.98,
+          "hours_percent_of_long": 14.8,
+          "kind": "rest",
+          "sleeping_calls": 89,
+          "sleeping_hours": 4.99,
+          "sleeping_hours_percent_of_sleeping": 8.2
+        }
+      ],
+      "calls": 1184,
+      "calls_percent": 1.3,
+      "calls_without_command": 1,
+      "github_calls": 948,
+      "github_hours": 62.31,
+      "github_hours_percent_of_long": 83.8,
+      "hours": 74.37,
+      "hours_percent_of_execute": 52.9,
+      "sleeping_calls": 851,
+      "sleeping_github_hours": 56.13,
+      "sleeping_github_percent_of_sleeping": 91.8,
+      "sleeping_hours": 61.12,
+      "sleeping_hours_percent_of_long": 82.2,
+      "threshold_seconds": 60
+    }
+  },
+  "executes_without_duration": 0,
+  "files_read": 71,
+  "keepers_in_both": [
+    {
+      "blocked_hours": 12.26,
+      "keeper": "rondo",
+      "self_wakes_naming_a_run": 6
+    },
+    {
+      "blocked_hours": 6.92,
+      "keeper": "masc-productor-owner",
+      "self_wakes_naming_a_run": 16
+    },
+    {
+      "blocked_hours": 2.01,
+      "keeper": "wkbl-front",
+      "self_wakes_naming_a_run": 6
+    },
+    {
+      "blocked_hours": 1.85,
+      "keeper": "wkbl-data",
+      "self_wakes_naming_a_run": 12
+    },
+    {
+      "blocked_hours": 0.63,
+      "keeper": "wkbl-web-leader",
+      "self_wakes_naming_a_run": 12
+    },
+    {
+      "blocked_hours": 0.27,
+      "keeper": "goo-yang-bong",
+      "self_wakes_naming_a_run": 16
+    },
+    {
+      "blocked_hours": 0.2,
+      "keeper": "github-pr-checker",
+      "self_wakes_naming_a_run": 46
+    },
+    {
+      "blocked_hours": 0.2,
+      "keeper": "e-masc-the-leader",
+      "self_wakes_naming_a_run": 50
+    },
+    {
+      "blocked_hours": 0.09,
+      "keeper": "sangsu",
+      "self_wakes_naming_a_run": 44
+    },
+    {
+      "blocked_hours": 0.02,
+      "keeper": "code-reviewer-father",
+      "self_wakes_naming_a_run": 6
+    },
+    {
+      "blocked_hours": 0.0,
+      "keeper": "wkbl-growth",
+      "self_wakes_naming_a_run": 3
+    }
+  ],
+  "rows_in_window": 143712,
+  "rows_without_timestamp": 0,
+  "run_waits": {
+    "blocked_hours": 24.69,
+    "blocked_hours_percent_of_execute": 17.6,
+    "blocked_hours_summed_over_waits": 29.38,
+    "blocked_minutes_per_wait": {
+      "max": 93.3,
+      "median": 5.0,
+      "p90": 11.3
+    },
+    "polls": 386,
+    "polls_naming_several_runs": 49,
+    "polls_per_wait": {
+      "max": 9.0,
+      "median": 1.0,
+      "p90": 3.0
+    },
+    "polls_summed_over_waits": 449,
+    "repos": {
+      "blocked_hours_without_a_repo": 0.3,
+      "by_repo": [
+        {
+          "blocked_hours": 19.97,
+          "repo": "jeong-sik/masc",
+          "waits": 214
+        },
+        {
+          "blocked_hours": 4.42,
+          "repo": "jeong-sik/wkbl",
+          "waits": 40
+        }
+      ],
+      "waits_without_a_repo": 14
+    },
+    "single_poll_waits": 155,
+    "top_keepers": [
+      {
+        "blocked_hours": 12.26,
+        "keeper": "rondo",
+        "waits": 138
+      },
+      {
+        "blocked_hours": 6.92,
+        "keeper": "masc-productor-owner",
+        "waits": 41
+      },
+      {
+        "blocked_hours": 2.01,
+        "keeper": "wkbl-front",
+        "waits": 16
+      },
+      {
+        "blocked_hours": 1.85,
+        "keeper": "wkbl-data",
+        "waits": 10
+      },
+      {
+        "blocked_hours": 0.63,
+        "keeper": "wkbl-web-leader",
+        "waits": 15
+      },
+      {
+        "blocked_hours": 0.27,
+        "keeper": "goo-yang-bong",
+        "waits": 3
+      },
+      {
+        "blocked_hours": 0.2,
+        "keeper": "github-pr-checker",
+        "waits": 5
+      },
+      {
+        "blocked_hours": 0.2,
+        "keeper": "e-masc-the-leader",
+        "waits": 26
+      }
+    ],
+    "waits": 268
+  },
+  "schedule_wakes": {
+    "creates": 464,
+    "distinct_keeper_run_pairs": 256,
+    "due_in_sec_of_those": {
+      "median": 2700.0,
+      "p10": 900.0,
+      "p90": 5700.0
+    },
+    "self_wakes": 459,
+    "self_wakes_naming_a_run": 238,
+    "top_keepers": [
+      {
+        "keeper": "e-masc-the-leader",
+        "wakes": 50
+      },
+      {
+        "keeper": "github-pr-checker",
+        "wakes": 46
+      },
+      {
+        "keeper": "sangsu",
+        "wakes": 44
+      },
+      {
+        "keeper": "goo-yang-bong",
+        "wakes": 16
+      },
+      {
+        "keeper": "masc-productor-owner",
+        "wakes": 16
+      },
+      {
+        "keeper": "wkbl-data",
+        "wakes": 12
+      },
+      {
+        "keeper": "wkbl-web-leader",
+        "wakes": 12
+      },
+      {
+        "keeper": "ocaml-agent-ic",
+        "wakes": 9
+      }
+    ]
+  },
+  "skipped_lines": 0,
+  "turn_time": {
+    "build_or_test_calls": {
+      "calls": 17,
+      "hours": 1.08,
+      "inside_hours": 0.48,
+      "inside_percent_of_turn_time": 0.1,
+      "outside_hours": 0.6
+    },
+    "execute": {
+      "calls": 91143,
+      "hours": 140.56,
+      "inside_hours": 84.31,
+      "inside_percent_of_turn_time": 12.9,
+      "outside_hours": 56.25
+    },
+    "execute_of_keepers_without_turn_traces": {
+      "calls": 0,
+      "hours": 0.0,
+      "keepers": 0
+    },
+    "github_calls": {
+      "calls": 948,
+      "hours": 62.31,
+      "inside_hours": 37.73,
+      "inside_percent_of_turn_time": 5.8,
+      "outside_hours": 24.58
+    },
+    "hours": 654.6,
+    "keepers_with_turn_traces": 28,
+    "long_calls": {
+      "calls": 1184,
+      "hours": 74.37,
+      "inside_hours": 44.48,
+      "inside_percent_of_turn_time": 6.8,
+      "outside_hours": 29.89
+    },
+    "poll_calls": {
+      "calls": 386,
+      "hours": 24.69,
+      "inside_hours": 14.64,
+      "inside_percent_of_turn_time": 2.2,
+      "outside_hours": 10.05
+    }
+  },
+  "window": {
+    "from": "2026-11-08",
+    "to": "2026-11-11",
+    "until": "2026-11-11T05:40:00+00:00"
+  }
+}

@@ -40,7 +40,8 @@ val make_routes_with_transport :
 (** {!make_routes} for a server whose connections run on another domain than
     its handlers (RFC http-transport-runs-on-its-own-domain §3.3). [sw] is
     the switch handlers fork under. [transport_sw] is a switch of the domain
-    that runs the connections, for the routes whose handlers stay on that
-    domain and keep fibers beside their connection: the two WebSocket
-    routes, [/ws] (its heartbeat) and the IDE LSP proxy (its writer, workers
-    and language servers). Call it on the domain of [sw]. *)
+    that runs the connections, for the route whose handler stays on that
+    domain and keeps fibers beside its connection: the IDE LSP proxy (its
+    writer, workers and language servers). [/ws] keeps its writer and its
+    heartbeat under the scope of its own connection. Call it on the domain
+    of [sw]. *)

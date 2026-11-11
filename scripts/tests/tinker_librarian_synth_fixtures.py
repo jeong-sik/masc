@@ -26,10 +26,10 @@ KINDS = tuple(S.CandidateKind)
 CANDIDATE_SEEN = dt.datetime(2026, 11, 7, 9, 0, tzinfo=dt.UTC).timestamp()
 
 
-def fact(index: int, *, stale: bool = False, duplicate_of: str | None = None) -> S.MemoryFact:
+def fact(index: int, *, stale: bool = False, duplicate_of: str | None = None, use_at: str | None = None) -> S.MemoryFact:
     seen = dt.datetime(2026, 10, 1, tzinfo=dt.UTC) + dt.timedelta(hours=index)
     return S.MemoryFact(f"m{index}", f"기억 {index}: 문서 링크를 고칠 때 지키는 규칙 {index}번.", "doc_links", None,
-                        seen.strftime("%Y-%m-%dT%H:%M:%SZ"), stale, duplicate_of)
+                        seen.strftime("%Y-%m-%dT%H:%M:%SZ"), stale, duplicate_of, use_at)
 
 
 def candidate(index: int, kind: S.CandidateKind, target: str | None) -> S.Candidate:
@@ -44,6 +44,10 @@ def request(facts: tuple[S.MemoryFact, ...], candidates: tuple[S.Candidate, ...]
 # A memory with every plant: m4 is stale, m6 restates m5. Targets come from m1, m2 and m3.
 PLANTED = (fact(1), fact(2), fact(3), fact(4, stale=True), fact(5), fact(6, duplicate_of="m5"))
 TARGETS = ("m1", "m2", "m3")
+# The same memory with two records: m7 is used on a day after the candidates' (11-07), and m8
+# was used the day after it was written, before them.
+RECORD_AHEAD, RECORD_PAST = "2026-11-09T09:00:00Z", "2026-10-02T09:00:00Z"
+SCHEDULED = PLANTED + (fact(7, use_at=RECORD_AHEAD), fact(8, stale=True, use_at=RECORD_PAST))
 
 
 def candidates_of(kinds: tuple[S.CandidateKind, ...]) -> tuple[S.Candidate, ...]:

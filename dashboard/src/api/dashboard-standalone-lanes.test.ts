@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseStandaloneLanesSnapshot } from './dashboard-standalone-lanes'
+import { slotMatrix } from './fixtures/exact-slot-observations'
 
 function row(laneId: string, status = 'idle'): Record<string, unknown> {
   return {
@@ -51,6 +52,16 @@ function snapshot() {
 }
 
 describe('standalone lane snapshot decoder', () => {
+  it('reads slot diagnostics separately from lane configuration and run counts', () => {
+    const raw = snapshot()
+    Object.assign(raw.lanes[0]!, { slot_states: slotMatrix(), slot_observation_unavailable_runs: 2 })
+    expect(parseStandaloneLanesSnapshot(raw).lanes[0]?.slotStates).toMatchObject({ state: 'available', unavailableRuns: 2 })
+    Object.assign(raw.lanes[0]!, { slot_states: [{}] })
+    const lane = parseStandaloneLanesSnapshot(raw).lanes[0]!
+    expect(lane.slotStates?.state).toBe('unavailable')
+    expect(lane.configurationState).toBe('ready')
+    expect(lane.runningCount).toBe(1)
+  })
   it('keeps all current lane states and observed slot counts', () => {
     const parsed = parseStandaloneLanesSnapshot(snapshot())
     expect(parsed.lanes).toHaveLength(5)

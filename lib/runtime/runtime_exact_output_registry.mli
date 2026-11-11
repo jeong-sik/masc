@@ -38,6 +38,9 @@ type publication_error =
   | Resolver_snapshot_rejected of Agent_core.Exact_output.resolver_snapshot_error
       (** The resolver snapshot for a replacement could not be built from the
           text being committed. *)
+  | Targets_refused of Runtime_account_access.refusal
+      (** The process sends with no API provider of the runtime table, so the
+          replacement has no slot to build (plan D4). *)
 
 type rejected_slot =
   { lane_id : string

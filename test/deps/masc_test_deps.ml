@@ -113,6 +113,14 @@ let host_account client =
   | Ok host -> host
   | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
 
+(** The config of a sealed API provider with the credential its operator
+    declared, as a sender takes it ({!Runtime_account_access.authorize_api}),
+    by the single-user access the executable published when it started. *)
+let api_config sealed =
+  match Runtime_account_access.authorize_api sealed with
+  | Ok config -> config
+  | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
+
 (** Install the Eio clock + optional switch in every registry the lib
     code reads from.
 

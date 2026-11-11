@@ -655,6 +655,11 @@ let test_category_edit_preserves_original_export_and_worker () =
        | _ -> fail "category rewrite lost the actual declaration");
       let after = Lane_addon_config.load_file ~path:source |> unwrap in
       check string "navigation edit preserves the configuration authority" before.revision after.revision;
+      let store = Lane_addon_store.create ~root:(Filename.concat root ".masc/lane-addons") in
+      (match Runtime.authorize_captured_exact_dispatch ~store ~declaration_id:after.id
+          ~package_id:after.package.id ~configuration_revision:after.revision with
+       | Ok () -> ()
+       | Error detail -> fail ("category edit revoked the original Exact dispatch: " ^ detail));
       let updated = Option.to_result ~none:"category rewrite lost the original export" (current ()) |> unwrap in
       check string "navigation edit preserves the live incarnation" original.instance_id updated.instance_id;
       check bool "navigation edit preserves the exact tool owner" true

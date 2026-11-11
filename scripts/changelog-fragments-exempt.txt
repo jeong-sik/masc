@@ -1,5 +1,29 @@
 # Pull requests exempt from the strict missing-fragment gate.
-# One PR number per line; '#' starts a comment. A number earns its place
-# only when the PR's own content IS changelog work (e.g. a fragment
-# backfill PR whose payload is another PR's fragment).
+# One PR number per line; '#' starts a comment. A number earns its place when
+# the PR's own content is changelog work (e.g. a fragment backfill PR whose
+# payload is another PR's fragment), or -- rule widened for v0.71.0 -- when the
+# merge changes nothing a user can see: documentation, tests, comments or
+# compile repairs only. Every entry states its reason on its own line. A PR
+# that changes behavior, output, configuration or an interface a user reads
+# still needs a fragment and must not be listed here.
 50747
+50686  # docs only (21 files under docs/); no user-facing behavior
+50706  # doc comment on close_after + move of the #50659 fragment from 50636.md to 50659.md; no behavior change
+50813  # v0.70.0 release fold backported to main; its content is the v0.70.0 notes themselves
+50857  # docs only (one RFC file); no user-facing behavior
+50881  # test + compile repair: renames the Board error printer in board_sub_boards.ml and three tests; no output change
+50894  # docs only (one RFC file); no user-facing behavior
+50911  # test only (one file); no user-facing behavior
+50983  # test only (one file); no user-facing behavior
+51014  # test only (one file): Board vote test calls the printer the facade exposes
+51016  # test only (two files); no user-facing behavior
+51159  # test only (one file): Board TTL helper passes ~reader
+51181  # docs only (one file); the change it records is already cited by fragment 51182.md
+51200  # changelog work only: moves the #51187 fragment to its Internal section
+51216  # changelog work only: rewords the #51185 fragment
+51251  # test only (one file): durability expectation; no user-facing behavior
+51277  # test only (one file): vote test reaction uses an emoji Board allows
+50721  # already published in the v0.70.0 notes (Internal, test fix); its fragment is dropped here to avoid listing it twice
+50756  # already published in the v0.70.0 notes (freeze exception 1); fragment dropped to avoid a double entry
+50773  # already published in the v0.70.0 notes (freeze exception 2); fragment dropped to avoid a double entry
+50782  # already published in the v0.70.0 notes (freeze exception 2, continued); fragment dropped to avoid a double entry

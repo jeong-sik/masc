@@ -154,7 +154,8 @@ let with_runtime ?(toml = runtime_toml) ?(credential_env = "OPENROUTER_API_KEY")
     let runtime = match Runtime.get_runtimes () with
       | [ runtime ] -> runtime | _ -> fail "expected one runtime" in
     (match runtime.Runtime_instance.execution with
-     | Runtime_execution.Agent_core config ->
+     | Runtime_execution.Agent_core sealed ->
+       let config = Runtime_account_access.api_declaration sealed in
        check (option string) "ordinary runtime retains its declared effort" (Some effort)
          (Option.map Llm_provider.Reasoning_effort.to_string config.reasoning_effort)
      | _ -> fail "expected the API runtime");
@@ -305,8 +306,9 @@ let checkpoint_request_body ?lane_budget admitted =
     |> require_ok "runtime attempt" |> EO.attempt_receipt in
   let declared =
     match Runtime.exact_output_targets (Runtime.get_runtimes ()) with
-    | [ declared ] -> wire_declared_target declared
-    | _ -> fail "expected the checkpoint binding as the one exact target" in
+    | Ok [ declared ] -> wire_declared_target declared
+    | Ok _ -> fail "expected the checkpoint binding as the one exact target"
+    | Error refusal -> fail (Runtime_account_access.refusal_to_string refusal) in
   let snapshot = Resolver.load_resolver_snapshot
       ~catalog:(Resolver.Embedded_with_targets [ declared ]) ()
     |> require_ok "wire resolver snapshot" in

@@ -163,7 +163,7 @@ let try_cli_slots
             | Ok { write_outcome = Fsync_completed; _ } ->
               queue_ops.after_bind ();
               (match
-                 Keeper_lane_cli_oneshot.run
+                 Exact_lane_slot_capture.run_cli
                    ?runner:cli_runner
                    ~base_dir
                    ~runtime_id
@@ -191,6 +191,9 @@ let try_cli_slots
                       Keeper_lane_cli_oneshot.Invalid_domain_output
                         { runtime_id; detail }
                     in
+                    Exact_lane_slot_capture.cli_outcome ~slot_id:runtime_id
+                      (Exact_lane_slot_observation.Cli_failed
+                         (Keeper_exact_walk_failure.cli_observation failure));
                     log_cli_slot_failure entry failure;
                     walk
                       ~bound:(Some identity)
@@ -198,6 +201,7 @@ let try_cli_slots
                       ~last_cli_failure:(Some failure)
                       rest
                   | Ok summary ->
+                    Exact_lane_slot_capture.cli_outcome ~slot_id:runtime_id Accepted;
                     (match complete_exact_attempt queue_ops entry identity summary with
                      | Ok { write_outcome = Fsync_completed; _ } ->
                        record_outcome Ok_summary_cli;

@@ -16,6 +16,7 @@ runs with `uv run`.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import json
 import random
@@ -31,6 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librari
 
 import synth_candidate_plan as C
 import synth_generate as G
+import synth_prompts as P
+import synth_rows as RW
 import synth_spec as S
 from tinker_oai import HTTP_OK, Call
 
@@ -145,15 +148,25 @@ def stale_copies_first(model: FakeModel, n: int) -> list[str]:
 
 def memory_plan(seed: int) -> G.MemoryPlan:
     """One category of three durable and three stale facts, and a duplicate planted there."""
-    slots = tuple(G.FactSlot("topic_0", LENGTH, i >= 3, SEEN + dt.timedelta(hours=i), BLANK) for i in range(6))
+    slots = tuple(G.FactSlot("topic_0", LENGTH, i >= 3, SEEN + dt.timedelta(hours=i), BLANK, None)
+                  for i in range(6))
     return G.MemoryPlan("docs-gardener-00", KEEPER, slots,
                         G.DuplicateSlot("topic_0", SEEN + dt.timedelta(days=2), BLANK), seed)
 
 
-def fact(index: int, *, category: str = "topic_0", stale: bool = False,
-         duplicate_of: str | None = None) -> S.MemoryFact:
+def fact(index: int, *, category: str = "topic_0", stale: bool = False, duplicate_of: str | None = None,
+         use_at: str | None = None) -> S.MemoryFact:
     seen = (SEEN + dt.timedelta(hours=index)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return S.MemoryFact(f"m{index}", text(index), category, None, seen, stale, duplicate_of)
+    return S.MemoryFact(f"m{index}", text(index), category, None, seen, stale, duplicate_of, use_at)
+
+
+def record_plan() -> G.MemoryPlan:
+    """Three durable facts, then a record still ahead and one already past, all in topic_0."""
+    durable = tuple(G.FactSlot("topic_0", LENGTH, False, SEEN + dt.timedelta(hours=i), BLANK, None)
+                    for i in range(3))
+    ahead = G.FactSlot("topic_0", LENGTH, False, SEEN + dt.timedelta(hours=3), BLANK, G.USE_AHEAD_START)
+    past = G.FactSlot("topic_0", LENGTH, True, SEEN + dt.timedelta(hours=4), BLANK, SEEN + dt.timedelta(days=1))
+    return G.MemoryPlan("docs-gardener-00", KEEPER, (*durable, ahead, past), None, 0)
 
 
 # m4 is stale and m6 restates m5, so only m1, m2 and m3 can be targets.
@@ -177,7 +190,7 @@ class PlanTest(unittest.TestCase):
             sizes = Counter(slot.category for slot in plan.slots)
             sizes[plan.duplicate.category] += 1
             self.assertLessEqual(max(sizes.values()), S.FACTS_PER_CATEGORY_CAP)
-            planted = {slot.category for slot in plan.slots if slot.stale} | {plan.duplicate.category}
+            planted = {slot.category for slot in plan.slots if G.planted(slot)} | {plan.duplicate.category}
             full += any(sizes[c] == S.FACTS_PER_CATEGORY_CAP for c in planted)
             self.assertIsNone(G.plan_memory(random.Random(seed), KEEPER, 0, False).duplicate)
         self.assertGreater(full, 0, "no plan put a planted fact in a full category, so the cap went unchecked")
@@ -209,13 +222,31 @@ class PlanTest(unittest.TestCase):
                     by_size.append(sum(c * c for c in durable.values()) / sum(durable.values()))
         self.assertGreater(mean(picked), (mean(even) + mean(by_size)) / 2)
 
+    def test_a_record_is_used_on_its_side_of_the_candidates_days(self) -> None:
+        """Candidates fall on 11-07 or 11-08. A record ahead is used on a later day; a past one is
+        used after it was written, on a day of its memory."""
+        last_candidate_day = (G.CANDIDATE_TIME_START + dt.timedelta(days=1)).date()
+        sides: Counter[bool] = Counter()
+        for seed in range(2000):
+            for slot in G.plan_memory(random.Random(seed), KEEPER, 0, False).slots:
+                if slot.use_at is None:
+                    continue
+                sides[slot.stale] += 1
+                if slot.stale:
+                    self.assertLessEqual(slot.seen + G.USE_PAST_AFTER, slot.use_at)
+                    self.assertLessEqual(slot.use_at, G.MEMORY_END)
+                else:
+                    self.assertGreater(slot.use_at.date(), last_candidate_day)
+                    self.assertLess(slot.use_at, G.USE_AHEAD_START + dt.timedelta(days=G.USE_AHEAD_DAYS))
+        self.assertLess(abs(sides[False] / sides.total() - S.SCHEDULED_AHEAD_SHARE), 0.05)
+
 
 class MemoryTest(unittest.TestCase):
     def test_a_duplicate_names_the_id_its_fact_gets_once_sorted_by_time(self) -> None:
         late, early = dt.datetime(2026, 10, 9, tzinfo=dt.UTC), dt.datetime(2026, 10, 2, tzinfo=dt.UTC)
-        written = [G.Written(late, "doc_links", False, "원래 기억", None),
-                   G.Written(early, "doc_links", False, "같은 지식의 다른 문장", "원래 기억"),
-                   G.Written(early + dt.timedelta(days=1), "doc_links", True, "낡은 상태", None)]
+        written = [G.Written(late, "doc_links", False, "원래 기억", None, None),
+                   G.Written(early, "doc_links", False, "같은 지식의 다른 문장", "원래 기억", None),
+                   G.Written(early + dt.timedelta(days=1), "doc_links", True, "낡은 상태", None, None)]
         facts = G.facts_of(random.Random(1), written)
         self.assertEqual([(f.memory_id, f.claim, f.planted_stale, f.duplicate_of) for f in facts],
                          [("m1", "같은 지식의 다른 문장", False, "m3"), ("m2", "낡은 상태", True, None),
@@ -230,6 +261,17 @@ class MemoryTest(unittest.TestCase):
             original = by_id[duplicate.duplicate_of or ""]
             self.assertFalse(original.planted_stale)
             self.assertEqual(original.category, duplicate.category)
+
+    def test_a_duplicate_never_restates_a_record(self) -> None:
+        # topic_0 holds three durable facts and a record still ahead, which is not stale either.
+        for seed in range(30):
+            plan = dataclasses.replace(record_plan(), duplicate=G.DuplicateSlot("topic_0", SEEN + dt.timedelta(days=2),
+                                                                                BLANK), seed=seed)
+            facts = G.build_memory(FakeModel(), plan)
+            assert facts is not None
+            by_id = {f.memory_id: f for f in facts}
+            (duplicate,) = [f for f in facts if f.duplicate_of is not None]
+            self.assertIsNone(by_id[duplicate.duplicate_of or ""].use_at, seed)
 
     def test_a_duplicate_that_copies_or_misses_its_marks_or_length_is_not_kept(self) -> None:
         model = FakeModel((copied, dated, too_long, fresh))
@@ -263,9 +305,33 @@ class MemoryTest(unittest.TestCase):
             assert kept is not None
             self.assertEqual([claim for _, claim in kept], model.written[-6:], lost.__name__)
 
+    def test_an_attempt_that_loses_a_record_is_asked_again(self) -> None:
+        # Slot 3 is the record ahead. Counted as a durable fact, losing it would leave enough.
+        plan = record_plan()
+        model = FakeModel(facts=(stale_copies_first, fresh_facts))
+        kept = G.claims_for(model, plan, "topic_0", plan.slots, [], [])
+        assert kept is not None
+        self.assertEqual([claim for _, claim in kept], model.written[-5:])
+
+    def test_the_prompt_names_a_records_kind_and_not_its_side(self) -> None:
+        plan = record_plan()
+        prompts: list[str] = []
+        for slot in plan.slots[3:]:
+            model = FakeModel()
+            self.assertIsNotNone(G.claims_for(model, plan, "topic_0", (slot,), [], []))
+            prompts.append(model.prompts[-1][1])
+        self.assertEqual(prompts[0], prompts[1])
+        self.assertIn(P.fact_kind_word("scheduled"), prompts[0])
+
+    def test_a_record_keeps_its_use_time_and_side(self) -> None:
+        facts = G.build_memory(FakeModel(), record_plan())
+        assert facts is not None
+        self.assertEqual([(f.planted_stale, f.use_at) for f in facts if f.use_at is not None],
+                         [(False, "2026-11-09T00:00:00Z"), (True, "2026-10-02T00:00:00Z")])
+
     def test_a_later_call_sees_its_categorys_facts_whole_and_others_by_their_head(self) -> None:
         # One topic_1 fact, then eight topic_0 facts: topic_0 takes two calls of FACTS_PER_CALL.
-        slots = tuple(G.FactSlot(category, LENGTH, False, SEEN + dt.timedelta(hours=i), BLANK)
+        slots = tuple(G.FactSlot(category, LENGTH, False, SEEN + dt.timedelta(hours=i), BLANK, None)
                       for i, category in enumerate(["topic_1"] + ["topic_0"] * 8))
         model = FakeModel()
         facts = G.build_memory(model, G.MemoryPlan("docs-gardener-00", KEEPER, slots, None, 0))
@@ -283,7 +349,28 @@ class MemoryTest(unittest.TestCase):
 
 class CandidatesTest(unittest.TestCase):
     def test_no_target_is_a_planted_fact(self) -> None:
-        self.assertEqual([f.memory_id for f in G.target_choices(PLANTED)], ["m1", "m2", "m3"])
+        records = (fact(7, use_at="2026-11-09T09:00:00Z"), fact(8, stale=True, use_at="2026-10-02T09:00:00Z"))
+        for facts in (PLANTED, PLANTED + records):
+            self.assertEqual([f.memory_id for f in G.target_choices(facts)], ["m1", "m2", "m3"])
+
+    def test_a_request_on_a_planned_memory_with_records_reads_back(self) -> None:
+        """The use times plan_memory draws hold against the times build_candidates gives."""
+        sides: Counter[bool] = Counter()
+        for seed in range(300):
+            plan = G.plan_memory(random.Random(seed), KEEPER, 0, False)
+            if not any(slot.use_at is not None for slot in plan.slots):
+                continue
+            written = [G.Written(slot.seen, slot.category, slot.stale, text(i), None, slot.use_at)
+                       for i, slot in enumerate(plan.slots)]
+            facts = G.facts_of(random.Random(seed), written)
+            plans = tuple(plan_of(kind) for kind in (S.CandidateKind.NEW_DURABLE, S.CandidateKind.TRANSIENT))
+            candidates = G.build_candidates(FakeModel(), random.Random(seed), KEEPER, facts, plans)
+            assert candidates is not None
+            req = S.SynthRequest(f"eval-{plan.memory_key}-000", KEEPER, facts, S.NoTask(), candidates)
+            row = json.loads(G.request_json(req))["request"]
+            self.assertEqual(RW.parts_of(row), (facts, candidates), seed)
+            sides.update(f.planted_stale for f in facts if f.use_at is not None)
+        self.assertGreater(min(sides[False], sides[True]), 50)
 
     def test_targeted_candidates_take_distinct_durable_facts_outside_the_pair(self) -> None:
         facts = PLANTED

@@ -696,8 +696,8 @@ let input_capabilities_for_config (config : config) =
 let input_capabilities_of_runtime (rt : Runtime_instance.t) =
   let provider_caps =
     match rt.Runtime_instance.execution with
-    | Runtime_execution.Agent_core provider_config ->
-      provider_caps_of_config provider_config
+    | Runtime_execution.Agent_core sealed ->
+      provider_caps_of_config (Runtime_account_access.api_declaration sealed)
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
     | Runtime_execution.Antigravity_cli _

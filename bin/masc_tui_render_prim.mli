@@ -327,6 +327,19 @@ val connection_badge : Masc_tui_types.state -> string
     the feed is whole and nothing is being read. The connection and the
     workspace it serves are named once, on the row above every screen. *)
 
+val here_row :
+  cols:int ->
+  Masc_tui_types.state ->
+  path:string list ->
+  readings:string list ->
+  position:Masc_tui_value.Position.t option ->
+  string
+(** The row under the top row: the top-row screen this one belongs to, each
+    step in [path] taken into it, the screen's own [readings], then
+    {!connection_badge} and the [position] at the right-hand end. The last
+    step folds first when the row is narrow, readings give way whole from the
+    end, and the position is never cut. The product name is not drawn. *)
+
 val surface_title_row :
   cols:int -> Masc_tui_types.state -> lead:string -> readings:string list -> string
 (** The title row of a surface drawn in [cols] columns: [lead], the [readings]
@@ -376,8 +389,6 @@ val badge_row : cols:int -> lead:string -> label:string -> badge:string -> strin
     drawn whole whenever [lead] and [badge] fit in the row; a row too narrow for
     those two is cut at its end like any other. *)
 
-val lane_run_detail_title : string
-val measurement_detail_title : string
 val fusion_title : string
 val runtime_detail_title : string
 val keeper_calls_lead : string

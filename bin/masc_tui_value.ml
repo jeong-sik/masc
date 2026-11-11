@@ -122,3 +122,15 @@ module Count = struct
       digits;
     Buffer.contents text
 end
+
+module Position = struct
+  type t =
+    | Row of { at : int; total : int }
+    | Partial of { at : int; loaded : int; total : int }
+
+  let text ~whole = function
+    | Row { at; total } -> Count.grouped at ^ "/" ^ Count.grouped total
+    | Partial { at; loaded; total } ->
+        Count.grouped at ^ "/" ^ Count.grouped loaded ^ " \xc2\xb7 " ^ whole
+        ^ " " ^ Count.grouped total
+end

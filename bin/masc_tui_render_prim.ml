@@ -2141,6 +2141,74 @@ let surface_title_row ~cols (state : state) ~lead ~readings =
   detail_heading ~cols ~lead:(Lead_text lead) ~id:"" ~after:("" :: readings)
     ~tail:(surface_connection_badge state ~width)
 
+(* The row under the top row: where this screen is -- the top-row screen it
+   belongs to, then each step taken into it -- then what the screen has to
+   say about its own reading, and how far down it the reader is. One function
+   draws it so that a path, a count and a position look the same on every
+   screen that has them (RFC tui-one-screen-grammar, section 2). The product
+   name is not part of a place and is not drawn.
+
+   The last step is the one that folds when the row is narrow: it is the id
+   of the thing being read, and the steps before it are how to get back. *)
+let here_step_separator = " \xe2\x80\xba "
+
+(* The cells kept clear ahead of the position. *)
+let here_position_gap_cells = 2
+
+let here_row ~cols (state : state) ~path ~readings ~position =
+  let screen =
+    let index = Masc_tui_surface_navigation.surface_ring_index state.view in
+    match List.nth_opt Masc_tui_types.surface_ring index with
+    | Some (surface, name) ->
+        Masc_tui_types.surface_ring_display_label ~lang:state.ui_language surface name
+    | None -> ""
+  in
+  let step text = Ansi.dim ^ here_step_separator ^ Ansi.reset ^ text in
+  let lead, id =
+    match List.rev path with
+    | [] -> screen_title (" " ^ screen), ""
+    | last :: before ->
+        ( screen_title (" " ^ screen)
+          ^ String.concat "" (List.rev_map step before)
+          ^ Ansi.dim ^ here_step_separator ^ Ansi.reset,
+          last )
+  in
+  let position =
+    Option.map
+      (fun position ->
+        Ansi.dim
+        ^ Masc_tui_value.Position.text
+            ~whole:(ui_text state ~ko:"전체" ~en:"of") position
+        ^ Ansi.reset)
+      position
+  in
+  let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+  (* The position ends the row: the path and the readings are laid out in the
+     cells left of it, then padded, so it keeps its column whatever the path
+     says. *)
+  let position_cells =
+    match position with
+    | Some text -> cells text + here_position_gap_cells
+    | None -> 0
+  in
+  let left_cols = cols - position_cells in
+  let left =
+    detail_heading ~cols:left_cols ~lead:(Lead_text lead) ~id
+      ~after:(List.map (fun reading -> "  " ^ reading) readings)
+      ~tail:
+        (surface_connection_badge state
+           ~width:(max 0 (framed_inner_width left_cols - 2)))
+  in
+  match position with
+  | None -> left
+  | Some position ->
+      left
+      ^ String.make
+          (max here_position_gap_cells
+             (framed_inner_width cols - cells left - cells position))
+          ' '
+      ^ position
+
 (* A header row of [lead], a bracketed [label] and [badge]. The badge says
    whether the screen can be trusted, so it is drawn whole and the label gives
    up cells to it, down to losing its brackets. The six cells are the two gaps
@@ -2164,8 +2232,6 @@ let badge_row ~cols ~lead ~label ~badge =
    run, a measurement artifact named by its sha256, a Fusion run (whose list
    and launch form carry the same title), one runtime's detail, and one
    keeper's calls. *)
-let lane_run_detail_title = " MASC Lane Run"
-let measurement_detail_title = " MASC Measurement"
 let fusion_title = " MASC Fusion"
 let runtime_detail_title = " MASC System / Runtime detail"
 let keeper_calls_lead = " Keepers \xe2\x96\xb8 "

@@ -187,20 +187,22 @@ val sse_comment_with_retry : comment:string -> string
 val sse_ping_interval_s : float
 (** Pinned at [30.0] seconds.  Ping fibers use this interval to
     write the SSE comment frame [": ping\n\n"] so middleboxes do
-    not idle out the connection.  Matches the same constant
-    duplicated in {!Server_mcp_transport_http_agui} (the duplicate
-    is intentional — see that module's contract). *)
+    not idle out the connection.  The SSE routes that send a keepalive
+    take their interval from here, apart from the execute-output stream
+    ({!Server_routes_http_routes_dashboard}), which keeps a shorter
+    heartbeat of its own. *)
 
 val sse_stalled_after_s : float
-(** Three {!sse_ping_interval_s}. An SSE frame that has not reached the socket
-    after this long closes its response (RFC-0493 §3.3).
-
-    It is also the bound every HTTP/2 stream gives a response flush
-    ({!Server_bootstrap_http.serve_h2_connection}). RFC-0518 D2 keeps one
-    stall bound for the server, so an SSE stream is cut at the same age on
-    either transport. A change here moves the smallest drain rate of every
-    HTTP/2 response with it: one 16 KiB slice within the bound, or two where
-    the socket is what holds the body back ({!Http_h2_stream.Response_body}). *)
+(** Three {!sse_ping_interval_s}. The HTTP/2 listeners give each stream's
+    response flushes this bound ({!Server_bootstrap_http.serve_h2_connection},
+    RFC-0518 D2), and an HTTP/1.1 SSE frame that has not reached the socket
+    after this long closes its response (RFC-0493 §3.3). The server keeps one
+    stall bound, so an SSE stream whose client takes nothing is cut at the
+    same age on either transport. A frame longer than a slice is where they
+    differ: HTTP/1.1 gives the whole frame the bound, HTTP/2 each slice. A
+    change here moves the smallest drain rate of every HTTP/2 response with
+    it: one 16 KiB slice within the bound, or two where the socket is what
+    holds the body back ({!Http_h2_stream.Response_body}). *)
 
 val observer_idle_timeout_header : string
 val observer_idle_timeout_ms : int

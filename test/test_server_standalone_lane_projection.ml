@@ -1171,7 +1171,7 @@ body_timeout_s=30.0
   let other_owner={run with run_id="other-owner";
     slot_observations=Some (Ok [O.with_owner (Runtime_schema.Addon addon)
       (observation "A" Accepted 1000. 1001.)])} in
-  let rows=Masc.Server_exact_slot_projection.slots_json
+  let rows=Server_exact_slot_projection.slots_json
     ~owner:(Runtime_schema.Builtin Standalone_lane.Librarian)
     ~current_http:["A",E.admitted_target_binding admitted]
     ~declared_http:["A";"B";"C"] ~declared_cli:["A"] ~runs:[other_owner;overlapping;run]

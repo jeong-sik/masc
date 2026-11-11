@@ -2108,6 +2108,7 @@ let run_named
     ?official_client_continuation
     ?on_checkpoint_prepared
     ?official_task_reference
+    ?direct_scope
     ?official_client_composed_context
     ?on_official_client_tool_boundary
     ?on_child_content_observation
@@ -2143,6 +2144,10 @@ let run_named
   : (named_run_result, Agent_core.Error.t) result =
   Runtime_response_identity_scope.without_identity (fun () ->
   let session_id = Keeper_request_source.trace_id input_source in
+  (* A run that serves no chat execution has no owner among the receipts. *)
+  let outbox_viewer = match direct_scope with
+    | None -> Keeper_client_tool_outbox.Unowned_only
+    | Some scope -> Keeper_client_tool_outbox.Owner_and_unowned scope in
   let tool_requirement = match output_contract with
     | Tool_verdict -> Keeper_required_tools.Required
     | Provider_default -> tool_requirement in
@@ -3000,6 +3005,7 @@ let run_named
             ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
             ~pre_tool_rejects
             ~base_path
+            ~outbox_viewer
             ~goal
             ~goal_blocks
             ~system_prompt
@@ -3176,6 +3182,7 @@ let run_named
               on_model_input_window_observation
             ~pre_tool_rejects
             ~base_path
+            ~outbox_viewer
             ~goal
             ~goal_blocks
             ~system_prompt
@@ -3326,6 +3333,7 @@ let run_named
               on_model_input_window_observation
             ~pre_tool_rejects
             ~base_path
+            ~outbox_viewer
             ~goal
             ~goal_blocks
             ~native_workspace_context:native_context
@@ -3473,6 +3481,7 @@ let run_named
             ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
             ~pre_tool_rejects
             ~base_path
+            ~outbox_viewer
             ~goal
             ~goal_blocks
             ~system_prompt
@@ -3666,6 +3675,7 @@ let run_named
             ; hold_carried_front = (fun seed -> refused_carried_front := Some seed)
             ; restore_carried_front = (fun prior -> refused_carried_front := prior)
             ; base_path
+            ; outbox_viewer
             ; media_store
             ; keeper_name
             ; name

@@ -378,6 +378,8 @@ type try_provider_ctx =
         (** Puts back the front held before a boundary resend that the
             provider refused for a reason other than size. *)
   ; base_path : string
+  ; outbox_viewer : Keeper_client_tool_outbox.viewer
+      (** Which retained receipts this attempt's run may carry. *)
   ; media_store : Agent_core.History.media_store
       (** The media of this Keeper's history; the attempt's agent and its
           request projection read and write it. *)

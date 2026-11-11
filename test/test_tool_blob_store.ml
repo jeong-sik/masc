@@ -1472,7 +1472,7 @@ let test_maintenance_receipt_shaped_messages_keep_history_ownership () =
         ~tool_name:"fixture" ~arguments:payload ~response:payload))
     else require (Outbox.retain ~base_path ~keeper_name:"reviewer"
       (outbox_vendor_receipt payload payload));
-    let snapshot = require (Outbox.load ~base_path ~keeper_name:"reviewer") in
+    let snapshot = require (Outbox.load ~base_path ~keeper_name:"reviewer" ~viewer:Outbox.Every_receipt) in
     let receipt_id = match Outbox.receipt_ids snapshot with
       | [id] -> id | _ -> Alcotest.fail "one retained receipt required" in
     let directory = require (Keeper_official_client_paths.outbox_dir ~base_path ~keeper_name:"reviewer") in

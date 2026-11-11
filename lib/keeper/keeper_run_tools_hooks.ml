@@ -672,6 +672,7 @@ let assemble_hooks
             (Keeper_client_tool_outbox.summary_reader
                ~base_path:config.base_path
                ~keeper_name:meta.name
+               ~viewer:Keeper_client_tool_outbox.Unowned_only
                ~on_unavailable:(fun detail ->
                  Log.Keeper.warn ~keeper_name:meta.name
                    "tool outbox unavailable; this round lists arrived tool results without \

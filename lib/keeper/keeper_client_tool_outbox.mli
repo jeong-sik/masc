@@ -20,6 +20,25 @@ val retain :
   base_path:string -> keeper_name:string ->
   receipt -> (unit, string) result
 
+(** Whose receipts a read may carry. A background-run request whose receipt an
+    unsettled chat execution waits for is owned by that execution
+    ({!Keeper_semantic_execution.receipt_obligation}), and no other run may
+    read it: a run that completes acknowledges exactly the receipts it read,
+    so another run's read would delete the receipt the owner waits for. *)
+type viewer =
+  | Unowned_only
+      (** Receipts no execution owns. A run that serves no chat execution, and
+          a stimulus that points at a receipt. *)
+  | Owner_and_unowned of Keeper_execution_scope_id.t
+      (** The receipts that execution owns, and the unowned ones. *)
+  | Every_receipt
+      (** All of them. Only a read that neither carries a receipt to a model
+          nor acknowledges one may use it. *)
+
+val receipt_visible : viewer -> owner:Keeper_execution_scope_id.t option -> bool
+(** Whether [viewer] may read a receipt whose request [owner] owns; [None] is a
+    request no execution owns. *)
+
 type host_producer
 val host_producer :
   base_path:string -> keeper_name:string -> runtime_label:string -> turn_count:int ->
@@ -103,11 +122,17 @@ val host_response :
     inside receipt payloads too. A failed blob write returns [Error], and
     nothing is written to the outbox. *)
 
-val load : base_path:string -> keeper_name:string -> (snapshot, string) result
+val load : base_path:string -> keeper_name:string -> viewer:viewer -> (snapshot, string) result
 (** Read exact committed results, excluding host producers whose kernel lease
     is still held. Vendor receipts remain independent. An unavailable/missing
     host lease is a failure, never an inactive owner or permission to ACK.
-    Loading is independent of the active producer's frozen delivery frontier. *)
+    Loading is independent of the active producer's frozen delivery frontier.
+
+    Receipts [viewer] may not read are left out of the snapshot, so
+    {!acknowledge} never removes them. Reading the owners needs the Keeper's
+    chat operation journal when the outbox holds a receipt and [viewer] is not
+    [Every_receipt]; a journal that cannot be read is an [Error], not an empty
+    owner set. *)
 val receipt_ids : snapshot -> string list
 (** Exact SHA256 identities of the validated committed receipts. Staging files
     and provider execution cell numbers are not receipt identities. *)
@@ -140,10 +165,11 @@ val receipt_summary : snapshot -> receipt_id:string -> Summary.t option
 val summary_reader :
   base_path:string ->
   keeper_name:string ->
+  viewer:viewer ->
   on_unavailable:(string -> unit) ->
   string ->
   Summary.t option
-(** [summary_reader ~base_path ~keeper_name ~on_unavailable] is a lookup from a
+(** [summary_reader ~base_path ~keeper_name ~viewer ~on_unavailable] is a lookup from a
     receipt identity to its {!Summary.t}. It loads the outbox at the
     first lookup and answers every later lookup from that load, so a round that
     points at no receipt reads nothing. An outbox that cannot be loaded calls
@@ -237,8 +263,11 @@ type run_carrier
     the run's first attempt. *)
 
 val run_carrier :
-  base_path:string -> keeper_name:string -> artifact_reader_available:bool -> run_carrier
-(** Reads and writes no file. [artifact_reader_available] is as for {!carrier}. *)
+  base_path:string -> keeper_name:string -> artifact_reader_available:bool ->
+  viewer:viewer -> run_carrier
+(** Reads and writes no file. [artifact_reader_available] is as for {!carrier}.
+    [viewer] is the run's, for its one load: a run serving a chat execution
+    passes [Owner_and_unowned] with that execution's scope. *)
 
 val run_carrier_load : run_carrier -> (snapshot * carrier, string) result
 (** The first successful call loads the outbox and starts its carrier. Every

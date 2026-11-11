@@ -51,7 +51,7 @@ let receipt turn_id : Keeper_client_tool_outbox.receipt =
 let retain config result =
   get (Keeper_client_tool_outbox.retain ~base_path:config.Workspace.base_path ~keeper_name result)
 let snapshot config =
-  get (Keeper_client_tool_outbox.load ~base_path:config.Workspace.base_path ~keeper_name)
+  get (Keeper_client_tool_outbox.load ~base_path:config.Workspace.base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt)
 let pending config =
   get (Keeper_registry_event_queue.pending_selections_result
     ~base_path:config.Workspace.base_path keeper_name)

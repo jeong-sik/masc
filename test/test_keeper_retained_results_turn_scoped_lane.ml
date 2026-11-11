@@ -39,7 +39,7 @@ let retained_carrier () =
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
   ignore (Workspace.init (Workspace.default_config base_path) ~agent_name:(Some keeper_name));
   get (Outbox.retain ~base_path ~keeper_name receipt);
-  match Outbox.context_message (get (Outbox.load ~base_path ~keeper_name)) with
+  match Outbox.context_message (get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt)) with
   | Some carrier -> carrier
   | None -> fail "the retained result has a carrier"
 ;;

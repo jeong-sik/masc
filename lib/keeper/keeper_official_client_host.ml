@@ -1670,6 +1670,7 @@ let arrival_source ~keeper_name ~base_path ~read : arrival_source =
            Keeper_client_tool_outbox.summary_reader
              ~base_path
              ~keeper_name
+             ~viewer:Keeper_client_tool_outbox.Unowned_only
              ~on_unavailable:(fun detail ->
                Log.Keeper.warn
                  ~keeper_name

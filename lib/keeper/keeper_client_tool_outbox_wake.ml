@@ -41,7 +41,11 @@ let notify ~base_path ~keeper_name =
   | Some meta when not (route_can_consume meta) -> Ok ()
   | Some meta ->
     let keeper_name = meta.Keeper_meta_contract.name in
-    let* snapshot = Keeper_client_tool_outbox.load ~base_path ~keeper_name in
+    (* A stimulus asks any run to read the receipt, so it covers only the
+       receipts no execution owns. *)
+    let* snapshot =
+      Keeper_client_tool_outbox.load ~base_path ~keeper_name
+        ~viewer:Keeper_client_tool_outbox.Unowned_only in
     let receipt_ids = Keeper_client_tool_outbox.receipt_ids snapshot in
     let* () = List.fold_left (fun acc receipt_id ->
       let* () = acc in

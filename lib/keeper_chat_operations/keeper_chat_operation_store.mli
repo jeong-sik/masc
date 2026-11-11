@@ -79,6 +79,20 @@ val inspect_pending_inputs : path:string -> (Operation.t list option, error) res
     Does not scan terminal history or run a whole-database integrity audit.
     [None] means no database, distinct from an empty validated snapshot. *)
 
+type receipt_owners
+(** Which unsettled execution owns each background-run request whose receipt
+    it waits for, at one read. *)
+
+val inspect_receipt_owners : path:string -> (receipt_owners, error) result
+(** Read-only, schema-checked transaction over the unsettled semantic
+    executions. A missing database is an empty set: nothing was admitted, so
+    nothing is owned. A request that two executions list is an integrity
+    error, never an arbitrary pick. Never creates, upgrades or recovers a
+    store, and runs no whole-database integrity audit. *)
+
+val receipt_owner : receipt_owners -> request_id:string -> Keeper_execution_scope_id.t option
+(** [None] when no unsettled execution owns the request. *)
+
 type native_history =
   { execution_operation_id : Operation.Operation_id.t
       (** The execution leader, including when a batch member was requested. *)

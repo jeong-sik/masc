@@ -3452,6 +3452,7 @@
 (include stanzas/test_keeper_agent_core_retained_carrier.inc)
 (include stanzas/test_keeper_execute_background.inc)
 (include stanzas/test_keeper_host_result_retention.inc)
+(include stanzas/test_keeper_receipt_ownership_reads.inc)
 (include stanzas/test_keeper_arrived_preview_readership.inc)
 (include stanzas/test_keeper_result_producer_liveness.inc)
 (include stanzas/test_runtime_claude_code.inc)

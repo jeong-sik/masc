@@ -106,7 +106,7 @@ let with_carrier_run ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
        arguments=`String "no-effect-replay";
        response=`String (overflow_label index ^ String.make 32_768 'r')}))
     overflow_indices;
-  let pending () = get (Outbox.load ~base_path ~keeper_name) in
+  let pending () = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt) in
   let loaded_ids = Outbox.receipt_ids (pending ()) in
   (* The text an Inline request carries, and the address the switch names. *)
   let inline = String.concat "\n\n" (Outbox.developer_context (pending ())) in

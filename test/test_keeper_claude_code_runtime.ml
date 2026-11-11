@@ -3328,7 +3328,7 @@ let run_direct_attempt
                     | None -> config
                     | Some timeout_s -> { config with Runtime_execution.timeout_s }
                   in
-                  Keeper_claude_code_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-pre-dispatch" })
+                  Keeper_claude_code_runtime.run ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-pre-dispatch" })
                     ~configured_reasoning_effort:runtime.model.reasoning_effort
                     ~turn_timeout_s:runtime.model.turn_timeout_s
                     ?terminal_effect_state
@@ -6906,7 +6906,7 @@ let test_original_outbox_result_is_delivered_on_start_and_resume () =
       {thread_id="original-codex-session";turn_id;call_id="original-call";
        tool_name="Execute";arguments=`String "original-effect-no-replay";response=`String value}
     |> get) in
-  let count () = store (fun () -> Keeper_client_tool_outbox.load ~base_path ~keeper_name
+  let count () = store (fun () -> Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt
     |> get |> Keeper_client_tool_outbox.receipt_ids |> List.length) in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     let system_path = Filename.concat base_path "outbox-start.txt"
@@ -6951,7 +6951,7 @@ let test_rejecting_keeper_accept_preserves_loaded_and_new_originals () =
     Fun.protect ~finally:Fs_compat.clear_fs f) in
   let get = function Ok value -> value | Error detail -> fail detail in
   let pending () = store (fun () ->
-    Keeper_client_tool_outbox.load ~base_path ~keeper_name |> get) in
+    Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt |> get) in
   let tool = Agent_core.Tool.create ~name:"masc_probe" ~description:"Complete one original effect"
     ~parameters:[{Agent_core.Types.name="marker";description="Fixture marker";param_type=String;required=true}]
     (fun _ -> incr effects;
@@ -7015,7 +7015,7 @@ module Retained_overflow = struct
        response=`String (label index ^ String.make 4096 'r')} |> get) indices)
 
   let pending base_path = store (fun () ->
-    Keeper_client_tool_outbox.load ~base_path ~keeper_name |> get)
+    Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt |> get)
 
   (* The text an Inline request carries, and the address the switch names. *)
   let inline base_path =

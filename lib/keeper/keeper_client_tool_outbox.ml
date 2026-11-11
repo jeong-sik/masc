@@ -13,6 +13,19 @@ type receipt = Keeper_client_tool_outbox_codec.receipt =
   ; response : Yojson.Safe.t
   }
 
+type viewer =
+  | Unowned_only
+  | Owner_and_unowned of Keeper_execution_scope_id.t
+  | Every_receipt
+
+let receipt_visible viewer ~owner =
+  match viewer, owner with
+  | Every_receipt, (None | Some _) -> true
+  | Unowned_only, None -> true
+  | Unowned_only, Some _ -> false
+  | Owner_and_unowned _, None -> true
+  | Owner_and_unowned viewer_scope, Some owner -> Keeper_execution_scope_id.equal viewer_scope owner
+
 type delivery_frontier = Open of entry Producer_map.t | Closed of entry Producer_map.t
 
 type host_producer =
@@ -263,7 +276,7 @@ let retain_confirmed_calls snapshot ~call_ids =
     | _ -> false in
   { snapshot with entries = List.filter is_confirmed snapshot.entries }
 
-let load ~base_path ~keeper_name =
+let load_committed ~base_path ~keeper_name =
   let* directory = directory ~base_path ~keeper_name in
   let* names =
     match Fs_compat.path_kind ~follow:false directory with
@@ -307,6 +320,49 @@ let load ~base_path ~keeper_name =
       let* inactive = producer_inactive json in
       if inactive then Ok ({path; json} :: acc) else Ok acc) (Ok []) names in
   Ok {directory; entries = List.rev entries}
+
+(* A receipt with no [call_id] names no request, so no execution owns it. *)
+let call_id_of_entry entry =
+  match entry.json with
+  | `Assoc fields ->
+    (match List.assoc_opt "call_id" fields with
+     | Some (`String id) -> Some id
+     | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null) | None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+(* The owner records are in the Keeper's chat operation journal, which the
+   Owner writes. This reads it without the Owner, as other read-only
+   inspections do, and only when the outbox holds a receipt to filter. *)
+let read_receipt_owners ~base_path ~keeper_name =
+  let path =
+    Keeper_chat_operation_store.path_for_keeper
+      ~keepers_runtime_dir:(Common.keepers_runtime_dir_of_base ~base_path)
+      ~keeper_name
+  in
+  match
+    Eio_guard.run_in_systhread ~label:"tool-outbox-receipt-owners" (fun () ->
+      Keeper_chat_operation_store.inspect_receipt_owners ~path)
+  with
+  | Ok owners -> Ok owners
+  | Error error ->
+    Error
+      ("tool outbox receipt owners are unreadable: "
+       ^ Keeper_chat_operation_store.error_to_string error)
+
+let load ~base_path ~keeper_name ~viewer =
+  let* snapshot = load_committed ~base_path ~keeper_name in
+  match viewer, snapshot.entries with
+  | Every_receipt, _ | (Unowned_only | Owner_and_unowned _), [] -> Ok snapshot
+  | (Unowned_only | Owner_and_unowned _), _ :: _ ->
+    let* owners = read_receipt_owners ~base_path ~keeper_name in
+    let visible entry =
+      let owner =
+        Option.bind (call_id_of_entry entry) (fun request_id ->
+          Keeper_chat_operation_store.receipt_owner owners ~request_id)
+      in
+      receipt_visible viewer ~owner
+    in
+    Ok { snapshot with entries = List.filter visible snapshot.entries }
 
 let id_of_entry entry = Filename.remove_extension (Filename.basename entry.path)
 
@@ -363,10 +419,10 @@ let receipt_summary snapshot ~receipt_id =
      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None)
 ;;
 
-let summary_reader ~base_path ~keeper_name ~on_unavailable =
+let summary_reader ~base_path ~keeper_name ~viewer ~on_unavailable =
   let loaded =
     lazy
-      (match load ~base_path ~keeper_name with
+      (match load ~base_path ~keeper_name ~viewer with
        | Ok snapshot -> Some snapshot
        | Error detail ->
          on_unavailable detail;
@@ -532,13 +588,15 @@ type run_carrier =
   { run_base_path : string
   ; run_keeper_name : string
   ; run_reader_available : bool
+  ; run_viewer : viewer
   ; run_loaded : (snapshot * carrier) option Atomic.t
   }
 
-let run_carrier ~base_path ~keeper_name ~artifact_reader_available =
+let run_carrier ~base_path ~keeper_name ~artifact_reader_available ~viewer =
   { run_base_path = base_path
   ; run_keeper_name = keeper_name
   ; run_reader_available = artifact_reader_available
+  ; run_viewer = viewer
   ; run_loaded = Atomic.make None
   }
 
@@ -546,7 +604,8 @@ let run_carrier_load run =
   match Atomic.get run.run_loaded with
   | Some loaded -> Ok loaded
   | None ->
-    let* snapshot = load ~base_path:run.run_base_path ~keeper_name:run.run_keeper_name in
+    let* snapshot =
+      load ~base_path:run.run_base_path ~keeper_name:run.run_keeper_name ~viewer:run.run_viewer in
     let loaded =
       snapshot,
       carrier ~base_path:run.run_base_path

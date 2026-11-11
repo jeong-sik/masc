@@ -1270,6 +1270,43 @@ let inspect_pending_inputs ~path =
     | Some (chat_operations, _, _, _, _) -> Some chat_operations)
 ;;
 
+module Request_owners = Map.Make (String)
+
+type receipt_owners = Keeper_execution_scope_id.t Request_owners.t
+
+let receipt_owners_of_executions executions =
+  List.fold_left
+    (fun owners (execution : Semantic.t) ->
+      List.fold_left
+        (fun owners (obligation : Semantic.receipt_obligation) ->
+          let* owners = owners in
+          match Request_owners.find_opt obligation.request_id owners with
+          | None -> Ok (Request_owners.add obligation.request_id execution.id owners)
+          | Some _ ->
+            Error
+              (Integrity_error
+                 ("receipt request is owned by two executions: " ^ obligation.request_id)))
+        owners
+        execution.receipt_obligations)
+    (Ok Request_owners.empty)
+    executions
+;;
+
+let inspect_receipt_owners ~path =
+  inspect_file ~path (fun db ->
+    let* () = exec db ~operation:"begin read-only inspection" "BEGIN" in
+    let* () = validate_schema db in
+    let* executions = semantic_rows db ~active_only:true in
+    let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
+    let* owners = receipt_owners_of_executions executions in
+    Ok (Some owners))
+  |> Result.map (function
+    | None -> Request_owners.empty
+    | Some owners -> owners)
+;;
+
+let receipt_owner owners ~request_id = Request_owners.find_opt request_id owners
+
 
 module Offline = struct
   type prepared_copy =

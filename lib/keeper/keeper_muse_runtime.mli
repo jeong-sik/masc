@@ -66,6 +66,7 @@ val run :
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
+  outbox_viewer:Keeper_client_tool_outbox.viewer ->
   workspace_root:string ->
   ?native_workspace_context:string ->
   goal:string ->

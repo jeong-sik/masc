@@ -39,7 +39,7 @@ let run_case ?(host=false) scenario () =
         ~tool_name:"Execute" ~arguments:(`Assoc ["command",`String "already-executed-effect"])
         ~response:(`Assoc ["content",`String marker;"success",`Bool true]))
     else get (Outbox.retain ~base_path ~keeper_name (receipt turn_id)) in
-  let snapshot () = get (Outbox.load ~base_path ~keeper_name) in
+  let snapshot () = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt) in
   retain "original-turn";
   let original_ids = Outbox.receipt_ids (snapshot ()) in
   let requests = ref [] and projections = ref [] and effects = ref 0 in

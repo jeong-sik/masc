@@ -49,6 +49,12 @@ Definitions:
 - valid: HTTP 200 with no provider error, finish_reason "stop", and
   `admission_validator.validate` accepts the content against the prompt, as
   MASC would.
+- E-real valid rate in reach (G1): valid answers over the E-real items the
+  baseline's endpoint did not refuse outright. A request the endpoint answers
+  with HTTP 400 is past what the base model accepts, such as its context, so no
+  weights trained on that model answer it. `verdict` lists those items as
+  `e_real_refused` and leaves them out of every target's rate. An answer cut
+  off at `max_tokens` stays in: the slot spent its time on it.
 - E-real outcome agreement: candidates whose outcome equals the live answer's,
   over every candidate (an answer that is not valid agrees with nothing).
   Reported, not gated.
@@ -164,6 +170,8 @@ GLM_IN_FLIGHT = 1
 WARM_MAX_TOKENS = 1
 # A measured call counts as warm when this share of its prompt tokens came from cache.
 WARM_CACHED_SHARE = 0.9
+# The endpoint's status for a request it will not take, such as one past the model's context.
+HTTP_BAD_REQUEST = 400
 # exact_output_ready_admission.ml domain_schema_instruction_text, verbatim.
 INSTRUCTION = ("Return exactly one JSON value matching this JSON Schema. Do not use Markdown "
                "code fences or include any explanation. JSON Schema: %s")
@@ -587,14 +595,27 @@ def at_least(value: object, line: float) -> bool:
     return value is not None and cast(float, value) >= line
 
 
+def real_numbers(rows: list[JsonObject], base: str) -> tuple[dict[str, JsonObject], list[str]]:
+    """Each target's E-real numbers (`summarize`) with `valid_rate_in_reach`, and the items left out of
+    that rate: the ones `base`'s endpoint refused outright (HTTP 400). Such a request is past what the
+    base model accepts, so no weights trained on it answer it. The rate is the target's valid answers
+    over the other items, None when there is no other item."""
+    refused = {cast(str, r["item"]) for r in rows if r["target"] == base and r["status"] == HTTP_BAD_REQUEST}
+    numbers = cast(dict[str, JsonObject], summarize("real", rows))
+    for name, part in numbers.items():
+        reach = [bool(r["valid"]) for r in rows if r["target"] == name and r["item"] not in refused]
+        part["valid_rate_in_reach"] = sum(reach) / len(reach) if reach else None
+    return numbers, sorted(refused)
+
+
 def gate_checks(gates: Gates, real: JsonObject, synth: JsonObject, merges: JsonObject, pair: JsonObject,
                 baseline_real: JsonObject) -> dict[str, bool]:
-    """Each gate for one candidate: its E-real and E-synth numbers (`summarize`), its merge numbers
-    (`merge_decisions.MergeAdjudication.numbers`), its pairing with the baseline (`paired`) and the
-    baseline's E-real numbers."""
+    """Each gate for one candidate: its E-real numbers (`real_numbers`), its E-synth numbers
+    (`summarize`), its merge numbers (`merge_decisions.MergeAdjudication.numbers`), its pairing with
+    the baseline (`paired`) and the baseline's E-real numbers."""
     p50, b50 = real["latency_p50_s"], baseline_real["latency_p50_s"]
     return {
-        "G1": at_least(real["valid_rate"], gates.g1_e_real_valid_rate_min),
+        "G1": at_least(real["valid_rate_in_reach"], gates.g1_e_real_valid_rate_min),
         "G2": cast(int, real["dropped_not_in_live"]) <= gates.g2_e_real_dropped_not_in_live_max,
         "G3": (at_least(synth["memory_state_accuracy"], gates.g3_e_synth_memory_state_accuracy_min)
                and at_least(synth["drop_precision"], gates.g3_e_synth_drop_precision_min)
@@ -716,7 +737,7 @@ def verdict(args: argparse.Namespace) -> int:
         raise SystemExit(problem)
     rows = read_rows(real_dir)
     # Recomputed from the rows, so an edited or stale summary.json cannot pass a gate.
-    r_all = cast(dict[str, JsonObject], summarize("real", rows))
+    r_all, refused = real_numbers(rows, base)
     counts = {n: t["items"] for n, t in r_all.items()}
     if any(counts.get(n) != cast(JsonObject, lines["e_real"])["items"] for n in [base, *names]):
         raise SystemExit(f"the real run has not answered every item for every target: {counts}")
@@ -737,7 +758,8 @@ def verdict(args: argparse.Namespace) -> int:
                                  "G5 would compare unlike cache states")
         result[name] = {**judged_candidate(gates, name, base, r_all, measure.by_target, m_all,
                                            paired(rows, base, name)),
-                        "widest_gap_s": round(gap, 1)}
+                        "widest_gap_s": round(gap, 1), "valid_rate_in_reach": r_all[name]["valid_rate_in_reach"]}
+    result["e_real_refused"] = refused
     result["e_synth_drops"] = measure.drops
     result["e_synth_merges"] = measure.merges
     result["choice"] = choose(names, result)

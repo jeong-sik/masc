@@ -221,6 +221,11 @@ the `--synth` run that holds those files.
 records each drop, its class, the memories left out, each target's wrong drops
 on them, each absorb's class, each target's absorb numbers and the judges' file
 sha256 values in `verdict.json`.
+G1 counts the E-real items the baseline's endpoint did not refuse outright. An
+item its call got HTTP 400 for is past what the base model accepts, such as its
+context, so no weights trained on that model answer it: `verdict.json` lists
+those items under `e_real_refused` and gives each candidate's
+`valid_rate_in_reach`. An answer cut off at `max_tokens` stays counted.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
 rest. A budget stop exits with status 2. `verdict` refuses a run where a

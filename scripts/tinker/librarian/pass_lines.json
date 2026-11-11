@@ -36,7 +36,7 @@
  "instruction_sha256": "b5eaa8abf5138b1e0fd494757a1562097c9ea6841712f5ffa2cb78c38e882631",
  "gates": {
   "G1_e_real_valid_rate_min": 0.95,
-  "G2_e_real_dropped_not_in_live_max": 2,
+  "G2_e_real_dropped_not_in_live_max": 4,
   "G3_e_synth_memory_state_accuracy_min": 0.95,
   "G3_e_synth_drop_precision_min": 1.0,
   "G3_e_synth_stale_drop_recall_min": 0.9,

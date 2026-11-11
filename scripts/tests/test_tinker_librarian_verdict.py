@@ -160,7 +160,9 @@ class ChoiceTest(unittest.TestCase):
 
 class GateChecksTest(unittest.TestCase):
     # Every number sits on its line in GATES; the outcome words are far below any line.
-    REAL: dict[str, object] = {"valid_rate": 0.95, "dropped_not_in_live": 2, "latency_p50_s": 10.0 * 1.16}
+    # The rate over every item is far below G1's line, so a check that reads it in place of the rate in reach shows.
+    REAL: dict[str, object] = {"valid_rate": 0.5, "valid_rate_in_reach": 0.95, "dropped_not_in_live": 2,
+                               "latency_p50_s": 10.0 * 1.16}
     BASELINE: dict[str, object] = {"latency_p50_s": 10.0}
     SYNTH: dict[str, object] = {"memory_state_accuracy": 0.97, "outcome_accuracy": 0.5, "drop_precision": 1.0,
                                 "stale_drop_recall": 0.9}
@@ -180,7 +182,8 @@ class GateChecksTest(unittest.TestCase):
 
     def test_each_e_real_gate_fails_just_past_its_line(self) -> None:
         cases: tuple[tuple[str, dict[str, object], dict[str, object], dict[str, object]], ...] = (
-            ("G1", {**self.REAL, "valid_rate": 0.94}, self.PAIR, self.BASELINE),
+            ("G1", {**self.REAL, "valid_rate": 1.0, "valid_rate_in_reach": 0.94}, self.PAIR, self.BASELINE),
+            ("G1", {**self.REAL, "valid_rate_in_reach": None}, self.PAIR, self.BASELINE),
             ("G2", {**self.REAL, "dropped_not_in_live": 3}, self.PAIR, self.BASELINE),
             ("G4", self.REAL, {"lead": -0.07}, self.BASELINE), ("G4", self.REAL, {"lead": None}, self.BASELINE),
             ("G5", {**self.REAL, "latency_p50_s": 11.7}, self.PAIR, self.BASELINE),
@@ -227,6 +230,31 @@ class JudgedCandidateTest(unittest.TestCase):
         slower = self.judged({"base": GateChecksTest.SYNTH, "A": GateChecksTest.SYNTH},
                              {"base": GateChecksTest.MERGES, "A": GateChecksTest.MERGES}, 9.0)
         self.assertEqual((slower["pass"], slower["G5"]), (False, False))
+
+
+class RealNumbersTest(unittest.TestCase):
+    def test_g1_counts_the_items_the_baselines_endpoint_did_not_refuse(self) -> None:
+        # i2 is past the base model's context: its endpoint answers 400 to every target.
+        rows = [real_row(target="base", item="i1"), real_row(target="A", item="i1"),
+                real_row(target="base", item="i2", status=400, valid=False),
+                real_row(target="A", item="i2", status=400, valid=False),
+                real_row(target="base", item="i3", valid=False), real_row(target="A", item="i3")]
+        numbers, refused = V.real_numbers(rows, "base")
+        self.assertEqual(refused, ["i2"])
+        self.assertEqual({n: (p["valid_rate"], p["valid_rate_in_reach"]) for n, p in numbers.items()},
+                         {"base": (1 / 3, 1 / 2), "A": (2 / 3, 1.0)})
+
+    def test_a_request_only_the_candidates_endpoint_refused_stays_in_its_rate(self) -> None:
+        rows = [real_row(target="base", item="i1"), real_row(target="A", item="i1", status=400, valid=False),
+                real_row(target="base", item="i2"), real_row(target="A", item="i2")]
+        numbers, refused = V.real_numbers(rows, "base")
+        self.assertEqual((refused, numbers["A"]["valid_rate_in_reach"]), ([], 1 / 2))
+
+    def test_a_target_with_every_item_refused_has_no_rate(self) -> None:
+        rows = [real_row(target="base", item="i1", status=400, valid=False),
+                real_row(target="A", item="i1", status=400, valid=False)]
+        numbers, refused = V.real_numbers(rows, "base")
+        self.assertEqual((refused, numbers["A"]["valid_rate_in_reach"]), (["i1"], None))
 
 
 class MeasureSynthTest(unittest.TestCase):

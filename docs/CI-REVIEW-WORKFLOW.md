@@ -208,7 +208,11 @@ Its shell-runner fixture substitutes the build command; it is not a product
 test result. Keep this focused CI self-check separate from product behavior
 suites. The RC nightly cut gate has the same shape of suite: run
 `python3 -m unittest discover -s scripts/ci/tests -p test_nightly_cut_gate.py -v`;
-its stub `gh` serves fixture responses and no cut is recorded.
+its stub `gh` serves fixture responses and no cut is recorded. The pin step's
+and the dependency install step's choice between asking apt and not asking it
+is checked the same way: run
+`python3 -m unittest discover -s scripts/ci/tests -p test_install_ocaml_deps.py -v`;
+its stub `opam` and `sudo` record the commands and nothing is installed.
 
 Reading a run's own log needs a writable cache directory. `gh run view RUN --log`
 writes under `$HOME/.cache/gh`, so on a lane whose home is read-only it fails with

@@ -105,7 +105,7 @@ let notify owner completion =
 
 (* The caller holds the original mutation guard, then [owner.mu]. Publication
    metadata and the source cell change together; no transport runs here. *)
-let synchronize_locked owner ~now generation =
+let synchronize_locked (owner : owner) ~now generation =
   if generation = !(owner.mutation_generation) then false else (
     owner.mutation_generation := generation;
     incr owner.source_revision;

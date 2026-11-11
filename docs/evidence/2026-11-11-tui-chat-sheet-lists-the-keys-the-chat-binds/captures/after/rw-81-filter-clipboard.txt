@@ -1,0 +1,30 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  /clipboard▌                                                                    │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│◆ Chat                                           ◇ Slash commands                                 │
+│  Ctrl-V           paste the clipboard image:      /copy           send this Keeper's latest      │
+│                   it is staged for the next                       completed reply to the         │
+│                   message and an [Image #1]                       terminal clipboard             │
+│                   marker lands in the draft                                                      │
+│  /copy            send the selected Keeper's    ◇ System                                         │
+│                   latest completed reply to       c                presets: copy the next        │
+│                   the terminal clipboard via                       retained unsent chat save     │
+│                   OSC 52                                           command to the terminal       │
+│                                                                    clipboard                     │
+│◇ Workspace / Code                                                                                │
+│  y                send the whole readable                                                        │
+│                   file's original bytes to the                                                   │
+│                   terminal clipboard via OSC                                                     │
+│                   52; terminal support is                                                        │
+│                   unconfirmed                                                                    │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page
+ › to imp   (i to write)

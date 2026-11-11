@@ -1,0 +1,30 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  /complete▌                                                                     │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│◆ Chat                                           ◇ Slash commands                                 │
+│  /copy            send the selected Keeper's      /copy           send this Keeper's latest      │
+│                   latest completed reply to                       completed reply to the         │
+│                   the terminal clipboard via                      terminal clipboard             │
+│                   OSC 52                                                                         │
+│                                                 ◇ Work                                           │
+│◇ Keepers                                          f                cycle all / active /          │
+│  !                read every current                               completed / dropped           │
+│                   Keeper-list observation                                                        │
+│                   error and its complete        ◇ Workspace                                      │
+│                   reason; Esc returns             v                read the complete selected    │
+│                                                                    path, Keeper assignments and  │
+│◇ System                                                            errors                        │
+│  v                read complete account/model                                                    │
+│                   settings without editing      ◇ Features & plugins                             │
+│                                                   d                read the selected Lane's      │
+│◇ Approvals                                                         complete configuration and    │
+│  v                while browsing, capture the                      observation                   │
+│                   last answer receipt,                                                           │
+│                   original question identity    ◇ Memory                                         │
+│  [lines 1-22/42]                                                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page
+ › to imp   (i to write)

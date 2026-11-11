@@ -1,0 +1,30 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  /recall▌                                                                       │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│◆ Chat                                           ◇ System                                         │
+│  Up / Down        roster focused: move; chat      m                runtime.toml: choose which    │
+│                   scrolled back: adjust by one                     keepers memory recall asks    │
+│                   line; while a /command is                        Jev about                     │
+│                   typed: pick among its                                                          │
+│                   completions; otherwise walk                                                    │
+│                   the history of lines you                                                       │
+│                   sent: Up recalls the                                                           │
+│                   previous one (a line still                                                     │
+│                   waiting in the queue comes                                                     │
+│                   back as an edit of that                                                        │
+│                   line), Down steps back                                                         │
+│                   toward your draft                                                              │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page
+ › to imp   (i to write)

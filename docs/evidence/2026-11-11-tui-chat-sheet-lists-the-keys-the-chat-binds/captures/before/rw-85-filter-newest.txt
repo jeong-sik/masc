@@ -1,0 +1,30 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  /newest▌                                                                       │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│◆ Chat                                           ◇ Slash commands                                 │
+│  Ctrl-O           preview the newest image or     /listen         play the newest audio or MIDI  │
+│                   Mermaid diagram; /images                        attachment in this             │
+│                   lists all; any key returns                      conversation                   │
+│                                                   /find [text]    go to the newest message       │
+│◇ Activity                                                         holding text; again for the    │
+│  Home/End         g and G as well; the ring                       next                           │
+│                   counts back from the newest,    /music [midi]   open the music library, or     │
+│                   so its top is now                               edit the newest chat MIDI and  │
+│                                                                   choose its instrument          │
+│◇ Workspace / Code                                 /score [N]      open alphaTex notation and     │
+│  Ctrl-R           list the local branches of                      playback in this terminal; N   │
+│                   the owning Git checkout,                        is newest-first                │
+│                   newest tip first, with how      /images [N]     open a conversation image or   │
+│                   each stands against its                         diagram; N is newest-first     │
+│                   upstream; type to filter,       /activity [fleet|changes|order                 │
+│                   Enter or Esc returns            [newest|oldest|longest|tool]|scroll            │
+│  H                the commits that touched the    up|down|top|+N|-N]                             │
+│                   open file, newest first (H                      walk the Activity pane beside  │
+│                   or Esc closes)                                  this surface narrow, wide,     │
+│  [lines 1-22/51]                                                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page
+ › to imp   (i to write)

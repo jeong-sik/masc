@@ -1,0 +1,30 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Cheat Sheet  /history▌                                                                      │
+├──────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  MASC · Multi-Agent Shared Context                                                               │
+│                                                                                                  │
+│◆ Chat                                           ◇ Slash commands                                 │
+│  Up / Down        roster focused: move; chat      /errors         read current history and       │
+│                   scrolled back: adjust by one                    memory loading errors in full  │
+│                   line; while a /command is                                                      │
+│                   typed: pick among its         ◇ Work                                           │
+│                   completions; otherwise walk     b                read captured Goal totals,    │
+│                   the history of lines you                         the global Task backlog,      │
+│                   sent: Up recalls the                             history, and snapshot         │
+│                   previous one (a line still                       changes                       │
+│                   waiting in the queue comes      H                in Task detail, extend the    │
+│                   back as an edit of that                          observed history with its     │
+│                   line), Down steps back                           known earlier page            │
+│                   toward your draft                                                              │
+│  PgUp/PgDn        scroll history by a page      ◇ Operations / Usage                             │
+│                                                   w                on Usage: cycle the exact     │
+│◇ System                                                            UTC day window for provider   │
+│  A                event history under System                       report history and tool       │
+│                                                                    calls                         │
+│◇ Work / Task Review                                                                              │
+│  h                the queue is what a task is   ◇ Workspace / Code                               │
+│  [lines 1-22/44]                                                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+  조치 필요 3 · 운영에서 확인  Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page
+ › to imp   (i to write)

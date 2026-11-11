@@ -1,6 +1,8 @@
 (* HIGH-RISK-UNREVIEWED: seals the secrets of logins in flight. A sealed
    transaction that another browser can read or change lets one person
-   finish another's login, or spend their invitation. *)
+   finish another's login, or spend their invitation. Nothing here stops a
+   sealed transaction from being used twice: that rests on Google and on
+   GitHub refusing a code they have exchanged. *)
 
 (** Logins in flight, Google's and GitHub's (design 5.2 and 5.2.1, plans
     C2a-2, C2b-1b and S1a-3a-1).
@@ -29,7 +31,9 @@
     remember that it was opened. What a second callback could spend is
     spent once elsewhere. The provider takes a code once, so a second
     exchange is refused there, and the log takes an invitation once
-    ({!Authz_login.sign_in}).
+    ({!Authz_login.sign_in}). The answer of a callback clears the cookie
+    of the browser whatever it found ({!Login_routes.callback}), so a
+    browser sends a sealed transaction to one callback.
 
     The key lives as long as the process: a login that started before a
     restart does not open after it, and starts again.

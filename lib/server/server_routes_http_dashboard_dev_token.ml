@@ -95,6 +95,7 @@ let retryable_domain_error = function
        | Masc_domain.Task_error.TransitionRejected _
        | Masc_domain.Task_error.InvalidState _
        | Masc_domain.Task_error.InvalidId _
+       | Masc_domain.Task_error.BacklogVersionConflict _
        | Masc_domain.Task_error.VerificationSuperseded _)
   | Masc_domain.Agent (Masc_domain.Agent_error.NotFound _ | Masc_domain.Agent_error.InvalidName _)
   | Masc_domain.Auth

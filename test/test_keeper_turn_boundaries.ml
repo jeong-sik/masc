@@ -506,12 +506,47 @@ let test_lines_read_before_keep_their_decoding () =
      check record_t "the appended line is the one written" (history_restarted ()) line
    | (_, Error _) :: _ | [] -> fail "the appended line was not decoded");
   Sys.remove (Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id);
+  check int "a store that is gone reads as no lines" 0 (List.length (read ()));
   append (record ~turn:9 Boundaries.Stale_noop);
   match read () with
   | [ (number, Ok line) ] ->
     check int "a store written again is numbered from one" 1 number;
     check record_t "and holds what was written" (record ~turn:9 Boundaries.Stale_noop) line
   | _ -> fail "a store written again did not read as its one line"
+;;
+
+(* A crash can leave the last line without its newline. That tail reads as
+   an incomplete line and is not kept as a decoded one: once the line is
+   whole, the read decodes it after the lines kept before it. *)
+let test_incomplete_tail_is_decoded_once_it_is_whole () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let path = Boundaries.path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let read () =
+    match Boundaries.read ~keepers_dir ~keeper_id with
+    | Ok lines -> lines
+    | Error detail -> fail detail
+  in
+  let append_bytes bytes =
+    Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path (fun oc ->
+      output_string oc bytes)
+  in
+  append_lines ~keepers_dir [ record ~turn:1 atom_history ];
+  let whole = read () in
+  let tail = Yojson.Safe.to_string (Boundaries.record_to_json (history_restarted ())) in
+  let cut = String.length tail / 2 in
+  append_bytes (String.sub tail 0 cut);
+  (match read () with
+   | [ kept; (number, Error Boundaries.Incomplete_line) ] ->
+     check bool "the whole line keeps its decoding" true (kept == List.hd whole);
+     check int "the cut line is numbered after it" 2 number
+   | _ -> fail "a cut last line did not read as one line and an incomplete one");
+  append_bytes (String.sub tail cut (String.length tail - cut) ^ "\n");
+  match read () with
+  | [ kept; (number, Ok line) ] ->
+    check bool "the earlier line still keeps its decoding" true (kept == List.hd whole);
+    check int "the completed line takes the number the cut one had" 2 number;
+    check record_t "and decodes to what was written" (history_restarted ()) line
+  | _ -> fail "the completed line did not read as a decoded second line"
 ;;
 
 (* [Ids.Turn_ref.make] takes an empty trace id and [Ids.Turn_ref.of_string]
@@ -1079,6 +1114,8 @@ let () =
             test_appended_lines_read_back_in_order
         ; test_case "lines read before keep their decoding" `Quick
             test_lines_read_before_keep_their_decoding
+        ; test_case "an incomplete tail is decoded once it is whole" `Quick
+            test_incomplete_tail_is_decoded_once_it_is_whole
         ; test_case "the store states its history from the tail" `Quick
             test_history_stated_in_store_answers_from_the_tail
         ; test_case "an unreadable store reports its failure" `Quick

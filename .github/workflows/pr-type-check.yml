@@ -65,9 +65,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Logged only; the filter below does not read these. GitHub adds
+          # `stack` to the pull_request payload of a native stack member, and
+          # its documentation does not list the fields. RFC
+          # stack-type-check-runs-at-the-top needs number, position, size and
+          # base.sha from the payload, because this job makes no REST call.
+          EVENT_ACTION: ${{ github.event.action }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          STACK_JSON: ${{ toJSON(github.event.pull_request.stack) }}
         shell: bash
         run: |
           set -euo pipefail
+          printf 'payload action: %s\n' "${EVENT_ACTION:-none}"
+          printf 'payload base.sha: %s\n' "${BASE_SHA:-none}"
+          printf 'payload stack: %s\n' "${STACK_JSON:-none}"
           if [ -z "${PR_NUMBER:-}" ]; then
             echo "workflow_dispatch — no PR to filter, running the check"
             echo "src=true" >> "$GITHUB_OUTPUT"

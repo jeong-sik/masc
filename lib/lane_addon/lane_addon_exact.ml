@@ -9,6 +9,7 @@ type request =
   ; system : string option
   ; messages : message list
   ; schema : Yojson.Safe.t option
+  ; digest : string
   }
 
 let request_keys = [ "kind"; "request_id"; "output"; "system"; "messages"; "schema" ]
@@ -28,6 +29,16 @@ let message_of_json = function
 let message_to_json message =
   `Assoc [ "role", `String (match message.role with User -> "user" | Assistant -> "assistant")
          ; "text", `String message.text ]
+
+let encode_request ~request_id ~output ~system ~messages ~schema =
+  `Assoc
+    ([ "kind", `String "exact_output"
+     ; "request_id", `String request_id
+     ; "output", `String output
+     ]
+     @ (match system with None -> [] | Some system -> [ "system", `String system ])
+     @ [ "messages", `List (List.map message_to_json messages) ]
+     @ (match schema with None -> [] | Some schema -> ["schema",schema]))
 
 let request_of_json = function
   | `Assoc fields ->
@@ -75,20 +86,19 @@ let request_of_json = function
       | None -> Ok None
       | Some (`Assoc _ as schema) -> Lane_addon_action.canonical schema |> Result.map Option.some
       | Some _ -> Error "request schema must be a JSON object" in
-    Ok { request_id; output; system; messages; schema }
+    (* The digest covers the whole wire form, which can be megabytes, and a
+       request is read far more often than it is made. This is the one place a
+       request is made, so the digest is taken here and carried. *)
+    let digest = Lane_addon_store.digest
+      (Yojson.Safe.to_string (encode_request ~request_id ~output ~system ~messages ~schema)) in
+    Ok { request_id; output; system; messages; schema; digest }
   | _ -> Error "an exact_output request must be an object"
 
 let request_to_json request =
-  `Assoc
-    ([ "kind", `String "exact_output"
-     ; "request_id", `String request.request_id
-     ; "output", `String request.output
-     ]
-     @ (match request.system with None -> [] | Some system -> [ "system", `String system ])
-     @ [ "messages", `List (List.map message_to_json request.messages) ]
-     @ (match request.schema with None -> [] | Some schema -> ["schema",schema]))
+  encode_request ~request_id:request.request_id ~output:request.output ~system:request.system
+    ~messages:request.messages ~schema:request.schema
 
-let digest request = Lane_addon_store.digest (Yojson.Safe.to_string (request_to_json request))
+let digest request = request.digest
 
 (* Baseline validation constructs one. [run] and the worker receipt path
    additionally check the original request's partial shape before delivery. *)

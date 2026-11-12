@@ -1021,6 +1021,8 @@ let test_conversation_is_retained_with_role_identity () =
     let original = make "assistant" in
     check bool "roles survive canonical encoding" true
       (require (Exact.request_of_json (Exact.request_to_json original)) = original);
+    check string "the carried digest is the digest of the wire text"
+      (Store.digest (Yojson.Safe.to_string (Exact.request_to_json original))) (Exact.digest original);
     check bool "the conversation answers" true (answered_with question (run_request store runner original));
     check bool "relisting reuses the original answer" true
       (answered_with question (run_request store runner original));

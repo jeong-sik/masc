@@ -73,7 +73,7 @@ let valid = `Assoc ["verdict",`String "APPROVE";"reason",`String "checked exact 
    follows a settled report. *)
 type cancel_point = While_provider_answers | While_report_runs | After_report_settles
 
-let run_native ?(refuse_publication=false) ?(after_scope_ready=fun () -> ()) ?cancel_at env sw ~base_path ~store ~original ~current calls =
+let run_native ?(refuse_publication=false) ?(refuse_after_report=false) ?(after_scope_ready=fun () -> ()) ?cancel_at env sw ~base_path ~store ~original ~current calls =
   let provider_calls = ref 0 and handler_calls = ref 0 in
   let cancel_ready,cancel_now = Eio.Promise.create () in
   let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
@@ -84,7 +84,9 @@ let run_native ?(refuse_publication=false) ?(after_scope_ready=fun () -> ()) ?ca
       | Some After_report_settles when !provider_calls > 1 ->
         Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
       | Some (While_report_runs | After_report_settles) | None ->
-        `OK, reply (if !provider_calls=1 then calls else []))) in
+        if refuse_after_report && !provider_calls > 1
+        then `Bad_request, {|{"error":{"message":"refused after the report","type":"invalid_request_error"}}|}
+        else `OK, reply (if !provider_calls=1 then calls else []))) in
   let provider_cfg = Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat ~provider_id:"fixture"
     ~model_id ~base_url:server.base_url ~request_path:"/v1/chat/completions" () in
@@ -158,26 +160,26 @@ let test_invalid_report_is_not_a_verdict () = with_fixture (fun env sw base_path
   Alcotest.(check bool) "schema refusal was observed after a real provider response" true (providers>0);
   Alcotest.(check int) "schema rejection occurs before the handler" 0 handlers;
   match X.observe ~base_path ~original (O.progress !current) |> get with
-  | Repair_required _ -> () | Awaiting | Cancelled_without_verdict _ | Verdict _ -> Alcotest.fail "invalid report became a judgment")
+  | Repair_required _ -> () | Awaiting | No_verdict _ | Verdict _ -> Alcotest.fail "invalid report became a judgment")
 
 let test_historical_original_has_no_replay_authority () = with_fixture (fun _ _ base_path _ original current ->
   match X.observe ~base_path ~original (O.progress !current) |> get with
-  | Repair_required _ -> () | Awaiting | Cancelled_without_verdict _ | Verdict _ -> Alcotest.fail "missing locator became recoverable")
+  | Repair_required _ -> () | Awaiting | No_verdict _ | Verdict _ -> Alcotest.fail "missing locator became recoverable")
 
 let test_duplicate_report_cannot_recover () = with_fixture (fun env sw base_path store original current ->
   ignore (run_native env sw ~base_path ~store ~original ~current
     [tool_call "first" valid;tool_call "duplicate" valid]);
   match X.observe ~base_path ~original (O.progress !current) |> get with
-  | Repair_required _ -> () | Awaiting | Cancelled_without_verdict _ | Verdict _ -> Alcotest.fail "duplicate report supplied a verdict")
+  | Repair_required _ -> () | Awaiting | No_verdict _ | Verdict _ -> Alcotest.fail "duplicate report supplied a verdict")
 
 let test_cancelled_reviewer_without_report_retries_as_a_successor () = with_fixture (fun env sw base_path store original current ->
   Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
     ignore (run_native ~cancel_at:While_provider_answers env sw ~base_path ~store ~original ~current []));
   (match X.observe ~base_path ~original (O.progress !current) |> get with
-   | Cancelled_without_verdict {AR.retryable_runtimes;_} ->
-     Alcotest.(check (list string)) "the cancelled runtime may review again" [model_id] retryable_runtimes
-   | Awaiting | Repair_required _ | Verdict _ ->
-     Alcotest.fail "a settled cancellation without a report was not retryable");
+   | No_verdict [runtime_id,Verifier_review_ending.Cancelled] ->
+     Alcotest.(check string) "the cancelled execution is named by its runtime" model_id runtime_id
+   | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
+     Alcotest.fail "a settled cancellation without a report was not read as one ending without a verdict");
   let prepared = ref 0 in
   (match W.run_attempt ~store ~verification_id ~attempt:0 ~installation_id ~package_id
     ~base_path ~prepare_authority:(fun () -> incr prepared;Error "producer VM is detached")
@@ -195,7 +197,7 @@ let test_reviewer_cancelled_inside_its_report_stays_a_repair () = with_fixture (
       [tool_call "cancelled-report" valid]));
   match X.observe ~base_path ~original (O.progress !current) |> get with
   | Repair_required _ -> ()
-  | Awaiting | Cancelled_without_verdict _ | Verdict _ ->
+  | Awaiting | No_verdict _ | Verdict _ ->
     Alcotest.fail "a cancellation inside the report handler authorized a retry or a verdict")
 
 let test_reviewer_cancelled_after_its_report_keeps_the_verdict () = with_fixture (fun env sw base_path store original current ->
@@ -205,8 +207,21 @@ let test_reviewer_cancelled_after_its_report_keeps_the_verdict () = with_fixture
   match X.observe ~base_path ~original (O.progress !current) |> get with
   | Verdict {AR.verdict=Some (Approve reason);_} ->
     Alcotest.(check string) "the settled report is the verdict" "checked exact evidence" reason
-  | Verdict _ | Awaiting | Repair_required _ | Cancelled_without_verdict _ ->
+  | Verdict _ | Awaiting | Repair_required _ | No_verdict _ ->
     Alcotest.fail "a cancellation after the settled report lost its verdict")
+
+(* The provider refuses the request that follows a settled report, so the run
+   ends as a failure. The handler had already recorded the verdict. *)
+let test_reviewer_failing_after_its_report_keeps_the_verdict () = with_fixture (fun env sw base_path store original current ->
+  let providers,handlers=run_native ~refuse_after_report:true env sw ~base_path ~store ~original ~current
+    [tool_call "settled-report" valid] in
+  Alcotest.(check int) "the report handler ran once" 1 handlers;
+  Alcotest.(check int) "the provider refused the request after the report" 2 providers;
+  match X.observe ~base_path ~original (O.progress !current) |> get with
+  | Verdict {AR.verdict=Some (Approve reason);_} ->
+    Alcotest.(check string) "the settled report is the verdict" "checked exact evidence" reason
+  | Verdict _ | Awaiting | Repair_required _ | No_verdict _ ->
+    Alcotest.fail "a failure after the settled report lost its verdict")
 
 let test_reference_bindings_are_strict () = with_fixture (fun _ _ base_path _ original current ->
   let fact=X.capture ~original ~runtime_id:model_id ~execution:(Types_core.Native_execution {call_id="fixture-call"}) |> get in
@@ -252,7 +267,7 @@ let test_earlier_open_call_prevents_later_verdict_recovery () = with_fixture (fu
       Eio.Promise.await ready;
       ignore (run_native env sw ~base_path ~store ~original ~current [tool_call "later" valid]);
       (match X.observe ~base_path ~original (O.progress !current) |> get with
-       | Awaiting -> () | Repair_required _ | Cancelled_without_verdict _ | Verdict _ ->
+       | Awaiting -> () | Repair_required _ | No_verdict _ | Verdict _ ->
          Alcotest.fail "later verdict bypassed the original still-open call");
       release_original ();Eio.Promise.await finished)))
 
@@ -268,6 +283,7 @@ let () =
     Alcotest.test_case "cancelled reviewer without a report retries as a successor" `Quick test_cancelled_reviewer_without_report_retries_as_a_successor;
     Alcotest.test_case "reviewer cancelled inside its report stays a repair" `Quick test_reviewer_cancelled_inside_its_report_stays_a_repair;
     Alcotest.test_case "reviewer cancelled after its report keeps the verdict" `Quick test_reviewer_cancelled_after_its_report_keeps_the_verdict;
+    Alcotest.test_case "reviewer failing after its report keeps the verdict" `Quick test_reviewer_failing_after_its_report_keeps_the_verdict;
     Alcotest.test_case "unknown and malformed execution bindings are refused" `Quick test_reference_bindings_are_strict;
     Alcotest.test_case "pending original cannot change physical workspace" `Quick test_pending_cannot_change_its_physical_workspace;
     Alcotest.test_case "earlier open call cannot be hidden by a later verdict" `Quick test_earlier_open_call_prevents_later_verdict_recovery]]

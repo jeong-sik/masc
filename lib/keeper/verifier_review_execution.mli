@@ -12,23 +12,26 @@ val references : original:Verifier_review_original.t -> Lane_addon_request_progr
 type observation =
   | Awaiting
   | Repair_required of string
-  | Cancelled_without_verdict of Task.Anti_rationalization.review_result
-      (** Every recorded call ended without a verdict, and at least one was
-          cancelled with its effects settled ([Retire]) before it invoked the
-          report tool. The result names the cancelled runtimes as
-          [retryable_runtimes]: a cancellation passes with time, so a successor
-          attempt may review the same original. *)
+  | No_verdict of (string * Verifier_review_ending.t) list
+      (** Every recorded execution has ended with its effects settled, and
+          none settled a report invocation. Each execution's runtime and
+          ending, in the order the executions were recorded. Whether the
+          original is reviewed again is the caller's reading of what the walk
+          left; this module only establishes that no verdict was produced. *)
   | Verdict of Task.Anti_rationalization.review_result
 
 val observe : base_path:string -> original:Verifier_review_original.t ->
   Lane_addon_request_progress.t -> (observation, string) result
 (** Validate all recorded call bindings and read their exact root journals.
-    Only a terminal success or a settled cancellation with a single admitted,
-    successfully settled report invocation may supply a verdict. A failed
-    terminal never does. Unknown effects, ambiguous report
-    histories and missing historical locators never authorize execution. A
-    cancelled call whose effects are settled and that never invoked the report
-    tool is [Cancelled_without_verdict], not a repair.
+    An execution's ending and its settled report invocations are read apart,
+    and the settled report invocations are counted over every recorded
+    execution. Exactly one, admitted and settled successfully, supplies the
+    verdict whatever ended its execution afterwards: the handler had already
+    recorded it. A report invocation that was opened and never admitted did
+    not reach its handler and is not counted. Any other settled report
+    history, an admitted Tool attempt without a settled result, an
+    official-client session and a missing historical locator are
+    [Repair_required]; none of them authorizes execution.
     A live or contended writer without a terminal remains [Awaiting]. Confirmed
-    writer loss without a canonical terminal returns [Repair_required], using
-    the existing operator-reconciliation path and preserving the original. *)
+    writer loss without a canonical terminal is an ending like the others: its
+    tree is read as the lost writer last committed it. *)

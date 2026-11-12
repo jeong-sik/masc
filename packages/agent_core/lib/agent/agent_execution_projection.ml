@@ -830,20 +830,24 @@ let settled_tool_invocations t =
   visit [] [root, None]
 ;;
 
+let tree_recovery_evidence snapshot run ~missing =
+  Execution_agent_scope.recovery_evidence_from_tree
+    ~root:(Journal.run_root run)
+    ~read_node:(fun node ->
+      Eio.Fiber.yield ();
+      match Journal.Reducer.find_node snapshot.reducer node with
+      | Some view -> Ok view
+      | None -> Error (Semantic_failure
+          {seq=Durable.last_seq snapshot.durable; detail=missing}))
+;;
+
 let terminal_recovery_from_snapshot t snapshot =
   match Journal.Reducer.find_run snapshot.reducer t.locator_run_id with
   | None -> Error (Locator_not_found t.locator_run_id)
   | Some {Journal.status=Running; _} -> Ok None
   | Some {Journal.status=Finished terminal; run; _} ->
-    let+ recovery = Execution_agent_scope.recovery_evidence_from_tree
-      ~root:(Journal.run_root run)
-      ~read_node:(fun node ->
-        Eio.Fiber.yield ();
-        match Journal.Reducer.find_node snapshot.reducer node with
-        | Some view -> Ok view
-        | None -> Error (Semantic_failure
-            {seq=Durable.last_seq snapshot.durable;
-             detail="terminal execution descendant disappeared"})) in
+    let+ recovery = tree_recovery_evidence snapshot run
+      ~missing:"terminal execution descendant disappeared" in
     Some (terminal.value, recovery)
 ;;
 
@@ -854,7 +858,7 @@ let terminal_recovery t =
 
 type ownership_observation =
   | Owner_awaiting
-  | Owner_lost
+  | Owner_lost of Execution_agent_scope.recovery_evidence
   | Terminal_observed of Event.terminal * Execution_agent_scope.recovery_evidence
 
 let observe_ownership t =
@@ -867,16 +871,23 @@ let observe_ownership t =
         (* Joining a refresh begun before the lock could return a pre-terminal
            snapshot after its writer has committed and released authority. *)
         let* snapshot = load_and_publish t (cached_snapshot t) in
-        terminal_recovery_from_snapshot t snapshot)
+        match Journal.Reducer.find_run snapshot.reducer t.locator_run_id with
+        | None -> Error (Locator_not_found t.locator_run_id)
+        | Some {Journal.status=Finished terminal; run; _} ->
+          let+ evidence = tree_recovery_evidence snapshot run
+            ~missing:"terminal execution descendant disappeared" in
+          Terminal_observed (terminal.value, evidence)
+        | Some {Journal.status=Running; run; _} ->
+          (* No writer holds this scope and none is admitted during the read,
+             so the tree is what the lost writer last committed. *)
+          let+ evidence = tree_recovery_evidence snapshot run
+            ~missing:"lost execution descendant disappeared" in
+          Owner_lost evidence)
       |> Result.map_error (fun error -> Storage_failure (Durable.storage_failure error))
     in
     match observation with
     | Execution_event_store.Writer_active -> Ok Owner_awaiting
-    | Writer_absent refreshed ->
-      let+ terminal = refreshed in
-      match terminal with
-      | None -> Owner_lost
-      | Some (terminal, evidence) -> Terminal_observed (terminal, evidence)
+    | Writer_absent observed -> observed
 ;;
 
 let cursor_matches scope_id (cursor : cursor) =

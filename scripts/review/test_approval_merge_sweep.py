@@ -73,9 +73,89 @@ class Selection(unittest.TestCase):
         rows = [row(1), row(2, 'b1', approvals=0)]
         self.assertEqual(SWEEP.select(rows, lambda n: False), [1])
 
+    def test_a_pull_request_in_no_stack_has_no_stack_field(self):
+        with patch.object(SWEEP, 'gh', return_value={'number': 1}):
+            self.assertFalse(SWEEP.in_native_stack('owner/repo', 1))
+        with patch.object(SWEEP, 'gh', return_value={'number': 1, 'stack': None}):
+            self.assertFalse(SWEEP.in_native_stack('owner/repo', 1))
+        with patch.object(SWEEP, 'gh', return_value={'number': 1, 'stack': {'number': 9}}):
+            self.assertTrue(SWEEP.in_native_stack('owner/repo', 1))
+
     def test_branches_that_name_each_other_end_the_walk(self):
         rows = [row(1), row(2, 'b1'), row(3, 'b2', headRefName='b1')]
         self.assertEqual(SWEEP.select(rows, never), [1])
+
+
+def ref(name, tip=1, *pulls, truncated=False, protected=False, ruled=0):
+    return {'name': name, 'target': {'oid': sha(tip)},
+            'branchProtectionRule': {'id': 'r'} if protected else None,
+            'rules': {'totalCount': ruled},
+            'associatedPullRequests': {'pageInfo': {'hasNextPage': truncated}, 'nodes': [
+                {'state': state, 'headRefOid': sha(head), 'isCrossRepository': fork,
+                 'mergedBy': None if merger is None else {'login': merger}}
+                for state, head, fork, merger in pulls]}}
+
+
+WORKER = ('MERGED', 1, False, 'github-actions')
+
+
+class MergedLeftovers(unittest.TestCase):
+    def test_a_branch_whose_worker_merge_ended_at_its_tip_goes(self):
+        self.assertEqual(SWEEP.merged_leftovers([ref('b1', 1, WORKER)], []), [('b1', sha(1))])
+
+    def test_everything_else_stays(self):
+        refs = [ref('main', 1, WORKER),
+                ref('release/v1', 1, WORKER),
+                ref('moved', 2, WORKER),                      # a commit after the merge
+                ref('reused', 1, WORKER, ('OPEN', 1, False, None)),
+                ref('base-of-open', 1, WORKER),
+                ref('head-of-open', 1, WORKER),               # its open pull request was not listed
+                ref('too-many-pull-requests', 1, WORKER, truncated=True),
+                ref('develop', 1, WORKER, protected=True),
+                ref('staging', 1, WORKER, ruled=1),
+                ref('merged-by-a-person', 1, ('MERGED', 1, False, 'someone')),
+                ref('merger-unknown', 1, ('MERGED', 1, False, None)),
+                ref('fork', 1, ('MERGED', 1, True, 'github-actions')),
+                ref('no-pull-request', 1)]
+        rows = [row(9, 'base-of-open'), row(8, headRefName='head-of-open')]
+        self.assertEqual(SWEEP.merged_leftovers(refs, rows), [])
+
+    def test_deleting_carries_a_lease_on_the_tip(self):
+        done = subprocess.CompletedProcess([], 0, '', '')
+        with patch.object(SWEEP.subprocess, 'run', return_value=done) as run:
+            self.assertIsNone(SWEEP.delete_branch('owner/repo', 'b1', sha(1)))
+        command = run.call_args.args[0]
+        self.assertIn(f'--force-with-lease=refs/heads/b1:{sha(1)}', command)
+        self.assertEqual(command[-2:], ['https://github.com/owner/repo.git', ':refs/heads/b1'])
+
+    def test_a_refusal_and_an_unreadable_listing_are_records(self):
+        refused = subprocess.CompletedProcess([], 1, '', 'stale info')
+        with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, WORKER)]), \
+             patch.object(SWEEP, 'open_pulls', return_value=[]), \
+             patch.object(SWEEP.subprocess, 'run', return_value=refused):
+            record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), False)
+        self.assertEqual(record, {'found': 1, 'deleted': 0, 'not_reached': 0,
+                                  'refused': [{'branch': 'b1', 'reason': 'stale info'}]})
+        with patch.object(SWEEP, 'walk', side_effect=ValueError('refused')):
+            self.assertEqual(SWEEP.clean_branches('owner/repo', 0, False),
+                             {'error': 'refused'})
+
+    def test_a_pull_request_opened_during_the_sweep_keeps_its_base(self):
+        with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, WORKER)]), \
+             patch.object(SWEEP, 'open_pulls', return_value=[row(9, 'b1')]) as listing, \
+             patch.object(SWEEP.subprocess, 'run') as run:
+            record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), False)
+        listing.assert_called_once()
+        run.assert_not_called()
+        self.assertEqual(record['found'], 0)
+
+    def test_a_dry_run_deletes_nothing(self):
+        with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, WORKER)]), \
+             patch.object(SWEEP, 'open_pulls', return_value=[]), \
+             patch.object(SWEEP.subprocess, 'run') as run:
+            record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), True)
+        run.assert_not_called()
+        self.assertEqual((record['found'], record['not_reached']), (1, 1))
 
 
 class Sweeping(unittest.TestCase):
@@ -87,6 +167,7 @@ class Sweeping(unittest.TestCase):
             return subprocess.CompletedProcess(command, exits[len(runs) - 1])
         patches = [patch.object(SWEEP, 'open_pulls', return_value=[row(1), row(2), row(3)]),
                    patch.object(SWEEP, 'quota', return_value=None),
+                   patch.object(SWEEP, 'clean_branches', return_value={'found': 0}),
                    patch.object(SWEEP.subprocess, 'run', side_effect=run),
                    patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}),
                    patch.object(SWEEP.sys, 'argv', ['sweep'])]
@@ -124,12 +205,21 @@ class Sweeping(unittest.TestCase):
     def test_an_unreadable_listing_is_the_only_red_sweep(self):
         errors = io.StringIO()
         with patch.object(SWEEP, 'open_pulls', side_effect=ValueError('refused')), \
-             patch.object(SWEEP, 'quota', return_value=0), \
+             patch.object(SWEEP, 'quota', return_value={'core': {'remaining': 0}}), \
              patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
              patch.object(SWEEP.sys, 'argv', ['sweep']), redirect_stderr(errors):
             self.assertEqual(SWEEP.main(), 1)
         self.assertIn('refused', errors.getvalue())
-        self.assertIn('"quota_before": {"core": 0, "graphql": 0}', errors.getvalue())
+        self.assertIn('"quota_before": {"core": {"remaining": 0}}', errors.getvalue())
+
+    def test_the_quota_record_keeps_limit_and_reset(self):
+        budget = {'remaining': 7, 'limit': 9, 'reset': 11, 'used': 2}
+        answer = {'resources': {'core': budget, 'graphql': budget, 'search': budget}}
+        with patch.object(SWEEP, 'gh', return_value=answer):
+            self.assertEqual(SWEEP.quota(), {
+                name: {'remaining': 7, 'limit': 9, 'reset': 11} for name in ('core', 'graphql')})
+        with patch.object(SWEEP, 'gh', side_effect=ValueError('refused')):
+            self.assertIsNone(SWEEP.quota())
 
     def test_a_refusal_is_recorded_from_its_start(self):
         refused = subprocess.CompletedProcess([], 1, '', 'API rate limit exceeded' + 'x' * 900)

@@ -147,6 +147,15 @@ layer that is not yet approved. It stops at the first worker run that meets a
 quota and lists the scopes it did not reach; the next sweep takes them. Its
 summary records the REST and GraphQL quota before and after.
 
+The sweep also deletes branches a merge left behind. The worker deletes a head
+branch when it sees the merge, which misses the layers of a native stack: each
+is still the base of the open layer above it at that moment. A branch goes only
+when a pull request of this repository that the worker merged ended at exactly
+its tip and no open pull request has it as head or base. `main`, `release/*`
+and any branch a protection rule or ruleset applies to stay. The open pull
+requests are read again just before deleting, and the push carries a lease on
+that tip, so a branch that moved is refused and kept.
+
 When enabling the worker, or after a transient read/merge failure, recheck an
 existing PR (any stack member) explicitly:
 

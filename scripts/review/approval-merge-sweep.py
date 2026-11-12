@@ -9,6 +9,8 @@ where the worker would certainly hold; admission stays in the worker.
 
 One GraphQL walk of the open pull requests feeds the selection, so its cost
 grows with pages of 100, not with pull requests.
+
+It also deletes the branches merges left behind (see `merged_leftovers`).
 """
 from __future__ import annotations
 
@@ -48,6 +50,27 @@ query($owner: String!, $name: String!, $cursor: String) {
   }
 }
 '''
+BRANCHES = '''
+query($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    refs(refPrefix: "refs/heads/", first: 100, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        name
+        target { oid }
+        branchProtectionRule { id }
+        rules(first: 1) { totalCount }
+        associatedPullRequests(first: 20, states: [OPEN, MERGED]) {
+          pageInfo { hasNextPage }
+          nodes { state headRefOid isCrossRepository mergedBy { login } }
+        }
+      }
+    }
+  }
+}
+'''
+PUSH_TIMEOUT_SECONDS = 120
+MERGER = 'github-actions'  # the account the merge worker's token merges as
 
 
 def gh(arguments):
@@ -63,22 +86,96 @@ def gh(arguments):
     return json.loads(operation.stdout)
 
 
-def open_pulls(repo):
+def walk(repo, document, connection):
+    """Every node of one repository connection, 100 to a GraphQL call."""
     owner, name = repo.split('/')
     rows, cursor = [], None
     while True:
-        arguments = ['api', 'graphql', '-f', f'query={OPEN_PULLS}',
+        arguments = ['api', 'graphql', '-f', f'query={document}',
                      '-f', f'owner={owner}', '-f', f'name={name}']
         if cursor is not None:
             arguments += ['-f', f'cursor={cursor}']
         answer = gh(arguments)
         if answer.get('errors'):
-            raise ValueError(json.dumps(answer['errors'])[:300])
-        page = answer['data']['repository']['pullRequests']
+            raise ValueError(json.dumps(answer['errors'])[:ERROR_CHARACTERS])
+        page = answer['data']['repository'][connection]
         rows.extend(page['nodes'])
         if not page['pageInfo']['hasNextPage']:
             return rows
         cursor = page['pageInfo']['endCursor']
+
+
+def open_pulls(repo):
+    return walk(repo, OPEN_PULLS, 'pullRequests')
+
+
+def merged_leftovers(refs, rows):
+    """Branches a worker merge left behind, as (name, tip).
+
+    The worker deletes a head branch when it sees the merge, and that misses
+    the layers of a native stack: each layer is still the base of the open
+    layer above it at that moment, and nothing looks again. On 2026-11-12 the
+    worker had merged 87 pull requests whose branch was still there.
+
+    A branch goes only when a pull request of this repository that the worker
+    merged ended at exactly its tip, so no commit is lost. It stays when an
+    open pull request names it as head or base, when a protection rule or a
+    ruleset applies to it, or when its pull requests were not all read.
+    GitHub deletes the branch itself after a merge made by a user account.
+    """
+    in_use = {row[side] for row in rows for side in ('baseRefName', 'headRefName')}
+    leftovers = []
+    for ref in refs:
+        name, tip = ref['name'], ref['target']['oid']
+        pulls = ref['associatedPullRequests']
+        if (name == 'main' or name.startswith('release/') or name in in_use or
+                ref['branchProtectionRule'] is not None or ref['rules']['totalCount'] or
+                pulls['pageInfo']['hasNextPage'] or
+                any(pull['state'] == 'OPEN' for pull in pulls['nodes'])):
+            continue
+        if any(pull['state'] == 'MERGED' and pull['headRefOid'] == tip and
+               pull['isCrossRepository'] is False and
+               (pull['mergedBy'] or {}).get('login') == MERGER for pull in pulls['nodes']):
+            leftovers.append((name, tip))
+    return leftovers
+
+
+def delete_branch(repo, name, tip):
+    """Delete one branch under a lease on `tip`; a moved branch is refused."""
+    try:
+        operation = subprocess.run(
+            ['git', '-c', 'credential.helper=', '-c',
+             'credential.helper=!gh auth git-credential', 'push',
+             f'--force-with-lease=refs/heads/{name}:{tip}',
+             f'https://github.com/{repo}.git', f':refs/heads/{name}'],
+            capture_output=True, text=True, check=False, timeout=PUSH_TIMEOUT_SECONDS)
+    except (OSError, subprocess.SubprocessError) as error:
+        return f'{type(error).__name__}: {error}'[:ERROR_CHARACTERS]
+    return (operation.stderr or '').strip()[-ERROR_CHARACTERS:] if operation.returncode else None
+
+
+def clean_branches(repo, started, dry_run):
+    """Never part of the sweep's verdict: every failure is a record.
+
+    The open pull requests are read again here. The listing the sweep began
+    with can be 20 minutes old by now, and a pull request opened since then
+    on a merged layer's branch would be closed by deleting that branch.
+    """
+    try:
+        leftovers = merged_leftovers(walk(repo, BRANCHES, 'refs'), open_pulls(repo))
+    except (ValueError, KeyError, TypeError) as error:
+        return {'error': str(error)}
+    record = {'found': len(leftovers), 'deleted': 0, 'refused': [], 'not_reached': 0}
+    for position, (name, tip) in enumerate(leftovers):
+        if dry_run or time.monotonic() - started >= SWEEP_SECONDS:
+            record['not_reached'] = len(leftovers) - position
+            break
+        refusal = delete_branch(repo, name, tip)
+        if refusal is None:
+            record['deleted'] += 1
+        else:
+            record['refused'].append({'branch': name, 'reason': refusal})
+    return record
 
 
 def ready(row):
@@ -127,10 +224,21 @@ def select(rows, in_native_stack):
     return [number for _, number in sorted(picked)]
 
 
-def quota(resource):
-    """Remaining quota, for the record only; reading it costs nothing."""
+def in_native_stack(repo, number):
+    """GitHub leaves `stack` out of a pull request that is in no stack."""
+    return gh(['api', f'repos/{repo}/pulls/{number}']).get('stack') is not None
+
+
+def quota():
+    """The token's REST and GraphQL budgets, for the record only.
+
+    Reading them costs nothing. `limit` and `reset` are kept because the
+    documented 1,000 an hour did not match what this token reported.
+    """
     try:
-        return gh(['api', 'rate_limit'])['resources'][resource]['remaining']
+        resources = gh(['api', 'rate_limit'])['resources']
+        return {name: {key: resources[name][key] for key in ('remaining', 'limit', 'reset')}
+                for name in ('core', 'graphql')}
     except (ValueError, KeyError, TypeError):
         return None
 
@@ -141,11 +249,10 @@ def main():
         raise SystemExit('invalid repository')
     dry_run = '--dry-run' in sys.argv[1:]
     started = time.monotonic()
-    report = {'quota_before': {'core': quota('core'), 'graphql': quota('graphql')}}
+    report = {'quota_before': quota()}
     try:
         rows = open_pulls(repo)
-        candidates = select(
-            rows, lambda number: gh(['api', f'repos/{repo}/pulls/{number}'])['stack'] is not None)
+        candidates = select(rows, lambda number: in_native_stack(repo, number))
     except (ValueError, KeyError, TypeError) as error:
         # The quota read before the listing says which budget was empty.
         print(f'approval-merge-sweep: cannot read the open pull requests: {error}\n'
@@ -175,7 +282,8 @@ def main():
         if code == QUOTA_EXIT:
             stop = 'quota reached'
     report['stopped'] = stop
-    report['quota_after'] = {'core': quota('core'), 'graphql': quota('graphql')}
+    report['merged_branches'] = clean_branches(repo, started, dry_run)
+    report['quota_after'] = quota()
     output = json.dumps(report, ensure_ascii=False, indent=2)
     print(output, flush=True)
     if os.environ.get('GITHUB_STEP_SUMMARY'):

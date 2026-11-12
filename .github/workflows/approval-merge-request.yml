@@ -83,6 +83,9 @@ jobs:
       - name: Record the PR number as data
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Logged only. It shows which concurrency group this run took: with
+          # no stack number in the payload the group above stays per PR.
+          STACK_NUMBER: ${{ github.event.pull_request.stack.number }}
           REQUEST_FILE: ${{ runner.temp }}/approval-merge-request/request.json
         run: |
           python3 - <<'PY'
@@ -92,6 +95,7 @@ jobs:
           path = pathlib.Path(os.environ['REQUEST_FILE'])
           path.parent.mkdir(parents=True, exist_ok=True)
           path.write_text(json.dumps({'pr': number}))
+          print('payload stack number:', os.environ['STACK_NUMBER'] or 'none')
           PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

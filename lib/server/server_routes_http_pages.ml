@@ -220,7 +220,7 @@ let dashboard_index_cache_control = "no-store, max-age=0, must-revalidate"
 
 let serve_dashboard_index request reqd =
   match Web_dashboard.load_dashboard_asset "index.html" with
-  | Ok { Web_dashboard.body; manifest_sha256 = _ } ->
+  | Ok { Web_dashboard.body; version = _ } ->
       Http.Response.html_cached
         ~etag:(dashboard_etag_of_body body)
         ~request body reqd
@@ -271,8 +271,8 @@ type encoding = encoding_result Eio.Promise.t
 
 type dashboard_asset =
   { identity : Shared_body.t
-  ; manifest_sha256 : string option
-    (** [Web_dashboard.loaded_asset.manifest_sha256] of the read that made the entry. *)
+  ; version : Web_dashboard.asset_version
+    (** The version of the read that made the entry. *)
   ; zstd : encoding option
   ; gzip : encoding option
   }
@@ -321,30 +321,20 @@ let dashboard_assets_have_room ~bytes =
   held + bytes <= dashboard_asset_cache_max_bytes
 ;;
 
-(* Whether the entry holds the bytes of this read. Each read computed the
-   SHA-256 of its bytes before it gave the manifest's digest, so two reads
-   with one digest hold the same bytes and the digests stand for them. A
-   read without a manifest is compared byte by byte. *)
-let holds_bytes_of_read asset (read : Web_dashboard.loaded_asset) =
-  match asset.manifest_sha256, read.Web_dashboard.manifest_sha256 with
-  | Some held, Some read_sha256 -> String.equal held read_sha256
-  | None, None | Some _, None | None, Some _ ->
-    String.equal (Shared_body.to_string asset.identity) read.Web_dashboard.body
-;;
-
 (* Called with the lock held: the entry of the bytes of this read, made if
    the table has none. [None] when the table has no room for them. An entry
    of other bytes under the name goes first. *)
 let dashboard_asset_of name (read : Web_dashboard.loaded_asset) =
   match Hashtbl.find_opt dashboard_assets name with
-  | Some asset when holds_bytes_of_read asset read -> Some asset
+  | Some asset when Web_dashboard.equal_asset_version asset.version read.Web_dashboard.version ->
+    Some asset
   | Some _ | None ->
     Hashtbl.remove dashboard_assets name;
     if dashboard_assets_have_room ~bytes:(String.length read.Web_dashboard.body)
     then (
       let asset =
         { identity = Shared_body.of_string read.Web_dashboard.body
-        ; manifest_sha256 = read.Web_dashboard.manifest_sha256
+        ; version = read.Web_dashboard.version
         ; zstd = None
         ; gzip = None
         }
@@ -478,8 +468,25 @@ let dashboard_asset_body name ~accept_encoding (read : Web_dashboard.loaded_asse
         encoded_dashboard_asset name ~accept_encoding read gzip_slot))
 ;;
 
+(* The bytes of the asset as its file is now. A name the table holds is asked
+   with the entry's version, so a file that is as it was is not read again:
+   the answer is then the entry's own bytes. The entry is held as a value
+   across the read, so another request replacing the table's entry meanwhile
+   does not change which bytes go with the version just found in the file. *)
+let read_dashboard_asset name =
+  match Mutex.protect dashboard_assets_lock (fun () -> Hashtbl.find_opt dashboard_assets name) with
+  | None -> Web_dashboard.load_dashboard_asset name
+  | Some asset ->
+    Result.map
+      (function
+        | Web_dashboard.Unchanged ->
+          { Web_dashboard.body = Shared_body.to_string asset.identity; version = asset.version }
+        | Web_dashboard.Reloaded read -> read)
+      (Web_dashboard.reload_dashboard_asset ~held:asset.version name)
+;;
+
 let serve_dashboard_static name request reqd =
-  match Web_dashboard.load_dashboard_asset name with
+  match read_dashboard_asset name with
   | Ok read ->
       let content_type = asset_content_type name in
       (* Vite hashed assets are immutable; index.html is not *)

@@ -350,6 +350,139 @@ let test_report_snapshot_exclusion_uses_directory_identity () =
         (Result.is_error (read ["assets"; "publiſhed-artifacts"; "snapshot.json"])))
 ;;
 
+let relative_path components =
+  match Fs_compat.owned_relative_path components with
+  | Ok path -> path
+  | Error detail -> fail detail
+;;
+
+let write_file path body =
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc body)
+;;
+
+(* A new file under the name, as a build writes one: the bytes are written
+   beside it and renamed over it. *)
+let replace_file path body =
+  let staged = path ^ ".staged" in
+  write_file staged body;
+  Unix.rename staged path
+;;
+
+let loaded_contents ~root components =
+  match Fs_compat.load_single_link_regular_file_beneath ~root (relative_path components) with
+  | Ok (Some contents) -> contents
+  | Ok None -> fail "the file was not found"
+  | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+;;
+
+let reread =
+  testable
+    (fun fmt -> function
+       | Fs_compat.Same_file -> Format.pp_print_string fmt "Same_file"
+       | Fs_compat.Read contents -> Format.fprintf fmt "Read %S" contents.Fs_compat.content)
+    (fun left right ->
+       match left, right with
+       | Fs_compat.Same_file, Fs_compat.Same_file -> true
+       | Fs_compat.Read left, Fs_compat.Read right ->
+         String.equal left.Fs_compat.content right.Fs_compat.content
+       | Fs_compat.Same_file, Fs_compat.Read _ | Fs_compat.Read _, Fs_compat.Same_file -> false)
+;;
+
+(* What a reload answers, with the bytes alone standing for a read. *)
+let reloaded ~root ~held components =
+  match
+    Fs_compat.reload_single_link_regular_file_beneath ~root ~held (relative_path components)
+  with
+  | Ok (Some answer) -> answer
+  | Ok None -> fail "the file was not found"
+  | Error error -> fail (Fs_compat.owned_regular_file_read_error_to_string error)
+;;
+
+let read_of body =
+  (* Only the bytes are compared, so any snapshot stands here. *)
+  fun (held : Fs_compat.owned_regular_file_snapshot) ->
+    Fs_compat.Read { Fs_compat.content = body; snapshot = held }
+;;
+
+let test_reload_does_not_read_the_file_it_holds () =
+  with_temp_dir (fun root ->
+    write_file (Filename.concat root "kept.js") "kept bytes";
+    let held = (loaded_contents ~root [ "kept.js" ]).Fs_compat.snapshot in
+    check reread "the file is as it was" Fs_compat.Same_file (reloaded ~root ~held [ "kept.js" ]))
+;;
+
+let test_reload_reads_a_replaced_file () =
+  with_temp_dir (fun root ->
+    let path = Filename.concat root "bundle.js" in
+    write_file path "first bytes";
+    let held = (loaded_contents ~root [ "bundle.js" ]).Fs_compat.snapshot in
+    replace_file path "bytes of a new file";
+    check
+      reread
+      "a new file under the name"
+      (read_of "bytes of a new file" held)
+      (reloaded ~root ~held [ "bundle.js" ]))
+;;
+
+let test_reload_reads_a_file_written_to_another_length () =
+  with_temp_dir (fun root ->
+    let path = Filename.concat root "index.html" in
+    write_file path "short";
+    let held = (loaded_contents ~root [ "index.html" ]).Fs_compat.snapshot in
+    write_file path "written in place, longer";
+    check int "the write kept the inode" held.Fs_compat.inode (Unix.stat path).Unix.st_ino;
+    check
+      reread
+      "the same inode with another length"
+      (read_of "written in place, longer" held)
+      (reloaded ~root ~held [ "index.html" ]))
+;;
+
+let test_reload_keeps_the_checks_of_the_load () =
+  with_temp_dir (fun root ->
+    let path = Filename.concat root "linked.js" in
+    write_file path "linked bytes";
+    let held = (loaded_contents ~root [ "linked.js" ]).Fs_compat.snapshot in
+    Unix.link path (Filename.concat root "second-name.js");
+    check bool "a second hard link is refused" true
+      (Result.is_error
+         (Fs_compat.reload_single_link_regular_file_beneath
+            ~root ~held (relative_path [ "linked.js" ])));
+    let snapshots = Filename.concat root "published-artifacts" in
+    Unix.mkdir snapshots 0o755;
+    write_file (Filename.concat snapshots "snapshot.json") "private snapshot";
+    let held =
+      (loaded_contents ~root [ "published-artifacts"; "snapshot.json" ]).Fs_compat.snapshot
+    in
+    check bool "the excluded directory is refused to a caller that holds its file" true
+      (Result.is_error
+         (Fs_compat.reload_single_link_regular_file_beneath
+            ~root
+            ~excluded_directory:(relative_path [ "published-artifacts" ])
+            ~held
+            (relative_path [ "published-artifacts"; "snapshot.json" ]))))
+;;
+
+let test_dashboard_static_serves_a_replaced_asset () =
+  with_dashboard_asset_tree (fun asset_dir ->
+    List.iter
+      (fun (protocol, name, request) ->
+         let path = Filename.concat asset_dir name in
+         let url = "/dashboard/assets/" ^ name in
+         write_file path "first asset bytes";
+         check (pair int string) (protocol ^ " first request") (200, "first asset bytes") (request url);
+         check (pair int string) (protocol ^ " file as it was") (200, "first asset bytes") (request url);
+         replace_file path "the asset after a rebuild";
+         check
+           (pair int string)
+           (protocol ^ " new file under the name")
+           (200, "the asset after a rebuild")
+           (request url))
+      [ "HTTP/1", "reread-h1.js", http1_dashboard_asset_response
+      ; "HTTP/2", "reread-h2.js", http2_dashboard_asset_response
+      ])
+;;
+
 let test_with_env_restores_missing_env_as_unset () =
   let name = "MASC_HTTP_PAGES_TEST_RESTORE_ENV" in
   unsetenv name;
@@ -382,6 +515,19 @@ let () =
             "snapshot exclusion uses directory identity"
             `Quick
             test_report_snapshot_exclusion_uses_directory_identity
+        ; test_case
+            "H1/H2 serve a replaced asset"
+            `Quick
+            test_dashboard_static_serves_a_replaced_asset
+        ] )
+    ; ( "reload"
+      , [ test_case "the held file is not read" `Quick test_reload_does_not_read_the_file_it_holds
+        ; test_case "a replaced file is read" `Quick test_reload_reads_a_replaced_file
+        ; test_case
+            "a file written to another length is read"
+            `Quick
+            test_reload_reads_a_file_written_to_another_length
+        ; test_case "the checks of the load stay" `Quick test_reload_keeps_the_checks_of_the_load
         ] )
     ; ( "dashboard_etag"
       , [ test_case "body content hash" `Quick test_dashboard_etag_of_body_content_hash

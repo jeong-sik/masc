@@ -1622,7 +1622,8 @@ let render_metrics (state : state) =
         if spacing_rows > 0 then
           c.push (if connection_rows = [] then ""
                   else Theme.recede ()
-                    ^ ui_text state ~ko:"End: 연결 상태" ~en:"End: status" ^ Ansi.reset);
+                    ^ metrics_status_at_end ~ko:(state.ui_language = Lang_ko)
+                    ^ Ansi.reset);
         let content_budget = max 0 (budget - navigation_rows - spacing_rows) in
         (* Put variable-length status details after account rows: refreshes do
            not move the account the reader is already scrolling through. *)

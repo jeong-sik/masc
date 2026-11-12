@@ -2362,6 +2362,7 @@
   ; the scheduler probe's states (Scheduler_lag), which the decode hands over
   masc.masc_core
   masc_tui_press
+  masc_tui_value
   masc_tui_task_flow
   masc
   masc_tui_ansi

@@ -19,13 +19,13 @@ type metrics_kpis = {
 }
 
 val calculate_kpis : state -> metrics_kpis
-val section_pills_line : cols:int -> active:metrics_section -> string
+val section_pills_line : ko:bool -> cols:int -> active:metrics_section -> string
 
 val render_section_fleet : ?session_rows:int -> cols:int -> state -> string list
 (** [session_rows] bounds the TUI session block's event rows. When the log
     folds to more rows than that, the block keeps the newest ones under a
-    ["+N earlier"] row, so the newest line stays in view. Without it every
-    row is drawn. *)
+    row that counts the earlier ones (["N earlier"], ["이전 N건"]), so the
+    newest line stays in view. Without it every row is drawn. *)
 val render_section_resources : cols:int -> state -> string list
 val render_section_tools : cols:int -> state -> string list
 

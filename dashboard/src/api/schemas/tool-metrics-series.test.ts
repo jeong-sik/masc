@@ -17,6 +17,9 @@ const busy = {
   max_ms: 90_000,
   long_count: 1,
   long_total_ms: 90_000,
+  result_observed_count: 2,
+  result_bytes_total: 5_000,
+  result_bytes_max: 4_000,
 }
 
 // A bucket in which no call ran: the server sends null, never zero, for the
@@ -31,6 +34,9 @@ const idle = {
   max_ms: null,
   long_count: 0,
   long_total_ms: 0,
+  result_observed_count: 0,
+  result_bytes_total: 0,
+  result_bytes_max: null,
 }
 
 function validResponse(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -93,6 +99,19 @@ describe('parseToolMetricsSeriesResponse', () => {
     )
     const { long_call_ms: _line, ...withoutLine } = validResponse()
     expect(() => parseToolMetricsSeriesResponse(withoutLine)).toThrow(/long_call_ms/)
+  })
+
+  it('keeps the result sizes of every row, and null for a set of calls without one', () => {
+    const out = parseToolMetricsSeriesResponse(validResponse())
+    expect([out.total, out.buckets[1], out.top_by_time[0]].map(row => row?.result_bytes_total)).toEqual([5_000, 5_000, 5_000])
+    expect(out.buckets[1]?.result_bytes_max).toBe(4_000)
+    const idleBucket = out.buckets[0]
+    expect([idleBucket?.result_observed_count, idleBucket?.result_bytes_total, idleBucket?.result_bytes_max]).toEqual([0, 0, null])
+  })
+
+  it('rejects an answer from a server that does not send result sizes', () => {
+    const { result_bytes_total: _bytes, ...withoutBytes } = busy
+    expect(() => parseToolMetricsSeriesResponse(validResponse({ total: withoutBytes }))).toThrow(/result_bytes_total/)
   })
 
   it('keeps the tool filter the server echoed', () => {

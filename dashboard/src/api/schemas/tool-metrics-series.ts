@@ -5,7 +5,14 @@
 // there is no call to take them from, and a chart must leave a gap there
 // rather than draw zero. `long_count` and `long_total_ms` are zero there:
 // no call ran past the line, and no time went into one. The line itself is
-// the response's `long_call_ms`. Fields the server adds later are dropped on decode.
+// the response's `long_call_ms`.
+//
+// `result_bytes_total` adds up the result sizes of the `result_observed_count`
+// calls that have one. A call stored before sizes were kept has none, so the
+// total covers fewer calls than `call_count` until the old rows age out.
+// `result_bytes_max` is null when no call in the set has a size: a set of calls
+// without sizes is not a set of calls that returned nothing.
+// Fields the server adds later are dropped on decode.
 
 import { Schema } from 'effect'
 
@@ -19,6 +26,9 @@ const SeriesStatFields = {
   max_ms: Schema.NullOr(Schema.Finite),
   long_count: Schema.Finite,
   long_total_ms: Schema.Finite,
+  result_observed_count: Schema.Finite,
+  result_bytes_total: Schema.Finite,
+  result_bytes_max: Schema.NullOr(Schema.Finite),
 }
 
 const ToolMetricsSeriesBucketSchema = Schema.Struct({

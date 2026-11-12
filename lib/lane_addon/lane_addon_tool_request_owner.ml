@@ -83,15 +83,24 @@ let decode ~scope ~request_id json =
   Ok ({Record.scope; request_id; installation_id; package_id; tool; request_digest; summary; progress} : Record.t)
 (* The body a record names: present, its bytes named by that digest, and the
    canonical JSON of the request. *)
+let check_body ~request_digest bytes =
+  let* () = if String.equal (Lane_addon_store.digest bytes) request_digest then Ok ()
+    else Error "original request body does not match its record's digest" in
+  let* json = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
+  let* request = Lane_addon_action.canonical json in
+  if String.equal (Yojson.Safe.to_string request) bytes then Ok request
+  else Error "original request body is not canonical"
+(* The check hashes the body, parses it and writes it out again: CPU work in
+   proportion to its size, and a body can be tens of megabytes. A fiber doing
+   that itself keeps every other fiber of its domain waiting until it is done,
+   so the fiber hands it to the CPU pool and waits. The check reads nothing but
+   its arguments. A caller that is not a fiber, or a process with no pool, runs
+   it where it is. *)
 let request_of_body ~request_digest = function
   | None -> Error "original request body named by its record is missing"
   | Some bytes ->
-    let* () = if String.equal (Lane_addon_store.digest bytes) request_digest then Ok ()
-      else Error "original request body does not match its record's digest" in
-    let* json = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
-    let* request = Lane_addon_action.canonical json in
-    if String.equal (Yojson.Safe.to_string request) bytes then Ok request
-    else Error "original request body is not canonical"
+    Domain_pool_ref.submit_cpu_or_inline ~name:"lane-addon-original-request-check" (fun () ->
+      check_body ~request_digest bytes)
 (* A record names its request by digest, so equal digests are equal requests;
    comparing them never walks the request itself. *)
 let same_listed (a : Record.t) (b : Record.t) =

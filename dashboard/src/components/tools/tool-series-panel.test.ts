@@ -8,8 +8,11 @@ import {
   failureRatePercent,
   failureRateSeries,
   latencySeries,
+  formatResultBytes,
   longCallLine,
+  resultBytesSeries,
   timeSeries,
+  unsizedCallCount,
   type ToolSeriesViewProps,
 } from './tool-series-panel'
 import { SERIES_WINDOW_ORDER } from './tool-series-state'
@@ -31,6 +34,9 @@ const busy = {
   max_ms: 200_000,
   long_count: 1,
   long_total_ms: 200_000,
+  result_observed_count: 10,
+  result_bytes_total: 5_242_880,
+  result_bytes_max: 2_097_152,
 }
 const idle = {
   call_count: 0,
@@ -42,6 +48,9 @@ const idle = {
   max_ms: null,
   long_count: 0,
   long_total_ms: 0,
+  result_observed_count: 0,
+  result_bytes_total: 0,
+  result_bytes_max: null,
 }
 
 const series: ToolMetricsSeriesResponse = {
@@ -65,6 +74,9 @@ const series: ToolMetricsSeriesResponse = {
       max_ms: 500,
       long_count: 0,
       long_total_ms: 0,
+      result_observed_count: 3,
+      result_bytes_total: 900,
+      result_bytes_max: 500,
     },
   ],
 }
@@ -183,6 +195,47 @@ describe('chart series', () => {
   })
 })
 
+describe('result bytes', () => {
+  it('writes a size in the largest unit that keeps it under a thousand and some', () => {
+    expect(formatResultBytes(0)).toBe('0 B')
+    expect(formatResultBytes(812)).toBe('812 B')
+    expect(formatResultBytes(1_024)).toBe('1.0 KB')
+    expect(formatResultBytes(4_915)).toBe('4.8 KB')
+    expect(formatResultBytes(5_242_880)).toBe('5.0 MB')
+    expect(formatResultBytes(1_395_864_371)).toBe('1.3 GB')
+  })
+
+  it('draws the bytes of each bucket, and a gap where no call ran', () => {
+    const [bytes] = resultBytesSeries(series)
+    expect(bytes?.name).toBe('결과 바이트 합계')
+    expect(bytes?.readings.map(reading => reading.value)).toEqual([null, 5_242_880])
+  })
+
+  it('leaves a gap in a bucket that holds calls without a size, rather than draw a drop', () => {
+    const partial: ToolMetricsSeriesResponse = {
+      ...series,
+      buckets: [
+        { start: 0, ...busy, result_observed_count: 4, result_bytes_total: 1_000 },
+        { start: 3600, ...busy },
+      ],
+    }
+    expect(resultBytesSeries(partial)[0]?.readings.map(reading => reading.value)).toEqual([null, 5_242_880])
+  })
+
+  it('draws a bucket whose calls all returned nothing as zero bytes, not as a gap', () => {
+    const empty: ToolMetricsSeriesResponse = {
+      ...series,
+      buckets: [{ start: 0, ...busy, result_bytes_total: 0, result_bytes_max: 0 }, { start: 3600, ...idle }],
+    }
+    expect(resultBytesSeries(empty)[0]?.readings.map(reading => reading.value)).toEqual([0, null])
+  })
+
+  it('counts the calls of the window that have no size', () => {
+    expect(unsizedCallCount(series)).toBe(0)
+    expect(unsizedCallCount({ ...series, total: { ...busy, result_observed_count: 4 } })).toBe(6)
+  })
+})
+
 describe('longCallLine', () => {
   it('says whole minutes as minutes and any other line as seconds', () => {
     expect(longCallLine(60_000)).toBe('1분')
@@ -212,6 +265,7 @@ describe('ToolSeriesView', () => {
       '구간별 실패율',
       '구간별 실행 시간 합계',
       '구간별 지연 p50 / p95',
+      '구간별 결과 바이트 합계',
     ])
   })
 
@@ -225,6 +279,35 @@ describe('ToolSeriesView', () => {
     const tiles = tileValues()
     expect(tiles['1분 이상 걸린 호출']).toBe('1회')
     expect(tiles['1분 이상 걸린 시간']).toBe('3.3m')
+  })
+
+  it('shows the bytes the calls returned and the largest result', () => {
+    mount(view())
+    const tiles = tileValues()
+    expect(tiles['결과 바이트 합계']).toBe('5.0 MB')
+    expect(tiles['가장 큰 결과']).toBe('2.0 MB')
+  })
+
+  it('shows a dash, not zero bytes, when no call in the window has a size', () => {
+    mount(view({ series: { ...series, total: { ...busy, result_observed_count: 0, result_bytes_total: 0, result_bytes_max: null } } }))
+    const tiles = tileValues()
+    expect(tiles['결과 바이트 합계']).toBe('-')
+    expect(tiles['가장 큰 결과']).toBe('-')
+  })
+
+  it('puts the bytes of each tool in the table', () => {
+    mount(view())
+    const header = Array.from(container.querySelectorAll('thead th')).map(cell => cell.textContent)
+    expect(header.slice(8)).toEqual(['결과 바이트 합계', '가장 큰 결과'])
+    expect(tableColumn(8)).toEqual(['5.0 MB', '900 B'])
+    expect(tableColumn(9)).toEqual(['2.0 MB', '500 B'])
+  })
+
+  it('says how many calls have no size only when some do not', () => {
+    mount(view())
+    expect(container.textContent).not.toContain('크기가 없어서')
+    mount(view({ series: { ...series, total: { ...busy, result_observed_count: 4 } } }))
+    expect(container.textContent).toContain('이 구간 호출 10회 중 6회는 크기가 없어서')
   })
 
   it('shows no long call as zero calls and no time', () => {

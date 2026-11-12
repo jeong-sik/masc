@@ -107,6 +107,7 @@ type sample =
   ; tool_name : string
   ; disposition : disposition
   ; duration_ms : float
+  ; result_bytes : int option
   }
 
 (* Durations of one set of calls, kept in a flat float array that doubles when
@@ -157,6 +158,9 @@ type stat =
   ; max_ms : float option
   ; long_count : int
   ; long_total_ms : float
+  ; result_observed_count : int
+  ; result_bytes_total : int
+  ; result_bytes_max : int option
   }
 
 type accumulator =
@@ -167,6 +171,9 @@ type accumulator =
   ; mutable peak_ms : float
   ; mutable long_calls : int
   ; mutable long_sum_ms : float
+  ; mutable sized_calls : int
+  ; mutable sum_bytes : int
+  ; mutable peak_bytes : int
   ; durations : Durations.t
   }
 
@@ -178,6 +185,9 @@ let new_accumulator () =
   ; peak_ms = 0.0
   ; long_calls = 0
   ; long_sum_ms = 0.0
+  ; sized_calls = 0
+  ; sum_bytes = 0
+  ; peak_bytes = 0
   ; durations = Durations.create ()
   }
 ;;
@@ -195,6 +205,12 @@ let record accumulator (sample : sample) =
   then (
     accumulator.long_calls <- accumulator.long_calls + 1;
     accumulator.long_sum_ms <- accumulator.long_sum_ms +. sample.duration_ms);
+  (match sample.result_bytes with
+   | None -> ()
+   | Some bytes ->
+     accumulator.sized_calls <- accumulator.sized_calls + 1;
+     accumulator.sum_bytes <- accumulator.sum_bytes + bytes;
+     if bytes > accumulator.peak_bytes then accumulator.peak_bytes <- bytes);
   Durations.add accumulator.durations sample.duration_ms
 ;;
 
@@ -208,6 +224,9 @@ let empty_stat =
   ; max_ms = None
   ; long_count = 0
   ; long_total_ms = 0.0
+  ; result_observed_count = 0
+  ; result_bytes_total = 0
+  ; result_bytes_max = None
   }
 ;;
 
@@ -225,6 +244,10 @@ let stat_of_accumulator accumulator =
     ; max_ms = Some accumulator.peak_ms
     ; long_count = accumulator.long_calls
     ; long_total_ms = accumulator.long_sum_ms
+    ; result_observed_count = accumulator.sized_calls
+    ; result_bytes_total = accumulator.sum_bytes
+    ; result_bytes_max =
+        (if accumulator.sized_calls = 0 then None else Some accumulator.peak_bytes)
     })
 ;;
 
@@ -252,6 +275,12 @@ let tool_accumulator builder name =
     accumulator
 ;;
 
+let negative_size (sample : sample) =
+  match sample.result_bytes with
+  | Some bytes -> bytes < 0
+  | None -> false
+;;
+
 let add builder (sample : sample) =
   let shape = builder.shape in
   if not (Float.is_finite sample.duration_ms) || sample.duration_ms < 0.0
@@ -261,6 +290,13 @@ let add builder (sample : sample) =
          "tool %s has an invalid duration of %g ms"
          sample.tool_name
          sample.duration_ms)
+  else if negative_size sample
+  then
+    Error
+      (Printf.sprintf
+         "tool %s has a negative result size of %d bytes"
+         sample.tool_name
+         (Option.value sample.result_bytes ~default:0))
   else if (not (Float.is_finite sample.ts))
           || sample.ts < shape.since
           || sample.ts >= shape.until
@@ -330,6 +366,11 @@ let float_or_null = function
   | Some value -> `Float value
 ;;
 
+let int_or_null = function
+  | None -> `Null
+  | Some value -> `Int value
+;;
+
 let stat_fields stat : (string * Yojson.Safe.t) list =
   [ "call_count", `Int stat.call_count
   ; "failure_count", `Int stat.failure_count
@@ -340,6 +381,9 @@ let stat_fields stat : (string * Yojson.Safe.t) list =
   ; "max_ms", float_or_null stat.max_ms
   ; "long_count", `Int stat.long_count
   ; "long_total_ms", `Float stat.long_total_ms
+  ; "result_observed_count", `Int stat.result_observed_count
+  ; "result_bytes_total", `Int stat.result_bytes_total
+  ; "result_bytes_max", int_or_null stat.result_bytes_max
   ]
 ;;
 

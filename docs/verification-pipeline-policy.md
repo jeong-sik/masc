@@ -90,8 +90,9 @@ the caller's cancellation. A pending review observes those exact recorded calls;
 it never starts another model call or allocates a successor on uncertainty.
 Observation does not require reconnecting to the producer's VM or SSH endpoint.
 
-`execution_pending` means the original journal has no terminal observation. The
-maintenance pulse schedules observation only. `execution_repair_required` means
+`execution_pending` means a recorded call has no terminal observation and its
+writer is live or contended. The maintenance pulse schedules observation only.
+`execution_repair_required` means
 automatic reconciliation cannot establish an original result; the operator must
 inspect it. TUI and Dashboard distinguish these from a generic review failure.
 Historical originals without a locator remain unresolved, even after upgrade.

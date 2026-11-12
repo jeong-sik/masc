@@ -49,7 +49,8 @@ let field_string key fields : (string, string) result =
    {!AR.valid_verdict_strings}, not a copy, so the two cannot drift apart. *)
 let canonical_output_contract () =
   Printf.sprintf
-    "Call the report_review_verdict tool exactly once with verdict one of: %s."
+    "Call the %s tool exactly once with verdict one of: %s."
+    AR.report_tool_name
     (String.concat ", " AR.valid_verdict_strings)
 
 (* The review's system prompt is the rendered [Prompt_names.verification]

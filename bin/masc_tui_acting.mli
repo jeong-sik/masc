@@ -85,7 +85,7 @@ val keeper_of_event :
     carries. [traces] is (keeper name, trace id) for every keeper the TUI
     knows. An event whose correlation matches none keeps its agent name. *)
 
-val label_of_event : Observer.event -> string
+val label_of_event : ko:bool -> Observer.event -> string
 (** What happened, in the EVENT column's one or two words. The sibling of
     {!keeper_of_event} for the other measured column: [row_of_event] reads
     its label here, so a measurement can ask for the word without building
@@ -310,7 +310,7 @@ val measured_of_row : row -> measured
 (** The measurement a drawn row already carries. *)
 
 val measured_of_event :
-  traces:(string * string) list -> Observer.event -> measured
+  ko:bool -> traces:(string * string) list -> Observer.event -> measured
 (** The measurement of an event that has no row yet. Activity measures every
     entry its filter keeps so the columns hold still while a reader scrolls;
     building a row for each of those spells a detail sentence the page never

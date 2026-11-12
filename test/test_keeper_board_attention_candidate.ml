@@ -53,6 +53,13 @@ let delivered label = function
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
+let recorded label = function
+  | Ok (A.Judgment_on_record candidate) -> candidate
+  | Ok (A.Judgment_refused _) ->
+    Alcotest.failf "%s: the candidate already records another judgment" label
+  | Error detail -> Alcotest.failf "%s: %s" label detail
+;;
+
 let signal ?(content = "Persisted Board evidence") ?(updated_at = 42.0) post_id :
   Masc.Board_dispatch.board_signal
   =
@@ -1178,16 +1185,25 @@ let test_not_relevant_delivery_is_idempotent () =
   let persisted = record ~base_path (candidate (signal "post-not-relevant")) in
   let verdict = judgment J.Not_relevant in
   ignore
-    (ok "record judgment" (A.record_judgment ~base_path persisted verdict)
+    (recorded "record judgment" (A.record_judgment ~base_path persisted verdict)
       : A.candidate);
+  (* [persisted] still says Pending, so this refusal is the comparison the
+     ledger lock makes against the row written above. *)
   (match
      A.record_judgment
        ~base_path
        persisted
        (judgment J.Relevant)
    with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "conflicting durable judgment was accepted");
+   | Ok (A.Judgment_refused { recorded }) ->
+     Alcotest.(check bool)
+       "the refusal carries the judgment on record"
+       true
+       (recorded = verdict)
+   | Ok (A.Judgment_on_record _) ->
+     Alcotest.fail "conflicting durable judgment was accepted"
+   | Error detail ->
+     Alcotest.failf "the refusal was not returned as a value: %s" detail);
   let consumed =
     delivered
       "apply judgment"

@@ -346,8 +346,20 @@ val record : base_path:string -> candidate -> record_result
    [Storage_error]. That is the only place a [delivery_failure] is constructed,
    so a caller outside holds none to record. *)
 
+type judgment_record =
+  | Judgment_on_record of candidate
+      (** The candidate records this judgment: this call wrote it, or the
+          same judgment was already there. *)
+  | Judgment_refused of { recorded : judgment }
+      (** The candidate already records [recorded], another judgment. Nothing
+          was written. *)
+
 val record_judgment :
-  base_path:string -> candidate -> judgment -> (candidate, string) result
+  base_path:string -> candidate -> judgment -> (judgment_record, string) result
+(** Record [judgment] on the candidate, or report the judgment it already
+    keeps. The comparison runs under the ledger lock against the ledger's
+    current row, so a judgment written since the caller read [candidate] is
+    seen. A quarantined or missing candidate is an [Error]. *)
 
 val quarantine :
   base_path:string ->

@@ -869,8 +869,10 @@ let deliver_completed ~base_path ~keeper_name partition =
        ^ partition.partition_id)
 ;;
 
-(* The worker settling its own [Not_relevant] judgment has no later member to
-   reach, so a refused judgment stays an [Error] there, as before. *)
+(* The worker settles its own [Not_relevant] judgment through this. A
+   judgment the candidate refuses stays an [Error] on this path, as before:
+   the drain returns it and the worker ends with [Durable_drain] while its
+   lane goes on. Only the owner walk holds a refused member and continues. *)
 let deliver_and_settle_completed ~base_path ~keeper_name partition =
   let* delivery = deliver_completed ~base_path ~keeper_name partition in
   match delivery with
@@ -1668,7 +1670,9 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
    drain blocks the partition and then cannot quarantine it, which stopped the
    worker (#48785). Once its candidate is Consumed a partition only moves
    toward Settled or Abandoned, so reading the partitions before the
-   candidate prune can keep a row one wake too long, never drop it too soon. *)
+   candidate prune can keep a row one wake too long, never drop it too soon.
+   A Completed partition whose judgment the candidate refused keeps the row
+   for as long as it stays Completed: the owner walk reads it on every pass. *)
 let open_partition_candidates partitions =
   List.filter_map
     (fun (partition : Partition.t) ->
@@ -2013,16 +2017,24 @@ let settle_completed_snapshot ~base_path ~keeper_name
         match delivery with
         | Completed_settled settled -> Some settled, held
         | Completed_held { partition; recorded; offered } ->
+          (* Two judgments with one decision still differ by slot or time,
+             so the line names all three. *)
+          let describe (judgment : Candidate.judgment) =
+            Printf.sprintf
+              "%s slot=%s judged_at=%.3f"
+              (Keeper_board_attention_judgment.decision_to_string
+                 judgment.verdict.decision)
+              judgment.slot_id
+              judgment.judged_at
+          in
           Log.Keeper.error
             ~keeper_name
-            "Board attention completion remains pending; it holds no other completion back: %s partition=%s recorded=%s offered=%s"
+            "Board attention completion remains pending; it holds no other completion back: %s partition=%s recorded=[%s] offered=[%s]"
             (Candidate.judgment_conflict_detail
                ~candidate_id:partition.Partition.candidate_id)
             partition.partition_id
-            (Keeper_board_attention_judgment.decision_to_string
-               recorded.verdict.decision)
-            (Keeper_board_attention_judgment.decision_to_string
-               offered.verdict.decision);
+            (describe recorded)
+            (describe offered);
           last_settled, partition :: held
       in
       (match rest with

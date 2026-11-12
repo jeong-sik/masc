@@ -700,7 +700,7 @@ let record_delivery_failure ~base_path candidate failure =
        if updated = current then None else Some updated)
 ;;
 
-(* What offering one judgment to a candidate found. A candidate keeps the
+(* What recording one judgment on a candidate found. A candidate keeps the
    first judgment written to it, so a second one either repeats it or is
    refused. *)
 type judgment_record =
@@ -715,7 +715,7 @@ let compare_with_recorded current ~recorded ~offered =
 
 (* The decision runs under the ledger lock, so a judgment another writer
    committed since the caller read the candidate is compared here too. *)
-let offer_judgment ~base_path candidate judgment =
+let record_judgment ~base_path candidate judgment =
   update_ledger ~base_path ~keeper_name:candidate.keeper_name (fun candidates ->
     match find_candidate candidates candidate.candidate_id with
     | None ->
@@ -758,16 +758,6 @@ let offer_judgment ~base_path candidate judgment =
          Error
            ("Quarantined Board attention candidate cannot be judged: "
             ^ candidate.candidate_id)))
-;;
-
-let record_judgment ~base_path candidate judgment =
-  let* record = offer_judgment ~base_path candidate judgment in
-  match record with
-  | Judgment_on_record current -> Ok current
-  | Judgment_refused { recorded = (_ : judgment) } ->
-    Error
-      ("Board attention candidate judgment conflict: "
-       ^ candidate.candidate_id)
 ;;
 
 let mark_consumed ~base_path candidate judgment delivery =
@@ -1216,9 +1206,9 @@ type judgment_delivery_outcome =
       }
       (** The candidate already records [recorded], and [offered] is another
           judgment. Nothing was written. Two writers judged one candidate;
-          this function does not pick which judgment stands. Every other
-          failure below stays an [Error], because those represent a live
-          candidate in an unexpected state. *)
+          [apply_judgment_and_deliver] does not pick which judgment stands.
+          Its other failures stay an [Error]: each is a live candidate in an
+          unexpected state. *)
 
 let judgment_conflict_detail ~candidate_id =
   "Board attention candidate judgment conflicts with worker result: " ^ candidate_id
@@ -1268,7 +1258,7 @@ let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
       match status_view candidate.status with
       | Direct_resumable (Resumable_pending _)
       | Requeued_resumable { resumable = Resumable_pending _; _ } ->
-        offer_judgment ~base_path candidate judgment
+        record_judgment ~base_path candidate judgment
       | Direct_resumable (Resumable_judged judged)
       | Requeued_resumable
           { resumable = Resumable_judged judged; _ } ->

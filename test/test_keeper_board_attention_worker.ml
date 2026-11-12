@@ -95,6 +95,13 @@ let delivered label = function
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
+let recorded label = function
+  | Ok (A.Judgment_on_record candidate) -> candidate
+  | Ok (A.Judgment_refused _) ->
+    Alcotest.failf "%s: the candidate already records another judgment" label
+  | Error detail -> Alcotest.failf "%s: %s" label detail
+;;
+
 let signal post_id : Masc.Board_dispatch.board_signal =
   let post_id = Masc_test_deps.Board_attention_parent_fixture.post_id post_id in
   { kind = Masc.Board_dispatch.Board_post_created
@@ -2974,7 +2981,7 @@ let test_existing_judgment_skips_exact_flow () =
   let persisted = record ~base_path (candidate ()) in
   let exact = provenance "existing-judged" in
   ignore
-    (ok
+    (recorded
        "record prior judgment"
        (A.record_judgment ~base_path persisted (judgment exact J.Relevant))
       : A.candidate);
@@ -3012,7 +3019,7 @@ let test_existing_consumed_skips_exact_flow_and_settles () =
       : int);
   let exact = provenance "existing-consumed" in
   ignore
-    (ok
+    (recorded
        "record consumed judgment"
        (A.record_judgment ~base_path persisted (judgment exact J.Not_relevant))
       : A.candidate);

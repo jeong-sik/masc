@@ -7,12 +7,14 @@ import {
   createKeeperPresenceStore,
   disconnectedSnapshot,
   globalPresenceSnapshot,
-  LOADING_SNAPSHOT,
+  publishGlobalPresenceSnapshot,
+  resetGlobalPresenceSnapshot,
   normalizeKeeperPresenceSnapshot,
   type KeeperPresenceEntry,
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
 import { setupObservationRefresh } from '../../lib/observation-refresh'
+import { captureDashboardObservationOwner } from '../../lib/observation-read-owner'
 
 async function fetchPresence(signal: AbortSignal): Promise<KeeperPresenceSnapshot> {
   const raw = await fetchIdePresence({ signal })
@@ -79,19 +81,20 @@ export function IdePresenceStrip({
   const presenceStore = useMemo(() => createKeeperPresenceStore(), [])
 
   useEffect(() => setupObservationRefresh(async signal => {
+    const owner = captureDashboardObservationOwner()
     try {
       const snapshot = await fetchPresence(signal)
       // Unchanged observations leave every downstream presence consumer alone.
       if (!signal.aborted && !samePresence(globalPresenceSnapshot.value, snapshot)) {
-        globalPresenceSnapshot.value = snapshot
+        publishGlobalPresenceSnapshot(owner, snapshot)
       }
     } catch (error) {
       if (signal.aborted) return
-      globalPresenceSnapshot.value = disconnectedSnapshot('fetch_failed')
+      publishGlobalPresenceSnapshot(owner, disconnectedSnapshot('fetch_failed'))
       throw error
     }
   }, { topics: ['ide_presence'], resetRead: () => {
-    globalPresenceSnapshot.value = LOADING_SNAPSHOT
+    resetGlobalPresenceSnapshot()
     presenceStore.reset()
   } }), [presenceStore])
 

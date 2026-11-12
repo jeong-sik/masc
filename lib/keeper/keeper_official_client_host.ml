@@ -849,7 +849,7 @@ let plan_arguments argument_projection ~measure_message_bytes messages =
             | Ok arguments -> Some arguments
             | Error _ ->
               Log.Keeper.warn ~keeper_name:source.keeper_name
-                "official input kept original arguments: completed raw source did not bind";
+                "official input kept original arguments and results: completed raw source did not bind";
               None in
           source.binding <- Arguments_bound arguments;
           arguments in
@@ -860,12 +860,17 @@ let plan_arguments argument_projection ~measure_message_bytes messages =
            Agent Core request does: markers from the same floor, below the
            same turn boundary, so one range leaves at one size on both lanes
            (RFC-tool-results-age-out-of-context). The client receives the
-           text this module encodes, so that encoding is the wire size. *)
+           text this module encodes, so that encoding is the wire size.
+           The boundary is an index into the raw seed; only a seed that bound
+           to this request vouches that it is an index into [messages] too. *)
+        let demote_before = match arguments with
+          | Some _ -> source.completed_before
+          | None -> 0 in
         Keeper_model_input_demotion.plan ?completed_arguments
           ~min_result_bytes:Keeper_turn_driver_try_provider.aged_result_min_bytes
           ~measure_message_bytes
           ~measure_wire_bytes:(fun message -> Some (measure_message_bytes message))
-          ~demote_before:source.completed_before messages)
+          ~demote_before messages)
 ;;
 
 type selected_start_range =

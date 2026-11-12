@@ -101,10 +101,69 @@ let test_blocked_fanout_preserves_writer_and_trailing_change () =
     check int "released source cannot publish" 2 !metric_notices)
 ;;
 
+let test_actual_activity_and_runtime_sample_wake_their_readers () =
+  with_workspace (fun env state ->
+    let config = Mcp_server.workspace_config state in
+    let notices = Eio.Stream.create 2 in
+    Eio.Switch.run (fun sw ->
+      subscribe ~sw ~base_path:config.base_path (fun event ->
+        match observation event with
+        | Some { topic = (`Activity | `Runtime_observables) as topic; scope = `Workspace } ->
+            Eio.Stream.add notices topic
+        | Some _ | None -> ());
+      Broadcast.install ~state ~sw ~mono_clock:(Eio.Stdenv.mono_clock env);
+      let value = Activity_graph.emit config ~kind:"isolated.source-commit"
+          ~payload:(`Assoc ["fixture", `Bool true]) () in
+      check bool "the real activity writer precedes its invalidation" true
+        (Eio.Stream.take notices = `Activity);
+      let rows = Activity_graph.list_events config ~after_seq:0 ~limit:1 ~keep:(fun _ -> true) () in
+      check bool "the event consumer can read the actual durable row" true
+        (List.exists (fun (row : Activity_graph.event) -> row.seq = value.seq) rows);
+      ignore (Otel_runtime_observables.For_testing.write_samples_to_store
+        ~masc_root:(Workspace.masc_dir config) ());
+      check bool "a completed runtime sample wakes its own reader" true
+        (Eio.Stream.take notices = `Runtime_observables)))
+;;
+
+let test_canonical_keeper_commit_keeps_its_reader_scope () =
+  with_workspace (fun env state ->
+    let config = Mcp_server.workspace_config state in
+    let composite = Server_dashboard_http_keeper_api_types.keeper_composite_cache_key
+        ~base_path:config.base_path "exact-keeper" in
+    let trace filter limit = Server_dashboard_http_keeper_api_types.keeper_runtime_trace_cache_key
+        config "exact-keeper" ~trace_id:filter ~limit () in
+    let traces = [trace "one" 1; trace "two" 2] in
+    List.iter (fun key -> ignore (Dashboard_cache.get_or_compute key ~ttl:60.0
+      (Pool_work.cpu ~name:__FUNCTION__ (fun () -> `String "old selection"))))
+      (composite :: traces);
+    let notices = Eio.Stream.create 2 in
+    Eio.Switch.run (fun sw ->
+      subscribe ~sw ~base_path:config.base_path (fun event ->
+        match observation event with
+        | Some { topic = (`Keeper_composite | `Keeper_runtime_trace) as topic; _ } as payload ->
+            let keys = if topic = `Keeper_composite then [composite] else traces in
+            List.iter (fun key -> check bool "every affected cache selection is retired first"
+              true (Option.is_none (Dashboard_cache.peek key))) keys;
+            Eio.Stream.add notices payload
+        | Some _ | None -> ());
+      Broadcast.install ~state ~sw ~mono_clock:(Eio.Stdenv.mono_clock env);
+      Keeper_row_broadcast.changed ~base_path:config.base_path ~keeper_name:"exact-keeper";
+      let first = Eio.Stream.take notices in
+      let second = Eio.Stream.take notices in
+      check bool "canonical row publication preserves the exact Keeper" true
+        (List.for_all (function
+          | Some { Sse_event.Types.scope = `Keeper "exact-keeper"; _ } -> true
+          | Some _ | None -> false) [first; second])))
+;;
+
 let () = run "dashboard commit observation"
   ["production paths", [
     test_case "leaf commit retires the dependent REST cache" `Quick
       test_actual_leaf_commit_invalidates_before_notice;
     test_case "blocked fanout preserves writer and read debt" `Quick
-      test_blocked_fanout_preserves_writer_and_trailing_change]]
+      test_blocked_fanout_preserves_writer_and_trailing_change;
+    test_case "real activity and sample commits wake their readers" `Quick
+      test_actual_activity_and_runtime_sample_wake_their_readers;
+    test_case "canonical Keeper row retains its scope" `Quick
+      test_canonical_keeper_commit_keeps_its_reader_scope]]
 ;;

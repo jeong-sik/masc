@@ -1,6 +1,14 @@
 (** Commit metadata enters the existing runtime observer bus outside the
     writer's lifetime. This module retains no rows or replay history. *)
 
+val observations :
+  Server_observation_input.t ->
+  Sse_event.Types.dashboard_observation_changed_payload list
+(** Closed dependencies of mounted Dashboard reads on canonical committed
+    input. Keeper and chat-operation identities remain exact. A computed
+    Dashboard observation is never reclassified as a new input. Native Logs
+    and mounted series receive their own frames rather than polling here. *)
+
 val install :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
@@ -17,4 +25,5 @@ val install :
     Dependent REST caches are invalidated before publishing. In-flight input
     remains owed; successful idle has no timer. Epoch replacement releases
     every old subscription and cancels its publishers. The canonical
-    publisher's own non-raising failure contract still applies. *)
+    publisher's own non-raising failure contract still applies. Initial
+    installation returns after its source subscriptions are registered. *)

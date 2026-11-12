@@ -150,6 +150,20 @@ let invalidate_tool_metrics_series ~base_path =
   Dashboard_cache.invalidate_prefix (tool_metrics_series_cache_prefix ~base_path)
 ;;
 
+let ide_file_activity_cache_prefix ~base_path =
+  partition_cache_key
+    ~partition:(cache_partition_of_base_path ~base_path)
+    "ide_file_activity" ""
+;;
+
+let ide_file_activity_cache_key ~base_path fields =
+  ide_file_activity_cache_prefix ~base_path ^ dashboard_query_cache_suffix fields
+;;
+
+let invalidate_ide_file_activity ~base_path =
+  Dashboard_cache.invalidate_prefix (ide_file_activity_cache_prefix ~base_path)
+;;
+
 (* Keyed by base path rather than config: the schedule store's change observer
    is handed only the base path of the workspace it wrote. *)
 let scheduled_automation_cache_key ~base_path =

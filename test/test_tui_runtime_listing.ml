@@ -25,6 +25,7 @@ let runtime id : Masc.Tui_decode.runtime_option =
     ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
     ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None; ro_quota_scope_id = None;
+    ro_credential_refused_at = None;
     ro_rate_limited = false; ro_rate_limit_resets_at = None;
     ro_failed_attempt = None }
 

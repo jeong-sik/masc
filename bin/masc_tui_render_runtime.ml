@@ -73,7 +73,8 @@ let runtime_route_badge state (runtime : Masc.Tui_decode.runtime_option) =
   let warn label = Option.map (fun text -> Theme.warn () ^ text ^ Ansi.reset) label in
   match
     List.filter_map Fun.id
-      [ warn (runtime_quota_label ~ko runtime); warn (runtime_rate_limit_label ~ko runtime)
+      [ warn (runtime_credential_refused_label ~ko runtime)
+      ; warn (runtime_quota_label ~ko runtime); warn (runtime_rate_limit_label ~ko runtime)
       ; runtime_usage_badge state runtime ]
   with
   | [] -> (Theme.info ()) ^ (if ko then "거절 없음" else "no refusal") ^ Ansi.reset
@@ -414,6 +415,15 @@ let runtime_detail_lines state target ~width =
           fact ~tone:Page_line.Attention "Rate limit"
             "no wait stated, cleared by the next successful answer"
       in
+      let credential =
+        match runtime.ro_credential_refused_at with
+        | None -> []
+        | Some at ->
+          let tm = Unix.localtime at in
+          fact ~tone:Page_line.Attention "Credential"
+            (Printf.sprintf "refused %02d-%02d %02d:%02d, until a call on it is answered"
+               (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min)
+      in
       let probe_lines =
         match probe with
         | None -> fact ~tone:Page_line.Quiet "Probe" "unobserved"
@@ -515,7 +525,7 @@ let runtime_detail_lines state target ~width =
       in
       detail_page ~width
         [ (if ko then "1. 현재 상태 · 연결 진단" else "1. Health & probe"),
-          probe_lines @ failed_attempt @ quota @ rate_limit @ usage_lines @ probe_limitations
+          probe_lines @ failed_attempt @ credential @ quota @ rate_limit @ usage_lines @ probe_limitations
         ; (if ko then "2. 레인 배정 · 실행 성적" else "2. Assignment & history"),
           assignment_fields @ keeper_lines @ evidence_lines
         ; (if ko then "3. 모델 · 컨텍스트" else "3. Model & context"), model_fields

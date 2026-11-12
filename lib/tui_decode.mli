@@ -446,6 +446,9 @@ type runtime_option = {
           It identifies a credential location or client home, not the provider's
           account identity; changing credentials in place need not change it.
           [None] means no unambiguous scope ID was reported. *)
+  ro_credential_refused_at : float option;
+      (** When the provider last refused this runtime's credential with no
+          answer on it since. A replaced credential ends it, not a wait. *)
   ro_rate_limited : bool;
       (** This process observed a 429 that has neither reached its provider's
           Retry-After deadline nor been cleared by a successful answer.

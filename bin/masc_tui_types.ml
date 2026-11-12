@@ -25195,6 +25195,7 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
 
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
   option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
+  || Option.is_some option.Tui_decode.ro_credential_refused_at
 
 let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
   state.runtime_dim_refusals
@@ -25216,6 +25217,15 @@ let runtime_quota_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
         Printf.sprintf (if ko then "쿼터 소진 (%02d:%02d 초기화)" else "quota exhausted (resets %02d:%02d)")
           tm.Unix.tm_hour tm.Unix.tm_min
     | None -> if ko then "쿼터 소진 (초기화 시각 없음)" else "quota exhausted (no reset stated)")
+
+(* The provider refused the credential itself. No wait ends it, so the label
+   carries when it was seen instead of when it resets. *)
+let runtime_credential_refused_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
+  Option.map (fun at ->
+    let tm = Unix.localtime at in
+    Printf.sprintf (if ko then "인증 거절 (%02d-%02d %02d:%02d 관측)" else "credential refused (seen %02d-%02d %02d:%02d)")
+      (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min)
+    runtime.ro_credential_refused_at
 
 let runtime_rate_limit_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
   if not runtime.ro_rate_limited then None
@@ -25260,7 +25270,8 @@ let runtime_usage_label state runtime =
 let runtime_route_probe_text state runtime probe =
   let ko = state.ui_language = Lang_ko in
   let route = match List.filter_map Fun.id
-      [ runtime_quota_label ~ko runtime; runtime_rate_limit_label ~ko runtime; runtime_usage_label state runtime ] with
+      [ runtime_credential_refused_label ~ko runtime; runtime_quota_label ~ko runtime
+      ; runtime_rate_limit_label ~ko runtime; runtime_usage_label state runtime ] with
     | [] -> if ko then "거절 없음" else "no refusal"
     | parts -> String.concat " " parts in
   route ^ " / " ^ (match probe with

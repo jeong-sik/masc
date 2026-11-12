@@ -124,6 +124,8 @@ what you asked before and what it answered. The answer of
 - **A new conversation is yours to start.** `masc_my_keeper_conversation_new`
   starts one. The Keeper's next turn has read none of the earlier turns.
   The earlier conversations stay recorded, and no turn goes on in them.
+  While a turn runs on the subscription of the current conversation, the
+  start is refused: start it when the turn has ended.
 - **Reading it back.** `masc_my_keeper_conversation` answers the turns of
   the current conversation, and the list of the Keeper's conversations.
   Name one of them in `conversation_id` to read an earlier one. Each
@@ -133,7 +135,10 @@ what you asked before and what it answered. The answer of
   `answered`, `failed`, or `unrecorded` when the server stopped before the
   turn ended. A failed or unrecorded turn with `model_may_have_read: true`
   may still be part of what the Keeper remembers: the client was started
-  with your message. The whole conversation comes in one answer.
+  with your message. The whole conversation comes in one answer. When the
+  server stopped in the middle of writing a row, the read is refused with
+  503 until the Keeper's next turn or a new conversation cuts that row.
+  Reading again does not cut it.
 - **A failed turn is not sent again.** The server does not start the turn
   over, and it starts no new conversation in place of one whose turn
   failed. Send the message again when you want it answered.
@@ -146,12 +151,11 @@ what you asked before and what it answered. The answer of
   request timeout ends the call first; raise that timeout if turns are cut
   off.
 - **One call of a subscription at a time.** A second turn on the same
-  subscription while one runs is refused.
+  subscription while one runs is refused, and so is a new conversation of
+  a Keeper whose current conversation is on that subscription.
 - **No OAuth.** A 401 carries no `WWW-Authenticate` challenge and the
   server publishes no protected resource metadata, so a client that
   connects only through MCP OAuth cannot connect. Use a client that sends a
   bearer header.
 - **No Board, no resources, no prompts, no notifications from the
   server.**
-- **A turn leaves no record on the server.** The answer is in the tool
-  result and nowhere else.

@@ -1196,6 +1196,15 @@ let a_person_keeps_keepers_over_mcp () =
          "masc_my_keeper_conversation"
          ~arguments:(`Assoc [ "keeper_id", `String "keeper-1"; "conversation_id", `String "none" ]));
     check
+      "an argument the definition of the tool does not have, before the route reads any"
+      ( "true"
+      , "Tool 'masc_my_keeper_conversation' received unsupported field(s): limit; accepted: keeper_id, \
+         conversation_id" )
+      (result
+         owner
+         "masc_my_keeper_conversation"
+         ~arguments:(`Assoc [ "keeper_id", `String "keeper-1"; "limit", `String "1" ]));
+    check
       "their Keeper of that name has no conversation of the first person's"
       ( "false"
       , {|{"keeper_id":"keeper-1","current_conversation_id":null,"conversations":[],"conversation_id":null,"turns":[]}|}

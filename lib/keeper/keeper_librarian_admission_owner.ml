@@ -327,8 +327,9 @@ let frontier ~store ~owner inventory =
             | Ok _,None -> continue (source original part)
             | (Ok _ | Error _),(None | Some _) -> Ok None)
          (* Only a destination-absent conflict can end an admission here, and
-            discovery validated it, so its candidates are gaps the frontier
-            hands to a replacement root (#46372). *)
+            discovery validated it. The frontier hands its candidates to a
+            replacement root (#46372), whose proof requires that they are
+            uncommitted ([Parts.terminal_witness]). *)
          | Conflicted _ -> continue (source original part)
          | Captured | Admission_wait _ | Dispatch_pending _ | Commit_unknown _
          | Subdividing _ | Subdivided _ -> Ok None) in

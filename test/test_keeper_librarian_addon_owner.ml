@@ -712,7 +712,14 @@ let test_absent_destination_ends_the_original_and_is_judged_again ()=
      it after the replacement committed the candidate it handed over. *)
   (match run_worker fixture with
    | Worker.Unavailable detail -> fail ("the pass after the replacement commit is unavailable: " ^ detail)
-   | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ -> ()))
+   | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ -> ());
+  (* A later candidate is admitted through a second replacement root while the
+     Conflicted original is still retained under the superseded root. *)
+  io (fun () -> ignore (append fixture.keepers_dir "new-tail" "Durable tail"));
+  drive_until fixture settled |> assert_settled;
+  check (list string) "the later candidate enters Memory" ["Durable A";"Durable tail"]
+    (io (fun () -> claims fixture.keepers_dir));
+  check int "the later candidate is ACKed" 0 (io (fun () -> List.length (pending_rows fixture.keepers_dir))))
 
 let latest_execution fixture capture=io (fun () ->
   let exact=Capture.request capture |> get in

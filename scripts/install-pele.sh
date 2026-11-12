@@ -10,8 +10,8 @@ if [ "$#" -gt 0 ]; then
   fi
   prefix=$2
 fi
-command -v node >/dev/null 2>&1
-command -v pnpm >/dev/null 2>&1
+command -v node >/dev/null 2>&1 || { printf '%s\n' 'install-pele: node not found; Pele needs Node.js 22 or newer' >&2; exit 1; }
+command -v pnpm >/dev/null 2>&1 || { printf '%s\n' 'install-pele: pnpm not found' >&2; exit 1; }
 node -e 'if (Number(process.versions.node.split(".")[0]) < 22) throw Error("Node.js 22 or newer is required")'
 mkdir -p "$prefix"
 prefix=$(CDPATH= cd -- "$prefix" && pwd)

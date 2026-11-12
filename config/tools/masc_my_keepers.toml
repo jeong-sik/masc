@@ -1,0 +1,6 @@
+name = "masc_my_keepers"
+title = "My Keepers"
+description = """
+List the Keepers you own. The answer is JSON: keepers holds each keeper_id \
+with the runtime_id of its latest assignment, or null when it has none."""
+additional_properties = false

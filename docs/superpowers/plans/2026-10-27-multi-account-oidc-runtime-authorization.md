@@ -1205,6 +1205,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 사용자 결정(2026-11-12).
   - S1b-1 다음 조각은 Board(S1b-2)가 아니라 이것이다. 지금 턴은 앞 대화도 기록도 없는 한 번 묻기다. 그래서 "자기 Keeper를 쓴다"가 되지 않는다.
   - 대화 본문은 서버 디스크에 남긴다. 사람이 자기 대화를 지우는 길은 purge(F1)를 기다리지 않고 이 층 바로 뒤에 넣는다(S1b-3c).
+  - 지우기는 authz 로그의 Purge 사건으로 기록한다(설계 §8.5). 2단계 F1의 한 조각(대상: 사람의 Keeper 대화 하나)을 1단계로 당긴다. 지운 표시를 사람 폴더의 index에 쓰면, 백업 복원이 그 폴더를 되감을 때 표시도 사라지고 지운 대화가 돌아온다(#51616 리뷰 P1).
 - 확인한 사실(main `90276cab16c1`, Claude Code 문서는 2026-11-12에 읽음).
   - 지금 턴(`Server_preview_keeper_turn.call_claude`)은 임시 폴더를 만들고, 그 안에서 CLI를 한 번 띄우고, 폴더를 지운다. `session_mode`를 넘기지 않아서 턴마다 새 session이다. masc는 로그에도 디스크에도 아무것도 남기지 않는다.
   - Claude Code client(`Runtime_claude_code.run_turn`)는 `?session_mode:(Resume {session_id})`를 받으면 `--resume=<id>`로 띄운다. 답(`turn_result`)에 `session_id`와 `resumed`가 있다. Keeper lane이 이미 쓰는 길이다.
@@ -1213,11 +1214,13 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - CLI는 저장한 대화를 기본 30일 뒤에 지운다(`cleanupPeriodDays`, 같은 sessions 문서). vendor의 값이라서 masc는 날짜를 세지 않는다.
   - 없는 session을 이어가려다 난 실패를 client가 따로 가르지 않는다. `Runtime_claude_code.error`에 그 갈래가 없다.
   - Codex 턴은 다계정에서 시작하기 전에 거절된다(D3c). 이 층의 대상이 아니다.
+  - Claude Code는 한 project의 로컬 상태를 지우는 `claude purge [path]`를 문서로 밝힌다. transcript, task, file history, prompt history의 그 project 줄, `.claude.json`의 그 project 항목을 지운다. `--yes`는 확인을 건너뛰고 `--dry-run`은 지울 것만 보인다. 맞는 상태가 없으면 exit 1이다. v2.1.288 전에는 이름이 `claude project purge`였다. session 하나만 지우는 명령은 없다(<https://code.claude.com/docs/en/cli-reference>, <https://code.claude.com/docs/en/claude-directory>, "Clear local data").
+  - `claude purge`가 `CLAUDE_CONFIG_DIR`을 따르는지는 문서에 없다. 2.1.322에서 `--dry-run`으로 쟀다. 같은 path를 기본 설정으로 물으면 지울 항목을 보이고(exit 0), 빈 폴더를 `CLAUDE_CONFIG_DIR`로 주면 "그 폴더 아래에 상태가 없다"고 답한다(exit 1). 그 출력은 `backups/`의 옛 `.claude.json` 사본(최대 5개, 돌아가며 지움)에 그 project 항목이 남을 수 있다고 적는다.
   - 로그의 Keeper는 (owner, 이름)으로 찾는다(D1-5, 이슈 #51073). 한 사람 안에서는 이름이 Keeper를 가린다.
 - 정한 것.
   1. 모델이 읽는 앞 대화는 vendor session이 든다. masc는 앞 대화를 prompt에 다시 싣지 않는다. 다시 실으면 길이를 자르는 규칙이 필요한데, 그 규칙은 Keeper lane의 것이고 이 경로에는 없다.
   2. masc는 묻고 답한 것을 따로 기록한다. 사람이 읽는 것은 이 기록이다. vendor의 파일은 읽지 않는다. 형식이 vendor 것이기 때문이다.
-  3. Keeper마다 "지금 대화"가 하나다. 그 Keeper의 마지막 `started` 줄이 지금 대화다. 따로 저장하지 않는다. 그 대화에 `delete_requested`나 `deleted` 줄이 붙었으면 지금 대화가 없고, 다음 턴이 새 대화를 시작한다. 그 앞의 지우지 않은 대화로 돌아가지 않는다.
+  3. Keeper마다 "지금 대화"가 하나다. 그 Keeper의 마지막 `started` 줄이 지금 대화다. 따로 저장하지 않는다. 그 대화에 Purge 사건이 있으면(지우는 중, 지웠음, 지우다 실패함) 지금 대화가 없고, 다음 턴이 새 대화를 시작한다. 그 앞의 지우지 않은 대화로 돌아가지 않는다.
   4. 대화는 시작한 구독(ProviderAccount)에 묶인다. session이 그 계정 홈에 있기 때문이다. Keeper의 Runtime이 같은 구독의 다른 모델로 바뀌면 이어 간다. 다른 구독으로 바뀌면 이어가는 턴을 409로 거절하고, 새 대화를 시작하라고 답한다. 말없이 새로 시작하지 않는다.
   5. 새 대화는 사람이 시작한다. 이어가는 턴이 실패해도 masc가 스스로 새 session으로 바꾸지 않는다. session이 지워져서 난 실패인지 가를 수 없기 때문이다.
   6. 기록의 주인은 Keeper의 owner다. 1단계에서는 owner만 자기 Keeper에게 묻는다(설계 §4.3). 그래서 줄마다 initiator를 적지 않는다. 다른 사람이 묻는 길을 여는 층이 D6과 함께 initiator를 더한다(설계 §3-11).
@@ -1226,10 +1229,9 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 위치는 `<.masc>/accounts/<namespace>/keeper-conversations/`다. 사람의 runtime root 아래라서 계정 홈과 같은 경계에 있다. Off 뒤에도 남고, 단일 사용자는 읽지 않는다.
   - 대화마다 폴더가 하나다. 폴더 이름은 masc가 뽑은 `conversation_id`다. Keeper 이름으로 경로를 만들지 않는다. 대소문자를 가리지 않는 볼륨에서는 두 이름이 한 폴더가 된다.
   - 줄은 JSON 객체 하나다. `kind` 필드가 줄의 종류이고, 나머지는 아래에 적은 필드가 한 번씩이다. 필드가 빠지거나 더 있으면 해석되지 않는 줄이다.
-  - `index.jsonl`은 덧붙이기만 하고 본문을 싣지 않는다. 줄은 세 가지다.
+  - `index.jsonl`은 덧붙이기만 하고 본문을 싣지 않는다. 줄은 한 가지다.
     - `started {conversation_id, keeper_id, provider_account_id, at_ms}`
-    - `delete_requested {conversation_id, at_ms}`
-    - `deleted {conversation_id, at_ms}`
+    - 지운 것은 index에 쓰지 않는다. 아래 "지우기"의 authz 사건이 든다.
   - `<conversation_id>/turns.jsonl`은 덧붙이기만 하고 본문을 싣는다. 줄은 세 가지다.
     - `asked {turn_id, message, at_ms}`. CLI를 띄우기 전에 쓴다. 못 쓰면 CLI를 띄우지 않는다.
     - `answered {turn_id, text, model, session_id, at_ms}`
@@ -1243,31 +1245,47 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 쓰기는 `Fs_compat`의 durable append를 쓴다. 한 사람의 기록에 쓰는 순서는 서버 프로세스 안의 잠금 하나가 정한다. 계정 서버는 구역을 쥔 한 프로세스다.
   - 해석되지 않는 줄이 있으면 그 사람의 대화 읽기와 턴을 거절한다. 고쳐서 읽지 않는다.
 - 지우기(S1b-3c).
-  - 사람이 자기 대화 하나를 지운다. `delete_requested`를 쓰고, 그 대화의 폴더를 지우고, `deleted`를 쓴다. 본문은 폴더와 함께 없어지고, `index.jsonl`에는 언제 시작하고 언제 지웠는지만 남는다(설계 §3-11의 감사 메타데이터).
-  - 폴더를 지우다 서버가 멈추면 `delete_requested`만 남는다. 그 대화는 그때부터 읽히지 않고 턴도 돌지 않는다. 계정 서버가 다시 뜰 때 남은 폴더를 마저 지우고 `deleted`를 쓴다. purge(F1)가 `Purge_pending`을 이어서 지우는 것과 같은 방식이다.
-  - 폴더를 지우다 권한이나 IO 오류가 나도 `delete_requested`만 남는다. 지우기는 503으로 답한다. 같은 대화에 `DELETE`를 다시 부르면 남은 폴더를 마저 지우고 `deleted`를 쓴다(204). `deleted`까지 붙은 대화에 다시 부르면 404다.
-  - 그 대화의 턴이 도는 중이면 지우기를 409로 거절한다. 판정은 계정마다 한 호출만 도는 잠금(`one_call_of`)으로 한다.
-  - vendor 쪽 사본(계정 홈의 session 파일)은 masc의 폴더와 따로 있다. CLI가 문서로 밝힌 방법으로 지울 수 있는지 S1b-3c를 시작할 때 문서에서 확인한다. 지울 수 없으면 지우기의 답과 화면이 "CLI가 보관 기간 동안 사본을 갖고 있다"고 밝힌다. vendor의 폴더 이름 규칙을 masc가 흉내 내서 파일을 찾지 않는다.
+  - 사람이 자기 대화 하나를 지운다. 본문은 폴더와 함께 없어지고, `index.jsonl`의 `started` 줄과 authz의 Purge 사건만 남는다(설계 §3-11의 감사 메타데이터).
+  - 대상은 `Keeper_conversation {owner, conversation_id}`다. 지우기 상태는 그 대상의 마지막 Purge 사건이다(설계 §8.5-6). 사건은 셋이다.
+    - `Purge_pending {target}`. 지우기를 시작한다. authz append 하나이고 §8.2의 `Purge` 사건이라 Intent/Committed 규칙과 외부 저장소를 따른다.
+    - `Purged {target, vendor_copy}`. 폴더를 지웠다.
+    - `Purge_failed {target, reason, vendor_copy}`. 폴더를 지우지 못했다. 사람에게 보이는 종단이다(설계 §8.5-5). `reason`은 `Folder_not_removed` 하나다.
+  - 인증(#51616 리뷰 P3). Active인 owner만 자기 대화를 지운다. 판정은 `Manage_own_keeper`다. PAT는 범위에 `manage_own_keeper`가 있어야 하고, `read_state`만 있는 PAT는 지우지 못한다. 브라우저는 same-origin과 CSRF token을 낸다. 대상은 부른 사람의 namespace 안의 대화뿐이다. Admin도 다른 사람의 대화를 지우지 못한다.
+  - 순서. 판정부터 마지막 append까지 그 대화의 계정 잠금(`one_call_of`) 안에서 한다. 잠금은 계정 단위라서 같은 계정의 다른 Keeper 턴이 돌 때도 409다. vendor 사본 정리가 그 계정 홈의 파일을 고치므로, 같은 홈에서 CLI가 동시에 돌지 않게 하려는 것이다.
+    1. 판정. 자기 Keeper의 대화(index의 `started`)가 아니면 404다. 마지막 사건이 `Purged`이면 404다. 사건이 없거나 `Purge_failed`이면 다음으로 간다.
+    2. `Purge_pending`을 쓴다. 이때부터 그 대화는 읽히지 않고 턴도 돌지 않는다.
+    3. vendor 사본을 먼저 지운다(#51616 리뷰 P2). 그 대화에서 CLI가 물음을 받았을 수 있는 턴(`answered`, `model_may_have_read`인 `failed`, 끝 줄이 없는 턴)이 있으면, 그 대화를 시작한 계정 홈을 `CLAUDE_CONFIG_DIR`로 주고 `claude purge --yes <그 대화 작업 폴더의 실제 경로>`를 부른다. 대화마다 작업 폴더가 따로라서 이 명령은 그 대화 하나에 맞는다. exit 0이면 `vendor_copy = removed`, 그 밖은 `may_remain`이다. 출력 글자를 읽어 가르지 않는다. CLI가 2.1.288보다 옛 것이면 부르지 않고 `may_remain`이다(`--version`으로 묻는다). 그런 턴이 없으면 부르지 않고 `none`이다. 맞는 상태가 없을 때의 exit 1을 실패와 가를 수 없어서다. 앞 시도의 `Purge_failed`가 `removed`를 적었으면 다시 부르지 않는다. 대화 id와 index의 계정만으로 다시 만들 수 있는 값이라 handle을 따로 남기지 않는다.
+    4. 대화 폴더(`<conversation_id>/`)를 지운다. 링크를 따라가지 않는다.
+    5. 지웠으면 `Purged {vendor_copy}`, 못 지웠으면 `Purge_failed {Folder_not_removed, vendor_copy}`를 쓴다.
+  - 답. 지웠으면 200 `{"conversation_id", "vendor_copy"}`다. 204를 쓰지 않는다. vendor 사본이 남을 수 있다는 것을 실어야 해서다(#51616 리뷰 P2). `removed`여도 CLI의 `backups/`에 옛 `.claude.json` 사본이 그 project 항목을 갖고 있을 수 있다. 화면과 도구 설명이 이것을 밝힌다. 폴더를 못 지웠으면 503이고 `Purge_failed`가 남는다. 같은 대화에 `DELETE`를 다시 부르면 1번부터 다시 한다. `Purged` 뒤에는 404다.
+  - 재기동. 남은 `Purge_pending`은 3~5번을 이어서 한다(설계 §8.5-5). `Purged`인데 폴더가 다시 있으면 폴더를 지우고 `Purged`를 한 번 더 쓴다(설계 §8.5-6). 복원이 폴더만 되살린 경우다. 그 사이 읽기와 턴은 authz 상태로 거절된다.
+  - 복원이 authz 로그까지 되감으면 부팅 판정(설계 §5.1)이 외부 고수위와 달라 부팅을 거부한다. 복원 창(F2)이 들어오면 설계 §10.5의 대조가 같은 대상을 다시 지정한다.
+  - 읽기, 턴, "지금 대화", 목록은 index를 읽은 뒤 Purge 상태로 거른다. 목록은 `Purged`와 `Purge_pending` 대화를 빼고, `Purge_failed` 대화에는 `"deletion": "failed"`를 붙인다. `Purge_failed` 대화의 턴은 읽히지 않는다.
   - 사람 자체를 지우는 purge(F1)는 이 폴더 전체를 대상에 넣는다.
 - 경로와 도구.
   - `POST /api/v1/auth/keepers/turn`. 본문은 그대로다. 지금 대화가 없으면 시작한다. 답에 `conversation_id`와 `continued`(이번 턴이 session을 이어받았는지)를 더한다.
   - `POST /api/v1/auth/keepers/conversation`. 본문은 `{"keeper_id"}`다. 새 대화를 시작한다. 앞 대화의 기록은 남는다.
-  - `GET /api/v1/auth/keepers/conversation?keeper_id=<이름>`. 지금 대화의 id와 턴을 순서대로 답한다. 그 Keeper의 대화 목록(`conversations`)도 함께 답한다. 목록의 항목은 id, 시작한 시각, 지운 시각이고 `index.jsonl`에서 읽는다. 본문은 없다. 사람은 지울 대화의 id를 여기서 얻는다.
-  - 같은 경로에 `conversation_id=<id>`를 더하면 그 Keeper의 그 대화의 턴을 답한다. 지운 대화와 자기 것이 아닌 id는 404다.
-  - `DELETE /api/v1/auth/keepers/conversation/<conversation_id>`. 그 대화를 지운다. 답은 204다. 자기 것이 아니거나 없는 id는 404다.
-  - MCP 도구 `masc_my_keeper_conversation`(읽기), `masc_my_keeper_conversation_new`, `masc_my_keeper_conversation_delete`. 경로와 같은 함수를 부른다.
+  - `GET /api/v1/auth/keepers/conversation?keeper_id=<이름>`. 지금 대화의 id와 턴을 순서대로 답한다. 그 Keeper의 대화 목록(`conversations`)도 함께 답한다. 목록의 항목은 id, 시작한 구독(`provider_account_id`), 시작한 시각이고 `index.jsonl`에서 읽는다. 지우다 실패한 대화에는 `deletion`이 붙는다. 본문은 없다. 사람은 지울 대화의 id를 여기서 얻는다.
+  - 같은 경로에 `conversation_id=<id>`를 더하면 그 Keeper의 그 대화의 턴을 답한다. Purge 사건이 있는 대화와 자기 것이 아닌 id는 404다.
+  - `DELETE /api/v1/auth/keepers/conversation/<conversation_id>`. 그 대화를 지운다. 답은 200 `{"conversation_id", "vendor_copy"}`다. 자기 것이 아니거나 없는 id는 404다.
+  - MCP 도구 `masc_my_keeper_conversation`(읽기, `keeper_id`와 선택 `conversation_id`), `masc_my_keeper_conversation_new`, `masc_my_keeper_conversation_delete`(`conversation_id`). 경로와 같은 함수를 부른다.
 - 시험으로 볼 것(구현 층).
   - 둘째 턴이 `--resume=<첫 턴의 session id>`로 뜬다. 가짜 CLI가 받은 인자로 본다.
   - 두 사람이 같은 이름의 Keeper로 각자 대화한다. 서로의 기록을 읽지 못하고, 서로의 session id로 뜨지 않는다.
   - 다른 구독으로 바꾼 Keeper의 턴은 CLI가 뜨기 전에 409다.
   - `asked`를 쓰지 못하면 CLI가 뜨지 않는다.
   - 턴 도중에 멈춘 기록(`asked`뿐)을 읽으면 그 턴이 답 없이 보인다.
-  - 지운 대화는 읽히지 않고, 그 폴더가 없고, 다음 턴은 새 대화다. `delete_requested`만 남은 설치를 다시 띄우면 폴더가 없어지고 `deleted`가 붙는다.
+  - 지운 대화는 읽히지 않고, 그 폴더가 없고, 다음 턴은 새 대화다. `Purge_pending`만 남은 설치를 다시 띄우면 폴더가 없어지고 `Purged`가 붙는다.
+  - 폴더만 되살린 뒤 다시 띄우면 그 대화는 읽히지 않고 폴더가 다시 지워진다.
+  - `vendor_copy`는 가짜 CLI의 purge exit 값을 따르고, CLI가 물음을 받았을 수 있는 턴이 없는 대화는 purge를 부르지 않는다.
+  - `read_state`만 있는 PAT, 다른 사람, Admin은 지우지 못한다.
 - 하지 않는 것: Keeper 지시문과 system prompt, 기억, MASC 도구, 스스로 시작하는 턴, Board, Codex, 답을 나눠 보내기, 대화를 가로지르는 검색, 보관 기간을 정해 자동으로 지우기.
 - 층.
   - S1b-3a 기록과 이어가기. 턴 경로와 `masc_my_keeper_turn`의 답에 `conversation_id`와 `continued`가 붙는다.
   - S1b-3b 새 대화와 읽기. 경로 둘과 MCP 도구 둘. 새 대화를 먼저 넣는다. 다른 구독으로 옮긴 Keeper가 받는 409의 출구가 그것뿐이다.
-  - S1b-3c 지우기. 경로 하나와 MCP 도구 하나, 재기동 때 이어서 지우기.
+  - S1b-3c 지우기. 둘로 나눈다.
+    - S1b-3c-1 authz의 Purge 사건과 상태(대상은 사람의 Keeper 대화 하나). Intent/Committed와 외부 저장소를 따른다.
+    - S1b-3c-2 경로 하나와 MCP 도구 하나, vendor 사본 정리, 재기동 때 이어서 지우기, 읽기·턴·목록의 거르기.
   - 화면은 이 층들에 없다. 계정 콘솔 층이 위 경로를 불러서 대화 목록, "새 대화", "지우기"를 단다.
 
 ### E. official client 격리
@@ -1361,6 +1379,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 1단계 개시 조건은 설계 §11.1이다. 백업 복원은 A2의 부팅 판정이 거부하거나 `AuthorizationUncertain`으로 시작한다. 복원 뒤 이어 쓰는 절차(F2)와 복구 리허설, official lane attestation(E3)은 2단계이고, 2단계 층이 들어오면 그 층의 증거가 설계 §11의 요구 목록에 다시 들어간다.
 - 1단계(2026-11-04 사용자 결정, §6 결정 9). 순서는 A2 → B3 → B2e → C2a → C2b → C2d → C3 → A4d 뒷부분 → C4 → C6 → D1 → D2 → D3 → D4 → F3a → S1이다(S1은 2026-11-05, F3a는 2026-11-08 사용자 결정). 이 층이 들어오고 설계 §11.1의 증거가 모이면, 초대한 사람이 Google이나 GitHub으로 로그인해 자기 Runtime으로 자기 Keeper를 쓴다. `Single_user` 동작은 층마다 그대로다. B2e(`Revocation_pending` 게이트)가 1단계에 드는 까닭은 1단계에도 Admin의 사용자 `Disable`과 초대 취소 같은 회수가 있어서다. 회수 기록이 중간에 끊기면 실행을 막아야 한다(설계 §3-5).
 - 2단계는 B4, C2c, C5, D5, D6, E1~E4, F1, F2, F3b, F4, F5다. Runtime 공유(Delegated·MachineShared), 입장 요청, MCP OAuth 결속, purge, 복원 창, 다시 켜기를 맡는다. 1단계를 실제로 쓴 뒤 연다.
+  - F1 가운데 사람의 Keeper 대화 하나를 지우는 조각(Purge 사건과 그 대상 하나)은 S1b-3c가 1단계에서 한다(2026-11-12 사용자). F1은 그 사건 위에 initiator 단위 지정과 dispatch 종단 대기를 더한다.
 - C6은 C2의 로그인 경로와 C3의 세션·CSRF만 쓰고 `Auth_gate.decide`(C4)를 호출하지 않는다. 그래서 C4와 C6은 서로의 선행이 아니고, 둘 다 C3 뒤에 어느 쪽을 먼저 열어도 된다. 다만 다계정을 켜려면 C4가 필요하다(설계 §11 readiness의 `legacy_workspace_secret_callers=[]`·`agent_credential_callers=[]`가 C4 몫이다). 화면만 먼저 병합돼도 다계정은 켜지지 않는다.
 - C6 ①의 "거부"는 HTTP 401이다. 현재 `server_auth.ml`의 strict 경로는 자격이 없는 요청을 `Missing_token` 등으로 거절하고 `www-authenticate: Bearer`를 붙인다(`http_status_of_auth_error`, `auth_error_headers`). HTTP strict는 `MASC_HTTP_AUTH_STRICT`가 켜져 있거나, 비 loopback으로 바인드하거나, `MASC_HTTP_BASE_URL`이 비 loopback 주소일 때 켜진다. A2가 `Multi_account`에서 `enabled=false`, `require_token=false`, `MASC_ALLOW_ANONYMOUS_MUTATIONS=true`를 부팅 때 거부해도 strict가 항상 켜지는 것은 아니다. `with_public_read`는 strict에서도 `is_public_read_path`의 공개 경로를 열고, strict가 꺼진 loopback에서는 다른 읽기에도 인증 검사를 하지 않는다. 자격 없는 요청의 401 여부는 경로와 C3·C4의 구현에 따라 확인한다. Dashboard의 기존 401 처리(`dashboard/src/api/core.ts`의 `reportRejectedCredential`)는 bearer를 보낸 요청에만 반응하므로, 자격 없는 요청이 401을 받으면 로그인으로 이동하는 부분은 C6이 새로 만든다. C4가 들어오기 전 C6의 상태 전이 시험은 서버 fixture 응답으로 하고, 실제 서버의 Reject 경로와 엮은 증거는 C4 뒤에 만든다.
 - readiness 증거는 층이 만든다. 각 층의 PR 본문이 자기 증거를 적고, F5는 그 증거를 모아 표면 digest에 결속하는 실행기만 만든다.

@@ -17,7 +17,6 @@ type item =
       ; title : string
       ; producer : string
       ; since : string
-      ; verification_id : string
       }
 
 let task_id = function
@@ -92,14 +91,13 @@ let project ~(config : Workspace_utils_backend_setup.config) tasks =
           grades which review stopped: the row carries when the submission
           was made, and the surfaces order by it. *)
        | Masc_domain.AwaitingVerification
-           { assignee; submitted_at; verification_id; started_at = _ } ->
+           { assignee; submitted_at; verification_id = _; started_at = _ } ->
          Some
            (Awaiting_verdict
               { task_id = task.id
               ; title = task.title
               ; producer = assignee
               ; since = submitted_at
-              ; verification_id
               })
        | Masc_domain.Claimed { assignee; claimed_at = since } ->
          classify_held ~config ~task_id:task.id ~title:task.title ~assignee ~since

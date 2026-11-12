@@ -59,9 +59,15 @@ let bound binary = match inspect binary with
   | Installed.Bound b -> b
   | state -> fail (Yojson.Safe.to_string (Installed.evidence state))
 let unavailable = function Installed.Unavailable _ -> true | _ -> false
+let load_body b name =
+  Result.map (fun (loaded : Installed.loaded) -> loaded.Installed.body) (Installed.load b name)
 let test_exact_release () = with_fixture (fun _ root binary _ ->
   let b = bound binary in
-  check (result string error) "exact bytes" (Ok "<p>exact release</p>") (Installed.load b "index.html");
+  check (result string error) "exact bytes" (Ok "<p>exact release</p>") (load_body b "index.html");
+  check (result string error) "the digest returned is the digest of the bytes read"
+    (Ok (sha "<p>exact release</p>"))
+    (Result.map (fun (loaded : Installed.loaded) -> loaded.Installed.body_sha256)
+       (Installed.load b "index.html"));
   check string "assets root" (Filename.concat root "assets") (Installed.assets_root b);
   Unix.utimes (Filename.concat root "assets/dashboard/.build-stamp") 1577836800. 1577836800.;
   check bool "old stamp does not break exact receipt" true (Result.is_ok (Installed.load b ".build-stamp")))
@@ -126,7 +132,7 @@ let test_pointer_switch () = with_fixture (fun temp _ binary pointer ->
   Unix.unlink pointer;
   let other = Filename.concat temp "other" in write other "other release";
   Unix.symlink other pointer;
-  check (result string error) "running release stays bound" (Ok "<p>exact release</p>") (Installed.load b "index.html");
+  check (result string error) "running release stays bound" (Ok "<p>exact release</p>") (load_body b "index.html");
   check bool "original binary still exists" true (Sys.file_exists binary))
 let test_receipt_removed () = with_fixture (fun _ root binary _ ->
   let b = bound binary in
@@ -244,7 +250,7 @@ let test_read_only_install () = with_fixture (fun _ root binary _ ->
       Unix.chmod binary 0o555;
       List.iter (fun dir -> Unix.chmod dir 0o555) dirs;
       check (result string error) "read-only installed release serves" (Ok "<p>exact release</p>")
-        (Installed.load (bound binary) "index.html")))
+        (load_body (bound binary) "index.html")))
 (* Read the executable list actually checked by the offline install smoke.  A
    new smoke companion must be accepted by the real receipt parser, not merely
    by a second hard-coded fixture list. *)
@@ -278,7 +284,7 @@ let test_smoke_companions_accepted () =
   let companions = List.map (fun name -> name, "fixture " ^ name) names in
   with_fixture ~companions (fun _ _ binary _ ->
     check (result string error) "all smoke companions have valid receipts"
-      (Ok "<p>exact release</p>") (Installed.load (bound binary) "index.html"));
+      (Ok "<p>exact release</p>") (load_body (bound binary) "index.html"));
   check bool "negative-control name is not in smoke" false
     (List.mem "masc-test-companion" names);
   with_fixture ~change_receipt:(function
@@ -313,7 +319,7 @@ let map_runtime_files transform = map_runtime (function
 let test_v2_payload_contract () =
   with_payload_fixture (fun _ _ binary _ ->
     check (result string error) "runtime-bearing distribution serves verified dashboard"
-      (Ok "<p>exact release</p>") (Installed.load (bound binary) "index.html"));
+      (Ok "<p>exact release</p>") (load_body (bound binary) "index.html"));
   with_fixture ~change_receipt:(function
     | `Assoc fields -> `Assoc (("schema", `String "masc.installed-release.v1") ::
         List.filter (fun (name, _) -> not (List.mem name ["schema"; "companions"; "runtime"])) fields)

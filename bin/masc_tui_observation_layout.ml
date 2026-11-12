@@ -134,7 +134,10 @@ let context_summary = function
       Context_unavailable
         (Tui_decode.context_unavailable_reason_to_string reason)
 
-let context_header_item ~max_cells ~inspect_key observation =
+let context_header_item ~ko ~max_cells ~inspect_key observation =
+  let say korean english = if ko then korean else english in
+  let context = say "컨텍스트" "Context" in
+  let tok = say "토큰" "tok" in
   match context_summary observation with
   | Context_measured { ratio; tokens; maximum; _ } ->
       (* The key travels with the number. This line was the only place the
@@ -146,18 +149,21 @@ let context_header_item ~max_cells ~inspect_key observation =
          the line is for, and a reader who has met the key once does not need
          it printed again. *)
       let grouped_int = Masc_tui_value.Count.grouped in
-      let figure = Printf.sprintf "Context %.0f%% used" (ratio *. 100.0) in
+      let figure =
+        Printf.sprintf "%s %.0f%% %s" context (ratio *. 100.0) (say "사용" "used")
+      in
       let measured =
-        Printf.sprintf "Context %.0f%% \xc2\xb7 %s/%s tok" (ratio *. 100.0)
-          (grouped_int tokens) (grouped_int maximum)
+        Printf.sprintf "%s %.0f%% \xc2\xb7 %s/%s %s" context (ratio *. 100.0)
+          (grouped_int tokens) (grouped_int maximum) tok
       in
       let with_key text = text ^ " \xc2\xb7 " ^ inspect_key in
       [ with_key measured; measured; with_key figure; figure ]
       |> List.find_opt (fun candidate -> max_cells >= cells candidate)
   | Context_partial {tokens; _} ->
-      [ Printf.sprintf "Context %d tok · limit —" tokens
-      ; Printf.sprintf "Context %d tok" tokens ]
+      [ Printf.sprintf "%s %d %s · %s —" context tokens tok (say "한도" "limit")
+      ; Printf.sprintf "%s %d %s" context tokens tok ]
       |> List.find_opt (fun candidate -> max_cells >= cells candidate)
   | Context_unavailable _ ->
-      [ "Context unavailable · " ^ inspect_key; "Context unavailable"; "Context —" ]
+      let unavailable = say "컨텍스트 측정 없음" "Context unavailable" in
+      [ unavailable ^ " · " ^ inspect_key; unavailable; context ^ " —" ]
       |> List.find_opt (fun candidate -> max_cells >= cells candidate)

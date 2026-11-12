@@ -830,18 +830,21 @@ let keeper_message_identity ~max_cells state keeper_name =
         let compact_status = match reading.Keeper_control.liveness with
           | Keeper_control.Absent ->
               (match keeper.k_origin with
-               | Tui_decode.Declared_keeper _ -> "아직 시작하지 않음"
+               | Tui_decode.Declared_keeper _ ->
+                   ui_text state ~ko:"아직 시작하지 않음" ~en:"never started"
                (* [status] is the only place the bare header carries the
                   Keeper's AUTO/YOLO mode and gate, so the absent label keeps
                   that stance. *)
-               | Persisted_keeper | Remote_keeper -> "absent" ^ stance)
+               | Persisted_keeper | Remote_keeper ->
+                   ui_text state ~ko:"없음" ~en:"absent" ^ stance)
           | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
         with_suggested_action (fit_identity (compact_status ^ Ansi.reset))
       else (match runtime with
        | None ->
            let detail = match keeper.k_origin with
              | Tui_decode.Declared_keeper requirements ->
-               "아직 시작하지 않음 · " ^ String.concat " · "
+               ui_text state ~ko:"아직 시작하지 않음" ~en:"never started"
+               ^ " · " ^ String.concat " · "
                  (List.map Masc.Keeper_declared_roster.requirement_label requirements)
              | Persisted_keeper | Remote_keeper -> status ^ " · —"
            in
@@ -4505,14 +4508,19 @@ let render_keeper_message (state : state) =
         match reading with
         | Masc_tui_fetched.Ready observation ->
             Observation_layout.context_header_item
+              ~ko:(state.ui_language = Lang_ko)
               ~max_cells:(min
                 (if state.msg_origin_display = Message_layout.Origin_bare then 24 else 48)
                 (telemetry_identity_cells / 2))
               ~inspect_key:Masc_tui_keys.context_inspector_label observation
-        | Masc_tui_fetched.Stale _ -> Some "Context refresh failed"
-        | Masc_tui_fetched.Failed _ -> Some "Context unavailable"
-        | Masc_tui_fetched.Loading -> Some "Context reading"
-        | Masc_tui_fetched.Absent -> Some "Context —"
+        | Masc_tui_fetched.Stale _ ->
+            Some (ui_text state ~ko:"컨텍스트 새로 조회 실패" ~en:"Context refresh failed")
+        | Masc_tui_fetched.Failed _ ->
+            Some (ui_text state ~ko:"컨텍스트 조회 실패" ~en:"Context unavailable")
+        | Masc_tui_fetched.Loading ->
+            Some (ui_text state ~ko:"컨텍스트 조회 중" ~en:"Context reading")
+        | Masc_tui_fetched.Absent ->
+            Some (ui_text state ~ko:"컨텍스트 —" ~en:"Context —")
     in
     let context_cells =
       match context_item with

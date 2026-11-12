@@ -155,8 +155,9 @@ val window_reading : noun:string -> scroll:int -> height:int -> int -> string
     reading site must supply its noun instead of assembling one afterward. *)
 
 val position_row : ko:bool -> scroll:int -> height:int -> ?hint:string -> int -> string option
-(** The ["[lines a-b/n]"] row under a window of [height] rows from [scroll]
-    over [count], followed by [hint] when there is one; [None] when there is
+(** The ["[lines a-b/n]"] row (["[줄 a-b/n]"] when [ko]) under a window of
+    [height] rows from [scroll] over [count], followed by [hint] when there is
+    one; [None] when there is
     nothing to say. The one builder of that row: three surfaces wrote their
     own, each beside its own height sum, and one missing the overflow row
     would put the window's last row under the reading (#38744).

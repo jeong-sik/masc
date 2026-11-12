@@ -20,12 +20,7 @@ let rec remove_tree path =
 
 let requests =
   [ ( "Keeper turn"
-    , Access.Keeper_turn
-        { keeper_name = "keeper-1"
-        ; channel = Authz_types.Channel.Autonomous
-        ; pat = Authz_types.Pat_binding.Not_pat
-        ; runtime_id = "runtime-1"
-        } )
+    , Access.Operator_keeper_turn { keeper_name = "keeper-1"; runtime_id = "runtime-1" } )
   ; "operator call", Access.Operator_call
   ]
 ;;

@@ -180,10 +180,37 @@ let turn
       ?(channel = Channel.Autonomous)
       ?(pat = Pat_binding.Not_pat)
       ?(runtime = who.runtime)
+      ?(keeper = who.keeper)
       ()
   =
   Access.Keeper_turn
-    { keeper_name = who.keeper; channel; pat; runtime_id = Runtime_id.to_string runtime }
+    { owner = who.user_id
+    ; keeper_id = get (Keeper_id.of_string keeper)
+    ; channel
+    ; pat
+    ; runtime_id = Runtime_id.to_string runtime
+    }
+;;
+
+(* The name both persons give a Keeper of their own. *)
+let shared_keeper = "keeper-shared"
+
+let make_shared_keeper zone (who : person) ~policy =
+  let keeper_id = get (Keeper_id.of_string shared_keeper) in
+  let turn_scope =
+    { Authorization_scope.runtimes = Runtime_scope.all
+    ; channels = Channel_scope.only (Channel.Set.of_list Channel.[ Autonomous; Direct ])
+    ; allowed_effects = Effect_scope.all
+    }
+  in
+  (match
+     Authz_keeper.make zone ~user_id:who.user_id ~keeper_id ~turn_scope ~draw:(fun () -> policy)
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
+  match Authz_keeper.assign zone ~user_id:who.user_id ~keeper_id ~runtime_id:who.runtime with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (Authz_keeper.error_detail error)
 ;;
 
 (* A personal access token whose scope covers a direct turn of [who]'s Keeper:
@@ -317,6 +344,8 @@ let test_multi_account () =
         in
         let alice = person zone ~base_path ~name:"alice" ~hex:'a' in
         let bob = person zone ~base_path ~name:"bob" ~hex:'b' in
+        make_shared_keeper zone alice ~policy:"policy-shared-alice";
+        make_shared_keeper zone bob ~policy:"policy-shared-bob";
         let alice_account = captured alice.home in
         refused "before the publication" (own alice ()) alice_account (function
           | Access.Not_published -> true
@@ -419,29 +448,41 @@ let test_multi_account () =
           (function
             | Access.Turn_refused (Authz_keeper_turn.Denied _) -> true
             | _ -> false);
+        let not_made = function
+          | Access.Turn_refused (Authz_keeper_turn.Keeper_not_made _) -> true
+          | _ -> false
+        in
+        refused "a Keeper no record made" (turn alice ~keeper:"keeper-nobody" ()) alice_account not_made;
+        (* A Keeper is its owner's: the name of another person's Keeper names
+           nothing of the person who asks. *)
         refused
-          "a Keeper no record made"
-          (Access.Keeper_turn
-             { keeper_name = "keeper-nobody"
-             ; channel = Channel.Autonomous
-             ; pat = Pat_binding.Not_pat
-             ; runtime_id = Runtime_id.to_string alice.runtime
-             })
+          "another person's Keeper asked for as one's own"
+          (turn alice ~keeper:bob.keeper ())
+          alice_account
+          not_made;
+        (* Two persons each made a Keeper of one name, and each runs their
+           own, on their own Runtime and account (issue #51073). *)
+        allowed "the person's Keeper of the shared name" (turn alice ~keeper:shared_keeper ()) alice_account;
+        allowed
+          "the other person's Keeper of the shared name"
+          (turn bob ~keeper:shared_keeper ())
+          (captured bob.home);
+        refused
+          "the other person's Keeper of the shared name on this person's account"
+          (turn bob ~keeper:shared_keeper ())
           alice_account
           (function
-            | Access.Turn_refused (Authz_keeper_turn.Keeper_not_made _) -> true
+            | Access.Not_the_account_home _ -> true
             | _ -> false);
+        (* A lane runs Keepers of the operator, and multi-account mode has
+           none. *)
         refused
-          "a Keeper name that is not an id"
-          (Access.Keeper_turn
-             { keeper_name = "not an id"
-             ; channel = Channel.Autonomous
-             ; pat = Pat_binding.Not_pat
-             ; runtime_id = Runtime_id.to_string alice.runtime
-             })
+          "a Keeper of the operator"
+          (Access.Operator_keeper_turn
+             { keeper_name = alice.keeper; runtime_id = Runtime_id.to_string alice.runtime })
           alice_account
           (function
-            | Access.Not_a_keeper_id _ -> true
+            | Access.No_operator_keeper name -> String.equal name alice.keeper
             | _ -> false);
         (* No operator owns the account of a person, and an inherited home
            carries the credentials of the process environment. *)

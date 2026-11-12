@@ -168,7 +168,11 @@ val publish_host_tool
 (** What a CLI starts for. *)
 type request =
   | Keeper_turn of
-      { keeper_name : string  (** The name of the Keeper, which is the name of its TOML. *)
+      { owner : Authz_types.User_id.t
+            (** Whose Keeper it is: the person the request was authenticated
+                as. A Keeper is named by its owner and its id
+                ({!Authz_keeper_state}). *)
+      ; keeper_id : Authz_types.Keeper_id.t
       ; channel : Authz_types.Channel.t  (** What started the turn. *)
       ; pat : Authz_types.Pat_binding.t
             (** The personal access token that authenticated the request the
@@ -177,6 +181,16 @@ type request =
                 for a turn the server starts itself. *)
       ; runtime_id : string  (** The Runtime of the runtime table that runs the turn. *)
       }
+      (** A turn of a person's Keeper, which the log records. *)
+  | Operator_keeper_turn of
+      { keeper_name : string  (** The name of its TOML. *)
+      ; runtime_id : string  (** The Runtime of the runtime table that runs the turn. *)
+      }
+      (** A turn of a Keeper of the operator, which a TOML of the
+          installation names and a lane of the server runs. It is no Keeper
+          of the log, whatever its name (issue #51073): a single user runs
+          it, after the accounts were turned off too unless its Runtime or
+          its home is a person's, and a multi-account process runs none. *)
   | Own_account of
       { user_id : Authz_types.User_id.t  (** The person who asked, as their session names them. *)
       ; provider_account_id : Authz_types.Provider_account_id.t
@@ -193,12 +207,14 @@ type request =
 type refusal =
   | Not_published  (** The process has not published its access. *)
   | No_operator  (** An operator call in a multi-account process. *)
+  | No_operator_keeper of string
+      (** A turn of a Keeper of the operator, by its name, in a multi-account
+          process. *)
   | Zone_uncertain of Authz_zone.uncertain
       (** A file of the authorization zone is stopped, or the files disagree
           ({!Authz_zone.read}): nothing is decided on its state, so no client
           starts for a person or for a turn. The text says which file it is
           and names no path ({!Authz_zone.uncertain_to_string}). *)
-  | Not_a_keeper_id of string  (** The name of the Keeper is not an id of the log. *)
   | Turn_refused of Authz_keeper_turn.refusal
   | Not_the_assigned_runtime of
       { requested : string
@@ -217,7 +233,7 @@ type refusal =
       (** A host client in a multi-account process, which shares no account
           of its host. *)
   | Off_keeper of Authz_types.Keeper_id.t
-      (** A turn of a Keeper of the log, after the accounts were turned off. *)
+      (** A turn of a person's Keeper, after the accounts were turned off. *)
   | Off_runtime of Authz_types.Runtime_id.t
       (** A turn on a Runtime of the log, after the accounts were turned off. *)
   | Off_person_home

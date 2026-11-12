@@ -206,6 +206,29 @@ let test_explicit_capacity_preserves_original_admission_without_replaying_unknow
   invalid store absent Progress.Dispatch_intended;
   check_events "capacity and uncertainty history survives another handle" (events absent) (load (Store.create ~root)))
 
+(* A fiber of a process that has a domain pool hands the body check to it. The
+   record it gets back is the one a caller outside Eio reads, and a body that
+   fails the check fails for the fiber with the same error. *)
+let test_fiber_with_a_domain_pool_loads_the_same_record () = with_store (fun root store ->
+  owned (retain store);
+  let on_fiber_with_pool f =
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+      Fun.protect ~finally:Domain_pool_ref.clear_for_tests f)) in
+  let outside = load store in
+  let inside = on_fiber_with_pool (fun () -> load store) in
+  Alcotest.check json "request" outside.request inside.request;
+  Alcotest.(check string) "digest" outside.request_digest inside.request_digest;
+  let bodies = Filename.concat (Filename.concat root "tool-request-bodies") (Store.digest scope) in
+  let body = Filename.concat bodies (outside.request_digest ^ ".json") in
+  Out_channel.with_open_bin body (fun channel -> Out_channel.output_string channel "{\"input\":\"another\"}");
+  let error value = match value with
+    | Error error -> Owner.error_to_string error
+    | Ok _ -> Alcotest.fail "a body that does not match its record's digest was accepted" in
+  Alcotest.(check string) "same refusal"
+    (error (Owner.load ~store ~scope ~request_id))
+    (on_fiber_with_pool (fun () -> error (Owner.load ~store ~scope ~request_id))))
+
 module Receipt = Lane_addon_request_receipt
 let receipt time payload = get (Receipt.make ~observed_at:time ~payload)
 let observe store record event = stored store record (Progress.Observer event)
@@ -642,6 +665,8 @@ let () = Alcotest.run "Original Add-on request progress" ["owner",[
   Alcotest.test_case "conflict and refusal remain terminal" `Quick test_conflict_and_refusal_are_terminal_facts;
   Alcotest.test_case "malformed history is not absence or replacement" `Quick test_strict_load_rejects_invalid_or_tampered_history;
   Alcotest.test_case "missing original cannot be recreated" `Quick test_missing_original_cannot_be_recreated_by_update;
+  Alcotest.test_case "a fiber with a domain pool loads the same record" `Quick
+    test_fiber_with_a_domain_pool_loads_the_same_record;
   Alcotest.test_case "only explicit capacity permits original admission retry" `Quick
     test_explicit_capacity_preserves_original_admission_without_replaying_unknown;
   Alcotest.test_case "observer intents survive domain completion and restart" `Quick

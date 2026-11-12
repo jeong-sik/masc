@@ -1758,6 +1758,8 @@
 
 (include stanzas/bench_systhread_cpu_work.inc)
 
+(include stanzas/bench_original_request_load.inc)
+
 (test
  (name test_pool_lane)
  (modules test_pool_lane)
@@ -6166,7 +6168,7 @@
 (test
  (name test_lane_addon_request_progress)
  (modules test_lane_addon_request_progress)
- (libraries alcotest yojson masc masc.fs_compat unix))
+ (libraries alcotest yojson masc masc.masc_core masc.fs_compat eio eio_main unix))
 
 (test
  (name test_lane_addon_captured_destination)

@@ -312,12 +312,12 @@ let stored_rows_carry_the_window_role () =
   let roles =
     Server_provider_usage_history_projection.record_json ~scope_id:"s" ~observed_at:1. report
     |> List.filter_map (fun row ->
-         match Yojson.Safe.Util.member "role" row with
-         | `String role -> Some role
+         match Yojson.Safe.Util.member "limit_id" row, Yojson.Safe.Util.member "role" row with
+         | `String limit_id, `String role -> Some (limit_id, role)
          | _ -> None)
-    |> List.sort String.compare in
-  check (list string) "each window row states its role"
-    [ "counts_other_use"; "gates_model_calls" ] roles
+    |> List.sort compare in
+  check (list (pair string string)) "each window row states its own role"
+    [ "TIME_LIMIT", "counts_other_use"; "TOKENS_LIMIT", "gates_model_calls" ] roles
 
 let () = run "provider usage durable snapshots" ["history", [
   test_case "stored rows carry the window role" `Quick stored_rows_carry_the_window_role;

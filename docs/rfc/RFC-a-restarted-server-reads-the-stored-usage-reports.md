@@ -21,7 +21,10 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 규칙은 하나다. **서버는 시작할 때 저장된 보고에서 계정의 창마다 가장 최근 값을 읽어 표에 올린다.**
 
 - 올린 값은 원래 관측 시각을 그대로 갖는다. 화면은 그 시각을 보여 준다.
-- 보고가 「창이 다 찼고 풀리는 시각이 아직 앞에 있다」고 하면, 살아 있는 보고와 똑같이 그 계정을 그 시각까지 쉬게 한다. 살아 있는 보고가 쉬게 하지 않는 source(Claude Code, Codex)는 되읽어도 쉬게 하지 않는다. 그 계정들은 화면의 사용량만 돌아온다.
+- 쉬게 할지는 살아 있는 보고와 같은 함수(`rest_scope`)가 지금 시각으로 정한다. 그 함수가 `Spent_until t` 를 내고 `t` 가 앞일 때만 그 계정을 `t` 까지 쉬게 한다. 찬 창이 하나 있다는 것만으로는 쉬지 않는다:
+  - 모델 호출을 막지 않는 창(`counts_other_use`, 예: Z.AI `TIME_LIMIT`)은 100%여도 세지 않는다.
+  - Antigravity 는 모델 호출을 막는 창이 전부 찼을 때만 쉰다. 하나라도 남으면 쓸 수 있다.
+  - 살아 있는 보고가 쉬게 하지 않는 source(Claude Code, Codex)는 되읽어도 쉬게 하지 않는다. 그 계정들은 화면의 사용량만 돌아온다.
 - 풀리는 시각 없이 찼다는 보고는 쉬게 하지 않는다. 화면에만 올린다.
 - 새 저장소는 없다. 저장 행에 필드 하나(`role`)가 는다(R0).
 
@@ -90,11 +93,17 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 
 1. R4: 풀리는 시각 없는 「찼다」를 재시작 뒤에 쉬게 하지 않는다. 대가는 그 계정이 재시작 뒤 한 번 더 거절당하는 것이다.
 2. R6: `state` 에 세 번째 값을 더한다. 더하지 않고 `reported` 로 내면 화면은 관측 시각만으로 구분해야 한다. 더하면 TUI·Dashboard 디코더의 닫힌 합타입이 같은 층에서 바뀐다. 옛 TUI 는 모르는 `state` 를 받으면 디코드를 실패시킨다(strict_parse_no_default). 서버를 먼저 올리면 옛 TUI 의 사용량 표가 다시 띄울 때까지 읽히지 않는다.
-3. 3절 첫 항목(거절만 있는 한도)을 따로 RFC 로 다룰지.
+3. 3절의 「거절만 있고 보고가 없는 한도」와 「Claude Code·Codex 계정을 쉬게 하기」를 따로 RFC 로 다룰지. 둘 다 거절을 저장해야 풀린다.
 
 ## 6. 구현 순서
 
 0. `record_json` 이 `role` 을 적는다(R0). 이 층만 먼저 설치돼도 된다.
 1. `Server_provider_usage_history`: 접힌 14일 결과에서 scope 별 최신 보고를 꺼내는 읽기. 시험: 날짜 파일 둘을 쓴 뒤 서버 상태를 새로 만들어 표와 한도 표를 읽는다. 한 계정에 창이 둘이고 더 오래 전에 보고된 창이 소진인 경우를 넣는다.
 2. `Runtime_provider_usage_window`: 관측자를 부르지 않고 올리는 진입점, `state` 의 세 번째 값, `/api/v1/runtime/resolved` 와 TUI·Dashboard 디코더.
-3. 설치 뒤 실측: 서버를 다시 시작하고 1분 안에 `/api/v1/runtime/resolved` 를 읽어, 저장 기록에 「찼고 풀리는 시각 앞」이 있던 계정을 본다. `gate_coverage` 가 있는 source 의 계정은 `quota_exhausted: true`, Claude Code·Codex 계정은 `provider_usage_windows` 에 그 창이 원래 `observed_at` 으로 있는지다.
+3. 설치 뒤 실측: 서버를 다시 시작하고 1분 안에 `/api/v1/runtime/resolved` 를 읽는다. 기대값은 저장 기록의 창을 계정·source 별로 `scope_room` 에 넣어 미리 계산한다.
+   - `Spent_until t` 이고 `t` 가 읽는 시각보다 앞인 계정: `quota_exhausted: true`, `quota_resets_at` 이 `t`.
+   - 모델 호출을 막지 않는 창만 찬 계정(Z.AI `TIME_LIMIT` 100%): `quota_exhausted: false`.
+   - 창 일부만 찬 Antigravity 계정: `quota_exhausted: false`.
+   - 풀리는 시각 없이 찬 계정(`Spent_without_reset`): `quota_exhausted: false`(R4).
+   - Claude Code·Codex 계정: `quota_exhausted` 는 보지 않는다. `provider_usage_windows` 에 그 창이 원래 `observed_at` 으로 있는지만 본다.
+   - 해당 계정이 저장 기록에 없는 갈래는 「사례 없음」으로 적고, 그 갈래는 1번의 시험이 덮는다.

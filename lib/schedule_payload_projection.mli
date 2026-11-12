@@ -57,6 +57,13 @@ val creation_keeper_wake_target
   :  payload:Yojson.Safe.t
   -> (string option, string) result
 
+val delivery_of_payload
+  :  Yojson.Safe.t
+  -> (Schedule_supported_kinds.keeper_wake_delivery, string) result
+(** How a [masc.keeper_wake] payload's due wake reaches its Keeper: the
+    [delivery] body field, or the default when it is absent. The default for any
+    other payload, which has no delivery. [Error] for an unknown [delivery]. *)
+
 val keeper_participants : Schedule_domain.schedule_request -> string list
 (** The automated creator, followed by a distinct decoded wake target. Human
     and system actor IDs are not Keeper identities. An absent or malformed

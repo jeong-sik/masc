@@ -393,6 +393,7 @@ let keeper_wake_arg_names =
   ; "message"
   ; "title"
   ; "urgency"
+  ; "delivery"
   ; "allow_unregistered_keeper"
   ; Schedule_run_watch.watch_field
   ; Schedule_checks_watch.watch_field
@@ -439,6 +440,7 @@ let keeper_wake_payload_from_args args =
     [ "keeper_name", `String keeper_name; "message", `String message ]
     @ optional "title" (string_opt args "title")
     @ optional "urgency" (string_opt args "urgency")
+    @ optional "delivery" (string_opt args "delivery")
     @ watch
   in
   Ok
@@ -522,6 +524,20 @@ let validate_watch_recurrence ~payload ~recurrence =
       (field
        ^ " needs recurrence_kind one_shot: a recurring schedule would wait only before its \
           first occurrence")
+;;
+
+(* A receipt is keyed by its schedule instance. A recurring schedule would write
+   every occurrence's receipt under the first one's call id. *)
+let validate_receipt_recurrence ~payload ~recurrence =
+  let* delivery = Schedule_payload_projection.delivery_of_payload payload in
+  match delivery, recurrence with
+  | Schedule_supported_kinds.Keeper_wake_to_queue, _
+  | Schedule_supported_kinds.Keeper_wake_to_receipt, Schedule_domain.One_shot -> Ok ()
+  | ( Schedule_supported_kinds.Keeper_wake_to_receipt
+    , (Schedule_domain.Interval _ | Schedule_domain.Daily _ | Schedule_domain.Cron _) ) ->
+    Error
+      "delivery receipt needs recurrence_kind one_shot: the receipt is keyed by one \
+       schedule instance"
 ;;
 
 (* A keeper_wake schedule whose target has no durable metadata can never be
@@ -899,6 +915,7 @@ let handle_write ~action ~tool_name ~start_time ctx args =
                  create parser's one_shot default decide an update. *)
               Error (Refusal "schedule not found")))
     in
+    let* () = plain (validate_receipt_recurrence ~payload ~recurrence) in
     let* watch = plain (validate_watch_recurrence ~payload ~recurrence) in
     (* Attaching a watch depends on the recurrence that was just validated.
        A concurrent edit must not replace that row with a recurring schedule

@@ -76,6 +76,18 @@ Where the wake sits in the Keeper's queue when it lands. Defaults to \
 normal."""
 
 [[params]]
+name = "delivery"
+type = "string"
+enum = ["queue", "receipt"]
+description = """
+How the due wake reaches the Keeper. queue, the default, puts a new message in \
+its queue. receipt writes a tool-result receipt instead of a queue message. \
+The receipt's request_id is this schedule's schedule_instance_id, which the \
+create result carries. Give that id to keeper_receipt_wait to end the turn and \
+continue the same work when the receipt arrives. An update issues a new \
+schedule_instance_id. Takes no urgency."""
+
+[[params]]
 name = "until_github_run"
 type = "string"
 description = """
@@ -185,7 +197,7 @@ description = """
 For a Lane action instead of a Keeper wake: the declared Lane Add-on \
 installation (its declaration id) whose live worker runs action at each due \
 time. Give it with action, and without keeper_name, message, title, urgency, \
-allow_unregistered_keeper, until_github_run or until_github_checks."""
+delivery, allow_unregistered_keeper, until_github_run or until_github_checks."""
 
 [[params]]
 name = "action"
@@ -202,5 +214,5 @@ description = "Wake a Keeper with this message."
 
 [[one_of]]
 required = ["installation_id", "action"]
-forbidden = ["keeper_name", "message", "title", "urgency", "allow_unregistered_keeper", "until_github_run", "until_github_checks"]
+forbidden = ["keeper_name", "message", "title", "urgency", "delivery", "allow_unregistered_keeper", "until_github_run", "until_github_checks"]
 description = "Hand this action to a declared Lane installation's live worker."

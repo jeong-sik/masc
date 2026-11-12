@@ -193,6 +193,53 @@ let test_create_keeps_a_named_attempt () =
     (describe_watch (watch_of_row (stored_exn config "watched")))
 ;;
 
+let test_create_stores_a_receipt_delivery () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"merge if green"
+          ~extra:[ "until_github_run", `String run_url; "delivery", `String "receipt" ]
+          ()));
+  let stored = stored_exn config "watched" in
+  check
+    string
+    "the delivery is stored as given"
+    "receipt"
+    (match List.assoc_opt "delivery" (body_of stored) with
+     | Some (`String value) -> value
+     | Some _ | None -> fail "stored body has no delivery string");
+  check bool "the run is still watched" true (Option.is_some (watch_of_row stored))
+;;
+
+let test_create_refuses_a_receipt_with_urgency_and_an_unknown_delivery () =
+  with_config
+  @@ fun config ->
+  check_refused
+    "a receipt takes no urgency"
+    ~mentioning:[ "urgency" ]
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"m"
+          ~extra:[ "delivery", `String "receipt"; "urgency", `String "low" ]
+          ()));
+  check_refused
+    "an unknown delivery"
+    ~mentioning:[ "delivery" ]
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields ~message:"m" ~extra:[ "delivery", `String "pigeon" ] ()));
+  check bool "nothing stored" true
+    (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"watched"))
+;;
+
 let test_create_refuses_a_url_that_names_no_run () =
   with_config
   @@ fun config ->
@@ -227,6 +274,27 @@ let test_create_refuses_a_recurring_schedule () =
           ~message:"check"
           ~extra:
             [ "until_github_run", `String run_url
+            ; "recurrence_kind", `String "interval"
+            ; "recurrence_interval_sec", `Int 3600
+            ]
+          ()));
+  check bool "nothing stored" true
+    (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"watched"))
+;;
+
+let test_create_refuses_a_recurring_receipt () =
+  with_config
+  @@ fun config ->
+  check_refused
+    "daily receipt"
+    ~mentioning:[ "delivery"; "one_shot" ]
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields
+          ~message:"check"
+          ~extra:
+            [ "delivery", `String "receipt"
             ; "recurrence_kind", `String "interval"
             ; "recurrence_interval_sec", `Int 3600
             ]
@@ -812,6 +880,9 @@ let () =
     [ ( "create"
       , [ test_case "stores the run as a typed field" `Quick test_create_stores_the_run_as_a_typed_field
         ; test_case "keeps a named attempt" `Quick test_create_keeps_a_named_attempt
+        ; test_case "stores a receipt delivery" `Quick test_create_stores_a_receipt_delivery
+        ; test_case "refuses a recurring receipt" `Quick test_create_refuses_a_recurring_receipt
+        ; test_case "refuses a receipt with urgency and an unknown delivery" `Quick test_create_refuses_a_receipt_with_urgency_and_an_unknown_delivery
         ; test_case "refuses a URL that names no run" `Quick test_create_refuses_a_url_that_names_no_run
         ; test_case "refuses a recurring schedule" `Quick test_create_refuses_a_recurring_schedule
         ; test_case "refuses a Lane action with a run" `Quick test_create_refuses_a_lane_action_with_a_run

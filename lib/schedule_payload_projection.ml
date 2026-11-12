@@ -207,10 +207,30 @@ let keeper_wake_body_fields =
   ; "message"
   ; "title"
   ; "urgency"
+  ; "delivery"
   ; "result_delivery"
   ; Schedule_run_watch.watch_field
   ; Schedule_checks_watch.watch_field
   ]
+
+let delivery_of_body body =
+  let* raw = optional_string_field "delivery" body in
+  match raw with
+  | None -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
+  | Some value ->
+    Schedule_supported_kinds.keeper_wake_delivery_of_string value
+    |> Result.map_error (fun detail -> keeper_wake_kind ^ " " ^ detail)
+;;
+
+let delivery_of_payload payload =
+  match payload with
+  | `Assoc fields ->
+    (match assoc_string "kind" fields, List.assoc_opt "body" fields with
+     | Some raw_kind, Some (`Assoc body) when classify_kind raw_kind = Some Keeper_wake ->
+       delivery_of_body body
+     | _ -> Ok Schedule_supported_kinds.default_keeper_wake_delivery)
+  | _ -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
+;;
 
 let unknown_keeper_wake_body_fields body =
   List.filter
@@ -262,12 +282,24 @@ let validate_keeper_wake_body body =
       (Schedule_supported_kinds.keeper_wake_target_name_error
          ~field:(keeper_wake_kind ^ " payload body.keeper_name"))
   | Some _, Some _ ->
-    (match optional_string_field "urgency" body with
-     | Error msg -> Error msg
-     | Ok None -> Ok ()
-     | Ok (Some raw) ->
-       Schedule_supported_kinds.keeper_wake_urgency_of_string raw
-       |> Result.map (fun _ -> ()))
+    let* urgency =
+      match optional_string_field "urgency" body with
+      | Error msg -> Error msg
+      | Ok None -> Ok None
+      | Ok (Some raw) ->
+        Schedule_supported_kinds.keeper_wake_urgency_of_string raw
+        |> Result.map Option.some
+    in
+    let* delivery = delivery_of_body body in
+    (* A receipt has no place in the Keeper's queue, so an urgency has nothing
+       to order. *)
+    (match delivery, urgency with
+     | Schedule_supported_kinds.Keeper_wake_to_receipt, Some _ ->
+       Error
+         (keeper_wake_kind
+          ^ " payload body.urgency is for a wake in the queue; a receipt delivery takes none")
+     | Schedule_supported_kinds.Keeper_wake_to_receipt, None
+     | Schedule_supported_kinds.Keeper_wake_to_queue, (Some _ | None) -> Ok ())
 ;;
 
 (* Whether the action fits the package's schema is a question for the worker

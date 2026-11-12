@@ -4,6 +4,7 @@
 
 let keeper_wake_enqueued_kind = "masc.keeper_wake.enqueued"
 let lane_act_handed_over_kind = "masc.lane_act.handed_over"
+let keeper_receipt_delivered_kind = "masc.keeper_receipt.delivered"
 let keeper_event_queue_label = "keeper_event_queue"
 let reaction_ledger_recorded_label = "recorded"
 let reaction_ledger_record_failed_label = "record_failed"
@@ -279,6 +280,11 @@ type dispatch_receipt =
       ; schedule_instance_id : string
       ; schedule_id : string
       }
+  | Keeper_receipt_delivered of
+      { keeper_name : string
+      ; schedule_instance_id : string
+      ; schedule_id : string
+      }
 
 let dispatch_receipt_of_detail = function
   | `Assoc fields ->
@@ -348,6 +354,12 @@ let dispatch_receipt_of_detail = function
            ; occurrence_status
            ; activation_outcome
            })
+    else if String.equal kind keeper_receipt_delivered_kind
+    then
+      let* keeper_name = keeper_name_field "keeper_name" fields in
+      let* schedule_instance_id = string_field "schedule_instance_id" fields in
+      let* schedule_id = string_field "schedule_id" fields in
+      Ok (Keeper_receipt_delivered { keeper_name; schedule_instance_id; schedule_id })
     else Error ("unsupported schedule dispatch receipt kind: " ^ kind)
   | _ -> Error "schedule dispatch receipt detail must be an object"
 ;;
@@ -399,6 +411,13 @@ let dispatch_receipt_to_yojson = function
       ; "schedule_instance_id", `String schedule_instance_id
       ; "schedule_id", `String schedule_id
       ]
+  | Keeper_receipt_delivered { keeper_name; schedule_instance_id; schedule_id } ->
+    `Assoc
+      [ "kind", `String keeper_receipt_delivered_kind
+      ; "keeper_name", `String keeper_name
+      ; "schedule_instance_id", `String schedule_instance_id
+      ; "schedule_id", `String schedule_id
+      ]
 ;;
 
 let accepts request =
@@ -427,6 +446,13 @@ let body_keeper_wake_urgency payload =
   | Some value ->
     let* urgency = Schedule_supported_kinds.keeper_wake_urgency_of_string value in
     Ok (Some urgency)
+;;
+
+let body_keeper_wake_delivery payload =
+  let* raw = Schedule_payload_projection.body_optional_string payload "delivery" in
+  match raw with
+  | None -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
+  | Some value -> Schedule_supported_kinds.keeper_wake_delivery_of_string value
 ;;
 
 let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
@@ -1274,6 +1300,43 @@ let dispatch_lane_act config (signal : Schedule_runner.wake_signal)
   Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })
 ;;
 
+(* A Keeper wake whose delivery is [receipt] writes a tool-result receipt and
+   queues no wake message. The outbox's own wake is the only one, so the Keeper
+   hears of the schedule once, and a turn that ended on [keeper_receipt_wait]
+   for this schedule continues with it. [message] is what the schedule holds:
+   for a watched run it already starts with the run's outcome. A receipt that
+   is already in the outbox is not written again, so a retry after a failed
+   commit leaves one. *)
+let dispatch_keeper_receipt config (request : Schedule_domain.schedule_request)
+      ~commit_acceptance payload
+  =
+  let base_path = config.Workspace_utils.base_path in
+  let* keeper_name = body_keeper_name payload |> terminal_dispatch_result in
+  let* message =
+    Schedule_payload_projection.body_required_string payload "message"
+    |> terminal_dispatch_result
+  in
+  let* (_ : owner_meta_read) = read_owner_meta config keeper_name in
+  let* () =
+    Keeper_schedule_receipt.deliver
+      ~base_path
+      ~keeper_name
+      ~schedule_instance_id:request.schedule_instance_id
+      (Keeper_schedule_receipt.Delivered { message })
+    |> Result.map_error (fun detail -> Schedule_runner.Retryable_dispatch_failure detail)
+  in
+  let detail =
+    dispatch_receipt_to_yojson
+      (Keeper_receipt_delivered
+         { keeper_name
+         ; schedule_instance_id = request.schedule_instance_id
+         ; schedule_id = request.schedule_id
+         })
+  in
+  let* acceptance_commit = commit_acceptance detail in
+  Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })
+;;
+
 let dispatch config ~now signal request ~commit_acceptance =
   match Schedule_payload_projection.dispatch_view_detailed request with
   | Error rejection ->
@@ -1283,7 +1346,12 @@ let dispatch config ~now signal request ~commit_acceptance =
   | Ok (kind, payload) ->
     (match kind with
      | Schedule_payload_projection.Keeper_wake ->
-       dispatch_keeper_wake config ~now signal request ~commit_acceptance payload
+       let* delivery = body_keeper_wake_delivery payload |> terminal_dispatch_result in
+       (match delivery with
+        | Schedule_supported_kinds.Keeper_wake_to_queue ->
+          dispatch_keeper_wake config ~now signal request ~commit_acceptance payload
+        | Schedule_supported_kinds.Keeper_wake_to_receipt ->
+          dispatch_keeper_receipt config request ~commit_acceptance payload)
      | Schedule_payload_projection.Lane_act ->
        dispatch_lane_act config signal request ~commit_acceptance payload)
 ;;

@@ -94,7 +94,10 @@ let wake_enqueue_counts_of_dispatches dispatches =
        | None -> counts
        | Some detail ->
          (match Consumers.dispatch_receipt_of_detail detail with
-          | Error _ | Ok (Consumers.Lane_act_handed_over _) -> counts
+          | Error _
+          | Ok
+              ( Consumers.Lane_act_handed_over _
+              | Consumers.Keeper_receipt_delivered _ ) -> counts
           | Ok
               (Consumers.Keeper_wake_enqueued
                   { occurrence_status =

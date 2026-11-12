@@ -30,7 +30,7 @@ Lane Add-on exact 요청 하나가 끝나지 않고 242번 실행됐다. 실행�
 |---|---|---|---|
 | L1 | 기다리는 slot 이 있는 동안, 이 요청의 입력 크기를 거절한 slot 을 이 요청으로 다시 부르지 않는다 | 그대로 | 없음 |
 | L2 | 실행 증거가 요청 본문을 담지 않는다. 요청은 `request_id` 와 `digest` 로 가리킨다 | 바뀜 | 필요 |
-| L3 | 요청 본문을 요청 기록 밖에 한 번만 저장한다 | 바뀜 | 필요 |
+| L3 | 요청 본문을 요청 기록 밖에 한 번만 저장한다 | 바뀜 | 필요 (L2 와 같은 설치, §9 D3) |
 
 L1 과 L2 는 이 문서에서 구현할 수 있을 만큼 정한다(§3.2, §3.3). L3 은 방향과 풀어야 할 것만 정한다(§3.4). 구현 전에 그 절을 채워 다시 리뷰받는다.
 
@@ -106,6 +106,8 @@ tinker 문장의 `max_tokens` 자리에는 283번이 1000000000, 11번이 4096 �
 - attempt 293~295 는 `every_slot_held` 다. provider 를 부르지 않았다. 그 요청의 증거 파일은 1,055,315,219 바이트에서 늘지 않았다.
 - 그 요청은 실행마다 그 파일을 통째로 읽는다(§2.3).
 - exact 요청 기록은 134개다. 열린 것이 7개, 끝난 attempt 가 있는 것이 132개다.
+- 11:30Z 에 그 요청의 attempt 는 300 이다. 39분 동안 다섯 번 실행됐다. 증거 파일은 같은 크기다.
+- 11:30Z 에 열린 요청은 8개다. Librarian 요청은 넷이다(`admission` 2, `durable` 2). attempt 가 19, 23 인 둘은 다시 뜬 뒤 58분 동안 실행되지 않았다. 증거 파일은 8,088,287 바이트와 13,156,450 바이트다.
 - 소비자 원본(`tool-request-owners`)은 709개다. request id 가 exact 요청 id 와 같은 것은 92개다(`admission` 58, `classification` 17, `durable` 4, 그 밖 13). 나머지 exact 기록 42개의 원본은 세지 못했다.
 
 ## 2. 지금 구조
@@ -295,7 +297,7 @@ L1 은 저장 모양을 바꾸지 않는다. receipt 의 version 과 칸이 그�
 구현 전에 잴 것:
 
 - 증거가 수십 개일 때와 수백 개일 때 읽기 한 번의 시간. 길면 최신 증거 하나만 읽는 안을 다시 연다(§8).
-- Librarian 의 preflight validator(`bin/deployment_preflight_helper.ml:826-831`)가 원본의 exact 증거까지 읽는지(§5).
+- 설치 시점에 살아 있는 Librarian 원본의 수와, 그 가운데 나눈 part 가 있는 것의 수(§5).
 
 ### 3.4 L3 — 요청 기록 (방향)
 
@@ -368,9 +370,9 @@ L2 는 증거의 모양을 바꾸고 L3 은 기록의 모양을 바꾼다. 옛 �
 
 | 지울 것 | 찾는 법 | 지운 뒤 |
 |---|---|---|
-| 증거가 있는 exact 요청 기록과 그 증거 파일 | preflight 의 fresh state 줄 | 그 요청의 원본은 `Retained_absent` 를 본다(`lane_addon_exact.ml:950-953`). 끝난 요청의 답도 같이 사라진다 |
+| 증거가 있는 exact 요청 기록과 그 증거 파일 | preflight 의 fresh state 줄 | 그 요청의 원본은 `Retained_absent` 를 본다(`lane_addon_exact.ml:950-953`). 보내는 중이던 원본은 worker 에 상태를 묻고 이어 간다(`lane_addon_submit_once.ml:214-218`). 답을 이미 받은 Librarian 원본은 "Original admission host terminal is absent" 로 멈춘다(`keeper_librarian_admission_capture.ml:382`) |
 | 그 증거에 묶인 slot 관측 파일 | Librarian·workspace-memory package 의 것은 시작 sweep 이 지운다. 다른 package 의 것은 `changelog.d` 항목이 디렉터리를 적는다 | 관측을 읽는 쪽은 `None` 을 받는다 |
-| 지운 요청을 원본으로 든 Librarian 원본 | `Tool_request_owners` scan 이 거절하면 fresh state 줄 | 확인하지 않았다(§10) |
+| Librarian package 의 원본(owner 기록과 본문) | `changelog.d` 항목이 scope 를 적는다. preflight 는 이것을 찾지 못한다 | 진행 중이던 접수와 history 작업이 사라진다. 다시 만들어지는지는 확인하지 않았다(§10) |
 
 2026-11-12T10:52Z 에 exact 요청 기록은 134개이고 그중 132개에 끝난 attempt 가 있다(§1.2). 증거가 있는 기록의 수는 그보다 많지 않다.
 
@@ -383,7 +385,9 @@ L2 는 증거의 모양을 바꾸고 L3 은 기록의 모양을 바꾼다. 옛 �
 | workspace-curator | slot 관측 | 직접 읽지 않았다(§10) |
 | operator quiz | host 쪽에서 증거를 읽는 곳을 찾지 못했다 | |
 
-Librarian 은 기록과 증거를 같이 지워도 멈출 수 있다. 다시 보낸 요청의 receipt 는 새 receipt 다. 이미 나눈 part 가 저장한 사본과 다르면 "Original subdivision proof changed" 다(`:600`). 그래서 그 원본까지 지운다. 그 수와 잃는 것은 구현 전에 센다(§10).
+Librarian 은 기록과 증거를 같이 지워도 멈출 수 있다. 다시 보낸 요청의 receipt 는 새 receipt 다. 이미 나눈 part 가 저장한 사본과 다르면 "Original subdivision proof changed" 다(`:600`). 그래서 Librarian 원본까지 지운다.
+
+preflight 는 남은 Librarian 원본을 잡지 못한다. Librarian 의 preflight validator 는 owner 기록과 본문만 읽고 exact 증거를 읽지 않는다(`lib/keeper/keeper_librarian_store_preflight.ml:54-112`). 지울 scope 는 `changelog.d` 항목에 적는다. 그 수와 잃는 것은 구현 전에 센다(§10).
 
 **L3 을 설치할 때**는 exact 요청 기록 전부가 대상이다. 기록의 모양이 바뀌어 `check_retained_record` 가 모두 거절한다.
 
@@ -452,7 +456,7 @@ L2 는 PR 하나다. 쓰는 쪽, 읽는 쪽, sweep, preflight 가 같은 모양�
 |---|---|---|---|---|
 | D1 | slot 이 같은지 무엇으로 보나 | slot id, target fingerprint, 보내는 schema | C2 | 셋이 덮지 않는 것이 바뀌어도 그 slot 은 기다림이 끝날 때에야 다시 불린다. lane 의 `max_output_tokens`·`thinking`, credential 값, provider 가 같은 target 에서 올린 한도, gateway 의 본문 한도가 그렇다. 측정한 경우 그 기다림은 나흘이다. 바로 부르게 하려면 운영자가 기다리는 slot 을 lane 에서 빼거나 target 을 바꾼다. lane 의 두 값까지 견주려면 증거에 칸을 더해야 한다(저장 모양 변경) |
 | D2 | L1 에서 `Every_slot_held` 의 뜻을 넓히나, variant 를 더하나 | 뜻을 넓힌다 | §3.2 6번 | TUI·dashboard 의 "모든 slot 이 기다림" 글을 "부를 slot 이 없고 기다리는 slot 이 있음"으로 고친다. 기다리는 slot 과 건너뛴 slot 을 화면에서 가르지 않는다. 건너뛴 slot 은 그 요청의 지난 증거에서만 보인다 |
-| D3 | L2 와 L3 을 한 번에 설치하나, 따로 하나 | L2 를 먼저 설치한다. L3 은 §3.4 의 넷을 정한 뒤 따로 한다 | §5 | hard cut 이 두 번이다. 그때마다 exact 요청 기록과 증거, 거기 묶인 Librarian 원본을 지운다. 한 번으로 묶으면 L3 이 정해질 때까지 §1.2 의 읽기(실행마다 1,055,315,219 바이트)가 남는다. 다른 slot 이 기다리는 동안 400 으로 거절되는 요청(§9 D5)은 호출마다 증거 파일이 요청 크기만큼 는다 |
+| D3 | L2 와 L3 을 한 번에 설치하나, 따로 하나 | 한 번에 한다. §3.4 의 넷을 정해 L3 을 채운 뒤 L2 와 같은 스택으로 올린다 | §5 | L3 이 정해질 때까지 §1.2 의 요청 하나가 실행마다 1,055,315,219 바이트를 읽는다. 잰 39분에 다섯 번이다. 다른 열린 요청의 증거 파일은 잰 58분 동안 늘지 않았다. 따로 설치하면 hard cut 이 두 번이고, 그때마다 exact 요청 기록과 증거, Librarian 원본을 지운다. 열린 요청의 증거 파일이 다시 늘기 시작하면 L2 를 먼저 설치하는 쪽으로 다시 정한다 |
 | D4 | 기다리는 slot 없이 열려 있는 요청도 건너뛰게 넓히나 | 지금은 넓히지 않는다. L1 뒤에 남은 되풀이를 재고 정한다 | §3.5 | 다른 slot 이 시각 없는 429, 5xx, 인증 거절로 실패하는 동안에는 큰 본문이 host event 마다 다시 나간다 |
 | D5 | L1 이 덮지 않는 400 의 되풀이(§1.1)를 어떻게 하나 | 건너뛰기를 넓히지 않는다. 실행당 디스크 비용은 L2 가 없앤다. claude 계열의 지출 한도 400 은 #49686 에서 정한다 | §3.5 | tinker 계열처럼 오류 코드 없이 본문을 거절하는 slot 은, 다른 slot 이 기다리는 동안 host event 마다 같은 본문을 한 번씩 받는다. 잰 경우 요청 여섯에 slot 둘이다 |
 
@@ -467,11 +471,10 @@ L2 는 PR 하나다. 쓰는 쪽, 읽는 쪽, sweep, preflight 가 같은 모양�
 - §1.1 의 1.03 GB 파일은 실행별로 세지 않았다. 통째로 읽어야 해서 뺐다.
 - 기다리는 slot 없이 400 으로 끝난 요청이 있는지. claude 계열의 지출 한도 400 은 그 경우 `Input_refused` 로 끝날 수 있다(#49686). 끝난 기록에서 찾지 않았다.
 - operator quiz 와 Candle appraiser 의 exact 요청 기록과 증거를 지우는 곳. 시작 sweep 은 Librarian 과 workspace-memory package 만 본다(`server_unowned_exact_sweep.ml:48-50`). 다른 곳에서 지우는지 찾지 못했다.
-- Librarian 의 preflight validator 가 원본의 exact 증거를 읽는지. 읽지 않으면 증거 없이 남은 Librarian 원본을 preflight 가 잡지 못한다.
-- exact 기록과 증거가 사라진 원본을 소비자가 다시 보내는지. `recover_retained` 가 `Retained_absent` 를 돌려주는 것만 읽었다.
+- exact 기록이 사라진 원본을 Librarian 밖의 소비자가 어떻게 잇는지. `lane_addon_submit_once.ml` 의 보내는 중 갈래와 Librarian 의 접수 갈래만 읽었다.
 - Librarian 원본을 지우면 무엇이 다시 만들어지지 않는지. 지울 원본의 수.
 - workspace-curator 가 증거나 slot 관측을 읽는 곳.
-- L1 설치 뒤 §1.1 의 Librarian 요청 여섯의 증거가 느는지.
+- §1.1 의 Librarian 요청 여섯 가운데 넷이 11:30Z 에 열린 목록에 없는 이유. 끝났는지 지워졌는지 보지 않았다.
 - 열린 요청 가운데 한 번 실행되고 멈춘 셋(`lane_unconfigured` 둘, `provider_unavailable` 하나)이 왜 열려 있는지. 열하루 넘게 바뀌지 않았다.
 
 확인한 것: `target_identity_fingerprint`(`packages/agent_core/lib/llm_provider/exact_output_resolver.ml:865-897`)는 target ref, provider id 와 종류, model id, base url, 요청 경로, credential 의 종류, thinking, reasoning effort, timeout 둘, `max_concurrent_requests`, codec, 선언한 header, capability projection 을 덮는다. credential 의 값과 lane 이 덧씌우는 `max_output_tokens`·`thinking` 은 덮지 않는다.

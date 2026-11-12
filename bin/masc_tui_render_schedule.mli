@@ -916,35 +916,35 @@ val classify_wake_reading :
 
 (** {1 Schedule hold reading} *)
 
-val schedule_hold_tag : due:string -> string
+val schedule_hold_tag : ko:bool -> due:string -> string
 (** The short form, for a line that also names the schedule and its status:
     only since when the held occurrence has been due. It leads
     {!schedule_hold_reading}, so the two cannot say different things. *)
 
-val schedule_hold_reading : due:string -> string
+val schedule_hold_reading : ko:bool -> due:string -> string
 (** What the Schedules screen says about a schedule the runner is holding:
     since when its held occurrence has been due, and that it waits for the
     target Keeper to take the previous wake. [due] is already formatted. *)
 
 val schedule_fence_hold_reading :
-  due:string -> target:string -> fence_owner:string -> string
+  ko:bool -> due:string -> target:string -> fence_owner:string -> string
 (** The same reading for a schedule held because its target Keeper is
     shutting down: it names the Keeper and the shutdown operation instead of
     the previous wake. *)
 
-val schedule_hold_as_of_tag : checked:string -> string
+val schedule_hold_as_of_tag : ko:bool -> checked:string -> string
 (** The short form of a hold the runner has not read again since [checked]:
     the time the hold was seen, in place of since when it has been due. It
     leads {!schedule_hold_as_of_reading}. *)
 
-val schedule_hold_as_of_reading : checked:string -> string
+val schedule_hold_as_of_reading : ko:bool -> checked:string -> string
 (** The same hold in the detail pane: that the keeper had not taken the
     previous wake as of [checked]. Drawn instead of {!schedule_hold_reading}
     when the runner status beside the list is not [ok], because a failed tick
     does not re-read the hold (#38411). [checked] is already formatted. *)
 
 val schedule_fence_hold_as_of_reading :
-  checked:string -> target:string -> fence_owner:string -> string
+  ko:bool -> checked:string -> target:string -> fence_owner:string -> string
 (** The fence hold ({!schedule_fence_hold_reading}) drawn as of [checked],
     for the same failed-tick reason as {!schedule_hold_as_of_reading}.
     [checked] is already formatted. *)

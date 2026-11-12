@@ -103,6 +103,14 @@ module Count : sig
       thing takes. The figure is {!grouped}. *)
 end
 
+(** A digest, such as a revision or a SHA-256. *)
+module Hash : sig
+  val short : string -> string
+  (** The digest's first twelve characters, or the whole value when it has
+      no more than that (RFC tui-one-screen-grammar, section 5.2). A screen
+      that draws a digest this way offers the whole value as a copy. *)
+end
+
 (** Where the reader is in what the screen holds. *)
 module Position : sig
   type t =

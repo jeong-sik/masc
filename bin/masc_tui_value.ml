@@ -167,6 +167,16 @@ module Count = struct
       figure ^ " " ^ if count = 1 then one else many
 end
 
+module Hash = struct
+  let shown_length = 12
+
+  (* [String.sub] raises on a value shorter than the cut, so a short value is
+     returned as it is. *)
+  let short value =
+    if String.length value <= shown_length then value
+    else String.sub value 0 shown_length
+end
+
 module Position = struct
   type t =
     | Row of { at : int; total : int }

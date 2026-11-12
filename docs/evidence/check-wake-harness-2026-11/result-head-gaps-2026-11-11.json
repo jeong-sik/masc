@@ -1,0 +1,1481 @@
+{
+ "repo": "jeong-sik/masc",
+ "probed_at": "2026-11-11T09:55:20+00:00",
+ "heads_read": 60,
+ "unreadable_answers": 0,
+ "heads_without_runs": 0,
+ "heads_unsettled": 0,
+ "heads_settled": 60,
+ "settled_heads_with_a_gap_by_later_run_event": {
+  "pull_request_target": 36,
+  "pull_request_review": 30,
+  "pull_request": 5,
+  "workflow_dispatch": 3
+ },
+ "settled_heads_with_any_gap": 47,
+ "settled_heads_where_all_runs_had_ended_before_a_check_run_was_made": 6,
+ "first_such_gap_length": {
+  "n": 6,
+  "median_s": 56.0,
+  "max_s": 98.0
+ },
+ "settled_heads_where_the_check_runs_alone_have_a_gap": 0,
+ "check_events": [
+  "pull_request",
+  "push",
+  "workflow_run"
+ ],
+ "gap_length_by_later_run_event": {
+  "pull_request": {
+   "n": 5,
+   "median_s": 53.0,
+   "max_s": 98.0
+  },
+  "pull_request_review": {
+   "n": 48,
+   "median_s": 553.0,
+   "max_s": 8232.0
+  },
+  "pull_request_target": {
+   "n": 56,
+   "median_s": 1108.0,
+   "max_s": 20303.0
+  },
+  "workflow_dispatch": {
+   "n": 3,
+   "median_s": 221.0,
+   "max_s": 1189.0
+  }
+ },
+ "heads": [
+  {
+   "pull": 51313,
+   "head": "a30eab0f2235f687885c171e4784227b5f7069b4",
+   "runs": 4,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51310,
+   "head": "61d8aed31b83bf369fa90e6453dd4e50900502f8",
+   "runs": 5,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51309,
+   "head": "64203622a9044c192683963d9cb964cb972ee6f5",
+   "runs": 3,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51308,
+   "head": "2b7b7840d231d175d48e10b020395c7edd44072c",
+   "runs": 5,
+   "events": [
+    "pull_request",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51307,
+   "head": "cc9902ff9737168b9b04d12424bc1c7e09e57668",
+   "runs": 4,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51306,
+   "head": "d0e6b12f2844114e8e585090b8039b7d9b9a8c82",
+   "runs": 2,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51305,
+   "head": "7ecdf8380bda7753b1da3b14359ca3b13c0989d8",
+   "runs": 2,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51303,
+   "head": "166a07b9383cb8a3861cba53c7c586dbc66eb84b",
+   "runs": 4,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42996427259,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 1291.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51302,
+   "head": "6663790be03b15e5e77055a0f297b29d59397d40",
+   "runs": 4,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42996423898,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 1284.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51301,
+   "head": "6581936efed60d2adb6c406337e58f3780c179e0",
+   "runs": 12,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42996418173,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 1054.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51299,
+   "head": "2d8efa52e99811cd46c29e51d4cab535ccd37e55",
+   "runs": 5,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42996413894,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 2432.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51298,
+   "head": "0d019ae5369a2b2a6e74f2c403141d77e5ae1ebe",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42991209940,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 292.0
+    },
+    {
+     "run_id": 42992464513,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 540.0
+    },
+    {
+     "run_id": 42993124483,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 269.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51296,
+   "head": "c602367097fe0adf6c3936c925d485d5b699a763",
+   "runs": 3,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51295,
+   "head": "24699b433d98c89d7bfec9dc36b1b0ec4d20a327",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42986963489,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 234.0
+    },
+    {
+     "run_id": 42987120400,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 64.0
+    },
+    {
+     "run_id": 42988778941,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 743.0
+    },
+    {
+     "run_id": 42993815063,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 2146.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51294,
+   "head": "b56dbb5a06d8ed0ebefafdb0a5dbd4dda85e5785",
+   "runs": 6,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [
+    {
+     "run_id": 42986405822,
+     "workflow": "Test",
+     "event": "workflow_dispatch",
+     "length_s": 101.0
+    },
+    {
+     "run_id": 42988219639,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 466.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51292,
+   "head": "61695347fc1068cd2651094d6e18697006bc5daf",
+   "runs": 7,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42986506297,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 565.0
+    },
+    {
+     "run_id": 42986768315,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 109.0
+    },
+    {
+     "run_id": 42987884594,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 496.0
+    },
+    {
+     "run_id": 42987963135,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 27.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51291,
+   "head": "026fe9d4ab25f9260b35398c32b7ad6ebf40a2a2",
+   "runs": 4,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51288,
+   "head": "6ea93ecf75978c13fd077b9b9f19670966132f1e",
+   "runs": 6,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42990984286,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 980.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51287,
+   "head": "cc703e8d3ff9257bd5ffff77f9dfc51a2dca825d",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42984935689,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 1329.0
+    },
+    {
+     "run_id": 42987865170,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 1324.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51286,
+   "head": "8b666a19e3455100528bb90b861374c56e563f82",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42996477210,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 53.0
+    },
+    {
+     "run_id": 42996503992,
+     "workflow": "Changelog fragments",
+     "event": "pull_request",
+     "length_s": 4.0
+    }
+   ],
+   "gap_before_a_check_run": true
+  },
+  {
+   "pull": 51284,
+   "head": "6dc6f60abd30370bc4cbeb4ed28379bcb13da6bd",
+   "runs": 4,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42988775895,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 4530.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51282,
+   "head": "062642714fb7a4177620e8594c8f6b1b388282a5",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42988772966,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 4076.0
+    },
+    {
+     "run_id": 42992739308,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 1702.0
+    },
+    {
+     "run_id": 42992846206,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 32.0
+    },
+    {
+     "run_id": 42998297732,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 2318.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51279,
+   "head": "da022e8385f3ee0789d4178f857928fe502f6b6f",
+   "runs": 7,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42987581047,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 5449.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51277,
+   "head": "d8d4d77ea02c65ed30aad2b5004f852f05d90ad4",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [
+    {
+     "run_id": 42978690969,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 1391.0
+    },
+    {
+     "run_id": 42980762332,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 1014.0
+    },
+    {
+     "run_id": 42980843107,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 32.0
+    },
+    {
+     "run_id": 42982242676,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 678.0
+    },
+    {
+     "run_id": 42990076543,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 3624.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51276,
+   "head": "4468d9f664a7eaaab7aa671cd2e027d911233cce",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42996489938,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 59.0
+    },
+    {
+     "run_id": 42996558051,
+     "workflow": "PR type-check (dune build @check)",
+     "event": "pull_request",
+     "length_s": 20.0
+    }
+   ],
+   "gap_before_a_check_run": true
+  },
+  {
+   "pull": 51275,
+   "head": "0c1f18425cd0587f6be1aa3339e21769ecf12631",
+   "runs": 9,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42983574282,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 1232.0
+    },
+    {
+     "run_id": 42985601035,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 920.0
+    },
+    {
+     "run_id": 42986564103,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 432.0
+    },
+    {
+     "run_id": 42987545038,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 438.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51274,
+   "head": "e481118917939c6bfe292e710e13d1835b10ec79",
+   "runs": 7,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [
+    {
+     "run_id": 42972935341,
+     "workflow": "Test",
+     "event": "workflow_dispatch",
+     "length_s": 221.0
+    },
+    {
+     "run_id": 42988768708,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 7360.0
+    },
+    {
+     "run_id": 42989868655,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 423.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51272,
+   "head": "7d07b71035b742734a48961cd387e5dd952e8162",
+   "runs": 4,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42988765407,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 5376.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51271,
+   "head": "558ffa16c6941207f724de0c332eccab621a77b6",
+   "runs": 6,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42992630209,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 2228.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51269,
+   "head": "12c656ce0218797bda57cd46b06d88d1da886653",
+   "runs": 6,
+   "events": [
+    "pull_request",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [
+    {
+     "run_id": 42988761486,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 9650.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51267,
+   "head": "59adb9514917fd194a8b323acb3934b97e57b858",
+   "runs": 5,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42984333231,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 8448.0
+    },
+    {
+     "run_id": 42987428289,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 1402.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51265,
+   "head": "ca148d67455993787445b26a8d9cbd8b9915ff51",
+   "runs": 4,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42988758502,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 10993.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51264,
+   "head": "379d483de91a2a4d04c712e2684f5bba617c5d1c",
+   "runs": 6,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42988755751,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 11233.0
+    },
+    {
+     "run_id": 42993581819,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 2075.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51263,
+   "head": "9166eaf3f999687dd4f1c0578bdc0d96fc845828",
+   "runs": 6,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [
+    {
+     "run_id": 42992517266,
+     "workflow": "Test",
+     "event": "workflow_dispatch",
+     "length_s": 1189.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51262,
+   "head": "e1c76be3ea9738eaa6418de16f51d4d806178f0e",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42987313443,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 844.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51260,
+   "head": "b3f7c6952c10862c529e73000c6b55d1f5b4424c",
+   "runs": 5,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42970365919,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 1731.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51258,
+   "head": "52cb762fc7eb5471ee92d4d3660193c0ebc7090a",
+   "runs": 11,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42963305691,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 14.0
+    },
+    {
+     "run_id": 42963353101,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 17.0
+    },
+    {
+     "run_id": 42964396494,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 546.0
+    },
+    {
+     "run_id": 42964844924,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 229.0
+    },
+    {
+     "run_id": 42971307936,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 3518.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51257,
+   "head": "f59b94ea1da5b91c298a09eccb14503451a69563",
+   "runs": 7,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42964390617,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 40.0
+    },
+    {
+     "run_id": 42964827345,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 223.0
+    },
+    {
+     "run_id": 42971305343,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 3526.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51255,
+   "head": "ffdedbe6c44959ec5622c898e6ac9a7bd0871be6",
+   "runs": 6,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42962924380,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 395.0
+    },
+    {
+     "run_id": 42964724397,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 946.0
+    },
+    {
+     "run_id": 42964903635,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 91.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51252,
+   "head": "7b55949b34447029bcd2e71f71999b4d1e64099d",
+   "runs": 12,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [
+    {
+     "run_id": 42964929263,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 1181.0
+    },
+    {
+     "run_id": 42965630972,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 372.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51251,
+   "head": "8e2d333a4542d0c0ec638b3fa188a6cd34bbfcae",
+   "runs": 6,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [
+    {
+     "run_id": 42963199943,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 242.0
+    },
+    {
+     "run_id": 42963463336,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 131.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51248,
+   "head": "1e3e740ed0fc9ba492225431a7bf9ca1591d0f1f",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42958525772,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 24.0
+    },
+    {
+     "run_id": 42964926919,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 1299.0
+    },
+    {
+     "run_id": 42965628903,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 375.0
+    }
+   ],
+   "gap_before_a_check_run": true
+  },
+  {
+   "pull": 51244,
+   "head": "e1ef72621df014aa4f71389c0974f607948fe6fc",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42957585255,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 476.0
+    },
+    {
+     "run_id": 42964923468,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 4033.0
+    },
+    {
+     "run_id": 42965626991,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 373.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51242,
+   "head": "f6da92a47bd229ae7431a188762ea4011e636a59",
+   "runs": 10,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42956046244,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 118.0
+    },
+    {
+     "run_id": 42959873636,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 2096.0
+    },
+    {
+     "run_id": 42962721171,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 542.0
+    },
+    {
+     "run_id": 42964299579,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 835.0
+    },
+    {
+     "run_id": 42965598784,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 689.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51240,
+   "head": "247d73ca153bade1c6bb6483fa9b46e250d49fa2",
+   "runs": 3,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51239,
+   "head": "30a4974ec0c9f26c52866df540f19e1957229184",
+   "runs": 3,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51238,
+   "head": "4d3a7f22189dc9c5824a21aa424fc75ae2e73b72",
+   "runs": 3,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51237,
+   "head": "00b6aa64700adb3f78f12bad7766255423aef984",
+   "runs": 3,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42997937296,
+     "workflow": "PR type-check (dune build @check)",
+     "event": "pull_request",
+     "length_s": 98.0
+    }
+   ],
+   "gap_before_a_check_run": true
+  },
+  {
+   "pull": 51236,
+   "head": "11064c1045edc079a14329bcb2b1273d947c9e82",
+   "runs": 7,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42956714511,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 84.0
+    },
+    {
+     "run_id": 42962861951,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 3411.0
+    },
+    {
+     "run_id": 42974074299,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 5988.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51234,
+   "head": "a528ac3b4ac08393d0ef4187d1e5cb2b53693791",
+   "runs": 7,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42956004200,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 90.0
+    },
+    {
+     "run_id": 42956059277,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 25.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51233,
+   "head": "ef4b6c2c8df3c0a09da0aa3826aa4196d5a671bb",
+   "runs": 8,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42956043088,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 82.0
+    },
+    {
+     "run_id": 42956064468,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 6.0
+    },
+    {
+     "run_id": 42984324736,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 14899.0
+    },
+    {
+     "run_id": 42987307636,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 1344.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51230,
+   "head": "c212c0c4f2b6e3df0ac9967c4190c4faaa25e7f4",
+   "runs": 7,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [
+    {
+     "run_id": 42952716226,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 58.0
+    },
+    {
+     "run_id": 42952800760,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 39.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51229,
+   "head": "f4f62e5806647ac5a03efe57bdeb659f4b1e4426",
+   "runs": 5,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42968981151,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 507.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51228,
+   "head": "9dc6ebf0dee5ad05a448630405aeb1a43373cd0d",
+   "runs": 7,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42992485824,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 1287.0
+    },
+    {
+     "run_id": 42999152974,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 2841.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51226,
+   "head": "9e278329395d4aad2fa630980d631756102bf815",
+   "runs": 7,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [
+    {
+     "run_id": 42956053896,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 295.0
+    },
+    {
+     "run_id": 42962843781,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 3776.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51225,
+   "head": "d4bc89a8bb31453f2208439d170bc2aed4af5855",
+   "runs": 9,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42950103795,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 18.0
+    },
+    {
+     "run_id": 42950223744,
+     "workflow": "Changelog fragments",
+     "event": "pull_request",
+     "length_s": 53.0
+    },
+    {
+     "run_id": 42951330371,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 19.0
+    },
+    {
+     "run_id": 42955177288,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 2095.0
+    },
+    {
+     "run_id": 42964266207,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 5041.0
+    },
+    {
+     "run_id": 42965583204,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 698.0
+    }
+   ],
+   "gap_before_a_check_run": true
+  },
+  {
+   "pull": 51224,
+   "head": "6f1a120b690953707f5f4eb0d3c8af362b4bb47f",
+   "runs": 4,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51223,
+   "head": "36a1fedca4865a8bad402d5a763a497e427cedc8",
+   "runs": 3,
+   "events": [
+    "pull_request",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42991885133,
+     "workflow": "PR type-check (dune build @check)",
+     "event": "pull_request",
+     "length_s": 91.0
+    }
+   ],
+   "gap_before_a_check_run": true
+  },
+  {
+   "pull": 51222,
+   "head": "14e0ced2943f54b00d784051e7b596a0c78c2af2",
+   "runs": 10,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target"
+   ],
+   "gaps": [
+    {
+     "run_id": 42949847910,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 782.0
+    },
+    {
+     "run_id": 42988740484,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 20303.0
+    },
+    {
+     "run_id": 42990089960,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 560.0
+    },
+    {
+     "run_id": 42990436216,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 150.0
+    },
+    {
+     "run_id": 42993097633,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 1162.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  },
+  {
+   "pull": 51221,
+   "head": "83a1d18b5aeac08359a89a84b53babda7218175a",
+   "runs": 11,
+   "events": [
+    "pull_request",
+    "pull_request_review",
+    "pull_request_target",
+    "workflow_dispatch"
+   ],
+   "gaps": [
+    {
+     "run_id": 42970580487,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 8232.0
+    },
+    {
+     "run_id": 42988737516,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 8908.0
+    },
+    {
+     "run_id": 42990261614,
+     "workflow": "Approval merge request",
+     "event": "pull_request_review",
+     "length_s": 639.0
+    },
+    {
+     "run_id": 42991764104,
+     "workflow": "Approval merge request",
+     "event": "pull_request_target",
+     "length_s": 670.0
+    }
+   ],
+   "gap_before_a_check_run": false
+  }
+ ]
+}

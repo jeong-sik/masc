@@ -15,6 +15,13 @@ module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
 module Press = Masc_tui_press
 
+(* A moment the wire spells out as ISO-8601 text, drawn the way every other
+   moment on these screens is: in the operator's zone, with only as much of
+   the date as its distance from now needs. *)
+let wire_moment (ts : string) =
+  Terminal_text.single_line
+    (Planning_detail.moment_text ~now:(Unix.gettimeofday ()) ts)
+
 (* Board lives under Work. Both links use the existing destinations; the
    palette spelling also gives keyboard users a path without claiming [b],
    which already opens the Goal summary. This is one physical header row. *)
@@ -540,7 +547,7 @@ let planning_stale_notice_rows (state : state) ~cols =
       let rows text = Message_layout.wrap_words ~max_cells:width text
         |> List.map (fun line -> Theme.warn () ^ "  " ^ line ^ Ansi.reset) in
       rows (status ^ (if ko then " · 표시 중인 스냅샷 " else " · showing snapshot ")
-        ^ Terminal_text.single_line snapshot.pl_generated_at)
+        ^ wire_moment snapshot.pl_generated_at)
       @ (match Terminal_text.optional_single_line (Some error) with
          | None -> []
          (* Keep verbose diagnostics on the existing error row; a long
@@ -576,10 +583,10 @@ let planning_summary_reading ~cols (state : state) =
         (warning @ [text "목표 관측 없음" "No Goal observation"])]
     | Some p ->
         let stamps =
-          [ text "표시 중인 서버 스냅샷: " "Displayed server snapshot: " ^ Terminal_text.single_line p.pl_generated_at ]
+          [ text "표시 중인 서버 스냅샷: " "Displayed server snapshot: " ^ wire_moment p.pl_generated_at ]
           @ (match state.planning_baseline with
              | None -> [text "기준 스냅샷 없음" "No baseline snapshot"]
-             | Some first -> [text "기준 서버 스냅샷: " "Baseline server snapshot: " ^ Terminal_text.single_line first.pl_generated_at])
+             | Some first -> [text "기준 서버 스냅샷: " "Baseline server snapshot: " ^ wire_moment first.pl_generated_at])
         in
         let history = match p.pl_goal_history with
           | [] -> [text "목록 밖 이력 없음" "No unlisted Goal history"]
@@ -759,7 +766,7 @@ let render_planning_list (state : state) =
            let scope = " " ^ (if current then Theme.recede () else Theme.warn ())
              ^ text (if current then "현재 목표 관측 · " else "보존한 목표 관측 · ")
                     (if current then "Current Goal reading · " else "Retained Goal reading · ")
-             ^ Terminal_text.single_line snapshot.pl_generated_at ^ Ansi.reset in
+             ^ wire_moment snapshot.pl_generated_at ^ Ansi.reset in
            List.iter push_context (if current then [navigation] else [scope; navigation]);
            let available = max 0 (budget - !used) in
            (* Modes and a read failure can use spare space, but never replace
@@ -846,7 +853,7 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
                       ((text "측정 근거: " "Measured: ") ^ Terminal_text.single_line evidence)
                   ; line Planning_detail.Quiet
                       ((text "측정 주체: " "Measured by: ") ^ Terminal_text.single_line actor
-                       ^ " · " ^ (text "기록 시각: " "recorded: ") ^ Terminal_text.single_line recorded_at)
+                       ^ " · " ^ (text "기록 시각: " "recorded: ") ^ wire_moment recorded_at)
                   ; tasks ]))
 
 let planning_confirmation_view (state : state) ~goal_id =
@@ -969,11 +976,11 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
     @ field (text "기한" "Due") (optional goal.pg_due_date)
     @ field (text "우선순위" "Priority") (Printf.sprintf "P%d" goal.pg_priority)
     @ (List.concat_map (fun (label, value) -> match value with
-         | None -> [] | Some value -> field ~tone:Planning_detail.Quiet label value)
+         | None -> [] | Some value -> field ~tone:Planning_detail.Quiet label (wire_moment value))
          [(text "생성" "Created"), goal.pg_created_at; (text "갱신" "Updated"), goal.pg_updated_at; (text "검토" "Reviewed"), goal.pg_last_review_at])
     @ field ~tone:Planning_detail.Quiet (text "링크" "Link") (Link.reference Goal goal.pg_id)
     @ (match state.planning with None -> [] | Some snapshot ->
-      field ~tone:Planning_detail.Quiet (text "목록 관측 시각" "List observed") snapshot.pl_generated_at)
+      field ~tone:Planning_detail.Quiet (text "목록 관측 시각" "List observed") (wire_moment snapshot.pl_generated_at))
   in
   let request_results = (match List.assoc_opt goal.pg_id state.goal_action_errors with
        | Some error ->
@@ -1036,7 +1043,10 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
   let measurement = planning_measurement_lines state goal in
   let criterion_review = Planning_detail.criterion_review_lines ~width
     ~ko:(state.ui_language = Lang_ko) goal.pg_criterion_review in
-  let timeline = Planning_detail.timeline ~ko ~width ~goal_id:goal.pg_id state.goal_timeline in
+  let timeline =
+    Planning_detail.timeline ~ko ~now:(Unix.gettimeofday ()) ~width
+      ~goal_id:goal.pg_id state.goal_timeline
+  in
   let candle =
     let open Candle_goal_observation in
     let coverage = field ~tone:Planning_detail.Quiet (text "후보 범위" "Candidate coverage")
@@ -1507,15 +1517,18 @@ let render_schedule_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let refusal_rows = schedule_form_refusal_rows state ~cols in
 
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = surface_title_row ~cols state
-    ~lead:(screen_title " MASC Keepers / Schedules") ~readings:[ "  " ^ timestamp ] in
+  (* The title carried the current time to the second, so the row was
+     redrawn every second with nothing on the screen having changed. The top
+     row holds the clock. *)
+  let header =
+    here_row ~cols state
+      ~path:[ ui_text state ~ko:"일정" ~en:"schedules" ]
+      ~readings:[] ~position:None
+  in
 
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
     ~hints:
-      (Masc_tui_keys.footer_hints ~detail_open:false
+      (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false
          ~has_rows:(schedule_list_has_rows state) Schedules)
     ~body:(fun ~budget c ->
   (* The refusal rows go first and take what the list's fixed rows leave;
@@ -2137,10 +2150,15 @@ let schedule_detail_viewport (state : state) =
 let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row) buf =
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s[%s]%s"
-       (screen_title " MASC Keepers / Schedules ▸ details")
-       (schedule_status_color row.sch_status)
-       (Terminal_text.single_line row.sch_status) Ansi.reset);
+    (here_row ~cols state
+       ~path:
+         [ ui_text state ~ko:"일정" ~en:"schedules"
+         ; ui_text state ~ko:"상세" ~en:"details" ]
+       ~readings:
+         [ Printf.sprintf "%s[%s]%s"
+             (schedule_status_color row.sch_status)
+             (Terminal_text.single_line row.sch_status) Ansi.reset ]
+       ~position:None);
   box_divider buf cols;
   (* Source freshness governs every evidence row, so it stays visible while
      the reader moves. The complete warning also remains in the reader for
@@ -2201,7 +2219,7 @@ let render_schedule_detail (state : state) ~runner (row : schedule_row) =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true Schedules));
+       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:true Schedules));
   finish_surface state ~clamped:(Schedule_detail_scroll scroll)
     ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols buf
 
@@ -2246,7 +2264,10 @@ let render_planning (state : state) =
                let terminal_rows, cols = get_terminal_size () in
                surface_chrome ~overflow:Fits state ~terminal_rows ~cols
                  ~surface_key:"planning_detail"
-                 ~title:(ui_text state ~ko:"목표" ~en:"Goal")
+                 ~title:
+                   (here_row ~cols state
+                      ~path:[ ui_text state ~ko:"목표" ~en:"goal" ]
+                      ~readings:[] ~position:None)
                  ~status:[] ~hints:(ui_text state ~ko:"Esc:대시보드  r:새로고침" ~en:"Esc:Dashboard  r:refresh")
                  ~body:(fun ~budget:_ c ->
                    c.push (match state.planning_error with

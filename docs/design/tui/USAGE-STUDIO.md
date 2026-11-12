@@ -4,7 +4,9 @@ The operator screenshot mixed quota windows, per-scope history and Keeper metric
 
 Usage now has four views. `v` cycles Plan, Trend, Keepers and Calls (`V` goes back). `w` opens Trend, or stays on Calls, and cycles the 1/7/14 UTC day range both draw. `p` enters or leaves Telemetry; the chosen Usage view survives that round trip. Each view resets scroll when selected.
 
-Plan groups windows and identity metadata into account cards. Cards pair when the width holds two columns of them, from about 107 cells; narrower terminals keep the account rows. Cards preserve scope IDs, provider labels, reported utilization, reset times and observation ages. Catalogue exhaustion has its own wrapped line and remains independent of provider window utilization and reset. A full limit classified as counting other use stays dim. Failed reads remain unavailable rather than becoming zero.
+Plan groups windows and identity metadata into account cards. Cards pair when the width holds two columns of them, from about 107 cells; narrower terminals keep the account rows. Every card in a section shares one label, gauge and percent column measurement, computed at the narrowest paired card's content width, so neighbouring accounts read on the same axes. Short section headings use a trailing rule when the width holds one. In the summary, counts lead while labels and the legend recede; warning colour is reserved for positive or unknown limit observations.
+
+Cards preserve scope IDs, provider labels, reported utilization, reset times and observation ages. Catalogue exhaustion has its own wrapped line and remains independent of provider window utilization and reset. A full limit classified as counting other use stays dim. Failed reads remain unavailable rather than becoming zero.
 
 Trend gives each scope a heading, window label and readable sparkline. Keepers gives each Keeper its own tokens, cost and coverage rows. The navigation remains fixed during scrolling; short screens reduce navigation spacing to preserve content.
 

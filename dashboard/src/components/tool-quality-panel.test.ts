@@ -60,6 +60,8 @@ const payloadWithHourlyTrend = {
     calls: 100 + i * 5,
     success: 90 + i * 4,
     success_rate: 88 + (i % 6),
+    // Hour i returned (i + 1) * 100,000 bytes: 30,000,000 in all, 2,400,000 at most.
+    result_bytes: (i + 1) * 100_000,
   })),
 }
 
@@ -105,6 +107,14 @@ async function flushUi(): Promise<void> {
   })
 }
 
+/** The observation refresh reads nothing until an execution workspace is accepted. The signal belongs to the
+ * module registry, so it is seeded in the registry that the panel is loaded from. */
+async function importPanel() {
+  const { acceptedExecutionWorkspace } = await import('../execution-workspace-authority')
+  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace', connectionGeneration: 1 }
+  return import('./tool-quality-panel')
+}
+
 async function loadPanel(mocks?: {
   fetchToolQuality?: (opts?: { n?: number; windowHours?: number; signal?: AbortSignal }) => Promise<ToolQualityResponse>
 }) {
@@ -118,7 +128,7 @@ async function loadPanel(mocks?: {
       }
     })
   }
-  return import('./tool-quality-panel')
+  return importPanel()
 }
 
 describe('ToolQualityPanel', () => {
@@ -149,7 +159,7 @@ describe('ToolQualityPanel', () => {
     }
   })
 
-  it('auto-refreshes tool quality while visible', async () => {
+  it('fetches tool quality once on mount and renders the summary', async () => {
     const fetchToolQuality = vi.fn().mockResolvedValue(payload)
     const { ToolQualityPanel } = await loadPanel({ fetchToolQuality })
 
@@ -160,15 +170,9 @@ describe('ToolQualityPanel', () => {
     await flushUi()
 
     expect(fetchToolQuality).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('Auto-refresh 30s')
     expect(container.textContent).toContain('95.5%')
     expect(container.textContent).toContain('최근 24시간 기준 집계')
     expect(container.textContent).toContain('Window Calls')
-
-    vi.advanceTimersByTime(30_000)
-    await flushUi()
-
-    expect(fetchToolQuality).toHaveBeenCalledTimes(2)
   })
 
   it('renders typed deferred observations without treating them as failures', async () => {
@@ -220,7 +224,7 @@ describe('ToolQualityPanel', () => {
   it('normalizes missing tool metric fields before rendering', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithMissingToolMetrics))
     vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel } = await import('./tool-quality-panel')
+    const { ToolQualityPanel } = await importPanel()
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)
@@ -236,7 +240,7 @@ describe('ToolQualityPanel', () => {
   it('renders runtime buckets separately from the redacted runtime model lane', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithRuntimeBuckets))
     vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel } = await import('./tool-quality-panel')
+    const { ToolQualityPanel } = await importPanel()
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)
@@ -251,7 +255,7 @@ describe('ToolQualityPanel', () => {
   it('renders the trend sparkline with multiple axis labels and bucket hit areas', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithHourlyTrend))
     vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel } = await import('./tool-quality-panel')
+    const { ToolQualityPanel } = await importPanel()
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)
@@ -276,7 +280,7 @@ describe('ToolQualityPanel', () => {
   it('shows a tooltip when a trend bucket is hovered', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithHourlyTrend))
     vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel } = await import('./tool-quality-panel')
+    const { ToolQualityPanel } = await importPanel()
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)
@@ -303,12 +307,58 @@ describe('ToolQualityPanel', () => {
     expect(tooltip?.textContent).toContain('92.0%')
     expect(tooltip?.textContent).toContain('150')
     expect(tooltip?.textContent).toContain('20')
+    // Hour 10 returned 11 * 100,000 = 1,100,000 bytes.
+    expect(container.querySelector('[data-testid="trend-tooltip-bytes"]')?.textContent?.trim()).toBe('1.0 MB')
+  })
+
+  it('draws one bar per hour of result bytes under the trend, with the window total', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithHourlyTrend))
+    vi.stubGlobal('fetch', fetchMock)
+    const { ToolQualityPanel } = await importPanel()
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const strip = container.querySelector('[data-testid="trend-bytes-svg"]')
+    expect(strip).not.toBeNull()
+    expect(strip?.querySelectorAll('rect').length).toBe(24)
+    // 30,000,000 bytes in all and 2,400,000 in the busiest hour.
+    expect(strip?.getAttribute('aria-label')).toContain('합계 28.6 MB')
+    expect(strip?.getAttribute('aria-label')).toContain('최대 2.3 MB')
+    // The busiest hour fills the strip and the first is a twenty-fourth of it.
+    const heights = Array.from(strip?.querySelectorAll('rect') ?? []).map(r => Number(r.getAttribute('height')))
+    expect(heights[23]).toBeGreaterThan(heights[0] ?? Infinity)
+    expect(heights[0]).toBeCloseTo((heights[23] ?? 0) / 24, 1)
+  })
+
+  it('scales the hourly bytes bars to the busiest hour', async () => {
+    const { hourlyBytesBars } = await importPanel()
+    const { heights, total, max } = hourlyBytesBars(
+      [{ result_bytes: 0 }, { result_bytes: 1_000 }, { result_bytes: 4_000 }],
+      12,
+    )
+    expect(total).toBe(5_000)
+    expect(max).toBe(4_000)
+    expect(heights).toEqual([0, 3, 12])
+    // No result in any hour: no bar, and no division by zero.
+    expect(hourlyBytesBars([{ result_bytes: 0 }, { result_bytes: 0 }], 12).heights).toEqual([0, 0])
+    expect(hourlyBytesBars([], 12)).toEqual({ heights: [], total: 0, max: 0 })
+  })
+
+  it('formats result bytes as B, KB or MB', async () => {
+    const { formatResultBytes } = await importPanel()
+    expect([0, 1023, 1024, 1536, 1024 * 1024, 5.5 * 1024 * 1024].map(formatResultBytes)).toEqual([
+      '0 B', '1023 B', '1.0 KB', '1.5 KB', '1.0 MB', '5.5 MB',
+    ])
   })
 
   it('renders tool-quality coverage gap provenance', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithCoverageGap))
     vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel } = await import('./tool-quality-panel')
+    const { ToolQualityPanel } = await importPanel()
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)
@@ -337,7 +387,7 @@ describe('ToolQualityPanel', () => {
       }))
       .mockResolvedValueOnce(okJson(payload))
     vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel, refreshToolQuality } = await import('./tool-quality-panel')
+    const { ToolQualityPanel, refreshToolQuality } = await importPanel()
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)
@@ -360,7 +410,7 @@ describe('ToolQualityPanel', () => {
   it('refreshes again when the refresh button is clicked', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson(payload))
     vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel } = await import('./tool-quality-panel')
+    const { ToolQualityPanel } = await importPanel()
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)
@@ -386,7 +436,7 @@ describe('ToolQualityPanel', () => {
       json: async () => payload,
     })
     vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel } = await import('./tool-quality-panel')
+    const { ToolQualityPanel } = await importPanel()
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)
@@ -416,7 +466,7 @@ describe('ToolQualityPanel', () => {
       }, { once: true })
     }))
     vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel } = await import('./tool-quality-panel')
+    const { ToolQualityPanel } = await importPanel()
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)
@@ -445,7 +495,7 @@ describe('ToolQualityPanel', () => {
       }, { once: true })
     }))
     vi.stubGlobal('fetch', fetchMock)
-    const { ToolQualityPanel } = await import('./tool-quality-panel')
+    const { ToolQualityPanel } = await importPanel()
 
     await act(async () => {
       render(html`<${ToolQualityPanel} />`, container)

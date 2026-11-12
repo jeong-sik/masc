@@ -1,0 +1,360 @@
+{
+ "seed": 20261111,
+ "strata": {
+  "strict_label": 20,
+  "other_label": 20,
+  "no_impact_label": 10
+ },
+ "rows": [
+  {
+   "number": 29276,
+   "label": "breaks-continuity",
+   "blind": "blinds-operator",
+   "unsure": true,
+   "why": "non-verdict 뒤 Board 쓰기가 실패하면 담당 Keeper 에게 알림·wake·재시도 없이 검증 대기로 남을 수 있다는 감사 결과이고 일어난 기록이 없어, 결과가 전달되지 않음(2순위)에서 한 등급 낮출지 망설이다 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 30649,
+   "label": "degrades",
+   "blind": "internal",
+   "unsure": false,
+   "why": "시험 픽스처 이름이 운영 Keeper 이름 목록과 부딪쳐 하루에 세 번 main CI 가 섰다는 것으로 개발할 때만 걸린다."
+  },
+  {
+   "number": 30673,
+   "label": "breaks-continuity",
+   "blind": "breaks-continuity",
+   "unsure": false,
+   "why": "키퍼 턴이 도는 7분 반 동안 서버 RSS 가 약 90GB 까지 자라 운영자가 서버를 직접 종료해야 했다는 관측으로, 서버를 내리면 돌던 턴이 모두 끊기므로 멈춤으로 봤다."
+  },
+  {
+   "number": 31442,
+   "label": "breaks-continuity",
+   "blind": "degrades",
+   "unsure": false,
+   "why": "remote_ssh lane 에서 파일 redirect 가 든 Execute 가 `remote_ssh_redirect_unavailable` 로 거절돼 기능 하나를 못 쓰는 불편이고, 턴이 멈추거나 호스트의 같은 이름 파일에 쓰는 일은 없다고 적혀 있다."
+  },
+  {
+   "number": 32118,
+   "label": "breaks-continuity",
+   "blind": "degrades",
+   "unsure": true,
+   "why": "본문이 비어 제목만 보면 microvm Keeper 빌드가 호스트 fd 를 쥐어 ENFILE 이 간헐적으로 난다는 것이고, 그때 턴이 멈췄는지는 알 수 없어 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 32405,
+   "label": "blinds-operator",
+   "blind": "blinds-operator",
+   "unsure": false,
+   "why": "12턴 실측에서 provider-input 스냅샷 합과 실제 보낸 본문 크기가 양방향으로 달라, 운영자가 그 턴에 실제로 무엇이 들어갔는지 화면으로 알 수 없다."
+  },
+  {
+   "number": 32715,
+   "label": "breaks-continuity",
+   "blind": "internal",
+   "unsure": true,
+   "why": "크래시 뒤 재개된 턴이 거부된 도구 이름을 모델에게 말하지 못한다는 것으로 특정 순간에 죽어야 생기고 일어난 기록이 없어, 덜 정확함(4순위)에서 한 등급 낮출지 망설이다 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 32747,
+   "label": "blinds-operator",
+   "blind": "blinds-operator",
+   "unsure": false,
+   "why": "승인 화면에는 `masc board list` 명령 실행이라고 뜨는데 실제로는 `masc_board_list` 도구 호출이 일어나, 운영자가 자기가 승인하는 일의 실제 모습을 볼 수 없다."
+  },
+  {
+   "number": 33044,
+   "label": "internal",
+   "blind": "internal",
+   "unsure": false,
+   "why": "어떤 값이 나와도 통과하는 시험 단언·문자열 분류기·임계값 15건을 정리한 목록이라 시험 품질 문제다."
+  },
+  {
+   "number": 33640,
+   "label": "breaks-collab",
+   "blind": "degrades",
+   "unsure": true,
+   "why": "Keeper 가 같은 계정으로 연 PR 을 approve 하려다 항상 거부되고 운영자 승인만 쓰였다는 사례라 불편에 해당하고, Keeper 끼리 승인이 안 되는 협업 결함으로도 읽혀 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 35306,
+   "label": "blinds-operator",
+   "blind": "degrades",
+   "unsure": false,
+   "why": "11개 화면에서 `/` 찾기가 열리지 않아 1,000행 목록도 눈으로 훑어야 하는 불편이고, 상태 자체는 화면에 보인다."
+  },
+  {
+   "number": 35472,
+   "label": "internal",
+   "blind": "internal",
+   "unsure": false,
+   "why": "`test_` 로 시작하지 않는 벤치·통합 하네스가 운영자 기본 경로 기록을 건드릴 수 있다는 시험 격리 문제로, 개발 도구를 돌릴 때만 생긴다."
+  },
+  {
+   "number": 36496,
+   "label": "breaks-continuity",
+   "blind": "internal",
+   "unsure": true,
+   "why": "창이 닫혀도 계산이 워커에서 계속 돌아 느린 표면을 반복 요청하면 pool 자리가 물린다는 코드 분석이고 실제로 pool 이 찬 기록은 없어, 느림(4순위)에서 한 등급 낮출지 망설이다 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 36941,
+   "label": "breaks-continuity",
+   "blind": "degrades",
+   "unsure": true,
+   "why": "microvm·remote_ssh Keeper 는 긴 명령을 턴 밖에서 돌릴 수단이 없고 `keeper_spawn` 이 122회 중 69회 실패했다는 기록이라 불편에 해당하며, 긴 명령이 턴을 붙잡아 응답이 멈춘 사건 기록은 없어 멈춤과 사이에서 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 37102,
+   "label": "breaks-continuity",
+   "blind": "internal",
+   "unsure": false,
+   "why": "checkpoint 저장이 Error 면 턴 끝 줄을 건너뛰는 코드가 RFC 문장과 다르다는 것이고, 라이브 로그에서는 0건이라 지금 깨지는 건 아니라고 적혀 있다."
+  },
+  {
+   "number": 37824,
+   "label": "breaks-continuity",
+   "blind": "breaks-collab",
+   "unsure": false,
+   "why": "흡수 지점과 씨앗 사이 atom 이 요청에서 빠져 앞 내용을 잃는 결함이지만 지금 이 모양으로 도는 Keeper 는 없다고 적어, 1순위에서 한 등급 낮췄다."
+  },
+  {
+   "number": 38098,
+   "label": "blinds-operator",
+   "blind": "degrades",
+   "unsure": true,
+   "why": "라이브 화면에서 서로 다른 lane 둘이 `cla…medium` 으로 똑같이 그려지지만 옆 CANDIDATE 칸으로 구분은 된다고 적어, 상태를 못 봄과 사이에서 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 38172,
+   "label": "degrades",
+   "blind": "degrades",
+   "unsure": true,
+   "why": "사용 한도로 끝난 852턴이 `authorization_refused` 로 분류돼 `operator_action_required` 로 갔다는 기록이라 종료 사유가 덜 정확하고, 운영자가 사유를 잘못 보게 되는 쪽과 사이에서 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 38700,
+   "label": "breaks-continuity",
+   "blind": "breaks-continuity",
+   "unsure": false,
+   "why": "09-24 에 로컬 서버가 14분 동안 멈춰 Keeper 턴·병합 대기열·TUI 연결이 모두 섰다는 실제 사건이다."
+  },
+  {
+   "number": 38827,
+   "label": "breaks-continuity",
+   "blind": "internal",
+   "unsure": true,
+   "why": "한 턴 안 failover 에서 실패한 공식 시도가 부른 도구가 checkpoint 와 조각에 남지 않는다는 코드상 빈틈이고 일어난 기록이 없어, 기록이 덜 정확함(4순위)에서 한 등급 낮출지 망설이다 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 39332,
+   "label": "degrades",
+   "blind": "internal",
+   "unsure": true,
+   "why": "Memory 화면 Build p50 이 1.14 ms 로 목표 1 ms 를 0.14 ms 넘겼다는 측정이라 느림에 해당하지만 쓰는 사람이 알아챌 크기가 아니어서 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 41014,
+   "label": "degrades",
+   "blind": "degrades",
+   "unsure": true,
+   "why": "월요일 일정을 매일 돌리는 Cron 해석, 적용됐다고 뜨지만 안 바뀌는 TOML 설정, Board 상세에서 사라지는 첨부 같은 감사 항목 묶음이라 결과가 덜 정확한 것이고, 일부는 운영자가 상태를 잘못 보게 해 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 42176,
+   "label": "breaks-collab",
+   "blind": "internal",
+   "unsure": true,
+   "why": "TUI 둘이 같은 MSX 기계를 쓸 때 쓰기가 복원된 상태를 덮어쓸 수 있다는 리뷰 지적이고 실제로 섞인 기록이 없어, 덜 정확함(4순위)에서 한 등급 낮출지 망설이다 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 42229,
+   "label": "breaks-collab",
+   "blind": "internal",
+   "unsure": true,
+   "why": "masc 저장소의 PR 스택 병합 스크립트·규칙 탓에 아래층만 병합이 49번 났다는 회고라 개발 과정의 일로 봤고, 세션 넷이 같은 스택을 동시에 다시 쌓은 점은 협업 결함으로도 읽혀 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 42782,
+   "label": "degrades",
+   "blind": "degrades",
+   "unsure": false,
+   "why": "TUI 에서 첨부를 열 수 없어 dashboard 를 써야 하고 탭으로 들여쓴 코드 블록이 거절되는 등 불편과 덜 정확한 렌더를 모은 후속 목록이다."
+  },
+  {
+   "number": 44787,
+   "label": "breaks-continuity",
+   "blind": "blinds-operator",
+   "unsure": true,
+   "why": "반복이 네 턴 연속 감지됐는데도 같은 작업을 다시 큐에 넣어 루프가 이어졌고 활동 화면에는 `native ended; outcome not reported` 만 남았다는 기록으로, 헛도는 턴을 멈춤으로 볼지 망설여 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 45747,
+   "label": "degrades",
+   "blind": "degrades",
+   "unsure": true,
+   "why": "구현은 그대로인데 check.js 만 바꿔 verify 가 통과한 사례 둘과 측정 없는 Goal 5개가 기록돼 완료 지표가 덜 정확하고, 운영자가 Goal 상태를 못 보는 쪽과 사이에서 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 46120,
+   "label": "breaks-continuity",
+   "blind": "breaks-continuity",
+   "unsure": false,
+   "why": "10-26 에 due 가 된 일정이 2시간 반 넘게 큐에 남아 턴이 시작되지 않았고(`turn_started_seen=false`) 뒤 발화까지 막혔다는 직접 관측이 있다."
+  },
+  {
+   "number": 46851,
+   "label": "breaks-continuity",
+   "blind": "breaks-collab",
+   "unsure": false,
+   "why": "`wake_prompt` 를 빈 문자열로 적으면 부팅은 통과하고 자율 턴마다 예외가 난다는 코드 읽기 결과이고 서버를 띄워 재현하지 않았다고 적어, 턴 실패(1순위)에서 한 등급 낮췄다."
+  },
+  {
+   "number": 47244,
+   "label": "degrades",
+   "blind": "breaks-collab",
+   "unsure": false,
+   "why": "clear 가 세션 claim lock 을 쥔 채 SSE 를 동기로 보내 교착할 수 있다는 코드 읽기 결과이고 실제 교착·장애는 재현하지 않았다고 적어, 멈춤(1순위)에서 한 등급 낮췄다."
+  },
+  {
+   "number": 47514,
+   "label": "breaks-continuity",
+   "blind": "degrades",
+   "unsure": true,
+   "why": "재연결한 정상 SSE 연결이 옛 연결로 오인돼 끊길 수 있다는 소스 수준 추론이고 운영 재현이 없어 한 등급 낮췄으며, 끊기는 쪽이 화면인지 Keeper 인지 적혀 있지 않아 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 47587,
+   "label": "internal",
+   "blind": "internal",
+   "unsure": false,
+   "why": "로컬 worktree 의 mock 서버 시험 하나가 실패한 것이고 실제 Cohere 호출이나 운영 장애는 확인하지 않았다고 적혀 있다."
+  },
+  {
+   "number": 47784,
+   "label": "degrades",
+   "blind": "internal",
+   "unsure": false,
+   "why": "tabId=0 요청이 저장되면 그 Space 의 attach 가 손으로 고칠 때까지 거부된다는 코드 판정인데, TUI 는 1 이상만 보내 일어난 기록이 없어 4순위에서 한 등급 낮췄다."
+  },
+  {
+   "number": 47785,
+   "label": "internal",
+   "blind": "internal",
+   "unsure": false,
+   "why": "같은 pass 안의 앞선 veto 가 기록되지 않아 재질의가 한 번 더 허용된다는 코드 판정이고 stub probe 뿐 end-to-end 재현이 없어, 덜 정확함(4순위)에서 한 등급 낮췄다."
+  },
+  {
+   "number": 47840,
+   "label": "breaks-continuity",
+   "blind": "degrades",
+   "unsure": true,
+   "why": "#45001 전에 만든 media delta 가 든 저널을 읽으면 `Journal_corrupt` 로 옛 작업 이력을 못 본다는 감사 판정이고 실제로 겪은 기록이 없어, 이력을 못 봄(3순위)에서 한 등급 낮출지 망설이다 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 48307,
+   "label": "degrades",
+   "blind": "degrades",
+   "unsure": true,
+   "why": "야간 CI 에서 다른 화면에 있는 동안 온 변경을 복귀 때 열린 상세가 다시 읽지 않아 낡은 상세가 남는 것이 관측됐지만 run 하나뿐이고 tip 재확인이 없어, 상태를 못 봄과 사이에서 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 48309,
+   "label": "internal",
+   "blind": "internal",
+   "unsure": false,
+   "why": "예약 CI run 하나에서 TUI 시험 넷이 새로 실패했다는 기록뿐이고, 흔들리는 실패인지도 모르며 쓰는 사람에게 생긴 결과는 적혀 있지 않다."
+  },
+  {
+   "number": 49176,
+   "label": "blinds-operator",
+   "blind": "blinds-operator",
+   "unsure": false,
+   "why": "서버가 보내는 도구별 호출 수·안 불린 도구·권한을 TUI 가 버리고 Skill 사용량도 원장 1,191회가 화면에는 55회로 나와, 운영자가 도구 사용 상태를 볼 수 없다."
+  },
+  {
+   "number": 49684,
+   "label": "breaks-continuity",
+   "blind": "degrades",
+   "unsure": false,
+   "why": "종료 52번 중 16번이 3초를 넘고 3번은 10초 강제 종료로 BOARD flush 와 정리 단계를 건너뛰었다는 측정으로 종료가 느리고 덜 깔끔한 것이며, 잃은 내용은 적혀 있지 않다."
+  },
+  {
+   "number": 50437,
+   "label": "internal",
+   "blind": "internal",
+   "unsure": false,
+   "why": "opam 바이너리 재다운로드가 504 로 끊겨 PR type-check job 이 컴파일 전에 실패하는 CI 문제라 개발할 때만 걸린다."
+  },
+  {
+   "number": 50676,
+   "label": null,
+   "blind": "degrades",
+   "unsure": false,
+   "why": "TUI 화면 23종에서 실제 흐름과 안 맞는 표현과 불필요한 설명을 덜어 달라는 운영자 요청으로, 화면을 읽기 불편하다는 내용이다."
+  },
+  {
+   "number": 50709,
+   "label": null,
+   "blind": "internal",
+   "unsure": true,
+   "why": "끝난 admission 원본이 active Store 에 남아 개발 중 재설치와 runtime discovery 가 같은 원본을 반복 검사한다는 것으로, 느려진 측정값이 없고 개발 중 재설치를 먼저 꼽아 느림과 사이에서 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 50828,
+   "label": null,
+   "blind": "blinds-operator",
+   "unsure": true,
+   "why": "결과가 미확인으로 남은 원 요청 둘이 조치 필요 상태인데 memory health alert 집계는 0이었다는 관측이라 운영자가 그 상태를 볼 수 없고, 결과 복원이 멈춘 쪽을 더 무겁게 볼지 망설여 가벼운 쪽을 골랐다."
+  },
+  {
+   "number": 50927,
+   "label": null,
+   "blind": "breaks-collab",
+   "unsure": false,
+   "why": "재시작에 끊긴 Keeper 간 요청 11건이 요청한 Keeper 에게 알아듣기 어려운 문장과 다른 실패 종류로 늦게 돌아갔다는 라이브 측정이다."
+  },
+  {
+   "number": 50991,
+   "label": null,
+   "blind": "internal",
+   "unsure": false,
+   "why": "시험이 아직 없는 디렉터리를 `--publish-base-path` 로 넘겨 마지막 단언에서 실패하는 것이고, 고칠 쪽이 시험일 가능성이 크다고 적혀 있다."
+  },
+  {
+   "number": 51015,
+   "label": null,
+   "blind": "breaks-collab",
+   "unsure": false,
+   "why": "끝줄에 newline 이 없으면 JSON 둘이 한 줄로 붙어 그 Keeper 의 대화 기록 붙이기가 모두 거절된다는 코드 읽기 결과이고 돌려서 재현하지 않았다고 적어, 1순위에서 한 등급 낮췄다."
+  },
+  {
+   "number": 51111,
+   "label": null,
+   "blind": "degrades",
+   "unsure": false,
+   "why": "좁은 창에서 제목 줄의 연결 칩이 잘릴 수 있는 화면이 남았다는 것으로, 남은 곳은 코드로만 세었고 잰 화면은 44칸에서 칩이 남아 좁은 창에서 겪는 불편 수준이다."
+  },
+  {
+   "number": 51231,
+   "label": null,
+   "blind": "degrades",
+   "unsure": false,
+   "why": "`detailed=false` 인데도 호출당 약 58 KB 행 전체가 오고 26번은 상한을 넘어 그중 20번은 앞 200자만 받았다는 측정으로, 낭비가 크고 결과가 덜 정확하다."
+  },
+  {
+   "number": 51280,
+   "label": null,
+   "blind": "degrades",
+   "unsure": false,
+   "why": "라이브 측정에서 먼저 만든 요청이 수십~수백 번 거절되며 4~7시간씩 접수되지 못했다는 것으로, 메모리 요청이 몇 시간씩 늦어지는 느림이다."
+  },
+  {
+   "number": 51304,
+   "label": null,
+   "blind": "internal",
+   "unsure": false,
+   "why": "`/health` 의 최근 로그에 5만 개 전 옛 행이 섞일 수 있다는 것으로 TSan 경고만 재현됐고 잘못된 행이 나온 기록은 없어, 덜 정확함(4순위)에서 한 등급 낮췄다."
+  }
+ ]
+}

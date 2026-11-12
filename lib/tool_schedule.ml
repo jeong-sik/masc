@@ -395,6 +395,7 @@ let keeper_wake_arg_names =
   ; "urgency"
   ; "allow_unregistered_keeper"
   ; Schedule_run_watch.watch_field
+  ; Schedule_checks_watch.watch_field
   ]
 let lane_act_arg_names = [ "installation_id"; "action" ]
 
@@ -408,13 +409,27 @@ let keeper_wake_payload_from_args args =
   let* keeper_name = required_string args "keeper_name" in
   let* message = required_string args "message" in
   let* watch =
-    match string_opt args Schedule_run_watch.watch_field with
-    | None -> Ok []
-    | Some url ->
+    match
+      string_opt args Schedule_run_watch.watch_field
+      , string_opt args Schedule_checks_watch.watch_field
+    with
+    | None, None -> Ok []
+    | Some url, None ->
       Schedule_run_watch.target_of_run_url url
       |> Result.map (fun target ->
         [ Schedule_run_watch.watch_field, Schedule_run_watch.target_to_yojson target ])
       |> Result.map_error (fun detail -> Schedule_run_watch.watch_field ^ ": " ^ detail)
+    | None, Some url ->
+      Schedule_checks_watch.target_of_commit_url url
+      |> Result.map (fun target ->
+        [ Schedule_checks_watch.watch_field, Schedule_checks_watch.target_to_yojson target ])
+      |> Result.map_error (fun detail -> Schedule_checks_watch.watch_field ^ ": " ^ detail)
+    | Some _, Some _ ->
+      Error
+        (Printf.sprintf
+           "give %s for one run or %s for the checks of a commit, not both"
+           Schedule_run_watch.watch_field
+           Schedule_checks_watch.watch_field)
   in
   let optional name = function
     | None -> []
@@ -478,20 +493,35 @@ let validate_known_payload_request ~payload =
     Error (Schedule_payload_projection.creation_rejection_message rejection)
 ;;
 
-(* A run watch moves one due time to the moment its run completes. A recurring
-   schedule gets a new due time after every occurrence, so the watch would
-   speak for the first occurrence only. *)
-let validate_run_watch_recurrence ~payload ~recurrence =
-  match Schedule_run_watch.watch_of_payload payload, recurrence with
-  | Error detail, _ -> Error detail
-  | Ok None, _ -> Ok None
-  | Ok (Some _ as watch), Schedule_domain.One_shot -> Ok watch
-  | ( Ok (Some _)
+(* A watch moves one due time to the moment its run, or the checks of its
+   commit, complete. A recurring schedule gets a new due time after every
+   occurrence, so the watch would speak for the first occurrence only. The
+   watch is the run's or the commit's, never both. *)
+let validate_watch_recurrence ~payload ~recurrence =
+  let* watch_field =
+    match
+      Schedule_run_watch.watch_of_payload payload, Schedule_checks_watch.watch_of_payload payload
+    with
+    | Error detail, _ | _, Error detail -> Error detail
+    | Ok None, Ok None -> Ok None
+    | Ok (Some _), Ok None -> Ok (Some Schedule_run_watch.watch_field)
+    | Ok None, Ok (Some _) -> Ok (Some Schedule_checks_watch.watch_field)
+    | Ok (Some _), Ok (Some _) ->
+      Error
+        (Printf.sprintf
+           "give %s or %s, not both"
+           Schedule_run_watch.watch_field
+           Schedule_checks_watch.watch_field)
+  in
+  match watch_field, recurrence with
+  | None, _ -> Ok None
+  | Some _, Schedule_domain.One_shot -> Ok watch_field
+  | ( Some field
     , (Schedule_domain.Interval _ | Schedule_domain.Daily _ | Schedule_domain.Cron _) ) ->
     Error
-      (Schedule_run_watch.watch_field
-       ^ " needs recurrence_kind one_shot: a recurring schedule would wait for the run only \
-          before its first occurrence")
+      (field
+       ^ " needs recurrence_kind one_shot: a recurring schedule would wait only before its \
+          first occurrence")
 ;;
 
 (* A keeper_wake schedule whose target has no durable metadata can never be
@@ -869,11 +899,11 @@ let handle_write ~action ~tool_name ~start_time ctx args =
                  create parser's one_shot default decide an update. *)
               Error (Refusal "schedule not found")))
     in
-    let* run_watch = plain (validate_run_watch_recurrence ~payload ~recurrence) in
+    let* watch = plain (validate_watch_recurrence ~payload ~recurrence) in
     (* Attaching a watch depends on the recurrence that was just validated.
        A concurrent edit must not replace that row with a recurring schedule
        while Keep_timing/Keep_recurrence keeps its latest timing below. *)
-    let expected_instance_id = match run_watch, stored with
+    let expected_instance_id = match watch, stored with
       | Some _, Some request -> Some request.schedule_instance_id
       | None, _ | Some _, None -> None
     in

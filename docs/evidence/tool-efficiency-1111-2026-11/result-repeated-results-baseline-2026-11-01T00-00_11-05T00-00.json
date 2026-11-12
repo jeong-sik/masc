@@ -1,0 +1,61 @@
+{
+  "hours": 96.0,
+  "calls": 151787,
+  "result_bytes": 977206683,
+  "repeated_calls": 34513,
+  "repeated_calls_pct": 22.7,
+  "repeated_bytes": 313146205,
+  "repeated_bytes_pct": 32.0,
+  "repeated_bytes_per_day": 78286551,
+  "result_bytes_per_day": 244301671,
+  "top_by_repeated_bytes": [
+    {
+      "tool": "masc_schedule_notes_list",
+      "repeated_calls": 18045,
+      "repeated_bytes": 153333508,
+      "tool_result_bytes": 224820415
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "repeated_calls": 8366,
+      "repeated_bytes": 120637633,
+      "tool_result_bytes": 211623630
+    },
+    {
+      "tool": "masc_dos_screen",
+      "repeated_calls": 139,
+      "repeated_bytes": 9628284,
+      "tool_result_bytes": 177579629
+    },
+    {
+      "tool": "masc_board_list",
+      "repeated_calls": 967,
+      "repeated_bytes": 6767067,
+      "tool_result_bytes": 8656761
+    },
+    {
+      "tool": "keeper_tools_list",
+      "repeated_calls": 22,
+      "repeated_bytes": 6653934,
+      "tool_result_bytes": 14489636
+    },
+    {
+      "tool": "Execute",
+      "repeated_calls": 3793,
+      "repeated_bytes": 3978489,
+      "tool_result_bytes": 155009371
+    },
+    {
+      "tool": "keeper_skill",
+      "repeated_calls": 677,
+      "repeated_bytes": 2791328,
+      "tool_result_bytes": 5775691
+    },
+    {
+      "tool": "masc_dos_restore",
+      "repeated_calls": 12,
+      "repeated_bytes": 2421435,
+      "tool_result_bytes": 3680588
+    }
+  ]
+}

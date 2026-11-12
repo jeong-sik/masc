@@ -95,7 +95,7 @@ function makeResponse(
   alertSummary = makeAlertSummary(),
 ): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v14',
+    schema: 'keeper.memory_os.current_health.v15',
     generated_at: 1_700_000_000,
     keepers,
     totals: {

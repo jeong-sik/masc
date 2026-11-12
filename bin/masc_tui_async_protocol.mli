@@ -415,7 +415,7 @@ type keeper_msg =
       Masc.Tui_decode.server_identity option
       * string
       * Masc_tui_keeper_control.action
-      * (Masc_tui_keeper_control.outcome, string) result
+      * (Masc_tui_keeper_control.outcome, Masc_tui_keeper_control.failure) result
   (* Carries the keeper it was asked about: the roster cursor can move while a
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)

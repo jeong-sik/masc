@@ -2455,11 +2455,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
       | Some keeper ->
           let reading = keeper_reading state keeper in
           let ko = state.ui_language = Lang_ko in
-          let health = Keeper_control.health_label ~ko reading in
-          let status =
-            if reading.paused then (if ko then "일시정지 · " else "paused · ") ^ health
-            else health
-          in
+          let status = Keeper_control.status_label ~ko reading in
           let runtime = match reading.liveness with
             | Keeper_control.Present runtime -> runtime.kr_runtime_id
             | Unobserved | Absent | Invalid _ ->

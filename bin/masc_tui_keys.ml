@@ -571,7 +571,7 @@ let for_surface = function
       ; b ~ko:"열기" Navigate "Enter" "open" ~help:"open the selected destination; never approve"
       ; b ~ko:"승인·질문" Navigate "p" "requests" ~help:"approvals and questions"
       ; b ~ko:"퀴즈" Navigate "g" "quiz" ~help:"the operator quiz's Results: scorecard windows and wrong-answer notes"
-      ; b ~ko:"일정·요청" Navigate ";" "agenda" ~help:"held calls, questions, Goal confirmations and task owner routes"
+      ; b ~ko:"일정·요청" Navigate ";" "agenda" ~help:"held calls, questions, Goal confirmations and tasks on the operator list"
       ; b ~ko:"사용량" Navigate "m" "Usage" ~help:"account windows and Keeper usage"
       ; b ~ko:"음악" Navigate "s" "music" ~help:"phrases, arrangements and recorded takes; no Keeper or score required"
       ]

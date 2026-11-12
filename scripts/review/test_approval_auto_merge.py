@@ -773,6 +773,7 @@ class FollowingAcceptedMerges(unittest.TestCase):
              patch.object(MERGE.subprocess, 'run') as run, \
              patch.object(MERGE, 'wake_main_build', return_value={'dispatched': True}) as wake, \
              patch.object(MERGE, 'delete_merged_heads', return_value=[]) as cleanup, \
+             patch.object(MERGE, 'close_linked_issues', return_value=[]) as closing, \
              patch.object(MERGE, 'read', return_value={'status': 'enqueued'}) as read, \
              patch.object(MERGE, 'pull', side_effect=lambda r, n: self.landed(n)), \
              redirect_stdout(io.StringIO()) as output:
@@ -781,6 +782,7 @@ class FollowingAcceptedMerges(unittest.TestCase):
         arm.assert_not_called(); admit.assert_not_called(); run.assert_not_called()
         wake.assert_called_once_with(REPO)
         cleanup.assert_called_once_with(REPO, [101, 102])
+        closing.assert_called_once_with(REPO, [101, 102])
         read.assert_called_once_with(PREFIX + f'/pulls/102/merge-async/{UUID}')
         self.assertIn('"status": "merged"', output.getvalue())
 
@@ -1080,6 +1082,12 @@ class WakingTheMainBuild(unittest.TestCase):
             side_effect=lambda repo, numbers: self.cleaned.append(list(numbers)) or [])
         cleanup.start()
         self.addCleanup(cleanup.stop)
+        self.closed = []
+        closing = patch.object(
+            MERGE, 'close_linked_issues',
+            side_effect=lambda repo, numbers: self.closed.append(list(numbers)) or [])
+        closing.start()
+        self.addCleanup(closing.stop)
 
     def test_the_auto_merge_arming_readback_wakes_the_main_build(self):
         """`gh pr merge --auto` followed by a merged readback returns at 468."""
@@ -1093,6 +1101,7 @@ class WakingTheMainBuild(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(self.dispatched, [REPO])
         self.assertEqual(self.cleaned, [[102]])
+        self.assertEqual(self.closed, [[102]])
 
     def test_a_resumed_receipt_that_reports_a_merge_wakes_the_main_build(self):
         """follow() reaches merged without ever calling submit(), then returns."""
@@ -1122,6 +1131,7 @@ class WakingTheMainBuild(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertEqual(self.dispatched, [])
         self.assertEqual(self.cleaned, [])
+        self.assertEqual(self.closed, [])
 
     def test_a_dry_run_reports_the_merge_without_waking_the_build(self):
         """--dry-run reads admission; it must never dispatch anything."""
@@ -1136,6 +1146,7 @@ class WakingTheMainBuild(unittest.TestCase):
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             MERGE.main()
         self.assertEqual(self.dispatched, [])
+        self.assertEqual(self.closed, [])
 
     def test_a_hold_on_an_already_merged_pull_request_wakes_the_build(self):
         """A reservation let GitHub merge first, so the run holds on a closed PR.
@@ -1157,6 +1168,7 @@ class WakingTheMainBuild(unittest.TestCase):
             MERGE.main()
         self.assertEqual(self.dispatched, [REPO])
         self.assertEqual(self.cleaned, [[102]])
+        self.assertEqual(self.closed, [[102]])
 
     def test_a_hold_on_an_unmerged_pull_request_does_not_wake_the_build(self):
         """Holding for any other reason is still not a merge."""
@@ -1172,6 +1184,7 @@ class WakingTheMainBuild(unittest.TestCase):
             MERGE.main()
         self.assertEqual(self.dispatched, [])
         self.assertEqual(self.cleaned, [])
+        self.assertEqual(self.closed, [])
 
     def test_a_dry_run_does_not_wake_for_an_already_merged_pull_request(self):
         """--dry-run must not dispatch even when the merge already happened."""
@@ -1187,6 +1200,7 @@ class WakingTheMainBuild(unittest.TestCase):
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             MERGE.main()
         self.assertEqual(self.dispatched, [])
+        self.assertEqual(self.closed, [])
 
 
 class DeletingMergedHeadBranches(unittest.TestCase):
@@ -1250,6 +1264,63 @@ class DeletingMergedHeadBranches(unittest.TestCase):
         self.assertEqual(MERGE.merged_numbers(
             {'pr': 102, 'result': {'status': 'merged', 'members': [101, 102]}}), [101, 102])
         self.assertEqual(MERGE.merged_numbers({'status': 'merged', 'pr': 102}), [102])
+
+
+class ClosingLinkedIssues(unittest.TestCase):
+    """A merge made with the Actions token leaves its linked issues open (#51498).
+
+    Which issue closes is decided in linked-issues.py and covered by
+    test_linked_issues.py. These cases cover what the worker adds: the gh
+    transport, and a failure that stays a record.
+    """
+
+    def test_a_document_goes_out_with_every_variable_as_a_raw_field(self):
+        answer = subprocess.CompletedProcess([], 0, json.dumps({'data': {'ok': 1}}), '')
+        with patch.object(MERGE.subprocess, 'run', return_value=answer) as run:
+            data = MERGE.graphql('query { ok }', owner='o', name='r')
+        self.assertEqual(data, {'ok': 1})
+        self.assertEqual(run.call_args.args[0], [
+            'gh', 'api', 'graphql', '-f', 'query=query { ok }', '-f', 'owner=o', '-f', 'name=r'])
+
+    def test_a_refused_unstartable_or_slow_call_is_a_value_error(self):
+        refused = subprocess.CompletedProcess([], 1, '{"errors": []}', 'gh: not accessible')
+        failures = {
+            'refused': {'return_value': refused},
+            'unstartable': {'side_effect': OSError('gh missing')},
+            'slow': {'side_effect': subprocess.TimeoutExpired('gh', 1)},
+        }
+        for name, behaviour in failures.items():
+            with self.subTest(name), patch.object(MERGE.subprocess, 'run', **behaviour), \
+                 self.assertRaises(ValueError):
+                MERGE.graphql('query { ok }')
+
+    def test_a_merged_pull_request_closes_its_open_issue_through_gh(self):
+        linked = {'totalCount': 1, 'nodes': [
+            {'id': 'I_7', 'url': f'https://github.com/{REPO}/issues/7', 'state': 'OPEN'}]}
+        read = {'repository': {'defaultBranchRef': {'name': 'main'}, 'p102': {
+            'merged': True, 'baseRefName': 'main', 'mergeCommit': {'oid': sha(102)},
+            'closingIssuesReferences': linked}}}
+        close = {'closeIssue': {'issue': {'state': 'CLOSED'}}}
+        commands = []
+
+        def gh(command, **_):
+            commands.append(command)
+            data = close if 'id=I_7' in command else read
+            return subprocess.CompletedProcess(command, 0, json.dumps({'data': data}), '')
+
+        with patch.object(MERGE.subprocess, 'run', side_effect=gh):
+            records = MERGE.close_linked_issues(REPO, [102])
+        self.assertEqual(records, [
+            {'pr': 102, 'issue': f'https://github.com/{REPO}/issues/7', 'closed': True}])
+        self.assertEqual([command[-4:] for command in commands], [
+            ['-f', 'owner=owner', '-f', 'name=repo'],
+            ['-f', f'query={MERGE.ISSUES.CLOSE_ISSUE}', '-f', 'id=I_7']])
+
+    def test_a_failed_read_is_one_record_that_names_the_pull_requests(self):
+        with patch.object(MERGE, 'graphql', side_effect=ValueError('rate limited')):
+            records = MERGE.close_linked_issues(REPO, [101, 102])
+        self.assertEqual([(row['prs'], row['closed']) for row in records], [([101, 102], False)])
+        self.assertIn('rate limited', records[0]['reason'])
 
 
 if __name__ == '__main__':

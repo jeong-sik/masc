@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 import time
+from urllib.parse import quote
 
 
 def sibling(name):
@@ -525,6 +526,63 @@ def wake_if_already_merged(repo, number):
     return wake_main_build(repo)
 
 
+def delete_merged_head(repo, number):
+    """Delete the head branch of one merged pull request, if nothing needs it.
+
+    GitHub's delete-branch-on-merge setting does not act on a merge made with
+    the Actions token: of 400 recently merged pull requests, all 244 merged by
+    this worker kept their branch and 155 of 156 merged by a user account lost
+    it (#51366). The worker therefore removes the branch itself.
+
+    The branch stays when the pull request is not merged, comes from a fork,
+    is a release branch, or is the base of an open pull request. The push
+    carries a lease on the merged head, so a branch that received a commit
+    after the merge is refused by the server and kept.
+    """
+    current = pull(repo, number)
+    ref, head = current['head']['ref'], current['head']['sha']
+    record = {'pr': number, 'branch': ref}
+    if current.get('merged') is not True:
+        return dict(record, deleted=False, reason='not merged')
+    if current['head']['repo'] is None or current['head']['repo']['full_name'] != repo:
+        return dict(record, deleted=False, reason='head is in another repository')
+    if ref == 'main' or ref.startswith('release/'):
+        return dict(record, deleted=False, reason='protected branch name')
+    if read(f'repos/{repo}/pulls?state=open&base={quote(ref, safe="")}&per_page=1'):
+        return dict(record, deleted=False, reason='an open pull request uses it as base')
+    operation = subprocess.run(
+        ['git', '-c', 'credential.helper=', '-c', 'credential.helper=!gh auth git-credential',
+         'push', f'--force-with-lease=refs/heads/{ref}:{head}',
+         f'https://github.com/{repo}.git', f':refs/heads/{ref}'],
+        capture_output=True, text=True, check=False, timeout=120)
+    if operation.returncode:
+        return dict(record, deleted=False, reason=(operation.stderr or '').strip()[-300:])
+    return dict(record, deleted=True)
+
+
+def delete_merged_heads(repo, numbers):
+    """Branch cleanup never changes a merge verdict: every failure is a record."""
+    records = []
+    for number in numbers:
+        try:
+            records.append(delete_merged_head(repo, number))
+        except (ValueError, TypeError, KeyError, OSError,
+                subprocess.SubprocessError) as error:
+            records.append({'pr': number, 'deleted': False,
+                            'reason': f'{type(error).__name__}: {error}'[:300]})
+    return records
+
+
+def merged_numbers(result):
+    """Pull requests a merged payload covers: the scope, the receipt, or itself."""
+    if 'scope' in result:
+        return [member['number'] for member in result['scope']['scope']]
+    inner = result.get('result')
+    if isinstance(inner, dict) and 'members' in inner:
+        return list(inner['members'])
+    return [result['pr']]
+
+
 def requested_pr():
     if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
         raw = os.environ['DISPATCH_PR']
@@ -541,6 +599,7 @@ def requested_pr():
 def emit(result):
     if _WAKE['enabled'] and reports_a_completed_merge(result):
         result['main_build'] = wake_main_build(_WAKE['repo'])
+        result['head_branches'] = delete_merged_heads(_WAKE['repo'], merged_numbers(result))
     output = json.dumps(result, ensure_ascii=False, indent=2)
     print(output, flush=True)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
@@ -587,6 +646,7 @@ def main():
             woken = wake_if_already_merged(_WAKE['repo'], number)
             if woken is not None:
                 result['main_build'] = woken
+                result['head_branches'] = delete_merged_heads(_WAKE['repo'], [number])
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
         print(f'approval-auto-merge: cannot establish or submit merge: {error}', file=sys.stderr)
         return 1

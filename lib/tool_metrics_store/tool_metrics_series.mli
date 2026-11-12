@@ -57,12 +57,15 @@ val window_bounds : window -> float * float
 (** [(since, until)] as given to {!window}. A reader that selects rows
     from a store uses it as the bounds of that selection. *)
 
-(** One recorded tool call. *)
+(** One recorded tool call. [result_bytes] is the size of the result the call
+    returned; [None] is a call recorded before sizes were kept, whose size is
+    unknown. It is not a call that returned nothing. *)
 type sample =
   { ts : float
   ; tool_name : string
   ; disposition : disposition
   ; duration_ms : float
+  ; result_bytes : int option
   }
 
 type builder
@@ -71,8 +74,8 @@ val builder : window -> builder
 
 val add : builder -> sample -> (unit, string) result
 (** [add builder sample] counts [sample]. It returns [Error] and counts
-    nothing when the timestamp is outside the window or the duration is
-    negative or not finite. *)
+    nothing when the timestamp is outside the window, the duration is
+    negative or not finite, or the result size is negative. *)
 
 val long_call_threshold_ms : float
 (** A call that ran at least this long (one minute) is a long call. A
@@ -84,7 +87,13 @@ val long_call_threshold_ms : float
     the set is empty. Durations of completed, deferred and failed calls are
     all included. [long_count] counts the calls that ran at least
     {!long_call_threshold_ms}, and [long_total_ms] adds up their durations;
-    both are zero when the set is empty. *)
+    both are zero when the set is empty.
+
+    The result sizes cover only the calls that have one. [result_observed_count]
+    is how many calls that is, so a total over fewer calls than [call_count] is
+    visible as such. [result_bytes_total] adds up their sizes and
+    [result_bytes_max] is the largest; it is [None], and the total zero, when no
+    call in the set has a size. *)
 type stat =
   { call_count : int
   ; failure_count : int
@@ -95,6 +104,9 @@ type stat =
   ; max_ms : float option
   ; long_count : int
   ; long_total_ms : float
+  ; result_observed_count : int
+  ; result_bytes_total : int
+  ; result_bytes_max : int option
   }
 
 type bucket =

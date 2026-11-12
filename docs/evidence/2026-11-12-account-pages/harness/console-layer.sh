@@ -16,6 +16,7 @@
 # usage: console-layer.sh BIN LABEL OUT PORT ASSETS
 #   PORT..PORT+2 are used. ASSETS is the directory that holds dashboard/, as
 #   the assets directory of a checkout whose dashboard was built does.
+#   UX_SPACE names the task space of the browser (default: masc account pages ux).
 set -u
 BIN="$1"; LABEL="$2"; OUT="$3"; PORT="$4"; ASSETS="$5"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -68,7 +69,7 @@ print(json.dumps([
 ]))
 PY
 )
-python3 "$HERE/ux-run.py" "masc account pages ux" "$LABEL" "$OUT" "$STATES" > "$T/run.mjs"
+python3 "$HERE/ux-run.py" "${UX_SPACE:-masc account pages ux}" "$LABEL" "$OUT" "$STATES" > "$T/run.mjs"
 ego-browser nodejs < "$T/run.mjs" > "$T/measure.out" 2>&1
 echo "measure exit=$? rows=$(grep -c '^{' "$T/measure.out")"
 

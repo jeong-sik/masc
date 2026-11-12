@@ -6,6 +6,14 @@
 // usage: node console-mock.mjs FILES_DIR PORT
 //   FILES_DIR/routes.json maps an address to the name of a saved answer
 //   (NAME.hdr, NAME.body), as console-layer.sh writes it.
+// Addresses for the script that drives the page:
+//   /__scenario/<name>  answers the session routes as in that case from now on
+//   /__seen             every request of the session routes since the scenario
+//   /__rotate[?user=…]  replaces the session as another tab that signs in
+//                       again does: a new CSRF token, and another person when
+//                       `user` is given
+//   /__hold, /__release the session routes wait between the two, so a page
+//                       can be measured while it reads
 import fs from "node:fs";
 import http from "node:http";
 
@@ -24,8 +32,10 @@ function saved(name) {
 }
 
 // What the session routes answer in each case. The sentences are the ones of
-// the server (lib/auth/login_routes.ml, lib/auth_gate.ml).
+// the server (lib/auth/login_routes.ml, lib/auth/authz_browser_request.ml,
+// lib/auth_gate.ml).
 const unread = { status: 503, error: "The server cannot read its accounts right now. Try again later." };
+const otherToken = { status: 403, error: "the CSRF token is not the one of the session" };
 const scenarios = {
   signed_out: { session: { status: 401, error: "no session cookie came with the request" }, role: null, logout: 401 },
   member: { session: { status: 200 }, role: "worker", logout: 204 },
@@ -33,13 +43,46 @@ const scenarios = {
   session_unread: { session: unread, role: "worker", logout: 503 },
   signout_refused: { session: { status: 200 }, role: "worker", logout: 503 },
 };
+const firstSession = { user: "usr_01JCM8P0Y4A7M2", token: "mock-csrf-token" };
 let scenario = scenarios.signed_out;
+let session = firstSession;
 // Every request of the session routes, for the script that drives the page.
 let seen = [];
+// The answers that wait for /__release, or null when nothing is held.
+let held = null;
 
 function json(res, status, value) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
   res.end(JSON.stringify(value));
+}
+
+async function sessionRoutes(req, res, path) {
+  if (held !== null) await new Promise((release) => held.push(release));
+  if (req.method === "GET" && path === "/auth/session") {
+    if (scenario.session.status !== 200) return json(res, scenario.session.status, { error: scenario.session.error });
+    return json(res, 200, { user_id: session.user, expires_at_ms: Date.now() + 8 * 3600000, csrf_token: session.token });
+  }
+  if (req.method === "GET" && path === "/api/v1/auth/whoami") {
+    if (scenario.session.status === 401) return json(res, 401, { error: "the route needs a credential" });
+    if (scenario.session.status !== 200) return json(res, scenario.session.status, { error: scenario.session.error });
+    return json(res, 200, {
+      principal: { kind: "human", id: session.user },
+      role: scenario.role,
+      binding: { kind: "session", id: "ses_01JCMB3N8V5C1X" },
+    });
+  }
+  if (req.method === "POST" && path === "/auth/logout") {
+    if (scenario.logout === 204) {
+      // The server holds one token per session and refuses any other.
+      if (req.headers["x-masc-csrf-token"] !== session.token) return json(res, otherToken.status, { error: otherToken.error });
+      scenario = scenarios.signed_out;
+      res.writeHead(204);
+      return res.end();
+    }
+    if (scenario.logout === 401) return json(res, 401, { error: "no session cookie came with the request" });
+    return json(res, scenario.logout, { error: unread.error });
+  }
+  return json(res, 405, { error: "method not allowed" });
 }
 
 http
@@ -50,10 +93,25 @@ http
       const name = path.slice("/__scenario/".length);
       if (!(name in scenarios)) return json(res, 404, { error: "no such scenario" });
       scenario = scenarios[name];
+      session = firstSession;
       seen = [];
       return json(res, 200, { scenario: name });
     }
     if (path === "/__seen") return json(res, 200, seen);
+    if (path === "/__rotate") {
+      session = { user: url.searchParams.get("user") ?? session.user, token: `${session.token}-again` };
+      return json(res, 200, session);
+    }
+    if (path === "/__hold") {
+      held = held ?? [];
+      return json(res, 200, { held: true });
+    }
+    if (path === "/__release") {
+      const waiting = held ?? [];
+      held = null;
+      for (const release of waiting) release();
+      return json(res, 200, { released: waiting.length });
+    }
     if (req.method === "GET" && path in routes) {
       const answer = saved(routes[path]);
       // The control: the same page under a policy that names no source of a
@@ -63,29 +121,9 @@ http
       res.writeHead(200, answer.headers);
       return res.end(answer.body);
     }
-    if (path === "/auth/session" || path === "/api/v1/auth/whoami" || path === "/auth/logout")
+    if (path === "/auth/session" || path === "/api/v1/auth/whoami" || path === "/auth/logout") {
       seen.push({ method: req.method, path, csrf: req.headers["x-masc-csrf-token"] ?? null, authorization: "authorization" in req.headers });
-    if (req.method === "GET" && path === "/auth/session") {
-      if (scenario.session.status !== 200) return json(res, scenario.session.status, { error: scenario.session.error });
-      return json(res, 200, { user_id: "usr_01JCM8P0Y4A7M2", expires_at_ms: Date.now() + 8 * 3600000, csrf_token: "mock-csrf-token" });
-    }
-    if (req.method === "GET" && path === "/api/v1/auth/whoami") {
-      if (scenario.session.status === 401) return json(res, 401, { error: "the route needs a credential" });
-      if (scenario.session.status !== 200) return json(res, scenario.session.status, { error: scenario.session.error });
-      return json(res, 200, {
-        principal: { kind: "human", id: "usr_01JCM8P0Y4A7M2" },
-        role: scenario.role,
-        binding: { kind: "session", id: "ses_01JCMB3N8V5C1X" },
-      });
-    }
-    if (req.method === "POST" && path === "/auth/logout") {
-      if (scenario.logout === 204) {
-        scenario = scenarios.signed_out;
-        res.writeHead(204);
-        return res.end();
-      }
-      if (scenario.logout === 401) return json(res, 401, { error: "no session cookie came with the request" });
-      return json(res, scenario.logout, { error: unread.error });
+      return void sessionRoutes(req, res, path);
     }
     json(res, 404, { error: "not found" });
   })

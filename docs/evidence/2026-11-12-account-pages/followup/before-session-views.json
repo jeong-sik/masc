@@ -23,7 +23,7 @@
       "viewsShown": [
         "the tools of a signed-in person"
       ],
-      "idsOfThePersonInTheDocument": 13
+      "idsOfThePersonInTheDocument": 15
     },
     "load": "no document was loaded",
     "requestsOfThePress": 3,
@@ -34,7 +34,7 @@
     "statusLine": null,
     "alertsShown": 0,
     "focus": "body",
-    "idsOfThePersonInTheDocument": 11,
+    "idsOfThePersonInTheDocument": 13,
     "sessionRouteAfterwards": 401
   },
   {
@@ -46,7 +46,7 @@
       "viewsShown": [
         "the tools of a signed-in person"
       ],
-      "idsOfThePersonInTheDocument": 13
+      "idsOfThePersonInTheDocument": 15
     },
     "load": "no document was loaded",
     "requestsOfThePress": 3,
@@ -54,10 +54,10 @@
       "the tools of a signed-in person"
     ],
     "heading": "MASC accounts",
-    "statusLine": "session of usr_01JCM8P0Y4A7M2 until 2026-11-12T17:37:55.849Z",
+    "statusLine": "session of usr_01JCM8P0Y4A7M2 until 2026-11-12T23:52:47.755Z",
     "alertsShown": 0,
     "focus": "button#signout",
-    "idsOfThePersonInTheDocument": 13,
+    "idsOfThePersonInTheDocument": 15,
     "sessionRouteAfterwards": 200
   },
   {
@@ -69,7 +69,7 @@
       "viewsShown": [
         "the tools of a signed-in person"
       ],
-      "idsOfThePersonInTheDocument": 13
+      "idsOfThePersonInTheDocument": 15
     },
     "load": "no document was loaded",
     "requestsOfThePress": 3,
@@ -80,7 +80,7 @@
     "statusLine": null,
     "alertsShown": 0,
     "focus": "body",
-    "idsOfThePersonInTheDocument": 11,
+    "idsOfThePersonInTheDocument": 13,
     "sessionRouteAfterwards": 503
   }
 ]

@@ -9,7 +9,8 @@
 //              page a real server answered
 // A case is a scenario of the stand-in and whether the sign-out button is
 // pressed. The button is pressed with the keyboard. The row also holds what
-// the session route answers afterwards, which is what is true of the session.
+// the session route answers afterwards: the answer the stand-in gives for the
+// case, never a session a real server read.
 const SPACE = __SPACE__;
 const LABEL = "__LABEL__";
 const OUT = "__OUT__";
@@ -53,8 +54,11 @@ const readPage = () => {
     alertsShown: [...document.querySelectorAll("[role=alert]")].filter(visible).length,
     focus: active === null || active === document.body ? "body" : active.tagName.toLowerCase() + (active.id ? "#" + active.id : ""),
     // The made-up ids of the person (accounts, Runtimes, tokens) that the
-    // document still holds, shown or hidden.
-    idsOfThePersonInTheDocument: (document.body.textContent.match(/\b(?:pa|rt|pat|usr)_[0-9A-Z]{6,}/g) || []).length,
+    // document still holds, shown or hidden. The options of a select join
+    // their texts with nothing between them, so an id may follow the last
+    // letter of another: only a lowercase letter before the prefix makes it
+    // part of a word.
+    idsOfThePersonInTheDocument: (document.body.textContent.match(/(?<![a-z])(?:pa|rt|pat|usr)_[0-9A-Z]{6,}/g) || []).length,
   };
 };
 

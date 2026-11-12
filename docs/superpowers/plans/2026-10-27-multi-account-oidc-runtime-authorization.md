@@ -1216,7 +1216,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 정한 것.
   1. 모델이 읽는 앞 대화는 vendor session이 든다. masc는 앞 대화를 prompt에 다시 싣지 않는다. 다시 실으면 길이를 자르는 규칙이 필요한데, 그 규칙은 Keeper lane의 것이고 이 경로에는 없다.
   2. masc는 묻고 답한 것을 따로 기록한다. 사람이 읽는 것은 이 기록이다. vendor의 파일은 읽지 않는다. 형식이 vendor 것이기 때문이다.
-  3. Keeper마다 "지금 대화"가 하나다. 그 Keeper의 마지막 `started` 줄이 지금 대화다. 따로 저장하지 않는다. 그 대화를 지웠으면 지금 대화가 없고, 다음 턴이 새 대화를 시작한다.
+  3. Keeper마다 "지금 대화"가 하나다. 그 Keeper의 마지막 `started` 줄이 지금 대화다. 따로 저장하지 않는다. 그 대화에 `delete_requested`나 `deleted` 줄이 붙었으면 지금 대화가 없고, 다음 턴이 새 대화를 시작한다. 그 앞의 지우지 않은 대화로 돌아가지 않는다.
   4. 대화는 시작한 구독(ProviderAccount)에 묶인다. session이 그 계정 홈에 있기 때문이다. Keeper의 Runtime이 같은 구독의 다른 모델로 바뀌면 이어 간다. 다른 구독으로 바뀌면 이어가는 턴을 409로 거절하고, 새 대화를 시작하라고 답한다. 말없이 새로 시작하지 않는다.
   5. 새 대화는 사람이 시작한다. 이어가는 턴이 실패해도 masc가 스스로 새 session으로 바꾸지 않는다. session이 지워져서 난 실패인지 가를 수 없기 때문이다.
   6. 기록의 주인은 Keeper의 owner다. 1단계에서는 owner만 자기 Keeper에게 묻는다(설계 §4.3). 그래서 줄마다 initiator를 적지 않는다. 다른 사람이 묻는 길을 여는 층이 D6과 함께 initiator를 더한다(설계 §3-11).
@@ -1250,7 +1250,8 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 경로와 도구.
   - `POST /api/v1/auth/keepers/turn`. 본문은 그대로다. 지금 대화가 없으면 시작한다. 답에 `conversation_id`와 `continued`(이번 턴이 session을 이어받았는지)를 더한다.
   - `POST /api/v1/auth/keepers/conversation`. 본문은 `{"keeper_id"}`다. 새 대화를 시작한다. 앞 대화의 기록은 남는다.
-  - `GET /api/v1/auth/keepers/conversation?keeper_id=<이름>`. 지금 대화의 턴을 순서대로 답한다.
+  - `GET /api/v1/auth/keepers/conversation?keeper_id=<이름>`. 지금 대화의 id와 턴을 순서대로 답한다. 그 Keeper의 대화 목록(`conversations`)도 함께 답한다. 목록의 항목은 id, 시작한 시각, 지운 시각이고 `index.jsonl`에서 읽는다. 본문은 없다. 사람은 지울 대화의 id를 여기서 얻는다.
+  - 같은 경로에 `conversation_id=<id>`를 더하면 그 Keeper의 그 대화의 턴을 답한다. 지운 대화와 자기 것이 아닌 id는 404다.
   - `DELETE /api/v1/auth/keepers/conversation/<conversation_id>`. 그 대화를 지운다. 답은 204다. 자기 것이 아니거나 없는 id는 404다.
   - MCP 도구 `masc_my_keeper_conversation`(읽기), `masc_my_keeper_conversation_new`, `masc_my_keeper_conversation_delete`. 경로와 같은 함수를 부른다.
 - 시험으로 볼 것(구현 층).
@@ -1260,7 +1261,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - `asked`를 쓰지 못하면 CLI가 뜨지 않는다.
   - 턴 도중에 멈춘 기록(`asked`뿐)을 읽으면 그 턴이 답 없이 보인다.
   - 지운 대화는 읽히지 않고, 그 폴더가 없고, 다음 턴은 새 대화다. `delete_requested`만 남은 설치를 다시 띄우면 폴더가 없어지고 `deleted`가 붙는다.
-- 하지 않는 것: Keeper 지시문과 system prompt, 기억, MASC 도구, 스스로 시작하는 턴, Board, Codex, 답을 나눠 보내기, 앞 대화들의 목록, 보관 기간을 정해 자동으로 지우기.
+- 하지 않는 것: Keeper 지시문과 system prompt, 기억, MASC 도구, 스스로 시작하는 턴, Board, Codex, 답을 나눠 보내기, 대화를 가로지르는 검색, 보관 기간을 정해 자동으로 지우기.
 - 층.
   - S1b-3a 기록과 이어가기. 턴 경로와 `masc_my_keeper_turn`의 답에 `conversation_id`와 `continued`가 붙는다.
   - S1b-3b 새 대화와 읽기. 경로 둘과 MCP 도구 둘. 새 대화를 먼저 넣는다. 다른 구독으로 옮긴 Keeper가 받는 409의 출구가 그것뿐이다.

@@ -99,6 +99,10 @@ module Kind : sig
       (** A person makes a Keeper and is its owner, and gives it one of
           their Runtimes (design 4.3, plan D1-5). The body is that of
           {!Authz_keeper_event}. *)
+    | Purge
+      (** A person starts the purge of what they own, and the system
+          maintenance ends it once it has deleted that, or failed to (design
+          8.5, plan S1b-3c). The body is that of {!Authz_purge_event}. *)
 
   val all : t list
   val to_string : t -> string
@@ -123,7 +127,10 @@ end
     [Runtime] record: the person who makes the Runtime, and a [Keeper]
     record: the person who makes the Keeper or gives it a Runtime. An [Internal_service_credential] record is written by the local
     operator: the host CLI issues and revokes the credentials of the services
-    the host starts (user decision 2026-11-07). *)
+    the host starts (user decision 2026-11-07). A [Purge] record is written by
+    an authenticated principal, who starts the purge of what they own, and by
+    the system maintenance, which ends it. Which of the two writes which event
+    is a question of the state. *)
 val admits : Kind.t -> Author.t -> bool
 
 (** Where the next record goes: its position and the hash it must carry. *)

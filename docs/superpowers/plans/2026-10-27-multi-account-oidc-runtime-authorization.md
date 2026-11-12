@@ -727,7 +727,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 ### S. 1단계 개시
 
-S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 돌아가는 상태부터 올린다. S1a는 미리보기가 하던 범위(로그인, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 실제 서버에 연다. S1b는 사람에게 MCP·Board·WebSocket을 연다.
+S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 돌아가는 상태부터 올린다. S1a는 미리보기가 하던 범위(로그인, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 실제 서버에 연다. S1b는 사람에게 MCP·Board·WebSocket을 연다. S1b도 MCP(S1b-1)부터 연다(2026-11-12 사용자).
 
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
@@ -742,7 +742,11 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 | S1a-3a | C3의 로그인 경로(로그인 시작·callback, 로그아웃, 세션, allowlist, PAT)를 계정 서버의 표에 단다. login client는 부팅이 판정한 `config.json`에서 읽는다. 세부는 표 아래 S1a-3a 범위다. | §5.1 | S1a-2e, F3a-3 |
 | S1a-3a-1 | 진행 중인 로그인을 서버에 저장하지 않고 transaction 쿠키에 봉인한다. 인증 없는 로그인 시작이 다른 사람의 로그인을 막지 못한다(#51394). 세부는 표 아래 S1a-3a-1 범위다. | §5.2 | S1a-3a |
 | S1a-3b | 사람의 화면과 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-3a-1 |
-| S1b | 사람에게 MCP·Board·WebSocket 경로를 연다. | §11.1 | S1a-3b, C4-11, C4-12, C6 |
+| S1b-1a | 계정 서버가 사람의 MCP endpoint(`POST /mcp`)를 연다. 요청마다 PAT나 세션을 판정하고 MCP 세션을 만들지 않는다. 도구는 내 정보 하나다. 세부는 표 아래 S1b 범위다. | §5.2, §5.3 | S1a-3b |
+| S1b-1b | MCP 도구에 내 Keeper 목록·만들기·배정을 더한다. | §5.3 | S1b-1a |
+| S1b-1c | MCP 도구에 내 Keeper의 한 턴을 더한다. | §5.3 | S1b-1b |
+| S1b-1d | 실제 MCP client로 붙여 본 기록과 사용 안내를 남긴다. | §11.1 | S1b-1c |
+| S1b-2 | 사람에게 Board·WebSocket 경로를 연다. 누가 읽고 쓰는지는 설계 절을 먼저 써서 정한다. | §11.1 | S1b-1d, C4-11, C4-12, C6 |
 
 - S1이 D4 뒤인 까닭: 계정 층 없이 다계정 설치를 서빙하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙한다. 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 다계정 설치를 서빙하면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
 - S1이 F3a 뒤인 까닭: S1부터 다계정 설치는 계정이 가진 Runtime·Keeper 기록을 쌓는다. 그때 "지우고 설치"는 그 기록을 지운다. 끄는 길 없이 켜는 길만 열면 실제 설치가 되돌릴 수 없이 다계정으로 넘어간다(§6 결정 10).
@@ -1148,6 +1152,41 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 화면의 Google 로그인 버튼.
   - provider까지 가는 로그인 왕복과 실제 구독으로 도는 턴. 사용자가 직접 써 볼 대상이다.
   - #51413(redirect가 이 서버의 callback인지), #51420, #51421.
+
+**S1b 범위** (사람에게 MCP를 연다, 2026-11-12)
+
+- 사용자 결정(2026-11-12).
+  - S1b는 MCP부터 연다. 도구는 사람의 화면이 하는 일만 준다. 내 정보, 내 Keeper 목록·만들기·배정, 내 Keeper의 한 턴이다.
+  - Board는 S1b-1에서 열지 않는다. 다계정에서 Board를 누가 읽고 쓰는지, 남의 글이 Keeper를 깨우는지는 설계에 없다. 설계 절을 따로 써서 정한다(S1b-2).
+  - WebSocket과 Dashboard(C6)도 따로 정한다.
+- 확인한 사실(main `93db247b1108`).
+  - 단일 사용자의 MCP(`Server_mcp_transport_http`, `Mcp_server_eio_protocol`), Board(`Board_dispatch`, `Mcp_tool_runtime_board`), WebSocket(`Server_mcp_transport_ws`)은 `Mcp_server.server_state`와 단일 사용자의 credential 저장소(`Auth`)를 읽는다. 계정 서버는 그 state를 만들지 않는다.
+  - 사람의 경로는 handler 안에서 `Auth_gate.decide`를 부른다. 세션과 PAT를 같은 판정으로 받는다. PAT는 범위에 `Manage_own_keeper`가 있어야 Keeper 경로를 지난다.
+  - JSON-RPC codec(`Mcp_transport_protocol`)과 2026-07-28 header 검사(`Server_mcp_transport_http_headers.validate_2026_request_headers`)는 state 없이 쓸 수 있다.
+  - Board 글의 작성자는 agent 이름 문자열(`Agent_id.t`)이다. 읽기 규칙은 Direct 수신자만 강제한다(`Board_access`).
+- 하는 일.
+  - 계정 서버가 `POST /mcp`를 연다. 경로의 종류는 `Self_authenticated Person_mcp`다. 계정 서버의 표(`Server_account_table.served`)가 이 종류를 받는다.
+  - 요청마다 credential을 `Auth_gate.decide`로 판정한다. 본문을 읽기 전에 `Read_auth`로 한 번 판정하고, 도구는 자기가 대신하는 경로의 종류로 다시 판정한다. 호출자는 그 판정의 principal이다. agent 이름, header, 세션 id는 호출자를 정하지 않는다.
+  - 서버는 MCP 세션을 만들지 않는다. `Mcp-Session-Id`를 주지 않고, 받은 값을 읽지 않는다. 그래서 PAT를 폐기하거나 사람을 Disable하면 다음 요청부터 거절된다.
+  - 답은 JSON 하나다. 긴 연결(SSE)을 열지 않는다. `GET /mcp`는 405다. notification은 본문 없는 202다.
+  - method는 `server/discover`, `initialize`, `ping`, `tools/list`, `tools/call`이다. 메시지 검사(`Mcp_request_admission.admit`)는 단일 사용자의 MCP와 같은 함수를 쓴다. 그래서 두 endpoint가 같은 메시지를 같은 답으로 거절한다.
+  - 도구는 사람의 경로와 같은 함수를 부른다. 경로의 답이 2xx가 아니면 도구 결과가 `isError`다. 도구 정의에 없는 인자도 `isError`다.
+  - 도구의 이름과 설명은 `config/tools/` 아래 TOML에 둔다. 단일 사용자의 도구 목록(`Config.visible_tool_schemas`)에는 넣지 않는다.
+- C4-11과 C4-12.
+  - C4-11(token 해석이 실패하면 alias를 쓰지 않고 Reject)은 이 경로에서 구조로 선다. 계정 서버의 MCP는 `Mcp_server_eio_caller_identity`를 지나지 않고, 이름을 정하는 다른 길이 없다.
+  - C4-12(transport를 세션·PAT에 결속하고 폐기 때 닫기)는 닫을 연결이 없어서 S1b-1에 일이 없다. SSE나 WebSocket을 여는 층(S1b-2)이 C4-12를 한다. `__Host-masc_mcp_session`도 그때 만든다.
+- 층.
+  - S1b-1a 경로 종류와 뼈대. `Mcp_request_admission`을 단일 사용자의 처리기에서 뽑는다. `POST /mcp`가 위 method를 답한다. 도구는 내 정보(`masc_whoami`) 하나다.
+  - S1b-1b Keeper 도구. 목록, 만들기, 배정이다.
+  - S1b-1c Keeper의 한 턴. 사람의 경로와 같은 시간 제한을 쓴다.
+  - S1b-1d 실제 MCP client로 붙여 본 기록과 사용 안내.
+- 시험(S1b-1a).
+  - credential 없음, 단일 사용자의 bearer, 폐기된 PAT가 각각 who-am-I 경로와 같은 답으로 거절된다.
+  - 세션 cookie로 온 요청은 same-origin과 CSRF token이 있어야 한다.
+  - 지원하지 않는 protocol version, JSON이 아닌 본문, batch, 모르는 method, 모르는 도구, 도구에 없는 인자, 본문 상한을 넘는 메시지.
+  - 요청마다 protocol을 고르는 개정(2026-07-28)의 요청은 답 header에 그 개정을 받고, routing header가 본문과 다르면 400이다.
+- 뒤 층의 시험: 범위에 `Manage_own_keeper`가 없는 PAT의 Keeper 도구(S1b-1b), 다른 사람의 Keeper에 청한 한 턴(S1b-1c).
+- 하지 않는 것: Board, WebSocket, Dashboard 화면(C6), MCP OAuth(C5), SSE와 `subscriptions/listen`, resources와 prompts, 단일 사용자 MCP의 동작 바꾸기, dispatch 전용 MCP credential(설계 §7.3). 401 답에 `WWW-Authenticate`와 protected resource metadata를 싣는 일은 C5가 한다.
 
 ### E. official client 격리
 

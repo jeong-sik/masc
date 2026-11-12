@@ -504,6 +504,10 @@ type settlement =
       { candidate_id : string
       ; continuation_wake : Keeper_registry.wakeup_outcome option
       }
+  | Completed_partitions_held of
+      { held : int
+      ; continuation_wake : Keeper_registry.wakeup_outcome option
+      }
 
 type fatal_stage =
   | Registration
@@ -814,8 +818,21 @@ let is_not_relevant_completion partition =
    mean the same thing for this delivery: it cannot succeed on a retry of the
    identical request, because the row it would update no longer exists.
    Settling the partition here without one is the terminal outcome, not a
-   fallback (masc, board attention finalizer, 2026-08-16). *)
-let deliver_and_settle_completed ~base_path ~keeper_name partition =
+   fallback (masc, board attention finalizer, 2026-08-16).
+
+   [Judgment_conflict] means the candidate already records another judgment
+   than this partition's. Nothing was delivered for this judgment, so the
+   partition stays [Completed]: settling it would record a delivery that did
+   not happen. *)
+type completed_delivery =
+  | Completed_settled of Partition.t
+  | Completed_held of
+      { partition : Partition.t
+      ; recorded : Candidate.judgment
+      ; offered : Candidate.judgment
+      }
+
+let deliver_completed ~base_path ~keeper_name partition =
   match partition.Partition.state with
   | Partition.Completed { item; _ } ->
     let* delivery =
@@ -825,18 +842,23 @@ let deliver_and_settle_completed ~base_path ~keeper_name partition =
         ~candidate_id:item.candidate_id
         ~judgment:item.judgment
     in
+    let settle () =
+      let* settled =
+        Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
+      in
+      Ok (Completed_settled settled)
+    in
     (match delivery with
      | Candidate.Candidate_absent ->
        Log.Keeper.error
          "Board attention candidate permanently absent from the ledger; settling partition without delivery keeper=%s partition=%s candidate=%s"
          keeper_name
          partition.partition_id
-         item.candidate_id
-     | Candidate.Delivered (_ : Candidate.candidate) -> ());
-    let* settled =
-      Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
-    in
-    Ok settled
+         item.candidate_id;
+       settle ()
+     | Candidate.Delivered (_ : Candidate.candidate) -> settle ()
+     | Candidate.Judgment_conflict { recorded; offered } ->
+       Ok (Completed_held { partition; recorded; offered }))
   | Partition.Ready
   | Partition.Running _
   | Partition.Settled _
@@ -845,6 +867,24 @@ let deliver_and_settle_completed ~base_path ~keeper_name partition =
     Error
       ("completed partition query returned non-Completed state: "
        ^ partition.partition_id)
+;;
+
+(* The worker settles its own [Not_relevant] judgment through this. A
+   judgment the candidate refuses stays an [Error] on this path, as before:
+   the drain returns it and the worker ends with [Durable_drain] while its
+   lane goes on. Only the owner walk holds a refused member and continues. *)
+let deliver_and_settle_completed ~base_path ~keeper_name partition =
+  let* delivery = deliver_completed ~base_path ~keeper_name partition in
+  match delivery with
+  | Completed_settled settled -> Ok settled
+  | Completed_held
+      { partition
+      ; recorded = (_ : Candidate.judgment)
+      ; offered = (_ : Candidate.judgment)
+      } ->
+    Error
+      (Candidate.judgment_conflict_detail
+         ~candidate_id:partition.Partition.candidate_id)
 ;;
 
 (* [Not_relevant] carries nothing across the owner lane: no event is
@@ -1630,7 +1670,9 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
    drain blocks the partition and then cannot quarantine it, which stopped the
    worker (#48785). Once its candidate is Consumed a partition only moves
    toward Settled or Abandoned, so reading the partitions before the
-   candidate prune can keep a row one wake too long, never drop it too soon. *)
+   candidate prune can keep a row one wake too long, never drop it too soon.
+   A Completed partition whose judgment the candidate refused keeps the row
+   for as long as it stays Completed: the owner walk reads it on every pass. *)
 let open_partition_candidates partitions =
   List.filter_map
     (fun (partition : Partition.t) ->
@@ -1947,7 +1989,12 @@ let replay_completed_owner_wake
 
 (* Only the captured list is drained: workers may complete more partitions
    while this owner yields, but those belong to the next admission snapshot.
-   Yield outside each durable transaction so other fibers remain runnable. *)
+   Yield outside each durable transaction so other fibers remain runnable.
+
+   A member whose candidate records another judgment stays [Completed] and
+   the walk goes on to the next member. Stopping there held every later
+   completion of this Keeper behind one refused judgment, on every
+   heartbeat, with no transition that could ever move it. *)
 let settle_completed_snapshot ~base_path ~keeper_name
       ?on_captured
       ?yield
@@ -1960,16 +2007,40 @@ let settle_completed_snapshot ~base_path ~keeper_name
         "completed owner settlement"
         partition
     in
-    deliver_and_settle_completed ~base_path ~keeper_name partition
+    deliver_completed ~base_path ~keeper_name partition
   in
-  let rec settle_snapshot last_settled = function
-    | [] -> Ok last_settled
+  let rec settle_snapshot ~last_settled ~held = function
+    | [] -> Ok (last_settled, held)
     | partition :: rest ->
-      let* settled = settle_head partition in
+      let* delivery = settle_head partition in
+      let last_settled, held =
+        match delivery with
+        | Completed_settled settled -> Some settled, held
+        | Completed_held { partition; recorded; offered } ->
+          (* Two judgments with one decision still differ by slot or time,
+             so the line names all three. *)
+          let describe (judgment : Candidate.judgment) =
+            Printf.sprintf
+              "%s slot=%s judged_at=%.3f"
+              (Keeper_board_attention_judgment.decision_to_string
+                 judgment.verdict.decision)
+              judgment.slot_id
+              judgment.judged_at
+          in
+          Log.Keeper.error
+            ~keeper_name
+            "Board attention completion remains pending; it holds no other completion back: %s partition=%s recorded=[%s] offered=[%s]"
+            (Candidate.judgment_conflict_detail
+               ~candidate_id:partition.Partition.candidate_id)
+            partition.partition_id
+            (describe recorded)
+            (describe offered);
+          last_settled, partition :: held
+      in
       (match rest with
        | [] -> ()
        | _ :: _ -> yield ());
-      settle_snapshot settled rest
+      settle_snapshot ~last_settled ~held rest
   in
   let* completed = completed_in_order ~base_path ~keeper_name in
   (* Test seam for the snapshot-capture boundary: fires exactly after the
@@ -1980,21 +2051,44 @@ let settle_completed_snapshot ~base_path ~keeper_name
    | None -> ());
   match completed with
   | [] -> Ok No_completed_partition
-  | first :: _ ->
-    let* settled = settle_snapshot first completed in
+  | _ :: _ ->
+    let* last_settled, held =
+      settle_snapshot ~last_settled:None ~held:[] completed
+    in
     Log.Keeper.info
-      "board_attention_completed_snapshot_settled keeper=%s count=%d"
+      "board_attention_completed_snapshot_settled keeper=%s count=%d held=%d"
       keeper_name
-      (List.length completed);
+      (List.length completed - List.length held)
+      (List.length held);
     let* remaining = completed_in_order ~base_path ~keeper_name in
+    (* A held member is still [Completed] after this walk. Counting it here
+       would wake the owner straight back into the same refusal. *)
+    let held_in_this_walk (partition : Partition.t) =
+      List.exists
+        (fun (member : Partition.t) ->
+           String.equal member.partition_id partition.partition_id)
+        held
+    in
     let continuation_wake =
-      match remaining with
+      match
+        List.filter
+          (fun partition -> not (held_in_this_walk partition))
+          remaining
+      with
       | [] -> None
       | _ :: _ -> Some (owner_wake ~base_path ~keeper_name)
     in
-    Ok
-      (Partition_settled
-         { candidate_id = settled.Partition.candidate_id; continuation_wake })
+    (match last_settled with
+     | Some settled ->
+       Ok
+         (Partition_settled
+            { candidate_id = settled.Partition.candidate_id
+            ; continuation_wake
+            })
+     | None ->
+       Ok
+         (Completed_partitions_held
+            { held = List.length held; continuation_wake }))
 ;;
 
 let recovered_mutex = Stdlib.Mutex.create ()

@@ -97,6 +97,12 @@ type settlement =
       { candidate_id : string
       ; continuation_wake : Keeper_registry.wakeup_outcome option
       }
+  | Completed_partitions_held of
+      { held : int
+      ; continuation_wake : Keeper_registry.wakeup_outcome option
+      }
+      (** The walk settled nothing: each of the [held] captured members
+          records a judgment its candidate refused, and stays [Completed]. *)
 
 type wake_skip_reason =
   | Keeper_paused
@@ -159,7 +165,12 @@ val settle_completed_snapshot :
     Stop at the first failed transition and leave later members untouched. A
     delivery failure retains its evidence without consuming the candidate; if
     delivery committed before partition settlement failed, replay preserves
-    that effect. The returned candidate id is the last settled member. A
+    that effect. A member whose candidate already records another judgment
+    ([Keeper_board_attention_candidate.Judgment_conflict]) is not a failed
+    transition: it stays [Completed], the walk logs it as an error and goes on
+    to the next member, and it does not count toward the continuation wake,
+    because the same refusal would answer that wake. The returned candidate
+    id is the last settled member. A
     sync-unconfirmed completion must pass explicit confirmation before
     delivery. This function never invokes AGENT_CORE.
     [?on_captured] fires exactly once, immediately after the capture and
@@ -199,8 +210,10 @@ module For_testing : sig
     (Keeper_board_attention_partition.t, string) result
   (** The settlement half of [signal_completion]: durably delivers the
       completed judgment to the candidate and settles the partition. Exposed
-      so a test can reproduce the owner settlement's exact write path without
-      standing up the full worker lifecycle. *)
+      so a test can reproduce the writes of a settlement without standing up
+      the full worker lifecycle. The owner walk makes the same writes for a
+      judgment the candidate accepts. A refused judgment is an [Error] here,
+      while the owner walk holds that member. *)
 
   val prunes_and_read :
     base_path:string ->

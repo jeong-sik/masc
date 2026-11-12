@@ -745,6 +745,7 @@ let test_existing_durable_comment_candidates_respect_parent_visibility () =
          with
          | Ok (KBAC.Delivered delivered) -> delivered
          | Ok KBAC.Candidate_absent -> fail "expected persisted candidate to remain present"
+         | Ok (KBAC.Judgment_conflict _) -> fail "the fixture candidate already records another judgment"
          | Error detail -> fail detail
        in
        (match delivered.status, expected_delivery with

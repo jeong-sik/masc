@@ -90,6 +90,15 @@ let delivered label = function
   | Ok (A.Delivered candidate) -> candidate
   | Ok A.Candidate_absent ->
     Alcotest.failf "%s: candidate absent (fixture did not persist it)" label
+  | Ok (A.Judgment_conflict _) ->
+    Alcotest.failf "%s: the candidate already records another judgment" label
+  | Error detail -> Alcotest.failf "%s: %s" label detail
+;;
+
+let recorded label = function
+  | Ok (A.Judgment_on_record candidate) -> candidate
+  | Ok (A.Judgment_refused _) ->
+    Alcotest.failf "%s: the candidate already records another judgment" label
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
@@ -375,7 +384,9 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
-   | W.No_completed_partition -> Alcotest.fail "completed judgment was not settled");
+   | W.No_completed_partition -> Alcotest.fail "completed judgment was not settled"
+   | W.Completed_partitions_held _ ->
+     Alcotest.fail "the completed judgment was held behind another judgment");
   match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
   | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
   | _ -> Alcotest.fail "owner settlement did not consume and settle the judgment"
@@ -543,7 +554,9 @@ let test_discards_do_not_hold_the_owner_delivery_slot () =
        "one call reaches the relevant verdict behind the discard"
        admitted.candidate_id
        candidate_id
-   | W.No_completed_partition -> Alcotest.fail "no completion was settled");
+   | W.No_completed_partition -> Alcotest.fail "no completion was settled"
+   | W.Completed_partitions_held _ ->
+     Alcotest.fail "the completed judgment was held behind another judgment");
   Alcotest.(check int)
     "the relevant verdict reached the Keeper queue"
     1
@@ -683,6 +696,76 @@ let test_completed_snapshot_failure_preserves_remainder_and_replays () =
     (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ()));
   Alcotest.(check (list string)) "crash replay and retry deliver once in order"
     [ first.candidate_id; failing.candidate_id; last.candidate_id ]
+    (delivered_ids ~base_path)
+;;
+
+(* The head completion's candidate already records another judgment, the way
+   a second judge of one Board event leaves it. That member cannot be
+   delivered and no transition moves it, so a walk that stops there keeps
+   every later completion of the Keeper from its queue on every heartbeat. *)
+let test_completed_snapshot_walks_past_a_refused_judgment () =
+  with_temp_base "board-completed-refused" @@ fun base_path ->
+  let make index =
+    record ~base_path
+      (candidate ~id:(Printf.sprintf "refused-%d" index)
+         ~recorded_at:(float_of_int index) ())
+  in
+  let refused = make 1 in
+  let second = make 2 in
+  let third = make 3 in
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  ignore (complete_next ~base_path J.Relevant);
+  ignore
+    (delivered
+       "another judge consumes the head candidate"
+       (A.apply_judgment_and_deliver
+          ~base_path
+          ~keeper_name:"alpha"
+          ~candidate_id:refused.candidate_id
+          ~judgment:(judgment (provenance "another-judge") J.Not_relevant))
+      : A.candidate);
+  (match
+     ok
+       "walk the snapshot"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
+   with
+   | W.Partition_settled { candidate_id; continuation_wake = None } ->
+     Alcotest.(check string)
+       "the walk reaches the last member"
+       third.candidate_id
+       candidate_id
+   | W.Partition_settled { continuation_wake = Some _; _ } ->
+     Alcotest.fail "the held member asked for a continuation wake"
+   | W.Completed_partitions_held _ ->
+     Alcotest.fail "the members behind the refused judgment were not settled"
+   | W.No_completed_partition -> Alcotest.fail "the snapshot was empty");
+  Alcotest.(check (list string))
+    "the members behind the refused judgment reach the Keeper queue"
+    [ second.candidate_id; third.candidate_id ]
+    (delivered_ids ~base_path);
+  List.iter
+    (fun (partition : P.t) ->
+       match
+         String.equal partition.candidate_id refused.candidate_id, partition.state
+       with
+       | true, P.Completed _ | false, P.Settled _ -> ()
+       | _ -> Alcotest.fail "the walk settled the wrong partitions")
+    (ok "reload partitions" (P.load ~base_path ~keeper_name:"alpha"));
+  (match
+     ok
+       "walk the held member again"
+       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
+   with
+   | W.Completed_partitions_held { held = 1; continuation_wake = None } -> ()
+   | W.Completed_partitions_held _ ->
+     Alcotest.fail "the held member was miscounted or asked for a continuation wake"
+   | W.Partition_settled _ -> Alcotest.fail "the refused judgment was settled"
+   | W.No_completed_partition ->
+     Alcotest.fail "the held member left the completed set");
+  Alcotest.(check (list string))
+    "a second walk delivers nothing more"
+    [ second.candidate_id; third.candidate_id ]
     (delivered_ids ~base_path)
 ;;
 
@@ -2898,7 +2981,7 @@ let test_existing_judgment_skips_exact_flow () =
   let persisted = record ~base_path (candidate ()) in
   let exact = provenance "existing-judged" in
   ignore
-    (ok
+    (recorded
        "record prior judgment"
        (A.record_judgment ~base_path persisted (judgment exact J.Relevant))
       : A.candidate);
@@ -2936,7 +3019,7 @@ let test_existing_consumed_skips_exact_flow_and_settles () =
       : int);
   let exact = provenance "existing-consumed" in
   ignore
-    (ok
+    (recorded
        "record consumed judgment"
        (A.record_judgment ~base_path persisted (judgment exact J.Not_relevant))
       : A.candidate);
@@ -3039,7 +3122,9 @@ let test_consumed_completed_crash_settles_without_duplicate_delivery () =
    | W.Partition_settled _ ->
      Alcotest.fail "crash-replayed completion settled with unexpected continuation"
    | W.No_completed_partition ->
-     Alcotest.fail "crash-replayed Completed partition was not found");
+     Alcotest.fail "crash-replayed Completed partition was not found"
+   | W.Completed_partitions_held _ ->
+     Alcotest.fail "the completed judgment was held behind another judgment");
   Alcotest.(check int)
     "Consumed replay did not duplicate Relevant delivery"
     1
@@ -3579,7 +3664,9 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Partition_settled { candidate_id; _ }
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
-   | W.No_completed_partition -> Alcotest.fail "completed judgment was not settled");
+   | W.No_completed_partition -> Alcotest.fail "completed judgment was not settled"
+   | W.Completed_partitions_held _ ->
+     Alcotest.fail "the completed judgment was held behind another judgment");
   (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
    | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ }, P.Settled _ -> ()
    | _ -> Alcotest.fail "manual requeue did not normalize, consume, and settle");
@@ -4769,7 +4856,9 @@ let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_
    | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
    | W.No_completed_partition ->
      Alcotest.fail
-       "the Completed partition with the retired candidate was not settled");
+       "the Completed partition with the retired candidate was not settled"
+   | W.Completed_partitions_held _ ->
+     Alcotest.fail "the completed judgment was held behind another judgment");
   (match (load_one_partition ~base_path).state with
    | P.Settled _ -> ()
    | _ -> Alcotest.fail "partition with a retired candidate did not reach Settled");
@@ -4779,7 +4868,7 @@ let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_
       (W.settle_completed_snapshot ~base_path ~keeper_name:"alpha" ())
   with
   | W.No_completed_partition -> ()
-  | W.Partition_settled _ ->
+  | W.Partition_settled _ | W.Completed_partitions_held _ ->
     Alcotest.fail
       "the terminalized partition was offered for settlement again (infinite retry)"
 ;;
@@ -5045,6 +5134,9 @@ let () =
         ; Alcotest.test_case
             "completed snapshot preserves failure and replays without duplication"
             `Quick test_completed_snapshot_failure_preserves_remainder_and_replays
+        ; Alcotest.test_case
+            "completed snapshot walks past a judgment its candidate refused"
+            `Quick test_completed_snapshot_walks_past_a_refused_judgment
         ; Alcotest.test_case
             "completed snapshot capture defers new completions to the next wake"
             `Quick test_completed_snapshot_captures_settle_and_continues_waking

@@ -1027,6 +1027,11 @@ let run_keepalive_unified_turn
        | Ok Keeper_board_attention_worker.No_completed_partition ->
          ()
        | Ok
+           (Keeper_board_attention_worker.Completed_partitions_held
+              { held = (_ : int); continuation_wake = _ }) ->
+         (* The walk logged each held completion as an error. *)
+         ()
+       | Ok
            (Keeper_board_attention_worker.Partition_settled
               { candidate_id; continuation_wake = _ }) ->
          Log.Keeper.info

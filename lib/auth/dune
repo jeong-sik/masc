@@ -36,18 +36,20 @@
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq)))
 
-; account_page.css is the sheet's only copy. The binary carries it as a string,
-; so a page sends it with no file beside the binary. A sheet that ever
-; contained the closing delimiter would end the string early and the generated
-; module would stop compiling, so that mistake cannot pass quietly.
+; account_base.css and account_page.css are the sheet's only copy, the base
+; first. The binary carries the sheet as a string, so a page sends it with no
+; file beside the binary. A sheet that ever contained the closing delimiter
+; would end the string early and the generated module would stop compiling,
+; so that mistake cannot pass quietly.
 
 (rule
  (target account_page_css.ml)
- (deps account_page.css)
+ (deps account_base.css account_page.css)
  (action
   (with-stdout-to
    %{target}
    (progn
     (echo "let sheet = {account_page_css|")
+    (cat account_base.css)
     (cat account_page.css)
     (echo "|account_page_css}\n")))))

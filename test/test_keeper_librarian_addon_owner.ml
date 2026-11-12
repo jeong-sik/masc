@@ -713,8 +713,12 @@ let test_absent_destination_ends_the_original_and_is_judged_again ()=
   (match run_worker fixture with
    | Worker.Unavailable detail -> fail ("the pass after the replacement commit is unavailable: " ^ detail)
    | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ -> ());
-  (* A later candidate is admitted through a second replacement root while the
-     Conflicted original is still retained under the superseded root. *)
+  (* The replacement took the candidate over and committed it, so the forest
+     that holds the Conflicted original is complete and that pass closed it. *)
+  check bool "the Conflicted original is no longer active" true
+    (Option.is_none (io (fun () -> Owner.load ~store:fixture.store ~scope:first.Owner.scope
+      ~request_id:first.request_id |> owned)));
+  (* A later candidate starts a root of its own. *)
   io (fun () -> ignore (append fixture.keepers_dir "new-tail" "Durable tail"));
   drive_until fixture settled |> assert_settled;
   check (list string) "the later candidate enters Memory" ["Durable A";"Durable tail"]

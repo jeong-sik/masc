@@ -17,7 +17,8 @@ let with_owner f = Eio_main.run (fun env ->
       f state scope (Owner.owner_for_scope ~state scope)))
 
 let observation marker next_deadline_unix : Dashboard_projection_cache.digest_observation =
-  {json = `Assoc ["health", `String "ok"; "marker", `String marker]; next_deadline_unix}
+  {json = `Assoc ["health", `String "ok"; "marker", `String marker]; next_deadline_unix;
+   completeness = Dashboard_projection_read.Complete}
 
 let marker owner = Yojson.Safe.Util.((Owner.publication owner).json |> member "marker" |> to_string)
 

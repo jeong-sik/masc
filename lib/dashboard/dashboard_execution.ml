@@ -3,7 +3,11 @@ include Dashboard_execution_builders
 
 module Agent_name_map = Set_util.StringMap
 
-type observation = { json : Yojson.Safe.t; next_deadline_unix : float option }
+type observation = Dashboard_projection_read.observation = {
+  json : Yojson.Safe.t;
+  next_deadline_unix : float option;
+  completeness : Dashboard_projection_read.completeness;
+}
 
 (* How many tasks that reached a terminal status inside the recency window the
    execution payload carries. The window itself is the filter; this bounds the
@@ -835,6 +839,10 @@ let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~
     (* Execution queue: first 10 attention-needing keepers in snapshot order.
        Not ranked — the cut is positional, not by severity or recency. *)
     let limited_queue = take 10 execution_queue in
+    let keepers_unread = match Keeper_snapshot_unread.of_snapshot snapshot_json with
+      | Ok unread -> unread | Error detail -> invalid_arg ("dashboard execution: " ^ detail) in
+    let keepers_listing = match Keeper_snapshot_unread.listing_of_snapshot snapshot_json with
+      | Ok listing -> listing | Error detail -> invalid_arg ("dashboard execution: " ^ detail) in
     let base_fields =
       let utf8_repair = Safe_ops.persistence_utf8_repair_stats () in
       [ "generated_at", `String (Masc_domain.now_iso ())
@@ -868,15 +876,11 @@ let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~
            beside the rows so the execution screen does not count them as
            absent (#38090). *)
         ( "keepers_unread"
-        , match Keeper_snapshot_unread.of_snapshot snapshot_json with
-          | Ok unread -> `List (List.map Keeper_snapshot_unread.to_json unread)
-          | Error detail -> invalid_arg ("dashboard execution: " ^ detail) )
+        , `List (List.map Keeper_snapshot_unread.to_json keepers_unread) )
       ; (* Whether the name list read at all: with no list, [keepers] and
            [keepers_unread] are both empty (#38120). *)
         ( "keepers_listing"
-        , match Keeper_snapshot_unread.listing_of_snapshot snapshot_json with
-          | Ok listing -> Keeper_snapshot_unread.listing_to_json listing
-          | Error detail -> invalid_arg ("dashboard execution: " ^ detail) )
+        , Keeper_snapshot_unread.listing_to_json keepers_listing )
       ]
     in
     let now = Time_compat.now () in
@@ -926,13 +930,15 @@ let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~
         (base_fields
          @ task_fields
          @ [ "messages", `List (List.map message_json messages) ]) in
-    {json; next_deadline_unix})
+    {json; next_deadline_unix;
+     completeness = Dashboard_projection_read.keeper_completeness ~listing:keepers_listing ~unread:keepers_unread})
 ;;
 
 let observe_current ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
   let effective_actor = Dashboard_projection_cache.normalize_actor_name actor in
   match execution_fixture_name ?fixture () with
-  | Some "execution_smoke" -> {json = execution_smoke_fixture_json (); next_deadline_unix = None}
+  | Some "execution_smoke" -> {json = execution_smoke_fixture_json (); next_deadline_unix = None;
+      completeness = Dashboard_projection_read.Complete}
   | Some _ | None ->
       render_observation ~read_policy:Dashboard_projection_read.Current
         ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()

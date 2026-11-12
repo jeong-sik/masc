@@ -564,7 +564,8 @@ let publish_execution_observation attempt (observation : Dashboard_execution.obs
 ;;
 
 let publish_execution_attempt_success attempt json =
-  publish_execution_observation attempt {Dashboard_execution.json; next_deadline_unix = None}
+  publish_execution_observation attempt {Dashboard_execution.json; next_deadline_unix = None;
+    completeness = Dashboard_projection_read.Complete}
 ;;
 
 let publish_execution_attempt_failure_message attempt message =

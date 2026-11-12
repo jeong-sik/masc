@@ -2,6 +2,7 @@ module Types = Masc_domain
 
 module Lib = Masc
 module Workspace = Lib.Workspace
+module Dashboard_projection_read = Lib.Dashboard_projection_read
 
 open Alcotest
 
@@ -797,6 +798,42 @@ let test_an_unlisted_keeper_directory_is_not_an_empty_fleet () =
   | Error _ -> ()
   | Ok _ -> fail "an unknown listing state decoded"
 
+let test_current_partial_rows_recover_after_actual_metadata_repair () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    with_test_env (fun ~clock ~sw ->
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:None);
+      ignore (Workspace.bind_session config ~agent_name:"readable-agent" ~capabilities:[] ());
+      declare_unbooted_keeper config "readable-declaration";
+      let broken = Lib.Keeper_types_profile.keeper_meta_path config "unread-metadata" in
+      (match Fs_compat.save_file_atomic broken "{" with
+       | Ok () -> () | Error detail -> fail detail);
+      let mission () = Dashboard_briefing.observe_current ~config ~sw ~clock ~proc_mgr:None () in
+      let execution () = Dashboard_execution.observe_current ~config ~sw ~clock ~proc_mgr:None () in
+      let assert_partial label (observation : Dashboard_projection_read.observation) =
+        (match observation.completeness with
+         | Partial _ -> () | Complete -> failf "%s settled the failed metadata read" label);
+        match Lib.Keeper_snapshot_unread.list_of_json
+            Yojson.Safe.Util.(observation.json |> member "keepers_unread") with
+        | Ok [{name = "unread-metadata"; reason = Meta_read_failed _}] -> ()
+        | Ok _ | Error _ -> failf "%s lost the actual unread Keeper" label in
+      let partial_mission = mission () and partial_execution = execution () in
+      assert_partial "Mission" partial_mission;
+      assert_partial "Execution" partial_execution;
+      check bool "Mission retains its independently readable agent" true
+        Yojson.Safe.Util.(partial_mission.json |> member "agent_briefs" |> to_list
+          |> List.exists (fun row -> row |> member "agent_name" = `String "readable-agent"));
+      check bool "Execution retains its independently readable declaration" true
+        (Option.is_some (row_named "readable-declaration"
+          Yojson.Safe.Util.(partial_execution.json |> member "keepers" |> to_list)));
+      (* Raw repair deliberately sends no source notification. This unit
+         verifies the next Current read, not the worker's retry scheduling. *)
+      Sys.remove broken;
+      List.iter (fun (label, observation) -> match observation.Dashboard_projection_read.completeness with
+        | Complete -> () | Partial detail -> failf "%s stayed partial after repair: %s" label detail)
+        ["Mission", mission (); "Execution", execution ()]))
+
 (* The execution render that answered 500 on 2026-09-19: the snapshot's
    declaration row for [imp] had no health, and the continuity briefs raised
    on it. *)
@@ -1238,6 +1275,8 @@ let () =
             test_a_keeper_whose_row_raises_is_reported_unread;
           Alcotest.test_case "an unlisted keeper directory is not an empty fleet" `Quick
             test_an_unlisted_keeper_directory_is_not_an_empty_fleet;
+          Alcotest.test_case "Current retains partial rows and observes actual metadata repair" `Quick
+            test_current_partial_rows_recover_after_actual_metadata_repair;
           Alcotest.test_case "pressure rank orders by health" `Quick
             test_pressure_rank_orders_by_surface_status;
           Alcotest.test_case "keeper brief publishes health and phase" `Quick

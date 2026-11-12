@@ -92,6 +92,7 @@ type briefing_projection = {
   keepers_listing : Keeper_snapshot_unread.listing;
   internal_signals : Yojson.Safe.t list;
   next_deadline_unix : float option;
+  completeness : Dashboard_projection_read.completeness;
 }
 
 let build_projection ~read_policy ?actor ~config ~sw ~clock
@@ -147,7 +148,7 @@ let build_projection ~read_policy ?actor ~config ~sw ~clock
                   ("recommended_actions", `List []);
                   ("error", `String message);
                 ])) in
-      {Dashboard_projection_cache.json; next_deadline_unix = None}
+      {Dashboard_projection_cache.json; next_deadline_unix = None; completeness = Dashboard_projection_read.Complete}
   in
   let snapshot_json, digest_observation =
     Eio.Fiber.pair snapshot_compute digest_compute
@@ -211,6 +212,8 @@ let build_projection ~read_policy ?actor ~config ~sw ~clock
     keepers_unread;
     keepers_listing;
     internal_signals;
+    completeness = Dashboard_projection_read.combine_completeness digest_observation.completeness
+      (Dashboard_projection_read.keeper_completeness ~listing:keepers_listing ~unread:keepers_unread);
     next_deadline_unix = (match digest_observation.next_deadline_unix, agent_observation.next_deadline_unix with
       | None, deadline | deadline, None -> deadline
       | Some left, Some right -> Some (Float.min left right));
@@ -261,12 +264,17 @@ let render_projection projection =
       ("internal_signals", `List projection.internal_signals);
     ]
 
-type observation = {json : Yojson.Safe.t; next_deadline_unix : float option}
+type observation = Dashboard_projection_read.observation = {
+  json : Yojson.Safe.t;
+  next_deadline_unix : float option;
+  completeness : Dashboard_projection_read.completeness;
+}
 
 let observe_current ?actor ~config ~sw ~clock ~proc_mgr () =
   let projection = build_projection ~read_policy:Dashboard_projection_read.Current
       ?actor ~config ~sw ~clock ~proc_mgr () in
-  {json = render_projection projection; next_deadline_unix = projection.next_deadline_unix}
+  {json = render_projection projection; next_deadline_unix = projection.next_deadline_unix;
+   completeness = projection.completeness}
 
 let json ?actor ~config ~sw ~clock ~proc_mgr () =
   build_projection ~read_policy:Dashboard_projection_read.Reuse

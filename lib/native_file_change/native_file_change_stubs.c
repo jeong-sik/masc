@@ -133,7 +133,7 @@ CAMLprim value masc_file_change_create(value paths, value directories, value dev
     if (registered < 0) failed(raw, "file_change_register", Field(paths, i));
 #elif defined(__linux__)
     uint32_t mask = Bool_val(Field(directories, i))
-      ? IN_ONLYDIR | IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO
+      ? IN_ONLYDIR | IN_ATTRIB | IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO
         | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT
       : IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT;
     /* This proc link identifies the opened inode, even if the caller's

@@ -114,10 +114,20 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 | | |
 |---|---|
 | 장점 | 읽기는 지금 틱이 하는 것 그대로예요(같은 run 은 한 번). 새 폴링이 없어요. 영수증 이어달리기와 이어받는 길, 소유, 재시작 처리를 그대로 써요. |
-| 대가 | `keeper_receipt_wait` 가 `Execute` 가 돌려준 `request_id` 만 받는 계약을 넓혀야 해요. 영수증의 `tool_name`·`arguments` 와 요청 레코드(`Keeper_msg_async.entry`)가 Execute 전용인지 확인이 필요해요(아래). 일정 쪽은 `due` 를 여전히 요구해요(5.3 참고). |
+| 대가 | `keeper_receipt_wait` 가 요청마다 「background Execute 인가」를 묻는 한 곳을 넓혀야 해요(아래). 일정 행에는 요청 레코드가 없어서, 요청 레코드를 누가 만드는지 정해야 해요. 서버가 재시작하면 끝나지 않은 요청에 영수증을 써 주는 길(`deliver_unfinished_runs`)도 생산자마다 따로 있어요. |
 | 위험 | 영수증 형식과 `request_id` 의 의미가 바뀌면 실행 기록 `v3` 에 닿아요. 그러면 fresh state 가 또 필요할 수 있어요. |
 
-**[확인 필요]** `Keeper_msg_async.entry` 는 「producer」 개념을 갖고 있어요(`lib/keeper/keeper_msg_async.mli:52, 318, 369`). Execute 이외의 생산자가 이 레코드를 만들 수 있는지, `request_arguments`(`lib/keeper/keeper_execute_background.mli:63`)가 Execute 만 읽는지는 읽지 않았어요. 이 확인이 (나)의 변경 범위를 정해요.
+**[사실]** `Keeper_msg_async` 는 Execute 전용이 아니에요. 요청 레코드가 생산자의 맥락(`request_context`)을 들고(`lib/keeper/keeper_msg_async.mli:51-53`), `lib/fusion/fusion_tool.ml:226` 이 `submit_with_request_id` 로 Execute 이외의 생산자로 이미 쓰고 있어요. `poll` 과 `cancel` 은 무엇이 요청을 만들었는지 보지 않아요(`lib/keeper/keeper_execute_background.ml:76-78` 주석).
+
+**[사실]** 막는 곳은 한 곳이에요. `lib/keeper/keeper_tool_receipt_wait.ml:45-49` 의 `waitable` 이 요청 레코드에서 `Keeper_execute_background.request_arguments` 를 읽어 `None` 이면 「This request is not a background Execute run.」으로 거절해요. 요청 레코드가 아예 없으면(`Absent`) 「No background run of this Keeper has this request_id.」예요. 영수증을 쓰는 쪽 `lib/keeper/keeper_receipt_wait_sweep.ml:19-21` 은 `None` 일 때 `Outbox.Unknown`(typed 부재)으로 쓰니 Execute 이외의 요청도 통과해요.
+
+**[사실]** 영수증 한 장의 `thread_id` 는 생산자 이름(`execute_background`), `tool_name` 은 `tool_execute` 예요(`keeper_execute_background.ml:9`, `:67-71`). 새 생산자는 자기 이름을 가져야 해요.
+
+**[사실]** 일정 행(`until_github_run`)은 `Keeper_msg_async` 요청이 아니에요. `lib/schedule_run_watch.mli:1-10` 은 이 모듈이 상태를 따로 갖지 않고 일정 행이 유일한 기록이라고 적어요. 그래서 일정 틱이 영수증만 쓰면 `waitable` 이 `Absent` 로 거절해요.
+
+**[제안]** 그래서 (나)는 두 모양이에요.
+- (나-1) 일정 틱이 run 이 끝날 때 요청 레코드와 영수증을 함께 써요. 틱의 읽기를 그대로 쓰지만 요청 레코드를 일정 쪽에서 만들어야 하고, Keeper 는 일정을 만든 응답에서 `request_id` 를 받아야 해요. **[확인 필요]** 지금 응답에 무엇이 들어 있는지는 읽지 않았어요.
+- (나-2) 새 생산자가 `Keeper_msg_async` 요청을 만들고 그 worker 가 서버의 run 읽기 결과를 기다려요. 요청·소유·재시작은 지금 길 그대로지만, 읽기를 일정 틱과 나누는 구조가 새로 필요해요. 나누지 못하면 서버 안의 폴링이 Keeper 마다 늘어서 (가)와 같은 대가가 돼요. **[확인 필요]** 읽기를 나누는 구조의 크기는 읽지 않았어요.
 
 ### 5.3 (다) 서버가 한 번 호출에서 끝까지 기다렸다가 돌려주는 방법
 
@@ -147,14 +157,14 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 ## 7. 사용자가 정할 것
 
 1. **먼저 (가)의 채택을 볼까요.** 영수증 이어달리기가 올라간 지금 `run_in_background` 비율이 오르는지 11-13 16:47 KST 중간 확인에서 읽고, 오르지 않을 때만 (나)로 가요. 대가는 하루를 더 기다리는 것이에요. 추천이에요.
-2. **(나)를 정석으로 볼까요.** 영수증 쓰기 쪽을 넓히는 일이라 `Keeper_msg_async` 의 생산자 계약을 먼저 읽어야 해요(5.2). 그 확인을 이 RFC 의 다음 갱신으로 받을지 결정해 주세요.
+2. **(나)를 정석으로 볼까요.** `Keeper_msg_async` 의 생산자 계약은 읽었어요(5.2). 막는 곳이 `keeper_tool_receipt_wait.ml:45-49` 한 곳이라 (나)의 변경 범위는 작아요. 정할 것은 (나-1)과 (나-2) 중 어느 쪽을 정석으로 볼지예요. 추천은 (나-1)이에요: 읽기가 그대로고 새 폴링이 없어요. 대가는 일정 쪽이 요청 레코드를 만드는 것과 응답에 `request_id` 를 싣는 것이에요.
 3. **(다)를 지울까요.** 큐 대기를 줄이지 못하는 후보예요. 이 글에서 닫으면 이후 논의에서 빼요.
 4. **Keeper 에게 이유를 물을까요.** `rondo`, `masc-productor-owner` 에게 「어떤 대기는 일정으로, 어떤 대기는 `sleep` 으로 하는 이유」를 Board 로 한 번 묻는 길이에요. 프롬프트가 아니라 일반 메시지이고 Keeper 에게 보내는 일이라 사용자 허락이 필요해요. 이 글은 이유를 모르는 채로 쓰였어요.
 
 ## 8. 확인하지 못한 것
 
 - 두 주인이 왜 이 모양에서 일정을 쓰지 않는지. 3절은 정황이에요.
-- `Keeper_msg_async.entry` 가 Execute 이외의 생산자를 받는지(5.2).
+- (나-2)의 읽기를 일정 틱과 나누는 구조의 크기(5.2).
 - 반복문 안의 `sleep` 276건(24.6시간) 중 GitHub 읽기가 차지하는 몫.
 - `rondo` 가 run id 를 어디서 얻는지. 같은 턴의 `git push` 뒤라는 것만 알아요.
 - 분류는 정규식이에요(`push`·`gh workflow run` 등 명령 목록, 리터럴 `sleep` 합). 셸 변수로 감춘 명령, 반복문의 `sleep` 은 놓쳐요.

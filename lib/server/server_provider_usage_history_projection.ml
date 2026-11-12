@@ -25,13 +25,6 @@ let kind_of_stored kind =
              Some (Usage.Provider_label (String.sub kind from (String.length kind - from)))
            else None)
 
-let utilization_json = function
-  | Usage.Fraction value -> [ "unit", `String "fraction"; "value", `Float value ]
-  | Usage.Percent value -> [ "unit", `String "percent"; "value", `Int value ]
-  | Usage.Usd { used; limit } ->
-      [ "unit", `String "usd"; "value", `Float used
-      ; "limit", Json_util.float_opt_to_json limit ]
-
 let record_json ~scope_id ~observed_at (report : Usage.report) =
   let source = Usage.source_to_string report.source in
   let snapshot = match Usage.report_shape report.source with
@@ -55,7 +48,7 @@ let record_json ~scope_id ~observed_at (report : Usage.report) =
         ; "role", `String (Usage.window_role_to_string window.role)
         ; "observed_at", `Float observed_at
         ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) window.resets_at
-        ] @ utilization_json window.utilization))
+        ] @ Usage.utilization_fields window.utilization))
     report.windows
 
 type point = {
@@ -96,7 +89,7 @@ let number key json =
   | Some (`Int value) -> Ok (float_of_int value)
   | _ -> Error ("provider usage history: invalid " ^ key)
 
-(* The stored line back into the variant [utilization_json] wrote: the unit
+(* The stored line back into the variant [Usage.utilization_fields] wrote: the unit
    word and the value's JSON type decide together, and anything else is not
    a report this store wrote. *)
 let utilization_of_json json =
@@ -156,7 +149,7 @@ let point_json point =
     ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) point.limit_id
     ; "observed_at", `Float point.observed_at
     ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) point.resets_at
-    ] @ utilization_json point.utilization)
+    ] @ Usage.utilization_fields point.utilization)
 
 type snapshot_state = Reported | Reported_no_windows
 

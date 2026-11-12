@@ -89,6 +89,18 @@ let source_of_string = function
   | _ -> None
 ;;
 
+(* The fields a utilization is written with, in the stored history rows and
+   in the windows of [/api/v1/runtime/resolved] alike. *)
+let utilization_fields : utilization -> (string * Yojson.Safe.t) list = function
+  | Fraction value -> [ "unit", `String "fraction"; "value", `Float value ]
+  | Percent value -> [ "unit", `String "percent"; "value", `Int value ]
+  | Usd { used; limit } ->
+    [ "unit", `String "usd"
+    ; "value", `Float used
+    ; "limit", Option.fold ~none:`Null ~some:(fun limit -> `Float limit) limit
+    ]
+;;
+
 open Result.Syntax
 
 let fields_at ~path = function

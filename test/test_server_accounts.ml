@@ -689,6 +689,81 @@ let json_of label body =
   | exception Yojson.Json_error detail -> Alcotest.failf "%s: %s: %S" label detail body
 ;;
 
+(* ---- the console ---- *)
+
+(* Runs [f] while the dashboard bundle of the process is a directory of the
+   case that holds [files], each under its name in the bundle. The checkout
+   the suite runs in then decides no answer. An empty value of the variable
+   reads as no value ([Host_config]), so the bundle the suite was started
+   with comes back afterwards. *)
+let with_bundle files f =
+  let variable = "MASC_ASSETS_DIR" in
+  let inherited = Option.value (Sys.getenv_opt variable) ~default:"" in
+  let root = Filename.temp_dir "server-accounts-bundle-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv variable inherited;
+      remove_tree root)
+    (fun () ->
+      let bundle = Filename.concat root "dashboard" in
+      Unix.mkdir bundle 0o700;
+      List.iter (fun (name, bytes) -> write_file (Filename.concat bundle name) bytes) files;
+      Unix.putenv variable root;
+      f ())
+;;
+
+let holds ~part text =
+  let part_length = String.length part in
+  let last = String.length text - part_length in
+  let rec same_from index offset =
+    offset = part_length
+    || (Char.equal text.[index + offset] part.[offset] && same_from index (offset + 1))
+  in
+  let rec from index = index <= last && (same_from index 0 || from (index + 1)) in
+  from 0
+;;
+
+(* The value of the one header line of this name. *)
+let header name lines =
+  let prefix = name ^ ": " in
+  match
+    List.filter_map
+      (fun line ->
+        if String.starts_with ~prefix (String.lowercase_ascii line)
+        then Some (String.sub line (String.length prefix) (String.length line - String.length prefix))
+        else None)
+      lines
+  with
+  | [ value ] -> Some value
+  | [] | _ :: _ :: _ -> None
+;;
+
+(* The directives of a policy, sorted. A nonce of 64 hex digits, as the
+   server draws it, reads as [N]: its value differs per answer. *)
+let directives policy =
+  let hex = function
+    | '0' .. '9' | 'a' .. 'f' -> true
+    | _ -> false
+  in
+  let without_nonce directive =
+    match String.split_on_char '\'' directive with
+    | [ before; value; after ]
+      when String.starts_with ~prefix:"nonce-" value
+           && String.length value = String.length "nonce-" + 64
+           && String.for_all hex (String.sub value (String.length "nonce-") 64) ->
+      before ^ "'nonce-N'" ^ after
+    | _ -> directive
+  in
+  String.split_on_char ';' policy
+  |> List.map (fun directive -> without_nonce (String.trim directive))
+  |> List.sort String.compare
+;;
+
+let console_page = "<!doctype html><title>the console of the case</title>"
+let console_script = "export const built = 'the console of the case';\n"
+let operator_page = "<!doctype html><title>the operator dashboard of the case</title>"
+let operator_script = "export const built = 'the operator dashboard of the case';\n"
+
 let test_serves_its_table_alone () =
   Unix.putenv github_secret_env "secret-of-the-case";
   with_installation
@@ -804,6 +879,128 @@ let test_serves_its_table_alone () =
             (Ok Account_page_reading.Open)
             (Account_page_reading.login ~start:"/auth/github/start" body))
         [ "/"; Authz_activation.invitation_path ];
+      (* The console of a signed-in person. A bundle that does not hold its
+         build: the page says so with a 503 and runs nothing, and the rest of
+         the table answers as it does. *)
+      with_bundle [] (fun () ->
+        let status, headers, (_ : string) =
+          exchange ~net ~port ~meth:"GET" Server_account_console.page_path
+        in
+        Alcotest.(check int) "the console of a bundle that does not hold it" 503 status;
+        Alcotest.(check (option (list string)))
+          "the page that stands in applies its own sheet and runs no script"
+          (Some
+             [ "base-uri 'none'"
+             ; "default-src 'none'"
+             ; "form-action 'none'"
+             ; "frame-ancestors 'none'"
+             ; "style-src 'nonce-N'"
+             ])
+          (Option.map directives (header "content-security-policy" headers));
+        Alcotest.(check int)
+          "a file of a build the bundle does not hold"
+          404
+          (fst (request ~net ~port ~meth:"GET" (Server_account_console.page_path ^ "/assets/app.js")));
+        Alcotest.(check int)
+          "the home page of a server whose bundle holds no console"
+          200
+          (fst (request ~net ~port ~meth:"GET" "/")));
+      (* A bundle that holds the build of the console beside the operator
+         dashboard. *)
+      with_bundle
+        [ "accounts/index.html", console_page
+        ; "accounts/assets/app.js", console_script
+        ; "index.html", operator_page
+        ; "assets/operator.js", operator_script
+        ]
+        (fun () ->
+          let status, headers, body =
+            exchange ~net ~port ~meth:"GET" Server_account_console.page_path
+          in
+          Alcotest.(check int) "the console" 200 status;
+          Alcotest.(check string) "it is the page of the build, byte for byte" console_page body;
+          (* The whole policy is named: a directive that opens the page to
+             another origin, or to inline code, does not come in unnoticed. *)
+          Alcotest.(check (option (list string)))
+            "the policy of the console"
+            (Some
+               [ "base-uri 'none'"
+               ; "connect-src 'self'"
+               ; "default-src 'none'"
+               ; "form-action 'none'"
+               ; "frame-ancestors 'none'"
+               ; "script-src 'self'"
+               ; "style-src 'self'"
+               ; "style-src-attr 'none'"
+               ])
+            (Option.map directives (header "content-security-policy" headers));
+          Alcotest.(check (option string))
+            "a browser does not keep the page"
+            (Some "no-store")
+            (header "cache-control" headers);
+          (let status, headers, body =
+             exchange ~net ~port ~meth:"GET" (Server_account_console.page_path ^ "/assets/app.js")
+           in
+           Alcotest.(check int) "a file of the build" 200 status;
+           Alcotest.(check string) "it is the file of the build, byte for byte" console_script body;
+           Alcotest.(check (option string))
+             "it is answered as a script"
+             (Some "application/javascript; charset=utf-8")
+             (header "content-type" headers));
+          (* Nothing else of the bundle has an address on this server: not
+             below the assets of the console, by any spelling of the way up,
+             and not at the addresses of the single-user server. *)
+          List.iter
+            (fun path ->
+              let status, body = request ~net ~port ~meth:"GET" path in
+              Alcotest.(check int) ("GET " ^ path) 404 status;
+              Alcotest.(check bool)
+                ("no file of the bundle is the answer of " ^ path)
+                false
+                (List.exists
+                   (fun part -> holds ~part body)
+                   [ console_page; console_script; operator_page; operator_script ]))
+            [ Server_account_console.page_path ^ "/assets/"
+            ; Server_account_console.page_path ^ "/assets//app.js"
+            ; Server_account_console.page_path ^ "/assets/../index.html"
+            ; Server_account_console.page_path ^ "/assets/../../index.html"
+            ; Server_account_console.page_path ^ "/assets/../../assets/operator.js"
+            ; Server_account_console.page_path ^ "/assets/..%2f..%2findex.html"
+            ; Server_account_console.page_path ^ "/assets/%2e%2e/index.html"
+            ; Server_account_console.page_path ^ "/assets/missing.js"
+            ; Server_account_console.page_path ^ "/index.html"
+            ; "/accounts/index.html"
+            ; "/dashboard"
+            ; "/dashboard/assets/operator.js"
+            ];
+          (* The sheet the console links is the first part of the sheet of
+             the pages the server writes itself, so the two look alike. A
+             browser that holds it is told so and gets no bytes again. *)
+          let sheet_path = Server_account_console.page_path ^ "/base.css" in
+          let status, headers, body = exchange ~net ~port ~meth:"GET" sheet_path in
+          Alcotest.(check int) "the sheet the console links" 200 status;
+          Alcotest.(check (option string))
+            "it is answered as a sheet"
+            (Some "text/css; charset=utf-8")
+            (header "content-type" headers);
+          Alcotest.(check bool) "it is the base sheet" true (String.equal body Account_page.base_sheet);
+          (* The address stays and the bytes change with the binary. *)
+          Alcotest.(check (option string))
+            "a browser asks for it again on every use"
+            (Some "no-cache")
+            (header "cache-control" headers);
+          Alcotest.(check bool)
+            "the home page carries the same sheet"
+            true
+            (holds ~part:Account_page.base_sheet (snd (request ~net ~port ~meth:"GET" "/")));
+          match header "etag" headers with
+          | None -> Alcotest.fail "the sheet has no entity tag"
+          | Some tag ->
+            let status, (_ : string list), body =
+              exchange ~net ~port ~headers:[ "If-None-Match", tag ] ~meth:"GET" sheet_path
+            in
+            Alcotest.(check int) "the sheet, asked by a browser that holds it" 304 status;
+            Alcotest.(check string) "no bytes go again" "" body);
       (* The routes of a person are in the table, and a request with no
          credential is refused by the route. *)
       List.iter

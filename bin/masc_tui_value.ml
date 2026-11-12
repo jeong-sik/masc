@@ -132,6 +132,8 @@ module Count = struct
     | Event
     | Image
     | File
+    | Task
+    | Open_task
 
   (* Singular, plural. *)
   let english = function
@@ -144,6 +146,8 @@ module Count = struct
     | Event -> "event", "events"
     | Image -> "image", "images"
     | File -> "file", "files"
+    | Task -> "task", "tasks"
+    | Open_task -> "open task", "open tasks"
 
   (* The thing, then the figure with its counter. A row is counted by the
      word that names it. *)
@@ -158,13 +162,18 @@ module Count = struct
     | Event -> "이벤트 " ^ figure ^ "개"
     | Image -> "그림 " ^ figure ^ "장"
     | File -> "파일 " ^ figure ^ "개"
+    | Task -> "작업 " ^ figure ^ "개"
+    | Open_task -> "열린 작업 " ^ figure ^ "개"
 
-  let reading ~ko noun count =
-    let figure = grouped count in
+  let written ~ko noun count figure =
     if ko then korean noun figure
     else
       let one, many = english noun in
       figure ^ " " ^ if count = 1 then one else many
+
+  let reading ~ko noun count = written ~ko noun count (grouped count)
+
+  let at_least ~ko noun count = written ~ko noun count ("≥" ^ grouped count)
 end
 
 module Position = struct

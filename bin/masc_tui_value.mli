@@ -94,6 +94,8 @@ module Count : sig
     | Event
     | Image  (** One picture staged on a message. *)
     | File  (** One file a keeper wrote. *)
+    | Task  (** One Task of the Work hub. *)
+    | Open_task  (** A Task not yet done or cancelled. *)
 
   val reading : ko:bool -> noun -> int -> string
   (** The count and what it counts, in the screen's language: [3 keepers],
@@ -101,6 +103,11 @@ module Count : sig
       names one thing in the singular and any other number in the plural.
       Korean names the thing first and counts it with the counter that
       thing takes. The figure is {!grouped}. *)
+
+  val at_least : ko:bool -> noun -> int -> string
+  (** {!reading} for a lower bound: [≥3 tasks], [작업 ≥3개]. A list read
+      in part holds this many and may hold more (RFC tui-one-screen-grammar,
+      section 6.3). *)
 end
 
 (** Where the reader is in what the screen holds. *)

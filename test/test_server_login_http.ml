@@ -803,7 +803,13 @@ let a_person_calls_mcp () =
     Alcotest.(check int) ("tools/list: " ^ listed.body) 200 listed.status;
     Alcotest.(check (list string))
       "the tools"
-      [ "masc_whoami"; "masc_my_runtimes"; "masc_my_keepers"; "masc_my_keeper_create"; "masc_my_keeper_assign" ]
+      [ "masc_whoami"
+      ; "masc_my_runtimes"
+      ; "masc_my_keepers"
+      ; "masc_my_keeper_create"
+      ; "masc_my_keeper_assign"
+      ; "masc_my_keeper_turn"
+      ]
       (match at [ "result"; "tools" ] listed with
        | `List tools ->
          List.map
@@ -930,7 +936,7 @@ let a_person_calls_mcp () =
       (whoami_line (as_pat (rpc ~id:13 "tools/list"))))
 ;;
 
-(* The Runtime and Keeper tools of the MCP endpoint (plan S1b-1b). Each tool
+(* The Runtime and Keeper tools of the MCP endpoint (plan S1b-1b, S1b-1c). Each tool
    is the route of the person's page under another name: the same judgment,
    the same function, the same words. A PAT whose scope lacks the effect of
    the route is refused by the tool, and a Keeper of another person is one
@@ -1070,7 +1076,30 @@ let a_person_keeps_keepers_over_mcp () =
          theirs
          "masc_my_keeper_assign"
          ~arguments:(`Assoc [ "keeper_id", `String "keeper-1"; "runtime_id", `String "account-1.claude-sonnet-5-5" ]));
-    check "the first person's Keeper is as it was" ("false", listed) (result owner "masc_my_keepers"))
+    check "the first person's Keeper is as it was" ("false", listed) (result owner "masc_my_keepers");
+    (* Plan S1b-1c: one turn of a Keeper. The tool stops where the route
+       stops, before any client starts. *)
+    let turn name message = `Assoc [ "keeper_id", `String name; "message", `String message ] in
+    check
+      "a PAT without the Keeper effect asks no Keeper"
+      ("true", error_json (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Pat_scope_lacks_own_keeper))
+      (result reader "masc_my_keeper_turn" ~arguments:(turn "keeper-1" "hello"));
+    check
+      "a turn of a Keeper no one made"
+      ("true", error_json "No Keeper of yours has this name.")
+      (result owner "masc_my_keeper_turn" ~arguments:(turn "keeper-2" "hello"));
+    check
+      "a turn of another person's Keeper"
+      ("true", error_json "No Keeper of yours has this name.")
+      (result theirs "masc_my_keeper_turn" ~arguments:(turn "keeper-1" "hello"));
+    check
+      "a blank message, in the words of the route"
+      ("true", error_json "The message is blank.")
+      (result owner "masc_my_keeper_turn" ~arguments:(turn "keeper-1" " "));
+    Alcotest.(check string)
+      "a turn without a message is refused by the definition of the tool"
+      "true"
+      (fst (result owner "masc_my_keeper_turn" ~arguments:(keeper "keeper-1"))))
 ;;
 
 (* Bytes another writer added to the log: the next commit finds the end moved

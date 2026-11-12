@@ -1178,7 +1178,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 층.
   - S1b-1a 경로 종류와 뼈대. `Mcp_request_admission`을 단일 사용자의 처리기에서 뽑는다. `POST /mcp`가 위 method를 답한다. 도구는 내 정보(`masc_whoami`) 하나다.
   - S1b-1b Runtime과 Keeper 도구. `masc_my_runtimes`(구독과 Runtime 목록, `Manage_own_provider`), `masc_my_keepers`, `masc_my_keeper_create`, `masc_my_keeper_assign`(`Manage_own_keeper`)이다. Runtime 목록은 배정에 넣을 `runtime_id`를 MCP만으로 알 수 있게 하려고 넣는다. 사람의 화면이 `GET /api/v1/auth/provider-accounts`로 읽는 것과 같다. 도구는 인자를 경로 함수가 읽는 본문으로 다시 써서 넘긴다. 인자의 순서는 답을 바꾸지 않는다.
-  - S1b-1c Keeper의 한 턴. 사람의 경로와 같은 시간 제한을 쓴다.
+  - S1b-1c Keeper의 한 턴. `masc_my_keeper_turn`이 `Server_preview_keeper_turn.run`을 부른다. 판정은 경로와 같은 `Auth_preview.keeper_owner_person`이다. 시간 제한, 메시지 길이, 계정마다 한 번에 한 호출은 그 함수의 것이다. 요청은 Runtime이 답할 때까지 열려 있다. 답을 나눠 보내는 일(progress, SSE)은 하지 않는다.
   - S1b-1d 실제 MCP client로 붙여 본 기록과 사용 안내.
 - 시험(S1b-1a).
   - credential 없음, 단일 사용자의 bearer, 폐기된 PAT가 각각 who-am-I 경로와 같은 답으로 거절된다.
@@ -1189,7 +1189,9 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 범위에 `Manage_own_keeper`가 없는 PAT는 Keeper 도구에서, `Manage_own_provider`가 없는 PAT는 Runtime 도구에서 경로와 같은 말로 거절된다.
   - Keeper를 만들고, 다시 만들고, Runtime을 배정하고, 목록을 읽은 답이 사람의 경로가 내는 JSON과 같다.
   - 다른 사람은 그 Keeper의 이름을 가져가지 못하고 Runtime을 배정하지 못한다.
-- 뒤 층의 시험: 다른 사람의 Keeper에 청한 한 턴(S1b-1c).
+- 시험(S1b-1c).
+  - 범위에 `Manage_own_keeper`가 없는 PAT, 아무도 만들지 않은 Keeper, 다른 사람의 Keeper, 빈 메시지가 경로와 같은 말로 거절된다. 모두 client가 시작하기 전이다.
+  - 실제 client가 답하는 턴은 시험에 없다. S1b-1d에서 실제 구독으로 본다.
 - 하지 않는 것: Board, WebSocket, Dashboard 화면(C6), MCP OAuth(C5), SSE와 `subscriptions/listen`, resources와 prompts, 단일 사용자 MCP의 동작 바꾸기, dispatch 전용 MCP credential(설계 §7.3). 401 답에 `WWW-Authenticate`와 protected resource metadata를 싣는 일은 C5가 한다.
 
 ### E. official client 격리

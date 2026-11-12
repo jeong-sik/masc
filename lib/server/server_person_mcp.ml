@@ -15,14 +15,19 @@ let endpoint = "person"
    for the envelope and for the escapes of the value. *)
 let max_message_bytes = 4 * 16 * 1024
 
-type caller =
+type installation =
   { zone : Authz_zone.t
-  ; trusted : Authz_zone.trusted
+  ; env : Eio_unix.Stdenv.base
+  ; base_path : string
+  }
+
+type caller =
+  { trusted : Authz_zone.trusted
   ; now_ms : int
   ; gate : Auth_gate.request
   }
 
-let admitted { zone = (_ : Authz_zone.t); trusted; now_ms; gate } =
+let admitted { trusted; now_ms; gate } =
   match Auth_gate.decide trusted ~now_ms Route_access.Read_auth gate with
   | Ok (Auth_gate.Authenticated (_ : Auth_gate.authenticated)) -> Ok ()
   | Ok (Auth_gate.Anonymous | Auth_gate.Judged_by_route) | Error (_ : Auth_gate.reason) ->
@@ -39,8 +44,9 @@ type tool =
   | Keepers
   | Keeper_create
   | Keeper_assign
+  | Keeper_turn
 
-let tools = [ Whoami; Runtimes; Keepers; Keeper_create; Keeper_assign ]
+let tools = [ Whoami; Runtimes; Keepers; Keeper_create; Keeper_assign; Keeper_turn ]
 
 let name_of = function
   | Whoami -> "masc_whoami"
@@ -48,6 +54,7 @@ let name_of = function
   | Keepers -> "masc_my_keepers"
   | Keeper_create -> "masc_my_keeper_create"
   | Keeper_assign -> "masc_my_keeper_assign"
+  | Keeper_turn -> "masc_my_keeper_turn"
 ;;
 
 (* Decoded when the module starts, as every tool definition the binary
@@ -59,12 +66,14 @@ let definition_of =
   let keepers = load Keepers in
   let keeper_create = load Keeper_create in
   let keeper_assign = load Keeper_assign in
+  let keeper_turn = load Keeper_turn in
   function
   | Whoami -> whoami
   | Runtimes -> runtimes
   | Keepers -> keepers
   | Keeper_create -> keeper_create
   | Keeper_assign -> keeper_assign
+  | Keeper_turn -> keeper_turn
 ;;
 
 let definitions = List.map (fun tool -> tool, definition_of tool) tools
@@ -82,11 +91,13 @@ let tool_json ((_ : tool), { Tool_definition_toml.schema; title; _ }) =
 
 (* The state of the snapshot that judges the request, as a route of a person
    reads it. *)
-let state { trusted; _ } = (trusted :> Authz_zone.snapshot).Authz_zone.state
+let state { trusted; now_ms = (_ : int); gate = (_ : Auth_gate.request) } =
+  (trusted :> Authz_zone.snapshot).Authz_zone.state
+;;
 
 (* The one a tool acts for, judged by [gate] as the route of the tool judges.
    A request that does not pass gets the answer of that route. *)
-let judged gate { trusted; now_ms; gate = request; _ } f =
+let judged gate { trusted; now_ms; gate = request } f =
   match gate trusted ~now_ms request with
   | Error answer -> answer
   | Ok who -> f who
@@ -119,17 +130,28 @@ let with_body names arguments f =
 ;;
 
 (* The function of the person's route, with the judgment that route makes. *)
-let run caller tool ~arguments =
+let run installation caller tool ~arguments =
   match tool with
   | Whoami -> Auth_preview.whoami caller.trusted ~now_ms:caller.now_ms caller.gate
   | Runtimes -> judged Auth_preview.person caller (Auth_preview.provider_accounts (state caller))
   | Keepers -> judged Auth_preview.keeper_owner caller (Auth_preview_keeper.list (state caller))
   | Keeper_create ->
     judged Auth_preview.keeper_owner caller (fun user_id ->
-      with_body [ "keeper_id" ] arguments (Auth_preview_keeper.make caller.zone user_id))
+      with_body [ "keeper_id" ] arguments (Auth_preview_keeper.make installation.zone user_id))
   | Keeper_assign ->
     judged Auth_preview.keeper_owner caller (fun user_id ->
-      with_body [ "keeper_id"; "runtime_id" ] arguments (Auth_preview_keeper.assign caller.zone user_id))
+      with_body [ "keeper_id"; "runtime_id" ] arguments (Auth_preview_keeper.assign installation.zone user_id))
+  | Keeper_turn ->
+    (* The turn starts the client of the person's account on a home under
+       their namespace, so its judgment gives the namespace too. *)
+    judged Auth_preview.keeper_owner_person caller (fun { Auth_preview.user_id; namespace } ->
+      with_body
+        [ "keeper_id"; "message" ]
+        arguments
+        (Server_preview_keeper_turn.run
+           ~env:installation.env
+           ~person:{ Server_setup_account_login.zone = installation.zone; user_id; namespace }
+           ~base_path:installation.base_path))
 ;;
 
 let succeeded = function
@@ -183,7 +205,7 @@ let call_of_params = function
     Error "Invalid params: expected an object with a name"
 ;;
 
-let call caller { tool; arguments } =
+let call installation caller { tool; arguments } =
   let { Tool_definition_toml.schema; _ } = definition_of tool in
   match
     Tool_input_contract.check_arguments
@@ -194,7 +216,7 @@ let call caller { tool; arguments } =
   with
   | Error { Tool_input_contract.message; _ } -> tool_result ~is_error:true message
   | Ok (arguments, (_ : Tool_input_contract.accepted)) ->
-    result_of_answer (run caller tool ~arguments)
+    result_of_answer (run installation caller tool ~arguments)
 ;;
 
 (* ---- the methods ---- *)
@@ -251,19 +273,19 @@ let list_tools ~id params =
            @ Mcp_server.(cache_hint_fields static_catalogue_cache_hint)))
 ;;
 
-let call_tool caller ~id params =
+let call_tool installation caller ~id params =
   match call_of_params params with
   | Error message -> A.error ~id Mcp_error_code.Invalid_params message
-  | Ok call_ -> P.make_response ~id (call caller call_)
+  | Ok call_ -> P.make_response ~id (call installation caller call_)
 ;;
 
-let result caller ~id (request : P.jsonrpc_request) =
+let result installation caller ~id (request : P.jsonrpc_request) =
   match request.method_ with
   | "server/discover" -> discover ~id
   | "initialize" -> initialize ~id request.params
   | "ping" -> P.make_response ~id (`Assoc [])
   | "tools/list" -> list_tools ~id request.params
-  | "tools/call" -> call_tool caller ~id request.params
+  | "tools/call" -> call_tool installation caller ~id request.params
   | method_ ->
     (* [method_allowed] let it through, and no arm above takes it: a
        notification method sent with an id. *)
@@ -299,7 +321,7 @@ let json_answer ?(headers = []) request ~body json =
   { status; headers = json_headers @ headers; body = Yojson.Safe.to_string json }
 ;;
 
-let answer caller request ~body =
+let answer installation caller request ~body =
   match H.classify_mcp_accept request with
   | P.Http_negotiation.Rejected ->
     bad_request
@@ -317,5 +339,9 @@ let answer caller request ~body =
           { status = `Accepted; headers = [ no_store ]; body = "" }
         | A.Answer json -> json_answer request ~body json
         | A.Request { id; message = (_ : Yojson.Safe.t); request = message; protocol } ->
-          json_answer ~headers:(version_headers protocol) request ~body (result caller ~id message)))
+          json_answer
+            ~headers:(version_headers protocol)
+            request
+            ~body
+            (result installation caller ~id message)))
 ;;

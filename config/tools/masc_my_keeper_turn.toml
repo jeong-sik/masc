@@ -1,0 +1,27 @@
+name = "masc_my_keeper_turn"
+title = "Ask My Keeper"
+description = """
+Send one of your Keepers a message and get its answer. The turn runs on \
+the Runtime you gave the Keeper, on your own subscription. The answer is \
+JSON: keeper_id, runtime_id, model and text. The request stays open until \
+the Runtime answers. A Keeper without a Runtime, a subscription that is \
+not signed in or has no quota left, and a second call while one of the \
+same subscription runs are refused."""
+additional_properties = false
+
+[[params]]
+name = "keeper_id"
+type = "string"
+required = true
+min_length = 1
+description = """
+The name of your Keeper, as masc_my_keepers lists it."""
+
+[[params]]
+name = "message"
+type = "string"
+required = true
+min_length = 1
+description = """
+What you ask the Keeper. The server refuses a blank message and one over \
+its length bound."""

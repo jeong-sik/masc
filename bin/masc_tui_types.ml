@@ -24216,10 +24216,14 @@ let runtime_pick_availability pick (runtime : Tui_decode.runtime_option) =
 (* The words a refused row leads with. The frame cuts a row from its tail, and
    a reason drawn after the runtime id was the part cut, so the row read like
    any other until Enter refused it. *)
-let runtime_pick_refusal_tag = function
-  | No_output_schema_channel -> "no output schema"
-  | No_exact_body_deadline -> "no exact-body-timeout-s"
-  | Wrong_candidate_group -> "different candidate group"
+let runtime_pick_refusal_tag ~ko refusal =
+  match refusal, ko with
+  | No_output_schema_channel, false -> "no output schema"
+  | No_output_schema_channel, true -> "출력 스키마 없음"
+  | No_exact_body_deadline, false -> "no exact-body-timeout-s"
+  | No_exact_body_deadline, true -> "exact-body-timeout-s 없음"
+  | Wrong_candidate_group, false -> "different candidate group"
+  | Wrong_candidate_group, true -> "다른 후보 그룹"
 
 (* The sentence Enter on a refused row draws. *)
 let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
@@ -24293,47 +24297,75 @@ let runtime_picker_rows (state : state) pick =
 (* The one row the picker draws when it has no rows: the catalogue is unread,
    or it is read and the filter keeps none of it. The two need different
    actions, so they read differently. *)
-let runtime_catalog_reading_suffix = function
+let runtime_catalog_reading_suffix ~ko reading =
+  let say korean english = if ko then korean else english in
+  match reading with
   | Runtime_catalog_read -> ""
-  | Runtime_catalog_unread -> " · catalogue not read"
-  | Runtime_catalog_loading -> " · reading catalogue"
-  | Runtime_catalog_refreshing None -> " · refreshing; last observed catalogue"
+  | Runtime_catalog_unread -> say " · 목록 미조회" " · catalogue not read"
+  | Runtime_catalog_loading -> say " · 목록 조회 중" " · reading catalogue"
+  | Runtime_catalog_refreshing None ->
+      say " · 다시 조회 중 · 이전 관측 목록" " · refreshing; last observed catalogue"
   | Runtime_catalog_refreshing (Some detail) ->
-      " · retrying; last refresh failed: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
+      say " · 다시 시도 중 · 지난 조회 실패: " " · retrying; last refresh failed: "
+      ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
   | Runtime_catalog_stale detail ->
-      " · last observed catalogue: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
+      say " · 이전 관측 목록: " " · last observed catalogue: "
+      ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
   | Runtime_catalog_failed detail ->
-      " · catalogue read failed: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
+      say " · 목록 조회 실패: " " · catalogue read failed: "
+      ^ Masc.Tui_terminal_text.sanitize_terminal_text detail
 
-let runtime_picker_empty_note picker =
+let runtime_picker_empty_note ~ko picker =
   let noun = match picker.rlp_pick with
-    | Pick_route_default -> "route"
+    | Pick_route_default -> if ko then "경로" else "route"
     | Pick_conversation_lane _ | Pick_exact_lane _ | Pick_exact_lane_replacement _
-    | Pick_new_lane _ | Pick_media_failover -> "runtime" in
+    | Pick_new_lane _ | Pick_media_failover -> if ko then "런타임" else "runtime" in
   match picker.rlp_catalog_reading with
-  | Runtime_catalog_unread -> Printf.sprintf "  (%s catalogue unread)" noun
-  | Runtime_catalog_loading -> Printf.sprintf "  (%s catalogue loading)" noun
-  | Runtime_catalog_refreshing _ -> Printf.sprintf "  (%s catalogue refreshing; last observation retained)" noun
+  | Runtime_catalog_unread ->
+      Printf.sprintf (if ko then "  (%s 목록 미조회)" else "  (%s catalogue unread)") noun
+  | Runtime_catalog_loading ->
+      Printf.sprintf (if ko then "  (%s 목록 조회 중)" else "  (%s catalogue loading)") noun
+  | Runtime_catalog_refreshing _ ->
+      Printf.sprintf
+        (if ko then "  (%s 목록 다시 조회 중 · 이전 관측 유지)"
+         else "  (%s catalogue refreshing; last observation retained)")
+        noun
   | Runtime_catalog_stale detail ->
-      "  (" ^ noun ^ " catalogue needs refresh: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")"
+      "  (" ^ noun
+      ^ (if ko then " 목록 다시 조회 필요: " else " catalogue needs refresh: ")
+      ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")"
   | Runtime_catalog_failed detail ->
-      "  (" ^ noun ^ " catalogue read failed: "
+      "  (" ^ noun
+      ^ (if ko then " 목록 조회 실패: " else " catalogue read failed: ")
       ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")"
   | Runtime_catalog_read ->
       if picker.rlp_total = 0 then
         match picker.rlp_pick with
-        | Pick_exact_lane_replacement _ -> "  (no eligible replacement in this candidate group)"
+        | Pick_exact_lane_replacement _ ->
+            if ko then "  (이 후보 그룹에 교체할 수 있는 후보 없음)"
+            else "  (no eligible replacement in this candidate group)"
         | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_exact_lane _
-        | Pick_new_lane _ -> Printf.sprintf "  (%s catalogue is empty)" noun
+        | Pick_new_lane _ ->
+            Printf.sprintf (if ko then "  (%s 목록이 비어 있음)" else "  (%s catalogue is empty)") noun
+      else if ko then
+        Printf.sprintf "  (%d개 중 필터에 맞는 %s 없음)" picker.rlp_total noun
       else
         Printf.sprintf "  (no %s among %d matches the filter)" noun picker.rlp_total
 
 (* The keys the picker's header names, around the verb its Enter carries.
    While the filter is typed, letters are the filter's, so the header names
    only the keys that still act. *)
-let runtime_picker_keys enter = function
-  | None -> Printf.sprintf "j/k move, PgUp/PgDn page, %s, e cancel" enter
-  | Some _ -> Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter" enter
+let runtime_picker_keys ~ko enter = function
+  | None ->
+      Printf.sprintf
+        (if ko then "j/k 이동, PgUp/PgDn 쪽 넘김, %s, e 취소"
+         else "j/k move, PgUp/PgDn page, %s, e cancel")
+        enter
+  | Some _ ->
+      Printf.sprintf
+        (if ko then "\xe2\x86\x91/\xe2\x86\x93 이동, %s, Esc 필터 지우기"
+         else "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter")
+        enter
 
 let runtime_picker_choice_height = function
   | Pick_exact_lane _ | Pick_exact_lane_replacement _ -> 2
@@ -24348,7 +24380,7 @@ let runtime_picker_catalogue_notices (state : state) =
   | (Runtime_catalog_unread | Runtime_catalog_loading
     | Runtime_catalog_refreshing _ | Runtime_catalog_stale _
     | Runtime_catalog_failed _) as reading ->
-      [ runtime_catalog_reading_suffix reading ]
+      [ runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko) reading ]
 
 (* Count source notices before wrapping: a long first notice must not make
    the following refusal or read error disappear from the title's count. *)
@@ -24414,8 +24446,10 @@ let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
       rlp_selected_row = view.Masc_tui_pick_list.selected_row;
       rlp_total = view.Masc_tui_pick_list.total;
       rlp_catalog_reading = state.runtime_catalog_reading;
-      rlp_summary = Masc_tui_pick_list.summary view ^
-        runtime_catalog_reading_suffix state.runtime_catalog_reading;
+      rlp_summary =
+        Masc_tui_pick_list.summary ~ko:(state.ui_language = Lang_ko) view
+        ^ runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
+            state.runtime_catalog_reading;
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
 
@@ -24526,12 +24560,16 @@ let lanes_overview_projection (state : state) ~rows ~cols =
              | Some (Runtime_choice runtime) ->
                  let refusal = match runtime_pick_availability picker.rlp_pick runtime with
                    | Pick_available -> ""
-                   | Pick_refused refusal -> "[" ^ runtime_pick_refusal_tag refusal ^ "] " in
+                   | Pick_refused refusal ->
+                       "[" ^ runtime_pick_refusal_tag ~ko:(state.ui_language = Lang_ko) refusal
+                       ^ "] " in
                  "> " ^ refusal ^ runtime_model_picker_title runtime
-             | Some (Lane_choice _) | None -> runtime_picker_empty_note picker in
+             | Some (Lane_choice _) | None ->
+                 runtime_picker_empty_note ~ko:(state.ui_language = Lang_ko) picker in
           [ui_text state ~ko:"후보 추가 · " ~en:"Add candidate · " ^ choice
            ^ " → " ^ picker.rlp_lane
-           ^ runtime_catalog_reading_suffix picker.rlp_catalog_reading] in
+           ^ runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
+               picker.rlp_catalog_reading] in
     let failures = Option.to_list state.lanes_action_error
       @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
       @ runtime_lane_stale_lines state in
@@ -25482,28 +25520,36 @@ let keeper_runtime_picker_view (state : state) ~terminal_rows =
 
 (* The count line, with the keys that still act while a filter is typed:
    letters are the filter's then, so the footer's [d] and [j/k] are not. *)
-let keeper_runtime_picker_summary view =
+let keeper_runtime_picker_summary ~ko view =
   match view.Masc_tui_pick_list.filter with
-  | None -> Masc_tui_pick_list.summary view
+  | None -> Masc_tui_pick_list.summary ~ko view
   | Some _ ->
-      Masc_tui_pick_list.summary view
-      ^ " \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter"
+      Masc_tui_pick_list.summary ~ko view
+      ^ (if ko then
+           " \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 이동, Enter 선택, Esc 필터 지우기"
+         else " \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter")
 
 (* The row in place of the column header when there are no rows; [None]
    while there are. An unread catalogue is waited for and an empty match is
    typed away, so they read differently. *)
-let keeper_runtime_picker_empty_note ~reading view =
+let keeper_runtime_picker_empty_note ~ko ~reading view =
+  let say korean english = if ko then korean else english in
   if view.Masc_tui_pick_list.total = 0 then
     Some (match reading with
-      | Runtime_catalog_read -> "  (runtime catalogue is empty)"
-      | Runtime_catalog_unread -> "  (runtime catalogue not read yet)"
-      | Runtime_catalog_loading -> "  (reading runtime catalogue…)"
-      | Runtime_catalog_refreshing _ -> "  (refreshing the last empty runtime catalogue)"
+      | Runtime_catalog_read -> say "  (런타임 목록이 비어 있음)" "  (runtime catalogue is empty)"
+      | Runtime_catalog_unread -> say "  (런타임 목록 미조회)" "  (runtime catalogue not read yet)"
+      | Runtime_catalog_loading -> say "  (런타임 목록 조회 중…)" "  (reading runtime catalogue…)"
+      | Runtime_catalog_refreshing _ ->
+          say "  (비어 있던 이전 런타임 목록을 다시 조회 중)"
+            "  (refreshing the last empty runtime catalogue)"
       | Runtime_catalog_stale detail | Runtime_catalog_failed detail ->
-          "  (runtime catalogue needs refresh: " ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")")
+          say "  (런타임 목록 다시 조회 필요: " "  (runtime catalogue needs refresh: "
+          ^ Masc.Tui_terminal_text.sanitize_terminal_text detail ^ ")")
   else if view.Masc_tui_pick_list.shown = 0 then
     Some
-      (Printf.sprintf "  (no lane or runtime among %d matches the filter)"
+      (Printf.sprintf
+         (if ko then "  (%d개 중 필터에 맞는 Lane·런타임 없음)"
+          else "  (no lane or runtime among %d matches the filter)")
          view.Masc_tui_pick_list.total)
   else None
 

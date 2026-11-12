@@ -6198,7 +6198,8 @@ let context_inspector_content_lines ~cols state : context_pane_body =
       let notice = match state.runtime_catalog_reading with
         | Runtime_catalog_read -> []
         | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
-            [Masc_tui_types.runtime_catalog_reading_suffix state.runtime_catalog_reading]
+            [Masc_tui_types.runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
+               state.runtime_catalog_reading]
         | Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_failed _ -> [] in
       notice @ (match List.find_opt (fun (r:Tui_decode.runtime_option) -> String.equal r.ro_id id) state.runtime_catalog with
        | None -> ["Connection/model configuration unavailable in the current catalogue"]

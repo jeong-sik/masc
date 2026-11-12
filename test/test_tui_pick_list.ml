@@ -40,7 +40,7 @@ let test_typing_narrows_and_backspace_widens () =
   Alcotest.(check int) "out of six" 6 v.P.total;
   check_under "the first match is under the cursor" (Some "openai.gpt") t;
   Alcotest.(check string) "the header names the filter and the count"
-    "filter: open\xe2\x96\x8f 2 of 6" (P.summary v);
+    "filter: open\xe2\x96\x8f 2 of 6" (P.summary ~ko:false v);
   let wider = run [ "/"; "o"; "p"; "e"; "n"; "\127"; "\127"; "\127" ] in
   Alcotest.(check int) "\"o\" keeps every runtime with an o" 4
     (P.view ~page ~window:P.Opens_at_cursor ~label items wider).P.shown

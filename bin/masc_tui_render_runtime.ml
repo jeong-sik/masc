@@ -578,12 +578,13 @@ let render_runtime_detail (state : state) target =
 
 (* The picker keeps the selected row at the head of its existing window.
    Optional exact-slot identity detail follows that same candidate. *)
-let runtime_picker_choice_rows picker =
+let runtime_picker_choice_rows ~ko picker =
+  let say korean english = if ko then korean else english in
   let rows = ref [] in
   let push row = rows := row :: !rows in
   if picker.rlp_choices = [] then
     push
-      (Masc_tui_types.runtime_picker_empty_note picker)
+      (Masc_tui_types.runtime_picker_empty_note ~ko picker)
   else
     List.iteri (fun offset choice ->
       let mark = if picker.rlp_selected_row = Some offset then ">" else " " in
@@ -603,7 +604,7 @@ let runtime_picker_choice_rows picker =
       | Masc_tui_types.Lane_choice lane ->
           let note =
             if List.exists (String.equal lane.rrl_id) picker.rlp_already
-            then "  (current route)" else "" in
+            then say "  (현재 경로)" "  (current route)" else "" in
           push
             (Printf.sprintf "  %s %s%s" mark
                label
@@ -612,26 +613,29 @@ let runtime_picker_choice_rows picker =
           let note =
             if List.exists (String.equal runtime.ro_id) picker.rlp_already
             then (match picker.rlp_pick with
-              | Masc_tui_types.Pick_route_default -> "  (current route)"
+              | Masc_tui_types.Pick_route_default -> say "  (현재 경로)" "  (current route)"
               | Pick_media_failover | Pick_conversation_lane _ | Pick_exact_lane _
-              | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ -> "  (already a candidate)")
+              | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ ->
+                  say "  (이미 후보)" "  (already a candidate)")
             else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
-            then "  (same provider as a current candidate)"
+            then say "  (현재 후보와 같은 provider)" "  (same provider as a current candidate)"
             else ""
           in
           let ctx =
             Printf.sprintf " [%s %s]"
               (format_context_tokens runtime.ro_effective_max_context)
               (match picker.rlp_pick with
-               | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ -> "context"
+               | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
+                   say "컨텍스트" "context"
                | Pick_media_failover | Pick_route_default | Pick_conversation_lane _
                | Pick_new_lane _ -> "ctx")
           in
           let def = if runtime.ro_is_default then
             (match picker.rlp_pick with
-             | Masc_tui_types.Pick_route_default -> " [entry runtime]"
+             | Masc_tui_types.Pick_route_default -> say " [진입 런타임]" " [entry runtime]"
              | Pick_media_failover | Pick_conversation_lane _ | Pick_exact_lane _
-             | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ -> " [default]") else "" in
+             | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ ->
+                 say " [기본]" " [default]") else "" in
           push
             (Printf.sprintf "  %s %s%s%s%s" mark
                label
@@ -639,8 +643,10 @@ let runtime_picker_choice_rows picker =
                (Ansi.dim ^ note ^ Ansi.reset));
           (match picker.rlp_pick with
            | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
-               push ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
-                 ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
+               push (say "      쿼터 범위 " "      Quota scope "
+                 ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
+                 ^ say " · 연결 " " · Connection "
+                 ^ Terminal_text.single_line runtime.ro_provider_id
                  ^ " · " ^ Terminal_text.single_line runtime.ro_id)
            | Pick_media_failover | Pick_route_default | Pick_conversation_lane _
            | Pick_new_lane _ -> ())) picker.rlp_choices;
@@ -1107,7 +1113,7 @@ let render_runtime (state : state) =
       surface_chrome ~overflow:Fits state ~terminal_rows ~cols
         ~surface_key:"runtime" ~title:(runtime_picker_title ~ko ~notices picker.rlp_pick)
         ~hints ~body:(fun ~budget c ->
-          let choices = runtime_picker_choice_rows picker in
+          let choices = runtime_picker_choice_rows ~ko picker in
           (* With just one body row the selected candidate takes it. With
              room, the filter/count precedes the same cursor-following page. *)
           let primary =
@@ -1685,9 +1691,10 @@ let render_runtime_pick (state : state) =
     ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language (Keepers Keeper_runtime_pick))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())
-        ("  " ^ Masc_tui_types.keeper_runtime_picker_summary view
-          ^ Masc_tui_types.runtime_catalog_reading_suffix state.runtime_catalog_reading);
-      (match state.runtime_catalog_reading, Masc_tui_types.keeper_runtime_picker_empty_note ~reading:state.runtime_catalog_reading view with
+        ("  " ^ Masc_tui_types.keeper_runtime_picker_summary ~ko:(state.ui_language = Lang_ko) view
+          ^ Masc_tui_types.runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
+              state.runtime_catalog_reading);
+      (match state.runtime_catalog_reading, Masc_tui_types.keeper_runtime_picker_empty_note ~ko:(state.ui_language = Lang_ko) ~reading:state.runtime_catalog_reading view with
        | Runtime_catalog_failed err, _ -> c.push (data_unreliable_row ~cols err)
        | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read
           | Runtime_catalog_refreshing _ | Runtime_catalog_stale _), Some note -> c.push (Ansi.dim ^ note ^ Ansi.reset)

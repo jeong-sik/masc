@@ -2233,7 +2233,8 @@ let dashboard_tools_warming_json () =
 ;;
 
 
-let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
+let dashboard_tools_http_result ?(read_policy = Dashboard_projection_read.Reuse)
+    ?keeper ?timing (config : Workspace.config) =
   let ctx : Tool_misc.context =
     { config
     ; agent_name = "dashboard"
@@ -2246,9 +2247,6 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
     | Some t -> Server_timing.measure t phase f
   in
   let cache_key = dashboard_tools_cache_key ~base_path:config.base_path in
-  Dashboard_cache.seed_stale_if_missing cache_key
-    ~stale_for:dashboard_tools_cache_ttl_sec
-    (dashboard_tools_warming_json ());
   let compute = Pool_work.cpu ~name:__FUNCTION__ @@ fun () ->
     let config_resolution =
       run Projection_config_resolution (fun () ->
@@ -2309,6 +2307,12 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
            ])
     | other -> other
   in
+  match read_policy with
+  | Dashboard_projection_read.Current ->
+      Dashboard_snapshot.Tools_ready (attach_live_tools_projections (Pool_work.submit compute))
+  | Reuse ->
+  Dashboard_cache.seed_stale_if_missing cache_key
+    ~stale_for:dashboard_tools_cache_ttl_sec (dashboard_tools_warming_json ());
   let cached =
     match timing with
     | None ->

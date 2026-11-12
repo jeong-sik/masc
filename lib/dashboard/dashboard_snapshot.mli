@@ -1,23 +1,6 @@
-(** Lock-free immutable dashboard snapshot, published by a single
-    background fiber and read by HTTP handlers without blocking.
-
-    See RFC-0138 ([docs/rfc/RFC-0138-dashboard-snapshot-lock-free-architecture.md])
-    for the motivation, migration sequence, and acceptance criteria.
-
-    The contract enforced by this module:
-
-    - {!current} is wait-free.  It must {b never} block, allocate
-      unboundedly, or raise.  HTTP handlers may call it on the request
-      fiber.
-    - {!t} values are immutable.  A field obtained from {!current} stays
-      valid for the lifetime of the caller's reference; subsequent
-      publishes do not mutate it.
-    - {!refresh_loop} is the {b only} site that computes a fresh
-      full snapshot. Request handlers read {!current}; before the first
-      publish, each selector retains its projection-specific fallback.
-
-    OCaml 5 [Atomic] holds an immutable record reference; readers see a
-    consistent snapshot per call (no torn reads). *)
+(** Immutable projections published by source-owned server workers. Reads never
+    compute or touch the filesystem. An epoch's publisher cannot replace a
+    successor's values, including when both epochs use the same paths. *)
 
 type tools_projection = private {
   base_path : string;
@@ -27,125 +10,64 @@ type tools_projection = private {
   etag : string;
   encoded : Http_response_payload.prepared;
 }
-(** One final tools projection and its HTTP representations, prepared together
-    inside the tools component refresh. No request timing is retained. *)
 
 type tools_result =
   | Tools_pending of Yojson.Safe.t
   | Tools_ready of Yojson.Safe.t
   | Tools_error of Yojson.Safe.t
-(** Readiness supplied by the tools producer from the exact cache payload's
-    origin. Empty computed inventories are ready; seeds and timeouts are not. *)
+(** Readiness from the actual tools reader, independent of empty inventories. *)
 
 type t = private {
-  generated_at : float;          (** Unix.gettimeofday at publish.  *)
+  generated_at : float;
+  base_path : string;
+  workspace_path : string;
+  masc_root : string;
   shell : Yojson.Safe.t;
   shell_light : Yojson.Safe.t;
-  (** RFC-0204 section 8.3 ("A").  The [~light] projection of [shell],
-      published alongside it so [shell?light=true] is served wait-free
-      from the snapshot instead of recomputing.  Different shape from
-      [shell] (light skips belief/tension and uses the light agent-count /
-      runtime projections), hence stored, not derived. *)
   tools : tools_projection;
-  namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
-  activity_events_default : Yojson.Safe.t;
-  (** Public rows within the newest 1000 raw candidates, with
-      [coverage="recent_window"] and unknown/null historical totals.
-      HTTP revalidates the shared {!public_activity_events} cache before
-      slicing to its requested limit. [`Null] before first publish. *)
 }
 
-val public_activity_events : Workspace.config -> Yojson.Safe.t
-(** Shared events-only projection for background refresh and HTTP. Every hit
-    revalidates its Public parent proof; rejected sources cannot authorize
-    fallback to a retained snapshot. Invoke on a worker. *)
+type publisher
+
+val activate : config:Workspace.config -> publisher
+(** Install an empty publisher for one captured workspace epoch. *)
+
+val retire : publisher -> unit
+(** Clear only this publisher; a successor keeps its current values. *)
+
+val publish_shell : publisher -> shell:Yojson.Safe.t -> shell_light:Yojson.Safe.t -> unit
+val publish_tools : publisher -> Yojson.Safe.t -> unit
+val publish_telemetry : publisher -> Yojson.Safe.t -> unit
+(** Install successful immutable component values. The complete snapshot becomes
+    available after all three components have succeeded. Later component writes
+    retain the others. Tools JSON, ETag and encoded bytes are prepared together
+    on the caller's worker. A retired publisher can update only its own cell. *)
 
 val current : unit -> t option
-(** [Atomic.get] from the live slot.  Returns [None] until the first
-    successful publish.  Wait-free; total. *)
+val current_for_config : Workspace.config -> t option
+(** Constant-time atomic reads. [current_for_config] also requires the exact
+    published base/workspace/MASC-root scope, without filesystem resolution. *)
 
-val refresh_loop :
-  sw:Eio.Switch.t ->
-  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  config:Workspace.config ->
-  ?state:Mcp_server.server_state ->
-  interval_sec:float ->
-  unit ->
-  unit
-(** Run forever in the given switch.  Every [interval_sec] seconds,
-    publish a fresh {!t} via [Atomic.set]. Lightweight fields refresh each
-    cycle; allocation-heavy immutable projections retain their last good value
-    behind bounded 10s/30s/60s component TTLs. Tools seeds and errors retry on
-    the next cycle while retaining prepared bytes; only a computed Tools
-    response earns the 60s TTL. If a refresh
-    raises, the {b previous} snapshot stays live (no torn state) and
-    the error is logged.  Cancellation via the switch propagates
-    cleanly through {!Eio.Time.sleep}.
+val public_activity_events : Workspace.config -> Yojson.Safe.t
+(** Shared public events projection. Every hit revalidates its Public parent
+    proof. Invoke on a worker. *)
 
-    [?state] (RFC-0138 Phase 3 Step 3) — when supplied, the refresh
-    loop additionally populates the snapshot's [namespace_truth] via
-    [Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches].
-    That function reads cached refs only (no PG I/O, no fiber
-    timeouts), so it is safe to call from a background fiber.  When
-    [?state] is omitted, [namespace_truth] stays [`Null] in published
-    snapshots — handlers fall back to the synchronous request-fiber
-    path. *)
+val invalidate_public_activity_events : base_path:string -> unit
+(** Drop this workspace's retained public window before source publication. *)
 
 val publish_for_test : t -> unit
-(** Test-only injection.  No production caller may use this. *)
-
 val make_for_test :
-  config:Workspace.config ->
-  shell:Yojson.Safe.t ->
-  ?shell_light:Yojson.Safe.t ->
-  tools:Yojson.Safe.t ->
-  namespace_truth:Yojson.Safe.t ->
-  telemetry_summary:Yojson.Safe.t ->
-  ?activity_events_default:Yojson.Safe.t ->
-  unit ->
-  t
-(** Test-only constructor.  Outside tests, snapshots are produced only
-    by the refresh fiber. *)
-
+  config:Workspace.config -> shell:Yojson.Safe.t ->
+  ?shell_light:Yojson.Safe.t -> tools:Yojson.Safe.t ->
+  telemetry_summary:Yojson.Safe.t -> unit -> t
 val reset_for_test : unit -> unit
-(** Test-only.  Clear the live slot back to [None]. *)
-
-val register_dashboard_shell_payload_json :
-  (?light:bool -> Workspace.config -> Yojson.Safe.t) ->
-  unit
-
-val register_dashboard_tools_http_result :
-  (Workspace.config -> tools_result) -> unit
-
-val register_namespace_truth_snapshot :
-  (Mcp_server.server_state -> Yojson.Safe.t option) -> unit
 
 module For_testing : sig
-  type cache
-  type tools_cache
   type activity_cache
-
-  val make_cache : unit -> cache
-
-  val make_tools_cache : unit -> tools_cache
-  val refresh_tools :
-    now:(unit -> float) -> ttl:float -> cache:tools_cache ->
-    config:Workspace.config -> (unit -> tools_result) -> tools_projection
-
-  val refresh_projection :
-    now:(unit -> float) ->
-    ttl:float ->
-    cache:cache ->
-    (unit -> Yojson.Safe.t) ->
-    Yojson.Safe.t
-
   val make_activity_cache : unit -> activity_cache
   val refresh_activity_events :
-    config:Workspace.config ->
-    now:(unit -> float) -> ttl:float -> cache:activity_cache ->
+    config:Workspace.config -> now:(unit -> float) -> ttl:float ->
+    cache:activity_cache ->
     (keep:(Activity_graph.event -> bool) -> Yojson.Safe.t) -> Yojson.Safe.t
-
-  val should_reuse_projection :
-    now:float -> ttl:float -> refreshed_at:float -> bool
 end

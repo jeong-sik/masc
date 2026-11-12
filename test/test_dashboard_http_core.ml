@@ -3360,7 +3360,6 @@ let test_dashboard_shell_snapshot_selector_injects_auth () =
                   ("paths", `Assoc []);
                 ])
            ~tools:`Null
-           ~namespace_truth:`Null
            ~telemetry_summary:`Null ()
        in
        Dashboard_snapshot.publish_for_test snapshot;
@@ -4246,7 +4245,7 @@ let test_shell_snapshot_wire_returns_snapshot_when_published () =
   Dashboard_snapshot.publish_for_test
     (Dashboard_snapshot.make_for_test ~config
        ~shell:marker ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:`Null ());
+       ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
   let json =
     Server_dashboard_snapshot_select.select_shell_json
@@ -4296,7 +4295,7 @@ let test_shell_snapshot_wire_light_reads_shell_light () =
   Dashboard_snapshot.publish_for_test
     (Dashboard_snapshot.make_for_test ~config
        ~shell:full ~shell_light:light ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:`Null ());
+       ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
   let json =
     Server_dashboard_snapshot_select.select_shell_json
@@ -4549,7 +4548,7 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
    [Server_dashboard_snapshot_select.select_tools_json] and
    [..._telemetry_summary_json]. *)
 
-let test_tools_worker_promotes_seed_before_component_ttl () =
+let test_tools_current_worker_bypasses_pending_private_cache () =
   let guard_was_ready = Eio_guard.is_ready () in
   (* Restore after the fixture's entire Eio runtime and worker pool close,
      including exceptional exits. Later synchronous fixtures must not inherit
@@ -4585,51 +4584,23 @@ let test_tools_worker_promotes_seed_before_component_ttl () =
             Eio.Promise.await release;
             ready_json)) in
         await started;
-        let cache = Dashboard_snapshot.For_testing.make_tools_cache () in
-        let now_value = ref 100. in
-        let producer_calls = Atomic.make 0 in
         let owner_domain = (Domain.self () :> int) in
-        let refresh () = Eio.Time.with_timeout_exn clock 2. (fun () ->
+        let ready = Eio.Time.with_timeout_exn clock 2. (fun () ->
           Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
-            Dashboard_snapshot.For_testing.refresh_tools
-              ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config (fun () ->
-                check bool "tools producer remains on a worker" true
-                  ((Domain.self () :> int) <> owner_domain);
-                Atomic.incr producer_calls;
-                Server_dashboard_http_runtime_info.dashboard_tools_http_result config))) in
-        let pending = refresh () in
-        now_value := 102.;
-        let still_pending = refresh () in
-        check bool "pending cycles reuse identity and all encodings" true
-          (pending == still_pending);
-        check int "pending producer is retried without waiting sixty seconds" 2
-          (Atomic.get producer_calls);
-        Eio.Promise.resolve release_u ();
-        let rec await_computed () =
-          match Dashboard_cache.peek_payload key with
-          | Some payload when payload.origin = Dashboard_cache.Computed -> payload
-          | _ -> Eio.Fiber.yield (); await_computed ()
-        in
-        let computed = Eio.Time.with_timeout_exn clock 2. await_computed in
-        check bool "returned seed keeps its origin after concurrent publication" true
+            check bool "current tools read remains on a worker" true
+              ((Domain.self () :> int) <> owner_domain);
+            match Server_dashboard_http_runtime_info.dashboard_tools_http_result
+                ~read_policy:Masc.Dashboard_projection_read.Current config with
+            | Dashboard_snapshot.Tools_ready json -> json
+            | Tools_pending _ -> fail "current tools joined the unrelated pending HTTP fill"
+            | Tools_error _ -> fail "current tools returned the unrelated HTTP fallback")) in
+        check bool "a returned seed keeps its own readiness" true
           (returned_seed.origin = Dashboard_cache.Seeded);
-        check bool "completed empty inventory has computed origin" true
-          (computed.origin = Dashboard_cache.Computed);
-        now_value := 104.;
-        let ready = refresh () in
-        check bool "ready promotes on the next cycle before the old TTL" true
-          (ready != pending);
-        check int "empty inventory remains empty after promotion" 0
-          Yojson.Safe.Util.(ready.json |> member "tool_inventory" |> to_list |> List.length);
-        check bool "promotion keeps the real producer's final decoration" true
-          (Yojson.Safe.Util.(ready.json |> member "keeper_waiting_inventory") <> `Null);
-        check string "promoted bytes describe the decorated JSON"
-          (Yojson.Safe.to_string ready.json) ready.encoded.identity;
-        now_value := 106.;
-        let ready_again = refresh () in
-        check bool "ready cycles reuse all prepared encodings" true (ready == ready_again);
-        check int "ready component TTL avoids another producer call" 3
-          (Atomic.get producer_calls)))
+        check bool "current tools has the actual final live decoration" true
+          (Yojson.Safe.Util.(ready |> member "keeper_waiting_inventory") <> `Null);
+        check bool "current tools did not wait for the old cache writer" false
+          (Eio.Promise.is_resolved release);
+        Eio.Promise.resolve release_u ()))
 
 let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -4638,7 +4609,7 @@ let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   Dashboard_snapshot.publish_for_test
     (Dashboard_snapshot.make_for_test ~config
        ~shell:`Null ~tools:marker
-       ~namespace_truth:`Null ~telemetry_summary:`Null ());
+       ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
   let json =
     Server_dashboard_snapshot_select.select_tools_json
@@ -4662,7 +4633,7 @@ let test_tools_prepared_selector_scope_and_keeper_contract () =
   Fun.protect ~finally:Dashboard_snapshot.reset_for_test (fun () ->
     let marker = `Assoc [ "snapshot", `String "final-tools" ] in
     let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null
-      ~tools:marker ~namespace_truth:`Null ~telemetry_summary:`Null () in
+      ~tools:marker ~telemetry_summary:`Null () in
     Dashboard_snapshot.publish_for_test snapshot;
     let require_prepared timing =
       match Server_dashboard_snapshot_select.select_tools_response ~timing config with
@@ -4978,7 +4949,7 @@ let test_tools_routes_serve_prepared_http_representations () =
       ; "keeper_waiting_inventory", `Assoc [ "wire_marker", `String "final-decoration" ]
       ; "effective_keeper_surface", `Null ] in
     let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null ~tools:final_json
-      ~namespace_truth:`Null ~telemetry_summary:`Null () in
+      ~telemetry_summary:`Null () in
     Dashboard_snapshot.publish_for_test snapshot;
     (* Keep exact-Keeper fallback cheap while still resolving its live fields. *)
     ignore (Dashboard_cache.get_or_compute ("tools:" ^ config.base_path) ~ttl:60.
@@ -5544,7 +5515,7 @@ let test_telemetry_summary_snapshot_wire_returns_snapshot () =
   Dashboard_snapshot.publish_for_test
     (Dashboard_snapshot.make_for_test ~config
        ~shell:`Null ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:marker ());
+       ~telemetry_summary:marker ());
   let timing = Server_timing.create () in
   let json =
     Server_dashboard_snapshot_select.select_telemetry_summary_json
@@ -5577,39 +5548,6 @@ let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
    server_state + Eio scheduler + 6 timeout env knobs ([with_test_env]
    does not synthesise these).  The fallback path lives in
    [test_dashboard_namespace_truth.ml] integration coverage. *)
-
-let test_project_snapshot_wire_returns_snapshot_when_populated () =
-  with_test_env @@ fun ~env ~sw ~config ->
-  Dashboard_snapshot.reset_for_test ();
-  let marker =
-    `Assoc [ "namespace_truth_marker", `String "from-snapshot" ]
-  in
-  Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test ~config
-       ~shell:`Null ~tools:`Null
-       ~namespace_truth:marker ~telemetry_summary:`Null ());
-  let clock = Eio.Stdenv.clock env in
-  let state =
-    Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path
-  in
-  let req = request "/api/v1/dashboard/project-snapshot" in
-  let timing = Server_timing.create () in
-  let json =
-    Server_dashboard_snapshot_select.select_project_snapshot_json
-      ~state ~sw ~clock ~timing req
-  in
-  let open Yojson.Safe.Util in
-  Alcotest.(check string)
-    "populated snapshot path returns published marker"
-    "from-snapshot"
-    (json |> member "namespace_truth_marker" |> to_string);
-  Alcotest.(check bool)
-    "Server-Timing header records snapshot_read phase on hit"
-    true
-    (let header = Server_timing.to_header_value timing in
-     let re = Re.compile (Re.Perl.re "snapshot_read") in
-     Re.execp re header);
-  Dashboard_snapshot.reset_for_test ()
 
 let assoc_has key = function
   | `Assoc fields -> List.mem_assoc key fields
@@ -8615,7 +8553,7 @@ let () =
           test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
             test_tools_snapshot_wire_returns_snapshot_when_actor_omitted;
           test_case "worker Tools seed promotes before component TTL with empty inventory" `Quick
-            test_tools_worker_promotes_seed_before_component_ttl;
+            test_tools_current_worker_bypasses_pending_private_cache;
           test_case "tools prepared selector scopes bytes and preserves exact keeper" `Quick
             test_tools_prepared_selector_scope_and_keeper_contract;
           test_case "tools routes serve prepared encodings and conditional responses" `Quick
@@ -8634,8 +8572,6 @@ let () =
             test_telemetry_summary_snapshot_wire_returns_snapshot;
           test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick
             test_telemetry_summary_snapshot_wire_falls_back_when_empty;
-          test_case "RFC-0138 project-snapshot wire returns snapshot when populated" `Quick
-            test_project_snapshot_wire_returns_snapshot_when_populated;
           test_case "telemetry n default is bounded (freeze guard)" `Quick
             test_telemetry_n_default_is_bounded;
           test_case "an HTTP/2 cached payload's timeout envelope is 504" `Quick

@@ -1,7 +1,7 @@
 (** Unit tests for [Server_activity_http.slice_default_events_to_limit].
 
     RFC-0201 Step 1 follow-up (issue #19313).  Guards the default-query
-    path that serves [Dashboard_snapshot.current ()].activity_events_default. *)
+    path that serves the shared public Activity window. *)
 
 open Alcotest
 

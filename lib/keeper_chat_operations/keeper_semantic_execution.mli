@@ -221,6 +221,15 @@ type action =
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
   | Discharge_gate of gate_obligation
+  | Await_receipt of receipt_obligation
+      (** Adds the request to the execution that holds the slot. The phase does
+          not change. A request the execution already owns keeps its entry and
+          state. The caller ends the turn in the same transaction. *)
+  | Resolve_receipt of { request_id : string; resolution : receipt_resolution }
+      (** Moves a [Pending] entry to [Arrived resolution]. An entry that is
+          already [Arrived], or no entry, leaves the record as it is, so a
+          notification that arrives twice or after the execution settled
+          changes nothing. The phase does not change. *)
   | Settle of terminal
 
 val error_to_string : error -> string

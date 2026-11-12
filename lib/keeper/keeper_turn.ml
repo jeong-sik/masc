@@ -1068,7 +1068,7 @@ let run_keeper_invocation_turn_admitted_inner
                   match result.checkpoint with
                   | Some checkpoint -> Keeper_direct_checkpoint_continuation.defer
                       ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
-                      ~session_dir ~session_id ~checkpoint
+                      ~session_dir ~session_id ~checkpoint ~receipt_wait:None
                   | None ->
                     (match result.official_client_settlement with
                      | None -> Error "cooperative turn omitted its producer-owned continuation authority"
@@ -1077,7 +1077,7 @@ let run_keeper_invocation_turn_admitted_inner
                         | Error error -> Error (Keeper_repetition_snapshot.error_to_string error)
                         | Ok frame -> Keeper_direct_checkpoint_continuation.defer_official
                             ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
-                            ~settled_session ~frame))
+                            ~settled_session ~frame ~receipt_wait:None))
                 else Ok () in
               (match retained with
                | Error detail ->

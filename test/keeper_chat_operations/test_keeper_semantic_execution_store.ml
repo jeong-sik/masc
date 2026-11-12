@@ -209,6 +209,50 @@ let test_receipt_owners_are_read_without_the_owner_and_cancel_releases_them () =
     check bool "a settled execution owns nothing" true
       (Option.is_none (Store.receipt_owner owners ~request_id:"request-a")))
 
+let obligation request_id state = Execution.receipt_obligation ~request_id ~state |> string_ok
+
+let entry_states (execution : Execution.t) =
+  List.map (fun (entry : Execution.receipt_obligation) -> entry.request_id, entry.state) execution.receipt_obligations
+
+let test_await_and_resolve_receipt_actions () =
+  let running = running_with [] in
+  let awaiting = Execution.apply ~now:4. (Execution.Await_receipt (obligation "request-a" Execution.Pending)) running |> exec_ok in
+  check (list string) "waiting adds the request" ["request-a"] (request_ids awaiting);
+  check string "and leaves the phase to the suspend that follows" (Execution.phase_name running.phase) (Execution.phase_name awaiting.phase);
+  let repeated = Execution.apply ~now:5.
+    (Execution.Await_receipt (obligation "request-a" (Execution.Arrived Execution.Receipt_in_outbox))) awaiting |> exec_ok in
+  check bool "a request the execution owns keeps its entry and state" true
+    (entry_states repeated = ["request-a", Execution.Pending] && repeated.revision = awaiting.revision);
+  let two = Execution.apply ~now:5. (Execution.Await_receipt (obligation "request-b" Execution.Pending)) awaiting |> exec_ok in
+  check (list string) "another request is appended" ["request-a"; "request-b"] (request_ids two);
+  let resolved = Execution.apply ~now:6.
+    (Execution.Resolve_receipt {request_id = "request-a"; resolution = Execution.Source_lost}) two |> exec_ok in
+  check bool "a pending entry arrives with the resolution it was given" true
+    (entry_states resolved = ["request-a", Execution.Arrived Execution.Source_lost; "request-b", Execution.Pending]);
+  let again = Execution.apply ~now:7.
+    (Execution.Resolve_receipt {request_id = "request-a"; resolution = Execution.Receipt_in_outbox}) resolved |> exec_ok in
+  check bool "an arrived entry is not resolved again" true
+    (entry_states again = entry_states resolved && again.revision = resolved.revision);
+  let missing = Execution.apply ~now:7.
+    (Execution.Resolve_receipt {request_id = "request-z"; resolution = Execution.Receipt_in_outbox}) resolved |> exec_ok in
+  check bool "a request with no entry changes nothing" true (missing.revision = resolved.revision);
+  let settled = Execution.apply ~now:8. (Execution.Settle Execution.Completed) running |> exec_ok in
+  let late = Execution.apply ~now:9.
+    (Execution.Resolve_receipt {request_id = "request-a"; resolution = Execution.Receipt_in_outbox}) settled |> exec_ok in
+  check bool "a notice after the execution settled changes nothing" true (late.revision = settled.revision)
+
+let test_await_receipt_is_admitted_only_while_the_execution_holds_the_slot () =
+  let running = running_with [] in
+  let created = Execution.create ~id:(scope_id 302) ~input:fixture_input ~sources:[] ~now:1. |> exec_ok in
+  let ready = Execution.apply ~now:2. Execution.Confirm_sources created |> exec_ok in
+  let suspended = Execution.apply ~now:4. (Execution.Suspend (checkpoint ())) running |> exec_ok in
+  let settled = Execution.apply ~now:4. (Execution.Settle Execution.Cancelled) running |> exec_ok in
+  let wait = Execution.Await_receipt (obligation "request-a" Execution.Pending) in
+  List.iter (fun (label, execution) ->
+    check bool (label ^ " refuses a wait") true (Result.is_error (Execution.apply ~now:5. wait execution)))
+    ["a prepared execution", created; "a ready execution", ready; "a suspended execution", suspended; "a settled execution", settled];
+  check bool "a running execution admits it" true (Result.is_ok (Execution.apply ~now:5. wait running))
+
 let test_receipt_owners_of_a_missing_store_is_empty_and_double_ownership_is_refused () =
   with_path (fun path ->
     let owners = Store.inspect_receipt_owners ~path |> store_ok in
@@ -1063,7 +1107,9 @@ let () =
         test_case "settling and an interrupting restart release the requests, other transitions keep them" `Quick test_settle_and_interruption_release_receipt_obligations;
         test_case "the record format is exact v3" `Quick test_receipt_obligations_are_exact_v3_fields;
         test_case "owners are read without the Owner and cancelling releases them" `Quick test_receipt_owners_are_read_without_the_owner_and_cancel_releases_them;
-        test_case "a missing journal owns nothing and double ownership is refused" `Quick test_receipt_owners_of_a_missing_store_is_empty_and_double_ownership_is_refused ];
+        test_case "a missing journal owns nothing and double ownership is refused" `Quick test_receipt_owners_of_a_missing_store_is_empty_and_double_ownership_is_refused;
+        test_case "waiting adds a request and resolving moves a pending entry once" `Quick test_await_and_resolve_receipt_actions;
+        test_case "waiting is admitted only while the execution holds the slot" `Quick test_await_receipt_is_admitted_only_while_the_execution_holds_the_slot ];
       "owner isolation", [
         test_case "startup marks an interrupted execution and releases the running slot" `Quick test_restart_interrupted_execution_releases_the_running_slot;
         test_case "readonly inventory includes every unsettled phase" `Quick test_readonly_inventory_includes_every_unsettled_phase;

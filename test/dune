@@ -7330,6 +7330,11 @@
  (modules test_tui_frame_lines)
  (libraries alcotest masc_tui_render_prim))
 
+(test
+ (name test_tui_here_row)
+ (modules test_tui_here_row)
+ (libraries alcotest masc_tui_render_prim masc_tui_types))
+
 (include stanzas/test_endpoint_job_protocol.inc)
 
 (include stanzas/test_endpoint_job_registry.inc)

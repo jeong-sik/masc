@@ -2226,6 +2226,13 @@ let here_steps_room ~cols (state : state) ~steps ~after =
   - after
 
 let here_row ~cols (state : state) ~path ~readings ~position =
+  (* Every step is text to read, and a step may be a string the server sent:
+     a keeper name, a run id, a lane label. The last one becomes the title's
+     id, which the title makes printable; the steps ahead of it reach the row
+     as given. Left to each caller, the keeper calls row forgot one. A step
+     that needs a style of its own is drawn with [here_path], by a caller
+     that lays out its own row. *)
+  let path = List.map Terminal_text.single_line path in
   let position =
     Option.map
       (fun position ->

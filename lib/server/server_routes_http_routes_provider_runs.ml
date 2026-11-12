@@ -6,7 +6,6 @@ module Http = Http_server_eio
 module Cache = Server_dashboard_json_cache
 
 let dashboard_cost_latency_cache = Cache.create ()
-let dashboard_keeper_decisions_cache = Cache.create ()
 let dashboard_keeper_practice_cache = Cache.create ()
 
 let cache_key parts = String.concat "\x1f" parts
@@ -191,33 +190,18 @@ let add_routes ~sw router =
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-decisions" (fun state req reqd ->
          let limit = dashboard_feed_limit req in
-         let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int limit ] in
-         let json =
-           Cache.read ~sw ~sync_first:true
-             ~cache:dashboard_keeper_decisions_cache ~key
-             ~placeholder:
-               (Dashboard_http_keeper.keeper_decisions_json ~config
-                  ~keepers:[] ~limit ())
-             ~compute:(fun () ->
-               let keeper_names =
-                 (match Keeper_meta_store.keeper_names_result config with
-                  | Ok names -> names
-                  | Error detail ->
-                    Log.Keeper.warn "dashboard keeper feed: keeper names unread: %s" detail;
-                    [])
-               in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | Ok (None) | Error _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_decisions_json ~config ~keepers
-                 ~limit ())
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         let config = Mcp_server.workspace_config state in
+         match Server_dashboard_keeper_decisions_http.read_current ~config ~limit with
+         | Ok json -> Http.Response.json_value ~compress:true ~request:req json reqd
+         | Error error ->
+             Log.Server.warn "%s" (Server_dashboard_keeper_decisions_http.read_error_to_string error);
+             Http.Response.json_value ~status:`Service_unavailable ~request:req
+               (Server_dashboard_keeper_decisions_http.read_error_to_json error) reqd
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+             Log.Server.warn "Keeper Decisions read failed: %s" (Printexc.to_string exn);
+             Http.Response.json_value ~status:`Service_unavailable ~request:req
+               (`Assoc ["error", `String "keeper_decisions_unavailable"]) reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-practice" (fun state req reqd ->
          let limit = dashboard_feed_limit req in

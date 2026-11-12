@@ -650,6 +650,12 @@ let the_preview_follows_a_login () =
       "a session and a bearer"
       ("401 " ^ Masc.Auth_gate.reason_to_string Masc.Auth_gate.Several_credentials)
       (whoami router admin ~headers:[ "Authorization", "Bearer " ^ String.make 64 'f' ] ());
+    (* Plan L2a: the integrations are read with the session. This workspace
+       has no runtime.toml, so the server says it cannot read one. *)
+    Alcotest.(check int)
+      "a person reaches the integrations"
+      503
+      (send admin router ~meth:"GET" ~path:Server_person_integrations.path).status;
     let out = send admin router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()) in
     Alcotest.(check int) ("signed out: " ^ out.body) 204 out.status;
     Alcotest.(check string)
@@ -659,7 +665,11 @@ let the_preview_follows_a_login () =
     Alcotest.(check int)
       "and no subscriptions"
       401
-      (send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path).status)
+      (send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path).status;
+    Alcotest.(check int)
+      "and no integrations"
+      401
+      (send admin router ~meth:"GET" ~path:Server_person_integrations.path).status)
 ;;
 
 (* A PAT through the routes a browser calls (plan C4-10): the person issues

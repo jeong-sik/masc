@@ -177,6 +177,83 @@ streaming = true
     codex
 ;;
 
+(* A provider of each kind, for what a person is offered (plan L2a). *)
+let offered_toml =
+  {|[runtime]
+default = "claude_code.claude-sonnet-5"
+
+[providers.claude_code]
+display-name = "Claude Code"
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+
+[providers.local]
+display-name = "Local server"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.codex]
+display-name = "Codex"
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[providers.agy]
+display-name = "Antigravity"
+protocol = "antigravity-cli"
+command = "agy"
+is-non-interactive = true
+timeout-s = 180.0
+
+[providers.muse]
+display-name = "Muse Code"
+protocol = "muse-serve"
+command = "muse"
+is-non-interactive = true
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[models."claude-opus-5"]
+api-name = "claude-opus-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[models."gpt-5.5"]
+api-name = "gpt-5.5"
+max-context = 400000
+tools-support = true
+streaming = true
+
+[models.muse-fixture]
+api-name = "muse-fixture-1"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[models.local-model]
+api-name = "local-model"
+max-context = 32000
+tools-support = true
+streaming = true
+
+[claude_code."claude-sonnet-5"]
+
+[claude_code."claude-opus-5"]
+
+[local.local-model]
+
+[codex."gpt-5.5"]
+
+[muse.muse-fixture]
+|}
+;;
+
 type someone =
   { person : Login.person
   ; account_id : string
@@ -451,6 +528,49 @@ let test_turn () =
          with
          | Ok () -> ()
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
+        (* What the page of a person is told before any call (plan L2a): the
+           Claude Code model runs here, and the Codex one is refused for the
+           native tools that refuse Carol's turn below. *)
+        Alcotest.(check (pair int string))
+          "the integrations a person is offered"
+          ( 200
+          , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"calls":"allowed"},{"integration_id":"codex","display_name":"Codex","models":["gpt-5.5"],"calls":"refused","refusal":"native_tools_reach_other_homes"}]}|}
+          )
+          (let { R.status; headers = _; body } = Server_person_integrations.answer ~base_path in
+           R.status_code status, body);
+        (* A person logs in to the official clients that keep their
+           credential in the home of the account. Antigravity keeps a copy in
+           the setup registry, and a server over HTTP has no login: neither is
+           offered. Of the three, only Claude Code calls a model here. *)
+        let offered =
+          match Runtime_toml.parse_string offered_toml with
+          | Ok offered -> Server_person_integrations.of_config offered
+          | Error _ -> Alcotest.fail "the runtime.toml of every kind does not parse"
+        in
+        Alcotest.(check (list (pair string (list string))))
+          "the providers a person may connect, in declared order, with their models"
+          [ "claude_code", [ "claude-sonnet-5"; "claude-opus-5" ]
+          ; "codex", [ "gpt-5.5" ]
+          ; "muse", [ "muse-fixture" ]
+          ]
+          (List.map
+             (fun (offer : Server_person_integrations.integration) ->
+               offer.integration_id, offer.models)
+             offered);
+        Alcotest.(check (list string))
+          "the integrations whose models are called here"
+          [ "claude_code" ]
+          (List.filter_map
+             (fun (offer : Server_person_integrations.integration) ->
+               match offer.calls with
+               | Server_person_integrations.Allowed -> Some offer.integration_id
+               | Server_person_integrations.Refused (Access.Native_tools_reach_other_homes _) -> None
+               | Server_person_integrations.Refused refusal ->
+                 Alcotest.failf
+                   "%s was refused for another reason: %s"
+                   offer.integration_id
+                   (Access.native_refusal_to_string refusal))
+             offered);
         (* The answer of a turn of [keeper] on [runtime]: its fields in
            order, [text], and whether the turn resumed. The conversation it
            names is the value. *)

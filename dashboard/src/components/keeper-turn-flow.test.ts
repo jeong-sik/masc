@@ -12,6 +12,7 @@ import { parseKeeperRuntimeTrace } from '../api/keeper-runtime-trace'
 import { decodePhysicalSkillEvidence, fetchPhysicalSkillEvidence } from '../api/keeper-physical-skill-evidence'
 import { route } from '../router'
 import { KeeperTurnFlow, turnBoardActionEvidence, turnToolEvidence } from './keeper-turn-flow'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 
 vi.mock('../api/keeper-turn-flow', () => ({ fetchTurnFlow: vi.fn() }))
 vi.mock('../api/core', async importOriginal => ({
@@ -23,8 +24,15 @@ vi.mock('../api/dashboard-keeper-tool-calls', async importOriginal => ({
 vi.mock('../api/keeper-physical-skill-evidence', async importOriginal => ({
   ...await importOriginal<typeof import('../api/keeper-physical-skill-evidence')>(), fetchPhysicalSkillEvidence: vi.fn(),
 }))
-afterEach(() => { cleanup(); vi.clearAllMocks() })
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+  acceptedExecutionWorkspace.value = null
+})
 beforeEach(() => {
+  // Reads run only for an accepted workspace that names its Observer instance.
+  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace',
+    connectionGeneration: 1, observerInstanceId: 'fixture-instance' }
   vi.mocked(get).mockReset()
   vi.mocked(fetchKeeperToolCallsByExecutionIds).mockReset()
   vi.mocked(fetchKeeperToolCallsByExecutionIds).mockImplementation(async (keeper, ids) => ({

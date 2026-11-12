@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({ fetchGoalVerificationRuns: vi.fn() }))
 
@@ -8,8 +8,15 @@ vi.mock('../api/dashboard', () => api)
 vi.mock('../sse-store', () => ({ registerInternalAgentRefresh: vi.fn(() => vi.fn()) }))
 
 import { GoalVerificationRunsPanel } from './goal-verification-runs-panel'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 
+beforeEach(() => {
+  // Reads run only for an accepted workspace that names its Observer instance.
+  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace',
+    connectionGeneration: 1, observerInstanceId: 'fixture-instance' }
+})
 afterEach(() => {
+  acceptedExecutionWorkspace.value = null
   cleanup()
   vi.clearAllMocks()
 })

@@ -36,6 +36,7 @@ import {
   type TurnRecordRow,
 } from '../api/dashboard'
 import { clearStoredToken, setStoredToken } from '../api/core'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 
 const keeper: MemoryKeeper = {
   id: 'masc-improver',
@@ -172,10 +173,14 @@ function stubFetch(payload: unknown = turnRecordsPayload()) {
 }
 
 beforeEach(() => {
+  // Reads run only for an accepted workspace that names its Observer instance.
+  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace',
+    connectionGeneration: 1, observerInstanceId: 'fixture-instance' }
   setStoredToken('memory-inspector-test-token', { source: 'manual' })
 })
 
 afterEach(() => {
+  acceptedExecutionWorkspace.value = null
   cleanup()
   clearStoredToken()
   vi.unstubAllGlobals()

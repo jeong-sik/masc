@@ -311,6 +311,7 @@ let reason_name : H.reason -> string = function
   | H.Digest_differs _ -> "Digest_differs"
   | H.Commit_not_in_log _ -> "Commit_not_in_log"
   | H.Intent_unplaced _ -> "Intent_unplaced"
+  | H.Answers_differ _ -> "Answers_differ"
 ;;
 
 let reasons_name first rest = String.concat "," (List.map reason_name (first :: rest))
@@ -1567,6 +1568,30 @@ let another_handle_on_the_log_stops_the_log () =
     check_judgment "a restart" dirs "Mismatch Digest_differs")
 ;;
 
+(* A mode event that was appended with no zone took no intent, so the store
+   answers one record fewer than the log holds of those that take one: the
+   epochs of the two files differ (design 5.1). A start reads a mismatch, and
+   a zone that is opened over these files does not write and does not know
+   its revocations. *)
+let an_event_appended_with_no_intent_is_a_mismatch () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let other = open_files dirs in
+    let head = other.replay.Z.Replay.head in
+    check_judgment "before the append" dirs "Matches";
+    append_log_outside other [ record_at ~head (mode_draft ~at_ms:(at_ms + 1) M.Off) ];
+    check_judgment "a restart" dirs "Mismatch Answers_differ";
+    let zone = open_zone dirs in
+    let before = files dirs in
+    check_error
+      "a commit"
+      "Uncertain Answers_differ"
+      zone
+      (mode_draft ~at_ms:(at_ms + 2) M.Reactivate);
+    check_files "the commit wrote nothing" before dirs;
+    check_gate "the gate" "files disagree" zone (Subject.Invite invite_id))
+;;
+
 (* Answers for two records that the log does not hold, which the store takes
    because they follow its own rules. *)
 let another_handle_on_the_store_stops_the_store () =
@@ -1973,6 +1998,10 @@ let () =
             "another handle on the log stops the log"
             `Quick
             another_handle_on_the_log_stops_the_log
+        ; Alcotest.test_case
+            "an event appended with no intent is a mismatch"
+            `Quick
+            an_event_appended_with_no_intent_is_a_mismatch
         ; Alcotest.test_case
             "another handle on the store stops the store"
             `Quick

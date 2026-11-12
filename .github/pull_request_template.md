@@ -45,6 +45,7 @@ stages: []
 
 ## Linked issue
 
+<!-- `Closes #N` closes the issue when this pull request merges. Use `Relates #N` when work remains in the issue after the merge. -->
 - Closes #
 - Relates #
 

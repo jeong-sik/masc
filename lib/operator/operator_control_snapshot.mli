@@ -132,6 +132,20 @@ end
 
 (** {1 Snapshot + recent actions JSON} *)
 
+val snapshot_read :
+  ?read_policy:Dashboard_projection_read.t ->
+  ?actor:string ->
+  ?view:string ->
+  ?include_messages:bool ->
+  ?include_keepers:bool ->
+  ?include_summary_fields:bool ->
+  ?lightweight_summary:bool ->
+  'a context -> Dashboard_projection_cache.snapshot_read
+(** Current returns [Observed] with the original rows, typed read failures,
+    quiet-reason transition and pending-confirm expiry from the same reads.
+    Reuse returns [Cached_json] and does not invent observation authority for
+    request-cache bytes. *)
+
 val snapshot_json :
   ?read_policy:Dashboard_projection_read.t ->
   ?actor:string ->

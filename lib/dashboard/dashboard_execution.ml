@@ -750,14 +750,17 @@ let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~
         ~include_messages:false ~include_keepers:true
         ~include_summary_fields:false ~lightweight_summary:true ctx
     in
-    let snapshot_json = match read_policy with
+    let snapshot_json, snapshot_observation = match read_policy with
       | Dashboard_projection_read.Reuse ->
-          Dashboard_projection_cache.get_or_compute_snapshot_json
+          (Dashboard_projection_cache.get_or_compute_snapshot_json
             ~config ~actor:(Some effective_actor)
-            (fun actor -> Pool_work.cpu ~name:__FUNCTION__ (fun () -> read_snapshot actor))
+            (fun actor -> Pool_work.cpu ~name:__FUNCTION__ (fun () -> read_snapshot actor))), None
       | Current ->
-          read_snapshot effective_actor
-          |> Dashboard_projection_cache.with_current_keeper_observations ~config
+          let observation = Dashboard_projection_cache.operator_snapshot_observation
+              ~actor:effective_actor ~view:"summary" ~include_messages:false ~include_keepers:true
+              ~include_summary_fields:false ~lightweight_summary:true ctx in
+          Dashboard_projection_cache.with_current_keeper_observations ~config observation.json,
+          Some observation
     in
     t_after_snapshot := Some (Time_compat.now ());
     Eio.Fiber.yield ();
@@ -898,6 +901,10 @@ let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~
         Option.bind (task_terminal_timestamp task) Masc_domain.parse_iso8601_opt
         |> Option.map (fun at -> Float.next_after (at +. Masc_time_constants.day) infinity))
           recent_done in
+      let policy_deadline = match policy_deadline,
+          Option.bind snapshot_observation (fun observation -> observation.next_deadline_unix) with
+        | None, deadline | deadline, None -> deadline
+        | Some left, Some right -> Some (Float.min left right) in
       List.fold_left (fun earliest at ->
         match earliest with None -> Some at | Some earlier -> Some (Float.min earlier at))
         policy_deadline deadlines
@@ -931,7 +938,9 @@ let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~
          @ task_fields
          @ [ "messages", `List (List.map message_json messages) ]) in
     {json; next_deadline_unix;
-     completeness = Dashboard_projection_read.keeper_completeness ~listing:keepers_listing ~unread:keepers_unread})
+     completeness = (match snapshot_observation with
+       | Some observation -> observation.completeness
+       | None -> Dashboard_projection_read.keeper_completeness ~listing:keepers_listing ~unread:keepers_unread)})
 ;;
 
 let observe_current ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =

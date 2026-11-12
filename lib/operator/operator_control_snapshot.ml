@@ -96,9 +96,36 @@ let with_keeper_slot ~sem ~name f =
 
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
 
+let earlier_deadline left right = match left, right with
+  | None, deadline | deadline, None -> deadline
+  | Some left, Some right -> Some (Float.min left right)
+
+let keeper_attention_observation config meta =
+  let approval_queue = Keeper_status_bridge.read_approval_queue_attention config meta in
+  let attention = Keeper_status_bridge.attention_of_surface config meta
+      (Keeper_status_bridge.runtime_blocker_surface_opt config meta) approval_queue in
+  let completeness = match approval_queue with
+    | Keeper_status_bridge.Approval_queue_ready _ -> Dashboard_projection_read.Complete
+    | Approval_queue_unavailable error -> Partial (Keeper_approval_queue_result.storage_error_to_string error) in
+  Keeper_status_bridge.attention_fields_json_of meta approval_queue attention, completeness
+
+let keeper_runtime_trust_observation ~read_policy ~config ~meta =
+  try match read_policy with
+    | Dashboard_projection_read.Current ->
+        Operator_control_snapshot_trust.compact_keeper_runtime_trust_observation ~config ~meta
+    | Reuse -> {Dashboard_projection_read.json = compact_keeper_runtime_trust_json ~read_policy ~config ~meta;
+        next_deadline_unix = None; completeness = Complete}
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      let detail = Printexc.to_string exn in
+      Log.Dashboard.warn "operator snapshot trust compact failed for keeper %s: %s" meta.Keeper_meta_contract.name detail;
+      {Dashboard_projection_read.json = `Null; next_deadline_unix = None;
+       completeness = Partial detail}
+
 (* What one Keeper name became in [keepers_json]. *)
 type keeper_row_outcome =
-  | Keeper_row of Yojson.Safe.t
+  | Keeper_row of Dashboard_projection_read.observation
   | Keeper_gone (** metadata absent: removed after the name was listed *)
   | Keeper_unread of Keeper_snapshot_unread.t
 
@@ -205,32 +232,25 @@ let keepers_json
                        same registry read as [phase]. Pausing is an operator
                        decision published in [paused]; it does not remove
                        the health observation. *)
-                    let diagnostic =
-                      Keeper_status_runtime.keeper_diagnostic_json
+                    let diagnostic_observation =
+                      Keeper_status_runtime.keeper_diagnostic_observation
                         ~meta
                         ~phase:registry_phase
                         ~history_items:[]
                         ~now_ts:(Time_compat.now ())
                     in
-                    let runtime_trust =
+                    let diagnostic = diagnostic_observation.json in
+                    let runtime_trust_observation =
                       let t_trust = Time_compat.now () in
-                      let result =
-                        try compact_keeper_runtime_trust_json ~read_policy ~config ~meta with
-                        | Eio.Cancel.Cancelled _ as e -> raise e
-                        | exn ->
-                          Log.Dashboard.warn
-                            "operator snapshot trust compact failed for paused keeper \
-                             %s: %s"
-                            meta.name
-                            (Printexc.to_string exn);
-                          `Null
-                      in
+                      let result = keeper_runtime_trust_observation ~read_policy ~config ~meta in
                       dt_trust := Time_compat.now () -. t_trust;
                       result
                     in
+                    let runtime_trust = runtime_trust_observation.json in
+                    let attention_fields, attention_completeness = keeper_attention_observation config meta in
                     emit_timing_log (Time_compat.now () -. t_work_start);
                     Keeper_row
-                      (`Assoc
+                      {json = (`Assoc
                           ([ "runtime_class", `String "keeper"
                            ; "pipeline_stage", `String "paused"
                            ; "phase", phase_str
@@ -252,8 +272,11 @@ let keepers_json
                            @ keeper_runtime_identity_fields meta
                            @ [ keeper_current_task_field meta ]
                            @ Keeper_status_bridge.runtime_blocker_fields_json config meta
-                           @ Keeper_status_bridge.attention_fields_json config meta
-                           @ [ "runtime_trust", runtime_trust ])))
+                           @ attention_fields
+                           @ [ "runtime_trust", runtime_trust ]));
+                       next_deadline_unix = earlier_deadline diagnostic_observation.next_deadline_unix runtime_trust_observation.next_deadline_unix;
+                       completeness = Dashboard_projection_read.combine_completeness
+                         runtime_trust_observation.completeness attention_completeness})
                   else (
                     (* One registry read for the row: [phase], [pipeline_stage],
                        [keepalive_running] and the diagnostic's health all come
@@ -291,13 +314,14 @@ let keepers_json
                     let last_activity_ago_s =
                       Keeper_status_metrics.age_seconds_opt ~now_ts last_activity_ts
                     in
-                    let diagnostic =
-                      Keeper_status_runtime.keeper_diagnostic_json
+                    let diagnostic_observation =
+                      Keeper_status_runtime.keeper_diagnostic_observation
                         ~meta
                         ~phase:registry_phase
                         ~history_items:[]
                         ~now_ts
                     in
+                    let diagnostic = diagnostic_observation.json in
                     let t_audit = Time_compat.now () in
                     let audit_json =
                       Operator_control_snapshot_tool_audit.tool_audit_json ~read_policy
@@ -357,21 +381,14 @@ let keepers_json
                         ~current_trace_id:
                           (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                     in
-                    let runtime_trust =
+                    let runtime_trust_observation =
                       let t_trust = Time_compat.now () in
-                      let result =
-                        try compact_keeper_runtime_trust_json ~read_policy ~config ~meta with
-                        | Eio.Cancel.Cancelled _ as e -> raise e
-                        | exn ->
-                          Log.Dashboard.warn
-                            "operator snapshot trust compact failed for keeper %s: %s"
-                            meta.name
-                            (Printexc.to_string exn);
-                          `Null
-                      in
+                      let result = keeper_runtime_trust_observation ~read_policy ~config ~meta in
                       dt_trust := Time_compat.now () -. t_trust;
                       result
                     in
+                    let runtime_trust = runtime_trust_observation.json in
+                    let attention_fields, attention_completeness = keeper_attention_observation config meta in
                     let row =
                       `Assoc
                         ([ "runtime_class", `String "keeper"
@@ -475,11 +492,14 @@ let keepers_json
                                  meta )
                            ]
                          @ Keeper_status_bridge.runtime_blocker_fields_json config meta
-                         @ Keeper_status_bridge.attention_fields_json config meta
+                         @ attention_fields
                          @ [ "runtime_trust", runtime_trust ])
                     in
                     emit_timing_log (Time_compat.now () -. t_work_start);
-                    Keeper_row row)
+                    Keeper_row {json = row;
+                      next_deadline_unix = earlier_deadline diagnostic_observation.next_deadline_unix runtime_trust_observation.next_deadline_unix;
+                      completeness = Dashboard_projection_read.combine_completeness
+                        runtime_trust_observation.completeness attention_completeness})
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->
@@ -494,7 +514,7 @@ let keepers_json
   let rows =
     List.filter_map
       (function
-        | Keeper_row row -> Some row
+        | Keeper_row observation -> Some observation.json
         | Keeper_gone | Keeper_unread _ -> None)
       outcomes
   in
@@ -510,9 +530,9 @@ let keepers_json
         | Keeper_row _ | Keeper_gone -> None)
       outcomes
   in
-  let declarations =
+  let declarations, declaration_completeness =
     match Keeper_meta_store.persisted_keeper_names_result config with
-    | Error _ -> [] (* A failed read cannot establish that a Keeper never started. *)
+    | Error detail -> [], Dashboard_projection_read.Partial detail
     | Ok persisted_names ->
       (* A metadata row may have been removed after this projection read it.
          Keep its initial name reserved until the next snapshot, so the same
@@ -520,15 +540,25 @@ let keepers_json
       Keeper_declared_roster.missing ~base_path:config.base_path
         ~persisted_names:(List.sort_uniq String.compare (names @ persisted_names))
       |> List.map Keeper_declared_roster.to_json
+      |> fun rows -> rows, Dashboard_projection_read.Complete
   in
   let rows = rows @ declarations in
-  `Assoc
+  let completeness = Dashboard_projection_read.combine_completeness declaration_completeness
+      (Dashboard_projection_read.keeper_completeness ~listing ~unread) in
+  let completeness, next_deadline_unix = List.fold_left (fun (completeness, deadline) -> function
+    | Keeper_row observation ->
+        Dashboard_projection_read.combine_completeness completeness observation.completeness,
+        earlier_deadline deadline observation.next_deadline_unix
+    | Keeper_gone | Keeper_unread _ -> completeness, deadline)
+      (completeness, None) outcomes in
+  let json = `Assoc
     [ "count", `Int (List.length rows)
     ; "items", `List rows
     ; ( Keeper_snapshot_unread.section_field
       , `List (List.map Keeper_snapshot_unread.to_json unread) )
     ; Keeper_snapshot_unread.listing_field, Keeper_snapshot_unread.listing_to_json listing
-    ]
+    ] in
+  {Dashboard_projection_read.json; next_deadline_unix; completeness}
 ;;
 
 let persistent_agents_json = Operator_control_snapshot_persistent_agents.persistent_agents_json
@@ -537,7 +567,7 @@ let _snapshot_recent_completed_limit () =
   Dashboard_http_helpers.operator_snapshot_recent_completed_limit ()
 ;;
 
-let workspace_json = Operator_control_snapshot_workspace.workspace_json
+let workspace_observation = Operator_control_snapshot_workspace.workspace_observation
 
 (* snapshot_view variant + parser extracted to
    [Operator_control_snapshot_view] (godfile decomp). *)
@@ -557,7 +587,7 @@ let snapshot_view_of_string_opt = Operator_control_snapshot_view.snapshot_view_o
 include Operator_control_snapshot_cache
 let namespace_scope_cache_segment (_config : Workspace_utils.config) = "default"
 
-let snapshot_json
+let snapshot_read
       ?(read_policy = Dashboard_projection_read.Reuse)
       ?actor
       ?view
@@ -566,7 +596,7 @@ let snapshot_json
       ?(include_summary_fields = true)
       ?(lightweight_summary = false)
       (ctx : 'a context)
-  : Yojson.Safe.t
+  : Dashboard_projection_cache.snapshot_read
   =
   let cache_key =
     Printf.sprintf
@@ -583,6 +613,8 @@ let snapshot_json
   let compute_snapshot () =
     let t0 = Time_compat.now () in
     let timing_records = ref [] in
+    let next_deadline = ref None in
+    let completeness = ref Dashboard_projection_read.Complete in
     let timed label f =
       let t_start = Time_compat.now () in
       let result = f () in
@@ -625,9 +657,10 @@ let snapshot_json
           | Summary | Full -> true
           | Keepers | Messages -> false
         then (
-          let workspace_attention =
-            build_workspace_attention_items config |> List.sort compare_attention
-          in
+          let workspace_attention, attention_deadline =
+            build_workspace_attention_observation ~now:(Time_compat.now ()) config in
+          next_deadline := earlier_deadline !next_deadline attention_deadline;
+          let workspace_attention = List.sort compare_attention workspace_attention in
           (* #26144 moved actions out of the fallback read model: this layer
              observes and does not recommend. The summary is constant here --
              count=0, top_action=null, provenance="fallback",
@@ -650,27 +683,42 @@ let snapshot_json
        no name to read; the listing failure is reported once, in the
        [keepers] section. *)
     let keeper_names = Result.value keeper_names_listing ~default:[] in
-    let persistent_keeper_names =
+    let persistent_keeper_names, persistent_unread =
       if initialized && include_keepers
-      then Keeper_meta_store.persistent_agent_names config
-      else []
+      then Keeper_meta_store.persistent_agent_names_with_unread config
+      else [], []
     in
+    completeness := Dashboard_projection_read.combine_completeness !completeness
+      (Dashboard_projection_read.keeper_completeness
+        ~listing:Keeper_snapshot_unread.Listed ~unread:persistent_unread);
   let board_attention_quarantines =
     timed "board_attention_quarantines" (fun () ->
       if initialized && include_keepers
       then
         let read_inventory () =
-             Keeper_board_attention_quarantine_command.inventory_json
+             Keeper_board_attention_quarantine_command.inventory
                ~base_path:config.base_path
                ~keeper_names in
         (match read_policy with
-         | Dashboard_projection_read.Current -> read_inventory ()
+         | Dashboard_projection_read.Current ->
+             let inventory = read_inventory () in
+             List.iter (fun (error : Keeper_board_attention_quarantine_command.inventory_error) ->
+               let detail = match error.kind with
+                 | Inventory_candidate_ledger_unavailable -> "candidate ledger unavailable"
+                 | Inventory_partition_ledger_unavailable -> "partition ledger unavailable" in
+               completeness := Dashboard_projection_read.combine_completeness !completeness
+                 (Partial (Printf.sprintf "Keeper %s quarantine inventory: %s" error.keeper_name detail)))
+               inventory.errors;
+             Keeper_board_attention_quarantine_command.inventory_to_json inventory
          | Reuse ->
              let cache_key = "operator:board-quarantines:" ^ config.base_path in
              Dashboard_cache.get_or_compute cache_key ~ttl:10.0
-               (Pool_work.cpu ~name:__FUNCTION__ read_inventory))
+               (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+                 Keeper_board_attention_quarantine_command.inventory_to_json (read_inventory ()))))
       else `Assoc [ "count", `Int 0; "items", `List []; "errors", `List [] ])
   in
+  let workspace = workspace_observation config in
+  completeness := Dashboard_projection_read.combine_completeness !completeness workspace.completeness;
   let result =
       `Assoc
         ([ "trace_id", `String trace_id
@@ -678,11 +726,11 @@ let snapshot_json
          ; "judgment_owner", `String "fallback_read_model"
          ; "authoritative_judgment_available", `Bool false
          ; "inference_inflight", Inference_inflight_observation.snapshot_json ()
-         ; "workspace", workspace_json config
+         ; "workspace", workspace.json
          ; "board_attention_quarantines", board_attention_quarantines
          ]
          @ (let empty_section = `Assoc [ "count", `Int 0; "items", `List [] ] in
-            let keepers_json_value =
+            let keepers_observation =
               timed "keepers_json" (fun () ->
                 if initialized && include_keepers
                 then
@@ -694,15 +742,18 @@ let snapshot_json
                     config
                 else
                   (* No Keeper name was read, so none went unread. *)
-                  `Assoc
+                  {Dashboard_projection_read.json = `Assoc
                     [ "count", `Int 0
                     ; "items", `List []
                     ; Keeper_snapshot_unread.section_field, `List []
                     ; ( Keeper_snapshot_unread.listing_field
                       , Keeper_snapshot_unread.listing_to_json
                           Keeper_snapshot_unread.Not_listed )
-                    ])
+                    ]; next_deadline_unix = None; completeness = Complete})
             in
+            completeness := Dashboard_projection_read.combine_completeness !completeness keepers_observation.completeness;
+            next_deadline := earlier_deadline !next_deadline keepers_observation.next_deadline_unix;
+            let keepers_json_value = keepers_observation.json in
             let persistent_agents_json_value =
               timed "persistent_agents_json" (fun () ->
                 if initialized && include_keepers
@@ -732,6 +783,8 @@ let snapshot_json
          @ (let confirm_scope =
               timed "pending_confirms" (fun () -> pending_confirm_scope ?actor config)
             in
+            next_deadline := earlier_deadline !next_deadline
+              (pending_confirm_deadline_unix confirm_scope.all_entries);
             [ ( "pending_confirm_envelope"
               , `Assoc
                   [ ( "items"
@@ -759,10 +812,19 @@ let snapshot_json
            if dt > 0.1
            then Log.Dashboard.info "[snapshot_json]   %s: %.0fms" label (dt *. 1000.0))
         (List.rev !timing_records));
-    result
+    {Dashboard_projection_read.json = result; next_deadline_unix = !next_deadline; completeness = !completeness}
   in
   let ttl = Env_config_runtime_services.Operator.cache_ttl_sec in
   match read_policy with
-  | Dashboard_projection_read.Current -> compute_snapshot ()
-  | Reuse -> get_or_compute cache_key ~ttl compute_snapshot
+  | Dashboard_projection_read.Current -> Dashboard_projection_cache.Observed (compute_snapshot ())
+  | Reuse -> Dashboard_projection_cache.Cached_json
+      (get_or_compute cache_key ~ttl (fun () -> (compute_snapshot ()).json))
+;;
+
+let snapshot_json ?read_policy ?actor ?view ?include_messages ?include_keepers
+    ?include_summary_fields ?lightweight_summary ctx =
+  match snapshot_read ?read_policy ?actor ?view ?include_messages ?include_keepers
+      ?include_summary_fields ?lightweight_summary ctx with
+  | Dashboard_projection_cache.Cached_json json -> json
+  | Observed observation -> observation.json
 ;;

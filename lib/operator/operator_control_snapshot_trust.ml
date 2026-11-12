@@ -38,6 +38,11 @@ let project_compact_runtime_trust runtime_trust =
     ]
 ;;
 
+let compact_keeper_runtime_trust_observation ~config ~meta =
+  let observation = Keeper_runtime_trust_snapshot.summary_observation ~config ~meta in
+  {observation with json = project_compact_runtime_trust observation.json}
+;;
+
 let compact_keeper_runtime_trust_json
       ~read_policy
       ~(config : Workspace.config)

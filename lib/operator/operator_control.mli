@@ -3,6 +3,16 @@ include module type of Operator_digest
 
 val invalidate_snapshot_cache : unit -> unit
 
+val snapshot_read :
+  ?read_policy:Dashboard_projection_read.t ->
+  ?actor:string ->
+  ?view:string ->
+  ?include_messages:bool ->
+  ?include_keepers:bool ->
+  ?include_summary_fields:bool ->
+  ?lightweight_summary:bool ->
+  'a context -> Dashboard_projection_cache.snapshot_read
+
 val snapshot_json :
   ?read_policy:Dashboard_projection_read.t ->
   ?actor:string ->

@@ -122,11 +122,15 @@ let build_projection ~read_policy ?actor ~config ~sw ~clock
             ~lightweight_summary:true ctx in
     match read_policy with
     | Dashboard_projection_read.Reuse ->
-        Dashboard_projection_cache.get_or_compute_snapshot_json
+        Dashboard_projection_cache.Cached_json (Dashboard_projection_cache.get_or_compute_snapshot_json
           ~config ~actor:(Some actor_name) (fun actor_name ->
-            Pool_work.cpu ~name:__FUNCTION__ (fun () -> read actor_name))
-    | Current -> read actor_name
-        |> Dashboard_projection_cache.with_current_keeper_observations ~config
+            Pool_work.cpu ~name:__FUNCTION__ (fun () -> read actor_name)))
+    | Current ->
+        let observation = Dashboard_projection_cache.operator_snapshot_observation
+            ~actor:actor_name ~view:"summary" ~include_messages:false ~include_keepers:true
+            ~include_summary_fields:false ~lightweight_summary:true ctx in
+        Observed {observation with json =
+          Dashboard_projection_cache.with_current_keeper_observations ~config observation.json}
   in
   let digest_compute () =
     match read_policy with
@@ -150,9 +154,12 @@ let build_projection ~read_policy ?actor ~config ~sw ~clock
                 ])) in
       {Dashboard_projection_cache.json; next_deadline_unix = None; completeness = Dashboard_projection_read.Complete}
   in
-  let snapshot_json, digest_observation =
+  let snapshot_read, digest_observation =
     Eio.Fiber.pair snapshot_compute digest_compute
   in
+  let snapshot_json, snapshot_observation = match snapshot_read with
+    | Dashboard_projection_cache.Cached_json json -> json, None
+    | Observed observation -> observation.json, Some observation in
   let digest_json = digest_observation.Dashboard_projection_cache.json in
   let namespace_json =
     match member_assoc "workspace" snapshot_json with
@@ -213,8 +220,13 @@ let build_projection ~read_policy ?actor ~config ~sw ~clock
     keepers_listing;
     internal_signals;
     completeness = Dashboard_projection_read.combine_completeness digest_observation.completeness
-      (Dashboard_projection_read.keeper_completeness ~listing:keepers_listing ~unread:keepers_unread);
-    next_deadline_unix = (match digest_observation.next_deadline_unix, agent_observation.next_deadline_unix with
+      (match snapshot_observation with
+       | Some observation -> observation.completeness
+       | None -> Dashboard_projection_read.keeper_completeness ~listing:keepers_listing ~unread:keepers_unread);
+    next_deadline_unix = (let digest_and_agents = match digest_observation.next_deadline_unix, agent_observation.next_deadline_unix with
+      | None, deadline | deadline, None -> deadline
+      | Some left, Some right -> Some (Float.min left right) in
+      match digest_and_agents, Option.bind snapshot_observation (fun observation -> observation.next_deadline_unix) with
       | None, deadline | deadline, None -> deadline
       | Some left, Some right -> Some (Float.min left right));
 }

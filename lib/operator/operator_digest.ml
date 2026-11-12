@@ -117,6 +117,9 @@ let build_workspace_attention_observation ~now config =
       ]
   in
   let host_items, deadline = recent_tool_host_failure_observation ~now () in
+  let deadline = match deadline, pending_confirm_deadline_unix pending_confirms with
+    | None, deadline | deadline, None -> deadline
+    | Some left, Some right -> Some (Float.min left right) in
   List.sort compare_attention (host_items @ pending_items), deadline
 
 let build_workspace_attention_items config =

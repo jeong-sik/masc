@@ -295,6 +295,8 @@ let get_or_compute_digest_json ~config ~actor work =
     (actor_cache_key config "digest" actor_name)
     ~ttl:digest_cache_ttl_s (work actor_name)
 
+type snapshot_read = Cached_json of Yojson.Safe.t | Observed of Dashboard_projection_read.observation
+
 type operator_snapshot_fn = {
   snapshot : 'a.
     ?read_policy:Dashboard_projection_read.t ->
@@ -305,7 +307,7 @@ type operator_snapshot_fn = {
     ?include_summary_fields:bool ->
     ?lightweight_summary:bool ->
     'a Tool_operator.context ->
-    Yojson.Safe.t;
+    snapshot_read;
 }
 
 type digest_observation = Dashboard_projection_read.observation = {
@@ -326,7 +328,7 @@ type operator_digest_observer = {
 
 let operator_snapshot_json_ref : operator_snapshot_fn ref =
   ref { snapshot = (fun ?read_policy:_ ?actor:_ ?view:_ ?include_messages:_ ?include_keepers:_ ?include_summary_fields:_ ?lightweight_summary:_ _ctx ->
-    `Null) }
+    Cached_json `Null) }
 
 let register_operator_snapshot_json fn =
   operator_snapshot_json_ref := fn
@@ -340,6 +342,13 @@ let register_operator_digest_observer fn =
 
 let operator_snapshot_json ?read_policy ?actor ?view ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx =
   (!operator_snapshot_json_ref).snapshot ?read_policy ?actor ?view ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx
+  |> function Cached_json json -> json | Observed observation -> observation.json
+
+let operator_snapshot_observation ?actor ?view ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx =
+  match (!operator_snapshot_json_ref).snapshot ~read_policy:Dashboard_projection_read.Current
+      ?actor ?view ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx with
+  | Observed observation -> observation
+  | Cached_json _ -> invalid_arg "Current Operator Snapshot reader returned cached bytes"
 
 let operator_digest_observation ?actor ?target_type ?target_id ?include_workers ctx =
   (!operator_digest_observer_ref).observe_digest ?actor ?target_type ?target_id ?include_workers ctx

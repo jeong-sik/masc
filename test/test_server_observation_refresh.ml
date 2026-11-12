@@ -167,7 +167,7 @@ let with_execution_workspace f =
     let inherited = Runtime.For_testing.snapshot () in
     Fun.protect ~finally:(fun () ->
       Dashboard_projection_cache.register_operator_snapshot_json
-        {snapshot = Operator_control.snapshot_json};
+        {snapshot = Operator_control.snapshot_read};
       Runtime.For_testing.restore inherited)
       (fun () ->
         let path = Filename.concat config.base_path "execution-runtime.toml" in
@@ -184,7 +184,7 @@ let with_execution_workspace f =
          | Ok () -> () | Error error -> fail error);
         ignore (Workspace.init config ~agent_name:None);
         Dashboard_projection_cache.register_operator_snapshot_json
-          {snapshot = Operator_control.snapshot_json};
+          {snapshot = Operator_control.snapshot_read};
         Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURES_ENABLED" (Some "false") (fun () ->
           Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURE" None (fun () -> f env state))))
 ;;
@@ -277,7 +277,7 @@ let test_late_lifecycle_patch_retains_the_source_read_debt () =
       (fun ?read_policy ?actor ?view ?include_messages ?include_keepers
           ?include_summary_fields ?lightweight_summary ctx ->
         let call = Atomic.fetch_and_add calls 1 + 1 in
-        let json = Operator_control.snapshot_json ?read_policy ?actor ?view
+        let json = Operator_control.snapshot_read ?read_policy ?actor ?view
             ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx in
         if call = 1 then (
           Eio.Promise.resolve signal_first ();
@@ -335,7 +335,7 @@ let test_http_wins_before_source_read_and_shell_completion_still_publishes ~forc
           Eio.Promise.resolve signal_first ();
           Eio.Promise.await release);
         if call = 3 then Eio.Promise.resolve signal_third ();
-        Operator_control.snapshot_json ?read_policy ?actor ?view ?include_messages
+        Operator_control.snapshot_read ?read_policy ?actor ?view ?include_messages
           ?include_keepers ?include_summary_fields ?lightweight_summary ctx)};
     Eio.Switch.run (fun sw ->
       subscribe_execution_frames ~state ~sw ~id:"execution-request-completion" (fun kind payload ->

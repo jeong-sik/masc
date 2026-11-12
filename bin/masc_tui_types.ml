@@ -5118,11 +5118,12 @@ type keeper_execute_follow = {
 }
 
 (* The server log stream the System logs view follows while it shows the
-   server's logs. [slf_level] is the floor it was opened with, [slf_reading]
-   the workspace reading it was opened under; [slf_owner] tells this job from
-   the next one. *)
+   server's logs. [slf_level] is the floor it was opened with, [slf_instance]
+   the Observer instance its requests name, [slf_reading] the workspace
+   reading it was opened under; [slf_owner] tells this job from the next one. *)
 type system_log_follow = {
   slf_level : string option;
+  slf_instance : string;
   slf_reading : unit ref;
   slf_owner : unit ref;
 }

@@ -16712,9 +16712,12 @@ let stop_system_log_stream state =
     state.system_log_stream <- None;
     stop ()
 
-let launch_system_log_stream state ~mailbox ~level =
+let launch_system_log_stream state ~mailbox ~level ~instance =
   let stream =
-    { slf_level = level; slf_reading = state.workspace_read_authority; slf_owner = ref () } in
+    { slf_level = level
+    ; slf_instance = instance
+    ; slf_reading = state.workspace_read_authority
+    ; slf_owner = ref () } in
   let stopped, stop = Eio.Promise.create () in
   state.system_log_stream <- Some (stream, fun () -> ignore (Eio.Promise.try_resolve stop ()));
   let enqueue_async = workspace_enqueue state in
@@ -16726,7 +16729,8 @@ let launch_system_log_stream state ~mailbox ~level =
       let reader = Masc_tui_system_log_stream.create () in
       let opened_at = Eio.Time.now clock in
       let ended =
-        Masc_tui_http.observe_system_log_stream ~clock ~host ~port ?level ?since_seq:!since
+        Masc_tui_http.observe_system_log_stream ~clock ~host ~port ~instance ?level
+          ?since_seq:!since
           ~limit:system_log_page
           ~on_chunk:(fun chunk ->
             List.iter
@@ -16770,25 +16774,41 @@ let launch_system_log_stream state ~mailbox ~level =
       System_logs_view.apply System_logs_view.Server (Error "Eio switch or clock is unavailable")
         state.system_logs
 
+(* The server admits a log stream only under the Observer instance the
+   request names, and this TUI learns that instance from its own Observer
+   stream. Until that stream has been answered there is no instance to name. *)
+let system_log_stream_waits_for_observer =
+  "the log stream opens once this TUI's Observer stream names the workspace instance"
+
 (* Runs on every loop iteration: one stream while the view shows the server's
-   logs and this TUI may read the workspace, none otherwise. *)
+   logs and this TUI may read the workspace, none otherwise. The stream names
+   the Observer instance this TUI is bound to. A replaced workspace ends the
+   Observer stream; the instance its successor is answered with is a new
+   binding, and the next iteration opens a stream that names it. *)
 let reconcile_system_log_stream state ~mailbox =
-  let wanted =
-    if state.view = System_logs
-       && System_logs_view.source state.system_logs = System_logs_view.Server
-       && server_authority_ready state
-    then Some (system_log_stream_level state)
-    else None
+  let shown =
+    state.view = System_logs
+    && System_logs_view.source state.system_logs = System_logs_view.Server
+    && server_authority_ready state
   in
-  match wanted, state.system_log_stream with
-  | None, None -> ()
-  | None, Some _ -> stop_system_log_stream state
-  | Some level, Some (stream, _)
-    when Option.equal String.equal stream.slf_level level
-         && stream.slf_reading == state.workspace_read_authority -> ()
-  | Some level, (Some _ | None) ->
+  match shown, state.observer_scope_binding, state.system_log_stream with
+  | false, _, None -> ()
+  | false, _, Some _ -> stop_system_log_stream state
+  | true, (Observer_scope_unbound | Observer_scope_retired), _ ->
     stop_system_log_stream state;
-    launch_system_log_stream state ~mailbox ~level
+    let waiting = Some system_log_stream_waits_for_observer in
+    let page = System_logs_view.page System_logs_view.Server state.system_logs in
+    if not (Option.equal String.equal page.lp_error waiting) then
+      state.system_logs <-
+        System_logs_view.apply System_logs_view.Server
+          (Error system_log_stream_waits_for_observer) state.system_logs
+  | true, Observer_scope_bound instance, Some (stream, _)
+    when Option.equal String.equal stream.slf_level (system_log_stream_level state)
+         && String.equal stream.slf_instance instance
+         && stream.slf_reading == state.workspace_read_authority -> ()
+  | true, Observer_scope_bound instance, (Some _ | None) ->
+    stop_system_log_stream state;
+    launch_system_log_stream state ~mailbox ~level:(system_log_stream_level state) ~instance
 
 (* The reads on the wire that the pages tell the reader about: the facts each
    page hands [page_unread_note_while], and the sources the status line names.

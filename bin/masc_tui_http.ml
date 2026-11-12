@@ -3843,12 +3843,15 @@ let system_log_stream_idle_timeout_sec =
 
 (** Follow [GET /api/v1/dashboard/logs/stream] until it ends. [since_seq] is the
     newest entry already held, so the server sends only newer ones; without it
-    the first frame is a whole page. [on_chunk] gets the raw SSE bytes. The
+    the first frame is a whole page. [on_chunk] gets the raw SSE bytes.
+    [instance] is the Observer instance this TUI's own Observer stream was
+    answered with; the server admits the stream only while that is still the
+    workspace it serves (400 without the header, 409 once replaced). The
     stream has no normal end: what returns is why it ended (a refusal, a
     response that is not an event stream, a dropped or idle connection), and
     the caller reconnects. *)
-let observe_system_log_stream ~clock ~(host : string) ~(port : int) ?level ?since_seq
-    ~(limit : int) ~(on_chunk : string -> unit) () : string =
+let observe_system_log_stream ~clock ~(host : string) ~(port : int) ~(instance : string)
+    ?level ?since_seq ~(limit : int) ~(on_chunk : string -> unit) () : string =
   let exception Invalid_stream_response of string in
   let query =
     Printf.sprintf "limit=%d%s%s" (max 1 (min 3000 limit))
@@ -3865,7 +3868,10 @@ let observe_system_log_stream ~clock ~(host : string) ~(port : int) ?level ?sinc
   match
     with_credential_refresh_on ~refused:stream_refused @@ fun () ->
     Masc_http_client.get_stream ~clock ~idle_timeout_sec:system_log_stream_idle_timeout_sec
-      ~url ~headers:(("Accept", "text/event-stream") :: auth_headers ())
+      ~url
+      ~headers:
+        (("Accept", "text/event-stream") :: (Sse_wire.instance_header, instance)
+         :: auth_headers ())
       ~on_response ~on_chunk ()
   with
   | exception Invalid_stream_response detail -> "log stream: " ^ detail

@@ -42,6 +42,9 @@ const scenarios = {
   admin: { session: { status: 200 }, role: "admin", logout: 204 },
   session_unread: { session: unread, role: "worker", logout: 503 },
   signout_refused: { session: { status: 200 }, role: "worker", logout: 503 },
+  // whoami names another person than the session, as when another tab signs
+  // in between the two requests.
+  account_changed: { session: { status: 200 }, role: "worker", logout: 204, whoamiUser: "usr_01JCMOTHER0000" },
 };
 const firstSession = { user: "usr_01JCM8P0Y4A7M2", token: "mock-csrf-token" };
 let scenario = scenarios.signed_out;
@@ -66,7 +69,7 @@ async function sessionRoutes(req, res, path) {
     if (scenario.session.status === 401) return json(res, 401, { error: "the route needs a credential" });
     if (scenario.session.status !== 200) return json(res, scenario.session.status, { error: scenario.session.error });
     return json(res, 200, {
-      principal: { kind: "human", id: session.user },
+      principal: { kind: "human", id: scenario.whoamiUser ?? session.user },
       role: scenario.role,
       binding: { kind: "session", id: "ses_01JCMB3N8V5C1X" },
     });

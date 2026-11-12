@@ -65,6 +65,7 @@ print(json.dumps([
     ["console_member", mock, "member", console],
     ["console_admin", mock, "admin", console],
     ["console_session_unread", mock, "session_unread", console],
+    ["console_account_changed", mock, "account_changed", console],
     ["control_no_style_source", mock, "member", console + "?control"],
 ]))
 PY

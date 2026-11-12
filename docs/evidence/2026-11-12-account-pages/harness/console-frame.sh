@@ -12,6 +12,9 @@ MOCK="http://127.0.0.1:$PORT"
 mkdir -p "$OUT"
 node "$HERE/console-mock.mjs" "$FILES" "$PORT" > "$OUT/$LABEL-mock.log" 2>&1 &
 MOCK_PID=$!
+# A job that a script starts in the background ignores Ctrl-C, so the script
+# stops the mock itself however it ends.
+trap 'kill -TERM "$MOCK_PID" 2>/dev/null' EXIT INT TERM
 n=0
 until curl -s -m 2 -o /dev/null "$MOCK/" || [ "$n" -ge 20 ]; do n=$((n + 1)); perl -e 'select(undef, undef, undef, 0.25)'; done
 python3 "$HERE/console-frame-run.py" "${UX_SPACE:-masc account pages ux}" "$LABEL" "$OUT" "$MOCK" > "$OUT/$LABEL-frame.mjs"

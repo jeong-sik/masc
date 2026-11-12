@@ -18,6 +18,9 @@ const READY_TIMEOUT_MS = 30000;
 // answers at once, so this is the time of the page and the browser alone.
 const SETTLE_MS = 500;
 const WIDTHS = [1548, 1280, 320];
+// The size of the letters of a browser as it comes, and two larger ones.
+const DEFAULT_LETTERS_PX = 16;
+const LARGER_LETTERS_PX = [20, 24];
 const fs = await import("node:fs/promises");
 
 const task = await taskSpace(SPACE);
@@ -100,6 +103,7 @@ const notes = (mark) => {
     statusLines: status,
     focus: focused === null || focused === document.body ? "body" : `${focused.tagName.toLowerCase()} ${focused.textContent.trim()}`,
     shownId: (document.querySelector(".account .hint") || { textContent: null }).textContent,
+    signOutShown: document.querySelector("header button") !== null,
     path: location.pathname,
   };
   if (mark) for (const e of alerts) e.dataset.measured = "1";
@@ -128,8 +132,9 @@ function record(row) {
 }
 
 // 1. The line and the column, signed in, at each width; and the line while
-//    the page reads, held until the reading is measured.
-for (const width of WIDTHS) {
+//    the page reads, held until the reading is measured. Then the same at
+//    1280px with the larger letters a person can set in the browser.
+async function line(width) {
   await call("/__hold");
   await open("member", width);
   await until(drawn, "reading", "the reading state");
@@ -137,9 +142,14 @@ for (const width of WIDTHS) {
   await call("/__release");
   await until(drawn, "signed_in", "the signed-in state");
   await page.waitForTimeout(200);
-  const signedIn = await page.evaluate(geometry);
-  record({ measure: "geometry", width, reading, signedIn });
+  return { reading, signedIn: await page.evaluate(geometry) };
 }
+for (const width of WIDTHS) record({ measure: "geometry", width, ...(await line(width)) });
+for (const fontSize of LARGER_LETTERS_PX) {
+  await page.cdp("Page.setFontSizes", { fontSizes: { standard: fontSize } });
+  record({ measure: "geometry_letters", width: 1280, fontSize, ...(await line(1280)) });
+}
+await page.cdp("Page.setFontSizes", { fontSizes: { standard: DEFAULT_LETTERS_PX } });
 await page.cdp("Emulation.setDeviceMetricsOverride", { width: 1280, height: 990, deviceScaleFactor: 1, mobile: false });
 
 // 2. The focus once the first reading ends.
@@ -166,7 +176,7 @@ for (const [name, rotate] of [["signed_in_again", "/__rotate"], ["another_person
   await call(rotate);
   await press("header button");
   const after = await page.evaluate(notes, true);
-  const pressedAgain = after.path === "/accounts/console" && after.alerts > 0;
+  const pressedAgain = after.path === "/accounts/console" && after.alerts > 0 && after.signOutShown;
   let again = null;
   if (pressedAgain) {
     await press("header button");

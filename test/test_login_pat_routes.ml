@@ -68,7 +68,10 @@ let instant_of_ms ms =
 
 let request ?(method_ = Q.Unsafe) ?(origin = Q.Same_origin) ?(csrf = true) cookie =
   { Q.method_
-  ; session_cookie = Option.map Bs.Cookie.to_value cookie
+  ; session_cookie =
+      (match cookie with
+       | None -> Q.No_cookie
+       | Some cookie -> Q.One_cookie (Bs.Cookie.to_value cookie))
   ; bearer = false
   ; query_credential = false
   ; origin

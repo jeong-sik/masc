@@ -98,6 +98,11 @@ let with_session f =
 
 let request ?(method_ = Q.Unsafe) ?session_cookie ?(bearer = false) ?(query_credential = false)
     ?(origin = Q.Same_origin) ?csrf () =
+  let session_cookie =
+    match session_cookie with
+    | None -> Q.No_cookie
+    | Some value -> Q.One_cookie value
+  in
   { Q.method_; session_cookie; bearer; query_credential; origin; csrf }
 ;;
 
@@ -145,6 +150,17 @@ let a_request_that_is_refused () =
       (fun (label, request, expected) ->
         Alcotest.(check string) label (Q.refusal_to_string expected) (verdict zone request))
       [ "a query credential", request ~query_credential:true (), Q.Query_credential
+      ; ( "the session twice"
+        , { (request ~csrf:token ()) with Q.session_cookie = Q.session_cookies_of_values [ value; value ] }
+        , Q.Several_session_cookies )
+      ; ( "the session beside another cookie"
+        , { (request ~method_:Q.Safe ()) with
+            Q.session_cookie = Q.session_cookies_of_values [ other_secret; value ]
+          }
+        , Q.Several_session_cookies )
+      ; ( "several cookies beside a bearer"
+        , { (request ~bearer:true ()) with Q.session_cookie = Q.Several_cookies }
+        , Q.Several_session_cookies )
       ; ( "a query credential beside the session"
         , request ~session_cookie:value ~csrf:token ~query_credential:true ()
         , Q.Query_credential )
@@ -211,6 +227,7 @@ let texts_are_told_apart () =
       Q.refusal_to_string
       [ Q.Query_credential
       ; Q.Session_and_bearer
+      ; Q.Several_session_cookies
       ; Q.Not_a_session_cookie
       ; Q.Cross_origin
       ; Q.Origin_missing

@@ -330,8 +330,14 @@ let keep_cookies browser answer =
 
 let code (answer : R.answer) = R.status_code answer.status
 
+let cookies_of browser =
+  match browser.session with
+  | None -> Q.No_cookie
+  | Some value -> Q.One_cookie value
+;;
+
 let start ?(origin = Q.Same_origin) ?(fields = []) t browser provider =
-  let answer = R.start t.routes provider ~origin ~session_cookie:browser.session ~fields in
+  let answer = R.start t.routes provider ~origin ~session_cookie:(cookies_of browser) ~fields in
   keep_cookies browser answer;
   answer
 ;;
@@ -363,7 +369,7 @@ let sign_in ?(fields = []) t browser provider ~who =
 ;;
 
 let request ?(method_ = Q.Unsafe) ?(origin = Q.Same_origin) ?csrf ?(bearer = false) browser =
-  { Q.method_; session_cookie = browser.session; bearer; query_credential = false; origin; csrf }
+  { Q.method_; session_cookie = cookies_of browser; bearer; query_credential = false; origin; csrf }
 ;;
 
 let read_session ?origin t browser = R.session t.routes (request ~method_:Q.Safe ?origin browser)
@@ -508,7 +514,7 @@ let starts_in_a_row = 64
 let a_start_that_is_refused () =
   with_installation (fun t ->
     let refused label ?(origin = Q.Same_origin) ?(routes = t.routes) ?(fields = []) provider expected =
-      let answer = R.start routes provider ~origin ~session_cookie:None ~fields in
+      let answer = R.start routes provider ~origin ~session_cookie:Q.No_cookie ~fields in
       Alcotest.(check int) label expected (code answer);
       Alcotest.(check (list string)) (label ^ ": no cookie") [] (headers "set-cookie" answer);
       Alcotest.(check bool) (label ^ ": no token in the page") false (contains ~sub:admin_token answer.body)
@@ -522,6 +528,14 @@ let a_start_that_is_refused () =
     refused "a URL" ~fields:[ "return_to", "https://evil.example/" ] R.Google 400;
     refused "Google not set up" ~routes:{ t.routes with R.google = None } R.Google 404;
     refused "GitHub not set up" ~routes:{ t.routes with R.github = None } R.Github 404;
+    List.iter
+      (fun provider ->
+        let answer =
+          R.start t.routes provider ~origin:Q.Same_origin ~session_cookie:Q.Several_cookies ~fields:[]
+        in
+        Alcotest.(check int) "several session cookies" 401 (code answer);
+        Alcotest.(check (list string)) "several session cookies: no cookie" [] (headers "set-cookie" answer))
+      [ R.Google; R.Github ];
     t.providers.discovery_up := false;
     refused "Google does not answer" R.Google 502;
     t.providers.discovery_up := true;
@@ -603,6 +617,13 @@ let a_sign_out_or_a_read_that_is_refused () =
     refused "a sign-out with no token" (R.logout t.routes (request b)) 403 ~clears:false;
     refused "a sign-out with another token" (R.logout t.routes (request ~csrf:(String.make 64 'f') b)) 403 ~clears:false;
     refused "a sign-out beside a bearer" (R.logout t.routes (request ~csrf ~bearer:true b)) 401 ~clears:false;
+    let twice = { (request ~csrf b) with Q.session_cookie = Q.session_cookies_of_values [ value; value ] } in
+    refused "a sign-out with the cookie twice" (R.logout t.routes twice) 401 ~clears:false;
+    refused
+      "a read with the cookie twice"
+      (R.session t.routes { twice with Q.method_ = Q.Safe; csrf = None })
+      401
+      ~clears:false;
     refused "a read from another origin" (read_session ~origin:Q.Other_origin t b) 403 ~clears:false;
     (* The token of the forged cookie passes the CSRF check, so the session
        check is the one that refuses. *)

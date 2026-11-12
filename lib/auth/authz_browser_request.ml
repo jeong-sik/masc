@@ -45,9 +45,20 @@ type origin =
   | Other_origin
   | No_origin
 
+type session_cookies =
+  | No_cookie
+  | One_cookie of string
+  | Several_cookies
+
+let session_cookies_of_values = function
+  | [] -> No_cookie
+  | [ value ] -> One_cookie value
+  | _ :: _ :: _ -> Several_cookies
+;;
+
 type request =
   { method_ : method_
-  ; session_cookie : string option
+  ; session_cookie : session_cookies
   ; bearer : bool
   ; query_credential : bool
   ; origin : origin
@@ -57,6 +68,7 @@ type request =
 type refusal =
   | Query_credential
   | Session_and_bearer
+  | Several_session_cookies
   | Not_a_session_cookie
   | Cross_origin
   | Origin_missing
@@ -67,6 +79,7 @@ type refusal =
 let refusal_to_string = function
   | Query_credential -> "a credential in the query string is not read in multi-account mode"
   | Session_and_bearer -> "the request carries a session cookie and a bearer token; send one"
+  | Several_session_cookies -> "the request carries several session cookies; send one"
   | Not_a_session_cookie -> "the session cookie does not hold a session"
   | Cross_origin -> "a request with a session cookie comes from another origin"
   | Origin_missing -> "a request that changes something with a session cookie names no origin"
@@ -78,6 +91,7 @@ let refusal_to_string = function
 let is_unauthenticated = function
   | Query_credential
   | Session_and_bearer
+  | Several_session_cookies
   | Not_a_session_cookie
   | Session_refused
       ( Bs.Unknown
@@ -115,9 +129,10 @@ let check (trusted : Authz_zone.trusted) ~now_ms request =
   then Error Query_credential
   else (
     match request.session_cookie with
-    | None -> Ok No_session
-    | Some (_ : string) when request.bearer -> Error Session_and_bearer
-    | Some value ->
+    | No_cookie -> Ok No_session
+    | Several_cookies -> Error Several_session_cookies
+    | One_cookie (_ : string) when request.bearer -> Error Session_and_bearer
+    | One_cookie value ->
       let* cookie = Option.to_result ~none:Not_a_session_cookie (Bs.Cookie.of_value value) in
       let* () = unsafe_needs cookie request in
       let* signed_in =

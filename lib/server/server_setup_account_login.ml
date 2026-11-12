@@ -54,6 +54,14 @@ let actor_of = function
   | Operator { actor } -> Session.Agent actor
   | Person { user_id; _ } -> Session.Person (Authz_types.User_id.to_string user_id)
 
+(* The page of this server reads a person's stream from the same origin, so
+   that stream names no origin it allows. The operator's stream keeps the
+   headers of the single-user server. *)
+let stream_cors_headers owner request =
+  match owner with
+  | Person (_ : person) -> []
+  | Operator { actor = (_ : string) } -> Server_auth.cors_headers (Server_auth.get_origin request)
+
 let private_child parent leaf =
   let path = Filename.concat parent leaf in
   (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -156,7 +164,7 @@ let start ~owner ~base_path ~body request reqd =
         let headers = Httpun.Headers.of_list
           (["content-type", "text/event-stream"; "cache-control", "no-store";
             "connection", "close"; "x-accel-buffering", "no"]
-            @ Server_auth.cors_headers (Server_auth.get_origin request)) in
+            @ stream_cors_headers owner request) in
         let response = Server_sse_response.respond ~clock:(Eio.Stdenv.clock env)
           ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
           reqd (Httpun.Response.create ~headers `OK) in

@@ -25,6 +25,13 @@ type owner =
           is Antigravity, whose credential copy lives in the setup registry,
           which has no owner. *)
 
+(** The CORS headers of the event stream that {!start} answers. A person's
+    stream has none: the page of the account server reads it from the same
+    origin, and no other origin is allowed to read it with the person's
+    credentials. The operator's stream allows the [Origin] of the request,
+    as the single-user server does ({!Server_auth.cors_headers}). *)
+val stream_cors_headers : owner -> Httpun.Request.t -> (string * string) list
+
 val start : owner:owner -> base_path:string -> body:string ->
   Httpun.Request.t -> Http_reqd.t -> unit
 val control : owner:owner -> base_path:string -> body:string ->

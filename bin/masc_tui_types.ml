@@ -6435,6 +6435,14 @@ let memory_pass_text ~ko ending =
     | Pass_raised _ -> "처리 실패", "crashed" in
   if ko then korean else english
 
+(* A failed explicit-admission pass travels as the local-failure kind, which a
+   durable pass reads as a failed recovery. Admission has no recovery step, so
+   it names the pass. *)
+let memory_admission_text ~ko = function
+  | Masc.Keeper_librarian_pending.Admission_waiting worker ->
+      memory_pass_text ~ko (Masc.Tui_decode_memory_health.Pass_pending (Worker worker))
+  | Admission_failed _ -> if ko then "접수 실패" else "admission failed"
+
 let memory_state_text ~ko (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let text korean english = if ko then korean else english in
   let pass () = match keeper.mkh_librarian.mlh_state with
@@ -6458,8 +6466,7 @@ let memory_keeper_search_text (keeper : Masc.Tui_decode_memory_health.memory_kee
     match keeper.mkh_librarian.mlh_admission_wait with
     | None -> []
     | Some admission ->
-        pass_words (Masc.Tui_decode_memory_health.Pass_pending
-          (Masc.Keeper_librarian_pending.admission_pending admission)) in
+        [memory_admission_text ~ko:true admission; memory_admission_text ~ko:false admission] in
   String.concat " "
     ([ keeper.mkh_keeper_id
     ; memory_state_label (memory_state keeper)

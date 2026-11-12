@@ -363,7 +363,12 @@ let test_admission_wait_is_independent_of_a_drained_durable_pass () =
     Alcotest.(check bool) "execution uncertainty requests attention" true (cell.tone = tone))
     Masc.Keeper_librarian_pending.[
       Capacity, Cell.Quiet;
-      Missing_after_dispatch, Cell.Attention]
+      Missing_after_dispatch, Cell.Attention];
+  let failed = Masc.Keeper_librarian_pending.Admission_failed "pass refused" in
+  let cell = Reading.pass_cell (reading_of [make_keeper_health
+    (make_librarian ~state:Health.Pass_drained ~admission_wait:failed ())] "alpha") in
+  Alcotest.(check bool) "a failed admission pass requests attention beside a drained pass" true
+    (cell.tone = Cell.Attention)
 
 let () =
   Alcotest.run "tui_keeper_memory_reading"

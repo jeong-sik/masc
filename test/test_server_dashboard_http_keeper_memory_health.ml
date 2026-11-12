@@ -1698,6 +1698,14 @@ let test_attention_retains_originals_and_clears_on_observation () =
       (bool_field "operator_action_required" failed);
     Alcotest.(check bool) "the failed pass survives the wire with its error" true
       (Yojson.Safe.equal (Pending.to_json (Local_failure refused)) (member "admission_wait" failed));
+    (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (read ()) with
+     | Error detail -> Alcotest.fail detail
+     | Ok snapshot ->
+       Alcotest.(check bool) "the TUI decoder reads the failed pass from the server answer" true
+         (List.exists (fun (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) ->
+            String.equal keeper.mkh_keeper_id keeper_name
+            && keeper.mkh_librarian.mlh_admission_wait = Some (Pending.Admission_failed refused))
+            snapshot.Masc.Tui_decode_memory_health.mhs_keepers));
     Alcotest.(check bool) "local recovery failure needs attention" true
       (Pending.attention_required ~durable:(Some (Local_failure "source read failed")) ~admission:None);
     List.iter (fun pending ->

@@ -281,11 +281,16 @@ let operator_action_label state (item : Masc.Operator_action_reason.t) =
   let clean = Masc_tui_ansi.Terminal_text.single_line in
   match item.cause with
   | Masc.Operator_action_reason.Memory_attention {keeper;durable;admission;_} ->
-      let pending = Option.to_list durable @ Option.to_list
-          (Option.map Masc.Keeper_librarian_pending.admission_pending admission) in
-      let causes = List.filter Masc.Keeper_librarian_pending.needs_attention pending
-          |> List.map (fun pending -> memory_pass_text ~ko:(state.ui_language=Lang_ko)
+      let ko = state.ui_language=Lang_ko in
+      let durable = Option.to_list durable
+          |> List.filter Masc.Keeper_librarian_pending.needs_attention
+          |> List.map (fun pending -> memory_pass_text ~ko
               (Masc.Tui_decode_memory_health.Pass_pending pending)) in
+      let admission = Option.to_list admission
+          |> List.filter (fun admission -> Masc.Keeper_librarian_pending.needs_attention
+              (Masc.Keeper_librarian_pending.admission_pending admission))
+          |> List.map (memory_admission_text ~ko) in
+      let causes = durable @ admission in
       "Memory · " ^ clean keeper ^ " · " ^ String.concat " · " causes
       ^ text " · Enter:상세" " · Enter:details"
   | Shutdown_fenced_backlog {count; keepers=Some [(keeper,_)]; complete=true} ->

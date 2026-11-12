@@ -275,7 +275,10 @@ let pass_cell reading =
      | Failure -> durable
      | Attention when pass_tone pending = Masc_tui_keeper_axis_cell.Quiet -> durable
      | Quiet | Attention ->
-       { Masc_tui_keeper_axis_cell.text = pass_word pending ^ " (admit)"; tone = pass_tone pending })
+       let text = match admission with
+         | Masc.Keeper_librarian_pending.Admission_waiting _ -> pass_word pending ^ " (admit)"
+         | Admission_failed _ -> Masc_tui_types.memory_admission_text ~ko:false admission in
+       { Masc_tui_keeper_axis_cell.text; tone = pass_tone pending })
   | Row { admission_wait = None; _ } | Unknown | No_row | Refused _ -> durable
 ;;
 

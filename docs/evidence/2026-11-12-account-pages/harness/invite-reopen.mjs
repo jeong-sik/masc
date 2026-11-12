@@ -7,8 +7,10 @@
 //   __OUT__    directory of the PNG and JSON files (absolute)
 //   __BASE__   origin of an account server
 // A step opens an address the way the address bar does (Page.navigate), and
-// the row says whether the browser loaded a document for it. An address that
-// differs from the open one in its fragment alone loads none.
+// the row says whether a document was loaded after it. An address that
+// differs from the open one in its fragment alone makes the browser load
+// none; a page that loads itself again then shows as a loaded document. The
+// row does not count the loads; invite-press.mjs counts the pages asked for.
 const SPACE = __SPACE__;
 const LABEL = "__LABEL__";
 const OUT = "__OUT__";

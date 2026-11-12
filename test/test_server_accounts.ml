@@ -1002,6 +1002,16 @@ let test_serves_its_table_alone () =
              "a browser keeps a file of the build, which is named after its bytes"
              (Some "public, max-age=31536000, immutable")
              (header "cache-control" headers));
+          (* A query names no other file: the page and a file of the build
+             with one are the same bytes as without. *)
+          List.iter
+            (fun (path, expected) ->
+              let status, body = request ~net ~port ~meth:"GET" path in
+              Alcotest.(check int) ("GET " ^ path) 200 status;
+              Alcotest.(check string) ("the answer of " ^ path ^ " is the same bytes") expected body)
+            [ Server_account_console.page_path ^ "?from=home", console_page
+            ; Server_account_console.page_path ^ "/assets/app.js?v=1", console_script
+            ];
           (* Nothing else of the bundle has an address on this server: not
              below the assets of the console, by any spelling of the way up,
              and not at the addresses of the single-user server. *)

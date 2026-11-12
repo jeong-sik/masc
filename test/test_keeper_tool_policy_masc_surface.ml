@@ -83,6 +83,7 @@ let test_model_surface_exposes_delegation_not_keeper_administration () =
     (fun name -> check_member (name ^ " is model-visible") name true names)
     [ "masc_keeper_delegate"
     ; "masc_keeper_delegate_status"
+    ; "masc_keeper_delegate_status_many"
     ; "masc_keeper_delegate_targets"
     ; "masc_keeper_delegate_cancel"
     ; "masc_keeper_list"

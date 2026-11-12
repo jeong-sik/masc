@@ -13,7 +13,11 @@
   --line-field: #6b6f86;
   --text-bright: #f4ead4;
   --text: #d8c9ad;
+  --text-muted: #a89c86;
+  --accent: #e0b057;
   --accent-strong: #f0c570;
+  --accent-ink: #1a1405;
+  --warn-line: #c2a04a;
   --info-line: #46c6f0;
   --radius-m: 6px;
   --radius-l: 10px;
@@ -36,7 +40,40 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* The frame: every page starts with the same line that names the place. */
+.site-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-panel);
+}
+.brand { color: var(--accent); font-weight: 700; letter-spacing: 0.08em; }
+.brand-sub { color: var(--text-muted); }
+
 main { width: 100%; max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
+
+/* A page of one decision: sign in, take an invitation, read how a sign-in
+   ended. Its card sits a little below the top on a tall window and near the
+   top on a short one. */
+.narrow { max-width: 440px; margin-inline: auto; padding-top: clamp(24px, 8vh, 96px); }
+.card {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--bg-card);
+}
+.hint { color: var(--text-muted); font-size: 0.875rem; }
+.center { text-align: center; }
+.notes { padding-left: 20px; color: var(--text-muted); font-size: 0.875rem; }
+.callout {
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn-line);
+  border-radius: var(--radius-m);
+  background: var(--bg-panel);
+}
 
 /* One gap between the parts of a page. Both rules weigh nothing, so the
    second one wins by its place and any rule below can change a margin. */
@@ -46,6 +83,7 @@ main { width: 100%; max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
 h1 { font-size: 1.5rem; line-height: 1.3; color: var(--text-bright); }
 h2 { font-size: 1.125rem; line-height: 1.4; color: var(--text-bright); }
 a { color: var(--accent-strong); text-underline-offset: 3px; }
+a.button { color: var(--text-bright); }
 :focus-visible { outline: 2px solid var(--info-line); outline-offset: 2px; }
 
 section {
@@ -79,7 +117,7 @@ input, select, textarea {
 }
 textarea { min-height: 88px; resize: vertical; font-family: var(--mono); }
 
-button {
+button, a.button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -91,10 +129,14 @@ button {
   color: var(--text-bright);
   font: inherit;
   font-weight: 600;
+  text-decoration: none;
   cursor: pointer;
 }
-button:hover { border-color: var(--text-bright); }
+button:hover, a.button:hover { border-color: var(--text-bright); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary, a.button.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+button.primary:hover, a.button.primary:hover { border-color: var(--accent-strong); background: var(--accent-strong); }
+.block { width: 100%; }
 
 /* What a route or a login tool answered. An empty one stays in the page with
    no height, so a screen reader hears it when it fills. */

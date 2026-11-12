@@ -63,6 +63,22 @@ http
       scenario = scenarios[name];
       return json(res, 200, { scenario: name });
     }
+    // A saved page under its own name, as it was answered. With ?hold the
+    // policy names another script nonce, so the script of the page does not
+    // run: the page of a completed sign-in leaves at once, and this holds it
+    // still to be looked at.
+    if (req.method === "GET" && path.startsWith("/__saved/")) {
+      const name = path.slice("/__saved/".length);
+      if (!/^[a-z0-9_-]+$/.test(name) || !fs.existsSync(`${pagesDir}/${name}.hdr`)) return json(res, 404, { error: "no such saved page" });
+      const page = savedPage(name);
+      if (url.searchParams.has("hold"))
+        page.headers["content-security-policy"] = page.headers["content-security-policy"].replace(
+          /script-src 'nonce-[0-9a-f]+'/,
+          "script-src 'nonce-" + "0".repeat(64) + "'",
+        );
+      res.writeHead(200, page.headers);
+      return res.end(page.body);
+    }
     if (req.method === "GET" && (path === "/" || path === "/accounts/invite")) {
       const page = savedPage(path === "/" ? "home" : "invite");
       res.writeHead(200, page.headers);

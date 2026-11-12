@@ -6,7 +6,7 @@ let document ~nonce ~title body =
   String.concat
     "\n"
     [ "<!doctype html>"
-    ; "<html lang=\"en\">"
+    ; "<html lang=\"ko\">"
     ; "<head>"
     ; "<meta charset=\"utf-8\">"
     ; "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
@@ -14,6 +14,7 @@ let document ~nonce ~title body =
     ; Printf.sprintf "<style nonce=\"%s\">%s</style>" nonce Account_page_css.sheet
     ; "</head>"
     ; "<body>"
+    ; "<header class=\"site-header\"><span class=\"brand\">MASC</span><span class=\"brand-sub\">계정</span></header>"
     ; body
     ; "</body>"
     ; "</html>"

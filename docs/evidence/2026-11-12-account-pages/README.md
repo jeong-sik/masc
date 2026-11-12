@@ -68,6 +68,38 @@ python3 harness/ux-table.py <출력 폴더>/<label>-measure.json
 
 - `invite_no_token` 은 화면의 script 가 단추를 막은 상태예요. 막힌 까닭은 단추 위 문단에 보이지만 단추가 그 문단을 가리키지 않아요. 경로 시험은 script 가 돌기 전의 문서를 읽어서 이 상태를 못 봐요. 다음 층이 이 상태를 form 을 숨기고 안내와 링크를 보이는 화면으로 바꿔요.
 
+## L1b — 로그인·초대 화면
+
+바이너리 sha256 앞 12자리 `b85f755a84bb`. 제품 소스 tree 는 `lib` `1858fa49c245`, `bin` `6af85a0e0703` 이에요. 이 층의 코드 커밋에서 만들었어요(잴 때의 커밋 id 는 `2b24c204fe83`, 안에 든 build id 도 같아요). 수치는 `l1b/l1b-measure.json` 이에요.
+
+| 상태 | HTTP | axe 위반 | incomplete | CSS 규칙 | 정책 위반 | `style` 속성 | 24px 미만 대상 | 가장 낮은 대상 | 보이는 경로 답 원문 | 자유 입력 칸 | 로그인 단추(DOM) | 첫 Tab | 320px 가로 넘침 | 시도 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| home_signed_out | 200 | 0 | 0 | 34 | 0 | 0 | 0 | 44px | 0 | 0 | 누를 수 있음 | `button#go` | none | 1 |
+| home_no_client | 200 | 0 | 0 | 34 | 0 | 0 | 0 | 44px | 0 | 0 | `disabled`, 보이는 설명 55자 | `body` | none | 1 |
+| invite_token | 200 | 0 | 0 | 34 | 0 | 0 | 0 | 44px | 0 | 0 | 누를 수 있음 | `button#go` | none | 1 |
+| invite_no_token | 200 | 0 | 0 | 34 | 0 | 0 | 0 | 44px | 0 | 0 | 숨김 | `a` | none | 1 |
+| invite_no_client | 200 | 0 | 0 | 34 | 0 | 0 | 0 | 44px | 0 | 0 | `disabled`, 보이는 설명 55자 | `body` | none | 1 |
+| member_new | 200 | 0 | 0 | 34 | 0 | 0 | 0 | 44px | 1 | 7 | 숨김 | `button#signout` | none | 1 |
+| member_full | 200 | 0 | 0 | 34 | 0 | 0 | 0 | 44px | 2 | 7 | 숨김 | `button#signout` | none | 1 |
+| admin_full | 200 | 0 | 0 | 34 | 0 | 0 | 0 | 44px | 2 | 9 | 숨김 | `button#signout` | none | 1 |
+| control_other_style_nonce | 200 | 0 | 0 | 0 | 1 | 0 | 1 | 22px | 0 | 0 | 누를 수 있음 | `button#go` | none | 1 |
+
+- 정책은 L1a 와 같아요.
+- 세션 없는 `/` 두 상태의 "보이는 경로 답 원문"이 1 에서 0 이 됐어요. `no session (401)` 두 줄을 쓰던 줄이 로그인한 사람이 쓰는 부분 안으로 들어갔어요.
+- "로그인 단추(DOM)"는 브라우저가 든 값이에요. GitHub client 가 있는 두 화면은 `button.disabled` 가 `false` 예요. client 가 없는 두 화면은 `true` 이고, 단추가 가리키는 설명 55자가 보여요.
+- `invite_no_token`. 주소에 token 이 없으면 화면의 script 가 form 을 숨기고, 초대 링크를 다시 열라는 안내와 로그인 화면으로 가는 링크를 보여요. 첫 Tab 이 그 링크에 닿아요. L1a 에서는 설명을 가리키지 않는 막힌 단추가 남았고 첫 Tab 이 `body` 였어요.
+- 로그인한 세 상태는 구조가 그대로예요. 문서의 `lang` 이 `ko` 가 돼서, 영어로 남은 그 부분은 `lang="en"` 을 따로 가져요. 이 상태들의 "숨김"은 로그인 form 이 숨겨졌다는 뜻이에요.
+- 대조군의 320px 넘침이 none 인 것은 세션 없는 화면에 넓은 `<pre>` 가 더는 없어서예요. sheet 가 버려진 것은 CSS 규칙 0, 정책 위반 1건, 22px 대상으로 보여요.
+- 재지 않은 것. 세션이 있는 사람이 `/` 를 열면 세션 확인이 끝날 때까지 로그인 카드가 먼저 보여요. 화면의 script 를 읽고 안 것이고 그 시간은 재지 않았어요. 로그인한 상태는 지어낸 JSON 으로 재서 시간이 실제와 달라요.
+
+| 캡처 | 상태 |
+| --- | --- |
+| `l1b/l1b-home_signed_out-desktop.png`, `l1b/l1b-home_signed_out-320.png` | 세션 없는 `/` (실제 서버) |
+| `l1b/l1b-home_no_client-320.png` | GitHub client 없는 서버의 `/` (실제 서버) |
+| `l1b/l1b-invite_token-320.png` | 초대 링크로 연 `/accounts/invite` (실제 서버, 지어낸 token) |
+| `l1b/l1b-invite_no_token-320.png` | token 없는 주소로 연 `/accounts/invite` (실제 서버) |
+| `l1b/l1b-member_new-320.png` | Member 로 로그인한 `/` (실제 HTML, 지어낸 JSON) |
+
 ## 확인하지 않은 것
 
 - 실제 GitHub 로그인 뒤의 화면과 JSON 경로. 시험용 OAuth App 이 있어야 해요.

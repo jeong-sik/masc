@@ -6,7 +6,7 @@ const wait = Schema.Union(
     'attempt_in_progress', 'awaiting_operator') }),
   Schema.Struct({ reason: Schema.Literal('lane_registry_unavailable', 'provider_unavailable',
     'provider_auth_refused', 'provider_configuration_refused', 'source_unavailable'), detail: Schema.String }),
-  // Every slot waits for a time its provider stated; until is Unix seconds.
+  // No slot can be called now and at least one waits for a time its provider stated; until is Unix seconds.
   Schema.Struct({ reason: Schema.Literal('every_slot_held'), until: Schema.Number.pipe(Schema.finite(), Schema.positive()) }),
 )
 const issue = Schema.Union(

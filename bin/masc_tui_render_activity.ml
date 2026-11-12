@@ -341,8 +341,9 @@ let render_system_logs (state : state) =
              page is on screen, and its first frame is the first answer. *)
           page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:(Option.is_some state.system_log_stream)
       | Page_empty when loaded_entries > 0 ->
-          "  (no entries match the current category filter)"
-      | Page_empty -> "  (no entries)"
+          ui_text state ~ko:"  (지금 분류 필터에 맞는 로그 줄 없음)"
+            ~en:"  (no entries match the current category filter)"
+      | Page_empty -> ui_text state ~ko:"  (로그 줄 없음)" ~en:"  (no entries)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -389,7 +390,9 @@ let render_system_logs (state : state) =
     done;
   if total_entries > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [entries %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
+      (Printf.sprintf
+         (if state.ui_language = Lang_ko then "  [줄 %s]" else "  [entries %s]")
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height total_entries));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -475,7 +478,8 @@ let render_keeper_calls (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
-    "  j/k rows · exact fields: tool | input | output"
+    ui_text state ~ko:"  j/k 줄 단위 · 원문 필드: tool | input | output"
+      ~en:"  j/k rows · exact fields: tool | input | output"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -489,7 +493,9 @@ let render_keeper_calls (state : state) =
    | Some snapshot when snapshot.Masc.Tui_decode.kcs_mismatched > 0 ->
        box_line_styled buf cols ~style:(Theme.warn ())
          (Printf.sprintf
-            "  %d row(s) named another keeper and were not drawn"
+            (if state.ui_language = Lang_ko then
+               "  다른 Keeper 를 가리킨 %d줄은 그리지 않음"
+             else "  %d row(s) named another keeper and were not drawn")
             snapshot.Masc.Tui_decode.kcs_mismatched);
        box_divider buf cols
    | Some _ | None -> ());
@@ -512,7 +518,10 @@ let render_keeper_calls (state : state) =
   let labeled_rows ~call_index ~style ~label value =
     let prefix = Printf.sprintf "  #%d %s " (call_index + 1) label in
     let value = Terminal_text.single_line value in
-    let value = if String.equal value "" then "(empty)" else value in
+    let value =
+      if String.equal value "" then ui_text state ~ko:"(빈 값)" ~en:"(empty)"
+      else value
+    in
     let narrow_rows () =
       (* Drop decorative indentation before wrapping the exact header. The
          TUI requests at most 100 entries, so even [#100
@@ -570,7 +579,9 @@ let render_keeper_calls (state : state) =
            match call.kc_turn with Some value -> string_of_int value | None -> Masc_tui_theme.Glyph.no_value
          in
          let summary =
-           Printf.sprintf "  #%d %s %s · %s · turn %s"
+           Printf.sprintf
+             (if state.ui_language = Lang_ko then "  #%d %s %s · %s · 턴 %s"
+              else "  #%d %s %s · %s · turn %s")
              (call_index + 1)
              (Terminal_text.clock_timestamp
                 (Masc_domain.iso8601_of_unix_seconds call.kc_at))
@@ -605,12 +616,12 @@ let render_keeper_calls (state : state) =
   if shown = 0 then begin
     let empty =
       if state.keeper_calls_loading && Option.is_none state.keeper_calls then
-        "  (loading exact call records...)"
+        ui_text state ~ko:"  (호출 기록 조회 중…)" ~en:"  (loading exact call records...)"
       else
       match (state.keeper_calls, state.keeper_calls_error) with
       | _, Some _ -> page_failed_note ~ko:(state.ui_language = Lang_ko)
       | None, None -> page_unread_note ~ko:(state.ui_language = Lang_ko)
-      | Some _, None -> "  (no calls recorded)"
+      | Some _, None -> ui_text state ~ko:"  (기록된 호출 없음)" ~en:"  (no calls recorded)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
@@ -635,7 +646,7 @@ let render_keeper_calls (state : state) =
       Masc_tui_scroll.window_text ~scroll ~height:content_height total_rows
     in
     let detailed_footer =
-      Printf.sprintf "[%s · %s]" (Masc_tui_message_layout.count_noun shown "call") window
+      Printf.sprintf "[%s · %s]" (count_reading state Masc_tui_value.Count.Call shown) window
     in
     let compact_footer = "[" ^ window ^ "]" in
     let footer =
@@ -1062,7 +1073,9 @@ let render_acting (state : state) =
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
+      (Printf.sprintf
+         (if state.ui_language = Lang_ko then "  [줄 %s]" else "  [rows %s]")
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf

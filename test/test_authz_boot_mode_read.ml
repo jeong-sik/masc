@@ -205,6 +205,29 @@ let test_config_file () =
     check_decision "unknown value refuses" (Read.Stop (Read.Refuse (B.Unknown_account_mode {|"multi"|}, []))) dirs)
 ;;
 
+(* What a command that holds no lease reads: the request alone, as the boot
+   reads it. *)
+let test_asks_for_multi_account () =
+  with_dirs (fun dirs ->
+    let check name expected =
+      Alcotest.(check bool) name expected (Read.asks_for_multi_account ~base_path:dirs.base)
+    in
+    check "missing file" false;
+    write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+    check "Multi_account" true;
+    (* A boot refuses this one, and it is no single user either. *)
+    write_config dirs {|{"enabled":false,"require_token":false,"account_mode":"Multi_account"}|};
+    check "Multi_account with auth off" true;
+    write_config dirs {|{"account_mode":"Single_user"}|};
+    check "Single_user" false;
+    write_config dirs {|{"account_mode":"multi_account"}|};
+    check "a value the table does not know" false;
+    write_config dirs {|{"account_mode":"Single_user","account_mode":"Multi_account"}|};
+    check "twice" false;
+    write_config dirs {|{"enabled":true,"account_m|};
+    check "cut file" false)
+;;
+
 (* ---- the table, on real installations ---- *)
 
 let test_nothing_set_up () =
@@ -765,6 +788,7 @@ let () =
     ; ( "config.json"
       , [ Alcotest.test_case "member shapes" `Quick test_member_shapes
         ; Alcotest.test_case "file" `Quick test_config_file
+        ; Alcotest.test_case "request, without the lease" `Quick test_asks_for_multi_account
         ] )
     ; ( "installations"
       , [ Alcotest.test_case "nothing set up" `Quick test_nothing_set_up

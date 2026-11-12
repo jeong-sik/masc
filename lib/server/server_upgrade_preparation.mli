@@ -60,10 +60,12 @@ type account_server =
   | Account_server_on_another_port of { pid : int; port : int }
       (** The kernel owner of the lease announces [port], not the one asked
           about. *)
-  | No_account_server
-      (** Nothing holds the lease, or its owner announces nothing the kernel
-          showed: the server of a single user, or an account server that has
-          not announced yet. *)
+  | Owner_announces_nothing
+      (** A process holds the lease and announces nothing the kernel showed:
+          the server of a single user, an account server that has not
+          announced yet, or one whose announcement the lock of another
+          process hid from a read about another port. *)
+  | No_owner  (** Nothing holds the lease. *)
 
 val account_server :
   run_dir:string -> base_path:string -> port:int ->
@@ -75,12 +77,33 @@ val account_server :
     is on. The other port is read over the whole file
     ({!Server_startup_takeover.account_server_announcement}), which names
     nothing else here, and can be missed behind such a lock; the answer is
-    then [No_account_server]. It signals nothing, and the pid is a number to
-    show: {!stop_account_server} reads the owner again. An [Error] when the
-    lease or the announcement cannot be read.
+    then [Owner_announces_nothing]. It signals nothing, and the pid is a
+    number to show: {!stop_account_server} reads the owner again. An [Error]
+    when the lease or the announcement cannot be read.
 
     The read makes the private lease directory and an empty lease file when
-    they are missing, as {!replacement_readiness} does. *)
+    they are missing, as {!replacement_readiness} does. A command that must
+    make nothing asks {!holder}. *)
+
+(** Who holds a BasePath, for a command that must make nothing. *)
+type holder =
+  | Held_by_nobody
+      (** No lease file was ever made, or nothing holds the one there. *)
+  | Held_without_announcement  (** {!Owner_announces_nothing}. *)
+  | Held_by_account_server of { port : int }
+      (** The owner announces [port]: the one asked about, or another. *)
+
+val holder :
+  Host_config.base_path_lease_root -> base_path:string -> port:int ->
+  (holder, Server_startup_takeover.owner_capture_error) result
+(** {!account_server} behind {!Server_startup_takeover.lease_file_present}.
+    A lease file that was never made was never held: then no owner is read
+    and nothing is made, not the lease root either. Once the file is there
+    the read of the owner finds nothing left to make. [port] is the port the
+    announcement is first looked for on, as in {!account_server}. An [Error]
+    when the lease root, the lease or the announcement cannot be read; a root
+    or a path to the lease file that cannot be read is an
+    [Owner_lease_rejected]. *)
 
 val stop_account_server : run_dir:string -> base_path:string -> port:int -> (unit, error) result
 (** Asks the account server of a multi-account installation to stop: the

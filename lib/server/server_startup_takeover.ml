@@ -333,6 +333,13 @@ let base_path_lock_digest_of_stats (stat : Unix.stats) =
   |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex
 ;;
 
+(* The name of the lease file of a BasePath in its private lease directory. *)
+let lease_file_name (base_path_stat : Unix.stats) =
+  Printf.sprintf
+    "masc-base-path-owner-v2-%s.lease"
+    (base_path_lock_digest_of_stats base_path_stat)
+;;
+
 let base_path_owner_pid = function
   | Owner_this_process pid | Owner_recorded pid ->
     Some pid
@@ -715,12 +722,7 @@ let prepare_base_path_lock ~run_dir base_path =
     ; lease_directory_stat
     ; runtime_directory =
         Filename.concat canonical_base_path Common.masc_dirname
-    ; path =
-        Filename.concat
-          lease_directory
-          (Printf.sprintf
-             "masc-base-path-owner-v2-%s.lease"
-             (base_path_lock_digest_of_stats base_path_stat))
+    ; path = Filename.concat lease_directory (lease_file_name base_path_stat)
     ; owner_uid
     }
 ;;
@@ -1350,17 +1352,28 @@ module For_testing = struct
     in
     (try Unix.mkdir lease_directory 0o700 with
      | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-    Filename.concat
-      lease_directory
-      (Printf.sprintf
-         "masc-base-path-owner-v2-%s.lease"
-         (base_path_lock_digest_of_stats (Unix.stat canonical_base_path)))
+    Filename.concat lease_directory (lease_file_name (Unix.stat canonical_base_path))
 end
 
 type owner_capture_error =
   | Owner_lease_rejected of base_path_lock_rejection
   | Owner_identity_unavailable of Owner_process_identity.error
   | Current_process_owner
+
+let owner_capture_error_to_string = function
+  | Owner_lease_rejected rejection -> base_path_lock_rejection_to_string rejection
+  | Owner_identity_unavailable Owner_process_identity.No_owner -> "no process holds the lease"
+  | Owner_identity_unavailable Owner_process_identity.Owner_changed ->
+    "the process that holds the lease changed while it was read"
+  | Owner_identity_unavailable Owner_process_identity.Unsupported ->
+    "this system gives no handle on the process that holds the lease"
+  | Owner_identity_unavailable Owner_process_identity.Unavailable ->
+    "the process that holds the lease could not be identified"
+  | Owner_identity_unavailable Owner_process_identity.Closed ->
+    "the handle on the process that holds the lease is closed"
+  | Current_process_owner -> "this process holds the lease"
+;;
+
 let capture_existing_owner ~run_dir ~base_path =
   match prepare_base_path_lock ~run_dir base_path with
   | Error rejection -> Error (Owner_lease_rejected rejection)
@@ -1375,6 +1388,58 @@ let capture_existing_owner ~run_dir ~base_path =
             match Owner_process_identity.capture ~lease_fd:fd with
             | Ok owner -> Ok owner
             | Error other -> Error (Owner_identity_unavailable other)))
+
+(* HIGH-RISK-UNREVIEWED: a reader takes [false] for "nobody holds this
+   BasePath", and reads no owner. The path is the one [lease_run_dir] and
+   [prepare_base_path_lock] spell: the run directory by its real path, the
+   private lease directory of the effective user under it, and the name of
+   the lease file. Nothing of an entry is judged here. An entry on the way
+   that is no directory answers [true], because the capture that follows
+   refuses it in its own words and makes nothing under it. *)
+let lease_file_present (root : Host_config.base_path_lease_root) ~base_path =
+  let unread ~operation ~path error =
+    Error (Lease_io_failed { operation; path; reason = Unix.error_message error })
+  in
+  (* [inside] goes on under a directory. *)
+  let entry ~operation path ~inside =
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+    | exception Unix.Unix_error (error, _, _) -> unread ~operation ~path error
+    | stat when stat.Unix.st_kind = Unix.S_DIR -> inside stat
+    | (_ : Unix.stats) -> Ok true
+  in
+  match Unix.realpath base_path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Base_path_canonicalization_failed { base_path; reason = Unix.error_message error })
+  | canonical_base_path ->
+    entry ~operation:"lstat_base_path" canonical_base_path ~inside:(fun base_path_stat ->
+      let run_dir =
+        match root with
+        | Lease_dir_override dir -> dir
+        | Beside_base_path -> Filename.concat canonical_base_path Common.owner_lease_dirname
+      in
+      match Unix.realpath run_dir with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+      | exception Unix.Unix_error (error, _, _) ->
+        Error
+          (Run_directory_canonicalization_failed { run_dir; reason = Unix.error_message error })
+      | run_directory ->
+        entry ~operation:"lstat_run_directory" run_directory ~inside:(fun (_ : Unix.stats) ->
+          let lease_directory =
+            base_path_lease_directory ~run_dir:run_directory ~owner_uid:(Unix.geteuid ())
+          in
+          entry
+            ~operation:"inspect_private_lease_directory"
+            lease_directory
+            ~inside:(fun (_ : Unix.stats) ->
+              let path = Filename.concat lease_directory (lease_file_name base_path_stat) in
+              match Unix.lstat path with
+              | (_ : Unix.stats) -> Ok true
+              | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+              | exception Unix.Unix_error (error, _, _) ->
+                unread ~operation:"lstat_lease_file" ~path error)))
+;;
 
 type account_server_announcement =
   { pid : int

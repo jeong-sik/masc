@@ -62,6 +62,13 @@ let read_config ~base_path =
           absent ("not a JSON object: " ^ Yojson.Safe.to_string json)))
 ;;
 
+let asks_for_multi_account ~base_path =
+  match read_config ~base_path with
+  | B.Requested Masc_domain.Multi_account, (_ : B.settings) -> true
+  | ( (B.Requested Masc_domain.Single_user | B.Not_set | B.Unknown_value (_ : string))
+    , (_ : B.settings) ) -> false
+;;
+
 (* The external store that the install record names, as the boot found it. *)
 type store_read =
   | Store_unreadable of string
@@ -202,6 +209,14 @@ let high_water_detail = function
 let turn_off_line =
   "to boot a single user that keeps the records of the accounts read-only, stop every masc \
    process on the workspace, run masc auth off, and take account_mode out of config.json"
+;;
+
+let account_installation_line ~base_path =
+  Printf.sprintf
+    "%s asks for Multi_account, so a boot of this workspace runs the account server or \
+     stops, and never runs the server of a single user: masc auth bootstrap activates the \
+     workspace while no server runs, and masc restart starts or replaces the account server"
+    (Auth_credential_base.auth_config_file base_path)
 ;;
 
 let messages (input : B.input) = function

@@ -1051,9 +1051,10 @@ type standalone_lanes_snapshot = {
 val standalone_lane_status_to_string : standalone_lane_status -> string
 
 (** The configuration clause of the lane detail line, subject included where
-    the state needs one. The caller writes no noun of its own. *)
+    the state needs one. The caller writes no noun of its own. [ko] picks the
+    language the clause is written in. *)
 val standalone_lane_configuration_phrase :
-  standalone_lane_configuration -> string
+  ko:bool -> standalone_lane_configuration -> string
 
 (** The lane detail's last two lines: what a retained run's Output holds, and
     what the run record keeps. *)
@@ -1062,8 +1063,8 @@ type standalone_lane_answer = {
   sla_evidence : string;
 }
 
-val standalone_lane_answer : standalone_lane -> standalone_lane_answer
-(** Every lane has its own pair. *)
+val standalone_lane_answer : ko:bool -> standalone_lane -> standalone_lane_answer
+(** Every lane has its own pair, written in the language [ko] picks. *)
 val decode_standalone_lanes_snapshot :
   Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
 

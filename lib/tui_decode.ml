@@ -3629,54 +3629,69 @@ let standalone_lane_configuration_of_string = function
    their own subject, so the live screen read "configuration not configured",
    and the other two read "configuration no slot admitted" and "configuration
    registry unreadable". The sentence is written in one place now, here. *)
-let standalone_lane_configuration_phrase = function
-  | Lane_off -> "off; candidate configuration retained"
-  | Lane_ready -> "configuration ready"
-  | Lane_slotless -> "configured, but no slot admitted"
-  | Lane_unconfigured -> "not configured"
-  | Lane_registry_unavailable -> "registry unreadable"
+let standalone_lane_configuration_phrase ~ko state =
+  let t korean english = if ko then korean else english in
+  match state with
+  | Lane_off -> t "꺼짐 · 후보 설정은 보존됨" "off; candidate configuration retained"
+  | Lane_ready -> t "설정 완료" "configuration ready"
+  | Lane_slotless -> t "설정됐지만 수락된 슬롯 없음" "configured, but no slot admitted"
+  | Lane_unconfigured -> t "미설정" "not configured"
+  | Lane_registry_unavailable -> t "레지스트리를 읽지 못함" "registry unreadable"
 
 (* The lane detail's last two facts, whose labels the screen draws. Every lane
    has its own arm, so a lane added to [Standalone_lane.t] fails here until it
    says what its output means. *)
-let standalone_lane_answer (lane : standalone_lane) =
+let standalone_lane_answer ~ko (lane : standalone_lane) =
+  let t korean english = if ko then korean else english in
   let structured_output_without_ledger =
-    "structured-output generation, not a MASC tool loop; the run \
-     retains exact Input/Output, outcome, and selected slot, so no tool-call \
-     ledger exists."
+    t "구조화 출력 생성이며 MASC 도구 루프가 아닙니다. 실행은 입력·출력 원문, \
+       결과, 선택된 슬롯을 보존하므로 도구 호출 원장이 없습니다."
+      "structured-output generation, not a MASC tool loop; the run \
+       retains exact Input/Output, outcome, and selected slot, so no tool-call \
+       ledger exists."
   in
   match lane.sl_lane with
   | Standalone_lane.Board_attention ->
-    { sla_output_meaning = "the accepted candidate judgment JSON."
+    { sla_output_meaning =
+        t "수락된 후보 판정 JSON." "the accepted candidate judgment JSON."
     ; sla_evidence =
-        "structured-output generation, not a MASC tool loop; the run \
-         retains exact Input/Output and outcome. HTTP/CLI attribution uses \
-         selected slot; Vendor System One provenance stays in Output."
+        t "구조화 출력 생성이며 MASC 도구 루프가 아닙니다. 실행은 입력·출력 \
+           원문과 결과를 보존합니다. HTTP/CLI 구분은 선택된 슬롯으로 하고, \
+           Vendor System One 출처는 출력에 남습니다."
+          "structured-output generation, not a MASC tool loop; the run \
+           retains exact Input/Output and outcome. HTTP/CLI attribution uses \
+           selected slot; Vendor System One provenance stays in Output."
     }
   | Standalone_lane.Hitl_auto_judge ->
     { sla_output_meaning =
-        "the validated and durably settled approval-context \
-         judgment summary."
+        t "검증을 거쳐 저장까지 끝난 승인 맥락 판정 요약."
+          "the validated and durably settled approval-context \
+           judgment summary."
     ; sla_evidence = structured_output_without_ledger
     }
   | Standalone_lane.Librarian ->
     { sla_output_meaning =
-        "selected memory facts plus committed snapshot metadata."
+        t "선택된 기억 사실과 커밋된 스냅샷 메타데이터."
+          "selected memory facts plus committed snapshot metadata."
     ; sla_evidence = structured_output_without_ledger
     }
   | Standalone_lane.Candle_appraiser ->
     { sla_output_meaning =
-        "the validated payout grade, each candidate Task's relation to the Goal, and Keeper weights, or no contributor."
+        t "검증된 지급 등급, 후보 태스크마다 목표와의 관계, Keeper 가중치. 기여자가 없으면 없음."
+          "the validated payout grade, each candidate Task's relation to the Goal, and Keeper weights, or no contributor."
     ; sla_evidence = structured_output_without_ledger
     }
   | Standalone_lane.Verifier ->
     { sla_output_meaning =
-        "Task completion or Goal proof verdict, reason, and \
-         evaluator runtime."
+        t "태스크 완료 또는 목표 증명 판정, 사유, 평가 런타임."
+          "Task completion or Goal proof verdict, reason, and \
+           evaluator runtime."
     ; sla_evidence =
-        "Verifier review records also retain MASC tool observations; \
-         open a run to inspect inputs, dispositions, excerpts, duration, and \
-         truncation."
+        t "Verifier 리뷰 기록은 MASC 도구 관측도 보존합니다. 실행을 열면 \
+           입력, 처리 결과, 발췌, 소요 시간, 잘림 여부를 볼 수 있습니다."
+          "Verifier review records also retain MASC tool observations; \
+           open a run to inspect inputs, dispositions, excerpts, duration, and \
+           truncation."
     }
 
 let standalone_lane_status_of_string = function

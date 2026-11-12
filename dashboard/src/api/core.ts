@@ -1200,9 +1200,10 @@ export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
 }
 
 export function fetchOperatorDigest(options: {
-  targetType?: 'namespace' | 'workspace'
+  targetType?: 'workspace'
   targetId?: string
   includeWorkers?: boolean
+  signal?: AbortSignal
 } = {}): Promise<OperatorDigest> {
   const params = new URLSearchParams()
   if (options.targetType) params.set('target_type', options.targetType)
@@ -1211,5 +1212,7 @@ export function fetchOperatorDigest(options: {
   const query = params.toString()
   return get(`/api/v1/operator/digest${query ? `?${query}` : ''}`, {
     includeActorHeader: false,
+    signal: options.signal,
+    consumeWithinTimeout: true,
   })
 }

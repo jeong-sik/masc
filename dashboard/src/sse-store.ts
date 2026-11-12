@@ -49,8 +49,8 @@ import {
   namespaceTruthError,
   normalizeNamespaceTruth,
 } from './namespace-truth-store'
-import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
-import { operatorError, operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
+import { normalizeOperatorSnapshot } from './operator-normalizers'
+import { operatorError, operatorSnapshot } from './operator-signals'
 import { compositeTick } from './composite-signals'
 import { isRecord } from './lib/type-guards'
 import { normalizeKeeperApprovalAuditReceipt } from './lib/keeper-approval-audit'
@@ -76,6 +76,7 @@ import {
 import { namespaceTruthInitializing, namespaceTruthLoading, namespaceTruthReadRecovery } from './namespace-truth-signals'
 import { subscribeStoredTokenChanges } from './api/core'
 import { hydrateMissionSnapshot, setupMissionObservation } from './mission-actions'
+import { hydrateOperatorDigest, setupOperatorDigestObservation } from './operator-digest-observation'
 
 // --- Refresh function registration (avoids circular imports) ---
 
@@ -416,14 +417,6 @@ function handleOperatorSnapshot(payload: unknown): void {
     const detail = err instanceof Error ? err.message : 'invalid operator snapshot'
     failOperatorSnapshotHydration(detail)
     console.warn('[server-push] operator snapshot hydration failed', detail)
-  }
-}
-
-function handleOperatorDigest(payload: unknown): void {
-  try {
-    operatorWorkspaceDigest.value = normalizeOperatorDigest(payload)
-  } catch (err) {
-    console.warn('[server-push] operator digest hydration failed', err instanceof Error ? err.message : '')
   }
 }
 
@@ -822,7 +815,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
   if (event.type === 'operator_digest' && event.payload) {
-    handleOperatorDigest(event.payload)
+    hydrateOperatorDigest(event.payload)
     return true
   }
   if (event.type === 'transport_health_snapshot' && event.payload) {
@@ -926,6 +919,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
 
 export function setupServerPushReaction(): () => void {
   const stopMission = setupMissionObservation()
+  const stopDigest = setupOperatorDigestObservation()
   const recoverReads = () => {
     namespaceTruthReadRecovery.recover()
     recoverExecutionReadDebt()
@@ -947,6 +941,7 @@ export function setupServerPushReaction(): () => void {
 
   return () => {
     stopMission()
+    stopDigest()
     unsubReconnect()
     unsubToken()
     window.removeEventListener('focus', recoverReads)

@@ -90,7 +90,7 @@ def end(*_):
 
 if os.environ.get("FAKE_VITE_IGNORES_SIGNALS"):
     # A server that is stuck: it does not exit when it is told to.
-    for name in ("SIGHUP", "SIGINT", "SIGTERM"):
+    for name in ("SIGHUP", "SIGINT", "SIGQUIT", "SIGTERM"):
         signal.signal(getattr(signal, name), signal.SIG_IGN)
 else:
     signal.signal(signal.SIGTERM, end)
@@ -157,18 +157,18 @@ harness_dashboard_dev_server_stop
 nothing_runs || fail "processes outlive the stop of the server that ends slowly: $(running)"
 printf 'ok: a server gets the time to end by itself\n'
 
-# The stop ignores the signals that end a script while it waits. A script that
-# goes on after a stop has its own handling of them back.
+# A script that goes on after a stop is still ended by the signals that end a
+# script, and still has the traps it set for them.
 : >"${pids}"
 trap ': a trap of the caller' HUP
-handling="$(trap -p HUP INT TERM)"
+handling="$(trap -p HUP INT QUIT TERM)"
 start || fail "the server did not start"
 harness_dashboard_dev_server_stop
-handling_now="$(trap -p HUP INT TERM)"
+handling_now="$(trap -p HUP INT QUIT TERM)"
 [[ "${handling_now}" == "${handling}" ]] ||
-  fail "stop changed how the script handles HUP, INT or TERM: ${handling_now//$'\n'/; }"
+  fail "stop changed how the script handles HUP, INT, QUIT or TERM: ${handling_now//$'\n'/; }"
 trap - HUP
-printf 'ok: stop gives the script its handling of signals back\n'
+printf 'ok: a stop in the middle of a script leaves its handling of signals alone\n'
 
 : >"${pids}"
 if FAKE_VITE_EXITS=1 start 2>"${fixture}/start.err"; then
@@ -249,8 +249,20 @@ source "${SCRIPT_DIR}/harness/lib/dashboard_dev_server.sh"
 if [[ -n "\${READY_TIMEOUT_SEC:-}" ]]; then
   HARNESS_DASHBOARD_DEV_SERVER_READY_TIMEOUT_SEC="\${READY_TIMEOUT_SEC}"
 fi
-trap harness_dashboard_dev_server_stop EXIT
+trap harness_dashboard_dev_server_stop_on_exit EXIT
 harness_dashboard_dev_server_start "${dashboard}" 127.0.0.1 "${port}" "${ready_url}" "${fixture}/server.log"
+if [[ -n "\${SLOW_FIRST_QUESTION:-}" ]]; then
+  # As on a machine under load: the first thing the stop asks takes a second.
+  : >"${fixture}/slow"
+  eval "quick_\$(declare -f harness_dashboard_dev_server_job)"
+  harness_dashboard_dev_server_job() {
+    if [[ -e "${fixture}/slow" ]]; then
+      rm -f "${fixture}/slow"
+      sleep 1
+    fi
+    quick_harness_dashboard_dev_server_job
+  }
+fi
 : >"${fixture}/started"
 while [[ -n "\${SHORT_STEPS:-}" ]]; do sleep 0.2; done
 sleep 600
@@ -302,7 +314,7 @@ printf 'ok: a script that is ended leaves no server\n'
 # ends a script, while it waits for the server to exit.
 FAKE_VITE_IGNORES_SIGNALS=1 run_harness
 await harness_started 120 || fail "the script never started the server that ignores signals"
-for signal in INT TERM HUP INT; do
+for signal in INT TERM HUP QUIT INT; do
   kill "-${signal}" -- "-${harness_pid}" 2>/dev/null || true
   sleep 0.5
 done
@@ -310,6 +322,20 @@ await nothing_runs 60 || fail "a second signal ended the stop before the server 
 await harness_ended 20 || fail "the script is still running after its server was killed"
 harness_pid=""
 printf 'ok: a second signal does not keep a stuck server from being killed\n'
+
+# The second signal can come before the stop has done anything: a script that
+# is told to end twice in a row, on a machine where every step takes long.
+# Bash ends a script at once when it is told to end while it runs its exit
+# trap, and nothing has been sent to the server by then.
+SHORT_STEPS=1 SLOW_FIRST_QUESTION=1 run_harness
+await harness_started 120 || fail "the script never started its server"
+kill -TERM "${harness_pid}"
+sleep 0.5
+kill -TERM "${harness_pid}" 2>/dev/null || true
+await harness_ended 120 || fail "the script that was told to end twice is still running"
+harness_pid=""
+await nothing_runs 20 || fail "a script that was told to end twice in a row left its server: $(running)"
+printf 'ok: a signal that arrives while the stop starts does not leave the server\n'
 
 FAKE_VITE_NEVER_ANSWERS=1 READY_TIMEOUT_SEC=2 run_harness
 if ! await harness_ended 80; then

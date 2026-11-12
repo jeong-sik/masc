@@ -27,7 +27,7 @@ HYDRATION_TOOL_SELECTOR='[data-tool-output-failure-scenario="hydration-failed"] 
 COVERAGE_TRACE_SELECTOR="[data-tool-output-failure-scenario=\"coverage-gap\"] [data-chat-work-trace][data-chat-turn-order-signature=\"${COVERAGE_SIGNATURE}\"][data-chat-tool-output-hydration-source=\"tool_calls_endpoint\"][data-chat-tool-output-hydration-status=\"hydrated\"][data-chat-tool-output-covered-through=\"1783264270000\"]"
 COVERAGE_TOOL_SELECTOR='[data-tool-output-failure-scenario="coverage-gap"] [data-chat-trace-step="tool"][data-chat-turn-order-index="0"][data-chat-turn-order-kind="tool"][data-chat-trace-tool-call-id="tc-coverage-gap"][data-chat-trace-entry-id="tool-tc-coverage-gap"][data-chat-trace-link-state="joined"][data-chat-trace-output-state="coverage-gap"][data-chat-trace-output-coverage="coverage-gap"]'
 
-trap harness_dashboard_dev_server_stop EXIT
+trap harness_dashboard_dev_server_stop_on_exit EXIT
 
 pnpm --dir "${DASHBOARD_DIR}" exec playwright --version >/dev/null
 

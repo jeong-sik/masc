@@ -28,7 +28,7 @@
 # Usage, from a script that runs without job control. The shell that starts
 # the server is the one that stops it:
 #   source "${ROOT_DIR}/scripts/harness/lib/dashboard_dev_server.sh"
-#   trap harness_dashboard_dev_server_stop EXIT
+#   trap harness_dashboard_dev_server_stop_on_exit EXIT
 #   MASC_DASHBOARD_PROXY_TARGET="${PROXY_TARGET}" \
 #     harness_dashboard_dev_server_start "${DASHBOARD_DIR}" "${HOST}" "${PORT}" "${READY_URL}" "${SERVER_LOG}"
 
@@ -102,30 +102,25 @@ harness_dashboard_dev_server_start() {
 # Ends the server: SIGTERM, then SIGKILL when it is still running. Returns
 # once it is gone. Does nothing when no server is running.
 harness_dashboard_dev_server_stop() {
-  local job signal attempt traps
-  if ! harness_dashboard_dev_server_job >/dev/null; then
-    return 0
-  fi
-  # The signals that end a script are ignored until the server is gone. One
-  # that arrives while this waits would otherwise end the script between
-  # SIGTERM and SIGKILL, and the server would stay.
-  traps="$(trap -p HUP INT TERM)"
-  trap '' HUP INT TERM
+  local job signal attempt
   for signal in TERM KILL; do
-    if job="$(harness_dashboard_dev_server_job)"; then
-      kill "-${signal}" "%${job}" 2>/dev/null || true
-    fi
+    job="$(harness_dashboard_dev_server_job)" || return 0
+    kill "-${signal}" "%${job}" 2>/dev/null || true
     for ((attempt = 0; attempt < HARNESS_DASHBOARD_DEV_SERVER_STOP_ATTEMPTS; attempt++)); do
-      if ! harness_dashboard_dev_server_job >/dev/null; then
-        break 2
-      fi
+      harness_dashboard_dev_server_job >/dev/null || return 0
       sleep "${HARNESS_DASHBOARD_DEV_SERVER_STOP_INTERVAL_SEC}"
     done
   done
-  if harness_dashboard_dev_server_job >/dev/null; then
-    printf 'dashboard dev server: process %s is still running after SIGKILL\n' \
-      "${harness_dashboard_dev_server_pid}" >&2
-  fi
-  trap - HUP INT TERM
-  eval "${traps}"
+  harness_dashboard_dev_server_job >/dev/null || return 0
+  printf 'dashboard dev server: process %s is still running after SIGKILL\n' \
+    "${harness_dashboard_dev_server_pid}" >&2
+}
+
+# The stop for `trap ... EXIT`. Bash ends a script at once when it is told to
+# end while it runs its exit trap, and a server that the stop had not ended
+# yet would stay. So the signals that tell a script to end are ignored from
+# the first command on. The script is ending anyway.
+harness_dashboard_dev_server_stop_on_exit() {
+  trap '' HUP INT QUIT TERM
+  harness_dashboard_dev_server_stop
 }

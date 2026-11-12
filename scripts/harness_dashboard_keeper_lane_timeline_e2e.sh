@@ -14,7 +14,7 @@ ARTIFACT_DIR="${KEEPER_LANE_TIMELINE_ARTIFACT_DIR:-${TMPDIR:-/tmp}}"
 
 mkdir -p "${ARTIFACT_DIR}"
 
-trap harness_dashboard_dev_server_stop EXIT
+trap harness_dashboard_dev_server_stop_on_exit EXIT
 
 pnpm --dir "${DASHBOARD_DIR}" exec playwright --version >/dev/null
 MASC_DASHBOARD_PROXY_TARGET="${PROXY_TARGET}" \

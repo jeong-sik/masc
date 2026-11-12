@@ -12,7 +12,7 @@ SERVER_LOG="${TMPDIR:-/tmp}/masc-dashboard-internal-agents-vite-${PORT}.log"
 ARTIFACT_DIR="${INTERNAL_AGENTS_ARTIFACT_DIR:-${TMPDIR:-/tmp}}"
 
 mkdir -p "${ARTIFACT_DIR}"
-trap harness_dashboard_dev_server_stop EXIT
+trap harness_dashboard_dev_server_stop_on_exit EXIT
 
 pnpm --dir "${DASHBOARD_DIR}" exec playwright --version >/dev/null
 MASC_DASHBOARD_PROXY_TARGET="${MASC_DASHBOARD_PROXY_TARGET:-http://127.0.0.1:8935}" \

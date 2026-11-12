@@ -14,7 +14,7 @@ DESKTOP_SCREENSHOT="${TMPDIR:-/tmp}/masc-chat-control-status-desktop.png"
 MOBILE_SCREENSHOT="${TMPDIR:-/tmp}/masc-chat-control-status-mobile.png"
 BROWSER_SCRIPT="${ROOT_DIR}/scripts/harness_dashboard_keeper_chat_control_status_dom_smoke.py"
 
-trap harness_dashboard_dev_server_stop EXIT
+trap harness_dashboard_dev_server_stop_on_exit EXIT
 
 MASC_DASHBOARD_PROXY_TARGET="${PROXY_TARGET}" \
   harness_dashboard_dev_server_start "${DASHBOARD_DIR}" "${HOST}" "${PORT}" "${FIXTURE_URL}" "${SERVER_LOG}"

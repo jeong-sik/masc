@@ -24,7 +24,7 @@ JOINED_TOOL_SELECTOR='[data-chat-trace-step="tool"][data-chat-turn-order-index="
 TRACE_ONLY_TOOL_SELECTOR='[data-chat-trace-step="tool"][data-chat-turn-order-index="3"][data-chat-turn-order-kind="tool"][data-chat-trace-tool-call-id="tc-missing"][data-chat-trace-link-state="trace-only"][data-chat-trace-output-state="pending"]'
 CHAT_SELECTOR='[data-chat-trace-step="chat"][data-chat-turn-order-index="4"][data-chat-turn-order-kind="chat"][data-chat-trace-entry-id="assistant-interleave"]'
 
-trap harness_dashboard_dev_server_stop EXIT
+trap harness_dashboard_dev_server_stop_on_exit EXIT
 
 pnpm --dir "${DASHBOARD_DIR}" exec playwright --version >/dev/null
 

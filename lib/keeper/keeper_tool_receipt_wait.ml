@@ -18,9 +18,13 @@ let id_of_target = function
   | Run id | Schedule id -> id
 ;;
 
-let nonempty_id name = function
-  | None -> Ok None
-  | Some value -> if String.equal value "" then Error (name ^ " is empty") else Ok (Some value)
+(* A field the call may leave out. Absent or null is no id. *)
+let optional_id name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) ->
+    if String.equal value "" then Error (name ^ " is empty") else Ok (Some value)
+  | Some _ -> Error ("field " ^ name ^ " must be a string")
 ;;
 
 let target_of_args args =
@@ -31,12 +35,8 @@ let target_of_args args =
       ~optional:[ "request_id"; "schedule_id" ]
       args
   in
-  let* request_id = Agent_core.Execution_json.option_string_field "request_id" fields in
-  let* schedule_id =
-    Agent_core.Execution_json.option_string_field "schedule_id" fields
-  in
-  let* request_id = nonempty_id "request_id" request_id in
-  let* schedule_id = nonempty_id "schedule_id" schedule_id in
+  let* request_id = optional_id "request_id" fields in
+  let* schedule_id = optional_id "schedule_id" fields in
   match request_id, schedule_id with
   | Some id, None -> Ok (Run id)
   | None, Some id -> Ok (Schedule id)

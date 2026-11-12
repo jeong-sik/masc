@@ -660,9 +660,8 @@ let cancel_schedule config ~schedule_id =
   | Error err -> fail ("cancel failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let test_a_schedule_that_ended_without_a_receipt_is_settled () =
+let settles_an_ended_schedule ~schedule_id =
   with_workspace (fun ~sw ~clock config ->
-    let schedule_id = "sched-ended-without-receipt" in
     create_receipt_schedule config ~schedule_id;
     cancel_schedule config ~schedule_id;
     let task = start_waiting_task ~sw ~clock config ~request_ids:[ schedule_id ] in
@@ -680,10 +679,21 @@ let test_a_schedule_that_ended_without_a_receipt_is_settled () =
                  ~keeper_name
                  ~viewer:Outbox.Every_receipt)))
     in
-    check bool "the receipt says the schedule ended without one" true
-      (Astring.String.is_infix ~affix:"ended before its receipt was written" text);
+    check bool "the receipt says it will not come" true
+      (Astring.String.is_infix ~affix:"The receipt will not come" text);
     get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
     check int "a second pass resumes nothing more" 2 !(task.attempts))
+;;
+
+let test_a_schedule_that_ended_without_a_receipt_is_settled () =
+  settles_an_ended_schedule ~schedule_id:"sched-ended-without-receipt"
+;;
+
+(* The Keeper chooses a schedule's id, and a request id cannot hold every
+   character it can. The request store refuses such an id, which can only be a
+   schedule's. *)
+let test_a_schedule_whose_id_is_not_a_request_id_is_settled () =
+  settles_an_ended_schedule ~schedule_id:"배포 결과 #12"
 ;;
 
 let test_a_schedule_that_has_not_ended_is_left_waiting () =
@@ -726,6 +736,8 @@ let () =
             test_run_with_a_worker_is_left_waiting
         ; test_case "a schedule that ended without a receipt is settled" `Quick
             test_a_schedule_that_ended_without_a_receipt_is_settled
+        ; test_case "a schedule whose id is not a request id is settled" `Quick
+            test_a_schedule_whose_id_is_not_a_request_id_is_settled
         ; test_case "a schedule that has not ended is left waiting" `Quick
             test_a_schedule_that_has_not_ended_is_left_waiting
         ; test_case "a request another conversation waits for is refused" `Quick

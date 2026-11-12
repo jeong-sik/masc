@@ -290,7 +290,10 @@ let test_a_schedule_is_waited_for_while_it_can_write_a_receipt () =
       (call config (schedule_args "sched-other"));
     create_schedule config ~schedule_id:"sched-receipt" ~keeper:keeper_name ~delivery:"receipt";
     expect_wait ~request_id:"sched-receipt" "a receipt wake that has not ended"
-      (call config (schedule_args "sched-receipt")))
+      (call config (schedule_args "sched-receipt"));
+    create_schedule config ~schedule_id:"배포 결과 #12" ~keeper:keeper_name ~delivery:"receipt";
+    expect_wait ~request_id:"배포 결과 #12" "a schedule id a request id cannot hold"
+      (call config (schedule_args "배포 결과 #12")))
 ;;
 
 (* An ended wake that left no receipt in the outbox has nothing to deliver. One

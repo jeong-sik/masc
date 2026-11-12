@@ -8,11 +8,23 @@ module Source = Keeper_receipt_wait_source
    what its Unfinished receipt echoes. A record that is absent, or that is not a
    background Execute run's, holds none, and the receipt says [Unknown]. A wait
    whose request record is absent may name a schedule instead: its row says
-   whether the wake can still write the receipt. *)
+   whether the wake can still write the receipt. A schedule's id is chosen by
+   the Keeper and may hold characters a request id cannot, so an id the request
+   store refuses as a request id can only be a schedule's. *)
 type record =
   | Worker_may_exist
   | Ended of Outbox.arguments
   | Schedule_ended
+
+(* A schedule that delivers a queue message never writes the receipt a wait
+   asked for, so it ends the wait like one that ended without it. [no_row] is
+   what an id with no schedule row is: a run whose record was pruned, or a
+   schedule that was. *)
+let record_of_schedule_row ~no_row = function
+  | Source.Row_waiting -> Worker_may_exist
+  | Source.Row_ended | Source.Row_delivers_to_queue -> Schedule_ended
+  | Source.No_row -> no_row
+;;
 
 let read_record ~base_path ~keeper_name request_id =
   match Keeper_msg_async.load_canonical_request ~base_path ~caller:keeper_name request_id with
@@ -25,13 +37,16 @@ let read_record ~base_path ~keeper_name request_id =
        | None -> Ok (Ended Outbox.Unknown))
   | Keeper_msg_async.Absent ->
     let* row = Source.find_schedule ~base_path ~keeper_name request_id in
-    (match row with
-     | Source.Row_waiting -> Ok Worker_may_exist
-     | Source.Row_ended -> Ok Schedule_ended
-     | Source.Row_delivers_to_queue | Source.No_row -> Ok (Ended Outbox.Unknown))
+    Ok (record_of_schedule_row ~no_row:(Ended Outbox.Unknown) row)
+  | Keeper_msg_async.Rejected Keeper_msg_async.Invalid_request_id ->
+    let* row = Source.find_schedule ~base_path ~keeper_name request_id in
+    Ok (record_of_schedule_row ~no_row:Schedule_ended row)
   | Keeper_msg_async.Unreadable reason ->
     Error (Printf.sprintf "request %s is unreadable: %s" request_id reason)
-  | Keeper_msg_async.Rejected rejection ->
+  | Keeper_msg_async.Rejected
+      (( Keeper_msg_async.Invalid_base_path _
+       | Keeper_msg_async.Invalid_caller
+       | Keeper_msg_async.Caller_mismatch ) as rejection) ->
     Error
       (Printf.sprintf
          "request %s is not readable by this Keeper: %s"

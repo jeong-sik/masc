@@ -73,8 +73,8 @@ let deliver ~base_path ~keeper_name ~schedule_id ending =
 ;;
 
 let source_lost_cause =
-  "The schedule ended before its receipt was written: its wake could not be \
-   delivered, or the schedule was cancelled or expired. Check the state it was \
+  "The receipt will not come: the schedule ended without writing it, was \
+   cancelled or expired, or no longer delivers receipts. Check the state it was \
    to report."
 ;;
 

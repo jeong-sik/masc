@@ -309,6 +309,31 @@ let test_schedule_update_form_keeps_the_receipt_delivery () =
   check (Alcotest.option str) "a queue row keeps its urgency" (Some "low")
     (queued |> member "urgency" |> to_string_option)
 
+(* A stored delivery this build cannot read opens no form: a default would turn
+   a receipt row into a queue wake on save. *)
+let test_schedule_update_form_refuses_an_unreadable_delivery () =
+  let row delivery =
+    { schedule_form_row with
+      sch_recurrence = Ok Schedule_domain.One_shot
+    ; sch_payload =
+        `Assoc
+          [ "kind", `String "masc.keeper_wake"
+          ; ( "body"
+            , `Assoc
+                [ "keeper_name", `String "edgar.a.poe"
+                ; "message", `String "inspect the latest work"
+                ; "delivery", delivery
+                ] )
+          ]
+    }
+  in
+  List.iter
+    (fun (label, delivery) ->
+      match Masc_tui_types.schedule_update_form_json (row delivery) with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail (label ^ ": the form opened"))
+    [ "an unknown delivery word", `String "mail"; "a delivery that is not a string", `Int 1 ]
+
 (* The same holds for the commit watch: an edit of the message must not remove
    the wait for the commit's checks. *)
 let test_schedule_update_form_keeps_the_commit_watch () =
@@ -2417,6 +2442,8 @@ let () =
             test_schedule_update_form_keeps_the_run_watch
         ; Alcotest.test_case "schedule update form keeps the receipt delivery" `Quick
             test_schedule_update_form_keeps_the_receipt_delivery
+        ; Alcotest.test_case "schedule update form refuses an unreadable delivery" `Quick
+            test_schedule_update_form_refuses_an_unreadable_delivery
         ; Alcotest.test_case "schedule update form keeps the commit watch" `Quick
             test_schedule_update_form_keeps_the_commit_watch
         ; Alcotest.test_case

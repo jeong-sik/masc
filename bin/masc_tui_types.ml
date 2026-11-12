@@ -3047,7 +3047,29 @@ let schedule_form_fields_of_recurrence = function
   | Schedule_domain.Cron { expression; timezone } ->
       schedule_form_recurrence_fields ~cron:expression ~timezone ()
 
-let schedule_modify_form (row : schedule_row) recurrence =
+(* The update replaces the whole definition, so a form that dropped [delivery]
+   would turn a receipt row into a queue wake on save. A stored value this build
+   cannot read opens no form: a default would be saved over it. *)
+let schedule_form_delivery (row : schedule_row) =
+  match schedule_payload_body row.sch_payload with
+  | `Assoc fields ->
+      (match List.assoc_opt "delivery" fields with
+       | None -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
+       | Some (`String raw) ->
+           Result.map_error
+             (fun detail ->
+                Printf.sprintf
+                  "this build cannot read the schedule's delivery %S (%s); the form \
+                   would save a default over it"
+                  raw detail)
+             (Schedule_supported_kinds.keeper_wake_delivery_of_string raw)
+       | Some _ ->
+           Error
+             "the schedule's delivery is not a string; the form would save a \
+              default over it")
+  | _ -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
+
+let schedule_modify_form (row : schedule_row) recurrence ~delivery =
   let body = schedule_payload_body row.sch_payload in
   let recurrence_kind = Schedule_domain.recurrence_kind_to_string recurrence in
   let recurrence_fields = schedule_form_fields_of_recurrence recurrence in
@@ -3078,20 +3100,8 @@ let schedule_modify_form (row : schedule_row) recurrence =
          | Ok None | Error _ -> [])
     | _ -> []
   in
-  (* A receipt delivery takes no urgency, and the update replaces the whole
-     definition: a form that dropped [delivery] would turn the row into a queue
-     wake on save. *)
-  let delivery =
-    match body with
-    | `Assoc fields ->
-        (match List.assoc_opt "delivery" fields with
-         | Some (`String raw) ->
-             (match Schedule_supported_kinds.keeper_wake_delivery_of_string raw with
-              | Ok delivery -> delivery
-              | Error _ -> Schedule_supported_kinds.default_keeper_wake_delivery)
-         | Some _ | None -> Schedule_supported_kinds.default_keeper_wake_delivery)
-    | _ -> Schedule_supported_kinds.default_keeper_wake_delivery
-  in
+  (* A receipt delivery takes no urgency, so a receipt row carries [delivery] and
+     no urgency, and a queue row the other way round. *)
   let delivery_and_urgency =
     match delivery with
     | Schedule_supported_kinds.Keeper_wake_to_receipt -> [ "delivery", `String "receipt" ]
@@ -3132,7 +3142,10 @@ let schedule_update_form_json (row : schedule_row) : (string, string) result =
            "this build cannot read the schedule's recurrence (%s); the form \
             would save a default over it"
            detail)
-  | None, Ok recurrence -> Ok (schedule_modify_form row recurrence)
+  | None, Ok recurrence ->
+      Result.map
+        (fun delivery -> schedule_modify_form row recurrence ~delivery)
+        (schedule_form_delivery row)
 
 let schedule_create_form_json () =
   `Assoc

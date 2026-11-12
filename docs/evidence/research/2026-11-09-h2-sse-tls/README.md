@@ -63,6 +63,11 @@ python3 summarize.py <h2_sse_leak_probe 의 --out dir>
 - `--repo` 는 `scripts/harness/perf/http_multiplex_probe.py` 를 가진 masc 트리다.
 - `--assets` 는 `dashboard/assets/index-*.js` 를 가진 asset 루트다. `OwnedServer` 가 `MASC_ASSETS_DIR` 로 넘긴다.
 - `tls_cpu_probe.py` 는 클라이언트를 `/opt/homebrew/bin/python3` 로 띄운다. 다른 호스트에서는 그 경로를 바꾼다.
+- `tls_cpu_probe.py` 는 서버 CPU 를 macOS 에서 `ps -o time`(0.01초 단위), Linux 에서 `/proc/<pid>/stat`(1/`SC_CLK_TCK` 초 단위, `SC_CLK_TCK` 가 100 이면 0.01초)로 읽는다. Linux 의 `ps -o time` 은 1초 단위라 쓰지 않는다.
+  - 읽은 눈금은 결과의 `cpu_clock_step_s` 에 남는다.
+  - 두 시계 모두 서버가 띄운 자식 프로세스의 CPU 는 세지 않는다.
+  - 평문 연결 하나의 서버 CPU 는 `--n 60` 에서 약 0.1초(눈금 10칸), `--n 300` 에서 약 0.5초(50칸)다(run13 의 1.92 ms/MB 기준).
+  - 결과의 `runs` 에 실행마다 보낸 MB, 걸린 시간, 서버 CPU 초가 남는다. 중앙값이 눈금 몇 칸 위에 서 있는지 여기서 본다.
 - `tls_cipher_probe.py` 는 PATH 의 `openssl` 을 부른다. OpenSSL 의 `openssl` 이 PATH 에서 먼저 와야 한다. macOS 의 `/usr/bin/openssl` 은 LibreSSL 3.3.6 이고, 그 `s_client` 에는 `-ciphersuites` 가 없다.
 - run5 와 run6 는 각각 `h2_sse_leak_probe.py` 의 `H2Conn` 을 가져다 쓴다. 같은 디렉터리에 둔다.
 

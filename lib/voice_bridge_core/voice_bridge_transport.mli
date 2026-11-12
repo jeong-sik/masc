@@ -31,8 +31,12 @@ val run_voice_status
   -> string list
   -> Unix.process_status * string
 
+(** The HTTP calls below send [api_key], the key the endpoint names, which
+    the caller resolves: this transport reads no credential of the host. An
+    endpoint that names no key takes the empty key. *)
 val speak_via_http_tts_to_file
   :  Voice_config.endpoint
+  -> api_key:string
   -> agent_id:string
   -> message:string
   -> voice:string
@@ -43,6 +47,7 @@ val speak_via_http_tts_to_file
 val transcribe_via_http_stt
   :  ?deadline:Monotonic_deadline.t
   -> Voice_config.endpoint
+  -> api_key:string
   -> audio_file:string
   -> model:string
   -> (Yojson.Safe.t, string) result
@@ -60,10 +65,13 @@ val collect_voice_catalogue
 
 (** Ask one endpoint for its complete catalogue. Parsing the collected voices
     into names belongs to the caller: this is the transport. [Error] when the
-    endpoint kind has no catalogue to ask for, when the credential is missing,
-    or when any page failed or its continuation was malformed. All pages share
-    the existing configured HTTP deadline; partial catalogues are not returned. *)
-val list_voices_via_http : Voice_config.endpoint -> (Yojson.Safe.t, string) result
+    endpoint kind has no catalogue to ask for, or when any page failed or its
+    continuation was malformed. All pages share the existing configured HTTP
+    deadline; partial catalogues are not returned. *)
+val list_voices_via_http
+  :  Voice_config.endpoint
+  -> api_key:string
+  -> (Yojson.Safe.t, string) result
 
 (** Speak one message by running a command, writing audio to [output_file] and
     answering its size. A command that exits cleanly having written nothing is

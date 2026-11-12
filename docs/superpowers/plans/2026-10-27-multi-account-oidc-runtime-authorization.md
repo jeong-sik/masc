@@ -703,6 +703,11 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 판정은 `host_access` 하나다. lane은 그 거절을 자기 이유로 옮긴다. key를 읽는 함수(`arm`)는 `host_account`를 받는다.
     - 이유를 받는 곳은 둘을 lane의 이유로 묶는다. 흡수 gate는 흡수를 미룬다. Board attention은 Jev에게 묻지 않는다. memory recall 보기와 TUI는 이유를 따로 보여 준다. Jev readiness와 health는 꺼짐으로 본다.
   - D4d MASC 도구의 호스트 key. web search, SystemOne cloud, voice.
+    - 판정은 `authorize_host`다. `host_client`에 `Web_search`, `Systemone_cloud`, `Voice_endpoint`를 더한다.
+    - key를 읽는 함수가 `host_account`를 받는다. web search는 `Tool_misc_web_search.credential`, SystemOne은 `cloud_headers`, voice는 `Voice_endpoint_key`의 `read`다.
+    - key가 없는 곳은 판정하지 않는다. SearXNG, SystemOne local, key 변수를 적지 않은 voice endpoint다.
+    - web search는 순서에 key 없는 provider가 없으면 `Policy_rejection`으로 끝난다. 있으면 그 provider로 찾고, key 있는 provider는 `account:` 오류로 남는다.
+    - voice transport(`masc.voice_bridge_core`)는 key를 읽지 않고 `~api_key`를 받는다. add-on 경계 아래 라이브러리가 판정 모듈에 기대지 않는다.
   - D4a, D4b, D4d의 판정은 `authorize_host`다. 대상마다 `host_client`에 닫힌 variant를 더해서, 거절 문장이 무엇을 막았는지 말한다. D4c는 lane의 이유가 이미 닫힌 variant라서 같은 결정(`host_access`)을 그 이유로 받는다.
 - D4a에서 남긴 것.
   - 시험 프로세스는 시작할 때 단일 사용자 접근을 게시한다(하네스 #50867). 그래서 D4a는 시험에 게시 호출을 더하지 않는다. 다계정 시험은 실행 표가 만든 API 런타임으로 verify를 불러, 거절(`account_not_authorized`)과 연결 0건을 본다.

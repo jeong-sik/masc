@@ -45,6 +45,9 @@ type host_client =
   | Model_list
   | Files_api
   | Replacement_catalog
+  | Web_search
+  | Systemone_cloud
+  | Voice_endpoint
 
 (* The proof carries nothing: a single-user process shares every account of
    its host, so one start of a host client is as allowed as another. *)
@@ -57,6 +60,9 @@ let host_client_name = function
   | Model_list -> "A model-list or serving-window request of a setup connection"
   | Files_api -> "The Files API of masc_file_*"
   | Replacement_catalog -> "A target of the replacement catalog AGENT_CORE_MODEL_CATALOG names"
+  | Web_search -> "A web search provider that masc_web_search calls with its key"
+  | Systemone_cloud -> "The cloud backend of SystemOne"
+  | Voice_endpoint -> "A voice endpoint that names a key"
 ;;
 
 type t =
@@ -148,7 +154,14 @@ let refusal_to_string = function
     Printf.sprintf
       "the account was captured from another home than the one of %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
-  | Host_account ((Api_provider | Model_list | Files_api | Replacement_catalog) as client) ->
+  | Host_account
+      (( Api_provider
+       | Model_list
+       | Files_api
+       | Replacement_catalog
+       | Web_search
+       | Systemone_cloud
+       | Voice_endpoint ) as client) ->
     Printf.sprintf
       "%s sends with the credential its operator declared, which is an account of the \
        host, and a multi-account process shares no account of its host"

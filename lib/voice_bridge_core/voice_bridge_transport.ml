@@ -49,32 +49,6 @@ let command_failure_reason output =
 let write_text path content = Fs_compat.save_file path content
 let read_file path = Fs_compat.load_file path
 
-let resolve_api_key endpoint =
-  let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
-  match Voice_runtime_overlay.endpoint_auth_env_name endpoint with
-  | Some env_name ->
-    (match Sys.getenv_opt env_name with
-     | Some value ->
-       let trimmed = String.trim value in
-       if trimmed <> ""
-       then Ok trimmed
-       else
-         Error
-           (Printf.sprintf
-              "voice provider %s (endpoint %s) expects %s to be set to a non-empty value"
-              adapter.canonical_name
-              endpoint.id
-              env_name)
-     | None ->
-       Error
-         (Printf.sprintf
-            "voice provider %s (endpoint %s) expects %s to be set to a non-empty value"
-            adapter.canonical_name
-            endpoint.id
-            env_name))
-  | None -> Ok ""
-;;
-
 let run_voice_status ?(timeout_sec = 35.0) ?(stdin_content = "") argv =
   Process_eio.run_argv_with_stdin_and_status
     ~timeout_sec
@@ -210,8 +184,7 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
          Error (Printf.sprintf "TTS curl stopped by signal %d" sig_num))
 ;;
 
-let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output_file =
-  let* api_key = resolve_api_key endpoint in
+let speak_via_http_tts_to_file endpoint ~api_key ~agent_id ~message ~voice ~model ~output_file =
   let tuning = Voice_bridge_core.tuning_for_agent agent_id in
   let* request =
     Voice_runtime_overlay.http_request_for_tts
@@ -537,22 +510,20 @@ let collect_voice_catalogue ~remaining_seconds ~fetch_page
   collect Catalogue_cursors.empty [] request
 ;;
 
-let list_voices_via_http endpoint =
+let list_voices_via_http endpoint ~api_key =
   let deadline =
     Monotonic_deadline.after ~seconds:Env_config_runtime.Voice.http_request_timeout_sec
   in
-  let* api_key = resolve_api_key endpoint in
   let* request = Voice_runtime_overlay.voice_listing_request_for_endpoint endpoint ~api_key in
   collect_voice_catalogue
     ~remaining_seconds:(fun () -> Monotonic_deadline.remaining_seconds deadline)
     ~fetch_page:run_voice_listing_request request
 ;;
 
-let transcribe_via_http_stt ?deadline endpoint ~audio_file ~model =
+let transcribe_via_http_stt ?deadline endpoint ~api_key ~audio_file ~model =
   if stt_deadline_spent deadline
   then Error "budget_spent"
   else
-    let* api_key = resolve_api_key endpoint in
     let* request =
       Voice_runtime_overlay.stt_request_for_endpoint endpoint ~api_key ~audio_file ~model
     in

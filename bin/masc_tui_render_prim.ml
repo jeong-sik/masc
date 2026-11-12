@@ -2002,7 +2002,7 @@ let refresh_progress_pieces (state : state) =
     match source with
     | Http_refresh_progress.Identity_before -> "작업 공간"
     | Approvals -> "승인" | Questions -> "질문" | Keepers -> "Keeper"
-    | Quiz_rows -> "운영자 질문" | Surface_data source -> surface_name source
+    | Surface_data source -> surface_name source
     | Identity_after -> "작업 공간 확인" in
   let component_name component = if not ko then Http_refresh_progress.component_name component else
     match component with

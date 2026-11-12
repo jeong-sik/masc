@@ -4767,21 +4767,6 @@ let fetch_installation_asks ~(expected_workspace : Masc.Tui_decode.server_identi
       | json -> Masc.Tui_decode_asks.decode_installation_asks json
       | exception Yojson.Json_error detail -> Error ("installation questions were not JSON: " ^ detail))
 
-(** The lane add-on inventory from [GET /api/v1/lane-addons]: every live
-    installation's instances and its current observation rows. The Home quiz
-    line reads the operator quiz's scorecard and review rows from it without
-    opening the Lane Add-ons screen. *)
-let fetch_lane_addons_inventory_json ~(host : string) ~(port : int) () :
-    (Yojson.Safe.t, string) result =
-  match http_get ~host ~port ~path:"/api/v1/lane-addons" with
-  | Error detail -> Error detail
-  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
-      Error (refusal ~status_code:status ~body)
-  | Ok (_, body) -> (
-      match Yojson.Safe.from_string body with
-      | json -> Ok json
-      | exception Yojson.Json_error detail -> Error ("lane add-ons inventory was not JSON: " ^ detail))
-
 (** Every open question to the operator: the fleet's Keepers, then the
     installations. Both come from the same server, so either failing is the
     question source failing. *)

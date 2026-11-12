@@ -34,6 +34,8 @@ Lane Add-on exact 요청 하나가 끝나지 않고 242번 실행됐다. 실행�
 
 L1 은 이 문서에서 구현할 수 있을 만큼 정한다. L2·L3 은 방향과 풀어야 할 것만 정한다(§3.3, §3.4). 구현 전에 그 절을 채워 다시 리뷰받는다.
 
+L1 은 #51649 로 병합됐다. 화면 문구는 #51650 이 고쳤다. §1.1 은 그 직후에 잰 값이다. L1 이 덮지 않는 되풀이 하나를 거기서 찾았다(§3.5, §9 D5).
+
 측정한 240번 가운데 219번은 다른 slot 이 기다리는 중이었다. L1 은 그 경우의 되풀이를 멈춘다. 기다리는 slot 없이 열려 있는 요청의 되풀이는 덮지 않는다(§3.5, §9 D4). L1 뒤에도 실행마다 요청 기록과 증거를 읽고 `Deferred` 한 줄을 쓴다. L2·L3 은 그 읽기와 쓰기를 요청 크기와 무관하게 만든다. attempt 목록이 trigger 마다 늘어나는 것은 #50762 가 다룬다. 이 RFC 는 그 목록의 길이를 줄이지 않는다.
 
 ## 1. 측정 (2026-11-12, 라이브 저장소를 읽기만 함)
@@ -60,6 +62,41 @@ attempt 240개를 slot 별로 센 결과다. slot 은 runtime 계열로만 적�
 재지 못한 것: 한 번의 27~224초 가운데 증거 파일을 읽고 쓴 몫, 그동안 서버의 다른 fiber 가 멈췄는지, 241번이 며칠에 걸친 것인지(attempt 에 시각이 없다).
 
 같은 저장소에 `provider_unavailable` attempt 865개 뒤에 끝난 기록과 223개 뒤에 끝난 기록이 있다.
+
+### 1.1 L1 병합 직후, 설치 전에 잰 것 (2026-11-12 09:38~09:50Z)
+
+운영 서버의 build 에는 아직 L1 이 없다. 저장소에서 칸 이름, 타입 이름, 개수, 바이트만 읽었다. slot 은 runtime 계열로만 적는다.
+
+| 항목 | 값 |
+|---|---|
+| 열린 `classification` 요청의 attempt | 287 |
+| 그 요청의 실행 증거로 보이는 파일 | 1,032,619,534 바이트. `host-results` 706개 합의 78.5% (계산값) |
+| 그 파일을 뺀 exact 증거 | 파일 137개, 실행 1,549개 |
+| 그 실행들의 `request` 칸 합 | 275.9 MB |
+| 그 실행들의 나머지 칸 합 | 5.4 MB |
+| 본문을 뺀 실행 하나 | 평균 약 3.5 KB (5.4 MB ÷ 1,549, 계산값). 칸별 중앙값을 더하면 약 1.4 KB |
+| 본문이 아닌 칸의 최댓값 | 답을 담은 `outcome` 100 KB |
+| 요청 기록 | 142개. 열린 것 10, 끝난 것 132 |
+
+큰 파일이 그 요청의 증거라는 것은 key 로 확인하지 않았다. 수정 시각이 요청 기록과 같이 움직이고, 바이트를 attempt 수로 나눈 값이 요청 크기와 비슷하다.
+
+열린 10개 가운데 6개는 Librarian 요청이다(`admission` 2, `durable` 4). 요청마다 19~22번 실행됐다. 본문은 118,523~391,718자다. 실행의 모양은 여섯 모두 같다.
+
+- HTTP slot 다섯 중 셋이 기다린다. 실행 세 번에서는 둘만 기다렸다.
+- 나머지 둘을 부른다. tinker 계열이 400, claude 계열이 400 으로 답한다. receipt 에는 둘 다 `Provider_refused { http_status = 400; refusal = Invalid_request }` 다. 여섯 요청에 기록된 호출은 계열마다 123번이다.
+- CLI slot 둘은 기다린다. 요청은 `provider_unavailable` 로 열려 있다.
+- 한 요청 안에서 slot 마다 receipt 의 `attempts[].plan` 과 `attempts[].body` 는 실행 내내 값이 하나다.
+
+두 400 의 응답 문장을 사람이 읽었다. masc 는 이 문장을 읽지 않는다.
+
+| slot | 문장의 뜻 | 저장된 증거 전체에서 |
+|---|---|---|
+| tinker 계열 | prompt 와 `max_tokens` 의 합이 context window(65,536)를 넘는다 | 294번. 모두 prompt 만으로 window 를 넘는다. 가장 작은 prompt 가 68,417 token 이다 |
+| claude 계열 | 사용자가 정한 지출 한도에 닿았다. 풀리는 날짜가 문장에 있다 | 298번. #49686 과 같은 원인이다 |
+
+tinker 계열의 400 에는 오류 코드가 없다. 그래서 `Invalid_request` 가 된다. L1 은 `Invalid_request` 를 건너뛰지 않는다(§3.2). 코드대로면 이 여섯은 L1 이 설치된 뒤에도 host event 마다 두 slot 을 다시 부른다. 설치 뒤의 값은 아직 재지 않았다.
+
+tinker 문장의 `max_tokens` 자리에는 283번이 1000000000, 11번이 4096 이다. Librarian lane 은 output 한도를 선언하지 않았다. 그 경우 요청은 그 칸을 싣지 않는다(`backend_openai_request.ml:238-263`). 1000000000 은 provider 의 기본값으로 보인다. wire 본문은 보지 않았다.
 
 ## 2. 지금 구조
 
@@ -88,6 +125,8 @@ host cycle 은 `wake_host` 가 불릴 때 돈다(`lib/lane_addon/lane_addon_runt
 cycle 은 열린 요청마다 `Lane_addon_exact.run` 을 부른다. `run` 은 기록이 열려 있으면 runner 를 다시 부른다(`lane_addon_exact.ml:1078-1106`). runner 는 부를 때마다 slot 순서를 새로 계산한다(`server_lane_addon_exact.ml:294`). 앞 실행의 결과는 어디에서도 읽지 않는다.
 
 모든 slot 이 기다리면 runner 는 호출을 만들지 않고 `Every_slot_held { until }` 을 돌려준다(`:277-299`). 그 판단은 slot 이 지금 기다리는지만 본다.
+
+그래서 provider 호출 수는 (host event 수) × (열린 요청 수) × (요청마다 걸을 slot 수)다. host event 는 그 요청과 무관한 일로도 난다. L1 은 셋째 항만 줄인다. host event 가 열린 요청을 다시 걷는 것은 지나갈 수 있는 실패를 다시 시도하는 유일한 길이기도 하다. 시간으로 깨우지 않기 때문이다.
 
 ### 2.3 실행 증거
 
@@ -122,6 +161,8 @@ cycle 은 열린 요청마다 `Lane_addon_exact.run` 을 부른다. `run` 은 �
 - `excluded_http` 는 걷지 않은 slot 의 id 목록이다. 지금은 기다리는 slot 이 들어간다.
 - slot 의 실패(`failed`)는 `Rejected { visit; disposition; detail }`(로컬 거절)이거나 `Execution_failed { visit; cause; raw_sha }` 다.
 - `cause` 는 `api_observation`(`keeper_exact_walk_failure.ml:107`)이다. provider 의 거절은 `Provider_refused { http_status; refusal }` 이고 `refusal` 은 닫힌 타입이다.
+
+receipt 는 보낸 요청마다 `attempts[]` 에 `plan` 과 `body` 를 담는다(`keeper_exact_walk_receipt.ml:101-102`). `body` 는 wire 본문의 sha256 이다. `plan` 은 본문 sha, catalog generation, target identity fingerprint, codec, timeout 둘을 합친 해시다(`packages/agent_core/lib/llm_provider/exact_output_ready_admission.ml:372-382`). catalog generation 은 catalog 의 모든 target 을 합친 값이다(`exact_output_resolver.ml:938-943`). 무관한 target 하나가 바뀌어도 `plan` 이 달라진다.
 
 receipt 쪽에는 관측 하나를 가르는 함수가 이미 있다. `of_api_observation`(`keeper_exact_walk_failure.ml:165-176`)은 provider 의 거절 `Context_overflow`, `Input_capacity`, `Request_body_refused` 셋을 "provider 가 입력 크기를 거절함"으로 가른다. 보낸 뒤의 실패 둘(`Context_overflow_failure`, window 에서 멈춘 빈 답 `Empty_completion Context_window_exceeded`)도 같은 갈래다(`:153-156`). `Invalid_request` 와 `Timeout` 은 그 갈래가 아니다.
 
@@ -161,7 +202,7 @@ receipt 가 담지 못하는 것도 있다. 로컬 거절의 `disposition` 은 `
 
 C1 은 시간으로 상태를 죽이지 않는다(헌법 `no_wall_clock_death`). 근거는 일어난 거절이다.
 
-C1 이 맞는 이유는 `ending` 이다. 기다리는 slot 이 있으면 걷기는 입력 거절로 끝나지 않는다(§2.1). 그동안 거절한 slot 을 다시 불러서 달라질 수 있는 결과는 "이번에는 답한다" 하나다. 본문은 digest 로 고정이다. target 과 schema 가 같으면 보내는 요청에서 달라질 수 있는 것은 lane 의 `max_output_tokens` 와 `thinking` 이다. 이 둘은 fingerprint 뒤에 lane 이 덧씌운다(`lib/runtime/runtime_exact_output_registry.ml:683-696`, `exact_output_resolver.ml:968-976`). 증거에도 receipt 에도 값이 없어서 견줄 수 없다. 운영자가 그 둘을 바꿔도 기다림이 끝날 때까지 그 slot 은 건너뛰어진다(§9 D1 의 대가).
+C1 이 맞는 이유는 `ending` 이다. 기다리는 slot 이 있으면 걷기는 입력 거절로 끝나지 않는다(§2.1). 그동안 거절한 slot 을 다시 불러서 달라질 수 있는 결과는 "이번에는 답한다" 하나다. 본문은 digest 로 고정이다. target 과 schema 가 같으면 보내는 요청에서 달라질 수 있는 것은 lane 의 `max_output_tokens` 와 `thinking` 이다. 이 둘은 fingerprint 뒤에 lane 이 덧씌운다(`lib/runtime/runtime_exact_output_registry.ml:683-696`, `exact_output_resolver.ml:968-976`). receipt 에 그 값은 없다. 보낸 wire 본문의 sha 는 있다(`attempts[].body`, §2.5). 그것과 견주려면 걷기 전에 slot 마다 본문을 직렬화해야 한다. L1 은 견주지 않는다. 운영자가 그 둘을 바꿔도 기다림이 끝날 때까지 그 slot 은 건너뛰어진다(§9 D1 의 대가, §8).
 
 C5 는 §2.6 에서 나온다. 기다리는 slot 이 없으면 아무것도 건너뛰지 않는다. 그래서 `Input_refused` 로 끝나는 걷기의 receipt 는 지금처럼 모든 slot 의 거절을 담는다.
 
@@ -217,7 +258,7 @@ L1 은 저장 모양을 바꾸지 않는다. receipt 의 version 과 칸이 그�
 - 지금 `.mli` 는 `bind_proofs` 가 한 요청의 증거 전체를 attempt 목록과 견준다고 약속한다. 증거를 보탤 때 전체를 읽지 않으려면 그 약속을 어디로 옮길지 정한다. ordinal 이 늘기만 하고 앞자리에 끼워 넣지 못한다는 검사도 같이다.
 - preflight 는 요청 기록만 본다. 옛 모양 증거가 남아 있으면 시작 때의 sweep 이 전체를 멈춘다. preflight 가 증거 모양도 보게 한다.
 - 증거 디렉터리는 `.json` 파일만 둔다. sweep 은 다른 종류의 항목이 있으면 전체를 멈춘다(`server_unowned_exact_sweep.ml:54-75`).
-- 본문을 뺀 증거 하나의 크기는 재지 않았다. 지금 중앙값 6.1 MB 에서 요청 기록 3.87 MB 를 뺀 나머지가 무엇인지 L2 전에 센다.
+- 본문을 뺀 증거 하나의 크기는 §1.1 에서 쟀다. 실행 1,549개에서 `request` 칸이 98% 다(275.9 MB 대 5.4 MB, 계산값). 본문을 뺀 실행 하나는 평균 약 3.5 KB 다. §1 의 중앙값 6.1 MB 는 본문이 큰 요청 하나의 값이다.
 
 ### 3.4 L3 — 요청 기록 (방향)
 
@@ -241,6 +282,7 @@ attempt 목록은 그대로 한 파일이다. 항목 하나는 수백 바이트�
 - attempt 를 지우거나 합치지 않는다.
 - receipt 에 칸을 더하지 않는다. 로컬 거절을 가르려면 칸이 필요하고, 그것은 저장 모양을 바꾸는 일이다.
 - 기다리는 slot 없이 열려 있는 요청은 건너뛰지 않는다. 다른 slot 이 시각 없는 429, 5xx, 인증 거절로 실패하는 경우다. 그 slot 의 결과는 걷기 전에 알 수 없다. 덮으려면 걷기가 "지나갈 수 있는 실패가 나오면 거절한 slot 앞에서 멈춘다"를 알아야 한다(§9 D4).
+- `Invalid_request` 로 거절한 slot 은 상태 코드가 400 이어도 건너뛰지 않는다. §1.1 의 두 400 은 종류가 다르다. tinker 계열의 것은 본문으로 정해진다. claude 계열의 것은 계정의 상태로 정해지고 본문과 무관하게 풀린다. receipt 의 타입도 상태 코드도 둘을 가르지 못한다. 가르지 못한 채 건너뛰면 계정의 400 이 풀려도 그 slot 은 기다리는 HTTP slot 이 하나도 없는 host event 까지 불리지 않는다. 기다림은 요청별 값이 아니다. candidate 와 quota scope 별 표에 있고(`lib/runtime/runtime_candidate_standing.ml:96-133`), 그 slot 을 쓰는 다른 호출의 결과가 그 표를 바꾼다. 시각이 어긋난 slot 이 여럿이면 그 host event 가 오는 때에 상한이 없다(§8, §9 D5).
 - CLI slot 은 건너뛰지 않는다. 기다리는 CLI slot 도 "기다리는 slot" 으로 세지 않는다. 기다리는 HTTP slot 은 걷기 전에 `Transient` 로 적힌다(`server_lane_addon_exact.ml:190-195`). 기다리는 CLI slot 은 CLI 걷기에 닿아야 적힌다(`keeper_lane_cli_oneshot.ml:479-484`). HTTP 걷기가 `Http_stopped` 로 끝나면 CLI 걷기에 닿지 않는다(`server_lane_addon_exact.ml:224`). 그래서 A 가 거절하고 CLI slot 만 기다리는 lane 의 되풀이는 덮지 않는다.
 
 ## 4. 순서
@@ -325,6 +367,10 @@ L1a 는 부르는 곳이 L1b 다. 둘을 한 스택으로 올린다.
 | 기다리는 slot 이 없어도 건너뛰고, 모든 slot 이 거절했으면 아무도 부르지 않고 `Input_refused` 로 끝낸다 | 끝난 요청의 receipt 에 거절이 없다. Librarian 의 `check_size` 가 나누기를 거절하고 그 part 가 멈춘다(§2.6) |
 | 건너뛴 slot 의 지난 거절을 새 receipt 에 옮겨 담는다 | receipt 에 칸이 는다. 저장 모양이 바뀌고 읽는 쪽을 같이 고쳐야 한다. 기다리는 동안만 건너뛰면 필요 없다 |
 | `Invalid_request` 와 로컬 거절도 건너뛴다 | 본문만으로 정해지지 않는 거절이 섞여 있다(§2.1). 로컬 거절은 receipt 에서 타입으로 가를 수 없다(§2.5) |
+| 상태 코드 400 의 `Invalid_request` 만 건너뛴다 | 400 안에도 계정의 상태로 난 거절이 있다(§1.1 의 지출 한도). 그 slot 을 다시 부르는 때가 다른 slot 의 기다림으로 정해지고 상한이 없다(§3.5). 400 을 고를 근거는 잰 표본뿐이다. 같은 분류의 422 를 뺄 이유가 없다(`retry.ml:370-371`). RFC 9110 15.5.1 은 400 을 다시 보내지 말라고 적지 않는다(2026-11-12 확인, https://www.rfc-editor.org/rfc/rfc9110.html, 신뢰도 High) |
+| provider 의 400 문장을 읽어 context window 초과와 지출 한도를 가른다 | 문자열 분류기다. provider 가 문장을 바꾸면 조용히 틀린다 |
+| slot 이 같은지를 receipt 의 `attempts[].plan` 으로 본다 | `plan` 은 catalog generation 을 담는다(§2.5). 무관한 target 하나가 바뀌면 열린 요청 전부가 거절했던 slot 에 본문을 한 번씩 다시 보낸다. L1 의 비교는 그 경우 건너뛴다 |
+| slot 이 같은지를 target fingerprint 와 `attempts[].body` 로 본다 | lane 의 `max_output_tokens`·`thinking` 이 wire 본문을 바꾸면 그 slot 을 바로 다시 부르게 된다(§9 D1 의 대가 일부). 대신 host event 마다, 거절 증거가 있는 slot 마다 본문을 걷기 전에 직렬화한다. 측정한 요청은 2,173,367자다. 운영자가 그 값을 바꾸고 기다린 일은 잰 적이 없다. 필요가 재어지면 다시 연다 |
 
 ## 9. 사용자 결정
 
@@ -334,6 +380,7 @@ L1a 는 부르는 곳이 L1b 다. 둘을 한 스택으로 올린다.
 | D2 | L1 에서 `Every_slot_held` 의 뜻을 넓히나, variant 를 더하나 | 뜻을 넓힌다 | §3.2 6번 | TUI·dashboard 의 "모든 slot 이 기다림" 글을 "부를 slot 이 없고 기다리는 slot 이 있음"으로 고친다. 기다리는 slot 과 건너뛴 slot 을 화면에서 가르지 않는다. 건너뛴 slot 은 그 요청의 지난 증거에서만 보인다 |
 | D3 | L2·L3 의 hard cut 을 하나, 언제 하나 | L1 을 먼저 넣고 잰 뒤, §3.3·§3.4 를 채워 L2·L3 을 한 번의 hard cut 으로 | §5 | 설치할 때 열린 exact 요청과 그 소비자 쪽 기록을 지운다 |
 | D4 | 기다리는 slot 없이 열려 있는 요청도 건너뛰게 넓히나 | 지금은 넓히지 않는다. L1 뒤에 남은 되풀이를 재고 정한다 | §3.5 | 다른 slot 이 시각 없는 429, 5xx, 인증 거절로 실패하는 동안에는 큰 본문이 host event 마다 다시 나간다 |
+| D5 | L1 이 덮지 않는 400 의 되풀이(§1.1)를 어떻게 하나 | 건너뛰기를 넓히지 않는다. 실행당 디스크 비용은 L2 가 없앤다. claude 계열의 지출 한도 400 은 #49686 에서 정한다 | §3.5 | tinker 계열처럼 오류 코드 없이 본문을 거절하는 slot 은, 다른 slot 이 기다리는 동안 host event 마다 같은 본문을 한 번씩 받는다. 잰 경우 요청 여섯에 slot 둘이다 |
 
 ## 10. 확인하지 않은 것
 
@@ -343,5 +390,9 @@ L1a 는 부르는 곳이 L1b 다. 둘을 한 스택으로 올린다.
 - operator quiz 가 열린 요청의 증거를 읽는지. 파일 이름 검색으로만 봤다.
 - `host-results` 를 읽는 저장소 밖의 도구가 있는지. 찾은 것은 tinker 스크립트 하나다. 그 스크립트는 끝나지 않은 실행의 receipt 도 읽는다. L1 뒤에는 그 실행이 줄어든다.
 - L1 뒤에도 `run` 은 시작할 때 증거 파일을 읽는다. 이미 커진 요청은 L2 전까지 실행마다 그 파일을 읽는다.
+- §1.1 의 1.03 GB 파일은 실행별로 세지 않았다. 통째로 읽어야 해서 뺐다.
+- L1 이 설치된 뒤 열린 `classification` 요청의 attempt 가 멈추는지. 설치 뒤에 잰다.
+- 기다리는 slot 없이 400 으로 끝난 요청이 있는지. claude 계열의 지출 한도 400 은 그 경우 `Input_refused` 로 끝날 수 있다(#49686). 끝난 기록에서 찾지 않았다.
+- 열린 요청 가운데 한 번 실행되고 멈춘 셋(`lane_unconfigured` 둘, `provider_unavailable` 하나)이 왜 열려 있는지. 열하루 넘게 바뀌지 않았다.
 
 확인한 것: `target_identity_fingerprint`(`packages/agent_core/lib/llm_provider/exact_output_resolver.ml:865-897`)는 target ref, provider id 와 종류, model id, base url, 요청 경로, credential 의 종류, thinking, reasoning effort, timeout 둘, `max_concurrent_requests`, codec, 선언한 header, capability projection 을 덮는다. credential 의 값과 lane 이 덧씌우는 `max_output_tokens`·`thinking` 은 덮지 않는다.

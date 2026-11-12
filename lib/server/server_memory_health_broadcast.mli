@@ -10,10 +10,14 @@
     the Keeper. A write under any other directory announces nothing: no reader
     of this workspace shows it.
 
-    Every write is announced on its own. A reader that is already reading the
-    row folds the next announcement into one more read. *)
+    Writers only empty caches and enqueue typed notices. A switch-owned
+    worker coalesces repeated notices and performs SSE fanout, which may
+    suspend through a client disconnect hook. A change during publication
+    remains owed after that publication. *)
 
-val install : sw:Eio.Switch.t -> config:Workspace.config -> unit
+val install :
+  sw:Eio.Switch.t -> mono_clock:_ Eio.Time.Mono.t ->
+  config:Workspace.config -> unit
 (** Subscribe for [config]'s workspace until [sw] is released. The two
     directories are resolved through symlinks once, here. One that does not
     exist yet is named under its deepest existing ancestor, resolved, which is

@@ -58,8 +58,6 @@ query($owner: String!, $name: String!, $cursor: String) {
       nodes {
         name
         target { oid }
-        branchProtectionRule { id }
-        rules(first: 1) { totalCount }
         associatedPullRequests(first: 20, states: [OPEN, MERGED]) {
           pageInfo { hasNextPage }
           nodes { state headRefOid isCrossRepository mergedBy { login } }
@@ -109,7 +107,23 @@ def open_pulls(repo):
     return walk(repo, OPEN_PULLS, 'pullRequests')
 
 
-def merged_leftovers(refs, rows):
+def protected_branches(repo):
+    """Names of the branches a protection rule or a ruleset applies to.
+
+    The Actions token may not read `branchProtectionRule` through GraphQL
+    ("Resource not accessible by integration"), so the REST listing is used.
+    It marks a branch protected for either kind of rule.
+    """
+    names, page = set(), 1
+    while True:
+        listed = gh(['api', f'repos/{repo}/branches?protected=true&per_page=100&page={page}'])
+        names.update(branch['name'] for branch in listed)
+        if len(listed) < 100:
+            return names
+        page += 1
+
+
+def merged_leftovers(refs, rows, protected):
     """Branches a worker merge left behind, as (name, tip).
 
     The worker deletes a head branch when it sees the merge, and that misses
@@ -129,8 +143,7 @@ def merged_leftovers(refs, rows):
         name, tip = ref['name'], ref['target']['oid']
         pulls = ref['associatedPullRequests']
         if (name == 'main' or name.startswith('release/') or name in in_use or
-                ref['branchProtectionRule'] is not None or ref['rules']['totalCount'] or
-                pulls['pageInfo']['hasNextPage'] or
+                name in protected or pulls['pageInfo']['hasNextPage'] or
                 any(pull['state'] == 'OPEN' for pull in pulls['nodes'])):
             continue
         if any(pull['state'] == 'MERGED' and pull['headRefOid'] == tip and
@@ -162,7 +175,8 @@ def clean_branches(repo, started, dry_run):
     on a merged layer's branch would be closed by deleting that branch.
     """
     try:
-        leftovers = merged_leftovers(walk(repo, BRANCHES, 'refs'), open_pulls(repo))
+        leftovers = merged_leftovers(walk(repo, BRANCHES, 'refs'), open_pulls(repo),
+                                     protected_branches(repo))
     except (ValueError, KeyError, TypeError) as error:
         return {'error': str(error)}
     record = {'found': len(leftovers), 'deleted': 0, 'refused': [], 'not_reached': 0}

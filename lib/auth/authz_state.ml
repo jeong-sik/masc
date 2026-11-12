@@ -28,6 +28,7 @@ type t =
   ; provider_accounts : Authz_provider_account_state.t
   ; runtimes : Authz_runtime_state.t
   ; keepers : Authz_keeper_state.t
+  ; purges : Authz_purge_state.t
   ; revocation_pending : held list
   ; latest_at_ms : int option
   }
@@ -43,6 +44,7 @@ let empty =
   ; provider_accounts = Authz_provider_account_state.empty
   ; runtimes = Authz_runtime_state.empty
   ; keepers = Authz_keeper_state.empty
+  ; purges = Authz_purge_state.empty
   ; revocation_pending = []
   ; latest_at_ms = None
   }
@@ -128,6 +130,8 @@ type refusal =
   | Runtime of Authz_runtime_state.refusal
   | Keeper_unreadable of Authz_keeper_event.error
   | Keeper of Authz_keeper_state.refusal
+  | Purge_unreadable of Authz_purge_event.error
+  | Purge of Authz_purge_state.refusal
 
 let refusal_to_string = function
   | Before_bootstrap kind ->
@@ -213,6 +217,9 @@ let refusal_to_string = function
   | Keeper_unreadable error ->
     "the Keeper record cannot be read: " ^ Authz_keeper_event.error_to_string error
   | Keeper refusal -> Authz_keeper_state.refusal_to_string refusal
+  | Purge_unreadable error ->
+    "the purge record cannot be read: " ^ Authz_purge_event.error_to_string error
+  | Purge refusal -> Authz_purge_state.refusal_to_string refusal
 ;;
 
 type applied =
@@ -434,7 +441,10 @@ let owner_of_issuer = function
    Nobody cancels the block of a session (plan C3): the session does not act
    while it is blocked, its owner closes the block by signing out again, and a
    new sign-in of the browser closes it by ending the session. Lifting it would
-   only bring back a session that its owner meant to end. *)
+   only bring back a session that its owner meant to end. Nor the block of a
+   Keeper conversation whose purge was given up (plan S1b-3c): it is not read
+   while blocked, and its owner closes the block by asking for the purge
+   again. Lifting it would only bring back what its owner meant to delete. *)
 let owner_behind state = function
   | Authz_records.Subject.Invite invite_id ->
     Option.map
@@ -461,7 +471,8 @@ let owner_behind state = function
   | Authz_records.Subject.Pat _
   | Authz_records.Subject.Service_credential _
   | Authz_records.Subject.Credential _
-  | Authz_records.Subject.Runtime _ -> None
+  | Authz_records.Subject.Runtime _
+  | Authz_records.Subject.Keeper_conversation _ -> None
 ;;
 
 (* An eligible Admin lifts one block (design 8.3). The canceller is never the
@@ -642,6 +653,33 @@ let keeper state (record : R.t) =
      | Ok keepers -> Ok { state = { state with keepers }; high_water = None })
 ;;
 
+(* The start of a purge takes its target out of reads (design 8.5-1 and
+   8.5-2), so it is a [Purge] intent on the target: a log restored from before
+   it disagrees with the store, and the target does not read again. Its end
+   takes no intent: cut back to before it, the purge is pending again, and the
+   maintenance deletes once more. *)
+let purge state (record : R.t) =
+  match Authz_purge_event.of_body record.R.body with
+  | Error error -> Error (Purge_unreadable error)
+  | Ok event ->
+    (match
+       Authz_purge_state.apply
+         state.purges
+         ~author:record.R.author
+         ~is_active:(Authz_principal_state.is_active state.principals)
+         event
+     with
+     | Error refusal -> Error (Purge refusal)
+     | Ok purges ->
+       let high_water =
+         match event with
+         | Authz_purge_event.Purge_pending { target } ->
+           Some (C.Authz { event = C.Purge; subject = Authz_purge_event.subject target })
+         | Authz_purge_event.Purged _ | Authz_purge_event.Purge_failed _ -> None
+       in
+       Ok { state = { state with purges }; high_water })
+;;
+
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
@@ -674,6 +712,8 @@ let read state (record : R.t) =
   | K.Runtime, Authz_mode_state.Off _ -> Error (Accounts_off K.Runtime)
   | K.Keeper, Authz_mode_state.Multi_account _ -> keeper state record
   | K.Keeper, Authz_mode_state.Off _ -> Error (Accounts_off K.Keeper)
+  | K.Purge, Authz_mode_state.Multi_account _ -> purge state record
+  | K.Purge, Authz_mode_state.Off _ -> Error (Accounts_off K.Purge)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -693,7 +733,8 @@ let read state (record : R.t) =
       | K.Pat
       | K.Provider_account
       | K.Runtime
-      | K.Keeper ) as kind )
+      | K.Keeper
+      | K.Purge ) as kind )
     , Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
@@ -800,5 +841,6 @@ let closed_by (record : R.t) =
   | K.Pat
   | K.Provider_account
   | K.Runtime
-  | K.Keeper -> record.R.closes
+  | K.Keeper
+  | K.Purge -> record.R.closes
 ;;

@@ -165,7 +165,7 @@ let test_live_and_restart_projection () =
               (Option.is_none (projection_value (Agent.read_execution_terminal projection)));
             (match projection_value (Agent.observe_execution projection) with
              | Agent.Execution_awaiting -> ()
-             | Execution_owner_lost | Execution_terminal _ ->
+             | Execution_owner_lost _ | Execution_terminal _ ->
                fail "live writer did not remain awaiting");
             let first =
               projection_value
@@ -246,7 +246,7 @@ let test_live_and_restart_projection () =
         | Agent.Execution_terminal observed ->
           check bool "owner observation preserves canonical terminal evidence" true
             (observed = terminal)
-        | Execution_awaiting | Execution_owner_lost ->
+        | Execution_awaiting | Execution_owner_lost _ ->
           fail "settled writer lost its canonical terminal evidence");
        let through = projection_value (Projection.current_cursor projection) in
        check bool "final cursor advanced" true (Projection.cursor_seq through > 2);
@@ -453,8 +453,14 @@ let test_settled_invocation_projection () =
      | [first; second; third] -> check bool "canonical settlement order" true
          (first.settlement_seq < second.settlement_seq && second.settlement_seq < third.settlement_seq)
      | [] | _ :: _ -> fail "expected three settled root occurrences");
-    (* Unsettled admission never becomes an executed observation. *)
-    let (_turn, _provider, _pending) = open_call root 4 "unsettled-tool" in
+    (* Unsettled admission never becomes an executed observation. The reply
+       that asked for it also asked for a tool whose invocation never opened. *)
+    let (_turn, provider, _pending) = open_call root 4 "unsettled-tool" in
+    let asked name = Llm_provider.Types.ToolUse {id="asked-" ^ name; name; input=`Assoc []} in
+    scope_value (Scope.record_provider_response provider
+      {Types.id="reply-4"; model="fixture"; stop_reason=Types.StopToolUse;
+       content=[asked "unsettled-tool"; asked "never-opened-tool"];
+       unreadable_tool_uses=[]; usage=None; telemetry=None});
     check int "unsettled result is absent" 3
       (List.length (projection_value (Projection.settled_tool_invocations projection)));
     scope_value (Scope.abort root (Scope.Cancelled
@@ -463,7 +469,10 @@ let test_settled_invocation_projection () =
     locator)) in
   let reopened = projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
   check int "restart projection retains the same settled occurrences" 3
-    (List.length (projection_value (Projection.settled_tool_invocations reopened)))
+    (List.length (projection_value (Projection.settled_tool_invocations reopened)));
+  check (list string) "every tool a recorded reply asked for is listed, opened or not"
+    ["unsettled-tool"; "never-opened-tool"]
+    (projection_value (Projection.tool_invocations reopened)).requested_tool_names
 ;;
 
 let test_cursor_codec_is_closed_and_versioned () =
@@ -933,9 +942,11 @@ let test_released_writer_without_terminal () =
         let before = read () in
         List.iter (fun () ->
           (match projection_value (Agent.observe_execution projection) with
-           | Agent.Execution_owner_lost -> ()
+           | Agent.Execution_owner_lost Retire -> ()
+           | Execution_owner_lost (Operator_repair_required Effect_outcome_unknown) ->
+             fail "a lost writer with no Tool attempt reported an unknown effect"
            | Execution_awaiting | Execution_terminal _ ->
-             fail "released writer without terminal did not require reconciliation");
+             fail "released writer without terminal was not observed as lost");
           check bool "owner loss does not invent a terminal" true
             (Option.is_none (projection_value (Agent.read_execution_terminal projection)))) [(); ()];
         let after = read () in
@@ -943,13 +954,47 @@ let test_released_writer_without_terminal () =
           (before.events = after.events && before.next_cursor = after.next_cursor))))
 ;;
 
+(* A writer lost after it admitted a Tool attempt and before it settled the
+   result: the effect is unknown, and the lost-owner observation says so. *)
+let test_released_writer_with_unknown_effect () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun runtime_sw ->
+      let domain_mgr = Eio.Stdenv.domain_mgr env in
+      let runtime = Agent.create_execution_runtime ~sw:runtime_sw ~domain_mgr ~domain_count:1
+        |> Result.map_error Error.to_string |> value in
+      let internal_runtime = Runtime.create ~sw:runtime_sw ~domain_mgr ~domain_count:1
+        |> Result.map_error Runtime.create_error_to_string |> value in
+      let codec = Codec.of_runtime internal_runtime in
+      let dir = make_dir (Eio.Stdenv.fs env) "agent_core-projection-owner-lost-effect-" in
+      Fun.protect ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir) (fun () ->
+        let projection = writer_value (Writer.run ~codec ~dir (fun ~sw:_ writer ->
+          let root = scope_value (Scope.start ~writer ~agent_name:"interrupted-effect") in
+          let turn = scope_value (Scope.open_turn root ~ordinal:1) in
+          let provider = scope_value (Scope.open_provider_attempt turn ~ordinal:0 (binding ())) in
+          let tool = scope_value (Scope.open_invocation provider ~invocation:(invocation ())
+            ~tool_name:"uncertain-write" ~input:(`Assoc [])) in
+          (match Scope.execute tool ~invoke:(fun ~start_child:_ ~tool_name:_ ~input:_ -> raise Exit) with
+           | exception Exit -> ()
+           | Ok _ -> fail "unknown effect fixture unexpectedly settled"
+           | Error error -> fail (Scope.error_to_string error));
+          projection_value (Agent.open_execution_projection ~runtime ~dir (public_locator root)))) in
+        (match projection_value (Agent.observe_execution projection) with
+         | Agent.Execution_owner_lost (Operator_repair_required Effect_outcome_unknown) -> ()
+         | Execution_owner_lost Retire ->
+           fail "a lost writer hid its admitted, unsettled Tool attempt"
+         | Execution_awaiting | Execution_terminal _ ->
+           fail "released writer without terminal was not observed as lost"))))
+;;
+
 let () =
   Alcotest.run
     "Execution projection"
     [ ( "authority"
       , [ test_case "live and restart projection" `Quick test_live_and_restart_projection
-        ; test_case "released writer without terminal requires reconciliation" `Quick
+        ; test_case "released writer without terminal is observed as lost" `Quick
             test_released_writer_without_terminal
+        ; test_case "released writer with an admitted Tool attempt reports the unknown effect" `Quick
+            test_released_writer_with_unknown_effect
         ; test_case "typed checkpoint facts enforce ownership and reopen" `Quick
             test_checkpoint_fact_ownership_and_reopen
         ; test_case "Sys.Break publication retries after normal mutex unlock" `Quick

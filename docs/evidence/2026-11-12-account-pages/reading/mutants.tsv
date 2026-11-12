@@ -1,0 +1,11 @@
+any namespace is HTML	caught	a button of another namespace
+every button submits, whatever its type	caught	a button that resets; a button that submits nothing
+a button may name another form, route or method	caught	a button of another form; a button that posts elsewhere
+a disabled fieldset does not disable	caught	a button in a disabled fieldset
+nothing is hidden	caught	a description in a hidden element; a form in a hidden element; a hidden button; a hidden description
+a blank description passes	caught	a description with no text
+a button anywhere belongs to the form	caught	a button outside the form
+a form that does not post counts	caught	a form that does not post
+an element of any kind is the button	caught	a button in a disabled fieldset; a button of another namespace; a disabled element that is no button; an element that is no button
+a missing description passes	caught	a description that is not in the page
+a disabled button with no description passes	caught	disabled with a description list of spaces; disabled with no description

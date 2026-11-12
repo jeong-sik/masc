@@ -798,10 +798,11 @@ let test_serves_its_table_alone () =
                (List.filter
                   (String.starts_with ~prefix:"content-security-policy: default-src 'none'; script-src 'nonce-")
                   lower));
-          Alcotest.(check bool)
+          Alcotest.check
+            Account_page_reading.outcome
             ("the GitHub login can be started from " ^ path)
-            true
-            (String_util.contains_substring body {|<button id="go">Sign in with GitHub</button>|}))
+            (Ok Account_page_reading.Open)
+            (Account_page_reading.login ~start:"/auth/github/start" body))
         [ "/"; Authz_activation.invitation_path ];
       (* The routes of a person are in the table, and a request with no
          credential is refused by the route. *)

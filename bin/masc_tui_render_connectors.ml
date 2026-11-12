@@ -101,6 +101,8 @@ let browser_lane_selection_scroll state ~terminal_rows ~cols view =
   | Some row when row >= scroll + room -> min limit (row - room + 1)
   | Some _ -> scroll
 
+let browser_step state = ui_text state ~ko:"브라우저" ~en:"browser"
+
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
   let terminal_rows, cols = get_terminal_size () in
@@ -114,25 +116,24 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     | Reading | Operating -> Theme.info ()
     | Unread | Browser_missing -> Theme.recede ()
   in
-  let title = Printf.sprintf "%s  %s  %s[%s]%s"
-      (screen_title " MASC Browser Lane") (selection_label view ^ " · "
-       ^ Option.value (connection_label view) ~default:"no browser")
-      read_style (Browser_lane_view.read_status_label read_status) Ansi.reset in
+  let title =
+    here_row ~cols state ~path:[ browser_step state ]
+      ~readings:
+        [ selection_label view ^ " · "
+          ^ Option.value (connection_label view) ~default:"no browser"
+        ; read_style ^ Browser_lane_view.read_status_label read_status ^ Ansi.reset ]
+      ~position:None
+  in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker with
-      | Some _ -> "↑/↓:choose  Enter:use browser  r:reload connections  A:advanced  Esc:cancel"
+      | Some _ -> Masc_tui_keys.footer_hints_browser_picker ~lang:state.ui_language
       | None when Option.is_some view.scene ->
-          let action = match Option.bind (selected_scene_target view) scene_target_action with
-            | Some Read_region -> "Enter:read region  "
-            | Some Follow_link -> "Enter:follow link  "
-            | Some Click_control -> "Enter:click  "
-            | None -> "" in
-          let article_hint =
-            if Browser_lane_view.scene_has_articles view then "N/P:article  " else "" in
-          "b:choose browser  " ^ action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  " ^ article_hint ^ "n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
+          Masc_tui_keys.footer_hints_browser_scene ~lang:state.ui_language
+            ~enter:(Option.bind (selected_scene_target view) scene_target_action)
+            ~articles:(Browser_lane_view.scene_has_articles view)
       | None when Option.is_some view.scene_guard ->
-          "b:choose browser  m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
-      | None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
+          Masc_tui_keys.footer_hints_browser_scene_guard ~lang:state.ui_language
+      | None -> Masc_tui_keys.footer_hints_browser_lane_reading ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()
@@ -315,9 +316,15 @@ let browser_history_scroll_limit state ~terminal_rows ~cols history =
 
 let render_browser_history (state : state) (history : Browser_history.t) =
   let terminal_rows, cols = get_terminal_size () in
-  let title = screen_title (" MASC Browser Lane · " ^ Terminal_text.single_line history.keeper_name ^ " · retained observations") in
+  let title =
+    here_row ~cols state
+      ~path:[ browser_step state
+            ; Terminal_text.single_line history.keeper_name
+            ; ui_text state ~ko:"관측" ~en:"observations" ]
+      ~readings:[] ~position:None
+  in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
-    ~hints:"[/]:observation  j/k:scroll  y:copy record  r:reload list  R:recheck workspace  h/Esc:back to browser"
+    ~hints:(Masc_tui_keys.footer_hints_browser_observations ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let status = match history.content with
         | Listing -> "Reading the Keeper's recent tool receipts…"

@@ -76,7 +76,7 @@ def health_payload() -> dict:
         "alerts": [],
     }
     return {
-        "schema": "keeper.memory_os.current_health.v14",
+        "schema": "keeper.memory_os.current_health.v15",
         "generated_at": 1.0,
         "execution": {
             "schema": "keeper.memory_execution_availability.v1",

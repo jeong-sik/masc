@@ -103,7 +103,9 @@ val next_attempt :
     successor preserving the complete frozen input. A wake alone never allocates.
     The host holds its workspace process lease and serializes this verification
     through allocation, retain and dispatch. Missing inventory starts at zero;
-    unreadable or malformed records never authorize a partial allocation. *)
+    unreadable or malformed records never authorize a partial allocation.
+    An execution refusal whose evidence cannot be read is an error. One that
+    names no runtime to review again keeps the frontier on its own attempt. *)
 
 type retained
 val original : retained -> Verifier_review_original.t

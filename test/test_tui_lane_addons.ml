@@ -433,7 +433,7 @@ let guided_actions () =
   let failed = {instance with title="MSX";phase=UI.Row.Failed (String.make 120 'x');
     action_schema=None} in
   let module S = Masc_tui_lane_standing in
-  let standing = testable (fun f value -> Format.pp_print_string f (S.word value)) ( = ) in
+  let standing = testable (fun f value -> Format.pp_print_string f (S.word ~korean:false value)) ( = ) in
   check standing "a failed worker is failing" S.Failing (UI.instance_standing ~off_requested:false failed);
   check standing "an attached worker is ready" S.Ready
     (UI.instance_standing ~off_requested:false {instance with phase=UI.Row.Attached});

@@ -2,19 +2,28 @@ module Usage = Runtime_provider_usage_window
 
 open Result.Syntax
 
+let provider_kind_prefix = "provider:"
+
 let kind_json = function
   | Usage.Five_hour -> `String "five_hour"
   | Usage.Seven_day -> `String "seven_day"
   | Usage.Duration_minutes minutes ->
       `String (Printf.sprintf "duration_%dm" minutes)
-  | Usage.Provider_label label -> `String ("provider:" ^ label)
+  | Usage.Provider_label label -> `String (provider_kind_prefix ^ label)
 
-let utilization_json = function
-  | Usage.Fraction value -> [ "unit", `String "fraction"; "value", `Float value ]
-  | Usage.Percent value -> [ "unit", `String "percent"; "value", `Int value ]
-  | Usage.Usd { used; limit } ->
-      [ "unit", `String "usd"; "value", `Float used
-      ; "limit", Json_util.float_opt_to_json limit ]
+(* The stored word back into the kind [kind_json] wrote it for. *)
+let kind_of_stored kind =
+  match kind with
+  | "five_hour" -> Some Usage.Five_hour
+  | "seven_day" -> Some Usage.Seven_day
+  | _ ->
+      (match Scanf.sscanf_opt kind "duration_%dm%!" (fun minutes -> minutes) with
+       | Some minutes -> Some (Usage.Duration_minutes minutes)
+       | None ->
+           if String.starts_with ~prefix:provider_kind_prefix kind then
+             let from = String.length provider_kind_prefix in
+             Some (Usage.Provider_label (String.sub kind from (String.length kind - from)))
+           else None)
 
 let record_json ~scope_id ~observed_at (report : Usage.report) =
   let source = Usage.source_to_string report.source in
@@ -32,9 +41,14 @@ let record_json ~scope_id ~observed_at (report : Usage.report) =
         ; "source", `String source
         ; "kind", kind_json window.kind
         ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) window.limit_id
+          (* What the window limits is decided from the provider's answer,
+             not from its source and kind, so a row that is to be put back
+             in the table after a restart has to carry it. The daily history
+             does not read it. *)
+        ; "role", `String (Usage.window_role_to_string window.role)
         ; "observed_at", `Float observed_at
         ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) window.resets_at
-        ] @ utilization_json window.utilization))
+        ] @ Usage.utilization_fields window.utilization))
     report.windows
 
 type point = {
@@ -42,6 +56,9 @@ type point = {
   source : string;
   kind : string;
   limit_id : string option;
+  role : Usage.window_role option;
+      (* [None] for a row stored before rows carried a role. Only the
+         restart read uses it. *)
   utilization : Usage.utilization;
   observed_at : float;
   resets_at : int option;
@@ -72,7 +89,7 @@ let number key json =
   | Some (`Int value) -> Ok (float_of_int value)
   | _ -> Error ("provider usage history: invalid " ^ key)
 
-(* The stored line back into the variant [utilization_json] wrote: the unit
+(* The stored line back into the variant [Usage.utilization_fields] wrote: the unit
    word and the value's JSON type decide together, and anything else is not
    a report this store wrote. *)
 let utilization_of_json json =
@@ -110,10 +127,19 @@ let decode_point json =
     else kind
   in
   let* limit_id = optional_string "limit_id" json in
+  let* role =
+    match member "role" json with
+    | None -> Ok None
+    | Some (`String word) ->
+        (match Usage.window_role_of_string word with
+         | Some role -> Ok (Some role)
+         | None -> Error "provider usage history: unknown role")
+    | Some _ -> Error "provider usage history: invalid role"
+  in
   let* utilization = utilization_of_json json in
   let* observed_at = number "observed_at" json in
   let* resets_at = optional_int "resets_at" json in
-  Ok { scope_id; source; kind; limit_id; utilization; observed_at; resets_at }
+  Ok { scope_id; source; kind; limit_id; role; utilization; observed_at; resets_at }
 
 let point_json point =
   `Assoc
@@ -123,7 +149,7 @@ let point_json point =
     ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) point.limit_id
     ; "observed_at", `Float point.observed_at
     ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) point.resets_at
-    ] @ utilization_json point.utilization)
+    ] @ Usage.utilization_fields point.utilization)
 
 type snapshot_state = Reported | Reported_no_windows
 
@@ -296,6 +322,102 @@ let daily_points t =
               | Some _ | None -> Display_day_map.add key point daily)
         held.windows daily)
     t.sources Display_day_map.empty
+
+module Scope_source = struct
+  type t = string * string
+
+  let compare = compare
+end
+
+module Scope_source_map = Map.Make (Scope_source)
+
+type stored_reports = {
+  reports : (string * float * Usage.report) list;
+  unrestorable : int;
+}
+
+(* Each source's days folded into one: its latest complete snapshot and the
+   latest reading of each window. *)
+let latest_by_source t =
+  Source_day_map.fold
+    (fun (key : Source_day.t) (held : source_day) latest ->
+      let key = key.scope_id, key.source in
+      let merged =
+        match Scope_source_map.find_opt key latest with
+        | None -> held
+        | Some (current : source_day) ->
+            let snapshot =
+              match current.snapshot, held.snapshot with
+              | Some a, Some b -> Some (if a.observed_at >= b.observed_at then a else b)
+              | (Some _ as only), None | None, only -> only
+            in
+            let windows =
+              Window_map.union
+                (fun _ (a : point) (b : point) ->
+                  Some (if a.observed_at >= b.observed_at then a else b))
+                current.windows held.windows
+            in
+            { snapshot; windows }
+      in
+      Scope_source_map.add key merged latest)
+    t.sources Scope_source_map.empty
+
+(* Readings that share an observation time were one report. *)
+let reports_of_readings source readings =
+  List.stable_sort (fun (a, _) (b, _) -> Float.compare a b) readings
+  |> List.fold_left
+       (fun groups (observed_at, window) ->
+         match groups with
+         | (held_at, windows) :: rest when Float.equal held_at observed_at ->
+             (held_at, window :: windows) :: rest
+         | _ -> (observed_at, [ window ]) :: groups)
+       []
+  |> List.rev_map (fun (observed_at, windows) ->
+       observed_at, { Usage.source; windows = List.rev windows })
+
+let stored_reports t =
+  Scope_source_map.fold
+    (fun (scope_id, source_word) (held : source_day) (stored : stored_reports) ->
+      match Usage.source_of_string source_word with
+      | None ->
+          { stored with unrestorable = stored.unrestorable + Window_map.cardinal held.windows }
+      | Some source ->
+          let readings, unrestorable =
+            Window_map.fold
+              (fun _ (point : point) (readings, unrestorable) ->
+                match held.snapshot, point.role with
+                | Some snapshot, _ when point.observed_at < snapshot.observed_at ->
+                    readings, unrestorable
+                | _, None -> readings, unrestorable
+                | _, Some role ->
+                    (match kind_of_stored point.kind with
+                     | None -> readings, unrestorable + 1
+                     | Some kind ->
+                         ( ( point.observed_at
+                           , { Usage.limit_id = point.limit_id
+                             ; kind
+                             ; role
+                             ; utilization = point.utilization
+                             ; resets_at = point.resets_at
+                             } )
+                           :: readings
+                         , unrestorable )))
+              held.windows ([], 0)
+          in
+          let reports =
+            match readings, held.snapshot with
+            | [], Some { observed_at; state = Reported_no_windows } ->
+                [ observed_at, { Usage.source; windows = [] } ]
+            | [], (Some { state = Reported; _ } | None) -> []
+            | _ :: _, _ -> reports_of_readings source readings
+          in
+          { reports =
+              stored.reports
+              @ List.map (fun (observed_at, report) -> scope_id, observed_at, report) reports
+          ; unrestorable = stored.unrestorable + unrestorable
+          })
+    (latest_by_source t)
+    { reports = []; unrestorable = 0 }
 
 let empty_reports t daily =
   let reported_days =

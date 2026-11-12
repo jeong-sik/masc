@@ -25,7 +25,8 @@ let input_refusal = function
 (* A refusal that may pass outranks one that cannot: the slot that refused for
    now may answer on the next trigger. Among those, the reason shown is the
    one most likely to clear by itself. An input refusal ends the request only
-   when no slot may still pass; [invalid_output] only when every slot answered. *)
+   when no slot may still pass, with the kind [Failure.ending_input_refusal]
+   chooses; [invalid_output] only when every slot answered. *)
 let ending = function
   | [] ->
     (* A walk that reached no slot leaves no evidence about the input or the
@@ -43,15 +44,7 @@ let ending = function
          else if has Failure.Configuration_refused then Addon.Provider_configuration_refused { detail }
          else Addon.Provider_auth_refused { detail })
     else
-      match
-        List.find_map
-          (fun f ->
-             match f.failure with
-             | Failure.Input_refused kind -> Some kind
-             | Failure.Transient | Failure.Auth_refused | Failure.Configuration_refused
-             | Failure.Output_unusable | Failure.Output_limit -> None)
-          failures
-      with
+      match Failure.ending_input_refusal (List.map (fun f -> f.failure) failures) with
       | Some kind -> Addon.Call_ended (Addon.Input_refused (input_refusal kind))
       | None ->
         if has Failure.Output_limit then Addon.Call_ended (Addon.Output_limit_reached {detail})

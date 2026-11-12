@@ -1,7 +1,7 @@
 (** Keeper Pulse's two header strips and the selected Keeper summary (RFC-0515 §2.8).
     The caller supplies one frame's clock and the roster before view filtering. *)
 val header :
-  now:float -> cells:int -> view:Masc_tui_keeper_list_model.view ->
+  ko:bool -> now:float -> cells:int -> view:Masc_tui_keeper_list_model.view ->
   selected:string option ->
   age:(Masc_tui_keeper_list_model.row -> Masc_tui_keeper_list_model.memory_age) ->
   Masc_tui_keeper_list_model.row list -> string

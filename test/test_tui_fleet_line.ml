@@ -35,8 +35,11 @@ let test_the_servers_words_are_drawn_as_text () =
   let hostile = "x\027[2Jy" in
   List.iter
     (fun (label, failure) ->
-       check bool (label ^ ": no raw escape") false
-         (String.contains (Masc_tui_fleet_line.failure_text failure) '\027'))
+       List.iter
+         (fun ko ->
+            check bool (label ^ ": no raw escape") false
+              (String.contains (Masc_tui_fleet_line.failure_text ~ko failure) '\027'))
+         [ false; true ])
     [ "a refusal", Masc_tui_fleet_stream.Refused { status = 500; detail = hostile }
     ; "a rejected frame", Masc_tui_fleet_stream.Frame_rejected hostile
     ]
@@ -52,7 +55,7 @@ let test_only_ok_is_healthy () =
 
 let test_the_status_word_is_the_grades_wire_name () =
   check string "a grade" "blocked"
-    (Masc_tui_fleet_line.status_text Masc.Keeper_fleet_grade.Fleet_blocked)
+    (Masc_tui_fleet_line.status_text ~ko:false Masc.Keeper_fleet_grade.Fleet_blocked)
 
 (* The interval is a setting, so the words convert back to the same seconds:
    a whole unit when one divides it, never a rounded one. *)

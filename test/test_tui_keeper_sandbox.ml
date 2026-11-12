@@ -13,7 +13,7 @@ let render json =
   with
   | Error detail -> Alcotest.fail detail
   | Ok reading ->
-    Masc_tui_keeper_sandbox.view_lines ~width:64 reading
+    Masc_tui_keeper_sandbox.view_lines ~ko:false ~width:64 reading
     |> String.concat "\n"
 
 let test_unknown_profile_fails_closed () =
@@ -331,7 +331,7 @@ let test_discard_diagnostic_is_sanitized_at_admission () =
   | Ok reading ->
     Alcotest.(check bool) "actual wire diagnostic reaches sanitizer" true
       (List.exists (fun (original, _) -> original = raw) !observed);
-    let rendered = Masc_tui_keeper_sandbox.view_lines ~width:64 reading |> String.concat "\n" in
+    let rendered = Masc_tui_keeper_sandbox.view_lines ~ko:false ~width:64 reading |> String.concat "\n" in
     Alcotest.(check bool) "raw terminal control never leaves decoded state" false (contains rendered "\027]");
     Alcotest.(check bool) "escaped control remains inspectable" true (contains rendered "\\x1B")
 ;;
@@ -363,7 +363,7 @@ let test_actual_container_logs_are_typed_and_terminal_safe () =
     | Error detail -> Alcotest.fail detail
   in
   let rendered =
-    Masc_tui_keeper_sandbox.logs_view_lines ~width:64 logs
+    Masc_tui_keeper_sandbox.logs_view_lines ~ko:false ~width:64 logs
     |> String.concat "\n"
   in
   List.iter

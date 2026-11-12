@@ -89,10 +89,11 @@ type memory_librarian_stalled =
    "not measured", which the header prints as such; it is not zero. *)
 type memory_librarian_health = {
   mlh_state : memory_librarian_pass_end option;
-  mlh_admission_wait : Keeper_librarian_pending.worker option;
-      (** The explicit-admission lane's latest worker wait, independent of
-          the durable pass and its measurement time. [None] means the latest
-          admission pass had no worker wait or was not observed here. *)
+  mlh_admission_wait : Keeper_librarian_pending.admission option;
+      (** What the explicit-admission lane's latest pass left unfinished: a
+          worker wait or the pass's own failure, independent of the durable
+          pass and its measurement time. [None] means the latest admission
+          pass had neither or was not observed here. *)
   mlh_operator_action_required : bool;
       (** Derived from the durable and admission observations. This flag
           grants no replay or source-consumption authority. *)

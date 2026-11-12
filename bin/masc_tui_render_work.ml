@@ -1421,6 +1421,11 @@ let schedule_status_is_terminal word =
   | Ok status -> Schedule_domain.is_terminal status
   | Error _ -> false
 
+(* The delivery summary is a row of [key:value] wire words (status:, queue:,
+   reaction:), written in English only, so its hold tag is asked for in
+   English too. *)
+let delivery_summary_in_korean = false
+
 let schedule_delivery_summary ~freshness ~runner (row : schedule_row) =
   let queue =
     match row.sch_queue_projection_status, row.sch_queue_pending_count with
@@ -1451,10 +1456,10 @@ let schedule_delivery_summary ~freshness ~runner (row : schedule_row) =
         " \xc2\xb7 "
         ^ (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
            | Tui_decode.Hold_current ->
-               Render_schedule.schedule_hold_tag
+               Render_schedule.schedule_hold_tag ~ko:delivery_summary_in_korean
                  ~due:(Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso)
            | Tui_decode.Hold_as_of checked ->
-               Render_schedule.schedule_hold_as_of_tag
+               Render_schedule.schedule_hold_as_of_tag ~ko:delivery_summary_in_korean
                  ~checked:(Terminal_text.short_timestamp_of_unix checked))
   in
   ( Printf.sprintf "%s \xc2\xb7 status:%s%s" row.sch_schedule_id
@@ -1799,9 +1804,10 @@ let render_schedule_list (state : state) =
    Drawn only when the ledger said something. A schedule that has not fired
    has no trail, and four rows of "--" under it would be four rows saying the
    same nothing the empty [LAST WAKE] block already says. *)
-let schedule_turn_rows
+let schedule_turn_rows ~ko
       ~(field : ?style:string -> string -> string -> string * string)
       (row : schedule_row) =
+  let t korean english = if ko then korean else english in
   let step_observed =
     [ row.sch_wake_seen
     ; row.sch_turn_started
@@ -1843,46 +1849,46 @@ let schedule_turn_rows
               " \xc2\xb7 " ^ timestamp
             | _, _ -> ""
           in
-          field ~style:tone label ((if value then "yes" else "no") ^ at)
+          field ~style:tone label ((if value then t "예" "yes" else t "아니오" "no") ^ at)
     in
     let identity_rows =
       [ Option.map
           (fun keeper ->
-             field "Keeper evidence"
+             field (t "Keeper 근거" "Keeper evidence")
                (Link.reference Keeper (Terminal_text.single_line keeper)))
           row.sch_reaction_keeper_name
       ; Option.map
-          (fun stimulus -> field "Stimulus" stimulus)
+          (fun stimulus -> field (t "자극" "Stimulus") stimulus)
           row.sch_reaction_stimulus_id
       ; Option.map
-          (fun occurrence -> field "Occurrence" occurrence)
+          (fun occurrence -> field (t "회차" "Occurrence") occurrence)
           row.sch_reaction_post_id
       ]
       |> List.filter_map Fun.id
     in
     [ Ansi.dim, ""
-    ; Ansi.bold, "  TURN"
+    ; Ansi.bold, t "  턴" "  TURN"
     ]
     @ identity_rows
-    @ [ step "Wake seen" row.sch_wake_seen row.sch_stimulus_recorded_at_iso
-      ; step "Turn started" row.sch_turn_started
+    @ [ step (t "실행 확인" "Wake seen") row.sch_wake_seen row.sch_stimulus_recorded_at_iso
+      ; step (t "턴 시작" "Turn started") row.sch_turn_started
           row.sch_turn_started_recorded_at_iso
-      ; step "Turn finished" row.sch_turn_finished
+      ; step (t "턴 종료" "Turn finished") row.sch_turn_finished
           row.sch_turn_finished_recorded_at_iso
-      ; step "Queue ack" row.sch_queue_ack_seen row.sch_queue_ack_recorded_at_iso
-      ; step ~bad_when_true:true "Cancelled" row.sch_wake_cancelled
+      ; step (t "큐 확인" "Queue ack") row.sch_queue_ack_seen row.sch_queue_ack_recorded_at_iso
+      ; step ~bad_when_true:true (t "취소" "Cancelled") row.sch_wake_cancelled
           row.sch_wake_cancelled_recorded_at_iso
-      ; field "Reaction kind"
+      ; field (t "반응 종류" "Reaction kind")
           (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_reaction_kind)
       ; field
           ~style:(if Option.is_some row.sch_reaction_reason then Theme.warn () else Ansi.dim)
-          "Reason" (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_reaction_reason)
+          (t "사유" "Reason") (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_reaction_reason)
     ; field
         ~style:
           (match row.sch_reaction_quarantined with
            | Some count when count > 0 -> Theme.warn ()
            | Some _ | None -> Ansi.dim)
-        "Quarantined"
+        (t "격리" "Quarantined")
         (match row.sch_reaction_quarantined with
          | None -> Masc_tui_theme.Glyph.no_value
          | Some count -> string_of_int count)
@@ -1893,11 +1899,13 @@ let schedule_turn_rows
    which: one attempt out of up to 32 read as a schedule's whole past for as
    long as the list was the only thing not projected. The three unloaded
    readings stay three sentences. *)
-let schedule_wake_lines
+let schedule_wake_lines ~ko
       ~(field : ?style:string -> string -> string -> string * string)
       ~(timestamp : string option -> string) ~(row : schedule_row)
       ~(history : schedule_wake_history option)
       ~(history_error : (string * string) option) =
+  let t korean english = if ko then korean else english in
+  let last_wake = Ansi.bold, t "  마지막 실행" "  LAST WAKE" in
   let last_wake_fields =
     [ (let word =
          Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:schedule_wake_word
@@ -1908,11 +1916,11 @@ let schedule_wake_lines
            (if Option.is_some row.sch_last_wake_status then
               schedule_status_color word
             else Ansi.dim)
-         "Status" word)
-    ; field "Started" (timestamp row.sch_last_wake_started_at_iso)
+         (t "상태" "Status") word)
+    ; field (t "시작" "Started") (timestamp row.sch_last_wake_started_at_iso)
     ; field
         ~style:(if Option.is_some row.sch_last_wake_error then Theme.bad () else Ansi.dim)
-        "Error" (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_last_wake_error)
+        (t "오류" "Error") (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_last_wake_error)
     ]
   in
   match
@@ -1924,21 +1932,24 @@ let schedule_wake_lines
            history)
   with
   | Render_schedule.Wake_history_failed err ->
-      (Ansi.bold, "  LAST WAKE")
+      last_wake
       :: last_wake_fields
-      @ [ (Theme.bad (), "  Wake history: " ^ Terminal_text.single_line err) ]
+      @ [ (Theme.bad (), t "  실행 이력: " "  Wake history: " ^ Terminal_text.single_line err) ]
   | Render_schedule.Wake_last_only ->
-      (Ansi.bold, "  LAST WAKE")
+      last_wake
       :: last_wake_fields
-      @ [ (Ansi.dim, "  (loading the rest of this schedule's wakes\xe2\x80\xa6)") ]
+      @ [ (Ansi.dim, t "  (이 일정의 나머지 실행을 읽는 중\xe2\x80\xa6)" "  (loading the rest of this schedule's wakes\xe2\x80\xa6)") ]
   | Render_schedule.Wake_never ->
-      [ Ansi.bold, "  WAKES"; (Ansi.dim, "  (this schedule has not woken)") ]
+      [ Ansi.bold, t "  실행" "  WAKES"
+      ; (Ansi.dim, t "  (이 일정은 아직 실행된 적 없음)" "  (this schedule has not woken)") ]
   | Render_schedule.Wake_history { count; retention } ->
       let wakes =
         match history with Some h -> h.swh_wakes | None -> []
       in
         (Ansi.bold
-        , Printf.sprintf "  WAKES (%d retained, ceiling %d per schedule)"
+        , Printf.sprintf
+            (if ko then "  실행 (%d건 보관, 일정당 최대 %d건)"
+             else "  WAKES (%d retained, ceiling %d per schedule)")
             count retention )
         :: List.concat_map
              (fun (wake : schedule_wake) ->
@@ -1958,11 +1969,14 @@ let schedule_wake_lines
                 | Some err -> [ head; field ~style:(Theme.bad ()) "" err ])
              wakes
 
-let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
+let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
       ~(wake_history : schedule_wake_history option)
       ~(wake_history_error : (string * string) option) =
   let field ?(style = Ansi.reset) label value =
-    let prefix = Printf.sprintf "  %-14s " label in
+    (* Padded by display width: "%-14s" counts bytes, which a Korean label
+       has three of for every two cells. *)
+    let pad = String.make (max 0 (14 - Message_layout.display_width label)) ' ' in
+    let prefix = "  " ^ label ^ pad ^ " " in
     let prefix_cells = Message_layout.display_width prefix in
     let rows =
       if width - prefix_cells >= width / 2 then
@@ -1977,6 +1991,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
     style, String.concat "\n" rows
   in
   let optional value = Option.value ~default:Masc_tui_theme.Glyph.no_value value in
+  let t korean english = if ko then korean else english in
   let timestamp value =
     match value with
     | None -> Masc_tui_theme.Glyph.no_value
@@ -1998,7 +2013,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
         Printf.sprintf "%s  %s" status at
   in
   let summary =
-    Option.value ~default:"(no payload summary)" row.sch_payload_summary
+    Option.value ~default:(t "(페이로드 요약 없음)" "(no payload summary)") row.sch_payload_summary
   in
   let keeper_wake =
     match row.sch_payload_kind with
@@ -2008,7 +2023,7 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
   let target_link =
     match keeper_wake, row.sch_payload_target with
     | true, Some keeper ->
-        [ field "Keeper link"
+        [ field (t "Keeper 링크" "Keeper link")
             (Link.reference Keeper (Terminal_text.single_line keeper))
         ]
     | _, _ -> []
@@ -2017,84 +2032,86 @@ let schedule_detail_lines ~width ~freshness ~runner (row : schedule_row)
     match row.sch_runner_hold with
     | None -> []
     | Some hold ->
-        [ field ~style:(Theme.warn ()) "Held"
+        [ field ~style:(Theme.warn ()) (t "보류" "Held")
             (match Tui_decode.schedule_hold_reading ~freshness ~runner hold with
              | Tui_decode.Hold_current ->
                  let due = Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso in
                  (match hold.Tui_decode.srh_reason with
                   | Tui_decode.Hold_previous_wake_untaken ->
-                      Render_schedule.schedule_hold_reading ~due
+                      Render_schedule.schedule_hold_reading ~ko ~due
                   | Tui_decode.Hold_target_shutdown_fenced { target; fence_owner } ->
                       Render_schedule.schedule_fence_hold_reading
-                        ~due ~target ~fence_owner)
+                        ~ko ~due ~target ~fence_owner)
              | Tui_decode.Hold_as_of checked ->
                  let checked = Terminal_text.short_timestamp_of_unix checked in
                  (match hold.Tui_decode.srh_reason with
                   | Tui_decode.Hold_previous_wake_untaken ->
-                      Render_schedule.schedule_hold_as_of_reading ~checked
+                      Render_schedule.schedule_hold_as_of_reading ~ko ~checked
                   | Tui_decode.Hold_target_shutdown_fenced { target; fence_owner } ->
                       Render_schedule.schedule_fence_hold_as_of_reading
-                        ~checked ~target ~fence_owner))
-        ; field "Held id" hold.Tui_decode.srh_occurrence_id
-        ; field "Held due" hold.Tui_decode.srh_due_at_iso
+                        ~ko ~checked ~target ~fence_owner))
+        ; field (t "보류 id" "Held id") hold.Tui_decode.srh_occurrence_id
+        ; field (t "보류 예정" "Held due") hold.Tui_decode.srh_due_at_iso
         ]
   in
   detail_section_heading ~first:true
-    "1. 현재 상태 · 다음 실행 · 보류 진단 (Status & Delivery)"
-  @ [ field ~style:(schedule_status_color row.sch_status) "Status" row.sch_status
-    ; field "Due" (timestamp row.sch_due_at_iso)
-    ; field "Next due" (timestamp row.sch_next_due_at_iso)
-    ; field "Recurrence" row.sch_recurrence_summary
-    ; field "Expires" (timestamp row.sch_expires_at_iso)
+    (t "1. 현재 상태 · 다음 실행 · 보류 진단" "1. Status & Delivery")
+  @ [ field ~style:(schedule_status_color row.sch_status) (t "상태" "Status") row.sch_status
+    ; field (t "예정" "Due") (timestamp row.sch_due_at_iso)
+    ; field (t "다음 예정" "Next due") (timestamp row.sch_next_due_at_iso)
+    ; field (t "반복" "Recurrence") row.sch_recurrence_summary
+    ; field (t "만료" "Expires") (timestamp row.sch_expires_at_iso)
     ]
   @ hold_rows
   @ [ field
         ~style:
           (Option.fold ~none:Ansi.dim ~some:schedule_status_color
              row.sch_queue_projection_status)
-        "Queue" queue
+        (t "큐" "Queue") queue
     ; field
         ~style:
           (Option.fold ~none:Ansi.dim ~some:schedule_status_color
              row.sch_reaction_projection_status)
-        "Reaction" reaction
+        (t "반응" "Reaction") reaction
     ]
-  @ schedule_turn_rows ~field row
-  @ detail_section_heading "2. 최근 실행 이력 (Wake History)"
-  @ schedule_wake_lines ~field ~timestamp ~row ~history:wake_history
+  @ schedule_turn_rows ~ko ~field row
+  @ detail_section_heading (t "2. 최근 실행 이력" "2. Wake History")
+  @ schedule_wake_lines ~ko ~field ~timestamp ~row ~history:wake_history
       ~history_error:wake_history_error
   @ (if keeper_wake then
        [ Ansi.dim, ""
-       ; Ansi.bold, "  WORK RESULT"
-       ; field "Attribution"
-           "the turn this wake opened, bounded by its start and finish rows"
-       ; field "Inspect"
-           "Keeper Calls or Activity between the two recorded times"
+       ; Ansi.bold, t "  작업 결과" "  WORK RESULT"
+       ; field (t "해당 턴" "Attribution")
+           (t "이 실행이 연 턴 · 시작 줄과 종료 줄 사이"
+              "the turn this wake opened, bounded by its start and finish rows")
+       ; field (t "확인 방법" "Inspect")
+           (t "기록된 두 시각 사이의 Keeper 호출이나 활동"
+              "Keeper Calls or Activity between the two recorded times")
        ]
      else [])
-  @ detail_section_heading "3. 작업 요약 · 스케줄 식별자 (Summary & Identity)"
-  @ [ Ansi.bold, "  SUMMARY" ]
+  @ detail_section_heading (t "3. 작업 요약 · 일정 식별자" "3. Summary & Identity")
+  @ [ Ansi.bold, t "  요약" "  SUMMARY" ]
   @ (Message_layout.wrap_body ~markdown:document_markdown
        ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
     |> List.map (fun line -> Ansi.reset, "    " ^ line))
-  @ [ field "Target" (optional row.sch_payload_target) ]
+  @ [ field (t "대상" "Target") (optional row.sch_payload_target) ]
   @ target_link
-  @ [ field "Kind" (optional row.sch_payload_kind)
-    ; field "Dispatch tool" (optional row.sch_payload_dispatch_tool)
-    ; field "Support" row.sch_payload_support
-    ; field "Schedule" row.sch_schedule_id
-    ; field "Instance" row.sch_schedule_instance_id
-    ; field "Link"
+  @ [ field (t "종류" "Kind") (optional row.sch_payload_kind)
+    ; field (t "실행 도구" "Dispatch tool") (optional row.sch_payload_dispatch_tool)
+    ; field (t "지원" "Support") row.sch_payload_support
+    ; field (t "일정" "Schedule") row.sch_schedule_id
+    ; field (t "인스턴스" "Instance") row.sch_schedule_instance_id
+    ; field (t "링크" "Link")
         (Link.reference Schedule
            (Terminal_text.single_line row.sch_schedule_id))
-    ; field "Source" row.sch_source
-    ; field "Requested by" row.sch_requested_by
-    ; field "Scheduled by" row.sch_scheduled_by
-    ; field "Requested" row.sch_requested_at_iso
+    ; field (t "출처" "Source") row.sch_source
+    ; field (t "요청자" "Requested by") row.sch_requested_by
+    ; field (t "등록자" "Scheduled by") row.sch_scheduled_by
+    ; field (t "요청 시각" "Requested") row.sch_requested_at_iso
     ]
-  @ detail_section_heading "4. 페이로드 원문 (Payload JSON & Digest)"
+  @ detail_section_heading (t "4. 페이로드 원문" "4. Payload JSON & Digest")
   @ [ field "Digest" row.sch_payload_digest
-    ; Ansi.bold, "  PAYLOAD JSON"
+    ; Ansi.bold, t "  페이로드 JSON" "  PAYLOAD JSON"
     ]
   @ (document_json ~width:(max 1 (width - 4))
        (Yojson.Safe.pretty_to_string row.sch_payload)
@@ -2112,13 +2129,19 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
        Source freshness still has its fixed summary outside this document. *)
     (match state.schedule_cancel_error with
      | Some (schedule_id, error) when String.equal schedule_id row.sch_schedule_id ->
-         [Theme.bad (), "Cancel error: " ^ wire error]
+         [Theme.bad (), ui_text state ~ko:"취소 오류: " ~en:"Cancel error: " ^ wire error]
      | Some _ | None -> [])
     @ (match schedule_source_warning state with
-       | None -> [] | Some error -> [Theme.bad (), "Source: " ^ wire error])
+       | None -> []
+       | Some error -> [Theme.bad (), ui_text state ~ko:"출처: " ~en:"Source: " ^ wire error])
     @ (match state.schedule_cancel_armed with
-       | None -> [] | Some id -> [Theme.warn (), "Armed: cancel " ^ wire id ^ " -- press x again to submit"]) in
-  let fields = schedule_detail_lines ~width
+       | None -> []
+       | Some id ->
+           [ Theme.warn ()
+           , if state.ui_language = Lang_ko then
+               "취소 준비됨: " ^ wire id ^ " \xc2\xb7 x 를 한 번 더 누르면 보냄"
+             else "Armed: cancel " ^ wire id ^ " -- press x again to submit" ]) in
+  let fields = schedule_detail_lines ~ko:(state.ui_language = Lang_ko) ~width
       ~freshness:(schedule_list_freshness state) ~runner row
       ~wake_history:state.schedule_wake_history
       ~wake_history_error:state.schedule_wake_history_error in

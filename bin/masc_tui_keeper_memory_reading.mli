@@ -28,8 +28,8 @@ type t =
       ; age_bins : Masc.Keeper_memory_age_bins.t option
       ; pass_end : Masc.Tui_decode_memory_health.memory_librarian_pass_end option
           (** How the librarian's last pass ended, from the same row. *)
-      ; admission_wait : Masc.Keeper_librarian_pending.worker option
-          (** An explicit admission's worker wait, independent of the durable pass. *)
+      ; admission_wait : Masc.Keeper_librarian_pending.admission option
+          (** What the last explicit-admission pass left unfinished, independent of the durable pass. *)
       }
 
 type index

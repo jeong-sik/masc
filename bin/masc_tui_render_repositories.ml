@@ -36,7 +36,7 @@ let selected_repository_reading (state : state) =
         [(if Option.is_some state.repositories then "Refresh failed · retained reading"
           else "Read failed"), reason] in
   let capture ~title fields =
-    Masc_tui_detail_reading.create ~title
+    Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko) ~title
       (List.map (fun (heading,body) -> {Masc_tui_detail_reading.heading;body}) fields) in
   match selected with
   | None ->
@@ -534,7 +534,7 @@ let render_repository_changes (state : state) =
       in
       let recorded_changes = current_keeper_chat_file_changes state in
       surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repository-changes"
-        ~title ~hints:Masc_tui_keys.footer_hints_git_changes
+        ~title ~hints:(Masc_tui_keys.footer_hints_git_changes ~lang:state.ui_language)
         ~body:(fun ~budget c ->
           let geometry = repository_changes_geometry state ~cols ~budget
               ~cursor:state.repository_changes_cursor in
@@ -801,7 +801,8 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     (Printf.sprintf "  col %d%s · esc closes" (state.changes_diff_hscroll + 1) position);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"Shift-Left / Shift-Right:pan  j/k:scroll  Left / Esc:back  o:open in editor  q:quit");
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints_changes_diff ~lang:state.ui_language));
   finish_surface state ~clamped:(Changes_diff_scroll scroll)
     ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
@@ -829,7 +830,7 @@ let render_changes_list (state : state) =
     match state.changes with
     | None ->
         heading
-          ~reading:(String.trim (title_missing_reading ~error:state.changes_error))
+          ~reading:(here_missing_reading state ~error:state.changes_error)
     | Some s ->
         (* The window and the call count are stated because the list alone
            does not say what was looked at: no changes in a window and no
@@ -1019,7 +1020,7 @@ let render_changes_tree_diff (state : state)
     ; ds_hscroll = state.changes_diff_hscroll
     ; ds_unchanged = "  (this file matches its last commit)"
     ; ds_esc_hint = "esc closes"
-    ; ds_footer_hints = "Shift-Left / Shift-Right:pan  j/k:scroll  Left / Esc:back  o:open in editor  q:quit"
+    ; ds_footer_hints = Masc_tui_keys.footer_hints_changes_diff ~lang:state.ui_language
     ; ds_surface_key = "changes"
     ; ds_clamped = (fun scroll -> Changes_diff_scroll scroll)
     }

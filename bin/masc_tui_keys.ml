@@ -37,14 +37,14 @@ type row_need =
 type binding = {
   key : string;
   label : string;
-  label_ko : string option;
+  label_ko : string;
   help : string option;
   group : group;
   detail : detail_state;
   rows : row_need;
 }
 
-let b ?help ?ko ?(detail = Either) ?(rows = Rowless) group key label =
+let b ?help ~ko ?(detail = Either) ?(rows = Rowless) group key label =
   { key; label; label_ko = ko; help; group; detail; rows }
 
 (* The one spelling of "key:label". The footer atoms, the Keeper tab row and
@@ -316,6 +316,7 @@ let chat_schedules_label = Masc_tui_types.chat_schedule_toggle_label
    output are drawn whole. Named for the rows that fold a long payload and
    say where the rest is. *)
 let keeper_calls_key = "t"
+let keeper_chat_key = "c"
 
 (* Ctrl-X opens the context inspector from the chat. It is named on the
    context header, beside the figure it explains, and nowhere else: the
@@ -325,50 +326,56 @@ let context_inspector_label = "Ctrl-X"
 
 
 let keepers_jump =
-  b Meta "3" "keepers"
+  b ~ko:"키퍼" Meta "3" "keepers"
     ~help:"jump to Keepers when the active field or panel does not use 3"
 
 let mouse_toggle_key = "f2"
 let mouse_toggle_label = "F2"
 
 let global =
-  [ b Meta "Tab / Shift-Tab" "next / previous surface"
+  [ b ~ko:"다음 / 이전 화면" Meta "Tab / Shift-Tab" "next / previous surface"
       ~help:"next / previous surface; the chat composer keeps them to complete a /command"
   ; keepers_jump
-  ; b Meta "r" "refresh the current surface"
-  ; b Meta "i" "focus the composer; on Dashboard, choose a Keeper"
-  ; b Meta ":" "command palette"
-  ; b Meta ";"
+  ; b ~ko:"지금 화면 새로 조회" Meta "r" "refresh the current surface"
+  ; b ~ko:"입력 줄로 가기; 운영에서는 키퍼 고르기" Meta "i"
+      "focus the composer; on Dashboard, choose a Keeper"
+  ; b ~ko:"명령 팔레트" Meta ":" "command palette"
+  ; b ~ko:"일정: 다가오는 일과 나를 기다리는 키퍼; Enter 로 줄 열기" Meta ";"
       "agenda: what is coming, and who is waiting on you; Enter opens a row"
-  ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
-  ; b Meta "?" "this help"
+  ; b ~ko:"응답 중: 턴을 돌고 있거나 막 끝낸 키퍼; Enter 로 채팅 열기" Meta "@"
+      "answering: who is mid-turn or just finished; Enter opens their chat"
+  ; b ~ko:"이 도움말" Meta "?" "this help"
       ~help:"the keys of this screen; `?` again lists every screen, the global keys and the slash commands, and `/` finds a key or a command among them all"
-  ; b Meta "&"
+  ; b ~ko:"Collab: MSX/DOS 보기와 플레이 링크 관리 (`:` go Collab 로도 열림)" Meta "&"
       "Collab: watch MSX/DOS and manage play links (also `:` go Collab)"
-  ; b Meta roster_toggle_key "show or hide the Keeper roster"
+  ; b ~ko:"키퍼 명단 보이기 / 숨기기" Meta roster_toggle_key "show or hide the Keeper roster"
       ~help:"show or hide the Keeper roster; it starts hidden and the \
              choice persists across navigation and resizing"
-  ; b Meta "Ctrl-L"
+  ; b ~ko:"활동 창을 좁게, 넓게, 숨김 순서로: 키퍼마다 지금 하는 일, 변경 탭에서는 고른 \
+           키퍼의 파일 (머리 줄을 눌러 전환)"
+      Meta "Ctrl-L"
       "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
        right now, and on its Changes tab the selected keeper's files (press the header to switch)"
       ~help:"cycle the Activity pane narrow, wide or hidden; the wheel over the pane \
              scrolls the full list; a press picks a keeper, a second press opens its chat; \
              /activity order turns the order of its calls, /activity scroll moves the pane"
-  ; b Navigate "Ctrl-W" "focus the Activity pane"
+  ; b ~ko:"활동 창으로 가기" Navigate "Ctrl-W" "focus the Activity pane"
       ~help:"focus the Activity pane: a cursor lands on its first row, j/k walk the rows a press \
              acts on and scroll past the last, Enter opens or closes the call under it, \
              Esc or Ctrl-W gives the keys back; the chat keeps Ctrl-W for its draft until \
              the draft is empty"
-  ; b Meta "Ctrl-^" "show or hide Browser Lane; retain tab and scroll"
-  ; b Meta mouse_toggle_label "mouse to the terminal and back; with masc, a drag copies one pane"
+  ; b ~ko:"브라우저 레인 보이기 / 숨기기; 탭과 스크롤은 그대로" Meta "Ctrl-^"
+      "show or hide Browser Lane; retain tab and scroll"
+  ; b ~ko:"마우스를 터미널에 넘기고 되받기; masc 가 쥐면 끌어서 한 창을 복사" Meta mouse_toggle_label
+      "mouse to the terminal and back; with masc, a drag copies one pane"
       ~help:"the mouse starts with masc: a drag selects inside the pane it began in \
              (Keeper roster, surface or Activity pane) and copies it on release via OSC 52, \
              a press that does not move clicks, and Esc drops a selection still held; \
              F2 hands the mouse to the terminal for its own selection across the \
              whole window, and F2 again takes it back"
-  ; b Navigate "Ctrl-]" "follow the reference under the cursor"
+  ; b ~ko:"커서 아래 참조 따라가기" Navigate "Ctrl-]" "follow the reference under the cursor"
       ~help:"follow the reference under the cursor; Esc on the surface it opens comes back here"
-  ; b Meta "q" "quit"
+  ; b ~ko:"종료" Meta "q" "quit"
   ]
 
 (* The plain-listing tail every converted footer shares. *)
@@ -383,7 +390,7 @@ let listing_meta = [ listing_refresh; listing_next; listing_quit ]
    list -- and the sheet says which. A binding of its own, so
    [sheet_bindings] keeps it where it drops the shared tail. *)
 let tools_refresh =
-  b Meta "r" "refresh"
+  b ~ko:"새로 조회" Meta "r" "refresh"
     ~help:"refresh the open original Task body/history, original request \
            detail, or Tools list"
 
@@ -400,7 +407,7 @@ let keeper_list_view_names =
     (List.map Masc_tui_keeper_list_model.view_label Masc_tui_keeper_list_model.views)
 
 let keeper_actions =
-  [ b ~ko:"채팅" Act "c" "chat" ~help:"chat with the keeper"
+  [ b ~ko:"채팅" Act keeper_chat_key "chat" ~help:"chat with the keeper"
   ; b ~ko:"로그" Act "l" "logs"
   ; b ~ko:"호출" Act keeper_calls_key "calls" ~help:"tool calls"
   ; b ~ko:"런타임" Act "u" "runtime" ~help:"pick a runtime candidate order"
@@ -436,62 +443,62 @@ let row_list_edges = [ b ~ko:"처음/끝" ~rows:Needs_row Navigate "Home/End" "t
    spelling: [Masc_tui_footer.never_dropped_keys] pins "y / n", which the open
    approval's own footer never said. *)
 let approval_decide =
-  b Act "y / n" "decide" ~help:"y confirms, n denies the approval under the cursor"
+  b ~ko:"승인 / 거절" Act "y / n" "decide" ~help:"y confirms, n denies the approval under the cursor"
 
 let approval_retry =
-  b Act "R" "retry Auto Judge"
+  b ~ko:"Auto Judge 다시" Act "R" "retry Auto Judge"
     ~help:"only when the blocked row is safely rearmable"
 
-let approval_move = b Navigate "j/k" "move"
+let approval_move = b ~ko:"선택" Navigate "j/k" "move"
 let approval_read =
-  b Act "Enter" "read the whole ask"
+  b ~ko:"요청 전체 읽기" Act "Enter" "read the whole ask"
     ~help:"the reader takes its own keys: j/k and the page keys scroll it, \
            Home/End reach its ends, [ / ] step asks, Esc goes back"
 let approval_value_bytes =
-  b Navigate "v" "string bytes" ~detail:Detail_only
+  b ~ko:"문자열 바이트" Navigate "v" "string bytes" ~detail:Detail_only
     ~help:"read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns"
 let approval_answer_receipt =
   b ~ko:"마지막 답변" Navigate "v" "last answer" ~detail:List_only
     ~help:"while browsing, capture the last answer receipt, original question identity and retained follow-up; scroll or search the complete text; v or Esc returns"
 let approval_answer =
-  b Act "a" "answer a question"
+  b ~ko:"질문에 답하기" Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
 let approval_answer_hint = key_hint approval_answer
 let approval_installation_results =
-  b Act "g" "installation Results"
+  b ~ko:"설치 결과" Act "g" "installation Results"
     ~help:"after answering an installation's question, open that installation's Results in Plugins, where the reveal appears"
 let approval_origin =
-  b Act "o / O" "source / inspect"
+  b ~ko:"출처 / 살펴보기" Act "o / O" "source / inspect"
     ~help:"o shows the question source; O opens that immutable turn's retained input. With no open question use the last answer's source. Esc returns to the question draft; a missing source is never replaced by the Keeper's latest turn"
 let approval_walk =
-  b Navigate "[ / ]" "ask"
+  b ~ko:"요청" Navigate "[ / ]" "ask"
     ~help:"while browsing or answering a question, move to the previous or next ask; \
            with an approval detail open, move to the previous or next approval"
 let approval_workspace =
-  b Act "w" "Workspace mode"
+  b ~ko:"작업 공간 모드" Act "w" "Workspace mode"
     ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
 let approval_outside =
-  b Act "e" "Outside mode"
+  b ~ko:"외부 모드" Act "e" "Outside mode"
     ~help:"choose how calls into outside services are reviewed; Enter applies"
 let approval_question =
-  b Navigate "Left/Right" "question"
+  b ~ko:"질문" Navigate "Left/Right" "question"
     ~help:"while answering, step through the open ask's questions; \
            j/k and the arrows do the same"
 let approval_pick =
-  b Act "1-9" "pick"
+  b ~ko:"고르기" Act "1-9" "pick"
     ~help:"while answering, choose by the position the server listed"
 let approval_write =
-  b Act "t" "write"
+  b ~ko:"쓰기" Act "t" "write"
     ~help:"while answering, open the free-text editor; Enter saves it, \
            Esc drops it"
 let approval_skip =
-  b Act "s" "skip"
+  b ~ko:"건너뛰기" Act "s" "skip"
     ~help:"while answering, leave this question unanswered"
 let approval_clear =
-  b Act "c" "clear"
+  b ~ko:"지우기" Act "c" "clear"
     ~help:"while answering, drop what is drafted for this question"
 let approval_back =
-  b Act "Esc" "back"
+  b ~ko:"뒤로" Act "Esc" "back"
     ~help:"leave the answering mode; with the editor open it drops the draft first"
 
 (* Where a Fusion run's caller and its Board evidence are, on the list and
@@ -516,18 +523,21 @@ let board_read_focus_key =
 
 (* Both read the run under the cursor. On the list with no run they answer
    with a notice and move nothing; an open run has its own footer. *)
-let fusion_caller_key = b ~rows:Needs_row Navigate "K" "calling Keeper"
-let fusion_board_key = b ~rows:Needs_row Navigate "B" "Board evidence"
+let fusion_caller_key = b ~ko:"부른 키퍼" ~rows:Needs_row Navigate "K" "calling Keeper"
+let fusion_board_key = b ~ko:"게시판 근거" ~rows:Needs_row Navigate "B" "Board evidence"
 
-let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
+let keeper_navigation_hints ~lang =
+  match lang with
+  | Masc_tui_types.Lang_ko -> "Up/Down:선택  Enter:열기  Right/Esc:뒤로"
+  | Masc_tui_types.Lang_en -> "Up/Down:move  Enter:open  Right/Esc:back"
 
 let tools_bracket_binding ~pane =
-  let label = match pane with
-    | Tools_surface -> "run"
+  let ko, label = match pane with
+    | Tools_surface -> "실행", "run"
     | Tools_async | Tools_activations | Tools_usage | Tools_storage
-    | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> "Keeper"
+    | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> "키퍼", "Keeper"
   in
-  b Navigate "[ / ]" label
+  b ~ko Navigate "[ / ]" label
     ~help:"in Available, older/newer retained original run; in other panes, previous/next Keeper"
 
 type metrics_key_scope =
@@ -957,7 +967,7 @@ let for_surface = function
           ~help:"in Goal detail, enter a reason and press Enter"
       ; b ~ko:"다시 열기" Act "o" "reopen" ~detail:Detail_only
           ~help:"in Goal detail, press twice to request reopening"
-      ; b Act goal_candle_refresh_key "Candle" ~rows:Needs_row
+      ; b ~ko:"Candle" Act goal_candle_refresh_key "Candle" ~rows:Needs_row
           ~help:"open the selected Goal's Candle payout from the list, or read it again in detail"
       ; b ~ko:"링크 복사" Act "Y" "copy link" ~rows:Needs_row
           ~help:"copy the selected goal reference"
@@ -1411,11 +1421,11 @@ let for_surface = function
 
 let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 
-let hints_in_order ?(lang = Lang_en) bindings =
+let hints_in_order ~lang bindings =
   bindings
   |> List.map (fun (binding : binding) ->
       let label = match lang with
-        | Lang_ko -> Option.value binding.label_ko ~default:binding.label
+        | Lang_ko -> binding.label_ko
         | Lang_en -> binding.label
       in
       key_hint ~label binding)
@@ -1424,7 +1434,7 @@ let hints_in_order ?(lang = Lang_en) bindings =
 (* Sort by group, then flatten to the footer's "key:label  key:label" form.
    Both the static per-surface footer and the Fusion detail footer (which
    appends a live scroll position) render through this one projection. *)
-let hints_of_bindings ?(lang = Lang_en) bindings =
+let hints_of_bindings ~lang bindings =
   bindings
   |> List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group))
   |> hints_in_order ~lang
@@ -1459,7 +1469,7 @@ let answers_in_state ?detail_open ?has_rows ?has_reading binding =
       | Needs_reading ->
           (match has_reading with Some false -> false | Some true | None -> true))
 
-let footer_hints ?(lang = Lang_en) ?detail_open ?has_rows ?has_reading surface =
+let footer_hints ~lang ?detail_open ?has_rows ?has_reading surface =
   hints_of_bindings ~lang
     (List.filter (answers_in_state ?detail_open ?has_rows ?has_reading)
        (for_surface surface))
@@ -1472,7 +1482,7 @@ let planning_goal_hints ~lang ~detail_open ~has_rows =
     |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r"))
     |> List.map (fun binding ->
       if detail_open && String.equal binding.key "j/k" then
-        {binding with label = "scroll"; label_ko = Some "스크롤"}
+        {binding with label = "scroll"; label_ko = "스크롤"}
       else binding) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
   hints_in_order ~lang (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
@@ -1527,8 +1537,17 @@ type approvals_footer =
 (* The approval queue and its question reader use the same binding records as
    Help. Their modes need a deliberate order and, for Enter, a mode-specific
    verb; the dispatcher gives that key a different action in each mode. *)
-let footer_hints_approvals mode =
-  let hint = key_hint in
+let footer_hints_approvals ~lang mode =
+  let say korean english =
+    match lang with Lang_ko -> korean | Lang_en -> english
+  in
+  (* A mode's own word for a key replaces the binding's, in both languages. *)
+  let hint ?label (binding : binding) =
+    match label, lang with
+    | Some word, (Lang_ko | Lang_en) -> key_hint ~label:word binding
+    | None, Lang_ko -> key_hint ~label:binding.label_ko binding
+    | None, Lang_en -> key_hint binding
+  in
   let row items = String.concat "  " items in
   match mode with
   | Approval_browsing { approvals; asks; source; last_answer } ->
@@ -1553,9 +1572,12 @@ let footer_hints_approvals mode =
            ; hint approval_back; hint listing_quit
            ])
   | Approval_writing ->
-      row [ hint ~label:"save" approval_read; hint ~label:"cancel" approval_back ]
+      row
+        [ hint ~label:(say "저장" "save") approval_read
+        ; hint ~label:(say "취소" "cancel") approval_back
+        ]
   | Approval_armed ->
-      "Press Enter again to send  |  "
+      say "Enter 를 한 번 더 누르면 전송  |  " "Press Enter again to send  |  "
       ^ row [ hint approval_skip; hint approval_clear; hint approval_back ]
   | Approval_answering { has_choices; takes_text } ->
       row
@@ -1563,7 +1585,7 @@ let footer_hints_approvals mode =
         @ (if has_choices then [ hint approval_pick ] else [])
         @ (if takes_text then [ hint approval_write ] else [])
         @ [ hint approval_skip; hint approval_clear
-          ; hint ~label:"answer" approval_read; hint approval_back
+          ; hint ~label:(say "답하기" "answer") approval_read; hint approval_back
           ])
 
 (* Whether this surface's table scopes any binding to one of the two states.
@@ -1608,16 +1630,16 @@ let footer_hints_metrics ~lang ~section ~telemetry =
    queue behind it and to call [R] something the key table does not. *)
 type approval_value_hint = No_value_reading | Readable_values | Byte_values
 
-let footer_hints_approval_detail ~value_hint =
-  hints_of_bindings
-    ([ b Navigate "j/k" "scroll" ]
+let footer_hints_approval_detail ~lang ~value_hint =
+  hints_of_bindings ~lang
+    ([ b ~ko:"스크롤" Navigate "j/k" "scroll" ]
     @ (match value_hint with
        | No_value_reading -> []
        | Readable_values -> [ approval_value_bytes ]
-       | Byte_values -> [ b Navigate "v" "text" ])
+       | Byte_values -> [ b ~ko:"글자" Navigate "v" "text" ])
     @ [ approval_decide
     ; approval_retry
-    ; b Act "Esc" "back"
+    ; b ~ko:"뒤로" Act "Esc" "back"
     ])
 
 (* The Board draft's two footers were written out in the renderer, and the
@@ -1627,7 +1649,7 @@ let footer_hints_approval_detail ~value_hint =
    keeps to what the draft is and where it goes. *)
 let board_compose_writing_bindings ~reply =
   [ b ~ko:"줄바꿈" Act "Enter" "newline" ~help:"newline in the draft; Esc opens the send menu"
-  ; b Act "Ctrl-E" "$EDITOR" ~help:"hand the draft to $EDITOR and take it back"
+  ; b ~ko:"$EDITOR" Act "Ctrl-E" "$EDITOR" ~help:"hand the draft to $EDITOR and take it back"
   ]
   (* A comment's wire carries text only, so the hint appears where the key
      works -- a reply's Ctrl-A says why instead of staging. *)
@@ -1756,31 +1778,31 @@ let voice_agent_bindings =
   ]
 
 let patch_review_bindings =
-  [ b Navigate "Shift+←/→" "pan"
+  [ b ~ko:"좌우 이동" Navigate "Shift+←/→" "pan"
       ~help:"Shift-Left / Shift-Right moves diff text horizontally while file coordinates remain fixed"
-  ; b Navigate "j/k" "scroll"
-  ; b Navigate "PgUp/PgDn / d/u" "page"
-  ; b Navigate "Home/End / g/G" "edges"
-  ; b Act "e" "edit" ~help:"leave review and open the project file in your editor"
-  ; b Meta "?" "help"
-  ; b Meta "Esc" "close" ~help:"Esc, q or Q closes the patch reader"
+  ; b ~ko:"스크롤" Navigate "j/k" "scroll"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn / d/u" "page"
+  ; b ~ko:"처음/끝" Navigate "Home/End / g/G" "edges"
+  ; b ~ko:"편집" Act "e" "edit" ~help:"leave review and open the project file in your editor"
+  ; b ~ko:"도움말" Meta "?" "help"
+  ; b ~ko:"닫기" Meta "Esc" "close" ~help:"Esc, q or Q closes the patch reader"
   ]
 
-let runtime_detail_bindings_for ~ko ~routes =
-  let text korean english = if ko then korean else english in
-  (if routes then [] else [ b Act "e" (text "모델 설정" "model settings") ])
-  @ [ b Navigate "j/k" (text "스크롤" "scroll")
-    ; b Navigate "PgUp/PgDn" (text "페이지" "page")
-    ; b Navigate "Home/End" (text "처음/끝" "edges")
-    ; b Act "Left / Esc" (text "목록" "list")
-    ; b Meta "r" (text "새로고침" "refresh")
-    ; b Meta "Tab" (text "다음" "next")
-    ; b Meta "?" (text "도움말" "help")
+let runtime_detail_bindings_for ~routes =
+  (if routes then [] else [ b ~ko:"모델 설정" Act "e" "model settings" ])
+  @ [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+    ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+    ; b ~ko:"처음/끝" Navigate "Home/End" "edges"
+    ; b ~ko:"목록" Act "Left / Esc" "list"
+    ; b ~ko:"새로 조회" Meta "r" "refresh"
+    ; b ~ko:"다음 화면" Meta "Tab" "next"
+    ; b ~ko:"도움말" Meta "?" "help"
     ]
 
-let footer_hints_patch_review () = hints_of_bindings patch_review_bindings
-let footer_hints_runtime_detail ?(ko = false) ?(routes = false) () =
-  hints_of_bindings (runtime_detail_bindings_for ~ko ~routes)
+let footer_hints_patch_review ~lang = hints_of_bindings ~lang patch_review_bindings
+
+let footer_hints_runtime_detail ~lang ~routes =
+  hints_of_bindings ~lang (runtime_detail_bindings_for ~routes)
 
 let voice_agent_bindings_for_saving saving =
   if saving then [ b ~ko:"도움말" Meta "?" "help"; b ~ko:"뒤로" Act "Esc" "back" ]
@@ -1819,8 +1841,8 @@ let memory_recall_form_bindings =
   ; b ~ko:"취소" Act "Esc" "cancel" ~help:"close the form; nothing is written"
   ]
 
-let footer_hints_memory_recall_form () =
-  hints_of_bindings memory_recall_form_bindings
+let footer_hints_memory_recall_form ~lang =
+  hints_of_bindings ~lang memory_recall_form_bindings
 
 (* The exclusion form takes every key while it is open, as the recall form
    does, so its row names only what the form reads. *)
@@ -1833,8 +1855,8 @@ let typesafeai_exclusion_form_bindings =
   ; b ~ko:"취소" Act "Esc" "cancel" ~help:"close the form; nothing is written"
   ]
 
-let footer_hints_typesafeai_exclusion_form () =
-  hints_of_bindings typesafeai_exclusion_form_bindings
+let footer_hints_typesafeai_exclusion_form ~lang =
+  hints_of_bindings ~lang typesafeai_exclusion_form_bindings
 
 (* After a save the form shows the sign-in command and types nothing, so
    [y] copies it as it does in the link and browser views. *)
@@ -1859,7 +1881,7 @@ let footer_hints_prompt_assets ~lang =
     |> List.filter (fun binding -> not (List.mem binding.key registry_only))
     |> List.map (fun binding ->
            if String.equal binding.key "o" then
-             { binding with label = "registry"; label_ko = Some "프롬프트 목록" }
+             { binding with label = "registry"; label_ko = "프롬프트 목록" }
            else binding)
   in
   config_row ~lang ~own ~shared
@@ -2051,13 +2073,13 @@ let footer_hints_code ~lang ~pane =
          (match pane with
           | Code_tree _ | Code_root _ -> b
           | Code_file | Code_diff | Code_notes | Code_history ->
-              { b with label = "scroll"; label_ko = Some "스크롤" })
+              { b with label = "scroll"; label_ko = "스크롤" })
        else if String.equal b.key "d" then
          (* On the list the key shows the project's changes; on an open file
             it shows that file's diff. *)
          (match pane with
           | Code_tree _ | Code_root _ ->
-              { b with label = "changes"; label_ko = Some "변경" }
+              { b with label = "changes"; label_ko = "변경" }
           | Code_file | Code_diff | Code_notes | Code_history -> b)
        else b)
   |> hints_of_bindings ~lang
@@ -2070,38 +2092,37 @@ let footer_hints_code ~lang ~pane =
 (* The ordinary reading and its picker answer different Enter keys. The
    footer reads the same pick/filter state the dispatcher owns; printable
    letters only belong to the surface while no filter is being typed. *)
-let runtime_parent_bindings ~ko parent =
-  let text korean english = if ko then korean else english in
-  let name_bindings enter =
-    [ b Act "Enter" enter
-    ; b Navigate "PgUp" (text "초안·안내 전체" "read draft/context")
-    ; b Act "Backspace" (text "지우기" "erase")
-    ; b Act "Esc" (text "취소" "cancel") ] in
+let runtime_parent_bindings parent =
+  let name_bindings ~ko enter =
+    [ b ~ko Act "Enter" enter
+    ; b ~ko:"초안·안내 전체" Navigate "PgUp" "read draft/context"
+    ; b ~ko:"지우기" Act "Backspace" "erase"
+    ; b ~ko:"취소" Act "Esc" "cancel" ] in
   match parent with
   | Runtime_media_parent ->
-      [ b Act "v" (text "전체 읽기" "read all")
+      [ b ~ko:"전체 읽기" Act "v" "read all"
           ~help:"read full IDs, admission and results without closing the editor; ! marks a declared slot not admitted in the last observation"
-      ; b Act "a" (text "추가" "add")
-      ; b Navigate "j/k" (text "선택" "select")
-      ; b Navigate "PgUp/PgDn" (text "페이지" "page")
-      ; b Navigate "Home/End" (text "처음/끝" "edges")
-      ; b Act "x" (text "제거" "drop")
-      ; b Act "J/K" (text "순서 변경" "reorder")
-      ; b Act "1" (text "맨 앞으로" "make first")
-      ; b Act "Esc" (text "닫기" "close")
-      ; b Meta "r" (text "새로 조회" "refresh")
-      ; b Meta "?" (text "도움말" "help") ]
+      ; b ~ko:"추가" Act "a" "add"
+      ; b ~ko:"선택" Navigate "j/k" "select"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"처음/끝" Navigate "Home/End" "edges"
+      ; b ~ko:"제거" Act "x" "drop"
+      ; b ~ko:"순서 변경" Act "J/K" "reorder"
+      ; b ~ko:"맨 앞으로" Act "1" "make first"
+      ; b ~ko:"닫기" Act "Esc" "close"
+      ; b ~ko:"새로 조회" Meta "r" "refresh"
+      ; b ~ko:"도움말" Meta "?" "help" ]
   | Runtime_prompt_parent (Lane_name_prompt _) ->
-      name_bindings (text "첫 런타임 선택" "choose first runtime")
+      name_bindings ~ko:"첫 런타임 선택" "choose first runtime"
   | Runtime_prompt_parent (Lane_rename_prompt _) ->
-      name_bindings (text "이름·참조 변경" "rename and rewrite references")
+      name_bindings ~ko:"이름·참조 변경" "rename and rewrite references"
   | Runtime_prompt_parent (Lane_remove_prompt _) ->
-      [ b Act "D" (text "제거 확인" "confirm removal")
-      ; b Act "v" (text "확인 해제·전체 읽기" "disarm and read all")
-      ; b Act "Esc" (text "뒤로" "back") ]
+      [ b ~ko:"제거 확인" Act "D" "confirm removal"
+      ; b ~ko:"확인 해제·전체 읽기" Act "v" "disarm and read all"
+      ; b ~ko:"뒤로" Act "Esc" "back" ]
 
-let footer_hints_runtime_parent ~ko ~parent =
-  runtime_parent_bindings ~ko parent |> hints_of_bindings
+let footer_hints_runtime_parent ~lang ~parent =
+  runtime_parent_bindings parent |> hints_of_bindings ~lang
 
 let footer_hints_runtime ~lang ~(mode : runtime_mode) ~picker =
   match picker with
@@ -2149,17 +2170,17 @@ let footer_hints_resources ~lang ~detail_focus =
   |> List.map (fun binding ->
          if String.equal binding.key "j/k" then
            if detail_focus then
-             { binding with label = "scroll text"; label_ko = Some "본문 스크롤" }
-           else { binding with label = "move"; label_ko = Some "선택" }
+             { binding with label = "scroll text"; label_ko = "본문 스크롤" }
+           else { binding with label = "move"; label_ko = "선택" }
          else binding)
   |> hints_of_bindings ~lang
 
-let footer_hints_resource_save ~pending =
-  (if pending then [] else [b Act "Enter" "create file"])
-  @ [ b Navigate "Esc" "close input"
-    ; b Act "Ctrl-U" "clear path"
-    ; b Navigate "PgUp/PgDn" "read result" ]
-  |> hints_of_bindings
+let footer_hints_resource_save ~lang ~pending =
+  (if pending then [] else [b ~ko:"파일 만들기" Act "Enter" "create file"])
+  @ [ b ~ko:"입력 닫기" Navigate "Esc" "close input"
+    ; b ~ko:"경로 지우기" Act "Ctrl-U" "clear path"
+    ; b ~ko:"결과 읽기" Navigate "PgUp/PgDn" "read result" ]
+  |> hints_of_bindings ~lang
 
 let opens_keepers ~message_mode key =
   (not message_mode) && String.equal key keepers_jump.key
@@ -2273,19 +2294,19 @@ let footer_hints_board_pending ~lang =
    ([Masc_tui_footer.line]'s [?position]) rather than as two spaces on the end
    of this string -- spelled that way the fitter read it as one more key item
    and gave it up first, and on this surface it was never drawn. *)
-let footer_hints_fusion_detail =
-  hints_of_bindings
-    ([ b Navigate "j/k" "scroll"
-     ; b Navigate "PgUp/PgDn" "page"
+let footer_hints_fusion_detail ~lang =
+  hints_of_bindings ~lang
+    ([ b ~ko:"스크롤" Navigate "j/k" "scroll"
+     ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
      (* The table scopes this key to the open detail, and this footer is what
         an open detail draws, so the key belongs on it. It was on the list
         footer instead, where the dispatcher refuses it. *)
-     ; b Navigate "[ / ]" "previous / next"
+     ; b ~ko:"이전 / 다음" Navigate "[ / ]" "previous / next"
          ~help:"step to the run before or after this one"
      ; fusion_caller_key
      ; fusion_board_key
-     ; b Act "Y" "copy"
-     ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
+     ; b ~ko:"복사" Act "Y" "copy"
+     ; b ~ko:"뒤로" Act "Esc" "back" ~help:"Left or Esc returns to the run list"
      ]
      @ listing_meta)
 
@@ -2314,7 +2335,7 @@ let footer_hints_lanes_run_list ~lang ~has_runs ~has_older =
     (lane_run_list_bindings ~has_runs ~has_older @ listing_meta)
 
 let preflight_detail_binding =
-  b Act "d" "JEV evidence" ~help:"in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence"
+  b ~ko:"JEV 근거" Act "d" "JEV evidence" ~help:"in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence"
 
 let lane_run_detail_bindings =
   [ b ~ko:"스크롤" Navigate "j/k" "compare" ~help:"scroll Input and Output together"
@@ -2332,25 +2353,25 @@ let footer_hints_lanes_run_detail_for ~lang ~preflight =
   if preflight then hints_of_bindings ~lang [preflight_detail_binding] ^ "  " ^ detail
   else detail
 
-let footer_hints_git_changes =
-  hints_of_bindings
-    ([ b Navigate "j/k" "move"
-     ; b Act "Right / d / Enter" "diff"
-     ; b Act "v" "open in code"
-     ; b Act "p" "open PR"
-     ; b Act "t/g" "task / goal"
-     ; b Act "Left / Esc" "back"
+let footer_hints_git_changes ~lang =
+  hints_of_bindings ~lang
+    ([ b ~ko:"선택" Navigate "j/k" "move"
+     ; b ~ko:"diff" Act "Right / d / Enter" "diff"
+     ; b ~ko:"코드에서 열기" Act "v" "open in code"
+     ; b ~ko:"PR 열기" Act "p" "open PR"
+     ; b ~ko:"작업 / 목표" Act "t/g" "task / goal"
+     ; b ~ko:"뒤로" Act "Left / Esc" "back"
      ]
      @ listing_meta)
 
-let footer_hints_git_diff =
-  hints_of_bindings
-    ([ b Navigate "Shift-Left / Shift-Right" "pan"
-     ; b Navigate "j/k" "scroll"
-     ; b Act "v" "open in code"
-     ; b Act "p" "open PR"
-     ; b Act "t/g" "task / goal"
-     ; b Act "Left / Esc" "back to files"
+let footer_hints_git_diff ~lang =
+  hints_of_bindings ~lang
+    ([ b ~ko:"좌우 이동" Navigate "Shift-Left / Shift-Right" "pan"
+     ; b ~ko:"스크롤" Navigate "j/k" "scroll"
+     ; b ~ko:"코드에서 열기" Act "v" "open in code"
+     ; b ~ko:"PR 열기" Act "p" "open PR"
+     ; b ~ko:"작업 / 목표" Act "t/g" "task / goal"
+     ; b ~ko:"파일 목록으로" Act "Left / Esc" "back to files"
      ]
      @ listing_meta)
 
@@ -2422,16 +2443,16 @@ let memory_fact_detail_hints ~lang = hints_of_bindings ~lang bindings_memory_fac
    scrolls under the cursor instead of the cursor moving rows, so it owns page
    and edge keys the feed row has none of. *)
 let bindings_acting_evidence =
-  [ b Navigate "j/k" "scroll"
-  ; b Navigate "PgUp/PgDn" "page"
-  ; b Navigate "g / G" "top/bottom"
+  [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"처음/끝" Navigate "g / G" "top/bottom"
       ~help:"jump to the first or last line of the event evidence"
-  ; b Act "Left / Esc" "back to events"
+  ; b ~ko:"이벤트 목록으로" Act "Left / Esc" "back to events"
       ~help:"close the snapshot and return to the live event feed"
   ]
-  @ [ b Meta "Tab" "next"; b Meta "q" "quit" ]
+  @ [ listing_next; listing_quit ]
 
-let acting_evidence_hints = hints_of_bindings bindings_acting_evidence
+let acting_evidence_hints ~lang = hints_of_bindings ~lang bindings_acting_evidence
 
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
@@ -2657,9 +2678,14 @@ let reference_notes : surface -> string list = function
   | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
   | Connectors | Runtime | Resources | System_logs -> []
 
-let entries bindings =
+let entries ~lang bindings =
   List.map
-    (fun { key; label; help; _ } -> (key, Option.value help ~default:label))
+    (fun { key; label; label_ko; help; _ } ->
+       ( key
+       , match help, lang with
+         | Some sentence, (Lang_ko | Lang_en) -> sentence
+         | None, Lang_ko -> label_ko
+         | None, Lang_en -> label ))
     bindings
 
 (* The reader's own surface first, then the keys that work everywhere, then
@@ -2687,65 +2713,67 @@ let here_marker = " \xc2\xb7 you are here"
 let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   match tab with
   | Detail_items ->
-      [ b Navigate "j/k" "preview"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Navigate "Home/End" "first/last"
-      ; b Navigate "v" "view" ~help:"all, owned, can buy, then face/neck/head/hand/base"
-      ; b Navigate "Space" "compare" ~help:"compare the try-on picture with the current outfit"
-      ; b Act "a" "ask Keeper" ~help:"prepare a price-bounded buy/equip chat draft; Enter sends it"
+      [ b ~ko:"미리 보기" Navigate "j/k" "preview"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"처음/끝" Navigate "Home/End" "first/last"
+      ; b ~ko:"보기" Navigate "v" "view" ~help:"all, owned, can buy, then face/neck/head/hand/base"
+      ; b ~ko:"비교" Navigate "Space" "compare" ~help:"compare the try-on picture with the current outfit"
+      ; b ~ko:"키퍼에게 부탁" Act "a" "ask Keeper" ~help:"prepare a price-bounded buy/equip chat draft; Enter sends it"
       ]
   | Detail_github ->
-      [ b Act "L" "login" ~help:"start the gh device-flow login with the ticked scopes"
-      ; b Act "P" "token" ~help:"set fine-grained PAT / token"
+      [ b ~ko:"로그인" Act "L" "login" ~help:"start the gh device-flow login with the ticked scopes"
+      ; b ~ko:"토큰" Act "P" "token" ~help:"set fine-grained PAT / token"
       ]
       (* One digit per scope the login can ask for, in the order the tab
          lists them, so a scope added to the server's list gets its key here
          without a second edit. *)
       @ List.mapi
           (fun index scope ->
-            b Act (string_of_int (index + 1))
-              (Masc.Keeper_github_identity.login_scope_to_string scope)
+            (* A scope is GitHub's own token, spelled the same in both
+               languages. *)
+            let scope = Masc.Keeper_github_identity.login_scope_to_string scope in
+            b ~ko:scope Act (string_of_int (index + 1)) scope
               ~help:"tick or untick this scope for the next L login")
           Masc.Keeper_github_identity.all_login_scopes
   | Detail_sandbox ->
-      [ b Act "o" "actual logs"
-      ; b Act "d/m/s" "backend"
+      [ b ~ko:"컨테이너 로그" Act "o" "actual logs"
+      ; b ~ko:"백엔드" Act "d/m/s" "backend"
           ~help:"set the sandbox backend in place: docker / microvm / remote_ssh"
-      ; b Navigate "PgUp/PgDn" "detail page"
-      ; b Meta "R" "refresh"
+      ; b ~ko:"상세 페이지" Navigate "PgUp/PgDn" "detail page"
+      ; b ~ko:"새로 조회" Meta "R" "refresh"
       ]
   | Detail_instructions ->
-      [ b Act "e" "edit TOML in $EDITOR"
+      [ b ~ko:"$EDITOR 로 TOML 고치기" Act "e" "edit TOML in $EDITOR"
           ~help:"multiline Keeper instructions; only changed fields are sent"
-      ; b Act "E" "edit JSON in $EDITOR"
+      ; b ~ko:"$EDITOR 로 JSON 고치기" Act "E" "edit JSON in $EDITOR"
           ~help:"the same settings and guarded save in JSON"
       ]
   | Detail_identity ->
       [ (* Arrows first: the digits only reach the first nine rows and the
            list is a declaration directory that can hold more. *)
-        b Navigate "arrows+enter" "connect"
-      ; b Navigate "PgUp/PgDn" "page" ~help:"move the cursor a page; Home/End go to the first and last service"
-      ; b Navigate "v" "view" ~help:"cycle all / attached only / not attached only"
-      ; b Navigate "o" "order" ~help:"cycle attached first / declared order"
-      ; b Act "T" "toggle" ~help:"turn the provider under the cursor on or off"
-      ; b Act "A" "app"
+        b ~ko:"연결" Navigate "arrows+enter" "connect"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page" ~help:"move the cursor a page; Home/End go to the first and last service"
+      ; b ~ko:"보기" Navigate "v" "view" ~help:"cycle all / attached only / not attached only"
+      ; b ~ko:"정렬" Navigate "o" "order" ~help:"cycle attached first / declared order"
+      ; b ~ko:"켜기/끄기" Act "T" "toggle" ~help:"turn the provider under the cursor on or off"
+      ; b ~ko:"앱 등록" Act "A" "app"
           ~help:"open the app-registration form for it -- it asks for a Client ID"
-      ; b Act "D D" "disconnect"
+      ; b ~ko:"연결 끊기" Act "D D" "disconnect"
           ~help:
             "twice: forget the stored token, drop the tools it attached, and ask \
              the provider to revoke what it still holds"
-      ; b Search "/" "filter"
-      ; b Meta "R" "refresh"
+      ; b ~ko:"필터" Search "/" "filter"
+      ; b ~ko:"새로 조회" Meta "R" "refresh"
       ]
   | Detail_channels ->
-      [ b Navigate "j/k" "transport"
-      ; b Navigate "J/K" "binding"
-      ; b Navigate "PgUp/PgDn" "detail page"
-      ; b Act "b / e / u u" "bind / reassign / remove"
+      [ b ~ko:"채널 종류" Navigate "j/k" "transport"
+      ; b ~ko:"연결" Navigate "J/K" "binding"
+      ; b ~ko:"상세 페이지" Navigate "PgUp/PgDn" "detail page"
+      ; b ~ko:"연결 / 옮기기 / 끊기" Act "b / e / u u" "bind / reassign / remove"
           ~help:"bind a channel, reassign the selected row, or remove it twice-confirmed"
         (* Takes [U] from the runtime picker on this tab only, the way [u]
            is taken above: the picker stays on every other tab. *)
-      ; b Act "U U" "unbind all"
+      ; b ~ko:"모두 끊기" Act "U U" "unbind all"
           ~help:"remove every channel binding of this Keeper on every \
                  transport, twice-confirmed; a channel rebound to another \
                  Keeper meanwhile is left as is"
@@ -2754,11 +2782,11 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       (* Lowercase [b] beside [B]: one partition, then all of them. It was
          [Q], but the global quit test takes [Q] as well as [q] and runs
          first, so the key armed the exit instead of the requeue. *)
-      [ b Act "b" "requeue board"
+      [ b ~ko:"게시판 다시 넣기" Act "b" "requeue board"
           ~help:
             "requeue the oldest blocked Board-attention partition; \
              its judgment call may run a second time"
-      ; b Act "B" "requeue all board"
+      ; b ~ko:"게시판 모두 다시 넣기" Act "B" "requeue all board"
           ~help:
             "requeue every waiting Board-attention partition in order, with \
              a separate audited CAS for each; judgment calls may run again"
@@ -2766,14 +2794,14 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   | Detail_terminal ->
       (* [g] is the approval-gate toggle on every tab, so the Terminal does not
          borrow it for the top the way readers elsewhere do. *)
-      [ b Navigate "j/k" "scroll"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Navigate "Home/End" "oldest/follow"
+      [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"처음/따라가기" Navigate "Home/End" "oldest/follow"
           ~help:"Home goes to the oldest output kept; End goes back to the \
                  bottom and follows new output again"
       ]
   | Detail_automation ->
-      [ b Navigate "< / >" "schedule pages"
+      [ b ~ko:"일정 쪽" Navigate "< / >" "schedule pages"
           ~help:"previous / next page for this Keeper; pages are separate observations" ]
   | Detail_secrets | Detail_runs -> []
 
@@ -2797,12 +2825,13 @@ let keeper_detail_tab_taken_keys tab =
 
 (* The keys the detail footer leads with. Same [key:label] spelling as the
    rest of the row, and the tab switch leads because it is on every tab. *)
-let keeper_detail_tab_hint tab =
+let keeper_detail_tab_hint ~ko tab =
+  let named binding =
+    if ko then key_hint ~label:binding.label_ko binding else key_hint binding
+  in
   String.concat "  "
-    ("[ ]:tab"
-     :: List.map
-          (fun binding -> key_hint binding)
-          (keeper_detail_tab_bindings tab))
+    (("[ ]:" ^ if ko then "탭" else "tab")
+     :: List.map named (keeper_detail_tab_bindings tab))
 
 (* A surface's rows on the sheet. The shared tail -- r, Tab and q exactly as
    [listing_meta] spells them -- is said once, under Global. Repeated under
@@ -2819,21 +2848,21 @@ let sheet_bindings surface =
    volume binding is also used by its catalog and child footers. *)
 let tools_detail_bindings =
   [ tools_volume_gc_binding
-  ; b Act "Enter" "read request / Skill evidence"
+  ; b ~ko:"요청 / Skill 근거 읽기" Act "Enter" "read request / Skill evidence"
       ~help:"in async runs, read the selected original request; \
              otherwise load retained evidence for the selected Skill"
-  ; b Navigate "t / T" "source Task"
+  ; b ~ko:"원본 작업" Navigate "t / T" "source Task"
       ~help:"from async request detail, read its original source Task and history"
-  ; b Navigate "H" "earlier history"
+  ; b ~ko:"이전 기록" Navigate "H" "earlier history"
       ~help:"from original Task detail, read earlier stored history; retains \
              the observed prefix on failure"
-  ; b Act "o / O" "exact lookup"
+  ; b ~ko:"정확히 찾기" Act "o / O" "exact lookup"
       ~help:"in async runs, edit the original submitter, request ID and \
              target Keeper for an exact lookup"
   ]
 
 let work_task_detail_bindings =
-  [ b Navigate "H" "earlier history"
+  [ b ~ko:"이전 기록" Navigate "H" "earlier history"
       ~help:"in Task detail, extend the observed history with its known \
              earlier page"
   ]
@@ -2841,7 +2870,7 @@ let work_task_detail_bindings =
 (* Each section with the surface it answers for; Global and the mark legends
    answer for none. The sheet reads the sections, the key reference reads the
    surface as well, for the paragraphs under a table. *)
-let located_sections ?current () =
+let located_sections ~lang ?current () =
   let sections =
     List.map
       (fun (title, surface) ->
@@ -2860,7 +2889,7 @@ let located_sections ?current () =
                          , Printf.sprintf "on the %s tab: %s"
                              (Masc_tui_types.keeper_detail_tab_label tab)
                              help ))
-                      (entries (keeper_detail_tab_bindings tab)))
+                      (entries ~lang (keeper_detail_tab_bindings tab)))
                  Masc_tui_types.keeper_detail_tabs
            (* The fact browser and the reading its Enter opens have the same
               problem the tabs above have: keys the surface list cannot hold,
@@ -2869,28 +2898,28 @@ let located_sections ?current () =
            | Memory ->
                List.map
                  (fun (key, help) -> (key, "in the facts browser: " ^ help))
-                 (entries bindings_memory_facts)
+                 (entries ~lang bindings_memory_facts)
                @ List.map (fun (key, help) -> (key, "in the changes browser: " ^ help))
-                   (entries bindings_memory_changes)
+                   (entries ~lang bindings_memory_changes)
                @ List.map
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
-                   (entries bindings_memory_fact_detail)
+                   (entries ~lang bindings_memory_fact_detail)
            | Lanes ->
                List.map
                  (fun (key, help) -> (key, "in a lane's run list: " ^ help))
-                 (entries (lane_run_list_bindings ~has_runs:true ~has_older:true))
+                 (entries ~lang (lane_run_list_bindings ~has_runs:true ~has_older:true))
                @ List.map
                    (fun (key, help) -> (key, "in a run's detail: " ^ help))
-                   (entries lane_run_detail_bindings)
-               @ entries [preflight_detail_binding]
-           | Planning -> entries work_task_detail_bindings
-           | Tools -> entries tools_detail_bindings
+                   (entries ~lang lane_run_detail_bindings)
+               @ entries ~lang [preflight_detail_binding]
+           | Planning -> entries ~lang work_task_detail_bindings
+           | Tools -> entries ~lang tools_detail_bindings
            | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
            | Overview | Acting | Metrics | Clients | Board | Approvals | Schedules
            | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
            | Config | Resources | System_logs -> []
          in
-         (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
+         (surface, (title, entries ~lang (sheet_bindings surface) @ tab_entries)))
       help_surfaces
   in
   let here, rest =
@@ -2900,7 +2929,7 @@ let located_sections ?current () =
         List.partition (fun (surface, _) -> surface = current) sections
   in
   List.map (fun (surface, (title, keys)) -> (Some surface, (title ^ here_marker, keys))) here
-  @ (None, ("Global", entries global))
+  @ (None, ("Global", entries ~lang global))
     :: (List.map (fun (surface, section) -> (Some surface, section)) rest
         (* The marks last, as reference, the way the slash commands read as
            reference. One reader of them has no words beside it: the Keepers
@@ -2957,7 +2986,7 @@ let located_sections ?current () =
           ; ("Param marks", Masc_tui_config_mark.param_legend)
           ])
 
-let help_sections ?current () = List.map snd (located_sections ?current ())
+let help_sections ~lang ?current () = List.map snd (located_sections ~lang ?current ())
 
 type reference_section = {
   section_title : string;
@@ -2977,96 +3006,118 @@ let reference_sections () =
          | None -> []
        in
        { section_title; section_rows; section_notes })
-    (located_sections ())
+    (located_sections ~lang:Lang_en ())
 
 let workspace_activity_bindings ~context =
-  [ b Navigate "j/k" (if context then "scroll" else "select")
-  ; b Navigate "PgUp/PgDn" "page"
-  ; b Act "Enter / Right" "file" ~help:"open the selected recorded file in Code"
-  ; b Act "r / R" "refresh"
-  ; b Navigate "Esc / Left" (if context then "list" else "repositories")
-  ; b Navigate "?" "help"
-  ] @ (if context then [b Navigate "Home/End / g/G" "edges"]
-       else [b Navigate "v / V" "context" ~help:"read the selected record's full path, Task and execution metadata"])
+  [ (if context then b ~ko:"스크롤" Navigate "j/k" "scroll"
+     else b ~ko:"선택" Navigate "j/k" "select")
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"파일" Act "Enter / Right" "file" ~help:"open the selected recorded file in Code"
+  ; b ~ko:"새로 조회" Act "r / R" "refresh"
+  ; (if context then b ~ko:"목록" Navigate "Esc / Left" "list"
+     else b ~ko:"저장소" Navigate "Esc / Left" "repositories")
+  ; b ~ko:"도움말" Navigate "?" "help"
+  ] @ (if context then [b ~ko:"처음/끝" Navigate "Home/End / g/G" "edges"]
+       else [b ~ko:"맥락" Navigate "v / V" "context" ~help:"read the selected record's full path, Task and execution metadata"])
 
 let exact_activity_bindings =
-  [ b Act "Space" "change activity draft" ~help:"preserve configuration; no write until s"
-  ; b Act "s" "save" ~help:"preview and save against the original file revision"
-  ; b Act "r" "read current" ~help:"keep edits; otherwise follow current file"
-  ; b Act "u" "reapply activity" ~help:"keep only the desired on/off change over the current file; s then saves"
-  ; b Act "x" "discard draft" ~help:"use the displayed current file; no write"
-  ; b Navigate "j/k" "scroll"
-  ; b Navigate "PgUp/PgDn" "page"
-  ; b Navigate "Home/End" "top/bottom"
-  ; b Navigate "Esc / q" "back" ~help:"retain the activity draft for this workspace and lane"
+  [ b ~ko:"활동 초안 바꾸기" Act "Space" "change activity draft" ~help:"preserve configuration; no write until s"
+  ; b ~ko:"저장" Act "s" "save" ~help:"preview and save against the original file revision"
+  ; b ~ko:"지금 파일 읽기" Act "r" "read current" ~help:"keep edits; otherwise follow current file"
+  ; b ~ko:"활동 다시 적용" Act "u" "reapply activity" ~help:"keep only the desired on/off change over the current file; s then saves"
+  ; b ~ko:"초안 버리기" Act "x" "discard draft" ~help:"use the displayed current file; no write"
+  ; b ~ko:"스크롤" Navigate "j/k" "scroll"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+  ; b ~ko:"뒤로" Navigate "Esc / q" "back" ~help:"retain the activity draft for this workspace and lane"
   ]
 
 let about_bindings =
-  [b Act "c" "candle"; b Meta "Esc" "close"; b Meta "?" "help"]
+  [ b ~ko:"Candle" Act "c" "candle"
+  ; b ~ko:"닫기" Meta "Esc" "close"
+  ; b ~ko:"도움말" Meta "?" "help" ]
 
 let context_bindings ~cols (state : state) =
   let module Inspector = Masc_tui_context_inspector in
   let split = cols >= Masc_tui_roster_pane.threshold_cols in
-  let tabs = [b Navigate "1/2/3/4 or Tab" "switch"] in
+  let tabs = [b ~ko:"전환" Navigate "1/2/3/4 or Tab" "switch"] in
   let turns = match state.context_inspector_target with
-    | Inspector.Recent _ -> [b Navigate "[ / ]" "turn"]
+    | Inspector.Recent _ -> [b ~ko:"턴" Navigate "[ / ]" "turn"]
     | Inspector.Pinned _ -> [] in
-  let refresh = [b Meta "r" "refresh"] in
-  let help = [b Meta "?" "help"] in
+  let refresh = [b ~ko:"새로 조회" Meta "r" "refresh"] in
+  let help = [b ~ko:"도움말" Meta "?" "help"] in
+  let scroll = b ~ko:"스크롤" Navigate "j/k" "scroll" in
+  let close = b ~ko:"닫기" Meta "Esc" "close" in
   let scroll_plain_body = match state.context_inspector_reading with
     | Some (_, reading) ->
         Inspector.scroll_plain_body ~tab:state.context_inspector_tab
           ~target:state.context_inspector_target reading
     | None -> false in
   if Option.is_some state.search then
-    [b Search "type" "query"; b Act "Enter" "keep search"; b Meta "Esc" "cancel search"]
+    [ b ~ko:"검색어" Search "type" "query"
+    ; b ~ko:"검색 유지" Act "Enter" "keep search"
+    ; b ~ko:"검색 취소" Meta "Esc" "cancel search" ]
   else match state.context_inspector_tab, state.context_inspector_exact with
   | Inspector.Response, _ ->
-      tabs @ turns @ [b Navigate "j/k" "scroll"; b Navigate "PgUp/PgDn" "page";
-        b Navigate "Home/End" "top/bottom"] @ refresh @ [b Meta "Esc" "return"] @ help
+      tabs @ turns @ [scroll; b ~ko:"페이지" Navigate "PgUp/PgDn" "page";
+        b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"] @ refresh
+      @ [b ~ko:"돌아가기" Meta "Esc" "return"] @ help
   | (Inspector.Composition | Inspector.Exact_input | Inspector.Input_map), Some _ ->
-      [b Navigate "4" "response"; b Navigate "j/k" "scroll"; b Meta "Esc" "list"] @ help
+      [b ~ko:"응답" Navigate "4" "response"; scroll; b ~ko:"목록" Meta "Esc" "list"] @ help
   | (Inspector.Exact_input | Inspector.Input_map), None when scroll_plain_body ->
-      tabs @ turns @ [b Navigate "j/k" "scroll"] @ refresh @ [b Meta "Esc" "close"] @ help
+      tabs @ turns @ [scroll] @ refresh @ [close] @ help
   | (Inspector.Exact_input | Inspector.Input_map), None ->
       tabs @ turns
       @ (if state.context_inspector_tab = Inspector.Exact_input
-            && Option.is_some state.context_inspector_reading then [b Search "/" "search"] else [])
-      @ [b Navigate "j/k" (if split then "select or scroll" else "select")]
-      @ (if split then [b Navigate "h/l" "pane"] else [])
-      @ [b Act "Enter" "open exact"] @ refresh @ [b Meta "Esc" "close"] @ help
+            && Option.is_some state.context_inspector_reading
+         then [b ~ko:"찾기" Search "/" "search"] else [])
+      @ [ if split then b ~ko:"선택 / 스크롤" Navigate "j/k" "select or scroll"
+          else b ~ko:"선택" Navigate "j/k" "select" ]
+      @ (if split then [b ~ko:"창" Navigate "h/l" "pane"] else [])
+      @ [b ~ko:"원문 열기" Act "Enter" "open exact"] @ refresh @ [close] @ help
   | Inspector.Composition, None ->
-      tabs @ turns @ [b Navigate "j/k" "scroll"] @ refresh @ [b Meta "Esc" "close"] @ help
+      tabs @ turns @ [scroll] @ refresh @ [close] @ help
 
-let footer_hints_about () = hints_of_bindings about_bindings
-let footer_hints_context ~cols state = hints_of_bindings (context_bindings ~cols state)
+let footer_hints_about ~lang = hints_of_bindings ~lang about_bindings
+let footer_hints_context ~cols (state : state) =
+  hints_of_bindings ~lang:state.ui_language (context_bindings ~cols state)
 
 let queue_bindings state panel =
-  let close = [b Meta "Esc" "back"; b Meta "?" "help"] in
+  let help = b ~ko:"도움말" Meta "?" "help" in
+  let page = b ~ko:"페이지" Navigate "PgUp/PgDn" "page" in
+  let edges = b ~ko:"처음/끝" Navigate "Home/End" "edges" in
+  let close = [b ~ko:"뒤로" Meta "Esc" "back"; help] in
   if Option.is_some panel.qp_detail then
-    [b Navigate "j/k" "scroll"; b Navigate "PgUp/PgDn" "page";
-     b Navigate "Home/End" "edges"; b Meta "Enter / Esc" "list"; b Meta "?" "help"]
+    [b ~ko:"스크롤" Navigate "j/k" "scroll"; page; edges;
+     b ~ko:"목록" Meta "Enter / Esc" "list"; help]
   else
     let actions =
       if panel.qp_reading <> Queue_current || not (server_authority_ready state) then []
       else match queue_panel_priority state ~items:(queue_panel_items state panel) panel with
-        | Queue_local_order -> [b Act "n" "first locally"; b Act "l" "last locally"]
-        | Queue_server_order -> [b Act "n" "run next"; b Act "l" "move last"]
-        | Queue_event_urgency -> [b Act "n" "immediate priority"; b Act "l" "low priority"]
+        | Queue_local_order ->
+            [ b ~ko:"여기서만 맨 앞" Act "n" "first locally"
+            ; b ~ko:"여기서만 맨 뒤" Act "l" "last locally" ]
+        | Queue_server_order ->
+            [b ~ko:"다음에 실행" Act "n" "run next"; b ~ko:"맨 뒤로" Act "l" "move last"]
+        | Queue_event_urgency ->
+            [ b ~ko:"최우선" Act "n" "immediate priority"
+            ; b ~ko:"낮은 순위" Act "l" "low priority" ]
         | Queue_no_priority -> [] in
-    actions @ [b Navigate "↑/↓ / j/k" "select"; b Navigate "Enter" "read"]
-    @ [b Navigate "f" (match panel.qp_layout with
-         | Masc_tui_queue_layout.Adaptive -> "prefer full"
-         | Expanded -> "allow context");
-       b Navigate "PgUp/PgDn" "page"; b Navigate "Home/End" "edges";
-       b Act "r" "refresh"] @ close
+    actions
+    @ [b ~ko:"선택" Navigate "↑/↓ / j/k" "select"; b ~ko:"읽기" Navigate "Enter" "read"]
+    @ [ (match panel.qp_layout with
+         | Masc_tui_queue_layout.Adaptive -> b ~ko:"전체 먼저" Navigate "f" "prefer full"
+         | Expanded -> b ~ko:"맥락 함께" Navigate "f" "allow context")
+      ; page; edges; b ~ko:"새로 조회" Act "r" "refresh" ] @ close
 
 (* The selected action has higher priority than generic movement. The shared
    default group sort would put every navigation key ahead of it and cause
    next/last to disappear first as the footer gives up its tail. *)
-let footer_hints_queue state panel = hints_in_order (queue_bindings state panel)
+let footer_hints_queue (state : state) panel =
+  hints_in_order ~lang:state.ui_language (queue_bindings state panel)
 
 let help_sections_for_state ~cols (state : state) =
+  let lang = state.ui_language in
   let active =
     if state.about_open then Some ("About", about_bindings)
     else if state.context_inspector_open then Some ("Context", context_bindings ~cols state)
@@ -3086,10 +3137,10 @@ let help_sections_for_state ~cols (state : state) =
       Some ("Keeper voices", bindings)
     else if state.view = Runtime && Option.is_some state.runtime_detail_target then
       let routes = state.runtime_detail_target = Some Runtime_routes in
-      Some ("Runtime detail", runtime_detail_bindings_for ~ko:(state.ui_language = Lang_ko) ~routes)
+      Some ("Runtime detail", runtime_detail_bindings_for ~routes)
     else if state.view = Runtime && Option.is_some (runtime_parent state) then
       Option.map (fun parent ->
-        "Runtime editor", runtime_parent_bindings ~ko:(state.ui_language = Lang_ko) parent)
+        "Runtime editor", runtime_parent_bindings parent)
         (runtime_parent state)
     else if state.view = Acting && Option.is_some state.acting_detail then
       Some ("Event evidence", bindings_acting_evidence)
@@ -3121,17 +3172,144 @@ let help_sections_for_state ~cols (state : state) =
     else None
   in
   match active with
-  | None -> help_sections ~current:state.view ()
+  | None -> help_sections ~lang ~current:state.view ()
   | Some (title, bindings) ->
-      (title ^ here_marker, entries bindings) :: help_sections ()
+      (title ^ here_marker, entries ~lang bindings) :: help_sections ~lang ()
 
-let footer_hints_browser_lane =
-  hints_of_bindings
-    [ b Navigate "b" "choose browser"
-    ; b Navigate "A" "advanced browsers"
-    ; b Navigate "[ / ]" "tab"
-    ; b Navigate "j/k" "text"
-    ; b Act "Ctrl-O" "screenshot"
-    ; b Act "r" "refresh"
-    ; b Navigate "Ctrl-^ / Esc" "hide lane"
+let footer_hints_browser_lane ~lang =
+  hints_of_bindings ~lang
+    [ b ~ko:"브라우저 고르기" Navigate "b" "choose browser"
+    ; b ~ko:"고급 브라우저" Navigate "A" "advanced browsers"
+    ; b ~ko:"탭" Navigate "[ / ]" "tab"
+    ; b ~ko:"본문" Navigate "j/k" "text"
+    ; b ~ko:"화면 캡처" Act "Ctrl-O" "screenshot"
+    ; b ~ko:"새로 조회" Act "r" "refresh"
+    ; b ~ko:"레인 숨기기" Navigate "Ctrl-^ / Esc" "hide lane"
+    ]
+
+(* The rows the renderers used to spell by hand, each a string in English
+   only. They are bindings like every other row now, so each key has both
+   names. The order is the one the string had: these rows are short and lead
+   with what the reader does first, so the group sort is not applied. *)
+let scroll_binding = b ~ko:"스크롤" Navigate "j/k" "scroll"
+let page_binding = b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+let close_binding = b ~ko:"닫기" Act "Esc" "close"
+
+let footer_hints_browser_lane_reading ~lang =
+  footer_hints_browser_lane ~lang ^ "  "
+  ^ hints_in_order ~lang
+      [ b ~ko:"장면" Navigate "s" "scene"
+      ; b ~ko:"영역" Navigate "v" "regions"
+      ; b ~ko:"관측" Navigate "h" "observations"
+      ]
+
+let footer_hints_browser_picker ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"고르기" Navigate "\xe2\x86\x91/\xe2\x86\x93" "choose"
+    ; b ~ko:"이 브라우저 쓰기" Act "Enter" "use browser"
+    ; b ~ko:"연결 다시 읽기" Act "r" "reload connections"
+    ; b ~ko:"고급" Navigate "A" "advanced"
+    ; b ~ko:"취소" Act "Esc" "cancel"
+    ]
+
+let browser_choose = b ~ko:"브라우저 고르기" Navigate "b" "choose browser"
+let browser_main = b ~ko:"본문으로" Navigate "m" "main"
+let browser_page_scroll = b ~ko:"페이지 스크롤" Navigate "J/K" "page scroll"
+let browser_observations = b ~ko:"관측" Navigate "h" "observations"
+let browser_image = b ~ko:"그림" Act "Ctrl-O" "image"
+
+(* [enter] is what Enter does to the element under the cursor, and is absent
+   where the cursor is on nothing that takes it. *)
+let footer_hints_browser_scene ~lang ~(enter : Browser_lane_view.scene_action option) ~articles =
+  hints_in_order ~lang
+    ([ browser_choose ]
+     @ (match enter with
+        | Some Browser_lane_view.Read_region -> [ b ~ko:"영역 읽기" Act "Enter" "read region" ]
+        | Some Browser_lane_view.Follow_link -> [ b ~ko:"링크 따라가기" Act "Enter" "follow link" ]
+        | Some Browser_lane_view.Click_control -> [ b ~ko:"누르기" Act "Enter" "click" ]
+        | None -> [])
+     @ [ browser_main
+       ; browser_page_scroll
+       ; b ~ko:"동작" Navigate "Tab/Shift-Tab" "action"
+       ]
+     @ (if articles then [ b ~ko:"글" Navigate "N/P" "article" ] else [])
+     @ [ b ~ko:"요소" Navigate "n/p" "element"
+       ; b ~ko:"영역" Navigate "v" "regions"
+       ; b ~ko:"본문" Navigate "s" "text"
+       ; b ~ko:"복사" Act "y" "copy"
+       ; browser_observations
+       ; browser_image
+       ])
+
+let footer_hints_browser_scene_guard ~lang =
+  hints_in_order ~lang
+    [ browser_choose
+    ; browser_main
+    ; browser_page_scroll
+    ; b ~ko:"따라간 곳 다시 확인" Act "r" "recheck followed destination"
+    ; b ~ko:"본문 다시 확인" Act "s" "recheck text"
+    ; browser_observations
+    ; browser_image
+    ]
+
+let footer_hints_browser_observations ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"관측" Navigate "[/]" "observation"
+    ; scroll_binding
+    ; b ~ko:"기록 복사" Act "y" "copy record"
+    ; b ~ko:"목록 다시 읽기" Act "r" "reload list"
+    ; b ~ko:"작업 공간 다시 확인" Act "R" "recheck workspace"
+    ; b ~ko:"브라우저로" Navigate "h/Esc" "back to browser"
+    ]
+
+let footer_hints_client_detail ~lang =
+  hints_in_order ~lang
+    [ scroll_binding
+    ; page_binding
+    ; b ~ko:"처음/끝" Navigate "g/G" "first/last"
+    ; b ~ko:"클라이언트" Navigate "Esc" "clients"
+    ]
+
+let footer_hints_lane_activity ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"초안" Act "Space" "draft"
+    ; b ~ko:"저장" Act "s" "save"
+    ; b ~ko:"읽기" Act "r" "read"
+    ; b ~ko:"다시 적용" Act "u" "reapply"
+    ; b ~ko:"버리기" Act "x" "discard"
+    ; b ~ko:"도움말" Meta "?" "help"
+    ; b ~ko:"뒤로" Navigate "Esc" "back"
+    ]
+
+let footer_hints_lane_inventory_detail ~lang =
+  hints_in_order ~lang
+    [ scroll_binding
+    ; page_binding
+    ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+    ; b ~ko:"새로 조회" Meta "r" "refresh"
+    ; b ~ko:"목록" Navigate "Esc/Left" "inventory"
+    ]
+
+let footer_hints_link_preview_empty ~lang = hints_in_order ~lang [ close_binding ]
+
+let footer_hints_play_invite ~lang =
+  hints_in_order ~lang
+    [ scroll_binding; b ~ko:"링크 복사" Act "y" "copy link"; close_binding ]
+
+let footer_hints_answering ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"선택" Navigate "j/k" "move"
+    ; page_binding
+    ; b ~ko:"처음/끝" Navigate "Home/End" "edges"
+    ; b ~ko:"채팅" Act "Enter" "chat"
+    ; close_binding
+    ]
+
+let footer_hints_changes_diff ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"좌우 이동" Navigate "Shift-Left / Shift-Right" "pan"
+    ; scroll_binding
+    ; b ~ko:"뒤로" Act "Left / Esc" "back"
+    ; b ~ko:"편집기에서 열기" Act "o" "open in editor"
+    ; listing_quit
     ]

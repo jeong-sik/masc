@@ -70,9 +70,16 @@ type wake_producer =
   | Keeper_job
   | Read_model_reader
 
+type row_bearing =
+  | Holds_state  (** The row puts its Keeper in [waiting] or [deferred]. *)
+  | Listed_only
+      (** The row is listed and puts the Keeper in no state: a reservation
+          whose time has not come. *)
+
 type waiting_row =
   { keeper_name : string option
   ; source : waiting_source
+  ; bearing : row_bearing
   ; waiting_on : string
   ; what : string
   ; wake_producer : wake_producer

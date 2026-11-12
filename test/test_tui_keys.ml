@@ -859,7 +859,7 @@ let test_the_questions_reading_tells_unread_from_none_open () =
     (Masc_tui_approvals_model.approvals_open_question_count state)
 
 let section name =
-  match List.assoc_opt name (Masc_tui_keys.help_sections ()) with
+  match List.assoc_opt name (Masc_tui_keys.help_sections ~lang:Masc_tui_types.Lang_en ()) with
   | Some entries -> entries
   | None -> Alcotest.failf "help has no %S section" name
 

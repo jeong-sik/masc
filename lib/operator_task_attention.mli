@@ -39,7 +39,6 @@ type item =
       ; title : string
       ; producer : string
       ; since : string  (** when the completion was submitted *)
-      ; verification_id : string
       }
 
 val project :

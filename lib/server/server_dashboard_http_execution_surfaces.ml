@@ -1086,42 +1086,43 @@ let execution_snapshot_json ~owner () =
    payload has been decoded by [Keeper_lifecycle_events.lifecycle_event_of_wire].
    The operator pause path constructs [Phase_event Paused] directly. *)
 
+(* What a lifecycle event says about a row: the phase it leaves the Keeper in
+   and, when the event states it, whether the Keeper is paused. The row's
+   [phase], [pipeline_stage] and [keepalive_running] words are read off the
+   phase by the functions a freshly built row uses, so a patched row and a
+   fresh one cannot spell the same phase differently. *)
 type lifecycle_display =
-  { ld_keepalive_running : bool
-  ; ld_phase : string
-  ; ld_pipeline_stage : string
+  { ld_phase : Keeper_state_machine.phase
   ; ld_paused : bool option
   }
 
 (* Exhaustive over the closed custom-event sum. A new [Keeper_lifecycle_events.t]
    variant breaks this match (no catch-all) until its dashboard projection is
-   declared. Values are byte-identical to the prior per-field string whitelist. *)
+   declared. *)
 let display_of_custom_event (verb : Keeper_lifecycle_events.t) : lifecycle_display =
   let open Keeper_lifecycle_events in
   match verb with
   | Started | Restarted | Reconciled ->
-    { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = Some false }
-  | Purged ->
-    { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = Some false }
+    { ld_phase = Keeper_state_machine.Running; ld_paused = Some false }
+  | Purged -> { ld_phase = Keeper_state_machine.Stopped; ld_paused = Some false }
   | Admission_denied ->
     (* admission guard refused to launch a fiber *)
-    { ld_keepalive_running = false; ld_phase = "offline"; ld_pipeline_stage = "offline"; ld_paused = Some false }
+    { ld_phase = Keeper_state_machine.Offline; ld_paused = Some false }
   | Supervisor_cleaned ->
-    (* cleanup == no longer alive *)
-    { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = Some false }
+    (* The supervisor removed the Keeper's registry entry. A row built fresh
+       for a Keeper without an entry reads offline. *)
+    { ld_phase = Keeper_state_machine.Offline; ld_paused = Some false }
 ;;
 
 let display_of_phase_event = function
   | Keeper_state_machine.Running ->
-    Some { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = Some false }
+    Some { ld_phase = Keeper_state_machine.Running; ld_paused = Some false }
   | Keeper_state_machine.Stopped ->
-    Some
-      { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = None }
+    Some { ld_phase = Keeper_state_machine.Stopped; ld_paused = None }
   | Keeper_state_machine.Crashed ->
-    Some
-      { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = Some false }
+    Some { ld_phase = Keeper_state_machine.Crashed; ld_paused = Some false }
   | Keeper_state_machine.Paused ->
-    Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = Some true }
+    Some { ld_phase = Keeper_state_machine.Paused; ld_paused = Some true }
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Failing
   | Keeper_state_machine.Draining
@@ -1137,15 +1138,22 @@ let lifecycle_display_of_event = function
 ;;
 
 let keepalive_running_of_lifecycle_event event =
-  Option.map (fun (d : lifecycle_display) -> d.ld_keepalive_running) (lifecycle_display_of_event event)
+  Option.map
+    (fun (d : lifecycle_display) ->
+       Keeper_status_runtime.keepalive_running_of_phase (Some d.ld_phase))
+    (lifecycle_display_of_event event)
 ;;
 
 let phase_of_lifecycle_event event =
-  Option.map (fun (d : lifecycle_display) -> d.ld_phase) (lifecycle_display_of_event event)
+  Option.map
+    (fun (d : lifecycle_display) -> Keeper_state_machine.phase_to_string d.ld_phase)
+    (lifecycle_display_of_event event)
 ;;
 
 let pipeline_stage_of_lifecycle_event event =
-  Option.map (fun (d : lifecycle_display) -> d.ld_pipeline_stage) (lifecycle_display_of_event event)
+  Option.map
+    (fun (d : lifecycle_display) -> Keeper_status_runtime.pipeline_stage_of_phase d.ld_phase)
+    (lifecycle_display_of_event event)
 ;;
 
 let paused_of_lifecycle_event event =
@@ -1279,16 +1287,11 @@ let patch_runtime_row ~event ~keepalive_running fields row =
   let row_fields =
     match lifecycle_display with
     | Some { ld_phase; _ } ->
-      upsert_assoc_field "phase" (`String ld_phase) row_fields
-    | None -> row_fields
-  in
-  let row_fields =
-    match lifecycle_display with
-    | Some { ld_pipeline_stage; _ } ->
-      upsert_assoc_field
-        "pipeline_stage"
-        (`String ld_pipeline_stage)
-        row_fields
+      row_fields
+      |> upsert_assoc_field "phase" (`String (Keeper_state_machine.phase_to_string ld_phase))
+      |> upsert_assoc_field
+           "pipeline_stage"
+           (`String (Keeper_status_runtime.pipeline_stage_of_phase ld_phase))
     | None -> row_fields
   in
   `Assoc row_fields

@@ -1,7 +1,8 @@
 (* What is checked is the decision a notation rests on, not the text a screen
    draws with it: which of today, this year and another year a moment falls
-   in, how far the operator's zone stands from UTC across a year's end, and
-   where a count's separators go around a sign. *)
+   in, how far the operator's zone stands from UTC across a year's end,
+   where a count's separators go around a sign, and which numbers an English
+   count names in the singular. *)
 
 module Instant = Masc_tui_value.Instant
 module Count = Masc_tui_value.Count
@@ -99,6 +100,15 @@ let test_a_sign_is_not_a_digit () =
     ; (-123456, "-123,456")
     ]
 
+(* English names one thing in the singular and every other number, zero
+   included, in the plural, and the figure is grouped like any other. *)
+let test_only_one_is_singular () =
+  List.iter
+    (fun (count, expected) ->
+      Alcotest.(check string) (string_of_int count) expected
+        (Count.reading ~ko:false Count.Entry count))
+    [ (0, "0 entries"); (1, "1 entry"); (2, "2 entries"); (8347, "8,347 entries") ]
+
 let () =
   Alcotest.run "tui_value"
     [ ( "instant distance",
@@ -118,5 +128,7 @@ let () =
             test_a_zone_label_carries_one_sign
         ] )
     ; ( "count",
-        [ Alcotest.test_case "a sign is not a digit" `Quick test_a_sign_is_not_a_digit ] )
+        [ Alcotest.test_case "a sign is not a digit" `Quick test_a_sign_is_not_a_digit
+        ; Alcotest.test_case "only one is singular" `Quick test_only_one_is_singular
+        ] )
     ]

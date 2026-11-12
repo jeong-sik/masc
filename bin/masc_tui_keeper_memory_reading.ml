@@ -27,7 +27,7 @@ type t =
       ; source_invalidations : int
       ; age_bins : Masc.Keeper_memory_age_bins.t option
       ; pass_end : Tui_decode_memory_health.memory_librarian_pass_end option
-      ; admission_wait : Masc.Keeper_librarian_pending.worker option
+      ; admission_wait : Masc.Keeper_librarian_pending.admission option
       }
 
 type index =
@@ -268,13 +268,17 @@ let pass_cell reading =
     ~measured:(fun ending -> { Masc_tui_keeper_axis_cell.text = pass_word ending; tone = pass_tone ending })
     (pass_end reading) in
   match reading with
-  | Row { admission_wait = Some worker; _ } ->
-    let pending = Tui_decode_memory_health.Pass_pending (Masc.Keeper_librarian_pending.Worker worker) in
+  | Row { admission_wait = Some admission; _ } ->
+    let pending = Tui_decode_memory_health.Pass_pending
+      (Masc.Keeper_librarian_pending.admission_pending admission) in
     (match durable.tone with
      | Failure -> durable
      | Attention when pass_tone pending = Masc_tui_keeper_axis_cell.Quiet -> durable
      | Quiet | Attention ->
-       { Masc_tui_keeper_axis_cell.text = pass_word pending ^ " (admit)"; tone = pass_tone pending })
+       let text = match admission with
+         | Masc.Keeper_librarian_pending.Admission_waiting _ -> pass_word pending ^ " (admit)"
+         | Admission_failed _ -> Masc_tui_types.memory_admission_text ~ko:false admission in
+       { Masc_tui_keeper_axis_cell.text; tone = pass_tone pending })
   | Row { admission_wait = None; _ } | Unknown | No_row | Refused _ -> durable
 ;;
 

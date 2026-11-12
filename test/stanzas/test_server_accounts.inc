@@ -13,6 +13,7 @@
  (name test_server_accounts)
  (modules test_server_accounts)
  (libraries
+  account_page_reading
   alcotest
   bigstringaf
   eio
@@ -25,7 +26,6 @@
   masc.masc_eio_context
   masc.masc_types
   masc.server
-  masc.string_util
   masc.workspace_connection
   unix
   yojson))

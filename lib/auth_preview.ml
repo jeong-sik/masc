@@ -9,9 +9,10 @@ let github_authorize_origin = "https://github.com"
    [form-action] on that redirect too. *)
 let policy ~nonce =
   Printf.sprintf
-    "default-src 'none'; script-src 'nonce-%s'; connect-src 'self'; form-action 'self' %s; \
+    "default-src 'none'; script-src 'nonce-%s'; %s; connect-src 'self'; form-action 'self' %s; \
      base-uri 'none'; frame-ancestors 'none'"
     nonce
+    (Account_page.style_source ~nonce)
     github_authorize_origin
 ;;
 
@@ -30,65 +31,79 @@ let page ~nonce ~title ~body ~script =
       ; "content-security-policy", policy ~nonce
       ]
   ; body =
-      String.concat
-        "\n"
-        [ "<!doctype html>"
-        ; "<html lang=\"en\">"
-        ; "<head>"
-        ; "<meta charset=\"utf-8\">"
-        ; "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        ; "<title>" ^ title ^ "</title>"
-        ; "</head>"
-        ; "<body>"
-        ; "<main>"
-        ; body
-        ; "</main>"
-        ; Printf.sprintf "<script nonce=\"%s\">%s</script>" nonce script
-        ; "</body>"
-        ; "</html>"
-        ; ""
-        ]
+      Account_page.document
+        ~nonce
+        ~title
+        (String.concat
+           "\n"
+           [ "<main>"; body; "</main>"; Printf.sprintf "<script nonce=\"%s\">%s</script>" nonce script ])
   }
 ;;
 
 (* The form is the same whether the server has a GitHub login client or
    not, so the scripts of the pages find its elements either way. Without a
    client the start is a 404, and the button cannot be pressed. *)
-let no_github_login = "This server has no GitHub login."
+let no_github_login =
+  "이 서버에는 GitHub 로그인이 설정되어 있지 않아요. 이 서버를 운영하는 사람에게 알려 주세요."
+;;
 
-let start_form ~invite ~github =
+(* [label] is what the button says: each page names what the login does
+   there. *)
+let start_form ~invite ~github ~label =
   String.concat
     "\n"
     [ "<form method=\"post\" action=\"/auth/github/start\">"
     ; (if invite then "<input type=\"hidden\" id=\"invite\" name=\"invite\">" else "")
     ; "<input type=\"hidden\" name=\"return_to\" value=\"/\">"
-    ; (if github
-       then "<button id=\"go\">Sign in with GitHub</button>"
-       else "<button id=\"go\" disabled aria-describedby=\"go-note\">Sign in with GitHub</button>")
+    ; Printf.sprintf
+        "<button id=\"go\" class=\"primary block\"%s>%s</button>"
+        (if github then "" else " disabled aria-describedby=\"go-note\"")
+        label
     ; "</form>"
-    ; (if github then "" else "<p id=\"go-note\">" ^ no_github_login ^ "</p>")
+    ; (if github then "" else "<p id=\"go-note\" class=\"callout\">" ^ no_github_login ^ "</p>")
     ]
 ;;
 
 (* The script takes the token from the fragment and drops the fragment from
-   the address bar, so the token is in no request line and no history entry. *)
+   the address bar, so the token is in no request line and no history entry.
+   An address with no token cannot start a login that takes an invitation, so
+   the page shows how to open the invitation again in place of the form. *)
 let invite_script =
   {|const token = location.hash.slice(1);
 history.replaceState(null, "", location.pathname);
 document.getElementById("invite").value = token;
 if (token === "") {
-  document.getElementById("note").textContent = "This link holds no invitation.";
-  document.getElementById("go").disabled = true;
+  document.title = "이 주소에는 초대 정보가 없어요";
+  document.getElementById("title").textContent = document.title;
+  document.getElementById("note").textContent =
+    "받은 초대 링크 전체를 그대로 다시 열어 주세요. 주소 끝의 # 뒤 글자까지 있어야 해요.";
+  document.getElementById("accept").hidden = true;
+  document.getElementById("back").hidden = false;
 }|}
 ;;
 
 let invite_page ~nonce ~github =
   page
     ~nonce
-    ~title:"Invitation"
+    ~title:"MASC 초대"
     ~body:
-      ("<h1>Invitation</h1>\n<p id=\"note\">Sign in with GitHub to join this workspace.</p>\n"
-       ^ start_form ~invite:true ~github)
+      (String.concat
+         "\n"
+         [ "<div class=\"narrow\">"
+         ; "<div class=\"card\">"
+         ; "<h1 id=\"title\">초대를 받았어요</h1>"
+         ; "<p id=\"note\">GitHub 계정으로 로그인하면 초대를 수락하고 이 서버를 쓸 수 있어요.</p>"
+         ; "<div id=\"accept\">"
+         ; start_form ~invite:true ~github ~label:"GitHub로 로그인하고 수락하기"
+         ; "<ul class=\"notes\">"
+         ; "<li>초대 링크는 한 번만 쓸 수 있어요.</li>"
+         ; "<li>기한이 지나면 쓸 수 없어요.</li>"
+         ; "</ul>"
+         ; "</div>"
+         ; "<p id=\"back\" hidden><a class=\"button block\" href=\"/\">로그인 화면으로</a></p>"
+         ; "</div>"
+         ; "</div>"
+         ])
     ~script:invite_script
 ;;
 
@@ -391,15 +406,25 @@ let section ~id ?(attrs = "") heading fields =
 let home_page ~nonce ~github =
   page
     ~nonce
-    ~title:"MASC accounts"
+    ~title:"MASC 계정"
     ~body:
       (String.concat
          "\n"
-         [ "<h1>MASC accounts</h1>"
+         [ "<div id=\"signin\" class=\"narrow\">"
+         ; "<div class=\"card\">"
+         ; "<h1>로그인</h1>"
+         ; "<p>초대받은 계정으로 로그인하면 내 구독을 연결하고 내 Keeper를 만들 수 있어요.</p>"
+         ; start_form ~invite:false ~github ~label:"GitHub로 계속하기"
+         ; "</div>"
+         ; "<p class=\"hint center\">초대 링크를 받았다면 그 링크를 먼저 열어 주세요. 초대는 이 서버를 운영하는 사람에게 요청할 수 있어요.</p>"
+         ; "</div>"
+           (* What a signed-in person uses, in English. The line that shows
+              what the session routes answered is inside it, so a browser with
+              no session sees the sign-in and no answer of a route. *)
+         ; "<div id=\"signed-in\" lang=\"en\" hidden>"
+         ; "<h1>MASC accounts</h1>"
          ; "<pre id=\"out\" role=\"status\">reading</pre>"
-         ; "<div id=\"signin\">" ^ start_form ~invite:false ~github ^ "</div>"
-         ; "<button id=\"signout\" hidden>Sign out</button>"
-         ; "<div id=\"signed-in\" hidden>"
+         ; "<button id=\"signout\">Sign out</button>"
          ; section
              ~id:"allowlist"
              ~attrs:" id=\"allowlist\" hidden"

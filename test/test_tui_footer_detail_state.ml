@@ -62,10 +62,10 @@ let test_each_list_footer_names_no_key_it_refuses () =
     (fun (name, surface, keys) ->
       check bool (name ^ " scopes at least one key to a state") true
         (Keys.has_detail_scoped_keys surface);
-      let list_hints = Keys.footer_hints ~detail_open:false surface in
+      let list_hints = Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false surface in
       (* Scoping moved the keys, it did not delete them: a caller that names
          no state still reads them, which is what the cheat sheet does. *)
-      let both = Keys.footer_hints surface in
+      let both = Keys.footer_hints ~lang:Masc_tui_types.Lang_en surface in
       List.iter
         (fun key ->
           check bool (name ^ " list does not advertise " ^ key) false
@@ -90,8 +90,8 @@ let names_item hints key = contains ("  " ^ hints) ("  " ^ key ^ ":")
    detail has none. *)
 let search_keys name surface =
   ( name,
-    Keys.footer_hints ~detail_open:false surface,
-    Keys.footer_hints ~detail_open:true surface,
+    Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false surface,
+    Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:true surface,
     [ "/"; "n / N" ] )
 
 (* Left closes an open detail and does nothing on a list (the [Some "left"]
@@ -105,13 +105,13 @@ let back_keys name ~list ~detail =
 
 let back_keys_of_surface name surface =
   back_keys name
-    ~list:(Keys.footer_hints ~detail_open:false surface)
-    ~detail:(Keys.footer_hints ~detail_open:true surface)
+    ~list:(Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false surface)
+    ~detail:(Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:true surface)
 
 (* The queue with a row, a question under the cursor and its source: every key
    the browsing footer can name. *)
 let approvals_list_footer =
-  Keys.footer_hints_approvals
+  Keys.footer_hints_approvals ~lang:Masc_tui_types.Lang_en
     (Keys.Approval_browsing
        { approvals = true; asks = Keys.Ask_selected; source = true; last_answer = false })
 
@@ -121,8 +121,8 @@ let scoped_keys =
       (Keys.footer_hints_planning_goal_detail ~lang:Masc_tui_types.Lang_en),
       [ "t"; "p"; "/"; "n / N" ] )
   ; ( "Board",
-      Keys.footer_hints ~detail_open:true Masc_tui_types.Board,
-      Keys.footer_hints ~detail_open:false Masc_tui_types.Board,
+      Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:true Masc_tui_types.Board,
+      Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false Masc_tui_types.Board,
       [ "c" ] )
   ; search_keys "Verification" Masc_tui_types.Verification
   ; search_keys "Harness" Masc_tui_types.Harness
@@ -130,15 +130,15 @@ let scoped_keys =
   (* Right and Enter open the entry under the cursor. An open log entry has
      nothing under them, so its footer is the list's without that key. *)
   ; ( "System_logs Right / Enter",
-      Keys.footer_hints ~detail_open:false Masc_tui_types.System_logs,
-      Keys.footer_hints ~detail_open:true Masc_tui_types.System_logs,
+      Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false Masc_tui_types.System_logs,
+      Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:true Masc_tui_types.System_logs,
       [ "Right / Enter" ] )
   (* [l], [v] and [c] change the list's filters and put its cursor back on the
      first row. An open log entry keeps its place, so [ and ] would step from
      the wrong row; the dispatcher declines all three while one is open. *)
   ; ( "System_logs filters",
-      Keys.footer_hints ~detail_open:false Masc_tui_types.System_logs,
-      Keys.footer_hints ~detail_open:true Masc_tui_types.System_logs,
+      Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false Masc_tui_types.System_logs,
+      Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:true Masc_tui_types.System_logs,
       [ "l"; "v"; "c" ] )
   (* The Approvals queue and an open approval draw from two builders of their
      own ([footer_hints_approvals], [footer_hints_approval_detail]), so no
@@ -147,11 +147,11 @@ let scoped_keys =
      is open, and that footer names it whenever the approval has values to
      read, as "string bytes" or, once they are shown, as "text". *)
   ; ( "Approvals string bytes",
-      Keys.footer_hints_approval_detail ~value_hint:Keys.Readable_values,
+      Keys.footer_hints_approval_detail ~lang:Masc_tui_types.Lang_en ~value_hint:Keys.Readable_values,
       approvals_list_footer,
       [ "v" ] )
   ; ( "Approvals text",
-      Keys.footer_hints_approval_detail ~value_hint:Keys.Byte_values,
+      Keys.footer_hints_approval_detail ~lang:Masc_tui_types.Lang_en ~value_hint:Keys.Byte_values,
       approvals_list_footer,
       [ "v" ] )
   ]
@@ -169,13 +169,13 @@ let scoped_keys =
   @ back_keys "Runtime"
       ~list:(Keys.footer_hints_runtime ~lang:Masc_tui_types.Lang_en
          ~mode:Masc_tui_types.Runtime_lanes ~picker:None)
-      ~detail:(Keys.footer_hints_runtime_detail ~ko:false ~routes:false ())
+      ~detail:(Keys.footer_hints_runtime_detail ~lang:Masc_tui_types.Lang_en ~routes:false)
   (* Repositories draws Git changes from a footer of its own; the repository
      list under it has nothing for Left to close, so Esc alone returns to
      Dashboard. *)
   @ back_keys "Repositories"
-      ~list:(Keys.footer_hints Masc_tui_types.Repositories)
-      ~detail:Keys.footer_hints_git_changes
+      ~list:(Keys.footer_hints ~lang:Masc_tui_types.Lang_en Masc_tui_types.Repositories)
+      ~detail:(Keys.footer_hints_git_changes ~lang:Masc_tui_types.Lang_en)
   (* Code at the project root has no step for Left ([code_back_step]); a
      directory down, Left climbs one. *)
   @ back_keys "Code tree"

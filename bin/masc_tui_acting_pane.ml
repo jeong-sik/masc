@@ -88,10 +88,13 @@ let next_layout ~layout ~cols =
        | Wide -> Hidden
        | Hidden -> Narrow)
 
-let layout_label = function
-  | Narrow -> "narrow"
-  | Wide -> "wide"
-  | Hidden -> "hidden"
+(* One wording in two languages; the screen the pane is drawn on picks. *)
+let say ko korean english = if ko then korean else english
+
+let layout_label ~ko = function
+  | Narrow -> say ko "좁게" "narrow"
+  | Wide -> say ko "넓게" "wide"
+  | Hidden -> say ko "숨김" "hidden"
 
 let content_cols ~layout ~cols = cols - drawn_cols ~layout ~cols
 
@@ -101,9 +104,9 @@ type tab =
   | Tab_fleet
   | Tab_changes
 
-let tab_label = function
-  | Tab_fleet -> "Recent"
-  | Tab_changes -> "Changes"
+let tab_label ~ko = function
+  | Tab_fleet -> say ko "최근" "Recent"
+  | Tab_changes -> say ko "변경" "Changes"
 
 let next_tab = function
   | Tab_fleet -> Tab_changes
@@ -185,11 +188,11 @@ type call_order =
   | Longest_first
   | By_tool
 
-let call_order_label = function
-  | Oldest_first -> "oldest first"
-  | Newest_first -> "newest first"
-  | Longest_first -> "longest first"
-  | By_tool -> "by tool"
+let call_order_label ~ko = function
+  | Oldest_first -> say ko "오래된 순" "oldest first"
+  | Newest_first -> say ko "최신 순" "newest first"
+  | Longest_first -> say ko "오래 걸린 순" "longest first"
+  | By_tool -> say ko "도구별" "by tool"
 
 let next_call_order = function
   | Newest_first -> Oldest_first
@@ -274,6 +277,7 @@ type input = {
   changes : changes;
   call_order : call_order;
   expanded : (string * Acting.call_key) list;
+  ko : bool;
 }
 
 type span = {
@@ -408,9 +412,9 @@ let tokens_sum_figure = function
   | Some (Acting.Input_whole n), Some o -> Layout.compact_count (n + o)
   | Some (Acting.Input_whole n), None | None, Some n -> Layout.compact_count n
 
-let calls_text n = Masc_tui_message_layout.count_noun n "call"
-let files_text n = Masc_tui_message_layout.count_noun n "file"
-let more_text n = Printf.sprintf "%d more" n
+let calls_text ~ko n = Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Call n
+let files_text ~ko n = Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.File n
+let more_text ~ko n = Printf.sprintf (if ko then "%d개 더" else "%d more") n
 let window_text hours = Printf.sprintf "%gh" hours
 
 let cost_text = function
@@ -429,15 +433,15 @@ let latest_tool (chunk : Acting.chunk) =
    open record only knows what this feed observed, which may have
    started mid-turn or lost rows, so it says at least that many: [4+ calls],
    and [no calls yet] when it saw none. *)
-let chunk_calls_text (chunk : Acting.chunk) =
+let chunk_calls_text ~ko (chunk : Acting.chunk) =
   if chunk.Acting.ck_settled then
     match chunk.Acting.ck_calls with
-    | Some count -> calls_text count
-    | None -> "calls ?"
+    | Some count -> calls_text ~ko count
+    | None -> say ko "호출 ?" "calls ?"
   else
     match List.length (Acting.chunk_tools chunk) with
-    | 0 -> "no calls yet"
-    | seen -> Printf.sprintf "%d+ calls" seen
+    | 0 -> say ko "아직 호출 없음" "no calls yet"
+    | seen -> Printf.sprintf (if ko then "호출 %d건+" else "%d+ calls") seen
 
 (* The same count as a figure alone, for the fleet row's four-cell column.
    The word "calls" moves to the column header, which says it once for every
@@ -530,14 +534,14 @@ let record_state ~health (chunk : Acting.chunk) =
    not yet chosen. And it reads first as "calm", which two comments here had
    to deny. The feed event is [Keeper_turn_complete]; the screen now says
    the same thing, from one place. *)
-let record_word = function
-  | Record_open -> ("open", Dim)
-  | Record_unfinished -> ("no end", Warn)
-  | Record_done -> ("done", Dim)
+let record_word ~ko = function
+  | Record_open -> (say ko "진행 중" "open", Dim)
+  | Record_unfinished -> (say ko "끝 없음" "no end", Warn)
+  | Record_done -> (say ko "완료" "done", Dim)
 
-let record_word_long = function
-  | Record_unfinished -> ("no end, process gone", Warn)
-  | (Record_open | Record_done) as state -> record_word state
+let record_word_long ~ko = function
+  | Record_unfinished -> (say ko "끝 없음, 프로세스 사라짐" "no end, process gone", Warn)
+  | (Record_open | Record_done) as state -> record_word ~ko state
 
 let record_glyph = function
   | Record_open -> open_record_glyph
@@ -599,7 +603,7 @@ let name_cells_for ~cols =
 let tool_cells_for ~cols =
   if is_wide ~cols then tool_cells + wide_tool_extra_cells else tool_cells
 
-let keeper_state_text ~cols ~health ~approval (chunk : Acting.chunk option) =
+let keeper_state_text ~ko ~cols ~health ~approval (chunk : Acting.chunk option) =
   let tool_cells = tool_cells_for ~cols in
   let blank width = { text = String.make width ' '; tone = Plain } in
   match approval, chunk with
@@ -607,7 +611,7 @@ let keeper_state_text ~cols ~health ~approval (chunk : Acting.chunk option) =
     (* An approval outranks whatever the record says, and it can arrive before
        any chunk does -- reading the chunk first drew a keeper waiting on an
        operator as one with nothing to report. *)
-    [ { text = pad_right state_cells "approval"; tone = Warn }
+    [ { text = pad_right state_cells (say ko "승인 대기" "approval"); tone = Warn }
     ; { text = pad_right tool_cells tool; tone = Warn }
     ; blank (calls_cells + tokens_cells)
     ]
@@ -615,12 +619,12 @@ let keeper_state_text ~cols ~health ~approval (chunk : Acting.chunk option) =
     (* No record at all. The state column carries the reason and the rest of
        the row stays blank, so an empty tool column reads as "nothing named"
        rather than as a row that failed to draw. *)
-    [ { text = pad_right state_cells "no events"; tone = Dim }
+    [ { text = pad_right state_cells (say ko "기록 없음" "no events"); tone = Dim }
     ; blank (tool_cells + calls_cells + tokens_cells)
     ]
   | None, Some chunk ->
     let state = record_state ~health chunk in
-    let word, word_tone = record_word state in
+    let word, word_tone = record_word ~ko state in
     (* Which columns a row fills is the record's shape, not a choice. A turn
        still open names the tool it is in and has no token count; a done one
        carries the counts and names no tool, because a turn that is over is
@@ -684,9 +688,9 @@ let rule_line ~cols =
 
 (* The tab that is up wears brackets and the accent; the other recedes so
    the header still reads as one line. *)
-let tab_pill ~active tab =
-  if active then { text = "[" ^ tab_label tab ^ "]"; tone = Accent }
-  else { text = tab_label tab; tone = Dim }
+let tab_pill ~ko ~active tab =
+  if active then { text = "[" ^ tab_label ~ko tab ^ "]"; tone = Accent }
+  else { text = tab_label ~ko tab; tone = Dim }
 
 (* The pane answers "what is every keeper doing right now", and a keeper with no
    agent present is doing nothing. Offline rows are dropped so the ones that are
@@ -722,12 +726,14 @@ let header_line ~cols input =
          bug, and a count of the drawn rows alone hides that anything was
          dropped. *)
       (match input.keepers_error, input.keepers with
-       | Some _, _ -> "keepers unavailable"
-       | None, None -> "keepers not loaded"
+       | Some _, _ -> say input.ko "키퍼 조회 실패" "keepers unavailable"
+       | None, None -> say input.ko "키퍼 조회 전" "keepers not loaded"
        | None, Some _ ->
          let hidden = offline_count input in
-         Masc_tui_message_layout.count_noun (List.length (working_keepers input)) "keeper"
-         ^ (if hidden = 0 then "" else Printf.sprintf " (%d offline)" hidden))
+         Masc_tui_value.Count.reading ~ko:input.ko Masc_tui_value.Count.Keeper
+           (List.length (working_keepers input))
+         ^ (if hidden = 0 then ""
+            else Printf.sprintf (if input.ko then " (오프라인 %d)" else " (%d offline)") hidden))
     | Selected_only -> ""
   in
   (* The feed is said when it is not delivering. Live is the state the rows
@@ -736,10 +742,11 @@ let header_line ~cols input =
   let feed =
     match input.feed with
     | Feed_live _ -> []
-    | Feed_off -> [ { text = middle_dot ^ "no feed"; tone = Dim } ]
-    | Feed_opening -> [ { text = middle_dot ^ "feed opening"; tone = Dim } ]
+    | Feed_off -> [ { text = middle_dot ^ say input.ko "피드 없음" "no feed"; tone = Dim } ]
+    | Feed_opening ->
+        [ { text = middle_dot ^ say input.ko "피드 여는 중" "feed opening"; tone = Dim } ]
     | Feed_closed reason ->
-        [ { text = middle_dot ^ "feed closed: " ^ reason; tone = Bad } ]
+        [ { text = middle_dot ^ say input.ko "피드 닫힘: " "feed closed: " ^ reason; tone = Bad } ]
   in
   let count =
     (* The count carried the separator that joined it to the feed word. With
@@ -750,9 +757,9 @@ let header_line ~cols input =
   in
   fit_line ~cols
     (with_border
-       ([ tab_pill ~active:(input.tab = Tab_fleet) Tab_fleet
+       ([ tab_pill ~ko:input.ko ~active:(input.tab = Tab_fleet) Tab_fleet
         ; { text = " "; tone = Plain }
-        ; tab_pill ~active:(input.tab = Tab_changes) Tab_changes
+        ; tab_pill ~ko:input.ko ~active:(input.tab = Tab_changes) Tab_changes
         ]
         @ count @ feed))
 
@@ -807,16 +814,16 @@ let fleet_row ~cols input keeper chunk =
             }
           ; { text = String.make gap_cells ' '; tone = Plain }
           ]
-          @ keeper_state_text ~cols ~health:keeper.health ~approval chunk))
+          @ keeper_state_text ~ko:input.ko ~cols ~health:keeper.health ~approval chunk))
   , Target_keeper keeper.name )
 
-let more_line ~cols n =
+let more_line ~ko ~cols n =
   ( fit_line ~cols
-      (with_border [ { text = ellipsis ^ " " ^ more_text n; tone = Dim } ])
+      (with_border [ { text = ellipsis ^ " " ^ more_text ~ko n; tone = Dim } ])
   , Target_more )
 
-let indicator_line ~cols arrow n =
-  ( fit_line ~cols (with_border [ { text = arrow ^ " " ^ more_text n; tone = Dim } ])
+let indicator_line ~ko ~cols arrow n =
+  ( fit_line ~cols (with_border [ { text = arrow ^ " " ^ more_text ~ko n; tone = Dim } ])
   , Target_none )
 
 (* The focus block: the selected keeper's newest feed record, call by call,
@@ -975,16 +982,19 @@ let tool_line ~cols ~now ~state ~place ~run (chunk : Acting.chunk)
    order is a press away, so the heading is the control as well as the
    label. No count is a record that is one response or whose responses the
    pane cannot tell apart; the count never says "1". *)
-let calls_heading_line ~cols order responses =
+let calls_heading_line ~ko ~cols order responses =
   let count =
     match responses with
-    | Some n -> middle_dot ^ string_of_int n ^ " responses"
+    | Some n ->
+        middle_dot ^ Printf.sprintf (if ko then "응답 %d개" else "%d responses") n
     | None -> ""
   in
   fit_line ~cols
     (with_border
        [ { text = String.make mark_cells ' '; tone = Plain }
-       ; { text = "calls" ^ middle_dot ^ call_order_label order ^ count; tone = Dim }
+       ; { text = say ko "호출" "calls" ^ middle_dot ^ call_order_label ~ko order ^ count
+         ; tone = Dim
+         }
        ])
 
 (* The mode and, in a batch, how many ran at once. Not the planned step:
@@ -992,18 +1002,19 @@ let calls_heading_line ~cols order responses =
    fifty cells after its indent -- with "step 12" on it the widest row
    ("completed \xc2\xb7 12m05s ago \xc2\xb7 step 12 \xc2\xb7 concurrent, 12 at
    once", 57) lost its last word to the cut; without it that row is 47. *)
-let schedule_text (tool : Acting.chunk_tool) =
+let schedule_text ~ko (tool : Acting.chunk_tool) =
   match tool.Acting.ct_schedule with
   | None -> ""
-  | Some (Error _) -> "schedule ?"
+  | Some (Error _) -> say ko "실행 방식 ?" "schedule ?"
   | Some (Ok schedule) ->
       let mode =
         match schedule.Agent_core.Tool_contract.execution_mode with
-        | Agent_core.Tool_contract.Concurrent -> "concurrent"
-        | Agent_core.Tool_contract.Serial -> "serial"
+        | Agent_core.Tool_contract.Concurrent -> say ko "동시" "concurrent"
+        | Agent_core.Tool_contract.Serial -> say ko "순차" "serial"
       in
       if schedule.Agent_core.Tool_contract.batch_size > 1 then
-        Printf.sprintf "%s, %d at once" mode schedule.Agent_core.Tool_contract.batch_size
+        Printf.sprintf (if ko then "%s, 한 번에 %d개" else "%s, %d at once")
+          mode schedule.Agent_core.Tool_contract.batch_size
       else mode
 
 let disposition_span (tool : Acting.chunk_tool) =
@@ -1025,25 +1036,29 @@ let disposition_span (tool : Acting.chunk_tool) =
    a tone and the one the cut must never take. The two previews are what
    the producer redacted and sent, one row each, cut to the pane; "not
    carried" is the wire plane, which sends none. *)
-let call_detail_line ~cols ~now (tool : Acting.chunk_tool) part =
+let call_detail_line ~ko ~cols ~now (tool : Acting.chunk_tool) part =
   let indent = { text = String.make detail_indent_cells ' '; tone = Plain } in
   let room = max 0 (cols - border_cells - detail_indent_cells) in
   let preview_row ~label preview =
+    (* The label keeps one cell between itself and the preview. The Korean
+       words are a cell wider than "out", so the column is as wide as the
+       word needs and never narrower than the English one. *)
+    let label_cells = max detail_label_cells (Layout.display_width label + 1) in
     let body =
       match preview with
       | Some text ->
-          { text = clip_cells (Masc.Tui_terminal_text.preview_line text) (max 0 (room - detail_label_cells))
+          { text = clip_cells (Masc.Tui_terminal_text.preview_line text) (max 0 (room - label_cells))
           ; tone = Plain
           }
-      | None -> { text = "not carried"; tone = Dim }
+      | None -> { text = say ko "실려 오지 않음" "not carried"; tone = Dim }
     in
     fit_line ~cols
-      (with_border [ indent; { text = pad_right detail_label_cells label; tone = Dim }; body ])
+      (with_border [ indent; { text = pad_right label_cells label; tone = Dim }; body ])
   in
   match part with
   | Detail_facts ->
       let facts =
-        { text = join [ ago_text ~now tool.Acting.ct_at; schedule_text tool ]
+        { text = join [ ago_text ~now tool.Acting.ct_at; schedule_text ~ko tool ]
         ; tone = Dim
         }
       in
@@ -1053,8 +1068,8 @@ let call_detail_line ~cols ~now (tool : Acting.chunk_tool) part =
         | None -> []
       in
       fit_line ~cols (with_border ((indent :: disposition) @ [ facts ]))
-  | Detail_input -> preview_row ~label:"in" tool.Acting.ct_input
-  | Detail_output -> preview_row ~label:"out" tool.Acting.ct_output
+  | Detail_input -> preview_row ~label:(say ko "입력" "in") tool.Acting.ct_input
+  | Detail_output -> preview_row ~label:(say ko "출력" "out") tool.Acting.ct_output
 
 (* The pane names a turn by the number its settle confirmed; the header
    then shows that number in place of the state word. An open turn spells
@@ -1066,7 +1081,7 @@ let turn_name (chunk : Acting.chunk) =
   | Some turn, true -> Some (Acting.turn_number_text turn)
   | Some _, false | None, (true | false) -> None
 
-let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
+let turn_summary_line ~ko ~cols ~health (chunk : Acting.chunk) =
   let state = record_state ~health chunk in
   let named =
     match turn_name chunk with
@@ -1077,14 +1092,14 @@ let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
     match state with
     | Record_done -> { text = done_glyph ^ " "; tone = Dim }
     | Record_open | Record_unfinished ->
-        let word, tone = record_word state in
+        let word, tone = record_word ~ko state in
         { text = record_glyph state ^ " " ^ word; tone }
   in
   let line ~tokens ~cost =
     with_border
       ( [ prefix ]
       @ named
-      @ [ { text = middle_dot ^ join [ chunk_calls_text chunk; tokens; cost ]; tone = Dim } ] )
+      @ [ { text = middle_dot ^ join [ chunk_calls_text ~ko chunk; tokens; cost ]; tone = Dim } ] )
   in
   let cost = cost_text chunk.Acting.ck_cost_usd in
   (* No receipt age: when this settle arrived is not what the row is read
@@ -1139,7 +1154,7 @@ let turn_summary_line ~cols ~health (chunk : Acting.chunk) =
    frame said; the gap between a tool's return and the next provider call;
    and a CLI lane, which sends no turn markers and runs a whole keeper turn
    as one provider call. *)
-let now_text ~now ~health ~state (chunk : Acting.chunk) =
+let now_text ~ko ~now ~health ~state (chunk : Acting.chunk) =
   let open_call =
     List.fold_left
       (fun open_so_far (wire : Acting.wire_tool) ->
@@ -1152,12 +1167,12 @@ let now_text ~now ~health ~state (chunk : Acting.chunk) =
     match open_call with
     | Some wire ->
         Some
-          (Printf.sprintf "running %s %s" wire.Acting.wt_tool
+          (Printf.sprintf (if ko then "%s 실행 중 %s" else "running %s %s") wire.Acting.wt_tool
              (age_text ~now wire.Acting.wt_started))
     | None -> (
         match chunk.Acting.ck_marker with
         | Some (Acting.Marker_started, at) ->
-            Some ("waiting on model " ^ age_text ~now at)
+            Some (say ko "모델 응답 대기 " "waiting on model " ^ age_text ~now at)
         | Some (Acting.Marker_ready, _)
         | Some (Acting.Marker_completed, _)
         | None -> None)
@@ -1169,11 +1184,11 @@ let now_text ~now ~health ~state (chunk : Acting.chunk) =
       | Record_done -> None)
   | Some Reading.Health_idle -> (
       match state with
-      | Record_done -> Some ("idle " ^ age_text ~now chunk.Acting.ck_at)
+      | Record_done -> Some (say ko "쉼 " "idle " ^ age_text ~now chunk.Acting.ck_at)
       | Record_open | Record_unfinished -> None)
   | Some Reading.Health_failing | Some Reading.Health_offline | None -> None
 
-let focus_header_line ~cols ~now ~health name current =
+let focus_header_line ~ko ~cols ~now ~health name current =
   match current with
   | Some (current : Acting.chunk) ->
       let state = record_state ~health current in
@@ -1190,14 +1205,14 @@ let focus_header_line ~cols ~now ~health name current =
         | Some _ | None ->
             List.map
               (fun (word, tone) -> [ { text = middle_dot ^ word; tone } ])
-              [ record_word_long state; record_word state ]
+              [ record_word_long ~ko state; record_word ~ko state ]
       in
       (* What the keeper is doing now comes before the state word, and
          carries its own clock, so the row does not spell two ages. The
          state word rows stay behind it: a narrow pane, or a record with
          nothing to say about now, falls back to them. *)
       let now_rows =
-        match now_text ~now ~health ~state current with
+        match now_text ~ko ~now ~health ~state current with
         | None -> []
         | Some text ->
             let now_span = { text = middle_dot ^ text; tone = Info } in
@@ -1218,7 +1233,9 @@ let focus_header_line ~cols ~now ~health name current =
       fit_line ~cols
         (with_border
            [ { text = name; tone = Accent }
-           ; { text = middle_dot ^ "no events on this feed yet"; tone = Dim }
+           ; { text = middle_dot ^ say ko "이 피드에 아직 이벤트 없음" "no events on this feed yet"
+             ; tone = Dim
+             }
            ])
 
 let approval_line ~cols tool =
@@ -1473,13 +1490,16 @@ let window ~below ~scroll ~overview body =
    scope folds to. Split out of [fleet_lines] so the heading above them can
    be decided from what they are: the column names belong over rows that use
    the columns, and beside the roster there may be none. *)
-let trace_summary count = Printf.sprintf
-  "Trace unavailable: %d Keepers · details in Keeper Info / Metadata" count
+let trace_summary ~ko count =
+  Printf.sprintf
+    (if ko then "추적 불가: 키퍼 %d명 · 자세한 내용은 키퍼 정보 탭의 메타데이터"
+     else "Trace unavailable: %d Keepers · details in Keeper Info / Metadata")
+    count
 
-let trace_unavailable_summary unavailable =
+let trace_unavailable_summary ~ko unavailable =
   match unavailable with
   | [] -> None
-  | _ :: _ -> Some (trace_summary (List.length unavailable))
+  | _ :: _ -> Some (trace_summary ~ko (List.length unavailable))
 
 let fleet_body input =
   let chunks = input.chunks in
@@ -1539,7 +1559,7 @@ let fleet_body input =
      | _ :: _ when below <= 1 -> overview ~below
      | [notice] -> notice :: overview ~below:(below - 1)
      | _ :: _ :: _ ->
-         Trace_unavailable_summary (trace_summary (List.length notices))
+         Trace_unavailable_summary (trace_summary ~ko:input.ko (List.length notices))
          :: overview ~below:(below - 1))
 
 let fleet_lines ~below ~scroll (body, overview) =
@@ -1612,12 +1632,15 @@ let changes_status_lines ~cols input =
   let one spans = [ (fit_line ~cols (with_border spans), Target_none) ] in
   let named name spans = one ({ text = name; tone = Accent } :: spans) in
   match input.selected, input.changes with
-  | None, _ -> one [ { text = "no keeper selected"; tone = Dim } ]
+  | None, _ -> one [ { text = say input.ko "고른 키퍼 없음" "no keeper selected"; tone = Dim } ]
   | Some name, Changes_absent ->
-      named name [ { text = middle_dot ^ "changes not fetched"; tone = Dim } ]
-  | Some name, Changes_loading -> named name [ { text = middle_dot ^ "loading"; tone = Dim } ]
+      named name
+        [ { text = middle_dot ^ say input.ko "변경 조회 전" "changes not fetched"; tone = Dim } ]
+  | Some name, Changes_loading ->
+      named name [ { text = middle_dot ^ say input.ko "조회 중" "loading"; tone = Dim } ]
   | Some name, Changes_failed why ->
-      named name [ { text = middle_dot ^ "failed" ^ middle_dot ^ why; tone = Bad } ]
+      named name
+        [ { text = middle_dot ^ say input.ko "조회 실패" "failed" ^ middle_dot ^ why; tone = Bad } ]
   | Some _, Changes_ready r ->
       let files = List.length r.files in
       let head =
@@ -1625,7 +1648,7 @@ let changes_status_lines ~cols input =
           [ { text =
                 middle_dot
                 ^ join
-                    [ files_text files
+                    [ files_text ~ko:input.ko files
                     ; window_text r.window_hours
                     ; ago_text ~now:input.now r.fetched_at
                     ]
@@ -1639,9 +1662,13 @@ let changes_status_lines ~cols input =
             [ { text =
                   join
                     [ (if r.over_budget > 0 then
-                         Printf.sprintf "%d without text" r.over_budget
+                         Printf.sprintf
+                           (if input.ko then "본문 없음 %d개" else "%d without text")
+                           r.over_budget
                        else "")
-                    ; (if r.malformed > 0 then Printf.sprintf "%d malformed" r.malformed
+                    ; (if r.malformed > 0 then
+                         Printf.sprintf (if input.ko then "형식 오류 %d개" else "%d malformed")
+                           r.malformed
                        else "")
                     ]
               ; tone = Warn
@@ -1651,7 +1678,13 @@ let changes_status_lines ~cols input =
       in
       let empty =
         if files = 0 then
-          one [ { text = "no writes in " ^ calls_text r.calls; tone = Dim } ]
+          one
+            [ { text =
+                  (if input.ko then calls_text ~ko:true r.calls ^ " 동안 쓴 파일 없음"
+                   else "no writes in " ^ calls_text ~ko:false r.calls)
+              ; tone = Dim
+              }
+            ]
         else []
       in
       let refresh_failed =
@@ -1690,27 +1723,28 @@ let materialize_row ~cols input = function
   | Trace_unavailable_summary summary ->
       fit_line ~cols (with_border [{text = summary; tone = Warn}]), Target_none
   | Trace_unavailable (name, reason) ->
-      let notice = "Trace unavailable: " ^ name ^ " · " ^ reason in
+      let notice =
+        say input.ko "추적 불가: " "Trace unavailable: " ^ name ^ " · " ^ reason in
       fit_line ~cols (with_border [{text = Terminal_text.single_line notice; tone = Warn}]), Target_none
   | Fleet_row (keeper, chunk) -> fleet_row ~cols input keeper chunk
   | Focus_header (name, current, health) ->
-      focus_header_line ~cols ~now:input.now ~health name current, Target_none
+      focus_header_line ~ko:input.ko ~cols ~now:input.now ~health name current, Target_none
   | Approval_row tool -> approval_line ~cols tool, Target_none
   | Calls_heading responses ->
-      calls_heading_line ~cols input.call_order responses, Target_call_order
+      calls_heading_line ~ko:input.ko ~cols input.call_order responses, Target_call_order
   | Tool_row (chunk, tool, state, place, run) ->
       ( tool_line ~cols ~now:input.now ~state ~place ~run chunk tool
       , Target_call (chunk.Acting.ck_keeper, Acting.call_key tool) )
   | Call_detail (chunk, tool, part) ->
-      ( call_detail_line ~cols ~now:input.now tool part
+      ( call_detail_line ~ko:input.ko ~cols ~now:input.now tool part
       , Target_call (chunk.Acting.ck_keeper, Acting.call_key tool) )
   | Earlier_turn (chunk, health) ->
-      turn_summary_line ~cols ~health chunk, Target_calls chunk.Acting.ck_keeper
+      turn_summary_line ~ko:input.ko ~cols ~health chunk, Target_calls chunk.Acting.ck_keeper
   | Rule -> rule_line ~cols, Target_none
-  | More n -> more_line ~cols n
+  | More n -> more_line ~ko:input.ko ~cols n
   | Indicator (direction, n) ->
       let arrow = match direction with Above -> up_arrow | Below -> down_arrow in
-      indicator_line ~cols arrow n
+      indicator_line ~ko:input.ko ~cols arrow n
   | File_row (index, file) ->
       let line, target = file_line ~cols ~now:input.now index file in
       (match input.changes with
@@ -1729,15 +1763,15 @@ let materialize_row ~cols input = function
    The [calls] column carries a [+] on an open record ([16+]): the feed may
    have started mid-turn, so the count is at least that many. The heading
    cannot say so in five cells; the guide does. *)
-let legend ~cols =
+let legend ~ko ~cols =
   String.make (mark_cells + name_cells_for ~cols + gap_cells) ' '
-  ^ pad_right state_cells "state"
-  ^ pad_right (tool_cells_for ~cols) "tool"
-  ^ pad_left calls_cells "calls"
+  ^ pad_right state_cells (say ko "상태" "state")
+  ^ pad_right (tool_cells_for ~cols) (say ko "도구" "tool")
+  ^ pad_left calls_cells (say ko "호출" "calls")
   (* The figure is the turn's own new tokens, in and out summed, cache reads
      left out. "tok/turn" read as a rate -- tokens per turn across turns --
      which is not what any row carries. *)
-  ^ pad_left tokens_cells "new tok"
+  ^ pad_left tokens_cells (say ko "새 tok" "new tok")
 
 let next_target_row ~(targets : row_target array) ~row ~step =
   let count = Array.length targets in
@@ -1760,53 +1794,66 @@ let keeper_context_lines ~cols input =
   match input.scope, input.selected, input.keeper_context with
   | Selected_only, Some selected, Some context
     when String.equal selected context.keeper_name ->
+    let say = say input.ko in
     let task = match context.task with
-      | Task_unavailable -> "task · unavailable"
-      | Task_not_observed -> "task · not observed"
-      | Task_refresh_failed -> "task refresh failed · not observed"
+      | Task_unavailable -> say "작업 · 조회 불가" "task · unavailable"
+      | Task_not_observed -> say "작업 · 관측 전" "task · not observed"
+      | Task_refresh_failed ->
+          say "작업 새로 조회 실패 · 관측 전" "task refresh failed · not observed"
       | Task_observed { id; refresh_failed = true } ->
-          "task refresh failed · last observed · " ^ Terminal_text.single_line id
+          say "작업 새로 조회 실패 · 마지막 관측 · " "task refresh failed · last observed · "
+          ^ Terminal_text.single_line id
       | Task_observed { id; refresh_failed = false } ->
-          "task observed · " ^ Terminal_text.single_line id in
+          say "관측한 작업 · " "task observed · " ^ Terminal_text.single_line id in
     let schedule, detail, delegate = match summarize_keeper_waiting context with
       | Waiting_not_observed ->
-          (one Dim "◷ waiting inventory not observed", one Dim "  —",
-           one Dim "↩ delegate result · not observed")
+          (one Dim (say "◷ 대기 목록 관측 전" "◷ waiting inventory not observed"), one Dim "  —",
+           one Dim (say "↩ 위임 결과 · 관측 전" "↩ delegate result · not observed"))
       | Waiting_read_unavailable ->
-          (one Warn "◷ waiting inventory unavailable", one Dim "  —",
-           one Dim "↩ delegate result · unavailable")
+          (one Warn (say "◷ 대기 목록 조회 불가" "◷ waiting inventory unavailable"), one Dim "  —",
+           one Dim (say "↩ 위임 결과 · 조회 불가" "↩ delegate result · unavailable"))
       | Waiting_items { schedules; delegate_result_waiting; read_error } ->
           (* Partial inventory refreshes can retain a row from an older read. *)
           (* The decision comes first so it survives the narrow pane; these
              qualifiers remain after it without claiming current knowledge. *)
           let qualifier =
-            if context.waiting_failed then " · read failed · last seen"
-            else if context.waiting_stale then " · stale · read err"
-            else if context.waiting_revalidating then " · revalidating"
-            else " · last seen" in
-          let suffix = qualifier ^ (if read_error then " · partial" else "") in
+            if context.waiting_failed then say " · 조회 실패 · 마지막 관측" " · read failed · last seen"
+            else if context.waiting_stale then say " · 오래됨 · 조회 오류" " · stale · read err"
+            else if context.waiting_revalidating then say " · 다시 확인 중" " · revalidating"
+            else say " · 마지막 관측" " · last seen" in
+          let suffix = qualifier ^ (if read_error then say " · 일부만" " · partial" else "") in
           let schedule, detail = match schedules with
-            | [] -> (one Dim ("◷ schedule unseen" ^ suffix), one Dim "  —")
+            | [] -> (one Dim (say "◷ 일정 못 봄" "◷ schedule unseen" ^ suffix), one Dim "  —")
             | item :: _ ->
                 let clock = match item.kwi_due_at with
-                  | None -> "time unobserved"
+                  | None -> say "시각 관측 전" "time unobserved"
                   | Some due ->
                       (match Layout.elapsed_text (abs_float (due -. input.now)) with
-                       | None -> "time unavailable"
+                       | None -> say "시각 조회 불가" "time unavailable"
                        | Some span ->
-                           if due >= input.now then "due in " ^ span
-                           else "due " ^ span ^ " ago") in
-                ( one Info (Printf.sprintf "◷ %d schedule%s waiting%s"
-                    (List.length schedules) (if List.length schedules = 1 then "" else "s") suffix)
-                , one Plain ("  one item · " ^ clock ^ " · " ^ Terminal_text.single_line item.kwi_what) ) in
+                           if due >= input.now then say (span ^ " 뒤 예정") ("due in " ^ span)
+                           else say ("예정 시각 " ^ span ^ " 지남") ("due " ^ span ^ " ago")) in
+                ( one Info
+                    (if input.ko then
+                       Printf.sprintf "◷ 대기 중인 일정 %d개%s" (List.length schedules) suffix
+                     else
+                       Printf.sprintf "◷ %d schedule%s waiting%s"
+                         (List.length schedules)
+                         (if List.length schedules = 1 then "" else "s") suffix)
+                , one Plain
+                    (say "  첫 항목 · " "  one item · " ^ clock ^ " · "
+                     ^ Terminal_text.single_line item.kwi_what) ) in
           let delegate =
-            if delegate_result_waiting then one Info ("↩ delegate result waiting" ^ suffix)
-            else one Dim ("↩ delegate result unseen" ^ suffix) in
+            if delegate_result_waiting then
+              one Info (say "↩ 위임 결과 대기 중" "↩ delegate result waiting" ^ suffix)
+            else one Dim (say "↩ 위임 결과 못 봄" "↩ delegate result unseen" ^ suffix) in
           schedule, detail, delegate in
     (* Keep a fixed-height context across refreshes, so an Activity target
        does not move under the keyboard cursor as waiting items change. *)
-    [one Accent (Terminal_text.single_line selected ^ " · selected"); one Dim task]
-    @ [schedule; detail; delegate; one Dim "J schedules · K queued peers"]
+    [ one Accent (Terminal_text.single_line selected ^ say " · 선택됨" " · selected")
+    ; one Dim task ]
+    @ [ schedule; detail; delegate
+      ; one Dim (say "J 일정 · K 대기 중인 동료" "J schedules · K queued peers") ]
   | (Selected_only | Whole_fleet), (Some _ | None), (Some _ | None) -> []
 
 let lines ~rows ~cols ~scroll input =
@@ -1821,7 +1868,7 @@ let lines ~rows ~cols ~scroll input =
     let headers =
       match fleet with
       | Some (body, _) when rows >= 2 && List.exists row_uses_the_columns body ->
-        [ header; (fit_line ~cols (with_border [ { text = legend ~cols; tone = Dim } ]), Target_none) ]
+        [ header; (fit_line ~cols (with_border [ { text = legend ~ko:input.ko ~cols; tone = Dim } ]), Target_none) ]
       | Some _ | None -> [ header ]
     in
     let context = keeper_context_lines ~cols input in

@@ -48,7 +48,7 @@ let to_json row =
     [ "name", `String row.name
     ; "runtime_class", `String "keeper"
     ; "status", `String "unbooted"
-    ; "phase", `String "Offline"
+    ; "phase", `String (Keeper_state_machine.phase_to_string Keeper_state_machine.Offline)
     ; "registered", `Bool false
     ; "keepalive_running", `Bool false
     ; declaration_only_key, `Bool true

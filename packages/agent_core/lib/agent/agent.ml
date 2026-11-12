@@ -59,7 +59,7 @@ type execution_terminal_evidence =
 
 type execution_observation =
   | Execution_awaiting
-  | Execution_owner_lost
+  | Execution_owner_lost of execution_recovery_action
   | Execution_terminal of execution_terminal_evidence
 
 module Execution_projection = Agent_execution_projection
@@ -96,7 +96,7 @@ let observe_execution projection =
   Execution_projection.observe_ownership projection
   |> Result.map (function
     | Execution_projection.Owner_awaiting -> Execution_awaiting
-    | Owner_lost -> Execution_owner_lost
+    | Owner_lost evidence -> Execution_owner_lost evidence.recovery
     | Terminal_observed (terminal, evidence) ->
       Execution_terminal (execution_terminal_evidence (terminal, evidence)))
 ;;

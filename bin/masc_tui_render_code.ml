@@ -51,6 +51,43 @@ let file_change_ranges (change : Masc.Tui_decode.file_change) =
         { occurrences = None; _ })
   | None -> []
 
+(* The title's note in the screen's language. The server's words, symbols,
+   paths and links are drawn as they came; only the sentence around them is
+   chosen here. *)
+let code_note_text ~ko = function
+  | Code_note_server_words { symbol; words } -> symbol ^ ": " ^ words
+  | Code_note_nothing_to_say symbol ->
+      symbol ^ (if ko then ": 서버가 돌려준 설명 없음" else ": the server has nothing to say here")
+  | Code_note_not_found { question; symbol } ->
+      Printf.sprintf (if ko then "찾지 못함: %s %S" else "no %s found for %S") question symbol
+  | Code_note_location { symbol; path; line } -> Printf.sprintf "%s: %s:%d" symbol path line
+  | Code_note_outside_workspace { symbol; path; line } ->
+      Printf.sprintf
+        (if ko then "%s: 워크스페이스 밖 %s:%d" else "%s: outside the workspace at %s:%d")
+        symbol path line
+  | Code_note_navigation_failed detail ->
+      (if ko then "이동 실패: " else "Navigation failed: ") ^ detail
+  | Code_note_no_jump_back -> if ko then "돌아갈 이동 없음" else "No jump to return from"
+  | Code_note_return_waits_for_workspace ->
+      if ko then "워크스페이스를 확인하기 전에는 돌아갈 수 없음"
+      else "Cannot return until the workspace is confirmed"
+  | Code_note_no_name_on_line ->
+      if ko then "커서 줄에 물어볼 이름 없음" else "the cursor line has no name to ask about"
+  | Code_note_saved -> if ko then "파일 저장됨" else "File saved"
+  | Code_note_pr_link url -> url
+  | Code_note_no_pr_number hash ->
+      hash ^ (if ko then ": 제목에 PR 번호 없음" else ": no PR number in this subject")
+  | Code_note_pr_without_remote number ->
+      Printf.sprintf
+        (if ko then "#%d · 이 범위에는 링크할 원격 저장소가 등록되지 않음"
+         else "#%d -- this scope has no registered remote to link into")
+        number
+  | Code_note_pr_remote_not_github number ->
+      Printf.sprintf
+        (if ko then "#%d · 원격 저장소가 GitHub 가 아니라 링크 모양을 모름"
+         else "#%d -- the remote is not GitHub, so the link shape is unknown")
+        number
+
 (* The file pane's usable rows: the surface title, then the pane's top gap,
    title, divider, bottom gap, and the footer. One owner — the dispatch keeps
    the cursor visible against the same number the renderer draws with. *)
@@ -296,7 +333,7 @@ let prepare_code_history_rows (state : state) ~cols =
         | _ :: _ -> []
       in
       let note = match state.code_lsp_note with
-        | None -> [] | Some text -> wrap None (field (say "알림" "File note") text)
+        | None -> [] | Some note -> wrap None (field (say "알림" "File note") (code_note_text ~ko note))
       in
       let scope_text = match scope with
         | Code_scope_project -> say "프로젝트" "Project"
@@ -309,7 +346,7 @@ let prepare_code_history_rows (state : state) ~cols =
 
 let history_rows_cache :
     (((code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t
-      * int option * string option * int * ui_language)
+      * int option * code_note option * int * ui_language)
      * ((int * code_history_entry) option * string) list) option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
@@ -616,7 +653,9 @@ let render_code (state : state) =
                          (if state.ui_language = Lang_ko then "언어 서버에 묻는 중: %s %S"
                           else "asking %s about %S")
                          query.clq_question query.clq_symbol)
-                   | None -> state.code_lsp_note) in
+                   | None ->
+                       Option.map (code_note_text ~ko:(state.ui_language = Lang_ko))
+                         state.code_lsp_note) in
             match (if hover_showing then None else note) with
             | Some note ->
                 base ^ "  " ^ (Theme.accent ())

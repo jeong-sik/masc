@@ -39722,8 +39722,7 @@ Use relative paths for resources already held in the package. -->
            in
            (match Masc_tui_palette.code_cursor_line_symbols state with
             | [] ->
-                state.code_lsp_note <-
-                  Some "the cursor line has no name to ask about"
+                state.code_lsp_note <- Some Code_note_no_name_on_line
             | [ symbol ] ->
                 Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~report:(report_action state)
                   ~question ~symbol
@@ -42000,9 +41999,7 @@ Use relative paths for resources already held in the package. -->
                             Some
                               (match pr_number_of_subject row.gl_subject with
                                | None ->
-                                   Printf.sprintf
-                                     "%s: no PR number in this subject"
-                                     row.gl_hash
+                                   Code_note_no_pr_number row.gl_hash
                                | Some number -> (
                                    let remote =
                                      match state.code_scope with
@@ -42022,22 +42019,14 @@ Use relative paths for resources already held in the package. -->
                                    in
                                    match remote with
                                    | None ->
-                                       Printf.sprintf
-                                         "#%d -- this scope has no \
-                                          registered remote to link into"
-                                         number
+                                       Code_note_pr_without_remote number
                                    | Some remote -> (
                                        match
                                          Masc_tui_pr_ref.github_pr_url ~remote
                                            ~number
                                        with
-                                       | Some url -> url
-                                       | None ->
-                                           Printf.sprintf
-                                             "#%d -- the remote is not \
-                                              GitHub, so the link shape is \
-                                              unknown"
-                                             number))))
+                                       | Some url -> Code_note_pr_link url
+                                       | None -> Code_note_pr_remote_not_github number))))
                   (* Nothing listed to jump from. *)
                   | Some (_, Goal_confirmation_read.Absent) | None
                   | Some (_, Goal_confirmation_read.Loading)

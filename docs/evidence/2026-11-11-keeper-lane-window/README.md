@@ -17,6 +17,8 @@ Keeper 작업 화면의 "작업 대기열"은 서버가 준 대기 행을 전부
 | 앞 | main `7ba926ef4f60` | [`before-main-7ba926ef4f60/measurements.json`](before-main-7ba926ef4f60/measurements.json) |
 | 뒤 | 브랜치 `fix/26606-lane-inventory-window` 커밋 `6e205532e94d` (main `7ba926ef4f60` 위) | [`after-6e205532e94d/browser-result.json`](after-6e205532e94d/browser-result.json) |
 
+결과 파일을 만든 뒤 `browser.mjs` 에 확인 한 줄을 더했어요. 축 라벨을 하나도 찾지 못하면 실패로 끝나요. 전에는 그 경우에도 축 라벨 확인이 통과했어요. 더한 스크립트를 다시 돌렸을 때 확인 9개가 통과했고, 축 라벨의 두 값(3.75 px, 2.05 px)과 DOM 의 행 수(17)는 결과 파일과 같았어요. 그때 장비의 load average 가 75~81 이어서 시간은 다시 적지 않았어요.
+
 환경은 macOS 27.2, Apple M3 Max(16코어), Playwright 1.61.1 이 띄운 Chromium 149.0.7827.55 headless, 창 1280×900, vite dev 서버예요. 두 실행은 이어서 돌렸고, 그동안 장비의 1분 load average 는 33~39 였어요. 시간은 실행마다 달라요. 이 장비에서 같은 날 앞을 여러 번 쟀을 때 render 와 layout 의 중앙값은 600~942 ms 사이였고, load average 와 나란히 움직이지는 않았어요.
 
 ## 결과
@@ -85,6 +87,7 @@ Keeper 작업 화면의 "작업 대기열"은 서버가 준 대기 행을 전부
 - 대기 목록 store 와 서버가 밀어 주는 갱신은 fixture 에 없어요. fixture 가 새 목록을 직접 넣어요.
 - Tools 화면과 예약 화면의 같은 목록은 브라우저로 열어 보지 않았어요. 두 화면도 같은 `LaneWaitingRows` 를 쓰고, vitest 시험 하나가 Tools 패널에서 2,000행 중 일부만 그려지는지 봐요.
 - fixture 는 앱이 불러오는 스타일 중 다섯 개만 `main.ts` 순서로 불러요. 행 간격(40.25 px), 키보드 포커스 링(1 px, 띄움 1 px), root 글자 크기(15 px)는 `main.ts` 의 스타일을 모두 불러온 임시 페이지에서 쟀을 때도 같았어요. 그 밖의 모양은 비교하지 않았어요.
+- 축 라벨의 2.05 px 는 fixture 페이지의 값이에요. 라벨에 붙은 `text-3xs` 는 CSS 규칙이 없는 class 라서, 라벨은 부모의 글자 크기로 그려져요. fixture 에서는 15 px 예요. 실제 앱 화면에서 라벨이 몇 px 로 그려지는지는 재지 않았어요. 이 class 는 앞뒤가 같고, #51446 에 남겼어요.
 - 이 스크립트는 CI 에서 돌지 않아요. vitest 시험은 happy-dom 에서 돌아서 스크롤 높이와 행 위치를 보지 못해요. 목록이 실제로 스크롤되는지, 화면 근처 행만 그리는지는 이 스크립트를 손으로 돌려야 확인돼요. 줄어든 목록이 다음 프레임 전에 그릴 범위를 옮기는지는 `virtual-list.test.ts` 의 시험 4개가 CI 에서 봐요.
 - `VirtualList` 를 쓰는 다른 목록 네 곳(`tools/tool-full-inventory.ts`, `keeper-workspace/keeper-workspace-roster.ts`, `logs.ts`, `work.ts`)은 브라우저로 열어 보지 않았어요. 네 곳의 vitest 시험 파일을 돌렸어요. 그중 `logs.test.ts` 의 9개는 이 장비에서 main `7ba926ef4f60` 도 같은 자리에서 시간 초과로 실패해서, 로그 목록은 그 시험으로 확인하지 못했어요.
 - Chromium 에서만 봤어요.
@@ -96,6 +99,6 @@ cd dashboard
 node fixtures/2026-11-11-keeper-lane-window/browser.mjs
 ```
 
-결과는 `artifacts/dashboard/2026-11-11-keeper-lane-window/run-*/` 에 생겨요. Keeper 하나의 행 수는 `LANE_WINDOW_ROWS` 로 바꿔요. 241 이상이어야 해요. 그보다 적으면 200행을 뺀 뒤 목록이 모든 행을 그리는 쪽으로 넘어가서, 스크립트가 그 단계에서 실패로 끝나요.
+결과는 `artifacts/dashboard/2026-11-11-keeper-lane-window/run-*/` 에 생겨요. Keeper 하나의 행 수는 `LANE_WINDOW_ROWS` 로 바꿔요. 241 이상이어야 해요. 206~240 이면 200행을 뺀 뒤 목록이 모든 행을 그리는 쪽으로 넘어가서, 스크립트가 그 단계에서 실패로 끝나요. 205 이하면 스크립트가 시작하자마자 멈춰요.
 
 앞의 숫자는 main `7ba926ef4f60` 을 꺼낸 폴더에 이 fixture 폴더를 넣고 같은 명령을 돌린 값이에요. 그 실행은 측정값을 쓴 다음 첫 기대값에서 실패로 끝나요.

@@ -41,20 +41,28 @@ HARNESS_DASHBOARD_DEV_SERVER_STOP_INTERVAL_SEC=0.1
 
 # Pid of the server this shell started last; empty before the first start.
 harness_dashboard_dev_server_pid=""
+# Number of its job, as of the last time bash listed it as running.
+harness_dashboard_dev_server_job=""
 
-# Prints the job number of that server while bash lists it as running. Fails
-# once bash has seen it exit, and before the first start.
-harness_dashboard_dev_server_job() {
-  local line
+# Succeeds while bash lists that server as running, and sets
+# harness_dashboard_dev_server_job to the number of its job. Fails once bash
+# has seen the server exit, and before the first start.
+#
+# Only a listing that arrived whole says the server is gone. The subshell that
+# fetches it can be killed, so the listing counts when it ends with the line
+# added here, and is fetched again otherwise. It is matched in one piece: read
+# line by line from a here-string, it would pass through a file under bash
+# 3.2, and that file can fail to be written.
+harness_dashboard_dev_server_runs() {
+  local listing="" last_line="end of the listing"
   # A line of `jobs -l`: "[1]+ 12345 Running    command".
-  local entry='^\[([0-9]+)\][-+ ]? +([0-9]+) '
-  while IFS= read -r line; do
-    if [[ "${line}" =~ ${entry} && "${BASH_REMATCH[2]}" == "${harness_dashboard_dev_server_pid}" ]]; then
-      printf '%s\n' "${BASH_REMATCH[1]}"
-      return 0
-    fi
-  done <<<"$(jobs -lr)"
-  return 1
+  local entry=$'\n''\[([0-9]+)\][-+ ]? +'"${harness_dashboard_dev_server_pid}"' '
+  [[ -n "${harness_dashboard_dev_server_pid}" ]] || return 1
+  until [[ "${listing}" == *$'\n'"${last_line}" ]]; do
+    listing=$'\n'"$(jobs -lr; echo "${last_line}")"
+  done
+  [[ "${listing}" =~ ${entry} ]] || return 1
+  harness_dashboard_dev_server_job="${BASH_REMATCH[1]}"
 }
 
 # Starts Vite in DASHBOARD_DIR and returns once READY_URL answers. Returns 1,
@@ -73,7 +81,7 @@ harness_dashboard_dev_server_start() {
   harness_dashboard_dev_server_pid="$!"
   deadline=$((SECONDS + HARNESS_DASHBOARD_DEV_SERVER_READY_TIMEOUT_SEC))
   while ((SECONDS < deadline)); do
-    if ! harness_dashboard_dev_server_job >/dev/null; then
+    if ! harness_dashboard_dev_server_runs; then
       failure="the server exited before it answered ${ready_url}"
       break
     fi
@@ -102,16 +110,16 @@ harness_dashboard_dev_server_start() {
 # Ends the server: SIGTERM, then SIGKILL when it is still running. Returns
 # once it is gone. Does nothing when no server is running.
 harness_dashboard_dev_server_stop() {
-  local job signal attempt
+  local signal attempt
   for signal in TERM KILL; do
-    job="$(harness_dashboard_dev_server_job)" || return 0
-    kill "-${signal}" "%${job}" 2>/dev/null || true
+    harness_dashboard_dev_server_runs || return 0
+    kill "-${signal}" "%${harness_dashboard_dev_server_job}" 2>/dev/null || true
     for ((attempt = 0; attempt < HARNESS_DASHBOARD_DEV_SERVER_STOP_ATTEMPTS; attempt++)); do
-      harness_dashboard_dev_server_job >/dev/null || return 0
+      harness_dashboard_dev_server_runs || return 0
       sleep "${HARNESS_DASHBOARD_DEV_SERVER_STOP_INTERVAL_SEC}"
     done
   done
-  harness_dashboard_dev_server_job >/dev/null || return 0
+  harness_dashboard_dev_server_runs || return 0
   printf 'dashboard dev server: process %s is still running after SIGKILL\n' \
     "${harness_dashboard_dev_server_pid}" >&2
 }

@@ -13,7 +13,7 @@ fixture="$(mktemp -d)"
 pids="${fixture}/pids"
 : >"${pids}"
 other_pid=""
-bystander_pid=""
+bystander_pids=""
 harness_pid=""
 
 # Recorded pids that still run. A zombie waiting for its parent does not.
@@ -28,6 +28,19 @@ running() {
   done <"${pids}"
 }
 
+# Ends the background commands that checks start to see the stop leave them
+# alone. With SIGKILL: a command started a moment ago can still be a copy of
+# this shell, which catches SIGTERM and then either loses it or runs this
+# test's exit trap.
+end_bystanders() {
+  local pid
+  for pid in ${bystander_pids}; do
+    kill -KILL "${pid}" 2>/dev/null || true
+    wait "${pid}" 2>/dev/null || true
+  done
+  bystander_pids=""
+}
+
 finish() {
   local pid
   harness_dashboard_dev_server_stop
@@ -36,10 +49,11 @@ finish() {
   for pid in ${harness_pid} $(running); do
     kill -KILL "${pid}" 2>/dev/null || true
   done
-  for pid in ${other_pid} ${bystander_pid}; do
-    kill "${pid}" 2>/dev/null || true
-    wait "${pid}" 2>/dev/null || true
-  done
+  end_bystanders
+  if [[ -n "${other_pid}" ]]; then
+    kill "${other_pid}" 2>/dev/null || true
+    wait "${other_pid}" 2>/dev/null || true
+  fi
   rm -rf "${fixture}"
 }
 trap finish EXIT
@@ -137,8 +151,17 @@ start() {
     harness_dashboard_dev_server_start "${dashboard}" "${1:-127.0.0.1}" "${port}" "${ready_url}" "${fixture}/server.log"
 }
 
-# A harness can exit before it starts the server.
+# A harness can exit before it starts the server. What it runs in the
+# background then is not the server.
+for _ in 1 2 3; do
+  sleep 600 &
+  bystander_pids+=" $!"
+done
 harness_dashboard_dev_server_stop
+for pid in ${bystander_pids}; do
+  kill -0 "${pid}" 2>/dev/null || fail "stop before any start ended a command that is not the server"
+done
+end_bystanders
 printf 'ok: stop before any start does nothing\n'
 
 start || fail "the server did not start"
@@ -193,7 +216,7 @@ printf 'ok: a server that ignores SIGTERM is killed\n'
 : >"${pids}"
 start || fail "the server did not start"
 sleep 600 &
-bystander_pid="$!"
+bystander_pids="$!"
 kill -KILL "$(cat "${pids}")"
 await nothing_runs 20 || fail "the server that was killed is still running: $(running)"
 signals="${fixture}/signals"
@@ -206,11 +229,58 @@ kill() {
 harness_dashboard_dev_server_stop
 unset -f kill
 [[ ! -s "${signals}" ]] || fail "stop signalled the pid of a server that had exited: $(tr '\n' ';' <"${signals}")"
-kill -0 "${bystander_pid}" 2>/dev/null || fail "stop ended a child that is not the server"
-kill "${bystander_pid}"
-wait "${bystander_pid}" 2>/dev/null || true
-bystander_pid=""
+kill -0 "${bystander_pids}" 2>/dev/null || fail "stop ended a child that is not the server"
+end_bystanders
 printf 'ok: stop sends nothing to the pid of a server that exited during the run\n'
+
+# The server can also exit while the stop runs: after the stop has found it
+# running and before the stop signals it. Here it is killed at that moment,
+# and the stop's signal goes on once bash has seen the exit.
+: >"${pids}"
+start || fail "the server did not start"
+server_pid="$(cat "${pids}")"
+server_seen_to_exit() { ! builtin kill -0 "${server_pid}" 2>/dev/null; }
+: >"${signals}"
+# shellcheck disable=SC2329 # the helper's stop calls it
+kill() {
+  if [[ ! -s "${signals}" ]]; then
+    builtin kill -KILL "${server_pid}"
+    # The pid names a process until bash has seen the server exit.
+    await server_seen_to_exit 20 || : >"${fixture}/exit-not-seen"
+  fi
+  printf '%s\n' "$*" >>"${signals}"
+  # A signal for the pid is held back: the pid can name another process now.
+  [[ " $* " != *" ${server_pid} "* ]] && builtin kill "$@"
+}
+harness_dashboard_dev_server_stop
+unset -f kill
+[[ ! -e "${fixture}/exit-not-seen" ]] || fail "bash did not see the killed server exit"
+[[ -s "${signals}" ]] || fail "stop did not signal the server it found running"
+[[ " $(tr '\n' ' ' <"${signals}")" != *" ${server_pid} "* ]] ||
+  fail "stop signalled the pid of a server that bash had seen exit: $(tr '\n' ';' <"${signals}")"
+printf 'ok: stop sends nothing to the pid of a server that exits while the stop runs\n'
+
+# A question to bash can be cut short: the subshell that fetches the listing
+# of jobs is killed, as a signal to the script's process group can do. Such a
+# question says nothing about the server.
+: >"${pids}"
+start || fail "the server did not start"
+: >"${fixture}/cut"
+# shellcheck disable=SC2329 # the helper calls it
+jobs() {
+  if [[ -e "${fixture}/cut" ]]; then
+    rm -f "${fixture}/cut"
+    # The parent of this `sh` is the subshell that asks.
+    # shellcheck disable=SC2016 # `sh` expands it
+    sh -c 'kill -KILL "$PPID"'
+  fi
+  builtin jobs "$@"
+}
+harness_dashboard_dev_server_stop
+unset -f jobs
+[[ ! -e "${fixture}/cut" ]] || fail "the stop never asked bash about its jobs, so no question was cut short"
+nothing_runs || fail "a stop whose question was cut short left the server: $(running)"
+printf 'ok: a question that is cut short is not taken for a server that exited\n'
 
 : >"${pids}"
 # shellcheck disable=SC2016 # the new shell expands them from its arguments
@@ -252,15 +322,15 @@ fi
 trap harness_dashboard_dev_server_stop_on_exit EXIT
 harness_dashboard_dev_server_start "${dashboard}" 127.0.0.1 "${port}" "${ready_url}" "${fixture}/server.log"
 if [[ -n "\${SLOW_FIRST_QUESTION:-}" ]]; then
-  # As on a machine under load: the first thing the stop asks takes a second.
+  # As on a machine under load: the next time the script asks bash about its
+  # jobs, the answer takes a second.
   : >"${fixture}/slow"
-  eval "quick_\$(declare -f harness_dashboard_dev_server_job)"
-  harness_dashboard_dev_server_job() {
+  jobs() {
+    builtin jobs "\$@"
     if [[ -e "${fixture}/slow" ]]; then
       rm -f "${fixture}/slow"
       sleep 1
     fi
-    quick_harness_dashboard_dev_server_job
   }
 fi
 : >"${fixture}/started"
@@ -335,6 +405,7 @@ kill -TERM "${harness_pid}" 2>/dev/null || true
 await harness_ended 120 || fail "the script that was told to end twice is still running"
 harness_pid=""
 await nothing_runs 20 || fail "a script that was told to end twice in a row left its server: $(running)"
+[[ ! -e "${fixture}/slow" ]] || fail "the stop never asked bash about its jobs, so nothing was slowed"
 printf 'ok: a signal that arrives while the stop starts does not leave the server\n'
 
 FAKE_VITE_NEVER_ANSWERS=1 READY_TIMEOUT_SEC=2 run_harness

@@ -156,6 +156,16 @@ let require_compatible_workspace base_path =
       "Workspace state needs attention: %s. No workspace files were changed and no server was started. Choose an unused directory with masc setup --base-path NEW_WORKSPACE, or return without changes and review these files before retrying. Existing logs: %s"
       paths (Filename.concat (Filename.concat base_path Common.masc_dirname) "logs"))
 
+(* Setup prepares imp for the server of a single user: it initializes the
+   workspace, calls the model as the operator of the host, and starts a server
+   that it expects to name its workspace. Where the config asks for accounts
+   no boot runs that server, so setup stops before the first of them. *)
+let require_single_user_workspace base_path =
+  if Authz_boot_mode_read.asks_for_multi_account ~base_path then
+    fail (Authz_boot_mode_read.account_installation_line ~base_path
+      ^ ". Setup prepares imp for the server of a single user, so it does not run here. \
+         No workspace files were changed and no server was started.")
+
 (* Waiting belongs to the PID already spawned. EINTR only interrupts the
    syscall: it must not rerun the command or turn a successful build into a
    setup failure. Both direct setup children and image-builder callbacks use
@@ -281,6 +291,7 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
       try
         if not (Unix.isatty Unix.stdin) && open_tui then
           fail "Interactive setup needs a terminal. Use --no-tui to prepare imp without opening the terminal UI.";
+        require_single_user_workspace base_path;
         require_compatible_workspace base_path;
         require_ok "Workspace initialization" initialize;
         let base_path = Unix.realpath base_path in

@@ -15,8 +15,10 @@
 
 (** [GET /accounts/invite], the page that an invitation link opens: a form
     that starts a GitHub login with the token of the link. [nonce] is the
-    nonce of its script. *)
-val invite_page : nonce:string -> Login_routes.answer
+    nonce of its script. [github] is whether the server has a GitHub login
+    client: without one the button cannot be pressed and the page says that
+    the server has no GitHub login. The pages start no Google login. *)
+val invite_page : nonce:string -> github:bool -> Login_routes.answer
 
 (** [GET /]: the session of the browser and who the server takes it for, a
     form that starts a GitHub login, and a sign-out button. Below them, the
@@ -26,12 +28,14 @@ val invite_page : nonce:string -> Login_routes.answer
     makes a Keeper and gives it a Runtime through {!Auth_preview_keeper}, and
     a form that sends the Keeper a message through
     {!Auth_preview_keeper.turn_path} and shows its answer. *)
-val home_page : nonce:string -> Login_routes.answer
+val home_page : nonce:string -> github:bool -> Login_routes.answer
 
-(** [GET /api/v1/auth/whoami], judged as [Read_auth] by {!Auth_gate.decide}.
-    A 200 JSON [{"principal": ..., "role": ..., "binding": ...}], or a JSON
+(** [GET /api/v1/auth/whoami], judged as [Read_auth] by {!Auth_gate.decide}
+    on a snapshot the zone could be trusted for ({!Authz_zone.read}), as
+    every judgment of this interface is. A 200 JSON
+    [{"principal": ..., "role": ..., "binding": ...}], or a JSON
     [{"error": ...}] with a 401 or a 403 ({!Auth_gate.is_unauthenticated}). *)
-val whoami : Authz_state.t -> now_ms:int -> Auth_gate.request -> Login_routes.answer
+val whoami : Authz_zone.trusted -> now_ms:int -> Auth_gate.request -> Login_routes.answer
 
 (** [/api/v1/setup/accounts/login], the subscription connect route of the
     server. The preview serves it, its status and its control under
@@ -57,13 +61,17 @@ type person =
 (** Judges the request as [Manage_own_provider] by {!Auth_gate.decide}. A
     request that does not pass gets the answer to write: a JSON
     [{"error": ...}] with a 401 or a 403. *)
-val person : Authz_state.t -> now_ms:int -> Auth_gate.request -> (person, Login_routes.answer) result
+val person
+  :  Authz_zone.trusted
+  -> now_ms:int
+  -> Auth_gate.request
+  -> (person, Login_routes.answer) result
 
 (** Judges the request as [Manage_own_keeper] by {!Auth_gate.decide}: the
     person whose Keepers a Keeper route reads and writes (plan D1-5). A
     request that does not pass gets the answer to write, as for {!person}. *)
 val keeper_owner
-  :  Authz_state.t
+  :  Authz_zone.trusted
   -> now_ms:int
   -> Auth_gate.request
   -> (Authz_types.User_id.t, Login_routes.answer) result
@@ -73,7 +81,7 @@ val keeper_owner
     their Keeper starts the client of their account on a home under that
     namespace (plan D2-8). *)
 val keeper_owner_person
-  :  Authz_state.t
+  :  Authz_zone.trusted
   -> now_ms:int
   -> Auth_gate.request
   -> (person, Login_routes.answer) result

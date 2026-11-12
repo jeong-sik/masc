@@ -117,9 +117,9 @@ let a_code_becomes_the_identity_it_names () =
 ;;
 
 let the_authorization_url_asks_for_this_login () =
-  let store = T.create ~capacity:1 in
-  match T.start store ~now_ms:0 T.Google ~invite:None ~return_to:T.Local_path.root ~replaces:None with
-  | Error T.Full -> Alcotest.fail "full"
+  let key = T.create () in
+  match T.start key ~now_ms:0 T.Google ~invite:None ~return_to:T.Local_path.root ~replaces:None with
+  | Error T.Too_long -> Alcotest.fail "too long"
   | Ok started ->
     (match X.endpoints ~get:(get (google ())) (X.cache ()) ~now_ms:0 with
      | Error error -> Alcotest.failf "no endpoints: %s" (X.error_to_string error)

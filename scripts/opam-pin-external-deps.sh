@@ -215,6 +215,14 @@ readonly OCAML_PROTOC_PLUGIN_SHA="4ffa25b5174e811951e7b5192195214afe776ce9"
 # constraint and every other eio package stay 1.3's. Remove the pin when an
 # Eio release carries the fix (ocaml-multicore/eio#957).
 readonly EIO_POSIX_SHA="3a8ab387d748bcc8d8ae682cfb0ec7da2c9544b7"
+# tls-eio 2.1.5 + one commit: a TLS session hands its ciphertext to the flow
+# under it with a write. tls-eio 2.1.5 copies it from a string source, and a
+# socket takes such a source through Eio.Flow.Pi.simple_copy, 4096 bytes a
+# write: on the bench the server spent 32~53% less CPU per MB with the write
+# (docs/evidence/research/2026-11-09-h2-sse-tls, bench run4). Pinned as
+# version 2.1.5 so the lock constraint and the tls package stay 2.1.5's.
+# Remove the pin when a tls-eio release writes its ciphertext this way.
+readonly TLS_EIO_SHA="2c0f8615865a8ae54188b706628d84474b26d8da"
 
 include_bisect=false
 include_compact_protocol=false
@@ -397,6 +405,8 @@ opam_pin_add ocaml-protoc-plugin.6.2.0 "https://github.com/jeong-sik/ocaml-proto
 pinned_pkgs+=("ocaml-protoc-plugin")
 opam_pin_add eio_posix.1.3 "https://github.com/jeong-sik/eio.git#${EIO_POSIX_SHA}" -n -y
 pinned_pkgs+=("eio_posix")
+opam_pin_add tls-eio.2.1.5 "https://github.com/jeong-sik/ocaml-tls.git#${TLS_EIO_SHA}" -n -y
+pinned_pkgs+=("tls-eio")
 
 if $include_bisect; then
   # bisect_ppx opam constraints lag newer compilers; keep CI solvable under OCaml 5.5 by pinning.
@@ -447,8 +457,15 @@ if $do_install; then
       echo "::warning::apt package index refresh failed; attempting install with existing package index" >&2
     fi
   }
-  refresh_apt_index
-  opam install --yes "${pinned_pkgs[@]}"
+  # shellcheck source=scripts/ci/opam-system-packages.sh
+  source "${SCRIPT_DIR}/ci/opam-system-packages.sh"
+  if opam_may_skip_system_packages \
+     && opam install --yes --no-depexts "${pinned_pkgs[@]}"; then
+    echo "[opam-pin] the restored switch was asked for no system packages."
+  else
+    refresh_apt_index
+    opam install --yes "${pinned_pkgs[@]}"
+  fi
   echo "[opam-pin] install complete. Installed binaries now match the pins above."
 else
   echo ""

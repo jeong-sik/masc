@@ -276,18 +276,33 @@ module Impl = struct
       let reaper_failure, report_reaper_failure = Promise.create () in
       let child_fds = List.map (fun (child_fd, _, _) -> child_fd) fds in
       let modes = List.map (fun (_, _, mode) -> mode) fds in
-      let pid =
+      (* The system call runs on a thread of the system-thread host, not on the
+         caller's thread. It holds its thread for 1.2-1.4 ms on an idle machine
+         and for 7-20 ms on a loaded one (179 ms at worst in a 45 s trace of
+         the live server, 2026-11-11), and a main-domain fiber that made it
+         inline kept every other fiber of that domain from running meanwhile.
+
+         There is no reaper for this child yet, including if it already
+         exited, so the same thread reads the start time right after the call:
+         the caller's fiber is suspended until both are done, and nothing can
+         release the PID in between. Never reconstruct it from a PID after
+         [spawn] returns.
+
+         The switch can finish while the caller waits. The hook below then
+         stops the child at once and raises, as [Switch.on_release] does on a
+         finished switch. *)
+      let pid, started =
         Eio_unix.Fd.use_exn_list "posix_spawn" (List.map (fun (_, fd, _) -> fd) fds)
         @@ fun unix_fds ->
         List.iter2 apply_blocking unix_fds modes;
+        let argv = Array.of_list args in
+        let own_group = Option.is_some group in
+        let descriptors = List.combine child_fds unix_fds in
         Eio.Private.Trace.with_span "spawn" (fun () ->
-          posix_spawn executable (Array.of_list args) env (cwd, Option.is_some group) (List.combine child_fds unix_fds))
+          Systhread_host.run ~label:"posix-spawn" (fun () ->
+            let pid = posix_spawn executable argv env (cwd, own_group) descriptors in
+            pid, Posix_spawn_detached.process_start pid))
       in
-      (* There is no reaper for this child yet, including if it already exited.
-         Retain this observation before hooks, diagnostic writers or fork can
-         yield and release the original PID. Never reconstruct it from a PID
-         after [spawn] returns. *)
-      let started = Posix_spawn_detached.process_start pid in
       let t = { pid; started; exit_status; reaper_failure; lock = Stdlib.Mutex.create (); group } in
       let hook =
         Switch.on_release_cancellable sw (fun () -> stop_owned t set_exit_status)

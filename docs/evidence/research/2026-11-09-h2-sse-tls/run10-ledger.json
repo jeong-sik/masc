@@ -1,0 +1,43 @@
+{
+ "build": "c9b8e1af3cbe",
+ "bundle_bytes": 866369,
+ "normal_before": {
+  "bundle": {
+   "200": 3
+  },
+  "health": {
+   "200": 3
+  }
+ },
+ "slow_client": {
+  "streams": 90,
+  "statuses": {
+   "200": 90
+  },
+  "server_reset": 0
+ },
+ "normal_while_slow_client_holds": {
+  "bundle": {
+   "200": 3
+  },
+  "health": {
+   "200": 3
+  }
+ },
+ "normal_while_slow_client_holds_5s_later": {
+  "bundle": {
+   "200": 3
+  },
+  "health": {
+   "200": 3
+  }
+ },
+ "normal_after_slow_client_left": {
+  "bundle": {
+   "200": 3
+  },
+  "health": {
+   "200": 3
+  }
+ }
+}

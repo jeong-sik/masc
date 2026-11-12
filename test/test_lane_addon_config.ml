@@ -951,6 +951,22 @@ let persistent_state_is_explicit_and_revisioned () = with_directory (fun _root p
     [ {|mode = "writable"|}; {|mode = true|}; {|mode = "persistent"
 path = "/host"|} ])
 
+let exact_in_flight_count_is_outside_worker_identity () = with_directory (fun _root packages directory ->
+  ignore (install_package packages);
+  let path = Filename.concat directory "frames.toml" in
+  write path (declaration msx_binding);
+  let original = unwrap (Config.load_file ~path) in
+  check int "a declaration without the key runs one exact request at a time"
+    (Config.one_exact_at_a_time :> int) (original.max_exact_in_flight :> int);
+  write path (declaration ~extra:"max_exact_in_flight = 3" msx_binding);
+  let widened = unwrap (Config.load_file ~path) in
+  check int "the declared count is read" 3 (widened.max_exact_in_flight :> int);
+  check string "the count is not a worker input" original.revision widened.revision;
+  List.iter (fun value ->
+    write path (declaration ~extra:("max_exact_in_flight = " ^ value) msx_binding);
+    check_error ("a count that is not an integer of 1 or more: " ^ value) path)
+    ["0"; "-1"; "1.5"; "\"3\""; "true"; "[3]"])
+
 let ui_category_is_strict_display_metadata () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in
   let path = Filename.concat directory "observer.toml" in
@@ -1024,6 +1040,7 @@ let () = run "Lane Add-on declarative composition"
   ["configuration",
     [test_case "Ego installation Space is typed before publication and revisioned" `Quick ego_installation_space_is_validated_and_revisioned;
      test_case "UI category is strict metadata outside worker identity" `Quick ui_category_is_strict_display_metadata;
+     test_case "exact in-flight count is read and stays outside worker identity" `Quick exact_in_flight_count_is_outside_worker_identity;
      test_case "browser service is explicit and names only supported capabilities" `Quick browser_service_is_explicit;
       test_case "native execution declares no container isolation" `Quick native_execution_has_no_container_claims;
       test_case "runtime resources name only enforceable limits" `Quick runtime_selects_enforceable_resources;

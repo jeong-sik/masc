@@ -3,9 +3,9 @@
 # dependencies = ["openai==3.46.0"]
 # ///
 # pyright: strict
-"""Tests for the labels of synthetic requests (scripts/tinker/librarian/synth_spec.py) and for
-the teacher answers kept as training targets (teacher_sample.py), with the merge judge's
-classes for the answers that absorb a memory.
+"""Tests for the labels of synthetic requests (scripts/tinker/librarian/synth_spec.py), for the
+note that shows a label to the teacher, and for the teacher answers kept as training targets
+(teacher_sample.py), with the merge judge's classes for the answers that absorb a memory.
 
 A label is a Memory decision MASC accepts: the answer it asks for passes
 `admission_validator` for the prompt `synth_render` makes from the request.
@@ -20,11 +20,13 @@ import argparse
 import dataclasses
 import itertools
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librarian"))
 
@@ -36,6 +38,7 @@ import memory_scores as M
 import synth_rows as RW
 import synth_spec as S
 import teacher_sample as T
+import tinker_oai as O
 from tinker_librarian_synth_fixtures import (
     KINDS,
     PLANTED,
@@ -44,6 +47,7 @@ from tinker_librarian_synth_fixtures import (
     answer_text,
     candidates_of,
     claim_json,
+    fact,
     label_answer,
     merged,
     prompt_of,
@@ -179,6 +183,205 @@ class TeacherTest(unittest.TestCase):
         item = M.SynthItem(req.item_id, prompt_of(req), "", S.label_of(req))
         self.assertEqual(M.score_synth(item, accepted(req, answer))["state_correct"], 2)
         self.assertEqual(teacher_rejection(req, answer), "outcome")
+
+
+def item_of(req: S.SynthRequest) -> M.SynthItem:
+    return M.SynthItem(req.item_id, prompt_of(req), "", S.label_of(req))
+
+
+# SCHEDULED and four more facts, the last one stale: m4 and m12 come in one order by number and in
+# the other by text.
+LONG = SCHEDULED + (fact(9), fact(10), fact(11), fact(12, stale=True))
+
+
+class TeacherNoteTest(unittest.TestCase):
+    def test_the_note_says_what_the_label_says_of_every_candidate_and_planted_memory(self) -> None:
+        # One candidate of every kind: the correction is of m1, the complement of m2, the paraphrase of m3.
+        req = request(LONG, candidates_of(KINDS))
+        new, correction, complement, paraphrase, transient = (c.request_id for c in req.candidates)
+        self.assertEqual(T.label_note(item_of(req)).splitlines(), [
+            "이 요청의 후보와 현재 기억을 하나씩 대조해 확인한 사실입니다. 답은 아래 사실과 맞습니다.",
+            "reason 은 기억과 후보의 내용으로 적고, 이 글은 말하지 않습니다.",
+            "",
+            "후보",
+            f"- {new}: 현재 기억에 없는 새 지식입니다. incorporated 이고, 이 지식을 적은 새 claim 이 들어갑니다.",
+            (f"- {correction}: 교정입니다(대상 m1). 대상의 내용은 더는 맞지 않습니다. incorporated 이고, "
+             "새 claim 의 supersedes 에 대상 ID 가 있으며 같은 ID 가 dropped 에도 있습니다."),
+            (f"- {complement}: 보완입니다(대상 m2). 대상과 함께 유효한 조건·예외를 더합니다. incorporated 이고, "
+             "두 내용을 합쳐 쓴 새 claim 의 absorbs 에 대상 ID 가 있습니다."),
+            (f"- {paraphrase}: 이미 기억에 있는 지식입니다(대상 m3). already_represented 이고, "
+             "memory_claim 은 대상의 claim 그대로입니다. 이 후보로 새 claim 을 쓰지 않고, 대상은 그대로 남습니다."),
+            f"- {transient}: 한 시점의 일시적 상태입니다. not_durable 이고, memory_claim 은 null 입니다.",
+            "",
+            "현재 기억",
+            "- m4: 한 시점의 상태만 적은 기억입니다. dropped 에 있고, 어떤 claim 의 absorbs 에도 없습니다.",
+            "- m7: 쓸 날이 아직 남은 기록입니다. 그대로 남습니다.",
+            "- m8: 쓸 날이 이미 지난 기록입니다. dropped 에 있고, 어떤 claim 의 absorbs 에도 없습니다.",
+            "- m12: 한 시점의 상태만 적은 기억입니다. dropped 에 있고, 어떤 claim 의 absorbs 에도 없습니다.",
+            ("- m5, m6: 같은 지식을 표현만 바꿔 적은 두 기억입니다. 둘 중 남길 기억의 문장을 그대로 복사한 "
+             "claim 이 new_claims 에 있고, 그 absorbs 에 두 ID 가 모두 있습니다."),
+            "- 이 글에 ID 가 나오지 않는 기억은 모두 그대로 남습니다. dropped, absorbs, supersedes 어디에도 없습니다."])
+
+    def test_requests_whose_labels_differ_get_different_notes(self) -> None:
+        for facts in (PLANTED, SCHEDULED):
+            notes: dict[str, S.RequestLabel] = {}
+            for n in (1, 2, 3):
+                for kinds in itertools.product(KINDS, repeat=n):
+                    req = request(facts, candidates_of(kinds))
+                    label = S.label_of(req)
+                    self.assertEqual(notes.setdefault(T.label_note(item_of(req)), label), label, kinds)
+
+    def test_a_label_no_candidate_supports_gets_a_note_that_leaves_memory_as_it_is(self) -> None:
+        req = request(SCHEDULED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT)))
+        label = S.label_of(req)
+        self.assertTrue(label.planted_stale and label.duplicates and label.scheduled_ahead)
+        self.assertEqual(T.memory_lines(label, [f.memory_id for f in req.facts]), [
+            ("- 기억 변경을 지지하는 후보가 없습니다. 현재 기억은 모두 그대로 남습니다. "
+             "new_claims 와 dropped 는 비어 있고 change_support 는 [] 입니다.")])
+
+    def test_a_label_that_restates_a_claim_memory_does_not_hold_stops_the_note(self) -> None:
+        req = request(PLANTED, candidates_of((S.CandidateKind.PARAPHRASE,)))
+        [cl] = S.label_of(req).candidates
+        elsewhere = dataclasses.replace(S.label_of(req), candidates=(
+            dataclasses.replace(cl, already_claim="현재 기억에 없는 문장."),))
+        with self.assertRaisesRegex(SystemExit, "restates a claim current memory does not hold"):
+            T.label_note(M.SynthItem(req.item_id, prompt_of(req), "", elsewhere))
+
+
+type Reply = tuple[list[str], int, str]
+
+
+class TeacherSampleTest(unittest.TestCase):
+    """`sample` over a call log that already holds the teacher's replies. The budget is 0, so a call
+    the log does not hold stops the run and nothing is sent."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.folder = Path(tmp.name)
+        self.out = self.folder / "teacher"
+        self.req = dataclasses.replace(
+            request(SCHEDULED, candidates_of((S.CandidateKind.CORRECTION, S.CandidateKind.NEW_DURABLE))),
+            item_id="train-docs-gardener-00-001")
+        self.requests = self.write_requests(self.req)
+        [self.item] = V.synth_items(self.requests)
+        self.audits = [self.write_audit([self.req.item_id])]
+        pinned = cast(dict[str, object], V.load_pass_lines()["request"])
+        self.effort, self.max_tokens = cast(str, pinned["reasoning_effort"]), cast(int, pinned["max_tokens"])
+        # The caller builds its client from the variable; a logged reply is returned before the client is used.
+        env = mock.patch.dict(os.environ, {"TINKER_API_KEY": "not-a-key"})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def write_requests(self, *reqs: S.SynthRequest) -> Path:
+        path = self.folder / "requests.jsonl"
+        path.write_text("".join(json.dumps({"request": RW.row_of(r)}, ensure_ascii=False) + "\n" for r in reqs),
+                        encoding="utf-8")
+        return path
+
+    def write_audit(self, judged: list[str], items: tuple[str, ...] = (), memories: tuple[str, ...] = (),
+                    name: str = "audit") -> Path:
+        """An audit folder with what `sample` reads of the audit.json `e_synth_audit.py apply` writes:
+        a case per judged item, and the items and memories the audit took out."""
+        audit = self.folder / name
+        audit.mkdir(exist_ok=True)
+        (audit / "audit.json").write_text(json.dumps({
+            "removed_items": list(items), "removed_memories": list(memories),
+            "per_case": [{"case": f"c{n:03d}", "item": item} for n, item in enumerate(judged, start=1)]}),
+            encoding="utf-8")
+        return audit
+
+    def noted(self, item: M.SynthItem) -> list[str]:
+        return [item.text, T.label_note(item), V.schema_instruction()]
+
+    def log(self, *replies: Reply) -> None:
+        """Write the call log: `content` as the reply to `messages` on that attempt, at the test's effort and budget."""
+        calls = [O.Call(O.call_key(T.TEACHER, self.effort, self.max_tokens, attempt, messages), "teacher", O.HTTP_OK,
+                        "stop", content, None, 10, 0, 1, 0.1, 1.0) for messages, attempt, content in replies]
+        self.out.mkdir(exist_ok=True)
+        (self.out / "calls.jsonl").write_text(
+            "".join(json.dumps(dataclasses.asdict(c), ensure_ascii=False) + "\n" for c in calls), encoding="utf-8")
+
+    def sample(self) -> tuple[int, dict[str, object]]:
+        code = T.sample(argparse.Namespace(requests=str(self.requests), audit=[str(a) for a in self.audits],
+                                           out=str(self.out), budget=0.0))
+        return code, cast(dict[str, object], json.loads((self.out / "summary.json").read_text(encoding="utf-8")))
+
+    def test_the_teacher_is_asked_with_the_label_note_before_the_instruction(self) -> None:
+        self.log((self.noted(self.item), 0, label_answer(self.req)))
+        code, summary = self.sample()
+        # The label's answer merges the planted pair, so it waits for the merge judge.
+        self.assertEqual((code, summary["kept"], summary["pending"], summary["stopped"]), (0, 0, 1, None))
+        self.assertEqual((summary["label_note"], summary["audits_sha256"]),
+                         (True, [V.sha256_file(self.audits[0] / "audit.json")]))
+        # A record holds the answer and where it came from, not the note.
+        self.assertEqual(D.read_jsonl(self.out / T.PENDING),
+                         [{"item": self.req.item_id, "attempt": 0, "answer": label_answer(self.req)}])
+
+    def test_a_reply_to_the_request_without_the_note_is_not_the_teachers(self) -> None:
+        self.log(([self.item.text, V.schema_instruction()], 0, label_answer(self.req)))
+        code, summary = self.sample()
+        self.assertEqual((code, summary["kept"], summary["pending"]), (2, 0, 0))
+        self.assertIsNotNone(summary["stopped"])
+
+    def test_a_second_attempt_carries_the_note_too(self) -> None:
+        self.log((self.noted(self.item), 0, "{}"), (self.noted(self.item), 1, label_answer(self.req)))
+        code, summary = self.sample()
+        self.assertEqual((code, summary["pending"], summary["by_attempt"]), (0, 1, {"1": 1}))
+        self.assertEqual(sum(cast(dict[str, int], summary["rejections"]).values()), 1)
+
+    def test_the_effort_and_the_output_budget_are_the_pass_lines(self) -> None:
+        self.effort, self.max_tokens = "medium", 4096
+        other = {**V.load_pass_lines(), "request": {"reasoning_effort": self.effort, "max_tokens": self.max_tokens}}
+        self.log((self.noted(self.item), 0, label_answer(self.req)))
+        with mock.patch.object(V, "load_pass_lines", return_value=other):
+            code, summary = self.sample()
+        self.assertEqual((code, summary["pending"], summary["effort"], summary["max_tokens"]), (0, 1, "medium", 4096))
+
+    def test_a_request_no_audit_confirmed_is_not_sampled(self) -> None:
+        item, memory = self.req.item_id, D.memory_of(self.req.item_id)
+        audits: tuple[tuple[str, list[str], tuple[str, ...], tuple[str, ...]], ...] = (
+            ("no case", [], (), ()), ("the request taken out", [item], (item,), ()),
+            ("its memory taken out", [item], (), (memory,)))
+        for name, judged, items, memories in audits:
+            with self.subTest(name):
+                self.audits = [self.write_audit(judged, items, memories)]
+                with self.assertRaisesRegex(SystemExit, "no audit confirmed the labels of 1 requests"):
+                    self.sample()
+                self.assertFalse(self.out.exists())
+
+    def test_an_audit_that_kept_a_request_does_not_overrule_one_that_took_it_out(self) -> None:
+        item, memory = self.req.item_id, D.memory_of(self.req.item_id)
+        kept = self.write_audit([item])
+        taken: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+            ("the request", (item,), ()), ("its memory", (), (memory,)))
+        for name, items, memories in taken:
+            took_out = self.write_audit([item], items, memories, name="later")
+            for audits in ([kept, took_out], [took_out, kept]):
+                with self.subTest(name, first=audits[0].name):
+                    self.audits = audits
+                    with self.assertRaisesRegex(SystemExit, "no audit confirmed the labels of 1 requests"):
+                        self.sample()
+
+    def test_requests_two_audits_judged_between_them_are_sampled(self) -> None:
+        other = dataclasses.replace(request(PLANTED, candidates_of((S.CandidateKind.NEW_DURABLE,))),
+                                    item_id="train-docs-gardener-01-002")
+        self.requests = self.write_requests(self.req, other)
+        first, second = V.synth_items(self.requests)
+        self.audits = [self.write_audit([self.req.item_id]), self.write_audit([other.item_id], name="second")]
+        self.log((self.noted(first), 0, label_answer(self.req)), (self.noted(second), 0, label_answer(other)))
+        code, summary = self.sample()
+        self.assertEqual((code, summary["pending"], summary["rejections"]), (0, 2, {}))
+        self.assertEqual(summary["audits_sha256"], [V.sha256_file(a / "audit.json") for a in self.audits])
+
+    def test_rows_that_share_an_item_id_are_each_asked_with_their_own_messages(self) -> None:
+        other = dataclasses.replace(request(PLANTED, candidates_of((S.CandidateKind.NEW_DURABLE,))),
+                                    item_id=self.req.item_id)
+        self.requests = self.write_requests(self.req, other)
+        first, second = V.synth_items(self.requests)
+        self.log((self.noted(first), 0, label_answer(self.req)), (self.noted(second), 0, label_answer(other)))
+        code, summary = self.sample()
+        self.assertEqual((code, summary["pending"], summary["rejections"]), (0, 2, {}))
 
 
 def record(req: S.SynthRequest, answer: str) -> dict[str, object]:

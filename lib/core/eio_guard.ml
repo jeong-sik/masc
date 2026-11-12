@@ -68,6 +68,14 @@ let with_mutex_ro mutex f =
 (** Run [f] in a system thread from an Eio fiber, or directly from a raw Domain
     or other non-Eio execution context.
 
+    The thread belongs to the system-thread host's domain once that host is
+    started ([Fs_compat.Systhread_host]), so [f] runs beside the caller's
+    domain instead of taking turns with it for one domain lock. [f] must not
+    rely on being interleaved with the caller's fibers: state it shares with
+    them needs an [Atomic] or a [Stdlib.Mutex]. Pool work, and a process that
+    never starts the host, keep the thread on the caller's domain. The
+    caller's fiber waits for [f] either way.
+
     A pool system thread has no Eio effect handler.  [f] must therefore
     perform only blocking C/Unix work, never an Eio operation: anything
     that performs an effect (e.g. [Eio.Mutex.use_rw], whose [Cancel.protect]
@@ -90,7 +98,7 @@ let with_mutex_ro mutex f =
 let run_in_systhread ~label f =
   match execution_context () with
   | Eio_fiber ->
-    Eio_unix.run_in_systhread ~label (fun () ->
+    Fs_compat.Systhread_host.run ~label (fun () ->
       try f () with
       | Effect.Unhandled _ as exn ->
         failwith

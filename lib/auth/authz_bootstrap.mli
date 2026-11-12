@@ -102,10 +102,10 @@
     record, so the call fails with {!Log_not_empty}, and the next boot promotes
     the intent ({!Authz_high_water.Promote}). An error from a write says which
     step failed. A failed append may or may not have reached the file, and a call
-    after it reads the files and goes on from there. Cancellation and a failure
-    of the thread host ([Systhread_host.Host_failed], raised by the appends as
-    {!Authz_log.append} says) are not turned into errors. They end the call
-    where they happen, as a crash does, and the same holds.
+    after it reads the files and goes on from there. Cancellation and an
+    exception from the system thread that runs an append (see
+    {!Authz_log.append}) are not turned into errors. They end the call where
+    they happen, as a crash does, and the same holds.
 
     {b What it does not do.} It refuses a store inside the base path, and it
     does not check more than that that the store is outside the backup of the

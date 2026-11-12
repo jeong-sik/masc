@@ -39,7 +39,7 @@ let request_stop t =
   Protocol.revoke t.protocol;
   ignore (Eio.Promise.try_resolve t.request_retirement ());
   ignore (Eio.Promise.try_resolve t.request_stop ())
-let admission_status admission = Eio_unix.run_in_systhread (fun () -> Native_addon_lease.status admission)
+let admission_status admission = Systhread_host.run ~label:"addon-native-lease-status" (fun () -> Native_addon_lease.status admission)
 let confirm t result = match t.confirmed with
   | Some receipt -> Ok receipt
   | None -> match result with
@@ -47,7 +47,7 @@ let confirm t result = match t.confirmed with
     | Ok receipt ->
         (* Process completion is immutable; durable retirement can fail
            transiently. Retry only this original claim, never its payload. *)
-        let* () = Eio_unix.run_in_systhread (fun () -> Native_addon_lease.retire t.admission)
+        let* () = Systhread_host.run ~label:"addon-native-lease-retire" (fun () -> Native_addon_lease.retire t.admission)
           |> Result.map_error (fun error -> Cleanup_unconfirmed (Native_addon_lease.error_to_string error)) in
         match admission_status t.admission with
         | Ok Native_addon_lease.Settled -> t.confirmed <- Some receipt;Ok receipt
@@ -220,7 +220,7 @@ let start ~sw ~clock ~grace_seconds ~admission ~launcher ~contract ~command ?cwd
         with Eio.Cancel.Cancelled _ as exn -> cleanup_completed := true;raise exn) in
         let retire () = Eio.Cancel.protect (fun () ->
           Eio.Promise.await retirement_requested;
-          match Eio_unix.run_in_systhread (fun () -> Native_addon_lease.retire admission) with
+          match Systhread_host.run ~label:"addon-native-lease-retire" (fun () -> Native_addon_lease.retire admission) with
           | Ok () -> () | Error error -> retirement_failure := Some error) in
         Eio.Fiber.both run_process retire
       with

@@ -910,8 +910,12 @@ let help_title (state : state) ~cols =
 (* The keys the footer names for the sheet in its current state. *)
 let help_hints (state : state) =
   match state.help_filter with
-  | Masc_tui_help.Off ->
-      "/:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
+  | Masc_tui_help.Off -> (
+      match state.help_scope with
+      | Masc_tui_help.Here ->
+          "?:every screen  /:find  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
+      | Masc_tui_help.Everything ->
+          "/:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close")
   | Masc_tui_help.Typing _ -> "Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page"
   | Masc_tui_help.Kept _ ->
       "/:edit  Esc:clear  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  ?:close"

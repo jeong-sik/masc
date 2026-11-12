@@ -17,9 +17,13 @@ The exact-request store holds real Keeper memory. The server removes an
 admission's text once every candidate is committed and acknowledged, so
 `e_real_manifest.py --snapshot` copies the answered admission records into
 `artifacts/tinker/librarian/e-real-snapshot/`, readable by its owner alone,
-when E-real is pinned. E-real runs read that copy. Nothing from the store is
-copied into this repository: the E-real manifest holds only record digests and
-file sha256 values. E-real model answers stay in the run's
+when E-real is pinned. E-real runs read that copy. It is the only copy once the
+server removed a record's text. When the snapshot is lost,
+`e_real_manifest.py --of <manifest>` takes that manifest's records again from a
+base that still holds them. The manifest it writes names the earlier one and
+lists the records that are gone (`of.gone`), and E-real is the records left.
+Nothing from the store is copied into this repository: the E-real manifest
+holds only record digests and file sha256 values. E-real model answers stay in the run's
 `calls.jsonl` under `artifacts/`. The committed evidence holds numbers, IDs and
 verdicts. A GLM run sends E-real prompts to Z.AI, where MASC's GLM slot sends
 them.
@@ -33,6 +37,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | --- | --- |
 | `pass_lines.json` | Fixed request shape, evaluation sets, baseline, candidates, gates and the files whose bytes they assume: every module `eval_admission.py`, `e_synth_audit.py` and `merge_cases.py` import, and the prompt template |
 | `e_real_manifest.json` | E-real: the answered admission records, by digest and sha256 |
+| `e_real_template.md` | The `config/prompts/librarian.md` the E-real records were drawn with (commit `7b026dc68ea0`); their prompt text is read with it |
 | `exact_store.py` | Reads answered admission records and copies them into the E-real snapshot; never writes the server's store |
 | `e_real_manifest.py` | Takes the E-real snapshot and writes its manifest |
 | `synth_spec.py` | Plan of a synthetic request: measured distributions, ID shapes, labels |
@@ -61,7 +66,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `glm_chat.py` | Capped calls to Z.AI's GLM coding endpoint in the request MASC's GLM slot sends, cached for resume |
 | `eval_admission.py` | Measures targets on E-real and E-synth, then applies the gates |
 | `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
-| `teacher_sample.py` | Keeps teacher answers that leave the memory their training labels ask for, and those that absorb a memory once the merge judge finds each absorb mergeable |
+| `audit_baseline.py` | Answers requests the pass lines do not pin with the base model, for their blind label audit |
+| `teacher_sample.py` | Shows the teacher what each audited training label says and keeps the answers that leave the memory the label asks for, those that absorb a memory once the merge judge finds each absorb mergeable |
 | `train_sft.py` | Trains the candidate A on the teacher's answers |
 | `prompt_lines.json` | A prompt draft's comparison, fixed before the draft runs: the baseline runs, the runs per side and the noise widths |
 | `prompt_compare.py` | Decides whether a prompt draft goes in, from runs of the pinned template and of the draft |
@@ -115,20 +121,38 @@ endpoint applies its default.
    E-synth numbers add `scheduled_ahead_keep_rate` and
    `scheduled_past_drop_recall`. A record still ahead that an answer drops is
    also an off-label drop (step 6).
-2. Run the base model on E-synth, audit the labels with a judge that sees
-   neither the labels nor the answers, and keep the requests it confirms.
+2. Run the base model on E-synth (`audit_baseline.py`: the set is not pinned
+   yet), audit the labels with a judge that sees neither the labels nor the
+   answers, and keep the requests it confirms.
+   E-synth can be made in batches. Generate each batch with its own seed and
+   with `--first-memory` at the number where the last batch's memories ended,
+   run and audit it by itself, and join the audited batches with
+   `e_synth_audit.py pool`. It writes the requests in item ID order and refuses
+   batches that share a memory key. `pass_lines.json` lists the batches and
+   their audits under `e_synth.batches`.
 3. Fix `pass_lines.json` and commit it before any training. The G6 merge lines
    come from the base model's merge numbers on the fixed E-synth:
    `eval_admission.py synth-numbers` prints them once the drop and merge judges
    (steps 6 and 7) have classed that run's answers. It reads no gate, choice
    or trained run. `verdict` and `train_sft.py` refuse while a gate has no
    number.
-4. Generate the training split and sample the teacher (`teacher_sample.py
-   sample`). An answer that absorbs a memory waits for the merge judge, also
-   when its label expects the merge: `teacher_sample.py cases` gives the judge
-   the absorb gate's question as `merge_cases.py` does, and `apply` keeps the
-   answer only when every absorb is judged mergeable. Train A on the
-   `accepted.jsonl` that `apply` writes.
+4. Generate the training split and audit its labels as step 2 audits
+   E-synth's, with `--sample` above the number of requests, so that the judge
+   sees every request. Sample the teacher on the requests the audit keeps
+   (`teacher_sample.py sample`). The teacher is the base model at the
+   reasoning effort and output budget `pass_lines.json` sets for a request.
+   Besides the request and the schema instruction it gets a note of what the
+   request's label says, so it follows the label, and a label no judge
+   confirmed would become a wrong training target: `sample` refuses a request
+   no `--audit` folder holds a case for, and one an audit took out alone or
+   with its memory, whatever another audit says of it. A request is tied to
+   its case by item ID: an audit records no sha256 of the requests it judged.
+   A training example holds the request, the schema instruction and the
+   answer, without the note. An answer that absorbs a memory waits for the
+   merge judge, also when its label expects the merge:
+   `teacher_sample.py cases` gives the judge the absorb gate's question as
+   `merge_cases.py` does, and `apply` keeps the answer only when every absorb
+   is judged mergeable. Train A on the `accepted.jsonl` that `apply` writes.
 5. Measure the base model and A in one run per set, from an empty `--out`.
 6. When a valid E-synth answer dropped a fact its label does not name (not
    planted stale, not a correction or complement target, not a fact of a
@@ -153,16 +177,47 @@ endpoint applies its default.
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/e_real_manifest.py \
   --snapshot artifacts/tinker/librarian/e-real-snapshot \
   --out scripts/tinker/librarian/e_real_manifest.json
-uv run scripts/tinker/librarian/synth_generate.py --split eval --seed 20261110 \
+# The pinned E-synth is two batches: --seed 20261112, then --seed 20261113 --first-memory 10.
+uv run scripts/tinker/librarian/synth_generate.py --split eval --seed 20261112 \
   --out artifacts/tinker/librarian/synth-eval --budget 6
+uv run scripts/tinker/librarian/audit_baseline.py \
+  --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
+  --out artifacts/tinker/librarian/eval-base-synth --budget 3
 uv run scripts/tinker/librarian/e_synth_audit.py cases \
   --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
   --run artifacts/tinker/librarian/eval-base-synth --baseline base \
-  --sample 1000 --seed 20261110 --out artifacts/tinker/librarian/e-synth-audit
+  --sample 1000 --seed 20261112 --out artifacts/tinker/librarian/e-synth-audit
 uv run scripts/tinker/librarian/e_synth_audit.py apply \
   --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
   --audit artifacts/tinker/librarian/e-synth-audit \
   --final artifacts/tinker/librarian/e-synth/requests.jsonl
+# E-synth in batches: the steps above once per batch, each `apply` to its own file, then
+uv run scripts/tinker/librarian/e_synth_audit.py pool \
+  --batch artifacts/tinker/librarian/e-synth-1/requests.jsonl \
+  --batch artifacts/tinker/librarian/e-synth-2/requests.jsonl \
+  --final artifacts/tinker/librarian/e-synth/requests.jsonl
+# The training split (step 4): the same audit, then the teacher on the requests it keeps.
+uv run scripts/tinker/librarian/synth_generate.py --split train --seed 20261114 \
+  --out artifacts/tinker/librarian/synth-train --budget 12
+uv run scripts/tinker/librarian/audit_baseline.py \
+  --requests artifacts/tinker/librarian/synth-train/requests.jsonl \
+  --out artifacts/tinker/librarian/train-base --budget 6
+uv run scripts/tinker/librarian/e_synth_audit.py cases \
+  --requests artifacts/tinker/librarian/synth-train/requests.jsonl \
+  --run artifacts/tinker/librarian/train-base --baseline base \
+  --sample 1000 --seed 20261114 --out artifacts/tinker/librarian/train-audit
+uv run scripts/tinker/librarian/e_synth_audit.py apply \
+  --requests artifacts/tinker/librarian/synth-train/requests.jsonl \
+  --audit artifacts/tinker/librarian/train-audit \
+  --final artifacts/tinker/librarian/train-audited/requests.jsonl
+uv run scripts/tinker/librarian/teacher_sample.py sample \
+  --requests artifacts/tinker/librarian/train-audited/requests.jsonl \
+  --audit artifacts/tinker/librarian/train-audit \
+  --out artifacts/tinker/librarian/teacher --budget 10
+uv run scripts/tinker/librarian/teacher_sample.py cases \
+  --requests artifacts/tinker/librarian/train-audited/requests.jsonl --out artifacts/tinker/librarian/teacher
+uv run scripts/tinker/librarian/teacher_sample.py apply \
+  --requests artifacts/tinker/librarian/train-audited/requests.jsonl --out artifacts/tinker/librarian/teacher
 MASC_BASE_PATH=artifacts/tinker/librarian/e-real-snapshot \
   uv run scripts/tinker/librarian/eval_admission.py run --set real \
   --target base=thinkingmachines/Inkling-2-Small:peft:262144 \
@@ -209,19 +264,32 @@ the `--synth` run that holds those files.
 records each drop, its class, the memories left out, each target's wrong drops
 on them, each absorb's class, each target's absorb numbers and the judges' file
 sha256 values in `verdict.json`.
+G1 counts the E-real items the baseline's endpoint did not refuse outright. An
+item its call got HTTP 400 for is past what the base model accepts, such as its
+context, so no weights trained on that model answer it: `verdict.json` lists
+those items under `e_real_refused` and gives each candidate's
+`valid_rate_in_reach`. An answer cut off at `max_tokens` stays counted.
+It also lists, by item, the memory IDs each candidate dropped that the live
+answer keeps (`dropped_not_in_live`). G2 caps their number; read the list
+before an install, since the count does not tell a lost memory from a stale
+one the live answer kept.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
-rest. A budget stop exits with status 2. `verdict` refuses a run where a
+rest. A budget stop exits with status 2. So does HTTP 402 from Tinker: the
+endpoint takes no call for the account until its billing changes, and the run
+ends there with the reason in `stopped`. `verdict` refuses a run where a
 candidate's call and the baseline's call for the same item left more than
 `same_item_window_s` apart, so a baseline answered in an earlier run cannot
 stand in for the one G5 compares against.
 
-`run --template <librarian.md>` measures a prompt change on the same sets: it
-draws every prompt with that file's template from the same request data. An
-E-real prompt is first read with the pinned template, and its retirement
-evidence goes out under the new template's retirement policy. `summary.json`
-records the sha256 of the template the prompts were drawn with, and `verdict`
-refuses a run whose template is not the pinned one.
+Every prompt goes out drawn with the pinned template. An E-real record holds
+the prompt text MASC sent, so it is first read with the template of that day
+(`e_real_template.md`, pinned as `e_real.template_sha256`) and drawn again from
+the same data; its retirement evidence goes out under the retirement policy of
+the template it is drawn with. `run --template <librarian.md>` measures a
+prompt change on the same sets: it draws every prompt with that file's template
+instead. `summary.json` records the sha256 of the template the prompts were
+drawn with, and `verdict` refuses a run whose template is not the pinned one.
 
 `prompt_compare.py --runs <runs.json> --out <compare.json>` decides whether a
 draft of `config/prompts/librarian.md` goes in (RFC-0517 §2.3).

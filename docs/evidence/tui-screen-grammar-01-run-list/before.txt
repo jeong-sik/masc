@@ -1,0 +1,36 @@
+-- inner width 196
+  STARTED           ACTOR            STATUS       ELAPSED SLOT
+  11-11 15:36:13    wkbl-front       succeeded      3m15s glm-coding.glm-5.3-flash
+  11-11 15:30:55    kidsn…dd-manager succeeded      7m06s glm-coding.glm-5.3-flash
+  11-11 15:25:56    sangsu           com…unknown    243ms —
+  11-11 14:57:43    wkbl-growth      rev…ncelled    29.2s —
+  11-10 15:43:00    code-…wer-father running            — ollama_cloud.ollama-cloud-deepseek-v4-1-flash
+  10-07 15:43:00    e-mas-the-leader bra…_status    1h06m glm-coding.glm-5.3-flash
+
+-- inner width 116
+  STARTED           ACTOR            STATUS       ELAPSED SLOT
+  11-11 15:36:13    wkbl-front       succeeded      3m15s glm-coding.glm-5.3-flash
+  11-11 15:30:55    kidsn…dd-manager succeeded      7m06s glm-coding.glm-5.3-flash
+  11-11 15:25:56    sangsu           com…unknown    243ms —
+  11-11 14:57:43    wkbl-growth      rev…ncelled    29.2s —
+  11-10 15:43:00    code-…wer-father running            — ollama_cloud.ollama-cloud-deepseek-v4-1-flash
+  10-07 15:43:00    e-mas-the-leader bra…_status    1h06m glm-coding.glm-5.3-flash
+
+-- inner width 76
+  ACTOR            STATUS       ELAPSED SLOT
+  wkbl-front       succeeded      3m15s glm-coding.glm-5.3-flash
+  kidsn…dd-manager succeeded      7m06s glm-coding.glm-5.3-flash
+  sangsu           com…unknown    243ms —
+  wkbl-growth      rev…ncelled    29.2s —
+  code-…wer-father running            — ollama_cloud…cloud-deepseek-v4-1-flash
+  e-mas-the-leader bra…_status    1h06m glm-coding.glm-5.3-flash
+
+-- inner width 56
+  ACTOR            STATUS      SLOT
+  wkbl-front       succeeded   glm-coding.glm-5.3-flash
+  kidsn…dd-manager succeeded   glm-coding.glm-5.3-flash
+  sangsu           com…unknown —
+  wkbl-growth      rev…ncelled —
+  code-…wer-father running     ollama_c…eepseek-v4-1-flash
+  e-mas-the-leader bra…_status glm-coding.glm-5.3-flash
+

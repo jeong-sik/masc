@@ -36,6 +36,22 @@ val person_runtime_root
   -> namespace:Authz_types.Account_home_namespace.t
   -> string
 
+(** Whether [home] is under {!accounts_dir} of [base_path], where the runtime
+    roots of the persons are. Both paths are read as spelled and by their real
+    path, the deepest part that is there resolved and the parts under it as
+    spelled, so a link, another case of a name on a volume that ignores case,
+    or a home that is not made yet still leads under it. It reads real paths
+    and makes nothing. *)
+val under_persons : base_path:string -> string -> bool
+
+(** Whether {!accounts_dir} of [base_path] is there: a login of a person made
+    it for the runtime roots of the persons, and only the operator removes
+    it. Whatever has that name counts, an empty directory, a link or a file,
+    so the answer needs no listing, which could end early on a read error and
+    look empty. [Ok false] only when the name is not there. [Error] when the
+    path to it could not be read. It reads one name and makes nothing. *)
+val persons_remain : base_path:string -> (bool, Unix.error) result
+
 (** The home of [account_id] of [client] under [runtime_root], spelled from the
     real path of [runtime_root]. It reads only that real path and makes
     nothing. [runtime_root] is absolute and [account_id] is one path leaf. *)

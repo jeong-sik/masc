@@ -16,6 +16,9 @@ val response_observations : t -> response_observation list option
     version 2 attempt-ordered list, including attempts with no response. *)
 
 type cli_result = Not_reached | Prompt_unavailable | Answered of string | Exhausted
+  | Stopped_before_dispatch of string
+      (** The walk stopped just before sending to this declared slot. It was
+          visited and not dispatched, and no later slot was visited. *)
 
 type cli
 val cli : visited:string list -> dispatched:string list -> failures:Keeper_lane_cli_oneshot.failure list ->

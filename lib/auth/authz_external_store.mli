@@ -111,6 +111,10 @@ module State : sig
   (** The hash of the record of the last [Committed]. *)
   val last_committed : t -> Authz_record.Hash.t option
 
+  (** How many [Committed] the file holds: the records of the log that the
+      store has answered. *)
+  val answered : t -> int
+
   (** Every [Aborted_intent], in file order. *)
   val aborted : t -> intent list
 

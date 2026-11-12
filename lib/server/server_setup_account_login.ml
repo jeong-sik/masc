@@ -344,12 +344,19 @@ let template_error (error : Runtime_account_runtime.error) =
   | Runtime_account_runtime.Runtime_not_bound _ ->
     `Bad_request, Runtime_account_runtime.error_to_string error
 
+(* The state a route of a person decides on. A zone that cannot be trusted
+   gives none, and the route answers a 503. *)
+let trusted_state person =
+  match Authz_zone.read person.zone with
+  | Ok trusted -> Ok (trusted :> Authz_zone.snapshot).Authz_zone.state
+  | Error uncertain -> Error (`Service_unavailable, Login_routes.zone_uncertain_message uncertain)
+
 (* The account of the person, its integration as the login receipt names it,
    and the runtime of [binding] on its home. An account of another person is
    answered as one that does not exist (design 4.2: an id grants nothing). *)
 let person_runtime person ~base_path ~provider_account_id:id ~binding =
   let provider_account_id = Authz_types.Provider_account_id.to_string id in
-  let state = (Authz_zone.snapshot person.zone).Authz_zone.state in
+  let* state = trusted_state person in
   let* () = match Authz_provider_account_state.owner state.Authz_state.provider_accounts id with
     | Some owner when Authz_types.User_id.equal owner person.user_id -> Ok ()
     | Some _ | None -> Error (`Not_found, unknown_account) in
@@ -410,7 +417,7 @@ let verified_runtime_effects =
    is a Runtime of theirs, with its Self grant (plan D1). Another call finds
    the Runtime the first one made. *)
 let record_runtime person { provider_account_id; runtime_id; runtime = _ } =
-  let state = (Authz_zone.snapshot person.zone).Authz_zone.state in
+  let* state = trusted_state person in
   match Authz_runtime_state.find state.Authz_state.runtimes runtime_id with
   | Some { Authz_runtime_state.owner; provider_account_id = account; self_grant = _; self_effects = _ }
     when Authz_types.User_id.equal owner person.user_id
@@ -422,7 +429,7 @@ let record_runtime person { provider_account_id; runtime_id; runtime = _ } =
      | Ok (_ : Authz_types.Grant_id.t) -> Ok Made
      | Error error ->
        Log.Server.warn "Runtime %s was not recorded: %s"
-         (Authz_types.Runtime_id.to_string runtime_id) (Authz_runtime.error_to_string error);
+         (Authz_types.Runtime_id.to_string runtime_id) (Authz_runtime.error_detail error);
        Error (`Service_unavailable, runtime_failure))
 
 (* The detail of a failure can name a path of the server, so it goes to the

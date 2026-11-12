@@ -37,6 +37,7 @@ type error =
       { path : string
       ; detail : string
       }
+  | Native_tools_refused of Runtime_account_access.native_refusal
 
 (* macOS finds a HOME's login keychain by path convention —
    [$HOME/Library/Keychains/login.keychain-db] — and nothing else. The HOME
@@ -112,6 +113,7 @@ let error_to_string = function
     Printf.sprintf "failed to write Antigravity MCP config %s: %s" path detail
   | Mcp_config_cleanup_failed { path; detail } ->
     Printf.sprintf "failed to clear Antigravity MCP config %s: %s" path detail
+  | Native_tools_refused refusal -> Runtime_account_access.native_refusal_to_string refusal
 ;;
 
 let unix_error_detail error fn arg =
@@ -1073,6 +1075,15 @@ let refuse_root_inside_runtime_root t root =
 ;;
 
 let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
+  (* HIGH-RISK-UNREVIEWED: these settings are what gives a model turn of
+     Antigravity its native tools, so the posture is judged before a rule is
+     written (plans D3c and F3a-3). A refusal leaves the settings of an earlier
+     turn in place and starts nothing: every caller of
+     [Runtime_antigravity.run_turn] prepares the tools of its turn here first. *)
+  let* () =
+    Runtime_account_access.authorize_native posture
+    |> Result.map_error (fun refusal -> Native_tools_refused refusal)
+  in
   let* cwd = prepare_native_workspace t ~workspace in
   let* () = refuse_runtime_root_holder t cwd in
   let rec validate = function

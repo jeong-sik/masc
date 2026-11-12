@@ -4,6 +4,7 @@ Retained reports explain findings and link to supporting verification records.
 Generate new reports under `artifacts/`; retain selected reports here. See the
 [storage guide](../guides/WORKSPACE-STORAGE.md).
 
+- [열린 이슈 1,094개 지도와 개선 계획 · 2026-11-11](2026-11-11-open-issue-map-and-plan.md)
 - [기능 경로 추가 점검 · 2026-11-09](2026-11-09-feature-miss-audit.md)
 - [최근 7일 코드 점검과 OCaml 5.5.2 적용 · 2026-11-09](2026-11-09-weekly-code-audit.md)
 - [Tools 효율: 11-07 배포 앞뒤와 남은 일 · 2026-11-08](2026-11-08-tool-efficiency-after-the-1107-deploy.md)

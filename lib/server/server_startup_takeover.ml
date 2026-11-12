@@ -75,6 +75,17 @@ type base_path_lock_rejection =
       ; path : string
       ; reason : string
       }
+  | Announcement_port_invalid of { port : int }
+  | Announcement_already_made of
+      { path : string
+      ; port : int
+      }
+  | Announcement_lease_not_active of { path : string }
+  | Announcement_port_locked of
+      { path : string
+      ; port : int
+      ; holder : int option
+      }
 
 (* Only the process-local table establishes ownership identity. The recorded
    number is written after locking and may describe a previous owner or a
@@ -182,6 +193,30 @@ let base_path_lock_rejection_to_string = function
       operation
       path
       reason
+  | Announcement_port_invalid { port } ->
+    Printf.sprintf "account server announcement refused: %d is not a port" port
+  | Announcement_already_made { path; port } ->
+    Printf.sprintf
+      "account server announcement refused: this process already announces port %d path=%s"
+      port
+      path
+  | Announcement_lease_not_active { path } ->
+    Printf.sprintf
+      "account server announcement refused: the lease handle is not the active process owner \
+       path=%s"
+      path
+  | Announcement_port_locked { path; port; holder = Some holder } ->
+    Printf.sprintf
+      "account server announcement refused: the byte of port %d is locked by pid %d path=%s"
+      port
+      holder
+      path
+  | Announcement_port_locked { path; port; holder = None } ->
+    Printf.sprintf
+      "account server announcement refused: the byte of port %d is locked by another process \
+       path=%s"
+      port
+      path
 ;;
 
 let base_path_lease_mu = Mutex.create ()
@@ -192,6 +227,38 @@ type retained_base_path_fd =
 
 let base_path_leases : (string, retained_base_path_fd) Hashtbl.t =
   Hashtbl.create 2
+;;
+
+(* The port an account server serves, told to the host through the lock table
+   of the kernel. The server locks one byte of a file beside its lease: the
+   byte whose position is the port. The file stays empty. Another process
+   asks the kernel with F_GETLK who holds the byte of a port
+   ([Owner_process_identity.byte_holder]). The record is the lock, so it is
+   gone the moment its holder is, and no number stays on disk to go stale as
+   the one in a lease file does ([Owner_recorded]).
+
+   lease path -> the descriptor that holds the lock, and the port. POSIX
+   record locks belong to the process, and closing any descriptor of the
+   file drops them. So this descriptor is the only one the announcing
+   process has on the file: the reads below find it by the identity of the
+   file and ask through it, and open nothing ([read_announcement]). *)
+let account_server_announcement_path lease_path = lease_path ^ ".account-server"
+
+let account_server_announcements : (string, Unix.file_descr * int) Hashtbl.t =
+  Hashtbl.create 2
+;;
+
+(* A close that fails leaves it open whether the descriptor is gone. It is
+   said and not tried again: the number may already name another file. *)
+let close_announcement_fd ~path fd =
+  try Unix.close fd with
+  | Unix.Unix_error (error, syscall, argument) ->
+    Log.Server.error
+      "account server announcement close failed: path=%s error=%s syscall=%s argument=%s"
+      path
+      (Unix.error_message error)
+      syscall
+      argument
 ;;
 
 let close_acquisition_fd ~operation ~path ~context fd =
@@ -266,6 +333,13 @@ let base_path_lock_digest_of_stats (stat : Unix.stats) =
   |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex
 ;;
 
+(* The name of the lease file of a BasePath in its private lease directory. *)
+let lease_file_name (base_path_stat : Unix.stats) =
+  Printf.sprintf
+    "masc-base-path-owner-v2-%s.lease"
+    (base_path_lock_digest_of_stats base_path_stat)
+;;
+
 let base_path_owner_pid = function
   | Owner_this_process pid | Owner_recorded pid ->
     Some pid
@@ -332,6 +406,15 @@ let release_base_path_lease lease =
         "BasePath lease release ignored because the handle is not the active owner: path=%s"
         lease.path
     else (
+      (* The announcement goes first: nothing reads a port from a process that
+         has given the workspace up. Closing the descriptor drops the lock. *)
+      (match Hashtbl.find_opt account_server_announcements lease.path with
+       | None -> ()
+       | Some (announcement_fd, (_ : int)) ->
+         Hashtbl.remove account_server_announcements lease.path;
+         close_announcement_fd
+           ~path:(account_server_announcement_path lease.path)
+           announcement_fd);
       (try
          let (_ : int) = Unix.lseek lease.fd 0 Unix.SEEK_SET in
          Unix.lockf lease.fd Unix.F_ULOCK 0
@@ -639,12 +722,7 @@ let prepare_base_path_lock ~run_dir base_path =
     ; lease_directory_stat
     ; runtime_directory =
         Filename.concat canonical_base_path Common.masc_dirname
-    ; path =
-        Filename.concat
-          lease_directory
-          (Printf.sprintf
-             "masc-base-path-owner-v2-%s.lease"
-             (base_path_lock_digest_of_stats base_path_stat))
+    ; path = Filename.concat lease_directory (lease_file_name base_path_stat)
     ; owner_uid
     }
 ;;
@@ -1274,17 +1352,28 @@ module For_testing = struct
     in
     (try Unix.mkdir lease_directory 0o700 with
      | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-    Filename.concat
-      lease_directory
-      (Printf.sprintf
-         "masc-base-path-owner-v2-%s.lease"
-         (base_path_lock_digest_of_stats (Unix.stat canonical_base_path)))
+    Filename.concat lease_directory (lease_file_name (Unix.stat canonical_base_path))
 end
 
 type owner_capture_error =
   | Owner_lease_rejected of base_path_lock_rejection
   | Owner_identity_unavailable of Owner_process_identity.error
   | Current_process_owner
+
+let owner_capture_error_to_string = function
+  | Owner_lease_rejected rejection -> base_path_lock_rejection_to_string rejection
+  | Owner_identity_unavailable Owner_process_identity.No_owner -> "no process holds the lease"
+  | Owner_identity_unavailable Owner_process_identity.Owner_changed ->
+    "the process that holds the lease changed while it was read"
+  | Owner_identity_unavailable Owner_process_identity.Unsupported ->
+    "this system gives no handle on the process that holds the lease"
+  | Owner_identity_unavailable Owner_process_identity.Unavailable ->
+    "the process that holds the lease could not be identified"
+  | Owner_identity_unavailable Owner_process_identity.Closed ->
+    "the handle on the process that holds the lease is closed"
+  | Current_process_owner -> "this process holds the lease"
+;;
+
 let capture_existing_owner ~run_dir ~base_path =
   match prepare_base_path_lock ~run_dir base_path with
   | Error rejection -> Error (Owner_lease_rejected rejection)
@@ -1299,3 +1388,267 @@ let capture_existing_owner ~run_dir ~base_path =
             match Owner_process_identity.capture ~lease_fd:fd with
             | Ok owner -> Ok owner
             | Error other -> Error (Owner_identity_unavailable other)))
+
+(* HIGH-RISK-UNREVIEWED: a reader takes [false] for "nobody holds this
+   BasePath", and reads no owner. The path is the one [lease_run_dir] and
+   [prepare_base_path_lock] spell: the run directory by its real path, the
+   private lease directory of the effective user under it, and the name of
+   the lease file. Nothing of an entry is judged here. An entry on the way
+   that is no directory answers [true], because the capture that follows
+   refuses it in its own words and makes nothing under it. *)
+let lease_file_present (root : Host_config.base_path_lease_root) ~base_path =
+  let unread ~operation ~path error =
+    Error (Lease_io_failed { operation; path; reason = Unix.error_message error })
+  in
+  (* [inside] goes on under a directory. *)
+  let entry ~operation path ~inside =
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+    | exception Unix.Unix_error (error, _, _) -> unread ~operation ~path error
+    | stat when stat.Unix.st_kind = Unix.S_DIR -> inside stat
+    | (_ : Unix.stats) -> Ok true
+  in
+  match Unix.realpath base_path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Base_path_canonicalization_failed { base_path; reason = Unix.error_message error })
+  | canonical_base_path ->
+    entry ~operation:"lstat_base_path" canonical_base_path ~inside:(fun base_path_stat ->
+      let run_dir =
+        match root with
+        | Lease_dir_override dir -> dir
+        | Beside_base_path -> Filename.concat canonical_base_path Common.owner_lease_dirname
+      in
+      match Unix.realpath run_dir with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+      | exception Unix.Unix_error (error, _, _) ->
+        Error
+          (Run_directory_canonicalization_failed { run_dir; reason = Unix.error_message error })
+      | run_directory ->
+        entry ~operation:"lstat_run_directory" run_directory ~inside:(fun (_ : Unix.stats) ->
+          let lease_directory =
+            base_path_lease_directory ~run_dir:run_directory ~owner_uid:(Unix.geteuid ())
+          in
+          entry
+            ~operation:"inspect_private_lease_directory"
+            lease_directory
+            ~inside:(fun (_ : Unix.stats) ->
+              let path = Filename.concat lease_directory (lease_file_name base_path_stat) in
+              match Unix.lstat path with
+              | (_ : Unix.stats) -> Ok true
+              | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+              | exception Unix.Unix_error (error, _, _) ->
+                unread ~operation:"lstat_lease_file" ~path error)))
+;;
+
+type account_server_announcement =
+  { pid : int
+  ; port : int
+  }
+
+let announcement_failed ~operation ~path reason =
+  Error (Lease_io_failed { operation; path; reason })
+;;
+
+(* The file behind [fd] is a regular file of this user with one name. [seen]
+   is what [lstat] said of the path before the open: a file that was there
+   must still be that one. The descriptor is closed on a rejection. *)
+let checked_announcement_fd ~path ~seen fd =
+  let reject rejection =
+    close_announcement_fd ~path fd;
+    Error rejection
+  in
+  match Unix.fstat fd with
+  | exception Unix.Unix_error (error, _, _) ->
+    reject
+      (Lease_io_failed
+         { operation = "fstat_account_server_announcement"
+         ; path
+         ; reason = Unix.error_message error
+         })
+  | stat ->
+    let effective_uid = Unix.geteuid () in
+    if stat.st_kind <> Unix.S_REG
+    then reject (Lease_file_non_regular { path; kind = stat.st_kind })
+    else if stat.st_nlink > 1
+    then reject (Lease_file_multiply_linked { path; links = stat.st_nlink })
+    else if stat.st_uid <> effective_uid
+    then
+      reject
+        (Lease_file_wrong_owner
+           { path; expected_uid = effective_uid; observed_uid = stat.st_uid })
+    else (
+      match seen with
+      | Some seen when not (same_file_identity seen stat) ->
+        reject (Lease_identity_changed { path })
+      | Some (_ : Unix.stats) | None -> Ok fd)
+;;
+
+let open_announcement_to_lock path =
+  let opened ~operation ~flags ~permissions ~seen =
+    match Unix.openfile path (Unix.O_RDWR :: Unix.O_CLOEXEC :: flags) permissions with
+    | fd -> checked_announcement_fd ~path ~seen fd
+    | exception Unix.Unix_error (error, _, _) ->
+      announcement_failed ~operation ~path (Unix.error_message error)
+  in
+  match observe_lease_path path with
+  | Error rejection -> Error rejection
+  | Ok (Lease_path_other kind) -> Error (Lease_file_non_regular { path; kind })
+  | Ok (Lease_path_regular seen) ->
+    opened
+      ~operation:"open_account_server_announcement"
+      ~flags:[]
+      ~permissions:0
+      ~seen:(Some seen)
+  | Ok Lease_path_missing ->
+    opened
+      ~operation:"create_account_server_announcement"
+      ~flags:[ Unix.O_CREAT; Unix.O_EXCL ]
+      ~permissions:0o600
+      ~seen:None
+;;
+
+let announce_account_server (lease : base_path_lease) ~port =
+  let path = account_server_announcement_path lease.path in
+  let failed = announcement_failed ~operation:"announce_account_server" ~path in
+  match Workspace_connection.port port with
+  | Error (_ : Workspace_connection.error) -> Error (Announcement_port_invalid { port })
+  | Ok (_ : Workspace_connection.port) ->
+    Mutex.protect base_path_lease_mu (fun () ->
+      match Hashtbl.find_opt base_path_leases lease.path with
+      | Some (Active_lease current) when current == lease ->
+        (match Hashtbl.find_opt account_server_announcements lease.path with
+         | Some ((_ : Unix.file_descr), announced) ->
+           Error (Announcement_already_made { path; port = announced })
+         | None ->
+           (* The private directory was validated when the lease was taken.
+              The lease path must still name the file this process holds
+              locked: a directory that was moved or replaced since then holds
+              no announcement of this owner. *)
+           (match Unix.fstat lease.fd, Unix.lstat lease.path with
+            | exception Unix.Unix_error (error, _, _) -> failed (Unix.error_message error)
+            | held, named when not (same_file_identity held named) ->
+              Error (Lease_identity_changed { path = lease.path })
+            | (_ : Unix.stats), (_ : Unix.stats) ->
+              (match open_announcement_to_lock path with
+               | Error rejection -> Error rejection
+               | Ok fd ->
+                 (match
+                    let (_ : int) = Unix.lseek fd port Unix.SEEK_SET in
+                    Unix.lockf fd Unix.F_TLOCK 1
+                  with
+                  | () ->
+                    Hashtbl.replace account_server_announcements lease.path (fd, port);
+                    Ok ()
+                  | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) ->
+                    (* Another process holds a lock over the byte. This
+                       descriptor holds none, so the kernel can be asked
+                       which process before it is closed. It names no process
+                       when the lock is not the write lock of that one byte. *)
+                    let holder =
+                      match Owner_process_identity.byte_holder fd ~byte:port with
+                      | Ok holder -> holder
+                      | Error (_ : Owner_process_identity.error) -> None
+                    in
+                    close_announcement_fd ~path fd;
+                    Error (Announcement_port_locked { path; port; holder })
+                  | exception Unix.Unix_error (error, _, _) ->
+                    close_announcement_fd ~path fd;
+                    failed (Unix.error_message error)))))
+      | Some (Active_lease _) | Some (Failed_close _) | None ->
+        Error (Announcement_lease_not_active { path = lease.path }))
+;;
+
+(* How this process may ask the kernel about an announcement file. *)
+type announcement_reader =
+  | Announces_here of Unix.file_descr * int
+  (** This process announces the port on the file. The descriptor is the one
+      that holds its lock, and the only one it may have on the file. *)
+  | Reads_through of Unix.file_descr
+  (** Another process announces on the file, or none does. The descriptor
+      was opened for this read and is closed after it. *)
+
+(* The announcement this process holds on the file that [seen] names. The
+   table is keyed by the lease path as this process spelled it, and one
+   directory has more than one spelling ([base_path_lock_digest_of_stats]):
+   the file is compared, not the string. A read that took another spelling
+   for another file would open a second descriptor on the file this process
+   locks, and its close would drop the announcement. *)
+let own_announcement_on seen =
+  Hashtbl.fold
+    (fun (_ : string) (fd, port) found ->
+      match found with
+      | Some (_ : Unix.file_descr * int) -> found
+      | None -> if same_file_identity seen (Unix.fstat fd) then Some (fd, port) else None)
+    account_server_announcements
+    None
+;;
+
+(* One read of the announcement file of [base_path]. [absent] is the answer
+   when no file is there: a read makes no file. The file is opened with the
+   checks of a lease file. *)
+let read_announcement ~operation ~run_dir ~base_path ~absent read =
+  match prepare_base_path_lock ~run_dir base_path with
+  | Error rejection -> Error rejection
+  | Ok prepared ->
+    let path = account_server_announcement_path prepared.path in
+    let failed = announcement_failed ~operation ~path in
+    Mutex.protect base_path_lease_mu (fun () ->
+      match observe_lease_path path with
+      | Error rejection -> Error rejection
+      | Ok Lease_path_missing -> Ok absent
+      | Ok (Lease_path_other kind) -> Error (Lease_file_non_regular { path; kind })
+      | Ok (Lease_path_regular seen) ->
+        (match own_announcement_on seen with
+         | exception Unix.Unix_error (error, _, _) -> failed (Unix.error_message error)
+         | Some (fd, port) -> read ~failed (Announces_here (fd, port))
+         | None ->
+           (match open_existing_lease_file { prepared with path } seen with
+            | Error rejection -> Error rejection
+            | Ok fd ->
+              Fun.protect
+                ~finally:(fun () -> close_announcement_fd ~path fd)
+                (fun () -> read ~failed (Reads_through fd)))))
+;;
+
+let kernel_not_asked failed = failed "the kernel could not be asked about the lock"
+
+let account_server_port_holder ~run_dir ~base_path ~port =
+  let operation = "read_account_server_port_holder" in
+  match Workspace_connection.port port with
+  | Error (_ : Workspace_connection.error) -> Error (Announcement_port_invalid { port })
+  | Ok (_ : Workspace_connection.port) ->
+    read_announcement ~operation ~run_dir ~base_path ~absent:None (fun ~failed reader ->
+      match reader with
+      | Announces_here ((_ : Unix.file_descr), announced) when announced = port ->
+        (* NDT-OK: the OS process id is the observed holder identity. *)
+        Ok (Some (Unix.getpid ()))
+      | Announces_here (fd, (_ : int)) | Reads_through fd ->
+        (match Owner_process_identity.byte_holder fd ~byte:port with
+         | Ok holder -> Ok holder
+         | Error (_ : Owner_process_identity.error) -> kernel_not_asked failed))
+;;
+
+let account_server_announcement ~run_dir ~base_path =
+  read_announcement
+    ~operation:"read_account_server_announcement"
+    ~run_dir
+    ~base_path
+    ~absent:None
+    (fun ~failed reader ->
+      match reader with
+      | Announces_here ((_ : Unix.file_descr), port) ->
+        (* NDT-OK: the OS process id is the observed holder identity. *)
+        Ok (Some { pid = Unix.getpid (); port })
+      | Reads_through fd ->
+        (match Owner_process_identity.held_byte fd with
+         | Ok None -> Ok None
+         | Ok (Some { holder; byte }) ->
+           (* No server announces outside the ports
+              ([announce_account_server]), so a lock there is no
+              announcement. *)
+           (match Workspace_connection.port byte with
+            | Ok (_ : Workspace_connection.port) -> Ok (Some { pid = holder; port = byte })
+            | Error (_ : Workspace_connection.error) -> Ok None)
+         | Error (_ : Owner_process_identity.error) -> kernel_not_asked failed))
+;;

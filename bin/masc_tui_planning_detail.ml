@@ -666,27 +666,39 @@ let criterion_review_lines ~width ~ko review =
       @ wrapped ~width Quiet (text "검토 요청: " "Review request: " ^ observed.request_id) in
   rows @ scope
 
-(* Shared with Task history. The goal timeline rows read [event_stamp] below,
-   which keeps the seconds; this one is the task-history shape alone. *)
+(* The task-history shape. The goal timeline rows read [event_stamp] below. *)
 let short_ts ts =
   if String.length ts >= 16 then
     String.sub ts 5 5 ^ " " ^ String.sub ts 11 5
   else ts
 
-(* The stamp a timeline row leads with. The full source timestamp repeats the
-   year and the timezone on every row of a screen whose events span days, so
-   the row keeps the date and the clock and drops the rest -- the seconds
-   stay, because one goal's evening holds events a minute apart and their
-   order is the story. A value not shaped like an ISO timestamp is shown
-   whole rather than guessed at, the way [short_ts] does. *)
-let event_stamp (ts : string) =
-  let iso_shaped =
-    String.length ts >= 19
-    && Char.equal ts.[4] '-'
-    && Char.equal ts.[7] '-'
-    && (Char.equal ts.[10] 'T' || Char.equal ts.[10] ' ')
-  in
-  if iso_shaped then String.sub ts 5 5 ^ " " ^ String.sub ts 11 8 else ts
+(* The stamp a timeline row leads with, in the operator's time zone. The
+   seconds stay, because one goal's evening holds events a minute apart and
+   their order is the story; the date goes when the event is today's.
+
+   The stamp was cut out of the source text by position, so it showed the
+   server's UTC clock with nothing saying so, nine hours off the clocks on
+   the other screens. A value that does not parse as a timestamp is shown
+   whole rather than guessed at: its zone is not known, so it is not moved
+   into ours. *)
+module Instant = Masc_tui_value.Instant
+
+let event_stamp_precision = Instant.To_second
+
+let event_stamp ~now (ts : string) =
+  match Masc_domain.parse_iso8601_opt ts with
+  | Some at ->
+      (* Right-aligned in the widest stamp, so the subjects of a day's rows
+         and of an older day's start in one column. *)
+      Printf.sprintf "%*s"
+        (Instant.cell_width event_stamp_precision)
+        (Instant.cell_text event_stamp_precision ~now at)
+  | None -> ts
+
+let moment_text ~now (ts : string) =
+  match Masc_domain.parse_iso8601_opt ts with
+  | Some at -> Instant.detail_text Instant.To_minute ~now at
+  | None -> ts
 
 let severity_tone = function
   | "ok" -> Quiet
@@ -754,7 +766,7 @@ let timeline_unavailability_detail = function
   | Tui_decode.Approval_queue_failure detail ->
       "Approval queue unavailable · Cause: " ^ detail
 
-let timeline ~ko ~width ~goal_id
+let timeline ~ko ~now ~width ~goal_id
     (loaded : (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t) =
   let text korean english = if ko then korean else english in
   let header =
@@ -777,7 +789,7 @@ let timeline ~ko ~width ~goal_id
                 let subject = subject event in
                 let lead =
                   wrapped ~width Quiet
-                    (Printf.sprintf "  %s  %s" (event_stamp event.gt_ts) subject) in
+                    (Printf.sprintf "  %s  %s" (event_stamp ~now event.gt_ts) subject) in
                 let title = String.trim event.gt_title in
                 let summary = String.trim event.gt_summary in
                 let body =

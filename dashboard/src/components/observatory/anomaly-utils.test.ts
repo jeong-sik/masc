@@ -3,7 +3,7 @@ import { detectAnomalies } from './anomaly-utils'
 import type { ToolQualityHourlyPoint } from '../../api/dashboard'
 
 function makePoint(success_rate: number, hour = '2026-04-17T00:00'): ToolQualityHourlyPoint {
-  return { hour, calls: 10, success: Math.round(success_rate * 10), success_rate }
+  return { hour, calls: 10, success: Math.round(success_rate * 10), success_rate, result_bytes: 0 }
 }
 
 function makeWindowed(rates: number[]): Array<{ point: ToolQualityHourlyPoint; ts: number }> {

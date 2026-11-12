@@ -10,6 +10,7 @@ from pathlib import Path
 import select
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -217,6 +218,7 @@ class Journey(StepByStep):
         self.assertEqual(run.call_args.args[0][-4:], ['--base-path', '/saved workspace', '--port', '9123'])
         self.assertNotIn('stderr', run.call_args.kwargs)
         with patch.object(sys, 'argv', ['setup', '--binary', '/owned/masc', '--base-path', '/saved workspace', '--sandbox-step']), \
+                patch.object(SETUP, 'onboarding_status', return_value=observation('/saved workspace')), \
                 patch.object(SETUP, 'sandbox_journey', side_effect=SETUP.SetupSessionFinished), \
                 patch.object(SETUP, 'journey') as initial:
             with self.assertRaises(SystemExit) as exited:
@@ -885,6 +887,427 @@ class Journey(StepByStep):
         opened.assert_once_with('/bin/masc', '/workspace', 8945) if hasattr(opened, 'assert_once_with') else opened.assert_called_once_with('/bin/masc', '/workspace', 8945)
         owner.assert_called_once_with('/bin/masc', '/workspace', 8945, resume_existing=True)
         picker.assert_not_called()
+
+    ACCOUNT_REQUEST = '/accounts/.masc/auth/config.json asks for Multi_account'
+    UNANNOUNCED = 'No account server announces itself for this workspace.'
+    UNINSPECTED = 'The account server of this workspace could not be inspected.'
+
+    def account_observation(self, base='/accounts'):
+        return observation(base, [('workspace', 'satisfied', 'Workspace found.'),
+                                  ('multi_account_request', 'needs_verification', self.ACCOUNT_REQUEST)],
+                           opening='account_installation')
+
+    @staticmethod
+    def server_reply(code, **document):
+        return subprocess.CompletedProcess([], code, json.dumps(document))
+
+    @classmethod
+    def server_observation(cls, **fields):
+        return cls.server_reply(0, schema='masc.setup_server.v1', read_only=True, installed_version='0.36.0', **fields)
+
+    @staticmethod
+    def account_server(port=19400, answers=True, **fields):
+        return dict(status='account_server', server_port=port, server_answers=answers, **fields)
+
+    def test_an_account_installation_is_reported_and_nothing_else_is_run(self):
+        # A boot of this workspace runs the account server or stops. The
+        # journey of a single user neither opens its history nor prepares imp
+        # in it, with bare `masc` (resume) and with `masc setup` alike.
+        running = self.server_observation(**self.account_server(server_version='0.36.0'))
+        for resume in (True, False):
+            with self.subTest(resume=resume), \
+                    patch.object(SETUP, 'onboarding_status', return_value=self.account_observation()) as doctor, \
+                    patch.object(SETUP, 'workspace_port', return_value=19400) as connection, \
+                    patch.object(SETUP.subprocess, 'run', return_value=running) as run, \
+                    patch.object(SETUP, 'pick') as picker, \
+                    patch.object(SETUP, 'workspace_check') as preflight, \
+                    patch.object(SETUP, 'wizard') as models, \
+                    patch.object(SETUP, 'open_workspace') as opened, \
+                    contextlib.redirect_stderr(io.StringIO()) as printed:
+                self.assertEqual(SETUP.journey('/bin/masc', None, None, 10, resume=resume), 0)
+                doctor.assert_called_once_with('/bin/masc', None)
+                self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
+                # The port is resolved, never saved.
+                self.assertEqual(connection.call_args_list[0].args, ('/bin/masc', '/accounts', None))
+                self.assertEqual([call.kwargs for call in connection.call_args_list], [{}])
+                for untouched in (picker, preflight, models, opened):
+                    untouched.assert_not_called()
+                self.assertIn(self.ACCOUNT_REQUEST, printed.getvalue())
+                self.assertNotIn('Workspace found.', printed.getvalue())
+                self.assertNotIn('Welcome', printed.getvalue())
+                self.assertIn('The account server is running on port 19400', printed.getvalue())
+                # The journey ends before its workspace screen, so it names the way to another one.
+                self.assertIn('masc setup --base-path', printed.getvalue())
+
+    def test_an_account_installation_says_whether_its_server_runs(self):
+        # What is said follows the observation: a server that answered is
+        # running whether or not its version was read, one that only announces
+        # its port is not said to run, and a port another process holds is no
+        # account server.
+        rows = [(self.account_server(server_version='0.36.0'),
+                 'running on port 19400 (MASC 0.36.0, the installed version)', 'did not answer'),
+                (self.account_server(19401, server_version='0.35.9'),
+                 'running on port 19401 (MASC 0.35.9). The installed MASC is 0.36.0', 'did not answer'),
+                (self.account_server(), 'running on port 19400. Its health answer names no version', 'did not answer'),
+                (self.account_server(answers=False),
+                 'announces port 19400 and did not answer its health probe there', 'is running'),
+                # A version read from an answer the binary did not count as one is not shown.
+                (self.account_server(answers=False, server_version='0.36.0'),
+                 'announces port 19400 and did not answer its health probe there', '0.36.0'),
+                (dict(status='free'), self.UNANNOUNCED, 'Port 19400'),
+                (dict(status='other_workspace', server_workspace='/other', suggested_port=19999),
+                 self.UNANNOUNCED + ' Port 19400 belongs to /other', 'is running'),
+                (dict(status='unknown_server', suggested_port=19999),
+                 self.UNANNOUNCED + ' Port 19400 is held by a process that does not answer as a MASC workspace',
+                 'is running'),
+                (dict(status='same_workspace', server_version='0.36.0'),
+                 'serves this workspace to a single user is running on port 19400', self.UNANNOUNCED)]
+        for fields, said, unsaid in rows:
+            with self.subTest(fields=fields), \
+                    patch.object(SETUP, 'workspace_port', return_value=19400), \
+                    patch.object(SETUP.subprocess, 'run', return_value=self.server_observation(**fields)), \
+                    patch.object(SETUP, 'pick') as picker, \
+                    contextlib.redirect_stderr(io.StringIO()) as printed:
+                self.assertEqual(SETUP.account_installation('/bin/masc', self.account_observation(), None), 0)
+                self.assertIn(said, printed.getvalue())
+                self.assertNotIn(unsaid, printed.getvalue())
+                # A port is suggested for another service; here none is offered.
+                self.assertNotIn('19999', printed.getvalue())
+                picker.assert_not_called()
+
+    def test_an_account_installation_never_reports_an_answer_it_cannot_read(self):
+        # The observation is read whole where it arrives: a document that
+        # lacks a field the journey would print is no observation.
+        unreadable = [self.server_observation(status=None),
+                      self.server_observation(status='account_server'),
+                      self.server_observation(**self.account_server(0)),
+                      self.server_observation(**self.account_server('19400')),
+                      self.server_observation(**self.account_server(65536)),
+                      self.server_observation(status='account_server', server_port=19400),
+                      self.server_observation(**self.account_server(answers='yes')),
+                      self.server_observation(**self.account_server(answers=1)),
+                      self.server_observation(**self.account_server(server_version=36)),
+                      self.server_reply(0, schema='masc.setup_server.v1', read_only=True, **self.account_server()),
+                      self.server_observation(status='same_workspace'),
+                      self.server_observation(status='other_workspace'),
+                      self.server_reply(0, schema='masc.setup_server.v1', status='free'),
+                      self.server_reply(1, schema='masc.setup_server.v1', read_only=True, status='free'),
+                      # The reason of an unread owner is a sentence, under its own schema.
+                      self.server_reply(1, schema='masc.setup_server_unread.v1', read_only=True, error=7),
+                      self.server_reply(1, schema='masc.setup_server_error.v1', read_only=True, error='A reason.'),
+                      subprocess.CompletedProcess([], 1, '', 'not a document'),
+                      subprocess.CompletedProcess([], 0, 'null'),
+                      subprocess.CompletedProcess([], 0, '[]')]
+        for reply in unreadable:
+            with self.subTest(reply=reply.stdout[:120]), \
+                    patch.object(SETUP, 'workspace_port', return_value=19400), \
+                    patch.object(SETUP.subprocess, 'run', return_value=reply), \
+                    contextlib.redirect_stderr(io.StringIO()) as printed, \
+                    self.assertRaises(SETUP.SetupError) as refused:
+                SETUP.account_installation('/bin/masc', self.account_observation(), None)
+            self.assertIn(self.UNINSPECTED, str(refused.exception))
+            self.assertNotIn('account server is running', printed.getvalue())
+            self.assertNotIn(self.UNANNOUNCED, printed.getvalue())
+        # A status this journey does not know is a document, and names no state either.
+        with patch.object(SETUP, 'workspace_port', return_value=19400), \
+                patch.object(SETUP.subprocess, 'run', return_value=self.server_observation(status='surprise')), \
+                contextlib.redirect_stderr(io.StringIO()) as printed, \
+                self.assertRaises(SETUP.SetupError):
+            SETUP.account_installation('/bin/masc', self.account_observation(), None)
+        self.assertNotIn(self.UNANNOUNCED, printed.getvalue())
+        self.assertNotIn('masc setup --base-path', printed.getvalue())
+
+    def test_an_owner_that_cannot_be_read_is_said_in_the_words_of_the_binary(self):
+        # Whether an account server runs is not known then, so the journey
+        # names no state; the reason is the one `masc setup-server` gave.
+        reason = 'The owner of /accounts could not be checked (the lease). No server was changed.'
+        unread = self.server_reply(1, schema='masc.setup_server_unread.v1', read_only=True, error=reason)
+        with patch.object(SETUP, 'workspace_port', return_value=19400), \
+                patch.object(SETUP.subprocess, 'run', return_value=unread), \
+                contextlib.redirect_stderr(io.StringIO()) as printed, \
+                self.assertRaises(SETUP.SetupError) as refused:
+            SETUP.account_installation('/bin/masc', self.account_observation(), None)
+        self.assertEqual(str(refused.exception), reason)
+        self.assertNotIn('account server is running', printed.getvalue())
+        self.assertNotIn(self.UNANNOUNCED, printed.getvalue())
+        # The journey of a single user says the same reason while it asked no server to stop.
+        with patch.object(SETUP.subprocess, 'run', return_value=unread), \
+                self.assertRaises(SETUP.SetupError) as preserved:
+            SETUP.select_setup_server('/bin/masc', '/workspace', 19400)
+        self.assertEqual(str(preserved.exception), reason)
+        # After it asked one to stop, "No server was changed" would be false.
+        same = self.server_observation(status='same_workspace', server_version='0.36.0')
+        requested = self.server_reply(0, schema='masc.setup_server_shutdown.v1', termination_requested=True,
+                                      readiness='owner_draining')
+        with patch.object(SETUP.subprocess, 'run', side_effect=[same, requested, unread]) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SETUP.SetupError) as pending:
+            SETUP.select_setup_server('/bin/masc', '/workspace', 19400, require_new_owner=True)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ['setup-server', 'setup-stop-previous-owner', 'setup-server'])
+        self.assertIn('shutdown was requested', str(pending.exception))
+        self.assertNotIn('No server was changed', str(pending.exception))
+
+    def test_a_chosen_directory_that_asks_for_accounts_is_not_checked_or_initialized(self):
+        # The first document is about the workspace the journey proposed. The
+        # directory typed on the workspace screen is read before the check of
+        # that directory, which can upgrade or restore what it finds, and
+        # before `masc init`.
+        with tempfile.TemporaryDirectory() as home:
+            home = str(Path(home).resolve())
+            chosen = home + '/accounts'
+            documents = {None: observation('/old'), chosen: self.account_observation(chosen)}
+            # The directory is read as the check would resolve it.
+            for typed in (chosen, '~/accounts', home + '/elsewhere/../accounts'):
+                with self.subTest(typed=typed), patch.dict(os.environ, HOME=home), \
+                        patch.object(SETUP, 'onboarding_status',
+                                     side_effect=lambda binary, base_path=None: documents[base_path]) as doctor, \
+                        patch.object(SETUP, 'pick', return_value=[1]), \
+                        patch.object(SETUP, 'ask_text', return_value=typed), \
+                        patch.object(SETUP, 'workspace_check') as preflight, \
+                        patch.object(SETUP, 'workspace_port', return_value=19400), \
+                        patch.object(SETUP, 'select_setup_server') as owner, \
+                        patch.object(SETUP, 'wizard') as models, \
+                        patch.object(SETUP.subprocess, 'run',
+                                     return_value=self.server_observation(status='free')) as run, \
+                        contextlib.redirect_stderr(io.StringIO()) as printed:
+                    self.assertEqual(SETUP.journey('/bin/masc', None, None, 10), 0)
+                    self.assertEqual([call.args for call in doctor.call_args_list],
+                                     [('/bin/masc', None), ('/bin/masc', chosen)])
+                    self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
+                    for untouched in (preflight, owner, models):
+                        untouched.assert_not_called()
+                    self.assertIn(self.UNANNOUNCED, printed.getvalue())
+
+    def test_a_chosen_directory_of_a_single_user_goes_on_to_its_check(self):
+        documents = {None: observation('/old'), '/chosen': observation('/chosen')}
+        with patch.object(SETUP, 'onboarding_status',
+                          side_effect=lambda binary, base_path=None: documents[base_path]) as doctor, \
+                patch.object(SETUP, 'pick', return_value=[1]), \
+                patch.object(SETUP, 'ask_text', return_value='/chosen'), \
+                patch.object(SETUP, 'workspace_check', return_value=dict(base_path='/chosen')) as preflight, \
+                patch.object(SETUP, 'workspace_port', return_value=8945), \
+                patch.object(SETUP, 'select_setup_server', return_value=None) as owner, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.journey('/bin/masc', None, 8945, 10), 1)
+        self.assertEqual([call.args for call in doctor.call_args_list], [('/bin/masc', None), ('/bin/masc', '/chosen')])
+        preflight.assert_called_once_with('/bin/masc', '/chosen')
+        owner.assert_called_once_with('/bin/masc', '/chosen', 8945)
+
+    def test_the_proposed_workspace_is_read_once(self):
+        with patch.object(SETUP, 'onboarding_status', return_value=observation('/workspace')) as doctor, \
+                patch.object(SETUP, 'pick', return_value=[0]), \
+                patch.object(SETUP, 'workspace_check', return_value=dict(base_path='/workspace')), \
+                patch.object(SETUP, 'workspace_port', return_value=8945), \
+                patch.object(SETUP, 'select_setup_server', return_value=None), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.journey('/bin/masc', None, 8945, 10), 1)
+        doctor.assert_called_once_with('/bin/masc', None)
+
+    def test_a_default_no_document_described_is_read_before_it_is_offered(self):
+        # A first run: the doctor describes no workspace and the journey
+        # proposes ~/MASC. That directory is read before a plan, a screen or a
+        # welcome offers it.
+        default = str(Path.home() / 'MASC')
+        documents = {None: observation(None), default: self.account_observation(default)}
+        with patch.object(SETUP, 'onboarding_status',
+                          side_effect=lambda binary, base_path=None: documents[base_path]) as doctor, \
+                patch.object(SETUP, 'quick_plan') as plan, \
+                patch.object(SETUP, 'pick') as picker, \
+                patch.object(SETUP, 'workspace_check') as preflight, \
+                patch.object(SETUP, 'workspace_port', return_value=19400), \
+                patch.object(SETUP.subprocess, 'run', return_value=self.server_observation(status='free')) as run, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            self.assertEqual(SETUP.journey('/bin/masc', None, None, 10), 0)
+        self.assertEqual([call.args for call in doctor.call_args_list], [('/bin/masc', None), ('/bin/masc', default)])
+        self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
+        for untouched in (plan, picker, preflight):
+            untouched.assert_not_called()
+        self.assertNotIn('Welcome', printed.getvalue())
+        # A default of a single user is offered as before.
+        documents[default] = observation(default)
+        with patch.object(SETUP, 'onboarding_status',
+                          side_effect=lambda binary, base_path=None: documents[base_path]) as doctor, \
+                patch.object(SETUP, 'quick_plan', return_value=None) as plan, \
+                patch.object(SETUP, 'pick', return_value=[2]) as picker, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            self.assertEqual(SETUP.journey('/bin/masc', None, None, 10), 0)
+        self.assertEqual([call.args for call in doctor.call_args_list], [('/bin/masc', None), ('/bin/masc', default)])
+        plan.assert_called_once_with('/bin/masc', default)
+        self.assertEqual(picker.call_args.args[1][0], 'Use ' + default)
+        self.assertIn('Welcome', printed.getvalue())
+
+    def test_an_account_server_is_never_offered_a_port_or_a_stop(self):
+        running = self.server_observation(**self.account_server(server_version='0.36.0'))
+        for options in (dict(), dict(resume_existing=True), dict(require_new_owner=True)):
+            with self.subTest(options=options), \
+                    patch.object(SETUP.subprocess, 'run', return_value=running) as run, \
+                    patch.object(SETUP, 'pick') as picker, \
+                    self.assertRaises(SETUP.SetupError) as refused:
+                SETUP.select_setup_server('/bin/masc', '/accounts', 19400, **options)
+            self.assertIn('masc restart', str(refused.exception))
+            self.assertIn('port 19400', str(refused.exception))
+            self.assertNotIn('shutdown', str(refused.exception))
+            self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
+            picker.assert_not_called()
+
+    def test_an_account_server_that_appears_after_a_stop_is_said_with_the_request(self):
+        # The server of a single user was asked to stop, so "nothing was
+        # stopped" would be false; no second request is sent.
+        same = self.server_observation(status='same_workspace', server_version='0.36.0')
+        requested = self.server_reply(0, schema='masc.setup_server_shutdown.v1', termination_requested=True,
+                                      readiness='owner_draining')
+        running = self.server_observation(**self.account_server(server_version='0.36.0'))
+        with patch.object(SETUP.subprocess, 'run', side_effect=[same, requested, running]) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SETUP.SetupError) as refused:
+            SETUP.select_setup_server('/bin/masc', '/accounts', 19400, require_new_owner=True)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ['setup-server', 'setup-stop-previous-owner', 'setup-server'])
+        self.assertIn('shutdown of the previous server was requested', str(refused.exception))
+        self.assertIn('masc restart', str(refused.exception))
+
+    def test_an_account_installation_is_an_opening_the_journey_reads(self):
+        response = subprocess.CompletedProcess([], 0, json.dumps(self.account_observation()), '')
+        with patch.object(SETUP.subprocess, 'run', return_value=response):
+            self.assertEqual(SETUP.onboarding_status('/bin/masc')['opening'], 'account_installation')
+
+    def test_the_sandbox_step_of_an_earlier_session_reads_the_workspace_first(self):
+        # The step runs in a later process than the journey that saved it; the
+        # config may ask for accounts since.
+        with patch.object(SETUP, 'onboarding_status', return_value=self.account_observation()) as doctor, \
+                patch.object(SETUP, 'workspace_port', return_value=19400), \
+                patch.object(SETUP.subprocess, 'run', return_value=self.server_observation(status='free')) as run, \
+                patch.object(SETUP, 'sandbox_journey') as sandbox, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.sandbox_step('/bin/masc', '/accounts', 19400), 0)
+        doctor.assert_called_once_with('/bin/masc', '/accounts')
+        self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
+        sandbox.assert_not_called()
+        with patch.object(SETUP, 'onboarding_status', return_value=observation('/saved')) as doctor, \
+                patch.object(SETUP, 'sandbox_journey', return_value=7) as sandbox:
+            self.assertEqual(SETUP.sandbox_step('/bin/masc', '/saved', 9123), 7)
+        doctor.assert_called_once_with('/bin/masc', '/saved')
+        sandbox.assert_called_once_with('/bin/masc', '/saved', 9123, refresh_owner=True)
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_account_installation_is_reported_and_left_uninitialized(self):
+        # The real doctor, the real setup-server and the shipped journey, on a
+        # workspace whose config asks for accounts and that no server runs on.
+        # The journey asks nothing there, so it needs no terminal.
+        with tempfile.TemporaryDirectory() as home:
+            home = str(Path(home).resolve())
+            asked = '{"enabled":true,"require_token":true,"account_mode":"Multi_account"}'
+            environment = {key: value for key, value in os.environ.items()
+                           if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb')
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1', 0))
+                port = listener.getsockname()[1]
+            # `accounts` is named to the journey; `MASC` is the default it
+            # proposes on a first run, which no argument names.
+            for name, where in (('accounts', ['--base-path']), ('MASC', None)):
+                base = Path(home, name)
+                config = base / '.masc/auth/config.json'
+                config.parent.mkdir(parents=True)
+                config.write_text(asked)
+                where = [] if where is None else where + [str(base)]
+                doctor = subprocess.run([BINARY, 'doctor', '--json', '--base-path', str(base)], env=environment,
+                                        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+                self.assertEqual(doctor.returncode, 0, doctor.stderr)
+                document = json.loads(doctor.stdout)
+                self.assertEqual(document['opening'], 'account_installation')
+                self.assertEqual([check['id'] for check in document['checks']], ['workspace', 'multi_account_request'])
+                for arguments in (['--journey', '--resume'], ['--journey']):
+                    with self.subTest(name=name, arguments=arguments):
+                        journey = subprocess.run(
+                            [sys.executable, '-B', str(ROOT / 'scripts/install-runtime-setup.py'), '--binary', BINARY,
+                             *arguments, *where, '--port', str(port)],
+                            env=environment, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+                        self.assertEqual(journey.returncode, 0, journey.stderr)
+                        self.assertIn(str(config) + ' asks for Multi_account', journey.stderr)
+                        self.assertIn(self.UNANNOUNCED, journey.stderr)
+                        self.assertNotIn('Welcome', journey.stderr)
+                # Nothing was initialized, no port was saved and no lease was
+                # made: the config is the one file under the directory.
+                self.assertEqual(sorted(str(path.relative_to(base)) for path in base.rglob('*')),
+                                 ['.masc', '.masc/auth', '.masc/auth/config.json'])
+                self.assertEqual(config.read_text(), asked)
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_account_server_is_seen_by_the_journey_and_left_running(self):
+        # The real bootstrap, the real account server and the shipped journey:
+        # the server is named with the port it announces, whichever port was
+        # asked about, and nothing here stops it.
+        with tempfile.TemporaryDirectory() as home:
+            home = str(Path(home).resolve())
+            base = Path(home, 'accounts')
+            (base / '.masc/auth').mkdir(parents=True)
+            (base / '.masc/auth/config.json').write_text(
+                '{"enabled":true,"require_token":true,"account_mode":"Multi_account"}')
+            Path(home, 'external').mkdir()
+            environment = {key: value for key, value in os.environ.items()
+                           if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb', MASC_HTTPS_PORT='0')
+            ports = []
+            for _ in range(2):
+                with socket.socket() as listener:
+                    listener.bind(('127.0.0.1', 0))
+                    ports.append(str(listener.getsockname()[1]))
+            port, other = ports
+
+            def masc(*arguments, **extra):
+                return subprocess.run([BINARY, *arguments, '--base-path', str(base)], env=dict(environment, **extra),
+                                      capture_output=True, text=True, timeout=180, stdin=subprocess.DEVNULL)
+
+            def journey(asked):
+                return subprocess.run(
+                    [sys.executable, '-B', str(ROOT / 'scripts/install-runtime-setup.py'), '--binary', BINARY,
+                     '--journey', '--resume', '--base-path', str(base), '--port', asked],
+                    env=environment, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+
+            # What bootstrap prints is not shown: it names the first invitation.
+            bootstrapped = masc('auth', 'bootstrap', '--external-store', home + '/external/external.jsonl',
+                                MASC_HTTP_BASE_URL='http://127.0.0.1:' + port)
+            self.assertEqual(bootstrapped.returncode, 0, 'masc auth bootstrap did not activate the workspace')
+            started = masc('restart', '--port', port, '--host', '127.0.0.1')
+            named = re.search(r'^Started pid (\d+)\.', started.stdout, re.MULTILINE)
+            self.assertIsNotNone(named, started.stdout + started.stderr)
+            server = int(named.group(1))
+            try:
+                self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+                for asked in (port, other):
+                    with self.subTest(asked=asked):
+                        observed = masc('setup-server', '--port', asked)
+                        self.assertEqual(observed.returncode, 0, observed.stderr)
+                        document = json.loads(observed.stdout)
+                        self.assertEqual((document['status'], document['server_port'], document['server_answers']),
+                                         ('account_server', int(port), True))
+                        self.assertEqual(document['server_version'], document['installed_version'])
+                        self.assertNotIn('suggested_port', document)
+                        told = journey(asked)
+                        self.assertEqual(told.returncode, 0, told.stderr)
+                        self.assertIn('The account server is running on port ' + port, told.stderr)
+                stopped = masc('setup-stop-previous-owner', '--port', port,
+                               '--expected-version', document['installed_version'])
+                self.assertEqual(stopped.returncode, 1, stopped.stderr)
+                receipt = json.loads(stopped.stdout)
+                self.assertIs(receipt['termination_requested'], False)
+                self.assertIn('held by its account server', receipt['error'])
+                os.kill(server, 0)  # It still runs.
+            finally:
+                os.kill(server, signal.SIGTERM)
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    try:
+                        os.kill(server, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.1)
+                else:
+                    os.kill(server, signal.SIGKILL)  # Started here, in a directory about to go.
+            # A lease file nothing holds any more is no account server.
+            self.assertNotEqual(json.loads(masc('setup-server', '--port', other).stdout)['status'], 'account_server')
 
     def test_declaration_alone_never_skips_first_preparation(self):
         state = observation('/workspace', [('workspace', 'satisfied'), ('keeper_declaration', 'satisfied')])
@@ -1559,8 +1982,9 @@ class ImpTools(unittest.TestCase):
 
     def test_no_running_server_of_this_workspace_means_no_note(self):
         # Another workspace's server, or a stranger on the port, is not the
-        # server `masc setup` would reuse.
-        for status in ('free', 'other_workspace', 'unknown_server'):
+        # server `masc setup` would reuse. An account server starts no Keeper,
+        # so it reads no browser setting.
+        for status in ('free', 'other_workspace', 'unknown_server', 'account_server'):
             with self.subTest(status=status):
                 self.assertEqual(self.note(completed(json.dumps(dict(status=status))))[1], '')
 

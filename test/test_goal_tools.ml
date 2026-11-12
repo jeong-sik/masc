@@ -1099,7 +1099,7 @@ let test_callers_share_a_goal_without_private_delivery () =
       [ "owner"; "notified_refuted_key"; "notified_overdue_key" ];
     row in
   let listed ctx =
-    match member "goals" (call ctx "masc_goal_list" []) |> to_list with
+    match member "goals" (call ctx "masc_goal_list" [ "detailed", `Bool true ]) |> to_list with
     | [ row ] -> shared_row "listed Goal" row
     | _ -> fail "the workspace must contain one shared Goal" in
   let incomplete = expect_error (Tool_workspace.dispatch creator

@@ -247,14 +247,16 @@ let only_shared_checks_hold_history_closed () =
   (* Exhaustive, so a new check id does not compile here until its role is
      decided in this test too. *)
   let expected : Onboarding_status.check_id -> Onboarding_status.role = function
-    | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
+    | Workspace | Runtime_configuration | Keeper_persistence | Multi_account_request ->
+      Required_to_open
     | Model_connection | Keeper_declaration | Sandbox -> Advisory
   in
   List.iter (fun id ->
       check bool (Onboarding_status.check_id_name id) true
         (Onboarding_status.role id = expected id))
     Onboarding_status.[ Workspace; Runtime_configuration; Keeper_persistence;
-                        Model_connection; Keeper_declaration; Sandbox ];
+                        Model_connection; Keeper_declaration; Sandbox;
+                        Multi_account_request ];
   check bool "no workspace never opens history" true
     (Onboarding_status.opening (inspect ~base_path:None)
      = Onboarding_status.Needs_journey)
@@ -268,6 +270,54 @@ let imp_workspace base keeper_toml =
   List.iter (fun path -> Unix.mkdir path 0o700) [root; config; keepers];
   write (Filename.concat config "runtime.toml") (read "../scripts/fixtures/release-evidence/runtime.toml");
   write (Filename.concat keepers "imp.toml") keeper_toml
+
+(* A workspace whose config asks for accounts boots the account server. Its
+   history does not open and the journey of a single user does not run,
+   whatever else the workspace holds, and what imp runs on is not read. *)
+let a_workspace_that_asks_for_accounts_is_an_account_installation () =
+  with_workspace @@ fun base ->
+  imp_workspace base (read "../config/keepers-default/imp.toml");
+  let root = Filename.concat base ".masc" in
+  let metadata_dir = Filename.concat root "keepers" in
+  Unix.mkdir metadata_dir 0o700;
+  write (Filename.concat metadata_dir "geek-scout.json")
+    (Yojson.Safe.to_string (Masc_test_deps.current_meta_json_fixture ~name:"geek-scout" ()));
+  let run, calls = fixture_runner healthy_docker in
+  let inspect () =
+    Onboarding_status.inspect ~sandbox:(Onboarding_status.Probe_with run) ~base_path:(Some base) in
+  check bool "without a request, the history opens" true
+    (Onboarding_status.opening (inspect ()) = Onboarding_status.Open_existing_history);
+  check bool "and imp's sandbox was probed" true (calls () <> []);
+  let auth = Filename.concat root "auth" in
+  Unix.mkdir auth 0o700;
+  let config = Filename.concat auth "config.json" in
+  let single_user = {|{"enabled":true,"require_token":true,"account_mode":"Single_user"}|} in
+  let multi_account = {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|} in
+  write config single_user;
+  check bool "a request for a single user changes nothing" true
+    (Onboarding_status.opening (inspect ()) = Onboarding_status.Open_existing_history);
+  write config multi_account;
+  let asked = List.length (calls ()) in
+  let observed = inspect () in
+  check bool "a request for accounts is an account installation" true
+    (Onboarding_status.opening observed = Onboarding_status.Account_installation);
+  check (list string) "the workspace and the request are its checks"
+    [ "workspace"; "multi_account_request" ]
+    (List.map (fun (c : Onboarding_status.check) -> Onboarding_status.check_id_name c.id)
+       observed.Onboarding_status.checks);
+  check bool "the request is not verified here" true
+    (condition Onboarding_status.Multi_account_request observed
+     = Onboarding_status.Needs_verification);
+  check int "no command is issued for it" asked (List.length (calls ()));
+  check bool "the inspection of a server answers the same" true
+    (Onboarding_status.opening (Onboarding_status.inspect_loaded ~base_path:(Some base))
+     = Onboarding_status.Account_installation);
+  (match Onboarding_status.to_json observed with
+   | `Assoc fields ->
+     check bool "the document names the opening" true
+       (List.assoc_opt "opening" fields = Some (`String "account_installation"))
+   | _ -> fail "the document is an object");
+  check string "the config is left as it was" multi_account (read config)
 
 let microvm_imp backend =
   Printf.sprintf
@@ -523,7 +573,9 @@ let () = run "Onboarding observations"
                  test_case "a workspace without imp opens its Keepers' history" `Quick
                    a_workspace_without_imp_opens_its_keepers_history;
                  test_case "only checks every Keeper shares hold history closed" `Quick
-                   only_shared_checks_hold_history_closed];
+                   only_shared_checks_hold_history_closed;
+                 test_case "a workspace that asks for accounts is an account installation" `Quick
+                   a_workspace_that_asks_for_accounts_is_an_account_installation];
    "sandbox probe", [test_case "a declared Apple Container is probed, not assumed" `Quick
                        a_declared_apple_container_is_probed_not_assumed;
                      test_case "a declared Docker is probed as Docker" `Quick

@@ -127,6 +127,13 @@ must enforce at least two approvals and stale-approval dismissal on `main`;
 repository rules continue to apply during the actual merge. These metadata-only
 workflows run no builds or tests.
 
+The request workflow skips events that cannot change what the worker does: a
+review or push on a draft, any event on a pull request that closed without
+merging, a review on a closed pull request, a title or body edit, and a review
+edit. A skipped request starts no runner and no worker job. Marking a draft
+Ready reads its reviews again, so nothing submitted while it was a draft is
+lost.
+
 When enabling the worker, or after a transient read/merge failure, recheck an
 existing PR (any stack member) explicitly:
 

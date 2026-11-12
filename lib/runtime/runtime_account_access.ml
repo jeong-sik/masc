@@ -45,6 +45,9 @@ type host_client =
   | Model_list
   | Files_api
   | Replacement_catalog
+  | Web_search
+  | Systemone_cloud
+  | Voice_endpoint
 
 (* The proof carries nothing: a single-user process shares every account of
    its host, so one start of a host client is as allowed as another. *)
@@ -57,6 +60,9 @@ let host_client_name = function
   | Model_list -> "A model-list or serving-window request of a setup connection"
   | Files_api -> "The Files API of masc_file_*"
   | Replacement_catalog -> "A target of the replacement catalog AGENT_CORE_MODEL_CATALOG names"
+  | Web_search -> "A web search provider that masc_web_search calls with its key"
+  | Systemone_cloud -> "The cloud backend of SystemOne"
+  | Voice_endpoint -> "A voice endpoint that names a key"
 ;;
 
 type t =
@@ -113,6 +119,7 @@ type request =
 type refusal =
   | Not_published
   | No_operator
+  | Zone_uncertain of Authz_zone.uncertain
   | Not_a_keeper_id of string
   | Turn_refused of Authz_keeper_turn.refusal
   | Not_the_assigned_runtime of
@@ -125,10 +132,17 @@ type refusal =
   | Not_a_declared_home
   | Not_the_account_home of Authz_types.Provider_account_id.t
   | Host_account of host_client
+  | Off_keeper of Authz_types.Keeper_id.t
+  | Off_runtime of Authz_types.Runtime_id.t
+  | Off_person_home
+  | Off_own_account of Authz_types.User_id.t
 
 let refusal_to_string = function
   | Not_published -> "this process has not published whether a CLI may start on an account"
   | No_operator -> "in multi-account mode no operator owns the account of a person"
+  | Zone_uncertain uncertain ->
+    "the authorization log cannot be trusted now, so no client starts on an account: "
+    ^ Authz_zone.uncertain_to_string uncertain
   | Not_a_keeper_id name -> Printf.sprintf "the Keeper %S is not an id of the authorization log" name
   | Turn_refused refusal -> "the turn is refused: " ^ Authz_keeper_turn.refusal_to_string refusal
   | Not_the_assigned_runtime { requested; assigned } ->
@@ -148,7 +162,14 @@ let refusal_to_string = function
     Printf.sprintf
       "the account was captured from another home than the one of %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
-  | Host_account ((Api_provider | Model_list | Files_api | Replacement_catalog) as client) ->
+  | Host_account
+      (( Api_provider
+       | Model_list
+       | Files_api
+       | Replacement_catalog
+       | Web_search
+       | Systemone_cloud
+       | Voice_endpoint ) as client) ->
     Printf.sprintf
       "%s sends with the credential its operator declared, which is an account of the \
        host, and a multi-account process shares no account of its host"
@@ -158,6 +179,24 @@ let refusal_to_string = function
       "%s starts on an account of the host, and a multi-account process shares no \
        account of its host"
       (host_client_name client)
+  | Off_keeper keeper_id ->
+    Printf.sprintf
+      "the Keeper %s belongs to an account, and the accounts of this installation were \
+       turned off: it stays read-only and runs no turn"
+      (Authz_types.Keeper_id.to_string keeper_id)
+  | Off_runtime runtime_id ->
+    Printf.sprintf
+      "the Runtime %s belongs to an account, and the accounts of this installation were \
+       turned off: no turn runs on it"
+      (Authz_types.Runtime_id.to_string runtime_id)
+  | Off_person_home ->
+    "the home is under the runtime roots of the persons (.masc/accounts), whose accounts were \
+     turned off: no client starts on it"
+  | Off_own_account user_id ->
+    Printf.sprintf
+      "the accounts of this installation were turned off, so no client starts on an account \
+       of %s"
+      (Authz_types.User_id.to_string user_id)
 ;;
 
 let layout_client (type client) (client : client Runtime_official_account.client) =
@@ -199,44 +238,97 @@ let own_home ~base_path (state : Authz_state.t) user_id provider_account_id clai
           else Error (Not_the_account_home provider_account_id)))
 ;;
 
-let state_of zone = (Authz_zone.snapshot zone).Authz_zone.state
-
+(* One request is judged on one snapshot, and only on one the zone could be
+   trusted for: the person, the turn and the home are read in the same state. *)
 let multi_account ~zone ~base_path ~now request claim =
+  let on_trusted judge =
+    match Authz_zone.read zone with
+    | Error uncertain -> Error (Zone_uncertain uncertain)
+    | Ok trusted -> judge trusted (trusted :> Authz_zone.snapshot).Authz_zone.state
+  in
   match request with
   | Operator_call -> Error No_operator
   | Own_account { user_id; provider_account_id } ->
-    let state = state_of zone in
-    (match Ps.find state.Authz_state.principals user_id with
-     | Some { Ps.status = Ps.Active; _ } -> own_home ~base_path state user_id provider_account_id claim
-     | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
+    on_trusted (fun (_ : Authz_zone.trusted) state ->
+      match Ps.find state.Authz_state.principals user_id with
+      | Some { Ps.status = Ps.Active; _ } -> own_home ~base_path state user_id provider_account_id claim
+      | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
   | Keeper_turn { keeper_name; channel; runtime_id } ->
     (match Authz_types.Keeper_id.of_string keeper_name with
      | Error (_ : Authz_id.error) -> Error (Not_a_keeper_id keeper_name)
      | Ok keeper_id ->
-       (match Authz_keeper_turn.decide zone ~keeper_id ~channel ~now:(now ()) with
-        | Error refusal -> Error (Turn_refused refusal)
-        | Ok turn ->
-          if String.equal (Authz_types.Runtime_id.to_string turn.Authz_keeper_turn.runtime_id) runtime_id
-          then
-            (* The namespace of a member is fixed by their admission, so a
-               later snapshot reads the one the decision saw, or none for a
-               principal deleted since. *)
-            own_home
-              ~base_path
-              (state_of zone)
-              turn.Authz_keeper_turn.owner
-              turn.Authz_keeper_turn.provider_account_id
-              claim
-          else
-            Error
-              (Not_the_assigned_runtime
-                 { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id })))
+       on_trusted (fun trusted state ->
+         match Authz_keeper_turn.decide trusted ~keeper_id ~channel ~now:(now ()) with
+         | Error refusal -> Error (Turn_refused refusal)
+         | Ok turn ->
+           if String.equal (Authz_types.Runtime_id.to_string turn.Authz_keeper_turn.runtime_id) runtime_id
+           then
+             own_home
+               ~base_path
+               state
+               turn.Authz_keeper_turn.owner
+               turn.Authz_keeper_turn.provider_account_id
+               claim
+           else
+             Error
+               (Not_the_assigned_runtime
+                  { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id })))
+;;
+
+(* The Keeper or the Runtime of the log that [name] spells, if the log made one.
+   A name that is no id names no record. *)
+let off_keeper (records : Authz_state.t) name =
+  match Authz_types.Keeper_id.of_string name with
+  | Error (_ : Authz_id.error) -> None
+  | Ok keeper_id ->
+    Option.map
+      (fun (_ : Authz_keeper_state.keeper) -> Off_keeper keeper_id)
+      (Authz_keeper_state.find records.Authz_state.keepers keeper_id)
+;;
+
+let off_runtime (records : Authz_state.t) name =
+  match Authz_types.Runtime_id.of_string name with
+  | Error (_ : Authz_id.error) -> None
+  | Ok runtime_id ->
+    Option.map
+      (fun (_ : Authz_runtime_state.runtime) -> Off_runtime runtime_id)
+      (Authz_runtime_state.find records.Authz_state.runtimes runtime_id)
+;;
+
+(* HIGH-RISK-UNREVIEWED: a single user after Off keeps the records of the
+   accounts read-only and runs nothing of theirs on the authority of the
+   operator (design 5.1 row 4, 10.5): no turn of their Keepers, no turn on
+   their Runtimes, and no client on the homes of the persons, whichever request
+   it is for. A home the environment of the process chose is the operator's. *)
+let after_off ~base_path (records : Authz_state.t) request claim =
+  let by_request =
+    match request with
+    | Operator_call -> None
+    | Own_account { user_id; provider_account_id = _ } -> Some (Off_own_account user_id)
+    | Keeper_turn { keeper_name; channel = _; runtime_id } ->
+      (match off_keeper records keeper_name with
+       | Some refusal -> Some refusal
+       | None -> off_runtime records runtime_id)
+  in
+  match by_request, claim.declared_home with
+  | Some refusal, (None | Some (_ : string)) -> Error refusal
+  | None, None -> Ok ()
+  | None, Some home ->
+    if Layout.under_persons ~base_path home then Error Off_person_home else Ok ()
 ;;
 
 let judge request claim =
   match Atomic.get state with
   | Unpublished -> Error Not_published
-  | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Ok ()
+  | Published (Single_user single_user) ->
+    (match Authz_boot_mode_read.turned_off single_user with
+     | None -> Ok ()
+     | Some records ->
+       after_off
+         ~base_path:(Authz_boot_mode_read.single_user_base_path single_user)
+         records
+         request
+         claim)
   | Published (Multi_account { zone; base_path; now }) ->
     multi_account ~zone ~base_path ~now request claim
 ;;
@@ -260,11 +352,25 @@ let authorize_muse request account =
   |> Result.map (fun () -> account)
 ;;
 
-let authorize_host client =
+type host_refusal =
+  | Host_unpublished
+  | Host_not_shared
+
+(* HIGH-RISK-UNREVIEWED: the one decision on the accounts of the host. Phase 1
+   shares them with nobody in a multi-account process, whoever asks and for
+   whichever client (plans D3b and D4). *)
+let host_access () =
   match Atomic.get state with
-  | Unpublished -> Error Not_published
+  | Unpublished -> Error Host_unpublished
   | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Ok Shared_by_single_user
-  | Published (Multi_account { zone = _; base_path = _; now = _ }) -> Error (Host_account client)
+  | Published (Multi_account { zone = _; base_path = _; now = _ }) -> Error Host_not_shared
+;;
+
+let authorize_host client =
+  host_access ()
+  |> Result.map_error (function
+    | Host_unpublished -> Not_published
+    | Host_not_shared -> Host_account client)
 ;;
 
 (* HIGH-RISK-UNREVIEWED: an API provider of the runtime table sends with the
@@ -293,6 +399,11 @@ let api_admission_snapshot config = Llm_provider.Provider_admission.snapshot_for
 type native_refusal =
   | Native_unpublished
   | Native_tools_reach_other_homes of Runtime_native_tools.posture
+  | Native_tools_reach_person_homes of Runtime_native_tools.posture
+  | Person_homes_unread of
+      { posture : Runtime_native_tools.posture
+      ; unread : Unix.error
+      }
 
 let native_refusal_to_string = function
   | Native_unpublished ->
@@ -305,14 +416,45 @@ let native_refusal_to_string = function
        supports the posture none runs here with keeper.tools.native = \"none\" in its \
        profile; a client without it runs no model turn here"
       (Runtime_native_tools.to_string posture)
+  | Native_tools_reach_person_homes posture ->
+    Printf.sprintf
+      "this workspace keeps .masc/accounts, where the runtime roots of persons are, and a \
+       model turn runs beside it only without native tools. This turn asks for the native \
+       posture %S: the CLI runs as the user of the server process, so its own tools could \
+       read the logins kept there. A Keeper whose client supports the posture none runs \
+       with keeper.tools.native = \"none\" in its profile; the other turns run once \
+       .masc/accounts is removed"
+      (Runtime_native_tools.to_string posture)
+  | Person_homes_unread { posture; unread } ->
+    Printf.sprintf
+      "whether .masc/accounts, where the runtime roots of persons are, remains could not \
+       be read (%s), so no model turn with native tools starts, and this turn asks for the \
+       native posture %S"
+      (Unix.error_message unread)
+      (Runtime_native_tools.to_string posture)
 ;;
 
+(* HIGH-RISK-UNREVIEWED: the one decision on the native tools of a model turn.
+   Without them a turn reads through MASC tools only, in either mode. With them
+   it reads what the user of the server process can read: in a multi-account
+   process the homes of the other persons (plan D3c), and in a single-user one
+   the homes that persons left under the workspace, after Off or after their
+   log was removed (plan F3a-3). Whether they remain is read from the
+   workspace at each start, so a removal or a first login counts at the next one. *)
 let authorize_native posture =
   match Atomic.get state, posture with
   | Unpublished, (Runtime_native_tools.Native_none | Native_read | Native_full) ->
     Error Native_unpublished
-  | ( Published (Single_user (_ : Authz_boot_mode_read.single_user))
-    , (Runtime_native_tools.Native_none | Native_read | Native_full) ) -> Ok ()
+  | Published (Single_user (_ : Authz_boot_mode_read.single_user)), Runtime_native_tools.Native_none
+    -> Ok ()
+  | Published (Single_user single_user), (Runtime_native_tools.Native_read | Native_full) ->
+    (match
+       Layout.persons_remain
+         ~base_path:(Authz_boot_mode_read.single_user_base_path single_user)
+     with
+     | Ok false -> Ok ()
+     | Ok true -> Error (Native_tools_reach_person_homes posture)
+     | Error unread -> Error (Person_homes_unread { posture; unread }))
   | Published (Multi_account { zone = _; base_path = _; now = _ }), Runtime_native_tools.Native_none
     -> Ok ()
   | ( Published (Multi_account { zone = _; base_path = _; now = _ })

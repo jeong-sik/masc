@@ -33,3 +33,13 @@ val make_request_handler
     set is classified as the HTTP/1.1 [Host] set is, then the request takes
     the shared path, client-IP rate limit included. A handler called outside
     a listener's request ledger scope gets its own response capacity. *)
+
+val make_table_request_handler
+  :  trust_policy:Server_request_authority.trust_policy
+  -> table:Server_account_table.t
+  -> stream_end:Http_h2_stream.Stream_end.t
+  -> Eio.Net.Sockaddr.stream
+  -> H2.Reqd.t
+  -> unit
+(** {!make_request_handler} over {!Server_http_ingress.serve_table}: the
+    HTTP/2 adapter of a server whose whole surface is its route table. *)

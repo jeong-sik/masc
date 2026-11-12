@@ -12,9 +12,11 @@
 | `../tool-efficiency-before-after-2026-11/queue_wait_overlap.py` | 긴 Execute 와 같은 Keeper 의 채팅 작업 큐 대기가 겹친 시간 (정의는 그 스크립트 docstring) | `result-queue-wait-overlap-2026-11-08T05-40_11-11T05-40.json` | 같아요 |
 | `../execute-waits-2026-11/measure_execute_waits.py` | Execute 시간, 긴 호출이 기다리는 것, 일정으로 깨우는 호출 (정의는 그 스크립트 docstring) | `result-execute-waits-2026-11-08_11-11T05-40.json` | 11-08T00:00Z ~ 11-11T05:40Z (77.67시간) |
 | `../lane-time-2026-11/measure_lane_time.py` | 턴 시간이 어디로 가는지, 모델 요청의 승인 대기 (정의는 그 폴더 README) | `result-lane-time-2026-11-08_11-11T05-40.json` | 같아요 (77.67시간) |
+| `repeated_results.py` (이 폴더) | 같은 Keeper 가 1시간 안에 같은 입력으로 같은 결과를 다시 받은 호출과 바이트 | `result-repeated-results-baseline-2026-11-01T00-00_11-05T00-00.json`, `…-last72h-2026-11-08T13-00_11-11T13-00.json`, `…-after-50763-2026-11-10T16-00_11-11T13-00.json` | 11-01T00:00Z ~ 11-05T00:00Z (96시간), 11-08T13:00Z ~ 11-11T13:00Z (72시간), 11-10T16:00Z ~ 11-11T13:00Z (21시간) |
+| `execute_result_shapes.py` (이 폴더) | Execute 결과 바이트가 명령 줄의 종류(`gh api`, `sed -n` 등)와 `gh api` 엔드포인트별로 어디로 가는지 | `result-execute-result-shapes-baseline-2026-11-01T00-00_11-05T00-00.json`, `…-last72h-2026-11-08T13-00_11-11T13-00.json` | 11-01T00:00Z ~ 11-05T00:00Z (96시간), 11-08T13:00Z ~ 11-11T13:00Z (72시간) |
 
 뒤의 두 스크립트는 `--from-date` 의 자정(UTC)부터 읽어서 창이 5.67시간 길어요. 시작을 05:40Z 로 맞추는 인자가 없어요.
-`long_turn_shapes.py` 는 `../tool-efficiency-1110-2026-11/ledger_window.py` 의 장부 읽기를 써요. 시험은 합성 장부로 돌리는 18개예요.
+`long_turn_shapes.py`, `repeated_results.py`, `execute_result_shapes.py` 는 `../tool-efficiency-1110-2026-11/ledger_window.py` 의 장부 읽기를 써요. 시험은 합성 장부로 돌리는 18개, 15개, 26개예요.
 
 ## 정의 (`long_turn_shapes.py`)
 
@@ -121,13 +123,87 @@
 - `masc_dos_*` 세 도구가 낡은 결과 바이트의 81.1%예요. 한 Keeper(msx-retro-mania)가 대부분이라서 다른 Keeper 의 일에는 옮겨지지 않아요.
 - 이 도구들이 바이트를 만드는 이유는 확인하지 못했어요. 이전 보고서의 측정(11-06 ~ 11-09)은 이 도구의 blob 을 읽은 호출이 0번이라고 적었어요.
 
+### 같은 결과 다시 받기 (`repeated_results.py`)
+
+정의는 [11-05 보고서](../../reports/2026-11-05-tool-efficiency.md) §1.2 와 같아요. 같은 Keeper 가 같은 도구에 같은 `input_fingerprint` 를 보내 같은 `output_fingerprint` 를 받았고, 같은 키의 가장 가까운 앞 호출이 3,600초 안(경계 포함)에 있으면 다시 받은 호출이에요. 앞 호출이 창 시작 전 1시간 안에 있어도 앞 호출로 세요(그 호출 자체는 창에 안 들어가요). 두 지문 중 하나라도 없는 행은 다시 받은 것으로 세지 않아요. 바이트는 장부의 `result_bytes` 예요. 1 MB 는 10^6 B 예요.
+
+| 창 (UTC) | 호출 | 결과 바이트 | 다시 받은 호출 | 다시 받은 바이트 | 하루로 환산한 다시 받은 바이트 | 하루로 환산한 결과 바이트 |
+|---|---:|---:|---:|---:|---:|---:|
+| 11-01T00:00 ~ 11-05T00:00 (96시간) | 151,787 | 977.2 MB | 34,513 (22.7%) | 313.1 MB (32.0%) | 78.3 MB | 244.3 MB |
+| 11-08T13:00 ~ 11-11T13:00 (72시간) | 142,925 | 618.6 MB | 5,498 (3.8%) | 22.1 MB (3.6%) | 7.4 MB | 206.2 MB |
+| 11-10T16:00 ~ 11-11T13:00 (21시간) | 38,036 | 112.7 MB | 1,633 (4.3%) | 3.3 MB (2.9%) | 3.7 MB | 128.8 MB |
+
+다시 받은 바이트가 가장 큰 도구예요. 괄호는 그 도구가 그 창에서 돌려준 결과 바이트 전체예요.
+
+- 96시간 창: `masc_schedule_notes_list` 153.3 MB (224.8 MB), `keeper_artifact_read` 120.6 MB (211.6 MB), `masc_dos_screen` 9.6 MB (177.6 MB), `masc_board_list` 6.8 MB (8.7 MB)
+- 72시간 창: `masc_dos_screen` 7.2 MB (165.0 MB), `keeper_skill` 2.7 MB (4.7 MB), `keeper_artifact_read` 2.6 MB (63.7 MB), `Execute` 2.3 MB (188.1 MB)
+- 21시간 창: `Execute` 0.87 MB (53.0 MB), `keeper_skill` 0.65 MB (0.87 MB), `keeper_wiki_read` 0.58 MB (2.29 MB), `keeper_artifact_read` 0.36 MB (20.9 MB)
+
+읽는 법:
+
+- 같은 정의가 11-05 보고서와 비슷한 값을 내요. 그 보고서의 창(11-01T00:00Z ~ 11-04T19:10Z, 91.17시간)은 33,848호출(23.5%)과 310 MB(33.2%)이고 이 스크립트의 96시간 창은 34,513호출(22.7%)과 313 MB(32.0%)예요. 창이 달라서 같은 값은 아니에요. 두 도구(`masc_schedule_notes_list`, `keeper_artifact_read`)의 다시 받은 바이트는 보고서의 153 MB, 121 MB 와 맞아요.
+- 다시 받은 바이트는 하루 78.3 MB 에서 7.4 MB 로 70.9 MB 줄었어요. 결과 바이트 전체는 하루 244.3 MB 에서 206.2 MB 로 38.1 MB(16%) 줄었어요. 처음 받은 결과의 바이트(전체에서 다시 받은 몫을 뺀 값)는 하루 166.0 MB 에서 198.8 MB 로 늘었어요. 남은 큰 몫은 다시 받은 결과가 아니라 처음 받은 큰 결과예요. 72시간 창에서 `Execute` 188.1 MB, `masc_dos_screen` 165.0 MB, `keeper_artifact_read` 63.7 MB 중 다시 받은 바이트는 각각 2.3, 7.2, 2.6 MB 예요.
+- `masc_schedule_notes_list` 는 72시간 창의 다시 받은 바이트 상위 8개에 없어요. 8위가 0.72 MB 라서 그 도구의 값은 0.72 MB 보다 작아요.
+- `Execute` 의 다시 받은 호출은 2,655개이고 바이트는 호출당 평균 853 B 예요. 호출 수는 많아도 컨텍스트에 실린 몫은 작아요.
+
+### Execute 결과 바이트가 가는 곳 (`execute_result_shapes.py`)
+
+호출의 명령 글자는 `input.command` 이거나 `input.argv`(`sh -c`·`bash -lc` 뒤의 스크립트, 아니면 낱말을 이은 것)예요. 분류는 그 글자로만 해요. 명령 줄에 `gh <하위 명령>` 이 명령 경계(줄 처음, `;`, `&&`, `||`, `|`, `(`, `{`, 역따옴표, 줄바꿈, `do`, `then` 뒤)에 있으면 처음 나온 것이 그 호출의 종류예요. 그래서 `date -u; gh api …` 는 `gh api` 예요. 그 밖의 호출은 앞머리 `cd X &&`, `export …;`, `set …;`, `VAR=값` 을 뗀 첫 두 낱말이에요. `gh api` 엔드포인트는 `repos/<소유자>/<저장소>/` 를 떼고 숫자를 `N` 으로 적어요. `--jq`·`-q` 가 있으면 필터를 건 호출로 세요.
+
+| 창 (UTC) | 호출 | 결과 바이트 | `gh` 가 든 호출의 바이트 | `gh api` 호출 | `gh api` 바이트 | 하루 환산 결과 바이트 |
+|---|---:|---:|---:|---:|---:|---:|
+| 11-01 ~ 11-05 (96시간) | 70,567 | 154.4 MB | 89.8 MB (58.2%) | 38,305 | 77.8 MB (50.4%) | 38.6 MB |
+| 11-08T13 ~ 11-11T13 (72시간) | 90,144 | 187.3 MB | 122.5 MB (65.4%) | 50,747 | 102.5 MB (54.7%) | 62.4 MB |
+
+`command`·`argv` 를 못 읽거나 결과 크기가 없는 Execute 행은 뺐어요(96시간 창 703행, 72시간 창 1,000행). 72시간 창의 `gh api` 호출 하나는 중앙값 805 B, p90 4,823 B, 최대 64,605 B 예요.
+
+72시간 창에서 결과 바이트가 큰 호출 종류예요.
+
+- `gh api` 102.5 MB (54.7%), `gh pr` 14.9 MB (8.0%, 7,189호출), `sed -n` 11.0 MB (5.9%, 2,593호출, 중앙값 3,209 B), `python3 -c` 6.3 MB (3.4%), `git show` 5.2 MB (2.8%), `gh run` 3.7 MB (2.0%, 1,932호출)
+
+72시간 창에서 바이트가 큰 `gh api` 엔드포인트예요(첫 `gh api` 기준이라 합이 위의 `gh api` 호출 줄과 조금 달라요).
+
+- `pulls/N/files` 13.9 MB (3,311호출, 중앙값 1,760 B, p90 11,160 B), `pulls/N` 11.8 MB (9,238호출, 중앙값 556 B), `pulls/N/reviews` 7.9 MB (5,714호출, 중앙값 503 B), `pulls/N/reviews/N` 4.2 MB (1,905호출), `pulls/$n` 4.1 MB (1,939호출), `--jq` 없는 `pulls/N` 2.5 MB (507호출, 중앙값 2,167 B, p90 15,355 B)
+- 필터 없는 `gh api` 의 바이트는 72시간 창 32.8 MB(`gh api` 가 든 줄 전체 107.2 MB 의 30.6%)이고 96시간 창 18.6 MB(80.4 MB 의 23.2%)예요.
+
+읽는 법:
+
+- 72시간 창에서 Execute 는 전체 도구 결과 바이트(618.6 MB)의 30.3%이고 `gh` 가 든 호출이 19.8%(122.5 MB)예요. 호출 하나는 작아요. 하루 환산으로 `gh api` 호출이 9,576개에서 16,916개로(+77%), Execute 결과 바이트가 38.6 MB에서 62.4 MB로(+62%) 늘었어요. 비용은 호출 크기가 아니라 호출 수에서 와요. 두 창의 길이와 Keeper 의 일이 달라서 늘어난 이유는 이 값으로 못 가려요.
+- 같은 입력에 같은 결과를 받은 Execute 호출은 2,655개(전체 91,144행의 2.9%)뿐이에요(위 「같은 결과 다시 받기」). 그래서 같은 결과를 다시 받는 것을 막아서 줄일 수 있는 몫은 작아요.
+- PR 리뷰 읽기(`pulls/N/files`, `pulls/N`, `pulls/N/reviews`)가 `gh api` 의 큰 몫이에요. 한 턴에서 PR 한 건에 5번 이상 읽은 묶음이 번호 있는 `gh` 호출의 55.8%이고 묶음 안 엔드포인트는 중앙값 4가지예요. 기다리는 폴링은 0.6%뿐이에요(아래 「스크립트 밖에서 센 값」).
+
 ## 스크립트 밖에서 센 값
 
-`keeper_skill` 도구의 description 크기예요. 저장소에 스크립트를 두지 않았어요.
+아래 두 값은 저장소에 스크립트를 두지 않았어요.
+
+### `keeper_skill` 도구의 description 크기
 
 - 읽은 것: 11-11 에 `<base>/.masc/keepers/<keeper>/provider-inputs/2026-11/11.jsonl` 이 있는 Keeper 의 마지막 요청 한 줄이에요. 그중 `tool_schemas` 에 `keeper_skill` 이 든 Keeper 가 18명이에요. 그 항목의 `artifact.content_ref` 에서 `sha256=` 값을 꺼내 `<base>/.masc/tool_blobs/<앞 두 자리>/<sha256>` 를 읽고, JSON 의 `description` 을 UTF-8 바이트로 셌어요.
 - 값: description 은 최소 19,565 B, 중앙값과 최대 19,997 B 이고 서로 다른 설명이 두 종류예요. 큰 쪽은 머리말 1,013 B 와 스킬 48행이에요. 행 바이트는 중앙값 346, p90 623, 최대 841이고 행 18개가 행 바이트의 절반이에요. 행은 `{"source_id":…,"package_id":…,"name":…}: <설명>` 꼴이고 `}: ` 앞의 identity 부분이 48행 합 4,956 B(행 바이트의 26.2%)예요. 48행 모두 name 과 package_id 가 같고, 6행의 source_id 는 `lane-<64자리 16진수>` 예요.
 - 한계: 11-11 의 마지막 요청만 봤어요. 파일이 사라지거나 바뀌면 같은 값을 다시 내지 못해요. 스킬 목록이 Keeper 마다 다를 수 있는데 이 요청들은 두 종류뿐이었어요. 이 설명이 요청마다 모델에게 실제로 몇 토큰이 되는지는 안 쟀어요.
+
+### 한 턴에서 PR 한 건에 `gh` 를 읽은 횟수
+
+- 읽은 것: 72시간 창(11-08T13:00Z ~ 11-11T13:00Z) Execute 행 중 위 「Execute 결과 바이트가 가는 곳」의 분류가 `gh api`, `gh pr`, `gh run` 으로 가른 호출 59,868개예요. 명령에 PR 번호(`pulls/<5자리>`, `pr view|checks|diff|status|ready|merge <5자리>`, `#<5자리>`)가 처음 나오는 것을 그 호출의 PR 로 보고, (Keeper, `keeper_turn_id`, PR 번호)를 묶음으로 삼았어요. 번호가 든 호출은 24,827개(41.5%)예요. `sleep <n>`(n ≥ 30)이 든 명령을 기다리는 호출로 셌어요.
+- 값: 묶음 8,011개, 묶음당 호출 중앙값 2, p90 7, 최대 153이에요. 5번 이상 읽은 묶음 1,645개가 번호 있는 호출의 55.8%(13,848개)와 결과 바이트의 51.6%(27.4 MB)를 차지하고, 10번 이상 읽은 묶음 351개가 21.2%(5,272개)와 19.1%(10.1 MB)를 차지해요. 5번 이상 묶음 안의 서로 다른 엔드포인트(또는 명령 앞머리)는 중앙값 4, p90 6이에요. 그 묶음의 첫 호출에서 마지막 호출까지는 중앙값 175초, p90 970초이고, 이어진 호출 사이는 중앙값 10.2초이며 2초 이하가 17.4%예요. 13,848호출은 모델 응답(`trace_id` 와 `turn` 쌍) 7,789번에 담겨 있어요. 묶음당 응답은 중앙값 4, p90 9이고 응답 하나당 호출은 중앙값 1.6이에요. 호출의 18.8%는 한 응답에서 둘째 이후로 낸 호출이에요. 응답 하나를 `trace_id` 와 `turn` 쌍으로 본 것이 맞는지는 코드로 확인하지 않았어요.
+- 기다리는 호출은 154개(0.6%, 0.1 MB)뿐이에요. `batch_size` 가 1보다 큰 `gh` 읽기는 0개였어요. `batch_size` 는 한 계획에서 같은 층에 놓여 함께 도는 노드 수이고, `Execute` 는 `Serial` 로 선언돼 층마다 하나라서 1이에요(`lib/keeper/keeper_tool_plan_executor.ml` 의 `schedule_layers`). `batch_index` 가 1 이상인 `gh` 읽기는 8,332개(13.9%)예요. 모델이 한 응답에 여러 호출을 내도 `Execute` 는 하나씩 돌아요.
+- 묶는 길은 이미 둘 있어요. 하나는 서버가 노드 여러 개를 검증해서 한 번에 돌리는 `keeper_composition_run` 이고 72시간에 11번(`keeper_composition_status` 19번) 불렸어요. 다른 하나는 쉘 한 줄이에요. `gh` 가 든 Execute 호출 60,951개 중 한 줄에 `gh` 가 둘 이상 있거나 반복문이 든 호출이 23,828개(39.1%)예요. `gh` 가 한 번뿐이고 반복문이 없는 호출은 60.9%(37,123개, 83.2 MB, 호출당 평균 2,241 B)예요.
+- 도구 쪽: 한 PR 의 파일과 리뷰를 읽는 Keeper 도구는 없어요. `config/tools` 에서 파일 이름에 `github`, `pr_`, `pull`, `review` 가 든 것은 `keeper_pull_requests_list`(서버가 60초마다 읽은 열린 PR 목록, GitHub 를 부르지 않아요)와 `report_review_verdict` 뿐이에요. `keeper_pull_requests_list` 는 같은 창에서 331번(3.0 MB) 불렸어요.
+- 한계: 번호가 없는 `gh` 호출 58.5%(`$n` 같은 변수, 목록 읽기 등)는 묶음에서 빠져요. 글자 세기라서 같은 PR 의 호출이 모두 리뷰인지, 서로 다른 엔드포인트가 같은 질문의 조각인지는 몰라요. 묶음 안 호출 사이에는 다른 도구 호출과 모델의 생각 시간이 들어 있어서 간격이 읽기 시간이 아니에요. 스크립트는 저장소에 없고 `~/me/.tmp/tools-goal-1110/execute-1111/gh_reads_per_pr.py` 예요.
+
+## 바깥 사례와 맞춰 본 것
+
+원문 페이지를 읽어 확인한 것만 적어요. 2026-11-11에 읽었어요.
+
+| 출처 | 확인한 내용 | 이 폴더의 값과 맞춰 본 결과 |
+|---|---|---|
+| *Sutradhara*, arxiv.org/abs/2601.12967 (v1 2026-01-19, v3 2026-04-22) | 초록: 도구 호출이 FTR(최종 답의 첫 토큰이 나오는 시각) 지연의 30~85%예요. 디코딩 중에 도구를 바로 보내고(streaming tool execution), 최대 FTR 중앙값 15%, 끝까지 시간 11%를 줄였다고 적어요(A100, "up to"). 본문은 안 읽었어요 | 서빙 층 최적화예요. Keeper 가 모델 응답을 받는 동안 도구를 미리 시작하는지는 안 봤어요 |
+| GitHub MCP server PR #1172 (2025-10-07 병합, `gh api repos/github/github-mcp-server/pulls/1172`) | PR 읽기 도구 여섯 개(`get_pull_request`, `…_files`, `…_status`, `…_diff`, `…_reviews`, `…_review_comments`)를 `pull_request_read` 하나와 `method` 인자(`get`, `get_files`, `get_status`, `get_diff`, `get_reviews`, `get_review_comments`)로 합쳤어요. 본문은 "curated benchmarks 에서 회귀 없음"이라고 적어요 | 도구 정의 수를 줄이는 변경이에요. 호출 하나는 여전히 `method` 하나를 읽어요. 호출 수는 줄지 않아요 |
+| Anthropic, programmatic tool calling 문서 (platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling, 쪽에 날짜 없음) | 코드 실행 샌드박스가 부른 도구의 결과는 모델 컨텍스트에 안 들어가고 마지막 출력만 들어가요. 도입부: BrowseComp·DeepSearchQA 에서 기본 검색 도구에 더했을 때 평균 11% 성능이 올랐고 입력 토큰이 24% 줄었어요. 그 아래 수치는 요약으로만 봐서 뺐어요 | `Execute` 는 이미 코드를 도는 도구예요. 한 줄에 `gh` 를 묶는 호출이 39.1%예요. 위 「한 턴에서 PR 한 건에 `gh` 를 읽은 횟수」의 묶는 길 참조 |
+| *The Complexity Trap*, arxiv.org/abs/2508.21433 (v3 2025-10-27) | 초록: 낡은 관찰을 가리는 것(observation masking)이 원본 에이전트에 비해 비용을 절반으로 줄이고, LLM 요약과 같거나 조금 더 높은 해결률을 내요(SWE-agent, SWE-bench Verified, 모델 구성 5개). v3 의 혼합 방식은 비용을 7%·11% 더 줄여요 | 끝난 턴의 낡은 결과를 마커로 바꾸는 규칙이 이미 있어요(`Keeper_turn_driver_try_provider.aged_result_min_bytes`, 위 「긴 턴의 모양」). 이 PR 은 그 규칙의 상수를 바꾸자고 하지 않아요 |
+
+- 이 값들은 다른 작업(웹 검색, SWE-bench)에서 나왔어요. masc 의 Keeper 에서 같은 크기로 나온다는 근거가 아니에요.
+- GitHub 변경 기록 쪽(github.blog changelog 2025-10-29)은 응답이 변경 기록이 아니어서 못 읽었고 위 PR 로 바꿔 확인했어요.
 
 ## 다시 내는 법
 
@@ -137,10 +213,12 @@ python3 -I docs/evidence/tool-efficiency-1110-2026-11/github_wait_shapes.py 2026
 python3 docs/evidence/tool-efficiency-before-after-2026-11/queue_wait_overlap.py --base-path ~/me --since 2026-11-08T05:40:00 --end 2026-11-11T05:40:00 --hold-s 60 --json-out <경로>
 python3 -I docs/evidence/execute-waits-2026-11/measure_execute_waits.py --base-path ~/me --from-date 2026-11-08 --to-date 2026-11-11 --until 2026-11-11T05:40:00Z --json-out <경로>
 python3 -I docs/evidence/lane-time-2026-11/measure_lane_time.py --base-path ~/me --from-date 2026-11-08 --to-date 2026-11-11 --until 2026-11-11T05:40:00Z --json-out <경로>
+python3 -I docs/evidence/tool-efficiency-1111-2026-11/repeated_results.py 2026-11-08T13:00:00Z 2026-11-11T13:00:00Z ~/me > <경로>
+python3 -I docs/evidence/tool-efficiency-1111-2026-11/execute_result_shapes.py 2026-11-08T13:00:00Z 2026-11-11T13:00:00Z ~/me > <경로>
 python3 -B -m unittest discover -s docs/evidence/tool-efficiency-1111-2026-11
 ```
 
-`github_wait_shapes.py` 는 결과를 표준 출력에 찍어서 `> <경로>` 로 저장해요. `queue_wait_overlap.py` 는 같은 폴더의 `measure_before_after.py` 를 불러서 `-I` 로 못 돌려요.
+`github_wait_shapes.py`, `repeated_results.py`, `execute_result_shapes.py` 는 결과를 표준 출력에 찍어서 `> <경로>` 로 저장해요. `repeated_results.py` 의 끝 시각이 지금보다 뒤면 아직 없는 시간이 창 길이에 들어가서 하루로 환산한 값이 작게 나와요. 처음에 끝을 13:30Z 로 줬다가 13:00Z 로 다시 냈어요. `queue_wait_overlap.py` 는 같은 폴더의 `measure_before_after.py` 를 불러서 `-I` 로 못 돌려요.
 장부는 오래된 날 파일을 지우므로 같은 창을 나중에 다시 재면 값이 달라질 수 있어요.
 
 ## 확인한 것
@@ -149,7 +227,11 @@ python3 -B -m unittest discover -s docs/evidence/tool-efficiency-1111-2026-11
 - 변이 35개(정규식 자릿수와 접두어, 바이트 경계, 마지막·처음 고르기, 정렬 키, 집계 키 바꾸기, 분모 바꾸기 등)를 로컬에서 하나씩 넣어 돌렸고 모두 시험이 잡았어요. 처음에는 5개가 살아남았고 시험을 더해 잡았어요. 변이를 넣는 스크립트는 저장소에 없어서 이 문장은 저자 보고예요.
 - 이 과정에서 `quantiles` 가 중앙값을 정수로 잘라 짝수 개수에서 0.5 낮게 적던 것을 고쳤어요. 영향은 `masc-productor-owner` 의 턴당 호출 수 중앙값(27에서 27.5)과 `msx-retro-mania` 의 것(17에서 17.5) 둘뿐이고 위 표의 값은 그대로예요.
 - `measure_lane_time.py` 의 `--until` 은 시간대 없는 값을 기기의 지역 시간(이 기기는 KST)으로 읽었어요. `measure_execute_waits.py` 는 UTC 로 읽어서 두 스크립트가 같은 인자에 다른 창을 줬어요. UTC 로 읽도록 고치고, `TZ=Asia/Seoul` 로 고정한 시험을 더했어요. 기존 결과 두 개(`result-2026-11-01_11-04.json`, `result-2026-11-01_11-05.json`)는 `Z` 를 붙여 돌려서 창이 맞아요(91.17시간, 101.0시간). 이번 결과도 `Z` 를 붙여 다시 냈어요. 처음 낸 값은 창이 68.67시간이어서 버렸어요.
-- `lane-time-2026-11` 의 시험 96개와 이 폴더의 시험 18개가 통과했어요.
+- `repeated_results.py` 의 시험 15개가 합성 호출에서 통과했어요. 1시간 경계(3,600초 포함, 3,601초 제외), 키의 네 부분(Keeper, 도구, 입력 지문, 출력 지문) 하나씩, 가장 가까운 앞 호출 기준(0, 3,000, 6,000초), 순서가 뒤집힌 입력, 창 시작 전 호출이 기억만 채우는 것, 창 끝 이후 호출 제외, 지문이 없는 호출, 도구별 집계, 필드가 빠진 행, 음수·불리언·문자열 바이트, 퍼센트와 하루 환산, 상위 도구 정렬 기준, 빈 창을 담아요.
+- 같은 스크립트에 변이 20개(경계 부등호, 키의 한 부분 빼기, 첫 호출 기준으로 바꾸기, 정렬 키, 분모, 바이트 판별 등)를 하나씩 넣어 돌렸어요. 처음에는 4개(정렬 키, 음수 바이트, 불리언 바이트, 상위 도구 정렬 기준)가 살아남았고 시험 3개를 더해 모두 잡았어요. 변이를 넣는 스크립트는 저장소에 없어서 이 문장은 저자 보고예요.
+- `execute_result_shapes.py` 의 시험 26개가 합성 호출에서 통과했어요. `command` 와 `argv`(`sh -c`, `bash -lc`, `zsh -ec`, 그 밖의 `argv`), 읽을 수 없는 입력, 결과 0 B 인 행, 음수·불리언 크기, `gh` 가 앞의 명령 뒤·`then`·역따옴표·파이프 뒤·`-R` 뒤에 올 때, 낱말 속·문장 속 `gh`, 앞머리 떼기, 엔드포인트의 저장소 앞머리·질의 문자열·숫자, 값을 받는 플래그(`-H`, `-X`), `--jq`·`-q`·`--jq=` 와 파이프 뒤 `grep -q`, 첫 `gh api` 기준, 깨진 따옴표, 창 경계, 짝수 개수 중앙값, 바이트 순과 호출 수 순의 차이, 빠진 행 수를 담아요.
+- 같은 스크립트에 변이 29개를 하나씩 넣어 돌렸고 모두 잡았어요. 처음 30개 중 9개가 살아남았고 그중 `p90` 변이 하나는 바이트 크기가 같아서 낡은 `.pyc` 가 읽힌 가짜 생존이었어요. 변이 러너를 `python3 -B` 와 `__pycache__` 삭제로 고쳐 다시 돌렸고, 진짜 생존 7개는 시험을 더해 잡았어요. 정규식의 `$(` 갈래는 `(` 가 이미 들어 있어 쓸모가 없어서 지웠어요. `repeated_results.py` 의 변이 20개도 같은 방식으로 다시 돌려 모두 잡혔어요. 변이를 넣는 스크립트는 저장소에 없어서 이 문장들은 저자 보고예요.
+- `lane-time-2026-11` 의 시험 96개와 이 폴더의 시험 59개(18개, 15개, 26개)가 통과했어요.
 
 ## 못 한 것과 모르는 것
 
@@ -163,4 +245,12 @@ python3 -B -m unittest discover -s docs/evidence/tool-efficiency-1111-2026-11
 - 승인 대기가 줄고(합 479.6 h 에서 204.6 h) 취소된 작업이 줄어든(106에서 2) 이유는 이 값들로 가르지 못해요. 창의 길이와 Keeper 의 일이 달라요.
 - GitHub 기다림의 모양은 명령 글자로만 갈랐어요. `gh` 를 거치지 않는 기다림은 세지 않아요(`../tool-efficiency-1110-2026-11/README.md` 의 「못 한 것과 모르는 것」과 같아요).
 - 이 값들만으로 비동기 Execute 가 줄이는 Keeper 시간은 정할 수 없어요.
+- 다시 받은 결과를 재는 세 창은 길이와 Keeper 의 일이 달라요. 하루로 환산한 값은 창 길이로 나눈 값이라 시간대별 일의 차이를 고치지 않아요. 21시간 창은 하루의 일부라서 하루 값으로 읽기 어려워요.
+- 다시 받은 바이트가 줄어든 이유를 특정 PR 로 가르지 못했어요. 11-05 보고서가 짚은 `masc_schedule_notes_list`(#48291)와 `keeper_artifact_read`(#48282)의 변경, `masc_dos_screen` 결과를 줄인 #50763 은 후보일 뿐이에요. 변경 전후로 같은 일을 시켜 본 값이 없어요.
+- 지문이 없는 행이 몇 개인지 안 셌어요. 그런 행은 다시 받은 것으로 세지 않아서 값이 작게 나올 수 있어요.
+- 필요해서 다시 읽은 호출과 불필요하게 다시 읽은 호출을 가르지 못해요. 이 값은 지문이 같았던 호출의 크기예요.
+- Execute 호출의 종류는 명령 글자로만 갈랐어요. `gh` 가 든 줄에서 파이프 뒤 명령이 결과를 줄여도 `gh` 로 세고, 따옴표 안 문장에서 `;` 뒤에 나온 `gh` 도 `gh` 로 세요. `gh api` 의 `--jq` 여부는 첫 `gh api` 의 낱말만 봐요. 줄바꿈으로 이은 뒤 명령의 플래그는 섞일 수 있어요.
+- `input` 이 빈 객체이거나 문자열인 Execute 행은 못 읽어서 뺐어요(1.1%, 96시간 창 703행, 72시간 창 1,000행). 그 행들의 바이트는 `gh` 몫에 안 들어가요.
+- PR 한 건에 `gh` 를 읽은 횟수는 스크립트 밖에서 쟀어요(아래 「스크립트 밖에서 센 값」). 그 값은 저장소 스크립트가 없어서 같은 값을 다시 내려면 그 절의 방법을 따라야 해요. 읽은 호출이 같은 질문의 조각인지는 안 가렸어요.
+- Execute 가 늘어난 이유(하루 `gh api` 9,576개에서 16,916개)는 이 값으로 못 가려요. Keeper 수와 일이 달라요.
 - `Test` 워크플로는 안 돌렸어요. 스크립트 시험은 로컬에서 돌렸어요.

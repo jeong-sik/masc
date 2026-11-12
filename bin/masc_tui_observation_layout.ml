@@ -145,18 +145,7 @@ let context_header_item ~max_cells ~inspect_key observation =
          Dropped first when the header runs out of room -- the figure is what
          the line is for, and a reader who has met the key once does not need
          it printed again. *)
-      let grouped_int value =
-        let digits = string_of_int value in
-        let length = String.length digits in
-        let grouped = Buffer.create (length + (length / 3)) in
-        String.iteri
-          (fun index char ->
-            if index > 0 && (length - index) mod 3 = 0 then
-              Buffer.add_char grouped ',';
-            Buffer.add_char grouped char)
-          digits;
-        Buffer.contents grouped
-      in
+      let grouped_int = Masc_tui_value.Count.grouped in
       let figure = Printf.sprintf "Context %.0f%% used" (ratio *. 100.0) in
       let measured =
         Printf.sprintf "Context %.0f%% \xc2\xb7 %s/%s tok" (ratio *. 100.0)

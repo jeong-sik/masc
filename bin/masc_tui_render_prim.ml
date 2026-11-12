@@ -945,8 +945,138 @@ let composer_row state ~rows ~cols =
    nothing to count -- and eight flat bars said "nothing finished" for a read
    that had not been made or had been refused. The shared words say which. *)
 
+let connection_status_parts ~ko (status : Masc_tui_types.connection_status) =
+  (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
+     can fail while the independent Recent event feed remains live. *)
+  match status with
+  | Connected -> Theme.text_status Masc_tui_theme.Ok,
+      (if ko then "연결됨" else "connected"),
+      (if ko then ["HTTP 연결됨", false; "연결됨", true] else ["HTTP connected", false; "connected", true; "HTTP up", true])
+  | Degraded -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "일부 관측" else "partial"),
+      (if ko then ["HTTP 일부 관측", false; "일부 관측", true] else ["HTTP partial", false; "partial", true])
+  | Connecting -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "조회 중" else "loading"),
+      (if ko then ["HTTP 조회 중", false; "조회 중", true] else ["HTTP loading", false; "loading", true])
+  | Booting -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "서버 시작 중" else "server booting"),
+      (if ko then ["서버 시작 중", false; "시작 중", true] else ["server booting", false; "booting", true])
+  | Disconnected -> Theme.text_status Masc_tui_theme.Bad,
+      (if ko then "조회 실패" else "refresh failed"),
+      (if ko then ["HTTP 조회 실패", false; "조회 실패", true] else ["HTTP refresh failed", false; "HTTP failed", true; "failed", true])
+
+type compact_connection_state =
+  | Compact_workspace_mismatch
+  | Compact_workspace_unconfirmed
+  | Compact_workspace_unread
+  | Compact_read_failed
+  | Compact_read_partial
+  | Compact_read_interrupted
+  | Compact_read_unfinished
+  | Compact_reading
+  | Compact_http of connection_status
+
+let compact_connection_state (state : state) =
+  let progress = match state.http_refresh_progress with
+    | Some (authority, progress) when authority = state.workspace_authority -> Some progress
+    | Some _ | None -> None in
+  let failed, partial, interrupted, unfinished, in_flight =
+    match progress with
+    | None -> false, false, false, false, false
+    | Some progress ->
+        let counts = Http_refresh_progress.counts progress in
+        let failed, interrupted, unfinished =
+          Http_refresh_progress.unreturned_component_reads progress
+          |> List.fold_left (fun (failed, interrupted, unfinished) reading ->
+               match reading.Http_refresh_progress.cr_status with
+               | Component_pending | Component_settled (_, Component_returned Part_received) ->
+                   failed, interrupted, unfinished
+               | Component_settled (_, (Component_returned Part_failed | Component_exception)) ->
+                   true, interrupted, unfinished
+               | Component_settled (_, Component_interrupted) -> failed, true, unfinished
+               | Component_settled (_, Component_unfinished) -> failed, interrupted, true)
+               (false, false, false) in
+        failed || counts.failed > 0, counts.partial > 0,
+        interrupted || counts.interrupted > 0, unfinished,
+        (match progress.phase with In_flight -> true | Finished _ -> false) in
+  let scoped_reading = surface_reads_pending state <> [] in
+  match state.workspace_identity with
+  | Workspace_identity_mismatch _ -> Compact_workspace_mismatch
+  | Workspace_identity_match_unconfirmed _ -> Compact_workspace_unconfirmed
+  | Workspace_identity_unread when state.connection_status = Connected
+                                   || state.connection_status = Degraded ->
+      Compact_workspace_unread
+  | Workspace_identity_unread | Workspace_identity_match ->
+      if state.connection_status = Disconnected then Compact_http Disconnected
+      else if failed then Compact_read_failed
+      else if partial then Compact_read_partial
+      else if interrupted then Compact_read_interrupted
+      else if unfinished then Compact_read_unfinished
+      else match state.connection_status with
+        | Connected when in_flight || scoped_reading -> Compact_reading
+        | Connected | Degraded | Connecting | Booting | Disconnected as status -> Compact_http status
+
+(* The words for each connection state, longest first, with whether a
+   spelling leaves out what the full badge says and whether the state needs
+   the full badge beside it whatever the spelling. *)
+let compact_connection_wording ~ko compact =
+  let options ko_label en_labels = if ko then [ko_label, true] else en_labels in
+  match compact with
+  | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, options "공간 불일치" ["WS mismatch", true; "mismatch", true], true
+  | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, options "공간 확인 대기" ["WS unconfirmed", true; "unconfirmed", true], true
+  | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, options "공간 미조회" ["WS unread", true; "unread", true], true
+  | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, options "조회 실패" ["read failed", true; "failed", true], true
+  | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, options "일부 관측" ["read partial", true; "partial", true], true
+  | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, options "조회 중단" ["read interrupted", true; "interrupted", true], true
+  | Compact_read_unfinished -> Theme.text_status Masc_tui_theme.Warn, options "조회 미완료" ["read unfinished", true; "unfinished", true], true
+  | Compact_reading -> Theme.text_status Masc_tui_theme.Warn, options "조회 중" ["reading data", true; "reading", true], true
+  | Compact_http status ->
+      let style, _, options = connection_status_parts ~ko status in
+      style, options, false
+
+(* What the top row says about the connection: one mark and the shortest
+   word for the state. A refresh in flight is not a state of the connection --
+   it comes and goes with every read, and the row every screen starts with
+   would change with it -- so it reads as the HTTP status under it. *)
+let strip_connection_reading (state : state) =
+  let ko = state.ui_language = Lang_ko in
+  let compact =
+    match compact_connection_state state with
+    | Compact_reading -> Compact_http state.connection_status
+    | ( Compact_workspace_mismatch | Compact_workspace_unconfirmed
+      | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
+      | Compact_read_interrupted | Compact_read_unfinished | Compact_http _ ) as
+      compact -> compact
+  in
+  let mark : Masc_tui_value.Mark.t =
+    match compact with
+    | Compact_http Connected -> Settled
+    | Compact_http (Connecting | Booting) | Compact_reading -> Under_way
+    | Compact_http Degraded | Compact_workspace_unconfirmed
+    | Compact_workspace_unread | Compact_read_partial
+    | Compact_read_interrupted | Compact_read_unfinished -> Caution
+    | Compact_http Disconnected | Compact_workspace_mismatch
+    | Compact_read_failed -> Failed
+  in
+  let style, word =
+    match compact with
+    | Compact_http status ->
+        let style, word, _ = connection_status_parts ~ko status in
+        style, word
+    | Compact_workspace_mismatch | Compact_workspace_unconfirmed
+    | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
+    | Compact_read_interrupted | Compact_read_unfinished | Compact_reading ->
+        let style, spellings, _ = compact_connection_wording ~ko compact in
+        style, List.fold_left (fun _ (spelling, _) -> spelling) "" spellings
+  in
+  style, Masc_tui_value.Mark.glyph mark ^ " " ^ word
+
 (* The gap between the last ring entry and the waiting badge. *)
 let waiting_badge_gap_cells = 3
+
+(* The cells ahead of the connection reading at the right-hand end of the
+   strip, and between it and the clock. *)
+let strip_reading_gap_cells = 2
 
 (* The strip above every surface: the Tab ring with the active family
    highlighted, then what waits on the operator. Wider terminals see the whole
@@ -988,7 +1118,43 @@ let surface_strip (state : state) ~cols =
     if badge = "" then 0
     else Message_layout.display_width badge + waiting_badge_gap_cells
   in
-  let budget = max 8 (cols - 1 - badge_reserved) in
+  (* The right-hand end: the connection, then the clock and the zone every
+     moment on the screen is drawn in. The clock is drawn while the whole ring
+     still fits beside it; a row too narrow for both keeps the ring, which is
+     how the operator moves. The mark and its word are always drawn, because
+     a screen that draws nothing is explained by them. *)
+  let connection_style, connection = strip_connection_reading state in
+  let wall_clock = Masc_tui_value.Instant.wall_clock ~now:(Unix.gettimeofday ()) in
+  let ring_cells =
+    let cells = ref 0 in
+    Array.iteri
+      (fun i (surface, name) ->
+        cells :=
+          !cells
+          + Message_layout.display_width
+              (Masc_tui_types.surface_ring_display_label ~lang:state.ui_language
+                 surface name
+               ^ badge_of_surface surface)
+          + (if i = active then 1 else 0)
+          + (if i > 0 then 2 else 0))
+      ring;
+    !cells
+  in
+  let reading_clock =
+    if 1 + ring_cells + badge_reserved + strip_reading_gap_cells
+       + Message_layout.display_width connection + strip_reading_gap_cells
+       + Message_layout.display_width wall_clock <= cols
+    then Some wall_clock
+    else None
+  in
+  let reading_cells =
+    Message_layout.display_width connection
+    + (match reading_clock with
+       | Some clock -> strip_reading_gap_cells + Message_layout.display_width clock
+       | None -> 0)
+  in
+  let reading_reserved = reading_cells + strip_reading_gap_cells in
+  let budget = max 8 (cols - 1 - badge_reserved - reading_reserved) in
   let active_hidden_cells =
     (if active > 0 then Message_layout.display_width (hidden_before_mark active) + 1 else 0)
     + (if active < n - 1 then
@@ -1076,6 +1242,25 @@ let surface_strip (state : state) ~cols =
   if badge <> "" then
     Buffer.add_string parts
       (String.make waiting_badge_gap_cells ' ' ^ Theme.bad () ^ badge ^ Ansi.reset);
+  (* Flush right: the clock keeps its column whatever the ring shows, and the
+     ring keeps its column whatever the connection says. *)
+  let drawn_cells =
+    1
+    + (if lo > 0 then Message_layout.display_width (hidden_before_mark lo) + 1 else 0)
+    + window_width lo hi
+    + (if hi < n - 1 then
+         Message_layout.display_width (hidden_after_mark (n - 1 - hi)) + 1
+       else 0)
+    + badge_reserved
+  in
+  Buffer.add_string parts
+    (String.make (max strip_reading_gap_cells (cols - drawn_cells - reading_cells)) ' ');
+  Buffer.add_string parts (connection_style ^ connection ^ Ansi.reset);
+  (match reading_clock with
+   | Some clock ->
+       Buffer.add_string parts
+         (String.make strip_reading_gap_cells ' ' ^ Ansi.dim ^ clock ^ Ansi.reset)
+   | None -> ());
   Buffer.contents parts
 
 
@@ -1767,38 +1952,10 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 
-let connection_status_parts ~ko (status : Masc_tui_types.connection_status) =
-  (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
-     can fail while the independent Recent event feed remains live. *)
-  match status with
-  | Connected -> Theme.text_status Masc_tui_theme.Ok,
-      (if ko then "연결됨" else "connected"),
-      (if ko then ["HTTP 연결됨", false; "연결됨", true] else ["HTTP connected", false; "connected", true; "HTTP up", true])
-  | Degraded -> Theme.text_status Masc_tui_theme.Warn,
-      (if ko then "일부 관측" else "partial"),
-      (if ko then ["HTTP 일부 관측", false; "일부 관측", true] else ["HTTP partial", false; "partial", true])
-  | Connecting -> Theme.text_status Masc_tui_theme.Warn,
-      (if ko then "조회 중" else "loading..."),
-      (if ko then ["HTTP 조회 중", false; "조회 중", true] else ["HTTP loading", false; "loading", true])
-  | Booting -> Theme.text_status Masc_tui_theme.Warn,
-      (if ko then "서버 시작 중" else "server booting..."),
-      (if ko then ["서버 시작 중", false; "시작 중", true] else ["server booting", false; "booting", true])
-  | Disconnected -> Theme.text_status Masc_tui_theme.Bad,
-      (if ko then "조회 실패" else "refresh failed"),
-      (if ko then ["HTTP 조회 실패", false; "조회 실패", true] else ["HTTP refresh failed", false; "HTTP failed", true; "failed", true])
-
-let connection_status_badge ~ko status =
-  let style, label, _ = connection_status_parts ~ko status in
-  "HTTP " ^ style ^ "[" ^ label ^ "]" ^ Ansi.reset
-
-;;
-
-(* Every surface header ends with this, so a workspace the server does not
-   share is said on whichever screen the operator is reading. The footer
-   carries the two paths when the row has space for them; this is the part
-   that has to survive a full row of key hints, because the surfaces it
-   explains are the ones drawing nothing. *)
-let refresh_progress_badge (state : state) =
+(* What the reads under way and the reads that failed have to say, one piece
+   each. The connection itself and the workspace it serves are on the top row
+   ([strip_connection_reading]); these are the particulars behind its word. *)
+let refresh_progress_pieces (state : state) =
   let ko = state.ui_language = Lang_ko in
   let text = ui_text state in
   let surface_name source = if not ko then Surface_read_order.source_name source else
@@ -1825,30 +1982,32 @@ let refresh_progress_badge (state : state) =
     | Component_interrupted -> "조회 중단" | Component_unfinished -> "조회 미완료" in
   let foreground =
     match surface_reads_pending state with
-    | [] -> ""
-    | source :: rest -> " · " ^ text ~ko:"조회 중: " ~en:"reading " ^ surface_name source
-        ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))
+    | [] -> []
+    | source :: rest ->
+        [ text ~ko:"조회 중: " ~en:"reading " ^ surface_name source
+          ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) ]
   in
   match state.http_refresh_progress with
   | Some (authority, progress) when authority = state.workspace_authority ->
       let outcome_notice completion label =
         match Http_refresh_progress.settled_sources ~completion progress with
-        | [] -> ""
-        | source :: rest -> " · " ^ source_name source ^ " " ^ label
-            ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
+        | [] -> []
+        | source :: rest ->
+            [ source_name source ^ " " ^ label
+              ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) ] in
       let partials = match Http_refresh_progress.partial_readings progress with
-        | [] -> ""
+        | [] -> []
         | (_,parts) :: rest ->
             let names outcome = Http_refresh_progress.components parts
               |> List.filter_map (fun (component,observed) -> if observed=outcome
                 then Some (component_name component) else None)
               |> String.concat ", " in
-            " · " ^ text ~ko:"일부 관측: " ~en:"partial: " ^ names Http_refresh_progress.Part_failed
+            [ text ~ko:"일부 관측: " ~en:"partial: " ^ names Http_refresh_progress.Part_failed
               ^ text ~ko:" 조회 실패; " ~en:" failed; "
               ^ names Http_refresh_progress.Part_received ^ text ~ko:" 관측됨" ~en:" received"
-              ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
+              ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) ] in
       let notices = outcome_notice Http_refresh_progress.Failed_read (text ~ko:"조회 실패" ~en:"read failed")
-        ^ outcome_notice Http_refresh_progress.Interrupted_read (text ~ko:"조회 중단" ~en:"interrupted") ^ partials in
+        @ outcome_notice Http_refresh_progress.Interrupted_read (text ~ko:"조회 중단" ~en:"interrupted") @ partials in
       let component_reads = Http_refresh_progress.unreturned_component_reads progress in
       let component_notices = component_reads |> List.filter_map (fun part ->
         match part.Http_refresh_progress.cr_status with
@@ -1856,11 +2015,11 @@ let refresh_progress_badge (state : state) =
         | Http_refresh_progress.Component_settled (_,outcome) ->
             Some (component_name part.cr_component ^ " "
               ^ component_outcome outcome)) |> String.concat "; " in
-      let notices = notices ^ (if component_notices="" then "" else " · " ^ component_notices) in
+      let notices = notices @ (if component_notices="" then [] else [ component_notices ]) in
       (match progress.Http_refresh_progress.phase with
-       | Http_refresh_progress.Finished _ -> notices ^ foreground
+       | Http_refresh_progress.Finished _ -> notices @ foreground
        | Http_refresh_progress.In_flight ->
-           if foreground <> "" then notices ^ foreground else
+           if foreground <> [] then notices @ foreground else
            let pending_components = List.filter (fun part ->
              match part.Http_refresh_progress.cr_status with
              | Http_refresh_progress.Component_pending -> true
@@ -1874,90 +2033,26 @@ let refresh_progress_badge (state : state) =
                      | _ :: _ -> text ~ko:"조회 마무리 중" ~en:"finishing refresh")
                  | source :: rest -> text ~ko:"조회 중: " ~en:"reading " ^ source_name source
                      ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))) in
-           notices ^ " · " ^ pending)
+           notices @ [ pending ])
   | Some _ | None -> foreground
+
+let reading_separator = " \xc2\xb7 "
+
+let refresh_progress_badge (state : state) =
+  String.concat reading_separator (refresh_progress_pieces state)
 
 let observer_loss_badge (state : state) =
   if state.observer_source_loss then
     Some (Theme.warn () ^ ui_text state ~ko:"[이벤트 유실]" ~en:"[events lost]" ^ Ansi.reset)
   else None
 
+(* What a title row adds to the top row's one word: that the event feed lost
+   events, and which reads are under way or failed. Empty while the feed is
+   whole and nothing is being read -- the title then ends with its own
+   readings, and "connected" is said once, above. *)
 let connection_badge (state : state) =
-  let text = ui_text state in
-  let connection = connection_status_badge ~ko:(state.ui_language = Lang_ko) state.connection_status in
-  let connection = match state.workspace_identity with
-  | Masc_tui_types.Workspace_identity_mismatch _ ->
-      connection ^ " " ^ Theme.text_status Masc_tui_theme.Bad ^ text ~ko:"[작업 공간 불일치]" ~en:"[workspace mismatch]" ^ Ansi.reset
-  | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
-      connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ text ~ko:"[작업 공간 확인 대기]" ~en:"[workspace unconfirmed]" ^ Ansi.reset
-  | Masc_tui_types.Workspace_identity_unread
-  | Masc_tui_types.Workspace_identity_match -> connection in
-  let source_loss = match observer_loss_badge state with
-    | Some badge -> badge ^ " "
-    | None -> ""
-  in
-  source_loss ^ connection ^ refresh_progress_badge state
-
-type compact_connection_state =
-  | Compact_workspace_mismatch
-  | Compact_workspace_unconfirmed
-  | Compact_workspace_unread
-  | Compact_read_failed
-  | Compact_read_partial
-  | Compact_read_interrupted
-  | Compact_read_unfinished
-  | Compact_reading
-  | Compact_http of connection_status
-
-let compact_connection_state (state : state) =
-  let progress = match state.http_refresh_progress with
-    | Some (authority, progress) when authority = state.workspace_authority -> Some progress
-    | Some _ | None -> None in
-  let failed, partial, interrupted, unfinished, in_flight =
-    match progress with
-    | None -> false, false, false, false, false
-    | Some progress ->
-        let counts = Http_refresh_progress.counts progress in
-        let failed, interrupted, unfinished =
-          Http_refresh_progress.unreturned_component_reads progress
-          |> List.fold_left (fun (failed, interrupted, unfinished) reading ->
-               match reading.Http_refresh_progress.cr_status with
-               | Component_pending | Component_settled (_, Component_returned Part_received) ->
-                   failed, interrupted, unfinished
-               | Component_settled (_, (Component_returned Part_failed | Component_exception)) ->
-                   true, interrupted, unfinished
-               | Component_settled (_, Component_interrupted) -> failed, true, unfinished
-               | Component_settled (_, Component_unfinished) -> failed, interrupted, true)
-               (false, false, false) in
-        failed || counts.failed > 0, counts.partial > 0,
-        interrupted || counts.interrupted > 0, unfinished,
-        (match progress.phase with In_flight -> true | Finished _ -> false) in
-  let scoped_reading = surface_reads_pending state <> [] in
-  match state.workspace_identity with
-  | Workspace_identity_mismatch _ -> Compact_workspace_mismatch
-  | Workspace_identity_match_unconfirmed _ -> Compact_workspace_unconfirmed
-  | Workspace_identity_unread when state.connection_status = Connected
-                                   || state.connection_status = Degraded ->
-      Compact_workspace_unread
-  | Workspace_identity_unread | Workspace_identity_match ->
-      if state.connection_status = Disconnected then Compact_http Disconnected
-      else if failed then Compact_read_failed
-      else if partial then Compact_read_partial
-      else if interrupted then Compact_read_interrupted
-      else if unfinished then Compact_read_unfinished
-      else match state.connection_status with
-        | Connected when in_flight || scoped_reading -> Compact_reading
-        | Connected | Degraded | Connecting | Booting | Disconnected as status -> Compact_http status
-
-let usage_connection_badge (state : state) =
-  let badge = connection_badge state in
-  match state.workspace_identity, state.connection_status with
-  | Workspace_identity_unread, (Connected | Degraded) ->
-      badge ^ " " ^ Theme.text_status Masc_tui_theme.Warn
-      ^ ui_text state ~ko:"[작업 공간 미조회]" ~en:"[workspace not observed]" ^ Ansi.reset
-  | (Workspace_identity_match | Workspace_identity_match_unconfirmed _
-    | Workspace_identity_mismatch _), _
-  | Workspace_identity_unread, (Connecting | Booting | Disconnected) -> badge
+  String.concat reading_separator
+    (Option.to_list (observer_loss_badge state) @ refresh_progress_pieces state)
 
 let reading_connection_notice (state : state) =
   let exceptional =
@@ -1969,34 +2064,26 @@ let reading_connection_notice (state : state) =
        | Compact_read_interrupted | Compact_read_unfinished
        | Compact_http (Degraded | Connecting | Booting | Disconnected) -> true
   in
-  if exceptional then Some (usage_connection_badge state) else None
+  if exceptional then
+    match connection_badge state with
+    | "" -> None
+    | particulars -> Some particulars
+  else None
 
 (* A narrow Usage title keeps a textual state visible while its longer
    workspace and refresh details remain available in the scrolled body. *)
 let compact_connection_badge (state : state) ~width =
   let ko = state.ui_language = Lang_ko in
-  let options ko_label en_labels = if ko then [ko_label, true] else en_labels in
   let choose options =
     match List.find_opt (fun (label, _) -> Message_layout.display_width label <= width) options with
     | Some choice -> choice
     | None -> List.hd (List.rev options)
   in
   let style, options, needs_context =
-    match compact_connection_state state with
-    | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, options "공간 불일치" ["WS mismatch", true; "mismatch", true], true
-    | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, options "공간 확인 대기" ["WS unconfirmed", true; "unconfirmed", true], true
-    | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, options "공간 미조회" ["WS unread", true; "unread", true], true
-    | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, options "조회 실패" ["read failed", true; "failed", true], true
-    | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, options "일부 관측" ["read partial", true; "partial", true], true
-    | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, options "조회 중단" ["read interrupted", true; "interrupted", true], true
-    | Compact_read_unfinished -> Theme.text_status Masc_tui_theme.Warn, options "조회 미완료" ["read unfinished", true; "unfinished", true], true
-    | Compact_reading -> Theme.text_status Masc_tui_theme.Warn, options "조회 중" ["reading data", true; "reading", true], true
-    | Compact_http status ->
-        let style, _, options = connection_status_parts ~ko status in
-        style, options, false in
+    compact_connection_wording ~ko (compact_connection_state state) in
   let label, needs_full_status = choose options in
   let details =
-    if needs_context || needs_full_status then usage_connection_badge state
+    if needs_context || needs_full_status then connection_badge state
     else refresh_progress_badge state in
   style ^ label ^ Ansi.reset, (if String.equal details "" then None else Some details)
 
@@ -2016,87 +2103,114 @@ let reading_connection_summary ~width state =
   in
   fit_width summary (max 0 width)
 
-let feature_child_heading (state : state) ~cols ~title =
-  let lead = Lead_text (screen_title (" " ^ title)) in
-  match reading_connection_notice state with
-  | None -> detail_heading ~cols ~lead ~id:"" ~after:[] ~tail:""
-  | Some notice ->
-      let heading = detail_heading ~cols ~lead ~id:"" ~after:[] ~tail:notice in
-      let width = framed_inner_width cols in
-      if Message_layout.display_width heading <= width then heading
-      else
-        (* The summary pads a table cell; the heading owns this free space. *)
-        let tail = reading_connection_summary
-          ~width:(max 0 (width - Message_layout.display_width "  ")) state
-          |> String.trim in
-        detail_heading ~cols ~lead ~id:"" ~after:[] ~tail
-
-(* The full badge can itself exceed the title's width: at forty-four columns
-   HTTP, workspace mismatch and refresh details cannot all be kept whole.
-   Reuse the prioritized workspace/read observation, then keep observer loss
-   and HTTP when they fit. The ellipsis says that full context was omitted. *)
+(* The particulars can exceed the title's width. The feed's loss is kept
+   whole ahead of the reads, and the ellipsis says the rest was left out. *)
 let surface_connection_badge (state : state) ~width =
   let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
   let full = connection_badge state in
   if cells full <= width then full
   else if width < 1 then ""
   else
-    let omitted = " …" in
+    let omitted = " \xe2\x80\xa6" in
     let room = width - cells omitted in
-    let primary, _ = compact_connection_badge state ~width:room in
-    let loss = Option.to_list (observer_loss_badge state) in
-    let notices = match compact_connection_state state with
-      | Compact_http _ -> loss @ [primary]
-      | Compact_workspace_mismatch | Compact_workspace_unconfirmed
-      | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
-      | Compact_read_interrupted | Compact_read_unfinished | Compact_reading ->
-          primary :: loss @ [connection_status_badge ~ko:(state.ui_language = Lang_ko)
-                             state.connection_status]
-    in
     let warning = Theme.warn () ^ "!" ^ Ansi.reset in
-    if room < 1 then warning
-    else
-      let compact = match notices with
-        | first :: _ when cells first > room -> warning
-        | _ -> Message_layout.join_fitting ~sep:" " ~cells:room notices
-      in
-      compact ^ omitted
+    match observer_loss_badge state with
+    | Some loss when cells loss <= room -> loss ^ omitted
+    | Some _ | None -> if room < 1 then warning else String.trim omitted
 
-(* Reserve the two-cell gap added by [detail_heading] before sizing the
-   status. Readings give way whole, then the title; an empty first reading
-   prevents the first real count or clock from being cut to a fragment. *)
-let surface_title_row ~cols (state : state) ~lead ~readings =
-  let width = max 0 (framed_inner_width cols - Message_layout.display_width "  ") in
-  detail_heading ~cols ~lead:(Lead_text lead) ~id:"" ~after:("" :: readings)
-    ~tail:(surface_connection_badge state ~width)
+(* The row under the top row: where this screen is -- the top-row screen it
+   belongs to, then each step taken into it -- then what the screen has to
+   say about its own reading, and how far down it the reader is. One function
+   draws it so that a path, a count and a position look the same on every
+   screen that has them (RFC tui-one-screen-grammar, section 2). The product
+   name is not part of a place and is not drawn.
 
-(* A header row of [lead], a bracketed [label] and [badge]. The badge says
-   whether the screen can be trusted, so it is drawn whole and the label gives
-   up cells to it, down to losing its brackets. The six cells are the two gaps
-   and the brackets. *)
-let badge_row ~cols ~lead ~label ~badge =
-  let room =
-    framed_inner_width cols
-    - Message_layout.display_width lead
-    - Message_layout.display_width badge
-    - 6
+   The last step is the one that folds when the row is narrow: it is the id
+   of the thing being read, and the steps before it are how to get back. *)
+let here_step_separator = " \xe2\x80\xba "
+
+(* The cells kept clear ahead of the position. *)
+let here_position_gap_cells = 2
+
+(* The top-row screen the current one belongs to, by the name the top row
+   draws for it. *)
+let here_screen_name (state : state) =
+  let index = Masc_tui_surface_navigation.surface_ring_index state.view in
+  match List.nth_opt Masc_tui_types.surface_ring index with
+  | Some (surface, name) ->
+      Masc_tui_types.surface_ring_display_label ~lang:state.ui_language surface name
+  | None -> ""
+
+(* The path alone, every step drawn whole: for a row that lays out what
+   follows the path itself. *)
+let here_path (state : state) ~path =
+  let step text = Ansi.dim ^ here_step_separator ^ Ansi.reset ^ text in
+  screen_title (" " ^ here_screen_name state)
+  ^ String.concat "" (List.map step path)
+
+let here_row ~cols (state : state) ~path ~readings ~position =
+  let lead, id =
+    match List.rev path with
+    | [] -> here_path state ~path:[], ""
+    | last :: before ->
+        ( here_path state ~path:(List.rev before)
+          ^ Ansi.dim ^ here_step_separator ^ Ansi.reset,
+          last )
   in
-  if room < 1 then Printf.sprintf "%s  %s" lead badge
-  else
-    let label =
-      if Message_layout.display_width label <= room then label
-      else Message_layout.take_cells label (room - 1) ^ "\xe2\x80\xa6"
-    in
-    Printf.sprintf "%s  %s[%s]%s  %s" lead Ansi.dim label Ansi.reset badge
+  let position =
+    Option.map
+      (fun position ->
+        Ansi.dim
+        ^ Masc_tui_value.Position.text
+            ~whole:(ui_text state ~ko:"전체" ~en:"of") position
+        ^ Ansi.reset)
+      position
+  in
+  let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+  (* The position ends the row: the path and the readings are laid out in the
+     cells left of it, then padded, so it keeps its column whatever the path
+     says. *)
+  let position_cells =
+    match position with
+    | Some text -> cells text + here_position_gap_cells
+    | None -> 0
+  in
+  let left_cols = cols - position_cells in
+  let left =
+    detail_heading ~cols:left_cols ~lead:(Lead_text lead) ~id
+      ~after:
+        (* One gap ahead of the first reading, one mark between readings, and
+           an empty reading takes no room. *)
+        (List.filter (fun reading -> reading <> "") readings
+         |> List.mapi (fun index reading ->
+                (if index = 0 then "  " else reading_separator) ^ reading))
+      ~tail:
+        (* Reads come and go with every refresh, and a row that changed with
+           them would never sit still. Each screen says what it is still
+           reading in its own body; the row speaks up only for what went
+           wrong. *)
+        (match reading_connection_notice state with
+         | None -> ""
+         | Some _ ->
+             surface_connection_badge state
+               ~width:(max 0 (framed_inner_width left_cols - 2)))
+  in
+  match position with
+  | None -> left
+  | Some position ->
+      left
+      ^ String.make
+          (max here_position_gap_cells
+             (framed_inner_width cols - cells left - cells position))
+          ' '
+      ^ position
 
 (* What the headings laid out by [detail_heading] draw before the id: a lane
    run, a measurement artifact named by its sha256, a Fusion run (whose list
    and launch form carry the same title), one runtime's detail, and one
    keeper's calls. *)
-let lane_run_detail_title = " MASC Lane Run"
-let measurement_detail_title = " MASC Measurement"
-let fusion_title = " MASC Fusion"
-let runtime_detail_title = " MASC System / Runtime detail"
+(* The step the Runtime screens take from System. *)
+let runtime_step (state : state) = ui_text state ~ko:"런타임" ~en:"runtime"
 let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 
 (* The coordinator's badge beside a reading of the surface's own. The badge
@@ -2361,8 +2475,10 @@ let sidebar_row_lead_cells = Message_layout.display_width sidebar_caret_lead
    has no difference to report. *)
 let list_count_text ~loaded ~holding =
   match holding with
-  | Some holding when holding > loaded -> Printf.sprintf "(%d of %d)" loaded holding
-  | Some _ | None -> Printf.sprintf "(%d)" loaded
+  | Some holding when holding > loaded ->
+      Printf.sprintf "(%s of %s)" (Masc_tui_value.Count.grouped loaded)
+        (Masc_tui_value.Count.grouped holding)
+  | Some _ | None -> Printf.sprintf "(%s)" (Masc_tui_value.Count.grouped loaded)
 
 (* [holding] is what the surface holds when that is more than this index was
    given: the Board's own header reads "(50 of 198)" one keypress away, and
@@ -3152,7 +3268,7 @@ type planning_tab = Render_schedule.planning_tab =
    half its clock. Callers build that tail once and hand the same value here
    and to the row, so the measurement and the drawing cannot disagree. *)
 let planning_workspace_lead (state : state) =
-  screen_title (if state.ui_language = Lang_ko then " MASC 작업" else " MASC Work") ^ "  "
+  screen_title (" " ^ here_screen_name state) ^ "  "
 
 let planning_workspace_tabs (state : state) ~(tab : planning_tab) ~(window : string) =
   let review_count = Option.map (fun s -> s.vs_total) state.verification in
@@ -3723,7 +3839,8 @@ let tree_diff_row_span ?(hscroll = 0) ~width (row : Masc.Tui_decode.git_diff_row
    listed once here and the frame is drawn once below; each copy used to
    count its own chrome by hand. *)
 type diff_surface =
-  { ds_title : string  (** the screen title *)
+  { ds_path : string list
+        (** the steps from the top-row screen to this reading's list *)
   ; ds_address : string  (** what the header names beside "vs HEAD" *)
   ; ds_context_lines : string list
         (** drawn under the header, each followed by a divider *)
@@ -3768,6 +3885,9 @@ let diff_surface_geometry ~rows ~context_lines ~has_error =
     dsg_content_height = content_height }
 
 
+(* The step the Git Changes list and its diffs take from Workspace. *)
+let git_changes_step (state : state) = ui_text state ~ko:"Git 변경" ~en:"git changes"
+
 let render_diff_surface (state : state) (ds : diff_surface) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -3779,8 +3899,8 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   in
   let total = List.length diff_rows in
   let header =
-    detail_heading ~cols ~lead:(Lead_text (screen_title ds.ds_title ^ " "))
-      ~id:ds.ds_address ~after:[ "  vs HEAD" ] ~tail:(connection_badge state)
+    here_row ~cols state ~path:(ds.ds_path @ [ ds.ds_address ])
+      ~readings:[ "vs HEAD" ] ~position:None
   in
   if rows < diff_surface_minimum_rows then begin
     Buffer.add_string buf (Message_layout.fit_width
@@ -3870,7 +3990,7 @@ let render_repository_changes_diff (state : state) ~path =
   let _, cols = get_terminal_size () in
   let change_ctx = resolve_change_context state ~path_opt:(Some path) in
   render_diff_surface state
-    { ds_title = " MASC Git Diff"
+    { ds_path = [ git_changes_step state ]
     ; ds_address = Terminal_text.single_line path
     ; ds_context_lines = build_change_context_lines ~cols change_ctx
     ; ds_diff =
@@ -4039,24 +4159,24 @@ let config_pane_title_head ~room ~name ~reading =
 
 
 (* The whole title row a Config pane draws: its name, the strip, and the badge
-   at the end -- with the file it is reading and the clock between them where
-   the pane has those to show. Eleven panes built this row and nine of them
+   at the end -- with the file it is reading between them where the pane has
+   one to show. Eleven panes built this row and nine of them
    spelled it identically, each appending the badge itself. That is also why
    none of them could tell the strip to leave room for it: at a hundred
    columns the strip took the row and the frame cut the badge, the clock and
    half of "(load failed)" with it. Built once, the row knows both halves. *)
-let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
-    (state : state) =
+let config_pane_title ~cols ?(path = []) ?(reading = "") ?(note = "") (state : state) =
+  let name = here_path state ~path in
   let keys = config_pane_keys state in
   let piece text = if text = "" then "" else "  " ^ text in
   let cells text =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
-  let tail = piece clock ^ "  " ^ connection_badge state in
+  let tail = "  " ^ connection_badge state in
   (* The note is the one part of this row whose width a workspace chooses: it
      is the path of the file the pane is reading. Everything else either
-     cannot give way or knows how to. The clock and the badge say whether the
-     screen is a live reading and have no way of saying they were shortened;
+     cannot give way or knows how to. The badge says whether the screen is a
+     live reading and has no way of saying it was shortened;
      the strip drops tabs and marks the cut. The note could do neither, so at
      eighty columns the row ran eighteen cells past the frame and the frame
      took them off the end -- the badge.
@@ -4075,16 +4195,22 @@ let config_pane_title ~cols ~name ?(reading = "") ?(note = "") ?(clock = "")
      cannot say it was cut that far; it has already spent its marks. *)
   let strip_floor = tab_strip_min_width (config_pane_tabs state) in
   if cells keys + strip_floor + cells tail > framed_inner_width cols then
+    (* The strip is what marks the pane the reader is on. Without it the path
+       says so, unless the caller's path already goes further than the pane. *)
     let active_name =
-      config_pane_tabs state
-      |> List.find_map (fun (label, active, _) -> if active then Some label else None)
-      |> Option.value ~default:name
-      |> fun label -> screen_title (" " ^ label)
+      match path with
+      | _ :: _ -> name
+      | [] ->
+          here_path state
+            ~path:
+              (config_pane_tabs state
+               |> List.filter_map (fun (label, active, _) ->
+                      if active then Some label else None))
     in
     let badge = surface_connection_badge state
         ~width:(max 0 (framed_inner_width cols - cells active_name - cells "  ")) in
     detail_heading ~cols ~lead:(Lead_text active_name) ~id:""
-      ~after:[piece reading; piece keys; piece note; piece clock] ~tail:badge
+      ~after:[piece reading; piece keys; piece note] ~tail:badge
   else
   (* What the title gives way with is its tail: the reading first, and then
      the name whole. [config_pane_title_head] owns that order. *)
@@ -4193,7 +4319,10 @@ let help_lines ~width (state : state) =
         (String.length title - String.length Masc_tui_keys.here_marker)
     else title
   in
-  let section (title, entries) =
+  (* A section's heading and each key's rows, a wrapped sentence kept with
+     its key so a caller that parts the section does not part a key from the
+     end of its own sentence. *)
+  let section_parts (title, entries) =
     let is_current =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
     in
@@ -4215,8 +4344,8 @@ let help_lines ~width (state : state) =
        themselves -- sat on neighbouring rows looking like the same key. The
        column already sets the key apart, and the footer and the slash
        commands below draw theirs without brackets. *)
-    header_line
-    :: List.concat_map
+    ( header_line
+    , List.map
          (fun (key, action) ->
            (* Padded in cells, not bytes. [%-*s] counts bytes, and the five
               legend sections put a glyph in this column, and a glyph is one
@@ -4238,8 +4367,11 @@ let help_lines ~width (state : state) =
                   key_cell Ansi.reset)
              ~lead_cells:(2 + Message_layout.display_width key_cell + 1)
              ~column:(2 + help_key_cells + 1) action)
-         entries
-    @ [ "" ]
+         entries )
+  in
+  let section titled =
+    let header_line, entry_rows = section_parts titled in
+    (header_line :: List.concat entry_rows) @ [ "" ]
   in
   let commands =
     List.filter
@@ -4308,7 +4440,14 @@ let help_lines ~width (state : state) =
        with
        | [] -> slash_commands
        | first :: rest ->
-           section first @ slash_commands @ List.concat_map section rest)
+           if Masc_tui_help.shows_everything state.help_filter state.help_scope
+           then section first @ slash_commands @ List.concat_map section rest
+           else
+             (* The reader's own screen and nothing behind it. The sections
+                after it are another screen's keys, and they followed the
+                first with no line between a reader could stop at. *)
+             let header_line, entry_rows = section_parts first in
+             Masc_tui_help.one_section ~cols ~heading:header_line entry_rows)
   in
   match rows with
   | _ :: _ -> rows
@@ -6191,16 +6330,13 @@ let answering_preview_rows = 3
 
 (* The two-pane surfaces -- Code and Resources -- opened on their list pane's
    header ("▸ /", "▸ Resources") with no row above it. Every other surface
-   opens on its name, the clock and the connection badge, and the badge is the
+   opens on its name and the connection badge, and the badge is the
    row that says the server has gone; on these two nothing did. The title row
    sits above both panes, so each pane gives up one row to it. *)
 let pane_surface_title_rows = 1
 
-let pane_surface_title (state : state) ~cols ~name =
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  surface_title_row ~cols state ~lead:(screen_title (" MASC " ^ name))
-    ~readings:
-      [ Printf.sprintf "  %02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec ]
+let pane_surface_title (state : state) ~cols ~path =
+  here_row ~cols state ~path ~readings:[] ~position:None
 
 (* The row between the strip and the title, then the title. Every other
    surface draws that row first -- a gap on its own, the box's top edge beside
@@ -6210,9 +6346,9 @@ let pane_surface_title (state : state) ~cols ~name =
    than on every other screen, and the heading read as a second, detached
    block. Beside the other pane the list's box draws its top edge on that row,
    so a split frame keeps it there. The row count is the same either way. *)
-let pane_surface_header buf cols (state : state) ~name ~split =
+let pane_surface_header buf cols (state : state) ~path ~split =
   if not split then box_top buf cols;
-  box_line buf cols (pane_surface_title state ~cols ~name)
+  box_line buf cols (pane_surface_title state ~cols ~path)
 
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)
@@ -6272,11 +6408,6 @@ let studio_panel ~width ~title ~lines =
       Theme.recede () ^ "│ " ^ Ansi.reset ^ fit_width line inner
       ^ Theme.recede () ^ " │" ^ Ansi.reset) lines
   @ [ border "└" "┘" ]
-
-let lane_run_clock started_at =
-  let tm = Unix.localtime started_at in
-  Printf.sprintf "%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 let detail_heading_rows ~first lines =
   let heading =

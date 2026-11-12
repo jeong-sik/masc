@@ -70,13 +70,13 @@ module Server_routes_http_runtime = Server_routes_http_runtime
 module Server_startup_takeover = Server_startup_takeover
 
 (** Main server loop *)
-let run_server ~sw ~runtime_sw ~env ~address ~port ~base_path ~input_base_path ~on_ready ~accept_store_quarantine =
+let run_server ~sw ~runtime_sw ~env ~address ~port ~judged ~input_base_path ~on_ready ~accept_store_quarantine =
   (* Service fibers attach to the session switch. Graceful shutdown fails
      that switch after the signal handler finishes its phases. Codec workers
      belong to the outer runtime switch, so they remain available until every
      cancelled service has finished its journal cleanup. *)
   try
-    Server_runtime_bootstrap.run ~sw ~runtime_sw ~env ~address ~port ~base_path
+    Server_runtime_bootstrap.run ~sw ~runtime_sw ~env ~address ~port ~judged
       ~input_base_path ~on_ready ~accept_store_quarantine ~make_routes:Server_routes_http.make_routes_with_transport
       ~make_request_handler:Server_http_ingress.http1_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
@@ -85,9 +85,7 @@ let run_server ~sw ~runtime_sw ~env ~address ~port ~base_path ~input_base_path ~
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Log.Server.error
-      "[main] keeper bootstrap failed; refusing to continue without keepers: %s"
-      (Printexc.to_string exn);
+    Log.Server.error "[main] the server stopped with an exception: %s" (Printexc.to_string exn);
     raise exn
 
 (** CLI options *)
@@ -311,6 +309,97 @@ let acquire_base_path_lock ~previous_owner ~lease_root base_path =
            (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
+(* The startup work of a single user, under the BasePath lease and before a
+   Keeper starts: three passes delete files (retained checkpoints, checkpoint
+   objects, the settled archive) and one only counts (original request
+   bodies). It takes the judgment of the boot and reads the base path out of
+   it, so it runs neither before the judgment nor on another base path. It
+   does nothing for the account server, which starts no Keeper and writes
+   none of this state, and a boot that the judgment refuses does not reach
+   it. *)
+let sweep_single_user_state (judged : Server_runtime_bootstrap.judged) =
+  match judged.Server_runtime_bootstrap.booted with
+  | Authz_boot_mode_read.Multi_account (_ : Authz_boot_mode_read.multi_account) -> ()
+  | Authz_boot_mode_read.Single_user single_user ->
+    let canonical_base_path = Authz_boot_mode_read.single_user_base_path single_user in
+    (* The BasePath writer lease is held and no keeper has started, so no
+       retention is between writing its file and committing the execution that
+       names it. *)
+    (let runtime_root =
+       (Workspace.backend_config_for canonical_base_path).Backend_types.base_path
+     in
+     (* Optional cleanup: an exception from it is logged, never a failed boot. *)
+     (match Masc.Keeper_retained_checkpoint_sweep.run ~runtime_root with
+      | exception exn ->
+        Log.Server.warn "[Startup] retained checkpoint sweep raised: %s"
+          (Printexc.to_string exn)
+      | Error error ->
+        Log.Server.warn "[Startup] retained checkpoint sweep skipped: %s"
+          (Masc.Keeper_retained_checkpoint_sweep.error_to_string error)
+      | Ok { live_references; removed; removed_bytes; failures } ->
+        Log.Server.info
+          "[Startup] retained checkpoint sweep: removed=%d bytes=%d live_references=%d failures=%d"
+          removed removed_bytes live_references (List.length failures);
+        List.iter
+          (fun failure -> Log.Server.warn "[Startup] retained checkpoint sweep: %s" failure)
+          failures);
+     (* After the retained sweep, so the accepted checkpoints it removed are no
+        longer roots. Optional cleanup, logged as the one above. *)
+     let started = Unix.gettimeofday () in
+     match
+       Masc.Keeper_checkpoint_object_sweep.run ~runtime_root
+         ~journal_inputs_dir:(Keeper_journal_preparation.input_directories canonical_base_path)
+         ~journal_input_head:Keeper_journal_preparation.input_checkpoint_basename
+     with
+     | exception exn ->
+       Log.Server.warn "[Startup] checkpoint object sweep raised: %s" (Printexc.to_string exn)
+     | Error error ->
+       Log.Server.warn "[Startup] checkpoint object sweep skipped: %s"
+         (Masc.Keeper_checkpoint_object_sweep.error_to_string error)
+     | Ok { sessions; roots; kept; removed; removed_bytes; failures } ->
+       Log.Server.info
+         "[Startup] checkpoint object sweep: sessions=%d roots=%d kept=%d removed=%d bytes=%d failures=%d elapsed_s=%.3f"
+         sessions roots kept removed removed_bytes (List.length failures)
+         (Unix.gettimeofday () -. started);
+       List.iter
+         (fun failure -> Log.Server.warn "[Startup] checkpoint object sweep: %s" failure)
+         failures);
+    (* The process lease is held and no original-request writer has started. *)
+    let original_inventory_started = Unix.gettimeofday () in
+    let original_inventory_elapsed () = max 0. (Unix.gettimeofday () -. original_inventory_started) in
+    (match Masc.Lane_addon_original_body_inventory.run_at_startup ~base_path:canonical_base_path with
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception _ ->
+       Log.Server.warn "[Startup] original request body inventory unavailable elapsed_s=%.3f"
+         (original_inventory_elapsed ())
+     | Error error ->
+       Log.Server.warn "[Startup] original request body inventory unavailable elapsed_s=%.3f: %s"
+         (original_inventory_elapsed ()) (Masc.Lane_addon_original_body_inventory.error_to_string error)
+     | Ok report ->
+       let message = Printf.sprintf
+         "[Startup] original request body inventory: live_unprotected_files=%d live_unprotected_logical_bytes=%Ld protected_digests=%d elapsed_s=%.3f"
+         report.unprotected_files report.unprotected_logical_bytes report.protected_digests
+         (original_inventory_elapsed ()) in
+       if report.unprotected_files > 0 then Log.Server.warn "%s" message else Log.Server.info "%s" message);
+    (* RFC-0498 layer three a: the settled-archive pass deletes under the same
+       lease, before any settle can run. *)
+    let sweep_started = Unix.gettimeofday () in
+    (match Server_settled_archive_sweep.run_at_startup ~base_path:canonical_base_path with
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn ->
+       Log.Server.warn "[Startup] settled archive sweep unavailable elapsed_s=%.3f: %s"
+         (Unix.gettimeofday () -. sweep_started) (Printexc.to_string exn)
+     | Error error ->
+       Log.Server.warn "[Startup] %s elapsed_s=%.3f"
+         (Server_settled_archive_sweep.error_to_string error) (Unix.gettimeofday () -. sweep_started)
+     | Ok report ->
+       Log.Server.info
+         "[Startup] settled archive sweep: live_records=%d named_ids=%d kept_records=%d removed_records=%d removed_record_bytes=%Ld removed_bodies=%d removed_body_bytes=%Ld elapsed_s=%.3f"
+         report.live_records report.named_ids report.kept_records report.removed_records
+         report.removed_record_bytes report.removed_bodies report.removed_body_bytes
+         (Unix.gettimeofday () -. sweep_started))
+;;
+
 (* [prepare_identity] runs in the process that serves, after the runtime events
    step: that step may exec this binary again, and the work done before it is
    done twice. Hashing the executable and probing the repository belong to the
@@ -427,11 +516,6 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
           (Masc.Shutdown.config_error_to_string error);
         exit 1
   in
-  (* Decouple console mirror writes from the Eio domain before any keeper
-     boots: with fd 2 on a pty, a full pty buffer (scrollback/copy-mode)
-     blocks write(2) outside the scheduler and halts the whole fleet
-     (#20684, 2026-06-10 live stall). *)
-  Console_sink.start ();
   if stripped_base_path <> ""
      && String.equal (Filename.basename stripped_base_path) Common.masc_dirname
   then
@@ -447,91 +531,61 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
   let log_dir = Filename.concat masc_dir "logs" in
   Fs_compat.mkdir_p log_dir;
   Log.Ring.init_file_sink log_dir;
-  (* Before any keeper boots, as for the console mirror above: the JSONL
+  (* Before any keeper boots, as for the console mirror below: the JSONL
      append and flush move to one OS thread, so a slow write() no longer
      stops the producing domain. They were the main thread's largest
      blocking call after #46467 (#46410). *)
   Log.Ring.start_writer ();
   Log.Ring.cleanup_old_files log_dir;
-  (* The BasePath writer lease is held and no keeper has started, so no
-     retention is between writing its file and committing the execution that
-     names it. *)
-  (let runtime_root =
-     (Workspace.backend_config_for canonical_base_path).Backend_types.base_path
-   in
-   (* Optional cleanup: an exception from it is logged, never a failed boot. *)
-   (match Masc.Keeper_retained_checkpoint_sweep.run ~runtime_root with
+  (* HIGH-RISK-UNREVIEWED: the account mode is judged here, once per boot.
+     The lease is held, the log sinks are up, and nothing that belongs to one
+     kind of server has run. [Authz_boot_mode_read.boot] is to be called
+     inside an Eio event loop (its interface), so the judgment runs in a loop
+     of its own, which ends before the startup work of a single user and
+     before the loop of the server. Only values leave it: no open file and
+     no lock crosses to the loop of the server.
+
+     A refusal and an exception both end the boot with a [FATAL] record and
+     exit 1, as they did when the judgment ran inside the loop of the
+     server. An exception left to escape from here would reach the command
+     line parser, which prints it and exits 125 with no log record. The
+     console mirror has not started, so the caller writes the line to the
+     console before the process exits; the mirror drains nothing at exit.
+
+     The handlers of SIGTERM and SIGINT are installed inside the loop of the
+     server. A signal that arrives during the judgment or the startup work
+     ends the process by the default action, as it always did during the
+     startup work. *)
+  let judged =
+    match
+      Eio_main.run (fun _env ->
+        Server_runtime_bootstrap.judge ~lease:base_path_lease ~base_path:canonical_base_path)
+    with
+    | Ok judged -> judged
+    | Error refusal ->
+      Log.Server.error "[FATAL] %s" (Server_runtime_bootstrap.judge_refusal_to_string refusal);
+      exit 1
     | exception exn ->
-      Log.Server.warn "[Startup] retained checkpoint sweep raised: %s"
-        (Printexc.to_string exn)
-    | Error error ->
-      Log.Server.warn "[Startup] retained checkpoint sweep skipped: %s"
-        (Masc.Keeper_retained_checkpoint_sweep.error_to_string error)
-    | Ok { live_references; removed; removed_bytes; failures } ->
-      Log.Server.info
-        "[Startup] retained checkpoint sweep: removed=%d bytes=%d live_references=%d failures=%d"
-        removed removed_bytes live_references (List.length failures);
-      List.iter
-        (fun failure -> Log.Server.warn "[Startup] retained checkpoint sweep: %s" failure)
-        failures);
-   (* After the retained sweep, so the accepted checkpoints it removed are no
-      longer roots. Optional cleanup, logged as the one above. *)
-   let started = Unix.gettimeofday () in
-   match
-     Masc.Keeper_checkpoint_object_sweep.run ~runtime_root
-       ~journal_inputs_dir:(Keeper_journal_preparation.input_directories canonical_base_path)
-       ~journal_input_head:Keeper_journal_preparation.input_checkpoint_basename
-   with
-   | exception exn ->
-     Log.Server.warn "[Startup] checkpoint object sweep raised: %s" (Printexc.to_string exn)
-   | Error error ->
-     Log.Server.warn "[Startup] checkpoint object sweep skipped: %s"
-       (Masc.Keeper_checkpoint_object_sweep.error_to_string error)
-   | Ok { sessions; roots; kept; removed; removed_bytes; failures } ->
-     Log.Server.info
-       "[Startup] checkpoint object sweep: sessions=%d roots=%d kept=%d removed=%d bytes=%d failures=%d elapsed_s=%.3f"
-       sessions roots kept removed removed_bytes (List.length failures)
-       (Unix.gettimeofday () -. started);
-     List.iter
-       (fun failure -> Log.Server.warn "[Startup] checkpoint object sweep: %s" failure)
-       failures);
-  (* The process lease is held and no original-request writer has started. *)
-  let original_inventory_started = Unix.gettimeofday () in
-  let original_inventory_elapsed () = max 0. (Unix.gettimeofday () -. original_inventory_started) in
-  (match Masc.Lane_addon_original_body_inventory.run_at_startup ~base_path:canonical_base_path with
-   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-   | exception _ ->
-     Log.Server.warn "[Startup] original request body inventory unavailable elapsed_s=%.3f"
-       (original_inventory_elapsed ())
-   | Error error ->
-     Log.Server.warn "[Startup] original request body inventory unavailable elapsed_s=%.3f: %s"
-       (original_inventory_elapsed ()) (Masc.Lane_addon_original_body_inventory.error_to_string error)
-   | Ok report ->
-     let message = Printf.sprintf
-       "[Startup] original request body inventory: live_unprotected_files=%d live_unprotected_logical_bytes=%Ld protected_digests=%d elapsed_s=%.3f"
-       report.unprotected_files report.unprotected_logical_bytes report.protected_digests
-       (original_inventory_elapsed ()) in
-     if report.unprotected_files > 0 then Log.Server.warn "%s" message else Log.Server.info "%s" message);
-  (* RFC-0498 layer three a: the settled-archive pass deletes under the same
-     lease, before any settle can run. *)
-  let sweep_started = Unix.gettimeofday () in
-  (match Server_settled_archive_sweep.run_at_startup ~base_path:canonical_base_path with
-   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-   | exception exn ->
-     Log.Server.warn "[Startup] settled archive sweep unavailable elapsed_s=%.3f: %s"
-       (Unix.gettimeofday () -. sweep_started) (Printexc.to_string exn)
-   | Error error ->
-     Log.Server.warn "[Startup] %s elapsed_s=%.3f"
-       (Server_settled_archive_sweep.error_to_string error) (Unix.gettimeofday () -. sweep_started)
-   | Ok report ->
-     Log.Server.info
-       "[Startup] settled archive sweep: live_records=%d named_ids=%d kept_records=%d removed_records=%d removed_record_bytes=%Ld removed_bodies=%d removed_body_bytes=%Ld elapsed_s=%.3f"
-       report.live_records report.named_ids report.kept_records report.removed_records
-       report.removed_record_bytes report.removed_bodies report.removed_body_bytes
-       (Unix.gettimeofday () -. sweep_started));
-  (* Only the server samples. Sampling starts before [Eio_main.run] so the
-     executor pool, which the main domain spawns while sampling, shares the
-     profile and the boot-time loads are in the tables. The rate is a tenth
+      let bt = Printexc.get_backtrace () in
+      Log.Server.error "[FATAL] The account mode judgment raised: %s" (Printexc.to_string exn);
+      if bt <> "" then Log.Server.error "[FATAL] Backtrace:\n%s" bt;
+      exit 1
+  in
+  (* Decouple console mirror writes from the Eio domain before any keeper
+     boots: with fd 2 on a pty, a full pty buffer (scrollback/copy-mode)
+     blocks write(2) outside the scheduler and halts the whole fleet
+     (#20684, 2026-06-10 live stall). It starts after the judgment so that
+     the line of a refused boot is on the console when the process exits:
+     of 24 refused boots measured with the mirror already running, three
+     ended before the mirror wrote the line. *)
+  Console_sink.start ();
+  sweep_single_user_state judged;
+  (* Only the server samples. Sampling starts before the [Eio_main.run] of
+     the server so the executor pool, which the main domain spawns while
+     sampling, shares the profile and the boot-time loads of the server loop
+     are in the tables. It starts after the judgment and after the startup
+     work of a single user, so what those two allocate is not in the tables,
+     the judged value that the server keeps included. The rate is a tenth
      of the one the OCaml manual reports as having no visible effect.
      GET /api/v1/diagnostics/memprof reads the tables. *)
   Alloc_profile.start ~sampling_rate:Alloc_profile.default_sampling_rate;
@@ -717,7 +771,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
                 ~env
                 ~address:bind_address
                 ~port
-                ~base_path:canonical_base_path
+                ~judged
                 ~input_base_path:raw_base_path
                 ~on_ready
                 ~accept_store_quarantine)
@@ -1180,10 +1234,10 @@ let auth_cmd =
            it out of the request URL. Only a digest of the token is written. \
            The invitation works once and expires after 24 hours."
       ; `P
-          ("This build does not serve multi-account yet: once the command \
-            succeeds, a server stops at boot on the workspace, and no command \
-            undoes the activation; "
-           ^ Authz_boot_mode_read.single_user_again
+          ("Once the command succeeds, "
+           ^ Masc_cli_auth.account_server_line
+           ^ ". "
+           ^ String.capitalize_ascii Authz_boot_mode_read.turn_off_line
            ^ ".")
       ]
     in
@@ -1222,6 +1276,31 @@ let auth_cmd =
       Term.(
         const (fun base_path ->
           Masc_cli_auth.invite ~base_path:(Env_config.normalize_masc_base_path_input base_path))
+        $ base_path)
+  in
+  let off_cmd =
+    let doc = "Turn the accounts of an activated workspace off while no server runs on it." in
+    let man =
+      [ `S Manpage.s_description
+      ; `P
+          "Writes an Off mode event to the authorization log and the external \
+           store. The log must have made Multi_account, and the external store \
+           must match it; config.json may ask for anything. The command takes \
+           the workspace lease, so stop the server first."
+      ; `P
+          "Once config.json does not ask for Multi_account (take account_mode \
+           out), a server boots a single user. The records of the accounts stay \
+           read-only: no turn runs for a Keeper or on a Runtime of the log, and \
+           no client starts on a home under .masc/accounts. A config.json that \
+           asks for Multi_account again is a reactivation, which this build \
+           refuses."
+      ]
+    in
+    Cmd.v
+      (Cmd.info "off" ~doc ~man)
+      Term.(
+        const (fun base_path ->
+          Masc_cli_auth.off ~base_path:(Env_config.normalize_masc_base_path_input base_path))
         $ base_path)
   in
   let preview_cmd =
@@ -1320,7 +1399,7 @@ let auth_cmd =
   in
   Cmd.group
     (Cmd.info "auth" ~doc)
-    [ bootstrap_cmd; invite_cmd; preview_cmd; service_credential_cmd ]
+    [ bootstrap_cmd; invite_cmd; off_cmd; preview_cmd; service_credential_cmd ]
 
 let login_cmd =
   let doc =

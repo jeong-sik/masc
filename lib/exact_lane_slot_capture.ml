@@ -51,15 +51,25 @@ let cli_capture ?observe () =
     record [Observation.cli ~slot_id ~started_at:(Some at) ~finished_at:None
       ~generation_dispatched:true ~outcome:Unresolved]) !started in
   observe,finish,failed,interrupted
-let walk_cli ?runner ?observe ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate ~on_failure () =
+(* One capture for both walks. A walk that stops before a dispatch leaves no
+   visit for the stopped slot: no client was invoked for it. *)
+let captured_walk ?observe ~on_failure walk =
   let observe,finish,failed,interrupted=cli_capture ?observe () in
-  match Cli.walk ?runner ~observe ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate
-    ~on_failure:(fun failure -> failed failure; on_failure failure) () with
+  match walk ~observe ~on_failure:(fun failure -> failed failure; on_failure failure) with
   | Ok (slot,value) -> finish ~slot_id:slot ~outcome:Accepted; Ok (slot,value)
-  | Error failures -> Error failures
+  | Error _ as ended -> ended
   | exception exn ->
     let backtrace=Printexc.get_raw_backtrace () in
     interrupted (); Printexc.raise_with_backtrace exn backtrace
+let walk_cli ?runner ?observe ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate ~on_failure () =
+  captured_walk ?observe ~on_failure (fun ~observe ~on_failure ->
+    Cli.walk ?runner ~observe ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt ~validate
+      ~on_failure ())
+let walk_cli_gated ?runner ?observe ~before_dispatch ~base_dir ~cli_slots ~system_prompt ~requirement ~prompt
+    ~validate ~on_failure () =
+  captured_walk ?observe ~on_failure (fun ~observe ~on_failure ->
+    Cli.walk_gated ?runner ~observe ~before_dispatch ~base_dir ~cli_slots ~system_prompt ~requirement
+      ~prompt ~validate ~on_failure ())
 let run_cli ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () =
   let observe,finish,failed,interrupted=cli_capture ?observe () in
   match Cli.run ?runner ~observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () with

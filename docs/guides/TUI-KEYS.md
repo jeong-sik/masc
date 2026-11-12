@@ -4,8 +4,8 @@
 
 # TUI key reference
 
-Press `?` in the TUI to read this sheet on screen; the surface you are
-on is the first section there. Every footer row names `?:help` where the
+Press `?` in the TUI to read the keys of the surface you are on, and
+`?` again to read this whole sheet. Every footer row names `?:help` where the
 key answers. In a chat, `?` opens the sheet only while the draft is
 empty -- once a sentence has started it is an ordinary question mark.
 The command palette is `:`.
@@ -21,7 +21,7 @@ The command palette is `:`.
 | `:` | command palette |
 | `;` | agenda: what is coming, and who is waiting on you; Enter opens a row |
 | `@` | answering: who is mid-turn or just finished; Enter opens their chat |
-| `?` | this help; `/` filters its keys and commands |
+| `?` | the keys of this screen; `?` again lists every screen, the global keys and the slash commands, and `/` finds a key or a command among them all |
 | `&` | Collab: watch MSX/DOS and manage play links (also `:` go Collab) |
 | `Ctrl-B` | show or hide the Keeper roster; it starts hidden and the choice persists across navigation and resizing |
 | `Ctrl-L` | cycle the Activity pane narrow, wide or hidden; the wheel over the pane scrolls the full list; a press picks a keeper, a second press opens its chat; /activity order turns the order of its calls, /activity scroll moves the pane |
@@ -506,6 +506,14 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `j/k` | in a lane's run list: move the run cursor |
+| `Right / Enter` | in a lane's run list: open the run's prompt and output |
+| `>` | in a lane's run list: load the next retained-run page from the server |
+| `Left / Esc` | in a lane's run list: back to the lane overview |
+| `j/k` | in a run's detail: scroll Input and Output together |
+| `PgUp/PgDn` | in a run's detail: page both evidence panes |
+| `[ / ]` | in a run's detail: step to the run before or after this one in the list |
+| `Left / Esc` | in a run's detail: back to the run list |
 | `d` | in Librarian preflight run detail: expand or fold model, probabilities and original input/output evidence |
 
 ## Features & plugins / Clients
@@ -566,7 +574,7 @@ count is drawn beyond the available space.
 | `[ / ]` | while a detail is open, step to the row before or after it |
 | `< / >` | step either list a page at a time; one page holds two hundred rows, so a shorter queue arrives whole |
 | `e / E` | read one submitted evidence item at a time |
-| `i` | 증거 목록 접기/펼치기 |
+| `i` | fold / unfold the evidence list |
 | `o` | download the retained copy and open it with a local application |
 | `s` | save this exact evidence item privately on this machine; its local path stays in the detail |
 | `a / x` | a approves the row under the cursor (press twice); x rejects with a reason ($EDITOR form) |

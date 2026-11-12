@@ -1,9 +1,16 @@
 module Upgrade = Server_upgrade_preparation
 
-(* What holds the workspace before anything is asked to stop. *)
+(* What holds the workspace before anything is asked to stop. The server of a
+   single user says its workspace in [/health] and is asked to stop with the
+   credential of its admin. The account server of a multi-account
+   installation says nothing of the workspace to the network: the kernel says
+   whether the owner of this workspace announces the port
+   ([Upgrade.account_server]), and it is asked to stop with the authority of
+   the host ([Upgrade.stop_account_server]). *)
 type incumbent =
   | Nothing_running
   | This_workspace of { version : string; pid : int option }
+  | This_account_server of { version : string option; pid : int }
 
 type refusal =
   | Host_not_an_address of string
@@ -11,6 +18,8 @@ type refusal =
   | Other_workspace of string
   | Port_held_by_unknown_process
   | Owner_without_answer
+  | Account_server_on_another_port of { pid : int; port : int }
+  | Account_server_without_answer of { pid : int }
   | Owner_unverifiable of string
   | Stop_refused of Upgrade.error
   | Log_unopenable of { path : string; reason : string }
@@ -20,15 +29,31 @@ type watched =
   | Replacement_ready
   | Replacement_exited of Unix.process_status option
 
+(* One look at the replacement: ready, or what there is to say while waiting. *)
+type look =
+  | Ready
+  | Waiting of string option
+
 (* How often the replacement's readiness answer is read again. Each read uses
-   its own client pool (see [fresh_get]), so this alone bounds how late a
-   ready server is noticed; the watch itself has no deadline. *)
+   its own client pool (see [fresh_get]) and ends within [answer_timeout_s],
+   so the two bound how late a ready server is noticed; the watch itself has
+   no deadline. *)
 let readiness_poll_interval_s = 0.25
 
 (* How much of the replacement's log is shown when it exits before ready. *)
 let failure_log_lines = 20
 
 let loopback_url port path = Masc_network_defaults.masc_http_loopback_origin ~port ^ path
+
+(* How long one answer of a loopback server is waited for. A server that
+   accepts the connection and then says nothing, because it is stopped or
+   stuck, would otherwise hold this command for ever: the client arms a
+   window only when it is given one. *)
+let answer_timeout_s = Masc_http_client.default_request_timeout_sec
+
+let get ~clock ~port path =
+  Masc_http_client.get_sync ~clock ~timeout_sec:answer_timeout_s ~headers:[]
+    ~url:(loopback_url port path) ()
 
 (* Restart reaches the running server and its replacement on 127.0.0.1, as
    setup does, so a replacement bound anywhere else would never be seen. A
@@ -51,7 +76,7 @@ let fresh_get ~clock ~port path =
   | Some env ->
     Eio.Switch.run (fun sw ->
       Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
-        Masc_http_client.get_sync ~clock ~headers:[] ~url:(loopback_url port path) ()))
+        get ~clock ~port path))
 
 let json_field name body =
   match Yojson.Safe.from_string body with
@@ -75,15 +100,13 @@ let stop_error_message = function
   | Closed -> "the owner check closed before the stop request"
   | Port_unavailable -> "the port could not be inspected"
 
-let observe ~clock ~run_dir ~base_path ~port =
-  match Masc_http_client.get_sync ~clock ~headers:[]
-          ~url:(loopback_url port Server_health_paths.full) () with
+let observe_single_user ~clock ~run_dir ~base_path ~port =
+  match get ~clock ~port Server_health_paths.full with
   | Ok (200, body) ->
     (match Upgrade.decode_health body with
      | Ok identity when String.equal identity.base_path base_path ->
        let pid =
-         match Masc_http_client.get_sync ~clock ~headers:[]
-                 ~url:(loopback_url port Server_health_paths.readiness) () with
+         match get ~clock ~port Server_health_paths.readiness with
          | Ok (_, body) -> answered_pid body
          | Error _ -> None
        in
@@ -98,6 +121,35 @@ let observe ~clock ~run_dir ~base_path ~port =
      | Ok Upgrade.Owner_draining -> Error Owner_without_answer
      | Ok Upgrade.Port_busy -> Error Port_held_by_unknown_process
      | Error error -> Error (Owner_unverifiable (stop_error_message error)))
+
+(* The kernel is asked first: which stop a server gets is decided by what its
+   owner announces, not by what the port answers. The owner of the lease that
+   announces the port is an account server; its answer on that port is read
+   only to see that it serves and to name its version. An owner that
+   announces nothing is the server of a single user, and with no owner the
+   workspace is nobody's: [/health] says which.
+
+   The order keeps an answer of the network from choosing the stop. Were the
+   port asked first, a listener there that names this workspace would send
+   the command through the sign-in and the bearer of a single user while an
+   account server owns the workspace.
+
+   The price is paid by a command that ends in a refusal: reading the owner
+   makes the private lease directory and an empty lease file when they are
+   missing ([Upgrade.account_server]), the ones [masc start] makes. *)
+let observe ~clock ~run_dir ~base_path ~port =
+  match Upgrade.account_server ~run_dir ~base_path ~port with
+  | Error unread ->
+    Error (Owner_unverifiable (Server_startup_takeover.owner_capture_error_to_string unread))
+  | Ok (Upgrade.Owner_announces_nothing | Upgrade.No_owner) ->
+    observe_single_user ~clock ~run_dir ~base_path ~port
+  | Ok (Upgrade.Account_server_on_another_port { pid; port = announced }) ->
+    Error (Account_server_on_another_port { pid; port = announced })
+  | Ok (Upgrade.Account_server_on_port { pid }) ->
+    (match get ~clock ~port Server_health_paths.health with
+     | Ok (200, body) ->
+       Ok (This_account_server { version = Server_accounts.health_version body; pid })
+     | Ok _ | Error _ -> Error (Account_server_without_answer { pid }))
 
 let refusal_message ~base_path ~port = function
   | Host_not_an_address host ->
@@ -116,6 +168,14 @@ let refusal_message ~base_path ~port = function
     Printf.sprintf "A process holds %s but does not answer on port %d, so it cannot be asked \
                     to stop. If it is shutting down, run restart again once it has exited; \
                     if it serves another port, pass that --port." base_path port
+  | Account_server_on_another_port { pid; port = announced } ->
+    Printf.sprintf "The account server of %s (pid %d) serves port %d, not port %d. Nothing \
+                    was stopped or started; pass --port %d."
+      base_path pid announced port announced
+  | Account_server_without_answer { pid } ->
+    Printf.sprintf "The account server of %s (pid %d) announces port %d and does not answer \
+                    there, so it was not asked to stop. If it is shutting down, run restart \
+                    again once it has exited." base_path pid port
   | Owner_unverifiable reason ->
     Printf.sprintf "The owner of %s could not be checked (%s). Nothing was stopped or started."
       base_path reason
@@ -179,15 +239,48 @@ let describe_answer ~child_pid = function
      | _, _, Some (`String error) -> Some (Printf.sprintf "answered %d: %s" status error)
      | _ -> Some (Printf.sprintf "answered %d" status))
 
-(* The replacement answers on the port the predecessor drains on, so a 200 only
-   counts once it carries the replacement's own pid. *)
-let watch ~clock ~port (child : Posix_spawn_detached.t) =
+let readiness_answer = function
+  | Ok (200, body) ->
+    (match answered_pid body with
+     | Some pid -> Upgrade.Ready_named pid
+     | None -> Upgrade.Ready_unnamed)
+  | Ok ((_ : int), (_ : string)) | Error (_ : string) -> Upgrade.Not_ready
+
+(* Whether the 200 is the replacement's is [Upgrade.replacement_sighting]: by
+   the pid a single-user server says in the answer, or, for the probes of an
+   account server that say nothing of the process, by the holder of the
+   announcement lock of the port. The replacement takes that lock after the
+   last check that can stop its boot ([Server_accounts.run]).
+
+   The 200 is read on 127.0.0.1. A replacement bound to 0.0.0.0 can share
+   the port with a listener of another process on 127.0.0.1 where the host
+   allows both binds, and the answer is then that listener's: ready then
+   says that the replacement announced and that the port answers, not that
+   the replacement answered. *)
+let look ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
+  let answer = fresh_get ~clock ~port Server_health_paths.readiness in
+  match
+    Upgrade.replacement_sighting ~child_pid:child.pid (readiness_answer answer)
+      ~port_holder:(fun () ->
+        Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port)
+  with
+  | Upgrade.Replacement_serves -> Ready
+  | Upgrade.Another_process_announces { pid } ->
+    Waiting (Some (Printf.sprintf "pid %d holds the announcement of port %d" pid port))
+  | Upgrade.Announcement_unreadable rejection ->
+    Waiting
+      (Some
+         ("the owner lease cannot be read: "
+          ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection))
+  | Upgrade.Another_server_answers { pid = (_ : int) }
+  | Upgrade.Nobody_announces
+  | Upgrade.No_ready_answer -> Waiting (describe_answer ~child_pid:child.pid answer)
+
+let watch ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
   let rec ready last =
-    let answer = fresh_get ~clock ~port Server_health_paths.readiness in
-    match answer with
-    | Ok (200, body) when answered_pid body = Some child.pid -> Replacement_ready
-    | Ok _ | Error _ ->
-      let note = describe_answer ~child_pid:child.pid answer in
+    match look ~clock ~run_dir ~base_path ~port child with
+    | Ready -> Replacement_ready
+    | Waiting note ->
       (match note with
        | Some text when note <> last -> Printf.printf "  %s\n%!" text
        | Some _ | None -> ());
@@ -208,7 +301,10 @@ let build_summary ~clock ~port =
           Printf.sprintf "masc %s (%s)" version
             (if String.length commit > 11 then String.sub commit 0 11 else commit)
         | _ -> "masc")
-     | _ -> "masc")
+     | _ ->
+       (match Server_accounts.health_version body with
+        | Some version -> Printf.sprintf "the account server masc %s" version
+        | None -> "masc"))
   | Ok _ | Error _ -> "masc"
 
 let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
@@ -231,6 +327,14 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
       let named = match pid with Some pid -> Printf.sprintf " (pid %d)" pid | None -> "" in
       Printf.printf "Asked masc %s%s on port %d to stop.\n%!" version named port;
       Ok [ "--wait-for-previous-owner" ]
+    | This_account_server { version; pid } ->
+      let* () =
+        Upgrade.stop_account_server ~run_dir ~base_path ~port
+        |> Result.map_error (fun error -> Stop_refused error)
+      in
+      let named = match version with Some version -> " masc " ^ version | None -> "" in
+      Printf.printf "Asked the account server%s (pid %d) on port %d to stop.\n%!" named pid port;
+      Ok [ "--wait-for-previous-owner" ]
   in
   let argv =
     (Sys.executable_name :: "start" :: wait_flag)
@@ -248,7 +352,7 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
                  Waiting for it to become ready; Ctrl-C stops watching, not the server.\n%!"
     pid log_path;
   let started_at = Eio.Time.now clock in
-  match watch ~clock ~port child with
+  match watch ~clock ~run_dir ~base_path ~port child with
   | Replacement_ready ->
     Printf.printf "Ready after %.1f s: %s, pid %d, serving %s on port %d.\n%!"
       (Eio.Time.now clock -. started_at) (build_summary ~clock ~port)

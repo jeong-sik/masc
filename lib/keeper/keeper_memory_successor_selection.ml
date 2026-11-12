@@ -33,13 +33,18 @@ let candidate_to_json (candidate : Current.successor_recall_candidate) =
       "relation",`String (match step.relation with
         | Current.Program_revision -> "revision"
         | Current.Program_absorption -> "absorption")] in
-  `Assoc ["historical_source",Keeper_memory_os_types.fact_to_json candidate.binding.source_fact;
+  (* A candidate with no program step omits the field, so requests for it stay
+     byte-identical to the wire captured before the field existed. *)
+  let program_steps = match candidate.program_steps with
+    | [] -> []
+    | steps -> ["ordered_program_steps",`List (List.map program_step_to_json steps)] in
+  `Assoc (["historical_source",Keeper_memory_os_types.fact_to_json candidate.binding.source_fact;
     "request_id",`String candidate.binding.candidate_id.request_id;
     "born_revision",`Int candidate.born_revision;
     "original_target",Keeper_memory_os_types.fact_to_json candidate.original_target;
     "current_target",Keeper_memory_os_types.fact_to_json candidate.target;
-    "committed_revision_path",`List (List.map Current.revision_evidence_to_json candidate.path);
-    "ordered_program_steps",`List (List.map program_step_to_json candidate.program_steps)]
+    "committed_revision_path",`List (List.map Current.revision_evidence_to_json candidate.path)]
+    @ program_steps)
 let load_guidance () =
   let open Result.Syntax in
   let render key = Prompt_registry.render_prompt_template key []

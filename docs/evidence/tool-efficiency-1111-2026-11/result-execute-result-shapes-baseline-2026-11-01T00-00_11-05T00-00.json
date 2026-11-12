@@ -1,0 +1,299 @@
+{
+  "calls": 70567,
+  "result_bytes": 154367016,
+  "gh_family_bytes": 89802657,
+  "gh_family_pct": 58.2,
+  "gh_api_bytes": 80366982,
+  "gh_api_with_jq_bytes": 61724772,
+  "gh_api_without_jq_bytes": 18642210,
+  "families": [
+    {
+      "family": "gh api",
+      "calls": 38305,
+      "result_bytes": 77813633,
+      "pct_of_execute_bytes": 50.4,
+      "median": 802,
+      "p90": 4825,
+      "max": 62631
+    },
+    {
+      "family": "git diff",
+      "calls": 2778,
+      "result_bytes": 12169848,
+      "pct_of_execute_bytes": 7.9,
+      "median": 1899.5,
+      "p90": 11791,
+      "max": 56394
+    },
+    {
+      "family": "git show",
+      "calls": 2744,
+      "result_bytes": 10983984,
+      "pct_of_execute_bytes": 7.1,
+      "median": 2838.0,
+      "p90": 9079,
+      "max": 28966
+    },
+    {
+      "family": "gh pr",
+      "calls": 4620,
+      "result_bytes": 8427637,
+      "pct_of_execute_bytes": 5.5,
+      "median": 698.0,
+      "p90": 4339,
+      "max": 60945
+    },
+    {
+      "family": "python3 -c",
+      "calls": 1799,
+      "result_bytes": 8077887,
+      "pct_of_execute_bytes": 5.2,
+      "median": 2919,
+      "p90": 11324,
+      "max": 52461
+    },
+    {
+      "family": "git grep",
+      "calls": 1397,
+      "result_bytes": 4076838,
+      "pct_of_execute_bytes": 2.6,
+      "median": 1667,
+      "p90": 7269,
+      "max": 16912
+    },
+    {
+      "family": "sed -n",
+      "calls": 1048,
+      "result_bytes": 3955925,
+      "pct_of_execute_bytes": 2.6,
+      "median": 2773.5,
+      "p90": 6882,
+      "max": 54993
+    },
+    {
+      "family": "bash -o",
+      "calls": 636,
+      "result_bytes": 2364516,
+      "pct_of_execute_bytes": 1.5,
+      "median": 2463.5,
+      "p90": 8893,
+      "max": 21929
+    },
+    {
+      "family": "gh run",
+      "calls": 1570,
+      "result_bytes": 2342403,
+      "pct_of_execute_bytes": 1.5,
+      "median": 650.0,
+      "p90": 2136,
+      "max": 64933
+    },
+    {
+      "family": "git -C",
+      "calls": 633,
+      "result_bytes": 1988471,
+      "pct_of_execute_bytes": 1.3,
+      "median": 1396,
+      "p90": 8331,
+      "max": 22052
+    },
+    {
+      "family": "grep -n",
+      "calls": 1072,
+      "result_bytes": 1860439,
+      "pct_of_execute_bytes": 1.2,
+      "median": 1072.0,
+      "p90": 3084,
+      "max": 55457
+    },
+    {
+      "family": "git -c",
+      "calls": 371,
+      "result_bytes": 1079816,
+      "pct_of_execute_bytes": 0.7,
+      "median": 1242,
+      "p90": 9181,
+      "max": 17381
+    },
+    {
+      "family": "bash scripts/review/approve-guard.sh",
+      "calls": 723,
+      "result_bytes": 860667,
+      "pct_of_execute_bytes": 0.6,
+      "median": 1248,
+      "p90": 1317,
+      "max": 1375
+    },
+    {
+      "family": "awk '/^diff",
+      "calls": 69,
+      "result_bytes": 831248,
+      "pct_of_execute_bytes": 0.5,
+      "median": 10711,
+      "p90": 24667,
+      "max": 44355
+    },
+    {
+      "family": "gh auth",
+      "calls": 707,
+      "result_bytes": 747219,
+      "pct_of_execute_bytes": 0.5,
+      "median": 728,
+      "p90": 1063,
+      "max": 17073
+    }
+  ],
+  "gh_api_endpoints": [
+    {
+      "endpoint": "pulls/N/reviews",
+      "filtered_with_jq": true,
+      "calls": 6029,
+      "result_bytes": 14076419,
+      "pct_of_execute_bytes": 9.1,
+      "median": 930,
+      "p90": 6385,
+      "max": 44417
+    },
+    {
+      "endpoint": "pulls/N",
+      "filtered_with_jq": true,
+      "calls": 8896,
+      "result_bytes": 11022212,
+      "pct_of_execute_bytes": 7.1,
+      "median": 676.0,
+      "p90": 2824,
+      "max": 33334
+    },
+    {
+      "endpoint": "pulls/N/files",
+      "filtered_with_jq": true,
+      "calls": 2092,
+      "result_bytes": 8484425,
+      "pct_of_execute_bytes": 5.5,
+      "median": 1733.0,
+      "p90": 10614,
+      "max": 61415
+    },
+    {
+      "endpoint": "pulls/N/reviews/N",
+      "filtered_with_jq": true,
+      "calls": 1663,
+      "result_bytes": 3186210,
+      "pct_of_execute_bytes": 2.1,
+      "median": 1958,
+      "p90": 3111,
+      "max": 29998
+    },
+    {
+      "endpoint": "issues/N/comments",
+      "filtered_with_jq": true,
+      "calls": 1363,
+      "result_bytes": 2819624,
+      "pct_of_execute_bytes": 1.8,
+      "median": 497,
+      "p90": 5475,
+      "max": 20016
+    },
+    {
+      "endpoint": "stacks/N",
+      "filtered_with_jq": true,
+      "calls": 1044,
+      "result_bytes": 2276290,
+      "pct_of_execute_bytes": 1.5,
+      "median": 1305.0,
+      "p90": 4050,
+      "max": 16695
+    },
+    {
+      "endpoint": "pulls/$n",
+      "filtered_with_jq": true,
+      "calls": 1386,
+      "result_bytes": 2185756,
+      "pct_of_execute_bytes": 1.4,
+      "median": 989.0,
+      "p90": 2630,
+      "max": 32746
+    },
+    {
+      "endpoint": "pulls/N",
+      "filtered_with_jq": false,
+      "calls": 261,
+      "result_bytes": 2097767,
+      "pct_of_execute_bytes": 1.4,
+      "median": 6903,
+      "p90": 16550,
+      "max": 33596
+    },
+    {
+      "endpoint": "pulls",
+      "filtered_with_jq": false,
+      "calls": 416,
+      "result_bytes": 2057691,
+      "pct_of_execute_bytes": 1.3,
+      "median": 3506.5,
+      "p90": 12488,
+      "max": 18607
+    },
+    {
+      "endpoint": "pulls/N/comments",
+      "filtered_with_jq": true,
+      "calls": 987,
+      "result_bytes": 1857573,
+      "pct_of_execute_bytes": 1.2,
+      "median": 426,
+      "p90": 5051,
+      "max": 28918
+    },
+    {
+      "endpoint": "pulls/N/reviews",
+      "filtered_with_jq": false,
+      "calls": 415,
+      "result_bytes": 1327145,
+      "pct_of_execute_bytes": 0.9,
+      "median": 3261,
+      "p90": 4690,
+      "max": 16991
+    },
+    {
+      "endpoint": "pulls/N/commits",
+      "filtered_with_jq": true,
+      "calls": 1012,
+      "result_bytes": 891636,
+      "pct_of_execute_bytes": 0.6,
+      "median": 752.0,
+      "p90": 1334,
+      "max": 16901
+    },
+    {
+      "endpoint": "pulls",
+      "filtered_with_jq": true,
+      "calls": 352,
+      "result_bytes": 878408,
+      "pct_of_execute_bytes": 0.6,
+      "median": 971.5,
+      "p90": 6300,
+      "max": 62631
+    },
+    {
+      "endpoint": "commits/main",
+      "filtered_with_jq": true,
+      "calls": 857,
+      "result_bytes": 790582,
+      "pct_of_execute_bytes": 0.5,
+      "median": 635,
+      "p90": 1141,
+      "max": 63391
+    },
+    {
+      "endpoint": "stacks/N",
+      "filtered_with_jq": false,
+      "calls": 89,
+      "result_bytes": 739916,
+      "pct_of_execute_bytes": 0.5,
+      "median": 4222,
+      "p90": 15228,
+      "max": 51706
+    }
+  ],
+  "rows_without_command_or_size": 703
+}

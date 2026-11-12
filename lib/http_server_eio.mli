@@ -433,6 +433,11 @@ module Router : sig
       and {!resolve} alike. A path registered twice has two rows here. *)
   val routes : t -> route list
 
+  (** A router of its own with the routes of this one. A registration that is
+      made on either router afterwards is not in the other: not in [routes],
+      not in [route_count] and not in {!resolve}. *)
+  val copy : t -> t
+
   (** The routes that dispatch can reach, in registration order. Dispatch uses
       the route registered last for a method and an exact path, and the newest
       route among equal prefixes, so a row that a later one replaced is left out,

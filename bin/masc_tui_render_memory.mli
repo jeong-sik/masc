@@ -46,24 +46,12 @@ type facts_reading =
       ; query_label : string
       }
 
-val facts_title :
-  ko:bool ->
-  cols:int ->
-  screen:string ->
-  keeper:string ->
-  reading:facts_reading ->
-  timestamp:string ->
-  badge:string ->
-  string
-(** The facts title row of a frame [cols] wide. Its total counts the current
+val facts_title_reading : ko:bool -> facts_reading -> string
+(** What the facts title reads beside its path. Its total counts the current
     filtered rows, including invalidation rows, rather than the stores' total
     knowledge. Category counts separately retain unknown store/fleet coverage.
-    The breakdown and the sort belong to the row under it, which this
-    module also draws. The title is the narrow line and the clock and the
-    connection badge sit at its end, so a fact spelled here and there goes off
-    the right edge. The clock and the badge are never shortened; the keeper's
-    name folds to its floor and the counts and filters are cut before the name
-    goes further ({!Masc_tui_ansi.detail_heading}). *)
+    The breakdown and the sort belong to the row under it, which this module
+    also draws. *)
 
 val storage_size : int -> string
 (** Observed rendered-knowledge bytes as B/KiB/MiB. Token mode separately

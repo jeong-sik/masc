@@ -1886,6 +1886,63 @@ let test_dashboard_hourly_trend_numeric_ts () =
     Alcotest.(check int) "hour bucket success" 1
       (Safe_ops.json_int ~default:0 "success" bucket))
 
+(* The trend carries the bytes each hour's results returned: the sum of the
+   rows' [result_bytes]. A row without [result_bytes] is malformed, dropped
+   from every aggregate, so it adds no bytes to its hour. *)
+let test_dashboard_hourly_trend_sums_result_bytes () =
+  with_tmp_log_dir (fun dir ->
+    let store = Dated_jsonl.open_store (tool_calls_location dir) in
+    let hour_a = 1_710_000_000 in
+    let hour_b = hour_a + 7_200 in
+    let row ?result_bytes ts =
+      `Assoc
+        ([ ("ts", `Int ts)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("wire_outcome", `String "ok")
+         ; ("duration_ms", `Float 2.0)
+         ]
+         @ (match result_bytes with
+            | Some n -> [ ("result_bytes", `Int n) ]
+            | None -> []))
+    in
+    List.iter
+      (Dated_jsonl.append store)
+      [ row ~result_bytes:2 hour_a
+      ; row ~result_bytes:40 (hour_a + 60)
+      ; row (hour_a + 120)
+      ; row ~result_bytes:7 hour_b
+      ];
+    let summary = aggregate ~n:10 () in
+    let hourly =
+      summary
+      |> Yojson.Safe.Util.member "hourly_trend"
+      |> Yojson.Safe.Util.to_list
+    in
+    let hour_key ts =
+      let tm = Unix.gmtime (Float.of_int ts) in
+      Printf.sprintf "%04d-%02d-%02dT%02d"
+        (tm.Unix.tm_year + 1900)
+        (tm.Unix.tm_mon + 1)
+        tm.Unix.tm_mday
+        tm.Unix.tm_hour
+    in
+    let bucket ts =
+      List.find
+        (fun item -> Safe_ops.json_string_opt "hour" item = Some (hour_key ts))
+        hourly
+    in
+    Alcotest.(check int) "first hour sums its two results" 42
+      (Safe_ops.json_int ~default:(-1) "result_bytes" (bucket hour_a));
+    Alcotest.(check int) "first hour counts only the two sized calls" 2
+      (Safe_ops.json_int ~default:(-1) "calls" (bucket hour_a));
+    Alcotest.(check int) "second hour" 7
+      (Safe_ops.json_int ~default:(-1) "result_bytes" (bucket hour_b));
+    Alcotest.(check int) "the row without result_bytes is malformed" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary))
+
 let test_dashboard_aggregate_window_hours () =
   with_tmp_log_dir (fun dir ->
     let store =
@@ -3482,6 +3539,8 @@ let () =
             test_dashboard_aggregate_names_an_unknown_record_kind_malformed
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
+        ; eio_test "dashboard hourly trend sums result bytes"
+            test_dashboard_hourly_trend_sums_result_bytes
         ; eio_test "dashboard aggregate window hours"
             test_dashboard_aggregate_window_hours
         ; eio_test "dashboard aggregate drops rows without result_bytes"

@@ -28,6 +28,21 @@ val keeper_wake_urgency_of_string : string -> (keeper_wake_urgency, string) resu
     this schedule-owned contract; keeper-side consumers map it to
     [Keeper_event_queue.urgency] at the boundary. *)
 
+(** How a due [masc.keeper_wake] reaches its Keeper. *)
+type keeper_wake_delivery =
+  | Keeper_wake_to_queue
+      (** A new message in the Keeper's event queue. *)
+  | Keeper_wake_to_receipt
+      (** A tool-result receipt whose [call_id] is the schedule id. A turn that
+          ended on [keeper_receipt_wait] for that id continues with it. No wake message is put in the event queue; the outbox delivers
+          the receipt. *)
+
+val default_keeper_wake_delivery : keeper_wake_delivery
+(** [Keeper_wake_to_queue], for a body without the optional [delivery] field. *)
+
+val keeper_wake_delivery_of_string : string -> (keeper_wake_delivery, string) result
+(** Wire enum of the [delivery] field: [queue] or [receipt]. *)
+
 val valid_keeper_wake_target_name : string -> bool
 (** [true] when a [masc.keeper_wake] body target name is valid. *)
 

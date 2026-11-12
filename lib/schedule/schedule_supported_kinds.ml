@@ -57,6 +57,42 @@ let keeper_wake_urgency_of_string value =
   | None -> Error (Printf.sprintf "unknown urgency: %s" value)
 ;;
 
+(* How a due Keeper wake reaches its Keeper. [Keeper_wake_to_queue] puts a new
+   message in the Keeper's event queue. [Keeper_wake_to_receipt] writes a
+   tool-result receipt the way a background run's result is written, so a turn
+   that ended on [keeper_receipt_wait] for this schedule continues with it. *)
+type keeper_wake_delivery =
+  | Keeper_wake_to_queue
+  | Keeper_wake_to_receipt
+
+let default_keeper_wake_delivery = Keeper_wake_to_queue
+
+type keeper_wake_delivery_spec =
+  { delivery_label : string
+  ; delivery_value : keeper_wake_delivery
+  }
+
+let keeper_wake_deliveries =
+  [ { delivery_label = "queue"; delivery_value = Keeper_wake_to_queue }
+  ; { delivery_label = "receipt"; delivery_value = Keeper_wake_to_receipt }
+  ]
+;;
+
+let keeper_wake_delivery_of_string value =
+  match
+    List.find_opt
+      (fun spec -> String.equal spec.delivery_label value)
+      keeper_wake_deliveries
+  with
+  | Some spec -> Ok spec.delivery_value
+  | None ->
+    Error
+      (Printf.sprintf
+         "unknown delivery: %s; known: %s"
+         value
+         (String.concat ", " (List.map (fun spec -> spec.delivery_label) keeper_wake_deliveries)))
+;;
+
 let valid_keeper_wake_target_name =
   Safe_identifier.is_portable_name
 ;;

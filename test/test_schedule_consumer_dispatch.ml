@@ -718,6 +718,155 @@ let test_keeper_wake_for_not_current_owner_meta_is_retained () =
         | Error reason -> fail ("receipt did not decode: " ^ reason)))
 ;;
 
+let keeper_receipt_payload =
+  `Assoc
+    [ "kind", `String "masc.keeper_wake"
+    ; ( "body"
+      , `Assoc
+          [ "keeper_name", `String "schedule-keeper"
+          ; "title", `String "Run result"
+          ; "message", `String "[github_run_watch] o/r run 1 completed: success"
+          ; "delivery", `String "receipt"
+          ] )
+    ]
+;;
+
+let rec queue_holds_schedule_wake queue =
+  match Keeper_event_queue.dequeue queue with
+  | None -> false
+  | Some (stimulus, rest) ->
+    (match stimulus.payload with
+     | Keeper_event_queue.Schedule_due _ -> true
+     | _ -> queue_holds_schedule_wake rest)
+;;
+
+let test_keeper_wake_with_receipt_delivery_writes_a_receipt_and_no_wake_message () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    match
+      Schedule_service.create config ~runner_tick_sec ~now:100.0
+        ~schedule_id:"keeper-receipt-sched-1" ~requested_at:100.0
+        ~requested_by:(human "operator") ~scheduled_by:(automated "scheduler-agent")
+        ~due_at:200.0 ~payload:keeper_receipt_payload
+        ~source:Schedule_domain.Operator_request ()
+    with
+    | Ok request -> request
+    | Error err -> fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+  in
+  let result =
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      tick_ok config ~now:201.0)
+  in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check string "dispatch status" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  (match
+     Schedule_store.last_wake_for_schedule_instance
+       (Schedule_store.read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "missing wake record"
+   | Some wake ->
+     (match wake.detail with
+      | None -> fail "wake detail missing"
+      | Some detail ->
+        (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
+         | Ok
+             (Server_schedule_consumers.Keeper_receipt_delivered
+               { keeper_name; schedule_instance_id; schedule_id }) ->
+           check string "receipt keeper" "schedule-keeper" keeper_name;
+           check string "receipt schedule instance" request.schedule_instance_id
+             schedule_instance_id;
+           check string "receipt schedule" request.schedule_id schedule_id
+         | Ok _ -> fail "detail decoded to a different receipt"
+         | Error reason -> fail ("detail did not decode: " ^ reason))));
+  let base_path = config.Workspace_utils.base_path in
+  (match
+     Keeper_client_tool_outbox.load
+       ~base_path
+       ~keeper_name:"schedule-keeper"
+       ~viewer:Keeper_client_tool_outbox.Every_receipt
+   with
+   | Error detail -> fail detail
+   | Ok snapshot ->
+     check bool "the outbox holds a receipt whose call id is the schedule id"
+       true
+       (Keeper_client_tool_outbox.contains_call
+          snapshot
+          ~call_id:request.schedule_id));
+  check bool "no wake message is queued" false
+    (queue_holds_schedule_wake
+       (Keeper_registry_event_queue.snapshot ~base_path "schedule-keeper"))
+;;
+
+(* A run watch that settles rewrites the row under a new instance id. The
+   receipt stays under the schedule id, the one the Keeper holds. *)
+let test_a_settled_run_watch_keeps_the_receipt_under_the_schedule_id () =
+  with_workspace
+  @@ fun config ->
+  let payload =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; ( "body"
+        , `Assoc
+            [ "keeper_name", `String "schedule-keeper"
+            ; "message", `String "merge if green"
+            ; "delivery", `String "receipt"
+            ; ( "until_github_run"
+              , `Assoc [ "repo", `String "jeong-sik/masc"; "run_id", `Int 5 ] )
+            ] )
+      ]
+  in
+  let created =
+    match
+      Schedule_service.create config ~runner_tick_sec ~now:100.0
+        ~schedule_id:"keeper-receipt-watch-1" ~requested_at:100.0
+        ~requested_by:(human "operator") ~scheduled_by:(automated "scheduler-agent")
+        ~due_at:5000.0 ~payload ~source:Schedule_domain.Operator_request ()
+    with
+    | Ok request -> request
+    | Error err -> fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+  in
+  (match
+     Schedule_run_watch.tick config ~now:150.0 ~runner_tick_sec
+       ~read:(fun _ ->
+         Ok (Schedule_run_watch.Completed (Some Schedule_run_watch.Success)))
+   with
+   | Ok [ _ ] -> ()
+   | Ok outcomes -> failf "expected one watch outcome, got %d" (List.length outcomes)
+   | Error detail -> fail detail);
+  let settled =
+    match Schedule_store.get_schedule config ~schedule_id:created.schedule_id with
+    | Some request -> request
+    | None -> fail "settled schedule missing"
+  in
+  check bool "the settle issued a new instance id" false
+    (String.equal created.schedule_instance_id settled.schedule_instance_id);
+  let result =
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      tick_ok config ~now:201.0)
+  in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check string "dispatch status" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  match
+    Keeper_client_tool_outbox.load
+      ~base_path:config.Workspace_utils.base_path
+      ~keeper_name:"schedule-keeper"
+      ~viewer:Keeper_client_tool_outbox.Every_receipt
+  with
+  | Error detail -> fail detail
+  | Ok snapshot ->
+    check bool "the receipt is under the schedule id" true
+      (Keeper_client_tool_outbox.contains_call snapshot ~call_id:created.schedule_id);
+    check bool "no receipt is under the first instance id" false
+      (Keeper_client_tool_outbox.contains_call
+         snapshot
+         ~call_id:created.schedule_instance_id)
+;;
+
 let test_keeper_wake_consumer_records_wake_receipt () =
   with_workspace
   @@ fun config ->
@@ -4717,6 +4866,11 @@ let () =
             test_keeper_wake_for_not_current_owner_meta_is_retained
         ; test_case "keeper wake records wake receipt" `Quick
             test_keeper_wake_consumer_records_wake_receipt
+        ; test_case "keeper wake with receipt delivery writes a receipt and no wake message"
+            `Quick
+            test_keeper_wake_with_receipt_delivery_writes_a_receipt_and_no_wake_message
+        ; test_case "a settled run watch keeps the receipt under the schedule id" `Quick
+            test_a_settled_run_watch_keeps_the_receipt_under_the_schedule_id
         ; test_case "routed schedule carries occurrence destination to Keeper" `Quick
             test_routed_schedule_carries_occurrence_destination_to_keeper
         ; test_case "a recurring wake supersedes the earlier pending occurrence" `Quick

@@ -275,6 +275,40 @@ let test_schedule_update_form_keeps_the_run_watch () =
      |> member Masc.Schedule_run_watch.watch_field
      = `Null)
 
+(* The update replaces the whole definition, so a form that left [delivery] out
+   would turn a receipt wake into a queue wake when the operator saves an edit.
+   A receipt delivery takes no urgency, so the form carries none for it. *)
+let test_schedule_update_form_keeps_the_receipt_delivery () =
+  let open Yojson.Safe.Util in
+  let body_with fields =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; ( "body"
+        , `Assoc
+            ([ "keeper_name", `String "edgar.a.poe"
+             ; "message", `String "inspect the latest work"
+             ]
+             @ fields) )
+      ]
+  in
+  let form fields =
+    update_form
+      { schedule_form_row with
+        sch_recurrence = Ok Schedule_domain.One_shot
+      ; sch_payload = body_with fields
+      }
+  in
+  let receipt = form [ "delivery", `String "receipt" ] in
+  check (Alcotest.option str) "a receipt row keeps its delivery" (Some "receipt")
+    (receipt |> member "delivery" |> to_string_option);
+  check Alcotest.bool "a receipt row gets no urgency" true
+    (receipt |> member "urgency" = `Null);
+  let queued = form [ "urgency", `String "low" ] in
+  check Alcotest.bool "a queue row gets no delivery field" true
+    (queued |> member "delivery" = `Null);
+  check (Alcotest.option str) "a queue row keeps its urgency" (Some "low")
+    (queued |> member "urgency" |> to_string_option)
+
 (* The same holds for the commit watch: an edit of the message must not remove
    the wait for the commit's checks. *)
 let test_schedule_update_form_keeps_the_commit_watch () =
@@ -2381,6 +2415,8 @@ let () =
             test_schedule_update_form_preserves_exact_editable_definition
         ; Alcotest.test_case "schedule update form keeps the run watch" `Quick
             test_schedule_update_form_keeps_the_run_watch
+        ; Alcotest.test_case "schedule update form keeps the receipt delivery" `Quick
+            test_schedule_update_form_keeps_the_receipt_delivery
         ; Alcotest.test_case "schedule update form keeps the commit watch" `Quick
             test_schedule_update_form_keeps_the_commit_watch
         ; Alcotest.test_case

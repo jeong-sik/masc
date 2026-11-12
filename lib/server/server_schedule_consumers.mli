@@ -61,6 +61,13 @@ type dispatch_receipt =
       }
       (** A [masc.lane_act] occurrence whose action receipt is durable. It
           names the receipt; the receipt says whether the worker ran it. *)
+  | Keeper_receipt_delivered of
+      { keeper_name : string
+      ; schedule_instance_id : string
+      ; schedule_id : string
+      }
+      (** A [masc.keeper_wake] occurrence whose delivery is [receipt] and whose
+          tool-result receipt is in the Keeper's outbox. *)
 
 val dispatch_receipt_of_detail :
   Yojson.Safe.t -> (dispatch_receipt, string) result

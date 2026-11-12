@@ -3076,16 +3076,38 @@ let schedule_modify_form (row : schedule_row) recurrence =
          | Ok None | Error _ -> [])
     | _ -> []
   in
+  (* A receipt delivery takes no urgency, and the update replaces the whole
+     definition: a form that dropped [delivery] would turn the row into a queue
+     wake on save. *)
+  let delivery =
+    match body with
+    | `Assoc fields ->
+        (match List.assoc_opt "delivery" fields with
+         | Some (`String raw) ->
+             (match Schedule_supported_kinds.keeper_wake_delivery_of_string raw with
+              | Ok delivery -> delivery
+              | Error _ -> Schedule_supported_kinds.default_keeper_wake_delivery)
+         | Some _ | None -> Schedule_supported_kinds.default_keeper_wake_delivery)
+    | _ -> Schedule_supported_kinds.default_keeper_wake_delivery
+  in
+  let delivery_and_urgency =
+    match delivery with
+    | Schedule_supported_kinds.Keeper_wake_to_receipt -> [ "delivery", `String "receipt" ]
+    | Schedule_supported_kinds.Keeper_wake_to_queue ->
+        [ ( "urgency"
+          , `String
+              (let value = schedule_json_string "urgency" body in
+               if String.trim value = "" then "normal" else value) )
+        ]
+  in
   `Assoc
     ([ "schedule_id", `String row.sch_schedule_id
      ; "keeper_name", `String (schedule_json_string "keeper_name" body)
      ; "message", `String (schedule_json_string "message" body)
      ; "title", `String (schedule_json_string "title" body)
-     ; "urgency",
-       `String
-         (let value = schedule_json_string "urgency" body in
-          if String.trim value = "" then "normal" else value)
-     ; "due_at_iso", `String (Option.value ~default:"" row.sch_due_at_iso)
+     ]
+     @ delivery_and_urgency
+     @ [ "due_at_iso", `String (Option.value ~default:"" row.sch_due_at_iso)
      ; "recurrence_kind", `String recurrence_kind
      ; "source", `String row.sch_source
      ; "allow_unregistered_keeper", `Bool false

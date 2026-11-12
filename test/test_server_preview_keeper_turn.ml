@@ -48,8 +48,9 @@ let commit zone ~author ~kind body =
    it was started on, its directory, its arguments and the message to
    [<script>.turn.json]. While [<script>.hold] is there it writes
    [<script>.started] after the message and waits. While [<script>.fail] is
-   there it ends after the message with no answer. The session is the one it
-   was started with, new or resumed. *)
+   there it ends after the message with no answer, and while [<script>.lost]
+   is there it ends so when it was started to resume a session. The session
+   is the one it was started with, new or resumed. *)
 let fake_claude = {|#!/usr/bin/env python3
 import json
 import os
@@ -81,6 +82,8 @@ prompt = content if isinstance(content, str) else "".join(block.get("text", "") 
 Path(script + ".turn.json").write_text(json.dumps({"home": os.environ.get("CLAUDE_CONFIG_DIR"),
     "cwd": os.getcwd(), "args": args, "prompt": prompt}))
 if Path(script + ".fail").exists():
+    sys.exit(1)
+if Path(script + ".lost").exists() and any(arg.startswith("--resume=") for arg in args):
     sys.exit(1)
 hold = Path(script + ".hold")
 if hold.exists():
@@ -761,8 +764,41 @@ let test_turn () =
           None
           (resumed_session (args_of (seen claude)));
         Sys.remove (claude ^ ".turn.json");
-        (* A new conversation of her first Keeper: the next turn has read
-           nothing, and the rows of the conversation before it stay. *)
+        (* A session the vendor no longer has: the client does not resume it.
+           Each turn tries the session of the last answer again and fails,
+           and the server starts no session in its place. The stand-in ends
+           such a turn as one with no answer; how the real client ends it is
+           not measured. *)
+        let lost = claude ^ ".lost" in
+        Out_channel.with_open_bin lost (fun (_ : out_channel) -> ());
+        List.iter
+          (fun message ->
+            check_reply
+              "a turn of a conversation whose session is gone"
+              (502, {|{"error":"The client ended the turn without an answer."}|})
+              (reply alice (body ~keeper:"keeper-alice" ~message));
+            Alcotest.(check (option string))
+              "tries the session of the last answer again"
+              (Some session)
+              (resumed_session (args_of (seen claude))))
+          [ "gone"; "still gone" ];
+        Sys.remove (claude ^ ".turn.json");
+        (* The directory of a conversation that others can enter is not used:
+           the turn is refused and no client starts. *)
+        let alice_conversation = Filename.concat alice_records conversation in
+        Unix.chmod alice_conversation 0o755;
+        check_reply
+          "a turn of a conversation whose directory is not private"
+          (503, {|{"error":"The record of this conversation could not be read or written."}|})
+          (reply alice (body ~keeper:"keeper-alice" ~message:"open"));
+        Alcotest.(check bool)
+          "starts no client"
+          false
+          (Sys.file_exists (claude ^ ".turn.json"));
+        Unix.chmod alice_conversation 0o700;
+        (* A new conversation of her first Keeper is the way on: the next
+           turn starts a session of its own though the client still resumes
+           none, and the rows of the conversation before it stay. *)
         let rows_before = List.length (rows alice_turns) in
         (match renew alice (only_keeper "keeper-alice") with
          | 200, (_ : string) -> ()
@@ -783,6 +819,11 @@ let test_turn () =
           "the conversation before it keeps its rows and gets no other"
           rows_before
           (List.length (rows alice_turns));
+        Alcotest.(check (pair bool (option string)))
+          "the turn started a session and resumed none"
+          (true, None)
+          (Option.is_some (new_session (args_of (seen claude))), resumed_session (args_of (seen claude)));
+        Sys.remove lost;
         Sys.remove (claude ^ ".turn.json");
         check_reply
           "a new conversation of another person's Keeper"

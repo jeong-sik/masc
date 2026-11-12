@@ -23,7 +23,27 @@
     Nothing else stores it.
 
     {b Reading.} A row that is not one of these, with exactly its fields, is
-    not repaired or skipped: the read is refused, and so is the turn.
+    not repaired or skipped: the read is refused, and so is the turn. There
+    is one format of the rows. A change of it is a hard cut: the records are
+    removed with it, and a binary from before the change refuses the turns of
+    a conversation that has a row of the new format.
+
+    {b The session of a conversation} is the one its last [answered] row
+    names. A [failed] row names none and changes none, so the turn after a
+    failed one resumes the same session. Nothing tells a session the vendor
+    no longer has from another turn without an answer, so this module starts
+    no session in place of one: the person starts a new conversation
+    ({!start}), and its first turn starts a session of its own.
+
+    {b An answer that was not recorded.} When the [answered] row of a turn
+    is not written, the turn keeps its [asked] row alone, the caller does not
+    give the answer out, and the next turn resumes the session of the
+    [answered] row before it. The vendor session holds that turn though the
+    record has no end of it.
+
+    {b Directories} are made with mode 0700. One that is already there is
+    used only when it is a directory of that mode: a file, a link or another
+    mode refuses the turn.
 
     {b Writing.} Rows are appended with
     {!Fs_compat.append_private_jsonl_durable_stable_result}. One lock of the

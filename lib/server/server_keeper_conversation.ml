@@ -16,6 +16,7 @@ let cwd_name = "cwd"
 
 (* The directories hold what a person asked and was answered. *)
 let private_directory_mode = 0o700
+let permission_bits = 0o777
 
 let root ~base_path ~namespace =
   Filename.concat (Runtime_account_home_layout.person_runtime_root ~base_path ~namespace) directory_name
@@ -235,11 +236,21 @@ let append path text =
 (* The runtime root of the person is there: the home of the account the turn
    runs on is under it. *)
 let private_directory path =
+  let refused detail = Error (Not_written (Printf.sprintf "%s: %s" path detail)) in
   match Unix.mkdir path private_directory_mode with
   | () -> Ok ()
-  | exception Unix.Unix_error (Unix.EEXIST, _, _) -> Ok ()
-  | exception Unix.Unix_error (error, _, _) ->
-    Error (Not_written (Printf.sprintf "%s: %s" path (Unix.error_message error)))
+  | exception Unix.Unix_error (Unix.EEXIST, _, _) ->
+    (* What is there is used only as the directory this module makes: not a
+       file, not a link to another place, not a directory others can enter. *)
+    (match Unix.lstat path with
+     | { Unix.st_kind = Unix.S_DIR; st_perm; _ } ->
+       if Int.equal (st_perm land permission_bits) private_directory_mode
+       then Ok ()
+       else refused (Printf.sprintf "its mode is %o" (st_perm land permission_bits))
+     | { Unix.st_kind = Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ } ->
+       refused "it is not a directory"
+     | exception Unix.Unix_error (error, _, _) -> refused (Unix.error_message error))
+  | exception Unix.Unix_error (error, _, _) -> refused (Unix.error_message error)
 ;;
 
 let now_field now_ms = at_field, `Int (now_ms ())

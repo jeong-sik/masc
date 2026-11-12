@@ -42,7 +42,8 @@ val http_failure :
 val make : declared_http:string list -> excluded_http:string list ->
   declared_cli:string list -> http:http -> cli:cli -> (t, string) result
 (** The complete original effective declarations, not current configuration.
-    [excluded_http] preserves preflight/structural exclusions; any exclusion or
+    [excluded_http] preserves the declared slots no flow saw: held ones and
+    ones left out for a size refusal on record; any exclusion or
     declared CLI tail disqualifies API-only unread proof. The caller's original
     envelope separately binds physical ownership, request/schema and attempt. *)
 
@@ -67,6 +68,24 @@ val generation_dispatch : t -> Agent_core.Exact_output.generation_dispatch_fact
 val exhausted_input_refusals : t -> Keeper_librarian_input_refusal.t list option
 (** Derived nonempty named causes only for an exhausted, fully visited,
     actually dispatched API-only walk without semantic/invalid/local veto. *)
+
+type http_slot = { slot_id:string; target_fingerprint:string }
+(** One HTTP slot as a walk bound it: its id and the
+    [Exact_output.target_identity_fingerprint] of the target it named. *)
+
+type http_slot_answer = Input_size_refused | Other_answer
+
+val http_slot_answers : t -> (http_slot * http_slot_answer) list
+(** What the provider behind each HTTP slot said to the generation request
+    this walk sent it. [Input_size_refused] is a sent request the provider
+    refused for its size, the observations
+    {!Keeper_exact_walk_failure.of_api_observation} gives a named input
+    refusal. [Other_answer] is any other sent request, answered or failed.
+    A slot this walk sent nothing to is absent: excluded, not reached,
+    rejected locally, or failed before its dispatch. A walk the host
+    completed lists a slot once; a reader that needs one answer per slot
+    takes the first (RFC-exact-request-skips-a-slot-that-refused-its-input
+    3.2). *)
 
 val answered_slot : t -> string option
 (** [Some slot] only for a transport accepted by the original host walk;

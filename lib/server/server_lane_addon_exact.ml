@@ -54,16 +54,21 @@ let raw_excerpt = Keeper_exact_flow_detail.raw_response_excerpt
 
 type http_outcome =
   | Http_answered of { output : Addon.checked; slot : string; usage : Addon.usage option }
-  | Http_exhausted  (** Every HTTP slot was tried, or there was none. *)
+  | Http_exhausted  (** Every walked HTTP slot was tried, or none was walked. *)
   | Http_stopped
       (** The flow refused to advance, so no later slot may be dispatched. *)
 
 let usage_of_api (usage : Agent_core.Types.api_usage) =
   { Addon.input_tokens = usage.input_tokens; output_tokens = usage.output_tokens }
 
+(* The candidate a walk binds a slot under. [execute_http] walks it and
+   [skip_size_refused] reads its target identity, so both see one value. *)
+let flow_candidate (slot : Registry.selected_slot) =
+  Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target
+
 let execute_http ~before_dispatch ~admission_class ~note ~capture_http ~resolved ~requirement ~messages ~validate =
   let candidate (slot : Registry.selected_slot) =
-    match Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target with
+    match flow_candidate slot with
     | Ok candidate -> Some candidate
     | Error Exact.Blank_flow_candidate_id ->
       note slot.slot_id Failure.Configuration_refused "blank slot id";
@@ -167,11 +172,14 @@ let cli_prompt messages =
   texts [] messages
 
 let call ~before_dispatch ~admission_class ~cli_runner ~base_path
-    ~(ordered : Runtime_exact_lane_backpressure.ordered) ~schema (request : Addon.request) ~validate =
+    ~(ordered : Runtime_exact_lane_backpressure.ordered) ~skipped_http ~schema (request : Addon.request) ~validate =
   let resolved = ordered.lane in
   let held_http =
     List.map (fun (held : Runtime_exact_lane_backpressure.held_slot) -> held.slot_id) ordered.held_http
   in
+  (* No flow saw a held slot or a skipped one, so both are exclusions. A
+     skipped slot leaves no failure: the held slot keeps the request open. *)
+  let excluded_http = held_http @ skipped_http in
   let http=ref (Receipt.http_not_started ~detail:"no HTTP generation flow started") in
   let visited=ref [] and dispatched=ref [] and cli_failures=ref [] in
   let failures = ref [] in
@@ -202,12 +210,12 @@ let call ~before_dispatch ~admission_class ~cli_runner ~base_path
   let complete cli_result outcome =
     let cli=Receipt.cli ~visited:(List.rev !visited) ~dispatched:(List.rev !dispatched) ~failures:(List.rev !cli_failures) ~result:cli_result in
     (* The receipt compares the walked candidates with [declared_http] minus
-       [excluded_http] in order, so the walked slots come first and the held
-       ones, which no flow saw, follow as exclusions. *)
+       [excluded_http] in order, so the walked slots come first and the
+       excluded ones follow. *)
     let receipt=match Receipt.make_v2
       ~declared_http:(List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) resolved.selected_slots
-                      @ held_http)
-      ~excluded_http:held_http ~declared_cli:resolved.cli_slots ~http:!http ~cli with
+                      @ excluded_http)
+      ~excluded_http ~declared_cli:resolved.cli_slots ~http:!http ~cli with
       | Ok receipt -> receipt
       | Error detail -> invalid_arg ("invalid original Addon walk: " ^ detail) in
     {Addon.outcome;receipt} in
@@ -265,8 +273,9 @@ let resolve ~lane_key =
     | Ok resolved -> Ok resolved
 
 (* The earliest stated time when no slot of either kind may be called now.
-   [resolve] admits a lane only with a slot, and both orders keep every slot
-   in [walk] or [held], so an empty walk on both sides has a held slot. *)
+   [resolve] admits a lane only with a slot, both orders keep every slot in
+   [walk] or [held], and [skip_size_refused] leaves a slot out only beside a
+   held one, so an empty walk on both sides has a held slot. *)
 let every_slot_held ({ lane; held_http } : Runtime_exact_lane_backpressure.ordered) =
   let { Runtime_candidate_standing.walk = cli_walk; held = cli_held } =
     Keeper_lane_cli_oneshot.order_slots lane.Registry.cli_slots
@@ -281,15 +290,53 @@ let every_slot_held ({ lane; held_http } : Runtime_exact_lane_backpressure.order
      | [] -> None
      | first :: rest -> Some (List.fold_left Float.min first rest))
 
+(* The fingerprint a walk binds this slot's target under. *)
+let slot_target_fingerprint (slot : Registry.selected_slot) =
+  match flow_candidate slot with
+  | Ok candidate ->
+    Some (Exact.target_identity_fingerprint (Exact.flow_candidate_identity candidate).Exact.target_identity)
+  | Error Exact.Blank_flow_candidate_id -> None
+
+(* RFC-exact-request-skips-a-slot-that-refused-its-input 3.2. While an HTTP
+   slot is held the walk cannot end the request as an input refusal. A slot
+   whose provider refused this request for its size is left out of such a
+   walk when its id and target are the ones that refused. The request body is
+   the same, so the slot answers differently only when something outside its
+   id and target changed: the lane's output limit or thinking, a credential,
+   a limit its provider raised. Such a change reaches the slot when no slot
+   is held (section 9, D1). With no held slot nothing is left out, so a walk
+   that ends the request without an answer sent to every slot and carries
+   each refusal in its own receipt. *)
+let skip_size_refused ~size_refused (ordered : Runtime_exact_lane_backpressure.ordered) =
+  match ordered.held_http with
+  | [] -> ordered, []
+  | _ :: _ ->
+    let refused (slot : Registry.selected_slot) =
+      match slot_target_fingerprint slot with
+      | None -> false
+      | Some target ->
+        List.exists
+          (fun (refusal : Receipt.http_slot) ->
+             String.equal refusal.slot_id slot.slot_id
+             && String.equal refusal.target_fingerprint target)
+          size_refused
+    in
+    let skipped, walked = List.partition refused ordered.lane.Registry.selected_slots in
+    ( { ordered with Runtime_exact_lane_backpressure.lane = { ordered.lane with Registry.selected_slots = walked } }
+    , List.map (fun (slot : Registry.selected_slot) -> slot.slot_id) skipped )
+
 let runner_with ~cli_runner ~base_path : Addon.runner =
-  fun ~before_dispatch ~admission_class ~lane_key ~schema request ->
+  fun ~before_dispatch ~admission_class ~lane_key ~schema ~size_refused request ->
   Result.bind (resolve ~lane_key) (fun resolved ->
-    let ordered = Runtime_exact_lane_backpressure.order resolved in
+    let ordered, skipped_http =
+      skip_size_refused ~size_refused (Runtime_exact_lane_backpressure.order resolved)
+    in
     match every_slot_held ordered with
     | Some until -> Error (Addon.Every_slot_held { until })
     | None ->
       Ok (fun ~validate ->
-        call ~before_dispatch ~admission_class ~cli_runner ~base_path ~ordered ~schema request ~validate))
+        call ~before_dispatch ~admission_class ~cli_runner ~base_path ~ordered ~skipped_http ~schema request
+          ~validate))
 
 let runner ~base_path = runner_with ~cli_runner:None ~base_path
 let authorize_request ~base_path ~store ~declaration_id ~package request =

@@ -141,10 +141,13 @@ type lane_unavailable =
       (** The host has no published lane registry right now: before startup
           published one, or while a replacement is being committed. *)
   | Every_slot_held of { until : float }
-      (** Every slot of the lane waits for a time its provider stated -- its
-          account's stated reset, or the end of its own Retry-After -- so none
-          was called. [until] is the earliest of those times, Unix epoch
-          seconds; the next host event after it walks the lane again
+      (** No slot of the lane may be sent this request now and at least one
+          waits for a time its provider stated -- its account's stated reset,
+          or the end of its own Retry-After -- so none was called. Any other
+          slot is one whose provider refused this request for its size
+          (RFC-exact-request-skips-a-slot-that-refused-its-input 3.2).
+          [until] is the earliest stated time, Unix epoch seconds; the next
+          host event after it walks the lane again
           (RFC-exact-lane-waits-for-a-stated-reset). *)
 
 (** A provider refusal of a sent call that may pass without changing the
@@ -227,10 +230,16 @@ type dispatch = Measurement | Generation
 
 type runner = before_dispatch:(dispatch -> (unit, string) result) ->
   admission_class:Agent_core.Llm_provider.Admission_class.t ->
-  lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
+  lane_key:string -> schema:Yojson.Safe.t ->
+  size_refused:Keeper_exact_walk_receipt.http_slot list -> request -> (call, lane_unavailable) result
 (** Resolves the add-on lane [lane_key] for the permitted provider [schema]
     (package baseline or request schema). The supplied [validate] still checks
-    the package baseline independently. [admission_class] comes only from the
+    the package baseline independently. [size_refused] names the HTTP slots
+    whose provider refused this request for its size while sending [schema],
+    as {!run} read them from the request's retained proofs; the runner sends
+    such a slot this request again only when no HTTP slot is held
+    (RFC-exact-request-skips-a-slot-that-refused-its-input 3.2).
+    [admission_class] comes only from the
     trusted host authority for this original request and is retained by the
     returned call, never selected by worker data. It governs the HTTP Exact
     flow, not an official client's separate process admission.

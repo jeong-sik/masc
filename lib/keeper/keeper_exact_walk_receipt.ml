@@ -183,6 +183,31 @@ let exhausted_input_refusals receipt =
   | (Not_started _ | Accepted _ | Execution_exhausted _ | Candidates_exhausted _
       | Execution_stopped _ | Semantic_exhausted | Locally_stopped _),([] | _::_) -> None
 
+type http_slot = { slot_id:string; target_fingerprint:string }
+type http_slot_answer = Input_size_refused | Other_answer
+let http_slot_answers receipt =
+  let h=receipt.walk.http in
+  let bound (visit : visit) = List.find_map (fun (b : binding) ->
+    if String.equal b.candidate_id visit.candidate_id
+    then Some {slot_id=b.candidate_id;target_fingerprint=b.target} else None) h.declared in
+  let answered visit = Option.map (fun slot -> slot,Other_answer) (bound visit) in
+  let failed = function
+    | Rejected _ -> None
+    | Execution_failed {visit;cause;_} ->
+      (match (Failure.of_api_observation cause).Failure.provider_input_refusals with
+       | _::_ -> Option.map (fun slot -> slot,Input_size_refused) (bound visit)
+       | [] -> if Failure.api_generation_dispatched cause then answered visit else None) in
+  let terminal = match h.terminal with
+    | Accepted visit -> Option.to_list (answered visit)
+    | Execution_exhausted f | Candidates_exhausted f | Execution_stopped f
+    | Locally_stopped (Before_advance f) -> Option.to_list (failed f)
+    | Not_started _ | Semantic_exhausted
+    | Locally_stopped (Already_started | Attempt_start | Measurement_start | Before_measurement
+                      | Measurement_terminal | Before_dispatch) -> [] in
+  List.filter_map (fun (a : advance) -> failed a.failed) h.advances
+  @ List.filter_map (fun (s : semantic) -> answered s.visit) h.semantic
+  @ terminal
+
 let valid_digest = String_util.is_lowercase_sha256_hex
 let unique values = List.length values=List.length (List.sort_uniq String.compare values)
 let valid_names values = unique values && List.for_all (fun value -> String.trim value<>"") values

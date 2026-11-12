@@ -392,7 +392,8 @@ type dispatch_guard = unit -> (unit, string) result
 type dispatch = Measurement | Generation
 type runner = before_dispatch:(dispatch -> (unit, string) result) ->
   admission_class:Agent_core.Llm_provider.Admission_class.t ->
-  lane_key:string -> schema:Yojson.Safe.t -> request -> (call, lane_unavailable) result
+  lane_key:string -> schema:Yojson.Safe.t ->
+  size_refused:Keeper_exact_walk_receipt.http_slot list -> request -> (call, lane_unavailable) result
 
 type recorded_attempt =
   | Started of string
@@ -801,6 +802,27 @@ let bound_proofs ~store ~declaration_id ~digest request record =
   let* ()=bind_proofs record proofs in
   Ok proofs
 
+(* RFC-exact-request-skips-a-slot-that-refused-its-input 3.2. The HTTP slots
+   whose provider refused this request for its size, read from its retained
+   proofs. The newest proof that sent to a slot decides for that slot, and its
+   refusal counts only when that proof sent the schema this run sends. *)
+let size_refused_slots ~schema proofs =
+  match Lane_addon_action.canonical schema with
+  | Error _ -> []
+  | Ok schema ->
+    let same_schema sent = match Lane_addon_action.canonical sent with
+      | Ok sent -> Yojson.Safe.equal sent schema
+      | Error _ -> false in
+    let _decided,refused=List.fold_left (fun state (_ordinal,sent,(execution : execution_result)) ->
+      List.fold_left (fun (decided,refused) ((slot : Keeper_exact_walk_receipt.http_slot),answer) ->
+        if List.mem slot.slot_id decided then decided,refused
+        else slot.slot_id::decided,(match answer with
+          | Keeper_exact_walk_receipt.Input_size_refused when same_schema sent -> slot::refused
+          | Keeper_exact_walk_receipt.Input_size_refused | Keeper_exact_walk_receipt.Other_answer -> refused))
+        state (Keeper_exact_walk_receipt.http_slot_answers execution.receipt))
+      ([],[]) (List.rev proofs) in
+    List.rev refused
+
 let retain_proof ~store ~declaration_id ~digest request ~schema ~attempt_ordinal execution =
   let* () = validate_execution execution in
   let json = proof_to_json ~store ~declaration_id ~digest request ~schema ~attempt_ordinal execution in
@@ -1099,7 +1121,8 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                  it returns. A cancelled started attempt remains unknown. *)
               Eio.Fiber.check ();
               authorization.before_dispatch () in
-          match runner ~before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema request with
+          match runner ~before_dispatch ~admission_class:authorization.admission_class ~lane_key ~schema
+                  ~size_refused:(size_refused_slots ~schema proofs) request with
           | Error unavailable ->
             let reason = Lane_unavailable unavailable in
             let* () = save {previous with attempts = previous.attempts @ [Deferred reason]} in

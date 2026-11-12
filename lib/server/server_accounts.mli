@@ -27,8 +27,24 @@
     listens ({!Route_of_another_kind}), so a registration of another kind
     stops the boot and is not served.
 
-    This layer registers the three health probes. The login routes and the
-    routes of a person come with the layers after it.
+    The table holds the three health probes and the login routes
+    ({!Server_login_http.add_routes}): the start and the callback of a
+    Google and of a GitHub login, the logout, the session, the allowlist and
+    the personal access tokens. The pages and the routes of a person's
+    subscriptions and Keepers come with the layer after it.
+
+    {b The login clients.} They are the [google] and the [github] member of
+    the [config.json] that the boot judged
+    ({!Authz_boot_mode_read.multi_account_login_clients}); the file is not
+    read again. A client is built by {!Login_client.of_environment}: its
+    secret is read from the environment variable the member names, and its
+    redirect is an [https] URL. A member whose client is refused stops the
+    boot ({!Login_client_refused}). A provider with no member is not
+    configured, and its start and its callback answer 404; with neither
+    member nobody logs in, and the boot says so in the log. This module does
+    not compare a redirect with the address of the server: a redirect that
+    names another host or another path fails at the provider or at the
+    callback of the first login.
 
     {b The probes.} They are answered with no credential, to a request whose
     Host is an identity of the server ({!Server_http_ingress.serve_table}),
@@ -64,6 +80,10 @@ type refusal =
           after the boot judged them. *)
   | Zone_not_multi_account of Authz_mode_state.t
       (** The log that opened is not in the mode the boot judged. *)
+  | Login_client_refused of Server_account_login.refusal
+      (** A login client that [config.json] names was refused: the
+          environment variable of its secret is not set or holds the empty
+          string, or its redirect is no [https] URL. *)
   | Route_of_another_kind of Server_account_table.refusal
       (** The table holds a route that is neither [Always_public] nor
           [Self_authenticated Browser_session]. *)
@@ -92,13 +112,14 @@ val health_version : string -> string option
     to is read from the kernel
     ({!Server_startup_takeover.account_server_port_holder}). *)
 
-(** Reads the HTTP mode, opens the zone and reads it again, makes the table,
-    binds [address]:[port], binds the HTTPS listener of the environment,
+(** Reads the HTTP mode, opens the zone and reads it again, builds the login
+    clients, makes the table, binds [address]:[port], binds the HTTPS listener of the environment,
     makes the trust policy, announces the port to the host under [lease]
     ({!Server_startup_takeover.announce_account_server}), publishes the
-    access, records the port for the CLI of the workspace
+    access, gives the environment and [sw] to the transport of a login
+    ([Eio_context]), records the port for the CLI of the workspace
     ([Workspace_connection]), calls [on_ready], and serves until [sw] is
-    cancelled. The cleartext listener follows the HTTP mode of the
+    cancelled. A refused boot has not set the two. The cleartext listener follows the HTTP mode of the
     environment, as the single-user server does. [lease] is the BasePath
     lease of the base path that was judged.
 

@@ -142,6 +142,22 @@ val multi_account_base_path : multi_account -> string
     its zone over this path and the log of {!multi_account_base_path}. *)
 val multi_account_external_store : multi_account -> string
 
+(** The clients that the installation registered at its login providers, as
+    [config.json] names them: the [google] and the [github] member, each
+    [None] when the file has no such member. A client names the environment
+    variable of its secret and holds no secret. *)
+type login_clients =
+  { google : Masc_domain.login_client option
+  ; github : Masc_domain.login_client option
+  }
+
+(** The login clients of the [config.json] that {!boot} judged. They come
+    from the bytes the judgment read: the file is not read a second time, so
+    a server does not judge one config and log persons in with another. A
+    multi-account boot stops on a config the full decoder refuses, so these
+    are the clients of a config that decoded. *)
+val multi_account_login_clients : multi_account -> login_clients
+
 (** What a boot runs on a base path. *)
 type booted =
   | Single_user of single_user

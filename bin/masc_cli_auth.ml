@@ -255,8 +255,6 @@ let github_client_secret_env = "MASC_GITHUB_CLIENT_SECRET"
 let default_preview_port = 8940
 let preview_host = "127.0.0.1"
 let preview_backlog = 16
-let login_transaction_capacity = 16
-let draw_bytes = 32
 
 (* The listener admits only the authority it binds, as the server does
    before it routes (Server_request_authority). *)
@@ -310,15 +308,10 @@ let serve_preview ~base_path ~store ~port github =
              ~explicit_base_url:None)
       in
       let routes =
-        { Login_routes.zone
-        ; transactions = Oidc_login_transaction.create ~capacity:login_transaction_capacity
-        ; google = None
-        ; github = Some github
-        ; get = Server_login_http.get ~clock
-        ; post = Server_login_http.post ~clock
-        ; now = Ptime_clock.now
-        ; draw = (fun () -> Random_id.hex ~bytes:draw_bytes)
-        }
+        Server_account_login.routes
+          ~clock
+          ~zone
+          { Server_account_login.google = None; github = Some github }
       in
       let router =
         Masc.Http_server_eio.Router.create ()

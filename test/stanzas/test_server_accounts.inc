@@ -22,6 +22,7 @@
   masc
   masc.auth
   masc.fs_compat
+  masc.masc_eio_context
   masc.server
   masc.workspace_connection
   unix

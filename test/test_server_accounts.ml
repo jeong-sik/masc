@@ -196,31 +196,45 @@ let max_response_bytes = 1 lsl 20
 (* The status line, the header lines up to the empty one, and the rest. *)
 let response =
   let open Eio.Buf_read.Syntax in
-  let rec past_headers () =
+  let rec header_lines lines =
     let* line = Eio.Buf_read.line in
-    if String.equal line "" then Eio.Buf_read.return () else past_headers ()
+    if String.equal line "" then Eio.Buf_read.return (List.rev lines) else header_lines (line :: lines)
   in
   let* status_line = Eio.Buf_read.line in
-  let* () = past_headers () in
+  let* headers = header_lines [] in
   let+ body = Eio.Buf_read.take_all in
-  status_line, body
+  status_line, headers, body
 ;;
 
-(* One HTTP/1.1 request on a connection of its own: the status and the body. *)
-let request ~net ~port ?host ~meth path =
+(* One HTTP/1.1 request on a connection of its own: the status, the header
+   lines and the body. *)
+let exchange ~net ~port ?host ?(headers = []) ~meth path =
   let host = Option.value host ~default:(Printf.sprintf "127.0.0.1:%d" port) in
   Eio.Switch.run (fun sw ->
     let flow = Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
     Eio.Flow.copy_string
-      (Printf.sprintf "%s %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n" meth path host)
+      (Printf.sprintf
+         "%s %s HTTP/1.1\r\nHost: %s\r\n%sConnection: close\r\n\r\n"
+         meth
+         path
+         host
+         (String.concat "" (List.map (fun (name, value) -> name ^ ": " ^ value ^ "\r\n") headers)))
       flow;
-    let status_line, body = Eio.Buf_read.parse_exn ~max_size:max_response_bytes response flow in
+    let status_line, headers, body =
+      Eio.Buf_read.parse_exn ~max_size:max_response_bytes response flow
+    in
     match String.split_on_char ' ' status_line with
     | (_ : string) :: status :: (_ : string list) ->
       (match int_of_string_opt status with
-       | Some status -> status, body
+       | Some status -> status, headers, body
        | None -> Alcotest.failf "no status in %S" status_line)
     | [] | [ (_ : string) ] -> Alcotest.failf "no status in %S" status_line)
+;;
+
+(* The status and the body of {!exchange}. *)
+let request ~net ~port ?host ~meth path =
+  let status, (_ : string list), body = exchange ~net ~port ?host ~meth path in
+  status, body
 ;;
 
 exception Served
@@ -245,7 +259,31 @@ type installation =
    listener, no public identity and the default HTTP mode: the listener is
    the loopback port alone, whatever the shell of the run holds. An empty
    value is read as unset. *)
-let with_installation f =
+let no_login_client = {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|}
+
+(* The variable of the secret that the GitHub client of a case names. The
+   cases that name it set it; no case sets [unset_secret_env]. *)
+let github_secret_env = "MASC_TEST_ACCOUNTS_GITHUB_SECRET"
+let unset_secret_env = "MASC_TEST_ACCOUNTS_UNSET_SECRET"
+
+let with_github_client ~redirect_uri ~client_secret_env =
+  Yojson.Safe.to_string
+    (`Assoc
+        [ "enabled", `Bool true
+        ; "require_token", `Bool true
+        ; "account_mode", `String "Multi_account"
+        ; ( "github"
+          , `Assoc
+              [ "client_id", `String "client-of-the-case"
+              ; "redirect_uri", `String redirect_uri
+              ; "client_secret_env", `String client_secret_env
+              ] )
+        ])
+;;
+
+let https_redirect = "https://masc.example" ^ Server_login_http.github_callback_path
+
+let with_installation ?(auth_config = no_login_client) f =
   Unix.putenv "MASC_HTTPS_PORT" "0";
   Unix.putenv "MASC_HTTP_BASE_URL" "";
   Unix.putenv "MASC_USE_H2" "auto";
@@ -270,9 +308,7 @@ let with_installation f =
          | Ok _ -> ()
          | Error error ->
            Alcotest.failf "bootstrap refused: %s" (Authz_bootstrap.error_to_string error));
-        write_file
-          (Auth.auth_config_file base)
-          {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+        write_file (Auth.auth_config_file base) auth_config;
         f env { base; config; store; multi_account = multi_account_of ~base ~config }))
 ;;
 
@@ -303,6 +339,19 @@ let refusal_label : Server_accounts.refusal -> string = function
   | Server_accounts.Zone_not_opened error -> "zone not opened: " ^ open_error_label error
   | Server_accounts.Zone_not_trusted uncertain -> "zone not trusted: " ^ uncertain_label uncertain
   | Server_accounts.Zone_not_multi_account mode -> "zone not multi-account: " ^ mode_label mode
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Github_client_refused (Login_client.Secret_variable_unset name)) ->
+    "github client refused: the variable " ^ name ^ " is not set"
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Github_client_refused
+         (Login_client.Client_refused Login_client.Redirect_uri_not_https)) ->
+    "github client refused: the redirect is not https"
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Github_client_refused
+         (Login_client.Client_refused
+            (Login_client.Client_id_empty | Login_client.Client_secret_empty)))
+  | Server_accounts.Login_client_refused (Server_account_login.Google_client_refused _) ->
+    "another login client refusal"
   | Server_accounts.Route_of_another_kind _ -> "route of another kind"
   | Server_accounts.Https_listener_refused _ -> "HTTPS listener refused"
   | Server_accounts.Listener_not_bound { host; port = _; reason = _ } ->
@@ -417,6 +466,28 @@ let recorded_port ~base =
    ([Env_config.Transport.configure_h2_from_env]); a value outside its
    vocabulary is refused and not kept. This case therefore runs before every
    case that reads the mode: after one of them the value below is not read. *)
+(* A login client that config.json names and that cannot be built stops the
+   boot: the server does not come up with the login of that provider left
+   out. The port is not bound yet, so nothing is recorded for the CLI. *)
+let test_stops_when_a_login_client_is_refused () =
+  Unix.putenv github_secret_env "secret-of-the-case";
+  List.iter
+    (fun (auth_config, expected) ->
+      with_installation ~auth_config (fun env { base; config = _; store = _; multi_account } ->
+        Alcotest.(check string)
+          "the boot over a login client that is refused"
+          expected
+          (boot_outcome env ~port:(free_port ()) multi_account);
+        Alcotest.(check (option int)) "no port is recorded for the CLI" None (recorded_port ~base)))
+    [ ( with_github_client ~redirect_uri:https_redirect ~client_secret_env:unset_secret_env
+      , "github client refused: the variable " ^ unset_secret_env ^ " is not set" )
+    ; ( with_github_client
+          ~redirect_uri:("http://masc.example" ^ Server_login_http.github_callback_path)
+          ~client_secret_env:github_secret_env
+      , "github client refused: the redirect is not https" )
+    ]
+;;
+
 let test_stops_on_an_http_mode_outside_its_vocabulary () =
   with_installation (fun env { base; config = _; store; multi_account } ->
     (* The store is gone too: a boot that opened the zone before it read the
@@ -508,7 +579,11 @@ let json_of label body =
 ;;
 
 let test_serves_its_table_alone () =
-  with_installation (fun env { base; config = _; store = _; multi_account } ->
+  Unix.putenv github_secret_env "secret-of-the-case";
+  with_installation
+    ~auth_config:
+      (with_github_client ~redirect_uri:https_redirect ~client_secret_env:github_secret_env)
+    (fun env { base; config = _; store = _; multi_account } ->
     let port = free_port () in
     let net = Eio.Stdenv.net env in
     with_lease multi_account
@@ -590,6 +665,55 @@ let test_serves_its_table_alone () =
         ; "GET", "/ws"
         ; "GET", "/"
         ];
+      (* The login routes are in the table. GitHub is the client of
+         config.json: a start with no Origin gets as far as the route, which
+         refuses it. Google has no member, so its start is the 404 of the
+         route, in the words of the route. *)
+      Alcotest.(check int)
+        "the start of the configured provider, with no Origin"
+        403
+        (fst (request ~net ~port ~meth:"POST" "/auth/github/start"));
+      (* A start from the pages of this server takes a pending login: it is
+         sent to the provider with the client of config.json, and the browser
+         gets the cookie of the login in flight. *)
+      (let status, headers, (_ : string) =
+         exchange
+           ~net
+           ~port
+           ~headers:[ "Origin", Printf.sprintf "http://127.0.0.1:%d" port ]
+           ~meth:"POST"
+           "/auth/github/start"
+       in
+       let lower = List.map String.lowercase_ascii headers in
+       Alcotest.(check int) "the start of the configured provider, from this origin" 303 status;
+       Alcotest.(check bool)
+         "it goes to the authorization page of GitHub with the client of config.json"
+         true
+         (List.exists
+            (String.starts_with
+               ~prefix:
+                 "location: https://github.com/login/oauth/authorize?client_id=client-of-the-case&")
+            lower);
+       Alcotest.(check int)
+         "it sets one cookie, of the login in flight"
+         1
+         (List.length (List.filter (String.starts_with ~prefix:"set-cookie: __host-masc_oidc_txn=") lower)));
+      (* The transport of a login makes its connections from the environment
+         and under the switch that the boot gave it. *)
+      Alcotest.(check bool)
+        "the transport of a login has the environment of the process"
+        true
+        (Option.is_some (Eio_context.get_env_opt ()));
+      Alcotest.(check bool)
+        "the transport of a login has the switch of the server"
+        true
+        (Option.is_some (Eio_context.get_switch_opt ()));
+      (let status, body = request ~net ~port ~meth:"POST" "/auth/oidc/start" in
+       Alcotest.(check int) "the start of a provider with no client" 404 status;
+       Alcotest.(check bool)
+         "the 404 is the answer of the login route and not of the router"
+         false
+         (String.equal body (snd (request ~net ~port ~meth:"POST" "/mcp"))));
       Alcotest.(check int)
         "a method the table does not hold for a path it holds"
         405
@@ -640,6 +764,10 @@ let () =
             "the boot stops when the accounts were turned off"
             `Quick
             test_stops_when_the_accounts_were_turned_off
+        ; Alcotest.test_case
+            "the boot stops when a login client is refused"
+            `Quick
+            test_stops_when_a_login_client_is_refused
         ; Alcotest.test_case "the boot stops when the port is taken" `Quick test_stops_when_the_port_is_taken
         ; Alcotest.test_case
             "the boot stops when the port cannot be announced"

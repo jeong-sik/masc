@@ -156,6 +156,7 @@
   tls-eio
   x509
   ptime
+  ptime.clock
   masc.crypto_rng
   mtime
   mtime.clock

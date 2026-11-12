@@ -8,8 +8,10 @@
 
     A handler reads the request into the values those modules take and writes
     their answer as it is: its status, its headers (each [set-cookie] among
-    them) and its body. S1 calls {!add_routes} at boot with the zone it opened,
-    and writes the HTTP/2 arms; until then no server holds a zone. *)
+    them) and its body. The account server calls {!add_routes} at boot with
+    the zone it opened ({!Server_accounts}, plan S1a-3a). A handler reads and
+    answers through {!Http_reqd}, so a request of either protocol passes the
+    same code. *)
 
 (** A [GET] and a [POST] to a provider, with the shared deadline
     ({!Masc_http_client.default_request_timeout_sec}) and the bound of
@@ -78,8 +80,8 @@ val github_callback_path : string
     {!Auth_preview.keeper_owner_person}, which gives the namespace of the
     person as well.
 
-    Only the preview command registers them; {!add_routes} is what a server
-    registers (S1). [env] is the environment of the preview process, from
+    Only the preview command registers them; {!add_routes} is what the
+    account server registers (S1a-3a). [env] is the environment of the preview process, from
     which a turn starts the client. *)
 val add_preview_routes
   :  Login_routes.t

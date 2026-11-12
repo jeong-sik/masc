@@ -69,11 +69,11 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 - **R3** 올린 창 전체에 `rest_scope` 를 지금 시각으로 적용한다. `Spent_until t` 이고 `t` 가 앞이면 `note_exhausted` 다. 살아 있는 보고가 타는 것과 같은 함수이고, 같은 source 에만 적용한다(`gate_coverage` 가 `None` 인 source 는 건너뛴다).
 - **R4** `Spent_without_reset` 은 `note_read_without_reset` 을 부르지 않는다. 그 쉼은 「관측한 순간부터 상한까지」인데, 관측한 순간이 재시작 전이다. 재시작 뒤에 그 길이를 다시 재면 masc 가 고른 시각으로 계정을 막게 된다.
 - **R5** 풀리는 시각이 이미 지난 창도 표에는 올린다. 쉬게 하지는 않는다. 화면은 관측 시각으로 오래된 값임을 보여 준다.
-- **R6** 계정 `state` 에 「저장 기록에서 읽음」을 더한다(`reported` · `not_reported_since_start` 옆의 세 번째 값). 시작 뒤 첫 보고가 오면 `reported` 가 된다. `provider_usage_windows_since` 의 뜻은 그대로다.
-- **R7** 저장 기록을 못 읽으면 표는 빈 채로 시작한다. 시작을 막지 않는다. 못 읽은 사실은 로그에 남기고, `state` 는 `not_reported_since_start` 그대로다. 읽지 못한 줄은 `read` 와 같이 건너뛰고 센다.
+- **R6** 저장 기록을 못 읽으면 표는 빈 채로 시작한다. 시작을 막지 않는다. 못 읽은 사실은 로그에 남기고, `state` 는 `not_reported_since_start` 그대로다. 읽지 못한 줄은 `read` 와 같이 건너뛰고 센다.
 
 ## 3. 이 규칙이 하지 않는 것
 
+- **되읽은 계정을 `state` 로 구분하기.** 되읽은 계정은 `reported` 다. 창마다 원래 `observed_at` 이 실려 있고 `provider_usage_windows_since` 보다 이르므로, 화면은 그 둘로 재시작 전 값임을 안다. `state` 에 세 번째 값을 더하면 TUI·Dashboard 디코더의 닫힌 합타입이 같이 바뀌고, 옛 TUI 는 모르는 `state` 에서 디코드를 실패시켜 다시 띄울 때까지 사용량 표를 읽지 못한다. 관측 시각이 이미 말하는 사실이라 더하지 않는다(저장소 주인 결정, 2026-11-12).
 - **Claude Code·Codex 계정을 쉬게 하기.** 되읽은 사용량은 화면에 「계정 한도 소진」으로 보이지만 `quota_exhausted` 는 `false` 로 남고 후보 순서도 그대로다. 1.1 의 계정은 재시작 뒤에도 한 번 거절당한 다음에야 쉰다. 운영자가 목록에서 찬 계정을 알아보는 것까지가 이 RFC 가 그 계정에 주는 것이다.
 - **거절만 있고 보고가 없는 한도.** API provider 의 402·HardQuota 가 말한 풀리는 시각은 사용량 보고가 아니라서 저장 기록에 없다. 재시작하면 지금처럼 잊는다. 이것까지 남기려면 거절을 저장하는 새 기록이 필요하고, 이 RFC 범위 밖이다.
 - **한 번도 보고한 적 없는 계정.** 1.1 의 시각에 다섯 계정(`mistral`, `claude`, `claude_vincent`, `opencode_go`, `tinker`)은 저장 기록이 0건이었다. 사용량을 묻는 경로가 없는 provider 다.
@@ -92,14 +92,13 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 ## 5. 저장소 주인이 정할 것
 
 1. R4: 풀리는 시각 없는 「찼다」를 재시작 뒤에 쉬게 하지 않는다. 대가는 그 계정이 재시작 뒤 한 번 더 거절당하는 것이다.
-2. R6: `state` 에 세 번째 값을 더한다. 더하지 않고 `reported` 로 내면 화면은 관측 시각만으로 구분해야 한다. 더하면 TUI·Dashboard 디코더의 닫힌 합타입이 같은 층에서 바뀐다. 옛 TUI 는 모르는 `state` 를 받으면 디코드를 실패시킨다(strict_parse_no_default). 서버를 먼저 올리면 옛 TUI 의 사용량 표가 다시 띄울 때까지 읽히지 않는다.
-3. 3절의 「거절만 있고 보고가 없는 한도」와 「Claude Code·Codex 계정을 쉬게 하기」를 따로 RFC 로 다룰지. 둘 다 거절을 저장해야 풀린다.
+2. 3절의 「거절만 있고 보고가 없는 한도」와 「Claude Code·Codex 계정을 쉬게 하기」를 따로 RFC 로 다룰지. 둘 다 거절을 저장해야 풀린다.
 
 ## 6. 구현 순서
 
 0. `record_json` 이 `role` 을 적는다(R0). 이 층만 먼저 설치돼도 된다.
 1. `Server_provider_usage_history`: 접힌 14일 결과에서 scope 별 최신 보고를 꺼내는 읽기. 시험: 날짜 파일 둘을 쓴 뒤 서버 상태를 새로 만들어 표와 한도 표를 읽는다. 한 계정에 창이 둘이고 더 오래 전에 보고된 창이 소진인 경우를 넣는다.
-2. `Runtime_provider_usage_window`: 관측자를 부르지 않고 올리는 진입점, `state` 의 세 번째 값, `/api/v1/runtime/resolved` 와 TUI·Dashboard 디코더.
+2. `Runtime_provider_usage_window`: 관측자를 부르지 않고 올리는 진입점(`restore`)과 시작할 때의 연결.
 3. 설치 뒤 실측: 서버를 다시 시작하고 1분 안에 `/api/v1/runtime/resolved` 를 읽는다. 기대값은 저장 기록의 창을 계정·source 별로 `scope_room` 에 넣어 미리 계산한다.
    - `Spent_until t` 이고 `t` 가 읽는 시각보다 앞인 계정: `quota_exhausted: true`, `quota_resets_at` 이 `t`.
    - 모델 호출을 막지 않는 창만 찬 계정(Z.AI `TIME_LIMIT` 100%): `quota_exhausted: false`.

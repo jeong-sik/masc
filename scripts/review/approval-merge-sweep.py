@@ -210,6 +210,11 @@ def select(rows, in_native_stack):
     return [number for _, number in sorted(picked)]
 
 
+def in_native_stack(repo, number):
+    """GitHub leaves `stack` out of a pull request that is in no stack."""
+    return gh(['api', f'repos/{repo}/pulls/{number}']).get('stack') is not None
+
+
 def quota():
     """The token's REST and GraphQL budgets, for the record only.
 
@@ -233,8 +238,7 @@ def main():
     report = {'quota_before': quota()}
     try:
         rows = open_pulls(repo)
-        candidates = select(
-            rows, lambda number: gh(['api', f'repos/{repo}/pulls/{number}'])['stack'] is not None)
+        candidates = select(rows, lambda number: in_native_stack(repo, number))
     except (ValueError, KeyError, TypeError) as error:
         # The quota read before the listing says which budget was empty.
         print(f'approval-merge-sweep: cannot read the open pull requests: {error}\n'

@@ -73,6 +73,14 @@ class Selection(unittest.TestCase):
         rows = [row(1), row(2, 'b1', approvals=0)]
         self.assertEqual(SWEEP.select(rows, lambda n: False), [1])
 
+    def test_a_pull_request_in_no_stack_has_no_stack_field(self):
+        with patch.object(SWEEP, 'gh', return_value={'number': 1}):
+            self.assertFalse(SWEEP.in_native_stack('owner/repo', 1))
+        with patch.object(SWEEP, 'gh', return_value={'number': 1, 'stack': None}):
+            self.assertFalse(SWEEP.in_native_stack('owner/repo', 1))
+        with patch.object(SWEEP, 'gh', return_value={'number': 1, 'stack': {'number': 9}}):
+            self.assertTrue(SWEEP.in_native_stack('owner/repo', 1))
+
     def test_branches_that_name_each_other_end_the_walk(self):
         rows = [row(1), row(2, 'b1'), row(3, 'b2', headRefName='b1')]
         self.assertEqual(SWEEP.select(rows, never), [1])

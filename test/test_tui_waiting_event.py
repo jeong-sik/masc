@@ -469,16 +469,18 @@ class WaitingEventTest(unittest.TestCase):
                     lambda: server.count("queued", "observer-event-written") == 2,
                     "queued events were not sent",
                 )
-                wait_until(
-                    # While the read is held the row keeps its last observation
-                    # and says it is being refreshed (#50974); the warning row
-                    # is only for a keeper with no observation history.
-                    lambda: any(
-                        rendered_row_contains(gamma_event_start, b"gamma", marker)
-                        for marker in ("갱신 대기".encode(), b"revalidating")
-                    ),
-                    "the TUI did not apply the later gamma event",
+                # While the read is held the row keeps its last observation and
+                # draws nothing new for the event (#50974), so the screen has no
+                # change to wait for. The event was sent above; what is left to
+                # check is that the row neither flipped to the warning nor lost
+                # the observation it kept.
+                drain_for(1.0)
+                self.assertFalse(
+                    rendered_row_contains(
+                        gamma_event_start, b"gamma", b"waiting unavailable"
+                    )
                 )
+                self.assertTrue(latest_rendered_row_contains(b"gamma", b"gamma-before"))
                 self.assertEqual(server.count("queued", TURNS_PATH), 0)
                 server.release_held_read.set()
                 wait_until(

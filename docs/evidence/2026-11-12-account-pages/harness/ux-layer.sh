@@ -8,11 +8,14 @@
 #   4. serves one more copy whose policy names another style nonce: the
 #      control that shows the measurement sees a refused sheet;
 #   5. runs ux-measure3.mjs over every state and stops everything it started.
-# usage: ux-layer.sh BIN LABEL OUT PORT [EXTRA_STATES_JSON]
+# usage: ux-layer.sh BIN LABEL OUT PORT [EXTRA_STATES_JSON [EXTRA_PAGES_DIR]]
 #   PORT..PORT+3 are used. EXTRA_STATES_JSON adds [name, base, scenario, path]
 #   rows; in it REAL, NOCLIENT and MOCK stand for the three bases.
+#   EXTRA_PAGES_DIR holds more saved pages (NAME.hdr, NAME.body); the stand-in
+#   answers each at /__saved/NAME, and at /__saved/NAME?hold with its script
+#   refused.
 set -u
-BIN="$1"; LABEL="$2"; OUT="$3"; PORT="$4"; EXTRA="${5:-[]}"
+BIN="$1"; LABEL="$2"; OUT="$3"; PORT="$4"; EXTRA="${5:-[]}"; EXTRA_PAGES="${6:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 T="$OUT/run"
 REAL="http://127.0.0.1:$PORT"
@@ -31,6 +34,7 @@ for name in home invite; do
   sed "s/style-src 'nonce-[0-9a-f]*'/style-src 'nonce-0000000000000000000000000000000000000000000000000000000000000000'/" \
     "$T/pages/$name.hdr" > "$T/control/$name.hdr"
 done
+[ -n "$EXTRA_PAGES" ] && cp "$EXTRA_PAGES"/*.hdr "$EXTRA_PAGES"/*.body "$T/pages/"
 echo "saved: $(grep -c . "$T/pages/home.hdr") header lines, $(wc -c < "$T/pages/home.body" | tr -d ' ') bytes of /"
 
 node "$HERE/ux-mock.mjs" "$T/pages" "$((PORT + 2))" > "$T/mock.log" 2>&1 &

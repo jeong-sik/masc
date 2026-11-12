@@ -677,19 +677,21 @@ val start_range_projection :
 
     With [argument_projection], verified closed raw-seed arguments and
     finished-turn tool results are planned before measuring capacity. A result
-    is planned when its atom is below the completed-turn boundary and its text
-    is at least {!Keeper_turn_driver_try_provider.aged_result_min_bytes}
-    bytes, the floor the Agent Core request uses; the current turn's results
-    stay verbatim. Both are planned only when the raw seed binds to the
-    request ({!Keeper_model_input_demotion.bind_completed_arguments}); when it
-    does not, arguments and results both stay verbatim. A Resume passes no
-    projection ({!argument_projection}). Seed/Librarian validation, digests
-    and observation still use the original source and atom coordinates.
-    Summary selection is
-    pure with respect to blobs; only retained slots are materialized once.
-    Actual success/failure outcomes are replayed, every unmaterialized slot is
-    restored, and the full range/summary decision is repeated without I/O.
-    Custom source projection must run after this function returns. *)
+    is planned when its atom is below the completed-turn boundary, inside the
+    raw seed's closed prefix that bound to the request
+    ({!Keeper_model_input_demotion.bound_atom_count}), and its text is at
+    least {!Keeper_turn_driver_try_provider.aged_result_min_bytes} bytes, the
+    floor the Agent Core request uses; the current turn's results stay
+    verbatim. When the raw seed does not bind
+    ({!Keeper_model_input_demotion.bind_completed_arguments}), arguments and
+    results both stay verbatim. A Resume passes no projection
+    ({!argument_projection}). Seed/Librarian validation, digests and
+    observation still use the original source and atom coordinates. Summary
+    selection is pure with respect to blobs; only retained slots are
+    materialized once. Actual success/failure outcomes are replayed, every
+    unmaterialized slot is restored, and the full range/summary decision is
+    repeated without I/O. Custom source projection must run after this
+    function returns. *)
 
 val carried_history_projection :
   input_source:Keeper_request_source.t ->

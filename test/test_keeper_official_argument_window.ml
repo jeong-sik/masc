@@ -296,6 +296,11 @@ let test_finished_turn_results_leave_as_markers_from_the_floor () = with_base @@
   let unbound = project_with ~seed:(text T.User "Another history." :: List.tl seed) None in
   check string "a seed that does not bind leaves the finished result verbatim"
     (String.make floor 'r') (result_body "at" unbound);
+  (* A seed with an open call before the boundary binds only the closed
+     prefix ahead of that call, and vouches for no index past it. *)
+  let open_seed = project_with ~seed:(List.take 2 seed) None in
+  check string "a finished result past the seed's closed prefix stays verbatim"
+    (String.make floor 'r') (result_body "at" open_seed);
   check bool "with no finished turn there is no source to plan from" true
     (Option.is_none
        (source ~seed:(Some seed) ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0}) base))

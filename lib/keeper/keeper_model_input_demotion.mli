@@ -41,7 +41,17 @@ type pending
 
 type completed_arguments
 (** Frozen argument occurrences from cycles already closed in the raw seed,
-    bound to the immutable blocks of one provider attempt's first request. *)
+    bound to the immutable blocks of one provider attempt's first request,
+    with the length of the closed prefix they were bound over. *)
+
+val bound_atom_count : completed_arguments -> int
+(** Atoms of the raw seed's closed prefix that the request was verified to
+    open with ({!bind_completed_arguments}); never more than its
+    [completed_before]. A raw-seed atom index names the same atom of the
+    request only below this count, so a caller that picks finished-turn
+    results by such an index stops here. {!prepend_argument_messages} and
+    {!protect_argument_prefix} keep it: a pinned prefix holds no atom, and
+    narrowing the arguments changes no verified message. *)
 
 val prepend_argument_messages :
   prefix:Agent_core.Types.message list -> completed_arguments -> completed_arguments

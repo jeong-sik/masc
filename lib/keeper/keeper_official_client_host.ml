@@ -861,11 +861,11 @@ let plan_arguments argument_projection ~measure_message_bytes messages =
            same turn boundary, so one range leaves at one size on both lanes
            (RFC-tool-results-age-out-of-context). The client receives the
            text this module encodes, so that encoding is the wire size.
-           The boundary is an index into the raw seed; only a seed that bound
-           to this request vouches that it is an index into [messages] too. *)
-        let demote_before = match arguments with
-          | Some _ -> source.completed_before
-          | None -> 0 in
+           The boundary is an index into the raw seed. The binding vouches
+           that it is an index into [messages] too only over the seed's
+           closed prefix, so a result past an open call stays verbatim. *)
+        let demote_before =
+          Option.fold ~none:0 ~some:Keeper_model_input_demotion.bound_atom_count arguments in
         Keeper_model_input_demotion.plan ?completed_arguments
           ~min_result_bytes:Keeper_turn_driver_try_provider.aged_result_min_bytes
           ~measure_message_bytes

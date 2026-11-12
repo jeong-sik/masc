@@ -67,6 +67,9 @@ async function loadSseStore() {
     refreshExecution,
     refreshBoard,
     refreshFusionRuns,
+    recoverExecutionReadDebt: vi.fn(),
+    recoverShellReadDebt: vi.fn(),
+    disposeExecutionReadRecovery: vi.fn(),
     serverStatus,
     boardPosts,
     boardSortMode,
@@ -186,6 +189,12 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(resetExecutionSnapshotGeneration).toHaveBeenCalledTimes(1)
     expect(refreshExecution).toHaveBeenCalledWith({ force: true })
     expect(refreshDashboard).toHaveBeenCalledWith({ force: true })
+
+    await vi.advanceTimersByTimeAsync(dashboardDeltaTimeoutMs)
+    await flushAsyncWork()
+    expect(refreshDashboard).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    expect(requestNamespaceTruthNow).toHaveBeenCalledTimes(1)
 
     vi.clearAllTimers()
     cleanup()

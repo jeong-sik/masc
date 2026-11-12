@@ -39,6 +39,20 @@ const observers = new Set<Observer>()
  * accepted observation, or recovery/focus owns completion without polling. */
 export class ObservationPending extends Error {}
 
+const recoveryOwnedFailures = new WeakSet<object>()
+
+/** The store owns this failure's retry debt. Retain the exact error object,
+ * including HTTP status and identity, without mutating/forking its contract. */
+export function retainObservationReadFailure(cause: unknown): unknown {
+  const failure = typeof cause === 'object' && cause !== null ? cause : new Error(String(cause))
+  recoveryOwnedFailures.add(failure)
+  return failure
+}
+
+function hasReadRecoveryOwner(cause: unknown): boolean {
+  return typeof cause === 'object' && cause !== null && recoveryOwnedFailures.has(cause)
+}
+
 /** A combined read must not let an earlier transient error hide a refused
  * sibling request and repeatedly resend that sibling's credential. */
 export function selectObservationReadFailure(causes: readonly unknown[]): unknown | null {
@@ -151,10 +165,10 @@ export function setupObservationRefresh(
         dirty = false
         clearRetry()
         if (options.onError) options.onError(error)
-      } else if (error instanceof ObservationPending) {
+      } else if (error instanceof ObservationPending || hasReadRecoveryOwner(error)) {
         retryDelayMs = TRANSPORT_RETRY_BASE_MS
         // Retain any invalidation received during the read as one trailing
-        // read; otherwise the producer completes it.
+        // read; otherwise the producer or store-owned recovery completes it.
       } else {
         dirty = true
         retryTimer = setTimeout(() => {

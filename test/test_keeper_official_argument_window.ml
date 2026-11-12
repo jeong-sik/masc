@@ -271,7 +271,7 @@ let test_finished_turn_results_leave_as_markers_from_the_floor () = with_base @@
   let history = seed @ [text T.User "Go on."] @ result_exchange "now" (floor*2) in
   let completed_before = snd (Runtime_model_input_tail_window.annotate seed) in
   let turn_start = Keeper_carried_front.Turn_boundary {end_atom=completed_before} in
-  let project_with ?(seed = seed) tools =
+  let project_with ?(seed = seed) ?(history = history) ?(turn_start = turn_start) tools =
     let argument_projection =
       projection ?tools (source ~seed:(Some seed) ~turn_start base) base in
     Host.start_range_projection
@@ -296,11 +296,30 @@ let test_finished_turn_results_leave_as_markers_from_the_floor () = with_base @@
   let unbound = project_with ~seed:(text T.User "Another history." :: List.tl seed) None in
   check string "a seed that does not bind leaves the finished result verbatim"
     (String.make floor 'r') (result_body "at" unbound);
-  (* A seed with an open call before the boundary binds only the closed
-     prefix ahead of that call, and vouches for no index past it. *)
-  let open_seed = project_with ~seed:(List.take 2 seed) None in
-  check string "a finished result past the seed's closed prefix stays verbatim"
-    (String.make floor 'r') (result_body "at" open_seed);
+  (* A call left unanswered mid-history stays open in the raw seed, and
+     admission closes it in the history the request carries. The closing
+     result opens no atom, so the turn boundary still names the same atoms
+     and the finished result after it leaves as a marker, as it does on the
+     Agent Core lane. *)
+  let lost = T.make_message ~role:T.Assistant
+      [T.ToolUse {id="lost";name="record";input=`Assoc ["command",`String "lost"]}] in
+  let open_seed = text T.User "The Librarian read this." :: lost
+                  :: text T.User "Continue." :: result_exchange "at" floor in
+  let admitted = match Keeper_transcript_unit.close_open_cycles open_seed with
+    | Ok {messages; closed_tool_use_ids=["lost"]} -> messages
+    | Ok _ -> fail "admission must close exactly the lost call"
+    | Error error -> fail (Keeper_transcript_unit.show_structural_error error) in
+  let end_atom = snd (Runtime_model_input_tail_window.annotate open_seed) in
+  let closed_mid_history =
+    project_with ~seed:open_seed
+      ~history:(admitted @ [text T.User "Go on."] @ result_exchange "now" (floor*2))
+      ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom}) None in
+  check int "the closing result opens no atom" end_atom
+    (snd (Runtime_model_input_tail_window.annotate admitted));
+  check bool "a finished result after a call admission closed leaves as a marker" true
+    (is_marker (result_body "at" closed_mid_history));
+  check string "the current turn's result after it stays verbatim"
+    (String.make (floor*2) 'r') (result_body "now" closed_mid_history);
   check bool "with no finished turn there is no source to plan from" true
     (Option.is_none
        (source ~seed:(Some seed) ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0}) base))

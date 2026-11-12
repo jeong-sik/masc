@@ -12,28 +12,17 @@ module Occurrences = Map.Make (struct
 end)
 
 type completed_arguments =
-  { occurrences : (Agent_core.Types.content_block * string) Occurrences.t
-  ; bound_atom_count : int
-  }
-
-let bound_atom_count arguments = arguments.bound_atom_count
+  (Agent_core.Types.content_block * string) Occurrences.t
 
 let prepend_argument_messages ~prefix arguments =
   let offset = List.length prefix in
-  { arguments with
-    occurrences =
-      Occurrences.fold (fun (message_index, block_index) value shifted ->
-        Occurrences.add (message_index + offset, block_index) value shifted)
-        arguments.occurrences Occurrences.empty
-  }
+  Occurrences.fold (fun (message_index, block_index) value shifted ->
+    Occurrences.add (message_index + offset, block_index) value shifted)
+    arguments Occurrences.empty
 ;;
 
 let protect_argument_prefix ~through_message arguments =
-  { arguments with
-    occurrences =
-      Occurrences.filter (fun (message_index, _) _ -> message_index > through_message)
-        arguments.occurrences
-  }
+  Occurrences.filter (fun (message_index, _) _ -> message_index > through_message) arguments
 ;;
 
 type argument_binding_error =
@@ -82,7 +71,7 @@ let bind_completed_arguments ~completed_before ~seed ~replay_prefix messages =
     Keeper_replay_prefix.split ~prefix:closed canonical
     |> Result.map_error (fun error -> Argument_seed_prefix_mismatch error)
   in
-  let labelled, bound_atom_count = Runtime_model_input_tail_window.annotate closed in
+  let labelled, _ = Runtime_model_input_tail_window.annotate closed in
   let rec bind_blocks message_index arguments expected actual =
     match expected, actual with
     | [], [] -> Ok arguments
@@ -121,7 +110,6 @@ let bind_completed_arguments ~completed_before ~seed ~replay_prefix messages =
       bind_messages (message_index + 1) arguments rest actual
   in
   bind_messages 0 Occurrences.empty labelled messages
-  |> Result.map (fun occurrences -> { occurrences; bound_atom_count })
 ;;
 
 (* Where one stored body sits in its block. A [ToolResult] has its [content],
@@ -309,12 +297,8 @@ let shrinks_on_the_wire ~before ~after =
   | Some (_ : int), None | None, (Some _ | None) -> false
 ;;
 
-let plan ?completed_arguments ?(min_result_bytes = 0)
+let plan ?(completed_arguments = Occurrences.empty) ?(min_result_bytes = 0)
     ~measure_message_bytes ~measure_wire_bytes ~demote_before messages =
-  let completed_arguments =
-    Option.fold ~none:Occurrences.empty ~some:(fun arguments -> arguments.occurrences)
-      completed_arguments
-  in
   let labelled, _atom_count = Runtime_model_input_tail_window.annotate messages in
   if demote_before <= 0 && Occurrences.is_empty completed_arguments
   then { messages; pending = [] }

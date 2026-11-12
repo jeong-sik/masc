@@ -677,12 +677,14 @@ val start_range_projection :
 
     With [argument_projection], verified closed raw-seed arguments and
     finished-turn tool results are planned before measuring capacity. A result
-    is planned when its atom is below the completed-turn boundary, inside the
-    raw seed's closed prefix that bound to the request
-    ({!Keeper_model_input_demotion.bound_atom_count}), and its text is at
-    least {!Keeper_turn_driver_try_provider.aged_result_min_bytes} bytes, the
-    floor the Agent Core request uses; the current turn's results stay
-    verbatim. When the raw seed does not bind
+    can be planned only when its atom is below the completed-turn boundary and
+    its text is at least
+    {!Keeper_turn_driver_try_provider.aged_result_min_bytes} bytes, the floor
+    the Agent Core request uses; {!Keeper_model_input_demotion.plan} then
+    plans it only where its marker makes the message smaller. The current
+    turn's results stay verbatim. The boundary was verified on the turn's
+    admitted history, whose atoms are the raw seed's: admission adds only Tool
+    results, which open no atom. When the raw seed does not bind
     ({!Keeper_model_input_demotion.bind_completed_arguments}), arguments and
     results both stay verbatim. A Resume passes no projection
     ({!argument_projection}). Seed/Librarian validation, digests and

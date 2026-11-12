@@ -331,15 +331,22 @@ sha256 of the rows they came from. `compare` reads the baseline from the file
 and measures only the draft's runs (`prompt_counts.py`), so a comparison needs
 neither the baseline's run folders nor its judges' decisions, and neither can
 move a pinned count. A model whose baseline is `null` cannot be compared yet.
+A draft run that holds the rows a pinned baseline was counted from is refused.
+`compare.json` names the rows of both sides by sha256.
 
 `prompt_compare.py baseline --runs <runs.json>` measures runs of the pinned
 template and prints the baseline to put in `prompt_lines.json`. A baseline
-names the pass lines, the template and the `prompt_counts.py` it was counted
-under. Once the file pins another of them the baseline is stale, and
-`prompt_lines.py` refuses the file: set the baseline to `null`, count the runs
-again and pin what `baseline` prints. `prompt_lines.json` also pins
-`prompt_counts.py`, `prompt_lines.py` and `prompt_compare.py` by sha256, and
-both commands stop when one of them holds other bytes.
+names the provider and the model it was counted for, and the pass lines, the
+template and the `prompt_counts.py` it was counted under. Once the file names
+another of them the baseline is stale, and `prompt_lines.py` refuses the file.
+After a change of `prompt_counts.py` alone, set the baseline to `null`, count
+the same runs again and pin what `baseline` prints. After a change of the
+model, the pass lines or the template the old runs are refused too, so the
+model runs again first. `prompt_lines.json` also pins `prompt_counts.py`,
+`prompt_lines.py` and `prompt_compare.py` by sha256, and both commands stop
+when one of them holds other bytes. The file is read as written: a key the
+comparison does not read, a key written twice in one object, or a value of
+another shape is refused.
 
 Each metric counts hits over
 chances, summed over a side's runs. Its noise σ is the binomial standard error

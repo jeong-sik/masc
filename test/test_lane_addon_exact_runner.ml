@@ -492,6 +492,21 @@ let test_a_refused_input_is_final () =
     | Exact.Final (Exact.Call_final (Exact.Input_refused Exact.Invalid_request)) -> ()
     | _ -> fail "a 400 refusal of the request must be input_refused")
 
+let test_a_slot_that_names_the_size_decides_the_refusal ~size_first () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let unnamed =
+      F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ -> `Bad_request, refusal_body "invalid_request_error"))
+    in
+    let sized =
+      F.start_server ~sw ~net ~clock
+        (F.Reply_with (fun _ _ -> `Request_entity_too_large, refusal_body "invalid_request_error"))
+    in
+    let slots = [ { F.id = "unnamed"; base_url = unnamed.base_url }; { F.id = "sized"; base_url = sized.base_url } ] in
+    publish ~base_path (if size_first then List.rev slots else slots);
+    match run_request ~base_path ~store "size-named" with
+    | Exact.Final (Exact.Call_final (Exact.Input_refused Exact.Request_body_refused)) -> ()
+    | _ -> fail "a walk where one slot names the size must end on that refusal")
+
 let test_a_rate_limit_is_not_final_and_is_sent_again () =
   with_case (fun ~sw ~net ~clock ~base_path ~store ->
     let server =
@@ -1455,6 +1470,10 @@ let () =
         ; test_case "unknown capacity boundary is not a terminal input refusal" `Quick (test_original_capacity_evidence_keeps_its_retry_meaning Boundary_unknown)
         ; test_case "measured input rejection stays terminal" `Quick (test_original_capacity_evidence_keeps_its_retry_meaning Input_rejected)
         ; test_case "a refused input is final" `Quick test_a_refused_input_is_final
+        ; test_case "a size refusal after an unnamed one ends the walk" `Quick
+            (test_a_slot_that_names_the_size_decides_the_refusal ~size_first:false)
+        ; test_case "a size refusal before an unnamed one ends the walk" `Quick
+            (test_a_slot_that_names_the_size_decides_the_refusal ~size_first:true)
         ; test_case "a rate limit is not final and is sent again" `Quick test_a_rate_limit_is_not_final_and_is_sent_again
         ; test_case "provider error type is not exposed" `Quick test_provider_error_type_is_not_exposed_in_the_refusal_detail
         ; test_case "an auth refusal is not final" `Quick test_an_auth_refusal_is_not_final

@@ -143,6 +143,9 @@ let contains ~needle haystack =
 let plain_surface_state view =
   let state = Masc_tui_types.create_state ~workspace:"" ~port:0 () in
   state.view <- view;
+  (* The rows below are read in English, so the state that stamps the help
+     item is an English one. *)
+  state.ui_language <- Masc_tui_types.Lang_en;
   state
 
 let surface_row state view width =

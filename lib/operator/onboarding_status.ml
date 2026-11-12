@@ -11,6 +11,7 @@ type check_id =
   | Sandbox
   | Keeper_persistence
   | Multi_account_request
+  | Person_account_homes
 
 type role = Required_to_open | Advisory
 
@@ -56,6 +57,7 @@ let check_id_name = function
   | Sandbox -> "sandbox"
   | Keeper_persistence -> "keeper_persistence"
   | Multi_account_request -> "multi_account_request"
+  | Person_account_homes -> "person_account_homes"
 
 (* Existing history opens on what every Keeper in the workspace shares: the
    workspace, a runtime.toml the server can load, and Keeper metadata its boot
@@ -66,11 +68,13 @@ let check_id_name = function
    sandbox concern the Keeper the journey creates: the server skips an imp it
    cannot load and boots every other Keeper, so a workspace whose history
    belongs to other Keepers opens and reports them beside it. A request for
-   accounts decides which server boots at all, so it is not advisory. *)
+   accounts decides which server boots at all, so it is not advisory. Runtime
+   roots that persons left behind stop the turns that use a CLI's native tools,
+   not the server or its history, so they are advisory. *)
 let role = function
   | Workspace | Runtime_configuration | Keeper_persistence | Multi_account_request ->
     Required_to_open
-  | Model_connection | Keeper_declaration | Sandbox -> Advisory
+  | Model_connection | Keeper_declaration | Sandbox | Person_account_homes -> Advisory
 
 let role_name = function
   | Required_to_open -> "required_to_open"
@@ -253,6 +257,17 @@ let keeper_checks ~sandbox base_path =
        [Start_imp];
      sandbox_check ~sandbox ~base_path]
 
+(* A workspace that had accounts and was turned off keeps the logins of its
+   persons until the operator removes them, and the single-user server refuses
+   the model turns with native tools while they are there. The check is there
+   only then, with the sentence the refused turn would give. *)
+let person_homes_checks base_path =
+  let remain = Runtime_account_home_layout.persons_remain ~base_path in
+  match Runtime_account_access.person_homes_notice remain, remain with
+  | None, (Ok _ | Error _) -> []
+  | Some notice, Ok _ -> [check Person_account_homes Needs_setup notice []]
+  | Some notice, Error (_ : Unix.error) -> [check Person_account_homes Needs_verification notice []]
+
 let inspected ~sandbox ~base_path =
   match base_path with
   | None ->
@@ -286,7 +301,8 @@ let inspected ~sandbox ~base_path =
       let selected_runtime, selected_model, models = model_checks config_path in
       { base_path = Some base_path; selected_runtime; selected_model;
         checks = workspace_found
-          :: (models @ keeper_checks ~sandbox base_path @ [persistence_check base_path]) }
+          :: (models @ keeper_checks ~sandbox base_path @ [persistence_check base_path]
+              @ person_homes_checks base_path) }
 
 let inspect ~sandbox ~base_path =
   inspected ~sandbox ~base_path

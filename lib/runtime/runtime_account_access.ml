@@ -423,7 +423,7 @@ let native_refusal_to_string = function
        posture %S: the CLI runs as the user of the server process, so its own tools could \
        read the logins kept there. A Keeper whose client supports the posture none runs \
        with keeper.tools.native = \"none\" in its profile; the other turns run once \
-       .masc/accounts is removed"
+       .masc/accounts is removed, which deletes the CLI logins that those persons made there"
       (Runtime_native_tools.to_string posture)
   | Person_homes_unread { posture; unread } ->
     Printf.sprintf
@@ -460,4 +460,22 @@ let authorize_native posture =
   | ( Published (Multi_account { zone = _; base_path = _; now = _ })
     , (Runtime_native_tools.Native_read | Native_full) ) ->
     Error (Native_tools_reach_other_homes posture)
+;;
+
+let person_homes_notice = function
+  | Ok false -> None
+  | Ok true ->
+    Some
+      "this workspace keeps .masc/accounts, where the runtime roots of persons are. A model \
+       turn that uses the native tools of its CLI is refused while it is there: the CLI runs \
+       as the user of the server process, so its own tools could read the logins kept there. \
+       A Keeper whose client supports the posture none runs with keeper.tools.native = \
+       \"none\" in its profile; the other turns run once .masc/accounts is removed, which \
+       deletes the CLI logins that those persons made there"
+  | Error unread ->
+    Some
+      (Printf.sprintf
+         "whether .masc/accounts, where the runtime roots of persons are, remains could not be \
+          read (%s), so no model turn that uses the native tools of its CLI starts"
+         (Unix.error_message unread))
 ;;

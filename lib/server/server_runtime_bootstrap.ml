@@ -758,6 +758,14 @@ let initialize_owner_state_blocking
    | Error Runtime_account_access.Already_published ->
      raise (Owner_initialization_failed Account_access_already_published));
   let base_path = Authz_boot_mode_read.single_user_base_path single_user in
+  (* The turns that [Runtime_account_access.authorize_native] refuses are
+     named once here, before a Keeper meets the refusal (issue #51414). *)
+  (match
+     Runtime_account_access.person_homes_notice
+       (Runtime_account_home_layout.persons_remain ~base_path)
+   with
+   | None -> ()
+   | Some notice -> Log.Server.warn "%s" notice);
   (* DET-OK: the optional transport spelling and the required owner BasePath
      denote the same requested path when the former is absent. *)
   let requested_base_path = Option.value input_base_path ~default:base_path in

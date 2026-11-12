@@ -249,14 +249,14 @@ let only_shared_checks_hold_history_closed () =
   let expected : Onboarding_status.check_id -> Onboarding_status.role = function
     | Workspace | Runtime_configuration | Keeper_persistence | Multi_account_request ->
       Required_to_open
-    | Model_connection | Keeper_declaration | Sandbox -> Advisory
+    | Model_connection | Keeper_declaration | Sandbox | Person_account_homes -> Advisory
   in
   List.iter (fun id ->
       check bool (Onboarding_status.check_id_name id) true
         (Onboarding_status.role id = expected id))
     Onboarding_status.[ Workspace; Runtime_configuration; Keeper_persistence;
                         Model_connection; Keeper_declaration; Sandbox;
-                        Multi_account_request ];
+                        Multi_account_request; Person_account_homes ];
   check bool "no workspace never opens history" true
     (Onboarding_status.opening (inspect ~base_path:None)
      = Onboarding_status.Needs_journey)
@@ -296,6 +296,26 @@ let a_workspace_that_asks_for_accounts_is_an_account_installation () =
   write config single_user;
   check bool "a request for a single user changes nothing" true
     (Onboarding_status.opening (inspect ()) = Onboarding_status.Open_existing_history);
+  (* Runtime roots that persons left behind are reported, with the turns the
+     server refuses while they are there; the history still opens. *)
+  let ids observed =
+    List.map (fun (c : Onboarding_status.check) -> Onboarding_status.check_id_name c.id)
+      observed.Onboarding_status.checks in
+  check bool "no runtime roots of persons, no check" false
+    (List.mem "person_account_homes" (ids (inspect ())));
+  let left_behind = Filename.concat root Runtime_account_home_layout.accounts_dir in
+  Unix.mkdir left_behind 0o700;
+  let with_roots = inspect () in
+  check bool "runtime roots of persons are reported" true
+    (condition Onboarding_status.Person_account_homes with_roots = Onboarding_status.Needs_setup);
+  check (option string) "with the sentence a refused turn would get first"
+    (Runtime_account_access.person_homes_notice (Ok true))
+    (Some (message Onboarding_status.Person_account_homes with_roots));
+  check (option string) "a workspace without them is told nothing" None
+    (Runtime_account_access.person_homes_notice (Ok false));
+  check bool "and the history still opens" true
+    (Onboarding_status.opening with_roots = Onboarding_status.Open_existing_history);
+  Unix.rmdir left_behind;
   write config multi_account;
   let asked = List.length (calls ()) in
   let observed = inspect () in

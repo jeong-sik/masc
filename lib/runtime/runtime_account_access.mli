@@ -323,3 +323,12 @@ val native_refusal_to_string : native_refusal -> string
     that appears between the two is seen by the next turn, not by this
     one. *)
 val authorize_native : Runtime_native_tools.posture -> (unit, native_refusal) result
+
+(** What the operator of a single-user workspace is told before any turn
+    runs, from the answer of {!Runtime_account_home_layout.persons_remain}:
+    [None] when no runtime root of a person remains, and otherwise that
+    {!authorize_native} refuses the model turns with native tools, and what
+    opens them again. [masc doctor] and the boot of the single-user server
+    say it, so the state is known before a Keeper turn is refused. It reads
+    nothing and judges no turn. *)
+val person_homes_notice : (bool, Unix.error) result -> string option

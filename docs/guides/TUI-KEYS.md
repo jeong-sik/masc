@@ -41,7 +41,7 @@ The command palette is `:`.
 | `Enter` | open the selected destination; never approve |
 | `p` | approvals and questions |
 | `g` | the operator quiz's Results: scorecard windows and wrong-answer notes |
-| `;` | held calls, questions, Goal confirmations and task owner routes |
+| `;` | held calls, questions, Goal confirmations and tasks on the operator list |
 | `m` | account windows and Keeper usage |
 | `s` | phrases, arrangements and recorded takes; no Keeper or score required |
 
@@ -364,8 +364,6 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Enter` | Actions/Everything: exact selected event; Turns are aggregates |
 | `Esc` | close event evidence; from the list, back to Dashboard |
 | `Home/End` | g and G as well; the ring counts back from the newest, so its top is now |
-| `Tab` | next |
-| `q` | quit |
 
 ## Keeper detail
 
@@ -791,8 +789,6 @@ count is drawn beyond the available space.
 | `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |
 | `r` | reload |
-| `Tab` | next |
-| `q` | quit |
 
 ## Features & plugins / Tools
 

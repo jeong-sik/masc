@@ -66,10 +66,12 @@ type stalled =
         (** The one line {!Operator_task_attention.summary} wrote. The sentence
             is made there rather than here so the three surfaces that draw this
             row cannot describe it three ways. *)
-  ; since_iso : string  (** when the task was claimed or started *)
+  ; since_iso : string
+        (** when the task was claimed or started, or its completion submitted *)
   }
-(** A task with no Keeper route, or a Keeper record that does not decode.
-    Neither observation proves its owner stopped or asked a question. *)
+(** A task with no Keeper route, a Keeper record that does not decode, or a
+    completion submitted and not yet decided. None of these proves an owner
+    or a review stopped, or that anyone asked a question. *)
 
 type goal_to_confirm =
   { goal_id : string  (** the Goal the row is about, so a key can open it *)

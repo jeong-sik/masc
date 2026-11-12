@@ -248,7 +248,9 @@ for ending in 'INT to its process group, as Ctrl-C sends it' \
   'HUP to its process group, as a closing terminal sends it' 'TERM to the script alone' \
   'KILL to its process group, as a supervisor that gives up sends it'; do
   case "${ending}" in
-    # Bash acts on a signal sent to it alone once its foreground command ends.
+    # The signal reaches the script alone, so the command the script runs at
+    # that moment outlives it. A short step is gone at once; the long one
+    # would stay behind for ten minutes.
     TERM*) SHORT_STEPS=1 run_harness ;;
     *) run_harness ;;
   esac

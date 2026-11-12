@@ -100,6 +100,17 @@ val keeper_turn_caller
   -> Auth_gate.request
   -> (turn_caller, Login_routes.answer) result
 
+(** Who reads what they asked their Keeper and what it answered (plan
+    S1b-3). The request is judged as [Manage_own_keeper], as {!keeper_owner}
+    judges it, and as [Read_auth], as {!whoami} judges it: a personal access
+    token needs both effects, so one that lists Keepers and lacks
+    [read_state] reads no conversation. *)
+val keeper_conversation_reader
+  :  Authz_zone.trusted
+  -> now_ms:int
+  -> Auth_gate.request
+  -> (person, Login_routes.answer) result
+
 (** A 200 JSON [{"provider_accounts": [...], "runtimes": [...]}]: the ids of
     the accounts the person owns ({!Authz_provider_account.owned}), and the
     Runtimes they own as [{"runtime_id":...,"provider_account_id":...}]

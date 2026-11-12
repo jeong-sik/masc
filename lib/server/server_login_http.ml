@@ -361,11 +361,29 @@ let new_keeper_conversation t ~env ~base_path request reqd =
        with_body reqd (fun body ->
          respond
            reqd
-           (Server_preview_keeper_turn.start_conversation
+           (Server_preview_keeper_conversation.start
               ~env
               ~person:(person_of t person)
               ~base_path
               ~body)))
+;;
+
+(* What a person asked and was answered is read by one judged both as the
+   owner of the Keeper and as a reader of state: a token that lists Keepers
+   and has no [read_state] does not read their conversations (plan S1b-3). *)
+let keeper_conversation t ~base_path request reqd =
+  as_gated
+    t
+    ~gate:Auth_preview.keeper_conversation_reader
+    request
+    reqd
+    (fun (_ : Authz_state.t) person ->
+       respond
+         reqd
+         (Server_preview_keeper_conversation.read
+            ~person:(person_of t person)
+            ~base_path
+            ~query:(query_of request)))
 ;;
 
 (* A turn starts the client of the person's account on a home under their
@@ -425,6 +443,7 @@ let add_person_routes t ~env ~base_path router =
        access
        Auth_preview_keeper.conversation_path
        (new_keeper_conversation t ~env ~base_path)
+  |> Server_route.get access Auth_preview_keeper.conversation_path (keeper_conversation t ~base_path)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
   |> Server_route.post mcp_access Server_person_mcp.path (person_mcp t ~env ~base_path)

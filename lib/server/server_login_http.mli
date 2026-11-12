@@ -72,9 +72,9 @@ val github_callback_path : string
       ({!Auth_preview_keeper}, plan D1-5)
     - [POST /api/v1/auth/keepers/turn], one turn of the person's Keeper on
       the Runtime they gave it ({!Server_preview_keeper_turn}, plan D2-8)
-    - [POST /api/v1/auth/keepers/conversation], a new conversation of the
-      person's Keeper ({!Server_preview_keeper_turn.start_conversation},
-      plan S1b-3)
+    - [POST] and [GET /api/v1/auth/keepers/conversation], a new
+      conversation of the person's Keeper and the read of what was asked and
+      answered ({!Server_preview_keeper_conversation}, plan S1b-3)
     - [POST /mcp], the MCP endpoint of the person ({!Server_person_mcp},
       plan S1b-1), registered as [Self_authenticated Person_mcp]. It is
       judged as [Read_auth] before its body is read, and each tool makes

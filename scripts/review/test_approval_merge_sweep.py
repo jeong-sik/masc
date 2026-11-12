@@ -86,10 +86,8 @@ class Selection(unittest.TestCase):
         self.assertEqual(SWEEP.select(rows, never), [1])
 
 
-def ref(name, tip=1, *pulls, truncated=False, protected=False, ruled=0):
+def ref(name, tip=1, *pulls, truncated=False):
     return {'name': name, 'target': {'oid': sha(tip)},
-            'branchProtectionRule': {'id': 'r'} if protected else None,
-            'rules': {'totalCount': ruled},
             'associatedPullRequests': {'pageInfo': {'hasNextPage': truncated}, 'nodes': [
                 {'state': state, 'headRefOid': sha(head), 'isCrossRepository': fork,
                  'mergedBy': None if merger is None else {'login': merger}}
@@ -101,7 +99,7 @@ WORKER = ('MERGED', 1, False, 'github-actions')
 
 class MergedLeftovers(unittest.TestCase):
     def test_a_branch_whose_worker_merge_ended_at_its_tip_goes(self):
-        self.assertEqual(SWEEP.merged_leftovers([ref('b1', 1, WORKER)], []), [('b1', sha(1))])
+        self.assertEqual(SWEEP.merged_leftovers([ref('b1', 1, WORKER)], [], set()), [('b1', sha(1))])
 
     def test_everything_else_stays(self):
         refs = [ref('main', 1, WORKER),
@@ -111,14 +109,31 @@ class MergedLeftovers(unittest.TestCase):
                 ref('base-of-open', 1, WORKER),
                 ref('head-of-open', 1, WORKER),               # its open pull request was not listed
                 ref('too-many-pull-requests', 1, WORKER, truncated=True),
-                ref('develop', 1, WORKER, protected=True),
-                ref('staging', 1, WORKER, ruled=1),
+                ref('develop', 1, WORKER),
                 ref('merged-by-a-person', 1, ('MERGED', 1, False, 'someone')),
                 ref('merger-unknown', 1, ('MERGED', 1, False, None)),
                 ref('fork', 1, ('MERGED', 1, True, 'github-actions')),
                 ref('no-pull-request', 1)]
         rows = [row(9, 'base-of-open'), row(8, headRefName='head-of-open')]
-        self.assertEqual(SWEEP.merged_leftovers(refs, rows), [])
+        self.assertEqual(SWEEP.merged_leftovers(refs, rows, {'develop'}), [])
+
+    def test_protected_names_come_from_every_page_of_the_rest_listing(self):
+        pages = {1: [{'name': f'release/{n}'} for n in range(100)], 2: [{'name': 'develop'}]}
+        def listing(arguments):
+            return pages[int(arguments[-1].rsplit('=', 1)[1])]
+        with patch.object(SWEEP, 'gh', side_effect=listing):
+            names = SWEEP.protected_branches('owner/repo')
+        self.assertEqual(len(names), 101)
+        self.assertIn('develop', names)
+
+    def test_an_unreadable_protection_listing_deletes_nothing(self):
+        with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, WORKER)]), \
+             patch.object(SWEEP, 'open_pulls', return_value=[]), \
+             patch.object(SWEEP, 'protected_branches', side_effect=ValueError('refused')), \
+             patch.object(SWEEP.subprocess, 'run') as run:
+            record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), False)
+        run.assert_not_called()
+        self.assertEqual(record, {'error': 'refused'})
 
     def test_deleting_carries_a_lease_on_the_tip(self):
         done = subprocess.CompletedProcess([], 0, '', '')
@@ -132,6 +147,7 @@ class MergedLeftovers(unittest.TestCase):
         refused = subprocess.CompletedProcess([], 1, '', 'stale info')
         with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, WORKER)]), \
              patch.object(SWEEP, 'open_pulls', return_value=[]), \
+             patch.object(SWEEP, 'protected_branches', return_value=set()), \
              patch.object(SWEEP.subprocess, 'run', return_value=refused):
             record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), False)
         self.assertEqual(record, {'found': 1, 'deleted': 0, 'not_reached': 0,
@@ -143,6 +159,7 @@ class MergedLeftovers(unittest.TestCase):
     def test_a_pull_request_opened_during_the_sweep_keeps_its_base(self):
         with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, WORKER)]), \
              patch.object(SWEEP, 'open_pulls', return_value=[row(9, 'b1')]) as listing, \
+             patch.object(SWEEP, 'protected_branches', return_value=set()), \
              patch.object(SWEEP.subprocess, 'run') as run:
             record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), False)
         listing.assert_called_once()
@@ -152,6 +169,7 @@ class MergedLeftovers(unittest.TestCase):
     def test_a_dry_run_deletes_nothing(self):
         with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, WORKER)]), \
              patch.object(SWEEP, 'open_pulls', return_value=[]), \
+             patch.object(SWEEP, 'protected_branches', return_value=set()), \
              patch.object(SWEEP.subprocess, 'run') as run:
             record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), True)
         run.assert_not_called()

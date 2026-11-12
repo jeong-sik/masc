@@ -80,11 +80,11 @@ let render_fusion_list (state : state) =
     | None ->
         let reading_note =
           match failure with
-          | None -> title_missing_reading ~error:None
+          | None -> here_missing_reading state ~error:None
           | Some _ -> ""
         in
         here_row ~cols state ~path:[ fusion_step ]
-          ~readings:[ String.trim reading_note ] ~position:None
+          ~readings:[ reading_note ] ~position:None
     | Some _ ->
         let completed_count =
           List.fold_left

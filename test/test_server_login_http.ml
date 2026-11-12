@@ -1297,6 +1297,8 @@ let the_route_table () =
       "the paths"
       [ "/api/v1/auth/allowlist"
       ; "/api/v1/auth/allowlist/"
+      ; "/api/v1/auth/invites"
+      ; "/api/v1/auth/invites/"
       ; "/api/v1/auth/pats"
       ; "/api/v1/auth/pats"
       ; "/api/v1/auth/pats/"

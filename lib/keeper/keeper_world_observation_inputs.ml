@@ -21,10 +21,20 @@ type current_task_observation =
       ; error : string
       }
 
+type task_age =
+  | Age_days of int
+  | Created_at_unreadable
+
+type task_goal_links =
+  | Active_goals of string list
+  | Goal_links_unread
+
 type claimable_task_identity =
   { task_id : Keeper_id.Task_id.t
   ; priority : int
-  ; created_at : string
+  ; age : task_age
+  ; returns : int
+  ; goal_links : task_goal_links
   }
 
 type held_task_skills =
@@ -126,6 +136,114 @@ let tasks_with_identities_memoized tasks =
     result
 ;;
 
+(* The in-progress Goals each Task is linked to, from the Goal store and the
+   primary link registry: the readers the turn's task context uses. [Error]
+   when either cannot be read, so the caller marks every row unread instead
+   of unlinked. The registry is read only when a Goal is in progress. *)
+let active_goals_by_task ~(config : Workspace.config) =
+  match Goal_store.list_goals_result config () with
+  | Error unavailable -> Error (Goal_store.unavailable_to_string unavailable)
+  | Ok goals ->
+    (match
+       List.filter_map
+         (fun (goal : Goal_store.goal) ->
+            if Goal_phase.admits_self_directed_progress goal.phase
+            then Some goal.id
+            else None)
+         goals
+     with
+     | [] -> Ok (fun ~task_id:(_ : string) -> [])
+     | active_goal_ids ->
+       Result.map
+         (fun links ->
+            let by_task =
+              Workspace_goal_index.build_task_goal_map
+                ~goal_task_links:
+                  (List.filter
+                     (fun (goal_id, (_ : string list)) ->
+                        List.exists (String.equal goal_id) active_goal_ids)
+                     links)
+                ()
+            in
+            fun ~task_id ->
+              Workspace_goal_index.goals_for_task_in_map by_task ~task_id
+              |> List.sort_uniq String.compare)
+         (Workspace_goal_index.read_goal_task_links_authoritative_r config))
+;;
+
+let seconds_per_day = 86_400.0
+
+(* The order the rows are shown in, which is not the order a claim without a
+   task id picks in ([Workspace.claim_next_r]: priority, then oldest):
+
+   1. Tasks linked to an in-progress Goal. A Goal is what the operator and
+      the Keepers declared they are advancing now.
+   2. The author's priority.
+   3. Newest first, so a Task a turn just added is not behind every older
+      sibling of its priority (#29101).
+   4. Task id.
+
+   Measured on one fleet backlog on 2026-11-12, 465 claimable Tasks of which
+   84 were linked to an in-progress Goal: the first ten rows of the claim
+   order were 28 to 66 days old and one of them was Goal-linked; the first
+   ten rows of this order were 6 to 14 days old and all ten were Goal-linked.
+
+   A Task whose [created_at] does not parse sorts after the ones that do
+   within its priority. Its age is [Created_at_unreadable], not zero. When the
+   Goal links cannot be read every row is [Goal_links_unread] and step 1 does
+   not apply. *)
+let claimable_rows ~(config : Workspace.config) ~now = function
+  | [] -> []
+  | claimable ->
+    let goal_links_of =
+      match active_goals_by_task ~config with
+      | Ok active_goals -> fun ~task_id -> Active_goals (active_goals ~task_id)
+      | Error detail ->
+        Log.Keeper.warn "claimable tasks: Goal links unreadable: %s" detail;
+        fun ~task_id:(_ : string) -> Goal_links_unread
+    in
+    let goal_rank (row : claimable_task_identity) =
+      match row.goal_links with
+      | Active_goals (_ :: _) -> 0
+      | Active_goals [] | Goal_links_unread -> 1
+    in
+    let newest_first left right =
+      match left, right with
+      | Some left, Some right -> Float.compare right left
+      | Some _, None -> -1
+      | None, Some _ -> 1
+      | None, None -> 0
+    in
+    claimable
+    |> List.map (fun ((task : Masc_domain.task), task_id) ->
+      let created = Masc_domain.parse_iso8601_opt task.created_at in
+      ( created
+      , { task_id
+        ; priority = task.priority
+        ; age =
+            (match created with
+             | Some created ->
+               Age_days (int_of_float (Float.floor ((now -. created) /. seconds_per_day)))
+             | None -> Created_at_unreadable)
+        ; returns = task.cycle_count
+        ; goal_links = goal_links_of ~task_id:task.id
+        } ))
+    |> List.sort (fun (left_created, left) (right_created, right) ->
+      match Int.compare (goal_rank left) (goal_rank right) with
+      | 0 ->
+        (match Int.compare left.priority right.priority with
+         | 0 ->
+           (match newest_first left_created right_created with
+            | 0 ->
+              String.compare
+                (Keeper_id.Task_id.to_string left.task_id)
+                (Keeper_id.Task_id.to_string right.task_id)
+            | order -> order)
+         | order -> order)
+      | order -> order)
+    |> List.map snd
+;;
+
 (** Read one authoritative backlog snapshot. Counts, claimable rows, and
     revision are projected from the same primary read. *)
 let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
@@ -178,25 +296,13 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
        in
        let unclaimed = List.length unclaimed_tasks in
        let claimable_tasks =
-         unclaimed_tasks
-         |> List.filter_map (fun (task, task_id) ->
-              if Workspace_task_schedule.task_is_claim_pool_candidate task
-              then Some { task_id; priority = task.priority; created_at = task.created_at }
-              else None)
-         (* Claim order -- the same key the auto-claim scheduler sorts by
-            (priority, then created_at, then id). The frame's "next to claim"
-            rows are the head of this list, so what the keeper reads first is
-            what the scheduler would claim first (#29101). *)
-         |> List.sort (fun (left : claimable_task_identity) (right : claimable_task_identity) ->
-              match Int.compare left.priority right.priority with
-              | 0 ->
-                (match String.compare left.created_at right.created_at with
-                 | 0 ->
-                   String.compare
-                     (Keeper_id.Task_id.to_string left.task_id)
-                     (Keeper_id.Task_id.to_string right.task_id)
-                 | order -> order)
-              | order -> order)
+         claimable_rows
+           ~config
+           ~now:(Time_compat.now ())
+           (List.filter
+              (fun ((task : Masc_domain.task), _) ->
+                 Workspace_task_schedule.task_is_claim_pool_candidate task)
+              unclaimed_tasks)
        in
        let failed =
          (* "Failed" here means still-auditable active work. Terminal Cancelled

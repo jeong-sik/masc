@@ -117,6 +117,10 @@ val force_json_response : bool
 
 (** {1 Header builders} *)
 
+val protocol_version_headers : string -> (string * string) list
+(** [protocol_version_headers protocol_version] is the one header that names
+    the revision of an answer: [mcp-protocol-version]. *)
+
 val mcp_headers : string -> string -> (string * string) list
 (** [mcp_headers session_id protocol_version] returns MCP envelope
     headers. Legacy protocol revisions include [mcp-session-id] and

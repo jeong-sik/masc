@@ -6,6 +6,7 @@
 
 module Access = Runtime_account_access
 module Account = Runtime_official_account
+module Layout = Runtime_account_home_layout
 
 let rec remove_tree path =
   match Unix.lstat path with
@@ -35,6 +36,9 @@ let hosts =
   ; "A model-list request", Access.Model_list
   ; "The Files API", Access.Files_api
   ; "The replacement catalog", Access.Replacement_catalog
+  ; "A web search provider", Access.Web_search
+  ; "The cloud backend of SystemOne", Access.Systemone_cloud
+  ; "A voice endpoint", Access.Voice_endpoint
   ]
 ;;
 
@@ -91,6 +95,12 @@ let test_published_once () =
             | Ok (_ : Access.host_account) ->
               Alcotest.failf "%s was allowed before the publication" label)
           hosts;
+        (match Access.host_access () with
+         | Error Access.Host_unpublished -> ()
+         | Error Access.Host_not_shared ->
+           Alcotest.fail "the accounts of the host were not shared before the publication"
+         | Ok (_ : Access.host_account) ->
+           Alcotest.fail "the accounts of the host were shared before the publication");
         List.iter
           (fun posture ->
             match Access.authorize_native posture with
@@ -108,7 +118,7 @@ let test_published_once () =
         (match Access.publish (Access.Single_user single_user) with
          | Ok () -> ()
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
-        let allowed () =
+        let allowed_but_native () =
           List.iter
             (fun (label, request) ->
               match Access.authorize request sealed with
@@ -128,8 +138,16 @@ let test_published_once () =
               | Error refusal ->
                 Alcotest.failf "%s was refused: %s" label (Access.refusal_to_string refusal))
             hosts;
+          (match Access.host_access () with
+           | Ok (_ : Access.host_account) -> ()
+           | Error (Access.Host_unpublished | Access.Host_not_shared) ->
+             Alcotest.fail "a single user does not share the accounts of the host")
+        in
+        let allowed () =
+          allowed_but_native ();
           (* The one person of a single-user process owns every home its
-             native tools can read (plan D3c). *)
+             native tools can read (plan D3c), while no person left a runtime
+             root under the workspace. *)
           List.iter
             (fun posture ->
               match Access.authorize_native posture with
@@ -145,6 +163,98 @@ let test_published_once () =
         (match Access.publish (Access.Single_user single_user) with
          | Error Access.Already_published -> ()
          | Ok () -> Alcotest.fail "a second publication was taken");
+        allowed ();
+        (* Plan F3a-3: what a person left under the workspace is read at each
+           start. The same published process answers by the directory. *)
+        let person_root =
+          match Authz_types.Account_home_namespace.of_string "ns-left-behind" with
+          | Ok namespace -> Layout.person_runtime_root ~base_path ~namespace
+          | Error (_ : Authz_id.error) -> Alcotest.fail "the namespace is no id"
+        in
+        let persons = Filename.dirname person_root in
+        let native label expected =
+          List.iter
+            (fun posture ->
+              let answer =
+                match Access.authorize_native posture with
+                | Ok () -> `Allowed
+                | Error (Access.Native_tools_reach_person_homes refused) ->
+                  Alcotest.(check string)
+                    (label ^ ": the refusal names the posture it refused")
+                    (Runtime_native_tools.to_string posture)
+                    (Runtime_native_tools.to_string refused);
+                  `Homes_remain
+                | Error (Access.Person_homes_unread { posture = refused; unread = (_ : Unix.error) }) ->
+                  Alcotest.(check string)
+                    (label ^ ": the refusal names the posture it refused")
+                    (Runtime_native_tools.to_string posture)
+                    (Runtime_native_tools.to_string refused);
+                  `Unread
+                | Error
+                    ((Access.Native_unpublished | Access.Native_tools_reach_other_homes _) as
+                     refusal) ->
+                  Alcotest.failf
+                    "%s: a single user got the refusal of another process: %s"
+                    label
+                    (Access.native_refusal_to_string refusal)
+              in
+              let wanted =
+                match posture with
+                | Runtime_native_tools.Native_none -> `Allowed
+                | Runtime_native_tools.Native_read | Runtime_native_tools.Native_full -> expected
+              in
+              if answer <> wanted
+              then
+                Alcotest.failf
+                  "%s: a turn with native %s tools was judged otherwise"
+                  label
+                  (Runtime_native_tools.to_string posture))
+            postures
+        in
+        let masc_dir = Filename.dirname persons in
+        (match Unix.mkdir masc_dir 0o700 with
+         | () -> ()
+         | exception Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+        Unix.mkdir persons 0o700;
+        native "the directory of the persons, emptied" `Homes_remain;
+        Unix.mkdir person_root 0o700;
+        native "a runtime root of a person" `Homes_remain;
+        (* The other decisions of a single user do not change with it. *)
+        allowed_but_native ();
+        (* Vibe takes no posture from its caller and passes the same decision
+           before it starts anything. *)
+        (match Access.authorize_host Access.Vibe with
+         | Error refusal -> Alcotest.fail (Access.refusal_to_string refusal)
+         | Ok host ->
+           let config : Runtime_vibe_cli.config =
+             { cli_path = Filename.concat root "no-vibe"
+             ; workdir = root
+             ; trust_workdir = false
+             ; model = None
+             ; time_limit_s = None
+             }
+           in
+           (match Runtime_vibe_cli.run ~host config ~prompt:"unused" with
+            | Error
+                (Runtime_vibe_cli.Native_tools_refused
+                   (Access.Native_tools_reach_person_homes Runtime_native_tools.Native_full)) -> ()
+            | Error error ->
+              Alcotest.failf "Vibe ended otherwise: %s" (Runtime_vibe_cli.error_to_string error)
+            | Ok (_ : Runtime_vibe_cli.run) -> Alcotest.fail "Vibe ran beside a person root"));
+        Unix.rmdir person_root;
+        native "the root removed and the directory left" `Homes_remain;
+        Unix.rmdir persons;
+        native "the directory removed" `Allowed;
+        Out_channel.with_open_bin persons (fun (_ : Out_channel.t) -> ());
+        native "a file of that name" `Homes_remain;
+        Sys.remove persons;
+        (* A path to the name that cannot be read gives no answer. *)
+        let aside = masc_dir ^ ".aside" in
+        Unix.rename masc_dir aside;
+        Out_channel.with_open_bin masc_dir (fun (_ : Out_channel.t) -> ());
+        native "a file where the directory of MASC is" `Unread;
+        Sys.remove masc_dir;
+        Unix.rename aside masc_dir;
         allowed ()))
 ;;
 

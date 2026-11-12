@@ -11,8 +11,9 @@
     refused: masc writes no record of that kind, so a log that holds one was not
     written by masc.
 
-    {!step} is the function that the log is replayed with
-    ({!Authz_log.open_at_start}). A record that it refuses stops every later
+    {!apply} is the function that the log is replayed with
+    ({!Authz_zone.Replay.step}): the replay keeps the state and counts the
+    changes for the high-water mark. A record that it refuses stops every later
     start, so a writer runs {!apply} on the record before the append. It
     decides what a record means, not whether someone may write it: who may write which kind is
     {!Authz_record.admits}, which the record already passed. A policy that may
@@ -211,6 +212,3 @@ val apply : t -> Authz_record.t -> (applied, refusal) result
     them all. A record cannot name an intent that begins after it, because the
     digest of the intent covers the head it began at. *)
 val closed_by : Authz_record.t -> Authz_record.Hash.t list
-
-(** {!apply} without the change: the fold function of the replay. *)
-val step : t -> Authz_record.t -> (t, refusal) result

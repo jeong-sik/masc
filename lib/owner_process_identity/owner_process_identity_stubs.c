@@ -117,3 +117,41 @@ CAMLprim value masc_owner_identity_terminate(value raw) {
 CAMLprim value masc_owner_identity_close(value raw) {
   CAMLparam1(raw); close_identity(raw); CAMLreturn(Val_unit);
 }
+/* The first lock another process holds on the range of the file, when it is a
+   write lock of exactly one byte: its holder and the position of the byte.
+   The lock table of the kernel is the record, so the answer never outlives
+   the holder.
+   Outcome 0: such a lock. 1: nothing another process holds blocks the range,
+   or what blocks it has another shape. 4: the kernel could not be asked. */
+CAMLprim value masc_owner_identity_held_byte(value file, value start, value length) {
+  CAMLparam3(file, start, length); CAMLlocal1(result);
+  int fd = Int_val(file), outcome = 4;
+  intnat holder = 0, byte = 0;
+  struct flock lock;
+  memset(&lock, 0, sizeof(lock));
+  lock.l_type = F_WRLCK; lock.l_whence = SEEK_SET;
+  lock.l_start = Long_val(start); lock.l_len = Long_val(length);
+  caml_enter_blocking_section();
+  int rc = fcntl(fd, F_GETLK, &lock);
+  caml_leave_blocking_section();
+  if (rc == 0) {
+    /* 1: nothing blocks the range, or what blocks it is not the one-byte
+       write lock of a process (a read lock, a longer range, or a lock the
+       kernel names no process for). */
+    outcome = 1;
+    if (lock.l_type == F_WRLCK && lock.l_whence == SEEK_SET
+        && lock.l_len == 1 && lock.l_start >= 0 && lock.l_pid > 1) {
+      outcome = 0; holder = lock.l_pid; byte = lock.l_start;
+    }
+  }
+  result = caml_alloc_tuple(3);
+  Store_field(result, 0, Val_int(outcome));
+  Store_field(result, 1, Val_long(holder));
+  Store_field(result, 2, Val_long(byte));
+  CAMLreturn(result);
+}
+CAMLprim value masc_owner_identity_pid(value raw) {
+  CAMLparam1(raw);
+  struct identity id; memcpy(&id, Data_custom_val(raw), sizeof(id));
+  CAMLreturn(Val_long(id.pid));
+}

@@ -8,8 +8,10 @@
 
     A handler reads the request into the values those modules take and writes
     their answer as it is: its status, its headers (each [set-cookie] among
-    them) and its body. S1 calls {!add_routes} at boot with the zone it opened,
-    and writes the HTTP/2 arms; until then no server holds a zone. *)
+    them) and its body. The account server calls {!add_routes} at boot with
+    the zone it opened ({!Server_accounts}, plan S1a-3a). A handler reads and
+    answers through {!Http_reqd}, so a request of either protocol passes the
+    same code. *)
 
 (** A [GET] and a [POST] to a provider, with the shared deadline
     ({!Masc_http_client.default_request_timeout_sec}) and the bound of
@@ -42,8 +44,8 @@ val add_routes : Login_routes.t -> Http_server_eio.Router.t -> Http_server_eio.R
     path on the address of the server. *)
 val github_callback_path : string
 
-(** The routes of the localhost preview (plan, preview scope P3), on top of
-    {!add_routes}:
+(** The pages and the routes of a person (plan, preview scope P3, and
+    S1a-3b), on top of {!add_routes}:
     - [GET /] and [GET /accounts/invite], the pages of {!Auth_preview}, open
       ([Always_public]); each page gets a fresh nonce from [draw]
     - [GET /api/v1/auth/whoami], judged by {!Auth_gate.decide} on one
@@ -65,18 +67,23 @@ val github_callback_path : string
     - [POST /api/v1/auth/keepers/turn], one turn of the person's Keeper on
       the Runtime they gave it ({!Server_preview_keeper_turn}, plan D2-8)
 
+    Each of these routes is judged on one snapshot that the zone could be
+    trusted for ({!Authz_zone.read}). A zone whose file stopped, or whose
+    files disagree, gives none, and the request gets the 503 of
+    {!Login_routes.zone_uncertain} before a credential is read.
+
     The subscription routes are judged as [Manage_own_provider] by
-    {!Auth_preview.person} on one snapshot of the zone, and a request that does
+    {!Auth_preview.person} on that snapshot, and a request that does
     not pass gets its 401 or 403 before the connect handler reads anything.
     The Keeper routes are judged the same way as [Manage_own_keeper] by
     {!Auth_preview.keeper_owner}, and the turn by
     {!Auth_preview.keeper_owner_person}, which gives the namespace of the
     person as well.
 
-    Only the preview command registers them; {!add_routes} is what a server
-    registers (S1). [env] is the environment of the preview process, from
-    which a turn starts the client. *)
-val add_preview_routes
+    The account server ({!Server_accounts}) and the preview command
+    register them. [env] is the environment of the process, from which a
+    turn starts the client. *)
+val add_person_routes
   :  Login_routes.t
   -> env:Eio_unix.Stdenv.base
   -> base_path:string

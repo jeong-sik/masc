@@ -56,7 +56,7 @@ let retain t ~store ~instance_id ~max_response_bytes ~call (output : output) =
             let needed = List.take (min (before-previous) (List.length entries)) entries in
             pages next (List.rev_append needed oldest_first) in
         let* entries = pages count [] in
-        let* retained = Eio_unix.run_in_systhread (fun () ->
+        let* retained = Systhread_host.run ~label:"addon-machine-history-retain" (fun () ->
           Lane_addon_store.retain_jsonl store ~history ~entry_count:count ~newest_first:entries
             ~encode:(fun entry -> Yojson.Safe.to_string entry ^ "\n")) in
         Hashtbl.replace t history count;

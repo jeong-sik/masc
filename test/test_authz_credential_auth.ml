@@ -99,7 +99,7 @@ let with_installation f =
                }
            with
            | Ok (_ : Z.committed) -> ()
-           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
           let admin =
             match
               Login.sign_in
@@ -144,7 +144,7 @@ let member t =
        }
    with
    | Ok (_ : Z.committed) -> ()
-   | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+   | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
   match
     Login.sign_in
       t.zone
@@ -164,17 +164,33 @@ let issue_pat ?(draw = drawing [ "pat-1" ]) ?expires_at_ms t ~user_id =
   | Error error -> Alcotest.failf "no PAT was issued: %s" (P.error_to_string error)
 ;;
 
+let uncertain_name : Z.uncertain -> string = function
+  | Z.Log_is_stopped _ -> "log stopped"
+  | Z.Store_is_stopped _ -> "store stopped"
+  | Z.Files_disagree _ -> "files disagree"
+  | Z.Store_answers_nothing -> "store holds no answer"
+;;
+
+(* What a token does in the zone as it stands. A zone that cannot be trusted
+   gives no snapshot to match the token with. *)
+let in_trusted t acts =
+  match Z.read t.zone with
+  | Error uncertain -> "no decision: " ^ uncertain_name uncertain
+  | Ok trusted -> acts trusted
+;;
+
 let pat_acts t token =
-  match P.authenticate (Z.snapshot t.zone).state ~now_ms:!(t.clock) token with
-  | Ok { P.user_id; pat_id; pat_scope } ->
-    Printf.sprintf
-      "acts as %s with %s until %s"
-      (User_id.to_string user_id)
-      (Pat_id.to_string pat_id)
-      (match pat_scope.Pat_scope.expires_at with
-       | Some at -> Printf.sprintf "%.3f" at
-       | None -> "no expiry")
-  | Error refusal -> P.refusal_to_string refusal
+  in_trusted t (fun trusted ->
+    match P.authenticate trusted ~now_ms:!(t.clock) token with
+    | Ok { P.user_id; pat_id; pat_scope } ->
+      Printf.sprintf
+        "acts as %s with %s until %s"
+        (User_id.to_string user_id)
+        (Pat_id.to_string pat_id)
+        (match pat_scope.Pat_scope.expires_at with
+         | Some at -> Printf.sprintf "%.3f" at
+         | None -> "no expiry")
+    | Error refusal -> P.refusal_to_string refusal)
 ;;
 
 let pat_of text =
@@ -226,7 +242,7 @@ let a_pat_acts_until_it_ends () =
          }
      with
      | Ok (_ : Z.committed) -> ()
-     | Error error -> Alcotest.failf "disable refused: %s" (Z.error_to_string error));
+     | Error error -> Alcotest.failf "disable refused: %s" (Z.error_detail error));
     Alcotest.(check string)
       "a disabled principal"
       (P.refusal_to_string (P.Principal_inactive member_id))
@@ -242,13 +258,14 @@ let a_pat_acts_until_it_ends () =
 ;;
 
 let service_acts t token =
-  match Sc.authenticate (Z.snapshot t.zone).state token with
-  | Ok { Sc.service_id; credential_id } ->
-    Printf.sprintf
-      "acts as %s with %s"
-      (Service_id.to_string service_id)
-      (Service_credential_id.to_string credential_id)
-  | Error refusal -> Sc.refusal_to_string refusal
+  in_trusted t (fun trusted ->
+    match Sc.authenticate trusted token with
+    | Ok { Sc.service_id; credential_id } ->
+      Printf.sprintf
+        "acts as %s with %s"
+        (Service_id.to_string service_id)
+        (Service_credential_id.to_string credential_id)
+    | Error refusal -> Sc.refusal_to_string refusal)
 ;;
 
 let a_service_credential_acts_until_it_is_revoked () =
@@ -287,6 +304,38 @@ let a_service_credential_acts_until_it_is_revoked () =
          (read_file t.store_path)))
 ;;
 
+(* Bytes another writer added to the log: the next commit finds the end moved
+   and stops the log. Both credentials stay issued in the published state, and
+   no decision rests on that state any more, so neither token acts. *)
+let a_stopped_zone_lets_no_token_act () =
+  with_installation (fun t ->
+    let pat = issue_pat t ~user_id:t.admin in
+    let service_id = get (Service_id.of_string "keeper-runner") in
+    let credential =
+      match Sc.issue t.zone ~service_id ~draw:(drawing [ "cred-1" ]) with
+      | Ok token -> token
+      | Error error -> Alcotest.failf "no credential was issued: %s" (Sc.error_to_string error)
+    in
+    Alcotest.(check string)
+      "the PAT acts while the zone can be trusted"
+      ("acts as " ^ User_id.to_string t.admin ^ " with pat-1 until no expiry")
+      (pat_acts t pat);
+    Alcotest.(check string)
+      "the Service credential acts while the zone can be trusted"
+      "acts as keeper-runner with cred-1"
+      (service_acts t credential);
+    Out_channel.with_open_gen [ Open_append; Open_binary ] 0o600 t.log_path (fun channel ->
+      Out_channel.output_string channel "{}\n");
+    (match Sc.issue t.zone ~service_id ~draw:(drawing [ "cred-2" ]) with
+     | Ok (_ : T.Service_credential.t) -> Alcotest.fail "the zone wrote over a log another writer moved"
+     | Error (_ : Sc.error) -> ());
+    Alcotest.(check string) "the PAT once the log is stopped" "no decision: log stopped" (pat_acts t pat);
+    Alcotest.(check string)
+      "the Service credential once the log is stopped"
+      "no decision: log stopped"
+      (service_acts t credential))
+;;
+
 let () =
   Alcotest.run
     "authz_credential_auth"
@@ -296,6 +345,7 @@ let () =
             "a Service credential acts until it is revoked"
             `Quick
             a_service_credential_acts_until_it_is_revoked
+        ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_lets_no_token_act
         ] )
     ]
 ;;

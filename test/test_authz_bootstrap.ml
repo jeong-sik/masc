@@ -341,14 +341,27 @@ let store_state path =
      | Error { S.path; reason } -> Alcotest.failf "the store %s is stopped: %s" path reason)
 ;;
 
+(* The probe of a start: the log replayed over the store, which says for each
+   record whether it takes an intent. *)
 let probe_of dirs =
-  List.fold_left H.Probe.add (H.Probe.create (store_state dirs.store)) (records_of_log dirs)
+  match
+    L.open_at_start
+      ~path:(log_file dirs)
+      ~init:(Z.Replay.init (store_state dirs.store))
+      ~step:Z.Replay.step
+  with
+  | Ok (_log, replay, _recovered) -> replay.Z.Replay.probe
+  | Error error ->
+    Alcotest.failf
+      "the log did not open: %s"
+      (L.open_error_to_string Authz_state.refusal_to_string error)
 ;;
 
 let reason_name = function
   | H.Digest_differs _ -> "Digest_differs"
   | H.Commit_not_in_log _ -> "Commit_not_in_log"
   | H.Intent_unplaced _ -> "Intent_unplaced"
+  | H.Answers_differ _ -> "Answers_differ"
 ;;
 
 let value_name = function
@@ -812,7 +825,7 @@ let not_a_fresh_installation : B.error -> (string * H.t) option = function
 
 let only_lost_commit : H.t -> R.Hash.t option = function
   | H.Mismatch (H.Commit_not_in_log lost, []) -> Some lost
-  | H.Mismatch ((H.Digest_differs _ | H.Intent_unplaced _), _)
+  | H.Mismatch ((H.Digest_differs _ | H.Intent_unplaced _ | H.Answers_differ _), _)
   | H.Mismatch (H.Commit_not_in_log _, _ :: _)
   | H.Absent
   | H.Matches -> None

@@ -211,7 +211,7 @@ let add_routes t router =
   |> Server_route.prefix_delete access pat_prefix (revoke_pat t)
 ;;
 
-(* ---- the localhost preview (plan, preview scope P3) ---- *)
+(* ---- the pages and the routes of a person (plan, preview scope P3, S1a-3b) ---- *)
 
 let whoami_path = "/api/v1/auth/whoami"
 let ms_per_second = 1000.
@@ -242,31 +242,43 @@ let gate_request ~request_authority (request : Httpun.Request.t) =
   }
 ;;
 
-let page answer_of (t : R.t) (_ : Httpun.Request.t) reqd = respond reqd (answer_of ~nonce:(t.draw ()))
+let page answer_of (t : R.t) (_ : Httpun.Request.t) reqd =
+  respond reqd (answer_of ~nonce:(t.draw ()) ~github:(Option.is_some t.github))
+;;
+
+(* A request is judged on one snapshot of the zone, and only on one the zone
+   could be trusted for. A zone whose file stopped, or whose files disagree,
+   gives none, and the request gets a 503 before any credential is read. *)
+let on_trusted (t : R.t) reqd f =
+  match Authz_zone.read t.zone with
+  | Error uncertain -> respond reqd (R.zone_uncertain uncertain)
+  | Ok trusted -> f trusted
+;;
 
 let whoami (t : R.t) request reqd =
   with_authority reqd (fun request_authority ->
-    respond
-      reqd
-      (Auth_preview.whoami
-         (Authz_zone.snapshot t.zone).Authz_zone.state
-         ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
-         (gate_request ~request_authority request)))
+    on_trusted t reqd (fun trusted ->
+      respond
+        reqd
+        (Auth_preview.whoami
+           trusted
+           ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
+           (gate_request ~request_authority request))))
 ;;
 
-(* The one a route of a person acts for, judged by [gate] on one snapshot of
-   the zone. *)
+(* The one a route of a person acts for, judged by [gate]. [f] gets the state
+   of the snapshot that judged the request. *)
 let as_gated (t : R.t) ~gate request reqd f =
   with_authority reqd (fun request_authority ->
-    let state = (Authz_zone.snapshot t.zone).Authz_zone.state in
-    match
-      gate
-        state
-        ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
-        (gate_request ~request_authority request)
-    with
-    | Error answer -> respond reqd answer
-    | Ok who -> f state who)
+    on_trusted t reqd (fun trusted ->
+      match
+        gate
+          trusted
+          ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
+          (gate_request ~request_authority request)
+      with
+      | Error answer -> respond reqd answer
+      | Ok who -> f (trusted :> Authz_zone.snapshot).Authz_zone.state who))
 ;;
 
 (* The person a subscription route acts for; the connect handler checks the
@@ -332,7 +344,7 @@ let keeper_turn t ~env ~base_path request reqd =
       respond reqd (Server_preview_keeper_turn.run ~env ~person:(person_of t person) ~base_path ~body)))
 ;;
 
-let add_preview_routes t ~env ~base_path router =
+let add_person_routes t ~env ~base_path router =
   router
   |> Server_route.get Server_route.Always_public "/" (page Auth_preview.home_page t)
   |> Server_route.get Server_route.Always_public Authz_activation.invitation_path (page Auth_preview.invite_page t)

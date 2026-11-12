@@ -123,16 +123,24 @@ module State = struct
     { entries : int
     ; pending : intent option
     ; last_committed : Hash.t option
+    ; answered : int  (** How many [Committed] the file holds. *)
     ; aborted : intent list  (** Newest first. *)
     ; mode : Authz_mode_state.t  (** What the committed mode changes add up to. *)
     }
 
   let empty =
-    { entries = 0; pending = None; last_committed = None; aborted = []; mode = Authz_mode_state.empty }
+    { entries = 0
+    ; pending = None
+    ; last_committed = None
+    ; answered = 0
+    ; aborted = []
+    ; mode = Authz_mode_state.empty
+    }
   ;;
 
   let pending state = state.pending
   let last_committed state = state.last_committed
+  let answered state = state.answered
   let aborted state = List.rev state.aborted
   let workspace_id state = Authz_mode_state.workspace state.mode
 end
@@ -213,7 +221,12 @@ let advance (state : State.t) entry : State.t =
              ("Authz_external_store.advance: the committed intent breaks a rule: "
               ^ violation_to_string violation))
     in
-    { state with State.pending = None; last_committed = Some record_hash; mode }
+    { state with
+      State.pending = None
+    ; last_committed = Some record_hash
+    ; answered = state.State.answered + 1
+    ; mode
+    }
   | Aborted_intent intent ->
     { state with State.pending = None; aborted = intent :: state.State.aborted }
 ;;

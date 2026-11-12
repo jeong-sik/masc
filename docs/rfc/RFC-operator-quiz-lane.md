@@ -377,9 +377,10 @@ A trigger that arrives during a cycle becomes one more cycle, as observation hin
 **One cycle.**
 1. List the requests.
 2. For each request in order: deliver a final result the host already holds, or try the work once and deliver its result if it is final.
+   - An `exact_output` request runs beside the walk. The walk goes on to the next request only while fewer than the installation's `max_exact_in_flight` exact requests are running. With 1 the walk waits for each one.
    - An `ask` is recorded once per request id. Its result is delivered only when the operator has answered it or the package has withdrawn it.
    - A request whose attempt was not final stays undelivered until the next trigger. It is tried at most once per cycle, so it cannot keep a cycle running.
-3. List again. The cycle ends when a listing produces no delivery.
+3. When every request of the listing has ended, list again. The cycle ends when a listing produces no delivery.
 4. Run one ordinary observation, so the package's rows show the new state.
 
 **Waiting for a trigger is intended.** A request whose last attempt was not final (lane unconfigured, off or without admitted slots; rate limit, overload, network, timeout; an authentication or authorization refusal) stays listed. The Host requests view (K6) shows it with its reason. It is tried again only on one of the five events above. Nothing else reopens it. A provider that stops rate-limiting is not an event the host sees. The host runs no add-on clock (`docs/design/lane-addon-v0.md:99`), and a retry interval would be a number deciding when to call a provider. For this package the operator's Schedule is the clock: each scheduled `compose` ends in a terminal receipt (event 2). A transient failure is therefore tried again at the latest at the next scheduled compose. If the waiting request belongs to a session that has not asked yet, that compose supersedes the session (§4.9 Sessions) and the new session's request takes its place.

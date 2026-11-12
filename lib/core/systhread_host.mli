@@ -11,10 +11,6 @@
     [Fs_compat.Systhread_host], and {!start} here supplies its log, its
     minor-heap tuning and which fibers are pool work. *)
 
-exception Host_failed of exn
-(** Raised to a caller whose work the host had already taken when the host's
-    scheduler failed. The work may or may not have run. *)
-
 val domain_count : int
 (** Domains {!start} adds to the process: 1. *)
 
@@ -45,9 +41,10 @@ val run : ?label:string -> (unit -> 'a) -> 'a
     waits for it uncancellably and gets its result. Exceptions re-raise with
     their backtrace; the work is never re-run.
 
-    If the host fails, the failure is logged once. Work it had not taken runs
-    on the caller's domain instead; work it had taken ends with
-    {!Host_failed}. Later calls use the caller's domain.
+    If the host fails, the failure is logged once. Work that had not begun
+    runs on the caller's domain instead; work that had begun is answered by
+    its own thread, and its caller waits for that. Later calls use the
+    caller's domain.
 
     The work must not depend on which domain runs it: code that compares the
     current domain with an owner domain ([Eio_context.run_on_owner_domain])

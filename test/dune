@@ -1756,6 +1756,8 @@
  (modules test_systhread_host)
  (libraries alcotest masc.masc_core masc.fs_compat eio eio_main unix threads.posix))
 
+(include stanzas/bench_systhread_cpu_work.inc)
+
 (test
  (name test_pool_lane)
  (modules test_pool_lane)
@@ -3031,6 +3033,7 @@
 
 (include stanzas/bench_fleet_stream.inc)
 (include stanzas/bench_systhread_host_fs_compat.inc)
+(include stanzas/bench_systhread_host_spawn.inc)
 (include stanzas/bench_sse_pump_throughput.inc)
 
 (include stanzas/test_tui_fleet_stream.inc)
@@ -6271,7 +6274,7 @@
 (test
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
- (libraries alcotest unix yojson eio eio_main masc.server masc.fs_compat))
+ (libraries alcotest unix yojson eio eio_main masc.server masc.host_config masc.fs_compat))
 
 (include stanzas/test_docker_desktop_install.inc)
 (include stanzas/test_docker_account_access.inc)
@@ -6582,6 +6585,11 @@
 (test
  (name test_lane_addon_host_request)
  (modules test_lane_addon_host_request)
+ (libraries masc_test_deps))
+
+(test
+ (name test_lane_addon_host_walk)
+ (modules test_lane_addon_host_walk)
  (libraries masc_test_deps))
 
 (test
@@ -7349,8 +7357,10 @@
 (include stanzas/test_authz_boot_mode_read.inc)
 (include stanzas/test_runtime_account_access.inc)
 (include stanzas/test_runtime_account_access_multi.inc)
+(include stanzas/test_runtime_account_access_off.inc)
 (include stanzas/test_keeper_account_home_reach.inc)
 (include stanzas/test_server_preview_keeper_turn.inc)
+(include stanzas/test_server_accounts.inc)
 (include stanzas/test_authz_state.inc)
 (include stanzas/test_authz_zone.inc)
 
@@ -7368,6 +7378,7 @@
 (include stanzas/test_authz_bootstrap.inc)
 
 (include stanzas/test_authz_activation.inc)
+(include stanzas/test_authz_off.inc)
 
 (include stanzas/test_authz_service_credential_host.inc)
 

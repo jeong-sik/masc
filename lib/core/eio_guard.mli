@@ -46,6 +46,12 @@ val with_mutex_ro : Eio.Mutex.t -> (unit -> 'a) -> 'a
 (** Run [f] in a system thread from an Eio fiber, directly from a non-Eio
     execution context.
 
+    Once the system-thread host is started, the thread belongs to the host's
+    domain and [f] runs beside the caller's domain: state [f] shares with the
+    caller's fibers needs an [Atomic] or a [Stdlib.Mutex]. Pool work, and a
+    process that never starts the host, keep the thread on the caller's
+    domain. The caller's fiber waits for [f] either way.
+
     [label] reaches the runtime-events ring as the fiber's suspend reason, so
     a trace can say which call a long run sat between. It is required: an
     unlabelled call reads as "systhread", which does not identify anything. *)

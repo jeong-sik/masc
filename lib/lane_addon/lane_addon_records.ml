@@ -231,7 +231,7 @@ let take_page ~measure ~max_bytes ~empty_body items =
 let answer_page ?head ~store ~source_id ~start { records; passed; complete } =
   let next_cursor = match passed with Some cursor -> Some cursor | None -> start_cursor start in
   match
-    Eio_unix.run_in_systhread (fun () ->
+    Systhread_host.run ~label:"addon-records-write" (fun () ->
       Lane_addon_store.write_blob store (Yojson.Safe.to_string (`List records)))
   with
   | Error detail -> Unavailable ("the page could not be retained: " ^ detail)
@@ -703,7 +703,7 @@ let read_file ~base_path ~store ~grants ~source_id ~commit ~path =
            (match git ~cwd [ "cat-file"; "blob"; commit ^ ":" ^ path ] with
             | Error _ -> Not_allowed ("path " ^ path ^ " is not a file at that commit")
             | Ok bytes ->
-              (match Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store bytes) with
+              (match Systhread_host.run ~label:"addon-records-blob-write" (fun () -> Lane_addon_store.write_blob store bytes) with
                | Error detail -> Unavailable ("the file could not be retained: " ^ detail)
                | Ok { Lane_addon_types.sha256 = None; _ } -> Unavailable "the retained file has no digest"
                | Ok { Lane_addon_types.sha256 = Some sha256; _ } ->

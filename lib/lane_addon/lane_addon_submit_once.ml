@@ -66,7 +66,7 @@ let advance ~store original event =
   | Error error -> Error (Unavailable (Owner.update_error_to_string error))
 let record = function New record | Acknowledged record -> record
 let publish ~store original event =
-  Eio_unix.run_in_systhread (fun () -> advance ~store original event)
+  Systhread_host.run ~label:"addon-submit-once-advance" (fun () -> advance ~store original event)
 
 let same_observation left right = match left, right with
   | Progress.Waiting left, Progress.Waiting right
@@ -92,7 +92,7 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~decode_f
       | Owner.Configuration id -> Ok id
       | Owner.Manual _ ->
         Error (Rejected ("Original " ^ label ^ " work requires its configured installation")) in
-    Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread (fun () ->
+    Eio.Cancel.protect (fun () -> Systhread_host.run ~label:"addon-submit-once-recover" (fun () ->
       Exact.recover_retained ~store ~declaration_id ~schema request))
     |> Result.map_error (function
          (* A record that exists but is not a trustworthy original can never

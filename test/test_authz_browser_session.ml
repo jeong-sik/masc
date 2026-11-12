@@ -98,7 +98,7 @@ let with_installation f =
                }
            with
            | Ok (_ : Z.committed) -> ()
-           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
           let admin =
             match
               Login.sign_in
@@ -120,11 +120,30 @@ let issue ?(draw = drawing [ "session-1" ]) ?replaces t ~user_id =
   | Error error -> Alcotest.failf "no session was issued: %s" (Bs.error_to_string error)
 ;;
 
+let uncertain_name : Z.uncertain -> string = function
+  | Z.Log_is_stopped _ -> "log stopped"
+  | Z.Store_is_stopped _ -> "store stopped"
+  | Z.Files_disagree _ -> "files disagree"
+  | Z.Store_answers_nothing -> "store holds no answer"
+;;
+
+(* The snapshot a decision rests on, in a case whose zone can be trusted. *)
+let trusted t =
+  match Z.read t.zone with
+  | Ok trusted -> trusted
+  | Error uncertain -> Alcotest.failf "the zone cannot be trusted: %s" (uncertain_name uncertain)
+;;
+
+(* What a cookie does in the zone as it stands. A zone that cannot be trusted
+   gives no snapshot to match the cookie with. *)
 let acts t cookie =
-  match Bs.authenticate (Z.snapshot t.zone).state ~now_ms:!(t.clock) cookie with
-  | Ok { Bs.user_id; session_id; expires_at_ms = _ } ->
-    Printf.sprintf "acts as %s in %s" (User_id.to_string user_id) (Session_id.to_string session_id)
-  | Error refusal -> Bs.refusal_to_string refusal
+  match Z.read t.zone with
+  | Error uncertain -> "no decision: " ^ uncertain_name uncertain
+  | Ok trusted ->
+    (match Bs.authenticate trusted ~now_ms:!(t.clock) cookie with
+     | Ok { Bs.user_id; session_id; expires_at_ms = _ } ->
+       Printf.sprintf "acts as %s in %s" (User_id.to_string user_id) (Session_id.to_string session_id)
+     | Error refusal -> Bs.refusal_to_string refusal)
 ;;
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
@@ -166,7 +185,7 @@ let member t =
        }
    with
    | Ok (_ : Z.committed) -> ()
-   | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+   | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
   match
     Login.sign_in
       t.zone
@@ -189,7 +208,7 @@ let a_person_who_signed_in_gets_a_session () =
       "acts"
       ("acts as " ^ User_id.to_string t.admin ^ " in session-1")
       (acts t cookie);
-    (match Bs.authenticate (Z.snapshot t.zone).state ~now_ms:!(t.clock) cookie with
+    (match Bs.authenticate (trusted t) ~now_ms:!(t.clock) cookie with
      | Ok { Bs.expires_at_ms; _ } ->
        Alcotest.(check int) "ends a week after its record" (start_ms + Authz_session_state.lifetime_ms) expires_at_ms
      | Error refusal -> Alcotest.failf "refused: %s" (Bs.refusal_to_string refusal));
@@ -245,7 +264,7 @@ let a_cookie_that_does_not_act () =
          }
      with
      | Ok (_ : Z.committed) -> ()
-     | Error error -> Alcotest.failf "disable refused: %s" (Z.error_to_string error));
+     | Error error -> Alcotest.failf "disable refused: %s" (Z.error_detail error));
     Alcotest.(check string)
       "a disabled principal"
       (Bs.refusal_to_string (Bs.Principal_inactive member_id))
@@ -385,6 +404,66 @@ let a_csrf_token () =
       (Bs.csrf_token (cookie_of ("session-1." ^ String.make 64 '0'))))
 ;;
 
+(* A disable whose record cannot be appended. The next start reads the
+   given-up intent and holds the block of the member (design 8.3). The member
+   is still active in the state and their session is open, and the cookie
+   does not act: a sign-in is refused for the same block. *)
+let a_session_of_a_blocked_principal_does_not_act () =
+  skip_for_superuser ();
+  with_installation (fun t ->
+    let member_id = member t in
+    let cookie = issue t ~user_id:member_id ~draw:(drawing [ "session-2" ]) in
+    Unix.chmod t.log_path 0o400;
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod t.log_path 0o600)
+      (fun () ->
+        match
+          Z.commit
+            t.zone
+            { Z.author = Author.Authenticated (Principal.Human t.admin)
+            ; kind = Authz_record.Kind.Principal
+            ; body =
+                get (Authz_principal_event.to_body (Authz_principal_event.Disabled { user_id = member_id }))
+            }
+        with
+        | Ok (_ : Z.committed) -> Alcotest.fail "the read-only log took the record"
+        | Error (_ : Z.error) -> ());
+    let t =
+      match Z.open_at_start ~now_ms:(now_ms t.clock) ~log_path:t.log_path ~store_path:t.store_path with
+      | Ok zone -> { t with zone }
+      | Error error -> Alcotest.failf "zone not reopened: %s" (Z.open_error_to_string error)
+    in
+    Alcotest.(check bool)
+      "still active in the state"
+      true
+      (Authz_principal_state.is_active (Z.snapshot t.zone).state.principals member_id);
+    Alcotest.(check string)
+      "the cookie of the blocked member"
+      (Bs.refusal_to_string (Bs.Principal_revocation_pending member_id))
+      (acts t cookie))
+;;
+
+(* Bytes another writer added to the log: the next commit finds the end moved
+   and stops the log. The session stays open in the published state, and no
+   decision rests on that state any more, so its cookie does not act. *)
+let a_stopped_zone_lets_no_cookie_act () =
+  with_installation (fun t ->
+    let cookie = issue t ~user_id:t.admin in
+    Alcotest.(check string)
+      "acts while the zone can be trusted"
+      ("acts as " ^ User_id.to_string t.admin ^ " in session-1")
+      (acts t cookie);
+    Out_channel.with_open_gen [ Open_append; Open_binary ] 0o600 t.log_path (fun channel ->
+      Out_channel.output_string channel "{}\n");
+    (match Bs.issue t.zone ~user_id:t.admin ~draw:(drawing [ "session-2" ]) ~replaces:None with
+     | Ok (_ : Bs.Cookie.t) -> Alcotest.fail "the zone wrote over a log another writer moved"
+     | Error (_ : Bs.error) -> ());
+    (match Authz_session_state.find (Z.snapshot t.zone).state.sessions (Bs.Cookie.session_id cookie) with
+     | Some { Authz_session_state.status = Authz_session_state.Open; _ } -> ()
+     | Some _ | None -> Alcotest.fail "the session is not open in the state");
+    Alcotest.(check string) "once the log is stopped" "no decision: log stopped" (acts t cookie))
+;;
+
 let texts_are_told_apart () =
   let texts =
     List.map
@@ -395,6 +474,7 @@ let texts_are_told_apart () =
       ; Bs.Secret_differs
       ; Bs.Revocation_pending
       ; Bs.Principal_inactive (get (User_id.of_string "alice"))
+      ; Bs.Principal_revocation_pending (get (User_id.of_string "alice"))
       ]
   in
   Alcotest.(check int)
@@ -412,6 +492,11 @@ let () =
         ; Alcotest.test_case "a new sign-in" `Quick a_new_sign_in_ends_the_session_of_the_browser
         ; Alcotest.test_case "a taken id" `Quick a_taken_id_is_drawn_again
         ; Alcotest.test_case "blocked" `Quick a_blocked_session_does_not_act
+        ; Alcotest.test_case
+            "a blocked principal"
+            `Quick
+            a_session_of_a_blocked_principal_does_not_act
+        ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_lets_no_cookie_act
         ] )
     ; ( "cookie"
       , [ Alcotest.test_case "value" `Quick a_cookie_value

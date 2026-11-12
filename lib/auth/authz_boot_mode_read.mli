@@ -44,6 +44,19 @@ val requested_of_json : Yojson.Safe.t -> Authz_boot_mode.requested
     fields. *)
 val read_config : base_path:string -> Authz_boot_mode.requested * Authz_boot_mode.settings
 
+(** Whether [config.json] under [base_path] asks for [Multi_account]: what a
+    command that holds no lease reads of the account mode. To such a request
+    {!Authz_boot_mode.judge} answers an activation, the account server, an
+    uncertainty or a refusal, and never a single user, so a command that
+    prepares or opens the server of a single user stops on [true]. It says
+    nothing of activation: the log and the store are read under the lease, by
+    {!boot}. [false] for a request that is not set, that asks for a single
+    user, or that holds a value the table does not know; a boot refuses the
+    last in its own words. [false] too for a file that is there and cannot be
+    read, or is no JSON object: {!read_config} takes no request from it and
+    logs a warning, and a boot judges it as a config that asks for nothing. *)
+val asks_for_multi_account : base_path:string -> bool
+
 (** The mode that the last mode event of the log made, and the external
     high-water mark. *)
 val read_log_and_store
@@ -60,33 +73,44 @@ val input
 (** Why a boot does not go on. [Multi_account] before activation needs the
     host-local bootstrap, [masc auth bootstrap], which runs while no server runs
     on the base path, so a server has nothing to open there (design 5.1, row 5).
-    [Multi_account] after activation needs the account layers that serve it;
-    booting it without them would serve multi-owned records with the behavior
-    of a single user. The lines say "this build", because [masc auth bootstrap]
-    prints them too. *)
+    [Multi_account] with a high-water mark that is absent, does not match or
+    cannot be read is [AuthorizationUncertain] (row 8, design 8.2 and 8.4): no
+    server serves the records of the accounts while the external store does not
+    confirm the log. *)
 type stop =
   | Refuse of Authz_boot_mode.refusal * Authz_boot_mode.refusal list
   | Activation_requested
-  | Multi_account_not_served of Authz_boot_mode.mode
+  | Authorization_uncertain
 
-(** What the boot does. Only a single user boots. *)
+(** What the boot does. *)
 type decision =
   | Boot_single_user
+  | Boot_after_off of Authz_state.t
+      (** The accounts were turned off (row 4). A single user boots, and the
+          records of the accounts in the state stay read-only. *)
+  | Boot_multi_account
+      (** The log made [Multi_account], the external store matches it, and the
+          config asks for it with auth on (row 7). The account server boots
+          ({!multi_account}); the owner state of a single user does not. *)
   | Stop of stop
 
 val decide : Authz_boot_mode.input -> decision
 
-(** How a workspace goes back to a single user while this build does not
-    serve multi-account. Without the log, the external store and the install
-    record, and with no [account_mode] in [config.json], the boot cannot tell
-    the base path from one never activated, and boots a single user (row 1).
-    It is one line for {!messages} and for the texts of [masc auth bootstrap]. *)
-val single_user_again : string
+(** The way from an active workspace to a single user that keeps the records
+    of the accounts read-only ({!Authz_off}). One line for the texts of
+    [masc auth bootstrap]. *)
+val turn_off_line : string
 
-(** One line per reason, the first apart, so a stop always has a reason. A
-    {!Multi_account_not_served} stop also says what the high-water mark found
-    when it is not a match. {!Activation_requested} and
-    {!Multi_account_not_served} end with {!single_user_again}. *)
+(** What a boot of a base path that {!asks_for_multi_account} does, the
+    account server or a stop and never the server of a single user, and the
+    two commands that run it. One line, which names the config file, for the
+    commands that prepare or open the server of a single user: [masc doctor],
+    [masc setup] and the setup journey. *)
+val account_installation_line : base_path:string -> string
+
+(** One line per reason, the first apart, so a stop always has a reason. An
+    {!Authorization_uncertain} stop also says what the high-water mark
+    found. *)
 val messages : Authz_boot_mode.input -> stop -> string * string list
 
 (** A base path that {!boot} judged a single-user boot. Only {!boot} makes one,
@@ -97,13 +121,55 @@ type single_user
 (** The base path that {!boot} read. *)
 val single_user_base_path : single_user -> string
 
-(** {!input}, {!decide} and {!messages} in one call: the judged base path for a
-    single-user boot, and the messages of the stop otherwise. *)
+(** The state of the authorization log of a base path whose accounts were
+    turned off (row 4). The Keepers, the Runtimes and the account homes it
+    names stay read-only: no run starts on them ({!Runtime_account_access}).
+    [None] for a base path never set up for accounts. *)
+val turned_off : single_user -> Authz_state.t option
+
+(** A base path that {!boot} judged an active multi-account installation
+    (row 7). Only {!boot} makes one, and the account server takes one in place
+    of a base path, so a server that skips the judgment does not open the
+    authorization zone of an installation. No single-user runtime takes one:
+    the owner state, the stdio server and a host tool take a {!single_user}. *)
+type multi_account
+
+(** The base path that {!boot} read. *)
+val multi_account_base_path : multi_account -> string
+
+(** The external store that the install record names and that {!boot} read:
+    the store the judgment compared with the log. The account server opens
+    its zone over this path and the log of {!multi_account_base_path}. *)
+val multi_account_external_store : multi_account -> string
+
+(** The clients that the installation registered at its login providers, as
+    [config.json] names them: the [google] and the [github] member, each
+    [None] when the file has no such member. A client names the environment
+    variable of its secret and holds no secret. *)
+type login_clients =
+  { google : Masc_domain.login_client option
+  ; github : Masc_domain.login_client option
+  }
+
+(** The login clients of the [config.json] that {!boot} judged. They come
+    from the bytes the judgment read: the file is not read a second time, so
+    a server does not judge one config and log persons in with another. A
+    multi-account boot stops on a config the full decoder refuses, so these
+    are the clients of a config that decoded. *)
+val multi_account_login_clients : multi_account -> login_clients
+
+(** What a boot runs on a base path. *)
+type booted =
+  | Single_user of single_user
+  | Multi_account of multi_account
+
+(** {!input}, {!decide} and {!messages} in one call, over one read of the
+    files: what the boot runs, and the messages of the stop otherwise. *)
 val boot
   :  base_path:string
   -> config_dir:string option
   -> anonymous_mutations:bool
-  -> (single_user, string * string list) result
+  -> (booted, string * string list) result
 
 (** A base path that a host tool may run turns on as its single user, judged
     without opening a file (plan D2-2). A tool runs while a server may be

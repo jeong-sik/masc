@@ -103,6 +103,7 @@ type refusal =
   | Secret_differs
   | Revocation_pending
   | Principal_inactive of User_id.t
+  | Principal_revocation_pending of User_id.t
 
 let refusal_to_string = function
   | Unknown -> "no session has the id of the cookie"
@@ -113,9 +114,14 @@ let refusal_to_string = function
     "a revocation of the session of the cookie was given up before it reached the log"
   | Principal_inactive user_id ->
     Printf.sprintf "the principal %s of the session is disabled or deleted" (User_id.to_string user_id)
+  | Principal_revocation_pending user_id ->
+    Printf.sprintf
+      "a revocation of the principal %s of the session was given up before it reached the log"
+      (User_id.to_string user_id)
 ;;
 
-let authenticate (state : Authz_state.t) ~now_ms (cookie : Cookie.t) =
+let authenticate (trusted : Authz_zone.trusted) ~now_ms (cookie : Cookie.t) =
+  let state = (trusted :> Authz_zone.snapshot).state in
   match Authz_session_state.find_active state.sessions cookie.Cookie.session_id ~now_ms with
   | Error Authz_session_state.Unknown -> Error Unknown
   | Error Authz_session_state.Ended -> Error Ended
@@ -131,14 +137,17 @@ let authenticate (state : Authz_state.t) ~now_ms (cookie : Cookie.t) =
       match Authz_state.revocation state (Subject.Session cookie.Cookie.session_id) with
       | Revocation_state.Pending -> Error Revocation_pending
       | Revocation_state.Not_pending ->
-        if Authz_principal_state.is_active state.principals user_id
-        then
-          Ok
-            { user_id
-            ; session_id = cookie.Cookie.session_id
-            ; expires_at_ms = issued_at_ms + Authz_session_state.lifetime_ms
-            }
-        else Error (Principal_inactive user_id))
+        if not (Authz_principal_state.is_active state.principals user_id)
+        then Error (Principal_inactive user_id)
+        else (
+          match Authz_state.revocation state (Subject.Principal (Principal.Human user_id)) with
+          | Revocation_state.Pending -> Error (Principal_revocation_pending user_id)
+          | Revocation_state.Not_pending ->
+            Ok
+              { user_id
+              ; session_id = cookie.Cookie.session_id
+              ; expires_at_ms = issued_at_ms + Authz_session_state.lifetime_ms
+              }))
 ;;
 
 let sign_out zone ~user_id session_id =

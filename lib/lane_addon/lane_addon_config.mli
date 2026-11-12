@@ -1,6 +1,16 @@
 (** Declarative installations from TOML. This module reads configuration only;
     it never starts workers, acquires observation sources or changes Keepers.
     Callers on a server fiber must offload these filesystem reads. *)
+type exact_in_flight = private int
+(** How many exact requests of one installation the host may run at once. It
+    is at least 1 by construction. *)
+
+val exact_in_flight : int -> exact_in_flight option
+(** [None] for a count below 1. *)
+
+val one_exact_at_a_time : exact_in_flight
+(** The host waits for each exact request before it starts the next. *)
+
 type declaration = {
   id : string;
   enabled : bool;
@@ -13,6 +23,10 @@ type declaration = {
   (** SHA-256 of the exact declaration bytes, including enabled and comments.
       Matches the declaration editor's source_revision; never a worker key. *)
   source_path : string;
+  max_exact_in_flight : exact_in_flight;
+  (** RFC host-cycle-runs-exact-requests-side-by-side 3.2.
+      {!one_exact_at_a_time} when the declaration has no such key. It is not a
+      worker input, so it is outside [revision]. *)
 }
 
 type issue = { source_path : string; id : string option; message : string }

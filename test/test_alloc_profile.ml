@@ -131,6 +131,66 @@ let test_report_under_a_live_profile_does_not_raise () =
   check int "nothing dropped" 0 second.dropped_samples
 ;;
 
+let test_the_starting_domain_table_counts_only_its_own_allocations () =
+  with_clean @@ fun () ->
+  T.set_sampling_rate 0.01;
+  (* See the wire case: the tables are what the case checks, not the handles. *)
+  ignore (T.observe_alloc ~key:"pool" ~n_samples:9);
+  ignore (T.observe_alloc_on_starting_domain ~key:"main" ~n_samples:4);
+  ignore (T.observe_alloc_on_starting_domain ~key:"both" ~n_samples:2);
+  ignore (T.observe_alloc ~key:"both" ~n_samples:1);
+  let report = P.report ~top:10 in
+  check (list string) "allocated: every domain" [ "pool"; "main"; "both" ]
+    (keys report.allocated);
+  check (list string) "starting domain: main (4) ahead of both (2), no pool"
+    [ "main"; "both" ] (keys report.starting_domain_allocated);
+  check int "allocated samples" 16 report.allocated_samples;
+  check int "starting domain samples" 6 report.starting_domain_allocated_samples;
+  check int "starting domain words" 600 report.starting_domain_allocated_words
+;;
+
+(* A real profile: this domain starts it and allocates, a domain it spawns
+   allocates as much under another function. Both are in the total; the
+   starting domain's table holds this domain's site and not the other's. *)
+let allocate_arrays count =
+  let sink = ref [] in
+  for _ = 1 to count do
+    sink := Array.make 64 0 :: !sink
+  done;
+  ignore (Sys.opaque_identity !sink : int array list)
+;;
+
+let allocate_on_the_starting_domain count = allocate_arrays count; ()
+let allocate_on_a_spawned_domain count = allocate_arrays count; ()
+
+let test_a_live_profile_tells_the_starting_domain_apart () =
+  with_clean @@ fun () ->
+  P.start ~sampling_rate:0.01;
+  Fun.protect ~finally:P.stop @@ fun () ->
+  allocate_on_the_starting_domain 20_000;
+  Domain.join (Domain.spawn (fun () -> allocate_on_a_spawned_domain 20_000));
+  let report = P.report ~top:50 in
+  let names (site : P.site_totals) marker =
+    (* A key is the call stack as text; the function's name is in it. *)
+    let rec has_from index =
+      index + String.length marker <= String.length site.key
+      && (String.sub site.key index (String.length marker) = marker || has_from (index + 1))
+    in
+    has_from 0
+  in
+  let in_table table marker = List.exists (fun site -> names site marker) table in
+  check bool "this domain's samples are counted" true
+    (report.starting_domain_allocated_samples > 0);
+  check bool "the spawned domain's samples are only in the total" true
+    (report.allocated_samples > report.starting_domain_allocated_samples);
+  check bool "the spawned domain's site is in the total table" true
+    (in_table report.allocated "allocate_on_a_spawned_domain");
+  check bool "this domain's site is in the starting-domain table" true
+    (in_table report.starting_domain_allocated "allocate_on_the_starting_domain");
+  check bool "the spawned domain's site is not" false
+    (in_table report.starting_domain_allocated "allocate_on_a_spawned_domain")
+;;
+
 let test_wire_shape () =
   with_clean @@ fun () ->
   T.set_sampling_rate 0.1;
@@ -140,7 +200,16 @@ let test_wire_shape () =
   | `Assoc fields ->
     List.iter
       (fun key -> check bool key true (List.mem_assoc key fields))
-      [ "live"; "major"; "allocated"; "dropped_samples"; "pending_events"; "sites" ];
+      [ "live"
+      ; "major"
+      ; "allocated"
+      ; "starting_domain_allocated"
+      ; "starting_domain_allocated_samples"
+      ; "starting_domain_allocated_bytes"
+      ; "dropped_samples"
+      ; "pending_events"
+      ; "sites"
+      ];
     check bool "rate" true (List.mem ("sampling_rate", `Float 0.1) fields)
   | _ -> fail "object"
 ;;
@@ -156,8 +225,14 @@ let () =
         ; test_case "site bound" `Quick test_sites_past_the_bound_fold_into_one
         ; test_case "callstack key" `Quick test_callstack_key_is_bounded_text
         ; test_case "key says when unattributed" `Quick test_a_key_says_when_it_found_no_caller
+        ; test_case "starting domain table" `Quick
+            test_the_starting_domain_table_counts_only_its_own_allocations
         ; test_case "wire" `Quick test_wire_shape
         ] )
-    ; "profile", [ test_case "report under sampling" `Quick test_report_under_a_live_profile_does_not_raise ]
+    ; ( "profile"
+      , [ test_case "report under sampling" `Quick test_report_under_a_live_profile_does_not_raise
+        ; test_case "starting domain under sampling" `Quick
+            test_a_live_profile_tells_the_starting_domain_apart
+        ] )
     ]
 ;;

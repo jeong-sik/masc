@@ -1725,7 +1725,6 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
              | Serve.Turn_cancelled | Serve.Unsupported_server_request _
              | Serve.Runtime_shutting_down | Serve.Process_exited _
              | Serve.Timeout _ -> ());
-            Option.iter on_model_input_refused (model_input_refusal_of_error error);
             if failure_leaves_effects_unknown ~admission:!admission ~turn_items:!turn_items error
             then observe_transport_uncertain ();
             recovery_failure := recovery_failure_for_attempt
@@ -1754,13 +1753,29 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                      catalog_read_s;
                    None)
             in
+            (* The same typed answer can come from a model the account does not
+               list or from a spent usage window. Either one names a cause
+               that is not the size of the range, so neither marks it. *)
+            (match model_input_refusal_of_error error, catalog with
+             | None, (Some (Catalog_lists_model | Catalog_omits_model _) | None)
+             | Some Turn_record.Model_error_not_retryable, Some (Catalog_omits_model _) -> ()
+             | Some refusal, (Some Catalog_lists_model | None) ->
+               if not (Runtime_quota_window.is_exhausted ~scope:quota_scope
+                         ~now:(Time_compat.now ()))
+               then on_model_input_refused refusal);
             runtime_error_to_core_error ?catalog error)
         | `Abort stop -> Ok (`Stopped stop))
     in
     let settle_cancellation exn =
       let backtrace = Printexc.get_raw_backtrace () in
       let terminal_failure error =
-        Option.iter on_model_input_refused (model_input_refusal_of_error error);
+        (* The catalog is not read under cancellation; a spent window still
+           vetoes the mark. *)
+        (match model_input_refusal_of_error error with
+         | Some refusal
+           when not (Runtime_quota_window.is_exhausted ~scope:quota_scope
+                       ~now:(Time_compat.now ())) -> on_model_input_refused refusal
+         | Some Turn_record.Model_error_not_retryable | None -> ());
         recovery_failure_of_runtime_error ~current:!recovery_failure error in
       recovery_failure
         := (match !provider_terminal with

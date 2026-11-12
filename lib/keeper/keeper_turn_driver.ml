@@ -2882,7 +2882,13 @@ let run_named
                   }
               ; refusal
               }
-          | None, (Some _ | None) | Some _, None -> ()
+          | Some _, None ->
+            Log.Keeper.info
+              ~keeper_name
+              "model input refusal names no range runtime=%s: the request carried no \
+               observed seed"
+              attempt_runtime_id
+          | None, (Some _ | None) -> ()
         in
         let hooks =
           match on_response_observed_model_input with

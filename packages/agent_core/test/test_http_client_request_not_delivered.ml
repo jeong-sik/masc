@@ -4,22 +4,22 @@
     small-request case of test 1(가) is in test_http_client_cache.ml.
 
     https providers are the ones that matter, and [Http_client] has no way to
-    trust a test certificate. The last test therefore checks the fact the count
-    stands on: tls-eio passes the errno of a failed write through. *)
+    trust a test certificate. Its [net] argument also takes only a [`Unix]
+    network, so a mock network cannot stand in. Two tests therefore check the
+    facts the count stands on: which exceptions [transport_named_peer_close]
+    names, and that tls-eio passes the errno of a failed write through. *)
 
 open Llm_provider
 
-let fresh_port () =
-  let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  Unix.setsockopt s Unix.SO_REUSEADDR true;
-  Unix.bind s (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
-  let port =
-    match Unix.getsockname s with
-    | Unix.ADDR_INET (_, p) -> p
-    | _ -> failwith "not inet"
+(* Listens on port 0 and reads back the address the kernel assigned, so no
+   other process can take the port between choosing it and listening. *)
+let listen_on_a_free_port ~sw ~net =
+  let socket =
+    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
   in
-  Unix.close s;
-  port
+  match Eio.Net.listening_addr socket with
+  | `Tcp (_, port) -> socket, port
+  | `Unix _ -> Alcotest.fail "the loopback listener has no TCP port"
 ;;
 
 (* Closing with SO_LINGER 0 sends RST instead of FIN, which the peer's next
@@ -52,11 +52,8 @@ let ok_response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
 
 (* Runs [handler] for every accepted connection and counts them. *)
 let start_server ~sw ~net handler =
-  let port = fresh_port () in
+  let socket, port = listen_on_a_free_port ~sw ~net in
   let accepted = Atomic.make 0 in
-  let socket =
-    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
-  in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     while true do
       Eio.Net.accept_fork socket ~sw ~on_error:(fun _ -> ()) (fun flow _addr ->
@@ -201,6 +198,78 @@ let test_a_reused_connection_cut_off_during_a_large_write () =
     stats.closed_after_reuse.request_not_delivered
 ;;
 
+(* The same cut-off through the streaming entry point, which closes its
+   connection on its own path. *)
+let test_a_streamed_request_cut_off_while_written () =
+  with_cache
+  @@ fun ~sw ~net ~cache ->
+  let url, accepted =
+    start_server ~sw ~net (fun flow ->
+      ignore (Eio.Buf_read.line (Eio.Buf_read.of_flow ~max_size:max_int flow) : string);
+      reset_on_close flow)
+  in
+  (match
+     Http_client.with_post_stream
+       ~cache
+       ~net
+       ~url
+       ~headers:[ "Content-Type", "application/json" ]
+       ~body:large_body
+       ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader)
+       ()
+   with
+   | Error (Http_client.NetworkError _) -> ()
+   | Ok _ -> Alcotest.fail "the streamed request was answered"
+   | Error error ->
+     Alcotest.failf "expected a network error, got %s" (describe_http_error error));
+  let stats = Http_client.cache_stats cache in
+  Alcotest.(check int) "one connection reached the server" 1 (Atomic.get accepted);
+  Alcotest.(check int)
+    "closed as not delivered"
+    1
+    stats.closed_total.request_not_delivered;
+  Alcotest.(check int) "not as a failed request" 0 stats.closed_total.request_failed
+;;
+
+(* A backend error like tls-eio's [Tls_socket_closed]: an Eio backend error
+   that is not an errno, and that this test cannot name any better than
+   [Http_client] can. *)
+type Eio.Exn.Backend.t += Unnamed_tls_close
+
+let test_only_a_named_peer_close_is_not_delivered () =
+  let unix_error code = Eio_unix.Unix_error (code, "writev", "") in
+  let reset backend = Eio.Net.err (Eio.Net.Connection_reset backend) in
+  let backend_error backend = Eio.Exn.create (Eio.Exn.X backend) in
+  let named =
+    [ "EPIPE raised directly", Unix.Unix_error (Unix.EPIPE, "writev", "")
+    ; "ECONNRESET raised directly", Unix.Unix_error (Unix.ECONNRESET, "writev", "")
+    ; "Connection_reset carrying EPIPE", reset (unix_error Unix.EPIPE)
+    ; "Connection_reset carrying ECONNRESET", reset (unix_error Unix.ECONNRESET)
+    ; "backend error carrying EPIPE", backend_error (unix_error Unix.EPIPE)
+    ; "backend error carrying ECONNRESET", backend_error (unix_error Unix.ECONNRESET)
+    ]
+  in
+  let unnamed =
+    [ "Connection_reset with a backend that is not an errno", reset Unnamed_tls_close
+    ; "backend error that is not an errno", backend_error Unnamed_tls_close
+    ; "Connection_reset carrying another errno", reset (unix_error Unix.EPERM)
+    ; "ETIMEDOUT", Unix.Unix_error (Unix.ETIMEDOUT, "writev", "")
+    ; "ECONNREFUSED", Unix.Unix_error (Unix.ECONNREFUSED, "connect", "")
+    ; "connection failure", Eio.Net.err (Eio.Net.Connection_failure Eio.Net.Timeout)
+    ; "End_of_file", End_of_file
+    ; "Failure", Failure "write"
+    ]
+  in
+  List.iter
+    (fun (label, exn) ->
+       Alcotest.(check bool) label true (Http_client.transport_named_peer_close exn))
+    named;
+  List.iter
+    (fun (label, exn) ->
+       Alcotest.(check bool) label false (Http_client.transport_named_peer_close exn))
+    unnamed
+;;
+
 (* ── tls-eio passes a failed write's errno through ───────────────── *)
 
 let make_self_signed () : X509.Certificate.t * X509.Private_key.t =
@@ -254,10 +323,7 @@ let test_tls_passes_a_failed_writes_errno_through () =
   Eio.Switch.run
   @@ fun sw ->
   let net = env#net in
-  let port = fresh_port () in
-  let socket =
-    Eio.Net.listen net ~sw ~backlog:8 ~reuse_addr:true (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
-  in
+  let socket, port = listen_on_a_free_port ~sw ~net in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Eio.Net.accept_fork socket ~sw ~on_error:(fun _ -> ()) (fun flow _addr ->
       try
@@ -302,6 +368,14 @@ let () =
             "a reused connection cut off during a large write is not delivered"
             `Quick
             test_a_reused_connection_cut_off_during_a_large_write
+        ; Alcotest.test_case
+            "a streamed request cut off while written is not delivered"
+            `Quick
+            test_a_streamed_request_cut_off_while_written
+        ; Alcotest.test_case
+            "only a named peer close is not delivered"
+            `Quick
+            test_only_a_named_peer_close_is_not_delivered
         ; Alcotest.test_case
             "tls passes a failed write's errno through"
             `Quick

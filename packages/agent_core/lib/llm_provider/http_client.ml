@@ -1177,7 +1177,10 @@ let end_connection held verdict =
 
     [f] receives the caller switch and returns its result with the
     {!Reuse_verdict.t} for the exchange it read. [Error] and exceptions close
-    the connection as [Request_failed]. A cached connection whose transport
+    the connection as [Request_not_delivered] when a write call raised an error
+    the transport named as the peer's close and no response byte came back
+    ({!Request_wire.delivery}), and as [Request_failed] otherwise. A cached
+    connection whose transport
     reported end of file closes as [Transport_ended] even when [f] answered:
     cohttp ends a body at the peer's close without an error. An exception
     raised after that end of file is the peer's close, and is returned as

@@ -292,6 +292,16 @@ type http_error =
     caller cancellation and reserved exceptions must still propagate. *)
 val classify_network_exn : exn -> http_error option
 
+(** [true] only when the transport itself named the peer's close: an
+    [ECONNRESET] or [EPIPE] raised directly or carried by
+    [Eio.Net.Connection_reset] or an Eio backend error. A reset whose backend
+    error is not an errno is [false], and so is every other exception. tls-eio's
+    [Tls_socket_closed] is one such backend error: [tls_eio.mli] does not export
+    it, so it cannot be named. A request is counted as not delivered
+    ({!cache_close_counts}) only when a write call raised an exception for
+    which this is [true]. *)
+val transport_named_peer_close : exn -> bool
+
 (** Diagnostic rendering only. Consumers must branch on [provider_failure_kind]
     directly and never parse this string. *)
 val provider_failure_kind_to_string : provider_failure_kind -> string

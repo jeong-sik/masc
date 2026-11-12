@@ -1,5 +1,5 @@
 id = "operator-quiz"
-revision = "0.3.1"
+revision = "0.3.2"
 title = "Operator quiz"
 ui_category = "memory_judgment"
 contributions = ["derive", "act"]
@@ -71,6 +71,18 @@ binding_schema = '''{
 presentation = '''{
   "description": "Questions from the workspace's own records, answered in Approvals",
   "readings": [
+    {"lane_id": "quiz/scorecard", "path": ["graded"], "label": "Graded in the window", "unit": "answers", "format": "number"},
+    {"lane_id": "quiz/scorecard", "path": ["correct"], "label": "Correct", "unit": "answers", "format": "number"},
+    {"lane_id": "quiz/scorecard", "path": ["incorrect"], "label": "Incorrect", "unit": "answers", "format": "number"},
+    {"lane_id": "quiz/scorecard", "path": ["skipped"], "label": "Skipped", "unit": "answers", "format": "number"},
+    {"lane_id": "quiz/scorecard", "path": ["score"], "label": "Correct of graded in the window", "unit": "answers", "format": "json"},
+    {"lane_id": "quiz/scorecard", "path": ["anchor_local_date"], "label": "Anchor day of the window", "unit": null, "format": "text"},
+    {"lane_id": "quiz/scorecard", "path": ["miss_topics"], "label": "Missed topics in the window", "unit": null, "format": "json"},
+    {"lane_id": "quiz/review", "path": ["latest"], "label": "Latest attempt", "unit": null, "format": "text"},
+    {"lane_id": "quiz/review", "path": ["response"], "label": "Your answer", "unit": null, "format": "json"},
+    {"lane_id": "quiz/review", "path": ["key"], "label": "Expected", "unit": null, "format": "json"},
+    {"lane_id": "quiz/review", "path": ["judgments"], "label": "Judgments", "unit": null, "format": "json"},
+    {"lane_id": "quiz/review", "path": ["sources"], "label": "Sources", "unit": null, "format": "json"},
     {"lane_id": "quiz/measures", "path": ["recovery"], "label": "R: right on a later-day re-ask", "unit": "items", "format": "json"},
     {"lane_id": "quiz/measures", "path": ["participation"], "label": "P: answered of posed", "unit": "questions", "format": "json"},
     {"lane_id": "quiz/measures", "path": ["score"], "label": "Correct of graded", "unit": "answers", "format": "json"},
@@ -100,18 +112,6 @@ presentation = '''{
     {"lane_id": "quiz/topics", "path": ["open_debt_items"], "label": "Items not yet answered right", "unit": null, "format": "json"},
     {"lane_id": "quiz/items", "path": ["latest"], "label": "Latest attempt", "unit": null, "format": "text"},
     {"lane_id": "quiz/items", "path": ["correct_streak"], "label": "Right in a row", "unit": "answers", "format": "number"},
-    {"lane_id": "quiz/items", "path": ["attempts"], "label": "Attempts", "unit": null, "format": "json"},
-    {"lane_id": "quiz/scorecard", "path": ["graded"], "label": "Graded in the window", "unit": "answers", "format": "number"},
-    {"lane_id": "quiz/scorecard", "path": ["correct"], "label": "Correct", "unit": "answers", "format": "number"},
-    {"lane_id": "quiz/scorecard", "path": ["incorrect"], "label": "Incorrect", "unit": "answers", "format": "number"},
-    {"lane_id": "quiz/scorecard", "path": ["skipped"], "label": "Skipped", "unit": "answers", "format": "number"},
-    {"lane_id": "quiz/scorecard", "path": ["score"], "label": "Correct of graded in the window", "unit": "answers", "format": "json"},
-    {"lane_id": "quiz/scorecard", "path": ["anchor_local_date"], "label": "Anchor day of the window", "unit": null, "format": "text"},
-    {"lane_id": "quiz/scorecard", "path": ["miss_topics"], "label": "Missed topics in the window", "unit": null, "format": "json"},
-    {"lane_id": "quiz/review", "path": ["latest"], "label": "Latest attempt", "unit": null, "format": "text"},
-    {"lane_id": "quiz/review", "path": ["response"], "label": "Your answer", "unit": null, "format": "json"},
-    {"lane_id": "quiz/review", "path": ["key"], "label": "Expected", "unit": null, "format": "json"},
-    {"lane_id": "quiz/review", "path": ["judgments"], "label": "Judgments", "unit": null, "format": "json"},
-    {"lane_id": "quiz/review", "path": ["sources"], "label": "Sources", "unit": null, "format": "json"}
+    {"lane_id": "quiz/items", "path": ["attempts"], "label": "Attempts", "unit": null, "format": "json"}
   ]
 }'''

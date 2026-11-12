@@ -107,12 +107,13 @@ max_output_tokens = 2048
 ## 설치본 갱신과 출제 복구
 
 저장소 소스가 바뀌어도 실행 중인 설치 패키지는 자동으로 바뀌지 않는다. 패키지의
-`revision` 과 설치 경로, 실제 worker 원본을 함께 확인한다. 현재 패키지는 `0.3.1` 이고,
+`revision` 과 설치 경로, 실제 worker 원본을 함께 확인한다. 현재 패키지는 `0.3.2` 이고,
 이미지 `0.1.0` 은 Python 과 공용 protocol 모듈을 담는 실행 환경이다. worker 코드는
 설치한 패키지 폴더를 `/addon` 에 읽기 전용으로 붙여 실행한다. `0.3.0` 은 관측 row 에
 `quiz/scorecard` 와 `quiz/review` 를 더했을 뿐 `log.jsonl` 의 모양은 그대로라, 아래
 갱신 절차대로 올려도 log 를 옮기지 않는다. `0.3.1` 은 Results 에 보이는 값의 선언만
-늘렸고 row 와 log 는 그대로다.
+늘렸고, `0.3.2` 는 그 선언의 순서를 바꿔 Results 가 `quiz/scorecard` 부터 열리게 했다.
+둘 다 row 와 log 는 그대로다.
 
 1. 원본 로그와 요청 blob, 설치 선언 및 현재 instance/volume 식별자를 보관한다.
 2. 검증한 패키지를 새 불변 경로에 설치한다. 실행 중인 패키지 폴더를 덮어쓰지 않는다.
@@ -141,19 +142,19 @@ max_output_tokens = 2048
 
 ## 결과 읽기
 
-TUI 에서는 `:` 팔레트에서 `go Features & plugins / Plugins / Operator quiz Results` 를 고르면 Results 가 바로 열린다. 이 항목은 TUI 가 이 설치를 본 뒤에 나온다. 설치가 Approvals 에 질문을 냈거나, Lanes 나 Lane Add-ons 화면을 한 번 연 뒤다. Results 는 왼쪽에 lane 별 목록, 오른쪽에 고른 행을 보여 준다. j/k 로 행을, Left/Right 로 lane 을 옮긴다.
+TUI 에서는 `:` 팔레트에서 `go Features & plugins / Plugins / Operator quiz Results` 를 고르면 Results 가 바로 열린다. 이 항목은 TUI 가 이 설치를 본 뒤에 나온다. 설치가 Approvals 에 질문을 냈거나, Lanes 나 Lane Add-ons 화면을 한 번 연 뒤다. Results 는 왼쪽에 lane 별 목록, 오른쪽에 고른 행을 보여 준다. 처음에는 `quiz/scorecard` 의 첫 행이 골라져 있다. j/k 로 행을, Left/Right 로 lane 을 아래 표의 순서대로 옮긴다. 이 순서는 패키지가 선언한 Results 값의 순서다.
 
 Results 에 일곱 lane 이 나온다.
 
 | lane | 한 행 | 보는 것 |
 |---|---|---|
+| `quiz/scorecard` | 창 하나(마지막 응답 날·최근 7일·30일·전체) | 창 안의 채점된 답 수, 맞음·틀림·건너뜀, 점수, 창 기준일, 놓친 주제 상위 |
+| `quiz/review` | 아직 못 맞힌 복습 항목 하나 | 마지막으로 낸 문제와 내 답, 정답, 판정 기록, 출처 |
+| `quiz/measures` | 하나 | R, P, G, 점수, 버린 문제 수, 실패한 세션 수(이유별) |
 | `quiz/sessions` | `compose` 하나 | 상태, 맞음·틀림·건너뜀·채점 대기·열림 수, 실패 이유 |
 | `quiz/questions` | 답한 문제 하나 | 내 답, 정답(선택형은 `choices`, 서술형은 `rubric`), 판정과 판정한 쪽(`key` 또는 `judgment`), 판정 기록, 채점 상태, 출처의 인용문과 hash |
 | `quiz/topics` | 주제 하나 | 문제 수, 풀이 수, 놓친 수, 아직 못 맞힌 문제와 그 출처 |
 | `quiz/items` | 복습 항목 하나 | 풀이 기록, 마지막 판정, 연속으로 맞힌 횟수 |
-| `quiz/measures` | 하나 | R, P, G, 점수, 버린 문제 수, 실패한 세션 수(이유별) |
-| `quiz/scorecard` | 창 하나(마지막 응답 날·최근 7일·30일·전체) | 창 안의 채점된 답 수, 맞음·틀림·건너뜀, 점수, 창 기준일, 놓친 주제 상위 |
-| `quiz/review` | 아직 못 맞힌 복습 항목 하나 | 마지막으로 낸 문제와 내 답, 정답, 판정 기록, 출처 |
 
 - 답하기 전의 문제는 `quiz/questions` 에 행이 없다. 정답이 먼저 보이는 일은 없다.
 - `quiz/scorecard` 의 창은 마지막으로 답한 날(운영자 시간대)에 붙어 있다. 같은 로그에서 관측을 다시 하면 같은 행이 나온다. 답이 하나도 없으면 이 lane 들은 행을 내지 않는다.

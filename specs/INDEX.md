@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-11-12T04:15:19Z (HEAD: 8f7ce962668f)
+Generated: 2026-11-12T10:16:11Z (HEAD: cb332f65830e)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -52,7 +52,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | DispatchHookChain.tla | DispatchHookChain | manual | 2 | 1 | clean={inv:ShortCircuitSkipsHandler, inv:ObserversAfterHandler, inv:HandlerRequiresNoReject} buggy={inv:ShortCircuitSkipsHandler} | a56f7e91e5c2 |
 | FileLockStarvation.tla | FileLockStarvation | manual | 2 | 1 | clean={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} buggy={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} | 60a4f68df073 |
 | KeeperOwnerOperation.tla | KeeperOwnerOperation | manual | 2 | 1 | clean={inv:TypeOK, inv:SingleRunning, inv:TerminalImmutable, inv:RestartNoRequeue, inv:FifoExceptMove, inv:ExecutionUsesLatestInput} buggy={inv:TypeOK, inv:SingleRunning, inv:TerminalImmutable, inv:RestartNoRequeue, inv:FifoExceptMove, inv:ExecutionUsesLatestInput} | 6c83a9ef70fd |
-| KeeperReceiptWait.tla | KeeperReceiptWait | manual | 14 | 13 | clean={inv:Safety, prop:WaiterResolves} buggy={inv:Safety} cancel-keeps-owner-buggy={inv:OwnerIsLive} claim-while-waiting-buggy={inv:ClaimedHasReceipt} duplicate-resolve-buggy={inv:SlotMatchesTask} duplicate-wait-buggy={inv:OneOwner} late-receipt-reachable-buggy={inv:LateReceiptAfterCancelUnreachable} orphan-wait-reachable-buggy={inv:WaitOnOrphanUnreachable} restart-loses-request-buggy={inv:WaitingHasSource} restart-requeue-reachable-buggy={inv:RestartRequeueThenSucceedUnreachable} resume-reachable-buggy={inv:WaitThenSucceedUnreachable} revive-cancelled-buggy={inv:TerminalIsFinal} unfiltered-load-buggy={inv:ReadyHasReceipt} wake-never-delivered-buggy={prop:WaiterResolves} | b3a0e2087a91 |
+| KeeperReceiptWait.tla | KeeperReceiptWait | manual | 14 | 13 | clean={inv:Safety, prop:WaiterResolves} buggy={inv:Safety} cancel-keeps-owner-buggy={inv:OwnerIsLive} claim-while-waiting-buggy={inv:ClaimedHasReceipt} duplicate-resolve-buggy={inv:SlotMatchesTask} duplicate-wait-buggy={inv:OneOwner} late-receipt-reachable-buggy={inv:LateReceiptAfterCancelUnreachable} orphan-wait-reachable-buggy={inv:WaitOnOrphanUnreachable} restart-loses-request-buggy={inv:WaitingHasSource} restart-requeue-reachable-buggy={inv:RestartRequeueThenSucceedUnreachable} resume-reachable-buggy={inv:WaitThenSucceedUnreachable} revive-cancelled-buggy={inv:TerminalIsFinal} unfiltered-load-buggy={inv:ReadyHasReceipt} wake-never-delivered-buggy={prop:WaiterResolves} | 3dbfc3a79852 |
 | KeeperTurnSingleFlight.tla | KeeperTurnSingleFlight | manual | 2 | 1 | clean={inv:TypeOK, inv:SingleFlight} buggy={inv:TypeOK, inv:SingleFlight} | 3729df26b85a |
 | KeeperWorktreeContainment.tla | KeeperWorktreeContainment | manual | 3 | 2 | clean={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} other-playground-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} server-root-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} | fc57677b6dc2 |
 | LibrarianContinuityWidth.tla | LibrarianContinuityWidth | manual | 5 | 4 | clean={inv:TypeOK, inv:NoRefusedUnitOffered, inv:LearnedWidthHolds} narrow-on-other-buggy={inv:TypeOK} no-carry-buggy={inv:TypeOK} release-on-commit-buggy={inv:TypeOK, inv:LearnedWidthHolds} release-on-unreadable-buggy={inv:TypeOK, inv:LearnedWidthHolds} | f23a79f08a08 |

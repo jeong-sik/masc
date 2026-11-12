@@ -1,10 +1,12 @@
 name = "keeper_receipt_wait"
 description = """
-Wait for the receipt of a background Execute run. The turn ends when this call \
-succeeds. Calls in the same turn wait for every run they name, and a later run of \
-this conversation starts with their receipts once all of them have arrived. A receipt \
-that is already waiting is read by the next run at once. A request_id that Execute \
-did not return is refused."""
+Wait for the receipt of a background Execute run, or of a schedule created with \
+masc_schedule_create delivery receipt. The turn ends when this call succeeds. Calls \
+in the same turn wait for every run and schedule they name, and a later run of this \
+conversation starts with their receipts once all of them have arrived. A receipt \
+that is already waiting is read by the next run at once. Give request_id for a run \
+and schedule_id for a schedule. An id that Execute or masc_schedule_create did not \
+return, or a schedule whose delivery is queue, is refused."""
 additional_properties = false
 defer_loading = true
 
@@ -12,5 +14,20 @@ defer_loading = true
 name = "request_id"
 type = "string"
 min_length = 1
-required = true
 description = "The request_id that Execute returned for a run started with run_in_background true."
+
+[[params]]
+name = "schedule_id"
+type = "string"
+min_length = 1
+description = "The schedule_id that masc_schedule_create returned for a Keeper wake of this Keeper with delivery receipt. With until_github_run, the receipt is the run's outcome."
+
+[[one_of]]
+required = ["request_id"]
+forbidden = ["schedule_id"]
+description = "Wait for a background Execute run."
+
+[[one_of]]
+required = ["schedule_id"]
+forbidden = ["request_id"]
+description = "Wait for a schedule whose delivery is receipt."

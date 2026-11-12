@@ -28,3 +28,14 @@ val deliver :
     is already in the outbox is not written again. The receipt is committed
     even when the wake cannot be: the maintenance pulse finds a retained
     receipt on its next pass. *)
+
+val retain_unfinished :
+  base_path:string ->
+  keeper_name:string ->
+  schedule_id:string ->
+  (unit, string) result
+(** Writes one [Unfinished] receipt for a schedule that ended without one, so a
+    conversation that waits for it receives an answer. Does not wake the
+    Keeper: the caller resolves the wait, and a wake before that would find the
+    receipt owned and read nothing. Nothing is written when the outbox already
+    holds a receipt of that call id. *)

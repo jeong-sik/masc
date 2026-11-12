@@ -59,13 +59,32 @@ let notify ~base_path ~keeper_name ~schedule_id =
       (Printexc.to_string exn)
 ;;
 
-let deliver ~base_path ~keeper_name ~schedule_id ending =
+let retain_once ~base_path ~keeper_name ~schedule_id ending =
   let* snapshot = Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt in
-  let* () =
-    if Outbox.contains_call snapshot ~call_id:schedule_id
-    then Ok ()
-    else Outbox.retain ~base_path ~keeper_name (receipt ~schedule_id ending)
-  in
+  if Outbox.contains_call snapshot ~call_id:schedule_id
+  then Ok ()
+  else Outbox.retain ~base_path ~keeper_name (receipt ~schedule_id ending)
+;;
+
+let deliver ~base_path ~keeper_name ~schedule_id ending =
+  let* () = retain_once ~base_path ~keeper_name ~schedule_id ending in
   notify ~base_path ~keeper_name ~schedule_id;
   Ok ()
+;;
+
+let source_lost_cause =
+  "The schedule ended before its receipt was written: its wake could not be \
+   delivered, or the schedule was cancelled or expired. Check the state it was \
+   to report."
+;;
+
+(* The wait that asked for this schedule is resolved by the caller afterwards,
+   so this does not wake the Keeper: a wake before the wait is resolved would
+   find the receipt owned and read nothing. *)
+let retain_unfinished ~base_path ~keeper_name ~schedule_id =
+  retain_once
+    ~base_path
+    ~keeper_name
+    ~schedule_id
+    (Unfinished { cause = source_lost_cause })
 ;;

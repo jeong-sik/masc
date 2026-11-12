@@ -17,7 +17,13 @@ val settle_lost : base_path:string -> keeper_name:string -> (unit, string) resul
 
     The receipt echoes the arguments the request record kept. A request with
     no record, or whose record is not a background Execute run's, has none to
-    echo: its receipt carries [Unknown] arguments and says so in its message. *)
+    echo: its receipt carries [Unknown] arguments and says so in its message.
+
+    A pending id with no request record may be a schedule id
+    ({!Keeper_receipt_wait_source}). A wake that delivers a receipt and has not
+    ended is left alone, like a run a worker may still own. One that has ended
+    without its receipt gets an [unfinished] receipt from
+    {!Keeper_schedule_receipt.retain_unfinished}. *)
 
 val after_wait : base_path:string -> keeper_name:string -> (unit, string) result
 (** Run once a wait is recorded: the receipt, or the end of the run, may have

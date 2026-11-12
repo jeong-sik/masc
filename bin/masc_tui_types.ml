@@ -10291,8 +10291,6 @@ type state = {
   mutable live_context_cancel: (unit -> unit) option;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
-  (* [None] means nothing has been read yet, which is not the same as an
-     installation with no rows. *)
   (* The Home Health line's own read (RFC-0480 §3.1): owed on a
      workspace_health push and a revalidation. *)
   mutable overview_inflight: bool;

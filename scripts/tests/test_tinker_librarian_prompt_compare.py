@@ -5,129 +5,98 @@
 # pyright: strict
 """Tests for scripts/tinker/librarian/prompt_compare.py: whether a prompt draft goes in.
 
-Rows and runs are invented. `eval_admission` imports the Tinker caller, which
-imports openai, so this file runs with `uv run`.
+Counts, runs and pinned lines are invented (`tinker_librarian_prompt_fixtures.py`). `CommandTest`
+runs the two commands over invented run folders of every pinned item, under the present pass lines.
+`eval_admission` imports the Tinker caller, which imports openai, so this file runs with `uv run`.
 """
 
 from __future__ import annotations
 
-import hashlib
+import contextlib
+import io
+import itertools
 import json
 import math
+import shutil
 import sys
 import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librarian"))
 
 import eval_admission as V
 import prompt_compare as P
+import prompt_counts as C
+import prompt_lines as L
+from tinker_librarian_prompt_fixtures import (
+    BASE_T,
+    DRAFT_T,
+    FILES,
+    GLM,
+    INKLING,
+    LINES,
+    OTHER_T,
+    PIN,
+    RECORD,
+    Row,
+    baseline,
+    measured,
+    real_row,
+    sha,
+    synth_row,
+    write_run,
+)
 
-type Row = dict[str, object]
-
-BASE_T, DRAFT_T, OTHER_T = "t-base", "t-draft", "t-other"
-PIN = "pin"
-INKLING = P.ModelLines("tinker", "inkling-model", 2, frozenset({"s1", "s2"}), frozenset({"r1", "r2"}))
-GLM = P.ModelLines("glm", "glm-model", 1, frozenset({"gs"}), frozenset({"gr"}))
-LINES = P.Lines(PIN, BASE_T, 2.5, 2.0, frozenset({"inkling"}), {"inkling": INKLING, "glm": GLM})
-
-
-def synth_row(item: str, **counts: object) -> Row:
-    base: Row = {"target": "base", "item": item, "call_key": f"key-{item}", "sent_at": 1.0,
-                 "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
-                 "prompt_tokens": 1, "cached_tokens": 1, "candidates": 2, "correct": 2, "dropped": 0,
-                 "absorbed": 0, "dropped_expected": 0, "planted": 1, "planted_dropped": 0, "state_correct": 2,
-                 "state_by_kind": {"new": [2, 2]}, "dropped_unmerged": [], "planted_absorbed": 0,
-                 "scheduled_ahead": 0, "scheduled_ahead_dropped": 0, "scheduled_past": 0, "scheduled_past_dropped": 0,
-                 "merges": 0, "merges_done": 0, "added": 0, "removed": 0, "expected_added": 0, "expected_removed": 0,
-                 "dropped_off_label": [], "absorbs": {}, "merges_absorbed": []}
-    return {**base, **counts}
-
-
-def real_row(item: str, **counts: object) -> Row:
-    base: Row = {"target": "base", "item": item, "call_key": f"key-{item}", "sent_at": 2.0,
-                 "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
-                 "prompt_tokens": 1, "cached_tokens": 1, "candidates": 2, "agree": 1,
-                 "dropped_not_in_live": [], "absorbed_not_in_live": [], "added": 0, "removed": 0,
-                 "live_added": 0, "live_removed": 0}
-    return {**base, **counts}
+type Sides = dict[str, tuple[L.Baseline, list[C.Measured]]]
 
 
-def counts(hits: dict[str, tuple[int, int]]) -> dict[P.Metric, P.Count]:
-    """Every metric at 5 of 10, but those named."""
-    out = {m: P.Count(5, 10) for m in P.Metric}
-    out.update({P.Metric(k): P.Count(*v) for k, v in hits.items()})
-    return out
-
-
-def measured(template: str, synth: str = "s", real: str = "r",
-             hits: dict[str, tuple[int, int]] | None = None,
-             answered: frozenset[tuple[str, float]] = frozenset()) -> P.Measured:
-    return P.Measured(counts(hits or {}), template, synth, real,
-                      {"agree": 1, "candidates": 2, "dropped_not_in_live": 0}, answered)
-
-
-def sides(inkling_draft: dict[str, tuple[int, int]], glm_draft: dict[str, tuple[int, int]] | None = None,
-          ) -> dict[str, tuple[list[P.Measured], list[P.Measured]]]:
-    out = {"inkling": ([measured(BASE_T, "s1", "r1"), measured(BASE_T, "s2", "r2")],
-                       [measured(DRAFT_T, hits=inkling_draft), measured(DRAFT_T, hits=inkling_draft)])}
+def sides(inkling_draft: dict[str, tuple[int, int]], glm_draft: dict[str, tuple[int, int]] | None = None) -> Sides:
+    """Each model's pinned baseline, every metric at 5 of 10 a run, beside draft runs counting the hits named."""
+    out: Sides = {"inkling": (baseline("i1", "i2"), [measured(DRAFT_T, "d1", inkling_draft),
+                                                     measured(DRAFT_T, "d2", inkling_draft)])}
     if glm_draft is not None:
-        out["glm"] = ([measured(BASE_T, "gs", "gr")], [measured(DRAFT_T, hits=glm_draft)])
+        out["glm"] = (baseline("g1"), [measured(DRAFT_T, "d3", glm_draft)])
     return out
 
 
 class ChangeTest(unittest.TestCase):
     def test_the_noise_width_decides_worse_and_better(self) -> None:
-        base = P.Count(80, 100)
-        self.assertEqual(P.change_of(base, P.Count(70, 100), 2.5, 2.0)[0], P.Change.SAME)
-        self.assertEqual(P.change_of(base, P.Count(70, 100), 1.5, 2.0)[0], P.Change.WORSE)
-        self.assertEqual(P.change_of(base, P.Count(95, 100), 2.5, 2.0)[0], P.Change.BETTER)
-        self.assertEqual(P.change_of(base, P.Count(95, 100), 2.5, 3.5)[0], P.Change.SAME)
+        base = C.Count(80, 100)
+        self.assertEqual(P.change_of(base, C.Count(70, 100), 2.5, 2.0)[0], P.Change.SAME)
+        self.assertEqual(P.change_of(base, C.Count(70, 100), 1.5, 2.0)[0], P.Change.WORSE)
+        self.assertEqual(P.change_of(base, C.Count(95, 100), 2.5, 2.0)[0], P.Change.BETTER)
+        self.assertEqual(P.change_of(base, C.Count(95, 100), 2.5, 3.5)[0], P.Change.SAME)
 
     def test_a_drop_reaching_the_edge_is_not_worse_and_one_past_it_is(self) -> None:
-        base, draft = P.Count(30, 41), P.Count(20, 41)
+        base, draft = C.Count(30, 41), C.Count(20, 41)
         _, d, sigma = P.change_of(base, draft, 9.0, 9.0)
         assert d is not None and sigma is not None
         edge = abs(d) / sigma
         self.assertEqual(P.change_of(base, draft, edge * (1 + 1e-9), 9.0)[0], P.Change.SAME)
         self.assertEqual(P.change_of(base, draft, edge * (1 - 1e-9), 9.0)[0], P.Change.WORSE)
 
+    def test_a_width_of_zero_makes_any_difference_a_change(self) -> None:
+        self.assertEqual(P.change_of(C.Count(50, 100), C.Count(49, 100), 0.0, 0.0)[0], P.Change.WORSE)
+        self.assertEqual(P.change_of(C.Count(50, 100), C.Count(51, 100), 0.0, 0.0)[0], P.Change.BETTER)
+        self.assertEqual(P.change_of(C.Count(50, 100), C.Count(25, 50), 0.0, 0.0)[0], P.Change.SAME)
+
     def test_sigma_is_the_standard_error_at_the_pooled_rate(self) -> None:
-        _, d, sigma = P.change_of(P.Count(5, 82), P.Count(20, 82), 2.5, 2.0)
+        _, d, sigma = P.change_of(C.Count(5, 82), C.Count(20, 82), 2.5, 2.0)
         p = 25 / 164
         self.assertAlmostEqual(cast(float, d), 15 / 82)
         self.assertAlmostEqual(cast(float, sigma), math.sqrt(p * (1 - p) * (2 / 82)))
 
     def test_a_side_with_nothing_to_count_is_uncounted(self) -> None:
-        self.assertEqual(P.change_of(P.Count(0, 0), P.Count(3, 4), 2.5, 2.0), (P.Change.UNCOUNTED, None, None))
-        self.assertEqual(P.change_of(P.Count(3, 4), P.Count(0, 0), 2.5, 2.0), (P.Change.UNCOUNTED, None, None))
+        self.assertEqual(P.change_of(C.Count(0, 0), C.Count(3, 4), 2.5, 2.0), (P.Change.UNCOUNTED, None, None))
+        self.assertEqual(P.change_of(C.Count(3, 4), C.Count(0, 0), 2.5, 2.0), (P.Change.UNCOUNTED, None, None))
 
-    def test_every_hit_on_both_sides_is_the_same(self) -> None:
-        self.assertEqual(P.change_of(P.Count(10, 10), P.Count(20, 20), 2.5, 2.0)[0], P.Change.SAME)
-
-
-class CountsTest(unittest.TestCase):
-    def test_rates_match_the_verdicts_numbers(self) -> None:
-        rows = [synth_row("m1-01", valid=False, candidates=3, state_correct=1, planted=2, planted_dropped=1,
-                          dropped=2, dropped_expected=1),
-                synth_row("m1-02", candidates=4, state_correct=4, planted=1, planted_dropped=1, dropped=1,
-                          dropped_expected=1),
-                synth_row("m2-01", candidates=2, state_correct=1, planted=0)]
-        merges: dict[str, object] = {"absorbs": 4, "absorbs_mergeable": 3, "merges": 5, "merges_mergeable": 2}
-        got = P.synth_counts(rows, 1, merges)
-        want = cast(dict[str, object], V.summarize("synth", rows, {"base": 1})["base"])
-        for metric, key in ((P.Metric.SYNTH_VALID, "valid_rate"), (P.Metric.MEMORY_STATE, "memory_state_accuracy"),
-                            (P.Metric.STALE_RECALL, "stale_drop_recall"), (P.Metric.DROP_PRECISION, "drop_precision")):
-            self.assertAlmostEqual(got[metric].hits / got[metric].chances, cast(float, want[key]), msg=metric)
-        self.assertEqual((got[P.Metric.ABSORB_PRECISION], got[P.Metric.MERGE_RECALL]), (P.Count(3, 4), P.Count(2, 5)))
-
-    def test_the_real_record_counts_valid_answers_only(self) -> None:
-        rows = [real_row("e1", agree=2, candidates=3, dropped_not_in_live=["m1"]),
-                real_row("e2", valid=False, agree=0, candidates=5, dropped_not_in_live=["m4", "m5"])]
-        self.assertEqual(P.real_record(rows), {"agree": 2, "candidates": 3, "dropped_not_in_live": 1})
+    def test_every_hit_or_no_hit_on_both_sides_is_the_same(self) -> None:
+        self.assertEqual(P.change_of(C.Count(10, 10), C.Count(20, 20), 2.5, 2.0)[0], P.Change.SAME)
+        self.assertEqual(P.change_of(C.Count(0, 10), C.Count(0, 20), 2.5, 2.0)[0], P.Change.SAME)
 
 
 class ComparedTest(unittest.TestCase):
@@ -156,15 +125,35 @@ class ComparedTest(unittest.TestCase):
         self.assertEqual((result["complete"], result["goes_in"]), (False, False))
         self.assertEqual(result["draft_template_sha256"], [DRAFT_T])
 
+    def test_the_base_side_is_the_pinned_baseline(self) -> None:
+        pinned = replace(baseline("i1", "i2"), counts={m: C.Count(7, 30) for m in C.Metric},
+                         real_record=(C.RealRecord(3, 4, 5), C.RealRecord(0, 7, 1)))
+        draft = [measured(DRAFT_T, "d1", record=C.RealRecord(2, 2, 0)), measured(DRAFT_T, "d2")]
+        got = cast(Row, cast(Row, P.compared(LINES, {"inkling": (pinned, draft)})["models"])["inkling"])
+        for metric in C.Metric:
+            row = cast(Row, cast(Row, got["metrics"])[metric.value])
+            self.assertEqual((row["base"], row["draft"]), ([7, 30], [10, 20]), msg=metric)
+        self.assertEqual(got["real_record"],
+                         {"base": [{"agree": 3, "candidates": 4, "dropped_not_in_live": 5},
+                                   {"agree": 0, "candidates": 7, "dropped_not_in_live": 1}],
+                          "draft": [{"agree": 2, "candidates": 2, "dropped_not_in_live": 0},
+                                    {"agree": RECORD.agree, "candidates": RECORD.candidates,
+                                     "dropped_not_in_live": RECORD.dropped_not_in_live}]})
+        self.assertEqual(got["base_rows_sha256"], {"synth": [sha("i1 synth"), sha("i2 synth")],
+                                                   "real": [sha("i1 real"), sha("i2 real")]})
+
     def test_precision_with_chances_on_only_one_side_cannot_prove_non_degradation(self) -> None:
         for model in ("inkling", "glm"):
-            for zero_side in (0, 1):
-                for metric in (P.Metric.DROP_PRECISION, P.Metric.ABSORB_PRECISION):
-                    with self.subTest(model=model, zero_side=zero_side, metric=metric):
+            for zero_base in (True, False):
+                for metric in (C.Metric.DROP_PRECISION, C.Metric.ABSORB_PRECISION):
+                    with self.subTest(model=model, zero_base=zero_base, metric=metric):
                         plan = sides({"memory_state_accuracy": (10, 10)}, {})
                         base, draft = plan[model]
-                        runs = base if zero_side == 0 else draft
-                        runs[:] = [replace(m, counts={**m.counts, metric: P.Count(0, 0)}) for m in runs]
+                        if zero_base:
+                            base = replace(base, counts={**base.counts, metric: C.Count(0, 0)})
+                        else:
+                            draft = [replace(m, counts={**m.counts, metric: C.Count(0, 0)}) for m in draft]
+                        plan[model] = (base, draft)
                         result = P.compared(LINES, plan)
                         self.assertEqual(result["uncompared"], [f"{model}.{metric.value}"])
                         self.assertEqual((result["worse"], result["complete"], result["goes_in"]),
@@ -173,53 +162,51 @@ class ComparedTest(unittest.TestCase):
 
     def test_no_actions_on_either_side_are_not_an_improvement_or_a_missing_comparison(self) -> None:
         plan = sides({"memory_state_accuracy": (10, 10)}, {})
-        for base, draft in plan.values():
-            for runs in (base, draft):
-                runs[:] = [replace(m, counts={**m.counts, P.Metric.ABSORB_PRECISION: P.Count(0, 0)})
-                           for m in runs]
+        for model, (base, draft) in list(plan.items()):
+            plan[model] = (replace(base, counts={**base.counts, C.Metric.ABSORB_PRECISION: C.Count(0, 0)}),
+                           [replace(m, counts={**m.counts, C.Metric.ABSORB_PRECISION: C.Count(0, 0)}) for m in draft])
         result = P.compared(LINES, plan)
         self.assertEqual((result["uncompared"], result["complete"], result["goes_in"]), ([], True, True))
         self.assertEqual(result["better"], ["inkling.memory_state_accuracy"])
         for model in ("inkling", "glm"):
             metrics = cast(dict[str, Row], cast(dict[str, Row], result["models"])[model]["metrics"])
-            self.assertEqual(metrics[P.Metric.ABSORB_PRECISION]["change"], P.Change.UNCOUNTED)
+            self.assertEqual(metrics[C.Metric.ABSORB_PRECISION]["change"], P.Change.UNCOUNTED)
 
 
-class SideProblemTest(unittest.TestCase):
-    def base(self) -> list[P.Measured]:
-        return [measured(BASE_T, "s1", "r1"), measured(BASE_T, "s2", "r2")]
+class RunsProblemTest(unittest.TestCase):
+    def test_the_pinned_number_of_runs_of_the_pinned_template_is_a_baseline(self) -> None:
+        self.assertIsNone(P.baseline_problem("inkling", INKLING, [measured(BASE_T, "i1"), measured(BASE_T, "i2")], BASE_T))
 
-    def test_pinned_runs_and_one_draft_template_compare(self) -> None:
-        self.assertIsNone(P.side_problem("inkling", INKLING, self.base(), [measured(DRAFT_T)] * 2, BASE_T))
-
-    def test_each_refusal(self) -> None:
-        cases = {
-            "takes 2 base and 2 draft": (INKLING, self.base(), [measured(DRAFT_T)]),
-            "pins no inkling baseline": (P.ModelLines("tinker", "m", 2, frozenset(), frozenset()), self.base(),
-                                         [measured(DRAFT_T)] * 2),
-            "not the ones": (INKLING, [measured(BASE_T, "s1", "r1"), measured(BASE_T, "s3", "r2")],
-                             [measured(DRAFT_T)] * 2),
-            "another template than the pinned": (INKLING, [measured(BASE_T, "s1", "r1"), measured(OTHER_T, "s2", "r2")],
-                                                 [measured(DRAFT_T)] * 2),
-            "do not share one template": (INKLING, self.base(), [measured(DRAFT_T), measured(OTHER_T)]),
-        }
-        for want, (model, base, draft) in cases.items():
+    def test_runs_that_cannot_be_a_baseline(self) -> None:
+        cases = {"inkling takes 2 baseline runs, not 1": [measured(BASE_T)],
+                 "inkling takes 2 baseline runs, not 3": [measured(BASE_T)] * 3,
+                 "another template than the pinned one": [measured(BASE_T), measured(OTHER_T)]}
+        for want, base in cases.items():
             with self.subTest(want=want):
-                self.assertIn(want, P.side_problem("inkling", model, base, draft, BASE_T) or "")
-        self.assertIn("other than the pinned",
-                      P.side_problem("inkling", INKLING, self.base(), [measured(BASE_T)] * 2, BASE_T) or "")
+                self.assertIn(want, P.baseline_problem("inkling", INKLING, base, BASE_T) or "")
+
+    def test_the_pinned_number_of_runs_of_one_other_template_is_a_draft(self) -> None:
+        self.assertIsNone(P.draft_problem("inkling", INKLING, [measured(DRAFT_T)] * 2, BASE_T))
+
+    def test_runs_that_cannot_be_a_draft(self) -> None:
+        cases = {"inkling takes 2 draft runs, not 1": [measured(DRAFT_T)],
+                 "inkling takes 2 draft runs, not 3": [measured(DRAFT_T)] * 3,
+                 "do not share one template": [measured(DRAFT_T), measured(OTHER_T)],
+                 "other than the pinned one": [measured(BASE_T)] * 2}
+        for want, draft in cases.items():
+            with self.subTest(want=want):
+                self.assertIn(want, P.draft_problem("inkling", INKLING, draft, BASE_T) or "")
 
 
 class PlanProblemTest(unittest.TestCase):
     def test_one_draft_template_and_runs_with_their_own_calls_compare(self) -> None:
-        plan = {"inkling": ([measured(BASE_T, answered=frozenset({("a", 1.0)}))],
-                            [measured(DRAFT_T, answered=frozenset({("a", 2.0)}))]),
-                "glm": ([measured(BASE_T, answered=frozenset({("b", 1.0)}))],
-                        [measured(DRAFT_T, answered=frozenset({("c", 1.0)}))])}
+        plan = {"inkling": [measured(DRAFT_T, answered=frozenset({("a", 1.0)})),
+                            measured(DRAFT_T, answered=frozenset({("a", 2.0)}))],
+                "glm": [measured(DRAFT_T, answered=frozenset({("c", 1.0)}))]}
         self.assertIsNone(P.plan_problem(plan))
 
     def test_models_whose_drafts_drew_different_templates_are_refused(self) -> None:
-        plan = {"inkling": ([measured(BASE_T)], [measured(DRAFT_T)]), "glm": ([measured(BASE_T)], [measured(OTHER_T)])}
+        plan = {"inkling": [measured(DRAFT_T)], "glm": [measured(OTHER_T)]}
         self.assertIn("different templates", P.plan_problem(plan) or "")
 
     def test_a_run_listed_twice_or_copied_is_refused(self) -> None:
@@ -227,77 +214,134 @@ class PlanProblemTest(unittest.TestCase):
         copied = measured(DRAFT_T, answered=frozenset({("k1", 1.0), ("k3", 1.0)}))
         for name, draft in {"twice": [run, run], "copied": [run, copied]}.items():
             with self.subTest(name=name):
-                self.assertIn("same answered call", P.plan_problem({"inkling": ([], draft)}) or "")
+                self.assertIn("two inkling runs count the same answered call", P.plan_problem({"inkling": draft}) or "")
 
 
-class MeasureTest(unittest.TestCase):
+class BaselinesTest(unittest.TestCase):
+    def test_a_baseline_sums_its_runs_and_keeps_their_order(self) -> None:
+        first = measured(BASE_T, "i1", {"stale_drop_recall": (1, 3)}, frozenset({("a", 1.0)}), C.RealRecord(3, 4, 5))
+        second = measured(BASE_T, "i2", {"stale_drop_recall": (2, 4)}, frozenset({("a", 2.0)}), C.RealRecord(0, 7, 1))
+        counts = {m: C.Count(10, 20) for m in C.Metric} | {C.Metric.STALE_RECALL: C.Count(3, 7)}
+        self.assertEqual(P.baselines(LINES, {"inkling": [first, second]}),
+                         {"inkling": L.Baseline(PIN, BASE_T, FILES[L.COUNTS], counts,
+                                                (C.RealRecord(3, 4, 5), C.RealRecord(0, 7, 1)),
+                                                (sha("i1 synth"), sha("i2 synth")), (sha("i1 real"), sha("i2 real")))})
+
+    def test_runs_that_cannot_be_a_baseline_are_refused(self) -> None:
+        run = measured(BASE_T, answered=frozenset({("k", 1.0)}))
+        cases = {"inkling takes 2 baseline runs, not 1": {"inkling": [measured(BASE_T)]},
+                 "a glm baseline run drew its prompts with another template": {"glm": [measured(DRAFT_T)]},
+                 "two inkling runs count the same answered call": {"inkling": [run, run]},
+                 "names no model another": {"another": [run]}}
+        for want, runs in cases.items():
+            with self.subTest(want=want):
+                with self.assertRaises(SystemExit) as caught:
+                    P.baselines(LINES, runs)
+                self.assertIn(want, str(caught.exception))
+
+
+class SidesTest(unittest.TestCase):
+    def test_a_models_draft_runs_stand_beside_its_pinned_baseline(self) -> None:
+        draft = [measured(DRAFT_T, "d1"), measured(DRAFT_T, "d2")]
+        self.assertEqual(P.sides_of(LINES, {"inkling": draft}), {"inkling": (INKLING.baseline, draft)})
+
+    def test_draft_runs_that_cannot_be_compared_are_refused(self) -> None:
+        unpinned = replace(LINES, models={**LINES.models, "glm": replace(GLM, baseline=None)})
+        run = measured(DRAFT_T, answered=frozenset({("k", 1.0)}))
+        cases: dict[str, tuple[L.Lines, dict[str, list[C.Measured]]]] = {
+            "prompt_lines.json pins no glm baseline yet": (unpinned, {"glm": [measured(DRAFT_T)]}),
+            "inkling takes 2 draft runs, not 1": (LINES, {"inkling": [measured(DRAFT_T)]}),
+            "different templates": (LINES, {"inkling": [measured(DRAFT_T)] * 2, "glm": [measured(OTHER_T)]}),
+            "two inkling runs count the same answered call": (LINES, {"inkling": [run, run]}),
+            "names no model another": (LINES, {"another": [run]}),
+        }
+        for want, (lines, drafts) in cases.items():
+            with self.subTest(want=want):
+                with self.assertRaises(SystemExit) as caught:
+                    P.sides_of(lines, drafts)
+                self.assertIn(want, str(caught.exception))
+
+    def test_runs_of_a_model_the_lines_do_not_hold_are_not_measured(self) -> None:
+        with self.assertRaises(SystemExit) as caught:
+            P.measured_runs(LINES, {"another": []}, (1, 1))
+        self.assertIn("names no model another", str(caught.exception))
+
+
+class CommandTest(unittest.TestCase):
+    """The two commands over invented run folders of every pinned item, under the present pass lines
+    and a prompt_lines.json of one model, in a temporary folder."""
+
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        pass_lines = V.load_pass_lines()
+        self.items = (cast(int, cast(Row, pass_lines["e_synth"])["items"]),
+                      cast(int, cast(Row, pass_lines["e_real"])["items"]))
+        self.pin = C.sha256_file(V.PASS_LINES)
+        self.lines = self.root / "prompt_lines.json"
+        self.sent = itertools.count(1)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def write(self, name: str, kind: str, rows: list[Row], **summary: object) -> Path:
-        run = self.root / name
-        run.mkdir()
-        (run / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-        body = {"set": kind, "pass_lines_sha256": PIN, "template_sha256": DRAFT_T, "provider": "tinker",
-                "targets": {"base": "inkling-model"}, "stopped": None, **summary}
-        (run / "summary.json").write_text(json.dumps(body), encoding="utf-8")
-        return run
+    def write_lines(self, pinned: object) -> None:
+        """A prompt_lines.json that pins the present files and holds `pinned` as the Inkling baseline."""
+        raw = {"schema": L.SCHEMA, "pass_lines_sha256": self.pin, "baseline_template_sha256": BASE_T,
+               "worse_sigmas": 2.5, "better_sigmas": 2.0, "better_from": ["inkling"],
+               "models": {"inkling": {"provider": "tinker", "model": "inkling-model", "runs": 2, "baseline": pinned}},
+               "files_sha256": {name: C.sha256_file(L.HERE / name) for name in L.PINNED_FILES}}
+        self.lines.write_text(json.dumps(raw), encoding="utf-8")
 
-    def run_(self, **summary: object) -> P.Run:
-        synth = self.write("synth", "synth", [synth_row("m1-01", planted=2, planted_dropped=1, merges=1),
-                                              synth_row("m2-01", valid=False)], **summary)
-        real = self.write("real", "real", [real_row("e1"), real_row("e2", valid=False)])
-        return P.Run(synth, real, None, None)
+    def runs(self, name: str, template: str, planted_dropped: int) -> Path:
+        """runs.json of two Inkling runs drawn with `template`. Each answers every item at its own time
+        and drops `planted_dropped` of the one stale fact planted on each E-synth item."""
+        listed: list[dict[str, str]] = []
+        for n in (1, 2):
+            sent_at = float(next(self.sent))
+            summary: Row = {"pass_lines_sha256": self.pin, "template_sha256": template}
+            synth = write_run(self.root, f"{name}-synth-{n}", "synth",
+                              [synth_row(f"m{i}", sent_at=sent_at, planted_dropped=planted_dropped)
+                               for i in range(self.items[0])], **summary)
+            real = write_run(self.root, f"{name}-real-{n}", "real",
+                             [real_row(f"e{i}", sent_at=sent_at) for i in range(self.items[1])], **summary)
+            listed.append({"synth": str(synth), "real": str(real)})
+        path = self.root / f"{name}.json"
+        path.write_text(json.dumps({"inkling": listed}), encoding="utf-8")
+        return path
 
-    def test_counts_come_from_the_rows(self) -> None:
-        run = self.run_()
-        got = P.measure(run, INKLING, PIN, (2, 2))
-        self.assertEqual((got.counts[P.Metric.SYNTH_VALID], got.counts[P.Metric.STALE_RECALL],
-                          got.counts[P.Metric.MERGE_RECALL], got.counts[P.Metric.REAL_VALID]),
-                         (P.Count(1, 2), P.Count(1, 3), P.Count(0, 1), P.Count(1, 2)))
-        self.assertEqual((got.template_sha256, got.synth_rows_sha256),
-                         (DRAFT_T, hashlib.sha256((run.synth / "rows.jsonl").read_bytes()).hexdigest()))
-        self.assertEqual(got.answered, frozenset({("key-m1-01", 1.0), ("key-m2-01", 1.0),
-                                                  ("key-e1", 2.0), ("key-e2", 2.0)}))
+    def command(self, *argv: str) -> str:
+        """What `prompt_compare.py <argv>` prints, reading the temporary prompt_lines.json."""
+        printed = io.StringIO()
+        with (mock.patch.object(L, "PROMPT_LINES", self.lines), mock.patch.object(sys, "argv", ["prompt_compare.py", *argv]),
+              contextlib.redirect_stdout(printed)):
+            self.assertEqual(P.main(), 0)
+        return printed.getvalue()
 
-    def test_refuses_runs_it_cannot_count(self) -> None:
-        cases: dict[str, tuple[dict[str, object], tuple[int, int]]] = {
-            "not an E-synth run": ({"pass_lines_sha256": "other"}, (2, 2)),
-            "stopped before": ({"stopped": "quota"}, (2, 2)),
-            "under one name": ({"targets": {"base": "inkling-model", "again": "inkling-model"}}, (2, 2)),
-            "all 3 E-synth": ({}, (3, 2)),
-            "all 3 E-real": ({}, (2, 3)),
-        }
-        for want, (summary, items) in cases.items():
-            with self.subTest(want=want):
-                self.tearDown()
-                self.setUp()
-                with self.assertRaises(SystemExit) as caught:
-                    P.measure(self.run_(**summary), INKLING, PIN, items)
-                self.assertIn(want, str(caught.exception))
+    def test_compare_reads_the_printed_baseline_after_its_runs_are_gone(self) -> None:
+        both = 2 * self.items[0]
+        self.write_lines(None)
+        printed = cast(dict[str, Row], json.loads(self.command("baseline", "--runs", str(self.runs("base", BASE_T, 0)))))
+        pinned = printed["inkling"]
+        self.assertEqual(cast(Row, pinned["counts"])["stale_drop_recall"], [0, both])
+        self.write_lines(pinned)
+        for folder in self.root.glob("base-*"):
+            shutil.rmtree(folder)
+        out = self.root / "compare.json"
+        said = cast(Row, json.loads(self.command("compare", "--runs", str(self.runs("draft", DRAFT_T, 1)),
+                                                 "--out", str(out))))
+        self.assertEqual(said, {"worse": [], "better": ["inkling.stale_drop_recall"], "uncompared": [],
+                                "complete": True, "goes_in": True})
+        result = cast(Row, cast(Row, cast(Row, json.loads(out.read_text(encoding="utf-8")))["models"])["inkling"])
+        stale = cast(Row, cast(Row, result["metrics"])["stale_drop_recall"])
+        self.assertEqual((stale["base"], stale["draft"], stale["change"]), ([0, both], [both, both], "better"))
+        self.assertEqual(result["base_rows_sha256"], {"synth": pinned["synth_rows_sha256"],
+                                                      "real": pinned["real_rows_sha256"]})
 
-    def test_an_absorb_needs_the_merge_judge(self) -> None:
-        synth = self.write("synth", "synth", [synth_row("m1-01", absorbs={"m3": "merge"})])
-        real = self.write("real", "real", [real_row("e1")])
-        with self.assertRaises(SystemExit):
-            P.measure(P.Run(synth, real, None, None), INKLING, PIN, (1, 1))
-
-
-class PinTest(unittest.TestCase):
-    def test_the_lines_pin_this_compare_the_pass_lines_and_their_template(self) -> None:
-        raw = cast(dict[str, object], json.loads(P.PROMPT_LINES.read_text(encoding="utf-8")))
-        compare = Path(P.__file__)
-        self.assertEqual(raw["files_sha256"], {compare.name: hashlib.sha256(compare.read_bytes()).hexdigest()})
-        lines = P.lines_of(raw)
-        pass_lines = V.load_pass_lines()
-        self.assertEqual(lines.pass_lines_sha256, hashlib.sha256(V.PASS_LINES.read_bytes()).hexdigest())
-        self.assertEqual(lines.baseline_template_sha256,
-                         cast(dict[str, str], pass_lines["files_sha256"])["../../../config/prompts/librarian.md"])
-        self.assertLessEqual(lines.better_from, frozenset(lines.models))
+    def test_compare_before_the_baseline_is_pinned_is_refused(self) -> None:
+        self.write_lines(None)
+        with self.assertRaises(SystemExit) as caught:
+            self.command("compare", "--runs", str(self.runs("draft", DRAFT_T, 1)), "--out", str(self.root / "c.json"))
+        self.assertIn("prompt_lines.json pins no inkling baseline yet", str(caught.exception))
 
 
 if __name__ == "__main__":

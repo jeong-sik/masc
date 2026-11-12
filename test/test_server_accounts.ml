@@ -352,6 +352,14 @@ let refusal_label : Server_accounts.refusal -> string = function
             (Login_client.Client_id_empty | Login_client.Client_secret_empty)))
   | Server_accounts.Login_client_refused (Server_account_login.Google_client_refused _) ->
     "another login client refusal"
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Redirect_not_the_callback
+         { provider = Login_routes.Github; callback_path; redirect_path }) ->
+    Printf.sprintf "github redirect on %s, the callback is %s" redirect_path callback_path
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Redirect_not_the_callback
+         { provider = Login_routes.Google; callback_path = _; redirect_path = _ }) ->
+    "google redirect not on the callback"
   | Server_accounts.Route_of_another_kind _ -> "route of another kind"
   | Server_accounts.Https_listener_refused _ -> "HTTPS listener refused"
   | Server_accounts.Listener_not_bound { host; port = _; reason = _ } ->
@@ -485,6 +493,16 @@ let test_stops_when_a_login_client_is_refused () =
           ~redirect_uri:("http://masc.example" ^ Server_login_http.github_callback_path)
           ~client_secret_env:github_secret_env
       , "github client refused: the redirect is not https" )
+    ; ( with_github_client
+          ~redirect_uri:"https://masc.example/auth/oidc/callback"
+          ~client_secret_env:github_secret_env
+      , "github redirect on /auth/oidc/callback, the callback is /auth/github/callback" )
+    ; ( with_github_client ~redirect_uri:"https://masc.example" ~client_secret_env:github_secret_env
+      , "github redirect on , the callback is /auth/github/callback" )
+    ; ( with_github_client
+          ~redirect_uri:(https_redirect ^ "/")
+          ~client_secret_env:github_secret_env
+      , "github redirect on /auth/github/callback/, the callback is /auth/github/callback" )
     ]
 ;;
 

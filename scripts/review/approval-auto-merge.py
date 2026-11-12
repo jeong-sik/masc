@@ -276,7 +276,10 @@ def prepare_reads(repo, number):
     selected, _, head = REVIEWS.pr_identity(top)
     if top['state'] != 'open' or top['draft'] is not False or top['merged'] is not False:
         raise Hold(f'#{selected} is not open and ready')
-    before = scope_snapshot(repo, selected, head)
+    # The rows are the scope's own read of each member, so review evidence
+    # needs no second read of a layer; the closing snapshot below still
+    # refuses a head that moved in between.
+    before, rows = STACKS.read_scope(repo, selected, head, get=read)
     selected_identity = next(member['identity'] for member in before['scope']
                              if member['number'] == selected)
     destination = (before['stack']['base']['ref'] if before['stack'] else
@@ -292,10 +295,7 @@ def prepare_reads(repo, number):
             raise Hold('Release/Tag candidates retain manual full-CI admission')
         if identity['state'] != 'open' or identity['draft'] is not False:
             raise Hold(f'#{member["number"]} is not open and ready')
-        current = pull(repo, member['number'])
-        if current['head']['sha'] != identity['head']['sha']:
-            raise Hold(f'#{member["number"]} head changed')
-        histories[member['number']] = review_evidence(repo, current)
+        histories[member['number']] = review_evidence(repo, rows[member['number']])
     # The head of the selected pull request holds every layer of the scope.
     unproven = unproven_skip(repo, head, destination)
     if unproven is not None:

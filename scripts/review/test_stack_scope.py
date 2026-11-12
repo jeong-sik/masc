@@ -16,6 +16,10 @@ import unittest
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = "o/r"
 STACK = 900
+# A pull request names its repository by id and full name. The stack listing
+# names the same repository by id, name and url, and never by full name.
+HOME = {"id": 1, "full_name": REPO}
+LISTED_HOME = {"id": 1, "name": "r", "url": "https://api.github.test/r"}
 
 FAKE_GH = r"""#!/usr/bin/env bash
 # api <path> --jq . over canned JSON in $FAKE_DIR.
@@ -52,8 +56,8 @@ class StackScope(unittest.TestCase):
             (self.data / f"pr-{number}.json").write_text(json.dumps({
                 "state": "open" if state == "open" else "closed",
                 "draft": False, "merged": state == "merged",
-                "base": {"ref": below, "sha": sha(number - 1), "repo": {"full_name": REPO}},
-                "head": {"ref": f"layer-{number}", "sha": sha(number), "repo": {"full_name": REPO}},
+                "base": {"ref": below, "sha": sha(number - 1), "repo": HOME},
+                "head": {"ref": f"layer-{number}", "sha": sha(number), "repo": HOME},
                 "user": {"login": "author"},
                 "stack": {"id": 7, "number": STACK, "base": {"ref": "main"},
                           "size": len(numbers), "position": position},
@@ -62,8 +66,12 @@ class StackScope(unittest.TestCase):
             "id": 7, "number": STACK, "base": {"ref": "main"},
             "pull_requests": [
                 {"number": number, "state": "open" if state == "open" else "closed",
-                 "head": {"sha": sha(number)}}
-                for number, state in zip(numbers, states)],
+                 "draft": False, "merged_at": "2026-11-09T01:00:00Z" if state == "merged" else None,
+                 "user": {"login": "author"},
+                 "base": {"ref": "main" if position == 1 else f"layer-{numbers[position - 2]}",
+                          "sha": sha(number - 1), "repo": LISTED_HOME},
+                 "head": {"ref": f"layer-{number}", "sha": sha(number), "repo": LISTED_HOME}}
+                for position, (number, state) in enumerate(zip(numbers, states), 1)],
         }))
         return numbers
 
@@ -103,6 +111,64 @@ class StackScope(unittest.TestCase):
         result = self.scope(numbers[1])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([m["number"] for m in json.loads(result.stdout)["scope"]], numbers[:2])
+
+    def listing(self, change):
+        value = json.loads((self.data / "stack.json").read_text())
+        change(value["pull_requests"])
+        (self.data / "stack.json").write_text(json.dumps(value))
+
+    def test_a_lower_layer_comes_from_the_listing_alone(self):
+        numbers = self.stack(["merged", "open", "open"])
+        for lower in numbers[:-1]:
+            (self.data / f"pr-{lower}.json").unlink()
+        result = self.scope(numbers[-1])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        scope = json.loads(result.stdout)["scope"]
+        self.assertEqual([(m["number"], m["identity"]["merged"], m["identity"]["stack"]["position"],
+                           m["identity"]["head"], m["identity"]["author"]) for m in scope[:2]],
+                         [(101, True, 1, {"ref": "layer-101", "sha": sha(101), "repo": REPO}, "author"),
+                          (102, False, 2, {"ref": "layer-102", "sha": sha(102), "repo": REPO}, "author")])
+
+    def test_the_listing_and_the_selected_pr_must_agree(self):
+        for field, value in (("draft", True), ("merged_at", "2026-11-09T01:00:00Z")):
+            with self.subTest(field=field):
+                numbers = self.stack(["open", "open"])
+                self.listing(lambda rows: rows[-1].update({field: value}))
+                result = self.scope(numbers[-1])
+                self.assertEqual((result.returncode, result.stdout), (2, ""))
+        numbers = self.stack(["open", "open"])
+        self.listing(lambda rows: rows[-1]["base"].update(sha=sha(9001)))
+        result = self.scope(numbers[-1])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(f"#{numbers[-1]} changed while reading stack", result.stderr)
+
+    def test_a_closed_unmerged_lower_layer_blocks_the_stack(self):
+        numbers = self.stack(["closed", "open"])
+        result = self.scope(numbers[-1])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(f"#{numbers[0]} is closed without merging", result.stderr)
+
+    def test_an_open_lower_layer_with_a_merge_date_is_refused(self):
+        # Read as merged, the layer would be passed over without its reviews.
+        numbers = self.stack(["open", "open"])
+        self.listing(lambda rows: rows[0].update(merged_at="2026-11-09T01:00:00Z"))
+        result = self.scope(numbers[-1])
+        self.assertEqual((result.returncode, result.stdout), (2, ""))
+        self.assertIn("open member has a merge date", result.stderr)
+
+    def test_a_member_in_another_repository_is_refused(self):
+        numbers = self.stack(["open", "open"])
+        self.listing(lambda rows: rows[0]["head"]["repo"].update(id=2))
+        result = self.scope(numbers[-1])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("stack member in another repository", result.stderr)
+
+    def test_a_listed_branch_whose_repository_is_gone_has_no_repository_name(self):
+        numbers = self.stack(["merged", "open"])
+        self.listing(lambda rows: rows[0]["head"].update(repo=None))
+        result = self.scope(numbers[-1])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIsNone(json.loads(result.stdout)["scope"][0]["identity"]["head"]["repo"])
 
 
 if __name__ == "__main__":

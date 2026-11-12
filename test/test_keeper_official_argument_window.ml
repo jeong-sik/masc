@@ -243,6 +243,55 @@ let test_zero_history_floor_does_not_write_dropped_slots () = with_base @@ fun b
   check bool "dropped slots caused no writes" false
     (Sys.file_exists (Tool_blob_store.root_dir (Tool_blob_store.create ~base_path:base)))
 
+(* A new session's seed carries a finished turn's results the way the Agent
+   Core request does: a marker from the same floor, the current turn verbatim. *)
+let result_exchange id bytes =
+  [T.make_message ~role:T.Assistant
+     [T.ToolUse {id;name="record";input=`Assoc ["command",`String id]}];
+   T.make_message ~role:T.Tool ~tool_call_id:id
+     [T.ToolResult {tool_use_id=id;content=String.make bytes 'r';outcome=T.Tool_succeeded;
+                    json=None;content_blocks=None}]]
+let result_body id messages =
+  match List.find_map (fun (message : T.message) ->
+    List.find_map (function
+      | T.ToolResult {tool_use_id;content;_} when String.equal tool_use_id id -> Some content
+      | T.ToolResult _ | T.Text _ | Thinking _ | RedactedThinking _ | ReasoningDetails _
+      | ToolUse _ | Image _ | Document _ | Audio _ -> None)
+      message.content) messages with
+  | Some content -> content
+  | None -> fail ("missing tool result " ^ id)
+let is_marker body = match Tool_output.decode_from_agent_core body with
+  | Tool_output.Decoded _ -> true
+  | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> false
+
+let test_finished_turn_results_leave_as_markers_from_the_floor () = with_base @@ fun base ->
+  let floor = Choice.aged_result_min_bytes in
+  let seed = text T.User "The Librarian read this."
+             :: (result_exchange "below" (floor-1) @ result_exchange "at" floor) in
+  let history = seed @ [text T.User "Go on."] @ result_exchange "now" (floor*2) in
+  let completed_before = snd (Runtime_model_input_tail_window.annotate seed) in
+  let turn_start = Keeper_carried_front.Turn_boundary {end_atom=completed_before} in
+  let project_with tools =
+    let argument_projection =
+      projection ?tools (source ~seed:(Some seed) ~turn_start base) base in
+    Host.start_range_projection
+      ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "official-results" })
+      ?argument_projection ~measure_message_bytes:measure
+      ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
+      ~librarian_front:(fun _ -> Ok progress)
+      ~turn_start ~keeper_name:"official-results" ~runtime_id:"official.sample" history
+    |> Result.map_error Agent_core.Error.to_string |> require in
+  let sent = project_with None in
+  check bool "a finished result at the floor leaves as a marker" true
+    (is_marker (result_body "at" sent));
+  check string "a finished result below the floor stays verbatim"
+    (String.make (floor-1) 'r') (result_body "below" sent);
+  check string "the current turn's result stays verbatim"
+    (String.make (floor*2) 'r') (result_body "now" sent);
+  let without_reader = project_with (Some []) in
+  check string "without a reader the finished result stays verbatim"
+    (String.make floor 'r') (result_body "at" without_reader)
+
 let test_completion_review_preserves_the_full_evidence_without_history_reads () =
   with_base @@ fun base ->
   let attachment = T.make_message ~role:T.User
@@ -297,4 +346,5 @@ let () = Alcotest.run "official argument window"
      test_case "authority/reader/open seed" `Quick test_absent_authority_surface_and_open_seed_leave_arguments_verbatim;
      test_case "storage failure and capacity" `Quick test_storage_failure_restores_raw_and_recuts_to_actual_capacity;
      test_case "storage failure repeats summary choice" `Quick test_failed_materialization_repeats_summary_choice_without_displacing_atoms;
-     test_case "zero-history floor" `Quick test_zero_history_floor_does_not_write_dropped_slots]]
+     test_case "zero-history floor" `Quick test_zero_history_floor_does_not_write_dropped_slots;
+     test_case "finished-turn results leave as markers" `Quick test_finished_turn_results_leave_as_markers_from_the_floor]]

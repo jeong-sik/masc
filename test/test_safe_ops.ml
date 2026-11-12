@@ -289,7 +289,7 @@ let test_list_dir_safe_lists_sorted_names () =
     check (result (list string) string) "names, sorted" (Ok [ "a"; "b" ])
       (Safe_ops.list_dir_safe dir))
 
-(* On a fiber the listing goes through Eio and returns the same names. *)
+(* On a fiber the listing runs on a system thread and returns the same names. *)
 let test_list_dir_safe_lists_the_same_names_on_a_fiber () =
   with_two_entries (fun dir ->
     Eio_main.run (fun env ->

@@ -118,7 +118,7 @@ it('withdraws prior authority metrics before new frames, including an unmounted 
   initial = false
   invalidateExecutionSnapshotGeneration('models-new-workspace', 0)
   await act(async () => {
-    hydrateExecutionSnapshot({ observer_instance_id: 'models-new-instance', execution_publication_epoch: 'models-new-workspace', execution_publication_generation: 1,
+    hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, observer_instance_id: 'models-new-instance', execution_publication_epoch: 'models-new-workspace', execution_publication_generation: 1,
       status: { project: 'new', workspace_root: '/new' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
     await flush()
   })
@@ -130,7 +130,7 @@ it('withdraws prior authority metrics before new frames, including an unmounted 
   view.unmount()
   setStoredToken('gap-authority', { source: 'manual' })
   invalidateExecutionSnapshotGeneration('models-unmounted-workspace', 0)
-  hydrateExecutionSnapshot({ observer_instance_id: 'models-unmounted-instance', execution_publication_epoch: 'models-unmounted-workspace', execution_publication_generation: 1,
+  hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, observer_instance_id: 'models-unmounted-instance', execution_publication_epoch: 'models-unmounted-workspace', execution_publication_generation: 1,
     status: { project: 'unmounted', workspace_root: '/unmounted' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
   const next = render(html`<${OverviewRuntimeStats} />`)
   await act(flush)

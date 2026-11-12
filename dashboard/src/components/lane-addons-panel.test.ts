@@ -53,7 +53,7 @@ let workspaceEpoch = 0
 beforeEach(() => {
   const epoch = `lane-panel-${++workspaceEpoch}`
   invalidateExecutionSnapshotGeneration(epoch, 0)
-  hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+  hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: 1,
     status: { project: 'fixture', workspace_root: '/workspace' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
 })
 afterEach(() => { cleanup(); vi.resetAllMocks() })

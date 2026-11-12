@@ -18,7 +18,7 @@ const panels = [
 ] as const
 let generation = 0
 function workspace(root: string) {
-  expect(hydrateExecutionSnapshot({ execution_publication_epoch: 'custom-http-owner',
+  expect(hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: 'custom-http-owner',
     execution_publication_generation: ++generation, observer_instance_id: root.slice(1),
     status: { project: 'custom', workspace_root: root }, agents: [], tasks: [], messages: [], keepers: [],
     execution_queue: [], worker_support_briefs: [], continuity_briefs: [],

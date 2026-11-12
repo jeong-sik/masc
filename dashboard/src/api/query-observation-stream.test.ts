@@ -69,7 +69,7 @@ describe('native query original authority', () => {
     expect(vi.getTimerCount()).toBe(0)
     // A same-path new scope is still a different owner even while the
     // process execution epoch and the selected root stay equal.
-    hydrateExecutionSnapshot({ observer_instance_id: 'observer-B',
+    hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, observer_instance_id: 'observer-B',
       execution_publication_epoch: original.epoch, execution_publication_generation: 2,
       status: { project: 'fixture', workspace_root: original.workspaceRoot },
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
@@ -86,7 +86,7 @@ describe('native query original authority', () => {
     vi.useFakeTimers()
     const epoch = 'scope-unavailable'
     invalidateExecutionSnapshotGeneration(epoch, 0)
-    hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+    hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: 1,
       status: { project: 'fixture', workspace_root: '/fixture/runtime-consumer' },
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
     dashboardObserverInstance.value = 'current-handshake-is-not-original'

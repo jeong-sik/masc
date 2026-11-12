@@ -236,6 +236,7 @@ describe('subscribeToolSeriesRefresh', () => {
     const store = await import('../../store')
     const { setStoredToken, clearStoredToken } = await import('../../api/core')
     const workspace = (root: string, generation: number) => ({
+      projection_diagnostics: { read_completeness: 'complete', read_error: null },
       generated_at: '2026-11-10T00:00:00Z',
       execution_publication_epoch: 'series-remount', execution_publication_generation: generation,
       status: { project: 'series', workspace_root: root }, agents: [], tasks: [], messages: [],

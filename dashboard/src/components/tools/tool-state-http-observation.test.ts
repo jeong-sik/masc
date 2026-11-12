@@ -18,6 +18,7 @@ const settle = async () => { await vi.advanceTimersByTimeAsync(0) }
 const firstName = () => tools.toolsData.peek()?.tool_inventory.tools[0]?.name ?? null
 function workspace(root: string, requestGeneration = connectionGeneration) {
   expect(store.hydrateExecutionSnapshot({
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
     execution_publication_epoch: 'tools-http-owner', execution_publication_generation: ++generation,
     observer_instance_id: root.slice(1),
     status: { project: 'tools', workspace_root: root }, agents: [], tasks: [], messages: [], keepers: [],

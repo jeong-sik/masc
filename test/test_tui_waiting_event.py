@@ -440,7 +440,14 @@ class WaitingEventTest(unittest.TestCase):
                 )
                 wait_until(
                     lambda: (
-                        b"waiting inventory: refreshing" in output[event_output_start:]
+                        any(
+                            marker in output[event_output_start:]
+                            for marker in (
+                                "대기 목록 갱신 중".encode(),
+                                b"waiting refresh pending",
+                                b"waiting inventory: refreshing",
+                            )
+                        )
                     ),
                     "waiting refresh was not shown as pending",
                 )
@@ -462,11 +469,22 @@ class WaitingEventTest(unittest.TestCase):
                     lambda: server.count("queued", "observer-event-written") == 2,
                     "queued events were not sent",
                 )
-                wait_until(
-                    lambda: rendered_row_contains(
+                # While the read is held the row keeps its last observation and
+                # draws nothing new for the event (#50974), so the screen has no
+                # change to wait for. The event was sent above; what is left to
+                # check is that the row neither flipped to the warning nor lost
+                # the observation it kept.
+                drain_for(1.0)
+                self.assertFalse(
+                    rendered_row_contains(
                         gamma_event_start, b"gamma", b"waiting unavailable"
-                    ),
-                    "the TUI did not apply the later gamma event",
+                    )
+                )
+                # The last row naming gamma may be another pane's row (the
+                # activity pane draws one for it), so look for the kept
+                # observation anywhere since the baseline.
+                self.assertTrue(
+                    rendered_row_contains(gamma_baseline_start, b"gamma", b"gamma-before")
                 )
                 self.assertEqual(server.count("queued", TURNS_PATH), 0)
                 server.release_held_read.set()
@@ -496,7 +514,10 @@ class WaitingEventTest(unittest.TestCase):
                 server.events.put((3, "gamma"))
                 server.events.put((4, "__loss__"))
                 wait_until(
-                    lambda: b"[events lost]" in output[duplicate_output_start:],
+                    lambda: any(
+                        marker in output[duplicate_output_start:]
+                        for marker in (b"[events lost]", "[이벤트 유실]".encode())
+                    ),
                     "the event after the duplicate was not applied",
                 )
                 self.assertEqual(server.count("duplicate", "observer-event-written"), 2)
@@ -505,8 +526,9 @@ class WaitingEventTest(unittest.TestCase):
                     "loss-sentinel refresh did not complete",
                 )
                 wait_until(
-                    lambda: rendered_row_contains(
-                        duplicate_output_start, b"beta", b"running"
+                    lambda: any(
+                        rendered_row_contains(duplicate_output_start, b"beta", marker)
+                        for marker in (b"running", "실행 중".encode())
                     ),
                     "the TUI did not apply the sentinel refresh",
                 )
@@ -530,9 +552,13 @@ class WaitingEventTest(unittest.TestCase):
                     "manual turns read did not complete during the event read",
                 )
                 wait_until(
-                    lambda: (
-                        b"fleet waiting observation unavailable"
-                        in output[collision_output_start:]
+                    lambda: any(
+                        marker in output[collision_output_start:]
+                        for marker in (
+                            b"fleet waiting observation unavailable",
+                            "일부 관측 미확인".encode(),
+                            b"some observations unknown",
+                        )
                     ),
                     "the partial poll was not shown",
                 )
@@ -550,8 +576,9 @@ class WaitingEventTest(unittest.TestCase):
                     "turns read did not continue during reconciliation",
                 )
                 wait_until(
-                    lambda: rendered_row_contains(
-                        poll_output_start, b"beta", b"running"
+                    lambda: any(
+                        rendered_row_contains(poll_output_start, b"beta", marker)
+                        for marker in (b"running", "실행 중".encode())
                     ),
                     "the TUI did not apply the turns part of the concurrent poll",
                 )
@@ -665,9 +692,16 @@ class WaitingEventTest(unittest.TestCase):
                     "confirmation observation failure did not trigger a read",
                 )
                 wait_until(
-                    lambda: (
-                        "운영자 확인 기한 관측 불가".encode()
-                        in output[confirm_failure_start:]
+                    # The native screen names the failure without the source's own
+                    # sentence (the sentence stays on the Approvals/detail views),
+                    # so accept either wording.
+                    lambda: any(
+                        marker in output[confirm_failure_start:]
+                        for marker in (
+                            "운영자 확인 기한 관측 불가".encode(),
+                            "대기 원본을 읽지 못했습니다".encode(),
+                            b"waiting sources unavailable",
+                        )
                     ),
                     "confirmation observation failure was not displayed",
                 )

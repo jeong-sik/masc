@@ -41,12 +41,21 @@ const scenarios = {
   },
 };
 scenarios.admin_full = { ...scenarios.member_full, session: "admin" };
+// A server whose authorization zone cannot be read: the routes that tell of
+// a session answer 503, which says nothing of whether anyone is signed in.
+scenarios.session_unread = { session: null, sessionRoutes: 503 };
+// Signed in, and the sign-out is refused: the session stays.
+scenarios.signout_refused = { ...scenarios.member_full, signout: "refused" };
+// Signed in, and the zone stops being readable at the sign-out: the sign-out
+// and the session routes after it answer 503, and the session is not ended.
+scenarios.zone_stops_at_signout = { ...scenarios.member_full, signout: "zone_stops" };
 let scenario = scenarios.signed_out;
 
 function json(res, status, value) {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
   res.end(JSON.stringify(value));
 }
+const unreadable = { error: "the authorization zone cannot be read" };
 function needsSession(res) {
   if (scenario.session !== null) return false;
   json(res, 401, { error: "the route needs a credential" });
@@ -84,6 +93,7 @@ http
       res.writeHead(200, page.headers);
       return res.end(page.body);
     }
+    if (scenario.sessionRoutes === 503 && (path === "/auth/session" || path === "/api/v1/auth/whoami")) return json(res, 503, unreadable);
     if (path === "/auth/session") {
       if (scenario.session === null) return json(res, 401, { error: "no session cookie came with the request" });
       return json(res, 200, { user_id: "usr_01JCM8P0Y4A7M2", expires_at_ms: now + 8 * 3600000, csrf_token: "mock-csrf-token" });
@@ -126,7 +136,13 @@ http
     if (req.method === "DELETE" && path.startsWith("/api/v1/auth/pats/")) { res.writeHead(204); return res.end(); }
     if (req.method === "POST" && path === "/api/v1/auth/allowlist") return json(res, 200, { registration_id: "reg_01JCME8X3Q6T1V", previously_deleted: false });
     if (req.method === "DELETE" && path.startsWith("/api/v1/auth/allowlist/")) { res.writeHead(204); return res.end(); }
-    if (req.method === "POST" && path === "/auth/logout") { scenario = scenarios.signed_out; res.writeHead(204); return res.end(); }
+    if (req.method === "POST" && path === "/auth/logout") {
+      if (scenario.signout === "refused") return json(res, 503, unreadable);
+      if (scenario.signout === "zone_stops") { scenario = scenarios.session_unread; return json(res, 503, unreadable); }
+      scenario = scenarios.signed_out;
+      res.writeHead(204);
+      return res.end();
+    }
     json(res, 404, { error: "not found" });
   })
   .listen(port, "127.0.0.1", () => console.log(`mock on http://127.0.0.1:${port} pages=${pagesDir}`));

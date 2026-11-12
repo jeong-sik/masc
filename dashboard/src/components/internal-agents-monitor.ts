@@ -251,7 +251,7 @@ function tone(row: Row): StatusBadgeTone {
   if (value === 'running') return 'warn'
   if (value === 'cancelled') return 'info'
   if (value === 'rejected') return 'info'
-  if (value === 'review_cancelled') return 'neutral'
+  if (value === 'review_cancelled' || value === 'superseded_by') return 'neutral'
   return 'bad'
 }
 

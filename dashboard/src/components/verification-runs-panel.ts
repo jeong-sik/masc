@@ -54,6 +54,7 @@ export function verificationRunTone(status: VerificationRunStatusLabel): StatusB
     case 'rejected':
       return 'info'
     case 'review_cancelled':
+    case 'superseded_by':
       return 'neutral'
     case 'infrastructure_unavailable':
       return 'bad'
@@ -76,6 +77,8 @@ export function verificationRunLabel(status: VerificationRunStatusLabel): string
       return '거부'
     case 'review_cancelled':
       return '판정 취소'
+    case 'superseded_by':
+      return '다른 결정으로 끝남'
     case 'infrastructure_unavailable':
       return '판정 기반시설 오류'
     case 'not_reviewed':

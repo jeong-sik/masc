@@ -3,7 +3,7 @@ rfc: "0492"
 title: "provider 연결은 프로세스 캐시 하나에서 다시 쓰고, 다시 쓸지는 닫힌 판정 하나로 정한다"
 status: Active
 created: 2026-11-05
-updated: 2026-11-11
+updated: 2026-11-12
 author: claude
 supersedes: []
 superseded_by: null
@@ -98,10 +98,10 @@ Keeper 의 provider 요청은 매번 새 TCP·TLS 연결을 열고, 응답을 �
 2026-11-11 의 서버 로그(`system_log_2026-11-11.jsonl`, 01:08Z~10:49Z 의 쓰기 실패)와 Keeper 11개의 runtime manifest 를 짝지었다. 입력, 명령, 결과 전체와 읽을 때의 한계는 [증거 묶음](../evidence/2026-11-11-provider-write-failures/README.md)에 있다.
 
 - 실패한 Keeper 사이클 380건 중 49건이 `Broken pipe, "writev"` 로 끝났다. `glm-coding` 47건, `ollama_cloud` 2건이다.
-- 49건 모두 그 턴에서 도구 결과를 주입한 뒤의 요청이었다. 같은 Keeper 들의 턴 중 도구 결과 주입이 있던 비율은 성공한 턴 44%(184/415), 실패한 턴 전체 42%(88/210)다. 기준선은 턴 단위이고 실패는 요청 단위다. 도구를 쓴 턴의 요청은 대부분 주입 뒤라서 이 값이 말하는 것은 적다.
+- 49건 모두 그 턴에서 도구 결과를 주입한 뒤의 요청이었다. 같은 Keeper 들의 턴 중 도구 결과 주입이 있던 비율은 성공한 턴 45%(190/426), 실패한 턴 전체 42%(88/210)다. 기준선은 턴 단위이고 실패는 요청 단위다. 도구를 쓴 턴의 요청은 대부분 주입 뒤라서 이 값이 말하는 것은 적다. 49건 중 3건은 사이클 줄의 runtime 이 아니라 같은 턴의 다음 attempt 의 `runtime_failed` 에 짝지어졌다. `glm-coding`·`ollama_cloud` 의 쓰기 실패로 확실한 것은 46건이다.
 - 재연결 이벤트(`provider_connection_reconnect`, #50357)가 같은 turn id 에 있던 것은 49건 중 2건이다. 둘 다 재연결한 run 이 취소로 끝나고(05:58Z) 새 run 이 06:02Z 에 시작됐으며, 실패는 그 새 run 에서 07:18:33Z 와 07:18:34Z 에 났다. 재연결로 캐시를 끄는 binding 은 fiber 안에 있어서(`Provider_connection_cache_ref.with_fresh_connections`) 새 run 에 닿지 않는다. 그래서 49건 모두 실패한 run 에는 재연결이 없었고, 연결의 출처는 49건 모두 모른다. run 경계를 `turn_started` 로 본 것은 이 두 턴의 이벤트 순서로만 확인했다.
-- 마지막 도구 결과 주입부터 실패까지 중앙값이 112초이고 49건 중 36건이 60초 이상이다. 놀다 닫힌 연결을 꺼낸 요청은 쓰자마자 실패한다. 이 값은 그렇게 바로 실패하는 모양이 아니다. permit 대기와 다른 요청이 간격에 섞였는지는 가르지 못했다. 다른 Keeper 의 쓰기 실패가 120초 안에 있던 쓰기 실패는 32건이다. 실패가 구간에 고르게 퍼졌다면 28%(14건쯤)다. 몰림은 공통 원인의 단서일 뿐 원인은 아니다.
-- 캐시는 부팅(약 10:46Z)부터 3시간 7분 동안 608번 다시 쓰고 43번 새로 열었다. 실패로 닫은 연결(`request_failed`) 3개가 모두 다시 쓴 연결이다. 쓰기 실패 49건 중 48건이 이 부팅 전이라서 이 통계는 그 48건에 대해 말하지 않는다. `request_failed` 는 쓰기 실패 말고 읽기 실패와 타임아웃도 센다. Implementation summary 의 11-06 값(565번 중 6개, 새 연결 61번 중 0개)과 합치면 다시 쓴 연결은 1,173번 중 9개, 새 연결은 104번 중 0개다. 새 연결이 104번뿐이라 같은 실패율이어도 0개가 나올 수 있어서, 이 수치로 새 연결의 실패를 배제하지 못한다.
+- 마지막 도구 결과 주입부터 `runtime_failed` 까지 중앙값이 112초이고 49건 중 36건이 60초 이상이다. `runtime_failed` 는 attempt 가 끝날 때 찍힌다. 이 간격은 요청을 쓴 시각까지의 간격이 아니라서, 놀다 닫힌 연결이 쓰자마자 실패하는 모양인지 아닌지를 가르지 못한다. permit 대기와 다른 요청이 간격에 섞였는지도 가르지 못했다. 다른 Keeper 의 쓰기 실패가 120초 안에 있던 쓰기 실패는 32건이다. 실패가 구간에 고르게 퍼졌다면 28%(14건쯤)다. 몰림은 공통 원인의 단서일 뿐 원인은 아니다.
+- 캐시는 부팅(약 10:46Z)부터 3시간 7분 동안 608번 다시 쓰고 43번 새로 열었다. 실패로 닫은 연결(`request_failed`) 3개가 모두 다시 쓴 연결이다. 쓰기 실패 49건 중 48건이 이 부팅 전이라서 이 통계는 그 48건에 대해 말하지 않는다. `request_failed` 는 쓰기 실패 말고 읽기 실패와 타임아웃도 센다. Implementation summary 의 11-06 값(565번 중 6개, 새 연결 61번 중 0개)과 합치면 다시 쓴 연결은 1,173번 중 9개, 새 연결은 104번 중 0개다. 두 값은 부팅과 빌드가 다르고, 같은 코드와 같은 workload 라는 전제는 확인하지 않았다. 새 연결이 104번뿐이라 같은 실패율이어도 0개가 나올 수 있어서, 이 수치로 새 연결의 실패를 배제하지 못한다.
 - 49건의 원인이 놀다 닫힌 재사용 연결인지는 이 측정으로 맞는지 틀린지 가르지 못한다. 연결의 출처가 49건 모두 로그에 없다. 확인된 것은 다른 Keeper 의 쓰기 실패와 가까이 몰리는 경향 하나다. 그래서 재전송은 이 측정이 아니라 §3.3 의 안전한 구조와 §6 의 사전 측정으로 정한다.
 - Keeper 의 run 단위 재연결(`connection_recovery_sequence`)은 `not !stream_started`, `same_run_retry_allowed`, `native_retry_allowed` 가 모두 참이고 `Agent_core` 로 도는 run 일 때만 돈다. `same_run_retry_allowed` 는 run 이 체크포인트 단계에 닿으면 거짓이다(`keeper_turn_driver_try_provider.ml`). 다시 도는 `attempt ()` 는 요청 하나가 아니라 run 전체다. 도구를 실행한 run 의 뒤쪽 요청이 끊기면 그 요청 하나만 새 연결로 다시 보낼 길이 없다. 49건에서 재연결을 막은 조건이 이것인지는 건별로 확인하지 않았다.
 - `Candidate_fault` 의 주석이 같은 빈칸을 적는다. `Retry.NetworkError` 에는 "보냈다가 잃은 것"과 "모든 후보가 공유하는 배선 문제"를 가를 dispatch 사실이 없다(`candidate_fault.ml`).
@@ -178,9 +178,10 @@ type delivery =
   | Possibly_delivered  (* 그 밖의 모든 실패. 요청이 서버에 닿았을 수 있다 *)
 ```
 
-  - 연결을 연 뒤의 `Not_delivered` 는 셋이 모두 참일 때다. (1) 추적 래퍼가 그 연결의 쓰기 호출(`single_write`, `copy`)에서 예외를 직접 봤다. (2) 그 예외를 `classify_network_exn` 이 `Connection_reset` 이나 `End_of_file` 로 분류한다. Unix 오류는 `classify_unix_error` 가 `ECONNRESET` 과 `EPIPE` 를 이 둘로 보내고, `Eio.Net.Connection_reset` 은 `classify_eio_error` 가 backend 오류를 분류하되 못 하면 `End_of_file` 로 둔다(tls-eio 의 `Tls_socket_closed` 가 이 경우다). (3) 그 연결에서 읽은 응답 바이트가 한 바이트도 없다. 요청을 다 쓴 뒤 응답을 기다리다 끊긴 경우는 쓰기가 성공했으므로 `Possibly_delivered` 다.
-  - 근거는 문구가 아니라 구조다. `track_connection_eof` 는 지금 읽기를 `single_read` 하나로 지나게 해서 전송층 EOF 를 `eof_seen` 으로 세운다. 쓰기(`single_write`, `copy`)는 추적하지 않는다. 이 RFC 는 같은 래퍼가 쓰기 호출의 예외와 읽은 응답 바이트 수도 세우도록 넓힌다(§7 6층). 오류 메시지 문구(`Broken pipe, "writev"`)는 읽지 않는다.
+  - 연결을 연 뒤의 `Not_delivered` 는 셋이 모두 참일 때다. (1) 추적 래퍼가 그 연결의 쓰기 호출(`single_write`, `copy`)에서 예외를 직접 봤다. (2) 그 예외를 `classify_network_exn` 이 `Connection_reset` 이나 `End_of_file` 로 분류한다. Unix 오류는 `classify_unix_error` 가 `ECONNRESET` 과 `EPIPE` 를 이 둘로 보내고, `Eio.Net.Connection_reset` 은 `classify_eio_error` 가 backend 오류를 분류하되 못 하면 `End_of_file` 로 둔다(tls-eio 의 `Tls_socket_closed` 가 지금 이 경우다). 이 기본값은 쓰기 예외를 `Not_delivered` 쪽으로 기울이므로 (2)에 쓰지 않는다. 6층이 `classify_eio_backend_error` 에 `Tls_socket_closed` 를 이름으로 더하고, (2)는 `ECONNRESET`·`EPIPE`·`Tls_socket_closed` 처럼 이름으로 분류한 경우에만 참이다. 기본값으로 떨어진 오류는 `Possibly_delivered` 다. (3) 이 요청의 첫 쓰기 이후 이 연결에서 읽은 응답 바이트가 한 바이트도 없다. 다시 쓴 연결은 앞 요청의 응답을 이미 읽었으므로 연결에서 누적한 바이트로 세지 않고 요청마다 새로 센다(`eof_seen` 이 `with_client` 호출마다 새 `ref` 인 것과 같은 단위다). 요청을 다 쓴 뒤 응답을 기다리다 끊긴 경우는 쓰기가 성공했으므로 `Possibly_delivered` 다.
+  - 근거는 문구가 아니라 구조다. `track_connection_eof` 는 지금 읽기를 `single_read` 하나로 지나게 해서 전송층 EOF 를 `eof_seen` 으로 세운다. 쓰기(`single_write`, `copy`)는 추적하지 않는다. 이 RFC 는 같은 래퍼가 쓰기 호출의 예외와 요청마다 읽은 응답 바이트 수도 세우도록 넓힌다(§7 6층). 오류 메시지 문구(`Broken pipe, "writev"`)는 읽지 않는다.
   - https 연결은 tls-eio 위에 있다. tls-eio 는 한쪽에서 난 예외를 연결 상태에 저장하고 반대쪽 호출에서 다시 던진다(`tls_eio.ml` 의 `write_t`, `read_react`). 호출자가 마지막에 받은 예외만으로는 쓰기에서 난 것인지 읽기에서 난 것인지 가르지 못한다. (1)은 래퍼가 쓰기 호출에서 직접 본 예외만 센다. 읽기 호출이 저장된 쓰기 예외를 다시 던진 경우는 (1)을 채우지 못해 `Possibly_delivered` 로 남는다. 재전송이 일어나지 않는 쪽으로 어긋난다. 쓰기 호출이 저장된 읽기 예외를 다시 던지는 경우(`tls_eio.ml` 의 `writev`)는 (1)을 채운다. 요청이 덜 쓰였으니 판정은 맞다. (3)의 바이트는 tls-eio 가 푼 응답 바이트다.
+  - 서버가 요청을 적용한 뒤에 클라이언트의 쓰기 호출이 실패할 수 있는가. 쓰기 호출이 `EPIPE` 나 `ECONNRESET` 으로 실패하면, 그 호출이 넘기려던 바이트를 로컬 커널이 받지 않았다고 기대한다. 소켓이 이미 오류 상태일 때 나는 오류이기 때문이다. 그러면 서버는 요청의 마지막 바이트를 받지 못했고 본문을 다 받지 못했다. 그 앞의 쓰기가 성공했다면 서버는 요청의 앞부분은 받았다. 남는 전제는 서버나 게이트웨이가 본문을 다 받기 전에는 요청을 처리하지 않는다는 것이다. 이 전제는 provider 마다 다를 수 있고 이 서버에서 재지 않았다. 그래서 8층은 6·7층의 측정만으로 만들지 않는다. 요청의 앞부분만 보내고 연결을 닫았을 때 provider 가 응답이나 사용량을 만들지 않는지 확인한 뒤에 만든다(§6 시험 5).
   - `Http_client.http_error`, `Retry.api_error`, `Error.t` 의 `NetworkError` 가 `delivery` 를 든다. 만드는 곳은 값을 반드시 정한다. 정하지 못하면 `Possibly_delivered` 다.
 - 다시 보내는 규칙은 하나다. `with_client`, 동기 완성, 스트림 완성이 빌린 연결(`Leased`)의 출처가 `Reused` 이고 실패가 `Not_delivered` 이면, 그 연결을 `Close Request_not_delivered` 로 닫고 새로 연 연결(`Created`)로 같은 요청을 한 번 다시 보낸다.
   - 횟수를 세지 않는다. 새로 연 연결의 실패는 출처가 `Created` 라서 다시 보내지 않는다. 방금 연 연결은 서버가 놀다가 닫은 연결일 수 없다. §9.2.2 의 "A client SHOULD NOT automatically retry a failed automatic retry." 와 http_client 안에서는 같다.
@@ -218,16 +219,17 @@ type delivery =
 ## 6. 검증
 
 - 시험: `decide` 의 모든 입력 조합. `with_client`·`dispatch_sync_request`·`with_post_stream` 이 `connection: close` 응답, 본문을 덜 읽은 응답, 전송층 EOF 에서 연결을 돌려놓지 않는다. 같은 origin 의 연속 요청이 연결 하나를 다시 쓴다(`stats.reuse_count_total`).
-- 시험(요청을 쓰다가 끊기는 경우): 상대 서버를 넷으로 둔다. 서버가 받은 요청 수를 센다. 1(가), 2, 4 는 6층에 두고(재전송 없이 분류와 수를 확인), 1(나)와 3 은 8층에 둔다.
-  1. 놀던 연결을 닫아 둔 서버. (가) 본문이 작아 한 번의 쓰기로 끝나는 요청은 읽기에서 reset 이 나서 `Possibly_delivered` 이고 다시 보내지 않는다고 예상한다. (나) 본문이 소켓 송신 버퍼보다 커서 여러 번 쓰는 요청은 쓰다가 끊긴다. 6층에서는 `Not_delivered` 로 올라오고 `closed_after_reuse.request_not_delivered` 가 1 늘어난다. 8층에서는 같은 요청이 새 연결에서 한 번 성공하고, 서버가 받은 요청은 1건이며 `created_total` 이 1 늘어난다. 어느 쪽이 되는지는 시험이 정한다(§3.3). (나)는 TLS 서버에서도 한다. tls-eio 가 쓰기 예외를 상태에 저장했다가 읽기에서 다시 던지기 때문이다.
+- 시험(요청을 쓰다가 끊기는 경우): 상대 서버를 넷으로 둔다. 서버가 받은 요청 수를 센다. 1(가), 2, 4 는 6층에 두고(재전송 없이 분류와 수를 확인), 1(나)와 3 은 8층에 둔다. 5 는 실제 provider 로 하고 8층 전에 한다.
+  1. 놀던 연결을 닫아 둔 서버. (가) 본문이 작아 한 번의 쓰기로 끝나는 요청은 읽기에서 reset 이 나서 `Possibly_delivered` 이고 다시 보내지 않는다고 예상한다. (나) 본문이 소켓 송신 버퍼보다 커서 여러 번 쓰는 요청은 쓰다가 끊긴다. 연결은 앞 요청의 응답을 이미 읽은 다시 쓴 연결로 둔다. 6층에서는 `Not_delivered` 로 올라오고(조건 (3)이 요청 단위인지 이 시험이 잡는다) `closed_after_reuse.request_not_delivered` 가 1 늘어난다. 8층에서는 같은 요청이 새 연결에서 한 번 성공하고, 서버가 받은 요청은 1건이며 `created_total` 이 1 늘어난다. 어느 쪽이 되는지는 시험이 정한다(§3.3). (나)는 TLS 서버에서도 한다. tls-eio 가 쓰기 예외를 상태에 저장했다가 읽기에서 다시 던지기 때문이다.
   2. 요청을 읽은 뒤 응답 전에 연결을 리셋하는 서버. `Possibly_delivered` 로 올라오고 다시 보내지 않는다. 서버가 받은 요청은 1건이다.
   3. 본문 중간에 거절 응답(413)을 보내고 닫는 서버. 결과는 셋 중 하나다. 거절 본문을 읽어 `HttpError` 가 된다. 읽기 전에 취소돼 `Not_delivered` 가 되고 새 연결에서 한 번 더 거절된다. 응답을 읽은 뒤 쓰기 fiber 의 실패가 올라와 `Possibly_delivered` 가 된다. 어느 쪽인지 이 시험이 정한다(§3.3).
   4. 처음부터 쓰기를 막는 서버. 새로 연 연결의 쓰기 실패는 다시 보내지 않고 `Not_delivered` 로 올라온다. 서버가 받은 연결은 1개다.
+  5. 요청의 앞부분만 받고 닫는 provider. `glm-coding` 과 `ollama_cloud` 에 요청 헤더와 본문 앞부분만 보내고 연결을 닫는다. 응답이나 사용량이 생기지 않아야 한다. 생기면 provider 가 불완전한 요청을 처리하는 것이라 그 provider 의 8층은 만들지 않는다(§3.3). 외부 provider 를 부르는 시험이라 운영자 승인을 받고 하고, 8층 PR 이 이 결과를 증거로 든다.
 - 배포 뒤: 캐시 `stats` 의 재사용 수와 새로 연 수, 이유별 닫은 수를 본다. 3층이 이 값을 `/health?full=1` 의 snapshot 필드 `provider_connection_cache` 로 낸다.
   - `/health` 는 인증 없이 열린 집계 화면이다. 그래서 origin 이름은 내지 않는다(RFC-0132). `max_idle_per_host` 를 다시 볼 값으로 origin 하나의 최대 idle 수만 낸다.
   - 다시 쓴 연결의 실패는 `closed_after_reuse` 의 `request_failed`·`transport_ended` 로 센다. `closed_total` 의 같은 이유 수에서 빼면 새 연결의 수다(#48933).
   - `request_failed` 는 응답 전과 후를 나누지 않는다. 타임아웃도 `request_failed` 에 든다. 요청을 다 쓰기 전의 끊김은 `request_not_delivered` 가 따로 센다.
-  - 6·7층을 먼저 배포한다(§7). 그때는 재전송 없이 `Not_delivered` 만 센다. 카운터는 서버 메모리라 재시작마다 0 이 된다. 기간은 사이클 쓰기 실패(§1.6 의 방법)가 난 uptime 들을 합친 시간으로 센다. 판정은 두 출처의 발생률 비교다. 다시 쓴 연결은 `closed_after_reuse.request_not_delivered` 를 `reused_total` 로, 새 연결은 `closed_total` 에서 뺀 `request_not_delivered` 를 `created_total` 로 나눈다. 다시 쓴 연결의 발생이 0 이면 8층을 만들지 않는다. 다시 쓴 연결의 발생률이 새 연결보다 높지 않으면 재전송이 새 연결에서 성공할 근거가 약하다. 그때는 8층 전에 이 RFC 를 다시 연다. 새 연결의 표본이 작으면(같은 발생률이어도 0 이 나온다, §1.6) 판정하지 않고 기간을 늘린다. 같은 기간의 사이클 쓰기 실패 수는 규모를 보는 참고값이다. cascade 가 요청 실패를 사이클 성공으로 바꿀 수 있어서 연결 수와 직접 견주지 않는다.
+  - 6·7층을 먼저 배포한다(§7). 그때는 재전송 없이 `Not_delivered` 만 센다. 카운터는 서버 메모리라 재시작마다 0 이 된다. 기간은 사이클 쓰기 실패(§1.6 의 방법)가 난 uptime 들을 합친 시간으로 센다. 판정은 두 출처의 발생률 비교다. 다시 쓴 연결은 `closed_after_reuse.request_not_delivered` 를 `reused_total` 로, 새 연결은 `closed_total` 에서 뺀 `request_not_delivered` 를 `created_total` 로 나눈다. 다시 쓴 연결의 발생이 0 이면 8층을 만들지 않는다. 0 의 뜻은 같은 기간의 `closed_after_reuse.request_failed`(이미 있는 값)로 가른다. 그 값이 0 이 아니면 다시 쓴 연결의 끊김은 있었고 `Not_delivered` 가 아니었다는 뜻이다. 8층을 만들지 않는 근거는 `request_not_delivered` 를 `request_failed` 로 나눈 비율로 적는다. 다시 쓴 연결의 발생률이 새 연결보다 높지 않으면 재전송이 새 연결에서 성공할 근거가 약하다. 그때는 8층 전에 이 RFC 를 다시 연다. 새 연결의 표본이 작으면(같은 발생률이어도 0 이 나온다, §1.6) 판정하지 않고 기간을 늘린다. 같은 기간의 사이클 쓰기 실패 수는 규모를 보는 참고값이다. cascade 가 요청 실패를 사이클 성공으로 바꿀 수 있어서 연결 수와 직접 견주지 않는다.
   - 8층을 배포한 뒤에는 재전송 수가 `closed_after_reuse.request_not_delivered` 다. 새 연결의 `request_not_delivered`(`closed_total` 에서 뺀 값)는 재전송의 실패와 처음부터 새 연결이던 요청의 실패를 합친 수다. 재전송 수에서 이 수를 빼면 새 연결에서 요청을 다 쓴 재전송 수의 하한이다. 다 쓴 뒤에도 재전송은 응답 단계에서 실패할 수 있다(`request_failed`). 재전송이 있는데 사이클의 쓰기 실패가 그대로면 §3.3 의 전제가 틀린 것이다.
   - 캐시를 쓰지 않는 요청(`One_shot`)의 쓰기 실패는 `stats` 에 없다. 사이클 수에는 그 실패도 든다.
 - 비용 원장 `per_request` 행에는 `request_latency_ms` 만 있고 첫 바이트 시간이 없다. 그래서 첫 바이트가 얼마나 빨라졌는지는 원장으로 직접 재지 못한다. 요청 시간이 짧은 ollama_cloud(중앙값 2.9초)의 `request_latency_ms` 를 배포 전 같은 시간대와 견주는 것이 간접 확인이다.
@@ -239,6 +241,6 @@ type delivery =
 3. `Provider_connection_cache_ref` 설치와 `Runtime_agent.transport_for_provider` 배선, runtime health 응답의 캐시 `stats`(masc).
 4. 꺼낸 연결의 출처(`lease`), `http_client` 의 연결 합타입, 다시 쓴 연결의 이유별 닫은 수와 health 응답의 `closed_after_reuse`(agent_core·masc, #48933).
 5. 단조 시계로 재는 TTL, 연결마다 owner switch, 전송층 EOF 뒤 취소를 취소로 올리기(agent_core·masc, #48990).
-6. `delivery` 합타입과 세 `NetworkError` 의 필드, `track_connection_eof` 가 쓰기 호출의 예외와 읽은 응답 바이트 수를 세우기, `close_reason` 의 `Request_not_delivered`, 연결을 여는 데 실패한 경우의 `Not_delivered`(agent_core). 시험 1(가), 2, 4 가 이 층에 든다. 이 층은 다시 보내지 않고 `Not_delivered` 로 닫은 연결을 센다. 읽는 곳은 컴파일러가 짚지 못하므로 `rg` 로 사용처를 모두 확인한다.
+6. `delivery` 합타입과 세 `NetworkError` 의 필드, `track_connection_eof` 가 쓰기 호출의 예외와 요청마다 읽은 응답 바이트 수를 세우기, `classify_eio_backend_error` 가 `Tls_socket_closed` 를 이름으로 분류하기, `close_reason` 의 `Request_not_delivered`, 연결을 여는 데 실패한 경우의 `Not_delivered`(agent_core). 시험 1(가), 2, 4 가 이 층에 든다. 이 층은 다시 보내지 않고 `Not_delivered` 로 닫은 연결을 센다. 읽는 곳은 컴파일러가 짚지 못하므로 `rg` 로 사용처를 모두 확인한다.
 7. health 응답의 `closed_after_reuse` 와 `closed_total` 에 `request_not_delivered` 추가(masc). 6층과 같이 배포한다.
-8. 6·7층을 배포해 `request_not_delivered` 의 상한을 잰 뒤, 상한이 0 이 아니면: `Http_client_cache.checkout` 의 새 연결 경로와 세 함수의 한 번 다시 보내기, §6 의 시험 1(나)와 3, 지난 §3.3 을 가리키는 주석 고치기(`http_client.ml` 의 `eof_error` 근처 주석, `test_http_client_cache.ml` 의 `RFC-0492 §3.3` 주석 둘)(agent_core).
+8. 6·7층을 배포해 `request_not_delivered` 의 상한을 잰 뒤, 상한이 0 이 아니고 시험 5 가 통과하면: `Http_client_cache.checkout` 의 새 연결 경로와 세 함수의 한 번 다시 보내기, §6 의 시험 1(나)와 3, 지난 §3.3 을 가리키는 주석 고치기(`http_client.ml` 의 `eof_error` 근처 주석, `test_http_client_cache.ml` 의 `RFC-0492 §3.3` 주석 둘)(agent_core).

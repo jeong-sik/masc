@@ -4457,10 +4457,17 @@ let render_keeper_message (state : state) =
          mode away from its default is spelled -- see
          [Tui_types.chat_visibility_summary] for why. *)
       let modes = status_frame.kmsf_title_suffix in
-      let title =
-        here_path state
-          ~path:[ display_keeper_name; ui_text state ~ko:"채팅" ~en:"chat" ]
+      (* A name the row cannot hold whole folds in the middle, so the step
+         after it stays on the row. *)
+      let chat_step = ui_text state ~ko:"채팅" ~en:"chat" in
+      let name =
+        Message_layout.truncate_middle
+          (max heading_id_floor
+             (here_steps_room ~cols:chat_cols state ~steps:2
+                ~after:(Message_layout.display_width chat_step)))
+          display_keeper_name
       in
+      let title = here_path state ~path:[ name; chat_step ] in
       let mode_suffix =
         (if state.observer_source_loss then
            "  " ^ Theme.warn () ^ "[events lost]" ^ Ansi.reset

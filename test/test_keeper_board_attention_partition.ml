@@ -1961,6 +1961,34 @@ let test_a_judged_candidate_keeps_its_abandoned_root_closed () =
   | _ -> Alcotest.fail "judged replay changed the abandoned root's state"
 ;;
 
+let test_actual_partition_write_metadata_follows_the_original_append () =
+  with_temp_base "board_partition_source" (fun base_path ->
+    let module Change = Masc.Keeper_board_attention_change in
+    let changes = ref [] in
+    let unsubscribe = Change.subscribe (fun change -> changes := change :: !changes) in
+    let unsubscribe_failure = Change.subscribe (fun _ -> raise Exit) in
+    Fun.protect ~finally:(fun () -> unsubscribe_failure (); unsubscribe ()) (fun () ->
+      let row = recorded_candidate ~id:"partition-source-parent" ~recorded_at:1.0 () in
+      Alcotest.(check int) "the original append still creates its root" 1
+        (ok "create actual root" (P.ensure_roots ~base_path ~keeper_name:"alpha" [row]));
+      (match !changes with
+       | [change] ->
+           Alcotest.(check string) "the original Keeper owns the source" "alpha" change.keeper_name;
+           Alcotest.(check string) "source root is captured before the write"
+             (Fs_compat.realpath_lenient (Common.masc_dir_from_base_path ~base_path)) change.canonical_masc_root;
+           (match change.source with Partition -> () | Candidate -> Alcotest.fail "wrong ledger source")
+       | [] | _ :: _ :: _ -> Alcotest.fail "actual root append did not notify once");
+      Alcotest.(check int) "listener failure cannot undo the actual durable root" 1
+        (List.length (ok "read actual root" (P.load ~base_path ~keeper_name:"alpha")));
+      Alcotest.(check int) "idempotent root discovery appends nothing" 0
+        (ok "repeat root discovery" (P.ensure_roots ~base_path ~keeper_name:"alpha" [row]));
+      Alcotest.(check int) "idempotent discovery creates no false write event" 1 (List.length !changes);
+      ignore (ok "purge actual root" (P.purge ~base_path ~keeper_name:"alpha"));
+      Alcotest.(check int) "actual root purge notifies after its attempt" 2 (List.length !changes);
+      Alcotest.(check int) "the original root is now absent" 0
+        (List.length (ok "read purged root" (P.load ~base_path ~keeper_name:"alpha")))))
+;;
+
 let () =
   match Array.to_list Sys.argv with
   | [ _; "--ready-confirm-child"; base_path ] -> confirm_ready_in_child base_path
@@ -1970,7 +1998,9 @@ let () =
     Alcotest.run
     "keeper_board_attention_partition"
     [ ( "durable singleton exact FSM"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "actual partition metadata follows its durable append" `Quick
+            test_actual_partition_write_metadata_follows_the_original_append
+        ; Alcotest.test_case
             "roots are deterministic singleton context partitions"
             `Quick
             test_roots_are_singleton_deterministic_and_context_exact

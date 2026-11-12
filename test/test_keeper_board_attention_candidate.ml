@@ -1560,11 +1560,48 @@ let test_prune_consumed_behind_cursor () =
     (ok "idempotent prune" (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" ~open_partition_candidates:[] (50.0, None)))
 ;;
 
+let test_actual_write_metadata_preserves_the_store_result () =
+  with_temp_base "board_candidate_source" (fun base_path ->
+    let module Change = Masc.Keeper_board_attention_change in
+    let changes = ref [] in
+    let unsubscribe = Change.subscribe (fun change -> changes := change :: !changes) in
+    let unsubscribe_failure = Change.subscribe (fun _ -> raise Exit) in
+    Fun.protect ~finally:(fun () -> unsubscribe_failure (); unsubscribe ()) (fun () ->
+      let row = candidate (signal "source-owner-post") in
+      (match A.record ~base_path row with
+       | A.Recorded _ -> ()
+       | Duplicate _ -> Alcotest.fail "new source row was a duplicate"
+       | Record_error detail -> Alcotest.fail detail);
+      (match !changes with
+       | [change] ->
+           Alcotest.(check string) "the actual write captures its original canonical root"
+             (Fs_compat.realpath_lenient (Common.masc_dir_from_base_path ~base_path)) change.canonical_masc_root;
+           Alcotest.(check string) "the actual Keeper owns the source" "alpha" change.keeper_name;
+           (match change.source with Candidate -> () | Partition -> Alcotest.fail "wrong ledger source")
+       | [] | _ :: _ :: _ -> Alcotest.fail "actual append did not notify once");
+      Alcotest.(check int) "listener failure cannot undo the original durable append" 1
+        (List.length (ok "read actual source row" (A.load_candidates ~base_path ~keeper_name:"alpha")));
+      (match A.record ~base_path row with
+       | Duplicate _ -> ()
+       | Recorded _ -> Alcotest.fail "duplicate appended again"
+       | Record_error detail -> Alcotest.fail detail);
+      Alcotest.(check int) "an unchanged duplicate has no publication attempt" 1 (List.length !changes);
+      (match A.record ~base_path {row with recorded_at = nan} with
+       | Record_error _ -> () | Recorded _ | Duplicate _ -> Alcotest.fail "invalid source row was accepted");
+      Alcotest.(check int) "rejected validation has no publication attempt" 1 (List.length !changes);
+      ignore (ok "purge actual source" (A.purge ~base_path ~keeper_name:"alpha"));
+      Alcotest.(check int) "actual purge also notifies the source owner" 2 (List.length !changes);
+      Alcotest.(check int) "purged original source is empty" 0
+        (List.length (ok "read purged source" (A.load_candidates ~base_path ~keeper_name:"alpha")))))
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_candidate"
     [ ( "durable candidate"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "actual write metadata preserves its durable outcome" `Quick
+            test_actual_write_metadata_preserves_the_store_result
+        ; Alcotest.test_case
             "an unreadable row does not hide the rest"
             `Quick
             test_unreadable_row_does_not_hide_the_rest

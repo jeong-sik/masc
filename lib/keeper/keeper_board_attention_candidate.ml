@@ -357,11 +357,14 @@ let load_candidates_with_rejections ~base_path ~keeper_name =
    by a mid-append crash is cut to the last complete row under the store's
    stable lock. General reads keep refusing an incomplete tail. *)
 let recover_for_process_start ~base_path ~keeper_name =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Candidate (fun mark_attempt ->
   let path = candidate_path ~base_path ~keeper_name in
   let entry = ledger_entry path in
   try
     Cross_context_mutex.with_durable_lock entry.ledger_mutex (fun () ->
       entry.ledger_cache <- None;
+      mark_attempt ();
       Fs_compat.recover_private_jsonl_durable_locked_result path
       |> snapshot_result ~path
       |> Result.map (fun (snapshot : Fs_compat.private_jsonl_snapshot) ->
@@ -380,6 +383,7 @@ let recover_for_process_start ~base_path ~keeper_name =
          keeper_name
          path
          (Printexc.to_string exn))
+  )
 ;;
 
 let load_candidates ~base_path ~keeper_name =
@@ -421,6 +425,8 @@ let validate_for_persistence candidates =
    passed validation when they were written, and refusing to compact them
    would wedge the ledger behind a rule tightened since. *)
 let update_ledger_many ~base_path ~keeper_name decide =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Candidate (fun mark_attempt ->
   let path = candidate_path ~base_path ~keeper_name in
   let entry = ledger_entry path in
   try
@@ -439,6 +445,7 @@ let update_ledger_many ~base_path ~keeper_name decide =
             ~live:(Candidate_map.cardinal appended.by_id)
         in
         let written =
+            mark_attempt ();
           if compact
           then
             Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
@@ -472,6 +479,7 @@ let update_ledger_many ~base_path ~keeper_name decide =
          keeper_name
          path
          (Printexc.to_string exn))
+  )
 ;;
 
 let update_ledger ~base_path ~keeper_name decide =
@@ -483,15 +491,19 @@ let update_ledger ~base_path ~keeper_name decide =
 ;;
 
 let purge ~base_path ~keeper_name =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Candidate (fun mark_attempt ->
   let path = candidate_path ~base_path ~keeper_name in
   let entry = ledger_entry path in
   Cross_context_mutex.with_durable_lock entry.ledger_mutex (fun () ->
     (* Keep the registry entry: a queued writer must not acquire a different
        mutex after purge. Invalidate even on failure, which may follow unlink. *)
     entry.ledger_cache <- None;
+    mark_attempt ();
     Fs_compat.purge_private_jsonl_durable_locked_result path
     |> cursor_result ~path
     |> Result.map (fun _cursor -> ()))
+  )
 ;;
 
 
@@ -542,6 +554,8 @@ let removable_consumed ~cursor candidate =
    concurrent keeper process that moves the cursor makes the whole prune fail
    instead of dropping that process's row. *)
 let prune_consumed_behind_cursor ~base_path ~keeper_name ~open_partition_candidates cursor =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Candidate (fun mark_attempt ->
   let path = candidate_path ~base_path ~keeper_name in
   let entry = ledger_entry path in
   try
@@ -564,6 +578,7 @@ let prune_consumed_behind_cursor ~base_path ~keeper_name ~open_partition_candida
         else
           let* () = validate_for_persistence kept in
           let written =
+            mark_attempt ();
             Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
               path
               ~expected:state.cursor
@@ -584,6 +599,7 @@ let prune_consumed_behind_cursor ~base_path ~keeper_name ~open_partition_candida
          keeper_name
          path
          (Printexc.to_string exn))
+  )
 ;;
 
 let find_candidate candidates candidate_id =

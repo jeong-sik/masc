@@ -69,3 +69,27 @@ val start :
 
     When [config.on_failure] is set, it is called on timeout or exception,
     allowing callers to record the failure (e.g. mark_cached_surface_error). *)
+
+val start_on_change :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  changes:unit Eio.Stream.t ->
+  config:config ->
+  compute:(unit -> 'a) ->
+  on_result:('a -> unit) ->
+  unit
+(** Serialize the initial read and change-driven reads in one worker. A
+    successful read waits indefinitely for [changes]; it has no periodic
+    refresh. A signal during a read remains owed after that read finishes.
+
+    [warm_delay_s] delays only the initial read; an input change can bring it
+    forward. Subsequent changes use [wakeup_coalesce_s]'s bounded leading
+    window. Failure retains a retry, using [interval_s] and the existing
+    exponential backoff; a new input can bring that retry forward. Every
+    attempt keeps [timeout_s], and switch cancellation ends both reads and
+    waits. The worker is a daemon, so a normal [Switch.run] return also retires
+    its idle wait before release callbacks unsubscribe the inputs.
+    [config.wakeup] is unused: [changes] is the sole input mailbox.
+
+    Install the input subscription before starting this worker. Its publisher
+    must retain a signal without blocking the authoritative writer. *)

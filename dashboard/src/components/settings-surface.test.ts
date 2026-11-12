@@ -177,6 +177,20 @@ vi.mock('../api/dashboard-logs', () => ({
   fetchLogs: apiMock.fetchLogs,
 }))
 
+vi.mock('../dashboard-logs-stream', () => ({
+  subscribeDashboardLogsStream: (request: unknown, reader: {
+    onFrame: (frame: { reset: boolean; data: LogsData; limit: number }) => void;
+    onError: (error: unknown) => void; onReset: () => void;
+  }) => {
+    let active = true
+    reader.onReset()
+    void Effect.runPromise(apiMock.fetchLogs(request)).then(data => {
+      if (active) reader.onFrame({ reset: true, data: data as LogsData, limit: 200 })
+    }, error => { if (active) reader.onError(error) })
+    return () => { active = false }
+  },
+}))
+
 vi.mock('../lib/runtime-config-refresh', () => ({
   refreshRuntimeConfigConsumers: runtimeRefreshMock.refreshRuntimeConfigConsumers,
 }))

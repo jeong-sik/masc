@@ -188,6 +188,10 @@ module For_testing : sig
 
   val board_sse_event_params : Board_dispatch.board_sse_event -> Yojson.Safe.t
 
+  val publish_board_sse_event : Board_dispatch.board_sse_event -> unit
+  (** The production hook's cache invalidation and exact JSON-RPC publication
+      boundary, without the separate Activity side effect. *)
+
   val broadcast_mention_wakeup_action :
     string option -> [ `Suppress_no_target | `Wake_keeper of string ]
 

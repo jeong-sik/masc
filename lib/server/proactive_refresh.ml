@@ -115,6 +115,87 @@ let notify_failure config failure =
   | Some f -> Safe_ops.protect ~default:() (fun () -> f failure)
   | None -> ()
 
+let coalesce_changes ~clock ~config stream =
+  let coalesce_s = max 0.0 config.wakeup_coalesce_s in
+  if coalesce_s > 0.0 then Eio.Time.sleep clock coalesce_s;
+  (* Bound the drain to the siblings observed now. Continuous writers must
+     not prevent the owed read from starting. *)
+  let observed = Eio.Stream.length stream in
+  for _ = 1 to observed do
+    ignore (Eio.Stream.take_nonblocking stream : unit option)
+  done
+;;
+
+let start_on_change ~sw ~clock ~changes ~config ~compute ~on_result =
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Switch.run ~name:(config.label ^ " observation") (fun _ ->
+      let consecutive_failures = ref 0 in
+      let current_interval = ref config.interval_s in
+      let take_change () =
+        Eio.Stream.take changes;
+        coalesce_changes ~clock ~config changes
+      in
+      let wait_for_retry_or_change () =
+        match Eio.Fiber.first
+          (fun () -> Eio.Time.sleep clock !current_interval; `Retry)
+          (fun () -> Eio.Stream.take changes; `Changed)
+        with
+        | `Retry -> ()
+        | `Changed -> coalesce_changes ~clock ~config changes
+      in
+      let initial () =
+        let changed =
+          if config.warm_delay_s > 0.0 then
+            Eio.Fiber.first
+              (fun () -> Eio.Time.sleep clock config.warm_delay_s; false)
+              (fun () -> Eio.Stream.take changes; true)
+          else Option.is_some (Eio.Stream.take_nonblocking changes)
+        in
+        if changed then coalesce_changes ~clock ~config changes
+      in
+      let attempt phase =
+        let started = Time_compat.now () in
+        let outcome =
+          match
+            (match
+               Watched_work.run
+                 ~watcher:(fun () ->
+                   Eio.Time.sleep clock config.timeout_s;
+                   Error (timeout_failure ~config ~phase
+                     ~elapsed_s:(Time_compat.now () -. started)))
+                 (fun () -> Ok (compute ()))
+             with
+             | Ok value -> on_result value; Ok ()
+             | Error failure -> Error failure)
+          with
+          | outcome -> outcome
+          | exception exn ->
+              if should_reraise_cancel exn then raise exn;
+              Error (Raised exn)
+        in
+        match outcome with
+        | Ok () ->
+            if !consecutive_failures > 0 then
+              Log.Dashboard.info "%s observation recovered after %d failures"
+                config.label !consecutive_failures;
+            consecutive_failures := 0;
+            current_interval := config.interval_s;
+            true
+        | Error failure ->
+            notify_failure config failure;
+            log_refresh_failure ~config ~consecutive_failures ~current_interval
+              ~dt:(Time_compat.now () -. started) failure;
+            false
+      in
+      let rec loop phase =
+        let succeeded = attempt phase in
+        if succeeded then take_change () else wait_for_retry_or_change ();
+        loop Refresh
+      in
+      initial ();
+      loop Warm_cache))
+;;
+
 let start ~sw ~clock ~config:raw_config ~compute ~on_result =
   (* Clamp timeout below interval to prevent overlapping refreshes.
      When timeout >= interval, a timed-out compute runs past the next

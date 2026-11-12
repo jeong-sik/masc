@@ -28,6 +28,36 @@ let push ?(module_name = module_name) message = Log.emit Log.Warn ~module_name m
 let messages (frame : Stream.frame) =
   List.map (fun (entry : Log.Ring.entry) -> entry.message) frame.entries
 
+let test_empty_ring_cursors () =
+  let first = Stream.next_frame (query ()) ~after:None in
+  check int "fresh process has an empty ring" 0 first.ring_bounds.total;
+  check bool "initial empty frame resets" true first.reset;
+  check int "empty ring frontier is -1" (-1) first.after;
+  let current = Stream.next_frame (query ()) ~after:(Some (-1)) in
+  check bool "current empty frontier does not reset" false current.reset;
+  check (list string) "current empty frame contains no entries" [] (messages current);
+  List.iter
+    (fun cursor ->
+      let frame = Stream.next_frame (query ()) ~after:(Some cursor) in
+      check bool "future empty-ring cursor resets" true frame.reset;
+      check int "future cursor returns the new empty frontier" (-1) frame.after)
+    [ 0; 42; max_int ]
+
+let test_cursor_from_a_newer_ring_resets () =
+  push "after-restart";
+  let total = (Log.Ring.bounds ()).total in
+  List.iter
+    (fun cursor ->
+      let frame = Stream.next_frame (query ()) ~after:(Some cursor) in
+      check bool "cursor from a newer ring resets" true frame.reset;
+      check bool "reset includes the current newest matching entry" true
+        (List.mem "after-restart" (messages frame));
+      check int "metadata and cursor share one frontier" frame.ring_bounds.total (frame.after + 1))
+    [ total; total + 100; max_int ];
+  let current = Stream.next_frame (query ()) ~after:(Some (total - 1)) in
+  check bool "the current nonempty frontier does not reset" false current.reset;
+  check (list string) "no duplicate entry at the current frontier" [] (messages current)
+
 let test_frames_follow_the_cursor () =
   push "one";
   let first = Stream.next_frame (query ()) ~after:None in
@@ -83,7 +113,9 @@ let test_the_wait_ends_on_the_next_entry () =
 let () =
   run "log_stream_frames"
     [ ( "frames"
-      , [ test_case "frames follow the cursor" `Quick test_frames_follow_the_cursor
+      , [ test_case "empty ring cursor boundaries" `Quick test_empty_ring_cursors
+        ; test_case "newer ring cursor resets" `Quick test_cursor_from_a_newer_ring_resets
+        ; test_case "frames follow the cursor" `Quick test_frames_follow_the_cursor
         ; test_case "an exact page appends" `Quick test_an_exact_page_appends
         ; test_case "more than a page resets" `Quick test_more_than_a_page_resets
         ; test_case "a cursor older than the ring resets" `Quick

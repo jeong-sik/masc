@@ -951,6 +951,37 @@ let external_matches_target target (subscriber : external_subscriber) =
       Option.exists (equal_observer_scope scope) subscriber.observer_scope
   | All | Observers | Presence_only -> true
 
+let publication_inputs : external_subscriber list Atomic.t = Atomic.make []
+
+let subscribe_publication_inputs ~runtime_authority ?observer_instance_id callback =
+  let observer_scope = Option.map
+      (fun instance_id -> observer_scope ~runtime_authority ~instance_id)
+      observer_instance_id in
+  let subscription =
+    { sub_id = "runtime-publication-input"; runtime_authority = Some runtime_authority
+    ; observer_scope; callback; is_alive = (fun () -> true) } in
+  Lockfree_atomic.update publication_inputs (fun current -> subscription :: current);
+  fun () -> Lockfree_atomic.update publication_inputs
+    (List.filter (fun current -> current != subscription))
+;;
+
+let notify_publication_inputs ~target event =
+  match target with
+  | Presence_only | Runtime_presence _ -> ()
+  | All | Observers | Runtime_observers _ | Scoped_runtime_observers _ ->
+    let visibility = event_visibility event.ext_payload in
+    List.iter (fun subscription ->
+      if external_matches_target target subscription
+         && visibility_permitted None visibility then
+        match subscription.callback event with
+        | () -> ()
+        | exception exn ->
+          (match Log.Server.warn "runtime publication input failed: %s"
+             (Printexc.exn_slot_name exn) with
+           | () -> ()
+           | exception _ -> ())) (Atomic.get publication_inputs)
+;;
+
 let notify_external_subscribers ~target event =
   let t0 = Time_compat.now () in
   let record_duration () =
@@ -1209,6 +1240,9 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_fanout ~on_commit
      enqueued or unregistered. Later metrics and external subscribers do not
      undo that publication. The callback is a non-yielding receipt. *)
   Option.iter (fun notify -> notify delivery.event_id) on_committed;
+  notify_publication_inputs ~target
+    { ext_frame = delivery.frame; ext_payload = delivery.payload
+    ; ext_event_id = delivery.event_id; ext_emitted_at = delivery.emitted_at };
   (* Record broadcast duration for transport observability *)
   let elapsed = Time_compat.now () -. t0 in
   Transport_metrics.observe_broadcast_duration ~target:target_label elapsed;

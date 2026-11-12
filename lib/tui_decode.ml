@@ -104,9 +104,10 @@ let keeper_health_reading : keeper_health -> keeper_health_reading = function
 
 (* The Keepers screen's own words for these states (정상, 대기 중, 실패,
    오프라인), so a health word and a state word for the same keeper agree.
+   No reading is 미조회, the word RFC-0519 §2 gives a value not read yet.
    English keeps the wire words it showed. *)
 let keeper_health_word ~ko = function
-  | None -> if ko then "미확인" else "unread"
+  | None -> if ko then "미조회" else "unread"
   | Some health ->
     (match keeper_health_reading health with
      | Health_running -> if ko then "정상" else "healthy"

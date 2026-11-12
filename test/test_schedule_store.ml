@@ -2087,9 +2087,17 @@ let test_primary_cache_respects_backend_authority () =
       (read_state memory).schedules)
 ;;
 
-(* A read that misses decodes on the pool, as a write encodes there: while the
-   pool's one worker is busy, the read waits for it. *)
-let test_a_read_that_misses_decodes_on_the_pool () =
+(* Another process replaces the ledger with a file the store was not told
+   about; here the file is replaced with its own bytes. *)
+let replace_ledger_outside_the_store config =
+  let path = schedules_path config in
+  Workspace_core.write_text config path (Workspace_core.read_text config path)
+;;
+
+(* Stores one schedule, runs [prepare], then reads the ledger while the pool's
+   one worker is held busy. Says whether the read came back before the worker
+   was released, and what it read. *)
+let read_beside_a_busy_worker ~prepare =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2100,6 +2108,7 @@ let test_a_read_that_misses_decodes_on_the_pool () =
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
   ignore (insert_ok config (make_request ()));
+  prepare config;
   let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
   let previous_pool = Domain_pool_ref.get () in
   Fun.protect
@@ -2117,6 +2126,7 @@ let test_a_read_that_misses_decodes_on_the_pool () =
       Eio.Promise.await release));
   Eio.Promise.await occupied;
   let read = ref None in
+  let came_back_before_release = ref false in
   let clock = Eio.Stdenv.clock env in
   Eio.Fiber.both
     (fun () -> read := Some (read_state_result config))
@@ -2128,12 +2138,56 @@ let test_a_read_that_misses_decodes_on_the_pool () =
           wait (polls - 1))
       in
       wait busy_worker_polls;
-      check bool "the read waits for the busy worker" true (Option.is_none !read);
+      came_back_before_release := Option.is_some !read;
       Eio.Promise.resolve release_u ());
   match !read with
-  | Some (Ok state) -> check int "and it holds the schedule" 1 (List.length state.schedules)
+  | Some (Ok state) -> !came_back_before_release, state
   | Some (Error error) -> fail (read_error_to_string error)
   | None -> fail "the read never finished"
+;;
+
+(* A read that misses decodes on the pool, as a write encodes there: while the
+   pool's one worker is busy, the read waits for it. *)
+let test_a_read_that_misses_decodes_on_the_pool () =
+  let came_back_before_release, state =
+    read_beside_a_busy_worker ~prepare:replace_ledger_outside_the_store
+  in
+  check bool "the read waits for the busy worker" false came_back_before_release;
+  check int "and it holds the schedule" 1 (List.length state.schedules)
+;;
+
+(* The store keeps the state it wrote, so a read after its own write decodes
+   nothing: it comes back while the pool's one worker is still busy. *)
+let test_a_read_after_the_stores_own_write_decodes_nothing () =
+  let came_back_before_release, state =
+    read_beside_a_busy_worker ~prepare:(fun (_ : Workspace_utils.config) -> ())
+  in
+  check bool "the read does not wait for the busy worker" true came_back_before_release;
+  check int "and it holds the schedule" 1 (List.length state.schedules)
+;;
+
+(* What the store keeps after a write is what a reader decodes from the file.
+   The note body is not valid UTF-8, so the bytes written carry a repaired
+   string where the state the mutation built carries the original. *)
+let test_the_state_kept_after_a_write_is_the_state_the_file_decodes_to () =
+  with_workspace
+  @@ fun config ->
+  let request = insert_ok config (make_request ()) in
+  (match
+     append_note config ~schedule_id:request.schedule_id ~author_id:"operator"
+       ~author_kind:Human_operator ~body:"caf\xff" ~now:150.0
+   with
+   | Ok _ -> ()
+   | Error err -> fail ("note: " ^ store_error_to_string err));
+  let kept = read_state config in
+  replace_ledger_outside_the_store config;
+  let decoded = read_state config in
+  check bool "the second read decoded the file" false (kept == decoded);
+  check bool "and decoded the state that was kept" true (kept = decoded);
+  check bool "whose note body is the repaired one" false
+    (List.exists
+       (fun (note : Schedule_domain.schedule_note) -> String.equal note.body "caf\xff")
+       kept.notes)
 ;;
 
 (* Compact JSON has no spelling for NaN or an infinity, so a schedule time that
@@ -2550,6 +2604,10 @@ let () =
             test_primary_cache_respects_backend_authority;
           test_case "a read that misses decodes on the pool" `Quick
             test_a_read_that_misses_decodes_on_the_pool;
+          test_case "a read after the store's own write decodes nothing" `Quick
+            test_a_read_after_the_stores_own_write_decodes_nothing;
+          test_case "the state kept after a write is the state the file decodes to" `Quick
+            test_the_state_kept_after_a_write_is_the_state_the_file_decodes_to;
           test_case "a schedule time that is not finite is refused" `Quick
             test_a_schedule_time_that_is_not_finite_is_refused;
           test_case "a ledger that cannot be encoded fails the write" `Quick

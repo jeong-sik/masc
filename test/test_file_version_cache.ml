@@ -24,6 +24,13 @@ let append path contents =
 
 let read path = In_channel.with_open_bin path In_channel.input_all
 
+(* A writer that renames a new file into place, so the path gets a new inode. *)
+let replace path contents =
+  let replacement = path ^ ".next" in
+  write replacement contents;
+  Unix.rename replacement path
+;;
+
 (* A decode that counts its runs and returns the file's text. *)
 let counting_decode path =
   let runs = ref 0 in
@@ -227,6 +234,68 @@ let test_a_missing_file_is_decoded_every_time () =
   check int "decoded every time" 2 !runs
 ;;
 
+(* A writer that replaced the file keeps the value it wrote: the next read
+   takes it and decodes nothing. *)
+let test_a_written_value_is_read_without_decoding () =
+  with_file
+  @@ fun path ->
+  write path "one";
+  let cache = File_version_cache.create () in
+  let decode, runs = counting_decode path in
+  ignore (load cache path ~decode : string);
+  replace path "two";
+  let written = "two" in
+  File_version_cache.keep_written cache path written;
+  check bool "the read takes the written value" true (load cache path ~decode == written);
+  check int "and the write was not decoded" 1 !runs
+;;
+
+(* The kept value belongs to the version the writer left. A later replacement
+   by a writer that tells the cache nothing is decoded. *)
+let test_a_file_replaced_after_a_kept_write_is_decoded () =
+  with_file
+  @@ fun path ->
+  write path "one";
+  let cache = File_version_cache.create () in
+  let decode, runs = counting_decode path in
+  File_version_cache.keep_written cache path "one";
+  replace path "two";
+  check string "the read decodes the replacement" "two" (load cache path ~decode);
+  check int "once" 1 !runs
+;;
+
+(* A decode that was reading the old file while the writer replaced it does
+   not put its value over the one the writer kept. *)
+let test_a_decode_overtaken_by_a_kept_write_keeps_nothing () =
+  with_file
+  @@ fun path ->
+  write path "one";
+  let cache = File_version_cache.create () in
+  let overtaken () =
+    let old = read path in
+    replace path "two";
+    File_version_cache.keep_written cache path "two";
+    Ok old
+  in
+  check string "the overtaken read returns what it decoded" "one"
+    (load cache path ~decode:overtaken);
+  let decode, runs = counting_decode path in
+  check string "the next read takes the written value" "two" (load cache path ~decode);
+  check int "without decoding" 0 !runs
+;;
+
+(* A path that is gone has no version to keep a value for. *)
+let test_a_written_value_for_a_missing_file_is_not_kept () =
+  with_file
+  @@ fun path ->
+  let cache = File_version_cache.create () in
+  File_version_cache.keep_written cache path "gone";
+  write path "one";
+  let decode, runs = counting_decode path in
+  check string "the read decodes the file" "one" (load cache path ~decode);
+  check int "once" 1 !runs
+;;
+
 let () =
   run
     "file version cache"
@@ -249,6 +318,16 @@ let () =
         ; test_case "an error is not kept" `Quick test_an_error_is_not_kept
         ; test_case "a missing file is decoded every time" `Quick
             test_a_missing_file_is_decoded_every_time
+        ] )
+    ; ( "keep_written"
+      , [ test_case "a written value is read without decoding" `Quick
+            test_a_written_value_is_read_without_decoding
+        ; test_case "a file replaced after a kept write is decoded" `Quick
+            test_a_file_replaced_after_a_kept_write_is_decoded
+        ; test_case "a decode overtaken by a kept write keeps nothing" `Quick
+            test_a_decode_overtaken_by_a_kept_write_keeps_nothing
+        ; test_case "a written value for a missing file is not kept" `Quick
+            test_a_written_value_for_a_missing_file_is_not_kept
         ] )
     ]
 ;;

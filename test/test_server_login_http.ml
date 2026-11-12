@@ -505,6 +505,21 @@ let the_preview_follows_a_login () =
       "a form may go to GitHub"
       true
       (contains ~sub:"form-action 'self' https://github.com" (one "content-security-policy" home));
+    (* The policy lets a browser apply one sheet, the one the page wrote under
+       the nonce of that policy. Under another nonce the browser applies no
+       style at all. *)
+    (match split_once ~on:"style-src 'nonce-" (one "content-security-policy" home) with
+     | None -> Alcotest.fail "the policy of the home page names no style sheet"
+     | Some (_, rest) ->
+       let nonce =
+         match split_once ~on:"'" rest with
+         | Some (nonce, _) -> nonce
+         | None -> Alcotest.fail "the style source of the policy does not end"
+       in
+       Alcotest.(check bool)
+         "the sheet of the page is under the nonce of its policy"
+         true
+         (contains ~sub:(Printf.sprintf {|<style nonce="%s">|} nonce) home.body));
     (* A browser sends "Origin: null" with a form POST from a no-referrer page. *)
     Alcotest.(check string) "the form posts with its origin" "same-origin" (one "referrer-policy" home);
     let invitation = send admin router ~meth:"GET" ~path:"/accounts/invite" in

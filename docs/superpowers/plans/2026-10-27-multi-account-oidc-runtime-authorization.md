@@ -1126,14 +1126,14 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 화면은 GitHub 로그인만 시작한다. 서버에 GitHub client가 없으면 버튼이 눌리지 않고 화면이 그 사실을 말한다. 전에는 눌러서 404를 받았다.
   - Google 로그인은 경로만 있고 화면에 버튼이 없다. 화면의 CSP `form-action`에 Google 인가 주소의 origin이 들어가야 하는데, 그 주소는 discovery가 준다.
   - Admin 세션이면 화면에 allowlist 등록·삭제 칸이 보인다(`whoami`의 `role`이 `admin`일 때만. 판정은 서버가 한다). C6의 Admin 화면이 생기기 전에 일반 Member를 들이는 길이다(#51483). allowlist를 읽는 경로가 없어서 방금 등록한 id만 보이고, C6가 서면 이 칸을 지운다.
-  - 로그인 전에는 로그인 칸만, 로그인 뒤에는 구독·Keeper·PAT 칸만 보이고 목록 조회는 로그인 뒤에만 보낸다. 칸은 `<section>`과 제목으로 이어지고 동작 결과는 `role="status"`로 낭독된다. `Account`와 `Runtime`은 서버가 준 목록에서 고르고, PAT 만료는 날짜·시간 선택이다. 스타일은 CSP에 `style-src`가 없어서 없다.
+  - 로그인 전에는 로그인 칸만, 로그인 뒤에는 구독·Keeper·PAT 칸만 보이고 목록 조회는 로그인 뒤에만 보낸다. 칸은 `<section>`과 제목으로 이어지고 동작 결과는 `role="status"`로 낭독된다. `Account`와 `Runtime`은 서버가 준 목록에서 고르고, PAT 만료는 날짜·시간 선택이다. 화면은 stylesheet 하나를 답 안에 싣고, CSP는 그 답의 nonce만 `style-src`로 받는다(`Account_page`). nonce는 `style` 속성을 덮지 않으므로 화면은 `style` 속성을 쓰지 않는다.
   - 제목은 `MASC accounts`다.
 - 프로세스 준비. 사람의 경로가 읽는 전역은 `Eio_context`의 env와 switch이고 S1a-3a가 이미 채운다. 턴은 official client를 서버의 프로세스로 띄운다(`Server_preview_keeper_turn`). net 전역을 읽는 경로는 없다(읽어서 확인).
 - 다른 사람의 Runtime. 턴은 `Runtime_account_access.authorize`가 허락한 계정에서만 시작한다. 다계정 프로세스에서 native 도구를 쓰는 자세는 `authorize_native`가 거절한다(D3c). 이 층은 그 판정을 바꾸지 않는다.
 - 안내문. `masc auth bootstrap`과 `masc auth invite`의 도움말이 "계정 서버는 아직 로그인 경로를 열지 않는다"고 적었다. 계정 서버가 여는 것으로 고친다.
 - 시험.
   - `test_server_accounts`: 띄운 계정 서버에서 화면 둘이 200이고 답마다 script nonce가 있으며 GitHub 버튼이 눌린다. who-am-I, 구독 목록, Keeper 목록은 credential 없이 401이다. 단일 사용자 경로(`/api/v1/keepers` 등)는 404다.
-  - `test_server_login_http`: GitHub client 없는 표의 화면 둘은 버튼이 막혀 있고 그 사실을 말한다.
+  - `test_server_login_http`: GitHub client 없는 표의 화면 둘은 버튼이 막혀 있고 그 사실을 말한다. 화면의 stylesheet는 그 답의 CSP가 받는 nonce 아래에 있다.
   - `test_auth_gate`: `mat_` bearer는 `Read_auth`·`Manage_own_provider`·`Manage_own_keeper`에서 `Mcp_oauth_token_not_bound`다. 세션과 PAT이 같이 오면 `Manage_own_*`에서도 `Several_credentials`다.
   - `test_authz_boot_mode_read`: `config.json`이 `enabled:false`이거나 `require_token:false`인 다계정 부팅은 파일에서 읽어 거절한다.
 - 설계 §11.1 증거(2026-11-11 조사, 코드와 시험을 읽음). 일곱 항목 가운데 문구 그대로 다 모인 것은 없다.

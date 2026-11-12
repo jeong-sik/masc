@@ -24407,6 +24407,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            already applied event may still be missing, failed or running.
            Recover only those local observations; successful reads need no
            followup and replayed events owe their own reads. *)
+        (* A stream that carried readings owes one revalidate even when this
+           reopen replays completely (see [Observer_closed]). Only this branch
+           ever sees an owned open, so the debt has to be taken here. *)
+        let revalidate_owed = state.observer_revalidate_owed in
+        state.observer_revalidate_owed <- false;
         if Masc_tui_types.observer_replay_is_complete handshake then begin
           note_local_source_observer_resume state Local_keepers;
           launch_local_source_followup state ~mailbox Local_keepers;
@@ -24418,7 +24423,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              metadata has no same-stat writer and keeps followup-only
              recovery. *)
           launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh
-            state.local_base_path
+            state.local_base_path;
+          (* The closed stream carried readings, so the replay cannot vouch for
+             the interval: read the waiting inventory and the agenda once. *)
+          if revalidate_owed then begin
+            launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
+            owe_agenda_revalidation state
+          end
         end else begin
           launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
           owe_agenda_revalidation state;

@@ -1926,7 +1926,7 @@ let host_wait_text = function
        | E.Lane_unavailable E.No_admitted_slots -> "its lane has no admitted slot"
        | E.Lane_unavailable (E.Lane_registry_unavailable { detail }) -> "lane registry unavailable: " ^ detail
        | E.Lane_unavailable (E.Every_slot_held { until }) ->
-           "every slot waits for its provider until " ^ Masc_domain.iso8601_of_unix_seconds until
+           "no slot can be called before " ^ Masc_domain.iso8601_of_unix_seconds until
        | E.Provider_refused (E.Provider_unavailable { detail }) -> "provider unavailable: " ^ detail
        | E.Provider_refused (E.Provider_auth_refused { detail }) -> "provider refused authentication: " ^ detail
        | E.Provider_refused (E.Provider_configuration_refused { detail }) ->

@@ -123,7 +123,7 @@ let problem_json = function
   | Tool_missing name -> "tool_missing",true,`String name
   | Output_not_selected name -> "output_not_selected",false,`String name
   | Route_unavailable reason ->
-    (* A stated wait ends at its own time; an operator has nothing to change. *)
+    (* A stated wait ends at its own time without an operator. *)
     let action = match reason with Exact.Lane_off | Every_slot_held _ -> false
       | Lane_unconfigured | No_admitted_slots | Lane_registry_unavailable _ -> true in
     "route_unavailable",action,not_final_json (Exact.Lane_unavailable reason)

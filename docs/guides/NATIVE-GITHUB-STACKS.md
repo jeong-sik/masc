@@ -156,8 +156,12 @@ and any branch a protection rule or ruleset applies to stay. The open pull
 requests are read again just before deleting, and the push carries a lease on
 that tip, so a branch that moved is refused and kept.
 
-The sweep reruns the worker on an approved scope within 30 minutes, so a
-failed or quota-ended worker run needs no follow-up. To recheck an existing PR
+At its next run the sweep reruns the worker on every scope that is still
+approved and ready (`ready` and `select` in
+`scripts/review/approval-merge-sweep.py`). A worker run that failed or ended at
+the quota therefore needs no follow-up while its pull request stays approved
+and ready. The sweep is scheduled every 30 minutes, and GitHub can start a
+scheduled run late or, under heavy load, drop it. To recheck an existing PR
 (any stack member) sooner, dispatch the worker by hand:
 
 ```bash

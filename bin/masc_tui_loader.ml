@@ -338,7 +338,8 @@ let record_observer_opened (state : state) ~session_id ~at =
   Log.Transport.info "tui_observer_opened replay=%s"
     (observer_replay_word state.observer_replay);
   add_event state "observer"
-    (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay);
+    (observer_replay_description ~ko:false ~source_loss:state.observer_source_loss
+       state.observer_replay);
   add_event state "observer" "runtime event feed open"
 
 let record_observer_closed (state : state) ~workspace outcome ~reason ~at =

@@ -670,10 +670,17 @@ let render_keeper_calls (state : state) =
    what arrives above it, so an operator reading the past is not pushed off
    it by the present. *)
 let acting_evidence_intro (state : state) =
-  [ Ansi.dim, " Selected event snapshot; new arrivals do not replace this reading"
-  ; Ansi.dim, Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting)
+  [ Ansi.dim
+    , ui_text state ~ko:" 고른 이벤트의 스냅샷 · 새로 온 이벤트가 이 화면을 바꾸지 않음"
+        ~en:" Selected event snapshot; new arrivals do not replace this reading"
+  ; Ansi.dim
+    , Printf.sprintf
+        (if state.ui_language = Lang_ko then " 보유한 이벤트: %d개 (고른 것은 고정)"
+         else " Retained feed events: %d (selection pinned)")
+        (List.length state.acting)
   ; Ansi.dim, " " ^ Terminal_text.single_line
-      (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay)
+      (observer_replay_description ~ko:(state.ui_language = Lang_ko)
+         ~source_loss:state.observer_source_loss state.observer_replay)
   ]
 
 (* The here row above the intro. *)
@@ -696,6 +703,8 @@ let render_acting_evidence (state : state) entry =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let intro = acting_evidence_intro state in
+  (* A field the event did not carry, as opposed to one it carried empty. *)
+  let not_carried = ui_text state ~ko:"실려 오지 않음" ~en:"not carried" in
   box_top buf cols;
   box_line buf cols
     (here_row ~cols state
@@ -705,15 +714,17 @@ let render_acting_evidence (state : state) entry =
   List.iter (fun (style, line) -> box_line_styled buf cols ~style line) intro;
   box_divider buf cols;
   let lines =
-    detail_section_lines ~first:true "1. 이벤트 식별 · 실행 컨텍스트 (Event Identity & Execution Context)"
-    @ (("TUI received at",
+    detail_section_lines ~first:true
+      (ui_text state ~ko:"1. 이벤트 식별 · 실행 컨텍스트"
+         ~en:"1. Event Identity & Execution Context")
+    @ ((ui_text state ~ko:"TUI 수신 시각" ~en:"TUI received at",
          Some (Masc_domain.iso8601_of_unix_seconds entry.Masc_tui_acting.ae_at))
        :: Masc_tui_acting.evidence_fields entry
        |> List.concat_map (fun (label, value) ->
            let prefix = "  " ^ label ^ ": " in
            let text = match value with
-             | None -> "not carried"
-             | Some "" -> "(empty string)"
+             | None -> not_carried
+             | Some "" -> ui_text state ~ko:"(빈 문자열)" ~en:"(empty string)"
              | Some value -> Terminal_text.single_line value in
            let continuation = String.make (Message_layout.display_width prefix) ' ' in
            match Message_layout.wrap_words
@@ -725,24 +736,28 @@ let render_acting_evidence (state : state) entry =
     match entry.Masc_tui_acting.ae_event with
     | Masc_tui_observer.Keeper_tool_call call ->
         let json label = function
-          | None -> ["  " ^ label ^ ": not carried"]
+          | None -> ["  " ^ label ^ ": " ^ not_carried]
           | Some value ->
-              ("  " ^ label ^ " (producer-redacted JSON)")
+              ("  " ^ label
+               ^ ui_text state ~ko:" (보낸 쪽이 가린 JSON)" ~en:" (producer-redacted JSON)")
               :: (document_json ~width:(max 1 (framed_inner_width cols - 3))
                     (Yojson.Safe.pretty_to_string value)
                   |> List.map (fun line -> "  " ^ line)) in
         let preview label = function
-          | None -> ["  " ^ label ^ ": not carried"]
+          | None -> ["  " ^ label ^ ": " ^ not_carried]
           | Some text ->
-              ("  " ^ label ^ " (producer-redacted preview)")
+              ("  " ^ label
+               ^ ui_text state ~ko:" (보낸 쪽이 가린 미리보기)" ~en:" (producer-redacted preview)")
               :: (document_markdown ~width:(max 1 (framed_inner_width cols - 3))
                     (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
                   |> List.map (fun line -> "  " ^ line)) in
-        detail_section_lines "2. 입출력 관측 기록 (INPUT / OUTPUT OBSERVATIONS)"
-        @ json "Input" call.kt_tool_args
-        @ preview "Input preview" call.kt_tool_args_preview
-        @ json "Output" call.kt_tool_result
-        @ preview "Output preview" call.kt_tool_output_preview
+        detail_section_lines
+          (ui_text state ~ko:"2. 입출력 관측 기록" ~en:"2. Input / Output Observations")
+        @ json (ui_text state ~ko:"입력" ~en:"Input") call.kt_tool_args
+        @ preview (ui_text state ~ko:"입력 미리보기" ~en:"Input preview") call.kt_tool_args_preview
+        @ json (ui_text state ~ko:"출력" ~en:"Output") call.kt_tool_result
+        @ preview (ui_text state ~ko:"출력 미리보기" ~en:"Output preview")
+            call.kt_tool_output_preview
     | Masc_tui_observer.Internal_agent_runs_changed _ | Masc_tui_observer.Workspace_store_changed _ | Masc_tui_observer.Dataset_changed _ | Masc_tui_observer.Gate_connector_changed _ | Masc_tui_observer.Keeper_event_queue_changed _ | Masc_tui_observer.Board_changed _ | Masc_tui_observer.Approval_change _ | Masc_tui_observer.Agent_core _
     | Masc_tui_observer.Keeper_heartbeat _ | Masc_tui_observer.Keeper_turn_complete _
     | Masc_tui_observer.Keeper_turn_observation _ | Masc_tui_observer.Keeper_composite_changed _ | Masc_tui_observer.Keeper_metrics_appended _
@@ -763,7 +778,8 @@ let render_acting_evidence (state : state) entry =
     | Some line -> box_line buf cols line
   done;
   box_line_styled buf cols ~style:Ansi.dim
-    (Printf.sprintf "  [evidence rows %s]"
+    (Printf.sprintf
+       (if state.ui_language = Lang_ko then "  [증거 줄 %s]" else "  [evidence rows %s]")
        (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)));
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols
@@ -777,7 +793,7 @@ let render_acting_evidence (state : state) entry =
 let acting_notices (state : state) ~trace_unavailable =
   let retained =
     if state.acting = [] then ""
-    else ui_text state ~ko:" · 이전 사건" ~en:" · retained events"
+    else ui_text state ~ko:" · 이전 이벤트" ~en:" · retained events"
   in
   let feed =
     match state.observer with
@@ -795,12 +811,12 @@ let acting_notices (state : state) ~trace_unavailable =
   let dropped =
     if state.acting_dropped = 0 then None
     else Some (Printf.sprintf "%s %d"
-      (ui_text state ~ko:"보관에서 빠진 사건" ~en:"Dropped events") state.acting_dropped)
+      (ui_text state ~ko:"보관에서 빠진 이벤트" ~en:"Dropped events") state.acting_dropped)
   in
   let undecodable =
     if state.acting_undecodable = 0 then None
     else Some (Printf.sprintf "%s %d%s"
-      (ui_text state ~ko:"해석하지 못한 사건" ~en:"Undecodable events")
+      (ui_text state ~ko:"해석하지 못한 이벤트" ~en:"Undecodable events")
       state.acting_undecodable
       (match state.acting_undecodable_last with
        | None -> ""
@@ -809,7 +825,7 @@ let acting_notices (state : state) ~trace_unavailable =
   let unseen =
     if state.acting_unseen = 0 then None
     else Some (Printf.sprintf "%s %d (g)"
-      (ui_text state ~ko:"위쪽 새 사건" ~en:"New above") state.acting_unseen)
+      (ui_text state ~ko:"위쪽 새 이벤트" ~en:"New above") state.acting_unseen)
   in
   let replay =
     match state.observer_replay with
@@ -822,7 +838,8 @@ let acting_notices (state : state) ~trace_unavailable =
                    | Sse_wire.Reset (Sse_wire.Instance_changed | Sse_wire.Unscoped_cursor
                                     | Sse_wire.Cursor_ahead)); _ } ->
         Some (Terminal_text.single_line
-          (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay))
+          (observer_replay_description ~ko:(state.ui_language = Lang_ko)
+             ~source_loss:state.observer_source_loss state.observer_replay))
   in
   let warning text = Theme.warn (), text in
   let trace =
@@ -991,7 +1008,7 @@ let render_acting (state : state) =
   in
   let col_hdr =
     column_line ~glyph:" "
-      ~content:(ui_text state ~ko:"사건" ~en:"EVENT")
+      ~content:(ui_text state ~ko:"이벤트" ~en:"EVENT")
       ~actor:(ui_text state ~ko:"주체" ~en:"ACTOR")
       ~clock:(ui_text state ~ko:"시각" ~en:"TIME")
   in

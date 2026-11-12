@@ -2913,7 +2913,7 @@ let question_hints (state : state) =
              | Some _ -> Ask_selected
              | None -> Asks_unselected)
       in
-      footer_hints_approvals
+      footer_hints_approvals ~lang:state.ui_language
         (Approval_browsing
            { approvals = not (List.is_empty (Masc_tui_approvals_model.approval_items state))
            ; asks
@@ -2922,10 +2922,10 @@ let question_hints (state : state) =
            })
   | Ask_answering _ ->
       (match state.ask_text_entry with
-       | Some _ -> footer_hints_approvals Approval_writing
+       | Some _ -> footer_hints_approvals ~lang:state.ui_language Approval_writing
        | None ->
            if Masc_tui_types.ask_submit_is_armed state then
-             footer_hints_approvals Approval_armed
+             footer_hints_approvals ~lang:state.ui_language Approval_armed
            else
              let question = selected_ask_question state in
              let has_choices =
@@ -2935,7 +2935,7 @@ let question_hints (state : state) =
                | None -> false
              in
              let takes_text = Option.is_some question in
-             footer_hints_approvals
+             footer_hints_approvals ~lang:state.ui_language
                (Approval_answering { has_choices; takes_text }))
 
 let draw_ask_origin buf cols (state : state) =

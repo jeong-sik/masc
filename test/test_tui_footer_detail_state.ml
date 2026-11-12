@@ -111,7 +111,7 @@ let back_keys_of_surface name surface =
 (* The queue with a row, a question under the cursor and its source: every key
    the browsing footer can name. *)
 let approvals_list_footer =
-  Keys.footer_hints_approvals
+  Keys.footer_hints_approvals ~lang:Masc_tui_types.Lang_en
     (Keys.Approval_browsing
        { approvals = true; asks = Keys.Ask_selected; source = true; last_answer = false })
 
@@ -147,11 +147,11 @@ let scoped_keys =
      is open, and that footer names it whenever the approval has values to
      read, as "string bytes" or, once they are shown, as "text". *)
   ; ( "Approvals string bytes",
-      Keys.footer_hints_approval_detail ~value_hint:Keys.Readable_values,
+      Keys.footer_hints_approval_detail ~lang:Masc_tui_types.Lang_en ~value_hint:Keys.Readable_values,
       approvals_list_footer,
       [ "v" ] )
   ; ( "Approvals text",
-      Keys.footer_hints_approval_detail ~value_hint:Keys.Byte_values,
+      Keys.footer_hints_approval_detail ~lang:Masc_tui_types.Lang_en ~value_hint:Keys.Byte_values,
       approvals_list_footer,
       [ "v" ] )
   ]

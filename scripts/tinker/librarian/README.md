@@ -326,12 +326,17 @@ whether a draft of `config/prompts/librarian.md` goes in (RFC-0517 §2.3).
 lines, the template of the baseline, two runs per side on Inkling and one on
 GLM, the noise widths, and each model's baseline. A baseline is what the
 model's runs of the pinned template counted, kept as numbers: each metric's
-hits over chances summed over the runs, each run's E-real record, and the
-sha256 of the rows they came from. `compare` reads the baseline from the file
+hits over chances summed over the runs and, for each run, its E-real record,
+the sha256 of the rows the counts came from and the answered calls it counted.
+An answered call is named by one sha256 of its key and the time it was sent
+(`answered_sha256`). `compare` reads the baseline from the file
 and measures only the draft's runs (`prompt_counts.py`), so a comparison needs
 neither the baseline's run folders nor its judges' decisions, and neither can
 move a pinned count. A model whose baseline is `null` cannot be compared yet.
-A draft run that holds the rows a pinned baseline was counted from is refused.
+A draft run that counts an answered call a pinned baseline counted is refused.
+A run made in a copy of a baseline run's folder answers from that folder's log
+every request the draft leaves as it was, and a row written again with other
+spacing or key order names the same call.
 `compare.json` names the rows of both sides by sha256.
 
 `prompt_compare.py baseline --runs <runs.json>` measures runs of the pinned
@@ -352,9 +357,9 @@ until it names that template. It also pins `prompt_counts.py`,
 `prompt_lines.py` and `prompt_compare.py` by sha256 (`files_sha256`). After a
 change of `prompt_lines.py` or `prompt_compare.py` only `files_sha256` is
 pinned again and the baselines stand; a change of `prompt_counts.py` leaves
-them stale as above. The file is read as written: a key the comparison does
-not read, a key written twice in one object, or a value of another shape is
-refused.
+them stale as above. `prompt_lines.json` and `runs.json` are read as written:
+a key the comparison does not read, a key written twice in one object, or a
+value of another shape is refused.
 
 Each metric counts hits over
 chances, summed over a side's runs. Its noise σ is the binomial standard error

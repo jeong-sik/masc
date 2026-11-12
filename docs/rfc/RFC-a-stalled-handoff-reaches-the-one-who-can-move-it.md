@@ -83,8 +83,8 @@ implementation_prs: []
 
 | 마지막 문구 | 수 | 처음 멈춘 순간 |
 |---|---|---|
-| `original execution lost its writer without a terminal settlement` | 8 | 3건: 리뷰를 예약하고 3분 뒤 서버가 SIGTERM 을 받았다(종료 한도 10초). 로그는 9초 뒤 종료 2단계에서 끝나고 3~5단계 줄이 없다. 그 실행 기록에는 끝이 없다. 5건: 로그 창보다 먼저 예약됐고, 창의 첫 시작 sweep 에서 이 문구로 처음 보인다 |
-| `original executions have no retained verdict` | 8 | 7건: 첫 검증 칸이 사용 한도 초과(다시 열리기까지 1.6~5일)라 둘째 칸으로 넘어갔고, 둘째 칸의 호출이 연결 끊김(`end_of_file`) 5, 900초 무진행 1, DNS 실패 1 로 끝났다. 1건: 로그 창보다 먼저 예약됐다 |
+| `original execution lost its writer without a terminal settlement` | 8 | 3건: 리뷰를 예약하고 3분 뒤 서버가 SIGTERM 을 받았다(종료 한도 10초). 로그는 9초 뒤 종료 2단계에서 끝나고 3~5단계 줄이 없다. 그 실행 기록에는 끝이 없다. 5건: 로그 창보다 먼저 예약됐고, 창의 첫 시작 sweep 에서 이 문구로 처음 보인다. 8건의 마지막 시도에서 6건은 첫 칸이 사용 한도로 실패한 뒤 둘째 칸의 실행 기록에 끝이 없고, 2건은 첫 칸의 실행 기록에 끝이 없다 |
+| `original executions have no retained verdict` | 8 | 8건 모두 마지막 시도의 실행 기록이 둘이다. 첫 검증 칸은 사용 한도 초과(다시 열리기까지 1.6~5일)로 실패했고, 둘째 칸은 연결 끊김(`end_of_file`) 5, 호출 시한 900초 2, DNS 실패 1 로 실패했다. 7건은 로그로도 확인했다. 1건은 로그 창보다 먼저 예약됐다 |
 | `original report history cannot establish one accepted verdict` | 1 | 리뷰어가 `report_review_verdict` 를 불러 정산까지 됐고, 그다음 provider 호출이 연결 끊김으로 실패했다 |
 | `original execution has an unsettled effect` | 1 | 원인을 가르지 못했다 |
 | `raised`: `retained subject or lookup authority differs` | 1 | 원인을 가르지 못했다 |
@@ -108,7 +108,7 @@ implementation_prs: []
   - 사용 한도는 코드가 확정된 거절로 분류하는 실패예요. provider 가 풀리는 시각을 밝혔으면 지금도 그 시각 뒤에 다시 돌아요(3.2).
   - 결과를 모르는 실패로 끝난 실행 기록은 14개예요. 14개 모두 코드가 다시 해 볼 실패(`Reviews_again`)로 분류하는 종류예요. 한 시도에 결과 모름이 하나라도 있으면 그 시도의 실행 기록을 모두 다시 읽어요(3.2).
   - timeout 2개는 호출 시한(`call_timeout_s`, 900초)을 넘겨 실패로 닫혔어요. 하나는 provider 입장 허가를 기다리다가, 하나는 응답을 받다가 넘겼어요.
-  - 로그에는 "900초 동안 진행이 없었다"는 줄이 하나 더 있어요. 그 줄이 가리키는 실행 기록은 가려내지 못했어요.
+  - 멈춘 19건의 마지막 시도가 남긴 실행 기록은 따로 읽었어요(위 표). 판정 보고가 없는 실패 기록 가운데 취소로 닫힌 것은 없어요.
 - 보고 없이 취소된 31개의 취소 사유는 서버의 graceful shutdown 이 24개, `Fiber.Not_first` 가 7개예요.
 - 같은 로그 창에 리뷰가 예약된 제출(`verification_id`)은 288개(Task 193개)예요. `requires original reconciliation` 으로 한 번이라도 멈춘 제출은 35개예요. 그중 18개가 지금도 그 Task 의 현재 제출이에요.
 
@@ -190,7 +190,7 @@ L1 과 L2 가 고치는 자리만 적어요.
 | 어느 끝이든, 시도가 시작됐는데 결과가 없는 도구 호출이 있음 | 읽지 않는다 | 수리 필요: `original execution has an unsettled effect` |
 | 공식 클라이언트 세션 | 읽지 않는다 | 수리 필요: `original official-client session requires operator reconciliation` |
 
-- **[사실]** 서버가 살아 있을 때도 같은 표를 타요. provider 호출이 "결과를 모름"으로 실패하면(`Attempt_failed` 의 `Outcome_unknown`) `Verifier_review_worker.run_attempt_with` 는 리뷰가 끝난 뒤 `observe_pending` 으로 실행 기록을 다시 읽어요. 1.2 의 연결 끊김, 900초 무진행, DNS 실패가 이 길로 갔어요. 로그는 그 호출을 `retryable=false; no verdict committed` 로 적어요.
+- **[사실]** 서버가 살아 있을 때도 같은 표를 타요. provider 호출이 "결과를 모름"으로 실패하면(`Attempt_failed` 의 `Outcome_unknown`) `Verifier_review_worker.run_attempt_with` 는 리뷰가 끝난 뒤 `observe_pending` 으로 실행 기록을 다시 읽어요. 1.2 의 연결 끊김, 호출 시한 900초, DNS 실패가 이 길로 갔어요. 로그는 그 호출을 `retryable=false; no verdict committed` 로 적어요.
 - **[사실]** 실패는 두 값으로 분류돼요(`lib/task/anti_rationalization.ml`).
   - 하나는 결과의 확실성이에요(`failure_certainty`). 보내기 전, 확정된 거절, 결과 모름 셋이에요. 연결 오류와 timeout 은 결과 모름이고, 사용 한도와 5xx 는 확정된 거절이에요.
   - 다른 하나는 다시 볼지예요(`candidate_failure`). `Reviews_again`, `Model_absent`, `Producer_must_act` 셋이에요. 연결 끊김, DNS 실패, timeout 은 `Reviews_again` 이에요. 설정 오류, 응답 해석 실패, 내부 오류는 `Producer_must_act` 예요.
@@ -326,7 +326,8 @@ walk 는 리뷰 한 번이 검증 칸을 차례로 도는 걸음이에요(`Anti_
 
 한 시도를 다시 읽는 순서예요.
 
-1. 그 시도의 실행 기록을 모두 읽어요. 지금과 같아요.
+1. 그 시도의 실행 기록을 모두 읽어요. 실행 기록이 하나도 없으면 수리 필요예요. 둘 다 지금과 같아요.
+   - 보내려 했다는 기록 뒤, 첫 실행 기록이 저장되기 전에 프로세스가 끝난 시도도 여기 들어요. provider 를 부르기 전이라 다시 돌려도 되는 경우예요. 멈춘 19건에 없어서 이 글은 지금 동작을 그대로 둬요.
 2. 시도가 시작됐는데 결과가 없는 도구 호출이 하나라도 있으면 수리 필요예요. 지금과 같아요.
 3. 판정 보고(`report_review_verdict`) 호출 노드를 정산 여부와 상관없이 시도 전체에서 세요.
    - 정확히 하나이고 성공으로 정산됐으면 그 판정이에요. 그 실행이 뒤에 어떻게 끝났는지는 판정을 바꾸지 않아요.
@@ -335,6 +336,8 @@ walk 는 리뷰 한 번이 검증 칸을 차례로 도는 걸음이에요(`Anti_
 5. 보고 호출이 없고 실행이 모두 실패, 취소, writer 유실로 끝났으면 "이 시도는 판정을 내지 않았다"가 확정돼요. 결과를 모르던 시도는 확정된 거절이 돼요. 다시 돌지는 walk 가 남긴 것이 정해요.
    - walk 가 끝까지 가서 결과를 남겼으면, 그 결과에 실린 실패의 typed 판정(`candidate_failure`)이 정해요. `Reviews_again` 인 칸이 있으면 다음 시도로 가요. 없으면 지금처럼 멈춰요. 헌법의 `AwaitingVerification` invariant 그대로예요.
    - walk 가 결과를 남기지 못했으면 다음 시도로 가요. 취소됐거나 프로세스가 끝나서 걸음이 끊긴 경우예요. 취소는 지금도 이렇게 해요(#49097).
+     - walk 가 끝났는데 결과를 저장하지 못한 경우도 여기 들어요. 저장이 실패했거나(`verifier_review_worker.ml:157-158`) 저장 도중에 취소된 경우예요(`:171-176`). 진행 이벤트로는 프로세스 종료와 가를 수 없어요. 그때 walk 가 계산한 typed 판정은 남지 않아서 그 시도는 한 번 다시 돌아요. 이것은 받아들여요.
+     - **[추정]** 저장 장애가 이어지는 동안에는 되풀이되지 않아요. 다시 읽기도 같은 저장소에 거절과 다음 시도를 적어야 해서 오류로 멈춰요.
    - walk 결과에 typed 판정이 없으면 멈춰요. 지금 저장된 옛 근거가 이 경우예요.
 
 | 시도가 남긴 것 | 실행 기록 | 지금 | 바꾼 뒤 | 지금 멈춘 19건 |
@@ -353,7 +356,7 @@ walk 는 리뷰 한 번이 검증 칸을 차례로 도는 걸음이에요(`Anti_
 
 **[사실]** 멈춘 19건의 마지막 시도가 남긴 진행 기록을 읽었어요(2026-11-12 13시, 읽기 전용).
 
-- writer 유실 8건에는 walk 결과가 없어요. 진행 이벤트가 `dispatch_intended` 와 `waiting` 뿐이에요. 실행 기록은 2건이 하나, 6건이 둘이에요.
+- writer 유실 8건에는 walk 결과가 없어요. 진행 이벤트가 `dispatch_intended` 와 `waiting` 뿐이에요. 실행 기록은 2건이 하나, 6건이 둘이에요. 둘인 6건의 첫 실행 기록은 모두 사용 한도 실패로 닫혔어요. 성공으로 끝나고 보고가 없는 기록은 없어요. 그래서 8건 모두 규칙 5 로 가요.
 - `no retained verdict` 8건과 보고 뒤에 실패한 1건에는 walk 결과(`verifier_review_unknown/v1`)가 있어요. 이 근거에는 `result` 만 있고 칸별 관측이 없어요(`verifier_review_worker.ml:138-139`).
 - 정산 안 된 효과 1건에는 취소 처리(`verifier_review_worker.ml:176`)가 남긴 관측이 있어요.
 
@@ -376,7 +379,7 @@ walk 는 리뷰 한 번이 검증 칸을 차례로 도는 걸음이에요(`Anti_
 - 다음 시도는 거절된 시도에서만 생겨요(`verifier_review_owner.ml:429-439`).
 - 판정은 backlog 잠금 안에서, Task 가 그 `verification_id` 의 판정을 기다릴 때만 적혀요(`workspace_task_transitions.ml:902` 의 `commit_verdict_r`). 이미 판정이 적힌 Task 는 `InvalidState` 로, 다른 제출로 넘어간 Task 는 `VerificationSuperseded` 로 거절돼요(`:962-977`). 적은 뒤에 무엇이 적혔는지는 `completion_authority_agent.ml:790-822` 의 `observe_original_change` 가 읽어요. 그 함수는 쓰기를 막지 않아요.
 - 여러 실행이 판정을 내면 수리 필요예요(`verifier_review_execution.ml` 의 `multiple original executions supplied verdicts`).
-- 같은 제출은 한 프로세스에서 하나만 돌아요(`completion_authority_agent.ml:80` 의 `claim_review`). 다시 읽기는 walk 가 끝난 뒤 같은 fiber 가 해요(`verifier_review_worker.ml:165`). 판정이 저장된 시도는 다시 읽지 않아요(`:70`).
+- 같은 제출은 한 프로세스에서 하나만 돌아요(`completion_authority_agent.ml:80` 의 `claim_review`). 다시 읽기는 walk 가 끝난 뒤 같은 fiber 가 해요(`verifier_review_worker.ml:165`). 판정이 저장된 시도는 다시 읽지 않아요(`:70-73`).
 
 **[사실]** 다시 돌려도 되는 근거예요.
 
@@ -391,13 +394,15 @@ walk 는 리뷰 한 번이 검증 칸을 차례로 도는 걸음이에요(`Anti_
 **[제안]** 바뀌는 곳이에요.
 
 - `anti_rationalization.ml(i)`: walk 가 이미 계산하는 typed 판정을 실패 관측(`Attempt_failed`)에 실어요. 계산과 걸음은 그대로예요.
+- `goal_criterion_agent.ml`: 그 관측을 받는 패턴(`:99`)에 새 필드를 더해요. 동작은 그대로예요.
 - `verifier_review_worker.ml`
   - 결과 모름으로 끝난 walk 결과에 칸별 관측과 그 판정을 실어 저장해요(`verifier_review_unknown/v2`). 지금은 `result` 만 저장해요.
   - 다시 읽어서 "판정 없음"이 확정되면 거절을 적어요. 지금은 취소만 그렇게 적어요(`observe_pending` 의 `"cancelled"`).
   - typed 판정은 그 시도의 진행 이벤트에서 찾아요. 진행 단계는 가장 최근 관측만 들고 있어요(`lane_addon_request_progress.ml:157`). 뒤에 붙은 취소 관측이 앞의 walk 결과를 가리면 안 돼요.
+  - walk 결과는 `schema` 가 `verifier_review_unknown/v1` 이나 `v2` 인 `execution_unknown` 이벤트예요. 취소 처리가 남기는 `{"cause":"review_cancelled"}` 도 같은 종류의 이벤트지만 walk 결과가 아니에요. 그것만 있는 시도는 "walk 결과 없음"이에요.
   - 옛 `v1` 근거는 "typed 판정 없음"으로 읽어요. 고쳐 읽는 코드는 두지 않아요.
 - `verifier_review_execution.ml` 의 `observe_call` 과 `observe`: 실행의 끝과 판정 보고를 따로 읽고, 시도 단위로 위 순서대로 합쳐요. 지금은 끝의 종류마다 갈래가 있어요.
-- `agent_execution_projection.ml`: 판정 보고 호출을 정산 여부와 상관없이 셀 수 있게 도구 호출 목록을 내요. `Owner_lost` 는 실행 트리에서 읽은 복구 근거를 같이 돌려줘요. writer 가 없다고 확인한 뒤라 트리는 더 바뀌지 않아요.
+- `agent_execution_projection.ml` 과 `agent_execution_projection_intf.mli`: 판정 보고 호출을 정산 여부와 상관없이 셀 수 있게 도구 호출 목록을 내요. `Owner_lost` 는 실행 트리에서 읽은 복구 근거를 같이 돌려줘요. writer 가 없다고 확인한 뒤라 트리는 더 바뀌지 않아요.
 - `verifier_review_owner.ml`
   - `known_observations` 가 새 관측 값을 읽어요. 다시 읽어 만든 거절에는 `outcome_unknown` 을 싣지 않아요. 지금 `known_observations` 는 그 값을 거부해요(`:296`).
   - `next_attempt` 는 지금 "근거를 읽지 못했다"와 "다시 돌 칸이 없다"를 같은 "다음 시도 없음"으로 받아요(`:431`). 둘을 나눠 돌려줘요. 근거를 읽지 못한 것은 오류예요.
@@ -423,7 +428,8 @@ walk 는 리뷰 한 번이 검증 칸을 차례로 도는 걸음이에요(`Anti_
 - 리뷰 실행 자체가 서버 프로세스를 끝내는 경우에는, 서버가 다시 시작할 때마다 그 리뷰가 다시 돌아요. 표본에는 없어요. writer 를 잃은 55개는 모두 provider 응답을 기다리던 중이었어요. 이름에 시각이 든 서버 시작 로그 74개 중 72개가 SIGTERM 으로 끝났어요.
   - 헌법의 `budget_gate` 는 누적 재시작 수로 행동을 막는 게이트를 금해요. 막아야 한다면 계획된 종료와 비정상 종료를 typed 로 나눠야 해요. 이 글은 그 장치를 넣지 않아요. 대신 운영자 목록에 attempt 번호가 보여요(L2b).
 - 저장하는 근거의 모양을 바꾼 뒤 옛 서버로 되돌리는 경우예요.
-  - **[사실]** 옛 `known_observations` 는 새 관측 값을 거부해요. 옛 `next_attempt` 는 그것을 "다음 시도 없음"으로 받아요. 옛 `observe_pending` 은 결과 모름 근거의 내용을 읽지 않아요. 판정이 틀리게 적히지 않아요.
+  - **[사실]** 옛 `known_observations` 는 새 관측 값을 거부해요. 옛 `observe_pending` 은 결과 모름 근거의 내용을 읽지 않아요. 판정이 틀리게 적히지 않아요.
+  - **[사실]** 새 서버가 다음 시도를 만들기 전이면 옛 `next_attempt` 는 그 거절을 "다음 시도 없음"으로 받아요(`verifier_review_owner.ml:429-431`). 새 서버가 다음 시도를 이미 만들었으면 옛 서버는 `Corrupt_original` 로 멈추고 그 다음 시도에 닿지 못해요(`:416-417`).
   - 그 시도가 pulse 마다 재시도 요청만 되풀이하는지는 읽지 않았어요. 구현 PR 이 옛 binary 로 확인해요.
 
 #### L2b — 사람이 풀어야 하는 제출은 운영자 목록에 있다
@@ -432,7 +438,7 @@ walk 는 리뷰 한 번이 검증 칸을 차례로 도는 걸음이에요(`Anti_
 
 - 운영자 목록(`Operator_task_attention.item`)에 판정을 기다리는 제출을 모두 실어요. 오래 기다린 순이에요.
 - 목록은 backlog 에서 만들어요. 실행 원장에서 만들지 않아요(3.2 의 64개 보존).
-- **[제안]** 항목에 그 제출의 attempt 번호를 싣자고 그 RFC 에 제안해요. 재시작마다 다시 도는 리뷰는 번호가 커지는 것으로 보여요. 번호로 행동을 막지는 않아요(헌법의 `budget_gate`).
+- **[제안]** 항목에 그 제출의 attempt 번호를 싣자고 그 RFC 에 제안해요. 재시작마다 다시 도는 리뷰는 번호가 커지는 것으로 보여요. 번호로 행동을 막지는 않아요(헌법의 `budget_gate`). backlog 의 `AwaitingVerification` 에는 attempt 가 없어요(`lib/types/types_core.ml:210-214`). 번호를 보이려면 항목마다 검증 요청 저장소를 읽어야 해요.
 - "멈춘 것"을 가려내는 기준을 두지 않아요. L2a 뒤에는 오래 기다리는 제출이 곧 사람이 볼 제출이에요.
 - 그 RFC 는 이 항목을 3단계에 뒀어요. **[추정]** 항목 하나를 더하는 일은 1단계(저장 형식 변경)에 기대지 않아서 먼저 낼 수 있어요. 순서를 바꿀지는 그 RFC 의 소유자가 정해요(10절).
 
@@ -468,7 +474,7 @@ walk 는 리뷰 한 번이 검증 칸을 차례로 도는 걸음이에요(`Anti_
 | 층 | 바뀌는 곳 | 대가 |
 |---|---|---|
 | L1 | `keeper_board_attention_fanout.ml`, `keeper_board_attention_partition.ml(i)`, `keeper_board_attention_candidate.ml`, `keeper_board_attention_worker.ml`, `keeper_board_attention_quarantine_command.ml`, 그 시험 | `ensure_current_roots` 와 `judgment_delivery_outcome` 을 `match` 하는 곳을 모두 고친다. fanout 의 `claim` 마다 후보 원장을 한 번 더 읽는다 |
-| L2a | `anti_rationalization.ml(i)`(실패 관측에 판정을 싣는 것만), `verifier_review_worker.ml`, `agent_execution_projection.ml(i)`, `agent.ml(i)`, `verifier_review_execution.ml(i)`, `verifier_review_owner.ml`, `completion_authority_agent.ml`(주석), 그 시험, `docs/verification-pipeline-policy.md`, `docs/constitution.xml` | 끊긴 리뷰가 다시 돈다. 리뷰 한 번의 토큰이 다시 든다. 연결 실패가 이어지면 그 리뷰에 pulse 마다 시도 하나가 쌓인다(5.2). 헌법 invariant 와 검증 정책 문서의 문장이 바뀐다 |
+| L2a | `anti_rationalization.ml(i)`(실패 관측에 판정을 싣는 것만), `goal_criterion_agent.ml`(패턴 한 줄), `verifier_review_worker.ml`, `agent_execution_projection.ml`, `agent_execution_projection_intf.mli`, `agent.ml(i)`, `verifier_review_execution.ml(i)`, `verifier_review_owner.ml`, `completion_authority_agent.ml`(주석), 그 시험, `docs/verification-pipeline-policy.md`, `docs/constitution.xml` | 끊긴 리뷰가 다시 돈다. 리뷰 한 번의 토큰이 다시 든다. 연결 실패가 이어지면 그 리뷰에 pulse 마다 시도 하나가 쌓인다(5.2). 헌법 invariant 와 검증 정책 문서의 문장이 바뀐다 |
 | L2b | `operator_task_attention.ml` 과 그 목록을 그리는 곳 | 운영자 목록에 판정을 기다리는 제출이 모두 실린다. 지금 20행이고, L2a 뒤에는 돌고 있는 리뷰와 남은 10건이다 |
 | 미디어 거절 | `keeper_turn_driver.ml` 의 미디어 갈래 | 7일 로그에 0줄이라 맨 뒤다 |
 | L3 | 그 RFC 의 8절 | 그 RFC 에 적혀 있다 |
@@ -538,7 +544,7 @@ walk 는 리뷰 한 번이 검증 칸을 차례로 도는 걸음이에요(`Anti_
 - 멈춘 19건 가운데 `unsettled effect` 1건과 `raised` 1건의 원인.
 - 실패 219개를 사용 한도 205와 결과 모름 14로 나눈 것은 실행 기록의 오류 글로 가른 값이에요. 그때 코드가 매긴 `failure_certainty` 값은 저장돼 있지 않아요.
 - 저장하는 근거의 모양을 바꾼 뒤 옛 서버로 되돌렸을 때, 그 시도가 pulse 마다 재시도 요청만 되풀이하는지. 옛 서버가 다음 시도를 만들지 않는 것까지는 읽었어요(5.2).
-- 로그의 "900초 동안 진행이 없었다" 줄이 가리키는 실행 기록이 어떻게 닫혔는지. 진행 감시자가 시도를 취소한 것이라면 지금 코드가 이미 다음 시도로 넘겨요.
+- 로그의 "900초 동안 진행이 없었다" 줄이 어느 실행 기록을 가리키는지. 멈춘 19건의 실행 기록에서는 시한 실패 2건이 모두 실패로 닫혔어요.
 - 같은 호스트에서 두 프로세스가 같은 설치를 여는 경우. 적대적 검토는 RFC-0489 6.2 와 #48709 를 들어 임시 폴더가 다르면 둘이 lease 를 같이 가질 수 있다고 적었어요. 직접 읽지 않았어요.
 - Goal 검증에 같은 멈춤(결과 모름 뒤에 다시 돌지 않음)이 있는지.
 - 여러 호스트나 네트워크 파일시스템에서 writer lock 이 맞게 도는지. 적대적 검토가 추정으로 남겼어요.

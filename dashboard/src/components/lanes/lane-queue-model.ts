@@ -274,10 +274,6 @@ const LANE_SOURCE_DEFS: Record<string, LaneSourceDef> = {
   observation_unavailable: { tone: 'bad', stage: 'operator' },
 }
 
-export function laneSourceLabel(source: string): string {
-  return source
-}
-
 export function laneSourceTone(source: string): LaneSourceTone {
   return LANE_SOURCE_DEFS[source]?.tone ?? 'dim'
 }
@@ -323,7 +319,7 @@ export function laneStageBreakdown(entry: DashboardKeeperWaitingKeeper): {
       const def = LANE_SOURCE_DEFS[source]
       const item: LaneStageItem = {
         source,
-        label: laneSourceLabel(source),
+        label: source,
         count: String(count),
         tone: laneSourceTone(source),
       }

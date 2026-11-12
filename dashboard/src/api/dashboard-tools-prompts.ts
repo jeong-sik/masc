@@ -516,10 +516,18 @@ export function normalizeKeeperWaitingInventory(
 ): DashboardKeeperWaitingInventory {
   return {
     ...inventory,
-    keepers: inventory.keepers.map(keeper => ({
-      ...keeper,
-      waiting_on: keeper.waiting_on.map(normalizeKeeperWaitingRow),
-    })),
+    keepers: inventory.keepers.map(keeper => {
+      const stateSources: unknown = keeper.state_sources
+      if (!Array.isArray(stateSources) || !stateSources.every(source => typeof source === 'string')) {
+        throw new Error(
+          `Keeper waiting inventory row for ${JSON.stringify(keeper.keeper_name)} has no state_sources list`,
+        )
+      }
+      return {
+        ...keeper,
+        waiting_on: keeper.waiting_on.map(normalizeKeeperWaitingRow),
+      }
+    }),
     ...(inventory.global_waiting_on
       ? { global_waiting_on: inventory.global_waiting_on.map(normalizeKeeperWaitingRow) }
       : {}),

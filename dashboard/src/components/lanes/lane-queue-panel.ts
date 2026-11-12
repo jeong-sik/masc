@@ -71,7 +71,6 @@ import {
   laneSecText,
   laneStageBreakdown,
   laneStatePresent,
-  laneSourceLabel,
   laneSourceTone,
   laneUntilText,
   laneValueLabel,
@@ -335,7 +334,7 @@ function WaitAges({
               onClick=${() => setOpen(on ? null : index)}
               style=${{ width: `${width}%` }}
             >
-              <span class="wa-src">${laneSourceLabel(row.source)}</span>
+              <span class="wa-src">${row.source}</span>
               <span class="wa-on ${dev ? 'mono' : ''}" title=${row.waiting_on}>${reading}</span>
               <span class="wa-age mono">${laneAgoText(age)}</span>
             </button>

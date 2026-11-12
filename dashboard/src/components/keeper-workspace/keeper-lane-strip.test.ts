@@ -93,8 +93,8 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
     keepers: [
       {
         keeper_name: 'sangsu',
-        state: 'deferred',
-        state_sources: [],
+        state: 'waiting',
+        state_sources: ['chat_operation_queued', 'chat_operation_running'],
         waiting_count: 2,
         waiting_on: [
           {
@@ -159,9 +159,9 @@ describe('KeeperLaneStrip', () => {
     `)
     const text = el.textContent ?? ''
     expect(text).toContain('작업 대기열')
-    expect(text).toContain('DEFERRED')
-    // The operator sentence is the default reading; the wire vocabulary stays
-    // behind the 기술 상세 toggle.
+    expect(text).toContain('WAITING · chat_operation_queued +1')
+    // The Korean operator sentence stays the reading of each row. The state
+    // and its sources are the server words even with the 기술 상세 toggle off.
     expect(text).toContain('운영자 채팅 1건 대기')
     expect(text).toContain('운영자와 진행 중인 대화')
     expect(text).not.toContain('owner_fifo')

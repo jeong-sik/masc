@@ -42,7 +42,6 @@ import {
 import { keeperActionVisibility } from '../lib/keeper-predicates'
 import { keeperPurgePending } from '../store'
 import { PHASE_LABEL_KO } from '../lib/fleet-tone'
-import { laneSourceLabel } from './lanes/lane-queue-model'
 import { TimeAgo } from './common/time-ago'
 import {
   KEEPER_ACTION_LABELS,
@@ -132,7 +131,7 @@ export function FleetQueueSection({ keeper }: { keeper: Keeper }) {
             ${rows.map(row => html`
               <div class="fl-q-item ${draining ? 'drain' : ''}" title=${row.what}>
                 <span class="fl-q-gl mono">${QUEUE_SOURCE_GLYPH[row.source]}</span>
-                <span class="fl-q-kind mono">${laneSourceLabel(row.source)}</span>
+                <span class="fl-q-kind mono">${row.source}</span>
                 <span class="fl-q-from">${queueRowFrom(row)}</span>
                 <span class="fl-q-at mono">${row.since_iso
                   ? html`<${TimeAgo} timestamp=${row.since_iso} />`

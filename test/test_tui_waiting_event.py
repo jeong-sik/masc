@@ -692,9 +692,16 @@ class WaitingEventTest(unittest.TestCase):
                     "confirmation observation failure did not trigger a read",
                 )
                 wait_until(
-                    lambda: (
-                        "운영자 확인 기한 관측 불가".encode()
-                        in output[confirm_failure_start:]
+                    # The native screen names the failure without the source's own
+                    # sentence (the sentence stays on the Approvals/detail views),
+                    # so accept either wording.
+                    lambda: any(
+                        marker in output[confirm_failure_start:]
+                        for marker in (
+                            "운영자 확인 기한 관측 불가".encode(),
+                            "대기 원본을 읽지 못했습니다".encode(),
+                            b"waiting sources unavailable",
+                        )
                     ),
                     "confirmation observation failure was not displayed",
                 )

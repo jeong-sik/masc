@@ -497,6 +497,11 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
           (tool_result_with_tool_name ~tool_name:name
              (Keeper_tool_surface_ops.keeper_delegate_status_body
                 ~config:ctx.config ~caller:ctx.agent_name args))
+    | Keeper_tool_name.Keeper_delegate_status_many ->
+        Some
+          (tool_result_with_tool_name ~tool_name:name
+             (Keeper_tool_surface_ops.keeper_delegate_status_many_body
+                ~config:ctx.config ~caller:ctx.agent_name args))
     | Keeper_tool_name.Keeper_delegate_cancel ->
         Some
           (tool_result_with_tool_name ~tool_name:name
@@ -684,6 +689,14 @@ let () =
           (tool_result_with_tool_name
              ~tool_name:name
              (Keeper_tool_surface_ops.keeper_delegate_status_body
+                ~config
+                ~caller:agent_name
+                args))
+      | Keeper_tool_name.Keeper_delegate_status_many ->
+        Some
+          (tool_result_with_tool_name
+             ~tool_name:name
+             (Keeper_tool_surface_ops.keeper_delegate_status_many_body
                 ~config
                 ~caller:agent_name
                 args))

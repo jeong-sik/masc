@@ -1,0 +1,52 @@
+name = "masc_keeper_delegate_status_many"
+description = """
+Read several of your Keeper chat operations in one call. Each element of \
+operations names one target and one operation_id, the same pair \
+masc_keeper_delegate_status takes, and the targets may differ. The result \
+lists one entry per element in the order given: data holds what \
+masc_keeper_delegate_status returns for that operation, error holds the error \
+it would return. An operation that cannot be read does not stop the others. \
+A malformed element rejects the whole call and names its index."""
+additional_properties = false
+
+# Held back from the request until the model asks for it by name, as
+# masc_keeper_delegate_status is. A Keeper reads several operations at once
+# only after it has submitted several, which a turn rarely does.
+defer_loading = true
+
+[[params]]
+name = "operations"
+type = "array"
+required = true
+min_items = 1
+# Over the 72 h up to 2026-11-12 the longest run of status reads in one turn
+# covered 5 operations. 10 is twice that and bounds the work and the size of
+# one call, since a succeeded operation returns its full reply.
+max_items = 10
+description = "The operations to read, each as a target and an operation_id."
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "target"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.items.params.params]]
+name = "kind"
+type = "string"
+required = true
+enum = ["keeper"]
+
+[[params.items.params.params]]
+name = "name"
+type = "string"
+required = true
+
+[[params.items.params]]
+name = "operation_id"
+type = "string"
+required = true

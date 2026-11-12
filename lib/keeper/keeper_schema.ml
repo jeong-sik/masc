@@ -12,6 +12,7 @@ let schema_for : Keeper_tool_name.t -> tool_schema = function
   | Keeper_tool_name.Keeper_delegate_cancel -> Keeper_schema_toml.delegate_cancel
   | Keeper_tool_name.Keeper_delegate_list -> Keeper_schema_toml.delegate_list
   | Keeper_tool_name.Keeper_delegate_status -> Keeper_schema_toml.delegate_status
+  | Keeper_tool_name.Keeper_delegate_status_many -> Keeper_schema_toml.delegate_status_many
   | Keeper_tool_name.Keeper_delegate_targets -> Keeper_schema_toml.delegate_targets
   | Keeper_tool_name.Keeper_down -> Keeper_schema_toml.down
   | Keeper_tool_name.Keeper_list -> Keeper_schema_toml.list

@@ -14,6 +14,7 @@ type t =
   | Keeper_delegate_cancel
   | Keeper_delegate_list
   | Keeper_delegate_status
+  | Keeper_delegate_status_many
   | Keeper_delegate_targets
   | Keeper_down
   | Keeper_list

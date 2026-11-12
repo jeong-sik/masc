@@ -3164,6 +3164,11 @@ let internal_descriptors : t list =
       (* Concurrent: owner-registry reads behind its Eio.Mutex; pure render. *)
       ~readonly:true
       ~polling_read:true
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      ~ordinary_execution_mode:Concurrent "delegate_status_many" Keeper_tool_name.(to_string Keeper_delegate_status_many)
+      (* Concurrent: the same owner-registry reads as delegate_status, one per element. *)
+      ~readonly:true
+      ~polling_read:true
   ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" Keeper_tool_name.(to_string Keeper_delegate_cancel)
       ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Internal_name

@@ -447,6 +447,7 @@ let test_keeper_management_projection_is_explicit () =
     (fun name -> check_projection name Descriptor.Internal_name)
     [ "masc_keeper_delegate"
     ; "masc_keeper_delegate_status"
+    ; "masc_keeper_delegate_status_many"
     ; "masc_keeper_delegate_targets"
     ; "masc_keeper_delegate_cancel"
     ; "masc_keeper_list"
@@ -1673,6 +1674,7 @@ let test_concurrent_execution_opt_ins_are_exact () =
     (* Owner-registry reads behind its Eio.Mutex. *)
     ; "masc_keeper_delegate_list"
     ; "masc_keeper_delegate_status"
+    ; "masc_keeper_delegate_status_many"
     (* An immutable lock-free operation inventory and a registry lookup. *)
     ; "masc_keeper_delegate_targets"
     (* Registry and roster reads; list cache is Atomic with CAS install. *)
@@ -1805,6 +1807,7 @@ let test_public_name_projection_uses_descriptor_resolution () =
 let cluster_projection_table =
   [ "masc_keeper_list", "tool_masc_keeper_dispatch"
   ; "masc_keeper_delegate_status", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_delegate_status_many", "tool_masc_keeper_dispatch"
   ; "masc_keeper_delegate_cancel", "tool_masc_keeper_dispatch"
   ; "masc_keeper_delegate_list", "tool_masc_keeper_dispatch"
   ; "masc_keeper_delegate_targets", "tool_masc_keeper_dispatch"

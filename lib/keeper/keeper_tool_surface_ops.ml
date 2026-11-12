@@ -950,14 +950,17 @@ let handle_keeper_msg_from_args ~submitted_by ctx args : tool_result =
   | Error error -> tool_result_of_handler_error error
 ;;
 
-let operation_reference_arg args =
-  let invalid detail =
-    Error
-      (`Assoc
-         [ "error", `String Keeper_chat_public_error.(code Invalid_input)
-         ; "message", `String detail
-         ])
-  in
+let invalid_operation_input detail =
+  `Assoc
+    [ "error", `String Keeper_chat_public_error.(code Invalid_input)
+    ; "message", `String detail
+    ]
+;;
+
+(* The target name and operation id an operation lookup names, or the detail
+   of what is wrong with it. *)
+let operation_reference_of_json args =
+  let invalid detail = Error detail in
   match args with
   | `Assoc fields ->
     let keys = List.map fst fields |> List.sort String.compare in
@@ -983,6 +986,10 @@ let operation_reference_arg args =
   | _ -> invalid "operation lookup must be an object"
 ;;
 
+let operation_reference_arg args =
+  Result.map_error invalid_operation_input (operation_reference_of_json args)
+;;
+
 let operation_target_arg args =
   match args with
   | `Assoc [ ("target", target) ] ->
@@ -1002,7 +1009,7 @@ let operation_target_arg args =
          ])
 ;;
 
-let owner_command_error_result error =
+let owner_command_error_data error =
   let class_ =
     match error with
     | Keeper_owner_registry.Command_rejected (Keeper_owner.Operation_rejected error) ->
@@ -1013,12 +1020,17 @@ let owner_command_error_result error =
     | Command_lookup_failed _ | Command_lifecycle_reserved _ ->
       Tool_result.Runtime_failure
   in
-  tool_result_error_data ~class_
-    (`Assoc
-       [ "error", `String (owner_operation_error_code error)
-       ; "message",
-         `String (Keeper_owner_registry.command_error_to_string error)
-       ])
+  ( class_
+  , `Assoc
+      [ "error", `String (owner_operation_error_code error)
+      ; "message",
+        `String (Keeper_owner_registry.command_error_to_string error)
+      ] )
+;;
+
+let owner_command_error_result error =
+  let class_, data = owner_command_error_data error in
+  tool_result_error_data ~class_ data
 ;;
 
 let operation_is_owned_by ~caller (operation : Keeper_owner.Chat_operation.t) =
@@ -1083,75 +1095,116 @@ let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
                 ; "replies", `List replies ]))
 ;;
 
+(* The read of one operation. The tool that reads one and the tool that reads
+   several both return this, so an operation reads the same either way. A
+   failure is the class and the error object the single-operation tool
+   returns. *)
+let delegate_status_read ~(config : Workspace.config) ~caller (keeper_name, operation_id) =
+  let unknown_operation () =
+    Error
+      ( Tool_result.Workflow_rejection
+      , `Assoc
+          [ "error", `String Keeper_chat_public_error.(code Unknown_operation)
+          ; "message", `String "Keeper chat operation was not found"
+          ] )
+  in
+  match
+    Keeper_owner_registry.exact_operation
+      ~base_path:config.base_path
+      ~keeper_name
+      operation_id
+  with
+  | Error error -> Error (owner_command_error_data error)
+  | Ok None -> unknown_operation ()
+  | Ok (Some operation) ->
+    (match operation_is_owned_by ~caller operation with
+     | Error detail ->
+       Error
+         ( Tool_result.Dependency_unavailable
+         , `Assoc
+             [ "error", `String Keeper_chat_public_error.(code Store_unavailable)
+             ; "message", `String detail
+             ] )
+     | Ok false -> unknown_operation ()
+     | Ok true ->
+       let operation_json = Keeper_owner.Chat_operation.to_status_json operation in
+       let data =
+         match operation.state, operation_json with
+         | Keeper_owner.Chat_operation.Succeeded { outcome_ref; _ }, `Assoc fields ->
+           let execution_id =
+             match operation.batch_membership with
+             | Some membership -> membership.execution_id
+             | None -> operation.operation_id
+           in
+           let reply =
+             match Keeper_chat_delivery_identity.Request_id.of_string
+               (Keeper_owner.Chat_operation.Operation_id.to_string execution_id) with
+             | Error _ ->
+               `Assoc [ "status", `String "unavailable"
+                      ; "reason", `String "invalid_delivery_identity" ]
+             | Ok request_id ->
+               let delivery_key = Keeper_chat_delivery_identity.Operation request_id in
+               completed_delegate_reply ~base_dir:config.base_path
+                 ~keeper_name ~delivery_key ~outcome_ref
+           in
+           `Assoc (fields @ [ "completed_reply", reply ])
+         | Keeper_owner.Chat_operation.Queued, `Assoc fields ->
+           `Assoc
+             (fields
+              @ target_turn_age_fields
+                  ~now:(Time_compat.now ())
+                  ~base_path:config.base_path
+                  ~keeper_name)
+         | ( Keeper_owner.Chat_operation.Queued
+           | Keeper_owner.Chat_operation.Running _
+           | Keeper_owner.Chat_operation.Failed _
+           | Keeper_owner.Chat_operation.Cancelled _ ), _ -> operation_json
+         | ( Keeper_owner.Chat_operation.Succeeded _ ),
+           ( `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+           | `List _ ) -> operation_json
+       in
+       Ok data)
+;;
+
 let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
   match operation_reference_arg args with
   | Error json -> tool_result_error_data ~class_:Tool_result.Policy_rejection json
-  | Ok (keeper_name, operation_id) ->
-    (match
-       Keeper_owner_registry.exact_operation
-         ~base_path:config.base_path
-         ~keeper_name
-         operation_id
-     with
-     | Error error -> owner_command_error_result error
-     | Ok None ->
-       tool_result_error_data ~class_:Tool_result.Workflow_rejection
-         (`Assoc
-            [ "error", `String Keeper_chat_public_error.(code Unknown_operation)
-            ; "message", `String "Keeper chat operation was not found"
-            ])
-     | Ok (Some operation) ->
-       (match operation_is_owned_by ~caller operation with
-        | Error detail ->
-          tool_result_error_data ~class_:Tool_result.Dependency_unavailable
-            (`Assoc
-               [ "error", `String Keeper_chat_public_error.(code Store_unavailable)
-               ; "message", `String detail
-               ])
-        | Ok false ->
-          tool_result_error_data ~class_:Tool_result.Workflow_rejection
-            (`Assoc
-               [ "error", `String Keeper_chat_public_error.(code Unknown_operation)
-               ; "message", `String "Keeper chat operation was not found"
-               ])
-        | Ok true ->
-          let operation_json = Keeper_owner.Chat_operation.to_status_json operation in
-          let data =
-            match operation.state, operation_json with
-            | Keeper_owner.Chat_operation.Succeeded { outcome_ref; _ }, `Assoc fields ->
-              let execution_id =
-                match operation.batch_membership with
-                | Some membership -> membership.execution_id
-                | None -> operation.operation_id
-              in
-              let reply =
-                match Keeper_chat_delivery_identity.Request_id.of_string
-                  (Keeper_owner.Chat_operation.Operation_id.to_string execution_id) with
-                | Error _ ->
-                  `Assoc [ "status", `String "unavailable"
-                         ; "reason", `String "invalid_delivery_identity" ]
-                | Ok request_id ->
-                  let delivery_key = Keeper_chat_delivery_identity.Operation request_id in
-                  completed_delegate_reply ~base_dir:config.base_path
-                    ~keeper_name ~delivery_key ~outcome_ref
-              in
-              `Assoc (fields @ [ "completed_reply", reply ])
-            | Keeper_owner.Chat_operation.Queued, `Assoc fields ->
-              `Assoc
-                (fields
-                 @ target_turn_age_fields
-                     ~now:(Time_compat.now ())
-                     ~base_path:config.base_path
-                     ~keeper_name)
-            | ( Keeper_owner.Chat_operation.Queued
-              | Keeper_owner.Chat_operation.Running _
-              | Keeper_owner.Chat_operation.Failed _
-              | Keeper_owner.Chat_operation.Cancelled _ ), _ -> operation_json
-            | ( Keeper_owner.Chat_operation.Succeeded _ ),
-              ( `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
-              | `List _ ) -> operation_json
-          in
-          tool_result_ok_data data))
+  | Ok reference ->
+    (match delegate_status_read ~config ~caller reference with
+     | Ok data -> tool_result_ok_data data
+     | Error (class_, data) -> tool_result_error_data ~class_ data)
+;;
+
+(* [operations] is every element's reference or none: the first element that is
+   not a lookup rejects the call, naming its position. An element that parses
+   and cannot be read gets its own error entry. *)
+let keeper_delegate_status_many_body ~(config : Workspace.config) ~caller args =
+  let rejected detail =
+    tool_result_error_data
+      ~class_:Tool_result.Policy_rejection
+      (invalid_operation_input detail)
+  in
+  match args with
+  | `Assoc [ ("operations", `List []) ] -> rejected "operations must name at least one operation"
+  | `Assoc [ ("operations", `List elements) ] ->
+    let rec parse index references = function
+      | [] -> Ok (List.rev references)
+      | element :: rest ->
+        (match operation_reference_of_json element with
+         | Ok reference -> parse (index + 1) (reference :: references) rest
+         | Error detail -> Error (Printf.sprintf "operations[%d]: %s" index detail))
+    in
+    (match parse 0 [] elements with
+     | Error detail -> rejected detail
+     | Ok references ->
+       let entry index reference =
+         match delegate_status_read ~config ~caller reference with
+         | Ok data -> `Assoc [ "index", `Int index; "data", data ]
+         | Error (_class, error) -> `Assoc [ "index", `Int index; "error", error ]
+       in
+       tool_result_ok_data
+         (`Assoc [ "results", `List (List.mapi entry references) ]))
+  | _ -> rejected "operations lookup requires exactly an operations list"
 ;;
 
 let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =

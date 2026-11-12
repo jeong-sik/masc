@@ -20,6 +20,7 @@ val delegate : Masc_domain.tool_schema
 val delegate_status : Masc_domain.tool_schema
 val delegate_cancel : Masc_domain.tool_schema
 val delegate_list : Masc_domain.tool_schema
+val delegate_status_many : Masc_domain.tool_schema
 val delegate_targets : Masc_domain.tool_schema
 val down : Masc_domain.tool_schema
 val list : Masc_domain.tool_schema

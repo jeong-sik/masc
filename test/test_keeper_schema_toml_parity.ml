@@ -35,7 +35,8 @@ let test_the_published_order_is_unchanged () =
     "Keeper_schema.schemas in order"
     [ "masc_keeper_audit"; "masc_keeper_clear"; "masc_keeper_delegate";
       "masc_keeper_delegate_cancel"; "masc_keeper_delegate_list";
-      "masc_keeper_delegate_status"; "masc_keeper_delegate_targets";
+      "masc_keeper_delegate_status"; "masc_keeper_delegate_status_many";
+      "masc_keeper_delegate_targets";
       "masc_keeper_down"; "masc_keeper_list";
       "masc_keeper_msg"; "masc_keeper_reset"; "masc_keeper_sandbox_start";
       "masc_keeper_sandbox_stop"; "masc_keeper_status"; "masc_keeper_up" ]

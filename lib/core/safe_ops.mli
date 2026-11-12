@@ -137,7 +137,9 @@ val read_json_eio : string -> Yojson.Safe.t
     errors and cancellation propagate. *)
 
 val list_dir_safe : string -> (string list, string) result
-(** List files in directory safely. *)
+(** The names in a directory, sorted. [Error] for a path that is missing, is
+    not a directory or cannot be read. On a fiber the directory is read
+    through Eio, not on the calling thread. *)
 
 (** {1 Numeric Parsing} *)
 

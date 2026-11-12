@@ -272,6 +272,33 @@ let test_list_dir_safe_valid () =
   let result = list_dir_safe "/tmp" in
   check bool "Ok on valid dir" true (Result.is_ok result)
 
+let with_two_entries f =
+  let dir = Filename.temp_dir "test_safe_ops_list" "" in
+  let touch name = close_out (open_out (Filename.concat dir name)) in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter (fun name -> Sys.remove (Filename.concat dir name)) [ "b"; "a" ];
+      Sys.rmdir dir)
+    (fun () ->
+      touch "b";
+      touch "a";
+      f dir)
+
+let test_list_dir_safe_lists_sorted_names () =
+  with_two_entries (fun dir ->
+    check (result (list string) string) "names, sorted" (Ok [ "a"; "b" ])
+      (Safe_ops.list_dir_safe dir))
+
+(* On a fiber the listing goes through Eio and returns the same names. *)
+let test_list_dir_safe_lists_the_same_names_on_a_fiber () =
+  with_two_entries (fun dir ->
+    Eio_main.run (fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      check (result (list string) string) "names, sorted" (Ok [ "a"; "b" ])
+        (Safe_ops.list_dir_safe dir);
+      check bool "Error on nonexistent" true
+        (Result.is_error (Safe_ops.list_dir_safe (Filename.concat dir "missing")))))
+
 (* read_json_file_safe *)
 let test_read_json_file_safe_nonexistent () =
   let open Safe_ops in
@@ -576,6 +603,9 @@ let () =
       test_case "nonexistent" `Quick test_list_dir_safe_nonexistent;
       test_case "not a dir" `Quick test_list_dir_safe_not_a_dir;
       test_case "valid dir" `Quick test_list_dir_safe_valid;
+      test_case "lists sorted names" `Quick test_list_dir_safe_lists_sorted_names;
+      test_case "lists the same names on a fiber" `Quick
+        test_list_dir_safe_lists_the_same_names_on_a_fiber;
     ];
     "get_env_bool_logged", [
       test_case "missing" `Quick test_get_env_bool_logged_missing;

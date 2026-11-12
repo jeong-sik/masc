@@ -1,6 +1,6 @@
 ---
 rfc: "keeper-world-state-shows-open-work"
-title: "Keeper 의 World State 에 열린 PR 과 할 일을 제목과 함께 보여 준다"
+title: "Keeper 의 World State 에 열린 PR 과 할 일을 보여 준다"
 status: Draft
 created: 2026-09-27
 updated: 2026-11-12
@@ -574,7 +574,9 @@ ACK 된 뒤 같은 변화가 다시 보이면 다시 들어간다. CI 재실행�
 
 ### 6.1 Task 행의 칸
 
-행은 한 줄이고 타입 있는 값만 싣는다(D8).
+행은 한 줄이다. Task 에 적힌 자유 글자(제목, 만든 이, 반납 사유)는 싣지 않는다(D8).
+`goals` 의 Goal id 는 Goal 을 만든 쪽이 정한 글자다. 빈칸과 앞뒤 공백만 막는다(`lib/goal/goal_store.ml` `validate_goal_id`).
+진행 중인 Goal 의 id 와 제목은 Active Goals 절에 이미 나간다. 그래서 이 칸이 프롬프트에 새로 싣는 글자는 없다.
 
 | 칸 | 값 |
 |---|---|
@@ -606,7 +608,7 @@ Keeper 는 지금처럼 `keeper_tasks_list` 로 제목을 읽는다.
 - `created_at` 은 문자열이다(`lib/types/types_core.mli:226`). 경계에서 한 번 시각으로 읽는다.
   못 읽은 Task 는 3번 순서에서 읽은 Task 뒤에 오고, 행의 `age_days` 가 `"unreadable"` 이다. 0 이나 지금 시각으로 채우지 않는다.
 - Goal 링크는 `read_goal_task_links_authoritative_r`(Result)로, Goal 은 `Goal_store.list_goals_result` 로 읽는다. 턴의 Task 맥락이 쓰는 읽기와 같다.
-  [사실] 지금 `build_task_goal_index_for_config` 는 못 읽은 링크 파일을 `[]` 로 바꾼다(`lib/workspace/workspace_goal_index.ml:598-599`).
+  [사실] 지금 `build_task_goal_index_for_config` 는 못 읽은 링크 파일을 빈 링크로 바꾼다(`lib/workspace/workspace_goal_index.ml` `build_task_goal_map_for_config`).
   이 절은 그 함수를 쓰지 않는다. 둘 중 하나라도 `Error` 면 1번 순서를 빼고 2~4번으로만 줄 세우고, 모든 행의 `goals` 가 `"unread"` 이다.
   이유 글자는 프롬프트에 싣지 않고 로그에 남긴다.
 
@@ -620,7 +622,7 @@ Keeper 한 명에게만 해당하는 관계는 지금 없다.
 
 [제안] 이 RFC 는 보여 주는 순서만 바꾼다. task_id 없이 부르는 claim 이 쓰는 `Workspace.claim_next_r` 은
 지금처럼 우선순위 안에서 먼저 만든 것부터 고른다(`lib/workspace/workspace_task_schedule.ml:145`).
-외부 에이전트의 `masc_claim_next`(`lib/task/tool_task_handlers.ml:652`)도 그대로다.
+외부 에이전트의 `masc_claim_next`(`lib/task/tool_task_handlers.ml` `handle_claim_next`)도 그대로다.
 
 그러면 #29101 이 맞춰 둔 "읽는 첫 행 = task_id 없는 claim 이 잡을 첫 행"은 더 이상 참이 아니다.
 Task 목록 조각(`world.namespace_state.claimable_rows`)이 이 차이를 한 문장으로 적는다. "task_id 없이 claim 하면 이 목록이 아니라 우선순위 안에서 먼저 만든 순서로 고른다."
@@ -740,7 +742,7 @@ D4(깨우기)는 S4 만 배포된 7일의 M3 을 보고 정한다. `Autonomous` 
 |---|---|---|
 | #38801 TUI measured home | `bin/masc_tui_repository_pulls.ml` 삭제, `docs/rfc/RFC-0465-…` 머리 수정 | S1 은 OCaml 타입을 옮기지만 HTTP JSON 은 그대로라 TUI decode 와 부딪히지 않는다. 이 RFC 는 RFC-0465 파일을 고치지 않는다. #38801 이 먼저 병합되면 스냅숏 소비자는 World State·도구·HTTP 만 남는다 |
 | #39442 예약 문구 | `config/prompts/keeper.md` | S4 가 같은 파일에 `### world.pull_requests.*` 조각을 더한다. 고치는 절이 달라 글자 충돌은 작다. S4 는 #39442 뒤에 연다 |
-| #39392 backlog snapshot 인코딩 | workspace backlog | S6 과 파일이 가깝다. 파일 목록상 직접 겹침은 없다 |
+| #39392 backlog snapshot 인코딩 | workspace backlog | S6a 와 파일이 가깝다. 파일 목록상 직접 겹침은 없다 |
 
 `lib/keeper/keeper_context_layers.*`, `lib/keeper/keeper_unified_prompt.ml`, `lib/server/server_repository_pulls.*`,
 `lib/keeper/keeper_sandbox_control.*`, `lib/keeper_runtime/keeper_event_queue*` 를 고치는 열린 PR 은 없었다.

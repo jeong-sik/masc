@@ -438,7 +438,7 @@ World State sections sent with only the rows you have not yet received in this s
 - Claimable tasks for this keeper: {{count}}
 
 ### world.namespace_state.claimable_rows
-Rows are ordered: linked to an in-progress Goal first, then lower `priority` number, then newest. `returns` is how many times a holder returned the Task to the pool. `goals` lists the in-progress Goals the Task is linked to, or `"unread"` when the links could not be read this turn. `age_days` is `"unreadable"` when the stored creation time cannot be read. `keeper_task_claim` without a task_id picks by priority, then oldest, which is a different order.
+Rows are ordered: linked to an in-progress Goal first, then lower `priority` number, then newest. `returns` is how many times a holder returned the Task to the pool. `goals` lists the in-progress Goals the Task is linked to, or `"unread"` when the Goals or their links could not be read this turn. `age_days` is `"unreadable"` when the stored creation time cannot be read. `keeper_task_claim` without a task_id picks by priority, then oldest, which is a different order.
 
 ### world.namespace_state.claimable_more (vars: count)
 - ({{count}} more — read them with keeper_tasks_list)

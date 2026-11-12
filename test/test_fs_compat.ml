@@ -672,6 +672,30 @@ let test_primitives_agree_inside_and_outside_eio ~fs () =
   check int "eio path creates the same mode" (snd inline) (snd eio)
 ;;
 
+(* Listing a directory of more than 256 entries through [Eio.Path.read_dir]
+   empties every domain's minor heap once per listing: eio_posix builds the
+   names with [Array.of_list], whose first element is young. Twenty listings
+   then make twenty minor collections; the names themselves fill far less than
+   one minor heap. *)
+let test_read_dir_of_a_large_directory_forces_no_minor_collection ~fs () =
+  with_tmp_dir
+  @@ fun base ->
+  let directory = Filename.concat base "large" in
+  Fs_compat.mkdir_p directory;
+  let entries = 300 in
+  for index = 1 to entries do
+    Fs_compat.save_file (Filename.concat directory (Printf.sprintf "entry-%03d" index)) ""
+  done;
+  Fs_compat.set_fs fs;
+  Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
+    let listings = 20 in
+    let before = (Gc.quick_stat ()).minor_collections in
+    let listed = List.init listings (fun _ -> List.length (Fs_compat.read_dir directory)) in
+    let collections = (Gc.quick_stat ()).minor_collections - before in
+    check (list int) "every listing names every entry" (List.init listings (fun _ -> entries)) listed;
+    check bool "listings do not force a minor collection each" true (collections < listings / 2))
+;;
+
 let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
   with_tmp_dir
   @@ fun base ->
@@ -1271,6 +1295,11 @@ let () =
             "load, save and append agree inside and outside Eio"
             `Quick
             (test_primitives_agree_inside_and_outside_eio ~fs:(Eio.Stdenv.fs env))
+        ; test_case
+            "read_dir of a large directory forces no minor collection"
+            `Quick
+            (test_read_dir_of_a_large_directory_forces_no_minor_collection
+               ~fs:(Eio.Stdenv.fs env))
         ] )
     ; ( "owned regular file"
       , [ test_case "requested UID checked before and after open/read" `Quick

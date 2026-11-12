@@ -447,9 +447,9 @@ let list_dir_safe path : (string list, string) result =
     (* [Sys.readdir] reads the directory on the calling thread. On a fiber
        that is the thread every other fiber of the domain runs on: listing
        the Keeper directory this way was 161 of 19,405 samples of the server's
-       main thread over 48 s (2026-11-12). [Fs_compat.read_dir] reads it
-       through Eio on a fiber and with [Sys.readdir] elsewhere, and sorts the
-       names. *)
+       main thread over 48 s (2026-11-12). On a fiber [Fs_compat.read_dir]
+       reads it on a system thread, elsewhere on the calling thread, and sorts
+       the names. *)
     try Ok (Fs_compat.read_dir path)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

@@ -396,8 +396,10 @@ let schema_of_name = Tool_definition_embedded.schema
    in the schema — model-facing prose belongs in the prompt files (RFC
    prompts-and-tool-definitions-outside-ocaml), and the ratchet on this file
    enforces that. *)
+let report_tool_name = "report_review_verdict"
+
 let report_review_verdict_schema : Masc_domain.tool_schema =
-  schema_of_name "report_review_verdict"
+  schema_of_name report_tool_name
 ;;
 
 (** Parse review verdict from tool call JSON arguments (deterministic). *)

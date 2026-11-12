@@ -148,9 +148,8 @@ type review_result =
     spent usage window read after a refusal, a rate-limit wait — and that
     time is still ahead. [No_stated_rest]: the path serves, or rests with no
     end the provider named. The reader belongs to the caller, which owns the
-    walk's stores; it is read once per failed candidate, when the walk reports
-    that failure: the walk records a refusal's rest before it reports the
-    failed attempt. *)
+    walk's stores. The walk reads it while it classifies a failure
+    ({!candidate_failure}), after it has recorded that refusal's rest. *)
 type provider_rest =
   | Rests_until_stated_end
   | No_stated_rest
@@ -161,7 +160,7 @@ type provider_rest =
     ({!Agent_core.Error.is_retryable}) or a path that rests until a time the
     provider stated ({!provider_rest}). [Model_absent]: a retired or unknown
     model, permanent for the unchanged request. [Producer_must_act]: nothing
-    that time alone changes. The walk reads this once, when the failure is
+    that time alone changes. The walk reads this when the failure is
     reported. A result without a verdict names the [Reviews_again] candidates
     in [retryable_runtimes]; a retained walk ({!review_rendered},
     {!run_retained}) empties that list once one candidate's outcome is
@@ -332,6 +331,9 @@ val run_retained :
     fence and the same read-result projection as Task review. No synthetic
     Task request, producer, second runner or prompt-registry read is needed.
     The caller owns retention, actual read authority and domain commitment. *)
+
+val report_tool_name : string
+(** The name of the tool a reviewer calls to report its verdict. *)
 
 (** Which decision a refused [report_review_verdict] call named. *)
 type verdict_refusal =

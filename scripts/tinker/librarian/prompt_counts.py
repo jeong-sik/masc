@@ -4,11 +4,15 @@
 `prompt_compare.py` compares these counts. A run is an E-synth run, an E-real run and the blind
 judges' folders of the E-synth run (`e_synth_audit.py drops`, `merge_cases.py`), None when the run
 has no off-label drop or no absorb. `measure` counts each metric as hits over chances from the rows
-and the judges' decisions, as `eval_admission.measure_synth` does, so an edited summary.json cannot
-change a count.
+and the judges' decisions, as `eval_admission.measure_synth` does, and reads no number from
+summary.json. The summary says what the run was: its set, pass lines, provider and template, whether
+it stopped, and the name it sent the model under, which picks the model's rows in a folder that
+holds another target's rows too.
 
 A baseline in prompt_lines.json is such counts kept as numbers. It names the sha256 of this file,
-so a change here leaves every pinned baseline stale until its runs are counted again.
+so a change here leaves every pinned baseline stale until its runs are counted again. The sha256 of
+a run's rows that a baseline keeps says which rows files the counts came from. The judges'
+decisions are not kept, so the pinned counts are the record.
 """
 
 from __future__ import annotations
@@ -27,6 +31,8 @@ import merge_decisions as MD
 import synth_render
 
 type JsonObject = dict[str, object]
+
+RUN_KEYS = frozenset({"synth", "real", "drops", "merges"})
 
 
 class Metric(StrEnum):
@@ -121,7 +127,8 @@ def target_of(summary: JsonObject, kind: str, pin: str, provider: str, model: st
 
 def measure(run: Run, *, provider: str, model: str, pin: str, items: tuple[int, int]) -> Measured:
     """`run`'s counts for `model` on `provider`, recomputed from its rows and its judges' folders.
-    `items` are the sizes of E-synth and E-real: a run that has not answered every item is refused."""
+    `items` are the sizes of E-synth and E-real: a run that does not hold that many rows for the
+    model is refused."""
     synth_summary = cast(JsonObject, json.loads((run.synth / "summary.json").read_text(encoding="utf-8")))
     real_summary = cast(JsonObject, json.loads((run.real / "summary.json").read_text(encoding="utf-8")))
     target = target_of(synth_summary, "synth", pin, provider, model, run.synth)
@@ -130,7 +137,7 @@ def measure(run: Run, *, provider: str, model: str, pin: str, items: tuple[int, 
         raise SystemExit(f"{run.synth} and {run.real} drew their prompts with different templates")
     rows = V.read_rows(run.synth)
     if sum(r["target"] == target for r in rows) != items[0]:
-        raise SystemExit(f"{run.synth} has not answered all {items[0]} E-synth items")
+        raise SystemExit(f"{run.synth} does not hold one row for each of the {items[0]} E-synth items")
     off = D.off_label(rows)
     if off and run.drops is None:
         raise SystemExit(f"{run.synth} has off-label drops and no drop judge's folder")
@@ -143,7 +150,7 @@ def measure(run: Run, *, provider: str, model: str, pin: str, items: tuple[int, 
     counts = synth_counts(mine, judged.wrong_outside(rows).get(target, 0), merges)
     real_rows = [r for r in V.read_rows(run.real) if r["target"] == real_target]
     if len(real_rows) != items[1]:
-        raise SystemExit(f"{run.real} has not answered all {items[1]} E-real items")
+        raise SystemExit(f"{run.real} does not hold one row for each of the {items[1]} E-real items")
     counts[Metric.REAL_VALID] = Count(sum(bool(r["valid"]) for r in real_rows), len(real_rows))
     answered = frozenset((cast(str, r["call_key"]), cast(float, r["sent_at"]))
                          for r in [*(r for r in rows if r["target"] == target), *real_rows])
@@ -159,9 +166,14 @@ def summed(side: list[Measured]) -> dict[Metric, Count]:
     return out
 
 
-def run_of(raw: JsonObject) -> Run:
-    def folder(key: str) -> Path | None:
-        value = raw.get(key)
-        return None if value is None else Path(cast(str, value))
-
-    return Run(Path(cast(str, raw["synth"])), Path(cast(str, raw["real"])), folder("drops"), folder("merges"))
+def run_of(raw: object) -> Run:
+    """One run as runs.json lists it: its `synth` and `real` folders and its judges' `drops` and
+    `merges` folders, each of the two null or left out when the run has none. SystemExit when it is
+    anything else."""
+    held = cast(dict[str, object], raw) if isinstance(raw, dict) else {}
+    synth, real, drops, merges = held.get("synth"), held.get("real"), held.get("drops"), held.get("merges")
+    if (not isinstance(synth, str) or not isinstance(real, str) or not isinstance(drops, str | None)
+            or not isinstance(merges, str | None) or not set(held) <= RUN_KEYS):
+        raise SystemExit("runs.json: a run names its synth and real folders, and its drops and merges folders or null")
+    return Run(Path(synth), Path(real), None if drops is None else Path(drops),
+               None if merges is None else Path(merges))

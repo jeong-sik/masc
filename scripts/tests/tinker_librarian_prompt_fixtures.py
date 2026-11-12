@@ -78,13 +78,14 @@ def measured(template: str, run: str = "run", hits: dict[str, tuple[int, int]] |
     return C.Measured(counts(hits or {}), template, sha(f"{run} synth"), sha(f"{run} real"), record, answered)
 
 
-def baseline(*runs: str) -> L.Baseline:
-    """The pinned baseline of the runs named `runs`, each counting every metric at 5 of 10."""
-    return L.Baseline(PIN, BASE_T, FILES[L.COUNTS], {m: C.Count(5 * len(runs), 10 * len(runs)) for m in C.Metric},
+def baseline(*runs: str, provider: str = "tinker", model: str = "inkling-model") -> L.Baseline:
+    """The pinned baseline of the runs named `runs`, each counting every metric at 5 of 10 for `model`."""
+    return L.Baseline(provider, model, PIN, BASE_T, FILES[L.COUNTS],
+                      {m: C.Count(5 * len(runs), 10 * len(runs)) for m in C.Metric},
                       tuple(RECORD for _ in runs), tuple(sha(f"{r} synth") for r in runs),
                       tuple(sha(f"{r} real") for r in runs))
 
 
 INKLING = L.ModelLines("tinker", "inkling-model", 2, baseline("i1", "i2"))
-GLM = L.ModelLines("glm", "glm-model", 1, baseline("g1"))
+GLM = L.ModelLines("glm", "glm-model", 1, baseline("g1", provider="glm", model="glm-model"))
 LINES = L.Lines(PIN, BASE_T, FILES, 2.5, 2.0, frozenset({"inkling"}), {"inkling": INKLING, "glm": GLM})

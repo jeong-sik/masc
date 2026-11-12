@@ -59,7 +59,7 @@ def sides(inkling_draft: dict[str, tuple[int, int]], glm_draft: dict[str, tuple[
     out: Sides = {"inkling": (baseline("i1", "i2"), [measured(DRAFT_T, "d1", inkling_draft),
                                                      measured(DRAFT_T, "d2", inkling_draft)])}
     if glm_draft is not None:
-        out["glm"] = (baseline("g1"), [measured(DRAFT_T, "d3", glm_draft)])
+        out["glm"] = (baseline("g1", provider="glm", model="glm-model"), [measured(DRAFT_T, "d3", glm_draft)])
     return out
 
 
@@ -135,10 +135,17 @@ class ComparedTest(unittest.TestCase):
         result = P.compared(LINES, sides({"stale_drop_recall": (9, 10)}, {"real_valid_rate": (0, 10)}))
         self.assertEqual((result["worse"], result["goes_in"]), (["glm.real_valid_rate"], False))
 
+    def test_each_quality_metric_alone_is_the_improvement(self) -> None:
+        for metric in ("memory_state_accuracy", "stale_drop_recall", "judged_merge_recall"):
+            with self.subTest(metric=metric):
+                result = P.compared(LINES, sides({metric: (10, 10)}, {}))
+                self.assertEqual((result["better"], result["goes_in"]), ([f"inkling.{metric}"], True))
+
     def test_better_guard_metric_or_glm_is_not_the_improvement(self) -> None:
-        for inkling, glm in (({"synth_valid_rate": (10, 10)}, {}), ({"drop_precision": (10, 10)}, {}),
-                             ({"absorb_precision": (10, 10)}, {}),
-                             ({}, {"stale_drop_recall": (10, 10)})):
+        guards = ("synth_valid_rate", "real_valid_rate", "drop_precision", "absorb_precision")
+        self.assertEqual({m.value for m in C.Metric}, {*guards, *(m.value for m in P.QUALITY)})
+        for inkling, glm in (*(({metric: (10, 10)}, {}) for metric in guards),
+                             *(({}, {m.value: (10, 10)}) for m in C.Metric)):
             with self.subTest(inkling=inkling, glm=glm):
                 result = P.compared(LINES, sides(inkling, glm))
                 self.assertEqual((result["better"], result["complete"], result["goes_in"]), ([], True, False))
@@ -164,6 +171,8 @@ class ComparedTest(unittest.TestCase):
                                      "dropped_not_in_live": RECORD.dropped_not_in_live}]})
         self.assertEqual(got["base_rows_sha256"], {"synth": [sha("i1 synth"), sha("i2 synth")],
                                                    "real": [sha("i1 real"), sha("i2 real")]})
+        self.assertEqual(got["draft_rows_sha256"], {"synth": [sha("d1 synth"), sha("d2 synth")],
+                                                    "real": [sha("d1 real"), sha("d2 real")]})
 
     def test_precision_with_chances_on_only_one_side_cannot_prove_non_degradation(self) -> None:
         for model in ("inkling", "glm"):
@@ -237,7 +246,13 @@ class PlanProblemTest(unittest.TestCase):
         copied = measured(DRAFT_T, answered=frozenset({("k1", 1.0), ("k3", 1.0)}))
         for name, draft in {"twice": [run, run], "copied": [run, copied]}.items():
             with self.subTest(name=name):
-                self.assertIn("two inkling runs count the same answered call", P.plan_problem({"inkling": draft}) or "")
+                self.assertIn("runs of inkling count the same answered call", P.plan_problem({"inkling": draft}) or "")
+
+    def test_a_call_two_models_runs_share_names_both(self) -> None:
+        plan = {"inkling": [measured(DRAFT_T, answered=frozenset({("k1", 1.0)})),
+                            measured(DRAFT_T, answered=frozenset({("k2", 1.0)}))],
+                "glm": [measured(DRAFT_T, answered=frozenset({("k2", 1.0), ("k3", 1.0)}))]}
+        self.assertIn("runs of glm and inkling count the same answered call", P.plan_problem(plan) or "")
 
 
 class BaselinesTest(unittest.TestCase):
@@ -246,15 +261,22 @@ class BaselinesTest(unittest.TestCase):
         second = measured(BASE_T, "i2", {"stale_drop_recall": (2, 4)}, frozenset({("a", 2.0)}), C.RealRecord(0, 7, 1))
         counts = {m: C.Count(10, 20) for m in C.Metric} | {C.Metric.STALE_RECALL: C.Count(3, 7)}
         self.assertEqual(P.baselines(LINES, {"inkling": [first, second]}),
-                         {"inkling": L.Baseline(PIN, BASE_T, FILES[L.COUNTS], counts,
+                         {"inkling": L.Baseline("tinker", "inkling-model", PIN, BASE_T, FILES[L.COUNTS], counts,
                                                 (C.RealRecord(3, 4, 5), C.RealRecord(0, 7, 1)),
                                                 (sha("i1 synth"), sha("i2 synth")), (sha("i1 real"), sha("i2 real")))})
+
+    def test_each_baseline_names_the_model_it_was_counted_for(self) -> None:
+        got = P.baselines(LINES, {"glm": [measured(BASE_T, "g1")], "inkling": [measured(BASE_T, "i1"),
+                                                                              measured(BASE_T, "i2")]})
+        self.assertEqual({name: (b.provider, b.model) for name, b in got.items()},
+                         {"glm": ("glm", "glm-model"), "inkling": ("tinker", "inkling-model")})
+        self.assertEqual(got, {"glm": GLM.baseline, "inkling": INKLING.baseline})
 
     def test_runs_that_cannot_be_a_baseline_are_refused(self) -> None:
         run = measured(BASE_T, answered=frozenset({("k", 1.0)}))
         cases = {"inkling takes 2 baseline runs, not 1": {"inkling": [measured(BASE_T)]},
                  "a glm baseline run drew its prompts with another template": {"glm": [measured(DRAFT_T)]},
-                 "two inkling runs count the same answered call": {"inkling": [run, run]},
+                 "runs of inkling count the same answered call": {"inkling": [run, run]},
                  "names no model another": {"another": [run]}}
         for want, runs in cases.items():
             with self.subTest(want=want):
@@ -275,7 +297,7 @@ class SidesTest(unittest.TestCase):
             "prompt_lines.json pins no glm baseline yet": (unpinned, {"glm": [measured(DRAFT_T)]}),
             "inkling takes 2 draft runs, not 1": (LINES, {"inkling": [measured(DRAFT_T)]}),
             "different templates": (LINES, {"inkling": [measured(DRAFT_T)] * 2, "glm": [measured(OTHER_T)]}),
-            "two inkling runs count the same answered call": (LINES, {"inkling": [run, run]}),
+            "runs of inkling count the same answered call": (LINES, {"inkling": [run, run]}),
             "names no model another": (LINES, {"another": [run]}),
         }
         for want, (lines, drafts) in cases.items():
@@ -284,10 +306,48 @@ class SidesTest(unittest.TestCase):
                     P.sides_of(lines, drafts)
                 self.assertIn(want, str(caught.exception))
 
+    def test_a_draft_run_that_holds_the_rows_of_a_pinned_baseline_is_refused(self) -> None:
+        # The rows of a baseline run, whatever template its summary names now and whichever model's
+        # baseline they are of.
+        fresh = measured(DRAFT_T, "d1")
+        cases = {"synth of its own baseline": ("inkling", replace(fresh, synth_rows_sha256=sha("i2 synth"))),
+                 "real of its own baseline": ("inkling", replace(fresh, real_rows_sha256=sha("i1 real"))),
+                 "real of the other model's": ("inkling", replace(fresh, real_rows_sha256=sha("g1 real"))),
+                 "synth of the other model's": ("glm", replace(fresh, synth_rows_sha256=sha("i1 synth")))}
+        for case, (name, run) in cases.items():
+            with self.subTest(case=case):
+                drafts = {name: [run] if name == "glm" else [measured(DRAFT_T, "d2"), run]}
+                with self.assertRaises(SystemExit) as caught:
+                    P.sides_of(LINES, drafts)
+                self.assertEqual(str(caught.exception),
+                                 f"a {name} draft run holds the rows a pinned baseline was counted from")
+
     def test_runs_of_a_model_the_lines_do_not_hold_are_not_measured(self) -> None:
         with self.assertRaises(SystemExit) as caught:
             P.measured_runs(LINES, {"another": []}, (1, 1))
         self.assertIn("names no model another", str(caught.exception))
+
+
+class PlanTest(unittest.TestCase):
+    def test_runs_json_lists_each_models_runs(self) -> None:
+        raw = {"inkling": [{"synth": "s1", "real": "r1", "drops": "d1", "merges": None}, {"synth": "s2", "real": "r2"}],
+               "glm": []}
+        self.assertEqual(P.plan_of(raw), {"inkling": [C.Run(Path("s1"), Path("r1"), Path("d1"), None),
+                                                      C.Run(Path("s2"), Path("r2"), None, None)], "glm": []})
+
+    def test_a_runs_json_of_another_shape_is_refused(self) -> None:
+        run = {"synth": "s", "real": "r"}
+        cases: dict[str, object] = {
+            "runs.json is not an object of each model's runs": [run],
+            "runs.json does not list runs under inkling": {"inkling": {"base": [run], "draft": [run]}},
+            "runs.json does not list runs under glm": {"inkling": [run], "glm": run},
+            "a run names its synth and real folders": {"inkling": [run, "s"]},
+        }
+        for want, raw in cases.items():
+            with self.subTest(want=want):
+                with self.assertRaises(SystemExit) as caught:
+                    P.plan_of(raw)
+                self.assertIn(want, str(caught.exception))
 
 
 class CommandTest(unittest.TestCase):
@@ -345,6 +405,7 @@ class CommandTest(unittest.TestCase):
         self.write_lines(None)
         printed = cast(dict[str, Row], json.loads(self.command("baseline", "--runs", str(self.runs("base", BASE_T, 0)))))
         pinned = printed["inkling"]
+        self.assertEqual((pinned["provider"], pinned["model"]), ("tinker", "inkling-model"))
         self.assertEqual(cast(Row, pinned["counts"])["stale_drop_recall"], [0, both])
         self.write_lines(pinned)
         for folder in self.root.glob("base-*"):
@@ -359,12 +420,49 @@ class CommandTest(unittest.TestCase):
         self.assertEqual((stale["base"], stale["draft"], stale["change"]), ([0, both], [both, both], "better"))
         self.assertEqual(result["base_rows_sha256"], {"synth": pinned["synth_rows_sha256"],
                                                       "real": pinned["real_rows_sha256"]})
+        self.assertEqual(result["draft_rows_sha256"],
+                         {kind: [C.sha256_file(self.root / f"draft-{kind}-{n}" / "rows.jsonl") for n in (1, 2)]
+                          for kind in ("synth", "real")})
 
     def test_compare_before_the_baseline_is_pinned_is_refused(self) -> None:
         self.write_lines(None)
         with self.assertRaises(SystemExit) as caught:
             self.command("compare", "--runs", str(self.runs("draft", DRAFT_T, 1)), "--out", str(self.root / "c.json"))
         self.assertIn("prompt_lines.json pins no inkling baseline yet", str(caught.exception))
+
+    def test_compare_refuses_the_baselines_own_runs_under_another_templates_name(self) -> None:
+        self.write_lines(None)
+        base = self.runs("base", BASE_T, 0)
+        self.write_lines(cast(dict[str, Row], json.loads(self.command("baseline", "--runs", str(base))))["inkling"])
+        for summary in self.root.glob("base-*/summary.json"):
+            held = cast(Row, json.loads(summary.read_text(encoding="utf-8")))
+            summary.write_text(json.dumps(held | {"template_sha256": DRAFT_T}), encoding="utf-8")
+        out = self.root / "compare.json"
+        with self.assertRaises(SystemExit) as caught:
+            self.command("compare", "--runs", str(base), "--out", str(out))
+        self.assertEqual(str(caught.exception), "a inkling draft run holds the rows a pinned baseline was counted from")
+        self.assertFalse(out.exists())
+
+    def test_both_commands_stop_when_a_pinned_file_is_another_version(self) -> None:
+        self.write_lines(None)
+        raw = cast(Row, json.loads(self.lines.read_text(encoding="utf-8")))
+        files = cast(dict[str, str], raw["files_sha256"]) | {"prompt_compare.py": sha("an earlier version")}
+        self.lines.write_text(json.dumps(raw | {"files_sha256": files}), encoding="utf-8")
+        runs, out = str(self.runs("base", BASE_T, 0)), self.root / "compare.json"
+        for argv in (("baseline", "--runs", runs), ("compare", "--runs", runs, "--out", str(out))):
+            with self.subTest(command=argv[0]):
+                with self.assertRaises(SystemExit) as caught:
+                    self.command(*argv)
+                self.assertEqual(str(caught.exception), "prompt_lines.json pins another version of prompt_compare.py")
+        self.assertFalse(out.exists())
+
+    def test_a_runs_json_that_splits_a_model_into_base_and_draft_is_refused(self) -> None:
+        self.write_lines(None)
+        path = self.root / "runs.json"
+        path.write_text(json.dumps({"inkling": {"base": [], "draft": []}}), encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            self.command("baseline", "--runs", str(path))
+        self.assertEqual(str(caught.exception), "runs.json does not list runs under inkling")
 
 
 if __name__ == "__main__":

@@ -11995,12 +11995,24 @@ let start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox text =
                    queue_run_next_on_admission state item.request;
                    launch_keeper_request ~promoted:item state ~mailbox item.request))))
 ;;
+(* Temporary diagnostic for the observer-epoch Enter-branch failure: append
+   the taken branch to <base>/.masc/trace-enter.log so the PTY-driven test can
+   print it at teardown (stderr is swallowed by the test's PTY). *)
+let trace_enter_append base_path line =
+  let dir = Common.masc_dir_from_base_path ~base_path in
+  let path = Filename.concat dir "trace-enter.log" in
+  let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
+  output_string oc (line ^ "\n");
+  close_out oc
+
 (* Send one line to one keeper.
 
    The refusals here are about whether the message can be delivered at all: no
    keeper selected, a roster this build could not read, a keeper that is no
    longer registered. *)
 let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
+  trace_enter_append base_path
+    ("TRACE-ENTER entry start_keeper_message len=" ^ string_of_int (String.length text));
   match
     match keeper_name with
     | Some _ -> keeper_name
@@ -15449,15 +15461,18 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       | Open_artifacts | Open_music | Open_music_midi | Music_invalid_arguments | Open_score _ | Score_invalid_index
       | Open_images _ | List_images | Images_invalid_index | Unknown _ -> true
   then
-    notice ~kind:Notice_failure
-      "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
+    (trace_enter_append base_path "TRACE-ENTER branch=queued_edit_active";
+     notice ~kind:Notice_failure
+       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it")
   else
   match command with
   | Masc_tui_command.Say _ when recovered_paste_send_locked_for state target ->
-      notice ~kind:Notice_failure
-        "Recovered draft protected; press Ctrl-G to enable Enter"
+      (trace_enter_append base_path "TRACE-ENTER branch=recovered_paste_send_locked";
+       notice ~kind:Notice_failure
+         "Recovered draft protected; press Ctrl-G to enable Enter")
   | Masc_tui_command.Say _ ->
-      start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text
+      (trace_enter_append base_path "TRACE-ENTER branch=start_keeper_message";
+       start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text)
   | Masc_tui_command.Task_missing_title ->
       report_action state "error" "/task needs a title on the same line"
   | Masc_tui_command.View_image_missing_path ->

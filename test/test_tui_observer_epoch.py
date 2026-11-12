@@ -254,6 +254,8 @@ class ObserverEpochTest(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
+                trace_path = pathlib.Path(server.base, ".masc", "trace-enter.log")
+                print("TRACE-ENTER-FILE:", trace_path.read_text() if trace_path.exists() else "missing", flush=True)
 
 
 if __name__ == "__main__":

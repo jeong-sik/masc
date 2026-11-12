@@ -111,7 +111,7 @@
                    전역 review_slots 세마포어가 동시 실행만 제한한다.
                    결과를 모르는 후보가 남은 시도는, 기록된 실행이 모두 끝났고 정산 안 된 effect 와
                    판정 보고가 없을 때에만 다음 시도의 근거가 된다. 그때 걸음이 남긴 typed 판정이 있으면
-                   그 판정이, 걸음이 결과를 남기기 전에 끊겼으면(취소, 프로세스 종료) 끝난 실행의
+                   그 판정이, 걸음이 결과를 남기지 못했으면(취소, 프로세스 종료, 결과 저장 실패) 끝난 실행의
                    runtime 이 다음 시도를 정한다.
                    (completion_authority_agent.ml, anti_rationalization.ml, verifier_review_worker.ml)</invariant>
       </lifecycle>

@@ -29,8 +29,9 @@ val cancelled : Yojson.Safe.t
 (** What the attempt's walk left among its execution observations. *)
 type reading =
   | No_walk_result
-      (** The walk was cut before it retained a result: the review was
-          cancelled, or its process ended. *)
+      (** The walk retained no result: the review was cancelled, its process
+          ended, or saving the result failed. The attempt's events do not tell
+          these apart. *)
   | Walk_result of
       { candidates : candidate list
       ; result : Yojson.Safe.t

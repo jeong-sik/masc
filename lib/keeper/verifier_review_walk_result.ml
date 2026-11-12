@@ -9,13 +9,28 @@ type candidate =
 
 let schema = "verifier_review_unknown/v2"
 
+(* The walk's two classifications, restated so their cases are enumerated here.
+   A case added to either type fails to compile at its restatement, and the
+   derived list then carries it to the reader. *)
+type certainty = AR.failure_certainty =
+  | Before_dispatch
+  | Definite_refusal
+  | Outcome_unknown
+[@@deriving enumerate]
+
+type failure = AR.candidate_failure =
+  | Reviews_again
+  | Model_absent
+  | Producer_must_act
+[@@deriving enumerate]
+
 let certainty_label = function
-  | AR.Before_dispatch -> "before_dispatch"
+  | Before_dispatch -> "before_dispatch"
   | Definite_refusal -> "definite_refusal"
   | Outcome_unknown -> "outcome_unknown"
 
 let failure_label = function
-  | AR.Reviews_again -> "reviews_again"
+  | Reviews_again -> "reviews_again"
   | Model_absent -> "model_absent"
   | Producer_must_act -> "producer_must_act"
 
@@ -44,14 +59,10 @@ type reading =
       }
 
 let certainty_of_label label =
-  List.find_opt
-    (fun certainty -> String.equal (certainty_label certainty) label)
-    [ AR.Before_dispatch; Definite_refusal; Outcome_unknown ]
+  List.find_opt (fun certainty -> String.equal (certainty_label certainty) label) all_of_certainty
 
 let failure_of_label label =
-  List.find_opt
-    (fun failure -> String.equal (failure_label failure) label)
-    [ AR.Reviews_again; Model_absent; Producer_must_act ]
+  List.find_opt (fun failure -> String.equal (failure_label failure) label) all_of_failure
 
 let candidate_of_json json =
   let malformed = Error "walk result candidate is malformed" in

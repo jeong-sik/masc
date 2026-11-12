@@ -3,6 +3,7 @@ type t =
   | Failed
   | Cancelled
   | Owner_lost
+[@@deriving enumerate]
 
 let cancelled_fact = "cancelled"
 let ended_without_verdict_fact = "ended_without_verdict"
@@ -15,10 +16,10 @@ let label = function
   | Owner_lost -> Some "owner_lost"
   | Cancelled -> None
 
+(* [all] is derived from the type, so an ending added later is read back as
+   soon as [label] names it. *)
 let of_label text =
-  List.find_opt
-    (fun ending -> Option.equal String.equal (label ending) (Some text))
-    [ Succeeded; Failed; Owner_lost ]
+  List.find_opt (fun ending -> Option.equal String.equal (label ending) (Some text)) all
 
 let observation ~runtime_id ending =
   match label ending with

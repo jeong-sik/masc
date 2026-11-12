@@ -3,7 +3,7 @@ rfc: "keeper-turn-ends-while-waiting-for-a-receipt-state-machine"
 title: "영수증을 기다리며 턴이 끝나는 상태 기계"
 status: Draft
 created: 2026-11-11
-updated: 2026-11-11
+updated: 2026-11-12
 author: claude
 supersedes: []
 superseded_by: null
@@ -22,9 +22,9 @@ implementation_prs: []
 
 - **[제안]** 채팅 작업의 상태는 일곱이에요. queued, waiting, ready, running, succeeded, failed, cancelled 예요. 새 상태는 waiting 과 ready 둘이고, 둘 다 reducer 에서는 지금처럼 `Queued` 예요(3.2).
 - **[제안]** 영수증은 기다리기로 한 작업이 소유해요. 소유는 작업이 끝날 때까지 이어지고, 끝나면(성공, 실패, 취소, 재시작 실패) 같은 전이에서 풀려요. 소유 기록은 실행 기록(semantic record)의 새 필드예요(4절). 이어받는 길은 지금 있는 체크포인트 재개예요(6절).
-- **[사실]** 영수증을 읽는 곳이 여섯이에요(2.7). 셋은 run 의 carrier, 나머지는 깨움, stimulus 점검, 가드예요. 모델은 소유를 안 보는 run 하나만 있어도 기다리는 작업의 영수증이 그 run 에 지워지는 반례를 내요(8.4).
+- **[사실]** 영수증을 읽는 곳은 처음 센 여섯보다 많아요. 구현(L1)에서 `load` 호출처는 열이에요(2.7). 모델은 소유를 안 보는 run 하나만 있어도 기다리는 작업의 영수증이 그 run 에 지워지는 반례를 내요(8.4).
 - **[사실]** TLC 는 정상 설정에서 위반을 찾지 못했어요(생성 58,645 상태, 서로 다른 19,218 상태, 깊이 18). 버그 설정 12개는 모두 의도한 불변식이나 속성을 깨는 반례를 내요(8.4).
-- **[제안]** hard cut 은 하나예요. 실행 기록 형식이 `v2` 에서 `v3` 로 바뀌어요. 부모 RFC 가 둘로 센 저장소 스키마와 소유 기록이 같은 필드 하나로 모여요(7절). 옛 형식을 읽는 코드는 없어요.
+- **[제안]** hard cut 은 둘이에요. 실행 기록 형식이 `v2` 에서 `v3` 로 바뀌어요. 부모 RFC 가 둘로 센 저장소 스키마와 소유 기록이 같은 필드 하나로 모여요. 영수증의 `arguments` 를 모를 때 빈 값으로 채우지 않고 typed 부재로 적는 선택(9절 3) 때문에 outbox 영수증 형식도 바뀌어요(7절). 옛 형식을 읽는 코드는 없어요.
 - 사용자가 정할 것은 9절에 있어요.
 
 ## 1. 이 글이 정하는 것
@@ -92,7 +92,7 @@ implementation_prs: []
 
 ### 2.7 영수증을 읽는 곳
 
-**[사실]** `rg` 로 센 호출처예요. 여섯이에요.
+**[사실]** `rg` 로 처음 센 호출처예요. 여섯이에요. 구현에서 `load` 를 부르는 곳은 열이에요(표 아래).
 
 | # | 호출처 | 무엇을 해요 |
 |---|---|---|
@@ -103,13 +103,15 @@ implementation_prs: []
 | 5 | `keeper_heartbeat_stimulus_intake.ml:617` | 대기 중인 `Tool_result_ready` 가 아직 영수증을 가리키는지 확인 |
 | 6 | `keeper_execute_background.ml:158` | `holds_receipt` 가드 |
 
+- **[사실]** 위 표는 run 의 carrier 를 셋으로 셌지만, 구현(L1)에서는 `run` 을 가진 runtime 이 넷(codex, antigravity, muse, claude_code)이고 `keeper_turn_driver_try_provider.ml` 이 따로 읽어요. 표에 없던 호출처가 둘 더 있어요. `keeper_official_client_host.ml` 과 `keeper_run_tools_hooks.ml` 이에요. 그래서 `load` 호출처는 열이에요. 필수 인자 `~viewer`(4.3)가 이 숫자를 컴파일러가 세게 해요.
 - **[사실]** run 하나는 첫 호출에서 outbox 를 한 번 읽고 그 snapshot 을 끝까지 써요(`keeper_client_tool_outbox.mli:243-248`, `.ml:545-555`).
 - **[사실]** snapshot 은 `Completed` 로 끝난 턴만 지워요. 체크포인트, 입력 대기로 끝나면 지우지 않아요. 지울 때는 읽은 내용과 같은 파일만 지워요(`.ml:592-607`).
 - **[사실]** `notify` 는 시작할 때와 maintenance tick 마다 모든 Keeper 에게 불려요(`keeper_client_tool_outbox_wake.ml:70-100`, `server_bootstrap_maintenance.ml:775-803`). ACK 될 때까지 같은 stimulus 를 다시 알려요(`keeper_client_tool_outbox_wake.ml:52-54`, `:62-63` 주석).
 
 ### 2.8 재시작과 취소
 
-- **[사실]** 재시작 때 `Running` 행은 continuation 이 없으면 `Failed` 예요(`keeper_chat_operation_store.ml:3456-3459`). `Queued` 행은 막힌 것도 그대로 남아요.
+- **[사실]** 재시작 때 `Running` 행은 continuation 이 없으면 `Failed` 예요(`keeper_chat_operation_store.ml:3456-3459`). continuation(체크포인트, runtime retry, gate 상태)이 있으면 `Queued` 로 돌아가 재개해요(같은 파일 `requeue_continuation_with_db`). `Queued` 행은 막힌 것도 그대로 남아요.
+- **[사실]** 실행 기록 쪽에서는 `Running` 이던 기록이 재시작에서 `Recovering` 의 origin `Interrupted_execution` 으로 가는 길이 있어요(`keeper_semantic_execution.ml` `recovery_origin`). 영수증 소유는 `Settle` 이 비우고, origin 이 `Interrupted_execution` 인 `Require_reconciliation` 도 비워요. 다른 origin 의 `Require_reconciliation` 은 비우지 않아요.
 - **[사실]** 작업 취소는 요청을 건드리지 않아요. 요청을 취소하는 길은 Keeper 가 부르는 도구 하나뿐이에요. `rg 'Keeper_msg_async\.cancel' lib` 의 호출처가 `keeper_tool_composition_surface_request_control.ml:126` 하나예요. `Cancel_queued_operation` 의 처리(`keeper_owner.ml:2740-2748`)는 저장소만 써요.
 
 ## 3. 상태 기계
@@ -142,21 +144,21 @@ implementation_prs: []
 
 | 상태＼사건 | Claim | Wait(r) | Resolve | Complete | Fail | Cancel | Restart |
 |---|---|---|---|---|---|---|---|
-| queued | → running | 거절 | 거절 | 거절 | 거절 | → cancelled | 그대로 |
+| queued | → running | 거절 | 그대로 | 거절 | 거절 | → cancelled | 그대로 |
 | waiting | 거절 | 거절 | → ready | 거절 | 거절 | → cancelled | 그대로 |
 | ready | → running | 거절 | 그대로 | 거절 | 거절 | → cancelled | 그대로 |
-| running | 거절 | → waiting 또는 → ready | 그대로 | → succeeded | → failed | 거절 | → failed |
+| running | 거절 | → waiting 또는 → ready | 그대로 | → succeeded | → failed | 거절 | continuation 없으면 → failed, 있으면 → 항목 상태대로 queued, waiting, ready |
 | succeeded | 거절 | 거절 | 그대로 | 거절 | 거절 | 거절 | 그대로 |
 | failed | 거절 | 거절 | 그대로 | 거절 | 거절 | 거절 | 그대로 |
 | cancelled | 거절 | 거절 | 그대로 | 거절 | 거절 | 거절 | 그대로 |
 
 사건의 조건이에요.
 - **Claim** 은 슬롯이 `free` 일 때만 해요. waiting 은 claim 하지 않아요.
-- **Wait(r)** 은 슬롯을 쥔 작업만 불러요. request r 에 영수증이 이미 있으면 ready 가 되고, worker 가 도는 중이면 waiting 이 돼요. r 에 출처가 없거나 다른 작업이 소유한 r 이면 거절이고 턴은 이어져요. 턴이 끝나고 슬롯이 비는 것과 소유 기록은 같은 transaction 이에요.
-- **Resolve** 는 영수증이 outbox 에 쓰였다는 통지예요. waiting 만 ready 로 바꿔요. 같은 통지가 또 오거나 이미 끝난 작업에 오면 그대로예요.
+- **Wait(r)** 은 슬롯을 쥔 작업만 불러요. request r 에 영수증이 이미 있으면 ready 가 되고, worker 가 도는 중이면 waiting 이 돼요. 도구를 부를 때 r 의 request 기록이 없으면 거절이고 턴은 이어져요. 다른 작업이 소유한 r 은 도구가 호출한 실행을 몰라서 호출 때 못 가려요. 턴 끝 저장 transaction 이 거절하고(`Turn_continuation_unpersisted`), 모델은 거절 문구를 받지 못해요. 턴이 끝나고 슬롯이 비는 것과 소유 기록은 같은 transaction 이에요.
+- **Resolve** 는 영수증이 outbox 에 쓰였다는 통지예요. waiting 만 ready 로 바꿔요. 통지는 request 를 가리킬 뿐이라 안 기다린 queued 작업과 끝난 작업을 가르지 못해요. 같은 통지가 또 오거나, 그 request 를 기다리지 않는 작업이나 이미 끝난 작업에 오면 그대로예요(4.4).
 - **Fail** 은 도는 턴이 오류나 operator interrupt 로 끝난 거예요(2.2). 영수증은 지우지 않아요(2.7).
 - **Cancel** 은 도는 작업에는 없어요(2.2). 도는 작업은 Fail 로 끝나요.
-- **Restart** 는 행과 영수증이 남아요. 도는 턴과 worker 는 사라져요(2.8).
+- **Restart** 는 행과 영수증이 남아요. 도는 턴과 worker 는 사라져요(2.8). running 작업이 continuation 을 쥐고 있으면(체크포인트에서 claim 한 작업) failed 가 아니라 `Queued` 로 돌아가고 항목은 그대로예요. 항목이 모두 `Arrived` 면 ready, `Pending` 이 있으면 waiting 이에요.
 
 `waiting` 과 `ready` 는 reducer 에 새 상태를 더하지 않아요. **[사실]** 부모 RFC 가 말한 「claim 못 함의 새 이유」는 reducer 가 아니라 `blocked_queued_scopes` 와 실행 기록의 일이에요(2.4).
 
@@ -181,7 +183,7 @@ implementation_prs: []
 **[제안]** `owns[t]` 는 작업 t 가 소유한 request 의 집합이에요. 규칙은 넷이에요.
 1. Wait(r) 이 r 을 더해요. 이미 다른 작업의 `owns` 에 든 r 이면 Wait 은 거절이에요.
 2. 작업이 waiting, ready, running 을 오가도 빼지 않아요. 재개한 턴이 다시 Wait 해서 슬롯을 놓아도 앞서 받은 영수증은 아직 지워지면 안 되기 때문이에요.
-3. 작업이 끝나면(Complete, Fail, Cancel, Restart 의 Fail) 같은 전이에서 비워요.
+3. 작업이 끝나면(Complete, Fail, Cancel, continuation 없는 running 의 Restart) 같은 전이에서 비워요. 실행 기록에서는 `Settle`, 또는 origin 이 `Interrupted_execution` 인 `Require_reconciliation` 이 비워요(2.8). continuation 이 있는 running 의 Restart 는 비우지 않아요.
 4. 영수증을 읽을 때 소유자가 아닌 run 은 소유된 영수증을 읽지 않아요(4.3).
 
 ### 3.5 불변식
@@ -221,7 +223,7 @@ implementation_prs: []
 
 **[사실]** 부모 RFC 9절이 열어 둔 질문 둘의 답이에요. 소유는 작업 기록에 둬요(outbox 영수증이 아니에요, (iv)). 새 상태는 `recovery_origin` 의 새 variant 없이 되고(i), (ii)는 되지만 비싸요.
 
-### 4.3 읽는 곳 여섯이 소유를 보게 하는 방법
+### 4.3 읽는 곳이 소유를 보게 하는 방법
 
 **[제안]** `Keeper_client_tool_outbox.load` 에 필수 인자 `~viewer` 를 더해요. 값은 닫힌 타입이에요.
 
@@ -232,23 +234,23 @@ type viewer =
   | Every_receipt
 ```
 
-필수 인자라서 호출처가 값을 적지 않으면 컴파일이 안 돼요. 일곱 번째 호출처가 생겨도 소유를 건너뛸 수 없어요.
+필수 인자라서 호출처가 값을 적지 않으면 컴파일이 안 돼요. 열한 번째 호출처가 생겨도 소유를 건너뛸 수 없어요.
 
 | 호출처(2.7) | viewer | 이유 |
 |---|---|---|
-| 1, 2, 3 run 의 carrier | 직접 턴이면 `Owner_and_unowned` 에 자기 작업, 그 밖은 `Unowned_only` | 재개한 작업은 자기 영수증과 주인 없는 영수증을 받아요. 순찰 run 은 주인 없는 것만 받아요 |
-| 4 `notify` | `Every_receipt` 로 읽고, 소유된 영수증은 stimulus 대신 소유 작업에 알려요(4.4) | 소유된 영수증으로 `Tool_result_ready` 를 계속 쌓으면 읽을 run 이 없는 stimulus 가 남아요 |
+| 1, 2, 3 run 의 carrier(runtime 넷의 `run`, `try_provider`) | `keeper_turn_driver.ml` 이 정해요. 직접 턴이면 `Owner_and_unowned` 에 자기 작업, 그 밖은 `Unowned_only` | 재개한 작업은 자기 영수증과 주인 없는 영수증을 받아요. 순찰 run 은 주인 없는 것만 받아요 |
+| 공식 클라이언트 host, 도구 hook | `Unowned_only` | 소유자가 아닌 곳이라 주인 없는 것만 봐요 |
+| 4 `notify` | stimulus 용으로는 `Unowned_only`. 소유된 영수증은 stimulus 를 만들지 않고 `Receipt_arrived` 로 Owner 에게 알려요(4.4) | 소유된 영수증으로 `Tool_result_ready` 를 계속 쌓으면 읽을 run 이 없는 stimulus 가 남아요 |
 | 5 stimulus 점검 | `Unowned_only` | 영수증이 stimulus 를 큐에 넣은 뒤 소유됐으면 점검이 「없음」으로 답하고 stimulus 를 거둬요 |
 | 6 `holds_receipt` | `Every_receipt` | 가드는 「이 request 의 영수증이 있나」를 물어요. 소유자가 숨기면 가드가 없다고 답해서 `Unfinished` 가 하나 더 쓰여요. 가드 주석이 막으려던 일이에요(`keeper_execute_background.ml:155-157`) |
 
-**[확인 필요]** 4번의 「읽을 run 이 없는 stimulus」 뒤에 무슨 일이 일어나는지는 읽지 않았어요. `Selection_actionable` 이 턴을 시작하는 길을 따라가지 않았어요(10절). **[추정]** 소유자 있는 영수증에 `Tool_result_ready` 가 계속 쌓이면 영수증을 0개 싣는 순찰 턴이 반복될 수 있어요. 모델에는 stimulus 가 없어요.
-
 ### 4.4 통지와 Resolve
 
-**[제안]** `notify` 가 소유된 영수증을 보면 Owner 에게 `Receipt_arrived request_id` 를 보내요. Owner 는 그 request 를 가진 `Pending` 항목을 `Arrived` 로 바꾸고(실행 기록의 revision 비교), `start_child_if_needed` 를 불러요. 이미 `Arrived` 이거나 없으면 아무것도 안 해요.
+**[제안]** `notify` 는 주인 없는 영수증만 stimulus 로 만들어요(`Unowned_only`). 소유된 영수증은 `Keeper_receipt_wait_resolution.arrived` 가 Owner 에게 `Receipt_arrived request_id` 로 알려요. Owner 는 그 request 를 가진 `Pending` 항목을 `Arrived` 로 바꾸고(실행 기록의 revision 비교), `start_child_if_needed` 를 불러요. 이미 `Arrived` 이거나 없으면 아무것도 안 해요.
 - **[사실]** 지금 `notify` 와 `pulse` 는 시작할 때와 tick 마다 불려요(2.7).
 - **[제안]** 소유된 영수증의 통지도 같은 길로 보내요. 통지 하나를 놓쳐도 다음 tick 에 다시 와서 지연이 되고, 영영 안 오지는 않아요. 모델에서는 `Resolve` 가 공정하다는 가정이에요. 가정을 빼면 `WaiterResolves` 가 깨져요(`wake-never-delivered`).
 - **[제안]** `Pending` 항목이 하나라도 있는 실행 기록은 claim 못 해요. `blocked_queued_scopes` 의 여섯째 이유예요. 기존 다섯 이유와 같은 closed match 에 넣어요(2.4).
+- **[제안]** 영수증이 턴이 끝나는 동안 도착하면 통지를 받을 `Pending` 항목이 아직 없어요. 이 틈은 기다림을 저장한 직후 한 번 부르는 `Keeper_receipt_wait_sweep.after_wait` 가 막아요. 도착한 영수증을 `Arrived` 로 바꾸고 `settle_lost`(5.2)도 해요. 이 호출이 실패하면 경고만 남기고 다음 maintenance 에 맡겨요.
 - Owner 는 폴링하지 않아요. 통지는 `notify` 가 보내요(2.4).
 
 ## 5. 실패
@@ -260,8 +262,8 @@ type viewer =
 - **[사실]** worker 가 죽은 request 는 부팅이 `Unfinished` 영수증을 써요. `RecoverUnfinished` 예요(2.6).
 - **[제안]** 영수증이 쓰이면 `notify` 가 소유 작업에 알리고, waiting 이 ready 가 돼요.
 - **[제안]** 재개한 작업은 `Unfinished` 영수증을 보통 영수증처럼 받아요. 무엇을 할지는 모델이 정해요.
-- **[사실]** 재시작 때 running 이던 작업은 continuation 이 없으면 `Failed` 예요(2.8).
-- **[제안]** 그 작업의 소유는 `Settle` 이 풀어요. Wait 의 소유 기록과 체크포인트 defer 를 한 transaction 으로 하면 둘 사이에 재시작이 끼어들 틈이 없어요(6절 3단계).
+- **[사실]** 재시작 때 running 이던 작업은 continuation 이 없으면 `Failed` 예요. continuation 이 있으면 `Queued` 로 돌아가요(2.8).
+- **[제안]** `Failed` 가 된 작업의 소유는 `Settle`(또는 origin 이 `Interrupted_execution` 인 `Require_reconciliation`)이 풀어요. `Queued` 로 돌아간 작업은 소유 항목이 그대로 남아요. Wait 의 소유 기록과 체크포인트 defer 를 한 transaction 으로 하면 둘 사이에 재시작이 끼어들 틈이 없어요(6절 3단계).
 - 모델: `Restart`, `RecoverUnfinished`. `orphan-wait-reachable` 이 「waiting 인데 worker 가 죽은 상태」에 이르는 길이 있다는 것을 보여요(반례 5단계). 이 상태에서 `WaitingHasSource` 는 지켜져요.
 
 ### 5.2 worker 종료
@@ -270,16 +272,19 @@ type viewer =
 - **[제안]** waiting 작업은 이 영수증을 받고 ready 가 돼요. 특별한 길이 없어요.
 - **[사실]** 영수증이 아예 안 쓰이는 경우가 하나 있어요. 부팅 때 active 목록을 읽지 못하면 영수증을 쓰지 않아요(2.6). 그 request 를 기다리는 작업은 영영 waiting 이에요. 모델 반례 `restart-loses-request` 예요(5단계, `WaitingHasSource` 위반).
 - **[제안]** 두 길이 있어요.
-  - (a) 소유 기록이 request 를 알고 있어요. `Pending` 항목의 request 에 worker 도 영수증도 없으면 owner 가 typed 해결 `Source_lost` 로 `Arrived` 처리하고, 같은 request_id 로 `Unfinished` 영수증을 한 번 써서 재개한 작업이 받게 해요. 쓰는 길은 `deliver_unfinished_unless_held` 가 이미 있어요(`keeper_execute_background.ml:161-167`). 이 판정은 목록이 아니라 request 하나를 찾는 읽기가 필요해요. 못 읽은 것이 바로 active 목록이기 때문이에요. 후보는 `Keeper_msg_async.load_canonical_request` 예요(`keeper_msg_async.mli:425`). 없는 request 를 어떻게 돌려주는지는 읽지 않았어요.
+  - (a) 소유 기록이 request 를 알고 있어요. `Pending` 항목의 request 가 끝났거나 끊겼는데 영수증이 outbox 에 없으면 typed 해결 `Source_lost` 로 `Arrived` 처리하고, 같은 request_id 로 `Unfinished` 영수증을 한 번 써서 재개한 작업이 받게 해요. 영수증은 `retain_source_lost_receipt`(새 함수)가 써요. 이미 영수증이 있으면 쓰지 않아요.
+    - 판정은 목록이 아니라 request 하나를 찾는 읽기로 해요. 못 읽은 것이 바로 active 목록이기 때문이에요. 읽기는 `Keeper_msg_async.load_canonical_request` 예요(`Found | Absent | Unreadable | Rejected`). worker 가 아직 있을 수 있는 request 상태는 계속 기다려요.
+    - 실행은 `Keeper_receipt_wait_sweep.settle_lost` 예요. maintenance 의 `reconcile` 이 Keeper 마다 `notify` 다음에 불러요. `Keeper_client_tool_outbox_wake` 가 sweep 을 직접 부르면 모듈 순환이 생겨서 `create ~settle_lost_waits` 로 주입해요.
   - (b) 부팅 때 active 목록을 못 읽으면 Keeper lane 을 시작하지 않아요.
-  - 추천은 (a)예요. (b)는 파일 하나를 못 읽은 일이 Keeper 하나의 정지로 번져요. (a)의 대가는 owner 가 request 기록을 읽는 길이 하나 늘어나는 거예요. 이 읽기를 아직 읽지 않았어요(10절).
-- **[제안]** `Source_lost` 판정은 시간 임계 없이 상태로만 해요. 「소유된 request 에 영수증도 활성 기록도 없다」예요. 4.3 의 `viewer` 가 있으면 소유된 영수증은 소유자만 지워요. 그래서 다른 run 이 소유된 영수증을 지워서 이 판정이 잘못 나오는 경우는 없어요.
+  - 추천은 (a)예요. (b)는 파일 하나를 못 읽은 일이 Keeper 하나의 정지로 번져요. (a)의 대가는 owner 쪽에 request 기록을 읽는 길이 하나 늘어나는 거예요.
+- **[사실·결정]** `Unfinished` 영수증의 `arguments` 는 request 기록이 남겨 둔 인자를 그대로 실어요(`Known`). request 기록이 `Absent` 이거나 Execute 백그라운드 요청의 기록이 아니면 인자를 알 길이 없어요. 읽은 범위에서 request_id 로 인자를 찾는 기록은 request 기록(`request_context` 의 `execute_background.arguments`) 하나뿐이에요. 실행 기록의 `input` 은 채팅 입력이고, 채팅 턴의 Execute 는 도구 실행 journal 에 request_id 로 남지 않아요. 빈 객체로 채우면 모델은 「인자 없이 Execute 를 불렀다」는 거짓 사실을 읽어요. 사용자가 typed 부재를 골랐어요(9절 3). 영수증 `arguments` 가 `Known | Unknown` 이 되고, `Unknown` 이면 메시지도 그렇게 말해요. outbox 형식이 바뀌어요(7절).
+- **[제안]** `Source_lost` 판정은 시간 임계 없이 상태로만 해요. 「소유된 request 가 끝났거나 끊겼고, 영수증이 outbox 에 없다」예요. 4.3 의 `viewer` 가 있으면 소유된 영수증은 소유자만 지워요. 그래서 다른 run 이 소유된 영수증을 지워서 이 판정이 잘못 나오는 경우는 없어요.
 
 ### 5.3 영수증 중복
 
 - **같은 영수증의 통지가 여럿.** **[사실]** `notify` 는 ACK 될 때까지 tick 마다 같은 stimulus 를 다시 알려요(2.7). **[제안]** Resolve 는 같은 request 에 대해 한 번만 상태를 바꿔요. ready 나 running 인 작업에 오는 통지는 그대로예요(3.2). 모델 `duplicate-resolve` 는 이 가드를 빼고, 통지가 running 작업을 ready 로 되돌려서 `SlotMatchesTask` 가 깨지는 반례를 내요(7단계).
 - **같은 request 의 영수증 둘.** **[사실]** `holds_receipt` 가드가 `Unfinished` 의 중복을 막아요(2.6). **[확인 필요]** 가드는 읽고 쓰는 두 단계라서, worker 의 정상 종료와 abort 경로가 동시에 오면 둘이 쓰일 수 있는지는 읽지 않았어요. 모델에는 request 당 영수증이 하나예요.
-- **다른 작업이 소유한 request 를 또 기다림.** **[제안]** Wait 이 거절해요. 모델 `duplicate-wait` 는 거절을 빼고, 영수증 하나를 두 작업이 소유하는 반례를 내요(6단계, `OneOwner` 위반).
+- **다른 작업이 소유한 request 를 또 기다림.** **[제안]** 소유 기록을 쓰는 턴 끝 저장 transaction 이 거절해요(3.2). 도구는 호출한 실행을 몰라서 호출 때는 못 가려요. 모델 `duplicate-wait` 는 거절을 빼고, 영수증 하나를 두 작업이 소유하는 반례를 내요(6단계, `OneOwner` 위반).
 - **다른 run 이 소유된 영수증을 읽음.** **[제안]** 4.3 의 `viewer` 가 막아요.
 
 ### 5.4 취소된 작업에 영수증이 늦게 옴
@@ -295,8 +300,8 @@ type viewer =
 
 | 단계 | 지금 코드(2절) | 이 설계가 더하는 것 |
 |---|---|---|
-| 1. 모델이 wait 도구를 부름 | `Generic_deferred` 도구 결과가 턴을 체크포인트 길로 끝내요(`keeper_tools_agent_core_bundle.ml:248-257`, `keeper_tool_terminal_boundary.ml:1-5`) | 도구 하나. request_id 를 아래 3 단계까지 실어 나르는 길 **[확인 필요]** |
-| 2. 턴이 체크포인트로 끝남 | `keeper_turn.ml:1057-1081` 의 checkpoint 갈래 → `defer`, `defer_official`(`keeper_direct_checkpoint_continuation.ml:85-104`) | 없음. 새 갈래가 아니에요. `InputRequired` 갈래는 안 써요. 입력 대기는 체크포인트 재개가 아니에요(2.3) |
+| 1. 모델이 wait 도구를 부름 | `Generic_deferred` 도구 결과가 턴을 체크포인트 길로 끝내요(`keeper_tools_agent_core_bundle.ml:248-257`, `keeper_tool_terminal_boundary.ml:1-5`) | 도구 하나. `Generic_deferred` 가 아니라 일반 도구예요. `Terminal` 서술자는 Agent Core 가 결과를 `Completed` 로 끝내서 못 써요. 도구 결과의 `terminal_effect_receipt` 에 `Receipt_wait_requested {request_id}` 를 실어 `keeper_turn.ml` 의 `defer` 까지 나르고, 왼쪽 줄 번호는 그 사이 바뀌었어요. 직접 작업이 아닌 턴(순찰, 자율, 검증)에는 `Keeper_run_tools_setup.descriptors_for_run` 이 도구를 빼서 모델이 보지 못해요 |
+| 2. 턴이 체크포인트로 끝남 | `keeper_turn.ml:1057-1081` 의 checkpoint 갈래 → `defer`, `defer_official`(`keeper_direct_checkpoint_continuation.ml:85-104`) | 없음. 새 갈래가 아니에요. `InputRequired` 갈래는 안 써요. 입력 대기는 체크포인트 재개가 아니에요(2.3). 기다림을 요청했는데 턴이 체크포인트로 끝나지 않거나 `InputRequired` 와 겹치면 기다림을 버리지 않고 에러로 끝내요 |
 | 3. 저장 | `defer_direct_checkpoint` 한 transaction: Suspend, 큐로 되돌림, 순서 이동(`keeper_chat_operation_store.ml:2616-2670`) | 같은 transaction 에 `receipt_obligations` 에 request 를 `Pending` 으로 더하는 한 단계. 다른 실행 기록이 이미 소유한 request 면 transaction 이 거절 |
 | 4. claim 못 함 | `blocked_queued_scopes`(`:1731-1753`) | 여섯째 이유: `Pending` 항목이 있다 |
 | 5. 영수증 도착 | `notify`, `pulse`(`keeper_client_tool_outbox_wake.ml:36-100`) | 소유된 영수증은 `Receipt_arrived` 로 Owner 에 알려요. `Pending` 이 `Arrived` 가 돼요(4.4) |
@@ -310,10 +315,12 @@ type viewer =
 
 **[제안]** 하나의 형식 변경이고 둘로 읽어요. 부모 RFC 4.2 비용 (2) 저장소 스키마와 (4) 영수증 소유 기록이에요. (i)에서는 같은 필드에 모여요.
 
-- 변경: 실행 기록 `masc.keeper_semantic_execution.v2` 가 `v3` 가 돼요. 필드 `receipt_obligations` 가 더해지고, 읽을 때 필드 목록과 `schema` 문자열이 `v3` 와 맞아야 해요(현재 `v2` 는 `keeper_semantic_execution.ml:1022`, `:1362-1367`).
-- **안 바뀌는 것.** SQLite DDL(`database_schema` `:85`, `semantic_table_sql` `:93-109`)과 outbox 영수증 형식이에요. 소유를 outbox 에 안 적어서 outbox 의 fresh state 는 없어요.
-- **Fresh state contract.** 이 빌드는 자기가 쓴 형식만 읽어요. `v2` 기록은 읽지도, 변환하지도, 옮기지도 않아요(`docs/guides/DURABLE-STORE-HARD-CUT.md:32-37`). 구현 PR 은 `changelog.d/` 에 `Fresh state required` 항목을 둬요. 항목이 말하는 것은 두 가지예요. 지울 것은 Keeper 마다 `chat-operations.sqlite3` 와 sidecar 이고, 지우면 사라지는 것은 큐, 실행 기록, 입력 이력이에요(같은 문서 `:55-85`).
-- **코드 없음.** `v2` reader, converter, migration 을 만들지 않아요. 옛 빌드로 되돌리면 `v3` 기록을 옛 빌드가 거절해서 마찬가지로 fresh state 가 필요해요.
+- 변경 1: 실행 기록 `masc.keeper_semantic_execution.v2` 가 `v3` 가 돼요. 필드 `receipt_obligations` 가 더해지고, 읽을 때 필드 목록과 `schema` 문자열이 `v3` 와 맞아야 해요(현재 `v2` 는 `keeper_semantic_execution.ml:1022`, `:1362-1367`).
+- 변경 2: outbox 영수증의 `arguments` 가 `Known | Unknown` 이 돼요(5.2). 소유 기록은 outbox 에 안 적지만, 출처가 없어진 request 의 영수증이 인자를 모른다고 적을 자리가 필요해서 영수증 형식이 바뀌어요. 사용자가 이 방식을 골랐어요(9절 3).
+- **안 바뀌는 것.** SQLite DDL(`database_schema` `:85`, `semantic_table_sql` `:93-109`)이에요.
+- **Fresh state contract.** 이 빌드는 자기가 쓴 형식만 읽어요. `v2` 기록과 옛 모양의 영수증은 읽지도, 변환하지도, 옮기지도 않아요(`docs/guides/DURABLE-STORE-HARD-CUT.md:32-37`). 구현 PR 은 `changelog.d/` 에 `Fresh state required` 항목을 둬요. 항목이 말하는 것은 둘이에요. 지울 것은 Keeper 마다 `chat-operations.sqlite3` 와 sidecar, 그리고 Keeper 마다 `<base-path>/.masc/keepers/<keeper>/official-client-runtime/undelivered-tools/*.json` 이에요. 지우면 사라지는 것은 큐, 실행 기록, 입력 이력(같은 문서 `:55-85`)과 아직 어떤 run 도 읽지 않은 영수증이에요.
+- **코드 없음.** `v2` reader, converter, migration, 옛 영수증을 `Known` 으로 읽는 길을 만들지 않아요. 옛 빌드로 되돌리면 `v3` 기록과 새 영수증을 옛 빌드가 거절해서 마찬가지로 fresh state 가 필요해요.
+- 영수증 형식은 `arguments` 가 `{"known": 값}` 이나 `{"unknown": true}` 두 모양일 때만 받고, 값이 그대로인 옛 영수증은 거절해요. 이 검사는 모양 검사예요. 옛 파일의 `arguments` 가 우연히 정확히 그 두 모양이었다면 새 형식으로 읽혀요. 실제 Execute 나 벤더 인자에서 나올 일은 없어 보이지만(확신 Medium) 막혀 있지는 않아요. 구조로 막으려면 필드 이름을 바꿔야 하고, 그러면 모델이 읽는 JSON 이 바뀌어요.
 - **[사실]** 이 hard cut 이 바꾸는 것이 아닌데 눈에 띈 것이 둘이에요. 이 RFC 는 같은 모양의 코드를 더하지 않아요.
   - `keeper_semantic_execution.ml:1359-1360` 은 `gate_obligations` 가 없는 옛 기록에 `[]` 를 채워 읽어요.
   - `prepare_v2_copy` 는 v2 저장소를 v3 로 옮기는 오프라인 복사예요(`keeper_chat_operation_store.ml:1346-1383`).
@@ -381,7 +388,7 @@ cd specs && java -XX:+UseParallelGC -Xmx2g -cp ~/.local/lib/tla/tla2tools-1.8.0.
 
 정석 쪽을 근거와 대가를 달아 먼저 써요.
 
-**결정(사용자, 2026-11-12).** 1, 2, 3, 5번은 아래 추천대로 정했어요: 소유 기록은 실행 기록의 새 필드(`receipt_obligations`), `load` 의 `~viewer` 는 필수 인자, 출처 없는 request 는 typed `Source_lost`, wait 는 별도 도구예요. 4, 6, 7번은 아직 정하지 않았고 추천이 기본이에요.
+**결정(사용자, 2026-11-12).** 1, 2, 3, 5번은 아래 추천대로 정했어요: 소유 기록은 실행 기록의 새 필드(`receipt_obligations`), `load` 의 `~viewer` 는 필수 인자, 출처 없는 request 는 typed `Source_lost`, wait 는 별도 도구예요. 3번에서 영수증의 `arguments` 를 모를 때는 typed 부재(`Known | Unknown`)로 적기로 했어요. 4, 6, 7번은 아직 정하지 않았고 추천이 기본이에요.
 
 1. **소유 기록을 어디에 적나.**
    - 추천: (i) 실행 기록의 새 필드(4.2).
@@ -389,12 +396,14 @@ cd specs && java -XX:+UseParallelGC -Xmx2g -cp ~/.local/lib/tla/tla2tools-1.8.0.
    - 대가: 기록 형식 `v3` 의 fresh state(7절). 요청 하나에 소유자 하나인지를 DB 가 아니라 Owner 가 확인해요. (iii)은 DB 가 막지만 표가 늘고 끝나는 길마다 지우기를 넣어야 해요.
 2. **`load` 에 필수 인자 `~viewer` 를 더할지.**
    - 추천: 더해요(4.3).
-   - 근거: 읽는 곳이 여섯이에요. 한 곳이라도 소유를 건너뛰면 모델 `unfiltered-load` 의 반례가 현실이 돼요. N곳을 손으로 고치는 대신 컴파일러가 빠진 곳을 짚어요.
-   - 대가: 호출처 여섯과 이 모듈을 쓰는 시험이 같이 바뀌어요.
+   - 근거: 읽는 곳이 열이에요(2.7). 한 곳이라도 소유를 건너뛰면 모델 `unfiltered-load` 의 반례가 현실이 돼요. N곳을 손으로 고치는 대신 컴파일러가 빠진 곳을 짚어요.
+   - 대가: 호출처 열과 이 모듈을 쓰는 시험이 같이 바뀌어요.
 3. **출처가 없어진 request 를 어떻게 하나(5.2).**
    - 추천: (a) typed `Source_lost` 로 해결하고 `Unfinished` 영수증을 한 번 써요.
    - 근거: 파일 하나를 못 읽은 일이 Keeper 하나의 정지로 번지지 않아요.
-   - 대가: owner 가 request 기록을 읽는 길이 하나 늘어요. 그 읽기를 아직 읽지 않았어요.
+   - 대가: owner 쪽에 request 기록을 읽는 길이 하나 늘어요(`load_canonical_request`).
+   - 인자를 모르는 request(기록이 `Absent` 이거나 Execute 백그라운드 요청의 기록이 아님): 영수증 `arguments` 를 빈 객체로 채우지 않고 typed 부재로 적어요. 선택지 중 인자를 기다림 항목에도 같이 적는 안은 실행 기록이 Execute 명령 본문을 한 부 더 들게 돼서, 영수증 없이 `Source_lost` 로만 닫는 안은 사용자가 정한 「`Unfinished` 영수증 하나」와 달라서 택하지 않았어요.
+   - 대가: outbox 영수증 형식이 바뀌어 fresh state 가 하나 더 생겨요(7절).
 4. **작업을 취소하면 worker 도 취소할지.**
    - 추천: 취소하지 않아요(5.4).
    - 근거: Execute 는 부작용이 있을 수 있어요. 지금도 worker 취소는 모델이 부르는 별도 도구예요(2.8).
@@ -412,9 +421,7 @@ cd specs && java -XX:+UseParallelGC -Xmx2g -cp ~/.local/lib/tla/tla2tools-1.8.0.
 ## 10. 확인하지 못한 것
 
 **읽지 않은 코드.**
-- 모델이 부른 wait 도구의 request_id 가 `keeper_turn.ml:1057-1081` 의 `defer` 까지 가는 길. 턴 결과 타입에 실을지, 도구 결과의 `deferred_kind` 에 실을지 정하지 못했어요(6절 1단계).
-- 소유된 영수증에 쌓이는 `Tool_result_ready` 가 어떤 턴을 시작하는지. `Selection_actionable` 이후를 읽지 않았어요(4.3).
-- 「소유된 request 에 영수증도 활성 기록도 없다」를 `Keeper_msg_async` 에서 어떻게 읽는지. `recover_lost_disk_records` 의 동작도 자세히 읽지 않았어요(5.2).
+- `recover_lost_disk_records` 의 동작은 자세히 읽지 않았어요(5.2).
 - 공식 클라이언트에서 긴 기다림 뒤 벤더 세션 Resume 이 되는지. Muse 와 Antigravity 의 resume 은 읽지 않았어요(6절).
 - CI workflow 가 `check-others` 를 부르는지(8.4).
 - `finish_operation_child` 와 `start_child_if_needed` 가 `blocked_queued_scopes` 를 읽는 비용. drain 마다 실행 기록 전체를 읽어요(`keeper_chat_operation_store.ml:1731-1753`). 이 설계는 항목 하나를 더할 뿐이라고 보지만 재지 않았어요.

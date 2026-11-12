@@ -136,28 +136,33 @@ let allocated_by work =
   ignore (work () |> get);
   Gc.allocated_bytes () -. before
 
-(* Every attempt of a journal names the same step. Confirming that step reads
-   its body and its execution proofs, which is most of what reading a journal
-   allocates. A journal read that confirmed the step once per attempt would
-   allocate several times the one-attempt journal; the steps of this fixture
-   carry bodies of the same size. *)
+(* Every attempt of a journal names the same step, and confirming that step
+   reads its body and its execution proofs. [Gate.validate] of a first attempt
+   confirms the step once, so what it allocates bounds one confirmation from
+   above. Both journals are read from the same gate scope, so the scope's own
+   cost cancels in each difference below. A read that confirmed the step again
+   for each attempt, or again to restore the latest result, would add at least
+   one whole confirmation to the difference. *)
 let check_a_journal_confirms_its_step_once fixture ~owner ~inventory steps =
   let attempts ((record : Owner.retained), (_ : Step.header)) =
     List.length (Gate.Inventory.execution_records inventory ~execution_id:record.request_id) in
   let step_of ((record : Owner.retained), (_ : Step.header)) = Step.restore ~owner record |> get in
   let latest step () = Gate.latest ~store:fixture.store ~owner ~capture:step in
-  match List.partition (fun step -> attempts step = 1) steps with
+  match List.filter (fun step -> attempts step = 1) steps, List.filter (fun step -> attempts step > 1) steps with
   | single :: _, retried :: _ ->
     let single = step_of single and retried = step_of retried in
-    let one_attempt = allocated_by (latest single) in
-    check bool "a retried journal confirms its step once" true
-      (allocated_by (latest retried) < 2. *. one_attempt);
     let gate = Gate.latest ~store:fixture.store ~owner ~capture:single |> get |> Option.get in
-    check bool "restoring the latest result confirms its step once" true
+    let one_confirmation = allocated_by (fun () ->
+      Gate.validate ~store:fixture.store ~owner ~capture:single ~record:gate) in
+    let one_attempt = allocated_by (latest single) in
+    check bool "a later attempt of a journal does not confirm its step again" true
+      (allocated_by (latest retried) -. one_attempt < one_confirmation);
+    check bool "restoring the latest result does not confirm its step again" true
       (allocated_by (fun () ->
          Gate.restore_latest_result ~store:fixture.store ~owner ~parent_execution:single
            ~gate_request_id:gate.request_id)
-       < 1.5 *. one_attempt)
+       -. one_attempt
+       < 0.5 *. one_confirmation)
   | [], _ | _, [] -> fail "the fixture has a step judged once and a step judged again"
 
 let test_a_chain_runs_each_step_once_and_a_restart_replays_it () = with_fixture (fun fixture ->

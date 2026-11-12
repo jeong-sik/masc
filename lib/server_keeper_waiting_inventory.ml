@@ -41,9 +41,17 @@ type wake_producer =
   | Keeper_job
   | Read_model_reader
 
+(* Whether a row puts its Keeper in a state. A reservation whose time has not
+   come is listed for the operator to read and puts the Keeper in none: the
+   schedule runner waits for the time, the Keeper waits for nothing. *)
+type row_bearing =
+  | Holds_state
+  | Listed_only
+
 type waiting_row =
   { keeper_name : string option
   ; source : waiting_source
+  ; bearing : row_bearing
   ; waiting_on : string
   ; what : string
       (** Operator sentence for the row, derived from the row's typed fields.
@@ -404,6 +412,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
       let row ~what ~since ~detail =
         { keeper_name = Some keeper_name
         ; source
+        ; bearing = Holds_state
         ; waiting_on = Keeper_event_queue.payload_kind_label stimulus.payload
         ; what
         ; wake_producer = wake_producer_of_payload stimulus.payload
@@ -532,6 +541,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
 let read_error_row ?keeper_name ~waiting_on ~next_action detail =
   { keeper_name
   ; source = Read_error
+  ; bearing = Holds_state
   ; waiting_on
   ; what = Printf.sprintf "대기 기록 읽기 실패 · %s" waiting_on
   ; wake_producer = Read_model_reader
@@ -617,6 +627,7 @@ let chat_operation_rows ~base_path keeper_name =
       else
         [ { keeper_name = Some keeper_name
           ; source = Chat_operation_queued
+          ; bearing = Holds_state
           ; waiting_on = "owner_fifo"
           ; what = Printf.sprintf "대화 요청 %d건 대기" projection.queued_count
           ; wake_producer = Keeper_owner_actor
@@ -633,6 +644,7 @@ let chat_operation_rows ~base_path keeper_name =
       | Some operation_id ->
         [ { keeper_name = Some keeper_name
           ; source = Chat_operation_running
+          ; bearing = Holds_state
           ; waiting_on = "keeper_turn"
           ; what = "진행 중인 대화 요청"
           ; wake_producer = Keeper_owner_actor
@@ -677,6 +689,7 @@ let owner_shutdown_rows ~config keeper_name =
   | Error error ->
     [ { keeper_name = Some keeper_name
       ; source = Read_error
+      ; bearing = Holds_state
       ; waiting_on = "keeper_owner"
       ; what = "대기 기록 읽기 실패 · keeper_owner"
       ; wake_producer = Read_model_reader
@@ -744,6 +757,7 @@ let owner_shutdown_rows ~config keeper_name =
       in
       [ { keeper_name = Some keeper_name
         ; source = Owner_shutdown
+        ; bearing = Holds_state
         ; waiting_on = "shutdown"
         ; what
         ; wake_producer = Keeper_owner_actor
@@ -771,6 +785,7 @@ let hitl_rows keeper_name pending =
   |> List.map (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
     { keeper_name = Some keeper_name
     ; source = Hitl_pending
+    ; bearing = Holds_state
     ; waiting_on = entry.tool_name
     ; what = Printf.sprintf "운영자 승인 대기 · %s" entry.tool_name
     ; wake_producer = Hitl_resolution_hook
@@ -826,6 +841,7 @@ let fusion_rows keeper_name runs =
         Some
           { keeper_name = Some keeper_name
           ; source = Fusion_running
+          ; bearing = Holds_state
           ; waiting_on = run.run_id
           ; what = Printf.sprintf "Fusion 실행 중 · %s" run.preset
           ; wake_producer = Fusion_sink
@@ -848,6 +864,7 @@ let pending_confirm_row ?keeper_name
   =
   { keeper_name
   ; source = Operator_pending_confirm
+  ; bearing = Holds_state
   ; waiting_on = entry.action_type
   ; what = Printf.sprintf "운영자 확인 대기 · %s" entry.action_type
   ; wake_producer = Operator_pending_confirm_store
@@ -939,6 +956,10 @@ let schedule_rows ?keeper_name ~keeper_names state =
   |> List.map (fun (request : Schedule_domain.schedule_request) ->
     { keeper_name = schedule_keeper_owner keeper_set request
     ; source = Schedule_waiting
+    ; bearing =
+        (match request.status with
+         | Scheduled -> Listed_only
+         | Due | Running | Succeeded | Failed | Cancelled | Expired -> Holds_state)
     ; waiting_on = schedule_waiting_on request
     ; what = Printf.sprintf "예약 실행 · %s" request.schedule_id
     ; wake_producer =
@@ -1012,6 +1033,7 @@ let pending_confirm_observation_rows ~before ~after =
   | Some (kind, what, next_action, action_required) ->
       ( [ { keeper_name = None
         ; source = Observation_unavailable
+        ; bearing = Holds_state
         ; waiting_on = "operator_pending_confirm_observer"
         ; what
         ; wake_producer = Read_model_reader
@@ -1045,17 +1067,24 @@ let defers (row : waiting_row) =
   | Runtime_quota_spent | Read_error | Observation_unavailable -> false
 ;;
 
+let holds_state (row : waiting_row) =
+  match row.bearing with
+  | Holds_state -> true
+  | Listed_only -> false
+;;
+
 let row_state rows =
-  if List.exists defers rows
+  let holding = List.filter holds_state rows in
+  if List.exists defers holding
   then Deferred
-  else if rows <> []
+  else if holding <> []
   then Waiting
   else Idle
 ;;
 
 (* The sources that put a Keeper in its state, each once, in row order: the
-   deferring sources of a deferred Keeper, every source of a waiting one, and
-   none for an idle or busy one. A reader shows the state with these beside
+   deferring sources of a deferred Keeper, every state-holding source of a
+   waiting one, and none for an idle or busy one. A reader shows the state with these beside
    it and does not pick them out of the rows itself. *)
 let state_sources state rows =
   let distinct rows =
@@ -1065,10 +1094,11 @@ let state_sources state rows =
       []
       rows
   in
+  let holding = List.filter holds_state rows in
   match state with
   | Idle | Busy -> []
-  | Waiting -> distinct rows
-  | Deferred -> distinct (List.filter defers rows)
+  | Waiting -> distinct holding
+  | Deferred -> distinct (List.filter defers holding)
 ;;
 
 let keeper_state ~busy rows =
@@ -1337,6 +1367,7 @@ let runtime_quota_spent_rows ~now ~base_path keeper_name =
        | Some spent ->
          [ { keeper_name = Some keeper_name
            ; source = Runtime_quota_spent
+           ; bearing = Holds_state
            ; waiting_on = route
            ; what = Printf.sprintf "모든 후보 한도 소진 · %s" route
            ; wake_producer = Keeper_supervisor
@@ -1399,6 +1430,7 @@ let global_rows_from rows =
 let pending_approval_read_error error =
   { keeper_name = None
   ; source = Read_error
+  ; bearing = Holds_state
   ; waiting_on = "keeper_gate_pending_store"
   ; what = "대기 기록 읽기 실패 · keeper_gate_pending_store"
   ; wake_producer = Read_model_reader

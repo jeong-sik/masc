@@ -16,7 +16,6 @@ type dashboard_compute_mode =
 (* Dashboard runtime helpers extracted to
    [Server_dashboard_http_core_runtime] (godfile decomp). *)
 let run_dashboard_compute = Server_dashboard_http_core_runtime.run_dashboard_compute
-let state_dashboard_runtime_caps = Server_dashboard_http_core_runtime.state_dashboard_runtime_caps
 
 (* ================================================================ *)
 (* Dashboard Data (Batch API)                                       *)
@@ -53,163 +52,14 @@ let operator_snapshot_http_json = Server_dashboard_http_core_operator_snapshot_h
 
 let operator_digest_http_json = Server_dashboard_http_core_operator_digest_http.operator_digest_http_json
 
-(* --- Mission proactive refresh ----------------------------------------
-   A background fiber recomputes the mission snapshot periodically.
-   The HTTP handler returns the cached ref immediately (0ms).
-   Actor-parameterized requests fall back to on-demand compute with
-   SWR cache. *)
-
-let mission_cache =
-  create_cached_surface
-    (`Assoc
-        [ "generated_at", `String (Masc_domain.now_iso ())
-        ; "summary", `Assoc [ "workspace_health", `String "initializing" ]
-        ; "incidents", `List []
-        ; "recommended_actions", `List []
-        ; "command_focus", `Assoc []
-        ; "operator_targets", `Assoc []
-        ; "attention_queue", `List []
-        ; "agent_briefs", `List []
-        ; "keeper_briefs", `List []
-        ; "keepers_unread", `List []
-        ; ( "keepers_listing"
-          , Keeper_snapshot_unread.listing_to_json Keeper_snapshot_unread.Not_listed )
-        ; "internal_signals", `List []
-        ])
-;;
-
-let start_mission_refresh_loop ~state ~sw ~clock =
-  let workspace_config = (Mcp_server.workspace_config state) in
-  let proc_mgr = state.Mcp_server.proc_mgr in
-  let net, mono_clock = state_dashboard_runtime_caps state in
-  let mission_refresh_timeout_s = 60.0 in
-  let compute () =
-    mark_cached_surface_attempt mission_cache;
-    let t0_mission = Unix.gettimeofday () in
-    try
-      run_dashboard_compute
-        ~mode:Offloaded_readonly
-        ?net
-        ?mono_clock
-        ~sw
-        ~clock
-        ~config:workspace_config
-        ~kind:Pool_work.Cpu ~name:__FUNCTION__
-      |> fun run_compute ->
-      let result =
-        run_compute (fun ~config ~sw ->
-          Dashboard_briefing.json ~config ~sw ~clock ~proc_mgr ())
-      in
-      let dt_total = Unix.gettimeofday () -. t0_mission in
-      if dt_total >= 5.0 then Log.Dashboard.warn "[mission profile] total=%.1fs" dt_total;
-      result
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      mark_cached_surface_error mission_cache exn;
-      raise exn
-  in
-  Proactive_refresh.start
-    ~sw
-    ~clock
-    ~config:
-      { (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0) with
-        timeout_s = mission_refresh_timeout_s
-      ; on_failure =
-          Some
-            (fun failure ->
-              mark_cached_surface_error_message
-                mission_cache
-                (Proactive_refresh.failure_message failure))
-      ; warm_delay_s = 90.0
-      }
-    ~compute
-    ~on_result:(fun json ->
-      mark_cached_surface_success mission_cache json;
-      (* The Home Health line is announced when a recomputation moves it. A
-         line that could not be taken leaves the mission refresh as it went. *)
-      match
-        Server_workspace_health_line.observe ~base_path:workspace_config.base_path
-          (Dashboard_projection_cache.with_current_keeper_observations
-             ~config:workspace_config json)
-      with
-      | () -> ()
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn ->
-        Log.Dashboard.warn "Home Health line not observed: %s" (Printexc.to_string exn))
-;;
-
-let briefing_compute ~state ~sw ~clock ?actor () =
-  let net, mono_clock = state_dashboard_runtime_caps state in
-  let compute ?actor () =
-    let started_at = Unix.gettimeofday () in
-    run_dashboard_compute
-      ~mode:Offloaded_readonly
-      ?net
-      ?mono_clock
-      ~sw
-      ~clock
-      ~config:(Mcp_server.workspace_config state)
-      ~kind:Pool_work.Cpu ~name:__FUNCTION__
-      (fun ~config ~sw ->
-         Dashboard_briefing.json
-           ?actor
-           ~config
-           ~sw
-           ~clock
-           ~proc_mgr:state.Mcp_server.proc_mgr
-           ())
-    |> Server_dashboard_http_core_cache.with_projection_diagnostics
-         ~surface:"mission" ~started_at ~extra:[]
-  in
-  compute ?actor ()
-
-(* Mirror execution surface behavior: serve cached mission instantly after the
-   first success, but let the very first default read bootstrap that success
-   instead of staying "initializing" forever when proactive warm-up misses its
-   first build window. *)
-let default_mission_json ~state ~sw ~clock =
-  cached_surface_or_first_success_json
-    mission_cache
-    ~cache_key:"briefing:default"
-    ~ttl:deep_surface_cache_ttl_s
-    ~clock
-    ~timeout_sec:dashboard_briefing_timeout_s
-    (Pool_work.cpu ~name:__FUNCTION__ (fun () -> briefing_compute ~state ~sw ~clock ()))
-
-let dashboard_briefing_http_json ~state ~sw ~clock request =
-  let actor =
-    dashboard_actor_for_request ~base_path:(Mcp_server.workspace_config state).base_path request
-  in
-  let compute ?actor () = briefing_compute ~state ~sw ~clock ?actor () in
-  let full_json =
-    match actor with
-    | None -> default_mission_json ~state ~sw ~clock
-    | Some _ ->
-      (* Actor-parameterized: on-demand with SWR cache. *)
-      let cache_key =
-        dashboard_cache_key
-          (Mcp_server.workspace_config state)
-          "mission"
-          (Option.value ~default:"" actor)
-      in
-      Dashboard_cache.get_or_compute_with_timeout
-        cache_key
-        ~ttl:deep_surface_cache_ttl_s
-        ~clock
-        ~timeout_sec:dashboard_briefing_timeout_s
-        (Pool_work.cpu ~name:__FUNCTION__ (compute ?actor))
-  in
-  Dashboard_projection_cache.with_current_keeper_observations
-    ~config:(Mcp_server.workspace_config state) full_json
-;;
-
-let dashboard_health_line_http_json ~state ~sw ~clock =
-  let config = Mcp_server.workspace_config state in
-  default_mission_json ~state ~sw ~clock
-  |> Dashboard_projection_cache.with_current_keeper_observations ~config
-  |> Server_workspace_health_line.of_briefing
-;;
+(* Mission owns captured scope, read debt and canonical completion in its
+   sibling; the facade carries the same abstract request context. *)
+let mission_cache = Server_dashboard_http_core_mission.cache
+let start_mission_refresh_loop = Server_dashboard_http_core_mission.start
+type mission_http_request = Server_dashboard_http_core_mission.request
+let mission_http_request = Server_dashboard_http_core_mission.request
+let dashboard_briefing_for_request = Server_dashboard_http_core_mission.json
+let dashboard_health_line_for_request = Server_dashboard_http_core_mission.health_line
 
 let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
   let actor =

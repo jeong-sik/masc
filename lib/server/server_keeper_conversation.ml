@@ -289,15 +289,28 @@ let rows_of file decode bytes =
   rows 1 [] (String.split_on_char '\n' bytes)
 ;;
 
-(* The writer of a file reads it before it appends, so a row a stopped server
-   left half written is cut as the append would cut it. *)
-let read file decode path =
-  match
-    Eio_guard.run_in_systhread ~label:"keeper-conversation-read" (fun () ->
-      Fs_compat.recover_private_jsonl_durable_locked_result path)
-  with
+let decoded file decode = function
   | Ok snapshot -> rows_of file decode snapshot.Fs_compat.bytes
   | Error error -> Error (Not_read (Fs_compat.private_jsonl_transaction_error_to_string error))
+;;
+
+(* The writer of a file reads it before it appends, so a row a stopped server
+   left half written is cut as the append would cut it. The writers are
+   serialized: one lock of the process for the index, one call of an account
+   for the turns of a conversation. *)
+let recovered file decode path =
+  Eio_guard.run_in_systhread ~label:"keeper-conversation-recover" (fun () ->
+    Fs_compat.recover_private_jsonl_durable_locked_result path)
+  |> decoded file decode
+;;
+
+(* A read that writes nothing. It is not serialized with the writers, so a
+   row a stopped server left half written refuses it, until the next writer
+   of the file cuts the row. *)
+let observed file decode path =
+  Eio_guard.run_in_systhread ~label:"keeper-conversation-read" (fun () ->
+    Fs_compat.read_private_jsonl_durable_locked_result path ~after:None)
+  |> decoded file decode
 ;;
 
 let append path text =
@@ -387,7 +400,7 @@ let current_or_start root keeper_id provider_account_id ~draw ~now_ms =
   Eio.Mutex.use_ro index_lock (fun () ->
     let* () = private_directory root in
     let index = Filename.concat root index_name in
-    let* started = read Index started_of index in
+    let* started = recovered Index started_of index in
     match last (of_keeper keeper_id started) with
     | Some { conversation; started_at_ms = (_ : int) } -> Ok conversation
     | None -> append_started ~index keeper_id provider_account_id ~draw ~now_ms)
@@ -399,7 +412,7 @@ let current_or_start root keeper_id provider_account_id ~draw ~now_ms =
 let conversations root keeper_id =
   let index = Filename.concat root index_name in
   if Sys.file_exists index
-  then Result.map (of_keeper keeper_id) (read Index started_of index)
+  then Result.map (of_keeper keeper_id) (observed Index started_of index)
   else Ok []
 ;;
 
@@ -413,7 +426,7 @@ let turns_path root (conversation : conversation) =
 (* A conversation with no turn yet has no file. *)
 let turns root conversation =
   let path = turns_path root conversation in
-  if Sys.file_exists path then Result.bind (read Turns turn_row_of path) turns_of else Ok []
+  if Sys.file_exists path then Result.bind (observed Turns turn_row_of path) turns_of else Ok []
 ;;
 
 type turn =
@@ -429,7 +442,7 @@ let open_turn root (conversation : conversation) =
   let directory = Filename.concat root (Conversation_id.to_string conversation.conversation_id) in
   let turns = Filename.concat directory turns_name in
   let* () = private_directory directory in
-  let* rows = read Turns turn_row_of turns in
+  let* rows = recovered Turns turn_row_of turns in
   let* recorded = turns_of rows in
   let session_id =
     List.fold_left

@@ -969,6 +969,40 @@ let test_turn () =
           ; "a read with an id that is no id", [ "keeper_id", "keeper-alice"; "conversation_id", ".." ]
           ; "a read with a name that is no Keeper name", [ "keeper_id", ".." ]
           ];
+        (* A row a stopped server left half written. The read writes nothing
+           and is refused. The next turn of the conversation cuts the row, and
+           the read after it has that turn. *)
+        let current = text_of now "current_conversation_id" in
+        let current_turns = List.fold_left Filename.concat alice_records [ current; "turns.jsonl" ] in
+        let whole = In_channel.with_open_bin current_turns In_channel.input_all in
+        let half = {|{"kind":"asked","turn_id":"half|} in
+        Out_channel.with_open_gen
+          [ Open_wronly; Open_append; Open_binary ]
+          0o600
+          current_turns
+          (fun out -> output_string out half);
+        check_reply
+          "the read of a record with a half written row"
+          (503, {|{"error":"The record of this conversation could not be read or written."}|})
+          (read alice [ "keeper_id", "keeper-alice" ]);
+        Alcotest.(check string)
+          "the read leaves the row as it was"
+          (whole ^ half)
+          (In_channel.with_open_bin current_turns In_channel.input_all);
+        Alcotest.(check string)
+          "the next turn of the conversation goes on in it"
+          current
+          (answered
+             "the turn after a half written row"
+             ~keeper:"keeper-alice"
+             ~runtime:alice_runtime
+             ~text:"echo: after"
+             ~continued:true
+             (reply alice (body ~keeper:"keeper-alice" ~message:"after")));
+        Alcotest.(check (list (pair string string)))
+          "and the read after it has that turn, and not the half row"
+          [ "anew", "answered"; "after", "answered" ]
+          (shown (read_fields "after a half written row" (read alice [ "keeper_id", "keeper-alice" ])));
         Sys.remove (claude ^ ".turn.json");
         check_reply
           "a new conversation of another person's Keeper"

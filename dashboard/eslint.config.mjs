@@ -5,6 +5,9 @@ import tseslint from 'typescript-eslint'
 const TARGET_FILES = [
   'design-system/headless-preact/use-inline-suggestion.ts',
   'design-system/headless-preact/use-collaboration.ts',
+  'src/accounts/console.ts',
+  'src/accounts/main.ts',
+  'src/accounts/wire.ts',
   'src/api/dashboard-runtime.ts',
   'src/api/dashboard.ts',
   'src/api/effect-http.ts',
@@ -60,6 +63,8 @@ const TEST_FILES = [
   'design-system/headless-preact/use-inline-suggestion.test.ts',
   'design-system/headless-preact/use-collaboration.test.ts',
   'design-system/headless-preact/use-tabs.test.ts',
+  'src/accounts/console.test.ts',
+  'src/accounts/wire.test.ts',
   'src/api/schemas/runtime.test.ts',
   'src/api/schemas/dashboard-config.test.ts',
   'src/api/schemas/transport-health.test.ts',

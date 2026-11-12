@@ -1,0 +1,20 @@
+/* The layout of the console of a signed-in person. The page links the base
+   sheet of the account pages before this one and takes its colours, fields
+   and buttons from it, so they are the ones of the sign-in page. This file
+   adds no colour. */
+main { width: 100%; max-width: 1072px; margin: 0 auto; padding: 24px 16px 48px; }
+
+/* One gap between the parts of a page. The rule weighs nothing and comes
+   after the margin reset of the base, so it wins by its place and any rule
+   below changes a margin. */
+:where(main, section, div) > * + * { margin-top: 16px; }
+
+/* Who is signed in and the way out sit at the end of the line that names the
+   place. On a narrow window they move under it together. */
+.site-header { flex-wrap: wrap; row-gap: 8px; }
+.account { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+
+.callout-title { color: var(--text-bright); font-weight: 600; }
+
+/* A button that is waiting for an answer stays where the focus can rest. */
+button[aria-disabled="true"] { opacity: 0.5; cursor: progress; }

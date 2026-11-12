@@ -5,8 +5,11 @@ module Layout = Masc_tui_message_layout
 module Render_metrics = Masc_tui_render_metrics
 module Render_prim = Masc_tui_render_prim
 
+(* The assertions read English; the TUI opens in Korean. *)
 let make_state () =
-  Types.create_state ~workspace:"" ~port:0 ()
+  let state = Types.create_state ~workspace:"" ~port:0 () in
+  state.Types.ui_language <- Types.Lang_en;
+  state
 ;;
 
 let test_compact_connection_priority () =
@@ -207,7 +210,7 @@ let test_calculate_kpis_empty () =
   check int "each unread block says so, and says it the one way" 3
     (List.length
        (List.filter
-          (fun line -> contains line "    not observed")
+          (fun line -> contains line "    not loaded")
           (String.split_on_char '\n' output)));
   check bool "no fabricated heap" false (contains output "42.5");
   check bool "no fabricated latency" false (contains output "0.82")

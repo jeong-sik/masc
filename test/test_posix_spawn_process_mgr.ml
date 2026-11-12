@@ -139,6 +139,54 @@ let test_child_is_killed_when_the_switch_is_released () =
    at startup and eio_linux does not, so on Linux the wait used to never end.
    Removing the handler here puts this backend into the state the other one
    starts in, which is what lets the Linux failure run on any machine. *)
+(* The spawn call suspends its fiber, so the switch it was given can finish
+   before the call returns. Its release hook then stops the child at once and
+   the caller is refused, as [Eio.Switch.on_release] does on a finished
+   switch. The duration names the child for the search below. *)
+let unowned_child_seconds = "61.37"
+
+let unowned_child_is_running () =
+  (* The dot is escaped so the shell that runs the search does not match
+     its own command line. *)
+  let pattern = String.concat "\\." (String.split_on_char '.' unowned_child_seconds) in
+  match Unix.system (Printf.sprintf "pgrep -f 'sleep %s' > /dev/null" pattern) with
+  | Unix.WEXITED 0 -> true
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
+;;
+
+let test_switch_that_finishes_during_the_spawn_leaves_no_child () =
+  Eio_main.run
+  @@ fun _env ->
+  let refused =
+    Eio.Switch.run
+    @@ fun outer ->
+    let handed, hand = Eio.Promise.create () in
+    let released, release = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw:outer (fun () ->
+      Eio.Switch.run (fun sw ->
+        Eio.Promise.resolve hand sw;
+        Eio.Promise.await released));
+    let sw = Eio.Promise.await handed in
+    (* The fiber above is runnable from here; it runs, and ends its switch,
+       when this fiber suspends inside the spawn. *)
+    Eio.Promise.resolve release ();
+    match
+      Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr [ "/bin/sleep"; unowned_child_seconds ]
+    with
+    | (_ : _ Eio.Process.t) -> false
+    | exception Invalid_argument _ -> true
+  in
+  check bool "the caller is refused" true refused;
+  check bool "no child outlives the refusal" false (unowned_child_is_running ())
+;;
+
+(* [Systhread_host.start] is once per process, so every case of the last
+   group starts it and the groups before it run without one. *)
+let with_the_host test () =
+  Systhread_host.start ();
+  test ()
+;;
+
 let test_await_without_the_backends_sigchld_handler () =
   Eio_main.run
   @@ fun env ->
@@ -715,6 +763,25 @@ let () =
     ; ( "stricter than eio_posix"
       , [ test_case "closes a descriptor it was not given" `Quick
             test_this_spawn_does_not_inherit_an_unlisted_pipe
+        ] )
+    ; ( "the spawn suspends its fiber"
+      , [ test_case "a switch that finishes meanwhile leaves no child" `Quick
+            test_switch_that_finishes_during_the_spawn_leaves_no_child
+        ] )
+    ; ( "with the system-thread host started"
+      , [ test_case "captures stdout" `Quick (with_the_host test_stdout_capture)
+        ; test_case "reports the exit status" `Quick (with_the_host test_exit_status)
+        ; test_case "honours cwd and env" `Quick (with_the_host test_cwd_and_env)
+        ; test_case "rejects a missing executable" `Quick
+            (with_the_host test_missing_executable)
+        ; test_case "kills the child when the switch is released" `Quick
+            (with_the_host test_child_is_killed_when_the_switch_is_released)
+        ; test_case "keeps the start time read before the reap" `Quick
+            (with_the_host test_original_birth_survives_reap)
+        ; test_case "closes a descriptor it was not given" `Quick
+            (with_the_host test_this_spawn_does_not_inherit_an_unlisted_pipe)
+        ; test_case "a switch that finishes meanwhile leaves no child" `Quick
+            (with_the_host test_switch_that_finishes_during_the_spawn_leaves_no_child)
         ] )
     ]
 ;;

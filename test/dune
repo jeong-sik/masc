@@ -3033,6 +3033,7 @@
 
 (include stanzas/bench_fleet_stream.inc)
 (include stanzas/bench_systhread_host_fs_compat.inc)
+(include stanzas/bench_systhread_host_spawn.inc)
 (include stanzas/bench_sse_pump_throughput.inc)
 
 (include stanzas/test_tui_fleet_stream.inc)

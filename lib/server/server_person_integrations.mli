@@ -5,14 +5,16 @@
     Nothing here decides anything: each fact comes from the function that
     decides it for the route that acts. *)
 
-(** Whether a model of the integration runs on this server: a verification
-    ({!Server_setup_account_login.verify}) and a Keeper turn
-    ({!Server_preview_keeper_turn.run}) both start the official client with
-    the native posture of its default configuration, and
-    {!Runtime_account_access.authorize_native} judges that posture. A
-    multi-account process allows no native tools, so today the models of
-    Claude Code are [Allowed], and those of Codex and Muse are refused with
-    [Native_tools_reach_other_homes] (plan D3c). *)
+(** Whether a model of the integration is called on this server. A
+    verification ({!Server_setup_account_login.verify}) starts the official
+    client with the native posture of its default configuration, and
+    {!Runtime_account_access.authorize_native} judges that posture. A Keeper
+    turn ({!Server_preview_keeper_turn.run}) starts Claude Code and Codex the
+    same way, and takes no Muse Runtime at all. A multi-account process
+    allows no native tools, so today the models of Claude Code are
+    [Allowed], and those of Codex and Muse are refused with
+    [Native_tools_reach_other_homes] (plan D3c), the reason a verification
+    of them is refused. *)
 type calls =
   | Allowed
   | Refused of Runtime_account_access.native_refusal

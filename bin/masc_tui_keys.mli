@@ -480,7 +480,7 @@ val keeper_detail_tab_taken_keys : Masc_tui_types.keeper_detail_tab -> string li
 (** The single keys the tab's own bindings answer ({!key_atoms}); a Keeper
     control on one of them does something else on that tab. *)
 
-val keeper_detail_tab_hint : Masc_tui_types.keeper_detail_tab -> string
+val keeper_detail_tab_hint : ko:bool -> Masc_tui_types.keeper_detail_tab -> string
 (** The keys the Keeper detail footer leads with, [key:label] joined by two
     spaces, led by the tab switch. Projects {!keeper_detail_tab_bindings} so
     the footer and the help sheet cannot name different keys. *)

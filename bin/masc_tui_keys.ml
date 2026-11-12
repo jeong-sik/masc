@@ -2688,16 +2688,16 @@ let here_marker = " \xc2\xb7 you are here"
 let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   match tab with
   | Detail_items ->
-      [ b Navigate "j/k" "preview"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Navigate "Home/End" "first/last"
-      ; b Navigate "v" "view" ~help:"all, owned, can buy, then face/neck/head/hand/base"
-      ; b Navigate "Space" "compare" ~help:"compare the try-on picture with the current outfit"
-      ; b Act "a" "ask Keeper" ~help:"prepare a price-bounded buy/equip chat draft; Enter sends it"
+      [ b ~ko:"미리 보기" Navigate "j/k" "preview"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"처음/끝" Navigate "Home/End" "first/last"
+      ; b ~ko:"보기" Navigate "v" "view" ~help:"all, owned, can buy, then face/neck/head/hand/base"
+      ; b ~ko:"비교" Navigate "Space" "compare" ~help:"compare the try-on picture with the current outfit"
+      ; b ~ko:"키퍼에게 부탁" Act "a" "ask Keeper" ~help:"prepare a price-bounded buy/equip chat draft; Enter sends it"
       ]
   | Detail_github ->
-      [ b Act "L" "login" ~help:"start the gh device-flow login with the ticked scopes"
-      ; b Act "P" "token" ~help:"set fine-grained PAT / token"
+      [ b ~ko:"로그인" Act "L" "login" ~help:"start the gh device-flow login with the ticked scopes"
+      ; b ~ko:"토큰" Act "P" "token" ~help:"set fine-grained PAT / token"
       ]
       (* One digit per scope the login can ask for, in the order the tab
          lists them, so a scope added to the server's list gets its key here
@@ -2709,44 +2709,44 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
               ~help:"tick or untick this scope for the next L login")
           Masc.Keeper_github_identity.all_login_scopes
   | Detail_sandbox ->
-      [ b Act "o" "actual logs"
-      ; b Act "d/m/s" "backend"
+      [ b ~ko:"컨테이너 로그" Act "o" "actual logs"
+      ; b ~ko:"백엔드" Act "d/m/s" "backend"
           ~help:"set the sandbox backend in place: docker / microvm / remote_ssh"
-      ; b Navigate "PgUp/PgDn" "detail page"
-      ; b Meta "R" "refresh"
+      ; b ~ko:"상세 페이지" Navigate "PgUp/PgDn" "detail page"
+      ; b ~ko:"새로 조회" Meta "R" "refresh"
       ]
   | Detail_instructions ->
-      [ b Act "e" "edit TOML in $EDITOR"
+      [ b ~ko:"$EDITOR 로 TOML 고치기" Act "e" "edit TOML in $EDITOR"
           ~help:"multiline Keeper instructions; only changed fields are sent"
-      ; b Act "E" "edit JSON in $EDITOR"
+      ; b ~ko:"$EDITOR 로 JSON 고치기" Act "E" "edit JSON in $EDITOR"
           ~help:"the same settings and guarded save in JSON"
       ]
   | Detail_identity ->
       [ (* Arrows first: the digits only reach the first nine rows and the
            list is a declaration directory that can hold more. *)
-        b Navigate "arrows+enter" "connect"
-      ; b Navigate "PgUp/PgDn" "page" ~help:"move the cursor a page; Home/End go to the first and last service"
-      ; b Navigate "v" "view" ~help:"cycle all / attached only / not attached only"
-      ; b Navigate "o" "order" ~help:"cycle attached first / declared order"
-      ; b Act "T" "toggle" ~help:"turn the provider under the cursor on or off"
-      ; b Act "A" "app"
+        b ~ko:"연결" Navigate "arrows+enter" "connect"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page" ~help:"move the cursor a page; Home/End go to the first and last service"
+      ; b ~ko:"보기" Navigate "v" "view" ~help:"cycle all / attached only / not attached only"
+      ; b ~ko:"정렬" Navigate "o" "order" ~help:"cycle attached first / declared order"
+      ; b ~ko:"켜기/끄기" Act "T" "toggle" ~help:"turn the provider under the cursor on or off"
+      ; b ~ko:"앱 등록" Act "A" "app"
           ~help:"open the app-registration form for it -- it asks for a Client ID"
-      ; b Act "D D" "disconnect"
+      ; b ~ko:"연결 끊기" Act "D D" "disconnect"
           ~help:
             "twice: forget the stored token, drop the tools it attached, and ask \
              the provider to revoke what it still holds"
-      ; b Search "/" "filter"
-      ; b Meta "R" "refresh"
+      ; b ~ko:"거르기" Search "/" "filter"
+      ; b ~ko:"새로 조회" Meta "R" "refresh"
       ]
   | Detail_channels ->
-      [ b Navigate "j/k" "transport"
-      ; b Navigate "J/K" "binding"
-      ; b Navigate "PgUp/PgDn" "detail page"
-      ; b Act "b / e / u u" "bind / reassign / remove"
+      [ b ~ko:"채널 종류" Navigate "j/k" "transport"
+      ; b ~ko:"연결" Navigate "J/K" "binding"
+      ; b ~ko:"상세 페이지" Navigate "PgUp/PgDn" "detail page"
+      ; b ~ko:"연결 / 옮기기 / 끊기" Act "b / e / u u" "bind / reassign / remove"
           ~help:"bind a channel, reassign the selected row, or remove it twice-confirmed"
         (* Takes [U] from the runtime picker on this tab only, the way [u]
            is taken above: the picker stays on every other tab. *)
-      ; b Act "U U" "unbind all"
+      ; b ~ko:"모두 끊기" Act "U U" "unbind all"
           ~help:"remove every channel binding of this Keeper on every \
                  transport, twice-confirmed; a channel rebound to another \
                  Keeper meanwhile is left as is"
@@ -2755,11 +2755,11 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
       (* Lowercase [b] beside [B]: one partition, then all of them. It was
          [Q], but the global quit test takes [Q] as well as [q] and runs
          first, so the key armed the exit instead of the requeue. *)
-      [ b Act "b" "requeue board"
+      [ b ~ko:"게시판 다시 넣기" Act "b" "requeue board"
           ~help:
             "requeue the oldest blocked Board-attention partition; \
              its judgment call may run a second time"
-      ; b Act "B" "requeue all board"
+      ; b ~ko:"게시판 모두 다시 넣기" Act "B" "requeue all board"
           ~help:
             "requeue every waiting Board-attention partition in order, with \
              a separate audited CAS for each; judgment calls may run again"
@@ -2767,14 +2767,14 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
   | Detail_terminal ->
       (* [g] is the approval-gate toggle on every tab, so the Terminal does not
          borrow it for the top the way readers elsewhere do. *)
-      [ b Navigate "j/k" "scroll"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Navigate "Home/End" "oldest/follow"
+      [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"처음/따라가기" Navigate "Home/End" "oldest/follow"
           ~help:"Home goes to the oldest output kept; End goes back to the \
                  bottom and follows new output again"
       ]
   | Detail_automation ->
-      [ b Navigate "< / >" "schedule pages"
+      [ b ~ko:"일정 쪽" Navigate "< / >" "schedule pages"
           ~help:"previous / next page for this Keeper; pages are separate observations" ]
   | Detail_secrets | Detail_runs -> []
 
@@ -2798,12 +2798,13 @@ let keeper_detail_tab_taken_keys tab =
 
 (* The keys the detail footer leads with. Same [key:label] spelling as the
    rest of the row, and the tab switch leads because it is on every tab. *)
-let keeper_detail_tab_hint tab =
+let keeper_detail_tab_hint ~ko tab =
+  let named binding =
+    if ko then key_hint ?label:binding.label_ko binding else key_hint binding
+  in
   String.concat "  "
-    ("[ ]:tab"
-     :: List.map
-          (fun binding -> key_hint binding)
-          (keeper_detail_tab_bindings tab))
+    (("[ ]:" ^ if ko then "탭" else "tab")
+     :: List.map named (keeper_detail_tab_bindings tab))
 
 (* A surface's rows on the sheet. The shared tail -- r, Tab and q exactly as
    [listing_meta] spells them -- is said once, under Global. Repeated under

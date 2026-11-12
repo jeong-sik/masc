@@ -3465,6 +3465,19 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
+  (* The English word is the one the notices about the action use. *)
+  let action_word action =
+    let english = Keeper_control.action_label action in
+    match action with
+    | Keeper_control.Pause -> say "일시 정지" english
+    | Keeper_control.Resume -> say "재개" english
+    | Keeper_control.Boot -> say "올리기" english
+    | Keeper_control.Shutdown -> say "내리기" english
+    | Keeper_control.Wakeup -> say "깨우기" english
+    | Keeper_control.Delete -> say "삭제" english
+  in
   (* An action that ends a fiber is toned apart from the reversible ones, so the
      key that needs two presses does not read like the keys that need one. *)
   let hint action label =
@@ -3480,8 +3493,10 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
   in
   let toggle =
     match Option.bind reading Keeper_control.primary with
-    | Some action -> hint action (Keeper_control.action_label action)
-    | None -> Printf.sprintf "%sp:pause%s" Ansi.dim Ansi.reset
+    | Some action -> hint action (action_word action)
+    | None ->
+        Printf.sprintf "%sp:%s%s" Ansi.dim (action_word Keeper_control.Pause)
+          Ansi.reset
   in
   let gate_hint =
     match reading with
@@ -3508,8 +3523,8 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      remote_ssh backend, and the row beside it still said "s:shutdown". *)
   let view_and_order =
     if state.view = Keepers Keeper_list then
-      [ "v", (Theme.accent ()) ^ "v" ^ Ansi.reset ^ ":view"
-      ; "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":order"
+      [ "v", (Theme.accent ()) ^ "v" ^ Ansi.reset ^ ":" ^ say "보기" "view"
+      ; "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":" ^ say "정렬" "order"
       ]
     else []
   in
@@ -3524,77 +3539,98 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
   let story = if state.view = Keepers Keeper_list then state.keeper_story else None in
   let way =
     if offers_back then
-      [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset ]
+      [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ say "뒤로" "back" ^ Ansi.reset ]
     else
       let esc =
         "Esc",
-        "Esc:" ^ Ansi.dim ^ (match story with None -> "dashboard" | Some _ -> "close") ^ Ansi.reset
+        "Esc:" ^ Ansi.dim
+        ^ (match story with
+           | None -> say "뒤로" "dashboard"
+           | Some _ -> say "닫기" "close")
+        ^ Ansi.reset
       in
       (* A heading opens no Keeper; its arrows fold the group under it. On a
          Keeper, Enter and Right are one item so that the pinned Enter keeps
          Right on the row too: they were one item while both opened the
          detail, and Right alone would be the first key a narrow row loses
          after [r]. The labels follow the keys in order. *)
-      if keeper_list_on_heading state then [ "Left / Right", accent "Left / Right" ^ ":fold"; esc ]
+      if keeper_list_on_heading state then
+        [ "Left / Right", accent "Left / Right" ^ ":" ^ say "접기 / 펴기" "fold"; esc ]
       else if state.view = Keepers Keeper_list
               && keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then
-        ["Enter", accent "Enter" ^ (match story with None -> ":world" | Some _ -> ":close"); esc]
+        [ "Enter",
+          accent "Enter" ^ ":"
+          ^ (match story with None -> say "World" "world" | Some _ -> say "닫기" "close")
+        ; esc
+        ]
       else
         let enter =
           match story with
-          | None -> "story"
-          | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) -> "close"
-          | Some Masc_tui_keeper_story.Schedule -> "story"
-          | Some Masc_tui_keeper_story.Memory -> "browse"
+          | None -> say "Story" "story"
+          | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) ->
+              say "닫기" "close"
+          | Some Masc_tui_keeper_story.Schedule -> say "Story" "story"
+          | Some Masc_tui_keeper_story.Memory -> say "기억 열기" "browse"
         in
-        [ "Enter / Right", accent "Enter / Right" ^ ":" ^ enter ^ " / detail"; esc ]
+        [ "Enter / Right",
+          accent "Enter / Right" ^ ":" ^ enter ^ " / " ^ say "상세" "detail"
+        ; esc
+        ]
   in
   let story_hints =
     match story with
     | None -> []
     | Some Masc_tui_keeper_story.World -> []
     | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) ->
-        [ accent "Tab" ^ ":page"; accent "s" ^ ":schedules"; accent "m" ^ ":memory" ]
+        [ accent "Tab" ^ ":" ^ say "쪽" "page"
+        ; accent "s" ^ ":" ^ say "일정" "schedules"
+        ; accent "m" ^ ":" ^ say "기억" "memory"
+        ]
   in
   (* [s] shuts a Keeper down only while the window is closed. *)
   let taken = match story with None -> taken | Some _ -> "s" :: taken in
   let items =
       view_and_order
-      @ [ "j/k", Ansi.dim ^ "j/k:move" ^ Ansi.reset
+      @ [ "j/k", Ansi.dim ^ "j/k:" ^ say "선택" "move" ^ Ansi.reset
           ; toggle_key, toggle
-          ; Keeper_control.action_key Keeper_control.Wakeup, hint Keeper_control.Wakeup "wake"
+          ; Keeper_control.action_key Keeper_control.Wakeup,
+            hint Keeper_control.Wakeup (action_word Keeper_control.Wakeup)
           (* RFC tui-server-lifecycle: with no server up, "s" starts one
              rather than shutting a keeper down, so the hint follows suit. *)
           ; "s", (match state.connection_status with
-             | Disconnected -> (Theme.accent ()) ^ "s" ^ Ansi.reset ^ ":start server"
+             | Disconnected ->
+                 (Theme.accent ()) ^ "s" ^ Ansi.reset ^ ":"
+                 ^ say "서버 시작" "start server"
              | Connecting | Booting | Degraded | Connected ->
-                 hint Keeper_control.Shutdown "shutdown")
+                 hint Keeper_control.Shutdown (action_word Keeper_control.Shutdown))
             (* Delete is the only action a keeper whose configuration failed to
                read still offers, and [primary] deliberately withholds it from
                the toggle. Without its own hint the footer showed that keeper a
                dimmed "p pause" and nothing else, so the one key that worked was
                the one key nothing named. *)
-          ; Keeper_control.action_key Keeper_control.Delete, hint Keeper_control.Delete "delete"
-          ; "e", (Theme.accent ()) ^ "e" ^ Ansi.reset ^ ":settings"
-          ; "a", (Theme.accent ()) ^ "a" ^ Ansi.reset ^ ":new"
+          ; Keeper_control.action_key Keeper_control.Delete,
+            hint Keeper_control.Delete (action_word Keeper_control.Delete)
+          ; "e", (Theme.accent ()) ^ "e" ^ Ansi.reset ^ ":" ^ say "설정" "settings"
+          ; "a", (Theme.accent ()) ^ "a" ^ Ansi.reset ^ ":" ^ say "새 키퍼" "new"
           ; (if state.view = Keepers Keeper_detail then
-               "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":logs"
-             else "l", (Theme.accent ()) ^ "l" ^ Ansi.reset ^ ":logs")
-          ; "t", (Theme.accent ()) ^ "t" ^ Ansi.reset ^ ":calls"
+               "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":" ^ say "로그" "logs"
+             else "l", (Theme.accent ()) ^ "l" ^ Ansi.reset ^ ":" ^ say "로그" "logs")
+          ; "t", (Theme.accent ()) ^ "t" ^ Ansi.reset ^ ":" ^ say "호출" "calls"
           ; "g", gate_hint
           ; (if state.view = Keepers Keeper_detail then "U" else "u"),
             (Theme.accent ())
             ^ (if state.view = Keepers Keeper_detail then "U" else "u")
-            ^ Ansi.reset ^ ":runtime"
+            ^ Ansi.reset ^ ":" ^ say "런타임" "runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
-          ; "c", (if offers_chat then (Theme.accent ()) ^ "c" ^ Ansi.reset ^ ":chat"
-             else Ansi.dim ^ "c:chat" ^ Ansi.reset)
+          ; "c", (if offers_chat then
+                    (Theme.accent ()) ^ "c" ^ Ansi.reset ^ ":" ^ say "채팅" "chat"
+                  else Ansi.dim ^ "c:" ^ say "채팅" "chat" ^ Ansi.reset)
           ]
       @ way
-      @ [ "r", Ansi.dim ^ "r:refresh" ^ Ansi.reset
-        ; "q", "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
+      @ [ "r", Ansi.dim ^ "r:" ^ say "새로 조회" "refresh" ^ Ansi.reset
+        ; "q", "q:" ^ Ansi.dim ^ say "종료" "quit" ^ Ansi.reset
         ]
   in
   story_hints

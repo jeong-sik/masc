@@ -4843,14 +4843,16 @@ let render_keeper_detail (state : state) =
        Sandbox tab, where [s] sets the remote_ssh backend and [o] reads the
        container logs the strip called "actual logs". *)
     let hints =
-      Masc_tui_keys.keeper_detail_tab_hint state.detail_tab
+      Masc_tui_keys.keeper_detail_tab_hint
+        ~ko:(state.ui_language = Lang_ko) state.detail_tab
       ^ "  "
       ^ keeper_control_hints
           ~taken:(Masc_tui_keys.keeper_detail_tab_taken_keys state.detail_tab)
           state (Some (keeper_reading state k))
     in
     let hints =
-      if keeper_roster_pane_shown state ~cols then "h/l:pane  " ^ hints
+      if keeper_roster_pane_shown state ~cols then
+        "h/l:" ^ ui_text state ~ko:"창" ~en:"pane" ^ "  " ^ hints
       else hints
     in
     let footer =

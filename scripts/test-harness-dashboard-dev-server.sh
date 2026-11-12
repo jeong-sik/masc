@@ -15,6 +15,7 @@ pids="${fixture}/pids"
 other_pid=""
 bystander_pids=""
 harness_pid=""
+test_pid="$$"
 
 # Recorded pids that still run. A zombie waiting for its parent does not.
 running() {
@@ -42,7 +43,18 @@ end_bystanders() {
 }
 
 finish() {
-  local pid
+  local pid self
+  # The test is ending. A second signal would end bash in the middle of this
+  # and leave what it had not ended yet.
+  trap '' HUP INT QUIT TERM
+  # A command this test starts in the background is a copy of this shell until
+  # it becomes that command, and a signal can make it run this trap. Such a
+  # copy leaves the test's processes and files alone. It is told apart by its
+  # pid: the parent of a `sh` that replaces a subshell of it. ($$ names the
+  # test in the copy too, and bash 3.2 has no BASHPID.)
+  # shellcheck disable=SC2016 # `sh` expands it
+  self="$(exec sh -c 'echo "${PPID}"')"
+  [[ -z "${self}" || "${self}" == "${test_pid}" ]] || return 0
   harness_dashboard_dev_server_stop
   # A check that fails leaves the processes it is about. End what this test
   # started, so a failed run does not keep a port either.
@@ -380,8 +392,9 @@ for ending in 'INT to its process group, as Ctrl-C sends it' \
 done
 printf 'ok: a script that is ended leaves no server\n'
 
-# The server is stuck and the script is told to end again, in each way that
-# ends a script, while it waits for the server to exit.
+# The server is stuck, and while the script waits for it to exit, the script
+# gets each of the signals that its exit stop ignores, sent to its process
+# group.
 FAKE_VITE_IGNORES_SIGNALS=1 run_harness
 await harness_started 120 || fail "the script never started the server that ignores signals"
 for signal in INT TERM HUP QUIT INT; do

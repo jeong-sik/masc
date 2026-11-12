@@ -86,8 +86,9 @@ type t =
 val of_event : Sse.external_event -> t option
 (** Validate exact wire names and input identities. Unknown or malformed
     input, whole snapshot output and [Dashboard_observation] are ignored.
-    [Execution_invalidated] is the explicit compact invalidation, never an
-    [execution_snapshot] containing a computed snapshot. Only exact JSON-RPC
+    [Execution_invalidated] is the producer's timestamped [execution_snapshot]
+    envelope whose [payload] is a compact true tombstone, never a computed
+    snapshot or a fixture-only flattened tombstone. Only exact JSON-RPC
     2.0 [notifications/board] and [notifications/tools/list_changed]
     notification envelopes are unwrapped; protocol replies, requests with an
     id and unrelated notification methods are not observation inputs.

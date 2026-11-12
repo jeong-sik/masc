@@ -67,6 +67,244 @@ let test_exact_dependency_matrix () =
     ; Input.Board ]
 ;;
 
+let test_execution_dependency_matrix () =
+  let affects = Refresh.affects Refresh.Execution in
+  List.iter (fun input -> check bool "execution source is admitted" true (affects input))
+    [ Input.Workspace_agent_signal {agent = "source-agent"}
+    ; Input.Workspace_messages {request_id = "original-message";
+        mention_delivery = Masc_domain.Mention_passive}
+    ; Input.Execution_invalidated; Input.Board
+    ; Input.Keeper_tool_call {keeper = "piano"}
+    ; Input.Dataset Workspace_dataset_event.Goals ];
+  List.iter (fun input -> check bool "unread surface cannot wake execution" false (affects input))
+    [ Input.Dataset Workspace_dataset_event.World_memory
+    ; Input.Dataset Workspace_dataset_event.Play_seats
+    ; Input.Dataset (Workspace_dataset_event.Dashboard_observation {topic = `Telemetry; scope = `Workspace})
+    ; Input.Agent_core {keeper = Some "piano"; change = Input.Tool_called}
+    ; Input.Telemetry_sample ]
+;;
+
+let test_execution_owner_rejects_a_retired_request () =
+  with_workspace (fun _env state ->
+    let config = Mcp_server.workspace_config state in
+    let old_scope = Mcp_server.workspace_scope state in
+    let old_owner = Surfaces.For_testing.owner_for_state ~state in
+    let old_cache = Surfaces.execution_cache ~state in
+    let initial = Surfaces.For_testing.begin_execution_attempt ~owner:old_owner () in
+    check bool "old scope originally had a real successful publication" true
+      (Surfaces.For_testing.publish_execution_attempt_success initial (`Assoc ["marker", `String "old-good"]));
+    let old_generation = Yojson.Safe.Util.(
+      (Cache.snapshot old_cache).json |> member "execution_publication_generation" |> to_int) in
+    let old_attempt = Surfaces.For_testing.begin_execution_attempt ~owner:old_owner () in
+    (match Mcp_server.set_workspace_config state config with
+     | Ok () -> () | Error _ -> fail "same-path scope replacement failed");
+    let current_owner = Surfaces.For_testing.owner_for_state ~state in
+    let current_cache = Surfaces.execution_cache ~state in
+    check bool "same-path scope owns a different execution cell" true (old_cache != current_cache);
+    let current_attempt = Surfaces.For_testing.begin_execution_attempt ~owner:current_owner () in
+    check bool "current publication is admitted" true
+      (Surfaces.For_testing.publish_execution_attempt_success current_attempt
+        (`Assoc ["marker", `String "current-scope"]));
+    check string "Goal/header process publication identity remains unchanged"
+      Surfaces.execution_publication_epoch Yojson.Safe.Util.(
+        (Cache.snapshot current_cache).json |> member "execution_publication_epoch" |> to_string);
+    check bool "same-process scope replacement advances the generation floor" true
+      (Yojson.Safe.Util.((Cache.snapshot current_cache).json
+         |> member "execution_publication_generation" |> to_int) > old_generation);
+    check bool "old request success is refused" false
+      (Surfaces.For_testing.publish_execution_attempt_success old_attempt
+        (`Assoc ["marker", `String "retired-scope"]));
+    check bool "old request failure cannot degrade the current answer" false
+      (Surfaces.For_testing.publish_execution_attempt_failure old_attempt Exit);
+    let delayed = Surfaces.execution_cache_for_scope ~state old_scope in
+    Cache.mark_cached_surface_success delayed (`String "delayed old lookup");
+    check bool "delayed old lookup cannot retire the current owner" true
+      (Surfaces.execution_cache ~state == current_cache);
+    check bool "current answer survives old scope writes" true
+      (Yojson.Safe.Util.member "marker" (Cache.snapshot current_cache).json = `String "current-scope");
+    Surfaces.publish_shell_cache_success ~state ~scope:old_scope ~light:false
+      (`Assoc ["marker", `String "late retired shell"]);
+    check bool "old shell completion cannot seed current namespace truth" true
+      (Option.is_none (Surfaces.last_good_shell_for_scope ~state (Mcp_server.workspace_scope state))))
+;;
+
+let with_execution_workspace f =
+  with_workspace (fun env state ->
+    let config = Mcp_server.workspace_config state in
+    let inherited = Runtime.For_testing.snapshot () in
+    Fun.protect ~finally:(fun () ->
+      Dashboard_projection_cache.register_operator_snapshot_json
+        {snapshot = Operator_control.snapshot_json};
+      Runtime.For_testing.restore inherited)
+      (fun () ->
+        let path = Filename.concat config.base_path "execution-runtime.toml" in
+        let oc = open_out path in
+        Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+          output_string oc (String.concat "\n" [
+            "version = 1"; "[runtime]"; "default = \"test_provider.test_model\"";
+            "[providers.test_provider]"; "display-name = \"Isolated metadata fixture\"";
+            "protocol = \"openai-compatible-http\""; "endpoint = \"http://127.0.0.1:1\"";
+            "[models.test_model]"; "api-name = \"test-model\""; "max-context = 8192";
+            "tools-support = true"; "streaming = true"; "[test_provider.test_model]";
+            "max-concurrent = 1"; ""]));
+        (match Runtime.init_default ~config_path:path with
+         | Ok () -> () | Error error -> fail error);
+        ignore (Workspace.init config ~agent_name:None);
+        Dashboard_projection_cache.register_operator_snapshot_json
+          {snapshot = Operator_control.snapshot_json};
+        Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURES_ENABLED" (Some "false") (fun () ->
+          Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURE" None (fun () -> f env state))))
+;;
+
+let subscribe_execution_frames ~state ~sw ~id consume =
+  let scope = Mcp_server.workspace_scope state in
+  Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path:scope.config.base_path)
+    ~observer_instance_id:(Server_observer_scope.instance_id scope) ~id
+    ~callback:(fun event ->
+      match Yojson.Safe.Util.member "type" event.Sse.ext_payload with
+      | `String "execution_snapshot" ->
+          let payload = Yojson.Safe.Util.member "payload" event.ext_payload in
+          if Yojson.Safe.Util.member "execution_invalidated" payload = `Bool false
+          then consume `Execution payload
+      | `String "project_snapshot" -> consume `Project
+          (Yojson.Safe.Util.member "payload" event.ext_payload)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> ()) ();
+  Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external id)
+;;
+
+let test_actual_execution_worker_waits_for_original_store_writes () =
+  with_execution_workspace (fun env state ->
+    let config = Mcp_server.workspace_config state in
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock (Time_compat.now ());
+    let frames = Eio.Stream.create 8 in
+    Eio.Switch.run (fun sw ->
+      subscribe_execution_frames ~state ~sw ~id:"execution-original-write" (fun kind payload ->
+        match kind with `Execution -> Eio.Stream.add frames payload | `Project -> ());
+      Surfaces.start_execution_refresh_loop ~state ~sw
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+        ~net:(Eio.Stdenv.net env) ~mono_clock:(Eio.Stdenv.mono_clock env);
+      let initial = Eio.Stream.take frames in
+      check int "real empty workspace starts with no active agent" 0
+        Yojson.Safe.Util.(initial |> member "agents" |> to_list |> List.length);
+      Eio.Fiber.yield ();
+      check bool "successful production worker has no cadence timer" false
+        (Eio_mock.Clock.try_advance clock);
+      let agent : Masc_domain.agent = {id = None; name = "original-agent";
+        agent_type = "review"; status = Masc_domain.Active; capabilities = [];
+        current_task = None; session_bound_at = "2020-01-01T00:00:00Z";
+        last_seen = "2020-01-01T00:01:00Z"; meta = None} in
+      let path = Filename.concat (Workspace.agents_dir config) "original-agent.json" in
+      Workspace_agent_record.write config path ~previous:None agent;
+      let refreshed = Eio.Stream.take frames in
+      let rows = Yojson.Safe.Util.(refreshed |> member "agents" |> to_list) in
+      check bool "canonical execution contains the actual committed agent" true
+        (List.exists (fun row -> Yojson.Safe.Util.member "name" row = `String agent.name
+          && Yojson.Safe.Util.member "last_seen" row = `String agent.last_seen) rows);
+      Eio.Fiber.yield ();
+      check bool "source and output settle without a feedback timer" false
+        (Eio_mock.Clock.try_advance clock);
+      let previous_task_hook = Atomic.get Workspace_hooks.on_task_mutation_fn in
+      Fun.protect ~finally:(fun () ->
+        Atomic.set Workspace_hooks.on_task_mutation_fn previous_task_hook)
+        (fun () ->
+          Surfaces.install_task_mutation_cache_invalidation
+            ~invalidate_full_health_snapshot:(fun () -> ()) ();
+          let task = match Workspace.add_task_with_result config
+              ~title:"Original Todo source" ~priority:2 ~description:"Isolated store commit" with
+            | Ok task -> task
+            | Error error -> fail (Workspace.add_task_error_to_string error) in
+          (* The actual mutation emits a timestamped execution_snapshot with
+             its compact tombstone under payload. A flattened decoder-only
+             fixture would not exercise this producer contract. *)
+          let canonical = Eio.Stream.take frames in
+          let tasks = Yojson.Safe.Util.(canonical |> member "tasks" |> to_list) in
+          check bool "Todo commit reaches the production worker through its actual compact hint" true
+            (List.exists (fun row -> Yojson.Safe.Util.member "id" row = `String task.task_id) tasks);
+          Eio.Fiber.yield ();
+          check bool "the Task update settles without a periodic scan" false
+            (Eio_mock.Clock.try_advance clock)));
+    check bool "normal release removes source worker waits" false (Eio_mock.Clock.try_advance clock))
+;;
+
+let test_http_wins_before_source_read_and_shell_completion_still_publishes ~force () =
+  with_execution_workspace (fun env state ->
+    (* Link the real namespace callback. These metadata projections do not
+       invoke the fixture's loopback provider endpoint. *)
+    ignore (Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches state);
+    let first, signal_first = Eio.Promise.create () in
+    let release, release_first = Eio.Promise.create () in
+    let third, signal_third = Eio.Promise.create () in
+    let calls = Atomic.make 0 in
+    let executions = Eio.Stream.create 8 and projects = Eio.Stream.create 8 in
+    Dashboard_projection_cache.register_operator_snapshot_json {snapshot =
+      (fun ?read_policy ?actor ?view ?include_messages ?include_keepers
+          ?include_summary_fields ?lightweight_summary ctx ->
+        let call = Atomic.fetch_and_add calls 1 + 1 in
+        if call = 1 then (
+          Eio.Promise.resolve signal_first ();
+          Eio.Promise.await release);
+        if call = 3 then Eio.Promise.resolve signal_third ();
+        Operator_control.snapshot_json ?read_policy ?actor ?view ?include_messages
+          ?include_keepers ?include_summary_fields ?lightweight_summary ctx)};
+    Eio.Switch.run (fun sw ->
+      subscribe_execution_frames ~state ~sw ~id:"execution-request-completion" (fun kind payload ->
+        match kind with
+        | `Execution -> Eio.Stream.add executions payload
+        | `Project -> Eio.Stream.add projects payload);
+      Surfaces.start_execution_refresh_loop ~state ~sw ~clock:(Eio.Stdenv.clock env)
+        ~net:(Eio.Stdenv.net env) ~mono_clock:(Eio.Stdenv.mono_clock env);
+      Eio.Promise.await first;
+      let request = Httpun.Request.create `GET
+          (if force then "/api/v1/dashboard/execution?force=1" else "/api/v1/dashboard/execution") in
+      let response = Surfaces.dashboard_execution_http_json ~state ~sw
+          ~clock:(Eio.Stdenv.clock env) request in
+      let expected_instance = Server_observer_scope.instance_id (Mcp_server.workspace_scope state) in
+      check bool "actual request finished while the source read is held" true
+        (Yojson.Safe.Util.(response |> member "query" |> member "force") = `Bool force);
+      check string "HTTP body attests the originally admitted observer instance" expected_instance
+        Yojson.Safe.Util.(response |> member "observer_instance_id" |> to_string);
+      let frame = Eio.Stream.take executions in
+      check string "canonical execution retains that exact instance" expected_instance
+        Yojson.Safe.Util.(frame |> member "observer_instance_id" |> to_string);
+      check bool "HTTP installation publishes the current owned answer" true
+        (Yojson.Safe.Util.member "execution_publication_epoch" frame
+         = Yojson.Safe.Util.member "execution_publication_epoch" (Cache.snapshot (Surfaces.execution_cache ~state)).json);
+      let initial_project = Eio.Stream.take projects in
+      check string "canonical namespace retains the same captured instance" expected_instance
+        Yojson.Safe.Util.(initial_project |> member "observer_instance_id" |> to_string);
+      let scope = Mcp_server.workspace_scope state in
+      let shell count =
+        `Assoc ["paths", `Assoc ["effective_base_path", `String scope.config.base_path];
+          "status", `Assoc ["project", `String "ready"];
+          "counts", `Assoc ["agents", `Int count; "tasks", `Int 0; "keepers", `Int 0;
+            "total_runtimes", `Int 0]; "configured_keepers", `Int 0] in
+      Surfaces.publish_shell_cache_success ~state ~scope ~light:false (shell 7);
+      let project = Eio.Stream.take projects in
+      check int "Shell installation separately completes canonical namespace truth" 7
+        Yojson.Safe.Util.(project |> member "workspace" |> member "counts" |> member "agents" |> to_int);
+      Surfaces.publish_shell_cache_success ~state ~scope ~light:true (`Assoc ["ready", `Bool true]);
+      let unchanged = Eio.Stream.take projects in
+      check int "light Shell completion remains visible when namespace values are equal" 7
+        Yojson.Safe.Util.(unchanged |> member "workspace" |> member "counts" |> member "agents" |> to_int);
+      let inherited_hook = Atomic.get Sse.buffer_commit_test_hook in
+      let failed_once = Atomic.make false in
+      Fun.protect ~finally:(fun () -> Atomic.set Sse.buffer_commit_test_hook inherited_hook) (fun () ->
+        Atomic.set Sse.buffer_commit_test_hook (Some (fun () ->
+          if Atomic.compare_and_set failed_once false true then
+            raise (Failure "isolated completion replay failure")));
+        Surfaces.publish_shell_cache_success ~state ~scope ~light:false (shell 8);
+        let recovered = Eio.Stream.take projects in
+        check bool "the production publisher crossed an actual replay failure" true (Atomic.get failed_once);
+        check int "failed replay insertion retains canonical completion debt" 8
+          Yojson.Safe.Util.(recovered |> member "workspace" |> member "counts" |> member "agents" |> to_int));
+      Eio.Promise.resolve release_first ();
+      Eio.Promise.await third;
+      check int "request completion leaves one owed source follow-up" 3 (Atomic.get calls));
+    check (option string) "normal cancellation cannot degrade the completed HTTP answer"
+      None (Cache.snapshot (Surfaces.execution_cache ~state)).last_error)
+;;
+
 let record_gap base_path =
   Telemetry_coverage_gap.record
     ~masc_root:(Common.masc_dir_from_base_path ~base_path)
@@ -232,9 +470,16 @@ let test_async_tool_commit_keeps_its_store_owner () =
 let () =
   run "workspace source refresh"
     [ "policy", [test_case "receipt health deadline" `Quick test_source_health_deadline;
-                  test_case "closed source dependencies" `Quick test_exact_dependency_matrix]
+                  test_case "closed source dependencies" `Quick test_exact_dependency_matrix;
+                  test_case "execution original dependencies" `Quick test_execution_dependency_matrix]
     ; "consumer", [test_case "actual trust cache completion and scope cell" `Quick test_actual_cache_completion_and_scope_cell;
                     test_case "replacement cancels the retired read" `Quick test_replaced_read_is_cancelled_before_new_generation;
                     test_case "actual commits preserve writer outcomes" `Quick test_actual_commit_inputs_and_listener_failure;
-                    test_case "async tool commit preserves its workspace owner" `Quick test_async_tool_commit_keeps_its_store_owner] ]
+                    test_case "async tool commit preserves its workspace owner" `Quick test_async_tool_commit_keeps_its_store_owner;
+                    test_case "retired execution request cannot replace current scope" `Quick test_execution_owner_rejects_a_retired_request;
+                    test_case "actual execution worker follows original store writes" `Quick test_actual_execution_worker_waits_for_original_store_writes;
+                    test_case "cold HTTP first and Shell complete canonical truth" `Quick
+                      (test_http_wins_before_source_read_and_shell_completion_still_publishes ~force:false);
+                    test_case "force HTTP first and Shell complete canonical truth" `Quick
+                      (test_http_wins_before_source_read_and_shell_completion_still_publishes ~force:true)] ]
 ;;

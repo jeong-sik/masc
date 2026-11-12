@@ -1518,40 +1518,51 @@ let run_keeper_lifecycle_listener ~clock ~subscription ~retry_interval_s
   loop ()
 ;;
 
+module Workspace_message_change = struct
+  type t = {base_path : string; request_id : string;
+    mention_delivery : Masc_domain.message_mention_delivery}
+  let compare = Stdlib.compare
+end
+
+module Workspace_message_changes = Server_workspace_invalidation.Make (Workspace_message_change)
+
 let install_workspace_message_mutation_invalidation
-      ~invalidate_full_health_snapshot
-      ()
-  =
-  Atomic.set Workspace_hooks.on_workspace_message_mutation_fn
-    (fun config ~request_id ~mention_delivery ->
-       (try
-          Dashboard_cache.invalidate_prefix
-            (Printf.sprintf "dashboard.workspace:%s;" config.Workspace.base_path);
-          Dashboard_cache.invalidate_prefix
-            (Printf.sprintf "workspace:%s:" config.base_path);
-          Sse.broadcast
-            (`Assoc
-               [ "type", `String "workspace_message_delivery_changed"
-               ; "request_id", `String request_id
-               ; ( "mention_delivery"
-                 , `String
-                     (Masc_domain.message_mention_delivery_to_string
-                        mention_delivery) )
-               ])
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Log.Keeper.warn
-            "workspace message projection invalidation failed request_id=%s: %s"
-            request_id
-            (Printexc.to_string exn));
-       try invalidate_full_health_snapshot () with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Log.Keeper.warn
-           "workspace message full-health invalidation failed request_id=%s: %s"
-           request_id
-           (Printexc.to_string exn))
+      ~state ~sw ~mono_clock ~invalidate_full_health_snapshot () =
+  let enqueue = Workspace_message_changes.start ~sw ~mono_clock
+      ~publish:(fun change ->
+        (* This is a committed store hint, not an operation's response. Keep
+           the one after-write hook installed for the whole server switch;
+           replacing it between epochs could lose a commit after a new
+           worker's initial read. The worker binds the actual store owner to
+           the current observer instance after resolving both authorities. *)
+        let scope = Mcp_server.workspace_scope state in
+        let authority = Sse.runtime_authority_exn ~base_path:scope.config.base_path in
+        let writer = Sse.runtime_authority_exn ~base_path:change.Workspace_message_change.base_path in
+        let target = Sse.Scoped_runtime_observers (Sse.observer_scope
+          ~runtime_authority:authority ~instance_id:(Server_observer_scope.instance_id scope)) in
+        if Sse.equal_runtime_authority authority writer
+           && Mcp_server.Workspace_scope_epoch.equal scope.epoch
+                (Mcp_server.workspace_scope state).epoch then
+          Sse.broadcast_to target (`Assoc [
+            "type", `String "workspace_message_delivery_changed";
+            "request_id", `String change.request_id;
+            "mention_delivery", `String (Masc_domain.message_mention_delivery_to_string
+              change.mention_delivery)])) in
+  let callback config ~request_id ~mention_delivery =
+    (* No filesystem lookup or fanout while the message write settles. *)
+    Dashboard_cache.invalidate_prefix
+      (Printf.sprintf "dashboard.workspace:%s;" config.Workspace.base_path);
+    Dashboard_cache.invalidate_prefix
+      (Printf.sprintf "workspace:%s:" config.base_path);
+    enqueue {Workspace_message_change.base_path = config.base_path; request_id; mention_delivery};
+    try invalidate_full_health_snapshot () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Log.Keeper.warn "workspace message full-health invalidation failed: %s"
+        (Printexc.to_string exn)
+  in
+  let previous = Atomic.exchange Workspace_hooks.on_workspace_message_mutation_fn callback in
+  Eio.Switch.on_release sw (fun () ->
+    ignore (Atomic.compare_and_set Workspace_hooks.on_workspace_message_mutation_fn callback previous))
 ;;
 
 let start_keeper_loops_owned
@@ -1560,6 +1571,7 @@ let start_keeper_loops_owned
       ~invalidate_full_health_snapshot
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       (state : Mcp_server.server_state)
@@ -1868,7 +1880,7 @@ let start_keeper_loops_owned
   Goal_delivery.register_backend goal_notification_backend;
   register_lane_fleet_backend ();
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
-  install_workspace_message_mutation_invalidation
+  install_workspace_message_mutation_invalidation ~state ~sw ~mono_clock
     ~invalidate_full_health_snapshot
     ();
   let workspace_config = Mcp_server.workspace_config state in
@@ -2214,6 +2226,7 @@ let start_keeper_loops
       ~invalidate_full_health_snapshot
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       (state : Mcp_server.server_state)
@@ -2238,6 +2251,7 @@ let start_keeper_loops
           ~invalidate_full_health_snapshot
           ~sw
           ~clock
+          ~mono_clock
           ~net
           ~proc_mgr
           state

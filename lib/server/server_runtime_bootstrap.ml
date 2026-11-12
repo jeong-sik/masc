@@ -1410,6 +1410,7 @@ let claim_and_start_keeper_persistence
       ~prepared_persistence
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       state
@@ -1433,6 +1434,7 @@ let claim_and_start_keeper_persistence
         Server_routes_http_runtime.invalidate_full_health_snapshot
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       state
@@ -1653,6 +1655,7 @@ let activate_owner_state
       ?(boot_stage = fun _ -> ())
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       (initialized : initialized_owner_state)
@@ -1680,6 +1683,7 @@ let activate_owner_state
     ~prepared_persistence:initialized.prepared_keeper_persistence
     ~sw
     ~clock
+    ~mono_clock
     ~net
     ~proc_mgr
     state;
@@ -1821,6 +1825,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
         ~boot_stage
         ~sw
         ~clock
+        ~mono_clock
         ~net
         ~proc_mgr
         initialized_owner

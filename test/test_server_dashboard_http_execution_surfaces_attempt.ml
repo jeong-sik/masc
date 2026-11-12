@@ -16,11 +16,13 @@
    refresh it calls takes no injectable failure. That both failure paths go
    through the guard is read at the call site, not run here. *)
 open Masc
+
+let execution_test_owner = Server_dashboard_http_execution_surfaces.For_testing.create_owner ()
 module Execution = Server_dashboard_http_execution_surfaces
 module Attempt = Server_dashboard_http_execution_surfaces.For_testing
 
 let with_execution_surface f =
-  let invalidate = Execution.invalidate_execution_cache in
+  let invalidate () = Server_dashboard_http_execution_surfaces.For_testing.invalidate execution_test_owner in
   invalidate ();
   Fun.protect ~finally:invalidate f
 ;;
@@ -32,10 +34,10 @@ let a_failure_that_ends_an_attempt () =
     { key = "the attempt's key"; role = Dashboard_cache.Compute_owner }
 ;;
 
-let surface () = Server_dashboard_http_cache.snapshot Execution.execution_cache
+let surface () = Server_dashboard_http_cache.snapshot (Server_dashboard_http_execution_surfaces.For_testing.cache execution_test_owner)
 
 let published_marker () =
-  match Server_dashboard_http_cache.cached_surface_json Execution.execution_cache with
+  match Server_dashboard_http_cache.cached_surface_json (Server_dashboard_http_execution_surfaces.For_testing.cache execution_test_owner) with
   | `Assoc fields -> (match List.assoc_opt "marker" fields with Some (`String m) -> Some m | _ -> None)
   | _ -> None
 ;;
@@ -43,7 +45,7 @@ let published_marker () =
 let test_a_published_answer_survives_its_attempts_own_failure () =
   with_execution_surface
   @@ fun () ->
-  let attempt = Attempt.begin_execution_attempt () in
+  let attempt = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
   Alcotest.(check bool)
     "the attempt published its answer"
     true
@@ -65,7 +67,7 @@ let test_a_published_answer_survives_its_attempts_own_failure () =
 let test_an_attempt_that_answered_nothing_publishes_its_failure () =
   with_execution_surface
   @@ fun () ->
-  let attempt = Attempt.begin_execution_attempt () in
+  let attempt = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
   Alcotest.(check bool)
     "the attempt publishes what ended it"
     true
@@ -83,8 +85,8 @@ let test_an_attempt_that_answered_nothing_publishes_its_failure () =
 let test_an_older_attempts_failure_does_not_replace_a_newer_attempts_answer () =
   with_execution_surface
   @@ fun () ->
-  let older = Attempt.begin_execution_attempt () in
-  let newer = Attempt.begin_execution_attempt () in
+  let older = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
+  let newer = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
   Alcotest.(check bool)
     "the newer attempt publishes its answer"
     true
@@ -101,8 +103,8 @@ let test_an_older_attempts_failure_does_not_replace_a_newer_attempts_answer () =
 let test_an_older_attempts_answer_does_not_replace_a_newer_attempts_answer () =
   with_execution_surface
   @@ fun () ->
-  let older = Attempt.begin_execution_attempt () in
-  let newer = Attempt.begin_execution_attempt () in
+  let older = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
+  let newer = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
   Alcotest.(check bool)
     "the newer attempt publishes its answer"
     true
@@ -120,8 +122,8 @@ let test_an_older_attempts_answer_does_not_replace_a_newer_attempts_answer () =
 let test_a_newer_attempts_outcome_follows_an_older_attempts_answer () =
   with_execution_surface
   @@ fun () ->
-  let older = Attempt.begin_execution_attempt () in
-  let newer = Attempt.begin_execution_attempt () in
+  let older = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
+  let newer = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
   Alcotest.(check bool)
     "the older attempt publishes while nothing newer has"
     true
@@ -141,8 +143,8 @@ let test_a_newer_attempts_outcome_follows_an_older_attempts_answer () =
 let test_an_attempt_begun_before_an_invalidation_publishes_nothing () =
   with_execution_surface
   @@ fun () ->
-  let before = Attempt.begin_execution_attempt () in
-  Execution.invalidate_execution_cache ();
+  let before = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
+  Server_dashboard_http_execution_surfaces.For_testing.invalidate execution_test_owner;
   Alcotest.(check bool)
     "its failure is not published"
     false
@@ -154,7 +156,7 @@ let test_an_attempt_begun_before_an_invalidation_publishes_nothing () =
   let surface = surface () in
   Alcotest.(check (option string)) "no error was recorded" None surface.last_error;
   Alcotest.(check bool) "no answer was recorded" true (Option.is_none surface.last_success_unix);
-  let after = Attempt.begin_execution_attempt () in
+  let after = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
   Alcotest.(check bool)
     "an attempt begun after the invalidation publishes"
     true
@@ -166,8 +168,8 @@ let test_an_attempt_begun_before_an_invalidation_publishes_nothing () =
 let test_an_older_attempts_outcome_does_not_replace_a_newer_attempts_failure () =
   with_execution_surface
   @@ fun () ->
-  let older = Attempt.begin_execution_attempt () in
-  let newer = Attempt.begin_execution_attempt () in
+  let older = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
+  let newer = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
   Alcotest.(check bool)
     "the newer attempt publishes its failure"
     true
@@ -194,7 +196,7 @@ let test_an_older_attempts_outcome_does_not_replace_a_newer_attempts_failure () 
 let test_an_attempts_failure_message_follows_its_failure () =
   with_execution_surface
   @@ fun () ->
-  let attempt = Attempt.begin_execution_attempt () in
+  let attempt = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
   Alcotest.(check bool)
     "the attempt publishes its failure"
     true

@@ -130,6 +130,25 @@ let telemetry_sample fields =
   then Some Telemetry_sample else None
 ;;
 
+let execution_invalidation fields =
+  let* payload = object_ fields "payload" in
+  let allowed = ["execution_invalidated"; "execution_publication_epoch";
+    "execution_publication_generation"; "observer_instance_id"] in
+  if not (timestamp fields && unique_fields payload
+      && List.for_all (fun (key, _) -> List.mem key allowed) payload)
+  then None
+  else
+    let instance_valid = match field payload "observer_instance_id" with
+      | None -> true
+      | Some (`String value) -> not (String.equal (String.trim value) "")
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _) -> false in
+    match field payload "execution_invalidated", text payload "execution_publication_epoch",
+          field payload "execution_publication_generation" with
+    | Some (`Bool true), Some _, Some (`Int generation) when generation >= 0 && instance_valid ->
+        Some Execution_invalidated
+    | _, _, _ -> None
+;;
+
 let of_fields fields =
   let* kind = text fields "type" in
   match kind with
@@ -193,10 +212,7 @@ let of_fields fields =
   | "board_changed" | "post_created" | "comment_added" | "post_voted"
   | "comment_voted" | "reaction_changed" | "post_changed" -> Some Board
   | value when String.equal value Dashboard_event_slices.execution_snapshot_type ->
-      (match field fields "execution_invalidated", text fields "execution_publication_epoch",
-             field fields "execution_publication_generation" with
-       | Some (`Bool true), Some _, Some (`Int generation) when generation >= 0 -> Some Execution_invalidated
-       | _, _, _ -> None)
+      execution_invalidation fields
   | "agent_core:agent_started" ->
       agent_core fields "agent_started" Started (valid_payload Sse_event.Json.agent_started_payload_of_string)
   | "agent_core:agent_completed" ->

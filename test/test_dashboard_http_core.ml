@@ -3461,7 +3461,7 @@ let test_execution_default_response_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" @@ fun () ->
   with_cached_surface_success
-    Server_dashboard_http_execution_surfaces.execution_cache
+    (Server_dashboard_http_execution_surfaces.execution_cache ~state)
     (`Assoc [ "default_marker", `String "last-success";
               "candle", Candle_observation.to_json Candle_observation.Off;
               "data", `String (String.make 4000 'x') ]) @@ fun () ->
@@ -3513,7 +3513,7 @@ let test_execution_default_response_reuses_prepared_bytes () =
 let test_execution_fixture_selection_isolates_prepared_live_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   let module Surface = Server_dashboard_http_execution_surfaces in
-  with_cached_surface_success Surface.execution_cache
+  with_cached_surface_success (Surface.execution_cache ~state)
     (`Assoc [ "live_marker", `Bool true;
               "candle", Candle_observation.to_json Candle_observation.Off ]) @@ fun () ->
   let context query = Surface.execution_http_request ~state
@@ -3541,7 +3541,7 @@ let test_execution_first_compute_reuses_prepared_bytes () =
   Surface.invalidate_execution_cache ();
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache (fun () ->
     check bool "no successful projection before first compute" true
-      (Option.is_none (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+      (Option.is_none (Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state))
                         .last_success_unix);
     let context = Surface.execution_http_request ~state
         (request_with_headers "/api/v1/dashboard/execution"
@@ -3552,7 +3552,7 @@ let test_execution_first_compute_reuses_prepared_bytes () =
     | Surface.Execution_json _ -> fail "first successful compute discarded prepared bytes"
     | Surface.Execution_payload payload ->
       check bool "first compute published a successful projection" true
-        (Option.is_some (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+        (Option.is_some (Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state))
                           .last_success_unix);
       let open Yojson.Safe.Util in
       check bool "default query retained" true
@@ -3648,9 +3648,9 @@ beanie = 200
     "operator_targets", `Assoc ["keepers", `List [row]]] in
   Surface.invalidate_execution_cache ();
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
-  with_cached_surface_success Surface.execution_cache execution_seed @@ fun () ->
-  with_mission_cache_success mission_seed @@ fun () ->
   let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path () in
+  with_cached_surface_success (Surface.execution_cache ~state) execution_seed @@ fun () ->
+  with_mission_cache_success mission_seed @@ fun () ->
   let clock = Eio.Stdenv.clock env in
   let req = request_with_headers "/api/v1/dashboard/execution"
       ["accept-encoding", "identity"] in
@@ -3675,7 +3675,8 @@ beanie = 200
     (* The production proactive on_result uses this exact preparation function
        before broadcasting. Assert its payload, not a replacement test-only
        projection; no SSE socket delivery is claimed by this scenario. *)
-    let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast ~config () in
+    let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast
+      ~owner:(Surface.For_testing.owner_for_state ~state) ~config () in
     List.iter (fun (surface, json, paths) ->
       let label = label ^ " " ^ surface in
       check string (label ^ " preserves metadata") "retained-metadata"
@@ -3734,7 +3735,7 @@ beanie = 200
       {issued_milli="1000";burned_milli="200";circulating_milli="800"})
     ~expected_balance:(Some "800");
   check bool "equipment refresh does not rebuild cached execution metadata" true
-    ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = execution_seed);
+    ((Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state)).json = execution_seed);
   check bool "equipment refresh does not rebuild cached mission metadata" true
     ((Server_dashboard_http_core.snapshot Server_dashboard_http_core.mission_cache).json = mission_seed);
   let ledger = Candle_ledger.path ~base_path in
@@ -3985,19 +3986,20 @@ let test_execution_fixture_broadcast_and_unknown_override () =
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
   let seeded = match expected with `Assoc fields ->
     `Assoc (("cache_marker",`String "synthetic-seed") :: fields) | _ -> expected in
-  with_cached_surface_success Surface.execution_cache seeded @@ fun () ->
+  with_cached_surface_success (Surface.execution_cache ~state) seeded @@ fun () ->
   Surface.patch_keeper_dependent_caches ~keeper_name:"dm-keeper"
     ~event:(Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped);
   check bool "live lifecycle event preserves the fixture cache" true
-    ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = seeded);
-  let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast ~config () in
+    ((Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state)).json = seeded);
+  let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast
+      ~owner:(Surface.For_testing.owner_for_state ~state) ~config () in
   List.iter (fun field ->
     check bool ("broadcast preserves fixture " ^ field) true
       (Yojson.Safe.Util.member field broadcast = Yojson.Safe.Util.member field expected))
     ["candle";"keepers";"continuity_briefs"];
   let unknown_request = request "/api/v1/dashboard/execution?fixture=unknown" in
   check bool "explicit unknown cannot take prepared default bytes" true
-    (Option.is_none (Surface.For_testing.cached_response ~config unknown_request));
+    (Option.is_none (Surface.For_testing.cached_response ~owner:(Surface.For_testing.owner_for_state ~state) ~config unknown_request));
   let actual = Surface.dashboard_execution_http_json ~state ~sw ~clock:(Eio.Stdenv.clock env)
     unknown_request in
   check bool "explicit unknown does not reuse the fixture-seeded cache" true
@@ -4153,7 +4155,7 @@ let test_dashboard_execution_force_refresh_bypasses_default_cache () =
       ]
   in
   with_cached_surface_success
-    Server_dashboard_http_execution_surfaces.execution_cache
+    (Server_dashboard_http_execution_surfaces.execution_cache ~state)
     seed
   @@ fun () ->
   let json =
@@ -6110,7 +6112,8 @@ let test_lifecycle_patch_never_patches_a_declaration_row () =
    it. The cached surface lists the Keeper as a declaration row, so the patch
    cannot apply: the cache is invalidated and its row is left as it was. *)
 let test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
   let surface =
     `Assoc
       [ "keepers", `List [ declared_keeper_row "imp" ]
@@ -6121,13 +6124,13 @@ let test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache (
     (fun event ->
        let label = Keeper_lifecycle_events.lifecycle_event_to_string event in
        with_cached_surface_success
-         Server_dashboard_http_execution_surfaces.execution_cache
+         (Server_dashboard_http_execution_surfaces.execution_cache ~state)
          surface
        @@ fun () ->
        Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
          ~keeper_name:"imp"
          ~event;
-       let cache = Server_dashboard_http_execution_surfaces.execution_cache in
+       let cache = (Server_dashboard_http_execution_surfaces.execution_cache ~state) in
        check bool (label ^ " invalidates the cached surface") false
          (Server_dashboard_http_cache.cached_surface_has_success cache);
        let open Yojson.Safe.Util in

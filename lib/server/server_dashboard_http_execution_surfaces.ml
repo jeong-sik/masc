@@ -22,67 +22,6 @@ let transport_health_timeout_max_s = 30.0
    [shell_prewarm_outer_timeout_sec] env to keep the 5s headroom. *)
 let shell_prewarm_timeout_s = Env_config_runtime.Dashboard.shell_prewarm_inner_timeout_sec
 
-let warm_shell_cache (state : Mcp_server.server_state) =
-  Atomic.set shell_warming true;
-  Eio_guard.protect
-    ~finally:(fun () -> Atomic.set shell_warming false)
-    (fun () ->
-       let t0 = Time_compat.now () in
-       let cache_shell_payload ~light =
-         let cache_key =
-           dashboard_shell_cache_key ~light (Mcp_server.workspace_config state)
-         in
-         let compute =
-           Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-             dashboard_shell_payload_json ~light (Mcp_server.workspace_config state))
-         in
-         match state.Mcp_server.clock with
-         | Some clock ->
-           Dashboard_cache.get_or_compute_with_timeout
-             cache_key
-             ~ttl:shell_surface_cache_ttl_s
-             ~clock
-             ~timeout_sec:shell_prewarm_timeout_s
-             compute
-         | None -> Dashboard_cache.get_or_compute cache_key ~ttl:shell_surface_cache_ttl_s compute
-       in
-       (try
-          let light_result = cache_shell_payload ~light:true in
-          if Dashboard_cache.is_timeout_envelope light_result
-          then
-            Log.Dashboard.warn
-              "light shell cache pre-warm timed out during compute (%.0fs)"
-              shell_prewarm_timeout_s
-          else (
-            Atomic.set last_good_shell_light light_result;
-            Log.Dashboard.info
-              "light shell cache pre-warmed (%.1fms)"
-              ((Time_compat.now () -. t0) *. 1000.0))
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Dashboard.warn
-            "light shell cache pre-warm failed: %s"
-            (Printexc.to_string exn));
-       try
-         let result = cache_shell_payload ~light:false in
-         if Dashboard_cache.is_timeout_envelope result
-         then
-           Log.Dashboard.warn
-             "shell cache pre-warm timed out during compute (%.0fs)"
-             shell_prewarm_timeout_s
-         else (
-           Atomic.set shell_warmed true;
-           Atomic.set last_good_shell result;
-           Log.Dashboard.info
-             "shell cache pre-warmed (%.1fms)"
-             ((Time_compat.now () -. t0) *. 1000.0))
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Dashboard.warn "shell cache pre-warm failed: %s" (Printexc.to_string exn))
-;;
-
 (* Delta push follows the replay commit, not the start or return of a
    broadcast. Different domains and external subscribers can interleave
    publications and callbacks for the same event type. *)
@@ -117,7 +56,7 @@ type surface_encoding =
 (** Broadcast a single cached surface to all Observer SSE sessions.
     [event_type] becomes the SSE event "type" field. Skips the broadcast when
     the payload text equals the previous one for [event_type] (delta push). *)
-let broadcast_cached_surface ~encoding ~event_type (json : Yojson.Safe.t) : unit =
+let broadcast_cached_surface ?(target = Sse.Observers) ~encoding ~event_type (json : Yojson.Safe.t) : unit =
   let payload =
     match encoding with
     | Encode_inline -> Some (Sse_wire.encode_json json)
@@ -179,7 +118,7 @@ let broadcast_cached_surface ~encoding ~event_type (json : Yojson.Safe.t) : unit
                 ; "ts_unix", Sse_wire.encode_json (`Float (Time_compat.now ()))
                 ]
             in
-            Sse.broadcast_encoded_to_with_receipts Observers ~on_fanout ~on_committed encoded;
+            Sse.broadcast_encoded_to_with_receipts target ~on_fanout ~on_committed encoded;
             `Published
         end)
     in
@@ -269,37 +208,36 @@ let () =
        | Some publication -> broadcast_operator_snapshot publication)
 ;;
 
-let broadcast_operator_digest =
-  broadcast_cached_surface ~encoding:Encode_inline ~event_type:"operator_digest"
+let broadcast_operator_digest json =
+  broadcast_cached_surface ~encoding:Encode_inline ~event_type:"operator_digest" json
 
-let execution_cache : cached_surface =
+let create_execution_cache () : cached_surface =
   Server_dashboard_http_cache.create_cached_surface
-    (`Assoc
-        [ "status", `String "initializing"
-        ; "generated_at", `String (Masc_domain.now_iso ())
-        ; "message", `String "Execution data is being computed. Refresh in a few seconds."
-        ])
+    (`Assoc [ "status", `String "initializing";
+      "generated_at", `String (Masc_domain.now_iso ());
+      "message", `String "Execution data is being computed." ])
 ;;
 
 let execution_default_light_cache_key = "execution:default:light"
-type execution_http_source =
-  { snapshot : Server_dashboard_http_cache.surface_snapshot
-  ; base_path : string
-  ; workspace_path : string
-  }
 
-type execution_http_preparation =
-  { source : execution_http_source
-  ; settled : unit Eio.Promise.t
-  ; settle : unit Eio.Promise.u
-  }
+type execution_http_source = {
+  snapshot : Server_dashboard_http_cache.surface_snapshot;
+  base_path : string;
+  workspace_path : string;
+}
 
-type execution_http_payload =
-  { source : execution_http_source
-  ; response_json : Yojson.Safe.t
-  ; encoded : Http_response_payload.prepared
-  ; etag : string
-  }
+type execution_http_preparation = {
+  source : execution_http_source;
+  settled : unit Eio.Promise.t;
+  settle : unit Eio.Promise.u;
+}
+
+type execution_http_payload = {
+  source : execution_http_source;
+  response_json : Yojson.Safe.t;
+  encoded : Http_response_payload.prepared;
+  etag : string;
+}
 
 type execution_http_response =
   | Execution_json of Yojson.Safe.t
@@ -311,158 +249,339 @@ let execution_payload_response (payload : execution_http_payload) =
   { Dashboard_cache.json = payload.response_json;
     raw_json; etag = payload.etag; origin = Dashboard_cache.Computed;
     encoded = Some payload.encoded }
+;;
 
 type execution_http_state =
   | Empty
   | Preparing of execution_http_preparation
   | Ready of execution_http_payload
 
-(* Accessed only while holding [execution_publication_mu]. *)
-let execution_default_light_http = ref Empty
-let execution_publication_mu = Stdlib.Mutex.create ()
-let execution_publication_generation = ref 0
+type last_publication =
+  | No_publication
+  | Published_success of int
+  | Published_failure of int
+
 let execution_publication_epoch =
-  (* NDT-OK: process-incarnation identity entropy only. *)
+  (* NDT-OK: process-incarnation identity only. Scope identity is captured
+     separately below before the read, never inferred from a later lookup. *)
   Uuidm.v4_gen (Random.State.make_self_init ()) () |> Uuidm.to_string
 ;;
 
 let execution_publication_epoch_field = "execution_publication_epoch"
 let execution_publication_generation_field = "execution_publication_generation"
 let execution_invalidated_field = "execution_invalidated"
+let execution_generation_sequence = Atomic.make 0
+let next_execution_generation () = Atomic.fetch_and_add execution_generation_sequence 1 + 1
 
-let with_execution_publication_lock f =
-  Stdlib.Mutex.protect execution_publication_mu f
+type execution_origin = Observation_read | Request_read
+
+type execution_completion =
+  | Cache_installed of execution_origin
+  | Cache_failed of execution_origin
+  | Cache_patched
+  | Shell_installed
+
+type completion_listener = { completed : execution_completion -> unit }
+
+type execution_owner = {
+  cache : cached_surface;
+  binding : (Mcp_server.server_state * Mcp_server.workspace_scope) option;
+  stream_epoch : string;
+  cache_identity : string;
+  target : Sse.broadcast_target;
+  publication_mu : Stdlib.Mutex.t;
+  generation : int ref;
+  default_light_http : execution_http_state ref;
+  next_ticket : int ref;
+  last_publication : last_publication ref;
+  completion_listeners : completion_listener list Atomic.t;
+  next_deadline_unix : float option ref;
+  shell : Yojson.Safe.t option ref;
+  shell_light : Yojson.Safe.t option ref;
+  namespace_revision : int ref;
+}
+
+type execution_attempt = { owner : execution_owner; generation : int; ticket : int; origin : execution_origin }
+
+let unbound_owner_sequence = Atomic.make 0
+
+let create_execution_owner binding =
+  let identity = match binding with
+    | Some (_, scope) -> Mcp_server.Workspace_scope_epoch.to_string scope.Mcp_server.epoch
+    | None -> "fixture:" ^ string_of_int (Atomic.fetch_and_add unbound_owner_sequence 1) in
+  let target = match binding with
+    | None -> Sse.Observers
+    | Some (_, scope) -> Sse.Scoped_runtime_observers (Sse.observer_scope
+        ~runtime_authority:(Sse.runtime_authority_exn ~base_path:scope.config.base_path)
+        ~instance_id:(Server_observer_scope.instance_id scope)) in
+  { cache = create_execution_cache (); binding; target;
+    stream_epoch = execution_publication_epoch;
+    cache_identity = execution_publication_epoch ^ ":" ^ identity;
+    publication_mu = Stdlib.Mutex.create (); generation = ref (next_execution_generation ());
+    default_light_http = ref Empty; next_ticket = ref 0;
+    last_publication = ref No_publication; completion_listeners = Atomic.make [];
+    next_deadline_unix = ref None; shell = ref None; shell_light = ref None; namespace_revision = ref 0 }
 ;;
 
-let clear_execution_default_light_http_body () =
-  execution_default_light_http := Empty
+let execution_owner_is_current owner = match owner.binding with
+  | None -> true
+  | Some (state, scope) -> Mcp_server.Workspace_scope_epoch.equal scope.epoch
+      (Mcp_server.workspace_scope state).epoch
 ;;
 
-let execution_surface_has_fresh_success_unlocked () =
-  let execution_snapshot = Server_dashboard_http_cache.snapshot execution_cache in
-  match execution_snapshot.last_success_unix, execution_snapshot.last_error_unix with
-  | Some success_ts, Some error_ts when error_ts > success_ts -> false
+let active_execution_owner_mu = Stdlib.Mutex.create ()
+let active_execution_owner : execution_owner option ref = ref None
+
+let execution_owner_for_scope ~state (scope : Mcp_server.workspace_scope) =
+  let selected_unlocked () = match !active_execution_owner with
+    | Some ({binding = Some (_, current); _} as owner)
+      when Mcp_server.Workspace_scope_epoch.equal current.epoch scope.epoch -> Some owner
+    | Some _ | None -> None in
+  match Stdlib.Mutex.protect active_execution_owner_mu selected_unlocked with
+  | Some owner -> owner
+  | None ->
+      (* Runtime authority resolution may touch the filesystem. It precedes
+         admission and never runs under the publication/owner mutexes. *)
+      let candidate = create_execution_owner (Some (state, scope)) in
+      Stdlib.Mutex.protect active_execution_owner_mu (fun () ->
+        match selected_unlocked () with
+        | Some owner -> owner
+        | None ->
+            if execution_owner_is_current candidate then
+              active_execution_owner := Some candidate;
+            candidate)
+;;
+
+let execution_cache_for_scope ~state scope =
+  (execution_owner_for_scope ~state scope).cache
+;;
+
+let execution_cache ~state =
+  execution_cache_for_scope ~state (Mcp_server.workspace_scope state)
+;;
+
+let current_execution_owner () =
+  Stdlib.Mutex.protect active_execution_owner_mu (fun () ->
+    match !active_execution_owner with
+    | Some owner when execution_owner_is_current owner -> Some owner
+    | Some _ | None -> None)
+;;
+
+let with_execution_publication_lock ~owner f =
+  Stdlib.Mutex.protect owner.publication_mu f
+;;
+
+let subscribe_execution_completion ~owner completed =
+  let listener = {completed} in
+  Lockfree_atomic.update owner.completion_listeners (fun current -> listener :: current);
+  fun () -> Lockfree_atomic.update owner.completion_listeners
+    (List.filter (fun current -> current != listener))
+;;
+
+let execution_completion_failures = Atomic.make 0
+
+let notify_execution_completion owner completion =
+  List.iter (fun listener ->
+    try listener.completed completion with
+    (* cancel-guard-ok: after-cache metadata callbacks must not replace the
+       admitted publication or the authoritative caller's cancellation. *)
+    | _ -> ignore (Atomic.fetch_and_add execution_completion_failures 1))
+    (Atomic.get owner.completion_listeners)
+;;
+
+let last_good_shell_for_scope ~state scope =
+  let owner = execution_owner_for_scope ~state scope in
+  with_execution_publication_lock ~owner (fun () -> !(owner.shell))
+;;
+
+let namespace_cache_revision ~state scope =
+  let owner = execution_owner_for_scope ~state scope in
+  with_execution_publication_lock ~owner (fun () -> !(owner.namespace_revision))
+;;
+
+let publish_shell_cache_success ~state ~scope ~light json =
+  let owner = execution_owner_for_scope ~state scope in
+  let published = with_execution_publication_lock ~owner (fun () ->
+    if not (execution_owner_is_current owner) then false else (
+      incr owner.namespace_revision;
+      if light then (
+        owner.shell_light := Some json;
+        Atomic.set last_good_shell_light json)
+      else (
+        owner.shell := Some json;
+        Atomic.set last_good_shell json;
+        Atomic.set shell_warmed true);
+      true)) in
+  if published then notify_execution_completion owner Shell_installed
+;;
+
+let warm_shell_cache (state : Mcp_server.server_state) =
+  let scope = Mcp_server.workspace_scope state in
+  Atomic.set shell_warming true;
+  Eio_guard.protect
+    ~finally:(fun () -> Atomic.set shell_warming false)
+    (fun () ->
+       let t0 = Time_compat.now () in
+       let cache_shell_payload ~light =
+         let cache_key =
+           dashboard_shell_cache_key ~light scope.config
+         in
+         let compute =
+           Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+             dashboard_shell_payload_json ~light scope.config)
+         in
+         match state.Mcp_server.clock with
+         | Some clock ->
+           Dashboard_cache.get_or_compute_with_timeout
+             cache_key
+             ~ttl:shell_surface_cache_ttl_s
+             ~clock
+             ~timeout_sec:shell_prewarm_timeout_s
+             compute
+         | None -> Dashboard_cache.get_or_compute cache_key ~ttl:shell_surface_cache_ttl_s compute
+       in
+       (try
+          let light_result = cache_shell_payload ~light:true in
+          if Dashboard_cache.is_timeout_envelope light_result
+          then
+            Log.Dashboard.warn
+              "light shell cache pre-warm timed out during compute (%.0fs)"
+              shell_prewarm_timeout_s
+          else (
+            publish_shell_cache_success ~state ~scope ~light:true light_result;
+            Log.Dashboard.info
+              "light shell cache pre-warmed (%.1fms)"
+              ((Time_compat.now () -. t0) *. 1000.0))
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Dashboard.warn
+            "light shell cache pre-warm failed: %s"
+            (Printexc.to_string exn));
+       try
+         let result = cache_shell_payload ~light:false in
+         if Dashboard_cache.is_timeout_envelope result
+         then
+           Log.Dashboard.warn
+             "shell cache pre-warm timed out during compute (%.0fs)"
+             shell_prewarm_timeout_s
+         else (
+           publish_shell_cache_success ~state ~scope ~light:false result;
+           Log.Dashboard.info
+             "shell cache pre-warmed (%.1fms)"
+             ((Time_compat.now () -. t0) *. 1000.0))
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Dashboard.warn "shell cache pre-warm failed: %s" (Printexc.to_string exn))
+;;
+
+let clear_execution_default_light_http_body ~owner () =
+  owner.default_light_http := Empty
+;;
+
+let execution_surface_has_fresh_success_unlocked ~owner () =
+  let snapshot = Server_dashboard_http_cache.snapshot owner.cache in
+  match snapshot.last_success_unix, snapshot.last_error_unix with
+  | Some success, Some error when error > success -> false
   | Some _, _ -> true
   | None, _ -> false
 ;;
 
-(* One attempt at publishing the execution surface: the generation it began
-   under, and its place in the order of attempts. Only invalidation advances
-   the generation, so attempts that run at once -- two forced refreshes, a
-   forced refresh and the periodic one -- share one. The ticket is what
-   orders them: it is taken when the attempt begins, and an attempt's outcome
-   never replaces the outcome of an attempt with a later ticket. *)
-type execution_attempt =
-  { generation : int
-  ; ticket : int
-  }
-
-(* The newest outcome published, by the ticket of the attempt that made it.
-   Accessed only while holding [execution_publication_mu]. *)
-type last_publication =
-  | No_publication
-  | Published_success of int
-  | Published_failure of int
-
-let execution_next_ticket = ref 0
-let execution_last_publication = ref No_publication
-
-(* An attempt at the current generation with a ticket newer than every attempt
-   begun so far, which leaves the surface's attempt stamp alone: for an
-   outcome with no attempt of its own to name. Its outcome is published over
-   the outcome of every earlier attempt, and an earlier attempt still running
-   then publishes nothing. *)
-let execution_attempt_now () =
-  with_execution_publication_lock (fun () ->
-    incr execution_next_ticket;
-    { generation = !execution_publication_generation; ticket = !execution_next_ticket })
+let execution_attempt_now ~owner ~origin () =
+  with_execution_publication_lock ~owner (fun () ->
+    incr owner.next_ticket;
+    { owner; generation = !(owner.generation); ticket = !(owner.next_ticket); origin })
 ;;
 
-let begin_execution_attempt () =
-  with_execution_publication_lock (fun () ->
-    let generation = !execution_publication_generation in
-    incr execution_next_ticket;
-    clear_execution_default_light_http_body ();
-    Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
-    { generation; ticket = !execution_next_ticket })
+let begin_execution_attempt ~owner ~origin () =
+  with_execution_publication_lock ~owner (fun () ->
+    incr owner.next_ticket;
+    clear_execution_default_light_http_body ~owner ();
+    Server_dashboard_http_cache.mark_cached_surface_attempt owner.cache;
+    { owner; generation = !(owner.generation); ticket = !(owner.next_ticket); origin })
 ;;
 
-let current_execution_publication_generation () =
-  with_execution_publication_lock (fun () -> !execution_publication_generation)
+let current_execution_publication_generation ~owner () =
+  with_execution_publication_lock ~owner (fun () -> !(owner.generation))
 ;;
 
-let with_execution_publication_generation ~generation = function
+let current_execution_http_revision ~owner () =
+  with_execution_publication_lock ~owner (fun () ->
+    let ticket = match !(owner.last_publication) with
+      | No_publication -> 0
+      | Published_success ticket | Published_failure ticket -> ticket in
+    !(owner.generation), ticket)
+;;
+
+let with_execution_observer_instance ~owner json =
+  match owner.binding, json with
+  | Some (_, scope), `Assoc fields ->
+      `Assoc (("observer_instance_id", `String (Server_observer_scope.instance_id scope))
+        :: List.remove_assoc "observer_instance_id" fields)
+  | None, `Assoc fields -> `Assoc (List.remove_assoc "observer_instance_id" fields)
+  | (None | Some _), (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> json
+;;
+
+let with_execution_publication_generation ~owner ~generation json =
+  (match json with
   | `Assoc fields ->
-    let fields =
-      fields
-      |> List.remove_assoc execution_publication_epoch_field
-      |> List.remove_assoc execution_publication_generation_field
-      |> List.remove_assoc execution_invalidated_field
-    in
-    `Assoc
-      ((execution_publication_epoch_field, `String execution_publication_epoch)
-       :: (execution_publication_generation_field, `Int generation)
-       :: (execution_invalidated_field, `Bool false)
-       :: fields)
-  | json ->
-    `Assoc
-      [ execution_publication_epoch_field, `String execution_publication_epoch
-      ; execution_publication_generation_field, `Int generation
-      ; execution_invalidated_field, `Bool false
-      ; "snapshot", json
-      ]
+      let fields = fields
+        |> List.remove_assoc execution_publication_epoch_field
+        |> List.remove_assoc execution_publication_generation_field
+        |> List.remove_assoc execution_invalidated_field in
+      `Assoc ((execution_publication_epoch_field, `String owner.stream_epoch)
+        :: (execution_publication_generation_field, `Int generation)
+        :: (execution_invalidated_field, `Bool false) :: fields)
+  | json -> `Assoc [execution_publication_epoch_field, `String owner.stream_epoch;
+      execution_publication_generation_field, `Int generation;
+      execution_invalidated_field, `Bool false; "snapshot", json])
+  |> with_execution_observer_instance ~owner
 ;;
 
-(* Whether an attempt's outcome may be published now. Not while the surface
-   was invalidated since the attempt began. A success is published unless a
-   later attempt already published. A failure never replaces a success of its
-   own attempt -- what an attempt does after it answered, such as refreshing
-   the light body or running out of its window, must not unmake the answer --
-   nor any outcome of a later attempt. Must hold [execution_publication_mu]. *)
 let execution_publication_admits_unlocked attempt ~failure =
-  attempt.generation = !execution_publication_generation
-  &&
-  match !execution_last_publication with
-  | No_publication -> true
-  | Published_success last ->
-    if failure then attempt.ticket > last else attempt.ticket >= last
-  | Published_failure last -> attempt.ticket >= last
+  let owner = attempt.owner in
+  execution_owner_is_current owner && attempt.generation = !(owner.generation)
+  && match !(owner.last_publication) with
+     | No_publication -> true
+     | Published_success last -> if failure then attempt.ticket > last else attempt.ticket >= last
+     | Published_failure last -> attempt.ticket >= last
+;;
+
+let publish_execution_observation attempt (observation : Dashboard_execution.observation) =
+  let owner = attempt.owner in
+  let published = with_execution_publication_lock ~owner (fun () ->
+    if not (execution_publication_admits_unlocked attempt ~failure:false) then false
+    else (
+      Server_dashboard_http_cache.mark_cached_surface_success owner.cache
+        (with_execution_publication_generation ~owner ~generation:attempt.generation observation.json);
+      owner.next_deadline_unix := observation.next_deadline_unix;
+      incr owner.namespace_revision;
+      owner.last_publication := Published_success attempt.ticket;
+      true)) in
+  if published then notify_execution_completion owner (Cache_installed attempt.origin);
+  published
 ;;
 
 let publish_execution_attempt_success attempt json =
-  with_execution_publication_lock (fun () ->
-    if not (execution_publication_admits_unlocked attempt ~failure:false)
-    then false
-    else (
-      Server_dashboard_http_cache.mark_cached_surface_success
-        execution_cache
-        (with_execution_publication_generation ~generation:attempt.generation json);
-      execution_last_publication := Published_success attempt.ticket;
-      true))
-;;
-
-let publish_execution_attempt_failure attempt exn =
-  with_execution_publication_lock (fun () ->
-    if not (execution_publication_admits_unlocked attempt ~failure:true)
-    then false
-    else (
-      clear_execution_default_light_http_body ();
-      Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
-      execution_last_publication := Published_failure attempt.ticket;
-      true))
+  publish_execution_observation attempt {Dashboard_execution.json; next_deadline_unix = None}
 ;;
 
 let publish_execution_attempt_failure_message attempt message =
-  with_execution_publication_lock (fun () ->
-    if not (execution_publication_admits_unlocked attempt ~failure:true)
-    then false
+  let owner = attempt.owner in
+  let published = with_execution_publication_lock ~owner (fun () ->
+    if not (execution_publication_admits_unlocked attempt ~failure:true) then false
     else (
-      clear_execution_default_light_http_body ();
-      Server_dashboard_http_cache.mark_cached_surface_error_message
-        execution_cache
-        message;
-      execution_last_publication := Published_failure attempt.ticket;
-      true))
+      clear_execution_default_light_http_body ~owner ();
+      Server_dashboard_http_cache.mark_cached_surface_error_message owner.cache message;
+      owner.last_publication := Published_failure attempt.ticket;
+      true)) in
+  if published then notify_execution_completion owner (Cache_failed attempt.origin);
+  published
+;;
+
+let publish_execution_attempt_failure attempt exn =
+  publish_execution_attempt_failure_message attempt (Printexc.to_string exn)
 ;;
 
 let execution_trust_cache_key = "execution-trust:default"
@@ -544,16 +663,17 @@ let invalidate_execution_cache_with_hooks_for_testing
       exn
 ;;
 
-let invalidate_execution_cache_with ~before_broadcast () =
+let invalidate_execution_owner_with ~owner ~before_broadcast () =
   let invalidate () =
   let invalidated_generation = ref None in
   invalidate_execution_cache_with_hooks_for_testing
     ~invalidate_execution_surface:(fun () ->
-      with_execution_publication_lock (fun () ->
-        incr execution_publication_generation;
-        invalidated_generation := Some !execution_publication_generation;
-        clear_execution_default_light_http_body ();
-        Server_dashboard_http_cache.invalidate_cached_surface execution_cache))
+      with_execution_publication_lock ~owner (fun () ->
+        owner.generation := next_execution_generation ();
+        owner.next_deadline_unix := None;
+        invalidated_generation := Some !(owner.generation);
+        clear_execution_default_light_http_body ~owner ();
+        Server_dashboard_http_cache.invalidate_cached_surface owner.cache))
     ~invalidate_light_cache:(fun () ->
       Dashboard_cache.invalidate_prefix "execution:")
     ();
@@ -561,14 +681,14 @@ let invalidate_execution_cache_with ~before_broadcast () =
   Option.iter
     (fun generation ->
        try
-         broadcast_cached_surface
+         broadcast_cached_surface ~target:owner.target
            ~encoding:Encode_inline
            ~event_type:Dashboard_event_slices.execution_snapshot_type
            (`Assoc
-               [ execution_publication_epoch_field, `String execution_publication_epoch
+               [ execution_publication_epoch_field, `String owner.stream_epoch
                ; execution_publication_generation_field, `Int generation
                ; execution_invalidated_field, `Bool true
-               ])
+               ] |> with_execution_observer_instance ~owner)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
@@ -581,6 +701,14 @@ let invalidate_execution_cache_with ~before_broadcast () =
   match Eio_guard.execution_context () with
   | Eio_guard.Eio_fiber -> Eio.Cancel.protect invalidate
   | Eio_guard.Non_eio -> invalidate ()
+;;
+
+let invalidate_execution_cache_with ~before_broadcast () =
+  match current_execution_owner () with
+  | Some owner -> invalidate_execution_owner_with ~owner ~before_broadcast ()
+  | None ->
+      Dashboard_cache.invalidate_prefix "execution:";
+      before_broadcast ()
 ;;
 
 let invalidate_execution_cache () =
@@ -631,10 +759,11 @@ let install_task_mutation_cache_invalidation ~invalidate_full_health_snapshot ()
 (** Bypass the proactive warm-up guard so tests that call
     [dashboard_namespace_truth_http_json] get the full response instead of
     the "initializing" short-circuit. *)
-let seed_execution_cache_for_test () =
-  with_execution_publication_lock (fun () ->
+let seed_execution_cache_for_test ~state () =
+  let owner = execution_owner_for_scope ~state (Mcp_server.workspace_scope state) in
+  with_execution_publication_lock ~owner (fun () ->
     Server_dashboard_http_cache.mark_cached_surface_success
-      execution_cache
+      owner.cache
       (`Assoc [ "status", `String "seeded_for_test" ]))
 ;;
 
@@ -675,7 +804,6 @@ let cached_surface_generated_at_iso json =
 let cached_surface_cache_json
       ?cache_key
       ~scope
-      ~background_refresh_interval_s
       json
   =
   let diagnostic_field key =
@@ -698,8 +826,8 @@ let cached_surface_cache_json
     ; "stale_reason", diagnostic_field "stale_reason"
     ; "stale_age_ms", diagnostic_field "stale_age_ms"
     ; "request_cache_key", Json_util.string_opt_to_json cache_key
-    ; "background_refresh_interval_s", `Float background_refresh_interval_s
-    ; "policy", `String "cached_surface plus HTTP stale-while-revalidate"
+    ; "background_refresh_interval_s", `Null
+    ; "policy", `String "original changes, semantic deadlines and failed-read recovery"
     ]
 ;;
 
@@ -711,7 +839,6 @@ let with_cached_dashboard_surface_metadata
       ~scope
       ~producer
       ~store_kind
-      ~background_refresh_interval_s
       ~query
       json
   =
@@ -737,10 +864,10 @@ let with_cached_dashboard_surface_metadata
             ; "workspace_path", `String config.workspace_path
             ; "producer", `String producer
             ; "store_kind", `String store_kind
-            ; "background_refresh_interval_s", `Float background_refresh_interval_s
+            ; "background_refresh_interval_s", `Null
             ; ( "cache_policy"
               , `String
-                  "default route uses proactive cached_surface; parameterized route uses HTTP stale-while-revalidate"
+                  "source-driven cached surface; parameterized HTTP stale-while-revalidate"
               )
             ] )
       ; ( "query", query )
@@ -748,7 +875,6 @@ let with_cached_dashboard_surface_metadata
         , cached_surface_cache_json
             ?cache_key
             ~scope
-            ~background_refresh_interval_s
             json )
       ]
     in
@@ -787,9 +913,8 @@ let with_execution_metadata ~config ?cache_key ~query json =
     ~dashboard_surface:"/api/v1/dashboard/execution"
     ~source:"dashboard_execution_read_model"
     ~scope:"dashboard_execution"
-    ~producer:"Dashboard_execution.json"
+    ~producer:"Dashboard_execution.observe_current"
     ~store_kind:"process_cache"
-    ~background_refresh_interval_s:60.0
     ~query
     json
 ;;
@@ -808,8 +933,9 @@ let with_execution_metadata ~config ?cache_key ~query json =
    publication state, not I/O -- the rule
    {!prepare_execution_snapshot_broadcast} states below. The callers under
    the lock choose what to do; this builds what they chose. *)
-let build_default_light_response_json ~config =
-  Server_dashboard_http_cache.cached_surface_json execution_cache
+let build_default_light_response_json ~owner ~config =
+  Server_dashboard_http_cache.cached_surface_json owner.cache
+  |> with_execution_observer_instance ~owner
   |> (match Dashboard_execution_helpers.execution_fixture_name () with
       | Some _ -> Fun.id
       | None -> Dashboard_projection_cache.with_current_keeper_observations ~config)
@@ -819,23 +945,24 @@ let build_default_light_response_json ~config =
        ~query:default_light_execution_query
 ;;
 
-let execution_http_source_matches ~(config : Workspace.config) (source : execution_http_source) =
-  source.snapshot == Server_dashboard_http_cache.snapshot execution_cache
+let execution_http_source_matches ~owner ~(config : Workspace.config) (source : execution_http_source) =
+  execution_owner_is_current owner
+  && source.snapshot == Server_dashboard_http_cache.snapshot owner.cache
   && String.equal source.base_path config.base_path
   && String.equal source.workspace_path config.workspace_path
 ;;
 
-let rec refresh_execution_default_light_http_body_with
+let rec refresh_execution_default_light_http_body_with ~owner
       ~prepare ~config () =
   let owned = ref None in
   Eio_guard.protect
     ~finally:(fun () ->
       Option.iter
         (fun preparation ->
-          with_execution_publication_lock (fun () ->
-            match !execution_default_light_http with
+          with_execution_publication_lock ~owner (fun () ->
+            match !(owner.default_light_http) with
             | Preparing current when current == preparation ->
-              execution_default_light_http := Empty
+              owner.default_light_http := Empty
             | Empty | Preparing _ | Ready _ -> ());
           Eio.Promise.resolve preparation.settle ())
         !owned)
@@ -845,21 +972,21 @@ let rec refresh_execution_default_light_http_body_with
          built after it, because building reads the Candle ledger from the
          filesystem and the lock guards publication state, not I/O. *)
       let action =
-        with_execution_publication_lock (fun () ->
-          if not (execution_surface_has_fresh_success_unlocked ()) then
+        with_execution_publication_lock ~owner (fun () ->
+          if not (execution_surface_has_fresh_success_unlocked ~owner ()) then
             `Build_fresh
           else
-            match !execution_default_light_http with
-            | Ready payload when execution_http_source_matches ~config payload.source ->
+            match !(owner.default_light_http) with
+            | Ready payload when execution_http_source_matches ~owner ~config payload.source ->
               `Return payload.response_json
             | Preparing preparation
-              when execution_http_source_matches ~config preparation.source ->
+              when execution_http_source_matches ~owner ~config preparation.source ->
               `Await preparation.settled
             | Empty | Preparing _ | Ready _ ->
               let settled, settle = Eio.Promise.create () in
               let preparation =
                 { source =
-                    { snapshot = Server_dashboard_http_cache.snapshot execution_cache
+                    { snapshot = Server_dashboard_http_cache.snapshot owner.cache
                     ; base_path = config.base_path
                     ; workspace_path = config.workspace_path
                     }
@@ -868,47 +995,47 @@ let rec refresh_execution_default_light_http_body_with
                 }
               in
               owned := Some preparation;
-              execution_default_light_http := Preparing preparation;
+              owner.default_light_http := Preparing preparation;
               `Prepare preparation)
       in
       match action with
-      | `Build_fresh -> build_default_light_response_json ~config
+      | `Build_fresh -> build_default_light_response_json ~owner ~config
       | `Return json -> json
       | `Await settled ->
         Eio.Promise.await settled;
-        refresh_execution_default_light_http_body_with ~prepare ~config ()
+        refresh_execution_default_light_http_body_with ~owner ~prepare ~config ()
       | `Prepare preparation ->
-        let response_json = build_default_light_response_json ~config in
+        let response_json = build_default_light_response_json ~owner ~config in
         let etag, encoded =
           Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
             let body = Yojson.Safe.to_string response_json in
             Http_server_eio.Response.weak_etag_value body, prepare body)
         in
-        with_execution_publication_lock (fun () ->
+        with_execution_publication_lock ~owner (fun () ->
           (* An older completion cannot replace or clear a newer preparation. *)
-          match !execution_default_light_http with
+          match !(owner.default_light_http) with
           | Preparing current
             when current == preparation
-                 && execution_http_source_matches ~config preparation.source
-                 && execution_surface_has_fresh_success_unlocked () ->
-            execution_default_light_http :=
+                 && execution_http_source_matches ~owner ~config preparation.source
+                 && execution_surface_has_fresh_success_unlocked ~owner () ->
+            owner.default_light_http :=
               Ready { source = preparation.source; response_json; encoded; etag };
             `Published response_json
           | Empty | Preparing _ | Ready _ -> `Build_fresh)
         |> function
         | `Published json -> json
-        | `Build_fresh -> build_default_light_response_json ~config)
+        | `Build_fresh -> build_default_light_response_json ~owner ~config)
 ;;
 
-let refresh_execution_default_light_http_body ~config =
-  refresh_execution_default_light_http_body_with
+let refresh_execution_default_light_http_body ~owner ~config =
+  refresh_execution_default_light_http_body_with ~owner
     ~prepare:Http_response_payload.prepare ~config ()
 ;;
 
 (* Observe the ledger after cached response preparation, outside the publication
    lock, so a completed purchase/equip is not replaced by an older snapshot. *)
-let prepare_execution_snapshot_broadcast ~config () =
-  refresh_execution_default_light_http_body ~config
+let prepare_execution_snapshot_broadcast ~owner ~config () =
+  refresh_execution_default_light_http_body ~owner ~config
   |> (match Dashboard_execution_helpers.execution_fixture_name () with
       | Some _ -> Fun.id
       | None -> Dashboard_projection_cache.with_current_keeper_observations ~config)
@@ -918,13 +1045,13 @@ type execution_read =
   | Published_snapshot of Server_dashboard_http_cache.surface_snapshot * Yojson.Safe.t
   | Unpublished_response of Yojson.Safe.t
 
-let cached_execution_or_first_success ~clock ~timeout_sec work =
+let cached_execution_or_first_success ~owner ~clock ~timeout_sec work =
   let cached_success () =
-    with_execution_publication_lock (fun () ->
-      if execution_surface_has_fresh_success_unlocked ()
+    with_execution_publication_lock ~owner (fun () ->
+      if execution_surface_has_fresh_success_unlocked ~owner ()
       then Some (Published_snapshot
-        (Server_dashboard_http_cache.snapshot execution_cache,
-         Server_dashboard_http_cache.cached_surface_json execution_cache))
+        (Server_dashboard_http_cache.snapshot owner.cache,
+         Server_dashboard_http_cache.cached_surface_json owner.cache))
       else None)
   in
   match cached_success () with
@@ -932,11 +1059,11 @@ let cached_execution_or_first_success ~clock ~timeout_sec work =
   | None ->
     let compute_and_track =
       Pool_work.wrap work (fun compute ->
-        let attempt = begin_execution_attempt () in
+        let attempt = begin_execution_attempt ~owner ~origin:Request_read () in
         try
-          let json = compute () in
-          let (_ : bool) = publish_execution_attempt_success attempt json in
-          json
+          let observation = compute () in
+          let (_ : bool) = publish_execution_observation attempt observation in
+          observation.json
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn ->
@@ -945,7 +1072,7 @@ let cached_execution_or_first_success ~clock ~timeout_sec work =
     in
     let json =
       Dashboard_cache.get_or_compute_with_timeout
-        execution_default_light_cache_key
+        (execution_default_light_cache_key ^ ":" ^ owner.cache_identity)
         ~ttl:deep_surface_cache_ttl_s
         ~clock
         ~timeout_sec
@@ -962,13 +1089,13 @@ let cached_execution_or_first_success ~clock ~timeout_sec work =
        Unpublished_response json)
 ;;
 
-let prepared_execution_payload_for_snapshot ~config snapshot =
-  with_execution_publication_lock (fun () ->
-    match !execution_default_light_http with
+let prepared_execution_payload_for_snapshot ~owner ~config snapshot =
+  with_execution_publication_lock ~owner (fun () ->
+    match !(owner.default_light_http) with
     | Ready payload
       when payload.source.snapshot == snapshot
-           && execution_http_source_matches ~config payload.source
-           && execution_surface_has_fresh_success_unlocked () ->
+           && execution_http_source_matches ~owner ~config payload.source
+           && execution_surface_has_fresh_success_unlocked ~owner () ->
       Some (execution_payload_response payload)
     | Empty | Preparing _ | Ready _ -> None)
 ;;
@@ -977,9 +1104,9 @@ let with_transport_health_metadata ?(source = "cached_surface") json =
   extend_projection_diagnostics json [ "source", `String source ]
 ;;
 
-let dashboard_execution_snapshot_json () =
-  with_execution_publication_lock (fun () ->
-    Server_dashboard_http_cache.cached_surface_json execution_cache)
+let execution_snapshot_json ~owner () =
+  with_execution_publication_lock ~owner (fun () ->
+    Server_dashboard_http_cache.cached_surface_json owner.cache)
 ;;
 
 (* Cache patchers project a typed lifecycle transition onto dashboard row fields
@@ -1302,13 +1429,12 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
                   patch has nothing to invalidate in it; the handler's cache
                   drops above are what clear a pre-boot render.
 
-                  Two paths remain that no invalidation covers: the listener
-                  fiber itself dying ([fork_logged_fiber ~on_error]), and a
-                  publish that lands between [Event_bus_slots.set_masc] and
-                  the listener's own [subscribe]. Either leaves this row until
-                  a render reads a snapshot taken after the boot, which is one
-                  or two refresh-loop turns and at most about 220s at the
-                  default TTLs. *)
+                  The source observer also subscribes to the original Keeper
+                  lifecycle and metadata inputs before its initial read.
+                  Its current read bypasses the nested metadata TTLs. The
+                  last-good declaration remains visible until a successful
+                  read replaces it; actual failures retain retry debt. There
+                  is no healthy periodic refresh as a fallback. *)
                acc)
           rows
           running
@@ -1346,20 +1472,21 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
   | other -> other
 ;;
 
-let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
+let patchexecution_cache_for_keeper ~owner ~keeper_name ~event ~keepalive_running =
   if Option.is_none (Dashboard_execution_helpers.execution_fixture_name ()) then
   let patch =
-    with_execution_publication_lock (fun () ->
-      incr execution_publication_generation;
-      let generation = !execution_publication_generation in
-      clear_execution_default_light_http_body ();
+    with_execution_publication_lock ~owner (fun () ->
+      owner.generation := next_execution_generation ();
+      let generation = !(owner.generation) in
+      clear_execution_default_light_http_body ~owner ();
       let publish json =
-        let json = with_execution_publication_generation ~generation json in
-        Server_dashboard_http_cache.update_cached_surface execution_cache
+        incr owner.namespace_revision;
+        let json = with_execution_publication_generation ~owner ~generation json in
+        Server_dashboard_http_cache.update_cached_surface owner.cache
           (fun current -> { current with json });
         Patched ()
       in
-      match (Server_dashboard_http_cache.snapshot execution_cache).json with
+      match (Server_dashboard_http_cache.snapshot owner.cache).json with
       | `Assoc fields ->
         (match List.assoc_opt "keepers" fields with
          | Some (`List rows) ->
@@ -1383,15 +1510,16 @@ let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
   (* Invalidation takes the publication lock itself and broadcasts outside it,
      so it runs after the patch has released the lock. *)
   match patch with
-  | Patched () -> ()
-  | Declaration_row_is_stale -> invalidate_execution_cache ()
+  | Patched () -> notify_execution_completion owner Cache_patched
+  | Declaration_row_is_stale -> invalidate_execution_owner_with ~owner ~before_broadcast:(fun () -> ()) ()
 ;;
 
 let patch_keeper_dependent_caches ~keeper_name ~event =
   match keepalive_running_of_lifecycle_event event with
   | None -> ()
   | Some keepalive_running ->
-    patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running
+    Option.iter (fun owner -> patchexecution_cache_for_keeper ~owner ~keeper_name ~event ~keepalive_running)
+      (current_execution_owner ())
 ;;
 
 (** Late-bound broadcast hook. Set after [broadcast_namespace_truth_snapshot]
@@ -1400,86 +1528,96 @@ let broadcast_namespace_truth_ref : (Mcp_server.server_state -> unit) ref =
   ref (fun (_state : Mcp_server.server_state) -> ())
 ;;
 
-(** Start the proactive execution refresh loop. When an Executor_pool is
-    available, each refresh runs in a pool domain with a domain-local Caqti
-    pool. Falls back to in-domain compute. *)
+let compute_execution_observation ~state ~config ~sw ~clock ?net ?mono_clock () =
+  let started_at = Unix.gettimeofday () in
+  run_dashboard_compute ~mode:Offloaded_readonly ~sw ~clock ?net ?mono_clock
+    ~config ~kind:Pool_work.Cpu ~name:__FUNCTION__ (fun ~config ~sw ->
+      let observation = Dashboard_execution.observe_current ~light:true ~config
+          ~sw ~clock ~proc_mgr:state.Mcp_server.proc_mgr () in
+      let json = observation.json
+        |> (match Dashboard_execution_helpers.execution_fixture_name () with
+            | Some _ -> Fun.id
+            | None -> patch_surface_json_for_running_keepers config)
+        |> Server_dashboard_http_core_cache.with_projection_diagnostics
+             ~surface:"execution" ~started_at
+             ~extra:["readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json ()] in
+      {observation with json})
+;;
+
+module Execution_completions = Server_workspace_invalidation.Make (struct
+  type t = unit
+  let compare () () = 0
+end)
+
 let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
-  let workspace_config = (Mcp_server.workspace_config state) in
-  let proc_mgr = state.Mcp_server.proc_mgr in
-  (* Default keeps timeout < interval (60s) so Proactive_refresh's clamp
-     at start does not fire every boot. Env var override can still push
-     above interval; runtime clamp remains the safety net. *)
-  let execution_refresh_timeout_s =
-    float_of_env_default
-      "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
-      ~default:48.0
-      ~min_v:30.0
-      ~max_v:300.0
-  in
-  let latest_attempt = Atomic.make None in
-  let compute () =
-    let attempt = begin_execution_attempt () in
-    Atomic.set latest_attempt (Some attempt);
-    let started_at = Unix.gettimeofday () in
-    try
-      let json =
-        run_dashboard_compute
-          ~mode:Offloaded_readonly
-          ~sw
-          ~clock
-          ~net
-          ~mono_clock
-          ~config:workspace_config
-          ~kind:Pool_work.Cpu ~name:__FUNCTION__
-          (fun ~config ~sw ->
-             Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
-             |> (match Dashboard_execution_helpers.execution_fixture_name () with
-                 | Some _ -> Fun.id
-                 | None -> patch_surface_json_for_running_keepers config)
-             |> Server_dashboard_http_core_cache.with_projection_diagnostics
-                  ~surface:"execution"
-                  ~started_at
-                  ~extra:
-                    [ ( "readonly_pool"
-                      , Workspace_utils.domain_local_pg_backend_diagnostics_json () )
-                    ])
+  let timeout_s = float_of_env_default "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
+      ~default:48.0 ~min_v:30.0 ~max_v:300.0 in
+  Server_observation_refresh.install_scoped ~state ~sw
+    ~install:(fun ~scope ~sw ~is_current ->
+      let owner = execution_owner_for_scope ~state scope in
+      let changes = Eio.Stream.create 1 in
+      let changes_mu = Stdlib.Mutex.create () in
+      let changed () = Stdlib.Mutex.protect changes_mu (fun () ->
+        if Eio.Stream.is_empty changes then Eio.Stream.add changes ()) in
+      Server_observation_input.subscribe ~sw ~base_path:scope.config.base_path
+        ~observer_instance_id:(Server_observer_scope.instance_id scope)
+        (fun input ->
+          if Server_observation_refresh.affects Execution input then changed ());
+      let enqueue_completion = ref (fun () -> ()) in
+      let publish_current () =
+        let selected = with_execution_publication_lock ~owner (fun () ->
+          let snapshot = Server_dashboard_http_cache.snapshot owner.cache in
+          if Option.is_some snapshot.last_success_unix || Option.is_some snapshot.last_error_unix
+          then Some snapshot else None) in
+        Option.iter (fun snapshot ->
+          if is_current () then (
+            let still_current () = is_current () && execution_owner_is_current owner
+              && snapshot == Server_dashboard_http_cache.snapshot owner.cache in
+            let json = prepare_execution_snapshot_broadcast ~owner ~config:scope.config () in
+            broadcast_cached_surface ~target:owner.target
+              ~encoding:(Encode_on_pool {still_current; on_superseded = (fun () -> !enqueue_completion ())})
+              ~event_type:Dashboard_event_slices.execution_snapshot_type json;
+            if still_current () then !broadcast_namespace_truth_ref state)) selected
       in
-      attempt, json
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      let (_ : bool) = publish_execution_attempt_failure attempt exn in
-      raise exn
-  in
-  Proactive_refresh.start
-    ~sw
-    ~clock
-    ~config:
-      { (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
-        timeout_s = execution_refresh_timeout_s
-      ; on_failure =
-          Some
-            (fun failure ->
-              let attempt =
-                match Atomic.get latest_attempt with
-                | Some attempt -> attempt
-                | None -> execution_attempt_now ()
-              in
-              ignore
-                (publish_execution_attempt_failure_message
-                   attempt
-                   (Proactive_refresh.failure_message failure)))
-      ; warm_delay_s = 0.0
-      }
-    ~compute
-    ~on_result:(fun (attempt, json) ->
-      if publish_execution_attempt_success attempt json
-      then (
-        broadcast_cached_surface
-          ~encoding:Encode_inline
-          ~event_type:Dashboard_event_slices.execution_snapshot_type
-          (prepare_execution_snapshot_broadcast ~config:workspace_config ());
-        !broadcast_namespace_truth_ref state))
+      let enqueue = Execution_completions.start ~sw ~mono_clock
+          ~publish:(fun () -> publish_current ()) in
+      enqueue_completion := (fun () -> enqueue ());
+      let unsubscribe = subscribe_execution_completion ~owner (fun completion ->
+        (* Only an actual request's cache installation/failure can change the
+           source worker's deadline or retry debt. Its own output never wakes
+           another source computation. All outcomes notify the publisher. *)
+        (match completion with
+         | Cache_installed Request_read | Cache_failed Request_read -> changed ()
+         | Cache_installed Observation_read | Cache_failed Observation_read | Cache_patched | Shell_installed -> ());
+        enqueue ()) in
+      Eio.Switch.on_release sw unsubscribe;
+      (* An HTTP fill may have won before this subscription was installed. *)
+      enqueue ();
+      let latest_attempt = ref None in
+      Proactive_refresh.start_on_change_or_deadline ~sw ~clock ~changes
+        ~config:{(Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
+          timeout_s; warm_delay_s = 0.0;
+          on_failure = Some (fun failure ->
+            if is_current () then Option.iter (fun attempt ->
+              ignore (publish_execution_attempt_failure_message attempt
+                (Proactive_refresh.failure_message failure))) !latest_attempt)}
+        ~compute:(fun () ->
+          let attempt = begin_execution_attempt ~owner ~origin:Observation_read () in
+          latest_attempt := Some attempt;
+          try
+            let observation = compute_execution_observation ~state ~config:scope.config
+                ~sw ~clock ~net ~mono_clock () in
+            (* The reusable worker reads the next deadline before on_result.
+               Install the known successful observation before returning it;
+               the attempt CAS preserves it if the outer window also fails. *)
+            ignore (publish_execution_observation attempt observation);
+            attempt, observation
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> ignore (publish_execution_attempt_failure attempt exn); raise exn)
+        ~on_result:(fun _ -> ())
+        ~next_deadline:(fun _ -> with_execution_publication_lock ~owner
+          (fun () -> !(owner.next_deadline_unix))))
 ;;
 
 type execution_parameters =
@@ -1500,14 +1638,17 @@ type execution_http_request =
   { state : Mcp_server.server_state
   ; config : Workspace.config
   ; parameters : execution_parameters
+  ; owner : execution_owner
   }
 
 let execution_http_request ~state request =
-  let config = Mcp_server.workspace_config state in
+  let scope = Mcp_server.workspace_scope state in
+  let config = scope.config in
+  let owner = execution_owner_for_scope ~state scope in
   let parameters = execution_parameters ~config request in
-  { state; config; parameters }
+  { state; config; owner; parameters }
 
-let execution_cached_http_response ~observe ~(config : Workspace.config)
+let execution_cached_http_response ~owner ~observe ~(config : Workspace.config)
       ~(parameters : execution_parameters) =
   let { fixture = requested_fixture; actor; full_mode; force } = parameters in
   let fixture =
@@ -1515,11 +1656,11 @@ let execution_cached_http_response ~observe ~(config : Workspace.config)
   in
   match fixture, actor, full_mode, force with
   | None, None, false, false when requested_fixture = None ->
-    let selected = with_execution_publication_lock (fun () ->
-      match !execution_default_light_http with
+    let selected = with_execution_publication_lock ~owner (fun () ->
+      match !(owner.default_light_http) with
       | Ready payload
-        when execution_surface_has_fresh_success_unlocked ()
-             && execution_http_source_matches ~config payload.source ->
+        when execution_surface_has_fresh_success_unlocked ~owner ()
+             && execution_http_source_matches ~owner ~config payload.source ->
         Some payload
       | Empty | Preparing _ | Ready _ -> None) in
     (match selected with
@@ -1533,42 +1674,55 @@ let execution_cached_http_response ~observe ~(config : Workspace.config)
          if json = payload.response_json
          then Execution_payload (execution_payload_response payload)
          else Execution_json json in
-       with_execution_publication_lock (fun () ->
-         if execution_surface_has_fresh_success_unlocked ()
-            && execution_http_source_matches ~config payload.source
+       with_execution_publication_lock ~owner (fun () ->
+         if execution_surface_has_fresh_success_unlocked ~owner ()
+            && execution_http_source_matches ~owner ~config payload.source
          then Some response
          else None))
   | _ -> None
 ;;
 
 let dashboard_execution_cached_http_response context =
-  execution_cached_http_response
+  let owner = context.owner in
+  execution_cached_http_response ~owner
     ~observe:Dashboard_projection_cache.with_current_keeper_observations
     ~config:context.config ~parameters:context.parameters
 ;;
 
 module For_testing = struct
+  type owner = execution_owner
   type nonrec execution_attempt = execution_attempt
 
+  let create_owner () =
+    let owner = create_execution_owner None in
+    Stdlib.Mutex.protect active_execution_owner_mu (fun () ->
+      active_execution_owner := Some owner);
+    owner
+  let owner_for_state ~state =
+    execution_owner_for_scope ~state (Mcp_server.workspace_scope state)
+  let cache owner = owner.cache
+  let invalidate owner =
+    Stdlib.Mutex.protect active_execution_owner_mu (fun () ->
+      active_execution_owner := Some owner);
+    invalidate_execution_owner_with ~owner ~before_broadcast:(fun () -> ()) ()
   let cached_response
       ?(observe = Dashboard_projection_cache.with_current_keeper_observations)
-      ~config request =
+      ~owner ~config request =
     let parameters = execution_parameters ~config request in
-    execution_cached_http_response ~observe ~config ~parameters
+    execution_cached_http_response ~owner ~observe ~config ~parameters
   let execution_publication_generation = current_execution_publication_generation
-  (* An outcome at the given generation, taken as the newest attempt's. *)
-  let publish_execution_success_if_current ~generation json =
-    publish_execution_attempt_success { (execution_attempt_now ()) with generation } json
-  let begin_execution_attempt = begin_execution_attempt
+  let publish_execution_success_if_current ~owner ~generation json =
+    publish_execution_attempt_success
+      { (execution_attempt_now ~owner ~origin:Observation_read ()) with generation } json
+  let begin_execution_attempt ~owner () =
+    begin_execution_attempt ~owner ~origin:Observation_read ()
   let publish_execution_attempt_success = publish_execution_attempt_success
   let publish_execution_attempt_failure = publish_execution_attempt_failure
   let publish_execution_attempt_failure_message = publish_execution_attempt_failure_message
   let refresh_execution_default_light_http_body
-        ?(prepare = Http_response_payload.prepare) ~config () =
-    refresh_execution_default_light_http_body_with ~prepare ~config ()
-
+        ?(prepare = Http_response_payload.prepare) ~owner ~config () =
+    refresh_execution_default_light_http_body_with ~owner ~prepare ~config ()
   let prepare_execution_snapshot_broadcast = prepare_execution_snapshot_broadcast
-
   let prepared_payload_for_snapshot = prepared_execution_payload_for_snapshot
 end
 ;;
@@ -1672,6 +1826,7 @@ let start_execution_trust_refresh_loop ~state ~sw ~clock =
 ;;
 
 let cached_dashboard_execution_http_response ~sw ~clock context =
+  let owner = context.owner in
   let state = context.state in
   let config = context.config in
   let net = state.Mcp_server.net in
@@ -1699,7 +1854,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       ~config
       ~kind:Pool_work.Cpu ~name:__FUNCTION__
       (fun ~config ~sw ->
-         Dashboard_execution.json
+         Dashboard_execution.observe_current
            ?actor
            ?fixture:requested_fixture
            ~light
@@ -1708,6 +1863,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
            ~clock
            ~proc_mgr:state.Mcp_server.proc_mgr
            ()
+         |> fun observation -> observation.Dashboard_execution.json
          |> (match fixture with
              | Some _ -> Fun.id
              | None -> patch_surface_json_for_running_keepers config)
@@ -1730,17 +1886,17 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
         !attempt
     in
     let compute_and_track () =
-      let this_attempt = begin_execution_attempt () in
+      let this_attempt = begin_execution_attempt ~owner ~origin:Request_read () in
       attempt := Some this_attempt;
       try
-        let json = compute ~light:true () in
-        if publish_execution_attempt_success this_attempt json
+        let observation = compute_execution_observation ~state ~config ~sw ~clock ?net ?mono_clock () in
+        if publish_execution_observation this_attempt observation
         then (
           let (_ : Yojson.Safe.t) =
-            refresh_execution_default_light_http_body ~config
+            refresh_execution_default_light_http_body ~owner ~config
           in
-          dashboard_execution_snapshot_json ())
-        else json
+          execution_snapshot_json ~owner ())
+        else observation.json
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -1780,10 +1936,11 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)
     let selected =
-      cached_execution_or_first_success
+      cached_execution_or_first_success ~owner
         ~clock
         ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
-        (Pool_work.cpu ~name:__FUNCTION__ (compute ~light:true))
+        (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+          compute_execution_observation ~state ~config ~sw ~clock ?net ?mono_clock ()))
     in
     let json = match selected with
       | Published_snapshot (_, json) | Unpublished_response json -> json
@@ -1795,7 +1952,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
         ~query
         json
     in
-    let (_ : Yojson.Safe.t) = refresh_execution_default_light_http_body ~config in
+    let (_ : Yojson.Safe.t) = refresh_execution_default_light_http_body ~owner ~config in
     (* Preparation may yield to a mutation or another publication. Reuse only
        the selected snapshot's bytes; a newer Ready payload cannot replace
        this request's already chosen response. A lost/failed publication keeps
@@ -1803,21 +1960,21 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
     (match selected with
      | Unpublished_response _ -> Execution_json response_json
      | Published_snapshot (snapshot, _) ->
-       match prepared_execution_payload_for_snapshot ~config snapshot with
+       match prepared_execution_payload_for_snapshot ~owner ~config snapshot with
        | Some payload -> Execution_payload payload
        | None -> Execution_json response_json)
   | _ ->
     (* Authenticated dashboards use this path too. Cache the complete response
        so repeat reads retain its bytes instead of serializing the projection
        again. Scope every input that contributes to the response metadata. *)
-    let generation = current_execution_publication_generation () in
+    let generation, publication_ticket = current_execution_http_revision ~owner () in
     let cache_key =
       "execution:parameterized:"
       ^ Yojson.Safe.to_string
           (`List
-             [ `String config.base_path; `String config.workspace_path;
+             [ `String owner.cache_identity; `String config.base_path; `String config.workspace_path;
                `String (Workspace.masc_dir config);
-               `Int generation; query ])
+               `Int generation; `Int publication_ticket; query ])
     in
     let compute_with_generation = Pool_work.cpu ~name:__FUNCTION__ @@ fun () ->
       compute ?actor ~light ()
@@ -1834,7 +1991,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       |> (match fixture with
           | None -> Dashboard_projection_cache.with_current_keeper_observations ~config
           | Some _ -> fun json -> json)
-      |> with_execution_publication_generation ~generation
+      |> with_execution_publication_generation ~owner ~generation
       |> with_execution_metadata ~config ~cache_key ~query
     in
     let payload =
@@ -1856,13 +2013,14 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
 
 let dashboard_execution_http_response ~sw ~clock context =
   let response = cached_dashboard_execution_http_response ~sw ~clock context in
-  match Dashboard_execution_helpers.execution_fixture_name ?fixture:context.parameters.fixture () with
-  | Some _ -> response
-  | None ->
-    let refresh = Dashboard_projection_cache.with_current_keeper_observations ~config:context.config in
-    match response with
-    | Execution_json json -> Execution_json (refresh json)
-    | Execution_payload payload ->
+  let refresh json =
+    let json = with_execution_observer_instance ~owner:context.owner json in
+    match Dashboard_execution_helpers.execution_fixture_name ?fixture:context.parameters.fixture () with
+    | Some _ -> json
+    | None -> Dashboard_projection_cache.with_current_keeper_observations ~config:context.config json in
+  match response with
+  | Execution_json json -> Execution_json (refresh json)
+  | Execution_payload payload ->
       let json = refresh payload.json in
       if json = payload.json then response else Execution_json json
 ;;

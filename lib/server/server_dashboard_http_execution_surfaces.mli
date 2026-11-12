@@ -1,65 +1,13 @@
-(** Server_dashboard_http_execution_surfaces — cached
-    execution + transport-health dashboard surfaces.
+(** Cached execution, execution-trust and transport observations.
 
-    [Server_dashboard_http] does
-    [include Server_dashboard_http_execution_surfaces];
-    [server_dashboard_http_namespace_truth.ml] does
-    [module Execution_surfaces = ...] alias and reaches
-    {!execution_cache} +
-    {!broadcast_namespace_truth_ref} through it.  Plus
-    direct dotted callers.  A [let module S = ...] inline alias for
-    the lifecycle-event patcher family was cited in
-    [test/test_types.ml], which does not exist.
-
-    External surface (22 entries):
-    - {b cache cells} ({!execution_cache},
-      {!broadcast_namespace_truth_ref}) reached by
-      [server_dashboard_http_namespace_truth] for
-      readiness gating + truth-broadcast wiring, plus
-      {!execution_trust_cache} for the execution-receipt
-      trust read model.
-    - {b shell prewarm} ({!warm_shell_cache}) — called
-      at server bootstrap.
-    - {b dashboard actor resolution}
-      ({!execution_actor_for_request}).
-    - {b cache management}
-      ({!invalidate_execution_cache},
-      {!patch_keeper_dependent_caches}).
-    - {b refresh fibers}
-      ({!start_execution_refresh_loop},
-      {!start_transport_health_refresh_loop},
-      {!start_execution_trust_refresh_loop}).
-    - {b snapshot access} ({!dashboard_execution_snapshot_json}).
-    - {b HTTP route entries}
-      ({!dashboard_execution_cached_http_response},
-      {!dashboard_execution_http_json},
-      {!dashboard_execution_trust_http_json},
-      {!dashboard_transport_health_http_json}).
-    - {b lifecycle-event patchers}
-      ({!keepalive_running_of_lifecycle_event},
-      {!phase_of_lifecycle_event},
-      {!pipeline_stage_of_lifecycle_event},
-      {!paused_of_lifecycle_event}) — pinned because
-      [test/test_types] inline-aliases this module to
-      assert every SSOT keeper-lifecycle event is
-      handled (#8396).
-    - {b SSE-event row patchers}
-      ({!patch_keeper_row},
-      {!patch_surface_json_for_running_keepers}) —
-      pinned because [test/test_dashboard_http_core] drives them directly.
-
-    Internal helpers stay private at this boundary
-    ([shell_prewarm_timeout_s],
-    [last_broadcast_payload] /
-    [broadcast_payload_mu] / [broadcast_cached_surface] /
-    [operator_snapshot_publication_is_current] / [operator_snapshot_json] /
-    [broadcast_current_successful_operator_snapshot],
-    [_transport_health_cache],
-    [keeper_top_level_status_opt] / [patched_keeper_status],
-    [patch_runtime_row] / [patch_keeper_rows] SSE-event row patcher helpers,
-    [running_keeper_names],
-    [patchexecution_cache_for_keeper],
-    [transport_health_cache_diagnostics]). *)
+    Execution retains one publication owner per workspace scope. Its cache,
+    attempt order, semantic deadline and prepared response bytes retire
+    together. Original input changes and actual HTTP/cache completions use
+    separate typed paths, so canonical output never re-enters the source
+    worker. The process publication epoch shared with Goal response headers
+    stays stable; publication generations advance across scope replacement.
+    HTTP and canonical SSE carry [observer_instance_id] only from the captured
+    scope. An isolated test owner has no observer authority to attest. *)
 
 (** {1 Cache cells} *)
 
@@ -72,13 +20,36 @@ type execution_http_response =
 val execution_publication_epoch : string
 (** Process-scoped identity of the execution publication stream. *)
 
-val execution_cache : cached_surface
+val execution_cache : state:Mcp_server.server_state -> cached_surface
 (** Cached execution surface JSON.  Reached by
     [Server_dashboard_http_namespace_truth] (via the
     [Execution_surfaces] alias) for readiness gating —
     the namespace-truth refresh skips the live execution
     fetch when this cache is still serving a successful
-    snapshot. *)
+    snapshot. Each workspace scope owns a separate publication cell, ticket
+    order and prepared HTTP body. A retired request cannot replace another
+    scope's last-good answer, including a same-path replacement. *)
+
+val execution_cache_for_scope :
+  state:Mcp_server.server_state -> Mcp_server.workspace_scope -> cached_surface
+(** Retain the cache for an already captured scope. A delayed retired lookup
+    receives a private cell and cannot retire the current scope's owner. *)
+
+val last_good_shell_for_scope :
+  state:Mcp_server.server_state -> Mcp_server.workspace_scope -> Yojson.Safe.t option
+
+val namespace_cache_revision :
+  state:Mcp_server.server_state -> Mcp_server.workspace_scope -> int
+(** Successful execution/Shell installations and lifecycle patches advance the
+    canonical completion revision, including an equal-valued light Shell.
+    This is completion identity, not Task or Goal authority. *)
+
+val publish_shell_cache_success :
+  state:Mcp_server.server_state -> scope:Mcp_server.workspace_scope ->
+  light:bool -> Yojson.Safe.t -> unit
+(** Install this scope's successful shell and enqueue canonical namespace
+    completion after the cache update. Late retired completions are ignored;
+    fanout never runs inline inside this cache installation. *)
 
 val execution_trust_cache : state:Mcp_server.server_state -> cached_surface
 (** Cached execution-trust surface JSON.  The default
@@ -129,10 +100,17 @@ val install_task_mutation_cache_invalidation :
     installs the callback before Workspace mutation hooks become available. *)
 
 module For_testing : sig
-  val execution_publication_generation : unit -> int
+  type owner
+  val create_owner : unit -> owner
+  val owner_for_state : state:Mcp_server.server_state -> owner
+  val cache : owner -> cached_surface
+  val invalidate : owner -> unit
+  (** An isolated publication owner for the cache/attempt boundary fixtures. *)
+
+  val execution_publication_generation : owner:owner -> unit -> int
 
   val publish_execution_success_if_current :
-    generation:int -> Yojson.Safe.t -> bool
+    owner:owner -> generation:int -> Yojson.Safe.t -> bool
   (** Publishes as an attempt that began after every attempt so far: [false]
       only when the surface was invalidated since [generation]. An attempt
       still running then publishes nothing. *)
@@ -143,7 +121,7 @@ module For_testing : sig
       share a generation; the one that began later is the newer, and the
       outcome of an older attempt is not published over a newer attempt's. *)
 
-  val begin_execution_attempt : unit -> execution_attempt
+  val begin_execution_attempt : owner:owner -> unit -> execution_attempt
 
   val publish_execution_attempt_success : execution_attempt -> Yojson.Safe.t -> bool
   (** [false] when the surface was invalidated since the attempt began, or a
@@ -165,21 +143,23 @@ module For_testing : sig
 
   val cached_response :
     ?observe:(config:Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t) ->
+    owner:owner ->
     config:Workspace.config -> Httpun.Request.t ->
     execution_http_response option
 
   val refresh_execution_default_light_http_body :
     ?prepare:(string -> Http_response_payload.prepared) ->
+    owner:owner ->
     config:Workspace.config -> unit -> Yojson.Safe.t
   (** The preparation callback runs outside the publication lock on the CPU
       worker. It can coordinate source changes and concurrent readers. *)
 
   val prepare_execution_snapshot_broadcast :
-    config:Workspace.config -> unit -> Yojson.Safe.t
+    owner:owner -> config:Workspace.config -> unit -> Yojson.Safe.t
   (** Production SSE payload preparation, including current ledger observations. *)
 
   val prepared_payload_for_snapshot :
-    config:Workspace.config -> Server_dashboard_http_cache.surface_snapshot ->
+    owner:owner -> config:Workspace.config -> Server_dashboard_http_cache.surface_snapshot ->
     Dashboard_cache.cached_payload option
   (** Returns bytes only for this exact, still-current successful snapshot and
       workspace. Used to exercise invalidation during cold response preparation. *)
@@ -203,10 +183,11 @@ val start_execution_refresh_loop :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   unit
-(** Forks the per-process execution-cache refresh fiber.
-    Idempotent.  Default refresh interval keeps timeout
-    < interval (60 s) so [Proactive_refresh]'s clamp
-    leaves workspace for the first build window after boot. *)
+(** Install the scope-bound execution observer and canonical completion
+    publisher. Initial read, original affecting inputs and returned semantic
+    deadlines own the debt. Successful idle has no refresh timer. HTTP cold
+    and force fills use the same publication owner and announce completion;
+    an older worker can never rebroadcast its superseded computed answer. *)
 
 val start_transport_health_refresh_loop :
   state:Mcp_server.server_state ->
@@ -315,7 +296,7 @@ val pipeline_stage_of_lifecycle_event :
 val paused_of_lifecycle_event :
   Keeper_lifecycle_events.lifecycle_event -> bool option
 
-val seed_execution_cache_for_test : unit -> unit
+val seed_execution_cache_for_test : state:Mcp_server.server_state -> unit -> unit
 
 val patch_surface_json_for_running_keepers :
   Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t

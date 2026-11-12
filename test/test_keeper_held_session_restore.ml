@@ -157,7 +157,7 @@ let test_keeper_boots_while_real_restore_is_held () =
          request or successful turn is asserted. *)
       Runtime_startup_state.set Available;
       Server_bootstrap_loops.start_keeper_loops ~claimed_persistence:claimed
-        ~invalidate_full_health_snapshot:(fun () -> ()) ~sw ~clock:env#clock
+        ~invalidate_full_health_snapshot:(fun () -> ()) ~sw ~clock:env#clock ~mono_clock:env#mono_clock
         ~net:env#net ~proc_mgr:env#process_mgr state;
       let rec await_started_lane () =
         match Keeper_registry.get ~base_path keeper_name with

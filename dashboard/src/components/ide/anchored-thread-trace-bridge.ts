@@ -1,5 +1,7 @@
 import { pushTrace } from './keeper-trace-store'
 import { isPositiveSafeInteger } from '../common/normalize'
+import { dashboardObservationOwnerHasWorkspace, dashboardObservationOwnerIsCurrent,
+  type DashboardObservationOwner } from '../../lib/observation-read-owner'
 
 /**
  * RFC-0028 PR-δ producer: anchored-thread → keeper-trace bridge.
@@ -49,7 +51,9 @@ export interface AnchoredThreadProducerInput {
 export function bridgePostsToTrace(
   posts: ReadonlyArray<AnchoredThreadProducerInput>,
   alreadyEmitted: ReadonlySet<string>,
+  owner: DashboardObservationOwner,
 ): ReadonlySet<string> {
+  if (!dashboardObservationOwnerHasWorkspace(owner) || !dashboardObservationOwnerIsCurrent(owner)) return alreadyEmitted
   if (posts.length === 0) return alreadyEmitted
   const next = new Set(alreadyEmitted)
   for (const post of posts) {
@@ -64,7 +68,7 @@ export function bridgePostsToTrace(
       threadId: post.id,
       filePath: post.filePath ?? null,
       line: lineFromPost(post),
-    })
+    }, owner)
     next.add(post.id)
   }
   return next

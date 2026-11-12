@@ -92,9 +92,11 @@ model call and allocates no successor.
 Observation does not require reconnecting to the producer's VM or SSH endpoint.
 
 When every recorded call has ended, every admitted tool attempt is settled and
-no call settled a report, the attempt produced no verdict. It is retained as a
-definite refusal. What the review walk left on the attempt names the runtimes
-that may review the same original in a successor attempt:
+no call settled a report, the attempt produced no verdict. A report that was
+asked for and never started settles nothing, so it does not change this. The
+attempt is retained as a definite refusal. What the review walk left on the
+attempt names the runtimes that may review the same original in a successor
+attempt:
 
 - a walk result with each failed candidate's typed failure names the candidates
   whose failure was `Reviews_again`. A result that names none leaves the attempt
@@ -110,15 +112,18 @@ automatic reconciliation cannot establish an original result; the operator must
 inspect it. TUI and Dashboard distinguish these from a generic review failure.
 These remain unresolved even after upgrade: an original without a locator
 (a historical one, or an attempt that was cut before its first call was
-recorded), an attempt whose walk result holds no per-candidate failure, and an
-attempt whose walk result does not fit its recorded calls (an unknown-outcome
-candidate that left no recorded call, or a result that is not the refusal an
-unknown outcome leaves).
+recorded), an attempt whose unknown-outcome observation carries no list of
+per-candidate failures, an attempt that holds more than one walk result, and
+an attempt whose walk result does not fit its recorded calls (an
+unknown-outcome candidate that left no recorded call, or a result that is not
+the refusal an unknown outcome leaves).
 
 A judgment is recovered only from one admitted, successfully settled structured
-verdict call. How the execution ended after that call (a success, a failure, a
-cancellation, or the loss of its writer) does not change it. Schema refusals,
-duplicate reports, unsettled effects and ambiguous histories cannot become
+verdict call, and only when the provider replies recorded for the attempt asked
+for that report and no other. How the execution ended after that call (a
+success, a failure, a cancellation, or the loss of its writer) does not change
+it. Schema refusals, duplicate reports, a second report that was asked for and
+never started, unsettled effects and ambiguous histories cannot become
 judgments. The recovered judgment
 and its observer intent enter the existing atomic publication and Task commit
 path. Its missing native response identity stays unknown. Official-client

@@ -232,8 +232,12 @@ function probePayload(overrides: Record<string, unknown> = {}) {
 describe('RuntimeHealthSnapshot', () => {
   let container: HTMLDivElement
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules()
+    // The panel reads only for a confirmed workspace; confirm it in the module
+    // graph this test is about to import.
+    const { confirmRuntimeTestWorkspace } = await import('../lib/runtime-workspace.test-fixture')
+    confirmRuntimeTestWorkspace()
     apiMocks.fetchRuntimeProviders.mockReset().mockResolvedValue(providerPayload())
     apiMocks.fetchDashboardRuntimeProbe.mockReset().mockResolvedValue(probePayload())
     container = document.createElement('div')

@@ -21,6 +21,10 @@ function execution(workspaceRoot: string | null) {
     generated_at: '2026-10-23T00:00:00Z',
     execution_publication_epoch: 'cold-route-fixture',
     execution_publication_generation: 1,
+    // An execution response is accepted only with its read outcome and the
+    // Observer instance that produced it.
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
+    observer_instance_id: 'cold-route-observer',
     status: { project: 'fixture', workspace_root: workspaceRoot },
     agents: [], tasks: [], messages: [], keepers: [],
   }

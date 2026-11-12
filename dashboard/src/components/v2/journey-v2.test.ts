@@ -172,6 +172,12 @@ async function loadPanel({
     fetchKeeperRuntimeTrace,
   }))
 
+  // The panel reads only for an accepted workspace that names its Observer
+  // instance; accept one in the module graph this test is about to import.
+  const { acceptedExecutionWorkspace } = await import('../../execution-workspace-authority')
+  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace',
+    connectionGeneration: 1, observerInstanceId: 'fixture-instance' }
+
   const mod = await import('./journey-v2')
   return {
     JourneyV2Panel: mod.JourneyV2Panel,

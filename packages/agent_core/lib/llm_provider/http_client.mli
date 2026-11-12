@@ -433,6 +433,13 @@ type cache_stats =
     eviction fiber wakes every half TTL on [mono_clock]. A wall clock step
     does not change a connection's age.
 
+    [tls_config] is the TLS client configuration for every https connection
+    this cache opens; without it they use {!Api_common.tls_client_config}, the
+    system trust store. It is the cache's, not a request's, because a parked
+    connection was checked under it and a later request must not inherit a
+    connection checked under another one. A request that passes no cache
+    always uses the system trust store.
+
     @raise Invalid_argument if [max_idle_per_host < 1], or if
     [idle_ttl_seconds] is under 1 ns, not finite, or 2{^53} ns or longer.
 
@@ -442,6 +449,7 @@ val create_cache
   -> mono_clock:_ Eio.Time.Mono.t
   -> ?max_idle_per_host:int
   -> ?idle_ttl_seconds:float
+  -> ?tls_config:Tls.Config.client
   -> unit
   -> cache
 

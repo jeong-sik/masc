@@ -854,8 +854,15 @@ let%test "tls peer: neither is an error, not a nameless handshake" =
   | Ok _ -> false
 ;;
 
-let make_https_result () : (tls_peer -> _ -> _, https_init_error) result =
-  match tls_client_config () with
+let make_https_result ?tls_config () : (tls_peer -> _ -> _, https_init_error) result =
+  let config =
+    match tls_config with
+    | Some config ->
+      ensure_rng_default ();
+      Ok config
+    | None -> tls_client_config ()
+  in
+  match config with
   | Error _ as e -> e
   | Ok tls_config ->
     Ok

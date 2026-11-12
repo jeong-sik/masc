@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
 
@@ -122,11 +122,20 @@ class Sweeping(unittest.TestCase):
         self.assertIn('"stopped": "sweep time used up"', output)
 
     def test_an_unreadable_listing_is_the_only_red_sweep(self):
+        errors = io.StringIO()
         with patch.object(SWEEP, 'open_pulls', side_effect=ValueError('refused')), \
-             patch.object(SWEEP, 'quota', return_value=None), \
+             patch.object(SWEEP, 'quota', return_value=0), \
              patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
-             patch.object(SWEEP.sys, 'argv', ['sweep']):
+             patch.object(SWEEP.sys, 'argv', ['sweep']), redirect_stderr(errors):
             self.assertEqual(SWEEP.main(), 1)
+        self.assertIn('refused', errors.getvalue())
+        self.assertIn('"quota_before": {"core": 0, "graphql": 0}', errors.getvalue())
+
+    def test_a_refusal_is_recorded_from_its_start(self):
+        refused = subprocess.CompletedProcess([], 1, '', 'API rate limit exceeded' + 'x' * 900)
+        with patch.object(SWEEP.subprocess, 'run', return_value=refused), \
+             self.assertRaisesRegex(ValueError, '^API rate limit exceeded'):
+            SWEEP.gh(['api', 'graphql'])
 
     def test_the_exit_status_matches_the_worker(self):
         spec = importlib.util.spec_from_file_location('worker', HERE / 'approval-auto-merge.py')

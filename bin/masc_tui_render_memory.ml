@@ -45,7 +45,7 @@ let facts_keeper_label ~ko = function
    Typed so the two spellings cannot drift into each other's shape. The unread
    word arrives rendered: whether a read is still in
    flight or came back failed is the caller's reading, and
-   [Masc_tui_types.title_missing_reading] is the one place that words it. *)
+   [Masc_tui_types.here_missing_reading] is the one place that words it. *)
 type facts_reading =
   | Facts_unread of { reading : string }
   | Facts_loaded of
@@ -1703,8 +1703,9 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
   let stats_line, pills_line =
     match memory_facts_view state with
     | Masc_tui_fetched.Loading -> (text "  (사실 조회 중)" "  (loading facts…)", "")
-    | Masc_tui_fetched.Absent -> (text "  미조회" ("  " ^ title_unread), "")
-    | Masc_tui_fetched.Failed _ -> (text "  조회 실패" ("  " ^ title_failed), "")
+    | Masc_tui_fetched.Absent -> ("  " ^ here_missing_reading state ~error:None, "")
+    | Masc_tui_fetched.Failed failure ->
+        ("  " ^ here_missing_reading state ~error:(Some failure), "")
     | Masc_tui_fetched.Ready (snapshot, _) | Masc_tui_fetched.Stale ((snapshot, _), _) ->
         let stats =
           facts_stats_row ~ko ~ordinary:ordinary_count ~source:source_count

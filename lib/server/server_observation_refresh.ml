@@ -1,6 +1,6 @@
 module Input = Server_observation_input
 
-type surface = Execution_trust | Execution | Transport_health | Mission | Operator_digest
+type surface = Execution_trust | Execution | Transport_health | Mission | Operator_digest | Operator_snapshot
 
 let affects_trust = function
   | Input.Keeper { change =
@@ -24,7 +24,7 @@ let affects_trust = function
   | Telemetry_gap { source = None; _ }
   | Telemetry_gap { source = Some (Keeper_metric | Agent_event | Tool_call_io
       | Trajectory_tool_call | Tool_usage | Agent_core_event | Goal_event | Tool_metric); _ }
-  | Chat_operation _ | Agent_core _ | Board | Execution_invalidated | Telemetry_sample
+  | Chat_operation _ | Agent_core _ | Board | Board_attention _ | Execution_invalidated | Telemetry_sample
   | Workspace_agent_signal _ | Workspace_messages _ | Transport_state
   | Operator_judgment _ | Tool_host_attention -> false
 ;;
@@ -32,7 +32,7 @@ let affects_trust = function
 let affects_execution input =
   if affects_trust input then true else match input with
   | Input.Workspace_agent_signal _ | Workspace_messages _
-  | Every_keeper_row | Execution_invalidated | Board | Chat_operation _
+  | Every_keeper_row | Execution_invalidated | Board | Board_attention _ | Chat_operation _
   | Keeper {change = (Turn_preview | Chat | Native_tasks | Child_content | Asks); _}
   | Store (Schedule | Pending_confirms | Goals | Skill_catalog | Lane_addon_exports)
   | Dataset (Clients | Goals | Skill_catalog | Keeper_metrics _
@@ -63,7 +63,7 @@ let affects_transport_health = function
       | Machine_live _ | Play_room _ | Lane_addons _ | Browser_observation _
       | Keeper_oauth_attempts _ | Memory_health _ | World_memory | Play_seats)
   | Keeper _ | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _
-  | Board | Execution_invalidated | Agent_core _ | Telemetry_sample | Transport_state
+  | Board | Board_attention _ | Execution_invalidated | Agent_core _ | Telemetry_sample | Transport_state
   | Telemetry_gap _ | Keeper_tool_call _ | Keeper_approval_audit _
   | Workspace_agent_signal _ | Workspace_messages _ | Operator_judgment _ | Tool_host_attention -> true
 ;;
@@ -77,10 +77,24 @@ let affects_mission input = match input with
        | Keeper {change = (Phase _ | Composite | Row | Turn | Chat | Native_tasks | Child_content
            | Memory_journal | Async_requests | Asks | Tool_approval_waits | Tool_approval_mode
            | Gate_settings | Event_queue | Waiting_inventory _); _}
-       | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _
+       | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _ | Board_attention _
        | Execution_invalidated | Agent_core _ | Telemetry_sample | Telemetry_gap _
        | Keeper_tool_call _ | Keeper_approval_audit _ | Workspace_agent_signal _ | Workspace_messages _ ->
            affects_execution input
+;;
+
+let affects_snapshot input = match input with
+  (* The snapshot reads persisted turn/context rows, not the in-turn preview.
+     Board post publication also precedes the ledger it actually projects. *)
+  | Input.Keeper {change = Turn_preview; _} | Board | Transport_state -> false
+  | Dataset _
+  | Keeper {change = (Phase _ | Composite | Row | Turn | Chat | Native_tasks | Child_content
+      | Memory_journal | Async_requests | Asks | Tool_approval_waits | Tool_approval_mode
+      | Gate_settings | Event_queue | Waiting_inventory _); _}
+  | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _ | Board_attention _
+  | Execution_invalidated | Agent_core _ | Telemetry_sample | Telemetry_gap _
+  | Keeper_tool_call _ | Keeper_approval_audit _ | Workspace_agent_signal _ | Workspace_messages _
+  | Operator_judgment _ | Tool_host_attention -> affects_execution input
 ;;
 
 let affects surface input = match surface with
@@ -88,9 +102,10 @@ let affects surface input = match surface with
   | Execution -> affects_execution input
   | Transport_health -> affects_transport_health input
   | Mission -> affects_mission input
+  | Operator_snapshot -> affects_snapshot input
   | Operator_digest ->
       (match input with
-       | Input.Workspace_agent_signal _ | Workspace_messages _ | Transport_state -> false
+       | Input.Workspace_agent_signal _ | Workspace_messages _ | Transport_state | Board_attention _ -> false
        | Dataset _ | Keeper _ | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _
        | Board | Execution_invalidated | Agent_core _ | Telemetry_sample | Telemetry_gap _
        | Keeper_tool_call _ | Keeper_approval_audit _ | Operator_judgment _ | Tool_host_attention ->

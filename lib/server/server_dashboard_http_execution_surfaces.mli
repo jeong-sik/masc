@@ -350,21 +350,6 @@ val patch_keeper_row :
     [event] sets no status of its own, and the row's current status is missing
     or not a control-plane status. *)
 
-val broadcast_operator_snapshot :
-  Server_dashboard_http_core_operator.operator_snapshot_publication -> unit
-(** Publish an operator snapshot on SSE, if the publication still matches the
-    current one. The payload is encoded on the calling fiber without yielding,
-    so a caller holding a lock may use it: the /api/v1/operator route and the
-    invalidation observer do. *)
-
-val broadcast_refreshed_operator_snapshot :
-  Server_dashboard_http_core_operator.operator_snapshot_publication -> unit
-(** {!broadcast_operator_snapshot} with the payload encoded on the domain pool,
-    for a caller that holds nothing and may yield. Passed to the snapshot
-    refresh loop at boot. A publication replaced while it encodes is not
-    broadcast; the current one is when it is a success, since a success the
-    route published has no broadcaster of its own. *)
-
 val broadcast_operator_digest : Yojson.Safe.t -> unit
 (** Publish a digest through the shared snapshot serializer. The source-driven
     Digest worker publishes directly to its captured workspace/instance. *)

@@ -23,6 +23,10 @@ type t =
   | Connector of string
   | Store of store_change
   | Board
+  | Board_attention of {
+      keeper : string;
+      source : Keeper_board_attention_change.source;
+    }
   | Execution_invalidated
   | Agent_core of { keeper : string option; change : agent_core_change }
   | Telemetry_sample
@@ -283,11 +287,15 @@ let subscribe ~sw ~base_path ?observer_instance_id notify =
   let unsubscribe_judgments = Operator_judgment.subscribe_written (fun change ->
     if String.equal canonical_masc_root change.canonical_masc_root then
       notify (Operator_judgment change.surface)) in
+  let unsubscribe_board_attention = Keeper_board_attention_change.subscribe (fun change ->
+    if String.equal canonical_masc_root change.canonical_masc_root then
+      notify (Board_attention {keeper = change.keeper_name; source = change.source})) in
   let unsubscribe_tool_host = Log.Ring.subscribe_published (fun change ->
     if Operator_digest.tool_host_ring_change_affects_attention change
     then notify Tool_host_attention) in
   Eio.Switch.on_release sw (fun () ->
     unsubscribe (); unsubscribe_transport (); unsubscribe_https ();
     unsubscribe_gaps (); unsubscribe_tools (); unsubscribe_audits ();
-    unsubscribe_agents (); unsubscribe_judgments (); unsubscribe_tool_host ())
+    unsubscribe_agents (); unsubscribe_judgments (); unsubscribe_board_attention ();
+    unsubscribe_tool_host ())
 ;;

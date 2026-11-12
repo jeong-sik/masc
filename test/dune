@@ -3209,6 +3209,7 @@
 (include stanzas/test_server_dashboard_mission_observation.inc)
 (include stanzas/test_server_dashboard_operator_digest_observation.inc)
 (include stanzas/test_server_dashboard_operator_snapshot_observation.inc)
+(include stanzas/test_server_dashboard_operator_snapshot_flow.inc)
 (include stanzas/test_dashboard_spa_deep_link.inc)
 (include stanzas/test_pending_confirm_expiry.inc)
 (include stanzas/test_wall_deadline.inc)

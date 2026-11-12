@@ -66,6 +66,7 @@ let test_exact_dependency_matrix () =
     ; Input.Telemetry_gap {source = Some Telemetry_unified_source.Goal_event; keeper = None}
     ; Input.Operator_judgment Operator_judgment.Command_namespace
     ; Input.Tool_host_attention
+    ; Input.Board_attention {keeper = "piano"; source = Keeper_board_attention_change.Candidate}
     ; Input.Board ]
 ;;
 
@@ -76,6 +77,7 @@ let test_execution_dependency_matrix () =
     ; Input.Workspace_messages {request_id = "original-message";
         mention_delivery = Masc_domain.Mention_passive}
     ; Input.Execution_invalidated; Input.Board
+    ; Input.Board_attention {keeper = "piano"; source = Keeper_board_attention_change.Partition}
     ; Input.Keeper_tool_call {keeper = "piano"}
     ; Input.Dataset Workspace_dataset_event.Goals ];
   List.iter (fun input -> check bool "unread surface cannot wake execution" false (affects input))
@@ -137,7 +139,9 @@ let test_mission_dependency_matrix () =
   List.iter (fun input -> check bool "actual Mission input is admitted" true (affects input))
     [Input.Workspace_agent_signal {agent = "source-agent"};
      Input.Workspace_messages {request_id = "source-message"; mention_delivery = Masc_domain.Mention_passive};
-     Input.Execution_invalidated; Input.Operator_judgment Operator_judgment.Command_namespace;
+     Input.Execution_invalidated;
+     Input.Board_attention {keeper = "piano"; source = Keeper_board_attention_change.Candidate};
+     Input.Operator_judgment Operator_judgment.Command_namespace;
      Input.Tool_host_attention];
   List.iter (fun input -> check bool "unread or own output cannot wake Mission" false (affects input))
     [Input.Operator_judgment Operator_judgment.Intervene; Input.Board;
@@ -155,9 +159,24 @@ let test_digest_dependency_matrix () =
      Input.Store Input.Pending_confirms];
   List.iter (fun input -> check bool "unread source or own output does not scan Digest" false (affects input))
     [Input.Workspace_agent_signal {agent = "source-agent"};
+     Input.Board_attention {keeper = "piano"; source = Keeper_board_attention_change.Partition};
      Input.Workspace_messages {request_id = "source-message"; mention_delivery = Masc_domain.Mention_passive};
      Input.Keeper {keeper = "piano"; change = Input.Turn_preview}; Input.Board;
      Input.Operator_judgment Operator_judgment.Intervene; Input.Telemetry_sample;
+     Input.Dataset (Workspace_dataset_event.Dashboard_observation {topic = `Telemetry; scope = `Workspace})]
+;;
+
+let test_snapshot_dependency_matrix () =
+  let affects = Refresh.affects Refresh.Operator_snapshot in
+  List.iter (fun input -> check bool "actual Snapshot source is admitted" true (affects input))
+    [Input.Workspace_agent_signal {agent = "source-agent"};
+     Input.Board_attention {keeper = "piano"; source = Keeper_board_attention_change.Candidate};
+     Input.Board_attention {keeper = "piano"; source = Keeper_board_attention_change.Partition};
+     Input.Store Input.Pending_confirms;
+     Input.Keeper {keeper = "piano"; change = Input.Turn}];
+  List.iter (fun input -> check bool "unread preview/output cannot scan Snapshot" false (affects input))
+    [Input.Keeper {keeper = "piano"; change = Input.Turn_preview}; Input.Board;
+     Input.Operator_judgment Operator_judgment.Intervene; Input.Tool_host_attention;
      Input.Dataset (Workspace_dataset_event.Dashboard_observation {topic = `Telemetry; scope = `Workspace})]
 ;;
 
@@ -623,7 +642,8 @@ let () =
   run "workspace source refresh"
     [ "policy", [test_case "receipt health deadline" `Quick test_source_health_deadline;
                   test_case "closed source dependencies" `Quick test_exact_dependency_matrix;
-                  test_case "execution original dependencies" `Quick test_execution_dependency_matrix]
+                  test_case "execution original dependencies" `Quick test_execution_dependency_matrix;
+                  test_case "Snapshot original dependencies" `Quick test_snapshot_dependency_matrix]
     ; "mission policy", [test_case "closed Mission source dependencies" `Quick test_mission_dependency_matrix;
                          test_case "closed Digest source dependencies" `Quick test_digest_dependency_matrix]
     ; "consumer", [test_case "actual trust cache completion and scope cell" `Quick test_actual_cache_completion_and_scope_cell;

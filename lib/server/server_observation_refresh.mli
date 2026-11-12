@@ -2,7 +2,7 @@
     read debt, worker and last-good cache, even when a replacement uses the
     same path. Completion callbacks are gated by the captured epoch. *)
 
-type surface = Execution_trust | Execution | Transport_health | Mission | Operator_digest
+type surface = Execution_trust | Execution | Transport_health | Mission | Operator_digest | Operator_snapshot
 
 val install_scoped :
   state:Mcp_server.server_state ->

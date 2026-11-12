@@ -35,7 +35,7 @@ let publication_epoch =
   (* NDT-OK: process-incarnation identity entropy only. *)
   Uuidm.v4_gen (Random.State.make_self_init ()) () |> Uuidm.to_string
 
-let with_metadata ~identity ~generation ~compute_sequence ~terminal_sequence
+let with_metadata ~config ~identity ~generation ~compute_sequence ~terminal_sequence
     ~next_deadline ~state = function
   | `Assoc fields ->
       let state = match state with
@@ -52,6 +52,8 @@ let with_metadata ~identity ~generation ~compute_sequence ~terminal_sequence
         "snapshot_observation_state", `String state;
         "observer_instance_id", `String identity]
         @ List.filter (fun (key, _) -> not (List.mem key keys)) fields)
+      |> Server_dashboard_http_core_operator_query.with_operator_snapshot_metadata
+        ~config ~query:(Server_dashboard_http_core_operator_query.operator_snapshot_default_query ())
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       invalid_arg "Operator Snapshot projection must be a JSON object"
 
@@ -65,7 +67,7 @@ let create_owner ~state (scope : Mcp_server.workspace_scope) =
   let now = Unix.gettimeofday () in
   let generation = Dashboard_projection_cache.snapshot_invalidation_generation () in
   let identity = Server_observer_scope.instance_id scope in
-  let initial = with_metadata ~identity ~generation ~compute_sequence:0 ~terminal_sequence:0
+  let initial = with_metadata ~config:scope.config ~identity ~generation ~compute_sequence:0 ~terminal_sequence:0
       ~next_deadline:None ~state:Initializing (placeholder ~now "initializing") in
   {state; scope; identity; cache = Cache.create_cached_surface initial;
    mu = Stdlib.Mutex.create (); mutation_generation = ref generation;
@@ -114,7 +116,7 @@ let synchronize_locked (owner : owner) ~now generation =
     owner.terminal_sequence := 0;
     owner.next_deadline := None;
     owner.retained_completeness := None;
-    let json = with_metadata ~identity:owner.identity ~generation ~compute_sequence:0
+    let json = with_metadata ~config:owner.scope.config ~identity:owner.identity ~generation ~compute_sequence:0
         ~terminal_sequence:0 ~next_deadline:None ~state:Mutation_invalidated
         (placeholder ~now "invalidated") in
     Cache.invalidate_cached_surface ~json owner.cache;
@@ -138,7 +140,9 @@ let cache_snapshot owner = guarded owner (fun ~now:_ _ -> Cache.snapshot owner.c
 let observation_is_usable owner =
   let now = Time_compat.now () in
   guarded owner (fun ~now:_ _ ->
-    is_current owner && Option.is_some !(owner.retained_completeness)
+    is_current owner
+    && (match (!(owner.canonical)).state with
+        | Ready | Read_failed -> true | Initializing | Mutation_invalidated -> false)
     && !(owner.source_revision) = !(owner.admitted_revision)
     && match !(owner.next_deadline) with None -> true | Some at -> now < at)
 
@@ -156,7 +160,7 @@ let admits attempt generation =
 let install_canonical owner ~now ~generation ~sequence ~state ~next_deadline json =
   let source = Cache.snapshot owner.cache in
   let json = Cache.surface_snapshot_json ~now {source with json}
-      |> with_metadata ~identity:owner.identity ~generation
+      |> with_metadata ~config:owner.scope.config ~identity:owner.identity ~generation
         ~compute_sequence:!(owner.compute_sequence) ~terminal_sequence:sequence ~next_deadline ~state in
   owner.canonical := {json; state};
   owner.terminal_sequence := sequence;

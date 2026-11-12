@@ -135,6 +135,10 @@ val acting
 (** A JSON object answer with [cache-control: no-store]. *)
 val json : status -> (string * Yojson.Safe.t) list -> answer
 
+(** Milliseconds since the epoch: the clock of [t.now] as the records keep
+    time. *)
+val ms_of : Ptime.t -> int
+
 (** What a person is told when a route decides on the authorization state
     and the zone cannot be trusted ({!Authz_zone.read}): one fixed sentence.
     The reason names a path of the server, so this writes it to the log and

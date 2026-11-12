@@ -477,6 +477,11 @@ val run_named :
      entry. Fallback candidates may invoke it again; consumption is idempotent. *)
   ?on_checkpoint_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
   ?official_task_reference:Keeper_official_task_reference.t ->
+  ?direct_scope:Keeper_execution_scope_id.t ->
+  (* The chat execution this run serves: its retained receipts, and those no
+     execution owns, are the ones the run may carry. A run that serves none
+     (autonomous, verifier, metric hook) carries only receipts no execution
+     owns. *)
   ?official_client_composed_context:
     (unit -> Keeper_official_client_host.composed_context option) ->
   ?on_official_client_tool_boundary:

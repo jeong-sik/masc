@@ -193,7 +193,7 @@ let test_outbox_keeps_the_receipt () =
   get (Outbox.retain ~base_path ~keeper_name unfinished);
   (* The same receipt again leaves one file: the name is the content digest. *)
   get (Outbox.retain ~base_path ~keeper_name unfinished);
-  let snapshot = get (Outbox.load ~base_path ~keeper_name) in
+  let snapshot = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt) in
   check int "two receipts" 2 (List.length (Outbox.receipt_ids snapshot));
   let context = String.concat "\n" (Outbox.developer_context snapshot) in
   check bool "first request id is readable" true (String_util.contains_substring context "req-1");
@@ -247,7 +247,7 @@ let test_summary_names_the_request_and_the_outcome () =
   List.iter
     (fun receipt -> get (Outbox.retain ~base_path ~keeper_name receipt))
     [ finished; failed; unfinished ];
-  let snapshot = get (Outbox.load ~base_path ~keeper_name) in
+  let snapshot = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt) in
   let summaries =
     List.filter_map
       (fun receipt_id -> Outbox.receipt_summary snapshot ~receipt_id)
@@ -274,7 +274,7 @@ let test_summary_names_the_request_and_the_outcome () =
      is not in it, and a lookup of an identity it does not hold is [None]. *)
   let unavailable = ref [] in
   let reader =
-    Outbox.summary_reader ~base_path ~keeper_name ~on_unavailable:(fun detail ->
+    Outbox.summary_reader ~base_path ~keeper_name ~viewer:Outbox.Unowned_only ~on_unavailable:(fun detail ->
       unavailable := detail :: !unavailable)
   in
   let first_id =
@@ -305,7 +305,7 @@ let test_summary_reader_reports_an_unreadable_outbox_once () =
   Fs_compat.save_file outbox "a file where the directory belongs";
   let reported = ref [] in
   let reader =
-    Outbox.summary_reader ~base_path ~keeper_name ~on_unavailable:(fun detail ->
+    Outbox.summary_reader ~base_path ~keeper_name ~viewer:Outbox.Unowned_only ~on_unavailable:(fun detail ->
       reported := detail :: !reported)
   in
   check bool "no summary" true (Option.is_none (reader "abc"));

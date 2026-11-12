@@ -153,7 +153,7 @@ let with_direct_attempt ~base_path ~cli_path body =
                     fail "Codex runtime fixture did not resolve"
                 in
                 let attempt ?on_guidance_prepared ~system_prompt ~on_transmitted_model_input () =
-                Keeper_codex_runtime.run ?on_guidance_prepared
+                Keeper_codex_runtime.run ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ?on_guidance_prepared
                   ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "codex-blank-prompt" })
                   ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
                   ~configured_reasoning_effort:runtime.model.reasoning_effort

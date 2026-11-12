@@ -57,6 +57,12 @@ let gate_obligation ~approval_id ~tool_name ~input_hash =
   if String.trim approval_id = "" || String.trim tool_name = "" then Error "Gate identity is blank"
   else if not (canonical_sha input_hash) then Error "Gate input hash is invalid"
   else Ok {approval_id; tool_name; input_hash}
+type receipt_resolution = Receipt_in_outbox | Source_lost
+type receipt_state = Pending | Arrived of receipt_resolution
+type receipt_obligation = { request_id : string; state : receipt_state }
+let receipt_obligation ~request_id ~state =
+  if String.trim request_id = "" then Error "receipt request id is blank"
+  else Ok {request_id; state}
 type runtime_suffix = { assignment_id:string; failed_runtime_id:string; next_runtime_id:string; later_runtime_ids:string list }
 let runtime_suffix ~assignment_id ~failed_runtime_id ~next_runtime_id ~later_runtime_ids =
   if List.exists (fun value -> String.trim value = "") (assignment_id :: failed_runtime_id :: next_runtime_id :: later_runtime_ids)
@@ -249,6 +255,7 @@ type t =
   ; input : Yojson.Safe.t option
   ; input_sha256 : string
   ; gate_obligations : gate_obligation list
+  ; receipt_obligations : receipt_obligation list
   ; sources : source_member list
   ; current_sources : source_member list
   ; frame : Snapshot.t
@@ -404,7 +411,7 @@ let create ~id ~input ~sources ~now =
     let* input, input_sha256 = canonical_input input |> Result.map_error (fun detail -> Invalid_record detail) in
     let* frame = Snapshot.admit Snapshot.empty (Snapshot.Fresh id)
       |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error)) in
-    Ok { id; revision = 0L; input = Some input; input_sha256; gate_obligations=[]; sources; current_sources = sources; frame; phase = Preparing; native_call = Keeper_native_call.No_native_call; native_calls=[]; input_response_intent=None; input_branch=None; created_at = now; updated_at = now }
+    Ok { id; revision = 0L; input = Some input; input_sha256; gate_obligations=[]; receipt_obligations=[]; sources; current_sources = sources; frame; phase = Preparing; native_call = Keeper_native_call.No_native_call; native_calls=[]; input_response_intent=None; input_branch=None; created_at = now; updated_at = now }
 
 let same_admission left right =
   Scope_id.equal left.id right.id && left.sources = right.sources
@@ -887,6 +894,26 @@ let apply ~now action current =
       | Resume_official_checkpoint _ | Suspend_official_checkpoint _
       | Require_reconciliation _ | Suspend _ | Suspend_input _ | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _ | Advance_input_branch _ | Suspend_runtime_retry _
       | Resume_runtime_retry _ | Update_runtime_retry_wait _ | Resolve_gate _ | Resume_gate _ -> current.gate_obligations in
+    let receipt_obligations = match action with
+      | Settle _ -> []
+      | Require_reconciliation _ ->
+        (* A running execution that a restart interrupted is never resumed
+           automatically, so it stops owning its requests as a settled one does. *)
+        (match phase with
+         | Recovering {origin = Interrupted_execution; _} -> []
+         | Preparing | Ready | Running | Preparing_checkpoint _ | Preparation_wait _
+         | Resuming_runtime_retry _ | Resuming_gate _ | Suspended _ | Settled _
+         | Recovering {origin = (Unconfirmed_sources | Confirmed_undispatched | Checkpointed _
+             | Official_checkpointed _ | Runtime_retry _ | Gate_wait _ | Gate_binding _
+             | Input_wait _); _} -> current.receipt_obligations)
+      | Confirm_sources | Begin_execution | Resume_checkpoint _ | Resume_official_checkpoint _
+      | Wait_preparation _ | Enter_official_checkpoint | Retry_preparation _
+      | Suspend _ | Suspend_official_checkpoint _
+      | Suspend_runtime_retry _ | Resume_runtime_retry _ | Update_runtime_retry_wait _
+      | Suspend_gate_reconciliation _ | Suspend_gate _ | Suspend_input _
+      | Prepare_input_response _ | Resolve_input _ | Resolve_input_branch _
+      | Advance_input_branch _ | Reconcile_gate_binding _ | Resolve_gate _
+      | Resume_gate _ | Discharge_gate _ -> current.receipt_obligations in
     let input_response_intent = match action with
       | Prepare_input_response intent -> Some intent
       | Resolve_input _ | Resolve_input_branch _ | Settle _ -> None
@@ -911,6 +938,7 @@ let apply ~now action current =
         ~phase ~native_call ~intent:input_response_intent input_branch
       |> Result.map_error (fun detail -> Invalid_transition detail) in
     if phase = current.phase && gate_obligations = current.gate_obligations
+       && receipt_obligations = current.receipt_obligations
        && Keeper_native_call.equal_state native_call current.native_call
        && Option.equal equal_input_response_intent input_response_intent current.input_response_intent
        && input_branch = current.input_branch
@@ -920,7 +948,7 @@ let apply ~now action current =
       let input = match phase with
         | Settled _ -> None
         | Preparing | Ready | Running | Preparing_checkpoint _ | Resuming_runtime_retry _ | Resuming_gate _ | Preparation_wait _ | Suspended _ | Recovering _ -> current.input in
-      Ok { current with revision = Int64.succ current.revision; phase; input; gate_obligations; native_call; input_response_intent; input_branch; updated_at = now }
+      Ok { current with revision = Int64.succ current.revision; phase; input; gate_obligations; receipt_obligations; native_call; input_response_intent; input_branch; updated_at = now }
 
 let source_to_json source =
   `Assoc [ "post_id", `String source.post_id
@@ -1018,12 +1046,20 @@ let input_response_intent_json (intent : input_response_intent) =
       | Agent_core.Hooks.Declined -> `Assoc ["kind",`String "declined"]
       | Agent_core.Hooks.Timeout -> `Assoc ["kind",`String "timeout"])]
 
+let receipt_obligation_json (value : receipt_obligation) = `Assoc
+  [ "request_id", `String value.request_id
+  ; "state", (match value.state with
+      | Pending -> `Assoc ["kind", `String "pending"]
+      | Arrived Receipt_in_outbox -> `Assoc ["kind", `String "arrived"; "resolution", `String "receipt_in_outbox"]
+      | Arrived Source_lost -> `Assoc ["kind", `String "arrived"; "resolution", `String "source_lost"]) ]
+
 let to_json execution =
-  `Assoc ([ "schema", `String "masc.keeper_semantic_execution.v2"
+  `Assoc ([ "schema", `String "masc.keeper_semantic_execution.v3"
          ; "id", Scope_id.to_json execution.id
          ; "revision", `Intlit (Int64.to_string execution.revision)
          ; "input", (match execution.input with None -> `Null | Some payload -> `Assoc ["payload", payload])
          ; "input_sha256", `String execution.input_sha256
+         ; "receipt_obligations", `List (List.map receipt_obligation_json execution.receipt_obligations)
          ; "sources", `List (List.map source_to_json execution.sources)
          ; "current_sources", `List (List.map source_to_json execution.current_sources)
          ; "frame", Snapshot.to_json execution.frame
@@ -1097,6 +1133,26 @@ let gate_obligation_of_json json =
   let* tool_name = string "tool_name" fields in
   let* input_hash = string "input_hash" fields in
   gate_obligation ~approval_id ~tool_name ~input_hash
+let receipt_state_of_json json =
+  let names = match json with
+    | `Assoc fields when List.mem_assoc "resolution" fields -> ["kind";"resolution"]
+    | _ -> ["kind"] in
+  let* fields = exact names json in
+  let* kind = string "kind" fields in
+  match kind, names with
+  | "pending", ["kind"] -> Ok Pending
+  | "arrived", ["kind";"resolution"] ->
+      let* resolution = string "resolution" fields in
+      (match resolution with
+       | "receipt_in_outbox" -> Ok (Arrived Receipt_in_outbox)
+       | "source_lost" -> Ok (Arrived Source_lost)
+       | _ -> Error "unknown receipt resolution")
+  | _ -> Error "invalid receipt state"
+let receipt_obligation_of_json json =
+  let* fields = exact ["request_id";"state"] json in
+  let* request_id = string "request_id" fields in
+  let* state = receipt_state_of_json (field "state" fields) in
+  receipt_obligation ~request_id ~state
 let runtime_retry_of_json json =
       let names = match json with
         | `Assoc fields when List.mem_assoc "not_before" fields ->
@@ -1359,12 +1415,19 @@ let of_json json =
       | `Assoc fields when not (List.mem_assoc "gate_obligations" fields) ->
         `Assoc (("gate_obligations", `List []) :: fields)
       | json -> json in
-    let* fields = exact ["schema";"id";"revision";"input";"input_sha256";"gate_obligations";"sources";"current_sources";"frame";"phase";"native_calls";"created_at";"updated_at"] json in
+    let* fields = exact ["schema";"id";"revision";"input";"input_sha256";"gate_obligations";"receipt_obligations";"sources";"current_sources";"frame";"phase";"native_calls";"created_at";"updated_at"] json in
     let* gate_obligations = match field "gate_obligations" fields with
       | `List rows -> decode_list gate_obligation_of_json rows
       | _ -> Error "Gate obligations must be a list" in
+    let* receipt_obligations = match field "receipt_obligations" fields with
+      | `List rows -> decode_list receipt_obligation_of_json rows
+      | _ -> Error "receipt obligations must be a list" in
+    let* () =
+      let ids = List.map (fun (row : receipt_obligation) -> row.request_id) receipt_obligations in
+      if List.length (List.sort_uniq String.compare ids) = List.length ids then Ok ()
+      else Error "duplicate receipt obligation" in
     let* schema = string "schema" fields in
-    let* () = if schema = "masc.keeper_semantic_execution.v2" then Ok () else Error "unsupported execution schema" in
+    let* () = if schema = "masc.keeper_semantic_execution.v3" then Ok () else Error "unsupported execution schema" in
     let* native_calls = match field "native_calls" fields with
       | `List rows -> decode_list Keeper_native_call.history_ref_of_json rows
       | _ -> Error "native call history must be a list" in
@@ -1414,6 +1477,15 @@ let of_json json =
           | Unconfirmed_sources | Confirmed_undispatched); _} -> Ok ()
       | Recovering {origin=Input_wait _;_} ->
         if gate_obligations=[] then Ok () else Error "input wait retains unresolved Gate obligations" in
+    let* () = match phase, receipt_obligations with
+      | (Settled _ | Recovering {origin = Interrupted_execution; _}), _ :: _ ->
+        Error "execution that never resumes retains a receipt obligation"
+      | (Settled _ | Recovering {origin = Interrupted_execution; _}), []
+      | (Preparing | Ready | Running | Preparing_checkpoint _ | Resuming_runtime_retry _ | Resuming_gate _
+        | Preparation_wait _ | Suspended _
+        | Recovering {origin = (Unconfirmed_sources | Confirmed_undispatched | Checkpointed _
+            | Official_checkpointed _ | Runtime_retry _ | Gate_wait _ | Gate_binding _
+            | Input_wait _); _}), _ -> Ok () in
     let* () = match input_response_intent with
       | None -> Ok ()
       | Some intent ->
@@ -1463,5 +1535,5 @@ let of_json json =
       else Error "execution phase, revision and initial frame are incoherent" in
     let* created_at = time "created_at" fields in
     let* updated_at = time "updated_at" fields in
-    Ok { id; revision; input; input_sha256; gate_obligations; sources; current_sources; frame; phase; native_call; native_calls; input_response_intent; input_branch; created_at; updated_at }
+    Ok { id; revision; input; input_sha256; gate_obligations; receipt_obligations; sources; current_sources; frame; phase; native_call; native_calls; input_response_intent; input_branch; created_at; updated_at }
   in decode () |> Result.map_error (fun detail -> Invalid_record detail)

@@ -424,6 +424,8 @@ type try_provider_ctx =
     hold_carried_front : Keeper_carried_front.seed -> unit
   ; restore_carried_front : Keeper_carried_front.seed option -> unit
   ; base_path : string
+  ; outbox_viewer : Keeper_client_tool_outbox.viewer
+      (** Which retained receipts this attempt's run may carry. *)
   ; media_store : Agent_core.History.media_store
   ; keeper_name : string
   ; name : string
@@ -1142,6 +1144,7 @@ let new_attempt_state (ctx : try_provider_ctx) =
         ~keeper_name:ctx.keeper_name
         ~artifact_reader_available:
           (Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools))
+        ~viewer:ctx.outbox_viewer
   }
 ;;
 

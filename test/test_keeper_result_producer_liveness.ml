@@ -7,7 +7,7 @@ let retain producer =
   get (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"same-client-id"
     ~tool_name:"effect" ~arguments:(`Assoc ["owner",`String keeper_name])
     ~response:(`Assoc ["content",`String "ORIGINAL_EFFECT_RESULT"]))
-let load base_path = get (Outbox.load ~base_path ~keeper_name)
+let load base_path = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt)
 let ids base_path = Outbox.receipt_ids (load base_path)
 
 let () =
@@ -150,7 +150,7 @@ let test_missing_lease_is_not_inactive_authority () = with_workspace (fun base_p
   let name = match Sys.readdir root |> Array.to_list with
     | [name] -> name | _ -> fail "one producer lease expected" in
   Sys.remove (Filename.concat root name);
-  match Outbox.load ~base_path ~keeper_name with
+  match Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt with
   | Error _ -> ()
   | Ok _ -> fail "missing producer authority became an inactive/empty success")
 

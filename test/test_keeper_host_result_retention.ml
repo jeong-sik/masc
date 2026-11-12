@@ -41,7 +41,7 @@ let project ?result_scope ?hooks ?effect_state ?on_result_handoff ?loading_plan 
     ?loading_plan ?read_arrived ?raw_trace_run ~base_path ~stop ~terminal_error handler)
 
 let stop = Host.Terminal_tool_boundary {tool_name="CompleteEffect";outcome=Durable_stimulus_deferred}
-let load base_path = get (Outbox.load ~base_path ~keeper_name)
+let load base_path = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt)
 let returned () = Ok {Agent_core.Types.content=marker;
   content_blocks=Some [Llm_provider.Types.Text "original-block-bytes"];_meta=None}
 
@@ -281,7 +281,7 @@ let test_retention_failure_cannot_claim_safe_consumption () = with_workspace (fu
   check bool "runtime receives additional diagnostic" true (Option.is_some !terminal_error);
   check string "actual returned content is not invented or discarded" marker result.content;
   check int "storage refusal does not replay completed effect" 1 !effects;
-  match Outbox.load ~base_path ~keeper_name with
+  match Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt with
   | Error _ -> () | Ok _ -> fail "unavailable original store became empty success")
 
 let test_retention_failure_keeps_proven_effect () = with_workspace (fun base_path ->
@@ -631,7 +631,7 @@ let test_host_invocation_index_validation () =
        refuses this committed receipt. Keep the valid seed beside it. *)
     let name = Agent_core_sha256.(digest_string (Yojson.Safe.to_string invalid) |> to_hex) ^ ".json" in
     Fs_compat.save_file (Filename.concat directory name) (Yojson.Safe.to_string invalid);
-    match Outbox.load ~base_path ~keeper_name with
+    match Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt with
     | Error _ -> () | Ok _ -> fail "malformed physical invocation index was accepted"))
     [ []; ["host_invocation_index",`Int (-1)]; ["host_invocation_index",`String "0"];
       ["host_invocation_index",`Int 0;"host_invocation_index",`Int 1] ];
@@ -775,7 +775,7 @@ let test_address_text_differs_only_in_numbers () = with_workspace (fun base_path
     retain_vendor_receipts ~keeper_name base_path (List.init count (fun index ->
       vendor_receipt ~call_id:(Printf.sprintf "shape-%05d" index) ~tool_name:"Screen" response));
     let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true
-        (get (Outbox.load ~base_path ~keeper_name)) in
+        (get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt)) in
     switch carrier;
     let text = carried_text carrier in
     without_numbers (hiding (carried_reference text).Tool_output.sha256 text) in
@@ -1058,7 +1058,7 @@ let test_run_carrier_loads_once () = with_workspace (fun base_path ->
   retain_vendor_receipts base_path (List.init 2 (fun index ->
     vendor_receipt ~call_id:(Printf.sprintf "run-%d" index) ~tool_name:"Read"
       (`String (String.make 2048 'u'))));
-  let retained = Outbox.run_carrier ~base_path ~keeper_name ~artifact_reader_available:true in
+  let retained = Outbox.run_carrier ~base_path ~keeper_name ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
   let snapshot, carrier = get (Outbox.run_carrier_load retained) in
   get (Outbox.retain ~base_path ~keeper_name
     (vendor_receipt ~call_id:"run-late" ~tool_name:"Read" (`String "written after the load")));
@@ -1073,7 +1073,7 @@ let test_run_carrier_reprojection_waits_for_the_load () = with_workspace (fun ba
   retain_vendor_receipts base_path (List.init 4 (fun index ->
     vendor_receipt ~call_id:(Printf.sprintf "wait-%d" index) ~tool_name:"Read"
       (`String (String.make 2048 'w'))));
-  let retained = Outbox.run_carrier ~base_path ~keeper_name ~artifact_reader_available:true in
+  let retained = Outbox.run_carrier ~base_path ~keeper_name ~artifact_reader_available:true ~viewer:Outbox.Unowned_only in
   let calls = ref 0 in
   let memory ~refusal:_ = incr calls; Ok Reprojection.Unchanged in
   check_reduction "before the run loads, the memory hook alone answers" Reprojection.Unchanged

@@ -62,8 +62,9 @@ are `chat-operations.sqlite3-wal`, `chat-operations.sqlite3-shm` and
 store, with every writer stopped before any fresh-state removal.
 
 The current semantic record format is
-`masc.keeper_semantic_execution.v2`, with an explicit `native_calls` list.
-Earlier records are refused without conversion or inferred empty history.
+`masc.keeper_semantic_execution.v3`, with explicit `native_calls` and
+`receipt_obligations` lists. Earlier records are refused without conversion
+or inferred empty history.
 Both ordinary open paths check every semantic row, including settled records,
 and its indexed scope, revision and phase before configuring the existing
 database. Deployment preflight also reads every durable record. Refusal names

@@ -1498,6 +1498,9 @@ let run_turn
                       ~pre_tool_rejects
                       ~continue_from_checkpoint
                       ?native_binding
+                      ?direct_scope:
+                        (Option.map Keeper_repetition_scope.Execution.scope
+                           repetition_execution)
                       ~goal:user_message
                       ?goal_blocks:user_blocks
                       ~goal_metadata:input_metadata

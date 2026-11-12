@@ -1768,7 +1768,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
                   recovery_detail))))
 ;;
 
-let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1808,6 +1808,7 @@ let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal 
     Keeper_client_tool_outbox.run_carrier ~base_path ~keeper_name
       ~artifact_reader_available:
         (Result.is_ok (Keeper_recovery_transmission.require_reader tools))
+      ~viewer:outbox_viewer
   in
   (* The carrier step answers a size refusal before memory and history do. *)
   let on_memory_capacity_refusal =

@@ -151,11 +151,12 @@ let async_result ~start_time (execution : Keeper_tool_execution.t) =
 (* The Keeper holds a receipt for the run when the end of the command was
    written before the request was settled. An [unfinished] receipt after that
    would tell the model the command ended and also that it may not have
-   started. *)
+   started. An execution that owns the receipt still holds it, so the read
+   sees every receipt. *)
 let holds_receipt ~base_path ~keeper_name ~request_id =
   Result.map
     (fun snapshot -> Outbox.contains_call snapshot ~call_id:request_id)
-    (Outbox.load ~base_path ~keeper_name)
+    (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt)
 ;;
 
 let deliver_unfinished_unless_held ~base_path ~keeper_name ~request_id ~arguments ~cause =

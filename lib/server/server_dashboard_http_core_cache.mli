@@ -36,6 +36,13 @@ val dashboard_cache_key : Workspace.config -> string -> string -> string
 val dashboard_query_cache_key :
   Workspace.config -> string -> (string * string option) list -> string
 
+val tool_metrics_series_cache_key :
+  Workspace.config -> (string * string option) list -> string
+val invalidate_tool_metrics_series : base_path:string -> unit
+(** The series route and after-write/deadline consumers share this key
+    family. Invalidation drops every filter/window for the owning workspace,
+    including an in-flight old computation, before publishing a change. *)
+
 val scheduled_automation_cache_key : base_path:string -> string
 (** The key the fleet schedule list ([GET /api/v1/dashboard/scheduled-automation]
     without a selector) is cached under, for the workspace at [base_path]. *)

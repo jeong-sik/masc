@@ -890,7 +890,7 @@ let test_summary_tool_metric_surface_points_to_raw_metrics () =
     ~finally:Tool_metrics_persist.reset_for_testing
     (fun () ->
       Tool_metrics_persist.enqueue
-        ~masc_root:(masc_root dir)
+        ~base_path:dir
         (Tool_result.Completed
            { retained_artifacts = []; content_blocks = None; tool_name = "tool_read_file"
            ; data = `Null

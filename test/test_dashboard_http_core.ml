@@ -2070,6 +2070,24 @@ let cache_sentinel key = `Assoc [ ("sentinel", `String key) ]
 let seed_cache key =
   ignore (Dashboard_cache.get_or_compute key ~ttl:60.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () -> cache_sentinel key)))
 
+let test_tool_metrics_series_cache_invalidation_is_workspace_scoped () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let other_dir = test_dir () in
+  Fun.protect ~finally:(fun () ->
+    Dashboard_cache.invalidate_all ();
+    cleanup_dir other_dir) (fun () ->
+    let other = Workspace_utils.default_config other_dir in
+    let key config tool = Server_dashboard_http_core_cache.tool_metrics_series_cache_key
+        config ["since_hours", Some "24"; "tool", Some tool] in
+    let first = key config "first" in
+    let second = key config "second" in
+    let unrelated = key other "first" in
+    List.iter seed_cache [first; second; unrelated];
+    Server_dashboard_http_core_cache.invalidate_tool_metrics_series ~base_path:config.base_path;
+    check bool "first filter invalidated" true (Option.is_none (Dashboard_cache.peek first));
+    check bool "second filter invalidated" true (Option.is_none (Dashboard_cache.peek second));
+    check bool "other workspace retained" true (Option.is_some (Dashboard_cache.peek unrelated)))
+
 let test_scheduled_automation_reads_its_cache_key () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Fun.protect
@@ -8507,6 +8525,8 @@ let () =
             test_dashboard_query_cache_key_partitions_route_params;
           test_case "dashboard query cache key encodes delimiter values" `Quick
             test_dashboard_query_cache_key_encodes_delimiter_values;
+          test_case "tool series invalidation follows the workspace cache family" `Quick
+            test_tool_metrics_series_cache_invalidation_is_workspace_scoped;
           test_case "cache key partitions by workspace root" `Quick
             test_dashboard_cache_key_partitions_by_workspace_root;
           test_case "operator snapshot default route exposes provenance" `Quick

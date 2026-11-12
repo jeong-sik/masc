@@ -53,6 +53,7 @@ let long_call_threshold_ms = Masc_time_constants.minute *. milliseconds_per_seco
 type window =
   { since : float
   ; until : float
+  ; span_s : float
   ; width : width
   ; utc_offset_s : int
   ; first_index : int
@@ -93,6 +94,7 @@ let window ~since ~until ~width ~utc_offset_min =
     Ok
       { since
       ; until
+      ; span_s = until -. since
       ; width
       ; utc_offset_s
       ; first_index
@@ -101,6 +103,35 @@ let window ~since ~until ~width ~utc_offset_min =
 ;;
 
 let window_bounds window = window.since, window.until
+
+let sliding_window ~span_s ~until ~width ~utc_offset_min =
+  Result.map (fun window -> { window with span_s })
+    (window ~since:(until -. span_s) ~until ~width ~utc_offset_min)
+;;
+
+let next_change_at window ~oldest_sample ~next_sample =
+  let span = window.span_s in
+  let width_s = seconds_of_width window.width in
+  let edge index = Float.of_int ((index * width_s) - window.utc_offset_s) in
+  (* Rounding the sum and subtracting the span can leave the original
+     timestamp on the included side. Advance in representable epoch values,
+     rather than guessing an epsilon that changes with the clock's scale. *)
+  let rec first_at ~crosses at =
+    if at > window.until && crosses (at -. span) then at
+    else first_at ~crosses (Float.succ at)
+  in
+  let left_edge = edge (window.first_index + 1) in
+  let left_change = first_at ~crosses:(fun since -> since >= left_edge)
+      (left_edge +. span) in
+  let right_change = Float.succ (edge (window.first_index + window.bucket_count)) in
+  let deadline = min left_change right_change in
+  let deadline = match oldest_sample with
+    | None -> deadline
+    | Some ts -> min deadline (first_at ~crosses:(fun since -> since > ts) (ts +. span)) in
+  match next_sample with
+  | None -> deadline
+  | Some ts -> min deadline (Float.succ ts)
+;;
 
 type sample =
   { ts : float

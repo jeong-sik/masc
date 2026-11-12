@@ -39,18 +39,28 @@ val read_series :
   ?tool_name:string ->
   unit ->
   (Tool_metrics_series.t, string) result
-(** [read_series ~masc_root ~window ()] groups the stored calls inside
-    [window] into its buckets. [tool_name] keeps only that tool's calls.
-    A store that does not exist yet gives a series with no calls. A call stored
-    without a size, as every call was before sizes were kept, is counted as a
-    call and adds nothing to the byte totals. The sizes live in a table that
-    opening the store through {!insert}, {!prune} or {!iter_all} creates, so
-    a database file that this version has not opened yet cannot be read here.
+(** Groups stored calls in [window], optionally filtered by tool. A missing
+    database gives an empty series. A call stored without a size, as every
+    call was before sizes were kept, is counted as a call and adds nothing to
+    the byte totals. The sizes live in a table that opening the store through
+    {!insert}, {!prune} or {!iter_all} creates, so a database file that this
+    version has not opened yet cannot be read here. Uses a private read-only
+    connection, without taking the writer lock. Month-long scans may take
+    about a second on a busy store; run this off the Eio event loop. *)
 
-    It reads on a connection of its own, so it does not wait for the store
-    lock or hold it, and an [insert] on another thread is not delayed by it.
-    A window of a month over a busy store is about 800,000 rows and blocks the
-    calling thread for about a second; run it off the Eio event loop. *)
+type series_observation = {
+  series : Tool_metrics_series.t;
+  next_change_at : float;
+}
+
+val observe_series :
+  masc_root:string -> window:Tool_metrics_series.window ->
+  ?tool_name:string -> unit -> (series_observation, string) result
+(** The series and its exact next row-admission/expiry or bucket-label
+    deadline, read from one SQLite snapshot. A missing database yields an
+    empty series with the next bucket deadline. This retains no connection
+    or timer after returning; a mounted streaming caller owns the deadline.
+    Like {!read_series}, run this off the Eio event loop. *)
 
 val summary : masc_root:string -> (summary, string) result
 val row_to_json : row -> Yojson.Safe.t

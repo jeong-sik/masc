@@ -16,7 +16,9 @@
 
 val record : Attribution.t -> unit
 (** [record attr] appends [attr] to its gate's ring. Thread-safe. When the
-    per-gate cap is reached, the oldest entry is dropped. *)
+    per-gate cap is reached, the oldest entry is dropped. After releasing
+    the ring lock, records a process-wide [Attribution] observation change.
+    No wall-clock expiry changes the ring between writes. *)
 
 val recent :
   ?gate:string -> ?limit:int -> unit -> (Attribution.t * float) list

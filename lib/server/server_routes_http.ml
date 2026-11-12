@@ -40,6 +40,7 @@ let make_routes_with_transport ~port:_ ~host:_ ~sw ~transport_sw ~clock =
   |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
   |> Server_routes_http_routes_fleet_stream.add_routes ~sw ~clock
   |> Server_routes_http_routes_log_stream.add_routes ~sw ~clock
+  |> Server_tool_metrics_series_stream.add_routes ~sw ~clock
   |> Server_routes_http_routes_repositories.add_routes
   |> Server_routes_http_routes_workspace.add_routes
   |> Server_ide_http.add_routes

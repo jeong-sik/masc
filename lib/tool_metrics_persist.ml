@@ -23,7 +23,11 @@ let sample_of_row (row : Tool_metrics_store.row) =
     ; duration_ms = row.duration_ms
     }
 
-let enqueue ~masc_root (result : Tool_result.result) =
+let announce_written ~base_path =
+  Dashboard_observation_commit.written ~base_path ~scope:`Workspace `Tool_metrics
+
+let enqueue ~base_path (result : Tool_result.result) =
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
   let row : Tool_metrics_store.row =
     { record_id = Random_id.uuid_v7 ()
     ; ts = Time_compat.now ()
@@ -35,7 +39,11 @@ let enqueue ~masc_root (result : Tool_result.result) =
   (* The size of the message the dispatcher returned. The keeper tool ledger's
      [result_bytes] is this same message's length. *)
   let result_bytes = String.length (Tool_result.message result) in
-  match Tool_metrics_store.insert ~masc_root ~result_bytes row with
+  let result = Fun.protect ~finally:(fun () -> announce_written ~base_path)
+      (fun () -> Tool_metrics_store.insert ~masc_root ~result_bytes row) in
+  (* An SQLite I/O failure can follow a visible commit. A read invalidation
+     conveys no invented success and must not replace the write outcome. *)
+  match result with
   | Ok () -> ()
   | Error error ->
     Otel_metric_store.inc_counter
@@ -43,10 +51,11 @@ let enqueue ~masc_root (result : Tool_result.result) =
       ();
     Log.Metrics.warn "tool_metrics_persist: write failed: %s" error
 
-let hydrate ~masc_root ~retention_days =
-  let* pruned_records =
-    Tool_metrics_store.prune ~masc_root ~retention_days
-  in
+let hydrate ~base_path ~retention_days =
+  let masc_root = Common.masc_dir_from_base_path ~base_path in
+  let pruned = Fun.protect ~finally:(fun () -> announce_written ~base_path)
+      (fun () -> Tool_metrics_store.prune ~masc_root ~retention_days) in
+  let* pruned_records = pruned in
   Tool_metrics.replace_samples (fun add ->
     let* loaded_records =
       Tool_metrics_store.iter_all ~masc_root ~f:(fun row ->

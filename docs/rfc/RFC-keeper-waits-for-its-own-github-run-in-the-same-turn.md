@@ -152,9 +152,10 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 
 **[사실]** 일정에는 payload kind 가 둘 있어요: `masc.keeper_wake`, `masc.lane_act`(`lib/schedule/schedule_supported_kinds.ml`). kind 를 더하려면 그 파일의 목록, `Tool_schedule.validate_known_payload_request` 의 검증 갈래, `server_schedule_consumers.ml` 의 dispatch 가 모두 필요해요(같은 파일 머리말). 일정 틱은 Keeper wake 본문의 `until_github_run` 만 스캔해요(`watch_of_payload` 는 Keeper wake 가 아닌 payload 에 `Ok None`).
 
-**[제안]** 위 두 가지를 한 번에 푸는 후보는 kind 를 하나 더하는 거예요(`masc.keeper_receipt`, 이름은 정하지 않았어요). 이 kind 의 consumer 는 일정이 due 가 되면 Keeper 를 깨우지 않고 outbox 에 `call_id = schedule_instance_id` 영수증을 쓰고 Owner 에게 알려요(`keeper_receipt_wait_resolution.ml` 의 `tell_owner`). 깨움이 없으니 같은 결과를 두 번 받지 않고, 영수증을 쓰는 자리가 consumer 한 곳이에요. 대가는 세 가지예요. 일정 틱이 새 kind 도 스캔하게 넓혀야 하고, `keeper_receipt_wait` 의 `waitable` 이 `schedule_instance_id` 를 받아야 하고, 5.2 의 합타입에 일정 행을 읽는 갈래가 들어가요.
+**[제안]** 위 두 가지를 한 번에 푸는 후보는 kind 를 하나 더하는 거예요(`masc.keeper_receipt`, 이름은 정하지 않았어요). 이 kind 의 consumer 는 일정이 due 가 되면 Keeper 를 깨우지 않고 outbox 에 `call_id = schedule_instance_id` 영수증을 쓰고 Keeper 를 깨워요(Execute 배경 실행의 `deliver` 와 같은 두 걸음). 깨움이 없으니 같은 결과를 두 번 받지 않고, 영수증을 쓰는 자리가 consumer 한 곳이에요. 대가는 세 가지예요. 일정 틱이 새 kind 도 스캔하게 넓혀야 하고, `keeper_receipt_wait` 의 `waitable` 이 `schedule_instance_id` 를 받아야 하고, 5.2 의 합타입에 일정 행을 읽는 갈래가 들어가요.
 - **[사실]** 쓸 수 있어요. `Outbox.retain ~base_path ~keeper_name receipt` 는 실행 scope 나 producer 없이 평범한 레코드를 받아요. 서버 쪽 writer 인 Execute 배경 실행은 이미 `thread_id = producer_label`, `turn_id = call_id = request_id` 로 채우고(`lib/keeper/keeper_execute_background.ml:66-73`), 영수증을 쓴 뒤 `Keeper_client_tool_outbox_wake.notify` 로 Keeper 를 한 번 깨워요(같은 파일 `deliver`). 새 kind 의 consumer 도 `thread_id = "schedule_run_watch"`, `turn_id = call_id = schedule_instance_id` 로 같은 길을 쓰면 돼요. 깨움은 영수증 길의 한 번뿐이에요.
-- **[확인 필요]** 일정 consumer 에서 대기 Owner 를 풀고(`tell_owner`) 영수증이 아직 안 읽혔는데 Keeper 를 깨우는 순서가 `deliver` 와 같은지, 영수증의 `tool_name` 을 무엇으로 둘지는 읽지 않았어요.
+- **[사실]** Owner 를 푸는 건 writer 가 아니에요. `deliver` 는 영수증을 쓰고 깨우기만 하고, 대기를 푸는 `Keeper_receipt_wait_sweep.after_wait` 는 대기를 건 턴이 끝날 때(`lib/keeper/keeper_turn.ml:1106-1114`)와 maintenance pass 가 outbox 를 읽어서 불러요. 새 consumer 도 영수증을 쓰고 깨우기만 하면 돼요.
+- **[확인 필요]** 영수증의 `tool_name` 과 `arguments` 를 무엇으로 채울지는 정하지 않았어요. Execute 는 `tool_name = "tool_execute"` 이고 `arguments` 는 요청 레코드의 명령이에요. 일정 쪽은 Keeper 가 부른 `masc_schedule_create` 와 일정 payload 의 감시 대상(`{repo, run_id}`)이 후보예요. 모델이 이 영수증을 어떻게 읽는지는 보지 않았어요.
 - **[확인 필요]** (나-2)에서 읽기를 일정 틱과 나누는 구조의 크기는 읽지 않았어요.
 
 ## 6. 재는 것

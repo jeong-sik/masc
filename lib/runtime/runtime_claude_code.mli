@@ -545,6 +545,37 @@ val probe_subscription :
     directory capability opens: one built from [Eio.Stdenv.fs] reaches it.
     [run_turn] probes the same way when it is not given a subscription. *)
 
+(** What {!purge_project} did with the copy Claude Code keeps of a project. *)
+type project_purge =
+  | Project_purged  (** [claude purge --yes] exited 0. *)
+  | Project_not_purged of string
+      (** The CLI was not asked, or did not exit 0: it is older than
+          2.1.288, the first to name [claude purge], its version could not be
+          read, it did not end within the bound, or it did not start. A CLI
+          that holds no state of the project exits 1 as well (2.1.322), so
+          this does not say that a copy is there. The detail can name a path
+          of the server. *)
+
+val purge_project :
+  mgr:_ Eio.Process.mgr ->
+  clock:_ Eio.Time.clock ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  account:authorized_account ->
+  cli_path:string ->
+  timeout_s:float ->
+  project:string ->
+  project_purge
+(** Deletes what Claude Code keeps of [project] in the home of [account]: its
+    transcripts, tasks, file history and its entry in [.claude.json]
+    ({{:https://code.claude.com/docs/en/cli-reference} claude purge}). Old
+    copies of [.claude.json] under [backups/] can keep the entry until they
+    rotate out. [project] is the real path the turns of the project started
+    in. It asks [claude --version] first, and starts [claude purge --yes]
+    only on 2.1.288 or later, with the environment of a turn and no settings
+    layer. [timeout_s] bounds the two together. [cwd] is where the CLI starts
+    and the directory capability its stdout file is opened through, as for
+    {!probe_subscription}. *)
+
 val cli_admitted_reasoning_effort :
   Llm_provider.Reasoning_effort.t -> Llm_provider.Reasoning_effort.t
 (** Admit the canonical effort to Claude Code's CLI vocabulary: [Minimal]

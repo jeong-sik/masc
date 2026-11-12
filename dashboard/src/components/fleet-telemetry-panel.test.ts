@@ -189,6 +189,9 @@ async function loadPanel(mocks: {
   fetchDashboardNamespaceTruth?: (opts?: { signal?: AbortSignal }) => Promise<DashboardNamespaceTruthResponse>
 }) {
   vi.resetModules()
+  const { acceptedExecutionWorkspace } = await import('../execution-workspace-authority')
+  acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/fixture',
+    connectionGeneration: 0, observerInstanceId: 'fixture-instance' })
   vi.doMock('../api/dashboard', () => ({
     fetchDashboardExecution: mocks.fetchDashboardExecution,
     fetchDashboardExecutionTrust:
@@ -777,7 +780,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('last 17m 10s ago')
   }, 60_000)
 
-  it('refreshes automatically on a visible page', async () => {
+  it('reads after a matching source change without healthy periodic HTTP', async () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue(executionResponse)
     const fetchToolQuality = vi.fn().mockResolvedValue(toolQualityResponse)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue(telemetrySummaryResponse)
@@ -803,11 +806,18 @@ describe('FleetTelemetryPanel', () => {
     await vi.advanceTimersByTimeAsync(30_000)
     await flushUi()
 
+    expect(fetchDashboardExecution).toHaveBeenCalledTimes(1)
+    expect(fetchToolQuality).toHaveBeenCalledTimes(1)
+    expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
+    expect(fetchDashboardNamespaceTruth).toHaveBeenCalledTimes(1)
+    const { publishDashboardObservationChange } = await import('../lib/observation-refresh')
+    publishDashboardObservationChange({ topic: 'telemetry' })
+    await flushUi()
+
     expect(fetchDashboardExecution).toHaveBeenCalledTimes(2)
     expect(fetchToolQuality).toHaveBeenCalledTimes(2)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
     expect(fetchDashboardNamespaceTruth).toHaveBeenCalledTimes(2)
-    expect(container.textContent).toContain('Auto-refresh 30s')
   }, 60_000)
 
   it('ignores out-of-order fleet telemetry refresh responses', async () => {
@@ -990,7 +1000,8 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    await vi.advanceTimersByTimeAsync(30_000)
+    const { publishDashboardObservationRecovery } = await import('../lib/observation-refresh')
+    publishDashboardObservationRecovery()
     await flushUi()
 
     expect(fetchDashboardExecution).toHaveBeenCalledTimes(2)

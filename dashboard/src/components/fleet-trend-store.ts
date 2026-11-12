@@ -1,5 +1,5 @@
 // Fleet Trend Store — in-memory ring buffer for per-keeper metric snapshots.
-// Captures 10 snapshots (at 30s refresh = 5 minutes of history) and computes
+// Captures 10 accepted observations and computes
 // directional trends (up/down/flat) with delta values and sparkline data.
 
 import type { FleetRow } from './fleet-telemetry-utils'

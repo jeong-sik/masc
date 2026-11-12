@@ -837,26 +837,7 @@ let mcp_tool_call_log_details ?outcome ~phase ~profile ~tool_name ~id ?mcp_sessi
      | None -> [])
 ;;
 
-let request_protocol_error_response ~id = function
-  | Mcp_transport_protocol.Invalid_request_meta message ->
-    make_error_typed ~id Mcp_error_code.Invalid_params message
-  | Mcp_transport_protocol.Unsupported_request_version requested ->
-    make_error_typed ~id
-      ~data:
-        (`Assoc
-          [ "supported", `List
-              (List.map (fun version -> `String version)
-                 Mcp_transport_protocol.supported_protocol_versions)
-          ; "requested", `String requested ])
-      Mcp_error_code.Unsupported_protocol_version
-      "Unsupported protocol version"
-;;
-
-let method_removed_from_stateless_protocol = function
-  | "initialize" | "notifications/initialized" | "ping"
-  | "resources/subscribe" | "resources/unsubscribe" | "logging/setLevel" -> true
-  | _ -> false
-;;
+let request_protocol_error_response = Mcp_request_admission.protocol_error
 
 (** Handle incoming JSON-RPC request - Pure Eio Native *)
 let handle_request
@@ -874,84 +855,27 @@ let handle_request
       request_str
   =
   try
-    let json =
-      try Ok (Yojson.Safe.from_string request_str) with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn -> Error (Printexc.to_string exn)
-    in
-    match json with
-    | Error msg ->
-      make_error_typed ~id:`Null ~data:(`String msg) Mcp_error_code.Parse_error "Parse error"
-    | Ok json ->
-      if
-        match json with
-        | `List _ -> true
-        | _ -> false
-      then
-        make_error_typed
-          ~id:`Null
-          Mcp_error_code.Invalid_request
-          "JSON-RPC batch requests are not supported on this MCP endpoint"
-      else if is_jsonrpc_response json
-      then `Null
-      else if not (is_jsonrpc_v2 json)
-      then make_error_typed ~id:`Null Mcp_error_code.Invalid_request "Invalid Request: jsonrpc must be 2.0"
-      else if not (has_unique_jsonrpc_fields json)
-      then make_error_typed ~id:`Null Mcp_error_code.Invalid_request "Invalid Request: duplicate JSON-RPC field"
-      else (
-        match jsonrpc_request_of_yojson json with
-        | Error msg ->
-          make_error_typed ~id:`Null ~data:(`String msg) Mcp_error_code.Invalid_request "Invalid Request"
-        | Ok req ->
-          let id = get_id req in
-          let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-          if not (method_allowed_in_profile profile req.method_)
-          then (
-            if Mcp_transport_protocol.is_notification req
-            then `Null
-            else
-              make_error_typed
-                ~id
-                Mcp_error_code.Method_not_found
-                (Printf.sprintf "%s is not available on the %s endpoint" req.method_
-                   (Mcp_server_eio_types.tool_profile_to_string profile)))
-          else if Mcp_transport_protocol.is_notification req
-          then (
-            match req.method_ with
-            | "dashboard/ack" ->
-              with_required_auth
-                ~base_path
-                ~id
-                ~requirement:Auth_requirement.Public
-                ?auth_token
-                (fun _auth_token ->
-                   handle_dashboard_ack_notification ?mcp_session_id req.params)
-            | _ -> `Null)
-          else if not (is_valid_request_id id)
-          then
-            make_error_typed
-              ~id:`Null
-              Mcp_error_code.Invalid_request
-              "Invalid Request: MCP id must be a string or integer"
-          else (
-            match
-              Mcp_transport_protocol.classify_request_protocol
-                ~require_stateless:false ~method_:req.method_ ~params:req.params
-            with
-            | Error error -> request_protocol_error_response ~id error
-            | Ok (Stateless_protocol _) when
-                method_removed_from_stateless_protocol req.method_ ->
-              make_error_typed ~id Mcp_error_code.Method_not_found
-                ("Method not found: " ^ req.method_)
-            | Ok (Stateless_protocol _) when
-                (String.equal req.method_ "tools/call"
-                 || String.equal req.method_ "resources/read"
-                 || String.equal req.method_ "prompts/get")
-                && Mcp_transport_protocol.request_has_continuation_fields req.params ->
-              make_error_typed ~id Mcp_error_code.Invalid_params
-                "This server has no resumable request for the supplied continuation"
-            | Ok (Legacy_protocol | Stateless_protocol _) ->
-            try
+    match
+      Mcp_request_admission.admit
+        ~method_allowed:(method_allowed_in_profile profile)
+        ~endpoint:(Mcp_server_eio_types.tool_profile_to_string profile)
+        request_str
+    with
+    | Mcp_request_admission.Answer answer -> answer
+    | Mcp_request_admission.Notification req ->
+      (match req.method_ with
+       | "dashboard/ack" ->
+         with_required_auth
+           ~base_path:(Mcp_server.workspace_config state).Workspace.base_path
+           ~id:(get_id req)
+           ~requirement:Auth_requirement.Public
+           ?auth_token
+           (fun _auth_token -> handle_dashboard_ack_notification ?mcp_session_id req.params)
+       | _ -> `Null)
+    | Mcp_request_admission.Request
+        { id; message = json; request = req; protocol = (_ : Mcp_transport_protocol.request_protocol) } ->
+      let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+      (try
               match req.method_ with
               | "server/discover" ->
                 with_required_auth
@@ -1409,7 +1333,7 @@ let handle_request
             | exn ->
               let err = Printexc.to_string exn in
               Log.Mcp.error "Request handling failed: method=%s: %s" req.method_ err;
-              make_error_typed ~id Mcp_error_code.Internal_error (Printf.sprintf "Internal error: %s" err)))
+              make_error_typed ~id Mcp_error_code.Internal_error (Printf.sprintf "Internal error: %s" err))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Auth.Auth_config_error _ ->

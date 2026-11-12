@@ -137,7 +137,7 @@ let test_seed_witness_uses_raw_source_and_dropped_arguments_are_not_written () =
   check int "one authority read across select and recut" 1 !reads;
   check bool "the raw opener still admits its carried front" true
     (match !fronts with [Host.Carried_seed _] -> true
-     | [] | _::_::_ | [Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Librarian_snapshot _ | Host.Librarian_progress _] -> false);
+     | [] | _::_::_ | [Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Librarian_snapshot _ | Host.Librarian_progress _] -> false);
   ignore (reference (input "beta" sent));
   check bool "discarded alpha is absent" false (List.mem_assoc "alpha" (inputs sent));
   let store = Tool_blob_store.create ~base_path:base in

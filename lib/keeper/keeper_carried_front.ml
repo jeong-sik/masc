@@ -114,13 +114,59 @@ type unreadable_records =
   ; first_reason : string
   }
 
+type refused_start =
+  { runtime_profile : string
+  ; first_atom : int
+  ; front : Model_input_front.t
+  ; turn : int
+  }
+
+(* The whole refused range counts, a refused whole history too: its start is
+   atom 0, where [carried_front_of_window] names no seed. *)
+let refused_start_of_record (record : Turn_record.t) =
+  Option.map
+    (fun (refused : Turn_record.refused_model_input) ->
+       { runtime_profile = refused.runtime_profile
+       ; first_atom =
+           refused.window.Turn_record.total_atoms
+           - refused.window.Turn_record.transmitted_atoms
+       ; front = refused.window.Turn_record.model_input_front
+       ; turn = record.Turn_record.absolute_turn
+       })
+    record.Turn_record.refused_model_input
+;;
+
+(* Whether a refusal is the newest observation, read newest first in stored
+   order: a direct retry may reuse its turn number, so the turn does not order
+   two records of one turn. A response answers every refusal stored before it,
+   the refusal its own record carries too: a lane tries the refused runtime
+   before the candidate that answers. *)
+type refusal_scan =
+  { response_met : bool
+  ; standing : refused_start option
+  }
+
+let refusal_scan_start = { response_met = false; standing = None }
+
+let scan_refusal scan (record : Turn_record.t) =
+  match record.Turn_record.response_observed_model_input, scan with
+  | Some _, _ -> { scan with response_met = true }
+  | None, { response_met = false; standing = None } ->
+    { scan with standing = refused_start_of_record record }
+  | None, ({ response_met = true; standing = _ } | { response_met = false; standing = Some _ }) ->
+    scan
+;;
+
 type seed_read =
   { seed : seed option
+  ; refused_start : refused_start option
   ; unreadable : unreadable_records option
   ; boundary_error : string option
   }
 
-let no_seed_read = { seed = None; unreadable = None; boundary_error = None }
+let no_seed_read =
+  { seed = None; refused_start = None; unreadable = None; boundary_error = None }
+;;
 
 let warn_seed_read_failures ~keeper_name ~runtime_id (read : seed_read) =
   Option.iter
@@ -163,7 +209,18 @@ let seed_read_of_rows ~trace_id rows =
       ([], None)
       rows
   in
-  { seed = of_records ~trace_id (List.rev records_rev)
+  let records = List.rev records_rev in
+  let refusal =
+    List.fold_left
+      (fun scan (record : Turn_record.t) ->
+         if String.equal record.Turn_record.trace_id trace_id
+         then scan_refusal scan record
+         else scan)
+      refusal_scan_start
+      records_rev
+  in
+  { seed = of_records ~trace_id records
+  ; refused_start = refusal.standing
   ; unreadable
   ; boundary_error = None
   }
@@ -258,12 +315,12 @@ let read_seed ~config ~keeper_name ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
   match current_generation_floor ~config ~keeper_name ~trace_id with
   | Error detail ->
-    { seed = None
-    ; unreadable = None
-    ; boundary_error = Some detail
-    }
+    { no_seed_read with boundary_error = Some detail }
   | Ok generation_floor ->
     let unreadable = ref None in
+    (* [scan_refusal], seed or not: a response-observed record ends the
+       search for a refusal even when it narrows nothing. *)
+    let refusal = ref refusal_scan_start in
     let exception Trace_boundary in
     (* Count observations, not intervening rows. A direct retry may reuse its
        turn number, so the last stored response is the latest observation.
@@ -280,7 +337,9 @@ let read_seed ~config ~keeper_name ~trace_id =
                   | Some floor -> record.Turn_record.absolute_turn <= floor
                   | None -> false) ->
             raise_notrace Trace_boundary
-          | Ok record -> of_records ~trace_id [ record ]
+          | Ok record ->
+            refusal := scan_refusal !refusal record;
+            of_records ~trace_id [ record ]
           | Error first_reason ->
             let count =
               match !unreadable with
@@ -292,6 +351,7 @@ let read_seed ~config ~keeper_name ~trace_id =
       with Trace_boundary -> []
     in
     { seed = List.nth_opt seeds 0
+    ; refused_start = (!refusal).standing
     ; unreadable = !unreadable
     ; boundary_error = None
     }
@@ -318,6 +378,16 @@ let for_history ~digest_at (seed : seed) =
   | Model_input_front.Empty_history when seed.first_atom > 0 ->
     Error Front_atom_missing
   | Model_input_front.Empty_history -> Ok seed
+;;
+
+let refused_start_for_history ~digest_at (refused : refused_start) =
+  for_history
+    ~digest_at
+    { first_atom = refused.first_atom
+    ; front = refused.front
+    ; source = Turn_record { turn = refused.turn }
+    }
+  |> Result.map (fun (_ : seed) -> refused)
 ;;
 
 let dropped_front_to_string = function

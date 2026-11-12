@@ -2326,16 +2326,19 @@ let absorbed_snapshot () =
   | Error error -> fail (Snapshot.error_to_string error)
 ;;
 
+let start_range_runtime = "claude_code.claude-sonnet-5"
+
 let start_range
       ?(librarian_front = frozen_librarian_position Choice.No_position)
       ?(own_first_atom = 0)
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ?carried_front_seed
       messages
   =
   Host.carried_start_range
     ~keeper_name:"alpha"
-    ~runtime_id:"claude_code.claude-sonnet-5"
-    ~carried_front_seed:None
+    ~runtime_id:start_range_runtime
+    ~carried_front_seed
     ~librarian_front
     ~own_first_atom
     ~turn_start
@@ -2362,7 +2365,7 @@ let test_a_start_seed_begins_at_the_librarian_position () =
     (match carried.Host.front with
      | Host.Librarian_snapshot { absorbed_through; _ } ->
        absorbed_through = snapshot.Snapshot.end_atom
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
      | Host.Librarian_progress _ -> false);
   check string "and the log names it the same word the Agent Core lane logs"
     "librarian_snapshot"
@@ -2388,8 +2391,88 @@ let test_a_seed_without_a_librarian_position_is_unchanged () =
   check bool "the turn start, which is 0 with no completed turn" true
     (match carried.Host.front with
      | Host.Turn_start -> true
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start_unknown _ | Host.Librarian_snapshot _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Librarian_snapshot _
      | Host.Librarian_progress _ -> false)
+;;
+
+(* RFC-librarian-lifecycle §4.10: a new session whose seed this runtime
+   refused opens strictly after where that seed opened. The Librarian read
+   two atoms; three more follow, and the last completed turn ended at 4. *)
+let refused_seed_messages =
+  absorbed_messages
+  @ [ msg Agent_core.Types.User "Now review it."
+    ; msg Agent_core.Types.Assistant "Reviewed."
+    ; msg Agent_core.Types.User "Ship it."
+    ]
+;;
+
+let refused_at ?(runtime_profile = start_range_runtime) first_atom =
+  let front =
+    match Runtime_model_input_tail_window.atom_opening_digest refused_seed_messages first_atom with
+    | Some digest -> Model_input_front.At_atom digest
+    | None -> fail "the fixture has no such atom"
+  in
+  { Keeper_carried_front.no_seed_read with
+    refused_start = Some { runtime_profile; first_atom; front; turn = 7 }
+  }
+;;
+
+let range_after_refusal ?(boundary = 4) refused =
+  let snapshot = absorbed_snapshot () in
+  ( snapshot.Snapshot.end_atom
+  , start_range
+      ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot snapshot))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = boundary })
+      ~carried_front_seed:(fun () -> refused)
+      refused_seed_messages )
+;;
+
+let is_past_refused_start (carried : Host.carried_start) =
+  match carried.Host.front with
+  | Host.Past_refused_start _ -> true
+  | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+  | Host.Librarian_snapshot _ | Host.Librarian_progress _ -> false
+;;
+
+let test_a_refused_seed_reopens_at_the_turn_boundary () =
+  let librarian_end, carried = range_after_refusal (refused_at 2) in
+  check int "the refused range opened at the Librarian point" 2 librarian_end;
+  check int "the next range opens at this turn's boundary" 4 carried.Host.first_atom;
+  check bool "and says why" true (is_past_refused_start carried);
+  check bool "the refused atoms are not sent again" false
+    (List.exists (String.equal "Now review it.") (texts carried.Host.messages))
+;;
+
+let test_a_refused_seed_without_a_later_boundary_keeps_the_newest_atom () =
+  let _, carried = range_after_refusal ~boundary:2 (refused_at 2) in
+  check int "the newest atom alone" 4 carried.Host.first_atom;
+  check bool "past the refused start" true (is_past_refused_start carried);
+  let _, at_the_end = range_after_refusal ~boundary:4 (refused_at 4) in
+  check int "with no later atom the range does not widen back" 4 at_the_end.Host.first_atom
+;;
+
+let test_a_refusal_speaks_only_for_its_runtime_and_history () =
+  let librarian_end, other_runtime =
+    range_after_refusal (refused_at ~runtime_profile:"muse.other" 2)
+  in
+  check int "another runtime's refusal leaves the Librarian point" librarian_end
+    other_runtime.Host.first_atom;
+  let _, behind_the_librarian = range_after_refusal (refused_at 1) in
+  check int "a refused start the Librarian passed is not read" librarian_end
+    behind_the_librarian.Host.first_atom;
+  let stale =
+    let read = refused_at 2 in
+    { read with
+      Keeper_carried_front.refused_start =
+        Option.map
+          (fun (refused : Keeper_carried_front.refused_start) ->
+             { refused with front = Model_input_front.At_atom (String.make 64 '0') })
+          read.Keeper_carried_front.refused_start
+    }
+  in
+  let _, other_history = range_after_refusal stale in
+  check int "a refused start this history no longer opens is not read" librarian_end
+    other_history.Host.first_atom
 ;;
 
 let latest_log_seq () =
@@ -2415,8 +2498,8 @@ let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
   check bool "nothing else chose the start" true
     (match opened.Host.front with
      | Host.Turn_start_unknown _ -> true
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Librarian_snapshot _
-     | Host.Librarian_progress _ -> false);
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Past_refused_start _
+     | Host.Librarian_snapshot _ | Host.Librarian_progress _ -> false);
   check int "composing the range says nothing" 0
     (warnings_for ~keeper_name:"alpha" ~since_seq:before_opening);
   let before_sending = latest_log_seq () in
@@ -2431,7 +2514,7 @@ let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
   check bool "the Librarian position chose the start" true
     (match decided.Host.front with
      | Host.Librarian_snapshot _ -> true
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
      | Host.Librarian_progress _ -> false);
   let before_librarian = latest_log_seq () in
   Host.warn_if_sent_on_unknown_start ~keeper_name:"alpha" decided.Host.front;
@@ -2495,7 +2578,7 @@ let test_a_librarian_position_behind_the_turn_start_still_wins () =
     (match carried.Host.front with
      | Host.Librarian_snapshot { absorbed_through; _ } ->
        absorbed_through = snapshot.Snapshot.end_atom
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
      | Host.Librarian_progress _ -> false)
 ;;
 
@@ -2515,7 +2598,7 @@ let test_a_read_position_alone_starts_the_range_without_a_working_state () =
   check bool "the front says so" true
     (match carried.Host.front with
      | Host.Librarian_progress { end_atom = at } -> at = end_atom
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
      | Host.Librarian_snapshot _ -> false);
   check string "and logs the Agent Core lane's word for it" "librarian_progress"
     (Host.carried_start_front_to_string carried.Host.front);
@@ -2543,7 +2626,7 @@ let test_a_read_position_behind_the_lane_cut_loses () =
   check bool "and the front is the lane's" true
     (match carried.Host.front with
      | Host.Lane_cut -> true
-     | Host.Carried_seed _ | Host.Turn_start | Host.Turn_start_unknown _
+     | Host.Carried_seed _ | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
      | Host.Librarian_snapshot _ | Host.Librarian_progress _ -> false)
 ;;
 
@@ -4173,6 +4256,18 @@ let () =
             "without one the lane's own front stands"
             `Quick
             test_a_seed_without_a_librarian_position_is_unchanged
+        ; test_case
+            "a refused seed reopens at the turn boundary"
+            `Quick
+            test_a_refused_seed_reopens_at_the_turn_boundary
+        ; test_case
+            "a refused seed without a later boundary keeps the newest atom"
+            `Quick
+            test_a_refused_seed_without_a_later_boundary_keeps_the_newest_atom
+        ; test_case
+            "a refusal speaks only for its runtime and history"
+            `Quick
+            test_a_refusal_speaks_only_for_its_runtime_and_history
         ; test_case
             "an unknown turn start is reported by the range sent"
             `Quick

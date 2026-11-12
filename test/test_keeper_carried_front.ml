@@ -26,6 +26,7 @@ let record
       ?(finish = Some "completed")
       ?(response_observed = true)
       ?response_runtime
+      ?(refused = false)
       ?(trace = "trace-1")
       ~turn
       window
@@ -77,7 +78,21 @@ let record
                }
            }
        | true, None | false, _ -> None)
-  ; refused_model_input = None
+  ; refused_model_input =
+      (match refused, window with
+       | true, Some (transmitted_atoms, total_atoms) ->
+         Some
+           { runtime_profile = runtime
+           ; window =
+               { Turn_record.transmitted_atoms
+               ; total_atoms
+               ; measurement = Turn_record.Durable_shape
+               ; model_input_front =
+                   Model_input_front.At_atom (recorded_digest (total_atoms - transmitted_atoms))
+               }
+           ; refusal = Turn_record.Model_error_not_retryable
+           }
+       | true, None | false, _ -> None)
   ; raw_trace_run_ref = None
   ; sampling = { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
   ; usage =
@@ -252,6 +267,32 @@ let test_restart_rows_restore_only_a_response_observed_front () =
     (Front.Turn_record { turn = 10 }) src;
   check bool "both current rows decoded" true
     (Option.is_none read.Front.unreadable)
+;;
+
+(* The newest observation decides whether a refusal still stands
+   (RFC-librarian-lifecycle §4.10): a refused range is read while no response
+   is newer, and the accepted range behind it stays the seed. *)
+let test_a_refusal_stands_until_a_newer_response () =
+  let accepted = record ~turn:10 (Some (30, 100)) in
+  let refused =
+    record ~turn:11 ~runtime:"muse" ~finish:None ~response_observed:false ~refused:true
+      (Some (40, 110))
+  in
+  let read rows =
+    Front.seed_read_of_rows ~trace_id:"trace-1" (List.map Turn_record.to_json rows)
+  in
+  let standing = read [ accepted; refused ] in
+  (match standing.Front.refused_start with
+   | Some { runtime_profile; first_atom; turn; front = _ } ->
+     check string "the refusing runtime" "muse" runtime_profile;
+     check int "where the refused range opened" 70 first_atom;
+     check int "the refused turn" 11 turn
+   | None -> fail "the newest refusal was not read");
+  check int "the accepted range behind it is still the seed" 70
+    (fst (seed standing.Front.seed));
+  let answered = read [ accepted; refused; record ~turn:12 (Some (20, 120)) ] in
+  check bool "a newer response ends the refusal" true
+    (Option.is_none answered.Front.refused_start)
 ;;
 
 (* A response-observed range remains valid even when the whole turn later
@@ -691,6 +732,58 @@ let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
     (start ~point:2 ~boundary:5)
 ;;
 
+(* The store scan reads newest first and stops at the seed, so it meets the
+   refusal only when nothing answered after it. *)
+let test_read_seed_reads_a_refusal_newer_than_every_response () =
+  let refused turn =
+    record ~turn ~runtime:"muse" ~finish:None ~response_observed:false ~refused:true
+      (Some (40, 110))
+  in
+  let stored records =
+    with_turn_record_store @@ fun config store ->
+    List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row)) records;
+    Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1"
+  in
+  let standing = stored [ record ~turn:10 (Some (30, 100)); refused 11; refused 12 ] in
+  check (option int) "the newest refusal stands" (Some 12)
+    (Option.map (fun (r : Front.refused_start) -> r.turn) standing.Front.refused_start);
+  check int "and the accepted range behind it is the seed" 70
+    (fst (seed standing.Front.seed));
+  let answered = stored [ refused 11; record ~turn:12 (Some (30, 120)) ] in
+  check bool "a refusal behind a response is not read" true
+    (Option.is_none answered.Front.refused_start)
+;;
+
+(* A direct retry may reuse its turn number, so stored order decides which of
+   one turn's records is newer. The row reader and the store scan must agree. *)
+let test_both_readers_take_the_stored_order_within_a_turn () =
+  let response = record ~turn:10 (Some (30, 100)) in
+  let refusal =
+    record ~turn:10 ~runtime:"muse" ~finish:None ~response_observed:false ~refused:true
+      (Some (40, 100))
+  in
+  let answered_in_its_record = record ~turn:10 ~runtime:"muse" ~refused:true (Some (30, 100)) in
+  let refused_turn (read : Front.seed_read) =
+    Option.map (fun (refused : Front.refused_start) -> refused.turn) read.Front.refused_start
+  in
+  let rows records =
+    Front.seed_read_of_rows ~trace_id:"trace-1" (List.map Turn_record.to_json records)
+  in
+  let stored records =
+    with_turn_record_store @@ fun config store ->
+    List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row)) records;
+    Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1"
+  in
+  List.iter
+    (fun (label, records, expected) ->
+       check (option int) (label ^ " (rows)") expected (refused_turn (rows records));
+       check (option int) (label ^ " (store)") expected (refused_turn (stored records)))
+    [ "a refusal stored after its turn's response stands", [ response; refusal ], Some 10
+    ; "a response stored after its turn's refusal answers it", [ refusal; response ], None
+    ; "a record's own response answers its refusal", [ answered_in_its_record ], None
+    ]
+;;
+
 let test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn () =
   with_turn_record_store @@ fun config store ->
   let records =
@@ -1105,6 +1198,12 @@ let () =
             test_a_later_unanswered_attempt_does_not_replace_the_same_turns_response
         ; test_case "restart rows restore only response-observed front" `Quick
             test_restart_rows_restore_only_a_response_observed_front
+        ; test_case "a refusal stands until a newer response" `Quick
+            test_a_refusal_stands_until_a_newer_response
+        ; test_case "both readers take the stored order within a turn" `Quick
+            test_both_readers_take_the_stored_order_within_a_turn
+        ; test_case "the store scan reads a refusal newer than every response" `Quick
+            test_read_seed_reads_a_refusal_newer_than_every_response
         ; test_case "a response-observed failed turn seeds" `Quick
             test_a_response_observed_failed_turn_seeds_the_front
         ; test_case "joined observation names the runtime" `Quick

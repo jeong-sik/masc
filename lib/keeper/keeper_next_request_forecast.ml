@@ -767,8 +767,12 @@ let librarian_gap ~config ~keeper_name =
     (match read with
      | { boundary_error = Some detail; _ } -> Error (Turn_boundary_refused detail)
      | { unreadable = Some unreadable; _ } -> Error (Turn_records_unreadable unreadable)
-     | { seed = None; unreadable = None; boundary_error = None } -> Ok None
-     | { seed = Some (accepted : Keeper_carried_front.seed); unreadable = None; boundary_error = None }
+     | { seed = None; refused_start = _; unreadable = None; boundary_error = None } -> Ok None
+     | { seed = Some (accepted : Keeper_carried_front.seed)
+       ; refused_start = _
+       ; unreadable = None
+       ; boundary_error = None
+       }
        ->
        let* snapshot_cut =
          match Keeper_librarian_continuity.read ~config ~keeper_name with

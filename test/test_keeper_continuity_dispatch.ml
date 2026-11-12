@@ -325,7 +325,7 @@ let test_a_librarian_behind_refusal_resends_from_the_boundary () =
     { first_atom = 4; front = Model_input_front.At_atom (Option.get (digest_at 4))
     ; source = Keeper_carried_front.Turn_record { turn = 1 } } in
   let carried_front_seed () =
-    { Keeper_carried_front.seed = Some recorded; unreadable = None; boundary_error = None } in
+    { Keeper_carried_front.seed = Some recorded; refused_start = None; unreadable = None; boundary_error = None } in
   let (_ : (string * Agent_core.Error.t) list) =
     dispatch ~carried_front_seed ~initial_messages ~sw ~net ~base_path () in
   check int "the refused peer is asked twice" 2 (Fixture.post_count refused);
@@ -381,7 +381,7 @@ let test_a_refused_boundary_resends_from_where_this_turn_began () =
     { first_atom = 6; front = Model_input_front.At_atom (Option.get (digest_at 6))
     ; source = Keeper_carried_front.Turn_record { turn = 1 } } in
   let carried_front_seed () =
-    { Keeper_carried_front.seed = Some recorded; unreadable = None; boundary_error = None } in
+    { Keeper_carried_front.seed = Some recorded; refused_start = None; unreadable = None; boundary_error = None } in
   let history_at_start = B.history_at_start_of_messages (completed @ failed_turn) in
   let (_ : (string * Agent_core.Error.t) list) =
     dispatch ~carried_front_seed ~history_at_start ~initial_messages ~sw ~net ~base_path () in

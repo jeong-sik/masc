@@ -177,8 +177,25 @@ type unreadable_records =
     that is not JSON is skipped by the store reader before this count and is
     not in it. *)
 
+type refused_start =
+  { runtime_profile : string  (** The runtime whose typed refusal it was. *)
+  ; first_atom : int  (** Where the refused range opened. *)
+  ; front : Model_input_front.t
+  ; turn : int
+  }
+(** The start of a request range a runtime refused
+    ({!Turn_record.refused_model_input}). *)
+
 type seed_read =
   { seed : seed option
+  ; refused_start : refused_start option
+        (** Set when the newest observation on this history is a refusal: no
+            response-observed record is stored after it. Stored order, not
+            the turn, decides, because a direct retry may reuse its turn
+            number; a record that carries both answers its own refusal.
+            [seed] is still the newest
+            accepted range behind it, for the runtimes the refusal does not
+            speak for (RFC-librarian-lifecycle §4.10). *)
   ; unreadable : unreadable_records option
         (** [None] when every record read decoded. A seed is looked for among
             the records that did, so [seed = None] with [Some _] here is
@@ -209,7 +226,8 @@ val seed_read_of_rows
   -> Yojson.Safe.t list
   -> seed_read
 (** {!of_records} over the rows that decode as turn records, with the rows
-    that do not counted and the first refusal kept, rows oldest first. *)
+    that do not counted and [refused_start] decided as {!read_seed} decides
+    it, rows oldest first. *)
 
 val read_seed
   :  config:Workspace.config
@@ -254,6 +272,13 @@ val for_history
     drops as [Front_atom_missing]. A dropped position names no atom of this
     history, and carrying the newest atom alone from there would never widen
     again, so the caller starts over as with no seed. *)
+
+val refused_start_for_history
+  :  digest_at:(int -> string option)
+  -> refused_start
+  -> (refused_start, dropped_front) result
+(** {!for_history} for a refused start: the refusal speaks for this history
+    only while the atom the refused range opened on is still that message. *)
 
 val dropped_front_to_string : dropped_front -> string
 

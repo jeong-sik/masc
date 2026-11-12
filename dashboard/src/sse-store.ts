@@ -75,6 +75,7 @@ import {
 } from './config/constants'
 import { namespaceTruthInitializing, namespaceTruthLoading, namespaceTruthReadRecovery } from './namespace-truth-signals'
 import { subscribeStoredTokenChanges } from './api/core'
+import { hydrateMissionSnapshot, setupMissionObservation } from './mission-actions'
 
 // --- Refresh function registration (avoids circular imports) ---
 
@@ -105,11 +106,6 @@ export function registerOperatorRefresh(fn: () => void): void {
   if (operatorSnapshotRefreshPending) {
     requestOperatorSnapshotRefresh('operator_snapshot_registration_drain')
   }
-}
-
-let _refreshMissionFn: (() => void) | null = null
-export function registerMissionRefresh(fn: () => void): void {
-  _refreshMissionFn = fn
 }
 
 let _keeperTurnRefreshFn: ((keeperName: string) => void) | null = null
@@ -491,7 +487,6 @@ async function refreshActiveRoute(): Promise<void> {
   } catch (err) {
     console.debug('[server-push] tab-refresh unavailable, using fallback refreshes', err instanceof Error ? err.message : '')
     _refreshOperatorFn?.()
-    _refreshMissionFn?.()
   }
 }
 
@@ -727,6 +722,10 @@ export function routeServerPushEvent(event: SSEEvent): void {
 }
 
 export function hydrateServerPushEvent(event: SSEEvent): boolean {
+  if (event.type === 'mission_snapshot') {
+    hydrateMissionSnapshot(event.payload)
+    return true
+  }
   if (event.type === 'project_snapshot' && event.payload) {
     handleNamespaceTruthSnapshot(event.payload)
     return true
@@ -926,6 +925,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
 // --- SSE server-push reaction setup ---
 
 export function setupServerPushReaction(): () => void {
+  const stopMission = setupMissionObservation()
   const recoverReads = () => {
     namespaceTruthReadRecovery.recover()
     recoverExecutionReadDebt()
@@ -946,6 +946,7 @@ export function setupServerPushReaction(): () => void {
   })
 
   return () => {
+    stopMission()
     unsubReconnect()
     unsubToken()
     window.removeEventListener('focus', recoverReads)

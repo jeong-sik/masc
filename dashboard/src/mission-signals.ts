@@ -17,3 +17,4 @@ export const missionKeeperBriefs: ReadonlySignal<DashboardMissionKeeperBrief[]> 
 )
 export const missionLoading = signal(false)
 export const missionError = signal<string | null>(null)
+export const missionInitializing = signal(false)

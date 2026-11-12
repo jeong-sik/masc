@@ -128,9 +128,20 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 **[사실]** 일정 행(`until_github_run`)은 `Keeper_msg_async` 요청이 아니에요. `lib/schedule_run_watch.mli:1-10` 은 이 모듈이 상태를 따로 갖지 않고 일정 행이 유일한 기록이라고 적어요. 그래서 일정 틱이 영수증만 쓰면 `waitable` 이 `Absent` 로 거절해요.
 
 **[제안]** 그래서 (나)는 두 모양이에요.
-- (나-1) `masc_schedule_create` 가 `until_github_run` 을 받으면 일정 행과 함께 요청 레코드를 대기 시작 때 만들고(`Running`), 응답에 `request_id` 를 실어요. 일정 틱은 지금처럼 run 을 한 번만 읽고, 끝나면 영수증을 쓰고 요청을 끝내요. 일정 응답은 `schedule_request_to_yojson` 에 파생 필드를 붙인 객체라 `schedule_id`·`schedule_instance_id` 가 들어 있고 `request_id` 는 없어요(`lib/schedule/schedule_domain.ml:894-897`, `lib/tool_schedule.ml:583-`).
+- (나-1) 일정 틱이 run 읽기를 이어서 맡아요. 처음 그린 모양은 (나-1a)예요. `masc_schedule_create` 가 `until_github_run` 을 받으면 일정 행과 함께 요청 레코드를 대기 시작 때 만들고(`Running`), 응답에 `request_id` 를 실어요. 요청 레코드를 만들지 않고 대기의 원천을 넓히는 (나-1b)는 아래에 있어요. 일정 틱은 지금처럼 run 을 한 번만 읽고, 끝나면 영수증을 쓰고 요청을 끝내요. 일정 응답은 `schedule_request_to_yojson` 에 파생 필드를 붙인 객체라 `schedule_id`·`schedule_instance_id` 가 들어 있고 `request_id` 는 없어요(`lib/schedule/schedule_domain.ml:894-897`, `lib/tool_schedule.ml:583-`).
 - (나-2) 새 생산자가 `Keeper_msg_async` 요청을 만들고 그 worker 가 서버의 run 읽기 결과를 기다려요. 요청·소유·재시작은 지금 길 그대로지만, 읽기를 일정 틱과 나누는 구조가 새로 필요해요. 나누지 못하면 서버 안의 폴링이 Keeper 마다 늘어서 (가)와 같은 대가가 돼요.
-- **[확인 필요]** (나-1)은 worker 가 없는 `Running` 요청을 만들어요. `Keeper_msg_async` 는 worker 없이 남은 비종료 요청을 `Lost` 로 정리해요(`lib/keeper/keeper_msg_async.mli:313-315` 의 「`Lost` is reserved for persisted non-terminal requests recovered without a live worker」). 서버가 재시작하면 일정 행은 살아서 틱이 이어가는데 요청 레코드는 `Lost` 가 되어 대기가 끊길 수 있어요. 재시작 정리가 일정에 걸린 요청을 건너뛰게 하거나 틱이 이어받게 해야 하는지는 읽지 않았어요. 이것이 (나-1)과 (나-2)를 가르는 가장 큰 비용일 수 있어요.
+**[사실]** 서버가 시작할 때 `Keeper_msg_async.recover_lost_disk_records` 가 worker 없이 디스크에 남은 `Queued`·`Running` 요청을 모두 `Lost` 로 바꾸고, 생산자별 예외가 없어요(`lib/keeper/keeper_msg_async.mli:486-495`). 그 앞에서 Execute 의 `deliver_unfinished_runs` 만 돌아요(`lib/server/server_bootstrap_maintenance.ml:375-376`). 대기 항목 `receipt_obligation` 은 `request_id : string` 하나로 키를 갖고 「background-run request」라고 문서화돼 있어요(`lib/keeper_chat_operations/keeper_semantic_execution.mli:45-47`).
+
+**[제안]** 그래서 (나-1)은 두 갈래예요. 일정 행은 재시작 뒤에도 살아서 틱이 이어가는데 요청 레코드는 `Lost` 로 끝나는 어긋남을 어떻게 막느냐가 달라요.
+
+| | (나-1a) 재시작 정리가 일정에 걸린 요청을 건너뛴다 | (나-1b) 대기의 원천을 닫힌 합타입으로 넓힌다 |
+|---|---|---|
+| 모양 | 요청 레코드를 대기 시작 때 만든다. `recover_lost_disk_records` 가 「일정 행이 `Scheduled` 인 요청」은 `Lost` 로 바꾸지 않는다. 틱이 끝나면 영수증을 쓰고 요청을 끝낸다 | 원천이 `Request_record` 또는 `Schedule_row` 다. `waitable` 과 sweep 의 `read_record` 가 같은 합타입을 받고, 일정 행이 `Scheduled` 면 `Worker_may_exist`(`keeper_receipt_wait_sweep.ml:10`), 끝났으면 영수증을 본다. 일정이 만든 대기의 키는 `schedule_instance_id` 이고 영수증의 `call_id` 로 쓴다. 요청 레코드를 만들지 않는다 |
+| 장점 | 대기 쪽 상태 기계와 실행 기록 형식이 그대로다 | 한 사실(일정이 끝났는가)을 한 곳에서만 읽어 어긋남이 없다. 정리 규칙에 예외를 두지 않는다 |
+| 대가 | 정리 규칙이 생산자별 예외가 된다(지금 예외가 없다). 일정 행과 요청 레코드가 같은 사실이 두 곳에 따로 적혀서 일정은 끝났는데 요청이 `Running` 인 틈이 생긴다 | `receipt_obligation` 의 키 의미가 바뀌어서 실행 기록 `v3` 에 닿고 fresh state 가 또 필요할 수 있다. 영수증 대기 TLA+ 모델의 원천(`WaitingHasSource`)도 넓혀야 한다. 변경이 더 크다 |
+
+- **[제안]** (나-1b)를 정석으로 봐요. 근거는 이 저장소의 원칙(닫힌 합타입, 예외가 아니라 타입으로, 한 사실은 한 곳)이에요. 대가는 위 표의 마지막 줄이고, 영수증 대기 스택이 올라간 지 하루도 안 된 지금 `v3` 를 다시 건드리는 일이에요.
+- **[확인 필요]** `Keeper_msg_async` 의 요청 레코드를 일정 틱이 끝낼 때 어떤 전이로 쓰는지(`Done` 으로 직접 쓰는 길이 있는지)는 읽지 않았어요. (나-1a)의 비용은 이 읽기에 달려 있어요.
 - **[확인 필요]** (나-2)에서 읽기를 일정 틱과 나누는 구조의 크기는 읽지 않았어요.
 
 ### 5.3 (다) 서버가 한 번 호출에서 끝까지 기다렸다가 돌려주는 방법
@@ -161,7 +172,7 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 ## 7. 사용자가 정한 것과 정할 것
 
 1. **결정(사용자, 2026-11-12): (가)를 건너뛰고 바로 (나)로 가요.** 이 글이 추천한 「(가)를 하루 먼저 본다」는 받아들여지지 않았어요. 11-13 16:47 의 `run_in_background` 비율은 (가)의 판정이 아니라 배포 뒤 기준선으로만 읽어요.
-2. **결정(사용자, 2026-11-12): (나-1)을 정석으로 봐요.** 이 글이 (나-1)을 추천한 근거는 「막는 곳이 한 곳이라 변경 범위가 작다」였는데, 5.2 의 읽기에서 막는 곳이 둘이고 요청 레코드를 대기 시작 때부터 갖는 변경이 필요한 것으로 바뀌었어요. 비용이 추천 때보다 커요. 구현 전에 정할 것은 두 가지예요. 재시작 때 일정에 걸린 요청을 `Lost` 로 정리하지 않게 하는 방법, 일정 응답에 `request_id` 를 싣는 도구 설명 변경이에요.
+2. **결정(사용자, 2026-11-12): (나-1)을 정석으로 봐요.** 이 글이 (나-1)을 추천한 근거는 「막는 곳이 한 곳이라 변경 범위가 작다」였는데, 5.2 의 읽기에서 막는 곳이 둘이고 재시작 정리와 부딪친다는 것으로 바뀌었어요. 비용이 추천 때보다 커요. 구현 전에 (나-1a)와 (나-1b) 중 하나를 정해야 해요. 이 글은 (나-1b)를 추천하고, 대가는 실행 기록 `v3` 를 다시 건드리는 것이에요.
 3. **(다)를 지울까요.** 사용자가 되물었어요(11-12): (다)가 무엇인지 설명을 기다려요. 결정 전이에요. 이 글은 닫기를 추천해요. 호출 수는 40번에서 1번으로 줄지만, 호출이 열려 있는 동안 Keeper 의 턴과 큐가 막히는 것은 지금 `sleep` 루프와 같아서 줄이려는 큐 대기(15.519 h)가 그대로예요.
 4. **결정(사용자, 2026-11-12): 예, 두 Keeper 에게 각자 한 번 물어요.** 이 글을 쓴 세션에서는 `mcp__masc__*` 도구가 연결되지 않아 아직 보내지 못했어요. 보낸 뒤 답은 Board 글의 댓글에 와요.
 

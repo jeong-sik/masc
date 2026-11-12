@@ -470,8 +470,12 @@ class WaitingEventTest(unittest.TestCase):
                     "queued events were not sent",
                 )
                 wait_until(
-                    lambda: rendered_row_contains(
-                        gamma_event_start, b"gamma", b"waiting unavailable"
+                    # While the read is held the row keeps its last observation
+                    # and says it is being refreshed (#50974); the warning row
+                    # is only for a keeper with no observation history.
+                    lambda: any(
+                        rendered_row_contains(gamma_event_start, b"gamma", marker)
+                        for marker in ("갱신 대기".encode(), b"revalidating")
                     ),
                     "the TUI did not apply the later gamma event",
                 )

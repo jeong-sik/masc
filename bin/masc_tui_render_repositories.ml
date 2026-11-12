@@ -17,53 +17,65 @@ module Diff = Masc_tui_diff
    what an operator needs before opening a shell or comparing another
    checkout; resolving the stored spelling again in the TUI would use the
    TUI's cwd instead of the server's base path. *)
-let repository_context_fields (repo : Masc.Tui_decode.repository) =
+let repository_context_fields ~ko (repo : Masc.Tui_decode.repository) =
+  let say korean english = if ko then korean else english in
   let stored_path =
     if String.equal repo.rp_local_path repo.rp_resolved_local_path then []
-    else ["Stored as", repo.rp_local_path]
+    else [say "저장된 표기" "Stored as", repo.rp_local_path]
   in
   let keepers = match repo.rp_keepers with
-    | [] -> "none assigned" | names -> String.concat ", " names in
+    | [] -> say "미배정" "none assigned" | names -> String.concat ", " names in
   let failure = match Masc.Tui_decode.repository_status_reason repo.rp_status with
-    | None -> [] | Some reason -> ["Error", reason] in
-  failure @ ["Path", repo.rp_resolved_local_path] @ stored_path @ ["Keepers", keepers]
+    | None -> [] | Some reason -> [say "오류" "Error", reason] in
+  failure @ [say "경로" "Path", repo.rp_resolved_local_path] @ stored_path
+  @ [say "키퍼" "Keepers", keepers]
 
 let selected_repository_reading (state : state) =
   let selected = Option.bind state.repositories (fun snapshot ->
     List.nth_opt snapshot.rs_repositories state.repositories_cursor) in
   let errors = match state.repositories_error with
     | None -> [] | Some reason ->
-        [(if Option.is_some state.repositories then "Refresh failed · retained reading"
-          else "Read failed"), reason] in
+        [(if Option.is_some state.repositories then
+            ui_text state ~ko:"갱신 실패 · 이전 관측" ~en:"Refresh failed · retained reading"
+          else ui_text state ~ko:"조회 실패" ~en:"Read failed"), reason] in
   let capture ~title fields =
     Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko) ~title
       (List.map (fun (heading,body) -> {Masc_tui_detail_reading.heading;body}) fields) in
   match selected with
   | None ->
-      if errors=[] then None else Some (capture ~title:"Workspace / inventory" errors)
+      if errors=[] then None
+      else
+        Some
+          (capture
+             ~title:(ui_text state ~ko:"워크스페이스 / 저장소 목록" ~en:"Workspace / inventory")
+             errors)
   | Some (repo : Masc.Tui_decode.repository) ->
       let format_fields fields =
         fields
         |> List.map (fun (label, value) -> Printf.sprintf "%s: %s" label value)
         |> String.concat "\n"
       in
-      Some (capture ~title:("Workspace / " ^ repo.rp_name)
+      Some (capture ~title:(ui_text state ~ko:"워크스페이스 / " ~en:"Workspace / " ^ repo.rp_name)
         (errors
          @ [ ( ui_text state
                  ~ko:"1. 저장소 기본 정보"
                  ~en:"1. Repository & Remote"
              , format_fields
-                 [ "Repository", repo.rp_name
+                 [ ui_text state ~ko:"저장소" ~en:"Repository", repo.rp_name
                  ; "ID", repo.rp_id
-                 ; "Status", Masc.Tui_decode.repository_status_word repo.rp_status
-                 ; "Remote", repo.rp_url
-                 ; "Default branch", repo.rp_default_branch
-                 ; "Auto sync", (if repo.rp_auto_sync then "on" else "off")
+                 ; ui_text state ~ko:"상태" ~en:"Status"
+                 , Masc.Tui_decode.repository_status_word repo.rp_status
+                 ; ui_text state ~ko:"원격" ~en:"Remote", repo.rp_url
+                 ; ui_text state ~ko:"기준 브랜치" ~en:"Default branch", repo.rp_default_branch
+                 ; ui_text state ~ko:"자동 동기화" ~en:"Auto sync"
+                 , (if repo.rp_auto_sync then ui_text state ~ko:"켜짐" ~en:"on"
+                    else ui_text state ~ko:"꺼짐" ~en:"off")
                  ] )
            ; ( ui_text state
                  ~ko:"2. 로컬 경로 · 배정된 키퍼"
                  ~en:"2. Local Path & Keepers"
-             , format_fields (repository_context_fields repo) )
+             , format_fields
+                 (repository_context_fields ~ko:(state.ui_language = Lang_ko) repo) )
            ]))
 
 type workspace_activity_column = Activity_date | Activity_keeper | Activity_task | Activity_result | Activity_path
@@ -71,7 +83,8 @@ type workspace_activity_column = Activity_date | Activity_keeper | Activity_task
 let workspace_activity_cells ~ko ~cols ~date ~keeper ~task ~result ~path =
   let width = function
     | Activity_date -> 16 | Activity_keeper -> 18 | Activity_task -> 16
-    | Activity_result -> String.length "RESULT" | Activity_path -> 8 in
+    | Activity_result -> Message_layout.display_width (if ko then "결과" else "RESULT")
+    | Activity_path -> 8 in
   let layout = Masc_tui_table.fit ~inner_width:(max 1 (framed_inner_width cols - 2))
     ~width ~flex:Activity_path ~drop_order:[Activity_task; Activity_date; Activity_keeper]
     [Activity_date; Activity_keeper; Activity_task; Activity_result; Activity_path] in
@@ -110,8 +123,8 @@ let render_workspace_activity (state : state) repo_id =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"workspace-activity"
     ~title
     ~hints:(match state.workspace_activity_context_scroll with
-      | None -> "v:context  j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:back"
-      | Some _ -> "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Enter:file  r:refresh  Esc:list")
+      | None -> Masc_tui_keys.footer_hints_workspace_activity ~lang:state.ui_language
+      | Some _ -> Masc_tui_keys.footer_hints_workspace_activity_context ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let listing ~budget reading =
           let ko = state.ui_language = Lang_ko in
@@ -145,16 +158,21 @@ let render_workspace_activity (state : state) repo_id =
                 let line = "  " ^ Masc_tui_table.row (cells ~date
                   ~keeper:(Terminal_text.single_line change.fc_keeper)
                   ~task:(Terminal_text.single_line task)
-                  ~result:(if change.fc_succeeded then "ok" else "failed")
+                  ~result:
+                    (if change.fc_succeeded then (if ko then "성공" else "ok")
+                     else if ko then "실패" else "failed")
                   ~path:(Terminal_text.single_line path)) in
                 if first + i = cursor then c.push_selected line else c.push line
           done;
           c.push_divider ();
           c.push (match selected with
-            | None -> "  Task and file links appear when a recorded change names them"
+            | None ->
+                if ko then "  기록된 변경이 태스크와 파일을 적어 두면 여기에 연결이 나옵니다"
+                else "  Task and file links appear when a recorded change names them"
             | Some (_, path) ->
-                "  v:context · " ^ Message_layout.fit_middle
-                  (max 1 (framed_inner_width cols - Message_layout.display_width "  v:context · "))
+                let lead = if ko then "  v:맥락 · " else "  v:context · " in
+                lead ^ Message_layout.fit_middle
+                  (max 1 (framed_inner_width cols - Message_layout.display_width lead))
                   (Terminal_text.single_line path))
       in
       let show ~budget reading = match state.workspace_activity_context_scroll with
@@ -168,14 +186,18 @@ let render_workspace_activity (state : state) repo_id =
               | None -> c.push_empty () | Some line -> c.push line
             done in
       match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
-      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> c.push "  Reading recorded file changes..."
+      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading ->
+          c.push
+            (ui_text state ~ko:"  기록된 파일 변경 조회 중…" ~en:"  Reading recorded file changes...")
       | Masc_tui_fetched.Failed message -> c.push_styled ~style:(Theme.bad ()) ("  " ^ Terminal_text.single_line message)
       | Masc_tui_fetched.Ready reading -> show ~budget reading
       (* The changes already read stay, with the failed refresh above them so
          they read as the last good reading rather than a fresh one. *)
       | Masc_tui_fetched.Stale (reading, message) ->
           c.push_styled ~style:(Theme.bad ())
-            ("  Refresh failed, showing the last read: " ^ Terminal_text.single_line message);
+            (ui_text state ~ko:"  갱신 실패 · 이전 관측 표시: "
+               ~en:"  Refresh failed, showing the last read: "
+             ^ Terminal_text.single_line message);
           show ~budget:(max 1 (budget - 1)) reading)
 
 (* The inventory names registered paths, not a fresh Git observation. Never
@@ -356,7 +378,8 @@ let render_repository_list (state : state) =
           [match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
            | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
            | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.repositories_inflight
-           | Page_empty -> "(no repositories registered)"]
+           | Page_empty ->
+               ui_text state ~ko:"(등록된 저장소 없음)" ~en:"(no repositories registered)"]
         else List.init content_height (fun i ->
           let idx = i + scroll in
           match Rows.at repos_window idx with
@@ -370,7 +393,8 @@ let render_repository_list (state : state) =
       let lines =
         geometry.rsg_errors @ lines
         @ (if geometry.rsg_overflowing then
-             ["repositories " ^ Masc_tui_scroll.window_text ~scroll ~height:content_height shown]
+             [ui_text state ~ko:"저장소 " ~en:"repositories "
+              ^ Masc_tui_scroll.window_text ~scroll ~height:content_height shown]
            else []) in
       (* [j/k] steps over a row; with none, the title does not offer it. *)
       let listing_title =
@@ -510,7 +534,8 @@ let render_repository_changes (state : state) =
       in
       let scope_name =
         match state.repository_changes_scope, state.repositories with
-        | Some Tui_decode.Repository_change_project, _ -> "Project workspace"
+        | Some Tui_decode.Repository_change_project, _ ->
+            ui_text state ~ko:"프로젝트 워크스페이스" ~en:"Project workspace"
         | Some (Tui_decode.Repository_change_repository id), Some snapshot ->
             (match
                List.find_opt
@@ -521,7 +546,7 @@ let render_repository_changes (state : state) =
              | Some repo -> repo.rp_name
              | None -> id)
         | Some (Tui_decode.Repository_change_repository id), None -> id
-        | None, _ -> "Git workspace"
+        | None, _ -> ui_text state ~ko:"Git 워크스페이스" ~en:"Git workspace"
       in
       let title =
         here_row ~cols state ~path:[ git_changes_step state; scope_name ]
@@ -555,7 +580,9 @@ let render_repository_changes (state : state) =
             geometry.rcg_context_lines;
           if geometry.rcg_header then begin
             c.push_styled ~style:(Theme.recede ())
-              (Printf.sprintf "  %-18s %s" "State" "Path");
+              ("  "
+               ^ Message_layout.fit_width (ui_text state ~ko:"상태" ~en:"State") 18
+               ^ " " ^ ui_text state ~ko:"경로" ~en:"Path");
             c.push_divider ()
           end;
           (match state.repository_changes_error, geometry.rcg_error_rows with
@@ -569,9 +596,10 @@ let render_repository_changes (state : state) =
           if changes = [] then
             c.push_styled ~style:(Theme.recede ())
               (match state.repository_changes, state.repository_changes_error with
-               | None, None -> "  (loading Git changes)"
-               | Some _, None -> "  (working tree clean)"
-               | _, Some _ -> "  (Git changes unavailable)")
+               | None, None -> ui_text state ~ko:"  (Git 변경 조회 중)" ~en:"  (loading Git changes)"
+               | Some _, None -> ui_text state ~ko:"  (바뀐 파일 없음)" ~en:"  (working tree clean)"
+               | _, Some _ ->
+                   ui_text state ~ko:"  (Git 변경 조회 실패)" ~en:"  (Git changes unavailable)")
           else
             let max_scroll = max 0 (List.length changes - room) in
             let scroll = max 0 (min state.repository_changes_scroll max_scroll) in

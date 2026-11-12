@@ -429,6 +429,8 @@ val footer_hints_lanes_run_detail_for :
 (** The Lanes lane-notice footer. The pane is static, so it keeps only the
     way back plus the shared tail. *)
 
+val footer_hints_workspace_activity : lang:Masc_tui_types.ui_language -> string
+val footer_hints_workspace_activity_context : lang:Masc_tui_types.ui_language -> string
 val footer_hints_git_changes : lang:Masc_tui_types.ui_language -> string
 (** The shared Git changes list under Repositories, Code, and Chat. *)
 

@@ -429,7 +429,7 @@ let record_runtime person { provider_account_id; runtime_id; runtime = _ } =
      | Ok (_ : Authz_types.Grant_id.t) -> Ok Made
      | Error error ->
        Log.Server.warn "Runtime %s was not recorded: %s"
-         (Authz_types.Runtime_id.to_string runtime_id) (Authz_runtime.error_to_string error);
+         (Authz_types.Runtime_id.to_string runtime_id) (Authz_runtime.error_detail error);
        Error (`Service_unavailable, runtime_failure))
 
 (* The detail of a failure can name a path of the server, so it goes to the

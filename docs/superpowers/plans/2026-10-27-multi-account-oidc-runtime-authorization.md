@@ -736,7 +736,8 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 | S1a-1 | 서버 부팅이 7행(`Multi_account`)을 계정 서버로 넘긴다. 계정 서버는 구역을 열어 쥐고 자기 표만 서빙한다. 이 층의 표는 `GET /health` 하나다. 세부는 표 아래 S1a-1 범위다. | §5.1, §8.2 | S1a-0, D4 |
 | S1a-2 | 구역을 읽는 곳이 구역의 멈춤을 본다. 로그가 멈췄거나 저장소와 어긋난 구역에서는 세션·PAT 인증과 나머지 읽기가 거절한다. | §5.1, §8.2 | S1a-1 |
 | S1a-2b | 계정 서버가 연 구역을 한 번 더 읽고, 믿을 수 없으면 부팅을 멈춘다. 준비 상태를 probe로 답한다. 표는 검사를 거친 타입으로만 ingress에 간다. 세부는 표 아래 S1a-2b 범위다. | §5.1, §8.2 | S1a-2 |
-| S1a-2c | 운영 명령(`masc restart`·`stop`·`setup`)이 다계정 설치를 알아본다. 계정 서버는 base path lease의 주인으로 알아보고 멈춘다. 부팅 판정을 단일 사용자 정리보다 앞에 둔다. | §5.1 | S1a-2b |
+| S1a-2b-1 | 구역이 기록하지 못한 사유를 사람에게 답할 때 서버의 파일 경로를 싣지 않는다. 사유는 구역이 로그에 쓴다. 세부는 표 아래 S1a-2b-1 범위다. | §5.1, §8.2 | S1a-2b |
+| S1a-2c | 운영 명령(`masc restart`, `masc setup`, `masc setup-stop-previous-owner`)이 다계정 설치를 알아본다. 계정 서버는 base path lease의 주인으로 알아보고 멈춘다. 부팅 판정을 단일 사용자 정리보다 앞에 둔다. | §5.1 | S1a-2b-1 |
 | S1a-3 | C3의 로그인 경로와 사람의 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. login client는 서버 설정에서 읽는다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-2c, F3a-3 |
 | S1b | 사람에게 MCP·Board·WebSocket 경로를 연다. | §11.1 | S1a-3, C4-11, C4-12, C6 |
 
@@ -768,11 +769,11 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 타입으로 묶은 곳. 세션·PAT·Service credential 인증(`authenticate`), 브라우저 요청 검사(`Authz_browser_request.check`), gate(`Auth_gate.decide`), Keeper 턴 판정(`Authz_keeper_turn.decide`)이 `Authz_zone.trusted`를 받는다. `trusted`는 `read`만 만든다. 그래서 이 함수들에는 멈춘 구역의 상태를 넘길 수 없다.
 - 거절하는 곳과 답.
   - 로그인(`Authz_login.sign_in`)은 `Uncertain`으로 거절한다. 이미 묶인 사람의 로그인도, 초대나 allowlist로 들어오는 입장도 같은 답이다.
-  - 사람의 경로(who-am-I, 세션 읽기, 로그아웃, 구독 연결·검증, Runtime·Keeper, Keeper에게 묻기)는 503과 고정 문장 하나로 답한다(`Login_routes.zone_uncertain`). credential을 읽기 전에 답한다. 사유에는 서버의 파일 경로가 들어 있어서 로그에만 쓴다. 로그아웃의 503은 쿠키를 지우지 않는다. 파일을 다시 읽은 뒤에는 그 세션이 살아 있을 수 있다.
+  - 사람의 경로(who-am-I, 세션 읽기, 로그아웃, 구독 연결·검증, Runtime·Keeper, Keeper에게 묻기)는 503과 고정 문장 하나로 답한다(`Login_routes.zone_uncertain`). credential을 읽기 전에 답한다. 사유에는 서버의 파일 경로가 들어 있어서 로그에만 쓴다. 이 문장은 구역을 읽고 거절하는 답의 것이다. commit이 실패한 답은 S1a-2b-1이 같은 규칙으로 맞춘다. 로그아웃의 503은 쿠키를 지우지 않는다. 파일을 다시 읽은 뒤에는 그 세션이 살아 있을 수 있다.
   - CLI 시작(`Runtime_account_access`의 `Own_account`와 `Keeper_turn`)은 `Zone_uncertain`으로 거절한다. 요청 하나를 snapshot 하나에서 판정한다. 사람, 턴, 홈을 같은 상태에서 읽는다. 상태를 읽지 않는 거절(`No_operator`, `Not_a_keeper_id`)은 전과 같다.
 - Keeper 턴 판정은 snapshot 하나에서 끝난다. 상태와 회수 보류를 같은 snapshot에서 읽으므로 둘 사이에 레코드가 끼지 않고, 다시 판정하는 고리가 없다. 회수 보류는 `Authz_state.revocation`이 답한다.
-- 세션과 PAT 인증은 사람의 회수 보류도 본다(`Principal_revocation_pending`). 사람을 정지하는 레코드가 로그에 닿지 못하고 포기되면 그 사람은 상태에서 아직 활성이다. 로그인은 이 보류로 거절하고(`Blocked`), 그 사람의 세션과 PAT도 같은 보류로 거절한다.
-- `Authz_zone.snapshot`은 쓰는 쪽이 본다. 제품 코드에 남은 호출은 9곳이고, 모두 읽은 뒤 같은 함수에서 `commit`으로 간다. `commit`이 진입에서 다시 판정하므로 멈춘 구역에서는 거절이나 commit 실패로 끝난다.
+- 세션과 PAT 인증은 사람의 회수 보류도 본다(`Principal_revocation_pending`). 사람에게 보류를 거는 레코드는 셋이다. 정지, 삭제, Admin 지정 회수다(`Authz_state`의 `principal_event`와 `admin_assignment`). 셋 중 하나가 로그에 닿지 못하고 포기되면 그 사람은 상태에서 아직 활성이다. 로그인은 이 보류로 거절하고(`Blocked`), 그 사람의 세션과 PAT도 같은 보류로 거절한다. Admin 지정 회수는 기록되면 Admin 권한만 거둔다. 포기된 동안에는 그 사람의 로그인·세션·PAT이 모두 막힌다. 막는 쪽으로 넓다.
+- `Authz_zone.snapshot`은 쓰는 쪽이 본다. 제품 코드에 남은 호출은 9곳이다. 9곳 모두 읽은 값만으로 무언가를 허용하지 않는다. 읽은 값은 뒤따르는 `commit`이 다시 판정한다. 그 `commit`은 같은 함수에 있거나, 그 함수를 부른 쪽이나 그 함수가 부르는 쪽에 있다. `commit`이 진입에서 다시 판정하므로 멈춘 구역에서는 거절이나 commit 실패로 끝난다. 이 규칙을 지키는 것은 타입이 아니라 아래 확인 명령이다.
   - 입장 2곳(`Authz_login`의 `admission`과, commit 실패 뒤 로그가 움직였는지 보는 곳)
   - 세션 교체(`Login_routes.still_acting`)
   - id 다시 뽑기 4곳(`Authz_allowlist`, `Authz_browser_session`, `Authz_service_credential`, `Authz_pat`)
@@ -819,6 +820,26 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 운영 명령과 부팅 순서(S1a-2c).
   - 받기 고리와 포트 기록을 한 벌로 합치는 일. `Server_accounts`의 `serve`·`record_port`는 단일 사용자 부팅의 `run_serving`과 같은 줄이다. 단일 사용자 쪽은 HTTP 서빙을 다른 도메인으로 옮기는 작업이 고치는 중이라 지금 합치지 않는다. 연결 수 상한(#51096)을 넣을 때 한 함수로 합친다.
   - 설정만으로 아는 trust policy 거절(`MASC_HTTP_BASE_URL`의 형식)을 포트를 묶기 전에 보는 일.
+
+**S1a-2b-1 범위**
+
+- 고치는 것. commit이 실패한 요청의 답에 서버의 파일 경로가 실렸다. 다른 writer가 로그를 움직인 뒤 처음 쓰는 요청이 그 답을 받았다. 로그아웃(`Login_routes.logout`), allowlist 등록·삭제(`Login_allowlist_routes`), 구독 연결(`Server_setup_account_login`) 세 곳이다. 그 사유는 로그에도 남지 않았다. Keeper 만들기와 Runtime 기록 두 곳은 호출처가 따로 막고 있었다. 다섯 곳 중 둘만 막은 상태였다.
+- 문장은 구역이 정한다. `Authz_zone.error_to_string`은 사람에게 줄 수 있는 문장이다. 레코드가 거절된 경우(`Refused`, `Record_not_built`, `Log_holds_records`)는 사유를 말한다. 그 밖은 구역의 실패이고 고정 문장 하나다("The server could not finish recording this. Try again later."). 사람은 그 사유로 할 수 있는 일이 없고, 사유에는 서버 경로가 들어갈 수 있다. `Authz_zone.error_detail`은 경로가 든 전체 사유다. 운영자가 읽는다. 둘을 가르는 판정은 `error`의 생성자를 모두 적은 `match` 하나다(`cause`). 생성자가 늘면 컴파일러가 이 판정을 다시 묻는다.
+- `uncertain`도 같다. `uncertain_to_string`은 네 사유 가운데 무엇인지만 말한다. `uncertain_detail`이 경로와 파일 오류를 싣는다. `Runtime_account_access`의 `Zone_uncertain` 거절 문장은 `uncertain_to_string`을 쓴다. 그 문장을 쓰는 곳들도 경로를 싣지 않게 됐다.
+- 사유는 구역이 로그에 쓴다. `Authz_zone.commit`이 실패를 돌려주면 두 잠금을 나온 뒤 `error_detail`을 WARN 한 줄로 쓴다. 거절된 레코드는 쓰지 않는다. 예외가 그 호출을 빠져나가는 경우도 쓰지 않는다. 구역은 자기가 쓸 때 파일의 멈춤을 안다. 그래서 멈춘 사유가 그 commit의 줄에 남는다. 로그인 콜백처럼 사유를 버리는 호출처에서도 남는다.
+- 운영자가 읽는 곳은 전체 사유를 쓴다. `masc auth off`(`Authz_off`), `masc auth bootstrap`과 `invite`(`Authz_bootstrap`, `Authz_activation`), 계정 서버의 부팅 거절(`Server_accounts`의 `Zone_not_trusted`), 요청 거절의 로그 줄(`Login_routes.zone_uncertain_message`)이다. Keeper 만들기와 Runtime 기록의 로그 줄도 같다. 두 모듈의 문장은 서버 로그에서만 읽는다. 그래서 `Authz_keeper`와 `Authz_runtime`은 `error_to_string`을 두지 않고 `error_detail`만 낸다. 사람에게는 호출처가 자기 고정 문장을 답한다.
+- 사람 쪽 여섯 모듈은 고치지 않았다(`Authz_login`, `Authz_allowlist`, `Authz_browser_session`, `Authz_service_credential`, `Authz_provider_account`, `Authz_pat`). `Commit_failed`의 문장을 `Authz_zone.error_to_string`에서 받는다. 새로 생기는 호출처도 같은 문장을 받는다.
+- 시험.
+  - `test_authz_zone`: 거절된 레코드는 두 문장이 같고, 구역은 그 거절을 로그에 쓰지 않는다. 다른 손잡이가 로그를 움직인 뒤의 commit은 `Record_not_appended Diverged`다. `error_to_string`은 고정 문장이고 `error_detail`에 로그 경로가 있다. 그 commit 뒤에 구역이 쓴 WARN이 한 줄 있고 경로를 싣는다. `read`의 사유는 `uncertain_to_string`에 경로가 없고 `uncertain_detail`에 있다.
+  - `test_authz_zone`: `error`의 생성자 13개를 손으로 만든다. 실패 10개는 고정 문장이다. 그중 경로를 싣는 7개는 `error_detail`에 그 경로가 있다. 거절 둘(`Log_holds_records`, `Record_not_built`)은 두 문장이 같다. 남은 거절(`Refused`)은 위 사례가 실제 commit으로 본다.
+  - `test_server_login_http`: Admin이 로그인한 뒤 로그에 다른 writer의 바이트를 붙인다. 그 뒤 첫 요청인 로그아웃이 503과 고정 문장으로 답하고, 본문에 서버 경로가 없다. 새 설치에서 allowlist 등록도 같다. 구독 연결이 사람에게 주는 문장(`Authz_provider_account.error_to_string`)에 경로가 없다.
+  - 시험 fixture가 실패를 알릴 때는 `error_detail`을 출력한다(30곳). 고정 문장으로는 왜 실패했는지 알 수 없다.
+- S1a-2 리뷰에서 나온 나머지.
+  - 요청마다 남는 WARN(`zone_uncertain_message`)은 그대로다. 멈춘 사유는 이제 commit의 줄에 한 번 남는다. 어긋난 채 열린 구역에서 로그인만 시도한 거절은 미리보기에서 여전히 로그에 없다. 계정 서버는 그런 구역으로 뜨지 않는다(S1a-2b).
+  - 타입이 묶지 않는 자리와 시험이 없는 분기는 이슈 #51170에 적었다.
+- 하지 않는 것.
+  - 문장의 타입을 둘로 나눠 응답 본문이 `error_detail`을 못 받게 하는 일. 지금은 기본값이 안전한 쪽이고(`error_to_string`), 전체 사유는 이름을 골라 불러야 받는다.
+  - `Login_allowlist_routes.error_status`가 `cause`를 쓰게 하는 일. 상태 코드는 셋으로 갈린다. 거절은 사유별이고, 만들 수 없는 레코드는 500이고, 실패는 503이다. 둘로 가르는 `cause`를 쓰면 나머지를 한 갈래로 묶는 `match`가 생긴다. 지금은 생성자를 모두 적는다. 생성자가 늘면 컴파일러가 두 곳에서 묻는다.
 
 ### E. official client 격리
 

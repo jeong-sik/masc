@@ -29,7 +29,7 @@ let refusal_to_string = function
   | Zone_not_trusted uncertain ->
     "the authorization zone changed since the boot judged it, and cannot be trusted \
      (AuthorizationUncertain): "
-    ^ Authz_zone.uncertain_to_string uncertain
+    ^ Authz_zone.uncertain_detail uncertain
   | Zone_not_multi_account mode ->
     Printf.sprintf
       "the authorization log changed since the boot judged it Multi_account: its mode is now %s"

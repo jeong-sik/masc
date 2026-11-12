@@ -212,7 +212,13 @@ type uncertain =
       (** The store holds no answer for a bootstrapped log: it was emptied, or
           is not the store of this log. *)
 
+(** Which of the four it is, without the path of a file and without what a
+    file error said. A caller whose text reaches a person gives this. *)
 val uncertain_to_string : uncertain -> string
+
+(** The reason in full, with the paths of the files: for the operator of the
+    host, in a boot refusal, in the answer of a command, or in the log. *)
+val uncertain_detail : uncertain -> string
 
 (** A snapshot that {!read} took while the zone could be trusted. Only {!read}
     makes one, so a function that takes one cannot be handed the state of a
@@ -309,9 +315,22 @@ type error =
       (** The call stopped at the [Committed]. The record is in the log and in
           the snapshot. *)
 
+(** What a caller that answers a person gives. A record that was turned down
+    ({!Refused}, {!Record_not_built}, {!Log_holds_records}) says why, as
+    {!error_detail} does. Every other error is a failure of the zone. A person
+    cannot act on its reason, and the reason can name paths of the server, so
+    the text is one fixed sentence. *)
 val error_to_string : error -> string
 
-(** Appends one record, as the module text says. *)
+(** The reason in full, with the paths of the files: for the operator of the
+    host. *)
+val error_detail : error -> string
+
+(** Appends one record, as the module text says. A failure of the zone that
+    this call returns is written to the log of the server once, as a warning
+    with {!error_detail}, so the operator has the reason that
+    {!error_to_string} leaves out. A record that was turned down is not
+    written to the log, and neither is an exception that leaves this call. *)
 val commit : t -> draft -> (committed, error) result
 
 (** Appends the first record of a log with the steps of {!commit}, for

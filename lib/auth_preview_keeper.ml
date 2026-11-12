@@ -75,7 +75,7 @@ let failed (error_ : Authz_keeper.error) =
   match error_ with
   | Authz_keeper.Refused refusal -> refusal_answer refusal
   | Authz_keeper.Id_not_drawn _ | Authz_keeper.Body_not_built _ | Authz_keeper.Commit_failed _ ->
-    Log.Server.warn "A Keeper record was not written: %s" (Authz_keeper.error_to_string error_);
+    Log.Server.warn "A Keeper record was not written: %s" (Authz_keeper.error_detail error_);
     error R.Service_unavailable_503 not_recorded
 ;;
 

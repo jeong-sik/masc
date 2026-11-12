@@ -49,7 +49,7 @@ let invitation_error_to_string = function
   | Invite_id_not_built error -> "the invite id was refused: " ^ Authz_id.error_to_string error
   | Body_not_built error -> "the invitation was refused: " ^ Authz_body.error_to_string error
   | Zone_not_opened error -> "the zone was not opened: " ^ Z.open_error_to_string error
-  | Commit_failed error -> Z.error_to_string error
+  | Commit_failed error -> Z.error_detail error
 ;;
 
 (* Design 10.5: after Off, a boot starts a single user that keeps the records of

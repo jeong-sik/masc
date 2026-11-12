@@ -99,7 +99,7 @@ let with_installation f =
                }
            with
            | Ok (_ : Z.committed) -> ()
-           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
           let admin =
             match
               Login.sign_in
@@ -144,7 +144,7 @@ let member t =
        }
    with
    | Ok (_ : Z.committed) -> ()
-   | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+   | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
   match
     Login.sign_in
       t.zone
@@ -242,7 +242,7 @@ let a_pat_acts_until_it_ends () =
          }
      with
      | Ok (_ : Z.committed) -> ()
-     | Error error -> Alcotest.failf "disable refused: %s" (Z.error_to_string error));
+     | Error error -> Alcotest.failf "disable refused: %s" (Z.error_detail error));
     Alcotest.(check string)
       "a disabled principal"
       (P.refusal_to_string (P.Principal_inactive member_id))

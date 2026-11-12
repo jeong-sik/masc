@@ -13,11 +13,11 @@ type error =
 
 let author_of user_id = Author.Authenticated (Principal.Human user_id)
 
-let error_to_string = function
+let error_detail = function
   | Id_not_drawn error -> "a drawn policy id was refused: " ^ Authz_id.error_to_string error
   | Body_not_built error -> "the Keeper body was not built: " ^ Authz_body.error_to_string error
   | Refused refusal -> Authz_keeper_state.refusal_to_string refusal
-  | Commit_failed error -> Authz_zone.error_to_string error
+  | Commit_failed error -> Authz_zone.error_detail error
 ;;
 
 (* What {!Authz_state} does with the record, on the state of the zone now, so

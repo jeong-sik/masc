@@ -413,7 +413,7 @@ let commit zone { at_ms; draft } =
 let commit_ok zone timed =
   match commit zone timed with
   | Ok committed -> committed
-  | Error error -> Alcotest.failf "commit refused: %s" (Z.error_to_string error)
+  | Error error -> Alcotest.failf "commit refused: %s" (Z.error_detail error)
 ;;
 
 let check_error label expected zone timed =
@@ -541,7 +541,7 @@ let commits_from_fibers_take_turns () =
       List.map
         (function
           | Ok committed -> committed
-          | Error error -> Alcotest.failf "a commit was refused: %s" (Z.error_to_string error))
+          | Error error -> Alcotest.failf "a commit was refused: %s" (Z.error_detail error))
         results
     in
     Alcotest.(check int) "every commit went in" (List.length events) (List.length committed);
@@ -689,6 +689,133 @@ let a_store_that_cannot_be_checked_is_not_opened () =
 ;;
 
 (* ---- failures ---- *)
+
+(* The seq of the newest line of the log ring. The first line of a ring has
+   seq 0, and [Log.Ring.recent ~since_seq] gives the lines after a seq, so an
+   empty ring answers the seq before the first one. *)
+let latest_ring_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+;;
+
+(* The lines that the zone wrote about a commit that failed, after [since_seq]. *)
+let failed_commit_lines ~since_seq =
+  List.filter
+    (fun (entry : Log.Ring.entry) ->
+      String_util.contains_substring entry.message "was not committed to the authorization zone")
+    (Log.Ring.recent ~limit:50 ~module_filter:"Auth" ~since_seq ())
+;;
+
+(* What a person is told of every failure of the zone. *)
+let not_recorded = "The server could not finish recording this. Try again later."
+
+(* The reason of a failure names paths of the server. The text a caller gives
+   to a person has none, the detail has them, and the zone writes the detail
+   to the log when the commit fails. A record that was turned down says why
+   in both texts. *)
+let a_failure_is_told_without_the_paths_of_the_server () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let zone = open_zone dirs in
+    let root = Filename.dirname dirs.base in
+    let names_a_path text = String_util.contains_substring text root in
+    let before_the_refusal = latest_ring_seq () in
+    (match commit zone (mode_draft M.Fresh_bootstrap) with
+     | Ok (_ : Z.committed) -> Alcotest.fail "a second bootstrap was committed"
+     | Error error ->
+       Alcotest.(check string) "a record that was turned down" "Refused Mode" (error_name error);
+       Alcotest.(check string)
+         "it says why in both texts"
+         (Z.error_detail error)
+         (Z.error_to_string error));
+    Alcotest.(check int)
+      "a record that was turned down is not written to the log"
+      0
+      (List.length (failed_commit_lines ~since_seq:before_the_refusal));
+    let other = open_files dirs in
+    let head = other.replay.Z.Replay.head in
+    append_log_outside other [ record_at ~head (mode_draft ~at_ms:(at_ms + 1) M.Off) ];
+    let before_the_failure = latest_ring_seq () in
+    (match commit zone (mode_draft ~at_ms:(at_ms + 2) M.Off) with
+     | Ok (_ : Z.committed) -> Alcotest.fail "the commit wrote over a log that moved"
+     | Error error ->
+       Alcotest.(check string) "a failure" "Record_not_appended Diverged" (error_name error);
+       Alcotest.(check string) "what a person is told" not_recorded (Z.error_to_string error);
+       Alcotest.(check bool) "the detail names the log" true (names_a_path (Z.error_detail error)));
+    (match failed_commit_lines ~since_seq:before_the_failure with
+     | [ line ] ->
+       Alcotest.(check bool) "the line of the zone names the log" true (names_a_path line.message)
+     | lines ->
+       Alcotest.failf "the zone wrote %d lines about the failed commit" (List.length lines));
+    match Z.read zone with
+    | Ok (_ : Z.trusted) -> Alcotest.fail "a decision rests on a log that stopped"
+    | Error uncertain ->
+      Alcotest.(check string)
+        "why no decision rests on the zone"
+        "the authorization log is stopped"
+        (Z.uncertain_to_string uncertain);
+      Alcotest.(check bool)
+        "the detail names the log"
+        true
+        (names_a_path (Z.uncertain_detail uncertain)))
+;;
+
+(* Every error of the zone, built by hand, the failures around a path where
+   they carry one. A failure tells a person the one sentence, and its detail
+   has the path. A record that was turned down says the same in both texts.
+   [Authz_zone] names every constructor where it tells the two apart, so the
+   compiler asks about a new one there; this is where its texts are read. *)
+let the_texts_of_each_error () =
+  let path = "/srv/masc-under-test/.masc/auth/authz.jsonl" in
+  let names_the_path text = String_util.contains_substring text path in
+  let hash = R.head_hash R.genesis in
+  let log_stop = { L.path; reason = "the file was replaced" } in
+  let store_stop = { S.path; reason = "the file was replaced" } in
+  let failures_around_a_path =
+    [ Z.Store_stopped store_stop
+    ; Z.Log_stopped log_stop
+    ; Z.Abort_not_confirmed (L.End_moved { path })
+    ; Z.Settlement_not_written (S.Write_failed { path; detail = "No space left on device" })
+    ; Z.Intent_not_written (S.Write_locked { path })
+    ; Z.Record_not_appended (L.Diverged { path })
+    ; Z.Answer_not_written { record_hash = hash; error = S.Stopped store_stop }
+    ]
+  in
+  let failures_without_a_path =
+    [ Z.Uncertain { first = H.Commit_not_in_log hash; rest = [] }
+    ; Z.Store_holds_no_answer
+    ; Z.Store_entry_refused
+        { entry = S.Committed { record_hash = hash }; violation = S.Committed_without_intent }
+    ]
+  in
+  let turned_down =
+    [ Z.Log_holds_records { next_seq = 1 }
+    ; Z.Record_not_built (R.Author_not_admitted { kind = R.Kind.Mode_event; author = user })
+    ]
+  in
+  List.iter
+    (fun error ->
+      Alcotest.(check string)
+        (error_name error ^ ": what a person is told")
+        not_recorded
+        (Z.error_to_string error))
+    (failures_around_a_path @ failures_without_a_path);
+  List.iter
+    (fun error ->
+      Alcotest.(check bool)
+        (error_name error ^ ": the detail names the path")
+        true
+        (names_the_path (Z.error_detail error)))
+    failures_around_a_path;
+  List.iter
+    (fun error ->
+      Alcotest.(check string)
+        (error_name error ^ ": both texts say why")
+        (Z.error_detail error)
+        (Z.error_to_string error))
+    turned_down
+;;
 
 let a_locked_store_writes_nothing_and_stops_nothing () =
   with_dirs (fun dirs ->
@@ -1779,7 +1906,7 @@ let install opened { at_ms; draft } =
 let install_ok opened timed =
   match install opened timed with
   | Ok installed -> installed
-  | Error error -> Alcotest.failf "install refused: %s" (Z.error_to_string error)
+  | Error error -> Alcotest.failf "install refused: %s" (Z.error_detail error)
 ;;
 
 let check_install_error label expected opened timed =
@@ -2043,6 +2170,11 @@ let () =
         ] )
     ; ( "failures"
       , [ Alcotest.test_case
+            "a failure is told without the paths of the server"
+            `Quick
+            a_failure_is_told_without_the_paths_of_the_server
+        ; Alcotest.test_case "the texts of each error" `Quick the_texts_of_each_error
+        ; Alcotest.test_case
             "a locked store writes nothing and stops nothing"
             `Quick
             a_locked_store_writes_nothing_and_stops_nothing

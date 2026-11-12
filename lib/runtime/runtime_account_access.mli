@@ -191,8 +191,8 @@ type refusal =
   | Zone_uncertain of Authz_zone.uncertain
       (** A file of the authorization zone is stopped, or the files disagree
           ({!Authz_zone.read}): nothing is decided on its state, so no client
-          starts for a person or for a turn. The text of the reason names a
-          path of the server. *)
+          starts for a person or for a turn. The text says which file it is
+          and names no path ({!Authz_zone.uncertain_to_string}). *)
   | Not_a_keeper_id of string  (** The name of the Keeper is not an id of the log. *)
   | Turn_refused of Authz_keeper_turn.refusal
   | Not_the_assigned_runtime of

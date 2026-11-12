@@ -151,6 +151,7 @@ function waitingInventory(): Record<string, unknown> {
       detail: { operation_id: operation.operationId },
     })),
   ]
+  const state = running ? 'busy' : queued.length > 0 ? 'waiting' : 'idle'
   return {
     schema: 'masc.dashboard.keeper_waiting_inventory.v3',
     source: 'server_keeper_waiting_inventory',
@@ -162,7 +163,8 @@ function waitingInventory(): Record<string, unknown> {
     row_count: waitingOn.length,
     keepers: [{
       keeper_name: KEEPER,
-      state: running ? 'busy' : queued.length > 0 ? 'waiting' : 'idle',
+      state,
+      state_sources: state === 'waiting' ? ['chat_operation_queued'] : [],
       waiting_count: waitingOn.length,
       waiting_on: waitingOn,
     }],

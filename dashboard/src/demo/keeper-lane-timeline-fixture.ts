@@ -24,6 +24,7 @@ const inventory: DashboardKeeperWaitingInventory = {
     {
       keeper_name: 'sangsu',
       state: 'waiting',
+      state_sources: ['event_queue_pending', 'schedule_waiting'],
       waiting_count: 3,
       sources: { event_queue_pending: 2, schedule_waiting: 1 },
       waiting_on: [

@@ -803,7 +803,7 @@ describe('KeeperConversationPanel', () => {
     mockedToolsData.value = {
       keeper_waiting_inventory: {
         keepers: [
-          { keeper_name: 'sangsu', state: 'busy', waiting_on: [], waiting_count: 0 },
+          { keeper_name: 'sangsu', state: 'busy', state_sources: [], waiting_on: [], waiting_count: 0 },
         ],
       },
     }
@@ -1057,7 +1057,7 @@ describe('KeeperConversationPanel', () => {
     mockedToolsData.value = {
       keeper_waiting_inventory: {
         keepers: [
-          { keeper_name: 'sangsu', state: 'busy', waiting_on: [], waiting_count: 0 },
+          { keeper_name: 'sangsu', state: 'busy', state_sources: [], waiting_on: [], waiting_count: 0 },
         ],
       },
     }

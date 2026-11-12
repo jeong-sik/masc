@@ -44,6 +44,7 @@ function eventInventory(row: DashboardKeeperWaitingRow = eventRow()): DashboardK
     keepers: [{
       keeper_name: 'sangsu',
       state: 'waiting',
+      state_sources: [row.source, 'chat_operation_queued'],
       waiting_count: 2,
       waiting_on: [
         row,
@@ -92,7 +93,8 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
     keepers: [
       {
         keeper_name: 'sangsu',
-        state: 'deferred',
+        state: 'waiting',
+        state_sources: ['chat_operation_queued', 'chat_operation_running'],
         waiting_count: 2,
         waiting_on: [
           {
@@ -118,6 +120,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
       {
         keeper_name: 'idle-one',
         state: 'idle',
+        state_sources: [],
         waiting_count: 0,
         waiting_on: [],
       },
@@ -156,9 +159,9 @@ describe('KeeperLaneStrip', () => {
     `)
     const text = el.textContent ?? ''
     expect(text).toContain('작업 대기열')
-    expect(text).toContain('외부 응답 대기')
-    // The operator sentence is the default reading; the wire vocabulary stays
-    // behind the 기술 상세 toggle.
+    expect(text).toContain('WAITING · chat_operation_queued +1')
+    // The Korean operator sentence stays the reading of each row. The state
+    // and its sources are the server words even with the 기술 상세 toggle off.
     expect(text).toContain('운영자 채팅 1건 대기')
     expect(text).toContain('운영자와 진행 중인 대화')
     expect(text).not.toContain('owner_fifo')
@@ -309,7 +312,7 @@ describe('KeeperLaneStrip', () => {
       'keeper:true',
     ])
     const queueStage = el.querySelector('[data-stage="queue"]')!
-    expect(queueStage.textContent).toContain('채팅 대기')
+    expect(queueStage.textContent).toContain('chat_operation_queued')
     expect(queueStage.textContent).toContain('1')
     expect(queueStage.textContent).not.toContain('keeper_event_queue')
     fireEvent.click(el.querySelector('[data-testid="keeper-lane-dev-toggle"]')!)

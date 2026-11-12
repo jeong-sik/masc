@@ -76,6 +76,7 @@ function inventoryFrom(firstSerial: number, count: number): DashboardKeeperWaiti
     return {
       keeper_name: name,
       state: 'waiting' as const,
+      state_sources: ['event_queue_pending'],
       waiting_count: waiting_on.length,
       sources: { event_queue_pending: waiting_on.length },
       waiting_on,

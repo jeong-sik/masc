@@ -119,6 +119,7 @@ function waitingInventoryFixture(
       ({
         keeper_name: keeperName,
         state: 'waiting',
+        state_sources: ['event_queue_pending'],
         waiting_count: 1,
         waiting_on: [
           {
@@ -480,11 +481,9 @@ describe('Tools', () => {
     expect(container.textContent).toContain('operator (human operator)')
     expect(container.textContent).toContain('Keeper Waiting Inventory')
     expect(container.textContent).toContain('sangsu')
-    // #30068 moved this panel onto the shared lane row, where a waiting
-    // source renders through LANE_SOURCE_LABELS instead of the raw enum.
-    // The row still names which queue the keeper is waiting on; only the
-    // wording changed.
-    expect(container.textContent).toContain('자율 이벤트')
+    // The shared lane row shows a waiting source as the server word, the
+    // raw enum, and does not rewrite it into a humanized label.
+    expect(container.textContent).toContain('event_queue_pending')
     expect(container.textContent).not.toContain('event queue pending')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
     expect(container.querySelector('.v2-lab-card')).not.toBeNull()

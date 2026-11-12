@@ -16,6 +16,26 @@ export function enumLabel(value: string | null | undefined): string {
   return value.replace(/_/g, ' ')
 }
 
+/** A Keeper waiting state as the server words it, in capitals: IDLE, BUSY,
+ *  WAITING, DEFERRED. Every surface shows this one word for the state. */
+export function waitingStateLabel(state: string | null | undefined): string {
+  if (!state) return '-'
+  return state.toUpperCase()
+}
+
+/** The state with what put the Keeper in it, as the server listed it:
+ *  `DEFERRED · fusion_running`, `WAITING · hitl_pending +2`. The sources are
+ *  the server's `state_sources`; nothing here picks them out of the rows. */
+export function waitingStateWithSources(
+  state: string | null | undefined,
+  stateSources: readonly string[],
+): string {
+  const label = waitingStateLabel(state)
+  const [first, ...rest] = stateSources
+  if (first === undefined) return label
+  return rest.length === 0 ? `${label} · ${first}` : `${label} · ${first} +${rest.length}`
+}
+
 export function stateTone(state: string | null | undefined): StatusChipTone {
   switch (state) {
     case 'waiting':
@@ -94,7 +114,7 @@ function KeeperRow({ keeper, dev }: { keeper: DashboardKeeperWaitingKeeper; dev:
       <div class="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
         <div class="flex min-w-0 items-center gap-2">
           <span class="min-w-0 truncate font-mono text-sm text-[var(--color-fg-primary)]">${keeper.keeper_name}</span>
-          <${StatusChip} tone=${stateTone(keeper.state)} uppercase=${false}>${enumLabel(keeper.state)}<//>
+          <${StatusChip} tone=${stateTone(keeper.state)} uppercase=${false}>${waitingStateWithSources(keeper.state, keeper.state_sources)}<//>
         </div>
         <span class="text-2xs text-[var(--color-fg-muted)]">${waitingCount} rows</span>
       </div>
@@ -172,7 +192,7 @@ function laneSummary(keeper: DashboardKeeperWaitingKeeper): string {
   const dueAt = timeLabel(keeper.due_at_iso)
   const since = timeLabel(keeper.since_iso)
   return [
-    `state ${enumLabel(keeper.state)}`,
+    `state ${waitingStateWithSources(keeper.state, keeper.state_sources)}`,
     `waiting ${keeper.waiting_count.toLocaleString()}`,
     `since ${since}`,
     `due ${dueAt}`,
@@ -193,7 +213,7 @@ function LaneEvidenceCard({ keeper, dev }: { keeper: DashboardKeeperWaitingKeepe
         <div class="min-w-0">
           <div class="flex min-w-0 flex-wrap items-center gap-2">
             <span class="min-w-0 truncate font-mono text-sm font-semibold text-[var(--color-fg-primary)]">${keeper.keeper_name}</span>
-            <${StatusChip} tone=${stateTone(keeper.state)} uppercase=${false}>${enumLabel(keeper.state)}<//>
+            <${StatusChip} tone=${stateTone(keeper.state)} uppercase=${false}>${waitingStateWithSources(keeper.state, keeper.state_sources)}<//>
           </div>
           <div class="mt-1 text-2xs text-[var(--color-fg-muted)]" title=${laneSummary(keeper)}>
             <span class="font-mono">since ${timeLabel(keeper.since_iso)}</span>

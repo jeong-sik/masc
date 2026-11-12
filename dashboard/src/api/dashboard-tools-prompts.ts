@@ -448,6 +448,10 @@ export interface DashboardKeeperWaitingRow {
 export interface DashboardKeeperWaitingKeeper {
   keeper_name: string
   state: DashboardKeeperWaitingState
+  /** The sources that put the Keeper in `state`, as the server listed them:
+   *  the deferring ones for `deferred`, all of them for `waiting`, none for
+   *  `idle` and `busy`. */
+  state_sources: string[]
   waiting_on: DashboardKeeperWaitingRow[]
   waiting_count: number
   sources?: Record<string, number>
@@ -512,10 +516,18 @@ export function normalizeKeeperWaitingInventory(
 ): DashboardKeeperWaitingInventory {
   return {
     ...inventory,
-    keepers: inventory.keepers.map(keeper => ({
-      ...keeper,
-      waiting_on: keeper.waiting_on.map(normalizeKeeperWaitingRow),
-    })),
+    keepers: inventory.keepers.map(keeper => {
+      const stateSources: unknown = keeper.state_sources
+      if (!Array.isArray(stateSources) || !stateSources.every(source => typeof source === 'string')) {
+        throw new Error(
+          `Keeper waiting inventory row for ${JSON.stringify(keeper.keeper_name)} has no state_sources list`,
+        )
+      }
+      return {
+        ...keeper,
+        waiting_on: keeper.waiting_on.map(normalizeKeeperWaitingRow),
+      }
+    }),
     ...(inventory.global_waiting_on
       ? { global_waiting_on: inventory.global_waiting_on.map(normalizeKeeperWaitingRow) }
       : {}),

@@ -145,6 +145,7 @@ function sampleWaitingInventory(): DashboardKeeperWaitingInventory {
       {
         keeper_name: 'sangsu',
         state: 'waiting',
+        state_sources: ['schedule_waiting'],
         waiting_count: 1,
         sources: { schedule_waiting: 1 },
         waiting_on: [

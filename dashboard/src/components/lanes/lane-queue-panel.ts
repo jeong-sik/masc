@@ -71,7 +71,6 @@ import {
   laneSecText,
   laneStageBreakdown,
   laneStatePresent,
-  laneSourceLabel,
   laneSourceTone,
   laneUntilText,
   laneValueLabel,
@@ -335,7 +334,7 @@ function WaitAges({
               onClick=${() => setOpen(on ? null : index)}
               style=${{ width: `${width}%` }}
             >
-              <span class="wa-src">${laneSourceLabel(row.source)}</span>
+              <span class="wa-src">${row.source}</span>
               <span class="wa-on ${dev ? 'mono' : ''}" title=${row.waiting_on}>${reading}</span>
               <span class="wa-age mono">${laneAgoText(age)}</span>
             </button>
@@ -520,7 +519,7 @@ export function KeeperWaitQueueRail({ keeperName, dev = false }: { keeperName: s
   useEffect(() => subscribeKeeperWaitingInventory(keeperName), [keeperName])
   const current = keeperWaitingInventoryStates.value[keeperName]
   const entry = inventoryEntryFor(current?.inventory, keeperName)
-  const present = entry ? laneStatePresent(entry.state) : null
+  const present = entry ? laneStatePresent(entry.state, entry.state_sources) : null
   const waitingCount = entry?.waiting_count ?? 0
   return html`
     <div class="ctx-sec" data-testid="keeper-wait-queue-rail">
@@ -726,7 +725,7 @@ export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
             <h4>${sel ?? '—'} · 무엇을 기다리는가</h4>
             ${selEntry
               ? html`
-                  <span class="lq-chip" data-tone=${laneStatePresent(selEntry.state).tone}>${laneStatePresent(selEntry.state).label}</span>
+                  <span class="lq-chip" data-tone=${laneStatePresent(selEntry.state, selEntry.state_sources).tone}>${laneStatePresent(selEntry.state, selEntry.state_sources).label}</span>
                   <span class="mono">${selEntry.waiting_count}건</span>
                 `
               : null}

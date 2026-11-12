@@ -1626,6 +1626,7 @@ describe('fetchDashboardTools', () => {
       keepers: [{
         keeper_name: 'exampleorg',
         state: 'waiting',
+        state_sources: ['event_queue_pending'],
         waiting_count: 1,
         waiting_on: [{
           keeper_name: 'exampleorg',
@@ -1651,6 +1652,31 @@ describe('fetchDashboardTools', () => {
       'x-masc-sse-instance-id': 'process.epoch',
     }))
     expect(result.keepers[0]?.waiting_on[0]?.source).toBe('event_queue_pending')
+  })
+
+  it.each([
+    ['missing', undefined],
+    ['not a list', 'event_queue_pending'],
+    ['a list with a non-string source', ['event_queue_pending', 7]],
+  ])('refuses a keeper row whose state_sources is %s and names the keeper', async (_label, stateSources) => {
+    const rawResponse = {
+      keepers: [{
+        keeper_name: 'exampleorg',
+        state: 'waiting',
+        ...(stateSources === undefined ? {} : { state_sources: stateSources }),
+        waiting_count: 0,
+        waiting_on: [],
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', 'x-masc-sse-instance-id': 'process.epoch' },
+      }),
+    ))
+    await expect(fetchKeeperWaitingInventory('exampleorg', 'process.epoch')).rejects.toThrow(
+      'Keeper waiting inventory row for "exampleorg" has no state_sources list',
+    )
   })
 
   it.each([null, 'another.epoch'])(

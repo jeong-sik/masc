@@ -1,4 +1,5 @@
 module Wire = Masc.Tui_decode_workspace_memory
+module Owed = Masc_tui_owed_read
 
 type inventory = Wire.inventory
 
@@ -15,52 +16,52 @@ type failure =
   | Suspended
   | Request_failed of string
 
-(* [not_before] is the monotonic time before which no read starts. An answer,
-   good or failed, sets it, so a down server is asked as rarely as a healthy
-   one. A read that was retired without an answer sets nothing, which is why
-   reading again once the workspace is confirmed does not wait. *)
 type t =
   { fetched : (unit, inventory, failure) Masc_tui_fetched.source
-  ; not_before : float option
+  ; owed : Owed.t
   }
 
-let initial = { fetched = Masc_tui_fetched.initial; not_before = None }
+let initial = { fetched = Masc_tui_fetched.initial; owed = Owed.changed Owed.settled }
+
+let changed t = { t with owed = Owed.changed t.owed }
 
 (* [refresh] and not [start]: over a failure only [refresh] keeps the failure in
    view while the retry runs, so a server that stays down does not flip the
    line between "read failed" and "not read" every interval. It supersedes a
    read in flight, which is why that case is turned away first. *)
 let start ~now t =
-  let waiting =
-    match t.not_before with
-    | Some not_before -> now < not_before
-    | None -> false
-  in
-  if waiting || Masc_tui_fetched.in_flight t.fetched
+  if not (Owed.due ~now t.owed) || Masc_tui_fetched.in_flight t.fetched
   then None
   else (
     match Masc_tui_fetched.refresh ~equal:Unit.equal t.fetched ~key:() with
     | Masc_tui_fetched.Already_loading -> None
-    | Masc_tui_fetched.Started (fetched, request) -> Some ({ t with fetched }, request))
+    | Masc_tui_fetched.Started (fetched, request) ->
+        Some ({ fetched; owed = Owed.started t.owed }, request))
 
-let complete ~next_read_at t request result =
+let complete ~retry_s ~max_retry_s ~now t request result =
   if Masc_tui_fetched.is_current ~equal:Unit.equal t.fetched request
   then
     { fetched =
         Masc_tui_fetched.complete ~equal:Unit.equal t.fetched request
           (Result.map_error (fun text -> Request_failed text) result)
-    ; not_before = Some next_read_at
+    ; owed = (match result with
+        | Ok _ -> Owed.succeeded t.owed
+        | Error _ -> Owed.failed ~retry_s ~max_retry_s ~now t.owed)
     }
   else t
 
 (* A retry over a failure keeps that failure's cause when it is retired: the
    retry never answered, so it has nothing to add. A refresh over an inventory
    takes [Suspended] as the cause of its stale mark. *)
-let suspend t = { t with fetched = Masc_tui_fetched.suspend_with ~reason:Suspended t.fetched }
+let suspend t =
+  { fetched = Masc_tui_fetched.suspend_with ~reason:Suspended t.fetched
+  ; owed = Owed.changed (Owed.abandoned t.owed)
+  }
 
 (* [Masc_tui_fetched.clear] keeps the generation counter, so a reply to a read
    made before this cannot pass for the next one. *)
-let clear t = { fetched = Masc_tui_fetched.clear t.fetched; not_before = None }
+let clear t =
+  { fetched = Masc_tui_fetched.clear t.fetched; owed = Owed.changed Owed.settled }
 
 type reading =
   | Not_read

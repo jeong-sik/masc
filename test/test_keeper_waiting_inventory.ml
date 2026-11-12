@@ -771,7 +771,11 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
   (match find_keeper json keeper_name with
    | None -> fail "keeper row missing"
    | Some keeper ->
-     check string "keeper state" "waiting" (json_string_member "state" keeper);
+     (* The reservation's time has not come: the row is listed and the
+        Keeper waits for nothing. *)
+     check string "keeper state" "idle" (json_string_member "state" keeper);
+     check (list string) "no source holds the Keeper's state"
+       [] (json_string_list_member "state_sources" keeper);
      check int "keeper waiting count" 1 (json_int_member "waiting_count" keeper);
      check int "keeper schedule source" 1
        U.(keeper |> member "sources" |> member "schedule_waiting" |> to_int);

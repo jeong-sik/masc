@@ -6,14 +6,17 @@ export function createReadRecovery() {
   let phase: 'settled' | 'reading' | 'waiting' | 'failed' | 'refused' = 'settled'
   let active = true
   let revision = 0
+  let readsStarted = 0
   let delayStep = 0
   let timer: ReturnType<typeof setTimeout> | null = null
   let retry: (() => void) | null = null
   const clear = () => { if (timer !== null) clearTimeout(timer); timer = null }
   return {
     get revision() { return revision },
-    get isReading() { return phase === 'reading' },
-    started() { active = true; clear(); phase = 'reading' },
+    /** Reads begun so far. A request that captured this when it was sent can
+     * tell whether a newer read began while it was in flight. */
+    get readsStarted() { return readsStarted },
+    started() { readsStarted += 1; active = true; clear(); phase = 'reading' },
     waiting(read: () => void) { clear(); phase = 'waiting'; delayStep = 0; retry = read },
     succeeded() { revision += 1; clear(); phase = 'settled'; delayStep = 0; retry = null },
     failed(read: () => void, retryable = true) {

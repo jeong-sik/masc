@@ -415,7 +415,10 @@ val with_owned_directory_inventory_if_present
     ancestors are errors. The complete scope is blocking; callers supply their
     original process lease and run it on one system thread. *)
 
-(** Eio-native, deterministically sorted directory inventory. *)
+(** The names in a directory, sorted, without [.] and [..]. On an Eio fiber
+    the directory is read on the system thread {!Systhread_host.run} picks,
+    elsewhere on the calling thread. A directory that cannot be read raises
+    [Sys_error]. *)
 val read_dir : string -> string list
 
 type cleanup_directory = Fs_compat_internal.Owned_tree_cleanup.directory =

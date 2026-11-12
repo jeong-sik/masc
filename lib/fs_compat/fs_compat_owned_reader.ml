@@ -289,13 +289,15 @@ let sha256_owned_regular_file ~ownership_root path =
       result)
 ;;
 
+(* Not [Eio.Path.read_dir]. eio_posix makes its result with [Array.of_list]
+   over the names it read, and the first name is a young string. For more
+   than 256 names (Max_young_wosize) the runtime then empties every domain's
+   minor heap before it allocates the array ([caml_uniform_array_make] in
+   runtime/array.c): one stop-the-world minor collection per listing, however
+   large the minor heap is. [Sys.readdir] allocates its array in C and forces
+   none. *)
 let read_dir (path : string) : string list =
-  with_fs_or_fallback
-    ~path
-    ~fallback:(fun () ->
-      Stdlib.Sys.readdir path
-      |> Array.to_list
-      |> List.sort String.compare)
-    (fun fs ->
-       Eio.Path.read_dir Eio.Path.(fs / path) |> List.sort String.compare)
+  let read () = Stdlib.Sys.readdir path |> Array.to_list |> List.sort String.compare in
+  with_fs_or_fallback ~path ~fallback:read (fun _fs ->
+    on_systhread ~label:(labelled "fs-compat-read-dir" path) read)
 ;;

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/harness/lib/dashboard_dev_server.sh
+source "${ROOT_DIR}/scripts/harness/lib/dashboard_dev_server.sh"
 DASHBOARD_DIR="${ROOT_DIR}/dashboard"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-5187}"
@@ -25,34 +27,12 @@ HYDRATION_TOOL_SELECTOR='[data-tool-output-failure-scenario="hydration-failed"] 
 COVERAGE_TRACE_SELECTOR="[data-tool-output-failure-scenario=\"coverage-gap\"] [data-chat-work-trace][data-chat-turn-order-signature=\"${COVERAGE_SIGNATURE}\"][data-chat-tool-output-hydration-source=\"tool_calls_endpoint\"][data-chat-tool-output-hydration-status=\"hydrated\"][data-chat-tool-output-covered-through=\"1783264270000\"]"
 COVERAGE_TOOL_SELECTOR='[data-tool-output-failure-scenario="coverage-gap"] [data-chat-trace-step="tool"][data-chat-turn-order-index="0"][data-chat-turn-order-kind="tool"][data-chat-trace-tool-call-id="tc-coverage-gap"][data-chat-trace-entry-id="tool-tc-coverage-gap"][data-chat-trace-link-state="joined"][data-chat-trace-output-state="coverage-gap"][data-chat-trace-output-coverage="coverage-gap"]'
 
-server_pid=""
-cleanup() {
-  if [[ -n "${server_pid}" ]] && kill -0 "${server_pid}" 2>/dev/null; then
-    kill "${server_pid}" 2>/dev/null || true
-    wait "${server_pid}" 2>/dev/null || true
-  fi
-}
-trap cleanup EXIT
+trap harness_dashboard_dev_server_stop_on_exit EXIT
 
 pnpm --dir "${DASHBOARD_DIR}" exec playwright --version >/dev/null
 
 MASC_DASHBOARD_PROXY_TARGET="${PROXY_TARGET}" \
-  pnpm --dir "${DASHBOARD_DIR}" exec vite --host "${HOST}" --port "${PORT}" --strictPort \
-  >"${SERVER_LOG}" 2>&1 &
-server_pid="$!"
-
-for _ in {1..80}; do
-  if curl -fsS "${FIXTURE_URL}" >/dev/null 2>&1; then
-    break
-  fi
-  if ! kill -0 "${server_pid}" 2>/dev/null; then
-    cat "${SERVER_LOG}" >&2
-    exit 1
-  fi
-  sleep 0.25
-done
-
-curl -fsS "${FIXTURE_URL}" >/dev/null
+  harness_dashboard_dev_server_start "${DASHBOARD_DIR}" "${HOST}" "${PORT}" "${FIXTURE_URL}" "${SERVER_LOG}"
 
 pnpm --dir "${DASHBOARD_DIR}" exec playwright screenshot \
   --browser chromium \

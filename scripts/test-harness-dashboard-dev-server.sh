@@ -1,0 +1,458 @@
+#!/usr/bin/env bash
+# What a dashboard harness leaves behind when it ends: no process and a free
+# port. And whose server it tests: the one it started. A fake
+# `node_modules/.bin/vite` stands in for Vite here. Like the launcher a package
+# manager writes, it replaces itself with the server.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/harness/lib/dashboard_dev_server.sh
+source "${SCRIPT_DIR}/harness/lib/dashboard_dev_server.sh"
+
+fixture="$(mktemp -d)"
+pids="${fixture}/pids"
+: >"${pids}"
+other_pid=""
+bystander_pids=""
+harness_pid=""
+test_pid="$$"
+
+# Recorded pids that still run. A zombie waiting for its parent does not.
+running() {
+  local pid state
+  while read -r pid; do
+    state="$(ps -o stat= -p "${pid}" 2>/dev/null || true)"
+    case "${state}" in
+      '' | Z*) ;;
+      *) printf '%s ' "${pid}" ;;
+    esac
+  done <"${pids}"
+}
+
+# Ends the background commands that checks start to see the stop leave them
+# alone. With SIGKILL: a command started a moment ago can still be a copy of
+# this shell, which catches SIGTERM and then either loses it or runs this
+# test's exit trap.
+end_bystanders() {
+  local pid
+  for pid in ${bystander_pids}; do
+    kill -KILL "${pid}" 2>/dev/null || true
+    wait "${pid}" 2>/dev/null || true
+  done
+  bystander_pids=""
+}
+
+finish() {
+  local pid self
+  # The test is ending. A second signal would end bash in the middle of this
+  # and leave what it had not ended yet.
+  trap '' HUP INT QUIT TERM
+  # A command this test starts in the background is a copy of this shell until
+  # it becomes that command, and a signal can make it run this trap. Such a
+  # copy leaves the test's processes and files alone. It is told apart by its
+  # pid: the parent of a `sh` that replaces a subshell of it. ($$ names the
+  # test in the copy too, and bash 3.2 has no BASHPID.)
+  # shellcheck disable=SC2016 # `sh` expands it
+  self="$(exec sh -c 'echo "${PPID}"')"
+  [[ -z "${self}" || "${self}" == "${test_pid}" ]] || return 0
+  harness_dashboard_dev_server_stop
+  # A check that fails leaves the processes it is about. End what this test
+  # started, so a failed run does not keep a port either.
+  for pid in ${harness_pid} $(running); do
+    kill -KILL "${pid}" 2>/dev/null || true
+  done
+  end_bystanders
+  if [[ -n "${other_pid}" ]]; then
+    kill "${other_pid}" 2>/dev/null || true
+    wait "${other_pid}" 2>/dev/null || true
+  fi
+  rm -rf "${fixture}"
+}
+trap finish EXIT
+
+dashboard="${fixture}/dashboard"
+mkdir -p "${dashboard}/node_modules/.bin" "${fixture}/empty"
+
+cat >"${dashboard}/node_modules/.bin/vite" <<'LAUNCHER'
+#!/bin/sh
+echo "$$" >>"${FAKE_VITE_PIDS}"
+if [ -n "${FAKE_VITE_EXITS:-}" ]; then
+  echo "fake vite: exits before it serves"
+  exit 3
+fi
+host=""
+port=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --host) host="$2"; shift 2 ;;
+    --port) port="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+exec python3 "$(dirname "$0")/server.py" "${host}" "${port}"
+LAUNCHER
+chmod +x "${dashboard}/node_modules/.bin/vite"
+
+cat >"${dashboard}/node_modules/.bin/server.py" <<'SERVER'
+import http.server
+import os
+import signal
+import socket
+import sys
+import time
+
+host, port = sys.argv[1], int(sys.argv[2])
+ended = os.environ.get("FAKE_VITE_ENDED")
+
+
+def end(*_):
+    if ended:
+        # A server that needs a moment to end, and leaves a mark once it has.
+        time.sleep(0.5)
+        open(ended, "w").close()
+    # Vite exits with status 143 when it gets SIGTERM.
+    sys.exit(143)
+
+
+if os.environ.get("FAKE_VITE_IGNORES_SIGNALS"):
+    # A server that is stuck: it does not exit when it is told to.
+    for name in ("SIGHUP", "SIGINT", "SIGQUIT", "SIGTERM"):
+        signal.signal(getattr(signal, name), signal.SIG_IGN)
+else:
+    signal.signal(signal.SIGTERM, end)
+if os.environ.get("FAKE_VITE_NEVER_ANSWERS"):
+    # Connections are taken by the kernel and no request gets an answer.
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind((host, port))
+    listener.listen()
+    time.sleep(600)
+else:
+    http.server.ThreadingHTTPServer((host, port), http.server.SimpleHTTPRequestHandler).serve_forever()
+SERVER
+
+fail() {
+  printf 'FAIL: %s\n' "$1" >&2
+  exit 1
+}
+
+recorded() {
+  wc -l <"${pids}" | tr -d ' '
+}
+
+# Waits up to $2 quarter seconds for the command in $1 to succeed.
+await() {
+  local check="$1" tries="$2" attempt
+  for ((attempt = 0; attempt < tries; attempt++)); do
+    if "${check}"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+nothing_runs() { [[ -z "$(running)" ]]; }
+harness_started() { [[ -e "${fixture}/started" ]]; }
+harness_ended() { ! kill -0 "${harness_pid}" 2>/dev/null; }
+
+port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+ready_url="http://127.0.0.1:${port}/"
+
+start() {
+  FAKE_VITE_PIDS="${pids}" \
+    harness_dashboard_dev_server_start "${dashboard}" "${1:-127.0.0.1}" "${port}" "${ready_url}" "${fixture}/server.log"
+}
+
+# A harness can exit before it starts the server. What it runs in the
+# background then is not the server.
+for _ in 1 2 3; do
+  sleep 600 &
+  bystander_pids+=" $!"
+done
+harness_dashboard_dev_server_stop
+for pid in ${bystander_pids}; do
+  kill -0 "${pid}" 2>/dev/null || fail "stop before any start ended a command that is not the server"
+done
+end_bystanders
+printf 'ok: stop before any start does nothing\n'
+
+start || fail "the server did not start"
+[[ "$(recorded)" == 1 ]] || fail "expected the launcher to become the server, recorded $(recorded) processes"
+harness_dashboard_dev_server_stop
+nothing_runs || fail "processes outlive the stop: $(running)"
+start || fail "the port was not free for a second server"
+harness_dashboard_dev_server_stop
+nothing_runs || fail "processes outlive the second stop: $(running)"
+printf 'ok: a stopped server leaves no process and frees the port\n'
+
+: >"${pids}"
+FAKE_VITE_ENDED="${fixture}/ended" start || fail "the server that ends slowly did not start"
+harness_dashboard_dev_server_stop
+[[ -e "${fixture}/ended" ]] || fail "the server was killed before it had ended by itself"
+nothing_runs || fail "processes outlive the stop of the server that ends slowly: $(running)"
+printf 'ok: a server gets the time to end by itself\n'
+
+# A script that goes on after a stop is still ended by the signals that end a
+# script, and still has the traps it set for them.
+: >"${pids}"
+trap ': a trap of the caller' HUP
+handling="$(trap -p HUP INT QUIT TERM)"
+start || fail "the server did not start"
+harness_dashboard_dev_server_stop
+handling_now="$(trap -p HUP INT QUIT TERM)"
+[[ "${handling_now}" == "${handling}" ]] ||
+  fail "stop changed how the script handles HUP, INT, QUIT or TERM: ${handling_now//$'\n'/; }"
+trap - HUP
+printf 'ok: a stop in the middle of a script leaves its handling of signals alone\n'
+
+: >"${pids}"
+if FAKE_VITE_EXITS=1 start 2>"${fixture}/start.err"; then
+  fail "start succeeded although the server exited"
+fi
+[[ "$(cat "${fixture}/start.err")" == *"fake vite: exits before it serves"* ]] ||
+  fail "the log of the server that exited was not printed"
+printf 'ok: a server that exits before answering fails the start and shows its log\n'
+
+: >"${pids}"
+FAKE_VITE_IGNORES_SIGNALS=1 start || fail "the server that ignores signals did not start"
+stop_attempts="${HARNESS_DASHBOARD_DEV_SERVER_STOP_ATTEMPTS}"
+HARNESS_DASHBOARD_DEV_SERVER_STOP_ATTEMPTS=3
+harness_dashboard_dev_server_stop
+HARNESS_DASHBOARD_DEV_SERVER_STOP_ATTEMPTS="${stop_attempts}"
+nothing_runs || fail "a server that ignores SIGTERM outlives the stop: $(running)"
+printf 'ok: a server that ignores SIGTERM is killed\n'
+
+# A server that exits during the run leaves a pid that can name another
+# process by the time the script ends. The script has another child running
+# then, which is not the server either.
+: >"${pids}"
+start || fail "the server did not start"
+sleep 600 &
+bystander_pids="$!"
+kill -KILL "$(cat "${pids}")"
+await nothing_runs 20 || fail "the server that was killed is still running: $(running)"
+signals="${fixture}/signals"
+: >"${signals}"
+# shellcheck disable=SC2329 # the helper's stop calls it
+kill() {
+  printf '%s\n' "$*" >>"${signals}"
+  builtin kill "$@"
+}
+harness_dashboard_dev_server_stop
+unset -f kill
+[[ ! -s "${signals}" ]] || fail "stop signalled the pid of a server that had exited: $(tr '\n' ';' <"${signals}")"
+kill -0 "${bystander_pids}" 2>/dev/null || fail "stop ended a child that is not the server"
+end_bystanders
+printf 'ok: stop sends nothing to the pid of a server that exited during the run\n'
+
+# The server can also exit while the stop runs: after the stop has found it
+# running and before the stop signals it. Here it is killed at that moment,
+# and the stop's signal goes on once bash has seen the exit.
+: >"${pids}"
+start || fail "the server did not start"
+server_pid="$(cat "${pids}")"
+server_seen_to_exit() { ! builtin kill -0 "${server_pid}" 2>/dev/null; }
+: >"${signals}"
+# shellcheck disable=SC2329 # the helper's stop calls it
+kill() {
+  if [[ ! -s "${signals}" ]]; then
+    builtin kill -KILL "${server_pid}"
+    # The pid names a process until bash has seen the server exit.
+    await server_seen_to_exit 20 || : >"${fixture}/exit-not-seen"
+  fi
+  printf '%s\n' "$*" >>"${signals}"
+  # A signal for the pid is held back: the pid can name another process now.
+  [[ " $* " != *" ${server_pid} "* ]] && builtin kill "$@"
+}
+harness_dashboard_dev_server_stop
+unset -f kill
+[[ ! -e "${fixture}/exit-not-seen" ]] || fail "bash did not see the killed server exit"
+[[ -s "${signals}" ]] || fail "stop did not signal the server it found running"
+[[ " $(tr '\n' ' ' <"${signals}")" != *" ${server_pid} "* ]] ||
+  fail "stop signalled the pid of a server that bash had seen exit: $(tr '\n' ';' <"${signals}")"
+printf 'ok: stop sends nothing to the pid of a server that exits while the stop runs\n'
+
+# A question to bash can be cut short: the subshell that fetches the listing
+# of jobs is killed, as a signal to the script's process group can do. Such a
+# question says nothing about the server.
+: >"${pids}"
+start || fail "the server did not start"
+: >"${fixture}/cut"
+# shellcheck disable=SC2329 # the helper calls it
+jobs() {
+  if [[ -e "${fixture}/cut" ]]; then
+    rm -f "${fixture}/cut"
+    # Kills the subshell that asks, the parent of this `sh`, and then marks the
+    # cut. `sh` outlives that subshell, and the question returns only once `sh`
+    # ends, since `sh` holds its output. Where bash runs `sh` in place of that
+    # subshell, the parent is this test: it is left alone, and the check below
+    # fails.
+    # shellcheck disable=SC2016 # `sh` expands them
+    sh -c '[ "$PPID" = "$1" ] || { kill -KILL "$PPID" && : >"$2"; }' sh "${test_pid}" "${fixture}/was-cut"
+  fi
+  builtin jobs "$@"
+}
+harness_dashboard_dev_server_stop
+unset -f jobs
+[[ -e "${fixture}/was-cut" ]] || fail "no question of the stop was cut short"
+nothing_runs || fail "a stop whose question was cut short left the server: $(running)"
+printf 'ok: a question that is cut short is not taken for a server that exited\n'
+
+: >"${pids}"
+# shellcheck disable=SC2016 # the new shell expands them from its arguments
+if PATH="${fixture}/empty" FAKE_VITE_PIDS="${pids}" "${BASH}" -c '
+  source "$1"
+  harness_dashboard_dev_server_start "$2" 127.0.0.1 "$3" "$4" "$5"
+' bash "${SCRIPT_DIR}/harness/lib/dashboard_dev_server.sh" "${dashboard}" "${port}" "${ready_url}" \
+  "${fixture}/server.log" 2>/dev/null; then
+  fail "start succeeded without lsof"
+fi
+[[ "$(recorded)" == 0 ]] || fail "without lsof, start ran a server it could not tell from another one"
+printf 'ok: without lsof nothing is started\n'
+
+# lsof reports only the listeners it may see, so it can come back empty. An
+# answer on the port then has no known sender.
+mkdir -p "${fixture}/blind"
+printf '%s\n' '#!/bin/sh' 'exit 1' >"${fixture}/blind/lsof"
+chmod +x "${fixture}/blind/lsof"
+: >"${pids}"
+ready_timeout="${HARNESS_DASHBOARD_DEV_SERVER_READY_TIMEOUT_SEC}"
+HARNESS_DASHBOARD_DEV_SERVER_READY_TIMEOUT_SEC=2
+if PATH="${fixture}/blind:${PATH}" start 2>/dev/null; then
+  fail "start accepted an answer although lsof showed no listener"
+fi
+HARNESS_DASHBOARD_DEV_SERVER_READY_TIMEOUT_SEC="${ready_timeout}"
+nothing_runs || fail "processes outlive the start that failed: $(running)"
+printf 'ok: an answer is not accepted while lsof shows no listener\n'
+
+# A script that does what the harness scripts do: start the server, keep the
+# stop for its exit, and go on with its own work. That work is one long step,
+# or short ones when SHORT_STEPS is set.
+cat >"${fixture}/harness.sh" <<HARNESS
+#!/usr/bin/env bash
+set -euo pipefail
+source "${SCRIPT_DIR}/harness/lib/dashboard_dev_server.sh"
+if [[ -n "\${READY_TIMEOUT_SEC:-}" ]]; then
+  HARNESS_DASHBOARD_DEV_SERVER_READY_TIMEOUT_SEC="\${READY_TIMEOUT_SEC}"
+fi
+trap harness_dashboard_dev_server_stop_on_exit EXIT
+harness_dashboard_dev_server_start "${dashboard}" 127.0.0.1 "${port}" "${ready_url}" "${fixture}/server.log"
+if [[ -n "\${SLOW_FIRST_QUESTION:-}" ]]; then
+  # As on a machine under load: the next time the script asks bash about its
+  # jobs, the answer takes a second.
+  : >"${fixture}/slow"
+  jobs() {
+    builtin jobs "\$@"
+    if [[ -e "${fixture}/slow" ]]; then
+      rm -f "${fixture}/slow"
+      sleep 1
+    fi
+  }
+fi
+: >"${fixture}/started"
+while [[ -n "\${SHORT_STEPS:-}" ]]; do sleep 0.2; done
+sleep 600
+HARNESS
+
+# Runs the script as a terminal or a supervisor does: in a process group of
+# its own, with the signals that end a script left to end it. A background
+# command starts with SIGINT ignored, and so does everything this test starts
+# when the test itself was started that way; a shell cannot undo that for its
+# children. Variables set for this call reach the script.
+run_harness() {
+  : >"${pids}"
+  rm -f "${fixture}/started"
+  FAKE_VITE_PIDS="${pids}" python3 -c '
+import os, signal, sys
+os.setpgid(0, 0)
+for name in ("SIGHUP", "SIGINT", "SIGQUIT", "SIGTERM"):
+    signal.signal(getattr(signal, name), signal.SIG_DFL)
+os.execv(sys.argv[1], sys.argv[1:])
+' "${BASH}" "${fixture}/harness.sh" >/dev/null 2>&1 &
+  harness_pid="$!"
+  disown "${harness_pid}"
+}
+
+for ending in 'INT to its process group, as Ctrl-C sends it' \
+  'HUP to its process group, as a closing terminal sends it' 'TERM to the script alone' \
+  'KILL to its process group, as a supervisor that gives up sends it'; do
+  case "${ending}" in
+    # The signal reaches the script alone, so the command the script runs at
+    # that moment outlives it. A short step is gone at once; the long one
+    # would stay behind for ten minutes.
+    TERM*) SHORT_STEPS=1 run_harness ;;
+    *) run_harness ;;
+  esac
+  await harness_started 120 || fail "the script never started its server"
+  case "${ending}" in
+    INT*) kill -INT -- "-${harness_pid}" ;;
+    HUP*) kill -HUP -- "-${harness_pid}" ;;
+    TERM*) kill -TERM "${harness_pid}" ;;
+    KILL*) kill -KILL -- "-${harness_pid}" ;;
+  esac
+  await harness_ended 120 || fail "a script ended by ${ending} is still running"
+  harness_pid=""
+  await nothing_runs 20 || fail "processes outlive a script ended by ${ending}: $(running)"
+done
+printf 'ok: a script that is ended leaves no server\n'
+
+# The server is stuck, and while the script waits for it to exit, the script
+# gets each of the signals that its exit stop ignores, sent to its process
+# group.
+FAKE_VITE_IGNORES_SIGNALS=1 run_harness
+await harness_started 120 || fail "the script never started the server that ignores signals"
+for signal in INT TERM HUP QUIT INT; do
+  kill "-${signal}" -- "-${harness_pid}" 2>/dev/null || true
+  sleep 0.5
+done
+await nothing_runs 60 || fail "a second signal ended the stop before the server was killed: $(running)"
+await harness_ended 20 || fail "the script is still running after its server was killed"
+harness_pid=""
+printf 'ok: a second signal does not keep a stuck server from being killed\n'
+
+# The second signal can come before the stop has done anything: a script that
+# is told to end twice in a row, on a machine where every step takes long.
+# Bash ends a script at once when it is told to end while it runs its exit
+# trap, and nothing has been sent to the server by then.
+SHORT_STEPS=1 SLOW_FIRST_QUESTION=1 run_harness
+await harness_started 120 || fail "the script never started its server"
+kill -TERM "${harness_pid}"
+sleep 0.5
+kill -TERM "${harness_pid}" 2>/dev/null || true
+await harness_ended 120 || fail "the script that was told to end twice is still running"
+harness_pid=""
+await nothing_runs 20 || fail "a script that was told to end twice in a row left its server: $(running)"
+[[ ! -e "${fixture}/slow" ]] || fail "the stop never asked bash about its jobs, so nothing was slowed"
+printf 'ok: a signal that arrives while the stop starts does not leave the server\n'
+
+FAKE_VITE_NEVER_ANSWERS=1 READY_TIMEOUT_SEC=2 run_harness
+if ! await harness_ended 80; then
+  harness_started && fail "start accepted a server that never answered"
+  fail "the script still waits for a server that never answers"
+fi
+harness_pid=""
+await nothing_runs 20 || fail "the server that never answered outlives the script: $(running)"
+printf 'ok: a server that never answers fails the start in time\n'
+
+# Another server on the port answers the probe in place of the one this run
+# starts: a server an earlier run left behind, or a run that started at the
+# same moment on the same port.
+python3 -m http.server "${port}" --bind 127.0.0.1 --directory "${fixture}" >/dev/null 2>&1 &
+other_pid="$!"
+other_answers() { curl -fsS "${ready_url}" >/dev/null 2>&1; }
+await other_answers 80 || fail "the other server did not come up"
+
+# On the other server's address this run's server cannot bind. On every
+# address it can, where the system lets the two share the port, and the other
+# server still answers the probe.
+for host in 127.0.0.1 0.0.0.0; do
+  : >"${pids}"
+  if start "${host}" 2>/dev/null; then
+    fail "start on ${host} accepted the answer of a server this run did not start"
+  fi
+  nothing_runs || fail "processes outlive the failed start on ${host}: $(running)"
+  kill -0 "${other_pid}" 2>/dev/null || fail "the failed start on ${host} ended a server this run did not start"
+done
+printf 'ok: the answer of another server on the port is not taken for this run'"'"'s server\n'
+
+printf 'harness dashboard dev server test passed\n'

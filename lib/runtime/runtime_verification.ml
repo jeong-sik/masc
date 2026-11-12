@@ -669,7 +669,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
          | Ok account ->
         let config = { (Runtime_muse_serve.default_config ()) with
           cli_path = execution.cli_path;
-          model = Some execution.model; native = Runtime_native_tools.muse_default;
+          model = Some execution.model;
           admission_timeout_s = Float.min timeout_s execution.timeout_s;
           timeout_s = Some timeout_s } in
         let reasoning_effort =

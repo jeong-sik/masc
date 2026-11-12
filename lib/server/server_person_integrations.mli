@@ -23,11 +23,14 @@ type integration =
   { integration_id : string  (** The id the connect request names. *)
   ; display_name : string
   ; models : string list
-      (** The models of the bindings of this provider in runtime.toml that a
-          verification calls: the [model] a verification names. A model the
-          verification refuses before any client starts
-          ({!Runtime_verification.model_refusal}) is left out, so a provider
-          may have none. *)
+      (** The models of the bindings of this provider in runtime.toml whose
+          model row declares tool calling ({!Runtime_verification.model_refusal}),
+          the [model] a verification names. A verification refuses the others
+          before any client starts, so a provider may have none. A binding the
+          runtime cannot build from its declaration alone, such as one of a
+          provider without [is-non-interactive = true], is still listed: its
+          verification ends with "The runtime of this account does not load"
+          (masc #51775). *)
   ; calls : calls
   }
 

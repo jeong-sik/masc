@@ -27,7 +27,7 @@ let default_config () =
   { cli_path = "muse"
   ; prepared_home = None
   ; model = None
-  ; native = Runtime_native_tools.Native_read
+  ; native = Runtime_native_tools.muse_default
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   }

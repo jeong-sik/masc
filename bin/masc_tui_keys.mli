@@ -45,7 +45,9 @@ type row_need =
 type binding = {
   key : string;
   label : string;      (** the footer's short word *)
-  label_ko : string option; (** Korean footer label when supplied *)
+  label_ko : string;
+      (** the Korean name. Required: a binding with one language would draw the
+          other on a screen that is not in it. *)
   help : string option;  (** the overlay's longer sentence; [label] if absent *)
   group : group;
   detail : detail_state;  (** which of a detail-owning surface's two states *)
@@ -514,6 +516,7 @@ val footer_hints_context : cols:int -> Masc_tui_types.state -> string
 val footer_hints_runtime_detail : lang:Masc_tui_types.ui_language -> routes:bool -> string
 
 val help_sections :
+  lang:Masc_tui_types.ui_language ->
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list
 (** Sections for the help sheet. [current] puts that surface's own section
     first and marks it, so the sheet opens on an answer rather than on a list

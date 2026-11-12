@@ -519,6 +519,31 @@ let test_model_error_names_a_missing_catalog_model () =
   | other -> failf "a retryable modelError stays availability: %s" (Agent_core.Error.to_string other)
 ;;
 
+(* A refusal marks its range only after the reads that could name another
+   cause answered and named none (RFC-librarian-lifecycle §4.10). *)
+let test_a_refusal_marks_its_range_only_after_its_reads_answer () =
+  let marks ?(window_spent = false) ~usage ~catalog () =
+    Adapter.marks_refused_range ~usage ~catalog ~window_spent in
+  let listed = Some (Ok Keeper_muse_runtime.Catalog_lists_model) in
+  let omitted =
+    Some (Ok (Keeper_muse_runtime.Catalog_omits_model
+                { model = "muse-spark-1.3"; source = Msp.Provider_catalog; listed = 1 })) in
+  check bool "a usage read and a catalog listing the model mark it" true
+    (marks ~usage:(Some (Ok ())) ~catalog:listed ());
+  check bool "with no configured model the usage read alone marks it" true
+    (marks ~usage:(Some (Ok ())) ~catalog:None ());
+  check bool "a usage read that failed leaves the cause unknown" false
+    (marks ~usage:(Some (Error "Muse Code was silent for 20s")) ~catalog:listed ());
+  check bool "no usage read after the refusal marks nothing" false
+    (marks ~usage:None ~catalog:listed ());
+  check bool "a spent window is another cause" false
+    (marks ~window_spent:true ~usage:(Some (Ok ())) ~catalog:listed ());
+  check bool "a catalog read that failed leaves the cause unknown" false
+    (marks ~usage:(Some (Ok ())) ~catalog:(Some (Error ())) ());
+  check bool "a catalog without the model is another cause" false
+    (marks ~usage:(Some (Ok ())) ~catalog:omitted ())
+;;
+
 (* Exit 2 and exit 5 refuse the configuration the host was started with, and
    the same configuration exits the same way again: configuration, not a
    dropped connection. Exit 3 is a refused login or settings file. *)
@@ -4084,6 +4109,8 @@ let () =
         ; test_case "session refusals start fresh next" `Quick
             test_refusals_of_the_session_start_fresh_next
         ; test_case "error projection" `Quick test_error_projection
+        ; test_case "a refusal marks its range only after its reads answer" `Quick
+            test_a_refusal_marks_its_range_only_after_its_reads_answer
         ; test_case "a modelError names a model missing from the account catalog" `Quick
             test_model_error_names_a_missing_catalog_model
         ; test_case "documented refusal exits are not dropped connections" `Quick

@@ -109,6 +109,21 @@ let catalog_checked_model ~configured_model (error : Serve.error) =
   | None -> None
 ;;
 
+(* A refusal marks its range when every read that could name another cause
+   answered after it and none named one (RFC-librarian-lifecycle §4.10): the
+   account's usage, for a spent window, and its catalog, for a model it does
+   not list. A read that did not answer leaves the cause unknown, so nothing
+   is marked and the next refusal of the range reads again. [usage] is [None]
+   when no read followed the refusal; [catalog] is [None] when there is no
+   configured model to look up. *)
+let marks_refused_range ~usage ~catalog ~window_spent =
+  match usage, catalog with
+  | Some (Ok ()), (None | Some (Ok Catalog_lists_model)) -> not window_spent
+  | Some (Ok ()), Some (Ok (Catalog_omits_model _) | Error ())
+  | ( (None | Some (Error (_ : string)))
+    , (None | Some (Ok (Catalog_lists_model | Catalog_omits_model _) | Error ())) ) -> false
+;;
+
 (* Mirrors the Codex app-server projection where the two clients share a
    shape: an exited process and the host's own interrupt are typed MASC
    values, and an idle stream after [turn/start] was written stays off the
@@ -1702,55 +1717,58 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
           client_result
           |> Result.map (fun turn -> `Completed turn)
           |> Result.map_error (fun error ->
-            (match error with
-             | Serve.Turn_failed { Msp.kind = Msp.Model_error; quota = None; _ }
-               when not (Runtime_quota_window.is_exhausted
-                           ~scope:quota_scope ~now:(Time_compat.now ())) ->
-               (* Without a typed quota detail, modelError gives free text and retryable. The
-                  account's typed usage/read can identify a spent window;
-                  never infer it from the error sentence or replay this turn. *)
-               (match model_input_refusal_of_error error with
-                | Some Turn_record.Model_error_not_retryable ->
-                  (* This answer can mark the range it refused, and a spent
-                     window is the one cause the mark must not cover. The
-                     usage is read before the mark is decided below, so the
-                     turn ends after the read does. *)
-                  (match
-                     Runtime_provider_usage_read.read_muse ~mgr:process_mgr ~clock
-                       ~cwd:process_cwd ~scope:quota_scope ~account client_config
-                   with
-                   | Ok () -> ()
-                   | Error detail ->
-                     Log.Keeper.warn ~keeper_name
-                       "Muse usage not read after model error: %s" detail)
-                | None ->
-               match Runtime_provider_usage_read.read_muse_in_background
-                        ~clock ~cwd:process_cwd ~scope:quota_scope ~account client_config with
-                | Runtime_provider_usage_read.Started
-                | Runtime_provider_usage_read.Already_reading -> ()
-                | Runtime_provider_usage_read.No_root_switch ->
-                  Log.Keeper.warn ~keeper_name
-                    "Muse usage not read after model error: no server root switch"
-                | Runtime_provider_usage_read.Scheduling_failed ->
-                  Log.Keeper.warn ~keeper_name
-                    "Muse usage not read after model error: background scheduling failed")
-             | Serve.Turn_failed
-                 { Msp.kind =
-                     ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error
-                     | Msp.Log_error | Msp.Workflow_launch_error
-                     | Msp.Environment_error | Msp.Model_error | Msp.Launch_error
-                     | Msp.Auth_required | Msp.Unrecognized_error_kind _ )
-                 ; _
-                 }
-             | Serve.Invalid_config _ | Serve.Spawn_failed _
-             | Serve.Turn_input_write_failed _ | Serve.Protocol_error _
-             | Serve.Rpc_error _ | Serve.Capability_not_granted _
-             | Serve.Session_not_durable | Serve.Session_model_mismatch _
-             | Serve.Session_workspace_mismatch _
-             | Serve.Session_approval_mode_mismatch _ | Serve.Auth_required _
-             | Serve.Turn_cancelled | Serve.Unsupported_server_request _
-             | Serve.Runtime_shutting_down | Serve.Process_exited _
-             | Serve.Timeout _ -> ());
+            let usage_after_refusal =
+              match error with
+               | Serve.Turn_failed { Msp.kind = Msp.Model_error; quota = None; _ }
+                 when not (Runtime_quota_window.is_exhausted
+                             ~scope:quota_scope ~now:(Time_compat.now ())) ->
+                 (* Without a typed quota detail, modelError gives free text and retryable. The
+                    account's typed usage/read can identify a spent window;
+                    never infer it from the error sentence or replay this turn. *)
+                 (match model_input_refusal_of_error error with
+                  | Some Turn_record.Model_error_not_retryable ->
+                    (* This answer can mark the range it refused, and a spent
+                       window is the one cause the mark must not cover. The
+                       usage is read before the mark is decided below, so the
+                       turn ends after the read does. *)
+                    let read =
+                      Runtime_provider_usage_read.read_muse ~mgr:process_mgr ~clock
+                        ~cwd:process_cwd ~scope:quota_scope ~account client_config
+                    in
+                    Result.iter_error
+                      (Log.Keeper.warn ~keeper_name "Muse usage not read after model error: %s")
+                      read;
+                    Some read
+                  | None ->
+                    (match Runtime_provider_usage_read.read_muse_in_background
+                             ~clock ~cwd:process_cwd ~scope:quota_scope ~account client_config with
+                     | Runtime_provider_usage_read.Started
+                     | Runtime_provider_usage_read.Already_reading -> ()
+                     | Runtime_provider_usage_read.No_root_switch ->
+                       Log.Keeper.warn ~keeper_name
+                         "Muse usage not read after model error: no server root switch"
+                     | Runtime_provider_usage_read.Scheduling_failed ->
+                       Log.Keeper.warn ~keeper_name
+                         "Muse usage not read after model error: background scheduling failed");
+                    None)
+               | Serve.Turn_failed
+                   { Msp.kind =
+                       ( Msp.Step_limit | Msp.Config_error | Msp.Projection_error
+                       | Msp.Log_error | Msp.Workflow_launch_error
+                       | Msp.Environment_error | Msp.Model_error | Msp.Launch_error
+                       | Msp.Auth_required | Msp.Unrecognized_error_kind _ )
+                   ; _
+                   }
+               | Serve.Invalid_config _ | Serve.Spawn_failed _
+               | Serve.Turn_input_write_failed _ | Serve.Protocol_error _
+               | Serve.Rpc_error _ | Serve.Capability_not_granted _
+               | Serve.Session_not_durable | Serve.Session_model_mismatch _
+               | Serve.Session_workspace_mismatch _
+               | Serve.Session_approval_mode_mismatch _ | Serve.Auth_required _
+               | Serve.Turn_cancelled | Serve.Unsupported_server_request _
+               | Serve.Runtime_shutting_down | Serve.Process_exited _
+               | Serve.Timeout _ -> None
+            in
             if failure_leaves_effects_unknown ~admission:!admission ~turn_items:!turn_items error
             then observe_transport_uncertain ();
             recovery_failure := recovery_failure_for_attempt
@@ -1759,7 +1777,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                already explains the failure, as it does for that read. *)
             let catalog_read_s =
               Float.min Runtime_provider_usage_read.read_timeout_s client_config.admission_timeout_s in
-            let catalog =
+            let catalog_read =
               match catalog_checked_model ~configured_model:client_config.model error with
               | Some _ when Runtime_quota_window.is_exhausted ~scope:quota_scope ~now:(Time_compat.now ()) -> None
               | None -> None
@@ -1768,40 +1786,37 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                    Eio.Time.with_timeout_exn clock catalog_read_s (fun () ->
                      Serve.list_models ~mgr:process_mgr ~clock ~cwd:process_cwd ~account client_config)
                  with
-                 | Ok listed -> Some (catalog_reading ~model listed)
+                 | Ok listed -> Some (Ok (catalog_reading ~model listed))
                  | Error read_error ->
                    Log.Keeper.warn ~keeper_name "Muse model catalog not read after model error: %s"
                      (Serve.error_to_string read_error);
-                   None
+                   Some (Error ())
                  | exception Eio.Time.Timeout ->
                    Log.Keeper.warn ~keeper_name
                      "Muse model catalog not read after model error: no answer within %.0fs"
                      catalog_read_s;
-                   None)
+                   Some (Error ()))
             in
-            (* The same typed answer can come from a model the account does not
-               list or from a spent usage window. Either one names a cause
-               that is not the size of the range, so neither marks it. *)
-            (match model_input_refusal_of_error error, catalog with
-             | None, (Some (Catalog_lists_model | Catalog_omits_model _) | None)
-             | Some Turn_record.Model_error_not_retryable, Some (Catalog_omits_model _) -> ()
-             | Some refusal, (Some Catalog_lists_model | None) ->
-               if not (Runtime_quota_window.is_exhausted ~scope:quota_scope
-                         ~now:(Time_compat.now ()))
-               then on_model_input_refused refusal);
+            let catalog = Option.bind catalog_read Result.to_option in
+            (match model_input_refusal_of_error error with
+             | None -> ()
+             | Some refusal ->
+               if marks_refused_range ~usage:usage_after_refusal ~catalog:catalog_read
+                    ~window_spent:(Runtime_quota_window.is_exhausted ~scope:quota_scope
+                                     ~now:(Time_compat.now ()))
+               then on_model_input_refused refusal
+               else
+                 Log.Keeper.info ~keeper_name
+                   "Muse refused range not marked: a read after the refusal named another \
+                    cause or did not answer");
             runtime_error_to_core_error ?catalog error)
         | `Abort stop -> Ok (`Stopped stop))
     in
     let settle_cancellation exn =
       let backtrace = Printexc.get_raw_backtrace () in
       let terminal_failure error =
-        (* The catalog is not read under cancellation; a spent window still
-           vetoes the mark. *)
-        (match model_input_refusal_of_error error with
-         | Some refusal
-           when not (Runtime_quota_window.is_exhausted ~scope:quota_scope
-                       ~now:(Time_compat.now ())) -> on_model_input_refused refusal
-         | Some Turn_record.Model_error_not_retryable | None -> ());
+        (* No read follows a refusal under cancellation, so it marks no range
+           ([marks_refused_range]); the next refusal of the range reads again. *)
         recovery_failure_of_runtime_error ~current:!recovery_failure error in
       recovery_failure
         := (match !provider_terminal with
@@ -2173,6 +2188,7 @@ module For_testing = struct
   let catalog_reading = catalog_reading
   let catalog_checked_model = catalog_checked_model
   let model_input_refusal_of_error = model_input_refusal_of_error
+  let marks_refused_range = marks_refused_range
   let runtime_error_to_core_error = runtime_error_to_core_error
   let recovery_failure_of_runtime_error = recovery_failure_of_runtime_error
 

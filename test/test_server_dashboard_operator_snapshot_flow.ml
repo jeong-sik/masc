@@ -5,10 +5,32 @@ module Owner = Server_dashboard_operator_snapshot_observation
 module Http = Server_dashboard_http_core_operator_snapshot_http
 module Worker = Server_dashboard_http_core_snapshot_refresh
 
+let init_fixture_runtime base_path =
+  let path = Filename.concat base_path "runtime.toml" in
+  Out_channel.with_open_bin path (fun output -> output_string output {|
+version = 1
+[runtime]
+default = "test_provider.test_model"
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[test_provider.test_model]
+max-concurrent = 1
+|});
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> () | Error detail -> failf "fixture Runtime.init_default failed: %s" detail
+
 let with_runtime f = Eio_main.run (fun env ->
   let previous_fs = Fs_compat.get_fs_opt () in
   let previous_context = Eio_context.snapshot_state () in
   let previous_clock = Eio_context.get_clock_opt () in
+  let previous_runtime = Runtime.For_testing.snapshot () in
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = Masc_test_deps.setup_test_workspace () in
   let mock_clock = Eio_mock.Clock.make () in
@@ -16,10 +38,12 @@ let with_runtime f = Eio_main.run (fun env ->
   Eio_mock.Clock.set_time mock_clock (Unix.gettimeofday ());
   Fun.protect ~finally:(fun () ->
     Dashboard_projection_cache.register_operator_snapshot_json {snapshot = Operator_control.snapshot_read};
+    Runtime.For_testing.restore previous_runtime;
     Eio_context.restore_state previous_context;
     (match previous_clock with Some clock -> Time_compat.set_clock clock | None -> Time_compat.clear_clock ());
     Masc_test_deps.cleanup_test_workspace base_path;
     match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ()) (fun () ->
+    init_fixture_runtime base_path;
     (* Test watchdog only; it does not define a product freshness interval. *)
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
       Eio.Switch.run (fun sw ->
@@ -36,7 +60,10 @@ let read ~state ~sw ~clock suffix =
     (Httpun.Request.create `GET ("/api/v1/operator" ^ suffix))
 
 let sequence payload = Yojson.Safe.Util.(payload |> member "snapshot_compute_sequence" |> to_int)
-let ordering payload = Yojson.Safe.Util.(payload |> member "snapshot_generation" |> to_int), sequence payload
+let terminal_sequence payload = Yojson.Safe.Util.(payload |> member "snapshot_terminal_sequence" |> to_int)
+(* A failed attempt advances terminal authority without inventing a computed
+   observation. Frame admission follows that original terminal identity. *)
+let ordering payload = Yojson.Safe.Util.(payload |> member "snapshot_generation" |> to_int), terminal_sequence payload
 let newer payload previous =
   let generation, sequence = ordering payload and before_generation, before_sequence = ordering previous in
   generation > before_generation || (generation = before_generation && sequence > before_sequence)
@@ -321,13 +348,17 @@ let test_actual_no_result_failure_does_not_repeat_cold_reads () =
     check bool "a thrown actual read has no retained body" false (Owner.has_observation owner);
     check string "first failure is a canonical terminal error" "error"
       Yojson.Safe.Util.(cold |> member "snapshot_observation_state" |> to_string);
-    List.iter (fun () -> check int "failed cold GET retains the terminal identity" (sequence cold)
-      (sequence (read ~state ~sw ~clock ""))) [(); (); ()];
+    List.iter (fun () -> check (pair int int) "failed cold GET retains the terminal identity" (ordering cold)
+      (ordering (read ~state ~sw ~clock ""))) [(); (); ()];
     check int "repeated GET cannot reissue the failed Current read" 1 (Atomic.get calls);
     let frames = frames ~sw ~scope "actual-snapshot-no-result-retry" in
     Worker.start_operator_snapshot_refresh_loop ~state ~sw ~clock ~mono_clock:(Eio.Stdenv.mono_clock env);
     let failed = frame_after frames cold (fun payload ->
       Yojson.Safe.Util.member "snapshot_observation_state" payload = `String "error") in
+    check bool "the failed source attempt advances its real terminal identity" true
+      (terminal_sequence failed > terminal_sequence cold);
+    check int "a failed source attempt does not fabricate a computed observation"
+      (sequence cold) (sequence failed);
     check int "the source worker owns its one initial recovery read" 2 (Atomic.get calls);
     let failed_sequence = sequence failed in
     ignore (read ~state ~sw ~clock "");

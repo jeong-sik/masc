@@ -798,7 +798,11 @@ let test_current_snapshot_retains_inventory_failure_and_confirmation_deadline ()
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let dir = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+  let previous_runtime = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore previous_runtime;
+    cleanup_dir dir) (fun () ->
+    init_runtime_default_for_snapshot dir;
     let config = Workspace.default_config dir in
     ignore (Workspace.init config ~agent_name:None);
     let meta = { (health_projection_meta ~total_turns:1) with paused = true } in

@@ -49,9 +49,10 @@ let entry : Trajectory.tool_call_entry =
   ; result=Some "ok"; duration_ms=1; error=None; execution_id=None }
 
 let test_buffered_flush_keeps_original_owner () = fixture (fun config ->
-  let other_base = Masc_test_deps.setup_test_workspace () in
-  let other = Masc.Workspace.default_config other_base in
+  let other_base = Filename.temp_dir "masc-telemetry-source-other-" "" in
   Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace other_base) (fun () ->
+    Unix.mkdir (Common.masc_dir_from_base_path ~base_path:other_base) 0o755;
+    let other = Masc.Workspace.default_config other_base in
     let seen = ref [] in
     let remove = Trajectory_write_observation.subscribe (fun owner -> seen := owner :: !seen) in
     Fun.protect ~finally:remove (fun () ->

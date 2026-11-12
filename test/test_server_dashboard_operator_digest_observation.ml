@@ -222,8 +222,16 @@ let test_parameter_cache_is_bound_to_the_original_workspace () =
   with_runtime (fun ~env:_ ~sw ~clock ~mock_clock:_ ~state ~scope ->
     let other_base = Masc_test_deps.setup_test_workspace () in
     Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace other_base) (fun () ->
-      let other = Workspace.default_config other_base in
-      ignore (Workspace.init other ~agent_name:None);
+      let foreign = Workspace.default_config other_base in
+      (match Mcp_server.set_workspace_config state foreign with
+       | Error (Workspace_masc_root_mismatch _) -> ()
+       | Ok () -> fail "a workspace replacement crossed the process runtime root");
+      check string "refused cross-root replacement preserves the actual scope"
+        (Server_observer_scope.instance_id scope)
+        (Server_observer_scope.instance_id (Mcp_server.workspace_scope state));
+      let other = {scope.config with
+        workspace_path = Filename.concat scope.config.base_path "replacement-workspace"} in
+      Fs_compat.mkdir_p other.workspace_path;
       let confidence = match Operator_judgment.Confidence.of_float 0.91 with
         | Some value -> value | None -> fail "invalid fixture confidence" in
       let seed config marker =
@@ -234,7 +242,6 @@ let test_parameter_cache_is_bound_to_the_original_workspace () =
           ~fresh_until:(Masc_domain.iso8601_of_unix_seconds (now +. 60.0)) ~fresh_until_unix:(now +. 60.0)
           ~keeper_name:"query-source-judge" ~recommended_action:(`Assoc ["marker", `String marker]) ()) in
       seed scope.config "original workspace";
-      seed other "replacement workspace";
       let read () = match Server_dashboard_http_core_operator_digest_http.operator_digest_http_json
           ~state ~sw ~clock (Httpun.Request.create `GET "/api/v1/operator/digest?agent_name=same-actor") with
         | Ok json -> json | Error _ -> fail "parameterized Digest read failed" in
@@ -242,6 +249,10 @@ let test_parameter_cache_is_bound_to_the_original_workspace () =
       check bool "the first query reads its actual source" true
         Yojson.Safe.Util.(first |> member "recommended_actions" =
           `List [`Assoc ["marker", `String "original workspace"]]);
+      (* This is an allowed same-root scope replacement. The original
+         durable source changes after the first query, so only the captured
+         instance/query cache boundary can prevent borrowing its old rows. *)
+      seed other "replacement workspace";
       (match Mcp_server.set_workspace_config state other with
        | Ok () -> () | Error _ -> fail "workspace query replacement failed");
       let replacement = Mcp_server.workspace_scope state in

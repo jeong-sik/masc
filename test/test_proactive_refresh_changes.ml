@@ -193,6 +193,7 @@ let test_deadline_crossed_by_read_stays_owed () =
     Eio_mock.Clock.set_time clock 0.0;
     let changes = Eio.Stream.create 1 and results = Eio.Stream.create 4 in
     let reads = ref 0 in
+    let started, mark_started = Eio.Promise.create () in
     Eio.Switch.run (fun sw ->
       Refresh.start_on_change_or_deadline ~sw
         ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~changes
@@ -201,10 +202,15 @@ let test_deadline_crossed_by_read_stays_owed () =
         ~compute:(fun () ->
           incr reads;
           let observed = Eio.Time.now clock in
-          if !reads = 1 then Eio.Time.sleep clock 40.0;
+          if !reads = 1 then (
+            Eio.Promise.resolve mark_started ();
+            Eio.Time.sleep clock 40.0);
           observed)
         ~next_deadline:(fun observed -> if observed < 30.0 then Some 30.0 else None)
         ~on_result:(Eio.Stream.add results);
+      Eio.Promise.await started;
+      check bool "the first read's delay needs the manual clock to advance" true
+        (Eio_mock.Clock.try_advance clock);
       check (float 0.) "the initial answer survives crossing its deadline" 0.0
         (Eio.Stream.take results);
       check (float 0.) "the elapsed transition retains its follow-up" 40.0

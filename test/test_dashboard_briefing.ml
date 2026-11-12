@@ -805,6 +805,11 @@ let test_current_partial_rows_recover_after_actual_metadata_repair () =
       let config = Workspace.default_config dir in
       ignore (Workspace.init config ~agent_name:None);
       ignore (Workspace.bind_session config ~agent_name:"readable-agent" ~capabilities:[] ());
+      let readable_agent =
+        match Workspace.get_agents_raw config
+          |> List.filter (fun (agent : Types.agent) -> agent.agent_type = "readable-agent") with
+        | [agent] -> agent.name
+        | [] | _ :: _ :: _ -> fail "the actual readable agent binding is not unique" in
       declare_unbooted_keeper config "readable-declaration";
       declare_unbooted_keeper config "unread-metadata";
       let broken = Lib.Keeper_types_profile.keeper_meta_path config "unread-metadata" in
@@ -849,7 +854,7 @@ let test_current_partial_rows_recover_after_actual_metadata_repair () =
         (Some expires) partial_execution.next_deadline_unix;
       check bool "Mission retains its independently readable agent" true
         Yojson.Safe.Util.(partial_mission.json |> member "agent_briefs" |> to_list
-          |> List.exists (fun row -> row |> member "agent_name" = `String "readable-agent"));
+          |> List.exists (fun row -> row |> member "agent_name" = `String readable_agent));
       check bool "Execution retains its independently readable declaration" true
         (Option.is_some (row_named "readable-declaration"
           Yojson.Safe.Util.(partial_execution.json |> member "keepers" |> to_list)));

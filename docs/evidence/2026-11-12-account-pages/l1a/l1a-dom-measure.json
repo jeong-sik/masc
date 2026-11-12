@@ -1,0 +1,319 @@
+[
+  {
+    "label": "l1a-dom",
+    "state": "home_signed_out",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 1,
+    "liveRegions": 8,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 1,
+    "styleRules": 21,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "en",
+    "title": "MASC accounts",
+    "firstTabStop": "button#go outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1a-dom",
+    "state": "home_no_client",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 1,
+    "liveRegions": 8,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 1,
+    "styleRules": 21,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        true
+      ],
+      "describedVisibleChars": [
+        32
+      ]
+    },
+    "lang": "en",
+    "title": "MASC accounts",
+    "firstTabStop": "body",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1a-dom",
+    "state": "invite_token",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 1,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 21,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "en",
+    "title": "Invitation",
+    "firstTabStop": "button#go outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1a-dom",
+    "state": "invite_no_token",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 1,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 21,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        true
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "en",
+    "title": "Invitation",
+    "firstTabStop": "body",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1a-dom",
+    "state": "invite_no_client",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 1,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 21,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        true
+      ],
+      "describedVisibleChars": [
+        32
+      ]
+    },
+    "lang": "en",
+    "title": "Invitation",
+    "firstTabStop": "body",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1a-dom",
+    "state": "member_new",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 1,
+    "liveRegions": 8,
+    "visibleControls": 19,
+    "freeTextFields": 7,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 1,
+    "styleRules": 21,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "en",
+    "title": "MASC accounts",
+    "firstTabStop": "button#signout outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1a-dom",
+    "state": "member_full",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 1,
+    "liveRegions": 8,
+    "visibleControls": 19,
+    "freeTextFields": 7,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 2,
+    "styleRules": 21,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "en",
+    "title": "MASC accounts",
+    "firstTabStop": "button#signout outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1a-dom",
+    "state": "admin_full",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 1,
+    "liveRegions": 8,
+    "visibleControls": 24,
+    "freeTextFields": 9,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 2,
+    "styleRules": 21,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "en",
+    "title": "MASC accounts",
+    "firstTabStop": "button#signout outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1a-dom",
+    "state": "control_other_style_nonce",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 1,
+    "liveRegions": 8,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 1,
+    "smallestControlHeight": 22,
+    "rawServerTextBlocks": 1,
+    "styleRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgba(0, 0, 0, 0)",
+    "policyViolations": [
+      "style-src-elem inline"
+    ],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "en",
+    "title": "MASC accounts",
+    "firstTabStop": "button#go outline=auto 1px",
+    "horizontalScrollAt320": "454px wide in 320px",
+    "attempts": 1
+  }
+]

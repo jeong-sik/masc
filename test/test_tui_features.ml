@@ -18,7 +18,7 @@ let global_keys =
     Masc_tui_keys.global
 
 let sheet_sections =
-  List.map fst (Masc_tui_keys.help_sections ())
+  List.map fst (Masc_tui_keys.help_sections ~lang:Masc_tui_types.Lang_en ())
 
 let fence_token_is_drawn fence =
   (* A fence token on the feature sheet must be recognized by the Markdown

@@ -20,7 +20,7 @@ val terminal_recovery :
 
 type ownership_observation =
   | Owner_awaiting
-  | Owner_lost
+  | Owner_lost of Execution_agent_scope.recovery_evidence
   | Terminal_observed of
       Execution_event.terminal * Execution_agent_scope.recovery_evidence
 
@@ -29,4 +29,6 @@ val observe_ownership : t -> (ownership_observation, error) result
     authority and refresh the same identity-bound projection while excluding
     new writers. Only a successful locked refresh with no terminal establishes
     [Owner_lost]. That read cannot join a refresh started before the lock.
+    [Owner_lost] carries the recovery evidence of the tree read under that
+    lock, derived as terminal settlement derives it.
     No journal bytes are recovered, appended or replayed. *)

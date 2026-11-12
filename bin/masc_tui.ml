@@ -15681,7 +15681,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       (match toggle_acting_pane state with
        | Ok layout ->
            notice ~kind:Notice_reply
-             ("Activity pane " ^ Masc_tui_acting_pane.layout_label layout)
+             (let ko = state.ui_language = Lang_ko in
+              (if ko then "활동 창 " else "Activity pane ")
+              ^ Masc_tui_acting_pane.layout_label ~ko layout)
        | Error reason -> notice ~kind:Notice_failure reason)
   | Masc_tui_command.Show_acting_pane_tab tab ->
       Masc_tui_message_input.clear state.msg_input;
@@ -15696,7 +15698,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
             | Masc_tui_acting_pane.Tab_changes -> refresh_acting_pane_changes state ~mailbox
             | Masc_tui_acting_pane.Tab_fleet -> ());
            notice ~kind:Notice_reply
-             ("Activity pane on " ^ Masc_tui_acting_pane.tab_label tab)
+             (let ko = state.ui_language = Lang_ko in
+              (if ko then "활동 창 탭: " else "Activity pane on ")
+              ^ Masc_tui_acting_pane.tab_label ~ko tab)
        | Error reason -> notice ~kind:Notice_failure reason)
   | Masc_tui_command.Acting_pane_tab_unknown word ->
       Masc_tui_message_input.clear state.msg_input;
@@ -15720,7 +15724,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            in
            state.acting_pane_call_order <- order;
            notice ~kind:Notice_reply
-             ("Activity calls " ^ Masc_tui_acting_pane.call_order_label order)
+             (let ko = state.ui_language = Lang_ko in
+              (if ko then "활동 창 호출 순서: " else "Activity calls ")
+              ^ Masc_tui_acting_pane.call_order_label ~ko order)
        | Error reason -> notice ~kind:Notice_failure reason)
   | Masc_tui_command.Acting_pane_call_order_unknown word ->
       Masc_tui_message_input.clear state.msg_input;
@@ -28901,9 +28907,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  (max 0. (Unix.gettimeofday () -. at)) ^ " 전" in
            let cause = Option.bind librarian.mlh_state
              Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause in
-           let admission = Option.map (fun worker ->
-             "명시적 메모리 후보: " ^ Masc.Keeper_librarian_pending.description
-               (Masc.Keeper_librarian_pending.Worker worker)) librarian.mlh_admission_wait in
+           let admission = Option.map (fun admission ->
+             "명시적 메모리 후보: " ^ Masc.Keeper_librarian_pending.admission_description admission)
+             librarian.mlh_admission_wait in
            let reading_age = "상태 조회 " ^ Masc_tui_message_layout.span_text
              (max 0. (Unix.gettimeofday () -. mhr_generated_at)) ^ " 전" in
            notice ~kind:Notice_reply (String.concat " · "
@@ -28978,6 +28984,22 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       then
         (match result with
          | Ok snapshot when repository_change_scope_equal snapshot.rcs_scope scope ->
+             (* A re-read can shorten or reorder the list under the cursor.
+                The cursor follows the path it was on; when that path is gone
+                it stays inside the rows read, so the selected row and the
+                position in the here row name a row that is drawn. *)
+             let paths (rows : Masc.Tui_decode.repository_change list) =
+               List.map (fun row -> row.Masc.Tui_decode.rc_path) rows
+             in
+             state.repository_changes_cursor <-
+               Masc_tui_board_selection.reconcile_cursor
+                 ~current_ids:
+                   (match state.repository_changes with
+                    | Some previous -> paths previous.rcs_changes
+                    | None -> [])
+                 ~cursor:state.repository_changes_cursor
+                 ~source:Masc_tui_board_selection.List_cursor
+                 ~next_ids:(paths snapshot.rcs_changes);
              state.repository_changes <- Some snapshot;
              state.repository_changes_error <- None
          | Ok _ ->

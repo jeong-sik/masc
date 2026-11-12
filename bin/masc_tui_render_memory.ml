@@ -45,7 +45,7 @@ let facts_keeper_label ~ko = function
    Typed so the two spellings cannot drift into each other's shape. The unread
    word arrives rendered: whether a read is still in
    flight or came back failed is the caller's reading, and
-   [Masc_tui_types.title_missing_reading] is the one place that words it. *)
+   [Masc_tui_types.here_missing_reading] is the one place that words it. *)
 type facts_reading =
   | Facts_unread of { reading : string }
   | Facts_loaded of
@@ -919,8 +919,8 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
          ; Printf.sprintf (if ko then "저장 %s" else "stored %s")
              (stored_amount state.memory_unit
                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
-         ; (if ko then Printf.sprintf "키퍼 %d명" (List.length snapshot.mhs_keepers)
-            else Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper")
+         ; Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Keeper
+             (List.length snapshot.mhs_keepers)
          ; (match state.memory_unit with
             | Memory_usage.Tokens -> text "저장 추정량, 턴 입력 아님" "stored estimate, not turn input"
             | Memory_usage.Bytes -> text "저장된 지식, 턴 입력 아님" "stored knowledge, not turn input")
@@ -1703,8 +1703,9 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
   let stats_line, pills_line =
     match memory_facts_view state with
     | Masc_tui_fetched.Loading -> (text "  (사실 조회 중)" "  (loading facts…)", "")
-    | Masc_tui_fetched.Absent -> (text "  미조회" ("  " ^ title_unread), "")
-    | Masc_tui_fetched.Failed _ -> (text "  조회 실패" ("  " ^ title_failed), "")
+    | Masc_tui_fetched.Absent -> ("  " ^ here_missing_reading state ~error:None, "")
+    | Masc_tui_fetched.Failed failure ->
+        ("  " ^ here_missing_reading state ~error:(Some failure), "")
     | Masc_tui_fetched.Ready (snapshot, _) | Masc_tui_fetched.Stale ((snapshot, _), _) ->
         let stats =
           facts_stats_row ~ko ~ordinary:ordinary_count ~source:source_count

@@ -119,6 +119,7 @@ let find_keeper json keeper_name =
 let json_int_member name json = U.(json |> member name |> to_int)
 let json_string_member name json = U.(json |> member name |> to_string)
 let json_bool_member name json = U.(json |> member name |> to_bool)
+let json_string_list_member name json = U.(json |> member name |> to_list |> List.map to_string)
 
 let metric_value name ~labels =
   Otel_metric_store.metric_value_or_zero name ~labels ()
@@ -291,6 +292,8 @@ let test_event_queue_pending_is_visible () =
   | None -> fail "keeper row missing"
   | Some keeper ->
     check string "state" "waiting" (json_string_member "state" keeper);
+    check (list string) "the state names what the Keeper waits on"
+      [ "event_queue_pending" ] (json_string_list_member "state_sources" keeper);
     check int "waiting count" 1 (json_int_member "waiting_count" keeper);
     check int "pending source" 1 U.(keeper |> member "sources" |> member "event_queue_pending" |> to_int);
     (match U.(keeper |> member "waiting_on" |> to_list) with
@@ -568,6 +571,8 @@ let test_owner_shutdown_row_is_deferred () =
        | Some keeper ->
          check string "shutdown keeper is deferred" "deferred"
            (json_string_member "state" keeper);
+         check (list string) "the state names what defers the Keeper"
+           [ "owner_shutdown" ] (json_string_list_member "state_sources" keeper);
          check int "shutdown source count" 1
            U.(keeper |> member "sources" |> member "owner_shutdown" |> to_int);
          (match U.(keeper |> member "waiting_on" |> to_list) with
@@ -766,7 +771,11 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
   (match find_keeper json keeper_name with
    | None -> fail "keeper row missing"
    | Some keeper ->
-     check string "keeper state" "waiting" (json_string_member "state" keeper);
+     (* The reservation's time has not come: the row is listed and the
+        Keeper waits for nothing. *)
+     check string "keeper state" "idle" (json_string_member "state" keeper);
+     check (list string) "no source holds the Keeper's state"
+       [] (json_string_list_member "state_sources" keeper);
      check int "keeper waiting count" 1 (json_int_member "waiting_count" keeper);
      check int "keeper schedule source" 1
        U.(keeper |> member "sources" |> member "schedule_waiting" |> to_int);

@@ -30,7 +30,7 @@ function noMemoryChanges(): KeeperMemoryChangesByPass {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v14',
+    schema: 'keeper.memory_os.current_health.v15',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -169,7 +169,7 @@ function addLibrarianAttention(payload: KeeperMemoryHealthResponse) {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v14',
+    schema: 'keeper.memory_os.current_health.v15',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -274,11 +274,13 @@ describe('fetchKeeperMemoryHealth', () => {
   it.each([
     undefined,
     { kind: 'publication', request_id: 'original', detail: 'settling' },
+    { kind: 'basis_changed', request_id: 'original' },
+    { kind: 'local_failure' },
     { kind: 'worker', installation_id: 'installation', request_id: 'original', wait: 'retry_anyway' },
     { kind: 'worker', installation_id: '', request_id: 'original', wait: 'capacity' },
     { kind: 'worker', request_id: 'original', wait: 'capacity' },
     { kind: 'worker', installation_id: 'installation', request_id: 'original', wait: 'capacity', replay: true },
-  ])('refuses an admission wait without its exact supported worker observation: %o', async admission_wait => {
+  ])('refuses an admission observation that is neither an exact worker wait nor a failed pass: %o', async admission_wait => {
     const payload = keeperMemoryHealthPayload()
     Object.assign(payload.keepers[0]!.librarian, { admission_wait })
     getMock.mockResolvedValue(payload)
@@ -314,6 +316,29 @@ describe('fetchKeeperMemoryHealth', () => {
     expect(health.keepers[0]!.librarian).toEqual(librarian)
     expect(health.alert_summary.librarian_attention_required_keepers).toBe(1)
     expect(health.alert_summary.librarian_stopped_keepers).toBe(0)
+  })
+
+  it('carries a failed admission pass as attention beside a drained durable pass', async () => {
+    const payload = keeperMemoryHealthPayload()
+    const admission_wait = { kind: 'local_failure' as const, detail: 'admission pass refused its records' }
+    Object.assign(payload.keepers[0]!.librarian, { admission_wait })
+    addLibrarianAttention(payload)
+    getMock.mockResolvedValue(payload)
+    const health = await fetchKeeperMemoryHealth()
+    expect(health.keepers[0]!.librarian.admission_wait).toEqual(admission_wait)
+    expect(health.keepers[0]!.librarian.state).toBe('drained')
+    expect(health.keepers[0]!.librarian.pending).toBeNull()
+    expect(health.alert_summary.librarian_attention_required_keepers).toBe(1)
+    expect(health.alert_summary.librarian_stopped_keepers).toBe(0)
+  })
+
+  it('refuses a failed admission pass that does not ask for operator action', async () => {
+    const payload = keeperMemoryHealthPayload()
+    Object.assign(payload.keepers[0]!.librarian, {
+      admission_wait: { kind: 'local_failure', detail: 'admission pass refused its records' },
+    })
+    getMock.mockResolvedValue(payload)
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
   })
 
   it('treats a typed local recovery failure as attention without a stopped pass', async () => {
@@ -519,6 +544,7 @@ describe('fetchKeeperMemoryHealth', () => {
     'keeper.memory_os.current_health.v11',
     'keeper.memory_os.current_health.v12',
     'keeper.memory_os.current_health.v13',
+    'keeper.memory_os.current_health.v14',
   ])('rejects an older memory-health envelope: %s', async schema => {
     getMock.mockResolvedValue({ ...keeperMemoryHealthPayload(), schema })
 
@@ -532,7 +558,7 @@ describe('fetchKeeperMemoryHealth', () => {
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v14')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v15')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,

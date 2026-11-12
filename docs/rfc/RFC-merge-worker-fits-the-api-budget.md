@@ -1,7 +1,7 @@
 ---
 rfc: "merge-worker-fits-the-api-budget"
 title: "자동 병합 worker 가 API 한도 안에서 돈다"
-status: Draft
+status: Accepted
 created: 2026-11-12
 updated: 2026-11-12
 author: claude
@@ -10,7 +10,7 @@ related: []
 
 # RFC — 자동 병합 worker 가 API 한도 안에서 돈다
 
-- Status: **Draft.** §6 의 세 가지는 운영자가 고른다. 고르기 전에는 구현하지 않는다.
+- Status: **D1·D2 구현.** 운영자가 2026-11-12 에 §6-1 을 "더한다"로 골랐다. D3 은 구현하지 않았다.
 - 대상: `.github/workflows/approval-merge-request.yml`, `.github/workflows/approval-auto-merge.yml`,
   `scripts/review/approval-auto-merge.py`.
 - 관련 이슈: #51479(한도에 걸린 worker 가 runner 를 쥐고 기다린다), #51465(같은 계정의 반복 승인).
@@ -161,6 +161,26 @@ Native Stack 하나의 크기와 같지 않을 수 있다.
    REST 경로에 맞춰져 있어 시험도 같이 바뀐다.
 3. **GraphQL 한도.** Actions 토큰의 GraphQL 한도가 REST 한도와 따로 계산되는지, 한 시간에 얼마인지는
    확인하지 않았다(확인 필요). D1 과 D3 은 이 값에 기대므로 구현 전에 공식 문서와 실제 응답 헤더로 확인한다.
+
+### 6.1 고른 것과 확인한 것 (2026-11-12)
+
+- §6-1: 운영자가 주기 실행을 더하기로 했다. `.github/workflows/approval-merge-sweep.yml` 이 매시 22분과 52분에 돈다.
+- §6-2: D1 과 D2 를 같은 PR 로 넣었다. D2 만 먼저 들어가면 한도에 걸려 끝난 worker 의 PR 을 주울 것이 없다.
+- §6-3: GitHub 문서는 Actions 의 `GITHUB_TOKEN` GraphQL 한도를 저장소마다 한 시간 1,000점으로 적고,
+  REST 한도와 따로 센다고 적는다(`docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api`,
+  2026-11-12 확인). 점수는 connection 요청 수를 100으로 나눈 값이다.
+  열린 PR 51개를 읽는 질의를 사용자 토큰으로 한 번 보냈고 1점이 줄었다. 한 번의 확인은 PR 100개마다 약 1점을 쓴다.
+  Actions 토큰으로 잰 값은 확인 실행의 summary 에 남는 `quota_before`·`quota_after` 로 본다.
+
+D1 의 확인이 worker 를 돌리는 범위는 다음과 같다.
+
+- main 을 base 로 하고, 서로 다른 두 계정이 지금 head 를 승인했고, Draft·`release/*`·충돌 상태가 아닌 PR.
+- 그 PR 위에 쌓인 열린 PR 이 있으면 전부 같은 조건을 채워야 한다. 하나라도 못 채우면 그 PR 이 Native Stack 인지
+  REST 한 번으로 읽는다. Stack 이면 건너뛰고, 아니면 그 PR 만 worker 에 넘긴다.
+- Auto-merge 예약이 걸린 단독 PR 은 건너뛴다. GitHub 가 직접 병합한다.
+
+확인의 비용은 고정된 GraphQL 질의와, 범위마다 worker 한 번이다. 승인은 받았는데 required check 가 실패한 스택은
+확인 때마다 worker 가 다시 읽는다. 이런 스택이 몇 개인지는 재지 않았고, summary 의 `candidates` 로 본다.
 
 ## 7. 확인하지 못한 것
 

@@ -774,7 +774,9 @@ let keeper_message_identity ~max_cells state keeper_name =
         match Keeper_control.next_action reading with
         | None -> text
         | Some _ ->
-            let clause = " \xc2\xb7 next: " ^ keeper_suggested_action reading in
+            let clause =
+              ui_text state ~ko:" \xc2\xb7 다음: " ~en:" \xc2\xb7 next: "
+              ^ keeper_suggested_action ~ko:(state.ui_language = Lang_ko) reading in
             if Message_layout.display_width text + Message_layout.display_width clause
                <= max_cells then text ^ clause else text
       in
@@ -830,18 +832,21 @@ let keeper_message_identity ~max_cells state keeper_name =
         let compact_status = match reading.Keeper_control.liveness with
           | Keeper_control.Absent ->
               (match keeper.k_origin with
-               | Tui_decode.Declared_keeper _ -> "아직 시작하지 않음"
+               | Tui_decode.Declared_keeper _ ->
+                   ui_text state ~ko:"아직 시작하지 않음" ~en:"never started"
                (* [status] is the only place the bare header carries the
                   Keeper's AUTO/YOLO mode and gate, so the absent label keeps
                   that stance. *)
-               | Persisted_keeper | Remote_keeper -> "absent" ^ stance)
+               | Persisted_keeper | Remote_keeper ->
+                   ui_text state ~ko:"없음" ~en:"absent" ^ stance)
           | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
         with_suggested_action (fit_identity (compact_status ^ Ansi.reset))
       else (match runtime with
        | None ->
            let detail = match keeper.k_origin with
              | Tui_decode.Declared_keeper requirements ->
-               "아직 시작하지 않음 · " ^ String.concat " · "
+               ui_text state ~ko:"아직 시작하지 않음" ~en:"never started"
+               ^ " · " ^ String.concat " · "
                  (List.map Masc.Keeper_declared_roster.requirement_label requirements)
              | Persisted_keeper | Remote_keeper -> status ^ " · —"
            in
@@ -4403,9 +4408,9 @@ let render_keeper_message (state : state) =
   | None ->
     box_top buf cols;
     box_line buf cols
-      (Printf.sprintf "%s  %s"
-         (screen_title " Keepers \xe2\x96\xb8 chat")
-         (connection_badge state));
+      (here_row ~cols state
+         ~path:[ ui_text state ~ko:"채팅" ~en:"chat" ]
+         ~readings:[] ~position:None);
     box_divider buf cols;
     box_line_styled buf cols ~style:(Theme.recede ()) "  No keeper selected.";
     for _ = 1 to max 0 (rows - 6) do
@@ -4457,10 +4462,17 @@ let render_keeper_message (state : state) =
          mode away from its default is spelled -- see
          [Tui_types.chat_visibility_summary] for why. *)
       let modes = status_frame.kmsf_title_suffix in
-      let title =
-        Printf.sprintf "%s Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat%s"
-          (Theme.recede ()) display_keeper_name Ansi.reset
+      (* A name the row cannot hold whole folds in the middle, so the step
+         after it stays on the row. *)
+      let chat_step = ui_text state ~ko:"채팅" ~en:"chat" in
+      let name =
+        Message_layout.truncate_middle
+          (max heading_id_floor
+             (here_steps_room ~cols:chat_cols state ~steps:2
+                ~after:(Message_layout.display_width chat_step)))
+          display_keeper_name
       in
+      let title = here_path state ~path:[ name; chat_step ] in
       let mode_suffix =
         (if state.observer_source_loss then
            "  " ^ Theme.warn () ^ "[events lost]" ^ Ansi.reset
@@ -4498,14 +4510,19 @@ let render_keeper_message (state : state) =
         match reading with
         | Masc_tui_fetched.Ready observation ->
             Observation_layout.context_header_item
+              ~ko:(state.ui_language = Lang_ko)
               ~max_cells:(min
                 (if state.msg_origin_display = Message_layout.Origin_bare then 24 else 48)
                 (telemetry_identity_cells / 2))
               ~inspect_key:Masc_tui_keys.context_inspector_label observation
-        | Masc_tui_fetched.Stale _ -> Some "Context refresh failed"
-        | Masc_tui_fetched.Failed _ -> Some "Context unavailable"
-        | Masc_tui_fetched.Loading -> Some "Context reading"
-        | Masc_tui_fetched.Absent -> Some "Context —"
+        | Masc_tui_fetched.Stale _ ->
+            Some (ui_text state ~ko:"컨텍스트 새로 조회 실패" ~en:"Context refresh failed")
+        | Masc_tui_fetched.Failed _ ->
+            Some (ui_text state ~ko:"컨텍스트 조회 실패" ~en:"Context unavailable")
+        | Masc_tui_fetched.Loading ->
+            Some (ui_text state ~ko:"컨텍스트 조회 중" ~en:"Context reading")
+        | Masc_tui_fetched.Absent ->
+            Some (ui_text state ~ko:"컨텍스트 —" ~en:"Context —")
     in
     let context_cells =
       match context_item with
@@ -5060,6 +5077,10 @@ let render_keeper_message (state : state) =
       Masc_tui_keeper_chat_queue.length_for_keeper state.msg_queued
         ~keeper_name
     in
+    (* Every name on this row is written in both languages. The keys and the
+       commands an operator types ([/queue resume]) stay as they are typed. *)
+    let ko = state.ui_language = Lang_ko in
+    let say korean english = if ko then korean else english in
     let enter_hint =
       (* What the key does is read once, by [send_disposition]; the in-flight
          kind only names what is happening while it does it. Answering both
@@ -5070,48 +5091,56 @@ let render_keeper_message (state : state) =
            rather than a second copy. The operator has to be told which of the
            two this Enter is: the composer looks identical either way. *)
         match current_recall_edit state with
-        | Some _ -> "Enter:replace the queued line  Ctrl-U:leave it queued"
+        | Some _ ->
+            say "Enter:대기 줄 바꾸기  Ctrl-U:대기 줄 그대로"
+              "Enter:replace the queued line  Ctrl-U:leave it queued"
         | None -> (
             match pending_count with
-            | 0 -> "Enter:send update"
+            | 0 -> say "Enter:추가 전송" "Enter:send update"
             | waiting ->
                 if state.msg_tool_visibility = Tools_full then
                   Printf.sprintf
-                    "Enter:send update (%d local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit"
+                    (if ko then
+                       format_of_string
+                         "Enter:추가 전송 (로컬 %d)  Ctrl-T:대기열  Ctrl-K:취소  Ctrl-P:고치기"
+                     else
+                       "Enter:send update (%d local)  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit")
                     waiting
-                else "Enter:send update  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit")
+                else
+                  say "Enter:추가 전송  Ctrl-T:대기열  Ctrl-K:취소  Ctrl-P:고치기"
+                    "Enter:send update  Ctrl-T:queue  Ctrl-K:cancel  Ctrl-P:edit")
+      in
+      let disabled () =
+        if Option.is_some state.keepers_error then
+          say "Enter:못 보냄 (목록 조회 실패)" "Enter:disabled (roster unavailable)"
+        else say "Enter:못 보냄 (키퍼에 닿지 않음)" "Enter:disabled (Keeper unavailable)"
       in
       match disposition with
       | Updates _ -> queue_hint ()
       | Queues_until_resume when target_registered ->
-          let full = "Enter:queue  /queue resume" in
+          let full = say "Enter:대기열" "Enter:queue" ^ "  /queue resume" in
           if Message_layout.display_width full <= max 0 (framed_inner_width chat_cols)
           then full else "/queue resume"
-      | Queues_until_resume ->
-          if Option.is_some state.keepers_error then
-            "Enter:disabled (roster unavailable)"
-          else "Enter:disabled (Keeper unavailable)"
+      | Queues_until_resume -> disabled ()
       | Sends ->
-          if target_registered then "Enter:send"
-          else if Option.is_some state.keepers_error then
-            "Enter:disabled (roster unavailable)"
-          else "Enter:disabled (Keeper unavailable)"
+          if target_registered then say "Enter:전송" "Enter:send"
+          else disabled ()
     in
     let scroll_hint =
-      Message_layout.scroll_hint ~scrolled_back:scroll
+      Message_layout.scroll_hint ~ko ~scrolled_back:scroll
         ~older_exist:state.msg_older_exist
     in
     (* Beside the keys, not among them. The fitter gives up key items from the
        back, and this is the one item on the row that [?] cannot recover. *)
     let scroll_position =
-      Message_layout.scroll_position ~scrolled_back:scroll
+      Message_layout.scroll_position ~ko ~scrolled_back:scroll
         ~older_exist:state.msg_older_exist
     in
     let return_hint () =
       match state.msg_return with
-      | Keeper_chat_return_home -> "Esc:Dashboard"
-      | Keeper_chat_return_list -> "Esc:list"
-      | Keeper_chat_return_detail -> "Esc:detail"
+      | Keeper_chat_return_home -> say "Esc:운영" "Esc:Dashboard"
+      | Keeper_chat_return_list -> say "Esc:목록" "Esc:list"
+      | Keeper_chat_return_detail -> say "Esc:상세" "Esc:detail"
     in
     (* The hint is the dispatch's own table, not a retelling of it: both read
        Masc_tui_esc_interrupt.action, so the footer cannot advertise an
@@ -5124,16 +5153,17 @@ let render_keeper_message (state : state) =
             ~now_ns:(Mtime_clock.elapsed_ns ()) state keeper_name entry)
         | None -> Masc_tui_types.keeper_observed_interrupt_action state keeper_name) in
       match action with
-      | Some Masc_tui_esc_interrupt.Launch_interrupt -> "Esc:stop current turn"
-      | Some Swallow -> "Esc:interrupt requested"
+      | Some Masc_tui_esc_interrupt.Launch_interrupt ->
+          say "Esc:지금 턴 멈춤" "Esc:stop current turn"
+      | Some Swallow -> say "Esc:멈춤 요청함" "Esc:interrupt requested"
       | Some Leave -> return_hint ()
       | None ->
         match state.msg_live with
         | Some live ->
           (match Masc_tui_esc_interrupt.action ~now_ns:(Mtime_clock.elapsed_ns ())
             (Keeper_chat_transcript.interrupt live.tl_transcript) with
-           | Launch_interrupt -> "Esc:interrupt turn"
-           | Swallow -> "Esc:interrupt sent"
+           | Launch_interrupt -> say "Esc:턴 멈춤" "Esc:interrupt turn"
+           | Swallow -> say "Esc:멈춤 보냄" "Esc:interrupt sent"
            | Leave -> return_hint ())
         | None -> return_hint ()
     in
@@ -5148,14 +5178,15 @@ let render_keeper_message (state : state) =
         if Masc_tui_keys.chat_quiet_leave ~input_supported:true
              ~turn_active:(keeper_message_turn_active state)
              ~draft_empty:(keeper_message_draft_empty state) "Q"
-        then "  Q / Ctrl-Q:leave"
-        else "  Ctrl-Q:leave"
+        then say "  Q / Ctrl-Q:나가기" "  Q / Ctrl-Q:leave"
+        else say "  Ctrl-Q:나가기" "  Ctrl-Q:leave"
       else ""
     in
     let switch_hint =
       match next_keeper_message_target state with
       | Masc_tui_keeper_selection.No_alternative -> ""
-      | Masc_tui_keeper_selection.Switch_to _ -> "  Ctrl-G:next Keeper"
+      | Masc_tui_keeper_selection.Switch_to _ ->
+          say "  Ctrl-G:다음 키퍼" "  Ctrl-G:next Keeper"
     in
     (* A composer holding a slash word gets a footer about that word instead
        of the key list. The keys have not changed and one backspace brings
@@ -5169,15 +5200,19 @@ let render_keeper_message (state : state) =
        are. *)
     let slash_hint =
       match command_window with
-      | Some _ -> Some "↑/↓:select  Tab/Enter:insert  Esc:close"
+      | Some _ ->
+          Some
+            (say "↑/↓:선택  Tab/Enter:넣기  Esc:닫기"
+               "↑/↓:select  Tab/Enter:insert  Esc:close")
       | None -> slash_hint_text ~restore:Ansi.default_fg (Masc_tui_message_input.contents state.msg_input)
     in
     let help_hint =
-      if help_door then "  ?:help"
+      if help_door then "  " ^ Masc_tui_footer.help_hint ~ko
       else ""
     in
     let footer_hints =
-      if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
+      if state.keeper_navigation_open then
+        Masc_tui_keys.keeper_navigation_hints ~lang:state.ui_language
       else
       match slash_hint with
       | Some line -> line
@@ -5210,57 +5245,72 @@ let render_keeper_message (state : state) =
         (* Both endings, because they are not the same and the difference is
            what the operator loses. Ctrl-Y keeps the sentence; Esc abandons it. *)
         Printf.sprintf
-          "%s  %s%s send · Esc discard%s"
+          "%s  %s%s %s · Esc %s%s"
           bar
           Ansi.dim
           Masc_tui_keys.voice_speak_key
+          (say "전송" "send")
+          (say "버리기" "discard")
           Ansi.reset
       (* Between utterances in continuous mode: on, but nothing recording. A
          mode that is idle looks exactly like one that is off without this. *)
       | None when state.voice_continuous <> None ->
         Printf.sprintf
-          "%s대기 중 — 말하면 잡습니다 · %s to stop%s"
+          "%s%s · %s %s%s"
           Ansi.dim
+          (say "대기 중 — 말하면 잡습니다" "waiting — speech starts a capture")
           Masc_tui_keys.voice_listen_key
+          (say "멈춤" "to stop")
           Ansi.reset
       | None ->
       if state.keeper_message_focus = Left_pane then
-        "Up/Down:move  Enter:open  Right/Esc:chat"
+        say "Up/Down:선택  Enter:열기  Right/Esc:채팅"
+          "Up/Down:move  Enter:open  Right/Esc:chat"
       else if state.msg_origin_display = Message_layout.Origin_bare then
         let context_hints = match disposition, current_recall_edit state with
-          | Updates _, Some _ -> ["Enter:replace"; "^U:leave queued"]
+          | Updates _, Some _ ->
+              [ say "Enter:바꾸기" "Enter:replace"; say "^U:그대로" "^U:leave queued" ]
           | Updates _, None when pending_count > 0 ->
-              ["Enter:update"; "^T:queue"; "^K:cancel"; "^P:edit"]
-          | Updates _, None -> ["Enter:update"]
+              [ say "Enter:추가 전송" "Enter:update"; say "^T:대기열" "^T:queue"
+              ; say "^K:취소" "^K:cancel"; say "^P:고치기" "^P:edit" ]
+          | Updates _, None -> [ say "Enter:추가 전송" "Enter:update" ]
           | Queues_until_resume, _ when target_registered ->
-              let full = "Enter:queue  /queue resume" in
+              let queue = say "Enter:대기열" "Enter:queue" in
+              let full = queue ^ "  /queue resume" in
               if Message_layout.display_width full <= max 0 (framed_inner_width chat_cols)
-              then ["Enter:queue"; "/queue resume"]
-              else ["/queue resume"; "Enter:queue"]
+              then [ queue; "/queue resume" ]
+              else [ "/queue resume"; queue ]
           | Sends, _ | Queues_until_resume, _ -> [] in
         (match context_hints with
-         | [] -> Masc_tui_footer.minimal_chat_hints ~max_cells:(max 0 (framed_inner_width chat_cols))
+         | [] -> Masc_tui_footer.minimal_chat_hints ~ko ~max_cells:(max 0 (framed_inner_width chat_cols))
              ~enter_hint ~escape_hint
-         | _ :: _ -> Masc_tui_footer.minimal_context_chat_hints ~max_cells:(max 0 (framed_inner_width chat_cols))
+         | _ :: _ -> Masc_tui_footer.minimal_context_chat_hints ~ko ~max_cells:(max 0 (framed_inner_width chat_cols))
              ~context_hints ~escape_hint)
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with
           | Updates _ -> (
               match current_recall_edit state with
-              | Some _ -> "Enter:replace queued  Ctrl-U:leave it"
+              | Some _ ->
+                  say "Enter:대기 줄 바꾸기  Ctrl-U:그대로"
+                    "Enter:replace queued  Ctrl-U:leave it"
               | None ->
-                  Printf.sprintf "Enter:send (%d local)  Ctrl-T:queue  Ctrl-K:cancel"
+                  Printf.sprintf
+                    (if ko then
+                       format_of_string
+                         "Enter:전송 (로컬 %d)  Ctrl-T:대기열  Ctrl-K:취소"
+                     else "Enter:send (%d local)  Ctrl-T:queue  Ctrl-K:cancel")
                     pending_count)
           | Sends | Queues_until_resume -> enter_hint
         in
         let compact_scroll_hint =
-          if scroll = 0 then "PgUp:history" else "PgDn:newest"
+          if scroll = 0 then say "PgUp:이전 대화" "PgUp:history"
+          else say "PgDn:최신" "PgDn:newest"
         in
-        Masc_tui_footer.compact_chat_hints ~enter_hint:compact_enter_hint
+        Masc_tui_footer.compact_chat_hints ~ko ~enter_hint:compact_enter_hint
           ~scroll_hint:compact_scroll_hint ~escape_hint ~help_hint
       else
-        Masc_tui_footer.chat_hints ~enter_hint ~scroll_hint ~switch_hint
+        Masc_tui_footer.chat_hints ~ko ~enter_hint ~scroll_hint ~switch_hint
           ~escape_hint ~leave_hint ~help_hint
     in
     let input_column =

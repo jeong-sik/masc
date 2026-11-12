@@ -88,6 +88,18 @@ class Hold(ValueError):
     """Known unmet merge condition; another review/event can recheck it."""
 
 
+# A run started by an event ends at a quota instead of sleeping on a runner
+# until the server's reset time: on 2026-11-12 runs that met the quota held
+# 28, 13 and 37 runners at once for half an hour or more. The scheduled sweep
+# (approval-merge-sweep.py) finds the scope such a run left unmerged. Only
+# admission reads end this way. Once a merge request is accepted, `follow`
+# keeps its own wait: the receipt must not be dropped.
+_ADMISSION = {'ends_at_quota': False}
+# Exit status of a run that ended at a quota during admission. The sweep reads
+# it to stop: every later candidate would meet the same quota.
+QUOTA_EXIT = 75
+
+
 def read(path):
     return CLIENT.read(path)
 
@@ -102,18 +114,23 @@ def scope_snapshot(repo, selected, head):
 
 def stable_reads(action):
     """A quota pause discards read evidence, never repeats a write."""
-    while True:
-        pauses = CLIENT.pauses
-        try:
-            result = action()
-        except GET.ApiFailure:
-            raise
-        except ValueError:
-            if CLIENT.pauses == pauses:
+    if _ADMISSION['ends_at_quota']:
+        CLIENT.deadline = CLIENT.clock()
+    try:
+        while True:
+            pauses = CLIENT.pauses
+            try:
+                result = action()
+            except GET.ApiFailure:
                 raise
-            continue
-        if CLIENT.pauses == pauses:
-            return result
+            except ValueError:
+                if CLIENT.pauses == pauses:
+                    raise
+                continue
+            if CLIENT.pauses == pauses:
+                return result
+    finally:
+        CLIENT.deadline = None
 
 
 def pull(repo, number):
@@ -276,7 +293,10 @@ def prepare_reads(repo, number):
     selected, _, head = REVIEWS.pr_identity(top)
     if top['state'] != 'open' or top['draft'] is not False or top['merged'] is not False:
         raise Hold(f'#{selected} is not open and ready')
-    before = scope_snapshot(repo, selected, head)
+    # The rows are the scope's own read of each member, so review evidence
+    # needs no second read of a layer; the closing snapshot below still
+    # refuses a head that moved in between.
+    before, rows = STACKS.read_scope(repo, selected, head, get=read)
     selected_identity = next(member['identity'] for member in before['scope']
                              if member['number'] == selected)
     destination = (before['stack']['base']['ref'] if before['stack'] else
@@ -292,10 +312,7 @@ def prepare_reads(repo, number):
             raise Hold('Release/Tag candidates retain manual full-CI admission')
         if identity['state'] != 'open' or identity['draft'] is not False:
             raise Hold(f'#{member["number"]} is not open and ready')
-        current = pull(repo, member['number'])
-        if current['head']['sha'] != identity['head']['sha']:
-            raise Hold(f'#{member["number"]} head changed')
-        histories[member['number']] = review_evidence(repo, current)
+        histories[member['number']] = review_evidence(repo, rows[member['number']])
     # The head of the selected pull request holds every layer of the scope.
     unproven = unproven_skip(repo, head, destination)
     if unproven is not None:
@@ -731,8 +748,12 @@ def emit(result):
 
 
 def main():
+    global WAIT_SECONDS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true', help='read admission without merging')
+    parser.add_argument('--hand-off-now', action='store_true',
+                        help='hand an accepted stack request to a fresh run instead of '
+                             'following it here')
     args = parser.parse_args()
     exit_code = 0
     try:
@@ -741,6 +762,9 @@ def main():
             raise ValueError('invalid repository')
         _WAKE['repo'] = repo
         _WAKE['enabled'] = not args.dry_run
+        _ADMISSION['ends_at_quota'] = not args.dry_run
+        if args.hand_off_now:
+            WAIT_SECONDS = 0
         number = requested_pr()
         raw_receipt = os.environ.get('DISPATCH_RECEIPT', '')
         if raw_receipt and os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
@@ -766,14 +790,23 @@ def main():
     except Hold as error:
         result = {'status': 'held', 'reason': str(error)}
         if _WAKE['enabled']:
+            if _ADMISSION['ends_at_quota']:
+                CLIENT.deadline = CLIENT.clock()  # this read must not sleep either
             woken = wake_if_already_merged(_WAKE['repo'], number)
             if woken is not None:
                 result['main_build'] = woken
                 result['head_branches'] = delete_merged_heads(_WAKE['repo'], [number])
                 result['linked_issues'] = close_linked_issues(_WAKE['repo'], [number])
+    except GET.QuotaWaitCutShort as error:
+        # `on_quota` already emitted status=rate_limited with retry_at.
+        print(f'approval-auto-merge: ended at a quota during admission, no merge was '
+              f'requested: {error}', file=sys.stderr)
+        return QUOTA_EXIT
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
         print(f'approval-auto-merge: cannot establish or submit merge: {error}', file=sys.stderr)
         return 1
+    finally:
+        _ADMISSION['ends_at_quota'] = False
     emit(result)
     return exit_code
 

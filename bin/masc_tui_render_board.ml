@@ -366,8 +366,7 @@ let board_hearth_census_line ~cols (state : state) =
          ends on -- was cut to "19". *)
       let cells = Message_layout.display_width in
       let tail =
-        Printf.sprintf "   %s" (if state.ui_language = Lang_ko then Printf.sprintf "글 %d개" total
-          else Masc_tui_message_layout.count_noun total "post")
+        Printf.sprintf "   %s" (count_reading state Masc_tui_value.Count.Post total)
       in
       let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
       let label_gap = " " in
@@ -483,7 +482,7 @@ let render_board_list (state : state) =
       ~readings:
         [ (match Masc_tui_fetched.value observation with
            | Some _ -> ""
-           | None -> if pending then (words state "글 조회 중" "reading posts") else words state (if Option.is_some list_error then "조회 실패" else "미조회") (field_missing_reading ~error:list_error))
+           | None -> if pending then (words state "글 조회 중" "reading posts") else here_missing_reading state ~error:list_error)
         ; hearth ]
       ~position:
         (match Masc_tui_fetched.value observation with

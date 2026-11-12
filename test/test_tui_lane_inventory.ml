@@ -301,7 +301,7 @@ let exact_outputs_wire_is_strict () =
    installation, a failed one and a lane nobody set up must not read alike. *)
 let standing_reads_what_the_row_says () =
   let module S = Masc_tui_lane_standing in
-  let standing = Alcotest.testable (fun f value -> Format.pp_print_string f (S.word value)) ( = ) in
+  let standing = Alcotest.testable (fun f value -> Format.pp_print_string f (S.word ~korean:false value)) ( = ) in
   let row_of state = { Decode.id = "row"; label = "row"; purpose = "fixture purpose"; ui_category = None;
     selection = Decode.Declaration "/config/lane-addons/browser-work.toml"; state } in
   let worker ?(presence = Decode.Live) phase = { Decode.instance_id = "worker"; incarnation = "worker"; run_id = "browser-work";
@@ -356,7 +356,7 @@ let standing_reads_what_the_row_says () =
    STATE text does. *)
 let exact_standing_reads_the_run_observation () =
   let module S = Masc_tui_lane_standing in
-  let standing = Alcotest.testable (fun f value -> Format.pp_print_string f (S.word value)) ( = ) in
+  let standing = Alcotest.testable (fun f value -> Format.pp_print_string f (S.word ~korean:false value)) ( = ) in
   let decoded = ok (Decode.decode (snapshot [])) in
   let lane = List.hd decoded.exact_snapshot.sls_lanes in
   let row = List.find (fun (row : Decode.row) -> match row.selection with

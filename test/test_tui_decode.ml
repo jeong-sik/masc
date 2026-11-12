@@ -5346,7 +5346,7 @@ let disabled_memory_execution =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v14")
+    [ ("schema", `String "keeper.memory_os.current_health.v15")
     ; ("execution", disabled_memory_execution)
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
@@ -5469,7 +5469,7 @@ let test_decode_memory_health_reads_change_history () =
   in
   Alcotest.(check bool) "the unchanged current fixture decodes" false
     (memory_health_rejects json);
-  (* Keep the v14 checks on the retained fixture after the large older
+  (* Keep the row checks on the retained fixture after the large older
      memory-health matrix moved to the server response tests. *)
   let healthy_field name value = map_keeper (replace_field name value) json in
   let point recorded_at facts =

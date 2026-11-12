@@ -12,6 +12,9 @@ type t = {
   fetched : (string, Masc.Tui_decode.keeper_call) Fetched.t;
   document : Reading.t;
 }
+(* This reader's titles and section names are written in English only, so the
+   capture note under them is English too. *)
+let titles_in_korean = false
 let section heading body = { Reading.heading; body }
 let selection_document choices cursor =
   let sections = match List.nth_opt choices cursor with
@@ -21,7 +24,7 @@ let selection_document choices cursor =
            choice.execution_id;
          section "Original input" choice.args]
         @ (match choice.subject with None -> [] | Some subject -> [section "Original target" subject]) in
-  Reading.create ~title:"Original calls · j/k choose · Enter read · Esc back" sections
+  Reading.create ~ko:titles_in_korean ~title:"Original calls · j/k choose · Enter read · Esc back" sections
 let create choices =
   (* Preserve the first original occurrence; repeated delivery is not a new call. *)
   let module Ids = Set.Make(String) in
@@ -91,7 +94,7 @@ let output_sections (call:Masc.Tui_decode.keeper_call) =
       "The ledger preview declares truncation to %d bytes; the original source is read separately." bytes)])
 let result_document t =
   match selected t with
-  | None -> Reading.create ~title:"Original calls" [section "Unavailable" "No original execution ID is recorded in this conversation."]
+  | None -> Reading.create ~ko:titles_in_korean ~title:"Original calls" [section "Unavailable" "No original execution ID is recorded in this conversation."]
   | Some choice ->
     let state = observation t in
     let observation = match state with

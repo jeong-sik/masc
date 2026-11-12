@@ -116,6 +116,7 @@ let fixture : Pane.input =
   ; changes = Pane.Changes_absent
   ; call_order = Pane.Oldest_first
   ; expanded = []
+  ; ko = false
   }
 
 let text (line : Pane.line) = String.concat "" (List.map (fun s -> s.Pane.text) line)
@@ -176,7 +177,7 @@ let middling = Pane.wide_threshold_cols - 1
 let narrow = Pane.threshold_cols - 1
 
 let layout =
-  testable (fun ppf l -> Format.pp_print_string ppf (Pane.layout_label l)) ( = )
+  testable (fun ppf l -> Format.pp_print_string ppf (Pane.layout_label ~ko:false l)) ( = )
 
 let test_ctrl_l_walks_narrow_wide_hidden () =
   let step layout_now cols = Pane.next_layout ~layout:layout_now ~cols in

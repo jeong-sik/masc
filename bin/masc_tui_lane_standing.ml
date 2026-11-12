@@ -12,7 +12,7 @@ let mark = function
   | Off | Not_set_up -> "○"
   | Unobserved -> "?"
 
-let word ?(korean = false) standing =
+let word ~korean standing =
   match standing with
   | Ready -> if korean then "사용 가능" else "ready"
   | Configured -> if korean then "설정됨" else "configured"
@@ -39,12 +39,12 @@ let recedes = function
   | Off | Not_set_up | Unobserved -> true
   | Ready | Configured | Waiting | Changing | Failing -> false
 
-let count_items ?(korean = false) standings =
+let count_items ~korean standings =
   List.filter_map (fun standing ->
       match List.length (List.filter (( = ) standing) standings) with
       | 0 -> None
       | count ->
           Some
             (if korean then Printf.sprintf "%s %d" (word ~korean standing) count
-             else Printf.sprintf "%d %s" count (word standing)))
+             else Printf.sprintf "%d %s" count (word ~korean standing)))
     all

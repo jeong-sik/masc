@@ -304,7 +304,159 @@ let alternating_windows_answer_one_pass_each () = fixture (fun config scope day 
            (read fresh window) (read config window))
       [ History.One_day; History.Seven_days; History.Fourteen_days ]))
 
+(* Z.AI states what each row limits in its answer; the stored row has to say
+   it too, because source and kind alone do not. *)
+let stored_rows config =
+  Dated_jsonl.read_recent (usage_journal config) 1000
+  |> List.concat_map (function `List rows -> rows | _ -> [])
+
+let stored_rows_carry_the_window_role () = fixture (fun config scope day ->
+  Usage.record ~scope ~observed_at:(day +. 10.) (decode Usage.decode_zai_quota_limit
+    {|{"code":200,"msg":"Operation successful","success":true,"data":{"level":"max","limits":[{"type":"TIME_LIMIT","unit":5,"number":1,"usage":4000,"currentValue":270,"remaining":3730,"percentage":6,"nextResetTime":1790326488997,"usageDetails":[{"modelCode":"search-prime","usage":270}]},{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":4,"nextResetTime":1790259391823}]}}|});
+  let roles =
+    stored_rows config
+    |> List.filter_map (fun row ->
+         match Yojson.Safe.Util.member "limit_id" row, Yojson.Safe.Util.member "role" row with
+         | `String limit_id, `String role -> Some (limit_id, role)
+         | _ -> None)
+    |> List.sort compare in
+  check (list (pair string string)) "each window row states its own role"
+    [ "TIME_LIMIT", "counts_other_use"; "TOKENS_LIMIT", "gates_model_calls" ] roles)
+
+let other_scope config name =
+  Runtime_quota_window.scope_of_credential
+    ~provider_id:(config.Workspace.base_path ^ "/" ^ name) None
+
+(* A restart: the reports are on disk and the table has never seen the
+   scope. [store_only] has the installed sink store the report for a scope
+   of its own, then stores the same rows again under [scope]'s digest, so
+   the rows are the sink's and the table holds nothing for [scope]. *)
+let store_only config scope ~observed_at report =
+  let target = History.scope_id scope in
+  let writer = other_scope config (Printf.sprintf "writer-%s-%.0f" target observed_at) in
+  Usage.record ~scope:writer ~observed_at report;
+  let written = `String (History.scope_id writer) in
+  let rows =
+    List.filter_map
+      (function
+        | `Assoc fields when List.assoc_opt "scope_id" fields = Some written ->
+            Some
+              (`Assoc
+                 (List.map
+                    (fun (key, value) ->
+                      if String.equal key "scope_id" then key, `String target else key, value)
+                    fields))
+        | _ -> None)
+      (stored_rows config)
+  in
+  Dated_jsonl.append (usage_journal config) (`List rows)
+
+let restore config ~now scopes =
+  match History.restore config ~now ~scopes with
+  | Ok () -> ()
+  | Error detail -> fail detail
+
+let restored scope =
+  match Usage.state ~scope with
+  | Usage.Reported (first, rest) ->
+      List.map
+        (fun (r : Usage.recorded) -> r.Usage.window.Usage.limit_id, r.Usage.observed_at)
+        (first :: rest)
+  | Usage.Not_reported_since_start | Usage.Reported_no_windows _ -> []
+
+let rest_end scope ~now =
+  match Runtime_quota_window.rest ~scope ~now with
+  | Some (Runtime_quota_window.Reset_stated at) -> Some at
+  | Some (Runtime_quota_window.Observed_until at) -> Some at
+  | None -> None
+
+(* [tokens]/[time] are percentages; a reset is seconds since the epoch. *)
+let zai ~tokens ~tokens_reset ~time ~time_reset =
+  let reset = function
+    | None -> ""
+    | Some at -> Printf.sprintf {|,"nextResetTime":%d000|} (Float.to_int at)
+  in
+  decode Usage.decode_zai_quota_limit
+    (Printf.sprintf
+       {|{"code":200,"msg":"Operation successful","success":true,"data":{"level":"max","limits":[{"type":"TIME_LIMIT","unit":5,"number":1,"percentage":%d%s},{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":%d%s}]}}|}
+       time (reset time_reset) tokens (reset tokens_reset))
+
+let restart_rests_a_scope_only_as_a_live_report_would () = fixture (fun config scope day ->
+  let now = day +. 60. in
+  let ahead = day +. 7200. in
+  (* Spent model-call window, reset ahead: rests until that reset. *)
+  store_only config scope ~observed_at:(day +. 10.)
+    (zai ~tokens:100 ~tokens_reset:(Some ahead) ~time:6 ~time_reset:(Some ahead));
+  (* Only the window that does not gate model calls is spent. *)
+  let other_use = other_scope config "other-use" in
+  store_only config other_use ~observed_at:(day +. 10.)
+    (zai ~tokens:4 ~tokens_reset:(Some ahead) ~time:100 ~time_reset:(Some ahead));
+  (* Spent, and its stated reset passed before the restart. *)
+  let passed = other_scope config "passed" in
+  store_only config passed ~observed_at:(day +. 10.)
+    (zai ~tokens:100 ~tokens_reset:(Some (day +. 30.)) ~time:6 ~time_reset:(Some ahead));
+  (* Spent without a stated reset. *)
+  let open_ended = other_scope config "open-ended" in
+  store_only config open_ended ~observed_at:(day +. 10.)
+    (zai ~tokens:100 ~tokens_reset:None ~time:6 ~time_reset:(Some ahead));
+  (* Antigravity: one of two windows spent. *)
+  let partly = other_scope config "partly" in
+  store_only config partly ~observed_at:(day +. 10.)
+    (decode Usage.decode_antigravity_usage
+       {|{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":[{"id":"week","window":"weekly","remaining_fraction":0},{"id":"short","window":"5h","remaining_fraction":0.5}]}]}}}|});
+  (* Codex: a spent window is shown and rests nothing. *)
+  let codex = other_scope config "codex" in
+  store_only config codex ~observed_at:(day +. 10.)
+    (decode Usage.decode_codex_rate_limits_updated
+       (Printf.sprintf
+          {|{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":%d},"secondary":{"usedPercent":20,"windowDurationMins":10080}}}|}
+          (Float.to_int ahead)));
+  let sunk = ref 0 in
+  Usage.set_record_observer (fun ~scope:_ ~observed_at:_ _ -> incr sunk);
+  restore config ~now [ scope; other_use; passed; open_ended; partly; codex ];
+  check int "restored reports are not stored again" 0 !sunk;
+  check (option (float 0.)) "spent until a reset ahead" (Some ahead) (rest_end scope ~now);
+  check (list (pair (option string) (float 0.))) "windows keep the time they were observed"
+    [ Some "TIME_LIMIT", day +. 10.; Some "TOKENS_LIMIT", day +. 10. ] (restored scope);
+  check (option (float 0.)) "a spent window that gates no model call" None (rest_end other_use ~now);
+  check (option (float 0.)) "a reset that passed" None (rest_end passed ~now);
+  check int "a window past its reset is still shown" 2 (List.length (restored passed));
+  check (option (float 0.)) "spent without a stated reset" None (rest_end open_ended ~now);
+  check (option (float 0.)) "one of two Antigravity windows spent" None (rest_end partly ~now);
+  check (option (float 0.)) "a source that rests nothing live" None (rest_end codex ~now);
+  check int "its windows are shown" 2 (List.length (restored codex)))
+
+let restart_reads_each_window_of_a_sparse_source () = fixture (fun config scope day ->
+  let codex = decode Usage.decode_codex_rate_limits_updated in
+  store_only config scope ~observed_at:(day +. 10.)
+    (codex {|{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":300},"secondary":{"usedPercent":20,"windowDurationMins":10080}}}|});
+  store_only config scope ~observed_at:(day +. 20.)
+    (codex {|{"rateLimits":{"primary":null,"secondary":{"usedPercent":21,"windowDurationMins":10080}}}|});
+  restore config ~now:(day +. 60.) [ scope ];
+  check (list (float 0.)) "the window the later report left out keeps its own reading"
+    [ day +. 10.; day +. 20. ]
+    (List.sort Float.compare (List.map snd (restored scope))))
+
+let restart_leaves_out_rows_without_a_role () = fixture (fun config scope day ->
+  Dated_jsonl.append (usage_journal config) (`List [`Assoc [
+    "scope_id", `String (History.scope_id scope);
+    "source", `String (Usage.source_to_string Usage.Codex_account_rate_limits_updated);
+    "kind", `String "five_hour"; "limit_id", `Null;
+    "observed_at", `Float (day +. 10.); "resets_at", `Null;
+    "unit", `String "percent"; "value", `Int 100]]);
+  restore config ~now:(day +. 60.) [ scope ];
+  check int "a row stored before rows carried a role is not put back" 0
+    (List.length (restored scope));
+  check int "and is still read by the daily history" 1 (List.length (points config (day +. 60.))))
+
 let () = run "provider usage durable snapshots" ["history", [
+  test_case "stored rows carry the window role" `Quick stored_rows_carry_the_window_role;
+  test_case "a restart rests a scope only as a live report would" `Quick
+    restart_rests_a_scope_only_as_a_live_report_would;
+  test_case "a restart reads each window of a sparse source" `Quick
+    restart_reads_each_window_of_a_sparse_source;
+  test_case "a restart leaves out rows without a role" `Quick
+    restart_leaves_out_rows_without_a_role;
   test_case "damaged journal retains readable history through the typed decoder" `Quick
     damaged_journal_keeps_readable_history;
   test_case "legacy OpenRouter credit label retains history identity" `Quick

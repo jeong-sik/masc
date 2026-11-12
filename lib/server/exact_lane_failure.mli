@@ -38,6 +38,18 @@ type t =
 val is_transient : t -> bool
 (** Only [Transient]: the same request may be sent again unchanged. *)
 
+val ending_input_refusal : t list -> input_refusal option
+(** The input refusal a walk ends with, given its slots' failures. [None]
+    when no slot refused the input. The answer does not depend on the order
+    the slots were walked in.
+
+    A refusal that names the size ([Context_overflow], [Input_capacity],
+    [Request_body]) is chosen before [Invalid_request]. It states that a
+    smaller input clears that slot's cause, which is what a consumer that
+    subdivides its input reads the kind for; [Invalid_request] states no
+    cause. Among the refusals that name the size, the order is the one
+    [Keeper_librarian_input_refusal.rank] gives them. *)
+
 val execution : Agent_core.Exact_output.execution_error_cause -> t
 (** An HTTP slot's failed call. *)
 

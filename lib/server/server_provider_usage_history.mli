@@ -12,6 +12,19 @@ val scope_id : Runtime_quota_window.scope -> string
 val install : Workspace.config -> unit
 (** Register the server-side sink before runtimes begin reporting. *)
 
+val restore :
+  Workspace.config ->
+  now:float ->
+  scopes:Runtime_quota_window.scope list ->
+  (unit, string) result
+(** Put the stored reports of the last fourteen UTC days back in the
+    in-memory usage table for [scopes], as {!Runtime_provider_usage_window.restore}
+    describes, choosing them as
+    {!Server_provider_usage_history_projection.stored_reports} does. Stored
+    reports of a scope not in [scopes] stay on disk only. Nothing is written
+    to the store. [Error] when the store cannot be read; the table is then
+    left as it was. Called once at start, before runtimes report. *)
+
 type window = One_day | Seven_days | Fourteen_days
 (** The UTC day windows the history answers for. *)
 

@@ -395,6 +395,36 @@ let test_attention_compact_empty () =
   let result = Dashboard_attention.compact_summary [] in
   Alcotest.(check string) "no action" "No action needed" result
 
+(* Every severity that has an item is named, so the counts in parentheses add
+   up to the total. Items graded [Info] alone used to leave them empty. *)
+let test_attention_compact_names_every_severity () =
+  let item severity : Dashboard_attention.attention_item =
+    { severity; summary = "row"; suggested_tool = "step" }
+  in
+  Alcotest.(check string) "info items alone" "2 items (2 info)"
+    (Dashboard_attention.compact_summary [ item Info; item Info ]);
+  Alcotest.(check string) "one of each, most severe first"
+    "3 items (1 critical, 1 warning, 1 info)"
+    (Dashboard_attention.compact_summary [ item Info; item Critical; item Warning ]);
+  Alcotest.(check string) "a single item" "1 item (1 warning)"
+    (Dashboard_attention.compact_summary [ item Warning ])
+
+(* The list does not know whether the review of a submission is running, so
+   the row is not graded as a warning. *)
+let test_attention_grades_a_submission_awaiting_a_verdict_as_info () =
+  match
+    Dashboard_attention.detect_operator_tasks
+      [ Masc.Operator_task_attention.Awaiting_verdict
+          { task_id = "task-77"
+          ; title = "work submitted as finished"
+          ; producer = "edgar.a.poe"
+          ; since = "2026-09-06T00:00:00Z"
+          }
+      ]
+  with
+  | [ ({ severity = Info; _ } : Dashboard_attention.attention_item) ] -> ()
+  | _ -> Alcotest.fail "a submission awaiting a verdict is one Info item"
+
 (* ===== Test Suite ===== *)
 
 let () =
@@ -443,5 +473,8 @@ let () =
            test_attention_grades_the_operators_tasks);
           ("a shared action is listed once", `Quick, test_attention_lists_a_shared_action_once);
           ("compact empty", `Quick, test_attention_compact_empty);
+          ("compact names every severity", `Quick, test_attention_compact_names_every_severity);
+          ("a submission awaiting a verdict is info", `Quick,
+           test_attention_grades_a_submission_awaiting_a_verdict_as_info);
         ] );
     ]

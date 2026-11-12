@@ -181,18 +181,19 @@ let overview_capacity_lines (state : state) =
   let quiet line = Theme.recede () ^ line ^ Ansi.reset in
   let warning line = Theme.warn () ^ line ^ Ansi.reset in
   let now = Unix.gettimeofday () in
+  let ko = state.ui_language = Lang_ko in
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
       [warning (text "미관측 · fleet 첫 관측 대기" "Not observed · awaiting fleet reading")]
   | Unreachable { since } ->
       [warning (text "미관측 · fleet에 연결하지 못함" "Not observed · fleet unreachable")
-      ; quiet (Masc_tui_fleet_line.unreachable_text ~now ~since)]
+      ; quiet (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since)]
   | Unavailable { degradation; disconnected_since } ->
       [warning (text "미관측 · fleet 스캔 실패" "Not observed · fleet scan unavailable")
-      ; quiet (Masc_tui_fleet_line.unavailable_text ~now ~degradation ~disconnected_since)]
+      ; quiet (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since)]
   | Cannot_read failure ->
       [warning (text "미관측 · fleet 응답을 읽지 못함" "Not observed · fleet response unreadable")
-      ; quiet (Masc_tui_fleet_line.failure_text failure)]
+      ; quiet (Masc_tui_fleet_line.failure_text ~ko failure)]
   | Reading { reading; trouble } ->
       let fleet = reading.fleet in
       let retained = Option.is_some trouble
@@ -202,7 +203,7 @@ let overview_capacity_lines (state : state) =
           [warning (text "이전 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown")]
         else []
       in
-      let grade = Masc_tui_fleet_line.status_text fleet.fs_status in
+      let grade = Masc_tui_fleet_line.status_text ~ko fleet.fs_status in
       let grade_style =
         if retained then Theme.warn ()
         else if fleet.fs_operator_action_required then Theme.bad ()
@@ -222,13 +223,13 @@ let overview_capacity_lines (state : state) =
           (Printf.sprintf "Turn capacity %d/%d · shortfall %d"
              (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
              fleet.fs_target_reaction_capacity fleet.fs_reaction_capacity_shortfall)]
-      @ Option.to_list (Option.map (fun detail -> warning (Masc_tui_fleet_line.trouble_text ~now detail)) trouble)
+      @ Option.to_list (Option.map (fun detail -> warning (Masc_tui_fleet_line.trouble_text ~ko ~now detail)) trouble)
       @ (if state.workspace_identity = Workspace_identity_match then [] else
            [warning (text "워크스페이스 식별 미확인" "Workspace identity unconfirmed")])
       @ Option.to_list (Option.map (fun detail ->
           (if retained then quiet else warning) (Terminal_text.single_line detail))
-          (Masc_tui_fleet_line.blocker_text fleet))
-      @ Option.to_list (Option.map quiet (Masc_tui_fleet_line.owner_scan_text fleet))
+          (Masc_tui_fleet_line.blocker_text ~ko fleet))
+      @ Option.to_list (Option.map quiet (Masc_tui_fleet_line.owner_scan_text ~ko fleet))
 
 let overview_header (state : state) ~cols =
   here_row ~cols state ~path:[]
@@ -266,13 +267,15 @@ let render_overview (state : state) home =
   surface_chrome ~overflow:Fits ?sidebar state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
     ~title:(overview_header state ~cols)
     ~status:[]
-    ~hints:(if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
+    ~hints:(if state.keeper_navigation_open then
+              Masc_tui_keys.keeper_navigation_hints ~lang:state.ui_language
             else Masc_tui_keys.footer_hints ~lang:state.ui_language Overview)
     ~body:(fun ~budget:chrome_budget c ->
       let rows_started = Masc_tui_frame_timing.start_stage () in
       let body = Masc_tui_home.home_body home ~scroll:state.home_decision_scroll ~budget:chrome_budget in
       if body.hb_help then
-        c.push (" " ^ Ansi.dim ^ Masc_tui_footer.help_hint_item
+        c.push (" " ^ Ansi.dim
+          ^ Masc_tui_footer.help_hint ~ko:(state.ui_language = Lang_ko)
           ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys" ^ Ansi.reset);
       if body.hb_shortcuts then
         c.push (" " ^ ui_text state ~ko:"v:조치 원인" ~en:"v:action reasons"
@@ -368,13 +371,13 @@ let render_memory (state : state) =
     | None ->
         let reading_note =
           match state.memory_health_error with
-          | None -> ui_text state ~ko:"(미조회)" ~en:(title_missing_reading ~error:None)
+          | None -> here_missing_reading state ~error:None
           | Some _ -> ""
         in
         memory_title [ String.trim reading_note ]
     | Some s ->
         memory_title
-          [ (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
+          [ count_reading state Masc_tui_value.Count.Keeper shown
           ; (match current_memory_starving_count s with
              | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
              | None -> if ko then "기억 필요 ? (일부 미조회)" else "? need memory (unread rows)")
@@ -478,9 +481,9 @@ and render_memory_facts_list (state : state) =
         (match Masc_tui_types.memory_facts_snapshot state with
          | None ->
            Render_memory.Facts_unread
-             { reading = ui_text state
-                 ~ko:(if Option.is_some (Masc_tui_types.memory_facts_failure state) then "(조회 실패)" else "(미조회)")
-                 ~en:(title_missing_reading ~error:(Masc_tui_types.memory_facts_failure state)) }
+             { reading =
+                 here_missing_reading state
+                   ~error:(Masc_tui_types.memory_facts_failure state) }
          | Some _ ->
            Render_memory.Facts_loaded { total; filter_label; query_label }) ]
   in

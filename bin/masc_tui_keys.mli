@@ -45,7 +45,9 @@ type row_need =
 type binding = {
   key : string;
   label : string;      (** the footer's short word *)
-  label_ko : string option; (** Korean footer label when supplied *)
+  label_ko : string;
+      (** the Korean name. Required: a binding with one language would draw the
+          other on a screen that is not in it. *)
   help : string option;  (** the overlay's longer sentence; [label] if absent *)
   group : group;
   detail : detail_state;  (** which of a detail-owning surface's two states *)
@@ -76,6 +78,9 @@ val roster_toggle_key : string
 val chat_schedules_key : string
 val chat_schedules_label : string
 (** F9 folds/expands the current chat Keeper's upcoming Jobs. *)
+
+val keeper_chat_key : string
+(** [c] on a keeper: the chat with it, where a held tool call is answered. *)
 
 val keeper_calls_key : string
 (** [t] on a keeper: the Keeper Calls view, where a call's served input and
@@ -130,7 +135,7 @@ val for_surface : Masc_tui_types.surface -> binding list
 val goal_candle_refresh_key : string
 (** Open or reread the selected Goal's Candle record without a Goal action. *)
 
-val keeper_navigation_hints : string
+val keeper_navigation_hints : lang:Masc_tui_types.ui_language -> string
 (** Keys while the Keeper navigator opened with Left holds focus. *)
 
 val footer_hints_planning_goal_list : lang:Masc_tui_types.ui_language -> has_rows:bool -> string
@@ -142,14 +147,16 @@ val footer_hints_planning_goal_detail : lang:Masc_tui_types.ui_language -> strin
 (** The Goal detail has a separate Candle read key: its [r] may mean Resume. *)
 
 val footer_hints :
-  ?lang:Masc_tui_types.ui_language ->
+  lang:Masc_tui_types.ui_language ->
   ?detail_open:bool ->
   ?has_rows:bool ->
   ?has_reading:bool ->
   Masc_tui_types.surface ->
   string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
-    Meta order.
+    Meta order. [lang] is required here and on every other row of this
+    module: a row built without the screen's language has no value to fall
+    back to, so a caller that leaves it out does not compile.
 
     [detail_open] is how a surface that owns a detail says which of its two
     states is on screen, so the footer drops the key the dispatcher refuses
@@ -196,7 +203,8 @@ type approvals_footer =
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
 
-val footer_hints_approvals : approvals_footer -> string
+val footer_hints_approvals :
+  lang:Masc_tui_types.ui_language -> approvals_footer -> string
 (** Project the Approvals queue and question reader's modal footers from the
     same binding records as the Help sheet. *)
 
@@ -245,7 +253,8 @@ val board_compose_menu_hints :
     the hearth cycle. Both come from the actual binding records. *)
 
 type approval_value_hint = No_value_reading | Readable_values | Byte_values
-val footer_hints_approval_detail : value_hint:approval_value_hint -> string
+val footer_hints_approval_detail :
+  lang:Masc_tui_types.ui_language -> value_hint:approval_value_hint -> string
 (** The keys an open approval answers to. The decision keys are one item
     ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
     the scroll before it gives up the answer. *)
@@ -260,12 +269,12 @@ val footer_hints_runtime_account_form : lang:Masc_tui_types.ui_language -> strin
     save and the way out. The form takes every other key as typing, so the
     pane's row would name keys that no longer do what it says. *)
 
-val footer_hints_memory_recall_form : unit -> string
+val footer_hints_memory_recall_form : lang:Masc_tui_types.ui_language -> string
 (** The runtime.toml recall form's row: the rows, the range, the pick, the
     save and the way out. The form takes every key, so the pane's row would
     name keys that no longer do what it says. *)
 
-val footer_hints_typesafeai_exclusion_form : unit -> string
+val footer_hints_typesafeai_exclusion_form : lang:Masc_tui_types.ui_language -> string
 (** The runtime.toml exclusion form's row: the rows, the pick, the save and
     the way out. The form takes every key, so the pane's row would name keys
     that no longer do what it says. *)
@@ -355,7 +364,7 @@ val footer_hints_runtime :
     to the query and only the picker's navigation and confirmation are shown. *)
 
 val footer_hints_runtime_parent :
-  ko:bool -> parent:Masc_tui_types.runtime_parent -> string
+  lang:Masc_tui_types.ui_language -> parent:Masc_tui_types.runtime_parent -> string
 (** The active media-order editor or lane prompt replaces the Runtime listing.
     Name fields own printable keys; their footer does not advertise listing
     actions or [v]. Their [PgUp] opens the full draft/context reader; its Esc
@@ -368,7 +377,7 @@ val footer_hints_resources :
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
 
-val footer_hints_resource_save : pending:bool -> string
+val footer_hints_resource_save : lang:Masc_tui_types.ui_language -> pending:bool -> string
 (** The path form owns printable keys, including q. Enter creates a file only
     while no matching save is pending; Esc closes input and does not cancel an
     issued write. Page keys read the retained result below the form. *)
@@ -396,7 +405,7 @@ val footer_hints_board_pending : lang:Masc_tui_types.ui_language -> string
 (** Board read controls while the post is loading, missing, or failed.
     Projects the live [r], [Left / Esc], and [Tab] bindings. *)
 
-val footer_hints_fusion_detail : string
+val footer_hints_fusion_detail : lang:Masc_tui_types.ui_language -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because the
     surface is a drill-down the static per-surface table does not name. The
     window the renderer drew travels beside these as
@@ -420,10 +429,10 @@ val footer_hints_lanes_run_detail_for :
 (** The Lanes lane-notice footer. The pane is static, so it keeps only the
     way back plus the shared tail. *)
 
-val footer_hints_git_changes : string
+val footer_hints_git_changes : lang:Masc_tui_types.ui_language -> string
 (** The shared Git changes list under Repositories, Code, and Chat. *)
 
-val footer_hints_git_diff : string
+val footer_hints_git_diff : lang:Masc_tui_types.ui_language -> string
 (** The Git diff view for a changed file in repository changes. *)
 
 val footer_hints_memory_facts : lang:Masc_tui_types.ui_language -> cols:int -> has_rows:bool -> string
@@ -458,7 +467,7 @@ val bindings_acting_evidence : binding list
     Separate from {!for_surface} [Acting] because it scrolls a pinned event
     snapshot instead of filtering or stepping the live feed. *)
 
-val acting_evidence_hints : string
+val acting_evidence_hints : lang:Masc_tui_types.ui_language -> string
 (** The Activity event-evidence footer hints, projected from
     {!bindings_acting_evidence} so the footer and [?] agree. *)
 
@@ -477,7 +486,7 @@ val keeper_detail_tab_taken_keys : Masc_tui_types.keeper_detail_tab -> string li
 (** The single keys the tab's own bindings answer ({!key_atoms}); a Keeper
     control on one of them does something else on that tab. *)
 
-val keeper_detail_tab_hint : Masc_tui_types.keeper_detail_tab -> string
+val keeper_detail_tab_hint : ko:bool -> Masc_tui_types.keeper_detail_tab -> string
 (** The keys the Keeper detail footer leads with, [key:label] joined by two
     spaces, led by the tab switch. Projects {!keeper_detail_tab_bindings} so
     the footer and the help sheet cannot name different keys. *)
@@ -500,13 +509,14 @@ val help_sections_for_state :
 (** Put the active nested reader's own keys first, ahead of surface reference
     sections. This is the help sheet's state-aware entry point. *)
 
-val footer_hints_patch_review : unit -> string
-val footer_hints_about : unit -> string
+val footer_hints_patch_review : lang:Masc_tui_types.ui_language -> string
+val footer_hints_about : lang:Masc_tui_types.ui_language -> string
 val footer_hints_queue : Masc_tui_types.state -> Masc_tui_types.queue_panel -> string
 val footer_hints_context : cols:int -> Masc_tui_types.state -> string
-val footer_hints_runtime_detail : ?ko:bool -> ?routes:bool -> unit -> string
+val footer_hints_runtime_detail : lang:Masc_tui_types.ui_language -> routes:bool -> string
 
 val help_sections :
+  lang:Masc_tui_types.ui_language ->
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list
 (** Sections for the help sheet. [current] puts that surface's own section
     first and marks it, so the sheet opens on an answer rather than on a list
@@ -528,4 +538,33 @@ val reference_sections : unit -> reference_section list
     sheet's order, plus the paragraphs a section's surface keeps for the
     document. The [?] sheet does not draw those paragraphs. *)
 
-val footer_hints_browser_lane : string
+val footer_hints_browser_lane : lang:Masc_tui_types.ui_language -> string
+
+(** {1 Rows a renderer used to spell by hand}
+
+    Each was an English string in a renderer. They project from bindings like
+    every other row, in the order the string had. *)
+
+val footer_hints_browser_lane_reading : lang:Masc_tui_types.ui_language -> string
+(** {!footer_hints_browser_lane} followed by the scene, region and observation
+    readers, for the lane with no scene open. *)
+
+val footer_hints_browser_picker : lang:Masc_tui_types.ui_language -> string
+
+val footer_hints_browser_scene :
+  lang:Masc_tui_types.ui_language ->
+  enter:Masc_tui_types.Browser_lane_view.scene_action option ->
+  articles:bool ->
+  string
+(** The open scene's row. [enter] is what Enter does to the element under the
+    cursor; [articles] adds the article step where the scene has articles. *)
+
+val footer_hints_browser_scene_guard : lang:Masc_tui_types.ui_language -> string
+val footer_hints_browser_observations : lang:Masc_tui_types.ui_language -> string
+val footer_hints_client_detail : lang:Masc_tui_types.ui_language -> string
+val footer_hints_lane_activity : lang:Masc_tui_types.ui_language -> string
+val footer_hints_lane_inventory_detail : lang:Masc_tui_types.ui_language -> string
+val footer_hints_link_preview_empty : lang:Masc_tui_types.ui_language -> string
+val footer_hints_play_invite : lang:Masc_tui_types.ui_language -> string
+val footer_hints_answering : lang:Masc_tui_types.ui_language -> string
+val footer_hints_changes_diff : lang:Masc_tui_types.ui_language -> string

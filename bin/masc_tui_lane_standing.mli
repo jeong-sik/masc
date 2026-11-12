@@ -24,9 +24,9 @@ val all : t list
 val mark : t -> string
 (** One cell drawn before the row. *)
 
-val word : ?korean:bool -> t -> string
-(** The standing in a word or two. Defaults to English; [korean=true]
-    changes only the display label, not the observed standing. *)
+val word : korean:bool -> t -> string
+(** The standing in a word or two. [korean] picks the display label and
+    leaves the observed standing as it is. *)
 
 val status : t -> Masc_tui_theme.status
 (** The status colour of the mark. *)
@@ -40,7 +40,7 @@ val recedes : t -> bool
 (** Whether the whole row is drawn behind the others: switched off, never
     set up, or not observed. *)
 
-val count_items : ?korean:bool -> t list -> string list
+val count_items : korean:bool -> t list -> string list
 (** [["3 ready"; "1 failing"; "2 off"]]: each standing present, with its
     count, in {!all} order. Korean labels precede their counts.
     [[]] for an empty list. These are observations, not required actions. *)

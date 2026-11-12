@@ -5,7 +5,7 @@ open Tui_decode_fields
 open Result.Syntax
 
 (* The fleet response and the one-Keeper row carry the same schema. *)
-let current_health_schema = "keeper.memory_os.current_health.v14"
+let current_health_schema = "keeper.memory_os.current_health.v15"
 
 type memory_alert_code =
   | Snapshot_read_error
@@ -78,7 +78,7 @@ type memory_librarian_stalled =
    "not measured", which the header prints as such; it is not zero. *)
 type memory_librarian_health = {
   mlh_state : memory_librarian_pass_end option;
-  mlh_admission_wait : Keeper_librarian_pending.worker option;
+  mlh_admission_wait : Keeper_librarian_pending.admission option;
   mlh_operator_action_required : bool;
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
@@ -302,10 +302,8 @@ let decode_memory_librarian_health keeper_json =
     | `Null -> Ok None
     | value ->
       let* pending = Keeper_librarian_pending.of_json value in
-      (match pending with
-       | Keeper_librarian_pending.Worker worker -> Ok (Some worker)
-       | Publication _ | Basis_changed _ | Message_floor _ | Local_failure _ ->
-         Error "Librarian admission wait must name an original worker request")
+      let+ admission = Keeper_librarian_pending.admission_of_pending pending in
+      Some admission
   in
   let* mlh_operator_action_required = required_bool_field json "operator_action_required" in
   let durable = Option.bind mlh_state (function

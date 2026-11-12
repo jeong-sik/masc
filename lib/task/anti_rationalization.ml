@@ -396,8 +396,10 @@ let schema_of_name = Tool_definition_embedded.schema
    in the schema — model-facing prose belongs in the prompt files (RFC
    prompts-and-tool-definitions-outside-ocaml), and the ratchet on this file
    enforces that. *)
+let report_tool_name = "report_review_verdict"
+
 let report_review_verdict_schema : Masc_domain.tool_schema =
-  schema_of_name "report_review_verdict"
+  schema_of_name report_tool_name
 ;;
 
 (** Parse review verdict from tool call JSON arguments (deterministic). *)
@@ -795,9 +797,10 @@ let run_with_execution_policy ~execution_policy
        let unknown_dispatch = ref false in
        let must_preserve_original () = execution_policy=Retained_original && !unknown_dispatch in
        (* The observation carries the same classification the walk keeps for
-          its own result, read once here. A walk that ends with an unknown
-          outcome empties its retry list, so the observation is the only place
-          a host can retain why each candidate failed. *)
+          its own result, read once here. A retained walk empties its retry
+          list once one candidate's outcome is unknown
+          ([must_preserve_original]), so the observation is the only place a
+          host can retain why each candidate failed. *)
        let observe_failure ~runtime_id ~dispatch error =
          let certainty = failure_certainty ~dispatch error in
          (match certainty with Outcome_unknown -> unknown_dispatch := true

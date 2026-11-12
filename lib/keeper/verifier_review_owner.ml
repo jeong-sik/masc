@@ -279,22 +279,24 @@ let known_observations = function
   | `List (_::_ as observations) ->
     List.fold_left (fun state observation ->
       let* reached,failed=state in
-      match observation with
-      | `Assoc fields when List.sort String.compare (List.map fst fields)=["fact"]
+      match Verifier_review_ending.of_observation observation,observation with
+      (* An execution that ended without a settled report: its record says how. *)
+      | Some (id,(Verifier_review_ending.Succeeded | Failed | Cancelled | Owner_lost)),_ ->
+        Ok (reached,id::failed)
+      | None,`Assoc fields when List.sort String.compare (List.map fst fields)=["fact"]
           && List.assoc "fact" fields=`String "admission_refused" -> Ok (reached,failed)
-      | `Assoc fields when List.sort String.compare (List.map fst fields)=["fact";"runtime_id"] ->
+      | None,`Assoc fields when List.sort String.compare (List.map fst fields)=["fact";"runtime_id"] ->
         (match List.assoc "fact" fields,List.assoc "runtime_id" fields with
          | `String "reply_received",`String id when String.trim id<>"" -> Ok (true,failed)
-         | `String "cancelled",`String id when String.trim id<>"" -> Ok (reached,id::failed)
          | _ -> Error "invalid retained reviewer reply or cancellation observation")
-      | `Assoc fields when List.sort String.compare (List.map fst fields)=["error_category";"fact";"runtime_id"] ->
+      | None,`Assoc fields when List.sort String.compare (List.map fst fields)=["error_category";"fact";"runtime_id"] ->
         (match List.assoc "fact" fields,List.assoc "runtime_id" fields,List.assoc "error_category" fields with
          | `String "before_dispatch",`String id,`String category when String.trim id<>"" && String.trim category<>"" ->
            Ok (reached,id::failed)
          | `String "definite_refusal",`String id,`String category when String.trim id<>"" && String.trim category<>"" ->
            Ok (true,id::failed)
          | _ -> Error "retained reviewer failure is not definitely resolved")
-      | _ -> Error "invalid retained reviewer execution observations") (Ok (false,[])) observations
+      | None,_ -> Error "invalid retained reviewer execution observations") (Ok (false,[])) observations
   | _ -> Error "retained reviewer disposition has no concrete admission observations"
 
 let validate_admission evidence =
@@ -427,9 +429,12 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id =
       let* child=retain_child parent successor child in
       walk child (match rest with [] -> [] | _::tail -> tail)
     | Progress.Rejected ({stage=Progress.Execution;evidence} as _refusal),[] ->
-      (match retry_result evidence with
-       | Error _ -> Ok (V.attempt parent.original)
-       | Ok () ->
+      (* A refusal that cannot be read is an error; one that names no runtime
+         to review again leaves the next move to a producer or an operator. *)
+      let* refused = terminal_review_result evidence |> Result.map_error (fun d -> Corrupt_original d) in
+      (match refused.AR.retryable_runtimes with
+       | [] -> Ok (V.attempt parent.original)
+       | _ :: _ ->
          let* child=V.successor parent.original |> Result.map_error (fun d -> Corrupt_original d) in
          let* request_id=attempt_request_id ~verification_id ~attempt:(V.attempt child)
            |> Result.map_error (fun d -> Corrupt_original d) in

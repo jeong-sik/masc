@@ -410,6 +410,18 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Server_keeper_volume_maintenance.start ~sw ~clock ~config;
   Server_sandbox_volume_gc_report.start ~sw ~clock ~config;
   Server_tool_blob_sweep.start ~sw ~clock ~config;
+  (* A restart empties the usage table; the reports are still on disk. A
+     store that cannot be read leaves the table empty and does not stop the
+     start. *)
+  (let snapshot = Runtime.dashboard_runtime_resolved_snapshot () in
+   let scopes =
+     Runtime_instance.distinct_quota_scopes
+       (Option.to_list snapshot.Runtime.rs_default_runtime @ snapshot.Runtime.rs_runtimes)
+   in
+   match Server_provider_usage_history.restore config ~now:(Time_compat.now ()) ~scopes with
+   | Ok () -> ()
+   | Error detail ->
+     Log.Server.warn "provider usage reports were not read back at start: %s" detail);
   Server_provider_usage_history.install config;
   Lane_addon_runtime.register_skill_export_handler
     Server_skill_snapshot_runtime.publish_lane_skills;

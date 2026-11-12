@@ -2212,17 +2212,31 @@ let here_row ~cols (state : state) ~path ~readings ~position =
     | None -> 0
   in
   let left_cols = cols - position_cells in
+  (* Reads come and go with every refresh, and a row that changed with them
+     would never sit still. Each screen says what it is still reading in its
+     own body; the row speaks up only for what went wrong. *)
+  let tail =
+    match reading_connection_notice state with
+    | None -> ""
+    | Some _ ->
+        surface_connection_badge state
+          ~width:(max 0 (framed_inner_width left_cols - 2))
+  in
   let lead, id =
     match List.rev path with
     | [] -> here_path state ~path:[], ""
     | last :: before ->
         let before = List.rev before in
-        (* The last step keeps its floor; the steps ahead of it share the
-           rest. *)
+        (* The last step keeps its floor and the tail its cells, gap
+           included; the steps ahead of them share the rest. Counted without
+           the tail's gap, the steps took two cells too many and the last
+           step was cut to its mark: "logs" drew as an ellipsis. *)
         let room =
           here_steps_room ~cols:left_cols state
             ~steps:(List.length before + 1)
-            ~after:(min (cells last) heading_id_floor)
+            ~after:
+              (min (cells last) heading_id_floor
+               + cells (heading_tail_gap ^ tail))
         in
         ( here_path state ~path:(fit_here_steps ~cells:room before)
           ^ Ansi.dim ^ here_step_separator ^ Ansi.reset,
@@ -2236,16 +2250,7 @@ let here_row ~cols (state : state) ~path ~readings ~position =
         (List.filter (fun reading -> reading <> "") readings
          |> List.mapi (fun index reading ->
                 (if index = 0 then "  " else reading_separator) ^ reading))
-      ~tail:
-        (* Reads come and go with every refresh, and a row that changed with
-           them would never sit still. Each screen says what it is still
-           reading in its own body; the row speaks up only for what went
-           wrong. *)
-        (match reading_connection_notice state with
-         | None -> ""
-         | Some _ ->
-             surface_connection_badge state
-               ~width:(max 0 (framed_inner_width left_cols - 2)))
+      ~tail
   in
   match position with
   | None -> left

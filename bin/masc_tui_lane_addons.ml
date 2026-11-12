@@ -353,14 +353,37 @@ let detail_instance view snapshot =
       List.find_opt (fun (instance : instance) ->
         String.equal instance.id id && String.equal instance.incarnation incarnation)
         snapshot.instances
-let row_owner instances (row : Row.row) =
+let lane_owner instances lane_id =
   List.find_opt (fun (instance : instance) ->
-    String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) instances
+    String.starts_with ~prefix:(instance.id ^ "/") lane_id) instances
+let row_owner instances (row : Row.row) = lane_owner instances row.lane_id
 let row_is_result (instance : instance) (row : Row.row) =
   match instance.display.readings with
   | [] -> true
   | readings -> List.exists (fun (reading : Masc.Lane_addon_presentation.reading) ->
       String.equal row.lane_id (instance.id ^ "/" ^ reading.lane_id)) readings
+(* Where a lane stands among its instance's lanes: the place its package
+   first names it in the presentation readings. The package says which lane
+   a reader meets first and in what order Left/Right walks them; sorting lane
+   ids by name put quiz/items ahead of the scorecard the quiz is read for.
+   Lanes the readings do not name follow the named ones by name, and lanes of
+   different instances keep apart by name. *)
+let reading_rank (instance : instance) lane_id =
+  let rec find index = function
+    | [] -> None
+    | (reading : Masc.Lane_addon_presentation.reading) :: rest ->
+        if String.equal lane_id (instance.id ^ "/" ^ reading.lane_id) then Some index
+        else find (index + 1) rest in
+  find 0 instance.display.readings
+let compare_result_lanes instances a b =
+  match lane_owner instances a, lane_owner instances b with
+  | Some owner, Some other when String.equal owner.id other.id ->
+      (match reading_rank owner a, reading_rank owner b with
+       | Some x, Some y -> Int.compare x y
+       | Some _, None -> -1
+       | None, Some _ -> 1
+       | None, None -> String.compare a b)
+  | (Some _ | None), (Some _ | None) -> String.compare a b
 let rows_in_screen view snapshot =
   let rows = List.mapi (fun index row -> index, row) snapshot.output.rows in
   match view.screen with
@@ -618,7 +641,7 @@ let ordered_result_rows view snapshot =
          pane draws. *)
       List.filter (fun (_, row) -> row_is_result item row) rows
       |> List.stable_sort (fun (_, (a : Row.row)) (_, (b : Row.row)) ->
-           String.compare a.lane_id b.lane_id)
+           compare_result_lanes [item] a.lane_id b.lane_id)
   | Overview, _ | Detail _, _ -> rows
 let select_initial_result view =
   match view.snapshot, selected_instance view with
@@ -815,7 +838,7 @@ let timeline_lines ?(instances=[]) ?selected ~width rows =
         @ List.concat_map (fun instance -> List.concat_map (fun (_,selection) ->
             match selection with Row.All_lanes -> []
             | Row.Selected_lanes lanes -> List.map (fun lane -> instance.id ^ "/" ^ lane) lanes) instance.outputs) instances)
-        |> List.sort_uniq String.compare in
+        |> List.sort_uniq (compare_result_lanes instances) in
       (* A lane id is "<instance id>/<lane>". The detail screen draws one
          instance, which its heading already names, so a lane is labelled by
          the part after the slash and the label column is as wide as the
@@ -988,7 +1011,7 @@ let move_lane view delta =
         | Rows | Connections | Configurations -> ordered_rows view snapshot in
       let lanes = rows
         |> List.map (fun (_, (row : Row.row)) -> row.lane_id)
-        |> List.sort_uniq String.compare in
+        |> List.sort_uniq (compare_result_lanes snapshot.instances) in
       let rec find index = function [] -> 0 | lane :: rest ->
         if lane=row.lane_id then index else find (index+1) rest in
       let index = max 0 (min (List.length lanes-1) (find 0 lanes + delta)) in

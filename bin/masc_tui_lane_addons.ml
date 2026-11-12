@@ -826,7 +826,7 @@ let utc_stamp time =
       t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
       (int_of_float ((time -. floor time)*.1000.))
   with Unix.Unix_error _ | Invalid_argument _ -> Printf.sprintf "epoch %.6g" time
-let timeline_lines ?(instances=[]) ?selected ~width rows =
+let timeline_lines ~instances ?selected ~width rows =
   match rows with
   | [] -> List.map (fun instance -> instance.title ^ " | " ^ phase_label instance.phase
       ^ " | no observations in this view") instances

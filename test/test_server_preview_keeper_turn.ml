@@ -369,6 +369,24 @@ let test_turn () =
           join zone ~base_path ~name:"alice" ~hex:'a' ~integration:"claude_code"
             ~client:Runtime_setup_login_client.Claude ~model:"claude-sonnet-5"
         in
+        (* The stream of a person's connection allows no origin (issue
+           #51421); the operator's allows the one that asked. *)
+        let from_elsewhere =
+          Httpun.Request.create
+            ~headers:(Httpun.Headers.of_list [ "origin", "https://elsewhere.example" ])
+            `POST
+            "/api/v1/setup/accounts/login"
+        in
+        Alcotest.(check (list (pair string string)))
+          "a person's stream allows no origin"
+          []
+          (Login.stream_cors_headers (Login.Person alice.person) from_elsewhere);
+        Alcotest.(check (option string))
+          "the operator's stream allows the origin that asked"
+          (Some "https://elsewhere.example")
+          (List.assoc_opt
+             "access-control-allow-origin"
+             (Login.stream_cors_headers (Login.Operator { actor = "operator" }) from_elsewhere));
         let bob, bob_runtime =
           join zone ~base_path ~name:"bob" ~hex:'b' ~integration:"claude_code"
             ~client:Runtime_setup_login_client.Claude ~model:"claude-sonnet-5"

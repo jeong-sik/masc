@@ -71,7 +71,7 @@ type worker = {
 type runner_mode = Answer of Yojson.Safe.t | Off
 type runner_state = { mode : runner_mode ref; resolutions : int ref }
 
-let runner state : Exact.runner = fun ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ ->
+let runner state : Exact.runner = fun ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ ->
   incr state.resolutions;
   match !(state.mode) with
   | Off -> Error Exact.Lane_off
@@ -399,7 +399,7 @@ let test_only_accepted_exact_results_wake_owner kind () =
 let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
   let entered, enter = Eio.Promise.create () and finished, finish = Eio.Promise.create () in
   let cleaning, clean = Eio.Promise.create () and released, release = Eio.Promise.create () in
-  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
     incr state.resolutions;
     Ok (fun ~validate:_ ->
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve finish ()) (fun () ->
@@ -437,7 +437,7 @@ let side_by_side_declaration = "max_exact_in_flight=2\n" ^ declaration
 let test_retirement_cancels_every_exact_call_running_side_by_side () =
   let entered = ref 0 and causes = ref [] in
   let together, reached = Eio.Promise.create () and both_ended, ended = Eio.Promise.create () in
-  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
     incr state.resolutions;
     Ok (fun ~validate:_ ->
       incr entered;
@@ -476,7 +476,7 @@ let test_retirement_cancels_every_exact_call_running_side_by_side () =
    reaches the worker that is already running. *)
 let test_a_declared_count_reaches_the_running_worker () =
   let blocking = ref false and entered = ref 0 in
-  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
     incr state.resolutions;
     if not !blocking then Error Exact.Lane_off
     else Ok (fun ~validate:_ -> incr entered; Eio.Fiber.await_cancel ()) in
@@ -831,7 +831,7 @@ let test_schema_key_order_edit_preserves_original_export_and_worker () =
 let test_export_reading_retains_typed_provider_wait_without_dispatch () =
   let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
     "inputSchema",`Assoc ["type",`String "object"]]) |> unwrap in
-  let make_runner state : Exact.runner = fun ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ ->
+  let make_runner state : Exact.runner = fun ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ ->
     incr state.resolutions;
     Ok (fun ~validate:_ -> executed
       (Exact.Call_refused (Exact.Provider_unavailable {detail="fixture provider is resting"}))) in

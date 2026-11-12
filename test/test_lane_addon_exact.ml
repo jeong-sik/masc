@@ -83,7 +83,7 @@ type step =
    before it sends, as a call must. *)
 let counting_runner store steps =
   let sends = ref 0 and seen = ref [] in
-  let runner ~before_dispatch ~admission_class:_ ~lane_key ~schema:_ (request : Exact.request) =
+  let runner ~before_dispatch ~admission_class:_ ~lane_key ~schema:_ ~size_refused:_ (request : Exact.request) =
     match !steps with
     | [] -> fail "the runner was asked more often than the test expected"
     | step :: rest ->
@@ -232,7 +232,7 @@ let test_a_started_attempt_without_outcome_is_unknown () =
 let test_an_exception_ends_the_request_as_unknown () =
   with_root (fun root ->
     let store = Store.create ~root in
-    let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ ->
+    let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ = Ok (fun ~validate:_ ->
       require (before_dispatch Exact.Generation);
       failwith "connection reset after send") in
     check bool "an exception is Outcome_unknown" true (run_request store runner (request "r5") = Exact.Final Exact.Outcome_unknown);
@@ -251,7 +251,7 @@ let test_an_exception_before_the_first_generation_dispatch_is_an_error () =
   List.iter (fun measures -> with_root (fun root ->
     let store = Store.create ~root in
     let original = request "raised-before-dispatch" in
-    let raising ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ ->
+    let raising ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ = Ok (fun ~validate:_ ->
       if measures then require (before_dispatch Exact.Measurement);
       invalid_arg "two settings of one endpoint disagree") in
     check bool "the run fails" true
@@ -310,7 +310,7 @@ let test_a_request_in_flight_is_not_run_twice () =
   with_root (fun root ->
     let entered, enter = Eio.Promise.create () in
     let released, release = Eio.Promise.create () in
-    let blocking ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let blocking ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       Ok
         (fun ~validate ->
            require (before_dispatch Exact.Generation);
@@ -341,7 +341,7 @@ let test_a_request_in_flight_is_not_run_twice () =
 let test_a_cancelled_call_leaves_its_attempt_started () =
   with_root (fun root ->
     let store = Store.create ~root in
-    let cancelled ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ ->
+    let cancelled ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ = Ok (fun ~validate:_ ->
       require (before_dispatch Exact.Generation);
       raise (Eio.Cancel.Cancelled Exit)) in
     (match Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:cancelled (request "r10") with
@@ -384,7 +384,7 @@ let test_confirmed_proof_recovers_lost_outcome_publication () =
   with_root (fun root ->
     let store = Store.create ~root in
     let directory = Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
-    let locking ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let locking ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       Ok
         (fun ~validate ->
            require (before_dispatch Exact.Generation);
@@ -426,7 +426,7 @@ let test_v2_proof_recovers_lost_outcome_publication () =
     let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
     let original=request "v2-publication-recovery" in
     let sent=ref 0 in
-    let locking ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let locking ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       Ok (fun ~validate ->
         require (before_dispatch Exact.Generation);
         incr sent;
@@ -552,7 +552,7 @@ let test_v1_and_v2_original_proofs_remain_distinct () =
     let read_link ()=Option.get (require (Store.load_host_result store ~instance_id ~request_id)) in
     let prior=match Yojson.Safe.Util.member "executions" (read_link ()) with
       | `List [one] -> one | _ -> fail "expected one v1 original proof" in
-    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       Ok (fun ~validate ->
         let output=require (validate question) in
         let cli=Receipt.cli ~visited:["s"] ~dispatched:["s"] ~failures:[] ~result:(Receipt.Answered "s") in
@@ -689,7 +689,7 @@ let test_proof_publication_failure_never_exposes_an_answer () =
     let original=request "blocked-proof" in
     let sends=ref 0 in
     let obstruction=Filename.concat root "host-results" in
-    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate ->
+    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ = Ok (fun ~validate ->
       incr sends;
       Out_channel.with_open_bin obstruction (fun channel -> output_string channel "not a proof directory");
       let output=require (validate question) in
@@ -717,7 +717,7 @@ let test_malformed_proof_refuses_publication_recovery () =
     let store=Store.create ~root in
     let original=request ("malformed-proof-"^label) in
     let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
-    let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate ->
+    let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ = Ok (fun ~validate ->
       require (before_dispatch Exact.Generation);
       let output=require (validate question) in
       Unix.chmod directory 0o500;
@@ -758,7 +758,7 @@ let test_recovery_refuses_malformed_earlier_attempt () =
     let first,_,_=counting_runner store (ref [Refused (Exact.Provider_unavailable {detail="first original refusal"})]) in
     ignore (run_request store first original);
     let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
-    let second ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate ->
+    let second ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ = Ok (fun ~validate ->
       require (before_dispatch Exact.Generation);
       let output=require (validate question) in
       Unix.chmod directory 0o500;
@@ -786,7 +786,7 @@ let test_a_call_cut_off_before_its_dispatch_is_tried_again () =
   with_root (fun root ->
     let store = Store.create ~root in
     let original = request "cut-before-dispatch" in
-    let waiting ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let waiting ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       Ok (fun ~validate:_ -> raise (Eio.Cancel.Cancelled Exit)) in
     (match Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:waiting original with
      | _ -> fail "a cancellation must reach the caller"
@@ -808,7 +808,7 @@ let test_the_started_marker_is_written_at_the_first_generation_dispatch () =
     let original = request "marker-at-dispatch" in
     let retained () = require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
     let entered = ref None and measured = ref [] and dispatched = ref [] and again = ref [] in
-    let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       Ok (fun ~validate ->
         entered := retained ();
         require (before_dispatch Exact.Measurement);
@@ -836,7 +836,7 @@ let test_a_call_that_ends_without_a_dispatch_retains_its_proof () =
     let store = Store.create ~root in
     let original = request "ended-without-dispatch" in
     let resting = Exact.Provider_unavailable { detail = "no candidate was admitted" } in
-    let undispatched ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let undispatched ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       Ok (fun ~validate:_ -> executed (Exact.Call_refused resting)) in
     check bool "the refusal does not end the request" true
       (run_request store undispatched original = Exact.Not_final (Exact.Provider_refused resting));
@@ -863,7 +863,7 @@ let test_a_marker_that_cannot_be_written_is_an_error () =
     let original = request "unwritable-marker" in
     let directory = Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
     let sends = ref 0 in
-    let stopped ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let stopped ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       Ok (fun ~validate:_ ->
         Unix.chmod directory 0o500;
         match before_dispatch Exact.Generation with
@@ -890,7 +890,7 @@ let test_an_ended_call_whose_marker_cannot_be_written_is_an_error () =
     let original = request "ended-unwritable-marker" in
     let directory = Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
     let resting = Exact.Provider_unavailable { detail = "no candidate was admitted" } in
-    let undispatched ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let undispatched ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       Ok (fun ~validate:_ ->
         Unix.chmod directory 0o500;
         executed (Exact.Call_refused resting)) in
@@ -914,7 +914,7 @@ let test_an_ended_call_writes_its_marker_before_its_proof () =
     let original = request "ended-blocked-proof" in
     let obstruction = Filename.concat root "host-results" in
     let resting = Exact.Provider_unavailable { detail = "no candidate was admitted" } in
-    let undispatched ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    let undispatched ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       Ok (fun ~validate:_ ->
         Out_channel.with_open_bin obstruction (fun channel -> output_string channel "not a proof directory");
         executed (Exact.Call_refused resting)) in
@@ -957,7 +957,7 @@ let test_recovered_refusal_is_returned_before_a_later_retry () =
     let directory=Filename.concat (Filename.concat root "exact-requests") (Store.digest declaration_id) in
     let busy=Exact.Provider_unavailable {detail="original refusal before publication loss"} in
     let sends=ref 0 in
-    let first ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ ->
+    let first ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ = Ok (fun ~validate:_ ->
       require (before_dispatch Exact.Generation);
       incr sends;
       Unix.chmod directory 0o500;
@@ -1080,7 +1080,7 @@ let test_request_schema_is_provider_requirement_not_baseline_replacement () =
   with_root (fun root ->
     let store=Store.create ~root in
     let sent_schema=ref None in
-    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema _request =
+    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema ~size_refused:_ _request =
       sent_schema:=Some schema;
       Ok (fun ~validate -> match validate (`Assoc ["question",`Null]) with
         | Ok output -> executed (Exact.Call_ended (Answered {output;slot="fixture";usage=None}))
@@ -1141,7 +1141,7 @@ let test_observe_missing_and_original_terminal_without_another_call ()=with_root
 let test_observe_started_is_open_while_provider_is_running ()=with_root (fun root ->
   let store=Store.create ~root in
   let original=request "readonly-running" in
-  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate ->
+  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _=Ok (fun ~validate ->
     require (before_dispatch Exact.Generation);
     let before=require (Store.load_exact_request store ~declaration_id ~request_id:original.request_id) in
     check bool "actual provider's started record remains open" true
@@ -1155,7 +1155,7 @@ let test_observe_started_is_open_while_provider_is_running ()=with_root (fun roo
 let test_observe_exception_and_later_denial_preserves_original ()=with_root (fun root ->
   let store=Store.create ~root in
   let original=request "readonly-exception" in
-  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate:_ ->
+  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _=Ok (fun ~validate:_ ->
     require (before_dispatch Exact.Generation);
     raise Exit) in
   ignore (run_request store runner original);
@@ -1214,7 +1214,7 @@ let test_host_admission_class_is_forwarded admission_class () =
     let observed=ref [] in
     let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
       Ok {Exact.admission_class; before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
-    let runner ~before_dispatch:_ ~admission_class ~lane_key:_ ~schema:_ _ =
+    let runner ~before_dispatch:_ ~admission_class ~lane_key:_ ~schema:_ ~size_refused:_ _ =
       observed:=admission_class :: !observed;
       Ok (fun ~validate ->
         match validate question with
@@ -1265,7 +1265,7 @@ let test_authority_refusal_does_not_start_a_request () =
     let original=request "host-refused-before-start" in
     let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
       Error (Exact.Undecided {detail="original binding is unreadable"}) in
-    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ = fail "refused original reached the runner" in
+    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ = fail "refused original reached the runner" in
     check bool "new request preserves host refusal" true
       (Result.is_error (Exact.run ~store ~declaration_id ~package ~authorize_request ~runner original));
     check bool "no admission or started record was published" true

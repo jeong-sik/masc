@@ -22,8 +22,17 @@
     reconstruct that proof. The common owner confirms the receipt durably
     before publishing the outcome. Resolution sends nothing. A lane that is unconfigured, off, without
     slots, or a registry that is not published, is reported before any call.
-    So is a lane whose every slot waits for a time its provider stated
-    ([every_slot_held], RFC-exact-lane-waits-for-a-stated-reset). *)
+    So is a lane with no slot to send this request to now and at least one
+    slot waiting for a time its provider stated ([every_slot_held],
+    RFC-exact-lane-waits-for-a-stated-reset).
+
+    While an HTTP slot waits, an HTTP slot whose provider refused this request
+    for its size is left out of the walk, as long as its id and target are
+    the ones that refused. A change outside those two -- the lane's output
+    limit or thinking, a credential, a limit the provider raised -- reaches
+    that slot once no slot waits. With no slot waiting, every slot is sent
+    the request (RFC-exact-request-skips-a-slot-that-refused-its-input 3.2
+    and 9 D1). *)
 
 val runner : base_path:string -> Lane_addon_exact.runner
 val authorize_request : base_path:string -> Lane_addon_exact.execution_authority

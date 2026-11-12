@@ -678,6 +678,178 @@ let test_a_held_slot_keeps_the_request_open_without_a_call () =
       check int "the held slot is not called" 0 (F.post_count held);
       check int "the walked slot is called once" 1 (F.post_count refusing)))
 
+(* RFC-exact-request-skips-a-slot-that-refused-its-input 3.2. Each case holds
+   the slot "held" by its own Retry-After and puts one walked slot beside it.
+   [body] gets [publish_beside], which publishes the lane with the given
+   walked slots after "held", and [release], which ends the hold. *)
+let too_large = F.Reply_with (fun _ _ -> `Request_entity_too_large, refusal_body "invalid_request_error")
+
+let with_a_held_slot ~base_path ~held body =
+  let runtime = fixture_runtime "stub-http.stub-model" in
+  let candidate = runtime.Runtime_instance.candidate_backpressure in
+  let publish_beside ?cli_slots (walked : F.target_fixture list) =
+    publish ~base_path ?cli_slots
+      ~runtime_observations:
+        [ ( "held"
+          , { Runtime_exact_output_registry.candidate
+            ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime } ) ]
+      ({ F.id = "held"; base_url = held } :: walked)
+  in
+  let release () = Runtime_candidate_backpressure.note_candidate_success ~candidate in
+  Fun.protect ~finally:release (fun () ->
+    Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 3600.0);
+    body ~publish_beside ~release)
+
+let open_after_a_refusal label = function
+  | Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _)) -> ()
+  | _ -> fail label
+
+(* A slot whose provider refused the request for its size is sent it once
+   while another slot waits; the next wake calls nothing. Once nothing waits,
+   the walk sends to every slot, so the walk that ends the request carries
+   each slot's refusal. *)
+let test_a_size_refusal_is_not_sent_again_while_a_slot_waits () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let held = F.start_server ~sw ~net ~clock too_large in
+    let sized = F.start_server ~sw ~net ~clock too_large in
+    with_a_held_slot ~base_path ~held:held.base_url (fun ~publish_beside ~release ->
+      publish_beside [ { F.id = "sized"; base_url = sized.base_url } ];
+      open_after_a_refusal "a size refusal beside a held slot must not end the request"
+        (run_request ~base_path ~store "skip1");
+      (match run_request ~base_path ~store "skip1" with
+       | Exact.Not_final (Exact.Lane_unavailable (Exact.Every_slot_held _)) -> ()
+       | _ -> fail "with the other slot refused for size, the lane has only the held slot left");
+      check int "the slot that refused the size is sent the request once" 1 (F.post_count sized);
+      check int "the held slot is not called" 0 (F.post_count held);
+      check (list string) "the second wake retains a held deferral and no Started attempt"
+        [ "provider_unavailable"; "every_slot_held" ] (attempt_labels ~store "skip1");
+      release ();
+      (match run_request ~base_path ~store "skip1" with
+       | Exact.Final (Exact.Call_final (Exact.Input_refused Exact.Request_body_refused)) -> ()
+       | _ -> fail "with no slot waiting, the walk must send to every slot and end on their refusals");
+      check int "the slot that waited is sent the request" 1 (F.post_count held);
+      check int "the slot that refused before is sent the request again" 2 (F.post_count sized)))
+
+(* A 400 names no cause, so it does not say the size was refused. *)
+let test_an_unnamed_refusal_is_sent_again_while_a_slot_waits () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let held = F.start_server ~sw ~net ~clock too_large in
+    let unnamed =
+      F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ -> `Bad_request, refusal_body "invalid_request_error"))
+    in
+    with_a_held_slot ~base_path ~held:held.base_url (fun ~publish_beside ~release:_ ->
+      publish_beside [ { F.id = "unnamed"; base_url = unnamed.base_url } ];
+      open_after_a_refusal "the first wake stays open" (run_request ~base_path ~store "skip2");
+      open_after_a_refusal "the second wake calls the slot again" (run_request ~base_path ~store "skip2");
+      check int "the slot is sent the request on each wake" 2 (F.post_count unnamed)))
+
+(* The refusal belongs to the target that gave it. The same slot id naming
+   another target is sent the request. *)
+let test_a_slot_with_another_target_is_sent_the_request () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let held = F.start_server ~sw ~net ~clock too_large in
+    let refusing = F.start_server ~sw ~net ~clock too_large in
+    let answering = F.start_server ~sw ~net ~clock (F.Reply (F.openai_response question)) in
+    with_a_held_slot ~base_path ~held:held.base_url (fun ~publish_beside ~release:_ ->
+      publish_beside [ { F.id = "moved"; base_url = refusing.base_url } ];
+      open_after_a_refusal "the first target refuses the size" (run_request ~base_path ~store "skip3");
+      publish_beside [ { F.id = "moved"; base_url = answering.base_url } ];
+      check bool "the slot's new target answers" true
+        (answered_by (run_request ~base_path ~store "skip3") <> None);
+      check int "the first target was sent the request once" 1 (F.post_count refusing);
+      check int "the new target was sent the request once" 1 (F.post_count answering)))
+
+(* The refusal belongs to the schema that was sent. The package output's
+   schema is what a request without its own schema sends, so another package
+   schema is another request to the provider. *)
+let test_a_slot_is_sent_the_request_under_another_schema () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let held = F.start_server ~sw ~net ~clock too_large in
+    let sized = F.start_server ~sw ~net ~clock too_large in
+    with_a_held_slot ~base_path ~held:held.base_url (fun ~publish_beside ~release:_ ->
+      publish_beside [ { F.id = "sized"; base_url = sized.base_url } ];
+      open_after_a_refusal "the first schema is refused for size" (run_request ~base_path ~store "skip5");
+      let other_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; "properties",
+            `Assoc [ "question", `Assoc [ "type", `String "string" ]; "hint", `Assoc [ "type", `String "string" ] ]
+          ; "required", `List [ `String "question" ]
+          ; "additionalProperties", `Bool false
+          ]
+      in
+      let package =
+        { package with
+          exact_outputs =
+            [ { Types.name = "author"; schema = other_schema; request_schema = Types.Package_schema_only } ] }
+      in
+      open_after_a_refusal "the slot is sent the request under the other schema"
+        (run_request ~package ~base_path ~store "skip5");
+      check int "the slot is sent the request once per schema" 2 (F.post_count sized)))
+
+(* The newest proof that sent to a slot decides for it. A slot that refused
+   the size and later failed another way is sent the request again. *)
+let test_the_newest_answer_of_a_slot_decides () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let held =
+      F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ -> `Too_many_requests, refusal_body "rate_limit_error"))
+    in
+    let changing =
+      F.start_server ~sw ~net ~clock
+        (F.Reply_with (fun index _ ->
+           if index = 0 then `Request_entity_too_large, refusal_body "invalid_request_error"
+           else `Internal_server_error, refusal_body "api_error"))
+    in
+    with_a_held_slot ~base_path ~held:held.base_url (fun ~publish_beside ~release ->
+      publish_beside [ { F.id = "changing"; base_url = changing.base_url } ];
+      open_after_a_refusal "the slot refuses the size beside the held slot"
+        (run_request ~base_path ~store "skip6");
+      release ();
+      open_after_a_refusal "with nothing held both slots are called and neither ends the request"
+        (run_request ~base_path ~store "skip6");
+      check int "the slot was sent the request again once nothing was held" 2 (F.post_count changing);
+      let runtime = fixture_runtime "stub-http.stub-model" in
+      Runtime_candidate_backpressure.note_rate_limit
+        ~candidate:runtime.Runtime_instance.candidate_backpressure ~retry_after:(Some 3600.0);
+      open_after_a_refusal "the slot's newest answer is not a size refusal, so it is called"
+        (run_request ~base_path ~store "skip6");
+      check int "the slot is sent the request on the held wake" 3 (F.post_count changing)))
+
+let excluded_http ~store ~attempt_ordinal id =
+  match Eio_unix.run_in_systhread (fun () -> Exact.read_original_execution ~store
+    ~declaration_id ~schema ~attempt_ordinal (request id)) with
+  | Ok (Exact.Completed_original result) ->
+    Yojson.Safe.Util.(
+      Keeper_exact_walk_receipt.to_json result.receipt |> member "excluded_http" |> to_list
+      |> List.map to_string)
+  | Ok Exact.No_completed_original -> fail "the walk left no proof"
+  | Error detail -> fail detail
+
+(* A walk that leaves a slot out still runs when a CLI slot can be called. Its
+   receipt records the held slot and the left-out slot as exclusions. *)
+let test_a_left_out_slot_is_an_exclusion_in_the_receipt () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let held = F.start_server ~sw ~net ~clock too_large in
+    let sized = F.start_server ~sw ~net ~clock too_large in
+    with_a_held_slot ~base_path ~held:held.base_url (fun ~publish_beside ~release:_ ->
+      publish_beside ~cli_slots:[ F.cli_primary_runtime ] [ { F.id = "sized"; base_url = sized.base_url } ];
+      let calls = ref 0 in
+      let cli_runner : Keeper_lane_cli_oneshot.runner =
+        fun ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+        incr calls;
+        if !calls = 1 then Ok "not json" else Ok (Yojson.Safe.to_string question)
+      in
+      let runner = Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in
+      open_after_a_refusal "the first wake stays open beside the held slot"
+        (run_request ~runner ~base_path ~store "skip4");
+      check bool "the CLI slot answers on the second wake" true
+        (answered_by (run_request ~runner ~base_path ~store "skip4") <> None);
+      check int "the slot that refused the size is sent the request once" 1 (F.post_count sized);
+      check (list string) "the first walk excludes only the held slot" [ "held" ]
+        (excluded_http ~store ~attempt_ordinal:1 "skip4");
+      check (list string) "the second walk excludes the held slot and the left-out slot" [ "held"; "sized" ]
+        (excluded_http ~store ~attempt_ordinal:2 "skip4")))
+
 (* R4 on a lane that declares HTTP slots only: a slot held by its own
    Retry-After is not called, and with no other slot the lane ends held. *)
 let test_an_http_lane_whose_every_slot_waits_starts_nothing () =
@@ -1141,7 +1313,7 @@ let test_http_flow_preserves_host_admission_class ?(revoke_while_queued=false) a
        with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
     let call=match Server_lane_addon_exact.runner ~base_path
         ~before_dispatch:(fun dispatch -> guarded:=dispatch::!guarded; authorization.before_dispatch ())
-        ~admission_class:authorization.admission_class ~lane_key:lane_id ~schema original with
+        ~admission_class:authorization.admission_class ~lane_key:lane_id ~schema ~size_refused:[] original with
       | Ok call -> call | Error _ -> fail "actual HTTP runner refused the fixture lane" in
     let validate raw=match Exact.validate_answer ~output:(List.hd package.exact_outputs) original raw with
       | Error detail -> Error detail
@@ -1482,6 +1654,17 @@ let () =
         ; test_case "no wake before the reset starts a call" `Quick test_no_wake_before_the_reset_starts_a_call
         ; test_case "a held slot keeps the request open without a call" `Quick
             test_a_held_slot_keeps_the_request_open_without_a_call
+        ; test_case "a size refusal is not sent again while a slot waits" `Quick
+            test_a_size_refusal_is_not_sent_again_while_a_slot_waits
+        ; test_case "an unnamed refusal is sent again while a slot waits" `Quick
+            test_an_unnamed_refusal_is_sent_again_while_a_slot_waits
+        ; test_case "a slot with another target is sent the request" `Quick
+            test_a_slot_with_another_target_is_sent_the_request
+        ; test_case "a slot is sent the request under another schema" `Quick
+            test_a_slot_is_sent_the_request_under_another_schema
+        ; test_case "the newest answer of a slot decides" `Quick test_the_newest_answer_of_a_slot_decides
+        ; test_case "a left-out slot is an exclusion in the receipt" `Quick
+            test_a_left_out_slot_is_an_exclusion_in_the_receipt
         ; test_case "an HTTP lane whose every slot waits starts nothing" `Quick
             test_an_http_lane_whose_every_slot_waits_starts_nothing
         ; test_case "a held CLI slot survives the retained receipt" `Quick

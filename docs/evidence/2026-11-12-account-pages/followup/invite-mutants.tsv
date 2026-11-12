@@ -1,0 +1,24 @@
+no change	works	passes	
+the page does not hear a change of the fragment	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+the button stays on while the server answers	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+the form stays while the server answers	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+the page turns its form off and does not load again	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+the page drops the new link before it loads again	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+the page empties the fragment before it loads again	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+the page listens once	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+the page puts the token back in the address	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+the address keeps the fragment	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+the tab gets a new entry that keeps the token	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+the script names an element the page lacks	breaks	caught	TypeError: Cannot set properties of null (setting 'textContent')
+the markup names the field otherwise	breaks	caught	TypeError: Cannot set properties of null (setting 'value')
+the markup names the form otherwise	breaks	caught	AssertionError [ERR_ASSERTION]: the page must have the element accept
+the markup names the button otherwise	breaks	caught	AssertionError [ERR_ASSERTION]: the page must have the element go
+the way back is shown at first	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+an address with no token keeps the form	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+an address with no token offers no way back	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+the form takes half of the token	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+the page hides the way back in place of the form	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+an address with no token loads again at once	breaks	caught	AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+the page listens through window	works	passes	
+the page asks for the load before it turns the form off	works	passes	
+the page says nothing of the wait	words	read in the browser	

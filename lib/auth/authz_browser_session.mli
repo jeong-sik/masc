@@ -79,11 +79,18 @@ type refusal =
           (design 8.3). *)
   | Principal_inactive of Authz_types.User_id.t
       (** The principal of the session is disabled or deleted. *)
+  | Principal_revocation_pending of Authz_types.User_id.t
+      (** A revocation of the principal of the session was given up before it
+          reached the log (design 8.3): the principal is still active in the
+          state, and a sign-in refuses them for the same block
+          ({!Authz_login.Blocked}). *)
 
 val refusal_to_string : refusal -> string
 
-(** What a cookie acts as at [now_ms], in the state of one snapshot. *)
-val authenticate : Authz_state.t -> now_ms:int -> Cookie.t -> (signed_in, refusal) result
+(** What a cookie acts as at [now_ms], in the state of one snapshot that the
+    zone could be trusted for ({!Authz_zone.read}). A zone whose files
+    stopped or disagree gives no such snapshot, so no cookie acts on one. *)
+val authenticate : Authz_zone.trusted -> now_ms:int -> Cookie.t -> (signed_in, refusal) result
 
 (** Ends the session of [user_id], who signs out. The caller matched the
     cookie with {!authenticate} first. *)

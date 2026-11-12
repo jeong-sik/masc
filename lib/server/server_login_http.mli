@@ -65,8 +65,13 @@ val github_callback_path : string
     - [POST /api/v1/auth/keepers/turn], one turn of the person's Keeper on
       the Runtime they gave it ({!Server_preview_keeper_turn}, plan D2-8)
 
+    Each of these routes is judged on one snapshot that the zone could be
+    trusted for ({!Authz_zone.read}). A zone whose file stopped, or whose
+    files disagree, gives none, and the request gets the 503 of
+    {!Login_routes.zone_uncertain} before a credential is read.
+
     The subscription routes are judged as [Manage_own_provider] by
-    {!Auth_preview.person} on one snapshot of the zone, and a request that does
+    {!Auth_preview.person} on that snapshot, and a request that does
     not pass gets its 401 or 403 before the connect handler reads anything.
     The Keeper routes are judged the same way as [Manage_own_keeper] by
     {!Auth_preview.keeper_owner}, and the turn by

@@ -468,6 +468,17 @@ let ws_gate_on ~base_path headers =
 
 let ws_gate headers = ws_gate_on ~base_path:(ws_absent_base_path ()) headers
 
+let with_strict_auth f =
+  Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1") f
+
+(* [Server_auth.http_auth_strict_enabled] reads three inputs. A shell that
+   exports a public MASC_HTTP_BASE_URL would run a case meant for local auth
+   under strict auth, so the local cases set all three. *)
+let with_non_strict_auth f =
+  Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "false") (fun () ->
+    Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" None (fun () ->
+      Masc_test_deps.with_process_env "MASC_HOST" None f))
+
 let test_ws_upgrade_denied_without_token_or_origin () =
   match ws_gate [ ("host", "127.0.0.1:8935") ] with
   | Ok () -> fail "expected deny: no bearer token and no Origin header"
@@ -476,15 +487,20 @@ let test_ws_upgrade_denied_without_token_or_origin () =
     failf "expected Auth error, got %s"
       (Masc_domain.masc_error_to_string other)
 
-let test_ws_upgrade_allows_same_origin () =
-  match
-    ws_gate
-      [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
-  with
-  | Ok () -> ()
-  | Error err ->
-    failf "expected same-origin upgrade to pass, got %s"
-      (Masc_domain.masc_error_to_string err)
+(* The workspace requires a token (the default config). An Origin naming this
+   server is written by the client, so it does not stand in for the bearer:
+   the upgrade gets the verdict a POST to /mcp gets. *)
+let test_ws_upgrade_same_origin_does_not_replace_the_bearer () =
+  with_non_strict_auth (fun () ->
+    match
+      ws_gate
+        [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
+    with
+    | Ok () -> fail "expected deny: same-origin upgrade without the required bearer"
+    | Error (Masc_domain.Auth _) -> ()
+    | Error other ->
+      failf "expected Auth error, got %s"
+        (Masc_domain.masc_error_to_string other))
 
 let test_ws_upgrade_denies_cross_origin () =
   match
@@ -505,27 +521,100 @@ let rec rm_rf path =
       Unix.rmdir path)
     else Sys.remove path
 
-let with_temp_auth_workspace f =
+let with_temp_auth_config_workspace auth_config f =
   let path = Filename.temp_file "masc-ws-upgrade-auth" "" in
   Sys.remove path;
   Unix.mkdir path 0o700;
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () ->
-    Auth.save_auth_config path
-      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    Auth.save_auth_config path auth_config;
     f path)
+
+let with_temp_auth_workspace f =
+  with_temp_auth_config_workspace
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
+    f
+
+let with_auth_off_workspace f =
+  with_temp_auth_config_workspace
+    { Masc_domain.default_auth_config with enabled = false; require_token = false }
+    f
+
+let worker_token base_path =
+  match
+    Auth.create_token base_path ~agent_name:"ws-auth-test"
+      ~role:Masc_domain.Worker
+  with
+  | Ok (raw_token, _) -> raw_token
+  | Error err ->
+    failf "expected test token creation to pass, got %s"
+      (Masc_domain.masc_error_to_string err)
+
+let expect_ws_admitted label = function
+  | Ok () -> ()
+  | Error err ->
+    failf "expected %s to pass, got %s" label
+      (Masc_domain.masc_error_to_string err)
+
+let expect_ws_refused label = function
+  | Ok () -> failf "expected deny: %s" label
+  | Error (Masc_domain.Auth _) -> ()
+  | Error other ->
+    failf "expected Auth error for %s, got %s" label
+      (Masc_domain.masc_error_to_string other)
+
+(* Strict auth: the server is reachable from outside, so an upgrade carries
+   the bearer like every other request. Writing this server's own origin is
+   not a credential. *)
+let test_ws_upgrade_strict_refuses_same_origin_without_bearer () =
+  with_temp_auth_workspace (fun base_path ->
+    with_strict_auth (fun () ->
+      ws_gate_on ~base_path
+        [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
+      |> expect_ws_refused "strict same-origin upgrade without a bearer"))
+
+let test_ws_upgrade_strict_admits_bearer () =
+  with_temp_auth_workspace (fun base_path ->
+    let token = worker_token base_path in
+    with_strict_auth (fun () ->
+      ws_gate_on ~base_path
+        [ ("host", "127.0.0.1:8935");
+          ("origin", "http://127.0.0.1:8935");
+          ("authorization", "Bearer " ^ token) ]
+      |> expect_ws_admitted "strict upgrade with a valid bearer"))
+
+(* Workspace auth off: /mcp admits a request without a credential, and so does
+   /ws, except from another site's page. *)
+let test_ws_upgrade_auth_off_admits_same_origin_browser () =
+  with_auth_off_workspace (fun base_path ->
+    with_non_strict_auth (fun () ->
+      ws_gate_on ~base_path
+        [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
+      |> expect_ws_admitted "same-origin upgrade with workspace auth off"))
+
+let test_ws_upgrade_auth_off_admits_native_client () =
+  with_auth_off_workspace (fun base_path ->
+    with_non_strict_auth (fun () ->
+      ws_gate_on ~base_path [ ("host", "127.0.0.1:8935") ]
+      |> expect_ws_admitted "native upgrade without Origin with workspace auth off"))
+
+(* The credential verdict admits this request, so only the browser check
+   can refuse it. *)
+let test_ws_upgrade_auth_off_refuses_cross_site_browser () =
+  with_auth_off_workspace (fun base_path ->
+    with_non_strict_auth (fun () ->
+      match
+        ws_gate_on ~base_path
+          [ ("host", "127.0.0.1:8935"); ("origin", "http://evil.example:8935") ]
+      with
+      | Error (Masc_domain.Auth Masc_domain.Auth_error.SameOriginBlocked) -> ()
+      | Ok () -> fail "expected deny: cross-site browser upgrade with workspace auth off"
+      | Error other ->
+        failf "expected SameOriginBlocked, got %s"
+          (Masc_domain.masc_error_to_string other)))
 
 let test_ws_upgrade_allows_authenticated_cross_origin () =
   with_temp_auth_workspace (fun base_path ->
-    let token =
-      match
-        Auth.create_token base_path ~agent_name:"ws-auth-test"
-          ~role:Masc_domain.Worker
-      with
-      | Ok (raw_token, _) -> raw_token
-      | Error err ->
-        failf "expected test token creation to pass, got %s"
-          (Masc_domain.masc_error_to_string err)
-    in
+    let token = worker_token base_path in
     match
       ws_gate_on ~base_path
         [ ("host", "127.0.0.1:8935");
@@ -573,11 +662,21 @@ let () =
         [
           test_case "denies upgrade without token or Origin" `Quick
             test_ws_upgrade_denied_without_token_or_origin;
-          test_case "allows same-origin upgrade" `Quick
-            test_ws_upgrade_allows_same_origin;
+          test_case "same-origin does not replace the required bearer" `Quick
+            test_ws_upgrade_same_origin_does_not_replace_the_bearer;
           test_case "denies cross-origin upgrade without token" `Quick
             test_ws_upgrade_denies_cross_origin;
           test_case "allows authenticated cross-origin upgrade" `Quick
             test_ws_upgrade_allows_authenticated_cross_origin;
+          test_case "strict refuses same-origin upgrade without bearer" `Quick
+            test_ws_upgrade_strict_refuses_same_origin_without_bearer;
+          test_case "strict admits upgrade with bearer" `Quick
+            test_ws_upgrade_strict_admits_bearer;
+          test_case "auth off admits same-origin browser" `Quick
+            test_ws_upgrade_auth_off_admits_same_origin_browser;
+          test_case "auth off admits native client" `Quick
+            test_ws_upgrade_auth_off_admits_native_client;
+          test_case "auth off refuses cross-site browser" `Quick
+            test_ws_upgrade_auth_off_refuses_cross_site_browser;
         ] );
     ]

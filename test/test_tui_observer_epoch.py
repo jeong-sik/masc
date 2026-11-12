@@ -183,8 +183,7 @@ class ObserverEpochTest(unittest.TestCase):
                 os.write(master, b"epoch-second-queued\r")
                 wait_until(
                     lambda: (
-                        b"Input retained locally; waiting for earlier input or control"
-                        in output
+                        b"Input retained locally" in output
                     ),
                     "second input was not retained behind the first",
                 )

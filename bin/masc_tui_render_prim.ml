@@ -6380,41 +6380,31 @@ let context_split_pane_height ~content_height ~common_len =
 ;;
 
 let keeper_deletions_lines (state : state) ~cols =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let receipt = Option.fold ~none:[] ~some:(fun (_, message) -> [message])
       state.keeper_deletions_retry_receipt in
   let lines = match state.keeper_deletions with
-    | None -> ["삭제 기록을 불러오는 중입니다."]
-    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail]
+    | None -> [ say "삭제 기록 조회 중…" "Loading deletion records…" ]
+    | Some (Error detail) ->
+      [ say "삭제 기록 조회 실패: " "Deletion records load failed: " ^ detail ]
     | Some (Ok inventory) ->
-      let errors = List.map (fun error -> "종료 기록 오류: " ^ error) inventory.errors in
+      let errors =
+        List.map
+          (fun error -> say "종료 기록 오류: " "Shutdown record error: " ^ error)
+          inventory.errors in
       let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
       errors @ (match selected with
-        | None -> ["저장된 키퍼 삭제 기록이 없습니다."]
+        | None -> [ say "저장된 키퍼 삭제 기록이 없습니다." "No saved keeper deletion records." ]
         | Some row ->
-          let status = match row.Keeper_control.operation with
-            | Keeper_control.Configuration_removal receipt ->
-              let label = match receipt.state with
-                | Masc.Keeper_configuration_removal.Prepared -> "설정 삭제 접수"
-                | Cleanup_required detail -> "설정 정리 실패: " ^ detail
-                | Artifacts_removed -> "설정 파일 제거 대기"
-                | Removed -> "설정 삭제 및 정리 완료" in
-              Option.fold ~none:label ~some:(fun error -> label ^ ": " ^ error) receipt.last_error
-            | Runtime_shutdown operation ->
-              let open Masc.Keeper_shutdown_types in
-              match operation.phase with
-              | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } ->
-                "파일·설정 정리 실패: " ^ detail
-              | Finalized { completion = Completion_pending _; _ } -> "파일·설정 정리 대기"
-              | Blocked failure -> "종료 작업 중단: " ^ failure.detail
-              | Reconciliation_required _ -> "진행 중이던 도구 실행 결과 확인 필요"
-              | Finalized { completion = (Completion_not_requested | Completion_delivered _);_}
-              | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
-              | Owner_absent _ | Operator_absence_acknowledged _ | Superseded _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
           [Printf.sprintf "%d / %d · %s · %s"
              (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
-             (Keeper_control.deletion_keeper_name row) status]
-          @ (if row.can_retry then [] else ["이 단계는 정리 재시도 대상이 아닙니다."])
-          @ ["종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
+             (Keeper_control.deletion_keeper_name row)
+             (Keeper_control.deletion_status ~ko row)]
+          @ (if row.Keeper_control.can_retry then []
+             else [ say "이 단계는 정리 재시도 대상이 아닙니다." "This phase cannot retry cleanup." ])
+          @ [ say "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"
+                "Shutdown ledger record (including cleanup failure causes):" ]
           @ String.split_on_char '\n'
               (Yojson.Safe.pretty_to_string (Keeper_control.deletion_json row)))
   in
@@ -6437,13 +6427,14 @@ let keeper_deletions_hints (state : state) ~scrollable =
         | None -> false )
     | Some (Error _) | None -> (0, false)
   in
+  let say korean english = if state.ui_language = Lang_ko then korean else english in
   String.concat "  "
-    ((if operations > 1 then [ "j/k:작업" ] else [])
-     @ (if scrollable then [ "J/K/PgUp/PgDn:원문" ] else [])
-     @ [ "r:조회" ]
+    ((if operations > 1 then [ say "j/k:기록" "j/k:record" ] else [])
+     @ (if scrollable then [ say "J/K/PgUp/PgDn:원문" "J/K/PgUp/PgDn:raw" ] else [])
+     @ [ say "r:다시 읽기" "r:reload" ]
      @ (if can_retry && Option.is_none state.keeper_deletions_retry_receipt
-        then [ "t:정리 재시도" ] else [])
-     @ [ "Esc:닫기" ])
+        then [ say "t:정리 재시도" "t:retry cleanup" ] else [])
+     @ [ say "Esc:닫기" "Esc:close" ])
 
 ;;
 

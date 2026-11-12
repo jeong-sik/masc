@@ -255,6 +255,12 @@ type carried_start_front =
   | Turn_start_unknown of { reason : string }
       (** No seed, no lane cut, and the turn start could not be read: the
           range opened on the newest atom alone. *)
+  | Past_refused_start of { refused_first_atom : int }
+      (** This runtime refused the range that opened at [refused_first_atom],
+          and nothing answered since: the range opens strictly after it, at
+          this turn's boundary or on the newest atom alone, and stays at the
+          refused start when the history has no later atom
+          (RFC-librarian-lifecycle §4.10). *)
   | Librarian_snapshot of { absorbed_through : int; boundary_line : int }
       (** The Librarian absorbed the history through [absorbed_through] and
           wrote what the keeper was in the middle of; the range starts there
@@ -301,6 +307,7 @@ let carried_start_front_to_string = function
   | Lane_cut -> "lane_cut"
   | Turn_start -> "turn_start"
   | Turn_start_unknown _ -> "turn_start_unknown"
+  | Past_refused_start _ -> "past_refused_start"
   (* The same word the Agent Core lane logs for this front
      ([Keeper_carried_front.origin_to_string]), so one search finds both. *)
   | Librarian_snapshot _ -> "librarian_snapshot"
@@ -310,8 +317,8 @@ let carried_start_front_to_string = function
 let warn_if_sent_on_unknown_start ~keeper_name = function
   | Turn_start_unknown { reason } ->
     Keeper_carried_front.warn_range_opens_on_newest_atom ~keeper_name ~reason
-  | Carried_seed _ | Lane_cut | Turn_start | Librarian_snapshot _ | Librarian_progress _ ->
-    ()
+  | Carried_seed _ | Lane_cut | Turn_start | Past_refused_start _ | Librarian_snapshot _
+  | Librarian_progress _ -> ()
 ;;
 
 let continuity_observation_input ~trace_id ~continuity front =
@@ -320,9 +327,9 @@ let continuity_observation_input ~trace_id ~continuity front =
     Keeper_continuity_observation.Summarized
       { trace_id; end_atom = absorbed_through; boundary_line }
   | Librarian_progress { end_atom }, _ -> Keeper_continuity_observation.Absorbed { trace_id; end_atom }
-  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _), None ->
+  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _), None ->
     Keeper_continuity_observation.Not_applied
-  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _), Some chosen ->
+  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _), Some chosen ->
     (match Keeper_turn_driver_try_provider.continuity_choice chosen with
      | Keeper_turn_driver_try_provider.Chose_no_point ->
        Keeper_continuity_observation.Without_snapshot
@@ -468,12 +475,80 @@ let carried_start_range_on_source
     | None -> first
   in
   let absorbed = librarian_front.Keeper_turn_driver_try_provider.point in
-  (* The range and what it must carry, decided together: a front that stands
-     for absorbed atoms cannot be composed without the working state that
-     stands for them. *)
-  let plan =
+  (* RFC-librarian-lifecycle §4.10: the newest observation on this history is
+     this runtime's own refusal of a range, so the next range opens strictly
+     after where that one opened. Another runtime's refusal says nothing
+     about this one's window. A Librarian position past the refused start
+     already names a range the refusal did not cover, and a lane cut past it
+     is already later. *)
+  let librarian_end_atom =
     match absorbed with
     | Keeper_turn_driver_try_provider.Librarian_snapshot
+        (snapshot : Librarian_continuity_snapshot.t) -> Some snapshot.end_atom
+    | Keeper_turn_driver_try_provider.Librarian_progress { end_atom } -> Some end_atom
+    | Keeper_turn_driver_try_provider.No_position -> None
+  in
+  let refused_first_atom =
+    match seed_read.Keeper_carried_front.refused_start with
+    | Some (refused : Keeper_carried_front.refused_start)
+      when String.equal refused.runtime_profile runtime_id ->
+      (match Keeper_carried_front.refused_start_for_history ~digest_at refused with
+       | Error dropped ->
+         Log.Keeper.info
+           ~keeper_name
+           "model input carried range does not read the refused start runtime=%s \
+            refused_first_atom=%d reason=%s: the history no longer opens that atom \
+            with the same message"
+           runtime_id
+           refused.first_atom
+           (Keeper_carried_front.dropped_front_to_string dropped);
+         None
+       | Ok (refused : Keeper_carried_front.refused_start) ->
+         let librarian_is_past =
+           match librarian_end_atom with
+           | Some end_atom -> end_atom > refused.first_atom
+           | None -> false
+         in
+         if librarian_is_past || own_first_atom > refused.first_atom
+         then None
+         else Some refused.first_atom)
+    | Some _ | None -> None
+  in
+  let past_refused_start =
+    match refused_first_atom with
+    | None -> None
+    | Some refused_first_atom ->
+      let front = Past_refused_start { refused_first_atom } in
+      let newest = Keeper_carried_front.newest_atom ~atom_count:history_atom_count in
+      let boundary =
+        match turn_start with
+        | Keeper_carried_front.Turn_boundary { end_atom } ->
+          Some (Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom)
+        | Keeper_carried_front.Turn_boundary_unknown _ -> None
+      in
+      (match boundary with
+       | Some boundary when boundary > refused_first_atom -> Some (boundary, front)
+       | Some _ | None ->
+         if newest > refused_first_atom
+         then Some (newest, front)
+         else (
+           (* Nothing of the history is left to leave out: what overflows is
+              the part every turn carries or this turn's own input. The
+              range stays where it was refused and does not widen back to an
+              older start. *)
+           Log.Keeper.warn
+             ~keeper_name
+             "model input carried range has no start after the refused one runtime=%s \
+              refused_first_atom=%d history_atoms=%d: the same range goes out again"
+             runtime_id
+             refused_first_atom
+             history_atom_count;
+           Some (Int.min refused_first_atom newest, front)))
+  in
+  let plan =
+    match past_refused_start, absorbed with
+    | Some (first_atom, front), _ -> Plain (first_atom, front)
+    | None, Keeper_turn_driver_try_provider.Librarian_snapshot
         (snapshot : Librarian_continuity_snapshot.t)
       when snapshot.end_atom >= librarian_must_reach ->
       (* Without an accepted empty boundary, keep the newest atom so a
@@ -487,7 +562,7 @@ let carried_start_range_on_source
         ; boundary_line = snapshot.end_boundary_line
         ; working_state = Keeper_turn_driver_try_provider.working_state_text snapshot
         }
-    | Keeper_turn_driver_try_provider.Librarian_progress { end_atom }
+    | None, Keeper_turn_driver_try_provider.Librarian_progress { end_atom }
       when end_atom >= librarian_must_reach ->
       (* The Librarian read through [end_atom] and no working state fits: the
          atoms before it are in the keeper's memory and nothing stands in for
@@ -497,9 +572,9 @@ let carried_start_range_on_source
       Plain
         ( librarian_first_atom end_atom
         , Librarian_progress { end_atom } )
-    | Keeper_turn_driver_try_provider.Librarian_snapshot _
-    | Keeper_turn_driver_try_provider.Librarian_progress _
-    | Keeper_turn_driver_try_provider.No_position ->
+    | None, ( Keeper_turn_driver_try_provider.Librarian_snapshot _
+            | Keeper_turn_driver_try_provider.Librarian_progress _
+            | Keeper_turn_driver_try_provider.No_position ) ->
       let first_atom, front = seed_or_lane in
       Plain (first_atom, front)
   in
@@ -547,7 +622,7 @@ let carried_start_range_on_source
    | Absorbed_through _
    | Plain
        ( _
-       , ( Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _
+       , ( Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _
          | Librarian_snapshot _ | Librarian_progress _ ) ) -> ());
   Log.Keeper.info
     ~keeper_name
@@ -691,8 +766,8 @@ let working_state_left_out_detail = function
 let carries_working_state (windowed : windowed_range) =
   match windowed.carried.front with
   | Librarian_snapshot _ -> true
-  | Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Librarian_progress _ ->
-    false
+  | Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _
+  | Librarian_progress _ -> false
 ;;
 
 (* A zero-width range can already be the request the provider accepted.

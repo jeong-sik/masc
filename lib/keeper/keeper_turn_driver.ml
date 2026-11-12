@@ -2219,10 +2219,7 @@ let run_named
 	  let official_client_carried_front_seed () : Keeper_carried_front.seed_read =
 	    match !refused_carried_front with
 	    | Some seed ->
-	      { Keeper_carried_front.seed = Some seed
-	      ; unreadable = None
-	      ; boundary_error = None
-	      }
+	      { Keeper_carried_front.no_seed_read with seed = Some seed }
 	    | None ->
 	      (match carried_front_seed with
 	       | Some read -> read ()

@@ -1163,7 +1163,18 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
               Host.argument_projection source ~tools:prepared.tools
                 ~history_prefix:(Option.to_list historical_task_message)))
             ?on_model_input_window_observation
-            ?carried_front_seed
+            ?carried_front_seed:
+              (* A refusal answered while this account's usage window is spent
+                 may have been the window, not the size of the range, so it
+                 does not move the start (RFC-librarian-lifecycle §4.10). *)
+              (Option.map
+                 (fun read () ->
+                    let (read : Keeper_carried_front.seed_read) = read () in
+                    if Runtime_quota_window.is_exhausted ~scope:quota_scope
+                         ~now:(Time_compat.now ())
+                    then { read with refused_start = None }
+                    else read)
+                 carried_front_seed)
             ?librarian_front
             ?on_carried_front
             ~turn_start

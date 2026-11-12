@@ -1838,6 +1838,7 @@ let test_appended_gate_reference_is_no_durable_atom () =
           ; front = Model_input_front.At_atom seed_front_digest
           ; source = Keeper_carried_front.Turn_record { turn = 40 }
           }
+    ; refused_start = None
     ; unreadable = None
     ; boundary_error = None
     }
@@ -1903,6 +1904,7 @@ let seed_read_at ~messages first_atom =
         ; front = Model_input_front.At_atom front_digest
         ; source = Keeper_carried_front.Turn_record { turn = 41 }
         }
+  ; refused_start = None
   ; unreadable = None
   ; boundary_error = None
   }

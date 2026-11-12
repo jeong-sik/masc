@@ -6220,6 +6220,7 @@ let seed_read_of records =
       Keeper_carried_front.of_records
         ~trace_id:"trace-1"
         records
+  ; refused_start = None
   ; unreadable = None
   ; boundary_error = None
   }

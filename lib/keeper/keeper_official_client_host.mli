@@ -435,6 +435,14 @@ type carried_start_front =
       (** No seed, no lane cut, and the turn start could not be read
           ({!Keeper_carried_front.Turn_boundary_unknown}): the range opened
           on the newest atom alone. *)
+  | Past_refused_start of { refused_first_atom : int }
+      (** This runtime refused the range that opened at [refused_first_atom]
+          and no response was observed since. The range opens strictly after
+          it: at this turn's boundary when that is later, else on the newest
+          atom alone. With no later atom the range stays at the refused start
+          (RFC-librarian-lifecycle §4.10). No working state is
+          carried; the atoms between a Librarian point and the range wait for
+          the Librarian. *)
   | Librarian_snapshot of { absorbed_through : int; boundary_line : int }
       (** The Librarian absorbed this history through [absorbed_through],
           the end of the completed turn on boundary-log row [boundary_line],

@@ -1079,6 +1079,7 @@ let seed_at first_atom () =
   in
   { Keeper_carried_front.seed =
       Some { Keeper_carried_front.first_atom; front = Model_input_front.At_atom front_digest; source = Keeper_carried_front.Ledger }
+  ; refused_start = None
   ; unreadable = None
   ; boundary_error = None
   }
@@ -1198,7 +1199,7 @@ let test_empty_history_keeps_a_fitting_summary () =
     ; source = Keeper_carried_front.Turn_record { turn = 1 }
     } in
   let carried_front_seed () =
-    { Keeper_carried_front.seed = Some seed; unreadable = None; boundary_error = None } in
+    { Keeper_carried_front.seed = Some seed; refused_start = None; unreadable = None; boundary_error = None } in
   let goal = "Continue with the new user instruction." in
   successful (run ~initial_messages:large_history ~carried_front_seed ~librarian_front
     ~goal ~instructions:"Keeper instructions" ~world:"Current state" ());

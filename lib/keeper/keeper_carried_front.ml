@@ -114,13 +114,38 @@ type unreadable_records =
   ; first_reason : string
   }
 
+type refused_start =
+  { runtime_profile : string
+  ; first_atom : int
+  ; front : Model_input_front.t
+  ; turn : int
+  }
+
+(* The whole refused range counts, a refused whole history too: its start is
+   atom 0, where [carried_front_of_window] names no seed. *)
+let refused_start_of_record (record : Turn_record.t) =
+  Option.map
+    (fun (refused : Turn_record.refused_model_input) ->
+       { runtime_profile = refused.runtime_profile
+       ; first_atom =
+           refused.window.Turn_record.total_atoms
+           - refused.window.Turn_record.transmitted_atoms
+       ; front = refused.window.Turn_record.model_input_front
+       ; turn = record.Turn_record.absolute_turn
+       })
+    record.Turn_record.refused_model_input
+;;
+
 type seed_read =
   { seed : seed option
+  ; refused_start : refused_start option
   ; unreadable : unreadable_records option
   ; boundary_error : string option
   }
 
-let no_seed_read = { seed = None; unreadable = None; boundary_error = None }
+let no_seed_read =
+  { seed = None; refused_start = None; unreadable = None; boundary_error = None }
+;;
 
 let warn_seed_read_failures ~keeper_name ~runtime_id (read : seed_read) =
   Option.iter
@@ -163,7 +188,33 @@ let seed_read_of_rows ~trace_id rows =
       ([], None)
       rows
   in
-  { seed = of_records ~trace_id (List.rev records_rev)
+  let records = List.rev records_rev in
+  let of_trace (record : Turn_record.t) = String.equal record.Turn_record.trace_id trace_id in
+  let newest_response_turn =
+    List.fold_left
+      (fun newest (record : Turn_record.t) ->
+         match record.Turn_record.response_observed_model_input with
+         | Some _ when of_trace record ->
+           Some (Option.fold ~none:record.absolute_turn ~some:(Int.max record.absolute_turn) newest)
+         | Some _ | None -> newest)
+      None
+      records
+  in
+  let refused_start =
+    List.fold_left
+      (fun newest (record : Turn_record.t) ->
+         match refused_start_of_record record, newest_response_turn with
+         | Some _, Some response_turn when response_turn >= record.absolute_turn -> newest
+         | Some refused, (Some _ | None) when of_trace record ->
+           (match newest with
+            | Some (kept : refused_start) when kept.turn > refused.turn -> newest
+            | Some _ | None -> Some refused)
+         | Some _, (Some _ | None) | None, (Some _ | None) -> newest)
+      None
+      records
+  in
+  { seed = of_records ~trace_id records
+  ; refused_start
   ; unreadable
   ; boundary_error = None
   }
@@ -258,12 +309,15 @@ let read_seed ~config ~keeper_name ~trace_id =
   let store = Keeper_types_support.keeper_turn_record_store config keeper_name in
   match current_generation_floor ~config ~keeper_name ~trace_id with
   | Error detail ->
-    { seed = None
-    ; unreadable = None
-    ; boundary_error = Some detail
-    }
+    { no_seed_read with boundary_error = Some detail }
   | Ok generation_floor ->
     let unreadable = ref None in
+    (* The newest observation when it is a refusal: a refused range met
+       before any response-observed record, seed or not. A response that is
+       newer answers the history after the refusal, so the refusal behind it
+       is not read. *)
+    let refused_start = ref None in
+    let response_met = ref false in
     let exception Trace_boundary in
     (* Count observations, not intervening rows. A direct retry may reuse its
        turn number, so the last stored response is the latest observation.
@@ -280,7 +334,15 @@ let read_seed ~config ~keeper_name ~trace_id =
                   | Some floor -> record.Turn_record.absolute_turn <= floor
                   | None -> false) ->
             raise_notrace Trace_boundary
-          | Ok record -> of_records ~trace_id [ record ]
+          | Ok record ->
+            (match record.Turn_record.response_observed_model_input with
+             | Some _ -> response_met := true
+             | None ->
+               (match !refused_start, refused_start_of_record record with
+                | None, (Some _ as refused) when not !response_met ->
+                  refused_start := refused
+                | (Some _ | None), (Some _ | None) -> ()));
+            of_records ~trace_id [ record ]
           | Error first_reason ->
             let count =
               match !unreadable with
@@ -292,6 +354,7 @@ let read_seed ~config ~keeper_name ~trace_id =
       with Trace_boundary -> []
     in
     { seed = List.nth_opt seeds 0
+    ; refused_start = !refused_start
     ; unreadable = !unreadable
     ; boundary_error = None
     }
@@ -318,6 +381,16 @@ let for_history ~digest_at (seed : seed) =
   | Model_input_front.Empty_history when seed.first_atom > 0 ->
     Error Front_atom_missing
   | Model_input_front.Empty_history -> Ok seed
+;;
+
+let refused_start_for_history ~digest_at (refused : refused_start) =
+  for_history
+    ~digest_at
+    { first_atom = refused.first_atom
+    ; front = refused.front
+    ; source = Turn_record { turn = refused.turn }
+    }
+  |> Result.map (fun (_ : seed) -> refused)
 ;;
 
 let dropped_front_to_string = function

@@ -702,15 +702,21 @@ let the_preview_follows_a_login () =
       , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"calls":"allowed"}]}|}
       )
       (integrations ());
-    let not_connected =
-      match Server_setup_account_login.person_may_connect Runtime_setup_login_client.Antigravity with
-      | Error message -> message
-      | Ok () -> Alcotest.fail "a person may connect Antigravity"
+    let refused refusal =
+      ( 400
+      , Yojson.Safe.to_string
+          (`Assoc [ "error", `String (Server_setup_account_login.person_refusal_message refusal) ]) )
     in
     check_reply
       "a connect of what a person may not connect"
-      (400, Yojson.Safe.to_string (`Assoc [ "error", `String not_connected ]))
+      (refused Server_setup_account_login.Copy_without_owner)
       (keeper_post Masc.Auth_preview.connect_path {|{"integration_id":"agy"}|});
+    (* A client the server knows that the workspace does not declare: an
+       account of it could not be used, so its login does not start. *)
+    check_reply
+      "a connect of a client the workspace does not declare"
+      (refused Server_setup_account_login.Not_declared)
+      (keeper_post Masc.Auth_preview.connect_path {|{"integration_id":"codex"}|});
     let out = send admin router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()) in
     Alcotest.(check int) ("signed out: " ^ out.body) 204 out.status;
     Alcotest.(check string)

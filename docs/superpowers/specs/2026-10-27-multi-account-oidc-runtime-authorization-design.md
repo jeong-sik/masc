@@ -634,7 +634,7 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 - `lib/runtime`에서 string만으로 실행 객체를 얻는 경로의 잔존 0
 - Provider 두 계정 호출과 제3자 거부. 다른 owner의 Runtime을 Keeper에 배정하거나 실행하려는 시도의 거부를 포함한다.
 - Keeper 실행 lane 종류(호스트 프로세스, container, microVM)마다 다른 owner의 account-home을 읽으려다 거절되는 시험. §7.2의 attestation이 아니라 lane마다 한 번 시도한 결과다.
-- 호스트 프로세스 lane은 서버와 같은 OS 사용자로 돌아서 다른 owner의 account-home을 읽을 수 있다. 위 시험을 통과하지 못하는 lane은 `Multi_account`에서 Keeper에 배정하지 못한다.
+- 호스트 프로세스 lane은 서버와 같은 OS 사용자로 돌아서 다른 owner의 account-home을 읽을 수 있다. 위 시험을 통과하지 못하는 lane은 `Multi_account`에서 턴을 시작하지 못한다. 남의 홈이 읽히는 것은 실행할 때이므로 판정은 턴이 시작될 때 한다. 그런 lane의 Runtime을 Keeper에 배정하는 것은 막지 않는다(2026-11-12 사용자 결정).
 
 복구 리허설, official lane attestation, Single_flight 대기 시간은 1단계 조건이 아니다. 그 기능을 내는 2단계 층이 증거를 만들고, 그때 §11의 요구 목록으로 돌아간다.
 

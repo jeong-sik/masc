@@ -1137,7 +1137,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 4항(`lib/runtime`의 string만으로 실행 객체를 얻는 경로 0): 일부. 실행 진입은 `authorize*`가 준 봉인 값만 받는다(타입). 남은 수를 세는 검사는 없다.
   - 5항(두 계정 호출과 제3자 거부): 일부. 남의 Runtime 배정·실행 거부와 두 사람의 턴은 시험이 있다(client는 대역). 실제 Provider 계정 둘로 부른 기록은 없다.
   - 6항(lane 종류마다 남의 account-home 읽기 시도): 일부. 호스트 프로세스는 시도한 결과가 있고, container와 microVM은 mount 목록을 본 것이지 시도가 아니다.
-  - 7항(통과 못 한 lane은 배정 못 함): 구현이 문구와 다르다. 배정은 되고 턴 시작이 거절된다. 설계 문구를 "실행하지 못한다"로 고칠지, 배정에서 막을지는 사용자 결정이다.
+  - 7항(통과 못 한 lane은 턴을 시작하지 못함): 있다. 설계 문구가 "배정하지 못한다"였는데 구현은 배정을 받고 턴 시작에서 거절한다. 문구를 구현에 맞췄다(2026-11-12 사용자 결정). 시험: `test_runtime_account_access_multi`(다계정에서 native 도구 자세는 `Native_tools_reach_other_homes`), `test_server_preview_keeper_turn`(Codex Keeper의 턴은 거절되고 Codex가 돌지 않는다).
 - 결과(2026-11-11 16:56~16:58Z, OCaml 5.5.2). 빌드 exit 0. `test_server_accounts` 11/11, `test_server_login_http` 8/8, `test_login_routes` 6/6, `test_auth_gate` 2/2, `test_authz_boot_mode_read` 31/31, `test_server_preview_keeper_turn` 1/1.
 - 실제 바이너리(임시 폴더, 비운 환경, loopback 포트, 2026-11-11 16:55Z).
   - 서버 로그가 표의 경로를 26개로 적는다(probe 셋, 로그인 경로 열하나, 화면 둘, 사람의 경로 열).

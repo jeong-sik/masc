@@ -8,9 +8,6 @@ val chat_row_actions :
   unit -> (Masc_tui_types.workspace_authority * unit ref) Masc_tui_chat_row_actions.t
 (** Candidate rows for the current draw. Publish only after presentation. *)
 
-val keeper_health_word :
-  Masc_tui_types.Tui_decode.keeper_health option -> string
-
 type chat_search_result = {
   match_result : (Masc_tui_types.chat_scroll_position * Masc_tui_types.chat_search_cursor) option;
   unavailable_entries : int;

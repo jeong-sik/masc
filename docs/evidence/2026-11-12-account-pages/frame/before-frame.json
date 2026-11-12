@@ -1,0 +1,308 @@
+[
+  {
+    "label": "before",
+    "measure": "geometry",
+    "width": 1548,
+    "reading": {
+      "width": 1548,
+      "headerHeight": 50.6,
+      "brandLeft": 16,
+      "headingLeft": 254,
+      "accountRight": null,
+      "columnRight": 1294,
+      "signOutMarginTop": null,
+      "signOutTop": null,
+      "headingTop": 74.6,
+      "backLinkHeight": null,
+      "smallestControlHeight": null,
+      "horizontalScroll": false
+    },
+    "signedIn": {
+      "width": 1548,
+      "headerHeight": 85,
+      "brandLeft": 16,
+      "headingLeft": 254,
+      "accountRight": 1532,
+      "columnRight": 1294,
+      "signOutMarginTop": "16px",
+      "signOutTop": 28,
+      "headingTop": 109,
+      "backLinkHeight": 23,
+      "smallestControlHeight": 23,
+      "horizontalScroll": false
+    }
+  },
+  {
+    "label": "before",
+    "measure": "geometry",
+    "width": 1280,
+    "reading": {
+      "width": 1280,
+      "headerHeight": 50.6,
+      "brandLeft": 16,
+      "headingLeft": 120,
+      "accountRight": null,
+      "columnRight": 1160,
+      "signOutMarginTop": null,
+      "signOutTop": null,
+      "headingTop": 74.6,
+      "backLinkHeight": null,
+      "smallestControlHeight": null,
+      "horizontalScroll": false
+    },
+    "signedIn": {
+      "width": 1280,
+      "headerHeight": 85,
+      "brandLeft": 16,
+      "headingLeft": 120,
+      "accountRight": 1264,
+      "columnRight": 1160,
+      "signOutMarginTop": "16px",
+      "signOutTop": 28,
+      "headingTop": 109,
+      "backLinkHeight": 23,
+      "smallestControlHeight": 23,
+      "horizontalScroll": false
+    }
+  },
+  {
+    "label": "before",
+    "measure": "geometry",
+    "width": 320,
+    "reading": {
+      "width": 320,
+      "headerHeight": 50.6,
+      "brandLeft": 16,
+      "headingLeft": 16,
+      "accountRight": null,
+      "columnRight": 304,
+      "signOutMarginTop": null,
+      "signOutTop": null,
+      "headingTop": 74.6,
+      "backLinkHeight": null,
+      "smallestControlHeight": null,
+      "horizontalScroll": false
+    },
+    "signedIn": {
+      "width": 320,
+      "headerHeight": 118.6,
+      "brandLeft": 16,
+      "headingLeft": 16,
+      "accountRight": 304,
+      "columnRight": 304,
+      "signOutMarginTop": "16px",
+      "signOutTop": 61.6,
+      "headingTop": 142.6,
+      "backLinkHeight": 23,
+      "smallestControlHeight": 23,
+      "horizontalScroll": false
+    }
+  },
+  {
+    "label": "before",
+    "measure": "first_reading",
+    "alerts": 0,
+    "alertIsNew": null,
+    "alertText": [],
+    "statusLines": [],
+    "focus": "body",
+    "shownId": "구성원 …Y4A7M2",
+    "path": "/accounts/console"
+  },
+  {
+    "label": "before",
+    "measure": "sign_out_refused_twice",
+    "first": {
+      "alerts": 1,
+      "alertIsNew": true,
+      "alertText": [
+        "로그아웃하지 못했어요 서버가 잠시 준비되지 않았어요. 잠시 뒤 다시 해 주세요. 서버가 알려 준 이유: The server cannot read its accounts right now. Try again later."
+      ],
+      "statusLines": [],
+      "focus": "button 로그아웃",
+      "shownId": "구성원 …Y4A7M2",
+      "path": "/accounts/console"
+    },
+    "second": {
+      "alerts": 1,
+      "alertIsNew": true,
+      "alertText": [
+        "로그아웃하지 못했어요 서버가 잠시 준비되지 않았어요. 잠시 뒤 다시 해 주세요. 서버가 알려 준 이유: The server cannot read its accounts right now. Try again later."
+      ],
+      "statusLines": [],
+      "focus": "button 로그아웃",
+      "shownId": "구성원 …Y4A7M2",
+      "path": "/accounts/console"
+    },
+    "seen": [
+      {
+        "method": "GET",
+        "path": "/auth/session",
+        "csrf": null,
+        "authorization": false
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/auth/whoami",
+        "csrf": null,
+        "authorization": false
+      },
+      {
+        "method": "POST",
+        "path": "/auth/logout",
+        "csrf": "mock-csrf-token",
+        "authorization": false
+      },
+      {
+        "method": "POST",
+        "path": "/auth/logout",
+        "csrf": "mock-csrf-token",
+        "authorization": false
+      }
+    ]
+  },
+  {
+    "label": "before",
+    "measure": "sign_out_signed_in_again",
+    "after": {
+      "alerts": 1,
+      "alertIsNew": true,
+      "alertText": [
+        "로그아웃하지 못했어요 서버가 요청을 받아들이지 않았어요. 서버가 알려 준 이유: the CSRF token is not the one of the session"
+      ],
+      "statusLines": [],
+      "focus": "button 로그아웃",
+      "shownId": "구성원 …Y4A7M2",
+      "path": "/accounts/console"
+    },
+    "again": {
+      "alerts": 1,
+      "alertIsNew": true,
+      "alertText": [
+        "로그아웃하지 못했어요 서버가 요청을 받아들이지 않았어요. 서버가 알려 준 이유: the CSRF token is not the one of the session"
+      ],
+      "statusLines": [],
+      "focus": "button 로그아웃",
+      "shownId": "구성원 …Y4A7M2",
+      "path": "/accounts/console"
+    },
+    "seen": [
+      {
+        "method": "GET",
+        "path": "/auth/session",
+        "csrf": null,
+        "authorization": false
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/auth/whoami",
+        "csrf": null,
+        "authorization": false
+      },
+      {
+        "method": "POST",
+        "path": "/auth/logout",
+        "csrf": "mock-csrf-token",
+        "authorization": false
+      },
+      {
+        "method": "POST",
+        "path": "/auth/logout",
+        "csrf": "mock-csrf-token",
+        "authorization": false
+      }
+    ]
+  },
+  {
+    "label": "before",
+    "measure": "sign_out_another_person",
+    "after": {
+      "alerts": 1,
+      "alertIsNew": true,
+      "alertText": [
+        "로그아웃하지 못했어요 서버가 요청을 받아들이지 않았어요. 서버가 알려 준 이유: the CSRF token is not the one of the session"
+      ],
+      "statusLines": [],
+      "focus": "button 로그아웃",
+      "shownId": "구성원 …Y4A7M2",
+      "path": "/accounts/console"
+    },
+    "again": {
+      "alerts": 1,
+      "alertIsNew": true,
+      "alertText": [
+        "로그아웃하지 못했어요 서버가 요청을 받아들이지 않았어요. 서버가 알려 준 이유: the CSRF token is not the one of the session"
+      ],
+      "statusLines": [],
+      "focus": "button 로그아웃",
+      "shownId": "구성원 …Y4A7M2",
+      "path": "/accounts/console"
+    },
+    "seen": [
+      {
+        "method": "GET",
+        "path": "/auth/session",
+        "csrf": null,
+        "authorization": false
+      },
+      {
+        "method": "GET",
+        "path": "/api/v1/auth/whoami",
+        "csrf": null,
+        "authorization": false
+      },
+      {
+        "method": "POST",
+        "path": "/auth/logout",
+        "csrf": "mock-csrf-token",
+        "authorization": false
+      },
+      {
+        "method": "POST",
+        "path": "/auth/logout",
+        "csrf": "mock-csrf-token",
+        "authorization": false
+      }
+    ]
+  },
+  {
+    "label": "before",
+    "measure": "retry_failed_again",
+    "first": {
+      "alerts": 1,
+      "alertIsNew": true,
+      "alertText": [
+        "내 계정을 불러오지 못했어요 서버가 잠시 준비되지 않았어요. 잠시 뒤 다시 해 주세요. 서버가 알려 준 이유: The server cannot read its accounts right now. Try again later."
+      ],
+      "statusLines": [],
+      "focus": "body",
+      "shownId": null,
+      "path": "/accounts/console"
+    },
+    "second": {
+      "alerts": 1,
+      "alertIsNew": false,
+      "alertText": [
+        "내 계정을 불러오지 못했어요 서버가 잠시 준비되지 않았어요. 잠시 뒤 다시 해 주세요. 서버가 알려 준 이유: The server cannot read its accounts right now. Try again later."
+      ],
+      "statusLines": [],
+      "focus": "button 다시 시도",
+      "shownId": null,
+      "path": "/accounts/console"
+    },
+    "seen": [
+      {
+        "method": "GET",
+        "path": "/auth/session",
+        "csrf": null,
+        "authorization": false
+      },
+      {
+        "method": "GET",
+        "path": "/auth/session",
+        "csrf": null,
+        "authorization": false
+      }
+    ]
+  }
+]

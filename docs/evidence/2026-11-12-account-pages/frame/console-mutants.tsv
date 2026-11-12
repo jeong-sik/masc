@@ -1,0 +1,24 @@
+no change	passes
+a refused sign-out cannot be sent again	caught
+the wait is announced over a failed view	caught
+the heading takes the focus on every sign-in	caught
+a refused whoami leaves for the sign-in page	caught
+two answers that name two people are shown	caught
+the sign-out button is never marked	caught
+the retry button is never marked	caught
+the line of the reading is no status	caught
+the line of the leaving is no status	caught
+the line of the retry is no status	caught
+the note of a reading stays for the next failure	caught
+the note of a sign-out stays for the next failure	caught
+failed readings are not counted	caught
+refused sign-outs are not counted	caught
+a refused sign-out does not read the session again	caught
+the token of now is not sent	caught
+a session of another person is kept	caught
+a session that ended meanwhile is kept	caught
+the token of now is dropped for the next press	caught
+a sign-out that worked changes the page	caught
+a sign-out is not marked as sending	caught
+the count is never said	NOT CAUGHT
+the way back is a link inside a sentence again	NOT CAUGHT

@@ -726,6 +726,7 @@ function hydrateDashboardBootstrap(
   authOwner: DashboardCredentialOwner,
   shellRootRevision: number,
   namespaceRevision: number,
+  namespaceReadsStarted: number,
 ): void {
   if (executionRequestGeneration !== executionSnapshotRequestGeneration()
     || !dashboardCredentialOwnerIsCurrent(authOwner)) return
@@ -743,7 +744,10 @@ function hydrateDashboardBootstrap(
 
   if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)
     && namespaceTruthReadRecovery.revision === namespaceRevision
-    && !namespaceTruthReadRecovery.isReading) {
+    // A namespace read sent after this bootstrap is the newer observation and
+    // delivers itself. One sent before it is older: this slice is accepted
+    // and fences that read's completion.
+    && namespaceTruthReadRecovery.readsStarted === namespaceReadsStarted) {
     const normalized = hydrateNamespaceTruthObservation(data.namespace_truth, 'http')
     if (normalized !== null) hydrateShellRootSnapshot(normalized.root, true)
   }
@@ -811,6 +815,7 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
       try {
         const shellRootRevision = shellRootCompletionRevision
         const namespaceRevision = namespaceTruthReadRecovery.revision
+        const namespaceReadsStarted = namespaceTruthReadRecovery.readsStarted
         const executionReadRevision = executionReadRecovery.revision
         const data = await fetchDashboardBootstrap()
         if (!current()) return
@@ -822,6 +827,7 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
           authOwner,
           shellRootRevision,
           namespaceRevision,
+          namespaceReadsStarted,
         )
       } catch (bootstrapErr) {
         if (!current()) return

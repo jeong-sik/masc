@@ -295,7 +295,7 @@ let client_of ~client_id ~redirect_uri ~variable ~secret =
   | Error error -> Alcotest.fail (Login_client.environment_error_to_string error)
 ;;
 
-let with_installation ?(capacity = 8) f =
+let with_installation f =
   Eio_main.run (fun _env ->
     let root = Filename.temp_dir "login-flow-" "" in
     Fun.protect
@@ -334,7 +334,7 @@ let with_installation ?(capacity = 8) f =
             { zone
             ; google =
                 { clock; discovery_up = ref true; grants = Hashtbl.create 4; issued = ref 0; token_requests = ref 0 }
-            ; transactions = T.create ~capacity
+            ; transactions = T.create ()
             ; cache = X.cache ()
             ; client
             ; github =
@@ -386,7 +386,7 @@ let drawing () =
     Printf.sprintf "%032x" !drawn
 ;;
 
-let callback t id ~state answer =
+let callback t sealed ~state answer =
   Flow.callback
     ~get:(get t.google)
     ~post:(post t.google)
@@ -396,7 +396,7 @@ let callback t id ~state answer =
     t.client
     ~now:(now t)
     ~draw:(drawing ())
-    id
+    sealed
     ~state
     answer
 ;;
@@ -405,7 +405,7 @@ let callback t id ~state answer =
 let login ?invite ?replaces t ~sub ~return_to =
   let started = started ?invite ?replaces t ~return_to in
   let code, state = sign_in_at_google t.google ~sub started.authorization_url in
-  callback t started.Flow.id ~state (Flow.Code code)
+  callback t started.Flow.sealed ~state (Flow.Code code)
 ;;
 
 let refusal_of label = function
@@ -454,34 +454,36 @@ let a_person_without_an_invitation_writes_nothing () =
     Alcotest.(check int) "nothing written" before (next_seq t))
 ;;
 
-let a_transaction_is_taken_once () =
+(* The server keeps nothing of a login in flight, so a callback with a wrong
+   state spends nothing, and the same callback can come twice. Google takes
+   a code once: the second exchange is refused there, and nothing more is
+   written. *)
+let a_callback_that_comes_twice_is_refused_at_google () =
   with_installation (fun t ->
-    let first = started ~invite:admin_invite t ~return_to:T.Local_path.root in
-    let code, state = sign_in_at_google t.google ~sub:"google-sub-1" first.authorization_url in
-    ignore (refusal_of "wrong state" (callback t first.id ~state:(state ^ "0") (Flow.Code code)));
-    (match refusal_of "after the wrong state" (callback t first.id ~state (Flow.Code code)) with
-     | Flow.Transaction_refused T.Unknown -> ()
+    let login = started ~invite:admin_invite t ~return_to:T.Local_path.root in
+    let code, state = sign_in_at_google t.google ~sub:"google-sub-1" login.authorization_url in
+    (match refusal_of "wrong state" (callback t login.sealed ~state:(state ^ "0") (Flow.Code code)) with
+     | Flow.Transaction_refused T.State_differs -> ()
      | error -> Alcotest.fail (Flow.callback_error_to_string error));
     Alcotest.(check int) "Google never asked" 0 !(t.google.token_requests);
-    let second = started ~invite:admin_invite t ~return_to:T.Local_path.root in
-    let code, state = sign_in_at_google t.google ~sub:"google-sub-1" second.authorization_url in
-    (match callback t second.id ~state (Flow.Code code) with
+    (match callback t login.sealed ~state (Flow.Code code) with
      | Ok (_ : Flow.completed) -> ()
      | Error error -> Alcotest.fail (Flow.callback_error_to_string error));
-    (match refusal_of "replayed" (callback t second.id ~state (Flow.Code code)) with
-     | Flow.Transaction_refused T.Unknown -> ()
+    let written = next_seq t in
+    (match refusal_of "replayed" (callback t login.sealed ~state (Flow.Code code)) with
+     | Flow.Exchange_failed (X.Token_refused { status = 400; _ }) -> ()
      | error -> Alcotest.fail (Flow.callback_error_to_string error));
-    Alcotest.(check int) "one token request" 1 !(t.google.token_requests))
+    Alcotest.(check int) "Google was asked for each callback" 2 !(t.google.token_requests);
+    Alcotest.(check int) "the second callback wrote nothing" written (next_seq t))
 ;;
 
-let a_refusal_at_google_spends_the_transaction () =
+let a_refusal_at_google_asks_for_no_token () =
   with_installation (fun t ->
     let login = started ~invite:admin_invite t ~return_to:T.Local_path.root in
     let _code, state = sign_in_at_google t.google ~sub:"google-sub-1" login.authorization_url in
-    (match refusal_of "refused" (callback t login.id ~state Flow.Refused) with
+    (match refusal_of "refused" (callback t login.sealed ~state Flow.Refused) with
      | Flow.Refused_at_google -> ()
      | error -> Alcotest.fail (Flow.callback_error_to_string error));
-    Alcotest.(check int) "no transaction left" 0 (T.live t.transactions ~now_ms:!(t.google.clock));
     Alcotest.(check int) "Google never asked" 0 !(t.google.token_requests))
 ;;
 
@@ -490,25 +492,22 @@ let a_late_callback_is_expired () =
     let login = started ~invite:admin_invite t ~return_to:T.Local_path.root in
     let code, state = sign_in_at_google t.google ~sub:"google-sub-1" login.authorization_url in
     t.google.clock := !(t.google.clock) + T.lifetime_ms;
-    match refusal_of "late" (callback t login.id ~state (Flow.Code code)) with
+    match refusal_of "late" (callback t login.sealed ~state (Flow.Code code)) with
     | Flow.Transaction_refused T.Expired -> ()
     | error -> Alcotest.fail (Flow.callback_error_to_string error))
 ;;
 
-let a_start_that_fails_at_google_holds_nothing () =
-  with_installation ~capacity:1 (fun t ->
+let a_start_that_fails_at_google_starts_later () =
+  with_installation (fun t ->
     t.google.discovery_up := false;
     (match start ~invite:admin_invite t ~return_to:T.Local_path.root with
      | Error (Flow.Google_unavailable (X.Discovery_unavailable _)) -> ()
      | Error error -> Alcotest.fail (Flow.start_error_to_string error)
      | Ok _ -> Alcotest.fail "started without Google");
-    Alcotest.(check int) "no transaction held" 0 (T.live t.transactions ~now_ms:!(t.google.clock));
     t.google.discovery_up := true;
-    ignore (started t ~return_to:T.Local_path.root);
     match start t ~return_to:T.Local_path.root with
-    | Error Flow.Transactions_full -> ()
-    | Error error -> Alcotest.fail (Flow.start_error_to_string error)
-    | Ok _ -> Alcotest.fail "started past the capacity")
+    | Ok (_ : Flow.started) -> ()
+    | Error error -> Alcotest.fail (Flow.start_error_to_string error))
 ;;
 
 let a_token_for_another_login_is_refused () =
@@ -519,7 +518,7 @@ let a_token_for_another_login_is_refused () =
     let _, state = sign_in_at_google t.google ~sub:"google-sub-1" second.authorization_url in
     (* The code of the first login comes back with the second transaction:
        its verifier is not the one the code was issued for. *)
-    match refusal_of "crossed" (callback t second.id ~state (Flow.Code code)) with
+    match refusal_of "crossed" (callback t second.sealed ~state (Flow.Code code)) with
     | Flow.Exchange_failed (X.Token_refused { status = 400; _ }) -> ()
     | error -> Alcotest.fail (Flow.callback_error_to_string error))
 ;;
@@ -554,10 +553,10 @@ let invite_of token =
 let github_started ?(invite = None) ?(replaces = None) t ~return_to =
   match Gh_flow.start t.transactions t.github_client ~now:(now t) ~invite ~return_to ~replaces with
   | Ok started -> started
-  | Error T.Full -> Alcotest.fail "the store is full"
+  | Error T.Too_long -> Alcotest.fail "the sealed transaction is too long"
 ;;
 
-let github_callback t id ~state answer =
+let github_callback t sealed ~state answer =
   Gh_flow.callback
     ~get:(github_get t.github)
     ~post:(github_post t.github)
@@ -566,7 +565,7 @@ let github_callback t id ~state answer =
     t.github_client
     ~now:(now t)
     ~draw:(drawing ())
-    id
+    sealed
     ~state
     answer
 ;;
@@ -575,7 +574,7 @@ let github_callback t id ~state answer =
 let github_login ?invite ?replaces t ~user_id ~return_to =
   let started = github_started ?invite ?replaces t ~return_to in
   let code, state = sign_in_at_github t.github ~user_id started.Gh_flow.authorization_url in
-  github_callback t started.Gh_flow.id ~state (Gh_flow.Code code)
+  github_callback t started.Gh_flow.sealed ~state (Gh_flow.Code code)
 ;;
 
 let github_refusal_of label = function
@@ -633,25 +632,34 @@ let a_github_person_without_an_invitation_writes_nothing () =
     Alcotest.(check int) "nothing written" before (next_seq t))
 ;;
 
-let a_github_transaction_is_taken_once () =
+let a_github_callback_that_comes_twice_is_refused_at_github () =
   with_installation (fun t ->
     let login = github_started ~invite:admin_invite t ~return_to:T.Local_path.root in
     let code, state = sign_in_at_github t.github ~user_id:583231 login.authorization_url in
-    ignore (github_refusal_of "wrong state" (github_callback t login.id ~state:(state ^ "0") (Gh_flow.Code code)));
-    (match github_refusal_of "after the wrong state" (github_callback t login.id ~state (Gh_flow.Code code)) with
-     | Gh_flow.Transaction_refused T.Unknown -> ()
+    (match
+       github_refusal_of "wrong state" (github_callback t login.sealed ~state:(state ^ "0") (Gh_flow.Code code))
+     with
+     | Gh_flow.Transaction_refused T.State_differs -> ()
      | error -> Alcotest.fail (Gh_flow.callback_error_to_string error));
-    Alcotest.(check int) "GitHub never asked" 0 !(t.github.github_token_requests))
+    Alcotest.(check int) "GitHub never asked" 0 !(t.github.github_token_requests);
+    (match github_callback t login.sealed ~state (Gh_flow.Code code) with
+     | Ok (_ : Gh_flow.completed) -> ()
+     | Error error -> Alcotest.fail (Gh_flow.callback_error_to_string error));
+    let written = next_seq t in
+    (match github_refusal_of "replayed" (github_callback t login.sealed ~state (Gh_flow.Code code)) with
+     | Gh_flow.Exchange_failed (Github_oauth.Token_refused { status = _; error = _ }) -> ()
+     | error -> Alcotest.fail (Gh_flow.callback_error_to_string error));
+    Alcotest.(check int) "GitHub was asked for each callback" 2 !(t.github.github_token_requests);
+    Alcotest.(check int) "the second callback wrote nothing" written (next_seq t))
 ;;
 
-let a_refusal_at_github_spends_the_transaction () =
+let a_refusal_at_github_asks_for_no_token () =
   with_installation (fun t ->
     let login = github_started ~invite:admin_invite t ~return_to:T.Local_path.root in
     let _code, state = sign_in_at_github t.github ~user_id:583231 login.authorization_url in
-    (match github_refusal_of "refused" (github_callback t login.id ~state Gh_flow.Refused) with
+    (match github_refusal_of "refused" (github_callback t login.sealed ~state Gh_flow.Refused) with
      | Gh_flow.Refused_at_github -> ()
      | error -> Alcotest.fail (Gh_flow.callback_error_to_string error));
-    Alcotest.(check int) "no transaction left" 0 (T.live t.transactions ~now_ms:!(t.google.clock));
     Alcotest.(check int) "GitHub never asked" 0 !(t.github.github_token_requests))
 ;;
 
@@ -660,7 +668,7 @@ let a_late_github_callback_is_expired () =
     let login = github_started ~invite:admin_invite t ~return_to:T.Local_path.root in
     let code, state = sign_in_at_github t.github ~user_id:583231 login.authorization_url in
     t.google.clock := !(t.google.clock) + T.lifetime_ms;
-    match github_refusal_of "late" (github_callback t login.id ~state (Gh_flow.Code code)) with
+    match github_refusal_of "late" (github_callback t login.sealed ~state (Gh_flow.Code code)) with
     | Gh_flow.Transaction_refused T.Expired -> ()
     | error -> Alcotest.fail (Gh_flow.callback_error_to_string error))
 ;;
@@ -673,7 +681,7 @@ let a_github_code_for_another_login_is_refused () =
     let second = github_started ~invite:admin_invite t ~return_to:T.Local_path.root in
     let code, _ = sign_in_at_github t.github ~user_id:583231 first.authorization_url in
     let _, state = sign_in_at_github t.github ~user_id:583231 second.authorization_url in
-    match github_refusal_of "crossed" (github_callback t second.id ~state (Gh_flow.Code code)) with
+    match github_refusal_of "crossed" (github_callback t second.sealed ~state (Gh_flow.Code code)) with
     | Gh_flow.Exchange_failed (Github_oauth.Token_refused { status = 200; error = Some "bad_verification_code" }) ->
       Alcotest.(check int) "no token issued" 0 (Hashtbl.length t.github.tokens)
     | error -> Alcotest.fail (Gh_flow.callback_error_to_string error))
@@ -685,15 +693,12 @@ let a_transaction_of_the_other_provider_is_refused () =
   with_installation (fun t ->
     let google = started ~invite:admin_invite t ~return_to:T.Local_path.root in
     let code, state = sign_in_at_google t.google ~sub:"google-sub-1" google.authorization_url in
-    (match github_refusal_of "Google at GitHub" (github_callback t google.id ~state (Gh_flow.Code code)) with
+    (match github_refusal_of "Google at GitHub" (github_callback t google.sealed ~state (Gh_flow.Code code)) with
      | Gh_flow.Transaction_refused T.Other_flow -> ()
      | error -> Alcotest.fail (Gh_flow.callback_error_to_string error));
-    (match refusal_of "after the refusal" (callback t google.id ~state (Flow.Code code)) with
-     | Flow.Transaction_refused T.Unknown -> ()
-     | error -> Alcotest.fail (Flow.callback_error_to_string error));
     let github = github_started ~invite:admin_invite t ~return_to:T.Local_path.root in
     let code, state = sign_in_at_github t.github ~user_id:583231 github.authorization_url in
-    (match refusal_of "GitHub at Google" (callback t github.id ~state (Flow.Code code)) with
+    (match refusal_of "GitHub at Google" (callback t github.sealed ~state (Flow.Code code)) with
      | Flow.Transaction_refused T.Other_flow -> ()
      | error -> Alcotest.fail (Flow.callback_error_to_string error));
     Alcotest.(check int) "neither provider asked" 0 (!(t.google.token_requests) + !(t.github.github_token_requests)))
@@ -737,8 +742,8 @@ let () =
     [ ( "github"
       , [ Alcotest.test_case "invited, then back" `Quick a_github_person_joins_and_signs_in_later
         ; Alcotest.test_case "not invited" `Quick a_github_person_without_an_invitation_writes_nothing
-        ; Alcotest.test_case "taken once" `Quick a_github_transaction_is_taken_once
-        ; Alcotest.test_case "refused at GitHub" `Quick a_refusal_at_github_spends_the_transaction
+        ; Alcotest.test_case "a callback twice" `Quick a_github_callback_that_comes_twice_is_refused_at_github
+        ; Alcotest.test_case "refused at GitHub" `Quick a_refusal_at_github_asks_for_no_token
         ; Alcotest.test_case "late" `Quick a_late_github_callback_is_expired
         ; Alcotest.test_case "crossed logins" `Quick a_github_code_for_another_login_is_refused
         ] )
@@ -749,10 +754,10 @@ let () =
     ; ( "google"
       , [ Alcotest.test_case "invited, then back" `Quick an_invited_person_joins_and_signs_in_later
         ; Alcotest.test_case "not invited" `Quick a_person_without_an_invitation_writes_nothing
-        ; Alcotest.test_case "taken once" `Quick a_transaction_is_taken_once
-        ; Alcotest.test_case "refused at Google" `Quick a_refusal_at_google_spends_the_transaction
+        ; Alcotest.test_case "a callback twice" `Quick a_callback_that_comes_twice_is_refused_at_google
+        ; Alcotest.test_case "refused at Google" `Quick a_refusal_at_google_asks_for_no_token
         ; Alcotest.test_case "late" `Quick a_late_callback_is_expired
-        ; Alcotest.test_case "start without Google" `Quick a_start_that_fails_at_google_holds_nothing
+        ; Alcotest.test_case "start without Google" `Quick a_start_that_fails_at_google_starts_later
         ; Alcotest.test_case "crossed logins" `Quick a_token_for_another_login_is_refused
         ; Alcotest.test_case "client" `Quick the_client_needs_its_secret
         ] )

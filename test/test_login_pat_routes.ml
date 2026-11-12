@@ -134,7 +134,7 @@ let with_installation f =
           in
           let routes =
             { R.zone
-            ; transactions = Oidc_login_transaction.create ~capacity:1
+            ; transactions = Oidc_login_transaction.create ()
             ; google = None
             ; github = None
             ; get = unreachable

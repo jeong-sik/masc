@@ -319,5 +319,7 @@ val native_refusal_to_string : native_refusal -> string
     their log was removed, the logins of the persons stay under
     [.masc/accounts] until the operator removes that directory, and the
     native tools of a CLI could read them (plan F3a-3). Whether it is there is
-    read at each call. *)
+    read at each call, and the client starts after the answer: a directory
+    that appears between the two is seen by the next turn, not by this
+    one. *)
 val authorize_native : Runtime_native_tools.posture -> (unit, native_refusal) result

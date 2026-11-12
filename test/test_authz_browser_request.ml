@@ -181,14 +181,23 @@ let the_cookies () =
       "its clear"
       "__Host-masc_session=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"
       Q.clear_session_cookie;
-    let id = String.make 64 'c' in
-    (match Oidc_login_transaction.Id.of_string id with
+    let sealed = String.make 64 'c' in
+    (match Oidc_login_transaction.Sealed.of_string sealed with
      | Some txn ->
        Alcotest.(check string)
          "the transaction cookie"
-         ("__Host-masc_oidc_txn=" ^ id ^ "; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600")
+         ("__Host-masc_oidc_txn=" ^ sealed ^ "; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=600")
          (Q.set_transaction_cookie txn)
-     | None -> Alcotest.fail "fixture transaction id refused");
+     | None -> Alcotest.fail "fixture transaction refused");
+    (* RFC 6265 section 6.1: a browser keeps at least 4096 bytes of a cookie,
+       its name, value and attributes together. *)
+    (match Oidc_login_transaction.Sealed.of_string (String.make Oidc_login_transaction.max_sealed_length 'c') with
+     | Some longest ->
+       Alcotest.(check bool)
+         "the longest transaction cookie fits in 4096 bytes"
+         true
+         (String.length (Q.set_transaction_cookie longest) <= 4096)
+     | None -> Alcotest.fail "the longest sealed text was refused");
     Alcotest.(check string)
       "its clear"
       "__Host-masc_oidc_txn=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0"

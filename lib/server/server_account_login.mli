@@ -7,8 +7,8 @@
     The account server makes it at boot from the login clients of the
     [config.json] that the boot judged, and the localhost preview makes it
     from the loopback client of its command line. Both go through {!routes},
-    so the store of pending logins, the transport to a provider, the wall
-    clock and the random source of the two are the same. *)
+    so the seal of a login in flight, the transport to a provider, the wall
+    clock and the random source of the two are made the same way. *)
 
 type refusal =
   | Google_client_refused of Login_client.environment_error
@@ -37,13 +37,8 @@ val clients_of_config
   -> Authz_boot_mode_read.login_clients
   -> (clients, refusal) result
 
-(** How many logins can be between their start and their callback at once.
-    A start beyond it is refused ({!Oidc_login_transaction.start_error}),
-    and a pending login leaves at its callback or when it expires. *)
-val pending_login_capacity : int
-
-(** The shared value of the routes over [zone]: a new store of
-    {!pending_login_capacity} pending logins, the transport of
+(** The shared value of the routes over [zone]: a new key that seals the
+    logins in flight ({!Oidc_login_transaction.create}), the transport of
     {!Server_login_http.get} and {!Server_login_http.post} on [clock], the
     wall clock, and 32 random bytes per draw ({!Random_id.hex}). The
     transport needs the environment and the switch of the process

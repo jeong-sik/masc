@@ -1,36 +1,55 @@
-(* HIGH-RISK-UNREVIEWED: holds the secrets of logins in flight. A transaction
-   that is taken twice, or by the wrong browser, lets one person finish
-   another's login, or spend their invitation. *)
+(* HIGH-RISK-UNREVIEWED: seals the secrets of logins in flight. A sealed
+   transaction that another browser can read or change lets one person
+   finish another's login, or spend their invitation. Nothing here stops a
+   sealed transaction from being used twice: that rests on Google and on
+   GitHub refusing a code they have exchanged. *)
 
 (** Logins in flight, Google's and GitHub's (design 5.2 and 5.2.1, plans
-    C2a-2 and C2b-1b).
+    C2a-2, C2b-1b and S1a-3a-1).
 
     The start of a login draws its [state] and PKCE verifier, and for Google
-    its nonce, from the CSPRNG of {!Random_id}, and keeps them here under a
-    transaction ID. The browser carries the ID (plan C3 puts it in
-    [__Host-masc_oidc_txn], for both providers) and the provider carries
-    [state] back to the callback, which takes the transaction with both. The
-    verifier never leaves this module but through {!take}, so the browser and
-    the provider see only the challenge, and for Google the nonce sent to it.
+    its nonce, from the CSPRNG of {!Random_id}. The server keeps none of
+    them: it seals them, with where the login returns and what it replaces,
+    under a key of the process, and the browser carries the sealed text
+    (plan C3 puts it in [__Host-masc_oidc_txn], for both providers). The
+    provider carries [state] back to the callback, which opens the sealed
+    text and compares the two. The seal is ChaCha20-Poly1305 (RFC 8439), so
+    the browser and the provider read only the challenge, and for Google the
+    nonce sent to it, and a text with a changed byte does not open.
 
-    A transaction knows the flow that started it, and the callback of one
-    flow cannot take the transaction of another.
+    Nothing is held per login, so a start is never refused for the logins of
+    others: a request with no credential can start a login, and one that
+    starts many takes nothing from the next person.
 
-    A transaction is taken once: {!take} removes it whether or not [state]
-    matches, so a second callback with the same ID finds nothing. It lives
-    {!lifetime_ms}. The store holds at most the capacity it was made with, and
-    a start that finds it full of live transactions is refused rather than
-    pushing one out: pushing out the oldest would end a login that someone
-    is finishing. Expired transactions do not count.
+    A sealed transaction knows the flow that started it, and the callback of
+    one flow does not open the transaction of another. It opens for
+    {!lifetime_ms} after its start, by the [now_ms] of each call. A clock
+    that is set back keeps it open that much longer, and one set forward
+    ends the logins in flight.
 
-    No network. The clock is the [now_ms] of each call, from a clock that does
-    not go back (a monotonic one): a clock set back would keep a transaction
-    past its lifetime. *)
+    It can be opened more than once in that time: the server does not
+    remember that it was opened. What a second callback could spend is
+    spent once elsewhere. The provider takes a code once, so a second
+    exchange is refused there, and the log takes an invitation once
+    ({!Authz_login.sign_in}). The answer of a callback clears the cookie
+    of the browser whatever it found ({!Login_routes.callback}), so a
+    browser sends a sealed transaction to one callback.
+
+    The key lives as long as the process: a login that started before a
+    restart does not open after it, and starts again.
+
+    The nonce of a seal is the count of seals of this key, and it goes in
+    the clear at the head of the sealed text. A count never comes twice, as
+    the seal requires. Whoever starts a login reads how many logins this
+    process has started.
+
+    No network. *)
 
 (** The token of an invitation link ([<base url>/accounts/invite#<token>],
-    plan B3d-1), sent by the form of the invitation screen. It is held only in
-    a transaction, and nothing prints it: the only function out of it is its
-    digest, so it reaches no log, query string, or error text (design 5.1-4). *)
+    plan B3d-1), sent by the form of the invitation screen. Nothing prints
+    it and nothing seals it: the only function out of it is its digest,
+    which is what a transaction carries, so the token reaches no log, query
+    string, cookie, or error text (design 5.1-4). *)
 module Invite_token : sig
   type t
 
@@ -58,14 +77,31 @@ module Local_path : sig
   val root : t
 end
 
-(** The key of a transaction: 32 bytes of the CSPRNG as 64 lowercase hex
-    characters. *)
-module Id : sig
+(** A sealed transaction, as the browser carries it: unpadded base64url of
+    the nonce, the sealed bytes and the tag, at most {!max_sealed_length}
+    characters. One text opens: another base64url text of the same bytes
+    does not. *)
+module Sealed : sig
   type t
 
+  (** [Some] for 1 to {!max_sealed_length} characters of the base64url
+      alphabet. It says nothing of the key: {!open_} does. *)
   val of_string : string -> t option
+
   val to_string : t -> string
 end
+
+(** 4000. A browser keeps at least 4096 bytes of a cookie with its name and
+    its attributes (RFC 6265 section 6.1), and those of the transaction
+    cookie are under 96 bytes.
+
+    The HTTP/1 listener reads a header line of at most 4096 bytes, and the
+    [Cookie] line of a callback carries every cookie that the browser sends
+    this host. A sealed text is 400 to 650 characters with the return path
+    [/] and grows by four characters for three of the path, so a login with
+    a return path of thousands of characters, from a browser that sends
+    other cookies as well, is a 400 at its callback. *)
+val max_sealed_length : int
 
 (** Ten minutes. A login that takes longer starts again. *)
 val lifetime_ms : int
@@ -81,11 +117,11 @@ type _ flow =
   | Google : google flow
   | Github : unit flow
 
-(** What the start of a login sends: the ID to the browser, the rest to the
-    provider in the authorization request. [code_challenge] is the S256
+(** What the start of a login sends: the sealed transaction to the browser,
+    the rest to the provider in the authorization request. [code_challenge] is the S256
     challenge of the verifier (RFC 7636 section 4.2). *)
 type 'held started =
-  { id : Id.t
+  { sealed : Sealed.t
   ; state : string
   ; code_challenge : string
   ; held : 'held
@@ -95,7 +131,8 @@ type 'held started =
 type 'held taken =
   { held : 'held
   ; code_verifier : string  (** Sent with the code to the token endpoint. *)
-  ; invite : Invite_token.t option
+  ; invite : Authz_invite_event.Token_digest.t option
+        (** The digest of the invitation the start came with. *)
   ; return_to : Local_path.t
   ; replaces : Authz_types.Session_id.t option
         (** The browser session that the browser held at the start, its
@@ -107,13 +144,17 @@ type 'held taken =
             does. *)
   }
 
+(** The key that seals the logins of a process. *)
 type t
 
-(** A store that holds at most [capacity] live transactions. [capacity] is at
-    least 1. *)
-val create : capacity:int -> t
+(** Draws a key from the CSPRNG. Two values do not open each other's
+    transactions. *)
+val create : unit -> t
 
-type start_error = Full
+type start_error =
+  | Too_long
+      (** The sealed transaction is longer than {!max_sealed_length}: the
+          return path is too long for a cookie. *)
 
 val start
   :  t
@@ -124,23 +165,23 @@ val start
   -> replaces:Authz_types.Session_id.t option
   -> ('held started, start_error) result
 
-type take_error =
-  | Unknown  (** No transaction has this ID: none started, or it was taken. *)
+type open_error =
+  | Unknown
+      (** The text was not sealed with this key, or a byte of it changed:
+          another process sealed it, or nobody did. *)
   | Other_flow  (** Another flow started it. *)
   | Expired  (** It started {!lifetime_ms} or more before [now_ms]. *)
   | State_differs
 
-val take_error_to_string : take_error -> string
+val open_error_to_string : open_error -> string
 
-(** Removes the transaction [id] and gives it back if [flow] started it, it is
-    live, and [state] is its state, compared in constant time. *)
-val take
+(** Opens a sealed transaction and gives back what it carries if [flow]
+    started it, it started less than {!lifetime_ms} before [now_ms], and
+    [state] is its state, compared in constant time. *)
+val open_
   :  t
   -> now_ms:int
   -> 'held flow
-  -> Id.t
+  -> Sealed.t
   -> state:string
-  -> ('held taken, take_error) result
-
-(** The live transactions at [now_ms]. *)
-val live : t -> now_ms:int -> int
+  -> ('held taken, open_error) result

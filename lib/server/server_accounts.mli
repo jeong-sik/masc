@@ -119,7 +119,9 @@ val health_version : string -> string option
     access, gives the environment and [sw] to the transport of a login
     ([Eio_context]), records the port for the CLI of the workspace
     ([Workspace_connection]), calls [on_ready], and serves until [sw] is
-    cancelled. A refused boot has not set the two. The cleartext listener follows the HTTP mode of the
+    cancelled. A refused boot has not set the two. The two are one value
+    each for the process: a process runs one account server, and a second
+    [run] in it would replace what the first one set. The cleartext listener follows the HTTP mode of the
     environment, as the single-user server does. [lease] is the BasePath
     lease of the base path that was judged.
 

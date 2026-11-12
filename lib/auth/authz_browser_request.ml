@@ -26,10 +26,10 @@ let set_session_cookie cookie =
 
 let clear_session_cookie = set_cookie ~name:session_cookie ~value:"" ~same_site:"Strict" ~max_age_s:0
 
-let set_transaction_cookie id =
+let set_transaction_cookie sealed =
   set_cookie
     ~name:transaction_cookie
-    ~value:(Oidc_login_transaction.Id.to_string id)
+    ~value:(Oidc_login_transaction.Sealed.to_string sealed)
     ~same_site:"Lax"
     ~max_age_s:(Oidc_login_transaction.lifetime_ms / milliseconds_per_second)
 ;;

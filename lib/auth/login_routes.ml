@@ -267,15 +267,15 @@ let begin_login t login ~invite ~return_to ~replaces =
     (match
        Google_login_flow.start ~get:t.get cache t.transactions client ~now:t.now ~invite ~return_to ~replaces
      with
-     | Ok { Google_login_flow.id; authorization_url } -> Ok (id, authorization_url)
+     | Ok { Google_login_flow.sealed; authorization_url } -> Ok (sealed, authorization_url)
      | Error (Google_login_flow.Google_unavailable error) ->
        Log.Auth.warn "login: Google did not start a login: %s" (Oidc_google_exchange.error_to_string error);
        Error Bad_gateway
-     | Error Google_login_flow.Transactions_full -> Error Unavailable)
+     | Error Google_login_flow.Return_path_too_long -> Error Bad_request)
   | Github_login client ->
     (match Github_login_flow.start t.transactions client ~now:t.now ~invite ~return_to ~replaces with
-     | Ok { Github_login_flow.id; authorization_url } -> Ok (id, authorization_url)
-     | Error T.Full -> Error Unavailable)
+     | Ok { Github_login_flow.sealed; authorization_url } -> Ok (sealed, authorization_url)
+     | Error T.Too_long -> Error Bad_request)
 ;;
 
 let start t provider ~origin ~session_cookie ~fields =
@@ -292,10 +292,10 @@ let start t provider ~origin ~session_cookie ~fields =
   in
   match started with
   | Error failure -> refused_page failure
-  | Ok (id, authorization_url) ->
+  | Ok (sealed, authorization_url) ->
     { status = See_other_303
     ; headers =
-        [ "location", authorization_url; set_cookie (Q.set_transaction_cookie id); no_store; no_referrer ]
+        [ "location", authorization_url; set_cookie (Q.set_transaction_cookie sealed); no_store; no_referrer ]
     ; body = ""
     }
 ;;
@@ -307,16 +307,16 @@ type returned =
   | Refused
 
 let read_callback ~transaction_cookie ~query =
-  let* id =
-    Option.to_result ~none:Unauthorized (Option.bind transaction_cookie T.Id.of_string)
+  let* sealed =
+    Option.to_result ~none:Unauthorized (Option.bind transaction_cookie T.Sealed.of_string)
   in
   let* state = single query "state" in
   let* state = Option.to_result ~none:Bad_request state in
   let* code = single query "code" in
   let* error = single query "error" in
   match code, error with
-  | Some code, None -> Ok (id, state, Code code)
-  | None, Some (_ : string) -> Ok (id, state, Refused)
+  | Some code, None -> Ok (sealed, state, Code code)
+  | None, Some (_ : string) -> Ok (sealed, state, Refused)
   | None, None | Some _, Some _ -> Error Bad_request
 ;;
 
@@ -365,7 +365,7 @@ let user_of = function
   | Authz_login.Admitted { user_id; role = _; previously_deleted = _ } -> user_id
 ;;
 
-let complete t login id ~state returned =
+let complete t login sealed ~state returned =
   match login with
   | Google_login { client; cache } ->
     let answer =
@@ -383,7 +383,7 @@ let complete t login id ~state returned =
          client
          ~now:t.now
          ~draw:t.draw
-         id
+         sealed
          ~state
          answer
      with
@@ -409,7 +409,7 @@ let complete t login id ~state returned =
          client
          ~now:t.now
          ~draw:t.draw
-         id
+         sealed
          ~state
          answer
      with
@@ -442,8 +442,8 @@ let still_acting t ~now_ms session_id =
 let callback t provider ~transaction_cookie ~query =
   let completed =
     let* login = Option.to_result ~none:Not_found (configured t provider) in
-    let* id, state, returned = read_callback ~transaction_cookie ~query in
-    let* user_id, return_to, replaces = complete t login id ~state returned in
+    let* sealed, state, returned = read_callback ~transaction_cookie ~query in
+    let* user_id, return_to, replaces = complete t login sealed ~state returned in
     let now_ms = ms_of (t.now ()) in
     let replaces = Option.bind replaces (still_acting t ~now_ms) in
     let* cookie = Bs.issue t.zone ~user_id ~draw:t.draw ~replaces |> Result.map_error issue_failure in

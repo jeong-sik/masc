@@ -1309,9 +1309,8 @@ let render_answering (state : state) =
 
 (* The agenda, through the overlay contract. Its sections are usually a few
    rows, and drawn by hand the box closed under them: the footer stood on row
-   11 of a 26-row terminal with the composer alone at the bottom. The title was
-   "Agenda & Upcoming Timers"; the sections are what is coming up and what is
-   waiting on the operator, and the other overlays open on MASC and their name. *)
+   11 of a 26-row terminal with the composer alone at the bottom. The title is
+   the name the [;] key carries in the footer. *)
 let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = agenda_lines state in
@@ -1332,14 +1331,13 @@ let render_agenda (state : state) =
   (* A panel with nothing to open says so on its own footer rather than
      naming a key that would do nothing. *)
   let hints =
-    match Agenda.target_indexes lines with
-    | [] -> "j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:close"
-    | _ -> "j/k:move  PgUp/PgDn:page  g/G:first/last  Enter:open  Esc:close"
+    Masc_tui_keys.footer_hints_agenda ~lang:state.ui_language
+      ~openable:(Agenda.target_indexes lines <> [])
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"agenda"
     ~frame:Chrome_overlay
-    ~title:(screen_title " MASC Agenda")
-    ~hints:(hints ^ "  ?:help")
+    ~title:(screen_title (ui_text state ~ko:" 일정·요청" ~en:" Agenda"))
+    ~hints
     (* [agenda_viewport] rather than the budget it is derived from: the
        keypress bounds the cursor against that pair. *)
     ~body:(fun ~budget:_ c ->

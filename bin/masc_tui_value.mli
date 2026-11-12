@@ -90,12 +90,10 @@ module Count : sig
     | Call
     | Post
     | Entry  (** One record of a log. *)
-    | Row  (** One row a list draws. *)
-    | Event
 
   val reading : ko:bool -> noun -> int -> string
   (** The count and what it counts, in the screen's language: [3 keepers],
-      [1 entry], [8,347 rows]; [키퍼 3명], [기록 1건], [8,347줄]. English
+      [1 entry], [8,347 posts]; [키퍼 3명], [기록 1건], [글 8,347개]. English
       names one thing in the singular and any other number in the plural.
       Korean names the thing first and counts it with the counter that
       thing takes. The figure is {!grouped}. *)

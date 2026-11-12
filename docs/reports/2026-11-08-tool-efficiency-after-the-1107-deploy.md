@@ -235,7 +235,15 @@
 - 동기 Execute 를 비동기로 바꾸는 대안: 긴 Execute 38.69 h(72시간) 중 큐에서 기다리던 다른 작업을 막은 Keeper 경과는 6.47 h(16.7%)였어요(앞 창). 「11-11 갱신」의 뒤 창은 15.519 h(20.9%)로 커져서 사용자가 (나)를 골랐어요.
 - 끝난 턴의 마커 상수, `keeper_skill` description 정리, Muse 빈 인자: 측정은 했고(위 「11-11 갱신」과 증거 README) 변경은 하지 않았어요.
 
-**바깥 사례.** 읽은 것은 증거 README 「바깥 사례와 맞춰 본 것」의 넷(Sutradhara, GitHub MCP server PR #1172, Anthropic programmatic tool calling 문서, *The Complexity Trap*)이 전부예요. 이 네 출처는 서빙 층 최적화, 도구 합치기, 코드 실행 샌드박스, 낡은 관찰 가리기예요. 모두 다른 작업(웹 검색, SWE-bench)의 값이라 masc 의 Keeper 에서 같은 크기로 나온다는 근거가 아니에요. 이번 갱신에서 새로 읽은 출처는 없어요. 영수증을 기다리며 턴을 끝내는 설계와 직접 맞는 선행 사례는 따로 찾지 않았어요.
+**바깥 사례.** 증거 README 「바깥 사례와 맞춰 본 것」의 넷(Sutradhara, GitHub MCP server PR #1172, Anthropic programmatic tool calling 문서, *The Complexity Trap*)은 서빙 층 최적화, 도구 합치기, 코드 실행 샌드박스, 낡은 관찰 가리기예요. 이 넷은 영수증을 기다리며 턴을 끝내는 설계와 직접 맞지 않아서 11-12 에 그 설계와 맞는 선행 사례 셋의 원문 페이지를 읽었어요. 모두 다른 시스템이라 masc 에서 같은 값이 나온다는 근거가 아니에요. 값이 아니라 설계 선택을 견줬어요.
+
+| 출처 (11-12 에 전체를 읽음) | 페이지가 말하는 것 | 이 설계와 견준 것 |
+|---|---|---|
+| MCP Tasks, modelcontextprotocol.io/specification/latest/basic/utilities/tasks | 호출이 task 가 되면 task ID·상태·TTL·폴링 간격을 돌려주고, task 는 그 응답 전에 영속으로 만들어져요. 클라이언트가 폴링으로 결과를 읽고, 취소는 서버가 받아들이되 일을 멈추지 않을 수 있어요(협조적). task 를 요청자나 인가 맥락에 묶는 규칙, 서버 재시작과 만료 때의 동작은 페이지에 없어요 | 취소가 일을 멈추지 않는 점은 RFC §9 4번의 추천(작업을 취소해도 worker 는 안 멈춤)과 같은 방향이에요. 이 설계는 모델이 폴링하지 않고 턴을 끝내요. 영수증을 소유자 작업에 묶는 규칙(`~viewer`)에 해당하는 규칙이 이 페이지에는 없어요 |
+| LangGraph interrupts, docs.langchain.com/oss/python/langgraph/interrupts | interrupt 가 걸리면 체크포인터에 상태를 저장하고 「무기한」 기다려요(시간 제한이 페이지에 없어요). 재개하면 노드를 처음부터 다시 실행해서 interrupt 앞의 부작용은 멱등이어야 해요. 한 노드의 여러 interrupt 는 순서(인덱스)로 재개 값과 맞춰요 | 시간 임계 없이 상태로만 기다리는 점은 같아요. 이 설계의 재개는 지금 있는 체크포인트 재개이고, 재개 때 Execute 가 다시 도는지는 이 설계에서 확인하지 않았어요. worker 는 서버 수명 switch 에서 따로 돌고 영수증은 request ID 로 찾아요 |
+| AWS Step Functions 콜백, docs.aws.amazon.com/step-functions/latest/dg/connect-to-resource.html | task token 을 외부 시스템이 받아 결과와 함께 돌려줄 때까지 기다려요. 하트비트 시간 안에 토큰이 안 오면 `States.Timeout` 으로 실패하고, 하트비트가 없으면 실행 한도(1년)까지 기다려요. 같은 토큰을 두 번 쓰면 어떻게 되는지는 페이지에 없어요 | 소유 키가 토큰이 아니라 request ID 라는 점이 달라요. 이 설계는 하트비트 시간 대신 상태(출처가 없어졌는지)로 `Source_lost` 를 판정해요. 같은 영수증 통지가 여럿 오는 경우는 모델의 `duplicate-resolve` 변이로 다뤘고, 토큰 재사용 쪽 비교는 페이지가 말하지 않아서 못 했어요 |
+
+세 페이지가 공통으로 말하는 것: 기다림의 열쇠(task ID, thread ID, task token)는 영속 저장되고 응답 전에 만들어져요. 이 설계의 request 기록과 `receipt_obligations` 가 같은 자리예요. 이번 갱신에서 이 셋 밖의 출처는 읽지 않았어요. MCP Tasks 의 세부는 ext-tasks 저장소에 있다고 페이지가 밝히는데 그것은 읽지 않았어요.
 
 ## 남은 일
 
@@ -273,5 +281,5 @@
 - wkbl-data, wkbl-front, wkbl-web-leader, msx-retro-mania 의 긴 턴이 무엇을 단위로 도는지. PR 번호가 입력에 거의 없어서 `long_turn_shapes.py` 로는 가르지 못했어요.
 - 같은 턴에서 같은 입력이 다시 돈 결과 바이트(34,686,650 B)가 모델 요청에 실제로 실린 크기인지, 그리고 줄였을 때 모델 요청이 얼마나 주는지. 장부 크기로 센 값이고 같은 입력이 다른 결과를 줬는지는 가르지 않았어요.
 - 영수증 기다림(11-12): 모델이 기다림 도구를 실제로 쓰는지, 쓰면 큐 대기와 겹침이 얼마나 주는지, 소유 규칙이 한 번이라도 틀리는지는 배포 전이라 값이 없어요. TLA+ 모델은 request 확인과 outbox 쓰기를 한 단계로 보고, Owner 명령 안의 쓰기 순서 틈과 도구 확인 뒤 턴 끝 기록 전의 틈을 못 봐요. 이 틈은 시험과 PR 본문의 한계로만 다뤄요. CI 가 모델을 돌리지 않으므로 모델이 구현과 어긋나는 것을 PR 검사가 못 알려 줘요.
-- 영수증을 기다리는 설계와 직접 맞는 바깥 사례. 찾지 않았어요.
+- 영수증 기다림의 바깥 사례는 셋(MCP Tasks, LangGraph interrupts, Step Functions 콜백)만 읽었어요. Temporal 같은 durable execution 엔진, OpenAI·Google 의 에이전트 SDK 는 읽지 않았어요. MCP Tasks 의 ext-tasks 저장소 사양과 Step Functions 의 한도 페이지도 읽지 않았어요.
 - 만든 턴 안에서 마커로 바꿨을 때 모델이 그 결과를 다시 찾는 몫. 끝난 턴의 값 1.32%는 그 몫이 아니에요. 재려면 마커로 바꾼 사건을 기록하는 코드가 먼저 있어야 해요.

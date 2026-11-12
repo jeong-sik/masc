@@ -117,7 +117,7 @@
     "axeRules": [],
     "axeIncomplete": [],
     "landmarks": 2,
-    "liveRegions": 0,
+    "liveRegions": 1,
     "visibleControls": 2,
     "freeTextFields": 0,
     "targetsUnder24px": 0,
@@ -143,8 +143,8 @@
       "visibilityState": "visible",
       "focused": "button",
       "hovered": "body",
-      "elements": 22,
-      "sha256": "8c9e388f1c9c56ca"
+      "elements": 23,
+      "sha256": "c45fd07faa3f1a57"
     },
     "styles1280": {
       "innerWidth": 1280,
@@ -153,8 +153,8 @@
       "visibilityState": "visible",
       "focused": "body",
       "hovered": "body",
-      "elements": 22,
-      "sha256": "9ac3a9ffe224b294"
+      "elements": 23,
+      "sha256": "70888459b880a02b"
     },
     "attempts": 1
   },
@@ -167,7 +167,7 @@
     "axeRules": [],
     "axeIncomplete": [],
     "landmarks": 2,
-    "liveRegions": 0,
+    "liveRegions": 1,
     "visibleControls": 2,
     "freeTextFields": 0,
     "targetsUnder24px": 0,
@@ -193,8 +193,8 @@
       "visibilityState": "visible",
       "focused": "button",
       "hovered": "body",
-      "elements": 22,
-      "sha256": "8c9e388f1c9c56ca"
+      "elements": 23,
+      "sha256": "c45fd07faa3f1a57"
     },
     "styles1280": {
       "innerWidth": 1280,
@@ -203,8 +203,8 @@
       "visibilityState": "visible",
       "focused": "body",
       "hovered": "body",
-      "elements": 22,
-      "sha256": "9ac3a9ffe224b294"
+      "elements": 23,
+      "sha256": "70888459b880a02b"
     },
     "attempts": 1
   },
@@ -260,6 +260,56 @@
   },
   {
     "label": "after",
+    "state": "console_account_changed",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 2,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 33,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": null,
+    "lang": "ko",
+    "title": "MASC 내 계정",
+    "finalPath": "/accounts/console",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "button outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "button",
+      "hovered": "body",
+      "elements": 22,
+      "sha256": "e52d481b2b6f3f52"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 22,
+      "sha256": "1a301ffd0195fbfa"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
     "state": "control_no_style_source",
     "httpStatus": 200,
     "policy": "default-src 'none'; script-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -267,7 +317,7 @@
     "axeRules": [],
     "axeIncomplete": [],
     "landmarks": 2,
-    "liveRegions": 0,
+    "liveRegions": 1,
     "visibleControls": 2,
     "freeTextFields": 0,
     "targetsUnder24px": 2,
@@ -278,8 +328,8 @@
     "styleAttributes": 0,
     "bodyBackground": "rgba(0, 0, 0, 0)",
     "policyViolations": [
-      "style-src-elem http://127.0.0.1:18972/accounts/console/base.css",
-      "style-src-elem http://127.0.0.1:18972/accounts/console/assets/index-CPx_Gy1M.css",
+      "style-src-elem http://127.0.0.1:19072/accounts/console/base.css",
+      "style-src-elem http://127.0.0.1:19072/accounts/console/assets/index-BAPNFRJQ.css",
       "style-src-elem inline",
       "style-src-elem inline"
     ],
@@ -288,8 +338,8 @@
     "title": "MASC 내 계정",
     "finalPath": "/accounts/console",
     "policyViolationsBeforeAxe": [
-      "style-src-elem http://127.0.0.1:18972/accounts/console/base.css",
-      "style-src-elem http://127.0.0.1:18972/accounts/console/assets/index-CPx_Gy1M.css"
+      "style-src-elem http://127.0.0.1:19072/accounts/console/base.css",
+      "style-src-elem http://127.0.0.1:19072/accounts/console/assets/index-BAPNFRJQ.css"
     ],
     "firstTabStop": "button outline=auto 1px",
     "horizontalScrollAt320": "none",
@@ -301,8 +351,8 @@
       "visibilityState": "visible",
       "focused": "button",
       "hovered": "html",
-      "elements": 22,
-      "sha256": "0280e2a7c72930c0"
+      "elements": 23,
+      "sha256": "ef4df6526e702670"
     },
     "styles1280": {
       "innerWidth": 1280,
@@ -311,8 +361,8 @@
       "visibilityState": "visible",
       "focused": "body",
       "hovered": "html",
-      "elements": 22,
-      "sha256": "77f9e0ed53c75569"
+      "elements": 23,
+      "sha256": "4d00e0770aaf7f6c"
     },
     "attempts": 1
   }

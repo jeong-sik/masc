@@ -1,24 +1,37 @@
-no change	passes
-a refused sign-out cannot be sent again	caught
-the wait is announced over a failed view	caught
-the heading takes the focus on every sign-in	caught
-a refused whoami leaves for the sign-in page	caught
-two answers that name two people are shown	caught
-the sign-out button is never marked	caught
-the retry button is never marked	caught
-the line of the reading is no status	caught
-the line of the leaving is no status	caught
-the line of the retry is no status	caught
-the note of a reading stays for the next failure	caught
-the note of a sign-out stays for the next failure	caught
-failed readings are not counted	caught
-refused sign-outs are not counted	caught
-a refused sign-out does not read the session again	caught
-the token of now is not sent	caught
-a session of another person is kept	caught
-a session that ended meanwhile is kept	caught
-the token of now is dropped for the next press	caught
-a sign-out that worked changes the page	caught
-a sign-out is not marked as sending	caught
-the count is never said	NOT CAUGHT
-the way back is a link inside a sentence again	NOT CAUGHT
+no change	same	passes
+a refused sign-out cannot be sent again	breaks	caught
+a sign-out is sent again after the person is out	breaks	caught
+the wait is announced over a failed view	breaks	caught
+the heading takes the focus on every sign-in	breaks	caught
+the heading does not take the focus when the account changed	breaks	caught
+a refused whoami leaves for the sign-in page	breaks	caught
+two answers that name two people are shown	breaks	caught
+two answers that name two people are a fault of the server	breaks	caught
+a reading runs while someone is signed in	breaks	caught
+a page that leaves reads again	breaks	caught
+a retry that found no session takes the page away	breaks	caught
+the sign-out button is never marked	breaks	caught
+the sign-out button is not marked when the person is out	breaks	caught
+the retry button is never marked	breaks	caught
+the line of the reading is no status	breaks	caught
+the line of the leaving is no status	breaks	caught
+the line of the retry is no status	breaks	caught
+the line of a sign-out is no status	breaks	caught
+a sign-out that worked says nothing	breaks	caught
+a retry that found no session says nothing	breaks	caught
+the note of a reading stays for the next failure	breaks	caught
+the note of a sign-out stays for the next failure	breaks	caught
+failed readings are not counted	breaks	caught
+refused sign-outs are not counted	breaks	caught
+a sign-out with no answer, or one it cannot read, counts as done	breaks	caught
+a sign-out answer it cannot read counts as done	breaks	caught
+a refused sign-out does not read the session again	breaks	caught
+the token of now is not sent	breaks	caught
+a session of another person is taken for the person's own	breaks	caught
+a session of another person leaves the page without a word	breaks	caught
+a session that ended meanwhile is kept	breaks	caught
+the token of now is dropped for the next press	breaks	caught
+a sign-out that worked changes the page	breaks	caught
+a sign-out is not marked as sending	breaks	caught
+the count is never said	words	read in the browser
+the way back is a link inside a sentence again	words	read in the browser

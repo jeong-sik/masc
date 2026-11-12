@@ -100,13 +100,84 @@
   },
   {
     "label": "after",
+    "measure": "geometry_letters",
+    "width": 1280,
+    "fontSize": 20,
+    "reading": {
+      "width": 1280,
+      "headerHeight": 75,
+      "brandLeft": 120,
+      "headingLeft": 120,
+      "accountRight": null,
+      "columnRight": 1160,
+      "signOutMarginTop": null,
+      "signOutTop": null,
+      "headingTop": 99,
+      "backLinkHeight": null,
+      "smallestControlHeight": null,
+      "horizontalScroll": false
+    },
+    "signedIn": {
+      "width": 1280,
+      "headerHeight": 75,
+      "brandLeft": 120,
+      "headingLeft": 120,
+      "accountRight": 1160,
+      "columnRight": 1160,
+      "signOutMarginTop": "0px",
+      "signOutTop": 12,
+      "headingTop": 99,
+      "backLinkHeight": 50,
+      "smallestControlHeight": 50,
+      "horizontalScroll": false
+    }
+  },
+  {
+    "label": "after",
+    "measure": "geometry_letters",
+    "width": 1280,
+    "fontSize": 24,
+    "reading": {
+      "width": 1280,
+      "headerHeight": 81.4,
+      "brandLeft": 120,
+      "headingLeft": 120,
+      "accountRight": null,
+      "columnRight": 1160,
+      "signOutMarginTop": null,
+      "signOutTop": null,
+      "headingTop": 105.4,
+      "backLinkHeight": null,
+      "smallestControlHeight": null,
+      "horizontalScroll": false
+    },
+    "signedIn": {
+      "width": 1280,
+      "headerHeight": 81.4,
+      "brandLeft": 120,
+      "headingLeft": 120,
+      "accountRight": 1160,
+      "columnRight": 1160,
+      "signOutMarginTop": "0px",
+      "signOutTop": 12,
+      "headingTop": 105.4,
+      "backLinkHeight": 56.4,
+      "smallestControlHeight": 56.4,
+      "horizontalScroll": false
+    }
+  },
+  {
+    "label": "after",
     "measure": "first_reading",
     "alerts": 0,
     "alertIsNew": null,
     "alertText": [],
-    "statusLines": [],
+    "statusLines": [
+      ""
+    ],
     "focus": "body",
     "shownId": "구성원 …Y4A7M2",
+    "signOutShown": true,
     "path": "/accounts/console"
   },
   {
@@ -118,9 +189,12 @@
       "alertText": [
         "로그아웃하지 못했어요 서버가 잠시 준비되지 않았어요. 잠시 뒤 다시 해 주세요. 서버가 알려 준 이유: The server cannot read its accounts right now. Try again later."
       ],
-      "statusLines": [],
+      "statusLines": [
+        ""
+      ],
       "focus": "button 로그아웃",
       "shownId": "구성원 …Y4A7M2",
+      "signOutShown": true,
       "path": "/accounts/console"
     },
     "second": {
@@ -129,9 +203,12 @@
       "alertText": [
         "로그아웃하지 못했어요 서버가 잠시 준비되지 않았어요. 잠시 뒤 다시 해 주세요. 서버가 알려 준 이유: The server cannot read its accounts right now. Try again later. 2번 시도했어요."
       ],
-      "statusLines": [],
+      "statusLines": [
+        ""
+      ],
       "focus": "button 로그아웃",
       "shownId": "구성원 …Y4A7M2",
+      "signOutShown": true,
       "path": "/accounts/console"
     },
     "seen": [
@@ -191,6 +268,7 @@
       ],
       "focus": "body",
       "shownId": null,
+      "signOutShown": false,
       "path": "/"
     },
     "again": null,
@@ -243,21 +321,18 @@
     "label": "after",
     "measure": "sign_out_another_person",
     "after": {
-      "alerts": 0,
-      "alertIsNew": null,
-      "alertText": [],
+      "alerts": 1,
+      "alertIsNew": true,
+      "alertText": [
+        "다른 탭에서 계정이 바뀌었어요 이 브라우저에는 지금 다른 계정이 로그인되어 있어요. 이 화면은 그 계정을 불러오기 전에는 아무것도 보내지 않아요."
+      ],
       "statusLines": [
-        "session of usr_01JCMOTHER0000 until 2026-11-12T20:50:45.985Z\nwhoami (200): {\"principal\":{\"kind\":\"human\",\"id\":\"usr_01JCMOTHER0000\"},\"role\":\"worker\",\"binding\":{\"kind\":\"session\",\"id\":\"ses_01JCMB3N8V5C1X\"}}",
-        "",
-        "",
-        "",
-        "",
-        "",
         ""
       ],
-      "focus": "body",
+      "focus": "h1 내 계정",
       "shownId": null,
-      "path": "/"
+      "signOutShown": false,
+      "path": "/accounts/console"
     },
     "again": null,
     "seen": [
@@ -284,18 +359,6 @@
         "path": "/auth/session",
         "csrf": null,
         "authorization": false
-      },
-      {
-        "method": "GET",
-        "path": "/auth/session",
-        "csrf": null,
-        "authorization": false
-      },
-      {
-        "method": "GET",
-        "path": "/api/v1/auth/whoami",
-        "csrf": null,
-        "authorization": false
       }
     ]
   },
@@ -313,6 +376,7 @@
       ],
       "focus": "body",
       "shownId": null,
+      "signOutShown": false,
       "path": "/accounts/console"
     },
     "second": {
@@ -326,6 +390,7 @@
       ],
       "focus": "button 다시 시도",
       "shownId": null,
+      "signOutShown": false,
       "path": "/accounts/console"
     },
     "seen": [

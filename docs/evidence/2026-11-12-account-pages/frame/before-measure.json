@@ -260,6 +260,56 @@
   },
   {
     "label": "before",
+    "state": "console_account_changed",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 2,
+    "freeTextFields": 0,
+    "targetsUnder24px": 1,
+    "smallestControlHeight": 23,
+    "rawServerTextBlocks": 0,
+    "styleRules": 31,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": null,
+    "lang": "ko",
+    "title": "MASC 내 계정",
+    "finalPath": "/accounts/console",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "button outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "button",
+      "hovered": "body",
+      "elements": 21,
+      "sha256": "06f2e585f94911ab"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 21,
+      "sha256": "b23263a1dbf39003"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "before",
     "state": "control_no_style_source",
     "httpStatus": 200,
     "policy": "default-src 'none'; script-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -278,8 +328,8 @@
     "styleAttributes": 0,
     "bodyBackground": "rgba(0, 0, 0, 0)",
     "policyViolations": [
-      "style-src-elem http://127.0.0.1:18962/accounts/console/base.css",
-      "style-src-elem http://127.0.0.1:18962/accounts/console/assets/index-CfAaj9st.css",
+      "style-src-elem http://127.0.0.1:19062/accounts/console/base.css",
+      "style-src-elem http://127.0.0.1:19062/accounts/console/assets/index-CfAaj9st.css",
       "style-src-elem inline",
       "style-src-elem inline"
     ],
@@ -288,8 +338,8 @@
     "title": "MASC 내 계정",
     "finalPath": "/accounts/console",
     "policyViolationsBeforeAxe": [
-      "style-src-elem http://127.0.0.1:18962/accounts/console/base.css",
-      "style-src-elem http://127.0.0.1:18962/accounts/console/assets/index-CfAaj9st.css"
+      "style-src-elem http://127.0.0.1:19062/accounts/console/base.css",
+      "style-src-elem http://127.0.0.1:19062/accounts/console/assets/index-CfAaj9st.css"
     ],
     "firstTabStop": "button outline=auto 1px",
     "horizontalScrollAt320": "none",
@@ -302,7 +352,7 @@
       "focused": "button",
       "hovered": "html",
       "elements": 21,
-      "sha256": "3874e9fc2801d8d6"
+      "sha256": "ed09736c61157775"
     },
     "styles1280": {
       "innerWidth": 1280,

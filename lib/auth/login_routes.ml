@@ -110,10 +110,6 @@ let html_type = "content-type", "text/html; charset=utf-8"
 let json_type = "content-type", "application/json"
 let set_cookie value = "set-cookie", value
 
-(* What every page of this module refuses. A page adds the sources it needs
-   before these. *)
-let page_limits = "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-
 let escape text =
   let buffer = Buffer.create (String.length text) in
   String.iter
@@ -144,7 +140,10 @@ let refused_page ~nonce failure =
       ; no_store
       ; no_referrer
       ; ( "content-security-policy"
-        , Printf.sprintf "default-src 'none'; %s; %s" (Account_page.style_source ~nonce) page_limits )
+        , Printf.sprintf
+            "default-src 'none'; %s; %s"
+            (Account_page.style_source ~nonce)
+            Account_page.formless_limits )
       ]
   ; body =
       Account_page.document
@@ -175,7 +174,7 @@ let completion_page ~nonce ~return_to ~cookie =
             "default-src 'none'; script-src 'nonce-%s'; %s; %s"
             nonce
             (Account_page.style_source ~nonce)
-            page_limits )
+            Account_page.formless_limits )
       ; set_cookie (Q.set_session_cookie cookie)
       ]
   ; body =

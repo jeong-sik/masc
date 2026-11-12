@@ -18,6 +18,19 @@
     style at all. *)
 val style_source : nonce:string -> string
 
+(** [base-uri 'none'; form-action 'none'; frame-ancestors 'none']: the three
+    limits [default-src] does not set, for a page that submits no form. Under
+    them a browser takes no other base for the addresses of the page, sends
+    no form from it, and shows it in no frame. *)
+val formless_limits : string
+
+(** The part of the sheet that is not the layout of the pages of this frame:
+    the colours, the type, the line that names the place, cards, fields and
+    buttons. A page that is built elsewhere and brings its own layout links
+    it, so it looks like the pages {!document} writes. It is the first part of
+    the sheet of {!document}, byte for byte. *)
+val base_sheet : string
+
 (** [document ~nonce ~title body]: an HTML document whose head holds [title]
     and the sheet, and whose body is the line that names the place and then
     [body]. [title] and [body] are written as

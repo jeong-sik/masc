@@ -1,0 +1,5 @@
+span_days=7.25 failures=2113 with_retry_after=2089
+restarts=71 at_least_an_hour_apart=39
+failures_30m_before=180 failures_30m_after=325
+first_failure_after_restart_inside_a_stated_reset=225
+by_keeper=pr-updater:25, code-reviewer-father:23, code-reviewer-uncle:21, code-reviewer-sister:13, wkbl-front:13, music-sensei:12, ocaml-agent-ic:10, build-maniac:10

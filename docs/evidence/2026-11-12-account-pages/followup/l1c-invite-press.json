@@ -1,0 +1,117 @@
+[
+  {
+    "label": "l1c",
+    "binary": "e39944514abc",
+    "holdMs": 300,
+    "atMs": 150,
+    "act": "mouse",
+    "firstLoad": "a document was loaded",
+    "openReturnedAfterMs": 5,
+    "actedAfterMs": 165,
+    "actedInTime": true,
+    "firstPressSent": [
+      "the first link"
+    ],
+    "invitationPagesAsked": 0,
+    "load": "a document was loaded",
+    "then": {
+      "page": "the page of the stand-in after a start",
+      "fragmentLength": 0,
+      "buttonShown": false,
+      "invite": "no field"
+    },
+    "pressThenSent": "no button"
+  },
+  {
+    "label": "l1c",
+    "binary": "e39944514abc",
+    "holdMs": 2000,
+    "atMs": 400,
+    "act": "mouse",
+    "firstLoad": "a document was loaded",
+    "openReturnedAfterMs": 3,
+    "actedAfterMs": 412,
+    "actedInTime": true,
+    "firstPressSent": [
+      "the first link"
+    ],
+    "invitationPagesAsked": 0,
+    "load": "a document was loaded",
+    "then": {
+      "page": "the page of the stand-in after a start",
+      "fragmentLength": 0,
+      "buttonShown": false,
+      "invite": "no field"
+    },
+    "pressThenSent": "no button"
+  },
+  {
+    "label": "l1c",
+    "binary": "e39944514abc",
+    "holdMs": 2000,
+    "atMs": 400,
+    "act": "Enter",
+    "firstLoad": "a document was loaded",
+    "openReturnedAfterMs": 4,
+    "actedAfterMs": 410,
+    "actedInTime": true,
+    "firstPressSent": [
+      "the first link"
+    ],
+    "invitationPagesAsked": 0,
+    "load": "a document was loaded",
+    "then": {
+      "page": "the page of the stand-in after a start",
+      "fragmentLength": 0,
+      "buttonShown": false,
+      "invite": "no field"
+    },
+    "pressThenSent": "no button"
+  },
+  {
+    "label": "l1c",
+    "binary": "e39944514abc",
+    "holdMs": 2000,
+    "atMs": 400,
+    "act": "Space",
+    "firstLoad": "a document was loaded",
+    "openReturnedAfterMs": 5,
+    "actedAfterMs": 406,
+    "actedInTime": true,
+    "firstPressSent": [
+      "the first link"
+    ],
+    "invitationPagesAsked": 0,
+    "load": "a document was loaded",
+    "then": {
+      "page": "the page of the stand-in after a start",
+      "fragmentLength": 0,
+      "buttonShown": false,
+      "invite": "no field"
+    },
+    "pressThenSent": "no button"
+  },
+  {
+    "label": "l1c",
+    "binary": "e39944514abc",
+    "holdMs": 2000,
+    "atMs": 400,
+    "act": "capture",
+    "firstLoad": "a document was loaded",
+    "openReturnedAfterMs": 4,
+    "actedAfterMs": 481,
+    "actedInTime": true,
+    "firstPressSent": null,
+    "invitationPagesAsked": 0,
+    "load": "no document was loaded",
+    "then": {
+      "page": "/accounts/invite",
+      "fragmentLength": 65,
+      "buttonShown": true,
+      "invite": "the first link"
+    },
+    "pressThenSent": [
+      "the first link"
+    ]
+  }
+]

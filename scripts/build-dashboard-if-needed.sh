@@ -222,13 +222,20 @@ needs_rebuild() {
   # No stamp or no output → must build
   [ ! -f "$STAMP" ] && return 0
   [ ! -f "$OUTPUT_DIR/index.html" ] && return 0
-  # The console of the account server is a second build under the same output.
-  [ ! -f "$OUTPUT_DIR/accounts/index.html" ] && return 0
 
+  # An output that is there and is not what a build of these sources writes.
+  # Every reason that holds is said, so no reason hides another.
+  local invalid=0
   if generated_index_has_remote_startup_resources; then
     echo "[dashboard] Generated index contains remote startup resources; rebuilding." >&2
-    return 0
+    invalid=1
   fi
+  # The console of the account server is a second build under the same output.
+  if [ ! -f "$OUTPUT_DIR/accounts/index.html" ]; then
+    echo "[dashboard] Generated output has no account console; rebuilding." >&2
+    invalid=1
+  fi
+  [ "$invalid" = "1" ] && return 0
 
   # Any .ts/.tsx/.css/.html source newer than stamp → rebuild
   if [[ -n "$(find "$DASHBOARD_DIR/src" \

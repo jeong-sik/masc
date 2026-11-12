@@ -98,10 +98,26 @@ type asset_load_error =
   | Asset_not_manifested
   | Asset_exact_read_failed of string
 
+type asset_version =
+  | Manifest_sha256 of string
+  | File_snapshot of Fs_compat.owned_regular_file_snapshot
+
+let equal_asset_version left right =
+  match left, right with
+  | Manifest_sha256 left, Manifest_sha256 right -> String.equal left right
+  | File_snapshot left, File_snapshot right ->
+    Fs_compat.equal_owned_regular_file_snapshot left right
+  | Manifest_sha256 _, File_snapshot _ | File_snapshot _, Manifest_sha256 _ -> false
+;;
+
 type loaded_asset =
   { body : string
-  ; manifest_sha256 : string option
+  ; version : asset_version
   }
+
+type reloaded_asset =
+  | Unchanged
+  | Reloaded of loaded_asset
 
 let asset_error_http_status = function
   | Asset_not_manifested -> `Not_found
@@ -185,7 +201,49 @@ let load_and_verify_dashboard_blob
     else Ok body
 ;;
 
-let load_dashboard_asset_for_selection installed relative_path =
+(* One file of an unbound source tree, taken by [read] after the path is
+   found to name an asset. *)
+let unbound_dashboard_asset relative_path ~read =
+  match assets_root () with
+  | None -> Error (Asset_exact_read_failed "dashboard asset root unavailable")
+  | Some root ->
+    if String.contains relative_path '\\' || String.contains relative_path '\000'
+    then Error Asset_not_manifested
+    else match Fs_compat.owned_relative_path (String.split_on_char '/' relative_path),
+               Fs_compat.owned_relative_path ["assets"; "published-artifacts"] with
+    | Error _, (Ok _ | Error _) | Ok _, Error _ -> Error Asset_not_manifested
+    | Ok relative, Ok excluded_directory ->
+      (match read ~root:(Filename.concat root "dashboard") ~excluded_directory relative with
+       | Ok (Some found) -> Ok found
+       | Ok None -> Error Asset_not_manifested
+       | Error error ->
+         Error (Asset_exact_read_failed (Fs_compat.owned_regular_file_read_error_to_string error)))
+;;
+
+let loaded_unbound_asset (contents : Fs_compat.owned_regular_file_contents) =
+  { body = contents.content; version = File_snapshot contents.snapshot }
+;;
+
+let load_unbound_dashboard_asset relative_path =
+  unbound_dashboard_asset relative_path ~read:(fun ~root ~excluded_directory relative ->
+    Result.map
+      (Option.map loaded_unbound_asset)
+      (Fs_compat.load_single_link_regular_file_beneath ~root ~excluded_directory relative))
+;;
+
+let reload_unbound_dashboard_asset ~held relative_path =
+  unbound_dashboard_asset relative_path ~read:(fun ~root ~excluded_directory relative ->
+    Result.map
+      (Option.map (function
+         | Fs_compat.Same_file -> Unchanged
+         | Fs_compat.Read contents -> Reloaded (loaded_unbound_asset contents)))
+      (Fs_compat.reload_single_link_regular_file_beneath ~root ~excluded_directory ~held relative))
+;;
+
+(* [of_loaded] and [unbound] give the two entry points their results: a load
+   returns the bytes, a reload may answer that the held ones still stand.
+   A bound launch and an installed release read and verify on every call. *)
+let dashboard_asset_for_selection ~of_loaded ~unbound installed relative_path =
   match installed with
   | Installed_dashboard.Unavailable e -> Error (Asset_installed_invalid e)
   | Installed_dashboard.Bound binding ->
@@ -194,9 +252,10 @@ let load_dashboard_asset_for_selection installed relative_path =
       | (Installed_dashboard.Invalid_receipt | Installed_dashboard.Receipt_identity_mismatch | Installed_dashboard.Binary_commit_unavailable | Installed_dashboard.Root_identity_changed | Installed_dashboard.Binary_commit_mismatch _ | Installed_dashboard.Digest_mismatch _ | Installed_dashboard.Size_mismatch _ | Installed_dashboard.Exact_read_failed _) as e -> Asset_installed_invalid e)
       (Result.map
          (fun (loaded : Installed_dashboard.loaded) ->
-            { body = loaded.Installed_dashboard.body
-            ; manifest_sha256 = Some loaded.Installed_dashboard.body_sha256
-            })
+            of_loaded
+              { body = loaded.Installed_dashboard.body
+              ; version = Manifest_sha256 loaded.Installed_dashboard.body_sha256
+              })
          (Installed_dashboard.load binding relative_path))
   | Installed_dashboard.Not_installed ->
   match Build_identity.resolve_dashboard_asset relative_path with
@@ -213,7 +272,7 @@ let load_dashboard_asset_for_selection installed relative_path =
       ; _
       } ->
     Result.map
-      (fun body -> { body; manifest_sha256 = Some expected_sha256 })
+      (fun body -> of_loaded { body; version = Manifest_sha256 expected_sha256 })
       (load_and_verify_dashboard_blob
          ~snapshot_root
          ~expected_snapshot_device:snapshot_device
@@ -224,22 +283,7 @@ let load_dashboard_asset_for_selection installed relative_path =
          path
          ~expected_size
          ~expected_sha256)
-  | Build_identity.Dashboard_assets_unbound ->
-    (match assets_root () with
-     | None -> Error (Asset_exact_read_failed "dashboard asset root unavailable")
-     | Some root ->
-       if String.contains relative_path '\\' || String.contains relative_path '\000'
-       then Error Asset_not_manifested
-       else match Fs_compat.owned_relative_path (String.split_on_char '/' relative_path),
-                  Fs_compat.owned_relative_path ["assets"; "published-artifacts"] with
-       | Error _, (Ok _ | Error _) | Ok _, Error _ -> Error Asset_not_manifested
-       | Ok relative, Ok excluded_directory ->
-         (match Fs_compat.load_single_link_regular_file_beneath
-             ~root:(Filename.concat root "dashboard") ~excluded_directory relative with
-          | Ok (Some body) -> Ok { body; manifest_sha256 = None }
-          | Ok None -> Error Asset_not_manifested
-          | Error error ->
-            Error (Asset_exact_read_failed (Fs_compat.owned_regular_file_read_error_to_string error))))
+  | Build_identity.Dashboard_assets_unbound -> unbound relative_path
   | Build_identity.Dashboard_assets_invalid reason ->
     Error (Asset_binding_invalid reason)
   | Build_identity.Dashboard_assets_unavailable ->
@@ -248,8 +292,28 @@ let load_dashboard_asset_for_selection installed relative_path =
     Error Asset_not_manifested
 ;;
 
+let load_dashboard_asset_for_selection installed relative_path =
+  dashboard_asset_for_selection
+    ~of_loaded:Fun.id
+    ~unbound:load_unbound_dashboard_asset
+    installed
+    relative_path
+;;
+
 let load_dashboard_asset relative_path =
   load_dashboard_asset_for_selection (installed_selection ()) relative_path
+
+let reload_dashboard_asset ~held relative_path =
+  let reloaded loaded = Reloaded loaded in
+  dashboard_asset_for_selection
+    ~of_loaded:reloaded
+    ~unbound:(match held with
+      | File_snapshot held -> reload_unbound_dashboard_asset ~held
+      | Manifest_sha256 _ ->
+        fun relative_path -> Result.map reloaded (load_unbound_dashboard_asset relative_path))
+    (installed_selection ())
+    relative_path
+;;
 
 let dashboard_asset_root () =
   match Build_identity.resolve_dashboard_asset "index.html" with
@@ -283,7 +347,7 @@ let source_bundle_freshness ~binary_commit () =
     (match binary_commit,
            load_dashboard_asset_for_selection Installed_dashboard.Not_installed
              ".build-identity.json" with
-     | Some binary_commit, Ok { body; manifest_sha256 = _ } ->
+     | Some binary_commit, Ok { body; version = _ } ->
        (try
           match Yojson.Safe.from_string body with
           | `Assoc fields ->
@@ -608,13 +672,13 @@ let surface_status_json () =
 
 let html () =
   match load_dashboard_asset "index.html" with
-  | Ok { body; manifest_sha256 = _ } -> body
+  | Ok { body; version = _ } -> body
   | Error _ ->
     "<html><body>Dashboard assets unavailable. Inspect /health dashboard_surface.recovery.</body></html>"
 
 let etag () =
   match load_dashboard_asset "index.html" with
-  | Ok { body; manifest_sha256 = _ } ->
+  | Ok { body; version = _ } ->
     let hash = Digest.string body |> Digest.to_hex in
     String.sub hash 0 12
   | Error _ -> "none"

@@ -5,6 +5,7 @@ import { isDismissEscape } from '../lib/keyboard'
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
+import { Effect } from 'effect'
 import { ConnectionStatus } from './dashboard-shell'
 import type { ComponentChildren } from 'preact'
 import { post } from '../api/core'
@@ -25,7 +26,7 @@ import {
   type GateKeeper,
   type KeeperListing,
 } from '../api/gate-keepers'
-import { dashboardRuntime } from '../api/effect-http'
+import { DashboardTransportError, dashboardRuntime } from '../api/effect-http'
 import {
   KNOWN_CONNECTOR_IDS,
   connectorActivation,
@@ -47,7 +48,7 @@ import {
 import { formatTimeAgoEn } from '../lib/format-time'
 import { ErrorState } from './common/feedback-state'
 import { ConnectorOverviewSkeleton } from './connector-overview-skeleton'
-import { lastEvent } from '../sse'
+import { selectObservationReadFailure, setupObservationRefresh } from '../lib/observation-refresh'
 import { KpiStripView, type KpiStripViewData } from './kpi-strip-view'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
@@ -166,6 +167,7 @@ type ConnectorStatusSnapshot = {
   gateError: string | null
   connectorError: string | null
   keeperError: string | null
+  readFailure: unknown | null
 }
 
 // Nothing fetched yet: zero known, zero served, nothing dropped. `truncated`
@@ -180,6 +182,7 @@ const EMPTY_SNAPSHOT: ConnectorStatusSnapshot = {
   gateError: null,
   connectorError: null,
   keeperError: null,
+  readFailure: null,
 }
 
 const connectorStatusResource = createManagedAsyncResource<ConnectorStatusSnapshot>(EMPTY_SNAPSHOT)
@@ -194,23 +197,33 @@ async function refresh() {
       gateError: null,
       connectorError: null,
       keeperError: null,
+      readFailure: null,
     }
+    const failures: unknown[] = []
 
     const [gateResult, connResult, keeperResult] = await Promise.allSettled([
       fetchGateStatus(signal),
       fetchGateConnectors(signal),
-      dashboardRuntime.runPromise(fetchGateKeepers(), { signal }),
+      // Keep the transport's original refusal; runPromise alone wraps typed
+      // failures in FiberFailure, hiding their HTTP status from the observer.
+      dashboardRuntime.runPromise(Effect.either(fetchGateKeepers()), { signal }).then(result => {
+        if (result._tag === 'Right') return result.right
+        const error = result.left
+        throw error instanceof DashboardTransportError ? error.cause ?? error : error
+      }),
     ])
 
     if (gateResult.status === 'fulfilled') {
       next.gate = gateResult.value
     } else {
+      failures.push(gateResult.reason)
       next.gateError = gateResult.reason instanceof Error ? gateResult.reason.message : 'fetch failed'
     }
 
     if (connResult.status === 'fulfilled') {
       next.connectors = connResult.value
     } else {
+      failures.push(connResult.reason)
       next.connectorError = connResult.reason instanceof Error ? connResult.reason.message : 'fetch failed'
     }
 
@@ -222,11 +235,14 @@ async function refresh() {
         : keeperResult.value.directoryIssues
             .map(issue => `${issue.keeperName}: ${issue.message}`)
             .join('; ')
+      if (next.keeperError !== null) failures.push(new Error(next.keeperError))
     } else {
+      failures.push(keeperResult.reason)
       next.keepers = []
       next.keeperListing = EMPTY_KEEPER_LISTING
       next.keeperError = keeperResult.reason instanceof Error ? keeperResult.reason.message : 'fetch failed'
     }
+    next.readFailure = selectObservationReadFailure(failures)
 
     return next
   })
@@ -1807,22 +1823,16 @@ function ConnectorDetailDrawerBody({
 
 export function ConnectorStatusPanel() {
   useEffect(() => {
-    void refresh()
-    return () => { connectorStatusResource.cancel() }
-  }, [])
-
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const unsubscribe = lastEvent.subscribe((event) => {
-      if (!event || !connectorStatusResource.state.value.data?.gate) return
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => {
-        void refresh()
-      }, 2000)
+    const stop = setupObservationRefresh(refresh, {
+      topics: ['gate', 'keeper_composite', 'runtime_resolved'],
+      readError: () => connectorStatusResource.readError()
+        ?? connectorStatusResource.state.peek().data?.readFailure ?? null,
+      cancelRead: () => connectorStatusResource.cancel(),
+      resetRead: () => connectorStatusResource.reset(EMPTY_SNAPSHOT),
     })
     return () => {
-      if (timer) clearTimeout(timer)
-      unsubscribe()
+      stop()
+      connectorStatusResource.cancel()
     }
   }, [])
 

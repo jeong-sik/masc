@@ -136,8 +136,8 @@ val active_store
     where a boot finds [Multi_account] with an external store that matches the
     log, and writes through the zone over the store that the install record
     names. It revokes no invitation, so an earlier link stays open until it is
-    spent or expires. Revoking an invitation and inviting a Member are not in
-    this build (plan C6). The caller holds the BasePath lease, as for
+    spent or expires. An Admin revokes an invitation and invites a Member
+    through the server ({!Authz_invite}). The caller holds the BasePath lease, as for
     {!activate}. *)
 val invite
   :  base_path:string

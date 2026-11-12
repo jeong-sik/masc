@@ -8,6 +8,8 @@ let response_headers () =
        ; "cache-control", "no-cache"
        ; "connection", "close"
        ; "x-accel-buffering", "no"
+       ; Server_mcp_transport_http_headers.observer_idle_timeout_header,
+         string_of_int Server_mcp_transport_http_headers.observer_idle_timeout_ms
        ])
 ;;
 

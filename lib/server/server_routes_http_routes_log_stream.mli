@@ -16,7 +16,9 @@
     only entries the query leaves out. A frame the client does not take within
     {!Server_mcp_transport_http_headers.sse_stalled_after_s} ends the stream
     ({!Server_sse_response.send}): HTTP/1.1 closes the response, HTTP/2
-    resets the stream. *)
+    resets the stream. The response advertises the shared observer idle
+    deadline so a client also retires a body whose keepalive bytes silently
+    stop arriving. *)
 
 val stream_path : string
 

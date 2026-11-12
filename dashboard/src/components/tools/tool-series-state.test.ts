@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolMetricsSeriesResponse } from '../../api/schemas/tool-metrics-series'
 
-const { fetchToolMetricsSeries } = vi.hoisted(() => ({ fetchToolMetricsSeries: vi.fn() }))
+const { fetchToolMetricsSeries, subscribeToolSeriesStream } = vi.hoisted(() => ({
+  fetchToolMetricsSeries: vi.fn(), subscribeToolSeriesStream: vi.fn(),
+}))
 
 vi.mock('../../api', () => ({ fetchToolMetricsSeries }))
+vi.mock('../../api/tool-metrics-series-stream', () => ({ subscribeToolSeriesStream }))
 
 type State = typeof import('./tool-series-state')
 let state: State
@@ -58,6 +61,7 @@ function series(overrides: Partial<ToolMetricsSeriesResponse> = {}): ToolMetrics
 beforeEach(async () => {
   vi.resetModules()
   fetchToolMetricsSeries.mockReset()
+  subscribeToolSeriesStream.mockReset().mockReturnValue(vi.fn())
   state = await import('./tool-series-state')
 })
 
@@ -228,24 +232,71 @@ describe('loading the picked window', () => {
 })
 
 describe('subscribeToolSeriesRefresh', () => {
-  it('refreshes the selected request only when its source changes and stops on disposal', async () => {
+  it('withdraws the previous workspace series after token and authority change between mounts', async () => {
+    const store = await import('../../store')
+    const { setStoredToken, clearStoredToken } = await import('../../api/core')
+    const workspace = (root: string, generation: number) => ({
+      generated_at: '2026-11-10T00:00:00Z',
+      execution_publication_epoch: 'series-remount', execution_publication_generation: generation,
+      status: { project: 'series', workspace_root: root }, agents: [], tasks: [], messages: [],
+      keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [],
+    })
+    expect(store.hydrateExecutionSnapshot(workspace('/workspace-a', 1))).toBe(true)
+    const stop = state.subscribeToolSeriesRefresh()
+    subscribeToolSeriesStream.mock.calls[0]![1].onFrame(series())
+    expect(state.visibleSeries.value).not.toBeNull()
+    stop()
+    setStoredToken('workspace-b-token', { source: 'manual' })
+    expect(store.hydrateExecutionSnapshot(workspace('/workspace-b', 2))).toBe(true)
+    expect(store.executionWorkspaceAuthority.peek()?.workspaceRoot).toBe('/workspace-b')
+    const remounted = state.subscribeToolSeriesRefresh()
+    try {
+      expect(state.visibleSeries.value).toBeNull()
+      expect(state.seriesLoading.value).toBe(true)
+      expect(fetchToolMetricsSeries).not.toHaveBeenCalled()
+      subscribeToolSeriesStream.mock.calls[1]![1].onFrame(series({ total: { ...busy, call_count: 99 } }))
+      expect(state.visibleSeries.value?.total.call_count).toBe(99)
+    } finally { remounted(); clearStoredToken() }
+  })
+
+  it('mounts one native query, applies snapshots and releases the last reader without GET', async () => {
     const { publishDashboardObservationChange } = await import('../../lib/observation-refresh')
-    // The observation refresh reads nothing until an execution workspace is accepted. The signal belongs
-    // to the module registry that `beforeEach` reset, so it is seeded in that registry.
-    const { acceptedExecutionWorkspace } = await import('../../execution-workspace-authority')
-    acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace', connectionGeneration: 1 }
-    fetchToolMetricsSeries.mockResolvedValue(series())
+    const release = vi.fn()
+    subscribeToolSeriesStream.mockReturnValue(release)
+    const dispose = state.subscribeToolSeriesRefresh()
+    const second = state.subscribeToolSeriesRefresh()
+    try {
+      expect(subscribeToolSeriesStream).toHaveBeenCalledTimes(1)
+      const reader = subscribeToolSeriesStream.mock.calls[0]![1]
+      reader.onFrame(series())
+      expect(state.visibleSeries.value).toEqual(series())
+      publishDashboardObservationChange({ topic: 'logs' })
+      publishDashboardObservationChange({ topic: 'tool_metrics' })
+      expect(subscribeToolSeriesStream).toHaveBeenCalledTimes(1)
+      expect(fetchToolMetricsSeries).not.toHaveBeenCalled()
+      dispose()
+      expect(release).not.toHaveBeenCalled()
+    } finally { dispose(); second() }
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
+  it('replaces the mounted query on selection and manual refresh, preserves filter data until the next frame', async () => {
+    const release = vi.fn()
+    subscribeToolSeriesStream.mockReturnValue(release)
     const dispose = state.subscribeToolSeriesRefresh()
     try {
-      await vi.waitFor(() => expect(fetchToolMetricsSeries).toHaveBeenCalledTimes(1))
-      publishDashboardObservationChange({ topic: 'logs' })
-      await Promise.resolve()
-      expect(fetchToolMetricsSeries).toHaveBeenCalledTimes(1)
-      publishDashboardObservationChange({ topic: 'tool_metrics' })
-      await vi.waitFor(() => expect(fetchToolMetricsSeries).toHaveBeenCalledTimes(2))
+      subscribeToolSeriesStream.mock.calls[0]![1].onFrame(series())
+      state.selectTool('tool_execute')
+      expect(release).toHaveBeenCalledTimes(1)
+      expect(state.visibleSeries.value?.tool).toBeNull()
+      expect(subscribeToolSeriesStream.mock.calls[1]![0].tool).toBe('tool_execute')
+      subscribeToolSeriesStream.mock.calls[1]![1].onFrame(series({ tool: 'tool_execute' }))
+      expect(state.visibleSeries.value?.tool).toBe('tool_execute')
+      await state.loadToolSeries()
+      expect(subscribeToolSeriesStream).toHaveBeenCalledTimes(3)
+      expect(fetchToolMetricsSeries).not.toHaveBeenCalled()
+      subscribeToolSeriesStream.mock.calls[2]![1].onReset('authority')
+      expect(state.visibleSeries.value).toBeNull()
     } finally { dispose() }
-    publishDashboardObservationChange({ topic: 'tool_metrics' })
-    await Promise.resolve()
-    expect(fetchToolMetricsSeries).toHaveBeenCalledTimes(2)
   })
 })

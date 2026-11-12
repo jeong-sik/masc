@@ -10,7 +10,9 @@ describe('native dashboard logs SSE', () => {
     let writer!: ReadableStreamDefaultController<Uint8Array>
     const cancel = vi.fn()
     const stream = new ReadableStream<Uint8Array>({ start: controller => { writer = controller }, cancel })
-    const fetch = vi.fn().mockResolvedValue(new Response(stream, { headers: { 'content-type': 'text/event-stream' } }))
+    const fetch = vi.fn().mockResolvedValue(new Response(stream, { headers: {
+      'content-type': 'text/event-stream', 'x-masc-sse-idle-timeout-ms': '90000',
+    } }))
     vi.stubGlobal('fetch', fetch)
     const controller = new AbortController()
     const frames: number[][] = []
@@ -31,7 +33,9 @@ describe('native dashboard logs SSE', () => {
 
   it('rejects malformed stream frames before they reach state', async () => {
     const body = new TextEncoder().encode(`data: ${JSON.stringify({ ...logStreamWire([]), reset: 'yes' })}\n\n`)
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { headers: { 'content-type': 'text/event-stream' } })))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { headers: {
+      'content-type': 'text/event-stream', 'x-masc-sse-idle-timeout-ms': '90000',
+    } })))
     const apply = vi.fn()
     await expect(readDashboardLogsStream({}, new AbortController().signal, apply))
       .rejects.toMatchObject({ _tag: 'LogsSchemaDriftError' })

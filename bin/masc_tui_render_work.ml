@@ -778,11 +778,18 @@ let render_planning_list (state : state) =
                     (if current then "Current Goal reading · " else "Previous Goal reading · ")
              ^ wire_moment snapshot.pl_generated_at ^ Ansi.reset in
            (* The linked-Task clause on each row is a value; when it is old,
-              read in part or missing, this is the one line that says why. *)
+              read in part or missing, these lines say why. A Task reading
+              and a Goal-link reading fail apart, so each has its own. *)
            let task_scope, task_warning = work_task_scope state in
+           let link_failure = match state.goal_task_links with
+             | Goal_links_read_failed reason ->
+                 [" " ^ Theme.warn () ^ text "목표 연결 조회 실패: " "Goal link reading failed: "
+                  ^ Terminal_text.single_line reason ^ Ansi.reset]
+             | Goal_links_not_read | Goal_links_read _ -> [] in
            List.iter push_context
              ((if current then [navigation] else [scope; navigation])
-              @ (if task_warning then [" " ^ Theme.warn () ^ task_scope ^ Ansi.reset] else []));
+              @ (if task_warning then [" " ^ Theme.warn () ^ task_scope ^ Ansi.reset] else [])
+              @ link_failure);
            let available = max 0 (budget - !used) in
            (* Modes and a read failure can use spare space, but never replace
               the one row Enter would open in a short terminal. *)

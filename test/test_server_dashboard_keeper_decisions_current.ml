@@ -138,7 +138,8 @@ let test_roster_failure_is_unavailable_and_quiet_repair_is_current () =
      | Ok () -> () | Error detail -> fail detail);
     (match Reader.read_current ~config ~limit:10 with
      | Error (Reader.Roster_unavailable _) -> ()
-     | Error (Metadata_unavailable _) | Ok _ -> fail "unreadable roster became a successful feed");
+     | Error (Metadata_unavailable _ | Decision_log_unavailable _) | Ok _ ->
+         fail "unreadable roster became a successful feed");
     let status, error = get router endpoint in
     check int "roster error reaches actual HTTP status" 503 status;
     check string "the failed source is explicit" "keeper_roster_unavailable"
@@ -162,7 +163,8 @@ let test_metadata_failures_never_become_successful_empty_feeds () =
       (match Reader.read_current ~config ~limit:10 with
        | Error (Reader.Metadata_unavailable {keeper; detail = _}) ->
            check string "typed failure keeps the original roster owner" meta.name keeper
-       | Error (Roster_unavailable _) | Ok _ -> fail "unreadable metadata became a successful feed");
+       | Error (Roster_unavailable _ | Decision_log_unavailable _) | Ok _ ->
+           fail "unreadable metadata became a successful feed");
       let status, error = get router endpoint in
       check int "metadata failure reaches actual HTTP status" 503 status;
       check string "the unavailable owner remains explicit" meta.name
@@ -171,10 +173,62 @@ let test_metadata_failures_never_become_successful_empty_feeds () =
       check (list string) "raw metadata repair is current on the next request"
         ["preserved metadata decision"] (choices (ok_route router endpoint))) ["{"; "{}"])
 
+let test_tail_io_failure_is_unavailable_and_raw_repair_is_current () =
+  with_router (fun ~config ~router ->
+    let meta = seed config in
+    check (list string) "a missing decision file retains successful empty semantics" []
+      (choices (ok_route router endpoint));
+    append config meta ~ts:1.0 "preserved tail decision";
+    check (list string) "warm route first reads the actual decision" ["preserved tail decision"]
+      (choices (ok_route router endpoint));
+    let path = Keeper_types_support.keeper_decision_log_path config meta.name in
+    let held = path ^ ".fixture-held" in
+    Unix.rename path held;
+    Unix.mkdir path 0o700;
+    let child = Filename.concat path "not-a-log-file" in
+    let channel = open_out_bin child in
+    output_string channel "actual nonempty directory in place of the log";
+    close_out channel;
+    let restored = ref false in
+    let restore () =
+      if not !restored then (
+        Sys.remove child;
+        Unix.rmdir path;
+        Unix.rename held path;
+        restored := true) in
+    Fun.protect ~finally:restore (fun () ->
+      (match Reader.read_current ~config ~limit:10 with
+       | Error (Reader.Decision_log_unavailable {keeper; cause}) ->
+           check string "the read error remains bound to its actual Keeper" meta.name keeper;
+           (match cause with
+            | Keeper_memory_recall_exn_class.Io_error -> ()
+            | Yojson_parse_error | Type_error | Other -> fail "directory fault lost its original I/O class")
+       | Error (Roster_unavailable _ | Metadata_unavailable _) | Ok _ ->
+           fail "actual tail I/O failure became a successful feed or unrelated error");
+      let status, error = get router endpoint in
+      check int "actual tail I/O failure reaches HTTP status" 503 status;
+      check string "the unavailable tail is explicit" "keeper_decision_log_unavailable"
+        Yojson.Safe.Util.(error |> member "reason" |> to_string);
+      check string "HTTP error preserves the original bounded class" "io_error"
+        Yojson.Safe.Util.(error |> member "read_error_class" |> to_string);
+      check bool "failed tail does not fabricate successful empty events" true
+        Yojson.Safe.Util.(error |> member "events" = `Null);
+      (* Restore the original bytes, without an append, event or clock wait. *)
+      restore ();
+      check (list string) "the next same-query request consumes raw repair"
+        ["preserved tail decision"] (choices (ok_route router endpoint));
+      let channel = open_out_gen [Open_append; Open_wronly] 0o600 path in
+      output_string channel "not JSON\n";
+      close_out channel;
+      check (list string) "individual malformed rows retain their skip policy"
+        ["preserved tail decision"] (choices (ok_route router endpoint))))
+
 let () = run "Current Keeper Decisions HTTP" ["actual route", [
   test_case "append is visible without elapsed-time refresh" `Quick
     test_append_is_visible_to_the_same_request_without_a_clock_wait;
   test_case "roster failure and quiet repair remain explicit" `Quick
     test_roster_failure_is_unavailable_and_quiet_repair_is_current;
   test_case "metadata read/decode failures do not become empty success" `Quick
-    test_metadata_failures_never_become_successful_empty_feeds]]
+    test_metadata_failures_never_become_successful_empty_feeds;
+  test_case "actual tail I/O error and quiet repair remain explicit" `Quick
+    test_tail_io_failure_is_unavailable_and_raw_repair_is_current]]

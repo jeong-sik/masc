@@ -25,9 +25,34 @@ val install_keeper_costs_kept_observer : (base_path:string -> unit) -> unit
 (** Called after every {!keeper_cost_aggregates_json}, which may have kept
     rows whose change instant is earlier than any kept before. *)
 
+type decision_log_read_error = {
+  keeper : string;
+  cause : Keeper_memory_recall_exn_class.t;
+}
+
+type decisions_observation = {
+  json : Yojson.Safe.t;
+  read_errors : decision_log_read_error list;
+}
+
+val keeper_decisions_observation :
+  config:Workspace.config ->
+  keepers:Keeper_meta_contract.keeper_meta list ->
+  ?limit:int ->
+  unit ->
+  decisions_observation
+(** One original tail read per listed Keeper supplies both the normalized
+    chronology and its typed read failures. Missing/empty files are successful
+    empty tails; individual malformed JSON rows retain their skip policy.
+    A returned tail I/O error keeps its Keeper and bounded original class,
+    without a second read or an existence preflight in this projection. *)
+
 val keeper_decisions_json :
   config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   ?limit:int ->
   unit ->
   Yojson.Safe.t
+(** Display facade over the same observation. Read failures are logged and
+    retain this facade's original readable-row projection; Current HTTP uses
+    {!keeper_decisions_observation} to require a complete successful feed. *)

@@ -4,6 +4,10 @@
 type read_error =
   | Roster_unavailable of string
   | Metadata_unavailable of { keeper : string; detail : string }
+  | Decision_log_unavailable of {
+      keeper : string;
+      cause : Keeper_memory_recall_exn_class.t;
+    }
 
 val read_current :
   config:Workspace.config -> limit:int -> (Yojson.Safe.t, read_error) result
@@ -13,6 +17,8 @@ val read_current :
     decoded is an error; confirmed absence after listing is skipped.
 
     The original decision-log tail/row decoding and limit policy are retained.
+    A returned tail read error is unavailable, not a successful empty feed;
+    its original bounded class and Keeper are preserved from that same read.
     The executor's entered-work cleanup and cancellation are not replaced by
     a new deadline or inline replay after failure. Exceptions propagate to the
     route; [Eio.Cancel.Cancelled] must remain cancellation. *)

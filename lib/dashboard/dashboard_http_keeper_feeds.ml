@@ -371,26 +371,38 @@ let keeper_cost_aggregates_json
     memory_search, etc.).  Each event is normalized to a flat record so
     the dashboard can render a single chronology without knowing the
     original schema variants. *)
-let keeper_decisions_json
+type decision_log_read_error = {
+  keeper : string;
+  cause : Keeper_memory_recall_exn_class.t;
+}
+
+type decisions_observation = {
+  json : Yojson.Safe.t;
+  read_errors : decision_log_read_error list;
+}
+
+let keeper_decisions_observation
     ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
-  : Yojson.Safe.t =
+  : decisions_observation =
   let limit = k2_feed_limit limit in
   let per_keeper_limit = limit * 2 in
+  let read_errors = ref [] in
   let all_events =
     List.concat_map
       (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_decision_log_path config m.name in
-        if not (Fs_compat.file_exists path)
-        then []
-        else (
           let lines =
-            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_decisions"
-              path
-              ~max_bytes:500_000
-              ~max_lines:per_keeper_limit
+            match Keeper_memory_recall.read_file_tail_lines_result path
+                ~max_bytes:500_000 ~max_lines:per_keeper_limit with
+            | Ok lines -> lines
+            | Error cause ->
+                Keeper_memory_recall.record_memory_recall_read_error
+                  ~site:"dashboard_keeper_decisions" path cause;
+                read_errors := {keeper = m.name; cause} :: !read_errors;
+                []
           in
           List.filter_map
             (fun line ->
@@ -415,7 +427,7 @@ let keeper_decisions_json
                 Some (ts, json, event_type, keeper_name)
               with
               | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
-            lines))
+            lines)
       keepers
   in
   let sorted = List.sort (fun (ta, _, _, _) (tb, _, _, _) -> Float.compare tb ta) all_events in
@@ -555,7 +567,7 @@ let keeper_decisions_json
           ])
       top
   in
-  `Assoc
+  let json = `Assoc
     [ "dashboard_surface", `String keeper_decisions_dashboard_surface
     ; "source", `String "keeper_decision_log"
     ; ( "retention"
@@ -566,5 +578,10 @@ let keeper_decisions_json
        event identity use parsed event timestamps above. *)
     ; "generated_at", `Float (Unix.gettimeofday ())
     ; "generated_at_iso", `String (Masc_domain.now_iso ())
-    ]
+    ] in
+  {json; read_errors = List.rev !read_errors}
+;;
+
+let keeper_decisions_json ~config ~keepers ?limit () =
+  (keeper_decisions_observation ~config ~keepers ?limit ()).json
 ;;

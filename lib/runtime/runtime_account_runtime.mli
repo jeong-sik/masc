@@ -31,6 +31,21 @@ type error =
 
 val error_to_string : error -> string
 
+(** The name of the error in an answer, one per constructor:
+    [template_not_declared], [model_not_bound], [runtime_not_bound],
+    [not_materialized]. *)
+val error_code : error -> string
+
+(** The binding of the template that [binding] chooses, moved onto the account
+    [provider_id]: the binding {!of_template} makes the runtime of, found
+    without making it. Its [model_id] is the model of that runtime. *)
+val binding_of
+  :  Runtime_schema.config
+  -> template:string
+  -> provider_id:string
+  -> binding:binding
+  -> (Runtime_schema.binding, error) result
+
 val of_template
   :  Runtime_schema.config
   -> template:string

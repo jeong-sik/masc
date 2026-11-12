@@ -6,6 +6,12 @@
       "run_id": 42867864778,
       "head_sha": "0e9718ca67e6132531614d5133cd836a2dc7aabc",
       "issue": 51357
+    },
+    {
+      "run_id": 43070910612,
+      "head_sha": "FULLSHA",
+      "issue": 51439,
+      "note": "v0.72.0 cut-over: TUI terminal 3 failures at 5eb17173 — (b) test_tui_task_event fixed on main by #51439; (c) test_tui_observer_epoch and (d) test_waiting_event are deletion-policy subjects (operator ask66c5e0bc c1, campaign 64-test bundle)."
     }
   ]
 }

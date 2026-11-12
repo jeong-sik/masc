@@ -836,6 +836,7 @@ let a_person_calls_mcp () =
       ; "masc_my_keeper_assign"
       ; "masc_my_keeper_turn"
       ; "masc_my_keeper_conversation_new"
+      ; "masc_my_keeper_conversation"
       ]
       (match at [ "result"; "tools" ] listed with
        | `List tools ->
@@ -1153,7 +1154,53 @@ let a_person_keeps_keepers_over_mcp () =
     Alcotest.(check string)
       "a conversation without a Keeper is refused by the definition of the tool"
       "true"
-      (fst (result owner "masc_my_keeper_conversation_new")))
+      (fst (result owner "masc_my_keeper_conversation_new"));
+    (* The read of a conversation. A token reads it with the Keeper effect
+       and [read_state] together. The endpoint of the tools asks [read_state]
+       of every message, so the token that lacks it is tried on the route. *)
+    check
+      "a PAT without the Keeper effect reads no conversation"
+      ("true", error_json (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Pat_scope_lacks_own_keeper))
+      (result reader "masc_my_keeper_conversation" ~arguments:(keeper "keeper-1"));
+    let keepers_only = pat admin ~csrf {|["manage_own_keeper"]|} in
+    let by_route token path =
+      (send (fresh_browser ()) router ~meth:"GET" ~path ~headers:[ "Authorization", "Bearer " ^ token ]).status
+    in
+    Alcotest.(check int)
+      "a PAT that manages Keepers lists them on the route"
+      200
+      (by_route keepers_only Masc.Auth_preview_keeper.keepers_path);
+    Alcotest.(check int)
+      "and reads no conversation, as it reads no state"
+      403
+      (by_route keepers_only (Masc.Auth_preview_keeper.conversation_path ^ "?keeper_id=keeper-1"));
+    Alcotest.(check int)
+      "the PAT with both reads it on the route"
+      200
+      (by_route owner (Masc.Auth_preview_keeper.conversation_path ^ "?keeper_id=keeper-1"));
+    check
+      "a Keeper with no turn yet has no conversation"
+      ( "false"
+      , {|{"keeper_id":"keeper-1","current_conversation_id":null,"conversations":[],"conversation_id":null,"turns":[]}|}
+      )
+      (result owner "masc_my_keeper_conversation" ~arguments:(keeper "keeper-1"));
+    check
+      "the conversation of a Keeper no one made"
+      ("true", error_json "No Keeper of yours has this name.")
+      (result owner "masc_my_keeper_conversation" ~arguments:(keeper "keeper-2"));
+    check
+      "a conversation the Keeper does not have"
+      ("true", error_json "No conversation of this Keeper has this id.")
+      (result
+         owner
+         "masc_my_keeper_conversation"
+         ~arguments:(`Assoc [ "keeper_id", `String "keeper-1"; "conversation_id", `String "none" ]));
+    check
+      "their Keeper of that name has no conversation of the first person's"
+      ( "false"
+      , {|{"keeper_id":"keeper-1","current_conversation_id":null,"conversations":[],"conversation_id":null,"turns":[]}|}
+      )
+      (result theirs "masc_my_keeper_conversation" ~arguments:(keeper "keeper-1")))
 ;;
 
 (* Bytes another writer added to the log: the next commit finds the end moved

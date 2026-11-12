@@ -31,6 +31,7 @@ request, one JSON answer.
 | `masc_my_keeper_assign` | Gives one of your Keepers one of your Runtimes. | `manage_own_keeper` |
 | `masc_my_keeper_turn` | Sends a Keeper a message and returns its answer. The Keeper goes on in its conversation. | `manage_own_keeper`, `invoke_model`, `use_tool` |
 | `masc_my_keeper_conversation_new` | Starts a new conversation of a Keeper. | `manage_own_keeper` |
+| `masc_my_keeper_conversation` | Reads what you asked a Keeper and what it answered. | `manage_own_keeper`, `read_state` |
 
 Each tool calls the function behind the matching control of the person's
 page (`/`), after the same check. The text of a tool result is the JSON
@@ -122,6 +123,16 @@ what you asked before and what it answered. The answer of
 - **A new conversation is yours to start.** `masc_my_keeper_conversation_new`
   starts one. The Keeper's next turn has read none of the earlier turns.
   The earlier conversations stay recorded, and no turn goes on in them.
+- **Reading it back.** `masc_my_keeper_conversation` answers the turns of
+  the current conversation, and the list of the Keeper's conversations.
+  Name one of them in `conversation_id` to read an earlier one. Each
+  listed conversation names the subscription it began on
+  (`provider_account_id`), so you can tell before a turn that the current
+  one is bound to another subscription than the Keeper's Runtime. A turn is
+  `answered`, `failed`, or `unrecorded` when the server stopped before the
+  turn ended. A failed or unrecorded turn with `model_may_have_read: true`
+  may still be part of what the Keeper remembers: the client was started
+  with your message. The whole conversation comes in one answer.
 - **A failed turn is not sent again.** The server does not start the turn
   over, and it starts no new conversation in place of one whose turn
   failed. Send the message again when you want it answered.

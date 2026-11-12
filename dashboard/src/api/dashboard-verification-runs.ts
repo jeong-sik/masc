@@ -24,6 +24,7 @@ export type VerificationRunStatusLabel =
   | 'commit_failed'
   | 'raised'
   | 'review_cancelled'
+  | 'superseded_by'
 
 export type VerificationToolDisposition = 'completed' | 'deferred' | 'failed'
 
@@ -48,13 +49,15 @@ const BACKEND_STATUSES: readonly string[] = [
   'commit_failed',
   'raised',
   'review_cancelled',
+  'superseded_by',
 ]
 
 /** One tracked review from the registry.
 
     `cause` is the operator-readable reason the outcome happened, flattened from
     the backend's per-outcome field (`reason` on an approval or a rejection,
-    `detail` on the failure or cancellation shapes). Absent on `running`.
+    `detail` on the failure or cancellation shapes, `authority` on a
+    superseded review). Absent on `running`.
     An approval whose reviewer stated nothing carries an empty string. */
 export interface VerificationRunRecord {
   verificationId: string
@@ -207,6 +210,10 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
       requiredOutcomeFields = ['elapsed_s', 'detail', 'tools']
       optionalFields = ['evaluator_runtime']
       break
+    case 'superseded_by':
+      requiredOutcomeFields = ['elapsed_s', 'authority', 'tools']
+      optionalFields = ['evaluator_runtime']
+      break
   }
   exactFields(raw, [...RUN_BASE_FIELDS, ...requiredOutcomeFields], optionalFields, context)
   const startedAt = finiteNumber(raw.started_at, `${context}.started_at`)
@@ -240,6 +247,8 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
         || status === 'execution_pending' || status === 'execution_repair_required'
         || status === 'commit_failed' || status === 'raised' || status === 'review_cancelled'
         ? nonEmptyString(raw.detail, `${context}.detail`)
+        : status === 'superseded_by'
+        ? nonEmptyString(raw.authority, `${context}.authority`)
         : undefined,
     gate: status === 'not_reviewed'
       ? nonEmptyString(raw.gate, `${context}.gate`)

@@ -242,6 +242,7 @@ describe('parseVerificationRunsResponse', () => {
       commit_failed: { detail: 'commit refused' },
       raised: { detail: 'unexpected evaluator error' },
       review_cancelled: { detail: 'review fiber cancelled: owner stopped' },
+      superseded_by: { authority: 'Cancelled by operator' },
     }
     for (const [status, fields] of Object.entries(outcomes)) {
       const parsed = parseVerificationRunsResponse({
@@ -249,7 +250,7 @@ describe('parseVerificationRunsResponse', () => {
         runs: [row({ status, ...fields })],
       })
       expect(onlyRun(parsed).status).toBe(status)
-      expect(onlyRun(parsed).cause).toBe(fields.reason ?? fields.detail)
+      expect(onlyRun(parsed).cause).toBe(fields.reason ?? fields.detail ?? fields.authority)
     }
   })
 

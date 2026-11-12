@@ -227,9 +227,15 @@ let visible ~entries ~content_height ~scroll =
   in
   take 0 [] entries
 
-let empty_message = function
-  | None -> "(no log entries found)"
-  | Some Remote_workspace -> "(metrics not read for the remote workspace)"
-  | Some Workspace_unconfirmed -> "(metrics not read: server workspace not observed)"
-  | Some (Storage_error _) -> "(log entries unavailable)"
-  | Some (Row_errors _) -> "(no valid rows in newest physical window)"
+let empty_message ~ko error =
+  match error, ko with
+  | None, true -> "(로그 항목 없음)"
+  | None, false -> "(no log entries found)"
+  | Some Remote_workspace, true -> "(원격 워크스페이스의 metrics 는 읽지 않음)"
+  | Some Remote_workspace, false -> "(metrics not read for the remote workspace)"
+  | Some Workspace_unconfirmed, true -> "(metrics 를 읽지 않음: 서버 워크스페이스 미관측)"
+  | Some Workspace_unconfirmed, false -> "(metrics not read: server workspace not observed)"
+  | Some (Storage_error _), true -> "(로그 항목을 읽지 못함)"
+  | Some (Storage_error _), false -> "(log entries unavailable)"
+  | Some (Row_errors _), true -> "(가장 최근 구간에 읽을 수 있는 행 없음)"
+  | Some (Row_errors _), false -> "(no valid rows in newest physical window)"

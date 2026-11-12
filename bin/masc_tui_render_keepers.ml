@@ -3313,8 +3313,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        selected preview. Both use the server's observed equipment. *)
     let portrait_reading = match (keeper_reading state k).Keeper_control.liveness with
       | Keeper_control.Present runtime -> runtime.kr_portrait
-      | Keeper_control.Unobserved -> Tui_decode.Unavailable "not yet read"
-      | Keeper_control.Absent -> Tui_decode.Unavailable "absent from live roster"
+      | Keeper_control.Unobserved ->
+        Tui_decode.Unavailable (ui_text state ~ko:"아직 읽지 않음" ~en:"not yet read")
+      | Keeper_control.Absent ->
+        Tui_decode.Unavailable
+          (ui_text state ~ko:"실시간 목록에 없음" ~en:"absent from live roster")
       (* The profile error's full text owns the failure section on the Info
          tab, where it wraps under its own heading. The portrait row is a
          status line read on the Items tab too, where no failure section
@@ -3682,7 +3685,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            | Masc.Keeper_tool_approval_mode.Auto -> Ansi.dim
          in
          tone ^ Masc_tui_types.tool_mode_word mode ^ " \xc2\xb7 "
-         ^ Masc_tui_types.tool_mode_effect mode ^ Ansi.reset);
+         ^ Masc_tui_types.tool_mode_effect ~ko:(state.ui_language = Lang_ko) mode
+         ^ Ansi.reset);
       (* "workspace" is where the stance comes from, not what it is. The chat
          header resolves the same inheritance before drawing it; this row left
          the reader to go and look it up. *)
@@ -3837,7 +3841,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        with
        | Keeper_activity.No_rows ->
          if log_diagnostics = [] then add_row window_label
-           (Ansi.dim ^ Metrics_tail.empty_message log_snapshot.error ^ Ansi.reset)
+           (Ansi.dim
+            ^ Metrics_tail.empty_message ~ko:(state.ui_language = Lang_ko)
+                log_snapshot.error
+            ^ Ansi.reset)
        | Keeper_activity.Rows activity ->
          if not activity.Keeper_activity.aw_covered then
            add_row window_label
@@ -5008,7 +5015,9 @@ let render_keeper_logs (state : state) =
     for index = 0 to content_height - 1 do
       if row_count = 0 && index = 0 then
         box_line_styled buf cols ~style:(Theme.recede ())
-          ("  " ^ Metrics_tail.empty_message log_snapshot.error)
+          ("  "
+           ^ Metrics_tail.empty_message ~ko:(state.ui_language = Lang_ko)
+               log_snapshot.error)
       else
         match Rows.at visible (scroll + index) with
         | Some (diagnostic, line) ->

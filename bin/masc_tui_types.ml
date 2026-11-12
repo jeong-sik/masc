@@ -1161,9 +1161,12 @@ let tool_mode_word = function
   | Masc.Keeper_tool_approval_mode.Yolo -> "yolo"
 
 (* What the stance does to a tool call, beside its word. *)
-let tool_mode_effect = function
-  | Masc.Keeper_tool_approval_mode.Auto -> "per Gate policy"
-  | Masc.Keeper_tool_approval_mode.Yolo -> "unasked"
+let tool_mode_effect ~ko mode =
+  match mode, ko with
+  | Masc.Keeper_tool_approval_mode.Auto, true -> "Gate 정책대로"
+  | Masc.Keeper_tool_approval_mode.Auto, false -> "per Gate policy"
+  | Masc.Keeper_tool_approval_mode.Yolo, true -> "묻지 않음"
+  | Masc.Keeper_tool_approval_mode.Yolo, false -> "unasked"
 
 (* The chat header shows the effective stances, including their defaults. A
    blank label here is worse than repetition: this is the surface where the

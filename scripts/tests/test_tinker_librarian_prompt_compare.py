@@ -79,6 +79,23 @@ class ChangeTest(unittest.TestCase):
         self.assertEqual(P.change_of(base, draft, edge * (1 + 1e-9), 9.0)[0], P.Change.SAME)
         self.assertEqual(P.change_of(base, draft, edge * (1 - 1e-9), 9.0)[0], P.Change.WORSE)
 
+    def test_a_difference_of_exactly_a_width_is_the_same(self) -> None:
+        # 45/50 against 35/50: p = 0.8, σ = 0.08, and the rates differ by 0.2 = 2.5σ.
+        # In floats 0.9 - 0.7 is a little more than 0.2 and 2.5 times σ a little less.
+        high, low = C.Count(45, 50), C.Count(35, 50)
+        self.assertEqual(P.change_of(high, low, 2.5, 9.0)[0], P.Change.SAME)
+        self.assertEqual(P.change_of(low, high, 9.0, 2.5)[0], P.Change.SAME)
+        self.assertEqual(P.change_of(high, C.Count(34, 50), 2.5, 9.0)[0], P.Change.WORSE)
+        self.assertEqual(P.change_of(low, C.Count(46, 50), 9.0, 2.5)[0], P.Change.BETTER)
+
+    def test_a_width_is_the_decimal_written_not_the_float_nearest_to_it(self) -> None:
+        # 198/40401 against 204/40401 differ by exactly 0.3σ. The float nearest to 0.3 is a little less.
+        low, high = C.Count(198, 40401), C.Count(204, 40401)
+        self.assertEqual(P.change_of(low, high, 9.0, 0.3)[0], P.Change.SAME)
+        self.assertEqual(P.change_of(high, low, 0.3, 9.0)[0], P.Change.SAME)
+        self.assertEqual(P.change_of(low, C.Count(205, 40401), 9.0, 0.3)[0], P.Change.BETTER)
+        self.assertEqual(P.change_of(high, C.Count(197, 40401), 0.3, 9.0)[0], P.Change.WORSE)
+
     def test_a_width_of_zero_makes_any_difference_a_change(self) -> None:
         self.assertEqual(P.change_of(C.Count(50, 100), C.Count(49, 100), 0.0, 0.0)[0], P.Change.WORSE)
         self.assertEqual(P.change_of(C.Count(50, 100), C.Count(51, 100), 0.0, 0.0)[0], P.Change.BETTER)

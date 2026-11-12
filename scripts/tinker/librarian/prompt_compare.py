@@ -30,8 +30,9 @@ move a pinned count. `baseline` measures runs of the pinned template and prints 
 A metric counts hits over chances, summed over a side's runs. The draft's rate minus the baseline's
 is d. Its noise σ is the binomial standard error of that difference at the pooled rate p:
 σ = sqrt(p(1 - p)(1/n_base + 1/n_draft)). A metric is worse when d < -worse_sigmas·σ and better when
-d > better_sigmas·σ. The draft goes in when no metric of any model is worse and memory state
-accuracy, stale drop recall or judged merge recall of a model in `better_from` is better.
+d > better_sigmas·σ; a difference of exactly a width is neither. The draft goes in when no metric of
+any model is worse and memory state accuracy, stale drop recall or judged merge recall of a model
+in `better_from` is better.
 A metric with chances on only one side leaves the comparison incomplete. With
 no chances on either side it supplies neither degradation nor improvement.
 
@@ -47,6 +48,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import asdict
 from enum import StrEnum
+from fractions import Fraction
 from pathlib import Path
 from typing import cast
 
@@ -70,17 +72,20 @@ class Change(StrEnum):
 
 def change_of(base: Count, draft: Count, worse_sigmas: float, better_sigmas: float) -> tuple[Change, float | None,
                                                                                                float | None]:
-    """The change from `base` to `draft`, with d and σ; UNCOUNTED, None, None when a side has no chance."""
+    """The change from `base` to `draft`, with d and σ; UNCOUNTED, None, None when a side has no chance.
+    The widths are compared as exact fractions, d² against (width·σ)², so a difference of exactly a
+    width is SAME whatever a float would round it to. A width is read as the decimal its float prints."""
     if base.chances == 0 or draft.chances == 0:
         return Change.UNCOUNTED, None, None
-    d = draft.hits / draft.chances - base.hits / base.chances
-    p = (base.hits + draft.hits) / (base.chances + draft.chances)
-    sigma = math.sqrt(p * (1 - p) * (1 / base.chances + 1 / draft.chances))
-    if d < -worse_sigmas * sigma:
-        return Change.WORSE, d, sigma
-    if d > better_sigmas * sigma:
-        return Change.BETTER, d, sigma
-    return Change.SAME, d, sigma
+    d = Fraction(draft.hits, draft.chances) - Fraction(base.hits, base.chances)
+    p = Fraction(base.hits + draft.hits, base.chances + draft.chances)
+    variance = p * (1 - p) * (Fraction(1, base.chances) + Fraction(1, draft.chances))
+    shown = float(d), math.sqrt(variance)
+    if d < 0 and d * d > Fraction(str(worse_sigmas)) ** 2 * variance:
+        return Change.WORSE, *shown
+    if d > 0 and d * d > Fraction(str(better_sigmas)) ** 2 * variance:
+        return Change.BETTER, *shown
+    return Change.SAME, *shown
 
 
 def baseline_problem(name: str, model: ModelLines, base: list[Measured], template: str) -> str | None:

@@ -143,13 +143,13 @@ type review_result =
   }
 
 (** What the stores the provider walk writes say about one runtime's path when
-    a review's slot has answered. [Rests_until_stated_end]: the provider
+    the walk reports that runtime's failure. [Rests_until_stated_end]: the provider
     stated when the path serves again — a hard quota's reset, the reset of a
     spent usage window read after a refusal, a rate-limit wait — and that
     time is still ahead. [No_stated_rest]: the path serves, or rests with no
     end the provider named. The reader belongs to the caller, which owns the
-    walk's stores; it is read once per failed candidate, after the slot
-    answers, because the walk records a refusal's rest after it reports the
+    walk's stores; it is read once per failed candidate, when the walk reports
+    that failure: the walk records a refusal's rest before it reports the
     failed attempt. *)
 type provider_rest =
   | Rests_until_stated_end
@@ -162,8 +162,10 @@ type provider_rest =
     provider stated ({!provider_rest}). [Model_absent]: a retired or unknown
     model, permanent for the unchanged request. [Producer_must_act]: nothing
     that time alone changes. The walk reads this once, when the failure is
-    reported, and names the [Reviews_again] candidates in
-    [retryable_runtimes] unless it ends with an unknown outcome. *)
+    reported. A result without a verdict names the [Reviews_again] candidates
+    in [retryable_runtimes]; a retained walk ({!review_rendered},
+    {!run_retained}) empties that list once one candidate's outcome is
+    unknown. *)
 type candidate_failure =
   | Reviews_again
   | Model_absent
@@ -174,8 +176,9 @@ type candidate_failure =
 type failure_certainty = Before_dispatch | Definite_refusal | Outcome_unknown
 
 (** [Attempt_failed.failure] is the classification the walk computed for that
-    candidate. A walk that ends with an unknown outcome empties
-    [retryable_runtimes], so this observation is where a host retains it. *)
+    candidate. A retained walk empties [retryable_runtimes] once one
+    candidate's outcome is unknown, so this observation is where a host
+    retains the classification. *)
 type execution_observation =
   | Admission_refused
   | Attempt_failed of

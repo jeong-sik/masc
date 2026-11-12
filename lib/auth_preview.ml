@@ -40,7 +40,9 @@ let page ~nonce ~title ~body ~script =
         ; "<title>" ^ title ^ "</title>"
         ; "</head>"
         ; "<body>"
+        ; "<main>"
         ; body
+        ; "</main>"
         ; Printf.sprintf "<script nonce=\"%s\">%s</script>" nonce script
         ; "</body>"
         ; "</html>"
@@ -62,9 +64,9 @@ let start_form ~invite ~github =
     ; "<input type=\"hidden\" name=\"return_to\" value=\"/\">"
     ; (if github
        then "<button id=\"go\">Sign in with GitHub</button>"
-       else "<button id=\"go\" disabled>Sign in with GitHub</button>")
+       else "<button id=\"go\" disabled aria-describedby=\"go-note\">Sign in with GitHub</button>")
     ; "</form>"
-    ; (if github then "" else "<p>" ^ no_github_login ^ "</p>")
+    ; (if github then "" else "<p id=\"go-note\">" ^ no_github_login ^ "</p>")
     ]
 ;;
 
@@ -121,6 +123,8 @@ const patExpiry = document.getElementById("pat-expiry");
 const patToken = document.getElementById("pat-token");
 const patId = document.getElementById("pat-id");
 const patVerdict = document.getElementById("pat-verdict");
+const signin = document.getElementById("signin");
+const signedIn = document.getElementById("signed-in");
 const allowSection = document.getElementById("allowlist");
 const allowProvider = document.getElementById("allow-provider");
 const allowIdentity = document.getElementById("allow-identity");
@@ -138,12 +142,15 @@ async function show() {
   const [who, w] = await read("/api/v1/auth/whoami");
   csrf = session.ok ? s.csrf_token : null;
   signout.hidden = !session.ok;
+  signin.hidden = session.ok;
+  signedIn.hidden = !session.ok;
   allowSection.hidden = !(session.ok && w.role === "admin");
   out.textContent =
     (session.ok
       ? "session of " + s.user_id + " until " + new Date(s.expires_at_ms).toISOString()
       : "no session (" + session.status + "): " + s.error) +
     "\nwhoami (" + who.status + "): " + JSON.stringify(w);
+  return session.ok;
 }
 signout.addEventListener("click", async () => {
   const answer = await fetch("/auth/logout", { method: "POST", headers: { "%s": csrf } });
@@ -159,12 +166,20 @@ async function listAccounts() {
     ? (json.runtimes.length === 0 ? "none"
        : json.runtimes.map((r) => r.runtime_id + " on " + r.provider_account_id).join("\n"))
     : "";
-  if (answer.ok && json.provider_accounts.length > 0) {
-    account.value = json.provider_accounts[json.provider_accounts.length - 1];
+  if (answer.ok) {
+    fill(account, json.provider_accounts);
+    fill(keeperRuntime, json.runtimes.map((r) => r.runtime_id));
   }
-  if (answer.ok && json.runtimes.length > 0) {
-    keeperRuntime.value = json.runtimes[json.runtimes.length - 1].runtime_id;
-  }
+}
+function fill(select, values) {
+  const previous = select.value;
+  select.replaceChildren(...values.map((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    return option;
+  }));
+  select.value = values.includes(previous) ? previous : (values.length === 0 ? "" : values[values.length - 1]);
 }
 function post(path, body) {
   return fetch(path, {
@@ -267,9 +282,9 @@ document.getElementById("issue-pat").addEventListener("click", async () => {
     return;
   }
   const expiryText = patExpiry.value.trim();
-  const expiry = expiryText === "" ? null : Number(expiryText);
+  const expiry = expiryText === "" ? null : new Date(expiryText).getTime();
   if (expiry !== null && !Number.isSafeInteger(expiry)) {
-    patToken.textContent = "expiry must be a safe integer in epoch milliseconds";
+    patToken.textContent = "the expiry is not a date and time";
     return;
   }
   const answer = await post("%s", { scope: scope, expires_at_ms: expiry });
@@ -335,7 +350,13 @@ document.getElementById("allow-remove").addEventListener("click", async () => {
     ? "Removed."
     : "remove (" + answer.status + "): " + await answer.text();
 });
-show().then(listAccounts).then(listKeepers).then(listPats);|}
+show().then(async (signedInNow) => {
+  if (signedInNow) {
+    await listAccounts();
+    await listKeepers();
+    await listPats();
+  }
+});|}
     Authz_browser_request.csrf_header
     provider_accounts_path
     Authz_browser_request.csrf_header
@@ -355,62 +376,90 @@ show().then(listAccounts).then(listKeepers).then(listPats);|}
     Authz_browser_request.csrf_header
 ;;
 
+(* A section is named by its heading, so a screen reader lists the page by
+   the same words that a sighted person scans. *)
+let section ~id ?(attrs = "") heading fields =
+  String.concat
+    "\n"
+    ([ Printf.sprintf "<section aria-labelledby=\"%s-heading\"%s>" id attrs
+     ; Printf.sprintf "<h2 id=\"%s-heading\">%s</h2>" id heading
+     ]
+     @ fields
+     @ [ "</section>" ])
+;;
+
 let home_page ~nonce ~github =
   page
     ~nonce
     ~title:"MASC accounts"
     ~body:
-      ("<h1>MASC accounts</h1>\n<pre id=\"out\">reading</pre>\n"
-       ^ start_form ~invite:false ~github
-       ^ "\n<button id=\"signout\" hidden>Sign out</button>\n"
-       ^ String.concat
-           "\n"
-           [ "<section id=\"allowlist\" hidden>"
-           ; "<h2>Let someone join</h2>"
-           ; "<label>Provider <select id=\"allow-provider\"><option value=\"github\">GitHub</option><option value=\"google\">Google</option></select></label>"
-           ; "<label>GitHub user id, or Google sub <input id=\"allow-identity\" autocomplete=\"off\" aria-describedby=\"allow-hint\"></label>"
-           ; "<p id=\"allow-hint\">A GitHub user id is a number: gh api users/LOGIN -q .id</p>"
-           ; "<button id=\"allow-add\">Allow</button>"
-           ; "<label>Registration id <input id=\"allow-id\"></label>"
-           ; "<button id=\"allow-remove\">Remove</button>"
-           ; "<pre id=\"allow-verdict\" role=\"status\"></pre>"
-           ; "</section>"
-           ; "<h2>My subscriptions</h2>"
-           ; "<pre id=\"accounts\">reading</pre>"
-           ; "<label>Integration (a provider of runtime.toml) <input id=\"integration\"></label>"
-           ; "<button id=\"connect\">Connect</button>"
-           ; "<pre id=\"transcript\"></pre>"
-           ; "<label>Answer the login <input id=\"reply\" autocomplete=\"off\"></label>"
-           ; "<button id=\"send\">Send</button>"
-           ; "<h2>Call my subscription once</h2>"
-           ; "<label>Account <input id=\"account\"></label>"
-           ; "<label>Model (bound to the integration in runtime.toml) <input id=\"model\"></label>"
-           ; "<button id=\"verify\">Verify</button>"
-           ; "<pre id=\"verdict\"></pre>"
-           ; "<h2>My Runtimes</h2>"
-           ; "<pre id=\"runtimes\">reading</pre>"
-           ; "<h2>My Keepers</h2>"
-           ; "<pre id=\"keepers\">reading</pre>"
-           ; "<label>Keeper name <input id=\"keeper\"></label>"
-           ; "<button id=\"make-keeper\">Make</button>"
-           ; "<label>Runtime (one of My Runtimes) <input id=\"keeper-runtime\"></label>"
-           ; "<button id=\"assign\">Assign</button>"
-           ; "<pre id=\"keeper-verdict\"></pre>"
-           ; "<label>Message to the Keeper <input id=\"turn-message\" autocomplete=\"off\"></label>"
-           ; "<button id=\"run-turn\">Run</button>"
-           ; "<pre id=\"turn-answer\"></pre>"
-           ; "<h2>My PATs</h2>"
-           ; "<pre id=\"pats\">reading</pre>"
-           ; "<label>Scope <textarea id=\"pat-scope\" rows=\"2\" cols=\"72\">"
-             ^ {|{"runtimes":"all","channels":["direct"],"allowed_effects":["read_state"]}|}
-             ^ "</textarea></label>"
-           ; "<label>Expires at (ms since the epoch, empty for none) <input id=\"pat-expiry\"></label>"
-           ; "<button id=\"issue-pat\">Issue</button>"
-           ; "<pre id=\"pat-token\"></pre>"
-           ; "<label>PAT id <input id=\"pat-id\"></label>"
-           ; "<button id=\"revoke-pat\">Revoke</button>"
-           ; "<pre id=\"pat-verdict\"></pre>"
-           ])
+      (String.concat
+         "\n"
+         [ "<h1>MASC accounts</h1>"
+         ; "<pre id=\"out\" role=\"status\">reading</pre>"
+         ; "<div id=\"signin\">" ^ start_form ~invite:false ~github ^ "</div>"
+         ; "<button id=\"signout\" hidden>Sign out</button>"
+         ; "<div id=\"signed-in\" hidden>"
+         ; section
+             ~id:"allowlist"
+             ~attrs:" id=\"allowlist\" hidden"
+             "Let someone join"
+             [ "<label>Provider <select id=\"allow-provider\"><option value=\"github\">GitHub</option><option value=\"google\">Google</option></select></label>"
+             ; "<label>GitHub user id, or Google sub <input id=\"allow-identity\" autocomplete=\"off\" aria-describedby=\"allow-hint\"></label>"
+             ; "<p id=\"allow-hint\">A GitHub user id is a number: gh api users/LOGIN -q .id</p>"
+             ; "<button id=\"allow-add\">Allow</button>"
+             ; "<label>Registration id <input id=\"allow-id\"></label>"
+             ; "<button id=\"allow-remove\">Remove</button>"
+             ; "<pre id=\"allow-verdict\" role=\"status\"></pre>"
+             ]
+         ; section
+             ~id:"subscriptions"
+             "My subscriptions"
+             [ "<pre id=\"accounts\">reading</pre>"
+             ; "<label>Integration (a provider of runtime.toml) <input id=\"integration\"></label>"
+             ; "<button id=\"connect\">Connect</button>"
+             ; "<pre id=\"transcript\" role=\"log\"></pre>"
+             ; "<label>Answer the login <input id=\"reply\" autocomplete=\"off\"></label>"
+             ; "<button id=\"send\">Send</button>"
+             ]
+         ; section
+             ~id:"verify"
+             "Call my subscription once"
+             [ "<label>Account <select id=\"account\"></select></label>"
+             ; "<label>Model (bound to the integration in runtime.toml) <input id=\"model\"></label>"
+             ; "<button id=\"verify\">Verify</button>"
+             ; "<pre id=\"verdict\" role=\"status\"></pre>"
+             ]
+         ; section ~id:"runtimes" "My Runtimes" [ "<pre id=\"runtimes\">reading</pre>" ]
+         ; section
+             ~id:"keepers"
+             "My Keepers"
+             [ "<pre id=\"keepers\">reading</pre>"
+             ; "<label>Keeper name <input id=\"keeper\"></label>"
+             ; "<button id=\"make-keeper\">Make</button>"
+             ; "<label>Runtime (one of My Runtimes) <select id=\"keeper-runtime\"></select></label>"
+             ; "<button id=\"assign\">Assign</button>"
+             ; "<pre id=\"keeper-verdict\" role=\"status\"></pre>"
+             ; "<label>Message to the Keeper <input id=\"turn-message\" autocomplete=\"off\"></label>"
+             ; "<button id=\"run-turn\">Run</button>"
+             ; "<pre id=\"turn-answer\" role=\"status\"></pre>"
+             ]
+         ; section
+             ~id:"pats"
+             "My PATs"
+             [ "<pre id=\"pats\">reading</pre>"
+             ; "<label>Scope <textarea id=\"pat-scope\" rows=\"2\" cols=\"72\">"
+               ^ {|{"runtimes":"all","channels":["direct"],"allowed_effects":["read_state"]}|}
+               ^ "</textarea></label>"
+             ; "<label>Expires (your local time, empty for none) <input id=\"pat-expiry\" type=\"datetime-local\"></label>"
+             ; "<button id=\"issue-pat\">Issue</button>"
+             ; "<pre id=\"pat-token\" role=\"status\"></pre>"
+             ; "<label>PAT id <input id=\"pat-id\"></label>"
+             ; "<button id=\"revoke-pat\">Revoke</button>"
+             ; "<pre id=\"pat-verdict\" role=\"status\"></pre>"
+             ]
+         ; "</div>"
+         ])
     ~script:home_script
 ;;
 

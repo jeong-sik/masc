@@ -133,6 +133,10 @@ val view_label : view -> string
 val view_of_string : string -> view option
 (** The labels are the values [tui-keepers.toml] stores under [view]. *)
 
+val view_title : ko:bool -> view -> string
+(** The view's name on the view row, in the screen language. The English name
+    is {!view_label}. *)
+
 val next_density : density -> density
 val density_label : density -> string
 val density_of_string : string -> density option

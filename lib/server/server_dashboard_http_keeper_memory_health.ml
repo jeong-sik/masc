@@ -9,9 +9,10 @@ type librarian_health =
   { state : Keeper_librarian_queue_refresh.pass_end option
       (** [None] until this process has observed the keeper's durable drain.
           This does not describe a later working-Context organization pass. *)
-  ; admission_wait : Keeper_librarian_pending.worker option
-      (** Explicit-admission wait, independent of the durable measurement.
-          [None] is no observed wait, not a completed durable pass. *)
+  ; admission_wait : Keeper_librarian_pending.admission option
+      (** What the latest explicit-admission pass left unfinished, independent
+          of the durable measurement. [None] is no observed wait or failure,
+          not a completed durable pass. *)
   ; measured_at : float option
   ; unread_atom_turns : int option
   ; unread_official_turns : int option
@@ -767,7 +768,9 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
                      | Not_committed | Stopped _ | Raised _) | None -> `Null )
           ; ( "admission_wait"
             , match h.librarian.admission_wait with
-              | Some worker -> Keeper_librarian_pending.to_json (Worker worker)
+              | Some admission ->
+                Keeper_librarian_pending.to_json
+                  (Keeper_librarian_pending.admission_pending admission)
               | None -> `Null )
           ; "operator_action_required", `Bool (librarian_attention_required h.librarian)
           ; ( "measured_at"
@@ -841,7 +844,7 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
     ]
 ;;
 
-let schema = "keeper.memory_os.current_health.v14"
+let schema = "keeper.memory_os.current_health.v15"
 
 let fleet_cache_key ~base_path = "keeper_memory_health:" ^ base_path
 

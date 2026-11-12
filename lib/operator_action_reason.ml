@@ -3,7 +3,7 @@ module Pending = Keeper_librarian_pending
 
 type cause =
   | Memory_attention of { keeper : string; durable : Pending.t option;
-      admission : Pending.worker option; measured_at : float option }
+      admission : Pending.admission option; measured_at : float option }
   | Shutdown_fenced_backlog of { count : int; keepers : (string * int) list option; complete : bool }
   | Other_reported
 
@@ -49,7 +49,8 @@ let to_json item =
         "memory_attention",
         ["keeper_id", `String keeper;
          "durable_pending", optional Pending.to_json durable;
-         "admission_wait", optional (fun worker -> Pending.to_json (Pending.Worker worker)) admission;
+         "admission_wait", optional (fun admission ->
+           Pending.to_json (Pending.admission_pending admission)) admission;
          "measured_at", optional (fun at -> `Float at) measured_at]
     | Shutdown_fenced_backlog {count; keepers; complete} ->
         "shutdown_fenced_backlog",
@@ -59,12 +60,8 @@ let to_json item =
     | Other_reported -> "reported", []
   in `Assoc (["schema", `String "masc.operator_action.v1";
                "kind", `String kind; "component", `String item.component; "reason", `String item.reason] @ fields)
-let worker json =
-  let* pending = Pending.of_json json in
-  match pending with
-  | Pending.Worker value -> Ok value
-  | Publication _ | Basis_changed _ | Message_floor _ | Local_failure _ ->
-      Error "admission wait must name an original worker"
+let admission json =
+  let* pending = Pending.of_json json in Pending.admission_of_pending pending
 let of_json json =
   let* fields = Candle_json.object_fields ~context json in
   let* schema, fields = field "schema" Candle_json.as_string fields in
@@ -76,7 +73,7 @@ let of_json json =
     | "memory_attention" ->
         let* keeper, fields = field "keeper_id" Candle_json.as_non_blank fields in
         let* durable, fields = field "durable_pending" (Candle_json.as_nullable Pending.of_json) fields in
-        let* admission, fields = field "admission_wait" (Candle_json.as_nullable worker) fields in
+        let* admission, fields = field "admission_wait" (Candle_json.as_nullable admission) fields in
         let* measured_at, fields = field "measured_at" (Candle_json.as_nullable time) fields in
         let* () = if Pending.attention_required ~durable ~admission then Ok ()
           else Error "memory action has no observed attention cause" in

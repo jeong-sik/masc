@@ -16,7 +16,7 @@ type measurement =
 
 let measurements : ((string * string), measurement) Hashtbl.t = Hashtbl.create 16
 let admission_waits :
-    ((string * string), Keeper_librarian_pending.worker) Hashtbl.t = Hashtbl.create 16
+    ((string * string), Keeper_librarian_pending.admission) Hashtbl.t = Hashtbl.create 16
 let input_capacities :
     ((string * string), Keeper_lane_cli_oneshot.input_capacity) Hashtbl.t =
   Hashtbl.create 16
@@ -74,12 +74,14 @@ let capacity_released ~config ~installation_id =
         if String.equal directory root && waiting then keeper :: names else names
       | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
       | Not_committed | Stopped _ | Raised _ -> names) measurements [] in
-    Hashtbl.fold (fun (directory, keeper) (waiting : Keeper_librarian_pending.worker) names ->
-      match waiting.wait with
-      | Capacity when String.equal directory root
-                      && String.equal waiting.installation_id installation_id -> keeper :: names
-      | Capacity | Processing | Outcome_unknown | Unreachable
-      | Missing_after_dispatch | Journal_recheck -> names) admission_waits durable
+    Hashtbl.fold (fun (directory, keeper) (admission : Keeper_librarian_pending.admission) names ->
+      match admission with
+      | Admission_waiting ({ wait = Capacity; _ } as waiting)
+        when String.equal directory root
+             && String.equal waiting.installation_id installation_id -> keeper :: names
+      | Admission_waiting { wait = (Capacity | Processing | Outcome_unknown | Unreachable
+          | Missing_after_dispatch | Journal_recheck); _ }
+      | Admission_failed _ -> names) admission_waits durable
     |> List.sort_uniq String.compare) in
   List.iter (fun keeper_name ->
     Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name) keepers
@@ -163,7 +165,8 @@ let attention_health_json ~config =
       "durable_pending", (match durable with
         | Some pending -> Keeper_librarian_pending.to_json pending | None -> `Null);
       "admission_wait", (match admission with
-        | Some waiting -> Keeper_librarian_pending.to_json (Keeper_librarian_pending.Worker waiting)
+        | Some admission ->
+          Keeper_librarian_pending.to_json (Keeper_librarian_pending.admission_pending admission)
         | None -> `Null)]) observations in
   `Assoc ["schema", `String "masc.keeper_memory_attention.v1";
     "scope", `String "last_completed_pass_observations_in_this_process";
@@ -1078,20 +1081,24 @@ let run_explicit_admission_with ~base_path ~keeper_name ~run =
   let config = Workspace.default_config base_path in
   let capacity_before = capacity_mark_snapshot ~config in
   let outcome = run () in
-  let waiting = match outcome with
-    | Keeper_memory_admission_worker.Awaiting_worker waiting -> Some waiting
+  let observed = match outcome with
+    | Keeper_memory_admission_worker.Awaiting_worker waiting ->
+      Some (Keeper_librarian_pending.Admission_waiting waiting)
+    | Unavailable detail -> Some (Keeper_librarian_pending.Admission_failed detail)
     | Disabled | Idle | Recheck_new_input | Settled _ | Pending _
-    | Addon_unattached _ | Unavailable _ -> None in
+    | Addon_unattached _ -> None in
   let key = measurement_key ~config ~keeper_name in
   Stdlib.Mutex.protect measurements_mu (fun () ->
-    match waiting with
-    | Some waiting -> Hashtbl.replace admission_waits key waiting
+    match observed with
+    | Some admission -> Hashtbl.replace admission_waits key admission
     | None -> Hashtbl.remove admission_waits key);
   !change_observer ~config ~keeper_name;
   Keeper_memory_health_input.written
     ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name;
-  Option.iter
-    (recheck_capacity_release ~config ~keeper_name ~before:capacity_before) waiting;
+  (match observed with
+   | Some (Admission_waiting waiting) ->
+     recheck_capacity_release ~config ~keeper_name ~before:capacity_before waiting
+   | Some (Admission_failed _) | None -> ());
   match outcome with
   | Disabled | Idle ->
     clear_reported_problem ~config ~keeper_name ~site:Explicit_admission

@@ -17,6 +17,20 @@ type t =
   | Message_floor of { request_id : string; detail : string }
   | Local_failure of string
 
+type admission =
+  | Admission_waiting of worker
+  | Admission_failed of string
+
+let admission_pending = function
+  | Admission_waiting worker -> Worker worker
+  | Admission_failed detail -> Local_failure detail
+
+let admission_of_pending = function
+  | Worker worker -> Ok (Admission_waiting worker)
+  | Local_failure detail -> Ok (Admission_failed detail)
+  | Publication _ | Basis_changed _ | Message_floor _ ->
+    Error "admission observation must be a worker wait or a failed pass"
+
 let of_worker_wait ~installation_id ~request_id wait =
   let wait = match wait with
     | Lane_addon_submit_once.Capacity -> Capacity
@@ -106,6 +120,10 @@ let needs_attention = function
   | Worker { wait = (Capacity | Processing | Unreachable | Journal_recheck); _ }
   | Publication _ | Basis_changed _ | Message_floor _ -> false
 
+let admission_description = function
+  | Admission_waiting worker -> description (Worker worker)
+  | Admission_failed detail -> "Explicit admission pass failed: " ^ detail
+
 let attention_required ~durable ~admission =
   Option.exists needs_attention durable
-  || Option.exists (fun worker -> needs_attention (Worker worker)) admission
+  || Option.exists (fun admission -> needs_attention (admission_pending admission)) admission

@@ -348,7 +348,7 @@ let test_the_peak_lag_is_the_drawn_keeper_furthest_behind () =
 
 let test_admission_wait_is_independent_of_a_drained_durable_pass () =
   List.iter (fun (wait, tone) ->
-    let admission_wait : Masc.Keeper_librarian_pending.worker =
+    let admission_wait = Masc.Keeper_librarian_pending.Admission_waiting
       {installation_id = "librarian"; request_id = "admission-original"; wait} in
     let reading = reading_of [make_keeper_health
       (make_librarian ~state:Health.Pass_drained ~admission_wait ())] "alpha" in

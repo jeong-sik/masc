@@ -449,7 +449,7 @@ let test_memory_keeper_search_accepts_display_words () =
     ; "recovery", P.Local_failure "read failed"
     ] in
   let admission = { ready with mkh_keeper_id = "admission";
-    mkh_librarian = { ready.mkh_librarian with mlh_admission_wait = Some (worker P.Capacity) } } in
+    mkh_librarian = { ready.mkh_librarian with mlh_admission_wait = Some (P.Admission_waiting (worker P.Capacity)) } } in
   state.memory_health <- Some { (make_fleet_health ready) with
     mhs_keepers = admission :: List.map (fun (id, pending) ->
       with_pass id (H.Pass_pending pending)) pending };

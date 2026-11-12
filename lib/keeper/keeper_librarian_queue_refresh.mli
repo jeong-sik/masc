@@ -34,10 +34,11 @@ val capacity_released : config:Workspace.config -> installation_id:string -> uni
     unconfirmed dispatch. *)
 
 val last_admission_wait :
-  config:Workspace.config -> keeper_name:string -> Keeper_librarian_pending.worker option
-(** The latest completed explicit-admission pass's actual worker wait, independent of the
-    durable-history measurement. None means the latest pass had no worker wait
-    or this process has not observed that admission lane. Never replay authority. *)
+  config:Workspace.config -> keeper_name:string -> Keeper_librarian_pending.admission option
+(** What the latest completed explicit-admission pass left unfinished: its
+    actual worker wait or its own failure, independent of the durable-history
+    measurement. None means the latest pass had neither, or this process has
+    not observed that admission lane. Never replay authority. *)
 
 val forget_measurement : config:Workspace.config -> keeper_name:string -> unit
 (** Clear after the purge has quiesced the lane and while submissions remain
@@ -50,7 +51,7 @@ val attention_health_json : config:Workspace.config -> Yojson.Safe.t
     using {!Keeper_librarian_pending.attention_required}. Each Keeper appears
     once, with both original observations and the durable measurement time.
     Counts cover only observations in this process, not unmeasured Keepers or
-    admission results that have no worker wait. No file, worker, provider or
+    admission passes that neither wait on a worker nor fail. No file, worker, provider or
     domain mutation is performed; an empty projection is not proof of drain. *)
 
 val install : unit -> unit

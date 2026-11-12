@@ -282,7 +282,7 @@ let operator_action_label state (item : Masc.Operator_action_reason.t) =
   match item.cause with
   | Masc.Operator_action_reason.Memory_attention {keeper;durable;admission;_} ->
       let pending = Option.to_list durable @ Option.to_list
-          (Option.map (fun worker -> Masc.Keeper_librarian_pending.Worker worker) admission) in
+          (Option.map Masc.Keeper_librarian_pending.admission_pending admission) in
       let causes = List.filter Masc.Keeper_librarian_pending.needs_attention pending
           |> List.map (fun pending -> memory_pass_text ~ko:(state.ui_language=Lang_ko)
               (Masc.Tui_decode_memory_health.Pass_pending pending)) in

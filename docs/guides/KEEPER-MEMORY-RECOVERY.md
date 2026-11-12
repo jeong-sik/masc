@@ -11,7 +11,7 @@ Keeper 턴 완료와 Memory 반영은 별도 단계다. 턴을 마치면 보존�
 | `capacity` | worker 접수 전 용량 거절 | 해당 installation의 실제 용량 반환 신호로 다시 진행한다. |
 | `missing_after_dispatch` | 전송 의도 뒤 worker에서 원 요청을 찾지 못함 | 원 요청·host Exact·실행 proof를 확인한다. 실행되지 않았다는 뜻은 아니다. |
 | `outcome_unknown` | 원 실행 결과가 불명확함 | 원인과 권위 있는 결과 증거를 확인한다. |
-| `local_failure` | 로컬 복구 작업이 결과를 반환하지 못함 | 표시된 원인과 복구 근거를 확인한다. |
+| `local_failure` | 로컬 복구 작업이 결과를 반환하지 못했거나, 명시적 memory admission pass가 자기 오류로 끝남 | 표시된 원인과 복구 근거를 확인한다. |
 
 뒤의 세 상태는 기존 typed `needs_attention` 규칙에 따라 조치 필요로 표시된다.
 durable history와 명시적 memory admission 중 하나라도 해당하면 Keeper를 한 번 센다.
@@ -123,12 +123,12 @@ POST의 `completion.kind`는 항상 `not_observed`다. 이후 GET은 저장된 �
 
 ## 관측 범위와 배포
 
-Memory health v13은 `librarian.operator_action_required`, 별도 attention alert,
+Memory health 응답은 `librarian.operator_action_required`, 별도 attention alert,
 `alert_summary.librarian_attention_required_keepers`를 함께 제공한다. 서버·TUI·dashboard를
-같은 계약으로 배포한다. v12를 새 decoder에 통과시키는 호환 경로는 없다.
+같은 계약으로 배포한다. 다른 schema의 응답을 decoder에 통과시키는 호환 경로는 없다.
 
 `/health?full=1`의 `keeper_memory_attention`은 현재 프로세스에서 완료한 durable 관측과
-독립 admission wait를 읽는다. `operator_action_required`와 이유가 전체 health로 이어진다.
+독립 admission 관측(worker 대기 또는 pass 실패)을 읽는다. `operator_action_required`와 이유가 전체 health로 이어진다.
 관측 수와 scope를 함께 보며, 일부 관측에 attention이 없다는 결과를 fleet 전체 drain으로
 부르지 않는다. `keeper_memory_execution`의 serving은 별도의 경로 가용성이다.
 

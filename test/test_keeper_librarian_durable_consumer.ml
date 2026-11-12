@@ -1225,7 +1225,8 @@ let test_admission_wait_survives_durable_measurement_and_release_race () =
     admission Pending.Capacity;
     durable Pending.Missing_after_dispatch;
     check bool "durable observation preserves the separate original admission wait" true
-      (Queue_refresh.last_admission_wait ~config ~keeper_name = Some (waiting Pending.Capacity));
+      (Queue_refresh.last_admission_wait ~config ~keeper_name
+       = Some (Pending.Admission_waiting (waiting Pending.Capacity)));
     released ~installation_id:"another-installation" ();
     released ~config:(Workspace.default_config (config.base_path ^ "-other-workspace")) ();
     check int "another workspace or installation cannot wake admission" 0 (List.length !wakes);
@@ -1307,6 +1308,25 @@ let test_memory_attention_snapshot_joins_both_original_lanes () =
     Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
       ~keeper_name ~run:(fun () -> Worker.Idle);
     check bool "new nonattention observations clear the action flag" false
+      (Yojson.Safe.Util.to_bool (field "operator_action_required" (snapshot ())));
+    (* A pass that ends with its own error is an observation too. *)
+    let refused = "admission pass refused its records" in
+    Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
+      ~keeper_name ~run:(fun () -> Worker.Unavailable refused);
+    let failed = snapshot () in
+    check int "a failed admission pass names this Keeper" 1
+      (Yojson.Safe.Util.to_int (field "attention_required_keepers" failed));
+    (match field "keepers" failed with
+     | `List [row] ->
+       check string "the pass's own error is retained" refused
+         Yojson.Safe.Util.(row |> member "admission_wait" |> member "detail" |> to_string)
+     | _ -> fail "expected exactly the affected Keeper");
+    check bool "the failure is the latest admission observation" true
+      (Queue_refresh.last_admission_wait ~config ~keeper_name
+       = Some (Pending.Admission_failed refused));
+    Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
+      ~keeper_name ~run:(fun () -> Worker.Idle);
+    check bool "a later finished pass clears the failure" false
       (Yojson.Safe.Util.to_bool (field "operator_action_required" (snapshot ())));
     check bool "attention observation grants no source ACK" true (read_progress config = progress_before);
     check string "attention observation does not publish Memory" memory_before

@@ -6457,9 +6457,9 @@ let memory_keeper_search_text (keeper : Masc.Tui_decode_memory_health.memory_kee
   let admission_words =
     match keeper.mkh_librarian.mlh_admission_wait with
     | None -> []
-    | Some worker ->
+    | Some admission ->
         pass_words (Masc.Tui_decode_memory_health.Pass_pending
-          (Masc.Keeper_librarian_pending.Worker worker)) in
+          (Masc.Keeper_librarian_pending.admission_pending admission)) in
   String.concat " "
     ([ keeper.mkh_keeper_id
     ; memory_state_label (memory_state keeper)

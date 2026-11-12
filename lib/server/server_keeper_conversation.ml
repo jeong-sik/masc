@@ -1,7 +1,7 @@
 (* HIGH-RISK-UNREVIEWED: see the interface. *)
 
 open Authz_types
-module Conversation_id = Authz_id.Make ()
+module Conversation_id = Authz_types.Conversation_id
 module Turn_id = Authz_id.Make ()
 
 let ( let* ) = Result.bind

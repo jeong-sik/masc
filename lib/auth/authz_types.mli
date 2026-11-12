@@ -46,6 +46,12 @@ module Registration_id : Authz_id.S
     [Invalid_byte]. *)
 module Account_home_namespace : Authz_id.S
 
+(** The id of a conversation of a person with one of their Keepers (plan
+    S1b-3). The conversation records of the account server name a
+    conversation by it, and a purge record names the conversation it deletes
+    by it and its owner (plan S1b-3c). *)
+module Conversation_id : Authz_id.S
+
 module Principal : sig
   type t =
     | Human of User_id.t

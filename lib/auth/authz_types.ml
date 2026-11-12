@@ -40,6 +40,8 @@ module Account_home_namespace = struct
   ;;
 end
 
+module Conversation_id = Authz_id.Make ()
+
 module Principal = struct
   type t =
     | Human of User_id.t

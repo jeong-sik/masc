@@ -15,8 +15,10 @@
 
 (** [GET /accounts/invite], the page that an invitation link opens: a form
     that starts a GitHub login with the token of the link. [nonce] is the
-    nonce of its script. *)
-val invite_page : nonce:string -> Login_routes.answer
+    nonce of its script. [github] is whether the server has a GitHub login
+    client: without one the button cannot be pressed and the page says that
+    the server has no GitHub login. The pages start no Google login. *)
+val invite_page : nonce:string -> github:bool -> Login_routes.answer
 
 (** [GET /]: the session of the browser and who the server takes it for, a
     form that starts a GitHub login, and a sign-out button. Below them, the
@@ -26,7 +28,7 @@ val invite_page : nonce:string -> Login_routes.answer
     makes a Keeper and gives it a Runtime through {!Auth_preview_keeper}, and
     a form that sends the Keeper a message through
     {!Auth_preview_keeper.turn_path} and shows its answer. *)
-val home_page : nonce:string -> Login_routes.answer
+val home_page : nonce:string -> github:bool -> Login_routes.answer
 
 (** [GET /api/v1/auth/whoami], judged as [Read_auth] by {!Auth_gate.decide}
     on a snapshot the zone could be trusted for ({!Authz_zone.read}), as

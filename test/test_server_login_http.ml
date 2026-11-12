@@ -464,7 +464,7 @@ let whoami router browser ?(headers = []) () =
    pages, a GitHub login from the invitation, who-am-I, and the sign-out. *)
 let the_preview_follows_a_login () =
   with_installation (fun t ->
-    let router = Server_login_http.add_preview_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
     let admin = fresh_browser () in
     let home = send admin router ~meth:"GET" ~path:"/" in
     Alcotest.(check int) "the home page" 200 home.status;
@@ -480,6 +480,28 @@ let the_preview_follows_a_login () =
       "it starts a GitHub login"
       true
       (contains ~sub:{|action="/auth/github/start"|} invitation.body);
+    (* A server with no GitHub login client serves the same pages, and the
+       button of the login cannot be pressed. *)
+    (let no_github =
+       Server_login_http.add_person_routes
+         { t.routes with Login_routes.github = None }
+         ~env:t.env
+         ~base_path:t.base
+         (Http.Router.create ())
+     in
+     List.iter
+       (fun path ->
+         let page = send (fresh_browser ()) no_github ~meth:"GET" ~path in
+         Alcotest.(check int) ("with no GitHub client, " ^ path) 200 page.status;
+         Alcotest.(check bool)
+           ("the button is disabled on " ^ path)
+           true
+           (contains ~sub:{|<button id="go" disabled>Sign in with GitHub</button>|} page.body);
+         Alcotest.(check bool)
+           ("the page says so on " ^ path)
+           true
+           (contains ~sub:"This server has no GitHub login." page.body))
+       [ "/"; "/accounts/invite" ]);
     Alcotest.(check string)
       "nobody yet"
       ("401 " ^ Masc.Auth_gate.reason_to_string Masc.Auth_gate.Credential_required)
@@ -616,7 +638,7 @@ let the_preview_follows_a_login () =
    so a PAT issues no other PAT. *)
 let a_pat_acts_until_it_is_revoked () =
   with_installation (fun t ->
-    let router = Server_login_http.add_preview_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
     let admin = fresh_browser () in
     Alcotest.(check int)
       "the Admin joins"
@@ -672,7 +694,7 @@ let a_pat_acts_until_it_is_revoked () =
    keeps its cookie for when the files are read again. *)
 let a_stopped_zone_answers_no_person () =
   with_installation (fun t ->
-    let router = Server_login_http.add_preview_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
     let admin = fresh_browser () in
     let back = sign_in t admin ~user_id:583231 ~fields:[ "invite", admin_token; "return_to", "/" ] in
     Alcotest.(check int) ("signed in: " ^ back.body) 200 back.status;

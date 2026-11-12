@@ -24,6 +24,7 @@
   masc.fs_compat
   masc.masc_eio_context
   masc.server
+  masc.string_util
   masc.workspace_connection
   unix
   yojson))

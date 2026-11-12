@@ -220,6 +220,9 @@ let add_task = Route_access.Tool { tool_name = "masc_add_task" }
 let each_kind_of_route_judges_the_request () =
   with_credentials (fun trusted c ->
     let legacy = "Bearer " ^ String.make 64 'f' in
+    (* The token of the MCP OAuth service, which no layer binds to a session
+       yet (plan C5). *)
+    let oauth_token = "Bearer mat_" ^ String.make 64 'f' in
     let rows =
       [ "public, nothing", Route_access.Always_public, request Nothing, "anonymous"
       ; ( "public, legacy bearer"
@@ -282,10 +285,22 @@ let each_kind_of_route_judges_the_request () =
         , Route_access.Self_authenticated Route_access.Oauth_protocol
         , request Nothing
         , refused (G.Not_served_in_multi_account Route_access.Oauth_protocol) )
+      ; ( "read, MCP OAuth token"
+        , Route_access.Read_auth
+        , request (Bearer oauth_token)
+        , refused G.Mcp_oauth_token_not_bound )
       ; ( "own provider, nothing"
         , Route_access.Manage_own_provider
         , request Nothing
         , refused G.Credential_required )
+      ; ( "own provider, session and PAT"
+        , Route_access.Manage_own_provider
+        , request (Cookie_and_bearer (c.admin_session, c.admin_pat))
+        , refused G.Several_credentials )
+      ; ( "own provider, MCP OAuth token"
+        , Route_access.Manage_own_provider
+        , request (Bearer oauth_token)
+        , refused G.Mcp_oauth_token_not_bound )
       ; ( "own provider, Member session"
         , Route_access.Manage_own_provider
         , request (Cookie c.member_session)
@@ -307,6 +322,14 @@ let each_kind_of_route_judges_the_request () =
         , Route_access.Manage_own_keeper
         , request Nothing
         , refused G.Credential_required )
+      ; ( "own keeper, session and PAT"
+        , Route_access.Manage_own_keeper
+        , request (Cookie_and_bearer (c.admin_session, c.admin_pat))
+        , refused G.Several_credentials )
+      ; ( "own keeper, MCP OAuth token"
+        , Route_access.Manage_own_keeper
+        , request (Bearer oauth_token)
+        , refused G.Mcp_oauth_token_not_bound )
       ; ( "own keeper, Member session"
         , Route_access.Manage_own_keeper
         , request (Cookie c.member_session)

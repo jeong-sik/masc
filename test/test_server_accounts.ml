@@ -663,8 +663,37 @@ let test_serves_its_table_alone () =
         ; "POST", "/mcp"
         ; "DELETE", "/mcp"
         ; "GET", "/ws"
-        ; "GET", "/"
+        ; "GET", "/api/v1/keepers"
         ];
+      (* The pages of a person are in the table, open, and each answer has
+         a script nonce of its own. GitHub is the client of config.json, so
+         the button of its login can be pressed. *)
+      List.iter
+        (fun path ->
+          let status, headers, body = exchange ~net ~port ~meth:"GET" path in
+          let lower = List.map String.lowercase_ascii headers in
+          Alcotest.(check int) ("GET " ^ path) 200 status;
+          Alcotest.(check int)
+            ("one content security policy with a script nonce on " ^ path)
+            1
+            (List.length
+               (List.filter
+                  (String.starts_with ~prefix:"content-security-policy: default-src 'none'; script-src 'nonce-")
+                  lower));
+          Alcotest.(check bool)
+            ("the GitHub login can be started from " ^ path)
+            true
+            (String_util.contains_substring body {|<button id="go">Sign in with GitHub</button>|}))
+        [ "/"; Authz_activation.invitation_path ];
+      (* The routes of a person are in the table, and a request with no
+         credential is refused by the route. *)
+      List.iter
+        (fun path ->
+          Alcotest.(check int)
+            ("GET " ^ path ^ " with no credential")
+            401
+            (fst (request ~net ~port ~meth:"GET" path)))
+        [ "/api/v1/auth/whoami"; Auth_preview.provider_accounts_path; Auth_preview_keeper.keepers_path ];
       (* The login routes are in the table. GitHub is the client of
          config.json: a start with no Origin gets as far as the route, which
          refuses it. Google has no member, so its start is the 404 of the

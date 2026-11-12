@@ -504,6 +504,25 @@ let test_boot_multi_account () =
          "the external store of the install record"
          (Unix.realpath dirs.store)
          (Unix.realpath (Read.multi_account_external_store multi_account)));
+    (* The table refuses a multi-account boot whose config.json turns the
+       authentication off or asks for no token: the refusal is read from the
+       file, and the reason is the first one. *)
+    List.iter
+      (fun (label, config, refusal) ->
+        write_config dirs config;
+        match Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:false with
+        | Ok (Read.Single_user (_ : Read.single_user) | Read.Multi_account (_ : Read.multi_account)) ->
+          Alcotest.failf "booted with %s" label
+        | Error (first, (_ : string list)) ->
+          Alcotest.(check string) ("the reason of " ^ label) (B.refusal_to_string refusal) first)
+      [ ( "the authentication off"
+        , {|{"enabled":false,"require_token":true,"account_mode":"Multi_account"}|}
+        , B.Auth_disabled_in_multi_account )
+      ; ( "no token required"
+        , {|{"enabled":true,"require_token":false,"account_mode":"Multi_account"}|}
+        , B.Token_not_required_in_multi_account )
+      ];
+    write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
     (* The table refuses a multi-account boot with anonymous mutations on. *)
     match Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:true with
     | Ok (Read.Single_user (_ : Read.single_user) | Read.Multi_account (_ : Read.multi_account)) ->

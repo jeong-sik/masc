@@ -5364,8 +5364,17 @@ type server_gc_health = {
   sgc_major_words : float;
 }
 
+(** The scheduler-lag probe's state, read by the module that writes it. A
+    word this build does not know is kept as it came, so a newer server's
+    state is drawn as written instead of dropped or read as another
+    (RFC tui-one-screen-grammar section 7.1). *)
+type scheduler_probe =
+  | Probe_reported of Scheduler_lag.probe_state
+  | Probe_unknown of string
+
 type server_scheduler_health = {
-  ssch_probe : string;
+  ssch_probe : scheduler_probe option;
+      (** [None] when the scheduler section carries no [probe]. *)
   ssch_samples : int;
   ssch_p50_ms : float;
   ssch_p95_ms : float;
@@ -5429,6 +5438,11 @@ let decode_server_identity json =
     match Option.map (member field) section with
     | Some (`String value) -> value
     | Some _ | None -> ""
+  in
+  let opt_string_in section field =
+    match Option.map (member field) section with
+    | Some (`String value) -> Some value
+    | Some _ | None -> None
   in
   let int_in section field default =
     match Option.map (member field) section with
@@ -5512,7 +5526,16 @@ let decode_server_identity json =
           | _ -> None
         in
         Some
-          { ssch_probe = string_in sched_obj "probe"
+          { ssch_probe =
+              Option.map
+                (fun word ->
+                  match
+                    Scheduler_lag.probe_state_of_fields ~probe:word
+                      ~stopped_reason:(opt_string_in sched_obj "stopped_reason")
+                  with
+                  | Some state -> Probe_reported state
+                  | None -> Probe_unknown word)
+                (opt_string_in sched_obj "probe")
           ; ssch_samples = int_in lag_obj "samples" 0
           ; ssch_p50_ms = float_in lag_obj "p50_ms" 0.0
           ; ssch_p95_ms = float_in lag_obj "p95_ms" 0.0

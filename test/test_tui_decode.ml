@@ -9888,7 +9888,9 @@ let test_decode_server_identity_reads_telemetry () =
       (match identity.Tui_decode.sid_scheduler with
       | None -> Alcotest.fail "expected sid_scheduler"
       | Some sched ->
-          Alcotest.(check string) "probe" "running" sched.Tui_decode.ssch_probe;
+          Alcotest.(check bool) "probe reads as the running state" true
+            (sched.Tui_decode.ssch_probe
+             = Some (Tui_decode.Probe_reported Scheduler_lag.Running));
           Alcotest.(check int) "samples" 600 sched.Tui_decode.ssch_samples;
           Alcotest.(check (option int)) "pool_domains" (Some 15) sched.Tui_decode.ssch_pool_domains;
           Alcotest.(check int) "stalls" 0 sched.Tui_decode.ssch_stalls;

@@ -266,13 +266,15 @@ let render_overview (state : state) home =
   surface_chrome ~overflow:Fits ?sidebar state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
     ~title:(overview_header state ~cols)
     ~status:[]
-    ~hints:(if state.keeper_navigation_open then Masc_tui_keys.keeper_navigation_hints
+    ~hints:(if state.keeper_navigation_open then
+              Masc_tui_keys.keeper_navigation_hints ~lang:state.ui_language
             else Masc_tui_keys.footer_hints ~lang:state.ui_language Overview)
     ~body:(fun ~budget:chrome_budget c ->
       let rows_started = Masc_tui_frame_timing.start_stage () in
       let body = Masc_tui_home.home_body home ~scroll:state.home_decision_scroll ~budget:chrome_budget in
       if body.hb_help then
-        c.push (" " ^ Ansi.dim ^ Masc_tui_footer.help_hint_item
+        c.push (" " ^ Ansi.dim
+          ^ Masc_tui_footer.help_hint ~ko:(state.ui_language = Lang_ko)
           ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys" ^ Ansi.reset);
       if body.hb_shortcuts then
         c.push (" " ^ ui_text state ~ko:"v:조치 원인" ~en:"v:action reasons"

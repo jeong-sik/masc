@@ -520,7 +520,10 @@ let board_read_focus_key =
 let fusion_caller_key = b ~rows:Needs_row Navigate "K" "calling Keeper"
 let fusion_board_key = b ~rows:Needs_row Navigate "B" "Board evidence"
 
-let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
+let keeper_navigation_hints ~lang =
+  match lang with
+  | Masc_tui_types.Lang_ko -> "Up/Down:선택  Enter:열기  Right/Esc:뒤로"
+  | Masc_tui_types.Lang_en -> "Up/Down:move  Enter:open  Right/Esc:back"
 
 let tools_bracket_binding ~pane =
   let label = match pane with

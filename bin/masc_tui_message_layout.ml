@@ -782,8 +782,9 @@ let chat_title_row ~inner_cells ~title ~mode_suffix =
 (* At the newest row the arrows answer the composer's history. Once PgUp has
    moved into the transcript they adjust it one row at a time, so the hint can
    name them without risking a draft replacement. *)
-let scroll_hint ~scrolled_back ~older_exist:_ =
-  if scrolled_back <= 0 then "PgUp:scroll back"
+let scroll_hint ~ko ~scrolled_back ~older_exist:_ =
+  if scrolled_back <= 0 then if ko then "PgUp:이전 대화" else "PgUp:scroll back"
+  else if ko then "\xe2\x86\x91/\xe2\x86\x93:줄  PgUp/PgDn:페이지  Ctrl-E:최신"
   else "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest"
 
 (* Where the pane stands, which is not a key and cannot be looked up: it
@@ -803,11 +804,14 @@ let scroll_hint ~scrolled_back ~older_exist:_ =
    that will not move should know it is the beginning of the conversation
    rather than a stuck key -- and there the distance says what "start"
    already says. *)
-let scroll_position ~scrolled_back ~older_exist =
+let scroll_position ~ko ~scrolled_back ~older_exist =
   if scrolled_back <= 0 then None
   else if older_exist then
-    Some (Printf.sprintf "(%d back \xc2\xb7 more\xe2\x86\x91)" scrolled_back)
-  else Some "(start)"
+    Some
+      (if ko then
+         Printf.sprintf "(%d줄 앞 \xc2\xb7 더 있음\xe2\x86\x91)" scrolled_back
+       else Printf.sprintf "(%d back \xc2\xb7 more\xe2\x86\x91)" scrolled_back)
+  else Some (if ko then "(처음)" else "(start)")
 
 let input_cursor_column ~terminal_cols ~input_cells =
   let last_column = Int.max 1 (terminal_cols - Masc_tui_frame.margin_cells) in

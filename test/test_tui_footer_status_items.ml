@@ -143,6 +143,9 @@ let contains ~needle haystack =
 let plain_surface_state view =
   let state = Masc_tui_types.create_state ~workspace:"" ~port:0 () in
   state.view <- view;
+  (* The rows below are read in English, so the state that stamps the help
+     item is an English one. *)
+  state.ui_language <- Masc_tui_types.Lang_en;
   state
 
 let surface_row state view width =
@@ -244,7 +247,7 @@ let test_overlays_that_answer_keep_the_stamped_door () =
    draft lets [?] answer; the caller passes the item, so both spellings have
    to ride the row without breaking their separators. *)
 let test_chat_rows_carry_the_door_only_while_the_draft_is_empty () =
-  let wide = Masc_tui_footer.chat_hints ~enter_hint:"Enter:send" ~scroll_hint:""
+  let wide = Masc_tui_footer.chat_hints ~ko:false ~enter_hint:"Enter:send" ~scroll_hint:""
       ~switch_hint:"" ~escape_hint:"" ~leave_hint:"" ~help_hint:"  ?:help" in
   check_bool "an empty draft's wide row names the door" true
     (contains ~needle:"?:help" wide);
@@ -252,17 +255,17 @@ let test_chat_rows_carry_the_door_only_while_the_draft_is_empty () =
     (contains ~needle:"Ctrl-W:word  ?:help" wide);
   check_bool "a typing wide row names no door" false
     (contains ~needle:"?:help"
-       (Masc_tui_footer.chat_hints ~enter_hint:"Enter:send" ~scroll_hint:""
+       (Masc_tui_footer.chat_hints ~ko:false ~enter_hint:"Enter:send" ~scroll_hint:""
           ~switch_hint:"" ~escape_hint:"" ~leave_hint:"" ~help_hint:""));
   let compact =
-    Masc_tui_footer.compact_chat_hints ~enter_hint:"Enter:send"
+    Masc_tui_footer.compact_chat_hints ~ko:false ~enter_hint:"Enter:send"
       ~scroll_hint:"PgUp:history" ~escape_hint:"Esc:quiet" ~help_hint:"  ?:help"
   in
   check_bool "an empty draft's compact row names the door" true
     (contains ~needle:"?:help" compact);
   check_bool "a typing compact row names no door" false
     (contains ~needle:"?:help"
-       (Masc_tui_footer.compact_chat_hints ~enter_hint:"Enter:send"
+       (Masc_tui_footer.compact_chat_hints ~ko:false ~enter_hint:"Enter:send"
           ~scroll_hint:"PgUp:history" ~escape_hint:"Esc:quiet" ~help_hint:""))
 
 let test_ensure_help_item_appends_once () =

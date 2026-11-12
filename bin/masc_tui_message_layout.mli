@@ -682,15 +682,17 @@ val composer_window : max_rows:int -> max_cells:int -> cursor:int -> string -> c
 (** A newline-separated window containing the cursor. [cursor_row] is zero-based;
     the number of rows is the same as {!composer_lines}. *)
 
-val scroll_hint : scrolled_back:int -> older_exist:bool -> string
-(** The footer's scrolling keys: which ones move the pane. How far back it
+val scroll_hint : ko:bool -> scrolled_back:int -> older_exist:bool -> string
+(** The footer's scrolling keys, in the screen's language: which ones move
+    the pane. How far back it
     sits is {!scroll_position}, which travels beside these as
     {!Masc_tui_footer.line}'s [?position] rather than on the end of this
     string -- the fitter reads this string as key items and gives up the last
     one first, and a position is the one item on the row that [?] cannot
     recover. *)
 
-val scroll_position : scrolled_back:int -> older_exist:bool -> string option
+val scroll_position :
+  ko:bool -> scrolled_back:int -> older_exist:bool -> string option
 (** How far back the pane sits, and whether anything older is left to fetch.
     [None] at the newest row, where there is no distance to say.
 

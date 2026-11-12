@@ -133,7 +133,7 @@ val for_surface : Masc_tui_types.surface -> binding list
 val goal_candle_refresh_key : string
 (** Open or reread the selected Goal's Candle record without a Goal action. *)
 
-val keeper_navigation_hints : string
+val keeper_navigation_hints : lang:Masc_tui_types.ui_language -> string
 (** Keys while the Keeper navigator opened with Left holds focus. *)
 
 val footer_hints_planning_goal_list : lang:Masc_tui_types.ui_language -> has_rows:bool -> string

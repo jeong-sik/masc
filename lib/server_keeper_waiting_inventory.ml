@@ -412,6 +412,7 @@ let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
       let row ~what ~since ~detail =
         { keeper_name = Some keeper_name
         ; source
+        ; bearing = Holds_state
         ; waiting_on = Keeper_event_queue.payload_kind_label stimulus.payload
         ; what
         ; wake_producer = wake_producer_of_payload stimulus.payload

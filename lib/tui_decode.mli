@@ -58,6 +58,9 @@ type keeper_identity_absence =
   | Keeper_not_started
   | Identity_unreadable of string
 
+val keeper_never_started_text : ko:bool -> string
+(** A declared Keeper that has not run, in the words every screen uses. *)
+
 val keeper_identity_absence_text : ko:bool -> keeper_identity_absence -> string
 (** The reason as a screen draws it. The decoder's sentence is drawn as it is. *)
 

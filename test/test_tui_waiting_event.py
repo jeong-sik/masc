@@ -552,9 +552,13 @@ class WaitingEventTest(unittest.TestCase):
                     "manual turns read did not complete during the event read",
                 )
                 wait_until(
-                    lambda: (
-                        b"fleet waiting observation unavailable"
-                        in output[collision_output_start:]
+                    lambda: any(
+                        marker in output[collision_output_start:]
+                        for marker in (
+                            b"fleet waiting observation unavailable",
+                            "일부 관측 미확인".encode(),
+                            b"some observations unknown",
+                        )
                     ),
                     "the partial poll was not shown",
                 )

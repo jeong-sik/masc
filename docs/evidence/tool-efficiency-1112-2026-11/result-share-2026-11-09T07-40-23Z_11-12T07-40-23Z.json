@@ -1,0 +1,46 @@
+{
+  "window": {
+    "since": "2026-11-09T07:40:23Z",
+    "end": "2026-11-12T07:40:23Z",
+    "hours": 72.0
+  },
+  "execute_calls": 84068,
+  "background_calls": 109,
+  "background_percent": 0.13,
+  "foreground_60s_calls": 1168,
+  "foreground_60s_hours": 76.8,
+  "background_by_keeper": [
+    [
+      "wkbl-data",
+      47
+    ],
+    [
+      "ocaml-agent-ic",
+      19
+    ],
+    [
+      "goo-yang-bong",
+      12
+    ],
+    [
+      "code-reviewer-father",
+      8
+    ],
+    [
+      "wkbl-front",
+      6
+    ],
+    [
+      "code-reviewer-uncle",
+      3
+    ],
+    [
+      "code-reviewer-mother",
+      2
+    ],
+    [
+      "wkbl-web-leader",
+      2
+    ]
+  ]
+}

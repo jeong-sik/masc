@@ -1,0 +1,134 @@
+{
+  "window": {
+    "since": "2026-11-09T07:40:23Z",
+    "end": "2026-11-12T07:40:23Z",
+    "hours": 72.0
+  },
+  "foreground_60s_calls": 1168,
+  "foreground_60s_hours": 76.8,
+  "groups": [
+    {
+      "group": "sleep+gh",
+      "calls": 535,
+      "hours": 36.6,
+      "median_s": 242
+    },
+    {
+      "group": "sleep",
+      "calls": 276,
+      "hours": 24.6,
+      "median_s": 278
+    },
+    {
+      "group": "git",
+      "calls": 25,
+      "hours": 2.5,
+      "median_s": 261
+    },
+    {
+      "group": "sleep+own background job",
+      "calls": 45,
+      "hours": 2.3,
+      "median_s": 200
+    },
+    {
+      "group": "sleep only",
+      "calls": 22,
+      "hours": 1.4,
+      "median_s": 190
+    },
+    {
+      "group": "python3",
+      "calls": 43,
+      "hours": 1.4,
+      "median_s": 92
+    },
+    {
+      "group": "for",
+      "calls": 46,
+      "hours": 1.2,
+      "median_s": 83
+    },
+    {
+      "group": "gh",
+      "calls": 23,
+      "hours": 1.1,
+      "median_s": 106
+    },
+    {
+      "group": "dune/opam",
+      "calls": 12,
+      "hours": 1.0,
+      "median_s": 277
+    },
+    {
+      "group": "export",
+      "calls": 26,
+      "hours": 0.9,
+      "median_s": 117
+    },
+    {
+      "group": "date",
+      "calls": 23,
+      "hours": 0.9,
+      "median_s": 80
+    },
+    {
+      "group": "cat",
+      "calls": 12,
+      "hours": 0.5,
+      "median_s": 132
+    },
+    {
+      "group": "bash",
+      "calls": 3,
+      "hours": 0.4,
+      "median_s": 415
+    },
+    {
+      "group": "set",
+      "calls": 13,
+      "hours": 0.4,
+      "median_s": 71
+    },
+    {
+      "group": "rm",
+      "calls": 11,
+      "hours": 0.4,
+      "median_s": 77
+    },
+    {
+      "group": "timeout",
+      "calls": 10,
+      "hours": 0.3,
+      "median_s": 94
+    }
+  ],
+  "sleep_gh_by_what_gh_reads": [
+    {
+      "group": "actions run",
+      "calls": 315,
+      "hours": 23.9
+    },
+    {
+      "group": "check-runs/pr checks",
+      "calls": 147,
+      "hours": 8.7
+    },
+    {
+      "group": "review/comments",
+      "calls": 35,
+      "hours": 2.2
+    },
+    {
+      "group": "other gh",
+      "calls": 15,
+      "hours": 0.9
+    },
+    {
+      "group": "pr state",
+      "calls": 23,
+      "hours": 0.8
+    }
+  ]
+}

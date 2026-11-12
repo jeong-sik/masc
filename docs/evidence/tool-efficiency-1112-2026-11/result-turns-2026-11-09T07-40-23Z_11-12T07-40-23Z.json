@@ -1,0 +1,94 @@
+{
+  "window": {
+    "since": "2026-11-09T07:40:23Z",
+    "end": "2026-11-12T07:40:23Z",
+    "hours": 72.0
+  },
+  "sleep_gh_calls": 535,
+  "sleep_gh_hours": 36.6,
+  "until_github_schedules_created": 262,
+  "keepers_with_sleep_gh": 17,
+  "keepers_with_sleep_gh_that_created_a_watch": 12,
+  "by_keeper": [
+    {
+      "keeper": "rondo",
+      "sleep_gh_calls": 223,
+      "hours": 14.4,
+      "turns": 31,
+      "after_push_in_same_turn": 216,
+      "in_turns_with_2_or_more": 212,
+      "most_in_one_turn": 40,
+      "until_github_schedules_created": 13
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "sleep_gh_calls": 163,
+      "hours": 13.9,
+      "turns": 41,
+      "after_push_in_same_turn": 25,
+      "in_turns_with_2_or_more": 145,
+      "most_in_one_turn": 24,
+      "until_github_schedules_created": 22
+    },
+    {
+      "keeper": "wkbl-data",
+      "sleep_gh_calls": 78,
+      "hours": 4.6,
+      "turns": 21,
+      "after_push_in_same_turn": 55,
+      "in_turns_with_2_or_more": 72,
+      "most_in_one_turn": 11,
+      "until_github_schedules_created": 10
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "sleep_gh_calls": 17,
+      "hours": 1.3,
+      "turns": 4,
+      "after_push_in_same_turn": 14,
+      "in_turns_with_2_or_more": 16,
+      "most_in_one_turn": 10,
+      "until_github_schedules_created": 12
+    },
+    {
+      "keeper": "goo-yang-bong",
+      "sleep_gh_calls": 8,
+      "hours": 0.7,
+      "turns": 6,
+      "after_push_in_same_turn": 0,
+      "in_turns_with_2_or_more": 4,
+      "most_in_one_turn": 2,
+      "until_github_schedules_created": 26
+    },
+    {
+      "keeper": "code-reviewer-brother",
+      "sleep_gh_calls": 11,
+      "hours": 0.6,
+      "turns": 7,
+      "after_push_in_same_turn": 0,
+      "in_turns_with_2_or_more": 5,
+      "most_in_one_turn": 5,
+      "until_github_schedules_created": 0
+    },
+    {
+      "keeper": "wkbl-front",
+      "sleep_gh_calls": 10,
+      "hours": 0.3,
+      "turns": 7,
+      "after_push_in_same_turn": 2,
+      "in_turns_with_2_or_more": 4,
+      "most_in_one_turn": 4,
+      "until_github_schedules_created": 22
+    },
+    {
+      "keeper": "context-reviewer",
+      "sleep_gh_calls": 5,
+      "hours": 0.2,
+      "turns": 3,
+      "after_push_in_same_turn": 0,
+      "in_turns_with_2_or_more": 3,
+      "most_in_one_turn": 3,
+      "until_github_schedules_created": 0
+    }
+  ]
+}

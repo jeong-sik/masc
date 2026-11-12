@@ -14,10 +14,11 @@ val deferred_kind_to_string : deferred_kind -> string
 
 type terminal_effect_receipt =
   | Surface_post_completed of Keeper_surface_post.post_target
-  | Receipt_wait_requested of { request_id : string }
-      (** The call asked the turn to end on the receipt of this background
-          request. Nothing has happened yet: the wait is recorded when the
-          turn's checkpoint is retained. *)
+  | Receipt_wait_requested of { first : string; later : string list }
+      (** The calls of this turn asked it to end on the receipts of these
+          background requests, [first] and then [later] in the order they were
+          asked, each once. Nothing has happened yet: the waits are recorded
+          together when the turn's checkpoint is retained. *)
 (** Producer-owned proof of the concrete terminal effect that completed, or of
     the wait the turn ends on. *)
 
@@ -106,6 +107,15 @@ val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
 
 val with_receipt_wait_receipt : request_id:string -> t -> t
 (** Sets the wait receipt on a completed result only. *)
+
+val merge_receipt_waits
+  :  held:terminal_effect_receipt
+  -> incoming:terminal_effect_receipt
+  -> terminal_effect_receipt option
+(** The receipt for a turn in which [incoming] was asked after [held] was
+    already recorded. Two waits give one wait on the requests of both; a
+    request already held is not repeated. Any pair that involves a post gives
+    [None], because a turn has one terminal effect and the first one stays. *)
 
 val with_file_change_evidence : Keeper_file_change_evidence.t -> t -> t
 (** Attach producer-recorded line evidence only to a completed execution. *)

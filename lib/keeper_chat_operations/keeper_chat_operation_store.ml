@@ -2679,16 +2679,17 @@ let resume_direct_runtime_retry store ~now ~operation_id ~observed =
       | Idempotency_conflict _ | Integrity_error _ | Native_call_unsettled) as error -> error
 ;;
 
-let owns_receipt_wait execution = function
-  | None -> true
-  | Some (wait : Semantic.receipt_obligation) ->
+let owns_receipt_waits execution = function
+  | [] -> true
+  | _ :: _ as waits ->
     (match execution with
      | None -> false
      | Some (record : Semantic.t) ->
-       List.exists (fun (entry : Semantic.receipt_obligation) ->
-         String.equal entry.request_id wait.request_id) record.receipt_obligations)
+       List.for_all (fun (wait : Semantic.receipt_obligation) ->
+         List.exists (fun (entry : Semantic.receipt_obligation) ->
+           String.equal entry.request_id wait.request_id) record.receipt_obligations) waits)
 
-let defer_direct_checkpoint ?receipt_wait store ~now ~operation_id ~execution_digest ~checkpoint =
+let defer_direct_checkpoint ?(receipt_waits = []) store ~now ~operation_id ~execution_digest ~checkpoint =
   let* () = ensure_open store in
   let read_existing () =
     let* operation = operation_or_unknown store.db operation_id in
@@ -2696,7 +2697,7 @@ let defer_direct_checkpoint ?receipt_wait store ~now ~operation_id ~execution_di
     match operation.state, pending_checkpoint execution with
     | Operation.Queued, Some existing when String.equal operation.execution_digest execution_digest
         && Semantic.equal_gate_checkpoint existing checkpoint
-        && owns_receipt_wait execution receipt_wait -> Ok operation
+        && owns_receipt_waits execution receipt_waits -> Ok operation
     | (Operation.Queued | Operation.Running _ | Operation.Succeeded _
        | Operation.Failed _ | Operation.Cancelled _), (Some _ | None) ->
       Error (Integrity_error "direct continuation commit is not confirmed") in
@@ -2722,17 +2723,20 @@ let defer_direct_checkpoint ?receipt_wait store ~now ~operation_id ~execution_di
              semantic_transition ~now Semantic.Begin_execution ready) in
       (* The owner record and the end of the turn commit together, so no
          restart or other run falls between them. *)
-      let* awaiting = match receipt_wait with
-        | None -> Ok execution
-        | Some wait ->
+      let* awaiting = match receipt_waits with
+        | [] -> Ok execution
+        | _ :: _ ->
           let* executions = semantic_rows store.db ~active_only:true in
           let others = List.filter (fun (other : Semantic.t) ->
             not (Keeper_execution_scope_id.equal other.id execution.id)) executions in
           let* owners = receipt_owners_of_executions others in
-          (match Request_owners.find_opt wait.request_id owners with
-           | Some _ ->
-             Error (Invalid_input ("receipt request is owned by another execution: " ^ wait.request_id))
-           | None -> semantic_transition ~now (Semantic.Await_receipt wait) execution) in
+          List.fold_left (fun held (wait : Semantic.receipt_obligation) ->
+            let* held = held in
+            match Request_owners.find_opt wait.request_id owners with
+            | Some _ ->
+              Error (Invalid_input ("receipt request is owned by another execution: " ^ wait.request_id))
+            | None -> semantic_transition ~now (Semantic.Await_receipt wait) held)
+            (Ok execution) receipt_waits in
       let action = match checkpoint with
         | Semantic.Agent_core checkpoint -> Semantic.Suspend checkpoint
         | Semantic.Official_client checkpoint -> Semantic.Suspend_official_checkpoint checkpoint in
@@ -2815,6 +2819,29 @@ let resolve_receipt store ~now ~request_id ~resolution =
            let* () = update_semantic store ~expected next in
            Ok Receipt_resolved))
 ;;
+
+type receipt_entry =
+  | Receipt_entry_pending
+  | Receipt_entry_arrived
+  | Receipt_entry_absent
+
+let receipt_entry store ~request_id =
+  let* () = ensure_open store in
+  let* executions = semantic_rows store.db ~active_only:true in
+  let* owners = receipt_owners_of_executions executions in
+  match Request_owners.find_opt request_id owners with
+  | None -> Ok Receipt_entry_absent
+  | Some owner ->
+    (match List.find_opt (fun (execution : Semantic.t) ->
+       Keeper_execution_scope_id.equal execution.id owner) executions with
+     | None -> Error (Integrity_error "receipt owner is not an active execution")
+     | Some execution ->
+       (match List.find_opt (fun (entry : Semantic.receipt_obligation) ->
+          String.equal entry.request_id request_id) execution.receipt_obligations with
+        | None -> Error (Integrity_error "receipt owner holds no entry for its request")
+        | Some { state = Semantic.Pending; _ } -> Ok Receipt_entry_pending
+        | Some { state = Semantic.Arrived (Semantic.Receipt_in_outbox | Semantic.Source_lost); _ } ->
+          Ok Receipt_entry_arrived))
 
 let wait_direct_preparation store ~now ~operation_id ~execution_digest ~observed ~detail =
   let* () = ensure_open store in

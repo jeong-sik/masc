@@ -1,5 +1,5 @@
-(** [keeper_receipt_wait]: the turn ends on the receipt of one background
-    Execute run.
+(** [keeper_receipt_wait]: the turn ends on the receipt of a background
+    Execute run. Several calls in one turn wait for all of their runs.
 
     The call checks that the request is a background Execute run of this
     Keeper whose receipt has not been delivered and acknowledged already, and

@@ -110,8 +110,8 @@ let expect_wait ~request_id label (execution : Keeper_tool_execution.t) =
    | Tool_result.Completed () -> ()
    | Tool_result.Deferred () | Tool_result.Failed _ -> fail (label ^ ": the call did not complete"));
   match execution.terminal_effect_receipt with
-  | Some (Keeper_tool_execution.Receipt_wait_requested { request_id = waited }) ->
-    check string (label ^ " names the request") request_id waited
+  | Some (Keeper_tool_execution.Receipt_wait_requested { first; later }) ->
+    check (list string) (label ^ " names the request") [ request_id ] (first :: later)
   | Some (Keeper_tool_execution.Surface_post_completed _) | None ->
     fail (label ^ ": the result carries no wait")
 ;;
@@ -258,8 +258,8 @@ let test_bundle_keeps_the_wait_in_the_terminal_state () =
        | Error error -> fail error.Agent_core.Types.message);
       (match bundle.terminal_effect_state () with
        | Keeper_tools_agent_core.Terminal_effect_completed
-           (Keeper_tool_execution.Receipt_wait_requested { request_id = waited }) ->
-         check string "the terminal state names the request" request_id waited
+           (Keeper_tool_execution.Receipt_wait_requested { first; later }) ->
+         check (list string) "the terminal state names the request" [ request_id ] (first :: later)
        | Keeper_tools_agent_core.Terminal_effect_open
        | Keeper_tools_agent_core.Deferred_tool_result
        | Keeper_tools_agent_core.External_effect_deferred
@@ -268,6 +268,93 @@ let test_bundle_keeps_the_wait_in_the_terminal_state () =
        | Keeper_tools_agent_core.Terminal_effect_failed _ ->
          fail "the completed wait is not in the terminal state"));
     Eio.Promise.resolve resolve_release ())
+;;
+
+(* A turn can call the wait more than once, and each success tells the model
+   the turn waits for that request. The turn records every request a call
+   accepted, once, in the order asked; a refused call records nothing. *)
+let test_every_accepted_wait_is_kept () =
+  with_workspace (fun ~sw ~clock config ->
+    let base_path = config.Workspace.base_path in
+    (* One run has ended with its receipt in the outbox; the other still works.
+       They are started one after the other, because the request lane takes one
+       submission at a time. *)
+    let ended =
+      submit ~sw ~base_path ~request_context:execute_context (fun ~request_id:_ _ ->
+        Keeper_types_profile.tool_result_ok "done")
+    in
+    wait_until_ended ~clock ~base_path ended;
+    get
+      (Outbox.retain
+         ~base_path
+         ~keeper_name
+         (Background.receipt_of_unfinished
+            ~request_id:ended
+            ~arguments:(`Assoc [])
+            ~cause:Background.restart_cause));
+    let release, resolve_release = Eio.Promise.create () in
+    let running =
+      submit ~sw ~base_path ~request_context:execute_context (fun ~request_id:_ _ ->
+        Eio.Promise.await release;
+        Keeper_types_profile.tool_result_ok "done")
+    in
+    let first = ended in
+    let second = running in
+    let bundle = bundle_for config in
+    Fun.protect ~finally:bundle.cleanup (fun () ->
+      let tool = wait_tool bundle in
+      let accepted =
+        List.filter_map
+          (fun request_id ->
+             match invoke tool (args request_id) with
+             | Ok _ -> Some request_id
+             | Error _ -> None)
+          [ first; "kmsg-never-submitted"; second; first ]
+      in
+      check (list string) "the model saw these calls succeed" [ first; second; first ] accepted;
+      let waited =
+        match bundle.terminal_effect_state () with
+        | Keeper_tools_agent_core.Terminal_effect_completed receipt ->
+          Keeper_receipt_wait_resolution.obligations_of_terminal_effect (Some receipt)
+          |> get
+          |> List.map (fun (obligation : Keeper_semantic_execution.receipt_obligation) ->
+            obligation.request_id)
+        | Keeper_tools_agent_core.Terminal_effect_open
+        | Keeper_tools_agent_core.Deferred_tool_result
+        | Keeper_tools_agent_core.External_effect_deferred
+        | Keeper_tools_agent_core.Terminal_effect_failed _ ->
+          fail "the accepted waits are not in the terminal state"
+      in
+      check bool "every accepted wait has an entry to record" true
+        (List.for_all (fun request_id -> List.mem request_id waited) accepted);
+      check (list string) "once each, in the order asked" [ first; second ] waited);
+    Eio.Promise.resolve resolve_release ())
+;;
+
+(* A post is the terminal effect of its turn and a wait is not one: Agent Core
+   admits a terminal tool only alone in its batch. So a post and a wait never
+   run in one batch, and a wait cannot be accepted and then lost to a post. *)
+let test_a_post_cannot_share_a_batch_with_a_wait () =
+  with_workspace (fun ~sw:_ ~clock:_ config ->
+    let bundle = bundle_for config in
+    Fun.protect ~finally:bundle.cleanup (fun () ->
+      let completion name =
+        match
+          List.find_opt
+            (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name name)
+            bundle.agent_core_tools
+        with
+        | Some tool -> Agent_core.Tool.completion tool
+        | None -> fail (name ^ " is not offered by the bundle")
+      in
+      (match completion "keeper_surface_post" with
+       | Agent_core.Tool_contract.Terminal_after_success _ -> ()
+       | Agent_core.Tool_contract.Continue_after_success ->
+         fail "a post does not end its batch");
+      match completion "keeper_receipt_wait" with
+      | Agent_core.Tool_contract.Continue_after_success -> ()
+      | Agent_core.Tool_contract.Terminal_after_success _ ->
+        fail "a wait claims to be a terminal tool"))
 ;;
 
 (* The wait ends a chat execution's turn on a retained checkpoint. A run that
@@ -306,6 +393,9 @@ let () =
     ; ( "bundle"
       , [ test_case "the wait stays in the terminal state" `Quick
             test_bundle_keeps_the_wait_in_the_terminal_state
+        ; test_case "every wait a call accepted is kept" `Quick test_every_accepted_wait_is_kept
+        ; test_case "a post cannot share a batch with a wait" `Quick
+            test_a_post_cannot_share_a_batch_with_a_wait
         ] )
     ; ( "surface"
       , [ test_case "a run without a chat execution is not offered the wait" `Quick

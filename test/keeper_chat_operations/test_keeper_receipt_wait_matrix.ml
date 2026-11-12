@@ -79,7 +79,7 @@ let claim store ~now =
 
 let defer store ~now (operation : Chat.t) request_id state =
   Store.defer_direct_checkpoint
-    ~receipt_wait:(obligation request_id state)
+    ~receipt_waits:[ obligation request_id state ]
     store
     ~now
     ~operation_id:operation.operation_id

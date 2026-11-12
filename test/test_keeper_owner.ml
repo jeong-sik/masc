@@ -6877,7 +6877,7 @@ let test_owner_receipt_wait_holds_the_claim_until_the_receipt_arrives () =
       incr attempts;
       match !attempts with
       | 1 ->
-        Owner.defer_direct_checkpoint ~receipt_wait:wait owner ~operation_id:id
+        Owner.defer_direct_checkpoint ~receipt_waits:[wait] owner ~operation_id:id
           ~execution_digest:operation.execution_digest ~checkpoint |> owner_ok |> ignore;
         Eio.Promise.resolve deferred_resolver ();
         Owner.Operation_deferred

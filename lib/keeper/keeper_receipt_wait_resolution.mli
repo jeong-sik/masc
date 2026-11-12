@@ -21,3 +21,11 @@ val arrived : base_path:string -> keeper_name:string -> (unit, string) result
     the execution waited for. A request already arrived, or one no execution
     owns, changes nothing, so a repeated call is safe. Every request is tried
     even when one fails; the error lists the failures. *)
+
+val obligations_of_terminal_effect
+  :  Keeper_tool_execution.terminal_effect_receipt option
+  -> (Keeper_semantic_execution.receipt_obligation list, string) result
+(** The [Pending] entries a turn records when it ends on its terminal effect:
+    one per request a wait asked for, in the order asked, and none for a post
+    or no terminal effect. The turn passes them to
+    {!Keeper_chat_operation_store.defer_direct_checkpoint}. *)

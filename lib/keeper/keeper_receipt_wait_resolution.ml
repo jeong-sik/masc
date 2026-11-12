@@ -73,3 +73,19 @@ let arrived ~base_path ~keeper_name =
      | [] -> Ok ()
      | _ :: _ -> Error (String.concat "; " failures))
 ;;
+
+let obligations_of_terminal_effect = function
+  | Some (Keeper_tool_execution.Receipt_wait_requested { first; later }) ->
+    List.fold_left
+      (fun obligations request_id ->
+         let* obligations = obligations in
+         let* obligation =
+           Keeper_semantic_execution.receipt_obligation
+             ~request_id
+             ~state:Keeper_semantic_execution.Pending
+         in
+         Ok (obligations @ [ obligation ]))
+      (Ok [])
+      (first :: later)
+  | Some (Keeper_tool_execution.Surface_post_completed _) | None -> Ok []
+;;

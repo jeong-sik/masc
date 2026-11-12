@@ -475,10 +475,10 @@ val checkpoint_direct_native_call : t -> operation_id:Chat_operation.Operation_i
   call_id:string -> observed:Keeper_checkpoint_ref.t -> checkpoint:Keeper_checkpoint_ref.t -> (unit, error) result
 val terminal_direct_native_call : t -> operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, error) result
-val defer_direct_checkpoint : ?receipt_wait:Keeper_semantic_execution.receipt_obligation -> t ->
+val defer_direct_checkpoint : ?receipt_waits:Keeper_semantic_execution.receipt_obligation list -> t ->
   operation_id:Chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Chat_operation.t, error) result
-(** [receipt_wait] ends the turn on a background receipt: the request joins the
+(** [receipt_waits] ends the turn on background receipts: the requests join the
     execution's owner record in the same transaction (see
     {!Keeper_chat_operation_store.defer_direct_checkpoint}). *)
 val receipt_arrived : t -> request_id:string ->
@@ -488,6 +488,15 @@ val receipt_arrived : t -> request_id:string ->
     source is gone. The Owner finds the execution that owns the request and
     starts a claim when its last pending receipt arrived. A repeated or late
     notice changes nothing. *)
+val settle_lost_receipt : t -> request_id:string -> retain:(unit -> (unit, string) result) ->
+  (Keeper_chat_operation_store.receipt_resolution_outcome, error) result
+(** Settles a wait whose run ended with no receipt. When the request's entry is
+    still [Pending], the Owner runs [retain], which writes the receipt, and then
+    resolves the entry as [Source_lost]; otherwise it writes nothing and answers
+    [Receipt_already_arrived] or [Receipt_without_owner]. Both steps run in one
+    Owner command, so a receipt that arrived and was read in the meantime is
+    never answered by a second one. A failed [retain] is an [Error] that leaves
+    the entry [Pending]. *)
 type input_response_error =
   | Response_owner_error of error
   | Response_installation_error of Keeper_input_wait_response.installation_error

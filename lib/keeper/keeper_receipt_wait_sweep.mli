@@ -6,11 +6,14 @@
 
 val settle_lost : base_path:string -> keeper_name:string -> (unit, string) result
 (** For every pending request of this Keeper that has ended or been cut off
-    and has no receipt in the outbox: writes one [unfinished] receipt, then
-    resolves the wait with {!Keeper_semantic_execution.Source_lost}. A request
-    a worker may still own is left alone. The state decides, never a time
-    limit. Every request is tried even when one fails; the error lists the
-    failures.
+    and has no receipt in the outbox: has the Owner write one [unfinished]
+    receipt and resolve the wait with {!Keeper_semantic_execution.Source_lost}
+    ({!Keeper_owner.settle_lost_receipt}). The Owner does both in one command
+    and only while the wait is still pending, so a wait that arrived and was
+    consumed since the sweep read it gets no second receipt, and two sweeps
+    that overlap write one. A request a worker may still own is left alone.
+    The state decides, never a time limit. Every request is tried even when
+    one fails; the error lists the failures.
 
     The receipt echoes the arguments the request record kept. A request with
     no record, or whose record is not a background Execute run's, has none to

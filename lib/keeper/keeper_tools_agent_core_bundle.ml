@@ -377,7 +377,22 @@ let make_tool_bundle_for_descriptors_with_policy
   let mark_terminal_effect_completed receipt =
     let rec transition () =
       match Atomic.get terminal_effect_state with
-      | Terminal_effect_completed _ | Terminal_effect_failed _ -> ()
+      | Terminal_effect_failed _ -> ()
+      | Terminal_effect_completed held as current ->
+        (* A turn can ask for several waits, and each success tells the model
+           the turn waits for that request. They join the receipt that is held,
+           so every request a call accepted is recorded. Any other pair keeps
+           the first terminal effect. *)
+        (match Keeper_tool_execution.merge_receipt_waits ~held ~incoming:receipt with
+         | None -> ()
+         | Some merged ->
+           if
+             not
+               (Atomic.compare_and_set
+                  terminal_effect_state
+                  current
+                  (Terminal_effect_completed merged))
+           then transition ())
       | ( Terminal_effect_open
         | Deferred_tool_result
         | External_effect_deferred ) as current ->

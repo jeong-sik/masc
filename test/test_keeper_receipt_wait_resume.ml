@@ -86,20 +86,24 @@ let await ~clock promise =
   Eio.Time.with_timeout_exn clock 15. (fun () -> Eio.Promise.await promise)
 ;;
 
-(* The task waits for [request_id]. The first claim records the wait with its
+(* The task waits for [request_ids]. The first claim records the waits with its
    checkpoint and ends; the second claim is the resumed run. [attempts] counts
-   the claims, and [finished] resolves when the resumed run settled. *)
+   the claims, [resumed] resolves when the resumed run has started, and
+   [finished] when it settled. [hold_resume] keeps the resumed run from going
+   on until it resolves. *)
 type waiting_task =
   { attempts : int ref
+  ; resumed : unit Eio.Promise.t
   ; finished : unit Eio.Promise.t
   ; scope : Keeper_execution_scope_id.t
   }
 
-let start_waiting_task ~sw ~clock (config : Workspace.config) ~request_id =
+let start_waiting_task ?hold_resume ~sw ~clock (config : Workspace.config) ~request_ids =
   let base_path = config.base_path in
   let id = operation_id "kmsg-receipt-resume" in
   let attempts = ref 0 in
   let deferred, deferred_resolver = Eio.Promise.create () in
+  let resumed, resumed_resolver = Eio.Promise.create () in
   let finished, finished_resolver = Eio.Promise.create () in
   let scope = Keeper_execution_scope_id.direct_operation id in
   let frame =
@@ -118,11 +122,14 @@ let start_waiting_task ~sw ~clock (config : Workspace.config) ~request_id =
       ; frame
       }
   in
-  let wait =
-    Keeper_semantic_execution.receipt_obligation
-      ~request_id
-      ~state:Keeper_semantic_execution.Pending
-    |> Result.get_ok
+  let waits =
+    List.map
+      (fun request_id ->
+         Keeper_semantic_execution.receipt_obligation
+           ~request_id
+           ~state:Keeper_semantic_execution.Pending
+         |> Result.get_ok)
+      request_ids
   in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     let operation : Chat_operation.t = claim () |> owner_ok |> Option.get in
@@ -137,10 +144,12 @@ let start_waiting_task ~sw ~clock (config : Workspace.config) ~request_id =
               ~operation_id:id
               ~execution_digest:operation.execution_digest
               ~checkpoint
-              ~receipt_wait:(Some wait)));
+              ~receipt_waits:waits));
       Eio.Promise.resolve deferred_resolver ();
       Owner.Operation_deferred
     | 2 ->
+      Eio.Promise.resolve resumed_resolver ();
+      Option.iter Eio.Promise.await hold_resume;
       let owner = Registry.get ~base_path ~keeper_name |> Result.get_ok in
       Owner.resume_direct_checkpoint owner ~operation_id:id ~observed:checkpoint |> owner_ok;
       Owner.enter_direct_preparation
@@ -181,7 +190,7 @@ let start_waiting_task ~sw ~clock (config : Workspace.config) ~request_id =
   |> owner_ok
   |> ignore;
   await ~clock deferred;
-  { attempts; finished; scope }
+  { attempts; resumed; finished; scope }
 ;;
 
 let receipt_for ~request_id =
@@ -209,7 +218,7 @@ let queued_receipt_hints config =
 let test_notify_resumes_the_waiting_task () =
   with_workspace (fun ~sw ~clock config ->
     let request_id = "kmsg-arrived" in
-    let task = start_waiting_task ~sw ~clock config ~request_id in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ request_id ] in
     get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
     check int "no receipt yet: nothing resumed" 1 !(task.attempts);
     get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id));
@@ -226,13 +235,50 @@ let test_notify_resumes_the_waiting_task () =
 let test_arrived_is_safe_to_repeat () =
   with_workspace (fun ~sw ~clock config ->
     let request_id = "kmsg-repeated" in
-    let task = start_waiting_task ~sw ~clock config ~request_id in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ request_id ] in
     get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id));
     get (Keeper_receipt_wait_resolution.arrived ~base_path:config.base_path ~keeper_name);
     get (Keeper_receipt_wait_resolution.arrived ~base_path:config.base_path ~keeper_name);
     await ~clock task.finished;
     check int "two notices resumed the task once" 2 !(task.attempts);
     get (Keeper_receipt_wait_resolution.arrived ~base_path:config.base_path ~keeper_name))
+;;
+
+let pending_requests config =
+  List.sort
+    String.compare
+    (get
+       (Keeper_receipt_wait_resolution.pending_requests
+          ~base_path:config.Workspace.base_path
+          ~keeper_name))
+;;
+
+(* A turn that waited for two requests owns both from the moment it ends, and
+   it resumes only when the last receipt has arrived. *)
+let test_a_task_waits_for_every_request () =
+  with_workspace (fun ~sw ~clock config ->
+    let first = "kmsg-first" in
+    let second = "kmsg-second" in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ first; second ] in
+    check (list string) "both requests are owned and pending" [ first; second ]
+      (pending_requests config);
+    get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id:first));
+    get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
+    check int "one receipt is not enough" 1 !(task.attempts);
+    check (list string) "the other request is still pending" [ second ]
+      (pending_requests config);
+    check bool "the first receipt is hidden from other runs" false
+      (outbox_has config ~viewer:Outbox.Unowned_only first);
+    get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id:second));
+    check bool "the second receipt is hidden from other runs" false
+      (outbox_has config ~viewer:Outbox.Unowned_only second);
+    get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
+    await ~clock task.finished;
+    check int "the last receipt resumed the task" 2 !(task.attempts);
+    check bool "the resumed run reads the first receipt" true
+      (outbox_has config ~viewer:(Outbox.Owner_and_unowned task.scope) first);
+    check bool "and the second" true
+      (outbox_has config ~viewer:(Outbox.Owner_and_unowned task.scope) second))
 ;;
 
 (* The receipt as it lies in the outbox: the arguments it carries and the text
@@ -299,7 +345,7 @@ let test_run_without_worker_or_receipt_is_settled () =
         Keeper_types_profile.tool_result_ok "done")
     in
     await ~clock settled;
-    let task = start_waiting_task ~sw ~clock config ~request_id in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ request_id ] in
     check bool "no receipt before the sweep" false
       (outbox_has config ~viewer:Outbox.Every_receipt request_id);
     get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
@@ -329,7 +375,7 @@ let test_run_without_worker_or_receipt_is_settled () =
 let test_run_without_a_record_is_settled_with_unknown_arguments () =
   with_workspace (fun ~sw ~clock config ->
     let request_id = "kmsg-never-recorded" in
-    let task = start_waiting_task ~sw ~clock config ~request_id in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ request_id ] in
     get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
     await ~clock task.finished;
     check int "the task resumed" 2 !(task.attempts);
@@ -355,6 +401,129 @@ let test_run_without_a_record_is_settled_with_unknown_arguments () =
     check int "a second pass resumes nothing more" 2 !(task.attempts))
 ;;
 
+(* The sweep reads the wait, the request record and the outbox, and some time
+   later asks the Owner to write the receipt. Meanwhile the wait can arrive
+   and the run that waited can read and acknowledge its receipt. The Owner
+   writes only while the wait is still pending, so that late sweep writes
+   nothing: a second receipt would reach a run that never asked for it. *)
+let settle_lost config ~request_id ~writes =
+  command_ok
+    (Registry.settle_lost_receipt
+       ~base_path:config.Workspace.base_path
+       ~keeper_name
+       ~request_id
+       ~retain:(fun () ->
+         incr writes;
+         Keeper_execute_background.retain_source_lost_receipt
+           ~base_path:config.base_path
+           ~keeper_name
+           ~request_id
+           ~arguments:Outbox.Unknown))
+;;
+
+let test_a_late_sweep_after_the_receipt_was_consumed_writes_nothing () =
+  with_workspace (fun ~sw ~clock config ->
+    let request_id = "kmsg-consumed" in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ request_id ] in
+    get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id));
+    get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
+    await ~clock task.finished;
+    get
+      (Outbox.acknowledge
+         (get
+            (Outbox.load
+               ~base_path:config.base_path
+               ~keeper_name
+               ~viewer:(Outbox.Owner_and_unowned task.scope))));
+    check bool "the run consumed the receipt" false
+      (outbox_has config ~viewer:Outbox.Every_receipt request_id);
+    let writes = ref 0 in
+    (match settle_lost config ~request_id ~writes with
+     | Keeper_chat_operation_store.Receipt_without_owner -> ()
+     | Keeper_chat_operation_store.Receipt_resolved
+     | Keeper_chat_operation_store.Receipt_already_arrived ->
+       fail "a settled execution still owned the request");
+    check int "the late sweep wrote nothing" 0 !writes;
+    check bool "so no receipt is left for an unrelated run" false
+      (outbox_has config ~viewer:Outbox.Unowned_only request_id))
+;;
+
+let test_a_late_sweep_while_the_resumed_run_works_writes_nothing () =
+  with_workspace (fun ~sw ~clock config ->
+    let request_id = "kmsg-in-use" in
+    let release, resolve_release = Eio.Promise.create () in
+    let task =
+      start_waiting_task ~hold_resume:release ~sw ~clock config ~request_ids:[ request_id ]
+    in
+    get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id));
+    get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
+    await ~clock task.resumed;
+    get
+      (Outbox.acknowledge
+         (get
+            (Outbox.load
+               ~base_path:config.base_path
+               ~keeper_name
+               ~viewer:(Outbox.Owner_and_unowned task.scope))));
+    let writes = ref 0 in
+    (match settle_lost config ~request_id ~writes with
+     | Keeper_chat_operation_store.Receipt_already_arrived -> ()
+     | Keeper_chat_operation_store.Receipt_resolved
+     | Keeper_chat_operation_store.Receipt_without_owner ->
+       fail "the arrived wait was not reported as arrived");
+    check int "the late sweep wrote nothing" 0 !writes;
+    check bool "so no receipt is left for an unrelated run" false
+      (outbox_has config ~viewer:Outbox.Every_receipt request_id);
+    Eio.Promise.resolve resolve_release ();
+    await ~clock task.finished)
+;;
+
+(* Two sweeps that overlap, the one a turn starts when it ends and the one the
+   maintenance tick starts, ask for the same receipt. One of them writes it. *)
+let test_overlapping_sweeps_write_one_receipt () =
+  with_workspace (fun ~sw ~clock config ->
+    let request_id = "kmsg-overlap" in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ request_id ] in
+    let writes = ref 0 in
+    let resolved = ref 0 in
+    let sweep () =
+      match settle_lost config ~request_id ~writes with
+      | Keeper_chat_operation_store.Receipt_resolved -> incr resolved
+      | Keeper_chat_operation_store.Receipt_already_arrived
+      | Keeper_chat_operation_store.Receipt_without_owner -> ()
+    in
+    Eio.Fiber.both sweep sweep;
+    await ~clock task.finished;
+    check int "one sweep wrote the receipt" 1 !writes;
+    check int "and one resolved the wait" 1 !resolved)
+;;
+
+(* A receipt that cannot be written, by an error or an exception, leaves the
+   wait pending and the Owner answering. A later sweep settles it. *)
+let test_a_failed_receipt_write_leaves_the_wait_pending () =
+  with_workspace (fun ~sw ~clock config ->
+    let request_id = "kmsg-write-fails" in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ request_id ] in
+    let settle retain =
+      Registry.settle_lost_receipt
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+        ~request_id
+        ~retain
+    in
+    (match settle (fun () -> Error "disk full") with
+     | Error _ -> ()
+     | Ok _ -> fail "a write that failed was reported as settled");
+    (match settle (fun () -> failwith "boom") with
+     | Error _ -> ()
+     | Ok _ -> fail "a write that raised was reported as settled");
+    check (list string) "the wait is still pending" [ request_id ] (pending_requests config);
+    check int "the task did not resume" 1 !(task.attempts);
+    get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
+    await ~clock task.finished;
+    check int "a sweep that can write settled it" 2 !(task.attempts))
+;;
+
 (* A request a worker may still own is not lost. The sweep reads the request
    record, never a clock. *)
 let test_run_with_a_worker_is_left_waiting () =
@@ -365,7 +534,7 @@ let test_run_with_a_worker_is_left_waiting () =
         Eio.Promise.await release;
         Keeper_types_profile.tool_result_ok "done")
     in
-    let task = start_waiting_task ~sw ~clock config ~request_id in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ request_id ] in
     get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
     check int "the sweep left the wait alone" 1 !(task.attempts);
     check bool "and wrote no receipt" false
@@ -380,6 +549,18 @@ let () =
       , [ test_case "notify resumes the waiting task" `Quick
             test_notify_resumes_the_waiting_task
         ; test_case "a repeated notice changes nothing" `Quick test_arrived_is_safe_to_repeat
+        ; test_case "a task waits for every request it named" `Quick
+            test_a_task_waits_for_every_request
+        ] )
+    ; ( "late sweep"
+      , [ test_case "a sweep after the receipt was consumed writes nothing" `Quick
+            test_a_late_sweep_after_the_receipt_was_consumed_writes_nothing
+        ; test_case "a sweep while the resumed run works writes nothing" `Quick
+            test_a_late_sweep_while_the_resumed_run_works_writes_nothing
+        ; test_case "overlapping sweeps write one receipt" `Quick
+            test_overlapping_sweeps_write_one_receipt
+        ; test_case "a failed receipt write leaves the wait pending" `Quick
+            test_a_failed_receipt_write_leaves_the_wait_pending
         ] )
     ; ( "lost run"
       , [ test_case "a run without worker or receipt is settled" `Quick

@@ -13,7 +13,7 @@ let deferred_kind_to_string = function
 
 type terminal_effect_receipt =
   | Surface_post_completed of Keeper_surface_post.post_target
-  | Receipt_wait_requested of { request_id : string }
+  | Receipt_wait_requested of { first : string; later : string list }
 
 type t =
   { retained_artifacts : Tool_output.artifact_ref list
@@ -174,9 +174,26 @@ let with_receipt_wait_receipt ~request_id result =
   match result.disposition with
   | Tool_result.Completed () ->
     { result with
-      terminal_effect_receipt = Some (Receipt_wait_requested { request_id })
+      terminal_effect_receipt = Some (Receipt_wait_requested { first = request_id; later = [] })
     }
   | Tool_result.Deferred () | Tool_result.Failed _ -> result
+;;
+
+let merge_receipt_waits ~held ~incoming =
+  match held, incoming with
+  | Receipt_wait_requested held, Receipt_wait_requested incoming ->
+    let held_ids = held.first :: held.later in
+    let added =
+      List.fold_left
+        (fun kept id ->
+           if List.mem id held_ids || List.mem id kept then kept else kept @ [ id ])
+        []
+        (incoming.first :: incoming.later)
+    in
+    Some (Receipt_wait_requested { first = held.first; later = held.later @ added })
+  | Receipt_wait_requested _, Surface_post_completed _
+  | Surface_post_completed _, Receipt_wait_requested _
+  | Surface_post_completed _, Surface_post_completed _ -> None
 ;;
 
 let with_file_change_evidence evidence result =

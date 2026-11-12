@@ -434,7 +434,7 @@ let test_applied_gate_replay_seeds_terminal_settlement () =
    checkpoint and the wait travels with it; a posted update completes the
    turn. *)
 let test_receipt_wait_ends_the_turn_on_a_checkpoint () =
-  let receipt = Masc.Keeper_tool_execution.Receipt_wait_requested { request_id = "kmsg-awaited" } in
+  let receipt = Masc.Keeper_tool_execution.Receipt_wait_requested { first = "kmsg-awaited"; later = [] } in
   let waiting = Masc.Keeper_tools_agent_core.Terminal_effect_completed receipt in
   (match Masc.Keeper_agent_run.terminal_effect_boundary_decision waiting with
    | Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting) -> ()

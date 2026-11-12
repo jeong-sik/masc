@@ -48,16 +48,20 @@ let lost_arguments ~base_path ~keeper_name request_id =
     else Ok (Some arguments)
 ;;
 
+(* The Owner writes the receipt and resolves the wait in one command, and only
+   while the wait is still pending. This sweep read the request record and the
+   outbox some time ago, and the receipt it saw missing may since have arrived,
+   been read and acknowledged by the run that waited. That run's end left no
+   receipt and no pending wait, and a second receipt written now would be read
+   by an unrelated run. *)
 let settle_one ~base_path ~keeper_name request_id arguments =
-  let* () =
-    Background.retain_source_lost_receipt ~base_path ~keeper_name ~request_id ~arguments
-  in
   match
-    Keeper_owner_registry.receipt_arrived
+    Keeper_owner_registry.settle_lost_receipt
       ~base_path
       ~keeper_name
       ~request_id
-      ~resolution:Keeper_semantic_execution.Source_lost
+      ~retain:(fun () ->
+        Background.retain_source_lost_receipt ~base_path ~keeper_name ~request_id ~arguments)
   with
   | Ok
       ( Keeper_chat_operation_store.Receipt_resolved
@@ -66,7 +70,7 @@ let settle_one ~base_path ~keeper_name request_id arguments =
   | Error error ->
     Error
       (Printf.sprintf
-         "lost source of %s could not be reported to the Owner: %s"
+         "lost source of %s could not be settled: %s"
          request_id
          (Keeper_owner_registry.command_error_to_string error))
 ;;

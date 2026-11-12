@@ -514,7 +514,10 @@ class WaitingEventTest(unittest.TestCase):
                 server.events.put((3, "gamma"))
                 server.events.put((4, "__loss__"))
                 wait_until(
-                    lambda: b"[events lost]" in output[duplicate_output_start:],
+                    lambda: any(
+                        marker in output[duplicate_output_start:]
+                        for marker in (b"[events lost]", "[이벤트 유실]".encode())
+                    ),
                     "the event after the duplicate was not applied",
                 )
                 self.assertEqual(server.count("duplicate", "observer-event-written"), 2)
@@ -523,8 +526,9 @@ class WaitingEventTest(unittest.TestCase):
                     "loss-sentinel refresh did not complete",
                 )
                 wait_until(
-                    lambda: rendered_row_contains(
-                        duplicate_output_start, b"beta", b"running"
+                    lambda: any(
+                        rendered_row_contains(duplicate_output_start, b"beta", marker)
+                        for marker in (b"running", "실행 중".encode())
                     ),
                     "the TUI did not apply the sentinel refresh",
                 )
@@ -568,8 +572,9 @@ class WaitingEventTest(unittest.TestCase):
                     "turns read did not continue during reconciliation",
                 )
                 wait_until(
-                    lambda: rendered_row_contains(
-                        poll_output_start, b"beta", b"running"
+                    lambda: any(
+                        rendered_row_contains(poll_output_start, b"beta", marker)
+                        for marker in (b"running", "실행 중".encode())
                     ),
                     "the TUI did not apply the turns part of the concurrent poll",
                 )

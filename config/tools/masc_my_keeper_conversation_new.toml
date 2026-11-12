@@ -6,7 +6,9 @@ there and has read none of the earlier turns. The conversations the \
 Keeper had stay recorded, and no turn goes on in them. Use it when a \
 turn is refused because the conversation began on another subscription, \
 or when you want the Keeper to start over. The answer is JSON: keeper_id \
-and conversation_id. A Keeper without a Runtime is refused."""
+and conversation_id. A Keeper without a Runtime is refused, and so is a \
+start while a turn runs on the subscription of the current \
+conversation."""
 additional_properties = false
 
 [[params]]

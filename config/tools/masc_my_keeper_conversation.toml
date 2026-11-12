@@ -1,0 +1,33 @@
+name = "masc_my_keeper_conversation"
+title = "Read My Keeper's Conversation"
+description = """
+Read what you asked one of your Keepers and what it answered. The answer \
+is JSON: keeper_id, current_conversation_id, conversations (each with \
+conversation_id, provider_account_id and started_at_ms, in the order \
+they were started), \
+conversation_id and turns. Each turn has message, asked_at_ms and \
+outcome: "answered" with text, model and answered_at_ms; "failed" with \
+failure, failed_at_ms and model_may_have_read; or "unrecorded" with \
+model_may_have_read, for a turn the server has no end of. Without \
+conversation_id the turns are those of the current conversation. The \
+whole conversation comes in one answer. When the server stopped in the \
+middle of writing a row, the read is refused until the Keeper's next \
+turn or a new conversation cuts that row; reading again does not."""
+additional_properties = false
+
+[[params]]
+name = "keeper_id"
+type = "string"
+required = true
+min_length = 1
+description = """
+The name of your Keeper, as masc_my_keepers lists it."""
+
+[[params]]
+name = "conversation_id"
+type = "string"
+required = false
+min_length = 1
+description = """
+An earlier conversation of the Keeper, as conversations lists it. Leave \
+it out to read the current one."""

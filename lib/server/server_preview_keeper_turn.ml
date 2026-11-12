@@ -11,7 +11,6 @@ let turn_timeout_s = 120.0
 let ms_per_second = 1000.
 let error status text = R.json status [ "error", `String text ]
 let shape = {|The body is {"keeper_id": "<name>", "message": "<text>"}.|}
-let conversation_shape = {|The body is {"keeper_id": "<name>"}.|}
 let unknown_keeper = "No Keeper of yours has this name."
 let no_runtime = "The Keeper has no Runtime. Give it one of yours first."
 let not_official_client = "A Keeper turn runs here only on a Claude Code or a Codex Runtime."
@@ -22,6 +21,13 @@ let no_quota = "The subscription of this Runtime has no quota left."
 let not_started = "The client did not start."
 let configuration_refused = "The client refused the configuration of the Runtime."
 let no_answer = "The client ended the turn without an answer."
+
+(* A turn of a conversation can fail on a session the vendor no longer has,
+   and nothing tells that from another turn without an answer: the sentence
+   names the way on, a new conversation, without naming a cause. *)
+let no_answer_in_conversation =
+  no_answer ^ " When the turns of this conversation keep failing, start a new conversation."
+;;
 
 let other_subscription =
   "The conversation of this Keeper began on another subscription of yours. Start a new conversation."
@@ -56,33 +62,42 @@ let request_of body =
   | _ -> Error (error R.Bad_request_400 shape)
 ;;
 
-(* The Runtime the person gave the Keeper, and the account that Runtime
-   spends, in a state the zone can be trusted for. A Keeper of another person
+(* The Keeper of the person and the Runtime they gave it, with the state it
+   was read in, which the zone can be trusted for. A Keeper of another person
    is answered as one that is not there, as the other Keeper routes answer
    it. *)
-let assigned (person : Login.person) keeper_id =
+let owned_in (person : Login.person) keeper_id =
   match Authz_zone.read person.zone with
   | Error uncertain -> Error (R.zone_uncertain uncertain)
   | Ok trusted ->
     let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
     (match Ks.find state.Authz_state.keepers ~owner:person.user_id keeper_id with
-     | Some { Ks.runtime; owner = _; policy_id = _; turn_scope = _ } ->
-       (match runtime with
-        | None -> Error (error R.Conflict_409 no_runtime)
-        | Some runtime_id ->
-          (match Authz_runtime_state.find state.Authz_state.runtimes runtime_id with
-           | Some
-               { Authz_runtime_state.provider_account_id; owner = _; self_grant = _; self_effects = _ }
-             -> Ok (runtime_id, provider_account_id)
-           | None ->
-             (* The log gives a Keeper only a Runtime it made, and a Runtime it
-                made stays. *)
-             Log.Server.warn
-               "Keeper %s has the Runtime %s, which the log does not have"
-               (Authz_types.Keeper_id.to_string keeper_id)
-               (Authz_types.Runtime_id.to_string runtime_id);
-             Error (error R.Internal_error_500 "The Runtime of this Keeper is not in the log.")))
+     | Some { Ks.runtime; owner = _; policy_id = _; turn_scope = _ } -> Ok (state, runtime)
      | None -> Error (error R.Not_found_404 unknown_keeper))
+;;
+
+let owned person keeper_id =
+  Result.map (fun ((_ : Authz_state.t), runtime) -> runtime) (owned_in person keeper_id)
+;;
+
+(* The Runtime the person gave the Keeper, and the account that Runtime
+   spends. *)
+let assigned person keeper_id =
+  let* state, runtime = owned_in person keeper_id in
+  match runtime with
+  | None -> Error (error R.Conflict_409 no_runtime)
+  | Some runtime_id ->
+    (match Authz_runtime_state.find state.Authz_state.runtimes runtime_id with
+     | Some { Authz_runtime_state.provider_account_id; owner = _; self_grant = _; self_effects = _ }
+       -> Ok (runtime_id, provider_account_id)
+     | None ->
+       (* The log gives a Keeper only a Runtime it made, and a Runtime it made
+          stays. *)
+       Log.Server.warn
+         "Keeper %s has the Runtime %s, which the log does not have"
+         (Authz_types.Keeper_id.to_string keeper_id)
+         (Authz_types.Runtime_id.to_string runtime_id);
+       Error (error R.Internal_error_500 "The Runtime of this Keeper is not in the log."))
 ;;
 
 let login_answer (status, message) =
@@ -147,7 +162,7 @@ let failure_answer = function
   | Conversation.Silent -> error R.Gateway_timeout_504 (silent ())
   | Conversation.Not_started -> error R.Service_unavailable_503 not_started
   | Conversation.Configuration_refused -> error R.Internal_error_500 configuration_refused
-  | Conversation.No_answer -> error R.Bad_gateway_502 no_answer
+  | Conversation.No_answer -> error R.Bad_gateway_502 no_answer_in_conversation
 ;;
 
 let claude_failure : Runtime_claude_code.error -> Conversation.failure = function
@@ -448,41 +463,6 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
             ; "continued", `Bool continued
             ]
           | None -> []))
-  in
-  Result.fold ~ok:Fun.id ~error:Fun.id answer
-;;
-
-(* The body of a new conversation: exactly the one named field. *)
-let conversation_request_of body =
-  match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error (_ : string) -> Error (error R.Bad_request_400 conversation_shape)
-  | `Assoc [ ("keeper_id", `String name) ] -> Ok name
-  | _ -> Error (error R.Bad_request_400 conversation_shape)
-;;
-
-let start_conversation ~env ~(person : Login.person) ~base_path ~body =
-  let answer =
-    let* name = conversation_request_of body in
-    let* keeper_id = Auth_preview_keeper.keeper_id_of name in
-    let* (_ : Authz_types.Runtime_id.t), provider_account_id = assigned person keeper_id in
-    let clock = Eio.Stdenv.clock env in
-    let* conversation =
-      Conversation.start
-        (Conversation.root ~base_path ~namespace:person.namespace)
-        keeper_id
-        provider_account_id
-        ~draw:Auth.generate_token
-        ~now_ms:(fun () -> Int.of_float (Eio.Time.now clock *. ms_per_second))
-      |> Result.map_error (record_answer ~keeper_id)
-    in
-    Ok
-      (R.json
-         R.Ok_200
-         [ "keeper_id", `String (Authz_types.Keeper_id.to_string keeper_id)
-         ; ( "conversation_id"
-           , `String
-               (Conversation.Conversation_id.to_string conversation.Conversation.conversation_id) )
-         ])
   in
   Result.fold ~ok:Fun.id ~error:Fun.id answer
 ;;

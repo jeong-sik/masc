@@ -292,6 +292,12 @@ let keeper zone (who : someone) name ?(policy = "policy-" ^ name) ?runtime () =
      | Error error -> Alcotest.fail (Authz_keeper.error_detail error))
 ;;
 
+(* The answer of a turn of a conversation that the client ended without an
+   answer. It names the way on and no cause. *)
+let no_answer_in_conversation =
+  {|{"error":"The client ended the turn without an answer. When the turns of this conversation keep failing, start a new conversation."}|}
+;;
+
 let body ~keeper ~message =
   Yojson.Safe.to_string (`Assoc [ "keeper_id", `String keeper; "message", `String message ])
 ;;
@@ -678,7 +684,7 @@ let test_turn () =
         Out_channel.with_open_bin fail (fun (_ : out_channel) -> ());
         check_reply
           "a turn the client ends without an answer"
-          (502, {|{"error":"The client ended the turn without an answer."}|})
+          (502, no_answer_in_conversation)
           (reply alice (body ~keeper:"keeper-alice" ~message:"lost"));
         Sys.remove fail;
         (match List.rev (rows alice_turns) with
@@ -715,10 +721,12 @@ let test_turn () =
               (get (Provider_account_id.of_string "another-account"))
               ~draw:(fun () -> "conversation-elsewhere")
               ~now_ms:(fun () -> start_ms)
+              ~one_call_of:Login.one_call_of
           with
           | Ok (conversation : Conversation.conversation) ->
             Conversation.Conversation_id.to_string conversation.conversation_id
-          | Error error -> Alcotest.fail (Conversation.error_to_string error)
+          | Error Conversation.Account_busy -> Alcotest.fail "the account was busy"
+          | Error (Conversation.Record_failed error) -> Alcotest.fail (Conversation.error_to_string error)
         in
         Sys.remove (claude ^ ".turn.json");
         check_reply
@@ -736,7 +744,7 @@ let test_turn () =
            its own. *)
         let renew who body =
           let answer =
-            Server_preview_keeper_turn.start_conversation ~env ~person:who.person ~base_path ~body
+            Server_preview_keeper_conversation.start ~env ~person:who.person ~base_path ~body
           in
           R.status_code answer.R.status, answer.R.body
         in
@@ -775,7 +783,7 @@ let test_turn () =
           (fun message ->
             check_reply
               "a turn of a conversation whose session is gone"
-              (502, {|{"error":"The client ended the turn without an answer."}|})
+              (502, no_answer_in_conversation)
               (reply alice (body ~keeper:"keeper-alice" ~message));
             Alcotest.(check (option string))
               "tries the session of the last answer again"
@@ -824,6 +832,228 @@ let test_turn () =
           (true, None)
           (Option.is_some (new_session (args_of (seen claude))), resumed_session (args_of (seen claude)));
         Sys.remove lost;
+        (* She reads what she asked and was answered. The read answers the
+           current conversation, and an earlier one by its id. *)
+        let read (who : someone) query =
+          let answer =
+            Server_preview_keeper_conversation.read ~person:who.person ~base_path ~query
+          in
+          R.status_code answer.R.status, answer.R.body
+        in
+        let read_fields label answer =
+          match answer with
+          | 200, body ->
+            (match Yojson.Safe.from_string body with
+             | `Assoc fields -> fields
+             | _ -> Alcotest.failf "%s: the read is not an object" label)
+          | status, body -> Alcotest.failf "%s: not read: %d %s" label status body
+        in
+        let turns_of fields =
+          match List.assoc_opt "turns" fields with
+          | Some (`List turns) ->
+            List.map
+              (function
+                | `Assoc turn -> turn
+                | _ -> Alcotest.fail "a turn is not an object")
+              turns
+          | _ -> Alcotest.fail "the read has no turns"
+        in
+        let shown fields = List.map (fun turn -> text_of turn "message", text_of turn "outcome") (turns_of fields) in
+        let now = read_fields "the current conversation" (read alice [ "keeper_id", "keeper-alice" ]) in
+        Alcotest.(check (list string))
+          "the fields of the read"
+          [ "keeper_id"; "current_conversation_id"; "conversations"; "conversation_id"; "turns" ]
+          (List.map fst now);
+        Alcotest.(check (list (pair string string)))
+          "the current conversation has the turn after it was started"
+          [ "anew", "answered" ]
+          (shown now);
+        Alcotest.(check bool)
+          "the current conversation is not the first"
+          false
+          (String.equal conversation (text_of now "current_conversation_id"));
+        Alcotest.(check string)
+          "the turns read are those of the current conversation"
+          (text_of now "current_conversation_id")
+          (text_of now "conversation_id");
+        (match List.assoc_opt "conversations" now with
+         | Some (`List [ `Assoc first; `Assoc second ]) ->
+           Alcotest.(check string) "the first conversation is listed first" conversation (text_of first "conversation_id");
+           Alcotest.(check string)
+             "the current one is listed last"
+             (text_of now "current_conversation_id")
+             (text_of second "conversation_id");
+           Alcotest.(check (list string))
+             "a listed conversation holds no text"
+             [ "conversation_id"; "provider_account_id"; "started_at_ms" ]
+             (List.map fst first);
+           Alcotest.(check string)
+             "and names the account it began on"
+             alice.account_id
+             (text_of first "provider_account_id")
+         | _ -> Alcotest.fail "the Keeper does not list two conversations");
+        let earlier =
+          read_fields
+            "the first conversation"
+            (read alice [ "keeper_id", "keeper-alice"; "conversation_id", conversation ])
+        in
+        Alcotest.(check (list (pair string string)))
+          "the first conversation has its turns in order"
+          [ "hello", "answered"
+          ; "by token", "answered"
+          ; "reversed", "answered"
+          ; "first", "answered"
+          ; "lost", "failed"
+          ; "again", "answered"
+          ; "gone", "failed"
+          ; "still gone", "failed"
+          ]
+          (shown earlier);
+        (match turns_of earlier with
+         | answered_turn :: _ ->
+           Alcotest.(check (list string))
+             "an answered turn names no session"
+             [ "message"; "asked_at_ms"; "outcome"; "text"; "model"; "answered_at_ms" ]
+             (List.map fst answered_turn);
+           Alcotest.(check string) "with the answer" "echo: hello" (text_of answered_turn "text")
+         | [] -> Alcotest.fail "the first conversation has no turn");
+        Alcotest.(check (list (pair string bool)))
+          "each failed turn names its failure, and its client was started with the message"
+          [ "no_answer", true; "no_answer", true; "no_answer", true ]
+          (List.filter_map
+             (fun turn ->
+                if String.equal (text_of turn "outcome") "failed"
+                then Some (text_of turn "failure", List.assoc_opt "model_may_have_read" turn = Some (`Bool true))
+                else None)
+             (turns_of earlier));
+        (* A turn the server stopped in has its message and no end. *)
+        let records = Conversation.root ~base_path ~namespace:alice.person.namespace in
+        (match Conversation.conversations records idle with
+         | Ok listed ->
+           (match List.rev listed with
+            | { Conversation.conversation; started_at_ms = _ } :: _ ->
+              (match
+                 Result.bind (Conversation.open_turn records conversation) (fun turn ->
+                   Conversation.ask
+                     turn
+                     ~message:"stopped"
+                     ~draw:(fun () -> "turn-stopped")
+                     ~now_ms:(fun () -> start_ms))
+               with
+               | Ok (_ : Conversation.asked) -> ()
+               | Error error -> Alcotest.fail (Conversation.error_to_string error))
+            | [] -> Alcotest.fail "her idle Keeper has no conversation")
+         | Error error -> Alcotest.fail (Conversation.error_to_string error));
+        let stopped = read_fields "a stopped turn" (read alice [ "keeper_id", "keeper-alice-idle" ]) in
+        Alcotest.(check (list (pair string string)))
+          "the stopped turn is read as unrecorded"
+          [ "fresh", "answered"; "stopped", "unrecorded" ]
+          (shown stopped);
+        (* The record is hers: his Keeper of the same name does not have her
+           conversation, and he reads his own. *)
+        check_reply
+          "her conversation is not one of his Keeper"
+          (404, {|{"error":"No conversation of this Keeper has this id."}|})
+          (read bob [ "keeper_id", "keeper-alice"; "conversation_id", conversation ]);
+        Alcotest.(check (list (pair string string)))
+          "his Keeper of her Keeper's name has no turn yet"
+          []
+          (shown (read_fields "his Keeper" (read bob [ "keeper_id", "keeper-alice" ])));
+        check_reply
+          "the conversation of another person's Keeper"
+          (404, {|{"error":"No Keeper of yours has this name."}|})
+          (read alice [ "keeper_id", "keeper-bob" ]);
+        List.iter
+          (fun (label, query) -> Alcotest.(check int) label 400 (fst (read alice query)))
+          [ "a read with no Keeper", []
+          ; "a read with two Keepers", [ "keeper_id", "keeper-alice"; "keeper_id", "keeper-alice-second" ]
+          ; "a read with another name", [ "keeper_id", "keeper-alice"; "limit", "1" ]
+          ; "a read with an id that is no id", [ "keeper_id", "keeper-alice"; "conversation_id", ".." ]
+          ; "a read with a name that is no Keeper name", [ "keeper_id", ".." ]
+          ];
+        (* A row a stopped server left half written. The read writes nothing
+           and is refused. The next turn of the conversation cuts the row, and
+           the read after it has that turn. *)
+        let current = text_of now "current_conversation_id" in
+        let current_turns = List.fold_left Filename.concat alice_records [ current; "turns.jsonl" ] in
+        let whole = In_channel.with_open_bin current_turns In_channel.input_all in
+        let half = {|{"kind":"asked","turn_id":"half|} in
+        Out_channel.with_open_gen
+          [ Open_wronly; Open_append; Open_binary ]
+          0o600
+          current_turns
+          (fun out -> output_string out half);
+        check_reply
+          "the read of a record with a half written row"
+          (503, {|{"error":"The record of this conversation could not be read or written."}|})
+          (read alice [ "keeper_id", "keeper-alice" ]);
+        Alcotest.(check string)
+          "the read leaves the row as it was"
+          (whole ^ half)
+          (In_channel.with_open_bin current_turns In_channel.input_all);
+        Alcotest.(check string)
+          "the next turn of the conversation goes on in it"
+          current
+          (answered
+             "the turn after a half written row"
+             ~keeper:"keeper-alice"
+             ~runtime:alice_runtime
+             ~text:"echo: after"
+             ~continued:true
+             (reply alice (body ~keeper:"keeper-alice" ~message:"after")));
+        Alcotest.(check (list (pair string string)))
+          "and the read after it has that turn, and not the half row"
+          [ "anew", "answered"; "after", "answered" ]
+          (shown (read_fields "after a half written row" (read alice [ "keeper_id", "keeper-alice" ])));
+        (* A conversation gets no turn after a new one starts, so the start
+           cuts such a row in it, and the conversation reads whole by its
+           id. *)
+        let settled = In_channel.with_open_bin current_turns In_channel.input_all in
+        Out_channel.with_open_gen
+          [ Open_wronly; Open_append; Open_binary ]
+          0o600
+          current_turns
+          (fun out -> output_string out half);
+        Alcotest.(check int)
+          "a new conversation after a half written row"
+          200
+          (fst (renew alice (only_keeper "keeper-alice")));
+        Alcotest.(check string)
+          "cuts the row of the conversation it follows"
+          settled
+          (In_channel.with_open_bin current_turns In_channel.input_all);
+        Alcotest.(check (list (pair string string)))
+          "and that conversation reads whole"
+          [ "anew", "answered"; "after", "answered" ]
+          (shown
+             (read_fields
+                "the conversation a new one follows"
+                (read alice [ "keeper_id", "keeper-alice"; "conversation_id", current ])));
+        (* No new conversation starts while a call of the account of the
+           current one runs: a turn of it could write after the start. *)
+        let followed =
+          text_of
+            (read_fields "a new conversation" (read alice [ "keeper_id", "keeper-alice" ]))
+            "current_conversation_id"
+        in
+        (match
+           Login.one_call_of
+             (get (Provider_account_id.of_string alice.account_id))
+             ~busy:"the call of the test did not start"
+             (fun () -> Ok (renew alice (only_keeper "keeper-alice")))
+         with
+         | Ok answer ->
+           check_reply
+             "a new conversation while a call of the account runs"
+             (409, {|{"error":"A call of the account of this Keeper's current conversation is running."}|})
+             answer
+         | Error busy -> Alcotest.fail busy);
+        Alcotest.(check string)
+          "starts none"
+          followed
+          (text_of
+             (read_fields "after a refused start" (read alice [ "keeper_id", "keeper-alice" ]))
+             "current_conversation_id");
         Sys.remove (claude ^ ".turn.json");
         check_reply
           "a new conversation of another person's Keeper"
@@ -856,6 +1086,10 @@ let test_turn () =
           "the record keeps the row and gets no other"
           (before ^ "{\"kind\":\"answered\"}\n")
           (In_channel.with_open_bin second_turns In_channel.input_all);
+        check_reply
+          "the read of a record with such a row"
+          (500, {|{"error":"The record of this conversation has a row the server does not understand."}|})
+          (read alice [ "keeper_id", "keeper-alice-second" ]);
         Alcotest.(check bool) "no client started for either" false (Sys.file_exists (claude ^ ".turn.json"));
         (* Bob's Keeper answers on his home, not hers. *)
         let (_ : string) =

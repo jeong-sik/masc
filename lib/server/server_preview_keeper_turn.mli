@@ -88,31 +88,33 @@ val run
   -> body:string
   -> Login_routes.answer
 
-(** [POST {!Auth_preview_keeper.conversation_path}] for [person]. The body is
-    exactly [{"keeper_id": <name>}], and the answer is a 200 JSON
-    [{"keeper_id":...,"conversation_id":...}]: the Keeper has a new
-    conversation on the account of the Runtime it has now, and its next turn
-    starts a session of its own there. The conversations the Keeper had stay
-    as they are, and no turn goes on in them. A turn that runs while the
-    conversation is started ends in the conversation it began in.
+(** {1 For the routes of a conversation}
 
-    The person starts a conversation; the server starts none in place of one
-    whose turn failed. This is the way on for a Keeper whose conversation
-    began on another account.
+    {!Server_preview_keeper_conversation} answers a Keeper that is not the
+    person's, a Keeper with no Runtime, and a failure of the record in the
+    words of the turn. *)
 
-    The other answers are a JSON [{"error": ...}]:
-    - 400: the body is not that, or the name is no Keeper name.
-    - 404: the Keeper is not the person's.
-    - 409: the Keeper has no Runtime, so there is no account to start on.
-    - 500 or 503: the record of the conversations has a row that is not
-      understood, or could not be written.
+(** The Runtime the person gave their Keeper, [None] when they gave it none,
+    read in a state the zone can be trusted for. The error is the answer to
+    write: a 404 for a Keeper that is not the person's, or the 503 of a zone
+    that is not trusted. *)
+val owned
+  :  Server_setup_account_login.person
+  -> Authz_types.Keeper_id.t
+  -> (Authz_types.Runtime_id.t option, Login_routes.answer) result
 
-    It starts no client and asks the authorization log for nothing but the
-    Keeper and its Runtime: the caller judged the request as
-    [Manage_own_keeper]. *)
-val start_conversation
-  :  env:Eio_unix.Stdenv.base
-  -> person:Server_setup_account_login.person
-  -> base_path:string
-  -> body:string
+(** The Runtime of the person's Keeper and the account that Runtime spends.
+    The error is the answer to write: those of {!owned}, or a 409 for a
+    Keeper with no Runtime. *)
+val assigned
+  :  Server_setup_account_login.person
+  -> Authz_types.Keeper_id.t
+  -> (Authz_types.Runtime_id.t * Authz_types.Provider_account_id.t, Login_routes.answer) result
+
+(** The answer for a failure of the record of a conversation: a 500 for a
+    row that is not understood, a 503 for a record that could not be read or
+    written. The detail goes to the server log. *)
+val record_answer
+  :  keeper_id:Authz_types.Keeper_id.t
+  -> Server_keeper_conversation.error
   -> Login_routes.answer

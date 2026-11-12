@@ -647,6 +647,18 @@ let keeper_turn_caller trusted ~now_ms request =
       Result.map (fun person -> { person; pat }) (with_namespace trusted user_id))
 ;;
 
+let keeper_conversation_reader trusted ~now_ms request =
+  Result.bind
+    (keeper_turn_caller trusted ~now_ms request)
+    (fun { person; pat = (_ : Pat_binding.t) } ->
+      match Auth_gate.decide trusted ~now_ms Route_access.Read_auth request with
+      | Ok (Auth_gate.Authenticated (_ : Auth_gate.authenticated)) -> Ok person
+      | Ok (Auth_gate.Anonymous | Auth_gate.Judged_by_route) ->
+        (* [Read_auth] needs a credential, so [decide] answers neither. *)
+        Error (refused Auth_gate.Credential_required)
+      | Error reason -> Error (refused reason))
+;;
+
 let provider_accounts state { user_id; namespace = _ } =
   R.json
     R.Ok_200

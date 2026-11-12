@@ -28,8 +28,8 @@ val assign_path : string
 val turn_path : string
 
 (** [/api/v1/auth/keepers/conversation]: [POST] starts a new conversation of
-    the person's Keeper ([Server_preview_keeper_turn.start_conversation],
-    plan S1b-3). *)
+    the person's Keeper and [GET] reads what was asked and answered
+    ([Server_preview_keeper_conversation], plan S1b-3). *)
 val conversation_path : string
 
 (** A Keeper name of the Keeper grammar ({!Keeper_id.Keeper_name}), which is

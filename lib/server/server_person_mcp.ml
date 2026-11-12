@@ -46,9 +46,18 @@ type tool =
   | Keeper_assign
   | Keeper_turn
   | Keeper_conversation_new
+  | Keeper_conversation
 
 let tools =
-  [ Whoami; Runtimes; Keepers; Keeper_create; Keeper_assign; Keeper_turn; Keeper_conversation_new ]
+  [ Whoami
+  ; Runtimes
+  ; Keepers
+  ; Keeper_create
+  ; Keeper_assign
+  ; Keeper_turn
+  ; Keeper_conversation_new
+  ; Keeper_conversation
+  ]
 ;;
 
 let name_of = function
@@ -59,6 +68,7 @@ let name_of = function
   | Keeper_assign -> "masc_my_keeper_assign"
   | Keeper_turn -> "masc_my_keeper_turn"
   | Keeper_conversation_new -> "masc_my_keeper_conversation_new"
+  | Keeper_conversation -> "masc_my_keeper_conversation"
 ;;
 
 (* Decoded when the module starts, as every tool definition the binary
@@ -72,6 +82,7 @@ let definition_of =
   let keeper_assign = load Keeper_assign in
   let keeper_turn = load Keeper_turn in
   let keeper_conversation_new = load Keeper_conversation_new in
+  let keeper_conversation = load Keeper_conversation in
   function
   | Whoami -> whoami
   | Runtimes -> runtimes
@@ -80,6 +91,7 @@ let definition_of =
   | Keeper_assign -> keeper_assign
   | Keeper_turn -> keeper_turn
   | Keeper_conversation_new -> keeper_conversation_new
+  | Keeper_conversation -> keeper_conversation
 ;;
 
 let definitions = List.map (fun tool -> tool, definition_of tool) tools
@@ -135,6 +147,30 @@ let with_body names arguments f =
     R.json R.Bad_request_400 [ "error", `String (Printf.sprintf "The argument %s must be a string." name) ]
 ;;
 
+(* The query that the read of a conversation takes: the Keeper, and the
+   conversation when the arguments name one. The definition of the tool
+   allows no other argument. *)
+let conversation_query arguments =
+  let fields =
+    match arguments with
+    | `Assoc fields -> fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
+  in
+  let text name =
+    match List.assoc_opt name fields with
+    | Some (`String value) -> Ok (Some value)
+    | None -> Ok None
+    | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> Error name
+  in
+  match text "keeper_id", text "conversation_id" with
+  | Ok (Some keeper), Ok None -> Ok [ "keeper_id", keeper ]
+  | Ok (Some keeper), Ok (Some conversation) ->
+    Ok [ "keeper_id", keeper; "conversation_id", conversation ]
+  | Ok None, (Ok (_ : string option) | Error (_ : string)) -> Error "keeper_id"
+  | Error name, (Ok (_ : string option) | Error (_ : string)) -> Error name
+  | Ok (Some (_ : string)), Error name -> Error name
+;;
+
 (* The function of the person's route, with the judgment that route makes. *)
 let run installation caller tool ~arguments =
   match tool with
@@ -178,10 +214,25 @@ let run installation caller tool ~arguments =
          with_body
            [ "keeper_id" ]
            arguments
-           (Server_preview_keeper_turn.start_conversation
+           (Server_preview_keeper_conversation.start
               ~env:installation.env
               ~person:{ Server_setup_account_login.zone = installation.zone; user_id; namespace }
               ~base_path:installation.base_path))
+  | Keeper_conversation ->
+    judged
+      Auth_preview.keeper_conversation_reader
+      caller
+      (fun { Auth_preview.user_id; namespace } ->
+         match conversation_query arguments with
+         | Ok query ->
+           Server_preview_keeper_conversation.read
+             ~person:{ Server_setup_account_login.zone = installation.zone; user_id; namespace }
+             ~base_path:installation.base_path
+             ~query
+         | Error name ->
+           R.json
+             R.Bad_request_400
+             [ "error", `String (Printf.sprintf "The argument %s must be a string." name) ])
 ;;
 
 let succeeded = function

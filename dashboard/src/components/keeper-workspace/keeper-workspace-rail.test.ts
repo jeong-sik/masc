@@ -910,6 +910,7 @@ describe('KeeperWorkspaceRail', () => {
         {
           keeper_name: 'masc-improver',
           state: 'waiting',
+          state_sources: ['event_queue_pending'],
           waiting_count: 1,
           sources: { event_queue_pending: 1 },
           waiting_on: [

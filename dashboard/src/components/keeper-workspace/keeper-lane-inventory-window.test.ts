@@ -45,6 +45,7 @@ function inventory(entries: Array<[string, DashboardKeeperWaitingRow[]]>): Dashb
     keepers: entries.map(([keeper_name, waiting_on]) => ({
       keeper_name,
       state: 'waiting',
+      state_sources: [...new Set(waiting_on.map(row => row.source))],
       waiting_count: waiting_on.length,
       waiting_on,
     })),

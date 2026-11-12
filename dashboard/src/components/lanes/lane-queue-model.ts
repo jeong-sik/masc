@@ -27,7 +27,7 @@ import type { KeeperLifecycleEvent } from '../../api/keeper'
 import type { CompositeObservation, LaneKey, SwimlaneSegment } from '../fsm-hub-types'
 import { isObservedStall } from '../fsm-hub-lane-analysis'
 import { laneChangedAt, laneTransitionCount } from '../fsm-hub-derivations'
-import { enumLabel } from '../tools/keeper-waiting-inventory-panel'
+import { waitingStateWithSources } from '../tools/keeper-waiting-inventory-panel'
 import { queueDrainStateOfEvidence as drainStateOfEvidence, type QueueDrainState } from '../schedule/queue-drain-status'
 export { drainStateOfEvidence }
 
@@ -252,7 +252,6 @@ export const LANE_STAGE_LABELS: Record<LaneStage, { label: string; wire: string 
 export type LaneSourceTone = 'volt' | 'warn' | 'ok' | 'dim' | 'bad'
 
 interface LaneSourceDef {
-  readonly label: string
   readonly tone: LaneSourceTone
   readonly stage: LaneStage
 }
@@ -261,38 +260,42 @@ interface LaneSourceDef {
  *  closed union does not know yet (e.g. a future workspace_message) still
  *  lands in its design stage instead of disappearing. */
 const LANE_SOURCE_DEFS: Record<string, LaneSourceDef> = {
-  event_queue_pending: { label: '자율 이벤트', tone: 'volt', stage: 'queue' },
-  workspace_message: { label: '다른 keeper 메시지', tone: 'volt', stage: 'queue' },
-  chat_operation_queued: { label: '채팅 대기', tone: 'volt', stage: 'queue' },
-  chat_operation_running: { label: '채팅 처리 중', tone: 'warn', stage: 'keeper' },
-  hitl_pending: { label: '승인 대기', tone: 'warn', stage: 'operator' },
-  fusion_running: { label: 'Fusion 실행 중', tone: 'ok', stage: 'keeper' },
-  schedule_waiting: { label: '예약 실행', tone: 'warn', stage: 'schedule' },
-  owner_shutdown: { label: '종료 정리', tone: 'dim', stage: 'keeper' },
-  operator_pending_confirm: { label: '운영자 확인', tone: 'warn', stage: 'operator' },
-  runtime_quota_spent: { label: '한도 소진', tone: 'bad', stage: 'keeper' },
-  read_error: { label: '읽기 오류', tone: 'bad', stage: 'queue' },
-  observation_unavailable: { label: '관측 불가', tone: 'bad', stage: 'operator' },
+  event_queue_pending: { tone: 'volt', stage: 'queue' },
+  workspace_message: { tone: 'volt', stage: 'queue' },
+  chat_operation_queued: { tone: 'volt', stage: 'queue' },
+  chat_operation_running: { tone: 'warn', stage: 'keeper' },
+  hitl_pending: { tone: 'warn', stage: 'operator' },
+  fusion_running: { tone: 'ok', stage: 'keeper' },
+  schedule_waiting: { tone: 'warn', stage: 'schedule' },
+  owner_shutdown: { tone: 'dim', stage: 'keeper' },
+  operator_pending_confirm: { tone: 'warn', stage: 'operator' },
+  runtime_quota_spent: { tone: 'bad', stage: 'keeper' },
+  read_error: { tone: 'bad', stage: 'queue' },
+  observation_unavailable: { tone: 'bad', stage: 'operator' },
 }
 
 export function laneSourceLabel(source: string): string {
-  return LANE_SOURCE_DEFS[source]?.label ?? enumLabel(source)
+  return source
 }
 
 export function laneSourceTone(source: string): LaneSourceTone {
   return LANE_SOURCE_DEFS[source]?.tone ?? 'dim'
 }
 
-/** Design LANE_STATE — keeper-level lane state chip. */
-export const LANE_STATE_PRESENT: Record<string, { label: string; tone: 'ok' | 'info' | 'warn' | 'dim' }> = {
-  idle: { label: '비어 있음', tone: 'ok' },
-  busy: { label: '처리 중', tone: 'info' },
-  waiting: { label: '대기 중', tone: 'warn' },
-  deferred: { label: '외부 응답 대기', tone: 'warn' },
+/** Keeper-level lane state chip tone. The chip's words are the server's. */
+const LANE_STATE_TONE: Record<string, 'ok' | 'info' | 'warn' | 'dim'> = {
+  idle: 'ok',
+  busy: 'info',
+  waiting: 'warn',
+  deferred: 'warn',
 }
 
-export function laneStatePresent(state: string): { label: string; tone: 'ok' | 'info' | 'warn' | 'dim' } {
-  return LANE_STATE_PRESENT[state] ?? { label: enumLabel(state), tone: 'dim' }
+export function laneStatePresent(
+  state: string,
+  stateSources: readonly string[],
+): { label: string; tone: 'ok' | 'info' | 'warn' | 'dim' } {
+  const tone = LANE_STATE_TONE[state] ?? 'dim'
+  return { label: waitingStateWithSources(state, stateSources), tone }
 }
 
 

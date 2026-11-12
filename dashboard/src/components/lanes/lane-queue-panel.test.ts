@@ -87,6 +87,7 @@ function waitingInventory(name: string): DashboardKeeperWaitingInventory {
     keepers: [{
       keeper_name: name,
       state: 'waiting',
+      state_sources: ['event_queue_pending', 'hitl_pending'],
       waiting_count: 2,
       sources: { event_queue_pending: 1, hitl_pending: 1 },
       waiting_on: [
@@ -250,7 +251,7 @@ describe('LaneQueuePanel', () => {
     const rows = getAllByTestId('lane-wait-row')
     expect(rows).toHaveLength(2)
     // Oldest first: the 10-minute queue row leads the 2-minute HITL row.
-    expect(rows[0]?.querySelector('.wa-src')?.textContent).toBe('자율 이벤트')
+    expect(rows[0]?.querySelector('.wa-src')?.textContent).toBe('event_queue_pending')
     expect(rows[0]?.querySelector('.wa-age')?.textContent).toBe('10분 전')
 
     fireEvent.click(rows[0]!.querySelector('.wa-bar')!)
@@ -332,7 +333,7 @@ describe('KeeperWaitQueueRail', () => {
     await waitFor(() => expect(container.querySelector('.lq-state-row')).not.toBeNull())
     expect(getByTestId('keeper-wait-queue-rail').classList.contains('ctx-sec')).toBe(true)
     expect(container.querySelector('.lq-rail-body')).not.toBeNull()
-    expect(container.querySelector('.lq-chip')?.textContent).toBe('대기 중')
+    expect(container.querySelector('.lq-chip')?.textContent).toBe('WAITING · event_queue_pending +1')
     expect(container.querySelectorAll('.wa-row')).toHaveLength(2)
   })
 

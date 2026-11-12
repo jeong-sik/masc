@@ -27,7 +27,7 @@ import {
   type DashboardKeeperWaitingSource,
 } from '../../api'
 import { StatusChip } from '../common/status-chip'
-import { enumLabel, stateTone } from '../tools/keeper-waiting-inventory-panel'
+import { stateTone, waitingStateWithSources } from '../tools/keeper-waiting-inventory-panel'
 import { formatDateTimeKo, formatRelativeSec, formatTimeUntil } from '../../lib/format-time'
 import { CountBadge } from '../v2/primitives-v2'
 import { JsonViewerCard } from '../common/json-viewer'
@@ -44,27 +44,6 @@ import {
   type LaneEventQueueActions,
 } from './keeper-lane-event-actions'
 import { KeeperLaneInventoryWindow } from './keeper-lane-inventory-window'
-
-const LANE_STATE_LABELS: Record<string, string> = {
-  idle: '비어 있음',
-  busy: '처리 중',
-  waiting: '대기 중',
-  deferred: '외부 응답 대기',
-}
-
-const LANE_SOURCE_LABELS: Record<DashboardKeeperWaitingSource, string> = {
-  event_queue_pending: '자율 이벤트',
-  chat_operation_queued: '채팅 대기',
-  chat_operation_running: '채팅 처리 중',
-  hitl_pending: '승인 대기',
-  fusion_running: 'Fusion 실행 중',
-  schedule_waiting: '예약 실행',
-  owner_shutdown: '종료 정리',
-  operator_pending_confirm: '운영자 확인',
-  runtime_quota_spent: '한도 소진',
-  read_error: '읽기 오류',
-  observation_unavailable: '관측 불가',
-}
 
 const LANE_SOURCE_GRAPH_COLORS: Record<DashboardKeeperWaitingSource, string> = {
   event_queue_pending: 'var(--color-accent)',
@@ -113,15 +92,6 @@ const HOUR_MINUTES = 60
 const DAY_MINUTES = 24 * HOUR_MINUTES
 /** A bar never shrinks below this so a fresh row stays clickable. */
 const MIN_BAR_PERCENT = 6
-
-function laneStateLabel(value: string): string {
-  return LANE_STATE_LABELS[value] ?? enumLabel(value)
-}
-
-function laneSourceLabel(value: string): string {
-  const source = parseDashboardKeeperWaitingSource(value)
-  return source === null ? enumLabel(value) : LANE_SOURCE_LABELS[source]
-}
 
 function inventoryEntry(
   inventory: DashboardKeeperWaitingInventory | null | undefined,
@@ -202,7 +172,7 @@ function stageBreakdown(entry: DashboardKeeperWaitingKeeper): {
       const source = parseDashboardKeeperWaitingSource(key)
       const item: StageItem = {
         source: key,
-        label: laneSourceLabel(key),
+        label: key,
         count: String(count),
         color: source === null ? null : LANE_SOURCE_GRAPH_COLORS[source],
       }
@@ -328,7 +298,7 @@ function LaneWaitingRow({
         data-testid="keeper-lane-waiting-bar"
         title=${dev ? row.what : row.waiting_on}
       >
-        <span class="whitespace-nowrap text-2xs text-[var(--color-fg-secondary)]">${laneSourceLabel(row.source)}</span>
+        <span class="whitespace-nowrap text-2xs text-[var(--color-fg-secondary)]">${row.source}</span>
         <span class=${`min-w-0 truncate text-xs text-[var(--color-fg-primary)] ${dev ? 'font-mono' : ''}`} data-testid="keeper-lane-waiting-what">${reading}</span>
         <span class="ml-auto whitespace-nowrap font-mono text-3xs text-[var(--color-fg-muted)]">${ageText}</span>
       </summary>
@@ -457,7 +427,7 @@ export function KeeperLaneStrip({
         ? html`
             <div class="grid gap-1.5">
               <div class="flex flex-wrap items-center gap-1.5">
-                <${StatusChip} tone=${stateTone(entry.state)} uppercase=${false} title=${entry.state}>${laneStateLabel(entry.state)}<//>
+                <${StatusChip} tone=${stateTone(entry.state)} uppercase=${false} title=${entry.state}>${waitingStateWithSources(entry.state, entry.state_sources)}<//>
               </div>
               ${Object.keys(entry.sources ?? {}).length > 0
                 ? html`<${LanePipeline} entry=${entry} dev=${dev} />`

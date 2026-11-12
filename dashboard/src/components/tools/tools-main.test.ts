@@ -119,6 +119,7 @@ function waitingInventoryFixture(
       ({
         keeper_name: keeperName,
         state: 'waiting',
+        state_sources: ['event_queue_pending'],
         waiting_count: 1,
         waiting_on: [
           {
@@ -484,7 +485,7 @@ describe('Tools', () => {
     // source renders through LANE_SOURCE_LABELS instead of the raw enum.
     // The row still names which queue the keeper is waiting on; only the
     // wording changed.
-    expect(container.textContent).toContain('자율 이벤트')
+    expect(container.textContent).toContain('event_queue_pending')
     expect(container.textContent).not.toContain('event queue pending')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
     expect(container.querySelector('.v2-lab-card')).not.toBeNull()

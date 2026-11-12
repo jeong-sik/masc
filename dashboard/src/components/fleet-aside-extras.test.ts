@@ -165,7 +165,7 @@ describe('FleetQueueSection (fl-q-*)', () => {
 
     const items = container.querySelectorAll('.fl-q-item')
     expect(items).toHaveLength(2)
-    expect(items[0]?.querySelector('.fl-q-kind')?.textContent).toBe('승인 대기')
+    expect(items[0]?.querySelector('.fl-q-kind')?.textContent).toBe('hitl_pending')
     expect(items[0]?.querySelector('.fl-q-gl')?.textContent).toBe('⚿')
     expect(items[0]?.querySelector('.fl-q-from')?.textContent).toBe('hitl')
     // 두 번째 행은 since 가 없다 — 디자인의 시각 미기록 arm.

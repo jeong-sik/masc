@@ -40,6 +40,7 @@ function inventory(): DashboardKeeperWaitingInventory {
     keepers: [{
       keeper_name: 'exampleorg',
       state: 'waiting',
+      state_sources: ['event_queue_pending'],
       waiting_count: 1,
       waiting_on: [{
         keeper_name: 'exampleorg',

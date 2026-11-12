@@ -448,6 +448,10 @@ export interface DashboardKeeperWaitingRow {
 export interface DashboardKeeperWaitingKeeper {
   keeper_name: string
   state: DashboardKeeperWaitingState
+  /** The sources that put the Keeper in `state`, as the server listed them:
+   *  the deferring ones for `deferred`, all of them for `waiting`, none for
+   *  `idle` and `busy`. */
+  state_sources: string[]
   waiting_on: DashboardKeeperWaitingRow[]
   waiting_count: number
   sources?: Record<string, number>

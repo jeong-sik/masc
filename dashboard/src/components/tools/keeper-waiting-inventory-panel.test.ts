@@ -32,6 +32,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
       {
         keeper_name: 'sangsu',
         state: 'waiting',
+        state_sources: ['event_queue_pending', 'chat_operation_running', 'chat_operation_queued'],
         waiting_count: 3,
         sources: {
           event_queue_pending: 1,
@@ -77,6 +78,7 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
       {
         keeper_name: 'busy-one',
         state: 'busy',
+        state_sources: [],
         waiting_count: 1,
         sources: {
           chat_operation_running: 1,
@@ -96,12 +98,14 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
       {
         keeper_name: 'idle-one',
         state: 'idle',
+        state_sources: [],
         waiting_count: 0,
         waiting_on: [],
       },
       {
         keeper_name: 'stopping-one',
         state: 'deferred',
+        state_sources: ['owner_shutdown'],
         waiting_count: 1,
         sources: {
           owner_shutdown: 1,
@@ -366,6 +370,7 @@ describe('KeeperLaneInventoryPanel', () => {
       {
         keeper_name: 'partial-lane',
         state: 'waiting',
+        state_sources: ['event_queue_pending'],
         waiting_count: 1,
         waiting_on: [
           {

@@ -1,0 +1,46 @@
+account:1 [glm-coding] state=reported first_report_after_restart=1min
+  zai.quota_limit five_hour value=29percent observed=0.0h_before reset=ahead
+  zai.quota_limit provider:1 x unit 5 value=1percent observed=0.0h_before reset=ahead
+account:2 [openrouter] state=reported first_report_after_restart=1min
+  openrouter.key provider:API key credit limit value=0.0usd observed=0.0h_before reset=passed_or_none
+  openrouter.key provider:free model requests, daily value=0.0fraction observed=0.0h_before reset=passed_or_none
+account:3 [antigravity_subscription] state=reported first_report_after_restart=1min
+  antigravity.usage five_hour value=0.0fraction observed=8.4h_before reset=passed_or_none
+  antigravity.usage seven_day value=0.9995517466741148fraction observed=8.4h_before reset=ahead
+account:4 [ollama_cloud] state=reported first_report_after_restart=1min
+  ollama.balance provider:session value=0.004899999999999949fraction observed=0.0h_before reset=ahead
+  ollama.balance seven_day value=1.0fraction observed=0.0h_before reset=ahead
+account:5 [mistral] state=not_reported_since_start first_report_after_restart=none
+account:6 [kimi_coding] state=reported first_report_after_restart=1min
+  kimi_coding.usages five_hour value=0.0fraction observed=0.0h_before reset=ahead
+  kimi_coding.usages provider:usage (provider resetTime) value=0.11fraction observed=0.0h_before reset=ahead
+account:7 [claude] state=not_reported_since_start first_report_after_restart=none
+account:8 [claude_vincent] state=not_reported_since_start first_report_after_restart=none
+account:9 [codex_e641909e,codex_276d45a0,codex_5675bb80] state=reported first_report_after_restart=1min
+  codex.account_rate_limits_read seven_day value=100percent observed=8.4h_before reset=ahead
+  codex.account_rate_limits_updated duration_0m value=0percent observed=224.4h_before reset=passed_or_none
+  codex.account_rate_limits_updated seven_day value=100percent observed=18.8h_before reset=ahead
+account:10 [claude_code_f2458adc] state=reported first_report_after_restart=3min
+  claude_code.rate_limit_event five_hour value=0.01fraction observed=0.3h_before reset=ahead
+  claude_code.rate_limit_event seven_day value=0.79fraction observed=0.3h_before reset=ahead
+account:11 [muse_d242bc1a] state=reported first_report_after_restart=4min
+  muse.subscription_usage five_hour value=3percent observed=0.0h_before reset=ahead
+  muse.subscription_usage seven_day value=89percent observed=0.0h_before reset=ahead
+account:12 [claude_code_ac22c1f2] state=reported first_report_after_restart=4min
+  claude_code.rate_limit_event five_hour value=0.0fraction observed=312.8h_before reset=passed_or_none
+  claude_code.rate_limit_event seven_day value=1.0fraction observed=0.0h_before reset=ahead
+account:13 [claude_code_b6e72ff9] state=reported first_report_after_restart=4min
+  claude_code.rate_limit_event five_hour value=0.0fraction observed=306.4h_before reset=passed_or_none
+  claude_code.rate_limit_event provider:seven_day_overage_included value=1.0fraction observed=3.5h_before reset=ahead
+  claude_code.rate_limit_event seven_day value=0.61fraction observed=3.5h_before reset=ahead
+account:14 [opencode_go] state=not_reported_since_start first_report_after_restart=none
+account:15 [claude_code_8d7c2775] state=reported first_report_after_restart=2min
+  claude_code.rate_limit_event seven_day value=1.0fraction observed=0.0h_before reset=ahead
+account:16 [claude_code_8ad4ff55] state=reported first_report_after_restart=4min
+  claude_code.rate_limit_event five_hour value=0.0fraction observed=5.4h_before reset=passed_or_none
+  claude_code.rate_limit_event seven_day value=1.0fraction observed=5.4h_before reset=ahead
+account:17 [tinker] state=not_reported_since_start first_report_after_restart=none
+account:18 [claude_code_e664f266] state=reported first_report_after_restart=49min
+  claude_code.rate_limit_event five_hour value=0.02fraction observed=67.3h_before reset=passed_or_none
+  claude_code.rate_limit_event provider:seven_day_overage_included value=0.37fraction observed=37.0h_before reset=ahead
+  claude_code.rate_limit_event seven_day value=1.0fraction observed=8.4h_before reset=ahead

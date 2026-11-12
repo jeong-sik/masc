@@ -423,7 +423,7 @@ let native_refusal_to_string = function
        posture %S: the CLI runs as the user of the server process, so its own tools could \
        read the logins kept there. A Keeper whose client supports the posture none runs \
        with keeper.tools.native = \"none\" in its profile; the other turns run once \
-       .masc/accounts is removed"
+       .masc/accounts is removed, which deletes the CLI logins that those persons made there"
       (Runtime_native_tools.to_string posture)
   | Person_homes_unread { posture; unread } ->
     Printf.sprintf
@@ -470,7 +470,8 @@ let person_homes_notice = function
        turn that uses the native tools of its CLI is refused while it is there: the CLI runs \
        as the user of the server process, so its own tools could read the logins kept there. \
        A Keeper whose client supports the posture none runs with keeper.tools.native = \
-       \"none\" in its profile; the other turns run once .masc/accounts is removed"
+       \"none\" in its profile; the other turns run once .masc/accounts is removed, which \
+       deletes the CLI logins that those persons made there"
   | Error unread ->
     Some
       (Printf.sprintf

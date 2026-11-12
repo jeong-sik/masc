@@ -308,14 +308,19 @@ type operator_snapshot_fn = {
     Yojson.Safe.t;
 }
 
-type operator_digest_fn = {
-  digest : 'a.
+type digest_observation = {
+  json : Yojson.Safe.t;
+  next_deadline_unix : float option;
+}
+
+type operator_digest_observer = {
+  observe_digest : 'a.
     ?actor:string ->
     ?target_type:string ->
     ?target_id:string ->
     ?include_workers:bool ->
     'a Tool_operator.context ->
-    (Yojson.Safe.t, string) result;
+    (digest_observation, string) result;
 }
 
 let operator_snapshot_json_ref : operator_snapshot_fn ref =
@@ -325,15 +330,19 @@ let operator_snapshot_json_ref : operator_snapshot_fn ref =
 let register_operator_snapshot_json fn =
   operator_snapshot_json_ref := fn
 
-let operator_digest_json_ref : operator_digest_fn ref =
-  ref { digest = (fun ?actor:_ ?target_type:_ ?target_id:_ ?include_workers:_ _ctx ->
-    Ok `Null) }
+let operator_digest_observer_ref : operator_digest_observer ref =
+  ref { observe_digest = (fun ?actor:_ ?target_type:_ ?target_id:_ ?include_workers:_ _ctx ->
+    Error "Operator digest observer is not registered") }
 
-let register_operator_digest_json fn =
-  operator_digest_json_ref := fn
+let register_operator_digest_observer fn =
+  operator_digest_observer_ref := fn
 
 let operator_snapshot_json ?read_policy ?actor ?view ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx =
   (!operator_snapshot_json_ref).snapshot ?read_policy ?actor ?view ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx
 
+let operator_digest_observation ?actor ?target_type ?target_id ?include_workers ctx =
+  (!operator_digest_observer_ref).observe_digest ?actor ?target_type ?target_id ?include_workers ctx
+
 let operator_digest_json ?actor ?target_type ?target_id ?include_workers ctx =
-  (!operator_digest_json_ref).digest ?actor ?target_type ?target_id ?include_workers ctx
+  operator_digest_observation ?actor ?target_type ?target_id ?include_workers ctx
+  |> Result.map (fun observation -> observation.json)

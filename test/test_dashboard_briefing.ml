@@ -1,14 +1,15 @@
 module Types = Masc_domain
 
 module Lib = Masc
+module Workspace = Lib.Workspace
 
 open Alcotest
 
 let () =
   Dashboard_projection_cache.register_operator_snapshot_json
     { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
-  Dashboard_projection_cache.register_operator_digest_json
-    { Dashboard_projection_cache.digest = Operator_control.digest_json }
+  Dashboard_projection_cache.register_operator_digest_observer
+    { Dashboard_projection_cache.observe_digest = Operator_control.observe }
 
 let () = ignore Operator_tool.force_link
 
@@ -1140,6 +1141,70 @@ let test_worker_support_tracks_each_exact_assignee_across_renders () =
   check bool "an empty fleet has no worker briefs" true
     (render ~tasks ~agents:[] = [])
 
+let test_current_observation_reads_commits_inside_actor_ttls () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    with_test_env (fun ~clock ~sw ->
+      let cache_clock = Eio_mock.Clock.make () in
+      Eio_mock.Clock.set_time cache_clock (Eio.Time.now clock);
+      Time_compat.set_clock (cache_clock :> float Eio.Time.clock_ty Eio.Resource.t);
+      Fun.protect ~finally:(fun () -> Time_compat.set_clock clock) (fun () ->
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:None);
+      let read () = Dashboard_briefing.json ~actor:"source-current-reader"
+          ~config ~sw ~clock ~proc_mgr:None () in
+      let original = read () in
+      let state = Workspace.read_state config in
+      Workspace.write_state config {state with project = "committed-new-project"};
+      let now = Time_compat.now () in
+      let confidence = match Operator_judgment.Confidence.of_float 0.91 with
+        | Some confidence -> confidence | None -> fail "invalid fixture confidence" in
+      let judgment = Operator_judgment.record config
+          ~surface:Operator_judgment.Command_namespace ~target_type:Operator_judgment.Workspace
+          ~target_id:None ~summary:"Source commit inside the previous projection TTL"
+          ~confidence ~generated_at:(Masc_domain.iso8601_of_unix_seconds now)
+          ~generated_at_unix:now ~fresh_until:(Masc_domain.iso8601_of_unix_seconds (now +. 60.0))
+          ~fresh_until_unix:(now +. 60.0) ~keeper_name:"source-judge"
+          ~recommended_action:(`Assoc ["action_kind", `String "recorded-action"]) () in
+      let reused = read () in
+      check bool "the reused snapshot still contains its earlier source observation" true
+        (Yojson.Safe.Util.(reused |> member "summary" |> member "project")
+         = Yojson.Safe.Util.(original |> member "summary" |> member "project"));
+      check int "the actor digest TTL has not acquired the new judgment" 0
+        Yojson.Safe.Util.(reused |> member "recommended_actions" |> to_list |> List.length);
+      let current = Dashboard_briefing.observe_current ~actor:"source-current-reader"
+          ~config ~sw ~clock ~proc_mgr:None () in
+      check string "Current bypasses the nested operator and actor snapshot TTLs" "committed-new-project"
+        Yojson.Safe.Util.(current.json |> member "summary" |> member "project" |> to_string);
+      check int "Current observes the actual committed judgment inside the digest TTL" 1
+        Yojson.Safe.Util.(current.json |> member "recommended_actions" |> to_list |> List.length);
+      check (option (float 0.0)) "the exact authoritative expiry travels with that observation"
+        (Some judgment.fresh_until_unix) current.next_deadline_unix)))
+
+let test_agent_truth_keeps_its_integer_policy_deadline () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    with_test_env (fun ~clock:_ ~sw:_ ->
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:None);
+      let agent : Masc_domain.agent = {id = None; name = "source-dated-agent";
+        agent_type = "test"; status = Masc_domain.Active; capabilities = [];
+        current_task = None; session_bound_at = "1970-01-01T00:01:40Z";
+        last_seen = "1970-01-01T00:01:40Z"; meta = None} in
+      Workspace_agent_record.write config (Filename.concat (Workspace.agents_dir config) "source-dated-agent.json")
+        ~previous:None agent;
+      let observe now_ts = Dashboard_briefing_agents.build_agent_briefs_observation
+          ~now_ts config [] [] in
+      let before = observe 400.75 in
+      let truth observation = match observation.Dashboard_briefing_agents.json with
+        | [row] -> Yojson.Safe.Util.(row |> member "signal_truth" |> to_string)
+        | rows -> failf "expected one actual source agent, got %d" (List.length rows) in
+      check string "integer age 300 remains live" "live" (truth before);
+      check (option (float 0.0)) "integer policy changes at 301" (Some 401.0) before.next_deadline_unix;
+      let after = observe 401.0 in
+      check string "the exact returned deadline changes the row" "stale" (truth after);
+      check (option (float 0.0)) "display-only age growth leaves no more debt" None after.next_deadline_unix))
+
 let () =
   Alcotest.run "Dashboard Mission"
     [
@@ -1157,6 +1222,10 @@ let () =
             `Quick test_latest_message_to_prefers_latest_mention;
           Alcotest.test_case "projection groups root-cause lanes" `Quick
             test_dashboard_briefing_projection;
+          Alcotest.test_case "Current reads commits inside actor and operator TTLs" `Quick
+            test_current_observation_reads_commits_inside_actor_ttls;
+          Alcotest.test_case "agent truth retains its actual integer policy deadline" `Quick
+            test_agent_truth_keeps_its_integer_policy_deadline;
           Alcotest.test_case "http mission keeps full contract" `Quick
             test_dashboard_briefing_http_full_contract;
           Alcotest.test_case "http mission default bootstraps first success"

@@ -91,9 +91,10 @@ type briefing_projection = {
   keepers_unread : Keeper_snapshot_unread.t list;
   keepers_listing : Keeper_snapshot_unread.listing;
   internal_signals : Yojson.Safe.t list;
+  next_deadline_unix : float option;
 }
 
-let build_projection ?actor ~config ~sw ~clock
+let build_projection ~read_policy ?actor ~config ~sw ~clock
     ~proc_mgr () =
   let actor_name = Dashboard_projection_cache.normalize_actor_name actor in
   let ctx : _ Tool_operator.context =
@@ -111,20 +112,29 @@ let build_projection ?actor ~config ~sw ~clock
     }
   in
   let snapshot_compute () =
-    Dashboard_projection_cache.get_or_compute_snapshot_json
-      ~config ~actor:(Some actor_name) (fun actor_name ->
-        Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-          Dashboard_projection_cache.operator_snapshot_json
-            ~actor:actor_name
+    let read actor_name = Dashboard_projection_cache.operator_snapshot_json
+            ~read_policy ~actor:actor_name
             ~view:"summary"
             ~include_messages:false
             ~include_keepers:true
             ~include_summary_fields:false
-            ~lightweight_summary:true
-            ctx))
+            ~lightweight_summary:true ctx in
+    match read_policy with
+    | Dashboard_projection_read.Reuse ->
+        Dashboard_projection_cache.get_or_compute_snapshot_json
+          ~config ~actor:(Some actor_name) (fun actor_name ->
+            Pool_work.cpu ~name:__FUNCTION__ (fun () -> read actor_name))
+    | Current -> read actor_name
+        |> Dashboard_projection_cache.with_current_keeper_observations ~config
   in
   let digest_compute () =
-    Dashboard_projection_cache.get_or_compute_digest_json
+    match read_policy with
+    | Dashboard_projection_read.Current ->
+        (match Dashboard_projection_cache.operator_digest_observation ~actor:actor_name ctx with
+         | Ok observation -> observation
+         | Error message -> invalid_arg ("dashboard briefing digest: " ^ message))
+    | Reuse ->
+      let json = Dashboard_projection_cache.get_or_compute_digest_json
       ~config ~actor:(Some actor_name) (fun actor_name ->
         Pool_work.cpu ~name:__FUNCTION__ (fun () ->
           match Dashboard_projection_cache.operator_digest_json ~actor:actor_name ctx with
@@ -136,11 +146,13 @@ let build_projection ?actor ~config ~sw ~clock
                   ("attention_items", `List []);
                   ("recommended_actions", `List []);
                   ("error", `String message);
-                ]))
+                ])) in
+      {Dashboard_projection_cache.json; next_deadline_unix = None}
   in
-  let snapshot_json, digest_json =
+  let snapshot_json, digest_observation =
     Eio.Fiber.pair snapshot_compute digest_compute
   in
+  let digest_json = digest_observation.Dashboard_projection_cache.json in
   let namespace_json =
     match member_assoc "workspace" snapshot_json with
     | `Assoc _ as value -> value
@@ -162,8 +174,9 @@ let build_projection ?actor ~config ~sw ~clock
     | `List items -> items
     | _ -> []
   in
-  let agent_briefs =
-    Dashboard_briefing_assembly.build_agent_briefs config attention_queue keeper_items
+  let agent_observation =
+    Dashboard_briefing_assembly.build_agent_briefs_observation ~now_ts:(Time_compat.now ())
+      config attention_queue keeper_items
   in
   let keeper_briefs = Dashboard_briefing_assembly.build_keeper_briefs config keeper_items in
   (* Keepers the snapshot listed but could not build a row for. They are not
@@ -193,19 +206,17 @@ let build_projection ?actor ~config ~sw ~clock
     incidents;
     recommended_actions;
     attention_queue;
-    agent_briefs;
+    agent_briefs = agent_observation.json;
     keeper_briefs;
     keepers_unread;
     keepers_listing;
     internal_signals;
+    next_deadline_unix = (match digest_observation.next_deadline_unix, agent_observation.next_deadline_unix with
+      | None, deadline | deadline, None -> deadline
+      | Some left, Some right -> Some (Float.min left right));
 }
 
-let json ?actor ~config ~sw ~clock ~proc_mgr
-    () =
-  let projection =
-    build_projection ?actor ~config ~sw
-      ~clock ~proc_mgr ()
-  in
+let render_projection projection =
   let summary_json =
     `Assoc
       [
@@ -249,3 +260,15 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
       ("keepers_listing", Keeper_snapshot_unread.listing_to_json projection.keepers_listing);
       ("internal_signals", `List projection.internal_signals);
     ]
+
+type observation = {json : Yojson.Safe.t; next_deadline_unix : float option}
+
+let observe_current ?actor ~config ~sw ~clock ~proc_mgr () =
+  let projection = build_projection ~read_policy:Dashboard_projection_read.Current
+      ?actor ~config ~sw ~clock ~proc_mgr () in
+  {json = render_projection projection; next_deadline_unix = projection.next_deadline_unix}
+
+let json ?actor ~config ~sw ~clock ~proc_mgr () =
+  build_projection ~read_policy:Dashboard_projection_read.Reuse
+    ?actor ~config ~sw ~clock ~proc_mgr ()
+  |> render_projection

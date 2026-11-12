@@ -79,19 +79,26 @@ type operator_snapshot_fn = {
     Yojson.Safe.t;
 }
 
-type operator_digest_fn = {
-  digest : 'a.
+type digest_observation = {
+  json : Yojson.Safe.t;
+  next_deadline_unix : float option;
+}
+(** The digest's actual retained source observation and its next policy
+    transition. Display-only age growth is not a refresh deadline. *)
+
+type operator_digest_observer = {
+  observe_digest : 'a.
     ?actor:string ->
     ?target_type:string ->
     ?target_id:string ->
     ?include_workers:bool ->
     'a Tool_operator.context ->
-    (Yojson.Safe.t, string) result;
+    (digest_observation, string) result;
 }
 
 val register_operator_snapshot_json : operator_snapshot_fn -> unit
 
-val register_operator_digest_json : operator_digest_fn -> unit
+val register_operator_digest_observer : operator_digest_observer -> unit
 
 val operator_snapshot_json :
   ?read_policy:Dashboard_projection_read.t ->
@@ -103,6 +110,14 @@ val operator_snapshot_json :
   ?lightweight_summary:bool ->
   'a Tool_operator.context ->
   Yojson.Safe.t
+
+val operator_digest_observation :
+  ?actor:string ->
+  ?target_type:string ->
+  ?target_id:string ->
+  ?include_workers:bool ->
+  'a Tool_operator.context ->
+  (digest_observation, string) result
 
 val operator_digest_json :
   ?actor:string ->

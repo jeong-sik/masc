@@ -38,6 +38,10 @@ val is_current : owner -> bool
 val has_observation : owner -> bool
 (** A complete or partial source body has been retained. First partial results
     can be served without turning each GET into a retry ahead of backoff. *)
+val has_terminal_answer : owner -> bool
+(** A current-scope actual read has completed or failed. A no-result error
+    answers default GET without bypassing the source worker's failure retry;
+    it does not become a successful observation. A new owner is still cold. *)
 val begin_attempt : owner -> origin:origin -> attempt
 val publish_observation : attempt -> Dashboard_briefing.observation -> bool
 val publish_failure_message : attempt -> string -> bool

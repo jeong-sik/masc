@@ -108,7 +108,7 @@ let attest_instance context = function
 let default_json ~sw ~clock context =
   let owner = context.owner in
   let cached () =
-    if Owner.has_observation owner
+    if Owner.has_terminal_answer owner
     then Some (Owner.publication owner).json else None in
   match cached () with
   | Some json -> json

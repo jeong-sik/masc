@@ -364,6 +364,98 @@ let test_actual_partial_retry_after_quiet_repair surface =
     check bool "after repair and actual expiry no healthy timer remains" false
       (Eio_mock.Clock.try_advance mock_clock))
 
+let test_actual_no_result_error_keeps_default_http_quiet surface =
+  with_runtime (fun ~env ~sw ~clock ~mock_clock ~state ~scope ->
+    let event_type, state_field, sequence_field, retry_interval = match surface with
+      | Mission -> "mission_snapshot", "mission_observation_state", "mission_publication_sequence", 120.0
+      | Digest -> "operator_digest", "digest_observation_state", "digest_publication_sequence",
+          Server_dashboard_http_core_operator.operator_refresh_interval_s in
+    let no_observation () = match surface with
+      | Mission -> not (Server_dashboard_mission_observation.has_observation
+          (Server_dashboard_mission_observation.owner_for_scope ~state scope))
+      | Digest -> not (Owner.has_observation (Owner.owner_for_scope ~state scope)) in
+    let has_terminal_answer () = match surface with
+      | Mission -> Server_dashboard_mission_observation.has_terminal_answer
+          (Server_dashboard_mission_observation.owner_for_scope ~state scope)
+      | Digest -> Owner.has_terminal_answer (Owner.owner_for_scope ~state scope) in
+    let publication () = match surface with
+      | Mission -> (Server_dashboard_mission_observation.publication
+          (Server_dashboard_mission_observation.owner_for_scope ~state scope)).json
+      | Digest -> (Owner.publication (Owner.owner_for_scope ~state scope)).json in
+    let read () = match surface with
+      | Mission -> Server_dashboard_http_core_mission.json ~sw ~clock
+          (Server_dashboard_http_core_mission.request ~state
+            (Httpun.Request.create `GET "/api/v1/dashboard/briefing"))
+      | Digest -> match Server_dashboard_http_core_operator_digest_http.operator_digest_http_json
+          ~state ~sw ~clock (Httpun.Request.create `GET "/api/v1/operator/digest") with
+          | Ok json -> json | Error _ -> fail "default Digest HTTP read failed" in
+    let start () = match surface with
+      | Mission -> Server_dashboard_http_core_mission.start ~state ~sw ~clock
+          ~mono_clock:(Eio.Stdenv.mono_clock env)
+      | Digest -> Server_dashboard_http_core_digest_refresh.start_operator_digest_refresh_loop
+          ~state ~sw ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) in
+    check bool "a new scope still needs its initial read" false (has_terminal_answer ());
+    let failed, mark_failed = Eio.Promise.create () in
+    let marked = ref false in
+    let failed_once () = if not !marked then (marked := true; Eio.Promise.resolve mark_failed ()) in
+    let unsubscribe = match surface with
+      | Mission -> Server_dashboard_mission_observation.subscribe_completed
+          (Server_dashboard_mission_observation.owner_for_scope ~state scope) (function
+            | Server_dashboard_mission_observation.Failed Source_read -> failed_once ()
+            | Failed Default_request | Installed _ | Invalidated -> ())
+      | Digest -> Owner.subscribe_completed (Owner.owner_for_scope ~state scope) (function
+          | Owner.Failed Source_read -> failed_once ()
+          | Failed Default_request | Installed _ | Invalidated -> ()) in
+    Eio.Switch.on_release sw unsubscribe;
+    let frames = Eio.Stream.create 16 in
+    let id = "actual-no-result-retry-" ^ event_type in
+    Sse.subscribe_external ~id
+      ~runtime_authority:(Sse.runtime_authority_exn ~base_path:scope.config.base_path)
+      ~observer_instance_id:(Server_observer_scope.instance_id scope)
+      ~callback:(fun event ->
+        if Yojson.Safe.Util.member "type" event.Sse.ext_payload = `String event_type then
+          Eio.Stream.add frames (Yojson.Safe.Util.member "payload" event.ext_payload)) ();
+    Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external id);
+    let path = Operator_pending_confirm.pending_confirms_path scope.config in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    (match Fs_compat.save_file_atomic path "{" with Ok () -> () | Error detail -> fail detail);
+    let started_at = Eio.Time.now clock in
+    start ();
+    (* Let the actual source reader encounter the broken store. The fixture
+       does not fabricate an Owner error or catch a failed assertion. *)
+    Eio.Promise.await failed;
+    check bool "the actual thrown read produced no observation" true (no_observation ());
+    check bool "the no-result failure remains a terminal answer" true (has_terminal_answer ());
+    let before = publication () in
+    let sequence json = Yojson.Safe.Util.(json |> member sequence_field |> to_int) in
+    List.iter (fun () ->
+      let json = read () in
+      check string "default HTTP exposes the retained failure" "error"
+        Yojson.Safe.Util.(json |> member state_field |> to_string);
+      check int "GET cannot reissue the failed source read" (sequence before) (sequence json)) [(); (); ()];
+    (* This repair publishes no original-source invalidation or HTTP demand. *)
+    (match Fs_compat.save_file_atomic path "[]" with Ok () -> () | Error detail -> fail detail);
+    let rec advance_when_registered () =
+      Eio.Fiber.yield ();
+      if not (Eio_mock.Clock.try_advance mock_clock) then advance_when_registered () in
+    advance_when_registered ();
+    let rec recovered_frame () =
+      let json = Eio.Stream.take frames in
+      if sequence json <= sequence before then recovered_frame ()
+      else match Yojson.Safe.Util.member state_field json with
+        | `String "ready" -> json
+        | `String ("initializing" | "error") -> recovered_frame ()
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+            fail "canonical frame lost its closed observation state" in
+    let recovered = recovered_frame () in
+    check (float 0.0) "the original failure-only interval owns the repair"
+      (started_at +. retry_interval) (Eio.Time.now clock);
+    check bool "repair carries the actual producer's complete outcome" true
+      Yojson.Safe.Util.(recovered |> member "projection_diagnostics" |> member "read_completeness" = `String "complete");
+    check bool "the completed retry now has an actual observation" false (no_observation ());
+    Eio.Fiber.yield ();
+    check bool "quiet recovery has no successful cadence" false (Eio_mock.Clock.try_advance mock_clock))
+
 let test_execution_partial_read_retries_after_quiet_repair () =
   with_runtime (fun ~env ~sw ~clock ~mock_clock ~state ~scope ->
     let module Execution = Server_dashboard_http_execution_surfaces in
@@ -527,6 +619,10 @@ let () = run "Operator Digest observation owner" ["publication", [
     (fun () -> test_actual_partial_retry_after_quiet_repair Mission);
   test_case "Digest actual partial read recovers after quiet raw repair" `Quick
     (fun () -> test_actual_partial_retry_after_quiet_repair Digest);
+  test_case "Mission no-result error cannot be retried by each default GET" `Quick
+    (fun () -> test_actual_no_result_error_keeps_default_http_quiet Mission);
+  test_case "Digest no-result error cannot be retried by each default GET" `Quick
+    (fun () -> test_actual_no_result_error_keeps_default_http_quiet Digest);
   test_case "Execution actual partial read recovers after quiet raw repair" `Quick
     test_execution_partial_read_retries_after_quiet_repair;
   test_case "Execution lifecycle patch preserves typed Namespace outcome" `Quick

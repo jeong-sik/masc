@@ -81,6 +81,8 @@ let owner_for_scope ~state (scope : Mcp_server.workspace_scope) =
 
 let cache owner = owner.cache
 let has_observation owner = Stdlib.Mutex.protect owner.mu (fun () -> Option.is_some !(owner.retained_completeness))
+let has_terminal_answer owner = Stdlib.Mutex.protect owner.mu (fun () ->
+  is_current owner && Option.is_some !(owner.terminal))
 let next_deadline_unix owner = Stdlib.Mutex.protect owner.mu (fun () -> !(owner.next_deadline))
 
 let subscribe_completed owner completed =

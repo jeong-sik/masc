@@ -3,8 +3,10 @@
 
     A due wake of that delivery reaches its Keeper as a tool-result receipt in
     the outbox, the way a background run's result does. [call_id] is the
-    schedule instance id, so a turn that ended on [keeper_receipt_wait] for
-    that id continues with it. *)
+    schedule id, so a turn that ended on [keeper_receipt_wait] for
+    that id continues with it. The schedule id survives an edit and the
+    settling of a run watch. The schedule instance id does not: both rewrite the
+    row under a new instance id, so it cannot key a receipt. *)
 
 type ending =
   | Delivered of { message : string }
@@ -14,12 +16,12 @@ type ending =
   | Unfinished of { cause : string }
       (** The schedule ended without writing its receipt. *)
 
-val receipt : schedule_instance_id:string -> ending -> Keeper_client_tool_outbox.receipt
+val receipt : schedule_id:string -> ending -> Keeper_client_tool_outbox.receipt
 
 val deliver :
   base_path:string ->
   keeper_name:string ->
-  schedule_instance_id:string ->
+  schedule_id:string ->
   ending ->
   (unit, string) result
 (** Retains the receipt and wakes the Keeper through the outbox. A receipt that

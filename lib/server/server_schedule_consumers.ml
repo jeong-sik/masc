@@ -1303,7 +1303,9 @@ let dispatch_lane_act config (signal : Schedule_runner.wake_signal)
 (* A Keeper wake whose delivery is [receipt] writes a tool-result receipt and
    queues no wake message. The outbox's own wake is the only one, so the Keeper
    hears of the schedule once, and a turn that ended on [keeper_receipt_wait]
-   for this schedule continues with it. [message] is what the schedule holds:
+   for this schedule continues with it. The receipt is keyed by the schedule id,
+   not the instance id: a run watch that settles rewrites the row under a new
+   instance id. [message] is what the schedule holds:
    for a watched run it already starts with the run's outcome. A receipt that
    is already in the outbox is not written again, so a retry after a failed
    commit leaves one. *)
@@ -1316,12 +1318,26 @@ let dispatch_keeper_receipt config (request : Schedule_domain.schedule_request)
     Schedule_payload_projection.body_required_string payload "message"
     |> terminal_dispatch_result
   in
-  let* (_ : owner_meta_read) = read_owner_meta config keeper_name in
+  let* owner_meta = read_owner_meta config keeper_name in
+  (* A route that cannot carry the receipt's result to a model would leave it
+     unread in the outbox while the occurrence reads as delivered. *)
+  let* () =
+    match owner_meta with
+    | Owner_meta_answered (Ok meta)
+      when not (Keeper_client_tool_outbox_wake.route_can_consume meta) ->
+      terminal_dispatch_result
+        (Error
+           (Printf.sprintf
+              "keeper %s has a route that cannot consume receipts, so a receipt \
+               delivery would stay unread"
+              keeper_name))
+    | Owner_meta_answered _ | Owner_meta_not_current _ | Owner_meta_unavailable _ -> Ok ()
+  in
   let* () =
     Keeper_schedule_receipt.deliver
       ~base_path
       ~keeper_name
-      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
       (Keeper_schedule_receipt.Delivered { message })
     |> Result.map_error (fun detail -> Schedule_runner.Retryable_dispatch_failure detail)
   in

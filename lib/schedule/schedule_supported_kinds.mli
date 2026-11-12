@@ -33,9 +33,8 @@ type keeper_wake_delivery =
   | Keeper_wake_to_queue
       (** A new message in the Keeper's event queue. *)
   | Keeper_wake_to_receipt
-      (** A tool-result receipt whose [call_id] is the schedule instance id. A
-          turn that ended on [keeper_receipt_wait] for that id continues with
-          it. No wake message is put in the event queue; the outbox delivers
+      (** A tool-result receipt whose [call_id] is the schedule id. A turn that
+          ended on [keeper_receipt_wait] for that id continues with it. No wake message is put in the event queue; the outbox delivers
           the receipt. *)
 
 val default_keeper_wake_delivery : keeper_wake_delivery

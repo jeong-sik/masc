@@ -13,7 +13,7 @@ related: ["librarian-absorb-gate", "0463", "keeper-recall-reaches-the-turn", "05
 # RFC-0517 — librarian 은 지식마다 맞는 fact 하나를 남긴다
 
 - Status: **Draft.** 사용자가 2026-11-09 에 방향을 정했다. "틀리는건 지우거나 흡수, 병합되어서 맞는 사실 1개만 남기고 그리고 문장을 정리해서 올바르게 기억을 남기는게 중요함". 같은 날 librarian 프롬프트와 기능도 같이 고치라고 했다.
-- 근거: [연구 문서](../research/2026-11-09-librarian-keeps-one-correct-fact.md)와 [측정 기록](../evidence/research/2026-11-09-librarian-memory-state/README.md). 이 RFC 의 숫자는 연구 문서에 출처가 있다. §2.1 의 교사와 학습 split 숫자는 [2026-11-12 측정 기록](../evidence/research/2026-11-12-librarian-teacher-label-note/README.md)에 있다.
+- 근거: [연구 문서](../research/2026-11-09-librarian-keeps-one-correct-fact.md)와 [측정 기록](../evidence/research/2026-11-09-librarian-memory-state/README.md). 이 RFC 의 숫자는 연구 문서에 출처가 있다. §2.1 의 교사와 학습 split 숫자는 [2026-11-12 측정 기록](../evidence/research/2026-11-12-librarian-teacher-label-note/README.md)에 있다. A 를 판정한 숫자는 [2026-11-12 판정 기록](../evidence/research/2026-11-12-librarian-candidate-a-verdict/README.md)에 있다.
 - 하네스 쪽 구현은 T 스택이 한다. #50290 이 계약 안에서 맞힐 수 있는 라벨을, #50325 가 남는 기억 채점을 넣는다.
 - §7 의 세 가지는 사용자가 고른다. 고르기 전에는 그 부분을 구현하지 않는다.
 - 2026-11-10 에 사용자가 F1 두 가지를 정했다. `pass` 는 커밋 함수의 필수 인자로 받는다. 흡수 게이트 판정은 두 길에서 슬롯 라벨 없이 센다(§2.2).
@@ -128,6 +128,11 @@ related: ["librarian-absorb-gate", "0463", "keeper-recall-reaches-the-turn", "05
   기록은 요청을 item ID 로만 가리킨다. 그래서 item ID 가 겹치는 요청 파일은 교사 샘플링부터 받지 않고, 한 요청에 기록이 둘이면 멈춘다.
   기록 파일의 줄 수가 교사 요약이 센 수와 다를 때도 멈춘다.
   학습 실행은 판정이 읽는 `summary.json` 을 먼저 쓴다. 그 뒤 optimizer 상태가 든 체크포인트를 7일 기한으로 저장하고 경로를 `state.json` 에 적는다. 한 번 도는 중에 실패하면 체크포인트는 남지 않는다.
+- 2026-11-12 에 A 를 한 번 학습하고 고정 게이트로 판정했다. A 는 G5(지연)만 통과했고 운영 슬롯에 올리지 않는다([판정 기록](../evidence/research/2026-11-12-librarian-candidate-a-verdict/README.md)).
+  A 는 E-real 49건과 E-synth 90건 모두 생각 부분 없이 답했다. 지연 p50 은 기본 모델의 0.61배가 됐다.
+  학습이 겨냥한 행동은 늘지 않았다. 심은 낡은 상태는 기본 모델과 A 모두 81개 중 18개를 지웠다. 라벨이 바란 합침은 37개 중 기본 모델이 9개, A 가 6개를 했다.
+  무효 답과 라벨 밖 지우기는 늘었다. E-real 유효율은 42/49 에서 38/49 가 됐다. E-synth 의 라벨 밖 지우기는 9개에서 19개가 됐고, 블라인드 판정자는 28개 모두 남겨야 할 fact 로 봤다.
+  기본 모델도 G1·G3·G6 선에 닿지 않는다. 남는 기억 108/125, 지우기 정밀도 34/43, 낡은 상태 재현율 18/81, 흡수 정밀도 8/16, 판정 합침 재현율 6/37 이다.
 
 ### 2.2 D2 — 기억이 바뀌는 모습을 보인다 (F1)
 

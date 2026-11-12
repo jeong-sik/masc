@@ -157,18 +157,27 @@ let decode_source json =
    could not say which side needed the restart. Routing now says its own
    state the way Keeper does, and the field that named neither side is gone.
    The detail screen still spells both sides on rows of their own. *)
-let routing_label routing ~requires_restart =
+let say ~ko korean english = if ko then korean else english
+
+let routing_label ~ko routing ~requires_restart =
   let state =
-    match routing with Routing_active -> "active" | Routing_applied -> "applied"
+    match routing with
+    | Routing_active -> say ~ko "사용 중" "active"
+    | Routing_applied -> say ~ko "적용됨" "applied"
   in
-  if requires_restart then state ^ ", pending restart" else state
-let keeper_label = function
-  | Not_configured -> "not configured" | Pending_restart -> "pending restart"
-  | Applied -> "applied" | Preempted_by_env -> "preempted by environment" | Mixed -> "mixed"
-  | Invalid_configuration -> "invalid configuration"
-let issue_kind_label = function
-  | Invalid_schema_version -> "invalid schema" | Unknown_key -> "unknown key"
-  | Type_mismatch -> "type mismatch" | Out_of_range -> "out of range"
+  if requires_restart then state ^ say ~ko " \xc2\xb7 재시작 대기" ", pending restart" else state
+let keeper_label ~ko = function
+  | Not_configured -> say ~ko "설정 없음" "not configured"
+  | Pending_restart -> say ~ko "재시작 대기" "pending restart"
+  | Applied -> say ~ko "적용됨" "applied"
+  | Preempted_by_env -> say ~ko "환경 변수가 앞섬" "preempted by environment"
+  | Mixed -> say ~ko "섞임" "mixed"
+  | Invalid_configuration -> say ~ko "잘못된 설정" "invalid configuration"
+let issue_kind_label ~ko = function
+  | Invalid_schema_version -> say ~ko "잘못된 스키마" "invalid schema"
+  | Unknown_key -> say ~ko "모르는 키" "unknown key"
+  | Type_mismatch -> say ~ko "타입 불일치" "type mismatch"
+  | Out_of_range -> say ~ko "범위 밖" "out of range"
 (* Twelve characters of the source revision. It is there to be compared -- this
    read against the last one -- and the full sixty-four spent two thirds of the
    row on characters nobody reads to the end. The footer cuts the build commit
@@ -186,28 +195,34 @@ let short_revision revision =
 
    The counts are spelled with the plural the number asks for. *)
 
-let validation_verdict = function
-  | Parse_error _ -> Bad, "invalid TOML"
+let validation_verdict ~ko = function
+  | Parse_error _ -> Bad, say ~ko "TOML 오류" "invalid TOML"
   | Checked report ->
       let count severity = List.length (List.filter (fun issue -> issue.severity = severity) report.issues) in
       let errors = count Error_issue and warnings = count Warning_issue in
-      let verdict = if report.valid then "valid" else "invalid" in
+      let verdict =
+        if report.valid then say ~ko "유효" "valid" else say ~ko "유효하지 않음" "invalid"
+      in
+      let counted ~korean ~english n =
+        if ko then Printf.sprintf "%s %d개" korean n
+        else Masc_tui_message_layout.count_noun n english
+      in
       let counts =
-        (if report.valid then [] else [ Masc_tui_message_layout.count_noun errors "error" ])
-        @ (if warnings = 0 then [] else [ Masc_tui_message_layout.count_noun warnings "warning" ])
+        (if report.valid then [] else [ counted ~korean:"오류" ~english:"error" errors ])
+        @ (if warnings = 0 then [] else [ counted ~korean:"경고" ~english:"warning" warnings ])
       in
       (if report.valid then (if warnings = 0 then Good else Warning) else Bad),
       String.concat " \xc2\xb7 " (verdict :: counts)
 
-let validation_line validation =
-  let tone, verdict = validation_verdict validation in
-  tone, "Validation: " ^ verdict
+let validation_line ~ko validation =
+  let tone, verdict = validation_verdict ~ko validation in
+  tone, say ~ko "검증: " "Validation: " ^ verdict
 (* The revision row, and the two verdict rows under it. Both screens draw the
    same verdict and differ only in how much of the revision they spend a row on,
    so the verdict lives in one place and the revision is the caller's: the
    compact summary has three rows for the whole read and prints the prefix, the
    detail screen has the room for the revision a reader pastes into [git show]. *)
-let revision_row revision = Neutral, "Source revision: " ^ revision
+let revision_row ~ko revision = Neutral, say ~ko "원본 revision: " "Source revision: " ^ revision
 
 (* The tone of the routing and of the keeper state. The compact summary prints
    both in one row and takes the worse of the two; the status page prints each
@@ -220,22 +235,22 @@ let keeper_tone metadata =
   else if metadata.keeper_requires_restart || metadata.preempted_keys <> [] then Warning
   else Neutral
 
-let verdict_rows metadata =
+let verdict_rows ~ko metadata =
   let tone =
     match routing_tone metadata, keeper_tone metadata with
     | Bad, _ | _, Bad -> Bad
     | Warning, _ | _, Warning -> Warning
     | (Neutral | Good), (Neutral | Good) -> Neutral
   in
-  [ validation_line metadata.validation;
+  [ validation_line ~ko metadata.validation;
     tone,
-      Printf.sprintf "Routing %s · Keeper %s"
-        (routing_label metadata.routing
+      Printf.sprintf (if ko then "라우팅 %s · Keeper %s" else "Routing %s · Keeper %s")
+        (routing_label ~ko metadata.routing
            ~requires_restart:metadata.routing_requires_restart)
-        (keeper_label metadata.keeper) ]
+        (keeper_label ~ko metadata.keeper) ]
 
-let summary_lines metadata =
-  revision_row (short_revision metadata.source_revision) :: verdict_rows metadata
+let summary_lines ~ko metadata =
+  revision_row ~ko (short_revision metadata.source_revision) :: verdict_rows ~ko metadata
 
 (* The summary's facts as the reading lines of the status page. A tone is
    decided in this module's own tones and only then mapped to a reading tone. *)
@@ -245,40 +260,45 @@ let page_tone = function
   | Warning -> Masc_tui_page_line.Attention
   | Bad -> Masc_tui_page_line.Failure
 
-let source_heading = "설정 원문 · Source"
+let source_heading ~ko = say ~ko "설정 원문" "Source"
 
-let detail_blocks ?(notices = []) ~lead metadata =
+let detail_blocks ~ko ?(notices = []) ~lead metadata =
   let module Line = Masc_tui_page_line in
   let fact tone label value = Line.fact ~tone:(page_tone tone) label value in
-  let validation_tone, validation_value = validation_verdict metadata.validation in
+  let validation_tone, validation_value = validation_verdict ~ko metadata.validation in
   let validation = match metadata.validation with
-    | Parse_error detail -> [ Line.note ~tone:Line.Failure ("TOML parse error: " ^ detail) ]
+    | Parse_error detail ->
+        [ Line.note ~tone:Line.Failure (say ~ko "TOML 해석 오류: " "TOML parse error: " ^ detail) ]
     | Checked report ->
-        fact (if report.forward_schema then Warning else Neutral) "Schema"
-          (Printf.sprintf "%d · current %d%s" report.schema_version report.current_schema_version
-             (if report.forward_schema then " · future schema" else ""))
+        fact (if report.forward_schema then Warning else Neutral) (say ~ko "스키마" "Schema")
+          (Printf.sprintf (if ko then "%d · 현재 %d%s" else "%d · current %d%s")
+             report.schema_version report.current_schema_version
+             (if report.forward_schema then say ~ko " · 더 새 스키마" " · future schema" else ""))
         :: List.map (fun issue ->
             Line.note
               ~tone:(match issue.severity with Error_issue -> Line.Failure | Warning_issue -> Line.Attention)
-              (Printf.sprintf "%s · %s: %s" issue.key (issue_kind_label issue.kind) issue.detail))
+              (Printf.sprintf "%s · %s: %s" issue.key (issue_kind_label ~ko issue.kind) issue.detail))
           report.issues
   in
   let application =
     notices
-    @ [ fact validation_tone "Validation" validation_value;
-        fact (routing_tone metadata) "Routing"
-          (routing_label metadata.routing ~requires_restart:metadata.routing_requires_restart);
-        fact (keeper_tone metadata) "Keeper" (keeper_label metadata.keeper) ]
+    @ [ fact validation_tone (say ~ko "검증" "Validation") validation_value;
+        fact (routing_tone metadata) (say ~ko "라우팅" "Routing")
+          (routing_label ~ko metadata.routing ~requires_restart:metadata.routing_requires_restart);
+        fact (keeper_tone metadata) "Keeper" (keeper_label ~ko metadata.keeper) ]
     @ validation
-    @ [ fact Neutral "Keeper settings" (Printf.sprintf "%d configured" metadata.configured_count) ]
+    @ [ fact Neutral (say ~ko "Keeper 설정" "Keeper settings")
+          (Printf.sprintf (if ko then "%d개 설정됨" else "%d configured") metadata.configured_count) ]
   in
-  let source = lead @ [ fact Neutral "Source revision" metadata.source_revision ] in
+  let source =
+    lead @ [ fact Neutral (say ~ko "원본 revision" "Source revision") metadata.source_revision ]
+  in
   let keys label tone values = Line.items ~tone:(page_tone tone) label values in
-  [ "적용 상태 · Application", application;
-    source_heading, source ]
+  [ say ~ko "적용 상태" "Application", application;
+    source_heading ~ko, source ]
   @ (if metadata.pending_keys = [] && metadata.preempted_keys = [] && metadata.applied_keys = [] then []
      else
-       [ "Keeper 설정 · Settings",
-         [ keys "Pending restart" Warning metadata.pending_keys;
-           keys "Preempted by environment" Warning metadata.preempted_keys;
-           keys "Applied" Neutral metadata.applied_keys ] ])
+       [ say ~ko "Keeper 설정" "Settings",
+         [ keys (say ~ko "재시작 대기" "Pending restart") Warning metadata.pending_keys;
+           keys (say ~ko "환경 변수가 앞섬" "Preempted by environment") Warning metadata.preempted_keys;
+           keys (say ~ko "적용됨" "Applied") Neutral metadata.applied_keys ] ])

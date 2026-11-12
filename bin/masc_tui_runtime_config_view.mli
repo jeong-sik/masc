@@ -34,10 +34,11 @@ val decode_source : Yojson.Safe.t -> (reading, string) result
 (** Document-only reads retain existing source/status/account observations but
     do not decode unused model rows. Their [model_bindings] result is unavailable;
     only [decode] prepares model evidence for Config snapshots. *)
-val summary_lines : metadata -> (tone * string) list
-val source_heading : string
+val summary_lines : ko:bool -> metadata -> (tone * string) list
+val source_heading : ko:bool -> string
 (** The title of the block that identifies the configuration source. *)
 val detail_blocks :
+  ko:bool ->
   ?notices:Masc_tui_page_line.t list ->
   lead:Masc_tui_page_line.t list ->
   metadata ->

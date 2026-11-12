@@ -4378,14 +4378,21 @@ let runtime_config_unmatched_current (state : state) =
 let config_metadata_summary (state : state) =
   match runtime_config_unmatched_current state with
   | Some current -> [Masc_tui_runtime_config_view.Neutral,
-      "Current snapshot revision: " ^ current.source_revision;
-      Masc_tui_runtime_config_view.Warning, "Validation and application state not read for this snapshot"]
+      ui_text state ~ko:"현재 스냅샷 revision: " ~en:"Current snapshot revision: "
+      ^ current.source_revision;
+      Masc_tui_runtime_config_view.Warning,
+      ui_text state ~ko:"이 스냅샷의 검증·적용 상태는 읽지 않음"
+        ~en:"Validation and application state not read for this snapshot"]
   | None -> match state.runtime_config_view with
   | None -> []
   | Some reading ->
-      let lines = Masc_tui_runtime_config_view.summary_lines reading.rcv_metadata in
+      let lines =
+        Masc_tui_runtime_config_view.summary_lines ~ko:(state.ui_language = Lang_ko)
+          reading.rcv_metadata
+      in
       (match lines, state.runtime_config_view_error with
-       | (tone, text) :: rest, Some _ -> (tone, "Previous read · " ^ text) :: rest
+       | (tone, text) :: rest, Some _ ->
+           (tone, ui_text state ~ko:"이전 관측 · " ~en:"Previous read · " ^ text) :: rest
        | _ -> lines)
 
 
@@ -6590,25 +6597,32 @@ let runtime_config_status_lines state ~cols =
   let blocks =
     match runtime_config_unmatched_current state with
     | Some current ->
-      [ ( View.source_heading,
+      [ ( View.source_heading ~ko:(state.ui_language = Lang_ko),
           error
           @ [ Line.note ~tone:Line.Attention
-                "Validation and application state not read for this snapshot";
-              Line.fact "Source" current.path;
-              Line.fact "Current snapshot revision" current.source_revision ] ) ]
+                (ui_text state ~ko:"이 스냅샷의 검증·적용 상태는 읽지 않음"
+                   ~en:"Validation and application state not read for this snapshot");
+              Line.fact (ui_text state ~ko:"원본" ~en:"Source") current.path;
+              Line.fact (ui_text state ~ko:"현재 스냅샷 revision" ~en:"Current snapshot revision")
+                current.source_revision ] ) ]
     | None ->
       (match state.runtime_config_view with
        | None ->
-         [ ( View.source_heading,
-             error @ [ Line.note ~tone:Line.Quiet "Configuration has not been read" ] ) ]
+         [ ( View.source_heading ~ko:(state.ui_language = Lang_ko),
+             error
+             @ [ Line.note ~tone:Line.Quiet
+                   (ui_text state ~ko:"설정을 아직 읽지 않음" ~en:"Configuration has not been read") ] ) ]
        | Some reading ->
          let source =
-           if Option.is_some state.runtime_config_view_error then "Previous source"
-           else "Source"
+           if Option.is_some state.runtime_config_view_error then
+             ui_text state ~ko:"이전 원본" ~en:"Previous source"
+           else ui_text state ~ko:"원본" ~en:"Source"
          in
-         View.detail_blocks
+         View.detail_blocks ~ko:(state.ui_language = Lang_ko)
            ~notices:(error @ (if Option.is_some state.runtime_config_view_error then
-             [Line.note ~tone:Line.Attention "Last observed settings · current status unknown"]
+             [Line.note ~tone:Line.Attention
+                (ui_text state ~ko:"마지막으로 본 설정 · 지금 상태는 모름"
+                   ~en:"Last observed settings · current status unknown")]
              else []))
            ~lead:[ Line.fact source reading.rcv_path ]
            reading.rcv_metadata)

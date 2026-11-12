@@ -21,13 +21,13 @@ let fixture () = `Assoc [
 let overlay f json = map_field "application" (map_field "keeper_overlay" f) json
 module Line = Masc_tui_page_line
 (* Every reading line of the status page, in order, without the block titles. *)
-let page_lines metadata = List.concat_map snd (detail_blocks ~lead:[] metadata)
+let page_lines metadata = List.concat_map snd (detail_blocks ~ko:false ~lead:[] metadata)
 let issue severity = `Assoc ["key", `String "keeper.foo"; "kind", `String "type_mismatch";
   "severity", `String severity; "detail", `String "expected a boolean"]
 let test_atomic_read () =
   let read = success (decode (fixture ())) in
   expect "same response source and revision" (read.source_text = "[keeper]\nfoo = true\n" && read.metadata.source_revision = "revision-a");
-  expect "three summary rows" (List.length (summary_lines read.metadata) = 3);
+  expect "three summary rows" (List.length (summary_lines ~ko:false read.metadata) = 3);
   expect "read has no write-only Skill receipt requirement" (read.metadata.routing = Routing_active)
 let test_pending_and_preempted () =
   let read = fixture () |> overlay (fun value -> value
@@ -44,7 +44,7 @@ let test_invalid_source_is_readable () =
   let read = fixture () |> map_field "validation" (fun value -> value
     |> replace "valid" (`Bool false) |> replace "issues" (`List [issue "error"])) |> decode |> success in
   expect "source survives typed validation failure" (read.source_text <> "");
-  expect "validation severity remains Bad" (match List.nth (summary_lines read.metadata) 1 with Bad, _ -> true | _ -> false);
+  expect "validation severity remains Bad" (match List.nth (summary_lines ~ko:false read.metadata) 1 with Bad, _ -> true | _ -> false);
   expect "issue detail retained"
     (List.mem (Line.note ~tone:Line.Failure "keeper.foo · type mismatch: expected a boolean") (page_lines read.metadata))
 let test_status_page_carries_the_verdict () =
@@ -54,15 +54,15 @@ let test_status_page_carries_the_verdict () =
     (List.mem (Line.fact "Routing" "active") (page_lines clean.metadata)
      && List.mem (Line.fact "Keeper" "applied") (page_lines clean.metadata));
   expect "applied keys are one list" (List.mem (Line.items "Applied" [ "keeper.foo" ]) (page_lines clean.metadata));
-  expect "three blocks while keys exist" (List.length (detail_blocks ~lead:[] clean.metadata) = 3);
+  expect "three blocks while keys exist" (List.length (detail_blocks ~ko:false ~lead:[] clean.metadata) = 3);
   let keyless = fixture () |> overlay (replace "applied_keys" (`List [])) |> decode |> success in
-  expect "no key block without keys" (List.length (detail_blocks ~lead:[] keyless.metadata) = 2);
+  expect "no key block without keys" (List.length (detail_blocks ~ko:false ~lead:[] keyless.metadata) = 2);
   let failed = fixture () |> map_field "validation" (fun value -> value
     |> replace "valid" (`Bool false) |> replace "issues" (`List [issue "error"])) |> decode |> success in
   expect "an invalid read is a failure"
     (List.mem (Line.fact ~tone:Line.Failure "Validation" "invalid · 1 error") (page_lines failed.metadata))
 let test_summary_and_page_agree_on_warnings () =
-  let summary_tone metadata = match List.nth (summary_lines metadata) 2 with tone, _ -> tone in
+  let summary_tone metadata = match List.nth (summary_lines ~ko:false metadata) 2 with tone, _ -> tone in
   let routing_pending = fixture ()
     |> map_field "application" (map_field "routing" (replace "requires_restart" (`Bool true)))
     |> decode |> success in

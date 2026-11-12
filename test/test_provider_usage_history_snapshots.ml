@@ -323,14 +323,33 @@ let stored_rows_carry_the_window_role () = fixture (fun config scope day ->
   check (list (pair string string)) "each window row states its own role"
     [ "TIME_LIMIT", "counts_other_use"; "TOKENS_LIMIT", "gates_model_calls" ] roles)
 
+let other_scope config name =
+  Runtime_quota_window.scope_of_credential
+    ~provider_id:(config.Workspace.base_path ^ "/" ^ name) None
+
 (* A restart: the reports are on disk and the table has never seen the
-   scope. [store_only] writes what the sink would have written without
-   touching the table. *)
+   scope. [store_only] has the installed sink store the report for a scope
+   of its own, then stores the same rows again under [scope]'s digest, so
+   the rows are the sink's and the table holds nothing for [scope]. *)
 let store_only config scope ~observed_at report =
-  Dated_jsonl.append (usage_journal config)
-    (`List
-       (Server_provider_usage_history_projection.record_json
-          ~scope_id:(History.scope_id scope) ~observed_at report))
+  let target = History.scope_id scope in
+  let writer = other_scope config (Printf.sprintf "writer-%s-%.0f" target observed_at) in
+  Usage.record ~scope:writer ~observed_at report;
+  let written = `String (History.scope_id writer) in
+  let rows =
+    List.filter_map
+      (function
+        | `Assoc fields when List.assoc_opt "scope_id" fields = Some written ->
+            Some
+              (`Assoc
+                 (List.map
+                    (fun (key, value) ->
+                      if String.equal key "scope_id" then key, `String target else key, value)
+                    fields))
+        | _ -> None)
+      (stored_rows config)
+  in
+  Dated_jsonl.append (usage_journal config) (`List rows)
 
 let restore config ~now scopes =
   match History.restore config ~now ~scopes with
@@ -350,10 +369,6 @@ let rest_end scope ~now =
   | Some (Runtime_quota_window.Reset_stated at) -> Some at
   | Some (Runtime_quota_window.Observed_until at) -> Some at
   | None -> None
-
-let other_scope config name =
-  Runtime_quota_window.scope_of_credential
-    ~provider_id:(config.Workspace.base_path ^ "/" ^ name) None
 
 (* [tokens]/[time] are percentages; a reset is seconds since the epoch. *)
 let zai ~tokens ~tokens_reset ~time ~time_reset =

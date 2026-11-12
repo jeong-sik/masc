@@ -9,9 +9,9 @@
     },
     {
       "run_id": 43070910612,
-      "head_sha": "FULLSHA",
+      "head_sha": "5eb171738dd1960cc1d3df27c995af7bb35d7406",
       "issue": 51439,
-      "note": "v0.72.0 cut-over: TUI terminal 3 failures at 5eb17173 — (b) test_tui_task_event fixed on main by #51439; (c) test_tui_observer_epoch and (d) test_waiting_event are deletion-policy subjects (operator ask66c5e0bc c1, campaign 64-test bundle)."
+      "note": "v0.72.0 cut-over: TUI terminal 3 failures at 5eb17173 - (b) test_tui_task_event fixed on main by #51439; (c) test_tui_observer_epoch and (d) test_waiting_event are deletion-policy subjects (operator ask66c5e0bc c1, campaign 64-test bundle)."
     }
   ]
 }

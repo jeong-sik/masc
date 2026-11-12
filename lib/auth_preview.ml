@@ -65,17 +65,32 @@ let start_form ~invite ~github ~label =
 ;;
 
 (* The script takes the token from the fragment and drops the fragment from
-   the address bar, so the token is in no request line and no history entry.
-   An address with no token cannot start a login that takes an invitation, so
-   the page shows how to open the invitation again in place of the form.
+   the address bar, so the token is in no request line, and the entry of the
+   tab's history that the page read it in keeps the address without it. The
+   list of visited pages of the browser keeps the address as it was opened,
+   and a page cannot take it out of there. An address with no token cannot
+   start a login that takes an invitation, so the page shows how to open the
+   invitation again in place of the form.
 
    A link that is opened in a tab that already shows this page changes only
    the fragment, and a browser does not load the document again for that. The
-   page loads itself again then, so it reads the link wherever it is opened. *)
+   page then turns its button off, hides its form, says that it loads the new
+   link, and loads itself again. So the form of the link before cannot be sent
+   while the server answers, by a pointer or by a key on a button that kept
+   the focus. When the answer is this page, it reads the new link; any other
+   answer, such as a 503, leaves the link in the address bar. A load that is
+   stopped before the answer leaves the page saying that it loads, with a word
+   on how to load it again. *)
 let invite_script =
   {|const token = location.hash.slice(1);
 history.replaceState(null, "", location.pathname);
-addEventListener("hashchange", () => location.reload());
+addEventListener("hashchange", () => {
+  document.getElementById("go").disabled = true;
+  document.getElementById("accept").hidden = true;
+  document.getElementById("note").textContent =
+    "새 초대 링크를 불러오고 있어요. 화면이 바뀌지 않으면 새로고침해 주세요.";
+  location.reload();
+});
 document.getElementById("invite").value = token;
 if (token === "") {
   document.title = "이 주소에는 초대 정보가 없어요";

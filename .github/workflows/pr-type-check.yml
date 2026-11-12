@@ -117,7 +117,9 @@ jobs:
     timeout-minutes: 90
     env:
       DUNE_JOBS: '4'
-      DUNE_CACHE: enabled-except-user-rules
+      # `enabled-except-user-rules` stored nothing, so every run compiled
+      # from scratch (issue #51365).
+      DUNE_CACHE: enabled
       # @check links nothing and runs nothing it builds, and no build rule
       # calls protoc (proto/dune), so a switch restored from the cache needs
       # no system package. Without "skip", opam fetched conf-protoc's two apt
@@ -130,9 +132,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # The path and the key prefix are the ones main-minimal-build.yml
+      # saves under; a different path would never match its cache entry.
       - name: Dune build cache location
+        id: dune-cache
         shell: bash
-        run: echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache-pr" >> "$GITHUB_ENV"
+        run: |
+          echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache" >> "$GITHUB_ENV"
+          echo "prefix=main-dune-v1-${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
 
       - uses: ./.github/actions/setup-ocaml-toolchain
       - uses: ./.github/actions/pin-ocaml-deps
@@ -141,14 +148,18 @@ jobs:
         with:
           install-flags: --with-test
 
-      - name: Reuse Dune build artifacts
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Restore only. A pull request cannot read another pull request's
+      # cache, and an entry is about 1.1 GB, so saving one per run would push
+      # the toolchain caches out of the 10 GB repository limit. The newest
+      # entry saved by the scheduled main build is used; modules that changed
+      # since then are compiled again.
+      - name: Reuse Dune build artifacts from main
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ runner.temp }}/masc-dune-cache-pr
-          key: pr-dune-v1-${{ runner.os }}-${{ hashFiles('dune-project', '**/dune', '*.opam') }}-${{ github.sha }}
+          path: ${{ runner.temp }}/masc-dune-cache
+          key: ${{ steps.dune-cache.outputs.prefix }}-${{ github.event.pull_request.base.sha || github.sha }}
           restore-keys: |
-            pr-dune-v1-${{ runner.os }}-${{ hashFiles('dune-project', '**/dune', '*.opam') }}-
-            pr-dune-v1-${{ runner.os }}-
+            ${{ steps.dune-cache.outputs.prefix }}-
 
       - name: Type-check the tree (dune build @check)
         run: opam exec -- dune build --root . @check

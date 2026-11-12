@@ -887,11 +887,14 @@ let render_keeper_deletions (state : state) =
    the hint rows are on. The end of the filter being typed stays in view, the
    way the palette keeps its query. *)
 let help_title (state : state) ~cols =
-  let name = screen_title " MASC Cheat Sheet" in
+  (* The product name is not drawn (RFC tui-one-screen-grammar §2): the sheet
+     is named for what it is, in the screen's language. *)
+  let name = screen_title (" " ^ ui_text state ~ko:"도움말" ~en:"Help") in
   match state.help_filter with
   | Masc_tui_help.Off ->
-      name ^ "  " ^ Ansi.dim ^ "hints "
-      ^ (if state.hints_visible then "on" else "off")
+      name ^ "  " ^ Ansi.dim
+      ^ (if state.hints_visible then ui_text state ~ko:"힌트 켬" ~en:"hints on"
+         else ui_text state ~ko:"힌트 끔" ~en:"hints off")
       ^ Ansi.reset
   | (Masc_tui_help.Typing query | Masc_tui_help.Kept query) as filter ->
       let caret =
@@ -915,12 +918,20 @@ let help_hints (state : state) =
   | Masc_tui_help.Off -> (
       match state.help_scope with
       | Masc_tui_help.Here ->
-          "?:every screen  /:find  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
+          ui_text state
+            ~ko:"?:모든 화면  /:찾기  j/k:스크롤  PgUp/PgDn:페이지  g/G:처음/끝  h:힌트  Esc:닫기"
+            ~en:"?:every screen  /:find  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
       | Masc_tui_help.Everything ->
-          "/:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close")
-  | Masc_tui_help.Typing _ -> "Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page"
+          ui_text state
+            ~ko:"/:필터  j/k:스크롤  PgUp/PgDn:페이지  g/G:처음/끝  h:힌트  Esc:닫기"
+            ~en:"/:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close")
+  | Masc_tui_help.Typing _ ->
+      ui_text state ~ko:"Enter:유지  Esc:지우기  Up/Down:스크롤  PgUp/PgDn:페이지"
+        ~en:"Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page"
   | Masc_tui_help.Kept _ ->
-      "/:edit  Esc:clear  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  ?:close"
+      ui_text state
+        ~ko:"/:고치기  Esc:지우기  j/k:스크롤  PgUp/PgDn:페이지  g/G:처음/끝  h:힌트  ?:닫기"
+        ~en:"/:edit  Esc:clear  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  ?:close"
 
 (* The cheat sheet, through the overlay contract. It drew its box and its rows
    by hand and closed the box under the last row, so a sheet shorter than the

@@ -89,6 +89,14 @@ let failure_to_string = function
 
 let failures = [ Not_signed_in; No_quota; Silent; Not_started; Configuration_refused; No_answer ]
 
+(* Whether the client of a failed turn was started with the message. A client
+   that did not start and a configuration refused before the start gave the
+   message to no session. *)
+let reached_client = function
+  | Not_started | Configuration_refused -> false
+  | Not_signed_in | No_quota | Silent | No_answer -> true
+;;
+
 let failure_of_string name =
   List.find_opt (fun failure -> String.equal (failure_to_string failure) name) failures
 ;;
@@ -127,8 +135,13 @@ let id of_string fields name =
   Result.to_option (of_string value)
 ;;
 
-type started =
+type listed =
   { conversation : conversation
+  ; started_at_ms : int
+  }
+
+type started =
+  { listed : listed
   ; keeper_id : Keeper_id.t
   }
 
@@ -137,44 +150,56 @@ let started_of json =
   let$ conversation_id = id Conversation_id.of_string fields conversation_field in
   let$ keeper_id = id Keeper_id.of_string fields keeper_field in
   let$ provider_account_id = id Provider_account_id.of_string fields account_field in
-  let$ (_ : int) = time fields in
-  Some { conversation = { conversation_id; provider_account_id }; keeper_id }
+  let$ started_at_ms = time fields in
+  Some { listed = { conversation = { conversation_id; provider_account_id }; started_at_ms }; keeper_id }
 ;;
 
-(* What the turn that resumes reads of a row: the session an answered turn
-   ran in. The other rows are read for being rows. *)
 type turn_row =
-  | Asked
-  | Answered of { session_id : string }
-  | Failed
+  | Asked_row of
+      { turn_id : Turn_id.t
+      ; message : string
+      ; at_ms : int
+      }
+  | Answered_row of
+      { turn_id : Turn_id.t
+      ; text : string
+      ; model : string
+      ; session_id : string
+      ; at_ms : int
+      }
+  | Failed_row of
+      { turn_id : Turn_id.t
+      ; failure : failure
+      ; at_ms : int
+      }
 
 let asked_of json =
   let$ fields = fields_of asked_kind [ turn_field; message_field; at_field ] json in
-  let$ (_ : Turn_id.t) = id Turn_id.of_string fields turn_field in
-  let$ (_ : string) = text_of fields message_field in
-  let$ (_ : int) = time fields in
-  Some Asked
+  let$ turn_id = id Turn_id.of_string fields turn_field in
+  let$ message = text_of fields message_field in
+  let$ at_ms = time fields in
+  Some (Asked_row { turn_id; message; at_ms })
 ;;
 
 let answered_of json =
   let$ fields =
     fields_of answered_kind [ turn_field; text_field; model_field; session_field; at_field ] json
   in
-  let$ (_ : Turn_id.t) = id Turn_id.of_string fields turn_field in
-  let$ (_ : string) = text_of fields text_field in
-  let$ (_ : string) = text_of fields model_field in
+  let$ turn_id = id Turn_id.of_string fields turn_field in
+  let$ text = text_of fields text_field in
+  let$ model = text_of fields model_field in
   let$ session_id = text_of fields session_field in
-  let$ (_ : int) = time fields in
-  Some (Answered { session_id })
+  let$ at_ms = time fields in
+  Some (Answered_row { turn_id; text; model; session_id; at_ms })
 ;;
 
 let failed_of json =
   let$ fields = fields_of failed_kind [ turn_field; failure_field; at_field ] json in
-  let$ (_ : Turn_id.t) = id Turn_id.of_string fields turn_field in
+  let$ turn_id = id Turn_id.of_string fields turn_field in
   let$ name = text_of fields failure_field in
-  let$ (_ : failure) = failure_of_string name in
-  let$ (_ : int) = time fields in
-  Some Failed
+  let$ failure = failure_of_string name in
+  let$ at_ms = time fields in
+  Some (Failed_row { turn_id; failure; at_ms })
 ;;
 
 let turn_row_of json =
@@ -184,6 +209,66 @@ let turn_row_of json =
     (match answered_of json with
      | Some _ as answered -> answered
      | None -> failed_of json)
+;;
+
+type outcome =
+  | Answered of
+      { text : string
+      ; model : string
+      ; session_id : string
+      ; at_ms : int
+      }
+  | Failed of
+      { failure : failure
+      ; at_ms : int
+      }
+  | Unrecorded
+
+type recorded =
+  { message : string
+  ; asked_at_ms : int
+  ; outcome : outcome
+  }
+
+(* The turns the rows make. One call of an account runs at a time and a
+   conversation stays on its account, so the rows of a turn are not mixed
+   with those of another: an [answered] or a [failed] row closes the turn of
+   the [asked] row before it, and one that does not is not a row of the
+   record. [row] counts from 1, as the rows of the file do. *)
+let turns_of rows =
+  let closed turns = function
+    | Some ((_ : Turn_id.t), turn) -> turn :: turns
+    | None -> turns
+  in
+  let closes asked turn_id =
+    match asked with
+    | Some (asked_id, turn) when Turn_id.equal asked_id turn_id -> Some turn
+    | Some _ | None -> None
+  in
+  let rec turns row read asked = function
+    | [] -> Ok (List.rev (closed read asked))
+    | Asked_row { turn_id; message; at_ms } :: rest ->
+      turns
+        (row + 1)
+        (closed read asked)
+        (Some (turn_id, { message; asked_at_ms = at_ms; outcome = Unrecorded }))
+        rest
+    | Answered_row { turn_id; text; model; session_id; at_ms } :: rest ->
+      (match closes asked turn_id with
+       | Some turn ->
+         turns
+           (row + 1)
+           ({ turn with outcome = Answered { text; model; session_id; at_ms } } :: read)
+           None
+           rest
+       | None -> Error (Row_not_understood { file = Turns; row }))
+    | Failed_row { turn_id; failure; at_ms } :: rest ->
+      (match closes asked turn_id with
+       | Some turn ->
+         turns (row + 1) ({ turn with outcome = Failed { failure; at_ms } } :: read) None rest
+       | None -> Error (Row_not_understood { file = Turns; row }))
+  in
+  turns 1 [] None rows
 ;;
 
 (* The rows of the bytes of a file, each through [decode]. Every row ends in
@@ -285,21 +370,50 @@ let start root keeper_id provider_account_id ~draw ~now_ms =
     append_started ~index:(Filename.concat root index_name) keeper_id provider_account_id ~draw ~now_ms)
 ;;
 
+(* The conversations of the Keeper among the rows of the index, in the order
+   they were started. *)
+let of_keeper keeper_id started =
+  List.filter_map
+    (fun (started : started) ->
+       if Keeper_id.equal started.keeper_id keeper_id then Some started.listed else None)
+    started
+;;
+
+let last listed =
+  List.fold_left (fun (_ : listed option) listed -> Some listed) None listed
+;;
+
 let current_or_start root keeper_id provider_account_id ~draw ~now_ms =
   Eio.Mutex.use_ro index_lock (fun () ->
     let* () = private_directory root in
     let index = Filename.concat root index_name in
     let* started = read Index started_of index in
-    let last =
-      List.fold_left
-        (fun last (started : started) ->
-           if Keeper_id.equal started.keeper_id keeper_id then Some started.conversation else last)
-        None
-        started
-    in
-    match last with
-    | Some conversation -> Ok conversation
+    match last (of_keeper keeper_id started) with
+    | Some { conversation; started_at_ms = (_ : int) } -> Ok conversation
     | None -> append_started ~index keeper_id provider_account_id ~draw ~now_ms)
+;;
+
+(* A person who has no record has no index, and reading makes none: the
+   transaction of a read may make the directory of a file that is not
+   there. *)
+let conversations root keeper_id =
+  let index = Filename.concat root index_name in
+  if Sys.file_exists index
+  then Result.map (of_keeper keeper_id) (read Index started_of index)
+  else Ok []
+;;
+
+let turns_path root (conversation : conversation) =
+  List.fold_left
+    Filename.concat
+    root
+    [ Conversation_id.to_string conversation.conversation_id; turns_name ]
+;;
+
+(* A conversation with no turn yet has no file. *)
+let turns root conversation =
+  let path = turns_path root conversation in
+  if Sys.file_exists path then Result.bind (read Turns turn_row_of path) turns_of else Ok []
 ;;
 
 type turn =
@@ -316,13 +430,15 @@ let open_turn root (conversation : conversation) =
   let turns = Filename.concat directory turns_name in
   let* () = private_directory directory in
   let* rows = read Turns turn_row_of turns in
+  let* recorded = turns_of rows in
   let session_id =
     List.fold_left
-      (fun last -> function
-         | Answered { session_id } -> Some session_id
-         | Asked | Failed -> last)
+      (fun last (turn : recorded) ->
+         match turn.outcome with
+         | Answered { session_id; text = _; model = _; at_ms = _ } -> Some session_id
+         | Failed { failure = _; at_ms = _ } | Unrecorded -> last)
       None
-      rows
+      recorded
   in
   let cwd = Filename.concat directory cwd_name in
   let* () = private_directory cwd in

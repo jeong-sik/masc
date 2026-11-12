@@ -79,6 +79,13 @@ type failure =
   | Configuration_refused
   | No_answer
 
+(** The name of the failure, as the record spells it. *)
+val failure_to_string : failure -> string
+
+(** Whether the client of a failed turn was started with the message, so the
+    vendor session may hold it though the record has no answer. *)
+val reached_client : failure -> bool
+
 type file =
   | Index
   | Turns
@@ -118,6 +125,42 @@ val current_or_start
   -> draw:(unit -> string)
   -> now_ms:(unit -> int)
   -> (conversation, error) result
+
+type listed =
+  { conversation : conversation
+  ; started_at_ms : int
+  }
+
+(** The conversations of the Keeper, in the order they were started. The last
+    is the one its turns go on in. It reads the index alone, and a person
+    with no record has none. *)
+val conversations : root -> Authz_types.Keeper_id.t -> (listed list, error) result
+
+type outcome =
+  | Answered of
+      { text : string
+      ; model : string
+      ; session_id : string  (** The vendor session the turn ran in. *)
+      ; at_ms : int
+      }
+  | Failed of
+      { failure : failure
+      ; at_ms : int
+      }
+  | Unrecorded
+      (** The turn has its [asked] row alone: the server stopped in the
+          turn, or the row of its end was not written. *)
+
+type recorded =
+  { message : string
+  ; asked_at_ms : int
+  ; outcome : outcome
+  }
+
+(** The turns of the conversation in order. An [answered] or a [failed] row
+    that does not close the turn of the [asked] row before it is a row that
+    is not understood. *)
+val turns : root -> conversation -> (recorded list, error) result
 
 (** A conversation opened for one turn. *)
 type turn

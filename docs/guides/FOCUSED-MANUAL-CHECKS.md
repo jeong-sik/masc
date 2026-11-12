@@ -63,13 +63,31 @@ bash scripts/harness_dashboard_keeper_chat_tool_output_failure_contract_dom_smok
 bash scripts/harness_dashboard_keeper_chat_control_status_dom_smoke.sh
 ```
 
-These commands start their own local Vite process and stop it on exit. They
-require pnpm, the dashboard dependencies and installed Playwright Chromium;
-the failure and control-status scripts additionally use Python's Playwright
-package. Their default ports are 5186, 5187 and 5188; set `PORT` for an unused
-port if needed. Each prints its fixture URL and screenshot paths. The scripts
-use the configured dashboard proxy target (default localhost:8935), so record
-that target if investigating any network-backed component behavior.
+These commands start their own local Vite process and stop it when they end.
+The server stays in the script's process group, so a signal sent to the group
+ends both. A script that is killed alone with SIGKILL leaves its server
+running. They require pnpm, the dashboard dependencies, `lsof` and installed
+Playwright Chromium; the failure and control-status scripts additionally use
+Python's Playwright package. Their default ports are 5186, 5187 and 5188; set
+`PORT` for an unused port if needed. A run fails when another process listens
+on its port, because it would otherwise test that process's pages. Each prints
+its fixture URL and screenshot paths. The scripts use the configured dashboard
+proxy target (default localhost:8935), so record that target if investigating
+any network-backed component behavior.
+
+Seven dashboard harness scripts, these three among them, start and stop Vite
+through `scripts/harness/lib/dashboard_dev_server.sh`. When changing that file,
+run:
+
+```bash
+bash scripts/test-harness-dashboard-dev-server.sh
+```
+
+It puts a fake `node_modules/.bin/vite` behind the helper and checks that a
+stop leaves no process, that a script ended by SIGINT, SIGHUP, SIGTERM or a
+SIGKILL of its process group leaves no server, and that a start fails when the
+server never answers or is not the only listener on the port. It needs
+`python3`, `curl` and `lsof`. It does not start Vite or a browser.
 
 The Chromium checks assert declared DOM attributes and fixture interactions.
 Screenshots are inspection artifacts. A fixture screenshot or DOM check does

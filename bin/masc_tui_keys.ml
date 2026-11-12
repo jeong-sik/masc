@@ -37,14 +37,14 @@ type row_need =
 type binding = {
   key : string;
   label : string;
-  label_ko : string option;
+  label_ko : string;
   help : string option;
   group : group;
   detail : detail_state;
   rows : row_need;
 }
 
-let b ?help ?ko ?(detail = Either) ?(rows = Rowless) group key label =
+let b ?help ~ko ?(detail = Either) ?(rows = Rowless) group key label =
   { key; label; label_ko = ko; help; group; detail; rows }
 
 (* The one spelling of "key:label". The footer atoms, the Keeper tab row and
@@ -326,50 +326,56 @@ let context_inspector_label = "Ctrl-X"
 
 
 let keepers_jump =
-  b Meta "3" "keepers"
+  b ~ko:"키퍼" Meta "3" "keepers"
     ~help:"jump to Keepers when the active field or panel does not use 3"
 
 let mouse_toggle_key = "f2"
 let mouse_toggle_label = "F2"
 
 let global =
-  [ b Meta "Tab / Shift-Tab" "next / previous surface"
+  [ b ~ko:"다음 / 이전 화면" Meta "Tab / Shift-Tab" "next / previous surface"
       ~help:"next / previous surface; the chat composer keeps them to complete a /command"
   ; keepers_jump
-  ; b Meta "r" "refresh the current surface"
-  ; b Meta "i" "focus the composer; on Dashboard, choose a Keeper"
-  ; b Meta ":" "command palette"
-  ; b Meta ";"
+  ; b ~ko:"지금 화면 새로 조회" Meta "r" "refresh the current surface"
+  ; b ~ko:"입력 줄로 가기; 운영에서는 키퍼 고르기" Meta "i"
+      "focus the composer; on Dashboard, choose a Keeper"
+  ; b ~ko:"명령 팔레트" Meta ":" "command palette"
+  ; b ~ko:"일정: 다가오는 일과 나를 기다리는 키퍼; Enter 로 줄 열기" Meta ";"
       "agenda: what is coming, and who is waiting on you; Enter opens a row"
-  ; b Meta "@" "answering: who is mid-turn or just finished; Enter opens their chat"
-  ; b Meta "?" "this help"
+  ; b ~ko:"응답 중: 턴을 돌고 있거나 막 끝낸 키퍼; Enter 로 채팅 열기" Meta "@"
+      "answering: who is mid-turn or just finished; Enter opens their chat"
+  ; b ~ko:"이 도움말" Meta "?" "this help"
       ~help:"the keys of this screen; `?` again lists every screen, the global keys and the slash commands, and `/` finds a key or a command among them all"
-  ; b Meta "&"
+  ; b ~ko:"Collab: MSX/DOS 보기와 플레이 링크 관리 (`:` go Collab 로도 열림)" Meta "&"
       "Collab: watch MSX/DOS and manage play links (also `:` go Collab)"
-  ; b Meta roster_toggle_key "show or hide the Keeper roster"
+  ; b ~ko:"키퍼 명단 보이기 / 숨기기" Meta roster_toggle_key "show or hide the Keeper roster"
       ~help:"show or hide the Keeper roster; it starts hidden and the \
              choice persists across navigation and resizing"
-  ; b Meta "Ctrl-L"
+  ; b ~ko:"활동 창을 좁게, 넓게, 숨김 순서로: 키퍼마다 지금 하는 일, 변경 탭에서는 고른 \
+           키퍼의 파일 (머리 줄을 눌러 전환)"
+      Meta "Ctrl-L"
       "the Activity pane, narrow, wide or hidden in turn: what every keeper is doing \
        right now, and on its Changes tab the selected keeper's files (press the header to switch)"
       ~help:"cycle the Activity pane narrow, wide or hidden; the wheel over the pane \
              scrolls the full list; a press picks a keeper, a second press opens its chat; \
              /activity order turns the order of its calls, /activity scroll moves the pane"
-  ; b Navigate "Ctrl-W" "focus the Activity pane"
+  ; b ~ko:"활동 창으로 가기" Navigate "Ctrl-W" "focus the Activity pane"
       ~help:"focus the Activity pane: a cursor lands on its first row, j/k walk the rows a press \
              acts on and scroll past the last, Enter opens or closes the call under it, \
              Esc or Ctrl-W gives the keys back; the chat keeps Ctrl-W for its draft until \
              the draft is empty"
-  ; b Meta "Ctrl-^" "show or hide Browser Lane; retain tab and scroll"
-  ; b Meta mouse_toggle_label "mouse to the terminal and back; with masc, a drag copies one pane"
+  ; b ~ko:"브라우저 레인 보이기 / 숨기기; 탭과 스크롤은 그대로" Meta "Ctrl-^"
+      "show or hide Browser Lane; retain tab and scroll"
+  ; b ~ko:"마우스를 터미널에 넘기고 되받기; masc 가 쥐면 끌어서 한 창을 복사" Meta mouse_toggle_label
+      "mouse to the terminal and back; with masc, a drag copies one pane"
       ~help:"the mouse starts with masc: a drag selects inside the pane it began in \
              (Keeper roster, surface or Activity pane) and copies it on release via OSC 52, \
              a press that does not move clicks, and Esc drops a selection still held; \
              F2 hands the mouse to the terminal for its own selection across the \
              whole window, and F2 again takes it back"
-  ; b Navigate "Ctrl-]" "follow the reference under the cursor"
+  ; b ~ko:"커서 아래 참조 따라가기" Navigate "Ctrl-]" "follow the reference under the cursor"
       ~help:"follow the reference under the cursor; Esc on the surface it opens comes back here"
-  ; b Meta "q" "quit"
+  ; b ~ko:"종료" Meta "q" "quit"
   ]
 
 (* The plain-listing tail every converted footer shares. *)
@@ -1419,7 +1425,7 @@ let hints_in_order ~lang bindings =
   bindings
   |> List.map (fun (binding : binding) ->
       let label = match lang with
-        | Lang_ko -> Option.value binding.label_ko ~default:binding.label
+        | Lang_ko -> binding.label_ko
         | Lang_en -> binding.label
       in
       key_hint ~label binding)
@@ -1476,7 +1482,7 @@ let planning_goal_hints ~lang ~detail_open ~has_rows =
     |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r"))
     |> List.map (fun binding ->
       if detail_open && String.equal binding.key "j/k" then
-        {binding with label = "scroll"; label_ko = Some "스크롤"}
+        {binding with label = "scroll"; label_ko = "스크롤"}
       else binding) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
   hints_in_order ~lang (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
@@ -1539,7 +1545,7 @@ let footer_hints_approvals ~lang mode =
   let hint ?label (binding : binding) =
     match label, lang with
     | Some word, (Lang_ko | Lang_en) -> key_hint ~label:word binding
-    | None, Lang_ko -> key_hint ?label:binding.label_ko binding
+    | None, Lang_ko -> key_hint ~label:binding.label_ko binding
     | None, Lang_en -> key_hint binding
   in
   let row items = String.concat "  " items in
@@ -1782,25 +1788,21 @@ let patch_review_bindings =
   ; b ~ko:"닫기" Meta "Esc" "close" ~help:"Esc, q or Q closes the patch reader"
   ]
 
-let runtime_detail_bindings_for ~ko ~routes =
-  let text korean english = if ko then korean else english in
-  (if routes then [] else [ b Act "e" (text "모델 설정" "model settings") ])
-  @ [ b Navigate "j/k" (text "스크롤" "scroll")
-    ; b Navigate "PgUp/PgDn" (text "페이지" "page")
-    ; b Navigate "Home/End" (text "처음/끝" "edges")
-    ; b Act "Left / Esc" (text "목록" "list")
-    ; b Meta "r" (text "새로고침" "refresh")
-    ; b Meta "Tab" (text "다음" "next")
-    ; b Meta "?" (text "도움말" "help")
+let runtime_detail_bindings_for ~routes =
+  (if routes then [] else [ b ~ko:"모델 설정" Act "e" "model settings" ])
+  @ [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+    ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+    ; b ~ko:"처음/끝" Navigate "Home/End" "edges"
+    ; b ~ko:"목록" Act "Left / Esc" "list"
+    ; b ~ko:"새로 조회" Meta "r" "refresh"
+    ; b ~ko:"다음 화면" Meta "Tab" "next"
+    ; b ~ko:"도움말" Meta "?" "help"
     ]
 
 let footer_hints_patch_review ~lang = hints_of_bindings ~lang patch_review_bindings
 
-(* The Runtime rows carry their wording in [label] already, in the language
-   they were built for, so the projection has nothing left to choose. *)
 let footer_hints_runtime_detail ~lang ~routes =
-  let ko = match lang with Lang_ko -> true | Lang_en -> false in
-  hints_of_bindings ~lang (runtime_detail_bindings_for ~ko ~routes)
+  hints_of_bindings ~lang (runtime_detail_bindings_for ~routes)
 
 let voice_agent_bindings_for_saving saving =
   if saving then [ b ~ko:"도움말" Meta "?" "help"; b ~ko:"뒤로" Act "Esc" "back" ]
@@ -1879,7 +1881,7 @@ let footer_hints_prompt_assets ~lang =
     |> List.filter (fun binding -> not (List.mem binding.key registry_only))
     |> List.map (fun binding ->
            if String.equal binding.key "o" then
-             { binding with label = "registry"; label_ko = Some "프롬프트 목록" }
+             { binding with label = "registry"; label_ko = "프롬프트 목록" }
            else binding)
   in
   config_row ~lang ~own ~shared
@@ -2071,13 +2073,13 @@ let footer_hints_code ~lang ~pane =
          (match pane with
           | Code_tree _ | Code_root _ -> b
           | Code_file | Code_diff | Code_notes | Code_history ->
-              { b with label = "scroll"; label_ko = Some "스크롤" })
+              { b with label = "scroll"; label_ko = "스크롤" })
        else if String.equal b.key "d" then
          (* On the list the key shows the project's changes; on an open file
             it shows that file's diff. *)
          (match pane with
           | Code_tree _ | Code_root _ ->
-              { b with label = "changes"; label_ko = Some "변경" }
+              { b with label = "changes"; label_ko = "변경" }
           | Code_file | Code_diff | Code_notes | Code_history -> b)
        else b)
   |> hints_of_bindings ~lang
@@ -2090,39 +2092,37 @@ let footer_hints_code ~lang ~pane =
 (* The ordinary reading and its picker answer different Enter keys. The
    footer reads the same pick/filter state the dispatcher owns; printable
    letters only belong to the surface while no filter is being typed. *)
-let runtime_parent_bindings ~ko parent =
-  let text korean english = if ko then korean else english in
-  let name_bindings enter =
-    [ b Act "Enter" enter
-    ; b Navigate "PgUp" (text "초안·안내 전체" "read draft/context")
-    ; b Act "Backspace" (text "지우기" "erase")
-    ; b Act "Esc" (text "취소" "cancel") ] in
+let runtime_parent_bindings parent =
+  let name_bindings ~ko enter =
+    [ b ~ko Act "Enter" enter
+    ; b ~ko:"초안·안내 전체" Navigate "PgUp" "read draft/context"
+    ; b ~ko:"지우기" Act "Backspace" "erase"
+    ; b ~ko:"취소" Act "Esc" "cancel" ] in
   match parent with
   | Runtime_media_parent ->
-      [ b Act "v" (text "전체 읽기" "read all")
+      [ b ~ko:"전체 읽기" Act "v" "read all"
           ~help:"read full IDs, admission and results without closing the editor; ! marks a declared slot not admitted in the last observation"
-      ; b Act "a" (text "추가" "add")
-      ; b Navigate "j/k" (text "선택" "select")
-      ; b Navigate "PgUp/PgDn" (text "페이지" "page")
-      ; b Navigate "Home/End" (text "처음/끝" "edges")
-      ; b Act "x" (text "제거" "drop")
-      ; b Act "J/K" (text "순서 변경" "reorder")
-      ; b Act "1" (text "맨 앞으로" "make first")
-      ; b Act "Esc" (text "닫기" "close")
-      ; b Meta "r" (text "새로 조회" "refresh")
-      ; b Meta "?" (text "도움말" "help") ]
+      ; b ~ko:"추가" Act "a" "add"
+      ; b ~ko:"선택" Navigate "j/k" "select"
+      ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+      ; b ~ko:"처음/끝" Navigate "Home/End" "edges"
+      ; b ~ko:"제거" Act "x" "drop"
+      ; b ~ko:"순서 변경" Act "J/K" "reorder"
+      ; b ~ko:"맨 앞으로" Act "1" "make first"
+      ; b ~ko:"닫기" Act "Esc" "close"
+      ; b ~ko:"새로 조회" Meta "r" "refresh"
+      ; b ~ko:"도움말" Meta "?" "help" ]
   | Runtime_prompt_parent (Lane_name_prompt _) ->
-      name_bindings (text "첫 런타임 선택" "choose first runtime")
+      name_bindings ~ko:"첫 런타임 선택" "choose first runtime"
   | Runtime_prompt_parent (Lane_rename_prompt _) ->
-      name_bindings (text "이름·참조 변경" "rename and rewrite references")
+      name_bindings ~ko:"이름·참조 변경" "rename and rewrite references"
   | Runtime_prompt_parent (Lane_remove_prompt _) ->
-      [ b Act "D" (text "제거 확인" "confirm removal")
-      ; b Act "v" (text "확인 해제·전체 읽기" "disarm and read all")
-      ; b Act "Esc" (text "뒤로" "back") ]
+      [ b ~ko:"제거 확인" Act "D" "confirm removal"
+      ; b ~ko:"확인 해제·전체 읽기" Act "v" "disarm and read all"
+      ; b ~ko:"뒤로" Act "Esc" "back" ]
 
 let footer_hints_runtime_parent ~lang ~parent =
-  let ko = match lang with Lang_ko -> true | Lang_en -> false in
-  runtime_parent_bindings ~ko parent |> hints_of_bindings ~lang
+  runtime_parent_bindings parent |> hints_of_bindings ~lang
 
 let footer_hints_runtime ~lang ~(mode : runtime_mode) ~picker =
   match picker with
@@ -2170,8 +2170,8 @@ let footer_hints_resources ~lang ~detail_focus =
   |> List.map (fun binding ->
          if String.equal binding.key "j/k" then
            if detail_focus then
-             { binding with label = "scroll text"; label_ko = Some "본문 스크롤" }
-           else { binding with label = "move"; label_ko = Some "선택" }
+             { binding with label = "scroll text"; label_ko = "본문 스크롤" }
+           else { binding with label = "move"; label_ko = "선택" }
          else binding)
   |> hints_of_bindings ~lang
 
@@ -2678,9 +2678,14 @@ let reference_notes : surface -> string list = function
   | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes
   | Connectors | Runtime | Resources | System_logs -> []
 
-let entries bindings =
+let entries ~lang bindings =
   List.map
-    (fun { key; label; help; _ } -> (key, Option.value help ~default:label))
+    (fun { key; label; label_ko; help; _ } ->
+       ( key
+       , match help, lang with
+         | Some sentence, (Lang_ko | Lang_en) -> sentence
+         | None, Lang_ko -> label_ko
+         | None, Lang_en -> label ))
     bindings
 
 (* The reader's own surface first, then the keys that work everywhere, then
@@ -2724,8 +2729,10 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
          without a second edit. *)
       @ List.mapi
           (fun index scope ->
-            b Act (string_of_int (index + 1))
-              (Masc.Keeper_github_identity.login_scope_to_string scope)
+            (* A scope is GitHub's own token, spelled the same in both
+               languages. *)
+            let scope = Masc.Keeper_github_identity.login_scope_to_string scope in
+            b ~ko:scope Act (string_of_int (index + 1)) scope
               ~help:"tick or untick this scope for the next L login")
           Masc.Keeper_github_identity.all_login_scopes
   | Detail_sandbox ->
@@ -2820,7 +2827,7 @@ let keeper_detail_tab_taken_keys tab =
    rest of the row, and the tab switch leads because it is on every tab. *)
 let keeper_detail_tab_hint ~ko tab =
   let named binding =
-    if ko then key_hint ?label:binding.label_ko binding else key_hint binding
+    if ko then key_hint ~label:binding.label_ko binding else key_hint binding
   in
   String.concat "  "
     (("[ ]:" ^ if ko then "탭" else "tab")
@@ -2841,21 +2848,21 @@ let sheet_bindings surface =
    volume binding is also used by its catalog and child footers. *)
 let tools_detail_bindings =
   [ tools_volume_gc_binding
-  ; b Act "Enter" "read request / Skill evidence"
+  ; b ~ko:"요청 / Skill 근거 읽기" Act "Enter" "read request / Skill evidence"
       ~help:"in async runs, read the selected original request; \
              otherwise load retained evidence for the selected Skill"
-  ; b Navigate "t / T" "source Task"
+  ; b ~ko:"원본 작업" Navigate "t / T" "source Task"
       ~help:"from async request detail, read its original source Task and history"
-  ; b Navigate "H" "earlier history"
+  ; b ~ko:"이전 기록" Navigate "H" "earlier history"
       ~help:"from original Task detail, read earlier stored history; retains \
              the observed prefix on failure"
-  ; b Act "o / O" "exact lookup"
+  ; b ~ko:"정확히 찾기" Act "o / O" "exact lookup"
       ~help:"in async runs, edit the original submitter, request ID and \
              target Keeper for an exact lookup"
   ]
 
 let work_task_detail_bindings =
-  [ b Navigate "H" "earlier history"
+  [ b ~ko:"이전 기록" Navigate "H" "earlier history"
       ~help:"in Task detail, extend the observed history with its known \
              earlier page"
   ]
@@ -2863,7 +2870,7 @@ let work_task_detail_bindings =
 (* Each section with the surface it answers for; Global and the mark legends
    answer for none. The sheet reads the sections, the key reference reads the
    surface as well, for the paragraphs under a table. *)
-let located_sections ?current () =
+let located_sections ~lang ?current () =
   let sections =
     List.map
       (fun (title, surface) ->
@@ -2882,7 +2889,7 @@ let located_sections ?current () =
                          , Printf.sprintf "on the %s tab: %s"
                              (Masc_tui_types.keeper_detail_tab_label tab)
                              help ))
-                      (entries (keeper_detail_tab_bindings tab)))
+                      (entries ~lang (keeper_detail_tab_bindings tab)))
                  Masc_tui_types.keeper_detail_tabs
            (* The fact browser and the reading its Enter opens have the same
               problem the tabs above have: keys the surface list cannot hold,
@@ -2891,28 +2898,28 @@ let located_sections ?current () =
            | Memory ->
                List.map
                  (fun (key, help) -> (key, "in the facts browser: " ^ help))
-                 (entries bindings_memory_facts)
+                 (entries ~lang bindings_memory_facts)
                @ List.map (fun (key, help) -> (key, "in the changes browser: " ^ help))
-                   (entries bindings_memory_changes)
+                   (entries ~lang bindings_memory_changes)
                @ List.map
                    (fun (key, help) -> (key, "in the fact detail: " ^ help))
-                   (entries bindings_memory_fact_detail)
+                   (entries ~lang bindings_memory_fact_detail)
            | Lanes ->
                List.map
                  (fun (key, help) -> (key, "in a lane's run list: " ^ help))
-                 (entries (lane_run_list_bindings ~has_runs:true ~has_older:true))
+                 (entries ~lang (lane_run_list_bindings ~has_runs:true ~has_older:true))
                @ List.map
                    (fun (key, help) -> (key, "in a run's detail: " ^ help))
-                   (entries lane_run_detail_bindings)
-               @ entries [preflight_detail_binding]
-           | Planning -> entries work_task_detail_bindings
-           | Tools -> entries tools_detail_bindings
+                   (entries ~lang lane_run_detail_bindings)
+               @ entries ~lang [preflight_detail_binding]
+           | Planning -> entries ~lang work_task_detail_bindings
+           | Tools -> entries ~lang tools_detail_bindings
            | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
            | Overview | Acting | Metrics | Clients | Board | Approvals | Schedules
            | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime
            | Config | Resources | System_logs -> []
          in
-         (surface, (title, entries (sheet_bindings surface) @ tab_entries)))
+         (surface, (title, entries ~lang (sheet_bindings surface) @ tab_entries)))
       help_surfaces
   in
   let here, rest =
@@ -2922,7 +2929,7 @@ let located_sections ?current () =
         List.partition (fun (surface, _) -> surface = current) sections
   in
   List.map (fun (surface, (title, keys)) -> (Some surface, (title ^ here_marker, keys))) here
-  @ (None, ("Global", entries global))
+  @ (None, ("Global", entries ~lang global))
     :: (List.map (fun (surface, section) -> (Some surface, section)) rest
         (* The marks last, as reference, the way the slash commands read as
            reference. One reader of them has no words beside it: the Keepers
@@ -2979,7 +2986,7 @@ let located_sections ?current () =
           ; ("Param marks", Masc_tui_config_mark.param_legend)
           ])
 
-let help_sections ?current () = List.map snd (located_sections ?current ())
+let help_sections ~lang ?current () = List.map snd (located_sections ~lang ?current ())
 
 type reference_section = {
   section_title : string;
@@ -2999,28 +3006,30 @@ let reference_sections () =
          | None -> []
        in
        { section_title; section_rows; section_notes })
-    (located_sections ())
+    (located_sections ~lang:Lang_en ())
 
 let workspace_activity_bindings ~context =
-  [ b Navigate "j/k" (if context then "scroll" else "select")
-  ; b Navigate "PgUp/PgDn" "page"
-  ; b Act "Enter / Right" "file" ~help:"open the selected recorded file in Code"
-  ; b Act "r / R" "refresh"
-  ; b Navigate "Esc / Left" (if context then "list" else "repositories")
-  ; b Navigate "?" "help"
-  ] @ (if context then [b Navigate "Home/End / g/G" "edges"]
-       else [b Navigate "v / V" "context" ~help:"read the selected record's full path, Task and execution metadata"])
+  [ (if context then b ~ko:"스크롤" Navigate "j/k" "scroll"
+     else b ~ko:"선택" Navigate "j/k" "select")
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"파일" Act "Enter / Right" "file" ~help:"open the selected recorded file in Code"
+  ; b ~ko:"새로 조회" Act "r / R" "refresh"
+  ; (if context then b ~ko:"목록" Navigate "Esc / Left" "list"
+     else b ~ko:"저장소" Navigate "Esc / Left" "repositories")
+  ; b ~ko:"도움말" Navigate "?" "help"
+  ] @ (if context then [b ~ko:"처음/끝" Navigate "Home/End / g/G" "edges"]
+       else [b ~ko:"맥락" Navigate "v / V" "context" ~help:"read the selected record's full path, Task and execution metadata"])
 
 let exact_activity_bindings =
-  [ b Act "Space" "change activity draft" ~help:"preserve configuration; no write until s"
-  ; b Act "s" "save" ~help:"preview and save against the original file revision"
-  ; b Act "r" "read current" ~help:"keep edits; otherwise follow current file"
-  ; b Act "u" "reapply activity" ~help:"keep only the desired on/off change over the current file; s then saves"
-  ; b Act "x" "discard draft" ~help:"use the displayed current file; no write"
-  ; b Navigate "j/k" "scroll"
-  ; b Navigate "PgUp/PgDn" "page"
-  ; b Navigate "Home/End" "top/bottom"
-  ; b Navigate "Esc / q" "back" ~help:"retain the activity draft for this workspace and lane"
+  [ b ~ko:"활동 초안 바꾸기" Act "Space" "change activity draft" ~help:"preserve configuration; no write until s"
+  ; b ~ko:"저장" Act "s" "save" ~help:"preview and save against the original file revision"
+  ; b ~ko:"지금 파일 읽기" Act "r" "read current" ~help:"keep edits; otherwise follow current file"
+  ; b ~ko:"활동 다시 적용" Act "u" "reapply activity" ~help:"keep only the desired on/off change over the current file; s then saves"
+  ; b ~ko:"초안 버리기" Act "x" "discard draft" ~help:"use the displayed current file; no write"
+  ; b ~ko:"스크롤" Navigate "j/k" "scroll"
+  ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+  ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+  ; b ~ko:"뒤로" Navigate "Esc / q" "back" ~help:"retain the activity draft for this workspace and lane"
   ]
 
 let about_bindings =
@@ -3108,6 +3117,7 @@ let footer_hints_queue (state : state) panel =
   hints_in_order ~lang:state.ui_language (queue_bindings state panel)
 
 let help_sections_for_state ~cols (state : state) =
+  let lang = state.ui_language in
   let active =
     if state.about_open then Some ("About", about_bindings)
     else if state.context_inspector_open then Some ("Context", context_bindings ~cols state)
@@ -3127,10 +3137,10 @@ let help_sections_for_state ~cols (state : state) =
       Some ("Keeper voices", bindings)
     else if state.view = Runtime && Option.is_some state.runtime_detail_target then
       let routes = state.runtime_detail_target = Some Runtime_routes in
-      Some ("Runtime detail", runtime_detail_bindings_for ~ko:(state.ui_language = Lang_ko) ~routes)
+      Some ("Runtime detail", runtime_detail_bindings_for ~routes)
     else if state.view = Runtime && Option.is_some (runtime_parent state) then
       Option.map (fun parent ->
-        "Runtime editor", runtime_parent_bindings ~ko:(state.ui_language = Lang_ko) parent)
+        "Runtime editor", runtime_parent_bindings parent)
         (runtime_parent state)
     else if state.view = Acting && Option.is_some state.acting_detail then
       Some ("Event evidence", bindings_acting_evidence)
@@ -3162,9 +3172,9 @@ let help_sections_for_state ~cols (state : state) =
     else None
   in
   match active with
-  | None -> help_sections ~current:state.view ()
+  | None -> help_sections ~lang ~current:state.view ()
   | Some (title, bindings) ->
-      (title ^ here_marker, entries bindings) :: help_sections ()
+      (title ^ here_marker, entries ~lang bindings) :: help_sections ~lang ()
 
 let footer_hints_browser_lane ~lang =
   hints_of_bindings ~lang

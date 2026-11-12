@@ -754,6 +754,36 @@ let test_read_seed_reads_a_refusal_newer_than_every_response () =
     (Option.is_none answered.Front.refused_start)
 ;;
 
+(* A direct retry may reuse its turn number, so stored order decides which of
+   one turn's records is newer. The row reader and the store scan must agree. *)
+let test_both_readers_take_the_stored_order_within_a_turn () =
+  let response = record ~turn:10 (Some (30, 100)) in
+  let refusal =
+    record ~turn:10 ~runtime:"muse" ~finish:None ~response_observed:false ~refused:true
+      (Some (40, 100))
+  in
+  let answered_in_its_record = record ~turn:10 ~runtime:"muse" ~refused:true (Some (30, 100)) in
+  let refused_turn (read : Front.seed_read) =
+    Option.map (fun (refused : Front.refused_start) -> refused.turn) read.Front.refused_start
+  in
+  let rows records =
+    Front.seed_read_of_rows ~trace_id:"trace-1" (List.map Turn_record.to_json records)
+  in
+  let stored records =
+    with_turn_record_store @@ fun config store ->
+    List.iter (fun row -> Dated_jsonl.append store (Turn_record.to_json row)) records;
+    Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1"
+  in
+  List.iter
+    (fun (label, records, expected) ->
+       check (option int) (label ^ " (rows)") expected (refused_turn (rows records));
+       check (option int) (label ^ " (store)") expected (refused_turn (stored records)))
+    [ "a refusal stored after its turn's response stands", [ response; refusal ], Some 10
+    ; "a response stored after its turn's refusal answers it", [ refusal; response ], None
+    ; "a record's own response answers its refusal", [ answered_in_its_record ], None
+    ]
+;;
+
 let test_read_seed_uses_the_last_response_when_a_retry_reuses_the_turn () =
   with_turn_record_store @@ fun config store ->
   let records =
@@ -1170,6 +1200,8 @@ let () =
             test_restart_rows_restore_only_a_response_observed_front
         ; test_case "a refusal stands until a newer response" `Quick
             test_a_refusal_stands_until_a_newer_response
+        ; test_case "both readers take the stored order within a turn" `Quick
+            test_both_readers_take_the_stored_order_within_a_turn
         ; test_case "the store scan reads a refusal newer than every response" `Quick
             test_read_seed_reads_a_refusal_newer_than_every_response
         ; test_case "a response-observed failed turn seeds" `Quick

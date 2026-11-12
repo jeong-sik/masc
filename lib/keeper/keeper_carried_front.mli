@@ -190,7 +190,10 @@ type seed_read =
   { seed : seed option
   ; refused_start : refused_start option
         (** Set when the newest observation on this history is a refusal: no
-            response-observed record is newer. [seed] is still the newest
+            response-observed record is stored after it. Stored order, not
+            the turn, decides, because a direct retry may reuse its turn
+            number; a record that carries both answers its own refusal.
+            [seed] is still the newest
             accepted range behind it, for the runtimes the refusal does not
             speak for (RFC-librarian-lifecycle §4.10). *)
   ; unreadable : unreadable_records option
@@ -223,7 +226,8 @@ val seed_read_of_rows
   -> Yojson.Safe.t list
   -> seed_read
 (** {!of_records} over the rows that decode as turn records, with the rows
-    that do not counted and the first refusal kept, rows oldest first. *)
+    that do not counted and [refused_start] decided as {!read_seed} decides
+    it, rows oldest first. *)
 
 val read_seed
   :  config:Workspace.config

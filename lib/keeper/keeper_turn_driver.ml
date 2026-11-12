@@ -2219,7 +2219,15 @@ let run_named
 	  let official_client_carried_front_seed () : Keeper_carried_front.seed_read =
 	    match !refused_carried_front with
 	    | Some seed ->
-	      { Keeper_carried_front.no_seed_read with seed = Some seed }
+	      (* The front this turn moved replaces the stored seed. A runtime's
+	         own stored refusal still stands beside it: the moved front can
+	         sit exactly where that runtime was refused. *)
+	      let refused_start =
+	        match carried_front_seed with
+	        | Some read -> (read ()).Keeper_carried_front.refused_start
+	        | None -> None
+	      in
+	      { Keeper_carried_front.no_seed_read with seed = Some seed; refused_start }
 	    | None ->
 	      (match carried_front_seed with
 	       | Some read -> read ()

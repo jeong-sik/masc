@@ -479,8 +479,8 @@ let carried_start_range_on_source
      this runtime's own refusal of a range, so the next range opens strictly
      after where that one opened. Another runtime's refusal says nothing
      about this one's window. A Librarian position past the refused start
-     already names a range the refusal did not cover, and a lane cut past it
-     is already later. *)
+     already names a range the refusal did not cover, and a held seed or a
+     lane cut past it is already later. *)
   let librarian_end_atom =
     match absorbed with
     | Keeper_turn_driver_try_provider.Librarian_snapshot
@@ -509,7 +509,12 @@ let carried_start_range_on_source
            | Some end_atom -> end_atom > refused.first_atom
            | None -> false
          in
-         if librarian_is_past || own_first_atom > refused.first_atom
+         let seed_is_past =
+           match seed_held with
+           | Some (first_atom, _) -> first_atom > refused.first_atom
+           | None -> false
+         in
+         if librarian_is_past || seed_is_past || own_first_atom > refused.first_atom
          then None
          else Some refused.first_atom)
     | Some _ | None -> None
@@ -543,7 +548,7 @@ let carried_start_range_on_source
              runtime_id
              refused_first_atom
              history_atom_count;
-           Some (Int.min refused_first_atom newest, front)))
+           Some (refused_first_atom, front)))
   in
   let plan =
     match past_refused_start, absorbed with

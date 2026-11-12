@@ -7,8 +7,11 @@
 Client: tls_client.py in a subprocess per run (homebrew Python, OpenSSL 3 on
 arm64, suite fixed with OPENSSL_CONF). Server CPU: the process CPU time before
 and after each run, minus the idle rate measured first. The clock is `ps -o
-time` on macOS and /proc/<pid>/stat on Linux, both in 0.01 s steps. Linux `ps
--o time` counts whole seconds, so one step of it is 3.8 ms/MB at --n 300.
+time` on macOS, in 0.01 s steps, and /proc/<pid>/stat on Linux, in steps of
+1/SC_CLK_TCK s (0.01 s where SC_CLK_TCK is 100). The step read is kept in the
+result as "cpu_clock_step_s". Linux `ps -o time` counts whole seconds, so one
+step of it is 3.8 ms/MB at --n 300. Neither clock counts the CPU of child
+processes of the server.
 Each run: C parallel connections x N pipelined GETs of the dashboard bundle.
 Every run's MB, wall time and server CPU are kept under "runs" in the result,
 so a reader can see how many clock steps a median stands on.
@@ -47,6 +50,18 @@ PROC_STAT_STIME = 12
 def cpu_s_of_proc_stat(text: str, ticks_per_s: int) -> float:
     fields = text.rsplit(")", 1)[1].split()
     return (int(fields[PROC_STAT_UTIME]) + int(fields[PROC_STAT_STIME])) / ticks_per_s
+
+
+# The last digit `ps -o time` prints on macOS.
+MACOS_PS_TIME_STEP_S = 0.01
+
+
+def cpu_clock_step_s() -> float:
+    if sys.platform.startswith("linux"):
+        return 1 / os.sysconf("SC_CLK_TCK")
+    if sys.platform == "darwin":
+        return MACOS_PS_TIME_STEP_S
+    raise SystemExit(f"no process CPU clock known for platform {sys.platform}")
 
 
 def cpu_s_of_ps_time(text: str) -> float:
@@ -95,6 +110,7 @@ def main() -> int:
         time.sleep(10)
         idle = (cpu_s(pid) - c0) / (time.monotonic() - t0)
         result["idle_cpu_s_per_s"] = round(idle, 3)
+        result["cpu_clock_step_s"] = cpu_clock_step_s()
         rows = {}
         for parallel in (1, 4):
             for mode in ("cleartext", *SUITES):

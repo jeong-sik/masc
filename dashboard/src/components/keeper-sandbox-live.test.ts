@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, render, screen, waitFor } from '@testing-library/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import '@testing-library/jest-dom'
 import { html } from 'htm/preact'
 import {
@@ -21,7 +22,13 @@ const fetchSandboxStatus = vi.mocked(fetchKeeperSandboxLiveStatus)
 
 afterEach(() => {
   cleanup()
+  acceptedExecutionWorkspace.value = null
   vi.clearAllMocks()
+})
+
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'sandbox-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'sandbox-fixture' }
 })
 
 function status(overrides: Partial<KeeperSandboxLiveStatus> = {}): KeeperSandboxLiveStatus {

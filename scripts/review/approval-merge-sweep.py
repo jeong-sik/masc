@@ -27,6 +27,9 @@ QUOTA_EXIT = 75  # approval-auto-merge.py: ended at a quota during admission
 SWEEP_SECONDS = 20 * 60
 WORKER_TIMEOUT_SECONDS = 300
 GH_TIMEOUT_SECONDS = 120
+# GitHub names the refusal at the start of its message and ends it with
+# boilerplate, so the record keeps the start.
+ERROR_CHARACTERS = 300
 REPO = re.compile(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+')
 OPEN_PULLS = '''
 query($owner: String!, $name: String!, $cursor: String) {
@@ -55,7 +58,7 @@ def gh(arguments):
     except (OSError, subprocess.SubprocessError) as error:
         raise ValueError(f'{type(error).__name__}: {error}') from error
     if operation.returncode:
-        raise ValueError((operation.stderr or operation.stdout).strip()[-300:] or
+        raise ValueError((operation.stderr or operation.stdout).strip()[:ERROR_CHARACTERS] or
                          f'gh exited {operation.returncode}')
     return json.loads(operation.stdout)
 
@@ -144,8 +147,9 @@ def main():
         candidates = select(
             rows, lambda number: gh(['api', f'repos/{repo}/pulls/{number}'])['stack'] is not None)
     except (ValueError, KeyError, TypeError) as error:
-        print(f'approval-merge-sweep: cannot read the open pull requests: {error}',
-              file=sys.stderr)
+        # The quota read before the listing says which budget was empty.
+        print(f'approval-merge-sweep: cannot read the open pull requests: {error}\n'
+              f'{json.dumps(report)}', file=sys.stderr)
         return 1
     report.update(open=len(rows), candidates=candidates, runs=[], not_reached=[])
     worker = Path(__file__).with_name('approval-auto-merge.py')

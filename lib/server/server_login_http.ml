@@ -141,6 +141,8 @@ let with_browser request reqd f =
 
 let allowlist_path = Login_allowlist_routes.path
 let allowlist_entry_prefix = allowlist_path ^ "/"
+let invites_path = Login_invite_routes.path
+let invite_entry_prefix = invites_path ^ "/"
 let pats_path = Login_pat_routes.path
 let pat_prefix = pats_path ^ "/"
 
@@ -192,6 +194,18 @@ let remove t request reqd =
         respond reqd (Login_allowlist_routes.remove t browser ~registration_id))))
 ;;
 
+let issue_invite t request reqd =
+  with_browser request reqd (fun browser ->
+    with_body reqd (fun body -> respond reqd (Login_invite_routes.issue t browser ~body)))
+;;
+
+let revoke_invite t request reqd =
+  with_entry ~prefix:invite_entry_prefix request reqd (fun invite_id ->
+    with_browser request reqd (fun browser ->
+      with_body reqd (fun (_ : string) ->
+        respond reqd (Login_invite_routes.revoke t browser ~invite_id))))
+;;
+
 let issue_pat t request reqd =
   with_browser request reqd (fun browser ->
     with_body reqd (fun body -> respond reqd (Login_pat_routes.issue t browser ~body)))
@@ -221,6 +235,8 @@ let add_routes t router =
   |> Server_route.get access "/auth/session" (session t)
   |> Server_route.post access allowlist_path (register t)
   |> Server_route.prefix_delete access allowlist_entry_prefix (remove t)
+  |> Server_route.post access invites_path (issue_invite t)
+  |> Server_route.prefix_delete access invite_entry_prefix (revoke_invite t)
   |> Server_route.post access pats_path (issue_pat t)
   |> Server_route.get access pats_path (list_pats t)
   |> Server_route.prefix_delete access pat_prefix (revoke_pat t)

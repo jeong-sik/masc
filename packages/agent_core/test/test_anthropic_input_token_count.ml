@@ -188,6 +188,7 @@ let completion_request config : Llm_transport.completion_request =
   { config
   ; messages
   ; tools = [ tool ]
+  ; admitted_http_body = None
   ; capture_id = Some "request-count-fixture"
   ; observe_http_status = None
   ; observe_wire_chunk = None

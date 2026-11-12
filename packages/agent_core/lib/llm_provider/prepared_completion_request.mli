@@ -8,7 +8,7 @@ type t
 type serialized
 type measured
 type admitted
-type admitted_body
+type admitted_body = Llm_transport.admitted_http_body
 
 type context_fit =
   { input_tokens : int

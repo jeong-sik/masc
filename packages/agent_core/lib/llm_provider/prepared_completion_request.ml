@@ -1,9 +1,6 @@
 type t = { request : Llm_transport.completion_request }
 
-type admitted_body =
-  { serialized_request : Complete_common.serialized_http_request
-  ; evidence : Request_wire_observer.observation
-  }
+type admitted_body = Llm_transport.admitted_http_body
 
 type serialized =
   { prepared : t
@@ -70,6 +67,7 @@ let prepare
             (Provider_config.freeze_for_request config) trace_context
       ; messages
       ; tools
+      ; admitted_http_body = None
       ; capture_id
       ; observe_http_status = None
       ; observe_wire_chunk = None
@@ -104,7 +102,16 @@ let admit_serialized_body ~stream prepared =
       ~stream
       ~body:serialized_request.body
   in
-  Ok { prepared; admitted_body = { serialized_request; evidence } }
+  Ok
+    { prepared
+    ; admitted_body =
+        Llm_transport.admit_http_body
+          ~serialized_request
+          ~evidence
+          ~config
+          ~messages:request.messages
+          ~tools:request.tools
+    }
 ;;
 
 let transport_failure error =
@@ -314,7 +321,8 @@ let measure
        ; measurement =
            { measured.measurement with
              output_token_receipt =
-               serialized.admitted_body.serialized_request.output_token_receipt }
+               serialized.admitted_body.Llm_transport.serialized_request
+                 .output_token_receipt }
        })
     (measure_prepared
        ?connection_cache
@@ -409,5 +417,5 @@ let with_first_event_timeout_s first_event_timeout_s (admitted : admitted) =
 let admitted_body admitted = admitted.measured.admitted_body
 let serialized_request (serialized : serialized) = serialized.prepared
 let serialized_admitted_body (serialized : serialized) = serialized.admitted_body
-let admitted_body_request admitted_body = admitted_body.serialized_request
-let admitted_body_evidence admitted_body = admitted_body.evidence
+let admitted_body_request (admitted_body : admitted_body) = admitted_body.serialized_request
+let admitted_body_evidence (admitted_body : admitted_body) = admitted_body.evidence

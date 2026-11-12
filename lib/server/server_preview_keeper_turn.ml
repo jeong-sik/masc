@@ -54,9 +54,8 @@ let assigned (person : Login.person) keeper_id =
   | Error uncertain -> Error (R.zone_uncertain uncertain)
   | Ok trusted ->
     let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
-    (match Ks.find state.Authz_state.keepers keeper_id with
-     | Some { Ks.owner; runtime; policy_id = _; turn_scope = _ }
-       when Authz_types.User_id.equal owner person.user_id ->
+    (match Ks.find state.Authz_state.keepers ~owner:person.user_id keeper_id with
+     | Some { Ks.runtime; owner = _; policy_id = _; turn_scope = _ } ->
        (match runtime with
         | None -> Error (error R.Conflict_409 no_runtime)
         | Some runtime_id ->
@@ -72,7 +71,7 @@ let assigned (person : Login.person) keeper_id =
                (Authz_types.Keeper_id.to_string keeper_id)
                (Authz_types.Runtime_id.to_string runtime_id);
              Error (error R.Internal_error_500 "The Runtime of this Keeper is not in the log.")))
-     | Some (_ : Ks.keeper) | None -> Error (error R.Not_found_404 unknown_keeper))
+     | None -> Error (error R.Not_found_404 unknown_keeper))
 ;;
 
 let login_answer (status, message) =
@@ -106,7 +105,7 @@ let refusal_answer (refusal : Runtime_account_access.refusal) =
     error R.Service_unavailable_503 "The home of the account could not be spelled."
   | Runtime_account_access.Not_published
   | Runtime_account_access.No_operator
-  | Runtime_account_access.Not_a_keeper_id _
+  | Runtime_account_access.No_operator_keeper _
   | Runtime_account_access.No_membership _
   | Runtime_account_access.Not_a_declared_home
   | Runtime_account_access.Host_account _
@@ -116,7 +115,7 @@ let refusal_answer (refusal : Runtime_account_access.refusal) =
   | Runtime_account_access.Off_own_account _
   | Runtime_account_access.Turn_refused Authz_keeper_turn.Not_bootstrapped ->
     (* The preview publishes its access before it listens, a turn is no
-       operator call, the name was read as an id of the log, an admission
+       operator call and no turn of an operator Keeper, an admission
        makes the membership, the runtime declares its home, the preview
        starts no host client, its access is multi-account and not a single
        user after Off, and the zone opened on a bootstrapped log. *)
@@ -287,7 +286,8 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
     in
     let request =
       Runtime_account_access.Keeper_turn
-        { keeper_name = Authz_types.Keeper_id.to_string keeper_id
+        { owner = person.user_id
+        ; keeper_id
         ; channel = Authz_types.Channel.Direct
         ; pat
         ; runtime_id = Authz_types.Runtime_id.to_string prepared.Login.runtime_id

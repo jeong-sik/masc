@@ -107,7 +107,7 @@ let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.mess
   { origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 
 let test_recorder = Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"failover-test"
-let test_fleet_turn = { Driver.keeper_name = "failover-test"; channel = Authz_types.Channel.Autonomous }
+let test_fleet_turn = { Driver.keeper_name = "failover-test" }
 
 let retryable_network_error message =
   Agent_core.Error.Api
@@ -5701,8 +5701,8 @@ let test_a_success_leaves_the_next_walk_declared () =
    behind. *)
 let keeper_a = Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"keeper-a"
 let keeper_b = Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"keeper-b"
-let turn_a = { Driver.keeper_name = "keeper-a"; channel = Authz_types.Channel.Autonomous }
-let turn_b = { Driver.keeper_name = "keeper-b"; channel = Authz_types.Channel.Autonomous }
+let turn_a = { Driver.keeper_name = "keeper-a" }
+let turn_b = { Driver.keeper_name = "keeper-b" }
 let lane_head = "primary.test_model"
 let lane_fallback = "fallback.test_model"
 

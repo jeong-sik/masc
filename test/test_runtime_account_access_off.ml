@@ -142,9 +142,14 @@ let refused label request captured expected =
       Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
 ;;
 
-let turn ~keeper ~runtime =
+(* A turn a lane starts: of a Keeper that a TOML of the installation names. *)
+let turn ~keeper ~runtime = Access.Operator_keeper_turn { keeper_name = keeper; runtime_id = runtime }
+
+(* A turn of the Keeper the person made in the log. *)
+let person_turn who ~runtime =
   Access.Keeper_turn
-    { keeper_name = keeper
+    { owner = who.user_id
+    ; keeper_id = get (Keeper_id.of_string who.keeper)
     ; channel = Channel.Autonomous
     ; pat = Authz_types.Pat_binding.Not_pat
     ; runtime_id = runtime
@@ -208,9 +213,15 @@ let test_turned_off () =
         let operator = captured operator_home in
         let alice_account = captured alice.home in
         (* The person's Keeper runs no turn, even on a Runtime of the operator. *)
-        refused "the person's Keeper" (turn ~keeper:alice.keeper ~runtime:operator_runtime) operator (function
+        refused "the person's Keeper" (person_turn alice ~runtime:operator_runtime) operator (function
           | Access.Off_keeper keeper_id -> String.equal (Keeper_id.to_string keeper_id) alice.keeper
           | _ -> false);
+        (* A Keeper of the operator whose TOML has the name of the person's
+           Keeper is another Keeper, and runs (issue #51073). *)
+        allowed
+          "an operator Keeper of the person's Keeper name"
+          (turn ~keeper:alice.keeper ~runtime:operator_runtime)
+          operator;
         (* No turn runs on the person's Runtime, even for a Keeper of the operator. *)
         refused
           "the person's Runtime"

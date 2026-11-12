@@ -49,7 +49,8 @@ val requested : Effect_request.t
 
 type refusal =
   | Not_bootstrapped  (** The log was never bootstrapped: it has no workspace. *)
-  | Keeper_not_made of Keeper_id.t  (** No Keeper record makes this id. *)
+  | Keeper_not_made of Keeper_id.t
+      (** The owner the turn names made no Keeper of this id. *)
   | No_authorized_runtime of Keeper_id.t
       (** The owner gave the Keeper no Runtime. It falls back to none (user
           decision 2026-11-08). *)
@@ -67,12 +68,16 @@ type turn = private
   ; allowance : Authz_decision.allowance
   }
 
-(** Decides one turn of [keeper_id] on [channel] at [now] (seconds since the
-    epoch), in the state of one trusted snapshot. [pat] is what authenticated
+(** Decides one turn of the Keeper [keeper_id] of [owner] on [channel] at
+    [now] (seconds since the epoch), in the state of one trusted snapshot. A
+    Keeper is named by its owner and its id ({!Authz_keeper_state}), so the
+    caller says whose Keeper it is: the person a request was authenticated
+    as, never a name the request sent. [pat] is what authenticated
     the request the turn answers: [Not_pat] for a session and for a turn the
     server starts itself. *)
 val decide
   :  Authz_zone.trusted
+  -> owner:User_id.t
   -> keeper_id:Keeper_id.t
   -> channel:Channel.t
   -> pat:Pat_binding.t

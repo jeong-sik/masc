@@ -241,12 +241,9 @@ type lane_terminal_error =
    retry it, so it records no failed-attempt mark (timeout, 5xx, 529, network).
    Its 429 and 402 evidence is recorded as any walk's, and an answer it
    receives clears the candidate's evidence (RFC-0458 §3.4 rule 5). An
-   official CLI starts for a fleet turn as that Keeper's turn on the channel
-   that started it, and for a one-shot walk as an operator call (plan D2-5). *)
-type fleet_turn =
-  { keeper_name : string
-  ; channel : Authz_types.Channel.t
-  }
+   official CLI starts for a fleet turn as a turn of that operator Keeper,
+   and for a one-shot walk as an operator call (plan D2-5). *)
+type fleet_turn = { keeper_name : string }
 
 type walk_owner =
   | Fleet_keeper_turn of fleet_turn
@@ -265,17 +262,16 @@ type walk_start = Runtime_candidate_standing.walk_start =
   | Every_mark_demotes
 
 let fresh_walk_of = function
-  | Fleet_keeper_turn { keeper_name; channel = _ } ->
+  | Fleet_keeper_turn { keeper_name } ->
     Fresh_walk_by (Runtime_candidate_backpressure.keeper_recorder ~keeper_name)
   | One_shot_walk -> Every_mark_demotes
 
 let account_request walk_owner ~runtime_id =
   match walk_owner with
-  | Fleet_keeper_turn { keeper_name; channel } ->
-    (* A Keeper lane starts its turns itself: no request with a personal
-       access token stands behind one. *)
-    Runtime_account_access.Keeper_turn
-      { keeper_name; channel; pat = Authz_types.Pat_binding.Not_pat; runtime_id }
+  | Fleet_keeper_turn { keeper_name } ->
+    (* A lane runs the Keepers that the TOMLs of the installation name: the
+       operator's, not a person's of the authorization log. *)
+    Runtime_account_access.Operator_keeper_turn { keeper_name; runtime_id }
   | One_shot_walk -> Runtime_account_access.Operator_call
 
 (* HIGH-RISK-UNREVIEWED: an attempt starts an official CLI, Claude Code (plan
@@ -1011,7 +1007,7 @@ let attempt_runtime_candidates
        in
        let note_failed_attempt failure =
          match walk_owner with
-         | Fleet_keeper_turn { keeper_name; channel = _ } ->
+         | Fleet_keeper_turn { keeper_name } ->
            Option.iter
              (fun candidate ->
                 Runtime_candidate_backpressure.note_failed_attempt

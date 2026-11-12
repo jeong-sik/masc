@@ -2,8 +2,9 @@ name = "masc_my_keeper_create"
 title = "Create My Keeper"
 description = """
 Make a Keeper that you own. The answer is JSON with record "made", or \
-"existing" when you made a Keeper of this name before. A name another \
-person took is refused. Give the Keeper a Runtime with \
+"existing" when you made a Keeper of this name before. The name is your \
+own: a Keeper of the same name that another person made is another \
+Keeper. Give the Keeper a Runtime with \
 masc_my_keeper_assign before you ask it anything."""
 additional_properties = false
 

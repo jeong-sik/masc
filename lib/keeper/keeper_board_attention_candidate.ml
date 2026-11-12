@@ -608,6 +608,27 @@ let find_candidate candidates candidate_id =
     candidates
 ;;
 
+type ledger_lookup =
+  | In_ledger of candidate
+  | Not_in_ledger
+  | Behind_rejected_rows of { rejected_rows : int }
+
+(* Under the ledger lock, off the cached state: the readable rows and the
+   count of rows the decoder refused come from one read, so the answer never
+   pairs the rows of one revision with the count of another. *)
+let lookup ~base_path ~keeper_name ~candidate_id =
+  let path = candidate_path ~base_path ~keeper_name in
+  let entry = ledger_entry path in
+  Cross_context_mutex.with_lock entry.ledger_mutex (fun () ->
+    Result.map
+      (fun state ->
+         match find_candidate state.latest candidate_id, state.rejected_rows with
+         | Some candidate, (_ : int) -> In_ledger candidate
+         | None, 0 -> Not_in_ledger
+         | None, rejected_rows -> Behind_rejected_rows { rejected_rows })
+      (refresh_ledger ~path entry))
+;;
+
 let record ~base_path candidate =
   match validate_candidate_for_persistence candidate with
   | Error detail -> Record_error ("invalid Board attention candidate: " ^ detail)

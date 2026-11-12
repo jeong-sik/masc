@@ -4843,8 +4843,8 @@ let test_drain_abandons_a_root_whose_candidate_is_gone_and_judges_the_next () =
     "only the live candidate reached the lane"
     [ live.candidate_id ]
     !reached_the_lane;
-  (* The drain's last wake drops the settled receipt of the judged candidate,
-     so the abandoned root is the one partition left. *)
+  (* The step that finds nothing left to judge drops the settled receipt of
+     the judged candidate, so the abandoned root is the one partition left. *)
   (match load_one_partition ~base_path with
    | { candidate_id; state = P.Abandoned { abandoned_at }; _ } ->
      Alcotest.(check string)
@@ -4859,6 +4859,67 @@ let test_drain_abandons_a_root_whose_candidate_is_gone_and_judges_the_next () =
   | A.Consumed { delivery = A.Not_relevant; _ } -> ()
   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
     Alcotest.fail "the candidate behind the abandoned root was not judged"
+;;
+
+(* A row the decoder refused may be the candidate a root names, with a
+   judgment or a quarantine this build cannot read. The ledger then cannot
+   say that candidate is gone, so the root is not given up: it stays Blocked
+   and the drain goes on to the candidate behind it. *)
+let test_drain_keeps_a_root_blocked_when_the_ledger_holds_an_unreadable_row () =
+  with_temp_base "board-attention-worker-drain-unreadable-row" @@ fun base_path ->
+  let unbacked = candidate ~id:"candidate-unbacked" () in
+  ignore
+    (ok
+       "mint a root no readable candidate row backs"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" [ unbacked ]));
+  let live =
+    record ~base_path (candidate ~id:"candidate-live" ~recorded_at:2.0 ())
+  in
+  let ledger =
+    open_out_gen [ Open_append ] 0o600 (A.ledger_path ~base_path ~keeper_name:"alpha")
+  in
+  output_string ledger "not a candidate row\n";
+  close_out ledger;
+  let exact = provenance "after-unreadable-row" in
+  let reached_the_lane = ref [] in
+  let outcome =
+    ok
+      "the drain survives the root behind an unreadable row"
+      (W.For_testing.drain_available
+         ~yield:(fun () -> ())
+         ~now:(fun () -> 3.0)
+         ~worker_epoch:(P.Worker_epoch.generate ())
+         ~base_path
+         ~keeper_name:"alpha"
+         ~prepare:(fun candidate -> Ok candidate)
+         ~execute:(fun ~before_dispatch ~before_advance:_ (prepared : A.candidate) ->
+           reached_the_lane := prepared.candidate_id :: !reached_the_lane;
+           ok "bind the live candidate's attempt" (before_dispatch exact);
+           Ok (judgment exact J.Not_relevant)))
+  in
+  (match outcome with
+   | W.Drained { judgments = 1; steps = 2 } -> ()
+   | W.Drained _ | W.Retry_later _ | W.Lane_deferred _
+   | W.Awaiting_registry_fence _ ->
+     Alcotest.fail "the drain did not block one root and judge the other");
+  Alcotest.(check (list string))
+    "only the live candidate reached the lane"
+    [ live.candidate_id ]
+    !reached_the_lane;
+  match
+    List.find_opt
+      (fun (partition : P.t) ->
+         String.equal partition.candidate_id unbacked.candidate_id)
+      (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha"))
+  with
+  | Some { state = P.Blocked _; _ } -> ()
+  | Some
+      { state = P.Ready | P.Running _ | P.Completed _ | P.Settled _ | P.Abandoned _
+      ; _
+      } ->
+    Alcotest.fail
+      "the root was not left Blocked although the ledger could not say its candidate was gone"
+  | None -> Alcotest.fail "the root behind the unreadable row is missing"
 ;;
 
 let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired
@@ -5238,6 +5299,10 @@ let () =
             "the drain abandons a root whose candidate is gone and judges the next"
             `Quick
             test_drain_abandons_a_root_whose_candidate_is_gone_and_judges_the_next
+        ; Alcotest.test_case
+            "the drain keeps a root blocked when the ledger holds an unreadable row"
+            `Quick
+            test_drain_keeps_a_root_blocked_when_the_ledger_holds_an_unreadable_row
         ] )
     ]
 ;;

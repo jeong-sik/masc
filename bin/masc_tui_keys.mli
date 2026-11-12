@@ -563,6 +563,7 @@ val footer_hints_browser_scene_guard : lang:Masc_tui_types.ui_language -> string
 val footer_hints_browser_observations : lang:Masc_tui_types.ui_language -> string
 val footer_hints_client_detail : lang:Masc_tui_types.ui_language -> string
 val footer_hints_lane_activity : lang:Masc_tui_types.ui_language -> string
+val footer_hints_exact_model_order : lang:Masc_tui_types.ui_language -> string
 val footer_hints_lane_inventory_detail : lang:Masc_tui_types.ui_language -> string
 val footer_hints_link_preview_empty : lang:Masc_tui_types.ui_language -> string
 val footer_hints_play_invite : lang:Masc_tui_types.ui_language -> string

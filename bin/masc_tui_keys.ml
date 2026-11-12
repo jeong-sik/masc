@@ -3300,6 +3300,22 @@ let footer_hints_lane_activity ~lang =
     ; b ~ko:"뒤로" Navigate "Esc" "back"
     ]
 
+(* The model order editor of one exact-output Lane. The Lanes list's own
+   keys do not act while it is open, so the footer names the editor's. *)
+let footer_hints_exact_model_order ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"교체" Act "r" "replace"
+    ; b ~ko:"후보 추가" Act "a" "add fallback"
+    ; b ~ko:"빼기" Act "x" "remove"
+    ; b ~ko:"순서" Act "J/K" "reorder"
+    ; b ~ko:"그룹 맨 앞" Act "1" "first in group"
+    ; b ~ko:"설정" Navigate "Enter/d" "settings"
+    ; b ~ko:"TOML" Navigate "e" "TOML"
+    ; b ~ko:"선택" Navigate "j/k" "select"
+    ; b ~ko:"도움말" Meta "?" "help"
+    ; b ~ko:"뒤로" Navigate "Esc" "back"
+    ]
+
 let footer_hints_lane_inventory_detail ~lang =
   hints_in_order ~lang
     [ scroll_binding

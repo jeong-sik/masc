@@ -34,6 +34,7 @@ async function load() {
   releaseDigestOwner = async () => {
     acceptedExecutionWorkspace.value = null
     await mod.refreshOperatorWorkspaceDigest({ force: true })
+    await mod.refreshOperatorSnapshot({ force: true })
   }
   return { mod, signals }
 }
@@ -63,6 +64,10 @@ const previewResult: OperatorActionResult = {
 }
 
 const validSnapshot = {
+  observer_instance_id: 'operator-test',
+  projection_diagnostics: { read_completeness: 'complete', read_error: null },
+  query: { actor: 'vincent', view: null, effective_actor: 'vincent', effective_view: 'full',
+    include_messages: true, include_keepers: true, lightweight_summary: false, default_summary_request: false },
   pending_confirm_envelope: {
     items: [],
     summary: {

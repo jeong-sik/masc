@@ -49,8 +49,6 @@ import {
   namespaceTruthError,
 } from './namespace-truth-store'
 import { hydrateNamespaceTruthObservation } from './namespace-truth-observation'
-import { normalizeOperatorSnapshot } from './operator-normalizers'
-import { operatorError, operatorSnapshot } from './operator-signals'
 import { compositeTick } from './composite-signals'
 import { isRecord } from './lib/type-guards'
 import { normalizeKeeperApprovalAuditReceipt } from './lib/keeper-approval-audit'
@@ -77,6 +75,7 @@ import { namespaceTruthReadRecovery } from './namespace-truth-signals'
 import { subscribeStoredTokenChanges } from './api/core'
 import { hydrateMissionSnapshot, setupMissionObservation } from './mission-actions'
 import { hydrateOperatorDigest, setupOperatorDigestObservation } from './operator-digest-observation'
+import { hydrateOperatorSnapshot, setupOperatorSnapshotObservation } from './operator-snapshot-observation'
 
 // --- Refresh function registration (avoids circular imports) ---
 
@@ -100,13 +99,9 @@ export function registerGateAuditReceiptObserver(
 }
 
 let _refreshOperatorFn: (() => void) | null = null
-let operatorSnapshotRefreshPending = false
 
 export function registerOperatorRefresh(fn: () => void): void {
   _refreshOperatorFn = fn
-  if (operatorSnapshotRefreshPending) {
-    requestOperatorSnapshotRefresh('operator_snapshot_registration_drain')
-  }
 }
 
 let _keeperTurnRefreshFn: ((keeperName: string) => void) | null = null
@@ -208,15 +203,6 @@ function scheduleRefresh(key: string, fn: () => void, delayMs = SSE_DEFAULT_DEBO
     fn()
     delete _debounceTimers[key]
   }, delayMs)
-}
-
-function requestOperatorSnapshotRefresh(key: string): void {
-  if (_refreshOperatorFn) {
-    operatorSnapshotRefreshPending = false
-    scheduleRefresh(key, () => _refreshOperatorFn?.(), 0)
-  } else {
-    operatorSnapshotRefreshPending = true
-  }
 }
 
 // --- Declarative event routing ---
@@ -400,22 +386,6 @@ function handleExecutionSnapshot(payload: unknown): void {
   }
 }
 
-function failOperatorSnapshotHydration(detail: string): void {
-  operatorSnapshot.value = null
-  operatorError.value = detail
-}
-
-function handleOperatorSnapshot(payload: unknown): void {
-  try {
-    operatorSnapshot.value = normalizeOperatorSnapshot(payload)
-    operatorError.value = null
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : 'invalid operator snapshot'
-    failOperatorSnapshotHydration(detail)
-    console.warn('[server-push] operator snapshot hydration failed', detail)
-  }
-}
-
 // P2 silent-failure fix: previously the dynamic import retried on every
 // Transport-health push event with only console.debug on failure (hidden
 // from default DevTools view).  Two improvements:
@@ -480,12 +450,6 @@ async function refreshActiveRoute(): Promise<void> {
 }
 
 // --- WebSocket reconnection handler ---
-
-let activeOperatorSnapshotEpoch: string | null = null
-let latestOperatorSnapshotGeneration: number | null = null
-let latestOperatorSnapshotComputeSequence: number | null = null
-let latestOperatorSnapshotTerminalSequence: number | null = null
-const retiredOperatorSnapshotEpochs = new Set<string>()
 
 function handleReconnect(notify = true): void {
   scheduleIdeConversationRefresh('board')
@@ -726,88 +690,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
   }
 
   if (event.type === 'operator_snapshot') {
-    if (!isRecord(event.payload)) {
-      failOperatorSnapshotHydration('operator snapshot payload is invalid')
-      requestOperatorSnapshotRefresh('operator_snapshot_invalid_payload')
-      return true
-    }
-    const payload = event.payload
-    const epoch = payload.snapshot_epoch
-    const generation = payload.snapshot_generation
-    const computeSequence = payload.snapshot_compute_sequence
-    const terminalSequence = payload.snapshot_terminal_sequence
-    if (
-      typeof epoch !== 'string'
-      || epoch.length === 0
-      || typeof generation !== 'number'
-      || !Number.isSafeInteger(generation)
-      || typeof computeSequence !== 'number'
-      || !Number.isSafeInteger(computeSequence)
-      || typeof terminalSequence !== 'number'
-      || !Number.isSafeInteger(terminalSequence)
-    ) {
-      failOperatorSnapshotHydration('operator snapshot ordering is missing')
-      requestOperatorSnapshotRefresh('operator_snapshot_missing_ordering')
-      return true
-    }
-    if (
-      typeof epoch === 'string'
-      && epoch.length > 0
-    ) {
-      if (retiredOperatorSnapshotEpochs.has(epoch)) {
-        return true
-      }
-      if (activeOperatorSnapshotEpoch !== epoch) {
-        if (activeOperatorSnapshotEpoch !== null) {
-          retiredOperatorSnapshotEpochs.add(activeOperatorSnapshotEpoch)
-        }
-        activeOperatorSnapshotEpoch = epoch
-        latestOperatorSnapshotGeneration = null
-        latestOperatorSnapshotComputeSequence = null
-        latestOperatorSnapshotTerminalSequence = null
-      }
-      if (
-        latestOperatorSnapshotGeneration !== null
-        && generation < latestOperatorSnapshotGeneration
-      ) {
-        return true
-      }
-      if (latestOperatorSnapshotGeneration !== generation) {
-        latestOperatorSnapshotGeneration = generation
-        latestOperatorSnapshotComputeSequence = null
-        latestOperatorSnapshotTerminalSequence = null
-      }
-      if (
-        typeof terminalSequence === 'number'
-        && Number.isSafeInteger(terminalSequence)
-      ) {
-        if (
-          latestOperatorSnapshotTerminalSequence !== null
-          && terminalSequence < latestOperatorSnapshotTerminalSequence
-        ) {
-          return true
-        }
-        latestOperatorSnapshotTerminalSequence = terminalSequence
-      }
-      if (
-        typeof computeSequence === 'number'
-        && Number.isSafeInteger(computeSequence)
-      ) {
-        if (
-          latestOperatorSnapshotComputeSequence !== null
-          && computeSequence < latestOperatorSnapshotComputeSequence
-        ) {
-          return true
-        }
-        latestOperatorSnapshotComputeSequence = computeSequence
-      }
-      if (payload.status === 'invalidated') {
-        failOperatorSnapshotHydration('operator snapshot invalidated')
-        requestOperatorSnapshotRefresh('operator_snapshot_invalidation')
-        return true
-      }
-    }
-    handleOperatorSnapshot(event.payload)
+    hydrateOperatorSnapshot(event.payload)
     return true
   }
   if (event.type === 'operator_digest' && event.payload) {
@@ -916,6 +799,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
 export function setupServerPushReaction(): () => void {
   const stopMission = setupMissionObservation()
   const stopDigest = setupOperatorDigestObservation()
+  const stopSnapshot = setupOperatorSnapshotObservation()
   const recoverReads = () => {
     namespaceTruthReadRecovery.recover()
     recoverExecutionReadDebt()
@@ -938,6 +822,7 @@ export function setupServerPushReaction(): () => void {
   return () => {
     stopMission()
     stopDigest()
+    stopSnapshot()
     unsubReconnect()
     unsubToken()
     window.removeEventListener('focus', recoverReads)

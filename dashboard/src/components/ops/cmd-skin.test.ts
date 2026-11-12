@@ -17,6 +17,11 @@ async function loadOps() {
     FlowControlPanel: () => html`<div data-testid="flow-control-panel">FlowControlPanel</div>`,
   }))
   const router = await import('../../router')
+  const { operatorSnapshotFixture } = await import('../../operator-snapshot.test-fixture')
+  vi.doMock('../../operator-snapshot-state', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../../operator-snapshot-state')>()
+    return { ...actual, operatorSnapshot: operatorSnapshotFixture }
+  })
   const operatorStore = await import('../../operator-store')
   const mod = await import('./index')
 
@@ -27,7 +32,7 @@ async function loadOps() {
     operatorDigestError: operatorStore.operatorDigestError,
     operatorError: operatorStore.operatorError,
     operatorWorkspaceDigest: operatorStore.operatorWorkspaceDigest,
-    operatorSnapshot: operatorStore.operatorSnapshot,
+    operatorSnapshot: operatorSnapshotFixture,
   }
 }
 
@@ -69,6 +74,7 @@ describe('Ops command-surface skin (keeper-v2 command.jsx parity)', () => {
     vi.useRealTimers()
     vi.resetModules()
     vi.clearAllMocks()
+    vi.doUnmock('../../operator-snapshot-state')
     vi.doUnmock('../board/composer-v2')
     vi.doUnmock('../flow-control/flow-control-panel')
   })

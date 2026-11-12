@@ -1198,8 +1198,8 @@ export async function runOperatorAction(
   return parseOperatorActionResult(raw)
 }
 
-export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
-  return get('/api/v1/operator', { includeActorHeader: false })
+export function fetchOperatorSnapshot(options: AbortableRequestOptions = {}): Promise<OperatorSnapshot> {
+  return get('/api/v1/operator', { includeActorHeader: false, signal: options.signal })
 }
 
 export function fetchOperatorDigest(options: {

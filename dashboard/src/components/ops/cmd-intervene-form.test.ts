@@ -1,3 +1,4 @@
+import { operatorSnapshotFixture as operatorSnapshot } from '../../operator-snapshot.test-fixture'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,7 +19,7 @@ vi.mock('./helpers', () => ({ executeAction }))
 vi.mock('../common/toast', () => ({ showToast }))
 vi.mock('../../router', () => ({ replaceRoute }))
 
-import { operatorActionBusy, operatorSnapshot } from '../../operator-store'
+import { operatorActionBusy } from '../../operator-store'
 import { CmdGateLinks, CmdInterveneForm } from './cmd-intervene-form'
 
 function seedSnapshot(keepers: { name: string }[]): void {
@@ -194,4 +195,10 @@ describe('CmdGateLinks (keeper-v2 command parity)', () => {
 
     expect(replaceRoute).toHaveBeenCalledWith('approvals')
   })
+})
+
+vi.mock('../../operator-snapshot-state', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../operator-snapshot-state')>()
+  const { operatorSnapshotFixture } = await import('../../operator-snapshot.test-fixture')
+  return { ...actual, operatorSnapshot: operatorSnapshotFixture }
 })

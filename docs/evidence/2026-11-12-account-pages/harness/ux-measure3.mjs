@@ -14,6 +14,13 @@
 // the browser tool is measured again from a fresh navigation, three times at
 // most, and its row says how many attempts it took (what a row holds does not
 // depend on timing); and a row holds the login as the browser holds it.
+// Since the sheet was split in two files: a row holds a digest of the
+// computed style of every element at two fixed window sizes, so two binaries
+// whose rows carry the same digests draw the same pages in these states. The
+// values behind a digest are kept in OUT/styles (gzip), and ux-compare.py
+// names the properties that differ when two digests do.
+// Since the console layer: a page that draws into #app is waited for, and a
+// row holds the path the browser ended on.
 const SPACE = __SPACE__;
 const LABEL = "__LABEL__";
 const OUT = "__OUT__";
@@ -23,8 +30,10 @@ const ATTEMPTS = 3;
 const READY_TIMEOUT_MS = 60000;
 const AXE_TIMEOUT_MS = 120000;
 const fs = await import("node:fs/promises");
+const zlib = await import("node:zlib");
+const crypto = await import("node:crypto");
 const axeSource = await fs.readFile(AXE, "utf8");
-await fs.mkdir(OUT, { recursive: true });
+await fs.mkdir(`${OUT}/styles`, { recursive: true });
 
 const task = await taskSpace(SPACE);
 const page = task.page("p1");
@@ -36,6 +45,92 @@ await page.cdp("Page.addScriptToEvaluateOnNewDocument", {
     "window.__violations = []; document.addEventListener('securitypolicyviolation', (e) => window.__violations.push(e.effectiveDirective + ' ' + (e.blockedURI || 'inline')));",
 });
 
+// A page with a status line is ready when the line has left "reading". The
+// console draws into #app and shows a status line of its own while it reads
+// the session or leaves for the sign-in page: it is ready when it has drawn
+// and that line is gone. The question is asked again and again, so a page
+// that leaves for another one is waited for at the page it arrives at.
+async function ready() {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  for (;;) {
+    let settled = false;
+    try {
+      settled = await page.evaluate(() => {
+        if (document.readyState !== "complete") return false;
+        const app = document.getElementById("app");
+        if (app !== null && (app.childElementCount === 0 || app.querySelector("[role=status]") !== null)) return false;
+        const out = document.getElementById("out");
+        return out === null || out.textContent !== "reading";
+      });
+    } catch (_) {
+      settled = false; // the document is being replaced
+    }
+    if (settled) return;
+    if (Date.now() >= deadline) throw new Error("the page did not get ready");
+    await page.waitForTimeout(100);
+  }
+}
+
+// What the sheet and the browser make of the page as it stands: every
+// element and its ::before and ::after, each with every computed property,
+// and the facts of the window the values were computed in. Runs in the page.
+const readStyles = () => {
+  const where = (element) => {
+    const parts = [];
+    for (let node = element; node !== null; node = node.parentElement) {
+      const index = node.parentElement === null ? 0 : [...node.parentElement.children].indexOf(node);
+      parts.push(`${node.tagName}[${index}]${node.id ? "#" + node.id : ""}`);
+    }
+    return parts.reverse().join("/");
+  };
+  const rows = {};
+  for (const element of document.querySelectorAll("*")) {
+    for (const pseudo of ["", "::before", "::after"]) {
+      const style = getComputedStyle(element, pseudo === "" ? null : pseudo);
+      // A browser lists the custom properties of an element in an order that
+      // changes from one load of a page to the next, so the names are sorted:
+      // what is read then depends on the values alone.
+      const names = [];
+      for (let i = 0; i < style.length; i += 1) names.push(style[i]);
+      names.sort();
+      const properties = {};
+      for (const name of names) properties[name] = style.getPropertyValue(name);
+      rows[where(element) + pseudo] = properties;
+    }
+  }
+  const name = (e) => e.tagName.toLowerCase() + (e.id ? "#" + e.id : "");
+  return {
+    window: {
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+      visibilityState: document.visibilityState,
+      focused: document.activeElement === null ? "none" : name(document.activeElement),
+      // The innermost element under the pointer. A pointer on a control adds
+      // the hover of that control to what is read.
+      hovered: [...document.querySelectorAll(":hover")].map(name).pop() || "none",
+    },
+    rows,
+  };
+};
+
+// Reads the styles at a window `width` pixels wide and files what was read.
+// The pointer is parked in the bottom left corner first, where no control of
+// these pages is, so that a pointer resting on the window adds no hover.
+async function styles(name, width) {
+  await page.cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 799 });
+  await page.waitForTimeout(200);
+  const reading = await page.evaluate(readStyles);
+  if (reading.window.innerWidth !== width) throw new Error(`the styles of ${name} were read at ${reading.window.innerWidth}px, not ${width}px`);
+  const text = JSON.stringify(reading.rows);
+  await fs.writeFile(`${OUT}/styles/${LABEL}-${name}-${width}.json.gz`, zlib.gzipSync(text));
+  return {
+    ...reading.window,
+    elements: Object.keys(reading.rows).length / 3,
+    sha256: crypto.createHash("sha256").update(text).digest("hex").slice(0, 16),
+  };
+}
+
 async function measure([name, base, scenario, path]) {
   if (scenario !== null) await fetch(`${base}/__scenario/${scenario}`);
   const head = await fetch(`${base}${path.split("#")[0]}`, { redirect: "manual" });
@@ -44,18 +139,14 @@ async function measure([name, base, scenario, path]) {
   await page.cdp("Emulation.clearDeviceMetricsOverride");
   await page.goto("about:blank");
   await page.goto(`${base}${path}`);
-  // A page with a status line is ready when the line has left "reading".
-  await page.waitForFunction(
-    () => {
-      if (document.readyState !== "complete") return false;
-      const out = document.getElementById("out");
-      return out === null || out.textContent !== "reading";
-    },
-    undefined,
-    { timeout: READY_TIMEOUT_MS },
-  );
+  await ready();
   await page.waitForTimeout(300);
   await page.screenshot({ path: `${OUT}/${LABEL}-${name}-desktop.png`, fullPage: true });
+
+  // What the page itself was refused, before a tool of the measurement runs
+  // in it: axe-core loads a sheet whose rules it cannot read and writes it
+  // into a style element, which a policy refuses and a browser reports.
+  const violationsBeforeAxe = await page.evaluate(() => (window.__violations === undefined ? null : [...window.__violations]));
 
   // The run is started in the page and its result is waited for, so that no
   // single call into the page lasts as long as the run does.
@@ -109,7 +200,10 @@ async function measure([name, base, scenario, path]) {
       targetsUnder24px: small.length,
       smallestControlHeight: heights.length === 0 ? null : Math.min(...heights),
       rawServerTextBlocks: raw.length,
-      styleRules: [...document.styleSheets].reduce((n, s) => n + s.cssRules.length, 0),
+      // A sheet the policy refused is in the list, and reading its rules
+      // throws: it counts no rule and is counted by itself.
+      styleRules: [...document.styleSheets].reduce((n, s) => { try { return n + s.cssRules.length; } catch (_) { return n; } }, 0),
+      sheetsWithoutRules: [...document.styleSheets].filter((s) => { try { return s.cssRules.length === 0; } catch (_) { return true; } }).length,
       styleAttributes: document.querySelectorAll("[style]").length,
       bodyBackground: getComputedStyle(document.body).backgroundColor,
       policyViolations: window.__violations === undefined ? "not counted" : window.__violations,
@@ -124,6 +218,9 @@ async function measure([name, base, scenario, path]) {
             },
       lang: document.documentElement.lang,
       title: document.title,
+      // Where the browser is when the page is ready: a page can leave for
+      // another one.
+      finalPath: location.pathname,
     };
   });
 
@@ -150,6 +247,12 @@ async function measure([name, base, scenario, path]) {
     clientWidth: document.documentElement.clientWidth,
   }));
   await page.screenshot({ path: `${OUT}/${LABEL}-${name}-320.png`, fullPage: true });
+  // At 320px the focus is where the first Tab left it, so that reading also
+  // holds how a focused control is drawn. At 1280px nothing has the focus.
+  const styles320 = await styles(name, 320);
+  await page.cdp("Emulation.setDeviceMetricsOverride", { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await page.evaluate(() => { if (document.activeElement) document.activeElement.blur(); window.scrollTo(0, 0); });
+  const styles1280 = await styles(name, 1280);
   await page.cdp("Emulation.clearDeviceMetricsOverride");
 
   return {
@@ -161,8 +264,12 @@ async function measure([name, base, scenario, path]) {
     axeRules: axe.violations.map((v) => `${v.id}(${v.impact},${v.nodes}) at ${v.first}`),
     axeIncomplete: axe.incomplete,
     ...structure,
+    policyViolationsBeforeAxe: violationsBeforeAxe === null ? "not counted" : violationsBeforeAxe,
     firstTabStop,
     horizontalScrollAt320: reflow.scrollWidth > reflow.clientWidth ? `${reflow.scrollWidth}px wide in ${reflow.clientWidth}px` : "none",
+    widthAt320: reflow.clientWidth,
+    styles320,
+    styles1280,
   };
 }
 

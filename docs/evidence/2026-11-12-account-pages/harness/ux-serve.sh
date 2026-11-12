@@ -4,6 +4,8 @@
 # dummy client id. The first invitation link goes to a file and is not shown.
 # usage: ux-serve.sh BIN T PORT [no-client]
 #   no-client leaves the GitHub login client out of the configuration.
+#   UX_SERVE_ENV, when set, is NAME=VALUE words (no space inside a value) that
+#   the server gets beside the emptied environment.
 set -u
 BIN="$1"; T="$2"; PORT="$3"; CLIENT="${4:-client}"
 M="$T/multi"
@@ -26,7 +28,7 @@ config["github"] = {
 json.dump(config, open(path, "w"))
 PY
 perl -e 'alarm shift; exec @ARGV' 120 env -i PATH="$PATH" HOME="$T/home" TMPDIR="$T/tmp" MASC_HTTPS_PORT=0 \
-  MASC_UX_GITHUB_SECRET=not-a-secret \
+  MASC_UX_GITHUB_SECRET=not-a-secret ${UX_SERVE_ENV:-} \
   "$BIN" restart --base-path "$M/base" --port "$PORT" --host 127.0.0.1 > "$T/restart.out" 2> "$T/restart.err" < /dev/null
 echo "restart exit=$?"
 sed -n 's/^Started pid \([0-9][0-9]*\)\..*/\1/p' "$T/restart.out" | head -1 > "$T/pid"

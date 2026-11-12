@@ -342,6 +342,8 @@ try {
   assert.equal(measurements.initial.farFromViewport, 0)
   assert.ok(measurements.initial.mounted < ROWS)
   checks.push('a large inventory mounts only the rows near the list viewport')
+  // With no label found the ink reaches -Infinity, and any distance clears that.
+  assert.ok(Number.isFinite(measurements.initial.axisLabelInkBelowAxisPx), 'the age axis has no label to measure')
   assert.ok(measurements.initial.listTopBelowAxisPx >= measurements.initial.axisLabelInkBelowAxisPx)
   checks.push('a row cut at the top of the list stays clear of the age axis labels')
   assert.equal(measurements.end.farFromViewport, 0)

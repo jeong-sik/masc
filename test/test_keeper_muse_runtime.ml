@@ -474,6 +474,14 @@ let test_model_error_names_a_missing_catalog_model () =
   check (option string) "another error kind does not read it"
     None (Adapter.catalog_checked_model ~configured_model:(Some model)
             (failed ~retryable:false Msp.Step_limit));
+  let refuses error = Option.is_some (Adapter.model_input_refusal_of_error error) in
+  check bool "a final modelError without quota refuses the turn's input" true (refuses final);
+  check bool "a retryable modelError refuses nothing" false
+    (refuses (failed ~retryable:true Msp.Model_error));
+  check bool "a spent window is not a refusal of the input" false
+    (refuses (failed ~quota:{Msp.limit_kind = "tierLimit"; resets_at_ms = 1}
+                ~retryable:false Msp.Model_error));
+  check bool "a cancelled turn refuses nothing" false (refuses Serve.Turn_cancelled);
   let reported ?catalog error =
     match Adapter.runtime_error_to_core_error ?catalog error with
     | Agent_core.Error.Provider

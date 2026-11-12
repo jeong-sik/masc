@@ -76,12 +76,14 @@ let catalog_reading ~model (catalog : Msp.model_catalog) =
 
 let model_not_in_account_catalog = "model_not_in_account_catalog"
 
-(* Only a non-retryable [modelError] without quota leaves its cause to prose,
-   so only that failure reads the catalog, and only for a configured model. *)
-let catalog_checked_model ~configured_model (error : Serve.error) =
+(* The host's typed refusal of a turn's input (RFC-librarian-lifecycle §4.10):
+   a model error it judged would not succeed on the same input, with no quota
+   detail. The error sentence is not read. The caller joins it to the range
+   the turn's seed carried, when the turn sent one. *)
+let model_input_refusal_of_error (error : Serve.error) =
   match error with
   | Serve.Turn_failed { Msp.kind = Msp.Model_error; retryable = false; quota = None; _ } ->
-    configured_model
+    Some Turn_record.Model_error_not_retryable
   | Serve.Turn_failed { Msp.kind = Msp.Model_error; retryable = true; _ }
   | Serve.Turn_failed { Msp.kind = Msp.Model_error; quota = Some _; _ }
   | Serve.Turn_failed
@@ -97,6 +99,14 @@ let catalog_checked_model ~configured_model (error : Serve.error) =
   | Serve.Session_workspace_mismatch _ | Serve.Session_approval_mode_mismatch _
   | Serve.Auth_required _ | Serve.Turn_cancelled | Serve.Unsupported_server_request _
   | Serve.Runtime_shutting_down | Serve.Process_exited _ | Serve.Timeout _ -> None
+;;
+
+(* Only that refusal leaves its cause to prose, so only it reads the catalog,
+   and only for a configured model. *)
+let catalog_checked_model ~configured_model (error : Serve.error) =
+  match model_input_refusal_of_error error with
+  | Some Turn_record.Model_error_not_retryable -> configured_model
+  | None -> None
 ;;
 
 (* Mirrors the Codex app-server projection where the two clients share a
@@ -901,7 +911,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
     ~turn_start ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
-    ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
+    ~initial_messages ~model_input_projection ~on_transmitted_model_input
+    ~on_model_input_refused ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_transport_uncertain ~observe_quiet_turn
     ~on_official_client_tool_boundary
@@ -1742,12 +1753,29 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                      catalog_read_s;
                    None)
             in
+            (* The same typed answer can come from a model the account does not
+               list or from a spent usage window. Either one names a cause
+               that is not the size of the range, so neither marks it. *)
+            (match model_input_refusal_of_error error, catalog with
+             | None, (Some (Catalog_lists_model | Catalog_omits_model _) | None)
+             | Some Turn_record.Model_error_not_retryable, Some (Catalog_omits_model _) -> ()
+             | Some refusal, (Some Catalog_lists_model | None) ->
+               if not (Runtime_quota_window.is_exhausted ~scope:quota_scope
+                         ~now:(Time_compat.now ()))
+               then on_model_input_refused refusal);
             runtime_error_to_core_error ?catalog error)
         | `Abort stop -> Ok (`Stopped stop))
     in
     let settle_cancellation exn =
       let backtrace = Printexc.get_raw_backtrace () in
       let terminal_failure error =
+        (* The catalog is not read under cancellation; a spent window still
+           vetoes the mark. *)
+        (match model_input_refusal_of_error error with
+         | Some refusal
+           when not (Runtime_quota_window.is_exhausted ~scope:quota_scope
+                       ~now:(Time_compat.now ())) -> on_model_input_refused refusal
+         | Some Turn_record.Model_error_not_retryable | None -> ());
         recovery_failure_of_runtime_error ~current:!recovery_failure error in
       recovery_failure
         := (match !provider_terminal with
@@ -1936,7 +1964,9 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     ~goal_blocks ~system_prompt ~tools
     ?(loading_plan = Keeper_official_client_host.All_on_demand)
     ~initial_messages ~model_input_projection
-    ~on_transmitted_model_input ~hooks ~context_injector ~context
+    ~on_transmitted_model_input
+    ?(on_model_input_refused = fun (_ : Turn_record.model_input_refusal) -> ())
+    ~hooks ~context_injector ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ?on_official_client_tool_boundary
@@ -2005,6 +2035,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         ~initial_messages
         ~model_input_projection
         ~on_transmitted_model_input
+        ~on_model_input_refused
         ~hooks
         ~context_injector
         ~context
@@ -2115,6 +2146,7 @@ module For_testing = struct
 
   let catalog_reading = catalog_reading
   let catalog_checked_model = catalog_checked_model
+  let model_input_refusal_of_error = model_input_refusal_of_error
   let runtime_error_to_core_error = runtime_error_to_core_error
   let recovery_failure_of_runtime_error = recovery_failure_of_runtime_error
 

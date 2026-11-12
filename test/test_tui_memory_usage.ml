@@ -35,6 +35,7 @@ let record ?(blocks = []) ?input_components ?(usage_scope = Runtime_usage_scope.
         ; model_input_front = Model_input_front.At_atom (String.make 64 'c')
         }
   ; response_observed_model_input = None
+  ; refused_model_input = None
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = Some 0.2

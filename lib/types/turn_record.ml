@@ -71,6 +71,24 @@ type model_input_window =
   ; model_input_front : Model_input_front.t
   }
 
+type model_input_refusal = Model_error_not_retryable
+
+let model_input_refusal_to_string = function
+  | Model_error_not_retryable -> "model_error_not_retryable"
+;;
+
+let model_input_refusal_of_string = function
+  | "model_error_not_retryable" -> Ok Model_error_not_retryable
+  | other ->
+    Error (Printf.sprintf "turn_record: unknown model_input_refusal %S" other)
+;;
+
+type refused_model_input =
+  { runtime_profile : string
+  ; window : model_input_window
+  ; refusal : model_input_refusal
+  }
+
 type response_observed_model_input =
   { runtime_profile : string
   ; window : model_input_window
@@ -112,6 +130,7 @@ type t =
   ; request_wire_observation : request_wire_observation option
   ; model_input_window : model_input_window option
   ; response_observed_model_input : response_observed_model_input option
+  ; refused_model_input : refused_model_input option
   ; raw_trace_run_ref : raw_trace_run_ref option
   ; request_observations : Request_observation.t list
   ; sampling : sampling
@@ -227,19 +246,33 @@ let to_json (r : t) : Yojson.Safe.t =
       , Model_input_front.to_json window.model_input_front )
     | None -> `Null, `Null, `Null, `Null
   in
+  let observed_window_fields ~runtime_profile (window : model_input_window) =
+    [ "runtime_profile", `String runtime_profile
+    ; "transmitted_atoms", `Int window.transmitted_atoms
+    ; "total_atoms", `Int window.total_atoms
+    ; ( "model_input_measurement"
+      , `String (model_input_measurement_to_string window.measurement) )
+    ; "model_input_front", Model_input_front.to_json window.model_input_front
+    ]
+  in
   let response_observed_model_input =
     match r.response_observed_model_input with
     | None -> `Null
-    | Some observed ->
-      let window = observed.window in
+    | Some (observed : response_observed_model_input) ->
       `Assoc
-        [ "runtime_profile", `String observed.runtime_profile
-        ; "transmitted_atoms", `Int window.transmitted_atoms
-        ; "total_atoms", `Int window.total_atoms
-        ; ( "model_input_measurement"
-          , `String (model_input_measurement_to_string window.measurement) )
-        ; "model_input_front", Model_input_front.to_json window.model_input_front
-        ]
+        (observed_window_fields
+           ~runtime_profile:observed.runtime_profile
+           observed.window)
+  in
+  let refused_model_input =
+    match r.refused_model_input with
+    | None -> `Null
+    | Some refused ->
+      `Assoc
+        (observed_window_fields
+           ~runtime_profile:refused.runtime_profile
+           refused.window
+         @ [ "refusal", `String (model_input_refusal_to_string refused.refusal) ])
   in
   `Assoc
     ([ ( "execution_ids"
@@ -265,6 +298,7 @@ let to_json (r : t) : Yojson.Safe.t =
      ; "model_input_measurement", model_input_measurement
      ; "model_input_front", model_input_front
      ; "response_observed_model_input", response_observed_model_input
+     ; "refused_model_input", refused_model_input
      ; ( "raw_trace_run_ref"
        , match r.raw_trace_run_ref with
          | Some run_ref -> raw_trace_run_ref_to_json run_ref
@@ -547,6 +581,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "model_input_measurement"
             ; "model_input_front"
             ; "response_observed_model_input"
+            ; "refused_model_input"
             ; "raw_trace_run_ref"
             ; "selected_model"
             ; "finish_reason"
@@ -670,6 +705,63 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
              model_input_measurement and model_input_front must all be present \
              or all be null"
       in
+      (* The runtime and the range it was asked to carry, as both the
+         response-observed and the refused fact write them. [extra] names the
+         keys one of them adds. *)
+      let observed_window ~key ~extra observed_fields =
+        let require_observed name =
+          match require name observed_fields with
+          | Ok _ as value -> value
+          | Error _ ->
+            Error (Printf.sprintf "turn_record: missing field %S" (key ^ "." ^ name))
+        in
+        let* () =
+          if
+            fields_are_unique_known
+              ([ "runtime_profile"
+               ; "transmitted_atoms"
+               ; "total_atoms"
+               ; "model_input_measurement"
+               ; "model_input_front"
+               ]
+               @ extra)
+              observed_fields
+          then Ok ()
+          else Error (Printf.sprintf "turn_record: %s fields are not exact" key)
+        in
+        let* runtime_profile_json = require_observed "runtime_profile" in
+        let* runtime_profile =
+          as_nonempty_string (key ^ ".runtime_profile") runtime_profile_json
+        in
+        let* transmitted_atoms_json = require_observed "transmitted_atoms" in
+        let* transmitted_atoms =
+          as_nonnegative_int (key ^ ".transmitted_atoms") transmitted_atoms_json
+        in
+        let* total_atoms_json = require_observed "total_atoms" in
+        let* total_atoms = as_nonnegative_int (key ^ ".total_atoms") total_atoms_json in
+        let* measurement_json = require_observed "model_input_measurement" in
+        let* measurement_raw =
+          as_nonempty_string (key ^ ".model_input_measurement") measurement_json
+        in
+        let* measurement = model_input_measurement_of_string measurement_raw in
+        let* model_input_front_json = require_observed "model_input_front" in
+        let* model_input_front = Model_input_front.of_json model_input_front_json in
+        let* () =
+          Model_input_front.validate ~transmitted_atoms ~total_atoms model_input_front
+          |> Result.map_error (fun detail -> Printf.sprintf "turn_record: %s: %s" key detail)
+        in
+        if transmitted_atoms > total_atoms
+        then
+          Error
+            (Printf.sprintf
+               "turn_record: %s.transmitted_atoms cannot exceed total_atoms"
+               key)
+        else
+          Ok
+            ( runtime_profile
+            , { transmitted_atoms; total_atoms; measurement; model_input_front }
+            , require_observed )
+      in
       let* response_observed_model_input_json =
         require "response_observed_model_input" fields
       in
@@ -677,84 +769,29 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         match response_observed_model_input_json with
         | `Null -> Ok None
         | `Assoc observed_fields ->
-          let require_observed name =
-            match require name observed_fields with
-            | Ok _ as value -> value
-            | Error _ ->
-              Error
-                (Printf.sprintf
-                   "turn_record: missing field %S"
-                   ("response_observed_model_input." ^ name))
+          let* runtime_profile, window, _ =
+            observed_window ~key:"response_observed_model_input" ~extra:[] observed_fields
           in
-          let* () =
-            if
-              fields_are_unique_known
-                [ "runtime_profile"
-                ; "transmitted_atoms"
-                ; "total_atoms"
-                ; "model_input_measurement"
-                ; "model_input_front"
-                ]
-                observed_fields
-            then Ok ()
-            else
-              Error
-                "turn_record: response_observed_model_input fields are not exact"
-          in
-          let* runtime_profile_json = require_observed "runtime_profile" in
-          let* runtime_profile =
-            as_nonempty_string
-              "response_observed_model_input.runtime_profile"
-              runtime_profile_json
-          in
-          let* transmitted_atoms_json = require_observed "transmitted_atoms" in
-          let* transmitted_atoms =
-            as_nonnegative_int
-              "response_observed_model_input.transmitted_atoms"
-              transmitted_atoms_json
-          in
-          let* total_atoms_json = require_observed "total_atoms" in
-          let* total_atoms =
-            as_nonnegative_int
-              "response_observed_model_input.total_atoms"
-              total_atoms_json
-          in
-          let* measurement_json = require_observed "model_input_measurement" in
-          let* measurement_raw =
-            as_nonempty_string
-              "response_observed_model_input.model_input_measurement"
-              measurement_json
-          in
-          let* measurement = model_input_measurement_of_string measurement_raw in
-          let* model_input_front_json = require_observed "model_input_front" in
-          let* model_input_front =
-            Model_input_front.of_json model_input_front_json
-          in
-          let* () =
-            Model_input_front.validate ~transmitted_atoms ~total_atoms model_input_front
-            |> Result.map_error (fun detail ->
-              "turn_record: response_observed_model_input: " ^ detail)
-          in
-          if transmitted_atoms > total_atoms
-          then
-            Error
-              "turn_record: response_observed_model_input.transmitted_atoms \
-               cannot exceed total_atoms"
-          else
-            Ok
-              (Some
-                 { runtime_profile
-                 ; window =
-                     { transmitted_atoms
-                     ; total_atoms
-                     ; measurement
-                     ; model_input_front
-                     }
-                 })
+          Ok (Some ({ runtime_profile; window } : response_observed_model_input))
         | _ ->
           Error
             "turn_record: response_observed_model_input is not an object or \
              null"
+      in
+      let* refused_model_input_json = require "refused_model_input" fields in
+      let* refused_model_input =
+        match refused_model_input_json with
+        | `Null -> Ok None
+        | `Assoc refused_fields ->
+          let key = "refused_model_input" in
+          let* runtime_profile, window, require_refused =
+            observed_window ~key ~extra:[ "refusal" ] refused_fields
+          in
+          let* refusal_json = require_refused "refusal" in
+          let* refusal_raw = as_nonempty_string (key ^ ".refusal") refusal_json in
+          let* refusal = model_input_refusal_of_string refusal_raw in
+          Ok (Some { runtime_profile; window; refusal })
+        | _ -> Error "turn_record: refused_model_input is not an object or null"
       in
       let* raw_trace_run_ref_json = require "raw_trace_run_ref" fields in
       let* raw_trace_run_ref =
@@ -851,6 +888,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; request_wire_observation
         ; model_input_window
         ; response_observed_model_input
+        ; refused_model_input
         ; raw_trace_run_ref
         ; request_observations
         ; sampling = { temperature; top_p; max_tokens; enable_thinking }

@@ -1363,6 +1363,7 @@ let test_the_librarian_stalled_alarm_is_read_from_files () =
       ~model_input_window:(Some window)
       ~response_observed_model_input:
         (if observed then Some { Turn_record.runtime_profile = "glm"; window } else None)
+      ~refused_model_input:None
       ~raw_trace_run_ref:None
       ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
       ~usage:

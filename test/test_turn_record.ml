@@ -158,6 +158,7 @@ let sample_record () : Turn_record.t =
             ; model_input_front = Model_input_front.At_atom (String.make 64 'b')
             }
         }
+  ; refused_model_input = None
   ; raw_trace_run_ref =
       Some
         { worker_run_id = "worker-run-41"
@@ -556,6 +557,7 @@ let test_codec_optional_fields_absent () =
     ; request_wire_observation = None
     ; model_input_window = None
     ; response_observed_model_input = None
+    ; refused_model_input = None
     ; sampling =
         { temperature = None
         ; top_p = None
@@ -690,6 +692,7 @@ let test_codec_requires_current_observation_fields () =
     ; "total_atoms"
     ; "model_input_front"
     ; "response_observed_model_input"
+    ; "refused_model_input"
     ]
 
 let test_codec_rejects_invalid_response_observed_model_input () =
@@ -730,6 +733,50 @@ let test_codec_rejects_invalid_response_observed_model_input () =
               ~affix:"response_observed_model_input"
               message))
     cases
+
+(* A typed refusal names the range the next new session must open after
+   (RFC-librarian-lifecycle §4.10), so the range, its runtime and the refusal
+   survive the codec together and an unknown refusal is not read as one. *)
+let test_refused_model_input_round_trips_and_rejects_unknown_refusal () =
+  let window : Turn_record.model_input_window =
+    { transmitted_atoms = 534
+    ; total_atoms = 621
+    ; measurement = Durable_shape
+    ; model_input_front = Model_input_front.At_atom (String.make 64 'c')
+    }
+  in
+  let record =
+    { (sample_record ()) with
+      Turn_record.response_observed_model_input = None
+    ; refused_model_input =
+        Some { runtime_profile = "muse"; window; refusal = Model_error_not_retryable }
+    }
+  in
+  let json = Turn_record.to_json record in
+  (match Turn_record.of_json json with
+   | Error detail -> fail detail
+   | Ok decoded ->
+     check bool "refused range survives the strict codec" true
+       (decoded.refused_model_input = record.refused_model_input);
+     check bool "a refusal is not a response observation" true
+       (Option.is_none decoded.response_observed_model_input));
+  let with_refusal value =
+    match json with
+    | `Assoc fields ->
+      (match List.assoc "refused_model_input" fields with
+       | `Assoc refused ->
+         `Assoc
+           (( "refused_model_input"
+            , `Assoc (("refusal", value) :: List.remove_assoc "refusal" refused) )
+            :: List.remove_assoc "refused_model_input" fields)
+       | _ -> fail "sample refusal is not an object")
+    | other -> other
+  in
+  match Turn_record.of_json (with_refusal (`String "context_overflow")) with
+  | Ok _ -> fail "an unknown refusal decoded"
+  | Error message ->
+    check bool "unknown refusal names its field" true
+      (Astring.String.is_infix ~affix:"model_input_refusal" message)
 
 (* The record has to carry how much of its own history the turn transmitted,
    because nothing downstream can recover it: the request itself keeps no trace
@@ -1348,6 +1395,8 @@ let () =
             test_codec_requires_current_observation_fields
         ; test_case "invalid response-observed input rejected" `Quick
             test_codec_rejects_invalid_response_observed_model_input
+        ; test_case "refused input round-trips and rejects unknown refusal" `Quick
+            test_refused_model_input_round_trips_and_rejects_unknown_refusal
         ; test_case "empty-history boundaries are explicit and strict" `Quick
             test_empty_model_input_boundaries_roundtrip_and_reject_invalid_shapes
         ; test_case "record carries transmitted history share" `Quick

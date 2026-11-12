@@ -1200,6 +1200,7 @@ let run_turn
     let request_observations_rev = ref [] in
     let model_input_window_ref = ref None in
     let response_observed_model_input_ref = ref None in
+    let refused_model_input_ref = ref None in
     let source_model_input_projection =
       s.Keeper_run_tools.model_input_projection
     in
@@ -1601,6 +1602,8 @@ let run_turn
                         (fun observation ->
                            response_observed_model_input_ref :=
                              Some observation)
+                      ~on_refused_model_input:
+                        (fun refused -> refused_model_input_ref := Some refused)
                       ~carried_front_seed:(fun () ->
                         Keeper_carried_front.read_seed
                           ~config
@@ -2356,6 +2359,7 @@ let run_turn
                !model_input_window_ref)
           ~response_observed_model_input:
             !response_observed_model_input_ref
+          ~refused_model_input:!refused_model_input_ref
           ~raw_trace_run_ref
           ~request_observations:(List.rev !request_observations_rev)
           ~sampling:

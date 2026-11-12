@@ -479,6 +479,7 @@ let test_retained_forecast_reuses_recent_reading_only () =
     ; request_wire_observation = None
     ; model_input_window = None
     ; response_observed_model_input = None
+    ; refused_model_input = None
     ; raw_trace_run_ref = None
     ; sampling =
         { temperature = None

@@ -115,7 +115,7 @@ let run_ref ~path ~worker_run_id ~start_seq =
 let write_turn_record ?(execution_ids = []) config ~absolute_turn ~turn_kind ~raw_trace_run_ref =
   Keeper_turn_record_writer.write ~request_observations:[]
     ~model_input_window:None
-    ~response_observed_model_input:None
+    ~response_observed_model_input:None ~refused_model_input:None
     ~config
     ~keeper_name
     ~agent_name

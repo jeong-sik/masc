@@ -131,6 +131,22 @@ type model_input_window =
     present or all null. A record without the [model_input_front] key does not
     decode. *)
 
+type model_input_refusal =
+  | Model_error_not_retryable
+      (** The host ended the turn with a model error it judged would not
+          succeed on the same input, with no quota detail. *)
+
+type refused_model_input =
+  { runtime_profile : string
+  ; window : model_input_window
+  ; refusal : model_input_refusal
+  }
+(** The request range a runtime's typed refusal answered: the seed of a new
+    client session, which the runtime named and the provider did not accept
+    (RFC-librarian-lifecycle §4.10). The next new session on the same runtime
+    opens strictly after this range's start. A refused request on a resumed
+    session carried no seed and leaves [None]. *)
+
 type response_observed_model_input =
   { runtime_profile : string
   ; window : model_input_window
@@ -265,6 +281,9 @@ type t =
        The JSON key is required and nullable; older rows without the fact do
        not decode and therefore cannot promote an attempted range after a
        restart. *)
+  ; refused_model_input : refused_model_input option
+    (* [None] means no typed refusal answered a seeded request in this turn.
+       The JSON key is required and nullable. *)
   ; raw_trace_run_ref : raw_trace_run_ref option
     (* Exact AGENT_CORE run selected by this turn's completed provider dispatch.
        [None] is an explicit observation that the raw-trace sink degraded or

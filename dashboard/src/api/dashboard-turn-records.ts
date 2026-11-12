@@ -583,6 +583,10 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'total_atoms',
     'model_input_measurement',
     'response_observed_model_input',
+    // The seed range a runtime's typed refusal answered (RFC-librarian-lifecycle
+    // §4.10). The inspector does not render it; it is accepted so a record
+    // carrying it is not rejected as unknown.
+    'refused_model_input',
     // The window's front position (RFC keeper-context-window-in-tokens
     // §10.4). The inspector does not render it; it is accepted so a record
     // carrying it is not rejected as unknown.

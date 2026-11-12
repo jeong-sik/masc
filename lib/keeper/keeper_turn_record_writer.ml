@@ -22,6 +22,7 @@ let write
       ~request_wire_observation
       ~model_input_window
       ~response_observed_model_input
+      ~refused_model_input
       ~raw_trace_run_ref
       ~request_observations
       ~sampling
@@ -56,6 +57,7 @@ let write
     ; request_wire_observation
     ; model_input_window
     ; response_observed_model_input
+    ; refused_model_input
     ; raw_trace_run_ref
     ; request_observations
     ; sampling

@@ -327,11 +327,11 @@ let render_system_logs (state : state) =
          all and the note pointed at a row that is not on the screen. The
          shared note holds in both, and the staleness is already said twice
          above -- by the badge and by the error row this listing draws. *)
-      | Page_failed -> page_failed_note
+      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
       | Page_unread ->
           (* The server page reads through a stream that stays open while the
              page is on screen, and its first frame is the first answer. *)
-          page_unread_note_while ~reading:(Option.is_some state.system_log_stream)
+          page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:(Option.is_some state.system_log_stream)
       | Page_empty when loaded_entries > 0 ->
           "  (no entries match the current category filter)"
       | Page_empty -> "  (no entries)"
@@ -596,8 +596,8 @@ let render_keeper_calls (state : state) =
         "  (loading exact call records...)"
       else
       match (state.keeper_calls, state.keeper_calls_error) with
-      | _, Some _ -> page_failed_note
-      | None, None -> page_unread_note
+      | _, Some _ -> page_failed_note ~ko:(state.ui_language = Lang_ko)
+      | None, None -> page_unread_note ~ko:(state.ui_language = Lang_ko)
       | Some _, None -> "  (no calls recorded)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

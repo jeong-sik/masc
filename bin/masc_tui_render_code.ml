@@ -389,7 +389,7 @@ let render_code (state : state) =
       | Masc_tui_fetched.Loading ->
           status_line (Ansi.dim ^ " (loading\xe2\x80\xa6)" ^ Ansi.reset)
       | Masc_tui_fetched.Absent ->
-          status_line (Ansi.dim ^ " " ^ String.trim page_unread_note ^ Ansi.reset)
+          status_line (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
       | Masc_tui_fetched.Ready [] ->
           status_line (Ansi.dim ^ " (empty directory)" ^ Ansi.reset)
       | Masc_tui_fetched.Ready (_ :: _) -> 0

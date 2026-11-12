@@ -344,8 +344,8 @@ let render_repository_list (state : state) =
       let lines =
         if shown = 0 then
           [match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
-           | Page_failed -> page_failed_note
-           | Page_unread -> page_unread_note_while ~reading:state.repositories_inflight
+           | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
+           | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.repositories_inflight
            | Page_empty -> "(no repositories registered)"]
         else List.init content_height (fun i ->
           let idx = i + scroll in
@@ -926,9 +926,9 @@ let render_changes_list (state : state) =
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.changes ~error:state.changes_error with
-      | Page_failed -> page_failed_note
+      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
       | Page_unread ->
-          if state.changes_inflight then page_reading_note
+          if state.changes_inflight then page_reading_note ~ko:(state.ui_language = Lang_ko)
           else
             ui_text state ~ko:"  (키퍼 화면에서 Keeper 를 고른 뒤 r 누르기)"
               ~en:"  (pick a keeper on the Keepers surface, then press r)"

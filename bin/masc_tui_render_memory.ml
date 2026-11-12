@@ -1545,10 +1545,10 @@ let render_memory_body ~cols ~budget (state : state)
       match
         empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
       with
-      | Page_failed -> if ko then "  (조회 실패 · 현재 기억 미확인)" else page_failed_note
+      | Page_failed -> if ko then "  (조회 실패 · 현재 기억 미확인)" else page_failed_note ~ko:false
       | Page_unread -> if ko then
           (if state.memory_health_inflight then "  (기억 조회 중)" else "  (기억 미조회)")
-          else page_unread_note_while ~reading:state.memory_health_inflight
+          else page_unread_note_while ~ko:false ~reading:state.memory_health_inflight
       | Page_empty when query <> "" ->
         Printf.sprintf (if ko then "  (\"%s\"에 맞는 Keeper 없음 · Esc:필터 해제)"
           else "  (no keepers matching \"%s\" — Esc clears filter)")
@@ -1775,11 +1775,12 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
          state.memory_facts_category
        with
        | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
-       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> text "  (조회 실패 · 현재 사실 미확인)" page_failed_note
+       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> text "  (조회 실패 · 현재 사실 미확인)" (page_failed_note ~ko:false)
        | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
        | (Page_unread, Category_source) | (Page_unread, Category_dropped) ->
            text (if view_is_loading (memory_facts_view state) then "  (조회 중)" else "  (미조회)")
-             (page_unread_note_while ~reading:(view_is_loading (memory_facts_view state)))
+             (page_unread_note_while ~ko:false
+                ~reading:(view_is_loading (memory_facts_view state)))
        | Page_empty, Category_all ->
            (* [total] counts rows filtered by [memory_search_query], so the
               note reads the same value; the store is not empty just because

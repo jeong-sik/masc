@@ -4066,13 +4066,13 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   let scroll = max 0 (min ds.ds_scroll max_scroll) in
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
   if Option.is_some ds.ds_error && geometry.dsg_error_rows = 0 then
-    box_line_styled buf cols ~style:(Theme.bad ()) page_failed_note
+    box_line_styled buf cols ~style:(Theme.bad ()) (page_failed_note ~ko:(state.ui_language = Lang_ko))
   else if total = 0 then begin
     (* Three different facts, and none of them is the others: not read yet, a
        failed read, and a file that matches its last commit. *)
     let empty =
       match (ds.ds_diff, ds.ds_error) with
-      | (Some _ | None), Some _ -> page_failed_note
+      | (Some _ | None), Some _ -> page_failed_note ~ko:(state.ui_language = Lang_ko)
       | None, None -> "  (reading the tree)"
       | Some diff, None ->
           if diff.Masc.Tui_decode.gd_has_changes then

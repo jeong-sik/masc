@@ -531,7 +531,7 @@ let render_board_list (state : state) =
       if count = 0 then
         (match observation with
          | Masc_tui_fetched.Failed _ | Stale _ -> Option.iter render_list_error list_error
-         | Absent -> c.push (Ansi.dim ^ words state "  (미조회 · r:다시 읽기)" page_unread_note ^ Ansi.reset)
+         | Absent -> c.push (Ansi.dim ^ page_unread_note ~ko:(state.ui_language = Lang_ko) ^ Ansi.reset)
          | Loading -> c.push (Ansi.dim ^ (words state "  (글 조회 중)" "  (reading Board posts)") ^ Ansi.reset)
          | Ready _ -> c.push (Ansi.dim
              ^ (if pending then (words state "  (이전 목록은 비어 있음 · 글 조회 중)" "  (last listing empty; reading posts)")

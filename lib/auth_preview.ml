@@ -504,11 +504,15 @@ type person =
   ; namespace : Account_home_namespace.t
   }
 
-(* The human a [Manage_own_*] route lets through. *)
-let human trusted ~now_ms access ~service_refused request =
+(* The human a [Manage_own_*] route lets through, with the personal access
+   token that authenticated the request, if one did. *)
+let authenticated_human trusted ~now_ms access ~service_refused request =
   match Auth_gate.decide trusted ~now_ms access request with
   | Error reason -> Error (refused reason)
-  | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Human user_id; _ }) -> Ok user_id
+  | Ok
+      (Auth_gate.Authenticated
+         { Auth_gate.principal = Principal.Human user_id; pat_binding; binding = _; role = _ }) ->
+    Ok (user_id, pat_binding)
   | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Service service_id; _ }) ->
     (* [decide] refuses a service on these kinds; were it not to, it still
        owns nothing. *)
@@ -518,20 +522,29 @@ let human trusted ~now_ms access ~service_refused request =
     Error (refused Auth_gate.Credential_required)
 ;;
 
+(* The human a [Manage_own_*] route lets through. *)
+let human trusted ~now_ms access ~service_refused request =
+  Result.map
+    (fun (user_id, (_ : Pat_binding.t)) -> user_id)
+    (authenticated_human trusted ~now_ms access ~service_refused request)
+;;
+
+(* The person of [user_id], with the namespace their admission fixed. *)
+let with_namespace (trusted : Authz_zone.trusted) user_id =
+  let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+  match Authz_principal_state.find_membership state.Authz_state.principals user_id with
+  | Some { Authz_principal_state.account_home_namespace = namespace; workspace_id = _ } ->
+    Ok { user_id; namespace }
+  | None ->
+    (* The admission that made an active principal made its membership in
+       the same record, so none is a log this build did not write. *)
+    Error (R.json R.Internal_error_500 [ "error", `String "the principal has no membership" ])
+;;
+
 (* The human a [Manage_own_*] route lets through, with the namespace their
    admission fixed. *)
-let member (trusted : Authz_zone.trusted) ~now_ms access ~service_refused request =
-  match human trusted ~now_ms access ~service_refused request with
-  | Error _ as refused -> refused
-  | Ok user_id ->
-    let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
-    (match Authz_principal_state.find_membership state.Authz_state.principals user_id with
-     | Some { Authz_principal_state.account_home_namespace = namespace; workspace_id = _ } ->
-       Ok { user_id; namespace }
-     | None ->
-       (* The admission that made an active principal made its membership in
-          the same record, so none is a log this build did not write. *)
-       Error (R.json R.Internal_error_500 [ "error", `String "the principal has no membership" ]))
+let member trusted ~now_ms access ~service_refused request =
+  Result.bind (human trusted ~now_ms access ~service_refused request) (with_namespace trusted)
 ;;
 
 let person trusted ~now_ms request =
@@ -552,13 +565,21 @@ let keeper_owner trusted ~now_ms request =
     request
 ;;
 
-let keeper_owner_person trusted ~now_ms request =
-  member
-    trusted
-    ~now_ms
-    Route_access.Manage_own_keeper
-    ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_keeper service_id)
-    request
+type turn_caller =
+  { person : person
+  ; pat : Pat_binding.t
+  }
+
+let keeper_turn_caller trusted ~now_ms request =
+  Result.bind
+    (authenticated_human
+       trusted
+       ~now_ms
+       Route_access.Manage_own_keeper
+       ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_keeper service_id)
+       request)
+    (fun (user_id, pat) ->
+      Result.map (fun person -> { person; pat }) (with_namespace trusted user_id))
 ;;
 
 let provider_accounts state { user_id; namespace = _ } =

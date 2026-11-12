@@ -116,16 +116,30 @@ val retained_prefix_reasoning_indices
 type serialized_http_request = private
   { http_codec : Provider_http_codec.t
   ; body : string
+  ; body_sha256 : string
+    (** Hex SHA-256 of [body], taken once when the record is built. *)
   ; output_token_receipt : Types.output_token_receipt
   }
 
-val serialize_http_request_with_thinking_control
+(** The request body alone, with no digest and no artifact: for a caller
+    that measures a body or wraps it in an artifact of its own and never
+    dispatches it. *)
+val serialize_http_request_body_with_thinking_control
   :  stream:bool
   -> anthropic_thinking_control:Capabilities.anthropic_thinking_control option
   -> config:Provider_config.t
   -> messages:Types.message list
   -> tools:Yojson.Safe.t list
-  -> (serialized_http_request, Http_client.http_error) result
+  -> (string, Http_client.http_error) result
+
+(** {!serialize_http_request_body_with_thinking_control} with the thinking
+    control resolved from [config]. *)
+val serialize_http_request_body
+  :  stream:bool
+  -> config:Provider_config.t
+  -> messages:Types.message list
+  -> tools:Yojson.Safe.t list
+  -> (string, Http_client.http_error) result
 
 val serialize_http_request
   :  stream:bool
@@ -140,6 +154,16 @@ val serialize_final_http_request_unadmitted
   -> messages:Types.message list
   -> tools:Yojson.Safe.t list
   -> (serialized_http_request, Http_client.http_error) result
+
+(** The pre-dispatch observation of [serialized]: its byte count and the
+    digest the record already carries. Equal to
+    {!Request_wire_observer.observation} over the same body. *)
+val serialization_observation
+  :  capture_id:string option
+  -> config:Provider_config.t
+  -> stream:bool
+  -> serialized_http_request
+  -> Request_wire_observer.observation
 
 val config_with_trace_context
   :  Provider_config.t

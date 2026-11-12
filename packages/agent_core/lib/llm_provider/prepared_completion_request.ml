@@ -94,13 +94,11 @@ let admit_serialized_body ~stream prepared =
       ~tools:request.tools
   in
   let evidence =
-    Request_wire_observer.observation
+    Complete_common.serialization_observation
       ~capture_id:request.capture_id
-      ~provider:(Provider_registry.provider_name_of_config config)
-      ~model:config.model_id
-      ~http_codec:(Provider_http_codec.fingerprint_tag serialized_request.http_codec)
+      ~config
       ~stream
-      ~body:serialized_request.body
+      serialized_request
   in
   Ok
     { prepared

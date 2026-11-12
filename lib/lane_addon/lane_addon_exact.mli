@@ -14,8 +14,10 @@
     marker was written is tried again. A request whose attempt was started but
     has no outcome gets [Outcome_unknown]: the host cannot tell whether the
     provider received it, so it does not call again. A call that raises an
-    exception also ends its request as [Outcome_unknown], even when it raised
-    before the marker.
+    exception after the marker was written ends its request as
+    [Outcome_unknown]. A call that raises before [run] saved the marker sent no
+    generation request: [run] is an [Error] and writes no attempt, so the next
+    run reads the record as it was.
 
     The Lane store lives under the base path, and only the server process that
     holds the base-path lease ([Server_startup_takeover.acquire_base_path_lock])
@@ -105,7 +107,7 @@ type final =
 type unknown_cause = Interrupted | Cut | Raised
 (** [Interrupted] means another server incarnation left the started marker;
     [Cut] means this process no longer runs its own started attempt; [Raised]
-    means the call raised. Same-process recovery during graceful shutdown is
+    means the call raised after its started marker. Same-process recovery during graceful shutdown is
     still [Cut]. A completed original proof takes priority over either marker
     cause. The incarnation is a process-wide, memory-only random 128-bit value. *)
 

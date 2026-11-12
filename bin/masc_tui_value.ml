@@ -128,8 +128,6 @@ module Count = struct
     | Call
     | Post
     | Entry
-    | Row
-    | Event
 
   (* Singular, plural. *)
   let english = function
@@ -138,11 +136,8 @@ module Count = struct
     | Call -> "call", "calls"
     | Post -> "post", "posts"
     | Entry -> "entry", "entries"
-    | Row -> "row", "rows"
-    | Event -> "event", "events"
 
-  (* The thing, then the figure with its counter. A row is counted by the
-     word that names it. *)
+  (* The thing, then the figure with its counter. *)
   let korean noun figure =
     match noun with
     | Keeper -> "키퍼 " ^ figure ^ "명"
@@ -150,8 +145,6 @@ module Count = struct
     | Call -> "호출 " ^ figure ^ "건"
     | Post -> "글 " ^ figure ^ "개"
     | Entry -> "기록 " ^ figure ^ "건"
-    | Row -> figure ^ "줄"
-    | Event -> "이벤트 " ^ figure ^ "개"
 
   let reading ~ko noun count =
     let figure = grouped count in

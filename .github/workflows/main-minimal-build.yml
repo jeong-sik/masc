@@ -33,8 +33,12 @@ jobs:
     timeout-minutes: 90
     env:
       DUNE_JOBS: '4'
-      # Keep user-written rules (including generated build identity) live.
-      DUNE_CACHE: enabled-except-user-rules
+      # `enabled-except-user-rules` stored nothing: every saved Dune cache was
+      # about 400 bytes and each build compiled from scratch (issue #51365).
+      # With `enabled`, a rule is reused only while its declared inputs are
+      # unchanged. The build-commit probe depends on (universe), so it still
+      # runs every build.
+      DUNE_CACHE: enabled
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -87,7 +91,7 @@ jobs:
 
       - name: Reuse Dune build artifacts
         if: steps.receipt.outputs.cache-hit != 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/masc-dune-cache
           key: ${{ steps.inputs.outputs.dune }}-${{ github.sha }}
@@ -114,6 +118,23 @@ jobs:
         run: |
           set -euo pipefail
           opam exec -- dune build --root . @check 2>&1 | tee -a "$RUNNER_TEMP/main-build.log"
+
+      # PR type-checks restore this cache and never save one of their own
+      # (pr-type-check.yml). One entry is about 1.1 GB, so only the scheduled
+      # run saves: the number of entries per day then follows the half-hour
+      # schedule, not the number of merges. Trimming to zero removes only the
+      # entries this build did not use; the ones it used are hard-linked from
+      # _build and stay, so the entry does not grow from run to run.
+      - name: Drop Dune cache entries this build did not use
+        if: success() && github.event_name == 'schedule' && steps.receipt.outputs.cache-hit != 'true'
+        run: opam exec -- dune cache trim --size=0B
+
+      - name: Save Dune build artifacts for pull request type-checks
+        if: success() && github.event_name == 'schedule' && steps.receipt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/masc-dune-cache
+          key: ${{ steps.inputs.outputs.dune }}-${{ github.sha }}
 
       - name: Write the receipt
         if: success() && steps.receipt.outputs.cache-hit != 'true'

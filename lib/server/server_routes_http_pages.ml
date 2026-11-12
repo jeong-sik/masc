@@ -485,7 +485,7 @@ let read_dashboard_asset name =
       (Web_dashboard.reload_dashboard_asset ~held:asset.version name)
 ;;
 
-let serve_dashboard_static name request reqd =
+let serve_dashboard_asset ~unavailable name request reqd =
   match read_dashboard_asset name with
   | Ok read ->
       let content_type = asset_content_type name in
@@ -509,11 +509,18 @@ let serve_dashboard_static name request reqd =
   | Error error ->
     (match Web_dashboard.asset_error_http_status error with
      | `Not_found -> Http.Response.not_found reqd
-     | `Service_unavailable ->
-       Http.Response.text
-         ~status:`Service_unavailable
-         "Dashboard assets unavailable; inspect /health dashboard_surface.recovery"
-         reqd)
+     | `Service_unavailable -> unavailable reqd)
+
+let serve_dashboard_static name request reqd =
+  serve_dashboard_asset
+    ~unavailable:(fun reqd ->
+      Http.Response.text
+        ~status:`Service_unavailable
+        "Dashboard assets unavailable; inspect /health dashboard_surface.recovery"
+        reqd)
+    name
+    request
+    reqd
 
 let favicon_svg = {|
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">

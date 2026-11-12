@@ -16,9 +16,10 @@
       production sister aliases are unused leftovers
       (cycle 223 unused-alias pattern).
 
-    External surface (19 entries):
+    External surface (20 entries):
     - {b Legacy dashboard handlers}
       ({!serve_dashboard_index},
+      {!serve_dashboard_asset},
       {!serve_dashboard_static}).
     - {b GraphQL handlers + assets}
       ({!handle_graphql},
@@ -120,10 +121,19 @@ val serve_dashboard_index :
   Httpun.Request.t -> Http_reqd.t -> unit
 (** Serves the legacy dashboard's [index.html]. *)
 
+val serve_dashboard_asset :
+  unavailable:(Http_reqd.t -> unit) -> string -> Httpun.Request.t -> Http_reqd.t -> unit
+(** Serves one file of the dashboard bundle by its name in the bundle. A file
+    the bundle does not hold is a 404. [unavailable] answers when the bundle
+    cannot give the file for another reason
+    ({!Web_dashboard.asset_error_http_status}). Negotiated compression may
+    suspend on the CPU pool; the response is written on the calling fiber. *)
+
 val serve_dashboard_static :
   string -> Httpun.Request.t -> Http_reqd.t -> unit
-(** Serves a dashboard static asset by name. Negotiated compression may
-    suspend on the CPU pool; the response is written on the calling fiber. *)
+(** {!serve_dashboard_asset} as the operator dashboard answers it: a bundle
+    that cannot give the file is a 503 that points at the dashboard surface
+    of [/health]. *)
 
 (** {1 Server-state helpers} *)
 

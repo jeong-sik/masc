@@ -1492,7 +1492,7 @@ let window ~below ~scroll ~overview body =
    the columns, and beside the roster there may be none. *)
 let trace_summary ~ko count =
   Printf.sprintf
-    (if ko then "추적 불가: 키퍼 %d명 · 자세한 내용은 키퍼 Info / Metadata"
+    (if ko then "추적 불가: 키퍼 %d명 · 자세한 내용은 키퍼 정보 탭의 메타데이터"
      else "Trace unavailable: %d Keepers · details in Keeper Info / Metadata")
     count
 

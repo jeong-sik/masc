@@ -342,11 +342,19 @@ another of them the baseline is stale, and `prompt_lines.py` refuses the file.
 After a change of `prompt_counts.py` alone, set the baseline to `null`, count
 the same runs again and pin what `baseline` prints. After a change of the
 model, the pass lines or the template the old runs are refused too, so the
-model runs again first. `prompt_lines.json` also pins `prompt_counts.py`,
-`prompt_lines.py` and `prompt_compare.py` by sha256, and both commands stop
-when one of them holds other bytes. The file is read as written: a key the
-comparison does not read, a key written twice in one object, or a value of
-another shape is refused.
+model runs again first.
+
+`prompt_lines.json` names two kinds of files, and both commands stop when one
+of them is not the present one. It names the pass lines and the template of
+the baseline. That template is `config/prompts/librarian.md` as the pass lines
+pin it, so pass lines pinned again for a new template leave the file refused
+until it names that template. It also pins `prompt_counts.py`,
+`prompt_lines.py` and `prompt_compare.py` by sha256 (`files_sha256`). After a
+change of `prompt_lines.py` or `prompt_compare.py` only `files_sha256` is
+pinned again and the baselines stand; a change of `prompt_counts.py` leaves
+them stale as above. The file is read as written: a key the comparison does
+not read, a key written twice in one object, or a value of another shape is
+refused.
 
 Each metric counts hits over
 chances, summed over a side's runs. Its noise σ is the binomial standard error

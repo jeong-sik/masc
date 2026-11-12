@@ -415,13 +415,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      start. *)
   (let snapshot = Runtime.dashboard_runtime_resolved_snapshot () in
    let scopes =
-     List.fold_left
-       (fun scopes (runtime : Runtime_instance.t) ->
-          let scope = Runtime_instance.quota_scope_of_runtime runtime in
-          if List.exists (Runtime_quota_window.scope_equal scope) scopes
-          then scopes
-          else scope :: scopes)
-       []
+     Runtime_instance.distinct_quota_scopes
        (Option.to_list snapshot.Runtime.rs_default_runtime @ snapshot.Runtime.rs_runtimes)
    in
    match Server_provider_usage_history.restore config ~now:(Time_compat.now ()) ~scopes with

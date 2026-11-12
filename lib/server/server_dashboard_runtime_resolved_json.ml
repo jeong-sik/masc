@@ -279,19 +279,11 @@ let usage_window_kind_json : Usage.window_kind -> Yojson.Safe.t = function
   | Provider_label label -> `Assoc [ "kind", `String "provider_label"; "label", `String label ]
 ;;
 
-let usage_utilization_json : Usage.utilization -> Yojson.Safe.t = function
-  | Fraction value -> `Assoc [ "unit", `String "fraction"; "value", `Float value ]
-  | Percent value -> `Assoc [ "unit", `String "percent"; "value", `Int value ]
-  | Usd { used; limit } ->
-    `Assoc [ "unit", `String "usd"; "value", `Float used
-           ; "limit", Json_util.float_opt_to_json limit ]
-;;
-
 let usage_window_json ({ window; source; observed_at } : Usage.recorded) : Yojson.Safe.t =
   `Assoc
     [ "limit_id", string_opt_json window.limit_id
     ; "window", usage_window_kind_json window.kind
-    ; "utilization", usage_utilization_json window.utilization
+    ; "utilization", `Assoc (Usage.utilization_fields window.utilization)
     ; "resets_at", int_opt_json window.resets_at
     ; "observed_at", `Float observed_at
     ; "source", `String (Usage.source_to_string source)

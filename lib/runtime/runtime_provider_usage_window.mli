@@ -225,6 +225,12 @@ type scope_state = Runtime_provider_usage_types.scope_state =
       (** A complete provider report states no applicable windows. *)
   | Reported of recorded * recorded list
 
+val utilization_fields : utilization -> (string * Yojson.Safe.t) list
+(** The JSON fields a utilization is written with: ["unit"] is ["fraction"],
+    ["percent"] or ["usd"], ["value"] the amount, and a USD utilization adds
+    ["limit"] (a number or null). The stored history rows and the windows of
+    [/api/v1/runtime/resolved] both write these fields. *)
+
 val window_role_of_string : string -> window_role option
 (** The role {!window_role_to_string} wrote this word for; [None] for any
     other word. *)

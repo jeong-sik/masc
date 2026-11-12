@@ -102,12 +102,13 @@ let bootstrap ~base_path ~external_store =
   | Ok (base_url, { A.workspace_id; invitation }) ->
     Printf.printf
       "The installation is activated for multi-account use, workspace %s.\n\
-       This build does not serve multi-account yet, so a server stops at boot on this \
-       workspace. %s. %s. The external store is %s.\n\
+       A server now boots this workspace as a multi-account installation: the account server, \
+       which answers GET /health and none of the routes of a single-user server. It does not \
+       serve the login routes yet; masc auth preview serves them on 127.0.0.1 while no server \
+       runs. %s. The external store is %s.\n\
        The first Admin is invited.\n"
       (Authz_types.Workspace_id.to_string workspace_id)
       (String.capitalize_ascii Authz_boot_mode_read.turn_off_line)
-      (String.capitalize_ascii Authz_boot_mode_read.single_user_again)
       external_store;
     print_link ~command:"bootstrap" ~base_url invitation
 ;;

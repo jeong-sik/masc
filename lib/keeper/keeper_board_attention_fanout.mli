@@ -7,7 +7,8 @@ val dispatch :
   Keeper_board_attention_candidate.candidate list -> unit
 (** Fork one request for the eligible candidates whose partitions can be
     claimed. Excluded, contended and failed candidates remain with the ordinary
-    worker. Relevant completions are delivered by the owner. *)
+    worker, as does a candidate whose ledger value changed since the event
+    recorded it. Relevant completions are delivered by the owner. *)
 
 (** Reserve a finite runtime fleet before forking normal discoverable post
     admission. Initial cursor candidates retain synchronous durability;

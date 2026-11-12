@@ -2586,6 +2586,46 @@ let test_jev_event_fanout_failure_releases_claim () =
       | _ -> Alcotest.fail "failed batch stranded a claimed partition"))
 ;;
 
+(* The Board event keeps the Pending value it recorded. Meanwhile the candidate
+   can be judged and consumed, and its settled receipt pruned. A root made from
+   the held value would be judged a second time; the consumed candidate
+   refuses that judgment and the root stays Completed in front of the owner. *)
+let test_jev_event_fanout_leaves_a_candidate_consumed_since_its_event () =
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    with_temp_base "board-event-fanout-consumed" @@ fun base_path ->
+    let c = candidate "consumed-before-fanout" in
+    let response = Yojson.Safe.to_string (`Assoc
+      [ "model", `String "jev-latest"
+      ; "answers", `Assoc
+          [ c.candidate_id, `Assoc
+              [ "type", `String "choice"; "choice", `String "not_relevant"
+              ; "probabilities", `Assoc
+                  [ "relevant", `Float 0.1; "not_relevant", `Float 0.8; "uncertain", `Float 0.1 ]
+              ; "confidence", `Float 1.0 ] ] ]) in
+    let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
+    with_jev ~endpoint:jev.base_url (fun () ->
+      (match Candidate.record ~base_path c with
+       | Candidate.Recorded _ -> ()
+       | Candidate.Duplicate _ | Candidate.Record_error _ -> Alcotest.fail "record failed");
+      Eio.Switch.run (fun batch_sw ->
+        Keeper_board_attention_fanout.dispatch ~sw:batch_sw ~clock ~base_path [c]);
+      (match Candidate.load_candidates ~base_path ~keeper_name:c.keeper_name with
+       | Ok [{ status = Candidate.Consumed _; _ }] -> ()
+       | _ -> Alcotest.fail "the first judgment did not consume the candidate");
+      (match Partition.prune_settled_receipts ~base_path ~keeper_name:c.keeper_name with
+       | Ok 1 -> ()
+       | Ok removed -> Alcotest.failf "pruned %d settled receipts instead of one" removed
+       | Error detail -> Alcotest.fail detail);
+      (* [c] still says Pending, as the event's held value does. *)
+      Eio.Switch.run (fun batch_sw ->
+        Keeper_board_attention_fanout.dispatch ~sw:batch_sw ~clock ~base_path [c]);
+      (match Partition.load ~base_path ~keeper_name:c.keeper_name with
+       | Ok [] -> ()
+       | Ok _ -> Alcotest.fail "a consumed candidate got a new root"
+       | Error detail -> Alcotest.fail detail);
+      Alcotest.(check int) "Jev is asked once" 1 (List.length (Fixture.request_bodies jev))))
+;;
+
 let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
   with_prompt_registry (fun () ->
   (match Prompt_registry.set_override Prompt_names.judge_board_policy board_policy_marker with
@@ -3132,6 +3172,8 @@ let () =
             test_jev_event_fanout_settles_and_defers
         ; Alcotest.test_case "failed event fanout releases the claim" `Quick
             test_jev_event_fanout_failure_releases_claim
+        ; Alcotest.test_case "event fanout leaves a candidate consumed since its event" `Quick
+            test_jev_event_fanout_leaves_a_candidate_consumed_since_its_event
         ; Alcotest.test_case
             "a relevant Jev answer is kept"
             `Quick

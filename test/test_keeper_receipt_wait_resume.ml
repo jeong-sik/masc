@@ -524,6 +524,75 @@ let test_a_failed_receipt_write_leaves_the_wait_pending () =
     check int "a sweep that can write settled it" 2 !(task.attempts))
 ;;
 
+(* The tool reads who owns the request before it answers. A request another
+   conversation already waits for is refused with a message the model reads,
+   and the owner's record stays as it was. The execution that owns it can call
+   again, and a request nobody waits for is accepted. *)
+let wait_call config ~execution_scope request_id =
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String keeper_name ])
+    with
+    | Ok meta -> meta
+    | Error detail -> fail detail
+  in
+  Keeper_tool_receipt_wait.handle
+    ~config
+    ~meta
+    ~execution_scope:(Some execution_scope)
+    ~args:(`Assoc [ "request_id", `String request_id ])
+;;
+
+let expect_completed label (execution : Keeper_tool_execution.t) =
+  match execution.disposition with
+  | Tool_result.Completed () -> ()
+  | Tool_result.Deferred () | Tool_result.Failed _ ->
+    fail (label ^ ": the call did not complete: " ^ execution.raw_output)
+;;
+
+let test_a_request_another_conversation_waits_for_is_refused () =
+  with_workspace (fun ~sw ~clock config ->
+    let release, resolve_release = Eio.Promise.create () in
+    let owned, _ =
+      submit_background_request ~sw config ~f:(fun ~request_id:_ _ ->
+        Eio.Promise.await release;
+        Keeper_types_profile.tool_result_ok "done")
+    in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ owned ] in
+    let other = Keeper_execution_scope_id.direct_operation (operation_id "kmsg-other-chat") in
+    let owner_of request_id =
+      get
+        (Keeper_receipt_wait_resolution.request_owner
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+           ~request_id)
+    in
+    let refused = wait_call config ~execution_scope:other owned in
+    (match refused.disposition with
+     | Tool_result.Failed Tool_result.Workflow_rejection -> ()
+     | Tool_result.Failed _ | Tool_result.Completed () | Tool_result.Deferred () ->
+       fail "another conversation's wait was not refused as a workflow rejection");
+    check bool "the model reads that another conversation waits" true
+      (Astring.String.is_infix ~affix:"Another conversation" refused.raw_output);
+    check bool "the refusal records no wait" true
+      (Option.is_none refused.terminal_effect_receipt);
+    check bool "the owner's record is unchanged" true
+      (owner_of owned = Some task.scope);
+    check (list string) "and still pending" [ owned ] (pending_requests config);
+    expect_completed "the owning execution calls again"
+      (wait_call config ~execution_scope:task.scope owned);
+    check bool "the repeat does not move the owner" true (owner_of owned = Some task.scope);
+    let free, _ =
+      submit_background_request ~sw config ~f:(fun ~request_id:_ _ ->
+        Eio.Promise.await release;
+        Keeper_types_profile.tool_result_ok "done")
+    in
+    expect_completed "a request nobody waits for"
+      (wait_call config ~execution_scope:other free);
+    check bool "accepting it records nothing yet" true (owner_of free = None);
+    Eio.Promise.resolve resolve_release ())
+;;
+
 (* A request a worker may still own is not lost. The sweep reads the request
    record, never a clock. *)
 let test_run_with_a_worker_is_left_waiting () =
@@ -569,6 +638,8 @@ let () =
             test_run_without_a_record_is_settled_with_unknown_arguments
         ; test_case "a run with a worker is left waiting" `Quick
             test_run_with_a_worker_is_left_waiting
+        ; test_case "a request another conversation waits for is refused" `Quick
+            test_a_request_another_conversation_waits_for_is_refused
         ] )
     ]
 ;;

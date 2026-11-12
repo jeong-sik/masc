@@ -65,15 +65,45 @@ let waitable ~base_path ~keeper_name request_id =
                , "This run has ended and its receipt is no longer waiting." )))
 ;;
 
-let handle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ~args =
+(* An execution that already waits for the request keeps it. Another
+   execution's wait is refused at the end of the turn too, in the transaction
+   that records the wait; this read only lets the model hear it now. The
+   journal is read outside the Owner, so a wait that starts after this read is
+   still caught by that transaction. *)
+let not_waited_by_another ~base_path ~keeper_name ~execution_scope request_id =
+  match execution_scope with
+  | None ->
+    Error
+      ( Tool_result.Workflow_rejection
+      , "This run serves no conversation, so it has no turn to end on a receipt." )
+  | Some scope ->
+    (match Keeper_receipt_wait_resolution.request_owner ~base_path ~keeper_name ~request_id with
+     | Error detail -> Error (Tool_result.Dependency_unavailable, detail)
+     | Ok None -> Ok ()
+     | Ok (Some owner) ->
+       if Keeper_execution_scope_id.equal owner scope
+       then Ok ()
+       else
+         Error
+           ( Tool_result.Workflow_rejection
+           , "Another conversation of this Keeper already waits for the receipt of this \
+              request." ))
+;;
+
+let handle
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~execution_scope
+      ~args
+  =
   match request_id_of_args args with
   | Error detail -> refusal ~class_:Tool_result.Policy_rejection detail
   | Ok request_id ->
+    let base_path = config.Workspace.base_path in
+    let keeper_name = meta.Keeper_meta_contract.name in
     (match
-       waitable
-         ~base_path:config.Workspace.base_path
-         ~keeper_name:meta.Keeper_meta_contract.name
-         request_id
+       Result.bind (waitable ~base_path ~keeper_name request_id) (fun () ->
+         not_waited_by_another ~base_path ~keeper_name ~execution_scope request_id)
      with
      | Error (class_, detail) -> refusal ~class_ detail
      | Ok () ->

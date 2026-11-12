@@ -88,8 +88,15 @@ let wait_until_ended ~clock ~base_path request_id =
 
 let args request_id = `Assoc [ "request_id", `String request_id ]
 
-let call config args =
-  Keeper_tool_receipt_wait.handle ~config ~meta:(meta ()) ~args
+(* The chat execution the calls below serve. *)
+let chat_scope =
+  match Keeper_chat_operation.Operation_id.of_string "kmsg-wait-tool-chat" with
+  | Ok id -> Keeper_execution_scope_id.direct_operation id
+  | Error detail -> fail detail
+;;
+
+let call ?(execution_scope = Some chat_scope) config args =
+  Keeper_tool_receipt_wait.handle ~config ~meta:(meta ()) ~execution_scope ~args
 ;;
 
 let refusal_class (execution : Keeper_tool_execution.t) =
@@ -164,6 +171,24 @@ let test_running_run_is_waited_for () =
     Eio.Promise.resolve resolve_release ())
 ;;
 
+(* A call from a run that serves no chat execution has no turn to end on the
+   receipt, so it is refused and records nothing. *)
+let test_a_call_without_a_chat_execution_is_refused () =
+  with_workspace (fun ~sw ~clock:_ config ->
+    let base_path = config.Workspace.base_path in
+    let release, resolve_release = Eio.Promise.create () in
+    let request_id =
+      submit ~sw ~base_path ~request_context:execute_context (fun ~request_id:_ _ ->
+        Eio.Promise.await release;
+        Keeper_types_profile.tool_result_ok "done")
+    in
+    expect_refused
+      ~class_:Tool_result.Workflow_rejection
+      "a call with no chat execution"
+      (call ~execution_scope:None config (args request_id));
+    Eio.Promise.resolve resolve_release ())
+;;
+
 (* The worker writes a run's receipt before it settles the request. A request
    that has ended with no receipt in the outbox had its receipt delivered and
    acknowledged already, so there is nothing to wait for. *)
@@ -194,6 +219,7 @@ let test_ended_run_is_waited_for_only_while_its_receipt_is_there () =
    the terminal state the turn reads, and a refused call leaves it open. *)
 let bundle_for config =
   Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
+    ~execution_scope:chat_scope
     ~config
     ~meta:(meta ())
     ~publication_recovery:
@@ -387,6 +413,8 @@ let () =
             test_request_of_another_producer_is_refused
         ; test_case "a run that is still working is waited for" `Quick
             test_running_run_is_waited_for
+        ; test_case "a call without a chat execution is refused" `Quick
+            test_a_call_without_a_chat_execution_is_refused
         ; test_case "an ended run is waited for only while its receipt is there" `Quick
             test_ended_run_is_waited_for_only_while_its_receipt_is_there
         ] )

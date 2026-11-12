@@ -54,6 +54,7 @@ val execute_keeper_tool_descriptor_for_capability_surface_with_outcome
         sub-call provenance rows so candidate attempts join this call. *)
   -> ?trace_id:string
   -> ?result_projection:Tool_output.model_projection
+  -> ?execution_scope:Keeper_execution_scope_id.t
   -> descriptor:Keeper_tool_descriptor.t
   -> input:Yojson.Safe.t
   -> unit
@@ -85,6 +86,7 @@ val execute_keeper_tool_call_for_capability_surface_with_outcome
   -> ?tool_use_id:string
   -> ?trace_id:string
   -> ?result_projection:Tool_output.model_projection
+  -> ?execution_scope:Keeper_execution_scope_id.t
   -> name:string
   -> input:Yojson.Safe.t
   -> unit
@@ -116,6 +118,7 @@ module Compatibility : sig
     -> ?tool_use_id:string
     -> ?trace_id:string
     -> ?result_projection:Tool_output.model_projection
+    -> ?execution_scope:Keeper_execution_scope_id.t
     -> descriptor:Keeper_tool_descriptor.t
     -> input:Yojson.Safe.t
     -> unit
@@ -146,6 +149,7 @@ module Compatibility : sig
     -> ?tool_use_id:string
     -> ?trace_id:string
     -> ?result_projection:Tool_output.model_projection
+    -> ?execution_scope:Keeper_execution_scope_id.t
     -> name:string
     -> input:Yojson.Safe.t
     -> unit

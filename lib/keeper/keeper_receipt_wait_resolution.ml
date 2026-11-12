@@ -1,12 +1,27 @@
 open Result.Syntax
 module Outbox = Keeper_client_tool_outbox
 
+let store_path ~base_path ~keeper_name =
+  Keeper_chat_operation_store.path_for_keeper
+    ~keepers_runtime_dir:(Common.keepers_runtime_dir_of_base ~base_path)
+    ~keeper_name
+;;
+
+let request_owner ~base_path ~keeper_name ~request_id =
+  let path = store_path ~base_path ~keeper_name in
+  match
+    Eio_guard.run_in_systhread ~label:"receipt-wait-owner" (fun () ->
+      Keeper_chat_operation_store.inspect_receipt_owners ~path)
+  with
+  | Ok owners -> Ok (Keeper_chat_operation_store.receipt_owner owners ~request_id)
+  | Error error ->
+    Error
+      ("receipt owners are unreadable: "
+       ^ Keeper_chat_operation_store.error_to_string error)
+;;
+
 let pending_requests ~base_path ~keeper_name =
-  let path =
-    Keeper_chat_operation_store.path_for_keeper
-      ~keepers_runtime_dir:(Common.keepers_runtime_dir_of_base ~base_path)
-      ~keeper_name
-  in
+  let path = store_path ~base_path ~keeper_name in
   match
     Eio_guard.run_in_systhread ~label:"receipt-wait-pending" (fun () ->
       Keeper_chat_operation_store.inspect_pending_receipt_requests ~path)

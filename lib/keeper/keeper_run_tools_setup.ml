@@ -585,6 +585,8 @@ let prepare_agent_setup
         (Keeper_run_tools_hook_accumulator.record_inline_receipt_committed
            acc ~keeper_turn_id)
       ~turn_ctx_cell
+      ?execution_scope:
+        (Option.map Keeper_repetition_scope.Execution.scope repetition_execution)
       ~checkpoint_owner:(fun () -> !active_checkpoint_owner)
       ~tool_result_inline_ceiling_bytes:(fun () -> !active_tool_result_inline_ceiling_bytes)
       ()

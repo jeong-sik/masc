@@ -181,6 +181,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
       ?capability_surface
+      ?execution_scope
       ?(checkpoint_owner = fun () -> None)
       ?(tool_result_inline_ceiling_bytes = fun () -> Common.max_tool_result_wire_bytes)
       ~(descriptors : Keeper_tool_descriptor.t list)
@@ -522,6 +523,7 @@ let make_tool_bundle_for_descriptors_with_policy
                    ?continuation_channel
                    ?gate_context:call_gate_context
                    ?gate_grant
+                   ?execution_scope
                    ?record_gate_result:call_record_gate_result
                    ?on_completed
                    ~on_deferred:mark_deferred_tool_result
@@ -545,6 +547,7 @@ let make_tool_bundle_for_descriptors_with_policy
                    ?continuation_channel
                    ?gate_context:call_gate_context
                    ?gate_grant
+                   ?execution_scope
                    ?record_gate_result:call_record_gate_result
                    ?on_completed
                    ~on_deferred:mark_deferred_tool_result
@@ -1034,6 +1037,7 @@ let make_tool_bundle_for_capability_surface
       ?turn_ctx_cell
       ?checkpoint_owner
       ?tool_result_inline_ceiling_bytes
+      ?execution_scope
       ~capability_surface
       ()
   =
@@ -1057,6 +1061,7 @@ let make_tool_bundle_for_capability_surface
     ?turn_ctx_cell
     ?checkpoint_owner
     ?tool_result_inline_ceiling_bytes
+    ?execution_scope
     ~descriptors:(Keeper_capability_surface.descriptors capability_surface)
     ~capability_surface
     ()
@@ -1076,6 +1081,7 @@ module For_testing = struct
         ?capability_surface
         ?skill_catalog
         ?turn_ctx_cell
+        ?execution_scope
         ()
     =
     let descriptors = match capability_surface with
@@ -1095,6 +1101,7 @@ module For_testing = struct
       ?skill_catalog
       ~allow_unrecorded_skill_surface:true
       ?turn_ctx_cell
+      ?execution_scope
       ()
     |> Result.get_ok
   ;;

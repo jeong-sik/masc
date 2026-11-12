@@ -3,6 +3,16 @@
     checkpoint ({!Keeper_chat_operation_store.defer_direct_checkpoint}); this
     module only reads it back and tells the Owner what arrived. *)
 
+val request_owner
+  :  base_path:string
+  -> keeper_name:string
+  -> request_id:string
+  -> (Keeper_execution_scope_id.t option, string) result
+(** The active execution of this Keeper that owns the request's receipt, if
+    any. The journal is read without the Owner, so the answer can be out of
+    date by the time the caller acts on it. An unreadable journal is an
+    [Error], not [None]. *)
+
 val pending_requests
   :  base_path:string
   -> keeper_name:string

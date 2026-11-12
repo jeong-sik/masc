@@ -2735,7 +2735,7 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
           ~help:
             "twice: forget the stored token, drop the tools it attached, and ask \
              the provider to revoke what it still holds"
-      ; b ~ko:"거르기" Search "/" "filter"
+      ; b ~ko:"필터" Search "/" "filter"
       ; b ~ko:"새로 조회" Meta "R" "refresh"
       ]
   | Detail_channels ->

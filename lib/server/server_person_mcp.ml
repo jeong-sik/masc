@@ -16,12 +16,13 @@ let endpoint = "person"
 let max_message_bytes = 4 * 16 * 1024
 
 type caller =
-  { trusted : Authz_zone.trusted
+  { zone : Authz_zone.t
+  ; trusted : Authz_zone.trusted
   ; now_ms : int
   ; gate : Auth_gate.request
   }
 
-let admitted { trusted; now_ms; gate } =
+let admitted { zone = (_ : Authz_zone.t); trusted; now_ms; gate } =
   match Auth_gate.decide trusted ~now_ms Route_access.Read_auth gate with
   | Ok (Auth_gate.Authenticated (_ : Auth_gate.authenticated)) -> Ok ()
   | Ok (Auth_gate.Anonymous | Auth_gate.Judged_by_route) | Error (_ : Auth_gate.reason) ->
@@ -32,20 +33,38 @@ let admitted { trusted; now_ms; gate } =
 
 (* ---- the tools ---- *)
 
-type tool = Whoami
+type tool =
+  | Whoami
+  | Runtimes
+  | Keepers
+  | Keeper_create
+  | Keeper_assign
 
-let tools = [ Whoami ]
+let tools = [ Whoami; Runtimes; Keepers; Keeper_create; Keeper_assign ]
 
 let name_of = function
   | Whoami -> "masc_whoami"
+  | Runtimes -> "masc_my_runtimes"
+  | Keepers -> "masc_my_keepers"
+  | Keeper_create -> "masc_my_keeper_create"
+  | Keeper_assign -> "masc_my_keeper_assign"
 ;;
 
 (* Decoded when the module starts, as every tool definition the binary
    publishes is: a binary that lacks one does not start. *)
 let definition_of =
-  let whoami = Tool_definition_embedded.load (name_of Whoami) in
+  let load tool = Tool_definition_embedded.load (name_of tool) in
+  let whoami = load Whoami in
+  let runtimes = load Runtimes in
+  let keepers = load Keepers in
+  let keeper_create = load Keeper_create in
+  let keeper_assign = load Keeper_assign in
   function
   | Whoami -> whoami
+  | Runtimes -> runtimes
+  | Keepers -> keepers
+  | Keeper_create -> keeper_create
+  | Keeper_assign -> keeper_assign
 ;;
 
 let definitions = List.map (fun tool -> tool, definition_of tool) tools
@@ -61,10 +80,56 @@ let tool_json ((_ : tool), { Tool_definition_toml.schema; title; _ }) =
        ])
 ;;
 
+(* The state of the snapshot that judges the request, as a route of a person
+   reads it. *)
+let state { trusted; _ } = (trusted :> Authz_zone.snapshot).Authz_zone.state
+
+(* The one a tool acts for, judged by [gate] as the route of the tool judges.
+   A request that does not pass gets the answer of that route. *)
+let judged gate { trusted; now_ms; gate = request; _ } f =
+  match gate trusted ~now_ms request with
+  | Error answer -> answer
+  | Ok who -> f who
+;;
+
+(* The body that the route function of a tool reads: the arguments [names],
+   in the order the function takes them. The definition of the tool requires
+   each as a string, so one that is missing here answers a 400 as a route
+   does for a body it cannot read. *)
+let with_body names arguments f =
+  let fields =
+    match arguments with
+    | `Assoc fields -> fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
+  in
+  let members =
+    List.fold_right
+      (fun name members ->
+        match members, List.assoc_opt name fields with
+        | Ok members, Some (`String value) -> Ok ((name, `String value) :: members)
+        | Ok (_ : (string * Yojson.Safe.t) list), (Some _ | None) -> Error name
+        | (Error (_ : string) as missing), (Some _ | None) -> missing)
+      names
+      (Ok [])
+  in
+  match members with
+  | Ok members -> f ~body:(Yojson.Safe.to_string (`Assoc members))
+  | Error name ->
+    R.json R.Bad_request_400 [ "error", `String (Printf.sprintf "The argument %s must be a string." name) ]
+;;
+
 (* The function of the person's route, with the judgment that route makes. *)
-let run { trusted; now_ms; gate } tool ~arguments:(_ : Yojson.Safe.t) =
+let run caller tool ~arguments =
   match tool with
-  | Whoami -> Auth_preview.whoami trusted ~now_ms gate
+  | Whoami -> Auth_preview.whoami caller.trusted ~now_ms:caller.now_ms caller.gate
+  | Runtimes -> judged Auth_preview.person caller (Auth_preview.provider_accounts (state caller))
+  | Keepers -> judged Auth_preview.keeper_owner caller (Auth_preview_keeper.list (state caller))
+  | Keeper_create ->
+    judged Auth_preview.keeper_owner caller (fun user_id ->
+      with_body [ "keeper_id" ] arguments (Auth_preview_keeper.make caller.zone user_id))
+  | Keeper_assign ->
+    judged Auth_preview.keeper_owner caller (fun user_id ->
+      with_body [ "keeper_id"; "runtime_id" ] arguments (Auth_preview_keeper.assign caller.zone user_id))
 ;;
 
 let succeeded = function

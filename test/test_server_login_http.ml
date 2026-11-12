@@ -803,7 +803,7 @@ let a_person_calls_mcp () =
     Alcotest.(check int) ("tools/list: " ^ listed.body) 200 listed.status;
     Alcotest.(check (list string))
       "the tools"
-      [ "masc_whoami" ]
+      [ "masc_whoami"; "masc_my_runtimes"; "masc_my_keepers"; "masc_my_keeper_create"; "masc_my_keeper_assign" ]
       (match at [ "result"; "tools" ] listed with
        | `List tools ->
          List.map
@@ -928,6 +928,149 @@ let a_person_calls_mcp () =
       "the revoked PAT sends no message"
       ("401 " ^ Masc.Auth_gate.reason_to_string (Masc.Auth_gate.Pat_refused Authz_pat.Ended))
       (whoami_line (as_pat (rpc ~id:13 "tools/list"))))
+;;
+
+(* The Runtime and Keeper tools of the MCP endpoint (plan S1b-1b). Each tool
+   is the route of the person's page under another name: the same judgment,
+   the same function, the same words. A PAT whose scope lacks the effect of
+   the route is refused by the tool, and a Keeper of another person is one
+   that is not there. *)
+let call_tool ?(arguments = `Assoc []) ~id name =
+  rpc ~id "tools/call" ~params:(`Assoc [ "name", `String name; "arguments", arguments ])
+;;
+
+let error_json text = Yojson.Safe.to_string (`Assoc [ "error", `String text ])
+
+let a_person_keeps_keepers_over_mcp () =
+  with_installation (fun t ->
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let admin = fresh_browser () in
+    Alcotest.(check int)
+      "the Admin joins"
+      200
+      (sign_in t admin ~fields:[ "invite", admin_token ] ~user_id:583231).status;
+    let csrf = csrf_of t admin in
+    let user_id = user_of t admin in
+    let account = get_ok (Provider_account_id.of_string "account-1") in
+    (match Authz_provider_account.link t.routes.R.zone ~user_id ~provider_account_id:account with
+     | Ok () -> ()
+     | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
+    (match
+       Authz_runtime.make
+         t.routes.R.zone
+         ~user_id
+         ~provider_account_id:account
+         ~runtime_id:(get_ok (Runtime_id.of_string "account-1.claude-sonnet-5-5"))
+         ~self_effects:Effect.(Set.of_list [ Invoke_model; Use_tool ])
+         ~draw:(fun () -> "grant-1")
+     with
+     | Ok (_ : Grant_id.t) -> ()
+     | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
+    (* A PAT of [browser]'s person whose scope allows [effects]. *)
+    let pat browser ~csrf effects =
+      let issued =
+        send
+          browser
+          router
+          ~meth:"POST"
+          ~path:"/api/v1/auth/pats"
+          ~headers:(("Content-Type", "application/json") :: changing ~csrf ())
+          ~body:
+            (Printf.sprintf
+               {|{"scope":{"runtimes":"all","channels":["direct"],"allowed_effects":%s},"expires_at_ms":null}|}
+               effects)
+      in
+      match member "token" issued with
+      | Some (`String token) -> token
+      | _ -> Alcotest.failf "no PAT in %S" issued.body
+    in
+    let reader = pat admin ~csrf {|["read_state"]|} in
+    let owner = pat admin ~csrf {|["manage_own_keeper","manage_own_provider","read_state"]|} in
+    (* Whether the result is an error, and its text. *)
+    let result ?arguments token name =
+      let reply =
+        mcp ~headers:[ "Authorization", "Bearer " ^ token ] (fresh_browser ()) router (call_tool ?arguments ~id:1 name)
+      in
+      Alcotest.(check int) (name ^ ": " ^ reply.body) 200 reply.status;
+      Yojson.Safe.to_string (at [ "result"; "isError" ] reply), tool_text reply
+    in
+    let check label expected actual = Alcotest.(check (pair string string)) label expected actual in
+    let keeper name = `Assoc [ "keeper_id", `String name ] in
+    check
+      "a PAT without the Keeper effect lists no Keeper"
+      ("true", error_json (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Pat_scope_lacks_own_keeper))
+      (result reader "masc_my_keepers");
+    check
+      "and makes none"
+      ("true", error_json (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Pat_scope_lacks_own_keeper))
+      (result reader "masc_my_keeper_create" ~arguments:(keeper "keeper-1"));
+    check
+      "a PAT without the provider effect lists no Runtime"
+      ("true", error_json (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Pat_scope_lacks_own_provider))
+      (result reader "masc_my_runtimes");
+    check
+      "the Runtimes of the person"
+      ( "false"
+      , {|{"provider_accounts":["account-1"],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1"}]}|}
+      )
+      (result owner "masc_my_runtimes");
+    check "no Keeper yet" ("false", {|{"keepers":[]}|}) (result owner "masc_my_keepers");
+    Alcotest.(check string)
+      "a Keeper without a name is refused by the definition of the tool"
+      "true"
+      (fst (result owner "masc_my_keeper_create"));
+    check
+      "a name that is not a Keeper name, in the words of the route"
+      ( "true"
+      , error_json
+          "keeper_name must match [A-Za-z0-9._-]+ and must not be a reserved path component (. or ..)" )
+      (result owner "masc_my_keeper_create" ~arguments:(keeper ".."));
+    check
+      "a Keeper"
+      ("false", {|{"keeper_id":"keeper-1","record":"made"}|})
+      (result owner "masc_my_keeper_create" ~arguments:(keeper "keeper-1"));
+    check
+      "the same Keeper again"
+      ("false", {|{"keeper_id":"keeper-1","record":"existing"}|})
+      (result owner "masc_my_keeper_create" ~arguments:(keeper "keeper-1"));
+    check
+      "a Runtime no one made"
+      ("true", error_json "No Runtime of yours has this id.")
+      (result
+         owner
+         "masc_my_keeper_assign"
+         ~arguments:(`Assoc [ "keeper_id", `String "keeper-1"; "runtime_id", `String "account-2.claude-sonnet-5-5" ]));
+    check
+      "its owner's Runtime, with the arguments in the other order"
+      ("false", {|{"keeper_id":"keeper-1","runtime_id":"account-1.claude-sonnet-5-5","record":"assigned"}|})
+      (result
+         owner
+         "masc_my_keeper_assign"
+         ~arguments:(`Assoc [ "runtime_id", `String "account-1.claude-sonnet-5-5"; "keeper_id", `String "keeper-1" ]));
+    let listed = {|{"keepers":[{"keeper_id":"keeper-1","runtime_id":"account-1.claude-sonnet-5-5"}]}|} in
+    check "the Keeper on its Runtime" ("false", listed) (result owner "masc_my_keepers");
+    Alcotest.(check string)
+      "the page of the person lists the same"
+      listed
+      (send admin router ~meth:"GET" ~path:Masc.Auth_preview_keeper.keepers_path).body;
+    (* Another person. *)
+    let (_ : string) = registration_of (register t admin ~csrf {|{"provider":"github","user_id":7}|}) in
+    let other = fresh_browser () in
+    Alcotest.(check int) "another person joins" 200 (sign_in t other ~user_id:7).status;
+    let theirs = pat other ~csrf:(csrf_of t other) {|["manage_own_keeper","read_state"]|} in
+    check "who owns no Keeper" ("false", {|{"keepers":[]}|}) (result theirs "masc_my_keepers");
+    Alcotest.(check string)
+      "and cannot take the name of the first person's Keeper"
+      "true"
+      (fst (result theirs "masc_my_keeper_create" ~arguments:(keeper "keeper-1")));
+    check
+      "nor give it a Runtime"
+      ("true", error_json "No Keeper of yours has this name.")
+      (result
+         theirs
+         "masc_my_keeper_assign"
+         ~arguments:(`Assoc [ "keeper_id", `String "keeper-1"; "runtime_id", `String "account-1.claude-sonnet-5-5" ]));
+    check "the first person's Keeper is as it was" ("false", listed) (result owner "masc_my_keepers"))
 ;;
 
 (* Bytes another writer added to the log: the next commit finds the end moved
@@ -1153,6 +1296,7 @@ let () =
         ; Alcotest.test_case "the preview follows a login" `Quick the_preview_follows_a_login
         ; Alcotest.test_case "a PAT acts until it is revoked" `Quick a_pat_acts_until_it_is_revoked
         ; Alcotest.test_case "a person calls MCP" `Quick a_person_calls_mcp
+        ; Alcotest.test_case "a person keeps Keepers over MCP" `Quick a_person_keeps_keepers_over_mcp
         ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_answers_no_person
         ; Alcotest.test_case
             "the request that meets a moved log"

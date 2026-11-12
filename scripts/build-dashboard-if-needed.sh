@@ -222,6 +222,8 @@ needs_rebuild() {
   # No stamp or no output → must build
   [ ! -f "$STAMP" ] && return 0
   [ ! -f "$OUTPUT_DIR/index.html" ] && return 0
+  # The console of the account server is a second build under the same output.
+  [ ! -f "$OUTPUT_DIR/accounts/index.html" ] && return 0
 
   if generated_index_has_remote_startup_resources; then
     echo "[dashboard] Generated index contains remote startup resources; rebuilding." >&2

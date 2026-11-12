@@ -801,7 +801,7 @@ let render_runtime_reading (state : state) =
    | Masc_tui_types.Runtime_lanes ->
        let missing_resolved_value =
          match state.runtime_surface_error with
-         | None -> field_missing_reading ~error:None
+         | None -> field_missing_reading ~ko:(state.ui_language = Lang_ko) ~error:None
          | Some _ -> Ansi.dim ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset
        in
        let resolved =

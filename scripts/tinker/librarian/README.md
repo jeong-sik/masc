@@ -68,7 +68,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
 | `audit_baseline.py` | Answers requests the pass lines do not pin with the base model, for their blind label audit |
 | `teacher_sample.py` | Shows the teacher what each audited training label says and keeps the answers that leave the memory the label asks for, those that absorb a memory once the merge judge finds each absorb mergeable |
-| `train_sft.py` | Trains the candidate A on the teacher's answers |
+| `sft_examples.py` | What the candidate A is trained on: the teacher answers accepted for their requests, the reasoning effort they are rendered at, and the steps of one pass |
+| `train_sft.py` | Trains the candidate A in one pass over the examples `sft_examples.py` plans |
 | `prompt_lines.json` | A prompt draft's comparison, fixed before the draft runs: the baseline runs, the runs per side and the noise widths |
 | `prompt_compare.py` | Decides whether a prompt draft goes in, from runs of the pinned template and of the draft |
 
@@ -147,12 +148,33 @@ endpoint applies its default.
    no `--audit` folder holds a case for, and one an audit took out alone or
    with its memory, whatever another audit says of it. A request is tied to
    its case by item ID: an audit records no sha256 of the requests it judged.
-   A training example holds the request, the schema instruction and the
-   answer, without the note. An answer that absorbs a memory waits for the
-   merge judge, also when its label expects the merge:
-   `teacher_sample.py cases` gives the judge the absorb gate's question as
-   `merge_cases.py` does, and `apply` keeps the answer only when every absorb
-   is judged mergeable. Train A on the `accepted.jsonl` that `apply` writes.
+   A training example is the request, the schema instruction and the answer.
+   The note is not one of its messages. The `reason` fields of the answer are
+   the teacher's words and can repeat the note's, and no check reads them. An
+   answer that absorbs a memory waits for the merge judge, also when its
+   label expects the merge: `teacher_sample.py cases` gives the judge the
+   absorb gate's question as `merge_cases.py` does, and `apply` keeps the
+   answer only when every absorb is judged mergeable. `train_sft.py` trains A
+   on the answers `apply` keeps, in one pass: each example is in one
+   optimizer step. It reads them from the teacher's folder as `apply` does,
+   so `accepted.jsonl` is a list to read, not what is trained on. `cases`,
+   `apply` and training take a record only when its answer is the reply the
+   call log holds for its request, asked with the label note at the
+   reasoning effort and output budget the pass lines set now, and the answer
+   still passes the teacher's screen for that request. They stop at a record
+   that does not, and at a request with two records. Training renders the
+   examples at that effort with the answer as the model's whole message, so A
+   is trained to start its answer at once, where the base model writes a
+   thinking part first. It refuses a teacher run that did not ask every
+   request to the end (it stopped on its budget, or a request ended in an
+   HTTP error) and one that names no label audit. A record names its request
+   by item ID, so `sample`, `cases`, `apply` and training refuse requests of
+   which two share one. Run `train_sft.py` with `--dry-run` first: that
+   prints the number of examples, their tokens and the cost estimate, and
+   trains nothing. A run writes `summary.json`, which `verdict --train`
+   reads, then saves the weights with the optimizer state for seven days and
+   writes that checkpoint's path to `state.json`. A failure during the pass
+   leaves no checkpoint.
 5. Measure the base model and A in one run per set, from an empty `--out`.
 6. When a valid E-synth answer dropped a fact its label does not name (not
    planted stale, not a correction or complement target, not a fact of a
@@ -218,6 +240,10 @@ uv run scripts/tinker/librarian/teacher_sample.py cases \
   --requests artifacts/tinker/librarian/train-audited/requests.jsonl --out artifacts/tinker/librarian/teacher
 uv run scripts/tinker/librarian/teacher_sample.py apply \
   --requests artifacts/tinker/librarian/train-audited/requests.jsonl --out artifacts/tinker/librarian/teacher
+uv run scripts/tinker/librarian/train_sft.py \
+  --requests artifacts/tinker/librarian/train-audited/requests.jsonl \
+  --teacher artifacts/tinker/librarian/teacher \
+  --out artifacts/tinker/librarian/train-A --budget 70
 MASC_BASE_PATH=artifacts/tinker/librarian/e-real-snapshot \
   uv run scripts/tinker/librarian/eval_admission.py run --set real \
   --target base=thinkingmachines/Inkling-2-Small:peft:262144 \

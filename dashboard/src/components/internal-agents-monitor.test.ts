@@ -517,6 +517,27 @@ describe('InternalAgentsMonitor', () => {
     expect(screen.queryByText('Run observations unavailable for this filter.')).toBeNull()
   })
 
+  it('shows the authority of a superseded verification review as a note, not as an error', async () => {
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue(parseVerificationRunsResponse({
+      generated_at: '2026-09-29T00:00:00Z', count: 1,
+      runs: [{
+        verification_id: 'vrf-superseded', task_id: 'task-superseded', producer: 'keeper-a',
+        authority_kind: 'system_llm_agent', authority_actor: 'judge-a', started_at: 1786000000,
+        status: 'superseded_by', elapsed_s: 1, tools: [],
+        authority: 'Cancelled by operator',
+      }],
+    }))
+
+    render(html`<${InternalAgentsMonitor} />`)
+    const run = await screen.findByRole('button', { name: /superseded_by Verification task-superseded/i })
+    expect(run.querySelector('.ia-badge')?.getAttribute('data-tone')).toBe('neutral')
+    fireEvent.click(run)
+    const detail = await screen.findByText('Cancelled by operator')
+    expect(detail.className).toBe('ia-note')
+  })
+
   const taskReview = parseVerificationRunsResponse({
     generated_at: '2026-10-06T00:00:00Z', count: 1,
     runs: [{

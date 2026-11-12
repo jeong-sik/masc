@@ -244,6 +244,12 @@ function status(row: Row): string {
   return row.run.status
 }
 
+/** A verification review that ended without its own verdict: its badge is
+ *  neutral and its cause reads as a note, never as an error. */
+function endedWithoutVerdict(value: string): boolean {
+  return value === 'review_cancelled' || value === 'superseded_by'
+}
+
 function tone(row: Row): StatusBadgeTone {
   if (row.source === 'goal_verification') return goalVerificationRunTone(row.run.status)
   const value = status(row)
@@ -251,7 +257,7 @@ function tone(row: Row): StatusBadgeTone {
   if (value === 'running') return 'warn'
   if (value === 'cancelled') return 'info'
   if (value === 'rejected') return 'info'
-  if (value === 'review_cancelled' || value === 'superseded_by') return 'neutral'
+  if (endedWithoutVerdict(value)) return 'neutral'
   return 'bad'
 }
 
@@ -697,7 +703,7 @@ function Details({ row }: { row: Row }) {
             ${row.run.evaluatorRuntime ? html` · runtime <code>${row.run.evaluatorRuntime}</code>` : null}
           </p>
           ${row.source === 'verification'
-            ? row.run.cause ? html`<p class=${row.run.status === 'review_cancelled' ? 'ia-note' : 'ia-err'}>${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null
+            ? row.run.cause ? html`<p class=${endedWithoutVerdict(row.run.status) ? 'ia-note' : 'ia-err'}>${row.run.gate ? `${row.run.gate}: ` : ''}${row.run.cause}</p>` : null
             : html`
               <p class="ia-note">Criterion r${row.run.criterion.revision} · ${row.run.criterion.title}</p>
               ${row.run.evaluatedVerdict ? html`<p class="ia-note">Verdict ${row.run.evaluatedVerdict.decision} · ${row.run.evaluatedVerdict.reason}</p>` : null}

@@ -26,12 +26,25 @@ val contents_lines : ko:bool -> Masc.Tui_decode.preset_detail -> string list
     per keeper instruction file, the keeper-to-runtime assignments and the
     lanes. The manifest says how many; this says which and how big. *)
 
-val detail_lines :
+type tone = Heading | Confirmed | Caution | Failure | Detail | Plain
+(** What a pane row says about itself: a section title, a confirmed outcome,
+    something the operator should check, a failure, supporting detail such as
+    a path or a reason, or plain content. The writer of the row names it. *)
+
+type row = { tone : tone; text : string }
+
+val heading : string -> row
+val caution : string -> row
+val failure : string -> row
+val detail : string -> row
+val plain : string -> row
+
+val detail_rows :
   ko:bool ->
   selected:Masc.Tui_decode.preset_manifest option ->
   detail:Masc.Tui_decode.preset_detail Masc_tui_fetched.view ->
   report:Masc.Tui_decode.preset_restore_report option ->
-  string list
+  row list
 (** The pane's detail: what the selected preset holds, then the last restore
     report, which is the only place the skipped keys and the runtime.toml
     outcome are said.

@@ -140,8 +140,10 @@ let render_system_log_detail (state : state) seq =
    the other, so the mark and the surface could disagree and nothing would say
    so. The keys leave with it: the Activity footer projects from the key table,
    which names 1 / 2 there, and no other surface puts its keys in its title. *)
+let acting_tab_label ~ko = if ko then "활동" else "Events"
+
 let activity_tabs ~ko ~on_logs : (string * bool * surface) list =
-  [ ((if ko then "활동" else "Events"), not on_logs, Acting)
+  [ (acting_tab_label ~ko, not on_logs, Acting)
   ; ((if ko then "로그" else "Logs"), on_logs, System_logs)
   ]
 
@@ -642,16 +644,21 @@ let render_keeper_calls (state : state) =
    what arrives above it, so an operator reading the past is not pushed off
    it by the present. *)
 let acting_evidence_intro (state : state) =
-  [ Ansi.reset, screen_title " ACTING EVENT EVIDENCE" ^ "  " ^ connection_badge state
-  ; Ansi.dim, " Selected event snapshot; new arrivals do not replace this reading"
+  [ Ansi.dim, " Selected event snapshot; new arrivals do not replace this reading"
   ; Ansi.dim, Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting)
   ; Ansi.dim, " " ^ Terminal_text.single_line
       (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay)
   ]
 
+(* The here row above the intro. *)
+let acting_evidence_here_rows = 1
+
 let acting_evidence_content_height ~rows ~intro =
-  (* Top and divider surround the same one-line intro the renderer consumes. *)
-  max 1 (rows - (2 + List.length intro + listing_rows_below_the_body))
+  (* Top and divider surround the here row and the intro the renderer consumes. *)
+  max 1
+    (rows
+     - (2 + acting_evidence_here_rows + List.length intro
+        + listing_rows_below_the_body))
 
 let acting_evidence_page_rows state ~terminal_rows =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -664,6 +671,11 @@ let render_acting_evidence (state : state) entry =
   let buf = Buffer.create 4096 in
   let intro = acting_evidence_intro state in
   box_top buf cols;
+  box_line buf cols
+    (here_row ~cols state
+       ~path:[ acting_tab_label ~ko:(state.ui_language = Lang_ko)
+             ; ui_text state ~ko:"증거" ~en:"evidence" ]
+       ~readings:[] ~position:None);
   List.iter (fun (style, line) -> box_line_styled buf cols ~style line) intro;
   box_divider buf cols;
   let lines =

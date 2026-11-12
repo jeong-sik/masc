@@ -849,19 +849,28 @@ let plan_arguments argument_projection ~measure_message_bytes messages =
             | Ok arguments -> Some arguments
             | Error _ ->
               Log.Keeper.warn ~keeper_name:source.keeper_name
-                "official input kept original arguments: completed raw source did not bind";
+                "official input kept original arguments and results: completed raw source did not bind";
               None in
           source.binding <- Arguments_bound arguments;
           arguments in
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let completed_arguments = Option.map
           (Keeper_model_input_demotion.prepend_argument_messages ~prefix:history_prefix) arguments in
-        (* [demote_before:0] plans no result body, so no lane is asked
-           whether one shrinks. *)
+        (* A new session's seed carries a finished turn's results as the
+           Agent Core request does: markers from the same floor, below the
+           same turn boundary, so one range leaves at one size on both lanes
+           (RFC-tool-results-age-out-of-context). The client receives the
+           text this module encodes, so that encoding is the wire size.
+           The boundary is an index into the raw seed; only a seed that bound
+           to this request vouches that it is an index into [messages] too. *)
+        let demote_before = match arguments with
+          | Some _ -> source.completed_before
+          | None -> 0 in
         Keeper_model_input_demotion.plan ?completed_arguments
+          ~min_result_bytes:Keeper_turn_driver_try_provider.aged_result_min_bytes
           ~measure_message_bytes
-          ~measure_wire_bytes:(fun (_ : Agent_core.Types.message) -> None)
-          ~demote_before:0 messages)
+          ~measure_wire_bytes:(fun message -> Some (measure_message_bytes message))
+          ~demote_before messages)
 ;;
 
 type selected_start_range =
@@ -950,7 +959,7 @@ let start_range_projection ~input_source ?argument_projection
         ~addresses:source.addresses ~pending:plan.pending selected.selected_messages in
       if outcome.reverted>0 then
         Log.Keeper.warn ~keeper_name:source.keeper_name
-          "official input restored %d arguments after blob storage failure" outcome.reverted;
+          "official input restored %d arguments or results after blob storage failure" outcome.reverted;
       let actual_messages = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let captured = Keeper_model_input_demotion.capture_materialized
           ~pending:plan.pending ~before:selected.selected_messages ~after:outcome.messages in

@@ -175,6 +175,11 @@ let single_user_again =
    restore"
 ;;
 
+let turn_off_line =
+  "to boot a single user that keeps the records of the accounts read-only, stop every masc \
+   process on the workspace, run masc auth off, and take account_mode out of config.json"
+;;
+
 let messages (input : B.input) = function
   | Refuse (first, rest) -> B.refusal_to_string first, List.map B.refusal_to_string rest
   | Activation_requested ->
@@ -182,8 +187,8 @@ let messages (input : B.input) = function
     , [ "this build does not serve multi-account; without account_mode in config.json, a boot \
          starts a single user"
       ; "masc auth bootstrap --external-store PATH, run while no server runs, activates the \
-         workspace; a server of this build then stops at boot, and no command undoes the \
-         activation"
+         workspace; a server of this build then stops at boot until masc auth off turns the \
+         accounts off"
       ; single_user_again
       ] )
   | Multi_account_not_served mode ->
@@ -191,7 +196,14 @@ let messages (input : B.input) = function
         "the authorization log made Multi_account (%s); this build does not have the account \
          layers that serve it"
         (B.mode_to_string mode)
-    , high_water_detail input.high_water @ [ single_user_again ] )
+    , high_water_detail input.high_water
+      @ (match mode with
+         | B.Multi_account -> [ turn_off_line ]
+         | B.Single_user
+         | B.Single_user_after_off (_ : Authz_state.t)
+         | B.Activation_requested
+         | B.Multi_account_uncertain -> [])
+      @ [ single_user_again ] )
 ;;
 
 type single_user =

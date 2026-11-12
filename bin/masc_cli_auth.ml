@@ -103,10 +103,11 @@ let bootstrap ~base_path ~external_store =
     Printf.printf
       "The installation is activated for multi-account use, workspace %s.\n\
        This build does not serve multi-account yet, so a server stops at boot on this \
-       workspace. No command undoes the activation; %s. The external store is %s.\n\
+       workspace. %s. %s. The external store is %s.\n\
        The first Admin is invited.\n"
       (Authz_types.Workspace_id.to_string workspace_id)
-      Authz_boot_mode_read.single_user_again
+      (String.capitalize_ascii Authz_boot_mode_read.turn_off_line)
+      (String.capitalize_ascii Authz_boot_mode_read.single_user_again)
       external_store;
     print_link ~command:"bootstrap" ~base_url invitation
 ;;
@@ -217,6 +218,28 @@ let service_credential_list ~base_path =
           (Time_codec.rfc3339_of_unix (float_of_int issued_at_ms /. 1000.))
           (status_label status))
       listed;
+    0
+;;
+
+(* The Off depends on the log and the external store alone, so neither the
+   public address nor the anonymous-mutation setting is read. *)
+let off ~base_path =
+  let turn_off base_path =
+    Eio_main.run (fun _env ->
+      Result.map_error
+        Authz_off.error_to_string
+        (Authz_off.turn_off ~base_path ~config_dir:(Env_config_core.masc_config_dir_opt ()) ~now_ms))
+  in
+  match with_lease ~base_path turn_off with
+  | Error reason -> refused "off" reason
+  | Ok workspace_id ->
+    Printf.printf
+      "The accounts of workspace %s are turned off.\n\
+       Once config.json does not ask for Multi_account (take account_mode out), a server \
+       boots a single user. The records of the accounts stay read-only: no turn runs for a \
+       Keeper or on a Runtime of the log, and no client starts on a home under \
+       .masc/accounts. This build does not turn the accounts on again.\n"
+      (Authz_types.Workspace_id.to_string workspace_id);
     0
 ;;
 

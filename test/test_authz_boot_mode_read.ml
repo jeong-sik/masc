@@ -236,33 +236,13 @@ let test_restored_before_bootstrap () =
     check_decision "row 6" (Read.Stop (Read.Refuse (B.Rewound_before_bootstrap, []))) dirs)
 ;;
 
-(* The local operator commits Off through the zone, as masc auth off does. *)
+(* masc auth off. *)
 let turn_off dirs =
-  let zone =
-    match
-      Authz_zone.open_at_start
-        ~now_ms:(fun () -> at_ms + 1)
-        ~log_path:(L.path_of_base_path ~base_path:dirs.base)
-        ~store_path:dirs.store
-    with
-    | Ok zone -> zone
-    | Error error -> Alcotest.failf "the zone did not open: %s" (Authz_zone.open_error_to_string error)
-  in
-  let body =
-    match
-      Authz_mode_event.to_body
-        { Authz_mode_event.event = Authz_mode_event.Off; workspace_id = workspace }
-    with
-    | Ok body -> body
-    | Error error -> Alcotest.failf "fixture body refused: %s" (Authz_body.error_to_string error)
-  in
   match
-    Authz_zone.commit
-      zone
-      { Authz_zone.author = Authz_records.Author.Local_operator; kind = R.Kind.Mode_event; body }
+    Authz_off.turn_off ~base_path:dirs.base ~config_dir:(Some dirs.config) ~now_ms:(fun () -> at_ms + 1)
   with
-  | Ok (_ : Authz_zone.committed) -> ()
-  | Error error -> Alcotest.failf "Off was refused: %s" (Authz_zone.error_to_string error)
+  | Ok (_ : Authz_types.Workspace_id.t) -> ()
+  | Error error -> Alcotest.failf "Off was refused: %s" (Authz_off.error_to_string error)
 ;;
 
 let test_turned_off () =

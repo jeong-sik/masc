@@ -4,7 +4,13 @@
 
 type close_reason =
   | Request_failed
-  (** The request or the body read ended in an error or an exception. *)
+  (** The request or the body read ended in an error or an exception, and
+      the request may have reached the server. *)
+  | Request_not_delivered
+  (** The request ended in an error before the server could have received it
+      whole: a write call raised an error the transport named as the peer's
+      close, and no response byte came back ({!Request_wire.Not_delivered}).
+      Counted apart from [Request_failed]; a close has one reason. *)
   | Not_persistent
   (** The request or the response ends the connection: HTTP/1.0 without
       keep-alive, [connection: close] on any line of either side, an

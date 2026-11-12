@@ -64,6 +64,7 @@ let close_entries entries =
 
 type close_counts =
   { request_failed : int
+  ; request_not_delivered : int
   ; not_persistent : int
   ; body_not_drained : int
   ; transport_ended : int
@@ -80,6 +81,7 @@ type stats =
 
 type close_counters =
   { request_failed_total : int Atomic.t
+  ; request_not_delivered_total : int Atomic.t
   ; not_persistent_total : int Atomic.t
   ; body_not_drained_total : int Atomic.t
   ; transport_ended_total : int Atomic.t
@@ -87,6 +89,7 @@ type close_counters =
 
 let close_counter counters : Reuse_verdict.close_reason -> int Atomic.t = function
   | Request_failed -> counters.request_failed_total
+  | Request_not_delivered -> counters.request_not_delivered_total
   | Not_persistent -> counters.not_persistent_total
   | Body_not_drained -> counters.body_not_drained_total
   | Transport_ended -> counters.transport_ended_total
@@ -94,6 +97,7 @@ let close_counter counters : Reuse_verdict.close_reason -> int Atomic.t = functi
 
 let make_close_counters () =
   { request_failed_total = Atomic.make 0
+  ; request_not_delivered_total = Atomic.make 0
   ; not_persistent_total = Atomic.make 0
   ; body_not_drained_total = Atomic.make 0
   ; transport_ended_total = Atomic.make 0
@@ -102,6 +106,7 @@ let make_close_counters () =
 
 let read_close_counters counters =
   { request_failed = Atomic.get counters.request_failed_total
+  ; request_not_delivered = Atomic.get counters.request_not_delivered_total
   ; not_persistent = Atomic.get counters.not_persistent_total
   ; body_not_drained = Atomic.get counters.body_not_drained_total
   ; transport_ended = Atomic.get counters.transport_ended_total

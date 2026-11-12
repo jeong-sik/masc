@@ -511,6 +511,7 @@ let pp_verdict fmt (verdict : Reuse_verdict.t) =
     (match verdict with
      | Park -> "Park"
      | Close Request_failed -> "Close Request_failed"
+     | Close Request_not_delivered -> "Close Request_not_delivered"
      | Close Not_persistent -> "Close Not_persistent"
      | Close Body_not_drained -> "Close Body_not_drained"
      | Close Transport_ended -> "Close Transport_ended")
@@ -1304,7 +1305,15 @@ let test_one_dispatch_stale_cache_has_no_hidden_retry () =
   Alcotest.(check int) "stale server sees one POST" 1 posts;
   Alcotest.(check int) "stale cache creates once" 1 stats.Http_client.create_count_total;
   Alcotest.(check int) "stale cache attempts once" 1 stats.reuse_count_total;
-  Alcotest.(check int) "failed stale connection is not parked" 0 stats.total_idle
+  Alcotest.(check int) "failed stale connection is not parked" 0 stats.total_idle;
+  (* RFC-0492 §6 test 1(가): a request this small leaves in one write, which the
+     kernel takes. The reset shows on the read, so the request may have been
+     delivered. *)
+  Alcotest.(check int) "a failed read is a failed request" 1 stats.closed_total.request_failed;
+  Alcotest.(check int)
+    "and not a request that was not delivered"
+    0
+    stats.closed_total.request_not_delivered
 ;;
 
 let test_one_dispatch_connection_close_and_final_chunked () =

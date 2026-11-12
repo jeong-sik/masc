@@ -26,6 +26,7 @@ type t
     closes the connection without a reason and is not counted here. *)
 type close_counts =
   { request_failed : int
+  ; request_not_delivered : int
   ; not_persistent : int
   ; body_not_drained : int
   ; transport_ended : int

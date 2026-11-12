@@ -224,20 +224,31 @@ let runner_tick_sec = 1.0
 
 let actor kind id : Schedule_domain.actor = { id; kind; display_name = None }
 
-let keeper_wake_payload ~keeper ~delivery =
+(* The key a receipt-delivering schedule holds in its body. It is a schedule's
+   own name, never its schedule id. *)
+let receipt_key_of schedule_id = "schedule-receipt:wait-tool:" ^ schedule_id
+
+let typed_key schedule_id =
+  get (Schedule_supported_kinds.receipt_key_of_string (receipt_key_of schedule_id))
+;;
+
+let keeper_wake_payload ~keeper ~delivery ~receipt_key =
   `Assoc
     [ "kind", `String "masc.keeper_wake"
     ; ( "body"
       , `Assoc
-          [ "keeper_name", `String keeper
-          ; "title", `String "Run result"
-          ; "message", `String "check the run"
-          ; "delivery", `String delivery
-          ] )
+          ([ "keeper_name", `String keeper
+           ; "title", `String "Run result"
+           ; "message", `String "check the run"
+           ; "delivery", `String delivery
+           ]
+           @ (match receipt_key with
+              | None -> []
+              | Some key -> [ "receipt_key", `String key ])) )
     ]
 ;;
 
-let create_schedule config ~schedule_id ~keeper ~delivery =
+let create_schedule config ~schedule_id ~keeper ~delivery ~receipt_key =
   match
     Schedule_service.create
       config
@@ -248,7 +259,7 @@ let create_schedule config ~schedule_id ~keeper ~delivery =
       ~requested_by:(actor Schedule_domain.Human_operator "operator")
       ~scheduled_by:(actor Schedule_domain.Automated_actor keeper)
       ~due_at:10_000.0
-      ~payload:(keeper_wake_payload ~keeper ~delivery)
+      ~payload:(keeper_wake_payload ~keeper ~delivery ~receipt_key)
       ~source:Schedule_domain.Operator_request
       ()
   with
@@ -278,21 +289,27 @@ let test_a_schedule_is_waited_for_while_it_can_write_a_receipt () =
       ~class_:Tool_result.Workflow_rejection
       "no schedule has this id"
       (call config (schedule_args "sched-never-created"));
-    create_schedule config ~schedule_id:"sched-queue" ~keeper:keeper_name ~delivery:"queue";
+    create_schedule config ~schedule_id:"sched-queue" ~keeper:keeper_name ~delivery:"queue"
+      ~receipt_key:None;
     expect_refused
       ~class_:Tool_result.Workflow_rejection
       "a wake that delivers a queue message"
       (call config (schedule_args "sched-queue"));
-    create_schedule config ~schedule_id:"sched-other" ~keeper:"another-keeper" ~delivery:"receipt";
+    create_schedule config ~schedule_id:"sched-other" ~keeper:"another-keeper"
+      ~delivery:"receipt" ~receipt_key:(Some (receipt_key_of "sched-other"));
     expect_refused
       ~class_:Tool_result.Workflow_rejection
       "a wake of another Keeper"
       (call config (schedule_args "sched-other"));
-    create_schedule config ~schedule_id:"sched-receipt" ~keeper:keeper_name ~delivery:"receipt";
-    expect_wait ~request_id:"sched-receipt" "a receipt wake that has not ended"
+    create_schedule config ~schedule_id:"sched-receipt" ~keeper:keeper_name
+      ~delivery:"receipt" ~receipt_key:(Some (receipt_key_of "sched-receipt"));
+    expect_wait ~request_id:(receipt_key_of "sched-receipt")
+      "a receipt wake that has not ended, waited for under its key"
       (call config (schedule_args "sched-receipt"));
-    create_schedule config ~schedule_id:"배포 결과 #12" ~keeper:keeper_name ~delivery:"receipt";
-    expect_wait ~request_id:"배포 결과 #12" "a schedule id a request id cannot hold"
+    create_schedule config ~schedule_id:"배포 결과 #12" ~keeper:keeper_name
+      ~delivery:"receipt" ~receipt_key:(Some (receipt_key_of "배포 결과 #12"));
+    expect_wait ~request_id:(receipt_key_of "배포 결과 #12")
+      "a schedule id a request id cannot hold"
       (call config (schedule_args "배포 결과 #12")))
 ;;
 
@@ -301,7 +318,8 @@ let test_a_schedule_is_waited_for_while_it_can_write_a_receipt () =
 let test_an_ended_schedule_is_waited_for_only_while_its_receipt_is_there () =
   with_workspace (fun ~sw:_ ~clock:_ config ->
     let base_path = config.Workspace.base_path in
-    create_schedule config ~schedule_id:"sched-ended" ~keeper:keeper_name ~delivery:"receipt";
+    create_schedule config ~schedule_id:"sched-ended" ~keeper:keeper_name
+      ~delivery:"receipt" ~receipt_key:(Some (receipt_key_of "sched-ended"));
     cancel_schedule config ~schedule_id:"sched-ended";
     expect_refused
       ~class_:Tool_result.Workflow_rejection
@@ -312,10 +330,36 @@ let test_an_ended_schedule_is_waited_for_only_while_its_receipt_is_there () =
          ~base_path
          ~keeper_name
          (Keeper_schedule_receipt.receipt
-            ~schedule_id:"sched-ended"
-            (Keeper_schedule_receipt.Delivered { message = "done" })));
-    expect_wait ~request_id:"sched-ended" "an ended wake whose receipt is waiting"
+            ~receipt_key:(typed_key "sched-ended")
+            (Keeper_schedule_receipt.Delivered
+               { schedule_id = "sched-ended"; message = "done" })));
+    expect_wait ~request_id:(receipt_key_of "sched-ended")
+      "an ended wake whose receipt is waiting"
       (call config (schedule_args "sched-ended")))
+;;
+
+(* A receipt that an earlier occurrence left under the schedule id is not this
+   schedule's receipt. The wait is recorded under the key, so it neither names
+   that receipt nor takes it for the schedule's own. *)
+let test_a_schedule_wait_is_recorded_under_the_key_not_the_schedule_id () =
+  with_workspace (fun ~sw:_ ~clock:_ config ->
+    let base_path = config.Workspace.base_path in
+    get
+      (Outbox.retain
+         ~base_path
+         ~keeper_name
+         { Outbox.thread_id = "execute_background"
+         ; turn_id = "sched-again"
+         ; call_id = "sched-again"
+         ; tool_name = "tool_execute"
+         ; arguments = Outbox.Unknown
+         ; response = `Assoc [ "request_id", `String "sched-again" ]
+         });
+    create_schedule config ~schedule_id:"sched-again" ~keeper:keeper_name
+      ~delivery:"receipt" ~receipt_key:(Some (receipt_key_of "sched-again"));
+    expect_wait ~request_id:(receipt_key_of "sched-again")
+      "a schedule whose id an older receipt carries"
+      (call config (schedule_args "sched-again")))
 ;;
 
 (* The tool runs through the bundle a turn builds. The call leaves the wait in
@@ -520,6 +564,8 @@ let () =
             test_a_schedule_is_waited_for_while_it_can_write_a_receipt
         ; test_case "an ended schedule is waited for only while its receipt is there" `Quick
             test_an_ended_schedule_is_waited_for_only_while_its_receipt_is_there
+        ; test_case "a schedule wait is recorded under the key, not the schedule id" `Quick
+            test_a_schedule_wait_is_recorded_under_the_key_not_the_schedule_id
         ; test_case "a call without a chat execution is refused" `Quick
             test_a_call_without_a_chat_execution_is_refused
         ; test_case "an ended run is waited for only while its receipt is there" `Quick

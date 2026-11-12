@@ -8,6 +8,9 @@
     of this Keeper that delivers a receipt, and that the receipt has not been
     delivered and acknowledged already, and answers with a completed result that carries
     {!Keeper_tool_execution.Receipt_wait_requested}. Nothing is recorded yet.
+    The wait is recorded under the id the receipt will carry: the request id of
+    a run, and for a schedule its {!Schedule_supported_kinds.receipt_key}, which
+    the answer gives as [request_id] next to the [schedule_id] the model named.
     The wait joins the conversation's execution record in the same transaction
     that retains the turn's checkpoint
     ({!Keeper_chat_operation_store.defer_direct_checkpoint}).

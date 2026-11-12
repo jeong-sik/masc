@@ -64,6 +64,25 @@ val delivery_of_payload
     [delivery] body field, or the default when it is absent. The default for any
     other payload, which has no delivery. [Error] for an unknown [delivery]. *)
 
+(** How a due [masc.keeper_wake] reaches its Keeper, with the name of the
+    schedule when that is a receipt ({!Schedule_supported_kinds.receipt_key}). *)
+type keeper_wake_route =
+  | Queue_route
+  | Receipt_route of Schedule_supported_kinds.receipt_key
+
+val route_of_payload : Yojson.Safe.t -> (keeper_wake_route, string) result
+(** The route of a [masc.keeper_wake] payload; [Queue_route] for any other
+    payload. [Error] for an unknown [delivery], a queue delivery that holds a
+    [receipt_key], or a receipt delivery that holds none. *)
+
+val set_keeper_wake_receipt_key :
+  payload:Yojson.Safe.t ->
+  key:Schedule_supported_kinds.receipt_key ->
+  (Yojson.Safe.t, string) result
+(** Stamp the key of a receipt delivery into a Keeper wake payload. A key the
+    payload already holds is replaced, never trusted. A queue delivery and any
+    other payload kind get none. *)
+
 val keeper_participants : Schedule_domain.schedule_request -> string list
 (** The automated creator, followed by a distinct decoded wake target. Human
     and system actor IDs are not Keeper identities. An absent or malformed
@@ -108,6 +127,9 @@ val result_delivery :
 
 val body_required_string : payload_view -> string -> (string, string) result
 val body_optional_string : payload_view -> string -> (string option, string) result
+
+val body_keeper_wake_route : payload_view -> (keeper_wake_route, string) result
+(** {!route_of_payload} for a payload the dispatch view already decoded. *)
 val body_result_delivery :
   payload_view -> (Keeper_continuation_channel.t option, string) result
 

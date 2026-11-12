@@ -208,6 +208,7 @@ let keeper_wake_body_fields =
   ; "title"
   ; "urgency"
   ; "delivery"
+  ; "receipt_key"
   ; "result_delivery"
   ; Schedule_run_watch.watch_field
   ; Schedule_checks_watch.watch_field
@@ -230,6 +231,68 @@ let delivery_of_payload payload =
        delivery_of_body body
      | _ -> Ok Schedule_supported_kinds.default_keeper_wake_delivery)
   | _ -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
+;;
+
+(* How a due wake reaches its Keeper, with the name of the schedule when that
+   is a receipt. The key is in the body next to the delivery it belongs to: a
+   queue delivery holds none and a receipt delivery must. *)
+type keeper_wake_route =
+  | Queue_route
+  | Receipt_route of Schedule_supported_kinds.receipt_key
+
+let route_of_body body =
+  let* delivery = delivery_of_body body in
+  let* raw_key = optional_string_field "receipt_key" body in
+  match delivery, raw_key with
+  | Schedule_supported_kinds.Keeper_wake_to_queue, None -> Ok Queue_route
+  | Schedule_supported_kinds.Keeper_wake_to_queue, Some _ ->
+    Error
+      (keeper_wake_kind
+       ^ " payload body.receipt_key belongs to a receipt delivery, and this one is a queue")
+  | Schedule_supported_kinds.Keeper_wake_to_receipt, None ->
+    Error (keeper_wake_kind ^ " payload body.receipt_key is required by a receipt delivery")
+  | Schedule_supported_kinds.Keeper_wake_to_receipt, Some raw ->
+    Schedule_supported_kinds.receipt_key_of_string raw
+    |> Result.map (fun key -> Receipt_route key)
+    |> Result.map_error (fun detail -> keeper_wake_kind ^ " " ^ detail)
+;;
+
+let route_of_payload payload =
+  match payload with
+  | `Assoc fields ->
+    (match assoc_string "kind" fields, List.assoc_opt "body" fields with
+     | Some raw_kind, Some (`Assoc body) when classify_kind raw_kind = Some Keeper_wake ->
+       route_of_body body
+     | _ -> Ok Queue_route)
+  | _ -> Ok Queue_route
+;;
+
+(* The key is issued where the schedule is written, so a key a caller supplied
+   is replaced, never trusted, as [set_keeper_wake_result_delivery] does for
+   the result route. A queue delivery holds none. *)
+let set_keeper_wake_receipt_key ~payload ~key =
+  match payload with
+  | `Assoc fields ->
+    (match assoc_string "kind" fields with
+     | Some raw_kind when classify_kind raw_kind = Some Keeper_wake ->
+       (match List.assoc_opt "body" fields with
+        | Some (`Assoc body) ->
+          let* delivery = delivery_of_body body in
+          let body = remove_all_assoc "receipt_key" body in
+          let body =
+            match delivery with
+            | Schedule_supported_kinds.Keeper_wake_to_receipt ->
+              ( "receipt_key"
+              , `String (Schedule_supported_kinds.receipt_key_to_string key) )
+              :: body
+            | Schedule_supported_kinds.Keeper_wake_to_queue -> body
+          in
+          Ok (`Assoc (("body", `Assoc body) :: remove_all_assoc "body" fields))
+        | Some _ | None ->
+          Error (keeper_wake_kind ^ " payload.body must be an object"))
+     | Some _ -> Ok payload
+     | None -> Error "payload.kind is required")
+  | _ -> Error "payload must be a JSON object"
 ;;
 
 let unknown_keeper_wake_body_fields body =
@@ -291,6 +354,23 @@ let validate_keeper_wake_body body =
         |> Result.map Option.some
     in
     let* delivery = delivery_of_body body in
+    (* The tool issues the key after this check, once it has read the stored
+       row, so a body without one is not wrong here. A body that holds one must
+       hold it for a receipt delivery. [route_of_body] is what insists on it. *)
+    let* () =
+      let* raw_key = optional_string_field "receipt_key" body in
+      match delivery, raw_key with
+      | Schedule_supported_kinds.Keeper_wake_to_queue, Some _ ->
+        Error
+          (keeper_wake_kind
+           ^ " payload body.receipt_key belongs to a receipt delivery, and this one is a queue")
+      | Schedule_supported_kinds.Keeper_wake_to_receipt, Some raw ->
+        Schedule_supported_kinds.receipt_key_of_string raw
+        |> Result.map (fun _ -> ())
+        |> Result.map_error (fun detail -> keeper_wake_kind ^ " " ^ detail)
+      | Schedule_supported_kinds.Keeper_wake_to_receipt, None
+      | Schedule_supported_kinds.Keeper_wake_to_queue, None -> Ok ()
+    in
     (* A receipt has no place in the Keeper's queue, so an urgency has nothing
        to order. *)
     (match delivery, urgency with
@@ -607,6 +687,7 @@ let result_delivery request =
 
 let body_required_string view name = required_string_field name view.body
 let body_optional_string view name = optional_string_field name view.body
+let body_keeper_wake_route view = route_of_body view.body
 let body_result_delivery view = result_delivery_of_body view.body
 
 let lane_act_body view =

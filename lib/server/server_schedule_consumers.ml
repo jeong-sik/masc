@@ -448,11 +448,8 @@ let body_keeper_wake_urgency payload =
     Ok (Some urgency)
 ;;
 
-let body_keeper_wake_delivery payload =
-  let* raw = Schedule_payload_projection.body_optional_string payload "delivery" in
-  match raw with
-  | None -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
-  | Some value -> Schedule_supported_kinds.keeper_wake_delivery_of_string value
+let body_keeper_wake_route payload =
+  Schedule_payload_projection.body_keeper_wake_route payload
 ;;
 
 let record_keeper_wake_stimulus ~base_path ~keeper_name stimulus =
@@ -1303,14 +1300,16 @@ let dispatch_lane_act config (signal : Schedule_runner.wake_signal)
 (* A Keeper wake whose delivery is [receipt] writes a tool-result receipt and
    queues no wake message. The outbox's own wake is the only one, so the Keeper
    hears of the schedule once, and a turn that ended on [keeper_receipt_wait]
-   for this schedule continues with it. The receipt is keyed by the schedule id,
-   not the instance id: a run watch that settles rewrites the row under a new
-   instance id. [message] is what the schedule holds:
-   for a watched run it already starts with the run's outcome. A receipt that
-   is already in the outbox is not written again, so a retry after a failed
-   commit leaves one. *)
+   for this schedule continues with it. The receipt is keyed by the schedule's
+   receipt key, not its id or instance id. A Keeper may pick the schedule id, so
+   it can equal an Execute request id or name a schedule created again after the
+   first was pruned; a run watch that settles rewrites the row under a new
+   instance id. The key is in the row's body, which the settling keeps.
+   [message] is what the schedule holds: for a watched run it already starts
+   with the run's outcome. A receipt that is already in the outbox is not
+   written again, so a retry after a failed commit leaves one. *)
 let dispatch_keeper_receipt config (request : Schedule_domain.schedule_request)
-      ~commit_acceptance payload
+      ~receipt_key ~commit_acceptance payload
   =
   let base_path = config.Workspace_utils.base_path in
   let* keeper_name = body_keeper_name payload |> terminal_dispatch_result in
@@ -1339,8 +1338,9 @@ let dispatch_keeper_receipt config (request : Schedule_domain.schedule_request)
     Keeper_schedule_receipt.deliver
       ~base_path
       ~keeper_name
-      ~schedule_id:request.schedule_id
-      (Keeper_schedule_receipt.Delivered { message })
+      ~receipt_key
+      (Keeper_schedule_receipt.Delivered
+         { schedule_id = request.schedule_id; message })
     |> Result.map_error (fun detail -> Schedule_runner.Retryable_dispatch_failure detail)
   in
   let detail =
@@ -1364,12 +1364,17 @@ let dispatch config ~now signal request ~commit_acceptance =
   | Ok (kind, payload) ->
     (match kind with
      | Schedule_payload_projection.Keeper_wake ->
-       let* delivery = body_keeper_wake_delivery payload |> terminal_dispatch_result in
-       (match delivery with
-        | Schedule_supported_kinds.Keeper_wake_to_queue ->
+       let* route = body_keeper_wake_route payload |> terminal_dispatch_result in
+       (match route with
+        | Schedule_payload_projection.Queue_route ->
           dispatch_keeper_wake config ~now signal request ~commit_acceptance payload
-        | Schedule_supported_kinds.Keeper_wake_to_receipt ->
-          dispatch_keeper_receipt config request ~commit_acceptance payload)
+        | Schedule_payload_projection.Receipt_route receipt_key ->
+          dispatch_keeper_receipt
+            config
+            request
+            ~receipt_key
+            ~commit_acceptance
+            payload)
      | Schedule_payload_projection.Lane_act ->
        dispatch_lane_act config signal request ~commit_acceptance payload)
 ;;

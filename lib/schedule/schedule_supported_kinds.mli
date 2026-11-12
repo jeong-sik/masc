@@ -33,15 +33,32 @@ type keeper_wake_delivery =
   | Keeper_wake_to_queue
       (** A new message in the Keeper's event queue. *)
   | Keeper_wake_to_receipt
-      (** A tool-result receipt whose [call_id] is the schedule id. A turn that
-          ended on [keeper_receipt_wait] for that id continues with it. No wake message is put in the event queue; the outbox delivers
-          the receipt. *)
+      (** A tool-result receipt whose [call_id] is the schedule's {!receipt_key}.
+          A turn that ended on [keeper_receipt_wait] for the schedule continues
+          with it. No wake message is put in the event queue; the outbox
+          delivers the receipt. *)
 
 val default_keeper_wake_delivery : keeper_wake_delivery
 (** [Keeper_wake_to_queue], for a body without the optional [delivery] field. *)
 
 val keeper_wake_delivery_of_string : string -> (keeper_wake_delivery, string) result
 (** Wire enum of the [delivery] field: [queue] or [receipt]. *)
+
+type receipt_key = private string
+(** The name of one receipt-delivering schedule, held in the row's body as
+    [receipt_key]. It is the receipt's [call_id], and a wait for the schedule is
+    recorded under it. The schedule id cannot play that part: a Keeper may pick
+    it, so it can equal an Execute request id, or name a second schedule created
+    after the first was pruned while the first one's receipt is still in the
+    outbox. *)
+
+val receipt_key_of_string : string -> (receipt_key, string) result
+(** [Error] for an empty key. *)
+
+val receipt_key_to_string : receipt_key -> string
+
+val fresh_receipt_key : unit -> receipt_key
+(** A key no other schedule holds. *)
 
 val valid_keeper_wake_target_name : string -> bool
 (** [true] when a [masc.keeper_wake] body target name is valid. *)

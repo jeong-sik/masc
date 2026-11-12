@@ -133,6 +133,13 @@ let message_of request =
   | Some _ | None -> fail "stored body has no message"
 ;;
 
+let receipt_key_of request =
+  match List.assoc_opt "receipt_key" (body_of request) with
+  | Some (`String key) -> Some key
+  | Some _ -> fail "stored receipt_key is not a string"
+  | None -> None
+;;
+
 let check_success label result =
   if not (Tool_result.is_success result)
   then failf "%s: refused: %s" label (Tool_result.message result)
@@ -213,7 +220,73 @@ let test_create_stores_a_receipt_delivery () =
     (match List.assoc_opt "delivery" (body_of stored) with
      | Some (`String value) -> value
      | Some _ | None -> fail "stored body has no delivery string");
-  check bool "the run is still watched" true (Option.is_some (watch_of_row stored))
+  check bool "the run is still watched" true (Option.is_some (watch_of_row stored));
+  (match receipt_key_of stored with
+   | None -> fail "a receipt delivery was stored without a receipt key"
+   | Some key ->
+     check bool "the key is not a valid request id" false
+       (Keeper_msg_async.For_testing.is_safe_request_id key))
+;;
+
+let test_create_stores_no_receipt_key_for_a_queue_delivery () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields ~message:"m" ~extra:[ "delivery", `String "queue" ] ()));
+  check
+    (option string)
+    "a queue delivery holds no key"
+    None
+    (receipt_key_of (stored_exn config "watched"))
+;;
+
+let test_two_receipt_schedules_hold_different_keys () =
+  with_config
+  @@ fun config ->
+  let create schedule_id =
+    check_success
+      ("create " ^ schedule_id)
+      (dispatch
+         config
+         ~name:create_name
+         (create_fields ~schedule_id ~message:"m" ~extra:[ "delivery", `String "receipt" ] ()));
+    receipt_key_of (stored_exn config schedule_id)
+  in
+  let first = create "first" in
+  let second = create "second" in
+  check bool "both hold a key" true (Option.is_some first && Option.is_some second);
+  check bool "the keys differ" false (first = second)
+;;
+
+(* A wait is recorded under the key, so an edit of a schedule that has not
+   ended must not issue a new one. *)
+let test_update_keeps_the_receipt_key_of_a_pending_schedule () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch
+       config
+       ~name:create_name
+       (create_fields ~message:"first" ~extra:[ "delivery", `String "receipt" ] ()));
+  let before = receipt_key_of (stored_exn config "watched") in
+  check_success
+    "update"
+    (dispatch
+       config
+       ~name:update_name
+       [ "schedule_id", `String "watched"
+       ; "keeper_name", `String wake_keeper
+       ; "message", `String "second"
+       ; "delivery", `String "receipt"
+       ]);
+  let after = receipt_key_of (stored_exn config "watched") in
+  check bool "the schedule holds a key" true (Option.is_some after);
+  check (option string) "the key is the one the first write issued" before after
 ;;
 
 let test_create_refuses_a_receipt_with_urgency_and_an_unknown_delivery () =
@@ -881,6 +954,9 @@ let () =
       , [ test_case "stores the run as a typed field" `Quick test_create_stores_the_run_as_a_typed_field
         ; test_case "keeps a named attempt" `Quick test_create_keeps_a_named_attempt
         ; test_case "stores a receipt delivery" `Quick test_create_stores_a_receipt_delivery
+        ; test_case "stores no receipt key for a queue delivery" `Quick test_create_stores_no_receipt_key_for_a_queue_delivery
+        ; test_case "two receipt schedules hold different keys" `Quick test_two_receipt_schedules_hold_different_keys
+        ; test_case "update keeps the receipt key of a pending schedule" `Quick test_update_keeps_the_receipt_key_of_a_pending_schedule
         ; test_case "refuses a recurring receipt" `Quick test_create_refuses_a_recurring_receipt
         ; test_case "refuses a receipt with urgency and an unknown delivery" `Quick test_create_refuses_a_receipt_with_urgency_and_an_unknown_delivery
         ; test_case "refuses a URL that names no run" `Quick test_create_refuses_a_url_that_names_no_run

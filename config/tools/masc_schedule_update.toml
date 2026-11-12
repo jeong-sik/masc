@@ -78,8 +78,11 @@ enum = ["queue", "receipt"]
 description = """
 How the due wake reaches the Keeper. queue, the default, puts a new message in \
 its queue. receipt writes a tool-result receipt instead of a queue message. \
-The receipt's request_id is this schedule's schedule_id. An update that omits \
-it sets queue. Takes no urgency and needs recurrence_kind one_shot."""
+Wait for it with keeper_receipt_wait schedule_id. The receipt carries a request_id \
+of its own and this schedule's schedule_id. An update of a schedule that has not \
+ended keeps the wait; an update of one that has ended starts a new receipt. An \
+update that omits it sets queue. Takes no urgency and needs recurrence_kind \
+one_shot."""
 
 [[params]]
 name = "until_github_run"

@@ -526,8 +526,8 @@ let validate_watch_recurrence ~payload ~recurrence =
           first occurrence")
 ;;
 
-(* A receipt is keyed by its schedule id. A recurring schedule would write every
-   occurrence's receipt under the same call id. *)
+(* A receipt is keyed by its schedule's receipt key. A recurring schedule would
+   write every occurrence's receipt under the same call id. *)
 let validate_receipt_recurrence ~payload ~recurrence =
   let* delivery = Schedule_payload_projection.delivery_of_payload payload in
   match delivery, recurrence with
@@ -537,7 +537,38 @@ let validate_receipt_recurrence ~payload ~recurrence =
     , (Schedule_domain.Interval _ | Schedule_domain.Daily _ | Schedule_domain.Cron _) ) ->
     Error
       "delivery receipt needs recurrence_kind one_shot: the receipt is keyed by one \
-       schedule id"
+       schedule"
+;;
+
+(* The key a write gives a receipt delivery. An edit of a schedule that has not
+   ended is the same occurrence and keeps its key, so a wait recorded under it
+   goes on. A schedule that has ended, and a schedule that is new, is a new
+   occurrence: a receipt of the old one still in the outbox must not answer
+   it. A queue delivery holds no key, and the projection leaves it out. *)
+let receipt_key_for_write ~(stored : Schedule_domain.schedule_request option) =
+  match stored with
+  | None -> Ok (Schedule_supported_kinds.fresh_receipt_key ())
+  | Some request ->
+    (match request.status with
+     | Schedule_domain.Succeeded
+     | Schedule_domain.Failed
+     | Schedule_domain.Cancelled
+     | Schedule_domain.Expired -> Ok (Schedule_supported_kinds.fresh_receipt_key ())
+     | Schedule_domain.Scheduled | Schedule_domain.Due | Schedule_domain.Running ->
+       (match
+          Schedule_payload_projection.route_of_payload
+            (Schedule_domain.payload_to_yojson request.payload)
+        with
+        | Ok (Schedule_payload_projection.Receipt_route key) -> Ok key
+        | Ok Schedule_payload_projection.Queue_route ->
+          Ok (Schedule_supported_kinds.fresh_receipt_key ())
+        | Error detail ->
+          Error
+            (Printf.sprintf
+               "stored schedule %s has a delivery this server cannot read (%s); cancel \
+                it and create it again"
+               request.schedule_id
+               detail)))
 ;;
 
 (* A keeper_wake schedule whose target has no durable metadata can never be
@@ -898,6 +929,13 @@ let handle_write ~action ~tool_name ~start_time ctx args =
         (match stored with
          | Some _ -> Ok stored
          | None -> Error (Refusal "schedule not found"))
+    in
+    (* The validation above ran before the stored row was read, so it could not
+       ask for the key. The key is stamped here and the projection insists on
+       it when the wake is dispatched. *)
+    let* payload =
+      let* key = plain (receipt_key_for_write ~stored) in
+      plain (Schedule_payload_projection.set_keeper_wake_receipt_key ~payload ~key)
     in
     let* supplied_kind = strict_string args "recurrence_kind" in
     let* recurrence =

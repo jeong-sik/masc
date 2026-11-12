@@ -19,10 +19,12 @@ val settle_lost : base_path:string -> keeper_name:string -> (unit, string) resul
     no record, or whose record is not a background Execute run's, has none to
     echo: its receipt carries [Unknown] arguments and says so in its message.
 
-    A pending id with no request record may be a schedule id
-    ({!Keeper_receipt_wait_source}). A wake that delivers a receipt and has not
+    A pending id the request store refuses as a request id is a schedule's
+    receipt key ({!Keeper_receipt_wait_source}), which holds a character a
+    request id cannot. A wake that holds the key, delivers a receipt and has not
     ended is left alone, like a run a worker may still own. One that has ended
-    without its receipt gets an [unfinished] receipt from
+    without its receipt, and a key no row holds any more (the schedule was
+    pruned, or an edit gave it a new key), gets an [unfinished] receipt from
     {!Keeper_schedule_receipt.retain_unfinished}. *)
 
 val after_wait : base_path:string -> keeper_name:string -> (unit, string) result

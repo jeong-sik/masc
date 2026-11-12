@@ -718,7 +718,7 @@ let test_keeper_wake_for_not_current_owner_meta_is_retained () =
         | Error reason -> fail ("receipt did not decode: " ^ reason)))
 ;;
 
-let keeper_receipt_payload =
+let keeper_receipt_payload_of receipt_key =
   `Assoc
     [ "kind", `String "masc.keeper_wake"
     ; ( "body"
@@ -727,9 +727,13 @@ let keeper_receipt_payload =
           ; "title", `String "Run result"
           ; "message", `String "[github_run_watch] o/r run 1 completed: success"
           ; "delivery", `String "receipt"
+          ; "receipt_key", `String receipt_key
           ] )
     ]
 ;;
+
+let keeper_receipt_key = "schedule-receipt:consumer-test-1"
+let keeper_receipt_payload = keeper_receipt_payload_of keeper_receipt_key
 
 let rec queue_holds_schedule_wake queue =
   match Keeper_event_queue.dequeue queue with
@@ -791,19 +795,19 @@ let test_keeper_wake_with_receipt_delivery_writes_a_receipt_and_no_wake_message 
    with
    | Error detail -> fail detail
    | Ok snapshot ->
-     check bool "the outbox holds a receipt whose call id is the schedule id"
+     check bool "the outbox holds a receipt whose call id is the receipt key"
        true
-       (Keeper_client_tool_outbox.contains_call
-          snapshot
-          ~call_id:request.schedule_id));
+       (Keeper_client_tool_outbox.contains_call snapshot ~call_id:keeper_receipt_key);
+     check bool "no receipt is under the schedule id" false
+       (Keeper_client_tool_outbox.contains_call snapshot ~call_id:request.schedule_id));
   check bool "no wake message is queued" false
     (queue_holds_schedule_wake
        (Keeper_registry_event_queue.snapshot ~base_path "schedule-keeper"))
 ;;
 
 (* A run watch that settles rewrites the row under a new instance id. The
-   receipt stays under the schedule id, the one the Keeper holds. *)
-let test_a_settled_run_watch_keeps_the_receipt_under_the_schedule_id () =
+   receipt key is in the body, which the settling keeps. *)
+let test_a_settled_run_watch_keeps_the_receipt_under_the_receipt_key () =
   with_workspace
   @@ fun config ->
   let payload =
@@ -814,6 +818,7 @@ let test_a_settled_run_watch_keeps_the_receipt_under_the_schedule_id () =
             [ "keeper_name", `String "schedule-keeper"
             ; "message", `String "merge if green"
             ; "delivery", `String "receipt"
+            ; "receipt_key", `String "schedule-receipt:consumer-watch-1"
             ; ( "until_github_run"
               , `Assoc [ "repo", `String "jeong-sik/masc"; "run_id", `Int 5 ] )
             ] )
@@ -859,12 +864,107 @@ let test_a_settled_run_watch_keeps_the_receipt_under_the_schedule_id () =
   with
   | Error detail -> fail detail
   | Ok snapshot ->
-    check bool "the receipt is under the schedule id" true
+    check bool "the receipt is under the receipt key" true
+      (Keeper_client_tool_outbox.contains_call
+         snapshot
+         ~call_id:"schedule-receipt:consumer-watch-1");
+    check bool "no receipt is under the schedule id" false
       (Keeper_client_tool_outbox.contains_call snapshot ~call_id:created.schedule_id);
     check bool "no receipt is under the first instance id" false
       (Keeper_client_tool_outbox.contains_call
          snapshot
          ~call_id:created.schedule_instance_id)
+;;
+
+let create_receipt_schedule config ~schedule_id ~now ~due_at ~receipt_key =
+  match
+    Schedule_service.create config ~runner_tick_sec ~now ~schedule_id
+      ~requested_at:now ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent") ~due_at
+      ~payload:(keeper_receipt_payload_of receipt_key)
+      ~source:Schedule_domain.Operator_request ()
+  with
+  | Ok request -> request
+  | Error err -> fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let outbox_snapshot config =
+  match
+    Keeper_client_tool_outbox.load
+      ~base_path:config.Workspace_utils.base_path
+      ~keeper_name:"schedule-keeper"
+      ~viewer:Keeper_client_tool_outbox.Every_receipt
+  with
+  | Ok snapshot -> snapshot
+  | Error detail -> fail detail
+;;
+
+(* The schedule id is the Keeper's to pick, so a schedule created again under
+   the id of a pruned one is another occurrence. The first one's receipt is
+   still in the outbox, unread, and must neither stand for the second nor stop
+   the second from writing its own. *)
+let test_a_schedule_created_again_after_a_prune_writes_its_own_receipt () =
+  with_workspace
+  @@ fun config ->
+  let first_key = "schedule-receipt:consumer-first" in
+  let second_key = "schedule-receipt:consumer-second" in
+  let _first =
+    create_receipt_schedule config ~schedule_id:"reused-id" ~now:100.0 ~due_at:200.0
+      ~receipt_key:first_key
+  in
+  ignore
+    (Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+       tick_ok config ~now:201.0));
+  (match Schedule_service.prune config with
+   | Ok _ -> ()
+   | Error err -> fail ("prune failed: " ^ Schedule_service.service_error_to_string err));
+  let _second =
+    create_receipt_schedule config ~schedule_id:"reused-id" ~now:210.0 ~due_at:300.0
+      ~receipt_key:second_key
+  in
+  ignore
+    (Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+       tick_ok config ~now:301.0));
+  let snapshot = outbox_snapshot config in
+  check bool "the first occurrence's receipt is still there" true
+    (Keeper_client_tool_outbox.contains_call snapshot ~call_id:first_key);
+  check bool "the second occurrence wrote its own" true
+    (Keeper_client_tool_outbox.contains_call snapshot ~call_id:second_key)
+;;
+
+(* A receipt of another producer under the same text as the schedule id does
+   not stand for the schedule's: the schedule writes under its key. *)
+let test_a_receipt_of_another_producer_under_the_schedule_id_does_not_stop_the_write () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace_utils.base_path in
+  (match
+     Keeper_client_tool_outbox.retain
+       ~base_path
+       ~keeper_name:"schedule-keeper"
+       { Keeper_client_tool_outbox.thread_id = "execute_background"
+       ; turn_id = "shared-text"
+       ; call_id = "shared-text"
+       ; tool_name = "tool_execute"
+       ; arguments = Keeper_client_tool_outbox.Unknown
+       ; response = `Assoc [ "request_id", `String "shared-text" ]
+       }
+   with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  let key = "schedule-receipt:consumer-shared" in
+  let _request =
+    create_receipt_schedule config ~schedule_id:"shared-text" ~now:100.0 ~due_at:200.0
+      ~receipt_key:key
+  in
+  ignore
+    (Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+       tick_ok config ~now:201.0));
+  let snapshot = outbox_snapshot config in
+  check bool "the other producer's receipt is untouched" true
+    (Keeper_client_tool_outbox.contains_call snapshot ~call_id:"shared-text");
+  check bool "the schedule wrote its own" true
+    (Keeper_client_tool_outbox.contains_call snapshot ~call_id:key)
 ;;
 
 let test_keeper_wake_consumer_records_wake_receipt () =
@@ -4869,8 +4969,12 @@ let () =
         ; test_case "keeper wake with receipt delivery writes a receipt and no wake message"
             `Quick
             test_keeper_wake_with_receipt_delivery_writes_a_receipt_and_no_wake_message
-        ; test_case "a settled run watch keeps the receipt under the schedule id" `Quick
-            test_a_settled_run_watch_keeps_the_receipt_under_the_schedule_id
+        ; test_case "a settled run watch keeps the receipt under the receipt key" `Quick
+            test_a_settled_run_watch_keeps_the_receipt_under_the_receipt_key
+        ; test_case "a schedule created again after a prune writes its own receipt" `Quick
+            test_a_schedule_created_again_after_a_prune_writes_its_own_receipt
+        ; test_case "a receipt of another producer under the schedule id does not stop the write" `Quick
+            test_a_receipt_of_another_producer_under_the_schedule_id_does_not_stop_the_write
         ; test_case "routed schedule carries occurrence destination to Keeper" `Quick
             test_routed_schedule_carries_occurrence_destination_to_keeper
         ; test_case "a recurring wake supersedes the earlier pending occurrence" `Quick

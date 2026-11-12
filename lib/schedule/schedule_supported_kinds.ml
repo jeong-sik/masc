@@ -93,6 +93,29 @@ let keeper_wake_delivery_of_string value =
          (String.concat ", " (List.map (fun spec -> spec.delivery_label) keeper_wake_deliveries)))
 ;;
 
+(* The name of one receipt-delivering schedule: the [call_id] of the receipt it
+   writes and the id a wait is recorded under. [schedule_id] cannot be that name.
+   A Keeper may pick it, so the same text can name an Execute request or a
+   schedule created again after the first was pruned, and a receipt still in the
+   outbox would answer the wrong one. The key is issued when the row is created
+   and is in the row's body, so a run watch that settles keeps it. *)
+type receipt_key = string
+
+let receipt_key_of_string value =
+  if String.equal value ""
+  then Error "receipt_key is empty"
+  else Ok value
+;;
+
+let receipt_key_to_string key = key
+
+(* The colon is one a request id cannot hold. The receipt wait sweep tells a
+   schedule's key from a request id by the request store refusing the id, so a
+   key must never be a valid request id. A test holds the two together.
+   NDT-OK: a key must differ from every other key ever issued, so it is drawn
+   from the process random source when the schedule is written. *)
+let fresh_receipt_key () = Random_id.prefixed ~prefix:"schedule-receipt:" ~bytes:16
+
 let valid_keeper_wake_target_name =
   Safe_identifier.is_portable_name
 ;;

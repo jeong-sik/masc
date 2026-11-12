@@ -21,7 +21,7 @@ let texts lines =
 
 let test_unavailable_reads_as_unknown_not_idle () =
   let lines =
-    Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+    Masc_tui_answering.overlay ~ko:false ~now:1000. ~chat_target:None ~error:None
       ~observed_at:(Some 988.)
       ~finishes:[]
       [ row "delta" (Tui_decode.Keeper_turn_unavailable "owner_not_found") ]
@@ -42,7 +42,7 @@ let test_unavailable_reads_as_unknown_not_idle () =
 let test_finished_turns_glow_then_expire () =
   let finishes = [ ("echo", 990.) ] in
   let fresh =
-    Masc_tui_answering.overlay ~now:1000. ~chat_target:None ~error:None
+    Masc_tui_answering.overlay ~ko:false ~now:1000. ~chat_target:None ~error:None
       ~observed_at:(Some 988.)
       ~finishes
       [ row "echo" Tui_decode.Keeper_turn_idle ]
@@ -64,7 +64,7 @@ let test_finished_turns_glow_then_expire () =
             idle.Masc_tui_answering.text)
    | other -> Alcotest.failf "expected two lines, got %d" (List.length other));
   let expired =
-    Masc_tui_answering.overlay
+    Masc_tui_answering.overlay ~ko:false
       ~now:(990. +. Masc_tui_answering.finish_glow_ttl_seconds +. 1.)
       ~chat_target:None ~error:None ~observed_at:(Some 988.) ~finishes
       [ row "echo" Tui_decode.Keeper_turn_idle ]
@@ -113,7 +113,7 @@ let test_advance_finishes_tracks_the_transition () =
 
 let test_target_indexes_skip_prose () =
   let lines =
-    Masc_tui_answering.overlay ~now:1000. ~chat_target:None
+    Masc_tui_answering.overlay ~ko:false ~now:1000. ~chat_target:None
       ~error:(Some "boom") ~observed_at:(Some 988.) ~finishes:[ ("analyst", 995.) ]
       [ running ~lane:Tui_decode.Turn_lane_autonomous ~started:990. "echo"
       ; row "delta" Tui_decode.Keeper_turn_idle
@@ -238,7 +238,7 @@ let test_chat_shows_background_work_and_uncertainty () =
     ; running ~lane:Tui_decode.Turn_lane_maintenance ~started:950. "other" ] in
   let text rows = List.map Masc_tui_answering.chat_activity_row_text rows in
   let activity ?(error = None) keeper_name rows =
-    Masc_tui_answering.chat_activity ~now:1000. ~keeper_name ~error rows
+    Masc_tui_answering.chat_activity ~ko:false ~now:1000. ~keeper_name ~error rows
   in
   let lines = activity "echo" rows in
   Alcotest.(check int) "only running status in the band" 1 (List.length lines);
@@ -280,7 +280,7 @@ let test_chat_shows_background_work_and_uncertainty () =
 let test_motion_demand_uses_only_a_fresh_running_observation () =
   let has_motion rows = List.exists (fun (row : Masc_tui_answering.chat_activity_row) ->
       match row.motion with Still -> false | Moving through -> through > 0) rows in
-  let activity ~error state = Masc_tui_answering.chat_activity ~frame:0 ~now:1000.
+  let activity ~error state = Masc_tui_answering.chat_activity ~ko:false ~frame:0 ~now:1000.
       ~keeper_name:"echo" ~error [state] in
   let running = running ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "echo" in
   Alcotest.(check bool) "a fresh observed turn requests the motion clock" true

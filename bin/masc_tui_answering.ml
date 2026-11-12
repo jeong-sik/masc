@@ -53,12 +53,12 @@ let running_glyph ~frame =
   else running_frames.(frame mod Array.length running_frames)
 ;;
 
-(* Wire spelling from [Keeper_owner.turn_lane_to_string], not a local
-   re-spelling: the overlay names the lane the server named. *)
-let lane_word = function
-  | Tui_decode.Turn_lane_autonomous -> "autonomous"
-  | Tui_decode.Turn_lane_chat_operation -> "chat_operation"
-  | Tui_decode.Turn_lane_maintenance -> "maintenance"
+(* The turn's lane in the screen's words. The server spells the chat lane
+   [chat_operation]; the screen calls it a chat. *)
+let lane_word ~ko = function
+  | Tui_decode.Turn_lane_autonomous -> if ko then "자율" else "autonomous"
+  | Tui_decode.Turn_lane_chat_operation -> if ko then "채팅" else "chat"
+  | Tui_decode.Turn_lane_maintenance -> if ko then "정비" else "maintenance"
 ;;
 
 (* "2m14s" reads at a glance; a bare second count stops meaning anything past
@@ -109,21 +109,24 @@ let chat_activity_row_text row = row.lead ^ row.rest ^ row.keys
    still mark. Reply text belongs to the scrollable conversation; this band
    carries only activity and the keys that act on it. *)
 let chat_activity ?(frame = -1) ?(stop_keys = "") ?(show_timing = true)
-    ~now ~keeper_name ~error rows =
+    ~ko ~now ~keeper_name ~error rows =
+  let say korean english = if ko then korean else english in
   let plain text = { lead = text; motion = Still; rest = ""; keys = "" } in
-  let stale = match error with None -> [] | Some detail -> [plain ("Activity unavailable: " ^ detail)] in
+  let stale = match error with
+    | None -> []
+    | Some detail -> [plain (say "활동 조회 실패: " "Activity unavailable: " ^ detail)] in
   match List.find_opt (fun (row : Tui_decode.keeper_turn_row) ->
     String.equal row.ktr_keeper_name keeper_name) rows with
   | None -> stale
   | Some { ktr_state = Tui_decode.Keeper_turn_idle; _ } -> stale
   | Some { ktr_state = Tui_decode.Keeper_turn_unavailable detail; _ } ->
-    stale @ [plain ("Current turn unavailable: " ^ detail)]
+    stale @ [plain (say "현재 턴 조회 실패: " "Current turn unavailable: " ^ detail)]
   | Some { ktr_state = Tui_decode.Keeper_turn_running { lane; started_at_unix; preview }; _ } ->
     let status = match preview with
-      | None -> "progress has not been reported"
+      | None -> say "진행 보고 없음" "progress has not been reported"
       | Some preview when not show_timing -> preview.Tui_decode.ktp_status_text
       | Some preview ->
-        Printf.sprintf "%s · last activity %s ago"
+        Printf.sprintf (if ko then "%s · 마지막 활동 %s 전" else "%s · last activity %s ago")
           preview.Tui_decode.ktp_status_text
           (elapsed_text ~now preview.ktp_updated_at_unix)
     in
@@ -134,10 +137,10 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ?(show_timing = true)
     let mark, observed =
       match error with
       | None -> running_glyph ~frame, ""
-      | Some _ -> running_still, "last observed "
+      | Some _ -> running_still, say "이전 관측 " "last observed "
     in
     stale
-    @ [ { lead = Printf.sprintf "%s %s%s%s" mark observed (lane_word lane)
+    @ [ { lead = Printf.sprintf "%s %s%s%s" mark observed (lane_word ~ko lane)
                    (if show_timing then " · " ^ elapsed_text ~now started_at_unix else "")
         ; motion = (match error with None -> Moving (Masc_tui_message_layout.display_width mark) | Some _ -> Still)
         ; rest = " · " ^ Masc.Tui_terminal_text.sanitize_terminal_text status
@@ -231,10 +234,13 @@ let advance_finishes ~now ~previous_rows ~current_rows finishes =
   fresh @ kept
 ;;
 
-let overlay ?(frame = -1) ?width ~(now : float) ~(chat_target : string option)
+let overlay ?(frame = -1) ?width ~ko ~(now : float) ~(chat_target : string option)
     ~(error : string option) ~(observed_at : float option)
     ~(finishes : (string * float) list)
     (rows : Tui_decode.keeper_turn_row list) : line list =
+  let say korean english = if ko then korean else english in
+  let answered elapsed =
+    if ko then elapsed ^ " 전에 끝남" else "answered " ^ elapsed ^ " ago" in
   let running, unavailable, idle_count =
     List.fold_left
       (fun (running, unavailable, idle) (row : Tui_decode.keeper_turn_row) ->
@@ -280,13 +286,13 @@ let overlay ?(frame = -1) ?width ~(now : float) ~(chat_target : string option)
     let running_width = List.fold_left
       (fun widest (_, lane, started_at) ->
         max widest (Masc_tui_message_layout.display_width
-          (Printf.sprintf "  %-14s  %s" (lane_word lane)
+          (Printf.sprintf "  %-14s  %s" (lane_word ~ko lane)
             (elapsed_text ~now started_at)))) 0 running
     in
     List.fold_left
       (fun widest (_, finished_at) ->
         max widest (Masc_tui_message_layout.display_width
-          ("  answered " ^ elapsed_text ~now finished_at ^ " ago")))
+          ("  " ^ answered (elapsed_text ~now finished_at))))
       running_width live_finishes
   in
   (* Reserve the lane and age first: one long fleet name must not push every
@@ -307,18 +313,18 @@ let overlay ?(frame = -1) ?width ~(now : float) ~(chat_target : string option)
     match error, observed_at with
     | None, _ -> []
     | Some detail, None ->
-        [ { text = Printf.sprintf "poll failed: %s" detail
+        [ { text = Printf.sprintf (if ko then "조회 실패: %s" else "poll failed: %s") detail
           ; tone = Unknown
           ; target = None
           }
         ]
     | Some detail, Some read_at ->
-        [ { text = Printf.sprintf "poll failed: %s" detail
+        [ { text = Printf.sprintf (if ko then "조회 실패: %s" else "poll failed: %s") detail
           ; tone = Unknown
           ; target = None
           }
         ; { text =
-              Printf.sprintf "showing the rows read %s ago"
+              Printf.sprintf (if ko then "%s 전에 읽은 목록" else "showing the rows read %s ago")
                 (elapsed_text ~now read_at)
           ; tone = Quiet
           ; target = None
@@ -329,14 +335,14 @@ let overlay ?(frame = -1) ?width ~(now : float) ~(chat_target : string option)
     match running, observed_at, error with
     | [], Some _, _ ->
         if live_finishes = [] then
-          [ { text = "nobody is answering right now"
+          [ { text = say "지금 응답 중인 키퍼 없음" "nobody is answering right now"
             ; tone = Quiet
             ; target = None
             }
           ]
         else []
     | [], None, None ->
-        [ { text = "not loaded yet"; tone = Quiet; target = None } ]
+        [ { text = say "미조회" "not loaded yet"; tone = Quiet; target = None } ]
     (* The failed poll above is the whole answer; there is no list to
        describe. *)
     | [], None, Some _ -> []
@@ -346,7 +352,7 @@ let overlay ?(frame = -1) ?width ~(now : float) ~(chat_target : string option)
             { text =
                 Printf.sprintf "%s %s  %-14s  %s" (running_glyph ~frame)
                   (fitted_name name)
-                  (lane_word lane)
+                  (lane_word ~ko lane)
                   (elapsed_text ~now started_at)
             ; tone = Running
             ; target = Some name
@@ -357,9 +363,9 @@ let overlay ?(frame = -1) ?width ~(now : float) ~(chat_target : string option)
     List.map
       (fun (name, finished_at) ->
         { text =
-            Printf.sprintf "\xe2\x9c\x93 %s  answered %s ago"
+            Printf.sprintf "\xe2\x9c\x93 %s  %s"
               (fitted_name name)
-              (elapsed_text ~now finished_at)
+              (answered (elapsed_text ~now finished_at))
         ; tone = Done
         ; target = Some name
         })
@@ -368,7 +374,7 @@ let overlay ?(frame = -1) ?width ~(now : float) ~(chat_target : string option)
   let unavailable_lines =
     List.map
       (fun (name, detail) ->
-        { text = Printf.sprintf "? %s \xe2\x80\x94 %s" name detail
+        { text = Printf.sprintf (if ko then "? %s \xc2\xb7 %s" else "? %s \xe2\x80\x94 %s") name detail
         ; tone = Unknown
         ; target = None
         })
@@ -377,7 +383,7 @@ let overlay ?(frame = -1) ?width ~(now : float) ~(chat_target : string option)
   let idle_line =
     if idle_count = 0 then []
     else
-      [ { text = Printf.sprintf "%d idle" idle_count
+      [ { text = Printf.sprintf (if ko then "쉬는 키퍼 %d" else "%d idle") idle_count
         ; tone = Quiet
         ; target = None
         }

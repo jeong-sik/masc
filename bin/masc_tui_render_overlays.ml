@@ -1275,7 +1275,7 @@ let render_answering (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"answering"
     ~frame:Chrome_overlay
     (* Enter and Esc are in the footer row below this overlay. *)
-    ~title:(screen_title " MASC Answering")
+    ~title:(screen_title (ui_text state ~ko:" 응답 중" ~en:" Answering"))
     ~hints:(Masc_tui_keys.footer_hints_answering ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let content_height = max 1 (budget - answering_preview_rows) in

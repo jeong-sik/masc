@@ -1,0 +1,2 @@
+[stall half] body 56/112 bytes sent, no FIN, response 0 bytes after 15.1s (server ended: True, reset: True, first byte at: 0.08707787503954023), status '' -> closed
+[stall all but last byte] body 111/112 bytes sent, no FIN, response 0 bytes after 15.1s (server ended: True, reset: True, first byte at: 0.06856354197952896), status '' -> closed

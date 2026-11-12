@@ -1,0 +1,14 @@
+[usage before]
+   {"currentValue": 22, "nextResetTime": 1795596888983, "number": 1, "percentage": 1, "remaining": 3978, "type": "TIME_LIMIT", "unit": 5, "usage": 4000, "usageDetails": [{"modelCode": "search-prime", "usage": 16}, {"modelCode": "web-reader", "usage": 6}, {"modelCode": "zread", "usage": 0}]}
+   {"nextResetTime": 1794473530615, "number": 5, "percentage": 93, "type": "TOKENS_LIMIT", "unit": 3}
+[control] 'HTTP/1.1 200 OK' after 2.2s, usage in body: True
+[usage after control]
+   {"currentValue": 22, "nextResetTime": 1795596888983, "number": 1, "percentage": 1, "remaining": 3978, "type": "TIME_LIMIT", "unit": 5, "usage": 4000, "usageDetails": [{"modelCode": "search-prime", "usage": 16}, {"modelCode": "web-reader", "usage": 6}, {"modelCode": "zread", "usage": 0}]}
+   {"nextResetTime": 1794473530615, "number": 5, "percentage": 93, "type": "TOKENS_LIMIT", "unit": 3}
+[headers only] body 0/92 bytes sent, FIN, response 0 bytes after 0.0s, status '' -> silent
+[1 byte] body 1/92 bytes sent, FIN, response 0 bytes after 0.0s, status '' -> silent
+[half] body 46/92 bytes sent, FIN, response 0 bytes after 0.0s, status '' -> silent
+[all but last byte] body 91/92 bytes sent, FIN, response 0 bytes after 0.0s, status '' -> silent
+[usage after partial]
+   {"currentValue": 22, "nextResetTime": 1795596888983, "number": 1, "percentage": 1, "remaining": 3978, "type": "TIME_LIMIT", "unit": 5, "usage": 4000, "usageDetails": [{"modelCode": "search-prime", "usage": 16}, {"modelCode": "web-reader", "usage": 6}, {"modelCode": "zread", "usage": 0}]}
+   {"nextResetTime": 1794473530615, "number": 5, "percentage": 93, "type": "TOKENS_LIMIT", "unit": 3}

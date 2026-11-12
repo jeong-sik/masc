@@ -1185,6 +1185,7 @@ let keeper_delegate_status_many_body ~(config : Workspace.config) ~caller args =
       (invalid_operation_input detail)
   in
   match args with
+  | `Assoc [ ("operations", `List []) ] -> rejected "operations must name at least one operation"
   | `Assoc [ ("operations", `List elements) ] ->
     let rec parse index references = function
       | [] -> Ok (List.rev references)

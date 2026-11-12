@@ -5629,6 +5629,12 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
        check bool "the rejection names the element" true
          (String_util.contains_substring
             (Yojson.Safe.to_string (Tool_result.data malformed)) "operations[1]");
+       check bool "an empty list rejects the call" false
+         (Tool_result.is_success
+            (Keeper_tool_surface_ops.keeper_delegate_status_many_body
+               ~config
+               ~caller:"agent-operation-caller"
+               (`Assoc [ "operations", `List [] ])));
        let listed =
          Keeper_tool_surface_ops.keeper_delegate_list_body
            ~config

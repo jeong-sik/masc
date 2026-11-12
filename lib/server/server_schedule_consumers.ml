@@ -1331,7 +1331,9 @@ let dispatch_keeper_receipt config (request : Schedule_domain.schedule_request)
               "keeper %s has a route that cannot consume receipts, so a receipt \
                delivery would stay unread"
               keeper_name))
-    | Owner_meta_answered _ | Owner_meta_not_current _ | Owner_meta_unavailable _ -> Ok ()
+    | Owner_meta_answered (Ok _ | Error _)
+    | Owner_meta_not_current _
+    | Owner_meta_unavailable _ -> Ok ()
   in
   let* () =
     Keeper_schedule_receipt.deliver

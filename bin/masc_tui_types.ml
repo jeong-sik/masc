@@ -3086,16 +3086,16 @@ let schedule_modify_form (row : schedule_row) recurrence =
     | `Assoc fields ->
         (match List.assoc_opt "delivery" fields with
          | Some (`String raw) ->
-             (match Masc.Schedule_supported_kinds.keeper_wake_delivery_of_string raw with
+             (match Schedule_supported_kinds.keeper_wake_delivery_of_string raw with
               | Ok delivery -> delivery
-              | Error _ -> Masc.Schedule_supported_kinds.default_keeper_wake_delivery)
-         | Some _ | None -> Masc.Schedule_supported_kinds.default_keeper_wake_delivery)
-    | _ -> Masc.Schedule_supported_kinds.default_keeper_wake_delivery
+              | Error _ -> Schedule_supported_kinds.default_keeper_wake_delivery)
+         | Some _ | None -> Schedule_supported_kinds.default_keeper_wake_delivery)
+    | _ -> Schedule_supported_kinds.default_keeper_wake_delivery
   in
   let delivery_and_urgency =
     match delivery with
-    | Masc.Schedule_supported_kinds.Keeper_wake_to_receipt -> [ "delivery", `String "receipt" ]
-    | Masc.Schedule_supported_kinds.Keeper_wake_to_queue ->
+    | Schedule_supported_kinds.Keeper_wake_to_receipt -> [ "delivery", `String "receipt" ]
+    | Schedule_supported_kinds.Keeper_wake_to_queue ->
         [ ( "urgency"
           , `String
               (let value = schedule_json_string "urgency" body in

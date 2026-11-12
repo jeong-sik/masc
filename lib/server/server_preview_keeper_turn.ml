@@ -22,6 +22,13 @@ let not_started = "The client did not start."
 let configuration_refused = "The client refused the configuration of the Runtime."
 let no_answer = "The client ended the turn without an answer."
 
+(* A turn of a conversation can fail on a session the vendor no longer has,
+   and nothing tells that from another turn without an answer: the sentence
+   names the way on, a new conversation, without naming a cause. *)
+let no_answer_in_conversation =
+  no_answer ^ " When the turns of this conversation keep failing, start a new conversation."
+;;
+
 let other_subscription =
   "The conversation of this Keeper began on another subscription of yours. Start a new conversation."
 ;;
@@ -155,7 +162,7 @@ let failure_answer = function
   | Conversation.Silent -> error R.Gateway_timeout_504 (silent ())
   | Conversation.Not_started -> error R.Service_unavailable_503 not_started
   | Conversation.Configuration_refused -> error R.Internal_error_500 configuration_refused
-  | Conversation.No_answer -> error R.Bad_gateway_502 no_answer
+  | Conversation.No_answer -> error R.Bad_gateway_502 no_answer_in_conversation
 ;;
 
 let claude_failure : Runtime_claude_code.error -> Conversation.failure = function

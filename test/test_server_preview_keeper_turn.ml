@@ -292,6 +292,12 @@ let keeper zone (who : someone) name ?(policy = "policy-" ^ name) ?runtime () =
      | Error error -> Alcotest.fail (Authz_keeper.error_detail error))
 ;;
 
+(* The answer of a turn of a conversation that the client ended without an
+   answer. It names the way on and no cause. *)
+let no_answer_in_conversation =
+  {|{"error":"The client ended the turn without an answer. When the turns of this conversation keep failing, start a new conversation."}|}
+;;
+
 let body ~keeper ~message =
   Yojson.Safe.to_string (`Assoc [ "keeper_id", `String keeper; "message", `String message ])
 ;;
@@ -678,7 +684,7 @@ let test_turn () =
         Out_channel.with_open_bin fail (fun (_ : out_channel) -> ());
         check_reply
           "a turn the client ends without an answer"
-          (502, {|{"error":"The client ended the turn without an answer."}|})
+          (502, no_answer_in_conversation)
           (reply alice (body ~keeper:"keeper-alice" ~message:"lost"));
         Sys.remove fail;
         (match List.rev (rows alice_turns) with
@@ -775,7 +781,7 @@ let test_turn () =
           (fun message ->
             check_reply
               "a turn of a conversation whose session is gone"
-              (502, {|{"error":"The client ended the turn without an answer."}|})
+              (502, no_answer_in_conversation)
               (reply alice (body ~keeper:"keeper-alice" ~message));
             Alcotest.(check (option string))
               "tries the session of the last answer again"

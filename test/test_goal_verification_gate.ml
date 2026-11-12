@@ -57,7 +57,7 @@ let rm_rf dir =
   | _ -> ()
 ;;
 
-let with_workspace f =
+let with_workspace_env f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -75,8 +75,10 @@ let with_workspace f =
     (fun () ->
        let config = Workspace.default_config dir in
        ignore (Workspace.init config ~agent_name:(Some "planner"));
-       f config)
+       f env config)
 ;;
+
+let with_workspace f = with_workspace_env (fun _env config -> f config)
 
 let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
   { Tool_workspace.config; agent_name }
@@ -2567,6 +2569,148 @@ let test_rm_rf_unlinks_symlinks () =
   rm_rf dir
 ;;
 
+let busy_worker_polls = 50
+let busy_worker_poll_interval_s = 0.01
+
+(* Runs [action] while the one worker of a domain pool set for the occasion is
+   held busy. Says whether [action] came back before the worker was released,
+   and what it returned. *)
+let beside_a_busy_worker env action =
+  Eio.Switch.run
+  @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+  @@ fun () ->
+  Domain_pool_ref.set pool;
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  let returned = ref None in
+  let came_back_before_release = ref false in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () -> returned := Some (action ()))
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && Option.is_none !returned
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      came_back_before_release := Option.is_some !returned;
+      Eio.Promise.resolve release_u ());
+  match !returned with
+  | Some value -> !came_back_before_release, value
+  | None -> fail "the action never finished"
+;;
+
+(* A criterion whose title makes the ledger larger than the size from which a
+   read decodes on the pool. *)
+let large_criterion =
+  Goal_store.Criterion
+    { revision = "test-criterion"
+    ; title = String.make (2 * Safe_ops.json_parse_offload_min_bytes) 't'
+    ; metric = None
+    ; target_value = None
+    }
+;;
+
+let pending_ok config ~goal_id ~criterion =
+  match Goal_verification.mark_proof_pending config ~goal_id ~criterion with
+  | Ok _ -> ()
+  | Error msg -> fail msg
+;;
+
+let records_ok config =
+  match Goal_verification.load_records_by_goal_id_authoritative config with
+  | Ok records -> records
+  | Error msg -> fail msg
+;;
+
+(* Another process changes the ledger's bytes without changing what they
+   decode to. *)
+let change_ledger_bytes_outside_the_store config =
+  let path = Goal_verification.verifications_path config in
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path
+    (fun channel -> output_string channel "\n")
+;;
+
+(* A write encodes the ledger on the pool: while the pool's one worker is busy
+   the write waits for it. The read the write starts with finds the ledger the
+   earlier write kept, so the encode is the only job it submits. *)
+let test_a_ledger_write_encodes_on_the_pool () =
+  with_workspace_env
+  @@ fun env config ->
+  pending_ok config ~goal_id:"goal-seed" ~criterion:large_criterion;
+  let came_back_before_release, () =
+    beside_a_busy_worker env (fun () ->
+      pending_ok config ~goal_id:"goal-next" ~criterion:isolated_criterion)
+  in
+  check bool "the write waits for the busy worker" false came_back_before_release;
+  check int "and both records are stored" 2
+    (Goal_store.Goal_id_map.cardinal (records_ok config))
+;;
+
+(* The store keeps what it wrote: a read after its own write of a large ledger
+   decodes nothing, and comes back while the pool's one worker is busy. *)
+let test_a_read_after_the_stores_own_write_decodes_nothing () =
+  with_workspace_env
+  @@ fun env config ->
+  pending_ok config ~goal_id:"goal-large" ~criterion:large_criterion;
+  let came_back_before_release, records =
+    beside_a_busy_worker env (fun () -> records_ok config)
+  in
+  check bool "the read does not wait for the busy worker" true came_back_before_release;
+  check int "and it holds the record" 1 (Goal_store.Goal_id_map.cardinal records)
+;;
+
+(* A large ledger whose bytes the store has not seen is decoded on the pool:
+   the read waits for the busy worker. *)
+let test_a_large_ledger_read_that_misses_decodes_on_the_pool () =
+  with_workspace_env
+  @@ fun env config ->
+  pending_ok config ~goal_id:"goal-large" ~criterion:large_criterion;
+  change_ledger_bytes_outside_the_store config;
+  let came_back_before_release, records =
+    beside_a_busy_worker env (fun () -> records_ok config)
+  in
+  check bool "the read waits for the busy worker" false came_back_before_release;
+  check int "and it holds the record" 1 (Goal_store.Goal_id_map.cardinal records)
+;;
+
+(* What the store keeps after a write is what a reader decodes from the file.
+   The criterion title is not valid UTF-8, so the bytes written carry a
+   repaired string where the state the mutation built carries the original. *)
+let test_the_state_kept_after_a_write_is_the_state_the_file_decodes_to () =
+  with_workspace
+  @@ fun config ->
+  let criterion =
+    Goal_store.Criterion
+      { revision = "test-criterion"; title = "caf\xff"; metric = None; target_value = None }
+  in
+  pending_ok config ~goal_id:"goal-repaired" ~criterion;
+  let kept = records_ok config in
+  change_ledger_bytes_outside_the_store config;
+  let decoded = records_ok config in
+  check bool "the second read decoded the file" false (kept == decoded);
+  check bool "and decoded the records that were kept" true
+    (Goal_store.Goal_id_map.equal ( = ) kept decoded);
+  match Goal_store.Goal_id_map.find_opt "goal-repaired" kept with
+  | Some { completion = Proof_pending { criterion = Criterion { title; _ }; _ }; _ } ->
+    check bool "whose title is the repaired one" false (String.equal title "caf\xff")
+  | Some _ | None -> fail "the kept record is not the pending request"
+;;
+
 let () =
   if Array.length Sys.argv = 2 && String.equal Sys.argv.(1) "--proof-mirror-presence" then
     proof_mirror_presence_scenario ()
@@ -2575,6 +2719,16 @@ let () =
     [ ( "temp directory cleanup"
       , [ test_case "rm_rf unlinks live and dangling links" `Quick
             test_rm_rf_unlinks_symlinks ] )
+    ; ( "ledger encoding and decoding"
+      , [ test_case "a ledger write encodes on the pool" `Quick
+            test_a_ledger_write_encodes_on_the_pool
+        ; test_case "a read after the store's own write decodes nothing" `Quick
+            test_a_read_after_the_stores_own_write_decodes_nothing
+        ; test_case "a large ledger read that misses decodes on the pool" `Quick
+            test_a_large_ledger_read_that_misses_decodes_on_the_pool
+        ; test_case "the state kept after a write is the state the file decodes to" `Quick
+            test_the_state_kept_after_a_write_is_the_state_the_file_decodes_to
+        ] )
     ; ( "durable proof effects"
       , [ test_case "proof request follows the phase machine" `Quick
             test_proof_request_follows_the_phase_machine

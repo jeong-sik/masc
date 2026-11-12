@@ -391,22 +391,33 @@ let read_state config path : (prepared_state option, string) result =
                (Workspace_utils.json_doc_error_to_string
                   Workspace_utils.Json_doc_blank))
            else
-             match Safe_ops.parse_json_off_fiber ~context:path trimmed with
-             | Error detail ->
+             (* Parsing a large ledger already left the fiber; decoding it
+                into records and indexing them by Goal did not, and for a
+                ledger that size they are a run of the same order. The three
+                read nothing but the text, so one pool job does them all. A
+                small ledger is decoded where it is read, on the boundary
+                [Safe_ops.parse_json_off_fiber] uses. *)
+             let decode () =
+               match Safe_ops.parse_json_safe ~context:path trimmed with
+               | Error detail ->
+                   Error
+                     (Workspace_utils.json_doc_error_to_string
+                        (Workspace_utils.Json_doc_unparsable detail))
+               | Ok json -> Result.map prepare_state (state_of_yojson json)
+             in
+             let decoded =
+               if String.length trimmed < Safe_ops.json_parse_offload_min_bytes
+               then decode ()
+               else Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ decode
+             in
+             match decoded with
+             | Error _ as err ->
                  clear_verifications_cache_for path;
-                 Error
-                   (Workspace_utils.json_doc_error_to_string
-                      (Workspace_utils.Json_doc_unparsable detail))
-             | Ok json ->
-                 (match state_of_yojson json with
-                  | Error _ as err ->
-                      clear_verifications_cache_for path;
-                      err
-                  | Ok state ->
-                      let prepared = prepare_state state in
-                      Mirrored_store_cache.Content_cache.replace
-                        verifications_cache path content prepared;
-                      Ok (Some prepared)))
+                 err
+             | Ok prepared ->
+                 Mirrored_store_cache.Content_cache.replace
+                   verifications_cache path content prepared;
+                 Ok (Some prepared))
 
 (* When the primary is absent, an existing or uninspectable mirror cannot be
    treated as a new empty ledger. Inspect the entry itself so a dangling
@@ -487,10 +498,27 @@ let write_state_result config state =
   let recovery = verifications_recovery_path config in
   clear_verifications_cache_for primary;
   clear_verifications_cache_for recovery;
-  let json = state_to_yojson state in
-  let* () = Workspace_utils.write_json_result config primary json in
+  (* One encoding serves both files, on the pool. Each file used to encode
+     the document again on the calling fiber: for the 1.3 MB ledger of
+     2026-11-12 that was two runs of 129 ms and 120 ms on the main domain for
+     one update. The same job decodes the document it encodes -- the state a
+     reader decodes from those bytes, with the UTF-8 repair the encoding
+     applies -- so the read after this write finds the bytes it reads already
+     decoded. *)
+  let content, reread =
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      let json = Safe_ops.sanitize_json_utf8 (state_to_yojson state) in
+      ( Workspace_utils.encode_json_pretty json
+      , Result.map prepare_state (state_of_yojson json) ))
+  in
+  let* () = Workspace_utils.write_encoded_json_result config primary content in
+  (match reread with
+   | Ok prepared ->
+     Mirrored_store_cache.Content_cache.replace
+       verifications_cache primary (content :> string) prepared
+   | Error (_ : string) -> ());
   Goal_store.projection_source_changed config;
-  (match Workspace_utils.write_json_result config recovery json
+  (match Workspace_utils.write_encoded_json_result config recovery content
    with
    | Ok () -> ()
    | Error msg ->

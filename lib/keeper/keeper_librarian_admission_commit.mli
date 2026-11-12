@@ -25,8 +25,9 @@ val validate : store:Lane_addon_store.t ->
     a pending evaluation remains pending. Missing proof
     cannot mint a replacement gate or execute another judgment. Finished also
     requires matching actual committed candidate receipts. Conflicted requires
-    its exact destination-absent conflict, a destination the proposal writes
-    into, and no committed candidate receipt. *)
+    its exact destination-absent conflict and a destination the proposal writes
+    into. Its candidates' receipts are not read: a replacement root takes the
+    candidates over and commits them while this record stays retained. *)
 val destination_absent_of_json : Lane_addon_tool_request_owner.retained ->
   Yojson.Safe.t -> (string, string) Stdlib.result
 (** The Memory identity an original admission's conflict names, when the

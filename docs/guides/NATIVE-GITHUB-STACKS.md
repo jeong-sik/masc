@@ -165,20 +165,24 @@ references of each pull request it sees merged, and records the outcome as
 its merge commit is on that branch, so a layer of a landed native stack counts
 although its base stays the parent branch.
 
-A merge closes its issues once. An issue that was closed after the merge and
-is open again was reopened by a person, and the worker leaves it open. A
-recheck of a merged pull request therefore sends only the closes that are
-still missing: the ones a failed close or a run that died before this step
-left behind. A close that fails is recorded and does not change the merge
-verdict; the issue stays open until the pull request is rechecked or someone
-closes it. One GraphQL query reads every pull request of the scope. A second
-one is sent only when a linked issue is still open; it asks whether the
-layers' merge commits are on the default branch and when each issue was last
-closed.
+A merge closes its issues once. An issue that was reopened after the merge
+stays open, whoever reopened it. A recheck of a merged pull request closes
+every other open issue the pull request links: one whose close failed, one a
+run left behind when it died before this step, and one that was never closed
+because the pull request merged before the worker had this step. GitHub's
+record does not tell the last kind from an issue left open on purpose. A
+close that fails is recorded and does not change the merge verdict; the issue
+stays open until the pull request is rechecked or someone closes it.
+
+One GraphQL query reads every pull request of the scope. A second one is sent
+only when a linked issue is still open; it asks whether the layers' merge
+commits are on the default branch, and for each issue its state and when it
+was last reopened. When the second query fails, the run closes no issue and
+records each one.
 
 GitHub decides what a closing reference is. `Closes #N` in a pull request
 whose base is the default branch is one. GitHub documents that it ignores the
-keyword in a pull request that targets another branch, so a layer above the
+keyword in a pull request whose base is another branch, so a layer above the
 bottom of a stack often lists none and the worker has nothing to close; the
 Development section of the pull request's sidebar shows what GitHub
 registered. The worker closes what the pull request declares: a pull request

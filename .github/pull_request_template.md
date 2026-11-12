@@ -46,7 +46,7 @@ stages: []
 ## Linked issue
 
 <!-- `Closes #N` closes the issue when this pull request lands on main. Use `Relates #N` when work remains in the issue.
-     GitHub may not register `Closes` in a pull request whose base is not main; the sidebar's Development section shows what it registered. -->
+     GitHub documents that it ignores `Closes` in a pull request whose base is not main; the sidebar's Development section shows what it registered. -->
 - Closes #
 - Relates #
 

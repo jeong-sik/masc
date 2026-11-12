@@ -136,6 +136,11 @@ val initial_runtime_id
     bare runtime IDs exactly as initial routing does. This does not try fallbacks
     or claim an empty lane has a usable target. Pass materialized lanes. *)
 
+(** What ends a verification of a Runtime of this model before any client
+    starts, or [None]: {!verify} asks the model to call a tool, so a model
+    that declares no tool calling is [Tools_not_declared]. *)
+val model_refusal : Runtime_schema.model_spec -> unavailable option
+
 (** [timeout_s] is one window over a runtime's whole readiness run, on
     [clock], for every arm: for an HTTP binding that is the wait for its
     admission permit, both provider round trips and the tool call between

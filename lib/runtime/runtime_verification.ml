@@ -647,15 +647,21 @@ let authorize_api sealed =
   Runtime_account_access.authorize_api sealed |> Result.map_error not_authorized
 ;;
 
+(* The verification asks the model to call a tool, so a model that declares
+   no tool calling ends it before any client starts. *)
+let model_refusal (model : Runtime_schema.model_spec) =
+  if model.tools_support then None else Some Tools_not_declared
+;;
+
 let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~account_request (runtime : Runtime_instance.t) =
   (* The refusal the client's latest report amounts to. Whichever ends the
      run first -- this window or the client's own timeout -- reads it. *)
   let refusal_before_deadline = ref None in
   let deadline_failure () = Option.value !refusal_before_deadline ~default:Timed_out in
   let run (tool : Runtime_official_client_tool.dynamic_tool) ~prompt =
-    if not runtime.model.tools_support
-    then Error (Unavailable Tools_not_declared)
-    else (
+    match model_refusal runtime.model with
+    | Some unavailable -> Error (Unavailable unavailable)
+    | None -> (
       match runtime.execution with
       | Runtime_execution.Muse_serve execution ->
         (match authorize_muse ~account_request execution.account_home with
@@ -663,7 +669,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
          | Ok account ->
         let config = { (Runtime_muse_serve.default_config ()) with
           cli_path = execution.cli_path;
-          model = Some execution.model; native = Runtime_native_tools.Native_read;
+          model = Some execution.model; native = Runtime_native_tools.muse_default;
           admission_timeout_s = Float.min timeout_s execution.timeout_s;
           timeout_s = Some timeout_s } in
         let reasoning_effort =

@@ -7,6 +7,7 @@ import {
   type ExecutionWorkspaceAuthority,
 } from '../execution-workspace-authority'
 import { dashboardActorRevision, managedDashboardActorRevision } from './dashboard-session-actor'
+import { isObserverInstance } from './observer-protocol'
 
 export interface DashboardObservationOwner {
   readonly workspace: ExecutionWorkspaceAuthority | null
@@ -41,9 +42,9 @@ export function dashboardObservationOwnerIsCurrent(owner: DashboardObservationOw
 export function dashboardObservationOwnerHasWorkspace(
   owner: DashboardObservationOwner,
 ): owner is DashboardObservationOwner & {
-  readonly workspace: ExecutionWorkspaceAuthority
+  readonly workspace: ExecutionWorkspaceAuthority & { readonly observerInstanceId: string }
 } {
-  return owner.workspace !== null
+  return owner.workspace !== null && isObserverInstance(owner.workspace.observerInstanceId)
 }
 
 /** Change-only subscription. Stored credential/actor ABA and workspace ABA

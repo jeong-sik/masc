@@ -897,6 +897,10 @@ let test_serves_its_table_alone () =
              ; "style-src 'nonce-N'"
              ])
           (Option.map directives (header "content-security-policy" headers));
+        Alcotest.(check (option string))
+          "nothing between the server and the browser keeps the page that stands in"
+          (Some "no-store")
+          (header "cache-control" headers);
         Alcotest.(check int)
           "a file of a build the bundle does not hold"
           404
@@ -938,6 +942,12 @@ let test_serves_its_table_alone () =
             "a browser does not keep the page"
             (Some "no-store")
             (header "cache-control" headers);
+          (* A link of the console that leaves this origin tells the other
+             site nothing of the address it was followed from. *)
+          Alcotest.(check (option string))
+            "a link to another site carries no address of this server"
+            (Some "same-origin")
+            (header "referrer-policy" headers);
           (let status, headers, body =
              exchange ~net ~port ~meth:"GET" (Server_account_console.page_path ^ "/assets/app.js")
            in
@@ -996,6 +1006,14 @@ let test_serves_its_table_alone () =
           match header "etag" headers with
           | None -> Alcotest.fail "the sheet has no entity tag"
           | Some tag ->
+            (* The tag follows the bytes: a browser that holds the sheet of
+               another binary is sent the sheet of this one. *)
+            Alcotest.(check string)
+              "the tag of the sheet is the tag of its bytes"
+              (Printf.sprintf
+                 "\"%s\""
+                 (Http_server_eio.Response.etag_of_body Account_page.base_sheet))
+              tag;
             let status, (_ : string list), body =
               exchange ~net ~port ~headers:[ "If-None-Match", tag ] ~meth:"GET" sheet_path
             in

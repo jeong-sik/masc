@@ -693,10 +693,21 @@ let retained_prefix_reasoning_indices ~(config : Provider_config.t) ~tools messa
 type serialized_http_request =
   { http_codec : Provider_http_codec.t
   ; body : string
+  ; body_sha256 : string
   ; output_token_receipt : Types.output_token_receipt
   }
 
-let serialize_http_request_with_policy
+(* The digest is taken here, once, from the bytes the record keeps. Every
+   later fact about this body reads the field. *)
+let seal_serialized ~http_codec ~body ~output_token_receipt =
+  { http_codec
+  ; body
+  ; body_sha256 = Agent_core_sha256.(to_hex (digest_string body))
+  ; output_token_receipt
+  }
+;;
+
+let serialize_http_request_parts
       ~stream
       ~anthropic_serialization_policy
       ~(config : Provider_config.t)
@@ -759,32 +770,45 @@ let serialize_http_request_with_policy
     | Invalid_argument reason -> Error (Http_client.AcceptRejected { reason })
   in
   Result.map (fun (body, output_token_receipt) ->
-    { http_codec; body; output_token_receipt }) body_result
+    http_codec, body, output_token_receipt) body_result
 ;;
 
-let serialize_http_request_with_thinking_control
+let serialize_http_request_body_with_thinking_control
       ~stream
       ~anthropic_thinking_control
       ~config
       ~messages
       ~tools
   =
-  serialize_http_request_with_policy
+  serialize_http_request_parts
     ~stream
     ~anthropic_serialization_policy:
       (Frozen_anthropic_thinking_control anthropic_thinking_control)
     ~config
     ~messages
     ~tools
+  |> Result.map (fun (_http_codec, body, _output_token_receipt) -> body)
 ;;
 
-let serialize_http_request ~stream ~(config : Provider_config.t) ~messages ~tools =
-  serialize_http_request_with_policy
+let serialize_http_request_body ~stream ~(config : Provider_config.t) ~messages ~tools =
+  serialize_http_request_parts
     ~stream
     ~anthropic_serialization_policy:Resolve_nonexact_anthropic_thinking_control
     ~config
     ~messages
     ~tools
+  |> Result.map (fun (_http_codec, body, _output_token_receipt) -> body)
+;;
+
+let serialize_http_request ~stream ~(config : Provider_config.t) ~messages ~tools =
+  serialize_http_request_parts
+    ~stream
+    ~anthropic_serialization_policy:Resolve_nonexact_anthropic_thinking_control
+    ~config
+    ~messages
+    ~tools
+  |> Result.map (fun (http_codec, body, output_token_receipt) ->
+    seal_serialized ~http_codec ~body ~output_token_receipt)
 ;;
 
 let finalize_stream_body ~http_codec body =
@@ -837,12 +861,75 @@ let serialize_final_http_request_unadmitted
       ~tools
   =
   Result.bind
-    (serialize_http_request ~stream ~config ~messages ~tools)
-    (fun serialized ->
-       if stream
-       then Result.map (fun body -> { serialized with body })
-           (finalize_stream_body ~http_codec:serialized.http_codec serialized.body)
-       else Ok serialized)
+    (serialize_http_request_parts
+       ~stream
+       ~anthropic_serialization_policy:Resolve_nonexact_anthropic_thinking_control
+       ~config
+       ~messages
+       ~tools)
+    (fun (http_codec, body, output_token_receipt) ->
+       (* The stream fields are part of the bytes sent, so the digest is taken
+          after they are in. *)
+       let final_body = if stream then finalize_stream_body ~http_codec body else Ok body in
+       Result.map
+         (fun body -> seal_serialized ~http_codec ~body ~output_token_receipt)
+         final_body)
+;;
+
+let serialization_observation
+      ~capture_id
+      ~(config : Provider_config.t)
+      ~stream
+      (serialized : serialized_http_request)
+  =
+  { Request_wire_observer.phase = Pre_dispatch_serialization
+  ; capture_id
+  ; provider = Provider_registry.provider_name_of_config config
+  ; model = config.model_id
+  ; http_codec = Provider_http_codec.fingerprint_tag serialized.http_codec
+  ; stream
+  ; body_bytes = String.length serialized.body
+  ; body_sha256 = serialized.body_sha256
+  }
+;;
+
+let%test "the final request carries the digest of the bytes it sends" =
+  List.for_all
+    (fun stream ->
+       let config =
+         Provider_config.make
+           ~kind:Provider_config.OpenAI_compat
+           ~model_id:"model"
+           ~base_url:"https://example.invalid"
+           ()
+       in
+       match
+         serialize_final_http_request_unadmitted
+           ~stream
+           ~config
+           ~messages:[ Types.user_msg "hello" ]
+           ~tools:[]
+       with
+       | Error _ -> false
+       | Ok serialized ->
+         let streams =
+           match Yojson.Safe.from_string serialized.body with
+           | `Assoc fields -> List.mem_assoc "stream_options" fields
+           | _ -> false
+         in
+         Bool.equal streams stream
+         && String.equal
+              serialized.body_sha256
+              Agent_core_sha256.(to_hex (digest_string serialized.body))
+         && (serialization_observation ~capture_id:None ~config ~stream serialized)
+            = Request_wire_observer.observation
+                ~capture_id:None
+                ~provider:(Provider_registry.provider_name_of_config config)
+                ~model:config.model_id
+                ~http_codec:(Provider_http_codec.fingerprint_tag serialized.http_codec)
+                ~stream
+                ~body:serialized.body)
+    [ false; true ]
 ;;
 
 let with_request_metadata ~body run =

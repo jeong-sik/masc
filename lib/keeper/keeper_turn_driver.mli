@@ -186,7 +186,7 @@ type walk_rest =
     cycle, so a failure it sees names the Keeper as the recorder
     ({!Runtime_candidate_backpressure.keeper_recorder}). An official CLI
     starts for it only on an account the access authorizes for that Keeper's
-    turn on [turn.channel] ({!Runtime_account_access.Keeper_turn}).
+    turn ({!Runtime_account_access.Operator_keeper_turn}).
     [One_shot_walk]: a walk no cycle repeats, such as a completion review. It
     records no failed-attempt mark (timeout, 5xx, 529, network): a mark naming it
     would have no one to retry it, and would hold the candidate behind for
@@ -194,10 +194,7 @@ type walk_rest =
     429 and 402 evidence is recorded as any walk's. An answer it receives
     still clears the candidate's evidence, whoever recorded it. An official CLI
     starts for it as an operator call ({!Runtime_account_access.Operator_call}). *)
-type fleet_turn =
-  { keeper_name : string  (** The Keeper, which is the name of its TOML. *)
-  ; channel : Authz_types.Channel.t  (** What started the turn. *)
-  }
+type fleet_turn = { keeper_name : string  (** The Keeper, which is the name of its TOML. *) }
 
 type walk_owner =
   | Fleet_keeper_turn of fleet_turn

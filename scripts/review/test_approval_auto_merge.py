@@ -74,6 +74,7 @@ class FakeGitHub:
             self.stack = {'id': 7, 'number': 900, 'base': {'ref': 'main'},
                           'pull_requests': [
                               {'number': number, 'state': row['state'],
+                               'merged_at': T1 if row['merged'] else None,
                                'head': {'sha': row['head']['sha']}}
                               for number, row in self.pulls.items()]}
 
@@ -180,6 +181,27 @@ class AutomaticMergeAdmission(unittest.TestCase):
             selected, _, scope = MERGE.prepare(REPO, 102)
         self.assertEqual(selected, 103)
         self.assertEqual([member['number'] for member in scope['scope']], [101, 102, 103])
+
+    def test_a_landed_stack_is_recognized_without_reading_its_layers(self):
+        with FakeGitHub(['merged', 'merged', 'merged']) as github:
+            with self.assertRaisesRegex(MERGE.Hold, 'already merged'):
+                MERGE.prepare(REPO, 102)
+        member_reads = {path: count for path, count in github.counts.items()
+                        if path.startswith(PREFIX + '/pulls/')}
+        self.assertEqual(member_reads, {PREFIX + '/pulls/102': 1})
+
+    def test_only_the_first_unmerged_layer_from_the_top_is_read_to_find_the_top(self):
+        with FakeGitHub(['merged', 'open', 'open']) as github:
+            top = MERGE.top_pull(REPO, 102)
+        self.assertEqual(top['number'], 103)
+        self.assertNotIn(PREFIX + '/pulls/101', github.counts)
+
+    def test_a_layer_that_merged_after_the_listing_is_passed_over(self):
+        with FakeGitHub(['open', 'open']) as github:
+            assert github.stack is not None
+            github.pulls[102].update(state='closed', merged=True)
+            top = MERGE.top_pull(REPO, 101)
+        self.assertEqual(top['number'], 101)
 
     def test_closed_unmerged_middle_and_top_block_the_whole_stack(self):
         for states in (['open', 'closed', 'open'], ['open', 'open', 'closed']):
@@ -1416,6 +1438,7 @@ class ClosingLinkedIssues(unittest.TestCase):
         self.assertEqual(data, {'ok': 1})
         self.assertEqual(run.call_args.args[0], [
             'gh', 'api', 'graphql', '-f', 'query=query { ok }', '-f', 'owner=o', '-f', 'name=r'])
+        self.assertEqual(run.call_args.kwargs['timeout'], MERGE.GRAPHQL_TIMEOUT_SECONDS)
 
     def test_a_refused_unstartable_or_slow_call_is_a_value_error(self):
         refused = subprocess.CompletedProcess([], 1, '{"errors": []}', 'gh: not accessible')
@@ -1433,14 +1456,15 @@ class ClosingLinkedIssues(unittest.TestCase):
         linked = {'totalCount': 1, 'nodes': [
             {'id': 'I_7', 'url': f'https://github.com/{REPO}/issues/7', 'state': 'OPEN'}]}
         read = {'repository': {'defaultBranchRef': {'name': 'main'}, 'p102': {
-            'merged': True, 'baseRefName': 'main', 'mergeCommit': {'oid': sha(102)},
-            'closingIssuesReferences': linked}}}
+            'merged': True, 'mergedAt': '2026-11-12T02:09:02Z', 'baseRefName': 'main',
+            'mergeCommit': {'oid': sha(102)}, 'closingIssuesReferences': linked}}}
+        never_reopened = {'i0': {'state': 'OPEN', 'timelineItems': {'nodes': []}}}
         close = {'closeIssue': {'issue': {'state': 'CLOSED'}}}
         commands = []
 
         def gh(command, **_):
             commands.append(command)
-            data = close if 'id=I_7' in command else read
+            data = close if 'id=I_7' in command else never_reopened if 'i0=I_7' in command else read
             return subprocess.CompletedProcess(command, 0, json.dumps({'data': data}), '')
 
         with patch.object(MERGE.subprocess, 'run', side_effect=gh):
@@ -1449,13 +1473,20 @@ class ClosingLinkedIssues(unittest.TestCase):
             {'pr': 102, 'issue': f'https://github.com/{REPO}/issues/7', 'closed': True}])
         self.assertEqual([command[-4:] for command in commands], [
             ['-f', 'owner=owner', '-f', 'name=repo'],
+            ['-f', f'query={MERGE.ISSUES.check_query([], 1)}', '-f', 'i0=I_7'],
             ['-f', f'query={MERGE.ISSUES.CLOSE_ISSUE}', '-f', 'id=I_7']])
 
-    def test_a_failed_read_is_one_record_that_names_the_pull_requests(self):
+    def test_a_read_that_fails_or_answers_nothing_is_one_record_that_names_the_pull_requests(self):
+        failures = {'refused': {'side_effect': ValueError('rate limited')},
+                    'empty': {'return_value': {'repository': None}},
+                    'without the default branch': {'return_value': {'repository': {}}}}
+        for name, behaviour in failures.items():
+            with self.subTest(name), patch.object(MERGE, 'graphql', **behaviour):
+                records = MERGE.close_linked_issues(REPO, [101, 102])
+                self.assertEqual([(row['prs'], row['closed']) for row in records],
+                                 [([101, 102], False)])
         with patch.object(MERGE, 'graphql', side_effect=ValueError('rate limited')):
-            records = MERGE.close_linked_issues(REPO, [101, 102])
-        self.assertEqual([(row['prs'], row['closed']) for row in records], [([101, 102], False)])
-        self.assertIn('rate limited', records[0]['reason'])
+            self.assertIn('rate limited', MERGE.close_linked_issues(REPO, [101])[0]['reason'])
 
 
 if __name__ == '__main__':

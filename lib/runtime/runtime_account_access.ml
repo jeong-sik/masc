@@ -106,9 +106,14 @@ let publish_host_tool ~base_path ~config_dir =
 
 type request =
   | Keeper_turn of
-      { keeper_name : string
+      { owner : Authz_types.User_id.t
+      ; keeper_id : Authz_types.Keeper_id.t
       ; channel : Authz_types.Channel.t
       ; pat : Authz_types.Pat_binding.t
+      ; runtime_id : string
+      }
+  | Operator_keeper_turn of
+      { keeper_name : string
       ; runtime_id : string
       }
   | Own_account of
@@ -120,8 +125,8 @@ type request =
 type refusal =
   | Not_published
   | No_operator
+  | No_operator_keeper of string
   | Zone_uncertain of Authz_zone.uncertain
-  | Not_a_keeper_id of string
   | Turn_refused of Authz_keeper_turn.refusal
   | Not_the_assigned_runtime of
       { requested : string
@@ -144,7 +149,10 @@ let refusal_to_string = function
   | Zone_uncertain uncertain ->
     "the authorization log cannot be trusted now, so no client starts on an account: "
     ^ Authz_zone.uncertain_to_string uncertain
-  | Not_a_keeper_id name -> Printf.sprintf "the Keeper %S is not an id of the authorization log" name
+  | No_operator_keeper name ->
+    Printf.sprintf
+      "in multi-account mode a Keeper is a person's, and %S is a Keeper of the operator"
+      name
   | Turn_refused refusal -> "the turn is refused: " ^ Authz_keeper_turn.refusal_to_string refusal
   | Not_the_assigned_runtime { requested; assigned } ->
     Printf.sprintf
@@ -254,39 +262,28 @@ let multi_account ~zone ~base_path ~now request claim =
       match Ps.find state.Authz_state.principals user_id with
       | Some { Ps.status = Ps.Active; _ } -> own_home ~base_path state user_id provider_account_id claim
       | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
-  | Keeper_turn { keeper_name; channel; pat; runtime_id } ->
-    (match Authz_types.Keeper_id.of_string keeper_name with
-     | Error (_ : Authz_id.error) -> Error (Not_a_keeper_id keeper_name)
-     | Ok keeper_id ->
-       on_trusted (fun trusted state ->
-         match Authz_keeper_turn.decide trusted ~keeper_id ~channel ~pat ~now:(now ()) with
-         | Error refusal -> Error (Turn_refused refusal)
-         | Ok turn ->
-           if String.equal (Authz_types.Runtime_id.to_string turn.Authz_keeper_turn.runtime_id) runtime_id
-           then
-             own_home
-               ~base_path
-               state
-               turn.Authz_keeper_turn.owner
-               turn.Authz_keeper_turn.provider_account_id
-               claim
-           else
-             Error
-               (Not_the_assigned_runtime
-                  { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id })))
+  | Operator_keeper_turn { keeper_name; runtime_id = _ } -> Error (No_operator_keeper keeper_name)
+  | Keeper_turn { owner; keeper_id; channel; pat; runtime_id } ->
+    on_trusted (fun trusted state ->
+      match Authz_keeper_turn.decide trusted ~owner ~keeper_id ~channel ~pat ~now:(now ()) with
+      | Error refusal -> Error (Turn_refused refusal)
+      | Ok turn ->
+        if String.equal (Authz_types.Runtime_id.to_string turn.Authz_keeper_turn.runtime_id) runtime_id
+        then
+          own_home
+            ~base_path
+            state
+            turn.Authz_keeper_turn.owner
+            turn.Authz_keeper_turn.provider_account_id
+            claim
+        else
+          Error
+            (Not_the_assigned_runtime
+               { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id }))
 ;;
 
-(* The Keeper or the Runtime of the log that [name] spells, if the log made one.
-   A name that is no id names no record. *)
-let off_keeper (records : Authz_state.t) name =
-  match Authz_types.Keeper_id.of_string name with
-  | Error (_ : Authz_id.error) -> None
-  | Ok keeper_id ->
-    Option.map
-      (fun (_ : Authz_keeper_state.keeper) -> Off_keeper keeper_id)
-      (Authz_keeper_state.find records.Authz_state.keepers keeper_id)
-;;
-
+(* The Runtime of the log that [name] spells, if the log made one. A name
+   that is no id names no record. *)
 let off_runtime (records : Authz_state.t) name =
   match Authz_types.Runtime_id.of_string name with
   | Error (_ : Authz_id.error) -> None
@@ -306,10 +303,15 @@ let after_off ~base_path (records : Authz_state.t) request claim =
     match request with
     | Operator_call -> None
     | Own_account { user_id; provider_account_id = _ } -> Some (Off_own_account user_id)
-    | Keeper_turn { keeper_name; channel = _; pat = _; runtime_id } ->
-      (match off_keeper records keeper_name with
-       | Some refusal -> Some refusal
-       | None -> off_runtime records runtime_id)
+    | Keeper_turn { owner = _; keeper_id; channel = _; pat = _; runtime_id = _ } ->
+      (* A Keeper of a person, whichever record the log holds of it. *)
+      Some (Off_keeper keeper_id)
+    | Operator_keeper_turn { keeper_name = _; runtime_id } ->
+      (* A Keeper of the operator is no Keeper of the log, whatever its
+         name: a person who made a Keeper of that name took nothing of it
+         (issue #51073). What stays off is the Runtimes and the homes of the
+         persons. *)
+      off_runtime records runtime_id
   in
   match by_request, claim.declared_home with
   | Some refusal, (None | Some (_ : string)) -> Error refusal

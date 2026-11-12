@@ -9,8 +9,9 @@
     {!turn_path} (plan D2-8), which the server answers.
 
     A Keeper or a Runtime of another person is answered as one that is not
-    there (404), so the answer does not say whose it is. A Keeper name is
-    taken for everyone once anyone made it, so that one is a 409.
+    there (404), so the answer does not say whose it is. A Keeper name is a
+    person's own: two persons can each make a Keeper of one name, and each
+    reads and runs their own (issue #51073).
 
     A Keeper made here runs its turns under a policy of its owner that allows
     the [autonomous] and [direct] channels; the Runtime it is given and that
@@ -39,7 +40,8 @@ val list : Authz_state.t -> Authz_types.User_id.t -> Login_routes.answer
 (** The body is [{"keeper_id": <name>}], a name of the Keeper grammar
     ({!Keeper_id.Keeper_name}). A 200 JSON
     [{"keeper_id":...,"record":"made"}], or ["existing"] when the person
-    made it before; a 409 when another person did. ["existing"] is read in a
+    made it before. A Keeper of that name which another person made does
+    not count. ["existing"] is read in a
     state the zone can be trusted for; a zone that cannot gets the 503 of
     {!Login_routes.zone_uncertain}. *)
 val make : Authz_zone.t -> Authz_types.User_id.t -> body:string -> Login_routes.answer

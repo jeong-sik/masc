@@ -45,7 +45,8 @@ stages: []
 
 ## Linked issue
 
-<!-- `Closes #N` closes the issue when this pull request merges. Use `Relates #N` when work remains in the issue after the merge. -->
+<!-- `Closes #N` closes the issue when this pull request lands on main. Use `Relates #N` when work remains in the issue.
+     GitHub documents that it ignores `Closes` in a pull request whose base is not main; the sidebar's Development section shows what it registered. -->
 - Closes #
 - Relates #
 

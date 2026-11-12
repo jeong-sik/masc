@@ -218,14 +218,15 @@ signout.addEventListener("click", async () => {
 async function listAccounts() {
   const [answer, json] = await read("%s");
   accounts.textContent = answer.ok
-    ? (json.provider_accounts.length === 0 ? "none" : json.provider_accounts.join("\n"))
+    ? (json.provider_accounts.length === 0 ? "none"
+       : json.provider_accounts.map((a) => a.provider_account_id).join("\n"))
     : "(" + answer.status + "): " + json.error;
   runtimes.textContent = answer.ok
     ? (json.runtimes.length === 0 ? "none"
        : json.runtimes.map((r) => r.runtime_id + " on " + r.provider_account_id).join("\n"))
     : "";
   if (answer.ok) {
-    fill(account, json.provider_accounts);
+    fill(account, json.provider_accounts.map((a) => a.provider_account_id));
     fill(keeperRuntime, json.runtimes.map((r) => r.runtime_id));
   }
 }
@@ -674,23 +675,86 @@ let keeper_conversation_reader trusted ~now_ms request =
       | Error reason -> Error (refused reason))
 ;;
 
-let provider_accounts state { user_id; namespace = _ } =
+(* Why the integration of an account is not known. *)
+type integration_unread =
+  | Login_receipt_missing
+  | Login_receipt_unreadable
+
+(* Why the model of a Runtime is not known. *)
+type model_unread =
+  | Account_integration_unread
+  | Configuration_unavailable
+  | Not_bound of Runtime_account_runtime.error
+
+let integration_unread_code = function
+  | Login_receipt_missing -> "login_receipt_missing"
+  | Login_receipt_unreadable -> "login_receipt_unreadable"
+;;
+
+let model_unread_code = function
+  | Account_integration_unread -> "account_integration_unread"
+  | Configuration_unavailable -> "configuration_unavailable"
+  | Not_bound error -> Runtime_account_runtime.error_code error
+;;
+
+(* The integration the login of the account named, read from its receipt
+   as the connect route saved it. *)
+let integration_of ~base_path user_id account =
+  match
+    Runtime_setup_login_receipt.load
+      ~workspace:base_path
+      ~actor:(Runtime_setup_login_session.Person (User_id.to_string user_id))
+      ~login_id:(Provider_account_id.to_string account)
+  with
+  | Ok receipt -> Ok receipt.Runtime_setup_login_receipt.integration_id
+  | Error Runtime_setup_login_receipt.Not_found -> Error Login_receipt_missing
+  | Error Runtime_setup_login_receipt.Unavailable -> Error Login_receipt_unreadable
+;;
+
+(* The model of the binding of the account's template that makes the
+   Runtime id, the binding a turn of the Runtime finds. *)
+let model_of ~config ~integration id (runtime : Authz_runtime_state.runtime) =
+  match integration, config with
+  | Error (_ : integration_unread), (_ : Runtime_schema.config option) -> Error Account_integration_unread
+  | Ok (_ : string), None -> Error Configuration_unavailable
+  | Ok template, Some config ->
+    Runtime_account_runtime.binding_of
+      config
+      ~template
+      ~provider_id:(Provider_account_id.to_string runtime.provider_account_id)
+      ~binding:(Runtime_account_runtime.Runtime (Runtime_id.to_string id))
+    |> Result.map (fun (binding : Runtime_schema.binding) -> binding.model_id)
+    |> Result.map_error (fun error -> Not_bound error)
+;;
+
+(* A fact as [name], or [null] and the code of why it was not read. *)
+let fact name code = function
+  | Ok value -> [ name, `String value ]
+  | Error unread -> [ name, `Null; "unread", `String (code unread) ]
+;;
+
+let provider_accounts ~base_path ~config state { user_id; namespace = _ } =
   R.json
     R.Ok_200
     [ ( "provider_accounts"
       , `List
           (List.map
-             (fun id -> `String (Provider_account_id.to_string id))
+             (fun account ->
+               `Assoc
+                 (("provider_account_id", `String (Provider_account_id.to_string account))
+                  :: fact "integration_id" integration_unread_code (integration_of ~base_path user_id account)))
              (Authz_provider_account.owned state user_id)) )
     ; ( "runtimes"
       , `List
           (List.map
              (fun (id, (runtime : Authz_runtime_state.runtime)) ->
+               let integration = integration_of ~base_path user_id runtime.provider_account_id in
                `Assoc
-                 [ "runtime_id", `String (Runtime_id.to_string id)
-                 ; ( "provider_account_id"
-                   , `String (Provider_account_id.to_string runtime.provider_account_id) )
-                 ])
+                 ([ "runtime_id", `String (Runtime_id.to_string id)
+                  ; ( "provider_account_id"
+                    , `String (Provider_account_id.to_string runtime.provider_account_id) )
+                  ]
+                  @ fact "model" model_unread_code (model_of ~config ~integration id runtime)))
              (Authz_runtime.owned state user_id)) )
     ]
 ;;

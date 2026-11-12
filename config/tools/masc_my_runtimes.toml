@@ -2,8 +2,9 @@ name = "masc_my_runtimes"
 title = "My Runtimes"
 description = """
 List the subscriptions you connected to this server and the Runtimes made \
-on them. The answer is JSON: provider_accounts holds the ids of your \
-subscriptions, and runtimes holds each runtime_id with the \
-provider_account_id it runs on. A Keeper takes one of these runtime_id \
-values in masc_my_keeper_assign."""
+on them. The answer is JSON: provider_accounts holds each \
+provider_account_id with the integration_id its login named, and runtimes \
+holds each runtime_id with the provider_account_id it runs on and its \
+model. A fact that could not be read is null, and unread names why. A \
+Keeper takes one of these runtime_id values in masc_my_keeper_assign."""
 additional_properties = false

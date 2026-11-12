@@ -8,7 +8,7 @@ import { waitForKeeperChatOperationTerminal } from './keeper-chat-operation-obse
 import { _resetChatHydrationForTests, hydrateTrackedKeeperChatOperations } from './keeper-actions'
 import { _clearTrackedKeeperChatOperationsForTests, trackedKeeperChatOperationsForKeeper,
   upsertTrackedKeeperChatOperation } from './keeper-chat-operations-local'
-import { keeperActionErrors } from './keeper-state'
+import { keeperActionErrors, keeperSending, keeperStreamStartedAt } from './keeper-state'
 
 const disposers: Array<() => void> = []
 const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0) })
@@ -52,10 +52,14 @@ describe('original durable operation HTTP owner', () => {
     const hydration = hydrateTrackedKeeperChatOperations('keeper').then(() => { settled = true })
     await settle()
     expect(fetch).toHaveBeenCalledTimes(1)
+    expect(keeperSending.value.keeper).toBe(true)
     await act(async () => { setCanonicalDashboardActor('actor-B') })
     await settle()
     expect(settled).toBe(true)
     await hydration
+    // The retired observation clears the sending state it set.
+    expect(keeperSending.value.keeper).toBe(false)
+    expect(keeperStreamStartedAt.value.keeper ?? null).toBeNull()
     expect(keeperActionErrors.value.keeper ?? null).toBeNull()
     expect(trackedKeeperChatOperationsForKeeper('keeper').map(request => request.operationId)).toEqual(['original'])
     expect(fetch).toHaveBeenCalledTimes(1)

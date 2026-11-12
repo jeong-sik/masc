@@ -16,11 +16,12 @@ type approval_line =
   | Field_line of Approval_detail.line
   | Gate_line of Approval_detail.gate_line
 
-let approval_gate_phase state = function
-  | Gate_queued -> ui_text state ~ko:"검토 대기" ~en:"queued", Theme.warn ()
-  | Gate_judging -> ui_text state ~ko:"자동 검토 중" ~en:"judging", Theme.info ()
-  | Gate_human_required -> ui_text state ~ko:"사람 판단 필요" ~en:"human required", Theme.warn ()
-  | Gate_blocked -> ui_text state ~ko:"자동 검토 중단" ~en:"auto judge blocked", Theme.bad ()
+let approval_gate_phase state phase =
+  ( Masc_tui_types.gate_phase_word state phase
+  , match phase with
+    | Gate_queued | Gate_human_required -> Theme.warn ()
+    | Gate_judging -> Theme.info ()
+    | Gate_blocked -> Theme.bad () )
 
 let approval_source_notices state ~(reading : Masc_tui_approvals_model.approvals_reading) =
   [ ui_text state ~ko:"운영자 승인" ~en:"Confirmations", reading.confirm_queue

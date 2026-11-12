@@ -26284,6 +26284,14 @@ let keeper_effects_at_the_gate (state : state) ~keeper_name =
       String.equal pending.gp_keeper keeper_name)
     state.gate_pending
 
+(* A gate phase in the screen's words. The Approvals screen and the chat
+   pane's gate row both read this table, so one phase has one name. *)
+let gate_phase_word (state : state) = function
+  | Tui_decode.Gate_queued -> ui_text state ~ko:"검토 대기" ~en:"queued"
+  | Tui_decode.Gate_judging -> ui_text state ~ko:"자동 검토 중" ~en:"judging"
+  | Tui_decode.Gate_human_required -> ui_text state ~ko:"사람 판단 필요" ~en:"human required"
+  | Tui_decode.Gate_blocked -> ui_text state ~ko:"자동 검토 중단" ~en:"auto judge blocked"
+
 (* The turn's status rows as the pane will draw them, folding included.
 
    One function rather than two readings: the budget below counts what this

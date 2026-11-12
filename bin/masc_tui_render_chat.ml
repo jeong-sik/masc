@@ -4809,6 +4809,7 @@ let render_keeper_message (state : state) =
      | Message_status (live, status) ->
          let request_id = turn_log_request_id live in
          let live = live.tl_transcript in
+         let ko = state.ui_language = Lang_ko in
          (* The streaming turn is the row the eye waits on: drawn in the
             accent rather than dimmed, behind the mark a running turn wears
             everywhere else on the screen.
@@ -4821,19 +4822,26 @@ let render_keeper_message (state : state) =
             turning either. [activity_frame] is the counter that ticker
             advances, and stepping from it means one repaint, one frame. *)
          let running_mark, progress_heading =
+           let mark = Masc_tui_value.Mark.glyph in
+           let waiting = mark Masc_tui_value.Mark.Waiting in
            match Keeper_chat_transcript.phase live with
-           | Keeper_chat_transcript.Waiting -> "○", "WAITING TO START"
+           | Keeper_chat_transcript.Waiting ->
+               waiting, ui_text state ~ko:"시작 대기" ~en:"WAITING TO START"
            | Working ->
                let heading =
                  if Keeper_chat_transcript.attempt live > 0 then
-                   "TURN · IN PROGRESS ON NEXT CANDIDATE"
+                   ui_text state ~ko:"턴 · 다음 후보로 진행 중"
+                     ~en:"TURN · IN PROGRESS ON NEXT CANDIDATE"
                  else
-                   "TURN · IN PROGRESS"
+                   ui_text state ~ko:"턴 · 진행 중" ~en:"TURN · IN PROGRESS"
                in
                Masc_tui_answering.running_glyph ~frame:state.activity_frame,
                heading
-           | Stream_ended -> "○", "FINALIZING"
-           | Stream_failed _ -> "!", "REQUEST ERROR"
+           | Stream_ended -> waiting, ui_text state ~ko:"마무리 중" ~en:"FINALIZING"
+           (* [!] is not a status mark (RFC tui-one-screen-grammar §7.2); a
+              failed turn wears the screen's failure mark. *)
+           | Stream_failed _ ->
+               mark Masc_tui_value.Mark.Failed, ui_text state ~ko:"요청 실패" ~en:"REQUEST ERROR"
          in
          (* The age belongs to the progress row, which already ends with it
             (masc #29229 pins that a turn which never started still reports
@@ -4846,10 +4854,15 @@ let render_keeper_message (state : state) =
             is holding them up. Only while there is something to queue. *)
          let queue_hint =
            if Masc_tui_message_input.length state.msg_input > 0 then
+             (* The key names are the footer's own (enter_hint below). *)
              (match send_disposition state ~keeper_name with
-              | Updates _ -> " · Enter:send update; Ctrl-T:queue"
-              | Sends -> " · Enter:send"
-              | Queues_until_resume -> " · Enter:queue; /queue resume")
+              | Updates _ ->
+                  ui_text state ~ko:" · Enter:추가 전송; Ctrl-T:대기열"
+                    ~en:" · Enter:send update; Ctrl-T:queue"
+              | Sends -> ui_text state ~ko:" · Enter:전송" ~en:" · Enter:send"
+              | Queues_until_resume ->
+                  ui_text state ~ko:" · Enter:대기열; /queue resume"
+                    ~en:" · Enter:queue; /queue resume")
            else ""
          in
          (* The gate and the prompt describe the same held call. Drawn apart,
@@ -4879,7 +4892,10 @@ let render_keeper_message (state : state) =
                  | Some seconds -> " " ^ Masc_tui_answering.duration_text seconds
                  | None -> ""
                in
-               Printf.sprintf " · the judge is deciding%s; your answer ends it now" age)
+               Printf.sprintf
+                 (if ko then " · 자동 검토 중%s · 지금 답하면 바로 끝남"
+                  else " · the judge is deciding%s; your answer ends it now")
+                 age)
          in
          (* What the fold took, said on the line that stays. A count the
             reader can see is a thing they can ask for; rows that simply were
@@ -4894,7 +4910,8 @@ let render_keeper_message (state : state) =
          in
          let fold_suffix =
            let parts =
-             (if gate_waiting > 0 then [ Printf.sprintf "gate %d" gate_waiting ]
+             (if gate_waiting > 0 then
+                [ Printf.sprintf (if ko then "도구 심사 %d" else "gate %d") gate_waiting ]
               else [])
              @ (if folded_away > 0 then [ Printf.sprintf "+%d" folded_away ]
                 else [])
@@ -4908,7 +4925,8 @@ let render_keeper_message (state : state) =
          let status_rows = status.kmsp_rows in
          if status.kmsp_details_hint
          then box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-           (Printf.sprintf "  +%d · %s:details" folded_away Masc_tui_keys.expand_turn_label);
+           (Printf.sprintf (if ko then "  +%d · %s:턴 상세" else "  +%d · %s:details")
+              folded_away Masc_tui_keys.expand_turn_label);
          List.iter
            (fun (kind, text) ->
              (match kind with
@@ -4920,7 +4938,8 @@ let render_keeper_message (state : state) =
                           | Waiting | Working | Stream_ended -> Theme.recede ())
                       , "  " ^ running_mark ^ " " ^ text
                         ^ (if folded_away > 0 then
-                             " · " ^ Masc_tui_keys.expand_turn_label ^ ":details"
+                             " · " ^ Masc_tui_keys.expand_turn_label
+                             ^ (if ko then ":턴 상세" else ":details")
                            else "") )
                     else
                       ( Theme.accent ()
@@ -5004,13 +5023,7 @@ let render_keeper_message (state : state) =
              let named =
                List.map
                  (fun (row : Tui_decode.gate_pending) ->
-                   let phase =
-                     match row.gp_phase with
-                     | Tui_decode.Gate_queued -> "queued"
-                     | Tui_decode.Gate_judging -> "judging"
-                     | Tui_decode.Gate_human_required -> "human"
-                     | Tui_decode.Gate_blocked -> "blocked"
-                   in
+                   let phase = Masc_tui_types.gate_phase_word state row.gp_phase in
                    let age =
                      match row.gp_waiting_s with
                      | Some seconds -> Masc_tui_answering.duration_text seconds
@@ -5023,20 +5036,31 @@ let render_keeper_message (state : state) =
              in
              let count = List.length pending in
              box_line_styled chat_buf chat_cols ~style
-               (Printf.sprintf "  AT THE GATE · %d external effect%s out · %s"
-                  count
-                  (if count = 1 then "" else "s")
-                  (String.concat " · " named))));
+               (if state.ui_language = Lang_ko then
+                  Printf.sprintf "  도구 심사 · 외부 효과 %d개 대기 · %s" count
+                    (String.concat " · " named)
+                else
+                  Printf.sprintf "  AT THE GATE · %d external effect%s out · %s"
+                    count
+                    (if count = 1 then "" else "s")
+                    (String.concat " · " named))));
     if not target_registered then begin
+      let ko = state.ui_language = Lang_ko in
       let unavailable_message =
         match state.keepers_error with
         | Some _ ->
-            "  Keeper roster is unavailable; draft retained; Esc to choose another"
+            if ko then "  키퍼 목록 조회 실패 · 초안 유지 · Esc 로 다른 키퍼 고르기"
+            else "  Keeper roster is unavailable; draft retained; Esc to choose another"
         | None ->
             Printf.sprintf
-              (if keeper_creation_matches state keeper_name then
-                 "  Keeper %s: creation accepted; roster confirmation pending; draft retained; Esc then r to refresh"
-               else "  Keeper %s is no longer registered; draft retained; Esc to choose another")
+              (match keeper_creation_matches state keeper_name, ko with
+               | true, true ->
+                   "  키퍼 %s 생성 접수됨 · 목록 확인 대기 · 초안 유지 · Esc 뒤 r 로 새로 고침"
+               | true, false ->
+                   "  Keeper %s: creation accepted; roster confirmation pending; draft retained; Esc then r to refresh"
+               | false, true -> "  키퍼 %s 등록 해제됨 · 초안 유지 · Esc 로 다른 키퍼 고르기"
+               | false, false ->
+                   "  Keeper %s is no longer registered; draft retained; Esc to choose another")
               display_keeper_name
       in
       box_line_styled chat_buf chat_cols ~style:(Theme.bad ()) unavailable_message
@@ -5045,7 +5069,8 @@ let render_keeper_message (state : state) =
      | None -> ()
      | Some (menu, entries) ->
        box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-         (Printf.sprintf "  Commands  %d/%d" (menu.selected + 1) (List.length menu.items));
+         (Printf.sprintf (if state.ui_language = Lang_ko then "  명령  %d/%d" else "  Commands  %d/%d")
+            (menu.selected + 1) (List.length menu.items));
        let label_cells = min 26 (max 8 ((framed_inner_width chat_cols - 5) / 3)) in
        List.iter (fun (selected, (item : Masc_tui_command.menu_item)) ->
          let label = fit_width (Terminal_text.single_line item.label) label_cells in

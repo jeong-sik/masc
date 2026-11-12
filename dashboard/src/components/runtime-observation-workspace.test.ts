@@ -29,6 +29,7 @@ import { ConfigResolutionPanel } from './tools/config-resolution-panel'
 let epoch = 0, generation = 0
 function workspace(name: string | null) {
   expect(hydrateExecutionSnapshot({
+    observer_instance_id: 'runtime-observation-audit',
     projection_diagnostics: { read_completeness: 'complete', read_error: null },
     execution_publication_epoch: `observation-audit-${epoch}`,
     execution_publication_generation: ++generation,

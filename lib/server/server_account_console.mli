@@ -19,12 +19,13 @@
     - [GET /accounts/console]: the page of the build under {!policy}, never
       stored. When the bundle cannot give the page, the answer is a 503 with a
       page in the frame of {!Account_page} that says so.
-    - [GET /accounts/console/assets/<path>]: a file of the build, answered as
-      the single-user server answers the assets of the dashboard
-      ({!Server_routes_http_pages.serve_dashboard_static}). The name of such a
-      file carries a hash of its bytes, so a browser may keep it. A path that
-      is no plain relative path is a 404, and so is a file the build does not
-      hold.
+    - [GET /accounts/console/assets/<path>]: a file of the build, read and
+      compressed as the single-user server does the assets of the dashboard
+      ({!Server_routes_http_pages.serve_dashboard_asset}). The answer lets a
+      browser keep the file for a year: the build names a file after a hash
+      of its bytes, and this module does not check that a name does. A path
+      that is no plain relative path is a 404, and so is a file the build
+      does not hold.
     - [GET /accounts/console/base.css]: {!Account_page.base_sheet}, which the
       page links so that it looks like the pages the server writes itself. A
       browser asks for it again on every use, with the entity tag it holds. *)

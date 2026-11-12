@@ -19,8 +19,8 @@ let policy =
 let no_store = "cache-control", "no-store"
 
 (* A link of the console that leaves this origin (the login page of a
-   provider) carries no Referer, so the other site does not learn the address
-   of this server. The pages the server writes itself say the same. *)
+   provider) carries no Referer. The home page of the server says the same
+   ([Auth_preview]). *)
 let referrer_policy = "referrer-policy", "same-origin"
 
 let unreadable_reason : Web_dashboard.asset_load_error -> string = function

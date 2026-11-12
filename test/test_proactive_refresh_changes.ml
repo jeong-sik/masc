@@ -161,6 +161,58 @@ let test_quiet_worker_allows_normal_switch_release () =
       (Eio_mock.Clock.try_advance clock))
 ;;
 
+let test_semantic_deadline_is_consumed_once () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let changes = Eio.Stream.create 1 and results = Eio.Stream.create 4 in
+    let reads = ref 0 in
+    Eio.Switch.run (fun sw ->
+      Refresh.start_on_change_or_deadline ~sw
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~changes
+        ~config:(Refresh.default_config ~label:"source-expiry" ~interval_s)
+        ~compute:(fun () -> incr reads; Eio.Time.now clock)
+        ~next_deadline:(fun observed -> if observed < 30.0 then Some 30.0 else None)
+        ~on_result:(Eio.Stream.add results);
+      check (float 0.) "initial source observation" 0.0 (Eio.Stream.take results);
+      Eio.Fiber.yield ();
+      check bool "the source's actual transition owns one deadline" true
+        (Eio_mock.Clock.try_advance clock);
+      check (float 0.) "the next read is at that transition" 30.0
+        (Eio.Stream.take results);
+      assert_settled clock;
+      check int "an expired source does not install a new cadence" 2 !reads;
+      Eio.Stream.add changes ();
+      ignore (Eio.Stream.take results : float);
+      assert_settled clock))
+;;
+
+let test_deadline_crossed_by_read_stays_owed () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let changes = Eio.Stream.create 1 and results = Eio.Stream.create 4 in
+    let reads = ref 0 in
+    Eio.Switch.run (fun sw ->
+      Refresh.start_on_change_or_deadline ~sw
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~changes
+        ~config:{(Refresh.default_config ~label:"read-crossed-expiry" ~interval_s)
+                  with timeout_s = 100.0}
+        ~compute:(fun () ->
+          incr reads;
+          let observed = Eio.Time.now clock in
+          if !reads = 1 then Eio.Time.sleep clock 40.0;
+          observed)
+        ~next_deadline:(fun observed -> if observed < 30.0 then Some 30.0 else None)
+        ~on_result:(Eio.Stream.add results);
+      check (float 0.) "the initial answer survives crossing its deadline" 0.0
+        (Eio.Stream.take results);
+      check (float 0.) "the elapsed transition retains its follow-up" 40.0
+        (Eio.Stream.take results);
+      assert_settled clock;
+      check int "there is only the owed follow-up" 2 !reads))
+;;
+
 let () =
   run "change-driven refresh"
     [ "read debt",
@@ -171,4 +223,6 @@ let () =
       ; test_case "input brings initial read forward" `Quick test_change_can_admit_the_initial_read
       ; test_case "cancellation retires pending work" `Quick test_cancellation_retires_work_without_publishing
       ; test_case "quiet worker permits normal switch release" `Quick test_quiet_worker_allows_normal_switch_release
+      ; test_case "semantic deadline settles after its transition" `Quick test_semantic_deadline_is_consumed_once
+      ; test_case "a deadline crossed during a read stays owed" `Quick test_deadline_crossed_by_read_stays_owed
       ] ]

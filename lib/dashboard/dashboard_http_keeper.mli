@@ -37,6 +37,12 @@ val execution_trust_dashboard_json : Workspace.config -> Yojson.Safe.t
     into a single JSON envelope used by the
     [Server_dashboard_http_execution_surfaces] cache. *)
 
+val execution_trust_dashboard_observation :
+  Workspace.config -> Yojson.Safe.t * float option
+(** The same source read together with its next receipt-freshness deadline.
+    The deadline is computed from the same receipt timestamp, count and gap
+    observation used to render [health], before encoding any wire fields. *)
+
 val keeper_cost_aggregates_json :
   config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->

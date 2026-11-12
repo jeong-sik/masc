@@ -12,6 +12,21 @@
     [string_opt_json] None-vs-empty serialiser) are hidden —
     callers consume only the recorder and the reader. *)
 
+type change = {
+  canonical_masc_root : string;
+  source : string;
+  keeper_name : string option;
+}
+
+val subscribe_changed : (change -> unit) -> (unit -> unit)
+(** Process-local after-append observation. The root is resolved before the
+    append attempt. Notification itself performs no I/O and carries no gap
+    row, trace or error text. The callback must not block or yield; release is
+    idempotent. Listener exceptions cannot reclassify the durable append. *)
+
+val failed_notifications : unit -> int
+(** Number of after-append listener exceptions in this process. *)
+
 val record :
   masc_root:string ->
   source:string ->

@@ -307,8 +307,8 @@ let execution_trust_keeper_rows (config : Workspace.config) =
        names);
   Array.to_list results |> List.filter_map Fun.id
 
-let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
-  (* This surface is refreshed every minute. Building it from the generalized
+let execution_trust_dashboard_observation (config : Workspace.config) =
+  (* Building this surface from the generalized
      Keeper dashboard projection used to scan metrics, histories, goals,
      profiles, crash logs, and runtime contracts only to discard all but these
      eleven fields. Keep the producer specialized so refresh work stays
@@ -328,7 +328,12 @@ let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
   let latest_ts = latest_receipt_ts_of_keeper_rows keepers in
   let coverage_gaps = execution_receipt_coverage_gaps config in
   let coverage_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
-  `Assoc
+  let next_deadline =
+    Dashboard_tool_source_freshness.next_health_change_unix ~now ~exists
+      ~entry_count ~latest_ts ~freshness_slo_s:execution_trust_freshness_slo_s
+      ?coverage_gap ()
+  in
+  let json = `Assoc
     ([
       ("source", `String execution_trust_source);
       ("producer", `String execution_trust_producer);
@@ -347,6 +352,13 @@ let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
     @ Dashboard_tool_source_freshness.health_fields
         ~now ~exists ~entry_count ~latest_ts
         ~freshness_slo_s:execution_trust_freshness_slo_s ?coverage_gap ())
+  in
+  json, next_deadline
+;;
+
+let execution_trust_dashboard_json config =
+  fst (execution_trust_dashboard_observation config)
+;;
 
 (* Per-keeper snapshot/config rendering extracted to
    [Dashboard_http_keeper_snapshot] (godfile decomp). *)

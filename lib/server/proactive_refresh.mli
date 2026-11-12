@@ -93,3 +93,19 @@ val start_on_change :
 
     Install the input subscription before starting this worker. Its publisher
     must retain a signal without blocking the authoritative writer. *)
+
+val start_on_change_or_deadline :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  changes:unit Eio.Stream.t ->
+  config:config ->
+  next_deadline:('a -> float option) ->
+  compute:(unit -> 'a) ->
+  on_result:('a -> unit) ->
+  unit
+(** As {!start_on_change}, with the next semantic deadline returned by the
+    successful observation. The deadline uses [clock]'s Unix-time domain.
+    [None] waits only for a change. An elapsed deadline is consumed once,
+    including when the read crossed it; a successful subsequent observation
+    must return its next deadline or [None]. This is not a refresh cadence.
+    Retry deadlines remain owned by the existing typed failure policy. *)

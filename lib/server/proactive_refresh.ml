@@ -126,7 +126,8 @@ let coalesce_changes ~clock ~config stream =
   done
 ;;
 
-let start_on_change ~sw ~clock ~changes ~config ~compute ~on_result =
+let start_on_change_or_deadline ~sw ~clock ~changes ~config ~next_deadline
+    ~compute ~on_result =
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Eio.Switch.run ~name:(config.label ^ " observation") (fun _ ->
       let consecutive_failures = ref 0 in
@@ -134,6 +135,16 @@ let start_on_change ~sw ~clock ~changes ~config ~compute ~on_result =
       let take_change () =
         Eio.Stream.take changes;
         coalesce_changes ~clock ~config changes
+      in
+      let wait_for_observation_deadline = function
+        | None -> take_change ()
+        | Some deadline ->
+          (match Eio.Fiber.first
+             (fun () -> Eio.Time.sleep_until clock deadline; `Deadline)
+             (fun () -> Eio.Stream.take changes; `Changed)
+           with
+           | `Deadline -> ()
+           | `Changed -> coalesce_changes ~clock ~config changes)
       in
       let wait_for_retry_or_change () =
         match Eio.Fiber.first
@@ -165,7 +176,10 @@ let start_on_change ~sw ~clock ~changes ~config ~compute ~on_result =
                      ~elapsed_s:(Time_compat.now () -. started)))
                  (fun () -> Ok (compute ()))
              with
-             | Ok value -> on_result value; Ok ()
+             | Ok value ->
+                 let deadline = next_deadline value in
+                 on_result value;
+                 Ok deadline
              | Error failure -> Error failure)
           with
           | outcome -> outcome
@@ -174,26 +188,32 @@ let start_on_change ~sw ~clock ~changes ~config ~compute ~on_result =
               Error (Raised exn)
         in
         match outcome with
-        | Ok () ->
+        | Ok deadline ->
             if !consecutive_failures > 0 then
               Log.Dashboard.info "%s observation recovered after %d failures"
                 config.label !consecutive_failures;
             consecutive_failures := 0;
             current_interval := config.interval_s;
-            true
+            Ok deadline
         | Error failure ->
             notify_failure config failure;
             log_refresh_failure ~config ~consecutive_failures ~current_interval
               ~dt:(Time_compat.now () -. started) failure;
-            false
+            Error ()
       in
       let rec loop phase =
-        let succeeded = attempt phase in
-        if succeeded then take_change () else wait_for_retry_or_change ();
+        (match attempt phase with
+         | Ok deadline -> wait_for_observation_deadline deadline
+         | Error () -> wait_for_retry_or_change ());
         loop Refresh
       in
       initial ();
       loop Warm_cache))
+;;
+
+let start_on_change ~sw ~clock ~changes ~config ~compute ~on_result =
+  start_on_change_or_deadline ~sw ~clock ~changes ~config
+    ~next_deadline:(fun _ -> None) ~compute ~on_result
 ;;
 
 let start ~sw ~clock ~config:raw_config ~compute ~on_result =

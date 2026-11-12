@@ -584,10 +584,11 @@ let search_marker_styled (state : state) =
         marker Ansi.reset
 
 let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
+  let ko = state.ui_language = Lang_ko in
   match (state.keeper_action_inflight, state.keeper_action_pending) with
   | Some (keeper_name, action), _ ->
     [ Masc_tui_footer.Keeper_action_running
-        { gerund = Keeper_control.action_gerund action
+        { gerund = Keeper_control.action_gerund ~ko action
         ; keeper = Terminal_text.single_line keeper_name
         }
     ]
@@ -595,7 +596,7 @@ let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
     [ Masc_tui_footer.Keeper_action_armed
         { key = Keeper_control.action_key pending.Keeper_control.pending_action
         ; action =
-            Keeper_control.action_label pending.Keeper_control.pending_action
+            Keeper_control.action_label ~ko pending.Keeper_control.pending_action
         ; keeper =
             Terminal_text.single_line pending.Keeper_control.pending_keeper
         }
@@ -840,7 +841,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
     | Masc_tui_types.Workspace_identity_match -> []
   in
   Masc_tui_footer.line ?literal_prefix ?action_text ?preferred_action ?position
-    ~help_key_answers:door_answers
+    ~help_key_answers:door_answers ~ko:(state.ui_language = Lang_ko)
     ~status:(keeper_action_status state @ task_creation_status state
       @ List.filter (fun item -> Masc_tui_footer.needs_operator item
           && not (List.mem item (keeper_action_status state))) status
@@ -3483,17 +3484,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
   in
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
-  (* The English word is the one the notices about the action use. *)
-  let action_word action =
-    let english = Keeper_control.action_label action in
-    match action with
-    | Keeper_control.Pause -> say "일시 정지" english
-    | Keeper_control.Resume -> say "재개" english
-    | Keeper_control.Boot -> say "올리기" english
-    | Keeper_control.Shutdown -> say "내리기" english
-    | Keeper_control.Wakeup -> say "깨우기" english
-    | Keeper_control.Delete -> say "삭제" english
-  in
+  let action_word = Keeper_control.action_label ~ko in
   (* An action that ends a fiber is toned apart from the reversible ones, so the
      key that needs two presses does not read like the keys that need one. *)
   let hint action label =

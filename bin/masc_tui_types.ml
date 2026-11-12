@@ -10740,6 +10740,12 @@ type state = {
   mutable tools_task_follow_end: tools_task_owner option;
   mutable tools_task_presented: tools_task_frame option;
   mutable tools_skill_cursor: int;
+  (* Whether the Effective Keeper Surface's diagnostics -- the runtime, the
+     two digests and the byte budgets -- are folded under their heading.
+     Folded is the default: these rows sat above the Skill list, and a reader
+     who came for the Skills had to read past two 64-character digests
+     first. *)
+  mutable tools_diagnostics_folded: bool;
   mutable tools_skill_source_picker: skill_source_picker option;
   mutable tools_skill_create_drafts: skill_create_draft list;
   (* The Skills list's delete waits for a second press of its key, exactly as
@@ -20900,6 +20906,7 @@ let create_state
   tools_task_follow_end = None;
   tools_task_presented = None;
   tools_skill_cursor = 0;
+  tools_diagnostics_folded = true;
   tools_skill_source_picker = None;
   tools_skill_create_drafts = [];
   tools_skill_delete_armed = None;

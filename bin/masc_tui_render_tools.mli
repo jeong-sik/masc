@@ -27,6 +27,14 @@ val tools_display_lines : ?cols:int -> ?terminal_rows:int -> state -> (string * 
     tool whose evidence wraps is more than one row. [cols] defaults to 80;
     pass the viewport width for usage cards, complete metadata wrapping and
     matching physical-row scroll geometry. Rows that already fit retain their
-    alignment and card borders; revisions and timestamps remain literal.
+    alignment and card borders; revisions and timestamps remain literal,
+    except on the Available section, which draws the selected Skill's
+    revision and its diagnostics' digests by their first twelve characters.
     Each pane starts with its observed content and read notices. Static
     scope and column legends are in the Tools section's Help binding. *)
+
+val tools_diagnostics_copy_text : state -> string option
+(** What the Available section's copy holds: the Keeper, its diagnostics
+    with whole digests, and the selected Skill's identity with its whole
+    revision, one per line. [None] while no Effective Keeper Surface is
+    read. *)

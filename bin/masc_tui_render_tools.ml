@@ -835,9 +835,70 @@ let tools_selection_document ~cols state =
             (Skill_reference.identity_source_id_to_string reference.identity)
         ; Ansi.dim, "Package: " ^ Terminal_text.single_line
             (Skill_reference.identity_package_id_to_string reference.identity)
-        ; Ansi.dim, "Revision: " ^ Terminal_text.single_line
-            (Skill_reference.content_revision_to_string reference.content_revision)
+        ; Ansi.dim, "Revision: " ^ Masc_tui_value.Hash.short (Terminal_text.single_line
+            (Skill_reference.content_revision_to_string reference.content_revision))
         ]
+
+(* The Effective Keeper Surface's diagnostics: what the runtime says about
+   itself, the two digests and the byte budgets. [hash] draws a digest: its
+   head on screen (RFC tui-one-screen-grammar, section 5.2), the whole value
+   in a copy. An unavailable surface has none. *)
+let effective_surface_diagnostics ~hash = function
+  | Masc.Tui_decode_tools.Effective_surface_unavailable _ -> []
+  | Masc.Tui_decode_tools.Effective_surface_available
+      { ets_runtime_id; ets_official_client_kind; ets_native_posture;
+        ets_skill_snapshot_revision; ets_skill_resource_read_max_bytes;
+        ets_tool_surface_bytes; ets_skill_tool_surface_bytes;
+        ets_skill_discovery_bytes; ets_skill_body_bytes; ets_tool_surface_sha256; _ } ->
+      let byte_count = function
+        | Some bytes -> Printf.sprintf "%dB" bytes
+        | None -> "?"
+      in
+      [ Printf.sprintf "runtime=%s  client=%s  native=%s"
+          (Terminal_text.single_line ets_runtime_id)
+          (Terminal_text.single_line ets_official_client_kind)
+          (Option.value ~default:"n/a" ets_native_posture)
+      ; "skill snapshot=" ^ hash (Terminal_text.single_line ets_skill_snapshot_revision)
+      ; "deferred resource bound="
+        ^ (match ets_skill_resource_read_max_bytes with
+           | Some max_bytes -> Printf.sprintf "%d bytes" max_bytes
+           | None -> "not configured")
+      ; Printf.sprintf
+          "Skill context: profile discovery=%dB · deferred bodies=%s · skill tool schema=%s/%s all tools"
+          ets_skill_discovery_bytes
+          (byte_count ets_skill_body_bytes)
+          (byte_count ets_skill_tool_surface_bytes)
+          (byte_count ets_tool_surface_bytes)
+      ; "digest="
+        ^ (match ets_tool_surface_sha256 with
+           | None -> "n/a (Agent Core owns the turn)"
+           | Some value -> hash (Terminal_text.single_line value)) ]
+
+let tools_diagnostics_copy_text (state : state) =
+  match state.tools_inventory with
+  | None | Some { Masc.Tui_decode_tools.ts_effective = None; _ } -> None
+  | Some { Masc.Tui_decode_tools.ts_effective = Some surface; _ } ->
+      (match surface with
+       | Masc.Tui_decode_tools.Effective_surface_unavailable _ -> None
+       | Masc.Tui_decode_tools.Effective_surface_available { ets_keeper_name; _ } ->
+           let skill =
+             match selected_tools_skill_profile state with
+             | None -> []
+             | Some profile ->
+                 let reference = profile.esp_reference in
+                 [ "Skill: " ^ Terminal_text.single_line profile.esp_name
+                 ; "Source: " ^ Terminal_text.single_line
+                     (Skill_reference.identity_source_id_to_string reference.identity)
+                 ; "Package: " ^ Terminal_text.single_line
+                     (Skill_reference.identity_package_id_to_string reference.identity)
+                 ; "Revision: " ^ Terminal_text.single_line
+                     (Skill_reference.content_revision_to_string reference.content_revision) ]
+           in
+           Some
+             (String.concat "\n"
+                (("Keeper: " ^ Terminal_text.single_line ets_keeper_name)
+                 :: effective_surface_diagnostics ~hash:Fun.id surface
+                 @ skill)))
 
 let skill_source_picker_prefix summary =
   [ Ansi.bold, " Choose the writable source for this package"
@@ -893,43 +954,48 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
             Some
               (Masc.Tui_decode_tools.Effective_surface_available
                  { ets_keeper_name;
-                   ets_runtime_id;
-                   ets_official_client_kind;
+                   (* The fields bound to [_] are drawn under the diagnostics
+                      heading, by [effective_surface_diagnostics]. *)
+                   ets_runtime_id = _;
+                   ets_official_client_kind = _;
                    ets_tool_delivery;
-                   ets_native_posture;
-                   ets_skill_snapshot_revision;
-                   ets_skill_resource_read_max_bytes;
+                   ets_native_posture = _;
+                   ets_skill_snapshot_revision = _;
+                   ets_skill_resource_read_max_bytes = _;
                    ets_skills_left_out;
                    ets_unavailable_skill_names;
                    ets_skill_profiles;
-                   ets_tool_surface_bytes;
-                   ets_skill_tool_surface_bytes;
-                   ets_skill_discovery_bytes;
-                   ets_skill_body_bytes;
+                   ets_tool_surface_bytes = _;
+                   ets_skill_tool_surface_bytes = _;
+                   ets_skill_discovery_bytes = _;
+                   ets_skill_body_bytes = _;
                    ets_tools;
-                   ets_tool_surface_sha256;
-                 });
+                   ets_tool_surface_sha256 = _;
+                 } as surface);
           _ } ->
-        let native = Option.value ~default:"n/a" ets_native_posture in
         let delivery_tone, delivery =
           match ets_tool_delivery with
           | Masc.Tui_decode_tools.Effective_tools_delivered -> Ansi.dim, "지원"
           | Masc.Tui_decode_tools.Effective_tools_suppressed_runtime_unsupported ->
             Theme.warn (), "미지원으로 제외"
         in
-        let resource_bound =
-          match ets_skill_resource_read_max_bytes with
-          | Some max_bytes -> Printf.sprintf "%d bytes" max_bytes
-          | None -> "not configured"
-        in
-        let byte_count = function
-          | Some bytes -> Printf.sprintf "%dB" bytes
-          | None -> "?"
-        in
-        let digest =
-          match ets_tool_surface_sha256 with
-          | None -> "n/a (Agent Core owns the turn)"
-          | Some value -> value
+        (* Folded under one heading by default (RFC tui-one-screen-grammar,
+           section 5.1): these rows sat above the Skill list, two of them a
+           64-character digest each. *)
+        let diagnostics_lines =
+          let folded = state.tools_diagnostics_folded in
+          ( Ansi.dim,
+            Printf.sprintf "   %s %s · %s %s · Y %s"
+              (if folded then "▸" else "▾")
+              (ui_text state ~ko:"진단" ~en:"Diagnostics")
+              Masc_tui_keys.expand_turn_label
+              (if folded then ui_text state ~ko:"펴기" ~en:"unfold"
+               else ui_text state ~ko:"접기" ~en:"fold")
+              (ui_text state ~ko:"전체 복사" ~en:"copy all") )
+          :: (if folded then []
+              else
+                List.map (fun line -> Ansi.dim, "     " ^ line)
+                  (effective_surface_diagnostics ~hash:Masc_tui_value.Hash.short surface))
         in
         let tool_lines =
           List.map
@@ -1316,29 +1382,12 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
         [ Ansi.bold,
           Printf.sprintf " Effective Keeper Surface — %s (%s)"
             (Terminal_text.single_line ets_keeper_name)
-            (Masc_tui_message_layout.count_noun (List.length ets_tools) "tool");
-          Ansi.dim,
-          Printf.sprintf "   runtime=%s  client=%s  native=%s"
-            (Terminal_text.single_line ets_runtime_id)
-            (Terminal_text.single_line ets_official_client_kind)
-            native ]
+            (Masc_tui_message_layout.count_noun (List.length ets_tools) "tool") ]
         @ performance_card
-        @ [ delivery_tone, "   Runtime 도구 전달: " ^ delivery;
-          Ansi.dim,
-          "   skill snapshot="
-          ^ Terminal_text.single_line ets_skill_snapshot_revision;
-          Ansi.dim,
-          "   deferred resource bound=" ^ Terminal_text.single_line resource_bound;
-          Ansi.bold,
-          Printf.sprintf
-            "   Skill context: profile discovery=%dB · deferred bodies=%s · skill tool schema=%s/%s all tools"
-            ets_skill_discovery_bytes
-            (byte_count ets_skill_body_bytes)
-            (byte_count ets_skill_tool_surface_bytes)
-            (byte_count ets_tool_surface_bytes);
-          Ansi.bold,
-          "   Skills — J/K select · Enter latest · [/] runs · Ctrl-O graph · e edit · c/C create";
-          Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
+        @ [ delivery_tone, "   Runtime 도구 전달: " ^ delivery ]
+        @ diagnostics_lines
+        @ [ Ansi.bold,
+            "   Skills — J/K select · Enter latest · [/] runs · Ctrl-O graph · e edit · c/C create" ]
         @ skill_profile_lines
         @ (match selected_tools_skill_profile state with
            | None -> [] | Some profile -> skill_io_lines ~cols profile.esp_io)

@@ -341,12 +341,5 @@ val broadcast_refreshed_operator_snapshot :
     route published has no broadcaster of its own. *)
 
 val broadcast_operator_digest : Yojson.Safe.t -> unit
-(** Publish an operator digest on SSE. Passed to the digest refresh loop at
-    boot.
-
-    Both used to reach their loops through process-global [Atomic.t] cells that
-    module initializers here filled, because
-    [Server_dashboard_http_core_operator] is compiled before [Sse] is in scope
-    here and cannot name these bodies. The cells defaulted to functions that
-    did nothing, so a missing registration was a broadcast that silently went
-    nowhere (#25927). *)
+(** Publish a digest through the shared snapshot serializer. The source-driven
+    Digest worker publishes directly to its captured workspace/instance. *)

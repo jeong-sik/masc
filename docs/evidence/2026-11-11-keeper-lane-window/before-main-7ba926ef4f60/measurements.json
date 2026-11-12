@@ -1,0 +1,100 @@
+{
+  "rowsPerKeeper": 5000,
+  "initial": {
+    "mounted": 5000,
+    "farFromViewport": 4977,
+    "listClientHeightPx": 450,
+    "listScrollHeightPx": 201246,
+    "listTopBelowAxisPx": 3.75,
+    "axisLabelInkBelowAxisPx": 2.0500011444091797,
+    "collapsedRowPitchPx": 40.25
+  },
+  "refresh": {
+    "samples": [
+      {
+        "renderAndLayoutMs": 674.8999999761581,
+        "mainThreadMs": 772.5030000000002
+      },
+      {
+        "renderAndLayoutMs": 632.1000000238419,
+        "mainThreadMs": 707.322
+      },
+      {
+        "renderAndLayoutMs": 623.5,
+        "mainThreadMs": 695.2060000000002
+      },
+      {
+        "renderAndLayoutMs": 650.5,
+        "mainThreadMs": 723.8249999999997
+      },
+      {
+        "renderAndLayoutMs": 632,
+        "mainThreadMs": 693.8879999999994
+      },
+      {
+        "renderAndLayoutMs": 627.5,
+        "mainThreadMs": 700.8900000000002
+      },
+      {
+        "renderAndLayoutMs": 671.2000000476837,
+        "mainThreadMs": 750.2819999999995
+      },
+      {
+        "renderAndLayoutMs": 699.8999999761581,
+        "mainThreadMs": 857.7889999999994
+      },
+      {
+        "renderAndLayoutMs": 646.9000000953674,
+        "mainThreadMs": 711.9940000000007
+      }
+    ],
+    "medianRenderAndLayoutMs": 646.9000000953674,
+    "medianMainThreadMs": 711.9940000000007,
+    "medianIdleMainThreadMs": 0.4249999999998977
+  },
+  "end": {
+    "scrollsToSettle": 1,
+    "mounted": 5000,
+    "farFromViewport": 4977,
+    "lastRowInView": true,
+    "firstRowMounted": true,
+    "operatedSourceIncarnation": "5027"
+  },
+  "focus": {
+    "afterFocusedRowLeft": "row"
+  },
+  "expansion": {
+    "firstRowOpenAfterReturn": true
+  },
+  "readdress": {
+    "rowOpen": true,
+    "focus": "row",
+    "currentSourceIncarnation": "1000000028",
+    "operationsSent": 1,
+    "operatedSourceIncarnation": "1000000028"
+  },
+  "keeperSwitch": {
+    "scrollTopBeforePx": 200947,
+    "scrollTopAfterPx": 200947,
+    "firstRowInView": false,
+    "openRows": 2
+  },
+  "consumedBatch": {
+    "consumedRows": 200,
+    "windowed": false,
+    "rowsInViewNextFrame": 12,
+    "emptyAbovePx": 0,
+    "emptyBelowPx": 0.375
+  },
+  "shortList": {
+    "rows": 5,
+    "focusedRow": 2,
+    "keyboardFocused": true,
+    "focusRingReachPx": 2,
+    "roomAbovePx": 115.625,
+    "roomRightPx": 3.75,
+    "roomBelowPx": 124.5,
+    "firstRowRoomAbovePx": 0
+  },
+  "errors": []
+}

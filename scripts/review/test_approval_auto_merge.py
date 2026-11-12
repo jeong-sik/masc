@@ -772,6 +772,7 @@ class FollowingAcceptedMerges(unittest.TestCase):
              patch.object(MERGE, 'auto_merge_default') as arm, patch.object(MERGE, 'prepare') as admit, \
              patch.object(MERGE.subprocess, 'run') as run, \
              patch.object(MERGE, 'wake_main_build', return_value={'dispatched': True}) as wake, \
+             patch.object(MERGE, 'delete_merged_heads', return_value=[]) as cleanup, \
              patch.object(MERGE, 'read', return_value={'status': 'enqueued'}) as read, \
              patch.object(MERGE, 'pull', side_effect=lambda r, n: self.landed(n)), \
              redirect_stdout(io.StringIO()) as output:
@@ -779,6 +780,7 @@ class FollowingAcceptedMerges(unittest.TestCase):
         self.assertEqual(code, 0)
         arm.assert_not_called(); admit.assert_not_called(); run.assert_not_called()
         wake.assert_called_once_with(REPO)
+        cleanup.assert_called_once_with(REPO, [101, 102])
         read.assert_called_once_with(PREFIX + f'/pulls/102/merge-async/{UUID}')
         self.assertIn('"status": "merged"', output.getvalue())
 
@@ -1072,6 +1074,12 @@ class WakingTheMainBuild(unittest.TestCase):
             side_effect=lambda repo: self.dispatched.append(repo) or {'dispatched': True})
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.cleaned = []
+        cleanup = patch.object(
+            MERGE, 'delete_merged_heads',
+            side_effect=lambda repo, numbers: self.cleaned.append(list(numbers)) or [])
+        cleanup.start()
+        self.addCleanup(cleanup.stop)
 
     def test_the_auto_merge_arming_readback_wakes_the_main_build(self):
         """`gh pr merge --auto` followed by a merged readback returns at 468."""
@@ -1084,6 +1092,7 @@ class WakingTheMainBuild(unittest.TestCase):
             code = MERGE.main()
         self.assertEqual(code, 0)
         self.assertEqual(self.dispatched, [REPO])
+        self.assertEqual(self.cleaned, [[102]])
 
     def test_a_resumed_receipt_that_reports_a_merge_wakes_the_main_build(self):
         """follow() reaches merged without ever calling submit(), then returns."""
@@ -1112,6 +1121,7 @@ class WakingTheMainBuild(unittest.TestCase):
             code = MERGE.main()
         self.assertNotEqual(code, 0)
         self.assertEqual(self.dispatched, [])
+        self.assertEqual(self.cleaned, [])
 
     def test_a_dry_run_reports_the_merge_without_waking_the_build(self):
         """--dry-run reads admission; it must never dispatch anything."""
@@ -1146,6 +1156,7 @@ class WakingTheMainBuild(unittest.TestCase):
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             MERGE.main()
         self.assertEqual(self.dispatched, [REPO])
+        self.assertEqual(self.cleaned, [[102]])
 
     def test_a_hold_on_an_unmerged_pull_request_does_not_wake_the_build(self):
         """Holding for any other reason is still not a merge."""
@@ -1160,6 +1171,7 @@ class WakingTheMainBuild(unittest.TestCase):
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             MERGE.main()
         self.assertEqual(self.dispatched, [])
+        self.assertEqual(self.cleaned, [])
 
     def test_a_dry_run_does_not_wake_for_an_already_merged_pull_request(self):
         """--dry-run must not dispatch even when the merge already happened."""
@@ -1175,6 +1187,69 @@ class WakingTheMainBuild(unittest.TestCase):
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             MERGE.main()
         self.assertEqual(self.dispatched, [])
+
+
+class DeletingMergedHeadBranches(unittest.TestCase):
+    """A merge made with the Actions token leaves its branch behind (#51366)."""
+
+    def merged(self, **changes):
+        row = {'number': 102, 'state': 'closed', 'merged': True,
+               'head': {'ref': 'feat/x#1', 'sha': sha(102), 'repo': {'full_name': REPO}}}
+        row['head'].update(changes.pop('head', {}))
+        return dict(row, **changes)
+
+    def delete(self, row, dependants=(), returncode=0, stderr=''):
+        result = subprocess.CompletedProcess([], returncode, '', stderr)
+        with patch.object(MERGE, 'pull', return_value=row), \
+             patch.object(MERGE, 'read', return_value=list(dependants)) as read, \
+             patch.object(MERGE.subprocess, 'run', return_value=result) as run:
+            return MERGE.delete_merged_head(REPO, 102), read, run
+
+    def test_the_push_is_leased_on_the_merged_head(self):
+        record, read, run = self.delete(self.merged())
+        self.assertEqual(record, {'pr': 102, 'branch': 'feat/x#1', 'deleted': True})
+        read.assert_called_once_with(
+            PREFIX + '/pulls?state=open&base=feat%2Fx%231&per_page=1')
+        command = run.call_args.args[0]
+        self.assertEqual(command[-3:], [
+            f'--force-with-lease=refs/heads/feat/x#1:{sha(102)}',
+            f'https://github.com/{REPO}.git', ':refs/heads/feat/x#1'])
+
+    def test_branches_something_still_needs_are_kept_without_a_push(self):
+        cases = {
+            'not merged': self.merged(merged=False, state='open'),
+            'head is in another repository': self.merged(head={'repo': {'full_name': 'fork/repo'}}),
+            'head is in another repository ': self.merged(head={'repo': None}),
+            'protected branch name': self.merged(head={'ref': 'release/v1.2.3'}),
+            'protected branch name ': self.merged(head={'ref': 'main'}),
+        }
+        for reason, row in cases.items():
+            with self.subTest(reason=reason):
+                record, _, run = self.delete(row)
+                self.assertEqual((record['deleted'], record['reason']), (False, reason.strip()))
+                run.assert_not_called()
+        record, _, run = self.delete(self.merged(), dependants=[{'number': 103}])
+        self.assertEqual(record['reason'], 'an open pull request uses it as base')
+        run.assert_not_called()
+
+    def test_a_refused_push_and_a_failed_read_are_records_not_errors(self):
+        record, _, _ = self.delete(self.merged(), returncode=1, stderr='! [rejected] (stale info)')
+        self.assertEqual((record['deleted'], record['reason']),
+                         (False, '! [rejected] (stale info)'))
+        with patch.object(MERGE, 'pull', side_effect=[OSError('gh missing'), self.merged()]), \
+             patch.object(MERGE, 'read', return_value=[]), \
+             patch.object(MERGE.subprocess, 'run',
+                          return_value=subprocess.CompletedProcess([], 0, '', '')):
+            records = MERGE.delete_merged_heads(REPO, [101, 102])
+        self.assertEqual([row['deleted'] for row in records], [False, True])
+        self.assertIn('gh missing', records[0]['reason'])
+
+    def test_a_merged_payload_names_every_member_it_covers(self):
+        scope = {'scope': [{'number': 101}, {'number': 102}]}
+        self.assertEqual(MERGE.merged_numbers({'pr': 102, 'scope': scope, 'result': {}}), [101, 102])
+        self.assertEqual(MERGE.merged_numbers(
+            {'pr': 102, 'result': {'status': 'merged', 'members': [101, 102]}}), [101, 102])
+        self.assertEqual(MERGE.merged_numbers({'status': 'merged', 'pr': 102}), [102])
 
 
 if __name__ == '__main__':

@@ -127,6 +127,13 @@ must enforce at least two approvals and stale-approval dismissal on `main`;
 repository rules continue to apply during the actual merge. These metadata-only
 workflows run no builds or tests.
 
+The request workflow skips events that cannot change what the worker does: a
+review or push on a draft, any event on a pull request that closed without
+merging, a review on a closed pull request, a title or body edit, and a review
+edit. A skipped request starts no runner and no worker job. Marking a draft
+Ready reads its reviews again, so nothing submitted while it was a draft is
+lost.
+
 When enabling the worker, or after a transient read/merge failure, recheck an
 existing PR (any stack member) explicitly:
 
@@ -143,6 +150,13 @@ unsettled: the worker retries and hands off the same receipt if its wait ends.
 Only a 404/410 from the UUID result endpoint ends tracking as `request_not_found`;
 a terminal request failure retains its reason without requiring member reads.
 A failed API read never establishes an absent stack or an approval.
+
+GitHub's delete-branch-on-merge setting does not act on a merge made with the
+Actions token, so the worker deletes the head branch of each pull request it
+sees merged and records the outcome as `head_branches`. A branch stays when it
+is the base of an open pull request, is a release branch, comes from a fork, or
+received a commit after the merge (the delete push is leased on the merged
+head). A failed delete is recorded and does not change the merge verdict.
 
 The worker's GET transport retries a quota response only when GitHub provides
 an actionable `Retry-After`, or zero `X-RateLimit-Remaining` with a future

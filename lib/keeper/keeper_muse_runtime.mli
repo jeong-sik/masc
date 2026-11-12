@@ -157,6 +157,15 @@ module For_testing : sig
   val model_input_refusal_of_error :
     Runtime_muse_serve.error -> Turn_record.model_input_refusal option
 
+  val marks_refused_range :
+    usage:(unit, string) result option ->
+    catalog:(catalog_reading, unit) result option ->
+    window_spent:bool ->
+    bool
+  (** Whether a refusal marks its range: both reads after it answered (the
+      account's usage and, for a configured model, its catalog) and neither
+      named another cause. A read that failed marks nothing. *)
+
   val usage_reports
     :  turn_count:int
     -> position:Keeper_usage_resolution.cumulative_position

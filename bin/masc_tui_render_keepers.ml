@@ -1388,19 +1388,20 @@ let keeper_fleet_gap_lines ~ko (fleet : fleet_safety) =
    makes a keeper failing, and a pending launch is one of the ways it is
    offline. Each of the other conditions has a phase of its own, which the
    lifecycle word already says, so naming it again would add nothing. *)
-let keeper_lane_phase_causes (conditions : Tui_decode.keeper_lane_conditions) =
+let keeper_lane_phase_causes ~ko (conditions : Tui_decode.keeper_lane_conditions) =
+  let say korean english = if ko then korean else english in
   List.filter_map
     (fun (holds, words) -> if holds then Some words else None)
-    [ (not conditions.klc_turn_healthy, "last turn failed")
-    ; (not conditions.klc_heartbeat_healthy, "heartbeat failed")
-    ; (conditions.klc_launch_pending, "launch pending")
+    [ (not conditions.klc_turn_healthy, say "마지막 턴 실패" "last turn failed")
+    ; (not conditions.klc_heartbeat_healthy, say "heartbeat 실패" "heartbeat failed")
+    ; (conditions.klc_launch_pending, say "기동 대기" "launch pending")
     ]
 
-let keeper_lane_lifecycle_text (lane : Tui_decode.keeper_lane) =
+let keeper_lane_lifecycle_text ~ko (lane : Tui_decode.keeper_lane) =
   let phase =
     Terminal_text.single_line (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
   in
-  match Option.fold ~none:[] ~some:keeper_lane_phase_causes lane.kl_conditions with
+  match Option.fold ~none:[] ~some:(keeper_lane_phase_causes ~ko) lane.kl_conditions with
   | [] -> phase
   | causes -> Printf.sprintf "%s (%s)" phase (String.concat ", " causes)
 
@@ -1429,7 +1430,9 @@ let keeper_last_runtime_text (state : state) = function
             | Tui_decode.Last_runtime_cataloged ro ->
                 id_text ^ " \xc2\xb7 " ^ Terminal_text.single_line ro.ro_provider
             | Tui_decode.Last_runtime_uncataloged _ ->
-                id_text ^ " \xc2\xb7 not in the runtime list"))
+                id_text
+                ^ ui_text state ~ko:" \xc2\xb7 런타임 목록에 없음"
+                    ~en:" \xc2\xb7 not in the runtime list"))
   | Some { Tui_decode.klo_selected_runtime_id = None; _ } | None ->
       Masc_tui_theme.Glyph.no_value
 
@@ -1455,34 +1458,40 @@ let keeper_operations_fields (state : state) ~keeper_name =
   let reading = keeper_composite_of state ~keeper_name in
   let error = keeper_composite_error_of state ~keeper_name in
   let reading_now = keeper_composite_reading_now state ~keeper_name in
+  let ko = state.ui_language = Lang_ko in
+  let t korean english = if ko then korean else english in
+  let execution = t "실행:" "Execution:" in
+  (* The phase, the turn phase and the runtime state are the server's wire
+     names and are drawn as sent. *)
   let fields = match reading with
   | Some { kcr_lane = lane; _ } ->
-      [ "Lifecycle:", keeper_lane_lifecycle_text lane
-      ; "Turn:", Terminal_text.single_line
+      [ t "수명 주기:" "Lifecycle:", keeper_lane_lifecycle_text ~ko lane
+      ; t "턴:" "Turn:", Terminal_text.single_line
           (Tui_decode.keeper_lane_turn_phase_to_string lane.kl_turn_phase)
-      ; "Idle:", keeper_lane_idle_text lane.kl_idle_seconds
-      ; "Last outcome:", keeper_operations_outcome_text lane.kl_last_outcome
-      ; "Last runtime:", keeper_last_runtime_text state lane.kl_last_outcome
+      ; t "쉰 시간:" "Idle:", keeper_lane_idle_text lane.kl_idle_seconds
+      ; t "마지막 턴 결과:" "Last outcome:", keeper_operations_outcome_text lane.kl_last_outcome
+      ; t "마지막 런타임:" "Last runtime:", keeper_last_runtime_text state lane.kl_last_outcome
       ]
   | None ->
       (match error with
        | Some detail ->
-           [ "Execution:", Theme.warn () ^ "unavailable · "
+           [ execution, Theme.warn () ^ t "읽지 못함 · " "unavailable · "
              ^ Terminal_text.single_line detail ^ Ansi.reset ]
        | None ->
            if reading_now then []
-           else [ "Execution:", Ansi.dim ^ "not observed" ^ Ansi.reset ])
+           else [ execution, Ansi.dim ^ t "미관측" "not observed" ^ Ansi.reset ])
   in
   let fields = match reading, error with
     | Some _, Some detail ->
-        ("Execution:", Theme.warn () ^ "stale · refresh failed: "
+        (execution, Theme.warn () ^ t "이전 관측 · 갱신 실패: " "stale · refresh failed: "
           ^ Terminal_text.single_line detail ^ Ansi.reset) :: fields
     | Some _, None | None, (Some _ | None) -> fields in
   if reading_now then
-    ("Execution:", Ansi.dim
+    (execution, Ansi.dim
       ^ (match reading with
-         | None -> "reading execution snapshot…"
-         | Some _ -> "refreshing execution snapshot · last observation")
+         | None -> t "실행 상태 읽는 중…" "reading execution snapshot…"
+         | Some _ ->
+             t "실행 상태 갱신 중 · 마지막 관측" "refreshing execution snapshot · last observation")
       ^ Ansi.reset) :: fields
   else fields
 
@@ -3504,7 +3513,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  if k.k_paused then (Theme.warn ()) ^ t "예" "yes" ^ Ansi.reset
                  else Ansi.dim ^ t "아니오" "no" ^ Ansi.reset)
         @ row_lines ~width (t "권장 조치:" "Suggested action:")
-            (keeper_suggested_action (keeper_reading state k))
+            (keeper_suggested_action ~ko (keeper_reading state k))
         @ (match Masc_tui_candle.balance_text ~now:(Unix.gettimeofday ())
                    state.candle_observation ~keeper:k.k_name with
            | None -> []
@@ -3630,7 +3639,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          operator's requeue, and nothing else on the screens said they existed.
          Beside the current failure because it is one: this Keeper's Board
          judgments for those posts do not move until someone presses Q. *)
-      Masc_tui_board_quarantine.lines ~now:(Unix.gettimeofday ())
+      Masc_tui_board_quarantine.lines ~ko ~now:(Unix.gettimeofday ())
         state.keeper_board_quarantines ~keeper_name:k.k_name
       |> List.iter (fun (tone, text) ->
            let color =
@@ -3793,7 +3802,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        | Declared_keeper requirements ->
          add_row (t "준비:" "Preparation:") (String.concat " · "
            (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
-      add_row (t "최근 결과:" "Last Outcome:")
+      add_row (t "최근 자율 턴:" "Last Outcome:")
         (match k.k_activity with
          | None -> t "미관측" "not observed"
          | Some activity ->
@@ -3860,7 +3869,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          the current failure of section 1 nor the 24 hours of section 3, and
          under section 1 it read as part of the failure. *)
       add_numbered_section (t "4. 이번 달 효율" "4. This Month's Efficiency");
-      (match Masc_tui_keeper_efficiency.lines state.keeper_efficiency ~keeper_name:k.k_name with
+      (match Masc_tui_keeper_efficiency.lines ~ko state.keeper_efficiency ~keeper_name:k.k_name with
        | [] -> wrap ~tone:Ansi.dim (t "읽기 전" "unread")
        | lines ->
          List.iter

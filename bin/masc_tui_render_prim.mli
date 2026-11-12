@@ -413,7 +413,7 @@ val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
 
 val keeper_action_color : Status.keeper_next_action_path option -> string
 
-val keeper_suggested_action : Masc_tui_keeper_control.reading -> string
+val keeper_suggested_action : ko:bool -> Masc_tui_keeper_control.reading -> string
 (** The runtime's suggested action, or why it was not observed. *)
 
 val keeper_state_glyph :

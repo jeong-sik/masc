@@ -2376,17 +2376,18 @@ let keeper_action_color
 
 (* Preserve what was actually observed: a runtime that names no action is not
    evidence that nothing needs doing, and an unread roster is not absence. *)
-let keeper_suggested_action reading =
+let keeper_suggested_action ~ko reading =
+  let say korean english = if ko then korean else english in
   match reading.Keeper_control.liveness with
-  | Keeper_control.Unobserved -> "not observed"
-  | Keeper_control.Invalid _ -> "read error"
-  | Keeper_control.Absent -> "unavailable"
+  | Keeper_control.Unobserved -> say "미관측" "not observed"
+  | Keeper_control.Invalid _ -> say "읽기 오류" "read error"
+  | Keeper_control.Absent -> say "해당 없음" "unavailable"
   | Keeper_control.Present runtime ->
       match runtime.kr_next_action with
-      | None -> "not reported"
-      | Some Status.Recover -> "recover"
-      | Some Status.Probe -> "probe"
-      | Some Status.Direct_message -> "direct message"
+      | None -> say "보고 없음" "not reported"
+      | Some Status.Recover -> say "복구" "recover"
+      | Some Status.Probe -> say "점검" "probe"
+      | Some Status.Direct_message -> say "직접 메시지" "direct message"
 
 
 let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
@@ -2435,7 +2436,9 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
       (fun keeper ->
         let indent = if inner >= 3 then "  " else "" in
         Message_layout.wrap_words ~max_cells:(max 1 (inner - String.length indent))
-          ("Selected next: " ^ keeper_suggested_action (keeper_reading state keeper))
+          (ui_text state ~ko:"고른 Keeper 의 다음: " ~en:"Selected next: "
+           ^ keeper_suggested_action ~ko:(state.ui_language = Lang_ko)
+               (keeper_reading state keeper))
         |> List.map (fun line -> "", indent ^ line))
       selected
   in

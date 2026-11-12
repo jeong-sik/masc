@@ -102,8 +102,9 @@ let lost_writer_exit = 87
 (* The first provider reply carries [calls] and every later one [later_calls].
    [refuse_from]: the provider refuses the request with this ordinal and every
    later one. [block_report]: the pre-execution gate refuses every tool call. *)
-let run_native ?(refuse_publication=false) ?refuse_from ?(block_report=false) ?(later_calls=[]) ?process_end
-    ?(on_result=fun _ -> ()) ?(after_scope_ready=fun () -> ()) ?cancel_at env sw ~base_path ~store ~original ~current calls =
+let run_native ?(runtime_id=model_id) ?(refuse_publication=false) ?refuse_from ?(block_report=false)
+    ?(later_calls=[]) ?process_end ?(on_result=fun _ -> ()) ?(after_scope_ready=fun () -> ()) ?cancel_at
+    env sw ~base_path ~store ~original ~current calls =
   let provider_calls = ref 0 and handler_calls = ref 0 and gate_calls = ref 0 in
   let cancel_ready,cancel_now = Eio.Promise.create () in
   let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
@@ -172,7 +173,7 @@ let run_native ?(refuse_publication=false) ?refuse_from ?(block_report=false) ?(
     ~on_scope_ready:(fun ~call_id ->
       if refuse_publication then Error "injected ownership publication failure"
       else (
-        let fact=X.capture ~original ~runtime_id:model_id ~execution:(Types_core.Native_execution {call_id}) |> get in
+        let fact=X.capture ~original ~runtime_id ~execution:(Types_core.Native_execution {call_id}) |> get in
         current:=O.advance ~store !current (P.Execution_observed (Waiting fact)) |> owner;
         after_scope_ready ();
         Ok ())) () |> get in
@@ -398,20 +399,34 @@ let next_attempt ~store = O.next_attempt ~store ~verification_id ~installation_i
 
 (* The provider refuses the only request, so the run ends as a failure and no
    report call exists. *)
-let fail_without_report env sw ~base_path ~store ~original ~current =
+let fail_without_report ?runtime_id env sw ~base_path ~store ~original ~current =
   Alcotest.(check (pair int int)) "the provider refused the only request and no report ran" (1,0)
-    (run_native ~refuse_from:1 env sw ~base_path ~store ~original ~current [])
+    (run_native ?runtime_id ~refuse_from:1 env sw ~base_path ~store ~original ~current [])
 
 (* The result a retained walk leaves once one candidate's outcome is unknown. *)
 let unknown_outcome_result = {AR.verdict=None;evaluator_runtime=model_id;generator_runtime=None;
   evaluator_execution=None;gate=AR.Evaluator_unavailable;
   fallback_reason=Some "one reviewer's outcome is unknown";retryable_runtimes=[];model_absent_runtimes=[]}
 
-let record_walk_result ~store ~current failure =
+(* [candidates]: runtime, certainty, error category and typed failure of each
+   candidate the walk reported, in order. *)
+let record_walk ?(result=unknown_outcome_result) ~store ~current candidates =
   current := O.advance ~store !current (P.Execution_observed (Outcome_unknown
-    (Walk_result.to_json ~result:(O.result_to_json unknown_outcome_result)
-      ~candidates:[{Walk_result.runtime_id=model_id;certainty=AR.Outcome_unknown;
-        error_category="api";failure}]))) |> owner
+    (Walk_result.to_json ~result:(O.result_to_json result)
+      ~candidates:(List.map (fun (runtime_id,certainty,error_category,failure) ->
+        {Walk_result.runtime_id;certainty;error_category;failure}) candidates)))) |> owner
+
+let record_walk_result ~store ~current failure =
+  record_walk ~store ~current [model_id,AR.Outcome_unknown,"api",failure]
+
+let check_stays_a_repair label ~base_path ~store =
+  (match reread ~base_path ~store with
+   | Error (W.Execution_repair_required _) -> ()
+   | Ok _ | Error _ -> Alcotest.fail label);
+  (match P.phase (O.progress (load_attempt ~store)) with
+   | Dispatch_pending _ -> ()
+   | _ -> Alcotest.fail "the repair changed what the attempt retained");
+  Alcotest.(check int) "the frontier stays on the pending attempt" 0 (next_attempt ~store)
 
 let check_retryable label expected = function
   | Ok (_, {AR.verdict=None;gate=AR.Evaluator_unavailable;retryable_runtimes;_}) ->
@@ -439,13 +454,68 @@ let test_unknown_candidate_that_reviews_again_opens_the_next_attempt () = with_f
    | _ -> Alcotest.fail "the attempt did not retain an execution refusal");
   Alcotest.(check int) "the owner walk opens the next attempt" 1 (next_attempt ~store))
 
-let test_unknown_candidate_left_to_the_producer_opens_no_attempt () = with_fixture (fun env sw base_path store original current ->
+let unknown_candidate_opens_no_attempt failure () = with_fixture (fun env sw base_path store original current ->
   fail_without_report env sw ~base_path ~store ~original ~current;
-  record_walk_result ~store ~current AR.Producer_must_act;
+  record_walk_result ~store ~current failure;
   (* The second reading restores the retained refusal. *)
   List.iter (fun () ->
     reread ~base_path ~store |> check_retryable "no runtime is named for a retry" []) [();()];
   Alcotest.(check int) "the frontier stays on the refused attempt" 0 (next_attempt ~store))
+
+let test_unknown_candidate_left_to_the_producer_opens_no_attempt =
+  unknown_candidate_opens_no_attempt AR.Producer_must_act
+let test_unknown_candidate_whose_model_is_absent_opens_no_attempt =
+  unknown_candidate_opens_no_attempt AR.Model_absent
+
+(* The shape a walk leaves when its first slot was refused for a time and its
+   second ended unknown: both dispatched, so each has its own execution. The
+   refusal then holds the first slot's definite refusal beside how each
+   execution ended, and the owner walk reads it back. *)
+let test_definite_refusal_before_the_unknown_candidate_is_reviewed_again () = with_fixture (fun env sw base_path store original current ->
+  let first_slot = "first-slot-runtime" in
+  fail_without_report ~runtime_id:first_slot env sw ~base_path ~store ~original ~current;
+  fail_without_report env sw ~base_path ~store ~original ~current;
+  record_walk ~store ~current
+    [first_slot,AR.Definite_refusal,"rate_limit",AR.Reviews_again;
+     model_id,AR.Outcome_unknown,"api",AR.Producer_must_act];
+  reread ~base_path ~store |> check_retryable "only the slot that reviews again is named" [first_slot];
+  (match P.phase (O.progress (load_attempt ~store)) with
+   | P.Rejected {P.stage=P.Execution;evidence=`Assoc fields} ->
+     (match List.assoc_opt "observations" fields with
+      | Some (`List observations) ->
+        Alcotest.(check int) "the definite refusal, then how each of the two executions ended" 3
+          (List.length observations)
+      | Some _ | None -> Alcotest.fail "the refusal holds no observations")
+   | _ -> Alcotest.fail "the attempt did not retain an execution refusal");
+  Alcotest.(check int) "the owner walk reads the refusal and opens the next attempt" 1 (next_attempt ~store))
+
+(* A candidate refused before dispatch has no execution; its observation alone
+   carries it into the refusal. *)
+let test_candidate_refused_before_dispatch_is_reviewed_again () = with_fixture (fun env sw base_path store original current ->
+  let never_dispatched = "never-dispatched-runtime" in
+  fail_without_report env sw ~base_path ~store ~original ~current;
+  record_walk ~store ~current
+    [never_dispatched,AR.Before_dispatch,"capacity",AR.Reviews_again;
+     model_id,AR.Outcome_unknown,"api",AR.Producer_must_act];
+  reread ~base_path ~store |> check_retryable "the candidate refused before dispatch is named" [never_dispatched];
+  Alcotest.(check int) "the owner walk reads the refusal and opens the next attempt" 1 (next_attempt ~store))
+
+let test_unknown_candidate_without_an_execution_stays_a_repair () = with_fixture (fun env sw base_path store original current ->
+  fail_without_report env sw ~base_path ~store ~original ~current;
+  record_walk ~store ~current ["unrecorded-runtime",AR.Outcome_unknown,"api",AR.Reviews_again];
+  check_stays_a_repair "an unknown candidate that left no execution chose a retry" ~base_path ~store)
+
+let test_walk_result_that_already_names_a_retry_stays_a_repair () = with_fixture (fun env sw base_path store original current ->
+  fail_without_report env sw ~base_path ~store ~original ~current;
+  record_walk ~result:{unknown_outcome_result with AR.retryable_runtimes=[model_id]} ~store ~current
+    [model_id,AR.Outcome_unknown,"api",AR.Reviews_again];
+  check_stays_a_repair "a walk result an unknown outcome cannot leave chose a retry" ~base_path ~store)
+
+let test_two_walk_results_stay_a_repair () = with_fixture (fun env sw base_path store original current ->
+  fail_without_report env sw ~base_path ~store ~original ~current;
+  record_walk_result ~store ~current AR.Reviews_again;
+  record_walk_result ~store ~current AR.Producer_must_act;
+  check_stays_a_repair "two walk results chose a retry" ~base_path ~store)
 
 let test_cancellation_after_the_walk_result_does_not_hide_it () = with_fixture (fun env sw base_path store original current ->
   fail_without_report env sw ~base_path ~store ~original ~current;
@@ -454,17 +524,13 @@ let test_cancellation_after_the_walk_result_does_not_hide_it () = with_fixture (
   reread ~base_path ~store |> check_retryable "the walk's typed failure still decides" [];
   Alcotest.(check int) "the frontier stays on the refused attempt" 0 (next_attempt ~store))
 
+(* The observation a walk wrote before it retained each candidate's failure. *)
 let test_unknown_outcome_without_candidate_failures_stays_a_repair () = with_fixture (fun env sw base_path store original current ->
   fail_without_report env sw ~base_path ~store ~original ~current;
   current := O.advance ~store !current (P.Execution_observed (Outcome_unknown
-    (`Assoc ["result",O.result_to_json unknown_outcome_result]))) |> owner;
-  (match reread ~base_path ~store with
-   | Error (W.Execution_repair_required _) -> ()
-   | Ok _ | Error _ -> Alcotest.fail "an observation without candidate failures chose a retry");
-  (match P.phase (O.progress (load_attempt ~store)) with
-   | Dispatch_pending _ -> ()
-   | _ -> Alcotest.fail "the repair changed what the attempt retained");
-  Alcotest.(check int) "the frontier stays on the pending attempt" 0 (next_attempt ~store))
+    (`Assoc ["schema",`String "verifier_review_unknown/v1";
+      "result",O.result_to_json unknown_outcome_result]))) |> owner;
+  check_stays_a_repair "an observation without candidate failures chose a retry" ~base_path ~store)
 
 (* No walk result was retained: the walk was cut after the execution ended. *)
 let test_cut_walk_whose_execution_failed_is_reviewed_again () = with_fixture (fun env sw base_path store original current ->
@@ -476,7 +542,7 @@ let test_cut_walk_whose_reviewer_replied_without_a_report_is_reviewed_again () =
   Alcotest.(check (pair int int)) "the reviewer replied once and called no report" (1,0)
     (run_native env sw ~base_path ~store ~original ~current []);
   (match X.observe ~base_path ~original (O.progress !current) |> get with
-   | No_verdict [_,Verifier_review_ending.Succeeded] -> ()
+   | No_verdict {first=_,Verifier_review_ending.Succeeded;later=[]} -> ()
    | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
      Alcotest.fail "a reply without a report was not read as a success without a verdict");
   reread ~base_path ~store |> check_retryable "the ended execution's runtime is named" [model_id];
@@ -576,6 +642,12 @@ let () =
     Alcotest.test_case "reviewer process ending after its report keeps the verdict" `Quick test_reviewer_process_ending_after_its_report_keeps_the_verdict;
     Alcotest.test_case "unknown candidate that reviews again opens the next attempt" `Quick test_unknown_candidate_that_reviews_again_opens_the_next_attempt;
     Alcotest.test_case "unknown candidate left to the producer opens no attempt" `Quick test_unknown_candidate_left_to_the_producer_opens_no_attempt;
+    Alcotest.test_case "unknown candidate whose model is absent opens no attempt" `Quick test_unknown_candidate_whose_model_is_absent_opens_no_attempt;
+    Alcotest.test_case "definite refusal before the unknown candidate is reviewed again" `Quick test_definite_refusal_before_the_unknown_candidate_is_reviewed_again;
+    Alcotest.test_case "candidate refused before dispatch is reviewed again" `Quick test_candidate_refused_before_dispatch_is_reviewed_again;
+    Alcotest.test_case "unknown candidate without an execution stays a repair" `Quick test_unknown_candidate_without_an_execution_stays_a_repair;
+    Alcotest.test_case "walk result that already names a retry stays a repair" `Quick test_walk_result_that_already_names_a_retry_stays_a_repair;
+    Alcotest.test_case "two walk results stay a repair" `Quick test_two_walk_results_stay_a_repair;
     Alcotest.test_case "cancellation after the walk result does not hide it" `Quick test_cancellation_after_the_walk_result_does_not_hide_it;
     Alcotest.test_case "unknown outcome without candidate failures stays a repair" `Quick test_unknown_outcome_without_candidate_failures_stays_a_repair;
     Alcotest.test_case "cut walk whose execution failed is reviewed again" `Quick test_cut_walk_whose_execution_failed_is_reviewed_again;

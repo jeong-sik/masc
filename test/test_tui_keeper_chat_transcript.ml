@@ -18,7 +18,7 @@ let missing_skill_activity () =
     ~turn_ref:"trace-1#3" ~state:Transcript.Skill_delivered ~actions:[] ()
 
 let rows ?(show_timing = true) ?(now = origin) t =
-  Transcript.status_rows ~show_timing ~now t
+  Transcript.status_rows ~show_timing ~ko:false ~now t
 
 let feed ?(now = origin) t deltas =
   List.iter (Transcript.apply ~now t) deltas

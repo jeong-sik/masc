@@ -26458,46 +26458,65 @@ let keeper_message_preparation_selection (state : state) =
 let keeper_message_saved_preparation_rows state live =
   let module Details = Masc_tui_preparation_details in
   let module Transcript = Masc_tui_keeper_chat_transcript in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
+  let counted count noun = Masc_tui_message_layout.count_noun count noun in
   let row text = Transcript.Diagnostic,
     Masc_tui_keeper_chat_projection.terminal_safe_text text in
   let issue = function
-    | Details.Partial_scan -> "조회한 저널 범위가 일부임"
-    | Partial_return -> "반환된 기록이 일부임"
-    | Missing_manifest -> "저장 저널이 확인되지 않음"
+    | Details.Partial_scan -> say "조회한 저널 범위가 일부임" "only part of the journal was scanned"
+    | Partial_return -> say "반환된 기록이 일부임" "only part of the record came back"
+    | Missing_manifest -> say "저장 저널이 확인되지 않음" "no saved journal was found"
     | Scan_unsupported_events count ->
-      Printf.sprintf "저널 조회 범위 · 지원하지 않는 이벤트 %d개" count
+      if ko then Printf.sprintf "저널 조회 범위 · 지원하지 않는 이벤트 %d개" count
+      else "journal scan · " ^ counted count "unsupported event"
     | Scan_invalid_manifest_rows count ->
-      Printf.sprintf "저널 조회 범위 · 읽을 수 없는 저널 행 %d개 · 이 작업의 기록 수가 아님" count
+      if ko then Printf.sprintf "저널 조회 범위 · 읽을 수 없는 저널 행 %d개 · 이 작업의 기록 수가 아님" count
+      else Printf.sprintf "journal scan · %s · not a count of this work's records"
+          (counted count "unreadable journal row")
     | Scan_invalid_json_rows count ->
-      Printf.sprintf "저널 조회 범위 · 읽을 수 없는 JSON 행 %d개 · 이 작업의 기록 수가 아님" count
-    | Unsupported_rows count -> Printf.sprintf "반환된 행 · 지원하지 않는 기록 %d개" count
-    | Invalid_rows count -> Printf.sprintf "반환된 행 · 읽을 수 없는 기록 %d개" count
-    | Invalid_report detail -> "준비 보고서 제외 · " ^ detail
-    | Duplicate_report id -> "중복된 준비 보고서 · " ^ id
-    | Unlinked_report -> "실행 연결이 없는 준비 보고서" in
+      if ko then Printf.sprintf "저널 조회 범위 · 읽을 수 없는 JSON 행 %d개 · 이 작업의 기록 수가 아님" count
+      else Printf.sprintf "journal scan · %s · not a count of this work's records"
+          (counted count "unreadable JSON row")
+    | Unsupported_rows count ->
+      if ko then Printf.sprintf "반환된 행 · 지원하지 않는 기록 %d개" count
+      else "returned rows · " ^ counted count "unsupported record"
+    | Invalid_rows count ->
+      if ko then Printf.sprintf "반환된 행 · 읽을 수 없는 기록 %d개" count
+      else "returned rows · " ^ counted count "unreadable record"
+    | Invalid_report detail -> say "준비 보고서 제외 · " "preparation report left out · " ^ detail
+    | Duplicate_report id -> say "중복된 준비 보고서 · " "duplicate preparation report · " ^ id
+    | Unlinked_report -> say "실행 연결이 없는 준비 보고서" "preparation report linked to no run" in
+  let saved = say "저장된 준비 · " "saved preparation · " in
   let snapshot_rows (snapshot : Details.snapshot) =
-    List.map (fun value -> row ("준비 관측 범위 · " ^ issue value)) snapshot.issues
-    @ (if snapshot.reports=[] then [row "이 작업의 저장된 준비 기록이 확인되지 않음"]
+    List.map (fun value -> row (say "준비 관측 범위 · " "preparation observation · " ^ issue value))
+      snapshot.issues
+    @ (if snapshot.reports=[] then
+         [row (say "이 작업의 저장된 준비 기록이 확인되지 않음"
+                 "no saved preparation record was found for this work")]
        else List.concat_map (fun (report : Masc.Keeper_preparation_runtime_observation.report) ->
          let boundary = match report.boundary with
-           | Returned -> "반환 시점" | Raised -> "예외 시점" | Cancelled -> "취소 시점" in
-         row ("저장된 준비 · " ^ boundary ^ " · " ^ report.report_id)
-         :: Transcript.preparation_timeline_rows ~archived:true report.timeline) snapshot.reports) in
+           | Returned -> say "반환 시점" "at return"
+           | Raised -> say "예외 시점" "at exception"
+           | Cancelled -> say "취소 시점" "at cancellation" in
+         row (saved ^ boundary ^ " · " ^ report.report_id)
+         :: Transcript.preparation_timeline_rows ~archived:true ~ko report.timeline) snapshot.reports) in
   match keeper_message_preparation_selection state with
   | Some (selected, result) when selected == live ->
     (match result with
-     | Error detail -> [row ("준비 기록 연결 불가 · " ^ detail)]
+     | Error detail -> [row (say "준비 기록 연결 불가 · " "cannot link the preparation record · " ^ detail)]
      | Ok target ->
        match Details.view target state.msg_preparation_details with
-       | Details.Not_loaded -> [row "저장된 준비 기록 조회 대기"]
-       | Loading -> [row "저장된 준비 기록 조회 중"]
-       | Failed detail -> [row ("준비 기록 조회 실패 · " ^ detail)]
+       | Details.Not_loaded -> [row (say "저장된 준비 기록 조회 대기" "saved preparation records waiting to load")]
+       | Loading -> [row (say "저장된 준비 기록 조회 중" "loading saved preparation records")]
+       | Failed detail -> [row (say "준비 기록 조회 실패 · " "preparation records failed to load · " ^ detail)]
        | Loaded snapshot -> snapshot_rows snapshot
        | Retained {snapshot;recheck} ->
+         let kept = saved ^ say "이전 관측 유지 · " "keeping the last observation · " in
          let note = match recheck with
-           | Details.Recheck_pending -> "저장된 준비 · 이전 관측 유지 · 재조회 대기"
-           | Recheck_loading -> "저장된 준비 · 이전 관측 유지 · 재조회 중"
-           | Recheck_failed detail -> "저장된 준비 · 이전 관측 유지 · 재조회 실패 · " ^ detail in
+           | Details.Recheck_pending -> kept ^ say "재조회 대기" "recheck pending"
+           | Recheck_loading -> kept ^ say "재조회 중" "rechecking"
+           | Recheck_failed detail -> kept ^ say "재조회 실패 · " "recheck failed · " ^ detail in
          row note :: snapshot_rows snapshot)
   | Some _ | None -> []
 ;;
@@ -26517,12 +26536,13 @@ let keeper_message_preparation_operation_targets state ~keeper_name =
 ;;
 
 let keeper_message_unfolded_status_rows (state : state) live ~now =
+  let ko = state.ui_language = Lang_ko in
   Masc_tui_keeper_chat_transcript.status_rows
     ?preparation:(keeper_message_preparation state live)
     ~compact:(state.msg_origin_display = Masc_tui_message_layout.Origin_bare)
-    ~show_timing:(keeper_message_timing_visible state) ~now live
+    ~show_timing:(keeper_message_timing_visible state) ~ko ~now live
   @ (match keeper_message_preparation_timeline state live with
-     | Some timeline -> Masc_tui_keeper_chat_transcript.preparation_timeline_rows timeline
+     | Some timeline -> Masc_tui_keeper_chat_transcript.preparation_timeline_rows ~ko timeline
      | None -> [])
   @ keeper_message_saved_preparation_rows state live
 
@@ -26850,8 +26870,10 @@ let keeper_message_activity_rows (state : state) =
            let transcript = Option.map (fun log -> log.tl_transcript) (keeper_message_status_log state) in
            (match keeper_message_uncovered_preparation state ~keeper_name transcript with
            | Some (_,preparation) ->
-             let kind,text = Masc_tui_keeper_chat_transcript.preparation_status preparation in
-             let text = "현재 작업 · " ^ text in
+             let kind,text =
+               Masc_tui_keeper_chat_transcript.preparation_status
+                 ~ko:(state.ui_language = Lang_ko) preparation in
+             let text = ui_text state ~ko:"현재 작업 · " ~en:"current work · " ^ text in
              if kind = Masc_tui_keeper_chat_transcript.Attention then attention text else add text
            | None -> List.iter (fun (row : Tui_decode.keeper_turn_row) ->
              if String.equal row.ktr_keeper_name keeper_name then

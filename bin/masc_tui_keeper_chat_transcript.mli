@@ -796,7 +796,7 @@ type approval_outcome =
   | Displaced
   | Approval_other of string
 
-val approval_outcome_to_string : approval_outcome -> string
+val approval_outcome_to_string : ko:bool -> approval_outcome -> string
 
 type status_kind =
   | Progress  (** How the turn is going. *)
@@ -826,18 +826,21 @@ val awaiting_approval : t -> awaiting_approval option
 (** The call the turn is held at, if any. One at a time: the turn cannot reach
     a second call while it is waiting on this one. *)
 
-val preparation_status : Masc.Keeper_turn_preview.preparation -> status_kind * string
+val preparation_status : ko:bool -> Masc.Keeper_turn_preview.preparation -> status_kind * string
 (** Presentation shared by exact journal progress and the independently
     observed current Owner slot before an autonomous journal exists. *)
-val preparation_timeline_rows : ?archived:bool -> Masc.Keeper_turn_preview.preparation_timeline -> (status_kind * string) list
+val preparation_timeline_rows :
+  ?archived:bool -> ko:bool -> Masc.Keeper_turn_preview.preparation_timeline ->
+  (status_kind * string) list
 (** Diagnostic rows from the exact running writer's start-ordered observations.
     These remain details, never a replacement for current provider activity.
     Archived unfinished scopes describe the capture, not current execution. *)
 
 val status_rows :
   ?preparation:Masc.Keeper_turn_preview.preparation ->
-  ?compact:bool -> ?show_timing:bool -> now:float -> t -> (status_kind * string) list
-(** The status rows the chat pane draws for this turn.
+  ?compact:bool -> ?show_timing:bool -> ko:bool -> now:float -> t -> (status_kind * string) list
+(** The status rows the chat pane draws for this turn, in the screen language
+    [ko] names.
 
     Returned as a list rather than drawn directly because the pane's row
     budget has to know how many there are before it lays the pane out, and the

@@ -13,7 +13,7 @@ let activity ?(generation=0) ?(scope=0) ?(index=0) ?(channel=E.Model_text) state
 let observed ?generation ?scope ?index ?channel () = L.Model_content_activity (activity ?generation ?scope ?index ?channel E.Content_observed)
 let ended ?generation ?scope ?index ?channel () = L.Model_content_activity (activity ?generation ?scope ?index ?channel E.Content_ended)
 let start = L.Stream_model_started {generation=None;stream_scope=None; message_id=Some "reusable"; model="fixture"; usage=None}
-let rows t = String.concat "\n" (List.map snd (T.status_rows ~now:1000. t))
+let rows t = String.concat "\n" (List.map snd (T.status_rows ~ko:false ~now:1000. t))
 let contains t needle = Astring.String.is_infix ~affix:needle (rows t)
 let assert_signal t signal =
   check bool ("signal: " ^ signal) true (contains t signal);
@@ -83,14 +83,14 @@ let test_bridge_live_and_journal () =
       let t = T.of_log ~now:2000. log in
       check bool "no unreadable event" true (Option.is_none (T.unreadable t));
       assert_signal t expected;
-      let before = T.status_rows ~now:2000. t in
+      let before = T.status_rows ~ko:false ~now:2000. t in
       List.iter (fun (entry:Log.entry) ->
         check bool "overlapping journal replay is deduplicated" false
           (Log.add ?at:entry.at log ~seq:entry.seq entry.delta)) (Log.entries log);
       check bool "duplicate frames do not change activity" true
-        (T.status_rows ~now:2000. (T.of_log ~now:2000. log)=before)) [live;replay];
+        (T.status_rows ~ko:false ~now:2000. (T.of_log ~now:2000. log)=before)) [live;replay];
     check bool "live and durable activity agree" true
-      (T.status_rows ~now:2000. (T.of_log ~now:2000. live)=T.status_rows ~now:2000. (T.of_log ~now:2000. replay)) in
+      (T.status_rows ~ko:false ~now:2000. (T.of_log ~now:2000. live)=T.status_rows ~ko:false ~now:2000. (T.of_log ~now:2000. replay)) in
   let open Agent_core.Types in
   send (MessageStart {id="response";model="fixture";usage=None});
   send (ContentBlockStart {index=9;content_type="thinking";tool_id=None;tool_name=None});
@@ -177,7 +177,7 @@ let test_poisoned_scope_retires_observed_activity () =
       check string "authored answer preserved, late poisoned bytes rejected" "answer\n" (T.text t);
       check string "observed reasoning preserved" "reasoning\n" (T.thinking t)) [live;replay];
     check bool "live and durable failure activity agree" true
-      (T.status_rows ~now:2000. (T.of_log ~now:2000. live)=T.status_rows ~now:2000. (T.of_log ~now:2000. replay));
+      (T.status_rows ~ko:false ~now:2000. (T.of_log ~now:2000. live)=T.status_rows ~ko:false ~now:2000. (T.of_log ~now:2000. replay));
     F.start_runtime_attempt f ~runtime_id:"retry-runtime" ~attempt_index:1;
     send (MessageStart {id="retry-response";model="fixture";usage=None});
     send (ContentBlockDelta {index=0;delta=TextDelta "retry\n"});

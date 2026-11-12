@@ -6600,7 +6600,7 @@ let test_content_completion_activity_reaches_tui () =
           let live,replay = F.snapshots fixture in
           List.iter (fun log ->
             let t = T.of_log ~now:2000. log in
-            let rows = String.concat "\n" (List.map snd (T.status_rows ~now:2000. t)) in
+            let rows = String.concat "\n" (List.map snd (T.status_rows ~ko:false ~now:2000. t)) in
             check bool "actual provider content stop clears stale model label" true
               (Astring.String.is_infix ~affix:"model content ended" rows);
             check bool "official turn is still open" true (T.phase t=T.Working);

@@ -103,7 +103,7 @@ let test_replayed_sequence_and_model_signal () =
     (* Pending tools hide model activity. Close both calls before comparing the
        visible signal and the silence measured from the original speech time. *)
     both ~now:4. (Live.Native_tool_ended {occurrence;completion=Native.end_observed});
-    let observed = T.status_rows ~now:10. t and expected = T.status_rows ~now:10. control in
+    let observed = T.status_rows ~ko:false ~now:10. t and expected = T.status_rows ~ko:false ~now:10. control in
     check bool "progress cannot change answering/thinking phase or silence age" true (observed=expected);
     (* The typed comparison above carries the decision; drawn wording
        belongs to the renderer and is not asserted here. *)
@@ -140,7 +140,7 @@ let test_heartbeat_reported_time_is_not_local_elapsed () =
    | _ -> fail "native occurrence missing");
   both ~now:52. (Live.Native_tool_ended {occurrence;completion=Native.end_observed});
   check bool "model signal and original silence age are unaffected" true
-    (T.status_rows ~now:60. t=T.status_rows ~now:60. control);
+    (T.status_rows ~ko:false ~now:60. t=T.status_rows ~ko:false ~now:60. control);
   check string "authored bytes remain unchanged" "answer" (T.text t)
 
 let test_exact_active_scope_only () =

@@ -1,5 +1,6 @@
-(** Task owner Keeper-route observations. A missing queue alone does not
-    establish that an external session is gone. *)
+(** The operator task list: owner Keeper-route observations and submissions
+    awaiting a verdict. A missing queue alone does not establish that an
+    external session is gone. *)
 module D = Masc_domain
 module W = Workspace_core
 module Attention = Masc.Operator_task_attention
@@ -102,9 +103,9 @@ let test_a_holders_cancel_is_not_an_operator_row () =
            handoff_context)
     | _ -> Alcotest.fail "the holder's cancel must end the task")
 
-(* A completion waits on the system authority, which is running. Only a stop
-   waits on a person. *)
-let test_a_completion_is_not_the_operators_row () =
+(* A completion that was submitted and has no verdict is a row. The backlog
+   alone says so; whether its review is running or stopped is not asked. *)
+let test_a_submission_awaiting_a_verdict_is_a_row () =
   with_workspace (fun config ->
     persist_keeper config live_keeper;
     add_task config ~title:"work submitted as finished";
@@ -116,8 +117,24 @@ let test_a_completion_is_not_the_operators_row () =
            ; submitted_at = "2026-09-02T00:00:00Z"
            ; verification_id = "vrf-completion"
            });
-    Alcotest.(check int) "a completion is nobody's operator row" 0
-      (List.length (project config)))
+    match project config with
+    | [ Attention.Awaiting_verdict { task_id; title; producer; since; verification_id }
+        as item
+      ] ->
+      Alcotest.(check string) "the submitted task is the row" "task-001" task_id;
+      Alcotest.(check string) "carries the task title" "work submitted as finished" title;
+      Alcotest.(check string) "named by who submitted it" live_keeper producer;
+      Alcotest.(check string) "waiting since the submission, not since the work started"
+        "2026-09-02T00:00:00Z" since;
+      Alcotest.(check string) "names the verification request" "vrf-completion"
+        verification_id;
+      Alcotest.(check string) "summary names id, title, and producer"
+        "task-001 · work submitted as finished: submitted as complete by edgar.a.poe, \
+         awaiting a verdict"
+        (Attention.summary item)
+    | items ->
+      Alcotest.failf "a submission awaiting a verdict is one row (got %d rows)"
+        (List.length items))
 
 (* The route is the same one rejection delivery computes: a name with a
    registry entry or Keeper meta can receive delivery through a Keeper. *)
@@ -179,17 +196,26 @@ let test_an_undecodable_keeper_record_is_its_own_row () =
     | items ->
       Alcotest.failf "an undecodable record is its own row, got %d" (List.length items))
 
-(* The earliest claim/start remains first. *)
+(* The earliest claim, start or submission remains first, whatever its kind. *)
 let test_rows_are_oldest_first () =
   with_workspace (fun config ->
     add_task config ~title:"abandoned later";
     add_task config ~title:"abandoned first";
+    add_task config ~title:"submitted in between";
     set_status config ~task_id:"task-001"
       ~status:(in_progress ~assignee:vanished ~started_at:"2026-09-10T00:00:00Z");
     set_status config ~task_id:"task-002"
       ~status:(in_progress ~assignee:vanished ~started_at:"2026-09-02T00:00:00Z");
+    set_status config ~task_id:"task-003"
+      ~status:
+        (D.AwaitingVerification
+           { assignee = vanished
+           ; started_at = "2026-09-01T00:00:00Z"
+           ; submitted_at = "2026-09-05T00:00:00Z"
+           ; verification_id = "vrf-in-between"
+           });
     Alcotest.(check (list string)) "oldest wait first"
-      [ "task-002"; "task-001" ]
+      [ "task-002"; "task-003"; "task-001" ]
       (List.map Attention.task_id (project config)))
 
 let test_terminal_and_unclaimed_tasks_are_not_rows () =
@@ -216,8 +242,8 @@ let () =
     [ ( "task owner route observations"
       , [ Alcotest.test_case "a holder's cancel is not an operator row" `Quick
             test_a_holders_cancel_is_not_an_operator_row
-        ; Alcotest.test_case "a completion is not an operator row" `Quick
-            test_a_completion_is_not_the_operators_row
+        ; Alcotest.test_case "a submission awaiting a verdict is a row" `Quick
+            test_a_submission_awaiting_a_verdict_is_a_row
         ; Alcotest.test_case "only tasks without a Keeper route are listed" `Quick
             test_only_tasks_without_a_keeper_route_are_listed
         ; Alcotest.test_case "an active external session can lack a Keeper route" `Quick

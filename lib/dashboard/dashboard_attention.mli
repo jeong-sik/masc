@@ -23,8 +23,8 @@ type attention_item = {
 (** {1 Collection} *)
 
 (** [collect ~now ~operator_tasks snapshots] scans for stuck agents and
-    idle-with-pending-work situations, folds in task owner route observations,
-    and returns the items sorted by severity (Critical first). *)
+    idle-with-pending-work situations, folds in the operator task list, and
+    returns the items sorted by severity (Critical first). *)
 val collect :
   now:float ->
   operator_tasks:Operator_task_attention.item list ->
@@ -34,7 +34,8 @@ val collect :
 val detect_operator_tasks :
   Operator_task_attention.item list -> attention_item list
 (** An unavailable Keeper route and an unreadable Keeper record are both
-    [Warning] observations. Neither proves the task is abandoned. *)
+    [Warning] observations. Neither proves the task is abandoned. A
+    submission awaiting a verdict is [Info]. *)
 
 (** {1 Presentation} *)
 

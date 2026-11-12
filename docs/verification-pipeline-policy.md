@@ -96,9 +96,11 @@ automatic reconciliation cannot establish an original result; the operator must
 inspect it. TUI and Dashboard distinguish these from a generic review failure.
 Historical originals without a locator remain unresolved, even after upgrade.
 
-Only a terminal native success with one admitted, successfully settled structured
-verdict call can be recovered. Schema refusals, duplicate reports, unsettled
-effects and ambiguous histories cannot become judgments. The recovered judgment
+A judgment is recovered only from one admitted, successfully settled structured
+verdict call. How the execution ended after that call (a success, a failure, a
+cancellation, or the loss of its writer) does not change it. Schema refusals,
+duplicate reports, unsettled effects and ambiguous histories cannot become
+judgments. The recovered judgment
 and its observer intent enter the existing atomic publication and Task commit
 path. Its missing native response identity stays unknown. Official-client
 candidates keep their existing supported execution path in the original's
@@ -113,6 +115,8 @@ empty tool list on that wake does not assert that the model used no tools.
 
 ## Revision History
 
+- 2026-11-12: a settled verdict call is recovered whatever ended its execution
+  afterwards.
 - 2026-10-17: noted instruction Skill access (`keeper_skill`) for verification
   agents and durable rejection delivery across restarts.
 - 2026-08-02: aligned the policy with the system-LLM authority and typed

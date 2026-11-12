@@ -392,7 +392,7 @@ let runtime_detail_lines state target ~width =
             (runtime_bool runtime.ro_is_default)
       in
       let quota =
-        match runtime_quota_badge runtime with
+        match runtime_quota_badge ~ko:(state.ui_language = Lang_ko) runtime with
         | None -> []
         | Some _ ->
             fact ~tone:Page_line.Attention "Quota"

@@ -130,7 +130,7 @@ val waiting : t -> int
     is not a request. An open ask counts once however many questions it holds.
     A list that was not read adds nothing. *)
 
-val waiting_label : ?ko:bool -> cells:int -> t -> string
+val waiting_label : ko:bool -> cells:int -> t -> string
 (** The badge for the surface strip, as plain text; styling belongs to the
     renderer. It names what waits, by kind and in that order of attention --
     questions, held calls, Goals to confirm -- led by the [;] key
@@ -143,7 +143,7 @@ val waiting_label : ?ko:bool -> cells:int -> t -> string
     English. *)
 
 val strip :
-  ?ko:bool -> now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> string option
+  ko:bool -> now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> string option
 (** The row above the composer: the next wake, or [None] exactly when
     {!rows_taken} is [0].
 
@@ -185,7 +185,7 @@ type line =
   }
 
 val overlay :
-  ?ko:bool -> now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
+  ko:bool -> now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
 (** Every wake still coming, earliest first, then everyone blocked on the
     operator, then the questions Keepers asked and nobody answered, then the
     Goals waiting for the operator's confirmation, then the tasks stuck on

@@ -179,7 +179,7 @@ let waiting_phrases ~ko t =
    the sentence, the kinds alone, the total alone. The total is the last
    resort and is returned even when it does not fit, because a badge that
    vanishes is worse than one the ring has to make room for. *)
-let waiting_label ?(ko = false) ~cells t =
+let waiting_label ~ko ~cells t =
   match waiting_phrases ~ko t with
   | [] -> ""
   | phrases ->
@@ -197,7 +197,7 @@ let waiting_label ?(ko = false) ~cells t =
 ;;
 
 (* The row above the composer: the next wake, or nothing. *)
-let strip ?(ko = false) ~now ~localtime ~cols t =
+let strip ~ko ~now ~localtime ~cols t =
   match t.coming, t.scheduled_freshness with
   | Read _, Refresh_needed ->
       Some (Masc_tui_message_layout.fit_middle cols
@@ -301,7 +301,7 @@ let updated ~now since_iso =
       else Printf.sprintf "updated %dm ago" (whole / 60))
 ;;
 
-let overlay ?(ko = false) ~now ~localtime ~cols t =
+let overlay ~ko ~now ~localtime ~cols t =
   let quiet text = { tone = Quiet; text = "  " ^ text; goes_to = Nowhere } in
   (* Why it failed, not only that it did. The reason is beside the flag in the
      state -- "schedule load failed: HTTP 503" -- and this panel dropped it,

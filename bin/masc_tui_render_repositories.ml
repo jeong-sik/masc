@@ -36,7 +36,7 @@ let selected_repository_reading (state : state) =
         [(if Option.is_some state.repositories then "Refresh failed · retained reading"
           else "Read failed"), reason] in
   let capture ~title fields =
-    Masc_tui_detail_reading.create ~title
+    Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko) ~title
       (List.map (fun (heading,body) -> {Masc_tui_detail_reading.heading;body}) fields) in
   match selected with
   | None ->

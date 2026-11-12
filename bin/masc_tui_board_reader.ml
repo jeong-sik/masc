@@ -9,13 +9,16 @@ type preparation = { key : key; content : content; presentation : presentation; 
 type 'a owned_request = { ticket : 'a F.request; job : unit ref }
 type request = key owned_request
 type preparation_request = preparation owned_request
+(* This reader's titles and section names are written in English only, so the
+   capture note under them is English too. *)
+let titles_in_korean = false
 type t = { opened : key option; source : (key,content) F.t;
   read_request : request option; preparation_request : preparation_request option;
   preparation : (preparation,D.row list) F.t; presentation : presentation;
   content_kind : content_kind; original_open_pending : unit ref option; document : D.t }
 let initial = {opened=None;source=F.initial;preparation=F.initial;presentation=Source;
   read_request=None;preparation_request=None;content_kind=Document;original_open_pending=None;
-  document=D.create ~title:"Board attachment" []}
+  document=D.create ~ko:titles_in_korean ~title:"Board attachment" []}
 let request_job (request : request)=request.job
 let preparation_job (request : preparation_request)=request.job
 let key t=t.opened
@@ -30,9 +33,9 @@ let pending t=if F.in_flight t.source then t.read_request else None
 let pending_preparation t=if F.in_flight t.preparation then t.preparation_request else None
 let close t={t with opened=None;source=F.clear t.source;preparation=F.clear t.preparation;
   read_request=None;preparation_request=None;content_kind=Document;original_open_pending=None;
-  document=D.create ~title:"Board attachment" []}
+  document=D.create ~ko:titles_in_korean ~title:"Board attachment" []}
 let title key=Option.value key.name ~default:"Board attachment"
-let notice key body=D.create ~title:(title key) [{D.heading="Attachment";body}]
+let notice key body=D.create ~ko:titles_in_korean ~title:(title key) [{D.heading="Attachment";body}]
 let offer_image ~key ~message t=
   let t=close t in
   {t with opened=Some key;content_kind=Image_bytes;

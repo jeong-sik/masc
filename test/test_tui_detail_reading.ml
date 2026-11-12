@@ -5,7 +5,7 @@ module Reading = Masc_tui_detail_reading
 let state () =
   create_state ~workspace:"detail-reading-test" ~port:8935 ()
 
-let reading () = Reading.create ~title:"selected object" []
+let reading () = Reading.create ~ko:false ~title:"selected object" []
 
 let test_selection_does_not_retarget_capture () =
   let state = state () in

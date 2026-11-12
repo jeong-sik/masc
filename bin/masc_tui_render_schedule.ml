@@ -424,7 +424,7 @@ let memory_no_values =
   ; mrow_delta = ""
   }
 
-let memory_cells ?(ko = false) ?(state_style = "") ?(size_style = "") ?(delta_style = "")
+let memory_cells ~ko ?(state_style = "") ?(size_style = "") ?(delta_style = "")
     columns values =
   let revision =
     if columns.mcol_show_updated then
@@ -455,8 +455,14 @@ let memory_cells ?(ko = false) ?(state_style = "") ?(size_style = "") ?(delta_st
         ~width:memory_delta_width values.mrow_delta
     ]
 
+(* A row and a width sum build the same cells as the header row and read each
+   cell's width and value. Neither reads a header name, and no name changes a
+   width, so they build the cells in one fixed language. *)
+let memory_unnamed_cells ?state_style ?size_style ?delta_style columns values =
+  memory_cells ~ko:false ?state_style ?size_style ?delta_style columns values
+
 let memory_columns_used_width columns =
-  Table.used_width (memory_cells columns memory_no_values)
+  Table.used_width (memory_unnamed_cells columns memory_no_values)
 
 (* The source-bound reading answers "is anything pinned to a file", and the
    revision answers "how far has the snapshot moved". Neither is the question
@@ -502,12 +508,12 @@ let allocate_memory_columns ~inner_width =
     in
     { base with mcol_name = base.mcol_name + growth }
 
-let memory_header_row ?(ko = false) columns =
+let memory_header_row ~ko columns =
   Table.header_row (memory_cells ~ko columns memory_no_values)
 
 let memory_row ?state_style ?size_style ?delta_style ?close columns values =
   Table.row ?close
-    (memory_cells ?state_style ?size_style ?delta_style columns values)
+    (memory_unnamed_cells ?state_style ?size_style ?delta_style columns values)
 
 (* Workspace repository columns.
 
@@ -1918,7 +1924,7 @@ let planning_cell ~ko ~phase_style ~priority_style ~open_style ~phase_width
   | Planning_due ->
       Table.cell ~header:(if ko then "기한" else "DUE") ~width:planning_due_width values.prow_due
 
-let planning_cells ?(ko = false) ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
+let planning_cells ~ko ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
     ~phase_width ~(layout : planning_column Table.layout) values =
   List.map
     (planning_cell ~ko ~phase_style ~priority_style ~open_style ~phase_width
@@ -1926,7 +1932,7 @@ let planning_cells ?(ko = false) ?(phase_style = "") ?(priority_style = "") ?(op
     layout.Table.shown
 
 let planning_header_row ~phase_width ~layout =
-  Table.header_row (planning_cells ~phase_width ~layout planning_no_values)
+  Table.header_row (planning_cells ~ko:false ~phase_width ~layout planning_no_values)
 
 let planning_header_row_korean ~phase_width ~layout =
   Table.header_row (planning_cells ~ko:true ~phase_width ~layout planning_no_values)
@@ -1934,7 +1940,7 @@ let planning_header_row_korean ~phase_width ~layout =
 let planning_row ?(priority_style = "") ?(open_style = "") ~phase_style
     ~phase_width ~layout values =
   Table.row
-    (planning_cells ~phase_style ~priority_style ~open_style ~phase_width
+    (planning_cells ~ko:false ~phase_style ~priority_style ~open_style ~phase_width
        ~layout values)
 
 (* Board post columns.

@@ -87,3 +87,32 @@ val run
   -> base_path:string
   -> body:string
   -> Login_routes.answer
+
+(** [POST {!Auth_preview_keeper.conversation_path}] for [person]. The body is
+    exactly [{"keeper_id": <name>}], and the answer is a 200 JSON
+    [{"keeper_id":...,"conversation_id":...}]: the Keeper has a new
+    conversation on the account of the Runtime it has now, and its next turn
+    starts a session of its own there. The conversations the Keeper had stay
+    as they are, and no turn goes on in them. A turn that runs while the
+    conversation is started ends in the conversation it began in.
+
+    The person starts a conversation; the server starts none in place of one
+    whose turn failed. This is the way on for a Keeper whose conversation
+    began on another account.
+
+    The other answers are a JSON [{"error": ...}]:
+    - 400: the body is not that, or the name is no Keeper name.
+    - 404: the Keeper is not the person's.
+    - 409: the Keeper has no Runtime, so there is no account to start on.
+    - 500 or 503: the record of the conversations has a row that is not
+      understood, or could not be written.
+
+    It starts no client and asks the authorization log for nothing but the
+    Keeper and its Runtime: the caller judged the request as
+    [Manage_own_keeper]. *)
+val start_conversation
+  :  env:Eio_unix.Stdenv.base
+  -> person:Server_setup_account_login.person
+  -> base_path:string
+  -> body:string
+  -> Login_routes.answer

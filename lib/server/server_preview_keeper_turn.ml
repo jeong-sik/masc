@@ -11,6 +11,7 @@ let turn_timeout_s = 120.0
 let ms_per_second = 1000.
 let error status text = R.json status [ "error", `String text ]
 let shape = {|The body is {"keeper_id": "<name>", "message": "<text>"}.|}
+let conversation_shape = {|The body is {"keeper_id": "<name>"}.|}
 let unknown_keeper = "No Keeper of yours has this name."
 let no_runtime = "The Keeper has no Runtime. Give it one of yours first."
 let not_official_client = "A Keeper turn runs here only on a Claude Code or a Codex Runtime."
@@ -447,6 +448,41 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
             ; "continued", `Bool continued
             ]
           | None -> []))
+  in
+  Result.fold ~ok:Fun.id ~error:Fun.id answer
+;;
+
+(* The body of a new conversation: exactly the one named field. *)
+let conversation_request_of body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error (_ : string) -> Error (error R.Bad_request_400 conversation_shape)
+  | `Assoc [ ("keeper_id", `String name) ] -> Ok name
+  | _ -> Error (error R.Bad_request_400 conversation_shape)
+;;
+
+let start_conversation ~env ~(person : Login.person) ~base_path ~body =
+  let answer =
+    let* name = conversation_request_of body in
+    let* keeper_id = Auth_preview_keeper.keeper_id_of name in
+    let* (_ : Authz_types.Runtime_id.t), provider_account_id = assigned person keeper_id in
+    let clock = Eio.Stdenv.clock env in
+    let* conversation =
+      Conversation.start
+        (Conversation.root ~base_path ~namespace:person.namespace)
+        keeper_id
+        provider_account_id
+        ~draw:Auth.generate_token
+        ~now_ms:(fun () -> Int.of_float (Eio.Time.now clock *. ms_per_second))
+      |> Result.map_error (record_answer ~keeper_id)
+    in
+    Ok
+      (R.json
+         R.Ok_200
+         [ "keeper_id", `String (Authz_types.Keeper_id.to_string keeper_id)
+         ; ( "conversation_id"
+           , `String
+               (Conversation.Conversation_id.to_string conversation.Conversation.conversation_id) )
+         ])
   in
   Result.fold ~ok:Fun.id ~error:Fun.id answer
 ;;

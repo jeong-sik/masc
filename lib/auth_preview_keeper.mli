@@ -27,6 +27,11 @@ val assign_path : string
     on the Runtime they gave it ([Server_preview_keeper_turn], plan D2-8). *)
 val turn_path : string
 
+(** [/api/v1/auth/keepers/conversation]: [POST] starts a new conversation of
+    the person's Keeper ([Server_preview_keeper_turn.start_conversation],
+    plan S1b-3). *)
+val conversation_path : string
+
 (** A Keeper name of the Keeper grammar ({!Keeper_id.Keeper_name}), which is
     also the name of its TOML, as an id of the log. A name that is not both
     gets a 400 JSON [{"error": ...}]. *)

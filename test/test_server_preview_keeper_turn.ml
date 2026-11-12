@@ -728,6 +728,74 @@ let test_turn () =
           "the conversation of another subscription has no turn"
           false
           (Sys.file_exists (Filename.concat alice_records elsewhere));
+        (* She starts a new conversation of the Keeper, on the account of the
+           Runtime it has now, and its next turn runs there in a session of
+           its own. *)
+        let renew who body =
+          let answer =
+            Server_preview_keeper_turn.start_conversation ~env ~person:who.person ~base_path ~body
+          in
+          R.status_code answer.R.status, answer.R.body
+        in
+        let only_keeper name = Yojson.Safe.to_string (`Assoc [ "keeper_id", `String name ]) in
+        let renewed =
+          match renew alice (only_keeper "keeper-alice-idle") with
+          | 200, body ->
+            (match Yojson.Safe.from_string body with
+             | `Assoc [ ("keeper_id", `String "keeper-alice-idle"); ("conversation_id", `String id) ] -> id
+             | _ -> Alcotest.failf "the new conversation is answered as %s" body)
+          | status, body -> Alcotest.failf "no new conversation: %d %s" status body
+        in
+        Alcotest.(check string)
+          "the turn after it runs in the new conversation"
+          renewed
+          (answered
+             "the turn in a new conversation"
+             ~keeper:"keeper-alice-idle"
+             ~runtime:alice_runtime
+             ~text:"echo: fresh"
+             ~continued:false
+             (reply alice (body ~keeper:"keeper-alice-idle" ~message:"fresh")));
+        Alcotest.(check (option string))
+          "in a session of its own"
+          None
+          (resumed_session (args_of (seen claude)));
+        Sys.remove (claude ^ ".turn.json");
+        (* A new conversation of her first Keeper: the next turn has read
+           nothing, and the rows of the conversation before it stay. *)
+        let rows_before = List.length (rows alice_turns) in
+        (match renew alice (only_keeper "keeper-alice") with
+         | 200, (_ : string) -> ()
+         | status, body -> Alcotest.failf "no new conversation: %d %s" status body);
+        Alcotest.(check bool)
+          "her first Keeper has another conversation"
+          false
+          (String.equal
+             conversation
+             (answered
+                "the first turn after a new conversation"
+                ~keeper:"keeper-alice"
+                ~runtime:alice_runtime
+                ~text:"echo: anew"
+                ~continued:false
+                (reply alice (body ~keeper:"keeper-alice" ~message:"anew"))));
+        Alcotest.(check int)
+          "the conversation before it keeps its rows and gets no other"
+          rows_before
+          (List.length (rows alice_turns));
+        Sys.remove (claude ^ ".turn.json");
+        check_reply
+          "a new conversation of another person's Keeper"
+          (404, {|{"error":"No Keeper of yours has this name."}|})
+          (renew alice (only_keeper "keeper-bob"));
+        List.iter
+          (fun (label, request) -> Alcotest.(check int) label 400 (fst (renew alice request)))
+          [ "a new conversation: malformed JSON", "{"
+          ; "a new conversation: no Keeper", "{}"
+          ; "a new conversation: an additional field", {|{"keeper_id":"keeper-alice","message":"hello"}|}
+          ; "a new conversation: a duplicate Keeper", {|{"keeper_id":"keeper-alice","keeper_id":"keeper-bob"}|}
+          ; "a new conversation: a non-string Keeper", {|{"keeper_id":1}|}
+          ];
         (* A row the server does not understand refuses the turn. It is not
            skipped and not repaired. *)
         let second_turns =

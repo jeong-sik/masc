@@ -208,12 +208,13 @@ let revoke_pat t request reqd =
 ;;
 
 let access = Server_route.Self_authenticated Route_access.Browser_session
+let google_callback_path = "/auth/oidc/callback"
 let github_callback_path = "/auth/github/callback"
 
 let add_routes t router =
   router
   |> Server_route.post access "/auth/oidc/start" (start t R.Google)
-  |> Server_route.get access "/auth/oidc/callback" (callback t R.Google)
+  |> Server_route.get access google_callback_path (callback t R.Google)
   |> Server_route.post access "/auth/github/start" (start t R.Github)
   |> Server_route.get access github_callback_path (callback t R.Github)
   |> Server_route.post access "/auth/logout" (logout t)

@@ -40,6 +40,10 @@ val max_request_bytes : int
     is a 500. *)
 val add_routes : Login_routes.t -> Http_server_eio.Router.t -> Http_server_eio.Router.t
 
+(** [/auth/oidc/callback]: the redirect of a Google login client is this
+    path on the address of the server. *)
+val google_callback_path : string
+
 (** [/auth/github/callback]: the redirect of a GitHub login client is this
     path on the address of the server. *)
 val github_callback_path : string

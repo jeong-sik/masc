@@ -34,24 +34,6 @@ let test_only_the_chat_pane_asks_for_chat_history () =
     ]
 ;;
 
-(* The quiz rows feed one line on Home; no other surface pays for the
-   inventory read. *)
-let test_only_home_asks_for_the_quiz_rows () =
-  check bool "Home asks for the quiz rows" true
-    (needs Types.Overview).Types.needs_quiz_scorecard;
-  List.iter
-    (fun (label, surface) ->
-       check bool (label ^ " does not") false
-         (needs surface).Types.needs_quiz_scorecard)
-    [ "approvals", Types.Approvals
-    ; "board", Types.Board
-    ; "planning", Types.Planning
-    ; "keepers list", Types.Keepers Types.Keeper_list
-    ; "metrics", Types.Metrics
-    ; "config", Types.Config
-    ]
-;;
-
 let test_every_keeper_sub_mode_still_asks_for_the_roster () =
   check bool "Overview reads the Candle envelope with its Keeper pane hidden" true
     (needs Types.Overview).Types.needs_keeper_roster;
@@ -471,8 +453,6 @@ let () =
             test_forward_navigation_fetches_only_new_surface_datasets
         ; test_case "the Keepers list reads operator attention" `Quick
             test_keepers_list_reads_operator_attention
-        ; test_case "only Home asks for the quiz rows" `Quick
-            test_only_home_asks_for_the_quiz_rows
         ; test_case "Keeper detail drops only list attention reads" `Quick
             test_keeper_detail_drops_only_list_attention_reads
         ; test_case "authoritative refresh coalesces to one followup" `Quick

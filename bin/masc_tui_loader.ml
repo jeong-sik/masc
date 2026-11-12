@@ -1320,38 +1320,6 @@ let load_overview_goals ~(host : string) ~(port : int) :
             (Tui_decode.decode_overview_goals json))
         json
 
-(** The operator quiz's scorecard windows and open wrong-answer notes, the
-    read behind the Home quiz line. One inventory request carries every
-    live installation's current rows. The installation's own instance id
-    comes from the inventory's instances (run_id "operator-quiz"), so two
-    installations of the package are never merged: the line reads the first
-    one's rows only, the same installation the Results door opens. An
-    installation that is not live simply has no rows here. *)
-let load_quiz_rows ~(host : string) ~(port : int) :
-    (quiz_scorecard_snapshot, string) result =
-  match fetch_lane_addons_inventory_json ~host ~port () with
-  | Error detail -> Error ("quiz rows load failed: " ^ detail)
-  | Ok json ->
-      let open Result.Syntax in
-      let* rows = Masc.Tui_decode_fields.required_list_field json "rows" in
-      let* coverage = Masc.Tui_decode_fields.optional_list_field json "coverage" in
-      let* instances = Masc.Tui_decode_fields.optional_list_field json "instances" in
-      let* output =
-        Masc.Lane_addon_types.output_of_json (`Assoc ["rows", `List rows; "coverage", `List coverage]) in
-      let field name = function
-        | `Assoc fields -> List.assoc_opt name fields
-        | _ -> None in
-      let quiz_ids = List.filter_map (fun instance ->
-          match field "run_id" instance, field "instance_id" instance with
-          | Some (`String "operator-quiz"), Some (`String id) -> Some id
-          | _ -> None) instances in
-      let belongs suffix (row : Masc.Lane_addon_types.row) =
-          List.exists (fun id ->
-              String.starts_with row.lane_id ~prefix:(id ^ suffix)) quiz_ids in
-      let of_lane suffix = List.filter (belongs suffix) output.Masc.Lane_addon_types.rows in
-      Ok { quiz_scorecards = of_lane "/quiz/scorecard";
-           quiz_reviews = of_lane "/quiz/review" }
-
 let memo_overview = json_memo ()
 
 (** The Home Health line as [GET /api/v1/dashboard/health-line] answers it.

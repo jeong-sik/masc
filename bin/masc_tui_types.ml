@@ -431,7 +431,6 @@ end
 module Http_refresh_progress = struct
   type source =
     | Identity_before | Approvals | Questions | Keepers
-    | Quiz_rows
     | Surface_data of Surface_read_source.t
     | Identity_after
   type part_outcome = Part_received | Part_failed
@@ -471,7 +470,6 @@ module Http_refresh_progress = struct
     | Approvals -> "confirmations"
     | Questions -> "questions"
     | Keepers -> "keepers"
-    | Quiz_rows -> "operator quiz"
     | Surface_data source -> Surface_read_source.name source
     | Identity_after -> "workspace verification"
 
@@ -4058,13 +4056,6 @@ type overview_snapshot = {
           cannot name. The server counts them with the same vocabulary. *)
 }
 
-(* The operator quiz's rows for the Home scorecard line: one scorecard row
-   per window and one review row per open wrong answer, both read through
-   the lane add-on inventory endpoint. *)
-type quiz_scorecard_snapshot = {
-  quiz_scorecards: Masc.Lane_addon_types.row list;
-  quiz_reviews: Masc.Lane_addon_types.row list;
-}
 
 (** Planning projections from [Tui_decode], which owns the current wire
     contract and its behavioral decoder tests. *)
@@ -4671,9 +4662,6 @@ type surface_needs = {
      sections, and the two screens draw different windows, so the loop sets it
      from what is drawn ([tool_series_drawn]). *)
   needs_tool_series : bool;
-  (* The operator quiz's scorecard and review rows, read through the lane
-     add-on inventory endpoint. Feeds only the Home quiz line. *)
-  needs_quiz_scorecard : bool;
 }
 
 let nothing =
@@ -4690,7 +4678,6 @@ let nothing =
     needs_overview_goals = false;
     needs_account_emails = false;
     needs_tool_series = false;
-    needs_quiz_scorecard = false;
   }
 
 (* Each datum is read by the surfaces that draw it, so a refresh spends a
@@ -4721,7 +4708,6 @@ and surface_needs_of_surface : surface -> surface_needs = function
      provider reports; their detail payloads do not belong on this screen. *)
   | Overview ->
       { nothing with needs_operator_approvals = true; needs_asks = true
-      ; needs_quiz_scorecard = true
       ; needs_keeper_roster = true }
   (* Its rows come from the acting store and the keeper list, neither of which
      is fetched here. *)
@@ -4802,8 +4788,6 @@ let surface_needs_delta ~previous ~next =
       next.needs_account_emails && not previous.needs_account_emails
   ; needs_tool_series =
       next.needs_tool_series && not previous.needs_tool_series
-  ; needs_quiz_scorecard =
-      next.needs_quiz_scorecard && not previous.needs_quiz_scorecard
   }
 
 let surface_needs_any needs = needs <> nothing
@@ -10309,8 +10293,6 @@ type state = {
   mutable overview_error: string option;
   (* [None] means nothing has been read yet, which is not the same as an
      installation with no rows. *)
-  mutable quiz_scorecard: quiz_scorecard_snapshot option;
-  mutable quiz_scorecard_error: string option;
   (* The Home Health line's own read (RFC-0480 §3.1): owed on a
      workspace_health push and a revalidation. *)
   mutable overview_inflight: bool;
@@ -20668,8 +20650,6 @@ let create_state
   live_context_cancel = None;
   overview = None;
   overview_error = None;
-  quiz_scorecard = None;
-  quiz_scorecard_error = None;
   overview_inflight = false;
   overview_owed = Masc_tui_owed_read.settled;
   transport = None;

@@ -32,6 +32,11 @@ let record_json ~scope_id ~observed_at (report : Usage.report) =
         ; "source", `String source
         ; "kind", kind_json window.kind
         ; "limit_id", Option.fold ~none:`Null ~some:(fun id -> `String id) window.limit_id
+          (* What the window limits is decided from the provider's answer,
+             not from its source and kind, so a row that is to be put back
+             in the table after a restart has to carry it. The daily history
+             does not read it. *)
+        ; "role", `String (Usage.window_role_to_string window.role)
         ; "observed_at", `Float observed_at
         ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) window.resets_at
         ] @ utilization_json window.utilization))

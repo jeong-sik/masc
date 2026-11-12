@@ -1172,16 +1172,19 @@ let store_full_health_snapshot_locked (snapshot : Health_observation.snapshot) ~
 
 let store_full_health_snapshot snapshot =
   with_full_health_snapshot_lock (fun () ->
-      store_full_health_snapshot_locked snapshot ~refresh_requested:false)
+      store_full_health_snapshot_locked snapshot ~refresh_requested:false);
+  Dashboard_observation_commit.process_written `Health
 
 let mark_full_health_snapshot_failure failure =
   with_full_health_snapshot_lock (fun () ->
       mark_full_health_snapshot_failure_locked ~workspace_epoch:(current_workspace_epoch ())
-        ~worker_active:false failure)
+        ~worker_active:false failure);
+  Dashboard_observation_commit.process_written `Health
 
 let mark_full_health_refresh_wait_failure failure =
-  with_full_health_snapshot_lock (fun () ->
-      match (!full_health_refresh).active_worker with
+  let changed = with_full_health_snapshot_lock (fun () ->
+      let before = !full_health_observation in
+      (match (!full_health_refresh).active_worker with
       | None -> ()
       | Some worker ->
         let workspace_epoch = full_health_failure_epoch worker.completion in
@@ -1200,7 +1203,10 @@ let mark_full_health_refresh_wait_failure failure =
           remember_worker_fleet_failure worker.completion workspace_epoch
         end;
         note_waiting_scope_failure_if_unmeasured worker.completion
-          ~failed_epoch:workspace_epoch ~since failure)
+          ~failed_epoch:workspace_epoch ~since failure);
+      before != !full_health_observation)
+  in
+  if changed then Dashboard_observation_commit.process_written `Health
 
 let compute_full_health_snapshot_for_refresh ?(listener = default_listener)
     ~request_authority request =
@@ -1306,6 +1312,7 @@ let finish_full_health_refresh_worker
         | None -> false, false)
   in
   if settled then begin
+    Dashboard_observation_commit.process_written `Health;
     Eio.Promise.resolve resolver
       (match outcome with
        | Ok _ -> Ok ()
@@ -1552,7 +1559,7 @@ let full_health_snapshot_metadata ~now (view : full_health_state_view) =
       ("stale_since_ts", stale_since_ts);
     ]
 
-let mark_full_health_refresh_requested () =
+let mark_full_health_refresh_requested ~now () =
   let wake, refresh =
     with_full_health_snapshot_lock (fun () ->
       let epoch = current_workspace_epoch () in
@@ -1569,10 +1576,18 @@ let mark_full_health_refresh_requested () =
           || not (Health_observation.same_scope epoch snapshot.workspace_epoch))
           (!full_health_observation).snapshot
       in
+      let expired_success =
+        Option.exists (fun (snapshot : Health_observation.snapshot) ->
+          Option.is_none snapshot.failure
+          && Option.is_none snapshot.stale_since_ts
+          && snapshot_is_stale ~now snapshot)
+          (!full_health_observation).snapshot
+      in
       let requested = Health_refresh.request refresh in
       full_health_refresh := requested;
       (not worker_matches
        && (foreign_worker || foreign_snapshot
+           || expired_success
            || Option.is_none (!full_health_observation).snapshot)), requested)
   in
   if wake then signal_full_health_refresh_wakeup ();
@@ -1676,7 +1691,7 @@ let make_cached_full_health_json_with ~after_selection ?timing ?(listener = defa
     | Some snapshot -> snapshot_is_stale ~now snapshot
   in
   let view =
-    if needs_refresh then { view with refresh = mark_full_health_refresh_requested () }
+    if needs_refresh then { view with refresh = mark_full_health_refresh_requested ~now () }
     else view
   in
   let fields =
@@ -1699,9 +1714,16 @@ let make_cached_full_health_json ?timing ?listener ~request_authority request =
 
 let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
   let request = Httpun.Request.create `GET Server_health_paths.full in
-  Proactive_refresh.start
+  (match current_server_state_opt () with
+   | Some state ->
+       Server_observation_refresh.install_scoped ~state ~sw
+         ~install:(fun ~scope:_ ~sw:_ ~is_current ->
+           if is_current () then invalidate_full_health_snapshot ())
+   | None -> ());
+  Proactive_refresh.start_on_change
     ~sw
     ~clock
+    ~changes:full_health_refresh_wakeup
     ~config:
       {
         (Proactive_refresh.default_config
@@ -1710,7 +1732,6 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
         with
         timeout_s = full_health_refresh_timeout_sec;
         on_failure = Some mark_full_health_refresh_wait_failure;
-        wakeup = Some full_health_refresh_wakeup;
         wakeup_coalesce_s = full_health_refresh_wakeup_coalesce_sec;
         warm_delay_s = 0.5;
         warn_first_failure = false;
@@ -1728,7 +1749,14 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
     ~compute:(fun () ->
       await_full_health_refresh_worker ~sw ~compute:(fun ~on_workspace_epoch ->
           Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-              compute_full_health_snapshot ~on_workspace_epoch ~request_authority request)))
+              compute_full_health_snapshot ~on_workspace_epoch ~request_authority request));
+      (* A shared scan can return a recorded failure without raising. Keep
+         that read owed instead of settling into an indefinite healthy wait.
+         Its original typed failure already lives in the cached observation. *)
+      match (full_health_snapshot_state ()).observation.snapshot with
+      | Some { failure = Some (Proactive_refresh.Raised exn); _ } -> raise exn
+      | Some { failure = Some (Proactive_refresh.Timed_out _); _ } -> raise Eio.Time.Timeout
+      | Some { failure = None; _ } | None -> ())
     ~on_result:Fun.id
 
 module For_testing = struct

@@ -1,7 +1,8 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   fetchKeeperStateDiagram,
@@ -24,8 +25,14 @@ vi.mock('../../api/keeper', async () => {
 
 const fetchKeeperStateDiagramMock = vi.mocked(fetchKeeperStateDiagram)
 
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'ide-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'ide-fixture' }
+})
+
 afterEach(() => {
   cleanup()
+  acceptedExecutionWorkspace.value = null
   vi.clearAllMocks()
   activeKeeperName.value = ''
   keepers.value = []
@@ -57,7 +64,7 @@ describe('IdePersistencePanel', () => {
       mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
 
-    render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+    render(html`<${IdePersistencePanel} />`)
 
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalledWith(
       'sangsu',
@@ -74,7 +81,7 @@ describe('IdePersistencePanel', () => {
     fetchKeeperStateDiagramMock.mockResolvedValue({
       keeper: 'sangsu', current_phase: phase, mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
-    render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+    render(html`<${IdePersistencePanel} />`)
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
     expect(screen.queryByText('저장됨')).toBeNull()
     expect(screen.queryByText('동기화 중')).toBeNull()
@@ -88,7 +95,7 @@ describe('IdePersistencePanel', () => {
       mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
 
-    render(html`<${IdePersistencePanel} keeperName="keeper-2" pollMs=${60_000} />`)
+    render(html`<${IdePersistencePanel} keeperName="keeper-2" />`)
 
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalledWith(
       'keeper-2',
@@ -110,7 +117,7 @@ describe('IdePersistencePanel', () => {
       mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
 
-    render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+    render(html`<${IdePersistencePanel} />`)
 
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
 

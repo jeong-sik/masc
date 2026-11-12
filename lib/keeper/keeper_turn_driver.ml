@@ -272,7 +272,10 @@ let fresh_walk_of = function
 let account_request walk_owner ~runtime_id =
   match walk_owner with
   | Fleet_keeper_turn { keeper_name; channel } ->
-    Runtime_account_access.Keeper_turn { keeper_name; channel; runtime_id }
+    (* A Keeper lane starts its turns itself: no request with a personal
+       access token stands behind one. *)
+    Runtime_account_access.Keeper_turn
+      { keeper_name; channel; pat = Authz_types.Pat_binding.Not_pat; runtime_id }
   | One_shot_walk -> Runtime_account_access.Operator_call
 
 (* HIGH-RISK-UNREVIEWED: an attempt starts an official CLI, Claude Code (plan

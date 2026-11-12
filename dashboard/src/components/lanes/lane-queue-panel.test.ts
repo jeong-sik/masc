@@ -1,3 +1,5 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { captureDashboardObservationOwner } from '../../lib/observation-read-owner'
 import { html } from 'htm/preact'
 import { cleanup, render, waitFor, fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -26,9 +28,9 @@ vi.mock('../../api/dashboard-scheduled-automation', () => ({
 vi.mock('../../sse-store', () => ({
   registerKeeperWaitingInventoryRefresh: vi.fn(() => vi.fn()),
 }))
-vi.mock('../../dashboard-ws-state', () => ({
-  dashboardWsReady: { value: true },
-  dashboardWsReconnectCount: {
+vi.mock('../../dashboard-observer-state', () => ({
+  dashboardObserverReady: { value: true },
+  dashboardObserverReconnectCount: {
     value: 0,
     subscribe: vi.fn(() => vi.fn()),
   },
@@ -155,8 +157,14 @@ function lifecycleResponse(name: string): KeeperLifecycleTimelineResponse {
   }
 }
 
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'lane-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'lane-fixture' }
+})
+
 afterEach(() => {
   cleanup()
+  acceptedExecutionWorkspace.value = null
   vi.clearAllMocks()
   keepers.value = []
   resetLaneQueueObservations()
@@ -345,9 +353,9 @@ describe('KeeperWaitQueueRail', () => {
 describe('ingestLaneQueueFleetSnapshot', () => {
   it('accumulates observations per keeper without fabricating transitions', () => {
     resetLaneQueueObservations()
-    ingestLaneQueueFleetSnapshot(fleetSnapshot([compositeSnapshot('a', NOW - 100)]))
-    ingestLaneQueueFleetSnapshot(fleetSnapshot([compositeSnapshot('a', NOW - 100)]))
-    ingestLaneQueueFleetSnapshot(fleetSnapshot([compositeSnapshot('a', NOW - 50, { turn_phase: 'executing' })]))
+    ingestLaneQueueFleetSnapshot(fleetSnapshot([compositeSnapshot('a', NOW - 100)]), captureDashboardObservationOwner())
+    ingestLaneQueueFleetSnapshot(fleetSnapshot([compositeSnapshot('a', NOW - 100)]), captureDashboardObservationOwner())
+    ingestLaneQueueFleetSnapshot(fleetSnapshot([compositeSnapshot('a', NOW - 50, { turn_phase: 'executing' })]), captureDashboardObservationOwner())
     // Render-free sanity: buffers feed laneReading via the exported reset/ingest pair.
     keepers.value = [keeperFixture('a')]
     mocks.fetchKeeperLifecycle.mockResolvedValue(lifecycleResponse('a'))

@@ -33,6 +33,19 @@ type event =
 val event_to_string : event -> string
 val event_of_string : string -> event option
 
+type written = {
+  canonical_masc_root : string;
+  keeper_name : string;
+  event_type : event;
+}
+
+val subscribe_written : (written -> unit) -> (unit -> unit)
+(** Observe an appended audit row, including append success with a descriptor
+    settlement failure. The root is resolved before the append. The callback
+    itself must not block or yield and cannot change the audit receipt. *)
+
+val failed_write_notifications : unit -> int
+
 type write_stage =
   | Store_create
   | Append

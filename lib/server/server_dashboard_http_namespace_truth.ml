@@ -51,18 +51,17 @@ let shell_json_matches_config ~(config : Workspace.config) json =
   | Some base_path -> String.equal base_path config.base_path
   | None -> false
 
-let last_good_shell_for_config config =
-  match Atomic.get last_good_shell with
-  | `Assoc [] -> None
-  | json when shell_json_matches_config ~config json -> Some json
-  | _ -> None
+let last_good_shell_for_config ~state ~scope config =
+  match Execution_surfaces.last_good_shell_for_scope ~state scope with
+  | Some json when shell_json_matches_config ~config json -> Some json
+  | Some _ | None -> None
 
-let cached_shell_json_for_namespace ~config =
-  match last_good_shell_for_config config with
+let cached_shell_json_for_namespace ~state ~scope ~config =
+  match last_good_shell_for_config ~state ~scope config with
   | Some json -> json
   | None -> namespace_truth_bootstrap_shell_json ()
 
-let schedule_namespace_truth_shell_refresh ~sw ~clock config =
+let schedule_namespace_truth_shell_refresh ~state ~scope ~sw ~clock config =
   if Atomic.compare_and_set namespace_truth_shell_refreshing false true then (
     (* The reader answers from the cached shell; no request waits on this
        refresh (RFC-0204 3.4). *)
@@ -93,8 +92,8 @@ let schedule_namespace_truth_shell_refresh ~sw ~clock config =
                in
                if result <> `Assoc [] && not (Dashboard_cache.is_timeout_envelope result)
                then (
-                 Atomic.set last_good_shell result;
-                 Atomic.set shell_warmed true;
+                 Execution_surfaces.publish_shell_cache_success
+                   ~state ~scope ~light:false result;
                  Log.Dashboard.debug
                    "project-snapshot async shell refresh completed: %.0fms"
                    ((Time_compat.now () -. t0) *. 1000.0))
@@ -105,19 +104,31 @@ let schedule_namespace_truth_shell_refresh ~sw ~clock config =
                    "project-snapshot async shell refresh failed: %s"
                    (Printexc.to_string exn))))
 
-let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
-  let config = (Mcp_server.workspace_config state) in
+let with_observer_instance ~scope = function
+  | `Assoc fields -> `Assoc (("observer_instance_id", `String (Server_observer_scope.instance_id scope))
+      :: List.remove_assoc "observer_instance_id" fields)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as json -> json
+;;
+
+let with_execution_read_diagnostics completeness json = match completeness with
+  | None -> json
+  | Some completeness -> Dashboard_projection_read.json_with_read_diagnostics {
+      json; completeness; next_deadline_unix = None}
+
+let dashboard_namespace_truth_for_scope ~state ~(scope : Mcp_server.workspace_scope) ~sw ~clock _request =
+  let config = scope.config in
+  let execution_cache = Execution_surfaces.execution_cache_for_scope ~state scope in
   (* Fast-path: if the proactive execution refresh hasn't produced a result
      yet, return "initializing" immediately instead of blocking for 15-20s
-     on cold-start on-demand compute. The frontend retries every 3s via
-     scheduleWarmRetry; the proactive refresh loop populates execution_cache
-     in background. *)
+     on cold-start on-demand compute. The client retains its warm debt until
+     the source worker or an actual HTTP fill publishes canonical completion.
+     Initializing is not a successful read and needs no periodic HTTP retry. *)
   let warm_escape_s = namespace_truth_warm_escape_s in
   let proactive_first_cycle_pending =
-    not (cached_surface_has_success Execution_surfaces.execution_cache)
+    not (cached_surface_has_success execution_cache)
     &&
     match
-      (Server_dashboard_http_cache.snapshot Execution_surfaces.execution_cache)
+      (Server_dashboard_http_cache.snapshot execution_cache)
         .last_attempt_unix
     with
     | None -> true
@@ -126,15 +137,15 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         elapsed < warm_escape_s
         && Option.is_none
              (Server_dashboard_http_cache.snapshot
-                Execution_surfaces.execution_cache)
+                execution_cache)
                .last_error_unix
   in
   if proactive_first_cycle_pending then
     Namespace_truth_support.compose_namespace_truth_initializing ~config
       ~message:
-        "Execution snapshot is still warming up. The dashboard will retry automatically."
+        "Execution snapshot is still warming up. The dashboard will update when it is ready."
   else
-    match last_good_shell_for_config config with
+    match last_good_shell_for_config ~state ~scope config with
     | None ->
         (* No shell seed exists yet, so do one bounded synchronous attempt. Later
            requests use stale-while-revalidate and do not pay this cost. *)
@@ -144,7 +155,6 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         (* Staged fetch: shell may still need a guarded refresh, while execution
            stays on the proactive cache to keep project-snapshot off the cold path. *)
         let shell_ref = ref (`Assoc []) in
-        let execution_ref = ref (`Assoc []) in
         (* Namespace-truth fiber timeouts.  Cold start uses higher defaults to
            allow shell/namespace reads to warm up.  The values are the
            module-level [namespace_truth_*_timeout_s] bindings; see them for the
@@ -152,7 +162,7 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         let warm_timeout_s = namespace_truth_warm_timeout_s in
         let cold_timeout_s = namespace_truth_cold_timeout_s in
         let is_cold =
-          not (cached_surface_has_success Execution_surfaces.execution_cache)
+          not (cached_surface_has_success execution_cache)
         in
         let base_timeout_s = if is_cold then cold_timeout_s else warm_timeout_s in
         let fiber_with_timeout ?(timeout_s = base_timeout_s) label f fallback =
@@ -191,20 +201,21 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         (* Graceful degradation: on timeout fall back to the last successful
            shell result rather than empty JSON, which would zero out namespace
            counts and focus data (61x/day under I/O contention). *)
-        let shell_fallback = cached_shell_json_for_namespace ~config in
+        let shell_fallback = cached_shell_json_for_namespace ~state ~scope ~config in
         (* Sequential fetch to avoid PG connection concurrent usage (#3305). *)
         shell_ref :=
           fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
             (fun () -> dashboard_shell_http_json ~clock config)
             shell_fallback;
-        execution_ref := cached_surface_json Execution_surfaces.execution_cache;
+        let execution_source, completeness =
+          Execution_surfaces.execution_cached_observation_for_scope ~state scope in
+        let execution_json = Server_dashboard_http_cache.surface_snapshot_json
+            ~now:(Unix.gettimeofday ()) execution_source in
         let shell_json = !shell_ref in
         (* Update last-known-good shell on success. *)
-        if shell_json <> `Assoc [] && shell_json <> shell_fallback then
-          Atomic.set last_good_shell shell_json;
-        if (not (Atomic.get shell_warmed)) && shell_json <> `Assoc [] then
-          Atomic.set shell_warmed true;
-        let execution_json = !execution_ref in
+        if shell_json <> `Assoc [] && shell_json <> shell_fallback
+           && not (Dashboard_cache.is_timeout_envelope shell_json) then
+          Execution_surfaces.publish_shell_cache_success ~state ~scope ~light:false shell_json;
         let parallel_ms = (Time_compat.now () -. t0) *. 1000.0 in
         if parallel_ms >= 100.0 then
           Log.Dashboard.info "project-snapshot fetch: %.0fms" parallel_ms
@@ -216,6 +227,7 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         in
         Namespace_truth_support.compose_namespace_truth_snapshot ~config
           ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json
+        |> with_execution_read_diagnostics completeness
         |> Server_dashboard_http_core_cache.with_projection_diagnostics
              ~surface:"namespace_truth" ~started_at
              ~extra:
@@ -225,11 +237,14 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
                    Json_util.string_opt_to_json execution_cache_state );
                ])
     | Some shell_json ->
-        schedule_namespace_truth_shell_refresh ~sw ~clock config;
+        schedule_namespace_truth_shell_refresh ~state ~scope ~sw ~clock config;
         (* NDT-OK: projection diagnostics timestamp only; snapshot content comes
            from cached read models. *)
         let started_at = Unix.gettimeofday () in
-        let execution_json = cached_surface_json Execution_surfaces.execution_cache in
+        let execution_source, completeness =
+          Execution_surfaces.execution_cached_observation_for_scope ~state scope in
+        let execution_json = Server_dashboard_http_cache.surface_snapshot_json
+            ~now:(Unix.gettimeofday ()) execution_source in
       let execution_cache_state =
         json_assoc_field "projection_diagnostics" execution_json
         |> json_string_field_opt "cache_state"
@@ -237,6 +252,7 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
       Namespace_truth_support.compose_namespace_truth_snapshot ~config
         ~initialized:(Workspace.is_initialized config)
         ~shell_json ~execution_json
+      |> with_execution_read_diagnostics completeness
       |> Server_dashboard_http_core_cache.with_projection_diagnostics
            ~surface:"namespace_truth" ~started_at
            ~extra:
@@ -250,43 +266,69 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
                  Json_util.string_opt_to_json execution_cache_state );
              ]
 
+let dashboard_namespace_truth_http_json ~state ~sw ~clock request =
+  let scope = Mcp_server.workspace_scope state in
+  dashboard_namespace_truth_for_scope ~state ~scope ~sw ~clock request
+  |> with_observer_instance ~scope
+;;
+
 (** Assemble a lightweight namespace-truth snapshot from cached refs only.
     No PG I/O — reads proactive caches for execution and command, and
-    the TTL-cached shell. Returns None when the execution cache has not
-    produced its first successful result (cold start). *)
-let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
-    Yojson.Safe.t option =
-  if not (cached_surface_has_success Server_dashboard_http_execution_surfaces.execution_cache) then
-    None
-  else
-    let config = (Mcp_server.workspace_config state) in
-    let shell_json = cached_shell_json_for_namespace ~config in
-    let execution_json =
-      (* Broadcast path reads the cached surface's raw [json] — a stable ref
-         retained until the next successful refresh — instead of
-         [cached_surface_json]. The latter rebuilds an [Assoc] tree carrying
-         volatile fields ([cache_state], [stale_age_ms], [last_success_at]) on
-         every call via [extend_projection_diagnostics]. But
-         [compose_namespace_truth_snapshot] consumes only the structural
-         fields of the execution surface ([execution_queue],
-         [operation_briefs], [summary], [keepers], [tasks]) and never the
-         projection-diagnostics fields, so reading the stable raw [json] skips
-         that per-broadcast-check allocation entirely without changing the
-         composed snapshot. The HTTP path
-         ([dashboard_namespace_truth_http_json]) keeps [cached_surface_json]
-         where clients render cache_state/stale_age_ms. *)
-      (Server_dashboard_http_cache.snapshot
-         Server_dashboard_http_execution_surfaces.execution_cache)
-        .json
-    in
-    Some
-      (Namespace_truth_support.compose_namespace_truth_snapshot ~config
-         ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json)
+    the TTL-cached shell. Returns None while no execution observation/error
+    has been admitted; partial actual observations retain their readable rows. *)
+type namespace_publication = {
+  scope : Mcp_server.workspace_scope;
+  cache : Server_dashboard_http_cache.cached_surface;
+  execution_source : Server_dashboard_http_cache.surface_snapshot;
+  shell_source : Yojson.Safe.t option;
+  completion_revision : int;
+  json : Yojson.Safe.t;
+}
+
+let namespace_publication_for_scope ~state (scope : Mcp_server.workspace_scope) =
+  let cache = Execution_surfaces.execution_cache_for_scope ~state scope in
+  let completion_revision = Execution_surfaces.namespace_cache_revision ~state scope in
+  let execution_source, completeness =
+    Execution_surfaces.execution_cached_observation_for_scope ~state scope in
+  match completeness with
+  | None -> None
+  | Some completeness ->
+      let shell_source = Execution_surfaces.last_good_shell_for_scope ~state scope in
+      let shell_json = match shell_source with
+        | Some json when shell_json_matches_config ~config:scope.config json -> json
+        | Some _ | None -> namespace_truth_bootstrap_shell_json () in
+      let json = Namespace_truth_support.compose_namespace_truth_snapshot
+          ~config:scope.config ~initialized:(Workspace.is_initialized scope.config)
+          ~shell_json ~execution_json:execution_source.json
+        |> with_execution_read_diagnostics (Some completeness)
+        |> with_observer_instance ~scope in
+      Some {scope; cache; execution_source; shell_source; completion_revision; json}
+;;
+
+let namespace_publication_is_current ~state publication =
+  Mcp_server.Workspace_scope_epoch.equal publication.scope.epoch
+    (Mcp_server.workspace_scope state).epoch
+  && publication.execution_source == Server_dashboard_http_cache.snapshot publication.cache
+  && publication.shell_source == Execution_surfaces.last_good_shell_for_scope ~state publication.scope
+  && publication.completion_revision = Execution_surfaces.namespace_cache_revision ~state publication.scope
+;;
+
+let namespace_truth_snapshot_from_caches state =
+  let scope = Mcp_server.workspace_scope state in
+  match namespace_publication_for_scope ~state scope with
+  | Some publication when Mcp_server.Workspace_scope_epoch.equal scope.epoch
+      (Mcp_server.workspace_scope state).epoch -> Some publication.json
+  | Some _ | None -> None
+;;
 
 let last_namespace_truth_snapshot_hash : Agent_core_sha256.t option ref =
   ref None
 
-let namespace_truth_snapshot_hash_mu = Eio.Mutex.create ()
+let last_namespace_truth_scope : Mcp_server.Workspace_scope_epoch.t option ref = ref None
+
+let namespace_truth_snapshot_hash_mu = Stdlib.Mutex.create ()
+let last_namespace_truth_revision : int option ref = ref None
+let last_namespace_truth_receipt : (Mcp_server.Workspace_scope_epoch.t * int) option ref = ref None
 
 let hash_namespace_truth_snapshot (snapshot : Yojson.Safe.t) : Agent_core_sha256.t =
   (* Incremental SHA256 over the snapshot structure, skipping the volatile
@@ -345,7 +387,7 @@ let hash_namespace_truth_snapshot (snapshot : Yojson.Safe.t) : Agent_core_sha256
 
 let should_broadcast_namespace_truth_snapshot (snapshot : Yojson.Safe.t) =
   let hash = hash_namespace_truth_snapshot snapshot in
-  Eio.Mutex.use_rw ~protect:true namespace_truth_snapshot_hash_mu (fun () ->
+  Stdlib.Mutex.protect namespace_truth_snapshot_hash_mu (fun () ->
       match !last_namespace_truth_snapshot_hash with
       | Some prev when Agent_core_sha256.equal prev hash -> false
       | _ ->
@@ -356,26 +398,42 @@ let should_broadcast_namespace_truth_snapshot (snapshot : Yojson.Safe.t) =
     Called after proactive cache refreshes and keeper lifecycle events.
     Safe to call from any fiber — reads only from cached refs. *)
 let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit =
-  match namespace_truth_snapshot_from_caches state with
+  let scope = Mcp_server.workspace_scope state in
+  let scope_is_current () = Mcp_server.Workspace_scope_epoch.equal scope.epoch
+      (Mcp_server.workspace_scope state).epoch in
+  match namespace_publication_for_scope ~state scope with
   | None -> ()
-  | Some snapshot when should_broadcast_namespace_truth_snapshot snapshot ->
-      let namespace_sse_json =
-        `Assoc
-          [
-            ("type", `String "project_snapshot");
-            ("payload", snapshot);
-            ("ts_unix", `Float (Time_compat.now ()));
-          ]
-      in
-      (* One event, not two. The alias carried the identical payload and every
-         consumer handled the two names in the same branch, so the fanout sent
-         each namespace-truth snapshot twice to say one thing (#27664). *)
-      Sse.broadcast_to Observers namespace_sse_json;
-      (* Snapshot broadcasts are normal dashboard fanout. The cache/update
-         failures around this path are logged separately. *)
-      Log.Dashboard.routine "project-snapshot pushed via SSE"
-  | Some _ ->
-      Log.Dashboard.routine "project-snapshot unchanged, skipping SSE broadcast"
+  | Some publication ->
+      let snapshot = publication.json in
+      let is_current () = scope_is_current () && namespace_publication_is_current ~state publication in
+      let target = Sse.Scoped_runtime_observers (Sse.observer_scope
+        ~runtime_authority:(Sse.runtime_authority_exn ~base_path:scope.config.base_path)
+        ~instance_id:(Server_observer_scope.instance_id scope)) in
+      let hash = hash_namespace_truth_snapshot snapshot in
+      let changed = Stdlib.Mutex.protect namespace_truth_snapshot_hash_mu (fun () ->
+        is_current () && not (
+          Option.exists (Mcp_server.Workspace_scope_epoch.equal scope.epoch) !last_namespace_truth_scope
+          && Option.exists (Agent_core_sha256.equal hash) !last_namespace_truth_snapshot_hash
+          && !last_namespace_truth_revision = Some publication.completion_revision)) in
+      if changed && is_current () then (
+        let encoded = Sse_wire.encode_json (`Assoc ["type", `String "project_snapshot";
+          "payload", snapshot; "ts_unix", `Float (Time_compat.now ())]) in
+        let on_committed event_id =
+          Stdlib.Mutex.protect namespace_truth_snapshot_hash_mu (fun () ->
+            let newest = match !last_namespace_truth_receipt with
+              | Some (epoch, previous) when Mcp_server.Workspace_scope_epoch.equal epoch scope.epoch ->
+                  event_id > previous || Option.is_none !last_namespace_truth_snapshot_hash
+              | Some _ | None -> true in
+            if newest && is_current () then (
+              last_namespace_truth_scope := Some scope.epoch;
+              last_namespace_truth_snapshot_hash := Some hash;
+              last_namespace_truth_revision := Some publication.completion_revision;
+              last_namespace_truth_receipt := Some (scope.epoch, event_id)))
+        in
+        (* A failed replay insertion leaves completion owed. Advancing dedup
+           before a receipt would turn the publisher's retry into a no-op. *)
+        if is_current () then Sse.broadcast_encoded_to_with_receipts target
+          ~on_fanout:(fun _ -> ()) ~on_committed encoded)
 
 let () =
   Execution_surfaces.broadcast_namespace_truth_ref :=

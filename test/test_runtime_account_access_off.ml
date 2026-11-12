@@ -143,7 +143,12 @@ let refused label request captured expected =
 ;;
 
 let turn ~keeper ~runtime =
-  Access.Keeper_turn { keeper_name = keeper; channel = Channel.Autonomous; runtime_id = runtime }
+  Access.Keeper_turn
+    { keeper_name = keeper
+    ; channel = Channel.Autonomous
+    ; pat = Authz_types.Pat_binding.Not_pat
+    ; runtime_id = runtime
+    }
 ;;
 
 let operator_keeper = "keeper-operator"

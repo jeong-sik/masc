@@ -36,8 +36,43 @@ let class_json = function
   | None -> `Null
   | Some cls -> `String (System_error_class.to_short_tag cls)
 
+type change = {
+  canonical_masc_root : string;
+  source : string;
+  keeper_name : string option;
+}
+
+type listener = { callback : change -> unit }
+let listeners : listener list Atomic.t = Atomic.make []
+let notification_failures = Atomic.make 0
+let failed_notifications () = Atomic.get notification_failures
+
+let rec update_listeners change =
+  let before = Atomic.get listeners in
+  if not (Atomic.compare_and_set listeners before (change before)) then
+    update_listeners change
+;;
+
+let subscribe_changed callback =
+  let listener = {callback} in
+  update_listeners (fun before -> listener :: before);
+  fun () -> update_listeners (List.filter (fun existing -> existing != listener))
+;;
+
+let notify_changed change =
+  List.iter (fun listener ->
+    match listener.callback change with
+    | () -> ()
+    | exception _ ->
+        (* cancel-guard-ok: commit observations must not replace the writer's outcome,
+           including cancellation delivered by a listener. No I/O here. *)
+        ignore (Atomic.fetch_and_add notification_failures 1))
+    (Atomic.get listeners)
+;;
+
 let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
     ~stale_reason ?keeper_name ?trace_id ?error ?exn () =
+  let canonical_masc_root = Fs_compat.realpath_lenient masc_root in
   let raw_error, error_class = derive_error_and_class ~error ~exn in
   (* The OTel counter was severed in #20189 (retired scrape-backend
      purge) without an Otel_metric_store replacement; every coverage-gap
@@ -72,7 +107,11 @@ let record ~masc_root ~source ~producer ~durable_store ~dashboard_surface
         ("error_class", class_json error_class);
       ]
   in
-  Dated_jsonl.append store json
+  Fun.protect ~finally:(fun () -> notify_changed {canonical_masc_root; source; keeper_name})
+    (fun () ->
+      match Dated_jsonl.append_notifying_commit store json ~on_committed:ignore with
+      | () -> ()
+      | exception Dated_jsonl.Append_guard_skipped -> ())
 
 let read_recent ~masc_root ~n =
   if n <= 0 then []

@@ -590,9 +590,9 @@ let keepalive_keeper_names config =
 
     Mirrors [keepalive_keeper_names] for readers that care about
     durability rather than the keepalive fiber. *)
-let persistent_agent_names config =
-  configured_keeper_names config
-  |> List.filter_map (fun name ->
+let persistent_agent_names_with_unread config =
+  let results = configured_keeper_names config
+  |> List.map (fun name ->
     let path = keeper_meta_path config name in
     match
       read_meta_file_path path
@@ -600,13 +600,13 @@ let persistent_agent_names config =
     | Ok (Some meta)
       when (not meta.paused) && effective_autoboot_enabled config name meta ->
         Problem_report_state.clear ~site:Persistent_scan ~path;
-        Some meta.name
+        Ok (Some meta.name)
     | Ok (Some _) ->
       Problem_report_state.clear ~site:Persistent_scan ~path;
-      None
+      Ok None
     | Ok None ->
       Problem_report_state.clear ~site:Persistent_scan ~path;
-      None
+      Ok None
     | Error msg ->
       (* Issue #8377: same anti-pattern as keepalive_keeper_names:
          Error was silently collapsed into None. Operator can't
@@ -623,7 +623,16 @@ let persistent_agent_names config =
           "persistent_agent_names: meta read failed for %s, treating as non-persistent: %s"
           name
           msg;
-      None)
+      Error {Keeper_snapshot_unread.name; reason = Meta_read_failed msg})
+  in
+  List.fold_right (fun result (names, unread) -> match result with
+    | Ok (Some name) -> name :: names, unread
+    | Ok None -> names, unread
+    | Error failed -> names, failed :: unread) results ([], [])
+;;
+
+let persistent_agent_names config =
+  fst (persistent_agent_names_with_unread config)
 ;;
 
 let read_meta_resolved config name : ((string * Keeper_meta_contract.keeper_meta) option, string) result =

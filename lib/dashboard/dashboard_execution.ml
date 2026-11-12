@@ -3,6 +3,12 @@ include Dashboard_execution_builders
 
 module Agent_name_map = Set_util.StringMap
 
+type observation = Dashboard_projection_read.observation = {
+  json : Yojson.Safe.t;
+  next_deadline_unix : float option;
+  completeness : Dashboard_projection_read.completeness;
+}
+
 (* How many tasks that reached a terminal status inside the recency window the
    execution payload carries. The window itself is the filter; this bounds the
    payload when a burst of tasks ends at once. *)
@@ -19,20 +25,22 @@ let recent_terminal_limit = 20
 
    Pure and separately exported so the ordering is testable without booting a
    workspace; the payload builder holds no second copy of this rule. *)
+let task_terminal_timestamp (t : Masc_domain.task) =
+  (* Exhaustive on [task_status]: a new terminal status must name its own
+     recency field here rather than silently never appearing. *)
+  match t.task_status with
+  | Masc_domain.Done { completed_at; _ } -> Some completed_at
+  | Masc_domain.Cancelled { cancelled_at; _ } -> Some cancelled_at
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.AwaitingVerification _ -> None
+;;
+
 let recent_terminal_tasks ~cutoff (tasks : Masc_domain.task list) : Masc_domain.task list =
   tasks
   |> List.filter_map (fun (t : Masc_domain.task) ->
-    let terminal_at =
-      (* Exhaustive on [task_status]: a new terminal status must name its own
-         recency field here rather than silently never appearing. *)
-      match t.task_status with
-      | Masc_domain.Done { completed_at; _ } -> Some completed_at
-      | Masc_domain.Cancelled { cancelled_at; _ } -> Some cancelled_at
-      | Masc_domain.Todo
-      | Masc_domain.Claimed _
-      | Masc_domain.InProgress _
-      | Masc_domain.AwaitingVerification _ -> None
-    in
+    let terminal_at = task_terminal_timestamp t in
     match terminal_at with
     | None -> None
     | Some timestamp ->
@@ -76,8 +84,10 @@ let tasks_safe config =
   if Workspace.is_initialized config then Workspace.get_tasks_safe config else []
 ;;
 
-let agents_safe config =
-  if Workspace.is_initialized config then Workspace.get_active_agents config else []
+let agent_sources_safe config =
+  if Workspace.is_initialized config then
+    fst (Workspace.get_active_agent_sources_observed config)
+  else []
 ;;
 
 let messages_safe config =
@@ -662,7 +672,7 @@ let message_json (message : Masc_domain.message) =
     operators can override via [MASC_DASHBOARD_RENDER_TIMEOUT_SEC]. *)
 let render_timeout_s = Env_config_runtime.Dashboard.render_timeout_sec
 
-let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
+let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
   let ctx : _ Tool_operator.context =
     { config
     ; agent_name = effective_actor
@@ -734,20 +744,23 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           timings.assemble_ms)
   in
   Eio_guard.protect ~finally:emit_render_timings (fun () ->
-    let snapshot_json =
-      Dashboard_projection_cache.get_or_compute_snapshot_json
-        ~config
-        ~actor:(Some effective_actor)
-        (fun actor_name ->
-           Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-             Dashboard_projection_cache.operator_snapshot_json
-               ~actor:actor_name
-               ~view:"summary"
-               ~include_messages:false
-               ~include_keepers:true
-               ~include_summary_fields:false
-               ~lightweight_summary:true
-               ctx))
+    let read_snapshot actor_name =
+      Dashboard_projection_cache.operator_snapshot_json
+        ~read_policy ~actor:actor_name ~view:"summary"
+        ~include_messages:false ~include_keepers:true
+        ~include_summary_fields:false ~lightweight_summary:true ctx
+    in
+    let snapshot_json, snapshot_observation = match read_policy with
+      | Dashboard_projection_read.Reuse ->
+          (Dashboard_projection_cache.get_or_compute_snapshot_json
+            ~config ~actor:(Some effective_actor)
+            (fun actor -> Pool_work.cpu ~name:__FUNCTION__ (fun () -> read_snapshot actor))), None
+      | Current ->
+          let observation = Dashboard_projection_cache.operator_snapshot_observation
+              ~actor:effective_actor ~view:"summary" ~include_messages:false ~include_keepers:true
+              ~include_summary_fields:false ~lightweight_summary:true ctx in
+          Dashboard_projection_cache.with_current_keeper_observations ~config observation.json,
+          Some observation
     in
     t_after_snapshot := Some (Time_compat.now ());
     Eio.Fiber.yield ();
@@ -797,7 +810,8 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          In light mode, tasks and messages are NOT serialized in the
          response payload (saves ~143KB) but are still loaded for
          worker_support_briefs computation. *)
-    let agents = agents_safe config in
+    let agent_sources = agent_sources_safe config in
+    let agents = List.map fst agent_sources in
     let messages = messages_safe config in
     t_after_data_load := Some (Time_compat.now ());
     let now_ts = Time_compat.now () in
@@ -810,6 +824,12 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         worker_rows
     in
     let continuity_rows = build_continuity_briefs ~now_ts keepers in
+    let source_dated_agents = List.filter_map (fun (agent, source) ->
+      match source with
+      | Workspace.Agent_record | Workspace_state -> Some agent
+      | Keeper_registry -> None) agent_sources in
+    let policy_deadline = next_policy_change_unix ~now_ts
+        ~agents:source_dated_agents ~messages ~keepers in
     (* Operations: only active/paused, max 20 *)
     let active_ops =
       List.filter
@@ -822,6 +842,10 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     (* Execution queue: first 10 attention-needing keepers in snapshot order.
        Not ranked — the cut is positional, not by severity or recency. *)
     let limited_queue = take 10 execution_queue in
+    let keepers_unread = match Keeper_snapshot_unread.of_snapshot snapshot_json with
+      | Ok unread -> unread | Error detail -> invalid_arg ("dashboard execution: " ^ detail) in
+    let keepers_listing = match Keeper_snapshot_unread.listing_of_snapshot snapshot_json with
+      | Ok listing -> listing | Error detail -> invalid_arg ("dashboard execution: " ^ detail) in
     let base_fields =
       let utf8_repair = Safe_ops.persistence_utf8_repair_stats () in
       [ "generated_at", `String (Masc_domain.now_iso ())
@@ -855,15 +879,11 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
            beside the rows so the execution screen does not count them as
            absent (#38090). *)
         ( "keepers_unread"
-        , match Keeper_snapshot_unread.of_snapshot snapshot_json with
-          | Ok unread -> `List (List.map Keeper_snapshot_unread.to_json unread)
-          | Error detail -> invalid_arg ("dashboard execution: " ^ detail) )
+        , `List (List.map Keeper_snapshot_unread.to_json keepers_unread) )
       ; (* Whether the name list read at all: with no list, [keepers] and
            [keepers_unread] are both empty (#38120). *)
         ( "keepers_listing"
-        , match Keeper_snapshot_unread.listing_of_snapshot snapshot_json with
-          | Ok listing -> Keeper_snapshot_unread.listing_to_json listing
-          | Error detail -> invalid_arg ("dashboard execution: " ^ detail) )
+        , Keeper_snapshot_unread.listing_to_json keepers_listing )
       ]
     in
     let now = Time_compat.now () in
@@ -876,6 +896,19 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         tasks
     in
     let recent_done = recent_terminal_tasks ~cutoff:recent_cutoff tasks in
+    let next_deadline_unix =
+      let deadlines = List.filter_map (fun task ->
+        Option.bind (task_terminal_timestamp task) Masc_domain.parse_iso8601_opt
+        |> Option.map (fun at -> Float.next_after (at +. Masc_time_constants.day) infinity))
+          recent_done in
+      let policy_deadline = match policy_deadline,
+          Option.bind snapshot_observation (fun observation -> observation.next_deadline_unix) with
+        | None, deadline | deadline, None -> deadline
+        | Some left, Some right -> Some (Float.min left right) in
+      List.fold_left (fun earliest at ->
+        match earliest with None -> Some at | Some earlier -> Some (Float.min earlier at))
+        policy_deadline deadlines
+    in
     (* Cap removed (2026-04-16): active_tasks is already bounded by
          how many tasks exist in state, and recent_done is capped at 20
          above. The previous [take 50] silently truncated the backlog in
@@ -898,14 +931,26 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          surface partial render telemetry.  The slow-render WARN is also
          emitted from there, off the same captured timings. *)
     emit_render_timings ();
-    if light
-    then `Assoc (base_fields @ task_fields)
-    else
+    let json = if light then `Assoc (base_fields @ task_fields) else
       (* Full mode: include messages in addition to tasks *)
       `Assoc
         (base_fields
          @ task_fields
-         @ [ "messages", `List (List.map message_json messages) ]))
+         @ [ "messages", `List (List.map message_json messages) ]) in
+    {json; next_deadline_unix;
+     completeness = (match snapshot_observation with
+       | Some observation -> observation.completeness
+       | None -> Dashboard_projection_read.keeper_completeness ~listing:keepers_listing ~unread:keepers_unread)})
+;;
+
+let observe_current ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
+  let effective_actor = Dashboard_projection_cache.normalize_actor_name actor in
+  match execution_fixture_name ?fixture () with
+  | Some "execution_smoke" -> {json = execution_smoke_fixture_json (); next_deadline_unix = None;
+      completeness = Dashboard_projection_read.Complete}
+  | Some _ | None ->
+      render_observation ~read_policy:Dashboard_projection_read.Current
+        ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()
 ;;
 
 (* A render that finished as the window closed is the render;
@@ -928,7 +973,8 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
        (observed: 11,018s render on 2026-03-21). *)
     (match
        render_under_timeout ~clock ~timeout_s:render_timeout_s (fun () ->
-         json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ())
+         (render_observation ~read_policy:Dashboard_projection_read.Reuse
+            ~effective_actor ~light ~config ~sw ~clock ~proc_mgr ()).json)
      with
      | Ok result -> result
      | Error `Timeout ->

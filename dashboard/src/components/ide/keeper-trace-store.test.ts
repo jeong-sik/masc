@@ -1,3 +1,5 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { captureDashboardObservationOwner } from '../../lib/observation-read-owner'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   COALESCE_WINDOW_MS,
@@ -9,6 +11,11 @@ import {
   tracesByKeeper,
   tracesBySource,
 } from './keeper-trace-store'
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'trace-test', workspaceRoot: '/fixture/trace',
+    connectionGeneration: 1, observerInstanceId: 'trace-test-instance' }
+})
+
 
 beforeEach(() => {
   clearTraces()
@@ -31,7 +38,7 @@ describe('keeper-trace-store', () => {
       source: 'anchored-thread',
       threadId: 'old-thread',
       line: 12,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'new',
       tsMs: 2000,
@@ -39,7 +46,7 @@ describe('keeper-trace-store', () => {
       source: 'anchored-thread',
       threadId: 'new-thread',
       line: 13,
-    })
+    }, captureDashboardObservationOwner())
 
     expect(filterTraceEventsByReplay(keeperTraceState.value.events, null).map(e => e.id))
       .toEqual(['old', 'new'])
@@ -55,7 +62,7 @@ describe('keeper-trace-store', () => {
       source: 'anchored-thread',
       threadId: 'th-1',
       line: 12,
-    })
+    }, captureDashboardObservationOwner())
     expect(keeperTraceState.value.events).toHaveLength(1)
     expect(keeperTraceState.value.events[0]).toMatchObject({
       id: 'a-1',
@@ -74,7 +81,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-2',
       tsMs: 1000 + COALESCE_WINDOW_MS,
@@ -82,7 +89,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-2',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     expect(keeperTraceState.value.events).toHaveLength(1)
     const merged = keeperTraceState.value.events[0]!
     expect(merged.count).toBe(2)
@@ -99,7 +106,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-2',
       tsMs: 1000 + COALESCE_WINDOW_MS + 1,
@@ -107,7 +114,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-2',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     expect(keeperTraceState.value.events).toHaveLength(2)
     expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1])
   })
@@ -120,7 +127,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-2',
       tsMs: 1010,
@@ -128,7 +135,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'dec-a-2',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     expect(keeperTraceState.value.events).toHaveLength(2)
     expect(keeperTraceState.value.events.map(e => e.source)).toEqual(['runtime-hop', 'decision-log'])
   })
@@ -141,7 +148,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-2',
       tsMs: 1010,
@@ -149,7 +156,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-2',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     expect(keeperTraceState.value.events).toHaveLength(2)
     expect(keeperTraceState.value.events.map(e => e.keeperName)).toEqual(['scholar', 'moth'])
   })
@@ -163,7 +170,7 @@ describe('keeper-trace-store', () => {
       threadId: 'th-1',
       filePath: 'runtime.ts',
       line: 12,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-2',
       tsMs: 1010,
@@ -172,7 +179,7 @@ describe('keeper-trace-store', () => {
       threadId: 'th-2',
       filePath: 'worker.ts',
       line: 12,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-3',
       tsMs: 1020,
@@ -181,7 +188,7 @@ describe('keeper-trace-store', () => {
       threadId: 'th-3',
       filePath: 'runtime.ts',
       line: 20,
-    })
+    }, captureDashboardObservationOwner())
 
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['a-1', 'a-2', 'a-3'])
     expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1, 1])
@@ -197,7 +204,7 @@ describe('keeper-trace-store', () => {
       filePath: 'runtime.ts',
       line: 12,
       surface: 'Goal',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'activity-2',
       tsMs: 1010,
@@ -207,7 +214,7 @@ describe('keeper-trace-store', () => {
       filePath: 'worker.ts',
       line: 12,
       surface: 'Task',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'activity-3',
       tsMs: 1020,
@@ -217,7 +224,7 @@ describe('keeper-trace-store', () => {
       filePath: 'runtime.ts',
       line: 20,
       surface: 'Log',
-    })
+    }, captureDashboardObservationOwner())
 
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['activity-1', 'activity-2', 'activity-3'])
     expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1, 1])
@@ -234,7 +241,7 @@ describe('keeper-trace-store', () => {
       filePath: 'runtime.ts',
       line: 12,
       goalId: 'goal-runtime',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'decision-2',
       tsMs: 1010,
@@ -245,7 +252,7 @@ describe('keeper-trace-store', () => {
       filePath: 'runtime.ts',
       line: 13,
       goalId: 'goal-runtime',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'decision-3',
       tsMs: 1020,
@@ -256,7 +263,7 @@ describe('keeper-trace-store', () => {
       filePath: 'runtime.ts',
       line: 12,
       goalId: 'goal-other',
-    })
+    }, captureDashboardObservationOwner())
 
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual([
       'decision-1',
@@ -274,7 +281,7 @@ describe('keeper-trace-store', () => {
       source: 'anchored-thread',
       threadId: 'th-1',
       line: 1,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-2',
       tsMs: 2000,
@@ -282,7 +289,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'd-1',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-3',
       tsMs: 3500,
@@ -290,7 +297,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'dec-a-3',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     expect(keeperTraceState.value.events.map(e => e.tsMs)).toEqual([2000, 3500, 5000])
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['a-2', 'a-3', 'a-1'])
   })
@@ -303,7 +310,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'd-1',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-2',
       tsMs: 1010,
@@ -311,7 +318,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'd-2',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-3',
       tsMs: 1040,
@@ -319,7 +326,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'd-3',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     expect(keeperTraceState.value.events).toHaveLength(1)
     const merged = keeperTraceState.value.events[0]!
     expect(merged.count).toBe(3)
@@ -335,7 +342,7 @@ describe('keeper-trace-store', () => {
       source: 'anchored-thread',
       threadId: 'th-old',
       line: 1,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'old-2',
       tsMs: 200,
@@ -343,7 +350,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-old',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     // Push event at RETENTION_MS + 500 → cutoff = 500, both prior events
     // (tsMs 0 + 200) fall outside the window.
     pushTrace({
@@ -353,7 +360,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'dec-fresh-1',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['fresh-1'])
   })
 
@@ -365,7 +372,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     // Push event at RETENTION_MS + 10 → cutoff = 10, survivor@5000 stays
     // because 5000 >= 10.
     pushTrace({
@@ -375,7 +382,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'dec-fresh',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['survivor', 'fresh'])
   })
 
@@ -387,7 +394,7 @@ describe('keeper-trace-store', () => {
       source: 'anchored-thread',
       threadId: 'th-1',
       line: 1,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'fresh',
       tsMs: RETENTION_MS,
@@ -395,7 +402,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     // Latest tsMs = RETENTION_MS, cutoff = 0 → boundary at tsMs=0 is kept (>= cutoff).
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['boundary', 'fresh'])
   })
@@ -408,7 +415,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     clearTraces()
     expect(keeperTraceState.value.events).toHaveLength(0)
   })
@@ -427,7 +434,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-2',
       tsMs: 1100,
@@ -435,7 +442,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-2',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     expect(tracesByKeeper('scholar').map(e => e.id)).toEqual(['a-1'])
     expect(tracesByKeeper('moth').map(e => e.id)).toEqual(['a-2'])
     expect(tracesByKeeper(' ')).toEqual([])
@@ -449,7 +456,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-2',
       tsMs: 1100,
@@ -457,7 +464,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'dec-a-2-bysource',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'a-3',
       tsMs: 1200,
@@ -465,7 +472,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'dec-a-3-bysource',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     expect(tracesBySource('runtime-hop').map(e => e.id)).toEqual(['a-1'])
     expect(tracesBySource('decision-log').map(e => e.id)).toEqual(['a-2', 'a-3'])
     expect(tracesBySource('activity-event')).toEqual([])
@@ -479,7 +486,7 @@ describe('keeper-trace-store', () => {
       source: 'anchored-thread',
       threadId: 'th-1',
       line: 12,
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'b-1',
       tsMs: 1100,
@@ -487,7 +494,7 @@ describe('keeper-trace-store', () => {
       source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'glm',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'd-1',
       tsMs: 1300,
@@ -495,7 +502,7 @@ describe('keeper-trace-store', () => {
       source: 'decision-log',
       decisionId: 'dec-1',
       semanticOutcome: 'success',
-    })
+    }, captureDashboardObservationOwner())
     pushTrace({
       id: 'e-1',
       tsMs: 1400,
@@ -505,7 +512,7 @@ describe('keeper-trace-store', () => {
       filePath: 'runtime.ts',
       line: 9,
       surface: 'Goal',
-    })
+    }, captureDashboardObservationOwner())
 
     for (const event of keeperTraceState.value.events) {
       // Compile-time exhaustive narrowing.

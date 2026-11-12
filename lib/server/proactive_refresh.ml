@@ -48,6 +48,7 @@ type config = {
   on_failure : (failure -> unit) option;
   wakeup : unit Eio.Stream.t option;
   wakeup_coalesce_s : float;
+  change_read_spacing_s : float;
   warm_delay_s : float;
   warn_first_failure : bool;
 }
@@ -62,6 +63,7 @@ let default_config ~label ~interval_s =
     on_failure = None;
     wakeup = None;
     wakeup_coalesce_s = 0.0;
+    change_read_spacing_s = 0.0;
     warm_delay_s = 0.0;
     warn_first_failure = true;
   }
@@ -114,6 +116,133 @@ let notify_failure config failure =
   match config.on_failure with
   | Some f -> Safe_ops.protect ~default:() (fun () -> f failure)
   | None -> ()
+
+let coalesce_changes ~clock ~config stream =
+  let coalesce_s = max 0.0 config.wakeup_coalesce_s in
+  if coalesce_s > 0.0 then Eio.Time.sleep clock coalesce_s;
+  (* Bound the drain to the siblings observed now. Continuous writers must
+     not prevent the owed read from starting. *)
+  let observed = Eio.Stream.length stream in
+  for _ = 1 to observed do
+    ignore (Eio.Stream.take_nonblocking stream : unit option)
+  done
+;;
+
+let start_on_change_or_deadline ~sw ~clock ~changes ~config ~next_deadline
+    ~compute ~on_result =
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Switch.run ~name:(config.label ^ " observation") (fun _ ->
+      let consecutive_failures = ref 0 in
+      let current_interval = ref config.interval_s in
+      let previous_changed_read_started = ref None in
+      (* A change has been taken. Its read starts once the spacing from the
+         previous change-driven read has passed, or at [before] (a deadline or
+         retry that is already due to read) when that comes first. Changes
+         that arrive in the meantime are answered by the same read. The
+         initial read and reads owed to a deadline or retry do not open a
+         spacing: they are not caused by input pressure. *)
+      let admit_changed_read ?before () =
+        let spaced_start =
+          match !previous_changed_read_started with
+          | Some started when config.change_read_spacing_s > 0.0 ->
+              Some (started +. config.change_read_spacing_s)
+          | Some _ | None -> None
+        in
+        (match spaced_start, before with
+         | None, _ -> ()
+         | Some at, None -> Eio.Time.sleep_until clock at
+         | Some at, Some before -> Eio.Time.sleep_until clock (Float.min at before));
+        coalesce_changes ~clock ~config changes;
+        previous_changed_read_started := Some (Eio.Time.now clock)
+      in
+      let take_change () =
+        Eio.Stream.take changes;
+        admit_changed_read ()
+      in
+      let wait_for_observation_deadline = function
+        | None -> take_change ()
+        | Some deadline ->
+          (match Eio.Fiber.first
+             (fun () -> Eio.Time.sleep_until clock deadline; `Deadline)
+             (fun () -> Eio.Stream.take changes; `Changed)
+           with
+           | `Deadline -> ()
+           | `Changed -> admit_changed_read ~before:deadline ())
+      in
+      let wait_for_retry_or_change observed_deadline =
+        let retry_at = Eio.Time.now clock +. !current_interval in
+        let retry_at = match observed_deadline with
+          | None -> retry_at | Some deadline -> Float.min retry_at deadline in
+        match Eio.Fiber.first
+          (fun () -> Eio.Time.sleep_until clock retry_at; `Retry)
+          (fun () -> Eio.Stream.take changes; `Changed)
+        with
+        | `Retry -> ()
+        | `Changed -> admit_changed_read ~before:retry_at ()
+      in
+      let initial () =
+        let changed =
+          if config.warm_delay_s > 0.0 then
+            Eio.Fiber.first
+              (fun () -> Eio.Time.sleep clock config.warm_delay_s; false)
+              (fun () -> Eio.Stream.take changes; true)
+          else Option.is_some (Eio.Stream.take_nonblocking changes)
+        in
+        if changed then coalesce_changes ~clock ~config changes
+      in
+      let attempt phase =
+        let started = Time_compat.now () in
+        let observed_deadline = ref None in
+        let outcome =
+          match
+            (match
+               Watched_work.run
+                 ~watcher:(fun () ->
+                   Eio.Time.sleep clock config.timeout_s;
+                   Error (timeout_failure ~config ~phase
+                     ~elapsed_s:(Time_compat.now () -. started)))
+                 (fun () -> Ok (compute ()))
+             with
+             | Ok value ->
+                 let deadline = next_deadline value in
+                 observed_deadline := deadline;
+                 on_result value;
+                 Ok deadline
+             | Error failure -> Error failure)
+          with
+          | outcome -> outcome
+          | exception exn ->
+              if should_reraise_cancel exn then raise exn;
+              Error (Raised exn)
+        in
+        match outcome with
+        | Ok deadline ->
+            if !consecutive_failures > 0 then
+              Log.Dashboard.info "%s observation recovered after %d failures"
+                config.label !consecutive_failures;
+            consecutive_failures := 0;
+            current_interval := config.interval_s;
+            Ok deadline
+        | Error failure ->
+            notify_failure config failure;
+            log_refresh_failure ~config ~consecutive_failures ~current_interval
+              ~dt:(Time_compat.now () -. started) failure;
+            Error !observed_deadline
+      in
+      let rec loop phase =
+        (match attempt phase with
+         | Ok deadline -> wait_for_observation_deadline deadline
+         | Error deadline -> wait_for_retry_or_change deadline);
+        loop Refresh
+      in
+      initial ();
+      loop Warm_cache))
+;;
+
+let start_on_change ~sw ~clock ~changes ~config ~compute ~on_result =
+  start_on_change_or_deadline ~sw ~clock ~changes ~config
+    ~next_deadline:(fun _ -> None) ~compute ~on_result
+;;
 
 let start ~sw ~clock ~config:raw_config ~compute ~on_result =
   (* Clamp timeout below interval to prevent overlapping refreshes.

@@ -218,6 +218,7 @@ describe('manual execution refresh completion through the actual HTTP reader', (
   function execution(generation: number) {
     return {
       generated_at: '2026-09-30T00:00:00Z',
+      projection_diagnostics: { read_completeness: 'complete', read_error: null },
       execution_publication_epoch: 'manual-refresh-fixture',
       execution_publication_generation: generation,
       status: { project: 'same-project', workspace_root: '/fixture/workspace-a' },
@@ -233,6 +234,26 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     const promise = new Promise<Response>(done => { resolve = done })
     return { promise, resolve }
   }
+
+  it('binds the observed workspace instance independently of the process execution epoch', async () => {
+    const store = await import('./store')
+    const snapshot = execution(1)
+    expect(store.hydrateExecutionSnapshot({ ...snapshot, observer_instance_id: 'workspace-instance-A' })).toBe(true)
+    const first = store.executionWorkspaceAuthority.peek()!
+    expect(first.observerInstanceId).toBe('workspace-instance-A')
+    expect(store.hydrateExecutionSnapshot({ ...snapshot, observer_instance_id: 'workspace-instance-A' })).toBe(true)
+    expect(store.executionWorkspaceAuthority.peek()).toBe(first)
+    expect(store.hydrateExecutionSnapshot({ ...snapshot, observer_instance_id: 'workspace-instance-B' })).toBe(true)
+    const second = store.executionWorkspaceAuthority.peek()!
+    expect(second).not.toBe(first)
+    expect(second.epoch).toBe(first.epoch)
+    expect(second.workspaceRoot).toBe(first.workspaceRoot)
+    expect(second.observerInstanceId).toBe('workspace-instance-B')
+    for (const observer_instance_id of [undefined, '', 'two instances', 'A,B']) {
+      expect(store.hydrateExecutionSnapshot({ ...snapshot, observer_instance_id })).toBe(true)
+      expect(store.executionWorkspaceAuthority.peek()?.observerInstanceId).toBeNull()
+    }
+  })
 
   it('rejects a delayed pre-purchase overlay within the same execution generation', async () => {
     const store = await import('./store')
@@ -363,7 +384,7 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     expect(store.executionError.value).toBeNull()
   })
 
-  it('does not call an initializing envelope a completed refresh while retaining warm retry', async () => {
+  it('waits for canonical completion after initializing without status polling', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(json({ status: 'initializing' }))
       .mockResolvedValueOnce(json(execution(1)))
     vi.stubGlobal('fetch', fetch)
@@ -371,11 +392,27 @@ describe('manual execution refresh completion through the actual HTTP reader', (
     await expect(store.refreshExecution({ force: true })).rejects.toThrow('Execution projection is initializing')
     expect(store.executionWorkspaceAuthority.peek()).toBeNull()
     expect(store.executionLoading.value).toBe(false)
-    // Existing warm retry remains scheduled; dispose no new timer policy here.
-    expect(vi.getTimerCount()).toBeGreaterThan(0)
-    await vi.runOnlyPendingTimersAsync()
-    expect(fetch).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(store.hydrateExecutionSnapshot(execution(1))).toBe(true)
     expect(store.executionWorkspaceAuthority.peek()?.workspaceRoot).toBe('/fixture/workspace-a')
+  })
+
+  it('retains failed execution read debt beyond ten attempts and settles it from canonical success', async () => {
+    const { warmRetryDelayFor } = await import('./lib/warm-retry')
+    const fetch = vi.fn().mockRejectedValue(new Error('execution unavailable'))
+    vi.stubGlobal('fetch', fetch)
+    const store = await import('./store')
+    await expect(store.refreshExecution({ force: true })).rejects.toThrow('execution unavailable')
+    for (let attempt = 1; attempt <= 12; attempt++) {
+      await vi.advanceTimersByTimeAsync(warmRetryDelayFor(attempt))
+    }
+    expect(fetch).toHaveBeenCalledTimes(13)
+    expect(store.executionError.value).toMatch(/execution unavailable/)
+    expect(store.hydrateExecutionSnapshot(execution(1))).toBe(true)
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(13)
+    store.disposeExecutionReadRecovery()
   })
 
   it('rejects a late HTTP failure without withdrawing a newer SSE Candle observation', async () => {

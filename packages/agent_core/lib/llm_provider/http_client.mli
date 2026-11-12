@@ -397,6 +397,7 @@ type cache
     already held [max_idle_per_host] idle connections is not counted. *)
 type cache_close_counts =
   { request_failed : int
+  ; request_not_delivered : int
   ; not_persistent : int
   ; body_not_drained : int
   ; transport_ended : int

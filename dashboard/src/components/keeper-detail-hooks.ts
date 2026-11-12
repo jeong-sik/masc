@@ -27,14 +27,12 @@ export type KeeperDetailEvidenceState<T> = EvidenceState<T>
  * now keeper-detail owns the fetch and threads the snapshot down via
  * the snapshot prop introduced in PR #14226.
  *
- * FsmHub still has its own polling/reducer loop — see RFC §7 for the
- * remaining dedup work. This hook handles only the two derived panels.
+ * FsmHub owns its own reducer. This hook serves the two derived panels.
  */
 export function useKeeperCompositeEvidence(keeperName: string): KeeperDetailEvidenceState<KeeperCompositeSnapshot> {
   const [evidence, setEvidence] = useState<KeeperDetailEvidenceState<KeeperCompositeSnapshot>>(loadingEvidence)
   useEffect(() => {
     let cancelled = false
-    setEvidence(loadingEvidence)
     const refresh = async (signal: AbortSignal) => {
       try {
         const result = await fetchKeeperComposite(keeperName, { signal: signal })
@@ -49,7 +47,8 @@ export function useKeeperCompositeEvidence(keeperName: string): KeeperDetailEvid
         }
       }
     }
-    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_composite'], keeperName, resetRead: () => setEvidence(loadingEvidence) })
+    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_composite'], keeperName,
+      resetRead: () => { setEvidence(loadingEvidence) } })
     return () => {
       cancelled = true
       cleanup()
@@ -65,7 +64,6 @@ export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailE
   const refreshNonce = keeperRuntimeTraceRefreshNonce.value
   useEffect(() => {
     let cancelled = false
-    setEvidence(loadingEvidence)
     const refresh = async (signal: AbortSignal) => {
       try {
         const result = await fetchKeeperRuntimeTrace(keeperName, {
@@ -83,7 +81,8 @@ export function useKeeperRuntimeTraceEvidence(keeperName: string): KeeperDetailE
         }
       }
     }
-    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_runtime_trace'], keeperName, resetRead: () => setEvidence(loadingEvidence) })
+    const cleanup = setupObservationRefresh(refresh, { topics: ['keeper_runtime_trace'], keeperName,
+      resetRead: () => { setEvidence(loadingEvidence) } })
     return () => {
       cancelled = true
       cleanup()

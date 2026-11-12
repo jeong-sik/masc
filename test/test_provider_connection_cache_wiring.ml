@@ -278,6 +278,49 @@ let test_health_tells_a_reused_connection's_closes_from_a_new_one's () =
       (closed "closed_after_reuse" "not_persistent"))
 ;;
 
+(* The server answers the first POST and closes the connection. The second
+   POST, whose body is larger than the socket buffers, reuses that connection
+   and is cut off while its bytes go out. The full health response counts it
+   as [request_not_delivered], in all and on a reused connection, and not as
+   [request_failed] (RFC-0492 §6). *)
+let test_health_counts_a_request_cut_off_while_written () =
+  Eio_main.run
+  @@ fun env ->
+  with_provider_and_cache env (fun ~sw ~net _provider ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let cache =
+      match Provider_connection_cache_ref.for_this_domain () with
+      | Some cache -> cache
+      | None -> Alcotest.fail "the cache is installed on this domain"
+    in
+    let url =
+      start_raw_server ~close_after_first:true ~sw ~net
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+    in
+    let post body =
+      Llm_provider.Http_client.post_sync_once ~cache ~net ~url
+        ~headers:
+          [ "Content-Type", "application/json"
+          ; "Content-Length", string_of_int (String.length body)
+          ]
+        ~body ()
+    in
+    (match post "{}" with
+     | Ok { status = 200; _ } -> ()
+     | Ok _ | Error _ -> Alcotest.fail "the first request is answered");
+    (match post (String.make (16 * 1024 * 1024) 'x') with
+     | Error (Llm_provider.Http_client.Dispatch_started_error (NetworkError _)) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "the reused connection the server closed fails");
+    let closed name reason =
+      Yojson.Safe.Util.(full_health_cache () |> member name |> member reason |> to_int)
+    in
+    Alcotest.(check int) "not delivered in all" 1 (closed "closed_total" "request_not_delivered");
+    Alcotest.(check int) "of them on a reused connection" 1
+      (closed "closed_after_reuse" "request_not_delivered");
+    Alcotest.(check int) "none counted as a failed request" 0
+      (closed "closed_total" "request_failed"))
+;;
+
 let () =
   Alcotest.run
     "provider_connection_cache_wiring"
@@ -292,6 +335,8 @@ let () =
             test_two_streamed_runs_share_one_connection
         ; Alcotest.test_case "health tells a reused connection's closes from a new one's"
             `Quick test_health_tells_a_reused_connection's_closes_from_a_new_one's
+        ; Alcotest.test_case "health counts a request cut off while written" `Quick
+            test_health_counts_a_request_cut_off_while_written
         ] )
     ]
 ;;

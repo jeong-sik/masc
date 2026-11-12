@@ -484,6 +484,24 @@
  (modules test_http_client_addresses)
  (libraries agent_core_test_deps llm_provider alcotest eio_main))
 
+(test
+ (name test_http_client_request_not_delivered)
+ (modules test_http_client_request_not_delivered)
+ (libraries
+  agent_core_test_deps
+  llm_provider
+  alcotest
+  eio_main
+  eio.unix
+  tls
+  tls-eio
+  x509
+  mirage-crypto-rng
+  mirage-crypto-rng.unix
+  domain-name
+  ipaddr
+  ptime))
+
 ; Own stanza: needs the mock clock/flow to drive deadline arithmetic without
 ; wall-clock sleeping, and runs entirely on Eio_mock.Backend (no real IO).
 

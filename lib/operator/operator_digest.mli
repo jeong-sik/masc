@@ -53,8 +53,30 @@ val summary_of_recommendations : actor:string -> recommended_action list -> Yojs
 
 val build_workspace_attention_items : Workspace.config -> attention_item list
 
+val build_workspace_attention_observation :
+  now:float -> Workspace.config -> attention_item list * float option
+(** Current workspace attention and the earliest selected tool-host or pending
+    confirmation deadline from the same reads. Snapshot summary assembly uses
+    this observation without rereading the underlying inputs. *)
+
+val tool_host_ring_change_affects_attention : Log.Ring.entry_change -> bool
+(** Non-I/O classifier for this projection's actual bounded module window.
+    A new ToolHost row changes its selection even without a failure envelope;
+    overwriting an older unselected ToolHost row does not. *)
+
 val normalize_digest_target_type :
   string option -> (string, string) result
+
+val observe :
+  ?actor:string ->
+  ?target_type:string ->
+  ?target_id:string ->
+  ?include_workers:bool ->
+  'a Operator_pending_confirm.context ->
+  (Dashboard_projection_cache.digest_observation, string) result
+(** Read current store/ring inputs once and retain their policy deadlines:
+    the selected tool-host attention window and active judgment expiry.
+    No actor projection TTL is consulted here. *)
 
 val digest_json :
   ?actor:string ->
@@ -63,3 +85,9 @@ val digest_json :
   ?include_workers:bool ->
   'a Operator_pending_confirm.context ->
   (Yojson.Safe.t, string) result
+
+module For_testing : sig
+  val tool_host_attention_observation :
+    now:float -> Log.Ring.entry list -> attention_item list * float option
+  (** The actual selected ring rows, de-duplication and strict age policy. *)
+end

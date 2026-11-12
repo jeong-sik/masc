@@ -66,10 +66,10 @@ function isMissingTokenBody(body: string): boolean {
 }
 
 /** Keep a 401 answered to [request] when its typed code says no credential was sent. */
-export async function noteRefusal(request: CredentiallessRequest, response: Response): Promise<void> {
-  if (response.status !== 401) return
+export async function noteRefusal(request: CredentiallessRequest, response: Response, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted || response.status !== 401) return
   const body = await response.text()
-  if (!isMissingTokenBody(body)) return
+  if (signal?.aborted || !isMissingTokenBody(body)) return
   refusals.set(request.route, {
     tokenRevision: request.tokenRevision,
     status: response.status,

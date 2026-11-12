@@ -296,9 +296,43 @@ let append_jsonl_durable path json =
             (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
 ;;
 
+type written = {
+  canonical_masc_root : string;
+  keeper_name : string;
+  event_type : event;
+}
+
+type write_observer = { callback : written -> unit }
+let write_observers : write_observer list Atomic.t = Atomic.make []
+let write_notification_failures = Atomic.make 0
+let failed_write_notifications () = Atomic.get write_notification_failures
+
+let rec update_write_observers f =
+  let before = Atomic.get write_observers in
+  if not (Atomic.compare_and_set write_observers before (f before)) then
+    update_write_observers f
+;;
+
+let subscribe_written callback =
+  let observer = {callback} in
+  update_write_observers (fun before -> observer :: before);
+  fun () -> update_write_observers (List.filter (fun current -> current != observer))
+;;
+
+let notify_written written =
+  (* cancel-guard-ok: this delivery follows the authoritative audit append.
+     A listener cannot replace its typed receipt, including with cancellation;
+     the writer's next suspension still observes its own cancellation. *)
+  List.iter (fun observer ->
+    match observer.callback written with
+    | () -> ()
+    | exception _ -> ignore (Atomic.fetch_and_add write_notification_failures 1))
+    (Atomic.get write_observers)
+;;
+
 let append_jsonl = Atomic.make append_jsonl_durable
 
-let get_audit_store ~base_path () =
+let get_audit_store_with_root ~base_path () =
   let report_failure exn =
     Keeper_fd_pressure.note_exception ~site:"approval_audit.store_create" exn;
     Otel_metric_store_core.inc_counter
@@ -314,6 +348,8 @@ let get_audit_store ~base_path () =
     Error (sanitized_write_failure_detail exn)
   in
   try
+    let canonical_masc_root = Fs_compat.realpath_lenient
+        (Filename.dirname (Dated_jsonl.Store.dir (audit_location ~base_path))) in
     match
       Stdlib.Mutex.protect audit_stores_mu (fun () ->
         try
@@ -329,11 +365,15 @@ let get_audit_store ~base_path () =
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error exn)
     with
-    | Ok store -> Ok store
+    | Ok store -> Ok (store, canonical_masc_root)
     | Error exn -> report_failure exn
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> report_failure exn
+;;
+
+let get_audit_store ~base_path () =
+  Result.map fst (get_audit_store_with_root ~base_path ())
 ;;
 
 let record
@@ -371,13 +411,13 @@ let record
     (* NDT-OK: the audit append boundary owns an omitted event timestamp. *)
     | None -> Unix.gettimeofday ()
   in
-  match get_audit_store ~base_path () with
+  match get_audit_store_with_root ~base_path () with
   | Error detail ->
     { event_type
     ; write_result = Error { stage = Store_create; detail }
     ; cleanup_failure = None
     }
-  | Ok (_ : Dated_jsonl.t) ->
+  | Ok ((_ : Dated_jsonl.t), canonical_masc_root) ->
     let json =
       `Assoc
         ([ "ts", `Float timestamp
@@ -439,6 +479,10 @@ let record
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error exn
     in
+    (match append_result with
+     | Ok (Append_recorded | Append_recorded_with_settlement_failure _) ->
+         notify_written { canonical_masc_root; keeper_name; event_type }
+     | Error _ -> ());
     (match append_result with
      | Ok Append_recorded ->
        { event_type; write_result = Ok (); cleanup_failure = None }

@@ -686,6 +686,83 @@ let test_read_series_without_a_database_is_empty_and_creates_none () =
       (Sys.file_exists (Tool_metrics_store.database_path ~masc_root)))
 ;;
 
+let sliding_exn ~span_s ~until ~width ~offset =
+  match S.sliding_window ~span_s ~until ~width ~utc_offset_min:offset with
+  | Ok window -> window
+  | Error error -> Alcotest.failf "sliding window: %s" error
+;;
+
+let test_empty_window_deadline_changes_real_bucket_labels () =
+  List.iter (fun (width, span_s, offset, origin) ->
+    let until = origin +. (span_s /. 2.0) in
+    let make until = sliding_exn ~span_s ~until ~width ~offset in
+    let window = make until in
+    let deadline = S.next_change_at window ~oldest_sample:None ~next_sample:None in
+    let initial = series_of window [] in
+    let before = series_of (make (Float.pred deadline)) [] in
+    let after = series_of (make deadline) [] in
+    Alcotest.(check bool) "quiet deadline is in the future" true (deadline > until);
+    Alcotest.(check (list (float 0.0))) "no earlier bucket-label change"
+      (starts initial) (starts before);
+    Alcotest.(check bool) "empty payload bucket labels actually change" true
+      (starts initial <> starts after))
+    [S.Hour, hour, 0, utc_midnight; S.Day, day, seoul_offset_min, seoul_midnight]
+;;
+
+let test_row_expiry_respects_inclusive_lower_bound () =
+  let until = utc_midnight +. 1800.0 in
+  let ts = until -. hour +. 10.0 in
+  let make until = sliding_exn ~span_s:hour ~until ~width:S.Hour ~offset:0 in
+  let deadline = S.next_change_at (make until) ~oldest_sample:(Some ts) ~next_sample:None in
+  let since_before, _ = S.window_bounds (make (Float.pred deadline)) in
+  let since_after, _ = S.window_bounds (make deadline) in
+  Alcotest.(check bool) "row still included just before expiry" true (since_before <= ts);
+  Alcotest.(check bool) "first expiry passes row timestamp" true (since_after > ts)
+;;
+
+let test_snapshot_deadlines_follow_actual_filtered_rows () =
+  with_masc_root (fun ~masc_root ->
+    let now = utc_midnight +. 1800.0 in
+    let old_ts = now -. hour +. 10.0 in
+    let future_ts = now +. 7.0 in
+    insert_exn ~masc_root ~record_id:"selected-old" ~ts:old_ts ~tool_name:"read"
+      ~disposition:"completed" 1.0;
+    insert_exn ~masc_root ~record_id:"selected-future" ~ts:future_ts ~tool_name:"read"
+      ~disposition:"failed" 2.0;
+    insert_exn ~masc_root ~record_id:"other-tool" ~ts:(now +. 1.0) ~tool_name:"write"
+      ~disposition:"completed" 3.0;
+    let observe until =
+      let window = sliding_exn ~span_s:hour ~until ~width:S.Hour ~offset:0 in
+      match Tool_metrics_store.observe_series ~masc_root ~window ~tool_name:"read" () with
+      | Ok observation -> observation
+      | Error error -> Alcotest.failf "observe series: %s" error in
+    let initial = observe now in
+    Alcotest.(check int) "only admitted selected row" 1 initial.series.total.call_count;
+    Alcotest.(check (float 0.0)) "unrelated future row creates no deadline"
+      (Float.succ future_ts) initial.next_change_at;
+    let admitted = observe initial.next_change_at in
+    Alcotest.(check int) "future row enters without a write" 2 admitted.series.total.call_count;
+    let before_expiry = observe (Float.pred admitted.next_change_at) in
+    Alcotest.(check int) "inclusive cutoff retains row" 2 before_expiry.series.total.call_count;
+    let expired = observe admitted.next_change_at in
+    Alcotest.(check int) "oldest row expires without a write" 1 expired.series.total.call_count;
+    Alcotest.(check int) "remaining failure retained" 1 expired.series.total.failure_count)
+;;
+
+let test_missing_store_observation_has_only_bucket_deadline () =
+  with_masc_root (fun ~masc_root ->
+    let until = utc_midnight +. 1800.0 in
+    let window = sliding_exn ~span_s:hour ~until ~width:S.Hour ~offset:0 in
+    match Tool_metrics_store.observe_series ~masc_root ~window () with
+    | Error error -> Alcotest.failf "missing store: %s" error
+    | Ok observed ->
+        Alcotest.(check int) "missing store has no samples" 0 observed.series.total.call_count;
+        Alcotest.(check (float 0.0)) "only actual bucket-label deadline"
+          (S.next_change_at window ~oldest_sample:None ~next_sample:None) observed.next_change_at;
+        Alcotest.(check bool) "observation creates no database" false
+          (Sys.file_exists (Tool_metrics_store.database_path ~masc_root)))
+;;
+
 let () =
   Alcotest.run
     "Tool_metrics_series"
@@ -754,6 +831,15 @@ let () =
             "read_series without a database is empty and creates none"
             `Quick
             test_read_series_without_a_database_is_empty_and_creates_none
+        ; Alcotest.test_case "deadline follows actual filtered rows without new writes" `Quick
+            test_snapshot_deadlines_follow_actual_filtered_rows
+        ; Alcotest.test_case "missing store has only a bucket deadline" `Quick
+            test_missing_store_observation_has_only_bucket_deadline
         ] )
+    ; ( "quiet deadlines"
+      , [ Alcotest.test_case "empty hour/day windows change emitted bucket labels" `Quick
+            test_empty_window_deadline_changes_real_bucket_labels
+        ; Alcotest.test_case "expiry preserves inclusive lower bound" `Quick
+            test_row_expiry_respects_inclusive_lower_bound ] )
     ]
 ;;

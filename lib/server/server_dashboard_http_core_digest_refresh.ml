@@ -1,111 +1,75 @@
-(** Operator-digest proactive refresh loop, extracted from
-    [server_dashboard_http_core.ml] (godfile decomp). Pairs with the
-    snapshot refresh sibling (#17358).
+module Owner = Server_dashboard_operator_digest_observation
 
-    [start_operator_digest_refresh_loop] wires the cached
-    [operator_digest] surface into [Proactive_refresh.start] with the
-    dashboard runtime's offloaded-readonly compute path. Each cycle
-    invokes [Operator_control.digest_json ~actor:"dashboard"
-    ~target_type:"workspace"] under a fresh [Operator_control.context],
-    decorates the result with [with_projection_diagnostics] /
-    [with_operator_digest_metadata], and republishes via
-    [broadcast_operator_digest].
+module Completions = Server_workspace_invalidation.Make (struct
+  type t = unit
+  let compare () () = 0
+end)
 
-    Pure helper move (no callback injection). All cross-module
-    references reach existing siblings or top-level libraries — no
-    sibling -> parent dependency.
-
-    The digest path differs from the snapshot path in two ways:
-    - [Operator_control.digest_json] returns [Result.t]; an [Error]
-      becomes [invalid_arg ...] inside the compute closure (preserves
-      the original behavior where Proactive_refresh sees an exception).
-    - [warm_delay_s = 150.0] (vs 120.0 for snapshot) — digest is
-      heavier and starts later so it does not race the snapshot's
-      first warm-up. *)
-
-include Server_dashboard_http_cache
-(* Constructors for [dashboard_compute_mode] (Inline_shared,
-   Offloaded_readonly) live in the runtime-support sibling.  Same
-   constructor-scope trap as the snapshot sibling (#17358): even
-   though the parent re-exports the type as a transparent alias, the
-   constructors are scoped to the defining module and need an [open]
-   here. *)
-open Server_dashboard_http_runtime_support
-
-module Core_runtime = Server_dashboard_http_core_runtime
-module Core_cache = Server_dashboard_http_core_cache
-module Core_operator = Server_dashboard_http_core_operator
-module Core_operator_query = Server_dashboard_http_core_operator_query
-
-let start_operator_digest_refresh_loop ~state ~sw ~clock ~broadcast_digest =
-  let workspace_scope = Mcp_server.workspace_scope state in
-  let config = workspace_scope.config in
-  let proc_mgr = state.Mcp_server.proc_mgr in
-  let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
-  let compute () =
-    mark_cached_surface_attempt Core_operator.operator_digest_cache;
-    let started_at = Unix.gettimeofday () in
-    try
-      Core_runtime.run_dashboard_compute
-        ~mode:Offloaded_readonly
-        ?net
-        ?mono_clock
-        ~sw
-        ~clock
-        ~config
-        ~kind:Pool_work.Cpu ~name:__FUNCTION__
-        (fun ~config ~sw ->
-           let ctx : _ Operator_control.context =
-             { config
-             ; agent_name = "dashboard"
-             ; sw
-             ; clock
-             ; proc_mgr
-             ; net = None
-             ; delegated_dispatch = None
-             ; mcp_session_id = None
-             }
-           in
-           match
-             Operator_control.digest_json ~actor:"dashboard" ~target_type:"workspace" ctx
-           with
-           | Ok json ->
-             Core_cache.with_projection_diagnostics
-               ~surface:"operator_digest"
-               ~started_at
-               ~extra:(Core_operator.operator_snapshot_extra ())
-               json
-           | Error err ->
-             invalid_arg ("server_dashboard_http_core: operator digest failed: " ^ err))
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      mark_cached_surface_error Core_operator.operator_digest_cache exn;
-      raise exn
-  in
-  Proactive_refresh.start
-    ~sw
-    ~clock
-    ~config:
-      { (Proactive_refresh.default_config
-           ~label:"operator_digest"
-           ~interval_s:Core_operator.operator_refresh_interval_s)
+let start_operator_digest_refresh_loop ~state ~sw ~clock ~mono_clock =
+  Server_observation_refresh.install_scoped ~state ~sw ~install:(fun ~scope ~sw ~is_current ->
+    let owner = Owner.owner_for_scope ~state scope in
+    let target = Sse.Scoped_runtime_observers (Sse.observer_scope
+        ~runtime_authority:(Sse.runtime_authority_exn ~base_path:scope.config.base_path)
+        ~instance_id:(Server_observer_scope.instance_id scope)) in
+    let query = Server_dashboard_http_core_operator_query.operator_digest_default_query () in
+    let changes = Eio.Stream.create 1 in
+    let changes_mu = Stdlib.Mutex.create () in
+    let changed () = Stdlib.Mutex.protect changes_mu (fun () ->
+      if Eio.Stream.is_empty changes then Eio.Stream.add changes ()) in
+    let enqueue = ref (fun () -> ()) in
+    let retain_if_superseded publication = match Owner.publication_status owner publication with
+      | Owner.Superseded -> !enqueue ()
+      | Current | Source_pending | Retired -> () in
+    let publish () =
+      let publication = Owner.publication owner in
+      match Owner.publication_status owner publication with
+      | Owner.Current ->
+          let encoded = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+            let payload = Server_dashboard_http_core_operator_query.with_operator_digest_metadata
+                ~config:scope.config ~query publication.json in
+            Sse_wire.encode_json (`Assoc ["type", `String "operator_digest";
+              "payload", payload; "ts_unix", `Float (Time_compat.now ())])) in
+          if is_current () && Owner.publication_is_current owner publication then
+            Sse.broadcast_encoded_to_with_receipts target
+              ~on_fanout:(fun _ -> ()) ~on_committed:(fun _ -> ()) encoded
+          else retain_if_superseded publication
+      | Superseded -> !enqueue ()
+      | Source_pending | Retired -> () in
+    let publish_owed = Completions.start ~sw ~mono_clock ~publish:(fun () -> publish ()) in
+    enqueue := (fun () -> publish_owed ());
+    let unsubscribe = Owner.subscribe_completed owner (fun completion ->
+      (match completion with
+       | Owner.Installed Default_request | Failed Default_request | Invalidated -> changed ()
+       | Installed Source_read | Failed Source_read -> ());
+      publish_owed ()) in
+    Eio.Switch.on_release sw unsubscribe;
+    Server_observation_input.subscribe ~sw ~base_path:scope.config.base_path
+      ~observer_instance_id:(Server_observer_scope.instance_id scope) (fun input ->
+        if Server_observation_refresh.affects Operator_digest input then Owner.invalidate owner);
+    publish_owed ();
+    let latest_attempt = ref None in
+    let interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s in
+    Proactive_refresh.start_on_change_or_deadline ~sw ~clock ~changes
+      ~config:{(Proactive_refresh.default_config ~label:"operator_digest" ~interval_s) with
+        timeout_s = interval_s *. 0.8; warm_delay_s = 0.0; change_read_spacing_s = interval_s;
+        on_failure = Some (fun failure ->
+          if is_current () then Option.iter (fun attempt ->
+            ignore (Owner.publish_failure_message attempt (Proactive_refresh.failure_message failure)))
+            !latest_attempt)}
+      ~compute:(fun () ->
+        let attempt = Owner.begin_attempt owner ~origin:Source_read in
+        latest_attempt := Some attempt;
+        try
+          let observation = match Server_dashboard_operator_digest_compute.observe_current
+              ~state ~scope ~sw ~clock ~query ~actor:"dashboard" ~target_type:"workspace" () with
+            | Ok observation -> observation
+            | Error detail -> invalid_arg ("Operator Digest source read: " ^ detail) in
+          (* The reusable worker samples the deadline before on_result. *)
+          ignore (Owner.publish_observation attempt observation);
+          observation
         with
-        timeout_s = Core_operator.operator_refresh_interval_s *. 0.8
-      ; on_failure =
-          Some
-            (fun failure ->
-              mark_cached_surface_error_message
-                Core_operator.operator_digest_cache
-                (Proactive_refresh.failure_message failure))
-      ; warm_delay_s = 150.0
-      }
-    ~compute
-    ~on_result:(fun json ->
-      mark_cached_surface_success Core_operator.operator_digest_cache json;
-      broadcast_digest
-        (cached_surface_json Core_operator.operator_digest_cache
-         |> Core_operator_query.with_operator_digest_metadata
-              ~config
-              ~query:(Core_operator_query.operator_digest_default_query ())))
-;;
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> ignore (Owner.publish_failure_message attempt (Printexc.to_string exn)); raise exn)
+      ~on_result:(fun observation -> match observation.Dashboard_projection_read.completeness with
+        | Complete -> () | Partial detail -> raise (Dashboard_projection_read.Incomplete_read detail))
+      ~next_deadline:(fun _ -> Owner.next_deadline_unix owner))

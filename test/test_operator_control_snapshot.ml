@@ -755,10 +755,129 @@ let test_recent_tool_names_ignore_blank_rows () =
        [ ""; turn_row [ "only" ]; "   " ])
 ;;
 
+let test_current_nested_reads_observe_actual_commits_inside_the_request_ttl () =
+  Eio_main.run (fun env ->
+    ensure_fs env;
+    let previous_clock = Eio_context.get_clock_opt () in
+    let mock_clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time mock_clock (Unix.gettimeofday ());
+    let clock = (mock_clock :> float Eio.Time.clock_ty Eio.Resource.t) in
+    Time_compat.set_clock clock;
+    let dir = temp_dir () in
+    let config = Workspace.default_config dir in
+    let meta = health_projection_meta ~total_turns:1 in
+    let entry = Keeper_registry.register_offline ~base_path:dir meta.name meta in
+    Fun.protect ~finally:(fun () ->
+      ignore (Keeper_registry.unregister_exact entry);
+      (match previous_clock with Some clock -> Time_compat.set_clock clock | None -> Time_compat.clear_clock ());
+      cleanup_dir dir) (fun () ->
+      ignore (Workspace.init config ~agent_name:None);
+      let audit read_policy = Operator_control_snapshot_tool_audit.tool_audit_json ~read_policy config meta in
+      let tools json = Yojson.Safe.Util.(json |> member "recent_tool_names" |> to_list) in
+      let initial = audit Dashboard_projection_read.Reuse in
+      Alcotest.(check bool) "the original source has no recorded tools" true (tools initial = []);
+      Keeper_types_support.append_keeper_metrics config meta.name
+        (Yojson.Safe.from_string (turn_row ["actual-committed-tool"]));
+      Alcotest.(check bool) "Reuse still holds the earlier request observation" true
+        (tools (audit Reuse) = []);
+      Alcotest.(check bool) "Current reads the actual metrics commit inside the unchanged TTL" true
+        (tools (audit Current) = [`String "actual-committed-tool"]);
+      let trust read_policy = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
+          ~read_policy ~config ~meta in
+      let initial_trust = trust Reuse in
+      Keeper_registry.set_failure_reason ~base_path:dir meta.name (Some (Keeper_registry.Exception "actual registry failure"));
+      Alcotest.(check bool) "ordinary compact trust read still holds its prior observation" true
+        (trust Reuse = initial_trust);
+      let current = trust Current in
+      Alcotest.(check string) "Current observes the exact registry failure cause" "runtime_blocker"
+        Yojson.Safe.Util.(current |> member "latest_causal_event" |> member "kind" |> to_string)))
+;;
+
+let test_current_snapshot_retains_inventory_failure_and_confirmation_deadline () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let dir = temp_dir () in
+  let previous_runtime = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore previous_runtime;
+    cleanup_dir dir) (fun () ->
+    init_runtime_default_for_snapshot dir;
+    let config = Workspace.default_config dir in
+    ignore (Workspace.init config ~agent_name:None);
+    let meta = { (health_projection_meta ~total_turns:1) with paused = true } in
+    (match Keeper_meta_store.replace_snapshot config meta with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    let ledger = Keeper_board_attention_candidate.ledger_path ~base_path:dir ~keeper_name:meta.name in
+    (* The real store refuses a directory at its private JSONL file path. *)
+    Fs_compat.mkdir_p ledger;
+    let now = Time_compat.now () in
+    let expires_at = Masc_domain.iso8601_of_unix_seconds (now +. 60.0) in
+    let confirmation : Operator_pending_confirm.pending_confirm = {
+      confirm_token = "snapshot-read-confirmation"; trace_id = "snapshot-read-trace";
+      actor = "another-operator"; action_type = "keeper_message"; target_type = "keeper";
+      target_id = Some meta.name; payload = `Assoc []; delegated_tool = "masc_keeper_delegate";
+      created_at = Masc_domain.iso8601_of_unix_seconds now; expires_at = Some expires_at} in
+    (match Operator_pending_confirm.write_pending_confirms config [confirmation] with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    let expected_deadline = match Masc_domain.parse_iso8601_opt expires_at with
+      | Some at -> at | None -> Alcotest.fail "invalid fixture expiry" in
+    let ctx = operator_ctx env sw config "owner" in
+    let read read_policy = Operator_control.snapshot_read ~read_policy ~view:"summary"
+        ~include_messages:false ~include_summary_fields:false ~lightweight_summary:true ctx in
+    (match read Dashboard_projection_read.Reuse with
+     | Dashboard_projection_cache.Cached_json _ -> ()
+     | Observed _ -> Alcotest.fail "request-cache read invented Current authority");
+    let current () = match read Dashboard_projection_read.Current with
+      | Dashboard_projection_cache.Observed observation -> observation
+      | Cached_json _ -> Alcotest.fail "Current returned request-cache bytes" in
+    let failed = current () in
+    (match failed.completeness with
+     | Partial _ -> () | Complete -> Alcotest.fail "unavailable quarantine ledger settled as complete");
+    Alcotest.(check (option (float 0.0))) "hidden confirmation retains its exact read expiry"
+      (Some expected_deadline) failed.next_deadline_unix;
+    let open Yojson.Safe.Util in
+    Alcotest.(check bool) "readable Keeper remains in the partial body" true
+      (failed.json |> member "keepers" |> member "items" |> to_list
+       |> List.exists (fun row -> row |> member "name" = `String meta.name));
+    Alcotest.(check string) "actual private-ledger failure remains visible" "candidate_ledger_unavailable"
+      (failed.json |> member "board_attention_quarantines" |> member "errors" |> to_list
+       |> List.hd |> member "kind" |> to_string);
+    (* Raw repair sends no source signal; this unit checks the actual Current
+       API, while the next worker unit owns scheduling the failure retry. *)
+    Unix.rmdir ledger;
+    (match (current ()).completeness with
+     | Complete -> ()
+     | Partial detail -> Alcotest.failf "repaired Current stayed partial: %s" detail);
+    let backlog_path = Workspace.backlog_path config in
+    let backlog_bytes = Fs_compat.load_file backlog_path in
+    let save path bytes = match Fs_compat.save_file_atomic path bytes with
+      | Ok () -> () | Error detail -> Alcotest.fail detail in
+    save backlog_path "{not-json";
+    save (backlog_path ^ ".last-good") "{not-json";
+    let failed = current () in
+    (match failed.completeness with
+     | Partial _ -> () | Complete -> Alcotest.fail "unavailable backlog settled as complete");
+    Alcotest.(check bool) "workspace retains its actual unavailable task observation" false
+      (failed.json |> member "workspace" |> member "task_ownership" |> member "available" |> to_bool);
+    Alcotest.(check bool) "backlog failure keeps the independently readable Keeper" true
+      (failed.json |> member "keepers" |> member "items" |> to_list
+       |> List.exists (fun row -> row |> member "name" = `String meta.name));
+    save backlog_path backlog_bytes;
+    match (current ()).completeness with
+    | Complete -> ()
+    | Partial detail -> Alcotest.failf "repaired backlog stayed partial: %s" detail)
+;;
+
 let () =
   Alcotest.run
     "operator_control_snapshot"
     [
+      ( "Current source reads"
+      , [Alcotest.test_case "nested reads observe actual commits inside request TTL" `Quick
+           test_current_nested_reads_observe_actual_commits_inside_the_request_ttl
+        ; Alcotest.test_case "Current retains actual inventory failure and confirmation expiry" `Quick
+            test_current_snapshot_retains_inventory_failure_and_confirmation_deadline] );
       ( "runtime status"
       , [
           Alcotest.test_case

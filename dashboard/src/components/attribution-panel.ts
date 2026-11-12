@@ -246,7 +246,7 @@ export function AttributionPanel() {
 
     const load = async (signal: AbortSignal) => {
       try {
-        const [s, r] = await Promise.allSettled([
+        const [summaryRead, recentRead] = await Promise.allSettled([
           fetchAttributionSummary({ signal: signal }),
           fetchAttributionRecent(
             {
@@ -257,14 +257,14 @@ export function AttributionPanel() {
           ),
         ])
         if (cancelled || signal.aborted) return
-        if (s.status === 'rejected' || r.status === 'rejected') {
+        if (summaryRead.status === 'rejected' || recentRead.status === 'rejected') {
           throw selectObservationReadFailure([
-            s.status === 'rejected' ? s.reason : null,
-            r.status === 'rejected' ? r.reason : null,
-          ])
+            summaryRead.status === 'rejected' ? summaryRead.reason : null,
+            recentRead.status === 'rejected' ? recentRead.reason : null,
+          ]) ?? new Error('attribution fetch failed')
         }
-        summary.value = s.value
-        recent.value = r.value.events
+        summary.value = summaryRead.value
+        recent.value = recentRead.value.events
         error.value = null
       } catch (e) {
         if (cancelled || signal.aborted || isAbortError(e)) return
@@ -275,7 +275,12 @@ export function AttributionPanel() {
       }
     }
 
-    const dispose = setupObservationRefresh(load, { topics: ['attribution'], resetRead: () => { summary.value = null; recent.value = []; error.value = null; loading.value = true } })
+    const dispose = setupObservationRefresh(load, { topics: ['attribution'], resetRead: () => {
+      summary.value = null
+      recent.value = []
+      error.value = null
+      loading.value = true
+    } })
     return () => {
       cancelled = true
       dispose()

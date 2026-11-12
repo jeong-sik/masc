@@ -1027,6 +1027,11 @@ let run_keepalive_unified_turn
        | Ok Keeper_board_attention_worker.No_completed_partition ->
          ()
        | Ok
+           (Keeper_board_attention_worker.Completed_partitions_held
+              { held = (_ : int); continuation_wake = _ }) ->
+         (* The walk logged each held completion as an error. *)
+         ()
+       | Ok
            (Keeper_board_attention_worker.Partition_settled
               { candidate_id; continuation_wake = _ }) ->
          Log.Keeper.info
@@ -1951,6 +1956,9 @@ let run_heartbeat_loop
            else
              Keeper_keepalive_signal.interruptible_sleep
                ~cadence_sleeping
+               ~on_cadence_sleeping_changed:(fun () ->
+                 Dashboard_observation_commit.written ~base_path:ctx.config.base_path
+                   ~scope:`Workspace `Telemetry)
                ~wake_policy
                ~interrupt_when
                ~clock:ctx.clock

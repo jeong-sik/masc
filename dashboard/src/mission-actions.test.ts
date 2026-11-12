@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiMocks = vi.hoisted(() => ({
   fetchDashboardMission: vi.fn(),
@@ -11,6 +11,8 @@ vi.mock('./api/dashboard', () => apiMocks)
 vi.mock('./api/dashboard-mission', () => apiMocks)
 
 const missionPayload = {
+  observer_instance_id: 'mission-test-A',
+  projection_diagnostics: { read_completeness: 'complete', read_error: null },
   generated_at: '2026-03-25T09:00:00Z',
   summary: {
     workspace_health: 'ok',
@@ -40,6 +42,7 @@ const missionPayload = {
 }
 
 const initializingMissionPayload = {
+  observer_instance_id: 'mission-test-A',
   generated_at: '2026-03-25T09:05:00Z',
   summary: {
     workspace_health: 'initializing',
@@ -54,7 +57,17 @@ const initializingMissionPayload = {
   internal_signals: [],
 }
 
-afterEach(() => {
+beforeEach(async () => {
+  const { acceptedExecutionWorkspace } = await import('./execution-workspace-authority')
+  acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'process', workspaceRoot: '/A',
+    connectionGeneration: 1, observerInstanceId: 'mission-test-A' })
+})
+
+afterEach(async () => {
+  const { acceptedExecutionWorkspace } = await import('./execution-workspace-authority')
+  acceptedExecutionWorkspace.value = null
+  const { refreshMissionSnapshot } = await import('./mission-actions')
+  await refreshMissionSnapshot({ force: true })
   vi.clearAllMocks()
   vi.resetModules()
 })
@@ -76,7 +89,7 @@ describe('refreshMissionSnapshot', () => {
           agent_briefs?: unknown[]
         }
       | null
-    expect(apiMocks.fetchDashboardMission).toHaveBeenCalledWith()
+    expect(apiMocks.fetchDashboardMission).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) })
     expect(mission?.summary?.workspace_health).toBe('ok')
     expect(mission?.agent_briefs).toHaveLength(1)
   })

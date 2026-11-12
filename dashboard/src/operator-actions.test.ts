@@ -7,6 +7,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchOperatorSnapshot: vi.fn(),
   fetchOperatorDigest: vi.fn(),
 }))
+let releaseDigestOwner: (() => Promise<void>) | undefined
 
 // Only the transport calls are mocked. extractApiError / ApiRequestError stay
 // real so the error-path tests exercise the actual summary shape the
@@ -25,8 +26,16 @@ vi.mock('./sse-store', () => ({ registerOperatorRefresh: vi.fn() }))
 // counter) is reset by re-importing a fresh module instance per test instead
 // of exposing test backdoors from the implementation.
 async function load() {
+  const { acceptedExecutionWorkspace } = await import('./execution-workspace-authority')
+  acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'process', workspaceRoot: '/workspace',
+    connectionGeneration: 1, observerInstanceId: 'operator-test' })
   const mod = await import('./operator-actions')
   const signals = await import('./operator-signals')
+  releaseDigestOwner = async () => {
+    acceptedExecutionWorkspace.value = null
+    await mod.refreshOperatorWorkspaceDigest({ force: true })
+    await mod.refreshOperatorSnapshot({ force: true })
+  }
   return { mod, signals }
 }
 
@@ -55,6 +64,10 @@ const previewResult: OperatorActionResult = {
 }
 
 const validSnapshot = {
+  observer_instance_id: 'operator-test',
+  projection_diagnostics: { read_completeness: 'complete', read_error: null },
+  query: { actor: 'vincent', view: null, effective_actor: 'vincent', effective_view: 'full',
+    include_messages: true, include_keepers: true, lightweight_summary: false, default_summary_request: false },
   pending_confirm_envelope: {
     items: [],
     summary: {
@@ -69,13 +82,22 @@ const validSnapshot = {
   },
 }
 
+function validDigest(extra: Record<string, unknown> = {}) {
+  return { observer_instance_id: 'operator-test', target_type: 'workspace',
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
+    query: { actor: 'vincent', target_type: 'workspace', effective_target_type: 'workspace',
+      target_id: null, include_workers: null, default_namespace_request: false }, ...extra }
+}
+
 beforeEach(() => {
   apiMocks.runOperatorAction.mockResolvedValue(executedResult)
   apiMocks.fetchOperatorSnapshot.mockResolvedValue(validSnapshot)
-  apiMocks.fetchOperatorDigest.mockResolvedValue({})
+  apiMocks.fetchOperatorDigest.mockResolvedValue(validDigest())
 })
 
-afterEach(() => {
+afterEach(async () => {
+  await releaseDigestOwner?.()
+  releaseDigestOwner = undefined
   vi.useRealTimers()
   vi.clearAllMocks()
   vi.resetModules()
@@ -203,7 +225,7 @@ describe('background action projections', () => {
     expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledTimes(1)
     expect(signals.operatorActionBusy.value).toBe(false)
     finishSnapshot(validSnapshot)
-    finishDigest({})
+    finishDigest(validDigest())
     await Promise.all([mod.refreshOperatorSnapshot(), mod.refreshOperatorWorkspaceDigest()])
   })
 })
@@ -220,7 +242,7 @@ it('queues one post-action read behind both held projection reads', async () => 
   expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(1)
   expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledTimes(1)
   finishSnapshot({ ...validSnapshot, root: { project: 'stale' } })
-  finishDigest({})
+  finishDigest(validDigest())
   await pending
   await vi.waitFor(() => {
     expect(apiMocks.fetchOperatorSnapshot).toHaveBeenCalledTimes(2)
@@ -311,13 +333,13 @@ describe('refreshOperatorSnapshot', () => {
 })
 
 describe('refreshOperatorWorkspaceDigest', () => {
-  it('fetches the namespace digest and stores the normalized result', async () => {
-    apiMocks.fetchOperatorDigest.mockResolvedValue({ trace_id: 'digest-1' })
+  it('fetches the workspace digest and stores the normalized result', async () => {
+    apiMocks.fetchOperatorDigest.mockResolvedValue(validDigest({ trace_id: 'digest-1' }))
     const { mod, signals } = await load()
 
     await mod.refreshOperatorWorkspaceDigest()
 
-    expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledExactlyOnceWith({ targetType: 'namespace' })
+    expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledExactlyOnceWith({ targetType: 'workspace', signal: expect.any(AbortSignal) })
     expect(signals.operatorWorkspaceDigest.value).not.toBeNull()
     expect(signals.operatorDigestLoading.value).toBe(false)
   })
@@ -356,7 +378,7 @@ describe('refreshOperatorWorkspaceDigest', () => {
     const second = mod.refreshOperatorWorkspaceDigest()
     expect(apiMocks.fetchOperatorDigest).toHaveBeenCalledTimes(1)
 
-    resolveFetch!({})
+    resolveFetch!(validDigest())
     await Promise.all([first, second])
     expect(signals.operatorWorkspaceDigest.value).not.toBeNull()
   })

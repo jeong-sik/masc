@@ -3,11 +3,10 @@
 
     The world is the curator's ledger of shared claims and conflicts, and the
     briefing written from it. The server answers
-    [GET /api/v1/dashboard/workspace-memory-inventory] from a 60 s cache and
-    sends no change signal, so the screen asks on a clock: after each answer
-    {!complete} sets the time before which {!start} gives out no read. The
-    caller asks from its per-iteration launcher while the Memory overview or
-    the Keepers memory/age views draw it, so there is no timer of its own.
+    [GET /api/v1/dashboard/workspace-memory-inventory]. The first observation,
+    a surface arrival, explicit revalidation and a World_memory announcement
+    owe a read. A successful read settles that debt unless another change
+    arrived while it ran. Only failed reads schedule a retry.
 
     Nothing here does I/O. The state is a value; every transition returns a new
     one. *)
@@ -29,17 +28,22 @@ type t
 
 val initial : t
 
-val start : now:float -> t -> (t * request) option
-(** The read to launch now. [None] while a read is in flight, and while [now] is
-    before the time the last answer set. The value already held stays in view
-    while the new read runs. *)
+val changed : t -> t
+(** An inventory change or revalidation owes a read, including one follow-up
+    after a read already in flight. *)
 
-val complete : next_read_at:float -> t -> request -> (inventory, string) result -> t
+val start : now:float -> t -> (t * request) option
+(** The owed read to launch now. [None] when settled, while a read is in flight,
+    or before a failed read's retry is due. The value already held stays in
+    view while the new read runs. *)
+
+val complete :
+  retry_s:float -> max_retry_s:float -> now:float ->
+  t -> request -> (inventory, string) result -> t
 (** An answer for a request this state has moved past is dropped whole. Any
-    other answer, failed or not, keeps the next read from starting before
-    [next_read_at]. A failure after a read keeps the last inventory and says
-    the read failed; a failure with nothing read before it holds no inventory.
-    The error text becomes [Request_failed]. *)
+    current success settles the read, preserving a change that arrived in
+    flight. A failure retries using the shared owed-read backoff, keeps the
+    last inventory if any, and carries its text as [Request_failed]. *)
 
 val suspend : t -> t
 (** The workspace is no longer confirmed: retire the read in flight, whose
@@ -50,7 +54,7 @@ val suspend : t -> t
     read after the workspace is confirmed again is not held back. *)
 
 val clear : t -> t
-(** Another workspace: nothing read and no wait. A reply to a request made
+(** Another workspace: nothing read and an initial read owed. A reply to a request made
     before this still cannot settle the next one. *)
 
 (** What the screen has to answer for. [Loaded] with a [refresh_failure] is the

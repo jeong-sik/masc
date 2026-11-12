@@ -667,6 +667,10 @@ let register_validated_client ~kind ?on_disconnect ?observer_instance_id
   match registration with
   | None -> Error (Registration_stale { session_id })
   | Some (evicted, client, previous) ->
+    (* The registry and its transport observation commit precede disconnect
+       callbacks, which may suspend or re-enter another registration. *)
+    sync_transport_snapshot ();
+    Transport_metrics.record_sse_lifecycle_change ();
     (match evicted with
      | Some (sid, client) ->
          Transport_metrics.inc_sse_client_evicted ();
@@ -677,7 +681,6 @@ let register_validated_client ~kind ?on_disconnect ?observer_instance_id
          invoke_disconnect_hook_for sid client
      | None ->
          ());
-    sync_transport_snapshot ();
     Ok (client, previous, Option.map fst evicted)
 
 let register_with_client ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
@@ -744,10 +747,11 @@ let unregister session_id =
   in
   match removed with
   | Some client ->
-    (* Wake the removed connection before recording the transport snapshot.
-       Its close may re-enter [unregister_if_current], which is now a no-op. *)
-    invoke_disconnect_hook_for session_id client;
-    sync_transport_snapshot ()
+    sync_transport_snapshot ();
+    Transport_metrics.record_sse_lifecycle_change ();
+    (* The removed logical inventory is observable before a disconnect hook
+       can suspend. Its close may re-enter [unregister_if_current], a no-op. *)
+    invoke_disconnect_hook_for session_id client
   | None -> ()
 
 (** Unregister only if the current client matches the given client_id.
@@ -778,9 +782,10 @@ let unregister_if_current session_id client_id =
   in
   match removed with
   | Some client ->
+    sync_transport_snapshot ();
+    Transport_metrics.record_sse_lifecycle_change ();
     (* See [unregister] for the hook ordering rationale. *)
-    invoke_disconnect_hook_for session_id client;
-    sync_transport_snapshot ()
+    invoke_disconnect_hook_for session_id client
   | None -> ()
 
 (** Check if client exists *)
@@ -950,6 +955,37 @@ let external_matches_target target (subscriber : external_subscriber) =
   | Scoped_runtime_observers scope ->
       Option.exists (equal_observer_scope scope) subscriber.observer_scope
   | All | Observers | Presence_only -> true
+
+let publication_inputs : external_subscriber list Atomic.t = Atomic.make []
+
+let subscribe_publication_inputs ~runtime_authority ?observer_instance_id callback =
+  let observer_scope = Option.map
+      (fun instance_id -> observer_scope ~runtime_authority ~instance_id)
+      observer_instance_id in
+  let subscription =
+    { sub_id = "runtime-publication-input"; runtime_authority = Some runtime_authority
+    ; observer_scope; callback; is_alive = (fun () -> true) } in
+  Lockfree_atomic.update publication_inputs (fun current -> subscription :: current);
+  fun () -> Lockfree_atomic.update publication_inputs
+    (List.filter (fun current -> current != subscription))
+;;
+
+let notify_publication_inputs ~target event =
+  match target with
+  | Presence_only | Runtime_presence _ -> ()
+  | All | Observers | Runtime_observers _ | Scoped_runtime_observers _ ->
+    let visibility = event_visibility event.ext_payload in
+    List.iter (fun subscription ->
+      if external_matches_target target subscription
+         && visibility_permitted None visibility then
+        match subscription.callback event with
+        | () -> ()
+        | exception exn ->
+          (match Log.Server.warn "runtime publication input failed: %s"
+             (Printexc.exn_slot_name exn) with
+           | () -> ()
+           | exception _ -> ())) (Atomic.get publication_inputs)
+;;
 
 let notify_external_subscribers ~target event =
   let t0 = Time_compat.now () in
@@ -1209,6 +1245,9 @@ let broadcast_deliver ~buffer ~notify_external ~event_type ~on_fanout ~on_commit
      enqueued or unregistered. Later metrics and external subscribers do not
      undo that publication. The callback is a non-yielding receipt. *)
   Option.iter (fun notify -> notify delivery.event_id) on_committed;
+  notify_publication_inputs ~target
+    { ext_frame = delivery.frame; ext_payload = delivery.payload
+    ; ext_event_id = delivery.event_id; ext_emitted_at = delivery.emitted_at };
   (* Record broadcast duration for transport observability *)
   let elapsed = Time_compat.now () -. t0 in
   Transport_metrics.observe_broadcast_duration ~target:target_label elapsed;
@@ -1385,6 +1424,7 @@ let close_all_clients () =
       })
   in
   sync_transport_snapshot ();
+  if sessions <> [] then Transport_metrics.record_sse_lifecycle_change ();
   List.length sessions
 
 (** Remove clients idle longer than max_age_s (default 30 min).

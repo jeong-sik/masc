@@ -17,6 +17,11 @@ vi.mock('../api/dashboard', async original => ({
   fetchRuntimeProviders: api.fetchRuntimeProviders,
   fetchDashboardRuntimeProbe: api.fetchDashboardRuntimeProbe,
 }))
+vi.mock('../api/model-metrics-stream', async original => {
+  const { modelMetricsSubscriptionFixture } = await import('../lib/model-metrics.test-fixture')
+  return { ...await original<typeof import('../api/model-metrics-stream')>(),
+    subscribeModelMetricsStream: modelMetricsSubscriptionFixture((window, bucket, options) => api.fetchRuntimeModelMetrics(window, bucket, options)) }
+})
 import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { reloadRuntimeCatalog, resetRuntimeCatalog, runtimeCatalogState } from '../lib/runtime-catalog-resource'
 import { OverviewRuntimeStats } from './overview/runtime-stats'
@@ -24,6 +29,8 @@ import { ConfigResolutionPanel } from './tools/config-resolution-panel'
 let epoch = 0, generation = 0
 function workspace(name: string | null) {
   expect(hydrateExecutionSnapshot({
+    observer_instance_id: 'runtime-observation-audit',
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
     execution_publication_epoch: `observation-audit-${epoch}`,
     execution_publication_generation: ++generation,
     status: { project: 'audit', workspace_root: name === null ? null : `/audit/${name}` },

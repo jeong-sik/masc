@@ -13,7 +13,7 @@
 (test
  (name test_published_artifact)
  (modules test_published_artifact)
- (libraries masc masc_test_deps masc.server masc.auth masc.masc_core masc.masc_tool_blob_store
+ (libraries masc masc.sse_event masc_test_deps masc.server masc.auth masc.masc_core masc.masc_tool_blob_store
   masc.fs_compat masc.tool_types masc.masc_types
   alcotest bigstringaf eio eio_main eio.unix unix yojson httpun))
 
@@ -25,7 +25,7 @@
 (test
  (name test_published_artifact_checks)
  (modules test_published_artifact_checks)
- (libraries masc masc.masc_core masc.fs_compat
+ (libraries masc masc.sse_event masc.masc_core masc.fs_compat
   alcotest eio eio_main eio.unix unix yojson))
 
 (test

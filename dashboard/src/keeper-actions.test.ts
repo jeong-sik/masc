@@ -1,3 +1,4 @@
+import { publishDashboardObservationChange, publishDashboardObservationRecovery } from './lib/observation-refresh'
 import { operationDeliveryProvenance } from './keeper-delivery-provenance'
 import { toolCallDeliveryProvenance } from './test-support/tool-delivery-provenance'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -40,7 +41,11 @@ vi.mock('./api/keeper', () => ({
   streamKeeperMessage,
 }))
 vi.mock('./api/dashboard', () => ({ fetchKeeperToolCalls }))
-vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard, shellAuthSummary }))
+vi.mock('./store', async () => {
+  const { signal } = await import('@preact/signals')
+  return { invalidateDashboardCache, refreshDashboard, shellAuthSummary,
+    executionWorkspaceAuthority: signal(null), executionWorkspaceRevision: signal(0) }
+})
 
 import {
   _resetActiveKeeperStreamsForTests,
@@ -86,6 +91,7 @@ import {
   upsertTrackedKeeperChatOperation,
 } from './keeper-chat-operations-local'
 import { ApiRequestError, clearStoredToken, setStoredToken } from './api/core'
+import { acceptedExecutionWorkspace } from './execution-workspace-authority'
 import {
   lookupToolCallOutput,
   resetToolCallOutputs,
@@ -105,10 +111,19 @@ beforeEach(() => {
   fetchKeeperChatHistoryPage.mockReset().mockResolvedValue({ messages: [], nextCursor: null, hasMore: false })
   clearStoredToken()
   shellAuthSummary.value = { effective_role: 'admin' }
+  // Chat operations are read only for an accepted workspace that names its Observer instance.
+  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace',
+    connectionGeneration: 1, observerInstanceId: 'fixture-instance' }
   fetchKeeperToolCalls.mockReset()
   fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
   resetToolCallOutputs()
   _resetKeeperStreamBuffersForTests()
+})
+
+afterEach(() => {
+  _resetChatHydrationForTests()
+  acceptedExecutionWorkspace.value = null
+  vi.useRealTimers()
 })
 
 describe('progressive first conversation read', () => {
@@ -710,6 +725,45 @@ describe('sendKeeperThreadMessage operation stream', () => {
     cancelKeeperChatOperation.mockReset()
     fetchKeeperChatOperation.mockReset()
     fetchKeeperChatHistory.mockReset()
+  })
+
+  it('observes a queued original operation on state changes without resending it', async () => {
+    vi.useFakeTimers()
+    let operationId = ''
+    let emit!: (event: KeeperChatStreamEvent) => void
+    let finish!: (outcome: { terminal: boolean }) => void
+    streamKeeperMessage.mockImplementation(async (_name: string, _message: string, opts: {
+      operationId: string; onEvent: (event: KeeperChatStreamEvent) => void;
+    }) => {
+      operationId = opts.operationId
+      emit = opts.onEvent
+      emit({ type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: operationId, state: 'Queued', queued_count: 1 } })
+      return new Promise(resolve => { finish = resolve })
+    })
+    fetchKeeperChatOperation.mockImplementation(async (_keeper: string, id: string) => ({
+      operationId: id, state: { kind: 'queued' },
+    }))
+    const send = sendKeeperThreadMessage('echo', 'original input')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(1)
+    expect(keeperThreads.value.echo?.some(entry => entry.role === 'assistant' && entry.delivery === 'queued')).toBe(true)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(1)
+    fetchKeeperChatOperation.mockResolvedValue({ operationId, state: { kind: 'running', startedAt: 2 } })
+    publishDashboardObservationChange({ topic: 'chat_operation', keeperName: 'echo', operationId })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(2)
+    expect(keeperThreads.value.echo?.some(entry => entry.role === 'assistant' && entry.delivery === 'sending')).toBe(true)
+    emit({ type: 'TEXT_MESSAGE_CONTENT', delta: 'finished original' })
+    emit({ type: 'RUN_FINISHED' })
+    finish({ terminal: true })
+    await send
+    publishDashboardObservationRecovery()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(2)
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(1)
+    expect(keeperThreads.value.echo?.some(entry => entry.text === 'finished original' && entry.delivery === 'delivered')).toBe(true)
   })
 
   function completeStream(
@@ -1809,6 +1863,27 @@ describe('restored chat operation outcome', () => {
     keeperThreads.value = {}
     await hydrateTrackedKeeperChatOperations('echo')
     expect(requiredFixture(keeperThreads.value.echo).find(candidate => candidate.role === 'assistant')?.rawText).toBe('partial authored answer')
+  })
+
+  it('recovers a failed original receipt read without a new send or periodic reads after success', async () => {
+    vi.useFakeTimers()
+    storeDraft()
+    streamKeeperMessage.mockClear()
+    fetchKeeperChatOperation.mockRejectedValueOnce(new Error('temporary HTTP 503'))
+      .mockResolvedValue({ operationId: 'restored-op', state: { kind: 'succeeded', completedAt: 2, outcomeRef: 'receipt' } })
+    await hydrateTrackedKeeperChatOperations('echo')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(1)
+    expect(trackedKeeperChatOperationsForKeeper('echo')[0]?.operationId).toBe('restored-op')
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(2)
+    expect(keeperThreads.value.echo?.find(entry => entry.role === 'assistant')).toMatchObject({
+      delivery: 'delivered', rawText: 'partial authored answer', responseState: { phase: 'terminal' },
+    })
+    expect(streamKeeperMessage).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(fetchKeeperChatOperation).toHaveBeenCalledTimes(2)
   })
 
   it('retains observed content and tracking when operation lookup temporarily fails', async () => {

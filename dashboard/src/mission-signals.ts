@@ -1,7 +1,5 @@
 import { signal, computed, type ReadonlySignal } from '@preact/signals'
-import { MISSION_BRIEFING_POLL_DELAY_MS } from './config/constants'
 import type {
-  DashboardMissionBriefingResponse,
   DashboardMissionResponse,
   DashboardMissionAgentBrief,
   DashboardMissionKeeperBrief,
@@ -19,25 +17,4 @@ export const missionKeeperBriefs: ReadonlySignal<DashboardMissionKeeperBrief[]> 
 )
 export const missionLoading = signal(false)
 export const missionError = signal<string | null>(null)
-export const missionBriefing = signal<DashboardMissionBriefingResponse | null>(null)
-export const missionBriefingLoading = signal(false)
-export const missionBriefingError = signal<string | null>(null)
-let missionBriefingPollTimer: number | null = null
-
-export function clearMissionBriefingPoll(): void {
-  if (missionBriefingPollTimer !== null) {
-    window.clearTimeout(missionBriefingPollTimer)
-    missionBriefingPollTimer = null
-  }
-}
-
-export function scheduleMissionBriefingPoll(
-  refreshFn: (force: boolean) => Promise<void>,
-  delayMs = MISSION_BRIEFING_POLL_DELAY_MS,
-): void {
-  if (missionBriefingPollTimer !== null) return
-  missionBriefingPollTimer = window.setTimeout(() => {
-    missionBriefingPollTimer = null
-    void refreshFn(false)
-  }, delayMs)
-}
+export const missionInitializing = signal(false)

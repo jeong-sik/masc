@@ -673,6 +673,7 @@ let fd_accountant_snapshot_json () =
 let cache_close_counts_json (closed : Llm_provider.Http_client.cache_close_counts) =
   `Assoc
     [ "request_failed", `Int closed.request_failed
+    ; "request_not_delivered", `Int closed.request_not_delivered
     ; "not_persistent", `Int closed.not_persistent
     ; "body_not_drained", `Int closed.body_not_drained
     ; "transport_ended", `Int closed.transport_ended

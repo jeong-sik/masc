@@ -45,4 +45,15 @@ describe('authenticated SSE framing', () => {
     expect(await result).toEqual(expect.objectContaining({ message: 'observer stream idle timeout' }))
     expect(cancel).toHaveBeenCalledOnce()
   })
+
+  it('releases a cancelled quiet stream even if the source cancellation never settles', async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => {}))
+    const body = new ReadableStream<Uint8Array>({ cancel })
+    const controller = new AbortController()
+    const result = readSse(body, vi.fn(), { signal: controller.signal }).then(() => null, error => error)
+    controller.abort()
+    expect(await result).toEqual(expect.objectContaining({ name: 'AbortError' }))
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
+  })
 })

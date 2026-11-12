@@ -111,7 +111,8 @@ async function flushUi(): Promise<void> {
  * module registry, so it is seeded in the registry that the panel is loaded from. */
 async function importPanel() {
   const { acceptedExecutionWorkspace } = await import('../execution-workspace-authority')
-  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace', connectionGeneration: 1 }
+  acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace', connectionGeneration: 1,
+    observerInstanceId: 'fixture-instance' }
   return import('./tool-quality-panel')
 }
 
@@ -119,6 +120,9 @@ async function loadPanel(mocks?: {
   fetchToolQuality?: (opts?: { n?: number; windowHours?: number; signal?: AbortSignal }) => Promise<ToolQualityResponse>
 }) {
   vi.resetModules()
+  const { acceptedExecutionWorkspace } = await import('../execution-workspace-authority')
+  acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/fixture',
+    connectionGeneration: 0, observerInstanceId: 'fixture-instance' })
   if (mocks?.fetchToolQuality) {
     vi.doMock('../api/dashboard', async () => {
       const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
@@ -135,8 +139,11 @@ describe('ToolQualityPanel', () => {
   let container: HTMLDivElement
   const originalVisibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers()
+    const { acceptedExecutionWorkspace } = await import('../execution-workspace-authority')
+    acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/fixture',
+      connectionGeneration: 0, observerInstanceId: 'fixture-instance' })
     container = document.createElement('div')
     document.body.appendChild(container)
     Object.defineProperty(document, 'visibilityState', {
@@ -159,7 +166,7 @@ describe('ToolQualityPanel', () => {
     }
   })
 
-  it('fetches tool quality once on mount and renders the summary', async () => {
+  it('refreshes tool quality after scoped observation events', async () => {
     const fetchToolQuality = vi.fn().mockResolvedValue(payload)
     const { ToolQualityPanel } = await loadPanel({ fetchToolQuality })
 
@@ -173,6 +180,14 @@ describe('ToolQualityPanel', () => {
     expect(container.textContent).toContain('95.5%')
     expect(container.textContent).toContain('최근 24시간 기준 집계')
     expect(container.textContent).toContain('Window Calls')
+
+    vi.advanceTimersByTime(30_000)
+    expect(fetchToolQuality).toHaveBeenCalledTimes(1)
+    const { publishDashboardObservationChange } = await import('../lib/observation-refresh')
+    publishDashboardObservationChange({ topic: 'tool_metrics' })
+    await flushUi()
+
+    expect(fetchToolQuality).toHaveBeenCalledTimes(2)
   })
 
   it('renders typed deferred observations without treating them as failures', async () => {

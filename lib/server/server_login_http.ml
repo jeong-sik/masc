@@ -333,11 +333,19 @@ let assign_keeper (t : R.t) request reqd =
 ;;
 
 (* A turn starts the client of the person's account on a home under their
-   namespace, so its gate gives the namespace too. *)
+   namespace, inside the scope of the token that authenticated the request,
+   so its gate gives both. *)
 let keeper_turn t ~env ~base_path request reqd =
-  as_gated t ~gate:Auth_preview.keeper_owner_person request reqd (fun (_ : Authz_state.t) person ->
-    with_body reqd (fun body ->
-      respond reqd (Server_preview_keeper_turn.run ~env ~person:(person_of t person) ~base_path ~body)))
+  as_gated
+    t
+    ~gate:Auth_preview.keeper_turn_caller
+    request
+    reqd
+    (fun (_ : Authz_state.t) { Auth_preview.person; pat } ->
+       with_body reqd (fun body ->
+         respond
+           reqd
+           (Server_preview_keeper_turn.run ~env ~person:(person_of t person) ~pat ~base_path ~body)))
 ;;
 
 (* ---- the MCP endpoint of a person (plan S1b-1) ---- *)

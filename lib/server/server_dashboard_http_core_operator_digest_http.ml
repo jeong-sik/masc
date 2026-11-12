@@ -1,176 +1,79 @@
-(** Operator-digest HTTP handler, extracted from
-    [server_dashboard_http_core.ml] (godfile decomp).
-
-    [operator_digest_http_json] is the GET handler backing the
-    operator dashboard's digest surface. Two paths:
-
-    1. **Default workspace request** (no actor, no target_id, no
-       include_workers override, target_type omitted or [workspace]) — serves the cached
-       [operator_digest_cache] surface immediately (0ms), decorated
-       with the default query metadata.
-
-    2. **Parameterized request** — computes on-demand behind the SWR
-       cache ([standard_cache_ttl_s]). Cache key is the colon-delimited
-       concatenation of
-       [actor | effective_target_type | target_id | include_workers]
-       so distinct query shapes are cached independently. The compute
-       closure runs [Operator_control.digest_json] inside
-       [run_dashboard_compute ~mode:Offloaded_readonly] and decorates
-       with [with_projection_diagnostics ~surface:"operator_digest"].
-       Validation errors are surfaced as `{error, message, generated_at}`
-       JSON. The compute has no window of its own:
-       [Dashboard_cache.get_or_compute_with_timeout] bounds it at
-       [dashboard_request_timeout_s], and a compute that runs past that
-       raises inside the cache rather than returning a value the cache
-       would store. What the caller gets then depends on what the key
-       holds, and the two cases exclude each other:
-
-       - the key holds an entry (fresh, stale or dead): the cache puts
-         it back and answers with it, and the repeated-timeout circuit
-         is cleared rather than advanced. A key that keeps timing out
-         keeps answering with an older digest.
-       - the key holds nothing: the timeout envelope is the answer, it
-         is not cached, and three of those inside the circuit's window
-         open the circuit.
-
-       That envelope carries [computation_timeout], which the HTTP
-       layer answers as 504. The compute's own window used to answer
-       200 with a body saying it had timed out.
-
-    Pure helper move (no callback injection). All references reach
-    existing siblings or top-level libraries. *)
-
-let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
-
-open Server_utils
-open Server_auth
-include Server_dashboard_http_cache
-
-module Core_runtime = Server_dashboard_http_core_runtime
+module Owner = Server_dashboard_operator_digest_observation
 module Core_cache = Server_dashboard_http_core_cache
-module Core_operator = Server_dashboard_http_core_operator
-module Core_operator_query = Server_dashboard_http_core_operator_query
+module Query = Server_dashboard_http_core_operator_query
 
-(* Constructors for [dashboard_compute_mode] (Inline_shared,
-   Offloaded_readonly) — same constructor-scope trap as the refresh
-   loop siblings (#17358/#17384). *)
-open Server_dashboard_http_runtime_support
+let attest_instance (scope : Mcp_server.workspace_scope) = function
+  | `Assoc fields -> `Assoc (("observer_instance_id", `String (Server_observer_scope.instance_id scope))
+      :: List.remove_assoc "observer_instance_id" fields)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as json -> json
+
+let default_json ~state ~scope ~owner ~sw ~clock =
+  let cached () = if Owner.has_terminal_answer owner
+    then Some (Owner.publication owner).json else None in
+  match cached () with
+  | Some json -> json
+  | None ->
+      let key = "operator_digest:default:" ^ Owner.cache_identity owner in
+      let attempted = ref None in
+      let fail exn = Option.iter (fun attempt ->
+        ignore (Owner.publish_failure_message attempt (Printexc.to_string exn))) !attempted in
+      let work = Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+        let attempt = Owner.begin_attempt owner ~origin:Default_request in
+        attempted := Some attempt;
+        try
+          let observation = match Server_dashboard_operator_digest_compute.observe_current
+              ~state ~scope ~sw ~clock ~query:(Query.operator_digest_default_query ())
+              ~actor:"dashboard" ~target_type:"workspace" () with
+            | Ok observation -> observation
+            | Error detail -> invalid_arg ("Operator Digest default read: " ^ detail) in
+          ignore (Owner.publish_observation attempt observation);
+          Dashboard_projection_read.json_with_read_diagnostics observation
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> fail exn; raise exn) in
+      let json = Dashboard_cache.get_or_compute_with_timeout key
+          ~ttl:Core_cache.standard_cache_ttl_s ~clock
+          ~timeout_sec:Core_cache.dashboard_request_timeout_s work in
+      if Dashboard_cache.is_timeout_envelope json then (
+        fail (Dashboard_cache.Compute_timeout {key; role = Dashboard_cache.Compute_owner});
+        attest_instance scope json)
+      else match cached () with Some current -> current | None -> attest_instance scope json
 
 let operator_digest_http_json ~state ~sw ~clock request =
-  let workspace_scope = Mcp_server.workspace_scope state in
-  let config = workspace_scope.config in
-  let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
-  let actor =
-    dashboard_actor_for_request ~base_path:config.base_path request
-  in
-  let target_type = query_param request "target_type" in
-  let target_id = query_param request "target_id" in
-  let include_workers =
-    match query_param request "include_workers" with
+  (* Entry capture precedes auth resolution, cache waiting and actual compute. *)
+  let scope = Mcp_server.workspace_scope state in
+  let owner = Owner.owner_for_scope ~state scope in
+  let config = scope.config in
+  let actor = Server_auth.dashboard_actor_for_request ~base_path:config.base_path request in
+  let target_type = Server_utils.query_param request "target_type" in
+  let target_id = Server_utils.query_param request "target_id" in
+  let include_workers = match Server_utils.query_param request "include_workers" with
     | Some ("0" | "false" | "no") -> Some false
     | Some ("1" | "true" | "yes") -> Some true
-    | _ -> None
-  in
-  let workspace_target_type value =
-    match Option.map (fun raw -> String.lowercase_ascii (String.trim raw)) value with
+    | Some _ | None -> None in
+  let workspace_target_type = function
     | None -> true
     | Some raw ->
-      (match Operator_action_constants.target_type_of_string raw with
-       | Some Operator_action_constants.Workspace -> true
-       | Some Operator_action_constants.Keeper
-       | Some Operator_action_constants.Goal
-       | None -> false)
-  in
-  let effective_target_type =
-    Option.value
-      ~default:Operator_action_constants.workspace_target_type
-      target_type
-  in
-  let default_namespace_request =
-    actor = None
-    && target_id = None
-    && include_workers = None
-    && workspace_target_type target_type
-  in
-  let query =
-    Core_operator_query.operator_digest_query_json
-      ~actor
-      ~target_type
-      ~target_id
-      ~include_workers
-      ~effective_target_type
-      ~default_namespace_request
-  in
-  if default_namespace_request
-  then
-    Ok
-      (cached_surface_json Core_operator.operator_digest_cache
-       |> Core_operator_query.with_operator_digest_metadata ~config ~query)
-  else (
-    let started_at = Unix.gettimeofday () in
-    let cache_key =
-      Printf.sprintf
-        "operator_digest:param:%s|%s|%s|%s|%s"
-        (Option.value ~default:"" actor)
-        effective_target_type
-        (Option.value ~default:"" target_id)
-        (match include_workers with
-         | None -> ""
-         | Some true -> "1"
-         | Some false -> "0")
-        ""
-    in
-    let compute () =
-      let json =
-        Core_runtime.run_dashboard_compute
-          ~mode:Offloaded_readonly
-          ?net
-          ?mono_clock
-          ~sw
-          ~clock
-          ~config
-          ~kind:Pool_work.Cpu ~name:__FUNCTION__
-          (fun ~config ~sw ->
-             let ctx : _ Operator_control.context =
-               { config
-               ; agent_name = Option.value ~default:"dashboard" actor
-               ; sw
-               ; clock
-               ; proc_mgr = state.Mcp_server.proc_mgr
-               ; net = state.Mcp_server.net
-               ; delegated_dispatch = None
-               ; mcp_session_id = None
-               }
-             in
-             match
-               Operator_control.digest_json
-                 ?actor
-                 ~target_type:effective_target_type
-                 ?target_id
-                 ?include_workers
-                 ctx
-             with
-             | Ok json -> json
-             | Error err ->
-               `Assoc
-                 [ "error", `String "validation_error"
-                 ; "message", `String err
-                 ; "generated_at", `String (Masc_domain.now_iso ())
-                 ])
-      in
-      Core_cache.with_projection_diagnostics
-        ~surface:"operator_digest"
-        ~started_at
-        ~extra:
-          [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json () ]
-        json
-    in
-    Ok
-      (Dashboard_cache.get_or_compute_with_timeout
-         cache_key
-         ~ttl:standard_cache_ttl_s
-         ~clock
-         ~timeout_sec:Core_cache.dashboard_request_timeout_s
-         (Pool_work.cpu ~name:__FUNCTION__ compute)
-       |> Core_operator_query.with_operator_digest_metadata ~config ~query))
-;;
+        (match Operator_action_constants.target_type_of_string (String.lowercase_ascii (String.trim raw)) with
+         | Some Operator_action_constants.Workspace -> true
+         | Some (Keeper | Goal) | None -> false) in
+  let effective_target_type = Option.value
+      ~default:Operator_action_constants.workspace_target_type target_type in
+  let default_namespace_request = actor = None && target_id = None && include_workers = None
+      && workspace_target_type target_type in
+  let query = Query.operator_digest_query_json ~actor ~target_type ~target_id ~include_workers
+      ~effective_target_type ~default_namespace_request in
+  let result =
+    if default_namespace_request then default_json ~state ~scope ~owner ~sw ~clock
+    else
+      let key = "operator_digest:param:" ^ Yojson.Safe.to_string (`List [
+        `String (Owner.cache_identity owner); query]) in
+      Dashboard_cache.get_or_compute_with_timeout key ~ttl:Core_cache.standard_cache_ttl_s
+        ~clock ~timeout_sec:Core_cache.dashboard_request_timeout_s
+        (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+          match Server_dashboard_operator_digest_compute.observe_current ~state ~scope ~sw ~clock
+              ~query ?actor ~target_type:effective_target_type ?target_id ?include_workers () with
+          | Ok observation -> Dashboard_projection_read.json_with_read_diagnostics observation
+          | Error detail -> `Assoc ["error", `String "validation_error";
+              "message", `String detail; "generated_at", `String (Masc_domain.now_iso ())])) in
+  Ok (result |> Query.with_operator_digest_metadata ~config ~query |> attest_instance scope)

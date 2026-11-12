@@ -16,19 +16,28 @@ let wake candidate ~base_path =
 
 let claim ~base_path ~worker_epoch candidate =
   let keeper_name = candidate.Candidate.keeper_name in
-  let* _ = Partition.ensure_roots ~base_path ~keeper_name [candidate] in
-  let* partitions = Partition.load ~base_path ~keeper_name in
-  match List.find_opt (fun (p : Partition.t) ->
-    String.equal p.candidate_id candidate.candidate_id
-    && match p.state with
-       | Partition.Ready -> true
-       | Partition.Running _ | Partition.Completed _ | Partition.Settled _
-       | Partition.Abandoned _ | Partition.Blocked _ -> false) partitions with
-  | None -> Ok None
-  | Some partition ->
-    Partition.claim_ready_exact ~now:(Time_compat.now ()) ~worker_epoch
-      ~base_path ~keeper_name ~partition_id:partition.partition_id
-      ~generation:partition.generation
+  (* The event holds the candidate value it recorded. The worker can judge
+     and settle that candidate, and prune its settled receipt, before this
+     claim runs. A root made from the held value would then be judged a
+     second time, and the consumed candidate refuses that judgment. The
+     restoration rereads the candidate under the partition lock; a changed
+     candidate stays with the worker. *)
+  let* restoration = Partition.ensure_current_roots ~base_path ~keeper_name [candidate] in
+  match restoration with
+  | Partition.Candidates_changed -> Ok None
+  | Partition.Roots_ensured (_ : int) ->
+    let* partitions = Partition.load ~base_path ~keeper_name in
+    (match List.find_opt (fun (p : Partition.t) ->
+       String.equal p.candidate_id candidate.candidate_id
+       && match p.state with
+          | Partition.Ready -> true
+          | Partition.Running _ | Partition.Completed _ | Partition.Settled _
+          | Partition.Abandoned _ | Partition.Blocked _ -> false) partitions with
+     | None -> Ok None
+     | Some partition ->
+       Partition.claim_ready_exact ~now:(Time_compat.now ()) ~worker_epoch
+         ~base_path ~keeper_name ~partition_id:partition.partition_id
+         ~generation:partition.generation)
 
 let confirm_completed ~base_path (transition : Partition.exact_transition) =
   match transition.write_outcome with
@@ -60,10 +69,17 @@ let complete ~base_path ~worker_epoch candidate partition (judged : Jev.judged) 
     Ok ()
   | Keeper_board_attention_judgment.Not_relevant, _
   | Keeper_board_attention_judgment.Relevant, Ok Candidate.Skip_non_discoverable_comment ->
-    let* _ = Candidate.apply_judgment_and_deliver ~base_path
+    let* delivery = Candidate.apply_judgment_and_deliver ~base_path
       ~keeper_name:candidate.keeper_name ~candidate_id:candidate.candidate_id ~judgment in
-    let* _ = Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition:completed in
-    Ok ()
+    (match delivery with
+     | Candidate.Delivered (_ : Candidate.candidate) | Candidate.Candidate_absent ->
+       let* _ = Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition:completed in
+       Ok ()
+     | Candidate.Judgment_conflict
+         { recorded = (_ : Candidate.judgment); offered = (_ : Candidate.judgment) } ->
+       (* Nothing was delivered for this judgment, so the root stays
+          Completed. The caller reports the error and wakes the owner. *)
+       Error (Candidate.judgment_conflict_detail ~candidate_id:candidate.candidate_id))
   | Keeper_board_attention_judgment.Relevant, Error detail ->
     Error ("Board comment parent unavailable: " ^ detail)
 

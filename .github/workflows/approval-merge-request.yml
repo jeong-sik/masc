@@ -25,19 +25,51 @@ permissions: {}
 # request of a PR matters. Cancelling an older request makes its workflow_run
 # "cancelled", which the consumer skips -- no artifact download, no API calls.
 # The group is per PR (never repository-wide), so another PR's final approval
-# is never replaced. "closed" keeps its own group: it is the only path that
-# starts the main build for a merged PR and must not be cancelled by a later
-# review event.
+# is never replaced. "closed" keeps its own per-PR group: it is the only path
+# that starts the main build for a merged PR and must not be cancelled by a
+# later review event, of that PR or of a stack sibling.
+#
+# The layers of a native stack share one group. The worker resolves any
+# layer's request to the stack's top pull request and reads the whole stack
+# (top_pull and reservation_reads in scripts/review/approval-auto-merge.py),
+# so the requests of one stack are interchangeable and only the newest one
+# matters. Per layer, one push of the 84-layer stack #51256 left 83 requests
+# queued here and 91 worker runs behind them (2026-11-12T05:03Z), each worker
+# run reading every layer from the shared hourly API budget. GitHub adds
+# `stack` to the pull_request payload of a stack member; a payload without it
+# keeps the per-PR group.
+#
+# An event the job below skips gets a group of its own ("noop"). A run whose
+# only job is skipped still enters its group, and its worker run skips, so in
+# the "live" group it would cancel a pending request and leave nothing to wake
+# the worker: a title edit on one layer would drop another layer's final
+# approval. The middle condition here repeats the job's `if` for events other
+# than "closed"; change the two together.
 concurrency:
-  group: approval-merge-request-${{ github.event.pull_request.number }}-${{ github.event.action == 'closed' && 'closed' || 'live' }}
+  group: >-
+    approval-merge-request-${{
+    github.event.action == 'closed'
+    && format('{0}-closed', github.event.pull_request.number)
+    || (github.event.action == 'converted_to_draft'
+    || (github.event.pull_request.draft == false
+    && github.event.pull_request.state == 'open'
+    && (github.event_name != 'pull_request_target'
+    || github.event.action != 'edited'
+    || github.event.changes.base != null)))
+    && format('{0}-live', github.event.pull_request.stack.number
+    && format('stack-{0}', github.event.pull_request.stack.number)
+    || github.event.pull_request.number)
+    || format('{0}-noop', github.event.pull_request.number)
+    }}
   cancel-in-progress: true
 
 jobs:
   request:
     # Kept: a draft conversion (the worker drops the reservation), and any
     # event on an open, ready pull request. A closed pull request is kept
-    # only when it merged (the worker wakes the main build and deletes the
-    # branch). An edit is kept only when it changed the base branch; title
+    # only when it merged (the worker wakes the main build, deletes the
+    # branch and closes the linked issues). An edit is kept only when it
+    # changed the base branch; title
     # and body edits change nothing the worker reads. A draft's reviews are
     # read again when it is marked ready.
     if: >-
@@ -52,6 +84,9 @@ jobs:
       - name: Record the PR number as data
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Logged only. It shows which concurrency group this run took: with
+          # no stack number in the payload the group above stays per PR.
+          STACK_NUMBER: ${{ github.event.pull_request.stack.number }}
           REQUEST_FILE: ${{ runner.temp }}/approval-merge-request/request.json
         run: |
           python3 - <<'PY'
@@ -61,6 +96,7 @@ jobs:
           path = pathlib.Path(os.environ['REQUEST_FILE'])
           path.parent.mkdir(parents=True, exist_ok=True)
           path.write_text(json.dumps({'pr': number}))
+          print('payload stack number:', os.environ['STACK_NUMBER'] or 'none')
           PY
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

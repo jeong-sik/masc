@@ -409,7 +409,7 @@ async function reportRejectedCredential(
   managedRevision: number,
 ): Promise<void> {
   const listener = rejectedCredentialListener
-  if (response.status !== 401 || listener === null) return
+  if (init.signal?.aborted || response.status !== 401 || listener === null) return
   const token = sentBearerToken(init.headers)
   if (token === null || token !== owner.token) return
   // A later 401 header makes an earlier shell validation stale even while
@@ -422,6 +422,7 @@ async function reportRejectedCredential(
   // Cloned before this function first awaits, so the caller still owns the
   // original body.
   const info = await errorResponseInfoFromResponse(response.clone())
+  if (init.signal?.aborted) return
   const managedStillCurrent = managed && owner.token === dashboardBearerToken()
     && owner.tokenRevision === currentStoredTokenRevision()
     && getStoredTokenMeta()?.source === 'dev' && owner.actor === currentDashboardActor()
@@ -456,15 +457,17 @@ async function credentialedFetch(path: string, init: CredentialedRequestInit): P
     if (replayed !== null) return replayed
   }
   const response = await fetch(path, requestInit)
+  if (requestInit.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
   // Kept before the caller sees the 401, so a poll that starts after it is
   // answered from the table instead of sending the same request again.
   if (credentialless !== null && response.status === 401) {
     try {
-      await noteRefusal(credentialless, response.clone())
+      await noteRefusal(credentialless, response.clone(), requestInit.signal ?? undefined)
     } catch (err) {
       if (!isAbortError(err)) console.warn('[dashboard-auth] credentialless refusal was not kept', err)
     }
   }
+  if (requestInit.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
   if (reportCredentialRefusal) void reportRejectedCredential(requestInit, response, owner, managed, managedRevision).catch(err => {
     console.warn('[dashboard-auth] rejected credential listener failed', err)
   })
@@ -970,18 +973,20 @@ export type GetOptions = AbortableRequestOptions & {
   timeoutMs?: number
   includeActorHeader?: boolean
   extraHeaders?: Record<string, string>
+  /** Keep the GET deadline and caller abort connected through JSON consumption; defaults to true. */
   consumeWithinTimeout?: boolean
   reportCredentialRefusal?: boolean
 }
 
 async function getRequest<T>(path: string, opts: GetOptions, anonymous: boolean): Promise<T> {
+  const consumeWithinTimeout = opts.consumeWithinTimeout ?? true
   const consume = async (res: Response): Promise<T> => {
     if (!res.ok) {
       const warmPayload = await bootstrapWarmPayload(path, res.clone())
       if (warmPayload !== null) return warmPayload as T
-      throw await apiRequestErrorFromResponse('GET', path, res, opts.consumeWithinTimeout)
+      throw await apiRequestErrorFromResponse('GET', path, res, consumeWithinTimeout)
     }
-    const data = await parseJsonResponse<T>('GET', path, res, opts.consumeWithinTimeout)
+    const data = await parseJsonResponse<T>('GET', path, res, consumeWithinTimeout)
     if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
       const payload = bootstrapInitializingPayload(path)
       if (payload !== null) return payload as T
@@ -996,7 +1001,7 @@ async function getRequest<T>(path: string, opts: GetOptions, anonymous: boolean)
     reportCredentialRefusal: opts.reportCredentialRefusal,
   }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
-  if (opts.consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
+  if (consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
   return consume(await fetchWithTimeout(path, init, timeoutMs))
 }
 
@@ -1025,20 +1030,21 @@ export async function getWithResponse<T>(
     rejectDuplicateJsonMembers?: boolean
   } = {},
 ): Promise<{ readonly data: T; readonly headers: Headers }> {
+  const consumeWithinTimeout = opts.consumeWithinTimeout ?? true
   const consume = async (res: Response): Promise<{ readonly data: T; readonly headers: Headers }> => {
     if (opts.beforeResponseBody) {
       try { opts.beforeResponseBody(res) }
       catch (reason) {
-        if (opts.consumeWithinTimeout) throw new ResponseHeaderRejected(reason)
+        if (consumeWithinTimeout) throw new ResponseHeaderRejected(reason)
         throw reason
       }
     }
     if (!res.ok) {
       const warmPayload = await bootstrapWarmPayload(path, res.clone())
       if (warmPayload !== null) return { data: warmPayload as T, headers: new Headers() }
-      throw await apiRequestErrorFromResponse('GET', path, res, opts.consumeWithinTimeout, opts.preserveErrorBodyFailure)
+      throw await apiRequestErrorFromResponse('GET', path, res, consumeWithinTimeout, opts.preserveErrorBodyFailure)
     }
-    const data = await parseJsonResponse<T>('GET', path, res, opts.consumeWithinTimeout, opts.rejectDuplicateJsonMembers)
+    const data = await parseJsonResponse<T>('GET', path, res, consumeWithinTimeout, opts.rejectDuplicateJsonMembers)
     if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
       const payload = bootstrapInitializingPayload(path)
       if (payload !== null) return { data: payload as T, headers: new Headers() }
@@ -1052,7 +1058,7 @@ export async function getWithResponse<T>(
     reportCredentialRefusal: opts.reportCredentialRefusal,
   }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
-  if (opts.consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
+  if (consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
   return consume(await fetchWithTimeout(path, init, timeoutMs))
 }
 
@@ -1192,14 +1198,15 @@ export async function runOperatorAction(
   return parseOperatorActionResult(raw)
 }
 
-export function fetchOperatorSnapshot(): Promise<OperatorSnapshot> {
-  return get('/api/v1/operator', { includeActorHeader: false })
+export function fetchOperatorSnapshot(options: AbortableRequestOptions = {}): Promise<OperatorSnapshot> {
+  return get('/api/v1/operator', { includeActorHeader: false, signal: options.signal })
 }
 
 export function fetchOperatorDigest(options: {
-  targetType?: 'namespace' | 'workspace'
+  targetType?: 'workspace'
   targetId?: string
   includeWorkers?: boolean
+  signal?: AbortSignal
 } = {}): Promise<OperatorDigest> {
   const params = new URLSearchParams()
   if (options.targetType) params.set('target_type', options.targetType)
@@ -1208,5 +1215,7 @@ export function fetchOperatorDigest(options: {
   const query = params.toString()
   return get(`/api/v1/operator/digest${query ? `?${query}` : ''}`, {
     includeActorHeader: false,
+    signal: options.signal,
+    consumeWithinTimeout: true,
   })
 }

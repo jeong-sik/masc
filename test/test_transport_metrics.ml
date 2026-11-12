@@ -412,15 +412,17 @@ let test_transport_health_json () =
           (Printf.sprintf "Sse.register failed: %s"
              (Masc.Sse.registration_error_to_string e))
   in
-  ignore
-    (register_exn ~kind:Masc.Sse.Observer "observer-session"
-       ~last_event_id:0);
-  ignore
-    (register_exn ~kind:Masc.Sse.Agent_stream "agent_stream-session"
-       ~last_event_id:0);
-  ignore
-    (register_exn ~kind:Masc.Sse.Presence "presence-session"
-       ~last_event_id:0);
+  let committed_sessions = ref [] in
+  let remove = TM.subscribe_source_changed (fun () ->
+    committed_sessions :=
+      (TM.transport_health_json () |> U.member "sse" |> U.member "sessions_total" |> U.to_int)
+      :: !committed_sessions) in
+  Fun.protect ~finally:remove (fun () ->
+    ignore (register_exn ~kind:Masc.Sse.Observer "observer-session" ~last_event_id:0);
+    ignore (register_exn ~kind:Masc.Sse.Agent_stream "agent_stream-session" ~last_event_id:0);
+    ignore (register_exn ~kind:Masc.Sse.Presence "presence-session" ~last_event_id:0);
+    check (list int) "actual registry commits publish the synchronized session inventory"
+      [3; 2; 1] !committed_sessions);
   TM.set_grpc_active_streams 1;
   TM.set_grpc_subscribers 2;
   Otel_metric_store.set_gauge Otel_metric_store.metric_agent_core_sse_relay_queue_depth 4.0;
@@ -475,7 +477,7 @@ let test_transport_health_json () =
      |> U.to_int);
   check_assoc_keys
     "summary exact keys"
-    [ "primary_path"; "queue_pressure"; "external_fanout_targets" ]
+    [ "primary_path"; "queue_pressure"; "external_fanout_targets"; "source_notification_failures" ]
     summary_json;
   check_assoc_keys
     "grpc exact keys"
@@ -728,6 +730,87 @@ let test_http_protocol_version_follows_opentelemetry () =
   check string "an HTTP/1.1 request" "1.1" (TM.http_protocol_version TM.H1);
   check string "an HTTP/2 request" "2" (TM.http_protocol_version TM.H2)
 
+let test_source_lifecycle_and_mirror_boundary () =
+  let received = ref [] in
+  let remove = TM.subscribe_source_changed (fun () ->
+    received := TM.http_listener_json () :: !received) in
+  Fun.protect ~finally:remove (fun () ->
+    TM.record_http_listener_started ~mode:"h1";
+    check string "committed listener state precedes the notification" "listening"
+      (List.hd !received |> U.member "status" |> U.to_string);
+    (* Ends any accept error an earlier case left on this process's listener. *)
+    TM.record_http_accept ~mode:"h1";
+    let before = List.length !received in
+    let accepted () = TM.http_listener_json () |> U.member "accepted_total" |> U.to_int in
+    let accepted_before = accepted () in
+    TM.record_http_accept ~mode:"h1";
+    check int "a connection on a listening listener is a count, not a source" before
+      (List.length !received);
+    check int "the next read sees the acceptance" (accepted_before + 1) (accepted ());
+    TM.record_http_accept_error ~mode:"h1" ~error:"accept failed";
+    check int "the listener leaving its listening state is a source" (before + 1)
+      (List.length !received);
+    check string "the notification sees the committed accept error" "accept_error"
+      (List.hd !received |> U.member "status" |> U.to_string);
+    TM.record_http_accept_error ~mode:"h1" ~error:"accept failed";
+    check int "the same accept error again is a count, not a source" (before + 1)
+      (List.length !received);
+    TM.record_http_accept ~mode:"h1";
+    check int "the acceptance that ends the error state is a source" (before + 2)
+      (List.length !received);
+    TM.record_http_connection_closed ~mode:"h1";
+    TM.record_http_connection_closed ~mode:"h1";
+    TM.record_http_connection_closed ~mode:"h1";
+    TM.inc_mcp_auth_reject ~endpoint:"/mcp" ~reason:"invalid_token";
+    check int "closed connections and authentication rejects are counts, not sources"
+      (before + 2) (List.length !received);
+    let before = List.length !received in
+    TM.set_sse_sessions ~kind:TM.Observer 0;
+    TM.observe_broadcast_duration 0.001;
+    TM.observe_grpc_heartbeat_latency 0.001;
+    ignore (TM.transport_health_json ());
+    check int "delivery mirrors and explicit reads do not notify" before (List.length !received);
+    let streams = TM.transport_health_json () |> U.member "grpc" |> U.member "active_streams" |> U.to_int in
+    TM.set_grpc_active_streams (streams + 1);
+    check int "a new stream count is a source" (before + 1) (List.length !received);
+    TM.set_grpc_active_streams (streams + 1);
+    check int "maintenance of an unchanged gauge is not a source" (before + 1) (List.length !received);
+    remove (); remove ();
+    TM.set_grpc_active_streams (streams + 2);
+    check int "release is idempotent and removes only this subscriber" (before + 1) (List.length !received))
+;;
+
+let test_https_source_and_listener_failure () =
+  let module Https = Masc.Https_listener_metrics in
+  let received = ref [] in
+  let remove = Https.subscribe_source_changed (fun () -> received := Https.status () :: !received) in
+  let before = Https.json () |> U.member "source_notification_failures" |> U.to_int in
+  let failing = Https.subscribe_source_changed (fun () -> raise Exit) in
+  Fun.protect ~finally:(fun () -> remove (); failing ()) (fun () ->
+    Https.record_started ();
+    check bool "a failed callback preserves the committed listener and next callback" true
+      (!received = [Https.Listening] && Https.status () = Https.Listening);
+    check int "metadata failure is visible without escaping the writer" (before + 1)
+      (Https.json () |> U.member "source_notification_failures" |> U.to_int);
+    ignore (Https.json ());
+    check int "reading HTTPS state cannot feed back" 1 (List.length !received);
+    Https.record_accept ();
+    Https.record_negotiated Https.Alpn_h2;
+    Https.record_handshake_failure ();
+    Https.record_connection_closed ();
+    check int "connections on a listening HTTPS listener are counts, not sources" 1
+      (List.length !received);
+    Https.record_accept_error ~error:"accept failed";
+    check bool "an HTTPS accept error is a source" true
+      (!received = [Https.Accept_error; Https.Listening]);
+    Https.record_accept_error ~error:"accept failed";
+    check int "the same HTTPS accept error again is a count, not a source" 2
+      (List.length !received);
+    remove (); remove ();
+    Https.record_stopped ();
+    check int "normal release removes the HTTPS listener" 2 (List.length !received))
+;;
+
 let () =
   run "Transport_metrics" [
     ("init", [
@@ -789,5 +872,9 @@ let () =
         test_listen_status_bind_failed;
       test_case "listen_status disabled" `Quick
         test_listen_status_disabled;
+    ]);
+    ("source observation", [
+      test_case "actual lifecycle excludes delivery mirrors" `Quick test_source_lifecycle_and_mirror_boundary;
+      test_case "HTTPS preserves commits and exposes callback failure" `Quick test_https_source_and_listener_failure;
     ]);
   ]

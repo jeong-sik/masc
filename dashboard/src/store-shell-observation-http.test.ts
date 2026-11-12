@@ -48,12 +48,13 @@ beforeEach(async () => {
   core = await import('./api/core')
   core.setStoredToken('shell-observation-a', { source: 'manual' })
   store = await import('./store')
-  const confirm = (await import('./lib/runtime-workspace.test-fixture')).confirmRuntimeTestWorkspace
+  const { confirmRuntimeTestWorkspace: confirm, RUNTIME_TEST_OBSERVER_INSTANCE } = await import('./lib/runtime-workspace.test-fixture')
   confirmWorkspace = () => {
     confirm()
     expect(store.executionWorkspaceAuthority.peek()).toEqual({
       epoch: expect.any(String), workspaceRoot: '/fixture/runtime-consumer',
       connectionGeneration: expect.any(Number),
+      observerInstanceId: RUNTIME_TEST_OBSERVER_INSTANCE,
     })
   }
 })

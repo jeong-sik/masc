@@ -9,6 +9,7 @@
  (flags
   (:standard -w +4 -w +33 -w +37))
  (libraries
+  masc.lockfree_atomic
   unix
   threads.posix
   yojson

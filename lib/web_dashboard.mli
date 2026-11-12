@@ -63,18 +63,40 @@ type surface_recovery =
 val asset_error_http_status :
   asset_load_error -> [ `Not_found | `Service_unavailable ]
 
+(** What stands for the bytes of one read. Two reads of one file with equal
+    versions gave the same bytes, within the limit {!File_snapshot} names. *)
+type asset_version =
+  | Manifest_sha256 of string
+  (** The SHA-256 a launch manifest or an install receipt gives the file.
+      The read computed the digest of the bytes and found it equal. *)
+  | File_snapshot of Fs_compat.owned_regular_file_snapshot
+  (** An unbound source tree has no manifest: the snapshot of the file the
+      bytes were read from. The limit is the one
+      {!Fs_compat.reload_single_link_regular_file_beneath} documents. *)
+
+val equal_asset_version : asset_version -> asset_version -> bool
+
 type loaded_asset =
   { body : string
-  ; manifest_sha256 : string option
-    (** The SHA-256 a launch manifest or an install receipt gives the file.
-        The read computed the digest of [body] and found it equal. [None]
-        under an unbound source tree, which has no manifest. *)
+  ; version : asset_version
   }
 
 val load_dashboard_asset : string -> (loaded_asset, asset_load_error) result
 (** Load one dashboard-relative file. Provenance-bound launches read only the
     immutable content-addressed snapshot and verify size/SHA-256 before
     returning bytes. Invalid/replaced bindings fail closed. *)
+
+type reloaded_asset =
+  | Unchanged  (** The file has the version the caller holds. Its bytes were not read. *)
+  | Reloaded of loaded_asset
+
+val reload_dashboard_asset
+  : held:asset_version -> string -> (reloaded_asset, asset_load_error) result
+(** {!load_dashboard_asset} for a caller that holds the bytes of an earlier
+    load and their version. Every check of the load runs on every call.
+    Under an unbound source tree the read of the bytes is skipped when the
+    file has the snapshot [held]. A provenance-bound launch and an installed
+    release read and verify the bytes on every call, whatever [held] is. *)
 
 module For_testing : sig
   val surface_status_json :

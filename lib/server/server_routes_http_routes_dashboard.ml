@@ -761,9 +761,6 @@ let add_routes ~sw ~clock router =
              ~state
              ~sw
              ~clock
-             ~broadcast_snapshot:
-               Server_dashboard_http_execution_surfaces
-               .broadcast_operator_snapshot
              req
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
@@ -1003,21 +1000,16 @@ let add_routes ~sw ~clock router =
          handle_dashboard_task_history state req reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/briefing" (fun state req reqd ->
-         let cache_key =
-           Server_dashboard_http_core_cache.dashboard_query_cache_key
-             (Mcp_server.workspace_config state)
-             "briefing"
-             [ ("actor", dashboard_actor_cache_segment state req) ]
-         in
-         respond_cached_read ~request:req ~reqd ~cache_key ~ttl:live_cache_ttl_s
-           (Pool_work.cpu ~name:__FUNCTION__ (fun () -> dashboard_briefing_http_json ~state ~sw ~clock req))
+         let context = mission_http_request ~state req in
+         let json = Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+             dashboard_briefing_for_request ~sw ~clock context) in
+         Http.Response.json_value_on_cpu ~request:req json reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/health-line" (fun state req reqd ->
-         (* Not cached here: a reader reads after a workspace_health push, and
-            the mission it is taken from is the server's own cache. *)
+         let context = mission_http_request ~state req in
          let json =
            Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
-               dashboard_health_line_http_json ~state ~sw ~clock)
+               dashboard_health_line_for_request ~sw ~clock context)
          in
          Http.Response.json_value ~request:req json reqd
        )

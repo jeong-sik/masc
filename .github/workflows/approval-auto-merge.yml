@@ -19,6 +19,8 @@ on:
 permissions:
   actions: write
   contents: write
+  # The worker closes the issues a merged pull request links (#51498).
+  issues: write
   pull-requests: write
 
 # Do not use one repository-wide concurrency group: Actions replaces older

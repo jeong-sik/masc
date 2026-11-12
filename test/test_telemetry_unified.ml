@@ -890,7 +890,7 @@ let test_summary_tool_metric_surface_points_to_raw_metrics () =
     ~finally:Tool_metrics_persist.reset_for_testing
     (fun () ->
       Tool_metrics_persist.enqueue
-        ~masc_root:(masc_root dir)
+        ~base_path:dir
         (Tool_result.Completed
            { retained_artifacts = []; content_blocks = None; tool_name = "tool_read_file"
            ; data = `Null
@@ -1676,6 +1676,40 @@ let test_missing_and_corrupt_trajectory_cache_are_survivable () =
 
 (* ── Runner ──────────────────────────────────────── *)
 
+let test_summary_policy_deadline_and_failed_read_recovery () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_summary_observation" in
+  let root = masc_root dir in
+  Fs_compat.mkdir_p root;
+  let now = 1_800_000_000.0 in
+  let observe now = Telemetry_unified.observe_summary ~now ~masc_root:root () in
+  let empty = observe now in
+  Alcotest.(check (option (float 0.0))) "missing stores have no healthy clock" None
+    empty.next_change_at_unix;
+  Alcotest.(check bool) "missing stores are observed, not a failed read" false empty.read_failed;
+  let since = now -. Telemetry_unified.source_freshness_slo_s Goal_event +. 1.0 in
+  Fs_compat.append_file (Filename.concat root "goal_events.jsonl")
+    (Yojson.Safe.to_string (`Assoc ["ts", `Float since; "event", `String "verified"]) ^ "\n");
+  let fresh = observe now in
+  let deadline = match fresh.next_change_at_unix with
+    | Some at -> at | None -> Alcotest.fail "a real fresh source lost its policy deadline" in
+  Alcotest.(check string) "actual current goal row is fresh" "ok"
+    (json_string_field "health" (source_summary "goal_event" fresh.json));
+  let expired = observe deadline in
+  Alcotest.(check string) "that deadline changes the real summary" "stale"
+    (json_string_field "health" (source_summary "goal_event" expired.json));
+  Alcotest.(check (option (float 0.0))) "stale rows do not create a display-age cadence"
+    None expired.next_change_at_unix;
+  let unreadable = Filename.concat root "telemetry" in
+  Fs_compat.append_file unreadable "a store directory was replaced by a file\n";
+  Alcotest.(check bool) "a real invalid source retains failed-read debt" true
+    (observe deadline).read_failed;
+  Unix.unlink unreadable;
+  Alcotest.(check bool) "a current read consumes recovered source debt" false
+    (observe deadline).read_failed
+;;
+
 let () =
   Alcotest.run "telemetry_unified"
     [
@@ -1733,6 +1767,8 @@ let () =
         ] );
       ( "summary",
         [
+          Alcotest.test_case "source deadline and failed-read recovery" `Quick
+            test_summary_policy_deadline_and_failed_read_recovery;
           Alcotest.test_case "empty" `Quick test_summary_empty;
           Alcotest.test_case "with data" `Quick test_summary_with_data;
           Alcotest.test_case "includes freshness metadata" `Quick

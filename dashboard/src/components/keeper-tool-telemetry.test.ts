@@ -113,6 +113,10 @@ async function loadTelemetry(fetchKeeperToolStats: ReturnType<typeof vi.fn>) {
   vi.doMock('../api/dashboard', () => ({
     fetchKeeperToolStats,
   }))
+  // The panel reads only for a confirmed workspace; confirm it in the module
+  // graph this test is about to import.
+  const { confirmRuntimeTestWorkspace } = await import('../lib/runtime-workspace.test-fixture')
+  confirmRuntimeTestWorkspace()
   return import('./keeper-tool-telemetry')
 }
 

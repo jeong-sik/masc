@@ -1,10 +1,3 @@
-(** See [dashboard_snapshot.mli] for the public contract.
-
-    RFC-0138 Phase 3 implementation.  The refresh fiber populates all
-    four projections ([shell], [tools], [namespace_truth],
-    [telemetry_summary]) and publishes via the lock-free atomic
-    [slot].  Handler wiring lives in [Server_dashboard_snapshot_select]. *)
-
 type tools_projection = {
   base_path : string;
   workspace_path : string;
@@ -14,144 +7,117 @@ type tools_projection = {
   encoded : Http_response_payload.prepared;
 }
 
-let prepare_tools ~(config : Workspace.config) compute =
-  let masc_root = Workspace.masc_dir config in
-  let json = compute () in
-  let raw = Yojson.Safe.to_string json in
-  { base_path = config.base_path; workspace_path = config.workspace_path; masc_root;
-    json; etag = Http_server_eio.Response.weak_etag_value raw;
-    encoded = Http_response_payload.prepare raw }
-
 type tools_result =
   | Tools_pending of Yojson.Safe.t
   | Tools_ready of Yojson.Safe.t
   | Tools_error of Yojson.Safe.t
 
+let make_tools_projection ~(config : Workspace.config) json =
+  let raw = Yojson.Safe.to_string json in
+  { base_path = config.base_path; workspace_path = config.workspace_path;
+    masc_root = Workspace.masc_dir config; json;
+    etag = Http_server_eio.Response.weak_etag_value raw;
+    encoded = Http_response_payload.prepare raw }
+;;
+
 type t = {
   generated_at : float;
+  base_path : string;
+  workspace_path : string;
+  masc_root : string;
   shell : Yojson.Safe.t;
   shell_light : Yojson.Safe.t;
-  (* RFC-0204 section 8.3 ("A"): the [~light] projection of the shell,
-     published alongside [shell] so a [shell?light=true] read serves it
-     wait-free instead of recomputing.  Light is a DIFFERENT shape from
-     [shell] (skips belief/tension evaluation, uses the light agent-count /
-     runtime projections), so it is stored separately rather than derived. *)
   tools : tools_projection;
-  namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
-  activity_events_default : Yojson.Safe.t;
-  (* RFC-0201 Step 1 — see [.mli] for contract. *)
 }
 
-(* Lock-free publish slot.  Holds [None] before the first publish so
-   readers can distinguish "not yet warmed" from a real empty snapshot
-   (the latter never occurs in normal operation). *)
-let slot : t option Atomic.t = Atomic.make None
+type partial = {
+  shell : (Yojson.Safe.t * Yojson.Safe.t) option;
+  tools : tools_projection option;
+  telemetry : Yojson.Safe.t option;
+  latest : t option;
+}
 
-let current () = Atomic.get slot
+type publisher = {
+  config : Workspace.config;
+  masc_root : string;
+  is_current : unit -> bool;
+  state : partial Atomic.t;
+}
+type tools_update = { publisher : publisher; projection : tools_projection }
+let active : publisher option Atomic.t = Atomic.make None
 
-type 'a projection_cache_entry =
-  { refreshed_at : float
-  ; value : 'a
-  }
+let activate ~config ~is_current =
+  let publisher = { config; masc_root = Workspace.masc_dir config; is_current;
+    state = Atomic.make { shell = None; tools = None; telemetry = None; latest = None } } in
+  Atomic.set active (Some publisher);
+  publisher
+;;
 
-type 'a projection_cache = 'a projection_cache_entry option Atomic.t
+let rec retire publisher =
+  let observed = Atomic.get active in
+  match observed with
+  | None -> ()
+  | Some current ->
+      if current == publisher && not (Atomic.compare_and_set active observed None)
+      then retire publisher
+;;
 
-let make_projection_cache () : 'a projection_cache = Atomic.make None
+let read_publisher publisher select =
+  let value = select (Atomic.get publisher.state) in
+  if publisher.is_current () then value else None
+;;
+
+let current () = Option.bind (Atomic.get active)
+    (fun publisher -> read_publisher publisher (fun state -> state.latest))
+
+let publisher_for_config (config : Workspace.config) =
+  match Atomic.get active with
+  | Some publisher when String.equal publisher.config.base_path config.base_path
+      && String.equal publisher.config.workspace_path config.workspace_path
+      && String.equal publisher.masc_root (Workspace.masc_dir config) -> Some publisher
+  | Some _ | None -> None
+;;
+
+let current_for_config config =
+  Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.latest))
+let shell_for_config config =
+  Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.shell))
+let tools_for_config config =
+  Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.tools))
+let telemetry_for_config config =
+  Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.telemetry))
+
+let update publisher change =
+  let generated_at = Unix.gettimeofday () in
+  Lockfree_atomic.update publisher.state (fun previous ->
+    let next = change previous in
+    match next.shell, next.tools, next.telemetry with
+    | Some (shell, shell_light), Some tools, Some telemetry_summary ->
+      {next with latest = Some { generated_at; base_path = publisher.config.base_path;
+        workspace_path = publisher.config.workspace_path; masc_root = publisher.masc_root;
+        shell; shell_light; tools; telemetry_summary }}
+    | (None, _, _) | (_, None, _) | (_, _, None) -> next)
+;;
+
+let publish_shell publisher ~shell ~shell_light =
+  update publisher (fun state -> {state with shell = Some (shell, shell_light)})
+;;
+
+let prepare_tools publisher json =
+  {publisher; projection = make_tools_projection ~config:publisher.config json}
+;;
+
+let publish_tools {publisher; projection = tools} =
+  update publisher (fun state -> {state with tools = Some tools})
+;;
+
+let publish_telemetry publisher json =
+  update publisher (fun state -> {state with telemetry = Some json})
+;;
 
 let should_reuse_projection ~now ~ttl ~refreshed_at =
-  let age = now -. refreshed_at in
-  age >= 0.0 && age < ttl
-;;
-
-let refresh_projection ~now ~ttl ~(cache : 'a projection_cache) compute =
-  let started_at = now () in
-  match Atomic.get cache with
-  | Some entry
-    when should_reuse_projection
-           ~now:started_at
-           ~ttl
-           ~refreshed_at:entry.refreshed_at ->
-    entry.value
-  | previous ->
-    (match compute () with
-     | value ->
-       Atomic.set cache (Some { refreshed_at = now (); value });
-       value
-     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception exn ->
-       (match previous with
-        | Some entry -> entry.value
-        | None -> raise exn))
-;;
-
-type tools_cache_entry =
-  | Pending_tools of tools_projection
-  | Failed_tools of tools_projection
-  | Ready_tools of tools_projection projection_cache_entry
-
-type tools_cache = tools_cache_entry option Atomic.t
-
-let make_tools_cache () : tools_cache = Atomic.make None
-
-let tools_cache_value = function
-  | Pending_tools value | Failed_tools value -> value
-  | Ready_tools entry -> entry.value
-
-let refresh_tools_projection ~now ~ttl ~cache ~config compute =
-  let previous = Atomic.get cache in
-  match previous with
-  | Some (Ready_tools entry)
-    when should_reuse_projection ~now:(now ()) ~ttl ~refreshed_at:entry.refreshed_at ->
-    entry.value
-  | None | Some (Pending_tools _ | Failed_tools _ | Ready_tools _) ->
-    let started_at = now () in
-    let allocated_before = Gc.allocated_bytes () in
-    let retain_or_prepare transient json =
-      match previous, transient with
-      | Some (Ready_tools entry), _ -> entry.value
-      | Some (Pending_tools value), `Pending
-      | Some (Failed_tools value), `Failed -> value
-      | None, _
-      | Some (Pending_tools _), `Failed
-      | Some (Failed_tools _), `Pending ->
-        let value = prepare_tools ~config (fun () -> json) in
-        Atomic.set cache (Some (match transient with
-          | `Pending -> Pending_tools value
-          | `Failed -> Failed_tools value));
-        value
-    in
-    (* Pending/error responses never earn the ready TTL. The existing snapshot
-       cycle retries them, reusing prepared placeholder bytes in the meantime.
-       A failed refresh also cannot renew the last successful timestamp. *)
-    (try
-     let value = match compute () with
-     | Tools_pending json -> retain_or_prepare `Pending json
-     | Tools_error json -> retain_or_prepare `Failed json
-     | Tools_ready json ->
-       let value = prepare_tools ~config (fun () -> json) in
-       Atomic.set cache (Some (Ready_tools { refreshed_at = now (); value }));
-       value
-     in
-     let elapsed_s = now () -. started_at in
-     let allocated_mb = (Gc.allocated_bytes () -. allocated_before) /. 1_048_576.0 in
-     if elapsed_s >= 5.0 || allocated_mb >= 256.0 then
-       Log.Dashboard.warn
-         "dashboard_snapshot heavy refresh: component=tools elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
-         elapsed_s allocated_mb ttl
-     else
-       Log.Dashboard.debug
-         "dashboard_snapshot refreshed: component=tools elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
-         elapsed_s allocated_mb ttl;
-     value
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Dashboard.warn "dashboard_snapshot refresh: tools failed (last good retained): %s"
-         (Printexc.to_string exn);
-       (match previous with
-        | Some entry -> tools_cache_value entry
-        | None -> raise exn))
+  let age = now -. refreshed_at in age >= 0.0 && age < ttl
 ;;
 
 type activity_events_entry =
@@ -209,193 +175,31 @@ let public_activity_events config =
         Activity_graph.recent_json_response config ~raw_limit:1000 ~keep ()))
 ;;
 
-let dashboard_shell_payload_json_ref :
-  (?light:bool -> Workspace.config -> Yojson.Safe.t) ref =
-  ref (fun ?light:_ _config -> `Null)
-
-let register_dashboard_shell_payload_json fn =
-  dashboard_shell_payload_json_ref := fn
-
-let dashboard_tools_http_result_ref =
-  ref (fun (_config : Workspace.config) -> Tools_pending `Null)
-
-let register_dashboard_tools_http_result fn =
-  dashboard_tools_http_result_ref := fn
-
-let namespace_truth_snapshot_callback =
-  ref (fun (_state : Mcp_server.server_state) -> None)
-
-let register_namespace_truth_snapshot fn =
-  namespace_truth_snapshot_callback := fn
-
-(* RFC-0138 Phase 3: refresh loop optionally accepts [~state] so it
-   can populate [namespace_truth] from the cached refs that
-   [Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches]
-   exposes.  That function reads only process-local refs (no PG I/O,
-   no fiber timeouts), so it is safe in a background fiber.  Moving
-   the read here is what allowed Step 4 (#16752) to retire the four
-   [MASC_NAMESPACE_TRUTH_*_TIMEOUT_S] env knobs from the request
-   path. *)
-let refresh_loop
-      ~sw:_ ~clock ~config ?state ~interval_sec ()
-  =
-  let log_failure label exn =
-    Log.Dashboard.warn
-      "dashboard_snapshot refresh: %s failed (last good retained): %s"
-      label (Printexc.to_string exn)
-  in
-  let shell_cache = make_projection_cache () in
-  let shell_light_cache = make_projection_cache () in
-  let tools_cache = make_tools_cache () in
-  let telemetry_cache = make_projection_cache () in
-  let namespace_truth_cache = make_projection_cache () in
-  let cached_projection ~ttl ~cache label f =
-    (* NDT-OK: wall time only gates cache freshness; it is not durable output. *)
-    refresh_projection ~now:Unix.gettimeofday ~ttl ~cache (fun () ->
-      (* NDT-OK: wall time only measures operator diagnostics. *)
-      let started_at = Unix.gettimeofday () in
-      let allocated_before = Gc.allocated_bytes () in
-      match f () with
-      | value ->
-        (* NDT-OK: elapsed time only selects diagnostic log severity. *)
-        let elapsed_s = Unix.gettimeofday () -. started_at in
-        let allocated_mb =
-          (Gc.allocated_bytes () -. allocated_before) /. 1_048_576.0
-        in
-        if elapsed_s >= 5.0 || allocated_mb >= 256.0
-        then
-          Log.Dashboard.warn
-            "dashboard_snapshot heavy refresh: component=%s elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
-            label elapsed_s allocated_mb ttl
-        else
-          Log.Dashboard.debug
-            "dashboard_snapshot refreshed: component=%s elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
-            label elapsed_s allocated_mb ttl;
-        value
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn ->
-        log_failure label exn;
-        raise exn)
-  in
-  let compute () =
-    let shell =
-      (* [shell] intentionally omits [~light]: the snapshot publishes the FULL
-         shell.  Its non-light path uses Eio.Fiber.all, which is safe on the
-         Executor_pool worker domain this [compute] runs on -- each worker
-         opens its own Switch.run and forks the job as a fiber (eio
-         executor_pool.ml run_worker), so Fiber.all resolves against the
-         worker's context, not the main domain's.  Do not "fix" this to
-         [~light:true]; that would change [shell] to the light shape. *)
-      cached_projection ~ttl:30.0 ~cache:shell_cache "shell" (fun () ->
-        (!dashboard_shell_payload_json_ref) config)
-    in
-    let shell_light =
-      (* RFC-0204 section 8.3 ("A"): publish the light projection too so
-         [shell?light=true] reads it wait-free. *)
-      cached_projection ~ttl:0.0 ~cache:shell_light_cache "shell_light"
-        (fun () -> (!dashboard_shell_payload_json_ref) ~light:true config)
-    in
-    let tools =
-      refresh_tools_projection ~now:(fun () -> Eio.Time.now clock) ~ttl:60.0 ~cache:tools_cache
-        ~config (fun () -> (!dashboard_tools_http_result_ref) config)
-    in
-    let telemetry_summary =
-      cached_projection ~ttl:30.0 ~cache:telemetry_cache "telemetry_summary" (fun () ->
-        let base_path = config.base_path in
-        let masc_root = Workspace.masc_dir config in
-        let keeper_keepalive_interval_s =
-          Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
-          |> float_of_int
-        in
-        let keeper_metric_producer_active =
-          Keeper_status_runtime.keeper_metric_producer_active ~base_path
-        in
-        Telemetry_unified.summary_json
-          ~keeper_keepalive_interval_s
-          ~keeper_metric_producer_active
-          ~masc_root
-          ())
-    in
-    let namespace_truth =
-      cached_projection ~ttl:0.0 ~cache:namespace_truth_cache
-        "namespace_truth" (fun () ->
-          match state with
-          | None -> `Null
-          | Some state ->
-            (match (!namespace_truth_snapshot_callback) state with
-             | Some json -> json
-             | None -> `Null))
-    in
-    let activity_events_default =
-      (* HTTP and the refresh fiber share the same parent-validated window. *)
-      public_activity_events config
-    in
-    {
-      generated_at = Unix.gettimeofday ();
-      shell;
-      shell_light;
-      tools;
-      namespace_truth;
-      telemetry_summary;
-      activity_events_default;
-    }
-  in
-  let rec loop () =
-    (match
-       (* Offload the snapshot compute to a worker domain (RFC-0204 sections 8-9
-          Phase 2).  The projection build (shell board scan + the activity
-          events page) is CPU-heavy and previously ran inline on the main Eio
-          domain, contending with WS dispatch and keeper fibers under host
-          load.  [submit_cpu_or_inline] reserves a full worker slot
-          (weight 1.0, matching the per-surface refresh loops'
-          [run_dashboard_compute ~mode:Offloaded_readonly]) and falls back to
-          inline before the pool is installed at boot.  Every shared cell
-          [compute] touches is an [Atomic] ([slot]), so
-          it is cross-domain safe; the publish ([Atomic.set slot]) stays on
-          this fiber.  If the whole compute path fails (an exception escapes a
-          [safe] wrapper), keep the previous snapshot live. *)
-       try Some (Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ compute) with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         log_failure "compute" exn;
-         None
-     with
-     | Some t -> Atomic.set slot (Some t)
-     | None -> ());
-    Eio.Time.sleep clock interval_sec;
-    loop ()
-  in
-  loop ()
+let invalidate_public_activity_events ~base_path =
+  Lockfree_atomic.update public_activity_cache (function
+    | Some entry -> if String.equal entry.base_path base_path then None else Some entry
+    | None -> None)
 ;;
 
-let publish_for_test t = Atomic.set slot (Some t)
-
-let make_for_test ~config ~shell ?(shell_light = `Null) ~tools ~namespace_truth
-      ~telemetry_summary
-      ?(activity_events_default = `Null) () =
-  {
-    generated_at = Unix.gettimeofday ();
-    shell;
-    shell_light;
-    tools = prepare_tools ~config (fun () -> tools);
-    namespace_truth;
-    telemetry_summary;
-    activity_events_default;
-  }
+let make_for_test ~config ~shell ?(shell_light = `Null) ~tools ~telemetry_summary () =
+  {generated_at = Unix.gettimeofday (); base_path = config.Workspace.base_path;
+   workspace_path = config.workspace_path; masc_root = Workspace.masc_dir config;
+   shell; shell_light; tools = make_tools_projection ~config tools; telemetry_summary}
 ;;
 
-let reset_for_test () = Atomic.set slot None
+let publish_for_test (snapshot : t) =
+  let config = { (Workspace.default_config snapshot.base_path) with
+    workspace_path = snapshot.workspace_path } in
+  let publisher = activate ~config ~is_current:(fun () -> true) in
+  Atomic.set publisher.state {shell = Some (snapshot.shell, snapshot.shell_light);
+    tools = Some snapshot.tools; telemetry = Some snapshot.telemetry_summary;
+    latest = Some snapshot}
+;;
+
+let reset_for_test () = Atomic.set active None
 
 module For_testing = struct
-  type cache = Yojson.Safe.t projection_cache
-  type nonrec tools_cache = tools_cache
   type activity_cache = activity_events_cache
-
-  let make_cache = make_projection_cache
-  let refresh_projection = refresh_projection
-  let make_tools_cache = make_tools_cache
-  let refresh_tools = refresh_tools_projection
   let make_activity_cache = make_activity_events_cache
   let refresh_activity_events = refresh_activity_events
-  let should_reuse_projection = should_reuse_projection
 end

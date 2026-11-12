@@ -1,8 +1,9 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 // @vitest-environment happy-dom
 import { cleanup, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   fetchKeeperStateDiagram,
@@ -22,8 +23,14 @@ vi.mock('../../api/keeper', async () => {
 
 const fetchKeeperStateDiagramMock = vi.mocked(fetchKeeperStateDiagram)
 
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'ide-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'ide-fixture' }
+})
+
 afterEach(() => {
   cleanup()
+  acceptedExecutionWorkspace.value = null
   vi.clearAllMocks()
   activeKeeperName.value = ''
   keepers.value = []
@@ -43,7 +50,7 @@ describe('IdePersistencePanel a11y', () => {
       mermaid: 'graph TD',
     } satisfies KeeperStateDiagramResponse)
 
-    const { container, findByTestId } = render(html`<${IdePersistencePanel} pollMs=${60_000} />`)
+    const { container, findByTestId } = render(html`<${IdePersistencePanel} />`)
     await findByTestId('ide-persistence-lifecycle')
     await waitFor(() => expect(fetchKeeperStateDiagramMock).toHaveBeenCalled())
 

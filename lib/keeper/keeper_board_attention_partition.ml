@@ -439,6 +439,8 @@ let validate_serialized ~base_path ~ledger_path contents =
 ;;
 
 let purge ~base_path ~keeper_name =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Partition (fun mark_attempt ->
   let ledger_path = path ~base_path ~keeper_name in
   run_blocking "board-attention-partition-purge" (fun () ->
     let entry = cache_entry ledger_path in
@@ -446,12 +448,16 @@ let purge ~base_path ~keeper_name =
       (* Never replace this entry while another transaction can be waiting on
          its mutex. A failed purge can already have unlinked the old inode. *)
       Atomic.set entry.cached None;
+      mark_attempt ();
       Fs_compat.purge_private_jsonl_durable_locked_result ledger_path
       |> cursor_result ~ledger_path
       |> Result.map (fun _cursor -> ())))
+  )
 ;;
 
 let update ~base_path ~keeper_name decide =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Partition (fun mark_attempt ->
   let ledger_path = path ~base_path ~keeper_name in
   run_blocking "board-attention-partition-update" (fun () ->
     let entry = cache_entry ledger_path in
@@ -464,7 +470,8 @@ let update ~base_path ~keeper_name decide =
       | _ :: _ ->
         let* updated = apply_rows view rows in
         let suffix = serialize rows in
-        (match
+        (mark_attempt ();
+         match
            Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
              ledger_path
              ~expected:view.cursor
@@ -475,9 +482,12 @@ let update ~base_path ~keeper_name decide =
          | Ok cursor ->
            Atomic.set entry.cached (Some { updated with cursor });
            Ok result)))
+  )
 ;;
 
 let update_exact ?ready_confirmation ~base_path ~keeper_name decide =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Partition (fun mark_attempt ->
   let ledger_path = path ~base_path ~keeper_name in
   run_blocking "board-attention-partition-exact-update" (fun () ->
     let entry = cache_entry ledger_path in
@@ -505,7 +515,8 @@ let update_exact ?ready_confirmation ~base_path ~keeper_name decide =
                ^ "\n")
           | Some _, _ -> Error "Ready confirmation must append its exact Ready row"
         in
-        (match
+        (mark_attempt ();
+         match
            Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
              ledger_path
              ~expected:view.cursor
@@ -516,6 +527,7 @@ let update_exact ?ready_confirmation ~base_path ~keeper_name decide =
          | Ok (cursor, write_outcome) ->
            Atomic.set entry.cached (Some { updated with cursor });
            Ok (result, write_outcome))))
+  )
 ;;
 
 let compare_candidate left right =
@@ -719,7 +731,10 @@ let advance_state partition state =
     Ok { partition with generation; state }
 ;;
 
-let ensure_roots_with_reader ~base_path ~keeper_name ~candidates read_candidates =
+(* [decide] runs under the partition mutation lock. It receives
+   [missing_roots], which computes the roots [candidates] still lack in the
+   locked view, and returns the rows to append with its own result. *)
+let ensure_roots_under_lock ~base_path ~keeper_name ~candidates decide =
   (* Board reads take Eio mutexes. Observe pending comments in the caller's
      fiber, before [update] offloads its serialized filesystem transaction to
      a system thread. The transaction still rereads/validates its candidates. *)
@@ -733,8 +748,7 @@ let ensure_roots_with_reader ~base_path ~keeper_name ~candidates read_candidates
         (Candidate.Resumable_judged _ | Candidate.Resumable_consumed _)
     | Candidate.Requeued_resumable _ | Candidate.Suspended_quarantine _ -> ()) candidates;
   update ~base_path ~keeper_name (fun view ->
-    let* candidates = read_candidates () in
-    let* roots =
+    let missing_roots () =
       candidates
       |> List.sort compare_candidate
       |> List.fold_left
@@ -882,23 +896,34 @@ let ensure_roots_with_reader ~base_path ~keeper_name ~candidates read_candidates
            (Ok [])
       |> Result.map List.rev
     in
-    Ok (roots, List.length roots))
+    decide ~missing_roots)
 ;;
 
 let ensure_roots ~base_path ~keeper_name candidates =
-  ensure_roots_with_reader ~base_path ~keeper_name ~candidates (fun () -> Ok candidates)
+  ensure_roots_under_lock ~base_path ~keeper_name ~candidates (fun ~missing_roots ->
+    let* roots = missing_roots () in
+    Ok (roots, List.length roots))
 ;;
 
+type root_restoration =
+  | Roots_ensured of int
+  | Candidates_changed
+
 let ensure_current_roots ~base_path ~keeper_name candidates =
-  ensure_roots_with_reader ~base_path ~keeper_name ~candidates (fun () ->
+  ensure_roots_under_lock ~base_path ~keeper_name ~candidates (fun ~missing_roots ->
     (* The partition mutation lock encloses this candidate read and the root
        append. Purge removes candidates before partitions: a stale request
        either finishes before partition purge or sees the missing candidate.
-       Re-reading before taking the partition lock would leave that race open. *)
+       Re-reading before taking the partition lock would leave that race open.
+       The settled-receipt prune holds the same lock and drops a receipt only
+       once its candidate is consumed or gone, so a candidate read here with
+       the caller's value never had its receipt dropped. *)
     let* current = Candidate.load_candidates ~base_path ~keeper_name in
     if List.for_all (fun candidate -> List.mem candidate current) candidates
-    then Ok candidates
-    else Error "Board attention candidates changed before root restoration")
+    then (
+      let* roots = missing_roots () in
+      Ok (roots, Roots_ensured (List.length roots)))
+    else Ok ([], Candidates_changed))
 ;;
 
 type settled_receipt_gate =
@@ -950,11 +975,14 @@ let settled_receipt_gate ~base_path ~keeper_name view =
 ;;
 
 let recover_for_process_start ~now ~base_path ~keeper_name =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Partition (fun mark_attempt ->
   let* () = valid_time "partition process-start recovery time" now in
   let ledger_path = path ~base_path ~keeper_name in
   run_blocking "board-attention-partition-process-start" (fun () ->
     let entry = cache_entry ledger_path in
     Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      mark_attempt ();
       match
         (* Process-start recovery only: a torn tail from a mid-append crash is
            truncated to the last complete row; general reads keep hard-failing. *)
@@ -1002,7 +1030,8 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
           Atomic.set entry.cached (Some current);
           Ok recovered)
         else
-          (match
+          (mark_attempt ();
+           match
              Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
                ledger_path
                ~expected:snapshot.cursor
@@ -1014,6 +1043,7 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
              let* compacted = apply_rows (empty_view cursor) latest in
              Atomic.set entry.cached (Some compacted);
              Ok recovered)))
+  )
 ;;
 
 (* Startup recovery is not the only place a settled receipt can go: a Keeper
@@ -1021,6 +1051,8 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
    otherwise leave one row until the next restart. This applies the same gate
    on a drain, without releasing [Running] roots, which only a restart cuts. *)
 let prune_settled_receipts ~base_path ~keeper_name =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Partition (fun mark_attempt ->
   let ledger_path = path ~base_path ~keeper_name in
   run_blocking "board-attention-partition-settled-prune" (fun () ->
     let entry = cache_entry ledger_path in
@@ -1065,6 +1097,7 @@ let prune_settled_receipts ~base_path ~keeper_name =
             Atomic.set entry.cached (Some current);
             Ok 0)
           else (
+            mark_attempt ();
             match
               Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
                 ledger_path
@@ -1079,6 +1112,7 @@ let prune_settled_receipts ~base_path ~keeper_name =
               let* compacted = apply_rows (empty_view cursor) kept in
               Atomic.set entry.cached (Some compacted);
               Ok removed)))
+  )
 ;;
 
 let claim_ready_exact
@@ -1089,6 +1123,8 @@ let claim_ready_exact
       ~partition_id
       ~generation
   =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Partition (fun mark_attempt ->
   let* () = valid_time "partition claim time" now in
   let* () = nonempty "partition claim id" partition_id in
   let ledger_path = path ~base_path ~keeper_name in
@@ -1109,7 +1145,8 @@ let claim_ready_exact
            in
            let* updated = apply_rows view [ claimed ] in
            let suffix = serialize [ claimed ] in
-           (match
+           (mark_attempt ();
+            match
               Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
                 ledger_path
                 ~expected:view.cursor
@@ -1123,6 +1160,7 @@ let claim_ready_exact
               Ok (Some claimed))
          | Running _ | Completed _ | Settled _ | Abandoned _ | Blocked _ -> Ok None)
       | Some _ -> Ok None))
+  )
 ;;
 
 let transition_running_exact ~base_path ~partition ~worker_epoch decide =
@@ -1383,6 +1421,8 @@ type requeue_decision =
   | Observe_generation_conflict of string
 
 let update_requeue_exact_or_observe ~base_path ~keeper_name decide =
+  Keeper_board_attention_change.with_attempt ~base_path ~keeper_name
+    ~source:Keeper_board_attention_change.Partition (fun mark_attempt ->
   let ledger_path = path ~base_path ~keeper_name in
   run_blocking "board-attention-partition-exact-observe" (fun () ->
     let entry = cache_entry ledger_path in
@@ -1398,7 +1438,8 @@ let update_requeue_exact_or_observe ~base_path ~keeper_name decide =
          | _ :: _ ->
            let* updated = apply_rows view rows in
            let suffix = serialize rows in
-           (match
+           (mark_attempt ();
+            match
               Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
                 ledger_path
                 ~expected:view.cursor
@@ -1415,6 +1456,7 @@ let update_requeue_exact_or_observe ~base_path ~keeper_name decide =
                | Ok (cursor, write_outcome) ->
                  Atomic.set entry.cached (Some { updated with cursor });
                  Ok (`Written (result, write_outcome)))))))
+  )
 ;;
 
 let requeue_blocked ~base_path ~(partition : t) =

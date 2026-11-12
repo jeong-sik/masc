@@ -15,7 +15,7 @@ import {
   type IdeContextRouteLink,
 } from './ide-context-lens'
 import { useSignalValue } from './use-signal-value'
-import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 import { IDE_CONTEXT_BADGE_STYLE } from './context-badge-style'
 import { routeLinkLabels } from './ide-context-route-helpers'
 
@@ -23,7 +23,6 @@ type LifecycleState = 'created' | 'active' | 'idle' | 'terminated'
 
 interface IdePersistencePanelProps {
   keeperName?: string
-  pollMs?: number
 }
 
 const LIFECYCLE_STEPS: ReadonlyArray<{ state: LifecycleState; label: string }> = [
@@ -134,7 +133,6 @@ function LifecycleMini({ state, phase }: { state: LifecycleState; phase: string 
 
 export function IdePersistencePanel({
   keeperName: explicitKeeperName,
-  pollMs = DEFAULT_PANEL_REFRESH_MS,
 }: IdePersistencePanelProps) {
   const activeName = useSignalValue(activeKeeperName)
   const keeperRows = useSignalValue(keepers)
@@ -156,30 +154,24 @@ export function IdePersistencePanel({
       return
     }
 
-    const controller = new AbortController()
-    let timer: number | null = null
-
-    const refresh = async () => {
+    return setupObservationRefresh(async signal => {
       try {
-        const next = await fetchKeeperStateDiagram(name, { signal: controller.signal })
-        if (controller.signal.aborted) return
+        const next = await fetchKeeperStateDiagram(name, { signal })
+        if (signal.aborted) return
         setDiagram(next)
         setError(null)
       } catch (err) {
-        if (!controller.signal.aborted) {
+        if (!signal.aborted) {
           setDiagram(null)
           setError(err instanceof Error ? err.message : 'state diagram unavailable')
+          throw err
         }
       }
-    }
-
-    void refresh()
-    timer = window.setInterval(refresh, Math.max(5000, pollMs))
-    return () => {
-      controller.abort()
-      if (timer !== null) window.clearInterval(timer)
-    }
-  }, [keeperName, pollMs])
+    }, { topics: ['keeper_composite', 'keeper_turns'], keeperName: name, resetRead: () => {
+      setDiagram(null)
+      setError(null)
+    } })
+  }, [keeperName])
 
   const phase = diagram?.current_phase ?? keeper?.phase ?? null
   const lifecycleState = lifecycleStateFromKeeperPhase(phase)

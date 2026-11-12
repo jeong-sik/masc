@@ -73,7 +73,8 @@ val issue :
   name:Name.t ->
   hours:int ->
   (issued, issue_error) result
-(** Issues a [Player] credential that expires [hours] from now.
+(** Issues a [Player] credential that expires [hours] from now and announces
+    the committed Play seat change.
     [public_base_url] is the configured [MASC_HTTP_BASE_URL] and
     [keeper_names] every keeper the workspace knows; the caller reads both.
     A name clashes with a keeper when they share a credential file name

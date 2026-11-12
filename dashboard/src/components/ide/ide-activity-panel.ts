@@ -1,3 +1,4 @@
+import { selectObservationReadFailure, setupObservationRefresh } from '../../lib/observation-refresh'
 import { html } from 'htm/preact'
 import { memo } from 'preact/compat'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -35,6 +36,8 @@ import {
   type RunActivityVerb,
 } from './run-activity-store'
 import { bridgeRunActivityEventsToTrace } from './run-activity-trace-bridge'
+import { captureDashboardObservationOwner, dashboardObservationOwnerIsCurrent,
+  type DashboardObservationOwner } from '../../lib/observation-read-owner'
 import { activityFileContext } from './ide-activity-file-context'
 import { isRecord } from '../../lib/type-guards'
 import { isUnambiguousGoalId, nonblankGoalId, type GoalIdentityObservation } from '../../lib/goal-identity'
@@ -74,7 +77,16 @@ interface GraphFetchResult {
   readonly history: ActivityHistoryWindow | null
   readonly events: ReadonlyArray<RunActivityEvent>
   readonly workspaceId: string
-  readonly ok: boolean
+  readonly read: ActivityReadOutcome
+}
+
+type ActivityReadOutcome = { readonly kind: 'ready' } | { readonly kind: 'failed'; readonly cause: unknown }
+const READ_READY: ActivityReadOutcome = { kind: 'ready' }
+
+function combineReadOutcomes(...outcomes: ActivityReadOutcome[]): ActivityReadOutcome {
+  const failures = outcomes.filter(outcome => outcome.kind === 'failed')
+  if (failures.length === 0) return READ_READY
+  return { kind: 'failed', cause: selectObservationReadFailure(failures.map(failure => failure.cause)) ?? failures[0]!.cause }
 }
 
 type ActivityFetchResult = GraphFetchResult
@@ -161,7 +173,6 @@ export interface IdeActivityPanelProps {
   /** RFC-0378 §5.3b: canonical codebase slug — the wire key. */
   readonly codebase?: string | null
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
-  readonly pollMs?: number
   readonly compact?: boolean
   readonly children?: unknown
 }
@@ -203,24 +214,27 @@ function mapApiEvent(event: ApiActivityEvent, workspaceId: string): RunActivityE
 }
 
 async function fetchActivityEvents(
-  codebase?: string | null,
+  codebase: string | null | undefined,
+  signal: AbortSignal,
 ): Promise<ActivityFetchResult> {
-  const graph = await fetchActivityGraphEvents()
-  const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, codebase)
+  const graph = await fetchActivityGraphEvents(signal)
+  signal.throwIfAborted()
+  const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, codebase, signal)
+  signal.throwIfAborted()
   return {
     workspaceId: graph.workspaceId,
     history: graph.history,
     // A bridge fetch failure must degrade the refresh tone instead of
     // rendering an empty-but-"live" feed: an operator cannot distinguish
     // "no keeper activity" from "the activity source is broken" otherwise.
-    ok: graph.ok && bridge.ok,
+    read: combineReadOutcomes(graph.read, bridge.read),
     events: mergeRunActivityEvents(graph.events, bridge.events),
   }
 }
 
-async function fetchActivityGraphEvents(): Promise<GraphFetchResult> {
+async function fetchActivityGraphEvents(signal: AbortSignal): Promise<GraphFetchResult> {
   try {
-    const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
+    const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50', { signal })
     const rawEvents = data.events
     if (!Array.isArray(rawEvents)) throw new Error('Activity events are unavailable')
     const reportedTotal = data.total_matching_events
@@ -229,42 +243,34 @@ async function fetchActivityGraphEvents(): Promise<GraphFetchResult> {
     const history = { loaded: rawEvents.length, total }
     const workspaceId = rawEvents[0]?.workspace_id || DEFAULT_WORKSPACE_ID
     const mapped = rawEvents.map(e => mapApiEvent(e, workspaceId))
-    return { events: mapped, workspaceId, ok: true, history }
-  } catch {
-    return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: false, history: null }
+    return { events: mapped, workspaceId, read: READ_READY, history }
+  } catch (cause) {
+    return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, read: { kind: 'failed', cause }, history: null }
   }
 }
 
 interface BridgeFetchResult {
   readonly events: ReadonlyArray<RunActivityEvent>
-  readonly ok: boolean
+  readonly read: ActivityReadOutcome
 }
 
 async function fetchIdeBridgeRunActivityEvents(
   workspaceId: string,
-  codebase?: string | null,
+  codebase: string | null | undefined,
+  signal: AbortSignal,
 ): Promise<BridgeFetchResult> {
-  const sources: Array<Promise<ReadonlyArray<IdeBridgeEvent>>> = []
   const scoped = codebase?.trim()
-  if (scoped) sources.push(fetchIdeEvents({ limit: 50, codebase: scoped }))
   // No codebase is set: there is nothing to query, not a request that
   // happened to find zero events. The caller derives the visible no-scope
   // state from the current props, before any asynchronous response arrives.
-  if (!scoped) return { events: EMPTY_ACTIVITY, ok: true }
-  const settled = await Promise.allSettled(sources)
-  const events: RunActivityEvent[] = []
-  let ok = true
-  for (const result of settled) {
-    if (result.status === 'fulfilled') {
-      for (const event of result.value) {
-        const key = bridgeEventKey(event)
-        events.push(mapIdeBridgeEvent(event, workspaceId, key, scoped))
-      }
-    } else {
-      ok = false
-    }
+  if (!scoped) return { events: EMPTY_ACTIVITY, read: READ_READY }
+  try {
+    const source = await fetchIdeEvents({ limit: 50, codebase: scoped, signal })
+    const events = source.map(event => mapIdeBridgeEvent(event, workspaceId, bridgeEventKey(event), scoped))
+    return { events, read: READ_READY }
+  } catch (cause) {
+    return { events: EMPTY_ACTIVITY, read: { kind: 'failed', cause } }
   }
-  return { events, ok }
 }
 
 function mergeRunActivityEvents(
@@ -435,11 +441,6 @@ function positiveInteger(value: unknown): number | undefined {
   return isPositiveSafeInteger(value) ? value : undefined
 }
 
-function normalizedPollMs(value: number | undefined): number | null {
-  if (value === undefined || value <= 0 || !Number.isFinite(value)) return null
-  return Math.floor(value)
-}
-
 function activityScopeKey(codebase?: string | null): string {
   return codebase?.trim() || ''
 }
@@ -453,7 +454,6 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     activeFile: rawActiveFile = '',
     codebase = null,
     diffRows = EMPTY_DIFF_ROWS,
-    pollMs = 0,
     compact = false,
   } = props
   const activeFile = rawActiveFile ?? ''
@@ -470,7 +470,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const [historyWindow, setHistoryWindow] = useState<ActivityHistoryWindow | null>(null)
   const [compactInsightsOpen, setCompactInsightsOpen] = useState(false)
   const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
-  const refreshMs = normalizedPollMs(pollMs)
+  const traceOwner = useRef<DashboardObservationOwner | null>(null)
 
   useEffect(() => {
     if (loadedScopeKeyRef.current !== requestedScopeKey) {
@@ -478,47 +478,48 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     }
   }, [requestedScopeKey])
 
-  useEffect(() => {
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const load = async () => {
-      const attemptMs = Date.now()
-      setRefreshState(prev => ({
-        ...prev,
+  useEffect(() => setupObservationRefresh(async signal => {
+    const owner = captureDashboardObservationOwner()
+    const attemptMs = Date.now()
+    setRefreshState(prev => ({
+      ...prev,
+      lastAttemptMs: attemptMs,
+      tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
+    }))
+    const { events, workspaceId, read, history } = await fetchActivityEvents(codebase, signal)
+    if (signal.aborted || !dashboardObservationOwnerIsCurrent(owner)) return
+    if (read.kind === 'ready') {
+      traceOwner.current = owner
+      store.reset(workspaceId)
+      store.seed(events)
+      setHistoryWindow(history)
+      loadedScopeKeyRef.current = requestedScopeKey
+      setLoadedScopeKey(requestedScopeKey)
+      setRefreshState({
+        tone: 'live',
+        lastOkMs: Date.now(),
         lastAttemptMs: attemptMs,
-        tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
+        failedCount: 0,
+      })
+    } else {
+      const sameScopeSnapshot = loadedScopeKeyRef.current === requestedScopeKey
+      setRefreshState(prev => ({
+        tone: sameScopeSnapshot && prev.lastOkMs !== null ? 'stale' : 'offline',
+        lastOkMs: sameScopeSnapshot ? prev.lastOkMs : null,
+        lastAttemptMs: attemptMs,
+        failedCount: prev.failedCount + 1,
       }))
-      const { events, workspaceId, ok, history } = await fetchActivityEvents(codebase)
-      if (cancelled) return
-      if (ok) {
-        store.reset(workspaceId)
-        store.seed(events)
-        setHistoryWindow(history)
-        loadedScopeKeyRef.current = requestedScopeKey
-        setLoadedScopeKey(requestedScopeKey)
-        setRefreshState({
-          tone: 'live',
-          lastOkMs: Date.now(),
-          lastAttemptMs: attemptMs,
-          failedCount: 0,
-        })
-      } else {
-        const sameScopeSnapshot = loadedScopeKeyRef.current === requestedScopeKey
-        setRefreshState(prev => ({
-          tone: sameScopeSnapshot && prev.lastOkMs !== null ? 'stale' : 'offline',
-          lastOkMs: sameScopeSnapshot ? prev.lastOkMs : null,
-          lastAttemptMs: attemptMs,
-          failedCount: prev.failedCount + 1,
-        }))
-      }
-      if (refreshMs !== null) timer = setTimeout(load, refreshMs)
+      throw read.cause
     }
-    void load()
-    return () => {
-      cancelled = true
-      if (timer !== null) clearTimeout(timer)
-    }
-  }, [store, refreshMs, codebase, requestedScopeKey])
+  }, { topics: ['activity', 'ide_events'], resetRead: () => {
+    store.reset(DEFAULT_WORKSPACE_ID)
+    setHistoryWindow(null)
+    loadedScopeKeyRef.current = null
+    setLoadedScopeKey(null)
+    setRefreshState(INITIAL_REFRESH_STATE)
+    emittedTraceIds.current = new Set()
+    traceOwner.current = null
+  } }), [store, codebase, requestedScopeKey])
 
   useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)
@@ -538,8 +539,9 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const progress = deriveIdeRunProgressSummary(events, activeFile, goals.value, tasks.value, codebase, goalIdentityObservation.value)
 
   useEffect(() => {
+    if (traceOwner.current === null) return
     emittedTraceIds.current = bridgeRunActivityEventsToTrace(
-      events.filter(event => activityFileContext(event, codebase) !== null), emittedTraceIds.current,
+      events.filter(event => activityFileContext(event, codebase) !== null), emittedTraceIds.current, traceOwner.current,
     )
   }, [events, codebase])
 
@@ -560,10 +562,10 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
               class="ide-activity-refresh-status"
               data-state=${refreshState.tone}
               role="status"
-              aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
-              title=${activityRefreshTitle(refreshState, refreshMs)}
+              aria-label=${`Activity refresh ${activityRefreshLabel(refreshState)}`}
+              title=${activityRefreshTitle(refreshState)}
             >
-              ${activityRefreshLabel(refreshState, refreshMs)}
+              ${activityRefreshLabel(refreshState)}
             </span>
           </span>
         </div>
@@ -582,11 +584,11 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
           class="ide-activity-compact-status"
           data-state=${refreshState.tone}
           role="status"
-          aria-label=${`Activity refresh ${activityRefreshLabel(refreshState, refreshMs)}`}
-          title=${activityRefreshTitle(refreshState, refreshMs)}
+          aria-label=${`Activity refresh ${activityRefreshLabel(refreshState)}`}
+          title=${activityRefreshTitle(refreshState)}
         >
           <span>${events.length} events · ${keepers.length} keepers</span>
-          <span>${activityRefreshLabel(refreshState, refreshMs)}</span>
+          <span>${activityRefreshLabel(refreshState)}</span>
         </div>
         <div class="ide-activity-compact-insights">
           <button
@@ -973,18 +975,17 @@ function activityRouteContext(item: RunActivityEvent, codebase?: string | null):
   }
 }
 
-function activityRefreshLabel(state: ActivityRefreshState, refreshMs: number | null): string {
+function activityRefreshLabel(state: ActivityRefreshState): string {
   if (state.tone === 'loading') return 'syncing'
-  if (state.tone === 'live') return refreshMs === null ? 'loaded' : 'live'
+  if (state.tone === 'live') return 'live'
   const failures = state.failedCount === 1 ? '1 failed' : `${state.failedCount} failed`
   return state.tone === 'offline' ? `offline ${failures}` : `stale ${failures}`
 }
 
-function activityRefreshTitle(state: ActivityRefreshState, refreshMs: number | null): string {
-  const parts = [`Activity refresh ${activityRefreshLabel(state, refreshMs)}`]
+function activityRefreshTitle(state: ActivityRefreshState): string {
+  const parts = [`Activity refresh ${activityRefreshLabel(state)}`]
   if (state.lastOkMs !== null) parts.push(`last update ${formatActivityTime(state.lastOkMs)}`)
   if (state.lastAttemptMs !== null) parts.push(`last attempt ${formatActivityTime(state.lastAttemptMs)}`)
-  if (refreshMs !== null) parts.push(`poll ${Math.max(1, Math.round(refreshMs / 1000))}s`)
   return parts.join(' | ')
 }
 

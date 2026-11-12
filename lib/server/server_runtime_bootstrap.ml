@@ -336,8 +336,6 @@ let () =
   ignore (Dashboard.force_link, Operator_tool.force_link);
   Transport_read_model.register_grpc_service_name Masc_grpc_service.service_name;
   Transport_read_model.register_grpc_health_service_name Masc_grpc_server.health_service_name;
-  Dashboard_snapshot.register_dashboard_tools_http_result Server_dashboard_http_runtime_info.dashboard_tools_http_result;
-  Dashboard_snapshot.register_namespace_truth_snapshot Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
     let open Gc in
     (* Route through the validated helper: a malformed value (e.g.
@@ -545,6 +543,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     startup_config_resolution ~base_path |> Config_dir_resolver.to_json
   in
   let config = Mcp_server.workspace_config state in
+  Server_dashboard_observation_broadcast.install ~state ~sw ~mono_clock;
   Server_provider_rest_broadcast.install ~sw ~clock ~config;
   Server_keeper_cost_broadcast.install ~sw ~clock ~config;
   Server_runtime_metrics.install ~sw ~clock ~config;
@@ -552,8 +551,11 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   Workspace_dataset_event.install_store_observers ();
   Server_lane_inventory.install ();
   Server_skill_usage_runtime.install ();
-  Server_memory_health_broadcast.install ~sw ~config;
+  Server_memory_health_broadcast.install ~sw ~mono_clock ~config;
   Server_dashboard_http_keeper_memory_health.install ();
+  Server_tla_source_events.start ~sw ~mono_clock ~report:(fun _ ->
+    Server_routes_http_runtime.invalidate_full_health_snapshot ();
+    Dashboard_observation_commit.process_written `Health);
   (* The harness health read is cached per workspace and query window. The
      verdict store belongs to the workspace that wrote the record, so its
      base_path is the one announced; every cached window goes first because
@@ -1408,6 +1410,7 @@ let claim_and_start_keeper_persistence
       ~prepared_persistence
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       state
@@ -1431,6 +1434,7 @@ let claim_and_start_keeper_persistence
         Server_routes_http_runtime.invalidate_full_health_snapshot
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       state
@@ -1651,6 +1655,7 @@ let activate_owner_state
       ?(boot_stage = fun _ -> ())
       ~sw
       ~clock
+      ~mono_clock
       ~net
       ~proc_mgr
       (initialized : initialized_owner_state)
@@ -1678,6 +1683,7 @@ let activate_owner_state
     ~prepared_persistence:initialized.prepared_keeper_persistence
     ~sw
     ~clock
+    ~mono_clock
     ~net
     ~proc_mgr
     state;
@@ -1819,6 +1825,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
         ~boot_stage
         ~sw
         ~clock
+        ~mono_clock
         ~net
         ~proc_mgr
         initialized_owner
@@ -2085,17 +2092,15 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
         ; execution_refresh = (fun () ->
             Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock)
         ; transport_health_refresh = (fun () ->
-            Server_dashboard_http.start_transport_health_refresh_loop ~sw ~clock)
+            Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock)
         ; execution_trust_refresh = (fun () ->
             Server_dashboard_http.start_execution_trust_refresh_loop ~state ~sw ~clock)
         ; mission_refresh = (fun () ->
-            Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock)
+            Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock ~mono_clock)
         ; operator_snapshot_refresh = (fun () ->
-            Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock
-              ~broadcast_snapshot:Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot)
+            Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock ~mono_clock)
         ; operator_digest_refresh = (fun () ->
-            Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock
-              ~broadcast_digest:Server_dashboard_http_execution_surfaces.broadcast_operator_digest)
+            Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock ~mono_clock)
         ; shell_prewarm = (fun () ->
             Atomic.set Server_dashboard_http.shell_warming true;
             Eio.Fiber.fork ~sw (fun () ->

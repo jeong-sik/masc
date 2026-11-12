@@ -5,9 +5,7 @@ module Http = Http_server_eio
 
 module Cache = Server_dashboard_json_cache
 
-let dashboard_model_metrics_cache = Cache.create ()
 let dashboard_cost_latency_cache = Cache.create ()
-let dashboard_keeper_decisions_cache = Cache.create ()
 let dashboard_keeper_practice_cache = Cache.create ()
 
 let cache_key parts = String.concat "\x1f" parts
@@ -30,17 +28,6 @@ let runtime_specification_json (runtime : Runtime_instance.t) =
     "model_context", Json_util.int_opt_to_json runtime.model.max_context;
     "provider_context", Json_util.int_opt_to_json runtime.provider.max_context;
     "binding_context", Json_util.int_opt_to_json runtime.binding.max_context ]
-
-let empty_model_metrics_json ~window ~bucket_min =
-  `Assoc
-    [ "window_minutes", `Int window
-    ; "bucket_minutes", `Int bucket_min
-    ; "total_entries", `Int 0
-    ; "total_error_entries", `Int 0
-    ; "cost_ledger_read", `Assoc [ "state", `String "pending" ]
-    ; "latency_buckets", `List []
-    ; "models", `List []
-    ]
 
 let empty_cost_latency_json ~window =
   `Assoc
@@ -66,30 +53,18 @@ let add_routes ~sw router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/models/metrics" (fun state req reqd ->
-         let window = int_query_param req "window" ~default:30 in
-         let bucket_min = int_query_param req "bucket_min" ~default:0 in
+         match Server_model_metrics_stream.request req with
+         | Error detail -> Http.Response.json_value ~status:`Bad_request
+             (`Assoc ["error", `String detail]) reqd
+         | Ok request ->
          let base_path = (Mcp_server.workspace_config state).base_path in
-         let key =
-           cache_key
-             [ base_path; string_of_int window; string_of_int bucket_min ]
-         in
-         let json =
-           Cache.read_result ~now:Unix.gettimeofday ~sw ~sync_first:false
-             ~cache:dashboard_model_metrics_cache ~key
-             ~placeholder:(empty_model_metrics_json ~window ~bucket_min)
-             ~compute:(fun () ->
-               let agg =
-                 if bucket_min > 0 then
-                   Model_inference_metrics.compute_with_buckets
-                     ~base_path ~window_minutes:window ~bucket_minutes:bucket_min
-                 else
-                   Model_inference_metrics.compute
-                     ~base_path ~window_minutes:window
-               in
-               Result.map Model_inference_metrics.to_json agg
-               |> Result.map_error Model_inference_metrics.read_error_to_string)
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         let _, result = Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+           Server_model_metrics_stream.read_snapshot ~base_path ~request ~now:(Time_compat.now ())
+             Model_inference_metrics_kept.empty)) in
+         match result with
+         | Ok snapshot -> Http.Response.json_value ~compress:true ~request:req snapshot.json reqd
+         | Error detail -> Http.Response.json_value ~status:`Service_unavailable ~request:req
+             (`Assoc ["error", `String detail]) reqd
        )
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/runtime/metrics" (fun state _agent req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
@@ -215,33 +190,18 @@ let add_routes ~sw router =
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-decisions" (fun state req reqd ->
          let limit = dashboard_feed_limit req in
-         let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int limit ] in
-         let json =
-           Cache.read ~sw ~sync_first:true
-             ~cache:dashboard_keeper_decisions_cache ~key
-             ~placeholder:
-               (Dashboard_http_keeper.keeper_decisions_json ~config
-                  ~keepers:[] ~limit ())
-             ~compute:(fun () ->
-               let keeper_names =
-                 (match Keeper_meta_store.keeper_names_result config with
-                  | Ok names -> names
-                  | Error detail ->
-                    Log.Keeper.warn "dashboard keeper feed: keeper names unread: %s" detail;
-                    [])
-               in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | Ok (None) | Error _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_decisions_json ~config ~keepers
-                 ~limit ())
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         let config = Mcp_server.workspace_config state in
+         match Server_dashboard_keeper_decisions_http.read_current ~config ~limit with
+         | Ok json -> Http.Response.json_value ~compress:true ~request:req json reqd
+         | Error error ->
+             Log.Server.warn "%s" (Server_dashboard_keeper_decisions_http.read_error_to_string error);
+             Http.Response.json_value ~status:`Service_unavailable ~request:req
+               (Server_dashboard_keeper_decisions_http.read_error_to_json error) reqd
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+             Log.Server.warn "Keeper Decisions read failed: %s" (Printexc.to_string exn);
+             Http.Response.json_value ~status:`Service_unavailable ~request:req
+               (`Assoc ["error", `String "keeper_decisions_unavailable"]) reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-practice" (fun state req reqd ->
          let limit = dashboard_feed_limit req in

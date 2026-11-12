@@ -25,6 +25,7 @@ afterEach(() => {
 describe('refreshNamespaceTruth', () => {
   it('hydrates build identity into serverStatus from project snapshot', async () => {
     apiMocks.fetchDashboardNamespaceTruth.mockResolvedValue({
+      projection_diagnostics: { read_completeness: 'complete', read_error: null },
       generated_at: '2026-03-25T08:16:21Z',
       root: {
         status: {

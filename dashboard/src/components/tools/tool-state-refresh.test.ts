@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const { fetchDashboardTools, setupVisibleAutoRefresh, stopRefresh } = vi.hoisted(() => ({
+const { fetchDashboardTools, setupObservationRefresh, stopRefresh } = vi.hoisted(() => ({
   fetchDashboardTools: vi.fn(async () => ({
     tools: [],
     keeper_waiting_inventory: { keepers: [] },
   })),
-  setupVisibleAutoRefresh: vi.fn(),
+  setupObservationRefresh: vi.fn(),
   stopRefresh: vi.fn(),
 }))
 
-setupVisibleAutoRefresh.mockReturnValue(stopRefresh)
+setupObservationRefresh.mockReturnValue(stopRefresh)
 
 vi.mock('../../api', () => ({ fetchDashboardTools }))
-vi.mock('../../lib/auto-refresh', () => ({ setupVisibleAutoRefresh }))
+vi.mock('../../lib/observation-refresh', () => ({ setupObservationRefresh }))
 
 import { subscribeToolsAutoRefresh } from './tool-state'
 
@@ -21,16 +21,16 @@ let disposers: Array<() => void> = []
 afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose()
   vi.clearAllMocks()
-  setupVisibleAutoRefresh.mockReturnValue(stopRefresh)
+  setupObservationRefresh.mockReturnValue(stopRefresh)
 })
 
 describe('subscribeToolsAutoRefresh', () => {
-  it('shares one polling owner across multiple mounted consumers', () => {
+  it('shares one observation subscription across multiple mounted consumers', () => {
     const first = subscribeToolsAutoRefresh()
     const second = subscribeToolsAutoRefresh()
     disposers = [first, second]
 
-    expect(setupVisibleAutoRefresh).toHaveBeenCalledTimes(1)
+    expect(setupObservationRefresh).toHaveBeenCalledTimes(1)
 
     first()
     disposers = [second]

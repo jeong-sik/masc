@@ -14,7 +14,7 @@ let settingsEpoch = 0
 function workspace(name: string | null) {
   const epoch = `settings-owner-${++settingsEpoch}`
   invalidateExecutionSnapshotGeneration(epoch, 0)
-  if (name !== null) hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+  if (name !== null) hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: 1,
     status: { project: name, workspace_root: `/fixture/${name}` },
   } as Parameters<typeof hydrateExecutionSnapshot>[0])
   return executionWorkspaceAuthority.peek()
@@ -63,7 +63,7 @@ import type { LogEntry, LogsData } from '../api/dashboard-logs'
 import { DashboardMain } from './dashboard-shell'
 import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route, navigate as navigateTo } from '../router'
-import { dashboardWsConnected } from '../dashboard-ws-state'
+import { dashboardObserverConnected } from '../dashboard-observer-state'
 import { tweaksDensity } from './tweaks-panel'
 import { notificationDeliveryError, notifyRules } from '../notifications'
 import {
@@ -175,6 +175,20 @@ vi.mock('../api/dashboard-config', () => ({
 
 vi.mock('../api/dashboard-logs', () => ({
   fetchLogs: apiMock.fetchLogs,
+}))
+
+vi.mock('../dashboard-logs-stream', () => ({
+  subscribeDashboardLogsStream: (request: unknown, reader: {
+    onFrame: (frame: { reset: boolean; data: LogsData; limit: number }) => void;
+    onError: (error: unknown) => void; onReset: () => void;
+  }) => {
+    let active = true
+    reader.onReset()
+    void Effect.runPromise(apiMock.fetchLogs(request)).then(data => {
+      if (active) reader.onFrame({ reset: true, data: data as LogsData, limit: 200 })
+    }, error => { if (active) reader.onError(error) })
+    return () => { active = false }
+  },
 }))
 
 vi.mock('../lib/runtime-config-refresh', () => ({
@@ -521,7 +535,7 @@ describe('SettingsSurface', () => {
   beforeEach(() => {
     const epoch = `settings-snapshot-${++settingsSnapshotEpoch}`
     invalidateExecutionSnapshotGeneration(epoch, 0)
-    hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+    hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: 1,
       status: { project: 'fixture', workspace_root: '/settings/fixture' },
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
     modelSetupResumeState.value = { kind: 'idle' }
@@ -2463,7 +2477,7 @@ describe('SettingsSurface', () => {
     function accept(name: string) {
       const epoch = `settings-refresh-${name}`
       invalidateExecutionSnapshotGeneration(epoch, 0)
-      hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: 1,
+      hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: 1,
         status: { project: name, workspace_root: `/settings/${name}` },
       } as Parameters<typeof hydrateExecutionSnapshot>[0])
     }
@@ -2523,7 +2537,7 @@ describe('SettingsSurface', () => {
     resetExactLaneActivitySessionsForTesting()
     resetRuntimeTomlSessionsForTesting()
     invalidateExecutionSnapshotGeneration(epoch, 0)
-    hydrateExecutionSnapshot({ execution_publication_epoch: epoch,
+    hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch,
       execution_publication_generation: 1, status: { project: 'test', workspace_root: '/settings-late-save' },
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
     const lanes = vi.spyOn(dashboardApi, 'fetchStandaloneLanes').mockResolvedValue(
@@ -2604,7 +2618,7 @@ describe('SettingsSurface', () => {
   it('opens the live runtime.toml editor from runtime management', async () => {
     resetRuntimeTomlSessionsForTesting()
     invalidateExecutionSnapshotGeneration('settings-open-editor', 0)
-    hydrateExecutionSnapshot({ execution_publication_epoch: 'settings-open-editor',
+    hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: 'settings-open-editor',
       execution_publication_generation: 1, status: { project: 'test', workspace_root: '/settings-open-editor' },
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
     const lanes = vi.spyOn(dashboardApi, 'fetchStandaloneLanes').mockResolvedValue(
@@ -2660,7 +2674,7 @@ describe('SettingsSurface shell route', () => {
     apiMock.fetchRuntimeProviders.mockReset()
     stubEmptyApi()
     dashboardLoading.value = false
-    dashboardWsConnected.value = true
+    dashboardObserverConnected.value = true
     namespaceTruthInitializing.value = false
     document.title = 'MASC Dashboard'
   })

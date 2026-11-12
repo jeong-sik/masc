@@ -1,3 +1,5 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { publishDashboardObservationChange } from '../../lib/observation-refresh'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render as preactRender } from 'preact'
@@ -31,6 +33,8 @@ function observedGoalList<T extends Goal>(list: T[]): T[] {
 }
 
 beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'activity-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'activity-fixture' }
   stubEmptyActivityFetch()
   clearTraces()
 })
@@ -38,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const container of renderedContainers) preactRender(null, container)
   renderedContainers.clear()
+  acceptedExecutionWorkspace.value = null
   vi.useRealTimers()
   vi.unstubAllGlobals()
   ideContextFocus.value = null
@@ -223,7 +228,7 @@ describe('IdeActivityPanel', () => {
       headers: { 'Content-Type': 'application/json' },
     }))
     await waitFor(() => {
-      expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('loaded')
+      expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('live')
     })
   })
 
@@ -515,7 +520,7 @@ describe('IdeActivityPanel', () => {
 
     const container = document.createElement('div')
     render(h(IdeActivityPanel, {
-      activeFile: 'lib/runtime.ml', codebase: 'github.com_x_masc', pollMs: 1_000,
+      activeFile: 'lib/runtime.ml', codebase: 'github.com_x_masc',
     }), container)
     const rowFor = (detail: string) =>
       [...container.querySelectorAll('.ide-activity-row')]
@@ -525,7 +530,8 @@ describe('IdeActivityPanel', () => {
     const olderFocus = ideContextFocus.value?.source_id
     expect(olderFocus).toBeTruthy()
 
-    await vi.advanceTimersByTimeAsync(1_000)
+    publishDashboardObservationChange({ topic: 'activity' })
+    await vi.advanceTimersByTimeAsync(0)
     await vi.waitFor(() => expect(rowFor('newer output')).toBeDefined())
     fireEvent.click(rowFor('newer output')!.querySelector<HTMLButtonElement>('.ide-activity-context-jump')!)
     expect(ideContextFocus.value?.source_id).not.toBe(olderFocus)
@@ -669,7 +675,7 @@ describe('IdeActivityPanel', () => {
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
   })
 
-  it('refreshes activity events when polling is enabled', async () => {
+  it('refreshes activity after an observation event and stays idle between changes', async () => {
     vi.useFakeTimers()
     const activityResponses = [
       {
@@ -727,17 +733,20 @@ describe('IdeActivityPanel', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', pollMs: 1_000 }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain('turn-1')
     })
     // Without a repo or keeper-lane scope there is no bridge fetch: the
     // server rejects unscoped /api/v1/ide/events, so only the activity
-    // graph is polled (one call per load).
+    // graph is read (one call per load).
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(60_000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    await vi.advanceTimersByTimeAsync(1_000)
+    publishDashboardObservationChange({ topic: 'activity' })
+    await vi.advanceTimersByTimeAsync(0)
     await vi.waitFor(() => {
       expect(container.querySelector('[aria-label="Open Goal goal-refresh"]')).not.toBeNull()
     })
@@ -785,7 +794,7 @@ describe('IdeActivityPanel', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', pollMs: 1_000 }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
 
     await vi.waitFor(() => {
       expect(container.textContent).toContain('turn-stable')
@@ -793,7 +802,8 @@ describe('IdeActivityPanel', () => {
     expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('live')
 
     vi.setSystemTime(new Date('2026-05-05T10:00:10Z'))
-    await vi.advanceTimersByTimeAsync(1_000)
+    publishDashboardObservationChange({ topic: 'activity' })
+    await vi.advanceTimersByTimeAsync(0)
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2)
     })

@@ -85,8 +85,9 @@ val github_callback_path : string
     not pass gets its 401 or 403 before the connect handler reads anything.
     The Keeper routes are judged the same way as [Manage_own_keeper] by
     {!Auth_preview.keeper_owner}, and the turn by
-    {!Auth_preview.keeper_owner_person}, which gives the namespace of the
-    person as well.
+    {!Auth_preview.keeper_turn_caller}, which gives the namespace of the
+    person and the token that authenticated the request as well: the turn
+    runs only inside the scope of that token.
 
     The account server ({!Server_accounts}) and the preview command
     register them. [env] is the environment of the process, from which a

@@ -1,9 +1,14 @@
-(** Task owners whose Keeper route needs inspection.
+(** Tasks an operator can look at: owners whose Keeper route needs inspection,
+    and completions that were submitted and have no verdict yet.
 
     A missing Keeper queue means that a verdict cannot be delivered to that
     queue. The owner may still be an active external session. An unreadable
     Keeper record is distinct from a missing queue. Neither observation is a
     question or proof that only an operator can move the Task.
+
+    A submission awaiting a verdict is listed whether its review is running,
+    has not started or has stopped. The list does not tell these apart; the
+    submission time does the ordering.
 
     A projection, not an authority: it reads the backlog every surface already
     reads and adds no state, no field and no gate. Nothing here decides
@@ -29,20 +34,29 @@ type item =
       ; since : string
       ; detail : string
       }
+  | Awaiting_verdict of
+      { task_id : string
+      ; title : string
+      ; producer : string
+      ; since : string  (** when the completion was submitted *)
+      ; verification_id : string
+      }
 
 val project :
   config:Workspace_utils_backend_setup.config -> Masc_domain.task list -> item list
-(** Oldest claim or start first. The producer route is
+(** Oldest claim, start or submission first. The producer route is
     resolved through {!Keeper_producer_route}, the same computation the
     rejection delivery uses, so a missing route means delivery cannot reach
-    that name through a Keeper queue. *)
+    that name through a Keeper queue. A submission awaiting a verdict is read
+    from the backlog alone. *)
 
 val task_id : item -> string
 
 val title : item -> string
 
 val waiting_since : item -> string
-(** The claim/start time; it does not establish when an owner stopped. *)
+(** The claim, start or submission time. It does not establish when an owner
+    or a review stopped. *)
 
 val summary : item -> string
 (** One line, for a surface that has one line. Written here rather than at each

@@ -1,6 +1,7 @@
 import { h } from 'preact'
 import { cleanup, render, waitFor } from '@testing-library/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import '@testing-library/jest-dom'
 
 const { fetchKeeperRuntimeTrace, fetchKeeperComposite } = vi.hoisted(() => ({
@@ -8,11 +9,6 @@ const { fetchKeeperRuntimeTrace, fetchKeeperComposite } = vi.hoisted(() => ({
   fetchKeeperComposite: vi.fn(),
 }))
 vi.mock('../api/keeper', () => ({ fetchKeeperRuntimeTrace, fetchKeeperComposite }))
-// Silence the visible-auto-refresh timer so only explicit (initial + nonce) fetches occur.
-vi.mock('../lib/auto-refresh', () => ({
-  DEFAULT_PANEL_REFRESH_MS: 30_000,
-  setupVisibleAutoRefresh: () => () => {},
-}))
 
 import { useKeeperRuntimeTraceEvidence } from './keeper-detail-hooks'
 import { bumpKeeperRuntimeTraceRefresh } from './keeper-runtime-trace-refresh'
@@ -24,7 +20,13 @@ function Probe({ name }: { name: string }): null {
 
 afterEach(() => {
   cleanup()
+  acceptedExecutionWorkspace.value = null
   vi.clearAllMocks()
+})
+
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'trace-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'trace-fixture' }
 })
 
 describe('useKeeperRuntimeTraceEvidence refresh nonce', () => {

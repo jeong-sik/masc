@@ -7,10 +7,6 @@ let () =
 module Lib = Masc
 
 open Alcotest
-(* Bypass the proactive execution cache warm-up guard so tests get the full
-   namespace-truth response instead of the "initializing" short-circuit. *)
-let () = Server_dashboard_http.seed_execution_cache_for_test ()
-
 let test_dir () =
   let tmp = Filename.temp_file "masc_dashboard_namespace_truth" "" in
   Sys.remove tmp;
@@ -111,13 +107,13 @@ let request target =
 (** Warm the execution cache so namespace-truth skips the "initializing" early
     return. Without this, proactive_first_cycle_pending is true and the handler
     returns a minimal {"status":"initializing"} JSON without namespace/execution/command data. *)
-let warm_execution_cache () =
+let warm_execution_cache ~state () =
   Server_dashboard_http_cache.mark_cached_surface_success
-    Server_dashboard_http.execution_cache
+    (Server_dashboard_http.execution_cache ~state)
     (`Assoc [("status", `String "ok")])
 
-let expire_execution_warmup () =
-  let surface = Server_dashboard_http.execution_cache in
+let expire_execution_warmup ~state () =
+  let surface = Server_dashboard_http.execution_cache ~state in
   Server_dashboard_http_cache.invalidate_cached_surface surface;
   let stale_attempt_ts = Unix.gettimeofday () -. 120.0 in
   Server_dashboard_http_cache.update_cached_surface surface (fun current ->
@@ -200,7 +196,7 @@ let test_a_held_tool_call_is_an_attention_row () =
       let clock = Eio.Stdenv.clock env in
       let registry = Masc.Keeper_tool_approval_registry.shared () in
       Eio.Switch.run (fun sw ->
-        warm_execution_cache ();
+        warm_execution_cache ~state ();
         check int "nothing held, nothing to answer" 0
           (held_call_rows (namespace_truth_json ~state ~sw ~clock));
         (* Park a wait the way a keeper turn does, answer it from another
@@ -251,7 +247,7 @@ let test_dashboard_namespace_truth_empty_workspace () =
          initialized workspace with nothing in it. *)
       ignore (Lib.Workspace.init (Lib.Mcp_server.workspace_config state) ~agent_name:None);
       Eio.Switch.run (fun sw ->
-        warm_execution_cache ();
+        warm_execution_cache ~state ();
         let json =
           Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
@@ -313,7 +309,7 @@ let test_dashboard_namespace_truth_execution_fixture () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
-      warm_execution_cache ();
+      warm_execution_cache ~state ();
       Eio.Switch.run (fun sw ->
         let json =
           Server_dashboard_http.dashboard_namespace_truth_http_json
@@ -335,7 +331,7 @@ let test_dashboard_namespace_truth_empty_workspace_focus_label () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
-      warm_execution_cache ();
+      warm_execution_cache ~state ();
       Eio.Switch.run (fun sw ->
         let json =
           Server_dashboard_http.dashboard_namespace_truth_http_json
@@ -388,7 +384,7 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
             Lib.Keeper_keepalive.stop_keepalive "alpha")
           (fun () ->
             create_keeper env sw state "alpha";
-            warm_execution_cache ();
+            warm_execution_cache ~state ();
             let json =
               Server_dashboard_http.dashboard_namespace_truth_http_json
                 ~state ~sw ~clock:(Eio.Stdenv.clock env)
@@ -451,7 +447,7 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
             Lib.Keeper_keepalive.stop_keepalive "alpha")
           (fun () ->
             create_keeper env sw state "alpha";
-            warm_execution_cache ();
+            warm_execution_cache ~state ();
             let json =
               Server_dashboard_http.dashboard_namespace_truth_http_json
                 ~state ~sw ~clock:(Eio.Stdenv.clock env)
@@ -478,7 +474,7 @@ let test_operator_pending_confirm_shape_matches_namespace_truth () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
-      warm_execution_cache ();
+      warm_execution_cache ~state ();
       Eio.Switch.run (fun sw ->
         let json =
           Server_dashboard_http.dashboard_namespace_truth_http_json
@@ -504,7 +500,7 @@ let test_namespace_truth_cached_snapshot_matches_http_projection_blocks () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
-      warm_execution_cache ();
+      warm_execution_cache ~state ();
       Server_dashboard_http.warm_shell_cache state;
       Eio.Switch.run (fun sw ->
         let http_json =
@@ -541,7 +537,7 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       let config = Lib.Mcp_server.workspace_config state in
-      warm_execution_cache ();
+      warm_execution_cache ~state ();
       let cached_shell =
         `Assoc
           [
@@ -564,7 +560,8 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
             ("configured_keepers", `Int 2);
           ]
       in
-      Atomic.set Server_dashboard_http.last_good_shell cached_shell;
+      Server_dashboard_http_execution_surfaces.publish_shell_cache_success ~state
+        ~scope:(Lib.Mcp_server.workspace_scope state) ~light:false cached_shell;
       Atomic.set Server_dashboard_http.shell_warmed true;
       Eio.Switch.run (fun sw ->
         let json =
@@ -595,14 +592,12 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
 let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =
   let dir = test_dir () in
   Fun.protect
-    ~finally:(fun () ->
-      warm_execution_cache ();
-      cleanup_dir dir)
+    ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
-      expire_execution_warmup ();
+      expire_execution_warmup ~state ();
       Eio.Switch.run (fun sw ->
         let json =
           Server_dashboard_http.dashboard_namespace_truth_http_json
@@ -633,7 +628,7 @@ let test_last_good_shell_fallback_preserves_counts () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:dir () in
       ignore (Lib.Workspace.init (Lib.Mcp_server.workspace_config state) ~agent_name:None);
-      warm_execution_cache ();
+      warm_execution_cache ~state ();
       (* Warm the shell cache so last_good_shell gets populated. *)
       Server_dashboard_http.warm_shell_cache state;
       let last_good = Atomic.get Server_dashboard_http.last_good_shell in
@@ -745,7 +740,8 @@ let test_warm_dashboard_surfaces_populates_caches () =
       check bool "keeper_memory_health cache key populated" true
         (Option.is_some (Dashboard_cache.peek keeper_health_key));
       let board_key =
-        Printf.sprintf "board:memory:-;-;hot;false;false;100;0;%s;-" dir
+        Printf.sprintf "board:memory:%s;-;-;hot;false;false;100;0;%s;-"
+          Masc_board_handlers.Board_access.(cache_key Operator) dir
       in
       check bool "board cache key populated" true
         (Option.is_some (Dashboard_cache.peek_payload board_key)))

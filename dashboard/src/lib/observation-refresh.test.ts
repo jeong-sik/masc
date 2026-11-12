@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiRequestError, clearStoredToken, setStoredToken } from '../api/core'
 import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 import { createManagedAsyncResource } from './async-state'
-import { confirmRuntimeTestWorkspace } from './runtime-workspace.test-fixture'
+import { confirmRuntimeTestWorkspace, RUNTIME_TEST_OBSERVER_INSTANCE } from './runtime-workspace.test-fixture'
 import {
   publishDashboardObservationChange,
   publishDashboardObservationRecovery,
   selectObservationReadFailure,
   setupObservationRefresh,
   ObservationPending,
+  retainObservationReadFailure,
 } from './observation-refresh'
 
 const disposers: Array<() => void> = []
@@ -20,6 +21,7 @@ beforeEach(() => {
   expect(acceptedExecutionWorkspace.peek()).toEqual({
     epoch: expect.any(String), workspaceRoot: '/fixture/runtime-consumer',
     connectionGeneration: expect.any(Number),
+    observerInstanceId: RUNTIME_TEST_OBSERVER_INSTANCE,
   })
 })
 
@@ -32,9 +34,12 @@ afterEach(() => {
 })
 
 describe('authoritative observation reads', () => {
-  it('waits for a pending producer without creating a retry timer', async () => {
+  it.each([
+    () => new ObservationPending('projection is initializing'),
+    () => retainObservationReadFailure(new Error('store owns failed read debt')),
+  ])('waits for its producer or store recovery without a duplicate retry timer', async failure => {
     vi.useFakeTimers()
-    const read = vi.fn(async () => { throw new ObservationPending('producer is pending') })
+    const read = vi.fn(async () => { throw failure() })
     disposers.push(setupObservationRefresh(read, { topics: ['keeper_composite'] }))
     await flush()
     await vi.advanceTimersByTimeAsync(300_000)
@@ -173,7 +178,7 @@ describe('authoritative observation reads', () => {
     publishDashboardObservationChange({ topic: 'keeper_composite' })
     await flush()
     acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'workspace-b', workspaceRoot: '/workspace-b',
-      connectionGeneration: 1 })
+      connectionGeneration: 1, observerInstanceId: RUNTIME_TEST_OBSERVER_INSTANCE })
     expect(evidence).toBeNull()
     expect(reads[1]!.signal.aborted).toBe(true)
     await flush()

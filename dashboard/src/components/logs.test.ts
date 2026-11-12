@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preac
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Effect } from 'effect'
 import type { LogEntry, LogsData } from '../api/dashboard-logs'
+import type { LogsStreamFrame } from '../api/schemas/logs'
 import {
   deltaMergeCap,
   logDiagnosticCause,
@@ -76,7 +77,25 @@ async function loadLogs(
       return logData(response.entries, response)
     }),
   }))
-  return import('./logs')
+  const readFixture = fetchLogs as (request: unknown) => Promise<Partial<LogsData> & { entries: readonly LogEntry[] }>
+  const readers = new Set<{ onFrame: (frame: LogsStreamFrame) => void }>()
+  vi.doMock('../dashboard-logs-stream', () => ({
+    subscribeDashboardLogsStream: (request: { limit?: number }, reader: {
+      onFrame: (frame: LogsStreamFrame) => void; onError: (error: Error) => void; onReset: () => void;
+    }) => {
+      let active = true
+      readers.add(reader)
+      reader.onReset()
+      void Promise.resolve().then(() => active ? readFixture(request) : undefined).then(response => {
+        if (active && response) reader.onFrame({ reset: true, data: logData(response.entries, response), limit: request.limit ?? 200 })
+      }, error => { if (active) reader.onError(error) })
+      return () => { active = false; readers.delete(reader) }
+    },
+  }))
+  const module = await import('./logs')
+  return { ...module, emitLogFrame: (data: LogsData, reset = false) => {
+    for (const reader of readers) reader.onFrame({ reset, data, limit: 200 })
+  } }
 }
 
 describe('log diagnostics', () => {
@@ -233,7 +252,7 @@ describe('LogViewer Code links', () => {
     window.location.hash = ''
   })
 
-  it('serializes older paging before the next delta refresh', async () => {
+  it('keeps native deltas while older paging completes without a periodic delta GET', async () => {
     vi.useFakeTimers()
     const olderPage = deferred<{ total: number; entries: LogEntry[] }>()
     const fetchLogs = vi.fn((opts?: { sinceSeq?: number; beforeSeq?: number }) => {
@@ -254,7 +273,7 @@ describe('LogViewer Code links', () => {
         ],
       })
     })
-    const { LogViewer } = await loadLogs(fetchLogs)
+    const { LogViewer, emitLogFrame } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
     await waitFor(() => expect(container.textContent).toContain('oldest visible'))
@@ -271,9 +290,10 @@ describe('LogViewer Code links', () => {
     )
 
     await act(async () => {
+      emitLogFrame(logData([entry({ seq: 11, module: 'Keeper', message: 'delta fresh' })]))
       await vi.advanceTimersByTimeAsync(3000)
     })
-    expect(container.textContent).not.toContain('delta fresh')
+    expect(container.textContent).toContain('delta fresh')
 
     await act(async () => {
       olderPage.resolve({
@@ -294,7 +314,28 @@ describe('LogViewer Code links', () => {
       expect(container.textContent).toContain('oldest visible')
       expect(container.textContent).toContain('older page')
     })
-    expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ sinceSeq: 10 }))
+    expect(fetchLogs).toHaveBeenCalledTimes(2)
+    expect(fetchLogs).not.toHaveBeenCalledWith(expect.objectContaining({ sinceSeq: expect.any(Number) }))
+  })
+
+  it('keeps a native row when an older manual snapshot returns late', async () => {
+    const initial = logData([entry({ seq: 10, message: 'initial row' })], { ring: { startSeq: 0, total: 11, droppedBefore: false } })
+    const manual = deferred<LogsData>()
+    const fetchLogs = vi.fn().mockResolvedValueOnce(initial).mockReturnValueOnce(manual.promise)
+    const { LogViewer, emitLogFrame } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+    await waitFor(() => expect(container.textContent).toContain('initial row'))
+    await act(async () => { fireEvent.click(container.querySelector('.logs-refresh-btn')!) })
+    await waitFor(() => expect(fetchLogs).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      emitLogFrame(logData([entry({ seq: 11, message: 'new native row' })], { ring: { startSeq: 0, total: 12, droppedBefore: false } }))
+    })
+    await act(async () => { manual.resolve(initial) })
+    await waitFor(() => {
+      expect(container.textContent).toContain('new native row')
+      expect(container.textContent).toContain('initial row')
+    })
+    expect(fetchLogs).toHaveBeenCalledTimes(2)
   })
 
   it('links safe structured log file details back to the Code IDE route', async () => {
@@ -475,7 +516,6 @@ describe('LogViewer Code links', () => {
     await waitFor(() => expect(container.textContent).toContain('tool event'))
     expect(container.textContent).toContain('turn event')
     expect(container.textContent).toContain('lifecycle event')
-    expect(container.querySelector('.v2-logs-live')?.textContent).toContain('masc-mcp · 3s polling')
 
     const toolChip = container.querySelector('[data-testid="logs-filter-tool"]') as HTMLButtonElement
     await act(async () => {

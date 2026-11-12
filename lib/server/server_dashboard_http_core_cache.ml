@@ -135,6 +135,35 @@ let dashboard_query_cache_key config prefix fields =
   dashboard_cache_key config prefix (dashboard_query_cache_suffix fields)
 ;;
 
+let tool_metrics_series_cache_prefix ~base_path =
+  partition_cache_key
+    ~partition:(cache_partition_of_base_path ~base_path)
+    "tool_metrics_series" ""
+;;
+
+let tool_metrics_series_cache_key (config : Workspace.config) fields =
+  tool_metrics_series_cache_prefix ~base_path:config.base_path
+  ^ dashboard_query_cache_suffix fields
+;;
+
+let invalidate_tool_metrics_series ~base_path =
+  Dashboard_cache.invalidate_prefix (tool_metrics_series_cache_prefix ~base_path)
+;;
+
+let ide_file_activity_cache_prefix ~base_path =
+  partition_cache_key
+    ~partition:(cache_partition_of_base_path ~base_path)
+    "ide_file_activity" ""
+;;
+
+let ide_file_activity_cache_key ~base_path fields =
+  ide_file_activity_cache_prefix ~base_path ^ dashboard_query_cache_suffix fields
+;;
+
+let invalidate_ide_file_activity ~base_path =
+  Dashboard_cache.invalidate_prefix (ide_file_activity_cache_prefix ~base_path)
+;;
+
 (* Keyed by base path rather than config: the schedule store's change observer
    is handed only the base path of the workspace it wrote. *)
 let scheduled_automation_cache_key ~base_path =
@@ -155,16 +184,36 @@ let invalidate_scheduled_automation ~base_path =
 
 let dashboard_briefing_timeout_s = Env_config_runtime.Dashboard.briefing_timeout_sec
 
-let attach_projection_diagnostics json diagnostics =
+let unique_diagnostic_fields fields =
+  let rec collect seen reversed = function
+    | [] -> List.rev reversed
+    | ((key, _) as field) :: rest ->
+        if List.mem key seen then collect seen reversed rest
+        else collect (key :: seen) (field :: reversed) rest
+  in
+  collect [] [] fields
+;;
+
+let attach_projection_diagnostics json metadata =
   match json with
-  | `Assoc fields -> `Assoc (("projection_diagnostics", diagnostics) :: fields)
+  | `Assoc fields ->
+      let original = match List.assoc_opt "projection_diagnostics" fields with
+        | Some (`Assoc original) -> original
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> [] in
+      (* These fields are the producer's same-read outcome, including an
+         explicit null error on Complete. Performance metadata cannot stamp
+         or override that authority. *)
+      let metadata = List.filter (fun (key, _) ->
+        key <> "read_completeness" && key <> "read_error") metadata in
+      let diagnostics = `Assoc (unique_diagnostic_fields (metadata @ original)) in
+      `Assoc (("projection_diagnostics", diagnostics)
+        :: List.filter (fun (key, _) -> key <> "projection_diagnostics") fields)
   | other -> other
 ;;
 
-let projection_diagnostics_json ~surface ~started_at ~extra json =
+let projection_diagnostics_fields ~surface ~started_at ~extra json =
   let build_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
   let payload_bytes = String.length (Yojson.Safe.to_string json) in
-  `Assoc
     ([ "surface", `String surface
      ; "build_ms", `Int build_ms
      ; "payload_bytes", `Int payload_bytes
@@ -176,5 +225,5 @@ let projection_diagnostics_json ~surface ~started_at ~extra json =
 let with_projection_diagnostics ~surface ~started_at ~extra json =
   attach_projection_diagnostics
     json
-    (projection_diagnostics_json ~surface ~started_at ~extra json)
+    (projection_diagnostics_fields ~surface ~started_at ~extra json)
 ;;

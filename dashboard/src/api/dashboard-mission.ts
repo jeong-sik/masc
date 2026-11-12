@@ -1,7 +1,7 @@
 // MASC Dashboard — mission/briefing/planning fetchers.
 // Extracted from dashboard.ts. Public symbols re-exported from dashboard.ts.
 
-import { get } from './core'
+import { get, type AbortableRequestOptions } from './core'
 import { GoalSourceUnavailableError, goalSourceUnavailable } from './dashboard-goals'
 import type {
   DashboardMissionResponse,
@@ -9,12 +9,12 @@ import type {
   DashboardPlanningResponse,
 } from '../types'
 
-export function fetchDashboardBriefing(): Promise<DashboardMissionResponse> {
-  return get('/api/v1/dashboard/briefing')
+export function fetchDashboardBriefing(opts?: AbortableRequestOptions): Promise<DashboardMissionResponse> {
+  return get('/api/v1/dashboard/briefing', { signal: opts?.signal, consumeWithinTimeout: true })
 }
 
-export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
-  return fetchDashboardBriefing()
+export function fetchDashboardMission(opts?: AbortableRequestOptions): Promise<DashboardMissionResponse> {
+  return fetchDashboardBriefing(opts)
 }
 
 export function fetchDashboardMissionBriefing(

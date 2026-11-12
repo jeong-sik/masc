@@ -30,6 +30,7 @@
   http_client_phase_observer
   http_client_diagnostics
   http_client_cache
+  request_wire
   http_retry_after
   provider_admission_state
   provider_registry_state

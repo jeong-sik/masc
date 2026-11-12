@@ -49,6 +49,23 @@ val series_tool_filter : string option -> (string option, string) Result.t
     rows by internal name, so [Execute] reads as [tool_execute]. An internal or
     unknown name is unchanged. *)
 
+type tool_series_request = {
+  since_hours : float;
+  width : Tool_metrics_series.width;
+  utc_offset_min : int;
+  tool_name : string option;
+}
+
+val tool_series_request : Httpun.Request.t -> (tool_series_request, string) result
+val tool_series_window :
+  tool_series_request -> until:float -> (Tool_metrics_series.window, string) result
+(** The REST reader and mounted series stream share query validation and
+    the exact sliding-window shape. *)
+
+val tool_series_cache_key : Masc.Workspace.config -> tool_series_request -> string
+(** The REST read and native query deadline share this exact filtered key.
+    Writer invalidation still clears the whole workspace series family. *)
+
 val agent_activity_http_json :
   config:Masc.Workspace.config -> hours:float -> Yojson.Safe.t
 (** Per-agent tool-call rollup for [GET /api/v1/agent-activity], cached per

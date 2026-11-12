@@ -392,7 +392,7 @@ let overlay ?(ko = false) ~now ~localtime ~cols t =
     match t.stuck with
     | Not_read -> [ quiet "not loaded yet" ]
     | Read_failed reason -> [ failure ~cols reason ]
-    | Read [] -> [ quiet "no task owner route needs inspection" ]
+    | Read [] -> [ quiet "no task is on the operator list" ]
     (* Every row, oldest first. The panel scrolls, and a row the cursor
        cannot reach is work the operator cannot open. *)
     | Read rows ->
@@ -429,14 +429,14 @@ let overlay ?(ko = false) ~now ~localtime ~cols t =
   let heading text = { tone = Heading; text; goes_to = Nowhere } in
   let blank = { tone = Quiet; text = ""; goes_to = Nowhere } in
   (heading "Coming up" :: wakes)
-  (* The task route section remains inspectable but is not a request. *)
+  (* The operator task list remains inspectable but is not a request. *)
   @ [ blank; heading "Holding a call" ]
   @ questions
   @ [ blank; heading "Answer a question" ]
   @ asked
   @ [ blank; heading "Confirm a goal" ]
   @ goals
-  @ [ blank; heading "Task owner routes" ]
+  @ [ blank; heading "Tasks on the operator list" ]
   @ stuck
 ;;
 

@@ -1,3 +1,20 @@
+type observation = Dashboard_projection_read.observation = {
+  json : Yojson.Safe.t;
+  next_deadline_unix : float option;
+  completeness : Dashboard_projection_read.completeness;
+}
+
+val observe_current :
+  ?actor:string -> ?fixture:string -> ?light:bool -> config:Workspace.config ->
+  sw:Eio.Switch.t -> clock:'a Eio.Time.clock ->
+  proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option -> unit -> observation
+(** Source-triggered current metadata, with policy/window deadlines from the
+    same observation. It bypasses the actor and nested operator metadata TTLs.
+    Keeper roster/row failures preserve readable rows with [Partial]
+    completeness instead of settling an empty fleet as successful.
+    The caller owns the existing compute timeout and failure retry policy;
+    this function never converts a timeout into a successful JSON envelope. *)
+
 val json :
   ?actor:string ->
   ?fixture:string ->

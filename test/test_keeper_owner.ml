@@ -5591,6 +5591,50 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
             check bool ("agent status omits the submitted " ^ field) false
               (List.mem field (field_names status)))
          [ "input"; "source" ];
+       (* Several operations in one call: each entry is what the one-operation
+          tool returned, an operation that is not found answers with its own
+          error without stopping the others, and a malformed element rejects
+          the call and names its position. *)
+       let missing =
+         `Assoc [ "target", target; "operation_id", `String "op-never-submitted" ]
+       in
+       let many =
+         Keeper_tool_surface_ops.keeper_delegate_status_many_body
+           ~config
+           ~caller:"agent-operation-caller"
+           (`Assoc [ "operations", `List [ reference; missing; reference ] ])
+       in
+       check bool "reading several operations succeeds" true (Tool_result.is_success many);
+       (match Tool_result.data many with
+        | `Assoc [ ("results", `List [ first; absent; last ]) ] ->
+          let data entry = Yojson.Safe.to_string (Yojson.Safe.Util.member "data" entry) in
+          check string "the first entry is the one-operation read"
+            (Yojson.Safe.to_string (Tool_result.data status)) (data first);
+          check int "the entries keep the order given" 2
+            Yojson.Safe.Util.(last |> member "index" |> to_int);
+          check string "an operation that is not found says so" "unknown_operation"
+            Yojson.Safe.Util.(absent |> member "error" |> member "error" |> to_string);
+          check bool "the entry that failed carries no data" true
+            (Yojson.Safe.Util.member "data" absent = `Null);
+          check string "the entry after it is still read" (data first) (data last)
+        | other -> fail ("unexpected results: " ^ Yojson.Safe.to_string other));
+       let malformed =
+         Keeper_tool_surface_ops.keeper_delegate_status_many_body
+           ~config
+           ~caller:"agent-operation-caller"
+           (`Assoc [ "operations", `List [ reference; `String "op" ] ])
+       in
+       check bool "a malformed element rejects the call" false
+         (Tool_result.is_success malformed);
+       check bool "the rejection names the element" true
+         (String_util.contains_substring
+            (Yojson.Safe.to_string (Tool_result.data malformed)) "operations[1]");
+       check bool "an empty list rejects the call" false
+         (Tool_result.is_success
+            (Keeper_tool_surface_ops.keeper_delegate_status_many_body
+               ~config
+               ~caller:"agent-operation-caller"
+               (`Assoc [ "operations", `List [] ])));
        let listed =
          Keeper_tool_surface_ops.keeper_delegate_list_body
            ~config

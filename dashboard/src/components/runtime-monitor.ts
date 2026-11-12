@@ -3,11 +3,9 @@ import { useEffect, useMemo } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   fetchDashboardRuntimeProbe,
-  fetchRuntimeModelMetrics,
   fetchRuntimeProviders,
   type DashboardRuntimeProbeResponse,
   type DashboardRuntimeModelMetric,
-  type DashboardRuntimeModelMetricsResponse,
   type DashboardRuntimeProviderProbe,
   type DashboardRuntimeProviderSnapshot,
   type DashboardRuntimeProvidersResponse,
@@ -36,6 +34,7 @@ import {
 } from '../lib/runtime-provider-summary'
 import { OfficialClientSessionPanel } from './official-client-session-panel'
 import { OfficialClientLoginProbe } from './official-client-login-probe'
+import { useModelMetrics } from '../lib/use-model-metrics'
 
 /**
  * Filters model metrics by case-insensitive substring match against
@@ -84,7 +83,6 @@ function sortModelMetricsByUrgency(
 
 interface RuntimeData {
   providers: DashboardRuntimeProvidersResponse | null
-  metrics: DashboardRuntimeModelMetricsResponse | null
   probe: DashboardRuntimeProbeResponse | null
   probeError: string | null
 }
@@ -127,19 +125,17 @@ const COVERAGE_STAGE_LABELS: Record<string, string> = {
 
 async function loadRuntimeData(
   resource: ManagedAsyncResource<RuntimeData>,
-  windowMinutes: number,
   forceProbe = false,
 ) {
   await resource.load(async (signal) => {
     const probeResult = fetchDashboardRuntimeProbe(forceProbe, { signal })
       .then(probe => ({ probe, probeError: null }))
       .catch(error => ({ probe: null, probeError: errorToString(error) }))
-    const [providers, metrics, probe] = await Promise.all([
+    const [providers, probe] = await Promise.all([
       fetchRuntimeProviders({ signal }),
-      fetchRuntimeModelMetrics(windowMinutes, 5, { signal }),
       probeResult,
     ])
-    return { providers, metrics, probe: probe.probe, probeError: probe.probeError }
+    return { providers, probe: probe.probe, probeError: probe.probeError }
   })
 }
 
@@ -808,18 +804,25 @@ export function RuntimeMonitor() {
   const expandedModel = useSignal<string | null>(null)
   const modelSearch = useSignal('')
 
-  const load = (forceProbe = false) => loadRuntimeData(resource, windowMinutes.value, forceProbe)
+  const metricsQuery = useModelMetrics({ windowMinutes: windowMinutes.value, bucketMinutes: 5 })
+  const load = (forceProbe = false) => {
+    metricsQuery.refresh()
+    return loadRuntimeData(resource, forceProbe)
+  }
 
   useEffect(() => {
-    void loadRuntimeData(resource, windowMinutes.value)
+    void loadRuntimeData(resource)
     return () => {
       resource.cancel()
     }
-  }, [resource, windowMinutes.value])
+  }, [resource])
 
   const current = resource.state.value
   const providers = current.data?.providers ?? null
-  const metrics = current.data?.metrics ?? null
+  const metrics = metricsQuery.state.kind === 'ready' ? metricsQuery.state.value : null
+  const loading = current.loading || metricsQuery.state.kind === 'loading'
+  const error = current.error ?? (metricsQuery.state.kind === 'error' ? metricsQuery.state.message
+    : metricsQuery.state.kind === 'ready' ? metricsQuery.state.readError : null)
   const probe = current.data?.probe ?? null
   const probeError = current.data?.probeError ?? null
   const providerProbes = providerProbeMap(probe)
@@ -859,14 +862,14 @@ export function RuntimeMonitor() {
           ariaLabel="runtime snapshot 새로고침"
           onClick=${() => void load(true)}
         >새로고침<//>
-        ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
+        ${loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
       </div>
 
-      ${current.error
-        ? html`<${ErrorState} message=${current.error} />`
+      ${error
+        ? html`<${ErrorState} message=${error} />`
         : null}
 
-      ${current.loading && !providers && !metrics
+      ${loading && !providers && !metrics
         ? html`<${LoadingState}>runtime snapshot 불러오는 중...<//>`
         : null}
 

@@ -105,7 +105,8 @@ let detect_idle_with_pending ~(now : float)
 
 (** Keeper routing observations shared with rejection delivery. A missing
     route is not proof that the owner has stopped, so neither case is graded
-    as a critical abandoned task. *)
+    as a critical abandoned task. A submission awaiting a verdict is [Info]:
+    the list does not know whether its review is running. *)
 let detect_operator_tasks (items : Operator_task_attention.item list)
     : attention_item list =
   List.map
@@ -114,6 +115,7 @@ let detect_operator_tasks (items : Operator_task_attention.item list)
          match item with
          | Operator_task_attention.Held_without_keeper_route _ -> Warning
          | Operator_task_attention.Producer_record_unreadable _ -> Warning
+         | Operator_task_attention.Awaiting_verdict _ -> Info
        in
        { severity
        ; summary = Operator_task_attention.summary item

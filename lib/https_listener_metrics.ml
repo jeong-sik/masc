@@ -89,31 +89,67 @@ let accept_errors = Atomic.make 0
 let last_accept_unix : float option Atomic.t = Atomic.make None
 let last_error : string option Atomic.t = Atomic.make None
 
+type source_listener = { notify : unit -> unit }
+let source_listeners : source_listener list Atomic.t = Atomic.make []
+let source_notification_failures = Atomic.make 0
+
+let rec update_source_listeners update =
+  let previous = Atomic.get source_listeners in
+  if not (Atomic.compare_and_set source_listeners previous (update previous)) then
+    update_source_listeners update
+;;
+
+let subscribe_source_changed notify =
+  let listener = { notify } in
+  update_source_listeners (fun previous -> listener :: previous);
+  fun () -> update_source_listeners (List.filter (fun current -> current != listener))
+;;
+
+let notify_source_changed () =
+  List.iter (fun listener ->
+    match listener.notify () with
+    | () -> ()
+    | exception _ ->
+      (* cancel-guard-ok: preserve the lifecycle source result. *)
+      ignore (Atomic.fetch_and_add source_notification_failures 1))
+    (Atomic.get source_listeners)
+;;
+
+let with_source_change update = Fun.protect ~finally:notify_source_changed update
+
+(* Writes a state cell and says whether its value moved; see
+   [Transport_metrics.cell_moved]. A connection notifies only when it moved
+   the listener's status or last error. *)
+let cell_moved cell value = Atomic.exchange cell value <> value
+
 let set_active_gauge value =
   Otel_metric_store.set_gauge metric_active_connections (float_of_int (max 0 value))
 ;;
 
 let configure ~port ~certificate =
-  Atomic.set port_cell (Some port);
-  Atomic.set certificate_cell (Some certificate);
-  Atomic.set status_cell Not_started
+  with_source_change (fun () ->
+    Atomic.set port_cell (Some port);
+    Atomic.set certificate_cell (Some certificate);
+    Atomic.set status_cell Not_started)
 ;;
 
 let record_bind_failure ~error =
-  Atomic.set status_cell Bind_failed;
-  Atomic.set last_error (Some error)
+  with_source_change (fun () ->
+    Atomic.set status_cell Bind_failed;
+    Atomic.set last_error (Some error))
 ;;
 
-let record_started () = Atomic.set status_cell Listening
-let record_stopped () = Atomic.set status_cell Stopped
+let record_started () = with_source_change (fun () -> Atomic.set status_cell Listening)
+let record_stopped () = with_source_change (fun () -> Atomic.set status_cell Stopped)
 
 let record_accept () =
-  Atomic.set status_cell Listening;
+  let status_moved = cell_moved status_cell Listening in
+  let error_cleared = cell_moved last_error None in
   Atomic.set last_accept_unix (Some (Unix.gettimeofday ()));
-  Atomic.set last_error None;
   ignore (Atomic.fetch_and_add accepted 1);
   Otel_metric_store.inc_counter metric_accepts ();
-  set_active_gauge (Atomic.fetch_and_add active 1 + 1)
+  set_active_gauge (Atomic.fetch_and_add active 1 + 1);
+  if status_moved || error_cleared then notify_source_changed ()
 ;;
 
 let rec dec_active () =
@@ -144,10 +180,11 @@ let record_handshake_failure () =
 ;;
 
 let record_accept_error ~error =
-  Atomic.set status_cell Accept_error;
-  Atomic.set last_error (Some error);
+  let status_moved = cell_moved status_cell Accept_error in
+  let error_moved = cell_moved last_error (Some error) in
   ignore (Atomic.fetch_and_add accept_errors 1);
-  Otel_metric_store.inc_counter metric_accept_errors ()
+  Otel_metric_store.inc_counter metric_accept_errors ();
+  if status_moved || error_moved then notify_source_changed ()
 ;;
 
 let status () = Atomic.get status_cell
@@ -182,6 +219,7 @@ let json ?now () =
     ; "alpn_none_total", `Int (Atomic.get alpn_none)
     ; "handshake_failures_total", `Int (Atomic.get handshake_failures)
     ; "accept_errors_total", `Int (Atomic.get accept_errors)
+    ; "source_notification_failures", `Int (Atomic.get source_notification_failures)
     ; "last_accept_unix", Json_util.float_opt_to_json last_accept_unix
     ; "last_accept_age_seconds", Json_util.float_opt_to_json last_accept_age_seconds
     ; "last_error", Json_util.string_opt_to_json (Atomic.get last_error)

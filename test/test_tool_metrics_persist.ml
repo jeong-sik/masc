@@ -47,13 +47,13 @@ let string_field key json =
 let test_enqueue_writes_directly_to_sqlite () =
   with_tmp_dir (fun base_path ->
     P.enqueue
-      ~masc_root:(masc_root base_path)
+      ~base_path
       (make_result ~name:"alpha" ~success:true ~duration_ms:10.0);
     P.enqueue
-      ~masc_root:(masc_root base_path)
+      ~base_path
       (make_result ~name:"alpha" ~success:false ~duration_ms:5.0);
     P.enqueue
-      ~masc_root:(masc_root base_path)
+      ~base_path
       (R.Deferred
          { R.retained_artifacts = []
          ; tool_name = "alpha"
@@ -63,7 +63,7 @@ let test_enqueue_writes_directly_to_sqlite () =
          ; duration_ms = 3.0
          });
     P.enqueue
-      ~masc_root:(masc_root base_path)
+      ~base_path
       (make_result ~name:"beta" ~success:true ~duration_ms:20.0);
     let summary =
       Tool_metrics_store.summary ~masc_root:(masc_root base_path)
@@ -126,10 +126,10 @@ let test_retained_metric_time_windows () =
 let test_restart_hydrates_without_duplicates () =
   with_tmp_dir (fun base_path ->
     P.enqueue
-      ~masc_root:(masc_root base_path)
+      ~base_path
       (make_result ~name:"alpha" ~success:true ~duration_ms:10.0);
     P.enqueue
-      ~masc_root:(masc_root base_path)
+      ~base_path
       (R.Deferred
          { R.retained_artifacts = []
          ; tool_name = "alpha"
@@ -139,12 +139,12 @@ let test_restart_hydrates_without_duplicates () =
          ; duration_ms = 20.0
          });
     P.enqueue
-      ~masc_root:(masc_root base_path)
+      ~base_path
       (make_result ~name:"beta" ~success:false ~duration_ms:30.0);
     P.reset_for_testing ();
     Tool_metrics.clear ();
     let report =
-      P.hydrate ~masc_root:(masc_root base_path) ~retention_days:30
+      P.hydrate ~base_path ~retention_days:30
       |> get_ok "first hydrate"
     in
     Alcotest.(check int) "three rows loaded" 3 report.loaded_records;
@@ -156,7 +156,7 @@ let test_restart_hydrates_without_duplicates () =
     let beta = Option.get (Tool_metrics.stats_for "beta") in
     Alcotest.(check int) "beta failed restored" 1 beta.failure_count;
     let second =
-      P.hydrate ~masc_root:(masc_root base_path) ~retention_days:30
+      P.hydrate ~base_path ~retention_days:30
       |> get_ok "second hydrate"
     in
     Alcotest.(check int) "second load sees same rows" 3 second.loaded_records;
@@ -181,11 +181,11 @@ let insert_old_row ~base_path =
 let test_hydrate_prunes_expired_rows () =
   with_tmp_dir (fun base_path ->
     P.enqueue
-      ~masc_root:(masc_root base_path)
+      ~base_path
       (make_result ~name:"current" ~success:true ~duration_ms:2.0);
     insert_old_row ~base_path;
     let report =
-      P.hydrate ~masc_root:(masc_root base_path) ~retention_days:30
+      P.hydrate ~base_path ~retention_days:30
       |> get_ok "hydrate after prune"
     in
     Alcotest.(check int) "one expired row pruned" 1 report.pruned_records;
@@ -220,10 +220,10 @@ let count_rows ~masc_root table =
 let test_hydrate_prunes_the_sizes_of_expired_rows () =
   with_tmp_dir (fun base_path ->
     let masc_root = masc_root base_path in
-    P.enqueue ~masc_root (make_result ~name:"current" ~success:true ~duration_ms:2.0);
+    P.enqueue ~base_path (make_result ~name:"current" ~success:true ~duration_ms:2.0);
     insert_old_row ~base_path;
     Alcotest.(check int) "a size for each row before pruning" 2 (count_rows ~masc_root "tool_metric_result_sizes");
-    ignore (P.hydrate ~masc_root ~retention_days:30 |> get_ok "hydrate after prune");
+    ignore (P.hydrate ~base_path ~retention_days:30 |> get_ok "hydrate after prune");
     Alcotest.(check int) "events after pruning" 1 (count_rows ~masc_root "tool_metric_events");
     Alcotest.(check int) "sizes after pruning" 1 (count_rows ~masc_root "tool_metric_result_sizes"))
 
@@ -243,8 +243,8 @@ let test_enqueue_stores_the_size_of_the_result_message () =
         }
     in
     Alcotest.(check string) "the message the size is taken from" message (R.message result);
-    P.enqueue ~masc_root result;
-    P.enqueue ~masc_root (make_result ~name:"empty" ~success:false ~duration_ms:1.0);
+    P.enqueue ~base_path result;
+    P.enqueue ~base_path (make_result ~name:"empty" ~success:false ~duration_ms:1.0);
     let now = Time_compat.now () in
     let window =
       Tool_metrics_series.window
@@ -268,13 +268,13 @@ let test_enqueue_stores_the_size_of_the_result_message () =
 let test_multidomain_writes_are_serialized () =
   with_tmp_dir (fun base_path ->
     P.enqueue
-      ~masc_root:(masc_root base_path)
+      ~base_path
       (make_result ~name:"seed" ~success:true ~duration_ms:1.0);
     let spawn producer =
       Domain.spawn (fun () ->
         for i = 1 to 250 do
           P.enqueue
-            ~masc_root:(masc_root base_path)
+            ~base_path
             (make_result
                ~name:(Printf.sprintf "domain-%d-tool-%03d" producer i)
                ~success:true
@@ -314,19 +314,56 @@ let test_write_failure_does_not_raise () =
     let masc_path = Filename.concat base_path ".masc" in
     Fs_compat.append_file masc_path "not-a-directory";
     P.enqueue
-      ~masc_root:masc_path
+      ~base_path
       (make_result ~name:"unpersisted" ~success:true ~duration_ms:1.0);
     Alcotest.(check bool)
       "database was not created"
       false
       (Sys.file_exists (Tool_metrics_store.database_path ~masc_root:masc_path)))
 
+let with_metric_observations f =
+  let seen = ref [] in
+  let unsubscribe = Masc.Dashboard_observation_commit.subscribe (function
+    | Workspace { base_path; payload } ->
+        if payload.topic = `Tool_metrics then seen := (base_path, payload.scope) :: !seen
+    | Process _ -> ()) in
+  Fun.protect ~finally:unsubscribe (fun () -> f seen)
+
+let test_writes_publish_workspace_owner () =
+  with_tmp_dir (fun directory ->
+    (* Keep the caller's raw owner spelling in metadata, while the store
+       resolves its runtime directory from exactly that owner. *)
+    let base_path = Filename.concat directory "." in
+    with_metric_observations (fun seen ->
+      let stop_failing = Masc.Dashboard_observation_commit.subscribe (fun _ -> raise Exit) in
+      Fun.protect ~finally:stop_failing (fun () ->
+        P.enqueue ~base_path (make_result ~name:"observed" ~success:true ~duration_ms:2.0));
+      Alcotest.(check bool) "workspace metadata retained"
+        true (!seen = [base_path, `Workspace]);
+      let summary = Tool_metrics_store.summary ~masc_root:(masc_root base_path)
+        |> get_ok "committed row" in
+      Alcotest.(check int) "row committed before return" 1 summary.entry_count;
+      ignore (Tool_metrics_store.read_recent ~masc_root:(masc_root base_path) ~n:10 ());
+      Alcotest.(check int) "reads send no invalidation" 1 (List.length !seen);
+      ignore (P.hydrate ~base_path ~retention_days:30 |> get_ok "hydrate observed store");
+      Alcotest.(check int) "retention write attempt invalidates once" 2 (List.length !seen)))
+
+let test_uncertain_write_notifies_without_claiming_success () =
+  with_tmp_dir (fun base_path ->
+    Fs_compat.append_file (masc_root base_path) "not-a-directory";
+    with_metric_observations (fun seen ->
+      P.enqueue ~base_path (make_result ~name:"unpersisted" ~success:true ~duration_ms:1.0);
+      Alcotest.(check bool) "failed attempt invalidates owning workspace"
+        true (!seen = [base_path, `Workspace]);
+      Alcotest.(check bool) "notification does not create a database" false
+        (Sys.file_exists (Tool_metrics_store.database_path ~masc_root:(masc_root base_path)))))
+
 let crash_child_arg = "--tool-metrics-crash-child"
 let crash_child_rows = 250
 
 let test_sigkill_recovery () =
   with_tmp_dir (fun base_path ->
-    let argv = [| Sys.executable_name; crash_child_arg; masc_root base_path |] in
+    let argv = [| Sys.executable_name; crash_child_arg; base_path |] in
     let pid =
       Unix.create_process
         Sys.executable_name
@@ -348,7 +385,7 @@ let test_sigkill_recovery () =
        Alcotest.failf "crash child stopped by signal %d" signal);
     Tool_metrics.clear ();
     let report =
-      P.hydrate ~masc_root:(masc_root base_path) ~retention_days:30
+      P.hydrate ~base_path ~retention_days:30
       |> get_ok "hydrate after SIGKILL"
     in
     Alcotest.(check int)
@@ -356,12 +393,12 @@ let test_sigkill_recovery () =
       crash_child_rows
       report.loaded_records)
 
-let run_crash_child masc_root =
+let run_crash_child base_path =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   for i = 1 to crash_child_rows do
     P.enqueue
-      ~masc_root
+      ~base_path
       (make_result
          ~name:(Printf.sprintf "crash-tool-%03d" i)
          ~success:true
@@ -404,6 +441,9 @@ let () =
           ; eio_test
               "storage failure does not change tool completion"
               test_write_failure_does_not_raise
+          ; eio_test "writes publish the raw workspace owner" test_writes_publish_workspace_owner
+          ; eio_test "uncertain writes retain read invalidation"
+              test_uncertain_write_notifies_without_claiming_success
           ; eio_test
               "committed rows survive SIGKILL"
               test_sigkill_recovery

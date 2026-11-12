@@ -383,6 +383,7 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_sandbox_stop", mutating_tool);
     ("masc_keeper_delegate", broadcast_tool);
     ("masc_keeper_delegate_status", read_state_tool);
+    ("masc_keeper_delegate_status_many", read_state_tool);
     (* Submits an async chat operation (same submit_agent_operation path as
        masc_keeper_delegate); poll masc_keeper_delegate_status for the
        outcome. *)

@@ -1,14 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { IdeKeeperWorkPanel, keeperWorkSummary } from './ide-keeper-work-panel'
 import { goals, keepers, tasks } from '../../store'
-import { fleetCompositeSnapshot } from '../../composite-signals'
+import { fleetCompositeFixture } from '../../lib/fleet-composite.test-fixture'
 import type { Goal, Keeper, Task } from '../../types'
 import type {
   FleetCompositeSnapshot,
   KeeperCompositeSnapshot,
 } from '../../api/schemas/keeper-composite'
+
+vi.mock('../../lib/use-fleet-composite', async () => {
+  const { fleetCompositeFixture } = await import('../../lib/fleet-composite.test-fixture')
+  return { useFleetComposite: () => ({ data: fleetCompositeFixture.value }) }
+})
 
 describe('IdeKeeperWorkPanel', () => {
   let container: HTMLDivElement
@@ -22,7 +27,7 @@ describe('IdeKeeperWorkPanel', () => {
     goals.value = []
     keepers.value = []
     tasks.value = []
-    fleetCompositeSnapshot.value = null
+    fleetCompositeFixture.value = null
     window.location.hash = ''
   })
 
@@ -42,7 +47,7 @@ describe('IdeKeeperWorkPanel', () => {
 
   it('renders live-turn fields from the composite snapshot SSOT', () => {
     keepers.value = [keeperFixture()]
-    fleetCompositeSnapshot.value = fleetFixture([
+    fleetCompositeFixture.value = fleetFixture([
       compositeFixture({
         keeper: 'sangsu',
         live_turn: {
@@ -71,7 +76,7 @@ describe('IdeKeeperWorkPanel', () => {
 
   it('omits the live-turn strip when no composite snapshot resolves', () => {
     keepers.value = [keeperFixture()]
-    fleetCompositeSnapshot.value = null
+    fleetCompositeFixture.value = null
 
     render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
 

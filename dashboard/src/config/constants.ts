@@ -24,44 +24,20 @@ export const DEFAULT_GET_TIMEOUT_MS = 35_000
 export const DEFAULT_POST_TIMEOUT_MS = 30_000
 export const DEFAULT_MCP_TIMEOUT_MS = 60_000
 export const NAMESPACE_TRUTH_GET_TIMEOUT_MS = 30_000
-// Dashboard WS JSON-RPC timeout. Matches the backend dashboard handler budget
-// so a slow first response under Executor_pool contention is not turned into
-// a reconnect by the client side.
-export const DASHBOARD_WS_RPC_TIMEOUT_MS = 30_000
-export const DASHBOARD_WS_HEARTBEAT_INTERVAL_MS = 30_000
-// Heartbeat RPCs should resolve quickly; a shorter timeout than the generic
-// RPC budget lets the client detect a half-open socket before the next beat.
-export const DASHBOARD_WS_HEARTBEAT_RPC_TIMEOUT_MS = 10_000
-// Number of consecutive failed connection attempts using a cached discovery
-// URL before the cache is invalidated and the client falls back to /ws.
-export const DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES = 3
-
 // --- Transport retry defaults (shared by all transport implementations) ---
 // Exponential backoff for transport-level reconnection.  Distinct from
-// RECONNECT_* (which caps at 60s for SSE/dashboard-WS reconnect storms).
+// retrying successful observations, which have no timer.
 export const TRANSPORT_RETRY_BASE_MS = 1_000
 export const TRANSPORT_RETRY_MAX_MS = 30_000
 export const TRANSPORT_RETRY_JITTER_MS = 1_000
 
-// --- Reconnect backoff (dashboard WS) ---
-// Cap at 60s with plus/minus 1s jitter to break reconnect storms when the server is
-// degraded; fleets of dashboards retrying every 15s synchronously was
-// observed to amplify Executor_pool starvation on cold start.
-export const RECONNECT_MAX_MS = 60_000
-export const RECONNECT_JITTER_MS = 1_000
-
 // --- Refresh & debounce (milliseconds) ---
 export const SHELL_TTL_MS = 5_000
 export const UI_REFRESH_TTL_MS = 1_000
-export const MISSION_BRIEFING_POLL_DELAY_MS = 1_500
 export const SSE_DEFAULT_DEBOUNCE_MS = 500
 export const SSE_ACTIVITY_DEBOUNCE_MS = 2_000
 export const SSE_KEEPER_OPERATOR_DEBOUNCE_MS = 600
 export const SSE_KEEPER_THREAD_DEBOUNCE_MS = 800
-export const SSE_RECONNECT_RETRY_MS = 3_000
-export const PERIODIC_REFRESH_DEV_MS = 180_000
-export const PERIODIC_REFRESH_PROD_MS = 120_000
-export const TELEMETRY_AUTO_REFRESH_MS = 30_000
 
 // --- Keeper UI/runtime limits ---
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200
@@ -89,8 +65,6 @@ export const OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET = envInt(
 export const TRIM_TEXT_DEFAULT = 120
 export const TRUNCATE_DEFAULT = 260
 
-// --- TLA+ verification panel poll interval ---
-export const TLA_POLL_INTERVAL_MS = 60_000
 
 // --- Default query window (minutes) ---
 export const DEFAULT_WINDOW_MINUTES_24H = 1440

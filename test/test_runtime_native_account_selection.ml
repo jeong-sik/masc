@@ -25,7 +25,7 @@ let env_value name environment =
     else None)
 
 let environment =
-  ["CLAUDE_CONFIG_DIR"; "CODEX_HOME";
+  ["CLAUDE_CONFIG_DIR"; "CODEX_HOME"; "ANTHROPIC_CONFIG_DIR";
    "ANTHROPIC_API_KEY"; "ANTHROPIC_AUTH_TOKEN"; "CLAUDE_CODE_OAUTH_TOKEN";
    "CLAUDE_CODE_USE_BEDROCK"; "CLAUDE_CODE_USE_VERTEX";
    "CLAUDE_CODE_USE_FOUNDRY"; "CLAUDE_CODE_USE_MANTLE";
@@ -97,6 +97,8 @@ let test_inherited_home client () =
         | Claude ->
           check (option string) "ordinary HOME does not become a config-dir override"
             None (env_value "CLAUDE_CONFIG_DIR" child);
+          check (option string) "an undeclared account gets no profile directory"
+            None (env_value "ANTHROPIC_CONFIG_DIR" child);
           (match runtime.execution with
            | Claude_code execution ->
              check (option string) "ordinary account file remains in admitted HOME"
@@ -149,7 +151,15 @@ let test_explicit_directory client () =
           check (option string) "explicit directory remains selected" (Some home)
             (env_value variable child);
           check (option string) "explicit directory keeps credential isolation" None
-            (env_value key child))))))
+            (env_value key child);
+          match client with
+          | Codex -> ()
+          | Claude ->
+            with_env ["ANTHROPIC_CONFIG_DIR", Some replacement] (fun () ->
+              check (option string)
+                "the Anthropic profile directory is inside the declared directory"
+                (Some (Filename.concat home "anthropic"))
+                (env_value "ANTHROPIC_CONFIG_DIR" (child_environment runtime))))))))
 
 let test_environment_copy client () =
   with_directory (fun home ->

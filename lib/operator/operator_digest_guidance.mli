@@ -12,9 +12,11 @@ type projection = {
   fields : (string * Yojson.Safe.t) list;
   recommended_actions : Yojson.Safe.t list;
   recommendation_summary : Yojson.Safe.t;
+  next_deadline_unix : float option;
 }
 
 val active_guidance :
+  now:float ->
   config:Workspace.config ->
   target_type:string ->
   target_id:string option ->

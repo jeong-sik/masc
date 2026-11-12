@@ -19,6 +19,7 @@
   server_schedule_runner_policy)
  (flags :standard -open Masc -w +33)
  (libraries
+  masc.lockfree_atomic
   masc.artifact_document_engine
   mcp_protocol
   masc.lane_addon_call_context
@@ -45,6 +46,7 @@
   masc.fs_compat
   masc.masc_process
   masc.sse_wire
+  masc.sse_event
   masc.agent_observation
   masc.machine_configuration
   masc.browser_lane
@@ -74,6 +76,7 @@
   masc.keeper_identity
   masc.mcp_client
   masc.watched_work
+  masc.native_file_change
   ;; RFC-0266 Phase 4: GET /api/v1/dashboard/fusion-runs names
   ;; Fusion_run_registry directly; dune does not re-export it through the masc
   ;; dep, so masc_server lists masc.fusion_core explicitly.
@@ -89,6 +92,7 @@
   masc.operator
   masc.voice_bridge_core
   yojson
+  atdgen-runtime
   otoml
   base64
   ws-direct-core
@@ -144,6 +148,7 @@
   masc.host_config
   masc.dashboard_eval_feed
   masc.telemetry_coverage_gap
+  masc.telemetry_unified_source
   masc.telemetry_unified
   masc.discovery_cache
   masc.keeper_contract

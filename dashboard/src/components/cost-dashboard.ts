@@ -15,7 +15,6 @@ import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
 import { useMemo } from 'preact/hooks'
 import {
-  fetchRuntimeModelMetrics,
   fetchKeeperCostMetrics,
   fetchAuditLedger,
   fetchKeeperDecisions,
@@ -51,7 +50,6 @@ import {
 import {
   type ModelLoadState,
   viewMode,
-  modelState,
   keeperState,
   auditLedgerState,
   keeperDecisionsState,
@@ -65,6 +63,7 @@ import {
   summarizeAuditActors,
   summarizeAuditKinds,
 } from './cost/audit-summarizer'
+import { useModelMetrics } from '../lib/use-model-metrics'
 
 // Re-export RFC-0050 PR-1 — preserve every public symbol callers import
 // from this module so the per-domain split is mechanical.
@@ -163,26 +162,8 @@ function setCostViewMode(mode: ViewMode): void {
     : costRouteParams({}, { clearFocus: true })
   viewMode.value = mode
   replaceRoute('monitoring', nextParams)
-  if (mode === 'model') {
-    void loadModelMetrics(windowMinutes.value)
-  } else {
+  if (mode === 'keeper') {
     void loadKeeperMetrics(windowMinutes.value)
-  }
-}
-
-async function loadModelMetrics(window: number) {
-  modelState.value = { status: 'loading' }
-  try {
-    const resp = await fetchRuntimeModelMetrics(window, 5)
-    modelState.value = {
-      status: 'loaded',
-      data: resp.models,
-      latencyBuckets: resp.latency_buckets ?? [],
-      windowMinutes: resp.window_minutes ?? window,
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'cost metrics 불러오기 실패'
-    modelState.value = { status: 'error', message }
   }
 }
 
@@ -225,9 +206,7 @@ async function loadKeeperDecisions(limit = 200) {
 
 function loadActiveView(window: number, view: CostView) {
   if (view === 'cost') {
-    if (viewMode.value === 'model') {
-      void loadModelMetrics(window)
-    } else {
+    if (viewMode.value === 'keeper') {
       void loadKeeperMetrics(window)
     }
   }
@@ -248,10 +227,7 @@ function completeMetricSum(values: ReadonlyArray<number | null | undefined>): nu
   )
 }
 
-const modelTotals = computed(() => {
-  const s = modelState.value
-  if (s.status !== 'loaded') return null
-  const data = s.data
+function aggregateModelTotals(data: DashboardRuntimeModelMetric[]) {
   const totalCost = completeMetricSum(data.map(m => m.total_cost_usd))
   const totalIn = completeMetricSum(data.map(m => m.total_input_tokens))
   const totalOut = completeMetricSum(data.map(m => m.total_output_tokens))
@@ -289,7 +265,7 @@ const modelTotals = computed(() => {
   const errorRate = (totalSuccess + totalError) > 0 ? totalError / (totalSuccess + totalError) : null
   const avgTtfrc = ttfrcCount > 0 ? Math.round(ttfrcSum / ttfrcCount) : null
   return { totalCost, totalIn, totalOut, totalCache, totalCacheCreation, totalReasoning, totalSuccess, totalError, cacheRatio, reasoningRatio, errorRate, avgTtfrc, p50Avg, p95Max, readCoverage: null, count: data.length }
-})
+}
 
 const keeperTotals = computed(() => {
   const s = keeperState.value
@@ -1091,7 +1067,14 @@ function CostDashboardContent({ view }: { view: CostView }) {
   const focus = activeCostFocus.value
   const requestedMode = focus ? viewModeForCostFocus(focus) : viewMode.value
   const mode = requestedMode
-  const activeState = mode === 'model' ? modelState.value : keeperState.value
+  const metrics = useModelMetrics({ windowMinutes: windowMinutes.value, bucketMinutes: 5 }, view === 'cost' && mode === 'model')
+  const modelState: ModelLoadState = metrics.state.kind === 'ready'
+    ? { status: 'loaded', data: metrics.state.value.models,
+        latencyBuckets: metrics.state.value.latency_buckets ?? [], windowMinutes: windowMinutes.value }
+    : metrics.state.kind === 'error' ? { status: 'error', message: metrics.state.message } : { status: 'loading' }
+  const modelTotals = useMemo(() => modelState.status === 'loaded' ? aggregateModelTotals(modelState.data) : null, [modelState])
+  const refresh = () => mode === 'model' ? metrics.refresh() : loadActiveView(windowMinutes.value, view)
+  const activeState = mode === 'model' ? modelState : keeperState.value
   const costData = useMemo(() => {
     if (activeState.status !== 'loaded') return null
     const data = activeState.data
@@ -1122,7 +1105,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
         <section class="flex flex-col gap-3">
           <${ErrorState} message=${activeState.message} />
           <button type="button" class="self-start text-sm text-accent-fg hover:underline"
-            onClick=${() => void loadActiveView(windowMinutes.value, view)}>
+            onClick=${refresh}>
             다시 시도
           </button>
         </section>
@@ -1131,10 +1114,10 @@ function CostDashboardContent({ view }: { view: CostView }) {
     if (activeState.status !== 'loaded') return null
 
     const { data, maxCost, maxP95 } = costData!
-    const t = mode === 'model' ? modelTotals.value : keeperTotals.value
-    const loadedModelCount = modelState.value.status === 'loaded' ? modelState.value.data.length : null
+    const t = mode === 'model' ? modelTotals : keeperTotals.value
+    const loadedModelCount = modelState.status === 'loaded' ? modelState.data.length : null
     const loadedKeeperCount = keeperState.value.status === 'loaded' ? keeperState.value.data.length : null
-    const loadedBucketCount = modelState.value.status === 'loaded' ? modelState.value.latencyBuckets.length : null
+    const loadedBucketCount = modelState.status === 'loaded' ? modelState.latencyBuckets.length : null
     const modelLoadedState = mode === 'model'
       ? activeState as Extract<ModelLoadState, { status: 'loaded' }>
       : null
@@ -1150,6 +1133,8 @@ function CostDashboardContent({ view }: { view: CostView }) {
 
     return html`
       <section class="flex flex-col gap-4" aria-label="비용 / 지연 대시보드">
+        ${mode === 'model' && metrics.state.kind === 'ready' && metrics.state.readError
+          ? html`<${ErrorState} message=${metrics.state.readError} />` : null}
         <header class="flex flex-wrap items-baseline justify-between gap-3">
           <div>
             <h2 class="text-base font-semibold text-text-strong">비용 / 지연 대시보드</h2>
@@ -1190,7 +1175,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   class="rounded-[var(--r-1)] border px-2 py-0.5 text-2xs ${windowMinutes.value === o.key
                     ? 'border-[var(--accent-50)] bg-[var(--accent-15)] text-accent-fg'
                   : 'border-card-border/40 text-text-muted hover:border-card-border/60'}"
-                  onClick=${() => { windowMinutes.value = o.key; void loadActiveView(o.key, view) }}
+                  onClick=${() => { windowMinutes.value = o.key; if (mode === 'keeper') void loadActiveView(o.key, view) }}
                 >
                   ${o.label}
                 </button>
@@ -1227,14 +1212,14 @@ function CostDashboardContent({ view }: { view: CostView }) {
             />
             <${StatTile}
               label="Cache Hit Ratio"
-              value=${mode === 'model' && modelTotals.value?.cacheRatio != null ? formatPct1(modelTotals.value.cacheRatio) : '—'}
-              status=${mode === 'model' && modelTotals.value?.cacheRatio != null ? (modelTotals.value.cacheRatio >= 0.8 ? 'ok' : modelTotals.value.cacheRatio >= 0.5 ? 'warn' : 'crit') : undefined}
-              delta=${{ direction: 'flat', text: mode === 'model' && modelTotals.value ? `${formatTokens(modelTotals.value.totalCache)} cached` : 'keeper view' }}
+              value=${mode === 'model' && modelTotals?.cacheRatio != null ? formatPct1(modelTotals.cacheRatio) : '—'}
+              status=${mode === 'model' && modelTotals?.cacheRatio != null ? (modelTotals.cacheRatio >= 0.8 ? 'ok' : modelTotals.cacheRatio >= 0.5 ? 'warn' : 'crit') : undefined}
+              delta=${{ direction: 'flat', text: mode === 'model' && modelTotals ? `${formatTokens(modelTotals.totalCache)} cached` : 'keeper view' }}
             />
             <${StatTile}
               label="Reasoning Ratio"
-              value=${mode === 'model' && modelTotals.value?.reasoningRatio != null ? formatPct1(modelTotals.value.reasoningRatio) : '—'}
-              delta=${{ direction: 'flat', text: mode === 'model' && modelTotals.value ? `${formatTokens(modelTotals.value.totalReasoning)} total` : 'keeper view' }}
+              value=${mode === 'model' && modelTotals?.reasoningRatio != null ? formatPct1(modelTotals.reasoningRatio) : '—'}
+              delta=${{ direction: 'flat', text: mode === 'model' && modelTotals ? `${formatTokens(modelTotals.totalReasoning)} total` : 'keeper view' }}
             />
             <${StatTile}
               label="Error Rate"

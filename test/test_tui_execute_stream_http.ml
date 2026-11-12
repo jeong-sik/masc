@@ -1946,6 +1946,153 @@ let test_mcp_future_cursor_resets_before_live_delivery env =
         Transport.stop_sse_session successor_id)))
 ;;
 
+(* Real local login rotation, followed by each production SSE admission path.
+   Restore the process credential cells and delete only this fixture's store. *)
+let with_rotating_workspace_credential ~port body =
+  let workspace = Filename.temp_file "tui-sse-credential" "" in
+  Sys.remove workspace;
+  Unix.mkdir workspace 0o700;
+  let previous_env = Sys.getenv_opt Masc_tui_credential.token_env_var in
+  let previous_cell = Atomic.get Http.operator_credential_cell in
+  let previous_workspace = !Http.credential_workspace in
+  let previous_source = !Http.operator_token_source in
+  let previous_failed = !Http.failed_refresh in
+  let rec remove path =
+    if Sys.is_directory path then begin
+      Array.iter (fun name -> remove (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else Sys.remove path in
+  Fun.protect ~finally:(fun () ->
+    Atomic.set Http.operator_credential_cell previous_cell;
+    Http.credential_workspace := previous_workspace;
+    Http.operator_token_source := previous_source;
+    Http.failed_refresh := previous_failed;
+    (match previous_env with
+     | None -> Unix.unsetenv Masc_tui_credential.token_env_var
+     | Some value -> Unix.putenv Masc_tui_credential.token_env_var value);
+    remove workspace) (fun () ->
+    Unix.unsetenv Masc_tui_credential.token_env_var;
+    let mint () =
+      match Auth_login.mint ~base_path:workspace ~host:"127.0.0.1" ~port
+          ~agent_name:Masc_tui_credential.agent_name ~role:Masc_domain.Admin
+          ~token_env_var:Masc_tui_credential.token_env_var
+          ~token_lifetime:Auth_login.Long_lived () with
+      | Ok report -> report.bearer_token
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error) in
+    let original = mint () in
+    Alcotest.(check bool) "the production installer adopts the original file" true
+      (Http.install_operator_token ~base_path:workspace ~host:"127.0.0.1" ~port
+       = Masc_tui_credential.Held);
+    let expected = { identity with
+      sid_base_path = Masc.Tui_decode.Canonical_path.of_path workspace;
+      sid_masc_root = Masc.Tui_decode.Canonical_path.of_path (Filename.concat workspace ".masc") } in
+    body ~original ~mint ~expected)
+;;
+
+let credential_subscriptions env ~port ~expected =
+  let clock = Eio.Stdenv.clock env in
+  [ "observer", (fun ~on_chunk ->
+      ignore (Http.observe_runtime_events ~clock ~host:"127.0.0.1" ~port
+        ~expected_base_path:expected.Masc.Tui_decode.sid_base_path
+        ~expected_masc_root:expected.sid_masc_root ~session_id:"held-session"
+        ~cursor:(Some Sse_wire.{ instance_id = "held-instance"; event_id = 17 })
+        ~on_identity:ignore ~on_open:ignore ~on_chunk : (unit, Http.observer_error) result))
+  ; "fleet", (fun ~on_chunk ->
+      ignore (Http.observe_fleet_stream ~clock ~host:"127.0.0.1" ~port
+        ~expected_workspace:expected ~on_chunk : (unit, Http.observer_error) result))
+  ; "system-log", (fun ~on_chunk ->
+      ignore (Http.observe_system_log_stream ~clock ~host:"127.0.0.1" ~port
+        ~instance:"held-instance" ~level:"info" ~since_seq:17 ~limit:10 ~on_chunk () : string))
+  ]
+;;
+
+let check_sse_credential_rotation env ~first_status ~second_status ~requests ~delivered =
+  List.iter (fun index ->
+    let observed = ref [] and rotate = ref None in
+    let original = ref None and replacement = ref None in
+    let handler reqd =
+      let request = Httpun.Reqd.request reqd in
+      let headers = request.Httpun.Request.headers in
+      let authorization = Httpun.Headers.get headers "authorization" in
+      let first = !observed = [] in
+      observed := (request.target, authorization,
+        List.map (Httpun.Headers.get headers)
+          ["mcp-session-id"; "last-event-id"; "x-masc-sse-instance-id"]) :: !observed;
+      if first then begin
+        (match !rotate with
+         | None -> Alcotest.fail "credential rotation was not installed"
+         | Some mint -> replacement := Some ("Bearer " ^ mint ()))
+      end;
+      let status = if first then first_status else second_status in
+      if status = `OK then
+        stream_response ~receipts:[receipt; "x-masc-sse-instance-id", "held-instance";
+          "x-masc-sse-replay", "resumed"] ["data: accepted\n\n"] reqd
+      else json_response ~status "admission refused" reqd in
+    with_server env ~handler (fun ~port ->
+      with_rotating_workspace_credential ~port (fun ~original:held ~mint ~expected ->
+        original := Some ("Bearer " ^ held);
+        rotate := Some mint;
+        let label, subscribe = List.nth (credential_subscriptions env ~port ~expected) index in
+        let bytes = Buffer.create 32 in
+        subscribe ~on_chunk:(Buffer.add_string bytes);
+        Alcotest.(check int) (label ^ ": admission requests") requests (List.length !observed);
+        Alcotest.(check string) (label ^ ": only accepted stream bytes reach the consumer")
+          (if delivered then "data: accepted\n\n" else "") (Buffer.contents bytes);
+        match List.rev !observed with
+        | [(target, bearer, cursor)] ->
+            Alcotest.(check bool) (label ^ ": initial bearer") true (bearer = !original);
+            Alcotest.(check bool) (label ^ ": no refresh after non-401 or delivered bytes") true
+              (Http.operator_token () = Some held);
+            ignore (target, cursor)
+        | [(target, bearer, cursor); (retried_target, retried_bearer, retried_cursor)] ->
+            Alcotest.(check bool) (label ^ ": refused request held the old bearer") true
+              (bearer = !original);
+            Alcotest.(check bool) (label ^ ": retry adopts the actual new workspace bearer") true
+              (retried_bearer = !replacement && retried_bearer <> bearer);
+            Alcotest.(check string) (label ^ ": exact target retained") target retried_target;
+            Alcotest.(check (list (option string))) (label ^ ": session and cursor retained")
+              cursor retried_cursor
+        | [] | _ :: _ -> Alcotest.fail "unexpected admission history"))) [0; 1; 2]
+;;
+
+let test_sse_admission_401_adopts_rotated_workspace_credential env =
+  check_sse_credential_rotation env ~first_status:`Unauthorized ~second_status:`OK
+    ~requests:2 ~delivered:true
+;;
+
+let test_sse_admission_retry_does_not_loop_on_second_401 env =
+  check_sse_credential_rotation env ~first_status:`Unauthorized ~second_status:`Unauthorized
+    ~requests:2 ~delivered:false
+;;
+
+let test_sse_forbidden_does_not_replace_credential env =
+  check_sse_credential_rotation env ~first_status:`Forbidden ~second_status:`OK
+    ~requests:1 ~delivered:false
+;;
+
+let test_sse_delivered_stream_does_not_refresh_or_replay env =
+  check_sse_credential_rotation env ~first_status:`OK ~second_status:`OK
+    ~requests:1 ~delivered:true
+;;
+
+let test_sse_admission_cancellation_is_not_a_refusal env =
+  List.iter (fun index ->
+    with_raw_peer env ~status:401 ~attest:false ~truncate:false
+      (fun ~port ~closed ~writes:_ ->
+        let label, subscribe = List.nth
+          (credential_subscriptions env ~port ~expected:identity) index in
+        (match
+           try
+             Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 0.05
+               (fun () -> subscribe ~on_chunk:(fun _ -> Alcotest.fail "refusal bytes escaped"));
+             `Returned
+           with Eio.Time.Timeout -> `Cancelled
+         with
+         | `Cancelled -> ()
+         | `Returned -> Alcotest.fail (label ^ ": cancellation became a completed outcome"));
+        wait_for_peer_close env closed)) [0; 1; 2]
+;;
+
 let test_observer_names_controlled_machine env =
   let target = ref "" in
   let handler reqd =
@@ -2031,6 +2178,16 @@ let () =
     ; ( "SSE response"
       , [ case "both subscriptions validate status and media type" test_sse_status_and_content_type_gate
         ; case "HTTP refusals keep status and body" test_sse_http_refusals_keep_status_and_body
+        ; case "admission 401 adopts a rotated workspace credential"
+            test_sse_admission_401_adopts_rotated_workspace_credential
+        ; case "a second admission 401 is returned without a retry loop"
+            test_sse_admission_retry_does_not_loop_on_second_401
+        ; case "a 403 never replaces the held credential"
+            test_sse_forbidden_does_not_replace_credential
+        ; case "delivered stream bytes never trigger credential replay"
+            test_sse_delivered_stream_does_not_refresh_or_replay
+        ; case "admission cancellation remains cancellation"
+            test_sse_admission_cancellation_is_not_a_refusal
         ; case "fleet requires the workspace receipt" test_fleet_requires_workspace_receipt
         ; case "fleet route attests its admitted workspace" test_fleet_route_attests_its_admitted_workspace
         ; case "registered fleet route replaces its scope" test_registered_fleet_route_replaces_its_scope ] )

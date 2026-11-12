@@ -549,7 +549,9 @@ let append (config : Workspace.config) (receipt : t) =
       ~disposition
       ~disposition_reason:reason
   in
-  Dated_jsonl.append store receipt_json;
+  Fun.protect ~finally:(fun () ->
+    Dashboard_observation_commit.written ~base_path:config.base_path ~scope:`Workspace `Telemetry)
+    (fun () -> Dated_jsonl.append store receipt_json);
   (* A roster row reads the newest receipt (its lane observation and the
      blocker summary), so its readers reread that Keeper (RFC-0481 §3.2). An
      append the fd guard skipped also sends it; the reread finds the same row. *)

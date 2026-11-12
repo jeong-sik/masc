@@ -12,19 +12,30 @@ type item =
       ; since : string
       ; detail : string
       }
+  | Awaiting_verdict of
+      { task_id : string
+      ; title : string
+      ; producer : string
+      ; since : string
+      ; verification_id : string
+      }
 
 let task_id = function
   | Held_without_keeper_route { task_id; _ }
-  | Producer_record_unreadable { task_id; _ } -> task_id
+  | Producer_record_unreadable { task_id; _ }
+  | Awaiting_verdict { task_id; _ } -> task_id
 ;;
 
 let title = function
   | Held_without_keeper_route { title; _ }
-  | Producer_record_unreadable { title; _ } -> title
+  | Producer_record_unreadable { title; _ }
+  | Awaiting_verdict { title; _ } -> title
 ;;
 
 let waiting_since = function
-  | Held_without_keeper_route { since; _ } | Producer_record_unreadable { since; _ } -> since
+  | Held_without_keeper_route { since; _ }
+  | Producer_record_unreadable { since; _ }
+  | Awaiting_verdict { since; _ } -> since
 ;;
 
 let task_label ~task_id ~title =
@@ -46,11 +57,17 @@ let summary = function
       (task_label ~task_id ~title)
       producer
       detail
+  | Awaiting_verdict { task_id; title; producer; _ } ->
+    Printf.sprintf
+      "%s: submitted as complete by %s, awaiting a verdict"
+      (task_label ~task_id ~title)
+      producer
 ;;
 
 let next_step = function
   | Held_without_keeper_route _ -> "inspect the task owner before choosing recovery"
   | Producer_record_unreadable _ -> "repair the Keeper record, then this resolves itself"
+  | Awaiting_verdict _ -> "read the verification request; decide it if the review does not"
 ;;
 
 (* Rejection delivery uses the same route. A missing Keeper queue means that
@@ -69,16 +86,28 @@ let project ~(config : Workspace_utils_backend_setup.config) tasks =
   List.filter_map
     (fun (task : Masc_domain.task) ->
        match task.task_status with
-       (* A completion waits on the system authority, which is running. It is
-          not the operator's row. *)
-       | Masc_domain.AwaitingVerification _ -> None
+       (* Every submission awaiting a verdict is a row. The backlog is the
+          source because the run registry keeps only its latest completed
+          rows, and a review that stopped drops out of it. Nothing here
+          grades which review stopped: the row carries when the submission
+          was made, and the surfaces order by it. *)
+       | Masc_domain.AwaitingVerification
+           { assignee; submitted_at; verification_id; started_at = _ } ->
+         Some
+           (Awaiting_verdict
+              { task_id = task.id
+              ; title = task.title
+              ; producer = assignee
+              ; since = submitted_at
+              ; verification_id
+              })
        | Masc_domain.Claimed { assignee; claimed_at = since } ->
          classify_held ~config ~task_id:task.id ~title:task.title ~assignee ~since
        | Masc_domain.InProgress { assignee; started_at = since } ->
          classify_held ~config ~task_id:task.id ~title:task.title ~assignee ~since
        | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None)
     tasks
-  (* Keep the oldest claims first, with stable order for equal timestamps. *)
+  (* Keep the oldest waits first, with stable order for equal timestamps. *)
   |> List.stable_sort (fun left right ->
     String.compare (waiting_since left) (waiting_since right))
 ;;

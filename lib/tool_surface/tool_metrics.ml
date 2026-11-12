@@ -79,6 +79,30 @@ let metrics_mu = Stdlib.Mutex.create ()
 
 let with_lock f = Stdlib.Mutex.protect metrics_mu f
 
+type subscription = { callback : unit -> unit }
+let subscriptions_mu = Stdlib.Mutex.create ()
+let subscriptions : subscription list ref = ref []
+
+let subscribe_written callback =
+  let subscription = { callback } in
+  Stdlib.Mutex.protect subscriptions_mu (fun () ->
+    subscriptions := subscription :: !subscriptions);
+  fun () -> Stdlib.Mutex.protect subscriptions_mu (fun () ->
+    subscriptions := List.filter (fun current -> current != subscription) !subscriptions)
+
+let announce_written () =
+  let current = Stdlib.Mutex.protect subscriptions_mu (fun () -> !subscriptions) in
+  List.iter (fun subscription ->
+    match subscription.callback () with
+    | () -> ()
+    | exception exn ->
+        (* Subscribers may only retain non-yielding metadata. A failed
+           observer, including its cancellation, cannot undo this snapshot. *)
+        (match Log.Metrics.warn "tool metrics subscriber failed: %s"
+          (Printexc.exn_slot_name exn) with
+         | () -> ()
+         | exception _ -> ())) current
+
 let add_sample metrics (sample : sample) =
   let acc =
     match StringMap.find_opt sample.tool_name metrics with
@@ -127,7 +151,8 @@ let record (result : Tool_result.result) =
   let sample = sample_of_result result in
   with_lock (fun () ->
     metrics := add_sample !metrics sample;
-    all_stats_cache := None)
+    all_stats_cache := None);
+  announce_written ()
 
 let replace_samples produce =
   let replacement = ref StringMap.empty in
@@ -138,6 +163,7 @@ let replace_samples produce =
     with_lock (fun () ->
       metrics := !replacement;
       all_stats_cache := None);
+    announce_written ();
     Ok value
 
 let percentile durations p =
@@ -204,7 +230,8 @@ let all_to_json () =
 let clear () =
   with_lock (fun () ->
     metrics := StringMap.empty;
-    all_stats_cache := None)
+    all_stats_cache := None);
+  announce_written ()
 
 (* Metrics are recorded only for handled dispatches. Other outcomes are
    counted by the dispatch telemetry path. *)

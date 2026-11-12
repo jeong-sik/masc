@@ -158,6 +158,18 @@ is the base of an open pull request, is a release branch, comes from a fork, or
 received a commit after the merge (the delete push is leased on the merged
 head). A failed delete is recorded and does not change the merge verdict.
 
+GitHub also leaves a linked issue open when the merge is made with the Actions
+token, so the worker closes the open issues that each pull request it sees
+merged names as closing references (`Closes #N`) and records the outcome as
+`linked_issues`. A pull request counts when its base is the default branch or
+its merge commit is on that branch, so a layer of a landed native stack counts
+although its base stays the parent branch. One GraphQL query reads every pull
+request of the scope; a comparison of merge commits is asked only for layers
+that still have an open issue. An issue in another repository and any other
+refused close are recorded and do not change the merge verdict. The worker
+closes what the pull request declares: a pull request that leaves work in an
+issue links it with `Relates #N`, the template's other line.
+
 The worker's GET transport retries a quota response only when GitHub provides
 an actionable `Retry-After`, or zero `X-RateLimit-Remaining` with a future
 `X-RateLimit-Reset`. It makes no request before that time. A pause restarts the

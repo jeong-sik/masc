@@ -206,6 +206,29 @@ let test_tlc_results_json_shape () =
              | _ -> fail "count should be 3")
           | _ -> fail "expected assoc")))
 
+let test_observation_inventory_uses_reader_paths () =
+  let root = make_fixture_dir () in
+  Fun.protect ~finally:(fun () -> cleanup root) (fun () ->
+    let empty = Filename.concat root "empty" in
+    Unix.mkdir empty 0o700;
+    with_specs_dir root (fun () -> with_tlc_results_dir root (fun () ->
+      match Dashboard_tla_specs.observation_source_inventory () with
+      | Error { path; error } -> fail (path ^ ": " ^ Unix.error_message error)
+      | Ok inventory ->
+        check string "specs root retains the configured authority" root inventory.specs_directory;
+        check string "results root uses the same resolver as the reader" root inventory.results_directory;
+        check (list string) "observed specs are exactly the reader's paths"
+          (Dashboard_tla_specs.list_specs ()
+           |> List.map (fun (entry : Dashboard_tla_specs.spec_entry) -> Filename.concat root entry.path)
+           |> List.sort String.compare)
+          (List.sort String.compare inventory.spec_files);
+        check bool "empty directory gets a topology watch" true (List.mem empty inventory.spec_directories);
+        check bool "missing companion is kept as a creation/symlink candidate" true
+          (List.mem (Filename.concat root "boundary/ZOnlyTla.cfg") inventory.cfg_files);
+        check (list string) "log names follow the reader's cfg mapping"
+          (List.map (Filename.concat root) [ "tlc-Overflow.log"; "tlc-RuntimeStrategy-buggy.log"; "tlc-RuntimeStrategy.log" ])
+          inventory.expected_log_files)))
+
 let () =
   run "dashboard_tla_specs"
     [
@@ -214,6 +237,7 @@ let () =
         test_case "cfg presence flags" `Quick test_cfg_presence_flags;
         test_case "category mapping" `Quick test_category_mapping;
         test_case "missing directory" `Quick test_missing_dir;
+        test_case "kernel source inventory uses reader authority" `Quick test_observation_inventory_uses_reader_paths;
       ];
       "json", [
         test_case "shape" `Quick test_json_shape;

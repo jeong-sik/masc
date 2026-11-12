@@ -66,6 +66,7 @@ let checkout_root () =
 let checkout_file path = Filename.concat (checkout_root ()) path
 
 module Lib = Masc
+module Dashboard_projection_read = Lib.Dashboard_projection_read
 module Auth = Auth
 module Workspace = Masc.Workspace
 module Dashboard_http_keeper = Dashboard_http_keeper
@@ -160,15 +161,6 @@ let with_cached_surface_success
     (fun () ->
       Server_dashboard_http_cache.mark_cached_surface_success surface json;
       f ())
-
-let with_mission_cache_success json f =
-  let module Core = Server_dashboard_http_core in
-  let surface = Core.mission_cache in
-  let saved = Core.snapshot surface in
-  Fun.protect
-    ~finally:(fun () ->
-      Core.update_cached_surface surface (fun _ -> saved))
-    (fun () -> Core.mark_cached_surface_success surface json; f ())
 
 let with_env key value f =
   let old = Sys.getenv_opt key in
@@ -1499,292 +1491,51 @@ let test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming () =
 
 let test_operator_snapshot_default_route_hydrates_first_success () =
   with_test_env @@ fun ~env ~sw ~config ->
+  let module Owner = Server_dashboard_operator_snapshot_observation in
   Dashboard_cache.invalidate_all ();
   Operator_control.invalidate_snapshot_cache ();
   Dashboard_projection_cache.invalidate_snapshot_json ~config;
-  let before =
-    Server_dashboard_http_core_operator.operator_snapshot_publication ()
-  in
-  check bool "invalidation clears the prior successful publication" false
-    before.has_success;
-  let state =
-    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
-  in
-  let json =
-    Server_dashboard_http_core.operator_snapshot_http_json
-      ~state
-      ~sw
-      ~clock:(Eio.Stdenv.clock env)
-      ~broadcast_snapshot:(fun _publication -> ())
-      (request "/api/v1/operator")
-  in
-  let after =
-    Server_dashboard_http_core_operator.operator_snapshot_publication ()
-  in
-  check bool "first default request publishes a successful snapshot" true
-    after.has_success;
-  check int "first success stays in the invalidated generation"
-    before.generation after.generation;
+  let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+  let owner = Owner.owner_for_scope ~state (Lib.Mcp_server.workspace_scope state) in
+  check bool "invalidation leaves no successful default body" false (Owner.has_observation owner);
+  let json = Server_dashboard_http_core.operator_snapshot_http_json
+      ~state ~sw ~clock:(Eio.Stdenv.clock env) (request "/api/v1/operator") in
+  check bool "first default request retains its actual body" true (Owner.has_observation owner);
   check string "HTTP returns the canonical first-success publication"
-    (Yojson.Safe.to_string
-       (Server_dashboard_http_core_operator.operator_snapshot_publication_json
-          after))
+    (Yojson.Safe.to_string (Owner.publication_json (Owner.publication owner)))
     (Yojson.Safe.to_string json);
-  let open Yojson.Safe.Util in
-  check bool "first response is not the initializing placeholder" false
-    (json |> member "status" = `String "initializing")
-
-let test_operator_snapshot_publication_rejects_stale_races () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  Dashboard_projection_cache.invalidate_snapshot_json ~config;
-  let lower =
-    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
-  in
-  let higher =
-    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
-  in
-  let higher_publication =
-    match
-      Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
-        ~compute:higher
-        (`Assoc [ "winner", `String "higher" ])
-    with
-    | Some publication -> publication
-    | None -> fail "higher sequence did not publish"
-  in
-  check bool "lower success is rejected after higher terminalization" true
-    (Option.is_none
-       (Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
-          ~compute:lower
-          (`Assoc [ "winner", `String "lower" ])));
-  check bool "lower error is rejected after higher terminalization" true
-    (Option.is_none
-       (Server_dashboard_http_core_operator.mark_operator_snapshot_error_if_current
-          ~compute:lower
-          (Failure "late lower error")));
-  let canonical =
-    Server_dashboard_http_core_operator.operator_snapshot_publication ()
-  in
-  check int "higher compute remains canonical"
-    higher_publication.compute_sequence canonical.compute_sequence;
-  let old_generation_compute =
-    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
-  in
-  (* This used to swap the process-global broadcaster and count what arrived on
-     it. The broadcaster is an argument now (#25927), so the assertion runs
-     against the function the observer actually calls: one invalidation yields
-     one publication, and a second read of the same generation yields none. *)
-  Dashboard_projection_cache.invalidate_snapshot_json ~config;
-  let generation = Dashboard_projection_cache.snapshot_invalidation_generation () in
-  let invalidation =
-    Server_dashboard_http_core_operator
-    .publish_operator_snapshot_invalidation_if_current
-      ~generation
-  in
-  (match invalidation with
-   | None -> fail "one invalidation must publish once"
-   | Some invalidation ->
-     let current =
-       Server_dashboard_http_core_operator.operator_snapshot_publication ()
-     in
-     check int "publication is the canonical generation" current.generation
-       invalidation.generation;
-     check int "publication is the canonical terminal sequence"
-       current.terminal_sequence invalidation.terminal_sequence);
-  (* Not "twice returns None": the contract says install *or return*, so a
-     second read of the current generation hands back the same tombstone. What
-     it refuses is a generation that is no longer current.
-
-     Two guards enforce that — the outer current_generation compare and the
-     inner publication.generation compare — so removing either one alone still
-     passes here. Removing both fails this case. *)
-  check bool "a stale generation does not publish" true
-    (Option.is_none
-       (Server_dashboard_http_core_operator
-        .publish_operator_snapshot_invalidation_if_current
-          ~generation:(generation - 1)));
-  check bool "old-generation completion is rejected" true
-    (Option.is_none
-       (Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
-          ~compute:old_generation_compute
-          (`Assoc [ "winner", `String "old-generation" ])))
-
-(* The refresh loop's broadcast encodes on the domain pool. A snapshot the
-   /api/v1/operator route published while it encoded replaces it: the route
-   broadcasts nothing itself, so the loop sends the route's snapshot instead of
-   its own. The broadcast for any other caller stays on its fiber. The 2.8 MB
-   snapshot used to be encoded twice and hashed on the calling fiber. *)
-let busy_worker_polls = 50
-let busy_worker_poll_interval_s = 0.01
-
-let test_refreshed_operator_snapshot_encodes_on_the_pool_and_hands_on_a_newer_one () =
-  with_test_env @@ fun ~env ~sw ~config:_ ->
-  let workspace = Masc_test_deps.setup_test_workspace () in
-  let auth = Masc_test_deps.make_sse_auth workspace "operator-snapshot-observer" in
-  let session_id = "operator-snapshot-observer" in
-  ignore (Lib.Session.McpSessionStore.get_or_create ~id:session_id ());
-  let previous_pool = Domain_pool_ref.get () in
-  Fun.protect
-    ~finally:(fun () ->
-      Lib.Sse.unregister session_id;
-      (match previous_pool with
-       | None -> Domain_pool_ref.clear_for_tests ()
-       | Some previous -> Domain_pool_ref.set previous);
-      Masc_test_deps.cleanup_test_workspace workspace)
-  @@ fun () ->
-  (match Lib.Sse.register ~kind:Lib.Sse.Observer ~auth session_id ~last_event_id:0 with
-   | Ok _ -> ()
-   | Error error -> fail (Lib.Sse.registration_error_to_string error));
-  let publish marker =
-    match
-      Server_dashboard_http_core_operator.For_testing.publish_operator_snapshot_success
-        (`Assoc [ "marker", `String marker ])
-    with
-    | Some publication -> publication
-    | None -> fail ("the " ^ marker ^ " snapshot did not publish")
-  in
-  let frame_marker label =
-    match Lib.Sse.try_pop session_id with
-    | None -> fail (label ^ ": no frame")
-    | Some frame ->
-      (match Lib.Sse.data_payload_of_frame frame with
-       | Error Lib.Sse.Missing_data_payload -> fail (label ^ ": the frame has no data")
-       | Ok data ->
-         let open Yojson.Safe.Util in
-         let event = Yojson.Safe.from_string data in
-         check string (label ^ ": an operator snapshot") "operator_snapshot"
-           (event |> member "type" |> to_string);
-         event |> member "payload" |> member "marker" |> to_string)
-  in
-  Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
-  let occupy_worker () =
-    let occupied, occupied_u = Eio.Promise.create () in
-    let release, release_u = Eio.Promise.create () in
-    Eio.Fiber.fork ~sw (fun () ->
-      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-        Eio.Promise.resolve occupied_u ();
-        Eio.Promise.await release));
-    Eio.Promise.await occupied;
-    release_u
-  in
-  let refreshed = publish "refreshed" in
-  let release_u = occupy_worker () in
-  let returned = ref false in
-  let clock = Eio.Stdenv.clock env in
-  Eio.Fiber.both
-    (fun () ->
-      Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot
-        refreshed;
-      returned := true)
-    (fun () ->
-      let rec wait polls =
-        if polls > 0 && not !returned
-        then (
-          Eio.Time.sleep clock busy_worker_poll_interval_s;
-          wait (polls - 1))
-      in
-      wait busy_worker_polls;
-      check bool "the refreshed broadcast waits for the busy worker" false !returned;
-      ignore (publish "from the route" : Server_dashboard_http_core_operator.operator_snapshot_publication);
-      Eio.Promise.resolve release_u ());
-  check string "the newer snapshot is sent in place of the replaced one" "from the route"
-    (frame_marker "after the refresh");
-  check (option string) "and nothing else" None (Lib.Sse.try_pop session_id);
-  let inline = publish "inline" in
-  let release_u = occupy_worker () in
-  let outcome =
-    Eio.Fiber.first
-      (fun () ->
-        Server_dashboard_http_execution_surfaces.broadcast_operator_snapshot inline;
-        `Returned)
-      (fun () ->
-        Eio.Time.sleep clock
-          (Float.of_int busy_worker_polls *. busy_worker_poll_interval_s);
-        `Waited)
-  in
-  Eio.Promise.resolve release_u ();
-  check bool "any other caller's broadcast does not wait for the pool" true
-    (outcome = `Returned);
-  check string "and it is sent" "inline" (frame_marker "while the worker is busy")
-
-let test_operator_snapshot_error_clears_previous_success () =
-  let success =
-    match
-      Server_dashboard_http_core_operator.For_testing
-      .publish_operator_snapshot_success
-        (`Assoc
-          [ "pending_confirm_envelope", `Assoc [ "items", `List [] ]
-          ; "generated_at", `String "2026-08-08T00:00:00Z"
-          ])
-    with
-    | Some publication -> publication
-    | None -> fail "operator snapshot success did not publish"
-  in
-  check bool "precondition has a successful snapshot" true success.has_success;
-  let compute =
-    Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
-  in
-  let failed =
-    match
-      Server_dashboard_http_core_operator.mark_operator_snapshot_error_if_current
-        ~compute
-        (Failure "pending-confirm store unreadable")
-    with
-    | Some publication -> publication
-    | None -> fail "operator snapshot error did not publish"
-  in
-  check bool "failed publication has no last success" false failed.has_success;
-  let open Yojson.Safe.Util in
-  check string "failed publication is unavailable" "unavailable"
-    (failed.json |> member "status" |> to_string);
-  check bool "failed publication does not retain pending rows" true
-    (failed.json |> member "pending_confirm_envelope" = `Null)
+  check string "first response is a ready observation" "ready"
+    Yojson.Safe.Util.(json |> member "snapshot_observation_state" |> to_string)
 
 let test_operator_snapshot_http_rejects_stale_success_after_store_error () =
   with_test_env @@ fun ~env ~sw ~config ->
-  let state =
-    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
-  in
+  let module Owner = Server_dashboard_operator_snapshot_observation in
+  let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+  let owner = Owner.owner_for_scope ~state (Lib.Mcp_server.workspace_scope state) in
   let path = Operator_control.pending_confirms_path config in
   (match Workspace_utils.write_json_result config path (`List []) with
-   | Ok () -> ()
-   | Error reason -> fail reason);
-  let stale =
-    match
-      Server_dashboard_http_core_operator.For_testing
-      .publish_operator_snapshot_success
-        ~fresh_for_s:(-1.0)
-        (`Assoc
-          [ "pending_confirm_envelope", `Assoc [ "items", `List [] ]
-          ; "generated_at", `String "2026-08-08T00:00:00Z"
-          ])
-    with
-    | Some publication -> publication
-    | None -> fail "stale operator snapshot success did not publish"
-  in
-  check bool "precondition is stale success" true stale.has_success;
+   | Ok () -> () | Error reason -> fail reason);
+  let attempt = Owner.begin_attempt owner ~origin:Default_request in
+  check bool "seed the earlier actual default body" true
+    (Owner.publish_observation attempt {
+      Dashboard_projection_read.json = `Assoc ["pending_confirm_envelope", `Assoc ["items", `List []]];
+      next_deadline_unix = Some (Time_compat.now ()); completeness = Complete});
+  check bool "that original semantic deadline requires a new read" false (Owner.observation_is_usable owner);
   write_file path "{not-json";
   Operator_control.invalidate_snapshot_cache ();
-  let json =
-    Server_dashboard_http_core.operator_snapshot_http_json
-      ~state
-      ~sw
-      ~clock:(Eio.Stdenv.clock env)
-      ~broadcast_snapshot:(fun _publication -> ())
-      (request "/api/v1/operator")
-  in
+  let json = Server_dashboard_http_core.operator_snapshot_http_json
+      ~state ~sw ~clock:(Eio.Stdenv.clock env) (request "/api/v1/operator") in
   let open Yojson.Safe.Util in
   check string "HTTP returns unavailable publication" "unavailable"
     (json |> member "status" |> to_string);
-  check bool "HTTP drops pending rows" true
-    (json |> member "pending_confirm_envelope" = `Null)
+  check bool "HTTP drops pending rows" true (json |> member "pending_confirm_envelope" = `Null)
 
 let test_operator_parameterized_snapshot_attests_workspace () =
   with_test_env @@ fun ~env ~sw ~config ->
   ignore (Workspace.init config ~agent_name:None);
   let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
   let json = Server_dashboard_http_core.operator_snapshot_http_json
-    ~state ~sw ~clock:(Eio.Stdenv.clock env) ~broadcast_snapshot:(fun _ -> ())
+    ~state ~sw ~clock:(Eio.Stdenv.clock env)
     (request "/api/v1/operator?view=summary&include_messages=0&include_keepers=0") in
   let open Yojson.Safe.Util in
   let identity = json |> member "workspace_identity" in
@@ -1890,103 +1641,47 @@ let test_dashboard_query_cache_key_encodes_delimiter_values () =
 
 let test_operator_snapshot_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->
-  let state =
-    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
-  in
-  let seed =
-    `Assoc
-      [ "available_actions", `List []
-      ; "keepers", `List []
-      ; "generated_at", `String "2026-05-15T00:00:00Z"
-      ]
-    |> Server_dashboard_http_core_operator_query.with_operator_snapshot_metadata
-         ~config
-         ~query:
-           (Server_dashboard_http_core_operator_query
-            .operator_snapshot_default_query ())
-  in
-  let publication =
-    match
-      Server_dashboard_http_core_operator.For_testing
-      .publish_operator_snapshot_success
-        seed
-    with
-    | Some publication -> publication
-    | None -> fail "canonical operator snapshot test publication was superseded"
-  in
-  let current, is_fresh =
-    Server_dashboard_http_core_operator.operator_snapshot_publication_with_freshness ()
-  in
-  check bool "canonical publication is fresh" true is_fresh;
-  check int
-    "canonical publication identity retained"
-    publication.compute_sequence
-    current.compute_sequence;
-  let json =
-    Server_dashboard_http_core.operator_snapshot_http_json
-      ~state
-      ~sw
-      ~clock:(Eio.Stdenv.clock env)
-      ~broadcast_snapshot:(fun _publication -> ())
-      (request "/api/v1/operator")
-  in
-  check string
-    "HTTP serves the canonical publication byte-for-byte"
-    (Yojson.Safe.to_string
-       (Server_dashboard_http_core_operator.operator_snapshot_publication_json
-          publication))
-    (Yojson.Safe.to_string json);
+  let module Owner = Server_dashboard_operator_snapshot_observation in
+  let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
+  let owner = Owner.owner_for_scope ~state (Lib.Mcp_server.workspace_scope state) in
+  let seed = `Assoc ["available_actions", `List []; "keepers", `List [];
+    "generated_at", `String "2026-05-15T00:00:00Z"] in
+  let attempt = Owner.begin_attempt owner ~origin:Default_request in
+  check bool "canonical default body is installed" true
+    (Owner.publish_observation attempt {Dashboard_projection_read.json = seed;
+      next_deadline_unix = None; completeness = Complete});
+  check bool "a healthy no-deadline body is usable" true (Owner.observation_is_usable owner);
+  let publication = Owner.publication owner in
+  let json = Server_dashboard_http_core.operator_snapshot_http_json
+      ~state ~sw ~clock:(Eio.Stdenv.clock env) (request "/api/v1/operator") in
+  check string "HTTP serves canonical immutable bytes"
+    (Yojson.Safe.to_string (Owner.publication_json publication)) (Yojson.Safe.to_string json);
   let open Yojson.Safe.Util in
-  check string "surface" "/api/v1/operator"
-    (json |> member "dashboard_surface" |> to_string);
-  check string "source" "operator_snapshot_read_model"
-    (json |> member "source" |> to_string);
-  check string "generated_at_iso" "2026-05-15T00:00:00Z"
-    (json |> member "generated_at_iso" |> to_string);
-  check string "retention scope" "operator_snapshot"
-    (json |> member "retention" |> member "scope" |> to_string);
-  check string "retention store" "process_cache"
-    (json |> member "retention" |> member "store_kind" |> to_string);
-  check string "query effective actor" "dashboard"
-    (json |> member "query" |> member "effective_actor" |> to_string);
-  check bool "query default summary" true
-    (json |> member "query" |> member "default_summary_request" |> to_bool);
-  check bool "query includes keepers" true
-    (json |> member "query" |> member "include_keepers" |> to_bool);
-  check bool "request cache metadata absent" true
-    (json |> member "cache" = `Null);
-  let stale_publication =
-    match
-      Server_dashboard_http_core_operator.For_testing
-      .publish_operator_snapshot_success
-        ~fresh_for_s:(-1.0)
-        seed
-    with
-    | Some publication -> publication
-    | None -> fail "stale canonical operator snapshot test publication was superseded"
-  in
-  let current, is_fresh =
-    Server_dashboard_http_core_operator.operator_snapshot_publication_with_freshness ()
-  in
-  check bool "expired canonical publication is stale" false is_fresh;
-  check int
-    "stale publication remains canonical"
-    stale_publication.compute_sequence
-    current.compute_sequence
+  check string "surface" "/api/v1/operator" (json |> member "dashboard_surface" |> to_string);
+  check string "source" "operator_snapshot_read_model" (json |> member "source" |> to_string);
+  check string "generated_at_iso" "2026-05-15T00:00:00Z" (json |> member "generated_at_iso" |> to_string);
+  check string "retention scope" "operator_snapshot" (json |> member "retention" |> member "scope" |> to_string);
+  check string "retention store" "process_cache" (json |> member "retention" |> member "store_kind" |> to_string);
+  check bool "no healthy background refresh is advertised" true
+    (json |> member "retention" |> member "background_refresh_interval_s" = `Null);
+  check string "query effective actor" "dashboard" (json |> member "query" |> member "effective_actor" |> to_string);
+  check bool "query default summary" true (json |> member "query" |> member "default_summary_request" |> to_bool);
+  check bool "query includes Keepers" true (json |> member "query" |> member "include_keepers" |> to_bool);
+  check bool "no semantic deadline is a null wire value" true (json |> member "snapshot_fresh_until_unix" = `Null);
+  check bool "request cache metadata absent" true (json |> member "cache" = `Null)
 
 let test_operator_digest_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->
+  let module Owner = Server_dashboard_operator_digest_observation in
+  ignore (Workspace.init config ~agent_name:None);
   let state =
     Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
-  let seed =
-    `Assoc
-      [ "health", `String "ok"
-      ; "generated_at", `String "2026-05-15T00:00:01Z"
-      ]
-  in
-  with_cached_surface_success Server_dashboard_http_core_operator.operator_digest_cache seed
-  @@ fun () ->
+  let owner = Owner.owner_for_scope ~state (Lib.Mcp_server.workspace_scope state) in
+  check bool "cold Digest has no terminal source answer" false (Owner.has_terminal_answer owner);
+  let completions = ref 0 in
+  let unsubscribe = Owner.subscribe_completed owner (fun _ -> incr completions) in
+  Fun.protect ~finally:unsubscribe @@ fun () ->
   match
     Server_dashboard_http_core.operator_digest_http_json
       ~state
@@ -1996,12 +1691,17 @@ let test_operator_digest_default_route_exposes_provenance () =
   with
   | Error _ -> Alcotest.fail "operator digest default route returned error"
   | Ok json ->
+    let publication = Owner.publication owner in
     let open Yojson.Safe.Util in
+    check bool "actual default read installed its source answer" true
+      (Owner.has_terminal_answer owner);
+    check int "cold HTTP completes one actual source read" 1 !completions;
     check string "surface" "/api/v1/operator/digest"
       (json |> member "dashboard_surface" |> to_string);
     check string "source" "operator_digest_read_model"
       (json |> member "source" |> to_string);
-    check string "generated_at_iso" "2026-05-15T00:00:01Z"
+    check string "generated_at_iso follows the admitted source observation"
+      (publication.source.json |> member "projection_diagnostics" |> member "generated_at" |> to_string)
       (json |> member "generated_at_iso" |> to_string);
     check string "retention scope" "operator_digest"
       (json |> member "retention" |> member "scope" |> to_string);
@@ -2012,7 +1712,17 @@ let test_operator_digest_default_route_exposes_provenance () =
     check bool "query default namespace" true
       (json |> member "query" |> member "default_namespace_request" |> to_bool);
     check string "cache state" "fresh"
-      (json |> member "projection_diagnostics" |> member "cache_state" |> to_string)
+      (json |> member "projection_diagnostics" |> member "cache_state" |> to_string);
+    (match Server_dashboard_http_core.operator_digest_http_json ~state ~sw
+        ~clock:(Eio.Stdenv.clock env) (request "/api/v1/operator/digest") with
+     | Error _ -> fail "retained default Digest returned error"
+     | Ok next ->
+         check int "retained HTTP does not reread the source" 1 !completions;
+         check bool "repeat retains the original source observation" true
+           ((Owner.publication owner).source == publication.source);
+         check string "repeat retains the admitted source timestamp"
+           (json |> member "generated_at_iso" |> to_string)
+           (next |> member "generated_at_iso" |> to_string))
 
 let test_dashboard_shell_timeout_fallback_reports_timing_context () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -2069,6 +1779,24 @@ let cache_sentinel key = `Assoc [ ("sentinel", `String key) ]
 
 let seed_cache key =
   ignore (Dashboard_cache.get_or_compute key ~ttl:60.0 (Pool_work.cpu ~name:__FUNCTION__ (fun () -> cache_sentinel key)))
+
+let test_tool_metrics_series_cache_invalidation_is_workspace_scoped () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let other_dir = test_dir () in
+  Fun.protect ~finally:(fun () ->
+    Dashboard_cache.invalidate_all ();
+    cleanup_dir other_dir) (fun () ->
+    let other = Workspace_utils.default_config other_dir in
+    let key config tool = Server_dashboard_http_core_cache.tool_metrics_series_cache_key
+        config ["since_hours", Some "24"; "tool", Some tool] in
+    let first = key config "first" in
+    let second = key config "second" in
+    let unrelated = key other "first" in
+    List.iter seed_cache [first; second; unrelated];
+    Server_dashboard_http_core_cache.invalidate_tool_metrics_series ~base_path:config.base_path;
+    check bool "first filter invalidated" true (Option.is_none (Dashboard_cache.peek first));
+    check bool "second filter invalidated" true (Option.is_none (Dashboard_cache.peek second));
+    check bool "other workspace retained" true (Option.is_some (Dashboard_cache.peek unrelated)))
 
 let test_scheduled_automation_reads_its_cache_key () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -3342,7 +3070,6 @@ let test_dashboard_shell_snapshot_selector_injects_auth () =
                   ("paths", `Assoc []);
                 ])
            ~tools:`Null
-           ~namespace_truth:`Null
            ~telemetry_summary:`Null ()
        in
        Dashboard_snapshot.publish_for_test snapshot;
@@ -3444,7 +3171,7 @@ let test_execution_default_response_reuses_prepared_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   with_env "MASC_DASHBOARD_FIXTURES_ENABLED" "false" @@ fun () ->
   with_cached_surface_success
-    Server_dashboard_http_execution_surfaces.execution_cache
+    (Server_dashboard_http_execution_surfaces.execution_cache ~state)
     (`Assoc [ "default_marker", `String "last-success";
               "candle", Candle_observation.to_json Candle_observation.Off;
               "data", `String (String.make 4000 'x') ]) @@ fun () ->
@@ -3496,7 +3223,7 @@ let test_execution_default_response_reuses_prepared_bytes () =
 let test_execution_fixture_selection_isolates_prepared_live_bytes () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   let module Surface = Server_dashboard_http_execution_surfaces in
-  with_cached_surface_success Surface.execution_cache
+  with_cached_surface_success (Surface.execution_cache ~state)
     (`Assoc [ "live_marker", `Bool true;
               "candle", Candle_observation.to_json Candle_observation.Off ]) @@ fun () ->
   let context query = Surface.execution_http_request ~state
@@ -3524,7 +3251,7 @@ let test_execution_first_compute_reuses_prepared_bytes () =
   Surface.invalidate_execution_cache ();
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache (fun () ->
     check bool "no successful projection before first compute" true
-      (Option.is_none (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+      (Option.is_none (Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state))
                         .last_success_unix);
     let context = Surface.execution_http_request ~state
         (request_with_headers "/api/v1/dashboard/execution"
@@ -3535,7 +3262,7 @@ let test_execution_first_compute_reuses_prepared_bytes () =
     | Surface.Execution_json _ -> fail "first successful compute discarded prepared bytes"
     | Surface.Execution_payload payload ->
       check bool "first compute published a successful projection" true
-        (Option.is_some (Server_dashboard_http_cache.snapshot Surface.execution_cache)
+        (Option.is_some (Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state))
                           .last_success_unix);
       let open Yojson.Safe.Util in
       check bool "default query retained" true
@@ -3558,6 +3285,7 @@ let test_warm_dashboard_responses_follow_equipment_authority () =
   Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURE" None @@ fun () ->
   with_test_env @@ fun ~env ~sw ~config ->
   let module Surface = Server_dashboard_http_execution_surfaces in
+  let module Mission = Server_dashboard_mission_observation in
   let module Portrait = Keeper_portrait_equipment in
   let ok show = function Ok value -> value | Error error -> fail (show error) in
   let base_path = config.Workspace.base_path in
@@ -3631,16 +3359,21 @@ beanie = 200
     "operator_targets", `Assoc ["keepers", `List [row]]] in
   Surface.invalidate_execution_cache ();
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
-  with_cached_surface_success Surface.execution_cache execution_seed @@ fun () ->
-  with_mission_cache_success mission_seed @@ fun () ->
   let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path () in
+  with_cached_surface_success (Surface.execution_cache ~state) execution_seed @@ fun () ->
+  let mission_owner = Mission.owner_for_scope ~state (Lib.Mcp_server.workspace_scope state) in
+  let mission_attempt = Mission.begin_attempt mission_owner ~origin:Default_request in
+  check bool "the fixture admits its retained Mission source observation" true
+    (Mission.publish_observation mission_attempt
+       {Dashboard_projection_read.json = mission_seed; next_deadline_unix = None; completeness = Complete});
+  let mission_source = (Server_dashboard_http_cache.snapshot (Mission.cache mission_owner)).json in
   let clock = Eio.Stdenv.clock env in
   let req = request_with_headers "/api/v1/dashboard/execution"
       ["accept-encoding", "identity"] in
   let context () = Surface.execution_http_request ~state req in
   let read_execution () = Surface.dashboard_execution_http_json ~state ~sw ~clock req in
-  let read_mission () = Server_dashboard_http_core.dashboard_briefing_http_json
-      ~state ~sw ~clock (request "/api/v1/dashboard/briefing") in
+  let read_mission () = Server_dashboard_http_core.dashboard_briefing_for_request
+      ~sw ~clock (Server_dashboard_http_core.mission_http_request ~state (request "/api/v1/dashboard/briefing")) in
   let observations path json =
     let rows = List.fold_left (fun json key -> Yojson.Safe.Util.member key json) json path
       |> Yojson.Safe.Util.to_list in
@@ -3658,7 +3391,8 @@ beanie = 200
     (* The production proactive on_result uses this exact preparation function
        before broadcasting. Assert its payload, not a replacement test-only
        projection; no SSE socket delivery is claimed by this scenario. *)
-    let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast ~config () in
+    let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast
+      ~owner:(Surface.For_testing.owner_for_state ~state) ~config () in
     List.iter (fun (surface, json, paths) ->
       let label = label ^ " " ^ surface in
       check string (label ^ " preserves metadata") "retained-metadata"
@@ -3717,9 +3451,9 @@ beanie = 200
       {issued_milli="1000";burned_milli="200";circulating_milli="800"})
     ~expected_balance:(Some "800");
   check bool "equipment refresh does not rebuild cached execution metadata" true
-    ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = execution_seed);
+    ((Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state)).json = execution_seed);
   check bool "equipment refresh does not rebuild cached mission metadata" true
-    ((Server_dashboard_http_core.snapshot Server_dashboard_http_core.mission_cache).json = mission_seed);
+    ((Server_dashboard_http_core.snapshot (Server_dashboard_http_core.mission_cache ~state)).json = mission_source);
   let ledger = Candle_ledger.path ~base_path in
   Fs_compat.append_file ledger "{partial";
   let corrupt = Fs_compat.load_file ledger in
@@ -3968,19 +3702,20 @@ let test_execution_fixture_broadcast_and_unknown_override () =
   Eio_guard.protect ~finally:Surface.invalidate_execution_cache @@ fun () ->
   let seeded = match expected with `Assoc fields ->
     `Assoc (("cache_marker",`String "synthetic-seed") :: fields) | _ -> expected in
-  with_cached_surface_success Surface.execution_cache seeded @@ fun () ->
+  with_cached_surface_success (Surface.execution_cache ~state) seeded @@ fun () ->
   Surface.patch_keeper_dependent_caches ~keeper_name:"dm-keeper"
     ~event:(Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped);
   check bool "live lifecycle event preserves the fixture cache" true
-    ((Server_dashboard_http_cache.snapshot Surface.execution_cache).json = seeded);
-  let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast ~config () in
+    ((Server_dashboard_http_cache.snapshot (Surface.execution_cache ~state)).json = seeded);
+  let broadcast = Surface.For_testing.prepare_execution_snapshot_broadcast
+      ~owner:(Surface.For_testing.owner_for_state ~state) ~config () in
   List.iter (fun field ->
     check bool ("broadcast preserves fixture " ^ field) true
       (Yojson.Safe.Util.member field broadcast = Yojson.Safe.Util.member field expected))
     ["candle";"keepers";"continuity_briefs"];
   let unknown_request = request "/api/v1/dashboard/execution?fixture=unknown" in
   check bool "explicit unknown cannot take prepared default bytes" true
-    (Option.is_none (Surface.For_testing.cached_response ~config unknown_request));
+    (Option.is_none (Surface.For_testing.cached_response ~owner:(Surface.For_testing.owner_for_state ~state) ~config unknown_request));
   let actual = Surface.dashboard_execution_http_json ~state ~sw ~clock:(Eio.Stdenv.clock env)
     unknown_request in
   check bool "explicit unknown does not reuse the fixture-seeded cache" true
@@ -4057,6 +3792,49 @@ let test_execution_parameterized_payload_separates_workspace_scope () =
     (execution_payload_key second <> execution_payload_key other);
   check string "runtime base metadata is current" other_base
     Yojson.Safe.Util.(other.json |> member "retention" |> member "workspace_root" |> to_string)
+
+let test_execution_prepared_payload_keeps_captured_workspace () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let scope = Lib.Mcp_server.workspace_scope state in
+  let original_instance = Server_observer_scope.instance_id scope in
+  let next_config = { scope.config with
+    workspace_path = Filename.concat scope.config.base_path "replacement-workspace" } in
+  let context = Surface.execution_http_request ~state
+      (request_with_headers "/api/v1/dashboard/execution?full=1"
+        ["x-masc-agent", "original-observer"]) in
+  let prepared = ref [] in
+  let response = Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun payload ->
+        prepared := payload :: !prepared;
+        match Lib.Mcp_server.set_workspace_config state next_config with
+        | Ok () -> ()
+        | Error error -> fail (Lib.Mcp_server.workspace_switch_error_to_string error))
+      (fun () -> Surface.dashboard_execution_http_response
+        ~sw ~clock:(Eio.Stdenv.clock env) context) in
+  let expected = match !prepared with
+    | [payload] -> payload
+    | _ -> fail "one original request must prepare one scoped payload" in
+  let actual = match response with
+    | Surface.Execution_payload payload -> payload
+    | Surface.Execution_json _ -> fail "same captured instance discarded prepared bytes" in
+  check bool "completed response retains original prepared JSON" true (actual.json == expected.json);
+  check bool "completed response retains original prepared bytes" true (actual.raw_json == expected.raw_json);
+  check string "completed response retains original validator" expected.etag actual.etag;
+  check string "delayed response still attests its original workspace" original_instance
+    Yojson.Safe.Util.(actual.json |> member "observer_instance_id" |> to_string);
+  check string "delayed response retains original workspace metadata" scope.config.workspace_path
+    Yojson.Safe.Util.(actual.json |> member "retention" |> member "workspace_path" |> to_string);
+  check bool "replacement scope really has another instance" true
+    (not (String.equal original_instance
+      (Server_observer_scope.instance_id (Lib.Mcp_server.workspace_scope state))));
+  let replacement = execution_payload ~state ~sw ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/dashboard/execution?full=1") in
+  check string "a new read attests the replacement workspace"
+    (Server_observer_scope.instance_id (Lib.Mcp_server.workspace_scope state))
+    Yojson.Safe.Util.(replacement.json |> member "observer_instance_id" |> to_string);
+  check bool "the new read cannot borrow original bytes" true
+    (replacement.raw_json != actual.raw_json)
 
 let test_execution_parameterized_payload_changes_after_invalidation () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
@@ -4136,7 +3914,7 @@ let test_dashboard_execution_force_refresh_bypasses_default_cache () =
       ]
   in
   with_cached_surface_success
-    Server_dashboard_http_execution_surfaces.execution_cache
+    (Server_dashboard_http_execution_surfaces.execution_cache ~state)
     seed
   @@ fun () ->
   let json =
@@ -4185,7 +3963,7 @@ let test_dashboard_execution_trust_default_route_uses_cached_surface () =
       ]
   in
   with_cached_surface_success
-    Server_dashboard_http_execution_surfaces.execution_trust_cache
+    (Server_dashboard_http_execution_surfaces.execution_trust_cache ~state)
     seed
   @@ fun () ->
   let json =
@@ -4204,7 +3982,9 @@ let test_dashboard_execution_trust_default_route_uses_cached_surface () =
   check string "envelope cache state" "fresh"
     (json |> member "dashboard_surface_envelope" |> member "cache" |> member "state"
      |> to_string);
-  check string "envelope cache key" "execution-trust:default"
+  check string "envelope cache key"
+    ("execution-trust:default:" ^ Lib.Mcp_server.Workspace_scope_epoch.to_string
+      (Lib.Mcp_server.workspace_scope state).epoch)
     (json |> member "dashboard_surface_envelope" |> member "cache" |> member "key"
      |> to_string)
 
@@ -4226,7 +4006,7 @@ let test_shell_snapshot_wire_returns_snapshot_when_published () =
   Dashboard_snapshot.publish_for_test
     (Dashboard_snapshot.make_for_test ~config
        ~shell:marker ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:`Null ());
+       ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
   let json =
     Server_dashboard_snapshot_select.select_shell_json
@@ -4276,7 +4056,7 @@ let test_shell_snapshot_wire_light_reads_shell_light () =
   Dashboard_snapshot.publish_for_test
     (Dashboard_snapshot.make_for_test ~config
        ~shell:full ~shell_light:light ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:`Null ());
+       ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
   let json =
     Server_dashboard_snapshot_select.select_shell_json
@@ -4529,7 +4309,7 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
    [Server_dashboard_snapshot_select.select_tools_json] and
    [..._telemetry_summary_json]. *)
 
-let test_tools_worker_promotes_seed_before_component_ttl () =
+let test_tools_current_worker_bypasses_pending_private_cache () =
   let guard_was_ready = Eio_guard.is_ready () in
   (* Restore after the fixture's entire Eio runtime and worker pool close,
      including exceptional exits. Later synchronous fixtures must not inherit
@@ -4565,51 +4345,23 @@ let test_tools_worker_promotes_seed_before_component_ttl () =
             Eio.Promise.await release;
             ready_json)) in
         await started;
-        let cache = Dashboard_snapshot.For_testing.make_tools_cache () in
-        let now_value = ref 100. in
-        let producer_calls = Atomic.make 0 in
         let owner_domain = (Domain.self () :> int) in
-        let refresh () = Eio.Time.with_timeout_exn clock 2. (fun () ->
+        let ready = Eio.Time.with_timeout_exn clock 2. (fun () ->
           Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
-            Dashboard_snapshot.For_testing.refresh_tools
-              ~now:(fun () -> !now_value) ~ttl:60. ~cache ~config (fun () ->
-                check bool "tools producer remains on a worker" true
-                  ((Domain.self () :> int) <> owner_domain);
-                Atomic.incr producer_calls;
-                Server_dashboard_http_runtime_info.dashboard_tools_http_result config))) in
-        let pending = refresh () in
-        now_value := 102.;
-        let still_pending = refresh () in
-        check bool "pending cycles reuse identity and all encodings" true
-          (pending == still_pending);
-        check int "pending producer is retried without waiting sixty seconds" 2
-          (Atomic.get producer_calls);
-        Eio.Promise.resolve release_u ();
-        let rec await_computed () =
-          match Dashboard_cache.peek_payload key with
-          | Some payload when payload.origin = Dashboard_cache.Computed -> payload
-          | _ -> Eio.Fiber.yield (); await_computed ()
-        in
-        let computed = Eio.Time.with_timeout_exn clock 2. await_computed in
-        check bool "returned seed keeps its origin after concurrent publication" true
+            check bool "current tools read remains on a worker" true
+              ((Domain.self () :> int) <> owner_domain);
+            match Server_dashboard_http_runtime_info.dashboard_tools_http_result
+                ~read_policy:Masc.Dashboard_projection_read.Current config with
+            | Dashboard_snapshot.Tools_ready json -> json
+            | Tools_pending _ -> fail "current tools joined the unrelated pending HTTP fill"
+            | Tools_error _ -> fail "current tools returned the unrelated HTTP fallback")) in
+        check bool "a returned seed keeps its own readiness" true
           (returned_seed.origin = Dashboard_cache.Seeded);
-        check bool "completed empty inventory has computed origin" true
-          (computed.origin = Dashboard_cache.Computed);
-        now_value := 104.;
-        let ready = refresh () in
-        check bool "ready promotes on the next cycle before the old TTL" true
-          (ready != pending);
-        check int "empty inventory remains empty after promotion" 0
-          Yojson.Safe.Util.(ready.json |> member "tool_inventory" |> to_list |> List.length);
-        check bool "promotion keeps the real producer's final decoration" true
-          (Yojson.Safe.Util.(ready.json |> member "keeper_waiting_inventory") <> `Null);
-        check string "promoted bytes describe the decorated JSON"
-          (Yojson.Safe.to_string ready.json) ready.encoded.identity;
-        now_value := 106.;
-        let ready_again = refresh () in
-        check bool "ready cycles reuse all prepared encodings" true (ready == ready_again);
-        check int "ready component TTL avoids another producer call" 3
-          (Atomic.get producer_calls)))
+        check bool "current tools has the actual final live decoration" true
+          (Yojson.Safe.Util.(ready |> member "keeper_waiting_inventory") <> `Null);
+        check bool "current tools did not wait for the old cache writer" false
+          (Eio.Promise.is_resolved release);
+        Eio.Promise.resolve release_u ()))
 
 let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -4618,7 +4370,7 @@ let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   Dashboard_snapshot.publish_for_test
     (Dashboard_snapshot.make_for_test ~config
        ~shell:`Null ~tools:marker
-       ~namespace_truth:`Null ~telemetry_summary:`Null ());
+       ~telemetry_summary:`Null ());
   let timing = Server_timing.create () in
   let json =
     Server_dashboard_snapshot_select.select_tools_json
@@ -4642,7 +4394,7 @@ let test_tools_prepared_selector_scope_and_keeper_contract () =
   Fun.protect ~finally:Dashboard_snapshot.reset_for_test (fun () ->
     let marker = `Assoc [ "snapshot", `String "final-tools" ] in
     let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null
-      ~tools:marker ~namespace_truth:`Null ~telemetry_summary:`Null () in
+      ~tools:marker ~telemetry_summary:`Null () in
     Dashboard_snapshot.publish_for_test snapshot;
     let require_prepared timing =
       match Server_dashboard_snapshot_select.select_tools_response ~timing config with
@@ -4958,7 +4710,7 @@ let test_tools_routes_serve_prepared_http_representations () =
       ; "keeper_waiting_inventory", `Assoc [ "wire_marker", `String "final-decoration" ]
       ; "effective_keeper_surface", `Null ] in
     let snapshot = Dashboard_snapshot.make_for_test ~config ~shell:`Null ~tools:final_json
-      ~namespace_truth:`Null ~telemetry_summary:`Null () in
+      ~telemetry_summary:`Null () in
     Dashboard_snapshot.publish_for_test snapshot;
     (* Keep exact-Keeper fallback cheap while still resolving its live fields. *)
     ignore (Dashboard_cache.get_or_compute ("tools:" ^ config.base_path) ~ttl:60.
@@ -5111,14 +4863,40 @@ let test_cached_dashboard_reads_send_the_kept_bytes () =
       [ "/api/v1/dashboard/planning"
       ; "/api/v1/dashboard/goals"
       ; "/api/v1/dashboard/goals/detail?goal_id=goal-absent"
-      ; "/api/v1/dashboard/briefing"
       ; "/api/v1/dashboard/briefing/sections"
       ; "/api/v1/dashboard/tool-quality?window_hours=1"
       ; "/api/v1/dashboard/eval-feed"
       ; "/api/v1/keepers/fixture-keeper/tool-stats"
       ; "/api/v1/workspace/tree"
       ; "/api/v1/workspace/children?path=fixture-dir"
-      ])
+      ];
+    (* Mission's captured owner/private query cache retains JSON rather than
+       a second encoded route page. Its actual authenticated HTTP reads must
+       still retain the observed body and validator without installing their
+       actor-local rows into the default workspace publication. *)
+    let module Mission = Server_dashboard_mission_observation in
+    let owner = Mission.owner_for_scope ~state (Lib.Mcp_server.workspace_scope state) in
+    let original = Mission.publication owner in
+    let prepared = ref 0 in
+    let (first_status, first_headers, first_body),
+        (second_status, second_headers, second_body) =
+      Dashboard_cache.For_testing.with_payload_prepared_hook
+        (fun _ -> incr prepared)
+        (fun () ->
+          let read () = tools_h1_wire_response ~router ~headers:authorized
+              "/api/v1/dashboard/briefing" in
+          let first = read () in first, read ()) in
+    check int "Mission answers" 200 first_status;
+    check int "Mission answers again" 200 second_status;
+    check int "Mission reads do not construct another encoded route cache" 0 !prepared;
+    check string "Mission retains its observed response bytes" first_body second_body;
+    check (option string) "Mission retains its validator"
+      (List.assoc_opt "etag" first_headers) (List.assoc_opt "etag" second_headers);
+    check string "Mission HTTP retains its captured workspace instance"
+      (Server_observer_scope.instance_id (Lib.Mcp_server.workspace_scope state))
+      Yojson.Safe.Util.(Yojson.Safe.from_string first_body |> member "observer_instance_id" |> to_string);
+    check bool "actor-local reads leave canonical source rows untouched" true
+      ((Mission.publication owner).source == original.source))
 
 (* Exact parsed queries must own distinct cached responses. Exercise the real
    router and response cache, including the echoed query and retained rows. *)
@@ -5524,7 +5302,7 @@ let test_telemetry_summary_snapshot_wire_returns_snapshot () =
   Dashboard_snapshot.publish_for_test
     (Dashboard_snapshot.make_for_test ~config
        ~shell:`Null ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:marker ());
+       ~telemetry_summary:marker ());
   let timing = Server_timing.create () in
   let json =
     Server_dashboard_snapshot_select.select_telemetry_summary_json
@@ -5557,39 +5335,6 @@ let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
    server_state + Eio scheduler + 6 timeout env knobs ([with_test_env]
    does not synthesise these).  The fallback path lives in
    [test_dashboard_namespace_truth.ml] integration coverage. *)
-
-let test_project_snapshot_wire_returns_snapshot_when_populated () =
-  with_test_env @@ fun ~env ~sw ~config ->
-  Dashboard_snapshot.reset_for_test ();
-  let marker =
-    `Assoc [ "namespace_truth_marker", `String "from-snapshot" ]
-  in
-  Dashboard_snapshot.publish_for_test
-    (Dashboard_snapshot.make_for_test ~config
-       ~shell:`Null ~tools:`Null
-       ~namespace_truth:marker ~telemetry_summary:`Null ());
-  let clock = Eio.Stdenv.clock env in
-  let state =
-    Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path
-  in
-  let req = request "/api/v1/dashboard/project-snapshot" in
-  let timing = Server_timing.create () in
-  let json =
-    Server_dashboard_snapshot_select.select_project_snapshot_json
-      ~state ~sw ~clock ~timing req
-  in
-  let open Yojson.Safe.Util in
-  Alcotest.(check string)
-    "populated snapshot path returns published marker"
-    "from-snapshot"
-    (json |> member "namespace_truth_marker" |> to_string);
-  Alcotest.(check bool)
-    "Server-Timing header records snapshot_read phase on hit"
-    true
-    (let header = Server_timing.to_header_value timing in
-     let re = Re.compile (Re.Perl.re "snapshot_read") in
-     Re.execp re header);
-  Dashboard_snapshot.reset_for_test ()
 
 let assoc_has key = function
   | `Assoc fields -> List.mem_assoc key fields
@@ -6152,7 +5897,8 @@ let test_lifecycle_patch_never_patches_a_declaration_row () =
    it. The cached surface lists the Keeper as a declaration row, so the patch
    cannot apply: the cache is invalidated and its row is left as it was. *)
 let test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config:_ ->
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let state = Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
   let surface =
     `Assoc
       [ "keepers", `List [ declared_keeper_row "imp" ]
@@ -6163,13 +5909,13 @@ let test_lifecycle_event_for_a_declared_keeper_invalidates_the_execution_cache (
     (fun event ->
        let label = Keeper_lifecycle_events.lifecycle_event_to_string event in
        with_cached_surface_success
-         Server_dashboard_http_execution_surfaces.execution_cache
+         (Server_dashboard_http_execution_surfaces.execution_cache ~state)
          surface
        @@ fun () ->
        Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
          ~keeper_name:"imp"
          ~event;
-       let cache = Server_dashboard_http_execution_surfaces.execution_cache in
+       let cache = (Server_dashboard_http_execution_surfaces.execution_cache ~state) in
        check bool (label ^ " invalidates the cached surface") false
          (Server_dashboard_http_cache.cached_surface_has_success cache);
        let open Yojson.Safe.Util in
@@ -8507,6 +8253,8 @@ let () =
             test_dashboard_query_cache_key_partitions_route_params;
           test_case "dashboard query cache key encodes delimiter values" `Quick
             test_dashboard_query_cache_key_encodes_delimiter_values;
+          test_case "tool series invalidation follows the workspace cache family" `Quick
+            test_tool_metrics_series_cache_invalidation_is_workspace_scoped;
           test_case "cache key partitions by workspace root" `Quick
             test_dashboard_cache_key_partitions_by_workspace_root;
           test_case "operator snapshot default route exposes provenance" `Quick
@@ -8570,6 +8318,8 @@ let () =
             test_execution_parameterized_payload_separates_request_queries;
           test_case "execution parameterized responses separate workspace scopes" `Quick
             test_execution_parameterized_payload_separates_workspace_scope;
+          test_case "execution prepared response retains captured workspace after replacement" `Quick
+            test_execution_prepared_payload_keeps_captured_workspace;
           test_case "execution parameterized response follows invalidation" `Quick
             test_execution_parameterized_payload_changes_after_invalidation;
           test_case "execution parameterized timeout keeps request metadata" `Quick
@@ -8593,7 +8343,7 @@ let () =
           test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
             test_tools_snapshot_wire_returns_snapshot_when_actor_omitted;
           test_case "worker Tools seed promotes before component TTL with empty inventory" `Quick
-            test_tools_worker_promotes_seed_before_component_ttl;
+            test_tools_current_worker_bypasses_pending_private_cache;
           test_case "tools prepared selector scopes bytes and preserves exact keeper" `Quick
             test_tools_prepared_selector_scope_and_keeper_contract;
           test_case "tools routes serve prepared encodings and conditional responses" `Quick
@@ -8612,8 +8362,6 @@ let () =
             test_telemetry_summary_snapshot_wire_returns_snapshot;
           test_case "RFC-0138 telemetry_summary wire falls back when empty" `Quick
             test_telemetry_summary_snapshot_wire_falls_back_when_empty;
-          test_case "RFC-0138 project-snapshot wire returns snapshot when populated" `Quick
-            test_project_snapshot_wire_returns_snapshot_when_populated;
           test_case "telemetry n default is bounded (freeze guard)" `Quick
             test_telemetry_n_default_is_bounded;
           test_case "an HTTP/2 cached payload's timeout envelope is 504" `Quick
@@ -8666,12 +8414,6 @@ let () =
             test_keeper_github_login_stream_frame_names_its_event;
           test_case "GitHub token route refuses an unreadable hostname" `Quick
             test_github_token_post_refuses_an_unreadable_hostname;
-          test_case "operator snapshot rejects stale publication races" `Quick
-            test_operator_snapshot_publication_rejects_stale_races;
-          test_case "refreshed operator snapshot encodes on the pool and hands on a newer one" `Quick
-            test_refreshed_operator_snapshot_encodes_on_the_pool_and_hands_on_a_newer_one;
-          test_case "operator snapshot error clears previous success" `Quick
-            test_operator_snapshot_error_clears_previous_success;
           test_case
             "operator snapshot HTTP rejects stale success after store error"
             `Quick

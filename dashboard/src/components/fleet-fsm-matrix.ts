@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../lib/observation-refresh'
 /**
  * FleetFsmMatrix (LT-16b)
  *
@@ -9,23 +10,22 @@
  * Backend: #7723 (LT-16a) → GET /api/v1/keepers/composite.
  *
  * LT-16c added a per-(keeper, axis) observation ring and a horizontal
- * sparkline renderer so each cell now carries its last 30 poll ticks.
+ * sparkline renderer so each cell carries its last 30 observations.
  * The ring lives client-side; the backend remains stateless. A keeper
- * that disappears from a fleet poll is pruned from history on the next
- * tick (operators care about currently-registered keepers).
+ * that disappears from a fleet observation is pruned from history.
  */
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 
 import { currentDashboardActor } from '../api/core'
-import { fetchKeepersComposite } from '../api/keeper'
 import type {
   FleetCompositeSnapshot,
   KeeperCompositeSnapshot,
   KeeperRuntimeAttention,
 } from '../api/keeper'
-import { fleetCompositeSnapshot } from '../composite-signals'
+import { useFleetComposite } from '../lib/use-fleet-composite'
+import { captureDashboardObservationOwner, dashboardObservationOwnerIsCurrent, readDashboardObservationOwner } from '../lib/observation-read-owner'
 import { dispatchOperatorAction } from '../operator-store'
 import { showToast } from './common/toast'
 import { unixSecondsToDate } from '../lib/format-time'
@@ -37,7 +37,6 @@ import {
   type LaneKey,
 } from './fsm-hub-types'
 
-const POLL_INTERVAL_MS = 10_000
 
 /**
  * Time-axis window (LT-16c). 30 snapshots × 10s poll = 5-minute
@@ -594,25 +593,31 @@ interface FleetFsmMatrixProps {
   onSelectKeeper?: (name: string) => void
   onRequestRuntimeAssist?: FleetRuntimeAssistHandler
   // Injectable for tests.
-  fetcher?: () => Promise<FleetCompositeSnapshot>
-  pollIntervalMs?: number
+  fetcher?: (opts?: { signal?: AbortSignal }) => Promise<FleetCompositeSnapshot>
 }
 
 export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
-  const fetcher = props.fetcher ?? fetchKeepersComposite
-  const allowStreamedData = props.fetcher == null
-  const intervalMs = props.pollIntervalMs ?? POLL_INTERVAL_MS
-  const [data, setData] = useState<FleetCompositeSnapshot | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState<boolean>(true)
+  const fetcher = props.fetcher
+  const shared = useFleetComposite(fetcher === undefined)
+  const [privateData, setData] = useState<FleetCompositeSnapshot | null>(null)
+  const [privateError, setError] = useState<string | null>(null)
+  const [privateLoading, setLoading] = useState<boolean>(true)
+  const data = fetcher === undefined ? shared.data : privateData
+  const error = fetcher === undefined ? shared.error : privateError
+  const loading = fetcher === undefined ? shared.loading : privateLoading
   const [query, setQuery] = useState<string>('')
   const [assistBusy, setAssistBusy] = useState<Set<string>>(() => new Set())
   const [actionBusy, setActionBusy] = useState<Set<string>>(() => new Set())
-  const lastStreamedAtRef = useRef<number | null>(null)
   // Observation ring. Ref rather than state because pushObservation
   // returns a fresh record per tick and we pair it with a setData call
   // which triggers the re-render — avoids a redundant state subscription.
   const historyRef = useRef<KeeperFleetHistory>({})
+  const historyOwner = useRef(captureDashboardObservationOwner())
+  void readDashboardObservationOwner()
+  if (!dashboardObservationOwnerIsCurrent(historyOwner.current)) {
+    historyOwner.current = captureDashboardObservationOwner()
+    historyRef.current = {}
+  }
 
   const applySnapshot = useCallback((snap: FleetCompositeSnapshot) => {
     historyRef.current = pushObservation(
@@ -647,15 +652,18 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     }
   }, [props.onRequestRuntimeAssist])
 
-  const refreshFleetComposite = useCallback(async () => {
+  const refreshFleetComposite = useCallback(async (keeperName?: string) => {
+    if (fetcher === undefined) { await shared.refresh(keeperName); return }
+    const owner = captureDashboardObservationOwner()
     const snap = await fetcher()
-    applySnapshot(snap)
-  }, [applySnapshot, fetcher])
+    if (dashboardObservationOwnerIsCurrent(owner)) applySnapshot(snap)
+  }, [applySnapshot, fetcher, shared.refresh])
 
   const runRuntimeAction = useCallback(async (
     keeperName: string,
     action: FleetRuntimeAction,
   ) => {
+    const owner = captureDashboardObservationOwner()
     const key = `${keeperName}:${action.action_type}`
     setActionBusy(prev => new Set(prev).add(key))
     try {
@@ -671,7 +679,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
       } else {
         showToast(`${keeperName} ${runtimeActionLabel(action)} 실행 완료`, 'success')
       }
-      await refreshFleetComposite()
+      if (dashboardObservationOwnerIsCurrent(owner)) await refreshFleetComposite(keeperName)
     } catch (err) {
       const message = err instanceof Error ? err.message : `${runtimeActionLabel(action)} 실패`
       showToast(message, 'error')
@@ -685,62 +693,30 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   }, [refreshFleetComposite])
 
   useEffect(() => {
-    if (!allowStreamedData) return
-    const applyStreamedSnapshot = (snap: FleetCompositeSnapshot | null) => {
-      if (!snap) return
-      lastStreamedAtRef.current = Date.now()
-      applySnapshot(snap)
-    }
-    applyStreamedSnapshot(fleetCompositeSnapshot.value)
-    return fleetCompositeSnapshot.subscribe(applyStreamedSnapshot)
-  }, [allowStreamedData, applySnapshot])
+    if (fetcher === undefined && shared.observation !== null
+      && dashboardObservationOwnerIsCurrent(shared.observation.owner)) applySnapshot(shared.observation.value)
+  }, [fetcher, shared.observation, applySnapshot])
 
   useEffect(() => {
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const streamStaleAfterMs = Math.max(intervalMs * 2, 1)
-    // In live mode the pushed fleet snapshot is primary; polling is only a
-    // seed/watchdog path so this matrix does not double-hit the backend every
-    // interval while the stream is healthy.
-    const shouldFetchFallback = (): boolean => {
-      if (!allowStreamedData) return true
-      const lastStreamedAt = lastStreamedAtRef.current
-      if (lastStreamedAt == null) return true
-      return Date.now() - lastStreamedAt >= streamStaleAfterMs
-    }
-    const tick = async () => {
-      if (!shouldFetchFallback()) {
-        if (!cancelled) {
-          timer = setTimeout(tick, intervalMs)
-        }
-        return
-      }
-      try {
-        const snap = await fetcher()
-        if (!cancelled) {
-          applySnapshot(snap)
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setError(String(e))
-          setLoading(false)
-        }
-      } finally {
-        if (!cancelled) {
-          timer = setTimeout(tick, intervalMs)
-        }
+    if (fetcher === undefined) return
+    return setupObservationRefresh(async signal => {
+    try {
+      const snap = await fetcher({ signal })
+      if (!signal.aborted) applySnapshot(snap)
+    } catch (e) {
+      if (!signal.aborted) {
+        setError(String(e))
+        setLoading(false)
+        throw e
       }
     }
-    if (allowStreamedData && fleetCompositeSnapshot.value) {
-      timer = setTimeout(tick, intervalMs)
-    } else {
-      void tick()
-    }
-    return () => {
-      cancelled = true
-      if (timer) clearTimeout(timer)
-    }
-  }, [allowStreamedData, applySnapshot, fetcher, intervalMs])
+    }, { topics: ['keeper_composite'], resetRead: () => {
+      historyRef.current = {}
+      setData(null)
+      setError(null)
+      setLoading(true)
+    } })
+  }, [applySnapshot, fetcher])
 
   const tallies = useMemo(
     () => (data ? tallyInvariantViolations(data.snapshots) : null),

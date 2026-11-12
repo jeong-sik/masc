@@ -40,7 +40,7 @@ import { activeKeeperName } from '../../keeper-state'
 import { keepers } from '../../store'
 import { dashboardBearerToken } from '../../api/core'
 import { devTokenBootstrapStatus } from '../../api/dev-token'
-import { dashboardWsReady } from '../../dashboard-ws-state'
+import { dashboardObserverReady } from '../../dashboard-observer-state'
 import { fetchRepositoryObservation, type Repository } from '../../api/repositories'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import type { WorkspaceFetchIssue } from './ide-data-workspace-store'
@@ -72,7 +72,6 @@ export interface IdeStatusbarModel {
 }
 
 const IDE_LAYER_KINDS = new Set(IDE_LAYERS.map(layer => layer.kind))
-const IDE_ACTIVITY_POLL_MS = 10_000
 const REVIEW_FOCUS_LAYER_PARAM = REVIEW_FOCUS_LAYERS.join(',')
 const EMPTY_LAYER_PARAM = 'none'
 export const IDE_TREE_WIDTH_STORAGE_KEY = 'dashboard:ide-tree-width'
@@ -298,7 +297,7 @@ function statusbarWorkspaceLabel(
 }
 
 function dashboardRuntimeConnected(): boolean {
-  return dashboardWsReady.value
+  return dashboardObserverReady.value
 }
 
 /**
@@ -1149,7 +1148,7 @@ export function IdeShell() {
             />
           </div>
         </details>
-        <${IdePresenceStrip} compact=${true} pollMs=${IDE_ACTIVITY_POLL_MS} />
+        <${IdePresenceStrip} compact=${true} />
         <${IdePinnedKeepers} onOpenKeeper=${handleOpenKeeper} />
         <button
           type="button"
@@ -1233,7 +1232,7 @@ export function IdeShell() {
                       activeFile=${activeFilePath}
                       codebase=${activeCodebase}
                       diffRows=${diffRows}
-                      pollMs=${IDE_ACTIVITY_POLL_MS}
+
                       compact=${true}
                     />
                     <div class="ide-v2-work-context">

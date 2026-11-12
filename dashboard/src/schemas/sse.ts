@@ -20,6 +20,9 @@ import {
 import type { KeeperChatCustomEventName, KeeperChatStreamEvent } from '../lib/keeper-chat-stream-contract'
 import { isRecord } from '../lib/type-guards'
 import { isAgentCoreEventType } from '../lib/sse-event-type'
+import { missionPublication } from '../mission-observation-contract'
+import { operatorDigestPublication } from '../operator-digest-contract'
+import { operatorSnapshotPublication } from '../operator-snapshot-contract'
 
 type SchemaIssue = { path?: string; message: string }
 type SafeParseSuccess<T> = { success: true; data: T }
@@ -138,6 +141,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // entry in sse-store.ts.
   'masc/task_claimed',
   'project_snapshot',
+  'mission_snapshot',
   'execution_snapshot',
   'operator_snapshot',
   'operator_digest',
@@ -1243,6 +1247,16 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
   if (!isRecord(value)) return fail(undefined, 'Expected SSE message object')
   if (!isSSEEventType(value.type)) {
     return fail('type', 'Expected known SSE event type or agent_core:* event type')
+  }
+
+  if (value.type === 'mission_snapshot' && missionPublication(value.payload) === null) {
+    return fail('payload', 'Expected captured Mission instance, generation, sequence and observation state')
+  }
+  if (value.type === 'operator_snapshot' && operatorSnapshotPublication(value.payload) === null) {
+    return { success: false, error: { issues: [{ message: 'operator snapshot publication is invalid' }] } }
+  }
+  if (value.type === 'operator_digest' && operatorDigestPublication(value.payload) === null) {
+    return fail('payload', 'Expected captured Operator Digest instance, ordering, state and query')
   }
 
   for (const key of STRING_FIELDS) {

@@ -319,6 +319,7 @@ export interface DashboardRuntimeCountAuthority {
 }
 
 export interface DashboardNamespaceTruthResponse {
+  observer_instance_id?: string
   generated_at?: string
   generated_at_iso?: string
   dashboard_surface?: string
@@ -453,6 +454,10 @@ export interface DashboardExecutionContinuityBrief {
 }
 
 export interface DashboardExecutionResponse {
+  observer_instance_id?: string
+  /** Untrusted wire metadata; an initializing envelope has no read outcome. */
+  projection_diagnostics?: unknown
+  query?: unknown
   candle?: unknown
   execution_publication_epoch?: string
   execution_publication_generation?: number

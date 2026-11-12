@@ -264,8 +264,38 @@ let execution_evidence_of_metadata metadata =
   Option.bind metadata find
 ;;
 
+type written = { canonical_masc_root : string; keeper_name : string }
+
+type write_observer = { callback : written -> unit }
+let write_observers : write_observer list Atomic.t = Atomic.make []
+let write_notification_failures = Atomic.make 0
+let failed_write_notifications () = Atomic.get write_notification_failures
+
+let rec update_write_observers f =
+  let before = Atomic.get write_observers in
+  if not (Atomic.compare_and_set write_observers before (f before)) then
+    update_write_observers f
+;;
+
+let subscribe_written callback =
+  let observer = {callback} in
+  update_write_observers (fun before -> observer :: before);
+  fun () -> update_write_observers (List.filter (fun current -> current != observer))
+;;
+
+let notify_written written =
+  (* cancel-guard-ok: a listener's cancellation cannot replace this committed
+     row's outcome. The writer's next suspension still observes its own
+     cancellation. This boundary performs no I/O. *)
+  List.iter (fun observer ->
+    match observer.callback written with
+    | () -> ()
+    | exception _ -> ignore (Atomic.fetch_and_add write_notification_failures 1))
+    (Atomic.get write_observers)
+;;
+
 type store_state =
-  { store : Dated_jsonl.t option
+  { store : (Dated_jsonl.t * string * string) option
   ; configured : (string * string) option
   }
 
@@ -356,6 +386,8 @@ let record_kind_of_string s = List.find_opt (fun v -> String.equal (record_kind_
 
 type append_entry =
   { store : Dated_jsonl.t
+  ; base_path : string
+  ; canonical_masc_root : string
   ; keeper_name : string
   ; tool_name : string
   ; trace_id : string option
@@ -444,6 +476,7 @@ let location masc_root =
 
 let init ~base_path () =
   let masc_root = Common.masc_dir_from_base_path ~base_path in
+  let canonical_masc_root = Fs_compat.realpath_lenient masc_root in
   let location = location masc_root in
   let dir = Dated_jsonl.Store.dir location in
   Atomic.set store_state { store = None; configured = Some (masc_root, dir) };
@@ -452,7 +485,7 @@ let init ~base_path () =
   try
     let store = Dated_jsonl.open_store location in
     Atomic.set store_state
-      { store = Some store; configured = Some (masc_root, dir) }
+      { store = Some (store, canonical_masc_root, base_path); configured = Some (masc_root, dir) }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -515,7 +548,7 @@ let pending_board_action_evidence_for_testing () =
        | None -> []))
 ;;
 
-let store () = (Atomic.get store_state).store
+let store () = Option.map (fun (store, _, _) -> store) (Atomic.get store_state).store
 
 let store_dir () = Option.map Dated_jsonl.base_dir (store ())
 
@@ -599,11 +632,16 @@ let max_current_segment_bytes = 16 * 1024 * 1024
 exception Rotation_sequence_exhausted of int
 
 let append_to_store_result ~committed (entry : append_entry) =
+  Fun.protect ~finally:(fun () ->
+    Dashboard_observation_commit.written ~base_path:entry.base_path ~scope:`Workspace `Telemetry)
+    (fun () ->
   try
     let outcome = Dated_jsonl.append_rotating
       ~on_committed:(fun () ->
         committed := true;
-        advance_committed_revision ~keeper_name:entry.keeper_name)
+        advance_committed_revision ~keeper_name:entry.keeper_name;
+        notify_written { canonical_masc_root = entry.canonical_masc_root;
+                         keeper_name = entry.keeper_name })
       entry.store ~max_current_file_bytes:max_current_segment_bytes entry.json in
     (match outcome with
      | Dated_jsonl.Appended_to_current | Dated_jsonl.Appended_after_rotation _ -> ()
@@ -628,7 +666,7 @@ let append_to_store_result ~committed (entry : append_entry) =
       ~tool_name:entry.tool_name
       ?trace_id
       exn;
-    Error exn
+    Error exn)
 ;;
 
 let append_to_store entry =
@@ -889,7 +927,7 @@ let log_call
     | None ->
       record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ();
       if requires_commit then raise Commit_required_but_store_unavailable
-    | Some store ->
+    | Some (store, canonical_masc_root, base_path) ->
       (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
          callers (keeper_hooks_agent_core, mcp_server_eio_call_tool) pass their
          run identity explicitly; filling [None] from a keeper-name-keyed
@@ -1300,7 +1338,7 @@ let log_call
          captures) that would corrupt the JSONL file and cause downstream
          readers — including the dashboard — to silently skip entire rows. *)
       let safe_json = Inference_utils.sanitize_json_utf8 json in
-      let entry = { store; keeper_name; tool_name; trace_id; json = safe_json } in
+      let entry = { store; base_path; canonical_masc_root; keeper_name; tool_name; trace_id; json = safe_json } in
       if requires_commit then
         (match append_to_store_result ~committed:(ref false) entry with
          | Ok () ->
@@ -1328,7 +1366,7 @@ let index_rows ?keeper_name ~n () : (Yojson.Safe.t list, index_error) result =
   if n <= 0
   then Ok []
   else (
-    match (Atomic.get store_state).store with
+    match store () with
     | None -> Ok []
     | Some store ->
       Result.map_error
@@ -1337,14 +1375,14 @@ let index_rows ?keeper_name ~n () : (Yojson.Safe.t list, index_error) result =
 ;;
 
 let read_after ~keeper_name ~after ~project =
-  match (Atomic.get store_state).store with
+  match store () with
   | None -> Error (Index_unavailable "tool-call ledger is not initialized")
   | Some store ->
     Keeper_tool_call_index.rows_after ~store ~keeper_name ~after ~project
     |> Result.map_error (fun detail -> Index_unavailable detail)
 
 let current_frontier ~keeper_name =
-  match (Atomic.get store_state).store with
+  match store () with
   | None -> Error (Index_unavailable "tool-call ledger is not initialized")
   | Some store ->
     Keeper_tool_call_index.current_frontier ~store ~keeper_name
@@ -1391,7 +1429,7 @@ let file_change_tally ?keeper_name ~(window_hours : float) () =
   if window_hours <= 0.0
   then Keeper_tool_call_file_change.empty_tally
   else (
-    match (Atomic.get store_state).store with
+    match store () with
     | None -> Keeper_tool_call_file_change.empty_tally
     | Some store ->
       let now = Time_compat.now () in
@@ -1456,7 +1494,7 @@ let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =
   if window_hours <= 0.0
   then []
   else (
-    match (Atomic.get store_state).store with
+    match store () with
     | None -> []
     | Some store ->
       let now = Time_compat.now () in
@@ -1488,7 +1526,7 @@ let read_latest ?keeper_name () : Yojson.Safe.t option =
     | Some k -> String.equal k name
     | None -> false
   in
-  match (Atomic.get store_state).store with
+  match store () with
   | None -> None
   | Some store ->
     let scan_limit =

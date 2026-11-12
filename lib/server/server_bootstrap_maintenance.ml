@@ -399,6 +399,13 @@ let recover_keeper_msg_requests_on_startup ~base_path =
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
+  Server_dashboard_snapshot_sources.install ~state ~sw ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~on_shell_published:(fun ~scope ~shell ~shell_light ->
+      Server_dashboard_http_execution_surfaces.publish_shell_cache_success
+        ~state ~scope ~light:false shell;
+      Server_dashboard_http_execution_surfaces.publish_shell_cache_success
+        ~state ~scope ~light:true shell_light);
   Server_keeper_build_maintenance.start ~sw ~clock ~config;
   Server_keeper_volume_maintenance.start ~sw ~clock ~config;
   Server_sandbox_volume_gc_report.start ~sw ~clock ~config;
@@ -562,13 +569,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      order prevents startup hydration from overwriting a call that completed
      concurrently. A failed read leaves the current snapshot unchanged and is
      visible to operators; persistence remains best-effort. *)
-  let tool_metrics_masc_root =
-    Workspace.masc_dir (Mcp_server.workspace_config state)
+  let tool_metrics_base_path =
+    (Mcp_server.workspace_config state).base_path
   in
   (try
      match
        Tool_metrics_persist.hydrate
-         ~masc_root:tool_metrics_masc_root
+         ~base_path:tool_metrics_base_path
          ~retention_days:(Env_config_core.jsonl_retention_days ())
      with
      | Ok report ->
@@ -592,7 +599,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     match outcome, result with
     | Dispatch_outcome.Handled, Some r ->
       Tool_metrics.record r;
-      Tool_metrics_persist.enqueue ~masc_root:tool_metrics_masc_root r
+      Tool_metrics_persist.enqueue ~base_path:tool_metrics_base_path r
     | (Dispatch_outcome.Handled, None) | (Dispatch_outcome.No_handler, _) -> ());
   (* RFC-0234 scheduled automation runner.  Public schedule tools and the
      dashboard-only approval route only mutate the durable ledger; this loop is
@@ -1074,26 +1081,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     in
     sync_once ();
     sync_loop ());
-  (* RFC-0138 Phase 3 Step 1: lock-free dashboard snapshot refresher.
-     Publishes shell/tools/telemetry_summary every [interval_sec] so
-     HTTP read handlers can serve via wait-free [Atomic.get] instead of
-     racing the synchronous compute path through [Dashboard_cache].
-
-     The interval (2.0s) matches RFC-0138 §6 Q2: frontend polls /shell
-     every 3s, so a 2s refresh keeps staleness bounded at 5s (2s + 3s)
-     while leaving the compute path fully out of the request fiber. *)
-  fork_logged_fiber
-    ~sw
-    ~on_error:(log_server_fiber_crash "dashboard_snapshot refresh")
-    (fun () ->
-      (* RFC-0138 Phase 3 Step 3: pass [~state] so refresh_loop can
-         populate [namespace_truth] from the cached-refs path.
-         That moves the 6 MASC_NAMESPACE_TRUTH_*_TIMEOUT_S knobs out
-         of the request fiber for the canonical project-snapshot
-         response (Step 4 retires the env knobs themselves). *)
-      Dashboard_snapshot.refresh_loop
-        ~sw ~clock ~config:(Mcp_server.workspace_config state) ~state
-        ~interval_sec:2.0 ());
   (* The runtime probe runs on the server's clock from boot, so the first
      dashboard request finds a value rather than a [warming_up] placeholder
      (which reads as "runtime down" to an operator). *)

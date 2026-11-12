@@ -39,13 +39,14 @@ import {
 } from '../api/dashboard-skills'
 import { SurfaceCard } from './common/card'
 import { EmptyState, ErrorState, LoadingState } from './common/feedback-state'
-import { currentStoredTokenRevision } from '../api/core'
 import { storedTokenRevision } from '../api/token-revision'
+import { dashboardActorRevision, managedDashboardActorRevision } from '../lib/dashboard-session-actor'
+import { captureDashboardObservationOwner, dashboardObservationOwnerHasWorkspace,
+  dashboardObservationOwnerIsCurrent, type DashboardObservationOwner } from '../lib/observation-read-owner'
 import {
   executionLoaded,
   executionWorkspaceAuthority,
   keepers,
-  type ExecutionWorkspaceAuthority,
 } from '../store'
 
 
@@ -756,10 +757,8 @@ export function SkillSourceEditor({ reference, onPublished, onMutation, observat
 }
 
 
-interface SkillsObservationOwner {
+interface SkillsObservationOwner extends DashboardObservationOwner {
   readonly mount: number
-  readonly authRevision: number
-  readonly authority: ExecutionWorkspaceAuthority | null
 }
 
 function identityLabel(identity: SkillIdentity): string {
@@ -784,20 +783,24 @@ function mutationMessage(result: SkillMutationResult): string {
 export function SkillsPanel() {
   const authRevision = storedTokenRevision.value
   const authority = executionWorkspaceAuthority.value
+  void dashboardActorRevision.value
+  void managedDashboardActorRevision.value
+  const observation = captureDashboardObservationOwner()
   const mounts = useRef(0)
   // The ordinal only keys UI lifetime. Authority remains the existing SSOT's
   // object identity, including a new object with otherwise equal fields.
-  const owner = useMemo(() => ({ mount: ++mounts.current, authRevision, authority }), [authRevision, authority])
+  const owner = useMemo(() => ({ ...observation, mount: ++mounts.current }), [authRevision, authority,
+    observation.actor, observation.actorRevision, observation.managed])
   const receipts = useSignal<readonly { owner: SkillsObservationOwner; result: SkillMutationResult }[]>([])
   return html`<div>
     ${receipts.value.length > 0 ? html`<section aria-label="Skill mutation receipts" data-testid="skill-mutation-receipts">
       ${receipts.value.map((receipt, index) => html`<div key=${index}>
         ${mutationMessage(receipt.result)}
-        <span class="ss-muted"> · original workspace ${receipt.owner.authority?.workspaceRoot ?? 'unconfirmed'}
+        <span class="ss-muted"> · original workspace ${receipt.owner.workspace?.workspaceRoot ?? 'unconfirmed'}
           ${receipt.owner !== owner ? ' · previous access context' : ''}</span>
       </div>`)}
     </section>` : null}
-    ${authority === null
+    ${!dashboardObservationOwnerHasWorkspace(owner)
       ? html`<p role="status">Confirm the current workspace before reading Skills.</p>`
       : html`<${SkillsObservationPanel} key=${owner.mount} owner=${owner}
           onMutation=${(result: SkillMutationResult) => { receipts.value = [...receipts.value, { owner, result }] }} />`}
@@ -854,6 +857,8 @@ function SkillsObservationPanel({ owner, onMutation }: {
   const error = useSignal<string | null>(null)
   const asyncObservation = useSignal<AsyncRequestObservation | null>(null)
   const asyncObservationError = useSignal<string | null>(null)
+  const catalogReadError = useRef<unknown | null>(null)
+  const asyncReadError = useRef<unknown | null>(null)
   const asyncSubmitter = useSignal('')
   const asyncKeeper = useSignal('')
   const asyncRequestId = useSignal('')
@@ -870,10 +875,8 @@ function SkillsObservationPanel({ owner, onMutation }: {
   const active = useRef(true)
   const catalogGeneration = useRef(0)
   const asyncGeneration = useRef(0)
-  const current = () => active.current
-    && currentStoredTokenRevision() === owner.authRevision
-    && executionWorkspaceAuthority.peek() === owner.authority
-    && owner.authority !== null
+  const current = () => active.current && dashboardObservationOwnerIsCurrent(owner)
+    && dashboardObservationOwnerHasWorkspace(owner)
 
   const inspectAsync = (identity: AsyncRequestIdentity) => {
     if (!current()) return
@@ -888,8 +891,6 @@ function SkillsObservationPanel({ owner, onMutation }: {
   // does not carry every ledger. The catalog read does not wait for them, and
   // a newer round cancels the older one.
   const usageReadError = useRef<unknown | null>(null)
-  const catalogReadError = useRef<unknown | null>(null)
-  const asyncReadError = useRef<unknown | null>(null)
   const loadUsage = async (signal?: AbortSignal) => {
     usageReadError.current = null
     if (!current() || signal?.aborted) return
@@ -936,6 +937,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
 
   useEffect(() => {
     const loadAsyncObservation = async (signal: AbortSignal) => {
+      if (!current() || signal.aborted) return
       asyncReadError.current = null
       const generation = ++asyncGeneration.current
       try {
@@ -951,19 +953,20 @@ function SkillsObservationPanel({ owner, onMutation }: {
     }
     const dispose = setupObservationRefresh(signal => Promise.all([
       load(signal), loadAsyncObservation(signal),
-    ]), { topics: ['skills', 'async_requests', 'skill_usage'], readError: () => selectObservationReadFailure([catalogReadError.current, asyncReadError.current, usageReadError.current]),
-      resetRead: () => {
-        usageController.current?.abort()
-        catalogReadError.current = null
-        asyncReadError.current = null
-        usageReadError.current = null
-        response.value = null
-        keeperUsage.value = null
-        asyncObservation.value = null
-        error.value = null
-        asyncObservationError.value = null
-        loading.value = true
-      } })
+    ]), { topics: ['skills', 'async_requests', 'skill_usage'], readError: () => selectObservationReadFailure([
+      catalogReadError.current, asyncReadError.current, usageReadError.current,
+    ]), resetRead: () => {
+      usageController.current?.abort()
+      catalogReadError.current = null
+      asyncReadError.current = null
+      usageReadError.current = null
+      response.value = null
+      keeperUsage.value = null
+      asyncObservation.value = null
+      error.value = null
+      asyncObservationError.value = null
+      loading.value = true
+    } })
     return () => {
       active.current = false
       usageController.current?.abort()

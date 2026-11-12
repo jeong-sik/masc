@@ -103,6 +103,75 @@ let test_execute_output_route_eof env =
           | Ok () -> ()
           | Error _ -> Alcotest.fail "execute stream did not end cleanly")))
 
+(* The TUI's log stream client against the real route. The route admits a
+   stream only under the Observer instance the request names: the instance
+   the server serves reaches a frame, any other is refused before one. *)
+let test_log_stream_names_its_observer_instance env =
+  let workspace = Masc_test_deps.setup_test_workspace () in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let previous_startup = Masc.Server_startup_state.snapshot () in
+  let transport_env =
+    [ "MASC_HTTP_AUTH_STRICT", "false"
+    ; "MASC_HOST", "127.0.0.1"
+    ; "MASC_HTTP_BASE_URL", "http://127.0.0.1:8935" ]
+  in
+  let previous_env = List.map (fun (name, _) -> name, Sys.getenv_opt name) transport_env in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state previous_state;
+      Masc.Server_startup_state.For_testing.restore previous_startup;
+      List.iter (fun (name, value) -> match value with
+        | Some value -> Unix.putenv name value
+        | None -> Unix.unsetenv name) previous_env;
+      Masc_test_deps.cleanup_test_workspace workspace)
+    (fun () ->
+      List.iter (fun (name, value) -> Unix.putenv name value) transport_env;
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace in
+      Server_auth.For_testing.restore_server_state (Some state);
+      Masc.Server_startup_state.reset ();
+      Result.get_ok (Masc.Server_startup_state.mark_state_ready ());
+      (* The first frame is a page of the ring, and an empty page is not sent. *)
+      Log.emit Log.Warn ~module_name:"tui-log-stream-instance-test" "an entry to page";
+      let clock = Eio.Stdenv.clock env in
+      try
+        Eio.Switch.run (fun route_sw ->
+          let router =
+            Server_routes_http_routes_log_stream.add_routes ~sw:route_sw ~clock
+              (Masc.Http_server_eio.Router.create ())
+          in
+          let handler reqd =
+            Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd)
+              (Masc.Http_reqd.of_httpun reqd)
+          in
+          with_server env ~handler (fun ~port ->
+            let follow instance =
+              let frame, got_frame = Eio.Promise.create () in
+              try
+                Eio.Time.with_timeout_exn clock 3. (fun () ->
+                  Eio.Fiber.first
+                    (fun () ->
+                      `Ended
+                        (Masc_tui_http.observe_system_log_stream ~clock ~host:"127.0.0.1"
+                           ~port ~instance ~limit:10
+                           ~on_chunk:(fun _ -> ignore (Eio.Promise.try_resolve got_frame ()))
+                           ()))
+                    (fun () -> Eio.Promise.await frame; `Frame))
+              with Eio.Time.Timeout ->
+                Alcotest.failf "the log stream named %s and neither ended nor sent a frame"
+                  instance
+            in
+            let serving =
+              Server_observer_scope.instance_id (Masc.Mcp_server.workspace_scope state)
+            in
+            (match follow serving with
+             | `Frame -> ()
+             | `Ended why -> Alcotest.failf "the served instance was refused: %s" why);
+            match follow "another-instance" with
+            | `Ended _ -> ()
+            | `Frame -> Alcotest.fail "a stream that named another instance got a frame");
+          Eio.Switch.fail route_sw Stop_dashboard_route)
+      with Stop_dashboard_route -> ())
+
 let admit ~base_path:_ _request = Ok ()
 
 (* The real presence route, served with a runtime on [runtime_sw], so its
@@ -233,6 +302,8 @@ let () =
   let case name test = Alcotest.test_case name `Quick (fun () -> Eio_main.run test) in
   Alcotest.run "Tui_sse_eof"
     [ "real routes", [ case "execute cleanup ends response" test_execute_output_route_eof
+                     ; case "log stream names its Observer instance"
+                         test_log_stream_names_its_observer_instance
                      ; case "presence stop ends response" test_presence_route_eof
                      ; case "an unread presence prime waits in the pump"
                          test_presence_prime_waits_in_the_pump ] ]

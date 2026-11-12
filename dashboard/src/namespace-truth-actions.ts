@@ -1,76 +1,42 @@
 import { fetchDashboardNamespaceTruth } from './api/dashboard-hot'
-import { asString, isRecord } from './components/common/normalize'
-import { serverStatus } from './store'
+import { hydrateShellRootSnapshot } from './store'
 import {
   namespaceTruth,
   namespaceTruthLoading,
   namespaceTruthError,
-  namespaceTruthInitializing,
+  namespaceTruthReadRecovery,
 } from './namespace-truth-signals'
-import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
-import { mergeServerStatus } from './store-normalizers'
+import { hydrateNamespaceTruthObservation } from './namespace-truth-observation'
 import { FetchScheduler } from './lib/fetch-scheduler'
-import { WARM_MAX_RETRIES, warmRetryDelayFor } from './lib/warm-retry'
-
-// --- Warm-up retry state ---
+import { ApiRequestError, captureDashboardCredentialOwner, dashboardCredentialOwnerIsCurrent } from './api/core'
 
 export { WARM_RETRY_DELAYS_MS, WARM_RETRY_CAP_MS, warmRetryDelayFor } from './lib/warm-retry'
-
-let warmRetryAttempt = 0
-let warmRetryTimer: ReturnType<typeof setTimeout> | null = null
 
 // --- Core fetch function (owns signal updates) ---
 
 async function doFetchNamespaceTruth(): Promise<void> {
+  namespaceTruthReadRecovery.started()
+  const revision = namespaceTruthReadRecovery.revision
+  const owner = captureDashboardCredentialOwner()
+  const current = () => namespaceTruthReadRecovery.revision === revision && dashboardCredentialOwnerIsCurrent(owner)
   namespaceTruthLoading.value = true
   namespaceTruthError.value = null
   try {
     const raw = await fetchDashboardNamespaceTruth()
-    const isInitializing =
-      isRecord(raw)
-      && asString((raw as Record<string, unknown>).status) === 'initializing'
-    if (isInitializing) {
-      console.debug('[project-snapshot] server initializing, scheduling warm-up retry')
-      namespaceTruthInitializing.value = true
-      scheduleNamespaceWarmRetry()
-      return
-    }
-    namespaceTruthInitializing.value = false
-    warmRetryAttempt = 0
-    const normalized = normalizeNamespaceTruth(raw)
-    namespaceTruth.value = normalized
-    serverStatus.value = mergeServerStatus(
-      serverStatus.value,
-      normalized.root.status ?? null,
-    )
+    if (!current()) return
+    const normalized = hydrateNamespaceTruthObservation(raw, 'http')
+    if (normalized !== null) hydrateShellRootSnapshot(normalized.root, true)
   } catch (err) {
+    if (!current()) return
     const detail = err instanceof Error ? err.message : 'Failed to load project snapshot'
     console.warn('[project-snapshot] fetch failed:', detail)
     namespaceTruth.value = null
     namespaceTruthError.value = detail
+    namespaceTruthReadRecovery.failed(() => { void namespaceTruthScheduler.requestNow() },
+      !(err instanceof ApiRequestError && (err.status === 401 || err.status === 403)))
   } finally {
     namespaceTruthLoading.value = false
   }
-}
-
-function scheduleNamespaceWarmRetry(): void {
-  warmRetryAttempt++
-  if (warmRetryAttempt > WARM_MAX_RETRIES) {
-    namespaceTruthInitializing.value = false
-    namespaceTruthError.value = 'Server warm-up timed out. Try refreshing.'
-    namespaceTruthLoading.value = false
-    warmRetryAttempt = 0
-    return
-  }
-  const delayMs = warmRetryDelayFor(warmRetryAttempt)
-  console.debug(
-    `[project-snapshot] warm-up retry ${warmRetryAttempt}/${WARM_MAX_RETRIES} in ${delayMs}ms`,
-  )
-  if (warmRetryTimer) clearTimeout(warmRetryTimer)
-  warmRetryTimer = setTimeout(() => {
-    warmRetryTimer = null
-    namespaceTruthScheduler.requestNow()
-  }, delayMs)
 }
 
 // --- Scheduler instance ---
@@ -104,10 +70,6 @@ export async function refreshNamespaceTruth(opts?: { force?: boolean }): Promise
 }
 
 export function disposeNamespaceTruthScheduler(): void {
-  if (warmRetryTimer) {
-    clearTimeout(warmRetryTimer)
-    warmRetryTimer = null
-  }
-  warmRetryAttempt = 0
+  namespaceTruthReadRecovery.dispose()
   namespaceTruthScheduler.dispose()
 }

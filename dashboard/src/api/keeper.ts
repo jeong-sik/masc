@@ -122,13 +122,7 @@ export async function fetchKeeperSandboxLiveStatus(
   opts?: { signal?: AbortSignal },
 ): Promise<KeeperSandboxLiveStatus> {
   const path = `/api/v1/gate/keeper-status?name=${encodeURIComponent(name)}`
-  const resp = await fetchWithTimeout(
-    path,
-    { headers: jsonHeaders(), signal: opts?.signal },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw await apiRequestErrorFromResponse('GET', path, resp)
-  return parseKeeperSandboxLiveStatus(await resp.json())
+  return parseKeeperSandboxLiveStatus(await get<unknown>(path, opts))
 }
 
 // --- Runtime trace evidence (split to keeper-runtime-trace.ts) ---
@@ -741,13 +735,7 @@ export async function fetchKeeperChatOperation(
   opts: { signal?: AbortSignal } = {},
 ): Promise<KeeperChatOperation> {
   const path = `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/operations/${encodeURIComponent(operationId)}`
-  const response = await fetchWithTimeout(
-    path,
-    { headers: jsonHeaders(), signal: opts.signal },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!response.ok) throw await apiRequestErrorFromResponse('GET', path, response)
-  const operation = parseKeeperChatOperation(await response.json())
+  const operation = parseKeeperChatOperation(await get<unknown>(path, { signal: opts.signal }))
   if (operation.operationId !== operationId) {
     throw new Error('Keeper chat operation response identity mismatch')
   }
@@ -1211,13 +1199,7 @@ export async function fetchKeeperStateDiagram(
   name: string,
   opts?: { signal?: AbortSignal },
 ): Promise<KeeperStateDiagramResponse> {
-  const resp = await fetchWithTimeout(
-    `/api/v1/keepers/${encodeURIComponent(name)}/state-diagram`,
-    { headers: jsonHeaders(), signal: opts?.signal },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw new Error(`state-diagram fetch failed: ${resp.status}`)
-  return resp.json() as Promise<KeeperStateDiagramResponse>
+  return get<KeeperStateDiagramResponse>(`/api/v1/keepers/${encodeURIComponent(name)}/state-diagram`, opts)
 }
 
 export async function fetchKeeperComposite(
@@ -1238,14 +1220,9 @@ export async function fetchKeeperComposite(
 export async function fetchKeepersComposite(
   opts?: { signal?: AbortSignal },
 ): Promise<FleetCompositeSnapshot> {
-  const resp = await fetchWithTimeout(
-    `/api/v1/keepers/composite`,
-    { headers: jsonHeaders(), signal: opts?.signal },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw new Error(`fleet composite fetch failed: ${resp.status}`)
+  const raw = await get<unknown>('/api/v1/keepers/composite', opts)
   const { parseFleetCompositeSnapshot } = await import('./schemas/keeper-composite')
-  return parseFleetCompositeSnapshot(await resp.json())
+  return parseFleetCompositeSnapshot(raw)
 }
 
 // --- Eval Quality (RFC-MASC-005 Phase 3) ---

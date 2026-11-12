@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   devTokenBootstrapStatus,
-  devTokenBootstrapNeedsReadinessProbe,
+  hasPendingDevTokenFailure,
   ensureDevToken,
   recoverFromRejectedCredential,
   refreshDevTokenAfterAuthError,
@@ -143,7 +143,7 @@ describe('ensureDevToken', () => {
     expect(setStoredToken).not.toHaveBeenCalled()
   })
 
-  it('requires an explicit bootstrap call after the server warm-up payload', async () => {
+  it('treats producer-less HTTP200 initializing as malformed until an explicit reset', async () => {
     fetchWithTimeout
       .mockResolvedValueOnce(jsonResponse({
         status: 'initializing',
@@ -158,8 +158,12 @@ describe('ensureDevToken', () => {
     await ensureDevToken()
     expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
     expect(setStoredToken).not.toHaveBeenCalled()
-    expect(devTokenBootstrapStatus.value).toBe('warming')
+    expect(devTokenBootstrapStatus.value).toBe('invalid_response')
+    expect(hasPendingDevTokenFailure()).toBe(false)
 
+    await ensureDevToken()
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+    resetDevTokenBootstrap()
     await ensureDevToken()
 
     expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
@@ -171,8 +175,8 @@ describe('ensureDevToken', () => {
     expect(devTokenBootstrapStatus.value).toBe('ok')
   })
 
-  it.each([408, 425, 429, 500, 503])(
-    'exposes HTTP %s as a readiness state without pinning the in-flight promise',
+  it.each([429, 503])(
+    'retains HTTP %s as a failed read without pinning the in-flight promise',
     async status => {
       fetchWithTimeout
         .mockResolvedValueOnce(new Response('not ready', { status }))
@@ -184,13 +188,31 @@ describe('ensureDevToken', () => {
 
       await ensureDevToken()
       expect(devTokenBootstrapStatus.value).toBe('warming')
-      expect(devTokenBootstrapNeedsReadinessProbe()).toBe(true)
+      expect(hasPendingDevTokenFailure()).toBe(true)
 
       await ensureDevToken()
       expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
       expect(devTokenBootstrapStatus.value).toBe('ok')
     },
   )
+
+  it.each([408, 425, 500])('does not keep retrying terminal HTTP %s token issuance', async status => {
+    fetchWithTimeout.mockResolvedValueOnce(new Response('refused', { status }))
+    await ensureDevToken()
+    await ensureDevToken()
+    expect(devTokenBootstrapStatus.value).toBe('invalid_response')
+    expect(hasPendingDevTokenFailure()).toBe(false)
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks malformed JSON unavailable instead of retryable network failure', async () => {
+    fetchWithTimeout.mockResolvedValueOnce(new Response('{broken', { headers: { 'content-type': 'application/json' } }))
+    await ensureDevToken()
+    await ensureDevToken()
+    expect(devTokenBootstrapStatus.value).toBe('invalid_response')
+    expect(hasPendingDevTokenFailure()).toBe(false)
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+  })
 
   it('does not overwrite a manual token entered while the server is warming', async () => {
     vi.useFakeTimers()

@@ -64,6 +64,14 @@ val active_coverage_gaps :
 (** Filter coverage gaps down to the entries still active for the
     current source timestamp. *)
 
+val next_health_change_unix :
+  now:float -> exists:bool -> entry_count:int -> latest_ts:float option ->
+  freshness_slo_s:float -> ?coverage_gap:Yojson.Safe.t -> unit -> float option
+(** Next time the current source can change from healthy to stale solely
+    because the existing [latest_age_s > freshness_slo_s] policy elapses.
+    Missing, empty, already-stale and coverage-gap sources have no such
+    deadline. No periodic age-display refresh is requested. *)
+
 val keeper_tool_call_io_fields :
   dashboard_surface:string ->
   unit ->

@@ -13,6 +13,25 @@
 
 (** {1 SSE hot-queue snapshot} *)
 
+val subscribe_source_changed : (unit -> unit) -> (unit -> unit)
+(** Observe completed transitions of transport state: a listener starting or
+    stopping, its mode, status or last accept error taking another value,
+    SSE/gRPC/WebSocket membership counts taking another value, and an agent
+    going stale. Carries no rows. Callbacks must not block or yield; their
+    exceptions cannot change the mutation's result. Removal is idempotent.
+
+    Counts added once per connection or request do not notify: accepted and
+    closed connections, authentication rejects and rate-limit responses. A
+    reader finds them in the next snapshot it reads. A notification for each
+    would recompute and broadcast transport health at the rate connections
+    arrive. Queue/delivery/cost mirror metrics do not notify either: sending
+    an observation must not create another source observation. *)
+
+val record_sse_lifecycle_change : unit -> unit
+(** Called by the canonical SSE registry after an actual client registration
+    or retirement and its full transport metrics snapshot have committed.
+    Not called by snapshot publication, queue drain or mirrored gauge setters. *)
+
 type sse_session_kind = Sse_queue_inventory.kind =
   | Observer
   | Agent_stream

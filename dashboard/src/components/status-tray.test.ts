@@ -4,13 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 import type { Keeper, Task } from '../types'
 import {
-  _resetDashboardWsCounterForTests,
-  dashboardWsConnected,
-  dashboardWsEventCount60s,
-  dashboardWsLastError,
-  dashboardWsLastEventAt,
-  dashboardWsReady,
-} from '../dashboard-ws-state'
+  _resetDashboardObserverCounterForTests,
+  dashboardObserverConnected,
+  dashboardObserverEventCount60s,
+  dashboardObserverLastError,
+  dashboardObserverLastEventAt,
+  dashboardObserverReady,
+} from '../dashboard-observer-state'
 import { route } from '../router'
 import { keepers, tasks } from '../store'
 import { journal } from '../sse'
@@ -42,13 +42,13 @@ function task(id: string, status: Task['status']): Task {
 describe('summarizeStatusTray', () => {
   it('marks the client transport red when the socket is not ready', () => {
     const summary = summarizeStatusTray({
-      wsConnected: false,
-      wsReady: false,
-      wsLastEventAt: 0,
-      wsEventCount60s: 0,
-      wsLastPongAt: 0,
-      wsLastPongLatencyMs: null,
-      wsLastError: 'socket closed',
+      observerConnected: false,
+      observerReady: false,
+      observerLastEventAt: 0,
+      observerEventCount60s: 0,
+      lastActivityAt: NOW - 1_000,
+      idleTimeoutMs: 90_000,
+      observerLastError: 'socket closed',
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [],
@@ -65,13 +65,13 @@ describe('summarizeStatusTray', () => {
 
   it('marks transport as handshaking when the socket is open but hello is not ready', () => {
     const summary = summarizeStatusTray({
-      wsConnected: true,
-      wsReady: false,
-      wsLastEventAt: 0,
-      wsEventCount60s: 0,
-      wsLastPongAt: 0,
-      wsLastPongLatencyMs: null,
-      wsLastError: null,
+      observerConnected: true,
+      observerReady: false,
+      observerLastEventAt: 0,
+      observerEventCount60s: 0,
+      lastActivityAt: NOW - 1_000,
+      idleTimeoutMs: 90_000,
+      observerLastError: null,
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [],
@@ -83,18 +83,18 @@ describe('summarizeStatusTray', () => {
 
     expect(summary.items.transport.tone).toBe('warn')
     expect(summary.items.transport.value).toBe('handshake')
-    expect(summary.items.transport.detail).toContain('dashboard/hello')
+    expect(summary.items.transport.detail).toContain('observer admission')
   })
 
   it('rolls keeper attention, verification, and error counts into tray items', () => {
     const summary = summarizeStatusTray({
-      wsConnected: true,
-      wsReady: true,
-      wsLastEventAt: NOW - 1000,
-      wsEventCount60s: 4,
-      wsLastPongAt: 0,
-      wsLastPongLatencyMs: null,
-      wsLastError: null,
+      observerConnected: true,
+      observerReady: true,
+      observerLastEventAt: NOW - 1000,
+      observerEventCount60s: 4,
+      lastActivityAt: NOW - 1_000,
+      idleTimeoutMs: 90_000,
+      observerLastError: null,
       reconnectCount: 1,
       lastDisconnectedAt: 0,
       keepers: [
@@ -122,19 +122,19 @@ describe('summarizeStatusTray', () => {
       pendingVerificationTasks: 1,
       unacknowledgedErrors: 2,
       reconnectCount: 1,
-      wsEventCount60s: 4,
+      observerEventCount60s: 4,
     })
   })
 
   it('counts execution receipt evidence even without the top-level attention flag', () => {
     const summary = summarizeStatusTray({
-      wsConnected: true,
-      wsReady: true,
-      wsLastEventAt: NOW - 1000,
-      wsEventCount60s: 4,
-      wsLastPongAt: 0,
-      wsLastPongLatencyMs: null,
-      wsLastError: null,
+      observerConnected: true,
+      observerReady: true,
+      observerLastEventAt: NOW - 1000,
+      observerEventCount60s: 4,
+      lastActivityAt: NOW - 1_000,
+      idleTimeoutMs: 90_000,
+      observerLastError: null,
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [
@@ -163,13 +163,13 @@ describe('summarizeStatusTray', () => {
 
   it('keeps the client transport green when route events are idle but heartbeat is fresh', () => {
     const summary = summarizeStatusTray({
-      wsConnected: true,
-      wsReady: true,
-      wsLastEventAt: 0,
-      wsEventCount60s: 0,
-      wsLastPongAt: NOW - 2_000,
-      wsLastPongLatencyMs: 37,
-      wsLastError: null,
+      observerConnected: true,
+      observerReady: true,
+      observerLastEventAt: 0,
+      observerEventCount60s: 0,
+      lastActivityAt: NOW - 2_000,
+      idleTimeoutMs: 90_000,
+      observerLastError: null,
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [],
@@ -180,19 +180,19 @@ describe('summarizeStatusTray', () => {
     })
 
     expect(summary.items.transport.tone).toBe('ok')
-    expect(summary.items.transport.value).toBe('37ms')
-    expect(summary.items.transport.detail).toContain('heartbeat pong 2s ago')
+    expect(summary.items.transport.value).toBe('0 events/min')
+    expect(summary.items.transport.detail).toContain('SSE bytes arrived 2s ago')
   })
 
   it('uses the first journal entry for activity state from newest-first snapshots', () => {
     const summary = summarizeStatusTray({
-      wsConnected: false,
-      wsReady: false,
-      wsLastEventAt: 0,
-      wsEventCount60s: 0,
-      wsLastPongAt: 0,
-      wsLastPongLatencyMs: null,
-      wsLastError: null,
+      observerConnected: false,
+      observerReady: false,
+      observerLastEventAt: 0,
+      observerEventCount60s: 0,
+      lastActivityAt: NOW - 1_000,
+      idleTimeoutMs: 90_000,
+      observerLastError: null,
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [],
@@ -212,13 +212,13 @@ describe('summarizeStatusTray', () => {
 
   it('preserves journal snapshot order instead of resorting by timestamp', () => {
     const summary = summarizeStatusTray({
-      wsConnected: false,
-      wsReady: false,
-      wsLastEventAt: 0,
-      wsEventCount60s: 0,
-      wsLastPongAt: 0,
-      wsLastPongLatencyMs: null,
-      wsLastError: null,
+      observerConnected: false,
+      observerReady: false,
+      observerLastEventAt: 0,
+      observerEventCount60s: 0,
+      lastActivityAt: NOW - 1_000,
+      idleTimeoutMs: 90_000,
+      observerLastError: null,
       reconnectCount: 0,
       lastDisconnectedAt: 0,
       keepers: [],
@@ -239,10 +239,10 @@ describe('summarizeStatusTray', () => {
 describe('DashboardStatusTray', () => {
   beforeEach(() => {
     route.value = { tab: 'overview', params: {}, postId: null }
-    dashboardWsConnected.value = false
-    dashboardWsReady.value = false
-    dashboardWsLastError.value = null
-    _resetDashboardWsCounterForTests()
+    dashboardObserverConnected.value = false
+    dashboardObserverReady.value = false
+    dashboardObserverLastError.value = null
+    _resetDashboardObserverCounterForTests()
     keepers.value = [keeper('alpha')]
     tasks.value = []
     journal.value = [
@@ -257,10 +257,10 @@ describe('DashboardStatusTray', () => {
     tasks.value = []
     journal.value = []
     errors.value = []
-    dashboardWsConnected.value = false
-    dashboardWsReady.value = false
-    dashboardWsLastEventAt.value = 0
-    dashboardWsEventCount60s.value = 0
+    dashboardObserverConnected.value = false
+    dashboardObserverReady.value = false
+    dashboardObserverLastEventAt.value = 0
+    dashboardObserverEventCount60s.value = 0
     vi.clearAllMocks()
   })
 

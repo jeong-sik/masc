@@ -57,6 +57,23 @@ val window_bounds : window -> float * float
 (** [(since, until)] as given to {!window}. A reader that selects rows
     from a store uses it as the bounds of that selection. *)
 
+val sliding_window :
+  span_s:float -> until:float -> width:width -> utc_offset_min:int ->
+  (window, string) result
+(** The same bounds as {!window} with [since = until - span_s], retaining
+    the requested span for exact floating-point deadline calculation. *)
+
+val next_change_at :
+  window -> oldest_sample:float option -> next_sample:float option -> float
+(** The first epoch time at which the same sliding window can change its
+    rows or bucket labels. [oldest_sample] is the oldest selected row and
+    [next_sample] the first row at or beyond the exclusive upper bound.
+    Both must be finite timestamps from the store. The lower bound includes
+    a row at its timestamp, so expiry is strictly after it; admission is
+    strictly after the future row's timestamp. Empty windows still change
+    their emitted bucket labels at the next viewer-clock bucket boundary.
+    This computes a deadline; it creates no timer or retained subscription. *)
+
 (** One recorded tool call. [result_bytes] is the size of the result the call
     returned; [None] is a call recorded before sizes were kept, whose size is
     unknown. It is not a call that returned nothing. *)

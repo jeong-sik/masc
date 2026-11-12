@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name native_file_change)
+ (public_name masc.native_file_change)
+ (libraries eio eio.unix unix)
+ (foreign_stubs (language c) (names native_file_change_stubs)))

@@ -1,5 +1,6 @@
 type close_reason =
   | Request_failed
+  | Request_not_delivered
   | Not_persistent
   | Body_not_drained
   | Transport_ended

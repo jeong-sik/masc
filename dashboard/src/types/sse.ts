@@ -84,6 +84,7 @@ export type SSEEventType =
   | `agent_core:${string}`
   // Server-push snapshot events (proactive cache broadcasts)
   | 'project_snapshot'
+  | 'mission_snapshot'
   | 'execution_snapshot'
   | 'operator_snapshot'
   | 'operator_digest'

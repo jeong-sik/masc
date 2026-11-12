@@ -28,7 +28,7 @@ export interface LogsRequest {
 
 export type LogsError = DashboardTransportError | LogsSchemaDriftError
 
-function logsPath(request: LogsRequest): string {
+export function logsPath(request: LogsRequest, stream = false): string {
   const params = new URLSearchParams()
   if (request.limit !== undefined) params.set('limit', String(request.limit))
   if (request.level !== undefined) params.set('level', request.level)
@@ -48,7 +48,7 @@ function logsPath(request: LogsRequest): string {
     params.set('exclude_category', request.excludeCategories.join(','))
   }
   const query = params.toString()
-  return `/api/v1/dashboard/logs${query === '' ? '' : `?${query}`}`
+  return `/api/v1/dashboard/logs${stream ? '/stream' : ''}${query === '' ? '' : `?${query}`}`
 }
 
 export function fetchLogs(

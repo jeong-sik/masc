@@ -298,6 +298,27 @@ module Ring = struct
     dropped_before : bool;
   }
 
+  type entry_change = {entry : entry; overwritten : entry option}
+  type publication_listener = {published : entry_change -> unit}
+  let publication_listeners : publication_listener list Atomic.t = Atomic.make []
+  let publication_notification_failures = Atomic.make 0
+
+  let subscribe_published published =
+    let listener = {published} in
+    Lockfree_atomic.update publication_listeners (fun listeners -> listener :: listeners);
+    fun () -> Lockfree_atomic.update publication_listeners
+      (List.filter (fun current -> current != listener))
+
+  let failed_publication_notifications () = Atomic.get publication_notification_failures
+
+  let notify_published change =
+    List.iter (fun listener ->
+      try listener.published change with
+      (* cancel-guard-ok: observers of an installed ring slot cannot replace
+         the original log operation, including its cancellation. *)
+      | _ -> ignore (Atomic.fetch_and_add publication_notification_failures 1))
+      (Atomic.get publication_listeners)
+
   (* Dashboard operators commonly inspect tool-call history over hours, not
      minutes.  5k entries was too small for high-volume keeper/MCP traffic and
      made recent MCP calls appear to disappear despite JSONL persistence. *)
@@ -955,6 +976,10 @@ module Ring = struct
     in
     let seq = Atomic.fetch_and_add total 1 in
     let idx = seq mod capacity in
+    let overwritten =
+      let previous = buf.(idx) in
+      if seq >= capacity && previous.seq >= Atomic.get first_seq
+      then Some previous else None in
     let entry = {
         seq;
         ts = timestamp_iso ();
@@ -970,6 +995,7 @@ module Ring = struct
       } in
     buf.(idx) <- entry;
     Eio.Condition.broadcast appended;
+    notify_published {entry; overwritten};
     (* A failed append closes the channel. Keep sending later entries to the
        configured sink so its next write can reopen it. *)
     if !file_base_dir <> "" then

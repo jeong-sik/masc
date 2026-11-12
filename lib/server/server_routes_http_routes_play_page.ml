@@ -164,11 +164,8 @@ let agent_note =
 let page_script =
   {play|">
 'use strict';
-// The TUI reads the same live route every 0.3 s.
-const POLL_MS = 300;
-// Seat authority scans credentials; frame reads do not need that inventory.
-const SEAT_POLL_MS = 5000;
-const ROOM_POLL_MS = 2000;
+const STREAM_RETRY_MS = Number(document.currentScript.dataset.retryMs);
+const EVENTS_PATH = '/api/v1/play/events';
 const ACTIVITY_SHOWN = 8;
 const LIVE_PATH = '/api/v1/lane-addons/live?source_kind=';
 const SEAT_PATH = '/api/v1/play/seat';
@@ -260,13 +257,11 @@ let machineObservationRevision = 0;
 let observedIncarnation = null;
 let observedMachineState = 'unobserved';
 let frameSeatRequest = null;
-let frameSeatNeedsRefresh = false;
 let framePadRequest = null;
 let queuedInputs = 0;
 let seatRefreshAfterInputs = false;
-let nextSeatPollAt = 0;
 let handoffRead = null;
-let participantsRead = 0;
+let participantsRead = null;
 let ended = false;
 let authRejected = false;
 let disconnecting = false;
@@ -276,13 +271,15 @@ let departureConfirmed = false;
 // A reload may retain the bearer after confirmed departure if cleanup failed.
 let initialConnectIntent = invitation !== '' && !invitationConflict;
 let connecting = Promise.resolve();
-let nextReconnectAt = 0;
+let joinInFlight = false;
 let sending = Promise.resolve();
 let textSending = false;
 let viewMachine = 'dos';
 let viewRevision = 0;
 let frameTimer = null;
 let frameAbort = null;
+let frameRead = null;
+let frameReadAgain = false;
 function roomId() { return operationId(); }
 // A new page gets a separate presence lease, including duplicated tabs.
 const roomClient = roomId();
@@ -410,14 +407,21 @@ async function api(method, path, body, signal, current = () => true) {
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
-  const response = await fetch(path, init);
+  let response;
+  try { response = await fetch(path, init); }
+  catch (error) {
+    if (method === 'GET' && !signal?.aborted) observationReadFailed();
+    throw error;
+  }
   let json = null;
   try { json = await response.json(); } catch (_) { json = null; }
   if (signal?.aborted) throw signal.reason;
   if (!current()) return { status:0, json:null };
+  if (method === 'GET' && (response.status >= 500 || json === null)) observationReadFailed();
   // Authentication/read failures do not settle an earlier admitted write.
   if (response.status === 401 || response.status === 403) {
     authRejected = true;
+    stopFrames();
     setControlsEnabled(false);
     if (!unsettled) end(AUTH_ENDED_MESSAGE, { terminalAuth:true });
   }
@@ -604,11 +608,10 @@ function roomRequest(body) {
 
 function refreshRoom(replace = true) {
   if (ended || authRejected || disconnecting || departureConfirmed || retainedDeparture || participationClosed() || roomDetached) return;
-  // Preserve slow reads between pulses, but renew a stalled observation at
-  // the seat recovery cadence. This never retries or abandons a room write.
-  if (roomBusy && !replace && performance.now() - roomReadRequest.startedAt < SEAT_POLL_MS) return;
+  // A newer committed room change supersedes the prior observation only.
+  if (roomBusy && !replace) return;
   if (roomReadAbort) roomReadAbort.abort();
-  const request = { startedAt:performance.now() };
+  const request = {};
   roomReadRequest = request;
   roomBusy = true;
   setRoomControls();
@@ -621,23 +624,20 @@ function refreshRoom(replace = true) {
     if (result.status === 200 && validRoom(result.json)) {
       renderRoom(result.json, before === roomBefore);
       if (!pendingChat) el('room-status').textContent = '';
-    } else el('room-status').textContent = '공용 대화를 읽지 못했어요 (' + result.status + '). 다시 읽고 있어요.';
+    } else {
+      el('room-status').textContent = '공용 대화를 읽지 못했어요 (' + result.status + '). 다시 읽고 있어요.';
+      observationReadFailed();
+    }
   }).catch(() => {
-    if (!ended && !authRejected && !departureConfirmed && !roomDetached && request === roomReadRequest)
+    if (!ended && !authRejected && !departureConfirmed && !roomDetached && request === roomReadRequest) {
       el('room-status').textContent = '공용 대화 연결이 끊겼어요. 다시 읽고 있어요.';
+      observationReadFailed();
+    }
   }).finally(() => {
     if (request !== roomReadRequest) return;
     roomBusy = false;
     setRoomControls();
   });
-}
-
-// Room presence and conversation have their own clock. A stalled seat or
-// live-frame request must not prevent an otherwise healthy room from updating.
-function tickRoom() {
-  if (ended || authRejected || departureConfirmed || roomDetached) return;
-  refreshRoom(false);
-  setTimeout(tickRoom, ROOM_POLL_MS);
 }
 
 function sendChat() {
@@ -802,18 +802,17 @@ function renderPassTargets(participants) {
 }
 
 // Retire the current seat read and the frame-owned read: neither may apply its
-// snapshot, and their pending promises must not block later polls.
+// snapshot, and their pending promises must not block later observations.
 function retireSeatRead() {
   const request = latestSeatRequest;
   const frame = frameSeatRequest;
   latestSeatRequest = null;
   frameSeatRequest = null;
-  frameSeatNeedsRefresh = false;
   frame?.cancel();
   request?.abort.abort();
 }
 
-async function refreshSeat(signal) {
+async function refreshSeat(signal, authorityCurrent = () => true) {
   if (ended || disconnecting) return null;
   // Frame activity reads and idle participation refresh share this authority.
   // A newer read supersedes an older one and its transport.
@@ -826,11 +825,10 @@ async function refreshSeat(signal) {
     else signal.addEventListener('abort', () => request.abort.abort(), { once:true });
   }
   const observedMachineRevision = machineObservationRevision;
-  nextSeatPollAt = performance.now() + SEAT_POLL_MS;
   // Pending authority cannot authorize a move, even while live frames continue.
   controllerError = '자리 정보를 확인하고 있어요.';
   renderTurn();
-  const current = () => latestSeatRequest === request;
+  const current = snapshot => latestSeatRequest === request && authorityCurrent(snapshot);
   let r;
   try {
     r = await api('GET', SEAT_PATH, undefined, request.abort.signal, current);
@@ -841,7 +839,9 @@ async function refreshSeat(signal) {
     setStatus('seat', controllerError);
     return null;
   }
-  if (ended || request.abort.signal.aborted || !current()) return null;
+  if (ended || request.abort.signal.aborted || !current(r.json)) return null;
+  // An invalidation received during this read owns a follow-up observation.
+  // The older response cannot re-enable input before that observation lands.
   if (r.status !== 200 || !r.json || typeof r.json.machine !== 'boolean'
       || typeof r.json.connected !== 'boolean'
       || typeof r.json.name !== 'string'
@@ -852,6 +852,7 @@ async function refreshSeat(signal) {
     controllerError = '자리 정보를 읽지 못했어요 (' + r.status + ')';
     renderTurn();
     setStatus('seat', controllerError);
+    observationReadFailed();
     return null;
   }
   me = r.json.name;
@@ -881,9 +882,9 @@ async function refreshSeat(signal) {
       }
       initialConnectIntent = false;
     }
-    else if (performance.now() >= nextReconnectAt && connectionSettled()) {
-      nextReconnectAt = performance.now() + SEAT_POLL_MS;
-      connecting = mutate(SESSION_PATH, { connected:true });
+    else if (!joinInFlight && connectionSettled()) {
+      joinInFlight = true;
+      connecting = mutate(SESSION_PATH, { connected:true }).finally(() => { joinInFlight = false; });
       const joined = await connecting;
       if (!ended && joined?.status === 200 && joined.json?.ok === true && joined.json.connected === true) {
         if (retainedDeparture) sessionStorage.removeItem(DEPARTURE_KEY);
@@ -891,6 +892,9 @@ async function refreshSeat(signal) {
         initialConnectIntent = false;
         return refreshSeat();
       }
+      // Only a settled transient refusal can request another observation.
+      // Unknown writes retain their marker and cannot be retried by a read.
+      if (joined?.status >= 500 && !unsettled) observationReadFailed();
     }
   }
   // Return this response's authority as well as rendering it. A concurrent
@@ -900,23 +904,30 @@ async function refreshSeat(signal) {
     : null;
 }
 
-// The handoff roster reads every credential, so the seat poll does not carry
+// The handoff roster reads every credential, so a frame change does not carry
 // it. A failed read keeps the previous options; pass itself is checked by the
 // server against the current roster.
-// A later read supersedes an earlier one that answers after it.
+// Repeated invalidations share a healthy read and leave one follow-up read.
 async function refreshParticipants() {
   if (ended || disconnecting) return;
-  const read = ++participantsRead;
-  const current = () => read === participantsRead;
-  let r;
-  try {
-    r = await api('GET', PARTICIPANTS_PATH, undefined, undefined, current);
-  } catch (_) {
-    return;
-  }
-  if (ended || !current() || r.status !== 200 || !r.json || !Array.isArray(r.json.participants)
-      || !r.json.participants.every(name => typeof name === 'string')) return;
-  renderPassTargets(r.json.participants);
+  if (participantsRead !== null) { participantsRead.again = true; return participantsRead.promise; }
+  const request = { abort:new AbortController(), again:false, promise:null };
+  participantsRead = request;
+  const current = () => participantsRead === request && !request.abort.signal.aborted;
+  request.promise = (async () => {
+    let r;
+    try { r = await api('GET', PARTICIPANTS_PATH, undefined, request.abort.signal, current); }
+    catch (_) { return; }
+    if (ended || !current()) return;
+    if (r.status !== 200 || !r.json || !Array.isArray(r.json.participants)
+        || !r.json.participants.every(name => typeof name === 'string')) { observationReadFailed(); return; }
+    renderPassTargets(r.json.participants);
+  })().finally(() => {
+    if (participantsRead !== request) return;
+    participantsRead = null;
+    if (request.again && !ended && !disconnecting) void refreshParticipants();
+  });
+  return request.promise;
 }
 
 // A pointer opening also focuses the select. Those events share one read of
@@ -947,7 +958,7 @@ function showPad(savesName, buttons) {
 // an answer about a program settles the pad -- its layout (200) or that it
 // has none (404) -- and it settles on the saves name that answer carries.
 // Any other answer, or a read that throws, leaves it unsettled with the keys
-// row showing, and the next poll reads it again.
+// row showing, and a failed observation reconnects before reading it again.
 function retirePadRead() {
   const request = framePadRequest;
   framePadRequest = null;
@@ -972,7 +983,10 @@ async function syncPad(signal) {
   }
   if (r.status === 200 && named && Array.isArray(r.json.buttons)) showPad(r.json.saves_name, r.json.buttons);
   else if (r.status === 404 && named) showPad(r.json.saves_name, []);
-  else setStatus('pad', '패드 배치를 읽지 못했어요 (' + r.status + '). 다시 읽고 있어요.');
+  else {
+    setStatus('pad', '패드 배치를 읽지 못했어요 (' + r.status + '). 다시 읽고 있어요.');
+    observationReadFailed();
+  }
 }
 
 // The saves name goes with the button: a program loaded since the pad was
@@ -1041,29 +1055,124 @@ function stopFrames() {
   if (frameAbort) frameAbort.abort();
   if (frameTimer !== null) clearTimeout(frameTimer);
   frameTimer = null;
+  frameRead = null;
+  frameReadAgain = false;
   frameSeatRequest = null;
-  frameSeatNeedsRefresh = false;
   framePadRequest = null;
+  const participants = participantsRead;
+  participantsRead = null;
+  participants?.abort.abort();
 }
 
-// One poll. Every way it can fail -- the network, the seat read, a frame
-// that will not decode -- is shown and the next poll is still scheduled, so
-// the page never freezes on an old frame without saying so.
+// Only transport/read failures reconnect. An idle healthy stream sends no GETs.
+function observationReadFailed() {
+  if (ended || authRejected || disconnecting || frameTimer !== null) return;
+  setStatus('connection', '상태를 읽지 못했어요. 관측 연결을 다시 열고 있어요.');
+  frameTimer = setTimeout(() => { frameTimer = null; restartFrames(); }, STREAM_RETRY_MS);
+}
+
+function refreshObservedFrame(revision, abort) {
+  if (frameRead !== null) { frameReadAgain = true; return; }
+  const request = {};
+  frameRead = request;
+  void readFrame(revision, abort.signal).catch(() => {
+    if (!abort.signal.aborted && revision === viewRevision) observationReadFailed();
+  }).finally(() => {
+    if (frameRead !== request) return;
+    frameRead = null;
+    if (!abort.signal.aborted && revision === viewRevision && frameReadAgain) {
+      frameReadAgain = false;
+      refreshObservedFrame(revision, abort);
+    }
+  });
+}
+
+function observed(change, revision, abort, keeper) {
+  if (ended || abort.signal.aborted || revision !== viewRevision) return;
+  switch (change) {
+    case 'snapshot':
+      since = null;
+      refreshRoom();
+      refreshParticipants();
+      refreshFrameSeat(revision, abort.signal, true);
+      refreshObservedFrame(revision, abort);
+      break;
+    case 'machine': refreshObservedFrame(revision, abort); break;
+    case 'seats':
+      refreshFrameSeat(revision, abort.signal, true);
+      refreshParticipants();
+      break;
+    case 'room': refreshRoom(); break;
+    case 'keeper':
+      if (typeof keeper !== 'string' || keeper.length === 0) throw new Error('invalid Play keeper');
+      refreshParticipants();
+      if (controller === keeper || frameSeatRequest !== null)
+        refreshFrameSeat(revision, abort.signal, false, false, keeper);
+      break;
+    default: throw new Error('invalid Play observation');
+  }
+}
+
+async function observe(revision, abort) {
+  const current = () => !ended && !abort.signal.aborted && revision === viewRevision;
+  const query = new URLSearchParams({ machine:viewMachine });
+  if (documentId !== null && !retainedDeparture) query.set('client_id', roomClient);
+  try {
+    const response = await fetch(EVENTS_PATH + '?' + query, {
+      headers:{ Authorization:'Bearer ' + token, Accept:'text/event-stream' },
+      credentials:'omit', cache:'no-store', signal:abort.signal
+    });
+    if (!current()) return;
+    if (response.status === 401 || response.status === 403) {
+      authRejected = true;
+      stopFrames();
+      end(AUTH_ENDED_MESSAGE, { terminalAuth:true });
+      return;
+    }
+    if (response.status !== 200 || !response.body) throw new Error('Play stream unavailable');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = '';
+    try {
+      while (current()) {
+        const { done, value } = await reader.read();
+        if (done) throw new Error('Play stream closed');
+        buffered += decoder.decode(value, { stream:true }).replace(/\r\n/g, '\n');
+        let boundary;
+        while ((boundary = buffered.indexOf('\n\n')) >= 0) {
+          const packet = buffered.slice(0, boundary);
+          buffered = buffered.slice(boundary + 2);
+          let event = ''; const data = [];
+          for (const line of packet.split('\n')) {
+            if (line.startsWith('event:')) event = line.slice(6).trim();
+            else if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+          }
+          if (!current()) return;
+          if (event === 'unavailable') throw new Error('Play observation unavailable');
+          if (event === 'play') {
+            const change = JSON.parse(data.join('\n'));
+            observed(change.change, revision, abort, change.keeper);
+          }
+        }
+      }
+    } finally { void reader.cancel().catch(() => {}); }
+  } catch (_) { if (current()) observationReadFailed(); }
+}
+
 function restartFrames() {
   stopFrames();
+  if (ended || authRejected || departureConfirmed) return;
   const abort = new AbortController();
   frameAbort = abort;
-  void tick(viewRevision, abort);
+  void observe(viewRevision, abort);
 }
 
 function refreshFramePad(revision, signal) {
+  if (viewMachine !== 'dos') return;
   if (seatSavesName === padFor) return;
-  if (framePadRequest !== null) {
-    if (performance.now() - framePadRequest.startedAt < SEAT_POLL_MS) return;
-    framePadRequest.cancel();
-  }
-  // A layout has its own cancellation scope: replacing a stalled read must
-  // keep the spectator frames running. Changing views cancels both scopes.
+  if (framePadRequest !== null) return;
+  // A layout has its own binding and cancellation scope. Machine replacement
+  // retires it; ordinary frame invalidations preserve a healthy pending read.
   const abort = new AbortController();
   const cancel = () => {
     signal.removeEventListener('abort', cancel);
@@ -1071,7 +1180,7 @@ function refreshFramePad(revision, signal) {
   };
   signal.addEventListener('abort', cancel, { once:true });
   if (signal.aborted) cancel();
-  const request = { startedAt:performance.now(), cancel };
+  const request = { cancel };
   framePadRequest = request;
   void syncPad(abort.signal).catch(() => {
     if (!ended && !abort.signal.aborted && revision === viewRevision && framePadRequest === request)
@@ -1082,7 +1191,7 @@ function refreshFramePad(revision, signal) {
   });
 }
 
-function refreshFrameSeat(revision, signal, authorityChanged = false, machineChanged = false) {
+function refreshFrameSeat(revision, signal, authorityChanged = false, machineChanged = false, keeper = null) {
   if (ended || disconnecting) return;
   // Serialized input moves the activity feed itself. A read now would mark
   // authority pending, and the next queued key would fail canMove() and be
@@ -1092,24 +1201,15 @@ function refreshFrameSeat(revision, signal, authorityChanged = false, machineCha
     seatRefreshAfterInputs = true;
     return;
   }
-  if (frameSeatRequest !== null && performance.now() - frameSeatRequest.startedAt >= SEAT_POLL_MS) {
-    const stalled = frameSeatRequest;
-    frameSeatRequest = null;
-    stalled.cancel();
-  }
   if (frameSeatRequest !== null) {
-    if (authorityChanged) {
-      // The read in flight predates this activity, so its snapshot can no
-      // longer authorize a move. Cancel it; one follow-up starts when it
-      // settles. A read that already applied its snapshot and now waits on a
-      // reconnect still holds that snapshot, so pending authority is set here
-      // too.
-      frameSeatNeedsRefresh = true;
-      latestSeatRequest?.abort.abort();
-      controllerError = '새 활동의 자리 정보를 다시 확인하고 있어요.';
-      renderTurn();
+    if (!machineChanged) {
+      if (authorityChanged) { frameSeatRequest.again = true; frameSeatRequest.invalidated = true; }
+      if (keeper !== null) frameSeatRequest.keepers.add(keeper);
+      return;
     }
-    return;
+    const retired = frameSeatRequest;
+    frameSeatRequest = null;
+    retired.cancel();
   }
   const abort = new AbortController();
   const cancel = () => {
@@ -1118,11 +1218,15 @@ function refreshFrameSeat(revision, signal, authorityChanged = false, machineCha
   };
   signal.addEventListener('abort', cancel, { once:true });
   if (signal.aborted) cancel();
-  const request = { startedAt:performance.now(), cancel };
+  const request = { cancel, again:false, invalidated:false, keepers:new Set() };
   frameSeatRequest = request;
-  void refreshSeat(abort.signal).then(() => {
+  void refreshSeat(abort.signal, snapshot => {
+    if (request.invalidated) return false;
+    if (snapshot && request.keepers.has(snapshot.controller)) { request.again = true; return false; }
+    return true;
+  }).then(authority => {
     if (ended || abort.signal.aborted || revision !== viewRevision || frameSeatRequest !== request) return;
-    refreshFramePad(revision, signal);
+    if (authority !== null) refreshFramePad(revision, signal);
   }).catch(() => {
     if (!ended && !abort.signal.aborted && revision === viewRevision && frameSeatRequest === request)
       setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.');
@@ -1130,36 +1234,12 @@ function refreshFrameSeat(revision, signal, authorityChanged = false, machineCha
     signal.removeEventListener('abort', cancel);
     if (frameSeatRequest !== request) return;
     frameSeatRequest = null;
-    if (!ended && !signal.aborted && revision === viewRevision && frameSeatNeedsRefresh) {
-      frameSeatNeedsRefresh = false;
+    if (request.again && !ended && !abort.signal.aborted && revision === viewRevision)
       refreshFrameSeat(revision, signal, true);
-    }
   });
 }
 
-// Seat authority must recover even when the frame transport never resolves.
-// Reuse the same coalesced owner as frame-triggered refreshes.
-function tickSeat() {
-  if (ended) return;
-  if (!authRejected && !disconnecting && frameAbort !== null
-      && performance.now() >= nextSeatPollAt)
-    refreshFrameSeat(viewRevision, frameAbort.signal);
-  setTimeout(tickSeat, SEAT_POLL_MS);
-}
-
-async function tick(revision, abort) {
-  try {
-    await poll(revision, abort.signal);
-  } catch (_) {
-    if (!ended && !abort.signal.aborted && revision === viewRevision)
-      setStatus('connection', '연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
-  } finally {
-    if (!ended && !abort.signal.aborted && revision === viewRevision)
-      frameTimer = setTimeout(() => tick(revision, abort), POLL_MS);
-  }
-}
-
-async function poll(revision, signal) {
+async function readFrame(revision, signal) {
   if (ended || signal.aborted || revision !== viewRevision) return;
   const watched = viewMachine;
   const query = since === null ? '' : '&since=' + since.count + '&incarnation=' + encodeURIComponent(since.incarnation);
@@ -1167,9 +1247,17 @@ async function poll(revision, signal) {
   if (ended || signal.aborted || revision !== viewRevision) return;
   if (r.status !== 200 || !r.json) {
     setStatus('connection', '연결이 잠시 끊겼어요. 다시 시도하고 있어요.');
+    observationReadFailed();
   } else {
     setStatus('connection', '');
     const live = r.json;
+    if (!['no_machine','changed','unchanged'].includes(live.state)
+        || (live.state !== 'no_machine'
+          && !(Number.isInteger(live.change_count) && live.change_count >= 0
+            && typeof live.incarnation === 'string' && live.incarnation.length > 0))) {
+      observationReadFailed();
+      return;
+    }
     let seatAuthorityChanged = false;
     if (live.state === 'no_machine') {
       since = null;
@@ -1207,7 +1295,7 @@ async function poll(revision, signal) {
       if (draw(live.screen)) {
         since = { count: live.change_count, incarnation: live.incarnation };
         setStatus('frame', '');
-      }
+      } else observationReadFailed();
     }
     const activity = live.activity || [];
     renderActivity(activity);
@@ -1219,7 +1307,7 @@ async function poll(revision, signal) {
     const activityChanged = watched === 'dos' && key !== observedActivityKey
       && (observedActivityKey !== null || key !== '');
     if (watched === 'dos') observedActivityKey = key;
-    if (activityChanged || seatAuthorityChanged || performance.now() >= nextSeatPollAt)
+    if (activityChanged || seatAuthorityChanged)
       refreshFrameSeat(revision, signal, activityChanged || seatAuthorityChanged, seatAuthorityChanged);
     if (watched === 'dos') refreshFramePad(revision, signal);
   }
@@ -1424,10 +1512,6 @@ setControlsEnabled(false);
 if (token === '') {
   end('링크에 초대 토큰이 없어요. 받은 링크를 그대로 열어 주세요.');
 } else {
-  tickRoom();
-  setTimeout(tickSeat, SEAT_POLL_MS);
-  refreshSeat().catch(() => setStatus('seat', '자리 정보를 읽지 못했어요. 다시 시도하고 있어요.'));
-  refreshParticipants();
   // Frame observation does not depend on controller authority being readable.
   restartFrames();
 }
@@ -1436,7 +1520,8 @@ if (token === '') {
 </html>
 |play}
 
-let page ~nonce = String.concat "" [ page_head; nonce; page_style; agent_note; nonce; page_script ]
+let page ~nonce = String.concat "" [ page_head; nonce; page_style; agent_note; nonce;
+  "\" data-retry-ms=\""; string_of_int Server_mcp_transport_http_headers.sse_retry_ms; page_script ]
 
 let serve_page _request reqd =
   let nonce = Random_id.hex ~bytes:nonce_bytes in
@@ -1557,6 +1642,7 @@ let session_response ~config ~name ~token body =
 
 let add_routes router =
   router
+  |> Server_routes_http_routes_play_events.add_routes
   |> Server_route.get Server_route.Always_public play_page_path serve_page
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanPlayMachine) seat_path (fun state name request reqd ->
            let status, json = seat_response ~config:(Mcp_server.workspace_config state) ~name in

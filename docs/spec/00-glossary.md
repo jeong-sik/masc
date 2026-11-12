@@ -3400,10 +3400,11 @@ status: reference
   [Tool_task_completion_review](../../lib/task/tool_task_completion_review.mli)
 
 **Operator Attention**
-: Task 담당자의 Keeper 경로를 확인할 수 있는 목록(`Operator_task_attention.item`). 종류는
+: 운영자가 들여다볼 Task 를 모은 목록(`Operator_task_attention.item`). 종류는
   `Held_without_keeper_route`, `Producer_record_unreadable`(Keeper 기록을 읽지
-  못한 것)이다. Keeper 대기열이 없다는 사실만으로 담당 세션이 끝났거나 운영자의 답변을
-  기다린다고 판단하지 않는다. TUI의 질문 수에는 넣지 않으며 Agenda에서 확인할 수 있다.
+  못한 것), `Awaiting_verdict`(완료로 제출됐고 판정이 아직 없는 것)이다. Keeper 대기열이
+  없다는 사실만으로 담당 세션이 끝났거나 운영자의 답변을 기다린다고 판단하지 않는다.
+  `Awaiting_verdict` 는 backlog 에서 만들고, 리뷰가 도는 중인지 멈췄는지는 가리지 않는다. TUI의 질문 수에는 넣지 않으며 Agenda에서 확인할 수 있다.
   **다른 뜻**: attention이라는 말은 세 곳이 더 쓴다. **Board Attention Candidate**는
   Keeper가 반응할지 판정할 게시물이다. Dashboard 브리핑의 attention 항목
   (`Dashboard_attention.attention_item`)과 TUI 개요 화면의 attention 항목

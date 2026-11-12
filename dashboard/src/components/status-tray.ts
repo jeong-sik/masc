@@ -5,16 +5,16 @@ import { Activity, AlertTriangle, Bell, Radio, Users, X } from 'lucide-preact'
 import type { JournalEntry, Keeper, Task } from '../types'
 import { isKeeperCrashed } from '../lib/keeper-predicates'
 import {
-  dashboardWsConnected,
-  dashboardWsEventCount60s,
-  dashboardWsLastDisconnectedAt,
-  dashboardWsLastError,
-  dashboardWsLastEventAt,
-  dashboardWsLastPongAt,
-  dashboardWsLastPongLatencyMs,
-  dashboardWsReady,
-  dashboardWsReconnectCount,
-} from '../dashboard-ws-state'
+  dashboardObserverConnected,
+  dashboardObserverEventCount60s,
+  dashboardObserverLastDisconnectedAt,
+  dashboardObserverLastError,
+  dashboardObserverLastEventAt,
+  dashboardObserverLastActivityAt,
+  dashboardObserverIdleTimeoutMs,
+  dashboardObserverReady,
+  dashboardObserverReconnectCount,
+} from '../dashboard-observer-state'
 import { route } from '../router'
 import {
   keepers,
@@ -23,19 +23,11 @@ import {
 import {
   journal,
 } from '../sse'
-import {
-  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
-  DASHBOARD_WS_RPC_TIMEOUT_MS,
-} from '../config/constants'
 import { journalSeverity } from '../journal-entry'
 import { TimeAgo } from './common/time-ago'
 import { RouteLink } from './common/route-link'
 import { ringFocusClasses } from './common/ring'
 import { unacknowledgedCount } from './common/error-notification-state'
-
-export const STATUS_TRAY_SILENT_MS = 30_000
-export const STATUS_TRAY_HEARTBEAT_FRESH_MS =
-  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS + DASHBOARD_WS_RPC_TIMEOUT_MS + 1_000
 
 export type StatusTrayKey = 'transport' | 'fleet' | 'activity' | 'attention'
 export type StatusTrayTone = 'ok' | 'warn' | 'err' | 'muted'
@@ -57,18 +49,18 @@ export interface StatusTraySummary {
     pendingVerificationTasks: number
     unacknowledgedErrors: number
     reconnectCount: number
-    wsEventCount60s: number
+    observerEventCount60s: number
   }
 }
 
 export interface StatusTrayInput {
-  wsConnected: boolean
-  wsReady: boolean
-  wsLastEventAt: number
-  wsEventCount60s: number
-  wsLastPongAt: number
-  wsLastPongLatencyMs: number | null
-  wsLastError: string | null
+  observerConnected: boolean
+  observerReady: boolean
+  observerLastEventAt: number
+  observerEventCount60s: number
+  lastActivityAt: number
+  idleTimeoutMs: number | null
+  observerLastError: string | null
   reconnectCount: number
   lastDisconnectedAt: number
   keepers: readonly Keeper[]
@@ -120,9 +112,9 @@ function latestEntries(entries: readonly JournalEntry[]): JournalEntry[] {
 }
 
 type TransportInput = Pick<StatusTrayInput,
-  | 'wsConnected' | 'wsReady'
-  | 'wsLastEventAt' | 'wsEventCount60s' | 'wsLastPongAt' | 'wsLastPongLatencyMs'
-  | 'wsLastError'
+  | 'observerConnected' | 'observerReady'
+  | 'observerLastEventAt' | 'observerEventCount60s' | 'lastActivityAt' | 'idleTimeoutMs'
+  | 'observerLastError'
   | 'reconnectCount' | 'lastDisconnectedAt' | 'now'>
 
 type FleetInput = Pick<StatusTrayInput,
@@ -141,17 +133,17 @@ interface FleetSummary {
 
 // Transport item depends only on ws signals + `now` (Date.now()). Separated from
 // the fleet/activity/attention cone so the latter can be memoized and skipped on
-// ws deltas — dashboardWsLastEventAt updates on every WS event (very frequent),
+// ws deltas — dashboardObserverLastEventAt updates on every WS event (very frequent),
 // but transport is the only item that reads it.
 function computeTransportItem(input: TransportInput): StatusTrayItem {
-  if (!input.wsConnected || !input.wsReady) {
-    if (input.wsConnected && !input.wsReady) {
+  if (!input.observerConnected || !input.observerReady) {
+    if (input.observerConnected && !input.observerReady) {
       return {
         key: 'transport',
         tone: 'warn',
         label: 'Client',
         value: 'handshake',
-        detail: 'client WS socket is open; waiting for dashboard/hello before route events resume',
+        detail: 'client SSE is awaiting observer admission',
       }
     }
     return {
@@ -159,34 +151,21 @@ function computeTransportItem(input: TransportInput): StatusTrayItem {
       tone: 'err',
       label: 'Client',
       value: 'closed',
-      detail: input.wsLastError
-        ? clip(input.wsLastError)
-        : 'client WS channel is not ready; server transport truth is in Diagnostics > Transport',
+      detail: input.observerLastError
+        ? clip(input.observerLastError)
+        : 'client SSE stream is not ready; server transport truth is in Diagnostics > Transport',
     }
   }
-  const silentMs = input.wsLastEventAt === 0
-    ? Number.POSITIVE_INFINITY
-    : input.now - input.wsLastEventAt
-  const silent = input.wsLastEventAt === 0 || silentMs > STATUS_TRAY_SILENT_MS
-  const pongAgeMs = input.wsLastPongAt === 0
-    ? Number.POSITIVE_INFINITY
-    : input.now - input.wsLastPongAt
-  const heartbeatFresh = pongAgeMs <= STATUS_TRAY_HEARTBEAT_FRESH_MS
-  const pongLatency = input.wsLastPongLatencyMs == null
-    ? 'pong'
-    : `${input.wsLastPongLatencyMs}ms`
+  const age = input.lastActivityAt === 0 ? null : input.now - input.lastActivityAt
+  const active = age !== null && input.idleTimeoutMs !== null && age < input.idleTimeoutMs
   return {
     key: 'transport',
-    tone: silent && !heartbeatFresh ? 'warn' : 'ok',
+    tone: active ? 'ok' : 'warn',
     label: 'Client',
-    value: silent
-      ? heartbeatFresh ? pongLatency : 'silent'
-      : `${input.wsEventCount60s} deltas/min`,
-    detail: silent
-      ? heartbeatFresh
-        ? `client WS channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
-        : 'client WS channel is open but no recent event or heartbeat pong has arrived'
-      : `last applied route delta ${Math.floor(silentMs / 1000)}s ago`,
+    value: active ? `${input.observerEventCount60s} events/min` : 'silent',
+    detail: active
+      ? `client SSE bytes arrived ${Math.floor(age / 1000)}s ago`
+      : 'client SSE has no activity inside the server-advertised idle deadline',
   }
 }
 
@@ -269,7 +248,7 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
     counts: {
       ...fleet.counts,
       reconnectCount: input.reconnectCount,
-      wsEventCount60s: input.wsEventCount60s,
+      observerEventCount60s: input.observerEventCount60s,
     },
     items: {
       transport,
@@ -353,8 +332,8 @@ function PopoverContent({
             <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.reconnectCount}</div>
           </div>
           <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">WS deltas</div>
-            <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.wsEventCount60s}/60s</div>
+            <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">SSE events</div>
+            <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.observerEventCount60s}/60s</div>
           </div>
         </div>
       </div>
@@ -426,21 +405,21 @@ const EMPTY_ITEM: StatusTrayItem = {
 }
 
 // Phase 2: signal subscriptions are isolated per chip so a ws delta
-// (dashboardWsLastEventAt updates per WS event) re-renders only the transport
+// (dashboardObserverLastEventAt updates per WS event) re-renders only the transport
 // chip — not the parent, the bar, or the fleet/activity/attention buttons.
 
 // Reads only ws signals + now. ws deltas re-render this chip alone.
 function TransportChip({ active, onActivate }: { active: boolean; onActivate: () => void }) {
   const transport = computeTransportItem({
-    wsConnected: dashboardWsConnected.value,
-    wsReady: dashboardWsReady.value,
-    wsLastEventAt: dashboardWsLastEventAt.value,
-    wsEventCount60s: dashboardWsEventCount60s.value,
-    wsLastPongAt: dashboardWsLastPongAt.value,
-    wsLastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
-    wsLastError: dashboardWsLastError.value,
-    reconnectCount: dashboardWsReconnectCount.value,
-    lastDisconnectedAt: dashboardWsLastDisconnectedAt.value,
+    observerConnected: dashboardObserverConnected.value,
+    observerReady: dashboardObserverReady.value,
+    observerLastEventAt: dashboardObserverLastEventAt.value,
+    observerEventCount60s: dashboardObserverEventCount60s.value,
+    lastActivityAt: dashboardObserverLastActivityAt.value,
+    idleTimeoutMs: dashboardObserverIdleTimeoutMs.value,
+    observerLastError: dashboardObserverLastError.value,
+    reconnectCount: dashboardObserverReconnectCount.value,
+    lastDisconnectedAt: dashboardObserverLastDisconnectedAt.value,
     now: Date.now(),
   })
   return html`<${TrayButton} item=${transport} active=${active} onClick=${onActivate} />`
@@ -495,20 +474,20 @@ function StatusTrayPopover({
         keeperAttention: 0,
         pendingVerificationTasks: 0,
         unacknowledgedErrors: 0,
-        reconnectCount: dashboardWsReconnectCount.value,
-        wsEventCount60s: dashboardWsEventCount60s.value,
+        reconnectCount: dashboardObserverReconnectCount.value,
+        observerEventCount60s: dashboardObserverEventCount60s.value,
       },
       items: {
         transport: computeTransportItem({
-          wsConnected: dashboardWsConnected.value,
-          wsReady: dashboardWsReady.value,
-          wsLastEventAt: dashboardWsLastEventAt.value,
-          wsEventCount60s: dashboardWsEventCount60s.value,
-          wsLastPongAt: dashboardWsLastPongAt.value,
-          wsLastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
-          wsLastError: dashboardWsLastError.value,
-          reconnectCount: dashboardWsReconnectCount.value,
-          lastDisconnectedAt: dashboardWsLastDisconnectedAt.value,
+          observerConnected: dashboardObserverConnected.value,
+          observerReady: dashboardObserverReady.value,
+          observerLastEventAt: dashboardObserverLastEventAt.value,
+          observerEventCount60s: dashboardObserverEventCount60s.value,
+          lastActivityAt: dashboardObserverLastActivityAt.value,
+          idleTimeoutMs: dashboardObserverIdleTimeoutMs.value,
+          observerLastError: dashboardObserverLastError.value,
+          reconnectCount: dashboardObserverReconnectCount.value,
+          lastDisconnectedAt: dashboardObserverLastDisconnectedAt.value,
           now: Date.now(),
         }),
         fleet: EMPTY_ITEM,
@@ -525,7 +504,7 @@ function StatusTrayPopover({
     })
     summary = {
       latestJournalEntries: fleet.latestJournalEntries,
-      counts: { ...fleet.counts, reconnectCount: 0, wsEventCount60s: 0 },
+      counts: { ...fleet.counts, reconnectCount: 0, observerEventCount60s: 0 },
       items: { transport: EMPTY_ITEM, ...fleet.items },
     }
   }

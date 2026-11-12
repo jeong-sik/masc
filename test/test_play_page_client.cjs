@@ -1,5 +1,4 @@
-// Run the shipped page through its poll and input handlers. Failed reads
-// must recover even when the machine remains at the same frame/activity.
+// Run the shipped page through authenticated SSE invalidations and input.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -71,6 +70,31 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     clearRect: () => { clears += 1; },
   });
   const timers = [];
+  let observation = null;
+  const streamReply = signal => {
+    const stream = { pending:null, chunks:[new TextEncoder().encode('event: play\ndata: {"change":"snapshot"}\n\n')], closed:false };
+    observation = stream;
+    const finish = () => {
+      stream.closed = true;
+      if (stream.pending) { stream.pending({ done:true }); stream.pending = null; }
+    };
+    stream.close = finish;
+    signal.addEventListener('abort', finish, { once:true });
+    return { status:200, body:{ getReader() { return {
+      read() {
+        if (stream.closed) return Promise.resolve({ done:true });
+        if (stream.chunks.length) return Promise.resolve({ done:false, value:stream.chunks.shift() });
+        return new Promise(resolve => { stream.pending = resolve; });
+      },
+      cancel() { finish(); return Promise.resolve(); }
+    }; } } };
+  };
+  const emit = (change, fields = {}) => {
+    if (!observation || observation.closed) return;
+    const value = new TextEncoder().encode('event: play\ndata: ' + JSON.stringify({ change, ...fields }) + '\n\n');
+    if (observation.pending) { const deliver = observation.pending; observation.pending = null; deliver({ done:false, value }); }
+    else observation.chunks.push(value);
+  };
   const requests = [];
   const windowHandlers = new Map();
   let reloads = 0;
@@ -78,6 +102,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
   const location = { hash, pathname: '/play', search: '', reload() { reloads += 1; } };
   const context = vm.createContext({
     document: {
+      currentScript: { dataset:{ retryMs:"3000" } },
       getElementById: get,
       createElement: element,
       querySelectorAll: selector => {
@@ -93,7 +118,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
     navigator: { getGamepads: () => [] },
     // HTTP LAN origins expose getRandomValues but not secure-context randomUUID.
     crypto: { getRandomValues: values => require('node:crypto').webcrypto.getRandomValues(values) },
-    TextEncoder,
+    TextEncoder, TextDecoder, URLSearchParams,
     AbortController,
     requestAnimationFrame() {},
     atob,
@@ -110,6 +135,7 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
       // deepEqual comparisons of recorded requests.
       Object.defineProperty(request, 'signal', { value: init.signal });
       requests.push(request);
+      if (url.startsWith('/api/v1/play/events?')) return streamReply(init.signal);
       if (url === '/api/v1/play/room') return roomReply(request, init.signal);
       if (url === '/api/v1/play/session') return sessionReply(request);
       return reply(request, init.signal);
@@ -120,44 +146,39 @@ function fixture(reply, { storage = new Map(), hash = '#fixture-token', roomRepl
   return {
     get, padButton, rendered, settle,
     evaluate(code) { return vm.runInContext(code, context); },
-    // Frame polls only: seat authority and the conversation keep their own timers.
-    get timerCount() { return timers.filter(timer => timer.delay === 300).length; },
-    // Existing cases assert game requests; room traffic has its own assertions.
-    get requests() { return requests.filter(request => request.url !== '/api/v1/play/room'); },
+    get streamCount() { return observation && !observation.closed ? 1 : 0; },
+    get idleTimerCount() { return timers.length; },
+    get allRequests() { return requests; },
+    get requests() { return requests.filter(request => request.url !== '/api/v1/play/room' && !request.url.startsWith('/api/v1/play/events?')); },
     get roomRequests() { return requests.filter(request => request.url === '/api/v1/play/room'); },
-    async roomPoll() { vm.runInContext('refreshRoom();', context); await settle(); },
+    async refreshRoom() { vm.runInContext('refreshRoom();', context); await settle(); },
     get reloads() { return reloads; },
     get hash() { return location.hash; },
     navigateFragment(hash) { context.location.hash = hash; windowHandlers.get('hashchange')?.(); },
     restoreFromCache() { windowHandlers.get('pageshow')?.({ persisted: true }); },
     get clears() { return clears; },
-    async seatTick() {
-      const pending = timers.filter(timer => timer.delay === 5000);
-      assert.equal(pending.length, 1, 'authority owns one independent timer');
-      const timer = pending[0];
-      timers.splice(timers.indexOf(timer), 1);
-      now += timer.delay;
-      await timer.callback();
+    async snapshotChanged() {
+      if (timers.length) await timers.shift().callback();
+      else { emit('seats'); emit('machine'); }
       await settle();
     },
-    async roomTick() {
-      const pending = timers.filter(timer => timer.delay === 2000);
-      assert.equal(pending.length, 1, 'conversation owns one independent refresh timer');
-      const timer = pending[0];
-      timers.splice(timers.indexOf(timer), 1);
-      now += timer.delay;
-      await timer.callback();
-      await settle();
-    },
-    async poll(elapsed = 5000) {
+    async seatsChanged() { emit('seats'); await settle(); },
+    async roomChanged() { emit('room'); await settle(); },
+    async keeperChanged(keeper) { emit('keeper', { keeper }); await settle(); },
+    async machineChanged(elapsed = 5000) {
       now += elapsed;
-      const pending = timers.filter(timer => timer.delay === 300);
-      assert.equal(pending.length, 1, 'the game keeps one next poll');
-      const timer = pending[0];
-      timers.splice(timers.indexOf(timer), 1);
-      await timer.callback();
+      if (timers.length) {
+        const timer = timers.shift();
+        await timer.callback();
+      } else emit('machine');
       await settle();
     },
+    async breakObservation() { observation.close(); await settle(); },
+    async reconnect() {
+      assert.equal(timers.length, 1, 'a failed transport owns one reconnect');
+      await timers.shift().callback(); await settle();
+    },
+
   };
 }
 
@@ -286,7 +307,7 @@ for (const blocked of ['/api/v1/play/seat', '/api/v1/lane-addons/live']) {
     assert.equal(page.roomRequests.length, 1, 'the room starts before the first seat read settles');
     for (let id = 1; id <= 2; id += 1) {
       messages = [roomMessage(id, 'Keeper message ' + id)];
-      await page.roomTick();
+      await page.roomChanged();
       assert.equal(page.get('room-messages').children[0].children[1].textContent, 'Keeper message ' + id);
     }
     assert.equal(page.roomRequests.length, 3, 'independent refreshes renew presence');
@@ -317,7 +338,7 @@ test('MSX observation uses the same room and never takes the DOS controller', as
   page.get('machine-view').value = 'msx';
   page.get('machine-view').handlers.change();
   await page.settle();
-  await page.poll();
+  await page.snapshotChanged();
   assert.match(page.get('turn').textContent, /MSX/);
   assert.equal(page.get('game-controls').hidden, true);
   assert.ok(page.requests.some(request => request.url.includes('msx_capture')));
@@ -347,7 +368,7 @@ test('a late DOS frame cannot repaint the selected MSX view', async () => {
   finish();
   await page.settle();
   assert.deepEqual(page.rendered, [[0, 255, 0, 255]], 'the late aborted response does not repaint');
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.rendered.length, 2, 'only the replacement poll loop remains');
 });
 
@@ -358,7 +379,7 @@ test('default DOS frames keep updating and can switch machines while seat reads 
   await page.settle();
   assert.equal(page.rendered.length, 1, 'default DOS starts without a seat response');
   assert.equal(page.padButton.disabled, true, 'unread ownership does not authorize game inputs');
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.rendered.length, 2, 'a hung observer seat read does not hold the next frame');
   page.get('machine-view').value = 'msx';
   page.get('machine-view').handlers.change();
@@ -368,7 +389,7 @@ test('default DOS frames keep updating and can switch machines while seat reads 
   finishSeat();
   await page.settle();
   assert.equal(page.rendered.length, 3, 'late initialization does not restart the selected view');
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.rendered.length, 4);
 });
 
@@ -530,22 +551,17 @@ test('a user send bypasses a hung room read and ignores its late response', asyn
   assert.equal(page.get('room-messages').children[0].children[1].textContent, 'without waiting for read');
 });
 
-test('explicit room refresh replaces a hung read without timing out slow observations', async () => {
+test('a committed room invalidation replaces a hung observation without replaying speech', async () => {
   let attempts = 0, oldSignal;
   const page = fixture(gameReply, { roomReply: (_request, signal) => {
     if (++attempts === 1) { oldSignal = signal; return new Promise(() => {}); }
-    return response({ ...emptyRoom, messages:[roomMessage(1, 'recovered room')] });
+    return response({ ...emptyRoom, messages:[roomMessage(1, 'recovered')] });
   } });
   await page.settle();
-  await page.roomTick();
-  assert.equal(oldSignal.aborted, false, 'ordinary pulses preserve an in-flight read');
-  assert.equal(attempts, 1);
-  await page.roomPoll();
+  await page.roomChanged();
   assert.equal(oldSignal.aborted, true);
-  assert.equal(attempts, 2);
-  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'recovered room');
-  await page.roomTick();
-  assert.equal(attempts, 3);
+  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'recovered');
+  assert.equal(page.roomRequests.some(r => r.body?.action === 'say'), false);
 });
 
 test('a read started during a send cannot overwrite the acknowledged message', async () => {
@@ -562,7 +578,7 @@ test('a read started during a send cannot overwrite the acknowledged message', a
   page.get('chat-text').value = 'acknowledged';
   page.get('chat-send').handlers.click();
   await page.settle();
-  await page.roomTick();
+  await page.roomChanged();
   finishSend();
   await page.settle();
   assert.equal(readSignal.aborted, true);
@@ -609,11 +625,11 @@ test('room history keeps a visible message and pixel offset across rolling reten
   await page.settle();
   list.scrollTop = 39 * list.rowHeight + 7; // Read message 40, seven pixels into its row.
   messages = messages.slice(1).concat(roomMessage(101, 'message 101'));
-  await page.roomPoll();
+  await page.refreshRoom();
   assert.equal(list.scrollTop, 38 * list.rowHeight + 7,
     'dropping an earlier message must not move the visible message or within-row offset');
   messages = Array.from({ length:100 }, (_, index) => roomMessage(index + 50, 'message ' + (index + 50)));
-  await page.roomPoll();
+  await page.refreshRoom();
   assert.equal(list.scrollTop, 0, 'an evicted anchor clamps to the oldest surviving message');
   assert.equal(list.children[0].children[1].textContent, 'message 50');
 });
@@ -625,7 +641,7 @@ test('room history keeps following new messages when already at the bottom', asy
   await page.settle();
   list.scrollTop = list.scrollHeight - list.clientHeight;
   messages = messages.concat(roomMessage(11, 'message 11'));
-  await page.roomPoll();
+  await page.refreshRoom();
   assert.equal(list.scrollTop, list.scrollHeight);
   assert.equal(list.children.at(-1).children[1].textContent, 'message 11');
 });
@@ -658,7 +674,7 @@ for (const [name, refusal, control] of [
       if (method === 'POST') { refused = true; return response(refusal, 409); }
       if (url === '/api/v1/play/seat') return response(seat);
       if (url === '/api/v1/play/pad') return response(layout);
-      return response(frame);
+      return gameReply({ url });
     });
     await page.settle();
     if (control === 'pad') page.padButton.handlers.click();
@@ -686,7 +702,7 @@ test('a failed seat read retries without a new move and restores playable contro
   assert.match(page.get('status').textContent, /자리/);
   assert.equal(seatReads, 2, 'first activity immediately retries the initial failed read');
   assert.equal(page.padButton.disabled, true);
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(seatReads, 3, 'retry the same activity after the seat recovers');
   assert.match(page.get('turn').textContent, /내 차례/);
   assert.equal(page.get('status').textContent, '');
@@ -714,10 +730,10 @@ for (const [name, badScreen] of [
     });
     await page.settle();
     assert.equal(page.rendered.length, 0);
-    await page.poll();
+    await page.snapshotChanged();
     assert.deepEqual(page.rendered, [[255, 0, 0, 255]], 'same frame is eventually drawn');
     assert.equal(page.get('status').textContent, '');
-    await page.poll();
+    await page.snapshotChanged();
     const live = page.requests.filter(r => r.url.includes('/live?'));
     assert.equal(live[1].url.includes('since='), false, 'failed frame is not acknowledged');
     assert.equal(live[2].url.includes('since=3'), true, 'drawn frame is acknowledged');
@@ -742,7 +758,7 @@ test('a failed seat request after an input retries while the activity feed is un
   await page.settle();
   assert.match(page.get('status').textContent, /자리 정보를 읽지 못했어요/);
   assert.doesNotMatch(page.get('status').textContent, /보내지 못했어요/);
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
   assert.equal(page.get('status').textContent, '');
 });
@@ -760,7 +776,7 @@ test('eject clears the last picture and the game pad', async () => {
   await page.settle();
   assert.equal(page.rendered.length, 1);
   ejected = true;
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.clears, 1);
   assert.equal(page.get('pad').hidden, true);
   assert.equal(page.padButton.disabled, true);
@@ -779,7 +795,7 @@ test('no_machine hides the old pad while seat is unavailable and a loaded game r
   });
   await page.settle();
   ejected = true;
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.clears, 1);
   assert.equal(page.get('pad').hidden, true, 'no_machine is sufficient to hide the stale game pad');
   assert.equal(page.padButton.disabled, true);
@@ -787,7 +803,7 @@ test('no_machine hides the old pad while seat is unavailable and a loaded game r
   assert.match(page.get('turn').textContent, /켜진 게임이 없어요/);
   assert.match(page.get('status').textContent, /자리 정보를 읽지 못했어요/);
   ejected = false;
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.get('pad').hidden, false);
   assert.equal(page.padButton.disabled, false);
   assert.equal(page.get('pass').disabled, false);
@@ -806,7 +822,7 @@ test('a malformed frame does not prevent new activity from refreshing the contro
   });
   await page.settle();
   corrupt = true;
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
   assert.match(page.get('activity').children[0].textContent, /pass operator/);
   assert.match(page.get('status').textContent, /화면을 읽지 못했어요/);
@@ -827,7 +843,7 @@ test('choosing a handoff discovers an invite added while the machine stays idle'
   const select = page.get('pass-to');
   select.value = 'operator';
   invited = true;
-  await page.poll(300);
+  await page.machineChanged(300);
   assert.equal(select.options.some(option => option.value === 'newplayer'), false);
   select.handlers.focus?.();
   await page.settle();
@@ -847,12 +863,12 @@ test('revoked access keeps controls disabled and stops sending moves', async () 
     if (revoked) return response({}, 401);
     if (url === '/api/v1/play/seat') return response(seat);
     if (url === '/api/v1/play/pad') return response(layout);
-    return response(frame);
+    return gameReply({ url });
   });
   await page.settle();
   assert.equal(page.padButton.disabled, false);
   revoked = true;
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.padButton.disabled, true);
   assert.equal(page.get('pass').disabled, true);
   assert.match(page.get('turn').textContent, /초대가 끝났거나 회수됐어요/);
@@ -875,7 +891,7 @@ test('an older seat response cannot overwrite a newer poll result', async () => 
   await page.settle();
   defer = true;
   page.get('pass-to').handlers.focus?.();
-  const poll = page.poll();
+  const poll = page.snapshotChanged();
   await page.settle();
   assert.equal(pending.length, 2);
   currentSeat = { ...seat, controller: 'operator' };
@@ -886,37 +902,23 @@ test('an older seat response cannot overwrite a newer poll result', async () => 
   assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
   assert.equal(page.get('pass').disabled, true, 'another player holds the controller');
   defer = false;
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
 });
 
-test('seat polls and machine activity do not read the handoff roster', async () => {
+test('machine invalidations leave the handoff roster until a seat invalidation', async () => {
   let rosterReads = 0;
-  let seatReads = 0;
-  let change = 3;
-  const page = fixture(({ url }) => {
-    if (url === '/api/v1/play/seat') { seatReads += 1; return response(seat); }
-    if (url === '/api/v1/play/pad') return response(layout);
-    if (url === PARTICIPANTS_PATH) { rosterReads += 1; return response(roster); }
-    change += 1;
-    return response({ ...frame, change_count: change,
-      activity: [{ at: change, who: 'operator', action: 'move-' + change }] });
+  const page = fixture(request => {
+    if (request.url === PARTICIPANTS_PATH) { rosterReads++; return response(roster); }
+    return gameReply(request);
   });
-  await page.settle();
-  assert.equal(rosterReads, 1, 'opening the page reads the roster once');
-  assert.equal(page.get('pass-to').options.some(option => option.value === 'operator'), true);
-  const seatsBefore = seatReads;
-  await page.poll(300);
-  await page.poll(300);
-  await page.poll(5000);
-  assert.ok(seatReads > seatsBefore, 'activity and the periodic poll still read the seat');
-  assert.equal(rosterReads, 1, 'seat reads leave the roster alone');
-  page.get('pass-to').handlers.focus?.();
-  await page.settle();
-  assert.equal(rosterReads, 2, 'opening the handoff selector reads the roster');
+  await page.settle(); const initial = rosterReads;
+  await page.machineChanged(300); await page.machineChanged(300);
+  assert.equal(rosterReads, initial);
+  await page.seatsChanged(); assert.equal(rosterReads, initial + 1);
 });
 
-test('an earlier roster answer cannot replace a later one', async () => {
+test('new roster invalidations share a slow read and retain one fresh follow-up', async () => {
   const pending = [];
   const page = fixture(({ url }) => {
     if (url === PARTICIPANTS_PATH) return new Promise(resolve => pending.push(resolve));
@@ -925,10 +927,12 @@ test('an earlier roster answer cannot replace a later one', async () => {
   await page.settle();
   page.get('pass-to').handlers.focus?.();
   await page.settle();
-  assert.equal(pending.length, 2);
-  pending[1](response({ participants: ['minsu', 'operator', 'newplayer'] }));
-  await page.settle();
+  await page.seatsChanged(); await page.seatsChanged();
+  assert.equal(pending.length, 1, 'a healthy read is not starved by repeated notifications');
   pending[0](response({ participants: ['minsu', 'operator'] }));
+  await page.settle();
+  assert.equal(pending.length, 2, 'one follow-up observes all the invalidations');
+  pending[1](response({ participants: ['minsu', 'operator', 'newplayer'] }));
   await page.settle();
   assert.equal(page.get('pass-to').options.some(option => option.value === 'newplayer'), true);
 });
@@ -987,10 +991,10 @@ test('an unreadable controller disables moves and recovers without new machine a
   page.padButton.handlers.click();
   await page.settle();
   assert.equal(page.requests.some(request => request.method === 'POST'), false);
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.get('pass').disabled, true, 'an unchanged frame cannot clear the read failure');
   unreadable = false;
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
   assert.equal(page.get('status').textContent, '');
   assert.equal(page.get('pass').disabled, true, 'another player holds the controller');
@@ -1023,10 +1027,10 @@ for (const [name, fail] of [
     page.padButton.handlers.click();
     await page.settle();
     assert.equal(page.requests.some(request => request.method === 'POST'), false);
-    await page.poll();
+    await page.snapshotChanged();
     assert.equal(page.padButton.disabled, true, 'the unchanged frame cannot restore unread ownership');
     unreadable = false;
-    await page.poll();
+    await page.snapshotChanged();
     assert.match(page.get('turn').textContent, /내 차례/);
     assert.equal(page.padButton.disabled, false);
     assert.equal(page.get('status').textContent, '');
@@ -1038,7 +1042,7 @@ for (const [name, fail] of [
 
 const normalReply = ({ url, method }) => response(method === 'POST' ? { ok: true }
   : url === '/api/v1/play/seat' ? seat
-  : url === '/api/v1/play/pad' ? layout : frame);
+  : url === '/api/v1/play/pad' ? layout : url === PARTICIPANTS_PATH ? roster : frame);
 
 test('reloading reconnects the same tab and disconnect clears its credential', async () => {
   const storage = new Map();
@@ -1119,7 +1123,7 @@ test('a departed holder becomes recoverable without any machine activity', async
   await page.settle();
   assert.equal(page.padButton.disabled, true);
   departed = true;
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.padButton.disabled, false, 'the authoritative seat allows the next recovery move');
   assert.match(page.get('turn').textContent, /떠났어요/);
   page.padButton.handlers.click();
@@ -1215,7 +1219,7 @@ test('disconnect drains an admitted move that acquires control and suppresses qu
   page.padButton.handlers.click();
   const disconnected = page.get('leave').handlers.click();
   page.padButton.handlers.click();
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.padButton.disabled, true, 'a concurrent seat poll cannot reenable input during disconnect');
   assert.equal(storage.get('masc.play.invite'), 'fixture-token');
   assert.equal(page.requests.filter(request => request.method === 'POST').length, 1);
@@ -1241,7 +1245,7 @@ test('a stale live response cannot bypass the atomic disconnect transition', asy
   }, { storage, sessionReply: () => new Promise(resolve => { completeDisconnect = resolve; }) });
   await page.settle();
   defer = true;
-  const poll = page.poll();
+  const poll = page.snapshotChanged();
   const disconnected = page.get('leave').handlers.click();
   await page.settle();
   // A stale projection cannot turn the explicit disconnect into local-only cleanup.
@@ -1330,16 +1334,19 @@ test('full-document invitation navigation preserves an existing controller ident
   assert.equal(storage.size, 0);
 });
 
-test('spectator frame polling does not repeatedly scan the seat inventory', async () => {
-  const page = fixture(request => request.url === '/api/v1/play/seat'
-    ? response({ ...seat, controller: 'operator' }) : normalReply(request));
-  await page.settle();
-  const seats = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
-  const initial = seats();
-  for (let i = 0; i < 16; i++) await page.poll(300);
-  assert.equal(seats(), initial, 'frame polls within the seat interval only read frames');
-  await page.poll(300);
-  assert.equal(seats(), initial + 1, 'the independent seat interval still detects departures');
+test('healthy idle has no HTTP read timer and machine events do not scan seat authority', async () => {
+  const page = fixture(gameReply); await page.settle();
+  const before = page.allRequests.length;
+  await page.settle(); assert.equal(page.allRequests.length, before);
+  assert.equal(page.idleTimerCount, 0);
+  const seatReads = () => page.requests.filter(r => r.url === '/api/v1/play/seat').length;
+  const seatsBefore = seatReads();
+  await page.machineChanged(300); await page.machineChanged(300);
+  assert.equal(seatReads(), seatsBefore);
+  await page.seatsChanged(); assert.equal(seatReads(), seatsBefore + 1);
+  const stream = page.allRequests.find(r => r.url.startsWith('/api/v1/play/events?'));
+  assert.equal(stream.authorization, 'Bearer fixture-token');
+  assert.equal(stream.url.includes('fixture-token'), false);
 });
 
 test('new machine activity and target selection refresh seats within the idle scan interval', async () => {
@@ -1351,9 +1358,9 @@ test('new machine activity and target selection refresh seats within the idle sc
   const seats = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
   const initial = seats();
   currentActivity = [{ at:2, who:'operator', action:'pass minsu' }];
-  await page.poll(300);
+  await page.machineChanged(300);
   assert.equal(seats(), initial + 1, 'new machine activity immediately refreshes authority');
-  await page.poll(300);
+  await page.machineChanged(300);
   assert.equal(seats(), initial + 1, 'an unchanged activity does not bypass the scan interval');
   page.get('pass-to').handlers.focus();
   await page.settle();
@@ -1392,7 +1399,7 @@ test('a lost move response cannot forget a credential before the server acquires
   assert.ok(recovered.requests.every(r => r.authorization === 'Bearer fixture-token'));
   assert.equal(JSON.parse(storage.get('masc.play.pending')).token, 'fixture-token');
   holder = 'minsu';
-  await recovered.poll();
+  await recovered.snapshotChanged();
   assert.equal(recovered.padButton.disabled, true);
   assert.equal(storage.get('masc.play.invite'), 'fixture-token', 'retain the late controller identity');
   assert.match(recovered.get('status').textContent, /운영자에게 초대 회수/);
@@ -1472,7 +1479,7 @@ test('a refused write ends its bearer even when its acknowledgement cannot read 
   page.padButton.handlers.click();
   await page.settle();
   const before = page.requests.length;
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.requests.length, before, 'the rejected bearer stops polling');
   assert.notEqual(read('masc.play.pending'), undefined, 'unreadable pending evidence is kept');
 });
@@ -1507,7 +1514,7 @@ for (const action of ['disconnect', 'input', 'auth failure']) {
     // Boundary guards also work before the requested reload has completed.
     if (action === 'disconnect') await cached.get('leave').handlers.click();
     else if (action === 'input') { cached.padButton.handlers.click(); await cached.settle(); }
-    else { authFails = true; await cached.poll(); }
+    else { authFails = true; await cached.snapshotChanged(); }
     assert.equal(cached.requests.some(r => r.method === 'POST'), false);
     assert.equal(storage.get('masc.play.pending'), marker);
     assert.equal(storage.get('masc.play.invite'), 'fixture-token');
@@ -1588,7 +1595,7 @@ test('credential removal failure keeps disconnect retryable and game input disab
   assert.equal(storage.get('masc.play.invite'), 'fixture-token');
   assert.match(page.get('status').textContent, /지우지 못했어요/);
   assert.equal(page.get('leave').disabled, false);
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.padButton.disabled, true);
   assert.equal(page.requests.some(request => request.url === '/api/v1/play/session' && request.body.connected), false,
     'ordinary polling cannot reconnect a departed participant');
@@ -1622,7 +1629,7 @@ test('reloading after departure cleanup fails does not rejoin without an invitat
   assert.equal(connected, false);
   const reloaded = fixture(reply, { storage, hash:'', sessionReply });
   await reloaded.settle();
-  await reloaded.poll();
+  await reloaded.snapshotChanged();
   assert.equal(connected, false);
   assert.equal(reloaded.padButton.disabled, true);
   assert.equal(reloaded.requests.some(request => request.method === 'POST'), false);
@@ -1643,12 +1650,12 @@ test('explicit reconnect retries transient refusals while the machine stays idle
   });
   await page.settle();
   assert.equal(attempts, 1, 'activity observation does not flood reconnect writes');
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(attempts, 2);
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(attempts, 3);
   assert.equal(page.padButton.disabled, false);
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(attempts, 3, 'successful reconnect settles the intent');
 });
 
@@ -1754,7 +1761,7 @@ test('a reopened departed invitation reconnects after a transient initial seat f
   assert.ok(reads >= 2, 'first activity recovers the failed initial seat immediately');
   assert.equal(page.padButton.disabled, false);
   assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:true }]);
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.requests.filter(request => request.method === 'POST').length, 1);
 });
 
@@ -1804,9 +1811,9 @@ for (const failingKey of ['masc.play.room.draft', 'masc.play.room.clients', 'mas
     page.get('chat-text').value = 'must not overwrite or send after departure';
     page.get('chat-text').handlers.input();
     page.get('chat-send').handlers.click();
-    await page.roomPoll();
-    await page.roomTick();
-    await page.poll();
+    await page.refreshRoom();
+    await page.roomChanged();
+    await page.snapshotChanged();
     assert.equal(page.roomRequests.length, roomRequests, 'confirmed departure stops chat and presence even when storage remains');
     assert.equal(page.get('chat-text').disabled, true, 'ordinary seat reads cannot reopen chat');
     assert.equal(storage.get('masc.play.room.draft'), failingKey === 'masc.play.room.draft' ? draft : undefined);
@@ -1898,7 +1905,7 @@ for (const failingKey of ['masc.play.room.draft', 'masc.play.room.clients', 'mas
     page.get('chat-text').handlers.input();
     storage.delete = key => { if (key === failingKey) throw new Error('cleanup refused'); return Map.prototype.delete.call(storage, key); };
     rejected = true;
-    await page.roomPoll();
+    await page.refreshRoom();
     assert.equal(page.get('chat-text').disabled, true);
     assert.equal(page.get('chat-send').disabled, true);
     assert.equal(page.get('leave').disabled, false, 'local cleanup remains retryable');
@@ -1907,7 +1914,7 @@ for (const failingKey of ['masc.play.room.draft', 'masc.play.room.clients', 'mas
     page.get('chat-text').value = 'must not persist';
     page.get('chat-text').handlers.input();
     page.get('chat-send').handlers.click();
-    await page.roomTick();
+    await page.roomChanged();
     assert.equal(page.roomRequests.length, sent);
     assert.equal(storage.get('masc.play.room.draft'), saved);
     storage.delete = key => Map.prototype.delete.call(storage, key);
@@ -1974,14 +1981,14 @@ for (const failingKey of ['masc.play.room.draft', 'masc.play.room.clients', 'mas
     assert.equal(connected, false);
     const reloaded = fixture(reply, { storage, hash:'', sessionReply });
     await reloaded.settle();
-    await reloaded.roomTick();
+    await reloaded.roomChanged();
     assert.equal(reloaded.roomRequests.length, 0);
     assert.equal(reloaded.get('chat-text').disabled, true);
     assert.equal(reloaded.get('chat-send').disabled, true);
     storage.delete = key => Map.prototype.delete.call(storage, key);
     const reopened = fixture(reply, { storage, sessionReply });
     await reopened.settle();
-    await reopened.roomTick();
+    await reopened.roomChanged();
     assert.equal(connected, true, 'an explicit invitation may reconnect');
     assert.equal(reopened.get('chat-text').disabled, false);
     assert.ok(reopened.roomRequests.some(r => r.body.action === 'read'));
@@ -2017,7 +2024,7 @@ test('revocation cannot forget an earlier unknown public send receipt', async ()
   await page.settle();
   const saved = storage.get('masc.play.room.draft');
   revoked = true;
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.get('chat-send').disabled, true);
   await page.get('leave').handlers.click();
   assert.equal(storage.get('masc.play.room.draft'), saved);
@@ -2025,17 +2032,20 @@ test('revocation cannot forget an earlier unknown public send receipt', async ()
 });
 
 
-test('frames keep polling while a pad read hangs', async () => {
-  let padReads = 0;
-  const page = fixture(request => {
-    if (request.url === '/api/v1/play/pad') { padReads += 1; return new Promise(() => {}); }
+test('machine events progress frames while preserving an unsettled healthy pad read', async () => {
+  let held;
+  const page = fixture((request, signal) => {
+    if (request.url === '/api/v1/play/pad') {
+      held ??= signal;
+      return new Promise(() => {});
+    }
     return gameReply(request);
   });
-  await page.settle();
-  await page.poll(300);
-  await page.poll(300);
-  assert.equal(page.rendered.length, 3);
-  assert.equal(padReads, 1, 'frame polling does not duplicate a pending pad read');
+  await page.settle(); const frames = page.rendered.length;
+  await page.machineChanged(300);
+  assert.equal(held.aborted, false);
+  assert.ok(page.rendered.length > frames);
+  assert.equal(page.requests.some(r => r.method === 'POST'), false);
 });
 
 
@@ -2049,62 +2059,40 @@ test('an empty-activity frame retries a failed pad without requiring new seat ac
   await page.settle();
   assert.equal(padReads, 1);
   assert.equal(page.get('pad').hidden, true);
-  await page.poll(300);
+  await page.machineChanged(300);
   assert.equal(padReads, 2);
   assert.equal(page.get('pad').hidden, false);
 });
 
 
-test('ordinary room pulses recover a stalled read and reject its late receipt', async () => {
-  let attempts = 0, oldSignal, finish;
-  const page = fixture(gameReply, { roomReply: (_request, signal) => {
-    if (++attempts === 1) {
-      oldSignal = signal;
-      return new Promise(resolve => { finish = () => resolve(response({ ...emptyRoom,
-        messages:[roomMessage(1, 'stale room')] })); });
-    }
-    return response({ ...emptyRoom, messages:[roomMessage(2, 'recovered room')] });
+test('a room event rejects an old read receipt after its replacement lands', async () => {
+  let finish, reads = 0;
+  const page = fixture(gameReply, { roomReply: () => {
+    if (++reads === 1) return new Promise(resolve => { finish = () => resolve(response({ ...emptyRoom,
+      messages:[roomMessage(1, 'stale')] })); });
+    return response({ ...emptyRoom, messages:[roomMessage(2, 'current')] });
   } });
-  await page.settle();
-  await page.roomTick();
-  await page.roomTick();
-  assert.equal(oldSignal.aborted, false, 'a slow observation survives ordinary short pulses');
-  await page.roomTick();
-  assert.equal(oldSignal.aborted, true);
-  assert.equal(attempts, 2);
-  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'recovered room');
-  finish();
-  await page.settle();
-  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'recovered room');
-  assert.equal(page.roomRequests.some(r => r.body.action === 'say'), false);
+  await page.settle(); await page.roomChanged(); finish(); await page.settle();
+  assert.equal(page.get('room-messages').children[0].children[1].textContent, 'current');
+  assert.equal(page.roomRequests.some(r => r.body?.action === 'say'), false);
 });
 
-test('a stalled pad retries independently while frames continue and discards its late result', async () => {
-  let attempts = 0, oldSignal, finish;
-  const page = fixture((request, signal) => {
-    if (request.url === '/api/v1/play/pad' && ++attempts === 1) {
-      oldSignal = signal;
+test('a pad read retired by observation reconnection cannot apply its late layout', async () => {
+  let finish, signal, reads = 0;
+  const page = fixture((request, abort) => {
+    if (request.url === '/api/v1/play/pad' && ++reads === 1) {
+      signal = abort;
       return new Promise(resolve => { finish = () => resolve(response({ ...layout,
-        buttons:[{button:'BTN_SOUTH', label:'stale', keys:['escape']}] })); });
+        saves_name:'stale-program' })); });
     }
     return gameReply(request);
   });
-  await page.settle();
-  assert.equal(page.get('keys').hidden, false);
-  await page.poll(300);
-  assert.equal(attempts, 1);
-  assert.equal(oldSignal.aborted, false);
-  const frames = page.rendered.length;
-  await page.poll(5000);
-  assert.equal(oldSignal.aborted, true);
-  assert.equal(attempts, 2);
-  assert.ok(page.rendered.length > frames);
-  assert.equal(page.padButton.textContent, '결정');
-  assert.equal(page.get('keys').hidden, true);
-  finish();
-  await page.settle();
-  assert.equal(page.padButton.textContent, '결정');
-  assert.equal(page.requests.some(r => r.method === 'POST'), false, 'observation never resends input');
+  await page.settle(); await page.breakObservation(); await page.reconnect();
+  assert.equal(signal.aborted, true);
+  finish(); await page.settle();
+  page.padButton.handlers.click(); await page.settle();
+  const input = page.requests.find(r => r.method === 'POST');
+  assert.equal(input.body.saves_name, 'game');
 });
 
 test('changing spectator cancels its stalled pad without stopping the next view', async () => {
@@ -2156,7 +2144,7 @@ for (const status of [401, 403]) {
     assert.match(page.get('turn').textContent, /초대가 끝났거나 회수됐어요/);
     assert.equal(page.get('leave').disabled, true);
     assert.equal(page.requests.length, 3, 'seat, roster and frame start independently');
-    await page.roomTick();
+    await page.roomChanged();
     assert.equal(page.requests.length, 3, 'closed observation sends no further traffic');
     assert.equal(Map.prototype.get.call(storage, 'masc.play.invite'), 'unread-identity');
   });
@@ -2212,7 +2200,7 @@ test('first observed activity reconnects a departed invitation after a transient
   assert.equal(reads, 3, 'initial failure, immediate activity read, and connected confirmation');
   assert.equal(page.padButton.disabled, false);
   assert.deepEqual(page.requests.filter(request => request.method === 'POST').map(request => request.body), [{ connected:true }]);
-  await page.poll();
+  await page.snapshotChanged();
   assert.equal(page.requests.filter(request => request.method === 'POST').length, 1);
 });
 
@@ -2260,54 +2248,40 @@ test('new activity updates controller ownership immediately inside the recovery 
   const reads = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
   const before = reads();
   controller = 'minsu'; version += 1;
-  await page.poll(300);
+  await page.machineChanged(300);
   assert.equal(reads(), before + 1);
   assert.equal(page.padButton.disabled, false, 'new owner becomes playable before five seconds');
   controller = 'operator'; version += 1;
-  await page.poll(300);
+  await page.machineChanged(300);
   assert.equal(reads(), before + 2);
   assert.equal(page.padButton.disabled, true, 'previous owner is disabled on the next changed frame');
-  await page.poll(4999);
+  await page.machineChanged(4999);
   assert.equal(reads(), before + 2, 'unchanged observer recovery keeps its cadence');
-  await page.poll(1);
-  assert.equal(reads(), before + 3, 'idle departure discovery still runs after five seconds');
+  await page.seatsChanged();
+  assert.equal(reads(), before + 3, 'seat invalidation reports idle departure');
 });
 
-test('a failed activity-triggered read retries unchanged activity only at the recovery cadence', async () => {
-  let version = 1, fail = false;
-  const page = fixture(request => request.url === '/api/v1/play/seat'
-    ? fail ? response({}, 503) : response(seat) : request.url.includes('/live?')
-      ? response({ ...frame, activity:[{ at:version, who:'operator', action:'handoff' }] }) : normalReply(request));
-  await page.settle();
-  const reads = () => page.requests.filter(request => request.url === '/api/v1/play/seat').length;
-  const before = reads();
-  fail = true; version += 1;
-  await page.poll(300);
-  assert.equal(reads(), before + 1);
+test('a failed read reconnects its observation and resynchronizes without a new input', async () => {
+  let unavailable = false;
+  const page = fixture(request => unavailable && request.url === '/api/v1/play/seat'
+    ? response({}, 503) : gameReply(request));
+  await page.settle(); unavailable = true; await page.seatsChanged();
   assert.equal(page.padButton.disabled, true);
-  fail = false;
-  await page.poll(4999);
-  assert.equal(reads(), before + 1, 'failed acknowledgement is not a new activity edge');
-  await page.poll(1);
-  assert.equal(reads(), before + 2);
+  unavailable = false; await page.reconnect();
   assert.equal(page.padButton.disabled, false);
+  assert.equal(page.requests.some(r => r.method === 'POST'), false);
+  assert.equal(page.idleTimerCount, 0);
 });
 
-test('changed activity does not accelerate refused explicit reconnect writes', async () => {
-  let version = 1, attempts = 0;
+test('an in-flight explicit reconnect is not duplicated by seat invalidations', async () => {
+  let finish, attempts = 0;
   const page = fixture(request => request.url === '/api/v1/play/seat'
-    ? response({ ...seat, connected:false, controller:null }) : request.url.includes('/live?')
-      ? response({ ...frame, activity:[{ at:version, who:'operator', action:'move' }] }) : normalReply(request), {
-    sessionReply: () => { attempts += 1; return response({ ok:false, error:'unavailable' }, 503); },
+    ? response({ ...seat, connected:false }) : gameReply(request), {
+    sessionReply: () => { attempts++; return new Promise(resolve => { finish = () => resolve(response({ok:false}, 409)); }); }
   });
-  await page.settle();
-  assert.equal(attempts, 1, 'first activity does not immediately retry the refused reconnect');
-  version += 1;
-  await page.poll(300);
+  await page.settle(); await page.seatsChanged(); await page.seatsChanged();
   assert.equal(attempts, 1);
-  version += 1;
-  await page.poll(4700);
-  assert.equal(attempts, 2, 'new authority may retry once its independent reconnect cadence is due');
+  finish(); await page.settle();
 });
 
 for (const explicit of [true, false]) {
@@ -2325,8 +2299,8 @@ for (const explicit of [true, false]) {
       return response({ ok:true, connected });
     } });
     await page.settle();
-    await page.poll(300);
-    await page.poll(300);
+    await page.machineChanged(300);
+    await page.machineChanged(300);
     finish(response({ ...seat, connected:false, machine:false, controller:null, saves_name:null }));
     await page.settle();
     const reconnects = page.requests.filter(request => request.url === '/api/v1/play/session');
@@ -2335,7 +2309,7 @@ for (const explicit of [true, false]) {
     assert.equal(page.get('send-text').disabled, true, 'no game is available for input');
     if (!explicit) {
       const before = page.roomRequests.length;
-      await page.roomTick();
+      await page.roomChanged();
       assert.equal(page.roomRequests.length, before, 'departed identity no longer renews presence');
     }
   });
@@ -2359,7 +2333,7 @@ test('a delayed pre-unload seat cannot restore old game controls', async () => {
 });
 
 
-test('activity during a slow seat read cancels it and coalesces one follow-up', async () => {
+test('activity during a slow seat read preserves it and coalesces one follow-up', async () => {
   let reads = 0, version = 1, finish, slowSignal;
   const page = fixture((request, signal) => {
     if (request.url === '/api/v1/play/seat') {
@@ -2374,21 +2348,17 @@ test('activity during a slow seat read cancels it and coalesces one follow-up', 
   });
   await page.settle();
   version += 1;
-  await page.poll(300);
+  await page.machineChanged(300);
   version += 1;
-  await page.poll(300);
+  await page.machineChanged(300);
+  assert.equal(slowSignal.aborted, false, 'ordinary invalidations do not starve a healthy response');
   assert.equal(reads, 2);
-  // The lower layer's contract (#41796): new activity cancels the read in
-  // flight, because its snapshot predates that activity. Activity is still
-  // coalesced into one follow-up once the read settles.
-  assert.equal(slowSignal.aborted, true);
   finish();
   await page.settle();
-  assert.equal(reads, 3, 'the latest pending activity is observed immediately after the slow read');
   assert.equal(page.padButton.disabled, false);
 });
 
-test('a stalled frame seat read is replaced without stopping frames or accepting late auth failure', async () => {
+test('a stream reset replaces a stalled seat read without accepting late auth failure', async () => {
   let reads = 0, finish, slowSignal;
   const page = fixture((request, signal) => {
     if (request.url === '/api/v1/play/seat' && ++reads === 2) {
@@ -2399,7 +2369,9 @@ test('a stalled frame seat read is replaced without stopping frames or accepting
   });
   await page.settle();
   const frames = page.rendered.length;
-  await page.poll(5000);
+  await page.snapshotChanged();
+  assert.equal(slowSignal.aborted, false);
+  await page.breakObservation(); await page.reconnect();
   assert.equal(slowSignal.aborted, true);
   assert.equal(reads, 3);
   assert.ok(page.rendered.length > frames);
@@ -2427,17 +2399,15 @@ for (const watched of ['dos', 'msx']) for (const initiallyConnected of [true, fa
     const reads = () => page.requests.filter(r => r.url === '/api/v1/play/seat').length;
     const before = reads();
     connected = !connected;
-    await page.poll(4999);
-    assert.equal(reads(), before, 'idle participation uses the slower cadence');
-    await page.poll(1);
+    await page.seatsChanged();
     assert.equal(reads(), before + 1);
     assert.equal(page.get('chat-text').disabled, !connected);
     assert.equal(page.padButton.disabled, watched === 'msx' || !connected);
     const roomReads = page.roomRequests.length;
-    await page.roomTick();
+    await page.roomChanged();
     assert.equal(page.roomRequests.length, roomReads + (connected ? 1 : 0), 'room presence follows observed participation');
     connected = !connected;
-    await page.poll(5000);
+    await page.snapshotChanged();
     assert.equal(page.get('chat-text').disabled, !connected, 'observed departure is reversible by an external reconnect');
     assert.equal(page.padButton.disabled, watched === 'msx' || !connected);
     assert.equal(page.requests.some(r => r.method === 'POST'), false, 'observation never changes participation itself');
@@ -2458,15 +2428,15 @@ for (const status of [401, 403]) {
       if (rejected) return response({}, status);
       if (url === '/api/v1/play/seat') return response(seat);
       if (url === '/api/v1/play/pad') return response(layout);
-      return response(frame);
+      return gameReply({ url });
     }, {storage});
     await page.settle();
     blocked = true; rejected = true;
-    await page.poll();
+    await page.snapshotChanged();
     await page.settle();
     assert.equal(page.evaluate('authRejected'), true, 'rejected bearer is retired independently of storage cleanup');
     const count = page.requests.length;
-    await page.seatTick();
+    await page.seatsChanged();
     assert.equal(page.requests.length, count, 'invalid bearer does not keep polling');
     assert.equal(page.get('send-text').disabled, true);
     assert.ok(backing.size > 0, 'inaccessible persisted evidence remains intact');
@@ -2483,16 +2453,16 @@ test('seat authority keeps its own cadence while the live frame request never an
   });
   await page.settle();
   const seatReads = () => page.requests.filter(r => r.url === '/api/v1/play/seat').length;
-  assert.equal(page.timerCount, 0, 'the frame poll waits on its stalled live request');
+  assert.equal(page.streamCount, 1, 'SSE authority remains live while a frame GET waits');
   assert.equal(page.padButton.disabled, false);
   const before = seatReads();
   // Another tab disconnected this invitation; no frame response will say so.
   current = { ...seat, connected: false };
-  await page.seatTick();
+  await page.seatsChanged();
   assert.equal(seatReads(), before + 1, 'authority is read without a live response');
   assert.equal(page.padButton.disabled, true, 'controls follow the new authority');
   current = seat;
-  await page.seatTick();
+  await page.seatsChanged();
   assert.equal(seatReads(), before + 2, 'the cadence continues');
   assert.equal(page.padButton.disabled, false);
 });
@@ -2510,9 +2480,7 @@ test('a stalled pad layout read is replaced at the recovery cadence', async () =
   const padReads = () => page.requests.filter(r => r.url === '/api/v1/play/pad').length;
   assert.equal(padReads(), 1);
   assert.equal(page.get('pad').hidden, true, 'the pad waits for its layout');
-  await page.poll(300);
-  assert.equal(padReads(), 1, 'a recent layout read is not replaced at frame cadence');
-  await page.poll(5000);
+  await page.breakObservation(); await page.reconnect();
   assert.equal(stalled.signal.aborted, true, 'the stalled read is retired');
   assert.equal(padReads(), 2, 'one replacement read');
   assert.equal(page.get('pad').hidden, false, 'the recovered layout shows the pad');
@@ -2537,7 +2505,7 @@ test('live activity from a queued input does not drop the next queued key', asyn
   holdSeat = true;
   liveActivity = [{ at: 2, who: 'minsu', action: 'pad BTN_SOUTH' }, ...activity];
   const seatReads = page.requests.filter(r => r.url === '/api/v1/play/seat').length;
-  await page.poll(300);
+  await page.machineChanged(300);
   assert.equal(page.requests.filter(r => r.url === '/api/v1/play/seat').length, seatReads,
     'the authority read waits for the queue');
   finishFirst();
@@ -2547,7 +2515,7 @@ test('live activity from a queued input does not drop the next queued key', asyn
     'one authority read follows the drained queue');
 });
 
-test('seat recovery cadence replaces a stalled authority request without machine activity', async () => {
+test('a stream reset recovers stalled authority without machine activity', async () => {
   let stalled;
   let hold = false;
   const page = fixture((request, signal) => {
@@ -2556,13 +2524,16 @@ test('seat recovery cadence replaces a stalled authority request without machine
       return response(seat);
     }
     if (request.url === '/api/v1/play/pad') return response(layout);
+    if (request.url === PARTICIPANTS_PATH) return response(roster);
     return response(frame);
   });
   await page.settle();
   hold = true;
-  await page.seatTick();
+  await page.seatsChanged();
   const reads = page.requests.filter(r => r.url === '/api/v1/play/seat').length;
-  await page.seatTick();
+  await page.seatsChanged();
+  assert.equal(stalled.aborted, false, 'a source event leaves the healthy pending read intact');
+  await page.breakObservation(); await page.reconnect();
   await page.settle();
   assert.equal(stalled.aborted, true);
   assert.equal(page.requests.filter(r => r.url === '/api/v1/play/seat').length, reads + 1);
@@ -2576,6 +2547,7 @@ test('a stalled periodic seat read cannot stop live frames or admit stale contro
   let resumeSeat;
   const heldSeat = new Promise(resolve => { resumeSeat = resolve; });
   const page = fixture(({ url, method }) => {
+    if (url === PARTICIPANTS_PATH) return response(roster);
     if (url === '/api/v1/play/seat') {
       seatReads += 1;
       return seatReads === 3 ? heldSeat
@@ -2590,14 +2562,12 @@ test('a stalled periodic seat read cannot stop live frames or admit stale contro
   });
   await page.settle();
   assert.match(page.get('turn').textContent, /내 차례/);
-  await page.poll(5000);
-  assert.equal(seatReads, 3, 'periodic authority request is pending');
+  await page.seatsChanged();
   const before = liveReads;
-  await page.poll(300);
-  await page.poll(300);
+  await page.machineChanged(300);
+  await page.machineChanged(300);
   assert.equal(liveReads, before + 2, 'subsequent live polls keep completing');
-  assert.equal(page.timerCount, 1, 'the live loop schedules its next frame');
-  assert.equal(seatReads, 3, 'pending periodic authority is coalesced');
+  assert.equal(page.streamCount, 1, 'the live loop schedules its next frame');
   assert.deepEqual(page.rendered.at(-1), [0, 0, 0, 255]);
   assert.equal(page.get('activity').children[0].textContent, 'operator · frame-' + liveReads);
   page.padButton.handlers.click();
@@ -2606,9 +2576,7 @@ test('a stalled periodic seat read cannot stop live frames or admit stale contro
   resumeSeat(response(seat));
   await page.settle();
   await page.settle();
-  assert.equal(seatReads, 4, 'activity refresh debt starts another authority read without a user action');
-  await page.poll(5000);
-  assert.equal(seatReads, 5, 'obsolete frame request cannot block later authority polling');
+  await page.seatsChanged();
   assert.equal(page.get('turn').textContent, 'operator 님 차례예요', 'old seat cannot restore stale control');
 });
 
@@ -2625,6 +2593,7 @@ for (const replacement of ['no_machine then new program', 'new incarnation with 
       buttons: [{ ...layout.buttons[0], label: 'new-layout' }] };
     const page = fixture(request => {
       const { url } = request;
+      if (url === PARTICIPANTS_PATH) return response(roster);
       if (url === '/api/v1/play/seat') return response({ ...seat,
         machine: phase !== 'empty', saves_name: phase === 'empty' ? null
           : phase === 'B' ? newProgram : seat.saves_name });
@@ -2641,11 +2610,11 @@ for (const replacement of ['no_machine then new program', 'new incarnation with 
     assert.equal(padReads, 1, 'old layout request is still held');
     if (replacement === 'no_machine then new program') {
       phase = 'empty';
-      await page.poll(300);
+      await page.machineChanged(300);
       assert.equal(page.get('pad').hidden, true, 'eject clears old controls while GET is pending');
     }
     phase = 'B';
-    await page.poll(300);
+    await page.machineChanged(300);
     assert.equal(padReads, 2, 'replacement layout can be read without waiting for obsolete GET');
     assert.equal(page.get('pad').hidden, false);
     assert.equal(page.padButton.textContent, 'new-layout');
@@ -2665,6 +2634,7 @@ for (const replacement of ['eject then replacement', 'direct incarnation replace
     let releaseOld;
     const oldSeat = new Promise(resolve => { releaseOld = resolve; });
     const page = fixture(({ url }) => {
+      if (url === PARTICIPANTS_PATH) return response(roster);
       if (url === '/api/v1/play/seat') {
         seatReads += 1;
         if (seatReads === 3) return oldSeat;
@@ -2680,19 +2650,19 @@ for (const replacement of ['eject then replacement', 'direct incarnation replace
         activity });
     });
     await page.settle();
-    await page.poll(5000);
+    await page.snapshotChanged();
     assert.equal(seatReads, 3, 'old A periodic seat response is held');
     if (replacement === 'eject then replacement') {
       phase = 'empty';
-      await page.poll(300);
+      await page.machineChanged(300);
       assert.equal(page.get('pad').hidden, true);
     }
     phase = 'B';
-    await page.poll(300);
+    await page.machineChanged(300);
     assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
     const observed = seatReads;
     assert.ok(observed > 3, 'replacement requested its own authority before old GET settled');
-    await page.poll(5000);
+    await page.snapshotChanged();
     assert.equal(seatReads, observed + 1, 'new owner keeps periodic authority refresh enabled');
     releaseOld(replacement === 'eject then replacement' ? response({}, 401) : response(seat));
     await page.settle();
@@ -2718,11 +2688,11 @@ test('held initial seat authority cannot block first or subsequent live observat
   // Discovering the first actual machine incarnation retires the boot read
   // and owns one new authority request; subsequent ticks coalesce that owner.
   assert.equal(seatReads, 2);
-  await page.poll(300);
-  await page.poll(5000);
+  await page.machineChanged(300);
+  await page.snapshotChanged();
   assert.equal(liveReads, 3);
-  assert.equal(seatReads, 3, 'the recovery cadence replaces stalled authority without waiting for a new incarnation');
-  assert.equal(page.timerCount, 1);
+  assert.equal(seatReads, 2, 'ordinary observations cannot starve the current authority read');
+  assert.equal(page.streamCount, 1);
   assert.deepEqual(page.rendered.at(-1), [255, 0, 0, 255]);
   assert.equal(page.get('activity').children[0].textContent, 'operator · initial-frame-3');
   page.padButton.handlers.click();
@@ -2742,6 +2712,7 @@ test('new activity while seat authority is pending rejects the old snapshot and 
   const old = new Promise(resolve => { releaseOld = resolve; });
   const fresh = new Promise(resolve => { releaseFresh = resolve; });
   const page = fixture(({ url }) => {
+    if (url === PARTICIPANTS_PATH) return response(roster);
     if (url === '/api/v1/play/seat') {
       seatReads += 1;
       if (seatReads === 3) return old;
@@ -2752,10 +2723,10 @@ test('new activity while seat authority is pending rejects the old snapshot and 
     return response({ ...frame, activity: currentActivity });
   });
   await page.settle();
-  await page.poll(5000);
+  await page.seatsChanged();
   currentActivity = [{ at: 2, who: 'operator', action: 'pass operator' }];
-  await page.poll(300);
-  assert.equal(seatReads, 3, 'coalesce while retaining the changed authority signal');
+  await page.machineChanged(300);
+  assert.equal(seatReads, 3, 'new authority leaves one follow-up without starving the current read');
   releaseOld(response(seat));
   await page.settle();
   assert.equal(seatReads, 4, 'settlement starts the retained follow-up before another live tick');
@@ -2773,6 +2744,7 @@ test('the first no-machine observation retires a held bootstrap seat snapshot', 
   let releaseBoot;
   const boot = new Promise(resolve => { releaseBoot = resolve; });
   const page = fixture(({ url }) => {
+    if (url === PARTICIPANTS_PATH) return response(roster);
     if (url === '/api/v1/play/seat') return ++reads === 1 ? boot
       : response({ ...seat, machine: false, controller: null, saves_name: null });
     if (url === '/api/v1/play/pad') return response(layout);
@@ -2787,7 +2759,7 @@ test('the first no-machine observation retires a held bootstrap seat snapshot', 
   assert.equal(page.get('pad').hidden, true);
   assert.equal(page.padButton.disabled, true);
   assert.equal(page.requests.some(r => r.url === '/api/v1/play/pad'), false);
-  await page.poll(300);
+  await page.machineChanged(300);
   assert.equal(reads, 2, 'repeated absent observations do not constantly retire current authority');
 });
 
@@ -2826,6 +2798,7 @@ for (const heldPath of ['/api/v1/play/seat', '/api/v1/play/pad']) {
         if (held) return;
         if (request.url === '/api/v1/play/seat') finish(response(seat));
         else if (request.url === '/api/v1/play/pad') finish(response(layout));
+        else if (request.url === PARTICIPANTS_PATH) finish(response(roster));
         else {
           liveReads += 1;
           finish(response({ ...frame, incarnation: 'machine-' + incarnation }));
@@ -2835,10 +2808,10 @@ for (const heldPath of ['/api/v1/play/seat', '/api/v1/play/pad']) {
       pump();
     }));
     await page.settle();
-    if (heldPath.endsWith('/seat')) await page.poll(5000);
+    if (heldPath.endsWith('/seat')) await page.snapshotChanged();
     for (incarnation = 2; incarnation <= 5; incarnation += 1) {
       const before = liveReads;
-      const next = page.poll(300);
+      const next = page.machineChanged(300);
       await page.settle();
       assert.equal(liveReads, before + 1, 'replacement live frame is not queued behind obsolete reads');
       await next;
@@ -2846,7 +2819,7 @@ for (const heldPath of ['/api/v1/play/seat', '/api/v1/play/pad']) {
     assert.ok(aborted >= 4, 'machine retirement releases each obsolete projection transport');
     assert.equal(waiting.length, 0);
     assert.equal(active, 1, 'only current projection remains pending');
-    assert.equal(page.timerCount, 1);
+    assert.equal(page.streamCount, 1);
   });
 }
 
@@ -2866,29 +2839,31 @@ for (const stalePath of ['/api/v1/play/seat', '/api/v1/play/pad']) {
       }
       if (url === '/api/v1/play/seat') return response(seat);
       if (url === '/api/v1/play/pad') return response(layout);
+      if (url === PARTICIPANTS_PATH) return response(roster);
       return response({ ...frame, incarnation });
     }, { storage });
     await page.settle();
     if (stalePath.endsWith('/pad')) {
       incarnation = 'machine-B';
-      await page.poll(300);
+      await page.machineChanged(300);
     }
     releaseBody({ auth_error_code: 'stale-token' });
     await page.settle();
     assert.equal(storage.get('masc.play.invite'), 'fixture-token', 'obsolete auth refusal cannot forget the active connection');
-    assert.equal(page.timerCount, 1);
+    assert.equal(page.streamCount, 1);
     assert.match(page.get('turn').textContent, /내 차례/);
     assert.equal(page.get('pad').hidden, false);
   });
 }
 
-test('dirty authority aborts a pending seat body before its stale auth refusal can end the connection', async () => {
+test('dirty authority fences a pending seat body before its stale auth refusal can end the connection', async () => {
   let seatReads = 0;
   let releaseBody;
   let currentActivity = activity;
   const storage = new Map();
   const body = new Promise(resolve => { releaseBody = resolve; });
   const page = fixture(({ url }) => {
+    if (url === PARTICIPANTS_PATH) return response(roster);
     if (url === '/api/v1/play/seat') return ++seatReads === 3
       ? { status: 401, json: () => body }
       : response({ ...seat, controller: seatReads >= 4 ? 'operator' : seat.controller });
@@ -2896,15 +2871,15 @@ test('dirty authority aborts a pending seat body before its stale auth refusal c
     return response({ ...frame, activity: currentActivity });
   }, { storage });
   await page.settle();
-  await page.poll(5000);
+  await page.snapshotChanged();
   currentActivity = [{ at: 2, who: 'operator', action: 'pass operator' }];
-  await page.poll(300);
+  await page.machineChanged(300);
   releaseBody({ auth_error_code: 'obsolete-seat' });
   await page.settle();
   assert.equal(seatReads, 4);
   assert.equal(storage.get('masc.play.invite'), 'fixture-token');
   assert.equal(page.get('turn').textContent, 'operator 님 차례예요');
-  assert.equal(page.timerCount, 1);
+  assert.equal(page.streamCount, 1);
 });
 
 test('opening the handoff picker keeps selection enabled while authority refresh is pending', async () => {
@@ -2946,12 +2921,12 @@ test('a refused disconnect retires a stalled frame seat read so authority pollin
     return normalReply(request);
   }, { sessionReply: () => response({ ok: false, message: 'try later' }, 409) });
   await page.settle();
-  await page.poll(5000);
+  await page.snapshotChanged();
   assert.equal(seatReads, 3, 'periodic authority is stalled');
   assert.equal(page.padButton.disabled, true);
   await page.get('leave').handlers.click();
   assert.equal(heldRequest.signal.aborted, true, 'departure cancels the obsolete transport');
-  await page.poll(5000);
+  await page.snapshotChanged();
   assert.equal(seatReads, 4, 'refused departure cannot leave polls behind the retired promise');
   assert.match(page.get('turn').textContent, /내 차례/);
   assert.equal(page.padButton.disabled, false);
@@ -3014,9 +2989,10 @@ test('first no-machine observation retires pending bootstrap authority', async (
 const stall = signal => new Promise((_, reject) =>
   signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
 
-test('changed activity aborts a stalled frame seat read and starts its follow-up', async () => {
+test('a stream reset aborts a stalled authority transport and starts its follow-up', async () => {
   let seatReads = 0, liveReads = 0, stalled;
   const page = fixture(request => {
+    if (request.url === PARTICIPANTS_PATH) return response(roster);
     if (request.url === '/api/v1/play/seat') {
       seatReads += 1;
       if (seatReads === 3) { stalled = request; return stall(request.signal); }
@@ -3029,12 +3005,15 @@ test('changed activity aborts a stalled frame seat read and starts its follow-up
       activity: [{ at: liveReads, who: 'operator', action: 'frame-' + liveReads }] });
   });
   await page.settle();
-  await page.poll(5000);
+  await page.seatsChanged();
   assert.equal(seatReads, 3, 'periodic authority read is stalled');
   assert.equal(stalled.signal.aborted, false);
-  await page.poll(300);
-  assert.equal(stalled.signal.aborted, true, 'new activity cancels the stalled authority transport');
-  assert.equal(seatReads, 4, 'the follow-up authority read starts without the stalled reply');
+  await page.machineChanged(300);
+  assert.equal(stalled.signal.aborted, false, 'ordinary activity retains a healthy pending response');
+  await page.breakObservation(); await page.reconnect();
+  assert.equal(stalled.signal.aborted, true, 'reconnect retires the old transport');
+  assert.ok(seatReads > 3, 'new authority is read without waiting for the stalled reply');
+  assert.equal(page.padButton.disabled, false);
 });
 
 test('a seat that reports a new program retires the stalled pad read before live does', async () => {
@@ -3043,6 +3022,7 @@ test('a seat that reports a new program retires the stalled pad read before live
   const newLayout = { saves_name: 'program-B', buttons: [{ ...layout.buttons[0], label: 'new-layout' }] };
   const page = fixture(request => {
     if (request.url === '/api/v1/play/seat') return response({ ...seat, saves_name: program });
+    if (request.url === PARTICIPANTS_PATH) return response(roster);
     if (request.url === '/api/v1/play/pad') {
       pads.push(request);
       if (pads.length === 1) return stall(request.signal);
@@ -3054,13 +3034,9 @@ test('a seat that reports a new program retires the stalled pad read before live
   await page.settle();
   assert.equal(pads.length, 1, 'program A layout read is stalled');
   program = 'program-B';
-  await page.poll(5000);
+  await page.seatsChanged();
   assert.equal(pads[0].signal.aborted, true, 'the seat observation retires the program A layout read');
-  // The same 5 s tick also replaces the stalled read (SEAT_POLL_MS cadence).
-  // That replacement starts before the seat answer, so it is still bound to
-  // program A; the seat's new program retires it and reads program B.
-  assert.equal(pads.length, 3, 'program B layout is read while live still reports the old incarnation');
-  assert.equal(pads[1].signal.aborted, true, 'the replacement bound to program A is retired as well');
+  assert.equal(pads.length, 2, 'the seat event reads the new program layout');
   assert.equal(page.padButton.textContent, 'new-layout');
 });
 
@@ -3068,6 +3044,7 @@ test('a same-program incarnation replacement rereads a settled pad layout', asyn
   let incarnation = 'machine-A', padReads = 0;
   const page = fixture(request => {
     if (request.url === '/api/v1/play/seat') return response(seat);
+    if (request.url === PARTICIPANTS_PATH) return response(roster);
     if (request.url === '/api/v1/play/pad') {
       padReads += 1;
       return response(incarnation === 'machine-A' ? layout
@@ -3079,7 +3056,7 @@ test('a same-program incarnation replacement rereads a settled pad layout', asyn
   assert.equal(page.padButton.textContent, layout.buttons[0].label, 'program A layout is settled');
   const settledReads = padReads;
   incarnation = 'machine-B';
-  await page.poll(300);
+  await page.machineChanged(300);
   await page.settle();
   assert.equal(padReads, settledReads + 1, 'the replacement machine rereads the same program layout');
   assert.equal(page.padButton.textContent, 'new-layout');
@@ -3090,6 +3067,7 @@ test('an incarnation replaced during a refused disconnect keeps stale controls c
   const page = fixture(request => {
     if (request.url === '/api/v1/play/seat') return response(seat);
     if (request.url === '/api/v1/play/pad') return response(layout);
+    if (request.url === PARTICIPANTS_PATH) return response(roster);
     if (request.method === 'POST') return response({ ok: true });
     return response({ ...frame, incarnation });
   }, { sessionReply: () => new Promise(resolve => { releaseSession = resolve; }) });
@@ -3098,7 +3076,7 @@ test('an incarnation replaced during a refused disconnect keeps stale controls c
   const leaving = page.get('leave').handlers.click();
   await page.settle();
   incarnation = 'machine-B';
-  await page.poll(300);
+  await page.machineChanged(300);
   releaseSession(response({ ok: false, message: 'try later' }, 409));
   await leaving;
   await page.settle();
@@ -3122,7 +3100,7 @@ test('storage-blocked observers read public room history without presence writes
   assert.match(page.get('room-messages').children[0].children[1].textContent, /visible without tab storage/);
   assert.equal(page.get('chat-text').disabled, true);
   assert.equal(page.get('chat-send').disabled, true);
-  await page.roomTick();
+  await page.roomChanged();
   assert.equal(page.roomRequests.length, 2);
 });
 
@@ -3209,9 +3187,9 @@ test('explicit reconnect retries departure-marker cleanup after storage recovers
   assert.equal(page.padButton.disabled, true);
   failRemoval = false;
   holdFrame = true;
-  void page.poll(300);
+  void page.machineChanged(300);
   await page.settle();
-  await page.seatTick();
+  await page.seatsChanged();
   assert.equal(storage.has('masc.play.departure'), false, 'retained reopen intent retries cleanup on independent seat timer while live is stalled');
   assert.equal(page.get('chat-text').disabled, false);
   assert.equal(page.padButton.disabled, false);
@@ -3236,9 +3214,9 @@ test('external reconnect recovers room authority while the live-frame request is
   await page.settle();
   assert.equal(seats, 1);
   connected = true;
-  await page.seatTick();
+  await page.seatsChanged();
   assert.equal(seats, 2, 'stalled frame did not stop seat observation');
-  await page.roomPoll();
+  await page.refreshRoom();
   assert.ok(page.roomRequests.length > 0, 'same invitation reconnect restores room observation');
   assert.equal(page.get('chat-text').disabled, false);
 });
@@ -3249,7 +3227,7 @@ for (const status of [401,403]) test(`superseded direct seat ${status} cannot te
   const f=fixture(({url}) => {
     if(url==='/api/v1/play/seat') { reads++; if(reads===1) return new Promise(resolve => {held=resolve;}); return response(seat); }
     if(url==='/api/v1/play/pad') return response(layout);
-    return response(frame);
+    return gameReply({ url });
   });
   await f.settle();
   await f.evaluate('refreshSeat()');
@@ -3259,7 +3237,7 @@ for (const status of [401,403]) test(`superseded direct seat ${status} cannot te
   assert.equal(f.evaluate('ended'),false);
 });
 test('MSX departed observation does not advertise participation', async () => {
-  const f=fixture(({url}) => url==='/api/v1/play/seat' ? response(seat) : response(frame));
+  const f=fixture(({url}) => gameReply({ url }));
   await f.settle();
   f.evaluate("viewMachine='msx'; connected=false; renderTurn()");
   assert.match(f.get('turn').textContent,/끊겨/);
@@ -3270,7 +3248,7 @@ for (const status of [200,404]) test(`pad ${status} for an older program stays u
   const f=fixture(({url}) => {
     if(url==='/api/v1/play/seat') return response(seat);
     if(url==='/api/v1/play/pad') return new Promise(resolve => {held=resolve;});
-    return response(frame);
+    return gameReply({ url });
   });
   await f.settle();
   f.evaluate("seatSavesName='replacement'");
@@ -3295,7 +3273,7 @@ for (const [name, reply] of [
     page.padButton.handlers.click();
     await page.settle();
     rejected = true;
-    await page.poll();
+    await page.snapshotChanged();
     assert.equal(page.evaluate('authRejected'), true);
     assert.equal(storage.get('masc.play.invite'), 'fixture-token', 'the admitted write keeps its bearer while unsettled');
     acknowledge();
@@ -3326,10 +3304,10 @@ for (const ending of ['disconnect', 'seat rejection']) {
     });
     await page.settle();
     hold = true;
-    const polled = page.poll();
+    const polled = page.snapshotChanged();
     await page.settle();
     assert.ok(stalledFrame !== null && !stalledFrame.aborted, 'the live read is stalled');
-    await page.seatTick();
+    await page.seatsChanged();
     if (ending === 'disconnect') {
       assert.ok(stalledSeat !== null && !stalledSeat.aborted, 'the linked seat read is stalled');
       await page.get('leave').handlers.click();
@@ -3342,3 +3320,122 @@ for (const ending of ['disconnect', 'seat rejection']) {
     assert.equal(page.evaluate('frameTimer'), null);
   });
 }
+
+for (const failure of ['network', 'http', 'malformed']) {
+  test(`a ${failure} room observation reconnects without replaying a message`, async () => {
+    let failed = false;
+    const page = fixture(gameReply, { roomReply: () => {
+      if (!failed) {
+        failed = true;
+        if (failure === 'network') throw new Error('read disconnected');
+        return failure === 'http' ? response({}, 503) : response({});
+      }
+      return response({ ...emptyRoom, messages:[roomMessage(1, 'recovered')] });
+    } });
+    await page.settle();
+    await page.reconnect();
+    assert.equal(page.get('room-messages').children[0].children[1].textContent, 'recovered');
+    assert.equal(page.roomRequests.some(r => r.body?.action === 'say'), false);
+    assert.equal(page.idleTimerCount, 0);
+  });
+}
+
+test('healthy slow layout completes across machine events without starvation', async () => {
+  let finish, held, reads = 0;
+  const page = fixture((request, signal) => {
+    if (request.url === '/api/v1/play/pad') {
+      reads++; held = signal;
+      return new Promise(resolve => { finish = () => resolve(response(layout)); });
+    }
+    return gameReply(request);
+  });
+  await page.settle(); await page.machineChanged(300); await page.machineChanged(300);
+  assert.equal(held.aborted, false);
+  assert.equal(reads, 1);
+  finish(); await page.settle();
+  page.padButton.handlers.click(); await page.settle();
+  assert.equal(page.requests.find(r => r.method === 'POST').body.saves_name, 'game');
+});
+
+test('quiet observation retries a settled transient reconnect refusal through a fresh snapshot', async () => {
+  let connected = false, writes = 0;
+  const page = fixture(request => request.url === '/api/v1/play/seat'
+    ? response({ ...seat, connected }) : gameReply(request), { sessionReply: () => {
+      if (++writes === 1) return response({ code:'participation_unavailable', error:'storage unavailable' }, 503);
+      connected = true;
+      return response({ ok:true, connected:true });
+    } });
+  await page.settle(); assert.equal(writes, 1);
+  await page.reconnect();
+  assert.equal(writes, 2);
+  assert.equal(page.padButton.disabled, false);
+  assert.equal(page.idleTimerCount, 0);
+});
+
+for (const failure of ['http', 'schema', 'rgb']) {
+  test(`a quiet ${failure} frame failure recovers through observation without input effects`, async () => {
+    let bad = true;
+    const page = fixture(request => {
+      if (bad && request.url.startsWith('/api/v1/lane-addons/live')) {
+        if (failure === 'http') return response({}, 409);
+        if (failure === 'schema') return response({ state:'unexpected' });
+        return response({ ...frame, screen:{ ...frame.screen, rgb_base64:'!' } });
+      }
+      return gameReply(request);
+    });
+    await page.settle();
+    bad = false;
+    await page.reconnect();
+    assert.equal(page.rendered.at(-1)[0], 255);
+    assert.equal(page.requests.some(request => request.method === 'POST'), false);
+    assert.equal(page.idleTimerCount, 0);
+  });
+}
+
+test('continuous unrelated Keeper activity cannot starve a slow valid seat response', async () => {
+  let held, finish, hold = false, reads = 0;
+  const page = fixture((request, signal) => {
+    if (request.url === '/api/v1/play/seat') {
+      reads++;
+      if (hold) { held = signal; return new Promise(resolve => { finish = () => resolve(response(seat)); }); }
+    }
+    return gameReply(request);
+  });
+  await page.settle();
+  hold = true;
+  await page.seatsChanged();
+  const during = reads;
+  for (let index = 0; index < 5; index++) await page.keeperChanged('other-keeper-' + (index % 2));
+  assert.equal(held.aborted, false);
+  assert.equal(reads, during);
+  finish(); await page.settle();
+  assert.equal(page.padButton.disabled, false, 'unrelated lifecycle hints do not discard this authority');
+  assert.equal(reads, during, 'unrelated hints do not leave a permanent authority-read cycle');
+  for (let index = 0; index < 5; index++) await page.keeperChanged('other-keeper-' + (index % 2));
+  assert.equal(page.padButton.disabled, false);
+  assert.equal(reads, during);
+});
+
+test('a Keeper holder change during a seat read retains exactly one authority follow-up', async () => {
+  let hold = false, finish, recoverable = false, reads = 0;
+  const page = fixture(request => {
+    if (request.url === '/api/v1/play/seat') {
+      reads++;
+      if (hold) {
+        hold = false;
+        return new Promise(resolve => { finish = () => resolve(response({ ...seat, controller:'operator' })); });
+      }
+      return response({ ...seat, controller:'operator', controller_recoverable:recoverable });
+    }
+    return gameReply(request);
+  });
+  await page.settle();
+  hold = true; await page.seatsChanged();
+  const during = reads;
+  recoverable = true; await page.keeperChanged('operator');
+  assert.equal(reads, during);
+  finish(); await page.settle();
+  assert.equal(reads, during + 1);
+  assert.equal(page.padButton.disabled, false, 'the related phase change reaches recoverability without a frame event');
+  assert.equal(page.requests.some(request => request.method === 'POST'), false);
+});

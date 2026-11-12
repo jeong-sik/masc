@@ -2,6 +2,7 @@
 import { html } from 'htm/preact'
 import { cleanup, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
 
 import type { RuntimeObservablesSnapshot } from '../api/runtime-observables'
 
@@ -67,10 +68,13 @@ function makeSnapshot(
 describe('RuntimeObservablesPanel', () => {
   beforeEach(() => {
     mockFetch.mockReset()
+    acceptedExecutionWorkspace.value = { epoch: 'observables-fixture', workspaceRoot: '/workspace',
+      connectionGeneration: 0, observerInstanceId: 'observables-fixture' }
   })
 
   afterEach(() => {
     cleanup()
+    acceptedExecutionWorkspace.value = null
   })
 
   it('renders the written cells as stats, stores, and bus contracts', async () => {

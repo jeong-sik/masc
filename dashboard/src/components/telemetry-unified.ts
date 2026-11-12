@@ -25,6 +25,8 @@ import { replaceRoute, route } from '../router'
 import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-sources'
 import { formatElapsedCompact, unixSecondsToDate } from '../lib/format-time'
 import { selectObservationReadFailure, setupObservationRefresh } from '../lib/observation-refresh'
+import { captureDashboardObservationOwner, dashboardObservationOwnerHasWorkspace,
+  dashboardObservationOwnerIsCurrent } from '../lib/observation-read-owner'
 import { isAbortError } from '../lib/async-state'
 import { errorToString } from '../lib/format-string'
 import { Btn } from './btn'
@@ -67,6 +69,11 @@ interface TelemetryState {
   cacheStatsError: string | null
   loading: boolean
   error: string | null
+}
+
+function emptyTelemetryState(): TelemetryState {
+  return { entries: [], telemetry: null, summary: [], totalEntries: 0, store: EMPTY_STORE,
+    cacheStats: null, cacheStatsError: null, loading: true, error: null }
 }
 
 const sourceMeta = telemetrySourceMeta
@@ -1105,17 +1112,7 @@ export function TelemetryUnified() {
   const activeController = useRef<AbortController | null>(null)
   const initialLoadDone = useRef(false)
   const autoRefreshLoadRef = useRef<(signal?: AbortSignal) => Promise<void>>(async () => undefined)
-  const state = useSignal<TelemetryState>({
-    entries: [],
-    telemetry: null,
-    summary: [],
-    totalEntries: 0,
-    store: EMPTY_STORE,
-    cacheStats: null,
-    cacheStatsError: null,
-    loading: true,
-    error: null,
-  })
+  const state = useSignal<TelemetryState>(emptyTelemetryState())
   const sourceFilter = useSignal<TelemetrySource | ''>(telemetrySourceFromRouteParam(params.source))
   const keeperFilter = useSignal('')
   const sessionFilter = useSignal(params.session_id ?? '')
@@ -1146,12 +1143,21 @@ export function TelemetryUnified() {
   async function load(signal?: AbortSignal) {
     observationReadError.current = null
     activeController.current?.abort()
+    activeController.current = null
+    const owner = captureDashboardObservationOwner()
+    if (!dashboardObservationOwnerHasWorkspace(owner)) {
+      latestRequestId.current += 1
+      state.value = emptyTelemetryState()
+      return
+    }
     const controller = new AbortController()
     activeController.current = controller
     const readSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
     const requestId = ++latestRequestId.current
-    state.value = { ...state.value, loading: true, error: null }
+    const current = () => !readSignal.aborted && requestId === latestRequestId.current
+      && dashboardObservationOwnerIsCurrent(owner)
     const failures: unknown[] = []
+    state.value = { ...state.value, loading: true, error: null }
     try {
       const catchStoreFailure = <T,>(promise: Promise<T>) =>
         promise.catch(error => {
@@ -1209,18 +1215,22 @@ export function TelemetryUnified() {
         storePromise,
         cacheStatsPromise,
       ])
-      if (readSignal.aborted || requestId !== latestRequestId.current) return
-      observationReadError.current = selectObservationReadFailure([
-        ...results.map(result => result.status === 'rejected' ? result.reason : null),
-        ...failures,
-        readSharedTelemetrySummaryError(),
-      ])
-      const [telemetryRead, , storeRead, cacheRead] = results
-      if (telemetryRead.status === 'rejected' || storeRead.status === 'rejected' || cacheRead.status === 'rejected') {
-        throw observationReadError.current
-      }
+      if (!current()) return
       const summaryError = readSharedTelemetrySummaryError()
+      observationReadError.current = selectObservationReadFailure([
+        ...failures, summaryError, ...results.map(result => result.status === 'rejected' ? result.reason : null),
+      ])
+      // refreshSharedTelemetrySummary records failures on the shared error
+      // signal rather than throwing (so tool-quality-panel can keep rendering
+      // the last-good value). Telemetry-unified, however, treated a summary
+      // failure as a panel-level error before Phase 0, so re-raise it here
+      // to preserve the user-visible regression surface.
+      const [telemetryRead, summaryRead, storeRead, cacheRead] = results
+      if (telemetryRead.status === 'rejected') throw telemetryRead.reason
+      if (summaryRead.status === 'rejected') throw summaryRead.reason
       if (summaryError !== null) throw summaryError
+      if (storeRead.status === 'rejected') throw storeRead.reason
+      if (cacheRead.status === 'rejected') throw cacheRead.reason
       const telemetry = telemetryRead.value
       const store = storeRead.value
       const cacheStatsResult = cacheRead.value
@@ -1237,7 +1247,7 @@ export function TelemetryUnified() {
         error: null,
       }
     } catch (e) {
-      if (readSignal.aborted || isAbortError(e) || requestId !== latestRequestId.current) return
+      if (!current() || isAbortError(e)) return
       observationReadError.current = selectObservationReadFailure([observationReadError.current, e])
       state.value = {
         ...state.value,
@@ -1273,22 +1283,25 @@ export function TelemetryUnified() {
   ])
 
   useEffect(() => {
+    const cancelRead = () => {
+      latestRequestId.current += 1
+      activeController.current?.abort()
+      activeController.current = null
+    }
     const disposeAutoRefresh = setupObservationRefresh(signal => autoRefreshLoadRef.current(signal), {
       topics: ['telemetry', 'tool_metrics', 'tools', 'health'],
       readError: () => observationReadError.current,
+      cancelRead,
       resetRead: () => {
-        activeController.current?.abort()
-        activeController.current = null
+        cancelRead()
         observationReadError.current = null
+        state.value = emptyTelemetryState()
         prepareSharedTelemetrySummaryRead()
-        state.value = { entries: [], telemetry: null, summary: [], totalEntries: 0,
-          store: EMPTY_STORE, cacheStats: null, cacheStatsError: null, loading: true, error: null }
       },
     })
     return () => {
       disposeAutoRefresh()
-      activeController.current?.abort()
-      activeController.current = null
+      cancelRead()
     }
   }, [])
 

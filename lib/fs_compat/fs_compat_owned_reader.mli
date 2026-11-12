@@ -20,7 +20,20 @@ val load_single_link_regular_file_beneath :
   root:string ->
   ?excluded_directory:string list ->
   string list ->
-  (string option,
+  (owned_regular_file_contents option,
+   owned_regular_file_read_error)
+  result
+
+type owned_regular_file_reread =
+  | Same_file
+  | Read of owned_regular_file_contents
+
+val reload_single_link_regular_file_beneath :
+  root:string ->
+  ?excluded_directory:string list ->
+  held:owned_regular_file_snapshot ->
+  string list ->
+  (owned_regular_file_reread option,
    owned_regular_file_read_error)
   result
 

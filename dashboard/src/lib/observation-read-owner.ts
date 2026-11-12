@@ -2,11 +2,13 @@ import {
   captureDashboardCredentialOwner,
   subscribeStoredTokenChanges,
 } from '../api/core'
+import { storedTokenRevision } from '../api/token-revision'
 import {
   executionWorkspaceAuthority,
   type ExecutionWorkspaceAuthority,
 } from '../execution-workspace-authority'
 import { dashboardActorRevision, managedDashboardActorRevision } from './dashboard-session-actor'
+import { isObserverInstance } from './observer-protocol'
 
 export interface DashboardObservationOwner {
   readonly workspace: ExecutionWorkspaceAuthority | null
@@ -31,19 +33,40 @@ export function captureDashboardObservationOwner(): DashboardObservationOwner {
   }
 }
 
-export function dashboardObservationOwnerIsCurrent(owner: DashboardObservationOwner): boolean {
-  const current = captureDashboardObservationOwner()
-  return owner.workspace === current.workspace && owner.token === current.token
+/** Capture the same owner while tracking only inputs that change its actual
+ * request identity. Refusal observations do not re-admit a refused reader. */
+export function readDashboardObservationOwner(): DashboardObservationOwner {
+  void storedTokenRevision.value
+  void dashboardActorRevision.value
+  void managedDashboardActorRevision.value
+  void executionWorkspaceAuthority.value
+  return captureDashboardObservationOwner()
+}
+
+function sameRequestIdentity(owner: DashboardObservationOwner, current: DashboardObservationOwner): boolean {
+  return owner.token === current.token
     && owner.tokenRevision === current.tokenRevision && owner.actor === current.actor
     && owner.actorRevision === current.actorRevision && owner.managed === current.managed
+}
+
+/** An admitted stream carries its original workspace instance in its headers;
+ * that scope can precede execution admission. Keep its request identity fenced
+ * without substituting a later workspace into the original owner. */
+export function dashboardObservationRequestIdentityIsCurrent(owner: DashboardObservationOwner): boolean {
+  return sameRequestIdentity(owner, captureDashboardObservationOwner())
+}
+
+export function dashboardObservationOwnerIsCurrent(owner: DashboardObservationOwner): boolean {
+  const current = captureDashboardObservationOwner()
+  return owner.workspace === current.workspace && sameRequestIdentity(owner, current)
 }
 
 export function dashboardObservationOwnerHasWorkspace(
   owner: DashboardObservationOwner,
 ): owner is DashboardObservationOwner & {
-  readonly workspace: ExecutionWorkspaceAuthority
+  readonly workspace: ExecutionWorkspaceAuthority & { readonly observerInstanceId: string }
 } {
-  return owner.workspace !== null
+  return owner.workspace !== null && isObserverInstance(owner.workspace.observerInstanceId)
 }
 
 /** Change-only subscription. Stored credential/actor ABA and workspace ABA

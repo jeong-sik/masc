@@ -1,6 +1,8 @@
+import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
+import { publishDashboardObservationChange } from '../lib/observation-refresh'
 import { html } from 'htm/preact'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
-import { afterEach, describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 
 const { fetchKeepersCompositeMock, dispatchOperatorActionMock, showToastMock } = vi.hoisted(() => ({
   fetchKeepersCompositeMock: vi.fn(),
@@ -36,7 +38,6 @@ import {
   type KeeperFleetHistory,
   FleetFsmMatrix,
 } from './fleet-fsm-matrix'
-import { fleetCompositeSnapshot } from '../composite-signals'
 import type {
   FleetCompositeSnapshot,
   KeeperCompositeExecution,
@@ -134,13 +135,18 @@ function fleetSnapshot(
   }
 }
 
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'matrix-fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 0, observerInstanceId: 'matrix-fixture' }
+})
+
 afterEach(() => {
   cleanup()
+  acceptedExecutionWorkspace.value = null
   vi.useRealTimers()
   fetchKeepersCompositeMock.mockReset()
   dispatchOperatorActionMock.mockReset()
   showToastMock.mockReset()
-  fleetCompositeSnapshot.value = null
 })
 
 describe('chipClassFor', () => {
@@ -701,34 +707,35 @@ describe('filterKeeperSnapshots', () => {
   })
 })
 
-describe('FleetFsmMatrix streaming fallback', () => {
-  it('uses an existing streamed snapshot without starting fallback polling', async () => {
+describe('FleetFsmMatrix observation refresh', () => {
+  it('reads once and follows fleet observation events without a watchdog', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-04-25T00:00:00Z'))
     fetchKeepersCompositeMock.mockResolvedValue(
-      fleetSnapshot([snapshot({ name: 'fallback' })]),
+      fleetSnapshot([snapshot({ name: 'initial' })]),
     )
-    fleetCompositeSnapshot.value = fleetSnapshot([snapshot({ name: 'streamed' })])
-
-    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
-    await act(async () => {})
-
-    expect(screen.getByText('streamed')).toBeTruthy()
-    expect(fetchKeepersCompositeMock).not.toHaveBeenCalled()
-
+    render(html`<${FleetFsmMatrix} />`)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.getByText('initial')).toBeTruthy()
+    expect(fetchKeepersCompositeMock).toHaveBeenCalledTimes(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(fetchKeepersCompositeMock).toHaveBeenCalledTimes(1)
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([snapshot({ name: 'after-event' })]),
+    )
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1000)
+      publishDashboardObservationChange({ topic: 'keeper_composite', keeperName: 'after-event' })
+      await vi.advanceTimersByTimeAsync(0)
     })
-
-    expect(fetchKeepersCompositeMock).not.toHaveBeenCalled()
+    expect(fetchKeepersCompositeMock).toHaveBeenCalledTimes(2)
+    expect(screen.getByText('after-event')).toBeTruthy()
   })
 
-  it('falls back to fetching immediately when no streamed snapshot exists', async () => {
+  it('reads immediately when no streamed snapshot exists', async () => {
     fetchKeepersCompositeMock.mockResolvedValue(
       fleetSnapshot([snapshot({ name: 'fallback' })]),
     )
 
-    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+    render(html`<${FleetFsmMatrix} />`)
 
     expect(await screen.findByText('fallback')).toBeTruthy()
     expect(fetchKeepersCompositeMock).toHaveBeenCalledTimes(1)
@@ -751,7 +758,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
       ]),
     )
 
-    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+    render(html`<${FleetFsmMatrix} />`)
 
     const cell = await screen.findByText('실행 중 · 정체')
     expect(cell.getAttribute('data-axis')).toBe('phase')
@@ -772,7 +779,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
       ]),
     )
 
-    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+    render(html`<${FleetFsmMatrix} />`)
 
     const chip = await screen.findByTestId('fsm-guard-violation-chip')
     expect(chip.title).toContain('turn_phase_transition/guard: 2')
@@ -799,7 +806,6 @@ describe('FleetFsmMatrix streaming fallback', () => {
 
     render(html`
       <${FleetFsmMatrix}
-        pollIntervalMs=${1000}
         onRequestRuntimeAssist=${onRequestRuntimeAssist}
       />
     `)
@@ -858,7 +864,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
       ]),
     )
 
-    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+    render(html`<${FleetFsmMatrix} />`)
 
     const button = await screen.findByRole('button', { name: 'Inspect provider runtime failure: provider_runtime_error' })
     await act(async () => {
@@ -917,7 +923,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
       ]),
     )
 
-    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+    render(html`<${FleetFsmMatrix} />`)
 
     const button = await screen.findByRole('button', { name: 'Controlled keeper recovery for runtime stall: api_error' })
     await act(async () => {

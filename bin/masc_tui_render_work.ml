@@ -260,7 +260,7 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
         Option.to_list
           (Option.map
              (fun (row : Masc_tui_agenda.stalled) ->
-               (text " 작업 담당 경로 · " " Task owner route · ") ^ Terminal_text.single_line row.what)
+               (text " 운영자 목록 · " " Operator list · ") ^ Terminal_text.single_line row.what)
              (List.find_opt
                 (fun (row : Masc_tui_agenda.stalled) ->
                   String.equal row.task_id task.id)

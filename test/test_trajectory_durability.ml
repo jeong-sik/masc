@@ -142,6 +142,11 @@ let test_failed_rollback_blocks_only_its_trace () =
 
 let test_unexpected_exception_after_actual_write () =
   with_root @@ fun root ->
+  let observed = ref [] and failures = Trajectory_write_observation.failed_notifications () in
+  let remove = Trajectory_write_observation.subscribe (fun owner ->
+    observed := owner :: !observed;
+    raise Exit) in
+  Fun.protect ~finally:remove (fun () ->
   let attempts = ref 0 in
   let io = {unix_io with write=(fun fd bytes offset length ->
     incr attempts;
@@ -156,7 +161,12 @@ let test_unexpected_exception_after_actual_write () =
     ["actually-written"] (labels root "lost-ack");
   (match T.flush_pending acc with B.Blocked _ -> () | _ -> Alcotest.fail "lost ack retried");
   Alcotest.(check int) "writer called once" 1 !attempts;
-  Alcotest.(check int) "unknown row remains owned" 1 (T.For_testing.pending_depth acc)
+  Alcotest.(check int) "unknown row remains owned" 1 (T.For_testing.pending_depth acc);
+  Alcotest.(check int) "uncertain actual write notifies once; blocked retry is quiet" 1 (List.length !observed);
+  Alcotest.(check string) "uncertain write retains its original owner" root
+    (List.hd !observed).Trajectory_write_observation.masc_root;
+  Alcotest.(check int) "observer failure cannot replace indeterminate outcome" (failures + 1)
+    (Trajectory_write_observation.failed_notifications ()))
 
 let test_incomplete_existing_tail_is_preserved () =
   with_root @@ fun root ->

@@ -414,8 +414,8 @@ let test_turn () =
               (Runtime_id.to_string runtime)
               text )
         in
-        let reply (who : someone) body =
-          let answer = Server_preview_keeper_turn.run ~env ~person:who.person ~base_path ~body in
+        let reply ?(pat = Pat_binding.Not_pat) (who : someone) body =
+          let answer = Server_preview_keeper_turn.run ~env ~person:who.person ~pat ~base_path ~body in
           R.status_code answer.R.status, answer.R.body
         in
         let check_reply label expected actual = Alcotest.(check (pair int string)) label expected actual in
@@ -426,6 +426,37 @@ let test_turn () =
           (reply alice (body ~keeper:"keeper-alice" ~message:"hello"));
         let first = seen claude in
         Alcotest.(check string) "on the home of her account" (home_of ~base_path alice) (text_of first "home");
+        (* A request that a personal access token authenticated runs the turn
+           only inside the scope of that token. *)
+        let token effects =
+          Pat_binding.Pat
+            { Pat_scope.scope =
+                { Authorization_scope.runtimes = Runtime_scope.all
+                ; channels = Channel_scope.only (Channel.Set.singleton Channel.Direct)
+                ; allowed_effects = Effect_scope.only (Effect.Set.of_list effects)
+                }
+            ; expires_at = None
+            }
+        in
+        check_reply
+          "a token that covers the turn"
+          (answered "keeper-alice" alice_runtime "echo: by token")
+          (reply
+             ~pat:(token Effect.[ Invoke_model; Manage_own_keeper; Use_tool ])
+             alice
+             (body ~keeper:"keeper-alice" ~message:"by token"));
+        Alcotest.(check int)
+          "a token that manages Keepers and calls no model"
+          403
+          (fst
+             (reply
+                ~pat:(token Effect.[ Manage_own_keeper; Read_state ])
+                alice
+                (body ~keeper:"keeper-alice" ~message:"refused")));
+        Alcotest.(check string)
+          "the refused turn started no client"
+          "by token"
+          (text_of (seen claude) "prompt");
         Alcotest.(check string) "with her message" "hello" (text_of first "prompt");
         Alcotest.(check (option string))
           "with no built-in tool but the lookup"

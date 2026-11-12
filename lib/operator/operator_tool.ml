@@ -435,8 +435,8 @@ let () =
 
 let () =
   Tool_operator.register_operator_tools ~dispatch ~remote_schemas;
-  Dashboard_projection_cache.register_operator_snapshot_json { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
-  Dashboard_projection_cache.register_operator_digest_json { Dashboard_projection_cache.digest = Operator_control.digest_json };
+  Dashboard_projection_cache.register_operator_snapshot_json { Dashboard_projection_cache.snapshot = Operator_control.snapshot_read };
+  Dashboard_projection_cache.register_operator_digest_observer { Dashboard_projection_cache.observe_digest = Operator_control.observe };
   Atomic.set
     Workspace_hooks.operator_pending_confirm_trace_id_fn
     Operator_pending_confirm.trace_id;

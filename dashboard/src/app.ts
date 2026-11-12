@@ -6,7 +6,7 @@
 // existing `DashboardMain` surface dispatcher, so every surface keeps
 // rendering while it is migrated to the prototype DOM in stacked follow-ups.
 //
-// All lifecycle wiring (router, WS push reaction, periodic refresh, dev-token,
+// Lifecycle wiring uses the router, SSE observation, dev-token,
 // config thresholds, cleanup, volt/theme sync) is preserved verbatim from the
 // previous shell — only the rendered DOM changed.
 
@@ -18,12 +18,11 @@ import { persistentSignal } from './lib/persistent-signal'
 import { isImeComposing } from './lib/keyboard'
 import { route, initRouter } from './router'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
-import { cancelPendingServerPushRefreshes, registerGateRefresh, registerMissionRefresh, setupServerPushReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
+import { cancelPendingServerPushRefreshes, registerGateRefresh, setupServerPushReaction } from './sse-store'
 import { initNotificationDelivery } from './notifications'
 import { refreshShell, setupShellObservation } from './store'
-import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
+import { connectDashboardObserver, disconnectDashboardObserver } from './dashboard-observer'
 import {
-  devTokenBootstrapNeedsReadinessProbe,
   ensureDevToken,
   installRejectedCredentialRecovery,
 } from './api/dev-token'
@@ -163,7 +162,6 @@ export function App() {
     let cancelled = false
     const shellBoot = new AbortController()
     const stopShellObservation = setupShellObservation()
-    let devTokenReadinessTimer: number | null = null
 
     // Initialize hash router and compatible deep links
     initRouter()
@@ -174,31 +172,14 @@ export function App() {
         console.warn('[app] dashboard dev-token bootstrap failed', err instanceof Error ? err.message : err)
       })
 
-    const scheduleDevTokenReadinessProbe = () => {
-      if (cancelled || !devTokenBootstrapNeedsReadinessProbe()) return
-      devTokenReadinessTimer = window.setTimeout(() => {
-        devTokenReadinessTimer = null
-        void ensureLoopbackAuth().finally(scheduleDevTokenReadinessProbe)
-      }, 1_000)
-    }
-
     void ensureLoopbackAuth()
       .finally(() => {
         if (cancelled) return
-        scheduleDevTokenReadinessProbe()
         void refreshShell({ light: true, signal: shellBoot.signal })
         requestNamespaceTruthNow()
 
-        void connectDashboardWS(route.value)
+        connectDashboardObserver()
       })
-
-    registerMissionRefresh(() => {
-      void import('./mission-actions')
-        .then(({ refreshMissionSnapshot }) => refreshMissionSnapshot())
-        .catch(err => {
-          console.warn('[app] mission refresh unavailable', err instanceof Error ? err.message : err)
-        })
-    })
 
     // Gate/HITL approvals feed the always-visible nav-rail approvals
     // badge and topbar attention indicator (see approvalsBadge below), so the
@@ -218,7 +199,6 @@ export function App() {
 
     const unsubscribeServerPush = setupServerPushReaction()
     const unsubNotify = initNotificationDelivery()
-    startPeriodicRefresh()
     startErrorCleanup()
     const uninstallStalenessWatch = installBundleStalenessWatch()
 
@@ -226,14 +206,9 @@ export function App() {
       cancelled = true
       shellBoot.abort()
       stopShellObservation()
-      if (devTokenReadinessTimer !== null) {
-        window.clearTimeout(devTokenReadinessTimer)
-        devTokenReadinessTimer = null
-      }
-      disconnectDashboardWS()
+      disconnectDashboardObserver()
       unsubscribeServerPush()
       unsubNotify()
-      stopPeriodicRefresh()
       stopErrorCleanup()
       disposeNamespaceTruthScheduler()
       uninstallStalenessWatch()
@@ -253,9 +228,6 @@ export function App() {
 
   useEffect(() => {
     cancelPendingServerPushRefreshes()
-    subscribeDashboardRoute(route.value).catch(err => {
-      console.warn('[dashboard] subscribeDashboardRoute failed', err)
-    })
     refreshCurrentRoute({ recordVisit: true })
   }, [route.value.tab, route.value.params.section, route.value.params.view, route.value.params.q])
 

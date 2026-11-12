@@ -39,12 +39,20 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
       | None ->
           Alcotest.failf "expected workspace judgment in %s"
             (Operator_judgment.judgments_path config));
+      let broken = Keeper_types_profile.keeper_meta_path config "unread-metadata" in
+      (match Fs_compat.save_file_atomic broken "{" with
+       | Ok () -> () | Error detail -> Alcotest.fail detail);
       let ctx = operator_ctx env sw config "operator" in
-      let digest =
-        match Operator_control.digest_json ~actor:"operator" ctx with
-        | Ok json -> json
+      let read () =
+        match Operator_control.observe ~actor:"operator" ctx with
+        | Ok observation -> observation
         | Error err -> Alcotest.fail err
       in
+      let observation = read () in
+      (match observation.completeness with
+       | Dashboard_projection_read.Partial _ -> ()
+       | Complete -> Alcotest.fail "Digest settled its actual failed metadata read");
+      let digest = observation.json in
       Alcotest.(check string) "judgment owner" "operator_keeper"
         Yojson.Safe.Util.(digest |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "authoritative judgment available" true
@@ -73,7 +81,11 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
           (digest |> member "recommendation_summary" |> member "authoritative"
           |> to_bool);
       Alcotest.(check bool) "judgment present" true
-        (Yojson.Safe.Util.member "judgment" digest <> `Null))
+        (Yojson.Safe.Util.member "judgment" digest <> `Null);
+      Sys.remove broken;
+      match (read ()).completeness with
+      | Dashboard_projection_read.Complete -> ()
+      | Partial detail -> Alcotest.fail ("Digest stayed partial after raw repair: " ^ detail))
 
 let test_digest_workspace_ignores_stale_operator_judgment () =
   Eio_main.run @@ fun env ->
@@ -124,7 +136,7 @@ let test_guidance_ignores_unsupported_target_type () =
         ~summary:"Root guidance must not leak to keeper targets."
         ~fresh_for_sec:90.0 ();
       let fields =
-        Operator_digest_guidance.active_guidance ~config
+        Operator_digest_guidance.active_guidance ~now:(Time_compat.now ()) ~config
           ~target_type:"keeper" ~target_id:None
           ~fallback_observation_summary:(`Assoc [ ("count", `Int 0) ])
           ~empty_recommendation_summary:(`Assoc [ ("count", `Int 0) ])
@@ -410,6 +422,54 @@ let test_operator_judgment_requires_stated_confidence () =
       | Error message -> Alcotest.failf "integer confidence must be accepted: %s" message)
 
 
+let test_guidance_retains_the_observed_authority_deadline () =
+  Eio_main.run (fun env ->
+    ensure_fs env;
+    let base_dir = temp_dir () in
+    Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:None);
+      let confidence = match Operator_judgment.Confidence.of_float 0.91 with
+        | Some confidence -> confidence | None -> Alcotest.fail "invalid fixture confidence" in
+      ignore (Operator_judgment.record config ~surface:Operator_judgment.Command_namespace
+        ~target_type:Operator_judgment.Workspace ~target_id:None ~summary:"Exact authority expiry"
+        ~confidence ~generated_at:"1970-01-01T00:01:40Z" ~generated_at_unix:100.0
+        ~fresh_until:"1970-01-01T00:01:50Z" ~fresh_until_unix:110.0
+        ~keeper_name:"source-judge" ~recommended_action:(`Assoc ["action_kind", `String "recorded-action"]) ());
+      let observe now = Operator_digest_guidance.active_guidance ~now ~config
+          ~target_type:"workspace" ~target_id:None
+          ~fallback_observation_summary:(`Assoc []) ~empty_recommendation_summary:(`Assoc []) in
+      let before = observe 109.0 in
+      Alcotest.(check int) "fresh authority supplies its actual action" 1 (List.length before.recommended_actions);
+      Alcotest.(check (option (float 0.0))) "deadline is the numeric source authority" (Some 110.0) before.next_deadline_unix;
+      let after = observe 110.0 in
+      Alcotest.(check int) "at exact strict expiry no recorded action remains" 0 (List.length after.recommended_actions);
+      Alcotest.(check (option (float 0.0))) "settled fallback has no display timer" None after.next_deadline_unix))
+
+let test_selected_tool_host_attention_keeps_its_strict_deadline () =
+  let failure = Failure_envelope.tool_host_failure ~agent_name:"source-agent"
+      ~client_name:"source-client" ~tool_name:"source-tool" ~transport:"test"
+      ~cause:Failure_envelope.Tool_host_timeout ~message:"isolated source failure" () in
+  let row seq at : Log.Ring.entry = {seq; ts = Masc_domain.iso8601_of_unix_seconds at;
+    level = Log.Error; source = Log.Structured; module_name = Failure_envelope.tool_host_log_module_name;
+    keeper_name = None; turn_id = None; message = "isolated source failure";
+    details = Failure_envelope.attach_to_details (`Assoc []) failure;
+    category = None; diagnostic_kind = None} in
+  let latest = row 2 101.0 and duplicate = row 1 100.0 in
+  let observe now rows = Operator_digest.For_testing.tool_host_attention_observation ~now rows in
+  let items, deadline = observe 1001.0 [latest; duplicate] in
+  Alcotest.(check int) "the selected newest fingerprint is still inside its inclusive window" 1 (List.length items);
+  let at = match deadline with
+    | Some at -> at | None -> Alcotest.fail "selected attention lost its expiry" in
+  Alcotest.(check bool) "strict age transition is just beyond 900" true (at > 1001.0);
+  let settled, next = observe at [latest; duplicate] in
+  Alcotest.(check int) "the actual deadline removes the selected attention" 0 (List.length settled);
+  Alcotest.(check (option (float 0.0))) "expired rows cannot schedule endless reads" None next;
+  let unrelated = {latest with module_name = "Dashboard"} in
+  let ignored, next = observe 105.0 [unrelated; {latest with ts = "unread timestamp"}] in
+  Alcotest.(check int) "unrelated and unread log rows carry no attention" 0 (List.length ignored);
+  Alcotest.(check (option (float 0.0))) "unselected log rows carry no deadline" None next
+
 let tests =
   [
     Alcotest.test_case "digest prefers fresh operator judgment" `Quick
@@ -432,6 +492,10 @@ let tests =
       test_operator_judgment_requires_every_written_member;
     Alcotest.test_case "requires a stated confidence" `Quick
       test_operator_judgment_requires_stated_confidence;
+    Alcotest.test_case "guidance retains exact source authority expiry" `Quick
+      test_guidance_retains_the_observed_authority_deadline;
+    Alcotest.test_case "selected tool-host attention retains strict policy expiry" `Quick
+      test_selected_tool_host_attention_keeps_its_strict_deadline;
   ]
 
 let () = Alcotest.run "operator_control_judgment" [ ("operator_control_judgment", tests) ]

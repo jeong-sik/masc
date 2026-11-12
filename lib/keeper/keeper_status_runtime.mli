@@ -18,6 +18,10 @@ val keeper_quiet_reason_to_string : keeper_quiet_reason -> string
     [KeeperQuietReason] union must list exactly these strings; an unlisted one
     is dropped when the diagnostic is normalised. *)
 
+val keeper_quiet_reason_of_string_opt : string -> keeper_quiet_reason option
+(** Strict inverse of the diagnostic vocabulary. Unknown input has no
+    invented quiet state or clock deadline. *)
+
 type keeper_next_action_path =
   | Recover
   | Probe
@@ -96,6 +100,19 @@ val keepalive_running_of_phase : Keeper_state_machine.phase option -> bool
     [true] exactly in the phases that may execute a turn (Running and
     Failing), [false] for every other phase and for a keeper with no registry
     entry. *)
+
+val keeper_diagnostic_observation :
+  meta:keeper_meta ->
+  phase:Keeper_state_machine.phase option ->
+  history_items:Yojson.Safe.t list ->
+  now_ts:float ->
+  Dashboard_projection_read.observation
+(** Pure diagnostic and its actual next policy transition from the same
+    typed quiet reason, phase, metadata and clock. Only [Starting_up] with a
+    valid creation timestamp has a deadline: the first representable instant
+    after the existing inclusive startup window. Health remains clockless.
+    Invalid/absent creation time has no synthetic deadline; display ages do
+    not create read debt. Completeness is [Complete] (no I/O is performed). *)
 
 val keeper_diagnostic_json :
   meta:keeper_meta ->

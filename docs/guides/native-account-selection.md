@@ -10,7 +10,13 @@ Reloading the configuration selects a new context; a changed context invalidates
 the previous dispatch observation even when the TOML text is unchanged.
 
 An explicit `account-home` keeps the existing credential isolation policy.
-Claude omits inherited provider credentials. Codex omits account overrides unless
+Claude omits inherited provider credentials. Its child also gets
+`ANTHROPIC_CONFIG_DIR=<account-home>/anthropic`, so the Anthropic profile it
+reads (the `ant` CLI, workload identity federation, a Console sign-in without
+an API key) is the one of that account and not the one of the server's OS
+user. A declared account that authenticated through a profile in
+`~/.config/anthropic` signs in again. Without `account-home` the child reads
+the profile directory under the inherited `XDG_CONFIG_HOME` or `HOME`. Codex omits account overrides unless
 the selected home's provider configuration explicitly names their environment
 variables. Setup, login and account display still select the current environment
 at the time of their operation. They do not change an already materialized

@@ -303,8 +303,14 @@ let lookup_receipt ~base_path ~id ~state ~operation_id =
   | Some receipt when String.equal receipt.request.operation_id operation_id -> Ok (Some receipt)
   | Some _ | None -> load_archived_receipt ~base_path ~id ~state ~operation_id
 
-let durable_share_save ~ownership_root path json =
-  Keeper_fs.save_json_durable_atomic ~ownership_root path json
+let observed_save ~ownership_root save =
+  Fun.protect ~finally:(fun () ->
+    Dashboard_observation_commit.written ~base_path:ownership_root
+      ~scope:`Workspace `Published_artifacts)
+    save
+
+let durable_metadata_save ~ownership_root path json =
+  observed_save ~ownership_root (fun () -> Keeper_fs.save_json_durable_atomic ~ownership_root path json)
 
 let publication_matches (artifact : Published_artifact.t) (request : Share.request) =
   match artifact.revisions with
@@ -327,7 +333,7 @@ let recover_pending_share ~base_path ~id ~artifact =
       Error (Share_unavailable "share migration baseline changed")
     else
       let save path json =
-        match durable_share_save ~ownership_root:base_path path json with
+        match durable_metadata_save ~ownership_root:base_path path json with
         | Ok () -> Ok ()
         | Error error -> Error (Share_unavailable (Keeper_fs.durable_write_error_to_string error)) in
       let* () = save (share_path ~base_path id) (Share.to_json next) in
@@ -416,7 +422,7 @@ let archive_receipt ~base_path ~id ~state receipt =
   | Some _ | None ->
     let json = `Assoc ["schema", `String "masc.published_artifact_share_receipt.v1";
       "id", `String id; "receipt", Share.receipt_to_json receipt] in
-    match durable_share_save ~ownership_root:base_path (share_receipt_path ~base_path id operation_id) json with
+    match durable_metadata_save ~ownership_root:base_path (share_receipt_path ~base_path id operation_id) json with
     | Ok () -> Ok ()
     | Error error -> Error (Share_unavailable (Keeper_fs.durable_write_error_to_string error))
 
@@ -438,7 +444,7 @@ let change_share_with_save ~save ~base_path ~id request =
         | Guard_absent ->
           let* previous = load_share_text ~base_path (share_path ~base_path id) in
           let pending = pending_guard_json ~id ~previous ~next in
-          (match durable_share_save ~ownership_root:base_path (share_guard_path ~base_path id) pending with
+          (match durable_metadata_save ~ownership_root:base_path (share_guard_path ~base_path id) pending with
            | Error error when error.renamed -> Error (Share_commit_uncertain receipt)
            | Error error -> Error (Share_unavailable (Keeper_fs.durable_write_error_to_string error))
            | Ok () ->
@@ -447,7 +453,7 @@ let change_share_with_save ~save ~base_path ~id request =
              (match save_share ~save ~base_path ~id next receipt with
               | Error _ -> Error (Share_commit_uncertain receipt)
               | Ok _ ->
-                match durable_share_save ~ownership_root:base_path
+                match durable_metadata_save ~ownership_root:base_path
                     (share_guard_path ~base_path id) (active_guard_json id) with
                 | Ok () -> Ok receipt
                 | Error _ -> Error (Share_commit_uncertain receipt)))
@@ -457,7 +463,7 @@ let change_share_with_save ~save ~base_path ~id request =
             | Some previous ->
               (* A visible rename may not yet be durable. Settle it before its
                  receipt can be archived in a different directory. *)
-              let* () = match save_share ~save:durable_share_save ~base_path ~id state previous with
+              let* () = match save_share ~save:durable_metadata_save ~base_path ~id state previous with
                 | Ok _ -> Ok ()
                 | Error (Share_commit_uncertain _) ->
                   Error (Share_unavailable "previous share state could not be settled")
@@ -466,7 +472,7 @@ let change_share_with_save ~save ~base_path ~id request =
           save_share ~save ~base_path ~id next receipt)
 
 let change_share ~base_path ~id request =
-  change_share_with_save ~save:durable_share_save ~base_path ~id request
+  change_share_with_save ~save:durable_metadata_save ~base_path ~id request
 
 let share_error_to_artifact_error = function
   | Share_invalid message -> Invalid message
@@ -496,7 +502,7 @@ let settle_share_before_publish ~base_path ~id artifact =
      | Guard_active ->
        (* A preceding active-guard rename may have returned an fsync error.
           Rewriting it durably also settles the directory before publication. *)
-       match durable_share_save ~ownership_root:base_path (share_guard_path ~base_path id) (active_guard_json id) with
+       match durable_metadata_save ~ownership_root:base_path (share_guard_path ~base_path id) (active_guard_json id) with
        | Ok () -> Ok ()
        | Error error -> Error (Unavailable (Keeper_fs.durable_write_error_to_string error)))
 
@@ -551,7 +557,7 @@ let publish ~base_path ~author (request : request) =
           ; created_at = Types_core.now_iso (); body
           ; task_id; goal_id } in
         let artifact = { id; revisions = revision :: previous } in
-        match Keeper_fs.save_json_durable_atomic ~ownership_root:base_path
+        match durable_metadata_save ~ownership_root:base_path
           (path ~base_path id) (Published_artifact.to_json artifact) with
         | Ok () -> Ok (artifact, revision)
         | Error error ->
@@ -588,6 +594,7 @@ module For_testing = struct
   let read_with_share_after_select = read_with_share_after_select
   let change_share_before_stage ~before_stage ~base_path ~id request =
     let save ~ownership_root path json =
-      Keeper_fs.For_testing.save_json_durable_atomic ~before_stage ~ownership_root path json in
+      observed_save ~ownership_root (fun () ->
+        Keeper_fs.For_testing.save_json_durable_atomic ~before_stage ~ownership_root path json) in
     change_share_with_save ~save ~base_path ~id request
 end

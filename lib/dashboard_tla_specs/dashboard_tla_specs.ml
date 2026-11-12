@@ -67,6 +67,24 @@ let file_exists_safe p =
   | Sys_error _ -> false
 ;;
 
+let companion_paths ~directory name =
+  Filename.concat directory (name ^ ".cfg"),
+  Filename.concat directory (name ^ "-buggy.cfg")
+;;
+
+let entry_for_file ~exists ~mtime ~root ~sub file =
+  let name = Filename.chop_suffix file ".tla" in
+  let directory = Filename.concat root sub in
+  let clean_cfg, buggy_cfg = companion_paths ~directory name in
+  { name
+  ; path = Filename.concat sub file
+  ; category = category_of_subdir sub
+  ; has_clean_cfg = exists clean_cfg
+  ; has_buggy_cfg = exists buggy_cfg
+  ; mtime = mtime (Filename.concat directory file)
+  }
+;;
+
 let scan_subdir ~root sub =
   let subpath = Filename.concat root sub in
   if not (is_directory_safe subpath)
@@ -74,18 +92,7 @@ let scan_subdir ~root sub =
   else
     readdir_safe subpath
     |> List.filter is_tla_file
-    |> List.map (fun f ->
-      let name = Filename.chop_suffix f ".tla" in
-      let file_path = Filename.concat subpath f in
-      let clean_cfg = Filename.concat subpath (name ^ ".cfg") in
-      let buggy_cfg = Filename.concat subpath (name ^ "-buggy.cfg") in
-      { name
-      ; path = Filename.concat sub f
-      ; category = category_of_subdir sub
-      ; has_clean_cfg = file_exists_safe clean_cfg
-      ; has_buggy_cfg = file_exists_safe buggy_cfg
-      ; mtime = safe_stat_mtime file_path
-      })
+    |> List.map (entry_for_file ~exists:file_exists_safe ~mtime:safe_stat_mtime ~root ~sub)
 ;;
 
 let list_specs () =
@@ -236,8 +243,12 @@ let cfg_entries_for_spec (entry : spec_entry) =
   clean @ buggy
 ;;
 
+let log_path_for_cfg ~results_dir cfg_stem =
+  Filename.concat results_dir ("tlc-" ^ cfg_stem ^ ".log")
+;;
+
 let result_for_cfg ~results_dir (spec : spec_entry) (cfg_name, cfg_stem) =
-  let log_path = Filename.concat results_dir ("tlc-" ^ cfg_stem ^ ".log") in
+  let log_path = log_path_for_cfg ~results_dir cfg_stem in
   match read_file_safe log_path with
   | None ->
     { spec_name = spec.name
@@ -308,4 +319,71 @@ let tlc_results_json () : Yojson.Safe.t =
     ; "count", `Int (List.length entries)
     ; "entries", `List (List.map tlc_entry_to_json entries)
     ]
+;;
+
+type source_inventory = {
+  specs_directory : string;
+  results_directory : string;
+  spec_directories : string list;
+  spec_files : string list;
+  cfg_files : string list;
+  expected_log_files : string list;
+}
+
+type scan_error = { path : string; error : Unix.error }
+
+let observation_source_inventory () =
+  let stat path =
+    match Unix.stat path with
+    | status -> Some status
+    | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> None
+  in
+  let is_dir path = match stat path with Some status -> status.Unix.st_kind = Unix.S_DIR | None -> false in
+  let names directory =
+    if not (is_dir directory) then []
+    else
+      let channel = Unix.opendir directory in
+      Fun.protect ~finally:(fun () -> Unix.closedir channel) (fun () ->
+        let rec read acc =
+          match Unix.readdir channel with
+          | "." | ".." -> read acc
+          | name -> read (name :: acc)
+          | exception End_of_file -> List.sort String.compare acc
+        in
+        read [])
+  in
+  match
+    let specs_directory = specs_dir () in
+    let results_directory = tlc_results_dir () in
+    let children = names specs_directory in
+    let subdirs = children
+        |> List.filter (fun name -> is_dir (Filename.concat specs_directory name)) in
+    let watch_subdirs = children |> List.filter (fun name ->
+      let path = Filename.concat specs_directory name in
+      match Unix.lstat path with
+      | status -> status.st_kind = Unix.S_LNK || status.st_kind = Unix.S_DIR
+      | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> false) in
+    let entries = subdirs |> List.concat_map (fun sub ->
+      names (Filename.concat specs_directory sub)
+      |> List.filter is_tla_file
+      |> List.map (entry_for_file ~root:specs_directory ~sub
+          ~exists:(fun path -> Option.is_some (stat path))
+          ~mtime:(fun path -> match stat path with Some status -> status.st_mtime | None -> 0.0))) in
+    let cfgs = entries |> List.concat_map (fun (spec : spec_entry) ->
+      cfg_entries_for_spec spec |> List.map (fun (name, stem) ->
+        Filename.concat (Filename.concat specs_directory (Filename.dirname spec.path)) name,
+        log_path_for_cfg ~results_dir:results_directory stem)) in
+    Ok {
+      specs_directory; results_directory;
+      spec_directories = List.map (Filename.concat specs_directory) watch_subdirs;
+      spec_files = List.map (fun (spec : spec_entry) -> Filename.concat specs_directory spec.path) entries;
+      cfg_files = entries |> List.concat_map (fun (spec : spec_entry) ->
+        let directory = Filename.concat specs_directory (Filename.dirname spec.path) in
+        let clean, buggy = companion_paths ~directory spec.name in
+        [ clean; buggy ]);
+      expected_log_files = List.map snd cfgs |> List.sort_uniq String.compare;
+    }
+  with
+  | result -> result
+  | exception Unix.Unix_error (error, _, path) -> Error { path; error }
 ;;

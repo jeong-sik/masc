@@ -702,6 +702,8 @@ let upsert_event_intents ~actor ~revision (goal : goal) action =
    writers already holding the Goal lock. This function never takes that lock
    or calls back into the Goal store. *)
 let append_audit_event config json =
+  Fun.protect ~finally:(fun () -> Goal_event_observation.attempted ~base_path:config.Workspace_utils.base_path)
+    (fun () ->
   let path = goal_events_path config in
   try
     let expected = try (Unix.stat path).Unix.st_size with
@@ -736,7 +738,7 @@ let append_audit_event config json =
                ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printexc.to_string exn)
+  | exn -> Error (Printexc.to_string exn))
 
 (* The Goal lock orders the outbox against every mutation and acknowledgement.
    Delivery uses the existing durable JSONL transaction, never a caller callback.
@@ -750,7 +752,12 @@ let flush_pending_events_locked config =
       | Available { pending_events = []; _ } -> Ok ()
       | Available state ->
           let path = goal_events_path config in
-          let outcome = Fs_compat.update_private_file_durable_locked_result path (fun existing ->
+          let append_requested = ref false in
+          let outcome = Fun.protect
+            ~finally:(fun () ->
+              if !append_requested then
+                Goal_event_observation.attempted ~base_path:config.Workspace_utils.base_path)
+            (fun () -> Fs_compat.update_private_file_durable_locked_result path (fun existing ->
             let inspect () =
               if existing <> "" && not (String.ends_with ~suffix:"\n" existing) then
                 Error "goal event ledger has an incomplete tail"
@@ -789,7 +796,12 @@ let flush_pending_events_locked config =
                   | [] -> None, false
                   | events -> Some (String.concat "" (List.map (fun event ->
                       Yojson.Safe.to_string (pending_event_to_yojson event) ^ "\n") events)), true in
-                suffix, Ok changed) in
+                (* An uncertain transaction may leave visible bytes. A later
+                   binding refusal may conservatively produce this read hint
+                   too; it is never a durable-write receipt. Empty/duplicate
+                   suffixes and rejected ledger reads owe no hint. *)
+                if changed then append_requested := true;
+                suffix, Ok changed)) in
           let appended = match outcome with
             | Fs_compat.Private_file_succeeded result -> result
             | Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->

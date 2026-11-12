@@ -69,11 +69,40 @@ let test_stopped_keeper_is_offline () =
     (member "health_state" row = Some (`String "offline"))
 ;;
 
+let test_startup_observation_keeps_the_exact_existing_policy_deadline () =
+  let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc [
+      "name", `String "startup-policy"; "trace_id", `String "startup-policy-trace";
+      "activation_mode", `String "autonomous"; "created_at", `String "1970-01-01T00:01:40Z";
+      "total_turns", `Int 0; "proactive_count_total", `Int 0]) with
+    | Ok meta -> meta | Error detail -> Alcotest.fail detail in
+  let observe ~meta ~phase now_ts = Keeper_status_runtime.keeper_diagnostic_observation
+      ~meta ~phase ~history_items:[] ~now_ts in
+  let before = observe ~meta ~phase:(Some Keeper_state_machine.Running) 220.0 in
+  Alcotest.(check bool) "the original inclusive startup boundary is preserved" true
+    (member "quiet_reason" before.json = Some (`String "startup"));
+  let deadline = Float.next_after 220.0 infinity in
+  Alcotest.(check (option (float 0.0))) "the same typed observation owns its exact next boundary"
+    (Some deadline) before.next_deadline_unix;
+  let after = observe ~meta ~phase:(Some Keeper_state_machine.Running) deadline in
+  Alcotest.(check bool) "the returned instant changes the actual quiet reason" true
+    (member "quiet_reason" after.json = Some (`String "never_started"));
+  Alcotest.(check bool) "health remains the same clockless observation" true
+    (member "health_state" before.json = member "health_state" after.json);
+  Alcotest.(check (option (float 0.0))) "elapsed policy does not create a cadence" None after.next_deadline_unix;
+  let stopped = observe ~meta ~phase:(Some Keeper_state_machine.Stopped) 200.0 in
+  Alcotest.(check (option (float 0.0))) "a stopped keepalive has no startup timer" None stopped.next_deadline_unix;
+  let invalid = observe ~meta:{meta with created_at = "unknown"}
+      ~phase:(Some Keeper_state_machine.Running) 200.0 in
+  Alcotest.(check (option (float 0.0))) "unknown creation time never gets a synthetic deadline" None invalid.next_deadline_unix
+;;
+
 let () =
   Alcotest.run
     "keeper_diagnostic_stale_last_error"
     [ ( "keeper-owned diagnostic evidence"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "startup observation retains its actual policy deadline" `Quick
+            test_startup_observation_keeps_the_exact_existing_policy_deadline
+        ; Alcotest.test_case
             "proactive reason is not reclassified as error"
             `Quick
             test_proactive_reason_is_not_reclassified_as_error

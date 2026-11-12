@@ -1,5 +1,6 @@
 (** HTTP routes exposing provider-run and dashboard observations.
-    Bounded cache execution is owned by {!Server_dashboard_json_cache}. *)
+    Cached projections use {!Server_dashboard_json_cache}. Decisions reads
+    are Current through {!Server_dashboard_keeper_decisions_http}. *)
 
 val add_routes :
   sw:Eio.Switch.t ->

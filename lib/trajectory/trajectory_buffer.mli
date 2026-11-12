@@ -12,7 +12,9 @@ type outcome =
   | Indeterminate_failure of Trajectory_persistence.issue
   | Blocked of Trajectory_persistence.issue
 
-val acquire : path:string -> t
+val acquire : owner:Trajectory_write_observation.owner -> path:string -> t
+(** The first writer of an exact trace retains its original owner. A later
+    global source re-init cannot reattribute its buffered flush. *)
 val release : t -> unit
 val enqueue : t -> Yojson.Safe.t -> receipt
 val is_durable : receipt -> bool
@@ -28,6 +30,7 @@ val outcome_label : outcome -> string
 
 module For_testing : sig
   val acquire_with_append :
+    owner:Trajectory_write_observation.owner ->
     append:(path:string -> Yojson.Safe.t list -> Trajectory_persistence.outcome) ->
     path:string -> t
 end

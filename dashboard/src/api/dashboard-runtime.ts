@@ -975,7 +975,7 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
   }
 }
 
-function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelMetricsResponse | null {
+export function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelMetricsResponse | null {
   if (!isRecord(raw) || !Array.isArray(raw.models)) return null
   const models = raw.models.map(decodeRuntimeModelMetric)
   if (models.some(model => model === null)) return null

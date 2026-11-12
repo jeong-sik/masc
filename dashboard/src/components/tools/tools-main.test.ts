@@ -7,6 +7,7 @@ import type {
   DashboardSkillActivationProjection,
   DashboardToolsResponse,
 } from '../../api'
+import { confirmRuntimeTestWorkspace } from '../../lib/runtime-workspace.test-fixture'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -59,9 +60,6 @@ vi.mock('./tool-state', () => ({
   KEEPER_WAITING_INVENTORY_REFRESH_MS: 15_000,
 }))
 
-vi.mock('../../lib/auto-refresh', () => ({
-  setupVisibleAutoRefresh: () => () => {},
-}))
 
 vi.mock('../common/card', () => ({
   SectionCard: ({ label, children }: { label: string; children: unknown }) => html`
@@ -319,6 +317,7 @@ describe('Tools', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
+    confirmRuntimeTestWorkspace()
     container = document.createElement('div')
     document.body.appendChild(container)
     mocks.loadTools.mockClear()

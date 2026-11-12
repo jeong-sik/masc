@@ -4,12 +4,14 @@ let report_interval_sec = 6.0 *. Masc_time_constants.hour
 
 (* The loop below is the only writer; the dashboard tools envelope reads it.
    A restart starts empty, and the first pass fills it again. *)
-let last : Periodic.t option Atomic.t = Atomic.make None
+type observed_pass = { base_path : string; value : Periodic.t }
+let last : observed_pass option Atomic.t = Atomic.make None
 
-let envelope_json () =
+let envelope_json ~base_path () =
   match Atomic.get last with
   | None -> `Null
-  | Some pass -> Periodic.to_json pass
+  | Some pass -> if String.equal pass.base_path base_path then
+      Periodic.to_json pass.value else `Null
 ;;
 
 let log_pass (pass : Periodic.t) =
@@ -48,7 +50,8 @@ let start ~sw ~clock ~(config : Workspace.config) =
        let rec tick () =
          let observed = pass ~base_path in
          log_pass observed;
-         Atomic.set last (Some observed);
+         Atomic.set last (Some {base_path; value = observed});
+         Dashboard_observation_commit.written ~base_path ~scope:`Workspace `Tools;
          Eio.Time.sleep clock report_interval_sec;
          tick ()
        in

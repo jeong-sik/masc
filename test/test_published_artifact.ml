@@ -1,6 +1,16 @@
 module A = Masc.Published_artifact
 module S = Masc.Published_artifact_store
 module Tool_bridge = Masc.Tool_bridge
+module Commit = Masc.Dashboard_observation_commit
+
+let with_publication_changes f =
+  let changes = ref [] in
+  let unsubscribe = Commit.subscribe (function
+    | Commit.Workspace { base_path; payload }
+      when payload.topic = `Published_artifacts ->
+        changes := (base_path, payload.scope) :: !changes
+    | Commit.Workspace _ | Commit.Process _ -> ()) in
+  Fun.protect ~finally:unsubscribe (fun () -> f changes)
 
 let with_base f =
   let base = Filename.temp_file "published_artifact" "" in
@@ -122,7 +132,7 @@ let test_shared_read_pins_revision () = with_base (fun base_path ->
      Alcotest.(check string) "operator reads the new body" "new private body" content
    | Ok `Private | Error _ -> Alcotest.fail "operator could not read the private revision"))
 
-let test_share_uncertain_commit () = with_base (fun base_path ->
+let test_share_uncertain_commit () = with_base (fun base_path -> with_publication_changes (fun changes ->
   let module Share = Masc.Published_artifact_share in
   let artifact, _ = publish ~base_path (request "share recovery") in
   let id = artifact.id in
@@ -137,11 +147,13 @@ let test_share_uncertain_commit () = with_base (fun base_path ->
       raise (Unix.Unix_error (Unix.EIO, "fsync", "injected"))
     | Directory_prepare | Payload_encode | Temp_file_create | Payload_write | Payload_fsync
     | Temp_file_close | Atomic_rename | Temp_directory_fsync_after_rename -> () in
+  let before = List.length !changes in
   let uncertain = match S.For_testing.change_share_before_stage ~before_stage ~base_path ~id request with
     | Error (S.Share_commit_uncertain receipt) -> receipt
     | Error ((S.Share_invalid _ | S.Share_missing | S.Share_operation_reused | S.Share_unavailable _) as error) ->
       Alcotest.fail (S.share_error_message error)
     | Ok _ -> Alcotest.fail "post-rename failure was reported as certain" in
+  Alcotest.(check bool) "uncertain visible share write invalidates observers" true (List.length !changes > before);
   let visible = S.find_share_receipt ~base_path ~id ~operation_id:request.operation_id |> share_ok in
   Alcotest.(check bool) "uncertain receipt can be observed" true (visible = Some uncertain);
   let settled = S.change_share ~base_path ~id request |> share_ok in
@@ -151,7 +163,7 @@ let test_share_uncertain_commit () = with_base (fun base_path ->
    | Share.Applied _ | Share.Conflict _ -> Alcotest.fail "unexpected recovered share receipt");
   let current = S.read_share ~base_path ~id |> share_ok in
   Alcotest.(check int) "replay does not advance the version" 1 current.version;
-  Alcotest.(check bool) "recovered revocation remains current" false current.shared)
+  Alcotest.(check bool) "recovered revocation remains current" false current.shared))
 
 let test_share_archives_and_downgrade () = with_base (fun base_path ->
   let module Share = Masc.Published_artifact_share in
@@ -815,6 +827,27 @@ let test_workspace_http_permissions_and_checkpoint_parser () = with_base (fun ba
         check "another actor cannot end this connection" 409 (post ~body (Some other_admin) presence);
         check "connection owner may leave" 200 (post ~body (Some admin) presence)))))
 
+let test_publication_and_sharing_notify () = with_base (fun base_path ->
+  with_publication_changes (fun changes ->
+    let remove_failed_subscriber = Commit.subscribe (fun _ -> failwith "injected observer failure") in
+    let artifact, _ = Fun.protect ~finally:remove_failed_subscriber (fun () ->
+      publish ~base_path (request "first observable publication")) in
+    Alcotest.(check bool) "subscriber failure cannot erase publication result" true (!changes <> []);
+    let before = List.length !changes in
+    ignore (publish ~base_path (request ~id:artifact.id ~expected_revision:1 "second publication"));
+    Alcotest.(check bool) "revising also notifies" true (List.length !changes > before);
+    let listing = S.list_with_authors ~base_path |> store_ok in
+    Alcotest.(check int) "a notified reader sees the committed inventory" 1 (List.length listing.artifacts);
+    let _, latest, body = S.read ~base_path ~id:artifact.id ~revision:None |> store_ok in
+    Alcotest.(check int) "reader sees the new revision" 2 latest.revision;
+    Alcotest.(check string) "reader sees its exact source" "second publication" body;
+    let before = List.length !changes in
+    ignore (S.set_shared ~base_path ~id:artifact.id ~shared:true |> store_ok);
+    Alcotest.(check bool) "sharing metadata is observable" true (List.length !changes > before);
+    Alcotest.(check bool) "reader sees committed sharing" true (S.read_share ~base_path ~id:artifact.id |> share_ok).shared;
+    Alcotest.(check bool) "notification retains the writer's workspace scope" true
+      (List.for_all (fun (source, scope) -> String.equal source base_path && scope = `Workspace) !changes)))
+
 let () = Eio_main.run (fun _ ->
   Alcotest.run "published reports"
     ["durable catalog", [
@@ -824,6 +857,7 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "unsafe directory is unavailable, not empty" `Quick test_unsafe_directory;
       Alcotest.test_case "metadata symlink is unavailable" `Quick test_metadata_symlink];
      "external sharing", [
+      Alcotest.test_case "publication and sharing notify their readers" `Quick test_publication_and_sharing_notify;
       Alcotest.test_case "concurrent requests and later replay" `Quick test_share_transactions;
       Alcotest.test_case "anonymous read pins its admitted revision" `Quick test_shared_read_pins_revision;
       Alcotest.test_case "uncertain commit and legacy share recovery" `Quick test_share_uncertain_commit;

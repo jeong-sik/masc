@@ -1,4 +1,4 @@
-// WebSocket server-push reaction and periodic refresh — extracted from store.ts
+// SSE server-push reaction — extracted from store.ts
 // Routes pushed events to the minimal refresh function needed.
 //
 // Event routing uses a declarative map for simple refresh-only events,
@@ -11,10 +11,10 @@ import {
   normalizeSSEDispatchType,
 } from './sse'
 import {
-  dashboardWsLastDisconnectedAt,
-  dashboardWsReady,
-  dashboardWsReconnectCount,
-} from './dashboard-ws-state'
+  dashboardObserverLastDisconnectedAt,
+  dashboardObserverReady,
+  dashboardObserverAdmissionCount,
+} from './dashboard-observer-state'
 import type {
   BoardPost,
   DashboardExecutionResponse,
@@ -26,12 +26,15 @@ import {
   invalidateDashboardCache,
   invalidateExecutionSnapshotGeneration,
   hydrateExecutionSnapshot,
+  hydrateShellRootSnapshot,
   resetExecutionSnapshotGeneration,
   refreshDashboard,
   refreshExecution,
   refreshBoard,
   refreshFusionRuns,
-  serverStatus,
+  recoverExecutionReadDebt,
+  recoverShellReadDebt,
+  disposeExecutionReadRecovery,
   boardPosts,
   boardSortMode,
   boardExcludeSystem,
@@ -41,15 +44,11 @@ import {
   boardOffset,
 } from './store'
 import {
-  requestNamespaceTruth,
   requestNamespaceTruthNow,
   namespaceTruth,
   namespaceTruthError,
-  normalizeNamespaceTruth,
 } from './namespace-truth-store'
-import { mergeServerStatus } from './store-normalizers'
-import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
-import { operatorError, operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
+import { hydrateNamespaceTruthObservation } from './namespace-truth-observation'
 import { compositeTick } from './composite-signals'
 import { isRecord } from './lib/type-guards'
 import { normalizeKeeperApprovalAuditReceipt } from './lib/keeper-approval-audit'
@@ -67,14 +66,16 @@ import {
 import { route } from './router'
 import { routeWantsRefreshTarget, type RouteRefreshTarget } from './refresh-scope'
 import {
-  PERIODIC_REFRESH_DEV_MS,
-  PERIODIC_REFRESH_PROD_MS,
   SSE_ACTIVITY_DEBOUNCE_MS,
   SSE_DEFAULT_DEBOUNCE_MS,
   SSE_KEEPER_OPERATOR_DEBOUNCE_MS,
   SSE_KEEPER_THREAD_DEBOUNCE_MS,
-  SSE_RECONNECT_RETRY_MS,
 } from './config/constants'
+import { namespaceTruthReadRecovery } from './namespace-truth-signals'
+import { subscribeStoredTokenChanges } from './api/core'
+import { hydrateMissionSnapshot, setupMissionObservation } from './mission-actions'
+import { hydrateOperatorDigest, setupOperatorDigestObservation } from './operator-digest-observation'
+import { hydrateOperatorSnapshot, setupOperatorSnapshotObservation } from './operator-snapshot-observation'
 
 // --- Refresh function registration (avoids circular imports) ---
 
@@ -98,18 +99,9 @@ export function registerGateAuditReceiptObserver(
 }
 
 let _refreshOperatorFn: (() => void) | null = null
-let operatorSnapshotRefreshPending = false
 
 export function registerOperatorRefresh(fn: () => void): void {
   _refreshOperatorFn = fn
-  if (operatorSnapshotRefreshPending) {
-    requestOperatorSnapshotRefresh('operator_snapshot_registration_drain')
-  }
-}
-
-let _refreshMissionFn: (() => void) | null = null
-export function registerMissionRefresh(fn: () => void): void {
-  _refreshMissionFn = fn
 }
 
 let _keeperTurnRefreshFn: ((keeperName: string) => void) | null = null
@@ -211,15 +203,6 @@ function scheduleRefresh(key: string, fn: () => void, delayMs = SSE_DEFAULT_DEBO
     fn()
     delete _debounceTimers[key]
   }, delayMs)
-}
-
-function requestOperatorSnapshotRefresh(key: string): void {
-  if (_refreshOperatorFn) {
-    operatorSnapshotRefreshPending = false
-    scheduleRefresh(key, () => _refreshOperatorFn?.(), 0)
-  } else {
-    operatorSnapshotRefreshPending = true
-  }
 }
 
 // --- Declarative event routing ---
@@ -365,13 +348,10 @@ function normalizeMascEventType(type: string): string {
 /** Hydrate project-snapshot signals directly from a push payload — zero HTTP fetch. */
 function handleNamespaceTruthSnapshot(payload: unknown): void {
   try {
-    const normalized = normalizeNamespaceTruth(payload)
-    namespaceTruth.value = normalized
-    namespaceTruthError.value = null
-    serverStatus.value = mergeServerStatus(
-      serverStatus.value,
-      normalized.root.status ?? null,
-    )
+    const normalized = hydrateNamespaceTruthObservation(payload, 'canonical')
+    if (normalized === null) return
+    recoverShellReadDebt()
+    hydrateShellRootSnapshot(normalized.root, true)
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'invalid project snapshot'
     namespaceTruth.value = null
@@ -403,30 +383,6 @@ function handleExecutionSnapshot(payload: unknown): void {
     hydrateExecutionSnapshot(payload as DashboardExecutionResponse)
   } catch (err) {
     console.warn('[server-push] execution snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
-  }
-}
-
-function failOperatorSnapshotHydration(detail: string): void {
-  operatorSnapshot.value = null
-  operatorError.value = detail
-}
-
-function handleOperatorSnapshot(payload: unknown): void {
-  try {
-    operatorSnapshot.value = normalizeOperatorSnapshot(payload)
-    operatorError.value = null
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : 'invalid operator snapshot'
-    failOperatorSnapshotHydration(detail)
-    console.warn('[server-push] operator snapshot hydration failed', detail)
-  }
-}
-
-function handleOperatorDigest(payload: unknown): void {
-  try {
-    operatorWorkspaceDigest.value = normalizeOperatorDigest(payload)
-  } catch (err) {
-    console.warn('[server-push] operator digest hydration failed', err instanceof Error ? err.message : '')
   }
 }
 
@@ -490,31 +446,24 @@ async function refreshActiveRoute(): Promise<void> {
   } catch (err) {
     console.debug('[server-push] tab-refresh unavailable, using fallback refreshes', err instanceof Error ? err.message : '')
     _refreshOperatorFn?.()
-    _refreshMissionFn?.()
   }
 }
 
 // --- WebSocket reconnection handler ---
 
-let activeOperatorSnapshotEpoch: string | null = null
-let latestOperatorSnapshotGeneration: number | null = null
-let latestOperatorSnapshotComputeSequence: number | null = null
-let latestOperatorSnapshotTerminalSequence: number | null = null
-const retiredOperatorSnapshotEpochs = new Set<string>()
-
-function handleReconnect(): void {
+function handleReconnect(notify = true): void {
   scheduleIdeConversationRefresh('board')
   scheduleIdeConversationRefresh('decisions')
-  const disconnectedMs = dashboardWsLastDisconnectedAt.value > 0
-    ? Date.now() - dashboardWsLastDisconnectedAt.value
+  const disconnectedMs = dashboardObserverLastDisconnectedAt.value > 0
+    ? Date.now() - dashboardObserverLastDisconnectedAt.value
     : 0
   const durationSec = Math.round(disconnectedMs / 1000)
   const label = durationSec > 0 ? `${durationSec}초 단절 후 재연결됨` : '서버 연결 복구됨'
-  showToast(label, 'success', 3000)
+  if (notify) showToast(label, 'success', 3000)
 
   // Refresh all data to recover events missed during disconnect.
-  // If the server is still warming up after restart, the first fetch may fail.
-  // Schedule a single retry after 3s to cover the warm-up window.
+  // Failed reads retain their own recovery debt. Initializing projections
+  // await canonical completion rather than scheduling another status read.
   invalidateDashboardCache()
   resetExecutionSnapshotGeneration()
   void refreshExecution({ force: true })
@@ -555,22 +504,6 @@ async function hydrateAfterReconnect(): Promise<void> {
   void refreshActiveRoute().catch(err =>
     console.warn('[server-push] reconnect route refresh failed', err instanceof Error ? err.message : err),
   )
-  // Safety-net retry: if project-snapshot fetch failed (e.g. server warm-up),
-  // the scheduler's error signal will be set. Retry once after delay.
-  setTimeout(() => {
-    if (namespaceTruthError.value) {
-      requestNamespaceTruthNow()
-    }
-    void refreshDashboard({ force: true }).catch(retryErr =>
-      console.warn(
-        '[server-push] reconnect dashboard retry failed',
-        retryErr instanceof Error ? retryErr.message : retryErr,
-      ),
-    )
-    void refreshActiveRoute().catch(retryErr =>
-      console.warn('[server-push] reconnect route retry failed', retryErr instanceof Error ? retryErr.message : retryErr),
-    )
-  }, SSE_RECONNECT_RETRY_MS)
 }
 
 // --- Board incremental hydration ---
@@ -742,6 +675,10 @@ export function routeServerPushEvent(event: SSEEvent): void {
 }
 
 export function hydrateServerPushEvent(event: SSEEvent): boolean {
+  if (event.type === 'mission_snapshot') {
+    hydrateMissionSnapshot(event.payload)
+    return true
+  }
   if (event.type === 'project_snapshot' && event.payload) {
     handleNamespaceTruthSnapshot(event.payload)
     return true
@@ -753,92 +690,11 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
   }
 
   if (event.type === 'operator_snapshot') {
-    if (!isRecord(event.payload)) {
-      failOperatorSnapshotHydration('operator snapshot payload is invalid')
-      requestOperatorSnapshotRefresh('operator_snapshot_invalid_payload')
-      return true
-    }
-    const payload = event.payload
-    const epoch = payload.snapshot_epoch
-    const generation = payload.snapshot_generation
-    const computeSequence = payload.snapshot_compute_sequence
-    const terminalSequence = payload.snapshot_terminal_sequence
-    if (
-      typeof epoch !== 'string'
-      || epoch.length === 0
-      || typeof generation !== 'number'
-      || !Number.isSafeInteger(generation)
-      || typeof computeSequence !== 'number'
-      || !Number.isSafeInteger(computeSequence)
-      || typeof terminalSequence !== 'number'
-      || !Number.isSafeInteger(terminalSequence)
-    ) {
-      failOperatorSnapshotHydration('operator snapshot ordering is missing')
-      requestOperatorSnapshotRefresh('operator_snapshot_missing_ordering')
-      return true
-    }
-    if (
-      typeof epoch === 'string'
-      && epoch.length > 0
-    ) {
-      if (retiredOperatorSnapshotEpochs.has(epoch)) {
-        return true
-      }
-      if (activeOperatorSnapshotEpoch !== epoch) {
-        if (activeOperatorSnapshotEpoch !== null) {
-          retiredOperatorSnapshotEpochs.add(activeOperatorSnapshotEpoch)
-        }
-        activeOperatorSnapshotEpoch = epoch
-        latestOperatorSnapshotGeneration = null
-        latestOperatorSnapshotComputeSequence = null
-        latestOperatorSnapshotTerminalSequence = null
-      }
-      if (
-        latestOperatorSnapshotGeneration !== null
-        && generation < latestOperatorSnapshotGeneration
-      ) {
-        return true
-      }
-      if (latestOperatorSnapshotGeneration !== generation) {
-        latestOperatorSnapshotGeneration = generation
-        latestOperatorSnapshotComputeSequence = null
-        latestOperatorSnapshotTerminalSequence = null
-      }
-      if (
-        typeof terminalSequence === 'number'
-        && Number.isSafeInteger(terminalSequence)
-      ) {
-        if (
-          latestOperatorSnapshotTerminalSequence !== null
-          && terminalSequence < latestOperatorSnapshotTerminalSequence
-        ) {
-          return true
-        }
-        latestOperatorSnapshotTerminalSequence = terminalSequence
-      }
-      if (
-        typeof computeSequence === 'number'
-        && Number.isSafeInteger(computeSequence)
-      ) {
-        if (
-          latestOperatorSnapshotComputeSequence !== null
-          && computeSequence < latestOperatorSnapshotComputeSequence
-        ) {
-          return true
-        }
-        latestOperatorSnapshotComputeSequence = computeSequence
-      }
-      if (payload.status === 'invalidated') {
-        failOperatorSnapshotHydration('operator snapshot invalidated')
-        requestOperatorSnapshotRefresh('operator_snapshot_invalidation')
-        return true
-      }
-    }
-    handleOperatorSnapshot(event.payload)
+    hydrateOperatorSnapshot(event.payload)
     return true
   }
   if (event.type === 'operator_digest' && event.payload) {
-    handleOperatorDigest(event.payload)
+    hydrateOperatorDigest(event.payload)
     return true
   }
   if (event.type === 'transport_health_snapshot' && event.payload) {
@@ -938,77 +794,45 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
   return false
 }
 
-function eventPayloadRecord(payload: unknown): Record<string, unknown> {
-  return isRecord(payload) ? payload : { payload }
-}
-
-export function hydrateDashboardSlice(_slice: string, payload: unknown, eventType?: string): void {
-  switch (eventType) {
-    case 'project_snapshot':
-    case 'execution_snapshot':
-    case 'operator_snapshot':
-    case 'operator_digest':
-    case 'transport_health_snapshot':
-      hydrateServerPushEvent({ type: eventType, payload } as SSEEvent)
-      return
-  }
-  if (eventType) {
-    routeServerPushEvent({
-      type: eventType,
-      ...eventPayloadRecord(payload),
-    } as SSEEvent)
-    return
-  }
-
-  // Dashboard deltas require an event type so the typed handler is explicit.
-}
-
-// --- WebSocket server-push reaction setup ---
+// --- SSE server-push reaction setup ---
 
 export function setupServerPushReaction(): () => void {
-  const unsubReconnect = dashboardWsReconnectCount.subscribe((count) => {
-    if (count > 0 && dashboardWsReady.value) {
-      handleReconnect()
+  const stopMission = setupMissionObservation()
+  const stopDigest = setupOperatorDigestObservation()
+  const stopSnapshot = setupOperatorSnapshotObservation()
+  const recoverReads = () => {
+    namespaceTruthReadRecovery.recover()
+    recoverExecutionReadDebt()
+    recoverShellReadDebt()
+  }
+  const recoverAuthority = () => {
+    namespaceTruthReadRecovery.recover(true)
+    recoverExecutionReadDebt(true)
+    recoverShellReadDebt(true)
+  }
+  window.addEventListener('focus', recoverReads)
+  window.addEventListener('online', recoverReads)
+  const unsubToken = subscribeStoredTokenChanges(recoverAuthority)
+  const unsubReconnect = dashboardObserverAdmissionCount.subscribe((count) => {
+    if (count > 0 && dashboardObserverReady.value) {
+      handleReconnect(count > 1)
     }
   })
 
   return () => {
+    stopMission()
+    stopDigest()
+    stopSnapshot()
     unsubReconnect()
+    unsubToken()
+    window.removeEventListener('focus', recoverReads)
+    window.removeEventListener('online', recoverReads)
+    namespaceTruthReadRecovery.dispose()
+    disposeExecutionReadRecovery()
     for (const key of Object.keys(_debounceTimers)) {
       clearTimeout(_debounceTimers[key])
       delete _debounceTimers[key]
     }
-  }
-}
-
-// --- Periodic refresh ---
-
-const PERIODIC_REFRESH_MS = import.meta.env.DEV
-  ? PERIODIC_REFRESH_DEV_MS
-  : PERIODIC_REFRESH_PROD_MS
-
-let _periodicId: ReturnType<typeof setInterval> | null = null
-
-export function startPeriodicRefresh(): void {
-  if (_periodicId) return
-  _periodicId = setInterval(() => {
-    // Fallback only. While the WS is delivering, every route surface this
-    // would refetch is already hydrated by push, so firing anyway just
-    // duplicates the traffic. Previously only invalidateDashboardCache()
-    // was gated and the two refresh calls ran unconditionally.
-    if (dashboardWsReady.value) return
-    invalidateDashboardCache()
-    requestNamespaceTruth()
-    void refreshActiveRoute().catch(err =>
-      console.warn('[periodic] route refresh failed', err instanceof Error ? err.message : err),
-    )
-  }, PERIODIC_REFRESH_MS)
-}
-
-export function stopPeriodicRefresh(): void {
-  if (_periodicId) {
-    clearInterval(_periodicId)
-    _periodicId = null
   }
 }
 

@@ -131,6 +131,8 @@ let mark_turn_finished ~observation_token ~base_path name =
         { e with meta; current_turn_observation = None; last_completed_turn }, true)
   in
   if changed then
+    Dashboard_observation_commit.written ~base_path ~scope:`Workspace `Telemetry;
+  if changed then
     Option.iter
       (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
       !completed_turn_to_record;
@@ -503,7 +505,10 @@ let wakeup_cadence_sleeper_exact (expected : registry_entry) =
                   (* tla-lint: allow-mutation: cadence sleep handshake — CAS
                      consumes only an active inter-cycle sleeper. *)
                   if Atomic.compare_and_set current.cadence_sleeping true false
-                  then Cadence_sleeper_signaled
+                  then (
+                    Dashboard_observation_commit.written ~base_path:current.base_path
+                      ~scope:`Workspace `Telemetry;
+                    Cadence_sleeper_signaled)
                   else Cadence_sleeper_awake)
              | (Keeper_state_machine.Offline | Keeper_state_machine.Draining | Keeper_state_machine.Paused | Keeper_state_machine.Stopped | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting) as phase -> Cadence_sleeper_inactive phase))))
 ;;
@@ -1014,7 +1019,8 @@ let prepare_fiber_launch ~base_path name =
      (* tla-lint: allow-mutation: fiber signal — initialise per-fiber Atomic flags before keeper launch *)
      Atomic.set entry.fiber_stop false;
      Atomic.set entry.fiber_wakeup false;
-     Atomic.set entry.cadence_sleeping false;
+     if Atomic.exchange entry.cadence_sleeping false then
+       Dashboard_observation_commit.written ~base_path:entry.base_path ~scope:`Workspace `Telemetry;
      Atomic.set entry.waiting_for_inference false
    | None ->
      (* P3 cleanup: previously this was a silent no-op when the
@@ -1039,7 +1045,8 @@ let prepare_fiber_launch ~base_path name =
 let prepare_fiber_launch_for_lifecycle token (entry : registry_entry) =
   Atomic.set entry.fiber_stop false;
   Atomic.set entry.fiber_wakeup false;
-  Atomic.set entry.cadence_sleeping false;
+  if Atomic.exchange entry.cadence_sleeping false then
+    Dashboard_observation_commit.written ~base_path:entry.base_path ~scope:`Workspace `Telemetry;
   Atomic.set entry.waiting_for_inference false;
   dispatch_event_exact_for_lifecycle token entry Keeper_state_machine.Fiber_started
 ;;

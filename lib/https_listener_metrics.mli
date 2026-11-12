@@ -38,6 +38,15 @@ val configure : port:int -> certificate:certificate -> unit
 (** Boot: the listener exists on [port] with [certificate]. The status becomes
     [Not_started]. *)
 
+val subscribe_source_changed : (unit -> unit) -> (unit -> unit)
+(** Metadata after the listener's state changes: configured, started,
+    stopped, a bind failure, and its status or last error taking another
+    value. Outside the mutation's result. Callbacks must not block or yield;
+    failures cannot replace the source result. Idempotent removal. Reading
+    JSON does not notify, and neither do the counts added once per
+    connection (accepts, closes, negotiated protocols, handshake failures):
+    a reader finds those in the next snapshot it reads. *)
+
 val record_bind_failure : error:string -> unit
 val record_started : unit -> unit
 val record_stopped : unit -> unit

@@ -2,6 +2,7 @@ module A = Masc.Published_artifact
 module Publications = Masc.Published_artifact_store
 module C = Masc.Published_artifact_check
 module S = Masc.Published_artifact_check_store
+module Commit = Masc.Dashboard_observation_commit
 
 let with_base f =
   let base = Filename.temp_file "artifact_checks" "" in
@@ -196,6 +197,30 @@ let test_precondition_settlement () = with_base (fun base_path ->
   Alcotest.(check string) "original check remains authoritative" checked.change_id
     (List.hd (S.list ~base_path |> stored).checks).change_id)
 
+let test_check_notifications_preserve_uncertainty () = with_base (fun base_path ->
+  let artifact, revision = publish ~base_path "observable check" in
+  let changes = ref [] in
+  let unsubscribe = Commit.subscribe (function
+    | Commit.Workspace { base_path; payload } when payload.topic = `Artifact_checks ->
+      changes := (base_path, payload.scope) :: !changes
+    | Commit.Workspace _ | Commit.Process _ -> ()) in
+  Fun.protect ~finally:unsubscribe (fun () ->
+    let checked = set ~base_path ~actor:"human" (change ~checked:true artifact.id revision) in
+    Alcotest.(check int) "one real check attempt notifies" 1 (List.length !changes);
+    let io = Fs_compat.{before_sync_parent=(fun _ -> raise (Unix.Unix_error (Unix.EIO, "fsync", "injected")));
+      close_fd=Unix.close} in
+    let uncertain = match S.For_testing.set_with_rewrite_io ~io ~base_path ~actor:"human"
+      (change ~expected:(Some checked.change_id) ~checked:false artifact.id revision) with
+      | Error (S.Commit_uncertain check) -> check
+      | Error error -> Alcotest.fail (S.error_message error)
+      | Ok _ -> Alcotest.fail "post-rename failure became certain" in
+    Alcotest.(check int) "uncertain published rewrite also notifies" 2 (List.length !changes);
+    let observed = S.list ~base_path |> stored in
+    Alcotest.(check string) "notified reader sees the uncertain write without replay"
+      uncertain.change_id (List.hd observed.checks).change_id;
+    Alcotest.(check bool) "metadata keeps the original workspace" true
+      (List.for_all (fun (source, scope) -> String.equal source base_path && scope = `Workspace) !changes)))
+
 let () = Eio_main.run (fun _ ->
   Alcotest.run "shared artifact revision checks"
     ["durable explicit confirmation",[
@@ -204,4 +229,5 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "strict request, actor spoof and immutable digest" `Quick test_strict_request_and_digest;
       Alcotest.test_case "lock links cannot create or alter external files" `Quick test_lock_symlink;
       Alcotest.test_case "precondition close failure is not a possible commit" `Quick test_precondition_settlement;
+      Alcotest.test_case "successful and uncertain checks notify readers" `Quick test_check_notifications_preserve_uncertainty;
       Alcotest.test_case "corrupt and unsafe storage remain unknown" `Quick test_corrupt_or_unsafe_storage]])

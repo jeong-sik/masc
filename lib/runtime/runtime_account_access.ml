@@ -108,6 +108,7 @@ type request =
   | Keeper_turn of
       { keeper_name : string
       ; channel : Authz_types.Channel.t
+      ; pat : Authz_types.Pat_binding.t
       ; runtime_id : string
       }
   | Own_account of
@@ -253,12 +254,12 @@ let multi_account ~zone ~base_path ~now request claim =
       match Ps.find state.Authz_state.principals user_id with
       | Some { Ps.status = Ps.Active; _ } -> own_home ~base_path state user_id provider_account_id claim
       | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
-  | Keeper_turn { keeper_name; channel; runtime_id } ->
+  | Keeper_turn { keeper_name; channel; pat; runtime_id } ->
     (match Authz_types.Keeper_id.of_string keeper_name with
      | Error (_ : Authz_id.error) -> Error (Not_a_keeper_id keeper_name)
      | Ok keeper_id ->
        on_trusted (fun trusted state ->
-         match Authz_keeper_turn.decide trusted ~keeper_id ~channel ~now:(now ()) with
+         match Authz_keeper_turn.decide trusted ~keeper_id ~channel ~pat ~now:(now ()) with
          | Error refusal -> Error (Turn_refused refusal)
          | Ok turn ->
            if String.equal (Authz_types.Runtime_id.to_string turn.Authz_keeper_turn.runtime_id) runtime_id
@@ -305,7 +306,7 @@ let after_off ~base_path (records : Authz_state.t) request claim =
     match request with
     | Operator_call -> None
     | Own_account { user_id; provider_account_id = _ } -> Some (Off_own_account user_id)
-    | Keeper_turn { keeper_name; channel = _; runtime_id } ->
+    | Keeper_turn { keeper_name; channel = _; pat = _; runtime_id } ->
       (match off_keeper records keeper_name with
        | Some refusal -> Some refusal
        | None -> off_runtime records runtime_id)

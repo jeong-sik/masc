@@ -10,17 +10,10 @@ import {
 
 // Observation topics name authoritative read models. The transport publishes
 // invalidations here; a mounted consumer reads only the models it uses.
-export const DASHBOARD_OBSERVATION_TOPICS = [
-  'logs', 'health', 'runtime_probe', 'attribution', 'keeper_composite',
-  'keeper_runtime_trace', 'keeper_sandbox', 'keeper_turns', 'keeper_memory_health',
-  'runtime_resolved', 'model_metrics', 'runtime_observables', 'scheduled_automation',
-  'tools', 'tool_metrics', 'skills', 'async_requests', 'skill_usage', 'skill_activations',
-  'telemetry', 'published_artifacts', 'artifact_checks', 'verification_requests',
-  'verification_specs', 'tlc_results', 'activity', 'ide_presence', 'ide_events',
-  'gate', 'gate_tool_events', 'chat_operation',
-] as const
+import { readDashboardObservationTopic } from '../schemas/sse_event_generated'
+import type { DashboardObservationTopic as GeneratedTopic } from '../schemas/sse_event_generated'
 
-export type DashboardObservationTopic = typeof DASHBOARD_OBSERVATION_TOPICS[number]
+export type DashboardObservationTopic = Lowercase<GeneratedTopic['kind']>
 
 export interface DashboardObservationChange {
   readonly topic: DashboardObservationTopic
@@ -46,6 +39,20 @@ const observers = new Set<Observer>()
  * accepted observation, or recovery/focus owns completion without polling. */
 export class ObservationPending extends Error {}
 
+const recoveryOwnedFailures = new WeakSet<object>()
+
+/** The store owns this failure's retry debt. Retain the exact error object,
+ * including HTTP status and identity, without mutating/forking its contract. */
+export function retainObservationReadFailure(cause: unknown): unknown {
+  const failure = typeof cause === 'object' && cause !== null ? cause : new Error(String(cause))
+  recoveryOwnedFailures.add(failure)
+  return failure
+}
+
+function hasReadRecoveryOwner(cause: unknown): boolean {
+  return typeof cause === 'object' && cause !== null && recoveryOwnedFailures.has(cause)
+}
+
 /** A combined read must not let an earlier transient error hide a refused
  * sibling request and repeatedly resend that sibling's credential. */
 export function selectObservationReadFailure(causes: readonly unknown[]): unknown | null {
@@ -54,7 +61,7 @@ export function selectObservationReadFailure(causes: readonly unknown[]): unknow
 }
 
 export function isDashboardObservationTopic(value: unknown): value is DashboardObservationTopic {
-  return DASHBOARD_OBSERVATION_TOPICS.some(topic => topic === value)
+  try { readDashboardObservationTopic(value); return true } catch { return false }
 }
 
 export function publishDashboardObservationChange(change: DashboardObservationChange): void {
@@ -96,6 +103,9 @@ export interface ObservationRefreshOptions extends DashboardObservationSelection
   /** Withdraw a previous owner's rows, including a cache retained while the
    * surface was unmounted. Called before the first read and on owner change. */
   readonly resetRead?: () => void
+  /** Existing source-specific push callbacks can share this read's owner,
+   * refusal and coalescing boundary without inventing another wire topic. */
+  readonly subscribeChanges?: (invalidate: () => void, recover: () => void) => (() => void)
 }
 
 /** Subscribe before the first read. Invalidation during a read retains one
@@ -154,14 +164,16 @@ export function setupObservationRefresh(
     } catch (error) {
       if (!current()) return
       if (error instanceof ApiRequestError && (error.status === 401 || error.status === 403)) {
+        // A store may own retry debt for this exact error. Its own refusal
+        // still blocks this mounted observer's source/focus/recovery reads.
         refused = true
         dirty = false
         clearRetry()
         if (options.onError) options.onError(error)
-      } else if (error instanceof ObservationPending) {
+      } else if (error instanceof ObservationPending || hasReadRecoveryOwner(error)) {
         retryDelayMs = TRANSPORT_RETRY_BASE_MS
         // Retain any invalidation received during the read as one trailing
-        // read; otherwise the producer completes it.
+        // read; otherwise the producer or store-owned recovery completes it.
       } else {
         dirty = true
         retryTimer = setTimeout(() => {
@@ -197,6 +209,7 @@ export function setupObservationRefresh(
   }
   const refreshWhenVisible = () => { if (visible()) recover() }
   const unsubscribe = subscribeDashboardObservation(options, invalidate, recover)
+  const unsubscribeChanges = options.subscribeChanges?.(invalidate, recover)
   const unsubscribeOwner = subscribeDashboardObservationOwnerChanges(next => {
     owner = next
     clearRetry()
@@ -217,6 +230,7 @@ export function setupObservationRefresh(
     clearRetry()
     retire()
     unsubscribe()
+    unsubscribeChanges?.()
     unsubscribeOwner()
     window.removeEventListener('focus', refreshWhenVisible)
     document.removeEventListener('visibilitychange', refreshWhenVisible)

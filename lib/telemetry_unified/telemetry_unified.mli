@@ -118,6 +118,23 @@ val read_unified_result :
 (** Like {!read_unified}, but also returns the total number of matching
     entries before truncation plus whether truncation occurred. *)
 
+type summary_observation = {
+  json : Yojson.Safe.t;
+  next_change_at_unix : float option;
+  read_failed : bool;
+}
+
+val observe_summary :
+  now:float ->
+  ?keeper_keepalive_interval_s:float ->
+  ?keeper_metric_producer_active:bool ->
+  masc_root:string -> unit -> summary_observation
+(** Read the same summary and its next actual source-freshness transition.
+    [None] means no healthy clock wake is needed; displayed ages alone never
+    schedule a read. An active Keeper producer suppresses its age transition.
+    [read_failed] retains retry debt for a source classified as unreadable;
+    missing and empty stores are successful observations. *)
+
 val summary_json :
   ?keeper_keepalive_interval_s:float ->
   ?keeper_metric_producer_active:bool ->

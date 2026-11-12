@@ -28,8 +28,14 @@
       ({!Authz_state.revocation}).
     - [dependencies]: [Cleared]. Phase 1 has no restore window (F2 is phase 2)
       and a restored log is refused when the zone opens (plan A2).
-    - The request carries no PAT, and no durable work stores a scope in phase
-      1, so the stored scope puts no limit.
+    - [pat_scope]: the personal access token that authenticated the request
+      the turn answers, if one did ([pat]). Its scope narrows the turn as
+      every other source does (design 4.4): the Runtime, the channel and
+      every effect of {!requested} must be inside it, and it must not have
+      expired. A turn that a session started, and a turn the server starts
+      itself, has none.
+    - No durable work stores a scope in phase 1, so the stored scope puts no
+      limit.
 
     {b One snapshot.} The facts and the gate read one snapshot, the one the
     caller took with {!Authz_zone.read}, so no record separates what they
@@ -62,10 +68,13 @@ type turn = private
   }
 
 (** Decides one turn of [keeper_id] on [channel] at [now] (seconds since the
-    epoch), in the state of one trusted snapshot. *)
+    epoch), in the state of one trusted snapshot. [pat] is what authenticated
+    the request the turn answers: [Not_pat] for a session and for a turn the
+    server starts itself. *)
 val decide
   :  Authz_zone.trusted
   -> keeper_id:Keeper_id.t
   -> channel:Channel.t
+  -> pat:Pat_binding.t
   -> now:float
   -> (turn, refusal) result

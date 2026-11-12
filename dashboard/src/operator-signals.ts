@@ -2,10 +2,9 @@ import { signal } from '@preact/signals'
 import type {
   OperatorActionLogEntry,
   OperatorDigest,
-  OperatorSnapshot,
 } from './types'
 
-export const operatorSnapshot = signal<OperatorSnapshot | null>(null)
+export { operatorSnapshot } from './operator-snapshot-state'
 export const operatorWorkspaceDigest = signal<OperatorDigest | null>(null)
 export const operatorLoading = signal(false)
 export const operatorError = signal<string | null>(null)

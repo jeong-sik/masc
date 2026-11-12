@@ -7,14 +7,14 @@
 // series of the previous filter stays until the new one arrives, so the table
 // and the button the viewer pressed are not torn down and rebuilt.
 
-import { computed, signal } from '@preact/signals'
+import { computed, effect, signal, untracked } from '@preact/signals'
 import { fetchToolMetricsSeries, type ToolMetricsSeriesRequest } from '../../api'
 import type {
   ToolMetricsSeriesBucket,
   ToolMetricsSeriesResponse,
 } from '../../api/schemas/tool-metrics-series'
 import { createManagedAsyncResource } from '../../lib/async-state'
-import { setupObservationRefresh } from '../../lib/observation-refresh'
+import { subscribeToolSeriesStream } from '../../api/tool-metrics-series-stream'
 import type { MetricReading } from '../../lib/metric-series'
 
 export const SERIES_WINDOWS = {
@@ -28,7 +28,7 @@ export type SeriesWindowKey = keyof typeof SERIES_WINDOWS
 /** The order the window chips are shown in. */
 export const SERIES_WINDOW_ORDER: readonly SeriesWindowKey[] = ['day', 'week', 'month']
 
-/** The server keeps 30 days of tool calls; a series answer is cached for 30 s. */
+/** The server keeps 30 days of tool calls. Mounted charts consume snapshots. */
 export const selectedWindow = signal<SeriesWindowKey>('day')
 export const selectedTool = signal<string | null>(null)
 
@@ -37,6 +37,11 @@ export function currentUtcOffsetMin(now: { getTimezoneOffset(): number } = new D
   const east = -now.getTimezoneOffset()
   return east === 0 ? 0 : east
 }
+
+const viewerUtcOffsetMin = signal(currentUtcOffsetMin())
+const refreshRevision = signal(0)
+let mounted = 0
+let stopMounted: (() => void) | null = null
 
 export function seriesRequest(
   windowKey: SeriesWindowKey,
@@ -52,7 +57,7 @@ function sameWindow(a: ToolMetricsSeriesRequest, b: ToolMetricsSeriesRequest): b
 }
 
 function pickedRequest(): ToolMetricsSeriesRequest {
-  return seriesRequest(selectedWindow.value, selectedTool.value, currentUtcOffsetMin())
+  return seriesRequest(selectedWindow.value, selectedTool.value, viewerUtcOffsetMin.value)
 }
 
 interface LoadedSeries {
@@ -75,6 +80,10 @@ export const seriesLoading = computed(() => seriesResource.state.value.loading)
 export const seriesError = computed<string | null>(() => seriesResource.state.value.error)
 
 export async function loadToolSeries(): Promise<void> {
+  if (mounted > 0) {
+    refreshRevision.value = refreshRevision.peek() + 1
+    return
+  }
   const request = pickedRequest()
   await seriesResource.load(async signal => ({
     request,
@@ -84,17 +93,61 @@ export async function loadToolSeries(): Promise<void> {
 
 export function selectWindow(key: SeriesWindowKey): void {
   selectedWindow.value = key
-  void loadToolSeries()
+  if (mounted === 0) void loadToolSeries()
 }
 
 export function selectTool(tool: string | null): void {
   selectedTool.value = tool
-  void loadToolSeries()
+  if (mounted === 0) void loadToolSeries()
 }
 
-/** Read the current selection when observed tool metrics change. */
+/** One native query lifetime for all mounted chart readers. Root metric
+ * invalidations are consumed by the server stream, so they cause no GET here. */
 export function subscribeToolSeriesRefresh(): () => void {
-  return setupObservationRefresh(loadToolSeries, { topics: ['tool_metrics'], readError: () => seriesResource.readError(), cancelRead: () => seriesResource.cancel(), resetRead: () => seriesResource.reset() })
+  mounted += 1
+  if (mounted === 1) {
+    // No stream owner observes authority changes while every chart is gone.
+    // A new mount must await its own query before displaying retained data.
+    seriesResource.reset()
+    const updateOffset = () => { viewerUtcOffsetMin.value = currentUtcOffsetMin() }
+    const visibleOffset = () => { if (document.visibilityState === 'visible') updateOffset() }
+    window.addEventListener('focus', updateOffset)
+    document.addEventListener('visibilitychange', visibleOffset)
+    const stopQuery = effect(() => {
+      refreshRevision.value
+      const request = pickedRequest()
+      return untracked(() => {
+        seriesResource.cancel()
+        const markLoading = () => {
+          seriesResource.state.value = { ...seriesResource.state.peek(), loading: true, error: null }
+        }
+        markLoading()
+        return subscribeToolSeriesStream(request, {
+          onReset: reason => {
+            if (reason === 'authority') seriesResource.reset()
+            markLoading()
+          },
+          onFrame: series => { seriesResource.reset({ request, series }) },
+          onError: error => {
+            seriesResource.state.value = { ...seriesResource.state.peek(), loading: false, error: error.message }
+          },
+        })
+      })
+    })
+    stopMounted = () => {
+      stopQuery()
+      seriesResource.cancel()
+      window.removeEventListener('focus', updateOffset)
+      document.removeEventListener('visibilitychange', visibleOffset)
+    }
+  }
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    mounted -= 1
+    if (mounted === 0) { stopMounted?.(); stopMounted = null }
+  }
 }
 
 /**

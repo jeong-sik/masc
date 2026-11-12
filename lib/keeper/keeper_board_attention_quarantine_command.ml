@@ -400,12 +400,20 @@ let execute_with_hooks
   let* candidate = find_candidate ~base_path command in
   let* observed = matching_quarantine command candidate in
   before_root_restore ();
-  let* (_ : int) =
+  let* restoration =
     Partition.ensure_current_roots
       ~base_path
       ~keeper_name:command.keeper_name
       [ candidate ]
     |> Result.map_error (fun detail -> Partition_state_conflict detail)
+  in
+  let* () =
+    match restoration with
+    | Partition.Roots_ensured (_ : int) -> Ok ()
+    | Partition.Candidates_changed ->
+      Error
+        (Partition_state_conflict
+           "Board attention candidates changed before root restoration")
   in
   let* partition = find_partition ~base_path command in
   match Quarantine_pair.classify partition observed with

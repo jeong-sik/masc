@@ -48,6 +48,15 @@ let delivered label = function
   | Ok (A.Delivered candidate) -> candidate
   | Ok A.Candidate_absent ->
     Alcotest.failf "%s: candidate absent (fixture did not persist it)" label
+  | Ok (A.Judgment_conflict _) ->
+    Alcotest.failf "%s: the candidate already records another judgment" label
+  | Error detail -> Alcotest.failf "%s: %s" label detail
+;;
+
+let recorded label = function
+  | Ok (A.Judgment_on_record candidate) -> candidate
+  | Ok (A.Judgment_refused _) ->
+    Alcotest.failf "%s: the candidate already records another judgment" label
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
@@ -1176,16 +1185,25 @@ let test_not_relevant_delivery_is_idempotent () =
   let persisted = record ~base_path (candidate (signal "post-not-relevant")) in
   let verdict = judgment J.Not_relevant in
   ignore
-    (ok "record judgment" (A.record_judgment ~base_path persisted verdict)
+    (recorded "record judgment" (A.record_judgment ~base_path persisted verdict)
       : A.candidate);
+  (* [persisted] still says Pending, so this refusal is the comparison the
+     ledger lock makes against the row written above. *)
   (match
      A.record_judgment
        ~base_path
        persisted
        (judgment J.Relevant)
    with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "conflicting durable judgment was accepted");
+   | Ok (A.Judgment_refused { recorded }) ->
+     Alcotest.(check bool)
+       "the refusal carries the judgment on record"
+       true
+       (recorded = verdict)
+   | Ok (A.Judgment_on_record _) ->
+     Alcotest.fail "conflicting durable judgment was accepted"
+   | Error detail ->
+     Alcotest.failf "the refusal was not returned as a value: %s" detail);
   let consumed =
     delivered
       "apply judgment"
@@ -1209,15 +1227,33 @@ let test_not_relevant_delivery_is_idempotent () =
          ~judgment:verdict)
   in
   Alcotest.(check bool) "terminal replay is idempotent" true (replayed = consumed);
-  match
-    A.apply_judgment_and_deliver
-      ~base_path
-      ~keeper_name:persisted.keeper_name
-      ~candidate_id:persisted.candidate_id
-      ~judgment:(judgment J.Relevant)
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "conflicting terminal judgment was accepted"
+  let conflicting = judgment J.Relevant in
+  (match
+     A.apply_judgment_and_deliver
+       ~base_path
+       ~keeper_name:persisted.keeper_name
+       ~candidate_id:persisted.candidate_id
+       ~judgment:conflicting
+   with
+   | Ok (A.Judgment_conflict { recorded; offered }) ->
+     Alcotest.(check bool)
+       "the conflict carries the judgment on record"
+       true
+       (recorded = verdict);
+     Alcotest.(check bool)
+       "the conflict carries the refused judgment"
+       true
+       (offered = conflicting)
+   | Ok (A.Delivered _) ->
+     Alcotest.fail "conflicting terminal judgment was accepted"
+   | Ok A.Candidate_absent ->
+     Alcotest.fail "the consumed candidate was reported absent"
+   | Error detail ->
+     Alcotest.failf "the conflict was not returned as a value: %s" detail);
+  Alcotest.(check bool)
+    "a refused judgment leaves the candidate as it was"
+    true
+    (load_one ~base_path = consumed)
 ;;
 
 let test_relevant_delivery_uses_exact_candidate_identity () =
@@ -1524,11 +1560,48 @@ let test_prune_consumed_behind_cursor () =
     (ok "idempotent prune" (A.prune_consumed_behind_cursor ~base_path ~keeper_name:"alpha" ~open_partition_candidates:[] (50.0, None)))
 ;;
 
+let test_actual_write_metadata_preserves_the_store_result () =
+  with_temp_base "board_candidate_source" (fun base_path ->
+    let module Change = Masc.Keeper_board_attention_change in
+    let changes = ref [] in
+    let unsubscribe = Change.subscribe (fun change -> changes := change :: !changes) in
+    let unsubscribe_failure = Change.subscribe (fun _ -> raise Exit) in
+    Fun.protect ~finally:(fun () -> unsubscribe_failure (); unsubscribe ()) (fun () ->
+      let row = candidate (signal "source-owner-post") in
+      (match A.record ~base_path row with
+       | A.Recorded _ -> ()
+       | Duplicate _ -> Alcotest.fail "new source row was a duplicate"
+       | Record_error detail -> Alcotest.fail detail);
+      (match !changes with
+       | [change] ->
+           Alcotest.(check string) "the actual write captures its original canonical root"
+             (Fs_compat.realpath_lenient (Common.masc_dir_from_base_path ~base_path)) change.canonical_masc_root;
+           Alcotest.(check string) "the actual Keeper owns the source" "alpha" change.keeper_name;
+           (match change.source with Candidate -> () | Partition -> Alcotest.fail "wrong ledger source")
+       | [] | _ :: _ :: _ -> Alcotest.fail "actual append did not notify once");
+      Alcotest.(check int) "listener failure cannot undo the original durable append" 1
+        (List.length (ok "read actual source row" (A.load_candidates ~base_path ~keeper_name:"alpha")));
+      (match A.record ~base_path row with
+       | Duplicate _ -> ()
+       | Recorded _ -> Alcotest.fail "duplicate appended again"
+       | Record_error detail -> Alcotest.fail detail);
+      Alcotest.(check int) "an unchanged duplicate has no publication attempt" 1 (List.length !changes);
+      (match A.record ~base_path {row with recorded_at = nan} with
+       | Record_error _ -> () | Recorded _ | Duplicate _ -> Alcotest.fail "invalid source row was accepted");
+      Alcotest.(check int) "rejected validation has no publication attempt" 1 (List.length !changes);
+      ignore (ok "purge actual source" (A.purge ~base_path ~keeper_name:"alpha"));
+      Alcotest.(check int) "actual purge also notifies the source owner" 2 (List.length !changes);
+      Alcotest.(check int) "purged original source is empty" 0
+        (List.length (ok "read purged source" (A.load_candidates ~base_path ~keeper_name:"alpha")))))
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_candidate"
     [ ( "durable candidate"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "actual write metadata preserves its durable outcome" `Quick
+            test_actual_write_metadata_preserves_the_store_result
+        ; Alcotest.test_case
             "an unreadable row does not hide the rest"
             `Quick
             test_unreadable_row_does_not_hide_the_rest

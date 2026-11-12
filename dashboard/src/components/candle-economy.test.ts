@@ -27,6 +27,7 @@ function reconnect() {
 }
 function snapshot(candle: unknown, amount: unknown, root = '/fixture/candle-a'): DashboardExecutionResponse {
   return {
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
     execution_publication_epoch: fixtureEpoch,
     execution_publication_generation: ++generation,
     status: { project: 'candle-fixture', workspace_root: root },
@@ -41,6 +42,7 @@ beforeEach(() => {
 })
 function observe(candle: unknown, amount: unknown, root: string | undefined = '/fixture/currency-a') {
   const accepted = hydrateExecutionSnapshot({
+    projection_diagnostics: { read_completeness: 'complete', read_error: null },
     execution_publication_epoch: fixtureEpoch, execution_publication_generation: ++generation,
     status: { project: 'same-project', ...(root === undefined ? {} : { workspace_root: root }) },
     candle, keepers: [{ name: 'alpha', status: 'active', emoji: 'A', candle_balance_milli: amount }],
@@ -112,7 +114,7 @@ describe('Candle existing screen consumers', () => {
       const refresh = refreshExecution({ immediate: true })
       rejected = expect(refresh).rejects.toThrow(
         outcome === 'initializing'
-          ? 'Execution initialization was superseded by a newer observation'
+          ? 'Execution response was superseded by a newer observation'
           : 'Execution failure was superseded by a newer observation',
       )
       await requested
@@ -181,6 +183,7 @@ describe('Candle existing screen consumers', () => {
     expect(screen.getByTestId('keeper-candle-balance').textContent).not.toContain('9007199254740.993')
     expect(candleObservation.peek().status).toBe('unavailable')
     expect(hydrateExecutionSnapshot({
+      projection_diagnostics: { read_completeness: 'complete', read_error: null },
       execution_publication_epoch: fixtureEpoch, execution_publication_generation: ++generation,
       status: { workspace_root: '/fixture/currency-a' }, candle: ready,
       keepers: [{ name: 'alpha', candle_balance_milli: '9007199254740993' }],
@@ -195,6 +198,7 @@ describe('Candle existing screen consumers', () => {
     observe(ready, '9007199254740993')
     render(html`<${View} />`)
     expect(hydrateExecutionSnapshot({
+      projection_diagnostics: { read_completeness: 'complete', read_error: null },
       execution_publication_epoch: fixtureEpoch, execution_publication_generation: ++generation,
       status: { project: 'same-project' }, candle: ready,
       keepers: [{ name: 'alpha', candle_balance_milli: '9007199254740993' }],

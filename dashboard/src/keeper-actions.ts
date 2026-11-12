@@ -1,3 +1,6 @@
+import { observeKeeperChatOperation, waitForKeeperChatOperationTerminal } from './keeper-chat-operation-observer'
+import { setupObservationRefresh } from './lib/observation-refresh'
+import { captureDashboardObservationOwner, dashboardObservationOwnerIsCurrent } from './lib/observation-read-owner'
 import { toolObservationContinues } from './keeper-tool-observations'
 import { initialKeeperResponseState, reduceKeeperResponse } from './lib/keeper-response-state'
 import { keeperStreamContract, normalizeStreamContract } from './keeper-stream-contract'
@@ -14,14 +17,13 @@ import { callMcpTool } from './api/mcp'
 import { ApiRequestError, currentStoredTokenRevision, runOperatorAction } from './api/core'
 import {
   cancelKeeperChatOperation,
-  fetchKeeperChatOperation,
   fetchKeeperChatHistory,
   fetchKeeperChatHistoryPage,
   fetchKeeperToolApprovals,
   interruptKeeperTurn as apiInterruptKeeperTurn,
   streamKeeperMessage,
 } from './api/keeper'
-import type { KeeperStreamSurfaceContext, KeeperToolApprovalRow } from './api/keeper'
+import type { KeeperChatOperation, KeeperStreamSurfaceContext, KeeperToolApprovalRow } from './api/keeper'
 import { answerKeeperToolApproval } from './api/keeper'
 import { fetchKeeperToolCalls } from './api/dashboard'
 import {
@@ -456,6 +458,12 @@ type ChatHistoryHydrationRequest = {
 const chatHistoryHydrationRequests = new Map<string, ChatHistoryHydrationRequest>()
 /** Test-only: reset the once-per-keeper hydration guard. */
 export function _resetChatHydrationForTests(): void {
+  operationObservationEpoch += 1
+  for (const dispose of pendingOperationWaiters.values()) dispose()
+  pendingOperationWaiters.clear()
+  hydratingKeeperChatOperations.clear()
+  for (const dispose of failedOperationRecoveries.values()) dispose()
+  failedOperationRecoveries.clear()
   hydratedChatKeepers.clear()
   chatHistoryHydrationRequests.clear()
   keeperChatHistoryErrors.value = {}
@@ -623,13 +631,59 @@ export async function hydrateKeeperToolOutputs(keeperName: string): Promise<void
 // one history refetch instead of one round-trip per message.
 const chatRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const CHAT_APPENDED_REFRESH_DELAY_MS = 400
-const PENDING_KEEPER_CHAT_POLL_MS = 2_000
 const QUEUED_KEEPER_REQUEST_LOST_MESSAGE =
   '서버 재시작으로 대기 중이던 요청을 찾을 수 없습니다. 메시지를 다시 보내주세요.'
 const PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE =
   '응답을 확인할 수 없어 메시지 복구를 중단했습니다. 다시 보내주세요.'
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+let operationObservationEpoch = 0
+const pendingOperationWaiters = new Map<string, () => void>()
+const failedOperationRecoveries = new Map<string, () => void>()
+
+function notePendingOperation(
+  keeperName: string,
+  assistantId: string,
+  operation: KeeperChatOperation,
+): void {
+  markKeeperStreamSignal(keeperName)
+  updateThreadEntry(keeperName, assistantId, entry => {
+    if (entry.delivery !== 'sending' && entry.delivery !== 'queued') return entry
+    const queued = operation.state.kind === 'queued'
+    return { ...entry, delivery: queued ? 'queued' : 'sending', streamState: queued ? null : 'opening' }
+  })
+}
+
+function retainFailedOperationObservation(
+  request: TrackedKeeperChatOperation,
+  error: unknown,
+  current: () => boolean,
+): void {
+  const key = `${request.keeperName}:${request.operationId}`
+  if (!current()) return
+  if (failedOperationRecoveries.has(key)) return
+  let first = true
+  let readError: unknown | null = error
+  const dispose = () => {
+    stop()
+    failedOperationRecoveries.delete(key)
+  }
+  const stop = setupObservationRefresh(async () => {
+    if (!current() || liveSendOwnsRequest(request.operationId)
+      || !trackedKeeperChatOperationsForKeeper(request.keeperName).some(candidate => candidate.operationId === request.operationId)) {
+      readError = null
+      dispose()
+      return
+    }
+    // The failed lookup already happened. Retain its debt without issuing
+    // another immediate read before the helper's recovery deadline.
+    if (first) { first = false; throw error }
+    readError = await hydrateTrackedKeeperChatOperation(request, true) ?? null
+    if (readError === null) dispose()
+  }, {
+    topics: ['chat_operation'], keeperName: request.keeperName, operationId: request.operationId,
+    readError: () => readError, onError: () => {},
+    resetRead: () => { if (!current()) { readError = null; dispose() } },
+  })
+  failedOperationRecoveries.set(key, dispose)
 }
 
 function hasCanonicalOperationTurn(
@@ -883,10 +937,18 @@ export function isKeeperThreadMessageSendInFlight(
   return sendKey ? sendingKeeperThreadMessages.has(sendKey) : false
 }
 
-async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOperation): Promise<void> {
+async function hydrateTrackedKeeperChatOperation(
+  request: TrackedKeeperChatOperation,
+  recoveryOwned = false,
+): Promise<unknown | null | void> {
+  const owner = captureDashboardObservationOwner()
+  const epoch = operationObservationEpoch
+  const current = () => epoch === operationObservationEpoch
+    && dashboardObservationOwnerIsCurrent(owner)
+  let lookupError: unknown | null = null
   // A live in-session send stream still owns this request (e.g. the panel
   // remounted on an SPA route change while the reply was pending). Defer to
-  // it rather than minting a duplicate pending entry + a second poll loop.
+  // it rather than minting a duplicate pending entry + a second operation observer.
   // After a full page reload this map is empty, so cold-start resume runs.
   if (liveSendOwnsRequest(request.operationId)) return
   const key = `${request.keeperName}:${request.operationId}`
@@ -898,100 +960,97 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
   setRecordValue(keeperStreamStartedAt, request.keeperName, request.submittedAt)
   markKeeperStreamSignal(request.keeperName, { force: true })
   try {
-    for (;;) {
-      const operation = await fetchKeeperChatOperation(
-        request.keeperName,
-        request.operationId,
-      )
-      markKeeperStreamSignal(request.keeperName)
-      if (operation.state.kind === 'queued' || operation.state.kind === 'running') {
-        await sleep(PENDING_KEEPER_CHAT_POLL_MS)
-        continue
-      }
-      const isCancelled = operation.state.kind === 'cancelled'
-      const failure = operation.state.kind === 'failed' ? operation.state : null
-      const interrupted =
-        failure?.failureKind === 'Interrupted_by_restart'
-      let errorMessage: string | null = null
-      if (failure) {
-        errorMessage = interrupted
-          ? 'Interrupted'
-          : `${failure.failureKind}: ${failure.detail}`
-      }
-      let userDelivery: KeeperConversationDelivery = 'delivered'
-      if (isCancelled) userDelivery = 'cancelled'
-      else if (failure) userDelivery = 'error'
-      const assistantStillLocal = (keeperThreads.value[request.keeperName] ?? [])
-        .find(entry => entry.id === assistantId)
-      // The operation receipt reports termination, not the observed turn
-      // outcome: a legitimately recorded `no_reply` must survive a mere
-      // successful-termination confirmation, or the hidden empty entry
-      // resurfaces as an "(empty reply)" bubble after reload.
-      const assistantDelivery: KeeperConversationDelivery =
-        userDelivery === 'delivered'
-          && (assistantStillLocal?.delivery ?? request.assistantDraft?.delivery) === 'no_reply'
-          ? 'no_reply'
-          : userDelivery
-      finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
-        delivery: userDelivery,
-        error: errorMessage,
+    const waiter = waitForKeeperChatOperationTerminal(request.keeperName, request.operationId, {
+      current,
+      onPending: operation => notePendingOperation(request.keeperName, assistantId, operation),
+    })
+    pendingOperationWaiters.set(key, waiter.dispose)
+    const operation = await waiter.result
+    if (!current()) return
+    markKeeperStreamSignal(request.keeperName)
+    const isCancelled = operation.state.kind === 'cancelled'
+    const failure = operation.state.kind === 'failed' ? operation.state : null
+    const interrupted =
+      failure?.failureKind === 'Interrupted_by_restart'
+    let errorMessage: string | null = null
+    if (failure) {
+      errorMessage = interrupted
+        ? 'Interrupted'
+        : `${failure.failureKind}: ${failure.detail}`
+    }
+    let userDelivery: KeeperConversationDelivery = 'delivered'
+    if (isCancelled) userDelivery = 'cancelled'
+    else if (failure) userDelivery = 'error'
+    const assistantStillLocal = (keeperThreads.value[request.keeperName] ?? [])
+      .find(entry => entry.id === assistantId)
+    // The operation receipt reports termination, not the observed turn
+    // outcome: a legitimately recorded `no_reply` must survive a mere
+    // successful-termination confirmation, or the hidden empty entry
+    // resurfaces as an "(empty reply)" bubble after reload.
+    const assistantDelivery: KeeperConversationDelivery =
+      userDelivery === 'delivered'
+        && (assistantStillLocal?.delivery ?? request.assistantDraft?.delivery) === 'no_reply'
+        ? 'no_reply'
+        : userDelivery
+    finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
+      delivery: userDelivery,
+      error: errorMessage,
+      streamContract: keeperStreamContract('client_operation_lookup', 'client_operation_terminal', {
+        requestId: request.operationId,
+        reason: errorMessage,
+      }),
+    })
+    if (assistantStillLocal) {
+      // The server finished the operation, but a response whose stream
+      // dropped a frame is incomplete and the stored transcript could not
+      // replace it: keep the recorded failure instead of a delivered reply.
+      const incomplete = !isCancelled && !failure && keeperResponseIsFailed(assistantStillLocal.responseState)
+      const incompleteReason = assistantStillLocal.error ?? INCOMPLETE_KEEPER_REPLY_MESSAGE
+      const priorResponseState = assistantStillLocal.responseState
+      finalizeAssistantEntry(request.keeperName, assistantId, {
+        // An unavailable stored state carries no ownership facts to protect;
+        // the authoritative terminal receipt still promotes it to a known
+        // terminal state instead of letting the normalizer downgrade it.
+        responseState: reduceKeeperResponse(
+          priorResponseState && priorResponseState.kind === 'known' ? priorResponseState : initialKeeperResponseState,
+          { kind: 'terminal' },
+        ).state,
+        delivery: incomplete ? 'error' : assistantDelivery,
+        streamState: null,
+        error: incomplete ? incompleteReason : errorMessage,
+        // Keep an observed occurrence time; only a placeholder saved before
+        // any assistant event falls back to the receipt's completion time so
+        // the settled row stops sorting with the no-timestamp in-flight tail.
+        timestamp: assistantStillLocal.timestamp
+          ?? new Date(operation.state.completedAt * 1000).toISOString(),
         streamContract: keeperStreamContract('client_operation_lookup', 'client_operation_terminal', {
           requestId: request.operationId,
-          reason: errorMessage,
+          reason: incomplete ? incompleteReason : errorMessage,
         }),
       })
-      if (assistantStillLocal) {
-        // The server finished the operation, but a response whose stream
-        // dropped a frame is incomplete and the stored transcript could not
-        // replace it: keep the recorded failure instead of a delivered reply.
-        const incomplete = !isCancelled && !failure && keeperResponseIsFailed(assistantStillLocal.responseState)
-        const incompleteReason = assistantStillLocal.error ?? INCOMPLETE_KEEPER_REPLY_MESSAGE
-        const priorResponseState = assistantStillLocal.responseState
-        finalizeAssistantEntry(request.keeperName, assistantId, {
-          // An unavailable stored state carries no ownership facts to protect;
-          // the authoritative terminal receipt still promotes it to a known
-          // terminal state instead of letting the normalizer downgrade it.
-          responseState: reduceKeeperResponse(
-            priorResponseState && priorResponseState.kind === 'known' ? priorResponseState : initialKeeperResponseState,
-            { kind: 'terminal' },
-          ).state,
-          delivery: incomplete ? 'error' : assistantDelivery,
-          streamState: null,
-          error: incomplete ? incompleteReason : errorMessage,
-          // Keep an observed occurrence time; only a placeholder saved before
-          // any assistant event falls back to the receipt's completion time so
-          // the settled row stops sorting with the no-timestamp in-flight tail.
-          timestamp: assistantStillLocal.timestamp
-            ?? new Date(operation.state.completedAt * 1000).toISOString(),
-          streamContract: keeperStreamContract('client_operation_lookup', 'client_operation_terminal', {
-            requestId: request.operationId,
-            reason: incomplete ? incompleteReason : errorMessage,
-          }),
-        })
-        if (incomplete) setRecordValue(keeperActionErrors, request.keeperName, incompleteReason)
+      if (incomplete) setRecordValue(keeperActionErrors, request.keeperName, incompleteReason)
+    }
+    if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
+    persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
+    try {
+      const canonical = await reconcileOperationFromServerHistory(
+        request.keeperName, request.operationId, operationUserEntryId(request.operationId), assistantId,
+      )
+      if (canonical) {
+        removeTrackedKeeperChatOperation(request.operationId)
+        // A prior failed hydration left a history banner behind; the
+        // canonical turn is merged now, so the failure signal is stale.
+        setRecordValue(keeperChatHistoryErrors, request.keeperName, null)
       }
-      if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
-      persistTrackedOperationAssistantDraft(request.keeperName, request.operationId, assistantId)
-      try {
-        const canonical = await reconcileOperationFromServerHistory(
-          request.keeperName, request.operationId, operationUserEntryId(request.operationId), assistantId,
-        )
-        if (canonical) {
-          removeTrackedKeeperChatOperation(request.operationId)
-          // A prior failed hydration left a history banner behind; the
-          // canonical turn is merged now, so the failure signal is stale.
-          setRecordValue(keeperChatHistoryErrors, request.keeperName, null)
-        }
-      } catch (historyError) {
-        // A missing observation cannot revoke the authoritative terminal receipt.
-        const detail = historyError instanceof Error ? historyError.message : 'Chat history unavailable'
-        setRecordValue(keeperChatHistoryErrors, request.keeperName, `이전 대화 불러오기 실패: ${detail}`)
-      }
-      return
+    } catch (historyError) {
+      // A missing observation cannot revoke the authoritative terminal receipt.
+      const detail = historyError instanceof Error ? historyError.message : 'Chat history unavailable'
+      setRecordValue(keeperChatHistoryErrors, request.keeperName, `이전 대화 불러오기 실패: ${detail}`)
     }
   } catch (err) {
-    const current = (keeperThreads.value[request.keeperName] ?? []).find(entry => entry.id === assistantId)
-    if (keeperResponseIsTerminal(current?.responseState)) {
+    if (!current()) return
+    const currentEntry = (keeperThreads.value[request.keeperName] ?? []).find(entry => entry.id === assistantId)
+    if (keeperResponseIsTerminal(currentEntry?.responseState)) {
       // A lookup observation cannot revoke a receipt already restored/applied.
       // History may now hold the canonical turn even though the lookup
       // itself fails: reconcile before retaining the receipt so the record
@@ -1037,6 +1096,7 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       await hydrateKeeperChatHistory(request.keeperName, { force: true })
       return
     }
+    lookupError = err
     const detail = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
     const message = `${PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE} (${detail})`
     // A lookup failure is not a terminal operation receipt. Keep tracking.
@@ -1061,7 +1121,12 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
     setRecordValue(keeperActionErrors, request.keeperName, message)
     await hydrateKeeperChatHistory(request.keeperName, { force: true })
   } finally {
+    pendingOperationWaiters.get(key)?.()
+    pendingOperationWaiters.delete(key)
     hydratingKeeperChatOperations.delete(key)
+    // This observation turned the sending state on, so it turns it off even after its
+    // owner (workspace, credential, actor) was replaced. Nothing else resets the state
+    // on an owner change, and the chat would keep showing an answer in progress.
     const observingAnother = trackedKeeperChatOperationsForKeeper(request.keeperName)
       .some(candidate => hydratingKeeperChatOperations.has(`${candidate.keeperName}:${candidate.operationId}`))
     if (!observingAnother && activeStreamEntryId(request.keeperName) === null) {
@@ -1069,13 +1134,17 @@ async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOpera
       setRecordValue(keeperStreamStartedAt, request.keeperName, null)
       clearKeeperStreamSignal(request.keeperName)
     }
+    if (current() && lookupError !== null && !recoveryOwned) {
+      retainFailedOperationObservation(request, lookupError, current)
+    }
   }
+  return lookupError
 }
 
 export async function hydrateTrackedKeeperChatOperations(name: string): Promise<void> {
   const keeperName = name.trim()
   if (!keeperName) return
-  await Promise.all(trackedKeeperChatOperationsForKeeper(keeperName).map(hydrateTrackedKeeperChatOperation))
+  await Promise.all(trackedKeeperChatOperationsForKeeper(keeperName).map(request => hydrateTrackedKeeperChatOperation(request)))
 }
 
 async function handoffCancelledStreamToOperationHydration(
@@ -1364,37 +1433,12 @@ export async function sendKeeperThreadMessage(
   let operationAccepted = false
   let toolCallEnded = false
   let droppedFrame: string | null = null
-  // #20849/#25898 Gap B: after ACCEPTED, the live-send SSE feed is silent
-  // while the operation sits queued behind a running turn. [lastEventAt]
-  // would otherwise cross STREAM_STALL_THRESHOLD_S and the composer would
-  // read a healthily-working keeper as "스트림 지연". The hydrate path already
-  // marks the signal on every poll tick for the same queued state; mark it
-  // here too until the stream's own reply events take over. Poll stops at
-  // the first reply-bearing event (deltas/tool calls stream from here on)
-  // and is abandoned by the stop call below on abort/failure.
-  let queuedSignalPollStopped = false
-  const stopQueuedSignalPoll = () => {
-    queuedSignalPollStopped = true
+  let queuedOperationObserver: (() => void) | null = null
+  let queuedOperationObservationStarted = false
+  const stopQueuedOperationObserver = () => {
+    queuedOperationObserver?.()
+    queuedOperationObserver = null
   }
-  void (async () => {
-    while (!queuedSignalPollStopped && !controller.signal.aborted) {
-      await sleep(PENDING_KEEPER_CHAT_POLL_MS)
-      if (queuedSignalPollStopped || controller.signal.aborted) return
-      try {
-        const operation = await fetchKeeperChatOperation(keeperName, operationId, {
-          signal: controller.signal,
-        })
-        if (operation.state.kind === 'queued' || operation.state.kind === 'running') {
-          markKeeperStreamSignal(keeperName)
-        } else {
-          return
-        }
-      } catch {
-        // Transient poll failure: the SSE feed still owns terminal
-        // handling; keep retrying until stopped.
-      }
-    }
-  })()
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
@@ -1427,6 +1471,21 @@ export async function sendKeeperThreadMessage(
             submittedAt: Date.now(),
             ...(attachments ? { attachments } : {}),
           })
+          if (!queuedOperationObservationStarted) {
+            queuedOperationObservationStarted = true
+            const authority = executionWorkspaceAuthority.peek()
+            const authRevision = currentStoredTokenRevision()
+            queuedOperationObserver = observeKeeperChatOperation(keeperName, operationId, {
+              signal: controller.signal,
+              current: () => authority === executionWorkspaceAuthority.peek()
+                && authRevision === currentStoredTokenRevision(),
+              onOperation: operation => {
+                if (operation.state.kind === 'queued' || operation.state.kind === 'running') {
+                  notePendingOperation(keeperName, assistantId, operation)
+                } else stopQueuedOperationObserver()
+              },
+            })
+          }
         }
         const error = applyKeeperStreamEvent(
           keeperName,
@@ -1446,14 +1505,14 @@ export async function sendKeeperThreadMessage(
           releaseLiveSendRequest(operationId)
         }
         // First reply-bearing event: the stream itself is the liveness
-        // signal now — retire the queued poll.
+        // signal now — retire the queued operation observer.
         if (
           event.type === 'TEXT_MESSAGE_CONTENT'
           || event.type === 'TOOL_CALL_START'
           || event.type === 'RUN_FINISHED'
           || event.type === 'RUN_ERROR'
         ) {
-          stopQueuedSignalPoll()
+          stopQueuedOperationObserver()
         }
         if (error) {
           throw new Error(error)
@@ -1677,7 +1736,7 @@ export async function sendKeeperThreadMessage(
   } finally {
     // The queued-liveness poll (Gap B above) must never outlive this send:
     // every exit path stops it here even if no reply event ever arrived.
-    stopQueuedSignalPoll()
+    stopQueuedOperationObserver()
     // Release cancellation bookkeeping on every accepted exit. The exact
     // operation ownership is released once by clearActiveStream below; the
     // non-terminal handoff released it early so its own resume was not blocked.

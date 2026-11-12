@@ -15,6 +15,18 @@ val report_roster_changed : Workspace_utils_backend_setup.config -> unit
 (** Report a roster change that is not a record write: a name added to or
     pruned from the workspace state's [active_agents]. *)
 
+type signal_change = { canonical_masc_root : string; agent_name : string }
+
+val subscribe_signal_changed : (signal_change -> unit) -> (unit -> unit)
+(** Original execution-observation fields changed in an agent record, including
+    its source-dated [last_seen], session and capabilities. A write whose
+    outcome is uncertain is reported too. The root is resolved before the
+    write. The after-write callback may run under the writer's lock: it must
+    not yield or do I/O. Listener exceptions cannot change the write outcome.
+    This leaves the Clients roster's last-seen-only exclusion unchanged. *)
+
+val signal_observer_failures : unit -> int
+
 val write :
   Workspace_utils_backend_setup.config ->
   string ->

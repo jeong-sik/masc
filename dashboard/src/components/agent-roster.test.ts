@@ -22,8 +22,8 @@ import {
 } from '../store'
 import { missionSnapshot } from '../mission-signals'
 import { namespaceTruth } from '../namespace-truth-store'
-import { fleetCompositeSnapshot } from '../composite-signals'
-import { operatorSnapshot } from '../operator-store'
+import { fleetCompositeFixture } from '../lib/fleet-composite.test-fixture'
+import { operatorSnapshotFixture as operatorSnapshot } from '../operator-snapshot.test-fixture'
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -66,6 +66,11 @@ async function flushUi(): Promise<void> {
     await Promise.resolve()
   })
 }
+
+vi.mock('../lib/use-fleet-composite', async () => {
+  const { fleetCompositeFixture } = await import('../lib/fleet-composite.test-fixture')
+  return { useFleetComposite: () => ({ data: fleetCompositeFixture.value }) }
+})
 
 describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
   function k(overrides: Partial<Keeper> = {}): Keeper {
@@ -657,7 +662,7 @@ describe('AgentRoster live-only cards', () => {
     serverStatus.value = null
     namespaceTruth.value = null
     missionSnapshot.value = null
-    fleetCompositeSnapshot.value = null
+    fleetCompositeFixture.value = null
     operatorSnapshot.value = null
   })
 
@@ -674,7 +679,7 @@ describe('AgentRoster live-only cards', () => {
     serverStatus.value = null
     namespaceTruth.value = null
     missionSnapshot.value = null
-    fleetCompositeSnapshot.value = null
+    fleetCompositeFixture.value = null
     operatorSnapshot.value = null
   })
 
@@ -1412,7 +1417,7 @@ describe('AgentRoster live-only cards', () => {
         keepalive_running: true,
       } as Keeper,
     ]
-    fleetCompositeSnapshot.value = {
+    fleetCompositeFixture.value = {
       generated_at: 1,
       count: 1,
       snapshots: [
@@ -1461,7 +1466,7 @@ describe('AgentRoster live-only cards', () => {
         keepalive_running: true,
       } as Keeper,
     ]
-    fleetCompositeSnapshot.value = {
+    fleetCompositeFixture.value = {
       generated_at: 1,
       count: 1,
       snapshots: [
@@ -1502,7 +1507,7 @@ describe('AgentRoster live-only cards', () => {
         keepalive_running: true,
       } as Keeper,
     ]
-    fleetCompositeSnapshot.value = {
+    fleetCompositeFixture.value = {
       generated_at: 1,
       count: 1,
       snapshots: [
@@ -1538,8 +1543,8 @@ describe('AgentRoster live-only cards', () => {
     expect(presence.textContent).toContain('executing live')
     expect(presence.textContent).toContain('반응형')
 
-    fleetCompositeSnapshot.value = {
-      ...fleetCompositeSnapshot.value,
+    fleetCompositeFixture.value = {
+      ...fleetCompositeFixture.value,
       snapshots: [
         makeCompositeSnapshot({
           keeper: 'sangsu',
@@ -1579,7 +1584,7 @@ describe('AgentRoster live-only cards', () => {
         keepalive_running: true,
       } as Keeper,
     ]
-    fleetCompositeSnapshot.value = {
+    fleetCompositeFixture.value = {
       generated_at: 1,
       count: 1,
       snapshots: [
@@ -1654,7 +1659,7 @@ describe('AgentRoster live-only cards', () => {
         keepalive_running: true,
       } as Keeper,
     ]
-    fleetCompositeSnapshot.value = {
+    fleetCompositeFixture.value = {
       generated_at: 1,
       count: 1,
       snapshots: [
@@ -1726,7 +1731,7 @@ describe('AgentRoster live-only cards', () => {
         keepalive_running: true,
       } as Keeper,
     ]
-    fleetCompositeSnapshot.value = {
+    fleetCompositeFixture.value = {
       generated_at: 1,
       count: 1,
       snapshots: [makeCompositeSnapshot({ keeper: 'sangsu', recommended_actions: [] })],
@@ -1831,7 +1836,7 @@ describe('AgentRoster keeper-v2 fleet.jsx parity chrome', () => {
     serverStatus.value = null
     namespaceTruth.value = null
     missionSnapshot.value = null
-    fleetCompositeSnapshot.value = null
+    fleetCompositeFixture.value = null
     operatorSnapshot.value = null
   })
 
@@ -1848,7 +1853,7 @@ describe('AgentRoster keeper-v2 fleet.jsx parity chrome', () => {
     serverStatus.value = null
     namespaceTruth.value = null
     missionSnapshot.value = null
-    fleetCompositeSnapshot.value = null
+    fleetCompositeFixture.value = null
     operatorSnapshot.value = null
   })
 
@@ -1938,4 +1943,10 @@ describe('AgentRoster keeper-v2 fleet.jsx parity chrome', () => {
     // confirmed request shuts the Keeper down durably before it cleans up.
     expect(keys).toEqual(['pause', 'wakeup', 'shutdown', 'purge'])
   })
+})
+
+vi.mock('../operator-snapshot-state', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../operator-snapshot-state')>()
+  const { operatorSnapshotFixture } = await import('../operator-snapshot.test-fixture')
+  return { ...actual, operatorSnapshot: operatorSnapshotFixture }
 })

@@ -19,7 +19,7 @@ let epochSequence = 0
 let epoch = ''
 let generation = 0
 function observeWorkspace(root: string | null) {
-  expect(hydrateExecutionSnapshot({ execution_publication_epoch: epoch, execution_publication_generation: ++generation,
+  expect(hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null }, execution_publication_epoch: epoch, execution_publication_generation: ++generation,
     status: { project: 'lane-fixture', workspace_root: root } } as Parameters<typeof hydrateExecutionSnapshot>[0])).toBe(true)
 }
 async function openNew(screen: ReturnType<typeof render>) {

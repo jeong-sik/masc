@@ -19,6 +19,7 @@ const mockCancel = vi.fn()
 vi.mock('../lib/async-state', () => ({
   createManagedAsyncResource: () => ({
     state: mockState,
+    readError: () => null,
     load: mockLoad,
     cancel: mockCancel,
     reset: vi.fn(),

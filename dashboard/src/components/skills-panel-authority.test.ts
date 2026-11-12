@@ -11,7 +11,7 @@ const exactRequests = vi.hoisted(() => ({ fetchAsyncRequestStatus: vi.fn() }))
 const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<ExecutionWorkspaceAuthority | null> }))
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
-  workspace.current = signal<ExecutionWorkspaceAuthority | null>(null)
+  workspace.current = (await import('../execution-workspace-authority')).acceptedExecutionWorkspace
   return { executionWorkspaceAuthority: workspace.current, keepers: signal([]), executionLoaded: signal(false) }
 })
 vi.mock('../api/dashboard-skills', async original => ({ ...await original<typeof import('../api/dashboard-skills')>(), ...api }))
@@ -25,7 +25,7 @@ function pending<T>() {
   const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail })
   return { promise, resolve, reject }
 }
-const authority = (root = '/workspace-a'): ExecutionWorkspaceAuthority => ({ epoch: 'fixture', workspaceRoot: root, connectionGeneration: 1 })
+const authority = (root = '/workspace-a'): ExecutionWorkspaceAuthority => ({ epoch: 'fixture', workspaceRoot: root, connectionGeneration: 1, observerInstanceId: 'fixture-instance' })
 const reference = (name: string): SkillReference => ({ identity: { source_id: 'workspace', package_id: name, name }, content_revision: `revision-${name}` })
 function catalog(names = ['alpha', 'beta']): SkillsResponse {
   return { schema: 'masc.skill-snapshot/v1', state: 'ready', snapshot: {
@@ -89,22 +89,19 @@ async function startSave() {
 
 describe('Skills observation owner', () => {
   it('retains the selected exact request after its active inventory row disappears', async () => {
-    const timer = vi.spyOn(window, 'setInterval')
     exactRequests.fetchAsyncRequestStatus.mockResolvedValue({ status: 'observed',
       request: { request_id: 'current-request', submitted_by: 'operator', keeper_name: 'owner', request_context: null, status: 'done' }, nested: { kind: 'absent' } })
-    try {
-      render(html`<${SkillsPanel} />`)
-      fireEvent.click(await screen.findByRole('button', { name: 'Inspect exact request' }))
-      await screen.findByText('Request state: done')
-      api.fetchAsyncRequestObservation.mockResolvedValue({ schema: 'masc.async-request-observation/v1', status: 'ready',
-        summary: { active: 0, runtime_owned: 0, ownership_unknown: 0, record_errors: 0 }, record_errors: [], startup_recovery: null, requests: [] })
-      const refresh = timer.mock.calls[0]![0]
-      await act(async () => refresh())
-      await screen.findByText('No durable active requests.')
-      expect(screen.getByRole('region', { name: 'Exact async request' })).toBeTruthy()
-      expect(screen.getByText('Request state: done')).toBeTruthy()
-      expect(exactRequests.fetchAsyncRequestStatus).toHaveBeenCalledWith({ submitted_by: 'operator', keeper_name: 'owner', request_id: 'current-request' }, { signal: expect.any(AbortSignal) })
-    } finally { timer.mockRestore() }
+    render(html`<${SkillsPanel} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect exact request' }))
+    await screen.findByText('Request state: done')
+    api.fetchAsyncRequestObservation.mockResolvedValue({ schema: 'masc.async-request-observation/v1', status: 'ready',
+      summary: { active: 0, runtime_owned: 0, ownership_unknown: 0, record_errors: 0 }, record_errors: [], startup_recovery: null, requests: [] })
+    const { publishDashboardObservationChange } = await import('../lib/observation-refresh')
+    await act(async () => { publishDashboardObservationChange({ topic: 'async_requests' }) })
+    await screen.findByText('No durable active requests.')
+    expect(screen.getByRole('region', { name: 'Exact async request' })).toBeTruthy()
+    expect(screen.getByText('Request state: done')).toBeTruthy()
+    expect(exactRequests.fetchAsyncRequestStatus).toHaveBeenCalledWith({ submitted_by: 'operator', keeper_name: 'owner', request_id: 'current-request' }, { signal: expect.any(AbortSignal) })
   })
 
   it('can look up an exact retained request that was never in the active inventory', async () => {

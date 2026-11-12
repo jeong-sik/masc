@@ -66,8 +66,15 @@ val get_or_compute_digest_json :
   Yojson.Safe.t
 (** Cached read with TTL [5.0 s] for the heavier digest projection. *)
 
+type snapshot_read =
+  | Cached_json of Yojson.Safe.t
+  | Observed of Dashboard_projection_read.observation
+(** Ordinary request-cache JSON and an actual Current read are different
+    authorities. Cached bytes do not fabricate typed completeness/deadlines. *)
+
 type operator_snapshot_fn = {
   snapshot : 'a.
+    ?read_policy:Dashboard_projection_read.t ->
     ?actor:string ->
     ?view:string ->
     ?include_messages:bool ->
@@ -75,24 +82,34 @@ type operator_snapshot_fn = {
     ?include_summary_fields:bool ->
     ?lightweight_summary:bool ->
     'a Tool_operator.context ->
-    Yojson.Safe.t;
+    snapshot_read;
 }
 
-type operator_digest_fn = {
-  digest : 'a.
+type digest_observation = Dashboard_projection_read.observation = {
+  json : Yojson.Safe.t;
+  next_deadline_unix : float option;
+  completeness : Dashboard_projection_read.completeness;
+}
+(** The digest's actual retained source observation and its next policy
+    transition, including typed storage completeness. Display-only age growth
+    is not a refresh deadline. *)
+
+type operator_digest_observer = {
+  observe_digest : 'a.
     ?actor:string ->
     ?target_type:string ->
     ?target_id:string ->
     ?include_workers:bool ->
     'a Tool_operator.context ->
-    (Yojson.Safe.t, string) result;
+    (digest_observation, string) result;
 }
 
 val register_operator_snapshot_json : operator_snapshot_fn -> unit
 
-val register_operator_digest_json : operator_digest_fn -> unit
+val register_operator_digest_observer : operator_digest_observer -> unit
 
 val operator_snapshot_json :
+  ?read_policy:Dashboard_projection_read.t ->
   ?actor:string ->
   ?view:string ->
   ?include_messages:bool ->
@@ -101,6 +118,26 @@ val operator_snapshot_json :
   ?lightweight_summary:bool ->
   'a Tool_operator.context ->
   Yojson.Safe.t
+(** Product JSON facade over the registered request/Current reader. *)
+
+val operator_snapshot_observation :
+  ?actor:string ->
+  ?view:string ->
+  ?include_messages:bool ->
+  ?include_keepers:bool ->
+  ?include_summary_fields:bool ->
+  ?lightweight_summary:bool ->
+  'a Tool_operator.context -> Dashboard_projection_read.observation
+(** Always requests Current and requires [Observed]. The returned rows,
+    read completeness and semantic deadline belong to that same read. *)
+
+val operator_digest_observation :
+  ?actor:string ->
+  ?target_type:string ->
+  ?target_id:string ->
+  ?include_workers:bool ->
+  'a Tool_operator.context ->
+  (digest_observation, string) result
 
 val operator_digest_json :
   ?actor:string ->

@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperQueueCancellation, KeeperQueuePreview, KeeperQueueRow } from '../../api/keeper-event-queue'
 
 vi.mock('../../store', () => ({
-  executionWorkspaceAuthority: signal({ workspaceRoot: '/fixture/a', epoch: 'epoch-a', connectionGeneration: 1 }),
+  executionWorkspaceAuthority: signal({ workspaceRoot: '/fixture/a', epoch: 'epoch-a', connectionGeneration: 1,
+    observerInstanceId: null }),
   shellAuthSummary: signal({ effective_role: 'admin' }),
 }))
 vi.mock('../../api/core', async importOriginal => {
@@ -50,7 +51,7 @@ async function prepare() {
 }
 beforeEach(() => {
   keeperQueueOperation.value = { kind: 'idle' }
-  authority.value = { workspaceRoot: '/fixture/a', epoch: 'epoch-a', connectionGeneration: 1 }
+  authority.value = { workspaceRoot: '/fixture/a', epoch: 'epoch-a', connectionGeneration: 1, observerInstanceId: null }
   auth.value = { effective_role: 'admin' } as import('../../types').DashboardShellAuthSummary
   vi.mocked(dashboardCredentialOwnerIsCurrent).mockReturnValue(true)
   vi.mocked(previewKeeperQueue).mockResolvedValue(preview())
@@ -94,7 +95,7 @@ describe('fleet queue cancel workflow', () => {
     fireEvent.click(screen.getByRole('button', { name: '확인한 1건 취소' }))
     await screen.findByText(/취소 완료 1건/)
     await screen.findByText(/같은 버전으로 대기 중/)
-    await act(async () => { authority.value = { workspaceRoot: '/fixture/a', epoch: 'epoch-a', connectionGeneration: 2 } })
+    await act(async () => { authority.value = { workspaceRoot: '/fixture/a', epoch: 'epoch-a', connectionGeneration: 2, observerInstanceId: null } })
     vi.mocked(previewKeeperQueue).mockResolvedValueOnce(preview([second]))
     fireEvent.click(screen.getByRole('button', { name: '요청 대상 재조회' }))
     await screen.findByText(/확인한 대상 중 0건/)
@@ -106,7 +107,7 @@ describe('fleet queue cancel workflow', () => {
     fireEvent.input(screen.getByRole('textbox', { name: 'Keeper 이름 필터' }), { target: { value: 'beta' } })
     expect(screen.queryByRole('group', { name: '취소 내용 확인' })).toBeNull()
     expect(cancelKeeperQueue).not.toHaveBeenCalled()
-    await act(async () => { authority.value = { workspaceRoot: '/fixture/b', epoch: 'epoch-b', connectionGeneration: 2 } })
+    await act(async () => { authority.value = { workspaceRoot: '/fixture/b', epoch: 'epoch-b', connectionGeneration: 2, observerInstanceId: null } })
     expect(screen.queryByText('alpha')).toBeNull()
     expect(cancelKeeperQueue).not.toHaveBeenCalled()
   })

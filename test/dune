@@ -1363,7 +1363,7 @@
 (test
  (name test_operator_control_snapshot)
  (modules test_operator_control_snapshot)
- (libraries masc_test_deps test_operator_control_support))
+ (libraries masc_test_deps test_operator_control_support eio.mock))
 
 ; The operator-control helper is shared by four executables in two different
 ; stanzas (the big tests group and the snapshot extraction), so it owns a
@@ -2940,12 +2940,17 @@
 (include stanzas/test_dashboard_keeper_metrics_10286.inc)
 
 (include stanzas/test_dashboard_tla_specs.inc)
+(include stanzas/test_native_file_change.inc)
+(include stanzas/test_tla_source_events.inc)
 
 (include stanzas/test_dated_jsonl.inc)
 
 (include stanzas/test_telemetry_unified_keeper_fan_in.inc)
 (include stanzas/test_tool_metrics_store_concurrent.inc)
 (include stanzas/test_tool_metrics_series.inc)
+(include stanzas/test_tool_metrics_series_stream.inc)
+(include stanzas/test_model_metrics_stream.inc)
+(include stanzas/test_native_query_observer_scope.inc)
 (include stanzas/test_tui_decode_tool_series.inc)
 (include stanzas/test_tui_usage_calls.inc)
 
@@ -3196,6 +3201,15 @@
 
 (include stanzas/test_keeper_execution_join.inc)
 (include stanzas/test_full_health_wakeup.inc)
+(include stanzas/test_proactive_refresh_changes.inc)
+(include stanzas/test_server_observation_input.inc)
+(include stanzas/test_server_observation_refresh.inc)
+(include stanzas/test_dashboard_observation_broadcast.inc)
+(include stanzas/test_dashboard_snapshot_sources.inc)
+(include stanzas/test_server_dashboard_mission_observation.inc)
+(include stanzas/test_server_dashboard_operator_digest_observation.inc)
+(include stanzas/test_server_dashboard_operator_snapshot_observation.inc)
+(include stanzas/test_server_dashboard_operator_snapshot_flow.inc)
 (include stanzas/test_dashboard_spa_deep_link.inc)
 (include stanzas/test_pending_confirm_expiry.inc)
 (include stanzas/test_wall_deadline.inc)
@@ -3430,6 +3444,7 @@
 
 (include stanzas/test_keeper_official_argument_window.inc)
 (include stanzas/test_keeper_official_client_host.inc)
+(include stanzas/test_official_client_canonical_source_digest.inc)
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_keeper_codex_tool_outbox_wake.inc)
@@ -6497,7 +6512,7 @@
 (test
  (name test_dashboard_execution_render_window)
  (modules test_dashboard_execution_render_window)
- (libraries alcotest eio eio.mock yojson masc.dashboard unix masc.fs_compat masc))
+ (libraries alcotest eio eio.mock yojson masc.dashboard unix masc.fs_compat masc masc_test_deps))
 
 ; Keeper practice summary: autonomous turn-mode/outcome mix folded from the
 ; decision-log tail. The vocabulary-coupling case builds probe rows from
@@ -7420,3 +7435,7 @@
 (include stanzas/test_keeper_chat_run_signal.inc)
 
 (include stanzas/test_server_skill_missing_on_disk.inc)
+
+(include stanzas/test_telemetry_source_writes.inc)
+
+(include stanzas/test_server_dashboard_keeper_decisions_current.inc)

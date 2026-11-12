@@ -15,7 +15,10 @@
     {b Authorization.} The route decides nothing itself.
     {!Runtime_account_access.authorize} decides a [Keeper_turn] on the
     [Direct] channel from the log, and the client starts only on the account
-    it authorizes.
+    it authorizes. A request that a personal access token authenticated runs
+    the turn only inside the scope of that token: the scope names the
+    Runtime, the [Direct] channel, and the effects [invoke_model] and
+    [use_tool] ({!Authz_keeper_turn.requested}).
 
     {b The call.} One turn of the client of the Runtime:
     - Claude Code: {!Runtime_claude_code.run_turn} in the posture of
@@ -46,7 +49,8 @@ val max_message_bytes : int
     - 400: the body is not that, the message is blank or longer than
       {!max_message_bytes}, or the Runtime is neither a Claude Code nor a
       Codex Runtime.
-    - 403: {!Runtime_account_access.authorize} refused the turn.
+    - 403: {!Runtime_account_access.authorize} refused the turn. The scope of
+      [pat] not covering the turn is one such refusal.
     - 404: the Keeper is not the person's.
     - 409: the Keeper has no Runtime, a call of the account runs, or the
       account is not signed in to a subscription.
@@ -59,6 +63,7 @@ val max_message_bytes : int
 val run
   :  env:Eio_unix.Stdenv.base
   -> person:Server_setup_account_login.person
+  -> pat:Authz_types.Pat_binding.t
   -> base_path:string
   -> body:string
   -> Login_routes.answer

@@ -1,5 +1,5 @@
 // MASC Dashboard server-push event projection.
-// Transport ownership lives in dashboard-ws.ts; this module only applies the
+// Transport ownership lives in dashboard-observer.ts; this module only applies the
 // typed events that arrive through that single WebSocket connection.
 
 import { signal } from '@preact/signals'

@@ -46,7 +46,7 @@ describe('saved prompt preset actions', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     resetPromptPresetSessionsForTesting()
-    workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 1 }
+    workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 1, observerInstanceId: null }
     mocks.fetchPromptPresets.mockResolvedValue({ ok: true, presets: [manifest()], unreadable: [] })
     mocks.fetchPromptPresetDetail.mockImplementation(async (name: string) => detail(name))
     mocks.restorePromptPreset.mockResolvedValue({ kind: 'confirmed', value: report })
@@ -134,13 +134,13 @@ describe('saved prompt preset actions', () => {
     workspace.current.value = null
     await waitFor(() => expect(container.querySelector('[data-testid="prompt-presets-restore"]')).toBeNull())
     mocks.fetchPromptPresets.mockResolvedValue({ ok: true, presets: [manifest('evening')], unreadable: [] })
-    workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-b', connectionGeneration: 2, observerInstanceId: null }
     await ready()
     finishOld(detail('morning'))
     await waitFor(() => expect(container.querySelector('[data-preset-detail]')?.getAttribute('data-preset-detail')).toBe('evening'))
     fireEvent.click(button('prompt-presets-restore'))
     await waitFor(() => expect(button('prompt-presets-confirm')).not.toBeNull())
-    workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 3 }
+    workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 3, observerInstanceId: null }
     await waitFor(() => expect(container.querySelector('[data-preset-confirmation]')).toBeNull())
     expect(mocks.restorePromptPreset).not.toHaveBeenCalled()
   })

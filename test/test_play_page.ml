@@ -5,6 +5,8 @@
 open Alcotest
 module Page = Server_routes_http_routes_play_page
 module Guide = Server_routes_http_routes_play_guide
+module Events = Server_routes_http_routes_play_events
+module Machine_lane = Masc.Machine_lane
 
 let remove_tree path =
   let rec go path =
@@ -532,6 +534,108 @@ let test_ineligible_participation_does_not_hide_active_seats () =
       let seats = auth_ok (Masc.Play_seat.participants ~base_path ~keepers:[] ~now:(Unix.gettimeofday ())) in
       check (list string) "irrelevant damaged state does not block eligible seats" ["active"] seats))
 
+let test_observation_requires_a_scoped_bearer () =
+  with_dir "play-observation-auth-" (fun base_path ->
+    Auth.save_auth_config base_path
+      { Masc_domain.default_auth_config with enabled = true; require_token = true };
+    let token = token_for base_path ~agent_name:"minsu" ~role:Masc_domain.Player in
+    (* This router fixture has no connection switch or clock. A correctly
+       admitted Player reaches readiness, rather than the Admin observer gate. *)
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+    Eio_main.run (fun env ->
+      Masc_test_deps.init_eio_clock env;
+      let get suffix bearer = dispatch_get ~state ~target:(Events.path ^ suffix) ~token:bearer |> status_of in
+      check int "anonymous observation is refused" 401 (get "?machine=dos" None);
+      check int "an invalid bearer is refused" 401 (get "?machine=dos" (Some "invalid"));
+      check int "a Player is admitted without generic observer authority" 503 (get "?machine=dos" (Some token));
+      List.iter (fun suffix -> check int suffix 400 (get suffix (Some token)))
+        [ ""; "?machine=unknown"; "?machine=dos&machine=msx"
+        ; "?machine=dos&token=must-not-be-used"; "?machine=dos&scope=admin"
+        ; "?machine=dos&client_id=bad%20client" ]))
+
+let test_observation_invalidates_only_its_public_read_models () =
+  let changed fields = Events.change_of_payload ~machine:Machine_lane.Dos (`Assoc fields) in
+  let dataset name extra = changed
+      (["type", `String Masc.Workspace_dataset_event.event_type; "dataset", `String name; "ts_unix", `Float 1.] @ extra) in
+  check bool "selected machine changed" true
+    (dataset "machine_live" ["machine", `String "dos"] = Some Events.Machine);
+  check bool "another machine cannot drive this frame read" true
+    (dataset "machine_live" ["machine", `String "msx"] = None);
+  check bool "the public transcript is shared across machines" true
+    (dataset "play_room" ["machine", `String "msx"] = Some Events.Room);
+  check bool "participation commits refresh the seat and roster" true
+    (dataset "play_seats" [] = Some Events.Seats);
+  let keeper kind extra = changed
+      (["type", `String kind; "name", `String "private-holder-name"; "ts_unix", `Float 1.] @ extra) in
+  check bool "idle Keeper pause refreshes recoverability" true
+    (keeper "keeper_phase_changed" ["prev_phase", `String "running"; "new_phase", `String "paused"] = Some (Events.Keeper "private-holder-name"));
+  check bool "composite changes refresh holder identity" true
+    (keeper "keeper_composite_changed" [] = Some (Events.Keeper "private-holder-name"));
+  check bool "invalid lifecycle state is not a producer" true
+    (keeper "keeper_phase_changed" ["prev_phase", `String "running"; "new_phase", `String "invented"] = None);
+  check bool "private chat cannot appear on the Play transport" true
+    (keeper "keeper_chat_appended" ["text", `String "private"] = None);
+  check string "only a public read invalidation leaves the transport"
+    "event: play\ndata: {\"change\":\"seats\"}\n\n" (Events.frame Events.Seats)
+
+let test_seat_expiry_uses_bearer_admission_boundary () =
+  let credential : Masc_domain.agent_credential =
+    { id = None; agent_id = None; agent_name = "holder"; token = "unused-hash"
+    ; role = Player; created_at = "2000-01-01T00:00:00Z"
+    ; expires_at = Some "2000-01-01T00:00:00Z" } in
+  let epoch = 946684800. in
+  let next now credentials = Events.For_testing.next_seat_expiry ~now credentials in
+  check (option (float 0.)) "a credential remains live throughout its expiry second"
+    (Some (epoch +. 1.)) (next (epoch +. 0.75) [credential]);
+  check (option (float 0.)) "an already expired credential cannot create a busy deadline loop"
+    None (next (epoch +. 1.) [credential]);
+  check (option (float 0.)) "workers do not form a seat expiry source"
+    None (next (epoch -. 1.) [{ credential with role = Worker }]);
+  check (option (float 0.)) "a non-expiring operator has no read timer"
+    None (next epoch [{ credential with role = Admin; expires_at = None }]);
+  let malformed = { credential with expires_at = Some "malformed" } in
+  check (option (float 0.)) "malformed authority supplies no seat deadline"
+    None (next epoch [malformed]);
+  List.iter (fun credentials ->
+    check (option (float 0.)) "one malformed expiry cannot hide a valid seat deadline"
+      (Some (epoch +. 1.)) (next epoch credentials))
+    [[malformed; credential]; [credential; malformed]]
+
+let test_malformed_credential_does_not_poison_seat_observation () =
+  with_dir "play-malformed-seat-expiry-" (fun base_path ->
+    Eio_main.run (fun env ->
+      Masc_test_deps.init_eio_clock env;
+      Auth.save_auth_config base_path
+        { Masc_domain.default_auth_config with enabled = true; require_token = true };
+      let auth_ok = function
+        | Ok value -> value
+        | Error error -> fail (Masc_domain.masc_error_to_string error) in
+      ignore (auth_ok (Auth.create_token_without_expiry base_path
+        ~agent_name:"operator" ~role:Masc_domain.Admin));
+      let _, holder = auth_ok (Auth.create_token_without_expiry base_path
+        ~agent_name:"holder" ~role:Masc_domain.Player) in
+      Auth.save_credential base_path
+        { holder with expires_at = Some "2100-01-01T00:00:00Z" };
+      List.iter (fun (agent_name, role) ->
+        let token, damaged = auth_ok (Auth.create_token_without_expiry base_path
+          ~agent_name ~role) in
+        Auth.save_credential base_path
+          { damaged with expires_at = Some "malformed" };
+        check bool "ignoring a damaged deadline cannot admit its bearer" true
+          (Result.is_error (Auth.verify_token base_path ~agent_name ~token)))
+        ["invalid-admin", Masc_domain.Admin; "invalid-player", Masc_domain.Player];
+      (* This is the actual transaction and selector used by the stream's
+         deadline worker, including the two readable damaged credentials. *)
+      let next = match Events.For_testing.observe_seat_expiry ~base_path with
+        | Ok next -> next
+        | Error () -> fail "one damaged expiry retired the workspace observation" in
+      check (option (float 0.)) "the valid expiry still drives the observer"
+        (Some 4102444801.) next;
+      let seats = auth_ok (Masc.Play_seat.participants ~base_path ~keepers:[]
+        ~now:(Time_compat.now ())) in
+      check (list string) "valid seats remain visible and damaged credentials are excluded"
+        ["holder"; "operator"] seats))
+
 let () =
   run "play-page"
     [ ( "page"
@@ -542,5 +646,9 @@ let () =
         ; test_case "expired invites and operators are not seats" `Quick test_expired_credentials_are_not_seats
         ; test_case "explicit departure and same-link reconnect over HTTP" `Quick test_explicit_departure_and_same_link_reconnect
         ; test_case "ineligible damaged participation cannot hide active seats" `Quick test_ineligible_participation_does_not_hide_active_seats
+        ; test_case "Play observation requires an exact scoped bearer" `Quick test_observation_requires_a_scoped_bearer
+        ; test_case "Play observation emits only relevant public invalidations" `Quick test_observation_invalidates_only_its_public_read_models
+        ; test_case "seat expiry uses the bearer admission boundary" `Quick test_seat_expiry_uses_bearer_admission_boundary
+        ; test_case "one malformed credential cannot retire seat observation" `Quick test_malformed_credential_does_not_poison_seat_observation
         ] )
     ]

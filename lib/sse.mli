@@ -267,6 +267,22 @@ type external_event = {
   ext_emitted_at : float;  (** Broadcast time, not subscriber arrival time. *)
 }
 
+val subscribe_publication_inputs :
+  runtime_authority:runtime_authority ->
+  ?observer_instance_id:string ->
+  (external_event -> unit) -> (unit -> unit)
+(** Observe committed observer publications inside the server, including
+    [broadcast_to_sse_runtime_observers] which bypasses external transports.
+    This is a synchronous after-publication hook, with the same authority,
+    instance and visibility selection as external subscribers. It adds no
+    queue, replay log or transport registration. Presence-only publications
+    never call it. Subscribe before the initial authoritative read.
+
+    Callbacks must not block or yield. Their exceptions, cancellation
+    included, are logged without replacing the original publication outcome;
+    the caller's next suspension still sees its own cancellation. The returned
+    unsubscribe removes only this subscription and is idempotent. *)
+
 val subscribe_external :
   ?runtime_authority:runtime_authority ->
   ?observer_instance_id:string ->

@@ -12,9 +12,9 @@ const workspaceOwner = vi.hoisted(() => ({ reset: () => {} }))
 const authOwner = vi.hoisted(() => ({ change: undefined as ((epoch: number) => void) | undefined }))
 
 vi.mock('../../store', async () => {
-  const { signal } = await import('@preact/signals')
-  const authority = signal<unknown>(null)
-  workspaceOwner.reset = () => { authority.value = { epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 } }
+  const { acceptedExecutionWorkspace: authority } = await import('../../execution-workspace-authority')
+  workspaceOwner.reset = () => { authority.value = { epoch: 'fixture', workspaceRoot: '/workspace',
+    connectionGeneration: 1, observerInstanceId: 'artifact-test-instance' } }
   return { executionWorkspaceAuthority: authority }
 })
 
@@ -23,7 +23,8 @@ vi.mock('../../router', async () => {
   const route = signal({ tab: 'workspace', params: {} as Record<string, string>, postId: null })
   return { route, navigate: vi.fn((tab: string, params: Record<string, string>) => { route.value = { tab, params, postId: null } }) }
 })
-vi.mock('../../api/core', () => ({
+vi.mock('../../api/core', async original => ({
+  ...await original<typeof import('../../api/core')>(),
   get: vi.fn(), getPublic: vi.fn(), getWithResponse: vi.fn(), post: vi.fn(), currentStoredTokenRevision: vi.fn(() => 0), getStoredToken: vi.fn(() => 'test-token'),
   subscribeStoredTokenChanges:vi.fn(()=>()=>{}),
   ApiRequestError: class extends Error { status = 404 },
@@ -301,6 +302,7 @@ describe('artifact library user flow', () => {
     vi.mocked(get).mockImplementationOnce(() => new Promise(r => { resolve = r }))
     const view = render(html`<${ArtifactDraftSessionProvider}><${ArtifactsSurface} /><//>`)
     expect(view.getByRole('status').textContent).toContain('목록을 불러오고')
+    await waitFor(() => expect(resolve).toBeTypeOf('function'))
     resolve?.({ artifacts: [], diagnostics: [] })
     expect(await view.findByText(/아직 게시된 아티팩트가 없습니다/)).toBeTruthy()
     vi.mocked(get).mockRejectedValueOnce(new Error('permission denied'))

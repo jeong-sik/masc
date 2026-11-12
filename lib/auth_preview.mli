@@ -76,15 +76,24 @@ val keeper_owner
   -> Auth_gate.request
   -> (Authz_types.User_id.t, Login_routes.answer) result
 
+(** Who asks for a turn of their Keeper. *)
+type turn_caller =
+  { person : person
+        (** With the namespace their admission fixed: the turn starts the
+            client of their account on a home under it (plan D2-8). *)
+  ; pat : Authz_types.Pat_binding.t
+        (** The personal access token that authenticated the request, or
+            [Not_pat] for a session. The decision of the turn reads its
+            scope ({!Authz_keeper_turn.decide}). *)
+  }
+
 (** Judges the request as [Manage_own_keeper], as {!keeper_owner} does, and
-    gives the person with the namespace their admission fixed: a turn of
-    their Keeper starts the client of their account on a home under that
-    namespace (plan D2-8). *)
-val keeper_owner_person
+    gives the caller of the turn. *)
+val keeper_turn_caller
   :  Authz_zone.trusted
   -> now_ms:int
   -> Auth_gate.request
-  -> (person, Login_routes.answer) result
+  -> (turn_caller, Login_routes.answer) result
 
 (** A 200 JSON [{"provider_accounts": [...], "runtimes": [...]}]: the ids of
     the accounts the person owns ({!Authz_provider_account.owned}), and the

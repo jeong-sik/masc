@@ -1,3 +1,5 @@
+import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
+import { captureDashboardObservationOwner } from '../../lib/observation-read-owner'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   clearTraces,
@@ -5,6 +7,11 @@ import {
 } from './keeper-trace-store'
 import { bridgeRunActivityEventsToTrace } from './run-activity-trace-bridge'
 import type { RunActivityEvent } from './run-activity-store'
+beforeEach(() => {
+  acceptedExecutionWorkspace.value = { epoch: 'trace-test', workspaceRoot: '/fixture/trace',
+    connectionGeneration: 1, observerInstanceId: 'trace-test-instance' }
+})
+
 
 beforeEach(() => {
   clearTraces()
@@ -35,7 +42,7 @@ describe('bridgeRunActivityEventsToTrace', () => {
           worker_run_id: 'wr-runtime',
         },
       }),
-    ], new Set())
+    ], new Set(), captureDashboardObservationOwner())
 
     expect([...emitted]).toEqual(['activity:run-default:evt-1'])
     expect(keeperTraceState.value.events).toEqual([{
@@ -71,8 +78,8 @@ describe('bridgeRunActivityEventsToTrace', () => {
       },
     })
 
-    const emitted = bridgeRunActivityEventsToTrace([event], new Set())
-    const emittedAgain = bridgeRunActivityEventsToTrace([event], emitted)
+    const emitted = bridgeRunActivityEventsToTrace([event], new Set(), captureDashboardObservationOwner())
+    const emittedAgain = bridgeRunActivityEventsToTrace([event], emitted, captureDashboardObservationOwner())
 
     expect(emittedAgain).toBeInstanceOf(Set)
     expect(keeperTraceState.value.events).toHaveLength(1)
@@ -101,7 +108,7 @@ describe('bridgeRunActivityEventsToTrace', () => {
           worker_run_id: 'worker-12',
         },
       }),
-    ], new Set())
+    ], new Set(), captureDashboardObservationOwner())
 
     expect([...emitted]).toEqual([
       'activity:run-default:evt-comment',
@@ -137,7 +144,7 @@ describe('bridgeRunActivityEventsToTrace', () => {
       context: { file_path: '/tmp/runtime.ml', line: 5, log_id: 'turn-2' },
     })
 
-    const first = bridgeRunActivityEventsToTrace([unscoped, unsafe], new Set())
+    const first = bridgeRunActivityEventsToTrace([unscoped, unsafe], new Set(), captureDashboardObservationOwner())
     expect([...first]).toEqual([])
     expect(keeperTraceState.value.events).toEqual([])
 
@@ -146,7 +153,7 @@ describe('bridgeRunActivityEventsToTrace', () => {
         id: 'evt-1',
         context: { file_path: 'lib/runtime.ml', line: 4, log_id: 'turn-1' },
       }),
-    ], first)
+    ], first, captureDashboardObservationOwner())
 
     expect([...enriched]).toEqual(['activity:run-default:evt-1'])
     expect(keeperTraceState.value.events[0]).toMatchObject({

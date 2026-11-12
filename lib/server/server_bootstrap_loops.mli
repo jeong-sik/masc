@@ -142,6 +142,7 @@ val start_keeper_loops :
   invalidate_full_health_snapshot:(unit -> unit) ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Process.mgr ->
   Mcp_server.server_state -> unit
@@ -188,6 +189,10 @@ module For_testing : sig
 
   val board_sse_event_params : Board_dispatch.board_sse_event -> Yojson.Safe.t
 
+  val publish_board_sse_event : Board_dispatch.board_sse_event -> unit
+  (** The production hook's cache invalidation and exact JSON-RPC publication
+      boundary, without the separate Activity side effect. *)
+
   val broadcast_mention_wakeup_action :
     string option -> [ `Suppress_no_target | `Wake_keeper of string ]
 
@@ -213,6 +218,8 @@ module For_testing : sig
   val mention_transcript_settled : Workspace_broadcast.mention_delivery -> bool
 
   val install_workspace_message_mutation_invalidation :
+    state:Mcp_server.server_state -> sw:Eio.Switch.t ->
+    mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
     invalidate_full_health_snapshot:(unit -> unit) -> unit -> unit
 
   val reset_keeper_persistence_lifecycle : unit -> unit

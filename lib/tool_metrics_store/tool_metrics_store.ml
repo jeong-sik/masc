@@ -535,31 +535,82 @@ let sample_of_statement statement =
     }
 ;;
 
+let read_series_rows db ~window ?tool_name add =
+  let since, until = Tool_metrics_series.window_bounds window in
+  let bounds = [ Sqlite3.Data.FLOAT since; Sqlite3.Data.FLOAT until ] in
+  let values = match tool_name with
+    | None -> bounds
+    | Some name -> bounds @ [ Sqlite3.Data.TEXT name ] in
+  let operation = "read tool metric series" in
+  with_statement db ~operation (series_sql tool_name) (fun statement ->
+    let* () = bind_all db statement ~operation:"bind tool metric series filters" values in
+    fold_statement db statement ~operation ~f:(fun row ->
+      let* sample = sample_of_statement row in
+      add sample))
+;;
+
 let read_series ~masc_root ~window ?tool_name () =
   let builder = Tool_metrics_series.builder window in
   let path = database_path ~masc_root in
   if not (Sys.file_exists path)
   then Ok (Tool_metrics_series.finish builder)
   else (
-    let since, until = Tool_metrics_series.window_bounds window in
-    let bounds = [ Sqlite3.Data.FLOAT since; Sqlite3.Data.FLOAT until ] in
-    let values =
-      match tool_name with
-      | None -> bounds
-      | Some name -> bounds @ [ Sqlite3.Data.TEXT name ]
-    in
-    let operation = "read tool metric series" in
     let* _row_count =
-      with_read_only_db ~path (fun db ->
-        with_statement db ~operation (series_sql tool_name) (fun statement ->
-          let* () =
-            bind_all db statement ~operation:"bind tool metric series filters" values
-          in
-          fold_statement db statement ~operation ~f:(fun row ->
-            let* sample = sample_of_statement row in
-            Tool_metrics_series.add builder sample)))
+      with_read_only_db ~path (fun db -> read_series_rows db ~window ?tool_name
+        (Tool_metrics_series.add builder))
     in
     Ok (Tool_metrics_series.finish builder))
+;;
+
+type series_observation = {
+  series : Tool_metrics_series.t;
+  next_change_at : float;
+}
+
+let first_future_sample db ~until ?tool_name () =
+  let sql = "SELECT MIN(ts) FROM tool_metric_events WHERE ts >= ?1" in
+  let sql, values = match tool_name with
+    | None -> sql, [Sqlite3.Data.FLOAT until]
+    | Some name -> sql ^ " AND tool_name = ?2", [Sqlite3.Data.FLOAT until; Sqlite3.Data.TEXT name] in
+  let operation = "read next tool metric admission" in
+  with_statement db ~operation sql (fun statement ->
+    let* () = bind_all db statement ~operation values in
+    let found = ref None in
+    let* _ = fold_statement db statement ~operation ~f:(fun row ->
+      if Sqlite3.column row 0 = Sqlite3.Data.NULL then Ok ()
+      else
+        let ts = Sqlite3.column_double row 0 in
+        if Float.is_finite ts then (found := Some ts; Ok ())
+        else Error "next tool metric timestamp is not finite") in
+    Ok !found)
+;;
+
+let observe_series ~masc_root ~window ?tool_name () =
+  let builder = Tool_metrics_series.builder window in
+  let oldest = ref None in
+  let finish next_sample =
+    { series = Tool_metrics_series.finish builder
+    ; next_change_at = Tool_metrics_series.next_change_at window
+        ~oldest_sample:!oldest ~next_sample } in
+  let path = database_path ~masc_root in
+  if not (Sys.file_exists path) then Ok (finish None)
+  else with_read_only_db ~path (fun db ->
+    let* () = exec db ~operation:"begin series observation" "BEGIN" in
+    let result =
+      let* _ = read_series_rows db ~window ?tool_name (fun sample ->
+        let* () = Tool_metrics_series.add builder sample in
+        oldest := Some (match !oldest with None -> sample.ts | Some ts -> min ts sample.ts);
+        Ok ()) in
+      let _, until = Tool_metrics_series.window_bounds window in
+      let* next_sample = first_future_sample db ~until ?tool_name () in
+      Ok (finish next_sample) in
+    match result with
+    | Ok _ ->
+        let* () = exec db ~operation:"finish series observation" "COMMIT" in
+        result
+    | Error _ ->
+        ignore (exec db ~operation:"rollback series observation" "ROLLBACK");
+        result)
 ;;
 
 let row_to_json row =

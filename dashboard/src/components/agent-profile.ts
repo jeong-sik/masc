@@ -3,8 +3,9 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
-import { createAsyncResource } from '../lib/async-state'
+import { useEffect, useRef } from 'preact/hooks'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { captureDashboardObservationOwner, dashboardObservationOwnerIsCurrent } from '../lib/observation-read-owner'
 import { SectionCard } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
@@ -35,7 +36,7 @@ import {
   type AgentTimelineEvent,
   type AgentTimelineResponse,
 } from '../api'
-import { missionSnapshot } from '../mission-store'
+import { missionSnapshot, missionError, missionInitializing } from '../mission-store'
 import { navigate } from '../router'
 import { formatDuration } from '../lib/format-time'
 import { trimText } from '../lib/truncate'
@@ -58,8 +59,6 @@ interface ProfileData {
   agentTimeline: AgentTimelineResponse | null
 }
 
-const profileResource = createAsyncResource<ProfileData>()
-let profileLoadedName = ''
 const mentionText = signal('')
 const sendingMention = signal(false)
 const activityQuery = signal('')
@@ -112,46 +111,54 @@ function workerBrief(name: string) {
   return executionWorkerSupportBriefs.value.find(w => w.name === name) ?? null
 }
 
-function loadProfile(name: string): Promise<void> {
-  if (profileLoadedName !== name) {
-    profileResource.reset()
-    profileLoadedName = name
+async function readProfile(name: string, signal: AbortSignal): Promise<ProfileData> {
+  const owner = captureDashboardObservationOwner()
+  const current = () => !signal.aborted && dashboardObservationOwnerIsCurrent(owner)
+  const assertCurrent = () => {
+    signal.throwIfAborted()
+    if (!current()) throw new DOMException('Profile owner retired', 'AbortError')
   }
-  return profileResource.load(async () => {
-    const [lines, timeline] = await Promise.all([
-      fetchWorkspaceMessages(80),
-      fetchAgentTimeline(name, 4, 20).catch(() => null),
-    ])
+  const options = { signal, identity: { revision: owner.tokenRevision, actor: owner.actor }, isCurrent: current }
+  // The task list belongs to this dispatch, before either network read can yield.
+  const taskIds = assignedTasks(name).slice(0, 6).map(task => task.id)
+  assertCurrent()
+  const [lines, timeline] = await Promise.all([
+    fetchWorkspaceMessages(80, options),
+    fetchAgentTimeline(name, 4, 20, { signal }).catch(() => null),
+  ])
+  assertCurrent()
 
-    const activity = lines
-      .filter(line => line.includes(name))
-      .slice(0, 20)
+  const activity = lines
+    .filter(line => line.includes(name))
+    .slice(0, 20)
 
-    const owned = assignedTasks(name).slice(0, 6)
-    let histories: TaskHistoryRow[] = []
-    if (owned.length > 0) {
-      histories = await Promise.all(
-        owned.map(async task => {
-          try {
-            const text = await fetchTaskHistory(task.id, 25)
-            return { taskId: task.id, text: text.trim() }
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : 'load failed'
-            return { taskId: task.id, text: `Failed: ${msg}` }
-          }
-        }),
-      )
-    }
+  let histories: TaskHistoryRow[] = []
+  if (taskIds.length > 0) {
+    histories = await Promise.all(
+      taskIds.map(async taskId => {
+        try {
+          assertCurrent()
+          const text = await fetchTaskHistory(taskId, 25, options)
+          assertCurrent()
+          return { taskId, text: text.trim() }
+        } catch (err) {
+          assertCurrent()
+          const msg = err instanceof Error ? err.message : 'load failed'
+          return { taskId, text: `Failed: ${msg}` }
+        }
+      }),
+    )
+  }
 
-    return {
-      workspaceActivity: activity,
-      taskHistories: histories,
-      agentTimeline: timeline,
-    }
-  })
+  assertCurrent()
+  return {
+    workspaceActivity: activity,
+    taskHistories: histories,
+    agentTimeline: timeline,
+  }
 }
 
-async function submitMention(target: string): Promise<void> {
+async function submitMention(target: string, refresh: () => void): Promise<void> {
   const text = mentionText.value.trim()
   if (!target || !text) return
   sendingMention.value = true
@@ -162,7 +169,7 @@ async function submitMention(target: string): Promise<void> {
       receipt.ok ? `${target}에게 전송` : broadcastReceiptMessage(receipt),
       receipt.ok ? 'success' : 'warning',
     )
-    void loadProfile(target)
+    refresh()
   } catch (err) {
     showToast(err instanceof Error ? err.message : '실패', 'error')
   } finally {
@@ -192,7 +199,7 @@ function timelineEventLabel(type: string): string {
 
 // --- FF Character Plate ---
 
-function CharacterPlate({ name }: { name: string }) {
+function CharacterPlate({ name, timeline }: { name: string; timeline: AgentTimelineResponse | null }) {
   const agent = findAgent(name)
   const keeper = findKeeper(name)
   const brief = missionBrief(name)
@@ -217,8 +224,6 @@ function CharacterPlate({ name }: { name: string }) {
   const workerState = worker?.state
   const workerFocus = worker?.focus
 
-  const cps = profileResource.state.value
-  const timeline = cps.status === 'loaded' ? cps.data.agentTimeline : null
   const summary = timeline?.summary
 
   return html`
@@ -233,6 +238,8 @@ function CharacterPlate({ name }: { name: string }) {
       </div>
 
       <div class="flex flex-col gap-1.5 min-w-0">
+        ${missionError.value ? html`<p role="status" class="text-warning">활동 요약을 갱신하지 못했습니다.</p>`
+          : missionInitializing.value ? html`<p role="status" class="text-muted">활동 요약을 준비하고 있습니다.</p>` : null}
         <div class="flex items-baseline gap-2 flex-wrap">
           <h2 class="m-0 text-2xl text-[var(--ff-gold)] flex items-center gap-1.5">
             ${agentEmoji ? html`<span class="text-[1.4em]">${agentEmoji}</span>` : ''}
@@ -305,16 +312,30 @@ function CharacterPlate({ name }: { name: string }) {
 // --- Main Profile ---
 
 export function AgentProfile({ name }: { name: string }) {
+  return html`<${ScopedAgentProfile} key=${name} name=${name} />`
+}
+
+function ScopedAgentProfile({ name }: { name: string }) {
+  const resource = useManagedAsyncResource<ProfileData>()
+  const mounted = useRef(false)
+  const refresh = () => {
+    if (mounted.current) void resource.load(signal => readProfile(name, signal))
+  }
   useEffect(() => {
-    void loadProfile(name)
+    mounted.current = true
+    refresh()
     // Reset the activity filter when switching agents so a stale query
     // from the previous profile does not leak into the new one.
     activityQuery.value = ''
-  }, [name])
+    return () => {
+      mounted.current = false
+      resource.cancel()
+    }
+  }, [name, resource])
 
-  const ps = profileResource.state.value
-  const profileData = ps.status === 'loaded' ? ps.data : undefined
-  const profileLoading = ps.status === 'loading'
+  const ps = resource.state.value
+  const profileData = ps.data
+  const profileLoading = ps.loading
 
   const owned = assignedTasks(name)
   const lines = profileData?.workspaceActivity ?? []
@@ -327,16 +348,16 @@ export function AgentProfile({ name }: { name: string }) {
     <div class="v2-monitoring-surface px-1 ${isKeeper ? 'ff-profile--keeper' : ''}">
       <div class="flex gap-2 mb-3">
         <${ActionButton} variant="ghost" onClick=${() => navigate('monitoring', { section: 'agents' })}>← 목록<//>
-        <${ActionButton} variant="ghost" onClick=${() => { void loadProfile(name) }} disabled=${profileLoading}>
+        <${ActionButton} variant="ghost" onClick=${refresh} disabled=${profileLoading}>
           ${profileLoading ? '...' : '새로고침'}
         <//>
       </div>
 
-      ${ps.status === 'error'
-        ? html`<div class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2">${ps.message}</div>`
+      ${ps.error
+        ? html`<div class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2">${ps.error}</div>`
         : null}
 
-      <${CharacterPlate} name=${name} />
+      <${CharacterPlate} name=${name} timeline=${timeline} />
 
       <${AgentRuntimeStrip} name=${name} />
 
@@ -422,11 +443,11 @@ export function AgentProfile({ name }: { name: string }) {
             placeholder="메시지 입력..."
             value=${mentionText.value}
             onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
-            onKeyDown=${(e: KeyboardEvent) => { if (isSubmitEnter(e)) void submitMention(name) }}
+            onKeyDown=${(e: KeyboardEvent) => { if (isSubmitEnter(e)) void submitMention(name, refresh) }}
             disabled=${sendingMention.value}
           />
           <${ActionButton}
-            onClick=${() => { void submitMention(name) }}
+            onClick=${() => { void submitMention(name, refresh) }}
             disabled=${sendingMention.value || mentionText.value.trim() === ''}
           >
             ${sendingMention.value ? '...' : '전송'}

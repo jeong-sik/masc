@@ -168,8 +168,8 @@ type tool_series_request =
   }
 
 let tool_series_window request ~until =
-  Tool_metrics_series.window
-    ~since:(until -. (request.since_hours *. Masc_time_constants.hour))
+  Tool_metrics_series.sliding_window
+    ~span_s:(request.since_hours *. Masc_time_constants.hour)
     ~until
     ~width:request.width
     ~utc_offset_min:request.utc_offset_min
@@ -207,20 +207,19 @@ let tool_series_request req =
 
 exception Tool_series_failed of string
 
+let tool_series_cache_key config request =
+  Server_dashboard_http_core_cache.tool_metrics_series_cache_key config
+    [ "since_hours", Some (string_of_float request.since_hours)
+    ; "bucket", Some (Tool_metrics_series.string_of_width request.width)
+    ; "utc_offset_min", Some (string_of_int request.utc_offset_min)
+    ; "tool", request.tool_name ]
+;;
+
 (* The scan reads up to a month of rows, about a second of CPU, so it runs on
    the executor pool behind the same 30 s cache as the other live rollups.
    A failed read raises, and the cache keeps nothing of it. *)
 let tool_series_http_json ~(config : Workspace.config) request : Yojson.Safe.t =
-  let cache_key =
-    Server_dashboard_http_core_cache.dashboard_query_cache_key
-      config
-      "tool_metrics_series"
-      [ "since_hours", Some (string_of_float request.since_hours)
-      ; "bucket", Some (Tool_metrics_series.string_of_width request.width)
-      ; "utc_offset_min", Some (string_of_int request.utc_offset_min)
-      ; "tool", request.tool_name
-      ]
-  in
+  let cache_key = tool_series_cache_key config request in
   Dashboard_cache.get_or_compute
     cache_key
     ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s

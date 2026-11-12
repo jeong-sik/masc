@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks'
+import { Effect, Either } from 'effect'
 import { InlineSpinner } from './common/inline-spinner'
 import { DialogOverlay } from './common/dialog'
 import { TextInput } from './common/input'
@@ -12,9 +13,11 @@ import {
   type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
 import { fetchGateKeepers } from '../api/gate-keepers'
-import { dashboardRuntime } from '../api/effect-http'
+import { dashboardRuntime, DashboardTransportError } from '../api/effect-http'
+import { ApiRequestError } from '../api/core'
 import { executionLoaded, keepers, refreshExecution } from '../store'
-import { compositeTick } from '../composite-signals'
+import { setupObservationRefresh } from '../lib/observation-refresh'
+import { subscribeDashboardObservationOwnerChanges } from '../lib/observation-read-owner'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
 import { useGlobalShortcut } from '../lib/use-global-shortcut'
 import { isImeComposing } from '../lib/keyboard'
@@ -73,8 +76,9 @@ export function filterKeeperNames(
   return names.filter(name => name.toLowerCase().includes(needle))
 }
 
-export function isCompositeFetchNotFound(err: unknown): boolean {
-  return err instanceof Error && /composite fetch failed: 404$/.test(err.message)
+export function isCompositeFetchNotFound(err: unknown, keeperName: string): boolean {
+  return err instanceof ApiRequestError && err.method === 'GET' && err.status === 404
+    && err.path === `/api/v1/keepers/${encodeURIComponent(keeperName)}/composite`
 }
 
 function shortText(value: string | null | undefined, max = 80): string {
@@ -277,6 +281,8 @@ function reduceHubState(state: HubState, action: HubAction): HubState {
         }
 
   switch (action.type) {
+    case 'owner_reset':
+      return { ...initialHubState, keeperName: action.keeperName }
     case 'fetch_started': {
       // Preserve `'fresh'` payload across a refetch only as `'stale'`.
       // The previous reducer kept `snapshot` populated and merely
@@ -372,7 +378,7 @@ export interface FsmHubProps {
   mode?: 'fleet' | 'detail'
   /** RFC-0046 §7 #2 follow-up: parent-supplied composite snapshot.
    *  When the prop is present (not `undefined`), this hub stops
-   *  issuing its own /composite poll and feeds the parent value into
+   *  issuing its own /composite read and feeds the parent value into
    *  its reducer as a `fetch_succeeded` event. `null` means the
    *  parent is loading — wait, do not race a duplicate fetch.
    *  Only honoured in `mode='detail'`; in `'fleet'` mode the keeper
@@ -398,7 +404,7 @@ export function FsmHub(props: FsmHubProps = {}) {
   }, [props.selectedName])
   const [hub, dispatch] = useReducer(reduceHubState, initialHubState)
   const [keeperFilter, setKeeperFilter] = useState('')
-  const [pollTick, setPollTick] = useState(0)
+  const [refreshKey, setRefreshKey] = useState(0)
   // The 5 s wall-clock signal is now subscribed to by each leaf that
   // actually displays elapsed durations — this hub component itself
   // never reads `nowSecondsSignal.value`, so 5 s ticks no longer
@@ -412,7 +418,7 @@ export function FsmHub(props: FsmHubProps = {}) {
   const [refreshFlash, setRefreshFlash] = useState(false)
   const flashTimeoutRef = useRef<number | null>(null)
   const refreshNow = () => {
-    setPollTick(t => t + 1)
+    setRefreshKey(t => t + 1)
     setRefreshFlash(true)
     if (flashTimeoutRef.current != null) window.clearTimeout(flashTimeoutRef.current)
     flashTimeoutRef.current = window.setTimeout(() => {
@@ -453,7 +459,6 @@ export function FsmHub(props: FsmHubProps = {}) {
     const stored = window.localStorage.getItem('fsm-hub:density')
     return stored === 'compact' ? 'compact' : 'comfortable'
   })
-  const requestIdRef = useRef(0)
 
   useEffect(() => {
     shortcutsOpenRef.current = shortcutsOpen
@@ -488,9 +493,6 @@ export function FsmHub(props: FsmHubProps = {}) {
     const handler = () => {
       const hidden = document.visibilityState === 'hidden'
       setPaused(hidden)
-      if (!hidden) {
-        setPollTick(t => t + 1)
-      }
     }
     document.addEventListener('visibilitychange', handler)
     return () => document.removeEventListener('visibilitychange', handler)
@@ -518,10 +520,8 @@ export function FsmHub(props: FsmHubProps = {}) {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // Primary source: store signal (from dashboard/shell polling).
-  // Fallback: direct gate fetch — the shell endpoint omits keeper
-  // details (only sends configured_keepers count), so without this
-  // fallback the FsmHub sees zero keepers and renders empty state.
+  // Accepted execution rows own the directory. Before the first execution
+  // observation, the current Gate directory supplies the cold read.
   const storeKeeperList = keepers.value
   const executionLoadedValue = executionLoaded.value
   const storeNames = useMemo(
@@ -530,23 +530,25 @@ export function FsmHub(props: FsmHubProps = {}) {
   )
   useEffect(() => {
     if (!shouldUseGateKeeperFallback(executionLoadedValue, storeNames)) return
-    const controller = new AbortController()
-    void dashboardRuntime
-      .runPromise(fetchGateKeepers(), { signal: controller.signal })
-      .then(data => {
+    return setupObservationRefresh(async signal => {
+      try {
+        const result = await dashboardRuntime.runPromise(Effect.either(fetchGateKeepers()), { signal })
+        if (Either.isLeft(result)) {
+          throw result.left instanceof DashboardTransportError ? result.left.cause : result.left
+        }
+        const data = result.right
+        if (signal.aborted) return
         const next = data.keepers.map(k => k.name).sort()
         setGateKeeperNames(prev =>
           prev.length === next.length && prev.every((v, i) => v === next[i])
             ? prev
             : next,
         )
-      })
-      .catch(() => {
-        // Gate endpoint auth failure or network error — keep the last
-        // successful fallback snapshot until the primary store path lands.
-      })
-    return () => { controller.abort() }
-  }, [executionLoadedValue, storeNames, pollTick])
+      } catch (error) {
+        if (!signal.aborted) throw error
+      }
+    }, { topics: ['keeper_composite', 'gate'], resetRead: () => setGateKeeperNames([]) })
+  }, [executionLoadedValue, storeNames, refreshKey])
 
   const keeperNames = shouldUseGateKeeperFallback(executionLoadedValue, storeNames)
     ? gateKeeperNames
@@ -561,21 +563,11 @@ export function FsmHub(props: FsmHubProps = {}) {
   }, [keeperNames, selected])
 
   useEffect(() => {
-    if (paused) return undefined
-    // pollTick was previously a dep, but the interval body already
-    // self-triggers via setPollTick(t => t + 1) — including pollTick
-    // forced clearInterval + setInterval every 30 s for nothing.
-    const id = setInterval(() => setPollTick(t => t + 1), 30_000)
-    return () => clearInterval(id)
-  }, [paused])
-
-  // The 5 s tick that previously lived here is now provided by
-  // useNowSecondsTicker() above (shared, ref-counted, runs once
-  // module-wide regardless of how many fsm-hubs are mounted).
-
-  const tick = compositeTick.value
-  const shouldRefetchForTick =
-    activeSelected != null && tick.name === activeSelected ? tick.ts_unix : 0
+    if (!activeSelected || externalSnapshot === undefined) return
+    const reset = () => dispatch({ type: 'owner_reset', keeperName: activeSelected })
+    reset()
+    return subscribeDashboardObservationOwnerChanges(reset)
+  }, [activeSelected, externalSnapshot !== undefined])
 
   useEffect(() => {
     if (!activeSelected) return
@@ -598,13 +590,11 @@ export function FsmHub(props: FsmHubProps = {}) {
       return
     }
 
-    const requestId = requestIdRef.current + 1
-    requestIdRef.current = requestId
-    dispatch({ type: 'fetch_started', keeperName: activeSelected })
-    void (async () => {
+    return setupObservationRefresh(async signal => {
+      dispatch({ type: 'fetch_started', keeperName: activeSelected })
       try {
-        const data = await fetchKeeperComposite(activeSelected)
-        if (requestIdRef.current !== requestId) return
+        const data = await fetchKeeperComposite(activeSelected, { signal })
+        if (signal.aborted) return
         dispatch({
           type: 'fetch_succeeded',
           keeperName: activeSelected,
@@ -612,9 +602,9 @@ export function FsmHub(props: FsmHubProps = {}) {
           fetchedAt: Date.now() / 1000,
         })
       } catch (err) {
-        if (requestIdRef.current !== requestId) return
+        if (signal.aborted) return
         const failedAt = Date.now() / 1000
-        if (isCompositeFetchNotFound(err)) {
+        if (isCompositeFetchNotFound(err, activeSelected)) {
           setGateKeeperNames(prev => prev.filter(name => name !== activeSelected))
           setSelected(prev => (prev === activeSelected ? null : prev))
           void refreshExecution({ force: true })
@@ -632,9 +622,11 @@ export function FsmHub(props: FsmHubProps = {}) {
           error: err instanceof Error ? err.message : 'composite fetch failed',
           failedAt,
         })
+        throw err
       }
-    })()
-  }, [activeSelected, shouldRefetchForTick, pollTick, externalSnapshot])
+    }, { topics: ['keeper_composite'], keeperName: activeSelected,
+      resetRead: () => dispatch({ type: 'owner_reset', keeperName: activeSelected }) })
+  }, [activeSelected, refreshKey, externalSnapshot])
 
   useGlobalShortcut(
     (ev) => ev.key >= '1' && ev.key <= '9',
@@ -984,7 +976,7 @@ function StatusBar({
           ${paused ? html`
             <span
               class="px-1.5 py-0.5 rounded-[var(--r-1)] border text-3xs font-mono text-[var(--color-fg-muted)] border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
-              title="백그라운드 — 폴링 일시정지"
+              title="백그라운드 — 화면 조회 대기"
             >
               ⏸ 일시 중지
             </span>

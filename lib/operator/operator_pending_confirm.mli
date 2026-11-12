@@ -57,6 +57,10 @@ val raw_pending_confirms : Workspace.config -> pending_confirm list
 val write_pending_confirms :
   Workspace.config -> pending_confirm list -> (unit, string) result
 val pending_confirm_expired : pending_confirm -> bool
+val pending_confirm_deadline_unix : pending_confirm list -> float option
+(** Earliest exact expiry from these already observed typed entries, with no
+    clock or store read. An elapsed expiry remains owed if the containing read
+    crossed it. Invalid timestamps raise [Store_error] as other strict readers. *)
 val read_pending_confirms_result :
   Workspace.config -> (pending_confirm list, string) result
 val read_pending_confirms : Workspace.config -> pending_confirm list

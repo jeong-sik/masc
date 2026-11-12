@@ -29,7 +29,7 @@ request, one JSON answer.
 | `masc_my_keepers` | Your Keepers, each with its Runtime. | `manage_own_keeper` |
 | `masc_my_keeper_create` | Makes a Keeper you own. | `manage_own_keeper` |
 | `masc_my_keeper_assign` | Gives one of your Keepers one of your Runtimes. | `manage_own_keeper` |
-| `masc_my_keeper_turn` | Sends a Keeper a message and returns its answer. | `manage_own_keeper` |
+| `masc_my_keeper_turn` | Sends a Keeper a message and returns its answer. | `manage_own_keeper`, `invoke_model`, `use_tool` |
 
 Each tool calls the function behind the matching control of the person's
 page (`/`), after the same check. The text of a tool result is the JSON
@@ -48,12 +48,18 @@ there.
    to carry, then press **Issue**. For every tool:
 
    ```json
-   {"runtimes":"all","channels":["direct"],"allowed_effects":["manage_own_keeper","manage_own_provider","read_state"]}
+   {"runtimes":"all","channels":["direct"],"allowed_effects":["invoke_model","manage_own_keeper","manage_own_provider","read_state","use_tool"]}
    ```
 
    The labels of `allowed_effects` are in ascending order; another order
    is refused. The scope the page fills in holds `read_state` alone, which
    is enough for `masc_whoami` and nothing else.
+
+   A turn runs on your subscription, so the token must allow it as a turn:
+   its scope holds `invoke_model` and `use_tool`, the `direct` channel, and
+   the Runtime of the Keeper (`"runtimes":"all"`, or a list that names it).
+   A token without them still lists, makes and assigns Keepers, and its
+   turn is refused with a 403.
 4. Copy the token. The page shows it once.
 5. Give the client the URL and the token as a bearer header. With Claude
    Code:

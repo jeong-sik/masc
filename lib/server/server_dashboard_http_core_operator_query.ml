@@ -7,8 +7,6 @@
 
 (* Sibling dependencies — already extracted in earlier godfile decomp PRs. *)
 let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso
-let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
-
 let operator_retention_json ~(config : Workspace.config) ~scope ~producer =
   `Assoc
     [ "scope", `String scope
@@ -16,10 +14,8 @@ let operator_retention_json ~(config : Workspace.config) ~scope ~producer =
     ; "workspace_path", `String config.workspace_path
     ; "producer", `String producer
     ; "store_kind", `String "process_cache"
-    ; "background_refresh_interval_s", `Float operator_refresh_interval_s
-    ; ( "cache_policy"
-      , `String "default publication refreshes synchronously when stale"
-      )
+    ; "background_refresh_interval_s", `Null
+    ; "cache_policy", `String "default publication follows source changes and policy deadlines"
     ]
 ;;
 
@@ -94,7 +90,7 @@ let with_operator_snapshot_metadata ~config ~query json =
     ~dashboard_surface:"/api/v1/operator"
     ~source:"operator_snapshot_read_model"
     ~scope:"operator_snapshot"
-    ~producer:"Operator_control.snapshot_json"
+    ~producer:"Operator_control.snapshot_read"
     ~query
     json
 ;;
@@ -105,7 +101,7 @@ let with_operator_digest_metadata ~config ~query json =
     ~dashboard_surface:"/api/v1/operator/digest"
     ~source:"operator_digest_read_model"
     ~scope:"operator_digest"
-    ~producer:"Operator_control.digest_json"
+    ~producer:"Operator_control.observe"
     ~query
     json
 ;;

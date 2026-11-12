@@ -1,4 +1,4 @@
-// Transport beacon — operator-facing signal for the dashboard WebSocket.
+// Transport beacon — operator-facing signal for the dashboard SSE stream.
 //
 // Renders a single chip for the browser's client channel only. Server-wide
 // transport truth lives in the hidden Diagnostics transport surface backed by
@@ -7,26 +7,17 @@
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
 import {
-  dashboardWsConnected,
-  dashboardWsEventCount60s,
-  dashboardWsLastEventAt,
-  dashboardWsLastPongAt,
-  dashboardWsLastPongLatencyMs,
-  dashboardWsLastDisconnectedAt,
-  dashboardWsReconnectCount,
-  dashboardWsReady,
-} from '../dashboard-ws-state'
-import {
-  DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
-  DASHBOARD_WS_RPC_TIMEOUT_MS,
-} from '../config/constants'
-
-// 30s of silence on a client WS channel turns the beacon yellow.  This is
-// shorter than the typical heartbeat interval to flag truly idle
-// transports without nuisance-firing on quiet workloads.
-const SILENT_THRESHOLD_MS = 30_000
-const HEARTBEAT_FRESH_MS = DASHBOARD_WS_HEARTBEAT_INTERVAL_MS + DASHBOARD_WS_RPC_TIMEOUT_MS + 1_000
-
+  dashboardObserverConnected,
+  dashboardObserverEventCount60s,
+  dashboardObserverLastEventAt,
+  dashboardObserverLastActivityAt,
+  dashboardObserverIdleTimeoutMs,
+  dashboardObserverLastDisconnectedAt,
+  dashboardObserverReconnectCount,
+  dashboardObserverReady,
+  dashboardObserverRejectedFrameCount,
+  dashboardObserverLastRejectedFrameError,
+} from '../dashboard-observer-state'
 type BeaconState = 'green' | 'yellow' | 'red'
 
 interface BeaconView {
@@ -40,8 +31,8 @@ export function computeBeaconView(args: {
   ready: boolean
   lastEventAt: number
   eventCount60s: number
-  lastPongAt: number
-  lastPongLatencyMs: number | null
+  lastActivityAt: number
+  idleTimeoutMs: number | null
   now: number
 }): BeaconView {
   if (!args.connected || !args.ready) {
@@ -49,49 +40,23 @@ export function computeBeaconView(args: {
       return {
         state: 'yellow',
         label: '연결 확인 중',
-        title: 'Client WS socket is open; waiting for dashboard/hello before route events resume.',
+        title: 'Client SSE is awaiting observer admission.',
       }
     }
     return {
       state: 'red',
       label: '재연결 중',
-      title: 'Client WS is closed. Events will pause until reconnect. Server transport truth is in Diagnostics > Transport.',
+      title: 'Client SSE is closed. Events will pause until reconnect. Server transport truth is in Diagnostics > Transport.',
     }
   }
-  const silentMs = args.now - args.lastEventAt
-  const hasRouteEvent = args.lastEventAt > 0
-  if (!hasRouteEvent || silentMs > SILENT_THRESHOLD_MS) {
-    const pongAgeMs = args.lastPongAt === 0
-      ? Number.POSITIVE_INFINITY
-      : args.now - args.lastPongAt
-    if (pongAgeMs <= HEARTBEAT_FRESH_MS) {
-      const latency = args.lastPongLatencyMs == null
-        ? 'ok'
-        : `${args.lastPongLatencyMs}ms`
-      return {
-        state: 'green',
-        label: '연결됨',
-        title: `Client WS is active. No route events, but heartbeat pong arrived ${Math.floor(pongAgeMs / 1000)}s ago; latency ${latency}. ${args.eventCount60s} deltas / 60s.`,
-      }
-    }
-    if (!hasRouteEvent) {
-      return {
-        state: 'yellow',
-        label: '연결 확인 필요',
-        title:
-          'Client WS is ready but has not received route events yet, and no fresh heartbeat pong is available. The workload may be idle or WS fan-out may be stuck.',
-      }
-    }
-    return {
-      state: 'yellow',
-      label: '연결 확인 필요',
-      title: `Client WS has received no events for ${Math.floor(silentMs / 1000)}s and no fresh heartbeat pong. The workload may be idle or WS fan-out may be stuck.`,
-    }
-  }
+  const age = args.lastActivityAt === 0 ? null : args.now - args.lastActivityAt
+  const active = age !== null && args.idleTimeoutMs !== null && age < args.idleTimeoutMs
   return {
-    state: 'green',
-    label: '연결됨',
-    title: `Client WS is active. ${args.eventCount60s} deltas / 60s. Last applied route delta ${Math.floor(silentMs / 1000)}s ago. Heartbeats are shown separately when route deltas are idle.`,
+    state: active ? 'green' : 'yellow',
+    label: active ? '연결됨' : '연결 확인 필요',
+    title: active
+      ? `Client SSE is active. ${args.eventCount60s} events / 60s; last stream bytes ${Math.floor(age / 1000)}s ago.`
+      : 'Client SSE has no activity inside the server-advertised idle deadline.',
   }
 }
 
@@ -105,20 +70,24 @@ const STATE_CLASS: Record<BeaconState, string> = {
 }
 
 const beaconView = computed<BeaconView>(() => computeBeaconView({
-  connected: dashboardWsConnected.value,
-  ready: dashboardWsReady.value,
-  lastEventAt: dashboardWsLastEventAt.value,
-  eventCount60s: dashboardWsEventCount60s.value,
-  lastPongAt: dashboardWsLastPongAt.value,
-  lastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
+  connected: dashboardObserverConnected.value,
+  ready: dashboardObserverReady.value,
+  lastEventAt: dashboardObserverLastEventAt.value,
+  eventCount60s: dashboardObserverEventCount60s.value,
+  lastActivityAt: dashboardObserverLastActivityAt.value,
+  idleTimeoutMs: dashboardObserverIdleTimeoutMs.value,
   now: Date.now(),
 }))
 
 export function TransportBeacon() {
   const view = beaconView.value
-  const details = [view.title, `Reconnect attempts ${dashboardWsReconnectCount.value}`]
-  if (dashboardWsLastDisconnectedAt.value > 0) {
-    details.push(`Last disconnected ${new Date(dashboardWsLastDisconnectedAt.value).toLocaleTimeString()}`)
+  const details = [view.title, `Reconnect attempts ${dashboardObserverReconnectCount.value}`]
+  if (dashboardObserverRejectedFrameCount.value > 0) {
+    details.push(`Discarded frames in this tab: ${dashboardObserverRejectedFrameCount.value}`)
+    if (dashboardObserverLastRejectedFrameError.value) details.push(dashboardObserverLastRejectedFrameError.value)
+  }
+  if (dashboardObserverLastDisconnectedAt.value > 0) {
+    details.push(`Last disconnected ${new Date(dashboardObserverLastDisconnectedAt.value).toLocaleTimeString()}`)
   }
   return html`
     <div

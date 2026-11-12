@@ -253,11 +253,41 @@ let test_all_stats_reuses_and_invalidates_snapshot () =
     "replacement"
     (List.hd after_replace).tool_name
 
+let test_committed_snapshot_observer () =
+  setup ();
+  let seen = ref [] in
+  let unsubscribe = M.subscribe_written (fun () ->
+    let count = List.fold_left (fun n (stats : M.tool_stats) -> n + stats.call_count)
+        0 (M.all_stats ()) in
+    seen := count :: !seen)
+  in
+  Fun.protect ~finally:unsubscribe (fun () ->
+    let stop_failing = M.subscribe_written (fun () -> raise Exit) in
+    Fun.protect ~finally:stop_failing (fun () ->
+      M.record (make_result ~name:"observed" ~success:true ~duration_ms:1.0);
+      let rejected = M.replace_samples (fun _ -> Error "not committed") in
+      Alcotest.(check (result unit string)) "failed producer" (Error "not committed") rejected;
+      let replaced = M.replace_samples (fun add ->
+        List.iter add
+          [{ M.tool_name = "replacement"; disposition = Completed; duration_ms = 2.0 };
+           { M.tool_name = "replacement"; disposition = Failed; duration_ms = 3.0 }];
+        Ok ()) in
+      Alcotest.(check (result unit string)) "replacement" (Ok ()) replaced;
+      ignore (M.all_stats ());
+      ignore (M.stats_for "replacement");
+      M.clear ();
+      Alcotest.(check (list int)) "only published snapshots notify" [0; 2; 1] !seen);
+    unsubscribe ();
+    unsubscribe ();
+    M.record (make_result ~name:"retired" ~success:true ~duration_ms:1.0);
+    Alcotest.(check (list int)) "withdrawal is idempotent" [0; 2; 1] !seen)
+
 let () =
   Alcotest.run "Tool_metrics" [
     "recording", [
       Alcotest.test_case "record and stats" `Quick test_record_and_stats;
       Alcotest.test_case "unknown tool" `Quick test_unknown_tool;
+      Alcotest.test_case "committed snapshot observer" `Quick test_committed_snapshot_observer;
     ];
     "percentiles", [
       Alcotest.test_case "p50/p95/p99" `Quick test_percentiles;

@@ -1,4 +1,6 @@
-import { signal } from '@preact/signals'
+import { computed, signal } from '@preact/signals'
+import { dashboardObservationOwnerHasWorkspace, dashboardObservationOwnerIsCurrent, readDashboardObservationOwner,
+  type DashboardObservationOwner } from '../../lib/observation-read-owner'
 
 /**
  * RFC-0028 PR-α: keeper-trace store.
@@ -23,9 +25,8 @@ import { signal } from '@preact/signals'
  * concern of `overlay-keeper-trace.tsx` (PR-β); the store is unbounded but
  * pruned by retention so memory stays O(events-in-last-10min).
  *
- * No new server endpoint: PR-β will wire the 4 producers (each existing
- * endpoint's polling client) into `pushTrace` so the store joins them
- * client-side.
+ * Existing source reads supply their captured observation owner to each
+ * append. The retained projection is readable only under that same owner.
  */
 
 export const COALESCE_WINDOW_MS = 50
@@ -109,7 +110,12 @@ export interface KeeperTraceState {
 
 const INITIAL_STATE: KeeperTraceState = { events: [] }
 
-export const keeperTraceState = signal<KeeperTraceState>(INITIAL_STATE)
+const ownedTraceState = signal<{ readonly owner: DashboardObservationOwner; readonly state: KeeperTraceState } | null>(null)
+export const keeperTraceState = computed<KeeperTraceState>(() => {
+  void readDashboardObservationOwner()
+  const held = ownedTraceState.value
+  return held !== null && dashboardObservationOwnerIsCurrent(held.owner) ? held.state : INITIAL_STATE
+})
 
 /**
  * Ingest a new trace event. The input omits `count` because the store either
@@ -127,7 +133,8 @@ export const keeperTraceState = signal<KeeperTraceState>(INITIAL_STATE)
  * is inserted at the correct ascending position. Coalescing only matches the
  * latest entry by tsMs of the same trace bucket.
  */
-export function pushTrace(input: KeeperTraceEventInput): void {
+export function pushTrace(input: KeeperTraceEventInput, owner: DashboardObservationOwner): void {
+  if (!dashboardObservationOwnerHasWorkspace(owner) || !dashboardObservationOwnerIsCurrent(owner)) return
   const prev = keeperTraceState.value.events
   const incoming: KeeperTraceEvent = { ...input, count: 1 } as KeeperTraceEvent
 
@@ -163,12 +170,11 @@ export function pushTrace(input: KeeperTraceEventInput): void {
   const cutoff = latestTs - RETENTION_MS
   const pruned = nextEvents.filter(e => e.tsMs >= cutoff)
 
-  keeperTraceState.value = { events: pruned }
+  ownedTraceState.value = { owner, state: { events: pruned } }
 }
 
 export function clearTraces(): void {
-  if (keeperTraceState.value.events.length === 0) return
-  keeperTraceState.value = INITIAL_STATE
+  ownedTraceState.value = null
 }
 
 export function tracesByKeeper(keeperName: string): ReadonlyArray<KeeperTraceEvent> {

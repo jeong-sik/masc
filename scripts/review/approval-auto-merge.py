@@ -55,8 +55,32 @@ SUCCESS = frozenset({'merged', 'eligible_dry_run', 'resume_dispatched', 'followi
 # is the only reader of its receipt, so one lost dispatch would leave it unread.
 HAND_OFF_RETRY_SECONDS = 5
 UNSETTLED = frozenset({'still_pending', 'observation_unavailable'})
+TYPE_CHECK = 'type-check'  # the job name in .github/workflows/pr-type-check.yml
+ACTIONS_APP = 'github-actions'
+CHECK_RUN_PAGE = 100
+# GitHub lists at most this many files in one comparison. A list this long
+# may be cut, so it cannot show that a scope changes no source.
+COMPARE_FILE_LIMIT = 300
 UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SHA = re.compile(r'[0-9a-f]{40}')
+
+
+def source_patterns():
+    """The source patterns of the pull request type-check, read from the one
+    file that holds them. That module declares dataclasses, which look their
+    module up by name, so it is registered before it runs."""
+    name = 'pr_source_changes'
+    path = Path(__file__).resolve().parents[1] / 'ci' / (name + '.py')
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f'cannot load {path}')
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+SOURCES = source_patterns()
 
 
 class Hold(ValueError):
@@ -148,6 +172,11 @@ def reservation_reads(repo, number):
         raise Hold('merge scope changed before enabling auto-merge')
     if scope_snapshot(repo, selected, head) != before:
         raise Hold('PR identity changed before enabling auto-merge')
+    # A reservation lets GitHub merge on the required checks alone. Do not
+    # make one, and drop one made earlier, while a skipped type-check is
+    # unproven; `prepare` then reports why.
+    if unproven_skip(repo, head, current['base']['ref']) is not None:
+        return None, [current]
     return (current, selected, head), []
 
 
@@ -190,6 +219,50 @@ def review_evidence(repo, current):
     return history
 
 
+def newest_type_check(repo, head):
+    """The newest `type-check` run GitHub Actions reported on this commit, or
+    None. A commit can carry several: one per pull request event, and one per
+    workflow_dispatch run of the same workflow on the branch."""
+    listed = read(f'repos/{repo}/commits/{head}/check-runs'
+                  f'?check_name={TYPE_CHECK}&filter=all&per_page={CHECK_RUN_PAGE}')
+    runs = listed['check_runs']
+    if listed['total_count'] > len(runs):
+        raise Hold(f'{head[:12]} has more than {CHECK_RUN_PAGE} {TYPE_CHECK} runs')
+    ours = [run for run in runs
+            if run['name'] == TYPE_CHECK and run['head_sha'] == head and
+            run['app']['slug'] == ACTIONS_APP]
+    return max(ours, key=lambda run: run['id'], default=None)
+
+
+def unproven_skip(repo, head, destination):
+    """Why a skipped type-check on `head` proves nothing, or None.
+
+    `skipped` satisfies the required check, and it has two meanings: this
+    scope changes no source, or the pull request was a lower layer of a native
+    stack and left the check to the stack's top. The second meaning stops being
+    true when the pull request leaves the stack, and no event runs the check
+    again. So a skipped check is trusted only when this worker sees for itself
+    that the scope changes no source.
+
+    Every other state is left to GitHub: it waits for a running check and
+    refuses a failed one, and nothing wakes this worker when a check ends.
+    """
+    run = newest_type_check(repo, head)
+    if run is None or run['status'] != 'completed' or run['conclusion'] != 'skipped':
+        return None
+    remedy = (f'run the pr-type-check workflow on the branch with workflow_dispatch; '
+              f'it compiles {head[:12]} without asking what changed')
+    files = read(f'repos/{repo}/compare/{destination}...{head}')['files']
+    if len(files) >= COMPARE_FILE_LIMIT:
+        return (f'{TYPE_CHECK} was skipped and the scope changes {COMPARE_FILE_LIMIT} files '
+                f'or more, too many to list; {remedy}')
+    for changed in files:
+        for name in (changed['filename'], changed.get('previous_filename')):
+            if name is not None and SOURCES.is_source(name):
+                return f'{TYPE_CHECK} was skipped but the scope changes {name}; {remedy}'
+    return None
+
+
 def prepare_reads(repo, number):
     require_server_reviews(repo)
     top = top_pull(repo, number)
@@ -216,6 +289,10 @@ def prepare_reads(repo, number):
         if current['head']['sha'] != identity['head']['sha']:
             raise Hold(f'#{member["number"]} head changed')
         histories[member['number']] = review_evidence(repo, current)
+    # The head of the selected pull request holds every layer of the scope.
+    unproven = unproven_skip(repo, head, destination)
+    if unproven is not None:
+        raise Hold(f'#{selected}: {unproven}')
     # Membership, all head/base identities and review histories must still
     # match. GitHub independently enforces the two-review rule during merge.
     for pr, history in histories.items():

@@ -34,11 +34,19 @@ def review(rid, account=2, state='APPROVED', *, head=sha(101), when=T1):
             'user': {'id': account, 'login': f'reviewer-{account}'}, 'body': ''}
 
 
+def type_check(rid, head, conclusion='skipped', *, status='completed', app='github-actions'):
+    return {'id': rid, 'name': 'type-check', 'head_sha': head, 'status': status,
+            'conclusion': conclusion if status == 'completed' else None, 'app': {'slug': app}}
+
+
 class FakeGitHub:
     """Only the gh process boundary is replaced; both source helpers run."""
 
     def __init__(self, states=None):
         self.pulls, self.reviews, self.counts = {}, {}, {}
+        # Head SHA -> its type-check runs, and -> the files `main...head` lists.
+        # A comparison no test prepared is a read the worker should not make.
+        self.type_checks, self.compared = {}, {}
         self.mutations = []
         self.list_page_size = 100
         self.merge_returncode = 0
@@ -80,6 +88,16 @@ class FakeGitHub:
             value = self.rules
         elif path == PREFIX + '/stacks/900':
             value = self.stack
+        elif path.startswith(PREFIX + '/commits/'):
+            head, rest = path.removeprefix(PREFIX + '/commits/').split('/', 1)
+            assert rest == 'check-runs?check_name=type-check&filter=all&per_page=100', path
+            runs = self.type_checks.get(head, [])
+            value = {'total_count': len(runs), 'check_runs': runs}
+        elif path.startswith(PREFIX + '/compare/'):
+            base, head = path.removeprefix(PREFIX + '/compare/').split('...')
+            assert base == 'main', path
+            value = {'files': [{'filename': name} if isinstance(name, str) else name
+                               for name in self.compared[head]]}
         elif path.startswith(PREFIX + '/pulls?'):
             query = dict(part.split('=') for part in path.split('?', 1)[1].split('&'))
             assert query['state'] == 'open' and query['per_page'] == '100', path
@@ -208,6 +226,123 @@ class AutomaticMergeAdmission(unittest.TestCase):
                     github.rules = []
                 with self.assertRaises(MERGE.Hold):
                     MERGE.prepare(REPO, 101)
+
+
+class SkippedTypeCheck(unittest.TestCase):
+    """`skipped` satisfies the required check. The worker trusts it only when
+    the scope it is about to merge changes no source."""
+
+    CHECKS = PREFIX + f'/commits/{sha(101)}/check-runs?check_name=type-check&filter=all&per_page=100'
+    COMPARE = PREFIX + f'/compare/main...{sha(101)}'
+    ARM = ['gh', 'pr', 'merge', '101', '--repo', REPO,
+           '--auto', '--squash', '--match-head-commit', sha(101)]
+
+    def test_a_skip_on_a_scope_without_sources_is_admitted_and_armed(self):
+        with FakeGitHub() as github, redirect_stdout(io.StringIO()):
+            github.type_checks[sha(101)] = [type_check(1, sha(101))]
+            github.compared[sha(101)] = ['dashboard/a.ts', 'docs/evidence/run/a.ml', 'changelog.d/101.md']
+            MERGE.prepare(REPO, 101)
+            MERGE.auto_merge_default(REPO, 101)
+        self.assertEqual(github.mutations, [self.ARM])
+
+    def test_a_skip_on_a_scope_with_sources_is_held_and_never_armed(self):
+        scopes = {
+            'source file': ['dashboard/a.ts', 'lib/a.ml'],
+            'build file': ['test/dune'],
+            'moved away from a source path': [
+                {'filename': 'docs/old.ml', 'previous_filename': 'lib/old.ml'}],
+        }
+        for label, files in scopes.items():
+            with self.subTest(label), FakeGitHub() as github, redirect_stdout(io.StringIO()):
+                github.type_checks[sha(101)] = [type_check(1, sha(101))]
+                github.compared[sha(101)] = files
+                with self.assertRaisesRegex(MERGE.Hold, 'type-check was skipped but the scope changes'):
+                    MERGE.prepare(REPO, 101)
+                self.assertIsNone(MERGE.auto_merge_default(REPO, 101))
+                self.assertEqual(github.mutations, [])
+
+    def test_an_earlier_reservation_is_dropped_when_the_skip_is_unproven(self):
+        with FakeGitHub() as github:
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            github.type_checks[sha(101)] = [type_check(1, sha(101))]
+            github.compared[sha(101)] = ['lib/a.ml']
+            self.assertIsNone(MERGE.auto_merge_default(REPO, 101))
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '101', '--repo', REPO, '--disable-auto']])
+
+    def test_a_file_list_at_the_comparison_limit_proves_nothing(self):
+        with FakeGitHub() as github:
+            github.type_checks[sha(101)] = [type_check(1, sha(101))]
+            github.compared[sha(101)] = [f'dashboard/{n}.ts' for n in range(MERGE.COMPARE_FILE_LIMIT)]
+            with self.assertRaisesRegex(MERGE.Hold, 'too many to list'):
+                MERGE.prepare(REPO, 101)
+            github.compared[sha(101)].pop()
+            MERGE.prepare(REPO, 101)
+
+    def test_only_a_completed_skip_makes_the_worker_read_the_scope(self):
+        left_to_github = {
+            'no run yet': [],
+            'queued': [type_check(1, sha(101), status='queued')],
+            'running': [type_check(1, sha(101), status='in_progress')],
+            'success': [type_check(1, sha(101), 'success')],
+            'failure': [type_check(1, sha(101), 'failure')],
+            'a later dispatched run compiled it': [
+                type_check(1, sha(101)), type_check(2, sha(101), 'success')],
+            'a skip reported by another app': [type_check(1, sha(101), app='someone-else')],
+            'a skip of another commit': [type_check(1, sha(99))],
+        }
+        for label, runs in left_to_github.items():
+            with self.subTest(label), FakeGitHub() as github, redirect_stdout(io.StringIO()):
+                github.type_checks[sha(101)] = runs
+                MERGE.prepare(REPO, 101)
+                MERGE.auto_merge_default(REPO, 101)
+                self.assertNotIn(self.COMPARE, github.counts)
+                self.assertEqual(github.mutations, [self.ARM])
+
+    def test_the_newest_run_decides_when_a_skip_follows_a_success(self):
+        with FakeGitHub() as github:
+            github.type_checks[sha(101)] = [type_check(2, sha(101)), type_check(1, sha(101), 'success')]
+            github.compared[sha(101)] = ['lib/a.ml']
+            with self.assertRaisesRegex(MERGE.Hold, 'type-check was skipped'):
+                MERGE.prepare(REPO, 101)
+
+    def test_more_runs_than_one_page_are_not_guessed_at(self):
+        with FakeGitHub() as github:
+            github.type_checks[sha(101)] = [type_check(1, sha(101), 'success')]
+            real = github.output
+
+            def cut(command):
+                body = real(command)
+                return body.replace('"total_count": 1', '"total_count": 101')
+            with patch.object(github, 'output', side_effect=cut):
+                with self.assertRaisesRegex(MERGE.Hold, 'more than 100 type-check runs'):
+                    MERGE.prepare(REPO, 101)
+
+    def test_a_stack_is_read_once_at_the_head_of_its_top(self):
+        top = sha(103)
+        with FakeGitHub(['merged', 'open', 'open']) as github:
+            github.type_checks[top] = [type_check(1, top)]
+            # The lower layer was skipped because the top checks the stack.
+            github.type_checks[sha(102)] = [type_check(2, sha(102))]
+            github.compared[top] = ['dashboard/a.ts', 'lib/a.ml']
+            with self.assertRaisesRegex(MERGE.Hold, '#103: type-check was skipped'):
+                MERGE.prepare(REPO, 102)
+            github.type_checks[top].append(type_check(3, top, 'success'))
+            selected, _, _ = MERGE.prepare(REPO, 102)
+        self.assertEqual(selected, 103)
+        self.assertFalse(any(sha(102) in path for path in github.counts if '/commits/' in path))
+
+    def test_a_scope_change_during_the_reads_still_refuses(self):
+        with FakeGitHub() as github:
+            github.type_checks[sha(101)] = [type_check(1, sha(101))]
+            github.compared[sha(101)] = ['dashboard/a.ts']
+
+            def push(path, count):
+                if path == self.COMPARE:
+                    github.pulls[101]['head']['sha'] = sha(9001)
+            github.hook = push
+            with self.assertRaises(ValueError):
+                MERGE.prepare(REPO, 101)
 
 
 class DefaultAutoMergeReservation(unittest.TestCase):

@@ -125,7 +125,7 @@ let with_browser request reqd f =
 
 (* ---- the routes ---- *)
 
-let allowlist_path = "/api/v1/auth/allowlist"
+let allowlist_path = Login_allowlist_routes.path
 let allowlist_entry_prefix = allowlist_path ^ "/"
 let pats_path = Login_pat_routes.path
 let pat_prefix = pats_path ^ "/"

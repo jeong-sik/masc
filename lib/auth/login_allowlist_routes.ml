@@ -3,6 +3,8 @@
 module R = Login_routes
 module S = Authz_state
 
+let path = "/api/v1/auth/allowlist"
+
 let refused status text = R.json status [ "error", `String text ]
 
 let identity_of_body body =

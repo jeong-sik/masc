@@ -39,6 +39,15 @@
     person's own subscription, on the home of that account, as a process of
     the server ({!Server_preview_keeper_turn}).
 
+    It also holds the console of a signed-in person
+    ({!Server_account_console.add_routes}): the page, the files of its build
+    and the sheet it shares with the pages above. The page and the files come
+    from the dashboard bundle of the server and the sheet from the binary;
+    all three are answered with no credential. The rest of the bundle, the
+    operator dashboard among it, is not answered.
+    When the bundle cannot give the page, the page is a 503, the boot says
+    why in the log, and every other route answers as it does without it.
+
     {b The login clients.} They are the [google] and the [github] member of
     the [config.json] that the boot judged
     ({!Authz_boot_mode_read.multi_account_login_clients}); the file is not

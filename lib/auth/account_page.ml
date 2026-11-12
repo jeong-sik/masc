@@ -1,6 +1,8 @@
 (* HIGH-RISK-UNREVIEWED: see the interface. *)
 
 let style_source ~nonce = Printf.sprintf "style-src 'nonce-%s'" nonce
+let formless_limits = "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+let base_sheet = Account_page_css.base
 
 let document ~nonce ~title body =
   String.concat

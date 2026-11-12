@@ -1,0 +1,20 @@
+no change	passes	
+the console may run inline script	caught	the policy of the console
+the console takes what no directive names from this origin	caught	the policy of the console
+the console drops the limits of a page without a form	caught	the policy of the console
+a browser may keep the page of the console	caught	a browser does not keep the page
+a link of the console sends its address to another site	caught	a link to another site carries no address of this server
+a bundle without the console answers 200	caught	the console of a bundle that does not hold it
+the page that stands in may be kept	caught	nothing between the server and the browser keeps the page that stands in
+the page that stands in may run a script of the server	caught	the page that stands in applies its own sheet and runs no script
+the page of the console is the page of the operator dashboard	caught	it is the page of the build, byte for byte
+the files of the console are the files of the operator dashboard	caught	a file of the build
+the name of a file is not checked before the bundle is asked	NOT CAUGHT	
+a browser keeps the base sheet for a year	caught	a browser asks for it again on every use
+the tag of the base sheet does not follow its bytes	caught	the tag of the sheet is the tag of its bytes
+the routes of the console are not registered	caught	the console of a bundle that does not hold it
+the files of the build carry no policy	caught	a file of the build carries the policy of the console
+the page that stands in says why	caught	the page that stands in does not say why
+a link of the page that stands in sends its address to another site	caught	a link of the page that stands in carries no address of this server
+a file the bundle cannot give is a 404	caught	GET /accounts/console/assets/app.js without a bundle
+a browser keeps a file of the build only for a moment	caught	a browser keeps a file of the build, which is named after its bytes

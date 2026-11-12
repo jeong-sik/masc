@@ -1,0 +1,274 @@
+[
+  {
+    "server": "with the console",
+    "what": "the page",
+    "path": "/accounts/console",
+    "sent": {},
+    "status": 200,
+    "headers": {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "referrer-policy": "same-origin"
+    },
+    "bytes": 760,
+    "sha256": "f44596f1e051"
+  },
+  {
+    "server": "with the console",
+    "what": "a file of the build",
+    "path": "/accounts/console/assets/index-48nnFfCc.js",
+    "sent": {},
+    "status": 200,
+    "headers": {
+      "content-type": "application/javascript; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "vary": "Accept-Encoding"
+    },
+    "bytes": 26211,
+    "sha256": "0344ed6a86fb"
+  },
+  {
+    "server": "with the console",
+    "what": "the same file, for a browser that takes zstd or gzip",
+    "path": "/accounts/console/assets/index-48nnFfCc.js",
+    "sent": {
+      "Accept-Encoding": "zstd, gzip"
+    },
+    "status": 200,
+    "headers": {
+      "content-type": "application/javascript; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "content-encoding": "zstd",
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "vary": "Accept-Encoding"
+    },
+    "bytes": 11164,
+    "sha256": "52e1d7f1f9ef"
+  },
+  {
+    "server": "with the console",
+    "what": "a file of the build",
+    "path": "/accounts/console/assets/index-CfAaj9st.css",
+    "sent": {},
+    "status": 200,
+    "headers": {
+      "content-type": "text/css; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "vary": "Accept-Encoding"
+    },
+    "bytes": 333,
+    "sha256": "3b48442fb129"
+  },
+  {
+    "server": "with the console",
+    "what": "the same file, for a browser that takes zstd or gzip",
+    "path": "/accounts/console/assets/index-CfAaj9st.css",
+    "sent": {
+      "Accept-Encoding": "zstd, gzip"
+    },
+    "status": 200,
+    "headers": {
+      "content-type": "text/css; charset=utf-8",
+      "cache-control": "public, max-age=31536000, immutable",
+      "content-encoding": "zstd",
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "vary": "Accept-Encoding"
+    },
+    "bytes": 262,
+    "sha256": "29e85a8185d1"
+  },
+  {
+    "server": "with the console",
+    "what": "the base sheet",
+    "path": "/accounts/console/base.css",
+    "sent": {},
+    "status": 200,
+    "headers": {
+      "content-type": "text/css; charset=utf-8",
+      "cache-control": "no-cache",
+      "etag": "\"55ce58911ad6\""
+    },
+    "bytes": 3799,
+    "sha256": "37395e338d3f"
+  },
+  {
+    "server": "with the console",
+    "what": "the base sheet, for a browser that holds it",
+    "path": "/accounts/console/base.css",
+    "sent": {
+      "If-None-Match": "\"55ce58911ad6\""
+    },
+    "status": 304,
+    "headers": {
+      "cache-control": "no-cache",
+      "etag": "\"55ce58911ad6\""
+    },
+    "bytes": 0,
+    "sha256": "e3b0c44298fc"
+  },
+  {
+    "server": "with the console",
+    "what": "the sheet of the home page starts with the base sheet, byte for byte",
+    "path": "/",
+    "holds": true,
+    "bytes": 5480
+  },
+  {
+    "server": "with the console",
+    "what": "the way up from the files of the build",
+    "path": "/accounts/console/assets/../index.html",
+    "sent": {},
+    "status": 404,
+    "headers": {
+      "content-type": "text/plain; charset=utf-8"
+    },
+    "bytes": 13,
+    "sha256": "7d04f7431bbf"
+  },
+  {
+    "server": "with the console",
+    "what": "two steps up, to the operator dashboard",
+    "path": "/accounts/console/assets/../../index.html",
+    "sent": {},
+    "status": 404,
+    "headers": {
+      "content-type": "text/plain; charset=utf-8"
+    },
+    "bytes": 13,
+    "sha256": "7d04f7431bbf"
+  },
+  {
+    "server": "with the console",
+    "what": "the same, percent-encoded",
+    "path": "/accounts/console/assets/..%2f..%2findex.html",
+    "sent": {},
+    "status": 404,
+    "headers": {
+      "content-type": "text/plain; charset=utf-8"
+    },
+    "bytes": 13,
+    "sha256": "7d04f7431bbf"
+  },
+  {
+    "server": "with the console",
+    "what": "no name",
+    "path": "/accounts/console/assets/",
+    "sent": {},
+    "status": 404,
+    "headers": {
+      "content-type": "text/plain; charset=utf-8"
+    },
+    "bytes": 13,
+    "sha256": "7d04f7431bbf"
+  },
+  {
+    "server": "with the console",
+    "what": "a name the build does not hold",
+    "path": "/accounts/console/assets/missing.js",
+    "sent": {},
+    "status": 404,
+    "headers": {
+      "content-type": "text/plain; charset=utf-8"
+    },
+    "bytes": 13,
+    "sha256": "7d04f7431bbf"
+  },
+  {
+    "server": "with the console",
+    "what": "the page of the operator dashboard",
+    "path": "/dashboard",
+    "sent": {},
+    "status": 404,
+    "headers": {
+      "content-type": "text/plain; charset=utf-8"
+    },
+    "bytes": 13,
+    "sha256": "7d04f7431bbf"
+  },
+  {
+    "server": "with the console",
+    "what": "an address of the bundle itself",
+    "path": "/accounts/index.html",
+    "sent": {},
+    "status": 404,
+    "headers": {
+      "content-type": "text/plain; charset=utf-8"
+    },
+    "bytes": 13,
+    "sha256": "7d04f7431bbf"
+  },
+  {
+    "server": "without a bundle",
+    "what": "the page",
+    "path": "/accounts/console",
+    "sent": {},
+    "status": 503,
+    "headers": {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "content-security-policy": "default-src 'none'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "referrer-policy": "same-origin"
+    },
+    "bytes": 6181,
+    "sha256": "7603e08b9f37"
+  },
+  {
+    "server": "without a bundle",
+    "what": "a file of the build",
+    "path": "/accounts/console/assets/index-48nnFfCc.js",
+    "sent": {},
+    "status": 404,
+    "headers": {
+      "content-type": "text/plain; charset=utf-8"
+    },
+    "bytes": 13,
+    "sha256": "7d04f7431bbf"
+  },
+  {
+    "server": "without a bundle",
+    "what": "the base sheet",
+    "path": "/accounts/console/base.css",
+    "sent": {},
+    "status": 200,
+    "headers": {
+      "content-type": "text/css; charset=utf-8",
+      "cache-control": "no-cache",
+      "etag": "\"55ce58911ad6\""
+    },
+    "bytes": 3799,
+    "sha256": "37395e338d3f"
+  },
+  {
+    "server": "without a bundle",
+    "what": "the home page",
+    "path": "/",
+    "sent": {},
+    "status": 200,
+    "headers": {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "content-security-policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+      "referrer-policy": "same-origin"
+    },
+    "bytes": 20175,
+    "sha256": "62b5427548f6"
+  },
+  {
+    "server": "without a bundle",
+    "what": "the readiness probe",
+    "path": "/health/ready",
+    "sent": {},
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-cache",
+      "etag": "W/\"94f3449a9ef8\"",
+      "vary": "Accept-Encoding"
+    },
+    "bytes": 14,
+    "sha256": "b342fc286d02"
+  }
+]

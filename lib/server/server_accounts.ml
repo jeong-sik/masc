@@ -112,6 +112,7 @@ let register ~login ~env ~base_path zone router =
   |> Server_route.get Server_route.Always_public Server_health_paths.readiness (readiness zone)
   |> Server_login_http.add_routes login
   |> Server_login_http.add_person_routes login ~env ~base_path
+  |> Server_account_console.add_routes ~draw:login.Login_routes.draw
 ;;
 
 (* A value of the HTTP mode that is not in its vocabulary stops the boot here,
@@ -212,6 +213,13 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
    | { Server_account_login.google = Some _; github = Some _ | None }
    | { Server_account_login.google = None; github = Some _ } -> ());
   let login = Server_account_login.routes ~clock ~zone login_clients in
+  (* Said once, here: the page that stands in for the console names no reason
+     to the browser, and the route is open to everyone, so a request does not
+     write the log. *)
+  (match Server_account_console.unreadable () with
+   | None -> ()
+   | Some reason ->
+     Log.Server.warn "%s answers 503: %s" Server_account_console.page_path reason);
   let* table =
     Result.map_error
       (fun refusal -> Route_of_another_kind refusal)

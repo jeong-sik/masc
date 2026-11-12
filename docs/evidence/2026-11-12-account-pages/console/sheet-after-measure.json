@@ -1,0 +1,691 @@
+[
+  {
+    "label": "after",
+    "state": "home_signed_out",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "finalPath": "/",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "button#go outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "button#go",
+      "hovered": "body",
+      "elements": 86,
+      "sha256": "f3ee0c5ad1752733"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 86,
+      "sha256": "d10ceb3aa0dd6e8d"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "home_no_client",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        true
+      ],
+      "describedVisibleChars": [
+        55
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "finalPath": "/",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "body",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 87,
+      "sha256": "a07b2c97d4b67ac6"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 87,
+      "sha256": "5e697871d36cabaf"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "invite_token",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 초대",
+    "finalPath": "/accounts/invite",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "button#go outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "button#go",
+      "hovered": "body",
+      "elements": 26,
+      "sha256": "84fd236bda3e0853"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 26,
+      "sha256": "61988aab340b73cb"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "invite_no_token",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "이 주소에는 초대 정보가 없어요",
+    "finalPath": "/accounts/invite",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "a outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "a",
+      "hovered": "body",
+      "elements": 26,
+      "sha256": "ad6cfa47763b1b0e"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 26,
+      "sha256": "8968af99946f15cb"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "invite_no_client",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        true
+      ],
+      "describedVisibleChars": [
+        55
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 초대",
+    "finalPath": "/accounts/invite",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "body",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 27,
+      "sha256": "9b4fe3c3316fd345"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 27,
+      "sha256": "e15ec8cd50082827"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "member_new",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 19,
+    "freeTextFields": 7,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 1,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "finalPath": "/",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "button#signout outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "button#signout",
+      "hovered": "main",
+      "elements": 86,
+      "sha256": "b4932077726d05a3"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 86,
+      "sha256": "6382a11f6b850299"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "member_full",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 19,
+    "freeTextFields": 7,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 2,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "finalPath": "/",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "button#signout outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "button#signout",
+      "hovered": "main",
+      "elements": 90,
+      "sha256": "0f5e05d1dc4bcc6e"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 90,
+      "sha256": "51bde2fddf056007"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "admin_full",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 24,
+    "freeTextFields": 9,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 2,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "finalPath": "/",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "button#signout outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "button#signout",
+      "hovered": "main",
+      "elements": 90,
+      "sha256": "67e0d449f4402444"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 90,
+      "sha256": "7afb55da5dab6f59"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "refused_401",
+    "httpStatus": 401,
+    "policy": "default-src 'none'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": null,
+    "lang": "ko",
+    "title": "MASC 로그인 실패",
+    "finalPath": "/auth/github/callback",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "a outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "a",
+      "hovered": "body",
+      "elements": 20,
+      "sha256": "238ebe198349b575"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 20,
+      "sha256": "a8e409dc25aac2ce"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "refused_404_no_client",
+    "httpStatus": 404,
+    "policy": "default-src 'none'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": null,
+    "lang": "ko",
+    "title": "MASC 로그인 실패",
+    "finalPath": "/auth/github/callback",
+    "policyViolationsBeforeAxe": [],
+    "firstTabStop": "a outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "a",
+      "hovered": "body",
+      "elements": 20,
+      "sha256": "238ebe198349b575"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 20,
+      "sha256": "a8e409dc25aac2ce"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "done_held",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [
+      "script-src-elem inline"
+    ],
+    "login": null,
+    "lang": "ko",
+    "title": "MASC 로그인 완료",
+    "finalPath": "/__saved/done",
+    "policyViolationsBeforeAxe": [
+      "script-src-elem inline"
+    ],
+    "firstTabStop": "a#next outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "a#next",
+      "hovered": "body",
+      "elements": 18,
+      "sha256": "1755988224065900"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "body",
+      "elements": 18,
+      "sha256": "c4acc2dc63389b88"
+    },
+    "attempts": 1
+  },
+  {
+    "label": "after",
+    "state": "control_other_style_nonce",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 1,
+    "smallestControlHeight": 22,
+    "rawServerTextBlocks": 0,
+    "styleRules": 0,
+    "sheetsWithoutRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgba(0, 0, 0, 0)",
+    "policyViolations": [
+      "style-src-elem inline"
+    ],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "finalPath": "/",
+    "policyViolationsBeforeAxe": [
+      "style-src-elem inline"
+    ],
+    "firstTabStop": "button#go outline=auto 1px",
+    "horizontalScrollAt320": "none",
+    "widthAt320": 320,
+    "styles320": {
+      "innerWidth": 320,
+      "innerHeight": 800,
+      "devicePixelRatio": 2,
+      "visibilityState": "visible",
+      "focused": "button#go",
+      "hovered": "html",
+      "elements": 86,
+      "sha256": "6d61364791b3c2dc"
+    },
+    "styles1280": {
+      "innerWidth": 1280,
+      "innerHeight": 800,
+      "devicePixelRatio": 1,
+      "visibilityState": "visible",
+      "focused": "body",
+      "hovered": "html",
+      "elements": 86,
+      "sha256": "3f26b255b1a710f0"
+    },
+    "attempts": 1
+  }
+]

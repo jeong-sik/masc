@@ -87,6 +87,7 @@ let wait_until_ended ~clock ~base_path request_id =
 ;;
 
 let args request_id = `Assoc [ "request_id", `String request_id ]
+let schedule_args schedule_id = `Assoc [ "schedule_id", `String schedule_id ]
 
 (* The chat execution the calls below serve. *)
 let chat_scope =
@@ -134,6 +135,10 @@ let test_arguments_are_exact () =
       ; ( "an extra field"
         , `Assoc [ "request_id", `String "kmsg-a"; "timeout", `Int 5 ] )
       ; "not an object", `String "kmsg-a"
+      ; "empty schedule_id", schedule_args ""
+      ; "schedule_id is not a string", `Assoc [ "schedule_id", `Int 1 ]
+      ; ( "a run and a schedule"
+        , `Assoc [ "request_id", `String "kmsg-a"; "schedule_id", `String "sched-a" ] )
       ])
 ;;
 
@@ -213,6 +218,104 @@ let test_ended_run_is_waited_for_only_while_its_receipt_is_there () =
             ~arguments:(`Assoc [])
             ~cause:Background.restart_cause));
     expect_wait ~request_id "an ended run whose receipt is waiting" (call config (args request_id)))
+;;
+
+let runner_tick_sec = 1.0
+
+let actor kind id : Schedule_domain.actor = { id; kind; display_name = None }
+
+let keeper_wake_payload ~keeper ~delivery =
+  `Assoc
+    [ "kind", `String "masc.keeper_wake"
+    ; ( "body"
+      , `Assoc
+          [ "keeper_name", `String keeper
+          ; "title", `String "Run result"
+          ; "message", `String "check the run"
+          ; "delivery", `String delivery
+          ] )
+    ]
+;;
+
+let create_schedule config ~schedule_id ~keeper ~delivery =
+  match
+    Schedule_service.create
+      config
+      ~now:100.0
+      ~runner_tick_sec
+      ~schedule_id
+      ~requested_at:100.0
+      ~requested_by:(actor Schedule_domain.Human_operator "operator")
+      ~scheduled_by:(actor Schedule_domain.Automated_actor keeper)
+      ~due_at:10_000.0
+      ~payload:(keeper_wake_payload ~keeper ~delivery)
+      ~source:Schedule_domain.Operator_request
+      ()
+  with
+  | Ok _ -> ()
+  | Error err -> fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let cancel_schedule config ~schedule_id =
+  match
+    Schedule_service.cancel
+      config
+      ~authority:Schedule_store.Operator_authority
+      ~schedule_id
+      ~cancelled_by:(actor Schedule_domain.Human_operator "operator")
+      ~reason:"fixture"
+      ~withdraw_queued_wakes:(fun _ _ -> Ok ())
+  with
+  | Ok _ -> ()
+  | Error err -> fail ("cancel failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+(* A schedule named by [schedule_id] is waited for while its wake can still
+   write a receipt. Another Keeper's schedule and a queue delivery never will. *)
+let test_a_schedule_is_waited_for_while_it_can_write_a_receipt () =
+  with_workspace (fun ~sw:_ ~clock:_ config ->
+    expect_refused
+      ~class_:Tool_result.Workflow_rejection
+      "no schedule has this id"
+      (call config (schedule_args "sched-never-created"));
+    create_schedule config ~schedule_id:"sched-queue" ~keeper:keeper_name ~delivery:"queue";
+    expect_refused
+      ~class_:Tool_result.Workflow_rejection
+      "a wake that delivers a queue message"
+      (call config (schedule_args "sched-queue"));
+    create_schedule config ~schedule_id:"sched-other" ~keeper:"another-keeper" ~delivery:"receipt";
+    expect_refused
+      ~class_:Tool_result.Workflow_rejection
+      "a wake of another Keeper"
+      (call config (schedule_args "sched-other"));
+    create_schedule config ~schedule_id:"sched-receipt" ~keeper:keeper_name ~delivery:"receipt";
+    expect_wait ~request_id:"sched-receipt" "a receipt wake that has not ended"
+      (call config (schedule_args "sched-receipt"));
+    create_schedule config ~schedule_id:"배포 결과 #12" ~keeper:keeper_name ~delivery:"receipt";
+    expect_wait ~request_id:"배포 결과 #12" "a schedule id a request id cannot hold"
+      (call config (schedule_args "배포 결과 #12")))
+;;
+
+(* An ended wake that left no receipt in the outbox has nothing to deliver. One
+   whose receipt is waiting is read by the next run. *)
+let test_an_ended_schedule_is_waited_for_only_while_its_receipt_is_there () =
+  with_workspace (fun ~sw:_ ~clock:_ config ->
+    let base_path = config.Workspace.base_path in
+    create_schedule config ~schedule_id:"sched-ended" ~keeper:keeper_name ~delivery:"receipt";
+    cancel_schedule config ~schedule_id:"sched-ended";
+    expect_refused
+      ~class_:Tool_result.Workflow_rejection
+      "an ended wake with no receipt"
+      (call config (schedule_args "sched-ended"));
+    get
+      (Outbox.retain
+         ~base_path
+         ~keeper_name
+         (Keeper_schedule_receipt.receipt
+            ~schedule_id:"sched-ended"
+            (Keeper_schedule_receipt.Delivered { message = "done" })));
+    expect_wait ~request_id:"sched-ended" "an ended wake whose receipt is waiting"
+      (call config (schedule_args "sched-ended")))
 ;;
 
 (* The tool runs through the bundle a turn builds. The call leaves the wait in
@@ -413,6 +516,10 @@ let () =
             test_request_of_another_producer_is_refused
         ; test_case "a run that is still working is waited for" `Quick
             test_running_run_is_waited_for
+        ; test_case "a schedule is waited for while it can write a receipt" `Quick
+            test_a_schedule_is_waited_for_while_it_can_write_a_receipt
+        ; test_case "an ended schedule is waited for only while its receipt is there" `Quick
+            test_an_ended_schedule_is_waited_for_only_while_its_receipt_is_there
         ; test_case "a call without a chat execution is refused" `Quick
             test_a_call_without_a_chat_execution_is_refused
         ; test_case "an ended run is waited for only while its receipt is there" `Quick

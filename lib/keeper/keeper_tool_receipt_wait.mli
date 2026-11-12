@@ -1,9 +1,12 @@
 (** [keeper_receipt_wait]: the turn ends on the receipt of a background
-    Execute run. Several calls in one turn wait for all of their runs.
+    Execute run, or of a Keeper wake whose delivery is [receipt]. Several calls
+    in one turn wait for all of what they name.
 
-    The call checks that the request is a background Execute run of this
-    Keeper whose receipt has not been delivered and acknowledged already, and
-    answers with a completed result that carries
+    The call names exactly one of [request_id] (the id Execute returned) and
+    [schedule_id] (the id of the wake's schedule). It checks that the
+    request is a background Execute run of this Keeper, or the schedule a wake
+    of this Keeper that delivers a receipt, and that the receipt has not been
+    delivered and acknowledged already, and answers with a completed result that carries
     {!Keeper_tool_execution.Receipt_wait_requested}. Nothing is recorded yet.
     The wait joins the conversation's execution record in the same transaction
     that retains the turn's checkpoint

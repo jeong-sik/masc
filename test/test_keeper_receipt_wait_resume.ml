@@ -611,6 +611,102 @@ let test_run_with_a_worker_is_left_waiting () =
     Eio.Promise.resolve resolve_release ())
 ;;
 
+(* A schedule is waited for under its schedule id. The sweep reads its row,
+   never a clock: a receipt wake that has not ended is left alone, and one that
+   ended without its receipt is settled like a run that left neither worker nor
+   receipt. *)
+let actor kind id : Schedule_domain.actor = { id; kind; display_name = None }
+
+let create_receipt_schedule config ~schedule_id =
+  match
+    Schedule_service.create
+      config
+      ~now:100.0
+      ~runner_tick_sec:1.0
+      ~schedule_id
+      ~requested_at:100.0
+      ~requested_by:(actor Schedule_domain.Human_operator "operator")
+      ~scheduled_by:(actor Schedule_domain.Automated_actor keeper_name)
+      ~due_at:10_000.0
+      ~payload:
+        (`Assoc
+          [ "kind", `String "masc.keeper_wake"
+          ; ( "body"
+            , `Assoc
+                [ "keeper_name", `String keeper_name
+                ; "title", `String "Run result"
+                ; "message", `String "check the run"
+                ; "delivery", `String "receipt"
+                ] )
+          ])
+      ~source:Schedule_domain.Operator_request
+      ()
+  with
+  | Ok _ -> ()
+  | Error err -> fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let cancel_schedule config ~schedule_id =
+  match
+    Schedule_service.cancel
+      config
+      ~authority:Schedule_store.Operator_authority
+      ~schedule_id
+      ~cancelled_by:(actor Schedule_domain.Human_operator "operator")
+      ~reason:"fixture"
+      ~withdraw_queued_wakes:(fun _ _ -> Ok ())
+  with
+  | Ok _ -> ()
+  | Error err -> fail ("cancel failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let settles_an_ended_schedule ~schedule_id =
+  with_workspace (fun ~sw ~clock config ->
+    create_receipt_schedule config ~schedule_id;
+    cancel_schedule config ~schedule_id;
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ schedule_id ] in
+    check bool "no receipt before the sweep" false
+      (outbox_has config ~viewer:Outbox.Every_receipt schedule_id);
+    get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
+    await ~clock task.finished;
+    check int "the task resumed" 2 !(task.attempts);
+    let text =
+      String.concat ""
+        (Outbox.developer_context
+           (get
+              (Outbox.load
+                 ~base_path:config.base_path
+                 ~keeper_name
+                 ~viewer:Outbox.Every_receipt)))
+    in
+    check bool "the receipt says it will not come" true
+      (Astring.String.is_infix ~affix:"The receipt will not come" text);
+    get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
+    check int "a second pass resumes nothing more" 2 !(task.attempts))
+;;
+
+let test_a_schedule_that_ended_without_a_receipt_is_settled () =
+  settles_an_ended_schedule ~schedule_id:"sched-ended-without-receipt"
+;;
+
+(* The Keeper chooses a schedule's id, and a request id cannot hold every
+   character it can. The request store refuses such an id, which can only be a
+   schedule's. *)
+let test_a_schedule_whose_id_is_not_a_request_id_is_settled () =
+  settles_an_ended_schedule ~schedule_id:"배포 결과 #12"
+;;
+
+let test_a_schedule_that_has_not_ended_is_left_waiting () =
+  with_workspace (fun ~sw ~clock config ->
+    let schedule_id = "sched-still-waiting" in
+    create_receipt_schedule config ~schedule_id;
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ schedule_id ] in
+    get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
+    check int "the sweep left the wait alone" 1 !(task.attempts);
+    check bool "and wrote no receipt" false
+      (outbox_has config ~viewer:Outbox.Every_receipt schedule_id))
+;;
+
 let () =
   run
     "keeper receipt wait resume"
@@ -638,6 +734,12 @@ let () =
             test_run_without_a_record_is_settled_with_unknown_arguments
         ; test_case "a run with a worker is left waiting" `Quick
             test_run_with_a_worker_is_left_waiting
+        ; test_case "a schedule that ended without a receipt is settled" `Quick
+            test_a_schedule_that_ended_without_a_receipt_is_settled
+        ; test_case "a schedule whose id is not a request id is settled" `Quick
+            test_a_schedule_whose_id_is_not_a_request_id_is_settled
+        ; test_case "a schedule that has not ended is left waiting" `Quick
+            test_a_schedule_that_has_not_ended_is_left_waiting
         ; test_case "a request another conversation waits for is refused" `Quick
             test_a_request_another_conversation_waits_for_is_refused
         ] )

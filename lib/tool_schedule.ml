@@ -526,8 +526,8 @@ let validate_watch_recurrence ~payload ~recurrence =
           first occurrence")
 ;;
 
-(* A receipt is keyed by its schedule instance. A recurring schedule would write
-   every occurrence's receipt under the first one's call id. *)
+(* A receipt is keyed by its schedule id. A recurring schedule would write every
+   occurrence's receipt under the same call id. *)
 let validate_receipt_recurrence ~payload ~recurrence =
   let* delivery = Schedule_payload_projection.delivery_of_payload payload in
   match delivery, recurrence with
@@ -537,7 +537,7 @@ let validate_receipt_recurrence ~payload ~recurrence =
     , (Schedule_domain.Interval _ | Schedule_domain.Daily _ | Schedule_domain.Cron _) ) ->
     Error
       "delivery receipt needs recurrence_kind one_shot: the receipt is keyed by one \
-       schedule instance"
+       schedule id"
 ;;
 
 (* A keeper_wake schedule whose target has no durable metadata can never be

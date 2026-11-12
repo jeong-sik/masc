@@ -63,6 +63,13 @@
 (* does them one after the other. A receipt is an id here; its content is  *)
 (* not. The patrol run and the other lanes are one holder, "patrol". Edit, *)
 (* batch members, the vendor session and the checkpoint are not modelled.  *)
+(* A request is a background Execute run or a Keeper wake whose delivery  *)
+(* is receipt (keeper_schedule_receipt.ml). The wake is "running" until    *)
+(* its schedule row ends: Retain is the consumer writing the receipt       *)
+(* (server_schedule_consumers.ml dispatch_keeper_receipt), and             *)
+(* EndWithoutReceipt is a row that ends without one (a rejected wake, a    *)
+(* cancelled row). The sweep then writes the unfinished receipt            *)
+(* (keeper_receipt_wait_sweep.ml), as RecoverUnfinished does for a run.    *)
 (* The model assumes boot recovery writes the unfinished receipt. The code *)
 (* logs a warning and writes none when the active inventory is unreadable  *)
 (* (keeper_execute_background.ml:336-339); that case is RestartLoses.      *)
@@ -178,6 +185,16 @@ RecoverUnfinished(r) ==
     /\ UNCHANGED << task, awaiting, owns, slot, loaded, finished, lastwait,
                     restarts, patrols, requeued >>
 
+\* A schedule row that delivers a receipt ends without writing one: its wake
+\* is rejected, or the row is cancelled. No server restart is involved, which
+\* is what separates this from Restart. The sweep writes the unfinished
+\* receipt, so RecoverUnfinished applies.
+EndWithoutReceipt(r) ==
+    /\ req[r] = "running"
+    /\ req' = [req EXCEPT ![r] = "orphaned"]
+    /\ UNCHANGED << task, awaiting, owns, slot, loaded, finished, lastwait,
+                    restarts, patrols, requeued >>
+
 \* The running task asks to wait for a set of requests. Its turn ends in the
 \* same step. Every request must have a source, and no task may own any of
 \* them yet. The task is claimable at once when every receipt is written.
@@ -288,6 +305,7 @@ Next ==
     \/ \E t \in Tasks : Claim(t)
     \/ \E r \in Requests : StartRun(r)
     \/ \E r \in Requests : Retain(r)
+    \/ \E r \in Requests : EndWithoutReceipt(r)
     \/ \E r \in Requests : RecoverUnfinished(r)
     \/ \E t \in Tasks, rs \in SUBSET Requests : Wait(t, rs)
     \/ \E t \in Tasks : Resolve(t)

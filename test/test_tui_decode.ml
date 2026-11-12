@@ -6441,9 +6441,6 @@ let test_decode_standalone_lane_configuration_is_a_closed_set () =
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
-      ; "exact_run_projection_count", `Int 1
-      ; "exact_run_source_total", `Int 1
-      ; "exact_run_projection_truncated", `Bool false
       ; ( "lanes"
         , `List
             [ standalone_lane_json ~configuration_state "board_attention_exact"
@@ -6499,9 +6496,6 @@ let test_decode_standalone_lanes_refuses_an_unknown_lane_id () =
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
-      ; "exact_run_projection_count", `Int 1
-      ; "exact_run_source_total", `Int 1
-      ; "exact_run_projection_truncated", `Bool false
       ; ( "lanes"
         , `List
             (standalone_lane_json "retired_lane_exact" "Retired"
@@ -6530,9 +6524,6 @@ let test_decode_standalone_lane_keeps_the_run_start () =
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
-      ; "exact_run_projection_count", `Int 1
-      ; "exact_run_source_total", `Int 1
-      ; "exact_run_projection_truncated", `Bool false
       ; "lanes",
         `List
           [ standalone_lane_json ~status:"running" ~running:1
@@ -6595,9 +6586,6 @@ let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
-      ; "exact_run_projection_count", `Int 4
-      ; "exact_run_source_total", `Int 4
-      ; "exact_run_projection_truncated", `Bool false
       ; "lanes", `List lanes
       ]
   in
@@ -6641,9 +6629,6 @@ let test_decode_standalone_lane_jev_is_typed_and_required () =
       ; "generated_at", `String "2026-09-20T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
-      ; "exact_run_projection_count", `Int 0
-      ; "exact_run_source_total", `Int 0
-      ; "exact_run_projection_truncated", `Bool false
       ; ( "lanes"
         , `List
             [ board
@@ -6852,9 +6837,6 @@ let test_decode_standalone_lanes_rejects_duplicate_ids () =
       ; "generated_at", `String "2026-08-27T00:00:00Z"
       ; "observed_at_unix", `Float 20.
       ; "observation_only", `Bool true
-      ; "exact_run_projection_count", `Int 5
-      ; "exact_run_source_total", `Int 5
-      ; "exact_run_projection_truncated", `Bool false
       ; "lanes", `List [ duplicate; duplicate; duplicate; duplicate; duplicate ]
       ]
   in

@@ -154,12 +154,7 @@ let idle_lane ~(lane : Standalone_lane.t) : Tui_decode.standalone_lane =
 ;;
 
 let lanes_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
-  { Tui_decode.sls_observed_at_unix = 0.
-  ; sls_exact_run_projection_count = 0
-  ; sls_exact_run_source_total = 0
-  ; sls_exact_run_projection_truncated = false
-  ; sls_lanes = lanes
-  }
+  { Tui_decode.sls_observed_at_unix = 0.; sls_lanes = lanes }
 ;;
 
 let animating ?(turns = []) ?(live_transcript = false)

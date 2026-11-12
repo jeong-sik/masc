@@ -287,9 +287,6 @@ type standalone_lane = {
 
 type standalone_lanes_snapshot = {
   sls_observed_at_unix : float;
-  sls_exact_run_projection_count : int;
-  sls_exact_run_source_total : int;
-  sls_exact_run_projection_truncated : bool;
   sls_lanes : standalone_lane list;
 }
 
@@ -3908,22 +3905,6 @@ let decode_standalone_lanes_snapshot json =
   in
   let* _generated_at = required_string_field json "generated_at" in
   let* sls_observed_at_unix = Json_util.require_float json "observed_at_unix" in
-  let* sls_exact_run_projection_count =
-    required_int_field json "exact_run_projection_count"
-  in
-  let* sls_exact_run_source_total = required_int_field json "exact_run_source_total" in
-  let* sls_exact_run_projection_truncated =
-    required_bool_field json "exact_run_projection_truncated"
-  in
-  let* () =
-    if
-      sls_exact_run_projection_count <= sls_exact_run_source_total
-      && Bool.equal
-           sls_exact_run_projection_truncated
-           (sls_exact_run_projection_count < sls_exact_run_source_total)
-    then Ok ()
-    else Error "exact run projection metadata is inconsistent"
-  in
   let* observation_only = required_bool_field json "observation_only" in
   let* () =
     if observation_only then Ok ()
@@ -3944,13 +3925,7 @@ let decode_standalone_lanes_snapshot json =
   in
   if every_lane_once
   then
-    Ok
-      { sls_observed_at_unix
-      ; sls_exact_run_projection_count
-      ; sls_exact_run_source_total
-      ; sls_exact_run_projection_truncated
-      ; sls_lanes
-      }
+    Ok { sls_observed_at_unix; sls_lanes }
   else Error "expected each known lane exactly once"
 
 let keeper_secret_status_of_string = function

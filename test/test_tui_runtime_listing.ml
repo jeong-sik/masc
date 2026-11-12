@@ -556,9 +556,6 @@ let slot_editor_state ?(cursor = 0) ?(declared = [ "a"; "rejected"; "b" ])
   state.standalone_lanes <-
     Some
       { Masc.Tui_decode.sls_observed_at_unix = 0.
-      ; sls_exact_run_projection_count = 0
-      ; sls_exact_run_source_total = 0
-      ; sls_exact_run_projection_truncated = false
       ; sls_lanes =
           [ standalone_lane ~lane:Standalone_lane.Librarian ~declared ~admitted
               ~declared_cli ~admitted_cli () ]
@@ -699,8 +696,7 @@ let test_slot_selection_survives_refresh () =
         ~cursor:(if kind = Catalog_slot then 1 else 2) () in
     let refresh http cli =
       state.standalone_lanes <- Some
-        { sls_observed_at_unix = 1.; sls_exact_run_projection_count = 0;
-          sls_exact_run_source_total = 0; sls_exact_run_projection_truncated = false;
+        { sls_observed_at_unix = 1.;
           sls_lanes = [standalone_lane ~lane:Standalone_lane.Librarian
             ~declared:http ~declared_cli:cli
             ~admitted:(if admitted then http else [])
@@ -749,8 +745,7 @@ let test_slot_selection_survives_refresh () =
     Alcotest.(check (option int)) "explicit navigation restores selection" (Some 0)
       (slot_editor_cursor_index state);
     state.standalone_lanes <- Some
-      { sls_observed_at_unix = 2.; sls_exact_run_projection_count = 0;
-        sls_exact_run_source_total = 0; sls_exact_run_projection_truncated = false;
+      { sls_observed_at_unix = 2.;
         sls_lanes = [standalone_lane ~lane:Standalone_lane.Verifier
           ~declared:http ~admitted:http ~declared_cli:cli ()] };
     reconcile_slot_editor_selection state;

@@ -90,13 +90,13 @@ SlotValues == {"free", "patrol"} \cup Tasks
 
 VARIABLES
     task,       \* [Tasks -> TaskStates]
-    awaiting,   \* the request a waiting or ready task waits for
+    awaiting,   \* the requests a waiting or ready task waits for
     owns,       \* the ownership record: requests a task owns
     req,        \* [Requests -> ReqStates]
     slot,       \* who holds the Keeper's one turn slot
     loaded,     \* the receipts the slot holder's run carries
     finished,   \* history: the terminal state a task reached
-    lastwait,   \* history: the last request a task waited for
+    lastwait,   \* history: the requests a task last waited for
     requeued,   \* history: tasks a restart returned to the queue while running
     restarts,
     patrols
@@ -106,26 +106,26 @@ vars == << task, awaiting, owns, req, slot, loaded, finished, lastwait,
 
 TypeOK ==
     /\ task \in [Tasks -> TaskStates]
-    /\ awaiting \in [Tasks -> Requests \cup {None}]
+    /\ awaiting \in [Tasks -> SUBSET Requests]
     /\ owns \in [Tasks -> SUBSET Requests]
     /\ req \in [Requests -> ReqStates]
     /\ slot \in SlotValues
     /\ loaded \subseteq Requests
     /\ finished \in [Tasks -> Terminal \cup {None}]
-    /\ lastwait \in [Tasks -> Requests \cup {None}]
+    /\ lastwait \in [Tasks -> SUBSET Requests]
     /\ requeued \subseteq Tasks
     /\ restarts \in 0..MaxRestarts
     /\ patrols \in 0..MaxPatrols
 
 Init ==
     /\ task = [t \in Tasks |-> "queued"]
-    /\ awaiting = [t \in Tasks |-> None]
+    /\ awaiting = [t \in Tasks |-> {}]
     /\ owns = [t \in Tasks |-> {}]
     /\ req = [r \in Requests |-> "idle"]
     /\ slot = "free"
     /\ loaded = {}
     /\ finished = [t \in Tasks |-> None]
-    /\ lastwait = [t \in Tasks |-> None]
+    /\ lastwait = [t \in Tasks |-> {}]
     /\ requeued = {}
     /\ restarts = 0
     /\ patrols = 0
@@ -149,7 +149,7 @@ Claim(t) ==
     /\ slot = "free"
     /\ task[t] \in {"queued", "ready"}
     /\ task' = [task EXCEPT ![t] = "running"]
-    /\ awaiting' = [awaiting EXCEPT ![t] = None]
+    /\ awaiting' = [awaiting EXCEPT ![t] = {}]
     /\ slot' = t
     /\ loaded' = {r \in Requests : Visible(r, t)}
     /\ UNCHANGED << owns, req, finished, lastwait, restarts, patrols, requeued >>
@@ -178,27 +178,28 @@ RecoverUnfinished(r) ==
     /\ UNCHANGED << task, awaiting, owns, slot, loaded, finished, lastwait,
                     restarts, patrols, requeued >>
 
-\* The running task asks to wait for a request. Its turn ends in the same
-\* step. The request must have a source, and no task may own it yet. A
-\* receipt that is already written makes the task claimable at once.
-Wait(t, r) ==
+\* The running task asks to wait for a set of requests. Its turn ends in the
+\* same step. Every request must have a source, and no task may own any of
+\* them yet. The task is claimable at once when every receipt is written.
+Wait(t, rs) ==
     /\ slot = t
     /\ task[t] = "running"
-    /\ req[r] \in {"running", "written"}
-    /\ r \notin Owned
-    /\ task' = [task EXCEPT ![t] = IF req[r] = "written" THEN "ready" ELSE "waiting"]
-    /\ awaiting' = [awaiting EXCEPT ![t] = r]
-    /\ owns' = [owns EXCEPT ![t] = @ \cup {r}]
-    /\ lastwait' = [lastwait EXCEPT ![t] = r]
+    /\ rs # {}
+    /\ \A r \in rs : req[r] \in {"running", "written"}
+    /\ rs \cap Owned = {}
+    /\ task' = [task EXCEPT ![t] = IF \A r \in rs : req[r] = "written" THEN "ready" ELSE "waiting"]
+    /\ awaiting' = [awaiting EXCEPT ![t] = rs]
+    /\ owns' = [owns EXCEPT ![t] = @ \cup rs]
+    /\ lastwait' = [lastwait EXCEPT ![t] = rs]
     /\ slot' = "free"
     /\ loaded' = {}
     /\ UNCHANGED << req, finished, restarts, patrols, requeued >>
 
-\* The receipt of the awaited request exists, so the wait is resolved. The
+\* Every receipt of the awaited requests exists, so the wait is resolved. The
 \* guard on the task state is the compare-and-set of the store row.
 Resolve(t) ==
     /\ task[t] = "waiting"
-    /\ req[awaiting[t]] = "written"
+    /\ \A r \in awaiting[t] : req[r] = "written"
     /\ task' = [task EXCEPT ![t] = "ready"]
     /\ UNCHANGED << awaiting, owns, req, slot, loaded, finished, lastwait,
                     restarts, patrols, requeued >>
@@ -234,7 +235,7 @@ Cancel(t) ==
     /\ task[t] \in {"queued", "waiting", "ready"}
     /\ task' = [task EXCEPT ![t] = "cancelled"]
     /\ finished' = [finished EXCEPT ![t] = "cancelled"]
-    /\ awaiting' = [awaiting EXCEPT ![t] = None]
+    /\ awaiting' = [awaiting EXCEPT ![t] = {}]
     /\ owns' = [owns EXCEPT ![t] = {}]
     /\ UNCHANGED << req, slot, loaded, lastwait, restarts, patrols, requeued >>
 
@@ -255,8 +256,8 @@ PatrolEnd ==
 
 \* A running task that was claimed after a wait carries the continuation it
 \* resumed from. A running task that never waited has none.
-Resumed(t) == task[t] = "running" /\ lastwait[t] # None
-NoContinuation(t) == task[t] = "running" /\ lastwait[t] = None
+Resumed(t) == task[t] = "running" /\ lastwait[t] # {}
+NoContinuation(t) == task[t] = "running" /\ lastwait[t] = {}
 
 \* The server restarts. Rows and receipts are durable. A running turn, its
 \* snapshot and the workers are not. A running row without a continuation
@@ -288,7 +289,7 @@ Next ==
     \/ \E r \in Requests : StartRun(r)
     \/ \E r \in Requests : Retain(r)
     \/ \E r \in Requests : RecoverUnfinished(r)
-    \/ \E t \in Tasks, r \in Requests : Wait(t, r)
+    \/ \E t \in Tasks, rs \in SUBSET Requests : Wait(t, rs)
     \/ \E t \in Tasks : Resolve(t)
     \/ \E t \in Tasks : Complete(t)
     \/ \E t \in Tasks : Fail(t)
@@ -321,21 +322,21 @@ OneOwner ==
 OwnerIsLive ==
     \A t \in Tasks : task[t] \in Terminal => owns[t] = {}
 
-\* A waiting or ready task names a request it owns, and no other task does.
+\* A waiting or ready task names requests it owns, and no other task does.
 WaitingHasRequest ==
     \A t \in Tasks :
-        /\ task[t] \in {"waiting", "ready"} <=> awaiting[t] # None
-        /\ awaiting[t] # None => awaiting[t] \in owns[t]
+        /\ task[t] \in {"waiting", "ready"} <=> awaiting[t] # {}
+        /\ awaiting[t] \subseteq owns[t]
 
-\* A waiting task has something to wait for: a worker, a request that boot
-\* will write a receipt for, or a receipt.
+\* A waiting task has something to wait for in every request: a worker, a
+\* request that boot will write a receipt for, or a receipt.
 WaitingHasSource ==
     \A t \in Tasks :
-        task[t] = "waiting" => req[awaiting[t]] \in {"running", "orphaned", "written"}
+        task[t] = "waiting" => \A r \in awaiting[t] : req[r] \in {"running", "orphaned", "written"}
 
 \* A ready task finds its receipt in the outbox.
 ReadyHasReceipt ==
-    \A t \in Tasks : task[t] = "ready" => req[awaiting[t]] = "written"
+    \A t \in Tasks : task[t] = "ready" => \A r \in awaiting[t] : req[r] = "written"
 
 \* A task is claimed only after the receipts it owns exist.
 ClaimedHasReceipt ==
@@ -371,18 +372,17 @@ WaiterResolves ==
 
 \* A task waits, is claimed again with its receipt, and completes.
 WaitThenSucceedUnreachable ==
-    \A t \in Tasks : ~(finished[t] = "succeeded" /\ lastwait[t] # None)
+    \A t \in Tasks : ~(finished[t] = "succeeded" /\ lastwait[t] # {})
 
 \* A task waits while its request is active but its worker is gone.
 WaitOnOrphanUnreachable ==
-    \A t \in Tasks : task[t] = "waiting" => req[awaiting[t]] # "orphaned"
+    \A t \in Tasks : task[t] = "waiting" => \A r \in awaiting[t] : req[r] # "orphaned"
 
 \* The receipt a cancelled task waited for is in the outbox, whether it was
 \* written before the cancel or after it.
 LateReceiptAfterCancelUnreachable ==
     \A t \in Tasks :
-        ~(finished[t] = "cancelled" /\ lastwait[t] # None
-          /\ req[lastwait[t]] = "written")
+        ~(finished[t] = "cancelled" /\ \E r \in lastwait[t] : req[r] = "written")
 
 \* A task waits and is claimed with its receipt, a restart returns it to the
 \* queue with what it owns, and it is claimed again and completes.
@@ -397,7 +397,7 @@ ClaimWhileWaiting(t) ==
     /\ slot = "free"
     /\ task[t] = "waiting"
     /\ task' = [task EXCEPT ![t] = "running"]
-    /\ awaiting' = [awaiting EXCEPT ![t] = None]
+    /\ awaiting' = [awaiting EXCEPT ![t] = {}]
     /\ slot' = t
     /\ loaded' = {r \in Requests : Visible(r, t)}
     /\ UNCHANGED << owns, req, finished, lastwait, restarts, patrols, requeued >>
@@ -407,20 +407,21 @@ SpecClaimBuggy == Init /\ [][NextClaimBuggy]_vars
 
 \* B2. A second task waits for a request another task already owns, so one
 \* receipt is claimed twice. The store has no unique index on the request.
-DuplicateWait(t, r) ==
+DuplicateWait(t, rs) ==
     /\ slot = t
     /\ task[t] = "running"
-    /\ req[r] \in {"running", "written"}
-    /\ \E u \in Tasks : u # t /\ r \in owns[u]
-    /\ task' = [task EXCEPT ![t] = IF req[r] = "written" THEN "ready" ELSE "waiting"]
-    /\ awaiting' = [awaiting EXCEPT ![t] = r]
-    /\ owns' = [owns EXCEPT ![t] = @ \cup {r}]
-    /\ lastwait' = [lastwait EXCEPT ![t] = r]
+    /\ rs # {}
+    /\ \A r \in rs : req[r] \in {"running", "written"}
+    /\ \E u \in Tasks : u # t /\ rs \cap owns[u] # {}
+    /\ task' = [task EXCEPT ![t] = IF \A r \in rs : req[r] = "written" THEN "ready" ELSE "waiting"]
+    /\ awaiting' = [awaiting EXCEPT ![t] = rs]
+    /\ owns' = [owns EXCEPT ![t] = @ \cup rs]
+    /\ lastwait' = [lastwait EXCEPT ![t] = rs]
     /\ slot' = "free"
     /\ loaded' = {}
     /\ UNCHANGED << req, finished, restarts, patrols, requeued >>
 
-NextDuplicateWaitBuggy == Next \/ (\E t \in Tasks, r \in Requests : DuplicateWait(t, r))
+NextDuplicateWaitBuggy == Next \/ (\E t \in Tasks, rs \in SUBSET Requests : DuplicateWait(t, rs))
 SpecDuplicateWaitBuggy == Init /\ [][NextDuplicateWaitBuggy]_vars
 
 \* B3. A run loads receipts without asking who owns them, and its completed
@@ -441,11 +442,11 @@ SpecUnfilteredLoadBuggy == Init /\ [][NextUnfilteredLoadBuggy]_vars
 \* task is an index nobody cleans when the task is cancelled.
 ReviveFromStaleIndex(t) ==
     /\ task[t] = "cancelled"
-    /\ lastwait[t] # None
-    /\ req[lastwait[t]] = "written"
+    /\ lastwait[t] # {}
+    /\ \A r \in lastwait[t] : req[r] = "written"
     /\ task' = [task EXCEPT ![t] = "ready"]
     /\ awaiting' = [awaiting EXCEPT ![t] = lastwait[t]]
-    /\ owns' = [owns EXCEPT ![t] = @ \cup {lastwait[t]}]
+    /\ owns' = [owns EXCEPT ![t] = @ \cup lastwait[t]]
     /\ UNCHANGED << req, slot, loaded, finished, lastwait, restarts, patrols, requeued >>
 
 NextReviveBuggy == Next \/ (\E t \in Tasks : ReviveFromStaleIndex(t))
@@ -457,7 +458,7 @@ CancelKeepsOwner(t) ==
     /\ task[t] \in {"queued", "waiting", "ready"}
     /\ task' = [task EXCEPT ![t] = "cancelled"]
     /\ finished' = [finished EXCEPT ![t] = "cancelled"]
-    /\ awaiting' = [awaiting EXCEPT ![t] = None]
+    /\ awaiting' = [awaiting EXCEPT ![t] = {}]
     /\ UNCHANGED << owns, req, slot, loaded, lastwait, restarts, patrols, requeued >>
 
 NextCancelKeepsOwnerBuggy == Next \/ (\E t \in Tasks : CancelKeepsOwner(t))
@@ -478,7 +479,7 @@ DuplicateResolveRequeues(t) ==
     /\ task[t] = "running"
     /\ \E r \in owns[t] : req[r] = "written"
     /\ task' = [task EXCEPT ![t] = "ready"]
-    /\ awaiting' = [awaiting EXCEPT ![t] = CHOOSE r \in owns[t] : req[r] = "written"]
+    /\ awaiting' = [awaiting EXCEPT ![t] = {r \in owns[t] : req[r] = "written"}]
     /\ UNCHANGED << owns, req, slot, loaded, finished, lastwait, restarts, patrols, requeued >>
 
 NextDuplicateResolveBuggy == Next \/ (\E t \in Tasks : DuplicateResolveRequeues(t))
@@ -499,7 +500,7 @@ SpecWakeNeverDelivered ==
 NextBuggy ==
     \/ Next
     \/ \E t \in Tasks : ClaimWhileWaiting(t)
-    \/ \E t \in Tasks, r \in Requests : DuplicateWait(t, r)
+    \/ \E t \in Tasks, rs \in SUBSET Requests : DuplicateWait(t, rs)
     \/ PatrolStartLoadsAll
     \/ \E t \in Tasks : ReviveFromStaleIndex(t)
     \/ \E t \in Tasks : CancelKeepsOwner(t)

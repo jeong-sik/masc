@@ -23,7 +23,7 @@ implementation_prs: []
 - **[제안]** 채팅 작업의 상태는 일곱이에요. queued, waiting, ready, running, succeeded, failed, cancelled 예요. 새 상태는 waiting 과 ready 둘이고, 둘 다 reducer 에서는 지금처럼 `Queued` 예요(3.2).
 - **[제안]** 영수증은 기다리기로 한 작업이 소유해요. 소유는 작업이 끝날 때까지 이어지고, 끝나면(성공, 실패, 취소, 재시작 실패) 같은 전이에서 풀려요. 소유 기록은 실행 기록(semantic record)의 새 필드예요(4절). 이어받는 길은 지금 있는 체크포인트 재개예요(6절).
 - **[사실]** 영수증을 읽는 곳은 처음 센 여섯보다 많아요. 구현(L1)에서 `load` 호출처는 열이에요(2.7). 모델은 소유를 안 보는 run 하나만 있어도 기다리는 작업의 영수증이 그 run 에 지워지는 반례를 내요(8.4).
-- **[사실]** TLC 는 정상 설정에서 위반을 찾지 못했어요(생성 75,517 상태, 서로 다른 26,970 상태, 깊이 20). 버그·가드 설정 13개는 모두 의도한 불변식이나 속성을 깨는 반례를 내요(8.4). 재개한 작업의 재시작(소유를 지킨 채 ready 로 돌아가는 길)도 모델에 들어 있어요.
+- **[사실]** TLC 는 정상 설정에서 위반을 찾지 못했어요(생성 93,108 상태, 서로 다른 34,029 상태, 깊이 20). 버그·가드 설정 13개는 모두 의도한 불변식이나 속성을 깨는 반례를 내요(8.4). 한 번의 wait 이 request 여럿을 기다리는 경우와 재개한 작업의 재시작(소유를 지킨 채 ready 로 돌아가는 길)도 모델에 들어 있어요.
 - **[제안]** hard cut 은 둘이에요. 실행 기록 형식이 `v2` 에서 `v3` 로 바뀌어요. 부모 RFC 가 둘로 센 저장소 스키마와 소유 기록이 같은 필드 하나로 모여요. 영수증의 `arguments` 를 모를 때 빈 값으로 채우지 않고 typed 부재로 적는 선택(9절 3) 때문에 outbox 영수증 형식도 바뀌어요(7절). 옛 형식을 읽는 코드는 없어요.
 - 사용자가 정할 것은 9절에 있어요.
 
@@ -116,7 +116,7 @@ implementation_prs: []
 
 ## 3. 상태 기계
 
-모델의 변수예요. `task` 는 작업 상태, `awaiting` 은 기다리는 request, `owns` 는 소유 기록, `req` 는 request 상태, `slot` 은 슬롯 주인, `loaded` 는 슬롯 주인의 run 이 읽은 영수증이에요.
+모델의 변수예요. `task` 는 작업 상태, `awaiting` 은 기다리는 request 의 집합, `owns` 는 소유 기록, `req` 는 request 상태, `slot` 은 슬롯 주인, `loaded` 는 슬롯 주인의 run 이 읽은 영수증이에요.
 
 ### 3.1 슬롯
 
@@ -142,7 +142,7 @@ implementation_prs: []
 
 **[제안]** 전이예요. 모든 칸을 적었어요. `거절` 은 호출한 쪽에 에러를 돌려주고 아무것도 바꾸지 않아요. `그대로` 는 정상이고 아무것도 바꾸지 않아요.
 
-| 상태＼사건 | Claim | Wait(r) | Resolve | Complete | Fail | Cancel | Restart |
+| 상태＼사건 | Claim | Wait(R) | Resolve | Complete | Fail | Cancel | Restart |
 |---|---|---|---|---|---|---|---|
 | queued | → running | 거절 | 그대로 | 거절 | 거절 | → cancelled | 그대로 |
 | waiting | 거절 | 거절 | → ready | 거절 | 거절 | → cancelled | 그대로 |
@@ -154,7 +154,7 @@ implementation_prs: []
 
 사건의 조건이에요.
 - **Claim** 은 슬롯이 `free` 일 때만 해요. waiting 은 claim 하지 않아요.
-- **Wait(r)** 은 슬롯을 쥔 작업만 불러요. request r 에 영수증이 이미 있으면 ready 가 되고, worker 가 도는 중이면 waiting 이 돼요. 도구를 부를 때 r 의 request 기록이 없으면 거절이고 턴은 이어져요. 다른 작업이 소유한 r 은 도구가 호출한 실행을 몰라서 호출 때 못 가려요. 턴 끝 저장 transaction 이 거절하고(`Turn_continuation_unpersisted`), 모델은 거절 문구를 받지 못해요. 턴이 끝나고 슬롯이 비는 것과 소유 기록은 같은 transaction 이에요.
+- **Wait(R)** 은 슬롯을 쥔 작업만 불러요. R 은 request 의 집합이고, 한 턴에 wait 도구를 여러 번 불러도 같은 transaction 에 모두 기록해요. R 의 영수증이 모두 이미 있으면 ready 가 되고, 하나라도 worker 가 도는 중이면 waiting 이 돼요. 도구를 부를 때 R 의 request 기록이 없으면 거절이고 턴은 이어져요. 다른 작업이 소유한 request 는 도구가 호출 때 거절해요. 도구는 도는 실행의 scope 와 owner 읽기로 소유자를 확인하고, 모델에게 보이는 거절 문구를 돌려줘요. 확인과 기록 사이에 틈이 남으므로 턴 끝 저장 transaction 이 한 번 더 거절해요(`Turn_continuation_unpersisted`, 최후 방어선). 턴이 끝나고 슬롯이 비는 것과 소유 기록은 같은 transaction 이에요.
 - **Resolve** 는 영수증이 outbox 에 쓰였다는 통지예요. waiting 만 ready 로 바꿔요. 통지는 request 를 가리킬 뿐이라 안 기다린 queued 작업과 끝난 작업을 가르지 못해요. 같은 통지가 또 오거나, 그 request 를 기다리지 않는 작업이나 이미 끝난 작업에 오면 그대로예요(4.4).
 - **Fail** 은 도는 턴이 오류나 operator interrupt 로 끝난 거예요(2.2). 영수증은 지우지 않아요(2.7).
 - **Cancel** 은 도는 작업에는 없어요(2.2). 도는 작업은 Fail 로 끝나요.
@@ -181,7 +181,7 @@ implementation_prs: []
 ### 3.4 소유 기록
 
 **[제안]** `owns[t]` 는 작업 t 가 소유한 request 의 집합이에요. 규칙은 넷이에요.
-1. Wait(r) 이 r 을 더해요. 이미 다른 작업의 `owns` 에 든 r 이면 Wait 은 거절이에요.
+1. Wait(R) 이 R 의 request 를 더해요. R 의 request 하나라도 이미 다른 작업의 `owns` 에 들었으면 Wait 은 거절이에요.
 2. 작업이 waiting, ready, running 을 오가도 빼지 않아요. 재개한 턴이 다시 Wait 해서 슬롯을 놓아도 앞서 받은 영수증은 아직 지워지면 안 되기 때문이에요.
 3. 작업이 끝나면(Complete, Fail, Cancel, continuation 없는 running 의 Restart) 같은 전이에서 비워요. 실행 기록에서는 `Settle`, 또는 origin 이 `Interrupted_execution` 인 `Require_reconciliation` 이 비워요(2.8). continuation 이 있는 running 의 Restart 는 비우지 않아요.
 4. 영수증을 읽을 때 소유자가 아닌 run 은 소유된 영수증을 읽지 않아요(4.3).
@@ -195,9 +195,9 @@ implementation_prs: []
 | `SlotMatchesTask` | 슬롯이 가리키는 작업만 running 이고, running 작업은 슬롯을 쥐어요 | duplicate-resolve |
 | `OneOwner` | request 하나의 소유자는 많아야 하나예요 | duplicate-wait |
 | `OwnerIsLive` | 끝난 작업은 아무것도 소유하지 않아요 | cancel-keeps-owner |
-| `WaitingHasRequest` | waiting, ready 작업은 자기가 소유한 request 하나를 가리켜요 | 없음. 다른 불변식이 먼저 걸려요 |
-| `WaitingHasSource` | waiting 작업의 request 에는 worker, 부팅이 영수증을 쓸 기록, 영수증 중 하나가 있어요 | restart-loses-request |
-| `ReadyHasReceipt` | ready 작업의 영수증은 outbox 에 있어요 | unfiltered-load |
+| `WaitingHasRequest` | waiting, ready 작업은 자기가 소유한 request 를 가리키고, 가리키는 집합은 비어 있지 않아요 | 없음. 다른 불변식이 먼저 걸려요 |
+| `WaitingHasSource` | waiting 작업이 기다리는 request 마다 worker, 부팅이 영수증을 쓸 기록, 영수증 중 하나가 있어요 | restart-loses-request |
+| `ReadyHasReceipt` | ready 작업이 기다리는 영수증은 모두 outbox 에 있어요 | unfiltered-load |
 | `ClaimedHasReceipt` | claim 된 작업이 소유한 영수증은 모두 outbox 에 있어요 | claim-while-waiting |
 | `TerminalIsFinal` | 끝난 작업의 상태는 바뀌지 않아요 | revive-cancelled |
 | `WaiterResolves` | waiting 은 언젠가 waiting 이 아니게 돼요(`Retain`, `RecoverUnfinished`, `Resolve` 가 공정할 때) | wake-never-delivered |
@@ -274,6 +274,7 @@ type viewer =
 - **[제안]** 두 길이 있어요.
   - (a) 소유 기록이 request 를 알고 있어요. `Pending` 항목의 request 가 끝났거나 끊겼는데 영수증이 outbox 에 없으면 typed 해결 `Source_lost` 로 `Arrived` 처리하고, 같은 request_id 로 `Unfinished` 영수증을 한 번 써서 재개한 작업이 받게 해요. 영수증은 `retain_source_lost_receipt`(새 함수)가 써요. 이미 영수증이 있으면 쓰지 않아요.
     - 판정은 목록이 아니라 request 하나를 찾는 읽기로 해요. 못 읽은 것이 바로 active 목록이기 때문이에요. 읽기는 `Keeper_msg_async.load_canonical_request` 예요(`Found | Absent | Unreadable | Rejected`). worker 가 아직 있을 수 있는 request 상태는 계속 기다려요.
+    - 영수증을 쓰는 일은 Owner 의 직렬 명령 하나 안에서 해요. 「항목이 아직 `Pending` 인지 읽기 → 영수증 쓰기 → `Source_lost` 해소」가 한 명령이에요. 이미 `Arrived` 이거나 소유자가 없으면 쓰지 않아요. 그러지 않으면 낡은 sweep 이 이미 소비된 request 에 소유자 없는 `Unfinished` 를 다시 쓰고, 다음 run 이 같은 명령을 다시 실행할 수 있어요. 쓰기는 sqlite transaction 밖이고, 실패하면 항목은 `Pending` 으로 남아요.
     - 실행은 `Keeper_receipt_wait_sweep.settle_lost` 예요. maintenance 의 `reconcile` 이 Keeper 마다 `notify` 다음에 불러요. `Keeper_client_tool_outbox_wake` 가 sweep 을 직접 부르면 모듈 순환이 생겨서 `create ~settle_lost_waits` 로 주입해요.
   - (b) 부팅 때 active 목록을 못 읽으면 Keeper lane 을 시작하지 않아요.
   - 추천은 (a)예요. (b)는 파일 하나를 못 읽은 일이 Keeper 하나의 정지로 번져요. (a)의 대가는 owner 쪽에 request 기록을 읽는 길이 하나 늘어나는 거예요.
@@ -284,7 +285,7 @@ type viewer =
 
 - **같은 영수증의 통지가 여럿.** **[사실]** `notify` 는 ACK 될 때까지 tick 마다 같은 stimulus 를 다시 알려요(2.7). **[제안]** Resolve 는 같은 request 에 대해 한 번만 상태를 바꿔요. ready 나 running 인 작업에 오는 통지는 그대로예요(3.2). 모델 `duplicate-resolve` 는 이 가드를 빼고, 통지가 running 작업을 ready 로 되돌려서 `SlotMatchesTask` 가 깨지는 반례를 내요(7단계).
 - **같은 request 의 영수증 둘.** **[사실]** `holds_receipt` 가드가 `Unfinished` 의 중복을 막아요(2.6). **[확인 필요]** 가드는 읽고 쓰는 두 단계라서, worker 의 정상 종료와 abort 경로가 동시에 오면 둘이 쓰일 수 있는지는 읽지 않았어요. 모델에는 request 당 영수증이 하나예요.
-- **다른 작업이 소유한 request 를 또 기다림.** **[제안]** 소유 기록을 쓰는 턴 끝 저장 transaction 이 거절해요(3.2). 도구는 호출한 실행을 몰라서 호출 때는 못 가려요. 모델 `duplicate-wait` 는 거절을 빼고, 영수증 하나를 두 작업이 소유하는 반례를 내요(6단계, `OneOwner` 위반).
+- **다른 작업이 소유한 request 를 또 기다림.** **[제안·결정]** 도구가 호출 때 거절해요(3.2). 사용자가 이 길을 골랐어요. 확인과 기록 사이의 틈은 소유 기록을 쓰는 턴 끝 저장 transaction 이 한 번 더 거절해요. 모델 `duplicate-wait` 는 두 거절을 모두 빼고, 영수증 하나를 두 작업이 소유하는 반례를 내요(6단계, `OneOwner` 위반).
 - **다른 run 이 소유된 영수증을 읽음.** **[제안]** 4.3 의 `viewer` 가 막아요.
 
 ### 5.4 취소된 작업에 영수증이 늦게 옴
@@ -300,7 +301,7 @@ type viewer =
 
 | 단계 | 지금 코드(2절) | 이 설계가 더하는 것 |
 |---|---|---|
-| 1. 모델이 wait 도구를 부름 | `Generic_deferred` 도구 결과가 턴을 체크포인트 길로 끝내요(`keeper_tools_agent_core_bundle.ml:248-257`, `keeper_tool_terminal_boundary.ml:1-5`) | 도구 하나. `Generic_deferred` 가 아니라 일반 도구예요. `Terminal` 서술자는 Agent Core 가 결과를 `Completed` 로 끝내서 못 써요. 도구 결과의 `terminal_effect_receipt` 에 `Receipt_wait_requested {request_id}` 를 실어 `keeper_turn.ml` 의 `defer` 까지 나르고, 왼쪽 줄 번호는 그 사이 바뀌었어요. 직접 작업이 아닌 턴(순찰, 자율, 검증)에는 `Keeper_run_tools_setup.descriptors_for_run` 이 도구를 빼서 모델이 보지 못해요 |
+| 1. 모델이 wait 도구를 부름 | `Generic_deferred` 도구 결과가 턴을 체크포인트 길로 끝내요(`keeper_tools_agent_core_bundle.ml:248-257`, `keeper_tool_terminal_boundary.ml:1-5`) | 도구 하나. `Generic_deferred` 가 아니라 일반 도구예요. `Terminal` 서술자는 Agent Core 가 결과를 `Completed` 로 끝내서 못 써요. 도구 결과의 `terminal_effect_receipt` 에 `Receipt_wait_requested {request_id}` 를 실어 `keeper_turn.ml` 의 `defer` 까지 나르고, 왼쪽 줄 번호는 그 사이 바뀌었어요. 직접 작업이 아닌 턴(순찰, 자율, 검증)에는 `Keeper_run_tools_setup.descriptors_for_run` 이 도구를 빼서 모델이 보지 못해요. 한 batch 에 wait 을 여러 번 부르면 모두 같은 transaction 에 기록해요. `surface_post` 와 wait 은 한 batch 에 못 들어가요(Agent Core 가 `Rejected_terminal_mix` 로 batch 전체를 거절해요) |
 | 2. 턴이 체크포인트로 끝남 | `keeper_turn.ml:1057-1081` 의 checkpoint 갈래 → `defer`, `defer_official`(`keeper_direct_checkpoint_continuation.ml:85-104`) | 없음. 새 갈래가 아니에요. `InputRequired` 갈래는 안 써요. 입력 대기는 체크포인트 재개가 아니에요(2.3). 기다림을 요청했는데 턴이 체크포인트로 끝나지 않거나 `InputRequired` 와 겹치면 기다림을 버리지 않고 에러로 끝내요 |
 | 3. 저장 | `defer_direct_checkpoint` 한 transaction: Suspend, 큐로 되돌림, 순서 이동(`keeper_chat_operation_store.ml:2616-2670`) | 같은 transaction 에 `receipt_obligations` 에 request 를 `Pending` 으로 더하는 한 단계. 다른 실행 기록이 이미 소유한 request 면 transaction 이 거절 |
 | 4. claim 못 함 | `blocked_queued_scopes`(`:1731-1753`) | 여섯째 이유: `Pending` 항목이 있다 |
@@ -357,7 +358,7 @@ type viewer =
 
 **[사실]** 파일은 `specs/bug-models/KeeperReceiptWait.tla` 와 cfg 열네 개예요. `Spec` 은 정상(`Next`)이에요. 버그 설정은 행동 하나를 `Next` 에 더한 `NextBuggy == Next \/ BugAction` 이고, 각 버그 cfg 는 그 버그를 혼자 잡을 불변식이나 속성 하나만 켜요(기존 규칙: `specs/bug-models/` 의 다른 모델과 같아요). 모델 머리말에 코드 대응표와 추상화가 있어요.
 
-**[사실]** 모델 크기는 작업 2개, request 2개, 재시작 최대 1번, 순찰 run 최대 2번이에요. 표의 값은 `tla2tools-1.8.0.jar`(TLC2 Version 2026.05.26.235334)를 `specs/Makefile` 과 같은 옵션(`-XX:+UseParallelGC -Xmx2g`, `-Dtlc2.TLC.stopAfter=180`)에 `-workers 1` 로 돌려서 cfg 마다 한 번씩 읽은 거예요. 반례 길이는 초기 상태를 포함한 상태 수예요. 한 cfg 를 다시 돌리는 명령은 이래요.
+**[사실]** 모델 크기는 작업 2개, request 2개, 재시작 최대 1번, 순찰 run 최대 2번이에요. wait 한 번은 request 의 비어 있지 않은 부분집합을 기다려요. 표의 값은 `tla2tools-1.8.0.jar`(TLC2 Version 2026.05.26.235334)를 `specs/Makefile` 과 같은 옵션(`-XX:+UseParallelGC -Xmx2g`, `-Dtlc2.TLC.stopAfter=180`)에 `-workers 1` 로 돌려서 cfg 마다 한 번씩 읽은 거예요. 반례 길이는 초기 상태를 포함한 상태 수예요. 한 cfg 를 다시 돌리는 명령은 이래요.
 
 ```
 cd specs && java -XX:+UseParallelGC -Xmx2g -cp ~/.local/lib/tla/tla2tools-1.8.0.jar tlc2.TLC -workers 1 -config bug-models/KeeperReceiptWait.cfg bug-models/KeeperReceiptWait.tla
@@ -365,22 +366,22 @@ cd specs && java -XX:+UseParallelGC -Xmx2g -cp ~/.local/lib/tla/tla2tools-1.8.0.
 
 | cfg(`KeeperReceiptWait` 뒤) | 모델링한 실패 | 결과 | 생성 | 서로 다른 | 깊이·반례 길이 |
 |---|---|---|---:|---:|---:|
-| (없음) | 정상 | 위반 없음(`Safety`, `WaiterResolves`) | 75,517 | 26,970 | 깊이 20 |
-| `-claim-while-waiting-buggy` | B1. waiting 인 작업을 claim | `ClaimedHasReceipt` 위반 | 175 | 130 | 5 |
-| `-duplicate-wait-buggy` | B2. 소유된 request 를 또 기다림 | `OneOwner` 위반 | 615 | 388 | 6 |
-| `-unfiltered-load-buggy` | B3. 소유를 안 보고 읽는 run | `ReadyHasReceipt` 위반 | 1,960 | 1,013 | 7 |
-| `-revive-cancelled-buggy` | B4. 늦은 영수증이 취소된 작업을 되살림 | `TerminalIsFinal` 위반 | 1,765 | 991 | 7 |
-| `-cancel-keeps-owner-buggy` | B5. 취소가 소유를 안 풀음 | `OwnerIsLive` 위반 | 213 | 130 | 5 |
-| `-restart-loses-request-buggy` | B6. 재시작이 request 의 출처를 잃음 | `WaitingHasSource` 위반 | 199 | 137 | 5 |
-| `-duplicate-resolve-buggy` | B7. 같은 통지가 running 작업을 되돌림 | `SlotMatchesTask` 위반 | 1,756 | 983 | 7 |
-| `-wake-never-delivered-buggy` | B8. 통지가 영영 안 옴(공정성 제거) | `WaiterResolves` 위반(liveness) | 71,709 | 25,906 | 깊이 17, 반례 13 |
-| `-buggy` | B1~B7 한꺼번에 | `Safety` 위반 | 252 | 137 | 5 |
-| `-resume-reachable-buggy` | 가드. 기다린 작업이 재개해 성공함 | 도달함(위반이 맞아요) | 1,752 | 979 | 7 |
-| `-orphan-wait-reachable-buggy` | 가드. worker 가 죽은 request 를 기다림 | 도달함 | 174 | 129 | 5 |
-| `-late-receipt-reachable-buggy` | 가드. 취소된 작업의 영수증이 도착함 | 도달함 | 589 | 369 | 6 |
-| `-restart-requeue-reachable-buggy` | 가드. 재개한 작업이 재시작으로 큐에 돌아가 다시 claim 되어 성공함 | 도달함 | 9,382 | 4,205 | 9 |
+| (없음) | 정상 | 위반 없음(`Safety`, `WaiterResolves`) | 93,108 | 34,029 | 깊이 20 |
+| `-claim-while-waiting-buggy` | B1. waiting 인 작업을 claim | `ClaimedHasReceipt` 위반 | 176 | 131 | 5 |
+| `-duplicate-wait-buggy` | B2. 소유된 request 를 또 기다림 | `OneOwner` 위반 | 627 | 397 | 6 |
+| `-unfiltered-load-buggy` | B3. 소유를 안 보고 읽는 run | `ReadyHasReceipt` 위반 | 2,037 | 1,060 | 7 |
+| `-revive-cancelled-buggy` | B4. 늦은 영수증이 취소된 작업을 되살림 | `TerminalIsFinal` 위반 | 1,835 | 1,036 | 7 |
+| `-cancel-keeps-owner-buggy` | B5. 취소가 소유를 안 풀음 | `OwnerIsLive` 위반 | 214 | 131 | 5 |
+| `-restart-loses-request-buggy` | B6. 재시작이 request 의 출처를 잃음 | `WaitingHasSource` 위반 | 200 | 138 | 5 |
+| `-duplicate-resolve-buggy` | B7. 같은 통지가 running 작업을 되돌림 | `SlotMatchesTask` 위반 | 1,826 | 1,028 | 7 |
+| `-wake-never-delivered-buggy` | B8. 통지가 영영 안 옴(공정성 제거) | `WaiterResolves` 위반(liveness) | 93,108 | 34,029 | 깊이 20, 반례 13 |
+| `-buggy` | B1~B7 한꺼번에 | `Safety` 위반 | 253 | 138 | 5 |
+| `-resume-reachable-buggy` | 가드. 기다린 작업이 재개해 성공함 | 도달함(위반이 맞아요) | 1,822 | 1,024 | 7 |
+| `-orphan-wait-reachable-buggy` | 가드. worker 가 죽은 request 를 기다림 | 도달함 | 175 | 130 | 5 |
+| `-late-receipt-reachable-buggy` | 가드. 취소된 작업의 영수증이 도착함 | 도달함 | 601 | 378 | 6 |
+| `-restart-requeue-reachable-buggy` | 가드. 재개한 작업이 재시작으로 큐에 돌아가 다시 claim 되어 성공함 | 도달함 | 10,265 | 4,618 | 9 |
 
-- **[사실]** `Restart` 는 두 갈래예요. 대기를 한 번 거쳐 claim 된 running 작업(모델의 `lastwait` 가 있는 작업)은 continuation 을 쥔 것으로 보고 소유를 지킨 채 ready 로 돌려요. 대기한 적 없는 running 작업은 continuation 이 없다고 보고 failed 로 만들고 소유를 비워요(3.2, 2.8). 돌려보낼 때 모델이 끝난 작업의 이력 변수 `requeued` 에 적어요. 소유를 비우는 쪽으로 바꾼 변이를 임시로 돌려 보면 `Safety` 가 위반돼요(저장소에 없어요).
+- **[사실]** `Restart` 는 두 갈래예요. 대기를 한 번 거쳐 claim 된 running 작업(모델의 `lastwait` 가 있는 작업)은 continuation 을 쥔 것으로 보고 소유를 지킨 채 ready 로 돌려요. 대기한 적 없는 running 작업은 continuation 이 없다고 보고 failed 로 만들고 소유를 비워요(3.2, 2.8). 돌려보낼 때 모델이 끝난 작업의 이력 변수 `requeued` 에 적어요. 임시 변이 둘을 돌려 보면 `Safety` 가 위반돼요. 재시작에서 재개한 작업의 소유를 비우는 변이와, `Resolve` 가 기다리는 영수증 중 하나만 있어도 ready 로 바꾸는 변이예요(저장소에 없어요).
 - 표의 가드 넷(`-resume-reachable`, `-orphan-wait-reachable`, `-late-receipt-reachable`, `-restart-requeue-reachable`)은 정상 모델이 그 길에 닿는다는 것을 보여요. 길이 막히면 불변식이 아무것도 안 지키는데 통과해요. 가드가 먼저 빨개져요.
 - 종료 코드는 정상 0, 버그 cfg 는 12(불변식 위반) 또는 13(속성 위반)이에요. `specs/Makefile` 의 `check-buggy` 가 같은 규칙으로 읽어요.
 - **[사실]** `specs/Makefile` 의 `check-others` 샤드가 `bug-models/` 를 포함해요(`:143-149`). `.github/workflows` 에서 `check-others` 를 부르는 곳은 없어요. `model-check.yml` 은 `workflow_dispatch` 로만 돌고 `scripts/tla-check.sh` 를 부르는데, 그 스크립트는 `bug-models/` 를 다루지 않아요. 이 모델은 사람이 `make -C specs check-others` 를 돌릴 때만 돌아요. 구현 PR 이 모델과 어긋나도 CI 가 알려 주지 않아요. 모델을 PR 검사로 돌리는 일은 이 RFC 범위 밖이에요.

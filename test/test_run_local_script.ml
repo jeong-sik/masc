@@ -545,19 +545,34 @@ esac
 
 let built_index = {|<!doctype html><html><head></head><body></body></html>|}
 
+let remote_font_index =
+  {|<!doctype html><html><head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR"></head><body></body></html>|}
+
+(* The console is there, so the remote resource is the only reason to build
+   again. *)
 let test_dashboard_build_helper_rebuilds_remote_startup_resource_output () =
   let pnpm_calls, stderr =
     run_dashboard_build_helper
       ~output_files:
-        [ ( "index.html"
-          , {|<!doctype html><html><head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR"></head><body></body></html>|}
-          )
-        ]
+        [ "index.html", remote_font_index; "accounts/index.html", built_index ]
   in
   check bool "stale generated index forced rebuild" true
     (String_util.contains_substring pnpm_calls "run build");
   check bool "stale reason was explicit" true
     (String_util.contains_substring stderr "remote startup resources")
+
+(* Both reasons hold, and the helper says both: the first does not hide the
+   second. *)
+let test_dashboard_build_helper_says_every_reason () =
+  let pnpm_calls, stderr =
+    run_dashboard_build_helper ~output_files:[ "index.html", remote_font_index ]
+  in
+  check bool "an output with both faults forced a rebuild" true
+    (String_util.contains_substring pnpm_calls "run build");
+  check bool "the remote resource was said" true
+    (String_util.contains_substring stderr "remote startup resources");
+  check bool "the missing console was said" true
+    (String_util.contains_substring stderr "no account console")
 
 (* An output built before the account console was an entry of the build has
    the stamp and the dashboard, and no console. *)
@@ -1068,6 +1083,8 @@ let () =
           test_case "dashboard helper rebuilds an output without the account console"
             `Quick
             test_dashboard_build_helper_rebuilds_output_without_account_console;
+          test_case "dashboard helper says every reason to rebuild" `Quick
+            test_dashboard_build_helper_says_every_reason;
           test_case "dashboard helper keeps a complete fresh output" `Quick
             test_dashboard_build_helper_keeps_complete_fresh_output;
           test_case "bootstrap-keepers flag is opt-in" `Quick

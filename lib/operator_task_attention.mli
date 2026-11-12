@@ -57,9 +57,10 @@ val waiting_since : item -> string
 (** The claim, start or submission time. It does not establish when an owner
     or a review stopped. *)
 
-val summary : item -> string
-(** One line, for a surface that has one line. Written here rather than at each
-    screen so three screens cannot describe the same row three ways. *)
+val summary : ko:bool -> item -> string
+(** One line, for a surface that has one line, in Korean when [ko]. Written
+    here rather than at each screen so three screens cannot describe the same
+    row three ways, in either language. *)
 
 val next_step : item -> string
 (** A suggested inspection or repair. *)

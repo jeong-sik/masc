@@ -44,21 +44,27 @@ let task_label ~task_id ~title =
   else Printf.sprintf "%s · %s" task_id title
 ;;
 
-let summary = function
+let summary ~ko = function
   | Held_without_keeper_route { task_id; title; assignee; _ } ->
     Printf.sprintf
-      "%s: held by %s, which has no Keeper queue"
+      (if ko
+       then "%s · %s 담당 · 키퍼 대기열 없음"
+       else "%s: held by %s, which has no Keeper queue")
       (task_label ~task_id ~title)
       assignee
   | Producer_record_unreadable { task_id; title; producer; detail; _ } ->
     Printf.sprintf
-      "%s: the Keeper record for %s does not decode — %s"
+      (if ko
+       then "%s · %s 의 키퍼 기록을 읽지 못함: %s"
+       else "%s: the Keeper record for %s does not decode: %s")
       (task_label ~task_id ~title)
       producer
       detail
   | Awaiting_verdict { task_id; title; producer; _ } ->
     Printf.sprintf
-      "%s: submitted as complete by %s, awaiting a verdict"
+      (if ko
+       then "%s · %s 완료 제출 · 검증 대기"
+       else "%s: submitted as complete by %s, awaiting a verdict")
       (task_label ~task_id ~title)
       producer
 ;;

@@ -119,7 +119,7 @@ let detect_operator_tasks (items : Operator_task_attention.item list)
          | Operator_task_attention.Awaiting_verdict _ -> Info
        in
        { severity
-       ; summary = Operator_task_attention.summary item
+       ; summary = Operator_task_attention.summary ~ko:false item
        ; suggested_tool = Operator_task_attention.next_step item
        })
     items

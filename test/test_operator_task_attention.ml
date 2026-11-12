@@ -127,7 +127,7 @@ let test_a_submission_awaiting_a_verdict_is_a_row () =
       Alcotest.(check string) "summary names id, title, and producer"
         "task-001 · work submitted as finished: submitted as complete by edgar.a.poe, \
          awaiting a verdict"
-        (Attention.summary item)
+        (Attention.summary ~ko:false item)
     | items ->
       Alcotest.failf "a submission awaiting a verdict is one row (got %d rows)"
         (List.length items))
@@ -151,7 +151,7 @@ let test_a_held_task_is_listed_only_without_a_keeper_route () =
       Alcotest.(check string) "waiting since it started" "2026-09-04T00:00:00Z" since;
       Alcotest.(check string) "summary names id, title, and holder"
         "task-002 · held by a session without a Keeper queue: held by codex-mcp-client, which has no Keeper queue"
-        (Attention.summary item)
+        (Attention.summary ~ko:false item)
     | items ->
       Alcotest.failf "a live Keeper's task is not an operator row (got %d rows)"
         (List.length items))

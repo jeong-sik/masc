@@ -63,7 +63,15 @@ type surface_recovery =
 val asset_error_http_status :
   asset_load_error -> [ `Not_found | `Service_unavailable ]
 
-val load_dashboard_asset : string -> (string, asset_load_error) result
+type loaded_asset =
+  { body : string
+  ; manifest_sha256 : string option
+    (** The SHA-256 a launch manifest or an install receipt gives the file.
+        The read computed the digest of [body] and found it equal. [None]
+        under an unbound source tree, which has no manifest. *)
+  }
+
+val load_dashboard_asset : string -> (loaded_asset, asset_load_error) result
 (** Load one dashboard-relative file. Provenance-bound launches read only the
     immutable content-addressed snapshot and verify size/SHA-256 before
     returning bytes. Invalid/replaced bindings fail closed. *)

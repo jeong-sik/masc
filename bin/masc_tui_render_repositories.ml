@@ -68,7 +68,7 @@ let selected_repository_reading (state : state) =
 
 type workspace_activity_column = Activity_date | Activity_keeper | Activity_task | Activity_result | Activity_path
 
-let workspace_activity_cells ~cols ~date ~keeper ~task ~result ~path =
+let workspace_activity_cells ~ko ~cols ~date ~keeper ~task ~result ~path =
   let width = function
     | Activity_date -> 16 | Activity_keeper -> 18 | Activity_task -> 16
     | Activity_result -> String.length "RESULT" | Activity_path -> 8 in
@@ -77,11 +77,16 @@ let workspace_activity_cells ~cols ~date ~keeper ~task ~result ~path =
     [Activity_date; Activity_keeper; Activity_task; Activity_result; Activity_path] in
   List.map (fun column ->
     let header, value, fold = match column with
-      | Activity_date -> "DATE", date, Masc_tui_table.Fold_tail
-      | Activity_keeper -> "KEEPER", keeper, Masc_tui_table.Fold_middle
-      | Activity_task -> "TASK", task, Masc_tui_table.Fold_middle
-      | Activity_result -> "RESULT", result, Masc_tui_table.Fold_tail
-      | Activity_path -> "FILE", path, Masc_tui_table.Fold_middle in
+      | Activity_date ->
+          (if ko then "날짜" else "DATE"), date, Masc_tui_table.Fold_tail
+      | Activity_keeper ->
+          (if ko then "키퍼" else "KEEPER"), keeper, Masc_tui_table.Fold_middle
+      | Activity_task ->
+          (if ko then "태스크" else "TASK"), task, Masc_tui_table.Fold_middle
+      | Activity_result ->
+          (if ko then "결과" else "RESULT"), result, Masc_tui_table.Fold_tail
+      | Activity_path ->
+          (if ko then "파일" else "FILE"), path, Masc_tui_table.Fold_middle in
     Masc_tui_table.cell ~header ~fold
       ~width:(if column = Activity_path then layout.flex_width else width column) value) layout.shown
 
@@ -109,16 +114,21 @@ let render_workspace_activity (state : state) repo_id =
       | Some _ -> "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Enter:file  r:refresh  Esc:list")
     ~body:(fun ~budget c ->
       let listing ~budget reading =
-          c.push (Printf.sprintf "  Last %.0fh · %d recorded changes · %d successful · %d incomplete repo calls · %d unlocated fleet calls"
+          let ko = state.ui_language = Lang_ko in
+          c.push (Printf.sprintf
+            (if ko then "  최근 %.0f시간 · 기록된 변경 %d건 · 성공 %d건 · 끝나지 않은 저장소 호출 %d건 · 위치 모르는 호출 %d건"
+             else "  Last %.0fh · %d recorded changes · %d successful · %d incomplete repo calls · %d unlocated fleet calls")
             reading.Tui_decode.ras_window_hours (List.length rows)
             (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_succeeded) rows))
             reading.ras_incomplete reading.ras_unattributed);
           let names = List.map (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper) rows |> List.sort_uniq String.compare in
-          c.push ("  Changes by Keeper: " ^ String.concat " · " (List.map (fun name ->
+          c.push ((if ko then "  Keeper 별 변경: " else "  Changes by Keeper: ") ^ String.concat " · " (List.map (fun name ->
               Printf.sprintf "%s %d" (Terminal_text.single_line name)
                 (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper = name) rows))) names));
-          c.push_styled ~style:(Theme.recede ()) "  Recorded clone writes from all Keepers · Enter opens file; H history, m notes in Code";
-          let cells = workspace_activity_cells ~cols in
+          c.push_styled ~style:(Theme.recede ())
+            (if ko then "  모든 Keeper 가 clone 에 쓴 기록 · Enter 로 파일 열기 · 코드 화면에서 H 이력, m 노트"
+             else "  Recorded clone writes from all Keepers · Enter opens file; H history, m notes in Code");
+          let cells = workspace_activity_cells ~ko ~cols in
           c.push ("  " ^ Masc_tui_table.header_row (cells ~date:"" ~keeper:"" ~task:"" ~result:"" ~path:""));
           c.push_divider ();
           let room = max 1 (budget - 7) in
@@ -126,12 +136,12 @@ let render_workspace_activity (state : state) repo_id =
           let rows_window = Rows.of_list ~first:first ~height:room rows in
           for i = 0 to room - 1 do
             match Rows.at rows_window (first + i) with
-            | None -> if i = 0 && rows = [] then c.push "  No recorded clone writes in this window" else c.push_empty ()
+            | None -> if i = 0 && rows = [] then c.push (if ko then "  이 기간에 기록된 clone 쓰기 없음" else "  No recorded clone writes in this window") else c.push_empty ()
             | Some (change, path) ->
                 let tm = Unix.localtime change.Tui_decode.fc_at in
                 let date = Printf.sprintf "%04d-%02d-%02d %02d:%02d"
                   (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min in
-                let task = match change.fc_task_id with None -> "unlinked" | Some id -> id in
+                let task = match change.fc_task_id with None -> (if ko then "연결 없음" else "unlinked") | Some id -> id in
                 let line = "  " ^ Masc_tui_table.row (cells ~date
                   ~keeper:(Terminal_text.single_line change.fc_keeper)
                   ~task:(Terminal_text.single_line task)

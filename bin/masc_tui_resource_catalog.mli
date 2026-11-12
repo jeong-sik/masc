@@ -21,7 +21,7 @@ val on_day : day -> t -> bool
 val select : scope:scope -> day:day option -> t list -> t list
 (** Preserve source order and typed identities. Date filtering includes only
     reports whose publication instant falls on the selected local day. *)
-val scope_label : scope -> string
+val scope_label : ko:bool -> scope -> string
 val next_scope : scope -> scope
 
 type direction = Older | Newer

@@ -62,24 +62,30 @@ val max_message_bytes : int
     Field order does not matter. Each request field must occur once and hold
     a string; missing, duplicate and additional fields are refused with 400.
 
-    The other answers are a JSON [{"error": ...}]:
+    The other answers are a JSON [{"error": ..., "code": ...}]
+    ({!Server_preview_keeper_error}):
     - 400: the body is not that, the message is blank or longer than
-      {!max_message_bytes}, or the Runtime is neither a Claude Code nor a
-      Codex Runtime.
-    - 403: {!Runtime_account_access.authorize} refused the turn. The scope of
-      [pat] not covering the turn is one such refusal.
-    - 404: the Keeper is not the person's.
-    - 409: the Keeper has no Runtime, a call of the account runs, the
-      account is not signed in to a subscription, or the conversation of the
-      Keeper began on another account.
+      {!max_message_bytes}, the Runtime is neither a Claude Code nor a Codex
+      Runtime, or the runtime of its account does not load.
+    - 403: {!Runtime_account_access.authorize} refused the turn, or the
+      client would start with tools that reach the homes of other people.
+      The scope of [pat] not covering the turn is one refusal.
+    - 404: the Keeper is not the person's, or the account of its Runtime has
+      no login of theirs.
+    - 409: the Keeper has no Runtime, a call of the account runs, the owner
+      gave the Keeper another Runtime meanwhile, the account is not signed in
+      to a subscription, or the conversation of the Keeper began on another
+      account.
     - 429: the subscription has no quota left.
     - 504: the client was silent for 120 seconds.
     - 500, 502 or 503: the client did not start, or ended without an answer;
-      the record of the conversation has a row that is not understood, or
-      could not be read or written; or the answer could not be recorded.
+      the record of the conversation has a row that is not understood, could
+      not be read or written, or did not take the answer; or the server
+      cannot decide now.
 
-    The detail of a failure goes to the server log, since it can name a path
-    of the server (issue #50018). *)
+    The code of a failed turn is the [failure] its record keeps. The detail
+    of a failure goes to the server log, since it can name a path of the
+    server (issue #50018). *)
 val run
   :  env:Eio_unix.Stdenv.base
   -> person:Server_setup_account_login.person
@@ -90,31 +96,35 @@ val run
 
 (** {1 For the routes of a conversation}
 
-    {!Server_preview_keeper_conversation} answers a Keeper that is not the
-    person's, a Keeper with no Runtime, and a failure of the record in the
-    words of the turn. *)
+    {!Server_preview_keeper_conversation} answers a Keeper name that is no
+    Keeper name, a Keeper that is not the person's, a Keeper with no Runtime,
+    and a failure of the record in the words of the turn. *)
+
+(** The Keeper id of a Keeper name ({!Auth_preview_keeper.keeper_id_of}). A
+    name that is no Keeper name is an [Invalid_request]. *)
+val keeper_id_of : string -> (Authz_types.Keeper_id.t, Server_preview_keeper_error.t) result
 
 (** The Runtime the person gave their Keeper, [None] when they gave it none,
-    read in a state the zone can be trusted for. The error is the answer to
-    write: a 404 for a Keeper that is not the person's, or the 503 of a zone
-    that is not trusted. *)
+    read in a state the zone can be trusted for. The error is
+    [Unknown_keeper] for a Keeper that is not the person's, or
+    [Server_unavailable] for a zone that is not trusted. *)
 val owned
   :  Server_setup_account_login.person
   -> Authz_types.Keeper_id.t
-  -> (Authz_types.Runtime_id.t option, Login_routes.answer) result
+  -> (Authz_types.Runtime_id.t option, Server_preview_keeper_error.t) result
 
 (** The Runtime of the person's Keeper and the account that Runtime spends.
-    The error is the answer to write: those of {!owned}, or a 409 for a
-    Keeper with no Runtime. *)
+    The error is one of {!owned}, or [Keeper_has_no_runtime]. *)
 val assigned
   :  Server_setup_account_login.person
   -> Authz_types.Keeper_id.t
-  -> (Authz_types.Runtime_id.t * Authz_types.Provider_account_id.t, Login_routes.answer) result
+  -> ( Authz_types.Runtime_id.t * Authz_types.Provider_account_id.t
+       , Server_preview_keeper_error.t )
+       result
 
-(** The answer for a failure of the record of a conversation: a 500 for a
-    row that is not understood, a 503 for a record that could not be read or
-    written. The detail goes to the server log. *)
-val record_answer
+(** The case of a failure of the record of a conversation. The detail goes to
+    the server log. *)
+val record_error
   :  keeper_id:Authz_types.Keeper_id.t
   -> Server_keeper_conversation.error
-  -> Login_routes.answer
+  -> Server_preview_keeper_error.t

@@ -25,13 +25,14 @@
     whose turn failed. This is the way on for a Keeper whose conversation
     began on another account.
 
-    The other answers are a JSON [{"error": ...}]:
+    The other answers are a JSON [{"error": ..., "code": ...}]
+    ({!Server_preview_keeper_error}):
     - 400: the body is not that, or the name is no Keeper name.
     - 404: the Keeper is not the person's.
     - 409: the Keeper has no Runtime, so there is no account to start on, or
       a call of the account of its current conversation runs.
     - 500 or 503: the record has a row that is not understood, or could not
-      be written. *)
+      be written; or the server cannot decide now. *)
 val start
   :  env:Eio_unix.Stdenv.base
   -> person:Server_setup_account_login.person
@@ -67,14 +68,16 @@ val start
 
     The whole conversation is one answer: the read has no page.
 
-    The other answers are a JSON [{"error": ...}]:
+    The other answers are a JSON [{"error": ..., "code": ...}]
+    ({!Server_preview_keeper_error}):
     - 400: [query] is not that, or a value is no Keeper name or no id.
     - 404: the Keeper is not the person's, or the Keeper has no conversation
       of that id.
     - 500 or 503: the record has a row that is not understood, or could not
-      be read. A row a stopped server left half written answers 503 until
-      the next turn of the Keeper, or a new conversation of it, cuts the
-      row. *)
+      be read; or the server cannot decide now. A row a stopped server left
+      half written answers 503 [conversation_row_half_written] until a new
+      conversation of the Keeper, or its next turn on a Claude Code Runtime,
+      cuts the row. *)
 val read
   :  person:Server_setup_account_login.person
   -> base_path:string

@@ -13,7 +13,8 @@ implementation_prs: []
 
 # RFC: 멈춘 전달은 그것을 움직일 수 있는 쪽에 닿는다
 
-줄 번호와 심볼은 `origin/main` `10daa5ef46cd` 기준이에요. 3.1 과 5.1 이 가리키는 Board attention 파일은 `9cfff6704657` 까지 바뀌지 않았어요. 코드는 쓰지 않았어요.
+줄 번호와 심볼은 `origin/main` `10daa5ef46cd` 기준이에요. 3.1 과 5.1 이 가리키는 Board attention 파일은 `9cfff6704657` 까지 바뀌지 않았어요. 이 글을 처음 쓸 때 코드는 쓰지 않았어요.
+2026-11-12 오후에 검증 멈춤(1.2 의 둘째 묶음, 3.2, 5.2 와 거기에 딸린 표)을 `b2f9ee56605d` 기준으로 다시 썼어요. 처음 글은 멈춘 원인을 세지 않았고, 읽을 자료도 잘못 골랐어요. L1 은 PR #51440(L1a)과 #51470(L1b)으로 구현했어요.
 표시: **[사실]** 은 내가 코드나 운영 기록에서 직접 확인한 것이에요. **[조사]** 는 읽기 전용 조사 에이전트가 읽거나 센 것이고 내가 다시 확인하지 않았어요. **[추정]**, **[제안]**, **[확인 필요]** 는 글자 그대로예요.
 
 열린 이슈 지도(PR #51363)가 "Keeper 사이 전달·리뷰" 묶음으로 나눈 이슈 아홉 개를 다시 따라갔어요. 이 글은 그 조사와, 거기서 나온 수리 순서예요.
@@ -24,16 +25,17 @@ implementation_prs: []
   - 한 Keeper 의 Board 판정 362건이 `Completed` 에서 정산되지 않아요. 그중 361건이 `relevant` 예요. 2026-11-09 05:02Z 부터예요. 그 뒤로 그 Keeper 의 partition 은 하나도 정산되지 않았어요. 자기를 지목하지 않은 Board 글은 판정을 거쳐야 Keeper 큐에 들어가는데, 그 길이 막혀 있어요.
   - 원인을 찾았어요. worker 가 판정하고 정산해 영수증이 지워진 직후에, 같은 Board 사건의 fanout 이 낡은 후보 값으로 root 를 다시 만들어 두 번째 판정을 내요(3.1). 8일 로그에서 3번 났어요.
   - 검증을 기다리는 Task 가 19개예요. 18개는 마지막 결과가 `execution_repair_required`, 1개는 `raised` 예요. 제출 뒤 6~208시간이 지났고 15개가 24시간을 넘겼어요.
+  - 19개 가운데 17개는 잠깐의 장애가 영구 정지로 굳은 것이에요. 리뷰가 도는 중에 서버 프로세스가 끝났거나(8), 리뷰어의 provider 호출이 실패했거나(8), 판정을 보고한 뒤 다음 provider 호출이 실패했어요(1). 다시 시도하는 길도, 운영자에게 닿는 길도 없어요(1.2, 3.2).
 - **[사실]** 두 곳 모두 로그와 기록 파일에는 적혀 있어요. 그것을 움직일 수 있는 쪽(그 Keeper, 제출한 Keeper, 운영자)의 턴이나 화면은 그 기록을 읽지 않아요.
 - **[조사]** 아홉 이슈 가운데 여덟이 같은 자리에서 끊겨요. 넘긴 쪽의 기록까지는 남고, 받는 쪽에 닿았는지는 아무도 읽지 않아요(2절).
 - **[제안]** 규칙은 하나예요. 넘긴 것이 멈추면 그 사실은 그것을 움직일 수 있는 쪽의 다음 문맥에 실려요. 멈춘 한 건이 다른 건의 전달을 막지 않고, 멈춘 채 "끝났다"고 적히지도 않아요.
 - **[제안]** 층은 넷이에요. 새로 설계하는 것은 L1 과 L2 뿐이에요.
   - L1: Board 판정 정산이에요. 낡은 후보 값으로 root 를 다시 만드는 길을 닫아요(L1a). 정산이 후보 하나의 결과를 닫힌 합으로 받아서, 한 후보가 실패해도 다음 후보를 전달해요(L1b)(5.1).
-  - L2: 검증이 재시도 없이 멈추면 제출한 Keeper 와 운영자가 그 사실을 봐요(5.2).
+  - L2: 리뷰 실행이 판정 없이 끝났고 실행 기록이 그것을 확정하면 다음 시도로 넘겨요. 정산된 판정 보고가 있으면 그 판정을 읽어요(L2a). 그래도 사람이 풀어야 하는 것은 운영자 목록에 실어요(L2b)(5.2).
   - L3: `RFC-keeper-world-state-shows-open-work` 의 S4·S6 을 구현해요. 운영자가 2026-09-28 에 이미 정했어요(5.3).
   - L4: `RFC-at-name-resolves-to-declared-recipient` 의 L3 를 구현해요. Active 인 RFC 의 남은 단계예요(5.4).
 - 새 상태, 새 저장소, 새 Gate 는 없어요. L1 이 문자열 `Error` 로 나가던 결과 셋을 닫힌 합의 갈래로 옮겨요.
-- 사용자가 정할 것은 10절에 셋 있어요.
+- 사용자가 정할 것은 10절에 넷 있어요.
 
 ## 1. 배경 (측정)
 
@@ -70,6 +72,36 @@ implementation_prs: []
 - 제출 뒤 지난 시간은 최소 6, 중앙값 124, 최대 208시간이에요.
 - 같은 파일에 남은 창(11-10 05:13Z 부터)에서 검증 64건의 마지막 결과는 `approved` 26, `rejected` 18, `execution_repair_required` 19, `raised` 1 이에요.
 
+**검증 대기의 원인.** **[사실]** 2026-11-12 11:3x KST 에 다시 세고, 멈춘 제출마다 처음 멈춘 순간을 서버 로그(78개, 11-04 19:13 ~ 11-12 KST)와 리뷰 실행 기록에서 찾았어요. 읽기만 했어요.
+
+- `awaiting_verification` 은 20개였어요. 1개는 판정이 돌고 있었고 19개가 멈춰 있었어요.
+- 멈춘 19개의 마지막 문구와, 처음 멈춘 순간에 일어난 일이에요.
+
+| 마지막 문구 | 수 | 처음 멈춘 순간 |
+|---|---|---|
+| `original execution lost its writer without a terminal settlement` | 8 | 3건: 리뷰를 예약하고 3분 뒤 서버가 SIGTERM 을 받았다(종료 한도 10초). 로그는 9초 뒤 종료 2단계에서 끝나고 3~5단계 줄이 없다. 그 실행 기록에는 끝이 없다. 5건: 로그 창보다 먼저 예약됐고, 창의 첫 시작 sweep 에서 이 문구로 처음 보인다 |
+| `original executions have no retained verdict` | 8 | 7건: 첫 검증 칸이 사용 한도 초과(다시 열리기까지 1.6~5일)라 둘째 칸으로 넘어갔고, 둘째 칸의 호출이 연결 끊김(`end_of_file`) 5, 900초 무진행 1, DNS 실패 1 로 끝났다. 1건: 로그 창보다 먼저 예약됐다 |
+| `original report history cannot establish one accepted verdict` | 1 | 리뷰어가 `report_review_verdict` 를 불러 정산까지 됐고, 그다음 provider 호출이 연결 끊김으로 실패했다 |
+| `original execution has an unsettled effect` | 1 | 원인을 가르지 못했다 |
+| `raised`: `retained subject or lookup authority differs` | 1 | 원인을 가르지 못했다 |
+
+- 같은 로그 창에 서버 시작 로그가 78개 있어요. 하루 10번꼴이에요. 멈춘 제출은 서버가 시작할 때마다 다시 관측되고 같은 결과로 다시 적혀요. 로그에 `requires original reconciliation` 줄이 1,124줄 있어요.
+- 리뷰 실행 기록(`verifier-executions` 아래 `events.v1.wal`) 959개를 구조만 읽었어요. 이벤트 종류와 노드가 어떻게 닫혔는지만 봤고 내용은 읽지 않았어요.
+
+| 실행의 끝 | `report_review_verdict` 호출 | 실행 기록 수 |
+|---|---|---|
+| 성공 | 1개, 정산됨 | 647 |
+| 실패 | 없음 | 219 |
+| 끝이 없음(writer 가 사라짐) | 없음 | 52 |
+| 취소 | 없음 | 31 |
+| 실패 | 1개, 정산됨 | 3 |
+| 취소 | 1개, 정산됨 | 3 |
+| 끝이 없음(writer 가 사라짐) | 1개, 정산됨 | 3 |
+| 성공 | 없음 | 1 |
+
+- 실패로 끝나고 판정 보고가 없는 219개의 실패 사유는 사용 한도 205, 연결 끊김 10, DNS 실패 2, timeout 2 예요. 모두 시간이 지나면 풀리는 실패예요.
+- 같은 로그 창에 리뷰가 예약된 제출(`verification_id`)은 288개(Task 193개)예요. `requires original reconciliation` 으로 한 번이라도 멈춘 제출은 35개예요. 그중 18개가 지금도 그 Task 의 현재 제출이에요.
+
 ### 1.3 Task 가 집히는 길
 
 **[사실]** `events/2026-11/05~11.jsonl` 에서 `task_claim`(id 를 골라 집음) 153건, `task_claim_next`(다음 것을 달라고 함) 4건이에요. **[조사]** 그 4건은 모두 같은 Task 하나로 갔고 매번 1~76분 안에 반납됐어요. 그 Task 는 27번 반납됐어요. Keeper 프롬프트가 보여 주는 할 일 목록의 앞 7행은 2026-09-07~09-29 에 만든 P1 이고, 행에는 `task_id` 만 있어요.
@@ -82,7 +114,7 @@ implementation_prs: []
 |---|---|---|---|
 | 리뷰 판정 → GitHub (#42017) | 턴의 마지막 글 | 없음. 게시된 리뷰만 서버가 읽는다 | 판정을 냈는데 게시 시도가 0번이라는 사실이 글로만 남는다 |
 | 리뷰할 PR → 리뷰어 (#46691) | GitHub 의 요청 목록 | 서버가 `unreviewed_on_head` 를 계산하지만 턴에 싣지 않는다 | consumer → caller |
-| 검증 요청 → 판정 (#39677) | `verification-runs.jsonl` 의 멈춤 행, WARN 한 줄 | 대시보드 검증 화면뿐. 제출자 큐와 운영자 attention 은 읽지 않는다 | consumer → caller |
+| 검증 요청 → 판정 (#39677) | `verification-runs.jsonl` 의 멈춤 행, WARN 한 줄 | 대시보드 검증 화면뿐. 제출자 큐와 운영자 attention 은 읽지 않는다 | 실행 기록이 확정한 것까지 수리로 분류한다. 남는 것은 consumer → caller |
 | 승인 → 산출물 (#26914) | `Done` | 없음 | 승인한 대상이 남았는지 기록하지 않는다 |
 | Board 판정 → Keeper 큐 (#38068) | partition `Completed` | owner 의 정산 걸음 | 한 건이 실패하면 뒤가 모두 멈추거나, 못 찾으면 전달 없이 `Settled` 가 된다 |
 | 글 → 받는 사람 (#46747) | 저장된 메시지 | 브로드캐스트 응답 | 저장되고 전달된 뒤에 `ok:false` 로 답한다 |
@@ -128,7 +160,31 @@ L1 과 L2 가 고치는 자리만 적어요.
 
 - **[사실]** `Completion_authority_agent.retry_request_of_stop_cause` 는 `Execution_repair_required`, `Infrastructure_unavailable`, `Commit_failed`, `Raised`, 그리고 다시 볼 runtime 이 없는 `Not_reviewed` 에 `No_retry_requested` 를 줘요(`completion_authority_agent.ml:653-658`). 주석은 "다음 수는 producer, 운영자, backlog 전체 sweep 에 남긴다"예요.
 - **[사실]** `Operator_task_attention.project` 는 `AwaitingVerification` 을 빼요. 주석은 "완료는 system authority 를 기다리고, 그것은 돌고 있다"예요(`operator_task_attention.ml:72-74`). 멈춘 검증에는 이 전제가 맞지 않아요.
-- **[조사]** 멈춘 사실은 `Verification_run_registry.mark_completed`(`verification-runs.jsonl`)와 `announce_stall` 의 WARN 로그에 적혀요. #47927 이 검증 정체를 알리던 Board 글을 지웠어요. 제출한 Keeper 의 큐에는 정체 이벤트가 없어요.
+- **[사실]** 멈춘 사실은 두 곳에만 적혀요. `announce_stall` 의 WARN 로그 한 줄(`completion_authority_agent.ml:777-779`)과 `Verification_run_registry` 의 완료 행(`verification-runs.jsonl`)이에요. **[조사]** #47927 이 검증 정체를 알리던 Board 글을 지웠어요.
+- **[사실]** 그 원장은 끝난 행을 최근 64개만 남겨요(`verification_run_registry.ml:159` 의 `completed_retention`, `run_registry_core.ml` 의 `prune`). 멈춘 제출의 행은 새 리뷰 64건이 끝나면 밀려나요. 지금 남아 있는 것은 서버가 시작할 때마다 sweep 이 다시 적기 때문이에요. 그래서 이 원장은 "멈춘 제출 목록"의 출처가 될 수 없어요. `RFC-task-lifecycle-a-verdict-assigns-no-work` 3.7 이 같은 것을 먼저 적었어요.
+- **[사실]** 제출한 Keeper 의 프롬프트는 그 Task 를 `awaiting verification (submitted …)` 한 줄로 보여 줘요(`keeper_unified_prompt.ml:442-445`, `config/prompts/keeper.md` 의 `world.current_task.status.awaiting_verification`). 리뷰가 멈췄는지는 싣지 않아요.
+- **[사실]** 멈춘 제출을 움직이는 길은 셋이에요.
+  - 제출한 쪽이 다시 제출해요. 새 `verification_id` 가 붙고 리뷰가 첫 시도부터 다시 돌아요(`workspace_task_lifecycle.ml:190-212`).
+  - 제출한 쪽이 취소해요(같은 파일의 `Cancel` 갈래).
+  - 운영자가 판정을 직접 내리거나 취소해요(`POST /api/v1/verification/verdict`, `POST /api/v1/dashboard/tasks/cancel`, `server_routes_http_routes_verification.ml:425`, `:445`).
+  - 멈춘 리뷰를 다시 돌리게 하는 운영자 도구는 찾지 못했어요. **[조사]** `masc_operator_task_recovery_resolve` 는 `AwaitingVerification` 을 거절해요.
+- **[사실]** 수리 필요는 `Verifier_review_execution.observe_call` 과 `observe` 가 정해요(`verifier_review_execution.ml:99-176`). 실행 기록에서 실행의 끝과 `report_review_verdict` 호출을 읽어요.
+
+| 실행의 끝 | 판정 보고 호출 | 지금 결과 |
+|---|---|---|
+| 성공, 취소 | 1개, 성공으로 정산 | 그 판정 |
+| 취소 | 없음 | 다음 시도(#49097) |
+| 실패, 성공 | 없음 | 판정을 낸 호출도 취소된 호출도 없으면 수리 필요: `original executions have no retained verdict` |
+| 실패 | 1개, 성공으로 정산 | 수리 필요: `original report history cannot establish one accepted verdict` |
+| 끝이 없고 writer 가 없음 | 읽지 않는다 | 수리 필요: `original execution lost its writer …` |
+| 어느 끝이든, 정산 안 된 도구 호출이 있음 | 읽지 않는다 | 수리 필요: `original execution has an unsettled effect` |
+| 공식 클라이언트 세션 | 읽지 않는다 | 수리 필요: `original official-client session requires operator reconciliation` |
+
+- **[사실]** 서버가 살아 있을 때도 같은 표를 타요. provider 호출이 "결과를 모름"으로 실패하면(`Attempt_failed` 의 `Outcome_unknown`) `Verifier_review_worker.run_attempt_with` 는 리뷰가 끝난 뒤 `observe_pending` 으로 실행 기록을 다시 읽어요. 1.2 의 연결 끊김, 900초 무진행, DNS 실패가 이 길로 갔어요. 로그는 그 호출을 `retryable=false; no verdict committed` 로 적어요.
+- **[사실]** 같은 뿌리를 고친 PR 이 둘 있어요.
+  - #47278(11-01)은 writer 가 사라진 실행을 "기다림"에서 "운영자 수리"로 옮겼어요. 본문은 "replay 나 자동 재시도 없이 실행 기록과 모르는 효과를 남긴다"예요.
+  - #49097(11-06)은 취소로 끝나고 판정 보고가 없는 실행만 다음 시도로 넘겼어요. 본문은 실패로 끝난 실행을 그대로 둔 이유를 "같은 요청을 다시 해도 결과가 같을 것"이라고 적었어요. 1.2 의 219개는 그 전제와 달라요. 모두 시간이 지나면 풀리는 실패예요.
+- **[사실]** 리뷰 실행 959개가 부른 도구는 일곱 가지예요. `masc_web_fetch`, `tool_read_file`, `tool_search_files`, `masc_board_post_get`, `keeper_tasks_list`, `masc_fusion_status`, `report_review_verdict` 예요. 앞의 여섯은 리뷰어에게 주는 조회 도구의 닫힌 목록이고(`verification_authority_tools.ml:7-22`) 읽기만 해요.
 - **[사실]** 대시보드의 검증 화면은 `execution_repair_required` 를 그려요(`lib/dashboard/dashboard_verification.ml:404`). 그 화면을 열어야 보여요.
 - **[조사]** #39677 이 처음 적은 원인은 따로 남아 있어요. `keeper_turn_driver` 의 `complete_media` 는 글 전용 검증 칸에 이미지가 오면 `InvalidConfig` 로 거절해요. `anti_rationalization` 의 주석은 그 칸이 미디어를 벗기고 판정한다고 적어요. 두 약속이 어긋나요. 7일 로그에 이 거절은 0줄이에요.
 
@@ -149,6 +205,7 @@ L1 과 L2 가 고치는 자리만 적어요.
 |---|---|---|
 | #38068, 362건 | root 를 만들 때 후보를 잠금 안에서 다시 읽는다. 판정 전달 결과를 닫힌 합으로 낸다. 정산 걸음이 후보 단위로 결과를 받는다 | 맞다. 지금은 낡은 값으로 root 가 다시 생기고, "전달됐다"와 "못 읽었다"가 같은 `Settled` 로 섞인다 |
 | #39677 | 글 전용 칸으로 갈 때 이미지 블록을 벗기고 참조 줄만 남긴다. `InvalidConfig` 라는 틀린 상태가 생기지 않는다 | 맞다. 어긋난 두 약속 중 하나를 지운다 |
+| #39677, 19건 | 리뷰 실행이 남긴 기록에서 판정을 한 규칙으로 읽는다. 정산된 판정 보고가 있으면 그 판정이다. 보고가 없고 실행이 취소·실패·writer 유실로 끝났으면 다음 시도다 | 맞다. 지금은 실행의 끝마다 따로 고쳤고(#49097 은 취소만), 남은 갈래에 17건이 서 있다 |
 | #46747 | 브로드캐스트가 Board 와 같은 선언 조회를 쓴다(`routing_target` 삭제) | 맞다. Active RFC 의 L3 그대로다 |
 | #46691 | Keeper 마다 GitHub 신원을 따로 둔다 | 맞다. 다만 계정·App 7~8개의 관리가 든다 |
 | #41343 | Task 를 만들 때 받는 쪽을 닫힌 합으로 받는다(`Keeper` / `Goal` / `Pool`) | 일부. `Pool` 을 고르면 지금과 같다. 담당 필드를 두면 "담당은 claim 으로 정한다"와 부딪힌다 |
@@ -161,7 +218,7 @@ L1 과 L2 가 고치는 자리만 적어요.
 |---|---|---|
 | #46691, #42017 | 서버가 이미 계산하는 `unreviewed_on_head` 를 리뷰어의 World State 에 싣는다 | 맞다. projection 이고 운영자가 정한 S4 다 |
 | #41343 | Task 행에 제목, 만든 이, 나이, 이어진 Goal, 반납 횟수, 마지막 반납 이유를 싣는다 | 맞다. 운영자가 정한 S6 이다 |
-| #39677, 19건 | 멈춘 검증을 제출한 Keeper 의 문맥과 운영자 attention 에 싣는다 | 맞다. 다만 이것만 하면 미디어 거절은 남는다 |
+| #39677, 19건 | 판정을 기다리는 제출을 운영자 attention 에 싣는다 | 단독으로는 맞지 않다. 19건 중 17건은 시스템이 스스로 이을 수 있는 것이라, 이것만 하면 "보이게만 하기"다. 좌를 한 뒤에 남는 것에는 맞다 |
 | #38068 | 정산 근거와 못 읽은 행 수를 화면에 싣는다 | 단독으로는 맞지 않다. 전달 손실이 그대로라 "보이게만 하기"다 |
 | #45003 | 실패 행에 닫힌 사유 variant 를 싣는다 | 맞다 |
 
@@ -170,7 +227,7 @@ L1 과 L2 가 고치는 자리만 적어요.
 | 층 | 방향 | 고른 이유 |
 |---|---|---|
 | L1 Board 정산 | 좌 | 지금 손실이 나는 곳이다. 보이게만 해서는 361건이 전달되지 않는다 |
-| L2 검증 멈춤 | 우 + 좌 | 움직일 쪽은 있는데 모른다(우). 미디어 거절은 틀린 상태라 따로 지운다(좌) |
+| L2 검증 멈춤 | 좌 + 우 | 멈춘 19건 중 17건은 실행 기록이 판정을 갖고 있거나 판정이 없다는 것을 확정한다. 그것은 시스템이 잇는다(좌). 사람이 풀어야 하는 나머지는 운영자 목록에 싣는다(우) |
 | L3 World State S4·S6 | 우 | 설계와 운영자 결정이 끝났다. 리뷰와 Task 두 이슈의 끊긴 자리가 consumer → caller 다 |
 | L4 at-name L3 | 좌 | Active RFC 의 남은 단계다 |
 
@@ -241,17 +298,76 @@ type judgment_delivery_outcome =
 - 거절 행 하나가 든 원장에서 그 id 를 찾으면 `Candidate_unreadable` 이고 `Settled` 가 되지 않는다.
 - 원장 읽기를 `Error` 로 만들면 뒤 partition 을 건드리지 않는다.
 
-### 5.2 L2 — 멈춘 검증은 제출자와 운영자에게 보인다
+### 5.2 L2 — 멈춘 검증
 
-**[제안]** 읽는 사실은 `verification-runs.jsonl` 의 마지막 행 하나예요. `retry_request_of_stop_cause` 가 `No_retry_requested` 를 준 멈춤만 대상이에요.
+#### L2a — 실행 기록이 확정한 것은 시스템이 잇는다
 
-- `Operator_task_attention.project` 가 `AwaitingVerification` 을 무조건 빼지 않아요. 그 `verification_id` 의 마지막 행이 재시도 없는 멈춤이면 목록에 실어요. 판정이 돌고 있거나 재시도가 서 있으면 지금처럼 빼요.
-- 제출한 Keeper 의 World State 에 한 줄을 실어요. 예: `task-… 제출 vrf-… 은 판정되지 않았고 다시 돌 예약이 없다 (execution_repair_required)`. 사유는 `Verification_run_registry.outcome` 의 닫힌 값이에요. 세부 문장은 싣지 않아요.
-- Keeper 가 그 줄을 보고 무엇을 할지는 정하지 않아요.
+**[제안]** 리뷰 실행을 다시 읽는 규칙을 둘로 줄여요.
 
-**[제안]** 미디어 거절(#39677 의 처음 원인)은 좌로 지워요. 글 전용 칸으로 가는 goal_blocks 에서 이미지 블록을 벗기고 참조 줄을 남겨요. `complete_media` 의 `InvalidConfig` 갈래는 닿지 않게 되면 지워요.
+1. 판정은 성공으로 정산된 `report_review_verdict` 호출 하나가 정해요. 실행이 그 뒤에 어떻게 끝났는지는 판정을 바꾸지 않아요.
+2. 판정 보고가 없고 실행이 취소, 실패, writer 유실로 끝났으면 다음 시도로 가요.
 
-**[확인 필요]** `execution_repair_required` 를 운영자가 실제로 푸는 방법이 무엇인지 확인하지 못했어요. 18건 중 8건은 "실행 기록의 writer 를 잃었다"예요. 재시작이 도는 검증을 모두 운영자 수리로 보내는지, 그게 의도인지는 `RFC-0361` 과 #46132 를 읽고 정해야 해요. 보여 주기만 하고 풀 방법이 없으면 L2 는 반쪽이에요.
+| 실행의 끝 | 판정 보고 호출 | 지금 | 바꾼 뒤 | 실행 기록 수(1.2) |
+|---|---|---|---|---|
+| 성공 | 1개, 성공으로 정산 | 그 판정 | 그대로 | 647 |
+| 취소 | 1개, 성공으로 정산 | 그 판정 | 그대로 | 3 |
+| 실패 | 1개, 성공으로 정산 | 수리 필요 | 그 판정 | 3 |
+| 끝이 없고 writer 가 없음 | 1개, 성공으로 정산 | 수리 필요 | 그 판정 | 3 |
+| 취소 | 없음 | 다음 시도 | 그대로 | 31 |
+| 실패 | 없음 | 수리 필요 | 다음 시도 | 219 |
+| 끝이 없고 writer 가 없음 | 없음 | 수리 필요 | 다음 시도 | 52 |
+| 성공 | 없음 | 수리 필요 | 그대로 | 1 |
+
+그대로 두는 것이에요.
+
+- 정산 안 된 도구 호출이 하나라도 있으면 수리 필요예요. `Execution_agent_scope.recovery_evidence_from_tree` 가 지금 하는 검사이고, #49097 이 취소에 쓴 전제와 같아요.
+- 판정 보고가 둘 이상이거나 정산이 성공이 아니면 수리 필요예요.
+- 실행이 성공으로 끝났는데 판정 보고가 없으면 수리 필요예요. 리뷰어가 보고 없이 턴을 끝낸 것이라 다시 해도 같을 수 있어요.
+- 공식 클라이언트 세션은 이 글이 다루지 않아요.
+
+**[사실]** 다시 돌려도 되는 근거예요.
+
+- 리뷰어가 Task 를 바꾸는 길은 판정 보고 하나예요. 나머지 도구 여섯은 닫힌 목록이고 읽기만 해요(3.2).
+- writer 가 사라진 실행 55개는 모두 도구 호출이 정산돼 있었어요. 모두 provider 응답을 기다리던 중이었어요. 정산 안 된 도구 호출은 0개예요.
+- 실패로 끝나고 판정 보고가 없는 219개의 사유는 모두 시간이 지나면 풀려요(1.2).
+- 판정을 Task 에 적는 일은 `Verifier_review_worker.commit_attempt` 가 해요. 적기 전과 뒤의 Task 상태를 읽어 대조해요. 제출이 바뀌면 `verification_id` 가 달라서 옛 판정은 거절돼요(`workspace_task_lifecycle.ml:196-199` 의 주석).
+- writer 가 없다는 것은 writer lock 으로 확인해요(`agent_execution_projection.ml` 의 `observe_ownership`, #47278).
+- 다음 시도는 새 attempt 번호와 새 요청 id 로 가요(`Verifier_review_owner.next_attempt`). 같은 요청을 다시 보내는 것이 아니에요. #49097 이 취소에 이미 쓰는 길이에요.
+
+**[제안]** 바뀌는 곳이에요.
+
+- `agent_execution_projection.ml` 의 `observe_ownership`: `Owner_lost` 가 실행 트리에서 읽은 복구 근거를 같이 돌려줘요. 지금은 끝난 실행에서만 그 근거를 읽어요(`terminal_recovery_from_snapshot`). writer 가 없다고 확인한 뒤라 트리는 더 바뀌지 않아요.
+- `Verifier_review_execution.observe_call`: 실행의 끝과 판정 보고를 따로 읽어요. 지금은 끝의 종류마다 갈래가 있어요.
+- `Verifier_review_execution.observe`: 판정 없는 끝 셋(취소, 실패, writer 유실)을 `retryable_runtimes` 에 실어요.
+- 저장하는 거절 근거(`verifier_review_refusal/v1`)의 관측 값에 `failed` 와 `owner_lost` 가 더해져요. `Verifier_review_owner.known_observations` 가 그 값을 읽어요.
+- 새 상태, 새 필드, 새 Gate 는 없어요.
+- 실패 사유를 문장으로 가르지 않아요. 실행 기록의 실패한 끝에는 사유가 문장으로만 남아요(`failure.kind` 는 모두 `internal`). 다음 시도가 살아 있는 서버에서 돌면 그 실패는 닫힌 값(`Attempt_failed` 의 `certainty`)으로 다시 분류돼요. 다시 해도 같은 거절이면 그 시도는 다시 볼 칸이 없는 `Not_reviewed` 로 멈춰요.
+
+**[사실]** 다음 시도는 지금 있는 재시도 길을 타요. `Not_reviewed` 에 `retryable_runtimes` 가 있으면 `Retry_requested` 가 서요(`completion_authority_agent.ml:653-658`). 간격은 `Verification_retry.delay` 가 정해요. 쉬는 칸은 풀리는 시각까지 기다리고, 아니면 maintenance pulse(기본 60초) 뒤예요.
+
+**[확인 필요]** 연결 실패가 이어지는 동안 시도가 얼마나 쌓이는지 읽지 않았어요. 연결 실패가 그 칸을 쉬게 하지 않으면 pulse 마다 시도가 하나씩 생겨요. 시도마다 보관 원본 한 벌과 실행 기록 폴더 하나가 늘어요. `Keeper_turn_driver.path_rest` 가 연결 실패에도 쉼을 적는지 구현 전에 확인해요. 적지 않으면 그 쉼을 `RFC-provider-path-rest` 쪽에서 먼저 정해요. 이 층에 상한이나 cooldown 을 따로 두지 않아요(9절).
+
+**[추정]** 지금 멈춘 19건은 L2a 가 배포된 뒤 첫 시작 sweep 에서 17건이 움직여요. writer 를 잃은 8건은 판정 보고가 정산돼 있으면 그 판정으로, 없으면 다음 시도로 가요. 판정 없이 끝난 8건은 다음 시도로 가요. 판정 보고 뒤에 실패한 1건은 그 판정으로 가요. 남는 것은 2건이에요(정산 안 된 효과 1, `raised` 1).
+
+#### L2b — 사람이 풀어야 하는 제출은 운영자 목록에 있다
+
+**[제안]** `RFC-task-lifecycle-a-verdict-assigns-no-work` 3.7 의 `Awaiting_verdict` 항목을 그대로 따라요. 새로 설계하지 않아요.
+
+- 운영자 목록(`Operator_task_attention.item`)에 판정을 기다리는 제출을 모두 실어요. 오래 기다린 순이에요.
+- 목록은 backlog 에서 만들어요. 실행 원장에서 만들지 않아요(3.2 의 64개 보존).
+- "멈춘 것"을 가려내는 기준을 두지 않아요. L2a 뒤에는 오래 기다리는 제출이 곧 사람이 볼 제출이에요.
+- 그 RFC 는 이 항목을 3단계에 뒀어요. **[추정]** 항목 하나를 더하는 일은 1단계(저장 형식 변경)에 기대지 않아서 먼저 낼 수 있어요. 순서를 바꿀지는 그 RFC 의 소유자가 정해요(10절).
+
+처음 글은 제출한 Keeper 의 World State 에 "판정되지 않았고 다시 돌 예약이 없다"는 줄을 싣자고 했어요. 이 수정에서 뺐어요.
+
+- 읽을 자료로 고른 실행 원장은 행을 64개만 남겨요(3.2). 그 줄이 조용히 사라질 수 있어요.
+- 제대로 하려면 completion authority 가 "이 제출을 지금 누가 움직이고 있는가"를 답하는 읽기 면이 필요해요. 새 면이에요.
+- L2a 뒤에 남는 것은 지금 자료로 2건이에요. L2a 와 L2b 를 배포하고 남는 수를 다시 잰 뒤에 정해요.
+- 제출한 쪽이 다시 제출하면 리뷰가 처음부터 돈다는 것은 지금도 그대로예요(3.2).
+
+#### 미디어 거절
+
+**[제안]** 미디어 거절(#39677 의 처음 원인)은 좌로 지워요. 글 전용 칸으로 가는 goal_blocks 에서 이미지 블록을 벗기고 참조 줄을 남겨요. `complete_media` 의 `InvalidConfig` 갈래는 닿지 않게 되면 지워요. 7일 로그에 이 거절이 0줄이라 L2a 와 L2b 뒤에 해요.
 
 ### 5.3 L3 — World State 의 S4·S6
 
@@ -274,7 +390,9 @@ type judgment_delivery_outcome =
 | 층 | 바뀌는 곳 | 대가 |
 |---|---|---|
 | L1 | `keeper_board_attention_fanout.ml`, `keeper_board_attention_partition.ml(i)`, `keeper_board_attention_candidate.ml`, `keeper_board_attention_worker.ml`, `keeper_board_attention_quarantine_command.ml`, 그 시험 | `ensure_current_roots` 와 `judgment_delivery_outcome` 을 `match` 하는 곳을 모두 고친다. fanout 의 `claim` 마다 후보 원장을 한 번 더 읽는다 |
-| L2 | `operator_task_attention.ml`, World State 층 하나, `keeper_turn_driver.ml` 의 미디어 갈래 | 운영자 attention 목록이 길어진다. 지금 19행이 더해진다 |
+| L2a | `agent_execution_projection.ml(i)`, `agent.ml(i)`, `verifier_review_execution.ml(i)`, `verifier_review_owner.ml`, `test_verifier_review_execution.ml` | 판정 없이 끝난 리뷰가 다시 돈다. 리뷰 한 번의 토큰이 다시 든다. 연결 실패가 이어지면 시도 기록이 쌓인다(5.2 의 확인 필요) |
+| L2b | `operator_task_attention.ml` 과 그 목록을 그리는 곳 | 운영자 목록에 판정을 기다리는 제출이 모두 실린다. 지금 20행이고, L2a 뒤에는 돌고 있는 리뷰와 남은 2건이다 |
+| 미디어 거절 | `keeper_turn_driver.ml` 의 미디어 갈래 | 7일 로그에 0줄이라 맨 뒤다 |
 | L3 | 그 RFC 의 8절 | 그 RFC 에 적혀 있다 |
 | L4 | 그 RFC 의 L3 | 그 RFC 에 적혀 있다 |
 
@@ -284,8 +402,9 @@ type judgment_delivery_outcome =
 |---|---|
 | `keeper-world-state-shows-open-work` (Draft) | L3 가 이 RFC 의 S4·S6 이다. 이 글은 순서의 근거와 `cycle_count` 한 칸을 더한다 |
 | `at-name-resolves-to-declared-recipient` (Active) | L4 가 이 RFC 의 L3 다 |
-| `task-lifecycle-a-verdict-assigns-no-work` (Draft) | 1.5절이 같은 검증 정체와 운영자 attention 제외를 적었다. L2 와 같은 자리다. 그 RFC 가 먼저 구현되면 L2 의 attention 부분은 거기에 합친다 |
-| `0361`, `0406` (Draft) | 검증 원본 보관과 원격 게스트 읽기. L2 의 "확인 필요"가 여기에 달렸다 |
+| `task-lifecycle-a-verdict-assigns-no-work` (Draft) | 1.5절이 같은 검증 정체와 운영자 attention 제외를 적었고, 3.7 이 운영자 목록의 `Awaiting_verdict` 를 설계했다. L2b 는 그 항목이다. 이 글은 그 설계를 다시 쓰지 않는다 |
+| `0361`, `0406` (Draft) | 검증 원본 보관과 원격 게스트 읽기. L2a 는 보관한 원본과 실행 기록을 읽는 규칙만 바꾼다 |
+| PR #47278, #49097 (병합됨) | writer 가 사라진 실행을 운영자 수리로 보낸 것과, 취소된 실행을 다음 시도로 넘긴 것. L2a 는 #49097 의 전제(정산 안 된 도구 호출이 없다)를 실패와 writer 유실에도 쓴다. #47278 의 "자동 재시도 없음"은 리뷰 실행에 한해 바뀐다 |
 | `board-attention-asks-jev-once-per-event` (Draft) | fanout 이 직접 판정하는 길(#40521)이다. worker 도 같은 후보를 Jev 에게 물어서 두 길이 claim 을 두고 겨룬다. L1a 는 그 겨룸에서 root 가 다시 생기는 틈만 닫는다. 한 사건을 한 번만 묻게 하는 일은 그 RFC 에 남긴다 |
 | `provider-path-rest` (Draft) | #45003 의 좌가 이 RFC 범위다. 이 글은 다루지 않는다 |
 | `keeper-github-apps` (Draft) | #46691 의 좌. 지금 하지 않는다(10절) |
@@ -301,7 +420,9 @@ type judgment_delivery_outcome =
 | L1a | fanout 의 `judgment conflicts with worker result` 경고 | 8일에 3번(후보 3개) | 0 |
 | L1b | Keeper 별 `Completed` partition 수 | 한 Keeper 362, 나머지 0 | 충돌·못 읽은 것만 남는다. 지금 자료로는 1 |
 | L1b | `completion remains pending` 로그가 가리키는 후보 수 | 1(693줄) | 줄 수는 그대로일 수 있다. 뒤에 밀린 partition 이 0이어야 한다 |
-| L2 | `awaiting_verification` 중 마지막 행이 재시도 없는 멈춤인 것 | 19 | 수는 그대로일 수 있다. 19건이 운영자 attention 과 제출자 문맥에 보여야 한다 |
+| L2a | `awaiting_verification` 중 판정도, 도는 리뷰도, 재시도 예약도 없는 제출 | 19 | 2. 그 뒤에 새로 생기는 것은 정산 안 된 효과, 보고 없이 끝난 리뷰, 권한 불일치뿐이어야 한다 |
+| L2a | `requires original reconciliation` 으로 한 번이라도 멈춘 제출 수 | 8일에 35(예약 288). 마지막 사유가 `lost its writer` 인 것 9, `no retained verdict` 인 것 12 | 그 두 사유는 0 |
+| L2b | 판정을 기다리는 제출 가운데 운영자 목록에 없는 것 | 20(전부) | 0 |
 | L3 | 7일 동안 외부 세션이 만든 Task 중 todo 비율 | 45% (102/227) | 낮아지는지 본다. 목표값은 두지 않는다 |
 | L3 | `task_claim_next` 가 간 Task 의 반납 횟수 | 27 | 같은 Task 로 다시 가지 않는지 본다 |
 | L4 | 7일 `Mention_rejected` | 17 | 선언된 이름의 진짜 실패만 남는다 |
@@ -311,18 +432,19 @@ type judgment_delivery_outcome =
 ## 9. 하지 않는 것
 
 - 멈춘 건수에 상한이나 cooldown 을 두지 않아요.
-- 멈춤을 알리는 Gate, 응답 의무, 재시도 의무를 만들지 않아요.
+- 멈춤을 알리는 Gate, 응답 의무, 재시도 의무를 만들지 않아요. L2a 는 completion authority 가 이미 가진 재시도 길을 쓰고, Keeper 에게 의무를 지우지 않아요.
 - 턴의 마지막 글을 분류하지 않아요(#42017). "게시 못 함"이라는 문장을 문자열로 가려내면 `closed_sum_over_string` 에 어긋나요.
 - 리뷰 재요청을 자동으로 걸지 않아요(#46691). 요청을 일 배정으로 쓰는 것이에요.
 - Task 레코드에 담당 필드를 두지 않아요(#41343).
-- 멈춰 있는 362건과 19건의 운영 자료를 이 글의 구현이 직접 고치지 않아요. L1b 가 배포되면 밀려 있던 `relevant` 판정은 다음 heartbeat 에 전달돼요. 19건은 10절의 결정에 달렸어요.
+- 멈춰 있는 362건과 19건의 운영 자료를 이 글의 구현이 직접 고치지 않아요. L1b 가 배포되면 밀려 있던 `relevant` 판정은 다음 heartbeat 에 전달돼요. 19건은 L2a 가 배포되면 다음 시작 sweep 이 다시 읽어요. 그 전에는 10절의 결정에 달렸어요.
 
 ## 10. 사용자가 정할 것
 
 | # | 정할 것 | 정석 | 대가 |
 |---|---|---|---|
 | 1 | L1 뒤에도 남는 충돌 partition 하나를 어떻게 하나. 후보는 이미 `not_relevant` 로 소비됐고, 남은 것은 같은 결론의 두 번째 판정이다 | 그대로 둔다. 코드 주석이 이 충돌을 "조용히 풀지 말고 크게 알릴 버그"로 정해 뒀고, L1b 뒤에는 다른 건을 막지 않는다 | heartbeat 마다 error 로그 한 줄이 계속 난다(지금 하루 165~320줄). 다른 쪽은 "후보가 이미 `Consumed` 면 뒤에 온 판정은 전달 없이 닫는다"를 갈래로 두는 것이다. 로그는 멎지만, 다른 원인으로 생긴 이중 판정도 같이 닫힌다 |
-| 2 | 멈춘 검증 19건 | L2 로 보이게 한 뒤 운영자가 건별로 푼다. 푸는 방법은 `RFC-0361` 쪽에서 확인한다 | 그때까지 19개 Task 가 `awaiting_verification` 으로 남는다 |
+| 2 | 멈춘 검증 19건과 L2a | L2a 를 한다. 실행 기록이 판정을 갖고 있거나 판정이 없다는 것을 확정한 리뷰는 시스템이 잇는다. 근거는 1.2 의 실행 기록 959개와 5.2 의 전제다. 남는 2건은 운영자가 판정하거나 제출한 쪽이 다시 제출한다 | #47278 이 정한 "writer 가 사라지면 자동 재시도 없음"과 #49097 이 정한 "실패로 끝나면 재시도 없음"이 리뷰 실행에 한해 바뀐다. 리뷰가 다시 도는 만큼 토큰이 든다. 다른 쪽은 지금 규칙을 두고 L2b 만 하는 것이다. 그러면 19건을 운영자가 하나씩 판정해야 하고, 같은 멈춤이 8일에 35번꼴로 계속 생긴다 |
+| 4 | L2b 를 `task-lifecycle` RFC 의 3단계에서 떼어 먼저 낼지 | 먼저 낸다. L2a 뒤에 남는 제출을 볼 곳이 운영자 목록뿐이다 | 그 RFC 의 단계 순서가 바뀐다. 그 RFC 3.7 은 목록이 짧다는 전제를 1단계 뒤로 잡았다. 먼저 내면 그때까지 목록에 돌고 있는 리뷰도 같이 보인다 |
 | 3 | Keeper 별 GitHub 신원(#46691 의 좌) | 지금 하지 않는다. L3 의 S4 가 배포된 뒤 "현재 head 에 리뷰 없는 Ready PR" 을 다시 잰다 | 어느 Keeper 가 리뷰했는지는 계속 계정 단위로만 남는다 |
 
 ## 11. 확인하지 못한 것
@@ -330,7 +452,12 @@ type judgment_delivery_outcome =
 - 11-05 의 충돌 둘이 owner 쪽에서 한 번씩만 실패하고 풀린 길. 조사 에이전트는 prune 뒤의 `Candidate_absent` 정산으로 읽었고 내가 다시 따라가지 않았어요.
 - L1a 의 경합을 시험으로 재현하지 않았어요. 로그 순서, 운영 설치의 두 행, 코드 읽기가 서로 맞는 것까지 확인했어요.
 - worker 와 fanout 이 같은 후보를 둘 다 Jev 에게 묻는 것이 의도인지.
-- `execution_repair_required` 를 푸는 운영자 절차.
+- 연결 실패가 리뷰 칸을 쉬게 하는지(`Keeper_turn_driver.path_rest`). L2a 의 시도 간격이 여기에 달렸어요(5.2).
+- 멈춘 19건 가운데 `unsettled effect` 1건과 `raised` 1건의 원인.
+- writer 를 잃은 8건 중 5건, 판정 없이 끝난 8건 중 1건이 처음 멈춘 순간. 로그 창(11-04 19:13 KST)보다 먼저예요.
+- 서버 종료가 10초 한도 안에 도는 리뷰를 취소로 정산하지 못하는 까닭. 11-07 의 재시작 한 번에서 리뷰 셋이 끝 없이 남은 것까지만 봤어요.
+- 실행 기록을 Task 에 맞춘 방법. 기록 속에 가장 많이 나온 Task id 와 시각으로 맞췄어요. 1.2 의 원인 표는 로그 줄(`verification_id` 가 적힘)로 셌고, 실행 기록 수는 Task 에 맞추지 않은 전체 수예요.
+- 공식 클라이언트 세션으로 돈 리뷰가 멈춘 수. 지금 멈춘 19건에는 없어요.
 - #42017 의 7일 사례 1건과 비슷한 6건. 조사 에이전트가 raw trace 에서 읽었고 내가 다시 읽지 않았어요. raw trace 는 Keeper 마다 최근 약 200턴만 남아서 7일 전체를 세지 못했어요.
 - #46691 의 "Ready 114개 모두 리뷰됨"이 왜 그런지. 스킬 문서의 순서, 운영자가 준 목록, 리뷰어 수 가운데 무엇 때문인지 가르지 못했어요.
 - #26914 의 승인 뒤 사라진 산출물 수.

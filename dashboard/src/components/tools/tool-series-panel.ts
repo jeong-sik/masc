@@ -1,6 +1,6 @@
 // Tool call series panel — hourly or daily totals of the retained tool calls,
 // drawn as calls, failure rate, time spent (and the part of it inside calls that ran a minute
-// or more) and latency, with the tools that spent the most time.
+// or more), latency and result bytes, with the tools that spent the most time.
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
@@ -30,6 +30,22 @@ const MS_PER_SECOND = 1_000
 const MS_PER_MINUTE = 60_000
 const MS_PER_HOUR = 3_600_000
 const PERCENT = 100
+const BYTES_PER_KIB = 1_024
+const BYTES_PER_MIB = BYTES_PER_KIB * BYTES_PER_KIB
+const BYTES_PER_GIB = BYTES_PER_MIB * BYTES_PER_KIB
+
+/** "812 B", "4.8 KB", "62.4 MB", "1.3 GB": the size of what the calls returned. */
+export function formatResultBytes(bytes: number): string {
+  if (bytes < BYTES_PER_KIB) return `${Math.round(bytes)} B`
+  if (bytes < BYTES_PER_MIB) return `${(bytes / BYTES_PER_KIB).toFixed(1)} KB`
+  if (bytes < BYTES_PER_GIB) return `${(bytes / BYTES_PER_MIB).toFixed(1)} MB`
+  return `${(bytes / BYTES_PER_GIB).toFixed(1)} GB`
+}
+
+/** A total over calls that have a size, or "-" when none does. */
+function formatObservedBytes(observedCount: number, bytes: number): string {
+  return observedCount === 0 ? '-' : formatResultBytes(bytes)
+}
 
 export function formatTotalTime(ms: number): string {
   return ms < MS_PER_HOUR ? formatMsCompact(ms) : `${(ms / MS_PER_HOUR).toFixed(1)}h`
@@ -117,6 +133,28 @@ export function timeSeries(series: ToolMetricsSeriesResponse): MetricChartSeries
   ]
 }
 
+/**
+ * Result bytes per bucket. A bucket that holds a call stored before sizes were
+ * kept sums fewer calls than it ran, so drawn it would read as a drop that did
+ * not happen: it is a gap, like a bucket with no call.
+ */
+export function resultBytesSeries(series: ToolMetricsSeriesResponse): MetricChartSeries[] {
+  return [
+    {
+      name: '결과 바이트 합계',
+      color: 'var(--color-accent-fg)',
+      readings: bucketReadings(series, bucket =>
+        bucket.call_count > 0 && bucket.result_observed_count === bucket.call_count ? bucket.result_bytes_total : null,
+      ),
+    },
+  ]
+}
+
+/** How many of the window's calls have no recorded size. */
+export function unsizedCallCount(series: ToolMetricsSeriesResponse): number {
+  return series.total.call_count - series.total.result_observed_count
+}
+
 /** p50 and p95 per bucket. A bucket with no call is a gap, not zero. */
 export function latencySeries(series: ToolMetricsSeriesResponse): MetricChartSeries[] {
   return [
@@ -145,8 +183,9 @@ export interface ToolSeriesViewProps {
 function ToolSeriesCharts({ series }: { series: ToolMetricsSeriesResponse }) {
   const total = series.total
   const cutShort = cutShortBucketCount(series)
+  const unsized = unsizedCallCount(series)
   return html`
-    <div class="grid grid-cols-[repeat(4,minmax(0,1fr))] gap-3 min-[1400px]:grid-cols-[repeat(8,minmax(0,1fr))] max-[520px]:grid-cols-[repeat(2,minmax(0,1fr))]">
+    <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-3 max-[520px]:grid-cols-[repeat(2,minmax(0,1fr))]">
       <${StatTile} label="호출" value=${formatCount(total.call_count)} status="brass" />
       <${StatTile} label="실패" value=${formatCount(total.failure_count)} status="brass" />
       <${StatTile} label="실패율" value=${formatFailureRate(total.call_count, total.failure_count)} status="brass" />
@@ -155,6 +194,8 @@ function ToolSeriesCharts({ series }: { series: ToolMetricsSeriesResponse }) {
       <${StatTile} label=${longTimeLabel(series)} value=${formatTotalTime(total.long_total_ms)} status="brass" />
       <${StatTile} label="지연 p50" value=${formatMsCompact(total.p50_ms, '-')} status="brass" />
       <${StatTile} label="지연 p95" value=${formatMsCompact(total.p95_ms, '-')} status="brass" />
+      <${StatTile} label="결과 바이트 합계" value=${formatObservedBytes(total.result_observed_count, total.result_bytes_total)} status="brass" />
+      <${StatTile} label="가장 큰 결과" value=${total.result_bytes_max === null ? '-' : formatResultBytes(total.result_bytes_max)} status="brass" />
     </div>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
       <${DetailCard}>
@@ -169,7 +210,13 @@ function ToolSeriesCharts({ series }: { series: ToolMetricsSeriesResponse }) {
       <${DetailCard}>
         <${ObservedMetricChart} label="구간별 지연 p50 / p95" unit="ms" formatValue=${(ms: number) => formatMsCompact(ms)} series=${latencySeries(series)} />
       <//>
+      <${DetailCard}>
+        <${ObservedMetricChart} label="구간별 결과 바이트 합계" unit="B" formatValue=${formatResultBytes} series=${resultBytesSeries(series)} />
+      <//>
     </div>
+    ${unsized > 0
+      ? html`<p class="text-2xs text-[var(--color-fg-muted)]">결과 바이트는 크기를 기록하기 시작한 뒤의 호출만 더해요. 이 구간 호출 ${formatCount(total.call_count)} 중 ${formatCount(unsized)}는 크기가 없어서 합계와 가장 큰 결과에 들어 있지 않고, 그런 호출이 든 구간은 그래프에서 뺐어요.</p>`
+      : null}
     ${cutShort > 0
       ? html`<p class="text-2xs text-[var(--color-fg-muted)]">처음과 끝의 덜 찬 구간은 그래프에서 뺐어요. 위 합계와 아래 표에는 들어 있어요.</p>`
       : null}
@@ -191,6 +238,7 @@ function ToolSeriesTable({ series, tool, onTool }: {
             <th scope="col">도구</th><th scope="col">호출</th><th scope="col">실패</th>
             <th scope="col">시간 합계</th><th scope="col">${longCallLabel(series)}</th>
             <th scope="col">p50</th><th scope="col">p95</th><th scope="col">최대</th>
+            <th scope="col">결과 바이트 합계</th><th scope="col">가장 큰 결과</th>
           </tr>
         </thead>
         <tbody>
@@ -209,6 +257,8 @@ function ToolSeriesTable({ series, tool, onTool }: {
               <td>${formatMsCompact(row.p50_ms, '-')}</td>
               <td>${formatMsCompact(row.p95_ms, '-')}</td>
               <td>${formatMsCompact(row.max_ms, '-')}</td>
+              <td>${formatObservedBytes(row.result_observed_count, row.result_bytes_total)}</td>
+              <td>${row.result_bytes_max === null ? '-' : formatResultBytes(row.result_bytes_max)}</td>
             </tr>
           `)}
         </tbody>

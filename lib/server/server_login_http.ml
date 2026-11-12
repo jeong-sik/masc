@@ -56,9 +56,23 @@ let origin_of ~request_authority request =
 
 let cookie request name = Server_routes_http_common.get_cookie_value request name
 
+(* Every value of a session cookie, over every [Cookie] field, so that two of
+   them are several credentials; [cookie] gives only the first. *)
+let session_cookie_values (request : Httpun.Request.t) =
+  Httpun.Headers.get_multi request.headers "cookie"
+  |> List.concat_map (fun raw ->
+    Cohttp.Header.init_with "cookie" raw |> Cohttp.Cookie.Cookie_hdr.extract)
+  |> List.filter_map (fun (name, value) ->
+    match String.equal name Q.session_cookie, String.trim value with
+    | false, (_ : string) | true, "" -> None
+    | true, value -> Some value)
+;;
+
+let session_cookies request = Q.session_cookies_of_values (session_cookie_values request)
+
 let browser_request ~request_authority request =
   { Q.method_ = method_of request
-  ; session_cookie = cookie request Q.session_cookie
+  ; session_cookie = session_cookies request
   ; bearer = Server_auth.request_carries_auth_credential request
   ; query_credential = Server_auth.request_carries_query_credential request
   ; origin = origin_of ~request_authority request
@@ -139,7 +153,7 @@ let start t provider request reqd =
            t
            provider
            ~origin:(origin_of ~request_authority request)
-           ~session_cookie:(cookie request Q.session_cookie)
+           ~session_cookie:(session_cookies request)
            ~fields:(form_of body))))
 ;;
 
@@ -215,18 +229,6 @@ let add_routes t router =
 
 let whoami_path = "/api/v1/auth/whoami"
 let ms_per_second = 1000.
-
-(* Every value of a session cookie, so that two of them are several
-   credentials; [cookie] gives only the first. *)
-let session_cookie_values (request : Httpun.Request.t) =
-  Httpun.Headers.get_multi request.headers "cookie"
-  |> List.concat_map (fun raw ->
-    Cohttp.Header.init_with "cookie" raw |> Cohttp.Cookie.Cookie_hdr.extract)
-  |> List.filter_map (fun (name, value) ->
-    match String.equal name Q.session_cookie, String.trim value with
-    | false, (_ : string) | true, "" -> None
-    | true, value -> Some value)
-;;
 
 let gate_request ~request_authority (request : Httpun.Request.t) =
   { Auth_gate.credentials =

@@ -4,8 +4,8 @@
 
 ## 방법
 
-- 바이너리. 커밋 `d52df0063456` 에서 빌드했어요(sha256 앞 12자리 `e32ee673a826`, 제품 소스 tree 는 `lib` `48ec4118433f`, `bin` `495af6fae0c1`). 그 뒤 커밋이 바꾼 것은 시험, 주석 세 곳, 이 폴더예요(`git diff d52df0063456 HEAD -- lib bin` 은 주석 줄만 내요).
-- 서버 둘. 같은 바이너리로 임시 다계정 설치 둘을 띄우고 `MASC_ASSETS_DIR` 만 다르게 줬어요. 하나는 콘솔 빌드가 든 bundle 이고, 하나는 빈 폴더예요.
+- 바이너리. 커밋 `5a767ce08174` 에서 빌드했어요(sha256 앞 12자리 `4840339f479d`, 제품 소스 tree 는 `lib` `867a853cd3a0`, `bin` `495af6fae0c1`). 그 뒤 커밋은 이 폴더만 바꿔요(`git diff 5a767ce08174 HEAD -- lib bin test` 는 아무것도 내지 않아요).
+- 서버 둘. 같은 바이너리로 임시 다계정 설치 둘을 띄우고 `MASC_ASSETS_DIR` 만 다르게 줬어요. 하나는 콘솔 빌드가 든 bundle 이고, 하나는 빈 `dashboard/` 폴더예요(콘솔도 운영자 Dashboard 도 없는 bundle).
 - bundle. 이 체크아웃의 `assets/dashboard/` 예요. 그 안의 콘솔은 `accounts/index.html`(760 B), `accounts/assets/index-48nnFfCc.js`(26,211 B), `accounts/assets/index-CfAaj9st.css`(333 B) 셋이에요. 콘솔 소스는 main 과 같고, 그 소스를 다시 빌드하면 세 파일의 sha256 이 같아요.
 - 서버의 답(`harness/console-answers.py`). 두 서버에 콘솔 경로를 HTTP 로 물어 상태, header, 바이트 수를 적어요. 주소는 적힌 그대로 보내요(`http.client`). `..` 를 중간에서 정리하는 것이 없어요.
 - 로그인 없이 실제 서버로 잰 상태 둘. 로그인하지 않은 브라우저가 콘솔을 열 때(`console_signed_out`), 빈 bundle 의 서버가 답하는 화면(`console_no_bundle`).
@@ -49,9 +49,12 @@ python3 harness/console-table.py <출력 폴더>/<label>-answers.json <출력 �
 
 - 콘솔 화면의 정책: `default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`
 - 빈 bundle 의 503 화면의 정책: `default-src 'none'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`
+- 빌드 파일 두 개의 답도 콘솔 화면과 같은 정책을 실어요. 브라우저가 빌드 파일을 문서로 열어도(나중 빌드의 `.html`·`.svg`) 화면과 같은 제한 아래에서 돌아요.
 - base sheet 는 서버가 직접 쓰는 화면의 sheet 앞부분과 바이트가 같아요. `/` 의 style 요소(5,480 B)가 base sheet(3,799 B)로 시작해요. 그래서 콘솔과 로그인 화면의 바탕 모양이 같아요.
 - 빌드 파일은 이름에 내용 hash 가 있어서 오래 둬도 돼요. base sheet 는 주소가 그대로이고 바이너리가 바뀌면 내용이 바뀌어서, 브라우저가 쓸 때마다 다시 물어요(`no-cache`, 같으면 304).
-- bundle 이 없어도 서버는 뜨고, 로그인 화면과 준비 확인은 그대로 답해요. 콘솔 자리에는 503 화면이 나와요. 서버 로그에는 뜰 때 `[WARN] [Server] /accounts/console answers 503: the dashboard bundle of this server holds no accounts/index.html` 한 줄이 남아요. 콘솔이 든 bundle 의 서버에는 그 줄이 없어요.
+- 빈 bundle 이어도 서버는 뜨고, 로그인 화면과 준비 확인은 그대로 답해요. 콘솔 자리에는 503 화면이 나와요. 서버 로그에는 뜰 때 `[WARN] [Server] /accounts/console answers 503: the dashboard bundle of this server holds no accounts/index.html` 한 줄이 남아요. 콘솔이 든 bundle 의 서버에는 그 줄이 없어요.
+- 이유는 뜰 때 한 번만 적어요. 로그인 없이 열리는 경로라 요청마다 적지 않아요. 그래서 뜬 뒤에 bundle 이 깨지면 로그에 이유가 남지 않아요.
+- `dashboard/` 폴더조차 없는 assets 폴더에서는 빌드 파일도 503 이에요(빈 bundle 에서는 404). 브라우저로 재지 않았고, `test/test_server_accounts.ml` 이 붙들어요(둘 다 503, 답에 서버의 폴더 경로가 없음).
 
 ## 브라우저에서 잰 상태
 
@@ -77,7 +80,7 @@ python3 harness/console-table.py <출력 폴더>/<label>-answers.json <출력 �
 이 층은 로그인 화면의 sheet 를 두 파일로 나눠요(`lib/auth/account_base.css`, `lib/auth/account_page.css`). 서버가 쓰는 화면은 둘을 이은 것을 받아요. 나누기 전과 후에 화면이 같은지를 두 가지로 봤어요.
 
 - 규칙(`harness/sheet-rules.py`). 주석과 빈 줄을 뺀 줄이 전 127줄, 후 127줄이고, 빠진 줄과 더해진 줄이 없어요. 무게가 없는 규칙 셋(`*`, `:where(…)` 둘)의 순서도 같아요.
-- 브라우저(`harness/ux-layer.sh`, `harness/ux-compare.py`). 상태마다 모든 요소와 `::before`·`::after` 의 computed style 전체를 폭 320px 와 1280px 에서 읽어 지문을 내요. 전은 sheet 를 나누기 전의 바이너리(커밋 `9107df280028`, sha256 앞 12자리 `c36648c75d65`)이고 후는 이 층의 바이너리예요. 두 커밋 사이에 화면을 만드는 소스(`lib/auth/`, `lib/auth_preview.ml`, `lib/server/server_login_http.ml`)는 이 층의 변경 말고는 바뀌지 않았어요.
+- 브라우저(`harness/ux-layer.sh`, `harness/ux-compare.py`). 상태마다 모든 요소와 `::before`·`::after` 의 computed style 전체를 폭 320px 와 1280px 에서 읽어 지문을 내요. 전은 이 층의 바탕 커밋 `d09adad5eec2`(main)의 바이너리(sha256 앞 12자리 `753209051476`)이고, 후는 위의 이 층 바이너리예요.
 
 | 상태 | 비교한 값 | 요소 수 | computed style 지문(320px) 전/후 | 지문(1280px) 전/후 | 결과 |
 |---|---|---|---|---|---|
@@ -95,7 +98,7 @@ python3 harness/console-table.py <출력 폴더>/<label>-answers.json <출력 �
 | control_other_style_nonce | 27 | 86 | `6d61364791b3c2dc/6d61364791b3c2dc` | `3f26b255b1a710f0/3f26b255b1a710f0` | 같음 |
 
 - 열두 상태 모두 표의 값과 두 지문이 같아요. 수치는 `sheet-before-measure.json`, `sheet-after-measure.json` 이에요.
-- 로그인 완료 화면(`done_held`)은 시험이 저장한 서버의 답이에요(`harness/ux-dump-done.py`). 전의 것은 나누기 전 소스로, 후의 것은 이 층의 소스로 만들었고, 두 답은 header 와 본문이 바이트까지 같아요.
+- 로그인 완료 화면(`done_held`)은 GitHub 로그인이 있어야 열려서, 로그인 시험이 저장한 서버의 답을 대역이 줘요(`harness/ux-dump-done.py`). 전의 것은 바탕 커밋의 소스로, 후의 것은 이 층의 소스로 만들었어요. 본문은 5,808 B(sha256 앞 12자리 `58afe5cd504d`)와 6,299 B(`383df5c38e53`)로 달라요. 안에 넣는 sheet 의 주석이 달라서예요(4,989 B → 5,480 B). 측정 JSON 에는 이 차이가 남지 않아서 여기에 적어요.
 - 지문 뒤의 값(요소별 속성)은 다시 재면 `<출력 폴더>/styles/` 에 남아요. 저장소에는 넣지 않았어요.
 
 ## 콘솔 틀에서 보인 것
@@ -126,14 +129,24 @@ python3 harness/console-table.py <출력 폴더>/<label>-answers.json <출력 �
 | 바탕 sheet 를 `immutable` 로 줌 | 잡힘 | `a browser asks for it again on every use` |
 | 바탕 sheet 의 tag 가 내용을 따르지 않음 | 잡힘 | `the tag of the sheet is the tag of its bytes` |
 | 콘솔 경로를 등록하지 않음 | 잡힘 | `the console of a bundle that does not hold it` |
+| 빌드 파일에 정책을 싣지 않음 | 잡힘 | `a file of the build carries the policy of the console` |
+| 503 화면이 서버 로그의 이유를 말함 | 잡힘 | `the page that stands in does not say why` |
+| 503 화면에 `referrer-policy` 가 없음 | 잡힘 | `a link of the page that stands in carries no address of this server` |
+| bundle 이 줄 수 없는 빌드 파일을 404 로 답함 | 잡힘 | `GET /accounts/console/assets/app.js without a bundle` |
+| 빌드 파일을 브라우저가 오래 두지 않음(공유 함수) | 잡힘 | `a browser keeps a file of the build, which is named after its bytes` |
 
-- 열넷 가운데 13개를 잡았어요. 고치지 않은 소스에서는 시험이 통과해요.
+- 열아홉 가운데 18개를 잡았어요. 고치지 않은 소스에서는 시험이 통과해요. 마지막 다섯은 리뷰 뒤 더한 단언을 확인하려고 더했어요.
 - 못 잡은 하나는 경로가 파일 이름을 검사하는 줄이에요(`Web_dashboard.is_public_asset_relative_path`). 그 줄을 빼도 bundle 을 읽는 함수가 같은 이름들을 거절해서 답이 같아요. 운영자 Dashboard 경로도 같은 검사를 먼저 해요(`lib/server/server_routes_http_routes_frontend.ml`). 경로가 읽는 길(설치, run-local, 폴더)에 기대지 않으려고 뒀어요. 시험이 붙드는 줄은 아니에요.
 
 ## 확인하지 않은 것
 
 - 설치된 release 와 `scripts/run-local.sh` 가 bundle 을 읽는 길. 잰 것은 `MASC_ASSETS_DIR` 로 폴더를 준 길 하나예요. 세 길은 같은 함수(`Web_dashboard.load_dashboard_asset`)로 모이고, 설치는 bundle 폴더를 통째로 옮겨요(소스를 읽어서 확인).
-- bundle 목록에는 있는데 읽지 못하는 파일의 답(503). 그런 bundle 을 만들지 않았어요.
+- 설치 release·run-local 에서 목록에는 있는데 읽지 못하는 파일의 답(503). 폴더 bundle 에서 빌드 파일이 503 인 경우는 시험이 붙들어요(위 `dashboard/` 가 없는 폴더).
 - 실제 GitHub 로그인 뒤의 콘솔. 시험용 OAuth App 이 있어야 해요.
-- 여러 사람이 동시에 열 때의 서버 부하. 파일 읽기와 압축은 계정 서버의 event loop 에서 돌아요.
+- 여러 사람이 동시에 열 때의 서버 부하. 압축이 CPU pool 로 넘어가는지(`Server_routes_http_pages.serve_dashboard_asset` 의 주석)도 계정 서버에서는 보지 않았어요.
 - 화면 낭독기로 읽는 소리, 다른 브라우저 엔진(WebKit, Gecko).
+
+## 알려진 것
+
+- 폴더에서 읽는 bundle 은 요청한 이름 그대로 파일을 열어요. 대소문자를 가리지 않는 파일시스템에서는 대소문자만 다른 이름이 모두 200 이고, 이름마다 자산 표에 한 칸씩 쌓여요. `ENOENT` 가 아닌 거절(경로 중간이 파일, 너무 긴 이름, 디렉터리, link)은 404 가 아니라 503 이에요. 운영자 `/dashboard/assets/` 도 같은 함수를 지나요(#51705).
+- HEAD 요청과 405 의 `Allow` header 는 계정 서버의 모든 경로가 같아요(#50861).

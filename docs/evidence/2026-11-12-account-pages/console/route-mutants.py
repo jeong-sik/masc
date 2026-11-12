@@ -13,6 +13,7 @@ wt = pathlib.Path(sys.argv[1])
 out = pathlib.Path(sys.argv[2])
 CONSOLE = "lib/server/server_account_console.ml"
 SERVER = "lib/server/server_accounts.ml"
+SHARED = "lib/server/server_routes_http_pages.ml"
 TEST = "test_server_accounts"
 
 MUTANTS = [
@@ -58,6 +59,21 @@ MUTANTS = [
     ("the routes of the console are not registered", SERVER,
      "  |> Server_account_console.add_routes ~draw:login.Login_routes.draw\n",
      ""),
+    ("the files of the build carry no policy", CONSOLE,
+     '      ~headers:[ "content-security-policy", policy ]\n',
+     "      ~headers:[]\n"),
+    ("the page that stands in says why", CONSOLE,
+     '; "<p>서버가 이 화면의 파일을 읽지 못했어요. 이 서버를 운영하는 사람에게 알려 주세요.</p>"',
+     '; "<p>" ^ Option.value (unreadable ()) ~default:"" ^ "</p>"'),
+    ("a link of the page that stands in sends its address to another site", CONSOLE,
+     "      [ no_store\n      ; referrer_policy\n      ; ( \"content-security-policy\"",
+     "      [ no_store\n      ; ( \"content-security-policy\""),
+    ("a file the bundle cannot give is a 404", CONSOLE,
+     '  Http.Response.text ~status:`Service_unavailable "This file cannot be read now." reqd',
+     "  Http.Response.not_found reqd"),
+    ("a browser keeps a file of the build only for a moment", SHARED,
+     '"public, max-age=31536000, immutable"',
+     '"no-cache"'),
 ]
 
 build = ["opam", "exec", "--switch=5.5.2", "--", "dune", "build", "--root", ".", "-j", "6", f"./test/{TEST}.exe"]
@@ -76,7 +92,7 @@ def run_test():
     return ran.returncode == 0, said[0].strip() if said else ""
 
 
-originals = {name: (wt / name).read_text(encoding="utf-8") for name in (CONSOLE, SERVER)}
+originals = {name: (wt / name).read_text(encoding="utf-8") for name in (CONSOLE, SERVER, SHARED)}
 for name, file, old, new in MUTANTS:
     assert originals[file].count(old) == 1, name
 rows = []

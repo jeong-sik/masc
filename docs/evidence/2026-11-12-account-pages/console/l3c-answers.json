@@ -23,6 +23,7 @@
     "headers": {
       "content-type": "application/javascript; charset=utf-8",
       "cache-control": "public, max-age=31536000, immutable",
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       "vary": "Accept-Encoding"
     },
     "bytes": 26211,
@@ -40,6 +41,7 @@
       "content-type": "application/javascript; charset=utf-8",
       "cache-control": "public, max-age=31536000, immutable",
       "content-encoding": "zstd",
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       "vary": "Accept-Encoding"
     },
     "bytes": 11164,
@@ -54,6 +56,7 @@
     "headers": {
       "content-type": "text/css; charset=utf-8",
       "cache-control": "public, max-age=31536000, immutable",
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       "vary": "Accept-Encoding"
     },
     "bytes": 333,
@@ -71,6 +74,7 @@
       "content-type": "text/css; charset=utf-8",
       "cache-control": "public, max-age=31536000, immutable",
       "content-encoding": "zstd",
+      "content-security-policy": "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'none'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       "vary": "Accept-Encoding"
     },
     "bytes": 262,
@@ -209,7 +213,7 @@
       "referrer-policy": "same-origin"
     },
     "bytes": 6181,
-    "sha256": "ca5eaf3372c3"
+    "sha256": "7603e08b9f37"
   },
   {
     "server": "without a bundle",
@@ -250,7 +254,7 @@
       "referrer-policy": "same-origin"
     },
     "bytes": 20175,
-    "sha256": "699efbef7218"
+    "sha256": "62b5427548f6"
   },
   {
     "server": "without a bundle",

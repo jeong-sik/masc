@@ -759,9 +759,10 @@ class WaitingEventTest(unittest.TestCase):
                     "reconnected observer did not revalidate the agenda",
                 )
                 wait_until(
-                    lambda: rendered_row_contains(
-                        reconnect_output_start, b"analyst", b"reconnected-waiting"
-                    ),
+                    # A keeper row is two lines now (name and state, then the
+                    # waiting text), so the name and the text no longer share a
+                    # line; the text alone shows the read was applied.
+                    lambda: b"reconnected-waiting" in output[reconnect_output_start:],
                     "reconnected observer did not refresh the waiting row",
                 )
                 # A failed identity check suspends the stream and its reads.

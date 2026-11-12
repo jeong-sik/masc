@@ -17,7 +17,9 @@
  * + #7439 (valibot schema pilot). See API_CONTRACT.md.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { fetchKeeperComposite } from '../api/keeper'
+import { ApiRequestError } from '../api/core'
 
 import {
   parseKeeperCompositeSnapshot,
@@ -252,6 +254,17 @@ describe('FSM Hub integration — API response shape', () => {
   })
 
   describe('keeper selection fallback guards', () => {
+    it('recognizes the real typed composite HTTP404 without depending on its error text', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'keeper is gone' }, { status: 404 })))
+      try {
+        const keeper = 'same keeper'
+        const error = await fetchKeeperComposite(keeper).catch(cause => cause)
+        expect(isCompositeFetchNotFound(error, keeper)).toBe(true)
+        expect(isCompositeFetchNotFound(error, 'other keeper')).toBe(false)
+      } finally {
+        vi.unstubAllGlobals()
+      }
+    })
     it('uses gate fallback only before execution data has loaded', () => {
       expect(shouldUseGateKeeperFallback(false, [])).toBe(true)
       expect(shouldUseGateKeeperFallback(true, [])).toBe(false)
@@ -260,9 +273,12 @@ describe('FSM Hub integration — API response shape', () => {
     })
 
     it('treats composite 404 as keeper disappearance, not generic schema failure', () => {
-      expect(isCompositeFetchNotFound(new Error('composite fetch failed: 404'))).toBe(true)
-      expect(isCompositeFetchNotFound(new Error('composite fetch failed: 500'))).toBe(false)
-      expect(isCompositeFetchNotFound(new Error('state-diagram fetch failed: 404'))).toBe(false)
+      const path = '/api/v1/keepers/keeper/composite'
+      expect(isCompositeFetchNotFound(new ApiRequestError({ method: 'GET', path, status: 404 }), 'keeper')).toBe(true)
+      expect(isCompositeFetchNotFound(new ApiRequestError({ method: 'GET', path, status: 500 }), 'keeper')).toBe(false)
+      expect(isCompositeFetchNotFound(new ApiRequestError({ method: 'GET',
+        path: '/api/v1/keepers/keeper/state-diagram', status: 404 }), 'keeper')).toBe(false)
+      expect(isCompositeFetchNotFound(new Error('composite fetch failed: 404'), 'keeper')).toBe(false)
     })
   })
 })

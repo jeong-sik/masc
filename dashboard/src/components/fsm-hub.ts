@@ -13,6 +13,7 @@ import {
 } from '../api/keeper'
 import { fetchGateKeepers } from '../api/gate-keepers'
 import { dashboardRuntime } from '../api/effect-http'
+import { ApiRequestError } from '../api/core'
 import { executionLoaded, keepers, refreshExecution } from '../store'
 import { setupObservationRefresh } from '../lib/observation-refresh'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
@@ -73,8 +74,9 @@ export function filterKeeperNames(
   return names.filter(name => name.toLowerCase().includes(needle))
 }
 
-export function isCompositeFetchNotFound(err: unknown): boolean {
-  return err instanceof Error && /composite fetch failed: 404$/.test(err.message)
+export function isCompositeFetchNotFound(err: unknown, keeperName: string): boolean {
+  return err instanceof ApiRequestError && err.method === 'GET' && err.status === 404
+    && err.path === `/api/v1/keepers/${encodeURIComponent(keeperName)}/composite`
 }
 
 function shortText(value: string | null | undefined, max = 80): string {
@@ -589,7 +591,7 @@ export function FsmHub(props: FsmHubProps = {}) {
       } catch (err) {
         if (signal.aborted) return
         const failedAt = Date.now() / 1000
-        if (isCompositeFetchNotFound(err)) {
+        if (isCompositeFetchNotFound(err, activeSelected)) {
           setGateKeeperNames(prev => prev.filter(name => name !== activeSelected))
           setSelected(prev => (prev === activeSelected ? null : prev))
           void refreshExecution({ force: true })

@@ -115,6 +115,10 @@ what you asked before and what it answered. The answer of
   subscription, its next turn is refused. Start a new conversation with
   `masc_my_keeper_conversation_new`, or give the Keeper a Runtime of the
   first subscription again.
+- **Turns that keep failing.** When Claude Code no longer has the session
+  of a conversation, each turn of it ends without an answer. The server
+  cannot tell that from another failure and starts no session by itself:
+  start a new conversation.
 - **A new conversation is yours to start.** `masc_my_keeper_conversation_new`
   starts one. The Keeper's next turn has read none of the earlier turns.
   The earlier conversations stay recorded, and no turn goes on in them.

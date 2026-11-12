@@ -2,9 +2,19 @@ name: Approval merge request
 
 # This stage has no write token and never checks out a PR. Reviews from forks
 # can therefore wake the trusted default-branch worker as well.
+#
+# Every run here starts a worker run, and both share the Actions token's
+# hourly API budget. In a sample of 60 worker runs on 2026-11-12, 48 held
+# without doing anything (36 because the pull request was a draft or already
+# closed), and 6 of 12 failed runs died on "API rate limit exceeded for
+# installation" while downloading the request. The job below therefore skips
+# the events that cannot change what the worker does; a skipped job starts no
+# runner and its worker run skips too.
 on:
+  # A review edit changes only the review's text. The worker reads state,
+  # account and reviewed commit, so an edit cannot change its verdict.
   pull_request_review:
-    types: [submitted, edited, dismissed]
+    types: [submitted, dismissed]
   pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, edited, closed]
 
@@ -12,6 +22,19 @@ permissions: {}
 
 jobs:
   request:
+    # Kept: a draft conversion (the worker drops the reservation), and any
+    # event on an open, ready pull request. A closed pull request is kept
+    # only when it merged (the worker wakes the main build and deletes the
+    # branch). An edit is kept only when it changed the base branch; title
+    # and body edits change nothing the worker reads. A draft's reviews are
+    # read again when it is marked ready.
+    if: >-
+      github.event.action == 'converted_to_draft' ||
+      (github.event.pull_request.draft == false &&
+       (github.event.pull_request.state == 'open' ||
+        (github.event.action == 'closed' && github.event.pull_request.merged == true)) &&
+       (github.event_name != 'pull_request_target' || github.event.action != 'edited' ||
+        github.event.changes.base != null))
     runs-on: ubuntu-24.04
     steps:
       - name: Record the PR number as data

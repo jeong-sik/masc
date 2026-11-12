@@ -1,3 +1,4 @@
+import { setupObservationRefresh } from '../../lib/observation-refresh'
 // Lane · Queue panel — the lanes.jsx Monitor surface, wired to live data.
 //
 //   · 진행 타임라인 (sw-*): composite observations accumulated from the fleet
@@ -90,7 +91,6 @@ const MIN_BAR_PERCENT = 6
  *  the window (lanes.jsx `(s.d / WINDOW_S) >= 0.085`). */
 const SEGMENT_LABEL_MIN_PCT = 8.5
 const LIFECYCLE_EVENT_LIMIT = 30
-const FLEET_POLL_MS = 30_000
 
 /* ── Observation buffers (module-level so tab switches keep history) ───── */
 
@@ -535,17 +535,15 @@ export function KeeperWaitQueueRail({ keeperName, dev = false }: { keeperName: s
 
 export interface LaneQueuePanelProps {
   /** Injectable for tests; defaults to the real fleet composite read. */
-  fetchFleet?: () => Promise<FleetCompositeSnapshot>
+  fetchFleet?: (opts?: { signal?: AbortSignal }) => Promise<FleetCompositeSnapshot>
   fetchLifecycle?: typeof fetchKeeperLifecycle
-  pollMs?: number
 }
 
 export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
   useNowSecondsTicker()
   const nowSec = nowSecondsSignal.value
-  const fetchFleet = useMemo(() => props.fetchFleet ?? (() => fetchKeepersComposite()), [props.fetchFleet])
+  const fetchFleet = useMemo(() => props.fetchFleet ?? fetchKeepersComposite, [props.fetchFleet])
   const fetchLifecycle = useMemo(() => props.fetchLifecycle ?? fetchKeeperLifecycle, [props.fetchLifecycle])
-  const pollMs = props.pollMs ?? FLEET_POLL_MS
 
   const roster = keepers.value
   const buffers = laneObservationBuffers.value
@@ -565,27 +563,20 @@ export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
   const [focus, setFocus] = useState<LaneKey>('turn')
   const [dev, setDev] = useState(false)
 
-  // Fleet composite ingestion: the SSE-hydrated stream is primary; the poll
-  // is the seed/watchdog so the panel also works where the stream is off.
-  // Ingestion dedupes unchanged states, so a poll that overlaps the stream
-  // never fabricates transitions.
+  // Both pushed snapshots and authoritative event-triggered reads feed the
+  // same deduplicating ingestion, so unchanged state creates no transition.
   useEffect(() => {
     ingestLaneQueueFleetSnapshot(fleetCompositeSnapshot.value)
     const unsubscribe = fleetCompositeSnapshot.subscribe(ingestLaneQueueFleetSnapshot)
-    let cancelled = false
-    const poll = () => {
-      void fetchFleet()
-        .then(snapshot => { if (!cancelled) ingestLaneQueueFleetSnapshot(snapshot) })
-        .catch(() => undefined)
-    }
-    poll()
-    const timer = setInterval(poll, pollMs)
+    const dispose = setupObservationRefresh(async signal => {
+      const snapshot = await fetchFleet({ signal })
+      if (!signal.aborted) ingestLaneQueueFleetSnapshot(snapshot)
+    }, { topics: ['keeper_composite'], onError: () => undefined })
     return () => {
-      cancelled = true
-      clearInterval(timer)
+      dispose()
       unsubscribe()
     }
-  }, [fetchFleet, pollMs])
+  }, [fetchFleet])
 
   // Waiting inventory: one shared keeper-scoped subscription per tab keeper
   // (push-invalidated; the store coalesces concurrent consumers).
@@ -595,7 +586,7 @@ export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
     return () => { for (const unsubscribe of unsubscribers) unsubscribe() }
   }, [tabKey])
 
-  // Scheduled-automation projection (shared visibility-aware poller).
+  // Scheduled-automation projection (shared event subscription).
   useEffect(() => subscribeScheduledAutomationRefresh(), [])
 
   // Lifecycle event stream for the selected keeper.

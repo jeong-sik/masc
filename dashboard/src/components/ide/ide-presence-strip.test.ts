@@ -1,3 +1,4 @@
+import { publishDashboardObservationChange } from '../../lib/observation-refresh'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
@@ -136,7 +137,7 @@ describe('IdePresenceStrip', () => {
   // and editor all read globalPresenceSnapshot. The strip is the one
   // always-mounted reader of /api/v1/ide/presence, so if it keeps what it
   // read to itself every one of those surfaces stays on `loading`.
-  it('publishes the presence it reads and re-reads it on the poll cadence', async () => {
+  it('publishes presence once and re-reads it only for observation changes', async () => {
     vi.useFakeTimers()
     const statuses: Array<'active' | 'idle'> = ['active', 'idle']
     let call = 0
@@ -158,7 +159,7 @@ describe('IdePresenceStrip', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const container = document.createElement('div')
-    render(h(IdePresenceStrip, { compact: true, pollMs: 1_000 }), container)
+    render(h(IdePresenceStrip, { compact: true }), container)
 
     await vi.waitFor(() => {
       const snap = globalPresenceSnapshot.value
@@ -169,22 +170,27 @@ describe('IdePresenceStrip', () => {
       expect(container.querySelector('[data-state="live"]')).not.toBeNull()
     })
 
-    await vi.advanceTimersByTimeAsync(1_000)
+    publishDashboardObservationChange({ topic: 'ide_presence' })
+    await vi.advanceTimersByTimeAsync(0)
     await vi.waitFor(() => {
       const snap = globalPresenceSnapshot.value
       if (snap.kind !== 'live') throw new Error('presence is not live')
       expect(snap.entries[0]?.status).toBe('idle')
     })
 
-    // A poll that reads the same presence does not wake every reader.
+    // An unchanged read does not wake every downstream reader.
     const unchanged = globalPresenceSnapshot.value
     const callsBefore = call
-    await vi.advanceTimersByTimeAsync(1_000)
+    publishDashboardObservationChange({ topic: 'ide_presence' })
+    await vi.advanceTimersByTimeAsync(0)
     await vi.waitFor(() => expect(call).toBe(callsBefore + 1))
     expect(globalPresenceSnapshot.value).toBe(unchanged)
 
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(call).toBe(callsBefore + 1)
     render(null, container)
     const callsAtUnmount = call
+    publishDashboardObservationChange({ topic: 'ide_presence' })
     await vi.advanceTimersByTimeAsync(3_000)
     expect(call).toBe(callsAtUnmount)
   })

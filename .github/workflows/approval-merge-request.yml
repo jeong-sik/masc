@@ -20,6 +20,18 @@ on:
 
 permissions: {}
 
+# One request per PR is enough: the consumer (Approval auto-merge) re-reads the
+# PR's current state and ignores which event woke it, so only the newest
+# request of a PR matters. Cancelling an older request makes its workflow_run
+# "cancelled", which the consumer skips -- no artifact download, no API calls.
+# The group is per PR (never repository-wide), so another PR's final approval
+# is never replaced. "closed" keeps its own group: it is the only path that
+# starts the main build for a merged PR and must not be cancelled by a later
+# review event.
+concurrency:
+  group: approval-merge-request-${{ github.event.pull_request.number }}-${{ github.event.action == 'closed' && 'closed' || 'live' }}
+  cancel-in-progress: true
+
 jobs:
   request:
     # Kept: a draft conversion (the worker drops the reservation), and any

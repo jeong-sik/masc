@@ -69,3 +69,9 @@ val with_projection_diagnostics :
   extra:(string * Yojson.Safe.t) list ->
   Yojson.Safe.t ->
   Yojson.Safe.t
+(** Refresh generated timing/extra metadata while retaining the producer's
+    existing diagnostic fields. [read_completeness] and [read_error] belong
+    only to the original read: metadata [extra] cannot replace or invent
+    them. Other metadata keys take precedence over an existing value. Emits
+    one [projection_diagnostics] member with unique field names; does not
+    infer an absent read outcome. *)

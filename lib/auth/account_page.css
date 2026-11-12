@@ -1,0 +1,113 @@
+/* The one style sheet of the pages the account server writes itself. A page
+   sends it inline under the nonce of its policy and uses no style attribute,
+   which a nonce does not cover. The colours follow the Dashboard's brass
+   skin; the muted text and the field border are lighter than the Dashboard's
+   so that text holds 4.5:1 and a field border 3:1 on the surfaces used here. */
+:root {
+  color-scheme: dark;
+  --bg-deep: #08090d;
+  --bg-panel: #0f1015;
+  --bg-card: #1b1c25;
+  --bg-field: #12131a;
+  --line: #282a36;
+  --line-field: #6b6f86;
+  --text-bright: #f4ead4;
+  --text: #d8c9ad;
+  --accent-strong: #f0c570;
+  --info-line: #46c6f0;
+  --radius-m: 6px;
+  --radius-l: 10px;
+  --font: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg-deep);
+  color: var(--text);
+  font: 1rem/1.6 var(--font);
+  /* Korean breaks between words, and a long token still breaks. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-text-size-adjust: 100%;
+}
+
+main { width: 100%; max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
+
+/* One gap between the parts of a page. Both rules weigh nothing, so the
+   second one wins by its place and any rule below can change a margin. */
+:where(h1, h2, p, ul, pre) { margin: 0; }
+:where(main, section, div) > * + * { margin-top: 16px; }
+
+h1 { font-size: 1.5rem; line-height: 1.3; color: var(--text-bright); }
+h2 { font-size: 1.125rem; line-height: 1.4; color: var(--text-bright); }
+a { color: var(--accent-strong); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--info-line); outline-offset: 2px; }
+
+section {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--bg-card);
+}
+
+/* A label holds its field. Without a track size the column grows to the
+   widest field and a narrow window scrolls sideways. */
+label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  color: var(--text-bright);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+input, select, textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-field);
+  border-radius: var(--radius-m);
+  background: var(--bg-field);
+  color: var(--text-bright);
+  font: inherit;
+  font-weight: 400;
+}
+textarea { min-height: 88px; resize: vertical; font-family: var(--mono); }
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid var(--line-field);
+  border-radius: var(--radius-m);
+  background: transparent;
+  color: var(--text-bright);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:hover { border-color: var(--text-bright); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* What a route or a login tool answered. An empty one stays in the page with
+   no height, so a screen reader hears it when it fills. */
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font: 0.8125rem/1.6 var(--mono);
+}
+pre:not(:empty) {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--bg-panel);
+}
+pre:empty { margin-top: 0; }

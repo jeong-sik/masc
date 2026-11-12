@@ -138,7 +138,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
           "b:choose browser  " ^ action ^ "m:main  J/K:page scroll  Tab/Shift-Tab:action  " ^ article_hint ^ "n/p:element  v:regions  s:text  y:copy  h:observations  Ctrl-O:image"
       | None when Option.is_some view.scene_guard ->
           "b:choose browser  m:main  J/K:page scroll  r:recheck followed destination  s:recheck text  h:observations  Ctrl-O:image"
-      | None -> Masc_tui_keys.footer_hints_browser_lane ^ "  s:scene  v:regions  h:observations")
+      | None ->
+          Masc_tui_keys.footer_hints_browser_lane ~lang:state.ui_language
+          ^ Masc_tui_types.ui_text state ~ko:"  s:장면  v:영역  h:관측"
+              ~en:"  s:scene  v:regions  h:observations")
     ~body:(fun ~budget c ->
       let status, style = match view.load with
         | Loading (_, Discover _) -> "Reading browser connections…", Theme.info ()

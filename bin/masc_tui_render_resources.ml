@@ -411,6 +411,7 @@ let render_resources (state : state) =
        ~hints:
          (match state.resource_save_prompt with
           | Some prompt -> Masc_tui_keys.footer_hints_resource_save
+              ~lang:state.ui_language
               ~pending:(resource_save_pending_for_prompt state prompt)
           | None -> Masc_tui_keys.footer_hints_resources
               ~lang:state.ui_language

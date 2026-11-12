@@ -38,9 +38,6 @@ type request = private
   ; schema : Yojson.Safe.t option
       (** Canonical request schema. Only an explicitly granted package output
           may use it; the package baseline remains mandatory. *)
-  ; digest : string
-      (** SHA-256 of the text of [request_to_json], taken once where
-          [request_of_json] makes the request. [digest] reads it. *)
   }
 
 val request_of_json : Yojson.Safe.t -> (request, string) result
@@ -53,8 +50,8 @@ val request_of_json : Yojson.Safe.t -> (request, string) result
 val request_to_json : request -> Yojson.Safe.t
 
 val digest : request -> string
-(** The request's [digest] field. The same request id with a different digest
-    is [Request_id_reused]. *)
+(** SHA-256 of the request's canonical JSON. The same request id with a
+    different digest is [Request_id_reused]. *)
 
 type checked
 (** An answer that matched the package's declared baseline schema. The [run]

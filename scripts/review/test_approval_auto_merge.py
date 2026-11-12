@@ -25,6 +25,21 @@ T1 = '2026-11-09T01:00:00Z'
 T2 = '2026-11-09T02:00:00Z'
 
 
+# A pull request names its repository by id and full name. The stack listing
+# names the same repository by id, name and url, and never by full name.
+HOME = {'id': 1, 'full_name': REPO}
+
+
+def listed(row):
+    """The entry of the stack listing for one pull request row."""
+    def side(ref):
+        return {'ref': ref['ref'], 'sha': ref['sha'],
+                'repo': {'id': ref['repo']['id'], 'name': 'r', 'url': 'https://api.github.test/r'}}
+    return {'number': row['number'], 'state': row['state'], 'draft': row['draft'],
+            'merged_at': T1 if row['merged'] else None, 'user': row['user'],
+            'base': side(row['base']), 'head': side(row['head'])}
+
+
 def sha(number):
     return f'{number:040x}'
 
@@ -62,9 +77,9 @@ class FakeGitHub:
                 'state': 'open' if state == 'open' else 'closed',
                 'draft': False, 'merged': state == 'merged', 'auto_merge': None,
                 'base': {'ref': 'main' if position == 1 else f'layer-{number - 1}',
-                         'sha': sha(number - 1), 'repo': {'full_name': REPO}},
+                         'sha': sha(number - 1), 'repo': HOME},
                 'head': {'ref': f'layer-{number}', 'sha': sha(number),
-                         'repo': {'full_name': REPO}},
+                         'repo': HOME},
                 'stack': None if len(states) == 1 else {
                     'id': 7, 'number': 900, 'base': {'ref': 'main'},
                     'position': position, 'size': len(states)}}
@@ -72,11 +87,7 @@ class FakeGitHub:
                                     review(number * 10 + 1, 3, head=sha(number))]
         if len(states) > 1:
             self.stack = {'id': 7, 'number': 900, 'base': {'ref': 'main'},
-                          'pull_requests': [
-                              {'number': number, 'state': row['state'],
-                               'merged_at': T1 if row['merged'] else None,
-                               'head': {'sha': row['head']['sha']}}
-                              for number, row in self.pulls.items()]}
+                          'pull_requests': [listed(row) for row in self.pulls.values()]}
 
     def output(self, command):
         if command[:2] != ['gh', 'api']:
@@ -203,6 +214,32 @@ class AutomaticMergeAdmission(unittest.TestCase):
             top = MERGE.top_pull(REPO, 101)
         self.assertEqual(top['number'], 101)
 
+    def test_an_admitted_stack_reads_only_its_top_pull_request(self):
+        with FakeGitHub(['merged', 'open', 'open', 'open']) as github:
+            selected, _, scope = MERGE.prepare(REPO, 104)
+        self.assertEqual((selected, scope['members']), (104, [101, 102, 103, 104]))
+        lower = {path: count for path, count in github.counts.items()
+                 if path in {PREFIX + f'/pulls/{number}' for number in (101, 102, 103)}}
+        self.assertEqual(lower, {})
+        # Each unmerged layer's reviews: once for evidence, once to see that
+        # they did not change during admission. A merged layer has none read.
+        self.assertEqual({number: github.counts.get(PREFIX + f'/pulls/{number}/reviews?per_page=100', 0)
+                          for number in (101, 102, 103, 104)}, {101: 0, 102: 2, 103: 2, 104: 2})
+
+    def test_a_lower_layer_is_judged_at_the_head_the_listing_gives(self):
+        with FakeGitHub(['open', 'open']) as github:
+            assert github.stack is not None
+            github.stack['pull_requests'][0]['head']['sha'] = sha(9001)
+            with self.assertRaisesRegex(MERGE.Hold, '#101 has 0/2 current-head account approvals'):
+                MERGE.prepare(REPO, 102)
+
+    def test_a_draft_lower_layer_in_the_listing_holds_the_stack(self):
+        with FakeGitHub(['open', 'open']) as github:
+            assert github.stack is not None
+            github.stack['pull_requests'][0]['draft'] = True
+            with self.assertRaisesRegex(MERGE.Hold, '#101 is not open and ready'):
+                MERGE.prepare(REPO, 102)
+
     def test_closed_unmerged_middle_and_top_block_the_whole_stack(self):
         for states in (['open', 'closed', 'open'], ['open', 'open', 'closed']):
             with self.subTest(states=states), FakeGitHub(states):
@@ -214,7 +251,7 @@ class AutomaticMergeAdmission(unittest.TestCase):
             def retarget(path, count):
                 if path == PREFIX + '/pulls/101' and count == 2:
                     github.pulls[101]['base'] = {
-                        'ref': 'release/v9.9.9', 'sha': sha(9), 'repo': {'full_name': REPO}}
+                        'ref': 'release/v9.9.9', 'sha': sha(9), 'repo': HOME}
             github.hook = retarget
             with self.assertRaisesRegex(MERGE.Hold, 'only scopes targeting main'):
                 MERGE.prepare(REPO, 101)
@@ -992,7 +1029,7 @@ class QuotaGetIntegration(unittest.TestCase):
                         github.reviews[101].append(review(9001, 4, 'CHANGES_REQUESTED', when=T2))
                 # The last snapshot is after both review reads: resuming just
                 # that GET would otherwise approve the old review history.
-                client, clock, counts = self.quota_client(github, PREFIX + '/pulls/101', 4, change)
+                client, clock, counts = self.quota_client(github, PREFIX + '/pulls/101', 3, change)
                 with patch.object(MERGE, 'CLIENT', client), self.assertRaises(ValueError):
                     MERGE.prepare(REPO, 101)
                 self.assertEqual(clock.sleeps, [30])
@@ -1006,7 +1043,7 @@ class QuotaGetIntegration(unittest.TestCase):
             def change():
                 github.pulls[101]['head']['sha'] = sha(9001)
                 github.reviews[101] = [review(9001, 2, head=sha(9001)), review(9002, 3, head=sha(9001))]
-            client, _, counts = self.quota_client(github, PREFIX + '/pulls/101', 4, change)
+            client, _, counts = self.quota_client(github, PREFIX + '/pulls/101', 3, change)
             with patch.object(MERGE, 'CLIENT', client):
                 selected, head, _ = MERGE.prepare(REPO, 101)
         self.assertEqual((selected, head), (101, sha(9001)))
@@ -1027,7 +1064,8 @@ class QuotaGetIntegration(unittest.TestCase):
 
     def test_native_snapshot_uses_the_same_get_transport(self):
         with FakeGitHub(['open', 'open']) as github:
-            client, clock, _ = self.quota_client(github, PREFIX + '/pulls/101', 2)
+            # The second read of the listing is the snapshot's own.
+            client, clock, _ = self.quota_client(github, PREFIX + '/stacks/900', 2)
             with patch.object(MERGE, 'CLIENT', client), \
                  patch.object(MERGE.subprocess, 'check_output') as legacy:
                 selected, _, scope = MERGE.prepare(REPO, 101)
@@ -1365,7 +1403,7 @@ class DeletingMergedHeadBranches(unittest.TestCase):
 
     def merged(self, **changes):
         row = {'number': 102, 'state': 'closed', 'merged': True,
-               'head': {'ref': 'feat/x#1', 'sha': sha(102), 'repo': {'full_name': REPO}}}
+               'head': {'ref': 'feat/x#1', 'sha': sha(102), 'repo': HOME}}
         row['head'].update(changes.pop('head', {}))
         return dict(row, **changes)
 

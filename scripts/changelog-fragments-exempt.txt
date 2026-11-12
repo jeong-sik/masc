@@ -32,3 +32,9 @@
 51438  # CI script only: approval-auto-merge polls a pending stack merge through the open pull list instead of one read per layer; no user-facing behavior
 51473  # CI workflow only: approval-merge-request runs are folded per PR with concurrency so duplicate review events no longer exhaust the installation rate limit; no user-facing behavior
 51562  # CI script only: the review GitHub reader retries a quota 403 whose reset second has just elapsed, a few times after its own wait; no user-facing behavior
+51338  # stack layer: pure watch logic for until_github_checks that nothing calls yet; the user-visible change is carried by fragment 51340.md
+51339  # stack layer: server reader and loop for until_github_checks with no schedule able to use them yet; the user-visible change is carried by fragment 51340.md
+51466  # docs only (one RFC and its evidence files under docs/); no user-facing behavior
+51502  # behavior-preserving refactor: the MCP admission check moves into one stateless function with the same check order and error text; no user-facing behavior
+51514  # comments only (three files): no code line changes; no user-facing behavior
+51671  # test only (one file): bounds a Librarian gate confirmation check; no user-facing behavior

@@ -2,6 +2,979 @@
 
 ## [Unreleased]
 
+
+## [0.72.0] - 2026-11-12
+
+### 요약
+
+1. 이번 0.72.0 은 0.71.0 이후 쌓인 조각 361개(PR 번호 기준)를 담았습니다. 사용자 대상 항목은 298건(Added 24·Changed 151·Fixed 103·Performance 20)이고 Documentation 42건, Internal 61건이 따로 있습니다. Removed 항목은 없습니다.
+2. Keeper 가 기다리는 방식이 늘었습니다: 새 `keeper_receipt_wait` 도구로 채팅 턴을 끝내고 백그라운드 `Execute` 의 영수증을 기다리며(#51429, 저장소 쪽은 #51424), `masc_schedule_create`·`masc_schedule_update` 는 `until_github_checks` 커밋 URL 로 커밋의 체크가 모두 끝나면 깨웁니다(#51340).
+3. Lane Add-on 호스트 사이클이 한 설치의 exact 요청을 선언한 `max_exact_in_flight`(기본 1) 만큼 나란히 실행합니다(#51376, #51377).
+4. 관측: Tools 화면과 `/api/v1/tool-metrics/series` 가 호출 결과 바이트를 싣고(#51380), 품질 패널의 시간별 추세에도 막대가 생겼으며(#51354), `GET /api/v1/diagnostics/memprof` 에 네 번째 표 `starting_domain_allocated` 가 더해졌습니다(#51370). 거절된 자격증명은 `/api/v1/runtime/resolved` 의 `credential_refused_at` 과 TUI 런타임 목록에 나옵니다(#51457, #51458).
+5. 저장 공간: `GET /api/v1/dashboard/tools` 가 `keeper_cleanup` 을 싣고(#51288), TUI Tools 화면에 호스트 디스크와 정리 결과를 읽는 여섯 번째 판 `저장 공간` 이 생겼습니다(#51306).
+6. 다계정: Admin 이 계정 서버를 통해 초대를 발급·철회합니다(#51604).
+7. 성능: `Fs_compat` 의 막는 호출이 소유(main) 도메인에서 `Systhread_host` 도메인으로 옮겨 가 메인 스케줄러와 락을 다투지 않고(#51282), 256개를 넘는 이름의 디렉터리 나열이 모든 도메인을 멈추던 마이너 GC 를 일으키지 않습니다(#51707).
+8. 업그레이드 주의는 아래 Upgrade notes 를 읽으세요: 이전 빌드로 되돌리면 새 규칙의 거절을 읽지 못합니다(#51618). Fresh state required 두 가지도 확인하세요: 의미 실행 기록은 `masc.keeper_semantic_execution.v3` 만 읽고(#51412), Keeper 도구 outbox 영수증은 새 `arguments` 형식만 읽습니다(#51429).
+9. Known issues: 전체 `@runtest` 에서 빨강으로 기재된 시험 3건이 아래에 있습니다. 둘은 삭제 묶음 대기 중입니다.
+10. 이번 컷의 노트 정리: 조각이 없던 병합 PR 중 사용자 영향이 있는 #51305·#51306 은 조각을 백필했고, 사용자 대면 변경이 없는 병합 6건(#51338·#51339·#51466·#51502·#51514·#51671)은 exempt 목록에 사유와 함께 올렸습니다. #51338·#51339 는 `until_github_checks` 스택의 층이라 사용자 대면 서술은 조각 51340.md 가 맡습니다.
+
+
+### Upgrade notes
+
+- Rolling back to a build without this change: an older build cannot read a refusal written by the new rule. From reading the older code (it was not run), such a submission repeats its retry request on every maintenance pulse without calling a provider, or is reported as a corrupt original when a successor attempt already exists. Decide those submissions by hand, or roll forward (#51618).
+
+### Fresh state required
+
+- Semantic execution records in formats other than `masc.keeper_semantic_execution.v3` are no longer read or converted. For fresh state in an existing workspace, stop every writer and preserve the old workspace and evidence before removing `<base-path>/.masc/keepers/<keeper>/chat-operations.sqlite3` (`Common.chat_operation_store_basename`) and any `chat-operations.sqlite3-wal`, `chat-operations.sqlite3-shm` and `chat-operations.sqlite3-journal` beside it. This discards that Keeper's queued, running and settled operations, their input history and the execution records. A build that finds a `v2` record refuses it at startup and returns no Owner handle. See [the stored-state guide](../docs/guides/DURABLE-STORE-HARD-CUT.md#keeper-chat-operation-journals); this change performs no installed-state removal (#51412).
+- Receipts in a Keeper's tool outbox are read only in the new `arguments` format: `{"known": <call arguments>}` or `{"unknown": true}`. A receipt written before this change, whose `arguments` is the bare call arguments, is no longer read or converted, and a Keeper whose outbox holds one fails to load its receipts with `invalid tool outbox arguments`. For fresh state in an existing workspace, stop every writer and preserve the old workspace and evidence before removing the `*.json` receipt files in `<base-path>/.masc/keepers/<keeper>/official-client-runtime/undelivered-tools/` (`Keeper_official_client_paths.outbox_dir`). This discards that Keeper's receipts that no run has read yet; the lease files in the sibling `tool-result-producer-leases` directory stay. This change performs no installed-state removal (#51429).
+
+### Known issues
+
+전체 `@runtest` 는 컷 시점에 아래 3건이 빨강으로 기재됩니다(ask2d364882 c1 게이트 문면). 이 노트는 원인을 단정하지 않습니다. 근거: `Test` 워크플로 workflow_dispatch 전체 실행 43180449953(head 4ae17976, 2026-11-12T08:07Z) — 이 실행에서 `test_tui_task_event` 는 통과했습니다.
+
+- `test_tui_observer_epoch` — `ObserverEpochTest.test_same_path_epoch_change_retires_old_reads_and_revalidates` (1건)
+- `test_waiting_event` — `WaitingEventTest.test_changes_while_reading_coalesce_without_cadence` (1건)
+- `test_tui_workspace_dataset_signal` — 시나리오 1건, `a repositories push did not read the list` (스택 착지 뒤 처음 관측)
+
+앞의 둘은 삭제 묶음 대기 중입니다(운영자 정책): 묶음이 착지하면 다음 창 노트에서 사라집니다. 컷 이후 전체 스위트 재실행으로 닫혔는지는 이 노트가 확인하지 않았습니다.
+
+그 밖의 알려진 문제:
+
+- A config whose `account_mode` is a value MASC does not know is read by
+  `masc doctor` and the setup journey as the config of a single user, while
+  a boot refuses it (#51320, #51324).
+
+### Added
+
+- Show separate current bindings and historical per-slot execution observations, including unknown and undated results. (#51239)
+- `GET /api/v1/dashboard/tools` carries `keeper_cleanup`: the latest storage
+  cleanup pass with every Owner counted once, and for each Keeper and step
+  the latest attempt as `reclaimed`, `deferred`, `not_running` or `failed`
+  beside the time that step last ran to its end. The value lives in server
+  memory; see "What a pass leaves" in
+  `docs/guides/KEEPER-VM-BUILD-CLEANUP.md` (#51288, #51271).
+- The TUI Tools surface has a sixth pane, `저장 공간` (`p` moves between panes). It draws the host disk as the server measured it, how long the server has been up, the latest storage cleanup pass and each Keeper's latest attempt. A Keeper whose declaration could not be read and a failed attempt come first, then an attempt that ran to its end and left entries behind; a summary or row this build cannot read is drawn as its reason. The pane only reads: it reloads the envelope when opened and on `r`, and reclaiming stays the catalog's two presses. See [the cleanup guide](../docs/guides/KEEPER-VM-BUILD-CLEANUP.md) (#51306).
+- `masc_schedule_create` and `masc_schedule_update` take `until_github_checks`, a commit URL. The schedule becomes due when every returned run of a push, pull_request or workflow_run event across all pages has completed, and the wake message lists each run with its conclusion. Checks outside GitHub Actions and downstream runs not registered yet are not covered. 가이드 없음(문서 없음) (#51340)
+- The host cycle logs one INFO line when a Lane Add-on exact attempt ends: installation id, output, result, elapsed milliseconds and how many exact attempts of that cycle were running when it started. The line carries no request body (#51352).
+- The hourly trend of the tool quality panel draws one bar per hour of the bytes its tool results returned, under the success rate chart, and `hourly_trend` in `GET /api/v1/dashboard/tool-quality` carries `result_bytes` per hour. 가이드 없음(문서 없음) (#51354)
+- `GET /api/v1/diagnostics/memprof` returns a fourth table,
+  `starting_domain_allocated`, with `starting_domain_allocated_samples` and
+  `starting_domain_allocated_bytes`: of the sampled allocations, those made
+  on the domain that started the profile, which is the server's main domain.
+  It names the call stacks that allocate on the main domain itself, which
+  the all-domain tables and a `sample` of the process could not tell apart
+  (#51370).
+- A Lane Add-on installation declaration reads `max_exact_in_flight`, the number of exact requests of that installation the host runs side by side; it is an integer of 1 or more, defaults to 1, and is outside the declaration revision (#51376).
+- The host cycle runs the exact requests of one Lane Add-on installation side by side, up to the `max_exact_in_flight` the installation declares; an installation that declares nothing keeps running them one at a time (#51377).
+- The hourly and daily tool-call series on the Tools screen and `/api/v1/tool-metrics/series` carry the result bytes of the calls: a total, the largest result, and how many calls have a size. A call stored before sizes were kept counts as a call and adds no bytes. The sizes live in a new table `tool_metric_result_sizes` that the store creates on open; no stored row is changed (#51380). 가이드 없음(문서 없음)
+- A chat task can end its turn to wait for a background request's receipt in the Keeper chat operation store and Owner. The semantic execution gains `Await_receipt` and `Resolve_receipt`, `defer_direct_checkpoint` takes `receipt_wait`, and a new `Receipt_arrived` Owner command resolves the entry for a request. A task with a pending entry is not claimable until its receipt arrives. Nothing ends a turn this way yet, so Keeper behavior is unchanged. 가이드 없음(문서 없음) (#51424).
+- A Keeper can end a chat turn to wait for the receipt of a background `Execute` run with the new `keeper_receipt_wait` tool. Several calls in one turn wait for all of their runs, and each request a call accepted is recorded with the turn. The next run of the same conversation starts with those receipts once all of them have arrived, and no other run reads or deletes them while the wait is pending. A request whose run ended without leaving a receipt is settled with one `Unfinished` receipt and a `Source_lost` resolution; the receipt echoes the arguments its request record kept, or marks them `Unknown` when the record holds none. The tool is offered only to runs that serve a chat execution. A request that another conversation of the Keeper already waits for is refused when the tool is called, with a message the model reads, and the owner's record stays as it was. 가이드 없음(문서 없음) (#51429).
+- The runtime list reports a refused credential: a runtime whose provider
+  answered that its credential is not valid (HTTP 401, an official client that
+  is not logged in) carries `credential_refused_at` in
+  `/api/v1/runtime/resolved` until a call on the same credential is answered.
+  It orders and holds nothing (#51457).
+- The TUI runtime list and runtime detail show a refused credential with the
+  time it was seen, instead of "no refusal" (#51458).
+- The home page of a multi-account server shows an Admin a "Let someone join" form that registers an allowlist identity (a GitHub user id or a Google sub) and removes an entry by its registration id, through the existing allowlist routes. The form is hidden unless the session is an Admin's. The page cannot list existing entries, because no route reads the allowlist. 가이드 없음(문서 없음) (#51484)
+- The operator task list now carries every completion that was submitted and has no verdict yet, oldest submission first, in the TUI agenda and the dashboard attention section. It is read from the backlog and does not tell a running review from a stopped one. 가이드 없음(문서 없음) (#51525).
+- `/health?full=1` reports `request_not_delivered` in `provider_connection_cache.closed_total` and `closed_after_reuse`. 가이드 없음(문서 없음) (#51529).
+- `masc_keeper_delegate_status_many` reads up to 10 Keeper chat operations in one call. It takes a list of `{target, operation_id}` pairs, the targets may differ, and returns for each pair in order either `data`, the same result `masc_keeper_delegate_status` returns, or `error`. A pair that cannot be read does not stop the others; a malformed pair rejects the call and names its index (#51546). 가이드 없음(문서 없음)
+- Each Keeper in the waiting inventory carries `state_sources`: the sources
+  that put it in its state (the deferring ones for `deferred`, all of them
+  for `waiting`, none for `idle` and `busy`) (#51590).
+- An Admin of a multi-account installation issues and revokes
+  invitations through the account server:
+  `POST /api/v1/auth/invites` with `{"role":"member"}` or
+  `{"role":"admin"}` answers the id, the expiry and the link
+  `/accounts/invite#<token>`, and `DELETE /api/v1/auth/invites/<id>`
+  revokes an open invitation. The token is in that answer alone. See
+  `docs/guides/account-server-invitations.md` (#51604).
+- The dashboard workspace builds a second entry, the console of a signed-in person on the account server, into `assets/dashboard/accounts`: `pnpm run build` runs both builds, and a release bundle carries its three files. It is a frame so far: who is signed in, a sign-out button, and what the page says while it reads the session or cannot. No server answers it yet (#51635).
+- A person's Keeper on a Claude Code Runtime goes on in its
+  conversation: a later turn resumes the session of the last answer,
+  and the server records the message and the answer of each turn
+  under the person's own directory. The answer of
+  `POST /api/v1/auth/keepers/turn` and of `masc_my_keeper_turn` gains
+  `conversation_id` and `continued`. A Keeper moved to a Runtime of
+  another subscription is refused its next turn. The person starts a
+  new conversation of a Keeper with
+  `POST /api/v1/auth/keepers/conversation` or
+  `masc_my_keeper_conversation_new`, which is the way on from a
+  conversation of another subscription or one whose session Claude
+  Code no longer has. See "Conversations" in
+  `docs/guides/account-server-mcp.md` (#51636).
+- `masc_schedule_create` and `masc_schedule_update` take `delivery` for a Keeper wake: `queue` (the default) puts a new message in the Keeper's queue, `receipt` writes a tool-result receipt whose call id is the schedule id and queues no wake message. A receipt delivery takes no `urgency` and needs a one-shot schedule. 가이드 없음(문서 없음) (#51663).
+- `keeper_receipt_wait` takes `schedule_id` as well as `request_id`. A Keeper that created a schedule with `delivery` `receipt` waits for that schedule's receipt in the same turn, and a wait whose schedule ended without a receipt is settled with an `unfinished` receipt. 가이드 없음(문서 없음) (#51673).
+
+### Changed
+
+- Deliver shared dashboard observations over authenticated SSE with scoped admission and connection recovery (#50832).
+- A multi-account process no longer calls the API providers of the runtime
+  table with the key their operator declared: Keeper turns, runtime
+  verification, the Agent Core runner, lane sampling, the dashboard probe,
+  usage reads, vision and exact-output targets are refused as an account of
+  the host, and a reader of the table sees the declaration without the key.
+  `masc runtime-token-sample` publishes its host-tool access before it calls
+  a provider (#50875).
+- A multi-account process no longer sends with the keys of the host outside
+  the runtime table: the setup routes refuse to read the model list or the
+  serving window of an HTTP connection with 403, `masc_file_*` fails before
+  it reads `DEEPSEEK_API_KEY`, and exact-output targets are not built from a
+  replacement catalog that `AGENT_CORE_MODEL_CATALOG` names. A single-user
+  process is unchanged (#50884).
+- A multi-account process no longer sends with the keys of the TypeSafe AI
+  lane: Board attention does not ask Jev, an absorb gate that is switched on
+  defers its absorptions, and the health section, the memory recall reading
+  and its TUI pane name the reason `host_account_not_shared`. A single-user
+  process is unchanged. Continuity measurements judge the selected workspace
+  before provider or Jev calls, using `--base-path` or the normal workspace
+  resolver; an isolated comparison store does not bypass that judgment (#50895).
+- A multi-account process no longer sends the keys of the host from three MASC
+  tools: web search asks only a provider without a key (SearXNG) and otherwise
+  ends as a policy rejection, and the cloud backend of SystemOne and a voice
+  endpoint that names a key are refused before the key is read. A single-user
+  process keeps its behaviour, except that a voice STT call with no key now
+  reports the missing key before the spent budget (#50925).
+- Replace IDE and pending Keeper chat status timers with event-driven reads while retaining failed-read recovery (#50928).
+- Expose typed write-attempt notifications for workspace and process observation read models (#50929).
+- Refresh Play views from authenticated SSE changes while preserving explicit machine-control inputs (#50932).
+- Read structured dashboard logs from the native SSE log stream and reset invalid ring cursors (#50933).
+- Notify observers after artifact publication/check and verification-request writes, preserving original write results (#50934).
+- Connect metric and attribution writes to observers and stream tool-metric queries with exact window deadlines (#50935).
+- Fan out scoped observation changes from tool-call, approval-audit and telemetry-gap writes (#50936).
+- Share mounted log and tool-series SSE readers with cancellation, idle deadlines and failure-only reconnects (#50937).
+- Refresh full-health observations on source invalidation, explicit read demand and owed failures (#50939).
+- Build Execution observations from current workspace inputs and retain their actual policy transition deadlines (#50940).
+- Observe verification/spec filesystem inputs through native file-change notifications and scoped refresh workers (#50942).
+- Expose the next actual telemetry source-freshness deadline from the same summary read (#50944).
+- Publish immutable workspace-owned Shell, Tools and Telemetry components instead of periodically collecting shared snapshots (#50945).
+- Drive Shell, Tools and Telemetry workers from captured-scope source changes and fence retired publishers (#50949).
+- Serve model metrics from one direct aggregate reader shared by REST and mounted query SSE streams (#50950).
+- Observe mounted model-metrics queries through shared SSE while retaining partial rows and original failures (#50951).
+- Refresh transport-health observations from listener, session and connection lifecycle changes (#50952).
+- Start scope-owned dashboard source workers at bootstrap and publish Shell completions through the canonical owner (#50955).
+- Build current Mission observations with their source-derived deadlines instead of nested projection TTLs (#50957).
+- Refresh attention observations when judgment ledgers or relevant tool-host log entries change (#50958).
+- Notify telemetry observers from original Goal, Keeper, tool-usage and trajectory write boundaries (#50959).
+- Publish captured-scope Mission source observations and reuse terminal canonical answers for default HTTP reads (#50963).
+- An installation whose accounts were turned off (the last mode event of the
+  authorization log is Off) boots a single user instead of stopping. The
+  records of the accounts stay read-only: no turn runs for a Keeper or on a
+  Runtime of the log, and no client starts on a home under the runtime roots
+  of the persons. masc auth bootstrap and masc auth invite write nothing
+  there (#50966).
+- Share dashboard credential and workspace read ownership so retired observations cannot admit late results (#50978).
+- Apply scoped Mission publications directly and preserve owned initial reads and failure recovery without status polling (#50979).
+- masc auth off turns the accounts of an activated installation off while no
+  server runs: it writes an Off mode event to the authorization log and the
+  external store, and only when the store matches the log. Once account_mode
+  is out of config.json, a server boots a single user that keeps the records
+  of the accounts read-only. masc auth bootstrap no longer says that no
+  command undoes the activation (#50985).
+- Drive Operator Digest computation from original source changes, semantic deadlines and retained read failures (#51003).
+- Carry readable partial projection rows together with their original read failure and semantic deadline (#51011).
+- Join fleet composite requests across mounted panels while preserving each lease and retiring stale owners (#51066).
+- Give default Operator Snapshot publications a captured-scope owner with ordered attempts and mutation invalidation (#51070).
+- A server now boots an installation activated for multi-account use (masc
+  auth bootstrap) instead of stopping: it runs the account server, which
+  serves its own route table. GET /health answers with the server name,
+  the release version and the account mode. A route
+  that reads the credentials of a single user is a 404 on that
+  installation, and the owner state and the Keepers of a single user are
+  not started, so an installation that ran Keepers as a single user stops
+  running them once it is activated. An
+  installation whose external store does not confirm the authorization log
+  still stops at boot, and the stdio runtime refuses an activated
+  installation (#51071).
+- A decision of a multi-account installation now rests on the
+  authorization zone only while the zone can be trusted. When the
+  authorization log or the external store is stopped, the two files
+  disagree, or the store holds no answer, a session cookie, a PAT and a
+  Service credential do not act, the routes of a signed-in person and
+  the sign-out answer a 503 with one fixed sentence, and no client
+  starts on a person's account or for a turn of their Keeper. A person
+  whose Disable, Delete or Admin revocation did not reach the log is
+  refused with their sessions and PATs, as their sign-in already was.
+  Authz_zone.read gives the trusted snapshot; Authz_zone.revocation and
+  the retry of the Keeper turn decision are removed (#51084).
+- Consume Operator Snapshot HTTP and SSE under the original workspace, actor query and hard-mutation generation (#51089).
+- Notify observers from Board attention candidate and partition write attempts without replacing writer outcomes (#51090).
+- Drive default Operator Snapshots from source changes and semantic deadlines using one immutable HTTP/SSE publication (#51091).
+- The account server of a multi-account installation reads the
+  authorization zone again after it opens it, and stops the boot when that
+  zone cannot be trusted or its mode is not Multi_account. It does not
+  compare the records with the ones the boot judged. It answers GET
+  /health/live and GET /health/ready beside GET /health: ready is a 200
+  while a decision can rest on the zone and a 503 otherwise, and neither
+  answer names the host or the process. The 503
+  needs a route that writes, which this server does not have yet. An
+  installation whose external store is gone is not opened, and nothing is
+  made where the store was. The table of the account server is a copy made
+  at its check, so a route that is registered afterwards is not in it.
+  masc auth preview names a port that is in use instead of ending with an
+  exception. A value of MASC_USE_H2 outside its vocabulary and a port that
+  does not bind stop the boot with a reason before a connection is
+  accepted, and the port is recorded for the CLI of the workspace once the
+  server starts. masc restart and the setup commands do not recognise the
+  account server yet (#51112).
+- Dashboard static assets no longer take room in the HTTP/2 response ledger.
+  The server keeps each asset and its zstd and gzip forms after the first
+  request that asks for them, compresses once for each content and encoding
+  instead of once a request, and every response reads those bytes
+  (`Http_reqd.respond_with_shared`, RFC-0518 D5). A client that opens many
+  bundle streams and stops reading no longer makes other connections' large
+  responses answer 503 (#51223, #50294).
+- `masc start` judges the account mode of the base path before the startup
+  work of a single user. A multi-account installation and a refused boot no
+  longer run the four startup passes of a single user: three delete files of
+  its Keeper state (retained checkpoints, checkpoint objects, the settled
+  archive) and one counts its original request bodies (#51276).
+- A boot that the judgment refuses writes one `[FATAL]` line and exits 1
+  without entering the server loop. An auth setting of the environment that
+  does not parse stops the boot at the same place. A refused boot no longer
+  removes the temporary HOMEs that dead Antigravity panelists left; the next
+  server that starts removes them (#51276).
+- `masc restart` replaces the account server of a multi-account
+  installation. Before, it refused a running account server, and it never
+  ended after starting one. The account server now announces the port it
+  serves to the host: it holds a kernel lock on one byte of an empty file
+  beside its BasePath lease, and the position of the byte is the port. The
+  record ends with its holder, so no stale number stays on disk. `masc
+  restart` asks the kernel who holds the byte of the port, stops that
+  process only when it is also the kernel owner of the lease, and takes the
+  replacement for ready once the replacement holds the byte and
+  `/health/ready` answers 200. A lock of another process on another byte of
+  the file changes none of these answers (#51286).
+- The boot of an account server stops when it cannot announce its port, for
+  example when another process holds a lock on that byte. No command could
+  replace a server whose port the host cannot read (#51286).
+- Stopping an account server rests on the authority of the host, the
+  effective UID that owns the private lease directory, as `masc auth` does.
+  An account server has no admin credential that a command line could
+  present. A single-user server is stopped and replaced as before (#51286).
+- `masc restart` reads the owner of the BasePath lease before it asks the
+  port, so that the answer of the port does not choose how a server is
+  stopped. A restart that ends in a refusal can therefore leave an empty
+  lease file behind, the one `masc start` creates (#51286).
+- An account server started by a binary from before this change announces
+  nothing. `masc restart` refuses it with the sentence it used before; stop
+  that server with a signal once (#51286).
+- The storage cleanup pass runs with both switches off and counts those
+  Keepers as switched off. Its log line gains `no_step=` and `scheduled=`,
+  and `builds=` and `workspaces=` now count the Keepers each step was chosen
+  for. Docker Keepers and microVM Keepers on a backend other than Apple
+  Container are counted as `no_step`. A guest `_build` attempt that ran its
+  payload logs one line even when it cleaned nothing, and a maintenance
+  command the Owner refused is a warning (#51288).
+- The first storage cleanup pass runs one maintenance pulse after the
+  server starts (one minute by default) instead of one cleanup interval
+  later. A server restarted within the interval still passes once, and
+  `keeper_cleanup` is filled about a minute after a start (#51291, #51271).
+- The Features run list writes a run's start in the operator's time zone
+  with only as much date as the reader still needs: the clock today,
+  month and day inside this year, the date alone in another year. A run
+  from another year used to read like one from this year. The status is a
+  mark and a word in the UI language instead of the wire spelling folded
+  into eleven cells, the column names follow the UI language, and the
+  subject column is as wide as the widest subject on the page where the
+  frame has the cells, so a keeper name is no longer cut in the middle
+  beside empty space (#51310).
+- `?` opens the help sheet on the keys of the screen it was opened from.
+  The sheet used to continue past them into every other screen, the global
+  keys and the slash commands, more than six hundred rows with nothing
+  marking where one screen's keys ended. `?` again lists everything and a
+  third `?` closes; a `/` query searches every section from the start. On
+  a wide terminal the one section is set in two columns (#51316).
+- The Verdicts sidebar labels a row with the notation the Features run
+  list uses for a start: the clock alone today, month and day first inside
+  this year, the date alone in another year. Rows recorded in the same
+  second keep their `#1`, `#2` after the minute (#51319).
+- `masc doctor`, `masc setup` and the bare `masc` in a terminal say that a
+  workspace whose `config.json` asks for `Multi_account` runs the account
+  server or stops. Before, they read it as the workspace of a single user:
+  the doctor listed the checks of imp, the journey offered Quick setup, and
+  `masc setup --no-tui` initialized the workspace before it stopped. `masc
+  doctor --json` answers `opening: "account_installation"` with two checks,
+  the workspace and `multi_account_request`. The journey prints the
+  workspace, that check and whether an account server announces itself, and
+  ends without asking, initializing, starting or stopping anything. It reads
+  the doctor of a directory typed on its workspace screen, of the default it
+  proposes on a first run and of a saved sandbox step before it offers,
+  checks or initializes anything there (#51324).
+- `masc setup-server` answers `status: "account_server"` when the process
+  that holds the workspace announces the port of an account server, with
+  `server_port`, the announced port, `server_answers`, whether that port
+  answered `/health` with a 200 within 10 seconds, and `server_version` when
+  the answer names one. Before, it answered `unknown_server` and suggested
+  another port. It reads the holder of the workspace whatever the config
+  asks, and names the announced port also when it was asked about another
+  one (#51324).
+- `masc setup-server` ends with exit 1 and a `masc.setup_server_unread.v1`
+  document when the config asks for accounts and the holder of the workspace
+  cannot be read. Before, it answered `free`. Where the config asks for no
+  accounts the port answers as before (#51324).
+- `masc setup-stop-previous-owner` reads the holder of the workspace before
+  it signs a local operator in. It refuses a workspace whose lease no
+  process holds, and one that its account server holds, for which it names
+  `masc restart`. Before, both went on to the health answer of the port
+  (#51324).
+- The keeper-librarian prompt returns to the wording its pinned comparison measured. The three passages on retention order that 0.71.0 carried without a measurement are out, and wait for one in the next prompt revision (#51325)
+- In a Features run's detail, `[` and `]` step to the run before or after
+  the open one, as they do on every other detail. The run list reads its
+  older page with `>` instead of `]`, the key Schedules and Verification
+  use for the next server page. The footers of the Features overview, the
+  run list and a run's detail follow the UI language (#51328).
+- A title that says how much of a long list is on screen groups the count's
+  thousands: `(50 of 8,347)` over the verdict queue and `(300 of 774,273)`
+  over the system log, where it read `(50 of 8347)`. The same holds for the
+  Board list title, the sidebar list titles, the verdict history range, a
+  Keeper's request page and the Features run list (#51335).
+- The footers of Schedules, Task Review and Task Verdicts follow the UI
+  language: each of their 37 keys has a Korean name, and the footers read
+  the setting (#51336).
+- The footers of Acting, Keeper logs, Keeper calls, Clients, Fusion,
+  Changes, Connectors, Repositories and System logs follow the UI language:
+  their 60 keys have a Korean name, and the six footers that did not read
+  the setting now do (#51345).
+- The Tools and Resources footers follow the UI language: their 43 keys
+  have a Korean name, and the Resources footer reads the setting (#51348).
+- TUI: the Code screen's footer follows the language setting. Its 26 keys, the hover reading, and the notes and history overlays now carry Korean names; the English row is unchanged. Git and MASC terms (`diff`, `blame`, `worktree`, `Task`) keep their names. (#51353)
+- Align Usage account cards on shared columns and clarify summary, gauge, and section hierarchy (#51361).
+- TUI: the Keeper list, detail, chat and runtime picker footers follow the language setting. Their 67 keys, including the shared Keeper actions, now carry Korean names; the English rows are unchanged. (#51368)
+- A single-user server runs a model turn with the native tools of its CLI
+  only while the workspace has no `.masc/accounts`. That directory keeps the
+  runtime roots of persons, with their logins, after `masc auth off` or
+  after the authorization log was removed, and a CLI runs as the user of the
+  server process. While it is there, also when it is empty, a turn whose
+  native posture is `read` or `full` is refused before its client starts,
+  and a Keeper with `keeper.tools.native = "none"` runs as before. Codex and
+  Muse have no posture `none`, so their model turns wait until the operator
+  removes the directory. It is read at each start, so no restart is needed
+  after that. A workspace that never had accounts has no such directory and
+  runs as before (#51371).
+- A Keeper turn that is refused for its native posture ends before it
+  claims its session, as a config error of `keeper.tools.native`, and the
+  effective tool surface of the Keeper names the reason. Before, a refusal
+  at the start of the client was recorded as a protocol failure and the
+  session went to recovery (#51371).
+- Model turns of Antigravity and panel calls of Mistral Vibe pass the same
+  decision on native tools as Claude Code, Codex and Muse. A Vibe agent is
+  judged as the posture `full`, because its own configuration chooses its
+  tools (#51371).
+- A TLS session's ciphertext goes to the socket with a write. tls-eio is pinned at 2.1.5 plus one commit (`jeong-sik/ocaml-tls` `2c0f8615865a`) that writes it instead of copying it from a string source 4096 bytes a write, and the connection socket no longer keeps a 256 KiB copy buffer per TLS connection. On the bench the pinned build spent 32~53% less server CPU per MB than the release, and within -9~+14% of the copy buffer it replaces (one run on a loaded machine). A local switch needs `bash scripts/opam-pin-external-deps.sh --install` once (#51374).
+- A write to a connection keeps its turn until every piece of it is with the kernel, so two writers' bytes never land inside each other when a write is longer than a piece (#51374).
+- TUI: the top row, drawn above every screen and overlay, ends with the connection (one mark and one word) and the clock with its zone as a distance from UTC (`● connected  22:04 UTC+9`). A refresh in flight no longer changes that row, and the clock gives way before any screen name does. (#51383)
+- TUI: title rows no longer repeat the connection (`HTTP [connected]`). They carry only what the top row's word does not: lost events, and reads under way or failed. (#51384)
+- TUI: the Features screen, a lane's runs and a run's detail draw one "here" row: the screen, each step into it, and the position at the right-hand end (`Features & plugins › Librarian › runs   3/50 · of 8,347`). The product name is no longer part of a title. (#51385)
+- TUI: the Work screens lead with the screen's own name instead of `MASC Work`, and the schedules title is `Keepers › schedules` without a clock that redrew the row every second. (#51386)
+- TUI: both Keeper list views draw the "here" row with the selected row's position (`7/29`). (#51387)
+- The account server of a multi-account installation serves the login
+  routes: the start and the callback of a Google and of a GitHub login, the
+  logout, the session, the allowlist and the personal access tokens. Before,
+  it answered the three health probes and only `masc auth preview` served
+  a login (#51393).
+- The account server builds its login clients from the `google` and the
+  `github` member of the `config.json` that the boot judged. The secret of a
+  client is read from the environment variable its member names. A member
+  whose variable is not set, or whose `redirect_uri` is no `https` URL,
+  stops the boot, and the log names the variable or the rule. A provider
+  with no member answers 404 on its login; with neither member the server
+  boots, warns in its log, and nobody logs in (#51393).
+- TUI: the Features children (Resources, Channels, Clients, Tools & Skills, the runtime parent) draw the here row, which no longer changes while reads merely come and go. (#51398)
+- TUI: title rows no longer carry a per-second clock; the top row has the wall clock and its zone. (#51399)
+- TUI: the System panes open on the top-row screen, and name only the steps taken past a pane ("System › voice › setup"). (#51401)
+- TUI: Fusion, Changes and Memory draw the here row ("Keepers › memory › <keeper>"), and the here row separates its readings with " · ". (#51402)
+- TUI: Workspace, its activity, Git Changes, the diff readings and Code draw the here row; the Git Changes count is the cursor's position. (#51403)
+- TUI: Operations, Runtime and a log's detail draw the here row. (#51404)
+- TUI: Activity and Logs open on the top-row screen, with the log source as a reading. (#51405)
+- TUI: the Board draws the here row, and its list count is the cursor's position ("3/50 · of 198"). (#51406)
+- TUI: Requests draws the here row and names its count ("3 pending"). (#51407)
+- TUI: the Runtime reading, its picker and the runtime.toml account form draw their footers in the configured language. (#51408)
+- The login transaction cookie (`__Host-masc_oidc_txn`) carries the state
+  of its login, sealed under a key of the server process, in place of the
+  id of an entry in the server. A login that was started before a restart
+  of the server starts again; sessions are kept. A callback with a wrong
+  `state` is still a 401 whose answer clears the cookie. A `return_to` too
+  long for the cookie is a 400 (#51411).
+- A Keeper's tool outbox read now names its viewer. A receipt that a waiting chat execution owns is read only by a run serving that execution; every other run, including patrol runs, leaves it on disk. The semantic execution record gains `receipt_obligations` for this, and nothing writes an entry yet, so every run still reads every receipt (#51412).
+- Transport health is recomputed when listener state, membership counts or liveness change, not for each accepted connection, authentication reject or rate-limit response; those counts appear with the next change or read (#51417).
+- Lane add-on store, ledger and lease work now runs on a thread of the
+  system-thread host domain instead of a thread of the calling domain. The
+  work parses and hashes JSON, and on the main domain its thread held the
+  domain lock: the main thread waited for it, up to a 50 ms thread tick at a
+  time, whenever it came back from a system call (#51422).
+- The account server of a multi-account installation serves the pages and
+  the routes of a person: the home page, the page of an invitation link,
+  who-am-I, the person's subscriptions and their connection, and the
+  person's Keepers with one turn of a Keeper on the Runtime its owner gave
+  it. Before, only `masc auth preview` served them. A request with no
+  credential gets a 401 from each of these routes (#51423).
+- The home page and the invitation page say when the server has no GitHub
+  login client, and their sign-in button cannot be pressed. Before, the
+  button led to a 404. The pages start no Google login yet (#51423).
+- `masc auth bootstrap` and the help of `masc auth invite` no longer say
+  that the account server serves no login route (#51423).
+- The remaining direct system-thread calls of the lane add-on (exact requests
+  and proofs, sampling, source capture, records, the native lease) run on the
+  system-thread host domain too, each under its own label, so their JSON and
+  digest work no longer holds the main domain's lock (#51427).
+- The `arguments` of a tool outbox receipt is a closed variant, `Known` of the call arguments or `Unknown`, in `Keeper_client_tool_outbox` and its codec. The model reads `"arguments":{"known":{...}}` or `"arguments":{"unknown":true}` in a retained receipt (#51429).
+- TUI: a keeper's detail, logs, calls, chat and runtime picker draw the here path ("Keepers › imp › logs"). (#51441)
+- TUI: the model order editor, Lane reading, Machine and Exact activity, Client Detail, Browser and event evidence draw the here row in place of a "MASC …" title. (#51443)
+- The execution, execution-trust, mission, operator snapshot, operator digest and dashboard source workers start a read caused by an input change no sooner than their declared interval after the previous such read; a change after a quiet spell is still read at once, and deadline and retry reads keep their times (#51444).
+- Two refusals of the multi-account work were in the code and in no
+  changelog entry. Until a process has published how it reads accounts, the
+  TypeSafe AI lane is off with the reason `access_unpublished`, and the
+  memory recall pane of the TUI names that state (#50895, #51449).
+- In an installation whose accounts were turned off, no client starts on a
+  person's own account either: a login check or a verification for a person
+  is refused with the user id of that person, as a turn of their Keeper is
+  (#50966, #51449).
+- TUI: the media editor names its re-read key `새로 조회`, the word the other screens use. The change shipped with the Runtime footers and was left out of their entry. (#51450)
+- A fiber that loads a retained original request (`Lane_addon_tool_request_owner.load`) now hands the body check (sha256, parse, canonical form, re-encode) to the CPU pool instead of running it on its own domain. On the operations store (1,000 bodies, 348 MB, largest 22.7 MB) the sweeps after a restart kept the main domain in that check for up to 323 ms at a time. `bench_original_request_load` with 4.5 MB bodies: probe lateness p50 70.7~79.5 ms -> 0.64~0.66 ms, p99 97~502 ms -> 3.85~5.42 ms. (#51451)
+- TUI: counts in the here row follow the screen language — Fusion ("실행 2건 · 완료 2"), a keeper's calls and logs, the Board and Memory. Fusion's "fail" reads "failed". (#51453)
+- TUI: a row with nothing read yet says "미조회" / "조회 실패" (English: "not loaded" / "load failed") without brackets, and the Activity feed counts in the screen language ("0줄 · 이벤트 0개 보유"). (#51455)
+- A multi-account boot refuses a login client of `config.json` whose
+  `redirect_uri` has a path other than the callback of its provider
+  (`/auth/oidc/callback` for Google, `/auth/github/callback` for GitHub).
+  Such a server came up ready and failed at the first login. The host of
+  the redirect is not compared (#51469).
+- TUI: the composer row under every screen follows the screen language — "› to imp   (i to write)" reads "› imp 에게" with "i:쓰기" at the right end, and why a keeper cannot be reached and the keeper-list reading are worded in Korean too. The key that opens the row stays at the right end instead of moving with the selected keeper's name. (#51477)
+- TUI: the Keepers list and keeper detail footers follow the screen language — "v:view  o:order  Enter / Right:story / detail  Esc:dashboard  q:quit" reads "v:보기  o:정렬  Enter / Right:Story / 상세  Esc:뒤로  q:종료". The keys of each keeper detail tab ("[ ]:탭", "b:게시판 다시 넣기" and the rest) have Korean names. (#51478)
+- TUI: the chat footer follows the screen language — "/:commands  ?:help  Enter:send  Esc:list  Ctrl-J:newline" reads "/:명령  ?:도움말  Enter:전송  Esc:목록  Ctrl-J:줄바꿈", and so do what Enter and Esc mean while a turn runs, the queue keys, the voice capture hints and the scroll position. The idle line of continuous listening is one sentence per language. (#51482)
+- `masc doctor` reports a `person_account_homes` check on a single-user
+  workspace that keeps `.masc/accounts`, the logins that persons left when
+  its accounts were turned off. The check names the model turns the server
+  refuses while the directory is there and what opens them again. The
+  single-user server logs the same sentence as a warning at boot. A
+  workspace without the directory reports nothing new (#51486).
+- TUI: the Requests footers follow the screen language — "w:Workspace mode  e:Outside mode  r:refresh  Esc:back  q:quit" reads "w:작업 공간 모드  e:외부 모드  r:새로 조회  Esc:뒤로  q:종료", and the keys for answering a question and for an open approval have Korean names. (#51487)
+- The home page of a multi-account server shows only the sign-in form before a login and only the account sections after it, and reads the lists only after a login. Each section is named by its heading, action results are announced to a screen reader, Account and Runtime are chosen from the server's lists, and a PAT expiry is a local date and time instead of epoch milliseconds (#51491).
+- TUI: the help sheet's title and key row follow the screen language — "MASC Cheat Sheet  hints on" reads "도움말  힌트 켬" ("Help  hints on" in English, without the product name), and "?:every screen  /:find  j/k:scroll  …  Esc:close" reads "?:모든 화면  /:찾기  j/k:스크롤  …  Esc:닫기". (#51492)
+- TUI: the chat header's keeper state and context reading follow the screen language — the row read "아직 시작하지 않음  Context unavailable" in both languages; it reads "아직 시작하지 않음  컨텍스트 조회 실패" in Korean and "never started  Context unavailable" in English. (#51499)
+- The account server of a multi-account installation answers `POST /mcp`:
+  the MCP endpoint of a person. An MCP client sends the person's personal
+  access token on every request, and the server judges it on every request,
+  so it issues no `Mcp-Session-Id` and a revoked token is refused on the
+  next request. The answer is one JSON body; the endpoint opens no stream.
+  It serves `server/discover`, `initialize`, `ping`, `tools/list` and
+  `tools/call`, with one tool, `masc_whoami`. A single-user server is
+  unchanged (#51503).
+- The MCP endpoint of a person on the account server has four more tools:
+  `masc_my_runtimes` lists the person's subscriptions and Runtimes,
+  `masc_my_keepers` lists their Keepers, `masc_my_keeper_create` makes one
+  and `masc_my_keeper_assign` gives it a Runtime. Each tool makes the
+  judgment of the route of the person's page that it stands for, so a
+  personal access token whose scope lacks `manage_own_keeper` or
+  `manage_own_provider` is refused there, and a Keeper or a Runtime of
+  another person is answered as one that is not there (#51505).
+- The MCP endpoint of a person on the account server has the tool
+  `masc_my_keeper_turn`: the person sends one of their Keepers a message,
+  and the Runtime they gave it answers on their own subscription. The tool
+  is the turn route of the person's page, with its judgment, its bound on
+  the message and its time limit, and the request stays open until the
+  Runtime answers. A Keeper of another person is answered as one that is
+  not there (#51506).
+- The RFC for reading stored provider usage reports at restart states that
+  a stored row has to carry the window `role` before it can be read back
+  (#51517).
+- Stored provider usage rows state what each window limits (`role`), so a
+  later read can tell a window that gates model calls from one that counts
+  other use (#51519).
+- A turn of a person's Keeper that a personal access token asked for
+  runs only inside the scope of that token: the scope names the Runtime,
+  the `direct` channel, and the effects `invoke_model` and `use_tool`.
+  A token that holds `manage_own_keeper` alone still lists, makes and
+  assigns Keepers, and its turn is refused with a 403. This holds for
+  the turn route of the page and for `masc_my_keeper_turn`. A turn asked
+  for by a browser session is unchanged (#51522).
+- CI: the layers of a native stack share one approval merge request, so a push of an N-layer stack queues one worker run instead of N. Events the request job skips no longer cancel a pending request. (#51524)
+- TUI: the key rows of the patch reader, the About and Context overlays, the queue panel, the Fusion run detail, the Git changes list and its diff, the Activity event evidence, the Resources save form, the two runtime.toml forms and Browser Lane follow the screen language; they were English on a Korean screen. A key row cannot be built without the screen language any more: the three functions that build one require it. (#51526)
+- TUI: every key binding carries a Korean name beside the English one, and a binding without one no longer compiles. The global keys, the Runtime detail and editor rows and the rows only the help sheet lists are named in Korean, and the help sheet shows a key that has no sentence by its name in the screen language. (#51533)
+- CI: the pull request type-check logs the event action, base.sha and the `stack` object of the payload. The filter does not read them. (#51535)
+- CI: a native stack is type-checked once, at its top pull request. A layer below the top skips `dune build @check`, and the top decides from every file the stack changes since its base, so a dashboard-only top still compiles the OCaml layers below it. The decision moved from inline workflow bash to `scripts/ci/pr_source_changes.py`, which has tests. (#51536)
+- The account server of a multi-account installation compares the
+  `redirect_uri` of each login client with `MASC_HTTP_BASE_URL` when
+  that variable is set: a redirect whose origin (scheme, host and port)
+  is not that of the base URL stops the boot and names both. Without a
+  base URL nothing is compared, and the boot log says so (#51541).
+- The pages the account server writes itself (`/` and `/accounts/invite`) carry one style sheet, sent inline under the nonce of the policy of the page. The policy gains `style-src 'nonce-…'` and nothing else. In a window 320 CSS px wide the pages no longer scroll sideways, and buttons and fields are 44 px high (#51542).
+- A restarted server reads the stored provider usage reports of the last
+  fourteen days and puts each account's latest windows back in the usage
+  table, at the time they were first observed. An account whose restored
+  windows are spent until a stated reset rests until that reset, for the
+  sources whose live reports rest an account; Claude Code and Codex
+  accounts get their windows back and are not rested (#51544).
+- A stored provider usage row whose `role` word is unknown is counted as an
+  unreadable report (#51544).
+- A draft RFC proposes storing the resets providers state in refusals so a
+  restarted server keeps them, with a seven-day count of Keeper turns that failed on a hard
+  quota before and after restarts (#51547).
+- TUI: the Activity pane beside every screen reads in the screen language: its tab names, column heads, keeper and feed states, the selected keeper's task and waiting rows and the Changes tab's status were English on a Korean screen. The notices that answer `/activity` follow the language too. Names, tool names and failure reasons the pane receives are drawn as sent. (#51549)
+- TUI: twelve key rows that were English strings inside a renderer come from the key table and follow the screen language: the Browser Lane picker, scene, scene guard and observations rows, the client detail, the lane activity draft, the lane inventory detail, the link preview, the play invite, the Answering overlay and the Changes diff. The Answering overlay's "Home/End" reads "Home/End:edges". (#51550)
+- The Keepers list header (fleet line, view row, mark row, sum row and the axis views' fleet block) reads in the screen language instead of mixing English words into a Korean screen (#51561)
+- CI: the merge worker verifies a skipped type-check before it merges. When the newest `type-check` run on the head is a completed skip, the worker reads the files the scope changes against main and holds if one is a source or the list reaches the 300-file comparison limit. The same reading gates the auto-merge reservation of an ordinary pull request. (#51564)
+- A Keeper name of the authorization log is a person's own: two persons
+  of a multi-account installation can each make a Keeper of one name,
+  and each lists, assigns and runs only their own. Until now the first
+  person to make a name held it for everyone (#51565).
+- The sign-in page and the invitation page of the account server are in Korean and say what to do next: each button names what the login does there, a server with no GitHub login client says whom to tell, and an invitation address with no token shows how to open the invitation again in place of a button that cannot be pressed. A browser with no session no longer sees the line that shows what the session routes answered (`no session (401)`) (#51566).
+- TUI: the Keeper detail tab row and the Info tab (labels, section headings and the state words the tab writes) read in the screen language. A section heading no longer carries both languages in one row. (#51568)
+- TUI: the values the Keeper Info tab is handed (suggested action, execution fields, the month of efficiency, the Board-attention rows) read in the screen language, as do the chat header's "next:" clause and the selected Keeper's "Selected next:" row. (#51572)
+- The utilization fields of stored provider usage rows and of the runtime
+  list response are written by one function, and the configured quota
+  scopes are listed by one function. No output changes (#51576).
+- TUI: the Keeper Secrets and Channels tabs (labels, section headings, state words, hint rows) read in the screen language. A continuation row of the Secrets lists is indented by display width. (#51577)
+- TUI: the log detail and the verdict detail (labels, section headings, notes) read in the screen language. The verdict detail pads its label column by display width. (#51588)
+- The Dashboard shows a Keeper waiting state as the server word with the
+  sources the server listed for it, for example `DEFERRED · fusion_running`,
+  on the lane strip, the lane queue panel and the waiting inventory panel.
+  The lane queue panel, the fleet aside and the lane strip stage cells show a
+  waiting source as the server word (#51591).
+- The pages the account server shows when a login is refused and when it completes are in Korean and in the frame of the sign-in page. A refused page has a heading, the sentence of its status, a button back to the sign-in page and the same two next steps for every failure; as before, no sentence names what was refused. The policy of both pages gains `style-src 'nonce-…'` and nothing else, so a refused page still runs no script (#51592).
+- TUI: the schedule detail (labels, section headings, hold sentences, wake history, notices) reads in the screen language, and pads its label column by display width. (#51593)
+- A Keeper whose only waiting rows are reservations whose time has not come
+  is `idle` in the waiting inventory, not `waiting`. The rows are still
+  listed (#51597).
+- TUI: the full Lane reading and the client detail are drawn in the screen language. Their headings no longer carry a second language in brackets, and the Lane page has an English form (#51605)
+- A completion review attempt whose recorded executions all ended without a settled verdict report is now kept as a definite refusal instead of waiting for operator repair. The review runs again when the walk classified a failed candidate as one that passes with time, or when the walk kept no result (a cancellation, the end of the server process, or a failed save of the result). Otherwise the submission stays with its producer or the operator. This narrows the earlier rule that a review whose writer was lost is never retried (#51618).
+- A new official-client session (Muse, Antigravity, Claude Code, Codex) now
+  receives finished-turn tool results of 2,048 bytes or more as markers, as
+  Agent Core requests already do, when the Keeper has the artifact reader
+  tool. The current turn's results stay verbatim (#51657).
+- A Keeper's turn frame lists its claimable Tasks in one order: Tasks linked
+  to an in-progress Goal first, then priority, then newest. Each row carries
+  the Task's priority, its age in days, how many times it was returned to
+  the pool and the ids of its in-progress Goals as typed values; titles stay
+  behind the task tools. A claim without a task id still picks by priority,
+  then oldest (#51695).
+
+### Fixed
+
+- An exact lane no longer calls a slot before the time its provider stated:
+  its account's stated quota reset or the end of its own Retry-After. A lane
+  whose every slot waits returns `every_slot_held` with the earliest time and
+  starts nothing; Candle, Board attention, HITL summaries, the Librarian and
+  the vision tool treat a waiting slot as one refused for its account's rest
+  (#50847).
+- Refresh TUI memory inventory on source changes and renew credentials for an initial SSE admission 401 (#50930).
+- Preserve original write outcomes when observation listeners fail and retain invalidations arriving during refresh (#50931).
+- Invalidate affected IDE activity, Keeper composite and runtime-trace caches after canonical source changes (#50938).
+- Wait for startup source completion and retain failed dashboard read debt without healthy status polling (#50941).
+- Recover transient dashboard credential failures while keeping terminal token refusals visible (#50943).
+- Wake native directory observers when permissions change (#50946).
+- Keep Execution and namespace cache attempts and canonical completions bound to their original workspace scope (#50953).
+- Bind native query SSE admission and frame delivery to the original workspace owner (#50954).
+- Retain a trailing Execution source read when a lifecycle patch supersedes an in-flight attempt (#50956).
+- Refresh Shell and Execution state from canonical source completion and fence late or cancelled HTTP reads from newer workspace counts and status (#50962).
+- Keep Mission and Digest publication completion ordered and retain read debt after superseded cache preparation (#50980).
+- Retain typed refusal causes and retire managed panel reads when their credential or workspace owner changes (#50982).
+- Fence Operator Digest HTTP and SSE observations by the original workspace and actor query (#51004).
+- Preserve typed Shell read outcomes across shared refresh joins and keep source events from rearming refused reads (#51006).
+- Keep original errors and owner-scoped cancellation in attribution, skills and shared tool-quality observations (#51008).
+- Retire telemetry reads with their workspace owner and preserve refusal causes from concurrent sibling reads (#51009).
+- Keep dashboard GET timeouts active until JSON response bodies finish, including cancellation and late refusals (#51010).
+- Retain partial projection failure debt through source workers, HTTP diagnostics and terminal publications (#51012).
+- Keep partial Mission and Digest rows visible while preserving the original failed-read recovery debt (#51020).
+- A boot and the authorization zone now refuse an authorization log that
+  holds a record the external store did not answer: a mode event or a
+  revocation appended to authz.jsonl outside masc. Before, a Reactivate
+  appended after masc auth off booted as an active installation, and an Off
+  appended to an active installation booted a single user. The external
+  store counts its Committed entries and the replay counts the records that
+  take an intent; a difference is a mismatch (#51039).
+- Scope Agent Profile HTTP and MCP reads to the original owner and abort retired requests (#51061).
+- Clear retired Keeper evidence and preserve original runtime, sandbox and observable read failures (#51062).
+- Retain IDE Activity, Persistence and Presence read ownership and report primary failures without success fallbacks (#51063).
+- Retire shared presence data at every read boundary when the credential or workspace owner changes (#51064).
+- Recognize missing Keeper composites through the original typed 404 cause (#51065).
+- Use current Keeper diagnostics and tool-audit inputs when building a Current Operator Snapshot (#51067).
+- Retain Snapshot read completeness, original source errors and same-read freshness deadlines (#51068).
+- Admit Execution and namespace outcomes with publication ordering while preserving partial-read recovery debt (#51085).
+- Clear custom panel state on owner changes, including FSM history for the same Keeper in a different workspace (#51086).
+- Bind Keeper trace caches and original chat-operation reads to their observation owner and retain cancellation (#51087).
+- Keep terminal Mission and Digest errors as source-owned answers instead of restarting reads on each default GET (#51092).
+- Read Keeper Decisions directly from the current roster and decision logs instead of a private TTL cache (#51093).
+- Preserve strict TurnRecord context read failures and their retry debt in Operator Snapshots (#51094).
+- Carry original decision-log tail failures through Current HTTP reads instead of returning a clean empty result (#51098).
+- Validate Snapshot bodies before advancing publication watermarks and retain recovery for malformed scoped frames (#51099).
+- Preserve prepared Execution bytes, ETags and encodings when the captured workspace instance is already attached (#51127).
+- Merge HTTP projection diagnostics without replacing the producer's original completeness and read error (#51128).
+- Refresh Connector status from typed source changes without starvation, retain partial-read retries and preserve original credential refusals (#51150).
+- A request that the authorization zone could not record no longer answers
+  with paths of the server. A sign-out, an allowlist change and the link
+  of a subscription answered with the reason of the failure, which names
+  the authorization log or the external store, when another writer had
+  moved the log. A person now reads one fixed sentence, and a record that
+  was turned down still says why. The zone writes the full reason to the
+  log of the server once, where it was not written at all before. The
+  operator commands and the boot refusal of the account server keep the
+  full reason (#51196).
+- With the HTTP serving domain on, a `/ws` connection no longer ends at its
+  first message. An inbound request is handled on the main domain through
+  the owner's queue, and every frame for the client (a response, a
+  broadcast, a ping, the close) is queued on the session and written by one
+  fiber under the connection's own switch, so the connection's writer is
+  touched from its own domain only. A session is cleaned up when its
+  connection's scope ends (#51214, #51139).
+- Retain owner-scoped typed slot observations beside original run output without replacing its completion proof. (#51237)
+- Retain Add-on slot observations beside their original execution proofs and retire companions with the same original owner. (#51238)
+- Show current bindings and retained slot observations under the Add-on installation and output that actually own them. (#51240)
+- A Lane Add-on Exact request cut off while it waited for a provider
+  admission permit runs again on the next host cycle instead of ending as
+  `outcome_unknown`. The host writes the request's started marker at the
+  first generation dispatch, after the permit wait and before the request
+  is sent, and a token-count request writes none (#51269).
+- `measure_lane_time.py --until` reads a time without a UTC offset as UTC instead of the machine's local zone (#51284).
+- `masc restart` no longer waits without end when the server it finds
+  accepts the connection and does not answer. The answers it reads to
+  observe the workspace and to see the replacement ready have a window of
+  10 seconds each; after it the command refuses and names the process. The
+  requests that ask a single-user server to stop have no window yet
+  (#51286).
+- Editing only a package's `ui_category` no longer makes the host refuse every Librarian Exact request of that installation; the host dispatch guard now compares the execution package, as the declaration revision and the destination check already do (#51308).
+- A goal's related-activity rows show their stamp in the operator's time
+  zone. The stamp was cut out of the server's UTC text by position, so an
+  event at 15:37 local read 06:37 with nothing marking the zone, and an
+  event after local midnight carried the previous day's date. Today's
+  events now show the clock alone and older ones their month and day
+  first, the notation the Features run list uses (#51313).
+- Saving a package schema with its keys in another order no longer makes the host refuse that installation's tool export, tool destination and Exact dispatch; package comparison now reads the same sorted-key package value as the declaration revision (#51322).
+- `?` on a Features run list or a run's detail lists that screen's keys.
+  It listed the lane overview's, whose `Esc` row said "back to Dashboard"
+  where `Esc` goes back one level, and had no row for the older page
+  (#51328).
+- Four evidence keys on Task Review showed a Korean name under the English
+  setting (`o:증거 열기`). They have an English name too (#51336).
+- The Goal screens draw a moment in the operator's zone where they printed
+  the wire text (`2026-11-11T10:39:49Z`): Created, Updated, Reviewed and
+  List observed in a Goal's detail, a measurement's recorded moment, the
+  retained-reading line over the Goal list, the refresh-failure banner and
+  the two snapshot stamps of the summary reading (#51342).
+- A host guard refusal just before an official-client (CLI) slot no longer ends the Exact request as `outcome_unknown`. Nothing is sent, no other client is tried, and the request stays open so the next host event runs it again, as it already did when the guard refused before an HTTP slot (#51343).
+- A successor-selection candidate that has no program step no longer sends an
+  empty `ordered_program_steps` field, so its request matches the wire captured
+  before that field existed again (#51347).
+- When the system-thread host domain fails, work that already began on one of
+  its threads now finishes and answers its caller itself. Before, the caller
+  was woken with `Systhread_host.Host_failed` while that work could still be
+  running, so it could release a file lock or read a result the work was
+  still writing. Only work that had not begun is taken back and run on the
+  caller's domain. `Host_failed` is removed (#51349).
+- The approval auto-merge worker deletes the head branch of each pull request
+  it sees merged, because the delete-branch-on-merge setting does not act on
+  a merge made with the Actions token. A branch that an open pull request uses
+  as base, a release branch, a fork head and a branch that moved after the
+  merge are kept (#51390).
+- A Lane Add-on Exact call that raises before its first generation dispatch no longer ends its request as `outcome_unknown`; the run fails without writing an attempt and the next host cycle runs the request again (#51391).
+- Selecting another Keeper starts its waiting-row list at the first row with
+  no row open. The list kept the previous Keeper's scroll position and the
+  places of its open rows (#51410).
+- A windowed dashboard list (`VirtualList`) that shrinks while it is scrolled
+  to its end draws rows across its viewport in the next frame. When more rows
+  left at once than it kept mounted beyond the viewport, it drew that frame
+  with part of the viewport empty, and with all of it empty once as many rows
+  left as it had mounted (#51410).
+- A multi-account server no longer refuses a login because other logins
+  were started. It kept each login in flight in a store of 16 entries, and
+  a start needs no credential, so 16 starts answered every later one with a
+  503 for up to ten minutes. The server now stores no login in flight
+  (#51411, #51394).
+- The TUI System logs view names its Observer instance on the server log stream, which the server requires before it sends a frame (#51415).
+- The dashboard Keeper chat stops showing an answer in progress when the workspace, credential or actor changes while a chat operation is being observed (#51433).
+- The Board event fanout rereads a candidate under the partition lock
+  before it creates that candidate's root. Before, a candidate the worker
+  had already judged and consumed could get a new root from the value the
+  event still held, once its settled receipt was pruned. The second
+  judgment conflicted with the consumed candidate and left a `Completed`
+  partition that stopped that Keeper's Board deliveries (#51440).
+- TUI: Git Changes keeps its cursor on the same file across a re-read, and inside the list when that file is gone. (#51442)
+- A dashboard bootstrap response keeps its namespace slice when the only namespace read in flight was sent before it, so an older complete response no longer replaces a newer partial one and hides its read error (#51448).
+- TUI: a long keeper name or lane label in the here row folds in the middle, so the step after it and the keeper detail's tab strip stay on the row. (#51450)
+- TUI: the here row keeps its last step whole beside a long step; it was cut to "…" at 80 columns. (#51456)
+- The login-side routes of the account server (`POST /auth/logout`,
+  `GET /auth/session`, the allowlist and the personal access tokens) and
+  the start of a login refuse a request that carries several session
+  cookies with a 401. They read the first one and went on; the routes of
+  a person already refused it (#51467).
+- The event stream of a person's subscription connection
+  (`POST /api/v1/setup/accounts/login` on the account server) carries no
+  CORS header. It put the `Origin` of the request into
+  `access-control-allow-origin` with credentials allowed. The operator's
+  stream of the single-user server is unchanged (#51468).
+- The owner's Board completion settlement no longer stops at a completion
+  whose candidate already records another judgment. That completion stays
+  `Completed` and is logged as an error on each walk, and the walk goes on
+  to the completions behind it. Before, every later completion of that
+  Keeper waited behind the refused one (#51470).
+- The required `changes` check reads a pull request's changed files with git
+  instead of the REST API, so it no longer fails when the Actions token's
+  hourly API budget runs out (#51475).
+- TUI: the line that says a keeper is holding a tool call named the keys "2 then m", which no longer open the chat. It reads them from the key table and says "3 then c". (#51477)
+- Explicit Librarian admission no longer stops for a Keeper after one admission ends Conflicted and its replacement commits the same candidates (#51489).
+- TUI: the here row makes every step of its path printable. A step ahead of the last one — a keeper name, a run id, a lane label sent by the server — reached the row as given unless the caller cleaned it, so a name holding a newline or an escape sequence could break the row. (#51501)
+- Librarian explicit admission closes a forest whose Conflicted original sits under a superseded root, once the replacement root has committed and the queue has acknowledged every candidate; such a forest used to stay open and every later pass read its records again (#51510).
+- A Claude Code child of a declared account (`account-home`) gets
+  `ANTHROPIC_CONFIG_DIR=<account-home>/anthropic`. It no longer reads the
+  Anthropic profile of the server's OS user, and a Console sign-in without
+  an API key made under one account is no longer the profile of the other
+  accounts of the server. A declared account that authenticated through a
+  profile in `~/.config/anthropic` signs in again (#51513).
+- The approval auto-merge worker closes the open issues that GitHub lists as
+  closing references (`Closes #N`) of each pull request it sees merged,
+  because GitHub leaves them open when the merge is made with the Actions
+  token. A layer of a native stack counts once its merge commit is on the
+  default branch. The workflow's token gains `issues: write`, and the pull
+  request template says to use `Relates #N` when work remains in the issue
+  (#51523).
+- TUI: on a Korean screen the "now" cell of a Keepers list row, the activity word in a Keeper's Story window, "Last Outcome" on a Keeper's Info tab, the quota badge in a Runtime detail and the capture note over a repository or model reading read in Korean; each was drawn in English because its caller left the language out. Sixteen functions that draw screen text now require the language instead of defaulting to English. (#51538)
+- The approval auto-merge worker closes a linked issue once per merge. An
+  issue that was reopened after the merge stays open when the worker meets
+  the merged pull request again: on a recheck, or when a stack whose lower
+  layers landed earlier lands the rest. A recheck of a merged pull request
+  closes its other open linked issues, including one that was never closed
+  because the pull request merged before the worker closed issues. Every pull
+  request and issue the worker could not decide gets its own record (#51552).
+- A failed explicit-admission pass of the Librarian now reaches `keeper_memory_attention` in `/health` and the Keeper memory-health row as an operator-action observation; the memory-health envelope is `keeper.memory_os.current_health.v15` (#51555).
+- The dashboard memory-health decoder accepts a failed explicit-admission pass in `admission_wait` and reads the `keeper.memory_os.current_health.v15` envelope (#51556).
+- After `masc auth off`, an operator Keeper whose TOML has the name of a
+  Keeper a person made in the log runs again. A turn is still refused on
+  a Runtime or an account home of a person (#51565).
+- CI: the merge worker recognizes a stack that already landed from the stack listing instead of reading every layer. A run that woke for the landed 86-layer stack #51256 spent 86 requests of the hourly Actions budget there. (#51582)
+- The compact dashboard's `ATTENTION` line now names every severity it counts. Items graded info were counted in the total and left out of the parentheses, so an installation whose only items were submissions awaiting a verdict read `19 items ()` (#51589).
+- Dashboard: a Keeper row patched by a lifecycle event spells the phase the way a freshly read row does. After supervisor cleanup the phase reads `offline` instead of `dead`, and after a pause `keepalive_running` is `false`. (#51599)
+- CI: the merge worker reads the layers of a native stack from the stack listing instead of one pull request at a time. Admitting a 24-layer stack takes 57 REST requests instead of 127, out of the 1,000 an hour that all workflows share. (#51600)
+- An exact request that ends on an input refusal ends on the refusal that names the size, whichever slot gave it, so a consumer that subdivides its input does so when any slot named the size (#51601).
+- Dashboard: the verification runs panel reads a review that another decision superseded. One such run used to make the panel reject the whole runs response. (#51603)
+- `prompt_compare.py` classes a difference of exactly a noise width as the same. It compared floats, and a rounding error called 18 of the 75 such pairs of equal chances up to 260 worse or better (#51611)
+- A completion review that was cut after its reviewer reported a verdict is now recovered from that report even when the execution failed afterwards or its server process ended. Before, only an execution that ended in success or cancellation supplied the verdict, and the rest waited for an operator. A settled report is no longer read as a verdict when the recorded provider responses asked for more than one report (#51613).
+- The script test of the token expiry field (`test/test_auth_preview_pat_expiry.js`) types a date and time, as the field has taken since #51491, and no longer fails under `dune runtest` (#51639).
+- An exact request no longer re-sends its body to an HTTP slot that refused it for its size while another slot of the lane waits for its provider; the slot is left out of the walk until the wait ends (#51649).
+- The TUI and the dashboard say that no model slot can be called before the stated time when a Lane Add-on request is held, since a held lane can include a slot left out for a size refusal (#51650).
+- The invitation page of the account server reads an invitation link that is opened in a tab that already shows the page. Such a link changes only the fragment of the address, for which a browser loads nothing, so the page used to keep saying that the address had no invitation, or kept the token of the invitation that was opened first in its form (#51652).
+- TUI Presets detail rows are coloured by kind: section title, confirmed outcome, caution, failure and supporting detail were all drawn in the default foreground (#51680).
+- TUI Home no longer fetches the whole Lane Add-on inventory on every refresh for operator quiz rows that nothing draws (#51681).
+- Operator quiz Results shows the session, topic, review item and scorecard counts its guide describes, and the ask and question ids a dispute needs (#51682).
+- `scripts/build-dashboard-if-needed.sh` says every reason a built dashboard output is invalid before it rebuilds. The check for a missing account console, added with #51635, used to return first and without a word, so an output that also named remote startup resources was rebuilt without the line that says so, and the case of `test_run_local_script` that reads that line failed. An output without the console now gets a line of its own (#51684).
+- The Board attention worker no longer stops when its drain meets a root
+  whose candidate is not in the candidate ledger. When every row of the
+  ledger decoded, the root is abandoned, as process start already did, and
+  the drain goes on to the next root. When the ledger holds rows the decoder
+  refused, the root stays Blocked, at process start too, because the
+  candidate may be one of those rows. Before, the worker ended with
+  `Blocked partition candidate is absent` and that Keeper's Board judgment
+  stayed stopped until its lane restarted (#51688).
+- The keeper-librarian prompt comparison refuses a draft run that counts an answered call a pinned baseline counted. A baseline in `prompt_lines.json` (schema v3) keeps the answered calls each of its runs counted (`answered_sha256`), each as one sha256 of the call's key and the time it was sent, read from the parsed row. Only a rows file with the sha256 of a baseline's rows was refused before, so a baseline run's folder passed as a draft once its summary named another template and its rows were written again with other spacing or key order, and so did a draft run made in a copy of a baseline run's folder, which answers from that folder's log every request the draft leaves as it was. A file in which two pinned runs count the same answered call is refused, `runs.json` is read as written like `prompt_lines.json`, and a v2 `prompt_lines.json` is refused (#51692)
+- `prompt_compare.py` refuses a run that does not hold one row of the model for each item of a set. It counted the rows only, so a run that answered one item twice in place of another passed. A `prompt_lines.json` or `runs.json` that Python does not read as JSON (bytes that are no text, an integer of too many digits, a nesting too deep) ends in one line that names the file (#51692)
+- The home page of the account server no longer shows the sign-in when the session routes do not say whether a session is open (a 503 from a server that cannot read its authorization files, or no answer): it says that the sign-in state could not be read and offers to open the page again. A sign-out that the server refuses is now said on the page while the session stays open, and a sign-out that ended the session loads the page again, so nothing that was listed for the person stays in the document (#51693).
+
+### Performance
+
+- `Fs_compat` blocking calls made from the owner (main) domain now run on the `Systhread_host` domain instead of on system threads of the calling domain, so the worker thread no longer competes with the main scheduler for the main domain lock. Calls from pool domains and from processes that never start the host keep their own domain. In the durable-rewrite benchmark (12 fibers, 13 blocked domains, load1 78-139) the scheduler lateness p99 of the calling domain went from 16.88-36.64 ms to 4.12-5.32 ms at 16 KB and from 40.96-54.59 ms to 4.79-7.63 ms at 256 KB (#51282).
+- Starting a child process no longer holds the main domain. The
+  `posix_spawn` call and the read of the child's start time run on a thread
+  of the system-thread host, and the calling fiber is suspended until both
+  are done. In three 45 s traces of a live server the main domain spent
+  304-423 ms in 19-41 spawn calls, 98-179 ms at worst. In
+  `bench_systhread_host_spawn` (4 fibers starting `/usr/bin/true`, a 5 ms
+  probe fiber on the same domain, load 164-237 on 16 cores) probe lateness
+  went from p99 2.65-6.93 ms and max 24.8-82.3 ms to p99 1.49-2.18 ms and
+  max 5.1-14.0 ms; p50 stayed at 1.0-1.2 ms (#51350).
+- `Eio_guard.run_in_systhread` work called from the server's main domain now
+  runs on a thread of the system-thread host domain, as `Fs_compat` calls do
+  since #51282, so that work no longer takes the main domain lock. Pool work
+  and processes that never start the host (`masc-tui`,
+  `masc-dos-addon-worker`) keep their own domain. On a live server these
+  calls were 11.7-19.5 % of the system-thread jobs the main domain handed
+  out in two 45 s traces (RFC main-domain-scheduler-latency 7.6, step S2)
+  (#51364).
+- The Keeper waiting-row list on the Keeper workspace lane strip, the Tools
+  waiting inventory and the Schedule lane evidence mounts only the rows near
+  its scroll position instead of every server row. With 5,000 pending events
+  on one Keeper the list holds 17 rows in the DOM instead of 5,000, and one
+  inventory refresh takes 3.6 ms of render and layout instead of 647 ms in
+  headless Chromium. Browser find reaches only the mounted rows of a list
+  longer than 40 rows (#51410).
+- Pull request type-checks restore the Dune cache that the scheduled main
+  build saves instead of compiling from scratch. The previous cache setting
+  stored nothing; with the same sources the type-check step took 21s instead
+  of 456s. Pull request runs save no cache of their own (#51452).
+- Reading or writing the proofs of an Exact request takes the request digest once per operation instead of writing the whole request out as text for every proof (#51463).
+- A schedule ledger write now keeps the state it wrote, so the read that follows no longer parses and decodes the whole ledger again. On a 10.7 MB ledger that read went from 127-228 ms (p50 of three runs) to 0.1 ms (#51474).
+- The dashboard asset table compares the SHA-256 that each read already verified against the manifest instead of comparing the whole body, so a bundle response no longer compares 866 KB per request. Reads under an unbound source tree, which has no manifest, still compare the body. Part of the cleartext CPU increase tracked in #51400 (#51488).
+- A Goal verification ledger write now encodes the ledger once on the domain pool instead of once per file on the calling fiber, and the read that follows takes the state the write kept instead of parsing the file again. A read that misses a large ledger decodes it on the pool (#51490).
+- `Safe_ops.list_dir_safe` reads the directory through Eio on a fiber instead of calling `Sys.readdir` on the fiber's own thread, and returns the names sorted (#51511).
+- A muse or antigravity Keeper turn now digests its canonical session source as a job of the CPU pool instead of on the turn's own fiber; the digest value is unchanged (#51512).
+- A fiber that decodes lane add-on original request records now hands the decode to the CPU pool, and `discover` and `observe` decode a scope's whole inventory as one pool job (#51527).
+- A dashboard asset of an unbound source tree (`MASC_ASSETS_DIR`, a source checkout) is read again only when its file changed. Each request still runs every path check; the body read and the 866 KB allocation are skipped when the opened file has the device, inode, owner, mode, size, modification time and change time the asset table holds. A same-size write in place that leaves both file times as they were is not seen. Bound launches and installed releases read and verify on every request as before (#51545).
+- A provider request built before dispatch is now the one the built-in HTTP transport sends. With a transport supplied, the transport used to build the same body a second time on the calling fiber. In a loop sending a 2.5 MB streaming request, the 5 ms sleep lag of the dispatching domain went from p99 166-587 ms to 21-44 ms (four runs each, machine load 170-230) (#51558).
+- A provider request now carries the SHA-256 of its body, taken once where the body is built. The outcome of a dispatch used to hash the whole body again on the dispatching fiber: 9 ms for 2.5 MB, 43 ms for 12.5 MB. With #51558, the 5 ms sleep lag of a domain that keeps sending a 2.5 MB streaming request went from p99 21-44 ms to 5.7-6.6 ms (#51570).
+- A provider request now reaches its connection 64 KB at a time, with a yield between slices. The whole request used to go down in one write, which TLS encrypted without suspending. In a loop sending a 12.5 MB body over TLS, the 5 ms sleep lag of the sending domain went from p99 31-52 ms to 4.6-7.0 ms, and one send took 15-25% longer (three runs each, machine load 132-166) (#51586).
+- Restoring a Keeper's continuity snapshot and finding where its last completed turn ends now select their range on the CPU pool. The selection labels every message of the history and hashes the message that opens each atom a boundary line states, and it used to run on the calling fiber: 84 ms and 64 ms of the main domain in one turn on a live server. In a bench it is 61 ms of CPU for a 4 MB history with 1,000 boundary lines (#51640).
+- Reading a librarian gate chain now confirms its parent execution once per call. Every attempt, every predecessor an attempt names and every successor request used to confirm it again: the parent's original body was read from the store and checked whole, its judgment decoded and its latest execution proofs read. That path was 20.9% of all bytes the live server allocated. On a test fixture, reading the latest attempt of a two-attempt chain allocates 8.5 MB where it allocated 35.6 MB (#51667).
+- Checking a replacement's terminal frontier now reads each original execution once. The witness read the execution and its latest attempt to choose a branch, and the branch read both again, checking the original's body whole each time. That path was 5.5% of all bytes the live server allocated. On a test fixture one witness allocates 9.7 MB where it allocated 14.6 MB (#51685).
+- Listing a directory of more than 256 names no longer stops every domain for a minor collection. `Fs_compat.read_dir` called `Eio.Path.read_dir`, and eio_posix builds the names with `Array.of_list` over a young first name, so the runtime emptied every domain's minor heap before it allocated the array. `Safe_ops.list_dir_safe` lists the Keeper config directory this way (820 names on the live server). On the live server 62 of 112 minor collections in 30 s were forced like this. `read_dir` now uses `Sys.readdir`, which allocates the array in C, on a system thread (#51707).
+
+### Documentation
+
+- Record targeted SSE migration evidence and restore missing changelog entries for the native stack (#51151).
+- The main-domain scheduler-latency RFC brings Phase 2 forward: it records that
+  the live main thread waits for its own domain lock in 18-29% of samples and
+  sets the order for sending owner-domain blocking jobs to the `Systhread_host`
+  domain (#51264).
+- Add the RFC that puts Keeper sandbox storage cleanup steps in one closed
+  list, ends every attempt in a typed outcome published on the tools
+  envelope, runs the first pass one maintenance pulse after boot, and names
+  the contract each deletion rests on; it records the 2026-11-11
+  measurements (no successful guest `_build` cleanup since 2026-11-09, 16 of
+  20 work volumes without the ext4 discard default) (#51271, #50266, #51266).
+- Add an RFC for a per-installation `max_exact_in_flight` limit that lets a Lane Add-on host cycle run that many `exact_output` requests side by side (#51272).
+- Record the 11-11 tool-efficiency measurements: finished-turn markers are read back in 1.32% of 17,829 cases, the shape of long turns, and a correction of the 11-08 report on what the RFC-0379 section 6.6 watch can receive (#51284).
+- Added a Draft RFC, `a-tool-declares-when-a-later-call-replaces-its-result`, for sending an earlier tool result as its blob marker once a later call of the same turn exists. It records the 11-08T05:40Z to 11-11T05:40Z measurement of 34,686,650 bytes of results superseded by a same-input call, of which 3,601,729 bytes have the same body as the later result, and compares four candidates: a per-tool declaration in `config/tools/<tool>.toml`, a three-value lifetime, server replacement by input, and server replacement by input and body. It also fixes the ledger and stored-request measurement (replaced bytes, bytes carried per request, re-read share) and the rule that drops a declaration when the bytes read back reach the bytes saved. No code changed (#51299)
+- A new RFC compares three ways to wake a Keeper when a pull request's checks finish (check completion on `Pull_heads`, a commit-keyed `until_github_checks` watch, one server reader), sets out four meanings of "done", and fixes the harness that scores false, missed and late wakes before any implementation (#51302)
+- Add RFC "a-keeper-works-while-a-long-execute-runs". It measures how long a Keeper's chat operation waits behind a long Execute call, compares three designs (per-call receipt reload, a Keeper-called typed wait that ends the turn, concurrent turns in one Keeper) and lists the decisions left to the user. (#51303)
+- A TUI screen grammar RFC and the audit behind it. The audit counts, from 25
+  operator captures and the TUI sources, how many shapes the same thing takes
+  today: 22 position formats, about 10 duration ladders, 13 spellings for a
+  missing value, and 350 string-literal key branches in a dispatcher that does
+  not read the key table. The RFC proposes one five-zone frame, one set of
+  movement keys, seven single-letter actions with the rest in a `Space` action
+  window, a one-screen `?` help, and typed time, duration, number and
+  missing-value cells that one module turns into text. No code changes
+  (#51307).
+- Add RFC "a-patrol-turn-ends-at-its-unit-of-work". It measures how long patrol turns end and what they cost, compares three designs (one queue row per PR head, Task as the unit, keep the long turn and let tools declare result lifetime), prices splitting a long turn into unit turns, and lists the decisions left to the user. (#51309)
+- Added a Draft RFC that defines how Librarian requests created under a replaced Add-on declaration end and are created again under the current one (#51317).
+- Added a Draft RFC that keeps a waiting Librarian history original on its owner record so a pass reads the request body only where the body is used (#51326).
+- Add `repeated_results.py` and its measurement of repeated tool results in three ledger windows: 32.0% of result bytes (11-01 to 11-05, 96 h), 3.6% (11-08T13Z to 11-11T13Z, 72 h) and 2.9% (11-10T16Z to 11-11T13Z, 21 h). All result bytes per day fell 16% over the same period, and the drop is not attributed to any pull request (#51358).
+- Add `execute_result_shapes.py` and its measurement of where `Execute` result bytes go: commands that contain `gh` carry 65.4% of the bytes in the 72 h window (58.2% in the 96 h window), and `gh api` alone is 54.7% with a median of 805 B per call (#51358).
+- Add report "open-issue-map-and-plan". It reads all 1,094 open issues and counts how many are labelled as breaking what the product promises (106). It tests those labels with blind re-rating: two judges rated 33 of the 106 as both observed and promise-breaking, and a body-reading pass over the other 940 issues found 36 more. It groups the issues by what they are about and what they ask for, traces the shared causes, compares two directions of repair for each cluster, records the result of re-checking 140 close candidates against main, and lists nine decisions left to the operator. The evidence bundle holds the fetch, measurement and counting scripts with their output and the per-issue verdicts. (#51363)
+- The RFC for waking a Keeper when a pull request's checks end records the decision that the end is B′, meaning at least one check run exists and every check run has completed (#51375).
+- The operator quiz lane contract and the Lane Add-on guides state that the host cycle runs exact requests side by side up to the declared `max_exact_in_flight` (#51378).
+- Add RFC "keeper-turn-ends-while-waiting-for-a-receipt-state-machine" and the TLA+ model `KeeperReceiptWait`. The RFC lists every state and transition of a chat task that ends its turn while it waits for a background receipt, who owns the receipt, what happens on restart, worker exit, duplicate receipt and a receipt after a cancel, and two proposed hard cuts: the semantic record (v2 to v3) and the outbox receipt, whose `arguments` becomes `Known | Unknown`. A restart of a task that resumed from a wait returns it to the queue with its receipts, and a wait for several requests at once, and the model covers both. The model passes with no violation and fails with a counterexample for each of its eight bug models (#51381).
+- RFC-0492 defines `delivery`, a typed fact for whether a request reached the server before its connection failed, and puts the measurement of reused-connection failures before any resend is built. The 2026-11-11 write-failure measurement and its script are under `docs/evidence/2026-11-11-provider-write-failures/` (#51382).
+- Add RFC draft "a-stalled-handoff-reaches-the-one-who-can-move-it". It retraces nine open issues about handoffs between Keepers, verification and the operator, records two handoffs that are stalled in the operating install (362 Board attention partitions of one Keeper, 19 Tasks awaiting verification), traces the Board stall to a race in which the event fanout re-creates a partition root from a candidate value read before the worker pruned its settled receipt, and sets the order of repair: root creation re-reads the candidate under the partition lock, Board attention settlement takes each candidate's outcome as a closed sum, a verification that stops without a retry shows to its submitter and the operator, and the remaining steps of two existing RFCs follow (#51418).
+- The open-issue-map report records what followed the operator's four decisions of 2026-11-12. 226 issues with no record of having happened were closed as not planned; two gaps in the closing rule were found afterwards (the rubric has no security grade, and the judges read issue bodies but not comments), so 12 were reopened and 5 had their reason changed to completed, leaving 209 closed as not planned. Of the 70 issues closed by the close verification, another session reopened 3 whose bodies require a regression test that is not on main. The evidence bundle gains the per-issue outcome of the 236 candidates, the re-read of 83 comment threads, and a script that recounts both. (#51426)
+- RFC `schedule-notes-live-outside-the-ledger` (Draft): schedule notes move from the ledger document to one append-only file per schedule, so a note append no longer rewrites the ledger (#51480).
+- RFC `merge-worker-fits-the-api-budget` proposes a periodic merge check, a
+  merge worker that ends when it hits the API quota, and one query per merge
+  scope (#51495).
+- Rewrite the verification part of RFC "a-stalled-handoff-reaches-the-one-who-can-move-it" from a read-only recount of the operating install. Of 19 Tasks stalled in `awaiting_verification`, 17 stopped on a passing failure: the server process ended during the review (8), the reviewer's provider call failed (8), or a provider call failed after the verdict was reported (1). The RFC now proposes that one verdict report, counted across the attempt whether or not it settled, decides the review however the execution ended; that an attempt whose journals establish that no verdict was reported becomes a definite refusal, where the typed candidate failure kept by a finished walk decides the retry as the constitution states and an attempt whose walk left no result, by cancellation or by the process ending, goes to the next attempt; and that the operator list follows the `Awaiting_verdict` item of the task-lifecycle RFC instead of reading the run registry, which keeps only the latest 64 completed rows (#51500).
+- `docs/guides/account-server-mcp.md` tells a person how to connect an MCP
+  client to the account server of a multi-account installation: the tools
+  of `POST /mcp`, the scope a personal access token needs for each, the
+  steps to connect, a check by hand, the statuses and the limits (#51507).
+- RFC-0517 (Draft) states that its training step ended on 2026-11-12 with candidate A's verdict: A is not put in the admission slot, no further training runs under the RFC, and the roll-out did not happen (#51509).
+- Add the 11-12 update to the Tools efficiency report: the receipt-wait async design and its implementation status, result bytes in the Tools statistics series, the changes deliberately not made with their evidence, and the work that remains after deploy (#51516).
+- RFC draft: a native stack's `type-check` runs once at the top pull request instead of once per layer, decided from the stack metadata in the event payload, with the merge worker confirming the top ran. (#51521)
+- A draft RFC describes reading a dashboard asset of an unbound source tree only when the file changed: each request keeps the path checks and skips the body read when the opened file has the snapshot the asset table holds. It records the case this misses, the file-time measurements on two hosts and the CPU measurements to take before and after (#51531).
+- RFC-0492 is corrected where #51528 showed it could not be built as written: layer 6 no longer names tls-eio's `Tls_socket_closed`, the section 6 ratio divides by `request_not_delivered + request_failed`, and the `NetworkError` `delivery` field moves from layer 6 to layer 8 (#51534).
+- The multi-account plan gains the section of S1b-3: how the turn of a
+  person's Keeper continues its conversation and where its record is
+  kept (#51567).
+- RFC draft: an exact request skips a slot that already refused its input, and execution proofs stop repeating the request body (#51574).
+- RFC stack-type-check-runs-at-the-top records how the change was built (#51535, #51536, #51564), what the payload check found, and three costs found while building. (#51579)
+- A draft RFC measures how Keepers wait for a GitHub run they just started inside one turn: in the 72 hours before the receipt-wait deploy, 535 foreground Execute calls (36.6 h) used `sleep` with `gh`, 315 of them (23.9 h) on Actions runs, and two Keepers made 72% of them. It lists three ways to move that wait onto the receipt path. Read-only scripts, 22 tests and three result files are under docs/evidence/tool-efficiency-1112-2026-11 (#51606).
+- RFC-0492 section 6 test 5 records its result for `glm-coding` and `openrouter`: a request cut off before its body ends gets no response while the connection stays open. The run records are under `docs/evidence/2026-11-12-provider-partial-request/` (#51607).
+- Bring the verification part of RFC "a-stalled-handoff-reaches-the-one-who-can-move-it" in line with what was built. A requested verdict report counts only beside a settled one and is read from the recorded provider responses, not from invocation nodes. The rule that sent a reviewer that ended in success without a report to operator repair is removed, because the current code already sends such an attempt on when a cancelled execution follows. The RFC also names its implementation PRs and two cases the work left as repair (#51621).
+- Record the operator decisions of 2026-11-12 on the open-issue map (failing tests, TUI leftovers, side features) and what was done for each: 15 failing-test issues closed, one fixed at its cause, no test deleted yet, a `side-feature` label on 15 issues, and the state of the stalled-handoff RFC and its implementation PRs. Four nights of the scheduled full test run are summarised beside the table (#51627).
+- RFC tool-results-age-out-of-context records a 2026-11-12 measurement where
+  one atom range left as 1.2 MB on an Agent Core request and 4.56 MB as a
+  Muse new-session seed, and proposes sending finished-turn tool results as
+  markers in official-client new-session seeds too (#51629).
+- `docs/verification-pipeline-policy.md` section 4 now states that a recovered judgment needs the recorded provider replies to have asked for that one report only, and names the unresolved cases as the code reads them (#51660).
+- The open-issue map report records how the failing-test bucket was settled (two fixtures fixed, two stale assertions removed, two left open) and the re-measurement after the Board settlement fix was deployed: unsettled Board judgments fell from 394 to 3 (#51665).
+- RFC `merge-worker-fits-the-api-budget` records the operator's choices, the
+  measured 5,000/hour Actions token limit and the results after the periodic
+  merge check landed (#51702).
+- RFC `merge-worker-fits-the-api-budget` marks the unmet target in its status
+  and says which call-count formula is the estimate and which the count
+  (#51723).
+
+### Internal
+
+- Test the installed-release receipt parser and Linux runtime packaging against the companion executables named by the offline installation smoke, while confirming unknown companion names remain rejected (#50798).
+- Use the shared atomic updater and declare direct Eio dependencies for observation modules (#50981).
+- Align observation interfaces and labelled arguments with the supported OCaml compiler (#51005).
+- Update native observation fixtures to use current public APIs, clock coercions and workspace policy arguments (#51007).
+- Keep Eio mock clock control separate from coerced production clock views in observation tests (#51019).
+- Use public module aliases and the unit-bearing completed disposition in observation fixtures (#51060).
+- Declare complete Execution outcomes in dashboard test and demo fixtures (#51088).
+- Expose current attention observations and disambiguate Snapshot owner record types (#51095).
+- Attest runtime observation workspace fixtures with the actual observer instance identity (#51097).
+- Align selected native observation fixtures with public module boundaries and canonical path identities (#51124).
+- Supply complete observation diagnostics and current shared-resource mock exports to dashboard consumer fixtures (#51125).
+- Initialize native observation fixtures through current workspace, source and read-policy contracts (#51126).
+- Exercise canonical Digest source initialization and actor-local Mission HTTP ownership in native fixtures (#51129).
+- Align terminal Mission and Digest fixtures with source admission, publication ordering and pinned clock behavior (#51136).
+- E-synth memories hold records with a use date. A record used after the request is labeled keep, and one used before it is planted stale. The synth summary adds `scheduled_ahead_keep_rate` and `scheduled_past_drop_recall`, and label and drop audit cases show the request time. Rows without `use_at` are refused, so E-synth and the training split are generated again (#51265).
+- The floor chain restart test passes the Memory the first run observed, so it reaches its assertions instead of stopping at `Superseded` (#51274).
+- The TUI snapshot keeps the host disk the server measured (`runtime_resolution.disk_observation`) and the published `keeper_cleanup` value as `ts_storage`, each read on its own: an absent, unreadable or failed-probe value no longer takes the tool inventory down with it. `Keeper_cleanup_status_json` now holds both the cleanup value's writer and a new reader that takes the pass summary and each row apart, so a step this build does not know is kept as its reason and the rows beside it are still read. `Keeper_cleanup_status.concern` names what in an attempt asks for a look: a failure, or a run to the end that left entries behind (#51305).
+- Add the harness for the check-finished wake of RFC keeper-wakes-when-a-pr-check-finishes: a pure scorer for false, early, late and missed wakes, a fixture cut from a real head with eight mutations, and a probe that counts the instants where every run of a pull request head had ended before a check run was made (10.0% of the 60 most recent heads of jeong-sik/masc). (#51315)
+- The RFC-0518 evidence bundle holds the stalled-stream and stream-reset probes rerun on an installed build: three zero-window log streams were reset at 90.0 seconds where the earlier build sent none in 105 seconds (#51327).
+- Add a test for the decisions the TUI's value notations rest on: which of
+  today, this year and another year a moment falls in across midnight and
+  the new year, and where a count's separators go around a minus sign
+  (#51346).
+- The RFC-0518 evidence bundle holds the ledger-starvation and TLS CPU probes rerun on an installed build: a client holding 90 bundle streams no longer makes other connections' bundle requests answer 503, and with the tls-eio pin of #51374 installed the server CPU per MB of a TLS connection is 28-42% below the build before the stack over five alternating pairs. One cleartext connection reads 39-42% above it; the cause is open in #51400 (#51355).
+- The keeper-librarian harness reads each E-real record with the template the record was drawn with, numbers a batch's memories from `--first-memory`, and pools audited E-synth batches into one set (`e_synth_audit.py pool`). G1 counts the E-real requests the base endpoint takes, and `verdict.json` lists each candidate's off-live drops (#51367)
+- A keeper-librarian harness run on Tinker stops when the endpoint answers HTTP 402, as it does on a spent budget, instead of sending every remaining call to be refused (#51367)
+- `e_real_manifest.py --of <manifest>` takes a lost E-real snapshot again from a base that still holds the manifest's records, and names the records that are gone. E-real is pinned as the 50 records left of the earlier 52 (#51367)
+- The shared Goal test reads whole list rows with `detailed=true`, matching the short list rows from #51267 (#51369).
+- A pull request's type-check no longer needs the apt mirror when its opam switch is restored from the cache: the build compiles the committed `proto/masc_workspace.ml` instead of calling `protoc`, and the pin and dependency steps first ask opam for no system packages on such a run. `dune build @proto/generated` regenerates the file and compares it; `proto-generated.yml` runs that on pull requests that change `proto/`, the lock or the pin script (#51409).
+- The keeper-librarian harness is pinned again: `pass_lines.json` names the files main holds, the measured prompt, and a new E-synth of 90 requests pooled from two audited batches. Its eval, teacher and training scripts start again; `prompt_lines.json` lists no baseline run until new ones are measured (#51416)
+- `Keeper_receipt_wait_state` lists every state and event pair of a receipt-waiting task, and a store test checks each pair against the real store (#51424).
+- `Keeper_tool_runtime.context` has a required `execution_scope` field, set from `Keeper_repetition_scope.Execution.scope` by `Keeper_run_tools_setup` through `?execution_scope` of the bundle, handler and dispatch builders. `Keeper_tool_receipt_wait.handle` takes `~execution_scope` and reads the request's owner with `Keeper_receipt_wait_resolution.request_owner`; a call with no scope is refused. The store's refusal at the end of the turn stays as the last check (#51429).
+- `Keeper_tool_execution.Receipt_wait_requested` carries every request a turn waits for, and `Keeper_chat_operation_store.defer_direct_checkpoint` takes `?receipt_waits` (a list) in place of `?receipt_wait`. `Keeper_owner.settle_lost_receipt` writes a lost run's `Unfinished` receipt and resolves the wait in one Owner command, only while the wait is still pending (#51429).
+- `Keeper_client_tool_outbox_wake.create` takes `~settle_lost_waits`, which `server_bootstrap_maintenance` binds to `Keeper_receipt_wait_sweep.settle_lost`. The wake module cannot call `Keeper_execute_background` directly because that module calls `notify` (#51429).
+- `Keeper_run_tools_setup.descriptors_for_run` drops the wait tool from the descriptors of a run that serves no chat execution (#51429).
+- The keeper-librarian teacher is shown what each training request's label says and takes only requests a blind label audit confirmed. `audit_baseline.py` answers request sets the pass lines do not pin, so a training split's labels can be audited before the teacher sees them (#51431)
+- Dashboard test fixtures accept a workspace that names its Observer instance, so the chat operation, tool quality and Keeper queue tests pass and type-check on the SSE transition stack (#51434).
+- A same-stat task replacement written while the TUI observer stream was down now re-reads the workspace backlog on reconnect, so the Overview list no longer keeps the pre-outage rows (#51439).
+- While the workspace match is merely unconfirmed, a line typed for a keeper request now queues behind the composer pending-send notice instead of being refused outright; sending still waits until a confirming read lands. The remaining observer-epoch queue-display coordinates are still in progress (#51439).
+- Five dashboard test files that re-import their component after a module reset confirm the fixture workspace in that module graph, so they pass on the SSE transition stack (#51447).
+- The approval merge request workflow skips events that cannot change a merge
+  (drafts, pull requests closed without merging, title and body edits, review
+  edits), so those events start no runner and spend none of the Actions
+  token budget the merge worker needs (#51459).
+- The keeper-librarian candidate is trained in one pass over the teacher's folder. Training, `cases` and `apply` take a teacher answer only when it is the reply the call log holds for its request as the request is asked now, and stop at a teacher run that did not ask every request to the end (#51462)
+- The main minimal build no longer cancels a build that has started; push and
+  merge-worker runs share one queue that keeps only the newest waiting run
+  (#51464).
+- The verdict on the keeper-librarian candidate A is recorded with its rows. One training pass gave a candidate that answers without a thinking part: it passes the latency gate and misses the other five, so it is not put in the admission slot (#51508)
+- The TLS CPU probe of the RFC-0518 evidence bundle reads the server's CPU time from `/proc/<pid>/stat` on Linux, where `ps -o time` counts whole seconds, and keeps each run's MB, wall time and server CPU in its result. The five Linux readings posted on #51400 were zero or one step of that one-second clock (#51515).
+- The Dune cache shared by the main build and pull request type-checks is
+  named v2, so a type-check never restores one of the empty v1 entries
+  (#51518).
+- The provider connection cache counts a connection closed because a write call failed with the peer's reset before any response byte came back as `request_not_delivered`, apart from `request_failed`. Nothing is sent again; the count is the measurement RFC-0492 §6 asks for before a resend is built (#51528).
+- The login page tests read the state of the login button (whether it is disabled, and whether the element it names as its description is in the page) instead of matching its whole markup, which failed on main after #51491 added an attribute to the button (#51532).
+- A completion review whose walk ends without knowing one candidate's outcome now retains, beside the walk result, how the walk classified each failed candidate (`verifier_review_unknown/v2`). Nothing reads the classification yet (#51540).
+- The scheduled main build deletes the Dune cache entries it replaces, so the
+  repository keeps one entry (about 1.35 GB) instead of one per half hour
+  (#51548).
+- The tests that fetch an account server page read its login from the parsed HTML, through one test library: the form that posts to the start route, its one submit button, whether a person can press it, and whether a disabled button names a description that is on the page and holds text. A test of that reading runs it over 29 hand-written pages. (#51563)
+- Follow-up to #51528 and #51529: the `with_client` comment names `Request_not_delivered`, `request_wire.mli` states its one-request, one-domain contract, and new tests cover a streamed request cut off while written and which exceptions `Http_client.transport_named_peer_close` names (#51575).
+- `Http_client.create_cache` takes an optional `?tls_config`, and `Api_common.make_https_result` takes the same option. A cache without it trusts the system store as before. Tests use it to run `request_not_delivered` cut-offs over https (#51584).
+- Test executables that link `masc_test_deps` put back the SIGCHLD behavior they found after their startup Eio run. On macOS the handler that run left behind made a blocking `Unix.waitpid` end in `EINTR`: 15 of the 29 `test_repo_git` cases failed on every run (#51594).
+- The RFC-0518 evidence bundle records run14: after #51545 the unbound dashboard asset path no longer rereads or compares the bundle body, yet the server CPU of one cleartext HTTP/1.1 connection stayed above the pre-stack binary in all five alternating pairs (median 2.38 to 3.25 ms/MB), and the RFC for that change gains its result section (#51602).
+- A scheduled sweep reruns the merge worker every 30 minutes on each approved
+  pull request that is still open, and a worker started by an event now ends
+  at an API quota instead of holding its runner until the quota resets
+  (#51609).
+- The keeper-librarian prompt comparison reads its baseline as numbers. `prompt_lines.json` (schema v2) holds each model's baseline as hits over chances for the seven metrics, each run's E-real record and the sha256 of the rows they came from, so `prompt_compare.py compare` no longer reads the baseline's run folders or its judges' decisions; `prompt_compare.py baseline` prints the baseline that runs of the pinned template counted. A baseline names the provider and the model it was counted for and the pass lines, the template and the `prompt_counts.py` it was counted under, and a file that names another of them is refused. A file that names another template of the baseline than the `config/prompts/librarian.md` the pass lines pin is refused. A draft run that holds the rows a pinned baseline was counted from is refused. `prompt_lines.json` is read as written: a key the comparison does not read, a key written twice in one object or a value of another shape is refused. A v1 `prompt_lines.json` is refused, and `runs.json` lists one list of runs per model (#51611)
+- The merge sweep records the start of a refusal and the quota it read before
+  the listing when it cannot read the open pull requests (#51612).
+- Two test cases that failed on every scheduled full run now pass: the task transition broadcast fixture sets the Eio clock that a contended backlog lock sleeps on, and the checkpoint stale-guard fixture persists its Keeper metadata so the constitution read admits the article it writes (#51646).
+- Remove two stale test assertions that failed on every scheduled full run: the keeper-column width case in `test_tui_keeper_columns`, and the Librarian progress assertion in the `test_keeper_supervisor` durable catch-up case, which cannot hold without the Original history Addon attached (#51654).
+- Pin with a test that a review cancelled before its requested report starts is read as an attempt without a verdict and reviewed again (#51660).
+- The merge sweep deletes a branch when a merged pull request ended at exactly
+  its tip and no open pull request uses it; native stack layers kept theirs
+  (#51661).
+- The run14 record in the RFC-0518 evidence bundle and the result section of the unbound dashboard asset RFC no longer conclude a cause. They report that the cleartext single-connection CPU gap is still present with #51545 installed, and that run14 can decide neither how much the removed reread and compare contributed nor whether the GC hypothesis holds (#51670).
+- The merge sweep reads protected branch names through the REST listing; the
+  Actions token may not read them through GraphQL, so the cleanup deleted
+  nothing (#51676).
+
 ## [0.71.0] - 2026-11-11
 
 ### 요약

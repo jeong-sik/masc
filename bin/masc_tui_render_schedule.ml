@@ -2257,16 +2257,19 @@ let classify_wake_reading ~history_error ~history =
 (* A schedule the runner holds back (#38205). Its status stays [due] and its
    last wake is still the previous occurrence's, so without this reading a
    held heartbeat looks like a late one. *)
-let schedule_hold_tag ~due = "held since " ^ due
+let schedule_hold_tag ~ko ~due = if ko then due ^ " 부터 보류" else "held since " ^ due
 
-let schedule_hold_reading ~due =
-  schedule_hold_tag ~due ^ ": the keeper has not taken the previous wake yet"
+let schedule_hold_reading ~ko ~due =
+  schedule_hold_tag ~ko ~due
+  ^ (if ko then ": Keeper 가 앞선 실행을 아직 받지 않음"
+     else ": the keeper has not taken the previous wake yet")
 
 (* #34642: a schedule held on its target's shutdown fence. *)
-let schedule_fence_hold_reading ~due ~target ~fence_owner =
+let schedule_fence_hold_reading ~ko ~due ~target ~fence_owner =
   Printf.sprintf
-    "%s: %s is shutting down (%s) and takes no wakes until that finishes"
-    (schedule_hold_tag ~due)
+    (if ko then "%s: %s 가 종료 중(%s)이라 끝날 때까지 실행을 받지 않음"
+     else "%s: %s is shutting down (%s) and takes no wakes until that finishes")
+    (schedule_hold_tag ~ko ~due)
     target
     fence_owner
 
@@ -2274,17 +2277,20 @@ let schedule_fence_hold_reading ~due ~target ~fence_owner =
    A tick that fails keeps the list without looking, so the hold is drawn at
    the time it was [checked], not as the present. The due column beside the
    row still says when the held occurrence came due. *)
-let schedule_hold_as_of_tag ~checked = "held as of " ^ checked
+let schedule_hold_as_of_tag ~ko ~checked =
+  if ko then checked ^ " 기준 보류" else "held as of " ^ checked
 
-let schedule_hold_as_of_reading ~checked =
-  schedule_hold_as_of_tag ~checked
-  ^ ": the keeper had not taken the previous wake by then"
+let schedule_hold_as_of_reading ~ko ~checked =
+  schedule_hold_as_of_tag ~ko ~checked
+  ^ (if ko then ": 그때까지 Keeper 가 앞선 실행을 받지 않았음"
+     else ": the keeper had not taken the previous wake by then")
 
 (* The fence hold drawn the same way, at the time it was [checked]: a failed
    tick does not re-read why it held either (#38411, #34642). *)
-let schedule_fence_hold_as_of_reading ~checked ~target ~fence_owner =
+let schedule_fence_hold_as_of_reading ~ko ~checked ~target ~fence_owner =
   Printf.sprintf
-    "%s: %s was shutting down (%s) and took no wakes until that finished"
-    (schedule_hold_as_of_tag ~checked)
+    (if ko then "%s: %s 가 종료 중(%s)이었고 끝날 때까지 실행을 받지 않았음"
+     else "%s: %s was shutting down (%s) and took no wakes until that finished")
+    (schedule_hold_as_of_tag ~ko ~checked)
     target
     fence_owner

@@ -1035,17 +1035,40 @@ let keeper_names_or_error_rows config =
       ] )
 ;;
 
+(* A row from one of these sources means the Keeper's own work is put off
+   until that source finishes; any other row is something it waits on. *)
+let defers (row : waiting_row) =
+  match row.source with
+  | Fusion_running | Owner_shutdown -> true
+  | Event_queue_pending | Chat_operation_queued | Chat_operation_running
+  | Hitl_pending | Schedule_waiting | Operator_pending_confirm
+  | Runtime_quota_spent | Read_error | Observation_unavailable -> false
+;;
+
 let row_state rows =
-  if
-    List.exists
-      (fun row ->
-         row.source = Fusion_running
-         || row.source = Owner_shutdown)
-      rows
+  if List.exists defers rows
   then Deferred
   else if rows <> []
   then Waiting
   else Idle
+;;
+
+(* The sources that put a Keeper in its state, each once, in row order: the
+   deferring sources of a deferred Keeper, every source of a waiting one, and
+   none for an idle or busy one. A reader shows the state with these beside
+   it and does not pick them out of the rows itself. *)
+let state_sources state rows =
+  let distinct rows =
+    List.fold_left
+      (fun sources (row : waiting_row) ->
+         if List.mem row.source sources then sources else sources @ [ row.source ])
+      []
+      rows
+  in
+  match state with
+  | Idle | Busy -> []
+  | Waiting -> distinct rows
+  | Deferred -> distinct (List.filter defers rows)
 ;;
 
 let keeper_state ~busy rows =
@@ -1228,6 +1251,11 @@ let keeper_json ~base_path keeper_name ~busy ~queue_residence rows =
     [ "keeper_name", `String keeper_name
     ; "paused", Option.fold ~none:`Null ~some:(fun value -> `Bool value) paused
     ; "state", `String (keeper_state_to_string state)
+    ; ( "state_sources"
+      , `List
+          (List.map
+             (fun source -> `String (source_to_string source))
+             (state_sources state rows)) )
     ; "waiting_on", `List (List.map waiting_row_json rows)
     ; "waiting_count", `Int (List.length rows)
     ; "sources", `Assoc (source_counts rows)

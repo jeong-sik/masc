@@ -437,62 +437,62 @@ let row_list_edges = [ b ~ko:"처음/끝" ~rows:Needs_row Navigate "Home/End" "t
    spelling: [Masc_tui_footer.never_dropped_keys] pins "y / n", which the open
    approval's own footer never said. *)
 let approval_decide =
-  b Act "y / n" "decide" ~help:"y confirms, n denies the approval under the cursor"
+  b ~ko:"승인 / 거절" Act "y / n" "decide" ~help:"y confirms, n denies the approval under the cursor"
 
 let approval_retry =
-  b Act "R" "retry Auto Judge"
+  b ~ko:"Auto Judge 다시" Act "R" "retry Auto Judge"
     ~help:"only when the blocked row is safely rearmable"
 
-let approval_move = b Navigate "j/k" "move"
+let approval_move = b ~ko:"선택" Navigate "j/k" "move"
 let approval_read =
-  b Act "Enter" "read the whole ask"
+  b ~ko:"요청 전체 읽기" Act "Enter" "read the whole ask"
     ~help:"the reader takes its own keys: j/k and the page keys scroll it, \
            Home/End reach its ends, [ / ] step asks, Esc goes back"
 let approval_value_bytes =
-  b Navigate "v" "string bytes" ~detail:Detail_only
+  b ~ko:"문자열 바이트" Navigate "v" "string bytes" ~detail:Detail_only
     ~help:"read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns"
 let approval_answer_receipt =
   b ~ko:"마지막 답변" Navigate "v" "last answer" ~detail:List_only
     ~help:"while browsing, capture the last answer receipt, original question identity and retained follow-up; scroll or search the complete text; v or Esc returns"
 let approval_answer =
-  b Act "a" "answer a question"
+  b ~ko:"질문에 답하기" Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
 let approval_answer_hint = key_hint approval_answer
 let approval_installation_results =
-  b Act "g" "installation Results"
+  b ~ko:"설치 결과" Act "g" "installation Results"
     ~help:"after answering an installation's question, open that installation's Results in Plugins, where the reveal appears"
 let approval_origin =
-  b Act "o / O" "source / inspect"
+  b ~ko:"출처 / 살펴보기" Act "o / O" "source / inspect"
     ~help:"o shows the question source; O opens that immutable turn's retained input. With no open question use the last answer's source. Esc returns to the question draft; a missing source is never replaced by the Keeper's latest turn"
 let approval_walk =
-  b Navigate "[ / ]" "ask"
+  b ~ko:"요청" Navigate "[ / ]" "ask"
     ~help:"while browsing or answering a question, move to the previous or next ask; \
            with an approval detail open, move to the previous or next approval"
 let approval_workspace =
-  b Act "w" "Workspace mode"
+  b ~ko:"작업 공간 모드" Act "w" "Workspace mode"
     ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
 let approval_outside =
-  b Act "e" "Outside mode"
+  b ~ko:"외부 모드" Act "e" "Outside mode"
     ~help:"choose how calls into outside services are reviewed; Enter applies"
 let approval_question =
-  b Navigate "Left/Right" "question"
+  b ~ko:"질문" Navigate "Left/Right" "question"
     ~help:"while answering, step through the open ask's questions; \
            j/k and the arrows do the same"
 let approval_pick =
-  b Act "1-9" "pick"
+  b ~ko:"고르기" Act "1-9" "pick"
     ~help:"while answering, choose by the position the server listed"
 let approval_write =
-  b Act "t" "write"
+  b ~ko:"쓰기" Act "t" "write"
     ~help:"while answering, open the free-text editor; Enter saves it, \
            Esc drops it"
 let approval_skip =
-  b Act "s" "skip"
+  b ~ko:"건너뛰기" Act "s" "skip"
     ~help:"while answering, leave this question unanswered"
 let approval_clear =
-  b Act "c" "clear"
+  b ~ko:"지우기" Act "c" "clear"
     ~help:"while answering, drop what is drafted for this question"
 let approval_back =
-  b Act "Esc" "back"
+  b ~ko:"뒤로" Act "Esc" "back"
     ~help:"leave the answering mode; with the editor open it drops the draft first"
 
 (* Where a Fusion run's caller and its Board evidence are, on the list and
@@ -1531,8 +1531,17 @@ type approvals_footer =
 (* The approval queue and its question reader use the same binding records as
    Help. Their modes need a deliberate order and, for Enter, a mode-specific
    verb; the dispatcher gives that key a different action in each mode. *)
-let footer_hints_approvals mode =
-  let hint = key_hint in
+let footer_hints_approvals ~lang mode =
+  let say korean english =
+    match lang with Lang_ko -> korean | Lang_en -> english
+  in
+  (* A mode's own word for a key replaces the binding's, in both languages. *)
+  let hint ?label (binding : binding) =
+    match label, lang with
+    | Some word, (Lang_ko | Lang_en) -> key_hint ~label:word binding
+    | None, Lang_ko -> key_hint ?label:binding.label_ko binding
+    | None, Lang_en -> key_hint binding
+  in
   let row items = String.concat "  " items in
   match mode with
   | Approval_browsing { approvals; asks; source; last_answer } ->
@@ -1557,9 +1566,12 @@ let footer_hints_approvals mode =
            ; hint approval_back; hint listing_quit
            ])
   | Approval_writing ->
-      row [ hint ~label:"save" approval_read; hint ~label:"cancel" approval_back ]
+      row
+        [ hint ~label:(say "저장" "save") approval_read
+        ; hint ~label:(say "취소" "cancel") approval_back
+        ]
   | Approval_armed ->
-      "Press Enter again to send  |  "
+      say "Enter 를 한 번 더 누르면 전송  |  " "Press Enter again to send  |  "
       ^ row [ hint approval_skip; hint approval_clear; hint approval_back ]
   | Approval_answering { has_choices; takes_text } ->
       row
@@ -1567,7 +1579,7 @@ let footer_hints_approvals mode =
         @ (if has_choices then [ hint approval_pick ] else [])
         @ (if takes_text then [ hint approval_write ] else [])
         @ [ hint approval_skip; hint approval_clear
-          ; hint ~label:"answer" approval_read; hint approval_back
+          ; hint ~label:(say "답하기" "answer") approval_read; hint approval_back
           ])
 
 (* Whether this surface's table scopes any binding to one of the two states.
@@ -1612,16 +1624,16 @@ let footer_hints_metrics ~lang ~section ~telemetry =
    queue behind it and to call [R] something the key table does not. *)
 type approval_value_hint = No_value_reading | Readable_values | Byte_values
 
-let footer_hints_approval_detail ~value_hint =
-  hints_of_bindings
-    ([ b Navigate "j/k" "scroll" ]
+let footer_hints_approval_detail ~lang ~value_hint =
+  hints_of_bindings ~lang
+    ([ b ~ko:"스크롤" Navigate "j/k" "scroll" ]
     @ (match value_hint with
        | No_value_reading -> []
        | Readable_values -> [ approval_value_bytes ]
-       | Byte_values -> [ b Navigate "v" "text" ])
+       | Byte_values -> [ b ~ko:"글자" Navigate "v" "text" ])
     @ [ approval_decide
     ; approval_retry
-    ; b Act "Esc" "back"
+    ; b ~ko:"뒤로" Act "Esc" "back"
     ])
 
 (* The Board draft's two footers were written out in the renderer, and the

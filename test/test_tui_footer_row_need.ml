@@ -183,7 +183,7 @@ let test_a_goal_list_with_a_row_names_every_key () =
    [w] and [e] open a palette, so they act on an empty queue too. *)
 let approvals_footer ?(approvals = false) ?(asks = Keys.No_asks)
     ?(source = false) () =
-  Keys.footer_hints_approvals
+  Keys.footer_hints_approvals ~lang:Masc_tui_types.Lang_en
     (Keys.Approval_browsing { approvals; asks; source; last_answer = false })
 
 let approvals_always = [ "w"; "e"; "r"; "Tab"; "Esc"; "q" ]

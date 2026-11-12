@@ -199,7 +199,8 @@ type approvals_footer =
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
 
-val footer_hints_approvals : approvals_footer -> string
+val footer_hints_approvals :
+  lang:Masc_tui_types.ui_language -> approvals_footer -> string
 (** Project the Approvals queue and question reader's modal footers from the
     same binding records as the Help sheet. *)
 
@@ -248,7 +249,8 @@ val board_compose_menu_hints :
     the hearth cycle. Both come from the actual binding records. *)
 
 type approval_value_hint = No_value_reading | Readable_values | Byte_values
-val footer_hints_approval_detail : value_hint:approval_value_hint -> string
+val footer_hints_approval_detail :
+  lang:Masc_tui_types.ui_language -> value_hint:approval_value_hint -> string
 (** The keys an open approval answers to. The decision keys are one item
     ("y / n"), the spelling {!Masc_tui_footer} pins, so a narrow row gives up
     the scroll before it gives up the answer. *)

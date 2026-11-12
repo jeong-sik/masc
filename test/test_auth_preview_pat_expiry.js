@@ -43,14 +43,20 @@ async function exerciseList(rows) {
     assert.equal(requests.length, 1);
     assert.equal(requests[0][1].expires_at_ms, null);
   }
-  for (const value of ['tomorrow', '1e999', '1.5', '9007199254740992']) {
+  // The field is a date and time in the local time zone (an input of type
+  // datetime-local). What is no date and time is refused in the page, a bare
+  // count of milliseconds included: nothing is sent, and the result line is
+  // not left empty.
+  for (const value of ['tomorrow', '1e999', '1730000000000']) {
     const { requests, message } = await exercise(value);
     assert.equal(requests.length, 0, value);
-    assert.match(message, /safe integer/);
+    assert.notEqual(message, '', value);
   }
-  const { requests } = await exercise('1730000000000');
+  const local = '2026-12-01T09:30';
+  const { requests } = await exercise(local);
   assert.equal(requests.length, 1);
-  assert.equal(requests[0][1].expires_at_ms, 1730000000000);
+  assert.equal(requests[0][1].expires_at_ms, new Date(local).getTime());
+  assert(Number.isSafeInteger(requests[0][1].expires_at_ms));
   const normalExpiry = 1730000000000;
   const outsideDateRange = 8640000000000001;
   assert(Number.isSafeInteger(outsideDateRange));
@@ -69,5 +75,5 @@ async function exerciseList(rows) {
     row('revoked-large', outsideDateRange, 'revoked'), row('still-open', normalExpiry)
   ]);
   assert(revoked.includes('revoked-large') && revoked.includes('still-open'));
-  console.log('PAT expiry handlers: 9 cases passed');
+  console.log('PAT expiry handlers passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

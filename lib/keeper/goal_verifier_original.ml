@@ -18,7 +18,8 @@ type t = {
 }
 
 let output_contract_text () =
-  Printf.sprintf "Call the report_review_verdict tool exactly once with verdict one of: %s."
+  Printf.sprintf "Call the %s tool exactly once with verdict one of: %s."
+    Task.Anti_rationalization.report_tool_name
     (String.concat ", " Task.Anti_rationalization.valid_verdict_strings)
 
 let render_prompt ~subject ~measurement ~lookup_schemas ~root_layout ~submitted_evidence =

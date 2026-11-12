@@ -50,15 +50,62 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
     match observation with
     | Verifier_review_execution.Awaiting -> Error (Execution_pending "original execution has no terminal observation")
     | Repair_required detail -> Error (Execution_repair_required detail)
-    | Cancelled_without_verdict result ->
-      (* The journals settle every effect, so the refusal is definite and the
-         owner's successor walk may run the next attempt. *)
-      let evidence = `Assoc ["schema",`String "verifier_review_refusal/v1";"certainty",`String "definite";
-        "observations",`List (List.map (fun runtime_id ->
-          `Assoc ["fact",`String "cancelled";"runtime_id",`String runtime_id]) result.AR.retryable_runtimes);
-        "result",O.result_to_json result] in
-      let* _ = save retained (Progress.Refused {stage=Progress.Execution;evidence}) in
-      Ok result
+    | No_verdict {first;later} ->
+      (* The journals settle every effect and hold no report, so this attempt
+         produced no verdict and the refusal is definite. What the walk left
+         says which runtimes may review the same original again. *)
+      let endings = first :: later in
+      let* walk = Walk_result.read (O.progress retained)
+        |> Result.map_error (fun detail -> Execution_repair_required detail) in
+      let executed = List.fold_left (fun runtimes (runtime_id,_) ->
+        if List.mem runtime_id runtimes then runtimes else runtimes @ [runtime_id]) [] endings in
+      let refuse ~candidate_observations result =
+        let evidence = `Assoc ["schema",`String "verifier_review_refusal/v1";"certainty",`String "definite";
+          "observations",`List (candidate_observations @ List.map (fun (runtime_id,ending) ->
+            Verifier_review_ending.observation ~runtime_id ending) endings);
+          "result",O.result_to_json result] in
+        let* _ = save retained (Progress.Refused {stage=Progress.Execution;evidence}) in
+        Ok result in
+      (match walk with
+       | Walk_result.No_walk_result ->
+         (* The walk was cut, so no classification survived. The successor
+            attempt walks every slot again and reads each path's rest itself. *)
+         let last = List.fold_left (fun _ (runtime_id,_) -> runtime_id) (fst first) later in
+         refuse ~candidate_observations:[] {AR.verdict=None;evaluator_runtime=last;
+           generator_runtime=V.generator_runtime original;evaluator_execution=None;
+           gate=AR.Evaluator_unavailable;
+           fallback_reason=Some "the review walk ended before it retained a result, and no execution reported a verdict";
+           retryable_runtimes=executed;model_absent_runtimes=[]}
+       | Walk_result.Walk_result {candidates;result} ->
+         let* walked = O.result_of_json result
+           |> Result.map_error (fun detail -> Execution_repair_required detail) in
+         let* () = match walked.AR.verdict,walked.gate,walked.retryable_runtimes with
+           | None,AR.Evaluator_unavailable,[] -> Ok ()
+           | (None | Some _),(AR.Evaluator_unavailable | Structured_tool | Invalid_verdict),_ ->
+             Error (Execution_repair_required "retained walk result is not the refusal an unknown outcome leaves") in
+         (* A candidate whose outcome the walk did not know is resolved by its
+            own execution record; without one it stays unknown. *)
+         let* () =
+           if List.for_all (fun (candidate:Walk_result.candidate) ->
+             match candidate.certainty with
+             | AR.Outcome_unknown -> List.mem candidate.runtime_id executed
+             | Before_dispatch | Definite_refusal -> true) candidates
+           then Ok ()
+           else Error (Execution_repair_required
+             "walk result names a candidate whose outcome is unknown and that left no execution record") in
+         let candidate_observations = List.filter_map (fun (candidate:Walk_result.candidate) ->
+           match candidate.certainty with
+           | AR.Outcome_unknown -> None
+           | Before_dispatch | Definite_refusal ->
+             Some (`Assoc ["fact",`String (Walk_result.certainty_label candidate.certainty);
+               "runtime_id",`String candidate.runtime_id;
+               "error_category",`String candidate.error_category])) candidates in
+         let retryable = List.fold_left (fun runtimes (candidate:Walk_result.candidate) ->
+           match candidate.failure with
+           | AR.Reviews_again when not (List.mem candidate.runtime_id runtimes) ->
+             runtimes @ [candidate.runtime_id]
+           | Reviews_again | Model_absent | Producer_must_act -> runtimes) [] candidates in
+         refuse ~candidate_observations {walked with AR.retryable_runtimes=retryable})
     | Verdict result ->
       let* _ = retain_judgment retained result in
       Ok result in
@@ -179,7 +226,7 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
         match O.load_retained ~store ~verification_id ~attempt ~installation_id ~package_id with
         | Ok saved -> (match Progress.phase (O.progress saved) with
             | Dispatch_pending _ -> ignore (save saved (Progress.Execution_observed
-                (Progress.Outcome_unknown (`Assoc ["cause",`String "review_cancelled"]))))
+                (Progress.Outcome_unknown Walk_result.cancelled)))
             | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _
             | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> ())
         | Error _ -> ());

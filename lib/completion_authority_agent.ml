@@ -613,9 +613,11 @@ type retry_scheduling =
     is left waiting on a producer, an operator, or the lane's own retry; the
     registry row and the WARN line are both read off this sum, so neither can
     say something the other does not. Only
-    [Not_reviewed] can request a retry: the evaluator's typed candidate
-    failures are the only automatic-retry authority, so no other stop can ask
-    for one. *)
+    [Not_reviewed] can request a retry. Its authority is the evaluator's typed
+    candidate failures, or, for an attempt whose walk was cut before it
+    retained a result, the execution records that establish the attempt
+    produced no verdict ([Verifier_review_worker]); no other stop can ask for
+    one. *)
 type stop_cause =
   | Infrastructure_unavailable of
       { stage : Verification_run_registry.infrastructure_stage
@@ -629,8 +631,10 @@ type stop_cause =
       ; retryable_runtimes : string list
           (** Candidates whose typed failure passes with time: a transient
               error, or a provider rest whose end is known
-              ([Task.Anti_rationalization.review_result]). A non-empty list
-              requests the retry, and their recorded path rests date it. *)
+              ([Task.Anti_rationalization.review_result]). For an attempt
+              whose walk was cut, the runtimes whose executions ended without
+              a verdict. A non-empty list requests the retry, and their
+              recorded path rests date it. *)
       ; model_absent_runtimes : string list
           (** Candidates whose typed refusal was model-absence (a retired or
               unknown model): permanent for the unchanged request, excluded
@@ -646,10 +650,11 @@ type process_outcome =
   | Superseded_by of { authority : string }
   | Stalled of stop_cause
 
-(* The one place that reads the evaluator's retryability. A candidate whose
-   failure passes with time is the only automatic-retry authority; a review
-   with none leaves the next move to the producer, the operator, or the
-   whole-backlog sweep. *)
+(* The one place that reads the review's retryability. The runtimes a
+   non-verdict names are the only automatic-retry authority: candidates whose
+   typed failure passes with time, or the runtimes of an attempt whose walk
+   was cut. A review that names none leaves the next move to the producer,
+   the operator, or the whole-backlog sweep. *)
 let retry_request_of_stop_cause : stop_cause -> retry_request = function
   | Execution_pending _ -> Observe_original_requested
   | Not_reviewed { retryable_runtimes = _ :: _; _ } -> Retry_requested

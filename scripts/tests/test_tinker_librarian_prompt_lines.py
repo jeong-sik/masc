@@ -323,6 +323,22 @@ class PinnedLinesTest(unittest.TestCase):
                 lines = counted_under(raw | {"pass_lines_sha256": other}, {"pass_lines_sha256": other})
                 self.assertEqual(self.refusal_of(lines), "prompt_lines.json was fixed under other pass lines")
 
+    def test_lines_that_name_another_template_than_the_present_one_are_refused(self) -> None:
+        # Pass lines pinned again for a new template, and a file that keeps the earlier template: the
+        # file names the present pass lines, and its baselines agree with the template it names.
+        earlier = sha("an earlier template")
+        for state, raw in self.states.items():
+            with self.subTest(state=state):
+                lines = counted_under(raw | {"baseline_template_sha256": earlier}, {"template_sha256": earlier})
+                self.assertEqual(self.refusal_of(lines), "prompt_lines.json names another template of the baseline "
+                                                         "than the present librarian.md")
+
+    def test_a_file_that_is_not_json_is_refused(self) -> None:
+        text = L.PROMPT_LINES.read_text(encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            self.read(text[:text.rindex("}")])
+        self.assertIn("prompt_lines.json is not JSON: ", str(caught.exception))
+
     def test_a_key_written_twice_is_refused(self) -> None:
         text = L.PROMPT_LINES.read_text(encoding="utf-8")
         once = '"worse_sigmas": 2.5,'

@@ -32,6 +32,7 @@ import eval_admission as V
 import prompt_compare as P
 import prompt_counts as C
 import prompt_lines as L
+import synth_render
 from tinker_librarian_prompt_fixtures import (
     BASE_T,
     DRAFT_T,
@@ -352,7 +353,7 @@ class PlanTest(unittest.TestCase):
 
 class CommandTest(unittest.TestCase):
     """The two commands over invented run folders of every pinned item, under the present pass lines
-    and a prompt_lines.json of one model, in a temporary folder."""
+    and template and a prompt_lines.json of one model, in a temporary folder."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -361,6 +362,7 @@ class CommandTest(unittest.TestCase):
         self.items = (cast(int, cast(Row, pass_lines["e_synth"])["items"]),
                       cast(int, cast(Row, pass_lines["e_real"])["items"]))
         self.pin = C.sha256_file(V.PASS_LINES)
+        self.template = C.sha256_file(synth_render.TEMPLATE)
         self.lines = self.root / "prompt_lines.json"
         self.sent = itertools.count(1)
 
@@ -368,8 +370,9 @@ class CommandTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def write_lines(self, pinned: object) -> None:
-        """A prompt_lines.json that pins the present files and holds `pinned` as the Inkling baseline."""
-        raw = {"schema": L.SCHEMA, "pass_lines_sha256": self.pin, "baseline_template_sha256": BASE_T,
+        """A prompt_lines.json that pins the present files, names the present template as the template
+        of the baseline, and holds `pinned` as the Inkling baseline."""
+        raw = {"schema": L.SCHEMA, "pass_lines_sha256": self.pin, "baseline_template_sha256": self.template,
                "worse_sigmas": 2.5, "better_sigmas": 2.0, "better_from": ["inkling"],
                "models": {"inkling": {"provider": "tinker", "model": "inkling-model", "runs": 2, "baseline": pinned}},
                "files_sha256": {name: C.sha256_file(L.HERE / name) for name in L.PINNED_FILES}}
@@ -403,7 +406,8 @@ class CommandTest(unittest.TestCase):
     def test_compare_reads_the_printed_baseline_after_its_runs_are_gone(self) -> None:
         both = 2 * self.items[0]
         self.write_lines(None)
-        printed = cast(dict[str, Row], json.loads(self.command("baseline", "--runs", str(self.runs("base", BASE_T, 0)))))
+        runs = str(self.runs("base", self.template, 0))
+        printed = cast(dict[str, Row], json.loads(self.command("baseline", "--runs", runs)))
         pinned = printed["inkling"]
         self.assertEqual((pinned["provider"], pinned["model"]), ("tinker", "inkling-model"))
         self.assertEqual(cast(Row, pinned["counts"])["stale_drop_recall"], [0, both])
@@ -432,7 +436,7 @@ class CommandTest(unittest.TestCase):
 
     def test_compare_refuses_the_baselines_own_runs_under_another_templates_name(self) -> None:
         self.write_lines(None)
-        base = self.runs("base", BASE_T, 0)
+        base = self.runs("base", self.template, 0)
         self.write_lines(cast(dict[str, Row], json.loads(self.command("baseline", "--runs", str(base))))["inkling"])
         for summary in self.root.glob("base-*/summary.json"):
             held = cast(Row, json.loads(summary.read_text(encoding="utf-8")))
@@ -443,17 +447,23 @@ class CommandTest(unittest.TestCase):
         self.assertEqual(str(caught.exception), "a inkling draft run holds the rows a pinned baseline was counted from")
         self.assertFalse(out.exists())
 
-    def test_both_commands_stop_when_a_pinned_file_is_another_version(self) -> None:
+    def test_both_commands_stop_when_the_lines_do_not_name_the_present_files(self) -> None:
+        # An earlier version of a pinned file, and an earlier template: the runs were drawn with the
+        # template the file names, under the present pass lines.
         self.write_lines(None)
         raw = cast(Row, json.loads(self.lines.read_text(encoding="utf-8")))
         files = cast(dict[str, str], raw["files_sha256"]) | {"prompt_compare.py": sha("an earlier version")}
-        self.lines.write_text(json.dumps(raw | {"files_sha256": files}), encoding="utf-8")
         runs, out = str(self.runs("base", BASE_T, 0)), self.root / "compare.json"
-        for argv in (("baseline", "--runs", runs), ("compare", "--runs", runs, "--out", str(out))):
-            with self.subTest(command=argv[0]):
-                with self.assertRaises(SystemExit) as caught:
-                    self.command(*argv)
-                self.assertEqual(str(caught.exception), "prompt_lines.json pins another version of prompt_compare.py")
+        for change, refusal in (
+                ({"files_sha256": files}, "prompt_lines.json pins another version of prompt_compare.py"),
+                ({"baseline_template_sha256": BASE_T},
+                 "prompt_lines.json names another template of the baseline than the present librarian.md")):
+            self.lines.write_text(json.dumps(raw | change), encoding="utf-8")
+            for argv in (("baseline", "--runs", runs), ("compare", "--runs", runs, "--out", str(out))):
+                with self.subTest(change=sorted(change), command=argv[0]):
+                    with self.assertRaises(SystemExit) as caught:
+                        self.command(*argv)
+                    self.assertEqual(str(caught.exception), refusal)
         self.assertFalse(out.exists())
 
     def test_a_runs_json_that_splits_a_model_into_base_and_draft_is_refused(self) -> None:

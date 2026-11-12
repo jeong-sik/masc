@@ -24,6 +24,10 @@ model's runs again with `prompt_compare.py baseline`, and pin what it prints. Af
 model, the pass lines or the template the old runs are refused as well (`prompt_counts.measure`,
 `prompt_compare.baseline_problem`), so the model runs again first.
 
+The template of the baseline is config/prompts/librarian.md as the pass lines pin it. A file that
+names another template is refused (`pinned_lines`), so pass lines pinned again for a new template
+leave the file refused until it names that template and its baselines are counted again.
+
 The file is read as written: a key the comparison does not read, a key written twice in one object,
 or a value of another shape is refused.
 """
@@ -39,6 +43,7 @@ from pathlib import Path
 from typing import cast
 
 import eval_admission as V
+import synth_render
 from prompt_counts import Count, Metric, RealRecord, sha256_file
 
 type JsonObject = dict[str, object]
@@ -269,14 +274,22 @@ def once(pairs: list[tuple[str, object]]) -> JsonObject:
 
 
 def pinned_lines() -> Lines:
-    """prompt_lines.json, read once it pins the present files of the comparison and was fixed under the
-    present pass lines. SystemExit otherwise."""
-    lines = lines_of(json.loads(PROMPT_LINES.read_text(encoding="utf-8"), object_pairs_hook=once))
+    """prompt_lines.json, read once it pins the present files of the comparison, was fixed under the
+    present pass lines and names the present config/prompts/librarian.md as the template of the
+    baseline. The pass lines pin that template, and `eval_admission.load_pass_lines` holds the file to
+    their pin. SystemExit otherwise, and when the file is not JSON."""
+    try:
+        lines = lines_of(json.loads(PROMPT_LINES.read_text(encoding="utf-8"), object_pairs_hook=once))
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"prompt_lines.json is not JSON: {error}") from error
     changed = [name for name, pinned in lines.files_sha256.items() if pinned != sha256_file(HERE / name)]
     if changed:
         raise SystemExit("prompt_lines.json pins another version of " + ", ".join(changed))
     if sha256_file(V.PASS_LINES) != lines.pass_lines_sha256:
         raise SystemExit("prompt_lines.json was fixed under other pass lines")
+    if sha256_file(synth_render.TEMPLATE) != lines.baseline_template_sha256:
+        raise SystemExit("prompt_lines.json names another template of the baseline than the present "
+                         f"{synth_render.TEMPLATE.name}")
     return lines
 
 

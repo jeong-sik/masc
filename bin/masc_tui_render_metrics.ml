@@ -7,8 +7,8 @@ module Rows = Masc_tui_rows
 
 module Task_flow = Masc_tui_task_flow
 
-(* Every row of this screen is written in English only, so the fleet words
-   drawn inside its sentences are asked for in English too. *)
+(* Every row of this screen is written in English only, so the fleet and
+   probe words drawn inside its sentences are asked for in English too. *)
 let fleet_words_in_korean = false
 
 type turn_counts = { running : int; idle : int; unavailable : int }
@@ -147,13 +147,22 @@ let format_megawords words =
 let repeat_glyph glyph count =
   if count <= 0 then "" else String.concat "" (List.init count (fun _ -> glyph))
 
-(* The probe word comes off the wire, and this pane draws it beside its own
-   prose. One place to escape it, so the three rows that ask for it cannot
-   each forget. *)
-let scheduler_probe_text probe =
-  match String.trim probe with
-  | "" -> "unreported"
-  | value -> Terminal_text.single_line value
+(* The probe's state in words. A word from a server newer than this build is
+   drawn as it came behind [?] (RFC tui-one-screen-grammar section 7.1). That
+   word and a stopped probe's reason come off the wire, so both are escaped
+   here, where the three rows that ask for them cannot each forget. *)
+let scheduler_probe_word ~ko = function
+  | Decode.Probe_reported Scheduler_lag.Not_started ->
+      if ko then "시작 전" else "not started"
+  | Decode.Probe_reported Scheduler_lag.Running -> if ko then "실행 중" else "running"
+  | Decode.Probe_reported (Scheduler_lag.Stopped reason) ->
+      (if ko then "멈춤: " else "stopped: ") ^ Terminal_text.single_line reason
+  | Decode.Probe_reported Scheduler_lag.Cancelled -> if ko then "취소됨" else "cancelled"
+  | Decode.Probe_unknown word -> "? " ^ Terminal_text.single_line word
+
+let scheduler_probe_text = function
+  | None -> "unreported"
+  | Some probe -> scheduler_probe_word ~ko:fleet_words_in_korean probe
 
 let pulse_line ~cols (state : state) kpis =
   let inner_width = max 10 (framed_inner_width cols) in

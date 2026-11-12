@@ -1602,8 +1602,17 @@ type server_gc_health = {
   sgc_major_words : float;
 }
 
+(** The scheduler-lag probe's state, read by the module that writes it. A
+    word this build does not know is kept as it came, so a newer server's
+    state is drawn as written instead of dropped or read as another
+    (RFC tui-one-screen-grammar section 7.1). *)
+type scheduler_probe =
+  | Probe_reported of Scheduler_lag.probe_state
+  | Probe_unknown of string
+
 type server_scheduler_health = {
-  ssch_probe : string;
+  ssch_probe : scheduler_probe option;
+      (** [None] when the scheduler section carries no [probe]. *)
   ssch_samples : int;
   ssch_p50_ms : float;
   ssch_p95_ms : float;

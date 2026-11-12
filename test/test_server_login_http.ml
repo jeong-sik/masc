@@ -1065,17 +1065,26 @@ let a_person_keeps_keepers_over_mcp () =
     Alcotest.(check int) "another person joins" 200 (sign_in t other ~user_id:7).status;
     let theirs = pat other ~csrf:(csrf_of t other) {|["manage_own_keeper","read_state"]|} in
     check "who owns no Keeper" ("false", {|{"keepers":[]}|}) (result theirs "masc_my_keepers");
-    Alcotest.(check string)
-      "and cannot take the name of the first person's Keeper"
-      "true"
-      (fst (result theirs "masc_my_keeper_create" ~arguments:(keeper "keeper-1")));
+    let give_the_first_runtime =
+      `Assoc [ "keeper_id", `String "keeper-1"; "runtime_id", `String "account-1.claude-sonnet-5-5" ]
+    in
     check
-      "nor give it a Runtime"
+      "and gives the first person's Keeper no Runtime"
       ("true", error_json "No Keeper of yours has this name.")
-      (result
-         theirs
-         "masc_my_keeper_assign"
-         ~arguments:(`Assoc [ "keeper_id", `String "keeper-1"; "runtime_id", `String "account-1.claude-sonnet-5-5" ]));
+      (result theirs "masc_my_keeper_assign" ~arguments:give_the_first_runtime);
+    (* A Keeper name is a person's own (issue #51073). *)
+    check
+      "they make a Keeper of the same name"
+      ("false", {|{"keeper_id":"keeper-1","record":"made"}|})
+      (result theirs "masc_my_keeper_create" ~arguments:(keeper "keeper-1"));
+    check
+      "which is theirs, with no Runtime"
+      ("false", {|{"keepers":[{"keeper_id":"keeper-1","runtime_id":null}]}|})
+      (result theirs "masc_my_keepers");
+    check
+      "a Runtime of the first person is not theirs to give it"
+      ("true", error_json "No Runtime of yours has this id.")
+      (result theirs "masc_my_keeper_assign" ~arguments:give_the_first_runtime);
     check "the first person's Keeper is as it was" ("false", listed) (result owner "masc_my_keepers");
     (* Plan S1b-1c: one turn of a Keeper. The tool stops where the route
        stops, before any client starts. *)
@@ -1089,8 +1098,8 @@ let a_person_keeps_keepers_over_mcp () =
       ("true", error_json "No Keeper of yours has this name.")
       (result owner "masc_my_keeper_turn" ~arguments:(turn "keeper-2" "hello"));
     check
-      "a turn of another person's Keeper"
-      ("true", error_json "No Keeper of yours has this name.")
+      "a turn of their Keeper of that name does not run on the first person's Runtime"
+      ("true", error_json "The Keeper has no Runtime. Give it one of yours first.")
       (result theirs "masc_my_keeper_turn" ~arguments:(turn "keeper-1" "hello"));
     check
       "a blank message, in the words of the route"

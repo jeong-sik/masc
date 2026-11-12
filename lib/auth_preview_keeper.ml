@@ -11,7 +11,6 @@ let make_shape = {|The body is {"keeper_id": "<name>"}.|}
 let assign_shape = {|The body is {"keeper_id": "<name>", "runtime_id": "<id>"}.|}
 let unknown_keeper = "No Keeper of yours has this name."
 let unknown_runtime = "No Runtime of yours has this id."
-let taken = "Another person has a Keeper of this name."
 let not_recorded = "The Keeper could not be recorded."
 let ( let* ) = Result.bind
 
@@ -53,20 +52,20 @@ let own_keeper_turn_scope =
 
 let refusal_answer (refusal : Ks.refusal) =
   match refusal with
-  | Ks.Already_made (_ : Authz_types.Keeper_id.t) -> error R.Conflict_409 taken
-  | Ks.Not_made (_ : Authz_types.Keeper_id.t) | Ks.Assigned_by_another _ ->
-    error R.Not_found_404 unknown_keeper
+  | Ks.Not_made (_ : Authz_types.Keeper_id.t) -> error R.Not_found_404 unknown_keeper
   | Ks.Runtime_not_made (_ : Authz_types.Runtime_id.t) | Ks.Not_the_owners_runtime _ ->
     error R.Not_found_404 unknown_runtime
   | Ks.User_not_active (_ : Authz_types.User_id.t) ->
     (* An Admin disabled the person after the gate read the log. *)
     error R.Forbidden_403 "The principal is not active."
+  | Ks.Already_made (_ : Authz_types.Keeper_id.t)
   | Ks.Made_for_another _
   | Ks.Not_a_human _
   | Ks.Not_a_keeper_author _
   | Ks.Policy_named_before (_ : Authz_types.Policy_id.t) ->
-    (* The gate let a human through, who writes in their own name, and the
-       policy id is drawn fresh. *)
+    (* The gate let a human through, who writes in their own name, the
+       policy id is drawn fresh, and [make] answers a Keeper the person made
+       before from the log without writing. *)
     Log.Server.warn "A Keeper record was refused: %s" (Ks.refusal_to_string refusal);
     error R.Internal_error_500 not_recorded
 ;;
@@ -124,10 +123,10 @@ let make zone user_id ~body =
       match keepers_of zone with
       | Error uncertain -> Some (Error (R.zone_uncertain uncertain))
       | Ok keepers ->
-        (match Ks.find keepers keeper_id with
-         | Some keeper when Authz_types.User_id.equal keeper.Ks.owner user_id ->
-           Some (Ok (made "existing"))
-         | Some (_ : Ks.keeper) -> Some (Error (error R.Conflict_409 taken))
+        (* A Keeper of this name that another person made is another
+           Keeper: it is not read here, and it does not take the name. *)
+        (match Ks.find keepers ~owner:user_id keeper_id with
+         | Some (_ : Ks.keeper) -> Some (Ok (made "existing"))
          | None -> None)
     in
     match made_before () with
@@ -143,8 +142,8 @@ let make zone user_id ~body =
        with
        | Ok () -> Ok (made "made")
        | Error error_ ->
-         (* Another request can make the Keeper between the read above and
-            this write. The log then has it, and says whose it is. *)
+         (* Another request of the person can make the Keeper between the
+            read above and this write. The log then has it. *)
          (match made_before () with
           | Some answer -> answer
           | None -> Error (failed error_)))
@@ -172,10 +171,9 @@ let assign zone user_id ~body =
     match keepers_of zone with
     | Error uncertain -> Error (R.zone_uncertain uncertain)
     | Ok keepers ->
-      (match Ks.find keepers keeper_id with
-       | Some { Ks.owner; runtime = Some current }
-         when Authz_types.User_id.equal owner user_id
-              && Authz_types.Runtime_id.equal current runtime_id -> Ok (assigned "existing")
+      (match Ks.find keepers ~owner:user_id keeper_id with
+       | Some { Ks.runtime = Some current; owner = _; policy_id = _; turn_scope = _ }
+         when Authz_types.Runtime_id.equal current runtime_id -> Ok (assigned "existing")
        | Some (_ : Ks.keeper) | None ->
          (match Authz_keeper.assign zone ~user_id ~keeper_id ~runtime_id with
           | Ok () -> Ok (assigned "assigned")

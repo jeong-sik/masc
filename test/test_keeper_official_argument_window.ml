@@ -271,7 +271,7 @@ let test_finished_turn_results_leave_as_markers_from_the_floor () = with_base @@
   let history = seed @ [text T.User "Go on."] @ result_exchange "now" (floor*2) in
   let completed_before = snd (Runtime_model_input_tail_window.annotate seed) in
   let turn_start = Keeper_carried_front.Turn_boundary {end_atom=completed_before} in
-  let project_with tools =
+  let project_with ?(seed = seed) tools =
     let argument_projection =
       projection ?tools (source ~seed:(Some seed) ~turn_start base) base in
     Host.start_range_projection
@@ -290,7 +290,15 @@ let test_finished_turn_results_leave_as_markers_from_the_floor () = with_base @@
     (String.make (floor*2) 'r') (result_body "now" sent);
   let without_reader = project_with (Some []) in
   check string "without a reader the finished result stays verbatim"
-    (String.make floor 'r') (result_body "at" without_reader)
+    (String.make floor 'r') (result_body "at" without_reader);
+  (* The boundary is an index into the raw seed; a seed whose history is not
+     this request's vouches for no index in it. *)
+  let unbound = project_with ~seed:(text T.User "Another history." :: List.tl seed) None in
+  check string "a seed that does not bind leaves the finished result verbatim"
+    (String.make floor 'r') (result_body "at" unbound);
+  check bool "with no finished turn there is no source to plan from" true
+    (Option.is_none
+       (source ~seed:(Some seed) ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0}) base))
 
 let test_completion_review_preserves_the_full_evidence_without_history_reads () =
   with_base @@ fun base ->

@@ -304,7 +304,23 @@ let alternating_windows_answer_one_pass_each () = fixture (fun config scope day 
            (read fresh window) (read config window))
       [ History.One_day; History.Seven_days; History.Fourteen_days ]))
 
+(* Z.AI states what each row limits in its answer; the stored row has to say
+   it too, because source and kind alone do not. *)
+let stored_rows_carry_the_window_role () =
+  let report = decode Usage.decode_zai_quota_limit
+    {|{"code":200,"msg":"Operation successful","success":true,"data":{"level":"max","limits":[{"type":"TIME_LIMIT","unit":5,"number":1,"usage":4000,"currentValue":270,"remaining":3730,"percentage":6,"nextResetTime":1790326488997,"usageDetails":[{"modelCode":"search-prime","usage":270}]},{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":4,"nextResetTime":1790259391823}]}}|} in
+  let roles =
+    Server_provider_usage_history_projection.record_json ~scope_id:"s" ~observed_at:1. report
+    |> List.filter_map (fun row ->
+         match Yojson.Safe.Util.member "role" row with
+         | `String role -> Some role
+         | _ -> None)
+    |> List.sort String.compare in
+  check (list string) "each window row states its role"
+    [ "counts_other_use"; "gates_model_calls" ] roles
+
 let () = run "provider usage durable snapshots" ["history", [
+  test_case "stored rows carry the window role" `Quick stored_rows_carry_the_window_role;
   test_case "damaged journal retains readable history through the typed decoder" `Quick
     damaged_journal_keeps_readable_history;
   test_case "legacy OpenRouter credit label retains history identity" `Quick

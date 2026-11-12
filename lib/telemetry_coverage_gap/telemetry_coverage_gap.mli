@@ -19,7 +19,8 @@ type change = {
 }
 
 val subscribe_changed : (change -> unit) -> (unit -> unit)
-(** Process-local after-append observation. The root is resolved before the
+(** Process-local after-attempt read invalidation, including uncertain writes.
+    It does not assert that a durable gap exists. The root is resolved before the
     append attempt. Notification itself performs no I/O and carries no gap
     row, trace or error text. The callback must not block or yield; release is
     idempotent. Listener exceptions cannot reclassify the durable append. *)

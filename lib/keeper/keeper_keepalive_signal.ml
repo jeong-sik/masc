@@ -189,10 +189,14 @@ type wake_policy =
   | Interrupt_on_wakeup
   | Serve_wakeup_after_duration
 
+let cadence_notification_failures = Atomic.make 0
+let failed_cadence_notifications () = Atomic.get cadence_notification_failures
+
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
 let interruptible_sleep
       ?cadence_sleeping
+      ?(on_cadence_sleeping_changed = fun () -> ())
       ?(wake_policy = Interrupt_on_wakeup)
       ?(interrupt_when = fun () -> false)
       ~clock
@@ -207,11 +211,20 @@ let interruptible_sleep
     | Interrupt_on_wakeup -> true
     | Serve_wakeup_after_duration -> false
   in
+  let notify_cadence_changed () =
+    match on_cadence_sleeping_changed () with
+    | () -> ()
+    | exception _ ->
+      (* cancel-guard-ok: metadata cannot replace the handshake's result or
+         consume the caller's actual cancellation. *)
+      ignore (Atomic.fetch_and_add cadence_notification_failures 1)
+  in
   let set_cadence_sleeping value =
     Option.iter
       (fun sleeping ->
          (* tla-lint: allow-mutation: cadence sleep handshake *)
-         Atomic.set sleeping value)
+         if Atomic.exchange sleeping value <> value then
+           notify_cadence_changed ())
       cadence_sleeping
   in
   set_cadence_sleeping true;
@@ -247,7 +260,7 @@ let interruptible_sleep
            CAS may report [Timeout]; a producer that already consumed the
            sleeper receives [Woken]. *)
         if Atomic.compare_and_set sleeping true false
-        then Timeout
+        then (notify_cadence_changed (); Timeout)
         else Woken
       | None -> Timeout)
     else (

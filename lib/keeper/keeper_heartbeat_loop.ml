@@ -1956,6 +1956,9 @@ let run_heartbeat_loop
            else
              Keeper_keepalive_signal.interruptible_sleep
                ~cadence_sleeping
+               ~on_cadence_sleeping_changed:(fun () ->
+                 Dashboard_observation_commit.written ~base_path:ctx.config.base_path
+                   ~scope:`Workspace `Telemetry)
                ~wake_policy
                ~interrupt_when
                ~clock:ctx.clock

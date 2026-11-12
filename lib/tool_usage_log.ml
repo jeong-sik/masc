@@ -15,7 +15,8 @@ let is_non_public name = not (Tool_catalog.is_public_mcp name)
 
 (* -- Store management -- *)
 
-let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
+type writer = { store : Dated_jsonl.t; base_path : string }
+let store_ref : writer option Atomic.t = Atomic.make None
 let source_name = "tool_usage"
 let source_producer = "tool_usage_log"
 let dashboard_surface = "/api/v1/dashboard/tools"
@@ -139,20 +140,23 @@ let latest_ts store =
 let init ~base_path () =
   let masc_root = Common.masc_dir_from_base_path ~base_path in
   let dir = store_dir masc_root in
+  Fun.protect ~finally:(fun () ->
+    Dashboard_observation_commit.written ~base_path ~scope:`Workspace `Telemetry) (fun () ->
   (try
      Fs_compat.mkdir_p dir;
      let store = Dated_jsonl.open_store (location masc_root) in
      (* Last init wins; close the replaced store handle before installing the
         new one. *)
-     Option.iter Dated_jsonl.close (Atomic.exchange store_ref (Some store))
+     Option.iter (fun writer -> Dated_jsonl.close writer.store)
+       (Atomic.exchange store_ref (Some {store; base_path}))
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     Option.iter Dated_jsonl.close (Atomic.exchange store_ref None);
+     Option.iter (fun writer -> Dated_jsonl.close writer.store) (Atomic.exchange store_ref None);
      Log.Misc.warn "tool_usage_log: init failed: %s" (Stdlib.Printexc.to_string exn);
      record_coverage_gap
        ~masc_root
        ~durable_store:dir
        ~stale_reason:"tool_usage_init_failed"
-       exn)
+       exn))
 
 (* -- Record format -- *)
 
@@ -182,9 +186,11 @@ let log_call ~on_io_failure ~tool_name ~disposition ~caller =
   match Atomic.get store_ref with
   | None ->
       Log.Misc.debug "tool_usage_log: store not initialized, skipping %s" tool_name
-  | Some store ->
+  | Some {store; base_path} ->
       let json = record_to_json ~tool_name ~disposition ~caller in
-      (try Dated_jsonl.append store json
+      (try Fun.protect ~finally:(fun () ->
+          Dashboard_observation_commit.written ~base_path ~scope:`Workspace `Telemetry)
+          (fun () -> Dated_jsonl.append store json)
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          on_io_failure ~site:"tool_usage_log.append" exn;
          Log.Misc.warn "tool_usage_log: append failed for %s: %s"
@@ -231,7 +237,7 @@ let install ~on_io_failure =
 let read_recent ?(n = 10_000) () : Yojson.Safe.t list =
   match Atomic.get store_ref with
   | None -> []
-  | Some store -> Dated_jsonl.read_recent store n
+  | Some {store; _} -> Dated_jsonl.read_recent store n
 
 let source_metadata_json ~masc_root =
   let now = Time_compat.now () in

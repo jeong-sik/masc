@@ -24,9 +24,18 @@ let components_of_input input =
     | Execution_invalidated -> [Shell; Telemetry]
     | Keeper {change = Phase _ | Composite | Row; _}
     | Every_keeper_row -> [Telemetry]
+    | Store Runtime_config | Dataset Runtime_config -> [Telemetry]
     | Keeper {change = Turn | Turn_preview | Chat
         | Native_tasks | Child_content | Memory_journal | Async_requests; _}
-    | Dataset _ | Chat_operation _ | Store _ | Board
+    | Dataset (Repositories | Verification_requests | Harness_verdicts | Goals
+        | Connectors | Keeper_metrics _ | Skill_activations _ | Skill_catalog
+        | Clients | Account_emails | Provider_usage | Provider_standing
+        | Keeper_costs | Workspace_health | Runtime_probe | Runtime_metrics
+        | Lanes | Machine_live _ | Play_room _ | Lane_addons _
+        | Browser_observation _ | Keeper_oauth_attempts _ | Memory_health _
+        | World_memory | Play_seats | Dashboard_observation _)
+    | Chat_operation _ | Store (Schedule | Pending_confirms | Tools | Goals
+        | Skill_catalog | Lane_addon_exports) | Board
     | Agent_core _ | Telemetry_sample | Telemetry_gap _ | Keeper_tool_call _
     | Keeper_approval_audit _ | Workspace_agent_signal _ | Workspace_messages _
     | Transport_state | Operator_judgment _ | Tool_host_attention -> []
@@ -53,10 +62,14 @@ let readers = ref {
       ~keeper_metric_producer_active:(Keeper_status_runtime.keeper_metric_producer_active ~base_path) ());
 }
 
-module Commit_changes = Server_workspace_invalidation.Make (struct
-  type t = Commit.change
+module Source_change = struct
+  type t =
+    | Projection_commit of Commit.change
+    | Trajectory_write of Trajectory_write_observation.owner
   let compare = Stdlib.compare
-end)
+end
+
+module Commit_changes = Server_workspace_invalidation.Make (Source_change)
 
 exception Tools_read_failed
 exception Telemetry_read_failed
@@ -82,19 +95,32 @@ let install ~state ~sw ~clock ~mono_clock ~on_shell_published =
         Stdlib.Mutex.protect mutex (fun () ->
           if Eio.Stream.is_empty changes then Eio.Stream.add changes ())
       in
-      let enqueue_commit = Commit_changes.start ~sw ~mono_clock ~publish:(function
-        | Commit.Process topic -> if is_current () then List.iter signal (components_of_topic topic)
-        | Commit.Workspace {base_path = owner; payload} ->
+      let enqueue_source = Commit_changes.start ~sw ~mono_clock ~publish:(function
+        | Source_change.Projection_commit (Commit.Process topic) ->
+          if is_current () then List.iter signal (components_of_topic topic)
+        | Projection_commit (Commit.Workspace {base_path = owner; payload}) ->
           if is_current () && String.equal (Fs_compat.realpath_lenient owner)
               (Fs_compat.realpath_lenient base_path)
-          then if is_current () then List.iter signal (components_of_topic payload.topic)) in
+          then if is_current () then List.iter signal (components_of_topic payload.topic)
+        | Trajectory_write owner ->
+          if is_current () && String.equal (Fs_compat.realpath_lenient owner.masc_root)
+              (Fs_compat.realpath_lenient (Workspace.masc_dir config))
+          then if is_current () then signal Telemetry) in
+      let enqueue_commit change = enqueue_source (Source_change.Projection_commit change) in
       let unsubscribe_commits = Commit.subscribe (fun change ->
         let topic = match change with Commit.Process topic -> topic
           | Commit.Workspace {payload; _} -> payload.topic in
         if components_of_topic topic <> [] then enqueue_commit change) in
       let unsubscribe_metrics = Tool_metrics.subscribe_written (fun () ->
         enqueue_commit (Commit.Process `Tool_metrics)) in
-      Eio.Switch.on_release sw (fun () -> unsubscribe_commits (); unsubscribe_metrics ());
+      let unsubscribe_goals = Goal_event_observation.subscribe (fun ~base_path ->
+        enqueue_commit (Commit.Workspace {base_path;
+          payload = {Sse_event.Types.topic = `Telemetry; scope = `Workspace}})) in
+      let unsubscribe_trajectories = Trajectory_write_observation.subscribe (fun owner ->
+        enqueue_source (Source_change.Trajectory_write owner)) in
+      Eio.Switch.on_release sw (fun () ->
+        unsubscribe_commits (); unsubscribe_metrics ();
+        unsubscribe_goals (); unsubscribe_trajectories ());
       Input.subscribe ~sw ~base_path
         ~observer_instance_id:(Server_observer_scope.instance_id scope)
         (fun input -> List.iter signal (components_of_input input));

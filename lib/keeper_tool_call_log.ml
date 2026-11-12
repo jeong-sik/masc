@@ -295,7 +295,7 @@ let notify_written written =
 ;;
 
 type store_state =
-  { store : (Dated_jsonl.t * string) option
+  { store : (Dated_jsonl.t * string * string) option
   ; configured : (string * string) option
   }
 
@@ -386,6 +386,7 @@ let record_kind_of_string s = List.find_opt (fun v -> String.equal (record_kind_
 
 type append_entry =
   { store : Dated_jsonl.t
+  ; base_path : string
   ; canonical_masc_root : string
   ; keeper_name : string
   ; tool_name : string
@@ -484,7 +485,7 @@ let init ~base_path () =
   try
     let store = Dated_jsonl.open_store location in
     Atomic.set store_state
-      { store = Some (store, canonical_masc_root); configured = Some (masc_root, dir) }
+      { store = Some (store, canonical_masc_root, base_path); configured = Some (masc_root, dir) }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -547,7 +548,7 @@ let pending_board_action_evidence_for_testing () =
        | None -> []))
 ;;
 
-let store () = Option.map fst (Atomic.get store_state).store
+let store () = Option.map (fun (store, _, _) -> store) (Atomic.get store_state).store
 
 let store_dir () = Option.map Dated_jsonl.base_dir (store ())
 
@@ -631,6 +632,9 @@ let max_current_segment_bytes = 16 * 1024 * 1024
 exception Rotation_sequence_exhausted of int
 
 let append_to_store_result ~committed (entry : append_entry) =
+  Fun.protect ~finally:(fun () ->
+    Dashboard_observation_commit.written ~base_path:entry.base_path ~scope:`Workspace `Telemetry)
+    (fun () ->
   try
     let outcome = Dated_jsonl.append_rotating
       ~on_committed:(fun () ->
@@ -662,7 +666,7 @@ let append_to_store_result ~committed (entry : append_entry) =
       ~tool_name:entry.tool_name
       ?trace_id
       exn;
-    Error exn
+    Error exn)
 ;;
 
 let append_to_store entry =
@@ -923,7 +927,7 @@ let log_call
     | None ->
       record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ();
       if requires_commit then raise Commit_required_but_store_unavailable
-    | Some (store, canonical_masc_root) ->
+    | Some (store, canonical_masc_root, base_path) ->
       (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
          callers (keeper_hooks_agent_core, mcp_server_eio_call_tool) pass their
          run identity explicitly; filling [None] from a keeper-name-keyed
@@ -1334,7 +1338,7 @@ let log_call
          captures) that would corrupt the JSONL file and cause downstream
          readers — including the dashboard — to silently skip entire rows. *)
       let safe_json = Inference_utils.sanitize_json_utf8 json in
-      let entry = { store; canonical_masc_root; keeper_name; tool_name; trace_id; json = safe_json } in
+      let entry = { store; base_path; canonical_masc_root; keeper_name; tool_name; trace_id; json = safe_json } in
       if requires_commit then
         (match append_to_store_result ~committed:(ref false) entry with
          | Ok () ->

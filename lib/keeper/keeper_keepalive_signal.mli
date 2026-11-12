@@ -89,6 +89,7 @@ type wake_policy =
     effect within ~chunk_sec instead of waiting for the full interval. *)
 val interruptible_sleep :
   ?cadence_sleeping:bool Atomic.t ->
+  ?on_cadence_sleeping_changed:(unit -> unit) ->
   ?wake_policy:wake_policy ->
   ?interrupt_when:(unit -> bool) ->
   clock:'a Eio.Time.clock ->
@@ -97,6 +98,9 @@ val interruptible_sleep :
   (unit -> float) ->
   sleep_outcome
 (** When [cadence_sleeping] is supplied, it is [true] only inside this sleep.
+    [on_cadence_sleeping_changed] records non-yielding metadata after an actual
+    handshake transition, including cancellation cleanup. Callback failures
+    cannot replace the sleep/cleanup result and are counted separately.
     A runtime cadence decrease consumes it with CAS, avoiding a queued wake
     during active cycle setup and closing both the duration-resolution and
     timeout-edge races. [duration] is resolved only after the handshake is
@@ -104,6 +108,9 @@ val interruptible_sleep :
     the wait at each existing sleep boundary. A true result returns [Woken]
     even under [Serve_wakeup_after_duration]; ordinary stimulus/cadence hints
     still cannot interrupt that policy. [stop] has precedence. *)
+
+val failed_cadence_notifications : unit -> int
+(** Exceptions raised by cadence metadata observers; reads do not notify. *)
 
 (** Wake up a specific keeper immediately.
 

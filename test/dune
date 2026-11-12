@@ -7430,3 +7430,5 @@
 (include stanzas/test_keeper_chat_run_signal.inc)
 
 (include stanzas/test_server_skill_missing_on_disk.inc)
+
+(include stanzas/test_telemetry_source_writes.inc)

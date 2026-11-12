@@ -2542,8 +2542,7 @@ describe('SettingsSurface', () => {
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
     const lanes = vi.spyOn(dashboardApi, 'fetchStandaloneLanes').mockResolvedValue(
       { schema: 'masc.standalone_llm_lanes.v2', generatedAt: '2026-10-04T00:00:00Z',
-        observedAtUnix: 0, observationOnly: true, exactRunProjectionCount: 0,
-        exactRunSourceTotal: 0, exactRunProjectionTruncated: false, lanes: [] })
+        observedAtUnix: 0, observationOnly: true, lanes: [] })
     const resume = vi.spyOn(coreApi, 'postControlPlane').mockResolvedValue({ runtime_ready: !activity,
       exact_output_authority_available: true, model_setup: { status: 'available' } })
     if (activity) vi.mocked(modelSetup.resumeSavedModelSetup).mockResolvedValueOnce({ kind: 'failed', reason: 'activation_failed' })
@@ -2623,8 +2622,7 @@ describe('SettingsSurface', () => {
     } as Parameters<typeof hydrateExecutionSnapshot>[0])
     const lanes = vi.spyOn(dashboardApi, 'fetchStandaloneLanes').mockResolvedValue(
       { schema: 'masc.standalone_llm_lanes.v2', generatedAt: '2026-10-04T00:00:00Z',
-        observedAtUnix: 0, observationOnly: true, exactRunProjectionCount: 0,
-        exactRunSourceTotal: 0, exactRunProjectionTruncated: false, lanes: [] })
+        observedAtUnix: 0, observationOnly: true, lanes: [] })
     try {
     const runtimeConfig = {
       ok: true,

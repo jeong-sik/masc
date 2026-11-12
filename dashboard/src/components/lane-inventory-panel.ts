@@ -6,7 +6,6 @@ import { executionWorkspaceAuthority, refreshExecution, type ExecutionWorkspaceA
 import { RouteLink } from './common/route-link'
 import { ExactLaneActivityPanel } from './exact-lane-activity-panel'
 import { ExactLaneSlotStates } from './exact-slot-observations'
-import type { StandaloneLanesSnapshot } from '../api/dashboard-standalone-lanes'
 import { exactLaneObservationRevision } from '../lib/exact-lane-observation'
 import { MachineLaneActivityPanel } from './machine-lane-activity-panel'
 import { machineLaneObservationRevision } from '../lib/machine-lane-observation'
@@ -58,8 +57,8 @@ function stateLines(row: LaneInventoryRow, snapshot: LaneInventory): string[] {
   }
 }
 
-function AddonModelRoutes({ installation, outputs, scope }: {
-  installation: string; outputs: readonly AddonExactOutput[]; scope: StandaloneLanesSnapshot
+function AddonModelRoutes({ installation, outputs }: {
+  installation: string; outputs: readonly AddonExactOutput[]
 }) {
   if (!outputs.length) return null
   return html`<section aria-label="Exact-output model routes" class="space-y-2">
@@ -85,8 +84,7 @@ function AddonModelRoutes({ installation, outputs, scope }: {
           <p>Declared HTTP: ${config.declared_slots.join(' → ') || 'none'}</p>
           <p>Declared CLI: ${config.declared_cli_slots.join(' → ') || 'none'}</p>
         ` : html`<p role="status">${config.kind}: ${config.detail}</p>`}
-        <${ExactLaneSlotStates} scope=${scope}
-          value=${parseAddonSlotMatrix(installation, output)} />
+        <${ExactLaneSlotStates} value=${parseAddonSlotMatrix(installation, output)} />
       </section>`
     })}
     <${RouteLink} tab="monitoring" params=${{ section: 'runtime', view: 'config' }}>Open Runtime configuration<//>
@@ -107,10 +105,10 @@ function LaneDetails({ row, snapshot, authority }: { row: LaneInventoryRow; snap
     ${stateLines(row, snapshot).map(line => html`<p>${line}</p>`)}
     ${row.state.kind === 'package' && row.state.declaration?.kind === 'valid'
       ? html`<${AddonModelRoutes} installation=${row.state.declaration.installation_id}
-          outputs=${row.state.declaration.exact_outputs} scope=${snapshot.exact_snapshot} />` : null}
+          outputs=${row.state.declaration.exact_outputs} />` : null}
     ${exactLane ? html`<p>Builtin 설정: <code>runtime.exact_output_lanes.${exactLane.laneId}</code>.
       Add-on이 실행한 기록과 설정은 해당 패키지의 출력별 경로에서 확인하세요.</p>
-      <${ExactLaneSlotStates} value=${exactLane.slotStates} scope=${snapshot.exact_snapshot} />
+      <${ExactLaneSlotStates} value=${exactLane.slotStates} />
       <${ExactLaneActivityPanel} key=${exactLane.laneId} lane=${exactLane} />` : null}
     ${selection.kind === 'machine' ? html`<${MachineLaneActivityPanel} key=${selection.machine} lane=${selection.machine} title=${row.label} />` : null}
     ${selection.kind === 'exact' ? html`<div class="flex flex-wrap gap-3">
@@ -201,7 +199,6 @@ export function LaneInventoryPanel() {
     ${snapshot ? html`<div class="space-y-2">
       <p>Observed ${new Date(snapshot.observed_at * 1000).toISOString()} · ${snapshot.rows.length} inventory rows</p>
       <p>Package read: ${snapshot.package_read.complete ? 'complete' : 'incomplete'} · ${snapshot.package_read.owner_present ? 'manager present' : 'manager not observed'}</p>
-      <p>Exact run reading: ${snapshot.exact_snapshot.exactRunProjectionCount} of ${snapshot.exact_snapshot.exactRunSourceTotal}${snapshot.exact_snapshot.exactRunProjectionTruncated ? ' · truncated' : ''}</p>
       ${snapshot.package_read.issues.map(issue => html`<p role="alert" class="break-all">${issue.source_path}: ${issue.message}</p>`)}
     </div>` : null}
     <label class="block">Find a Lane<input class="block w-full rounded border bg-transparent p-2" type="search" value=${query}

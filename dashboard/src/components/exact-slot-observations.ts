@@ -1,7 +1,6 @@
 import { html } from 'htm/preact'
 import type { ExactSlotObservation, RetainedSlotObservation, SlotHttpBinding,
   SlotMatrixState, SlotObservationState, SlotOutcome } from '../api/exact-slot-observations'
-import type { StandaloneLanesSnapshot } from '../api/dashboard-standalone-lanes'
 import { formatDateTimeKo } from '../lib/format-time'
 
 const card = 'rounded border border-[var(--color-border-default)] p-3 space-y-2'
@@ -65,15 +64,10 @@ export function ExactRunSlotObservations({ value }: { value?: SlotObservationSta
             </li>`)}</ol>`}
   </section>`
 }
-export function ExactLaneSlotStates({ value, scope }: {
-  value?: SlotMatrixState
-  scope: Pick<StandaloneLanesSnapshot, 'exactRunProjectionCount' | 'exactRunSourceTotal' | 'exactRunProjectionTruncated'>
-}) {
+export function ExactLaneSlotStates({ value }: { value?: SlotMatrixState }) {
   const state = value ?? { state: 'unobserved' as const }
   return html`<section aria-label="슬롯별 실행 관측" class=${card}>
     <h4 class="font-semibold">슬롯별 실행 관측</h4>
-    <p>조회한 보관 run: ${scope.exactRunProjectionCount} / ${scope.exactRunSourceTotal}
-      ${scope.exactRunProjectionTruncated ? ' · 일부 기록만 조회했습니다.' : ''}</p>
     <p>마지막 관측은 실행 시각이 기록된 항목만 비교합니다. 실행 반환은 의미 검증 완료 시각과 다를 수 있습니다.</p>
     ${state.state === 'unobserved' ? html`<p>보관된 슬롯 관측 없음 · 실행 여부 미확인</p>`
       : state.state === 'unavailable' ? html`<p role="status">슬롯 관측을 읽지 못했습니다: ${state.detail}</p>`

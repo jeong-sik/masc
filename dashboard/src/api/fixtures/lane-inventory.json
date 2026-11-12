@@ -184,9 +184,6 @@
     "schema": "masc.standalone_llm_lanes.v2",
     "generated_at": "2026-08-27T20:36:29Z",
     "observed_at_unix": 1787557669.715736,
-    "exact_run_projection_count": 60,
-    "exact_run_source_total": 60,
-    "exact_run_projection_truncated": false,
     "observation_only": true,
     "lanes": [
       {

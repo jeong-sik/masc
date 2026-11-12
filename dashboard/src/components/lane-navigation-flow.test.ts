@@ -53,8 +53,7 @@ beforeEach(() => {
   api.fetchGoalVerificationRuns.mockResolvedValue({ runs: [], skippedScans: [], count: 0, generatedAt: 'now' })
   api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
   api.fetchStandaloneLanes.mockResolvedValue({ schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now',
-    observedAtUnix: 1, observationOnly: true, exactRunProjectionCount: 0, exactRunSourceTotal: 0,
-    exactRunProjectionTruncated: false, lanes: [] })
+    observedAtUnix: 1, observationOnly: true, lanes: [] })
   replaceRoute('monitoring', laneTargetParams({ kind: 'run_history', lane: 'workspace_curator_exact', workspace: '/fixture/navigation' }))
 })
 afterEach(() => {

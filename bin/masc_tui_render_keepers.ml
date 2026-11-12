@@ -2478,7 +2478,7 @@ let render_keeper_axes (state : state) =
         (match state.keepers, keeper_rows_page state ~error:keepers_error with
          | _ :: _, _ | [], Page_empty -> []
          | [], (Page_unread | Page_failed) ->
-             [ String.trim (title_missing_reading ~error:keepers_error) ])
+             [ here_missing_reading state ~error:keepers_error ])
       ~position:(keeper_list_position ~stop model_rows)
   in
   box_line buf cols heading;

@@ -1317,7 +1317,7 @@ let config_path_note (state : state) =
       Ansi.dim ^ shown ^ Ansi.reset
   | None, Some _ -> ""
   | None, None ->
-      Ansi.dim ^ title_missing_reading ~error:None ^ Ansi.reset
+      Ansi.dim ^ here_missing_reading state ~error:None ^ Ansi.reset
 
 (* A provider id such as [codex_727e6d05] does not say which account it is,
    and one account can sit under several ids. The Models pane names the

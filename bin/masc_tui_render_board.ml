@@ -482,7 +482,7 @@ let render_board_list (state : state) =
       ~readings:
         [ (match Masc_tui_fetched.value observation with
            | Some _ -> ""
-           | None -> if pending then (words state "글 조회 중" "reading posts") else words state (if Option.is_some list_error then "조회 실패" else "미조회") (field_missing_reading ~error:list_error))
+           | None -> if pending then (words state "글 조회 중" "reading posts") else here_missing_reading state ~error:list_error)
         ; hearth ]
       ~position:
         (match Masc_tui_fetched.value observation with

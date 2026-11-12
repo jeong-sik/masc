@@ -2262,6 +2262,11 @@ let here_row ~cols (state : state) ~path ~readings ~position =
           ' '
       ^ position
 
+let keeper_calls_heading ~cols (state : state) ~keeper_name ~readings =
+  here_row ~cols state
+    ~path:[ keeper_name; ui_text state ~ko:"호출" ~en:"calls" ]
+    ~readings ~position:None
+
 (* The step the Runtime screens take from System, and a keeper's runtime
    takes from that keeper. *)
 let runtime_step (state : state) = ui_text state ~ko:"런타임" ~en:"runtime"

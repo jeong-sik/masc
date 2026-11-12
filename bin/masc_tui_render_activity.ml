@@ -403,11 +403,7 @@ let render_keeper_calls (state : state) =
     | Some keeper -> keeper.k_name
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let heading ~readings =
-    here_row ~cols state
-      ~path:[ keeper_name; ui_text state ~ko:"호출" ~en:"calls" ]
-      ~readings ~position:None
-  in
+  let heading = keeper_calls_heading ~cols state ~keeper_name in
   let header =
     match state.keeper_calls with
     | Some snapshot when state.keeper_calls_loading ->

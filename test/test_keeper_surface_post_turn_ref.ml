@@ -72,6 +72,8 @@ let scenario () =
     let target=match posted.terminal_effect_receipt with
       | Some (Masc.Keeper_tool_execution.Surface_post_completed target) ->
           Masc.Keeper_surface_post.delivery_target_of_post_target target
+      | Some (Masc.Keeper_tool_execution.Receipt_wait_requested _) ->
+          fail "actual post left a receipt wait, not its delivery receipt"
       | None -> fail "actual post lost its terminal receipt" in
     let dashboard_effect=Events.External_effect_completed {target} in
     let verdict=Alcotest.testable Audit.pp_verdict Audit.equal_verdict in

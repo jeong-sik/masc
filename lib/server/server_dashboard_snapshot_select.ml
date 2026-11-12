@@ -11,13 +11,13 @@ let select_shell_json
   in
   if light
   then (
-    match Dashboard_snapshot.current_for_config config with
-    | Some snap ->
+    match Dashboard_snapshot.shell_for_config config with
+    | Some (_, trimmed) ->
       let shell =
         Server_timing.measure
           timing_obj
           (Server_timing.Custom "snapshot_read")
-          (fun () -> snap.shell_light)
+          (fun () -> trimmed)
       in
       (match request with
        | None -> shell
@@ -28,13 +28,13 @@ let select_shell_json
       Server_dashboard_http_core.dashboard_shell_http_json
         ?clock ?request ~timing:timing_obj ~light config)
   else (
-    match Dashboard_snapshot.current_for_config config with
-    | Some snap ->
+    match Dashboard_snapshot.shell_for_config config with
+    | Some (full, _) ->
       let shell =
         Server_timing.measure
           timing_obj
           (Server_timing.Custom "snapshot_read")
-          (fun () -> snap.shell)
+          (fun () -> full)
       in
       (match request with
        | None -> shell
@@ -58,15 +58,12 @@ let select_tools_response_with ~fallback
     | Some t -> t
     | None -> Server_timing.create ()
   in
-  match keeper, Dashboard_snapshot.current_for_config config with
-  | None, Some snap
-    when String.equal snap.tools.base_path config.base_path
-      && String.equal snap.tools.workspace_path config.workspace_path
-      && String.equal snap.tools.masc_root (Workspace.masc_dir config) ->
+  match keeper, Dashboard_snapshot.tools_for_config config with
+  | None, Some tools ->
     Server_timing.measure
       timing_obj
       (Server_timing.Custom "snapshot_read")
-      (fun () -> Tools_prepared snap.tools)
+      (fun () -> Tools_prepared tools)
   | _ ->
     Tools_json (fallback ~keeper ~timing:timing_obj config)
 ;;
@@ -94,12 +91,12 @@ let select_telemetry_summary_json
     | Some t -> t
     | None -> Server_timing.create ()
   in
-  match Dashboard_snapshot.current_for_config config with
-  | Some snap ->
+  match Dashboard_snapshot.telemetry_for_config config with
+  | Some summary ->
     Server_timing.measure
       timing_obj
       (Server_timing.Custom "snapshot_read")
-      (fun () -> snap.telemetry_summary)
+      (fun () -> summary)
   | None ->
     let base_path = config.base_path in
     let masc_root = Workspace.masc_dir config in

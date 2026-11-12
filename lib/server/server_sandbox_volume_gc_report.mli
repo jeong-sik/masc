@@ -15,9 +15,9 @@
     without starting helper microVMs every pulse. *)
 val report_interval_sec : float
 
-(** The last pass as {!Keeper_volume_gc_periodic.to_json} writes it, or
-    [`Null] until the first pass ends. *)
-val envelope_json : unit -> Yojson.Safe.t
+(** This workspace's last pass, or [`Null] when no matching pass is retained.
+    Installing a pass announces its Tools source after the value is visible. *)
+val envelope_json : base_path:string -> unit -> Yojson.Safe.t
 
 val start :
   sw:Eio.Switch.t

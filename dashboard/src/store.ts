@@ -1,5 +1,5 @@
 import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'
-import { acceptedExecutionWorkspace } from './execution-workspace-authority'
+import { acceptedExecutionWorkspace, executionWorkspaceAuthority } from './execution-workspace-authority'
 export { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from './execution-workspace-authority'
 import { isObserverInstance } from './lib/observer-protocol'
 import { decodeGoalProof } from './api/goal-proof'
@@ -587,6 +587,7 @@ interface ShellRefreshFlight {
   stopAuthorityWatch: () => void
 }
 let inflightShellRefresh: ShellRefreshFlight | null = null
+let shellRootCompletionRevision = 0
 const shellReadRecovery = createReadRecovery()
 let inflightWorkspaceMessagesRefresh: Promise<void> | null = null
 let inflightWorkspaceMessagesRefreshProject: string | null = null
@@ -720,7 +721,11 @@ function hydrateDashboardBootstrap(
   executionRequestGeneration: number,
   goalOwnerAtStart: symbol,
   authOwner: DashboardCredentialOwner,
+  shellRootRevision: number,
+  namespaceRevision: number,
 ): void {
+  if (executionRequestGeneration !== executionSnapshotRequestGeneration()
+    || !dashboardCredentialOwnerIsCurrent(authOwner)) return
   if (!data.shell || bootstrapSliceError(data.shell)) {
     throw new Error('dashboard bootstrap shell slice unavailable')
   }
@@ -728,19 +733,18 @@ function hydrateDashboardBootstrap(
     throw new Error('dashboard bootstrap execution slice unavailable')
   }
 
-  hydrateShellSnapshot(data.shell, { light: true, sentToken: authOwner.token, authOwner })
-  hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration })
+  hydrateShellSnapshot(data.shell, { light: true, sentToken: authOwner.token, authOwner, rootRevision: shellRootRevision })
+  hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration, rootRevision: shellRootRevision })
 
-  if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)) {
+  if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)
+    && namespaceTruthReadRecovery.revision === namespaceRevision
+    && !namespaceTruthReadRecovery.isReading) {
     const normalized = normalizeNamespaceTruth(data.namespace_truth)
     namespaceTruth.value = normalized
     namespaceTruthError.value = null
     namespaceTruthInitializing.value = false
     namespaceTruthReadRecovery.succeeded()
-    serverStatus.value = mergeServerStatus(
-      serverStatus.value,
-      normalized.root.status ?? null,
-    )
+    hydrateShellRootSnapshot(normalized.root, true)
   }
   // A bootstrap may omit Goal slices. Such a response must not take ownership
   // away from an explicit refresh already loading the combined Goal snapshot.
@@ -796,18 +800,28 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   inflightDashboardRefresh = (async () => {
     const executionRequestGeneration = executionSnapshotRequestGeneration()
     const goalOwnerAtStart = goalObservationOwner
+    const authOwner = captureDashboardCredentialOwner()
+    const workspaceOwner = executionWorkspaceAuthority.peek()
+    const current = () => executionRequestGeneration === executionSnapshotRequestGeneration()
+      && dashboardCredentialOwnerIsCurrent(authOwner) && executionWorkspaceAuthority.peek() === workspaceOwner
     try {
       executionLoading.value = true
       executionError.value = null
       try {
-        const authOwner = captureDashboardCredentialOwner()
+        const shellRootRevision = shellRootCompletionRevision
+        const namespaceRevision = namespaceTruthReadRecovery.revision
+        const data = await fetchDashboardBootstrap()
+        if (!current()) return
         hydrateDashboardBootstrap(
-          await fetchDashboardBootstrap(),
+          data,
           executionRequestGeneration,
           goalOwnerAtStart,
           authOwner,
+          shellRootRevision,
+          namespaceRevision,
         )
       } catch (bootstrapErr) {
+        if (!current()) return
         console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
         await refreshDashboardFallback(opts)
       } finally {
@@ -924,13 +938,53 @@ function recoverFromRejectedShellAuth(
     })
 }
 
+type ShellRootSnapshot = Pick<DashboardShellResponse, 'generated_at' | 'counts' | 'configured_keepers'>
+  & { status?: ServerStatus | null }
+
+/** Shell and namespace snapshots share this root projection. A namespace read
+ * or push completion fences reads already in flight without claiming their auth or
+ * config/runtime-resolution slices were refreshed. */
+export function hydrateShellRootSnapshot(data: ShellRootSnapshot, completion = false): void {
+  if (completion) shellRootCompletionRevision += 1
+  const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
+  if (normalizedStatus) serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
+  if (data.counts) {
+    const agents = asNumber(data.counts.agents)
+    const keepers = asNumber(data.counts.keepers)
+    const tasks = asNumber(data.counts.tasks)
+    const totalRuntimes = asNumber(data.counts.total_runtimes)
+      ?? (agents != null && keepers != null ? agents + keepers : undefined)
+    const configuredKeepers = asNumber(data.configured_keepers)
+    shellCounts.value = {
+      ...(agents != null ? { agents } : {}),
+      ...(tasks != null ? { tasks } : {}),
+      ...(keepers != null ? { keepers } : {}),
+      ...(totalRuntimes != null ? { total_runtimes: totalRuntimes } : {}),
+      ...(configuredKeepers != null ? { configured_keepers: configuredKeepers } : {}),
+    }
+  }
+}
+
 export function hydrateShellSnapshot(
   data: DashboardShellResponse,
-  opts: { light?: boolean; preserveAuth?: boolean; sentToken: string | null; authOwner?: DashboardCredentialOwner; recoverAuth?: boolean },
+  opts: { light?: boolean; preserveAuth?: boolean; sentToken: string | null; authOwner?: DashboardCredentialOwner; recoverAuth?: boolean; rootRevision?: number },
 ): boolean {
   const wantsLight = opts.light === true
   const staleOwner = opts.authOwner !== undefined && !dashboardCredentialOwnerIsCurrent(opts.authOwner)
-  const preserveAuth = opts.preserveAuth === true || staleOwner
+  if (staleOwner) return false
+  const rootSuperseded = opts.rootRevision !== undefined && opts.rootRevision !== shellRootCompletionRevision
+  const status: unknown = data.status
+  const initializing = status === 'initializing' || (isRecord(status) && status.project === 'initializing')
+  if (rootSuperseded && initializing) {
+    // This read missed a completion we already accepted. Its synthetic auth
+    // and empty projections cannot replace it, and no second producer event
+    // is owed. Recover that one read after its current flight releases.
+    const revision = shellReadRecovery.revision
+    shellReadRecovery.waiting(() => { void refreshShell({ light: wantsLight, force: true }) })
+    queueMicrotask(() => { if (shellReadRecovery.revision === revision) shellReadRecovery.recover() })
+    return false
+  }
+  const preserveAuth = opts.preserveAuth === true
   let applyAuth = !preserveAuth
   const normalizedAuth = normalizeShellAuthSummary(data.auth)
   if (applyAuth) {
@@ -962,24 +1016,8 @@ export function hydrateShellSnapshot(
       && currentCanonicalDashboardActor() === nextActor
     if (applyAuth && opts.recoverAuth !== false) recoverFromRejectedShellAuth(normalizedAuth, opts.sentToken)
   }
-  const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
-  if (normalizedStatus) {
-    serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
-  }
-  if (data.counts) {
-    const agents = data.counts.agents
-    const keepers = data.counts.keepers
-    const totalRuntimes = data.counts.total_runtimes
-      ?? (agents != null && keepers != null ? agents + keepers : undefined)
-    shellCounts.value = {
-      ...(agents != null ? { agents } : {}),
-      ...(data.counts.tasks != null ? { tasks: data.counts.tasks } : {}),
-      ...(keepers != null ? { keepers } : {}),
-      ...(totalRuntimes != null ? { total_runtimes: totalRuntimes } : {}),
-      ...(data.configured_keepers != null
-        ? { configured_keepers: data.configured_keepers }
-        : {}),
-    }
+  if (opts.rootRevision === undefined || opts.rootRevision === shellRootCompletionRevision) {
+    hydrateShellRootSnapshot(data)
   }
   if (applyAuth) {
     shellAuthSummary.value = normalizedAuth
@@ -995,8 +1033,7 @@ export function hydrateShellSnapshot(
   const admitted = !staleOwner && (opts.preserveAuth === true || applyAuth)
   lastShellRefreshAt = admitted ? Date.now() : 0
   if (admitted) {
-    const status: unknown = data.status
-    if (status === 'initializing' || (isRecord(status) && status.project === 'initializing')) {
+    if (initializing) {
       shellReadRecovery.waiting(() => { void refreshShell({ light: wantsLight, force: true }) })
     } else shellReadRecovery.succeeded()
   }
@@ -1067,6 +1104,7 @@ export async function readShell(opts?: RefreshOptions & { recoverAuth?: boolean;
   shellReadRecovery.started()
   const authOwner = captureDashboardCredentialOwner()
   const requestOwner = captureDashboardObservationOwner()
+  const rootRevision = shellRootCompletionRevision
   const stopAuthorityWatch = subscribeDashboardObservationOwnerChanges(() => retireShellRefresh(flight))
   flight.stopAuthorityWatch = stopAuthorityWatch
   const current = () => !flight.controller.signal.aborted
@@ -1080,7 +1118,7 @@ export async function readShell(opts?: RefreshOptions & { recoverAuth?: boolean;
       // transition is checked by hydrateShellSnapshot's credential CAS.
       stopAuthorityWatch()
       const admitted = hydrateShellSnapshot(data, { light: wantsLight, sentToken: authOwner.token, authOwner,
-        recoverAuth: opts?.recoverAuth })
+        recoverAuth: opts?.recoverAuth, rootRevision })
       return { kind: admitted ? 'ready' : 'cancelled' }
     } catch (err) {
       if (!current() || isAbortError(err)) return { kind: 'cancelled' }
@@ -1231,7 +1269,7 @@ export function resetExecutionSnapshotGeneration(): void {
  *  Shared by doFetchExecution (HTTP) and SSE execution_snapshot handler. */
 export function hydrateExecutionSnapshot(
   data: DashboardExecutionResponse,
-  opts?: { requestGeneration?: number },
+  opts?: { requestGeneration?: number; rootRevision?: number },
 ): boolean {
   if (
     opts?.requestGeneration !== undefined
@@ -1299,11 +1337,12 @@ export function hydrateExecutionSnapshot(
   // for presentation; that root cannot admit account reads in this response.
   acceptExecutionWorkspace(identity?.epoch ?? null, normalizedStatus?.workspace_root, data.observer_instance_id)
   const previousProject = serverStatus.value?.project
-  if (normalizedStatus) {
+  const acceptsRoot = opts?.rootRevision === undefined || opts.rootRevision === shellRootCompletionRevision
+  if (normalizedStatus && acceptsRoot) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
   }
   const workspaceChanged =
-    previousProject != null
+    acceptsRoot && previousProject != null
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
   if (workspaceChanged) {
@@ -1372,6 +1411,7 @@ async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
   const requestGeneration = executionSnapshotRequestGeneration()
+  const rootRevision = shellRootCompletionRevision
   const requestEpoch = executionPublicationEpoch
   const requestPublicationGeneration = executionPublicationGenerationWatermark
   const requestCandleSequence = candleObservationSequenceWatermark
@@ -1395,7 +1435,7 @@ async function doFetchExecution(): Promise<void> {
       executionReadRecovery.waiting(() => { void executionScheduler.requestNow() })
       throw new ExecutionRefreshUnavailable('Execution projection is initializing')
     }
-    if (!hydrateExecutionSnapshot(data, { requestGeneration })) {
+    if (!hydrateExecutionSnapshot(data, { requestGeneration, rootRevision })) {
       throw new ExecutionRefreshUnavailable('Execution response was superseded by a newer observation')
     }
   } catch (err) {
@@ -1438,6 +1478,7 @@ export function recoverShellReadDebt(authorityChanged = false): void {
 export function disposeExecutionReadRecovery(): void {
   executionReadRecovery.dispose()
   shellReadRecovery.dispose()
+  if (inflightShellRefresh) retireShellRefresh(inflightShellRefresh)
   executionScheduler.dispose()
 }
 

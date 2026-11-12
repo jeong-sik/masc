@@ -533,7 +533,7 @@ describe('refreshDashboard bootstrap', () => {
     await store.refreshDashboard({ force: true })
 
     expect(apiMocks.fetchDashboardBootstrap).toHaveBeenCalledTimes(1)
-    expect(apiMocks.fetchDashboardShell).toHaveBeenCalledWith({ light: false })
+    expect(apiMocks.fetchDashboardShell).toHaveBeenCalledWith(expect.objectContaining({ light: false, signal: expect.any(AbortSignal) }))
     expect(apiMocks.fetchDashboardExecution).toHaveBeenCalledTimes(1)
     expect(store.serverStatus.value?.project).toBe('fallback')
     expect(store.executionLoaded.value).toBe(true)
@@ -645,7 +645,7 @@ describe('refreshKeeperRuntimeStatus', () => {
 
     expect(apiMocks.fetchDashboardBootstrap).not.toHaveBeenCalled()
     expect(apiMocks.fetchDashboardExecution).toHaveBeenCalledWith({ force: true })
-    expect(apiMocks.fetchDashboardShell).toHaveBeenCalledWith({ light: true })
+    expect(apiMocks.fetchDashboardShell).toHaveBeenCalledWith(expect.objectContaining({ light: true, signal: expect.any(AbortSignal) }))
     expect(apiMocks.fetchDashboardShell.mock.invocationCallOrder[0]!)
       .toBeLessThan(apiMocks.fetchDashboardExecution.mock.invocationCallOrder[0]!)
     expect(store.shellCounts.value).toEqual({

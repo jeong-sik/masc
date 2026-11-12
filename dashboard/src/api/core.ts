@@ -409,7 +409,7 @@ async function reportRejectedCredential(
   managedRevision: number,
 ): Promise<void> {
   const listener = rejectedCredentialListener
-  if (response.status !== 401 || listener === null) return
+  if (init.signal?.aborted || response.status !== 401 || listener === null) return
   const token = sentBearerToken(init.headers)
   if (token === null || token !== owner.token) return
   // A later 401 header makes an earlier shell validation stale even while
@@ -422,6 +422,7 @@ async function reportRejectedCredential(
   // Cloned before this function first awaits, so the caller still owns the
   // original body.
   const info = await errorResponseInfoFromResponse(response.clone())
+  if (init.signal?.aborted) return
   const managedStillCurrent = managed && owner.token === dashboardBearerToken()
     && owner.tokenRevision === currentStoredTokenRevision()
     && getStoredTokenMeta()?.source === 'dev' && owner.actor === currentDashboardActor()
@@ -456,15 +457,17 @@ async function credentialedFetch(path: string, init: CredentialedRequestInit): P
     if (replayed !== null) return replayed
   }
   const response = await fetch(path, requestInit)
+  if (requestInit.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
   // Kept before the caller sees the 401, so a poll that starts after it is
   // answered from the table instead of sending the same request again.
   if (credentialless !== null && response.status === 401) {
     try {
-      await noteRefusal(credentialless, response.clone())
+      await noteRefusal(credentialless, response.clone(), requestInit.signal ?? undefined)
     } catch (err) {
       if (!isAbortError(err)) console.warn('[dashboard-auth] credentialless refusal was not kept', err)
     }
   }
+  if (requestInit.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
   if (reportCredentialRefusal) void reportRejectedCredential(requestInit, response, owner, managed, managedRevision).catch(err => {
     console.warn('[dashboard-auth] rejected credential listener failed', err)
   })

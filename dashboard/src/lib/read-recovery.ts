@@ -12,6 +12,7 @@ export function createReadRecovery() {
   const clear = () => { if (timer !== null) clearTimeout(timer); timer = null }
   return {
     get revision() { return revision },
+    get isReading() { return phase === 'reading' },
     started() { active = true; clear(); phase = 'reading' },
     waiting(read: () => void) { clear(); phase = 'waiting'; delayStep = 0; retry = read },
     succeeded() { revision += 1; clear(); phase = 'settled'; delayStep = 0; retry = null },

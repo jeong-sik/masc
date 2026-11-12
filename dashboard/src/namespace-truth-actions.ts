@@ -1,6 +1,6 @@
 import { fetchDashboardNamespaceTruth } from './api/dashboard-hot'
 import { asString, isRecord } from './components/common/normalize'
-import { serverStatus } from './store'
+import { hydrateShellRootSnapshot } from './store'
 import {
   namespaceTruth,
   namespaceTruthLoading,
@@ -9,7 +9,6 @@ import {
   namespaceTruthReadRecovery,
 } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
-import { mergeServerStatus } from './store-normalizers'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { ApiRequestError, captureDashboardCredentialOwner, dashboardCredentialOwnerIsCurrent } from './api/core'
 
@@ -38,10 +37,7 @@ async function doFetchNamespaceTruth(): Promise<void> {
     namespaceTruthInitializing.value = false
     const normalized = normalizeNamespaceTruth(raw)
     namespaceTruth.value = normalized
-    serverStatus.value = mergeServerStatus(
-      serverStatus.value,
-      normalized.root.status ?? null,
-    )
+    hydrateShellRootSnapshot(normalized.root, true)
     namespaceTruthReadRecovery.succeeded()
   } catch (err) {
     if (!current()) return

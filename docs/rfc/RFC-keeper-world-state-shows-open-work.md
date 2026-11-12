@@ -8,7 +8,7 @@ author: dancer + claude
 supersedes: []
 superseded_by: null
 related: ["0465", "keeper-github-apps", "0385", "0462", "connector-ambient-attention-wake", "prompts-and-tool-definitions-outside-ocaml", "every-durable-store-has-one-boot-policy"]
-implementation_prs: [50213, 50214, 50259]
+implementation_prs: [50213, 50214, 50259, 51695, 51712]
 ---
 
 # RFC: Keeper 는 World State 에서 열린 일을 본다

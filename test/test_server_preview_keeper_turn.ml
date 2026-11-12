@@ -177,7 +177,9 @@ streaming = true
     codex
 ;;
 
-(* A provider of each kind, for what a person is offered (plan L2a). *)
+(* A provider of each kind, for what a person is offered (plan L2a). The
+   commands name no file, so a check that reaches a client fails at once
+   instead of starting the one on PATH. *)
 let offered_toml =
   {|[runtime]
 default = "claude_code.claude-sonnet-5"
@@ -185,7 +187,7 @@ default = "claude_code.claude-sonnet-5"
 [providers.claude_code]
 display-name = "Claude Code"
 protocol = "claude-code"
-command = "claude"
+command = "/nonexistent/claude"
 is-non-interactive = true
 
 [providers.local]
@@ -196,20 +198,20 @@ endpoint = "http://127.0.0.1:1"
 [providers.codex]
 display-name = "Codex"
 protocol = "codex-app-server"
-command = "codex"
+command = "/nonexistent/codex"
 is-non-interactive = true
 
 [providers.agy]
 display-name = "Antigravity"
 protocol = "antigravity-cli"
-command = "agy"
+command = "/nonexistent/agy"
 is-non-interactive = true
 timeout-s = 180.0
 
 [providers.muse]
 display-name = "Muse Code"
 protocol = "muse-serve"
-command = "muse"
+command = "/nonexistent/muse"
 is-non-interactive = true
 
 [models."claude-sonnet-5"]

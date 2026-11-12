@@ -30,6 +30,7 @@ def sibling(name):
 REVIEWS = sibling('github-reviews')
 STACKS = sibling('stack-scope')
 GET = sibling('github-get')
+ISSUES = sibling('linked-issues')
 CLIENT = GET.Client(
     run=lambda *args, **kwargs: subprocess.run(*args, **kwargs),
     clock=lambda: time.time(), sleep=lambda seconds: time.sleep(seconds),
@@ -583,6 +584,43 @@ def merged_numbers(result):
     return [result['pr']]
 
 
+GRAPHQL_TIMEOUT_SECONDS = 120
+
+
+def graphql(document, **variables):
+    """Run one GraphQL document through gh and return its data.
+
+    Every failure is a ValueError: a process that cannot start or outlives the
+    timeout, a refused call, and an answer that carries errors.
+    """
+    command = ['gh', 'api', 'graphql', '-f', f'query={document}']
+    for key, value in variables.items():
+        command += ['-f', f'{key}={value}']
+    try:
+        operation = subprocess.run(command, capture_output=True, text=True, check=False,
+                                   timeout=GRAPHQL_TIMEOUT_SECONDS)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError(f'{type(error).__name__}: {error}') from error
+    if operation.returncode:
+        raise ValueError((operation.stderr or operation.stdout).strip()[-300:] or
+                         f'gh api graphql exited {operation.returncode}')
+    return json.loads(operation.stdout)['data']
+
+
+def close_linked_issues(repo, numbers):
+    """Close the issues the merged pull requests link (#51498).
+
+    GitHub does not close a linked issue for a merge made with the Actions
+    token, so the worker closes it. Like branch cleanup, this never changes a
+    merge verdict: a read that fails is one record naming the pull requests.
+    """
+    try:
+        return ISSUES.close_linked_issues(repo, numbers, graphql)
+    except (ValueError, TypeError, KeyError) as error:
+        return [{'prs': list(numbers), 'closed': False,
+                 'reason': f'{type(error).__name__}: {error}'[:300]}]
+
+
 def requested_pr():
     if os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
         raw = os.environ['DISPATCH_PR']
@@ -598,8 +636,10 @@ def requested_pr():
 
 def emit(result):
     if _WAKE['enabled'] and reports_a_completed_merge(result):
+        numbers = merged_numbers(result)
         result['main_build'] = wake_main_build(_WAKE['repo'])
-        result['head_branches'] = delete_merged_heads(_WAKE['repo'], merged_numbers(result))
+        result['head_branches'] = delete_merged_heads(_WAKE['repo'], numbers)
+        result['linked_issues'] = close_linked_issues(_WAKE['repo'], numbers)
     output = json.dumps(result, ensure_ascii=False, indent=2)
     print(output, flush=True)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
@@ -647,6 +687,7 @@ def main():
             if woken is not None:
                 result['main_build'] = woken
                 result['head_branches'] = delete_merged_heads(_WAKE['repo'], [number])
+                result['linked_issues'] = close_linked_issues(_WAKE['repo'], [number])
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
         print(f'approval-auto-merge: cannot establish or submit merge: {error}', file=sys.stderr)
         return 1

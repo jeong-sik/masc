@@ -36,8 +36,9 @@ jobs:
   request:
     # Kept: a draft conversion (the worker drops the reservation), and any
     # event on an open, ready pull request. A closed pull request is kept
-    # only when it merged (the worker wakes the main build and deletes the
-    # branch). An edit is kept only when it changed the base branch; title
+    # only when it merged (the worker wakes the main build, deletes the
+    # branch and closes the linked issues). An edit is kept only when it
+    # changed the base branch; title
     # and body edits change nothing the worker reads. A draft's reviews are
     # read again when it is marked ready.
     if: >-

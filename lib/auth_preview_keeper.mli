@@ -33,9 +33,9 @@ val turn_path : string
 val conversation_path : string
 
 (** A Keeper name of the Keeper grammar ({!Keeper_id.Keeper_name}), which is
-    also the name of its TOML, as an id of the log. A name that is not both
-    gets a 400 JSON [{"error": ...}]. *)
-val keeper_id_of : string -> (Authz_types.Keeper_id.t, Login_routes.answer) result
+    also the name of its TOML, as an id of the log. For a name that is not
+    both, the error is the sentence that says why; a route answers it 400. *)
+val keeper_id_of : string -> (Authz_types.Keeper_id.t, string) result
 
 (** A 200 JSON [{"keepers": [{"keeper_id":...,"runtime_id":...}]}]: the
     Keepers the person owns, each with the Runtime of its latest assignment

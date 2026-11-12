@@ -84,10 +84,12 @@ let tool_call id input = `Assoc ["id",`String id;"type",`String "function";
 let valid = `Assoc ["verdict",`String "APPROVE";"reason",`String "checked exact evidence"]
 
 (* Where a server shutdown interrupts the reviewer: while its provider request
-   is open, while its report handler runs, on the provider request that
-   follows a settled report, or before a report call of a later reply starts. *)
+   is open, before the report call of its first reply starts, while its report
+   handler runs, on the provider request that follows a settled report, or
+   before a report call of a later reply starts. *)
 type cancel_point =
   | While_provider_answers
+  | Before_report_starts
   | While_report_runs
   | After_report_settles
   | Before_later_report_starts
@@ -119,7 +121,8 @@ let run_native ?(runtime_id=model_id) ?(refuse_publication=false) ?refuse_from ?
       | Some While_provider_answers -> Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
       | Some After_report_settles when !provider_calls > 1 ->
         Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
-      | Some (While_report_runs | After_report_settles | Before_later_report_starts) | None ->
+      | Some (Before_report_starts | While_report_runs | After_report_settles
+             | Before_later_report_starts) | None ->
         (match refuse_from with
          | Some ordinal when !provider_calls >= ordinal ->
            `Bad_request, {|{"error":{"message":"refused by the fixture","type":"invalid_request_error"}}|}
@@ -140,7 +143,8 @@ let run_native ?(runtime_id=model_id) ?(refuse_publication=false) ?refuse_from ?
      | Some (Before_any_report | Between_two_reports | After_the_report) | None -> ());
     match cancel_at with
     | Some While_report_runs -> Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
-    | Some (While_provider_answers | After_report_settles | Before_later_report_starts) | None ->
+    | Some (While_provider_answers | Before_report_starts | After_report_settles
+           | Before_later_report_starts) | None ->
     let next,answer = AR.step_verdict_call !state input in
     state:=next;
     match answer with
@@ -154,6 +158,8 @@ let run_native ?(runtime_id=model_id) ?(refuse_publication=false) ?refuse_from ?
   let gate _ =
     incr gate_calls;
     match cancel_at with
+    | Some Before_report_starts ->
+      Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
     | Some Before_later_report_starts when !gate_calls > 1 ->
       Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
     | Some (While_provider_answers | While_report_runs | After_report_settles | Before_later_report_starts) | None ->
@@ -181,7 +187,8 @@ let run_native ?(runtime_id=model_id) ?(refuse_publication=false) ?refuse_from ?
     Runtime_agent.run_blocks ~sw:run_sw ~net:env#net ~config [Agent_core.Types.Text "Review"]) in
   let result = match cancel_at with
     | None -> Some (run ())
-    | Some (While_provider_answers | While_report_runs | After_report_settles | Before_later_report_starts) ->
+    | Some (While_provider_answers | Before_report_starts | While_report_runs | After_report_settles
+           | Before_later_report_starts) ->
       Eio.Fiber.first (fun () -> Some (run ())) (fun () -> Eio.Promise.await cancel_ready;None) in
   on_result result;
   (* Discard the returned Agent result: only the original's durable references
@@ -248,6 +255,27 @@ let test_cancelled_reviewer_without_report_retries_as_a_successor () = with_fixt
      Alcotest.(check (list string)) "the refusal names the cancelled runtime" [model_id] retryable_runtimes
    | Ok _ | Error _ -> Alcotest.fail "cancelled original did not become a retryable refusal");
   Alcotest.(check int) "recovery prepares no producer access" 0 !prepared;
+  Alcotest.(check int) "the owner walk opens the next attempt" 1
+    (O.next_attempt ~store ~verification_id ~installation_id ~package_id |> owner))
+
+(* The reviewer's reply asks for its report and the review is cancelled before
+   that call starts: the journal holds a requested report and no settled one. *)
+let test_reviewer_cancelled_before_its_report_starts_is_reviewed_again () = with_fixture (fun env sw base_path store original current ->
+  Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
+    Alcotest.(check (pair int int)) "the report was requested and its handler never ran" (1,0)
+      (run_native ~cancel_at:Before_report_starts env sw ~base_path ~store ~original ~current
+        [tool_call "unstarted-report" valid]));
+  (match X.observe ~base_path ~original (O.progress !current) |> get with
+   | No_verdict {first=runtime_id,Verifier_review_ending.Cancelled;later=[]} ->
+     Alcotest.(check string) "the cancelled execution is named by its runtime" model_id runtime_id
+   | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
+     Alcotest.fail "a requested report that never started was not read as an ending without a verdict");
+  (match W.run_attempt ~store ~verification_id ~attempt:0 ~installation_id ~package_id
+    ~base_path ~prepare_authority:(fun () -> Error "producer VM is detached")
+    ~prepare_notes:(fun _ -> "unreachable") ~provider_rest:(fun _ -> AR.No_stated_rest) () with
+   | Ok (_, {AR.verdict=None;retryable_runtimes;_}) ->
+     Alcotest.(check (list string)) "the refusal names the cancelled runtime" [model_id] retryable_runtimes
+   | Ok _ | Error _ -> Alcotest.fail "the cancelled original did not become a retryable refusal");
   Alcotest.(check int) "the owner walk opens the next attempt" 1
     (O.next_attempt ~store ~verification_id ~installation_id ~package_id |> owner))
 
@@ -630,6 +658,7 @@ let () =
     Alcotest.test_case "historical missing locator requires reconciliation" `Quick test_historical_original_has_no_replay_authority;
     Alcotest.test_case "duplicate report cannot supply a recovered verdict" `Quick test_duplicate_report_cannot_recover;
     Alcotest.test_case "cancelled reviewer without a report retries as a successor" `Quick test_cancelled_reviewer_without_report_retries_as_a_successor;
+    Alcotest.test_case "reviewer cancelled before its report starts is reviewed again" `Quick test_reviewer_cancelled_before_its_report_starts_is_reviewed_again;
     Alcotest.test_case "reviewer cancelled inside its report stays a repair" `Quick test_reviewer_cancelled_inside_its_report_stays_a_repair;
     Alcotest.test_case "reviewer cancelled after its report keeps the verdict" `Quick test_reviewer_cancelled_after_its_report_keeps_the_verdict;
     Alcotest.test_case "reviewer failing after its report keeps the verdict" `Quick test_reviewer_failing_after_its_report_keeps_the_verdict;

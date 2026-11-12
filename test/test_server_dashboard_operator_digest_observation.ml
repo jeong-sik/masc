@@ -219,7 +219,7 @@ let test_actual_cold_read_and_source_deadline () = with_runtime (fun ~env ~sw ~c
   check bool "settled expiry and own output leave no cadence" false (Eio_mock.Clock.try_advance mock_clock))
 
 let test_parameter_cache_is_bound_to_the_original_workspace () =
-  with_runtime (fun ~env:_ ~sw ~clock ~mock_clock:_ ~state ~scope ->
+  with_runtime (fun ~env:_ ~sw ~clock ~mock_clock ~state ~scope ->
     let other_base = Masc_test_deps.setup_test_workspace () in
     Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace other_base) (fun () ->
       let foreign = Workspace.default_config other_base in
@@ -236,12 +236,12 @@ let test_parameter_cache_is_bound_to_the_original_workspace () =
         | Some value -> value | None -> fail "invalid fixture confidence" in
       let seed config marker =
         let now = Time_compat.now () in
-        ignore (Operator_judgment.record config ~surface:Operator_judgment.Command_namespace
+        Operator_judgment.record config ~surface:Operator_judgment.Command_namespace
           ~target_type:Operator_judgment.Workspace ~target_id:None ~summary:marker ~confidence
           ~generated_at:(Masc_domain.iso8601_of_unix_seconds now) ~generated_at_unix:now
           ~fresh_until:(Masc_domain.iso8601_of_unix_seconds (now +. 60.0)) ~fresh_until_unix:(now +. 60.0)
-          ~keeper_name:"query-source-judge" ~recommended_action:(`Assoc ["marker", `String marker]) ()) in
-      seed scope.config "original workspace";
+          ~keeper_name:"query-source-judge" ~recommended_action:(`Assoc ["marker", `String marker]) () in
+      let original_judgment = seed scope.config "original workspace" in
       let read () = match Server_dashboard_http_core_operator_digest_http.operator_digest_http_json
           ~state ~sw ~clock (Httpun.Request.create `GET "/api/v1/operator/digest?agent_name=same-actor") with
         | Ok json -> json | Error _ -> fail "parameterized Digest read failed" in
@@ -249,10 +249,26 @@ let test_parameter_cache_is_bound_to_the_original_workspace () =
       check bool "the first query reads its actual source" true
         Yojson.Safe.Util.(first |> member "recommended_actions" =
           `List [`Assoc ["marker", `String "original workspace"]]);
-      (* This is an allowed same-root scope replacement. The original
-         durable source changes after the first query, so only the captured
-         instance/query cache boundary can prevent borrowing its old rows. *)
-      seed other "replacement workspace";
+      (* Both scopes use the same actual ledger. Its latest-by-key selection
+         retains the earlier row at equal generated_at_unix, and this fixture
+         clock does not advance itself. Move to its next representable instant
+         before appending the replacement so the source really selects it. *)
+      check string "allowed replacement keeps the same durable source root"
+        (Workspace.masc_dir scope.config) (Workspace.masc_dir other);
+      Eio_mock.Clock.set_time mock_clock
+        (Float.next_after original_judgment.generated_at_unix infinity);
+      let replacement_judgment = seed other "replacement workspace" in
+      check bool "the replacement judgment is strictly newer in the source" true
+        (replacement_judgment.generated_at_unix > original_judgment.generated_at_unix);
+      check int "the actual append retains both source records" 2
+        (List.length (Operator_judgment.load_all other));
+      let selected = match Operator_judgment.latest_active other
+          ~surface:Operator_judgment.Command_namespace
+          ~target_type:Operator_judgment.Workspace ~target_id:None with
+        | Some selected -> selected
+        | None -> fail "the replacement judgment was not read from its actual ledger" in
+      check string "the actual source selects the replacement before HTTP reads it"
+        replacement_judgment.judgment_id selected.judgment_id;
       (match Mcp_server.set_workspace_config state other with
        | Ok () -> () | Error _ -> fail "workspace query replacement failed");
       let replacement = Mcp_server.workspace_scope state in

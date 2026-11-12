@@ -444,8 +444,8 @@ let a_browser_signs_in_acts_and_signs_out () =
       (send old t.router ~meth:"GET" ~path:"/auth/session").status)
 ;;
 
-let whoami router browser ?(headers = []) () =
-  let reply = send browser router ~meth:"GET" ~path:"/api/v1/auth/whoami" ~headers in
+(* What a who-am-I answer says, in one line. *)
+let whoami_line (reply : reply) =
   let text name =
     match member name reply with
     | Some (`String value) -> value
@@ -458,6 +458,10 @@ let whoami router browser ?(headers = []) () =
   match reply.status with
   | 200 -> Printf.sprintf "200 %s %s by %s" (text "role") (text "principal") (text "binding")
   | status -> Printf.sprintf "%d %s" status (text "error")
+;;
+
+let whoami router browser ?(headers = []) () =
+  whoami_line (send browser router ~meth:"GET" ~path:"/api/v1/auth/whoami" ~headers)
 ;;
 
 (* The localhost preview (plan, preview scope P3) as a browser uses it: the
@@ -687,6 +691,245 @@ let a_pat_acts_until_it_is_revoked () =
       (whoami router (fresh_browser ()) ~headers:bearer ()))
 ;;
 
+(* The MCP endpoint of a person (plan S1b-1a): an MCP client posts JSON-RPC
+   messages with the person's PAT and gets one JSON answer for each. The
+   endpoint judges the credential of every request, so it gives no session id,
+   and a revoked PAT is refused on the next request. A browser session acts
+   there under the rules of every route that changes something: the same
+   origin and the CSRF token. *)
+let mcp_headers = [ "Content-Type", "application/json"; "Accept", "application/json, text/event-stream" ]
+
+let mcp ?(headers = []) browser router body =
+  send browser router ~meth:"POST" ~path:Server_person_mcp.path ~headers:(mcp_headers @ headers) ~body
+;;
+
+let rpc ?(params = `Assoc []) ~id method_ =
+  Yojson.Safe.to_string
+    (`Assoc [ "jsonrpc", `String "2.0"; "id", `Int id; "method", `String method_; "params", params ])
+;;
+
+(* The member at [path] of the JSON answer, [`Null] where there is none. *)
+let at path (reply : reply) =
+  List.fold_left
+    (fun json name ->
+      match json with
+      | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt name fields)
+      | _ -> `Null)
+    (Yojson.Safe.from_string reply.body)
+    path
+;;
+
+let error_code reply =
+  match at [ "error"; "code" ] reply with
+  | `Int code -> code
+  | _ -> Alcotest.failf "no error code in %S" reply.body
+;;
+
+let wire = Masc.Mcp_error_code.to_wire_code
+
+(* The text of a tool result, as the answer of the route it stands for. *)
+let tool_text (reply : reply) =
+  match at [ "result"; "content" ] reply with
+  | `List [ `Assoc fields ] ->
+    (match List.assoc_opt "text" fields with
+     | Some (`String text) -> text
+     | _ -> Alcotest.failf "no text in %S" reply.body)
+  | _ -> Alcotest.failf "no content in %S" reply.body
+;;
+
+let call_whoami ?(arguments = `Assoc []) ~id () =
+  rpc ~id "tools/call" ~params:(`Assoc [ "name", `String "masc_whoami"; "arguments", arguments ])
+;;
+
+let a_person_calls_mcp () =
+  with_installation (fun t ->
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let admin = fresh_browser () in
+    Alcotest.(check int)
+      "the Admin joins"
+      200
+      (sign_in t admin ~fields:[ "invite", admin_token ] ~user_id:583231).status;
+    let csrf = csrf_of t admin in
+    let issued =
+      send
+        admin
+        router
+        ~meth:"POST"
+        ~path:"/api/v1/auth/pats"
+        ~headers:(("Content-Type", "application/json") :: changing ~csrf ())
+        ~body:
+          {|{"scope":{"runtimes":"all","channels":["direct"],"allowed_effects":["read_state"]},"expires_at_ms":null}|}
+    in
+    let pat_id, token =
+      match member "pat_id" issued, member "token" issued with
+      | Some (`String pat_id), Some (`String token) -> pat_id, token
+      | _ -> Alcotest.failf "no PAT in %S" issued.body
+    in
+    let bearer = [ "Authorization", "Bearer " ^ token ] in
+    let as_pat ?(headers = []) body = mcp ~headers:(bearer @ headers) (fresh_browser ()) router body in
+    (* Who may send a message at all. *)
+    Alcotest.(check string)
+      "no credential"
+      ("401 " ^ Masc.Auth_gate.reason_to_string Masc.Auth_gate.Credential_required)
+      (whoami_line (mcp (fresh_browser ()) router (rpc ~id:1 "tools/list")));
+    let legacy = [ "Authorization", "Bearer " ^ String.make 64 'f' ] in
+    Alcotest.(check string)
+      "a credential the who-am-I route refuses is refused in its words"
+      (whoami router (fresh_browser ()) ~headers:legacy ())
+      (whoami_line (mcp ~headers:legacy (fresh_browser ()) router (rpc ~id:1 "tools/list")));
+    (* The handshake of a client that starts with initialize. *)
+    let initialized =
+      as_pat
+        (rpc
+           ~id:1
+           "initialize"
+           ~params:
+             (`Assoc
+                 [ "protocolVersion", `String "2025-06-18"
+                 ; "capabilities", `Assoc []
+                 ; "clientInfo", `Assoc [ "name", `String "test"; "version", `String "0" ]
+                 ]))
+    in
+    Alcotest.(check int) ("initialize: " ^ initialized.body) 200 initialized.status;
+    Alcotest.(check string)
+      "tools and nothing else"
+      {|{"tools":{"listChanged":false}}|}
+      (Yojson.Safe.to_string (at [ "result"; "capabilities" ] initialized));
+    Alcotest.(check (list string)) "no session id" [] (all "mcp-session-id" initialized);
+    let notified = as_pat {|{"jsonrpc":"2.0","method":"notifications/initialized"}|} in
+    Alcotest.(check (pair int string)) "a notification" (202, "") (notified.status, notified.body);
+    (* The tools. *)
+    let listed = as_pat (rpc ~id:2 "tools/list") in
+    Alcotest.(check int) ("tools/list: " ^ listed.body) 200 listed.status;
+    Alcotest.(check (list string))
+      "the tools"
+      [ "masc_whoami" ]
+      (match at [ "result"; "tools" ] listed with
+       | `List tools ->
+         List.map
+           (function
+             | `Assoc fields ->
+               (match List.assoc_opt "name" fields with
+                | Some (`String name) -> name
+                | _ -> Alcotest.failf "a tool without a name in %S" listed.body)
+             | _ -> Alcotest.failf "a tool that is no object in %S" listed.body)
+           tools
+       | _ -> Alcotest.failf "no tools in %S" listed.body);
+    let called = as_pat (call_whoami ~id:3 ()) in
+    Alcotest.(check int) ("tools/call: " ^ called.body) 200 called.status;
+    Alcotest.(check string)
+      "the tool acts as the person of the PAT"
+      "200 admin human by pat"
+      (whoami_line { status = 200; headers = []; body = tool_text called });
+    Alcotest.(check string)
+      "and the result is no error"
+      "false"
+      (Yojson.Safe.to_string (at [ "result"; "isError" ] called));
+    let with_argument = as_pat (call_whoami ~id:4 ~arguments:(`Assoc [ "user", `String "someone" ]) ()) in
+    Alcotest.(check (pair int string))
+      ("an argument the tool does not take: " ^ with_argument.body)
+      (200, "true")
+      (with_argument.status, Yojson.Safe.to_string (at [ "result"; "isError" ] with_argument));
+    Alcotest.(check int)
+      "a tool the endpoint does not have"
+      (wire Masc.Mcp_error_code.Invalid_params)
+      (error_code (as_pat (rpc ~id:5 "tools/call" ~params:(`Assoc [ "name", `String "masc_keeper_up" ]))));
+    let unknown = as_pat (rpc ~id:6 "resources/list") in
+    Alcotest.(check (pair int int))
+      "a method the endpoint does not have"
+      (200, wire Masc.Mcp_error_code.Method_not_found)
+      (unknown.status, error_code unknown);
+    (* What is no message. *)
+    List.iter
+      (fun (label, body, code) ->
+        let reply = as_pat body in
+        Alcotest.(check (pair int int)) (label ^ ": " ^ reply.body) (400, wire code) (reply.status, error_code reply))
+      [ "text that is not JSON", "{", Masc.Mcp_error_code.Parse_error
+      ; "a batch", "[]", Masc.Mcp_error_code.Invalid_request
+      ];
+    let only_json =
+      send
+        (fresh_browser ())
+        router
+        ~meth:"POST"
+        ~path:Server_person_mcp.path
+        ~headers:([ "Content-Type", "application/json"; "Accept", "application/json" ] @ bearer)
+        ~body:(rpc ~id:7 "tools/list")
+    in
+    Alcotest.(check (pair int int))
+      ("an Accept without the event stream: " ^ only_json.body)
+      (400, wire Masc.Mcp_error_code.Invalid_request)
+      (only_json.status, error_code only_json);
+    Alcotest.(check int)
+      "a message over the bound"
+      413
+      (as_pat (String.make (Server_person_mcp.max_message_bytes + 1) ' ')).status;
+    Alcotest.(check int)
+      "the endpoint opens no stream"
+      405
+      (send (fresh_browser ()) router ~meth:"GET" ~path:Server_person_mcp.path ~headers:bearer).status;
+    (* A revision that selects its protocol on every request. *)
+    let revision = Mcp_transport_protocol.protocol_version_2026_07_28 in
+    let stateless ?(revision = revision) ~id () =
+      rpc
+        ~id
+        "tools/call"
+        ~params:
+          (`Assoc
+              [ "name", `String "masc_whoami"
+              ; ( "_meta"
+                , `Assoc
+                    [ Mcp_transport_protocol.protocol_version_meta_key, `String revision
+                    ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc []
+                    ] )
+              ])
+    in
+    let routing ?(revision = revision) method_ =
+      [ "MCP-Protocol-Version", revision; "Mcp-Method", method_; "Mcp-Name", "masc_whoami" ]
+    in
+    let per_request = as_pat ~headers:(routing "tools/call") (stateless ~id:8 ()) in
+    Alcotest.(check int) ("a per-request revision: " ^ per_request.body) 200 per_request.status;
+    Alcotest.(check (list string)) "names the revision back" [ revision ] (all "mcp-protocol-version" per_request);
+    Alcotest.(check string)
+      "and calls the tool"
+      "200 admin human by pat"
+      (whoami_line { status = 200; headers = []; body = tool_text per_request });
+    let mismatched = as_pat ~headers:(routing "tools/list") (stateless ~id:9 ()) in
+    Alcotest.(check (pair int int))
+      ("a routing header that is not the method of the body: " ^ mismatched.body)
+      (400, wire Masc.Mcp_error_code.Header_mismatch)
+      (mismatched.status, error_code mismatched);
+    let unsupported =
+      as_pat
+        ~headers:(routing ~revision:"1999-01-01" "tools/call")
+        (stateless ~revision:"1999-01-01" ~id:10 ())
+    in
+    Alcotest.(check (pair int int))
+      ("a revision the server does not have: " ^ unsupported.body)
+      (400, wire Masc.Mcp_error_code.Unsupported_protocol_version)
+      (unsupported.status, error_code unsupported);
+    (* A browser session. *)
+    let by_session = mcp ~headers:(changing ~csrf ()) admin router (call_whoami ~id:11 ()) in
+    Alcotest.(check int) ("a session with the token: " ^ by_session.body) 200 by_session.status;
+    Alcotest.(check string)
+      "acts as the person of the session"
+      "200 admin human by session"
+      (whoami_line { status = 200; headers = []; body = tool_text by_session });
+    Alcotest.(check string)
+      "a session without the CSRF token"
+      ("403 " ^ Masc.Auth_gate.reason_to_string (Masc.Auth_gate.Session_refused Q.Csrf_missing))
+      (whoami_line (mcp ~headers:(changing ()) admin router (call_whoami ~id:12 ())));
+    (* The PAT, once revoked. *)
+    let revoked =
+      send admin router ~meth:"DELETE" ~path:("/api/v1/auth/pats/" ^ pat_id) ~headers:(changing ~csrf ())
+    in
+    Alcotest.(check int) ("revoked: " ^ revoked.body) 204 revoked.status;
+    Alcotest.(check string)
+      "the revoked PAT sends no message"
+      ("401 " ^ Masc.Auth_gate.reason_to_string (Masc.Auth_gate.Pat_refused Authz_pat.Ended))
+      (whoami_line (as_pat (rpc ~id:13 "tools/list"))))
+;;
+
 (* Bytes another writer added to the log: the next commit finds the end moved
    and stops the log. From then on no route decides on the state the zone
    holds. A person who signed in before gets a 503 where they read or change
@@ -909,6 +1152,7 @@ let () =
       , [ Alcotest.test_case "a browser signs in, acts and signs out" `Quick a_browser_signs_in_acts_and_signs_out
         ; Alcotest.test_case "the preview follows a login" `Quick the_preview_follows_a_login
         ; Alcotest.test_case "a PAT acts until it is revoked" `Quick a_pat_acts_until_it_is_revoked
+        ; Alcotest.test_case "a person calls MCP" `Quick a_person_calls_mcp
         ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_answers_no_person
         ; Alcotest.test_case
             "the request that meets a moved log"

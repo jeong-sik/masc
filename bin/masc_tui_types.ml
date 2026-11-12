@@ -4477,6 +4477,24 @@ let keeper_detail_tab_label = function
   | Detail_runs -> "Runs"
   | Detail_terminal -> "Terminal"
 
+(* The tab's name on the tab row. [keeper_detail_tab_label] is the English
+   name the help sentences quote. *)
+let keeper_detail_tab_title ~ko tab =
+  if not ko then keeper_detail_tab_label tab
+  else
+    match tab with
+    | Detail_info -> "정보"
+    | Detail_items -> "아이템"
+    | Detail_sandbox -> "샌드박스"
+    | Detail_instructions -> "설정"
+    | Detail_secrets -> "시크릿"
+    | Detail_github -> "GitHub"
+    | Detail_identity -> "정체성"
+    | Detail_channels -> "채널"
+    | Detail_automation -> "자동화"
+    | Detail_runs -> "실행"
+    | Detail_terminal -> "터미널"
+
 (** Which Keeper a connected client is acting for, where that is a reading
     its row does not already carry.
 

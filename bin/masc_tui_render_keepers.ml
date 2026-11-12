@@ -3470,6 +3470,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       (* Build all detail lines first, then apply scroll *)
       let lines = ref [] in
       let add_line s = lines := s :: !lines in
+      let ko = state.ui_language = Lang_ko in
+      let t korean english = if ko then korean else english in
 
       (* Helper to add a labeled row *)
       let row_lines ~width label value =
@@ -3490,75 +3492,80 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       in
       let identity =
         let width = header_width in
-        [ section_line "Identity" ]
-        @ row_lines ~width "Name:" (Terminal_text.single_line k.k_name)
-        @ row_lines ~width "Paused:"
+        [ section_line (t "기본 정보" "Identity") ]
+        @ row_lines ~width (t "이름:" "Name:") (Terminal_text.single_line k.k_name)
+        @ row_lines ~width (t "일시정지:" "Paused:")
             (match k.k_origin, (keeper_reading state k).Keeper_control.liveness with
              | Tui_decode.Remote_keeper,
                  (Keeper_control.Invalid _ | Unobserved | Absent) ->
-                 Ansi.dim ^ "not observed" ^ Ansi.reset
+                 Ansi.dim ^ t "미관측" "not observed" ^ Ansi.reset
              | (Tui_decode.Persisted_keeper | Declared_keeper _), _
              | Remote_keeper, Keeper_control.Present _ ->
-                 if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
-                 else Ansi.dim ^ "no" ^ Ansi.reset)
-        @ row_lines ~width "Suggested action:"
+                 if k.k_paused then (Theme.warn ()) ^ t "예" "yes" ^ Ansi.reset
+                 else Ansi.dim ^ t "아니오" "no" ^ Ansi.reset)
+        @ row_lines ~width (t "권장 조치:" "Suggested action:")
             (keeper_suggested_action (keeper_reading state k))
         @ (match Masc_tui_candle.balance_text ~now:(Unix.gettimeofday ())
                    state.candle_observation ~keeper:k.k_name with
            | None -> []
-           | Some value -> row_lines ~width "Candle balance:" (Terminal_text.single_line value))
+           | Some value -> row_lines ~width (t "Candle 잔액:" "Candle balance:") (Terminal_text.single_line value))
       in
       List.iter add_line identity;
       (match portrait_reading with
        | Tui_decode.Ready _ -> ()
-       | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
+       | Tui_decode.Unavailable reason -> add_row (t "초상:" "Portrait:") (t "없음: " "unavailable: " ^ Terminal_text.single_line reason));
       add_empty ();
       let add_row label value =
         List.iter add_line (row_lines ~width:header_width label value)
       in
       (* Current work section *)
-      add_section "Current Work";
-      add_row "Task:"
+      add_section (t "현재 작업" "Current Work");
+      add_row (t "작업:" "Task:")
         (match k.k_activity with
-         | None -> "not observed"
+         | None -> t "미관측" "not observed"
          | Some activity -> Terminal_text.single_line_or
              ~default:Masc_tui_theme.Glyph.no_value activity.k_current_task_id);
       add_empty ();
 
-      add_section "Live Context";
+      add_section (t "실시간 컨텍스트" "Live Context");
+      let context_label = t "컨텍스트:" "Context:" in
       let add_context observation =
         match Observation_layout.context_summary observation with
         | Observation_layout.Context_measured observation ->
             let ratio = observation.ratio in
             let pct = Float.of_int (Observation_layout.percentage_tenths ratio) /. 10.0 in
             let bar_width = Layout.keeper_context_bar_width ~inner_width:header_width in
-            add_row "Context:"
-              (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
+            add_row context_label
+              (Printf.sprintf
+                 (if ko then "%s%.1f%%%s  %s  %s / %s 토큰"
+                  else "%s%.1f%%%s  %s  %s / %s tokens")
                  (ctx_color ratio) pct Ansi.reset (ctx_bar ratio bar_width)
                  (Masc_tui_message_layout.compact_count observation.tokens)
                  (Masc_tui_message_layout.compact_count observation.maximum));
-            add_row "Observed:" (Terminal_text.short_timestamp observation.observed_at);
-            add_row "Turn Ref:" (Terminal_text.single_line observation.turn_ref)
+            add_row (t "관측 시각:" "Observed:") (Terminal_text.short_timestamp observation.observed_at);
+            add_row (t "턴 참조:" "Turn Ref:") (Terminal_text.single_line observation.turn_ref)
         | Observation_layout.Context_partial observation ->
-            add_row "Context:"
-              (Printf.sprintf "%s tokens in context; window not observed"
+            add_row context_label
+              (Printf.sprintf
+                 (if ko then "컨텍스트 %s 토큰 · 창 크기 미관측"
+                  else "%s tokens in context; window not observed")
                  (Masc_tui_message_layout.compact_count observation.tokens));
-            add_row "Observed:" (Terminal_text.short_timestamp observation.observed_at);
-            add_row "Turn Ref:" (Terminal_text.single_line observation.turn_ref)
+            add_row (t "관측 시각:" "Observed:") (Terminal_text.short_timestamp observation.observed_at);
+            add_row (t "턴 참조:" "Turn Ref:") (Terminal_text.single_line observation.turn_ref)
         | Observation_layout.Context_unavailable reason ->
-            add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset)
+            add_row context_label (Ansi.dim ^ reason ^ Ansi.reset)
       in
       (match live_context_view state k with
        | Masc_tui_fetched.Absent ->
-           add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)
+           add_row context_label (Ansi.dim ^ t "읽기 전" "not loaded" ^ Ansi.reset)
        | Masc_tui_fetched.Loading ->
-           add_row "Context:" (Ansi.dim ^ "reading" ^ Ansi.reset)
+           add_row context_label (Ansi.dim ^ t "읽는 중" "reading" ^ Ansi.reset)
        | Masc_tui_fetched.Ready observation -> add_context observation
        | Masc_tui_fetched.Stale (observation, detail) ->
-           add_row "Refresh:" ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset);
+           add_row (t "갱신:" "Refresh:") ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset);
            add_context observation
        | Masc_tui_fetched.Failed detail ->
-           add_row "Context:" ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset));
+           add_row context_label ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset));
       add_empty ();
 
       let header_lines = List.rev !lines in
@@ -3579,8 +3586,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          drawn dimmed underneath, so the wire a log search keys on stays on
          screen without ever leading the row. *)
       add_numbered_section ~first:true
-        "1. 현재 장애 · 보드 격리 (Current Failure & Board Attention)";
+        (t "1. 현재 장애 · 보드 격리" "1. Current Failure & Board Attention");
       let indent = "  " in
+      let absent_text = t "실시간 목록에 없음" "absent from live roster" in
       let wrap ?(tone = "") text =
         Message_layout.wrap_words
           ~max_cells:(max 1 (inner - Message_layout.display_width indent))
@@ -3611,11 +3619,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 (match runtime.kr_runtime_blocker_signature with
                 | Some signature -> wrap ~tone:Ansi.dim signature
                 | None -> ())
-            | None -> wrap ~tone:Ansi.dim "none")
-        | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim "unread"
-        | Keeper_control.Absent -> wrap ~tone:Ansi.dim "absent from live roster"
+            | None -> wrap ~tone:Ansi.dim (t "없음" "none"))
+        | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim (t "미관측" "unread")
+        | Keeper_control.Absent -> wrap ~tone:Ansi.dim absent_text
         | Keeper_control.Invalid detail ->
-            wrap ~tone:(Theme.bad ()) ("config error: " ^ detail)
+            wrap ~tone:(Theme.bad ()) (t "설정 오류: " "config error: " ^ detail)
       in
 
       (* Blocked Board-attention partitions wait here for an
@@ -3641,11 +3649,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          durable and is what an external effect -- a write to a service this
          Keeper is attached to -- is actually decided under. An operator reading
          one for the other is how a call gets made that nobody meant to allow. *)
-      add_numbered_section "2. 권한 게이트 · 승인 정책 (Gate & Tool Policy)";
+      add_numbered_section (t "2. 권한 게이트 · 승인 정책" "2. Gate & Tool Policy");
       (* The same word the chat header wears in capitals and the footer offers
          after g, with what it does beside it. This row said "asked" under a
          header saying AUTO. *)
-      add_row "Tool calls:"
+      add_row (t "도구 호출:" "Tool calls:")
         (let mode =
            if List.mem k.k_name state.keeper_yolo_names then
              Masc.Keeper_tool_approval_mode.Yolo
@@ -3661,7 +3669,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       (* "workspace" is where the stance comes from, not what it is. The chat
          header resolves the same inheritance before drawing it; this row left
          the reader to go and look it up. *)
-      add_row "Effects (Gate mode):"
+      add_row (t "효과(Gate 모드):" "Effects (Gate mode):")
         (let inherited =
            Option.map
              (fun (modes : Tui_decode.gate_lane_modes) ->
@@ -3674,19 +3682,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              ^ Terminal_text.single_line (gate_mode_reading_word mode)
              ^ Ansi.reset
          | None ->
-             Ansi.dim ^ "workspace"
+             Ansi.dim ^ t "워크스페이스" "workspace"
              ^ (match inherited with
                 | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
                 | None -> "")
              ^ Ansi.reset);
-      add_row "Lane first:"
+      add_row (t "우선 lane:" "Lane first:")
         (match
            List.filter
              (fun (first : Tui_decode.keeper_exact_lane_first) ->
                String.equal first.Tui_decode.kel_keeper k.k_name)
              state.keeper_exact_lane_firsts
          with
-         | [] -> Ansi.dim ^ "lane order" ^ Ansi.reset
+         | [] -> Ansi.dim ^ t "lane 순서" "lane order" ^ Ansi.reset
          | firsts ->
              (Theme.accent ())
              ^ Terminal_text.single_line
@@ -3696,7 +3704,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                          (* The marker leads: a narrow pane cuts the row's
                             tail, and the slot id is the part it can lose. *)
                          (if first.kel_offered then ""
-                          else "not offered, lane order \xc2\xb7 ")
+                          else t "제안 안 됨, lane 순서 \xc2\xb7 " "not offered, lane order \xc2\xb7 ")
                          ^ first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
                          ^ first.kel_slot_id)
                        firsts))
@@ -3704,12 +3712,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       (match state.keeper_gate_settings_unread with
        | None -> ()
        | Some reason ->
-           add_row "Gate settings:"
-             (Theme.bad () ^ "unread \xc2\xb7 "
+           add_row (t "Gate 설정:" "Gate settings:")
+             (Theme.bad () ^ t "못 읽음 \xc2\xb7 " "unread \xc2\xb7 "
               ^ Terminal_text.single_line reason ^ Ansi.reset));
 
       (* Runtime & 24h section *)
-      add_numbered_section "3. 런타임 배정 · 최근 24시간 활동 (Runtime & Last 24h Activity)";
+      add_numbered_section (t "3. 런타임 배정 · 최근 24시간 활동" "3. Runtime & Last 24h Activity");
       List.iter (fun (label, value) -> add_row label value)
         (keeper_operations_fields state ~keeper_name:k.k_name);
       let assignment =
@@ -3726,13 +3734,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
               match state.runtime_surface with
               | Some s ->
                   (match s.rss_resolved.rrs_default_runtime_id with
-                   | Some d -> Printf.sprintf "inherited: %s" d
-                   | None -> "inherited")
-              | None -> "inherited"
+                   | Some d -> t "상속: " "inherited: " ^ d
+                   | None -> t "상속" "inherited")
+              | None -> t "상속" "inherited"
             in
-            Printf.sprintf "default (%s)" def_name
+            Printf.sprintf "%s (%s)" (t "기본" "default") def_name
       in
-      add_row "Runtime Target:" target_str;
+      add_row (t "런타임 대상:" "Runtime Target:") target_str;
       (match assignment with
        | Some { ra_resolution = Runtime_assignment_lane tid; _ } ->
            (match
@@ -3746,9 +3754,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                   String.concat " \xe2\x86\x92 "
                     (List.map runtime_id_model_part lane.rrl_runtime_ids)
                 in
-                add_row "Candidate Chain:" hops;
+                add_row (t "후보 순서:" "Candidate Chain:") hops;
                 (match lane.rrl_runtime_ids with
-                 | first :: _ -> add_row "Head Candidate:" first
+                 | first :: _ -> add_row (t "첫 후보:" "Head Candidate:") first
                  | [] -> ())
             | None -> ())
        | Some
@@ -3768,27 +3776,29 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                           snap.rss_resolved.rrs_runtimes
                       with
                       | Some ro ->
-                          add_row "Default Context:"
-                            (Printf.sprintf "%s \xc2\xb7 max output %s"
+                          add_row (t "기본 컨텍스트:" "Default Context:")
+                            (Printf.sprintf
+                               (if ko then "%s \xc2\xb7 최대 출력 %s"
+                                else "%s \xc2\xb7 max output %s")
                                (format_context_tokens ro.ro_effective_max_context)
                                (match ro.ro_max_output_tokens with
                                 | Some t -> format_context_tokens t
-                                | None -> "default"))
+                                | None -> t "기본" "default"))
                       | None -> ())
                  | None -> ())
             | None -> ()));
       (match k.k_origin with
        | Tui_decode.Persisted_keeper -> ()
-       | Remote_keeper -> add_row "Source:" "server roster"
+       | Remote_keeper -> add_row (t "출처:" "Source:") (t "서버 목록" "server roster")
        | Declared_keeper requirements ->
-         add_row "Preparation:" (String.concat " · "
+         add_row (t "준비:" "Preparation:") (String.concat " · "
            (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
-      add_row "Last Outcome:"
+      add_row (t "최근 결과:" "Last Outcome:")
         (match k.k_activity with
-         | None -> "not observed"
+         | None -> t "미관측" "not observed"
          | Some activity ->
            (match activity.k_last_proactive_outcome with
-            | Some outcome -> proactive_outcome_word ~ko:(state.ui_language = Lang_ko) outcome
+            | Some outcome -> proactive_outcome_word ~ko outcome
             | None -> Masc_tui_theme.Glyph.no_value));
       (* Recent activity, folded from the metrics rows already read for this
          Keeper. The window is bounded by row count, so it can fall short of the
@@ -3797,9 +3807,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          draws no zeros: the same sentence the Logs tab gives for the same
          read. *)
       let log_snapshot = keeper_log_snapshot state in
+      let window_label = t "구간:" "Window:" in
       let log_diagnostics = keeper_log_diagnostics state in
       List.iter (fun (tone, detail) ->
-        add_row "Metrics:" (keeper_log_style tone ^ Terminal_text.single_line detail ^ Ansi.reset))
+        add_row (t "지표:" "Metrics:") (keeper_log_style tone ^ Terminal_text.single_line detail ^ Ansi.reset))
         log_diagnostics;
       (match
          Keeper_activity.read
@@ -3808,32 +3819,32 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            log_snapshot.entries
        with
        | Keeper_activity.No_rows ->
-         if log_diagnostics = [] then add_row "Window:"
+         if log_diagnostics = [] then add_row window_label
            (Ansi.dim ^ Metrics_tail.empty_message log_snapshot.error ^ Ansi.reset)
        | Keeper_activity.Rows activity ->
          if not activity.Keeper_activity.aw_covered then
-           add_row "Window:"
+           add_row window_label
              (match activity.Keeper_activity.aw_oldest_ts with
               | Some oldest ->
-                Printf.sprintf "partial, reaches %s"
-                  (Terminal_text.short_timestamp oldest)
-              | None -> "partial");
-         add_row "Turns / Heartbeats:"
+                (if ko then Terminal_text.short_timestamp oldest ^ " 까지만"
+                 else "partial, reaches " ^ Terminal_text.short_timestamp oldest)
+              | None -> t "일부만" "partial");
+         add_row (t "턴 / heartbeat:" "Turns / Heartbeats:")
            (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
               activity.Keeper_activity.aw_heartbeats);
-         add_row "Tokens In / Out:"
+         add_row (t "토큰 입력 / 출력:" "Tokens In / Out:")
            (Printf.sprintf "%s / %s"
               (Masc_tui_message_layout.compact_count
                  activity.Keeper_activity.aw_input_tokens)
               (Masc_tui_message_layout.compact_count
                  activity.Keeper_activity.aw_output_tokens));
-         add_row "Cost:"
+         add_row (t "비용:" "Cost:")
            (match activity.Keeper_activity.aw_cost_usd with
             | Some cost -> Printf.sprintf "$%.4f" cost
-            | None -> Ansi.dim ^ "not priced by the provider" ^ Ansi.reset);
-         add_row "Tool Calls:"
+            | None -> Ansi.dim ^ t "provider 가 값을 매기지 않음" "not priced by the provider" ^ Ansi.reset);
+         add_row (t "도구 호출:" "Tool Calls:")
            (string_of_int activity.Keeper_activity.aw_tool_calls);
-         add_row "Top Tools:"
+         add_row (t "많이 쓴 도구:" "Top Tools:")
            (match activity.Keeper_activity.aw_top_tools with
             | [] -> Masc_tui_theme.Glyph.no_value
             | tools ->
@@ -3848,9 +3859,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          numbers for every Keeper, read once per month. The month is neither
          the current failure of section 1 nor the 24 hours of section 3, and
          under section 1 it read as part of the failure. *)
-      add_numbered_section "4. 이번 달 효율 (This Month's Efficiency)";
+      add_numbered_section (t "4. 이번 달 효율" "4. This Month's Efficiency");
       (match Masc_tui_keeper_efficiency.lines state.keeper_efficiency ~keeper_name:k.k_name with
-       | [] -> wrap ~tone:Ansi.dim "unread"
+       | [] -> wrap ~tone:Ansi.dim (t "읽기 전" "unread")
        | lines ->
          List.iter
            (fun (tone, text) ->
@@ -3866,101 +3877,102 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
 
       (* Historical receipt evidence is a separate reading. A successful
          fallback may retain earlier refusals while the live blocker is clear. *)
-      add_numbered_section "5. 최근 후보 모델 폴백 이력 (Recorded Runtime Walk)";
+      add_numbered_section (t "5. 최근 후보 모델 폴백 이력" "5. Recorded Runtime Walk");
       let module Receipt = Masc.Keeper_execution_receipt in
       let module Evidence = Keeper_runtime_walk_evidence in
       let module Fault = Llm_provider.Candidate_fault in
       let history_row label value = add_row label (Terminal_text.single_line value) in
+      let terminal_label = t "마지막 실패 후보:" "Terminal origin:" in
       let source (turn : Receipt.receipt_turn) =
-        history_row "Receipt trace:" turn.receipt_trace_id;
-        history_row "Receipt turn:"
+        history_row (t "영수증 trace:" "Receipt trace:") turn.receipt_trace_id;
+        history_row (t "영수증 턴:" "Receipt turn:")
           (match turn.receipt_turn_count with
            | Some count -> string_of_int count
-           | None -> "not recorded");
-        history_row "Receipt ended:" turn.receipt_ended_at
+           | None -> t "기록 없음" "not recorded");
+        history_row (t "영수증 종료:" "Receipt ended:") turn.receipt_ended_at
       in
       let fault = function
-        | None -> "API classification inapplicable"
-        | Some Fault.Unattributed -> "unattributed API refusal"
-        | Some Fault.Unknown_after_dispatch -> "outcome uncertain"
-        | Some Fault.Local_admission -> "MASC admission wait"
+        | None -> t "API 분류 해당 없음" "API classification inapplicable"
+        | Some Fault.Unattributed -> t "원인 미분류 API 거절" "unattributed API refusal"
+        | Some Fault.Unknown_after_dispatch -> t "결과 불확실" "outcome uncertain"
+        | Some Fault.Local_admission -> t "MASC 입장 대기" "MASC admission wait"
         | Some (Fault.Binding binding) ->
           match binding with
-          | Fault.Credential -> "credential"
-          | Fault.Account_access -> "account access"
-          | Fault.Account -> "account"
-          | Fault.Model_absent -> "model absent"
-          | Fault.Rate_limit -> "rate limit"
-          | Fault.Capacity -> "capacity"
-          | Fault.Server -> "server"
-          | Fault.Window -> "context window"
-          | Fault.Body_limit -> "body limit"
-          | Fault.Admission -> "admission"
-          | Fault.Deadline -> "deadline"
-          | Fault.Output_dialect -> "output dialect"
-          | Fault.Refusal_unread -> "refusal unread"
+          | Fault.Credential -> t "인증 정보" "credential"
+          | Fault.Account_access -> t "계정 접근" "account access"
+          | Fault.Account -> t "계정" "account"
+          | Fault.Model_absent -> t "모델 없음" "model absent"
+          | Fault.Rate_limit -> t "요청 한도" "rate limit"
+          | Fault.Capacity -> t "용량" "capacity"
+          | Fault.Server -> t "서버" "server"
+          | Fault.Window -> t "컨텍스트 창" "context window"
+          | Fault.Body_limit -> t "본문 크기 한도" "body limit"
+          | Fault.Admission -> t "입장" "admission"
+          | Fault.Deadline -> t "기한" "deadline"
+          | Fault.Output_dialect -> t "출력 형식" "output dialect"
+          | Fault.Refusal_unread -> t "거절 본문 못 읽음" "refusal unread"
       in
       (match (keeper_reading state k).Keeper_control.liveness with
        | Keeper_control.Present runtime ->
          (match runtime.kr_runtime_lane_observation with
-          | None -> wrap ~tone:Ansi.dim no_receipt_text
+          | None -> wrap ~tone:Ansi.dim (t "영수증 없음" no_receipt_text)
           | Some (Receipt.Runtime_lane_not_observed turn) ->
             source turn;
-            wrap ~tone:Ansi.dim walk_not_captured_text
+            wrap ~tone:Ansi.dim (t "후보 순회가 기록되지 않음" walk_not_captured_text)
           | Some (Receipt.Runtime_lane_unreadable {turn;field}) ->
             Option.iter source turn;
-            wrap ~tone:(Theme.warn ()) (evidence_unreadable_text ^ ": " ^ field)
+            wrap ~tone:(Theme.warn ()) (t "지난 기록을 읽지 못함" evidence_unreadable_text ^ ": " ^ field)
           | Some (Receipt.Runtime_lane_observed {turn;evidence}) ->
             source turn;
             (match evidence.failures with
-             | [] -> wrap ~tone:Ansi.dim no_candidate_failure_text
+             | [] -> wrap ~tone:Ansi.dim (t "기록된 후보 실패 없음" no_candidate_failure_text)
              | failures -> List.iter (fun (failure : Evidence.failure) ->
-                 history_row "Candidate:"
+                 history_row (t "후보:" "Candidate:")
                    (Printf.sprintf "%d · %s" failure.attempt failure.runtime_id);
-                 history_row "Invocation:"
+                 history_row (t "호출:" "Invocation:")
                    (match failure.dispatch with
-                    | Runtime_attempt_dispatch.Dispatched -> "candidate invoked"
-                    | Runtime_attempt_dispatch.Rejected_before_dispatch -> "rejected before invocation");
-                 history_row "API fact:" (fault failure.api_candidate_fault);
+                    | Runtime_attempt_dispatch.Dispatched -> t "후보 호출함" "candidate invoked"
+                    | Runtime_attempt_dispatch.Rejected_before_dispatch -> t "호출 전 거절" "rejected before invocation");
+                 history_row (t "API 분류:" "API fact:") (fault failure.api_candidate_fault);
                  wrap (Keeper_request_failure.summary failure.failure)) failures);
             (match evidence.terminal with
              | Evidence.Terminal_not_observed ->
-               history_row "Terminal origin:" "not observed"
+               history_row terminal_label (t "미관측" "not observed")
              | Evidence.Candidate_terminal {runtime_id;attempt;failure} ->
-               history_row "Terminal origin:" (Printf.sprintf "%d · %s" attempt runtime_id);
+               history_row terminal_label (Printf.sprintf "%d · %s" attempt runtime_id);
                wrap (Keeper_request_failure.summary failure)))
-       | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim "live roster unread"
-       | Keeper_control.Absent -> wrap ~tone:Ansi.dim "absent from live roster"
+       | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim (t "실시간 목록 미관측" "live roster unread")
+       | Keeper_control.Absent -> wrap ~tone:Ansi.dim absent_text
        | Keeper_control.Invalid detail ->
-         wrap ~tone:(Theme.warn ()) ("roster unavailable: " ^ detail));
+         wrap ~tone:(Theme.warn ()) (t "목록을 읽지 못함: " "roster unavailable: " ^ detail));
 
       (* Lifetime totals & Timestamps section *)
-      add_numbered_section "6. 누적 통계 · 생성 이력 (Lifetime Totals & Timestamps)";
+      add_numbered_section (t "6. 누적 통계 · 생성 이력" "6. Lifetime Totals & Timestamps");
       (match k.k_activity with
-       | None -> add_row "Activity:" "not observed"
+       | None -> add_row (t "활동:" "Activity:") (t "미관측" "not observed")
        | Some activity ->
-         add_row "Total Turns:" (string_of_int activity.k_total_turns);
+         add_row (t "누적 턴:" "Total Turns:") (string_of_int activity.k_total_turns);
          (* Read at a glance, the way the Acting pane's block already reads its
             token figures. A live roster drew "75111274" here: eight digits a
             reader counts rather than reads. Turns and tool calls keep their
             digits -- three or four of them, and a count of things done rather
             than a size. *)
-         add_row "Total Tokens:"
+         add_row (t "누적 토큰:" "Total Tokens:")
            (Masc_tui_message_layout.compact_count activity.k_total_tokens);
-         add_row "Lifetime Cost:" (Tui_decode.keeper_cost_summary activity.k_total_cost_usd);
-         add_row "Last Turn:"
+         add_row (t "누적 비용:" "Lifetime Cost:") (Tui_decode.keeper_cost_summary activity.k_total_cost_usd);
+         add_row (t "마지막 턴:" "Last Turn:")
            (match activity.k_last_turn_at with
             | Some at -> Terminal_text.short_timestamp_of_unix at
-            | None -> "(never)"));
+            | None -> t "(없음)" "(never)"));
       (match k.k_identity with
        | Ok identity ->
-         add_row "Created:" (Terminal_text.short_timestamp identity.k_created_at);
-         add_row "Updated:" (Terminal_text.short_timestamp identity.k_updated_at)
+         add_row (t "생성:" "Created:") (Terminal_text.short_timestamp identity.k_created_at);
+         add_row (t "수정:" "Updated:") (Terminal_text.short_timestamp identity.k_updated_at)
        | Error reason ->
            Message_layout.wrap_words ~max_cells:(max 1 (inner - 26))
              (Terminal_text.single_line reason)
            |> List.iteri (fun index line ->
-                add_row (if index = 0 then "Metadata:" else "") line));
+                add_row (if index = 0 then t "메타데이터:" "Metadata:" else "") line));
 
       List.rev !lines
     in
@@ -4717,7 +4729,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let entries =
       List.map
         (fun tab ->
-          ( Masc_tui_types.keeper_detail_tab_label tab
+          ( Masc_tui_types.keeper_detail_tab_title ~ko:(state.ui_language = Lang_ko) tab
           , tab = state.detail_tab
           , tab ))
         Masc_tui_types.keeper_detail_tabs

@@ -1729,11 +1729,14 @@ let render_schedule_list (state : state) =
            in
            let layout =
              Render_schedule.schedule_layout
+               ~ko:(state.ui_language = Lang_ko)
                ~inner_width:(max 1 (framed_inner_width cols - 2))
                ~target_width:subject_width ~wake_width ~delivery_width
            in
            c.push_styled ~style:(Theme.recede ())
-             ("  " ^ Render_schedule.schedule_header_row ~layout);
+             ("  "
+              ^ Render_schedule.schedule_header_row
+                  ~ko:(state.ui_language = Lang_ko) ~layout);
            c.push_divider ();
            (* The column names and the rule under them, the two rows every
               other list on this screen already spends to say what it draws. *)

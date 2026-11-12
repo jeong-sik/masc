@@ -661,6 +661,18 @@ type system_log_column =
   | Log_category
   | Log_message
 
+(* A row draws no head: it lays its cells out on the header's columns with
+   every head empty. *)
+let no_head _ = ""
+
+let system_log_head ~ko = function
+  | Log_time -> if ko then "시각" else "TIME"
+  | Log_level -> if ko then "수준" else "LEVEL"
+  | Log_module -> if ko then "모듈" else "MODULE"
+  | Log_keeper -> if ko then "키퍼" else "KEEPER"
+  | Log_category -> if ko then "분류" else "CATEGORY"
+  | Log_message -> if ko then "메시지" else "MESSAGE"
+
 let system_log_column_width = function
   | Log_time -> system_log_time_width
   | Log_level -> system_log_level_width
@@ -682,34 +694,38 @@ let system_log_layout ~inner_width =
     [ Log_message; Log_level; Log_module; Log_keeper; Log_category; Log_time ]
 
 let system_log_cells ?(styles = system_log_plain_styles) ?(level_style = "")
-    ~(layout : system_log_column Table.layout) values =
+    ~head ~(layout : system_log_column Table.layout) values =
   List.map
-    (function
+    (fun column ->
+      let header = head column in
+      match column with
       | Log_time ->
-          Table.cell ~style:styles.slog_time_style ~header:"TIME"
+          Table.cell ~style:styles.slog_time_style ~header
             ~width:system_log_time_width values.slog_time
       | Log_level ->
-          Table.cell ~style:level_style ~header:"LEVEL"
+          Table.cell ~style:level_style ~header
             ~width:system_log_level_width values.slog_level
       | Log_module ->
-          Table.cell ~style:styles.slog_module_style ~header:"MODULE"
+          Table.cell ~style:styles.slog_module_style ~header
             ~width:system_log_module_width values.slog_module
       | Log_keeper ->
-          Table.cell ~style:styles.slog_keeper_style ~header:"KEEPER"
+          Table.cell ~style:styles.slog_keeper_style ~header
             ~width:system_log_keeper_width values.slog_keeper
       | Log_category ->
-          Table.cell ~style:styles.slog_category_style ~header:"CATEGORY"
+          Table.cell ~style:styles.slog_category_style ~header
             ~width:system_log_category_width values.slog_category
       | Log_message ->
-          Table.cell ~fold:Table.Fold_tail ~header:"MESSAGE"
+          Table.cell ~fold:Table.Fold_tail ~header
             ~width:layout.Table.flex_width values.slog_message)
     layout.Table.shown
 
-let system_log_header_row ~layout =
-  Table.header_row (system_log_cells ~layout system_log_no_values)
+let system_log_header_row ~ko ~layout =
+  Table.header_row
+    (system_log_cells ~head:(system_log_head ~ko) ~layout system_log_no_values)
 
 let system_log_row ~styles ~level_style ~layout values =
-  Table.row (system_log_cells ~styles ~level_style ~layout values)
+  Table.row
+    (system_log_cells ~styles ~level_style ~head:no_head ~layout values)
 
 (* Work / Tasks list columns.
 
@@ -993,6 +1009,14 @@ let schedule_columns =
   ; Schedule_recurrence
   ]
 
+let schedule_head ~ko = function
+  | Schedule_status -> if ko then "상태" else "STATUS"
+  | Schedule_due -> if ko then "기한" else "DUE"
+  | Schedule_target -> if ko then "대상" else "TARGET"
+  | Schedule_wake -> if ko then "실행" else "WAKE"
+  | Schedule_delivery -> if ko then "전달" else "DELIVERY"
+  | Schedule_recurrence -> if ko then "반복" else "RECURRENCE"
+
 (* Preserve the operator's list priority: due time, target and recurrence.
    Delivery goes first, then wake, then state; full state is in the detail. *)
 let schedule_drop_order =
@@ -1009,9 +1033,14 @@ type schedule_layout = {
   sl_delivery_width : int;
 }
 
-let schedule_layout ~inner_width ~target_width ~wake_width ~delivery_width =
-  let due_floor = Masc_tui_message_layout.display_width "DUE" in
-  let target_floor = Masc_tui_message_layout.display_width "TARGET" in
+let schedule_layout ~ko ~inner_width ~target_width ~wake_width ~delivery_width =
+  (* A column is never narrower than its own head, in the language the head
+     is drawn in. *)
+  let head_floor column =
+    Masc_tui_message_layout.display_width (schedule_head ~ko column)
+  in
+  let due_floor = head_floor Schedule_due in
+  let target_floor = head_floor Schedule_target in
   let primary_gaps = 2 * Table.cell_gap in
   let due_width = min schedule_due_width
       (max due_floor (inner_width - target_floor - schedule_minimum_recurrence_width - primary_gaps)) in
@@ -1039,38 +1068,43 @@ let schedule_layout ~inner_width ~target_width ~wake_width ~delivery_width =
   ; sl_delivery_width = delivery_width
   }
 
-let schedule_cell ~status_style ~wake_style ~recurrence_style
-    ~(layout : schedule_layout) values = function
+let schedule_cell ~status_style ~wake_style ~recurrence_style ~head
+    ~(layout : schedule_layout) values column =
+  let header = head column in
+  match column with
   | Schedule_status ->
-      Table.cell ~style:status_style ~header:"STATUS"
+      Table.cell ~style:status_style ~header
         ~width:schedule_status_width values.srow_status
   | Schedule_due ->
-      Table.cell ~header:"DUE" ~width:layout.sl_due_width values.srow_due
+      Table.cell ~header ~width:layout.sl_due_width values.srow_due
   | Schedule_target ->
-      Table.cell ~header:"TARGET" ~width:layout.sl_target_width
+      Table.cell ~header ~width:layout.sl_target_width
         values.srow_target
   | Schedule_wake ->
-      Table.cell ~style:wake_style ~header:"WAKE" ~width:layout.sl_wake_width
+      Table.cell ~style:wake_style ~header ~width:layout.sl_wake_width
         values.srow_wake
   | Schedule_delivery ->
-      Table.cell ~header:"DELIVERY" ~width:layout.sl_delivery_width
+      Table.cell ~header ~width:layout.sl_delivery_width
         values.srow_delivery
   | Schedule_recurrence ->
-      Table.cell ~style:recurrence_style ~header:"RECURRENCE"
+      Table.cell ~style:recurrence_style ~header
         ~width:layout.sl_columns.Table.flex_width values.srow_recurrence
 
 let schedule_cells ?(status_style = "") ?(wake_style = "")
-    ?(recurrence_style = "") ~layout values =
+    ?(recurrence_style = "") ~head ~layout values =
   List.map
-    (schedule_cell ~status_style ~wake_style ~recurrence_style ~layout values)
+    (schedule_cell ~status_style ~wake_style ~recurrence_style ~head ~layout
+       values)
     layout.sl_columns.Table.shown
 
-let schedule_header_row ~layout =
-  Table.header_row (schedule_cells ~layout schedule_no_values)
+let schedule_header_row ~ko ~layout =
+  Table.header_row
+    (schedule_cells ~head:(schedule_head ~ko) ~layout schedule_no_values)
 
 let schedule_row ?status_style ?wake_style ?recurrence_style ~layout values =
   Table.row
-    (schedule_cells ?status_style ?wake_style ?recurrence_style ~layout values)
+    (schedule_cells ?status_style ?wake_style ?recurrence_style ~head:no_head
+       ~layout values)
 
 (* Keeper automation tab columns.
 
@@ -1252,45 +1286,60 @@ let kauto_layout ~inner_width ~status_width ~clock_width ~outcome_width
   ; k_by_width = by_width
   }
 
-let kauto_cell ~styles ~(layout : kauto_layout) values = function
+(* The mark column has no name: no name is narrower than the cell holding the
+   mark, like Board's kind mark, and the glyph carries its own dress. *)
+let kauto_head ~ko = function
+  | Kauto_mark -> " "
+  | Kauto_status -> if ko then "상태" else "STATUS"
+  | Kauto_triggered -> if ko then "실행" else "TRIGGERED"
+  | Kauto_outcome -> if ko then "결과" else "OUTCOME"
+  | Kauto_received -> if ko then "수신" else "RECEIVED"
+  | Kauto_recurrence -> if ko then "반복" else "RECURRENCE"
+  | Kauto_by -> if ko then "요청자" else "BY"
+  | Kauto_requested -> if ko then "요청 시각" else "REQUESTED"
+  | Kauto_what -> if ko then "내용" else "WHAT"
+
+let kauto_cell ~styles ~head ~(layout : kauto_layout) values column =
+  let header = head column in
+  match column with
   | Kauto_mark ->
-      (* A mark, like Board's kind mark: no name is narrower than the cell
-         holding it, and the glyph carries its own dress. *)
-      Table.cell ~style:styles.kstyle_mark ~header:" " ~width:kauto_mark_width
+      Table.cell ~style:styles.kstyle_mark ~header ~width:kauto_mark_width
         values.krow_mark
   | Kauto_status ->
-      Table.cell ~style:styles.kstyle_status ~header:"STATUS"
+      Table.cell ~style:styles.kstyle_status ~header
         ~width:layout.k_status_width values.krow_status
   | Kauto_triggered ->
-      Table.cell ~header:"TRIGGERED" ~width:layout.k_clock_width
+      Table.cell ~header ~width:layout.k_clock_width
         values.krow_triggered
   | Kauto_outcome ->
-      Table.cell ~style:styles.kstyle_outcome ~header:"OUTCOME"
+      Table.cell ~style:styles.kstyle_outcome ~header
         ~width:layout.k_outcome_width values.krow_outcome
   | Kauto_received ->
-      Table.cell ~header:"RECEIVED" ~width:layout.k_clock_width
+      Table.cell ~header ~width:layout.k_clock_width
         values.krow_received
   | Kauto_recurrence ->
-      Table.cell ~style:styles.kstyle_recurrence ~header:"RECURRENCE"
+      Table.cell ~style:styles.kstyle_recurrence ~header
         ~width:layout.k_recurrence_width values.krow_recurrence
   | Kauto_by ->
-      Table.cell ~style:styles.kstyle_by ~header:"BY"
+      Table.cell ~style:styles.kstyle_by ~header
         ~width:layout.k_by_width values.krow_by
   | Kauto_requested ->
-      Table.cell ~header:"REQUESTED" ~width:layout.k_clock_width
+      Table.cell ~header ~width:layout.k_clock_width
         values.krow_requested
   | Kauto_what ->
-      Table.cell ~fold:Table.Fold_tail ~header:"WHAT"
+      Table.cell ~fold:Table.Fold_tail ~header
         ~width:layout.k_columns.Table.flex_width values.krow_what
 
-let kauto_cells ~styles ~(layout : kauto_layout) values =
-  List.map (kauto_cell ~styles ~layout values) layout.k_columns.Table.shown
+let kauto_cells ~styles ~head ~(layout : kauto_layout) values =
+  List.map (kauto_cell ~styles ~head ~layout values) layout.k_columns.Table.shown
 
-let kauto_header_row ~layout =
-  Table.header_row (kauto_cells ~styles:kauto_plain_styles ~layout kauto_no_values)
+let kauto_header_row ~ko ~layout =
+  Table.header_row
+    (kauto_cells ~styles:kauto_plain_styles ~head:(kauto_head ~ko) ~layout
+       kauto_no_values)
 
 let kauto_row ~styles ~layout values =
-  Table.row (kauto_cells ~styles ~layout values)
+  Table.row (kauto_cells ~styles ~head:no_head ~layout values)
 
 (* The mark a schedule's state draws, from the projection's own status
    vocabulary. A word this build does not name keeps the middot: the mark
@@ -1571,36 +1620,48 @@ let change_layout ~inner_width =
   Table.fit ~inner_width ~width:change_column_width ~flex:Change_summary
     ~drop_order:change_drop_order change_columns
 
-let change_cell ~op_style ~result_style ~summary_width values = function
+let change_head ~ko = function
+  | Change_turn -> if ko then "턴" else "TURN"
+  | Change_task -> if ko then "태스크" else "TASK"
+  | Change_op -> if ko then "동작" else "OP"
+  | Change_result -> if ko then "결과" else "RESULT"
+  | Change_file -> if ko then "파일" else "FILE"
+  | Change_summary -> if ko then "내용" else "WHAT"
+
+let change_cell ~op_style ~result_style ~summary_width ~head values column =
+  let header = head column in
+  match column with
   | Change_turn ->
-      Table.cell ~align:Table.Right ~header:"TURN" ~width:change_turn_width
+      Table.cell ~align:Table.Right ~header ~width:change_turn_width
         values.crow_turn
   | Change_task ->
-      Table.cell ~header:"TASK" ~width:change_task_width values.crow_task
+      Table.cell ~header ~width:change_task_width values.crow_task
   | Change_op ->
-      Table.cell ~style:op_style ~header:"OP" ~width:change_op_width
+      Table.cell ~style:op_style ~header ~width:change_op_width
         values.crow_op
   | Change_result ->
-      Table.cell ~style:result_style ~header:"RESULT"
+      Table.cell ~style:result_style ~header
         ~width:change_result_width values.crow_result
   | Change_file ->
-      Table.cell ~header:"FILE" ~width:change_file_width values.crow_file
+      Table.cell ~header ~width:change_file_width values.crow_file
   | Change_summary ->
-      Table.cell ~fold:Table.Fold_tail ~header:"WHAT" ~width:summary_width
+      Table.cell ~fold:Table.Fold_tail ~header ~width:summary_width
         values.crow_summary
 
-let change_cells ?(op_style = "") ?(result_style = "")
+let change_cells ?(op_style = "") ?(result_style = "") ~head
     ~(layout : change_column Table.layout) values =
   List.map
     (change_cell ~op_style ~result_style ~summary_width:layout.Table.flex_width
-       values)
+       ~head values)
     layout.Table.shown
 
-let change_header_row ~layout =
-  Table.header_row (change_cells ~layout change_no_values)
+let change_header_row ~ko ~layout =
+  Table.header_row
+    (change_cells ~head:(change_head ~ko) ~layout change_no_values)
 
 let change_row ~op_style ~result_style ~layout values =
-  Table.row (change_cells ~op_style ~result_style ~layout values)
+  Table.row
+    (change_cells ~op_style ~result_style ~head:no_head ~layout values)
 
 (* Fusion run columns.
 

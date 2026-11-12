@@ -289,7 +289,8 @@ let render_system_logs (state : state) =
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   let col_hdr =
-    "  " ^ Render_schedule.system_log_header_row ~layout:log_layout
+    "  " ^ Render_schedule.system_log_header_row
+           ~ko:(state.ui_language = Lang_ko) ~layout:log_layout
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -959,7 +960,8 @@ let render_acting (state : state) =
   let col_hdr =
     column_line ~glyph:" "
       ~content:(ui_text state ~ko:"사건" ~en:"EVENT")
-      ~actor:(ui_text state ~ko:"주체" ~en:"ACTOR") ~clock:"TIME"
+      ~actor:(ui_text state ~ko:"주체" ~en:"ACTOR")
+      ~clock:(ui_text state ~ko:"시각" ~en:"TIME")
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   let content_height = acting_content_height ~rows ~notices in
@@ -975,18 +977,29 @@ let render_acting (state : state) =
         else previous
   in
   if shown = 0 then begin
+    let nothing_under_filter =
+      ui_text state ~ko:"  (이 필터에 해당하는 것 없음 · f 로 전체 보기)"
+        ~en:"  (nothing under this filter; f shows everything)"
+    in
     let empty =
       match state.observer with
-      | Observer_off | Observer_opening -> "  (no events yet: the feed is not open)"
+      | Observer_off | Observer_opening ->
+          ui_text state ~ko:"  (아직 이벤트 없음: 피드가 열리지 않음)"
+            ~en:"  (no events yet: the feed is not open)"
       | Observer_live _ ->
-          if held = 0 then "  (no events yet)"
-          else "  (nothing under this filter; f shows everything)"
+          if held = 0 then
+            ui_text state ~ko:"  (아직 이벤트 없음)" ~en:"  (no events yet)"
+          else nothing_under_filter
       | Observer_closed_after_live _ ->
-          if held = 0 then "  (the feed closed before any event arrived)"
-          else "  (nothing under this filter; f shows everything)"
+          if held = 0 then
+            ui_text state ~ko:"  (이벤트가 오기 전에 피드가 닫힘)"
+              ~en:"  (the feed closed before any event arrived)"
+          else nothing_under_filter
       | Observer_closed_before_answer _ ->
-          if held = 0 then "  (no events yet: the feed failed to open)"
-          else "  (nothing under this filter; f shows everything)"
+          if held = 0 then
+            ui_text state ~ko:"  (아직 이벤트 없음: 피드를 열지 못함)"
+              ~en:"  (no events yet: the feed failed to open)"
+          else nothing_under_filter
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do

@@ -4474,7 +4474,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                      (Render_schedule.kauto_recurrence_width recurrence_words)
                    ~by_width:(Render_schedule.kauto_by_width by_words)
                in
-               let header = Render_schedule.kauto_header_row ~layout in
+               let header =
+                 Render_schedule.kauto_header_row
+                   ~ko:(state.ui_language = Lang_ko) ~layout
+               in
                (* The rule under the names runs the header's own width, so a
                   pane narrower than the table does not draw a rule longer
                   than the rows under it. The closed rule below ends at the

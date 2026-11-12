@@ -152,7 +152,7 @@ let render_fusion_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ Render_schedule.fusion_header_row columns);
+    ("  " ^ Render_schedule.fusion_header_row ~ko:(state.ui_language = Lang_ko) columns);
   box_divider buf cols;
   (match failure with
    | None -> ()
@@ -214,8 +214,11 @@ let render_fusion_list (state : state) =
       | Page_failed -> page_failed_note
       | Page_unread -> page_unread_note_while ~reading:(view_is_loading reading)
       | Page_empty ->
-          if Option.is_some replay_warning then "  No readable retained runs; see startup read warning above"
-          else "  (no retained Fusion runs)"
+          if Option.is_some replay_warning then
+            ui_text state
+              ~ko:"  읽을 수 있는 보존 실행이 없습니다. 위의 시작 시 읽기 경고를 보세요"
+              ~en:"  No readable retained runs; see startup read warning above"
+          else ui_text state ~ko:"  (보존된 Fusion 실행 없음)" ~en:"  (no retained Fusion runs)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do

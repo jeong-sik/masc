@@ -740,7 +740,7 @@ let render_harness_list (state : state) =
       match empty_page_of ~snapshot:state.harness ~error:state.harness_error with
       | Page_failed -> page_failed_note
       | Page_unread -> page_unread_note_while ~reading:state.harness_inflight
-      | Page_empty -> "  (no verdicts recorded)"
+      | Page_empty -> ui_text state ~ko:"  (기록된 판정 없음)" ~en:"  (no verdicts recorded)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do

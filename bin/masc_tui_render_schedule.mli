@@ -653,7 +653,8 @@ type fusion_columns = {
 }
 
 val allocate_fusion_columns : inner_width:int -> keeper_width:int -> fusion_columns
-val fusion_header_row : fusion_columns -> string
+val fusion_header_row : ko:bool -> fusion_columns -> string
+(** The column heads in Korean when [ko] is true, in English otherwise. *)
 
 val fusion_row :
   state_style:string ->

@@ -656,6 +656,7 @@ let keeper_tool_activity_kind = function
   | Keeper_tool_name.Keeper_clear
   | Keeper_tool_name.Keeper_delegate_list
   | Keeper_tool_name.Keeper_delegate_status
+  | Keeper_tool_name.Keeper_delegate_status_many
   | Keeper_tool_name.Keeper_delegate_targets
   | Keeper_tool_name.Keeper_down
   | Keeper_tool_name.Keeper_list

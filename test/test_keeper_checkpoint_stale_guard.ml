@@ -911,6 +911,11 @@ let test_unreadable_constitution_stops_turn_and_the_next_tick_resumes () =
    | Ok _ -> fail "an unreadable constitution allowed a turn");
   check bool "no prompt or model turn ran" false !prompt_built;
   Unix.rmdir ledger;
+  (* The read admits a norm only from an author the roster names, and the
+     roster is the persisted Keeper metadata. *)
+  let meta_path = Keeper_types_profile.keeper_meta_path config meta.name in
+  Fs_compat.mkdir_p (Filename.dirname meta_path);
+  Yojson.Safe.to_file meta_path (Keeper_meta_json.meta_to_json meta);
   let article = "open before you record" in
   let written =
     match

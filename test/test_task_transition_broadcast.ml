@@ -32,6 +32,9 @@ let with_test_env f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* Two fibers claiming one task contend for the backlog lock, and the
+     loser's retry wait sleeps on this clock. *)
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   let config = Workspace.default_config tmp_dir in
   let _ = Workspace.init config ~agent_name:(Some owner) in
   (* [init] binds a namespace session and broadcasts that fact, so the

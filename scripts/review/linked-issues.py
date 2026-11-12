@@ -8,21 +8,43 @@ closes them itself.
 
 A merge closes its issues once. The worker meets the same merged pull request
 again: on a recheck, after a run that died before this step, and in a stack
-whose lower layers landed earlier. An issue that was closed after the merge
-and is open now was reopened by a person, so it stays open.
+whose lower layers landed earlier. An issue that was reopened after the merge
+stays open, whoever reopened it.
 
 The decisions live here and the one I/O path comes in as an argument:
 `graphql(document, **variables)` returns the response's `data` and raises
 ValueError when the call fails.
 """
+import dataclasses
 import datetime
 
 # One page of a pull request's closing references. A pull request that links
 # more is reported instead of being read further.
 LINKED_ISSUE_PAGE = 100
+OPEN = 'OPEN'
 CLOSED = 'CLOSED'
 CLOSE_ISSUE = ('mutation($id: ID!) { closeIssue(input: {issueId: $id, stateReason: COMPLETED}) '
                '{ issue { state } } }')
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Issue:
+    """A linked issue that the read reports as open."""
+    id: str
+    url: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Merged:
+    """A merged pull request with open linked issues.
+
+    `commit` is the merge commit to look for on the default branch. It is None
+    when that branch is the base, which needs no look.
+    """
+    number: int
+    merged_at: datetime.datetime
+    commit: str | None
+    issues: tuple[Issue, ...]
 
 
 def read_query(numbers):
@@ -40,13 +62,13 @@ def read_query(numbers):
 def check_query(layers, issues):
     """One document asks what the read cannot tell about the issues still open.
 
-    For each pull request in `layers`, whether its merge commit (`c<number>`)
-    is on the branch; for each of `issues` issues (`i<index>`), when it was
-    last closed.
+    For each pull request in `layers`, how far its merge commit (`c<number>`)
+    is ahead of the branch. For each of `issues` issues (`i<index>`), its
+    state now and when it was last reopened.
     """
     declared = [f'$i{index:d}: ID!' for index in range(issues)]
-    selected = [f'i{index:d}: node(id: $i{index:d}) {{ ... on Issue {{ timelineItems('
-                'itemTypes: [CLOSED_EVENT], last: 1) { nodes { ... on ClosedEvent { createdAt } } } '
+    selected = [f'i{index:d}: node(id: $i{index:d}) {{ ... on Issue {{ state timelineItems('
+                'itemTypes: [REOPENED_EVENT], last: 1) { nodes { ... on ReopenedEvent { createdAt } } } '
                 '} }' for index in range(issues)]
     if layers:
         declared += ['$owner: String!', '$name: String!', '$branch: String!']
@@ -64,34 +86,73 @@ def instant(value):
 
 
 def refused(number, issue, reason):
-    return {'pr': number, 'issue': issue['url'], 'closed': False, 'reason': reason}
+    return {'pr': number, 'issue': issue.url, 'closed': False, 'reason': reason}
 
 
-def check(owner, name, default, undecided, graphql):
+def read(repository, numbers):
+    """Take from the read's answer what the later steps use.
+
+    Returns the default branch, the records the read already decides, and the
+    merged pull requests whose open issues are still to decide. An answer of
+    another shape raises here, before anything is sent. Only subscripts, `len`
+    and loops touch the answer, so what it raises is a KeyError, TypeError or
+    ValueError.
+    """
+    default = repository['defaultBranchRef']['name']
+    records, merged = [], []
+    for number in numbers:
+        pull = repository[f'p{number:d}']
+        linked = pull['closingIssuesReferences']
+        nodes = linked['nodes']
+        if linked['totalCount'] > len(nodes):
+            records.append({'pr': number, 'closed': False,
+                            'reason': f'{linked["totalCount"]} linked issues; only the first '
+                                      f'{len(nodes)} were read'})
+        # The schema lets an entry of the list be null. Such an issue cannot be decided.
+        unreadable = sum(1 for node in nodes if node is None)
+        if unreadable:
+            records.append({'pr': number, 'closed': False,
+                            'reason': f'{unreadable} linked issues are not readable'})
+        issues = tuple(Issue(node['id'], node['url']) for node in nodes
+                       if node is not None and node['state'] == OPEN)
+        if not issues:
+            continue
+        layer = pull['baseRefName'] != default
+        if pull['merged'] is not True:
+            kept = 'GitHub does not report the pull request as merged'
+        elif layer and pull['mergeCommit'] is None:
+            kept = f'GitHub reports no merge commit to look for on {default}'
+        else:
+            merged.append(Merged(number, instant(pull['mergedAt']),
+                                 pull['mergeCommit']['oid'] if layer else None, issues))
+            continue
+        records += [refused(number, issue, kept) for issue in issues]
+    return default, records, merged
+
+
+def check(owner, name, default, merged, graphql):
     """Ask what decides the open issues of merged pull requests.
 
     Returns the layers whose merge commit is on the default branch, and for
-    each issue the time it was last closed, or None when it never was.
+    each issue its state now with the time it was last reopened, or None when
+    it never was.
     """
-    layers = {number: pull['mergeCommit']['oid'] for number, pull, _ in undecided
-              if pull['baseRefName'] != default}
-    ids = list(dict.fromkeys(issue['id'] for _, _, opened in undecided for issue in opened))
+    layers = {pull.number: pull.commit for pull in merged if pull.commit is not None}
+    ids = list(dict.fromkeys(issue.id for pull in merged for issue in pull.issues))
     variables = {f'i{index:d}': issue_id for index, issue_id in enumerate(ids)}
     if layers:
         variables.update(owner=owner, name=name, branch=f'refs/heads/{default}')
-        variables.update({f'c{number:d}': oid for number, oid in layers.items()})
+        variables.update({f'c{number:d}': commit for number, commit in layers.items()})
     checked = graphql(check_query(list(layers), len(ids)), **variables)
-    landed = set()
-    for number in layers:
-        comparison = checked['repository']['ref'][f'p{number:d}']
-        # A commit on the branch is never ahead of it; no answer proves nothing.
-        if comparison is not None and comparison['aheadBy'] == 0:
-            landed.add(number)
-    last_closed = {}
+    # A commit on the branch is never ahead of it.
+    landed = {number for number in layers
+              if checked['repository']['ref'][f'p{number:d}']['aheadBy'] == 0}
+    now = {}
     for index, issue_id in enumerate(ids):
-        events = checked[f'i{index:d}']['timelineItems']['nodes']
-        last_closed[issue_id] = instant(events[0]['createdAt']) if events else None
-    return landed, last_closed
+        node = checked[f'i{index:d}']
+        reopened = node['timelineItems']['nodes']
+        now[issue_id] = (node['state'], instant(reopened[0]['createdAt']) if reopened else None)
+    return landed, now
 
 
 def close(issue_id, graphql):
@@ -113,60 +174,44 @@ def close_linked_issues(repo, numbers, graphql):
     keeps its parent branch as base after the stack lands on main, so the
     base alone would leave the issues of every such layer open.
 
-    Only the first read can raise. After it, every pull request and issue gets
-    its own record, so one that cannot be decided does not hide the others.
+    An issue is left open when it was reopened at or after the merge. GitHub
+    keeps times to the second, and the same second counts as after: closing
+    an issue someone reopened costs more than leaving one open.
+
+    Only the read can raise, and it raises before anything is sent. After it
+    every pull request and issue gets its own record. A check that fails
+    refuses every open issue of the call; a close that fails is the record
+    of that issue alone.
     """
     owner, name = repo.split('/')
-    repository = graphql(read_query(numbers), owner=owner, name=name)['repository']
-    default = repository['defaultBranchRef']['name']
-    records, undecided = [], []
-    for number in numbers:
-        pull = repository[f'p{number:d}']
-        linked = pull['closingIssuesReferences']
-        if linked['totalCount'] > len(linked['nodes']):
-            records.append({'pr': number, 'closed': False,
-                            'reason': f'{linked["totalCount"]} linked issues; only the first '
-                                      f'{len(linked["nodes"])} were read'})
-        # GitHub answers null for an issue this token may not read.
-        unreadable = linked['nodes'].count(None)
-        if unreadable:
-            records.append({'pr': number, 'closed': False,
-                            'reason': f'{unreadable} linked issues are not readable'})
-        opened = [issue for issue in linked['nodes']
-                  if issue is not None and issue['state'] == 'OPEN']
-        if not opened:
-            continue
-        if pull['merged'] is not True:
-            kept = 'GitHub does not report the pull request as merged'
-        elif pull['baseRefName'] != default and pull['mergeCommit'] is None:
-            kept = f'GitHub reports no merge commit to look for on {default}'
-        else:
-            undecided.append((number, pull, opened))
-            continue
-        records += [refused(number, issue, kept) for issue in opened]
-    if not undecided:
+    default, records, merged = read(
+        graphql(read_query(numbers), owner=owner, name=name)['repository'], numbers)
+    if not merged:
         return records
 
     try:
-        landed, last_closed = check(owner, name, default, undecided, graphql)
-        merged_at = {number: instant(pull['mergedAt']) for number, pull, _ in undecided}
+        landed, now = check(owner, name, default, merged, graphql)
     except (ValueError, TypeError, KeyError) as error:
         reason = f'could not check the merge and the issue: {type(error).__name__}: {error}'[:300]
-        return records + [refused(number, issue, reason)
-                          for number, _, opened in undecided for issue in opened]
+        return records + [refused(pull.number, issue, reason)
+                          for pull in merged for issue in pull.issues]
 
     outcome = {}
-    for number, pull, opened in undecided:
-        for issue in opened:
-            closed_at = last_closed[issue['id']]
-            if pull['baseRefName'] != default and number not in landed:
-                records.append(refused(number, issue, f'the merge commit is not on {default}'))
-            elif closed_at is not None and closed_at >= merged_at[number]:
-                records.append(refused(number, issue,
-                                       'the issue was closed after the merge and reopened'))
+    for pull in merged:
+        for issue in pull.issues:
+            state, reopened_at = now[issue.id]
+            if pull.commit is not None and pull.number not in landed:
+                kept = f'the merge commit is not on {default}'
+            elif state != OPEN:
+                # Another run or a person closed it between the read and the check.
+                kept = 'the issue is no longer open'
+            elif reopened_at is not None and reopened_at >= pull.merged_at:
+                kept = 'the issue was reopened after the merge'
             else:
                 # Two pull requests can link one issue; it gets one close.
-                if issue['id'] not in outcome:
-                    outcome[issue['id']] = close(issue['id'], graphql)
-                records.append(dict({'pr': number, 'issue': issue['url']}, **outcome[issue['id']]))
+                if issue.id not in outcome:
+                    outcome[issue.id] = close(issue.id, graphql)
+                records.append({'pr': pull.number, 'issue': issue.url, **outcome[issue.id]})
+                continue
+            records.append(refused(pull.number, issue, kept))
     return records

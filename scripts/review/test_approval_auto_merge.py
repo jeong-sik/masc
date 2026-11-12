@@ -1301,13 +1301,13 @@ class ClosingLinkedIssues(unittest.TestCase):
         read = {'repository': {'defaultBranchRef': {'name': 'main'}, 'p102': {
             'merged': True, 'mergedAt': '2026-11-12T02:09:02Z', 'baseRefName': 'main',
             'mergeCommit': {'oid': sha(102)}, 'closingIssuesReferences': linked}}}
-        never_closed = {'i0': {'timelineItems': {'nodes': []}}}
+        never_reopened = {'i0': {'state': 'OPEN', 'timelineItems': {'nodes': []}}}
         close = {'closeIssue': {'issue': {'state': 'CLOSED'}}}
         commands = []
 
         def gh(command, **_):
             commands.append(command)
-            data = close if 'id=I_7' in command else never_closed if 'i0=I_7' in command else read
+            data = close if 'id=I_7' in command else never_reopened if 'i0=I_7' in command else read
             return subprocess.CompletedProcess(command, 0, json.dumps({'data': data}), '')
 
         with patch.object(MERGE.subprocess, 'run', side_effect=gh):
@@ -1321,7 +1321,8 @@ class ClosingLinkedIssues(unittest.TestCase):
 
     def test_a_read_that_fails_or_answers_nothing_is_one_record_that_names_the_pull_requests(self):
         failures = {'refused': {'side_effect': ValueError('rate limited')},
-                    'empty': {'return_value': {'repository': None}}}
+                    'empty': {'return_value': {'repository': None}},
+                    'without the default branch': {'return_value': {'repository': {}}}}
         for name, behaviour in failures.items():
             with self.subTest(name), patch.object(MERGE, 'graphql', **behaviour):
                 records = MERGE.close_linked_issues(REPO, [101, 102])

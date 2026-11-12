@@ -70,8 +70,10 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `teacher_sample.py` | Shows the teacher what each audited training label says and keeps the answers that leave the memory the label asks for, those that absorb a memory once the merge judge finds each absorb mergeable |
 | `sft_examples.py` | What the candidate A is trained on: the teacher answers accepted for their requests, the reasoning effort they are rendered at, and the steps of one pass |
 | `train_sft.py` | Trains the candidate A in one pass over the examples `sft_examples.py` plans |
-| `prompt_lines.json` | A prompt draft's comparison, fixed before the draft runs: the baseline runs, the runs per side and the noise widths |
-| `prompt_compare.py` | Decides whether a prompt draft goes in, from runs of the pinned template and of the draft |
+| `prompt_lines.json` | A prompt draft's comparison, fixed before the draft runs: each model's baseline as numbers, the runs per side and the noise widths |
+| `prompt_counts.py` | Counts one run of the pinned sets for a prompt comparison, from its rows and its judges' decisions |
+| `prompt_lines.py` | Reads `prompt_lines.json`, and refuses one that is malformed, holds a stale baseline or pins other files than the present ones |
+| `prompt_compare.py` | Decides whether a prompt draft goes in, from the pinned baselines and runs of the draft; prints the baseline that runs of the pinned template counted |
 
 The tests are `scripts/tests/test_tinker_librarian_*.py`. They read only
 invented rows and the invented Keepers in
@@ -318,14 +320,32 @@ prompt change on the same sets: it draws every prompt with that file's template
 instead. `summary.json` records the sha256 of the template the prompts were
 drawn with, and `verdict` refuses a run whose template is not the pinned one.
 
-`prompt_compare.py --runs <runs.json> --out <compare.json>` decides whether a
-draft of `config/prompts/librarian.md` goes in (RFC-0517 §2.3).
+`prompt_compare.py compare --runs <runs.json> --out <compare.json>` decides
+whether a draft of `config/prompts/librarian.md` goes in (RFC-0517 §2.3).
 `prompt_lines.json` fixes the comparison before the draft runs: the pass
-lines, the template and rows of each baseline run, two runs per side on
-Inkling and one on GLM, and the noise widths. Each metric counts hits over
+lines, the template of the baseline, two runs per side on Inkling and one on
+GLM, the noise widths, and each model's baseline. A baseline is what the
+model's runs of the pinned template counted, kept as numbers: each metric's
+hits over chances summed over the runs, each run's E-real record, and the
+sha256 of the rows they came from. `compare` reads the baseline from the file
+and measures only the draft's runs (`prompt_counts.py`), so a comparison needs
+neither the baseline's run folders nor its judges' decisions, and neither can
+move a pinned count. A model whose baseline is `null` cannot be compared yet.
+
+`prompt_compare.py baseline --runs <runs.json>` measures runs of the pinned
+template and prints the baseline to put in `prompt_lines.json`. A baseline
+names the pass lines, the template and the `prompt_counts.py` it was counted
+under. Once the file pins another of them the baseline is stale, and
+`prompt_lines.py` refuses the file: set the baseline to `null`, count the runs
+again and pin what `baseline` prints. `prompt_lines.json` also pins
+`prompt_counts.py`, `prompt_lines.py` and `prompt_compare.py` by sha256, and
+both commands stop when one of them holds other bytes.
+
+Each metric counts hits over
 chances, summed over a side's runs. Its noise σ is the binomial standard error
 of the difference at the pooled rate. A metric is worse below -2.5σ and better
-above +2σ. The draft goes in when no metric of either model is worse and an
+above +2σ. The widths are compared in exact fractions, so a difference of
+exactly a width is neither. The draft goes in when no metric of either model is worse and an
 Inkling E-synth quality metric is better: memory state accuracy, stale drop
 recall or judged merge recall. Drop and absorb precision and the valid rates
 remain non-degradation checks; their improvement alone does not admit a draft.

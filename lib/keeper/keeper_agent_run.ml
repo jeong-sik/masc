@@ -431,14 +431,6 @@ let capture_skill_snapshot ~base_path =
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
            [Keeper_config.keeper_unified_temperature] is the fallback. *)
-(* The channel a Keeper turn runs on, for the access that decides which
-   account its official CLI starts on (plan D2-5). A message to the Keeper
-   (Keeper_turn.handle_keeper_msg) starts a direct turn, and every other turn
-   is autonomous: the runtime names no other kind. *)
-let channel_of_turn_kind : Turn_record.turn_kind -> Authz_types.Channel.t = function
-  | Turn_record.Autonomous -> Authz_types.Channel.Autonomous
-  | Turn_record.Direct -> Authz_types.Channel.Direct
-
 let run_turn
       ?event_scope
       ?preview
@@ -1493,8 +1485,7 @@ let run_turn
                       ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.base_path)
                       ~keeper_name:meta.name
                       ~walk_owner:
-                        (Keeper_turn_driver.Fleet_keeper_turn
-                           { keeper_name = meta.name; channel = channel_of_turn_kind turn_kind })
+                        (Keeper_turn_driver.Fleet_keeper_turn { keeper_name = meta.name })
                       ~pre_tool_rejects
                       ~continue_from_checkpoint
                       ?native_binding

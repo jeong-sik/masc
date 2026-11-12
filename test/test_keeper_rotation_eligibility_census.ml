@@ -25,7 +25,7 @@ let second_candidate = "second.model"
 
 let emit_manifest_ignored ?status:_ ?decision:_ _event = ()
 
-let test_fleet_turn = { Driver.keeper_name = "census-test"; channel = Authz_types.Channel.Autonomous }
+let test_fleet_turn = { Driver.keeper_name = "census-test" }
 
 
 (* Attempted candidate ids, in order, for a lane whose first candidate fails

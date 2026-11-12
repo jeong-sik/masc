@@ -145,10 +145,12 @@ let work_preview_body ~cells ~rows text =
     if index = rows - 1 then Message_layout.take_cells line (max 0 (cells - 1)) ^ "…"
     else line) shown
 
+(* The rows on screen are the last reading that arrived. A read still in
+   flight does not make them older: they stay as they are until its answer
+   lands, and the slow-read note says a read is under way (RFC
+   tui-one-screen-grammar, section 8). *)
 let work_task_rows_current (state : state) =
   state.workspace_identity = Workspace_identity_match
-  && not (Local_read_order.in_flight state.local_workspace_read_order)
-  && Option.is_none (local_source_pending state Local_work)
   && match state.local_workspace, state.task_reading with
      | Local_workspace_read, Overview_tasks.Rows_read _ -> true
      | (Local_workspace_unread | Local_workspace_failed _), _
@@ -168,18 +170,17 @@ let work_task_scope (state : state) =
         if partial then text "현재 작업 관측 · 조회 범위 일부" "Current Task reading · partial coverage"
         else text "현재 작업 관측" "Current Task reading"
     | Rows_read _ ->
+        (* Rows that are read but not current: the local workspace was not
+           read or its read failed, or else the workspace is unconfirmed. *)
         let reason = match state.local_workspace with
           | Local_workspace_failed detail ->
               text "새 조회 실패: " "Refresh failed: " ^ Terminal_text.single_line detail
-          | Local_workspace_unread -> text "로컬 작업 공간 미관측" "Local workspace not observed"
-          | Local_workspace_read ->
-              if state.workspace_identity <> Workspace_identity_match then
-                text "작업 공간 식별 미확인" "Workspace identity unconfirmed"
-              else text "갱신 중" "Refresh pending" in
-        text "보존한 작업 · 현재 목록 미확인 · " "Retained Tasks · current list unknown · " ^ reason
-    | Rows_unread -> text "작업 미관측 · 남아 있는 행은 보존 자료" "Tasks not observed · remaining rows are retained"
+          | Local_workspace_unread -> text "로컬 작업 공간 미조회" "Local workspace not read"
+          | Local_workspace_read -> text "작업 공간 식별 미확인" "Workspace identity unconfirmed" in
+        text "이전 작업 관측 · " "Previous Task reading · " ^ reason
+    | Rows_unread -> text "작업 미조회 · 남은 줄은 이전 관측" "Tasks not read · the rows shown are a previous reading"
     | Rows_unavailable detail ->
-        text "작업 조회 실패 · 보존 자료: " "Task reading unavailable · retained: "
+        text "작업 조회 실패 · 남은 줄은 이전 관측: " "Task reading failed · the rows shown are a previous reading: "
         ^ Terminal_text.single_line detail in
   scope, (not current || partial)
 
@@ -394,25 +395,26 @@ let render_work_tasks (state : state) =
                 if work_task_rows_complete state then text "표시할 열린 작업 없음" "No open Tasks in this reading"
                 else if work_task_rows_current state then
                   text "이 관측에 열린 작업 없음 · 전체 미확인" "No open Tasks in this reading · total unknown"
-                else text "보존한 목록에 열린 작업 없음 · 현재 미확인" "No open Tasks in retained list · current unknown"
-            | Rows_unread | Rows_unavailable _ -> text "열린 작업 목록 미관측" "Open Task list not observed"]
+                else text "이전 관측에 열린 작업 없음 · 현재 미확인" "No open Tasks in the previous reading · current unknown"
+            | Rows_unread | Rows_unavailable _ -> text "열린 작업 목록 미조회" "Open Task list not read"]
          else
+           (* A row holds values only. A previous reading draws them faint
+              and the scope line above says why (RFC tui-one-screen-grammar
+              6.4); a list read in part says so on that line too. *)
+           let previous = not (work_task_rows_current state) in
            rows |> List.mapi (fun index task -> index, task)
            |> List.drop window.first |> List.take window.capacity
            |> List.concat_map (fun (index, (task : Tui_decode.task)) ->
              let status = task_status_word state task.status in
-             let scope =
-               if not (work_task_rows_current state) then text "보존 · " "retained · "
-               else if not (work_task_rows_complete state) then text "일부 · " "partial · "
-               else "" in
              let owner = match Masc_domain.task_assignee_of_status task.status with
                | Some name -> Terminal_text.single_line name
                | None -> text "미배정" "unassigned" in
-             let summary = task_state_style task.status ^ scope ^ status ^ Ansi.reset
+             let status_style = if previous then Theme.recede () else task_state_style task.status in
+             let summary = status_style ^ status ^ Ansi.reset
                ^ Theme.recede () ^ " · " ^ owner ^ Ansi.reset in
              work_entry_lines ~cells:geometry.list_width ~height:window.entry_height
                ~selected:(Some index = selected) ~title:task.title ~summary
-               ~compact:(scope ^ status)))
+               ~compact:status))
         @ work_list_position window ~count in
       let selected_task = Overview_tasks.work_selected_task state.tasks
           ~selected:(Overview_tasks.selection state.task_focus) in
@@ -505,13 +507,16 @@ let planning_proof_detail ~ko (goal : planning_goal) =
            else Planning_detail.unreconciled_heading ~ko blocked.vu_step)
           (Terminal_text.single_line blocked.vu_detail) )
   | None ->
+  (* A verdict is a past event of the Goal, not its state: the phase beside
+     it is the state, and a refused Goal is back at work. "지난" keeps the
+     two from reading as one Goal in two states at once. *)
   match goal.pg_proof with
-  | Tui_decode.Proof_proven None -> Some ((Theme.ok ()), text "검증 통과" "proven")
+  | Tui_decode.Proof_proven None -> Some ((Theme.ok ()), text "지난 검증 통과" "last verification passed")
   | Tui_decode.Proof_proven (Some evidence) ->
-      Some ((Theme.ok ()), text "검증 통과: " "proven: " ^ Terminal_text.single_line evidence)
-  | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), text "검증 거절" "refused")
+      Some ((Theme.ok ()), text "지난 검증 통과: " "last verification passed: " ^ Terminal_text.single_line evidence)
+  | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), text "지난 검증 거절" "last verification refused")
   | Tui_decode.Proof_refuted (Some reason) ->
-      Some ((Theme.bad ()), text "검증 거절: " "refused: " ^ Terminal_text.single_line reason)
+      Some ((Theme.bad ()), text "지난 검증 거절: " "last verification refused: " ^ Terminal_text.single_line reason)
   | Tui_decode.Proof_pending -> Some ((Theme.warn ()), text "완료 판정 대기" "verification result pending")
   | Tui_decode.Proof_stale _ ->
       Some ((Theme.warn ()), text "기준 변경 · 이전 증거는 이력" "criterion changed; previous proof is historical")
@@ -641,28 +646,35 @@ let planning_summary_reading ~cols (state : state) =
     | _ -> [section (text "목표 요청 결과" "Goal request results") retired]) in
   Masc_tui_detail_reading.create ~ko ~title:(text "작업 요약" "Work summary") sections
 
-(* Linked Tasks have a separate read contract from the Goal snapshot. Do not
-   turn an unread registry or backlog into a claim that a Goal has no work. *)
-let planning_linked_tasks (state : state) (goal : planning_goal) =
-  match state.goal_task_links, state.task_reading with
-  | Goal_links_read _, Overview_tasks.Rows_read _ ->
-      Some (List.filter (fun (task : Tui_decode.task) -> List.mem goal.pg_id task.goal_ids) state.tasks)
-  | (Goal_links_not_read | Goal_links_read_failed _), _
-  | Goal_links_read _, (Rows_unread | Rows_unavailable _) -> None
-
+(* The linked-Task clause of a Goal row. It names what it counts, in the
+   words of the Task list, so it never reads as a second state of the Goal:
+   [작업 2개 검증 대기], not [검증 2]. It is a value (RFC
+   tui-one-screen-grammar 6.3, 6.4): a list read in part is a lower bound,
+   a reading that is missing is a mark (◌ not read yet, ✕ the read failed,
+   ? read in part with none of this Goal's among what arrived), and a
+   previous reading is faint. Why a value is missing or old is the scope
+   line above the list. Linked Tasks have a separate read contract from the
+   Goal snapshot: an unread registry or backlog is never a claim that a Goal
+   has no work. *)
 let planning_open_note (state : state) (goal : planning_goal) =
   let ko = state.ui_language = Lang_ko in
-  match planning_linked_tasks state goal with
-  | None -> (if ko then "미관측" else "unread"), Theme.warn ()
-  | Some _ when not (work_task_rows_current state) ->
-      (if ko then "보존 작업" else "retained"), Theme.warn ()
-  | Some [] when not (work_task_rows_complete state) ->
-      (if ko then "일부 관측 0" else "partial 0 seen"), Theme.warn ()
-  | Some [] -> "", Ansi.dim
-  | Some tasks ->
-      let partial = not (work_task_rows_complete state) in
-      let qualify value =
-        if partial then (if ko then "일부 " else "partial ") ^ value else value in
+  let missing mark = (if ko then "작업 " else "tasks ") ^ mark in
+  match state.goal_task_links, state.task_reading with
+  (* A failed reading on either side is a failure whatever the other side
+     holds: a backlog that cannot be read leaves the links not read too
+     (Masc_tui_loader). *)
+  | Goal_links_read_failed _, (Overview_tasks.Rows_unread | Rows_read _ | Rows_unavailable _)
+  | (Goal_links_not_read | Goal_links_read _), Rows_unavailable _ ->
+      missing "✕", Theme.warn ()
+  | Goal_links_not_read, (Rows_unread | Rows_read _) | Goal_links_read _, Rows_unread ->
+      missing "◌", Theme.recede ()
+  | Goal_links_read _, Rows_read _ ->
+      let tasks = List.filter (fun (task : Tui_decode.task) -> List.mem goal.pg_id task.goal_ids) state.tasks in
+      let partial = Option.is_some state.tasks_error in
+      let faint style = if work_task_rows_current state then style else Theme.recede () in
+      let count noun value =
+        (if partial then Masc_tui_value.Count.at_least else Masc_tui_value.Count.reading)
+          ~ko noun value in
       let awaiting = List.length (List.filter (fun (task : Tui_decode.task) ->
         match task.status with
         | Masc_domain.AwaitingVerification _ -> true
@@ -671,13 +683,15 @@ let planning_open_note (state : state) (goal : planning_goal) =
         match task.status with
         | Masc_domain.InProgress _ -> true
         | Todo | Claimed _ | AwaitingVerification _ | Done _ | Cancelled _ -> false) tasks) in
-      if awaiting > 0 then
-        qualify (Printf.sprintf (if ko then "검증 %d" else "%d verify") awaiting), Theme.warn ()
+      if tasks = [] then (if partial then missing "?", faint (Theme.warn ()) else "", Ansi.dim)
+      else if awaiting > 0 then
+        count Masc_tui_value.Count.Task awaiting ^ (if ko then " 검증 대기" else " awaiting verification"),
+        faint (Theme.warn ())
       else if running > 0 then
-        qualify (Printf.sprintf (if ko then "진행 %d" else "%d running") running),
-        (if partial then Theme.warn () else Theme.info ())
-      else qualify (Printf.sprintf (if ko then "%d열림" else "%d open") (List.length tasks)),
-        (if partial then Theme.warn () else Ansi.dim)
+        count Masc_tui_value.Count.Task running ^ (if ko then " 진행 중" else " in progress"),
+        faint (if partial then Theme.warn () else Theme.info ())
+      else count Masc_tui_value.Count.Open_task (List.length tasks),
+        faint (if partial then Theme.warn () else Ansi.dim)
 
 let planning_preview_lines (state : state) ~cells ~rows (goal : planning_goal) =
   if rows <= 0 then [] else
@@ -764,10 +778,22 @@ let render_planning_list (state : state) =
            push (" " ^ Theme.warn () ^ note ^ Ansi.reset)
        | Some snapshot ->
            let scope = " " ^ (if current then Theme.recede () else Theme.warn ())
-             ^ text (if current then "현재 목표 관측 · " else "보존한 목표 관측 · ")
-                    (if current then "Current Goal reading · " else "Retained Goal reading · ")
+             ^ text (if current then "현재 목표 관측 · " else "이전 목표 관측 · ")
+                    (if current then "Current Goal reading · " else "Previous Goal reading · ")
              ^ wire_moment snapshot.pl_generated_at ^ Ansi.reset in
-           List.iter push_context (if current then [navigation] else [scope; navigation]);
+           (* The linked-Task clause on each row is a value; when it is old,
+              read in part or missing, these lines say why. A Task reading
+              and a Goal-link reading fail apart, so each has its own. *)
+           let task_scope, task_warning = work_task_scope state in
+           let link_failure = match state.goal_task_links with
+             | Goal_links_read_failed reason ->
+                 [" " ^ Theme.warn () ^ text "목표 연결 조회 실패: " "Goal link reading failed: "
+                  ^ Terminal_text.single_line reason ^ Ansi.reset]
+             | Goal_links_not_read | Goal_links_read _ -> [] in
+           List.iter push_context
+             ((if current then [navigation] else [scope; navigation])
+              @ (if task_warning then [" " ^ Theme.warn () ^ task_scope ^ Ansi.reset] else [])
+              @ link_failure);
            let available = max 0 (budget - !used) in
            (* Modes and a read failure can use spare space, but never replace
               the one row Enter would open in a short terminal. *)
@@ -788,14 +814,34 @@ let render_planning_list (state : state) =
                 |> List.drop window.first |> List.take window.capacity
                 |> List.concat_map (fun (index, (goal : planning_goal)) ->
                   let phase = planning_phase_label ~ko goal.pg_phase in
-                  let phase = (if current then "" else text "보존 · " "retained · ") ^ phase in
                   let open_note, open_style = planning_open_note state goal in
                   let linked = if open_note = "" then "" else " · " ^ open_note in
-                  let proof = match planning_proof_detail ~ko goal with
-                    | None -> ""
-                    | Some (style, detail) -> " · " ^ style ^ Terminal_text.single_line detail ^ Ansi.reset in
-                  let summary = planning_phase_color goal.pg_phase ^ phase ^ Ansi.reset
-                    ^ open_style ^ linked ^ Ansi.reset ^ proof in
+                  (* A Goal in verification is waiting for its verdict; the
+                     pending verdict would say the phase a second time. *)
+                  let restates_phase = match goal.pg_proof with
+                    | Tui_decode.Proof_pending ->
+                        (match goal.pg_phase with
+                         | Goal_phase.Verifying -> Option.is_none goal.pg_verifier_unreconciled
+                         | Executing | Awaiting_confirmation | Completed | Dropped
+                         | Paused _ | Blocked _ -> false)
+                    | Proof_idle | Proof_proven _ | Proof_refuted _ | Proof_stale _
+                    | Proof_unreadable _ -> false in
+                  let verdict = if restates_phase then None else planning_proof_detail ~ko goal in
+                  (* A previous Goal reading keeps its words and loses its
+                     colours; the scope line above says why. *)
+                  let summary =
+                    if current then
+                      planning_phase_color goal.pg_phase ^ phase ^ Ansi.reset
+                      ^ open_style ^ linked ^ Ansi.reset
+                      ^ (match verdict with
+                         | None -> ""
+                         | Some (style, detail) -> " · " ^ style ^ Terminal_text.single_line detail ^ Ansi.reset)
+                    else
+                      Theme.recede () ^ phase ^ linked
+                      ^ (match verdict with
+                         | None -> ""
+                         | Some (_, detail) -> " · " ^ Terminal_text.single_line detail)
+                      ^ Ansi.reset in
                   work_entry_lines ~cells:geometry.list_width ~height:window.entry_height
                     ~selected:(index = state.planning_cursor) ~title:goal.pg_title ~summary
                     ~compact:(phase ^ linked)))

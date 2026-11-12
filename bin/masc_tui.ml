@@ -28978,6 +28978,22 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       then
         (match result with
          | Ok snapshot when repository_change_scope_equal snapshot.rcs_scope scope ->
+             (* A re-read can shorten or reorder the list under the cursor.
+                The cursor follows the path it was on; when that path is gone
+                it stays inside the rows read, so the selected row and the
+                position in the here row name a row that is drawn. *)
+             let paths (rows : Masc.Tui_decode.repository_change list) =
+               List.map (fun row -> row.Masc.Tui_decode.rc_path) rows
+             in
+             state.repository_changes_cursor <-
+               Masc_tui_board_selection.reconcile_cursor
+                 ~current_ids:
+                   (match state.repository_changes with
+                    | Some previous -> paths previous.rcs_changes
+                    | None -> [])
+                 ~cursor:state.repository_changes_cursor
+                 ~source:Masc_tui_board_selection.List_cursor
+                 ~next_ids:(paths snapshot.rcs_changes);
              state.repository_changes <- Some snapshot;
              state.repository_changes_error <- None
          | Ok _ ->

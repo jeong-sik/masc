@@ -201,10 +201,24 @@ class GitHubGet(unittest.TestCase):
         with self.assertRaises(GET.ApiFailure) as raised:
             client.read('repos/o/r/pulls/1')
         self.assertNotIsInstance(raised.exception, GET.QuotaLimited)
+        # Its own type and state, so it is told apart from any other refusal.
+        self.assertIsInstance(raised.exception, GET.QuotaBoundaryExhausted)
         self.assertEqual(raised.exception.status, 403)
+        self.assertEqual(raised.exception.details['quota_state'], 'boundary_retries_exhausted')
+        self.assertEqual(raised.exception.details['boundary_retries'], GET.BOUNDARY_RETRIES)
+        self.assertIn('retries exhausted', str(raised.exception))
         # First request, the post-wait request, then the bounded retries.
         self.assertEqual(len(calls), 2 + GET.BOUNDARY_RETRIES)
         self.assertEqual(client.boundary_retries, GET.BOUNDARY_RETRIES)
+
+    def test_other_refusals_do_not_carry_the_boundary_state(self):
+        clock = Clock()
+        client = GET.Client(run=lambda *a, **k: response(403, {'message': 'forbidden'}),
+                            clock=lambda: clock.now, sleep=clock.sleep)
+        with self.assertRaises(GET.ApiFailure) as raised:
+            client.read('repos/o/r/pulls/1')
+        self.assertNotIsInstance(raised.exception, GET.QuotaBoundaryExhausted)
+        self.assertNotIn('quota_state', raised.exception.details)
 
     def test_an_elapsed_reset_without_a_prior_wait_stays_a_visible_failure(self):
         clock, calls = Clock(), []

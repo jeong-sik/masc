@@ -37,6 +37,22 @@ class QuotaLimited(ApiFailure):
         self.retry_at = retry_at
 
 
+class QuotaBoundaryExhausted(ApiFailure):
+    """The post-wait retries at the reset second all met the old window.
+
+    Its own type and ``quota_state`` mark it, so a measurement can tell this
+    end from an ordinary refusal or a quota wait that was cut short.
+    """
+    STATE = 'boundary_retries_exhausted'
+
+    def __init__(self, failure, retries):
+        super().__init__(failure.path, failure.status, failure.headers,
+                         f'{failure.details["message"]} (quota reset boundary: '
+                         f'{retries} retries exhausted)')
+        self.details = dict(self.details, quota_state=self.STATE, boundary_retries=retries)
+        self.args = (json.dumps(self.details, ensure_ascii=False),)
+
+
 class QuotaWaitCutShort(QuotaLimited):
     """A quota wait ended at the caller's deadline with retry_at still ahead.
 
@@ -143,9 +159,10 @@ class Client:
                 self.wait_for_quota(failure)
                 waited = True
             except ApiFailure as failure:
-                if not (waited and boundary < BOUNDARY_RETRIES and
-                        self.reset_just_elapsed(failure)):
+                if not (waited and self.reset_just_elapsed(failure)):
                     raise
+                if boundary >= BOUNDARY_RETRIES:
+                    raise QuotaBoundaryExhausted(failure, boundary) from failure
                 boundary += 1
                 self.boundary_retries += 1
                 self.sleep(BOUNDARY_PAUSE_SECONDS)

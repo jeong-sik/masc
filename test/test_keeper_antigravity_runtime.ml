@@ -2514,7 +2514,8 @@ module Argument_start_fixture = struct
       | _ -> fail "expected one retained tool receipt" in
     check string "retained tool name" "masc_probe" (receipt |> member "tool_name" |> to_string);
     check bool "retained tool arguments" true
-      (member "arguments" receipt = `Assoc ["marker", `String "from-antigravity"]);
+      (member "arguments" receipt
+       = `Assoc ["known", `Assoc ["marker", `String "from-antigravity"]]);
     check bool "retained tool succeeded" true
       (receipt |> member "response" |> member "success" = `Bool true);
     check string "retained original tool result" "MASC_TOOL_RESULT"
@@ -2811,7 +2812,7 @@ let test_original_result_survives_a_vendor_session_change () =
               | Error error -> fail (Agent_core.Error.to_string error) in
             let retain turn_id value = Keeper_client_tool_outbox.retain ~base_path ~keeper_name
               {thread_id="original-codex-session";turn_id;call_id="original-call";
-               tool_name="Execute";arguments=`String "original-effect-no-replay";response=`String value}
+               tool_name="Execute";arguments=Keeper_client_tool_outbox.Known (`String "original-effect-no-replay");response=`String value}
               |> get in
             let count () = Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt
               |> get |> Keeper_client_tool_outbox.receipt_ids |> List.length in

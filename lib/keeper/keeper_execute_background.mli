@@ -68,12 +68,13 @@ val retain_source_lost_receipt
   :  base_path:string
   -> keeper_name:string
   -> request_id:string
-  -> arguments:Yojson.Safe.t
+  -> arguments:Keeper_client_tool_outbox.arguments
   -> (unit, string) result
 (** Writes one [unfinished] receipt, echoing [arguments], for a run that has
     no worker and no receipt, so a conversation that waits for it receives an
-    answer. [arguments] are the ones its request record kept
-    ({!request_arguments}). Writes
+    answer. [arguments] are [Known] ones its request record kept
+    ({!request_arguments}), or [Unknown] when it kept none; the receipt says so
+    in its message and in its [arguments]. Writes
     nothing when the outbox already holds a receipt for the request. It does not
     wake the Keeper. *)
 

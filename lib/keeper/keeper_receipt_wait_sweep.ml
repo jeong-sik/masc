@@ -3,16 +3,12 @@ module Outbox = Keeper_client_tool_outbox
 module Background = Keeper_execute_background
 module Resolution = Keeper_receipt_wait_resolution
 
-(* What the request record says about a run. The arguments of an ended run
-   are what its Unfinished receipt echoes. A record that is absent, or that is
-   not a background Execute run's, has none, and no value stands in for them. *)
-type ended =
-  | With_arguments of Yojson.Safe.t
-  | Without_arguments of string
-
+(* What the request record says about a run. The arguments of an ended run are
+   what its Unfinished receipt echoes. A record that is absent, or that is not a
+   background Execute run's, holds none, and the receipt says [Unknown]. *)
 type record =
   | Worker_may_exist
-  | Ended of ended
+  | Ended of Outbox.arguments
 
 let read_record ~base_path ~keeper_name request_id =
   match Keeper_msg_async.load_canonical_request ~base_path ~caller:keeper_name request_id with
@@ -21,22 +17,9 @@ let read_record ~base_path ~keeper_name request_id =
     then Ok Worker_may_exist
     else
       (match Background.request_arguments entry with
-       | Some arguments -> Ok (Ended (With_arguments arguments))
-       | None ->
-         Ok
-           (Ended
-              (Without_arguments
-                 (Printf.sprintf
-                    "request %s is not a background Execute run, so its arguments are \
-                     not recorded"
-                    request_id))))
-  | Keeper_msg_async.Absent ->
-    Ok
-      (Ended
-         (Without_arguments
-            (Printf.sprintf
-               "request %s has no record, so the arguments of its run are not known"
-               request_id)))
+       | Some arguments -> Ok (Ended (Outbox.Known arguments))
+       | None -> Ok (Ended Outbox.Unknown))
+  | Keeper_msg_async.Absent -> Ok (Ended Outbox.Unknown)
   | Keeper_msg_async.Unreadable reason ->
     Error (Printf.sprintf "request %s is unreadable: %s" request_id reason)
   | Keeper_msg_async.Rejected rejection ->
@@ -51,22 +34,18 @@ let read_record ~base_path ~keeper_name request_id =
    before it settles the request, so a request that has ended and has no
    receipt in an outbox read taken afterwards never had its receipt delivered.
    The other order lets a worker finish between the two reads. [Ok None] is a
-   wait with nothing to settle. An [Error] leaves the wait pending, and the
-   next sweep reads it again. *)
+   wait with nothing to settle. *)
 let lost_arguments ~base_path ~keeper_name request_id =
   let* record = read_record ~base_path ~keeper_name request_id in
   match record with
   | Worker_may_exist -> Ok None
-  | Ended ended ->
+  | Ended arguments ->
     let* snapshot =
       Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt
     in
     if Outbox.contains_call snapshot ~call_id:request_id
     then Ok None
-    else
-      (match ended with
-       | With_arguments arguments -> Ok (Some arguments)
-       | Without_arguments reason -> Error reason)
+    else Ok (Some arguments)
 ;;
 
 let settle_one ~base_path ~keeper_name request_id arguments =

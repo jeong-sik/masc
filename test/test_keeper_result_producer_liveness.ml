@@ -5,7 +5,7 @@ let get = function Ok value -> value | Error detail -> fail detail
 let keeper_name = "producer-owner"
 let retain producer =
   get (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"same-client-id"
-    ~tool_name:"effect" ~arguments:(`Assoc ["owner",`String keeper_name])
+    ~tool_name:"effect" ~arguments:(Outbox.Known (`Assoc ["owner",`String keeper_name]))
     ~response:(`Assoc ["content",`String "ORIGINAL_EFFECT_RESULT"]))
 let load base_path = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt)
 let ids base_path = Outbox.receipt_ids (load base_path)
@@ -35,7 +35,7 @@ let test_same_process_owner_and_independent_result () = with_workspace (fun base
       check (list string) "own live result is not a wake or consumption source" [] (ids base_path);
       let independent : Outbox.receipt =
         {thread_id="finished-vendor";turn_id="finished-turn";call_id="other-original";
-         tool_name="independent";arguments=`Assoc [];response=`String "independent-result"} in
+         tool_name="independent";arguments=Outbox.Known (`Assoc []);response=`String "independent-result"} in
       get (Outbox.retain ~base_path ~keeper_name independent);
       let ready = load base_path in
       check int "independent result remains available" 1 (List.length (Outbox.receipt_ids ready));

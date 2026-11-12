@@ -235,6 +235,35 @@ let test_arrived_is_safe_to_repeat () =
     get (Keeper_receipt_wait_resolution.arrived ~base_path:config.base_path ~keeper_name))
 ;;
 
+(* The receipt as it lies in the outbox: the arguments it carries and the text
+   the model reads. *)
+let receipt_arguments config ~request_id =
+  let directory =
+    get (Keeper_official_client_paths.outbox_dir ~base_path:config.Workspace.base_path ~keeper_name)
+  in
+  let carrying =
+    List.filter_map
+      (fun name ->
+         if not (Filename.check_suffix name ".json")
+         then None
+         else (
+           let json =
+             Yojson.Safe.from_string
+               (In_channel.with_open_bin (Filename.concat directory name) In_channel.input_all)
+           in
+           match Yojson.Safe.Util.member "call_id" json with
+           | `String call_id when String.equal call_id request_id ->
+             Some (Yojson.Safe.Util.member "arguments" json)
+           | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+             None))
+      (Array.to_list (Sys.readdir directory))
+  in
+  match carrying with
+  | [ field ] -> get (Keeper_client_tool_outbox_codec.arguments_of_json field)
+  | [] -> fail "no receipt carries the request"
+  | _ :: _ :: _ -> fail "two receipts carry the request"
+;;
+
 (* A background Execute request as the Keeper records it: the arguments are in
    its request record. [settled] resolves when the worker has finished and the
    request has its final status. *)
@@ -287,31 +316,43 @@ let test_run_without_worker_or_receipt_is_settled () =
     in
     check bool "the unfinished receipt shows the recorded command" true
       (Astring.String.is_infix ~affix:"sleep 30" receipt_text);
+    check bool "and carries it as known arguments" true
+      (receipt_arguments config ~request_id
+       = Keeper_client_tool_outbox_codec.Known recorded_command);
     get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
     check int "a second pass resumes nothing more" 2 !(task.attempts))
 ;;
 
-(* No record of the request means no arguments to echo. No value stands in for
-   them: the wait stays pending, no receipt is written, and every sweep reports
-   the request. *)
-let test_run_without_a_record_stays_waiting () =
+(* No record of the request means no arguments to echo. The receipt says
+   [Unknown]: no value stands in for them, and the text the model reads has no
+   empty arguments. *)
+let test_run_without_a_record_is_settled_with_unknown_arguments () =
   with_workspace (fun ~sw ~clock config ->
     let request_id = "kmsg-never-recorded" in
     let task = start_waiting_task ~sw ~clock config ~request_id in
-    let swept =
-      Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name
+    get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
+    await ~clock task.finished;
+    check int "the task resumed" 2 !(task.attempts);
+    check bool "the receipt carries unknown arguments" true
+      (receipt_arguments config ~request_id = Keeper_client_tool_outbox_codec.Unknown);
+    let text =
+      String.concat ""
+        (Outbox.developer_context
+           (get
+              (Outbox.load
+                 ~base_path:config.base_path
+                 ~keeper_name
+                 ~viewer:Outbox.Every_receipt)))
     in
-    (match swept with
-     | Ok () -> fail "a wait without arguments to echo was settled"
-     | Error detail ->
-       check bool "the error names the request" true
-         (Astring.String.is_infix ~affix:request_id detail));
-    check int "the wait stays pending" 1 !(task.attempts);
-    check bool "and no receipt was written" false
-      (outbox_has config ~viewer:Outbox.Every_receipt request_id);
-    check bool "the next sweep reports it again" true
-      (Result.is_error
-         (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name)))
+    check bool "the model reads that they are unknown" true
+      (Astring.String.is_infix ~affix:{|"arguments":{"unknown":true}|} text);
+    check bool "and the message says why" true
+      (Astring.String.is_infix ~affix:"does not hold its command" text);
+    check bool "no empty arguments reach the model" false
+      (Astring.String.is_infix ~affix:{|"arguments":{}|} text
+       || Astring.String.is_infix ~affix:{|"known":{}|} text);
+    get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
+    check int "a second pass resumes nothing more" 2 !(task.attempts))
 ;;
 
 (* A request a worker may still own is not lost. The sweep reads the request
@@ -343,8 +384,8 @@ let () =
     ; ( "lost run"
       , [ test_case "a run without worker or receipt is settled" `Quick
             test_run_without_worker_or_receipt_is_settled
-        ; test_case "a run without a record stays waiting" `Quick
-            test_run_without_a_record_stays_waiting
+        ; test_case "a run without a record is settled with unknown arguments" `Quick
+            test_run_without_a_record_is_settled_with_unknown_arguments
         ; test_case "a run with a worker is left waiting" `Quick
             test_run_with_a_worker_is_left_waiting
         ] )

@@ -107,7 +107,12 @@ let started_json ~request_id ~elapsed_ms =
 (* The receipt is committed even when the wake cannot be: the maintenance
    pulse finds a retained receipt on its next pass. *)
 let deliver ~base_path ~keeper_name ~request_id ~arguments ending =
-  match Outbox.retain ~base_path ~keeper_name (receipt ~request_id ~arguments ending) with
+  match
+    Outbox.retain
+      ~base_path
+      ~keeper_name
+      (receipt ~request_id ~arguments:(Outbox.Known arguments) ending)
+  with
   | Error detail -> Error detail
   | Ok () ->
     (match Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name with
@@ -334,8 +339,12 @@ let unfinished_entry (entry : Keeper_msg_async.entry) =
 
 let request_arguments entry = Option.map snd (unfinished_entry entry)
 
-let source_lost_cause =
-  "The run has no worker and left no receipt. " ^ effect_unknown
+let source_lost_cause = function
+  | Outbox.Known _ -> "The run has no worker and left no receipt. " ^ effect_unknown
+  | Outbox.Unknown ->
+    "The request record of this run does not hold its command. The run has no \
+     worker and left no receipt. "
+    ^ effect_unknown
 ;;
 
 (* The wait that asked for this run is resolved by the caller afterwards, so
@@ -349,7 +358,10 @@ let retain_source_lost_receipt ~base_path ~keeper_name ~request_id ~arguments =
     Outbox.retain
       ~base_path
       ~keeper_name
-      (receipt ~request_id ~arguments (Unfinished { cause = source_lost_cause }))
+      (receipt
+         ~request_id
+         ~arguments
+         (Unfinished { cause = source_lost_cause arguments }))
 ;;
 
 let deliver_unfinished_runs ~base_path =
@@ -375,11 +387,11 @@ let deliver_unfinished_runs ~base_path =
 
 module For_testing = struct
   let receipt_of_unfinished ~request_id ~arguments ~cause =
-    receipt ~request_id ~arguments (Unfinished { cause })
+    receipt ~request_id ~arguments:(Outbox.Known arguments) (Unfinished { cause })
   ;;
 
   let receipt_of_execution ~request_id ~arguments execution =
-    receipt ~request_id ~arguments (Finished execution)
+    receipt ~request_id ~arguments:(Outbox.Known arguments) (Finished execution)
   ;;
 
   let started_json = started_json

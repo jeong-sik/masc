@@ -14,8 +14,7 @@ val settle_lost : base_path:string -> keeper_name:string -> (unit, string) resul
 
     The receipt echoes the arguments the request record kept. A request with
     no record, or whose record is not a background Execute run's, has none to
-    echo: no receipt is written, the wait stays pending, and the error names
-    the request. *)
+    echo: its receipt carries [Unknown] arguments and says so in its message. *)
 
 val after_wait : base_path:string -> keeper_name:string -> (unit, string) result
 (** Run once a wait is recorded: the receipt, or the end of the run, may have

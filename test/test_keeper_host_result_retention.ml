@@ -325,7 +325,7 @@ let test_producer_identity_and_vendor_coexistence () = with_workspace (fun base_
   let first = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"Claude" ~turn_count:1)
   and replacement = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"Muse" ~turn_count:1) in
   let retain ?(invocation_index=0) producer = get (Outbox.retain_host_result producer ~invocation_index
-    ~call_id:"same-client-local-call-id" ~tool_name:"Execute" ~arguments:(`Assoc []) ~response:(`String marker)) in
+    ~call_id:"same-client-local-call-id" ~tool_name:"Execute" ~arguments:(Outbox.Known (`Assoc [])) ~response:(`String marker)) in
   retain first; retain first;
   check int "the same original source/result is idempotent" 1
     (List.length (Outbox.receipt_ids (load base_path)));
@@ -335,14 +335,14 @@ let test_producer_identity_and_vendor_coexistence () = with_workspace (fun base_
   retain replacement;
   get (Outbox.retain ~base_path ~keeper_name
     {thread_id="actual-vendor-thread";turn_id="actual-vendor-turn";call_id="actual-vendor-call";
-     tool_name="Execute";arguments=`Assoc [];response=`String "original vendor result"});
+     tool_name="Execute";arguments=Outbox.Known (`Assoc []);response=`String "original vendor result"});
   check int "replacement host and vendor sources retain their own identities" 4
     (List.length (Outbox.receipt_ids (load base_path))))
 
 let test_shared_context_preserves_each_retained_result () = with_workspace (fun base_path ->
   let first = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"client-a" ~turn_count:1)
   and second = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"client-b" ~turn_count:1) in
-  let arguments = `Assoc ["page",`String (String.make 4096 'a'); "offset",`Int 0] in
+  let arguments = Outbox.Known (`Assoc ["page",`String (String.make 4096 'a'); "offset",`Int 0]) in
   let response = `Assoc ["ok",`Bool true; "content",`String "retained \"original\" 한글"] in
   for index = 0 to 19 do
     get (Outbox.retain_host_result first ~invocation_index:index ~call_id:"reused-id"
@@ -406,7 +406,7 @@ let retain_old_host_image_receipt base_path ~call_id image =
   let producer = get (Outbox.host_producer ~base_path ~keeper_name
       ~runtime_label:"old-host-fixture" ~turn_count:1) in
   get (Outbox.retain_host_result producer ~invocation_index:0 ~call_id
-         ~tool_name:"Screenshot" ~arguments:(`Assoc [])
+         ~tool_name:"Screenshot" ~arguments:(Outbox.Known (`Assoc []))
          ~response:(`Assoc ["success", `Bool true; "content", `String "screenshot taken";
                             "content_blocks", `List [block]]))
 
@@ -421,7 +421,7 @@ let test_carrier_names_media_by_identity () = with_workspace (fun base_path ->
     | Ok items -> items | Error detail -> fail detail in
   get (Outbox.retain ~base_path ~keeper_name
     {thread_id="vendor-thread";turn_id="vendor-turn";call_id="codex-image-call";
-     tool_name="Screenshot";arguments=`Assoc [];
+     tool_name="Screenshot";arguments=Outbox.Known (`Assoc []);
      response=`Assoc ["id",`Int 9; "result",`Assoc ["success",`Bool true; "contentItems",`List items]]});
   let snapshot = load base_path in
   let session = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
@@ -617,7 +617,7 @@ let test_host_invocation_index_validation () =
   List.iter (fun index_fields -> with_workspace (fun base_path ->
     let producer = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"index-validation" ~turn_count:0) in
     get (Outbox.retain_host_result producer ~invocation_index:0
-      ~call_id:"call" ~tool_name:"Execute" ~arguments:(`Assoc []) ~response:(`String marker));
+      ~call_id:"call" ~tool_name:"Execute" ~arguments:(Outbox.Known (`Assoc [])) ~response:(`String marker));
     let session_path = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
     let directory = Filename.concat (Filename.dirname session_path) "undelivered-tools" in
     let id = match Outbox.receipt_ids (load base_path) with
@@ -638,7 +638,7 @@ let test_host_invocation_index_validation () =
   with_workspace (fun base_path ->
     let producer = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"negative-index" ~turn_count:0) in
     match Outbox.retain_host_result producer ~invocation_index:(-1)
-      ~call_id:"call" ~tool_name:"Execute" ~arguments:(`Assoc []) ~response:(`String marker) with
+      ~call_id:"call" ~tool_name:"Execute" ~arguments:(Outbox.Known (`Assoc [])) ~response:(`String marker) with
     | Error _ -> check int "invalid producer index creates no receipt" 0
         (List.length (Outbox.receipt_ids (load base_path)))
     | Ok () -> fail "negative producer invocation index was retained")
@@ -648,7 +648,7 @@ let test_host_invocation_index_validation () =
 let test_original_that_reads_back_different_creates_no_receipt () = with_workspace (fun base_path ->
   let producer = get (Outbox.host_producer ~base_path ~keeper_name ~runtime_label:"invalid-utf8" ~turn_count:0) in
   let retain invocation_index response = Outbox.retain_host_result producer ~invocation_index
-    ~call_id:"call" ~tool_name:"Read" ~arguments:(`Assoc []) ~response in
+    ~call_id:"call" ~tool_name:"Read" ~arguments:(Outbox.Known (`Assoc [])) ~response in
   let cut_mid_syllable = "\xEB\xA1\x9C\xEA\xB7\xB8\xEC\x9D" in
   (match retain 0 (`String cut_mid_syllable) with
    | Error _ -> ()
@@ -697,7 +697,7 @@ let receipt_files base_path =
 
 let vendor_receipt ~call_id ~tool_name response =
   {Outbox.thread_id="carrier-thread"; turn_id="carrier-turn"; call_id; tool_name;
-   arguments=`Assoc ["call", `String call_id]; response}
+   arguments=Outbox.Known (`Assoc ["call", `String call_id]); response}
 
 (* Written as [Outbox.retain] writes them, without one durable write per file,
    so a test can hold thousands. The first goes through [Outbox.retain], which
@@ -708,13 +708,7 @@ let retain_vendor_receipts ?(keeper_name = keeper_name) base_path = function
     get (Outbox.retain ~base_path ~keeper_name first);
     let directory = outbox_directory ~keeper_name base_path in
     List.iter (fun (receipt : Outbox.receipt) ->
-      let body = Yojson.Safe.to_string (`Assoc [
-          "thread_id", `String receipt.Outbox.thread_id;
-          "turn_id", `String receipt.Outbox.turn_id;
-          "call_id", `String receipt.Outbox.call_id;
-          "tool_name", `String receipt.Outbox.tool_name;
-          "arguments", receipt.Outbox.arguments;
-          "response", receipt.Outbox.response]) in
+      let body = Yojson.Safe.to_string (Keeper_client_tool_outbox_codec.to_json receipt) in
       Out_channel.with_open_gen [Open_wronly; Open_creat; Open_excl; Open_binary] 0o600
         (Filename.concat directory (sha256_hex body ^ ".json"))
         (fun channel -> Out_channel.output_string channel body)) rest
@@ -931,7 +925,7 @@ let test_address_form_keeps_base64_out () = with_workspace (fun base_path ->
     | Ok items -> items | Error detail -> fail detail in
   get (Outbox.retain ~base_path ~keeper_name
     {thread_id="vendor-thread";turn_id="vendor-turn";call_id="codex-image-call";
-     tool_name="Screenshot";arguments=`Assoc [];
+     tool_name="Screenshot";arguments=Outbox.Known (`Assoc []);
      response=`Assoc ["id",`Int 9; "result",`Assoc ["success",`Bool true; "contentItems",`List items]]});
   retain_vendor_receipts base_path (List.init 4 (fun index ->
     vendor_receipt ~call_id:(Printf.sprintf "text-%d" index) ~tool_name:"Read"
@@ -1018,7 +1012,7 @@ let test_maintenance_keeps_receipt_blobs_and_the_next_run_rewrites () =
   let response = get (Outbox.host_response producer ~min_result_bytes:0 ~success:true
       ~content:body ~content_blocks:None) in
   get (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
-      ~tool_name:"Read" ~arguments:(`Assoc []) ~response);
+      ~tool_name:"Read" ~arguments:(Outbox.Known (`Assoc [])) ~response);
   retain_vendor_receipts base_path (List.init 3 (fun index ->
     vendor_receipt ~call_id:(Printf.sprintf "swept-%d" index) ~tool_name:"Read"
       (`String (String.make 2048 's'))));

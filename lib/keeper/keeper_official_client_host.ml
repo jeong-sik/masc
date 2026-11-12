@@ -1644,7 +1644,7 @@ let retain_original_result producer ~invocation ~call_id ~tool_name ~input
       ~content_blocks:original.content_blocks in
   Keeper_client_tool_outbox.retain_host_result_with_delivery producer
     ~invocation_index:(Agent_core.Tool_contract.Invocation.planned_index invocation)
-    ~call_id ~tool_name ~arguments:input ~response
+    ~call_id ~tool_name ~arguments:(Keeper_client_tool_outbox.Known input) ~response
 
 (* A queue is read when a turn starts, so a row that reaches it while an
    official client runs the turn waits for the turn to end

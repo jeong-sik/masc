@@ -45,7 +45,7 @@ default = "codex.codex"
 
 let receipt turn_id : Keeper_client_tool_outbox.receipt =
   {thread_id="thread-original";turn_id;call_id="call-original";
-   tool_name="Execute";arguments=`Assoc ["command",`String "effect-already-completed"];
+   tool_name="Execute";arguments=Keeper_client_tool_outbox.Known (`Assoc ["command",`String "effect-already-completed"]);
    response=`String "private-completed-result"}
 
 let retain config result =

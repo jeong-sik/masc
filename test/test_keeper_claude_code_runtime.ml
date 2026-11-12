@@ -6904,7 +6904,7 @@ let test_original_outbox_result_is_delivered_on_start_and_resume () =
   let retain turn_id value = store (fun () ->
     Keeper_client_tool_outbox.retain ~base_path ~keeper_name
       {thread_id="original-codex-session";turn_id;call_id="original-call";
-       tool_name="Execute";arguments=`String "original-effect-no-replay";response=`String value}
+       tool_name="Execute";arguments=Keeper_client_tool_outbox.Known (`String "original-effect-no-replay");response=`String value}
     |> get) in
   let count () = store (fun () -> Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt
     |> get |> Keeper_client_tool_outbox.receipt_ids |> List.length) in
@@ -6959,7 +6959,7 @@ let test_rejecting_keeper_accept_preserves_loaded_and_new_originals () =
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     store (fun () -> Keeper_client_tool_outbox.retain ~base_path ~keeper_name
       {thread_id="previous-thread";turn_id="previous-turn";call_id="previous-call";
-       tool_name="Execute";arguments=`String "no-effect-replay";
+       tool_name="Execute";arguments=Keeper_client_tool_outbox.Known (`String "no-effect-replay");
        response=`String "PREVIOUS_ORIGINAL_RESULT"} |> get);
     with_fixture_sequence
       [Emit_and_read mcp_initialize; Emit mcp_initialized_notification;
@@ -7011,7 +7011,7 @@ module Retained_overflow = struct
     Keeper_client_tool_outbox.retain ~base_path ~keeper_name
       {thread_id="overflow-thread";turn_id="overflow-turn";
        call_id=Printf.sprintf "overflow-call-%d" index;tool_name="Read";
-       arguments=`String "no-effect-replay";
+       arguments=Keeper_client_tool_outbox.Known (`String "no-effect-replay");
        response=`String (label index ^ String.make 4096 'r')} |> get) indices)
 
   let pending base_path = store (fun () ->

@@ -1492,7 +1492,7 @@ let test_checkpoint_preserves_receipt_across_session_replacement () =
     (fun () ->
       let original : Keeper_client_tool_outbox.receipt =
         {thread_id="previous-session";turn_id="original-turn";call_id="original-call";
-         tool_name="Execute";arguments=`Assoc ["command",`String "original-effect-no-replay"];
+         tool_name="Execute";arguments=Keeper_client_tool_outbox.Known (`Assoc ["command",`String "original-effect-no-replay"]);
          response=`String "original-private-result-after-session-replacement"} in
       Keeper_client_tool_outbox.retain ~base_path ~keeper_name original |> require;
       let load () = Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt |> require in
@@ -1574,7 +1574,7 @@ let retain_overflow_receipts ~base_path ~keeper_name =
     Keeper_client_tool_outbox.retain ~base_path ~keeper_name
       {thread_id="overflow-thread";turn_id="overflow-turn";
        call_id=Printf.sprintf "overflow-call-%d" index;tool_name="Read";
-       arguments=`String "no-effect-replay";
+       arguments=Keeper_client_tool_outbox.Known (`String "no-effect-replay");
        response=`String (retained_label index ^ String.make 4096 'r')} |> require)
     retained_indices
 

@@ -1676,7 +1676,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
            (fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
              let receipt : Keeper_client_tool_outbox.receipt =
                {thread_id=receipt.thread_id;turn_id=receipt.turn_id;call_id=receipt.call_id;
-                tool_name=receipt.tool_name;arguments=receipt.arguments;response=receipt.response} in
+                tool_name=receipt.tool_name;
+                arguments=Keeper_client_tool_outbox.Known receipt.arguments;
+                response=receipt.response} in
              let* () = Keeper_client_tool_outbox.retain ~base_path ~keeper_name receipt in
              (* The receipt is committed even if notification cannot commit.
                 Startup and the existing maintenance pulse rediscover it. *)

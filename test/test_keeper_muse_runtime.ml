@@ -3820,7 +3820,7 @@ let test_original_result_crosses_checkpoint_and_fresh_session () =
     ignore (settle_first_turn ~base_path ~tool);
     let receipt : Keeper_client_tool_outbox.receipt =
       {thread_id="original-codex-thread";turn_id="original-result-turn";call_id="original-call";
-       tool_name="Execute";arguments=`Assoc ["command",`String "original-effect-no-replay"];
+       tool_name="Execute";arguments=Keeper_client_tool_outbox.Known (`Assoc ["command",`String "original-effect-no-replay"]);
        response=`String "ORIGINAL_CROSS_RUNTIME_RESULT"} in
     Keeper_client_tool_outbox.retain ~base_path ~keeper_name receipt |> get;
     let load () = Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt |> get in

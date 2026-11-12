@@ -11,7 +11,7 @@ let contains text body = String_util.contains_substring body text
 
 let receipt turn_id : Outbox.receipt =
   {thread_id="original-vendor-session";turn_id;call_id="original-effect-call";
-   tool_name="Execute";arguments=`Assoc ["command",`String "already-executed-effect"];
+   tool_name="Execute";arguments=Outbox.Known (`Assoc ["command",`String "already-executed-effect"]);
    response=`Assoc ["content",`String marker;"isError",`Bool false]}
 
 type scenario = Completed | Deferred | Projection_failed | Provider_failed | Rejected | Save_failed
@@ -36,7 +36,7 @@ let run_case ?(host=false) scenario () =
       let invocation_index = !next_host_invocation_index in
       incr next_host_invocation_index;
       get (Outbox.retain_host_result host_producer ~invocation_index ~call_id:turn_id
-        ~tool_name:"Execute" ~arguments:(`Assoc ["command",`String "already-executed-effect"])
+        ~tool_name:"Execute" ~arguments:(Outbox.Known (`Assoc ["command",`String "already-executed-effect"]))
         ~response:(`Assoc ["content",`String marker;"success",`Bool true]))
     else get (Outbox.retain ~base_path ~keeper_name (receipt turn_id)) in
   let snapshot () = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt) in

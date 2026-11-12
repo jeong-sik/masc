@@ -1,25 +1,40 @@
 let ( let* ) = Result.bind
 
+type arguments =
+  | Known of Yojson.Safe.t
+  | Unknown
+
 type receipt =
   { thread_id : string
   ; turn_id : string
   ; call_id : string
   ; tool_name : string
-  ; arguments : Yojson.Safe.t
+  ; arguments : arguments
   ; response : Yojson.Safe.t
   }
+
+let arguments_to_json = function
+  | Known value -> `Assoc ["known", value]
+  | Unknown -> `Assoc ["unknown", `Bool true]
+
+let arguments_of_json = function
+  | `Assoc ["known", value] -> Ok (Known value)
+  | `Assoc ["unknown", `Bool true] -> Ok Unknown
+  | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error "invalid tool outbox arguments"
 
 let to_json (result : receipt) =
   `Assoc ["thread_id", `String result.thread_id; "turn_id", `String result.turn_id;
     "call_id", `String result.call_id; "tool_name", `String result.tool_name;
-    "arguments", result.arguments; "response", result.response]
+    "arguments", arguments_to_json result.arguments; "response", result.response]
 
 let host_to_json ~producer_id ~runtime_label ~turn_count ~invocation_index
     ~call_id ~tool_name ~arguments ~response =
   `Assoc ["host_invocation_index",`Int invocation_index;
     "host_producer_id",`String producer_id;
     "runtime_label",`String runtime_label;"host_turn_count",`Int turn_count;
-    "call_id",`String call_id;"tool_name",`String tool_name;"arguments",arguments;"response",response]
+    "call_id",`String call_id;"tool_name",`String tool_name;
+    "arguments",arguments_to_json arguments;"response",response]
 
 let filename json =
   Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex) ^ ".json"
@@ -53,6 +68,9 @@ let validate ~path json =
            | Some (`Int value) when value >= 0 -> Ok ()
            | Some _ | None -> Error "invalid host tool result turn count")
       else Error "invalid tool outbox fields" in
+    let* () = match List.assoc_opt "arguments" fields with
+      | Some value -> arguments_of_json value |> Result.map (fun (_ : arguments) -> ())
+      | None -> Error "invalid tool outbox arguments" in
     if Filename.basename path <> filename json then Error "tool outbox digest mismatch"
     else Ok ()
   | _ -> Error "tool outbox receipt must be an object"

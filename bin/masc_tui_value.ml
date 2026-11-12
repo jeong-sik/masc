@@ -43,9 +43,9 @@ module Instant = struct
   let cell_width precision =
     String.length (within_year precision (Unix.gmtime 0.0))
 
-  let detail_text precision ~now at =
-    let tm = Unix.localtime at in
-    match distance ~now:(Unix.localtime now) tm with
+  let detail_text ?(localtime = Unix.localtime) precision ~now at =
+    let tm = localtime at in
+    match distance ~now:(localtime now) tm with
     | Same_day -> clock precision tm
     | Same_year -> within_year precision tm
     | Other_year -> year_month_day tm ^ " " ^ clock precision tm

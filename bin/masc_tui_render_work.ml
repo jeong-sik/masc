@@ -261,10 +261,13 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
         Option.to_list
           (Option.map
              (fun (row : Masc_tui_agenda.stalled) ->
-               (text " 운영자 목록 · " " Operator list · ") ^ Terminal_text.single_line row.what)
+               (text " 운영자 목록 · " " Operator list · ")
+               ^ Terminal_text.single_line
+                   (Masc.Operator_task_attention.summary
+                      ~ko:(state.ui_language = Lang_ko) row))
              (List.find_opt
                 (fun (row : Masc_tui_agenda.stalled) ->
-                  String.equal row.task_id task.id)
+                  String.equal (Masc.Operator_task_attention.task_id row) task.id)
                 rows))
     | Masc_tui_agenda.Not_read | Masc_tui_agenda.Read_failed _ -> []
   in

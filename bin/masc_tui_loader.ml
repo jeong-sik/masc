@@ -289,13 +289,7 @@ let load_active_tasks ~fresh (base_path : string) :
          | None ->
              Masc_tui_agenda.Read
                (Masc.Operator_task_attention.project ~config
-                  observation.observed_backlog.tasks
-                |> List.map (fun item ->
-                     { Masc_tui_agenda.task_id =
-                         Masc.Operator_task_attention.task_id item
-                     ; what = Masc.Operator_task_attention.summary ~ko:false item
-                     ; since_iso = Masc.Operator_task_attention.waiting_since item
-                     })))
+                  observation.observed_backlog.tasks))
       , goal_task_links )
 
 (* Goals whose stored phase awaits the operator's confirmation. This query does

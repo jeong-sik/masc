@@ -765,7 +765,7 @@
  (name masc_tui_agenda)
  (wrapped false)
  (modules masc_tui_agenda)
- (libraries masc masc.time_codec masc_tui_message_layout unix))
+ (libraries masc masc.time_codec masc_tui_message_layout masc_tui_value unix))
 
 (library
  (name masc_tui_card)

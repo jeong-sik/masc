@@ -210,10 +210,16 @@ def select(rows, in_native_stack):
     return [number for _, number in sorted(picked)]
 
 
-def quota(resource):
-    """Remaining quota, for the record only; reading it costs nothing."""
+def quota():
+    """The token's REST and GraphQL budgets, for the record only.
+
+    Reading them costs nothing. `limit` and `reset` are kept because the
+    documented 1,000 an hour did not match what this token reported.
+    """
     try:
-        return gh(['api', 'rate_limit'])['resources'][resource]['remaining']
+        resources = gh(['api', 'rate_limit'])['resources']
+        return {name: {key: resources[name][key] for key in ('remaining', 'limit', 'reset')}
+                for name in ('core', 'graphql')}
     except (ValueError, KeyError, TypeError):
         return None
 
@@ -224,7 +230,7 @@ def main():
         raise SystemExit('invalid repository')
     dry_run = '--dry-run' in sys.argv[1:]
     started = time.monotonic()
-    report = {'quota_before': {'core': quota('core'), 'graphql': quota('graphql')}}
+    report = {'quota_before': quota()}
     try:
         rows = open_pulls(repo)
         candidates = select(
@@ -259,7 +265,7 @@ def main():
             stop = 'quota reached'
     report['stopped'] = stop
     report['merged_branches'] = clean_branches(repo, rows, started, dry_run)
-    report['quota_after'] = {'core': quota('core'), 'graphql': quota('graphql')}
+    report['quota_after'] = quota()
     output = json.dumps(report, ensure_ascii=False, indent=2)
     print(output, flush=True)
     if os.environ.get('GITHUB_STEP_SUMMARY'):

@@ -174,12 +174,21 @@ class Sweeping(unittest.TestCase):
     def test_an_unreadable_listing_is_the_only_red_sweep(self):
         errors = io.StringIO()
         with patch.object(SWEEP, 'open_pulls', side_effect=ValueError('refused')), \
-             patch.object(SWEEP, 'quota', return_value=0), \
+             patch.object(SWEEP, 'quota', return_value={'core': {'remaining': 0}}), \
              patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
              patch.object(SWEEP.sys, 'argv', ['sweep']), redirect_stderr(errors):
             self.assertEqual(SWEEP.main(), 1)
         self.assertIn('refused', errors.getvalue())
-        self.assertIn('"quota_before": {"core": 0, "graphql": 0}', errors.getvalue())
+        self.assertIn('"quota_before": {"core": {"remaining": 0}}', errors.getvalue())
+
+    def test_the_quota_record_keeps_limit_and_reset(self):
+        budget = {'remaining': 7, 'limit': 9, 'reset': 11, 'used': 2}
+        answer = {'resources': {'core': budget, 'graphql': budget, 'search': budget}}
+        with patch.object(SWEEP, 'gh', return_value=answer):
+            self.assertEqual(SWEEP.quota(), {
+                name: {'remaining': 7, 'limit': 9, 'reset': 11} for name in ('core', 'graphql')})
+        with patch.object(SWEEP, 'gh', side_effect=ValueError('refused')):
+            self.assertIsNone(SWEEP.quota())
 
     def test_a_refusal_is_recorded_from_its_start(self):
         refused = subprocess.CompletedProcess([], 1, '', 'API rate limit exceeded' + 'x' * 900)

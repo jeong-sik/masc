@@ -225,6 +225,8 @@ type delivery =
   3. 본문 중간에 거절 응답(413)을 보내고 닫는 서버. 결과는 셋 중 하나다. 거절 본문을 읽어 `HttpError` 가 된다. 읽기 전에 취소돼 `Not_delivered` 가 되고 새 연결에서 한 번 더 거절된다. 응답을 읽은 뒤 쓰기 fiber 의 실패가 올라와 `Possibly_delivered` 가 된다. 어느 쪽인지 이 시험이 정한다(§3.3).
   4. 요청 줄을 읽고 reset 하는 서버. 본문은 소켓 버퍼보다 크다. 새로 연 연결의 쓰기 실패는 다시 보내지 않고 `Not_delivered` 로 올라온다. 서버가 받은 연결은 1개다. 요청 줄을 읽기 전에 reset 하면 클라이언트의 `connect` 가 먼저 실패해 `Before_dispatch_error` 가 되고 닫을 연결도 없으니 이 시험이 아니다(#51528 의 첫 시험은 200번 중 53번 그렇게 갈렸다).
   5. 요청의 앞부분만 받고 닫는 provider. `glm-coding` 과 `ollama_cloud` 에 요청 헤더와 본문 앞부분만 보내고 연결을 닫는다. 응답이나 사용량이 생기지 않아야 한다. 생기면 provider 가 불완전한 요청을 처리하는 것이라 그 provider 의 8층은 만들지 않는다(§3.3). 외부 provider 를 부르는 시험이라 운영자 승인을 받고 하고, 8층 PR 이 이 결과를 증거로 든다.
+     - 결과(2026-11-12, [기록](../evidence/2026-11-12-provider-partial-request/README.md)): `glm-coding` 과 `openrouter` 는 본문을 절반 또는 한 바이트 모자라게만 보내고 연결을 닫지 않은 채 기다렸을 때 응답하지 않았다(glm 60초 뒤 FIN, openrouter 15초 뒤 RST). 정상 요청은 같은 조건에서 2.2초와 0.5초에 200 으로 답했다. FIN 으로 닫는 방식은 쓸 수 없다. 요청을 모두 보낸 뒤 FIN 만 보내도 glm 은 응답 없이 닫았다.
+     - 한계: 클라이언트가 멈춘 경우이고 연결이 끊기는 경우가 아니다. 사용량이 생기는지는 재지 못했다(glm 의 창은 정수 퍼센트, openrouter 는 무료 모델). 처리하고 응답만 버린 경우는 배제하지 못한다. `ollama_cloud` 는 한도에 막혀 시험하지 않았고 그 provider 의 8층은 시험 전에 만들지 않는다.
 - 배포 뒤: 캐시 `stats` 의 재사용 수와 새로 연 수, 이유별 닫은 수를 본다. 3층이 이 값을 `/health?full=1` 의 snapshot 필드 `provider_connection_cache` 로 낸다.
   - `/health` 는 인증 없이 열린 집계 화면이다. 그래서 origin 이름은 내지 않는다(RFC-0132). `max_idle_per_host` 를 다시 볼 값으로 origin 하나의 최대 idle 수만 낸다.
   - 다시 쓴 연결의 실패는 `closed_after_reuse` 의 `request_failed`·`transport_ended` 로 센다. `closed_total` 의 같은 이유 수에서 빼면 새 연결의 수다(#48933).

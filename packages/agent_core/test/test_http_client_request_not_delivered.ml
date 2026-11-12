@@ -9,9 +9,10 @@
     network cannot stand in. Two tests check the facts the count stands on:
     which exceptions [transport_named_peer_close] names, and that tls-eio passes
     the errno of a failed write through. An unnamed close such as tls-eio's
-    [Tls_socket_closed] is checked there and not over TLS: tls-eio raises it
-    from a write only after this side shut the session down or a read failed
-    first, and [Http_client] does neither before it writes. *)
+    [Tls_socket_closed] is checked there and not over TLS. tls-eio raises it
+    from a write only after this side shut the session's write direction down,
+    and it raises a stored [Tls_failure] or [Tls_alert] only after a read on the
+    session failed. [Http_client] does neither before it writes a request. *)
 
 open Llm_provider
 

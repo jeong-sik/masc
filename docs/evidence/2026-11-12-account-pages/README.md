@@ -22,6 +22,15 @@ sh harness/ux-layer.sh <masc 바이너리> <label> <출력 폴더> <빈 포트>
 python3 harness/ux-table.py <출력 폴더>/<label>-measure.json
 ```
 
+로그인 실패·완료 화면까지 재려면 완료 화면을 먼저 저장해요. `harness/ux-dump-done.py` 가 저장 프로그램을 만들고, 그 머리말대로 빌드해 돌리면 `<저장 폴더>` 에 header 와 바이트가 남아요. 그다음 상태 셋과 그 폴더를 인자로 더해요.
+
+```sh
+python3 harness/ux-dump-done.py <worktree> <저장 폴더>
+sh harness/ux-layer.sh <masc 바이너리> <label> <출력 폴더> <빈 포트> \
+  '[["refused_401","REAL",null,"/auth/github/callback"],["refused_404_no_client","NOCLIENT",null,"/auth/github/callback"],["done_held","MOCK",null,"/__saved/done?hold"]]' \
+  <저장 폴더>
+```
+
 ## L1a — stylesheet 와 화면 뼈대
 
 바이너리 sha256 앞 12자리 `ff7012df7e35`. 제품 소스 tree 는 `lib` `6f68976c06fe`, `bin` `6af85a0e0703` 이고 커밋 `b706d4df8092` 의 것과 같아요. 커밋하기 전 작업 트리에서 만든 바이너리라서 안에 든 build id 는 그 부모 `17df780c6390` 이에요. 수치는 `l1a/l1a-measure.json` 이에요.
@@ -99,6 +108,46 @@ python3 harness/ux-table.py <출력 폴더>/<label>-measure.json
 | `l1b/l1b-invite_token-320.png` | 초대 링크로 연 `/accounts/invite` (실제 서버, 지어낸 token) |
 | `l1b/l1b-invite_no_token-320.png` | token 없는 주소로 연 `/accounts/invite` (실제 서버) |
 | `l1b/l1b-member_new-320.png` | Member 로 로그인한 `/` (실제 HTML, 지어낸 JSON) |
+
+## L1c — 로그인 실패·완료 화면
+
+바이너리 sha256 앞 12자리 `e39944514abc`. 제품 소스 tree 는 `lib` `29d587c3e5fb`, `bin` `525a6aa7d7a0` 이에요. 이 층의 코드 커밋에서 만들었어요(잴 때의 커밋 id 는 `9641f31214a8`, 안에 든 build id 도 같아요). 스택이 새 main 위로 옮겨진 뒤라 `bin` tree 도 앞 층과 달라요. 수치는 `l1c/l1c-measure.json` 이에요.
+
+새로 잰 상태는 셋이에요.
+
+- `refused_401`. 실제 서버의 `GET /auth/github/callback` 을 쿠키 없이 열었어요.
+- `refused_404_no_client`. GitHub client 가 없는 서버의 같은 주소예요.
+- `done_held`. 로그인을 마친 화면이에요. GitHub 로그인이 있어야 나오는 답이라 브라우저로는 못 가요. 로그인 시험(`test_server_login_http`)이 GitHub 를 대신해 로그인을 끝낸 자리에서 서버가 답한 header 와 바이트를 저장했고(`harness/ux-dump-done.py`), 대역이 그것을 그대로 줘요. 이 화면은 뜨자마자 다음 주소로 떠나요. 재는 동안 머물게 하려고 대역이 정책의 script nonce 만 다른 값으로 바꿔 줬어요. sheet 의 nonce 는 그대로예요.
+
+| 상태 | HTTP | axe 위반 | incomplete | CSS 규칙 | 정책 위반 | `style` 속성 | 24px 미만 대상 | 가장 낮은 대상 | landmark | 문서 `lang` | 첫 Tab | 320px 가로 넘침 | 시도 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| refused_401 | 401 | 0 | 0 | 34 | 0 | 0 | 0 | 44px | 2 | `ko` | `a` | none | 1 |
+| refused_404_no_client | 404 | 0 | 0 | 34 | 0 | 0 | 0 | 44px | 2 | `ko` | `a` | none | 1 |
+| done_held | 200 | 0 | 0 | 34 | 1 | 0 | 0 | 44px | 2 | `ko` | `a#next` | none | 1 |
+| 전: refused_401 | 401 | 4 | 1 | 0 | 0 | 0 | 1 | 20px | 0 | `en` | `a` | none | 1 |
+| 전: refused_404_no_client | 404 | 4 | 1 | 0 | 0 | 0 | 1 | 20px | 0 | `en` | `a` | none | 1 |
+
+- "전" 두 줄은 앞 층 바이너리(`b85f755a84bb`)의 같은 두 주소예요(`l1c/l1c-before-measure.json`). axe 위반 넷은 `landmark-one-main`, `page-has-heading-one`, `region` 둘이고 incomplete 는 `bypass` 예요. 화면에 style 이 없었고, 하나뿐인 링크의 높이가 20px 이었어요.
+- 정책. 실패 화면은 `default-src 'none'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` 이에요. 전에는 `style-src` 가 없었어요. 완료 화면은 여기에 `script-src 'nonce-N'` 이 더 있고, 이 줄은 전과 같아요.
+- `done_held` 의 정책 위반 1건은 `script-src-elem` 이에요. 대역이 막아 둔 그 script 예요. 서버가 답한 그대로면 script 가 돌고 화면이 떠나요.
+- 문서 제목은 `MASC 로그인 실패`, `MASC 로그인 완료` 예요.
+- 나머지 아홉 줄(로그인 전 다섯, 로그인한 셋, 대조군)은 L1b 표와 값이 같아요.
+- 완료 화면의 `href` 는 시험이 고른 돌아갈 주소예요. 실제 로그인에서는 로그인을 시작한 화면이 보낸 주소가 들어가요.
+
+경로 시험(`test_login_routes`)이 두 화면의 정책과 sheet 의 nonce 를 붙드는지는 코드를 일부러 틀리게 고쳐서 봤어요(`l1c/policy-mutants.py`, 결과 `l1c/policy-mutants.tsv`). 고칠 때마다 시험을 다시 빌드해 돌렸고 넷 다 시험이 실패했어요. 끝나면 스크립트가 소스를 원래대로 되돌려요.
+
+| 틀리게 고친 것 | 결과 | 실패한 시험 |
+| --- | --- | --- |
+| 실패 화면의 정책에 `script-src 'self'` 를 더함 | 잡힘 | `refused` 의 `start`, `callback` |
+| 실패 화면의 정책에서 `style-src` 를 뺌 | 잡힘 | `refused` 의 `start`, `callback` |
+| 실패 화면의 sheet 를 정책과 다른 nonce 로 실음 | 잡힘 | `refused` 의 `start`, `callback` |
+| 완료 화면의 sheet 를 정책과 다른 nonce 로 실음 | 잡힘 | `sign-in` 의 `Google, then sign out` |
+
+| 캡처 | 상태 |
+| --- | --- |
+| `l1c/l1c-refused_401-desktop.png`, `l1c/l1c-refused_401-320.png` | 쿠키 없이 연 `/auth/github/callback` (실제 서버) |
+| `l1c/l1c-refused_404_no_client-320.png` | GitHub client 없는 서버의 같은 주소 (실제 서버) |
+| `l1c/l1c-done_held-desktop.png`, `l1c/l1c-done_held-320.png` | 로그인을 마친 화면 (시험이 저장한 서버의 답, script 는 막아 둠) |
 
 ## 확인하지 않은 것
 

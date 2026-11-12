@@ -1127,7 +1127,8 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - Google 로그인은 경로만 있고 화면에 버튼이 없다. 화면의 CSP `form-action`에 Google 인가 주소의 origin이 들어가야 하는데, 그 주소는 discovery가 준다.
   - Admin 세션이면 화면에 allowlist 등록·삭제 칸이 보인다(`whoami`의 `role`이 `admin`일 때만. 판정은 서버가 한다). C6의 Admin 화면이 생기기 전에 일반 Member를 들이는 길이다(#51483). allowlist를 읽는 경로가 없어서 방금 등록한 id만 보이고, C6가 서면 이 칸을 지운다.
   - 로그인 전에는 로그인 칸만, 로그인 뒤에는 구독·Keeper·PAT 칸만 보이고 목록 조회는 로그인 뒤에만 보낸다. 칸은 `<section>`과 제목으로 이어지고 동작 결과는 `role="status"`로 낭독된다. `Account`와 `Runtime`은 서버가 준 목록에서 고르고, PAT 만료는 날짜·시간 선택이다. 화면은 stylesheet 하나를 답 안에 싣고, CSP는 그 답의 nonce만 `style-src`로 받는다(`Account_page`). nonce는 `style` 속성을 덮지 않으므로 화면은 `style` 속성을 쓰지 않는다.
-  - 제목은 `MASC accounts`다.
+  - 로그인 전 화면(로그인, 초대)은 한국어다. 문서 제목은 `MASC 계정`과 `MASC 초대`다. 로그인 뒤 묶음은 영어로 남고 `lang="en"`을 단다. 세션을 읽은 결과 줄은 그 묶음 안에 있어서, 세션이 없는 브라우저에는 경로의 답이 보이지 않는다.
+  - 초대 화면은 주소에 token이 없으면 로그인 칸 대신 초대 링크를 다시 여는 방법을 보인다.
 - 프로세스 준비. 사람의 경로가 읽는 전역은 `Eio_context`의 env와 switch이고 S1a-3a가 이미 채운다. 턴은 official client를 서버의 프로세스로 띄운다(`Server_preview_keeper_turn`). net 전역을 읽는 경로는 없다(읽어서 확인).
 - 다른 사람의 Runtime. 턴은 `Runtime_account_access.authorize`가 허락한 계정에서만 시작한다. 다계정 프로세스에서 native 도구를 쓰는 자세는 `authorize_native`가 거절한다(D3c). 이 층은 그 판정을 바꾸지 않는다.
 - 안내문. `masc auth bootstrap`과 `masc auth invite`의 도움말이 "계정 서버는 아직 로그인 경로를 열지 않는다"고 적었다. 계정 서버가 여는 것으로 고친다.

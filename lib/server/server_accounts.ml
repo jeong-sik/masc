@@ -19,8 +19,9 @@ type refusal =
       ; port : int
       ; reason : string
       }
-  | Access_not_published of Runtime_account_access.publish_error
   | Trust_policy_refused of Server_request_authority.trust_policy_error
+  | Port_not_announced of Server_startup_takeover.base_path_lock_rejection
+  | Access_not_published of Runtime_account_access.publish_error
 
 let refusal_to_string = function
   | Http_mode_refused reason -> reason
@@ -38,8 +39,11 @@ let refusal_to_string = function
   | Https_listener_refused reason -> "HTTPS listener: " ^ reason
   | Listener_not_bound { host; port; reason } ->
     Printf.sprintf "%s:%d is not listened on: %s" host port reason
-  | Access_not_published error -> Runtime_account_access.publish_error_to_string error
   | Trust_policy_refused error -> Server_request_authority.trust_policy_error_to_string error
+  | Port_not_announced rejection ->
+    "the port is not announced to the host, so no command could replace this server: "
+    ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection
+  | Access_not_published error -> Runtime_account_access.publish_error_to_string error
 ;;
 
 (* The release version and the mode, and nothing of the host or the
@@ -47,15 +51,38 @@ let refusal_to_string = function
    [Build_identity.to_yojson] is not part of it, because it carries the path
    of the executable and of its checkout, the commit, and when the process
    started. *)
+let health_server_field = "server"
+let health_version_field = "version"
+let health_account_mode_field = "account_mode"
+let health_server_name = "masc"
+let health_account_mode = Masc_domain.account_mode_label Masc_domain.Multi_account
+
 let health (_ : Httpun.Request.t) reqd =
   Http.Response.json_value
     (`Assoc
-       [ "server", `String "masc"
-       ; "version", `String Runtime_build_version.current
-       ; ( "account_mode"
-         , `String (Masc_domain.account_mode_label Masc_domain.Multi_account) )
+       [ health_server_field, `String health_server_name
+       ; health_version_field, `String Runtime_build_version.current
+       ; health_account_mode_field, `String health_account_mode
        ])
     reqd
+;;
+
+(* The release version in an answer of [health], for a command line that
+   names the server it is about to replace. Any other body is [None]. *)
+let health_version body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error _ -> None
+  | `Assoc fields ->
+    (match
+       ( List.assoc_opt health_server_field fields
+       , List.assoc_opt health_account_mode_field fields
+       , List.assoc_opt health_version_field fields )
+     with
+     | Some (`String server), Some (`String mode), Some (`String version)
+       when String.equal server health_server_name && String.equal mode health_account_mode ->
+       Some version
+     | _ -> None)
+  | _ -> None
 ;;
 
 (* The listener answers. Nothing of the process or of the host. *)
@@ -152,7 +179,7 @@ let serve ~sw ~clock ~http_mode ~(config : Http.config) ~socket ~https_listener 
       ~h2_error_handler
 ;;
 
-let run ~sw ~env ~address ~port ?on_ready multi_account =
+let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
   let clock = Eio.Stdenv.clock env in
   let net = Eio.Stdenv.net env in
   let base_path = M.multi_account_base_path multi_account in
@@ -181,13 +208,6 @@ let run ~sw ~env ~address ~port ?on_ready multi_account =
       (fun reason -> Listener_not_bound { host = config.host; port = config.port; reason })
       (Server_bootstrap_http.listen_socket_result ~sw ~net ~address config)
   in
-  let* () =
-    Result.map_error
-      (fun error -> Access_not_published error)
-      (Runtime_account_access.publish
-         (Runtime_account_access.Multi_account
-            { zone; base_path; now = (fun () -> Eio.Time.now clock) }))
-  in
   let https_listener =
     Server_bootstrap_http.listen_https_socket ~sw ~net ~address ~config https
   in
@@ -206,6 +226,29 @@ let run ~sw ~env ~address ~port ?on_ready multi_account =
          ~bind_port:config.port
          ~https_port
          ~explicit_base_url:(Env_config_core.masc_http_base_url_opt ()))
+  in
+  (* The host reads the port of this server from the kernel
+     ([Server_startup_takeover.announce_account_server]). The probes say
+     nothing of the workspace, so [masc restart] stops only an owner that
+     announces the port it was asked about, and takes a replacement for
+     ready only once it announces. A server that cannot announce could not
+     be replaced by a command, so its boot stops.
+
+     It comes after every check that can stop a boot: a command that reads
+     the announcement reads a server that goes on to serve. The one step
+     after it that can refuse is the publication, which refuses a process
+     that published before, and a boot publishes once. *)
+  let* () =
+    Result.map_error
+      (fun rejection -> Port_not_announced rejection)
+      (Server_startup_takeover.announce_account_server lease ~port:config.port)
+  in
+  let* () =
+    Result.map_error
+      (fun error -> Access_not_published error)
+      (Runtime_account_access.publish
+         (Runtime_account_access.Multi_account
+            { zone; base_path; now = (fun () -> Eio.Time.now clock) }))
   in
   (* Nothing below refuses: a boot that stops records no port and leaves no
      fiber behind. *)

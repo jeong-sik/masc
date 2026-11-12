@@ -307,6 +307,7 @@ let refusal_label : Server_accounts.refusal -> string = function
   | Server_accounts.Https_listener_refused _ -> "HTTPS listener refused"
   | Server_accounts.Listener_not_bound { host; port = _; reason = _ } ->
     "listener not bound on " ^ host
+  | Server_accounts.Port_not_announced _ -> "port not announced"
   | Server_accounts.Access_not_published _ -> "access not published"
   | Server_accounts.Trust_policy_refused _ -> "trust policy refused"
 ;;
@@ -317,12 +318,36 @@ exception Still_serving
    the case that serves can still publish it. A boot that does not stop
    serves until its switch is cancelled, so the wait for the refusal has an
    end: the exception cancels the switch and what the server forked on it. *)
-let boot_outcome env ~port multi_account =
+(* The directory of the owner lease of an installation, beside its base. *)
+let owner_dir multi_account =
+  Filename.concat (Filename.dirname (Read.multi_account_base_path multi_account)) "owner"
+;;
+
+(* The account server announces its port under the BasePath lease, which the
+   process of [masc start] holds when it boots one. *)
+let with_lease multi_account f =
+  let run_dir = owner_dir multi_account in
+  if not (Sys.file_exists run_dir) then Unix.mkdir run_dir 0o700;
+  match
+    Server_startup_takeover.acquire_base_path_lock
+      ~run_dir
+      (Read.multi_account_base_path multi_account)
+  with
+  | Server_startup_takeover.Base_path_acquired lease ->
+    Fun.protect
+      ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+      (fun () -> f lease)
+  | Server_startup_takeover.Base_path_already_owned _
+  | Server_startup_takeover.Base_path_rejected _ ->
+    Alcotest.fail "the lease of the installation was not acquired"
+;;
+
+let boot_outcome_under lease env ~port multi_account =
   match
     Eio.Switch.run (fun sw ->
       Eio.Fiber.first
         (fun () ->
-          match Server_accounts.run ~sw ~env ~address:loopback ~port multi_account with
+          match Server_accounts.run ~sw ~env ~address:loopback ~port ~lease multi_account with
           | Ok () -> "returned"
           | Error refusal -> refusal_label refusal)
         (fun () ->
@@ -331,6 +356,10 @@ let boot_outcome env ~port multi_account =
   with
   | outcome -> outcome
   | exception Still_serving -> "still serving"
+;;
+
+let boot_outcome env ~port multi_account =
+  with_lease multi_account @@ fun lease -> boot_outcome_under lease env ~port multi_account
 ;;
 
 (* The judgment read a store that matched the log. A store that is gone when
@@ -423,6 +452,55 @@ let test_stops_when_the_port_is_taken () =
         Alcotest.(check (option int)) "no port is recorded" None (recorded_port ~base)))
 ;;
 
+(* The file the announcement lock is taken on is a directory, so the port
+   that bound cannot be announced. The boot stops before the access of the
+   process is published. *)
+let test_stops_when_the_port_cannot_be_announced () =
+  with_installation (fun env { base; config = _; store = _; multi_account } ->
+    let run_dir = owner_dir multi_account in
+    Unix.mkdir run_dir 0o700;
+    Unix.mkdir
+      (Server_startup_takeover.For_testing.lease_path
+         ~run_dir:(Unix.realpath run_dir)
+         ~canonical_base_path:(Unix.realpath base)
+       ^ ".account-server")
+      0o700;
+    Alcotest.(check string)
+      "the boot whose port cannot be announced"
+      "port not announced"
+      (boot_outcome env ~port:(free_port ()) multi_account);
+    Alcotest.(check (option int)) "no port is recorded" None (recorded_port ~base))
+;;
+
+(* The base URL of the process names no HTTP(S) identity, so the trust policy
+   is refused after the port bound. The boot stops before it announces: a
+   command that reads the announcement reads a server that goes on to serve.
+   The kernel is asked while the lease is still held, because the release of
+   the lease withdraws an announcement. *)
+let test_stops_before_it_announces_when_the_trust_policy_refuses () =
+  with_installation (fun env { base; config = _; store = _; multi_account } ->
+    Unix.putenv "MASC_HTTP_BASE_URL" "ftp://127.0.0.1";
+    let port = free_port () in
+    with_lease multi_account
+    @@ fun lease ->
+    Alcotest.(check string)
+      "the boot under a base URL that names no HTTP identity"
+      "trust policy refused"
+      (boot_outcome_under lease env ~port multi_account);
+    (match
+       Server_startup_takeover.account_server_port_holder
+         ~run_dir:(owner_dir multi_account)
+         ~base_path:base
+         ~port
+     with
+     | Ok None -> ()
+     | Ok (Some pid) ->
+       Alcotest.failf "pid %d holds the announcement of the port of a boot that stopped" pid
+     | Error rejection ->
+       Alcotest.fail (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
+    Alcotest.(check (option int)) "no port is recorded" None (recorded_port ~base))
+;;
+
 let json_of label body =
   match Yojson.Safe.from_string body with
   | json -> json
@@ -433,6 +511,8 @@ let test_serves_its_table_alone () =
   with_installation (fun env { base; config = _; store = _; multi_account } ->
     let port = free_port () in
     let net = Eio.Stdenv.net env in
+    with_lease multi_account
+    @@ fun lease ->
     let serve sw =
       let ready, set_ready = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
@@ -442,6 +522,7 @@ let test_serves_its_table_alone () =
             ~env
             ~address:loopback
             ~port
+            ~lease
             ~on_ready:(Eio.Promise.resolve set_ready)
             multi_account
         with
@@ -452,6 +533,12 @@ let test_serves_its_table_alone () =
       Alcotest.(check int) "GET /health" 200 status;
       (match json_of "GET /health" body with
        | `Assoc fields ->
+         Alcotest.(check (option string))
+           "the version a command line reads from the health answer"
+           (match List.assoc_opt "version" fields with
+            | Some (`String version) -> Some version
+            | Some _ | None -> None)
+           (Server_accounts.health_version body);
          Alcotest.(check (option string))
            "the account mode of the health answer"
            (Some "Multi_account")
@@ -511,6 +598,20 @@ let test_serves_its_table_alone () =
         "a Host that is not the listener"
         400
         (fst (request ~net ~port ~host:"example.com" ~meth:"GET" Server_health_paths.health));
+      (* The host reads the port from the kernel while the server holds the
+         lease. This process is the holder, so it is answered from its own
+         table; the read through the kernel is a case of the takeover suite. *)
+      (match
+         Server_startup_takeover.account_server_announcement
+           ~run_dir:(owner_dir multi_account)
+           ~base_path:base
+       with
+       | Ok (Some { Server_startup_takeover.pid; port = announced }) ->
+         Alcotest.(check int) "the port that is announced" port announced;
+         Alcotest.(check int) "the process that announces it" (Unix.getpid ()) pid
+       | Ok None -> Alcotest.fail "the server announced no port"
+       | Error rejection ->
+         Alcotest.fail (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       (* The CLI of the workspace finds the port without being told. *)
       Alcotest.(check (option int)) "the port the workspace records" (Some port) (recorded_port ~base);
       raise Served
@@ -540,6 +641,14 @@ let () =
             `Quick
             test_stops_when_the_accounts_were_turned_off
         ; Alcotest.test_case "the boot stops when the port is taken" `Quick test_stops_when_the_port_is_taken
+        ; Alcotest.test_case
+            "the boot stops when the port cannot be announced"
+            `Quick
+            test_stops_when_the_port_cannot_be_announced
+        ; Alcotest.test_case
+            "the boot stops before it announces when the trust policy refuses"
+            `Quick
+            test_stops_before_it_announces_when_the_trust_policy_refuses
         ; Alcotest.test_case "it serves its table alone" `Quick test_serves_its_table_alone
         ] )
     ]

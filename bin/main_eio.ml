@@ -559,7 +559,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
   let judged =
     match
       Eio_main.run (fun _env ->
-        Server_runtime_bootstrap.judge ~base_path:canonical_base_path)
+        Server_runtime_bootstrap.judge ~lease:base_path_lease ~base_path:canonical_base_path)
     with
     | Ok judged -> judged
     | Error refusal ->

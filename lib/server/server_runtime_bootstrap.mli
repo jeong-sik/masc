@@ -280,10 +280,13 @@ val start_post_ready_owner_lanes :
     one kind of server ran: the auth settings of the environment, and the
     account mode with the base path it was read from
     ({!Authz_boot_mode_read.boot}). Only {!judge} makes one and {!run} takes
-    one, so a boot that skips the judgment does not compile. *)
+    one, so a boot that skips the judgment does not compile. It keeps the
+    lease the judgment was made under: what runs on the base path works under
+    that lease. *)
 type judged = private
   { auth_config : Server_auth_config.t
   ; booted : Authz_boot_mode_read.booted
+  ; lease : Server_startup_takeover.base_path_lease
   }
 
 (** Why a boot does not go on. *)
@@ -295,19 +298,24 @@ type judge_refusal =
 val judge_refusal_to_string : judge_refusal -> string
 
 (** Reads the auth settings of the environment and judges the account mode of
-    [base_path]. The caller holds the BasePath lease and calls this once per
-    boot, inside an Eio event loop ({!Authz_boot_mode_read.boot}), before the
-    startup work of a single user and before {!run}. It starts nothing and
-    writes nothing but what opening the authorization log and the external
-    store writes ({!Authz_boot_mode_read}). *)
-val judge : base_path:string -> (judged, judge_refusal) result
+    [base_path]. [lease] is the BasePath lease of [base_path], which the
+    caller took. The caller calls this once per boot, inside an Eio event
+    loop ({!Authz_boot_mode_read.boot}), before the startup work of a single
+    user and before {!run}. It starts nothing and writes nothing but what
+    opening the authorization log and the external store writes
+    ({!Authz_boot_mode_read}). *)
+val judge
+  :  lease:Server_startup_takeover.base_path_lease
+  -> base_path:string
+  -> (judged, judge_refusal) result
 
 (** Runs what [judged] names. A single user gets the owner state and the
     routes of [make_routes]. An active multi-account installation gets
     {!Server_accounts.run} on the same [address] and [port], with its own
     route table: no owner state, no Keeper and no route of [make_routes] is
     started for it, and [runtime_sw], [accept_store_quarantine] and the
-    handler makers are not used. An account server that does not start
+    handler makers are not used. The account server announces its port to
+    the host under the lease of [judged]. An account server that does not start
     raises [Env_config_core.Config_error]. Either runs on the base path that
     [judged] was read from. [input_base_path] is that path as the operator
     typed it, before it was made canonical: the diagnostics of a single user

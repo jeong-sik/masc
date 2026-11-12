@@ -52,8 +52,9 @@ class WorkspaceDatasetSignalTest(unittest.TestCase):
         def opened(server: owed.ChatServer, step: Callable[..., None]) -> None:
             repositories = cast(RepositoriesServer, server)
             repositories.set_phase("open")
-            # Keepers -> Usage -> Board -> Workspace.
-            step("keys", "\t\t\t")
+            # Keepers -> Features & plugins -> Workspace (#50465 took Usage and
+            # Board off the tab ring, so Workspace is two tabs from Keepers).
+            step("keys", "\t\t")
             step(
                 "wait",
                 lambda: repositories.response_count("open", REPOSITORIES_PATH) >= 1,

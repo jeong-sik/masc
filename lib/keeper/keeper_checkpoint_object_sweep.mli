@@ -10,9 +10,9 @@
     [checkpoint_version] is not a root: no load reads it again.
 
     The pass is run only by the server process that holds the BasePath writer
-    lease, after the retained checkpoint sweep and before its scheduler starts
-    or any keeper runs, so nothing reads or writes a session's objects while
-    it runs.
+    lease, after the retained checkpoint sweep and before the scheduler of
+    its server loop starts or any keeper runs, so nothing reads or writes a
+    session's objects while it runs.
 
     Every root is read before anything is removed. A root that cannot be read
     or decoded, an [accepted-checkpoints] entry that is not a directory, a head

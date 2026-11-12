@@ -737,8 +737,9 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 | S1a-2 | 구역을 읽는 곳이 구역의 멈춤을 본다. 로그가 멈췄거나 저장소와 어긋난 구역에서는 세션·PAT 인증과 나머지 읽기가 거절한다. | §5.1, §8.2 | S1a-1 |
 | S1a-2b | 계정 서버가 연 구역을 한 번 더 읽고, 믿을 수 없으면 부팅을 멈춘다. 준비 상태를 probe로 답한다. 표는 검사를 거친 타입으로만 ingress에 간다. 세부는 표 아래 S1a-2b 범위다. | §5.1, §8.2 | S1a-2 |
 | S1a-2b-1 | 구역이 기록하지 못한 사유를 사람에게 답할 때 서버의 파일 경로를 싣지 않는다. 사유는 구역이 로그에 쓴다. 세부는 표 아래 S1a-2b-1 범위다. | §5.1, §8.2 | S1a-2b |
-| S1a-2c | 운영 명령(`masc restart`, `masc setup`, `masc setup-stop-previous-owner`)이 다계정 설치를 알아본다. 계정 서버는 base path lease의 주인으로 알아보고 멈춘다. 부팅 판정을 단일 사용자 정리보다 앞에 둔다. | §5.1 | S1a-2b-1 |
-| S1a-3 | C3의 로그인 경로와 사람의 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. login client는 서버 설정에서 읽는다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-2c, F3a-3 |
+| S1a-2c | 부팅이 계정 mode를 단일 사용자의 시작 정리보다 먼저 판정한다. 다계정 설치의 부팅과 거절된 부팅은 단일 사용자의 Keeper 상태를 정리하는 코드를 지나지 않는다. 세부는 표 아래 S1a-2c 범위다. | §5.1 | S1a-2b-1 |
+| S1a-2d | 운영 명령(`masc restart`, `masc setup`, `masc setup-stop-previous-owner`)이 다계정 설치를 알아본다. 계정 서버는 base path lease의 주인으로 알아보고 멈춘다. | §5.1 | S1a-2c |
+| S1a-3 | C3의 로그인 경로와 사람의 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. login client는 서버 설정에서 읽는다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-2d, F3a-3 |
 | S1b | 사람에게 MCP·Board·WebSocket 경로를 연다. | §11.1 | S1a-3, C4-11, C4-12, C6 |
 
 - S1이 D4 뒤인 까닭: 계정 층 없이 다계정 설치를 서빙하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙한다. 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 다계정 설치를 서빙하면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
@@ -817,7 +818,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - listener 오류 처리기가 예외 글을 본문에 싣는 것. 두 서버가 같이 쓰는 코드이고, HTTP/2 쪽은 `test_h2_response_window`가 그 글의 길이에 기댄다. 계정 서버는 handler 예외에 고정 문구를 답하므로, 남는 길은 입장 단계에서 난 예외다. 이슈 #50613에 적었고, S1a-3 전에 정한다.
   - 연결 수 상한과 첫 바이트 제한 시간(#51096).
   - `Boot_multi_account`가 저장소 경로를 싣게 하는 일. 판정표가 파일 값을 알게 된다. 표가 내지 않는 짝(`Multi_account`인데 저장소를 못 읽음)은 부팅 거절로 남는다.
-  - 운영 명령과 부팅 순서(S1a-2c).
+  - 부팅 순서(S1a-2c)와 운영 명령(S1a-2d).
   - 받기 고리와 포트 기록을 한 벌로 합치는 일. `Server_accounts`의 `serve`·`record_port`는 단일 사용자 부팅의 `run_serving`과 같은 줄이다. 단일 사용자 쪽은 HTTP 서빙을 다른 도메인으로 옮기는 작업이 고치는 중이라 지금 합치지 않는다. 연결 수 상한(#51096)을 넣을 때 한 함수로 합친다.
   - 설정만으로 아는 trust policy 거절(`MASC_HTTP_BASE_URL`의 형식)을 포트를 묶기 전에 보는 일.
 
@@ -840,6 +841,37 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 하지 않는 것.
   - 문장의 타입을 둘로 나눠 응답 본문이 `error_detail`을 못 받게 하는 일. 지금은 기본값이 안전한 쪽이고(`error_to_string`), 전체 사유는 이름을 골라 불러야 받는다.
   - `Login_allowlist_routes.error_status`가 `cause`를 쓰게 하는 일. 상태 코드는 셋으로 갈린다. 거절은 사유별이고, 만들 수 없는 레코드는 500이고, 실패는 503이다. 둘로 가르는 `cause`를 쓰면 나머지를 한 갈래로 묶는 `match`가 생긴다. 지금은 생성자를 모두 적는다. 생성자가 늘면 컴파일러가 두 곳에서 묻는다.
+
+**S1a-2c 범위**
+
+- 고치는 것. 서버 부팅(`masc start`)은 base path lease를 쥔 뒤 단일 사용자의 시작 정리를 먼저 돌리고, 그 뒤 서버 loop 안에서 계정 mode를 판정했다. 시작 정리는 넷이다. 보존 checkpoint 정리, checkpoint object 정리, 원본 요청 본문 목록, settled archive 정리다. 셋은 단일 사용자의 Keeper 상태에서 파일을 지우고, 원본 요청 본문 목록은 세기만 한다. 다계정 설치의 부팅과 거절된 부팅도 그 코드를 지났다.
+  - 고치기 전 측정(2026-11-10 23:37Z, 트리 `67f56fb30a53`, 임시 설치): 다계정 부팅과 외부 저장소가 옮겨진 부팅 둘 다 `[Startup]` 정리 줄 넷이 판정보다 먼저 찍혔다. 거절된 부팅은 그 뒤에 줄 넷을 더 찍었다. FATAL, "the server stopped with an exception", "Unhandled exception", backtrace다.
+- 순서. lease, 로그 파일 sink, 판정, 콘솔 mirror, 시작 정리(단일 사용자일 때만), 서버 순이다. 판정은 `Server_runtime_bootstrap.judge`다. auth 환경 설정(`Server_auth_config`)을 읽고 `Authz_boot_mode_read.boot`를 부른다. 한 부팅에 한 번 부른다.
+- 판정은 자기 event loop 하나에서 돈다. `Authz_boot_mode_read.boot`의 인터페이스가 event loop 안에서 부르라고 적는다. 그 loop는 시작 정리와 서버의 loop보다 먼저 끝난다. 판정 결과는 값뿐이다. base path, 꺼진 계정의 상태, 저장소 경로다. 열어 둔 파일이나 잠금을 서버 loop로 넘기지 않는다.
+  - 택하지 않은 길: 시작 정리를 서버 loop 안으로 옮기기. 정리 넷은 loop 밖에서 도는 코드다. 옮기면 지금 돌고 있는 단일 사용자 서버의 부팅 경로가 바뀐다.
+- 타입 둘이 순서를 지킨다.
+  - `judge`만 `judged`를 만든다(`private`). `run`은 `judged`를 받고 서버가 뜰 base path를 따로 받지 않는다. 판정을 건너뛴 부팅은 컴파일되지 않는다. 판정이 읽은 것과 다른 base path로 서버를 띄울 수도 없다. `?input_base_path`는 운영자가 친 경로 그대로다. 단일 사용자의 진단 정보에만 쓰고 아무것도 열지 않는다. 계정 서버는 쓰지 않는다.
+  - 시작 정리(`sweep_single_user_state`)도 `judged`를 받고 그 안의 base path를 읽는다. 판정 전에는 넘길 값이 없고, 다른 base path를 넘길 수도 없다. 다계정 판정이면 아무것도 하지 않는다. 단일 사용자 판정값(`Authz_boot_mode_read.single_user`)을 받지 않는 까닭이 있다. host 도구용 판정(`Authz_boot_mode_read.tool`)도 그 값을 만든다.
+- 거절. 판정이 멈추면 `[FATAL]` 한 줄을 쓰고 exit 1로 끝난다. 서버 loop에 들어가지 않는다. auth 환경 설정의 형식 오류(`MASC_ALLOW_ANONYMOUS_MUTATIONS`, `MASC_HTTP_DEV_MUTATION_ORIGINS`)도 같은 자리에서 한 줄로 멈춘다. 전에는 둘 다 서버 loop 안에서 예외로 나왔다.
+  - 판정이 예외를 내도 `[FATAL]` 줄(예외 글과 backtrace)을 쓰고 exit 1로 끝난다. 서버 loop 안에서 판정하던 때와 같은 결과다. 잡지 않으면 명령줄 파서가 예외를 받아 stderr에 찍고 exit 125로 끝나며 로그에는 남지 않는다.
+- Antigravity panelist의 임시 HOME 정리(`sweep_stale_antigravity_panel_roots`)는 옮기지 않았다. 전처럼 서버 loop 안에서 돌고 두 서버가 다 돌린다. 그 HOME은 base path 밖 호스트 임시 폴더에 있고, 죽은 프로세스가 남긴 OAuth 파일 사본을 담는다. 어느 서버가 뜨든 지워야 한다. 달라진 점은 하나다. 거절된 부팅은 서버 loop에 들어가지 않아서 이 정리를 돌리지 않는다. 다음에 뜨는 서버가 지운다.
+- 판정보다 먼저 도는 것은 두 서버가 같이 쓴다. base path 만들기, lease, runtime events 준비, build identity, 로그 파일 sink, 오래된 로그 파일 정리다. 거절된 부팅이 새 base path에 남기는 파일은 둘이다. lease 파일과 그날의 로그 파일이다. 폴더는 `.masc/logs`, `.masc/runtime/events`, `.masc-owner/masc-base-path-leases-v1-<uid>`가 생긴다.
+- 신호. SIGTERM·SIGINT 처리기는 서버 loop 안에서 단다. 판정과 시작 정리 동안 온 신호는 기본 동작으로 프로세스를 끝낸다. 시작 정리 동안은 전에도 그랬다. 판정 동안은 이 층에서 새로 그렇다. 전에는 판정이 처리기를 단 뒤에 돌았다. 판정이 쓰는 것은 `open_at_start`가 쓰는 둘뿐이다. 끝나지 않은 마지막 줄을 자르고, 로그와 저장소 옆에 lock 파일을 둔다.
+- 할당 샘플러(`Alloc_profile`)는 자리를 그대로 뒀다. 시작 정리 뒤, 서버 loop 앞이다. 판정이 그 앞으로 갔으니 판정의 할당은 표에 없다. 서버가 계속 쥐는 판정값도 live 표에 나오지 않는다. 샘플러를 판정 앞으로 올리지 않은 까닭이 있다. 올리면 시작 정리의 할당이 단일 사용자 서버의 누적 표에 새로 섞인다. 계정 서버에는 그 표를 읽는 경로(`/api/v1/diagnostics/memprof`)가 아직 없다.
+- stdio runtime(`bin/main_stdio_eio.ml`)은 이미 lease 바로 뒤에 판정한다. 바꾸지 않았다.
+- 확인(실제 바이너리, 임시 폴더, 비운 환경, 2026-11-11 03:17~03:23Z, OCaml 5.5.2, 시험 묶음을 같이 돌려 부하가 있는 실행).
+  - 다계정 설치: `[Startup]` 줄 0, probe 셋 200, `/api/v1/status` 404, SIGTERM 뒤 exit 0. 심어 둔 낡은 panelist HOME이 지워진다.
+  - 외부 저장소가 옮겨진 부팅 40번: 모두 exit 1, 정리 줄 0, 콘솔에 FATAL 한 줄, 예외와 backtrace 줄 0이다. 설치의 파일 목록이 그대로다. 다시 심은 낡은 panelist HOME도 그대로다.
+  - 거절 넷 더: auth 환경 설정이 boolean이 아닌 부팅(다계정 설치와 새 base path), bootstrap 전에 `Multi_account`를 청한 부팅, Off 뒤에 `Multi_account`를 청한 부팅. 모두 exit 1, 정리 줄 0, 콘솔에 FATAL 한 줄이다.
+  - 판정이 예외를 낸 부팅: 연 파일 수 한도를 6과 7로 낮추면 판정의 event loop가 pipe를 못 만든다(`EMFILE`). 둘 다 `[FATAL]` 두 줄(예외 글, backtrace)을 쓰고 exit 1로 끝났다. 한도 5에서는 판정보다 앞선 로그 파일 sink가 같은 예외를 내고, 명령줄 파서가 받아 exit 125로 끝났다. 이 층이 고치지 않은 자리다.
+  - 새 base path의 단일 사용자: 정리 줄 넷(경고 줄 0), `/health`·`/health/ready`·`/api/v1/status` 200이다. 낡은 panelist HOME이 지워진다. SIGTERM 뒤 exit 0이다.
+  - `masc auth off` 뒤 `account_mode`를 뺀 설치: 단일 사용자로 뜨고 정리 줄 넷이다.
+- 시험. 이 층의 새 시험은 없다. `judge`의 단위 시험도 없다. 순서는 `bin/main_eio.ml`의 `run_cmd`가 정하고, 그 함수는 프로세스 하나를 통째로 쓴다(lease, exec, 로그 sink, exit). 순서는 위 두 타입이 지키고, 실제 순서는 실제 바이너리로 봤다. `judge`가 부르는 `Authz_boot_mode_read.boot`에는 시험이 있다(`test_authz_boot_mode_read`).
+- 콘솔. 콘솔 mirror(`Console_sink`)는 시작한 뒤부터 다른 thread가 줄을 쓰고, 프로세스가 끝날 때 남은 줄을 마저 쓰지 않는다. 그래서 mirror를 판정 뒤에 시작한다. 그때까지는 줄을 부른 쪽이 바로 쓴다. 거절 줄은 프로세스가 끝나기 전에 콘솔에 있다.
+  - mirror를 판정 앞에서 시작한 트리로 재면 거절된 부팅 24번 중 3번이 콘솔에 줄을 못 썼다(2026-11-11 02:35~02:37Z, 같은 부하 조건). 로그 파일에는 24번 다 있었다. 부하가 없던 실행(01:28~01:30Z)에서는 24번 다 콘솔에 있었다.
+  - 옮긴 뒤에는 같은 부하 조건에서 거절된 부팅 44번이 모두 콘솔에 줄을 썼다.
+- 남는 한계. 서버 loop 안의 `[FATAL]` 자리들은 mirror를 지나므로 같은 유실이 날 수 있다. 계정 서버가 뜨지 못한 때의 줄이 그렇다. 로그 파일에는 exit 때 남은 줄을 마저 쓴다(`at_exit`).
+- 하지 않는 것: 운영 명령(S1a-2d), 판정보다 먼저 도는 로그 파일 정리를 옮기는 일, 시작 정리 넷을 `bin` 밖으로 옮기는 일, 신호 처리기와 샘플러를 판정 앞으로 옮기는 일.
 
 ### E. official client 격리
 

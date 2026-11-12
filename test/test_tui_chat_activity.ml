@@ -248,6 +248,7 @@ let test_priority_control_receipt_ordering () =
 
 let test_compact_progress_follows_working_execution () =
   let state = state () in
+  state.ui_language <- Tui.Lang_en;
   state.msg_tool_visibility <- Tui.Tools_compact;
   let active = inflight ~request_id:"active-execution" ~at:1. () in
   Tui.turn_log_add ~now:2. active.log ~seq:(Some 0) Live.Run_started;

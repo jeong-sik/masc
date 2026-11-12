@@ -56,7 +56,11 @@ presentation = '''{
 ```
 
 Reading paths address fields in a row, in declared display order. `lane_id` is
-package-local; the host resolves it within the owning instance. Supported formats
+package-local; the host resolves it within the owning instance. The same order
+places the lanes: the TUI Results view opens on the lane the first reading
+names, and Left/Right move in the order readings first name lanes. Lanes no
+reading names follow, by name. Reordering readings therefore changes which lane
+Results opens on. Supported formats
 are `text`, `number`, `boolean`, and `json`. Missing or wrongly typed values are
 shown as unavailable, never zero or success. Original fields and evidence remain
 available in technical detail. Display metadata grants no action authority.

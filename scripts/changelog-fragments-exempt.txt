@@ -38,3 +38,5 @@
 51502  # behavior-preserving refactor: the MCP admission check moves into one stateless function with the same check order and error text; no user-facing behavior
 51514  # comments only (three files): no code line changes; no user-facing behavior
 51671  # test only (one file): bounds a Librarian gate confirmation check; no user-facing behavior
+51305  # already published in the v0.72.0 notes (Internal, keeper_cleanup envelope); fragment dropped to avoid a double entry
+51306  # already published in the v0.72.0 notes (Added, TUI storage pane); fragment dropped to avoid a double entry

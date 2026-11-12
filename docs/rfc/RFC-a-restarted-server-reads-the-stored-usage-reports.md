@@ -18,7 +18,7 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 계정이 다시 보고할 때까지 runtime 목록은 그 계정을 「시작 뒤 보고 없음」으로 보여 준다.
 그런데 같은 보고는 이미 디스크에 날짜별로 남아 있다(`provider_usage_history`).
 
-규칙은 하나다. **서버는 시작할 때 저장된 보고 중 계정마다 가장 최근 것을 읽어 표에 올린다.**
+규칙은 하나다. **서버는 시작할 때 저장된 보고에서 계정의 창마다 가장 최근 값을 읽어 표에 올린다.**
 
 - 올린 값은 원래 관측 시각을 그대로 갖는다. 화면은 그 시각을 보여 준다.
 - 보고가 「창이 다 찼고 풀리는 시각이 아직 앞에 있다」고 하면, 살아 있는 보고와 똑같이 그 계정을 그 시각까지 쉬게 한다.
@@ -41,12 +41,14 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 같은 시각 다른 Claude Code 계정 셋(`8d7c2775`, `ac22c1f2`, `8ad4ff55`)도 저장 기록에 `seven_day` 100%·풀리는 시각 앞이 있었다.
 이 셋은 재시작 2~4분 뒤에 다시 보고가 왔다.
 
-셈 범위: `provider_usage_history/2026-10/*`, `2026-11/*` 의 창 행 중 `observed_at` 이 재시작 시각보다 앞인 것. 계정마다 창 종류별 최신 행을 봤다.
+셈 범위: `provider_usage_history/2026-10/*`, `2026-11/*` 의 창 행 중 `observed_at` 이 재시작 시각보다 앞인 것. 계정·source·창 종류마다 최신 행을 봤다.
+셈 스크립트와 결과: `docs/evidence/2026-11-12-usage-reports-at-restart/`.
 
 ### 1.2 코드
 
 - `Runtime_provider_usage_window.record` 가 보고를 메모리 표에 올리고, 관측자(`set_record_observer`)를 부른다.
-- `Server_provider_usage_history.install` 이 그 관측자로 보고를 `Dated_jsonl` 날짜 파일에 덧붙인다. 한 줄에 `scope_id`, `source`, `kind`, `observed_at`, `resets_at`, `unit`, `value` 가 있다.
+- `Server_provider_usage_history.install` 이 그 관측자로 보고를 `Dated_jsonl` 날짜 파일에 덧붙인다. 한 줄은 보고 하나이고, 창마다 행이 하나씩 든다. 행에 `scope_id`, `source`, `kind`, `observed_at`, `resets_at`, `unit`, `value` 가 있다. 한 보고의 행들은 `observed_at` 이 같다. 창을 다 실은 보고는 `complete_snapshot` 행을 앞에 둔다.
+- 한 계정의 창들은 서로 다른 때에 보고된다. 1.1 의 `e664f266` 은 `seven_day` 가 8.4시간 전, `five_hour` 가 67.3시간 전 값이었다.
 - `Runtime_provider_usage_window.rest_scope` 가 보고에서 「찼고 풀리는 시각이 있다」를 읽으면 `Runtime_quota_window.note_exhausted` 를 부른다.
 - 표 둘 다 프로세스 메모리다. `runtime_quota_window.mli` 는 「a restart forgets it and the next refusal teaches it again」이라고 적는다.
 - `/api/v1/runtime/resolved` 는 `provider_usage_windows_since`(프로세스 시작 시각)와 계정별 `state` 를 낸다. 시작 뒤 보고가 없으면 `not_reported_since_start` 다.
@@ -55,9 +57,9 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 
 ## 2. 규칙
 
-- **R1** `install` 은 관측자를 달기 전에 저장 기록을 읽는다. 지금 설정에 있는 quota scope 마다, `scope_id` 가 같은 보고 중 `observed_at` 이 가장 늦은 것을 고른다. 범위는 `read` 가 이미 접는 14일이다.
-- **R2** 고른 보고를 원래 `observed_at` 으로 메모리 표에 올린다. 이때 관측자는 부르지 않는다(같은 보고를 다시 저장하지 않는다).
-- **R3** 올린 보고에 `rest_scope` 를 지금 시각으로 적용한다. `Spent_until t` 이고 `t` 가 앞이면 `note_exhausted` 다. 살아 있는 보고가 타는 것과 같은 함수다.
+- **R1** `install` 은 관측자를 달기 전에 저장 기록을 읽는다. 지금 설정에 있는 quota scope 마다, `scope_id` 가 같은 행을 source 와 창 종류(`kind`, `limit_id`)별로 나누고 각각 `observed_at` 이 가장 늦은 행을 고른다. 계정 하나에서 가장 늦은 행 하나를 고르지 않는다: 자주 보고되는 창이 오래된 소진 창을 가린다. 더 늦은 `complete_snapshot` 보고가 싣지 않은 창은 고르지 않는다(`read` 가 하루치를 접는 규칙과 같다). 범위는 `read` 가 이미 접는 14일이다.
+- **R2** 고른 행들을 각자의 원래 `observed_at` 으로 메모리 표에 올린다. 이때 관측자는 부르지 않는다(같은 보고를 다시 저장하지 않는다).
+- **R3** 올린 창 전체에 `rest_scope` 를 지금 시각으로 적용한다. `Spent_until t` 이고 `t` 가 앞이면 `note_exhausted` 다. 살아 있는 보고가 타는 것과 같은 함수다.
 - **R4** `Spent_without_reset` 은 `note_read_without_reset` 을 부르지 않는다. 그 쉼은 「관측한 순간부터 상한까지」인데, 관측한 순간이 재시작 전이다. 재시작 뒤에 그 길이를 다시 재면 masc 가 고른 시각으로 계정을 막게 된다.
 - **R5** 풀리는 시각이 이미 지난 창도 표에는 올린다. 쉬게 하지는 않는다. 화면은 관측 시각으로 오래된 값임을 보여 준다.
 - **R6** 계정 `state` 에 「저장 기록에서 읽음」을 더한다(`reported` · `not_reported_since_start` 옆의 세 번째 값). 시작 뒤 첫 보고가 오면 `reported` 가 된다. `provider_usage_windows_since` 의 뜻은 그대로다.
@@ -68,6 +70,7 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 - **거절만 있고 보고가 없는 한도.** API provider 의 402·HardQuota 가 말한 풀리는 시각은 사용량 보고가 아니라서 저장 기록에 없다. 재시작하면 지금처럼 잊는다. 이것까지 남기려면 거절을 저장하는 새 기록이 필요하고, 이 RFC 범위 밖이다.
 - **한 번도 보고한 적 없는 계정.** 1.1 의 시각에 다섯 계정(`mistral`, `claude`, `claude_vincent`, `opencode_go`, `tinker`)은 저장 기록이 0건이었다. 사용량을 묻는 경로가 없는 provider 다.
 - **인증 거절.** 스택 #51460 이 행에 따로 싣는다. 재시작하면 잊는다.
+- **14일 넘게 보고가 없던 창.** R1 의 범위 밖이라 올라오지 않는다. 지금 저장 기록의 창 종류는 `five_hour`, `seven_day`, provider 가 이름 붙인 창(`provider:…`) 여섯 가지, `duration_0m` 이다(`2026-10`·`2026-11` 전체를 셈). 풀리는 시각이 14일보다 먼 창이 있는지는 세지 않았다.
 - **턴 없이 Claude Code 사용량 묻기.** `runtime_provider_usage_read.mli` 는 Claude Code 가 모델 턴 중에만 보고한다고 적는다.
 
 ## 4. 대가
@@ -79,11 +82,11 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 ## 5. 저장소 주인이 정할 것
 
 1. R4: 풀리는 시각 없는 「찼다」를 재시작 뒤에 쉬게 하지 않는다. 대가는 그 계정이 재시작 뒤 한 번 더 거절당하는 것이다.
-2. R6: `state` 에 세 번째 값을 더한다. 더하지 않고 `reported` 로 내면 화면은 관측 시각만으로 구분해야 한다.
+2. R6: `state` 에 세 번째 값을 더한다. 더하지 않고 `reported` 로 내면 화면은 관측 시각만으로 구분해야 한다. 더하면 TUI·Dashboard 디코더의 닫힌 합타입이 같은 층에서 바뀐다. 옛 TUI 는 모르는 `state` 를 받으면 디코드를 실패시킨다(strict_parse_no_default). 서버를 먼저 올리면 옛 TUI 의 사용량 표가 다시 띄울 때까지 읽히지 않는다.
 3. 3절 첫 항목(거절만 있는 한도)을 따로 RFC 로 다룰지.
 
 ## 6. 구현 순서
 
-1. `Server_provider_usage_history`: 접힌 14일 결과에서 scope 별 최신 보고를 꺼내는 읽기. 시험: 날짜 파일 둘을 쓴 뒤 서버 상태를 새로 만들어 표와 한도 표를 읽는다.
+1. `Server_provider_usage_history`: 접힌 14일 결과에서 scope 별 최신 보고를 꺼내는 읽기. 시험: 날짜 파일 둘을 쓴 뒤 서버 상태를 새로 만들어 표와 한도 표를 읽는다. 한 계정에 창이 둘이고 더 오래 전에 보고된 창이 소진인 경우를 넣는다.
 2. `Runtime_provider_usage_window`: 관측자를 부르지 않고 올리는 진입점, `state` 의 세 번째 값, `/api/v1/runtime/resolved` 와 TUI·Dashboard 디코더.
 3. 설치 뒤 실측: 서버를 다시 시작하고 1분 안에 `/api/v1/runtime/resolved` 를 읽어, 저장 기록에 「찼고 풀리는 시각 앞」이 있던 계정이 `quota_exhausted: true` 인지 본다.

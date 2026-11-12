@@ -11,10 +11,14 @@ let next_filter = function
   | Actions -> Everything
   | Everything -> Turns
 
-let filter_label = function
-  | Turns -> "turns"
-  | Actions -> "actions"
-  | Everything -> "everything"
+let filter_label ~ko filter =
+  match filter, ko with
+  | Turns, false -> "turns"
+  | Turns, true -> "턴"
+  | Actions, false -> "actions"
+  | Actions, true -> "동작"
+  | Everything, false -> "everything"
+  | Everything, true -> "전체"
 
 (* One feed event as the screen holds it. The arrival time is here rather than
    read back off the event because the screen is a feed: rows are held and

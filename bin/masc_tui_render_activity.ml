@@ -232,16 +232,19 @@ let render_system_logs (state : state) =
   let filter_pieces =
     let level =
       match (system_logs_page state).lp_min_level with
-      | None -> "  level\xe2\x89\xa5DEBUG"
+      | None -> ui_text state ~ko:"  수준\xe2\x89\xa5DEBUG" ~en:"  level\xe2\x89\xa5DEBUG"
       | Some floor ->
-          Printf.sprintf "  level\xe2\x89\xa5%s"
+          Printf.sprintf
+            (if state.ui_language = Lang_ko then "  수준\xe2\x89\xa5%s"
+             else "  level\xe2\x89\xa5%s")
             (String.trim (Masc.Tui_decode.system_log_level_label floor))
     in
     let category =
       match (system_logs_page state).lp_category with
       | None -> []
       | Some category ->
-          [ "  category:" ^ Terminal_text.single_line category ]
+          [ ui_text state ~ko:"  분류:" ~en:"  category:"
+            ^ Terminal_text.single_line category ]
     in
     level :: category
   in
@@ -272,9 +275,14 @@ let render_system_logs (state : state) =
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         activity_heading state ~cols ~on_logs:true
           ~reading:
-            (Printf.sprintf "  (%s of %s)"
-               (Masc_tui_value.Count.grouped total_entries)
-               (Masc_tui_value.Count.grouped snapshot.sys_total)
+            ((if state.ui_language = Lang_ko then
+                Printf.sprintf "  (%s개 중 %s개)"
+                  (Masc_tui_value.Count.grouped snapshot.sys_total)
+                  (Masc_tui_value.Count.grouped total_entries)
+              else
+                Printf.sprintf "  (%s of %s)"
+                  (Masc_tui_value.Count.grouped total_entries)
+                  (Masc_tui_value.Count.grouped snapshot.sys_total))
              :: (match snapshot.sys_latest_seq with
                  | None -> []
                  | Some seq -> [ Printf.sprintf "  seq %d" seq ])
@@ -915,7 +923,7 @@ let render_acting (state : state) =
   let header =
     activity_heading state ~cols ~on_logs:false
       ~reading:
-        (("  " ^ Acting.filter_label state.acting_filter)
+        (("  " ^ Acting.filter_label ~ko:(state.ui_language = Lang_ko) state.acting_filter)
          ::
          (match
             Masc_tui_types.activity_title_reading ~observer:state.observer

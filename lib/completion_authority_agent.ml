@@ -853,6 +853,11 @@ let apply_original_change ~config ~original ~judgment ~authority change =
        | Agent _ | Auth _ | System _ ->
          Error (W.Outcome_unknown {error=failure; detail}))
 
+let owner_load_error_detail = function
+  | Verifier_review_owner.Not_found -> "original absent"
+  | Load_store_unavailable detail | Corrupt_original detail -> detail
+;;
+
 let commit_verdict_with_effects ~observe_original ~apply_original
       (config : Workspace_utils_backend_setup.config) (task : Masc_domain.task)
       ~store ~attempt ~installation_id ~package_id
@@ -864,8 +869,7 @@ let commit_verdict_with_effects ~observe_original ~apply_original
   let module AR = Task.Anti_rationalization in
   let operation () =
     let* retained = O.load_retained ~store ~verification_id ~attempt ~installation_id ~package_id
-      |> Result.map_error (function O.Not_found -> "original absent"
-        | Load_store_unavailable d | Corrupt_original d -> d) in
+      |> Result.map_error owner_load_error_detail in
     let original=O.original retained in
     let* judgment = match P.phase (O.progress retained) with
       | P.Judged json -> Ok json
@@ -1059,8 +1063,8 @@ let process_task_once ?(registry=Verification_run_registry.global ())
     match Verifier_review_owner.retained_commits ~store
       ~selection:(Verifier_review_owner.Verification verification_id)
       ~installation_id:host_installation_id ~package_id:host_package_id with
-    | Error _ -> defer_unavailable ~stage:Verification_run_registry.Review_preparation
-        ~detail:"original host judgment inventory unavailable"
+    | Error error -> defer_unavailable ~stage:Verification_run_registry.Review_preparation
+        ~detail:("original host judgment inventory unavailable: " ^ owner_load_error_detail error)
     | Ok pending ->
       match List.find_opt (fun retained ->
         let original=Verifier_review_owner.original retained in

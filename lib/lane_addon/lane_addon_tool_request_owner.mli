@@ -80,8 +80,11 @@ val reload : store:Lane_addon_store.t -> retained -> (retained option, error) re
     is gone (settled or removed). *)
 val load_listed : store:Lane_addon_store.t -> Record.t -> (retained, error) result
 (** Restore one observed record and its complete body using {!load}, then
-    confirm that the record still has the exact discovered identity, summary,
-    digest and progress. Changed or disappeared observations are errors.
+    confirm that the record still has the discovered identity: scope, request
+    ID, binding, tool, digest and summary. Its progress is the record's as
+    read now, which another writer may have advanced since the listing; every
+    write to a record is compare-and-set against what its writer read. A
+    changed identity or a disappeared record is an error.
     Consumers may select known typed subjects before reading their bodies;
     this operation does not turn a partial selection into a complete scope
     inventory or authorize any effect. *)
@@ -99,9 +102,12 @@ val fold_all :
     every original request body in memory simultaneously. Any scope, record or
     body error rejects the whole fold without returning partial results. *)
 val load_scope : store:Lane_addon_store.t -> scope:string -> (retained list, error) result
-(** Discover record identities, then strictly load each unchanged original.
-    Missing or changed observations reject the whole result. Unlike
-    {!discover}, this explicitly reads every request body in the scope. *)
+(** Discover record identities, then strictly load each original whose
+    identity is unchanged ({!load_listed}). A missing record or a changed
+    identity rejects the whole result. Each record's progress is as read when
+    that record was loaded, so the result is not one snapshot of the scope.
+    Unlike {!discover}, this explicitly reads every request body in the
+    scope. *)
 val prepare_successor : store:Lane_addon_store.t -> scope:string -> request_id:string ->
   request:Yojson.Safe.t -> (Lane_addon_request_progress.successor, error) result
 (** Durably stage canonical input before retaining its digest-only successor

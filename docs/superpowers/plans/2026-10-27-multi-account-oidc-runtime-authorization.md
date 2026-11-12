@@ -747,7 +747,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 | S1b-1c | MCP 도구에 내 Keeper의 한 턴을 더한다. | §5.3 | S1b-1b |
 | S1b-1d | 실제 MCP client로 붙여 본 기록과 사용 안내를 남긴다. | §11.1 | S1b-1c |
 | S1b-2 | 사람에게 Board·WebSocket 경로를 연다. 누가 읽고 쓰는지는 설계 절을 먼저 써서 정한다. | §11.1 | S1b-1d, C4-11, C4-12, C6 |
-| S1b-3 | 사람의 Keeper 턴이 앞 대화를 이어받고, 묻고 답한 기록을 그 사람의 폴더에 남긴다. S1b-2보다 먼저 한다(2026-11-12 사용자). 세부는 표 아래 S1b-3 범위다. | §3-11, §4.3 | S1b-1c |
+| S1b-3 | 사람의 Keeper 턴이 앞 대화를 이어받고, 묻고 답한 기록을 그 사람의 폴더에 남긴다. 사람이 자기 대화를 지운다. S1b-2보다 먼저 한다(2026-11-12 사용자). 세부는 표 아래 S1b-3 범위다. | §3-11, §4.3 | S1b-1c |
 
 - S1이 D4 뒤인 까닭: 계정 층 없이 다계정 설치를 서빙하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙한다. 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 다계정 설치를 서빙하면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
 - S1이 F3a 뒤인 까닭: S1부터 다계정 설치는 계정이 가진 Runtime·Keeper 기록을 쌓는다. 그때 "지우고 설치"는 그 기록을 지운다. 끄는 길 없이 켜는 길만 열면 실제 설치가 되돌릴 수 없이 다계정으로 넘어간다(§6 결정 10).
@@ -1201,7 +1201,9 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 
 **S1b-3 범위** (사람의 Keeper가 대화를 이어 간다, 2026-11-12)
 
-- 사용자 결정(2026-11-12): S1b-1 다음 조각은 Board(S1b-2)가 아니라 이것이다. 지금 턴은 앞 대화도 기록도 없는 한 번 묻기다. 그래서 "자기 Keeper를 쓴다"가 되지 않는다.
+- 사용자 결정(2026-11-12).
+  - S1b-1 다음 조각은 Board(S1b-2)가 아니라 이것이다. 지금 턴은 앞 대화도 기록도 없는 한 번 묻기다. 그래서 "자기 Keeper를 쓴다"가 되지 않는다.
+  - 대화 본문은 서버 디스크에 남긴다. 사람이 자기 대화를 지우는 길은 purge(F1)를 기다리지 않고 이 층 바로 뒤에 넣는다(S1b-3c).
 - 확인한 사실(main `90276cab16c1`, Claude Code 문서는 2026-11-12에 읽음).
   - 지금 턴(`Server_preview_keeper_turn.call_claude`)은 임시 폴더를 만들고, 그 안에서 CLI를 한 번 띄우고, 폴더를 지운다. `session_mode`를 넘기지 않아서 턴마다 새 session이다. masc는 로그에도 디스크에도 아무것도 남기지 않는다.
   - Claude Code client(`Runtime_claude_code.run_turn`)는 `?session_mode:(Resume {session_id})`를 받으면 `--resume=<id>`로 띄운다. 답(`turn_result`)에 `session_id`와 `resumed`가 있다. Keeper lane이 이미 쓰는 길이다.
@@ -1214,38 +1216,53 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 정한 것.
   1. 모델이 읽는 앞 대화는 vendor session이 든다. masc는 앞 대화를 prompt에 다시 싣지 않는다. 다시 실으면 길이를 자르는 규칙이 필요한데, 그 규칙은 Keeper lane의 것이고 이 경로에는 없다.
   2. masc는 묻고 답한 것을 따로 기록한다. 사람이 읽는 것은 이 기록이다. vendor의 파일은 읽지 않는다. 형식이 vendor 것이기 때문이다.
-  3. Keeper마다 "지금 대화"가 하나다. 그 Keeper의 마지막 `started` 줄이 지금 대화다. 따로 저장하지 않는다.
+  3. Keeper마다 "지금 대화"가 하나다. 그 Keeper의 마지막 `started` 줄이 지금 대화다. 따로 저장하지 않는다. 그 대화를 지웠으면 지금 대화가 없고, 다음 턴이 새 대화를 시작한다.
   4. 대화는 시작한 구독(ProviderAccount)에 묶인다. session이 그 계정 홈에 있기 때문이다. Keeper의 Runtime이 같은 구독의 다른 모델로 바뀌면 이어 간다. 다른 구독으로 바뀌면 이어가는 턴을 409로 거절하고, 새 대화를 시작하라고 답한다. 말없이 새로 시작하지 않는다.
   5. 새 대화는 사람이 시작한다. 이어가는 턴이 실패해도 masc가 스스로 새 session으로 바꾸지 않는다. session이 지워져서 난 실패인지 가를 수 없기 때문이다.
   6. 기록의 주인은 Keeper의 owner다. 1단계에서는 owner만 자기 Keeper에게 묻는다(설계 §4.3). 그래서 줄마다 initiator를 적지 않는다. 다른 사람이 묻는 길을 여는 층이 D6과 함께 initiator를 더한다(설계 §3-11).
   7. PAT로 기록을 읽으려면 범위에 `manage_own_keeper`와 `read_state`가 다 있어야 한다. 목록만 읽는 PAT가 대화 내용까지 읽지 않게 한다.
 - 저장.
   - 위치는 `<.masc>/accounts/<namespace>/keeper-conversations/`다. 사람의 runtime root 아래라서 계정 홈과 같은 경계에 있다. Off 뒤에도 남고, 단일 사용자는 읽지 않는다.
-  - `record.jsonl`은 덧붙이기만 한다. 줄은 네 가지다.
+  - 대화마다 폴더가 하나다. 폴더 이름은 masc가 뽑은 `conversation_id`다. Keeper 이름으로 경로를 만들지 않는다. 대소문자를 가리지 않는 볼륨에서는 두 이름이 한 폴더가 된다.
+  - `index.jsonl`은 덧붙이기만 하고 본문을 싣지 않는다. 줄은 세 가지다.
     - `started {conversation_id, keeper_id, provider_account_id, at_ms}`
-    - `asked {conversation_id, turn_id, message, at_ms}`. CLI를 띄우기 전에 쓴다. 못 쓰면 CLI를 띄우지 않는다.
+    - `delete_requested {conversation_id, at_ms}`
+    - `deleted {conversation_id, at_ms}`
+  - `<conversation_id>/turns.jsonl`은 덧붙이기만 하고 본문을 싣는다. 줄은 세 가지다.
+    - `asked {turn_id, message, at_ms}`. CLI를 띄우기 전에 쓴다. 못 쓰면 CLI를 띄우지 않는다.
     - `answered {turn_id, text, model, session_id, at_ms}`
     - `failed {turn_id, kind, at_ms}`. `kind`는 사람에게 답한 실패의 종류다(로그인 없음, 한도, 시간 초과, 시작 못 함, 답 없음). 서버의 파일 경로가 들어갈 수 있는 상세는 싣지 않는다(#50018).
   - `asked`만 있고 끝 줄이 없는 턴은 서버가 턴 도중에 멈춘 것이다. 읽는 쪽은 "답이 기록되지 않았다"로 답한다.
-  - 이어갈 session id는 지금 대화의 마지막 `answered` 줄에서 읽는다. `answered`가 없으면 새 session으로 시작한다.
-  - 작업 폴더는 `keeper-conversations/cwd/<conversation_id>/`다. 이름은 masc가 뽑은 id다. Keeper 이름으로 경로를 만들지 않는다. 대소문자를 가리지 않는 볼륨에서는 두 이름이 한 폴더가 된다. 한 대화의 턴은 늘 같은 폴더에서 뜬다. 그래서 CLI가 session을 지금 project에서 찾는다. 내장 도구가 없는 자세(`Native_none`)라서 폴더는 비어 있다.
+  - 이어갈 session id는 지금 대화의 마지막 `answered` 줄에서 읽는다. `answered`가 없으면 새 session으로 시작한다. 첫 턴이 실패한 대화가 그렇다. 이것은 "정한 것" 5번과 다르다. masc가 기록한 session이 없어서 바꿀 것이 없다.
+  - 실패한 턴의 물음을 vendor session은 갖고 있을 수 있다. 이어가는 턴에서 모델은 그 물음을 읽고, 기록은 그 턴을 `failed`로 보인다. 기록은 masc가 본 것만 말한다. 읽기 답은 `failed` 턴에 "모델이 이 물음을 읽었을 수 있다"는 표시를 단다(#51567 리뷰).
+  - 작업 폴더는 `<conversation_id>/cwd/`다. 한 대화의 턴은 늘 같은 폴더에서 뜬다. 그래서 CLI가 session을 지금 project에서 찾는다. 내장 도구가 없는 자세(`Native_none`)라서 폴더는 비어 있다.
   - 쓰기는 `Fs_compat`의 durable append를 쓴다. 한 사람의 기록에 쓰는 순서는 서버 프로세스 안의 잠금 하나가 정한다. 계정 서버는 구역을 쥔 한 프로세스다.
   - 해석되지 않는 줄이 있으면 그 사람의 대화 읽기와 턴을 거절한다. 고쳐서 읽지 않는다.
+- 지우기(S1b-3c).
+  - 사람이 자기 대화 하나를 지운다. `delete_requested`를 쓰고, 그 대화의 폴더를 지우고, `deleted`를 쓴다. 본문은 폴더와 함께 없어지고, `index.jsonl`에는 언제 시작하고 언제 지웠는지만 남는다(설계 §3-11의 감사 메타데이터).
+  - 폴더를 지우다 서버가 멈추면 `delete_requested`만 남는다. 그 대화는 그때부터 읽히지 않고 턴도 돌지 않는다. 계정 서버가 다시 뜰 때 남은 폴더를 마저 지우고 `deleted`를 쓴다. purge(F1)가 `Purge_pending`을 이어서 지우는 것과 같은 방식이다.
+  - 그 대화의 턴이 도는 중이면 지우기를 409로 거절한다. 판정은 계정마다 한 호출만 도는 잠금(`one_call_of`)으로 한다.
+  - vendor 쪽 사본(계정 홈의 session 파일)은 masc의 폴더와 따로 있다. CLI가 문서로 밝힌 방법으로 지울 수 있는지 S1b-3c를 시작할 때 문서에서 확인한다. 지울 수 없으면 지우기의 답과 화면이 "CLI가 보관 기간 동안 사본을 갖고 있다"고 밝힌다. vendor의 폴더 이름 규칙을 masc가 흉내 내서 파일을 찾지 않는다.
+  - 사람 자체를 지우는 purge(F1)는 이 폴더 전체를 대상에 넣는다.
 - 경로와 도구.
   - `POST /api/v1/auth/keepers/turn`. 본문은 그대로다. 지금 대화가 없으면 시작한다. 답에 `conversation_id`와 `continued`(이번 턴이 session을 이어받았는지)를 더한다.
   - `POST /api/v1/auth/keepers/conversation`. 본문은 `{"keeper_id"}`다. 새 대화를 시작한다. 앞 대화의 기록은 남는다.
   - `GET /api/v1/auth/keepers/conversation?keeper_id=<이름>`. 지금 대화의 턴을 순서대로 답한다.
-  - MCP 도구 `masc_my_keeper_conversation`(읽기)과 `masc_my_keeper_conversation_new`. 경로와 같은 함수를 부른다.
+  - `DELETE /api/v1/auth/keepers/conversation/<conversation_id>`. 그 대화를 지운다. 답은 204다. 자기 것이 아니거나 없는 id는 404다.
+  - MCP 도구 `masc_my_keeper_conversation`(읽기), `masc_my_keeper_conversation_new`, `masc_my_keeper_conversation_delete`. 경로와 같은 함수를 부른다.
 - 시험으로 볼 것(구현 층).
   - 둘째 턴이 `--resume=<첫 턴의 session id>`로 뜬다. 가짜 CLI가 받은 인자로 본다.
   - 두 사람이 같은 이름의 Keeper로 각자 대화한다. 서로의 기록을 읽지 못하고, 서로의 session id로 뜨지 않는다.
   - 다른 구독으로 바꾼 Keeper의 턴은 CLI가 뜨기 전에 409다.
   - `asked`를 쓰지 못하면 CLI가 뜨지 않는다.
   - 턴 도중에 멈춘 기록(`asked`뿐)을 읽으면 그 턴이 답 없이 보인다.
-- 하지 않는 것: Keeper 지시문과 system prompt, 기억, MASC 도구, 스스로 시작하는 턴, Board, Codex, 답을 나눠 보내기, 앞 대화들의 목록. vendor의 대화 파일과 masc의 기록을 지우는 일도 하지 않는다. 사람의 기록을 지우는 것은 purge(F1)이고, F1이 이 폴더를 대상에 넣는다.
+  - 지운 대화는 읽히지 않고, 그 폴더가 없고, 다음 턴은 새 대화다. `delete_requested`만 남은 설치를 다시 띄우면 폴더가 없어지고 `deleted`가 붙는다.
+- 하지 않는 것: Keeper 지시문과 system prompt, 기억, MASC 도구, 스스로 시작하는 턴, Board, Codex, 답을 나눠 보내기, 앞 대화들의 목록, 보관 기간을 정해 자동으로 지우기.
 - 층.
   - S1b-3a 기록과 이어가기. 턴 경로와 `masc_my_keeper_turn`의 답에 `conversation_id`와 `continued`가 붙는다.
-  - S1b-3b 새 대화와 읽기. 경로 둘, MCP 도구 둘, 사람의 화면.
+  - S1b-3b 새 대화와 읽기. 경로 둘과 MCP 도구 둘.
+  - S1b-3c 지우기. 경로 하나와 MCP 도구 하나, 재기동 때 이어서 지우기.
+  - 화면은 이 층들에 없다. 계정 콘솔 층이 위 경로를 불러서 대화 목록, "새 대화", "지우기"를 단다.
 
 ### E. official client 격리
 

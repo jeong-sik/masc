@@ -75,6 +75,7 @@
   masc.keeper_identity
   masc.mcp_client
   masc.watched_work
+  masc.native_file_change
   ;; RFC-0266 Phase 4: GET /api/v1/dashboard/fusion-runs names
   ;; Fusion_run_registry directly; dune does not re-export it through the masc
   ;; dep, so masc_server lists masc.fusion_core explicitly.

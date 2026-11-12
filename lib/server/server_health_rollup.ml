@@ -37,6 +37,7 @@ let cached_field_names =
     "keeper_terminal_effect_policy";
     "keeper_observability_artifacts";
     "skill_catalog";
+    "tla_source_observation";
     "auxiliary_startup";
     "paused_keepers";
     "keeper_config_error_count";

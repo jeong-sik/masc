@@ -2940,6 +2940,8 @@
 (include stanzas/test_dashboard_keeper_metrics_10286.inc)
 
 (include stanzas/test_dashboard_tla_specs.inc)
+(include stanzas/test_native_file_change.inc)
+(include stanzas/test_tla_source_events.inc)
 
 (include stanzas/test_dated_jsonl.inc)
 

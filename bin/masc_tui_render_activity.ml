@@ -260,7 +260,7 @@ let render_system_logs (state : state) =
     | None ->
         let reading_note =
           match (system_logs_page state).lp_error with
-          | None -> title_missing_reading ~error:None
+          | None -> here_missing_reading state ~error:None
           | Some _ -> ""
         in
         activity_heading state ~cols ~on_logs:true
@@ -907,9 +907,19 @@ let render_acting (state : state) =
   let header =
     activity_heading state ~cols ~on_logs:false
       ~reading:
-        [ "  " ^ Acting.filter_label state.acting_filter
-        ; "  " ^ Masc_tui_types.activity_title_reading ~observer:state.observer
-            ~shown ~held ]
+        (("  " ^ Acting.filter_label state.acting_filter)
+         ::
+         (match
+            Masc_tui_types.activity_title_reading ~observer:state.observer
+              ~shown ~held
+          with
+          | Activity_unanswered { error } ->
+              [ "  " ^ here_missing_reading state ~error ]
+          | Activity_counted { shown; held } ->
+              [ "  " ^ count_reading state Masc_tui_value.Count.Row shown
+              ; reading_separator
+                ^ count_reading state Masc_tui_value.Count.Event held
+                ^ ui_text state ~ko:" 보유" ~en:" held" ]))
   in
   box_top buf cols;
   box_line buf cols header;

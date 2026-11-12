@@ -829,7 +829,7 @@ let render_changes_list (state : state) =
     match state.changes with
     | None ->
         heading
-          ~reading:(String.trim (title_missing_reading ~error:state.changes_error))
+          ~reading:(here_missing_reading state ~error:state.changes_error)
     | Some s ->
         (* The window and the call count are stated because the list alone
            does not say what was looked at: no changes in a window and no

@@ -104,7 +104,7 @@ let render_verification_list (state : state) =
     | None ->
         let reading_note =
           match state.verification_error with
-          | None -> title_missing_reading ~error:None
+          | None -> here_missing_reading state ~error:None
           | Some _ -> ""
         in
         let after =
@@ -640,7 +640,7 @@ let render_harness_list (state : state) =
     | None ->
         let reading_note =
           match state.harness_error with
-          | None -> title_missing_reading ~error:None
+          | None -> here_missing_reading state ~error:None
           | Some _ -> ""
         in
         let after =

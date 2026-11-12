@@ -655,7 +655,7 @@ let render_lanes_overview (state : state) =
   let projection = Masc_tui_types.lanes_overview_projection state ~rows ~cols in
   let header =
     let readings = match state.lane_inventory with
-      | None -> [String.trim (title_missing_reading ~error:state.standalone_lanes_error)]
+      | None -> [ here_missing_reading state ~error:state.standalone_lanes_error ]
       | Some _ -> [] in
     here_row ~cols state ~path:[] ~readings ~position:None
   in

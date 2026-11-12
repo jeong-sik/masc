@@ -483,7 +483,11 @@ let test_dashboard_build_precedes_launch_binding () =
       check bool "launch binding follows successful dashboard build" true
         (Sys.file_exists provenance_dir))
 
-let test_dashboard_build_helper_rebuilds_remote_startup_resource_output () =
+(* The helper script on a checkout whose built output holds [output_files]
+   (each under its name in assets/dashboard) and a stamp newer than every
+   source, with a pnpm that records its calls: those calls and what the helper
+   said on stderr. *)
+let run_dashboard_build_helper ~output_files =
   with_temp_dir "run-local-script" (fun dir ->
       let repo_root = Filename.concat dir "repo" in
       let scripts_dir = Filename.concat repo_root "scripts" in
@@ -503,9 +507,14 @@ let test_dashboard_build_helper_rebuilds_remote_startup_resource_output () =
       write_file (Filename.concat dashboard_dir "index.html")
         {|<!doctype html><html><head></head><body><div id="app"></div></body></html>|};
       write_file (Filename.concat dashboard_dir "src/main.ts") "export {}\n";
-      write_file (Filename.concat output_dir "index.html")
-        {|<!doctype html><html><head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR"></head><body></body></html>|};
+      List.iter
+        (fun (name, content) ->
+          let file = Filename.concat output_dir name in
+          mkdir_p (Filename.dirname file);
+          write_file file content)
+        output_files;
       write_file (Filename.concat output_dir ".build-stamp") "fresh\n";
+      write_file pnpm_capture "";
       write_executable (Filename.concat fake_bin "pnpm")
         (Printf.sprintf
            {|
@@ -532,10 +541,43 @@ esac
       if code <> 0 then
         failf "dashboard build helper failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code stdout stderr;
-      check bool "stale generated index forced rebuild" true
-        (String_util.contains_substring (read_file pnpm_capture) "run build");
-      check bool "stale reason was explicit" true
-        (String_util.contains_substring stderr "remote startup resources"))
+      read_file pnpm_capture, stderr)
+
+let built_index = {|<!doctype html><html><head></head><body></body></html>|}
+
+let test_dashboard_build_helper_rebuilds_remote_startup_resource_output () =
+  let pnpm_calls, stderr =
+    run_dashboard_build_helper
+      ~output_files:
+        [ ( "index.html"
+          , {|<!doctype html><html><head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR"></head><body></body></html>|}
+          )
+        ]
+  in
+  check bool "stale generated index forced rebuild" true
+    (String_util.contains_substring pnpm_calls "run build");
+  check bool "stale reason was explicit" true
+    (String_util.contains_substring stderr "remote startup resources")
+
+(* An output built before the account console was an entry of the build has
+   the stamp and the dashboard, and no console. *)
+let test_dashboard_build_helper_rebuilds_output_without_account_console () =
+  let pnpm_calls, stderr =
+    run_dashboard_build_helper ~output_files:[ "index.html", built_index ]
+  in
+  check bool "an output without the console forced a rebuild" true
+    (String_util.contains_substring pnpm_calls "run build");
+  check bool "the reason was explicit" true
+    (String_util.contains_substring stderr "no account console")
+
+let test_dashboard_build_helper_keeps_complete_fresh_output () =
+  let pnpm_calls, stderr =
+    run_dashboard_build_helper
+      ~output_files:[ "index.html", built_index; "accounts/index.html", built_index ]
+  in
+  check string "a complete output newer than its sources is not built again" "" pnpm_calls;
+  check bool "the helper says it is up to date" true
+    (String_util.contains_substring stderr "Up to date")
 
 let test_existing_target_config_is_not_overwritten () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -1023,6 +1065,11 @@ let () =
           test_case "dashboard helper rebuilds stale remote startup resources"
             `Quick
             test_dashboard_build_helper_rebuilds_remote_startup_resource_output;
+          test_case "dashboard helper rebuilds an output without the account console"
+            `Quick
+            test_dashboard_build_helper_rebuilds_output_without_account_console;
+          test_case "dashboard helper keeps a complete fresh output" `Quick
+            test_dashboard_build_helper_keeps_complete_fresh_output;
           test_case "bootstrap-keepers flag is opt-in" `Quick
             test_bootstrap_keepers_flag_is_opt_in;
           test_case "existing target config is not overwritten" `Quick

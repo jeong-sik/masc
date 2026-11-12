@@ -36,7 +36,9 @@ request, one JSON answer.
 Each tool calls the function behind the matching control of the person's
 page (`/`), after the same check. The text of a tool result is the JSON
 that page reads. A refusal comes back as a tool result with `isError: true`
-and the sentence of the refusal.
+and the sentence of the refusal. The tools of a Keeper's turn and
+conversation give `{"error": <sentence>, "code": <code>}`; the codes are
+listed under [Error codes of a turn and a conversation](#error-codes-of-a-turn-and-a-conversation).
 
 A Keeper or a Runtime of another person is answered as one that is not
 there. A Keeper name is your own: another person can have a Keeper of the
@@ -137,11 +139,52 @@ what you asked before and what it answered. The answer of
   may still be part of what the Keeper remembers: the client was started
   with your message. The whole conversation comes in one answer. When the
   server stopped in the middle of writing a row, the read is refused with
-  503 until the Keeper's next turn or a new conversation cuts that row.
+  503 `conversation_row_half_written` until a new conversation of the
+  Keeper, or its next turn on a Claude Code Runtime, cuts that row.
   Reading again does not cut it.
 - **A failed turn is not sent again.** The server does not start the turn
   over, and it starts no new conversation in place of one whose turn
   failed. Send the message again when you want it answered.
+
+## Error codes of a turn and a conversation
+
+`masc_my_keeper_turn`, `masc_my_keeper_conversation_new` and
+`masc_my_keeper_conversation`, and the routes behind them, refuse with
+`{"error": <sentence>, "code": <code>}`. Tell the cases apart by `code`;
+the sentence may change. The code of a failed turn is the `failure` the
+read of the conversation shows for that turn.
+
+| Status | `code` | Meaning |
+| --- | --- | --- |
+| 400 | `invalid_request` | The arguments are not of the shape the tool reads, or the name is no Keeper name. |
+| 400 | `message_too_long` | The message is longer than 4096 bytes. |
+| 400 | `message_blank` | The message is blank. |
+| 400 | `runtime_not_supported` | The Runtime of the Keeper is neither a Claude Code nor a Codex Runtime. |
+| 400 | `account_runtime_invalid` | The runtime of the subscription does not load from the configuration of the server. |
+| 403 | `turn_refused` | The authorization refused the turn, for example for a PAT whose scope does not cover it. |
+| 403 | `native_tools_refused` | The client would start with tools that reach the homes of other people. |
+| 404 | `unknown_keeper` | No Keeper of yours has this name. |
+| 404 | `unknown_conversation` | The Keeper has no conversation of this id. |
+| 404 | `unknown_account` | The subscription of the Keeper's Runtime has no login of yours. |
+| 409 | `keeper_has_no_runtime` | The Keeper has no Runtime. Give it one first. |
+| 409 | `account_call_running` | A turn or a check of the subscription runs. Try again when it ends. |
+| 409 | `conversation_on_other_subscription` | The current conversation began on another subscription. Start a new conversation. |
+| 409 | `runtime_reassigned` | The Keeper got another Runtime during the request. |
+| 409 | `not_signed_in` | The subscription of the Runtime is not signed in. |
+| 429 | `no_quota` | The subscription has no quota left. |
+| 500 | `configuration_refused` | The client refused the configuration of the Runtime. |
+| 500 | `conversation_row_not_understood` | The record of the conversation has a row the server does not understand. |
+| 500 | `internal_error` | A state the server does not expect. Its log has the detail. |
+| 502 | `no_answer` | The client ended the turn without an answer. When the turns of a conversation keep failing, start a new conversation. |
+| 503 | `not_started` | The client did not start. |
+| 503 | `answer_unrecorded` | The Keeper answered, and the server could not record the answer. |
+| 503 | `conversation_row_half_written` | A stopped server left the last row of the record half written. A new conversation, or the Keeper's next turn on a Claude Code Runtime, cuts it. |
+| 503 | `conversation_record_unavailable` | The server could not read or write the record of the conversation. |
+| 503 | `server_unavailable` | The server cannot decide now. Try again later. |
+| 504 | `silent` | The client sent nothing for 120 seconds. |
+
+A refusal before the tool reaches the route, such as a PAT without the
+Keeper effect, has no `code`.
 
 ## Limits
 

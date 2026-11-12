@@ -5,8 +5,6 @@
 open Alcotest
 module Types = Masc_tui_types
 
-let contains = String_util.contains_substring
-
 let test_runtime_keeper_name_is_terminal_text () =
   let state = Types.create_state ~workspace:"" ~port:0 () in
   let rendered =
@@ -22,7 +20,7 @@ let test_runtime_keeper_name_is_terminal_text () =
   List.iter
     (fun escaped ->
       check bool "the roster controls remain visible as escapes" true
-        (List.exists (contains escaped) rows))
+        (List.exists (fun row -> String_util.contains_substring row escaped) rows))
     [ "\\x0A"; "\\x1B]0;owned"; "\\x07" ]
 
 let () =

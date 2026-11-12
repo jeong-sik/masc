@@ -29,7 +29,12 @@
       [POST /api/v1/auth/keepers/assign], [Manage_own_keeper]
       ({!Auth_preview.keeper_owner}). A PAT whose scope lacks the effect is
       refused, and a Keeper or a Runtime of another person is answered as
-      one that is not there. *)
+      one that is not there.
+    - [masc_my_keeper_turn]: [POST /api/v1/auth/keepers/turn],
+      [Manage_own_keeper] with the namespace of the person
+      ({!Auth_preview.keeper_owner_person}). The request stays open until the
+      Runtime answers or {!Server_preview_keeper_turn} gives the turn up, and
+      the result is the JSON of that route. *)
 
 (** [/mcp]. *)
 val path : string
@@ -37,13 +42,20 @@ val path : string
 (** The most bytes of one message. *)
 val max_message_bytes : int
 
-(** What a request is judged with: one snapshot the zone could be trusted
-    for, the time, and what the server read of the credential. [zone] is the
-    zone of the snapshot, where a tool that makes or changes a record of the
-    person commits it. *)
-type caller =
+(** The installation the endpoint answers for: the zone, where a tool that
+    makes or changes a record of the person commits it, the environment of
+    the process, from which a turn starts the client, and the workspace base
+    path, under which the account homes are. *)
+type installation =
   { zone : Authz_zone.t
-  ; trusted : Authz_zone.trusted
+  ; env : Eio_unix.Stdenv.base
+  ; base_path : string
+  }
+
+(** What a request is judged with: one snapshot the zone could be trusted
+    for, the time, and what the server read of the credential. *)
+type caller =
+  { trusted : Authz_zone.trusted
   ; now_ms : int
   ; gate : Auth_gate.request
   }
@@ -74,4 +86,4 @@ type answer =
     The status is 200, but a 400 or a 404 where the single-user endpoint
     gives one: an error with a null id, and on a revision that selects its
     protocol per request an error that the revision maps to a status. *)
-val answer : caller -> Httpun.Request.t -> body:string -> answer
+val answer : installation -> caller -> Httpun.Request.t -> body:string -> answer

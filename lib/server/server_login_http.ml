@@ -348,21 +348,18 @@ let respond_mcp reqd { Server_person_mcp.status; headers; body } =
 
 (* The credential is judged before the body is read, and the tools judge the
    same request on the same snapshot. *)
-let person_mcp (t : R.t) request reqd =
+let person_mcp (t : R.t) ~env ~base_path request reqd =
   with_authority reqd (fun request_authority ->
     on_trusted t reqd (fun trusted ->
+      let installation = { Server_person_mcp.zone = t.zone; env; base_path } in
       let caller =
-        { Server_person_mcp.zone = t.zone
-        ; trusted
-        ; now_ms = now_ms t
-        ; gate = gate_request ~request_authority request
-        }
+        { Server_person_mcp.trusted; now_ms = now_ms t; gate = gate_request ~request_authority request }
       in
       match Server_person_mcp.admitted caller with
       | Error answer -> respond reqd answer
       | Ok () ->
         with_body ~max_bytes:Server_person_mcp.max_message_bytes reqd (fun body ->
-          respond_mcp reqd (Server_person_mcp.answer caller request ~body))))
+          respond_mcp reqd (Server_person_mcp.answer installation caller request ~body))))
 ;;
 
 let add_person_routes t ~env ~base_path router =
@@ -379,5 +376,5 @@ let add_person_routes t ~env ~base_path router =
   |> Server_route.post access Auth_preview_keeper.turn_path (keeper_turn t ~env ~base_path)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
-  |> Server_route.post mcp_access Server_person_mcp.path (person_mcp t)
+  |> Server_route.post mcp_access Server_person_mcp.path (person_mcp t ~env ~base_path)
 ;;

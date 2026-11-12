@@ -46,10 +46,12 @@
     redirect is an [https] URL. A member whose client is refused stops the
     boot ({!Login_client_refused}). A provider with no member is not
     configured, and its start and its callback answer 404; with neither
-    member nobody logs in, and the boot says so in the log. This module does
-    not compare a redirect with the address of the server: a redirect that
-    names another host or another path fails at the provider or at the
-    callback of the first login.
+    member nobody logs in, and the boot says so in the log. A redirect whose
+    path is not the callback of its provider stops the boot too
+    ({!Server_account_login.Redirect_not_the_callback}). The host of a
+    redirect is not compared with an address of the server: a redirect that
+    names another host fails at the provider or at the callback of the
+    first login.
 
     {b The probes.} They are answered with no credential, to a request whose
     Host is an identity of the server ({!Server_http_ingress.serve_table}),
@@ -88,7 +90,8 @@ type refusal =
   | Login_client_refused of Server_account_login.refusal
       (** A login client that [config.json] names was refused: the
           environment variable of its secret is not set or holds the empty
-          string, or its redirect is no [https] URL. *)
+          string, its redirect is no [https] URL, or the path of its
+          redirect is not the callback of its provider. *)
   | Route_of_another_kind of Server_account_table.refusal
       (** The table holds a route that is neither [Always_public] nor
           [Self_authenticated Browser_session]. *)

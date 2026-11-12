@@ -5,6 +5,16 @@ let ( let* ) = Result.bind
 type refusal =
   | Google_client_refused of Login_client.environment_error
   | Github_client_refused of Login_client.environment_error
+  | Redirect_not_the_callback of
+      { provider : Login_routes.provider
+      ; callback_path : string
+      ; redirect_path : string
+      }
+
+let provider_name = function
+  | Login_routes.Google -> "google"
+  | Login_routes.Github -> "github"
+;;
 
 let refusal_to_string = function
   | Google_client_refused error ->
@@ -13,6 +23,13 @@ let refusal_to_string = function
   | Github_client_refused error ->
     "the github login client of config.json is refused: "
     ^ Login_client.environment_error_to_string error
+  | Redirect_not_the_callback { provider; callback_path; redirect_path } ->
+    Printf.sprintf
+      "the redirect_uri of the %s login client of config.json has the path %S; the callback of this \
+       server is %s"
+      (provider_name provider)
+      redirect_path
+      callback_path
 ;;
 
 type clients =
@@ -28,6 +45,21 @@ let client ~getenv (configured : Masc_domain.login_client) =
     ~client_secret_env:configured.client_secret_env
 ;;
 
+let callback_path_of = function
+  | Login_routes.Google -> Server_login_http.google_callback_path
+  | Login_routes.Github -> Server_login_http.github_callback_path
+;;
+
+(* The provider sends the browser back to the redirect, and this server
+   answers a callback on one path. *)
+let on_the_callback provider client =
+  let callback_path = callback_path_of provider in
+  let redirect_path = Uri.path (Uri.of_string (Login_client.redirect_uri client)) in
+  if String.equal redirect_path callback_path
+  then Ok client
+  else Error (Redirect_not_the_callback { provider; callback_path; redirect_path })
+;;
+
 let clients_of_config ~getenv (configured : Authz_boot_mode_read.login_clients) =
   let* google =
     match configured.google with
@@ -35,6 +67,7 @@ let clients_of_config ~getenv (configured : Authz_boot_mode_read.login_clients) 
     | Some configured ->
       (match client ~getenv configured with
        | Ok client ->
+         let* client = on_the_callback Login_routes.Google client in
          Ok (Some { Login_routes.client; cache = Oidc_google_exchange.cache () })
        | Error error -> Error (Google_client_refused error))
   in
@@ -43,7 +76,7 @@ let clients_of_config ~getenv (configured : Authz_boot_mode_read.login_clients) 
     | None -> Ok None
     | Some configured ->
       (match client ~getenv configured with
-       | Ok client -> Ok (Some client)
+       | Ok client -> Result.map Option.some (on_the_callback Login_routes.Github client)
        | Error error -> Error (Github_client_refused error))
   in
   Ok { google; github }

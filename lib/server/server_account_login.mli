@@ -13,9 +13,16 @@
 type refusal =
   | Google_client_refused of Login_client.environment_error
   | Github_client_refused of Login_client.environment_error
+  | Redirect_not_the_callback of
+      { provider : Login_routes.provider
+      ; callback_path : string  (** The path this server answers the callback on. *)
+      ; redirect_path : string  (** The path of the [redirect_uri] of the member. *)
+      }
+      (** The provider would send the browser back to a path this server
+          does not answer the callback on. *)
 
-(** Names the provider, and the variable or the field that was refused. The
-    value of a secret is in no refusal. *)
+(** Names the provider, and the variable, the field or the path that was
+    refused. The value of a secret is in no refusal. *)
 val refusal_to_string : refusal -> string
 
 (** The clients of a server. *)
@@ -27,7 +34,10 @@ type clients =
 (** The clients that [config.json] names, each built by
     {!Login_client.of_environment}: the secret is read through [getenv] from
     the variable the member names, and the redirect has to be an [https]
-    URL. A member that is there and whose client is refused stops the boot:
+    URL whose path is the callback of its provider
+    ({!Server_login_http.google_callback_path},
+    {!Server_login_http.github_callback_path}). The host of the redirect is
+    not compared with an address of the server. A member that is there and whose client is refused stops the boot:
     a server that left it out would answer 404 on a login the operator
     configured. A member that is not there gives [None], and its routes
     answer 404 ({!Login_routes.t}). The Google client gets an empty cache of

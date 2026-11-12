@@ -4727,22 +4727,28 @@ let render_keeper_message (state : state) =
     (match state.msg_loaded_error with
      | Some _ ->
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-           "  History load failed · /errors"
+           (ui_text state ~ko:"  대화 기록 조회 실패 · /errors"
+              ~en:"  History load failed · /errors")
      | None -> ());
     (if state.msg_loaded_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (Printf.sprintf
-            "  %d saved row(s) could not be read and are not shown"
+            (if state.ui_language = Lang_ko then
+               "  저장된 행 %d개를 읽지 못해 표시하지 않음"
+             else "  %d saved row(s) could not be read and are not shown")
             state.msg_loaded_dropped));
     (match state.msg_memory_error with
      | None -> ()
      | Some _ ->
          box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-           "  Memory load failed · /errors");
+           (ui_text state ~ko:"  기억 조회 실패 · /errors"
+              ~en:"  Memory load failed · /errors"));
     (if state.msg_memory_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (Printf.sprintf
-            "  %d memory journal row(s) could not be read and are not shown"
+            (if state.ui_language = Lang_ko then
+               "  기억 기록 행 %d개를 읽지 못해 표시하지 않음"
+             else "  %d memory journal row(s) could not be read and are not shown")
             state.msg_memory_dropped));
     (* Where the pane is, when it is not at the newest row. The distance and
        the key back are what the footer used to carry seventh of nine hints,
@@ -4762,24 +4768,32 @@ let render_keeper_message (state : state) =
     (if Masc_tui_types.keeper_message_reading_back ~scroll:requested state then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (if scroll <= 0 then
-            "  \xe2\x86\x93 back at the newest row"
+            ui_text state ~ko:"  \xe2\x86\x93 가장 최근 줄로 돌아옴"
+              ~en:"  \xe2\x86\x93 back at the newest row"
           else if state.msg_older_exist then
             Printf.sprintf
-              "  \xe2\x86\x91 reading back %d row(s) \xc2\xb7 Ctrl-E returns to the newest"
+              (if state.ui_language = Lang_ko then
+                 "  \xe2\x86\x91 %d줄 위를 읽는 중 \xc2\xb7 Ctrl-E 로 가장 최근 줄"
+               else
+                 "  \xe2\x86\x91 reading back %d row(s) \xc2\xb7 Ctrl-E returns to the newest")
               scroll
           else
-            "  \xe2\x86\x91 the start of this conversation \xc2\xb7 Ctrl-E returns to the newest"));
+            ui_text state
+              ~ko:"  \xe2\x86\x91 이 대화의 처음 \xc2\xb7 Ctrl-E 로 가장 최근 줄"
+              ~en:"  \xe2\x86\x91 the start of this conversation \xc2\xb7 Ctrl-E returns to the newest"));
     (* The row [keeper_message_status_rows] reserves for the older-page
        fetch. Counting it without drawing it floated the footer a row up,
        and a failed page load was silent -- the one thing it must not be. *)
     (if state.msg_older_loading then
        box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-         "  (loading older messages\xe2\x80\xa6)"
+         (ui_text state ~ko:"  (이전 메시지 조회 중\xe2\x80\xa6)"
+            ~en:"  (loading older messages\xe2\x80\xa6)")
      else
        match state.msg_older_error with
        | Some _ ->
            box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-             "  Older load failed · /errors"
+             (ui_text state ~ko:"  이전 메시지 조회 실패 · /errors"
+                ~en:"  Older load failed · /errors")
        | None -> ());
     (match status_frame.kmsf_source with
      | Message_status (live, status) ->

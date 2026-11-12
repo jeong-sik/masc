@@ -129,6 +129,21 @@ let view_label = function
   | By_runtime -> "runtime"
   | Day_wall -> "24h"
 
+(* The name on the view row. [view_label] is the word the preference file
+   stores and reads back, so it stays one spelling in both languages. *)
+let view_title ~ko view =
+  if not ko then view_label view
+  else
+    match view with
+    | Plain -> "목록"
+    | By_state -> "상태"
+    | By_cause -> "원인"
+    | By_time -> "시간"
+    | By_memory -> "기억"
+    | By_age -> "나이"
+    | By_runtime -> "런타임"
+    | Day_wall -> "24시간"
+
 let view_of_string = function
   | "list" -> Some Plain
   | "state" -> Some By_state

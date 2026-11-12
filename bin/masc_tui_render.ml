@@ -181,18 +181,19 @@ let overview_capacity_lines (state : state) =
   let quiet line = Theme.recede () ^ line ^ Ansi.reset in
   let warning line = Theme.warn () ^ line ^ Ansi.reset in
   let now = Unix.gettimeofday () in
+  let ko = state.ui_language = Lang_ko in
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
       [warning (text "미관측 · fleet 첫 관측 대기" "Not observed · awaiting fleet reading")]
   | Unreachable { since } ->
       [warning (text "미관측 · fleet에 연결하지 못함" "Not observed · fleet unreachable")
-      ; quiet (Masc_tui_fleet_line.unreachable_text ~now ~since)]
+      ; quiet (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since)]
   | Unavailable { degradation; disconnected_since } ->
       [warning (text "미관측 · fleet 스캔 실패" "Not observed · fleet scan unavailable")
-      ; quiet (Masc_tui_fleet_line.unavailable_text ~now ~degradation ~disconnected_since)]
+      ; quiet (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since)]
   | Cannot_read failure ->
       [warning (text "미관측 · fleet 응답을 읽지 못함" "Not observed · fleet response unreadable")
-      ; quiet (Masc_tui_fleet_line.failure_text failure)]
+      ; quiet (Masc_tui_fleet_line.failure_text ~ko failure)]
   | Reading { reading; trouble } ->
       let fleet = reading.fleet in
       let retained = Option.is_some trouble
@@ -202,7 +203,7 @@ let overview_capacity_lines (state : state) =
           [warning (text "이전 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown")]
         else []
       in
-      let grade = Masc_tui_fleet_line.status_text fleet.fs_status in
+      let grade = Masc_tui_fleet_line.status_text ~ko fleet.fs_status in
       let grade_style =
         if retained then Theme.warn ()
         else if fleet.fs_operator_action_required then Theme.bad ()
@@ -222,13 +223,13 @@ let overview_capacity_lines (state : state) =
           (Printf.sprintf "Turn capacity %d/%d · shortfall %d"
              (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
              fleet.fs_target_reaction_capacity fleet.fs_reaction_capacity_shortfall)]
-      @ Option.to_list (Option.map (fun detail -> warning (Masc_tui_fleet_line.trouble_text ~now detail)) trouble)
+      @ Option.to_list (Option.map (fun detail -> warning (Masc_tui_fleet_line.trouble_text ~ko ~now detail)) trouble)
       @ (if state.workspace_identity = Workspace_identity_match then [] else
            [warning (text "워크스페이스 식별 미확인" "Workspace identity unconfirmed")])
       @ Option.to_list (Option.map (fun detail ->
           (if retained then quiet else warning) (Terminal_text.single_line detail))
-          (Masc_tui_fleet_line.blocker_text fleet))
-      @ Option.to_list (Option.map quiet (Masc_tui_fleet_line.owner_scan_text fleet))
+          (Masc_tui_fleet_line.blocker_text ~ko fleet))
+      @ Option.to_list (Option.map quiet (Masc_tui_fleet_line.owner_scan_text ~ko fleet))
 
 let overview_header (state : state) ~cols =
   here_row ~cols state ~path:[]

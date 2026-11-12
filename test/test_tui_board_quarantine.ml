@@ -294,7 +294,7 @@ let test_an_unreconciled_row_does_not_read_as_nothing_blocked () =
   in
   let tones =
     List.map fst
-      (Quarantine.lines ~now:100.0
+      (Quarantine.lines ~ko:false ~now:100.0
          (ready_fetched ~keeper_name:"alpha" (Ok quarantines))
          ~keeper_name:"alpha")
   in
@@ -313,9 +313,12 @@ let test_wire_strings_are_sanitized () =
          ])
   in
   let lines =
-    Quarantine.lines ~now:2.0
-      (ready_fetched ~keeper_name:"alpha" (Ok quarantines))
-      ~keeper_name:"alpha"
+    List.concat_map
+      (fun ko ->
+         Quarantine.lines ~ko ~now:2.0
+           (ready_fetched ~keeper_name:"alpha" (Ok quarantines))
+           ~keeper_name:"alpha")
+      [ false; true ]
   in
   List.iter
     (fun (_, text) ->

@@ -1,0 +1,2066 @@
+{
+ "probe": "tls_cpu_probe.py",
+ "before_build": "379d483de91a",
+ "after_build": "fa36c50f263f (rounds 1 and 2), 31b43e9ebafa (rounds 3 to 5)",
+ "note": "rounds: five rounds of 300 requests a connection (--n 300), one probe run per build back to back, order alternating. The installed binary was replaced between rounds 2 and 3, so each round's build field is the one to read. load_log lines are the UTC start of each probe run, which build (old = before_build, new = the installed build), the round, and the 1, 5 and 15 minute load averages.",
+ "load_log": [
+  "11-12 07:00:47Z old r1 393.20 293.29 211.63",
+  "11-12 07:04:52Z new r1 151.78 216.08 198.83",
+  "11-12 07:08:07Z new r2 183.27 218.01 204.29",
+  "11-12 07:10:04Z old r2 182.71 199.49 198.24",
+  "11-12 07:16:58Z old r3 278.18 243.91 220.44",
+  "11-12 07:19:20Z new r3 101.83 188.71 202.07",
+  "11-12 07:22:11Z new r4 205.42 206.43 207.16",
+  "11-12 07:23:37Z old r4 131.01 181.37 197.44",
+  "11-12 07:25:47Z old r5 145.07 167.15 189.23",
+  "11-12 07:27:38Z new r5 179.85 173.58 189.09",
+  "11-12 07:29:07Z end 128.11 157.72 181.41"
+ ],
+ "rounds": [
+  {
+   "round": 1,
+   "order": [
+    "before",
+    "after"
+   ],
+   "before": {
+    "client": "3.14.4 OpenSSL 3.6.4 25 Aug 2026",
+    "build": "379d483de91a",
+    "bundle_bytes": 866369,
+    "idle_cpu_s_per_s": 0.006,
+    "cpu_clock_step_s": 0.01,
+    "rows": {
+     "cleartext x1": {
+      "MB_s_median": 206.5,
+      "server_cpu_ms_per_MB_median": 3.05,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.259,
+        "server_cpu_s": 0.842
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.275,
+        "server_cpu_s": 0.792
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.756,
+        "server_cpu_s": 0.595
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x1": {
+      "MB_s_median": 33.1,
+      "server_cpu_ms_per_MB_median": 11.59,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 9.44,
+        "server_cpu_s": 3.213
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 7.852,
+        "server_cpu_s": 3.013
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 4.962,
+        "server_cpu_s": 2.95
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x1": {
+      "MB_s_median": 42.4,
+      "server_cpu_ms_per_MB_median": 11.97,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 3.945,
+        "server_cpu_s": 2.696
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 6.128,
+        "server_cpu_s": 3.173
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 6.227,
+        "server_cpu_s": 3.113
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x1": {
+      "MB_s_median": 60.3,
+      "server_cpu_ms_per_MB_median": 8.44,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 4.309,
+        "server_cpu_s": 2.254
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 4.126,
+        "server_cpu_s": 2.095
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 4.477,
+        "server_cpu_s": 2.193
+       }
+      ]
+     },
+     "cleartext x4": {
+      "MB_s_median": 778.5,
+      "server_cpu_ms_per_MB_median": 2.36,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 1.494,
+        "server_cpu_s": 2.451
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 1.275,
+        "server_cpu_s": 2.382
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 1.336,
+        "server_cpu_s": 2.482
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x4": {
+      "MB_s_median": 60.1,
+      "server_cpu_ms_per_MB_median": 9.33,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 11.239,
+        "server_cpu_s": 9.523
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 17.295,
+        "server_cpu_s": 9.706
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 27.797,
+        "server_cpu_s": 9.794
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x4": {
+      "MB_s_median": 71.9,
+      "server_cpu_ms_per_MB_median": 10.76,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 20.269,
+        "server_cpu_s": 11.609
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 14.455,
+        "server_cpu_s": 11.193
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 14.05,
+        "server_cpu_s": 10.616
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x4": {
+      "MB_s_median": 67.0,
+      "server_cpu_ms_per_MB_median": 7.82,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 10.08,
+        "server_cpu_s": 7.93
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 15.529,
+        "server_cpu_s": 8.127
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 38.687,
+        "server_cpu_s": 9.698
+       }
+      ]
+     }
+    }
+   },
+   "after": {
+    "client": "3.14.4 OpenSSL 3.6.4 25 Aug 2026",
+    "build": "fa36c50f263f",
+    "bundle_bytes": 866369,
+    "idle_cpu_s_per_s": 0.024,
+    "cpu_clock_step_s": 0.01,
+    "rows": {
+     "cleartext x1": {
+      "MB_s_median": 141.0,
+      "server_cpu_ms_per_MB_median": 3.28,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.995,
+        "server_cpu_s": 0.852
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.843,
+        "server_cpu_s": 0.826
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.437,
+        "server_cpu_s": 0.866
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x1": {
+      "MB_s_median": 36.2,
+      "server_cpu_ms_per_MB_median": 6.65,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 8.037,
+        "server_cpu_s": 1.728
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 6.756,
+        "server_cpu_s": 1.729
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 7.176,
+        "server_cpu_s": 1.658
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x1": {
+      "MB_s_median": 25.9,
+      "server_cpu_ms_per_MB_median": 8.33,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 10.029,
+        "server_cpu_s": 2.47
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 8.914,
+        "server_cpu_s": 2.007
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 14.4,
+        "server_cpu_s": 2.166
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x1": {
+      "MB_s_median": 34.5,
+      "server_cpu_ms_per_MB_median": 5.03,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 7.641,
+        "server_cpu_s": 1.307
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 7.527,
+        "server_cpu_s": 1.35
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 5.253,
+        "server_cpu_s": 1.304
+       }
+      ]
+     },
+     "cleartext x4": {
+      "MB_s_median": 268.0,
+      "server_cpu_ms_per_MB_median": 2.57,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 6.01,
+        "server_cpu_s": 2.756
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 3.278,
+        "server_cpu_s": 2.672
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 3.88,
+        "server_cpu_s": 2.667
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x4": {
+      "MB_s_median": 126.2,
+      "server_cpu_ms_per_MB_median": 6.27,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 19.658,
+        "server_cpu_s": 6.49
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 7.941,
+        "server_cpu_s": 6.52
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 8.242,
+        "server_cpu_s": 6.993
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x4": {
+      "MB_s_median": 91.6,
+      "server_cpu_ms_per_MB_median": 7.5,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 13.305,
+        "server_cpu_s": 7.802
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 11.357,
+        "server_cpu_s": 7.809
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 8.338,
+        "server_cpu_s": 7.681
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x4": {
+      "MB_s_median": 220.8,
+      "server_cpu_ms_per_MB_median": 4.62,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 5.793,
+        "server_cpu_s": 4.802
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 4.71,
+        "server_cpu_s": 4.847
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 4.28,
+        "server_cpu_s": 4.808
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "round": 2,
+   "order": [
+    "after",
+    "before"
+   ],
+   "before": {
+    "client": "3.14.4 OpenSSL 3.6.4 25 Aug 2026",
+    "build": "379d483de91a",
+    "bundle_bytes": 866369,
+    "idle_cpu_s_per_s": 0.006,
+    "cpu_clock_step_s": 0.01,
+    "rows": {
+     "cleartext x1": {
+      "MB_s_median": 258.4,
+      "server_cpu_ms_per_MB_median": 2.67,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 0.875,
+        "server_cpu_s": 0.695
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.071,
+        "server_cpu_s": 0.824
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.006,
+        "server_cpu_s": 0.644
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x1": {
+      "MB_s_median": 19.1,
+      "server_cpu_ms_per_MB_median": 12.75,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 12.24,
+        "server_cpu_s": 3.337
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 15.803,
+        "server_cpu_s": 3.315
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 13.636,
+        "server_cpu_s": 3.238
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x1": {
+      "MB_s_median": 16.7,
+      "server_cpu_ms_per_MB_median": 13.64,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 14.561,
+        "server_cpu_s": 3.723
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 15.555,
+        "server_cpu_s": 3.547
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 16.274,
+        "server_cpu_s": 3.522
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x1": {
+      "MB_s_median": 23.8,
+      "server_cpu_ms_per_MB_median": 10.75,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 10.854,
+        "server_cpu_s": 2.795
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 13.783,
+        "server_cpu_s": 2.847
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 10.945,
+        "server_cpu_s": 2.704
+       }
+      ]
+     },
+     "cleartext x4": {
+      "MB_s_median": 479.3,
+      "server_cpu_ms_per_MB_median": 2.31,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 1.808,
+        "server_cpu_s": 2.399
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 2.169,
+        "server_cpu_s": 2.317
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 2.225,
+        "server_cpu_s": 2.907
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x4": {
+      "MB_s_median": 100.9,
+      "server_cpu_ms_per_MB_median": 8.9,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 10.311,
+        "server_cpu_s": 9.258
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 10.333,
+        "server_cpu_s": 8.988
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 9.762,
+        "server_cpu_s": 9.262
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x4": {
+      "MB_s_median": 28.3,
+      "server_cpu_ms_per_MB_median": 11.11,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 11.28,
+        "server_cpu_s": 10.432
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 36.68,
+        "server_cpu_s": 11.55
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 67.936,
+        "server_cpu_s": 11.893
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x4": {
+      "MB_s_median": 25.0,
+      "server_cpu_ms_per_MB_median": 8.42,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 48.774,
+        "server_cpu_s": 9.458
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 41.647,
+        "server_cpu_s": 8.46
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 27.994,
+        "server_cpu_s": 8.752
+       }
+      ]
+     }
+    }
+   },
+   "after": {
+    "client": "3.14.4 OpenSSL 3.6.4 25 Aug 2026",
+    "build": "fa36c50f263f",
+    "bundle_bytes": 866369,
+    "idle_cpu_s_per_s": 0.013,
+    "cpu_clock_step_s": 0.01,
+    "rows": {
+     "cleartext x1": {
+      "MB_s_median": 616.6,
+      "server_cpu_ms_per_MB_median": 3.25,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 0.39,
+        "server_cpu_s": 0.845
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.48,
+        "server_cpu_s": 1.534
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.422,
+        "server_cpu_s": 0.835
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x1": {
+      "MB_s_median": 173.4,
+      "server_cpu_ms_per_MB_median": 6.2,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.499,
+        "server_cpu_s": 1.671
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.465,
+        "server_cpu_s": 1.611
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.694,
+        "server_cpu_s": 1.598
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x1": {
+      "MB_s_median": 122.0,
+      "server_cpu_ms_per_MB_median": 7.54,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.98,
+        "server_cpu_s": 1.874
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.285,
+        "server_cpu_s": 1.96
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.131,
+        "server_cpu_s": 2.032
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x1": {
+      "MB_s_median": 213.9,
+      "server_cpu_ms_per_MB_median": 4.71,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.096,
+        "server_cpu_s": 1.216
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.307,
+        "server_cpu_s": 1.263
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.215,
+        "server_cpu_s": 1.224
+       }
+      ]
+     },
+     "cleartext x4": {
+      "MB_s_median": 680.0,
+      "server_cpu_ms_per_MB_median": 2.54,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 1.152,
+        "server_cpu_s": 2.645
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 2.091,
+        "server_cpu_s": 2.983
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 1.529,
+        "server_cpu_s": 2.37
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x4": {
+      "MB_s_median": 158.4,
+      "server_cpu_ms_per_MB_median": 6.25,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 6.598,
+        "server_cpu_s": 6.934
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 6.558,
+        "server_cpu_s": 6.465
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 6.566,
+        "server_cpu_s": 6.495
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x4": {
+      "MB_s_median": 93.6,
+      "server_cpu_ms_per_MB_median": 7.67,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 10.45,
+        "server_cpu_s": 7.974
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 12.346,
+        "server_cpu_s": 7.94
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 11.111,
+        "server_cpu_s": 8.016
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x4": {
+      "MB_s_median": 96.3,
+      "server_cpu_ms_per_MB_median": 5.17,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 6.147,
+        "server_cpu_s": 5.47
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 11.907,
+        "server_cpu_s": 5.345
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 10.8,
+        "server_cpu_s": 5.38
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "round": 3,
+   "order": [
+    "before",
+    "after"
+   ],
+   "before": {
+    "client": "3.14.4 OpenSSL 3.6.4 25 Aug 2026",
+    "build": "379d483de91a",
+    "bundle_bytes": 866369,
+    "idle_cpu_s_per_s": 0.006,
+    "cpu_clock_step_s": 0.01,
+    "rows": {
+     "cleartext x1": {
+      "MB_s_median": 259.3,
+      "server_cpu_ms_per_MB_median": 2.28,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.365,
+        "server_cpu_s": 0.782
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.003,
+        "server_cpu_s": 0.594
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.489,
+        "server_cpu_s": 0.547
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x1": {
+      "MB_s_median": 56.0,
+      "server_cpu_ms_per_MB_median": 9.83,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 4.639,
+        "server_cpu_s": 2.662
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 4.269,
+        "server_cpu_s": 2.554
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 4.898,
+        "server_cpu_s": 2.551
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x1": {
+      "MB_s_median": 61.6,
+      "server_cpu_ms_per_MB_median": 10.79,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 4.094,
+        "server_cpu_s": 2.685
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 5.794,
+        "server_cpu_s": 2.915
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 4.218,
+        "server_cpu_s": 2.805
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x1": {
+      "MB_s_median": 57.8,
+      "server_cpu_ms_per_MB_median": 8.95,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 5.357,
+        "server_cpu_s": 2.328
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 4.496,
+        "server_cpu_s": 2.543
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 3.865,
+        "server_cpu_s": 2.127
+       }
+      ]
+     },
+     "cleartext x4": {
+      "MB_s_median": 1039.8,
+      "server_cpu_ms_per_MB_median": 2.1,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 1.0,
+        "server_cpu_s": 2.154
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 1.124,
+        "server_cpu_s": 2.183
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 0.998,
+        "server_cpu_s": 2.224
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x4": {
+      "MB_s_median": 103.2,
+      "server_cpu_ms_per_MB_median": 8.11,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 10.278,
+        "server_cpu_s": 9.278
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 10.076,
+        "server_cpu_s": 8.43
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 8.638,
+        "server_cpu_s": 8.278
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x4": {
+      "MB_s_median": 105.3,
+      "server_cpu_ms_per_MB_median": 8.98,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 10.577,
+        "server_cpu_s": 9.597
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 9.872,
+        "server_cpu_s": 9.341
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 9.742,
+        "server_cpu_s": 8.942
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x4": {
+      "MB_s_median": 137.0,
+      "server_cpu_ms_per_MB_median": 6.6,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 6.215,
+        "server_cpu_s": 6.253
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 8.063,
+        "server_cpu_s": 6.862
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 7.588,
+        "server_cpu_s": 7.155
+       }
+      ]
+     }
+    }
+   },
+   "after": {
+    "client": "3.14.4 OpenSSL 3.6.4 25 Aug 2026",
+    "build": "31b43e9ebafa",
+    "bundle_bytes": 866369,
+    "idle_cpu_s_per_s": 0.016,
+    "cpu_clock_step_s": 0.01,
+    "rows": {
+     "cleartext x1": {
+      "MB_s_median": 121.6,
+      "server_cpu_ms_per_MB_median": 3.87,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.913,
+        "server_cpu_s": 3.039
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.138,
+        "server_cpu_s": 0.906
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.178,
+        "server_cpu_s": 1.005
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x1": {
+      "MB_s_median": 77.1,
+      "server_cpu_ms_per_MB_median": 7.36,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 3.37,
+        "server_cpu_s": 2.566
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 3.053,
+        "server_cpu_s": 1.631
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 3.496,
+        "server_cpu_s": 1.914
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x1": {
+      "MB_s_median": 74.9,
+      "server_cpu_ms_per_MB_median": 7.13,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 3.24,
+        "server_cpu_s": 1.838
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 3.561,
+        "server_cpu_s": 1.853
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 3.469,
+        "server_cpu_s": 2.015
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x1": {
+      "MB_s_median": 92.6,
+      "server_cpu_ms_per_MB_median": 5.36,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 2.622,
+        "server_cpu_s": 1.478
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 3.6,
+        "server_cpu_s": 1.392
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.808,
+        "server_cpu_s": 1.225
+       }
+      ]
+     },
+     "cleartext x4": {
+      "MB_s_median": 241.3,
+      "server_cpu_ms_per_MB_median": 3.11,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 4.31,
+        "server_cpu_s": 3.331
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 4.468,
+        "server_cpu_s": 3.239
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 3.829,
+        "server_cpu_s": 2.739
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x4": {
+      "MB_s_median": 57.9,
+      "server_cpu_ms_per_MB_median": 6.17,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 16.83,
+        "server_cpu_s": 6.711
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 20.137,
+        "server_cpu_s": 6.328
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 17.972,
+        "server_cpu_s": 6.413
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x4": {
+      "MB_s_median": 85.7,
+      "server_cpu_ms_per_MB_median": 7.72,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 20.192,
+        "server_cpu_s": 8.307
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 12.136,
+        "server_cpu_s": 7.926
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 7.488,
+        "server_cpu_s": 8.03
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x4": {
+      "MB_s_median": 239.1,
+      "server_cpu_ms_per_MB_median": 4.76,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 6.048,
+        "server_cpu_s": 4.983
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 4.349,
+        "server_cpu_s": 4.951
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 4.206,
+        "server_cpu_s": 4.883
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "round": 4,
+   "order": [
+    "after",
+    "before"
+   ],
+   "before": {
+    "client": "3.14.4 OpenSSL 3.6.4 25 Aug 2026",
+    "build": "379d483de91a",
+    "bundle_bytes": 866369,
+    "idle_cpu_s_per_s": 0.005,
+    "cpu_clock_step_s": 0.01,
+    "rows": {
+     "cleartext x1": {
+      "MB_s_median": 740.7,
+      "server_cpu_ms_per_MB_median": 2.38,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 0.306,
+        "server_cpu_s": 0.558
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.408,
+        "server_cpu_s": 0.658
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.351,
+        "server_cpu_s": 0.618
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x1": {
+      "MB_s_median": 81.1,
+      "server_cpu_ms_per_MB_median": 8.56,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 3.527,
+        "server_cpu_s": 2.622
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 3.207,
+        "server_cpu_s": 2.224
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.799,
+        "server_cpu_s": 2.056
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x1": {
+      "MB_s_median": 72.7,
+      "server_cpu_ms_per_MB_median": 9.89,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 2.872,
+        "server_cpu_s": 2.156
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 4.148,
+        "server_cpu_s": 2.749
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 3.577,
+        "server_cpu_s": 2.572
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x1": {
+      "MB_s_median": 118.0,
+      "server_cpu_ms_per_MB_median": 6.42,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 2.522,
+        "server_cpu_s": 1.737
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.821,
+        "server_cpu_s": 1.331
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.203,
+        "server_cpu_s": 1.669
+       }
+      ]
+     },
+     "cleartext x4": {
+      "MB_s_median": 1333.1,
+      "server_cpu_ms_per_MB_median": 1.99,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 0.723,
+        "server_cpu_s": 1.796
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 0.78,
+        "server_cpu_s": 2.066
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 0.825,
+        "server_cpu_s": 2.106
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x4": {
+      "MB_s_median": 137.5,
+      "server_cpu_ms_per_MB_median": 7.26,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 7.562,
+        "server_cpu_s": 7.552
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 6.982,
+        "server_cpu_s": 6.815
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 10.202,
+        "server_cpu_s": 9.139
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x4": {
+      "MB_s_median": 96.7,
+      "server_cpu_ms_per_MB_median": 9.78,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 10.752,
+        "server_cpu_s": 10.166
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 24.148,
+        "server_cpu_s": 11.639
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 9.681,
+        "server_cpu_s": 9.772
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x4": {
+      "MB_s_median": 200.6,
+      "server_cpu_ms_per_MB_median": 5.14,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 7.688,
+        "server_cpu_s": 7.382
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 5.185,
+        "server_cpu_s": 5.344
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 4.673,
+        "server_cpu_s": 4.967
+       }
+      ]
+     }
+    }
+   },
+   "after": {
+    "client": "3.14.4 OpenSSL 3.6.4 25 Aug 2026",
+    "build": "31b43e9ebafa",
+    "bundle_bytes": 866369,
+    "idle_cpu_s_per_s": 0.018,
+    "cpu_clock_step_s": 0.01,
+    "rows": {
+     "cleartext x1": {
+      "MB_s_median": 748.2,
+      "server_cpu_ms_per_MB_median": 3.02,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 0.316,
+        "server_cpu_s": 0.784
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.379,
+        "server_cpu_s": 0.753
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.347,
+        "server_cpu_s": 0.884
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x1": {
+      "MB_s_median": 195.9,
+      "server_cpu_ms_per_MB_median": 5.6,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.451,
+        "server_cpu_s": 1.574
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.327,
+        "server_cpu_s": 1.436
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.325,
+        "server_cpu_s": 1.456
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x1": {
+      "MB_s_median": 147.0,
+      "server_cpu_ms_per_MB_median": 6.8,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.768,
+        "server_cpu_s": 1.768
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.926,
+        "server_cpu_s": 1.845
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.632,
+        "server_cpu_s": 1.651
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x1": {
+      "MB_s_median": 251.2,
+      "server_cpu_ms_per_MB_median": 4.5,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.17,
+        "server_cpu_s": 1.169
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.035,
+        "server_cpu_s": 1.181
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.996,
+        "server_cpu_s": 1.082
+       }
+      ]
+     },
+     "cleartext x4": {
+      "MB_s_median": 1169.3,
+      "server_cpu_ms_per_MB_median": 2.24,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 0.997,
+        "server_cpu_s": 2.332
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 0.889,
+        "server_cpu_s": 2.414
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 0.776,
+        "server_cpu_s": 2.106
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x4": {
+      "MB_s_median": 184.9,
+      "server_cpu_ms_per_MB_median": 6.09,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 5.061,
+        "server_cpu_s": 6.109
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 5.624,
+        "server_cpu_s": 6.329
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 9.009,
+        "server_cpu_s": 6.628
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x4": {
+      "MB_s_median": 141.7,
+      "server_cpu_ms_per_MB_median": 7.27,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 6.964,
+        "server_cpu_s": 7.565
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 7.524,
+        "server_cpu_s": 7.875
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 7.34,
+        "server_cpu_s": 7.338
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x4": {
+      "MB_s_median": 226.7,
+      "server_cpu_ms_per_MB_median": 4.47,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 4.587,
+        "server_cpu_s": 4.648
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 5.707,
+        "server_cpu_s": 4.767
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 4.134,
+        "server_cpu_s": 4.586
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "round": 5,
+   "order": [
+    "before",
+    "after"
+   ],
+   "before": {
+    "client": "3.14.4 OpenSSL 3.6.4 25 Aug 2026",
+    "build": "379d483de91a",
+    "bundle_bytes": 866369,
+    "idle_cpu_s_per_s": 0.003,
+    "cpu_clock_step_s": 0.01,
+    "rows": {
+     "cleartext x1": {
+      "MB_s_median": 1280.9,
+      "server_cpu_ms_per_MB_median": 1.92,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 0.204,
+        "server_cpu_s": 0.449
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.203,
+        "server_cpu_s": 0.499
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.2,
+        "server_cpu_s": 0.499
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x1": {
+      "MB_s_median": 123.3,
+      "server_cpu_ms_per_MB_median": 6.44,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 2.154,
+        "server_cpu_s": 1.674
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.09,
+        "server_cpu_s": 1.704
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.109,
+        "server_cpu_s": 1.654
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x1": {
+      "MB_s_median": 106.8,
+      "server_cpu_ms_per_MB_median": 7.74,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 2.222,
+        "server_cpu_s": 1.863
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.434,
+        "server_cpu_s": 2.013
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 3.027,
+        "server_cpu_s": 2.291
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x1": {
+      "MB_s_median": 105.8,
+      "server_cpu_ms_per_MB_median": 7.36,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 2.457,
+        "server_cpu_s": 1.913
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.95,
+        "server_cpu_s": 1.614
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 4.52,
+        "server_cpu_s": 2.096
+       }
+      ]
+     },
+     "cleartext x4": {
+      "MB_s_median": 849.8,
+      "server_cpu_ms_per_MB_median": 2.32,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 1.489,
+        "server_cpu_s": 2.256
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 1.224,
+        "server_cpu_s": 2.416
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 1.177,
+        "server_cpu_s": 2.516
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x4": {
+      "MB_s_median": 109.2,
+      "server_cpu_ms_per_MB_median": 8.87,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 9.519,
+        "server_cpu_s": 9.411
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 9.546,
+        "server_cpu_s": 9.221
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 9.05,
+        "server_cpu_s": 8.803
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x4": {
+      "MB_s_median": 120.3,
+      "server_cpu_ms_per_MB_median": 8.45,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 8.575,
+        "server_cpu_s": 8.784
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 9.264,
+        "server_cpu_s": 9.252
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 8.646,
+        "server_cpu_s": 8.744
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x4": {
+      "MB_s_median": 187.3,
+      "server_cpu_ms_per_MB_median": 5.62,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 5.931,
+        "server_cpu_s": 6.152
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 5.475,
+        "server_cpu_s": 5.574
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 5.552,
+        "server_cpu_s": 5.843
+       }
+      ]
+     }
+    }
+   },
+   "after": {
+    "client": "3.14.4 OpenSSL 3.6.4 25 Aug 2026",
+    "build": "31b43e9ebafa",
+    "bundle_bytes": 866369,
+    "idle_cpu_s_per_s": 0.007,
+    "cpu_clock_step_s": 0.01,
+    "rows": {
+     "cleartext x1": {
+      "MB_s_median": 708.9,
+      "server_cpu_ms_per_MB_median": 3.03,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 0.314,
+        "server_cpu_s": 0.738
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.535,
+        "server_cpu_s": 0.806
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 0.367,
+        "server_cpu_s": 0.787
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x1": {
+      "MB_s_median": 187.6,
+      "server_cpu_ms_per_MB_median": 5.54,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.308,
+        "server_cpu_s": 1.441
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.385,
+        "server_cpu_s": 1.44
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 3.427,
+        "server_cpu_s": 1.646
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x1": {
+      "MB_s_median": 124.5,
+      "server_cpu_ms_per_MB_median": 7.37,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 2.517,
+        "server_cpu_s": 1.972
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 2.087,
+        "server_cpu_s": 1.915
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.978,
+        "server_cpu_s": 1.896
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x1": {
+      "MB_s_median": 241.4,
+      "server_cpu_ms_per_MB_median": 4.51,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 259.96,
+        "wall_s": 1.098,
+        "server_cpu_s": 1.202
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.04,
+        "server_cpu_s": 1.153
+       },
+       {
+        "MB": 259.96,
+        "wall_s": 1.077,
+        "server_cpu_s": 1.172
+       }
+      ]
+     },
+     "cleartext x4": {
+      "MB_s_median": 927.5,
+      "server_cpu_ms_per_MB_median": 2.16,
+      "ciphers": [
+       "None"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 1.121,
+        "server_cpu_s": 2.362
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 1.038,
+        "server_cpu_s": 2.233
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 1.254,
+        "server_cpu_s": 2.241
+       }
+      ]
+     },
+     "TLS_AES_128_GCM_SHA256 x4": {
+      "MB_s_median": 163.0,
+      "server_cpu_ms_per_MB_median": 5.86,
+      "ciphers": [
+       "TLS_AES_128_GCM_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 6.378,
+        "server_cpu_s": 6.865
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 7.063,
+        "server_cpu_s": 6.001
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 5.848,
+        "server_cpu_s": 6.089
+       }
+      ]
+     },
+     "TLS_AES_256_GCM_SHA384 x4": {
+      "MB_s_median": 135.9,
+      "server_cpu_ms_per_MB_median": 7.19,
+      "ciphers": [
+       "TLS_AES_256_GCM_SHA384"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 7.405,
+        "server_cpu_s": 7.478
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 7.653,
+        "server_cpu_s": 7.456
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 9.192,
+        "server_cpu_s": 7.696
+       }
+      ]
+     },
+     "TLS_CHACHA20_POLY1305_SHA256 x4": {
+      "MB_s_median": 239.2,
+      "server_cpu_ms_per_MB_median": 4.68,
+      "ciphers": [
+       "TLS_CHACHA20_POLY1305_SHA256"
+      ],
+      "runs": [
+       {
+        "MB": 1039.85,
+        "wall_s": 4.507,
+        "server_cpu_s": 4.938
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 3.552,
+        "server_cpu_s": 4.355
+       },
+       {
+        "MB": 1039.85,
+        "wall_s": 4.348,
+        "server_cpu_s": 4.87
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

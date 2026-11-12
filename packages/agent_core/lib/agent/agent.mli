@@ -250,7 +250,7 @@ type execution_terminal_evidence =
 
 type execution_observation =
   | Execution_awaiting
-  | Execution_owner_lost
+  | Execution_owner_lost of execution_recovery_action
   | Execution_terminal of execution_terminal_evidence
 
 val execution_locator_to_yojson : execution_locator -> Yojson.Safe.t
@@ -308,8 +308,14 @@ val observe_execution :
     under that lock. Missing files, identity changes and cleanup failures are
     errors, never owner-loss evidence. The operation creates no lock file and
     performs no recovery writes, replay or execution admission. A lost owner
-    with no terminal requires operator reconciliation; external effects remain
-    unknown. [Execution_awaiting] includes a competing observation or writer
+    carries the recovery action read from the tree its writer last committed,
+    derived as terminal settlement derives it:
+    [Operator_repair_required] when a Tool attempt was admitted and has no
+    settled result, so its external effect is unknown; [Retire] when every
+    admitted Tool attempt is settled. [Retire] says nothing about a provider
+    request that was open when the writer was lost: what a lost run means for
+    the host's own work is the host's decision.
+    [Execution_awaiting] includes a competing observation or writer
     admission whose absence has not been established. *)
 
 (** Configure one durable execution scope. Without [resume], the directory must

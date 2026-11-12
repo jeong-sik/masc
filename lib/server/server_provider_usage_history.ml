@@ -2,6 +2,8 @@ module Usage = Runtime_provider_usage_window
 
 module Projection = Server_provider_usage_history_projection
 
+open Result.Syntax
+
 let store config =
   Dated_jsonl.open_store
     (Dated_jsonl.Store.at
@@ -81,32 +83,55 @@ module Kept = Dated_jsonl_kept_days
 let kept : (string, Projection.t Kept.t) Hashtbl.t = Hashtbl.create 1
 let kept_mu = Stdlib.Mutex.create ()
 
+(* The day files of the widest window, folded and kept for the workspace. *)
+let kept_days config ~now =
+  let days =
+    Kept.days_between ~since:(window_start ~now ~window:Fourteen_days) ~until:now
+  in
+  let previous =
+    Stdlib.Mutex.protect kept_mu (fun () ->
+      Option.value ~default:Kept.empty (Hashtbl.find_opt kept config.Workspace.base_path))
+  in
+  match
+    Kept.refresh (store config) ~days ~init:(Projection.unbounded ()) ~f:consume previous
+  with
+  | Error read_error ->
+      Log.Server.warn "provider usage history read failed: %s"
+        (Dated_jsonl.read_error_to_string read_error);
+      Error "provider usage history store unavailable"
+  | Ok files ->
+      Stdlib.Mutex.protect kept_mu (fun () ->
+        Hashtbl.replace kept config.Workspace.base_path files);
+      Ok files
+
+let project files ~now ~window =
+  let since_at = window_start ~now ~window in
+  Kept.fold files ~init:(Projection.create ~since_at ~now)
+    ~f:(fun projection (day : Kept.day) file ->
+      if day.starts_at >= since_at then Projection.absorb projection file
+      else projection)
+
 let read config ~now ~window =
   if failure_in_window ~now ~window then
     Error "provider usage history incomplete: a report could not be stored"
   else
-    let days =
-      Kept.days_between ~since:(window_start ~now ~window:Fourteen_days) ~until:now
-    in
-    let previous =
-      Stdlib.Mutex.protect kept_mu (fun () ->
-        Option.value ~default:Kept.empty (Hashtbl.find_opt kept config.Workspace.base_path))
-    in
-    match
-      Kept.refresh (store config) ~days ~init:(Projection.unbounded ()) ~f:consume previous
-    with
-    | Error read_error ->
-        Log.Server.warn "provider usage history read failed: %s"
-          (Dated_jsonl.read_error_to_string read_error);
-        Error "provider usage history store unavailable"
-    | Ok files ->
-        Stdlib.Mutex.protect kept_mu (fun () ->
-          Hashtbl.replace kept config.Workspace.base_path files);
-        let since_at = window_start ~now ~window in
-        let projection =
-          Kept.fold files ~init:(Projection.create ~since_at ~now)
-            ~f:(fun projection (day : Kept.day) file ->
-              if day.starts_at >= since_at then Projection.absorb projection file
-              else projection)
-        in
-        Ok (Projection.response_json ~days:(days_of_window window) projection)
+    let* files = kept_days config ~now in
+    Ok (Projection.response_json ~days:(days_of_window window) (project files ~now ~window))
+
+let restore config ~now ~scopes =
+  let* files = kept_days config ~now in
+  let stored = Projection.stored_reports (project files ~now ~window:Fourteen_days) in
+  if stored.Projection.unrestorable > 0 then
+    Log.Server.warn
+      "provider usage history: %d stored readings name a source or kind this build does not write and were not put back"
+      stored.Projection.unrestorable;
+  List.iter
+    (fun scope ->
+      let id = scope_id scope in
+      Usage.restore ~scope ~now
+        (List.filter_map
+           (fun (scope_id, observed_at, report) ->
+             if String.equal scope_id id then Some (observed_at, report) else None)
+           stored.Projection.reports))
+    scopes;
+  Ok ()

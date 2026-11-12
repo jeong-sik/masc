@@ -36,7 +36,7 @@ let test_unreachable_target_keeps_its_name_and_reason () =
       ()
   in
   Alcotest.(check string) "name and reason" "beta — no longer in the roster"
-    (Composer.prompt composer);
+    (Composer.prompt ~ko:false composer);
   check_key ~label:"enter cannot send"
     { composer with Composer.focus = Composer.Focused; draft = "hi" }
     Composer.send_key Composer.Edit

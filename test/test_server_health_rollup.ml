@@ -369,7 +369,11 @@ let test_typed_original_observation_survives_rollup () =
     | `Assoc fields -> `Assoc (("keeper_id", `String "different-keeper") :: List.remove_assoc "keeper_id" fields)
     | _ -> Alcotest.fail "the action is an object" in
   check bool "a changed target cannot borrow the original diagnostic" true
-    (Result.is_error (A.of_json changed))
+    (Result.is_error (A.of_json changed));
+  let failed = A.memory_attention ~keeper:"keeper-a" ~durable:None
+      ~admission:(Some (P.Admission_failed "pass refused")) ~measured_at:None in
+  check bool "a failed admission pass survives the operator-action wire" true
+    (match A.of_json (A.to_json failed) with Ok held -> A.equal held failed | Error _ -> false)
 
 let test_queue_action_preserves_ambiguous_ownership () =
   let module A = Masc.Operator_action_reason in

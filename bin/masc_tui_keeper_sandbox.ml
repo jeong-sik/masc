@@ -879,7 +879,7 @@ let detail_sections ~ko ~width reading =
   @ wrapped_rows ~width ~label:(text ~ko "샌드박스 호출" "Sandbox calls") ~tone:`Info
       (text ~ko "t  도구 호출" "t  tool calls")
 
-let view_lines ?(ko = false) ~width reading =
+let view_lines ~ko ~width reading =
   status_lines ~ko ~width reading @ detail_sections ~ko ~width reading
 
 (* These replies can arrive in either order. Do not join names or infer that
@@ -1128,7 +1128,7 @@ let decode_logs ~sanitize json =
   Ok { log_source; log_tail; log_kata_host_alignment }
 ;;
 
-let logs_view_lines ?(ko = false) ~width logs =
+let logs_view_lines ~ko ~width logs =
   let tr = text ~ko in
   let title = [ ""; " " ^ styled Masc_tui_theme.Sgr.bold (tr "7. 컨테이너 로그" "7. container logs") ] in
   let backend_label = function

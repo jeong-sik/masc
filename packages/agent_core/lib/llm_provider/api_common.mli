@@ -249,8 +249,15 @@ val tls_peer_of_host : string -> (tls_peer, string) result
     There is no third answer: this client never opens a TLS session with no
     name for the authenticator to check. *)
 
+(** [make_https_result ?tls_config ()] is the function that starts a TLS
+    session on a connected socket. It uses [tls_config] when given, and
+    {!tls_client_config} otherwise. A given configuration decides which
+    certificates are trusted, so a caller that passes one owns that decision;
+    the handshake still draws from the process's default random generator,
+    which this installs the same way for both. *)
 val make_https_result
-  :  unit
+  :  ?tls_config:Tls.Config.client
+  -> unit
   -> ( tls_peer -> [> `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t -> Tls_eio.t
        , https_init_error )
        result

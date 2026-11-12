@@ -7,6 +7,10 @@ module Rows = Masc_tui_rows
 
 module Task_flow = Masc_tui_task_flow
 
+(* Every row of this screen is written in English only, so the fleet words
+   drawn inside its sentences are asked for in English too. *)
+let fleet_words_in_korean = false
+
 type turn_counts = { running : int; idle : int; unavailable : int }
 type metrics_kpis = {
   total_keepers : int;
@@ -543,19 +547,19 @@ let render_section_resources ~cols (state : state) =
      asked for yet (#38499). *)
   let safety_lines = match fleet_stream_view state with
     | Masc_tui_fleet_stream.Cannot_read failure ->
-      [ "    Execution readiness: " ^ Masc_tui_fleet_line.failure_text failure ]
+      [ "    Execution readiness: " ^ Masc_tui_fleet_line.failure_text ~ko:fleet_words_in_korean failure ]
     | Masc_tui_fleet_stream.Awaiting_first_reading -> [ "    Execution readiness not observed" ]
     | Masc_tui_fleet_stream.Unreachable { since } ->
-      [ "    Execution readiness: " ^ Masc_tui_fleet_line.unreachable_text ~now ~since ]
+      [ "    Execution readiness: " ^ Masc_tui_fleet_line.unreachable_text ~ko:fleet_words_in_korean ~now ~since ]
     | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
       [ "    Execution readiness: "
-        ^ Masc_tui_fleet_line.unavailable_text ~now ~degradation ~disconnected_since ]
+        ^ Masc_tui_fleet_line.unavailable_text ~ko:fleet_words_in_korean ~now ~degradation ~disconnected_since ]
     | Masc_tui_fleet_stream.Reading { reading = { fleet = safety; _ }; trouble } ->
       Printf.sprintf "    Executable %d / target %d · shortfall %d · failing %d · paused %d"
         safety.fs_executable_count safety.fs_target_reaction_capacity
         safety.fs_reaction_capacity_shortfall safety.fs_failing_count safety.fs_paused_count
       :: (trouble
-          |> Option.map (fun trouble -> "    " ^ Masc_tui_fleet_line.trouble_text ~now trouble)
+          |> Option.map (fun trouble -> "    " ^ Masc_tui_fleet_line.trouble_text ~ko:fleet_words_in_korean ~now trouble)
           |> Option.to_list)
   in
   List.map clip

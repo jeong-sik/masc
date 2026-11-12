@@ -1317,7 +1317,7 @@ let config_path_note (state : state) =
       Ansi.dim ^ shown ^ Ansi.reset
   | None, Some _ -> ""
   | None, None ->
-      Ansi.dim ^ title_missing_reading ~error:None ^ Ansi.reset
+      Ansi.dim ^ here_missing_reading state ~error:None ^ Ansi.reset
 
 (* A provider id such as [codex_727e6d05] does not say which account it is,
    and one account can sit under several ids. The Models pane names the
@@ -1378,7 +1378,7 @@ let selected_model_reading (state : state) =
               ui_text state ~ko:"2. 계정 · 모델 바인딩 및 배정 키퍼"
                 ~en:"2. Account / Model & Keepers";
             body=String.concat "\n" (config_models_detail state row)}] in
-      Some (Masc_tui_detail_reading.create
+      Some (Masc_tui_detail_reading.create ~ko:(state.ui_language = Lang_ko)
         ~title:("System / Models / " ^ row.provider ^ " / " ^ row.model) sections))
 
 type model_scope_line = Model_identity of string | Model_observation of string
@@ -2223,9 +2223,9 @@ let render_config (state : state) =
          Masc_tui_keys.footer_hints_runtime_account_saved ~lang:state.ui_language
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ~lang:state.ui_language
        | None when Option.is_some state.memory_recall_form ->
-         Masc_tui_keys.footer_hints_memory_recall_form ()
+         Masc_tui_keys.footer_hints_memory_recall_form ~lang:state.ui_language
        | None when Option.is_some state.typesafeai_exclusion_form ->
-         Masc_tui_keys.footer_hints_typesafeai_exclusion_form ()
+         Masc_tui_keys.footer_hints_typesafeai_exclusion_form ~lang:state.ui_language
        | None -> Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:state.config_pane)
     ~body:(fun ~budget:_ c ->
       List.iter (c.push_styled ~style:(Theme.recede ()))

@@ -134,6 +134,19 @@ edit. A skipped request starts no runner and no worker job. Marking a draft
 Ready reads its reviews again, so nothing submitted while it was a draft is
 lost.
 
+A worker run started by an event does not wait for an API quota. When a read
+during admission meets one, the run records `rate_limited` with the server's
+`retry_at`, requests no merge and exits with status 75. Nothing is lost:
+[`approval-merge-sweep.yml`](../../.github/workflows/approval-merge-sweep.yml)
+runs every 30 minutes, reads the open pull requests with one GraphQL walk and
+runs the same worker on every scope that two accounts approved at its current
+head and that is still open. The sweep decides nothing about merging; admission
+stays in the worker. It skips a pull request with an auto-merge reservation
+(GitHub merges that one itself), a conflicting one, and a native stack with a
+layer that is not yet approved. It stops at the first worker run that meets a
+quota and lists the scopes it did not reach; the next sweep takes them. Its
+summary records the REST and GraphQL quota before and after.
+
 When enabling the worker, or after a transient read/merge failure, recheck an
 existing PR (any stack member) explicitly:
 

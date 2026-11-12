@@ -103,8 +103,8 @@ let invalid_profile_dashboard_row ~keeper_name error =
   in
   `Assoc
     [ ("name", `String keeper_name)
-    ; ("phase", `String "Offline")
-    ; ("lifecycle_phase", `String "Offline")
+    ; ("phase", `String (Keeper_state_machine.phase_to_string Keeper_state_machine.Offline))
+    ; ("lifecycle_phase", `String (Keeper_state_machine.phase_to_string Keeper_state_machine.Offline))
     ; ("pipeline_stage", `String "offline")
     ; ("pipeline_stage_detail", `String "keeper_profile_load_failed")
     ; ("status", `String "blocked")

@@ -4,7 +4,18 @@
     One value belongs to one request. A reused connection has carried earlier
     requests, and their response bytes are not this request's, so a value is
     created when the request starts and its counts start at the request's
-    first write. *)
+    first write.
+
+    The fields are plain mutable values with no lock. Only the fibers of one
+    request touch a value, and they all run on the domain that made the
+    request. Eio switches between fibers of one domain only at an effect, so
+    each update below finishes before another fiber reads the value. A value
+    must not be used from another domain: nothing orders its updates there.
+
+    The order of updates matters in one place. {!bytes_read} counts only after
+    {!write_began}, so a read that runs before the request's first write adds
+    nothing, and {!delivery} reads the counts after the request has ended in
+    an error. *)
 
 type t
 

@@ -320,6 +320,18 @@ let quota_scope_of_runtime (rt : t) : Runtime_quota_window.scope =
   rt.quota_scope
 ;;
 
+(* Each quota scope the runtimes draw on, once, in first-appearance order:
+   rows that share a credential share one scope. *)
+let distinct_quota_scopes (runtimes : t list) : Runtime_quota_window.scope list =
+  List.fold_left
+    (fun scopes (rt : t) ->
+       if List.exists (Runtime_quota_window.scope_equal rt.quota_scope) scopes
+       then scopes
+       else scopes @ [ rt.quota_scope ])
+    []
+    runtimes
+;;
+
 (* The model's declared max output tokens (AGENT_CORE capability catalog SSOT).
    [None] for an official-client runtime, for a model with no catalog row, and
    for a row that leaves it unset.

@@ -30,7 +30,7 @@ let render_about (state : state) =
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~help_door:true
     ~surface_key:"about" ~title:(screen_title " MASC")
-    ~hints:(Masc_tui_keys.footer_hints_about ())
+    ~hints:(Masc_tui_keys.footer_hints_about ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       Masc_tui_emblem_screen.about_body
         ~cols:(framed_inner_width cols) ~rows:budget
@@ -67,7 +67,9 @@ let render_keeper_navigation (state : state) =
     ~cursor:Frame_presenter.Hidden ~rows:terminal_rows ~cols
     ~footer:
       (Footer_hints
-         { hints = Masc_tui_keys.keeper_navigation_hints; position = None })
+         { hints = Masc_tui_keys.keeper_navigation_hints ~lang:state.ui_language
+         ; position = None
+         })
     buf
 
 let context_split_lines ~cols ~left_width ~left ~right =
@@ -681,7 +683,7 @@ let render_patch_modal (state : state) =
     ~title:
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
-    ~hints:(Masc_tui_keys.footer_hints_patch_review ())
+    ~hints:(Masc_tui_keys.footer_hints_patch_review ~lang:state.ui_language)
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  old / new · col %d/%d" (hscroll + 1) (limit + 1));
@@ -763,7 +765,7 @@ let render_link_preview_modal (state : state) =
         ~title:
           (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
            ^ Ansi.reset)
-        ~hints:"Esc:close"
+        ~hints:(Masc_tui_keys.footer_hints_link_preview_empty ~lang:state.ui_language)
         ~body:(fun ~budget:_ c ->
           c.push "  (no web links found in this conversation to preview)")
   | Some (_url, preview, total_links, content_height, content_lines) ->
@@ -812,7 +814,7 @@ let render_play_card (state : state) card =
     state ~terminal_rows ~cols ~surface_key:"play-invite"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Play invite")
-    ~hints:"j/k:scroll  y:copy link  Esc:close"
+    ~hints:(Masc_tui_keys.footer_hints_play_invite ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let width = framed_inner_width cols - String.length play_card_indent in
       List.iter
@@ -885,11 +887,14 @@ let render_keeper_deletions (state : state) =
    the hint rows are on. The end of the filter being typed stays in view, the
    way the palette keeps its query. *)
 let help_title (state : state) ~cols =
-  let name = screen_title " MASC Cheat Sheet" in
+  (* The product name is not drawn (RFC tui-one-screen-grammar §2): the sheet
+     is named for what it is, in the screen's language. *)
+  let name = screen_title (" " ^ ui_text state ~ko:"도움말" ~en:"Help") in
   match state.help_filter with
   | Masc_tui_help.Off ->
-      name ^ "  " ^ Ansi.dim ^ "hints "
-      ^ (if state.hints_visible then "on" else "off")
+      name ^ "  " ^ Ansi.dim
+      ^ (if state.hints_visible then ui_text state ~ko:"힌트 켬" ~en:"hints on"
+         else ui_text state ~ko:"힌트 끔" ~en:"hints off")
       ^ Ansi.reset
   | (Masc_tui_help.Typing query | Masc_tui_help.Kept query) as filter ->
       let caret =
@@ -913,12 +918,20 @@ let help_hints (state : state) =
   | Masc_tui_help.Off -> (
       match state.help_scope with
       | Masc_tui_help.Here ->
-          "?:every screen  /:find  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
+          ui_text state
+            ~ko:"?:모든 화면  /:찾기  j/k:스크롤  PgUp/PgDn:페이지  g/G:처음/끝  h:힌트  Esc:닫기"
+            ~en:"?:every screen  /:find  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close"
       | Masc_tui_help.Everything ->
-          "/:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close")
-  | Masc_tui_help.Typing _ -> "Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page"
+          ui_text state
+            ~ko:"/:필터  j/k:스크롤  PgUp/PgDn:페이지  g/G:처음/끝  h:힌트  Esc:닫기"
+            ~en:"/:filter  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  Esc:close")
+  | Masc_tui_help.Typing _ ->
+      ui_text state ~ko:"Enter:유지  Esc:지우기  Up/Down:스크롤  PgUp/PgDn:페이지"
+        ~en:"Enter:keep  Esc:clear  Up/Down:scroll  PgUp/PgDn:page"
   | Masc_tui_help.Kept _ ->
-      "/:edit  Esc:clear  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  ?:close"
+      ui_text state
+        ~ko:"/:고치기  Esc:지우기  j/k:스크롤  PgUp/PgDn:페이지  g/G:처음/끝  h:힌트  ?:닫기"
+        ~en:"/:edit  Esc:clear  j/k:scroll  PgUp/PgDn:page  g/G:first/last  h:hints  ?:close"
 
 (* The cheat sheet, through the overlay contract. It drew its box and its rows
    by hand and closed the box under the last row, so a sheet shorter than the
@@ -1263,7 +1276,7 @@ let render_answering (state : state) =
     ~frame:Chrome_overlay
     (* Enter and Esc are in the footer row below this overlay. *)
     ~title:(screen_title " MASC Answering")
-    ~hints:"j/k:move  PgUp/PgDn:page  Home/End  Enter:chat  Esc:close"
+    ~hints:(Masc_tui_keys.footer_hints_answering ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let content_height = max 1 (budget - answering_preview_rows) in
       let scroll =

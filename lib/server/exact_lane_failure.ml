@@ -19,6 +19,14 @@ let is_transient = function
   | Transient -> true
   | Auth_refused | Configuration_refused | Input_refused _ | Output_unusable | Output_limit -> false
 
+(* The refusals that name the size come first, in the order
+   [Keeper_librarian_input_refusal.rank] gives them; [Invalid_request] names
+   no cause and comes last. *)
+let ending_precedence = [ Context_overflow; Input_capacity; Request_body; Invalid_request ]
+
+let ending_input_refusal failures =
+  List.find_opt (fun kind -> List.mem (Input_refused kind) failures) ending_precedence
+
 (* A quota or billing refusal that states when the account may be called
    again is transient: the slot waits for that time, and a slot held for it
    ends as this call did (RFC-exact-lane-waits-for-a-stated-reset R5).

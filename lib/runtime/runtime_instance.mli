@@ -131,6 +131,9 @@ val quota_scope_of_runtime : t -> Runtime_quota_window.scope
     snapshot.  Use this form across a provider call so a concurrent catalog
     reload cannot rebind the response to a different credential account. *)
 
+val distinct_quota_scopes : t list -> Runtime_quota_window.scope list
+(** Each quota scope the runtimes draw on, once, in first-appearance order. *)
+
 val max_output_tokens_of_runtime : t -> int option
 (** Declared max output tokens (AGENT_CORE capability catalog) for the model bound to
     [rt]. [None] for an official-client runtime (Codex app-server, Claude Code,

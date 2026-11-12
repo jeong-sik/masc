@@ -1,0 +1,4 @@
+a refused page may run a script of the server	caught	callback; start
+a refused page names no style source	caught	callback; start
+the sheet of a refused page is under another nonce	caught	callback; start
+the sheet of a completed page is under another nonce	caught	Google, then sign out

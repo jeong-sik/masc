@@ -15,7 +15,7 @@ val legend : (string * string) list
     travels: asked, approved, refused, outrun by its own criterion, unreadable. *)
 
 val legend_rows :
-  ?ko:bool -> max_cells:int -> max_rows:int -> Masc.Tui_decode.goal_proof list -> string list
+  ko:bool -> max_cells:int -> max_rows:int -> Masc.Tui_decode.goal_proof list -> string list
 (** Complete, uncoloured legend rows, including the JUDGE label and continuation
     indent. Wraps within the frame's content-cell budget. Returns no rows when
     the full legend cannot fit the available height, the label leaves no room

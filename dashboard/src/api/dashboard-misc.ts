@@ -76,17 +76,22 @@ export type KeeperLibrarianWorkerPending = {
   wait: 'capacity' | 'processing' | 'outcome_unknown' | 'unreachable' | 'missing_after_dispatch' | 'journal_recheck'
 }
 
+export type KeeperLibrarianLocalFailure = { kind: 'local_failure'; detail: string }
+
 export type KeeperLibrarianPending =
   | KeeperLibrarianWorkerPending
   | { kind: 'publication' | 'message_floor'; request_id: string; detail: string }
   | { kind: 'basis_changed'; request_id: string }
-  | { kind: 'local_failure'; detail: string }
+  | KeeperLibrarianLocalFailure
+
+/** What the latest explicit-admission pass left unfinished: a worker wait or the pass's own failure. */
+export type KeeperLibrarianAdmission = KeeperLibrarianWorkerPending | KeeperLibrarianLocalFailure
 
 export interface KeeperMemoryHealthLibrarian {
   state: KeeperMemoryHealthLibrarianState | null
   detail: string | null
   pending: KeeperLibrarianPending | null
-  admission_wait: KeeperLibrarianWorkerPending | null
+  admission_wait: KeeperLibrarianAdmission | null
   operator_action_required: boolean
   measured_at: number | null
   unread_atom_turns: number | null
@@ -261,7 +266,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v14'
+  schema: 'keeper.memory_os.current_health.v15'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -449,8 +454,9 @@ function decodeKeeperMemoryHealthLibrarian(raw: unknown): KeeperMemoryHealthLibr
   const pending = raw.pending === null ? null : decodeKeeperLibrarianPending(raw.pending)
   if ((state === 'pending') !== (pending !== null) || (raw.pending !== null && pending === null)) return null
   const admission = raw.admission_wait === null ? null : decodeKeeperLibrarianPending(raw.admission_wait)
-  if (raw.admission_wait !== null && admission?.kind !== 'worker') return null
-  const admission_wait = admission?.kind === 'worker' ? admission : null
+  const admission_wait = admission?.kind === 'worker' || admission?.kind === 'local_failure'
+    ? admission : null
+  if (raw.admission_wait !== null && admission_wait === null) return null
   const operator_action_required = librarianPendingNeedsAttention(pending)
     || librarianPendingNeedsAttention(admission_wait)
   if (raw.operator_action_required !== operator_action_required) return null
@@ -875,7 +881,7 @@ function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | nu
     ? ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary', 'execution']
     : ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary']
   if (!exactKeys(raw, expectedKeys)) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v14') return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v15') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)

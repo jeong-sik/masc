@@ -46,6 +46,7 @@ let system_log_optional_fact label = function
 let system_log_detail_section = detail_section_heading
 
 let system_log_detail_lines (state : state) ~seq ~width =
+  let t korean english = ui_text state ~ko:korean ~en:english in
   let entry =
     Option.bind (system_logs_page state).lp_snapshot (fun snapshot ->
         List.find_opt
@@ -55,27 +56,28 @@ let system_log_detail_lines (state : state) ~seq ~width =
   match entry with
   | None ->
       [ Theme.warn (),
-        "  This log entry is no longer present in the retained page; reload or return to the list."
+        t "  이 로그 줄은 보관 중인 쪽에 더 없음 · 다시 읽거나 목록으로 돌아가기"
+          "  This log entry is no longer present in the retained page; reload or return to the list."
       ]
   | Some entry ->
       let core_facts =
-        [ system_log_fact "Message" entry.sl_message
-        ; Page_line.fact ~tone:(system_log_level_tone entry.sl_level) "Level"
+        [ system_log_fact (t "메시지" "Message") entry.sl_message
+        ; Page_line.fact ~tone:(system_log_level_tone entry.sl_level) (t "수준" "Level")
             (system_log_level_mark entry.sl_level ^ " "
              ^ String.trim (Masc.Tui_decode.system_log_level_label entry.sl_level))
-        ; system_log_fact "Timestamp" entry.sl_ts
-        ; system_log_optional_fact "Category" entry.sl_category
+        ; system_log_fact (t "시각" "Timestamp") entry.sl_ts
+        ; system_log_optional_fact (t "분류" "Category") entry.sl_category
         ]
       in
       let metadata_facts =
-        [ system_log_optional_fact "Keeper" entry.sl_keeper
-        ; system_log_optional_fact "Turn" (Option.map string_of_int entry.sl_turn)
-        ; system_log_fact "Module" entry.sl_module
-        ; system_log_fact "Source"
+        [ system_log_optional_fact (t "Keeper" "Keeper") entry.sl_keeper
+        ; system_log_optional_fact (t "턴" "Turn") (Option.map string_of_int entry.sl_turn)
+        ; system_log_fact (t "모듈" "Module") entry.sl_module
+        ; system_log_fact (t "출처" "Source")
             (Masc.Tui_decode.system_log_source_label entry.sl_source)
-        ; system_log_fact "Origin"
+        ; system_log_fact (t "읽은 곳" "Origin")
             (System_logs_view.source_label (System_logs_view.source state.system_logs))
-        ; system_log_fact "Sequence" (string_of_int entry.sl_seq)
+        ; system_log_fact (t "순번" "Sequence") (string_of_int entry.sl_seq)
         ]
       in
       let blocks =
@@ -84,15 +86,15 @@ let system_log_detail_lines (state : state) ~seq ~width =
          | Some error ->
              [ ui_text state ~ko:"이전 관측 · 조회 실패" ~en:"Last read · refresh failed",
                [ Page_line.note ~tone:Page_line.Failure error ] ])
-        @ [ "1. 로그 메시지 · 핵심 상태 (Message & Severity)", core_facts
-        ; "2. 발생 위치 · 메타데이터 (Origin & Context)", metadata_facts
+        @ [ t "1. 로그 메시지 · 핵심 상태" "1. Message & Severity", core_facts
+        ; t "2. 발생 위치 · 메타데이터" "2. Origin & Context", metadata_facts
         ]
       in
-      let details_title = "3. 구조화 상세 (STRUCTURED DETAILS)" in
+      let details_title = t "3. 구조화 상세" "3. Structured Details" in
       (match entry.sl_details with
        | `Null ->
            detail_page ~width
-             (blocks @ [ details_title, [ Page_line.note ~tone:Page_line.Quiet "none" ] ])
+             (blocks @ [ details_title, [ Page_line.note ~tone:Page_line.Quiet (t "없음" "none") ] ])
        | json ->
            detail_page ~width blocks
            @ system_log_detail_section details_title
@@ -140,8 +142,10 @@ let render_system_log_detail (state : state) seq =
    the other, so the mark and the surface could disagree and nothing would say
    so. The keys leave with it: the Activity footer projects from the key table,
    which names 1 / 2 there, and no other surface puts its keys in its title. *)
+let acting_tab_label ~ko = if ko then "활동" else "Events"
+
 let activity_tabs ~ko ~on_logs : (string * bool * surface) list =
-  [ ((if ko then "활동" else "Events"), not on_logs, Acting)
+  [ (acting_tab_label ~ko, not on_logs, Acting)
   ; ((if ko then "로그" else "Logs"), on_logs, System_logs)
   ]
 
@@ -258,7 +262,7 @@ let render_system_logs (state : state) =
     | None ->
         let reading_note =
           match (system_logs_page state).lp_error with
-          | None -> title_missing_reading ~error:None
+          | None -> here_missing_reading state ~error:None
           | Some _ -> ""
         in
         activity_heading state ~cols ~on_logs:true
@@ -396,29 +400,33 @@ let render_keeper_calls (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  (* The name is a string the server sent. It is drawn as a step ahead of
+     the last one, which the row lays out as given, so it is made printable
+     here: as the id of the title this row replaced it was made printable by
+     the title itself. *)
   let keeper_name =
     match List.nth_opt state.keepers state.keeper_cursor with
-    | Some keeper -> keeper.k_name
+    | Some keeper -> Terminal_text.single_line keeper.k_name
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let heading ~after =
-    detail_heading ~cols ~lead:(Lead_text keeper_calls_lead) ~id:keeper_name
-      ~after:[ after ] ~tail:(connection_badge state)
+  let heading ~readings =
+    here_row ~cols state
+      ~path:[ keeper_name; ui_text state ~ko:"호출" ~en:"calls" ]
+      ~readings ~position:None
   in
   let header =
     match state.keeper_calls with
     | Some snapshot when state.keeper_calls_loading ->
         heading
-          ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  refreshing..."
-               (List.length snapshot.Masc.Tui_decode.kcs_entries))
+          ~readings:
+            [ count_reading state Masc_tui_value.Count.Call
+                (List.length snapshot.Masc.Tui_decode.kcs_entries)
+            ; ui_text state ~ko:"다시 읽는 중" ~en:"refreshing" ]
     | None when state.keeper_calls_loading ->
-        heading ~after:" \xe2\x96\xb8 calls  (loading...)"
+        heading ~readings:[ ui_text state ~ko:"읽는 중" ~en:"loading" ]
     | None ->
         heading
-          ~after:
-            (" \xe2\x96\xb8 calls  "
-            ^ title_missing_reading ~error:state.keeper_calls_error)
+          ~readings:[ field_missing_reading ~error:state.keeper_calls_error ]
     | Some snapshot ->
         (* The verdict says what is wrong with the log; the reason says why,
            and it is not always the verdict said twice. Four of the words
@@ -445,13 +453,13 @@ let render_keeper_calls (state : state) =
           | None -> health ^ reason
         in
         heading
-          ~after:
-            (Printf.sprintf " \xe2\x96\xb8 calls (%d)  %s"
-               (List.length snapshot.Masc.Tui_decode.kcs_entries)
-               freshness)
+          ~readings:
+            [ count_reading state Masc_tui_value.Count.Call
+                (List.length snapshot.Masc.Tui_decode.kcs_entries)
+            ; freshness ]
   in
   box_top buf cols;
-  box_line_styled buf cols ~style:Ansi.bold header;
+  box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
     "  j/k rows · exact fields: tool | input | output"
@@ -638,16 +646,21 @@ let render_keeper_calls (state : state) =
    what arrives above it, so an operator reading the past is not pushed off
    it by the present. *)
 let acting_evidence_intro (state : state) =
-  [ Ansi.reset, screen_title " ACTING EVENT EVIDENCE" ^ "  " ^ connection_badge state
-  ; Ansi.dim, " Selected event snapshot; new arrivals do not replace this reading"
+  [ Ansi.dim, " Selected event snapshot; new arrivals do not replace this reading"
   ; Ansi.dim, Printf.sprintf " Retained feed events: %d (selection pinned)" (List.length state.acting)
   ; Ansi.dim, " " ^ Terminal_text.single_line
       (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay)
   ]
 
+(* The here row above the intro. *)
+let acting_evidence_here_rows = 1
+
 let acting_evidence_content_height ~rows ~intro =
-  (* Top and divider surround the same one-line intro the renderer consumes. *)
-  max 1 (rows - (2 + List.length intro + listing_rows_below_the_body))
+  (* Top and divider surround the here row and the intro the renderer consumes. *)
+  max 1
+    (rows
+     - (2 + acting_evidence_here_rows + List.length intro
+        + listing_rows_below_the_body))
 
 let acting_evidence_page_rows state ~terminal_rows =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -660,6 +673,11 @@ let render_acting_evidence (state : state) entry =
   let buf = Buffer.create 4096 in
   let intro = acting_evidence_intro state in
   box_top buf cols;
+  box_line buf cols
+    (here_row ~cols state
+       ~path:[ acting_tab_label ~ko:(state.ui_language = Lang_ko)
+             ; ui_text state ~ko:"증거" ~en:"evidence" ]
+       ~readings:[] ~position:None);
   List.iter (fun (style, line) -> box_line_styled buf cols ~style line) intro;
   box_divider buf cols;
   let lines =
@@ -725,7 +743,7 @@ let render_acting_evidence (state : state) entry =
        (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)));
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols
-      ~hints:Masc_tui_keys.acting_evidence_hints);
+      ~hints:(Masc_tui_keys.acting_evidence_hints ~lang:state.ui_language));
   finish_surface state ~clamped:(Acting_detail_scroll scroll)
     ~surface_key:"acting-evidence" ~rows:terminal_rows ~cols buf
 
@@ -784,7 +802,8 @@ let acting_notices (state : state) ~trace_unavailable =
   in
   List.filter_map Fun.id
     [ feed; dropped; undecodable; unseen; replay
-    ; Masc_tui_acting_pane.trace_unavailable_summary trace_unavailable ]
+    ; Masc_tui_acting_pane.trace_unavailable_summary ~ko:(state.ui_language = Lang_ko)
+        trace_unavailable ]
 
 let acting_content_height ~rows ~notices =
   (* Top/title/divider, column heading, then overflow/bottom/footer. *)
@@ -891,9 +910,19 @@ let render_acting (state : state) =
   let header =
     activity_heading state ~cols ~on_logs:false
       ~reading:
-        [ "  " ^ Acting.filter_label state.acting_filter
-        ; "  " ^ Masc_tui_types.activity_title_reading ~observer:state.observer
-            ~shown ~held ]
+        (("  " ^ Acting.filter_label state.acting_filter)
+         ::
+         (match
+            Masc_tui_types.activity_title_reading ~observer:state.observer
+              ~shown ~held
+          with
+          | Activity_unanswered { error } ->
+              [ "  " ^ here_missing_reading state ~error ]
+          | Activity_counted { shown; held } ->
+              [ "  " ^ count_reading state Masc_tui_value.Count.Row shown
+              ; reading_separator
+                ^ count_reading state Masc_tui_value.Count.Event held
+                ^ ui_text state ~ko:" 보유" ~en:" held" ]))
   in
   box_top buf cols;
   box_line buf cols header;

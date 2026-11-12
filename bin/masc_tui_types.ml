@@ -4477,6 +4477,24 @@ let keeper_detail_tab_label = function
   | Detail_runs -> "Runs"
   | Detail_terminal -> "Terminal"
 
+(* The tab's name on the tab row. [keeper_detail_tab_label] is the English
+   name the help sentences quote. *)
+let keeper_detail_tab_title ~ko tab =
+  if not ko then keeper_detail_tab_label tab
+  else
+    match tab with
+    | Detail_info -> "정보"
+    | Detail_items -> "아이템"
+    | Detail_sandbox -> "샌드박스"
+    | Detail_instructions -> "설정"
+    | Detail_secrets -> "시크릿"
+    | Detail_github -> "GitHub"
+    | Detail_identity -> "정체성"
+    | Detail_channels -> "채널"
+    | Detail_automation -> "자동화"
+    | Detail_runs -> "실행"
+    | Detail_terminal -> "터미널"
+
 (** Which Keeper a connected client is acting for, where that is a reading
     its row does not already carry.
 
@@ -6436,6 +6454,14 @@ let memory_pass_text ~ko ending =
     | Pass_raised _ -> "처리 실패", "crashed" in
   if ko then korean else english
 
+(* A failed explicit-admission pass travels as the local-failure kind, which a
+   durable pass reads as a failed recovery. Admission has no recovery step, so
+   it names the pass. *)
+let memory_admission_text ~ko = function
+  | Masc.Keeper_librarian_pending.Admission_waiting worker ->
+      memory_pass_text ~ko (Masc.Tui_decode_memory_health.Pass_pending (Worker worker))
+  | Admission_failed _ -> if ko then "접수 실패" else "admission failed"
+
 let memory_state_text ~ko (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let text korean english = if ko then korean else english in
   let pass () = match keeper.mkh_librarian.mlh_state with
@@ -6458,9 +6484,8 @@ let memory_keeper_search_text (keeper : Masc.Tui_decode_memory_health.memory_kee
   let admission_words =
     match keeper.mkh_librarian.mlh_admission_wait with
     | None -> []
-    | Some worker ->
-        pass_words (Masc.Tui_decode_memory_health.Pass_pending
-          (Masc.Keeper_librarian_pending.Worker worker)) in
+    | Some admission ->
+        [memory_admission_text ~ko:true admission; memory_admission_text ~ko:false admission] in
   String.concat " "
     ([ keeper.mkh_keeper_id
     ; memory_state_label (memory_state keeper)
@@ -21314,6 +21339,15 @@ let title_missing_reading ~error =
 let field_missing_reading ~error =
   if Option.is_some error then field_failed else field_unread
 
+(* The same answer in the here row. The row's gap sets a reading off from the
+   path, so it takes no brackets, and it reads in the screen's language like
+   the path beside it. Four rows each wrote this Korean pair by hand and the
+   rest drew the bracketed English on a Korean screen. *)
+let here_missing_reading (state : state) ~error =
+  ui_text state
+    ~ko:(if Option.is_some error then "조회 실패" else "미조회")
+    ~en:(field_missing_reading ~error)
+
 (* The Activity feed's title reading. A count is a reading only once the feed
    has answered. With no server on the port the feed never opens, and a title
    reading "(0 rows \xc2\xb7 0 events held)" there states a measurement of
@@ -21329,17 +21363,19 @@ let field_missing_reading ~error =
    Held frames outlive the stream that delivered them, so a closed feed, or one
    switched back off, with frames in hand still has a reading to report. Only
    the state before any answer, with nothing held, has none. *)
+type activity_title_reading =
+  | Activity_unanswered of { error : string option }
+  | Activity_counted of { shown : int; held : int }
+
 let activity_title_reading ~observer ~shown ~held =
   match observer, held with
-  | (Observer_off | Observer_opening), 0 -> title_missing_reading ~error:None
+  | (Observer_off | Observer_opening), 0 -> Activity_unanswered { error = None }
   | Observer_closed_before_answer { reason; _ }, 0 ->
-    title_missing_reading ~error:(Some reason)
+    Activity_unanswered { error = Some reason }
   | ( ( Observer_off | Observer_opening | Observer_live _
       | Observer_closed_before_answer _ | Observer_closed_after_live _ ),
       _ ) ->
-    Printf.sprintf "(%s \xc2\xb7 %s held)"
-      (Masc_tui_message_layout.count_noun shown "row")
-      (Masc_tui_message_layout.count_noun held "event")
+    Activity_counted { shown; held }
 
 (* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
    count once it has answered, and otherwise which of the two it is. Asked and

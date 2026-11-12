@@ -392,7 +392,7 @@ let runtime_detail_lines state target ~width =
             (runtime_bool runtime.ro_is_default)
       in
       let quota =
-        match runtime_quota_badge runtime with
+        match runtime_quota_badge ~ko:(state.ui_language = Lang_ko) runtime with
         | None -> []
         | Some _ ->
             fact ~tone:Page_line.Attention "Quota"
@@ -571,8 +571,8 @@ let render_runtime_detail (state : state) target =
     (footer_line state ~max_cells:cols ?position
        ~hints:
          (Masc_tui_keys.footer_hints_runtime_detail
-            ~ko:(state.ui_language = Lang_ko)
-            ~routes:(target = Runtime_routes) ()));
+            ~lang:state.ui_language
+            ~routes:(target = Runtime_routes)));
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
 
@@ -712,11 +712,11 @@ let render_runtime_reading (state : state) =
     | None ->
         let reading_note =
           match state.runtime_surface_error with
-          | None -> title_missing_reading ~error:None
+          | None -> here_missing_reading state ~error:None
           | Some _ -> ""
         in
         here_row ~cols state ~path:[ runtime_step state ]
-          ~readings:[ String.trim reading_note; timestamp ] ~position:None
+          ~readings:[ reading_note; timestamp ] ~position:None
     | Some snapshot ->
         let probe_status =
           match snapshot.Masc.Tui_decode.rss_probe with
@@ -1074,7 +1074,7 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
     | None -> ""
     | Some position -> Printf.sprintf "[%s]  " position in
   let hints = position ^ Masc_tui_keys.footer_hints_runtime_parent
-      ~ko ~parent:projection.rpp_parent in
+      ~lang:state.ui_language ~parent:projection.rpp_parent in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
     ~surface_key:"runtime-parent"
     ~title:header ~hints
@@ -1676,10 +1676,12 @@ let render_runtime_pick (state : state) =
   let current_id = Masc_tui_types.runtime_pick_current_id state in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
-      (Printf.sprintf "%s  %scurrent: %s%s"
-         (screen_title
-            (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 runtime" keeper_name))
-         Ansi.dim current Ansi.reset)
+      (here_row ~cols state
+         ~path:[ keeper_name; runtime_step state ]
+         ~readings:
+           [ Ansi.dim ^ ui_text state ~ko:"지금: " ~en:"current: " ^ current
+             ^ Ansi.reset ]
+         ~position:None)
     ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language (Keepers Keeper_runtime_pick))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())

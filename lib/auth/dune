@@ -4,7 +4,11 @@
  (name masc_auth)
  (public_name masc.auth)
  (wrapped false)
- (private_modules auth_credential_base auth_credential_batch_projection auth_metric_store)
+ (private_modules
+  account_page_css
+  auth_credential_base
+  auth_credential_batch_projection
+  auth_metric_store)
  (libraries
   yojson
   base64
@@ -31,3 +35,19 @@
   time_compat)
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq)))
+
+; account_page.css is the sheet's only copy. The binary carries it as a string,
+; so a page sends it with no file beside the binary. A sheet that ever
+; contained the closing delimiter would end the string early and the generated
+; module would stop compiling, so that mistake cannot pass quietly.
+
+(rule
+ (target account_page_css.ml)
+ (deps account_page.css)
+ (action
+  (with-stdout-to
+   %{target}
+   (progn
+    (echo "let sheet = {account_page_css|")
+    (cat account_page.css)
+    (echo "|account_page_css}\n")))))

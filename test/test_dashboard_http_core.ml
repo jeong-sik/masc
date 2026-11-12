@@ -5490,7 +5490,10 @@ let test_lifecycle_event_display_values () =
           { verb = Keeper_lifecycle_events.Started; phase = None },
         true, "running", "idle", Some false );
       ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Paused,
-        true, "paused", "paused", Some true );
+        false, "paused", "paused", Some true );
+      ( Keeper_lifecycle_events.Custom_event
+          { verb = Keeper_lifecycle_events.Supervisor_cleaned; phase = None },
+        false, "offline", "offline", Some false );
       ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped,
         false, "stopped", "offline", None );
       ( Keeper_lifecycle_events.Phase_event Keeper_state_machine.Crashed,
@@ -5533,8 +5536,8 @@ let patched_runtime_row ~keeper_name ~event ~keepalive_running row =
   | Server_dashboard_http_execution_surfaces.Declaration_row_is_stale ->
     fail "a runtime row was reported as a stale declaration row"
 
-(* The [paused] lifecycle event patches with [keepalive_running = true], so the
-   row goes through the keepalive branch of the status patcher. That branch used
+(* A [paused] lifecycle event patched with [keepalive_running = true] takes the
+   keepalive branch of the status patcher. That branch used
    to classify against the surface vocabulary alone, where "paused" is not a
    member, and fell through to "idle" — producing a row that said [status =
    "idle"] and [paused = true] at the same time. The rebuilt continuity brief

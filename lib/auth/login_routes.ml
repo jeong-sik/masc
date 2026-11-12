@@ -89,14 +89,14 @@ let failure_status = function
 (* The sentence of a refused page. None names what was refused, so a page
    tells a visitor nothing about an invitation or an account. *)
 let failure_sentence = function
-  | Bad_request -> "The sign-in request is not one this server reads."
-  | Unauthorized -> "The sign-in did not complete. Start it again."
-  | Forbidden -> "This account cannot sign in here."
-  | Not_found -> "This sign-in is not set up on this server."
-  | Conflict -> "Another sign-in used this invitation or account first."
-  | Internal_error -> "The server could not finish the sign-in."
-  | Bad_gateway -> "The login provider did not answer as expected. Try again."
-  | Unavailable -> "The server cannot sign anyone in right now. Try again later."
+  | Bad_request -> "로그인 요청을 읽을 수 없어요."
+  | Unauthorized -> "로그인이 끝나지 않았어요. 처음부터 다시 해 주세요."
+  | Forbidden -> "이 계정은 여기에 로그인할 수 없어요."
+  | Not_found -> "이 서버에는 이 로그인 방법이 설정되어 있지 않아요."
+  | Conflict -> "이 초대나 계정으로 다른 로그인이 먼저 끝났어요."
+  | Internal_error -> "서버가 로그인을 마치지 못했어요."
+  | Bad_gateway -> "로그인 서비스가 예상과 다르게 답했어요. 다시 해 주세요."
+  | Unavailable -> "지금은 서버가 로그인을 받을 수 없어요. 잠시 뒤에 다시 해 주세요."
 ;;
 
 (* ---- answers ---- *)
@@ -109,7 +109,10 @@ let no_referrer = "referrer-policy", "no-referrer"
 let html_type = "content-type", "text/html; charset=utf-8"
 let json_type = "content-type", "application/json"
 let set_cookie value = "set-cookie", value
-let page_policy = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+
+(* What every page of this module refuses. A page adds the sources it needs
+   before these. *)
+let page_limits = "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 let escape text =
   let buffer = Buffer.create (String.length text) in
@@ -125,31 +128,37 @@ let escape text =
   Buffer.contents buffer
 ;;
 
-let page ~title ~body =
+(* A page of one decision, as the sign-in page is. *)
+let card parts =
   String.concat
     "\n"
-    [ "<!doctype html>"
-    ; "<html lang=\"en\">"
-    ; "<head>"
-    ; "<meta charset=\"utf-8\">"
-    ; "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-    ; "<title>" ^ title ^ "</title>"
-    ; "</head>"
-    ; "<body>"
-    ; body
-    ; "</body>"
-    ; "</html>"
-    ; ""
-    ]
+    ([ "<main>"; "<div class=\"narrow\">"; "<div class=\"card\">" ] @ parts @ [ "</div>"; "</div>"; "</main>" ])
 ;;
 
-let refused_page failure =
+(* Every failure gets the same two next steps, so the steps tell a visitor no
+   more about an invitation or an account than the sentence does. *)
+let refused_page ~nonce failure =
   { status = failure_status failure
-  ; headers = [ html_type; no_store; no_referrer; "content-security-policy", page_policy ]
+  ; headers =
+      [ html_type
+      ; no_store
+      ; no_referrer
+      ; ( "content-security-policy"
+        , Printf.sprintf "default-src 'none'; %s; %s" (Account_page.style_source ~nonce) page_limits )
+      ]
   ; body =
-      page
-        ~title:"Sign-in failed"
-        ~body:(Printf.sprintf "<p>%s</p>\n<p><a href=\"/\">Back</a></p>" (failure_sentence failure))
+      Account_page.document
+        ~nonce
+        ~title:"MASC 로그인 실패"
+        (card
+           [ "<h1>로그인하지 못했어요</h1>"
+           ; "<p>" ^ failure_sentence failure ^ "</p>"
+           ; "<p><a class=\"button primary block\" href=\"/\">로그인 화면으로</a></p>"
+           ; "<ul class=\"notes\">"
+           ; "<li>초대를 받았다면 받은 초대 링크를 다시 열어 주세요.</li>"
+           ; "<li>계속 안 되면 이 서버를 운영하는 사람에게 알려 주세요.</li>"
+           ; "</ul>"
+           ])
   }
 ;;
 
@@ -163,18 +172,25 @@ let completion_page ~nonce ~return_to ~cookie =
       ; no_referrer
       ; ( "content-security-policy"
         , Printf.sprintf
-            "default-src 'none'; script-src 'nonce-%s'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-            nonce )
+            "default-src 'none'; script-src 'nonce-%s'; %s; %s"
+            nonce
+            (Account_page.style_source ~nonce)
+            page_limits )
       ; set_cookie (Q.set_session_cookie cookie)
       ]
   ; body =
-      page
-        ~title:"Signed in"
-        ~body:
-          (Printf.sprintf
-             "<p>Signed in. <a id=\"next\" href=\"%s\">Continue</a></p>\n\
-              <script nonce=\"%s\">location.replace(document.getElementById(\"next\").getAttribute(\"href\"));</script>"
-             (escape (T.Local_path.to_string return_to))
+      Account_page.document
+        ~nonce
+        ~title:"MASC 로그인 완료"
+        (card
+           [ "<h1>로그인됐어요</h1>"
+           ; "<p>곧 이동해요. 이동하지 않으면 아래 단추를 눌러 주세요.</p>"
+           ; Printf.sprintf
+               "<p><a id=\"next\" class=\"button primary block\" href=\"%s\">계속하기</a></p>"
+               (escape (T.Local_path.to_string return_to))
+           ]
+         ^ Printf.sprintf
+             "\n<script nonce=\"%s\">location.replace(document.getElementById(\"next\").getAttribute(\"href\"));</script>"
              nonce)
   }
 ;;
@@ -294,7 +310,7 @@ let start t provider ~origin ~session_cookie ~fields =
     begin_login t login ~invite ~return_to ~replaces
   in
   match started with
-  | Error failure -> refused_page failure
+  | Error failure -> refused_page ~nonce:(t.draw ()) failure
   | Ok (sealed, authorization_url) ->
     { status = See_other_303
     ; headers =
@@ -454,7 +470,7 @@ let callback t provider ~transaction_cookie ~query =
   in
   let answer =
     match completed with
-    | Error failure -> refused_page failure
+    | Error failure -> refused_page ~nonce:(t.draw ()) failure
     | Ok (return_to, cookie) -> completion_page ~nonce:(t.draw ()) ~return_to ~cookie
   in
   { answer with headers = answer.headers @ [ set_cookie Q.clear_transaction_cookie ] }

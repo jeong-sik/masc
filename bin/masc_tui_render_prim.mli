@@ -342,7 +342,23 @@ val here_row :
     path by a gap and from each other by {!reading_separator}; an empty one
     is not drawn. The last
     step folds first when the row is narrow, readings give way whole from the
-    end, and the position is never cut. The product name is not drawn. *)
+    end, and the position is never cut. A step ahead of the last that the row
+    cannot hold whole is folded in the middle, the longest first, so the last
+    step stays on the row. The product name is not drawn. *)
+
+val reading_separator : string
+(** The mark between two readings of one row. *)
+
+val count_reading :
+  Masc_tui_types.state -> Masc_tui_value.Count.noun -> int -> string
+(** {!Masc_tui_value.Count.reading} in the screen's language. *)
+
+val here_steps_room :
+  cols:int -> Masc_tui_types.state -> steps:int -> after:int -> int
+(** The cells [steps] steps of a path share on a row [cols] wide that must
+    also keep [after] cells for what follows the path: what the screen name
+    and one separator a step leave. A row that lays out the path itself
+    ({!here_path}) folds a long step to this. *)
 
 type compact_connection_state =
   | Compact_workspace_mismatch
@@ -372,11 +388,8 @@ val reading_connection_summary : width:int -> Masc_tui_types.state -> string
     Shared by child headings and Board's existing overflow fallback. *)
 
 val runtime_step : Masc_tui_types.state -> string
-(** The step the Runtime screens take from System. *)
-
-val keeper_calls_lead : string
-(** What the headings laid out by {!Masc_tui_ansi.detail_heading} draw before
-    the id: one keeper's calls. *)
+(** The step the Runtime screens take from System, and a keeper's runtime
+    takes from that keeper. *)
 
 val coordinator_status_row :
   Masc_tui_types.state -> style:string -> string -> string
@@ -400,7 +413,7 @@ val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
 
 val keeper_action_color : Status.keeper_next_action_path option -> string
 
-val keeper_suggested_action : Masc_tui_keeper_control.reading -> string
+val keeper_suggested_action : ko:bool -> Masc_tui_keeper_control.reading -> string
 (** The runtime's suggested action, or why it was not observed. *)
 
 val keeper_state_glyph :
@@ -557,7 +570,7 @@ val planning_backlog_clauses :
     each styled by magnitude band and kept atomic across clause packing. *)
 
 val planning_change_clauses :
-  ?ko:bool ->
+  ko:bool ->
   baseline:Masc_tui_types.planning_snapshot option ->
   Masc_tui_types.planning_snapshot ->
   string list
@@ -687,7 +700,7 @@ val render_repository_changes_diff :
   path:String.t ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
-val runtime_quota_badge : Masc.Tui_decode.runtime_option -> string option
+val runtime_quota_badge : ko:bool -> Masc.Tui_decode.runtime_option -> string option
 
 (** The lanes that list a runtime among their candidates, in resolved order.
     Both doors into the runtime detail read it, so neither can answer with a

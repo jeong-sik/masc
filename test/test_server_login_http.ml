@@ -62,6 +62,10 @@ let split_once ~on text =
   find 0
 ;;
 
+(* What a page lets a person do about a GitHub login, read from the page as
+   a browser parses it. *)
+let login_of page = Account_page_reading.login ~start:"/auth/github/start" page
+
 (* ---- GitHub, as the test plays it ---- *)
 
 type github =
@@ -476,14 +480,37 @@ let the_preview_follows_a_login () =
       "a form may go to GitHub"
       true
       (contains ~sub:"form-action 'self' https://github.com" (one "content-security-policy" home));
+    (* The policy lets a browser apply one sheet, the one the page wrote under
+       the nonce of that policy. Under another nonce the browser applies no
+       style at all. *)
+    (match split_once ~on:"style-src 'nonce-" (one "content-security-policy" home) with
+     | None -> Alcotest.fail "the policy of the home page names no style sheet"
+     | Some (_, rest) ->
+       let nonce =
+         match split_once ~on:"'" rest with
+         | Some (nonce, _) -> nonce
+         | None -> Alcotest.fail "the style source of the policy does not end"
+       in
+       Alcotest.(check bool)
+         "the sheet of the page is under the nonce of its policy"
+         true
+         (contains ~sub:(Printf.sprintf {|<style nonce="%s">|} nonce) home.body));
     (* A browser sends "Origin: null" with a form POST from a no-referrer page. *)
     Alcotest.(check string) "the form posts with its origin" "same-origin" (one "referrer-policy" home);
     let invitation = send admin router ~meth:"GET" ~path:"/accounts/invite" in
     Alcotest.(check int) "the invitation page" 200 invitation.status;
-    Alcotest.(check bool)
-      "it starts a GitHub login"
-      true
-      (contains ~sub:{|action="/auth/github/start"|} invitation.body);
+    (* On each page a person can press the one submit button of the form that
+       posts to the start route. *)
+    Alcotest.check
+      Account_page_reading.outcome
+      "the home page starts a GitHub login"
+      (Ok Account_page_reading.Open)
+      (login_of home.body);
+    Alcotest.check
+      Account_page_reading.outcome
+      "the invitation page starts one"
+      (Ok Account_page_reading.Open)
+      (login_of invitation.body);
     (* A server with no GitHub login client serves the same pages, and the
        button of the login cannot be pressed. *)
     (let no_github =
@@ -497,14 +524,13 @@ let the_preview_follows_a_login () =
        (fun path ->
          let page = send (fresh_browser ()) no_github ~meth:"GET" ~path in
          Alcotest.(check int) ("with no GitHub client, " ^ path) 200 page.status;
-         Alcotest.(check bool)
-           ("the button is disabled on " ^ path)
-           true
-           (contains ~sub:{|<button id="go" disabled>Sign in with GitHub</button>|} page.body);
-         Alcotest.(check bool)
-           ("the page says so on " ^ path)
-           true
-           (contains ~sub:"This server has no GitHub login." page.body))
+         (* The same button, disabled, and the page says why: the button
+            names its description, which is on the page and holds text. *)
+         Alcotest.check
+           Account_page_reading.outcome
+           ("the login is closed and the page says why on " ^ path)
+           (Ok Account_page_reading.Closed)
+           (login_of page.body))
        [ "/"; "/accounts/invite" ]);
     Alcotest.(check string)
       "nobody yet"
@@ -1306,6 +1332,8 @@ let the_route_table () =
       "the paths"
       [ "/api/v1/auth/allowlist"
       ; "/api/v1/auth/allowlist/"
+      ; "/api/v1/auth/invites"
+      ; "/api/v1/auth/invites/"
       ; "/api/v1/auth/pats"
       ; "/api/v1/auth/pats"
       ; "/api/v1/auth/pats/"

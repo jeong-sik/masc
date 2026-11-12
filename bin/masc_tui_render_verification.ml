@@ -104,7 +104,7 @@ let render_verification_list (state : state) =
     | None ->
         let reading_note =
           match state.verification_error with
-          | None -> title_missing_reading ~error:None
+          | None -> here_missing_reading state ~error:None
           | Some _ -> ""
         in
         let after =
@@ -640,7 +640,7 @@ let render_harness_list (state : state) =
     | None ->
         let reading_note =
           match state.harness_error with
-          | None -> title_missing_reading ~error:None
+          | None -> here_missing_reading state ~error:None
           | Some _ -> ""
         in
         let after =
@@ -774,7 +774,16 @@ let render_harness_list (state : state) =
    metric it is measured by -- three hops that were all present and never
    walked, so a verdict said "pass" without saying what it was passing
    towards. *)
+(* The label column of the verdict detail, in display cells: a Korean label
+   is padded by what it occupies, not by its bytes. *)
+let harness_label_cells = 12
+
+let harness_labeled label value =
+  Printf.sprintf "  %s %s" (Message_layout.fit_width label harness_label_cells) value
+
 let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdict) =
+  let t korean english = ui_text state ~ko:korean ~en:english in
+  let towards = t "목표" "Towards" in
   let goal_of id =
     Option.bind state.planning (fun snapshot ->
       List.find_opt
@@ -783,9 +792,9 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
   in
   match task_goal_reading state ~task_id:verdict.hv_task_id with
   | Masc_tui_agenda.Not_read ->
-    [ Ansi.dim, "  Towards      goal links not read" ]
+    [ Ansi.dim, harness_labeled towards (t "목표 연결을 읽기 전" "goal links not read") ]
   | Read_failed _ ->
-    [ Ansi.dim, "  Towards      goal links unavailable" ]
+    [ Ansi.dim, harness_labeled towards (t "목표 연결을 읽지 못함" "goal links unavailable") ]
   | Read [] ->
     (* Two different silences, told apart. A task this screen has never seen
        (the backlog has not loaded, or the verdict judged something already
@@ -797,11 +806,15 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
         (Masc_tui_types.task_domain_values state)
     in
     if known_task then
-      [ Ansi.dim, "  Towards      this task is not linked to a goal" ]
+      [ Ansi.dim
+        , harness_labeled towards
+            (t "이 태스크는 목표에 연결되지 않음" "this task is not linked to a goal") ]
     else
-      [ Ansi.dim, "  Towards      the judged task is not in this backlog" ]
+      [ Ansi.dim
+        , harness_labeled towards
+            (t "판정한 태스크가 이 backlog 에 없음" "the judged task is not in this backlog") ]
   | Read goal_ids ->
-    (Ansi.bold, "  TOWARDS")
+    (Ansi.bold, t "  목표" "  TOWARDS")
     :: List.concat_map
          (fun id ->
            match goal_of id with
@@ -809,30 +822,29 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
              (* Linked to a goal this snapshot does not carry -- terminal, or
                 simply not in the page that was fetched. Named rather than
                 dropped: the link is a fact even when the goal is not here. *)
-             [ Ansi.reset, Printf.sprintf "  %-12s %s" "Goal" (Terminal_text.single_line id)
-             ; Ansi.dim, Printf.sprintf "  %-12s %s" "" (Link.reference Goal id)
+             [ Ansi.reset, harness_labeled (t "목표" "Goal") (Terminal_text.single_line id)
+             ; Ansi.dim, harness_labeled "" (Link.reference Goal id)
              ]
            | Some goal ->
              let aim =
                match goal.pg_metric, goal.pg_target_value with
                | Some metric, Some target -> Printf.sprintf "%s -> %s" metric target
                | Some metric, None -> metric
-               | None, Some target -> Printf.sprintf "target %s" target
-               | None, None -> "no metric declared"
+               | None, Some target -> t "목표값 " "target " ^ target
+               | None, None -> t "선언한 지표 없음" "no metric declared"
              in
              [ Ansi.reset,
-               Printf.sprintf "  %-12s %s" "Goal"
-                 (Terminal_text.single_line goal.pg_title)
-             ; Ansi.reset, Printf.sprintf "  %-12s %s" "Aim" (Terminal_text.single_line aim)
-             ; Ansi.dim, Printf.sprintf "  %-12s %s" "" (Link.reference Goal id)
+               harness_labeled (t "목표" "Goal") (Terminal_text.single_line goal.pg_title)
+             ; Ansi.reset, harness_labeled (t "지표" "Aim") (Terminal_text.single_line aim)
+             ; Ansi.dim, harness_labeled "" (Link.reference Goal id)
              ])
          goal_ids
 ;;
 
-let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
+let harness_detail_lines ~ko ~width (verdict : Masc.Tui_decode.harness_verdict) =
+  let t korean english = if ko then korean else english in
   let field ?(style = Ansi.reset) label value =
-    style,
-    Printf.sprintf "  %-12s %s" label (Terminal_text.single_line value)
+    style, harness_labeled label (Terminal_text.single_line value)
   in
   let wrapped label text =
     (Ansi.bold, "  " ^ label)
@@ -843,10 +855,15 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
   in
   let fallback =
     match verdict.hv_fallback_reason with
-    | None -> [ Ansi.dim, "  Fallback     none; the named evaluator answered" ]
+    | None ->
+        [ Ansi.dim
+        , harness_labeled (t "대체 평가" "Fallback")
+            (t "없음 · 지정한 평가자가 답함" "none; the named evaluator answered") ]
     | Some reason ->
-        [ (Theme.warn ()), "  FALLBACK EVALUATION" ]
-        @ wrapped "Why the requested evaluator did not run" reason
+        [ (Theme.warn ()), t "  대체 평가" "  FALLBACK EVALUATION" ]
+        @ wrapped
+            (t "요청한 평가자가 돌지 못한 이유" "Why the requested evaluator did not run")
+            reason
   in
   let ruling, reason =
     let whole = verdict.hv_verdict in
@@ -862,23 +879,23 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
     |> List.map (fun line -> Ansi.bold, "  " ^ line)
   in
   title
-  @ detail_section_heading "1. 판정 결과 · 사유 (Decision & Verdict)"
-  @ [ field ~style:(semantic_status_color ruling) "Verdict" ruling
+  @ detail_section_heading (t "1. 판정 결과 · 사유" "1. Decision & Verdict")
+  @ [ field ~style:(semantic_status_color ruling) (t "판정" "Verdict") ruling
     ; field "Gate" verdict.hv_gate
-    ; field "Evaluator" verdict.hv_evaluator
-    ; field "Recorded"
+    ; field (t "평가자" "Evaluator") verdict.hv_evaluator
+    ; field (t "기록 시각" "Recorded")
         (Masc_domain.iso8601_of_unix_seconds verdict.hv_at)
     ]
   (* The reason a task was rejected or approved is the sentence the operator came
      here to read, and it runs long. [field] is one [single_line], so it was cut at
      the pane's width and the rest existed nowhere on the surface. The title
      above already wraps for the same reason. *)
-  @ (if reason = "" then [] else wrapped "Reason" reason)
+  @ (if reason = "" then [] else wrapped (t "사유" "Reason") reason)
   @ fallback
-  @ detail_section_heading "2. 대상 태스크 · 에이전트 (Task & Agent)"
-  @ [ field "Task" verdict.hv_task_id
-    ; field "Task link" (Link.reference Task verdict.hv_task_id)
-    ; field "Agent" verdict.hv_agent
+  @ detail_section_heading (t "2. 대상 태스크 · 에이전트" "2. Task & Agent")
+  @ [ field (t "태스크" "Task") verdict.hv_task_id
+    ; field (t "태스크 링크" "Task link") (Link.reference Task verdict.hv_task_id)
+    ; field (t "에이전트" "Agent") verdict.hv_agent
     ]
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =
@@ -891,17 +908,20 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   let lines =
     reading_notice_lines state ~width:(max 1 (framed_inner_width cols))
       ~inflight:state.harness_inflight ~error:state.harness_error
-    @ harness_detail_lines ~width:(max 1 (framed_inner_width cols)) verdict
+    @ harness_detail_lines ~ko:(state.ui_language = Lang_ko)
+        ~width:(max 1 (framed_inner_width cols)) verdict
     (* Appended rather than woven in: the verdict block is what the server
        said, and what the task is aiming at is read from two other surfaces.
        Keeping them in that order keeps the judged fact above the context. *)
     @ (match harness_goal_lines state verdict with
        | [] -> []
        | goal_lines ->
-           detail_section_heading "3. 연결된 목표 (Towards Goals)" @ goal_lines)
+           detail_section_heading (ui_text state ~ko:"3. 연결된 목표" ~en:"3. Towards Goals")
+           @ goal_lines)
     @ (match harness_ledger_lines ~cols state.harness with
        | [] -> []
-       | lines -> detail_section_heading "전체 판정 집계"
+       | lines ->
+           detail_section_heading (ui_text state ~ko:"전체 판정 집계" ~en:"All Verdicts")
            @ List.map (fun line -> Ansi.reset, line) lines)
     |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
   in

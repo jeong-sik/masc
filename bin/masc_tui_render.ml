@@ -231,10 +231,8 @@ let overview_capacity_lines (state : state) =
       @ Option.to_list (Option.map quiet (Masc_tui_fleet_line.owner_scan_text fleet))
 
 let overview_header (state : state) ~cols =
-  badge_row ~cols
-    ~lead:(screen_title (ui_text state ~ko:" 운영" ~en:" Operations"))
-    ~label:(Terminal_text.single_line state.workspace)
-    ~badge:(connection_badge state)
+  here_row ~cols state ~path:[]
+    ~readings:[ Terminal_text.single_line state.workspace ] ~position:None
 
 let render_overview (state : state) home =
   let terminal_rows, full_cols = get_terminal_size () in
@@ -349,6 +347,9 @@ let render_acting = Masc_tui_render_activity.render_acting
 
 
 
+(* The step the memory screens take from Keepers. *)
+let memory_step (state : state) = ui_text state ~ko:"기억" ~en:"memory"
+
 let render_memory (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let ko = state.ui_language = Lang_ko in
@@ -359,12 +360,9 @@ let render_memory (state : state) =
     | Some s -> s.mhs_keepers
   in
   let shown = List.length keepers in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
+  let memory_title readings =
+    here_row ~cols state ~path:[ memory_step state ] ~readings ~position:None
   in
-  let lead = screen_title (if ko then " MASC 기억 · 전체 저장 상태" else " MASC Memory · fleet storage") in
   let title =
     match state.memory_health with
     | None ->
@@ -373,19 +371,18 @@ let render_memory (state : state) =
           | None -> ui_text state ~ko:"(미조회)" ~en:(title_missing_reading ~error:None)
           | Some _ -> ""
         in
-        surface_title_row ~cols state ~lead ~readings:[ "  " ^ reading_note; "  " ^ timestamp ]
+        memory_title [ String.trim reading_note ]
     | Some s ->
-        surface_title_row ~cols state ~lead
-          ~readings:
-            [ " · " ^ (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
-            ; " · " ^ (match current_memory_starving_count s with
-               | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
-               | None -> if ko then "기억 필요 ? (일부 미조회)" else "? need memory (unread rows)")
-            ; " · " ^ (let tm = Unix.localtime s.mhs_generated_at in
-               Printf.sprintf (if ko then "%02d/%02d %02d:%02d 관측" else "read %02d/%02d %02d:%02d")
-                 (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-                 tm.Unix.tm_hour tm.Unix.tm_min)
-            ]
+        memory_title
+          [ (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
+          ; (match current_memory_starving_count s with
+             | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
+             | None -> if ko then "기억 필요 ? (일부 미조회)" else "? need memory (unread rows)")
+          ; (let tm = Unix.localtime s.mhs_generated_at in
+             Printf.sprintf (if ko then "%02d/%02d %02d:%02d 관측" else "read %02d/%02d %02d:%02d")
+               (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+               tm.Unix.tm_hour tm.Unix.tm_min)
+          ]
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory"
     ~title ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
@@ -397,8 +394,13 @@ let render_memory (state : state) =
 let render_memory_changes (state : state) keeper_name =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-changes"
-    ~title:(screen_title (ui_text state ~ko:" MASC 기억 · 변화 · " ~en:" MASC Memory · changes · "
-      ^ Terminal_text.single_line keeper_name))
+    ~title:
+      (here_row ~cols state
+         ~path:
+           [ memory_step state
+           ; Terminal_text.single_line keeper_name
+           ; ui_text state ~ko:"변화" ~en:"changes" ]
+         ~readings:[] ~position:None)
     ~hints:(Masc_tui_keys.footer_hints_memory_changes ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       Masc_tui_render_keeper_memory.changes_lines state ~cols ~max_lines:budget
@@ -435,7 +437,10 @@ let render_memory_fact_detail (state : state) =
       (Scrolled
          { scroll = state.memory_fact_detail_scroll
          ; report = (fun scroll -> Memory_fact_detail_scroll scroll) })
-    ~title:(screen_title (ui_text state ~ko:" MASC 기억 · 사실" ~en:" MASC Memory · fact"))
+    ~title:
+      (here_row ~cols state
+         ~path:[ memory_step state; ui_text state ~ko:"사실" ~en:"fact" ]
+         ~readings:[] ~position:None)
     (* The keys project the same bindings the help sheet carries, so the
        footer and [?] cannot teach different keys. *)
     ~hints:(Masc_tui_keys.memory_fact_detail_hints ~lang:state.ui_language)
@@ -452,11 +457,6 @@ and render_memory_facts_list (state : state) =
   let keeper_name = Render_memory.facts_keeper_label ~ko state.memory_facts_keeper in
   let rows = Masc_tui_types.memory_fact_rows state in
   let total = List.length rows in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let filter_label =
     Render_memory.memory_category_filter_text ~ko state.memory_facts_category
   in
@@ -471,10 +471,10 @@ and render_memory_facts_list (state : state) =
         else ""
   in
   let title =
-    Render_memory.facts_title ~ko ~cols
-      ~screen:(screen_title (if ko then " MASC 기억" else " MASC Memory"))
-      ~keeper:keeper_name
-      ~reading:
+    here_row ~cols state ~path:[ memory_step state; keeper_name ]
+      ~position:None
+      ~readings:
+        [ Render_memory.facts_title_reading ~ko
         (match Masc_tui_types.memory_facts_snapshot state with
          | None ->
            Render_memory.Facts_unread
@@ -482,9 +482,7 @@ and render_memory_facts_list (state : state) =
                  ~ko:(if Option.is_some (Masc_tui_types.memory_facts_failure state) then "(조회 실패)" else "(미조회)")
                  ~en:(title_missing_reading ~error:(Masc_tui_types.memory_facts_failure state)) }
          | Some _ ->
-           Render_memory.Facts_loaded { total; filter_label; query_label })
-      ~timestamp
-      ~badge:(connection_badge state)
+           Render_memory.Facts_loaded { total; filter_label; query_label }) ]
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-facts"
     ~title ~hints:(Masc_tui_keys.footer_hints_memory_facts ~lang:state.ui_language ~cols ~has_rows:(total > 0))
@@ -565,7 +563,12 @@ let render_surface ~home (state : state) =
                 | None ->
                     let terminal_rows, cols = get_terminal_size () in
                     surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"board-read"
-                      ~title:(screen_title (ui_text state ~ko:" MASC 게시판 / " ~en:" MASC Board / " ^ Terminal_text.single_line post_id))
+                      ~title:
+                        (here_row ~cols state
+                           ~path:
+                             [ Masc_tui_render_board.board_step state
+                             ; Terminal_text.single_line post_id ]
+                           ~readings:[] ~position:None)
                       ~hints:(Masc_tui_keys.footer_hints_board_pending ~lang:state.ui_language)
                       ~body:(fun ~budget:_ c ->
                         match Board_detail.view_for state.board_detail ~post_id with

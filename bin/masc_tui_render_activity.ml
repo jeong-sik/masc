@@ -43,10 +43,6 @@ let system_log_optional_fact label = function
   | Some value -> system_log_fact label value
   | None -> system_log_missing_fact label
 
-let system_logs_status state = match System_logs_view.source state.system_logs with
-  | Server -> "Server  " ^ connection_badge state
-  | This_tui -> System_logs_view.source_label This_tui
-
 let system_log_detail_section = detail_section_heading
 
 let system_log_detail_lines (state : state) ~seq ~width =
@@ -109,8 +105,12 @@ let render_system_log_detail (state : state) seq =
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  seq %d  %s" (screen_title " MASC Log detail") seq
-       (system_logs_status state));
+    (here_row ~cols state
+       ~path:[ ui_text state ~ko:"로그" ~en:"logs"; Printf.sprintf "seq %d" seq ]
+       ~readings:
+         [ System_logs_view.source_label
+             (System_logs_view.source state.system_logs) ]
+       ~position:None);
   box_divider buf cols;
   let lines = system_log_detail_lines state ~seq ~width:(max 1 (framed_inner_width cols - 4)) in
   let content_height = max 1 (rows - 5) in
@@ -126,7 +126,7 @@ let render_system_log_detail (state : state) seq =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~position:(Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines))
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:true System_logs));
+       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:true System_logs));
   finish_surface state ~clamped:(System_log_detail_scroll scroll)
     ~surface_key:"system-log-detail" ~rows:terminal_rows ~cols buf
 
@@ -152,16 +152,25 @@ let activity_heading (state : state) ~cols ~on_logs ~reading =
   let ko = state.ui_language = Lang_ko in
   let tabs = activity_tabs ~ko ~on_logs in
   let source = System_logs_view.source state.system_logs in
+  (* The strip marks which of the two readings is on screen. Where it has no
+     room the path names that reading in its place. *)
   let title =
-    screen_title
-      (if on_logs then
-         " " ^ ui_text state ~ko:"로그" ~en:"Logs" ^ " · "
-         ^ (match source with
-            | Server -> ui_text state ~ko:"서버" ~en:"Server"
-            | This_tui -> "This TUI")
-       else if ko then " 활동" else " Activity")
+    here_path state
+      ~path:
+        (List.filter_map
+           (fun (label, active, _) -> if active then Some label else None)
+           tabs)
   in
-  let before = title ^ "  " and dot = "  \xc2\xb7" in
+  let reading =
+    if on_logs then
+      ("  "
+       ^ (match source with
+          | Server -> ui_text state ~ko:"서버" ~en:"Server"
+          | This_tui -> ui_text state ~ko:"이 TUI" ~en:"This TUI"))
+      :: reading
+    else reading
+  in
+  let before = here_path state ~path:[] ^ "  " and dot = "  \xc2\xb7" in
   let cells text =
     Message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
@@ -259,7 +268,9 @@ let render_system_logs (state : state) =
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         activity_heading state ~cols ~on_logs:true
           ~reading:
-            (Printf.sprintf "  (%d of %d)" total_entries snapshot.sys_total
+            (Printf.sprintf "  (%s of %s)"
+               (Masc_tui_value.Count.grouped total_entries)
+               (Masc_tui_value.Count.grouped snapshot.sys_total)
              :: (match snapshot.sys_latest_seq with
                  | None -> []
                  | Some seq -> [ Printf.sprintf "  seq %d" seq ])
@@ -390,14 +401,9 @@ let render_keeper_calls (state : state) =
     | Some keeper -> keeper.k_name
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let heading ~after =
     detail_heading ~cols ~lead:(Lead_text keeper_calls_lead) ~id:keeper_name
-      ~after:[ after ] ~tail:(timestamp ^ "  " ^ connection_badge state)
+      ~after:[ after ] ~tail:(connection_badge state)
   in
   let header =
     match state.keeper_calls with
@@ -622,7 +628,7 @@ let render_keeper_calls (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints state.view));
+       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view));
   finish_surface state ~clamped:(Keeper_calls scroll) ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
 
 (* The runtime's event feed, newest first, for watching every keeper act at

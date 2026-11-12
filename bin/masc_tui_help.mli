@@ -32,6 +32,17 @@ val sheet : ?header:string list -> cols:int -> string list -> string list
     written, set under whichever column is shorter (the left one when they are
     as tall), with a blank row between two sections of a column. *)
 
+val one_section :
+  cols:int -> heading:string -> string list list -> string list
+(** The lines of a sheet that holds a single section, for {!sheet} at this
+    width. [entries] is each key's rows, a wrapped sentence kept with its key.
+    {!sheet} sets whole sections under its two columns, so one section alone
+    would stand in the left column beside an empty right one; here the
+    section's keys are parted at the key nearest the middle, and the second
+    part begins level with the first key of the first. Below
+    {!two_column_minimum_cols} the lines are the heading and the rows as
+    written. *)
+
 val filter_sections :
   query:string ->
   heading:(string -> string) ->
@@ -60,10 +71,28 @@ type filter =
 val filter_query : filter -> string
 (** The query the filter holds; empty when it is [Off]. *)
 
+(** {1 How much the sheet lists}
+
+    The sheet opens on the keys of the screen it was opened from and nothing
+    else. It listed every screen, the global keys and the slash commands
+    behind that one section -- more than six hundred rows -- so a reader who
+    paged past the end of their own screen's keys was among another screen's,
+    with no line saying so. *)
+
+type scope =
+  | Here  (** The keys of the screen the sheet was opened from. *)
+  | Everything
+      (** Every screen's keys, the global keys and the slash commands. *)
+
+val shows_everything : filter -> scope -> bool
+(** Whether the sheet lists every section. A typed query always does: a
+    reader looking for a key by name is not asking about one screen. *)
+
 type step =
   | Set_filter of { filter : filter; scroll_to_top : bool }
       (** The filter becomes [filter]. A different query is a different sheet,
           so [scroll_to_top] is set when the query changed or cleared. *)
+  | Widen  (** List every section; [?] pressed on the one-screen sheet. *)
   | Close  (** Close the sheet. *)
   | Toggle_hints  (** Show or hide the footer hints for this session. *)
   | Scroll of Masc_tui_scroll.key_move
@@ -72,9 +101,10 @@ type step =
           the page keys scroll; every other key is text or does nothing. *)
   | Ignore  (** The key does nothing in this state. *)
 
-val step : filter -> key:string -> step
-(** What one key does to the open sheet. Esc clears a kept query before it
-    closes the sheet. A Hangul key typed into the query is read back as the
+val step : filter -> scope:scope -> key:string -> step
+(** What one key does to the open sheet. [?] widens the one-screen sheet and
+    closes the sheet that already lists everything. Esc clears a kept query
+    before it closes the sheet. A Hangul key typed into the query is read back as the
     letters that were pressed (see {!Masc_tui_key_ime.latin_text}); the sheet's
     keys and nearly all of its wording are English. Enter, or a line feed from
     a terminal that sends one for Return, settles a non-empty query and clears

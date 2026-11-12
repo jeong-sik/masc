@@ -27,7 +27,7 @@ let make_error_handler () =
   h2_error_handler
 ;;
 
-let make_request_handler ~trust_policy ~routes =
+let request_handler ~trust_policy ~serve =
   let embedded_ledger =
     Http_h2_response_ledger.create
       ~max_pending_bytes:(H2_response_limits.max_pending_bytes ())
@@ -50,10 +50,18 @@ let make_request_handler ~trust_policy ~routes =
           (Http_h2_stream.Stream_end.request stream_end)
       with
       | Server_request_authority.H2_authority classification ->
-        Server_http_ingress.serve ~routes ~client_addr classification reqd
+        serve ~client_addr classification reqd
       | Server_request_authority.Unsupported_asterisk_form_options ->
         Server_http_ingress.respond_request_authority_bad_request
           ~error_code:"request_target_asterisk_unsupported"
           ~message:"MASC does not support authority-free OPTIONS *"
           reqd)
+;;
+
+let make_request_handler ~trust_policy ~routes =
+  request_handler ~trust_policy ~serve:(Server_http_ingress.serve ~routes)
+;;
+
+let make_table_request_handler ~trust_policy ~table =
+  request_handler ~trust_policy ~serve:(Server_http_ingress.serve_table ~table)
 ;;

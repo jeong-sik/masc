@@ -86,6 +86,7 @@ let pp_step ppf = function
   | Masc_tui_help.Set_filter { filter; scroll_to_top } ->
       Format.fprintf ppf "Set_filter (%a, scroll_to_top=%b)" pp_filter filter
         scroll_to_top
+  | Masc_tui_help.Widen -> Format.pp_print_string ppf "Widen"
   | Masc_tui_help.Close -> Format.pp_print_string ppf "Close"
   | Masc_tui_help.Toggle_hints -> Format.pp_print_string ppf "Toggle_hints"
   | Masc_tui_help.Scroll move -> Format.fprintf ppf "Scroll %a" pp_key_move move
@@ -104,14 +105,32 @@ let settled filter =
 let cleared =
   Masc_tui_help.Set_filter { filter = Masc_tui_help.Off; scroll_to_top = true }
 
-let check_steps label filter cases =
+(* The filter's steps do not depend on how much the sheet lists; they are
+   checked on the sheet that lists everything, which is the sheet they were
+   written against. *)
+let step_on_whole_sheet filter ~key =
+  Masc_tui_help.step filter ~scope:Masc_tui_help.Everything ~key
+
+let check_steps ?(scope = Masc_tui_help.Everything) label filter cases =
   List.iter
     (fun (key, expected) ->
       Alcotest.check step_t
         (Printf.sprintf "%s: %S" label key)
         expected
-        (Masc_tui_help.step filter ~key))
+        (Masc_tui_help.step filter ~scope ~key))
     cases
+
+(* [?] on the sheet that lists one screen asks for the rest; on the sheet
+   that already lists everything it closes. A typed query lists everything
+   whatever the sheet opened on, so [?] closes that one too. Esc closes
+   either. *)
+let test_question_mark_widens_before_it_closes () =
+  check_steps ~scope:Masc_tui_help.Here "one screen" Masc_tui_help.Off
+    [ ("?", Widen); ("esc", Close) ];
+  check_steps ~scope:Masc_tui_help.Everything "every screen" Masc_tui_help.Off
+    [ ("?", Close); ("esc", Close) ];
+  check_steps ~scope:Masc_tui_help.Here "one screen, kept query"
+    (Masc_tui_help.Kept "ab") [ ("?", Close) ]
 
 let test_filter_query () =
   Alcotest.(check string) "off holds nothing" "" (Masc_tui_help.filter_query Off);
@@ -203,14 +222,14 @@ let test_kept_keys () =
 (* Esc clears a kept query, and only the Esc after that closes the sheet. *)
 let test_esc_clears_before_it_closes () =
   Alcotest.check step_t "first Esc on a kept query" cleared
-    (Masc_tui_help.step (Masc_tui_help.Kept "ab") ~key:"esc");
+    (step_on_whole_sheet (Masc_tui_help.Kept "ab") ~key:"esc");
   Alcotest.check step_t "next Esc on the whole sheet" Close
-    (Masc_tui_help.step Masc_tui_help.Off ~key:"esc")
+    (step_on_whole_sheet Masc_tui_help.Off ~key:"esc")
 
 let type_keys keys =
   List.fold_left
     (fun filter key ->
-      match Masc_tui_help.step filter ~key with
+      match step_on_whole_sheet filter ~key with
       | Masc_tui_help.Set_filter { filter; _ } -> filter
       | other -> Alcotest.failf "key %S gave %a" key pp_step other)
     (Masc_tui_help.Typing "") keys
@@ -232,7 +251,7 @@ let test_korean_mode_types_the_letters_pressed () =
 let test_filter_chain_from_off_to_closed () =
   (* /, text, Enter, Esc, Esc: the sheet narrows, settles, widens, closes. *)
   let apply filter key =
-    match Masc_tui_help.step filter ~key with
+    match step_on_whole_sheet filter ~key with
     | Masc_tui_help.Set_filter { filter; _ } -> filter
     | other -> Alcotest.failf "key %S gave %a" key pp_step other
   in
@@ -245,7 +264,7 @@ let test_filter_chain_from_off_to_closed () =
   let cleared_filter = apply kept "esc" in
   Alcotest.check filter_t "Esc clears it" Masc_tui_help.Off cleared_filter;
   Alcotest.check step_t "the next Esc closes the sheet" Close
-    (Masc_tui_help.step cleared_filter ~key:"esc")
+    (step_on_whole_sheet cleared_filter ~key:"esc")
 
 let () =
   Alcotest.run "tui_help_filter"
@@ -267,6 +286,8 @@ let () =
     ; ( "step"
       , [ Alcotest.test_case "filter_query" `Quick test_filter_query
         ; Alcotest.test_case "off: the sheet's own keys" `Quick test_off_keys
+        ; Alcotest.test_case "? widens the one-screen sheet before it closes"
+            `Quick test_question_mark_widens_before_it_closes
         ; Alcotest.test_case "typing: printable keys are text" `Quick
             test_typing_takes_printable_keys_as_text
         ; Alcotest.test_case "typing: Enter settles the query" `Quick

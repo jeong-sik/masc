@@ -18,7 +18,10 @@ type error =
           made refusable between the read and the commit lands here too, as a
           [Refused] of the zone. *)
 
-val error_to_string : error -> string
+(** The reason in full, as {!Authz_zone.error_detail} gives that of a commit
+    that failed. It can name paths of the server, so it is for the log of the
+    server and not for an answer to a person. *)
+val error_detail : error -> string
 
 (** Writes the record that makes [keeper_id] for [user_id], whose turns run
     under a policy of [user_id] to [user_id] with the id [draw ()] and the

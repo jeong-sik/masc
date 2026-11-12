@@ -45,9 +45,33 @@ let make_http_config ~address ~port : Http.config =
   config
 ;;
 
+let tcp_address ~address (config : Http.config) =
+  `Tcp (Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets address), config.port)
+;;
+
 let listen_socket ~sw ~net ~address (config : Http.config) =
-  let addr = `Tcp (Eio.Net.Ipaddr.of_raw (Ipaddr.to_octets address), config.port) in
-  Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:config.listen_backlog addr
+  Eio.Net.listen
+    net
+    ~sw
+    ~reuse_addr:true
+    ~backlog:config.listen_backlog
+    (tcp_address ~address config)
+;;
+
+(* Eio 1.3 lets the Unix error of socket, bind and listen through as it is for
+   a TCP address, in its posix and its linux backend (a port in use is
+   EADDRINUSE), and its interface names no exception. A caller that answers a
+   listener that did not bind with a reason binds here, so the case of a port
+   in use (test_server_accounts) fails when a later Eio raises another one. *)
+let listen_tcp_result ~sw ~net ~backlog address =
+  match Eio.Net.listen net ~sw ~reuse_addr:true ~backlog address with
+  | socket -> Ok socket
+  | exception Unix.Unix_error (error, call, (_ : string)) ->
+    Error (Printf.sprintf "%s: %s" call (Unix.error_message error))
+;;
+
+let listen_socket_result ~sw ~net ~address (config : Http.config) =
+  listen_tcp_result ~sw ~net ~backlog:config.listen_backlog (tcp_address ~address config)
 ;;
 
 (* The HTTPS listener of one boot (RFC-0512 D6); see the interface. *)

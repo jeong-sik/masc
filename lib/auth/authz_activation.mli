@@ -78,6 +78,11 @@ type error =
   | Already_active
       (** The log made [Multi_account] and the external store matches it: a
           boot reads this installation as activated. No record was written. *)
+  | Turned_off
+      (** The log made [Off], the external store matches it, and the config
+          does not ask for [Multi_account]: a boot starts a single user that
+          keeps the records of the accounts read-only. No record was
+          written. *)
   | Boot_stops of string * string list
       (** A boot stops on this installation for another reason than an
           activation, with the lines it prints. No record was written. *)
@@ -101,6 +106,9 @@ type invite_error =
   | Not_activated
       (** A boot starts a single user, or asks for the activation that
           {!activate} runs: there is no active installation to invite to.
+          Nothing was written. *)
+  | Accounts_turned_off
+      (** A boot starts a single user after the accounts were turned off.
           Nothing was written. *)
   | Not_served_as_active of string * string list
       (** A boot stops on this installation, and not on an active one whose

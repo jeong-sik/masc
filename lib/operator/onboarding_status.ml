@@ -10,10 +10,11 @@ type check_id =
   | Keeper_declaration
   | Sandbox
   | Keeper_persistence
+  | Multi_account_request
 
 type role = Required_to_open | Advisory
 
-type opening = Open_existing_history | Needs_journey
+type opening = Open_existing_history | Needs_journey | Account_installation
 
 type check =
   { id : check_id
@@ -54,6 +55,7 @@ let check_id_name = function
   | Keeper_declaration -> "keeper_declaration"
   | Sandbox -> "sandbox"
   | Keeper_persistence -> "keeper_persistence"
+  | Multi_account_request -> "multi_account_request"
 
 (* Existing history opens on what every Keeper in the workspace shares: the
    workspace, a runtime.toml the server can load, and Keeper metadata its boot
@@ -63,9 +65,11 @@ let check_id_name = function
    and the journey's model step is the repair. imp's model binding, declaration and
    sandbox concern the Keeper the journey creates: the server skips an imp it
    cannot load and boots every other Keeper, so a workspace whose history
-   belongs to other Keepers opens and reports them beside it. *)
+   belongs to other Keepers opens and reports them beside it. A request for
+   accounts decides which server boots at all, so it is not advisory. *)
 let role = function
-  | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
+  | Workspace | Runtime_configuration | Keeper_persistence | Multi_account_request ->
+    Required_to_open
   | Model_connection | Keeper_declaration | Sandbox -> Advisory
 
 let role_name = function
@@ -75,6 +79,7 @@ let role_name = function
 let opening_name = function
   | Open_existing_history -> "open_existing_history"
   | Needs_journey -> "needs_journey"
+  | Account_installation -> "account_installation"
 
 let check id condition message actions = { id; condition; message; actions }
 
@@ -263,10 +268,24 @@ let inspected ~sandbox ~base_path =
           "This location does not contain an initialized MASC workspace."
           [Initialize_workspace; Choose_workspace]] }
     else
+      let workspace_found = check Workspace Satisfied "Workspace found." [Choose_workspace] in
+      if Authz_boot_mode_read.asks_for_multi_account ~base_path then
+        (* imp's model, declaration, sandbox and history are what the server
+           of a single user runs on, and no such server boots here. They are
+           not read, so no sandbox is probed either. Whether the workspace is
+           activated is in the authorization log, which only the holder of
+           the lease opens. *)
+        { base_path = Some base_path; selected_runtime = None; selected_model = None;
+          checks = [workspace_found;
+                    check Multi_account_request Needs_verification
+                      (Authz_boot_mode_read.account_installation_line ~base_path
+                       ^ ". Whether the workspace is activated is judged by a boot, not here.")
+                      []] }
+      else
       let config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
       let selected_runtime, selected_model, models = model_checks config_path in
       { base_path = Some base_path; selected_runtime; selected_model;
-        checks = check Workspace Satisfied "Workspace found." [Choose_workspace]
+        checks = workspace_found
           :: (models @ keeper_checks ~sandbox base_path @ [persistence_check base_path]) }
 
 let inspect ~sandbox ~base_path =
@@ -292,6 +311,8 @@ let opening t =
   in
   match t.base_path with
   | None -> Needs_journey
+  | Some _ when List.exists (fun c -> c.id = Multi_account_request) t.checks ->
+    Account_installation
   | Some _ ->
     if satisfied Workspace && satisfied Runtime_configuration && satisfied Keeper_persistence
        && not (List.exists holds_closed t.checks)
@@ -311,7 +332,12 @@ let to_json t =
       "message", `String c.message;
       "actions", `List (List.map (fun a -> `String (action_name a)) c.actions)]) t.checks)]
 
+let heading t =
+  match opening t with
+  | Account_installation -> "MASC — a workspace that asks for accounts"
+  | Open_existing_history | Needs_journey -> "MASC — you and imp"
+
 let to_text t =
   String.concat "\n"
-    ("MASC — you and imp" :: List.map (fun c ->
+    (heading t :: List.map (fun c ->
        Printf.sprintf "[%s] %s: %s" (condition_name c.condition) (check_id_name c.id) c.message) t.checks)

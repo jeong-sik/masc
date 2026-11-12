@@ -776,9 +776,9 @@ let drawn_groups ~now ~account_emails groups =
   List.rev drawn
 
 let section_title = function
-  | At_limit_or_exhausted -> "Reported at limit / observed exhausted"
-  | Other_windows -> "Other windows"
-  | No_windows -> "No windows to show"
+  | At_limit_or_exhausted -> "At limit / exhausted"
+  | Other_windows -> "Reported windows"
+  | No_windows -> "No windows"
 
 let section_tone = function
   | At_limit_or_exhausted -> Theme.text_status Masc_tui_theme.Bad
@@ -916,8 +916,9 @@ let draw_entry layout tone entry =
     let gauge =
       match line.share with
       | Some share ->
-          meter_open ^ meter ~cells:layout.bar_cells share ^ meter_close ^ " "
-          ^ pad_left line.percent layout.percent_cells
+          let tone = Option.value ~default:(Theme.info ()) line.tone in
+          tone ^ meter_open ^ meter ~cells:layout.bar_cells share ^ meter_close ^ " "
+          ^ pad_left line.percent layout.percent_cells ^ Ansi.reset
       | None -> String.make gauge_width ' '
     in
     (* A row with no bar has an empty gauge. When the detail does not fit
@@ -993,7 +994,7 @@ let draw_entry layout tone entry =
      | Some email -> note_lines ~tone:(Theme.recede ()) email)
 
 let group_heading_text section entries =
-  Printf.sprintf "%s (%d)" (section_title section) (List.length entries)
+  Printf.sprintf "%s  %d" (section_title section) (List.length entries)
 
 let wrap_group_text ~width ~tone text =
   (* Preserve the six-cell [x:show] key on very narrow screens. *)
@@ -1001,17 +1002,25 @@ let wrap_group_text ~width ~tone text =
   Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - String.length indent)) text
   |> List.map (fun line -> indent ^ tone ^ line ^ Ansi.reset)
 
-let group_heading ~width section entries =
-  wrap_group_text ~width ~tone:(Ansi.bold ^ section_tone section)
-    (group_heading_text section entries)
+let group_heading ?note ~width section entries =
+  let title = group_heading_text section entries in
+  let note_suffix = Option.fold ~none:"" ~some:(fun note -> " \xc2\xb7 " ^ note) note in
+  let title_cells = cells_of (indent ^ title ^ note_suffix) in
+  let heading =
+    indent ^ Ansi.bold ^ section_tone section ^ title ^ Ansi.reset
+    ^ Option.fold ~none:""
+        ~some:(fun note -> Theme.recede () ^ " \xc2\xb7 " ^ note ^ Ansi.reset)
+        note
+  in
+  if title_cells + 4 <= width then
+    [ heading ^ Theme.recede () ^ " " ^ draw_hline (width - title_cells - 1) ^ Ansi.reset ]
+  else if title_cells <= width then [ heading ]
+  else
+    wrap_group_text ~width ~tone:(Ansi.bold ^ section_tone section) title
+    @ Option.fold ~none:[] ~some:(wrap_group_text ~width ~tone:(Theme.recede ())) note
 
 let hidden_limit_heading ~width section entries =
-  let note = "hidden \xc2\xb7 x:show" in
-  match group_heading ~width section entries with
-  | [ heading ]
-    when cells_of (group_heading_text section entries ^ " \xc2\xb7 " ^ note) + 1 <= width ->
-      [ heading ^ Theme.recede () ^ " \xc2\xb7 " ^ note ^ Ansi.reset ]
-  | headings -> headings @ wrap_group_text ~width ~tone:(Theme.recede ()) note
+  group_heading ~note:("hidden \xc2\xb7 x:show") ~width section entries
 
 (* One empty line between blocks so each reads as a unit. *)
 let rec separated = function
@@ -1142,8 +1151,9 @@ let rec pairs = function
   | first :: second :: rest -> [ first; second ] :: pairs rest
 
 (* An account's windows as a card titled with its name. The name column is
-   empty inside the card: the title already says it. *)
-let account_card ~tone entry =
+   empty inside the card: the title already says it. The section's shared
+   layout keeps every window row on the same axes. *)
+let account_card ~tone ~layout entry =
   { Masc_tui_card.title = marked ~attention:entry.de_attention entry.de_name
   ; body =
       (fun ~cells ->
@@ -1153,7 +1163,7 @@ let account_card ~tone entry =
             wrap_marked ~width:cells ~attention:entry.de_attention entry.de_name
             |> List.map (fun line -> Ansi.bold ^ tone ^ line ^ Ansi.reset)
         in
-        full_name @ draw_entry (layout_for ~show_names:false ~width:cells [ entry ]) tone entry)
+        full_name @ draw_entry layout tone entry)
   }
 
 (* Each pair of accounts is one row of cards that end on the same line; a lone
@@ -1167,8 +1177,14 @@ let draw_card_rows ~width ~tone entries =
     }
   in
   let inner_width = max 0 (width - indent_cells) in
+  let shared_cells =
+    Masc_tui_card.column_widths ~inner_width ~gap:card_gap ~columns:card_columns
+    |> List.map (fun width -> Masc_tui_card.content_cells ~width)
+    |> List.fold_left min max_int
+  in
+  let layout = layout_for ~show_names:false ~width:shared_cells entries in
   let row pair =
-    let cards = List.map (account_card ~tone) pair in
+    let cards = List.map (account_card ~tone ~layout) pair in
     let columns =
       match cards with
       | [ only ] -> [ [ only ]; [] ]
@@ -1309,20 +1325,37 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
         | Exhausted_unknown -> "unknown"
         | Exhausted_accounts count -> string_of_int count
       in
-      (* Two header rows, each a list of clauses. A row that is too wide ends
-         where a clause ends: broken at a space it left "Exhausted" and
-         "(observed) 0" on two rows, or "v:" at the end of one and its label
-         alone on the next. The Trend reading is named by the tab row above,
-         with the key that reaches it, so this row does not name it again. *)
-      let summary =
-        List.concat_map (Masc_tui_message_layout.pack_clauses ~max_cells:width)
-          [ [ Printf.sprintf "Accounts %d" counts.accounts
-            ; Printf.sprintf "Reporting %d" counts.reporting
-            ; Printf.sprintf "At limit (reported) %d" counts.at_limit
-            ; Printf.sprintf "Exhausted (observed) %s" exhausted ]
-          ; [ "!: at limit or exhausted"
-            ; "Bar: used at last report"
-            ; "other use does not block model calls" ] ] in
+      (* Metrics lead and the legend recedes. A row that is too wide still ends
+         where a clause ends, rather than splitting a count from its meaning. *)
+      let metric ?(tone = "") label value =
+        Theme.recede () ^ label ^ Ansi.reset ^ " " ^ Ansi.bold ^ tone ^ value ^ Ansi.reset
+      in
+      let summary_indent = if width > indent_cells then indent else "" in
+      let summary_width = max 1 (width - String.length summary_indent) in
+      let metrics =
+        Masc_tui_message_layout.pack_clauses ~max_cells:summary_width
+          [ metric "Accounts" (string_of_int counts.accounts)
+          ; metric "Reporting" (string_of_int counts.reporting)
+          ; metric
+              ~tone:(if counts.at_limit > 0 then Theme.text_status Masc_tui_theme.Bad else "")
+              "At limit (reported)" (string_of_int counts.at_limit)
+          ; metric
+              ~tone:(match counts.exhausted with
+                | Exhausted_unknown -> Theme.text_status Masc_tui_theme.Warn
+                | Exhausted_accounts count when count > 0 -> Theme.text_status Masc_tui_theme.Bad
+                | Exhausted_accounts _ -> "")
+              "Exhausted (observed)" exhausted
+          ]
+        |> List.map (fun line -> summary_indent ^ line)
+      in
+      let legend =
+        Masc_tui_message_layout.pack_clauses ~max_cells:summary_width
+          [ "!: at limit or exhausted"
+          ; "Bar: used at last report"
+          ; "other use does not block model calls" ]
+        |> List.map (fun line -> summary_indent ^ Theme.recede () ^ line ^ Ansi.reset)
+      in
+      let summary = metrics @ legend in
       let notes = runtimes_note @ emails_note in
       match rows with
       | [] ->

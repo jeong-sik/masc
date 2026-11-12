@@ -264,6 +264,25 @@ let test_two_copies_do_not_interleave () =
     (String.equal (Buffer.contents received) (first ^ second))
 ;;
 
+(* Two writers at once, each with a write of more than two pieces. The
+   second waits until the first's last piece is out: a turn given up between
+   pieces would put the second's bytes inside the first's. tls-eio hands a
+   run of records to one write, from two fibers. *)
+let test_two_writes_do_not_interleave () =
+  with_connection @@ fun ~clock:_ _connection socket peer ->
+  let length = (2 * Socket.write_piece_bytes) + (88 * kib) in
+  let first = String.make length 'a' and second = String.make length 'b' in
+  Eio.Switch.run @@ fun sw ->
+  let first_sent = ending_of ~sw (fun () -> Eio.Flow.write socket [ Cstruct.of_string first ]) in
+  let second_sent = ending_of ~sw (fun () -> Eio.Flow.write socket [ Cstruct.of_string second ]) in
+  let received = Buffer.create (2 * length) in
+  read_more peer received (2 * length);
+  check ending "the first write ended whole" Whole (Eio.Promise.await_exn first_sent);
+  check ending "the second write ended whole" Whole (Eio.Promise.await_exn second_sent);
+  check bool "the second write's bytes follow all of the first's" true
+    (String.equal (Buffer.contents received) (first ^ second))
+;;
+
 (* The server's sending side is over and the peer keeps its own open. The
    read that waits for the peer's end waits one bound. *)
 let test_peer_that_keeps_its_side_open_is_cut () =
@@ -410,6 +429,7 @@ let () =
             test_slow_reader_of_every_piece_is_not_cut
         ; test_case "a write to a closed peer ends" `Quick test_write_to_a_closed_peer_ends
         ; test_case "two copies do not interleave" `Quick test_two_copies_do_not_interleave
+        ; test_case "two writes do not interleave" `Quick test_two_writes_do_not_interleave
         ] )
     ; ( "sending side closed"
       , [ test_case "a peer that keeps its side open is cut at the bound" `Quick

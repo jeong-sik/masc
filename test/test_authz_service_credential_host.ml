@@ -122,11 +122,15 @@ let status_name = function
 ;;
 
 (* What the request gate reads: the token against the state of a zone opened
-   afresh, as the next boot opens it. *)
+   afresh, as the next boot opens it, on a snapshot the zone could be trusted for. *)
 let authenticate dirs token =
   match Z.open_at_start ~now_ms ~log_path:(log_path dirs) ~store_path:dirs.store with
   | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)
-  | Ok zone -> S.authenticate (Z.snapshot zone).Z.state token
+  | Ok zone ->
+    (match Z.read zone with
+     | Error uncertain ->
+       Alcotest.failf "zone cannot be trusted: %s" (Z.uncertain_to_string uncertain)
+     | Ok trusted -> S.authenticate trusted token)
 ;;
 
 let check_acts label dirs token ~service =

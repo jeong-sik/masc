@@ -44,12 +44,26 @@ let await ~label slot =
       register ())
 ;;
 
+(* Who has a job. Each move is one compare-and-set, so one side makes it.
+   - [Offered]: in the queue. The host takes it; a failed host's cleanup
+     withdraws it.
+   - [Taken]: the host gave it a thread that has not begun the work. That
+     thread begins it; the cleanup withdraws it.
+   - [Started]: the work runs or ran. Its thread answers the caller, whatever
+     happens to the host meanwhile.
+   - [Withdrawn]: the host will not run it. The caller runs it. *)
+type stage =
+  | Offered
+  | Taken
+  | Started
+  | Withdrawn
+
 type job =
   | Job :
       { id : int
       ; work : unit -> 'a
       ; label : string option
-      ; claimed : bool Atomic.t
+      ; stage : stage Atomic.t
       ; outcome : 'a outcome slot Atomic.t
       }
       -> job
@@ -63,65 +77,78 @@ type wiring =
 type host =
   | Not_started
   | Running of wiring
-  | Failed of exn
-
-exception Host_failed of exn
+  | Failed
 
 let state = Atomic.make Not_started
 
 (* Unbounded, as [Eio_unix.run_in_systhread] is: adding never waits. *)
 let jobs : job Eio.Stream.t = Eio.Stream.create max_int
 
-(* Every job handed over and not yet answered, with how to answer it if the
-   host fails. The host's scheduler can die outside any fiber (a failed
+(* Every job handed over and not yet answered, with how to take it back if
+   the host fails. The host's scheduler can die outside any fiber (a failed
    [Thread.create] escapes its effect handler), and then nothing else would
-   ever resolve these. *)
-let pending : (int, exn -> unit) Hashtbl.t = Hashtbl.create 16
+   ever answer a job whose work never began. *)
+let pending : (int, unit -> unit) Hashtbl.t = Hashtbl.create 16
 let pending_mutex = Mutex.create ()
 let next_id = Atomic.make 0
 
 let unregister id = Mutex.protect pending_mutex (fun () -> Hashtbl.remove pending id)
 
-(* [claimed] decides who runs a job: the host when it takes it, or the caller
-   when the host failed first. Only the winner of the CAS runs the work. *)
-let answer_after_failure ~claimed ~outcome exn =
-  if Atomic.compare_and_set claimed false true
-  then fill outcome Unserved
-  else fill outcome (Served (Error (Host_failed exn, Printexc.get_callstack 0)))
+(* Take a job back from a failed host. Work that began is left to its thread:
+   the caller waits for it, so it never runs beside its own work and never
+   runs it twice. *)
+let rec withdraw ~stage ~outcome =
+  match Atomic.get stage with
+  | (Offered | Taken) as seen ->
+    if Atomic.compare_and_set stage seen Withdrawn
+    then fill outcome Unserved
+    else withdraw ~stage ~outcome
+  | Started | Withdrawn -> ()
 ;;
 
 let fail_host exn =
-  (match Atomic.exchange state (Failed exn) with
+  (match Atomic.exchange state Failed with
    | Running { on_failure; keeps_own_domain = _ } -> on_failure exn
-   | Not_started | Failed _ -> ());
-  let answers =
+   | Not_started | Failed -> ());
+  let withdrawals =
     Mutex.protect pending_mutex (fun () ->
-      let answers = Hashtbl.fold (fun _ answer acc -> answer :: acc) pending [] in
+      let withdrawals = Hashtbl.fold (fun _ withdraw acc -> withdraw :: acc) pending [] in
       Hashtbl.reset pending;
-      answers)
+      withdrawals)
   in
-  List.iter (fun answer -> answer exn) answers
+  List.iter (fun withdraw -> withdraw ()) withdrawals
 ;;
 
 (* Each job gets its own fiber at once, so a long one never delays the next.
-   The fiber catches everything the work raises. *)
+   The work's thread catches everything the work raises and answers the
+   caller itself: a scheduler that dies under it cannot leave the caller
+   without the result.
+
+   That rests on the host being a spawned domain. A domain that stops while
+   another still runs joins its threads first (caml_thread_domain_stop_hook
+   in the runtime's systhreads library), and the main domain outlives this
+   one. The last domain does not join, so a host run on the main domain
+   would lose the answer of work that had begun. *)
 let serve ~on_domain_start () =
   on_domain_start ();
   match
     Eio_main.run (fun _env ->
       Eio.Switch.run (fun sw ->
         let rec loop () =
-          let (Job { id; work; label; claimed; outcome }) = Eio.Stream.take jobs in
-          if Atomic.compare_and_set claimed false true
+          let (Job { id; work; label; stage; outcome }) = Eio.Stream.take jobs in
+          if Atomic.compare_and_set stage Offered Taken
           then
             Eio.Fiber.fork ~sw (fun () ->
-              let result =
-                match Eio_unix.run_in_systhread ?label work with
-                | value -> Ok value
-                | exception exn -> Error (exn, Printexc.get_raw_backtrace ())
-              in
-              fill outcome (Served result);
-              unregister id);
+              Eio_unix.run_in_systhread ?label (fun () ->
+                if Atomic.compare_and_set stage Taken Started
+                then (
+                  let result =
+                    match work () with
+                    | value -> Ok value
+                    | exception exn -> Error (exn, Printexc.get_raw_backtrace ())
+                  in
+                  fill outcome (Served result);
+                  unregister id)));
           loop ()
         in
         loop ()))
@@ -143,22 +170,22 @@ let run ?label work =
   | Execution_context.Eio_fiber ->
     let on_own_domain () = Eio_unix.run_in_systhread ?label work in
     (match Atomic.get state with
-     | Not_started | Failed _ -> on_own_domain ()
+     | Not_started | Failed -> on_own_domain ()
      | Running { keeps_own_domain; on_failure = _ } when keeps_own_domain () ->
        on_own_domain ()
      | Running _ ->
        Eio.Fiber.check ();
        let outcome = Atomic.make Empty in
-       let claimed = Atomic.make false in
+       let stage = Atomic.make Offered in
        let id = Atomic.fetch_and_add next_id 1 in
-       Mutex.protect pending_mutex (fun () ->
-         Hashtbl.replace pending id (answer_after_failure ~claimed ~outcome));
-       Eio.Stream.add jobs (Job { id; work; label; claimed; outcome });
+       let withdraw () = withdraw ~stage ~outcome in
+       Mutex.protect pending_mutex (fun () -> Hashtbl.replace pending id withdraw);
+       Eio.Stream.add jobs (Job { id; work; label; stage; outcome });
        (* A host that failed after the check above may never take this job,
-          and its failure may have answered the pending table before the job
+          and its cleanup may have emptied the pending table before the job
           was in it. *)
        (match Atomic.get state with
-        | Failed exn -> answer_after_failure ~claimed ~outcome exn
+        | Failed -> withdraw ()
         | Not_started | Running _ -> ());
        (match await ~label:(Option.value label ~default:default_label) outcome with
         | Served (Ok value) -> value

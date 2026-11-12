@@ -1,0 +1,58 @@
+(* Draws the run list's table from the worktree's own table code, with fixed
+   moments so the output is the same on every run. *)
+let now = 1794379380.0 (* 2026-11-11 15:43:00 KST *)
+let hour = 3600.0
+let day = 24.0 *. hour
+
+let rows =
+  [ now -. 407.0, "wkbl-front", "\xe2\x97\x8f \xec\x84\xb1\xea\xb3\xb5", "\xe2\x97\x8f succeeded", Some 195.2, "glm-coding.glm-5.3-flash"
+  ; now -. 725.0, "kidsnote-incoming-dd-manager", "\xe2\x97\x8f \xec\x84\xb1\xea\xb3\xb5", "\xe2\x97\x8f succeeded", Some 426.0, "glm-coding.glm-5.3-flash"
+  ; now -. 1024.0, "sangsu", "\xe2\x9c\x95 \xea\xb2\xb0\xea\xb3\xbc \xec\xa0\x80\xec\x9e\xa5 \xeb\xb6\x88\xed\x99\x95\xec\x8b\xa4", "\xe2\x9c\x95 save unknown", Some 0.243, "\xe2\x80\x94"
+  ; now -. 2717.0, "wkbl-growth", "\xe2\x80\x96 \xea\xb2\x80\xed\x86\xa0 \xec\xb7\xa8\xec\x86\x8c", "\xe2\x80\x96 review cancelled", Some 29.2, "\xe2\x80\x94"
+  ; now -. day, "code-reviewer-father", "\xe2\x97\x90 \xec\x8b\xa4\xed\x96\x89 \xec\xa4\x91", "\xe2\x97\x90 running", None, "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+  ; now -. (400.0 *. day), "e-mas-the-leader", "? brand_new_status", "? brand_new_status", Some 4000.0, "glm-coding.glm-5.3-flash"
+  ]
+
+let draw ~korean ~inner_width =
+  let headers =
+    if korean then
+      { Run_table.lhead_started = "\xec\x8b\x9c\xec\x9e\x91"
+      ; lhead_subject = "\xec\x9a\x94\xec\xb2\xad\xec\x9e\x90"
+      ; lhead_status = "\xec\x83\x81\xed\x83\x9c"
+      ; lhead_elapsed = "\xea\xb1\xb8\xeb\xa6\xb0 \xec\x8b\x9c\xea\xb0\x84"
+      ; lhead_slot = "\xec\x8a\xac\xeb\xa1\xaf"
+      }
+    else
+      { Run_table.lhead_started = "Started"
+      ; lhead_subject = "Actor"
+      ; lhead_status = "Status"
+      ; lhead_elapsed = "Elapsed"
+      ; lhead_slot = "Slot"
+      }
+  in
+  let table =
+    Run_table.lane_run_table ~headers ~subject:Run_table.Run_actor_name
+      ~subjects:(List.map (fun (_, subject, _, _, _, _) -> subject) rows)
+      ~inner_width
+  in
+  Printf.printf "-- inner width %d, %s\n" inner_width (if korean then "ko" else "en");
+  print_endline ("  " ^ Run_table.lane_run_header_row table);
+  List.iter
+    (fun (started, subject, ko, en, elapsed, slot) ->
+      print_endline
+        ("  "
+        ^ Run_table.lane_run_row table ~now ~status_style:""
+            { Run_table.lrow_started = started
+            ; lrow_subject = subject
+            ; lrow_status = (if korean then ko else en)
+            ; lrow_elapsed = elapsed
+            ; lrow_slot = slot
+            }))
+    rows;
+  print_newline ()
+
+let () =
+  draw ~korean:true ~inner_width:196;
+  draw ~korean:false ~inner_width:116;
+  draw ~korean:true ~inner_width:76;
+  draw ~korean:true ~inner_width:56

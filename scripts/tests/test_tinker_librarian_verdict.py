@@ -17,7 +17,7 @@ import math
 import sys
 import tempfile
 import unittest
-from dataclasses import astuple
+from dataclasses import astuple, replace
 from pathlib import Path
 from typing import cast
 
@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import admission_request as R
 import admission_validator as AV
 import eval_admission as V
+import exact_store as E
 import memory_scores as M
 import synth_render
 import synth_rows as RW
@@ -159,7 +160,9 @@ class ChoiceTest(unittest.TestCase):
 
 class GateChecksTest(unittest.TestCase):
     # Every number sits on its line in GATES; the outcome words are far below any line.
-    REAL: dict[str, object] = {"valid_rate": 0.95, "dropped_not_in_live": 2, "latency_p50_s": 10.0 * 1.16}
+    # The rate over every item is far below G1's line, so a check that reads it in place of the rate in reach shows.
+    REAL: dict[str, object] = {"valid_rate": 0.5, "valid_rate_in_reach": 0.95, "dropped_not_in_live": 2,
+                               "latency_p50_s": 10.0 * 1.16}
     BASELINE: dict[str, object] = {"latency_p50_s": 10.0}
     SYNTH: dict[str, object] = {"memory_state_accuracy": 0.97, "outcome_accuracy": 0.5, "drop_precision": 1.0,
                                 "stale_drop_recall": 0.9}
@@ -179,7 +182,8 @@ class GateChecksTest(unittest.TestCase):
 
     def test_each_e_real_gate_fails_just_past_its_line(self) -> None:
         cases: tuple[tuple[str, dict[str, object], dict[str, object], dict[str, object]], ...] = (
-            ("G1", {**self.REAL, "valid_rate": 0.94}, self.PAIR, self.BASELINE),
+            ("G1", {**self.REAL, "valid_rate": 1.0, "valid_rate_in_reach": 0.94}, self.PAIR, self.BASELINE),
+            ("G1", {**self.REAL, "valid_rate_in_reach": None}, self.PAIR, self.BASELINE),
             ("G2", {**self.REAL, "dropped_not_in_live": 3}, self.PAIR, self.BASELINE),
             ("G4", self.REAL, {"lead": -0.07}, self.BASELINE), ("G4", self.REAL, {"lead": None}, self.BASELINE),
             ("G5", {**self.REAL, "latency_p50_s": 11.7}, self.PAIR, self.BASELINE),
@@ -226,6 +230,41 @@ class JudgedCandidateTest(unittest.TestCase):
         slower = self.judged({"base": GateChecksTest.SYNTH, "A": GateChecksTest.SYNTH},
                              {"base": GateChecksTest.MERGES, "A": GateChecksTest.MERGES}, 9.0)
         self.assertEqual((slower["pass"], slower["G5"]), (False, False))
+
+
+class RealNumbersTest(unittest.TestCase):
+    def test_g1_counts_the_items_the_baselines_endpoint_did_not_refuse(self) -> None:
+        # i2 is past the base model's context: its endpoint answers 400 to every target.
+        rows = [real_row(target="base", item="i1"), real_row(target="A", item="i1"),
+                real_row(target="base", item="i2", status=400, valid=False),
+                real_row(target="A", item="i2", status=400, valid=False),
+                real_row(target="base", item="i3", valid=False), real_row(target="A", item="i3")]
+        numbers, refused = V.real_numbers(rows, "base")
+        self.assertEqual(refused, ["i2"])
+        self.assertEqual({n: (p["valid_rate"], p["valid_rate_in_reach"]) for n, p in numbers.items()},
+                         {"base": (1 / 3, 1 / 2), "A": (2 / 3, 1.0)})
+
+    def test_a_request_only_the_candidates_endpoint_refused_stays_in_its_rate(self) -> None:
+        rows = [real_row(target="base", item="i1"), real_row(target="A", item="i1", status=400, valid=False),
+                real_row(target="base", item="i2"), real_row(target="A", item="i2")]
+        numbers, refused = V.real_numbers(rows, "base")
+        self.assertEqual((refused, numbers["A"]["valid_rate_in_reach"]), ([], 1 / 2))
+
+    def test_a_target_with_every_item_refused_has_no_rate(self) -> None:
+        rows = [real_row(target="base", item="i1", status=400, valid=False),
+                real_row(target="A", item="i1", status=400, valid=False)]
+        numbers, refused = V.real_numbers(rows, "base")
+        self.assertEqual((refused, numbers["A"]["valid_rate_in_reach"]), (["i1"], None))
+
+
+class OffLiveDropsTest(unittest.TestCase):
+    def test_the_verdict_lists_the_ids_g2_counts_for_one_target(self) -> None:
+        rows = [real_row(target="A", item="i1", dropped_not_in_live=["m3", "m9"]), real_row(target="A", item="i2"),
+                real_row(target="A", item="i3", dropped_not_in_live=["m1"]),
+                real_row(target="base", item="i1", dropped_not_in_live=["m7"])]
+        listed = V.off_live_drops(rows, "A")
+        self.assertEqual(listed, {"i1": ["m3", "m9"], "i3": ["m1"]})
+        self.assertEqual(sum(len(ids) for ids in listed.values()), part_of(V.summarize("real", rows))["dropped_not_in_live"])
 
 
 class MeasureSynthTest(unittest.TestCase):
@@ -441,6 +480,52 @@ class RetemplateTest(unittest.TestCase):
                          (item.prompt.current_memory, item.prompt.candidates))
         data = item.text.index(R.CANDIDATE_HEADER)
         self.assertTrue(other.text.endswith(item.text[data:]))
+
+    def test_an_e_real_record_is_read_with_its_own_template_and_goes_out_drawn_with_the_pinned_one(self) -> None:
+        rules = synth_render.TEMPLATE.read_text(encoding="utf-8")
+        added = "기록할 때만 있던 문장입니다."
+        first_slot = rules.index("\n### ")
+        deferred: dict[str, object] = {
+            "memory": {"new_claims": [], "dropped": [], "working_state": None, "working_contexts": []},
+            "candidates": [{"request_id": r, "outcome": "deferred", "memory_claim": None, "reason": "later"}
+                           for r in ("r1", "r2", "r3")],
+            "change_support": []}
+        with tempfile.TemporaryDirectory() as tmp:
+            recorded = Path(tmp) / "recorded.md"
+            recorded.write_text(rules[:first_slot] + "\n" + added + rules[first_slot:], encoding="utf-8")
+            sent = make_prompt(synth_render.template_at(recorded))
+            text = R.render(sent)
+            base = Path(tmp) / "base"
+            record = E.store_dir(base) / "scope" / ("d" * 64 + ".json")
+            record.parent.mkdir(parents=True)
+            record.write_text(json.dumps({
+                "declaration_id": E.DECLARATION, "digest": "d" * 64,
+                "request": {"output": E.OUTPUT, "schema": {"type": "object"},
+                            "messages": [{"role": "user", "text": text}]},
+                "final": {"status": "answered", "output": deferred, "slot": "slot"}}), encoding="utf-8")
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(json.dumps(E.manifest_of(E.answered_admissions(base), "2026-11-11T00:00:00Z")),
+                                encoding="utf-8")
+            [item] = V.real_items(manifest, recorded, base)
+            with self.assertRaises(SystemExit) as stop:
+                V.real_items(manifest, synth_render.TEMPLATE, base)
+        self.assertIn("prompt does not parse", str(stop.exception))
+        self.assertEqual((item.prompt, item.text), (sent, text))
+        path, [out] = V.drawn_with(None, [item])
+        self.assertEqual(path, synth_render.TEMPLATE)
+        self.assertIn(added, item.text)
+        self.assertNotIn(added, out.text)
+        self.assertEqual(out.prompt, replace(sent, template=synth_render.template()))
+        self.assertEqual(R.parse(out.text, synth_render.template()), out.prompt)
+
+    def test_the_e_real_manifest_and_template_are_the_files_the_pass_lines_pin(self) -> None:
+        lines = cast(dict[str, object], json.loads(V.PASS_LINES.read_text(encoding="utf-8")))
+        real = cast(dict[str, object], lines["e_real"])
+        self.assertEqual(V.e_real_files(lines), (V.HERE / "e_real_manifest.json", V.HERE / "e_real_template.md"))
+        for pin, name in (("manifest_sha256", "manifest"), ("template_sha256", "template")):
+            with self.assertRaises(SystemExit) as stop:
+                V.e_real_files({**lines, "e_real": {**real, pin: "0" * 64}})
+            self.assertEqual(str(stop.exception), f"the E-real {name} differs from pass_lines.json")
 
     def test_retirement_evidence_goes_out_under_the_new_templates_policy(self) -> None:
         payload = '{"evidence_kind":"exact_identity_retirement_history","status":"unavailable","detail":"x"}'

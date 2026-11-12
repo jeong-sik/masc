@@ -1,0 +1,36 @@
+-- inner width 196, ko
+            시작 요청자                       상태               걸린 시간 슬롯
+        15:36:13 wkbl-front                   ● 성공                 3m15s glm-coding.glm-5.3-flash
+        15:30:55 kidsnote-incoming-dd-manager ● 성공                 7m06s glm-coding.glm-5.3-flash
+        15:25:56 sangsu                       ✕ 결과 저장 불확실     243ms —
+        14:57:43 wkbl-growth                  ‖ 검토 취소            29.2s —
+  11-10 15:43:00 code-reviewer-father         ◐ 실행 중                  — ollama_cloud.ollama-cloud-deepseek-v4-1-flash
+      2025-10-07 e-mas-the-leader             ? brand_new_status     1h06m glm-coding.glm-5.3-flash
+
+-- inner width 116, en
+         Started Actor                        Status               Elapsed Slot
+        15:36:13 wkbl-front                   ● succeeded            3m15s glm-coding.glm-5.3-flash
+        15:30:55 kidsnote-incoming-dd-manager ● succeeded            7m06s glm-coding.glm-5.3-flash
+        15:25:56 sangsu                       ✕ save unknown         243ms —
+        14:57:43 wkbl-growth                  ‖ review cancelled     29.2s —
+  11-10 15:43:00 code-reviewer-father         ◐ running                  — ollama_cloud.o…ma-cloud-deepseek-v4-1-flash
+      2025-10-07 e-mas-the-leader             ? brand_new_status     1h06m glm-coding.glm-5.3-flash
+
+-- inner width 76, ko
+  요청자           상태               걸린 시간 슬롯
+  wkbl-front       ● 성공                 3m15s glm-coding.glm-5.3-flash
+  kidsnote-incomi… ● 성공                 7m06s glm-coding.glm-5.3-flash
+  sangsu           ✕ 결과 저장 불확실     243ms —
+  wkbl-growth      ‖ 검토 취소            29.2s —
+  code-reviewer-f… ◐ 실행 중                  — ollama_cl…-deepseek-v4-1-flash
+  e-mas-the-leader ? brand_new_status     1h06m glm-coding.glm-5.3-flash
+
+-- inner width 56, ko
+  요청자           상태               슬롯
+  wkbl-front       ● 성공             glm-coding.glm-5.3-flash
+  kidsnote-incomi… ● 성공             glm-coding.glm-5.3-flash
+  sangsu           ✕ 결과 저장 불확실 —
+  wkbl-growth      ‖ 검토 취소        —
+  code-reviewer-f… ◐ 실행 중          ollama_…pseek-v4-1-flash
+  e-mas-the-leader ? brand_new_status glm-coding.glm-5.3-flash
+

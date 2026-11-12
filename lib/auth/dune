@@ -18,7 +18,9 @@
    masc.agent_core.digest
   eqaf
   jose
+  mirage-crypto
   mirage-crypto-pk
+  masc.crypto_rng
   ptime
   masc.fs_compat
   masc.masc_log

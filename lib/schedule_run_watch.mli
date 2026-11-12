@@ -54,6 +54,7 @@ type conclusion =
   | Startup_failure
   | Unrecognized of string
 
+val conclusion_of_string : string -> conclusion
 val conclusion_to_string : conclusion -> string
 
 type observation =
@@ -124,6 +125,44 @@ val watch_of_payload : Yojson.Safe.t -> (target option, string) result
 val settle_payload : Yojson.Safe.t -> target -> settled -> (Yojson.Safe.t, string) result
 (** The payload with the watch removed and {!wake_message} in place of the
     message. The removed watch is what stops a second wake. *)
+
+val keeper_wake_body : Yojson.Safe.t -> (string * Yojson.Safe.t) list option
+(** The body of a Keeper wake payload; [None] for any other payload. *)
+
+val settle_body_payload :
+  Yojson.Safe.t ->
+  field:string ->
+  message:(string -> string) ->
+  (Yojson.Safe.t, string) result
+(** The payload with the body field [field] removed and the message replaced by
+    [message] applied to the original. {!settle_payload} is this with the run
+    watch's field. Another kind of watch in the same body uses it to stop a
+    second wake the same way. *)
+
+val one_shot_scheduled : Schedule_domain.schedule_request -> bool
+(** [true] for a row that is [Scheduled] and one-shot: the only rows a watch
+    moves. *)
+
+val make_due :
+  Workspace_utils.config ->
+  now:float ->
+  runner_tick_sec:float ->
+  Schedule_domain.schedule_request ->
+  payload:Yojson.Safe.t ->
+  (unit, string) result
+(** Stores [payload] on the scanned row and moves its due time to the current
+    second (an earlier due time stays). The update names the scanned instance,
+    so a row that was replaced meanwhile keeps the replacement; the store also
+    refuses a row that is running or finished. [Error] carries the store's
+    reason. *)
+
+val reads_once :
+  key:('target -> string) ->
+  read:('target -> ('observation, read_failure) result) ->
+  'target -> ('observation, read_failure) result
+(** A reader for one pass: each distinct [key] is read once, and after a
+    {!Rate_limited} answer no further read is made. The tick of every kind of
+    watch uses it. *)
 
 type verdict =
   | Woken of settled

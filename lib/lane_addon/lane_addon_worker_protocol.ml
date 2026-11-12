@@ -250,7 +250,7 @@ let observe t ~binding ~sources =
               match result.structured_content with
               | None -> Error (Invalid_observation "lane_observe must return structuredContent")
               | Some json ->
-                  let* output = Eio_unix.run_in_systhread (fun () ->
+                  let* output = Systhread_host.run ~label:"addon-worker-packet-decode" (fun () ->
                     Lane_addon_packet.decode ?store:t.artifact_store json)
                     |> Result.map_error (fun detail -> Invalid_observation detail) in
                   let has_history = List.exists (fun (row : row) -> List.mem_assoc "input_history" row.fields) output.rows in
@@ -297,7 +297,7 @@ let act t ~arguments =
       | None | Some false ->
           (match result.structured_content with
            | None -> Error (Protocol_failed "action tool must return structuredContent")
-           | Some json -> Eio_unix.run_in_systhread (fun () ->
+           | Some json -> Systhread_host.run ~label:"addon-worker-result-decode" (fun () ->
                Lane_addon_action.decode_result ~store json)
                |> Result.map_error (fun detail -> Protocol_failed detail))
     with

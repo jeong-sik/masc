@@ -20,14 +20,8 @@ module Board_attachments = Masc_tui_board_attachments
 
 let words state ko en = ui_text state ~ko ~en
 
-let board_title ~cols state title =
-  match reading_connection_notice state with
-  | None -> title
-  | Some badge ->
-      let heading = badge_row ~cols ~lead:" " ~label:title ~badge in
-      let width = framed_inner_width cols in
-      if Message_layout.display_width heading <= width then heading
-      else reading_connection_summary ~width state
+(* The step the Board screens take from Work. *)
+let board_step state = words state "게시판" "board"
 
 let board_sort_text state sort =
   if state.ui_language <> Lang_ko then board_sort_explanation sort
@@ -145,13 +139,14 @@ let render_board_compose (state : state) =
             ~max_cells:(framed_inner_width cols) addressing
         ]
   in
-  let header = board_title ~cols state (Printf.sprintf "%s  %s[%s]%s"
-    (screen_title (words state " 게시판" " Board"))
-    (Theme.accent ())
-    (match state.board_compose_reply_to with
-     | Some _ -> words state "댓글" "reply"
-     | None -> words state "새 글" "new post")
-    Ansi.reset)
+  let header =
+    here_row ~cols state
+      ~path:
+        [ board_step state
+        ; (match state.board_compose_reply_to with
+           | Some _ -> words state "댓글" "reply"
+           | None -> words state "새 글" "new post") ]
+      ~readings:[] ~position:None
   in
   (* Staged files ride the post being written; a comment has no attachment
      wire, so like the hearth they are not named on a reply's pane. *)
@@ -465,7 +460,7 @@ let render_board_list (state : state) =
     match query.bq_hearth with
     | None -> ""
     | Some hearth ->
-        Printf.sprintf (if state.ui_language = Lang_ko then "  %s게시판:%s%s" else "  %shearth:%s%s") (Theme.accent ())
+        Printf.sprintf (if state.ui_language = Lang_ko then "%s게시판:%s%s" else "%shearth:%s%s") (Theme.accent ())
           (Terminal_text.single_line hearth) Ansi.reset
   in
   let observation,pending=board_posts_reading state in
@@ -483,13 +478,25 @@ let render_board_list (state : state) =
      already on screen stays when a later refresh fails: those posts are
      still the last reading. *)
   let holding = board_census_holding state ~hearth:query.bq_hearth in
-  let header = board_title ~cols state (Printf.sprintf "%s %s%s"
-    (screen_title (words state " 게시판" " Board"))
-    (match Masc_tui_fetched.value observation with
-     | Some _ ->
-         list_count_text ~loaded:count ~holding
-     | None -> if pending then (words state "(글 조회 중)" "(reading posts)") else words state (if Option.is_some list_error then "(조회 실패)" else "(미조회)") (title_missing_reading ~error:list_error))
-    hearth) in
+  let header =
+    here_row ~cols state ~path:[ board_step state ]
+      ~readings:
+        [ (match Masc_tui_fetched.value observation with
+           | Some _ -> ""
+           | None -> if pending then (words state "글 조회 중" "reading posts") else words state (if Option.is_some list_error then "조회 실패" else "미조회") (field_missing_reading ~error:list_error))
+        ; hearth ]
+      ~position:
+        (match Masc_tui_fetched.value observation with
+         | None -> None
+         | Some _ when count = 0 -> None
+         | Some _ ->
+             let at = state.board_cursor + 1 in
+             Some
+               (match holding with
+                | Some total when total > count ->
+                    Masc_tui_value.Position.Partial { at; loaded = count; total }
+                | Some _ | None -> Masc_tui_value.Position.Row { at; total = count }))
+  in
 
   let layout = board_layout ~cols in
   (* The frame, its fill and the footer are the contract's: this surface
@@ -758,9 +765,15 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
         list_post
   in
 
-  let header = board_title ~cols state (screen_title (words state " 게시판" " Board")
-    ^ (match Terminal_text.optional_single_line post.bp_hearth with
-       | None -> "" | Some hearth -> " · #" ^ hearth)) in
+  let header =
+    here_row ~cols state
+      ~path:
+        (board_step state
+         :: (match Terminal_text.optional_single_line post.bp_hearth with
+             | None -> []
+             | Some hearth -> [ "#" ^ hearth ]))
+      ~readings:[] ~position:None
+  in
 
   box_top buf cols;
   box_line buf cols header;

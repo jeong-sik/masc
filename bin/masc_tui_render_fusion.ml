@@ -12,6 +12,10 @@ module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
 module Chart = Masc_tui_chart
 
+(* The step the Fusion screens take from Keepers. A feature's own name, the
+   same in both languages. *)
+let fusion_step = "Fusion"
+
 (* What became of the selected run, in one row under the list. It opened
    with "Flow: Question → Panel → Judge → Evidence" on every run: the four
    stops are the same for every run and say nothing about this one, the
@@ -71,11 +75,6 @@ let render_fusion_list (state : state) =
         state.fusion_launch_error
   in
   let now_epoch = Unix.gettimeofday () in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let header =
     match snapshot with
     | None ->
@@ -84,8 +83,8 @@ let render_fusion_list (state : state) =
           | None -> title_missing_reading ~error:None
           | Some _ -> ""
         in
-        surface_title_row ~cols state ~lead:(screen_title fusion_title)
-          ~readings:[ "  " ^ reading_note; "  " ^ timestamp ]
+        here_row ~cols state ~path:[ fusion_step ]
+          ~readings:[ String.trim reading_note ] ~position:None
     | Some _ ->
         let completed_count =
           List.fold_left
@@ -108,7 +107,7 @@ let render_fusion_list (state : state) =
            left out when it is zero, the way the failures beside it already
            are. *)
         let stats_note =
-          Printf.sprintf " (%s · %s%d done%s%s%s)"
+          Printf.sprintf "%s · %s%d done%s%s%s"
             (Masc_tui_message_layout.count_noun (List.length runs) "run")
             (Theme.ok ()) completed_count Ansi.reset
             (if running_count > 0 then
@@ -117,11 +116,12 @@ let render_fusion_list (state : state) =
              else "")
             (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
         in
-        surface_title_row ~cols state ~lead:(screen_title fusion_title)
+        here_row ~cols state ~path:[ fusion_step ]
           ~readings:
-            [ stats_note ^ (if history_count = 0 then "" else
-                Printf.sprintf " · %d Board evidence" history_count)
-            ; "  " ^ timestamp ]
+            [ stats_note
+            ; (if history_count = 0 then ""
+               else Printf.sprintf "%d Board evidence" history_count) ]
+          ~position:None
   in
   (* Measured from the rows, the way the Approvals table measures its own
      name column. Eighteen of twenty-eight keepers were cut at sixteen while
@@ -268,7 +268,7 @@ let render_fusion_list (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
+         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false ~has_rows:(shown > 0)
             Fusion));
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
@@ -1079,8 +1079,8 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | Fusion_list | Fusion_detail _ -> state.fusion_detail_stale && Option.is_some detail
   in
   let header =
-    detail_heading ~cols ~lead:(Lead_text (screen_title fusion_title ^ "  "))
-      ~id:run_id ~after:[] ~tail:(connection_badge state)
+    here_row ~cols state ~path:[ fusion_step; run_id ] ~readings:[]
+      ~position:None
   in
   box_top buf cols;
   box_line buf cols header;
@@ -1217,6 +1217,9 @@ let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t optio
       (Scrolled
          { scroll = state.fusion_scroll
          ; report = (fun scroll -> Fusion_detail_scroll scroll) })
-    ~title:(screen_title (fusion_title ^ " - LAUNCH"))
+    ~title:
+      (here_row ~cols state
+         ~path:[ fusion_step; ui_text state ~ko:"실행 시작" ~en:"launch" ]
+         ~readings:[] ~position:None)
     ~hints
     ~body:(fun ~budget:_ c -> List.iter c.push lines)

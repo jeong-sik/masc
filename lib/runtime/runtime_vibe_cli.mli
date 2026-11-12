@@ -61,6 +61,9 @@ type run =
 
 type error =
   | Invalid_config of string
+  | Native_tools_refused of Runtime_account_access.native_refusal
+      (** This process runs no model turn with the tools of a Vibe agent.
+          Nothing was spawned. *)
   | Process_runtime_unavailable
       (** The Eio process runtime is not initialized, so nothing was spawned. *)
   | Call_dir_failed of string

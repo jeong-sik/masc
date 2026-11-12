@@ -27,6 +27,12 @@ type unavailable_reason =
   | Keeper_excluded
       (** the keeper is named in [\[typesafeai\] excluded_keepers]: nothing of
           it reaches the vendor, whichever gate asks *)
+  | Access_unpublished
+      (** the process has not published its account access, so it cannot tell
+          whether it may send with the keys of its host *)
+  | Host_account_not_shared
+      (** a multi-account process shares no account of its host, and the key
+          each destination names is one (plan D4c) *)
 
 val unavailable_reason_to_string : unavailable_reason -> string
 
@@ -42,10 +48,13 @@ val unarmed_destinations : unit -> Runtime_schema.typesafeai_destination list
     off, which is not a misconfiguration. *)
 
 val lane_destinations : unit -> (destinations, unavailable_reason) result
-(** The lane switch, then the armed destinations: [Error Lane_disabled] when
-    the table turns the lane off, [Error No_armed_destination] when no named
-    variable holds a key. Used by the continuity measurement CLI,
-    independently of any gate. *)
+(** The lane switch, the account access, then the armed destinations:
+    [Error Lane_disabled] when the table turns the lane off,
+    [Error Access_unpublished] or [Error Host_account_not_shared] when the
+    process may not send with the keys of its host
+    ({!Runtime_account_access.host_access}), [Error No_armed_destination]
+    when no named variable holds a key. Used by the continuity measurement
+    CLI, independently of any gate. *)
 
 val absorb_gate_destinations : keeper_id:string -> (destinations, unavailable_reason) result
 (** One snapshot for evaluation or its skip reason, in this precedence: the

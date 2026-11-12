@@ -85,6 +85,19 @@ Resolve a relative manifest from the actual declaration directory if
 `MASC_CONFIG_DIR` selects another root. Do not replace a conflicting declaration
 or manual attachment by inventing a second installation.
 
+The optional top-level `max_exact_in_flight` is how many exact requests of this
+installation the host runs side by side. It is an integer of 1 or more and
+defaults to 1. This one installation receives every Keeper's Librarian request,
+so with 1 a slow request holds the requests behind it. The key is outside the
+declaration revision: changing it does not restart the worker and does not
+strand waiting requests. Keep it below the smallest `max-concurrent` among the
+accounts the installation's lanes pass through, or this installation alone can
+hold every place of that account. A server build that does not know the key
+refuses the declaration, so add it only when every server that reads the file
+knows it, and remove it first when rolling back. The order to turn it on and
+what to compare before and after are in
+`docs/rfc/RFC-host-cycle-runs-exact-requests-side-by-side.md` section 6.
+
 ## Bind the two exact outputs
 
 Read the authenticated `GET /api/v1/runtime/config/raw`. In its source, provide

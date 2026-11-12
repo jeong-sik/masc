@@ -40,6 +40,41 @@ let test_without_the_host_the_thread_is_the_callers () =
     check int "the caller's domain starts the thread" caller thread)
 ;;
 
+(* [Eio_guard.run_in_systhread] is the labelled entry the rest of the code
+   calls, and takes the same route. *)
+let guard_thread () = Eio_guard.run_in_systhread ~label:"test-guard" domain
+
+let test_without_the_host_a_guard_call_is_the_callers () =
+  Eio_main.run (fun env ->
+    let caller = domain () in
+    let thread = bounded env 10.0 "the guard call" guard_thread in
+    check int "the caller's domain starts the thread" caller thread)
+;;
+
+let test_a_guard_call_runs_on_the_host () =
+  Systhread_host.start ();
+  Eio_main.run (fun env ->
+    let caller = domain () in
+    let thread = bounded env 10.0 "the guard call" guard_thread in
+    let direct = bounded env 10.0 "the direct call" (fun () -> Systhread_host.run domain) in
+    check bool "the thread is not the caller's domain's" true (thread <> caller);
+    check int "it is the host that Systhread_host.run uses" direct thread)
+;;
+
+(* A host thread has no Eio handler either, and the guard still names the
+   misuse instead of letting [Effect.Unhandled] out. *)
+let test_a_guard_call_on_the_host_names_an_eio_operation () =
+  Systhread_host.start ();
+  Eio_main.run (fun env ->
+    let named =
+      bounded env 10.0 "the guard call" (fun () ->
+        match Eio_guard.run_in_systhread ~label:"test-guard" Eio.Fiber.yield with
+        | () -> false
+        | exception Failure _ -> true)
+    in
+    check bool "an Eio operation in the body is a Failure" true named)
+;;
+
 (* [Fs_compat]'s own blocking calls take the same route. A durable rewrite
    calls its [decide] inside the blocking call, so [decide] names the domain
    whose thread ran it. *)
@@ -231,6 +266,8 @@ let () =
             test_without_the_host_the_thread_is_the_callers
         ; test_case "without the host a Fs_compat call's thread is the caller's" `Quick
             test_without_the_host_a_fs_compat_call_is_the_callers
+        ; test_case "without the host an Eio_guard call's thread is the caller's" `Quick
+            test_without_the_host_a_guard_call_is_the_callers
         ; test_case "work runs on the host, outside Eio" `Quick
             test_work_runs_on_the_host_outside_eio
         ; test_case "pool work keeps its own domain" `Quick test_pool_work_keeps_its_own_domain
@@ -238,6 +275,10 @@ let () =
             test_a_fs_compat_call_runs_on_the_host
         ; test_case "a Fs_compat call from pool work keeps its domain" `Quick
             test_a_fs_compat_call_from_pool_work_keeps_its_domain
+        ; test_case "an Eio_guard call runs on the host" `Quick
+            test_a_guard_call_runs_on_the_host
+        ; test_case "an Eio_guard call on the host names an Eio operation" `Quick
+            test_a_guard_call_on_the_host_names_an_eio_operation
         ] )
     ; ( "cancellation"
       , [ test_case "a cancelled caller starts work only when protected" `Quick

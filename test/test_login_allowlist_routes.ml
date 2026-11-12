@@ -108,7 +108,7 @@ let with_installation f =
                }
            with
            | Ok (_ : Z.committed) -> ()
-           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_to_string error));
+           | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
           let admin =
             match sign_in zone ~invite:(E.Token_digest.of_token admin_token) (google "111") with
             | Ok (Authz_login.Admitted { user_id; _ }) -> session_for zone user_id
@@ -116,7 +116,7 @@ let with_installation f =
           in
           let routes =
             { R.zone
-            ; transactions = Oidc_login_transaction.create ~capacity:1
+            ; transactions = Oidc_login_transaction.create ()
             ; google = None
             ; github = None
             ; get = unreachable

@@ -1,7 +1,7 @@
 open Lane_addon_types
 open Result.Syntax
 type jsonl_snapshot = { entry_count : int; reference : evidence }
-type t = { root : string; mutable root_parent_pending : bool; sequence_mutex : Mutex.t;
+type t = { root : string; root_parent_pending : bool Atomic.t; sequence_mutex : Mutex.t;
            sequences : (string, jsonl_snapshot) Hashtbl.t }
 let create ~root =
   let root = if Filename.is_relative root then Filename.concat (Sys.getcwd ()) root else root in
@@ -9,7 +9,7 @@ let create ~root =
     let length = String.length root in
     if length > 1 && root.[length - 1] = Filename.dir_sep.[0] then
       trim_separator (String.sub root 0 (length - 1)) else root in
-  { root = trim_separator root; root_parent_pending = true; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
+  { root = trim_separator root; root_parent_pending = Atomic.make true; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
 let root t = t.root
 let name_in_masc_dir = "lane-addons"
 let directory ~masc_dir = Filename.concat masc_dir name_in_masc_dir
@@ -36,13 +36,13 @@ let rec sync_existing_parent ~sync_parent directory =
 let rec durable_directory t ~sync_parent directory =
   let parent = Filename.dirname directory in
   if directory = t.root then (
-    (try Unix.mkdir directory 0o700; t.root_parent_pending <- true with
+    (try Unix.mkdir directory 0o700; Atomic.set t.root_parent_pending true with
      | Unix.Unix_error (Unix.EEXIST, _, _) ->
          if (Unix.lstat directory).Unix.st_kind <> Unix.S_DIR then
            raise (Sys_error "retained evidence root is not a directory"));
     (* Flush only the new root entry, never walk preexisting ancestors.
        Keep the obligation on failure so a retry in this store cannot skip it. *)
-    if t.root_parent_pending then (sync_parent parent; t.root_parent_pending <- false))
+    if Atomic.get t.root_parent_pending then (sync_parent parent; Atomic.set t.root_parent_pending false))
   else if parent <> directory then (
     durable_directory t ~sync_parent parent;
     (try Unix.mkdir directory 0o700 with

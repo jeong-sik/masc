@@ -520,7 +520,8 @@ let main env =
           let deadline = Unix.gettimeofday () +. 30. in
           let rec loop () =
             if Unix.gettimeofday () > deadline then false
-            else if raw_has raw "[connected]" || raw_has raw "[partial]" then true
+            else if raw_has raw "\xe2\x97\x8f connected" || raw_has raw "\xe2\x96\xb2 partial"
+            then true
             else ( Eio.Time.sleep clock 0.3; loop () )
           in
           loop ()
@@ -528,7 +529,7 @@ let main env =
         log "workspace identity confirmed=%b" confirmed;
         if not confirmed then
           setup_failed "workspace identity"
-            "candidate never showed [connected]/[partial] within 30s";
+            "the top row never read connected or partial within 30s";
         ensure_broker_alive tui_pid "after identity confirm";
         (* Enter the DOS spectator through the global palette (: + "dos" +
            Enter); it starts the DOS live poll whose first read the handler

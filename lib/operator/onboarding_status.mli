@@ -13,17 +13,29 @@ type check_id =
   | Keeper_declaration
   | Sandbox
   | Keeper_persistence
+  | Multi_account_request
+      (** [config.json] of the workspace asks for [Multi_account]
+          ({!Authz_boot_mode_read.asks_for_multi_account}). It is the one
+          check of such a workspace beside [Workspace]: a boot runs the
+          account server there, so imp's model, declaration, sandbox and
+          history, which the server of a single user runs on, are not read.
+          It is [Needs_verification]: whether the workspace is activated is
+          judged by a boot, under the lease. *)
 
 (** Whether an [Invalid] check keeps the workspace's existing history from opening.
     [Required_to_open]: the workspace, a loadable runtime.toml and Keeper
     metadata the boot admits. [Advisory] checks — imp's model binding,
     declaration and sandbox — are reported but never
-    send the operator back into setup. *)
+    send the operator back into setup. A request for accounts is
+    [Required_to_open]: it decides which server boots. *)
 type role = Required_to_open | Advisory
 
 (** What a bare [masc] does with this observation: open the workspace's
-    persisted Keeper history, or walk the setup journey. *)
-type opening = Open_existing_history | Needs_journey
+    persisted Keeper history, walk the setup journey, or do neither because
+    the workspace asks for accounts. The journey prepares the server of a
+    single user and the history is what that server serves, so for an
+    [Account_installation] it reports the account server and stops. *)
+type opening = Open_existing_history | Needs_journey | Account_installation
 
 type check =
   { id : check_id
@@ -59,7 +71,8 @@ type sandbox_observation =
     runner. The probe issues read-only commands only (host detection, then the
     backend's inventory and, for Apple Container, Rosetta and kernel settings),
     at most seven per inspection. A workspace with no readable imp declaration
-    issues none. *)
+    issues none, and neither does one that asks for accounts
+    ([Multi_account_request]). *)
 val inspect : sandbox:sandbox_observation -> base_path:string option -> t
 
 (** {!inspect} for a running server. It never probes the sandbox
@@ -85,7 +98,10 @@ val role : check_id -> role
 
 (** [Open_existing_history] needs [workspace], [runtime_configuration] and
     [keeper_persistence] Satisfied, and no [Required_to_open] check Invalid. It is a statement about readable
-    history, never about a running Keeper, model or sandbox. *)
+    history, never about a running Keeper, model or sandbox.
+    [Account_installation] is a workspace that holds a
+    [Multi_account_request] check, whatever else it holds: a statement about
+    what its config asks for, never about an account server that runs. *)
 val opening : t -> opening
 val to_json : t -> Yojson.Safe.t
 val to_text : t -> string

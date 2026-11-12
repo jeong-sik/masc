@@ -80,7 +80,14 @@ let run_cmd cli_base_path =
         ~config_dir:(Env_config_core.masc_config_dir_opt ())
         ~anonymous_mutations:false
     with
-    | Ok single_user -> single_user
+    | Ok (Authz_boot_mode_read.Single_user single_user) -> single_user
+    | Ok (Authz_boot_mode_read.Multi_account (_ : Authz_boot_mode_read.multi_account)) ->
+      (* The stdio runtime is the owner state of a single user. The account
+         server of the HTTP boot serves a multi-account installation. *)
+      Log.Server.error
+        "[FATAL] the account mode refuses this stdio boot: the workspace is an active \
+         multi-account installation, which the stdio runtime does not serve";
+      exit 1
     | Error (first, rest) ->
       Log.Server.error
         "[FATAL] the account mode refuses this stdio boot: %s"

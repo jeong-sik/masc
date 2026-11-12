@@ -27,7 +27,7 @@ val csrf_header : string
 val set_session_cookie : Authz_browser_session.Cookie.t -> string
 
 val clear_session_cookie : string
-val set_transaction_cookie : Oidc_login_transaction.Id.t -> string
+val set_transaction_cookie : Oidc_login_transaction.Sealed.t -> string
 val clear_transaction_cookie : string
 
 type method_ =
@@ -86,7 +86,7 @@ type verdict =
 (** The checks run in this order: a query credential, a bearer beside the
     cookie, the cookie value, the origin, and for an {!Unsafe} request the
     origin again (it must be there) and the CSRF token, and last the session
-    in [state] at [now_ms]. A request with the cookie needs the token whether
+    in the trusted snapshot at [now_ms]. A request with the cookie needs the token whether
     or not it also carries a bearer (design 5.3), and a {!Safe} request with
     the cookie needs no token because it changes nothing. *)
-val check : Authz_state.t -> now_ms:int -> request -> (verdict, refusal) result
+val check : Authz_zone.trusted -> now_ms:int -> request -> (verdict, refusal) result

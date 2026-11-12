@@ -3055,9 +3055,9 @@ let schedule_modify_form (row : schedule_row) recurrence =
     Option.bind row.sch_expires_at_iso Time_codec.parse_rfc3339_opt
     |> Option.fold ~none:[] ~some:(fun value -> [ "expires_at_unix", `Float value ])
   in
-  (* The update replaces the whole definition, so a form without the run watch
-     removes it on save. Creation refuses a body whose watch does not decode, so
-     only a hand-edited store file reaches the [Error] arm. *)
+  (* The update replaces the whole definition, so a form without the run or
+     commit watch removes it on save. Creation refuses a body whose watch does
+     not decode, so only a hand-edited store file reaches the [Error] arm. *)
   let run_watch =
     match body with
     | `Assoc fields ->
@@ -3065,6 +3065,16 @@ let schedule_modify_form (row : schedule_row) recurrence =
          | Ok (Some target) ->
              [ ( Masc.Schedule_run_watch.watch_field
                , `String (Masc.Schedule_run_watch.target_url target) ) ]
+         | Ok None | Error _ -> [])
+    | _ -> []
+  in
+  let checks_watch =
+    match body with
+    | `Assoc fields ->
+        (match Masc.Schedule_checks_watch.watch_of_body fields with
+         | Ok (Some target) ->
+             [ ( Masc.Schedule_checks_watch.watch_field
+               , `String (Masc.Schedule_checks_watch.target_url target) ) ]
          | Ok None | Error _ -> [])
     | _ -> []
   in
@@ -3082,7 +3092,7 @@ let schedule_modify_form (row : schedule_row) recurrence =
      ; "source", `String row.sch_source
      ; "allow_unregistered_keeper", `Bool false
      ]
-     @ run_watch @ recurrence_fields @ expires)
+     @ run_watch @ checks_watch @ recurrence_fields @ expires)
   |> Yojson.Safe.pretty_to_string
 
 (** The form the modify editor opens with, or why it does not open.
@@ -9595,6 +9605,9 @@ type state = {
      a reader looking for one key types a piece of its name or of what it
      does. *)
   mutable help_filter: Masc_tui_help.filter;
+  (* How much the sheet lists. [Here] whenever the sheet is closed, so it
+     opens on the reader's own screen every time. *)
+  mutable help_scope: Masc_tui_help.scope;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
      it in its own layer, and the frame presenter redraws only the rows that
@@ -19868,6 +19881,7 @@ let close_key_modals (state : state) =
   state.help_open <- false;
   state.help_scroll <- 0;
   state.help_filter <- Masc_tui_help.Off;
+  state.help_scope <- Masc_tui_help.Here;
   state.queue_panel <- None;
   close_detail_reading state;
   state.about_open <- false;
@@ -20280,6 +20294,7 @@ let create_state
      else Workspace_identity_unread);
   help_scroll = 0;
   help_filter = Masc_tui_help.Off;
+  help_scope = Masc_tui_help.Here;
   image_open = false;
   image_inspection = None;
   image_cell_view = None;

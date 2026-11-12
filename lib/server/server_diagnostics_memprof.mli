@@ -1,6 +1,7 @@
 (** GET /api/v1/diagnostics/memprof — the {!Alloc_profile} tables: which call
     sites allocated, promoted, and still hold sampled blocks since the
-    process started sampling.
+    process started sampling, and which of them allocated on the main domain
+    ([starting_domain_allocated]).
 
     Operator-only ([CanAdmin]). Reading the tables takes the profile's mutex
     for a snapshot of the site table; it does not walk the heap and does not

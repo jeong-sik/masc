@@ -3,6 +3,8 @@ type reason =
   | Recall_not_switched_on
   | Keeper_excluded
   | Lane_disabled
+  | Access_unpublished
+  | Host_account_not_shared
   | No_armed_destination
   | Refused_by_another_gate
 [@@deriving enumerate]
@@ -11,10 +13,13 @@ type t =
   | Judged
   | Not_judged of reason
 
-(* [Typesafeai_config.lane_destinations] answers only about the lane switch and
-   the keys; a reason of any other gate is not an answer of it. *)
+(* [Typesafeai_config.lane_destinations] answers only about the lane switch,
+   the account access and the keys; a reason of any other gate is not an
+   answer of it. *)
 let lane_reason_of_unavailable = function
   | Typesafeai_config.Lane_disabled -> Lane_disabled
+  | Typesafeai_config.Access_unpublished -> Access_unpublished
+  | Typesafeai_config.Host_account_not_shared -> Host_account_not_shared
   | Typesafeai_config.No_armed_destination -> No_armed_destination
   | Typesafeai_config.Absorb_gate_disabled
   | Typesafeai_config.Board_attention_disabled
@@ -32,6 +37,8 @@ let reason_of_unavailable = function
   | Typesafeai_config.Memory_recall_disabled -> Recall_not_switched_on
   | Typesafeai_config.Keeper_excluded -> Keeper_excluded
   | ( Typesafeai_config.Lane_disabled
+    | Typesafeai_config.Access_unpublished
+    | Typesafeai_config.Host_account_not_shared
     | Typesafeai_config.No_armed_destination
     | Typesafeai_config.Absorb_gate_disabled
     | Typesafeai_config.Board_attention_disabled
@@ -43,7 +50,11 @@ let reason_of_unavailable = function
 ;;
 
 let is_lane_reason = function
-  | Lane_disabled | No_armed_destination | Refused_by_another_gate -> true
+  | Lane_disabled
+  | Access_unpublished
+  | Host_account_not_shared
+  | No_armed_destination
+  | Refused_by_another_gate -> true
   | Environment_switch_off | Recall_not_switched_on | Keeper_excluded -> false
 ;;
 
@@ -77,6 +88,10 @@ let reason_to_string = function
     Typesafeai_config.unavailable_reason_to_string Typesafeai_config.Keeper_excluded
   | Lane_disabled ->
     Typesafeai_config.unavailable_reason_to_string Typesafeai_config.Lane_disabled
+  | Access_unpublished ->
+    Typesafeai_config.unavailable_reason_to_string Typesafeai_config.Access_unpublished
+  | Host_account_not_shared ->
+    Typesafeai_config.unavailable_reason_to_string Typesafeai_config.Host_account_not_shared
   | No_armed_destination ->
     Typesafeai_config.unavailable_reason_to_string Typesafeai_config.No_armed_destination
   | Refused_by_another_gate -> "another_gate_refused"

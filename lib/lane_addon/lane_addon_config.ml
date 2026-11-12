@@ -1,3 +1,7 @@
+type exact_in_flight = int
+let one_exact_at_a_time = 1
+let exact_in_flight count = if count >= one_exact_at_a_time then Some count else None
+
 type declaration = {
   id : string;
   enabled : bool;
@@ -8,6 +12,7 @@ type declaration = {
   revision : string;
   source_revision : string;
   source_path : string;
+  max_exact_in_flight : exact_in_flight;
 }
 
 type issue = { source_path : string; id : string option; message : string }
@@ -121,7 +126,8 @@ let select_exact_outputs declared = function
   | _ -> Error "exact_outputs requires an array of declared output names"
 
 let decode ~manifest_scope ~source_path ~source_revision ~id fields =
-  let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs"] in
+  let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs";
+    "max_exact_in_flight"] in
   let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
     | None -> Ok () | Some (key, _) -> Error ("unknown declaration field: " ^ key) in
   let* enabled = match List.assoc_opt "enabled" fields with
@@ -131,6 +137,15 @@ let decode ~manifest_scope ~source_path ~source_revision ~id fields =
     | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
     | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
     | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "enabled requires a boolean" in
+  let* max_exact_in_flight =
+    let refused = Error "max_exact_in_flight requires an integer of 1 or more" in
+    match List.assoc_opt "max_exact_in_flight" fields with
+    | None -> Ok one_exact_at_a_time
+    | Some (Otoml.TomlInteger count) -> Option.fold ~none:refused ~some:Result.ok (exact_in_flight count)
+    | Some (Otoml.TomlString _) | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlFloat _)
+    | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+    | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+    | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> refused in
   let* run_id = text fields "run_id" in
   let* manifest_path = text fields "manifest_path" in
   let directory = Filename.dirname source_path in
@@ -178,7 +193,8 @@ let decode ~manifest_scope ~source_path ~source_revision ~id fields =
     |> Yojson.Safe.sort |> Yojson.Safe.to_string
   in
   let revision = Agent_core_sha256.(to_hex (digest_string canonical)) in
-  Ok { id; enabled; run_id; manifest_path; package; binding; revision; source_revision; source_path }
+  Ok { id; enabled; run_id; manifest_path; package; binding; revision; source_revision; source_path;
+       max_exact_in_flight }
 
 let parse_declaration ~manifest_scope ~source_path bytes =
   let failure ?id ~unreadable message =

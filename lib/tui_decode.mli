@@ -448,7 +448,9 @@ type runtime_option = {
           [None] means no unambiguous scope ID was reported. *)
   ro_credential_refused_at : float option;
       (** When the provider last refused this runtime's credential with no
-          answer on it since. A replaced credential ends it, not a wait. *)
+          answer on it since. No wait ends it: it stays until a call on the
+          same credential is answered, so a replaced credential that nothing
+          has called yet still shows here. *)
   ro_rate_limited : bool;
       (** This process observed a 429 that has neither reached its provider's
           Retry-After deadline nor been cleared by a successful answer.

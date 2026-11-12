@@ -31930,12 +31930,41 @@ Use relative paths for resources already held in the package. -->
       report_action state "error" "Skill inventory is not confirmed for the selected Keeper; refresh before opening the diagram"
     else match selected_tools_skill_profile state with
     | None -> report_action state "error" "No published Skill selected"
-    | Some { esp_flow = None; _ } ->
-        report_action state "system" "Normal Skill: the model orchestrates tools; no declared execution graph"
     | Some profile ->
-        (match profile.esp_flow with
-         | None -> ()
-         | Some flow ->
+        (* Split on the declared kind, not on whether a flow arrived: the
+           answer to a Normal Skill is where the graphs are. The Skills list
+           opens on the Normal group, so Ctrl-O there was the first try and
+           used to end on one English line. [f] is the key that moves to a
+           Composition. *)
+        (match profile.esp_io, profile.esp_flow with
+         | Model_orchestrated, (None | Some _) ->
+             let compositions =
+               List.length
+                 (List.filter
+                    (fun (candidate : Masc.Tui_decode_tools.effective_skill_profile) ->
+                       match candidate.esp_io with
+                       | Model_orchestrated -> false
+                       | Composition_io _ -> true)
+                    (tools_skill_profiles state))
+             in
+             report_action state "system"
+               (if compositions = 0 then
+                  ui_text state
+                    ~ko:"이 Keeper 에는 Composition Skill 이 없어 Skill 그래프가 없습니다"
+                    ~en:"This Keeper has no Composition Skill, so there is no Skill graph"
+                else
+                  ui_text state
+                    ~ko:(Printf.sprintf
+                           "Skill 그래프는 Composition Skill %d개에만 있습니다 · f: Composition 선택"
+                           compositions)
+                    ~en:(Printf.sprintf "Skill graphs exist only for %s · f selects one"
+                           (Masc_tui_message_layout.count_noun compositions "Composition Skill")))
+         | Composition_io _, None ->
+             report_action state "error"
+               (ui_text state
+                  ~ko:"이 Composition Skill 응답에 실행 그래프가 없습니다; 새로 읽은 뒤 다시 여세요"
+                  ~en:"This Composition Skill reading has no execution graph; refresh and open it again")
+         | Composition_io _, Some flow ->
              match Masc.Tui_decode_tools.skill_flow_mermaid flow with
              | Error detail -> report_action state "error" detail
              | Ok source ->

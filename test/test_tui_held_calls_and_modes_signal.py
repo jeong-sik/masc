@@ -77,9 +77,11 @@ class HeldCallsAndModesSignalTest(unittest.TestCase):
         def opened(server: owed.ChatServer, step: Callable[..., None]) -> None:
             approvals = cast(ApprovalsServer, server)
             if to_overview:
-                # Keepers -> Usage -> Board -> Workspace -> System -> Dashboard.
+                # Keepers -> Features & plugins -> Workspace -> System ->
+                # Operations (#50465 took Usage and Board off the tab ring, so
+                # Operations is four tabs from Keepers).
                 approvals.set_phase("open")
-                step("keys", "\t\t\t\t\t")
+                step("keys", "\t\t\t\t")
                 step(
                     "wait",
                     lambda: approvals.response_count("open", HELD_PATH) >= 1,

@@ -29,7 +29,8 @@ request, one JSON answer.
 | `masc_my_keepers` | Your Keepers, each with its Runtime. | `manage_own_keeper` |
 | `masc_my_keeper_create` | Makes a Keeper you own. | `manage_own_keeper` |
 | `masc_my_keeper_assign` | Gives one of your Keepers one of your Runtimes. | `manage_own_keeper` |
-| `masc_my_keeper_turn` | Sends a Keeper a message and returns its answer. | `manage_own_keeper`, `invoke_model`, `use_tool` |
+| `masc_my_keeper_turn` | Sends a Keeper a message and returns its answer. The Keeper goes on in its conversation. | `manage_own_keeper`, `invoke_model`, `use_tool` |
+| `masc_my_keeper_conversation_new` | Starts a new conversation of a Keeper. | `manage_own_keeper` |
 
 Each tool calls the function behind the matching control of the person's
 page (`/`), after the same check. The text of a tool result is the JSON
@@ -96,6 +97,34 @@ and `"binding":{"kind":"pat",...}`.
 | 405 | `GET` or `DELETE`. The endpoint opens no stream. |
 | 413 | A message over 64 KiB. |
 | 503 | The server cannot read its accounts. Try again later. |
+
+## Conversations
+
+A Keeper on a Claude Code Runtime has one conversation at a time. Its first
+turn starts one, and each later turn goes on in it: the Keeper has read
+what you asked before and what it answered. The answer of
+`masc_my_keeper_turn` names the conversation in `conversation_id`, and
+`continued` is `true` when the turn resumed it.
+
+- **What the server keeps.** The message and the answer of each turn are
+  written to the disk of the server, in a directory of your own beside the
+  logins of your subscriptions. Whoever runs the server can read that
+  directory.
+- **One subscription per conversation.** A conversation stays on the
+  subscription it began on. When you give the Keeper a Runtime of another
+  subscription, its next turn is refused. Start a new conversation with
+  `masc_my_keeper_conversation_new`, or give the Keeper a Runtime of the
+  first subscription again.
+- **Turns that keep failing.** When Claude Code no longer has the session
+  of a conversation, each turn of it ends without an answer. The server
+  cannot tell that from another failure and starts no session by itself:
+  start a new conversation.
+- **A new conversation is yours to start.** `masc_my_keeper_conversation_new`
+  starts one. The Keeper's next turn has read none of the earlier turns.
+  The earlier conversations stay recorded, and no turn goes on in them.
+- **A failed turn is not sent again.** The server does not start the turn
+  over, and it starts no new conversation in place of one whose turn
+  failed. Send the message again when you want it answered.
 
 ## Limits
 

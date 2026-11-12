@@ -45,8 +45,11 @@ type tool =
   | Keeper_create
   | Keeper_assign
   | Keeper_turn
+  | Keeper_conversation_new
 
-let tools = [ Whoami; Runtimes; Keepers; Keeper_create; Keeper_assign; Keeper_turn ]
+let tools =
+  [ Whoami; Runtimes; Keepers; Keeper_create; Keeper_assign; Keeper_turn; Keeper_conversation_new ]
+;;
 
 let name_of = function
   | Whoami -> "masc_whoami"
@@ -55,6 +58,7 @@ let name_of = function
   | Keeper_create -> "masc_my_keeper_create"
   | Keeper_assign -> "masc_my_keeper_assign"
   | Keeper_turn -> "masc_my_keeper_turn"
+  | Keeper_conversation_new -> "masc_my_keeper_conversation_new"
 ;;
 
 (* Decoded when the module starts, as every tool definition the binary
@@ -67,6 +71,7 @@ let definition_of =
   let keeper_create = load Keeper_create in
   let keeper_assign = load Keeper_assign in
   let keeper_turn = load Keeper_turn in
+  let keeper_conversation_new = load Keeper_conversation_new in
   function
   | Whoami -> whoami
   | Runtimes -> runtimes
@@ -74,6 +79,7 @@ let definition_of =
   | Keeper_create -> keeper_create
   | Keeper_assign -> keeper_assign
   | Keeper_turn -> keeper_turn
+  | Keeper_conversation_new -> keeper_conversation_new
 ;;
 
 let definitions = List.map (fun tool -> tool, definition_of tool) tools
@@ -156,6 +162,25 @@ let run installation caller tool ~arguments =
               ~env:installation.env
               ~person:{ Server_setup_account_login.zone = installation.zone; user_id; namespace }
               ~pat
+              ~base_path:installation.base_path))
+  | Keeper_conversation_new ->
+    (* The conversation is recorded under the namespace of the person, which
+       this judgment gives. Starting one calls no model, so the token is not
+       read. *)
+    judged
+      Auth_preview.keeper_turn_caller
+      caller
+      (fun
+          { Auth_preview.person = { Auth_preview.user_id; namespace }
+          ; pat = (_ : Authz_types.Pat_binding.t)
+          }
+        ->
+         with_body
+           [ "keeper_id" ]
+           arguments
+           (Server_preview_keeper_turn.start_conversation
+              ~env:installation.env
+              ~person:{ Server_setup_account_login.zone = installation.zone; user_id; namespace }
               ~base_path:installation.base_path))
 ;;
 

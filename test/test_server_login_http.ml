@@ -835,6 +835,7 @@ let a_person_calls_mcp () =
       ; "masc_my_keeper_create"
       ; "masc_my_keeper_assign"
       ; "masc_my_keeper_turn"
+      ; "masc_my_keeper_conversation_new"
       ]
       (match at [ "result"; "tools" ] listed with
        | `List tools ->
@@ -1134,7 +1135,25 @@ let a_person_keeps_keepers_over_mcp () =
     Alcotest.(check string)
       "a turn without a message is refused by the definition of the tool"
       "true"
-      (fst (result owner "masc_my_keeper_turn" ~arguments:(keeper "keeper-1"))))
+      (fst (result owner "masc_my_keeper_turn" ~arguments:(keeper "keeper-1")));
+    (* Plan S1b-3: a new conversation of a Keeper. The tool stops where the
+       route stops. *)
+    check
+      "a PAT without the Keeper effect starts no conversation"
+      ("true", error_json (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Pat_scope_lacks_own_keeper))
+      (result reader "masc_my_keeper_conversation_new" ~arguments:(keeper "keeper-1"));
+    check
+      "a conversation of a Keeper no one made"
+      ("true", error_json "No Keeper of yours has this name.")
+      (result owner "masc_my_keeper_conversation_new" ~arguments:(keeper "keeper-2"));
+    check
+      "a conversation of their Keeper of that name does not start on the first person's account"
+      ("true", error_json "The Keeper has no Runtime. Give it one of yours first.")
+      (result theirs "masc_my_keeper_conversation_new" ~arguments:(keeper "keeper-1"));
+    Alcotest.(check string)
+      "a conversation without a Keeper is refused by the definition of the tool"
+      "true"
+      (fst (result owner "masc_my_keeper_conversation_new")))
 ;;
 
 (* Bytes another writer added to the log: the next commit finds the end moved

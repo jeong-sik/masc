@@ -1,4 +1,5 @@
-(* One turn of a person's Keeper in the localhost preview (plan D2-8). The
+(* The turns of a person's Keeper in the localhost preview (plan D2-8) and the
+   conversation they make (plan S1b-3). The
    zone is on real files, made by the real bootstrap, and its records are made
    by the real writers. The runtime is the provider of a runtime.toml with a
    login receipt of each account. The Claude Code CLI is a script that answers
@@ -6,6 +7,8 @@
    app-server protocol, and each writes down what it was started with.
    Codex has no turn without native tools, so the preview refuses a Codex
    turn before Codex starts one (plan D3c).
+   A turn of Claude Code is recorded under the namespace of the person, and
+   the next turn of the Keeper resumes the session of the last answer.
    The access is published once per process, so the executable has one case
    and it runs in order. *)
 
@@ -19,6 +22,7 @@ module B = Authz_bootstrap
 module E = Authz_invite_event
 module Z = Authz_zone
 module R = Login_routes
+module Conversation = Server_keeper_conversation
 
 let get = function
   | Ok value -> value
@@ -43,7 +47,10 @@ let commit zone ~author ~kind body =
    subscription, and a turn with "echo: " and the message. It writes the home
    it was started on, its directory, its arguments and the message to
    [<script>.turn.json]. While [<script>.hold] is there it writes
-   [<script>.started] after the message and waits. *)
+   [<script>.started] after the message and waits. While [<script>.fail] is
+   there it ends after the message with no answer, and while [<script>.lost]
+   is there it ends so when it was started to resume a session. The session
+   is the one it was started with, new or resumed. *)
 let fake_claude = {|#!/usr/bin/env python3
 import json
 import os
@@ -64,7 +71,7 @@ def emit(frame):
     print(json.dumps(frame), flush=True)
 
 model = args[args.index("--model") + 1]
-session = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--session-id="))
+session = next(arg.split("=", 1)[1] for arg in args if arg.startswith(("--session-id=", "--resume=")))
 request = read()
 emit({"type": "control_response", "response": {"subtype": "success",
     "request_id": request["request_id"], "response": {}}})
@@ -74,6 +81,10 @@ content = user["message"]["content"]
 prompt = content if isinstance(content, str) else "".join(block.get("text", "") for block in content)
 Path(script + ".turn.json").write_text(json.dumps({"home": os.environ.get("CLAUDE_CONFIG_DIR"),
     "cwd": os.getcwd(), "args": args, "prompt": prompt}))
+if Path(script + ".fail").exists():
+    sys.exit(1)
+if Path(script + ".lost").exists() and any(arg.startswith("--resume=") for arg in args):
+    sys.exit(1)
 hold = Path(script + ".hold")
 if hold.exists():
     Path(script + ".started").write_text("started")
@@ -315,6 +326,37 @@ let rec after flag = function
   | [] -> None
 ;;
 
+(* The argument that starts with [prefix], without it. *)
+let valued prefix args =
+  List.find_map
+    (fun arg ->
+       if String.starts_with ~prefix arg
+       then Some (String.sub arg (String.length prefix) (String.length arg - String.length prefix))
+       else None)
+    args
+;;
+
+let new_session = valued "--session-id="
+let resumed_session = valued "--resume="
+
+(* The directory of the conversations of the person, and the rows of a file
+   under it. *)
+let records_of ~base_path (who : someone) =
+  Filename.concat
+    (Layout.person_runtime_root ~base_path ~namespace:who.person.namespace)
+    "keeper-conversations"
+;;
+
+let rows path =
+  In_channel.with_open_bin path In_channel.input_lines
+  |> List.map (fun row ->
+    match Yojson.Safe.from_string row with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.failf "a row of %s is not an object" (Filename.basename path))
+;;
+
+let kinds path = List.map (fun fields -> text_of fields "kind") (rows path)
+
 (* Login receipts live under the configuration directory of the user. *)
 let config_home = "XDG_CONFIG_HOME"
 
@@ -409,13 +451,32 @@ let test_turn () =
          with
          | Ok () -> ()
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
-        let answered keeper runtime text =
-          ( 200
-          , Printf.sprintf
-              {|{"keeper_id":"%s","runtime_id":"%s","model":"claude-sonnet-5","text":"%s"}|}
-              keeper
-              (Runtime_id.to_string runtime)
-              text )
+        (* The answer of a turn of [keeper] on [runtime]: its fields in
+           order, [text], and whether the turn resumed. The conversation it
+           names is the value. *)
+        let answered label ~keeper ~runtime ~text ~continued (status, body) =
+          let fields =
+            match status, Yojson.Safe.from_string body with
+            | 200, `Assoc fields -> fields
+            | _ -> Alcotest.failf "%s: the turn was not answered: %d %s" label status body
+          in
+          Alcotest.(check (list string))
+            (label ^ ": the fields of the answer")
+            [ "keeper_id"; "runtime_id"; "model"; "text"; "conversation_id"; "continued" ]
+            (List.map fst fields);
+          List.iter
+            (fun (name, expected) ->
+               Alcotest.(check string) (label ^ ": " ^ name) expected (text_of fields name))
+            [ "keeper_id", keeper
+            ; "runtime_id", Runtime_id.to_string runtime
+            ; "model", "claude-sonnet-5"
+            ; "text", text
+            ];
+          Alcotest.(check bool)
+            (label ^ ": whether the turn resumed")
+            true
+            (List.assoc_opt "continued" fields = Some (`Bool continued));
+          text_of fields "conversation_id"
         in
         let reply ?(pat = Pat_binding.Not_pat) (who : someone) body =
           let answer = Server_preview_keeper_turn.run ~env ~person:who.person ~pat ~base_path ~body in
@@ -423,11 +484,21 @@ let test_turn () =
         in
         let check_reply label expected actual = Alcotest.(check (pair int string)) label expected actual in
         (* The person's Keeper answers on the home of their own account. *)
-        check_reply
-          "her Keeper answers"
-          (answered "keeper-alice" alice_runtime "echo: hello")
-          (reply alice (body ~keeper:"keeper-alice" ~message:"hello"));
+        let conversation =
+          answered
+            "her Keeper answers"
+            ~keeper:"keeper-alice"
+            ~runtime:alice_runtime
+            ~text:"echo: hello"
+            ~continued:false
+            (reply alice (body ~keeper:"keeper-alice" ~message:"hello"))
+        in
         let first = seen claude in
+        let session =
+          match new_session (args_of first), resumed_session (args_of first) with
+          | Some session, None -> session
+          | _ -> Alcotest.fail "the first turn did not start a session"
+        in
         Alcotest.(check string) "on the home of her account" (home_of ~base_path alice) (text_of first "home");
         (* A request that a personal access token authenticated runs the turn
            only inside the scope of that token. *)
@@ -441,13 +512,31 @@ let test_turn () =
             ; expires_at = None
             }
         in
-        check_reply
-          "a token that covers the turn"
-          (answered "keeper-alice" alice_runtime "echo: by token")
-          (reply
-             ~pat:(token Effect.[ Invoke_model; Manage_own_keeper; Use_tool ])
-             alice
-             (body ~keeper:"keeper-alice" ~message:"by token"));
+        (* The second turn of the Keeper goes on in the conversation: the
+           client resumes the session of the first answer, in the directory
+           of the first turn. *)
+        Alcotest.(check string)
+          "a token that covers the turn stays in the conversation"
+          conversation
+          (answered
+             "a token that covers the turn"
+             ~keeper:"keeper-alice"
+             ~runtime:alice_runtime
+             ~text:"echo: by token"
+             ~continued:true
+             (reply
+                ~pat:(token Effect.[ Invoke_model; Manage_own_keeper; Use_tool ])
+                alice
+                (body ~keeper:"keeper-alice" ~message:"by token")));
+        let second = seen claude in
+        Alcotest.(check (pair (option string) (option string)))
+          "the second turn resumes the session of the first"
+          (None, Some session)
+          (new_session (args_of second), resumed_session (args_of second));
+        Alcotest.(check string)
+          "in the directory of the first turn"
+          (text_of first "cwd")
+          (text_of second "cwd");
         Alcotest.(check int)
           "a token that manages Keepers and calls no model"
           403
@@ -465,14 +554,32 @@ let test_turn () =
           "with no built-in tool but the lookup"
           (Some "ToolSearch")
           (after "--tools" (args_of first));
-        Alcotest.(check bool)
-          "in a private directory that is gone after the turn"
-          false
-          (Sys.file_exists (text_of first "cwd"));
-        check_reply
-          "request field order does not change the turn"
-          (answered "keeper-alice" alice_runtime "echo: reversed")
-          (reply alice {|{"message":"reversed","keeper_id":"keeper-alice"}|});
+        let alice_records = records_of ~base_path alice in
+        let alice_turns = List.fold_left Filename.concat alice_records [ conversation; "turns.jsonl" ] in
+        Alcotest.(check string)
+          "in the directory of the conversation, under her namespace"
+          (List.fold_left Filename.concat alice_records [ conversation; "cwd" ])
+          (text_of first "cwd");
+        (* The token that calls no model was refused before the record. *)
+        Alcotest.(check (list string))
+          "the two turns are recorded"
+          [ "asked"; "answered"; "asked"; "answered" ]
+          (kinds alice_turns);
+        (match rows alice_turns with
+         | [ asked; answer; _; _ ] ->
+           Alcotest.(check string) "her message is recorded" "hello" (text_of asked "message");
+           Alcotest.(check string) "the answer is recorded" "echo: hello" (text_of answer "text");
+           Alcotest.(check string) "with the session of the client" session (text_of answer "session_id")
+         | _ -> Alcotest.fail "the record does not have four rows");
+        let (_ : string) =
+          answered
+            "request field order does not change the turn"
+            ~keeper:"keeper-alice"
+            ~runtime:alice_runtime
+            ~text:"echo: reversed"
+            ~continued:true
+            (reply alice {|{"message":"reversed","keeper_id":"keeper-alice"}|})
+        in
         let reversed = seen claude in
         Alcotest.(check string)
           "reversed fields keep her account home"
@@ -550,22 +657,246 @@ let test_turn () =
           busy;
         Alcotest.(check int) "the first turn answers" 200 (fst held);
         Alcotest.(check string) "the first turn's message" "first" (text_of (seen claude) "prompt");
+        (* The refused call wrote nothing: this is the first turn of her
+           second Keeper, in a conversation of its own. *)
+        let second_conversation =
+          answered
+            "the account is free again"
+            ~keeper:"keeper-alice-second"
+            ~runtime:alice_runtime
+            ~text:"echo: second"
+            ~continued:false
+            (reply alice (body ~keeper:"keeper-alice-second" ~message:"second"))
+        in
+        Alcotest.(check bool)
+          "her second Keeper has a conversation of its own"
+          false
+          (String.equal conversation second_conversation);
+        (* A turn the client ends without an answer is recorded as failed,
+           and the next turn resumes the session of the last answer. *)
+        let fail = claude ^ ".fail" in
+        Out_channel.with_open_bin fail (fun (_ : out_channel) -> ());
         check_reply
-          "the account is free again"
-          (answered "keeper-alice-second" alice_runtime "echo: second")
-          (reply alice (body ~keeper:"keeper-alice-second" ~message:"second"));
+          "a turn the client ends without an answer"
+          (502, {|{"error":"The client ended the turn without an answer."}|})
+          (reply alice (body ~keeper:"keeper-alice" ~message:"lost"));
+        Sys.remove fail;
+        (match List.rev (rows alice_turns) with
+         | failed :: asked :: _ ->
+           Alcotest.(check string) "the failed turn is recorded" "failed" (text_of failed "kind");
+           Alcotest.(check string) "with the kind of the failure" "no_answer" (text_of failed "failure");
+           Alcotest.(check string) "after its message" "lost" (text_of asked "message")
+         | _ -> Alcotest.fail "the failed turn left no rows");
+        let (_ : string) =
+          answered
+            "the turn after a failed one"
+            ~keeper:"keeper-alice"
+            ~runtime:alice_runtime
+            ~text:"echo: again"
+            ~continued:true
+            (reply alice (body ~keeper:"keeper-alice" ~message:"again"))
+        in
+        Alcotest.(check (option string))
+          "resumes the session of the last answer"
+          (Some session)
+          (resumed_session (args_of (seen claude)));
+        (* A conversation stays on the account it began on. Her idle Keeper
+           gets a Runtime, and its conversation is one that began on another
+           account: the turn is refused and no client starts. *)
+        let idle = get (Keeper_id.of_string "keeper-alice-idle") in
+        (match Authz_keeper.assign zone ~user_id:alice.person.user_id ~keeper_id:idle ~runtime_id:alice_runtime with
+         | Ok () -> ()
+         | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
+        let elsewhere =
+          match
+            Conversation.start
+              (Conversation.root ~base_path ~namespace:alice.person.namespace)
+              idle
+              (get (Provider_account_id.of_string "another-account"))
+              ~draw:(fun () -> "conversation-elsewhere")
+              ~now_ms:(fun () -> start_ms)
+          with
+          | Ok (conversation : Conversation.conversation) ->
+            Conversation.Conversation_id.to_string conversation.conversation_id
+          | Error error -> Alcotest.fail (Conversation.error_to_string error)
+        in
+        Sys.remove (claude ^ ".turn.json");
+        check_reply
+          "a conversation that began on another subscription"
+          ( 409
+          , {|{"error":"The conversation of this Keeper began on another subscription of yours. Start a new conversation."}|}
+          )
+          (reply alice (body ~keeper:"keeper-alice-idle" ~message:"hello"));
+        Alcotest.(check bool)
+          "the conversation of another subscription has no turn"
+          false
+          (Sys.file_exists (Filename.concat alice_records elsewhere));
+        (* She starts a new conversation of the Keeper, on the account of the
+           Runtime it has now, and its next turn runs there in a session of
+           its own. *)
+        let renew who body =
+          let answer =
+            Server_preview_keeper_turn.start_conversation ~env ~person:who.person ~base_path ~body
+          in
+          R.status_code answer.R.status, answer.R.body
+        in
+        let only_keeper name = Yojson.Safe.to_string (`Assoc [ "keeper_id", `String name ]) in
+        let renewed =
+          match renew alice (only_keeper "keeper-alice-idle") with
+          | 200, body ->
+            (match Yojson.Safe.from_string body with
+             | `Assoc [ ("keeper_id", `String "keeper-alice-idle"); ("conversation_id", `String id) ] -> id
+             | _ -> Alcotest.failf "the new conversation is answered as %s" body)
+          | status, body -> Alcotest.failf "no new conversation: %d %s" status body
+        in
+        Alcotest.(check string)
+          "the turn after it runs in the new conversation"
+          renewed
+          (answered
+             "the turn in a new conversation"
+             ~keeper:"keeper-alice-idle"
+             ~runtime:alice_runtime
+             ~text:"echo: fresh"
+             ~continued:false
+             (reply alice (body ~keeper:"keeper-alice-idle" ~message:"fresh")));
+        Alcotest.(check (option string))
+          "in a session of its own"
+          None
+          (resumed_session (args_of (seen claude)));
+        Sys.remove (claude ^ ".turn.json");
+        (* A session the vendor no longer has: the client does not resume it.
+           Each turn tries the session of the last answer again and fails,
+           and the server starts no session in its place. The stand-in ends
+           such a turn as one with no answer; how the real client ends it is
+           not measured. *)
+        let lost = claude ^ ".lost" in
+        Out_channel.with_open_bin lost (fun (_ : out_channel) -> ());
+        List.iter
+          (fun message ->
+            check_reply
+              "a turn of a conversation whose session is gone"
+              (502, {|{"error":"The client ended the turn without an answer."}|})
+              (reply alice (body ~keeper:"keeper-alice" ~message));
+            Alcotest.(check (option string))
+              "tries the session of the last answer again"
+              (Some session)
+              (resumed_session (args_of (seen claude))))
+          [ "gone"; "still gone" ];
+        Sys.remove (claude ^ ".turn.json");
+        (* The directory of a conversation that others can enter is not used:
+           the turn is refused and no client starts. *)
+        let alice_conversation = Filename.concat alice_records conversation in
+        Unix.chmod alice_conversation 0o755;
+        check_reply
+          "a turn of a conversation whose directory is not private"
+          (503, {|{"error":"The record of this conversation could not be read or written."}|})
+          (reply alice (body ~keeper:"keeper-alice" ~message:"open"));
+        Alcotest.(check bool)
+          "starts no client"
+          false
+          (Sys.file_exists (claude ^ ".turn.json"));
+        Unix.chmod alice_conversation 0o700;
+        (* A new conversation of her first Keeper is the way on: the next
+           turn starts a session of its own though the client still resumes
+           none, and the rows of the conversation before it stay. *)
+        let rows_before = List.length (rows alice_turns) in
+        (match renew alice (only_keeper "keeper-alice") with
+         | 200, (_ : string) -> ()
+         | status, body -> Alcotest.failf "no new conversation: %d %s" status body);
+        Alcotest.(check bool)
+          "her first Keeper has another conversation"
+          false
+          (String.equal
+             conversation
+             (answered
+                "the first turn after a new conversation"
+                ~keeper:"keeper-alice"
+                ~runtime:alice_runtime
+                ~text:"echo: anew"
+                ~continued:false
+                (reply alice (body ~keeper:"keeper-alice" ~message:"anew"))));
+        Alcotest.(check int)
+          "the conversation before it keeps its rows and gets no other"
+          rows_before
+          (List.length (rows alice_turns));
+        Alcotest.(check (pair bool (option string)))
+          "the turn started a session and resumed none"
+          (true, None)
+          (Option.is_some (new_session (args_of (seen claude))), resumed_session (args_of (seen claude)));
+        Sys.remove lost;
+        Sys.remove (claude ^ ".turn.json");
+        check_reply
+          "a new conversation of another person's Keeper"
+          (404, {|{"error":"No Keeper of yours has this name."}|})
+          (renew alice (only_keeper "keeper-bob"));
+        List.iter
+          (fun (label, request) -> Alcotest.(check int) label 400 (fst (renew alice request)))
+          [ "a new conversation: malformed JSON", "{"
+          ; "a new conversation: no Keeper", "{}"
+          ; "a new conversation: an additional field", {|{"keeper_id":"keeper-alice","message":"hello"}|}
+          ; "a new conversation: a duplicate Keeper", {|{"keeper_id":"keeper-alice","keeper_id":"keeper-bob"}|}
+          ; "a new conversation: a non-string Keeper", {|{"keeper_id":1}|}
+          ];
+        (* A row the server does not understand refuses the turn. It is not
+           skipped and not repaired. *)
+        let second_turns =
+          List.fold_left Filename.concat alice_records [ second_conversation; "turns.jsonl" ]
+        in
+        let before = In_channel.with_open_bin second_turns In_channel.input_all in
+        Out_channel.with_open_gen
+          [ Open_wronly; Open_append; Open_binary ]
+          0o600
+          second_turns
+          (fun out -> output_string out "{\"kind\":\"answered\"}\n");
+        check_reply
+          "a row the server does not understand"
+          (500, {|{"error":"The record of this conversation has a row the server does not understand."}|})
+          (reply alice (body ~keeper:"keeper-alice-second" ~message:"hello"));
+        Alcotest.(check string)
+          "the record keeps the row and gets no other"
+          (before ^ "{\"kind\":\"answered\"}\n")
+          (In_channel.with_open_bin second_turns In_channel.input_all);
+        Alcotest.(check bool) "no client started for either" false (Sys.file_exists (claude ^ ".turn.json"));
         (* Bob's Keeper answers on his home, not hers. *)
-        check_reply
-          "his Keeper answers"
-          (answered "keeper-bob" bob_runtime "echo: hi")
-          (reply bob (body ~keeper:"keeper-bob" ~message:"hi"));
+        let (_ : string) =
+          answered
+            "his Keeper answers"
+            ~keeper:"keeper-bob"
+            ~runtime:bob_runtime
+            ~text:"echo: hi"
+            ~continued:false
+            (reply bob (body ~keeper:"keeper-bob" ~message:"hi"))
+        in
         Alcotest.(check string) "on the home of his account" (home_of ~base_path bob) (text_of (seen claude) "home");
         (* Her turns above ran her Keeper of that name on her home. His Keeper
            of the same name runs on his Runtime and his home. *)
-        check_reply
-          "his Keeper of her Keeper's name answers"
-          (answered "keeper-alice" bob_runtime "echo: his")
-          (reply bob (body ~keeper:"keeper-alice" ~message:"his"));
+        (* Her Keeper of that name has a conversation. His is another: its
+           first turn starts a session of its own, in a directory under his
+           namespace, and her record does not get its rows. *)
+        let her_rows = List.length (rows alice_turns) in
+        let his_conversation =
+          answered
+            "his Keeper of her Keeper's name answers"
+            ~keeper:"keeper-alice"
+            ~runtime:bob_runtime
+            ~text:"echo: his"
+            ~continued:false
+            (reply bob (body ~keeper:"keeper-alice" ~message:"his"))
+        in
+        let his = seen claude in
+        Alcotest.(check (option string))
+          "his turn resumes no session"
+          None
+          (resumed_session (args_of his));
+        Alcotest.(check bool)
+          "his session is not hers"
+          false
+          (Option.equal String.equal (new_session (args_of his)) (Some session));
+        Alcotest.(check string)
+          "in a directory under his namespace"
+          (List.fold_left Filename.concat (records_of ~base_path bob) [ his_conversation; "cwd" ])
+          (text_of his "cwd");
+        Alcotest.(check int) "her record gets no row of his turn" her_rows (List.length (rows alice_turns));
         Alcotest.(check string)
           "on his home, not hers"
           (home_of ~base_path bob)

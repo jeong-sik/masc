@@ -37,7 +37,11 @@
       channel, and the effects [invoke_model] and [use_tool]
       ({!Authz_keeper_turn.decide}). The request stays open until the
       Runtime answers or {!Server_preview_keeper_turn} gives the turn up, and
-      the result is the JSON of that route. *)
+      the result is the JSON of that route.
+    - [masc_my_keeper_conversation_new]:
+      [POST /api/v1/auth/keepers/conversation], [Manage_own_keeper] with the
+      namespace of the person ({!Auth_preview.keeper_turn_caller}). It starts
+      no client, so the scope of a PAT needs no more than that effect. *)
 
 (** [/mcp]. *)
 val path : string

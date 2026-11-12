@@ -74,6 +74,19 @@ let forget t path =
     t.forgets <- t.forgets + 1)
 ;;
 
+(* The writer's own count of [forgets] goes up as it does for [forget]: a
+   decode that was running while the file was written read either the old
+   file, whose version its two stats will not both show, or the new one, and
+   [keep] leaves an entry of the same version where it is. *)
+let keep_written t path value =
+  let written = version_of_path path in
+  Mutex.protect t.mutex (fun () ->
+    t.forgets <- t.forgets + 1;
+    match written with
+    | Some decoded_from -> Hashtbl.replace t.entries path { decoded_from; value }
+    | None -> Hashtbl.remove t.entries path)
+;;
+
 let load t path ~decode =
   let current = version_of_path path in
   let held, forgets_before = kept t path in

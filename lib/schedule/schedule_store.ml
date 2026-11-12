@@ -417,7 +417,8 @@ let decode_primary config path : (state, primary_failure) Result.t =
    several megabytes, and it is read far more often than it is written -- every Keeper's world
    observation, the dashboard and the schedule tools read all of it, a runner
    commit writes it -- so a reader of an unchanged file takes the state the
-   last miss decoded. [write_state] forgets it after it writes. A miss reads,
+   last miss decoded. [write_state] keeps the state it wrote, so its own write
+   is not a miss. A miss reads,
    parses and decodes as one job on the domain pool when one is installed. *)
 let decoded_primary : state File_version_cache.t = File_version_cache.create ()
 
@@ -542,16 +543,33 @@ let write_state config state =
      domain each time: four of them within a second when a schedule fired.
      Yojson prints that document compact in 15 ms where the pretty printer
      takes 107 ms. *)
-  let* content =
+  (* The same job decodes the document it encodes. That state is what a
+     reader of the written file decodes -- the strings are the UTF-8 repaired
+     ones the bytes carry -- and [written_state] below keeps it, so a write
+     does not make the next reader parse the whole ledger again. Parsing is
+     the larger part of a read; this decode starts from the document already
+     in hand. *)
+  let* content, reread =
     Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-      Workspace_utils.encode_json_compact (state_to_yojson state))
+      let json = Safe_ops.sanitize_json_utf8 (state_to_yojson state) in
+      Result.map
+        (fun content -> content, state_of_yojson json)
+        (Workspace_utils.encode_json_compact json))
     |> Result.map_error (fun msg -> Persistence_failed ("ledger encoding failed: " ^ msg))
   in
-  let written =
-    Workspace_utils.write_encoded_json_commit_result config (schedules_path config) content
-  in
-  (* Landed or not, the file may no longer be the version that was decoded. *)
-  File_version_cache.forget decoded_primary (schedules_path config);
+  let path = schedules_path config in
+  let written = Workspace_utils.write_encoded_json_commit_result config path content in
+  (* Every writer of the ledger holds its lock, and the FileSystem backend
+     renames a new file into place, so after a write that landed the file at
+     [path] is the bytes [reread] was decoded for. Anything else -- a write
+     that failed and may or may not have landed, a Memory backend whose local
+     file is a mirror, a state that does not decode from its own encoding --
+     leaves the file a version nothing is kept for. *)
+  (match written, reread, config.Workspace_utils.backend with
+   | Ok { Workspace_utils.mirror_error = None }, Ok written_state, Workspace_utils.FileSystem _ ->
+     File_version_cache.keep_written decoded_primary path written_state
+   | (Ok _ | Error _), (Ok _ | Error _), (Workspace_utils.FileSystem _ | Workspace_utils.Memory _) ->
+     File_version_cache.forget decoded_primary path);
   let* commit = written |> Result.map_error (fun msg -> Persistence_failed msg) in
   (* Memory's backend is authoritative. Its local mirror can fail after that
      commit; reporting failure then would tell the runner to retry a settlement

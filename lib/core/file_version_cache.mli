@@ -30,3 +30,16 @@ val forget : 'a t -> string -> unit
     write that keeps the inode and the size within one file-time tick is not
     taken for the version already kept, even by a reader that was decoding
     while it wrote. *)
+
+val keep_written : 'a t -> string -> 'a -> unit
+(** [keep_written cache path value] is for a writer that has just replaced
+    [path] with a new file and holds [value], what {!load}'s [decode] would
+    return for the bytes it wrote. The value is kept for the version [path]
+    has now, so the next reader of that file takes it without decoding.
+    Like {!forget}, it stops every decode running on the cache now from
+    keeping a value of another version.
+
+    The caller must exclude every other writer of [path] from before its
+    write until this returns, and must have replaced the file rather than
+    written into it: the version read here is then the version of the bytes
+    [value] stands for. A path that cannot be stat'ed keeps nothing. *)

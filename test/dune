@@ -1760,6 +1760,8 @@
 
 (include stanzas/bench_original_request_load.inc)
 
+(include stanzas/bench_schedule_ledger_write_read.inc)
+
 (test
  (name test_pool_lane)
  (modules test_pool_lane)

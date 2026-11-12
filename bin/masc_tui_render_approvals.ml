@@ -921,16 +921,33 @@ let render_approvals (state : state) =
      Approvals row of Masc_tui_keys. *)
   (* A lane word this build does not know is drawn as the server wrote it,
      the same spelling the chat header and the Keeper detail draw. *)
+  (* The command palette names a lane and a mode in English because its
+     entries are what the operator types. On a Korean screen this row says the
+     same two things in Korean; on an English one it shows the palette's own
+     words. *)
   let lane_mode_label = function
-    | Tui_decode.Gate_mode mode -> Masc_tui_palette.gate_mode_label mode
+    | Tui_decode.Gate_mode mode ->
+        (match mode, state.ui_language with
+         | Masc.Keeper_gate_mode.Manual, Lang_ko -> "매번 나에게 묻기"
+         | Masc.Keeper_gate_mode.Auto_judge, Lang_ko -> "Auto Judge 가 판단"
+         | Masc.Keeper_gate_mode.Always_allow, Lang_ko -> "검토 없이 모두 허용"
+         | ( Masc.Keeper_gate_mode.Manual | Masc.Keeper_gate_mode.Auto_judge
+           | Masc.Keeper_gate_mode.Always_allow ), Lang_en ->
+             Masc_tui_palette.gate_mode_label mode)
     | Tui_decode.Unrecognised_gate_mode raw -> Terminal_text.single_line raw
+  in
+  let lane_word gate =
+    match gate, state.ui_language with
+    | Masc_tui_palette.Workspace_gate, Lang_ko -> "워크스페이스"
+    | Masc_tui_palette.External_gate, Lang_ko -> "외부 서비스"
+    | (Masc_tui_palette.Workspace_gate | Masc_tui_palette.External_gate), Lang_en ->
+        Masc_tui_palette.gate_lane_label gate
   in
   (* The two lanes share a row while both fit. A narrower terminal gives each
      lane its own row, so a mode is not cut off in the middle of its words. *)
   let lane_rows modes =
     let lane ~key gate mode =
-      Printf.sprintf "[%s] %s: %s" key (Masc_tui_palette.gate_lane_label gate)
-        (lane_mode_label mode)
+      Printf.sprintf "[%s] %s: %s" key (lane_word gate) (lane_mode_label mode)
     in
     let workspace =
       lane ~key:"w" Masc_tui_palette.Workspace_gate modes.Tui_decode.glm_workspace
@@ -956,7 +973,9 @@ let render_approvals (state : state) =
         server's own sentence about the store, which does not name itself. *)
      | None, Some err -> [ data_unreliable_row ~cols err ]
      | None, None ->
-         [ Ansi.dim ^ "  Gate lanes: loading" ^ Ansi.reset ]);
+         [ Ansi.dim
+           ^ ui_text state ~ko:"  Gate 설정: 조회 중" ~en:"  Gate lanes: loading"
+           ^ Ansi.reset ]);
   (* Standing always-allow rules, on the row under the lanes. A rule answers
      its call before the call can reach the queue, so an operator reading an
      empty queue is reading the rules' work without seeing them. One row: the
@@ -964,18 +983,23 @@ let render_approvals (state : state) =
   box_line policy_buf cols
     (match state.gate_rules_unavailable, state.gate_rules with
      | Some detail, _ ->
-         data_unreliable_row ~cols ("always-allow rules: " ^ detail)
+         data_unreliable_row ~cols
+           (ui_text state ~ko:"항상 허용 규칙: " ~en:"always-allow rules: " ^ detail)
      | None, [] ->
-         Ansi.dim ^ "  Always-allow rules: none" ^ Ansi.reset
+         Ansi.dim
+         ^ ui_text state ~ko:"  항상 허용 규칙: 없음" ~en:"  Always-allow rules: none"
+         ^ Ansi.reset
      | None, (newest :: _ as rules) ->
          Printf.sprintf
-           "  %sAlways-allow rules: %d  ·  newest %s / %s%s%s"
+           (if state.ui_language = Lang_ko then
+              "  %s항상 허용 규칙: %d개  ·  최근 %s / %s%s%s"
+            else "  %sAlways-allow rules: %d  ·  newest %s / %s%s%s")
            Ansi.dim
            (List.length rules)
            newest.Tui_decode.gr_keeper
            newest.Tui_decode.gr_tool
            (match newest.Tui_decode.gr_expires_at with
-            | Some _ -> " (expires)"
+            | Some _ -> ui_text state ~ko:" (만료 있음)" ~en:" (expires)"
             | None -> "")
            Ansi.reset);
   box_divider policy_buf cols;

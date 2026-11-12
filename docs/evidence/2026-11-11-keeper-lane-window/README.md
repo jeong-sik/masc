@@ -17,7 +17,7 @@ Keeper 작업 화면의 "작업 대기열"은 서버가 준 대기 행을 전부
 | 앞 | main `7ba926ef4f60` | [`before-main-7ba926ef4f60/measurements.json`](before-main-7ba926ef4f60/measurements.json) |
 | 뒤 | 브랜치 `fix/26606-lane-inventory-window` 커밋 `6e205532e94d` (main `7ba926ef4f60` 위) | [`after-6e205532e94d/browser-result.json`](after-6e205532e94d/browser-result.json) |
 
-결과 파일을 만든 뒤 `browser.mjs` 에 확인 한 줄을 더했어요. 축 라벨을 하나도 찾지 못하면 실패로 끝나요. 전에는 그 경우에도 축 라벨 확인이 통과했어요. 더한 스크립트를 다시 돌렸을 때 확인 9개가 통과했고, 축 라벨의 두 값(3.75 px, 2.05 px)과 DOM 의 행 수(17)는 결과 파일과 같았어요. 그때 장비의 load average 가 75~81 이어서 시간은 다시 적지 않았어요.
+결과 파일을 만든 뒤 `browser.mjs` 는 두 곳이 바뀌었어요. 재는 코드는 그대로예요. 하나는 더한 확인 한 줄이에요. 축 라벨을 하나도 찾지 못하면 실패로 끝나요. 전에는 그 경우에도 축 라벨 확인이 통과했어요. 다른 하나는 행 수가 205 이하일 때 나오는 오류 문구예요. 바꾼 스크립트를 다시 돌렸을 때 확인 9개가 통과했고, 축 라벨의 두 값(3.75 px, 2.05 px)과 DOM 의 행 수(17)는 결과 파일과 같았어요. 그때 장비의 1분 load average 가 70~81 이어서 시간은 다시 적지 않았어요.
 
 환경은 macOS 27.2, Apple M3 Max(16코어), Playwright 1.61.1 이 띄운 Chromium 149.0.7827.55 headless, 창 1280×900, vite dev 서버예요. 두 실행은 이어서 돌렸고, 그동안 장비의 1분 load average 는 33~39 였어요. 시간은 실행마다 달라요. 이 장비에서 같은 날 앞을 여러 번 쟀을 때 render 와 layout 의 중앙값은 600~942 ms 사이였고, load average 와 나란히 움직이지는 않았어요.
 

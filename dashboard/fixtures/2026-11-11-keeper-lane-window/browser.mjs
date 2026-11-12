@@ -33,7 +33,9 @@ const SHORT_LIST_FOCUSED_ROW = 1
  *  the walk if something else takes focus first. */
 const MAX_TAB_PRESSES = 10
 if (ROWS <= CONSUMED_ROWS + SHORT_LIST_ROWS) {
-  throw new Error(`LANE_WINDOW_ROWS must be above ${CONSUMED_ROWS + SHORT_LIST_ROWS}`)
+  throw new Error(
+    `LANE_WINDOW_ROWS must be above ${CONSUMED_ROWS + SHORT_LIST_ROWS}, and large enough that the list still windows after ${CONSUMED_ROWS} rows leave`,
+  )
 }
 /** The dev server transforms the whole module graph on the first request. */
 const COLD_START_TIMEOUT_MS = 120_000

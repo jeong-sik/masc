@@ -1709,7 +1709,22 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                (* Without a typed quota detail, modelError gives free text and retryable. The
                   account's typed usage/read can identify a spent window;
                   never infer it from the error sentence or replay this turn. *)
-               (match Runtime_provider_usage_read.read_muse_in_background
+               (match model_input_refusal_of_error error with
+                | Some Turn_record.Model_error_not_retryable ->
+                  (* This answer can mark the range it refused, and a spent
+                     window is the one cause the mark must not cover. The
+                     usage is read before the mark is decided below, so the
+                     turn ends after the read does. *)
+                  (match
+                     Runtime_provider_usage_read.read_muse ~mgr:process_mgr ~clock
+                       ~cwd:process_cwd ~scope:quota_scope ~account client_config
+                   with
+                   | Ok () -> ()
+                   | Error detail ->
+                     Log.Keeper.warn ~keeper_name
+                       "Muse usage not read after model error: %s" detail)
+                | None ->
+               match Runtime_provider_usage_read.read_muse_in_background
                         ~clock ~cwd:process_cwd ~scope:quota_scope ~account client_config with
                 | Runtime_provider_usage_read.Started
                 | Runtime_provider_usage_read.Already_reading -> ()

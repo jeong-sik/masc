@@ -346,6 +346,10 @@ val here_row :
     cannot hold whole is folded in the middle, the longest first, so the last
     step stays on the row. The product name is not drawn. *)
 
+val count_reading :
+  Masc_tui_types.state -> Masc_tui_value.Count.noun -> int -> string
+(** {!Masc_tui_value.Count.reading} in the screen's language. *)
+
 val here_steps_room :
   cols:int -> Masc_tui_types.state -> steps:int -> after:int -> int
 (** The cells [steps] steps of a path share on a row [cols] wide that must

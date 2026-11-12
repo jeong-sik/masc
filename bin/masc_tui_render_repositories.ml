@@ -846,7 +846,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
       | None -> box_empty buf cols
       | Some row -> box_line_span buf cols (diff_row_span ~hscroll:state.changes_diff_hscroll ~width:(framed_inner_width cols) row)
     done;
-  let position = match Masc_tui_scroll.position_row ~scroll ~height:content_height total with
+  let position = match Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height total with
     | None -> ""
     | Some text -> " · " ^ String.trim text in
   box_line_styled buf cols ~style:(Theme.recede ())

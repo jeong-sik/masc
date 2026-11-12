@@ -154,7 +154,7 @@ val window_reading : noun:string -> scroll:int -> height:int -> int -> string
 (** A window with its counted item named, such as ["rows 1-10/60"]. A new
     reading site must supply its noun instead of assembling one afterward. *)
 
-val position_row : scroll:int -> height:int -> ?hint:string -> int -> string option
+val position_row : ko:bool -> scroll:int -> height:int -> ?hint:string -> int -> string option
 (** The ["[lines a-b/n]"] row under a window of [height] rows from [scroll]
     over [count], followed by [hint] when there is one; [None] when there is
     nothing to say. The one builder of that row: three surfaces wrote their

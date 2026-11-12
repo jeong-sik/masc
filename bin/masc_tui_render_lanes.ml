@@ -842,7 +842,7 @@ let render_lanes_overview (state : state) =
             ^ recede ^ fit_width label label_width ^ "  " ^ Ansi.reset
             ^ Masc_tui_lane_standing.colour observed ^ fit_width (summary row) status_width ^ Ansi.reset)) in
   let position = if projection.lop_position
-    then Masc_tui_scroll.position_row ~scroll ~height (List.length entries) else None in
+    then Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height (List.length entries) else None in
   let listing = listing @ Option.to_list position in
   let listing = if projection.lop_boxed then
       studio_panel ~width:list_width

@@ -4886,7 +4886,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       Option.iter
         (fun row ->
           box_line buf cols ((Theme.recede ()) ^ row ^ Ansi.reset))
-        (Masc_tui_scroll.position_row ~scroll ~height:content_height total_lines);
+        (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height total_lines);
 
     (* Bottom border *)
     box_bottom buf cols;

@@ -178,10 +178,12 @@ let window_reading ~noun ~scroll ~height count =
    "[lines ...]  esc closes" flush against the frame, and the patch review
    put it in its footer, where the fitter reads it as one more key item
    (#38820). *)
-let position_row ~scroll ~height ?hint count =
+let position_row ~ko ~scroll ~height ?hint count =
   let reading =
     if count > height then
-      Some (Printf.sprintf "[lines %s]" (window_text ~scroll ~height count))
+      Some
+        (Printf.sprintf (if ko then "[줄 %s]" else "[lines %s]")
+           (window_text ~scroll ~height count))
     else None
   in
   match reading, hint with

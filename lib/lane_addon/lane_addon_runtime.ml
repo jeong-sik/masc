@@ -302,7 +302,12 @@ let retained_runtime fields = match List.assoc_opt "runtime" fields with
   | Some (`String value) -> Option.to_result ~none:"invalid retained runtime" (runtime_of_string value) |> Result.map Option.some
   | None -> Ok (Some Docker)
   | Some _ -> Error "invalid retained runtime"
-let offload f = Eio_unix.run_in_systhread f
+(* Blocking store, ledger and lease work for a fiber of this runtime. The
+   bodies parse, encode and hash as well as read and write, so their thread
+   must not belong to the caller's domain: there it would hold the domain lock
+   and the caller's other fibers would wait for it at every system call they
+   return from. [Systhread_host] starts the thread on its own domain. *)
+let offload f = Systhread_host.run ~label:"lane-addon-offload" f
 let configuration_owner_json (owner : configuration_owner) =
   `Assoc ["id", `String owner.id; "source_path", `String owner.source_path;
     "revision", `String owner.revision]

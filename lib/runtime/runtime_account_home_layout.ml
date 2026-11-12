@@ -22,6 +22,45 @@ let person_runtime_root ~base_path ~namespace =
     [ accounts_dir; Authz_types.Account_home_namespace.to_string namespace ]
 ;;
 
+(* The parts of a path: [.] and the empty parts of a doubled or trailing slash
+   are dropped, and [..] stays a part. *)
+let parts path =
+  List.filter (fun part -> part <> "" && part <> ".") (String.split_on_char '/' path)
+;;
+
+let rec leads_into ~ancestor parts =
+  match ancestor, parts with
+  | [], (_ : string list) -> true
+  | _ :: _, [] -> false
+  | top :: ancestor, part :: parts -> String.equal top part && leads_into ~ancestor parts
+;;
+
+(* The real path of the deepest part of [path] that is there, and the parts
+   under it as spelled. [None] when no part is there to read. *)
+let rec real_spelling path =
+  match Unix.realpath path with
+  | real -> Some real
+  | exception (Unix.Unix_error _ | Sys_error _) ->
+    let parent = Filename.dirname path in
+    if String.equal parent path
+    then None
+    else
+      Option.map
+        (fun real -> Filename.concat real (Filename.basename path))
+        (real_spelling parent)
+;;
+
+let under_persons ~base_path home =
+  let persons = Filename.concat (Common.masc_dir_from_base_path ~base_path) accounts_dir in
+  let spellings path = path :: Option.to_list (real_spelling path) in
+  List.exists
+    (fun ancestor ->
+      List.exists
+        (fun home -> leads_into ~ancestor:(parts ancestor) (parts home))
+        (spellings home))
+    (spellings persons)
+;;
+
 let home ~runtime_root client ~account_id =
   if not (Fs_compat.is_capability_leaf account_id)
   then Error "Invalid login account identity."

@@ -11,12 +11,13 @@ type log_mode =
   | Log_unreadable of string
   | No_mode_event
   | Made_multi_account
-  | Made_off
+  | Made_off of Authz_state.t
 
-let of_mode_state : Authz_mode_state.t -> log_mode = function
+let of_state (state : Authz_state.t) =
+  match state.Authz_state.mode with
   | Authz_mode_state.Not_bootstrapped -> No_mode_event
   | Authz_mode_state.Multi_account _ -> Made_multi_account
-  | Authz_mode_state.Off _ -> Made_off
+  | Authz_mode_state.Off _ -> Made_off state
 ;;
 
 type high_water =
@@ -40,6 +41,7 @@ type input =
 
 type mode =
   | Single_user
+  | Single_user_after_off of Authz_state.t
   | Activation_requested
   | Multi_account
   | Multi_account_uncertain
@@ -49,7 +51,6 @@ type refusal =
   | Authorization_log_unreadable of string
   | Rewound_before_bootstrap
   | Downgraded_from_multi_account
-  | Off_mode_not_supported
   | Reactivation_not_ready
   | Rewound_after_off
   | External_store_unreadable of string
@@ -95,7 +96,7 @@ let config_column = function
 type readable_log =
   | No_event
   | Made_multi of high_water_column
-  | Off_matched
+  | Off_matched of Authz_state.t
 
 let readable_log log high_water : (readable_log, refusal) result =
   match log, high_water with
@@ -104,9 +105,9 @@ let readable_log log high_water : (readable_log, refusal) result =
   | No_mode_event, Absent -> Ok No_event
   | No_mode_event, (Matches | Mismatch_found) -> Error Rewound_before_bootstrap
   | No_mode_event, Unreadable detail -> Error (External_store_unreadable detail)
-  | Made_off, Matches -> Ok Off_matched
-  | Made_off, (Absent | Mismatch_found) -> Error Rewound_after_off
-  | Made_off, Unreadable detail -> Error (External_store_unreadable detail)
+  | Made_off state, Matches -> Ok (Off_matched state)
+  | Made_off (_ : Authz_state.t), (Absent | Mismatch_found) -> Error Rewound_after_off
+  | Made_off (_ : Authz_state.t), Unreadable detail -> Error (External_store_unreadable detail)
   | Made_multi_account, high_water -> Ok (Made_multi high_water)
 ;;
 
@@ -114,7 +115,7 @@ let readable_log log high_water : (readable_log, refusal) result =
 let single_user_row : readable_log -> (mode, refusal * refusal list) result = function
   | No_event -> Ok Single_user
   | Made_multi _ -> Error (Downgraded_from_multi_account, [])
-  | Off_matched -> Error (Off_mode_not_supported, [])
+  | Off_matched state -> Ok (Single_user_after_off state)
 ;;
 
 (* Rows 5, 7, 8 and 9 of the table. *)
@@ -122,7 +123,7 @@ let multi_account_row : readable_log -> (mode, refusal * refusal list) result = 
   | No_event -> Ok Activation_requested
   | Made_multi Matches -> Ok Multi_account
   | Made_multi (Absent | Mismatch_found | Unreadable _) -> Ok Multi_account_uncertain
-  | Off_matched -> Error (Reactivation_not_ready, [])
+  | Off_matched (_ : Authz_state.t) -> Error (Reactivation_not_ready, [])
 ;;
 
 let settings_reasons config input =
@@ -145,7 +146,7 @@ let judge input =
   let high_water = column input.high_water in
   let by_table =
     match config, readable_log input.log_mode high_water with
-    | Asks_unknown text, Ok (No_event | Made_multi _ | Off_matched) ->
+    | Asks_unknown text, Ok (No_event | Made_multi _ | Off_matched _) ->
       Error (Unknown_account_mode text, [])
     | Asks_unknown text, Error by_log -> Error (Unknown_account_mode text, [ by_log ])
     | (Asks_single_user | Asks_multi_account), Error by_log -> Error (by_log, [])
@@ -160,6 +161,7 @@ let judge input =
 
 let mode_to_string = function
   | Single_user -> "single_user"
+  | Single_user_after_off (_ : Authz_state.t) -> "single_user_after_off"
   | Activation_requested -> "activation_requested"
   | Multi_account -> "multi_account"
   | Multi_account_uncertain -> "multi_account_uncertain"
@@ -178,8 +180,6 @@ let refusal_to_string = function
   | Downgraded_from_multi_account ->
     "the authorization log made Multi_account and config.json does not ask for it; set \
      account_mode to \"Multi_account\""
-  | Off_mode_not_supported ->
-    "the last mode event of the authorization log is Off, which this build cannot boot yet"
   | Reactivation_not_ready ->
     "config.json asks for Multi_account after an Off mode event; reactivation needs the \
      recovery procedure, which this build does not have yet"

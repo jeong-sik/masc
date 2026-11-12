@@ -86,6 +86,7 @@ let input dirs = Read.input ~base_path:dirs.base ~config_dir:(Some dirs.config) 
 
 let decision_label = function
   | Read.Boot_single_user -> "boot single user"
+  | Read.Boot_after_off (_ : Authz_state.t) -> "boot single user after Off"
   | Read.Stop (Read.Refuse (first, rest)) ->
     "refuse: " ^ String.concat "; " (List.map B.refusal_to_string (first :: rest))
   | Read.Stop Read.Activation_requested -> "activation requested"
@@ -95,6 +96,7 @@ let decision_label = function
 let refused = function
   | Read.Stop (Read.Refuse (first, rest)) -> Some (first, rest)
   | Read.Boot_single_user
+  | Read.Boot_after_off (_ : Authz_state.t)
   | Read.Stop (Read.Activation_requested | Read.Multi_account_not_served _) -> None
 ;;
 
@@ -232,6 +234,75 @@ let test_restored_before_bootstrap () =
     check_decision "row 2" (Read.Stop (Read.Refuse (B.Rewound_before_bootstrap, []))) dirs;
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
     check_decision "row 6" (Read.Stop (Read.Refuse (B.Rewound_before_bootstrap, []))) dirs)
+;;
+
+(* The local operator commits Off through the zone, as masc auth off does. *)
+let turn_off dirs =
+  let zone =
+    match
+      Authz_zone.open_at_start
+        ~now_ms:(fun () -> at_ms + 1)
+        ~log_path:(L.path_of_base_path ~base_path:dirs.base)
+        ~store_path:dirs.store
+    with
+    | Ok zone -> zone
+    | Error error -> Alcotest.failf "the zone did not open: %s" (Authz_zone.open_error_to_string error)
+  in
+  let body =
+    match
+      Authz_mode_event.to_body
+        { Authz_mode_event.event = Authz_mode_event.Off; workspace_id = workspace }
+    with
+    | Ok body -> body
+    | Error error -> Alcotest.failf "fixture body refused: %s" (Authz_body.error_to_string error)
+  in
+  match
+    Authz_zone.commit
+      zone
+      { Authz_zone.author = Authz_records.Author.Local_operator; kind = R.Kind.Mode_event; body }
+  with
+  | Ok (_ : Authz_zone.committed) -> ()
+  | Error error -> Alcotest.failf "Off was refused: %s" (Authz_zone.error_to_string error)
+;;
+
+let test_turned_off () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    turn_off dirs;
+    (* Row 4: a config that does not ask for Multi_account boots a single user
+       that holds the state the log replayed to. *)
+    List.iter
+      (fun (name, config) ->
+         write_config dirs config;
+         match Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:false with
+         | Error (first, _) -> Alcotest.failf "%s: refused: %s" name first
+         | Ok single_user ->
+           (match Read.turned_off single_user with
+            | None -> Alcotest.failf "%s: booted as a base path never set up" name
+            | Some state ->
+              (match state.Authz_state.mode with
+               | Authz_mode_state.Off workspace_id ->
+                 Alcotest.(check bool)
+                   (name ^ ": Off of the bootstrapped workspace")
+                   true
+                   (Authz_types.Workspace_id.equal workspace_id workspace)
+               | Authz_mode_state.Not_bootstrapped | Authz_mode_state.Multi_account _ ->
+                 Alcotest.failf "%s: the state is not the one after Off" name)))
+      [ "no member", {|{"enabled":true,"require_token":true}|}
+      ; "Single_user", {|{"enabled":true,"require_token":true,"account_mode":"Single_user"}|}
+      ];
+    (* Row 9: asking for Multi_account again is a reactivation. *)
+    write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+    check_decision "row 9" (Read.Stop (Read.Refuse (B.Reactivation_not_ready, []))) dirs;
+    (* Row 10: a store that no longer holds the Off, whatever the config asks. *)
+    Sys.remove dirs.store;
+    List.iter
+      (fun config ->
+         write_config dirs config;
+         check_decision "row 10" (Read.Stop (Read.Refuse (B.Rewound_after_off, []))) dirs)
+      [ {|{"enabled":true,"require_token":true}|}
+      ; {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|}
+      ])
 ;;
 
 let test_install_record_lost () =
@@ -460,7 +531,8 @@ let test_record_after_the_bootstrap () =
     in
     (match (input dirs).B.log_mode with
      | B.Log_unreadable detail -> Alcotest.(check string) "the line and the kind" expected detail
-     | B.No_mode_event | B.Made_multi_account | B.Made_off -> Alcotest.fail "expected an unreadable log");
+     | B.No_mode_event | B.Made_multi_account | B.Made_off (_ : Authz_state.t) ->
+       Alcotest.fail "expected an unreadable log");
     check_refused_by "a record that no layer reads" log_unreadable dirs)
 ;;
 
@@ -606,6 +678,7 @@ let () =
         ; Alcotest.test_case "restored before bootstrap" `Quick test_restored_before_bootstrap
         ; Alcotest.test_case "install record lost" `Quick test_install_record_lost
         ; Alcotest.test_case "single user again" `Quick test_single_user_again
+        ; Alcotest.test_case "turned off" `Quick test_turned_off
         ; Alcotest.test_case "config dir others can write" `Quick test_unreadable_config_dir
         ; Alcotest.test_case "log without a mode event" `Quick test_log_without_mode_event
         ; Alcotest.test_case "record after the bootstrap" `Quick test_record_after_the_bootstrap

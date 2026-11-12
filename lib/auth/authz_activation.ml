@@ -39,6 +39,7 @@ type error =
   | Not_asked
   | Config_unreadable of string
   | Already_active
+  | Turned_off
   | Boot_stops of string * string list
   | Workspace_id_not_built of Authz_id.error
   | Bootstrap_failed of Authz_bootstrap.error
@@ -49,6 +50,13 @@ let invitation_error_to_string = function
   | Body_not_built error -> "the invitation was refused: " ^ Authz_body.error_to_string error
   | Zone_not_opened error -> "the zone was not opened: " ^ Z.open_error_to_string error
   | Commit_failed error -> Z.error_to_string error
+;;
+
+(* Design 10.5: after Off, a boot starts a single user that keeps the records of
+   the accounts read-only, and reactivation needs the recovery procedure. *)
+let turned_off_text =
+  "the accounts of this installation were turned off, so a boot starts a single user that \
+   keeps their records read-only; turning them on again is not in this build"
 ;;
 
 let error_to_string = function
@@ -62,6 +70,7 @@ let error_to_string = function
   | Already_active ->
     "the authorization log made Multi_account and the external store matches it: this \
      installation is already activated, and masc auth invite writes one more Admin invitation"
+  | Turned_off -> turned_off_text
   | Boot_stops (first, rest) ->
     "a boot stops on this installation, and an activation would not change that: "
     ^ String.concat "; " (first :: rest)
@@ -78,6 +87,7 @@ let asked ~base_path ~config_dir ~anonymous_mutations =
   let input = M.input ~base_path ~config_dir ~anonymous_mutations in
   match M.decide input with
   | M.Stop M.Activation_requested -> Ok ()
+  | M.Boot_after_off (_ : Authz_state.t) -> Error Turned_off
   | M.Boot_single_user ->
     (match input.B.settings with
      | B.Settings_read _ -> Error Not_asked
@@ -86,7 +96,10 @@ let asked ~base_path ~config_dir ~anonymous_mutations =
   | M.Stop
       ((M.Refuse _
        | M.Multi_account_not_served
-           (B.Single_user | B.Activation_requested | B.Multi_account_uncertain)) as stop) ->
+           ( B.Single_user
+           | B.Single_user_after_off (_ : Authz_state.t)
+           | B.Activation_requested
+           | B.Multi_account_uncertain )) as stop) ->
     let first, rest = M.messages input stop in
     Error (Boot_stops (first, rest))
 ;;
@@ -147,6 +160,7 @@ let activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms
 
 type invite_error =
   | Not_activated
+  | Accounts_turned_off
   | Not_served_as_active of string * string list
   | Store_not_located of string
   | Invite_not_written of invitation_error
@@ -154,6 +168,7 @@ type invite_error =
 let invite_error_to_string = function
   | Not_activated ->
     "no installation is active for multi-account use here: activate it with masc auth bootstrap"
+  | Accounts_turned_off -> turned_off_text
   | Not_served_as_active (first, rest) ->
     "a boot stops on this installation, and not on an active one: " ^ String.concat "; " (first :: rest)
   | Store_not_located detail -> "the external store is not located: " ^ detail
@@ -167,10 +182,14 @@ let active ~base_path ~config_dir ~anonymous_mutations =
   match M.decide input with
   | M.Stop (M.Multi_account_not_served B.Multi_account) -> Ok ()
   | M.Boot_single_user | M.Stop M.Activation_requested -> Error Not_activated
+  | M.Boot_after_off (_ : Authz_state.t) -> Error Accounts_turned_off
   | M.Stop
       ((M.Refuse _
        | M.Multi_account_not_served
-           (B.Single_user | B.Activation_requested | B.Multi_account_uncertain)) as stop) ->
+           ( B.Single_user
+           | B.Single_user_after_off (_ : Authz_state.t)
+           | B.Activation_requested
+           | B.Multi_account_uncertain )) as stop) ->
     let first, rest = M.messages input stop in
     Error (Not_served_as_active (first, rest))
 ;;

@@ -36,6 +36,14 @@ val person_runtime_root
   -> namespace:Authz_types.Account_home_namespace.t
   -> string
 
+(** Whether [home] is under {!accounts_dir} of [base_path], where the runtime
+    roots of the persons are. Both paths are read as spelled and by their real
+    path, the deepest part that is there resolved and the parts under it as
+    spelled, so a link, another case of a name on a volume that ignores case,
+    or a home that is not made yet still leads under it. It reads real paths
+    and makes nothing. *)
+val under_persons : base_path:string -> string -> bool
+
 (** The home of [account_id] of [client] under [runtime_root], spelled from the
     real path of [runtime_root]. It reads only that real path and makes
     nothing. [runtime_root] is absolute and [account_id] is one path leaf. *)

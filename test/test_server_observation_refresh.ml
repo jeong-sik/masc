@@ -227,6 +227,63 @@ let test_actual_execution_worker_waits_for_original_store_writes () =
     check bool "normal release removes source worker waits" false (Eio_mock.Clock.try_advance clock))
 ;;
 
+let test_late_lifecycle_patch_retains_the_source_read_debt () =
+  with_execution_workspace (fun env state ->
+    let config = Mcp_server.workspace_config state in
+    let task = match Workspace.add_task_with_result config
+        ~title:"Retained source observation" ~priority:2 ~description:"Original committed task" with
+      | Ok task -> task
+      | Error error -> fail (Workspace.add_task_error_to_string error) in
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock (Time_compat.now ());
+    let first, signal_first = Eio.Promise.create () in
+    let release, release_first = Eio.Promise.create () in
+    let calls = Atomic.make 0 in
+    let frames = Eio.Stream.create 8 in
+    Dashboard_projection_cache.register_operator_snapshot_json {snapshot =
+      (fun ?read_policy ?actor ?view ?include_messages ?include_keepers
+          ?include_summary_fields ?lightweight_summary ctx ->
+        let call = Atomic.fetch_and_add calls 1 + 1 in
+        let json = Operator_control.snapshot_json ?read_policy ?actor ?view
+            ?include_messages ?include_keepers ?include_summary_fields ?lightweight_summary ctx in
+        if call = 1 then (
+          Eio.Promise.resolve signal_first ();
+          Eio.Promise.await release);
+        json)};
+    Eio.Switch.run (fun sw ->
+      subscribe_execution_frames ~state ~sw ~id:"execution-late-lifecycle-patch" (fun kind payload ->
+        match kind with `Execution -> Eio.Stream.add frames payload | `Project -> ());
+      Surfaces.start_execution_refresh_loop ~state ~sw
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
+        ~net:(Eio.Stdenv.net env) ~mono_clock:(Eio.Stdenv.mono_clock env);
+      Eio.Promise.await first;
+      let owner = Surfaces.For_testing.owner_for_state ~state in
+      let before = Surfaces.For_testing.execution_publication_generation ~owner () in
+      (* Model a listener arriving after the original phase hint was consumed.
+         Drive its production patch boundary without adding
+         another input that could hide its missing trailing read. A cold cache
+         has no runtime row to patch, but still advances the attempt epoch. *)
+      Surfaces.patch_keeper_dependent_caches ~keeper_name:"delayed-lifecycle"
+        ~event:(Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped);
+      let current = Surfaces.For_testing.execution_publication_generation ~owner () in
+      check bool "the actual lifecycle patch supersedes the held attempt" true (current > before);
+      check bool "a cold lifecycle patch is not a completed source read" false
+        (Cache.cached_surface_has_success (Surfaces.execution_cache ~state));
+      Eio.Promise.resolve release_first ();
+      let canonical = Eio.Stream.take frames in
+      check int "the old attempt is refused and exactly one owed read follows" 2 (Atomic.get calls);
+      check int "canonical output belongs to the patch's current attempt epoch" current
+        Yojson.Safe.Util.(canonical |> member "execution_publication_generation" |> to_int);
+      let tasks = Yojson.Safe.Util.(canonical |> member "tasks" |> to_list) in
+      check bool "the trailing actual reader publishes the original committed Task" true
+        (List.exists (fun row -> Yojson.Safe.Util.member "id" row = `String task.task_id) tasks);
+      check bool "the trailing observation settles the cold cache" true
+        (Cache.cached_surface_has_success (Surfaces.execution_cache ~state));
+      Eio.Fiber.yield ();
+      check bool "successful recovery leaves no healthy timer" false (Eio_mock.Clock.try_advance clock));
+    check bool "release cancels the source owner waits" false (Eio_mock.Clock.try_advance clock))
+;;
+
 let test_http_wins_before_source_read_and_shell_completion_still_publishes ~force () =
   with_execution_workspace (fun env state ->
     (* Link the real namespace callback. These metadata projections do not
@@ -478,6 +535,7 @@ let () =
                     test_case "async tool commit preserves its workspace owner" `Quick test_async_tool_commit_keeps_its_store_owner;
                     test_case "retired execution request cannot replace current scope" `Quick test_execution_owner_rejects_a_retired_request;
                     test_case "actual execution worker follows original store writes" `Quick test_actual_execution_worker_waits_for_original_store_writes;
+                    test_case "late lifecycle patch retains the owed source read" `Quick test_late_lifecycle_patch_retains_the_source_read_debt;
                     test_case "cold HTTP first and Shell complete canonical truth" `Quick
                       (test_http_wins_before_source_read_and_shell_completion_still_publishes ~force:false);
                     test_case "force HTTP first and Shell complete canonical truth" `Quick

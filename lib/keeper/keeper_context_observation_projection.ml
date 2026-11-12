@@ -69,7 +69,7 @@ let missing_context_fields () =
 type latest_turn_observation =
   | No_turn_record
   | Undecodable_turn_record
-  | Turn_record_read_failed
+  | Turn_record_read_failed of string
   | Observed of Turn_record.t
 
 (* The strict tail read keeps failure classes apart: [read_recent] would
@@ -96,18 +96,20 @@ let latest_turn_observation ~config ~keeper_name =
       detail;
     Undecodable_turn_record
   | Error read_error ->
+    let detail = Dated_jsonl.read_error_to_string read_error in
     Log.Keeper.warn
       "context observation turn-record read failed keeper=%s: %s"
       keeper_name
-      (Dated_jsonl.read_error_to_string read_error);
-    Turn_record_read_failed
+      detail;
+    Turn_record_read_failed detail
   | exception (Eio.Cancel.Cancelled _ as error) -> raise error
   | exception exn ->
+    let detail = Printexc.to_string exn in
     Log.Keeper.warn
       "context observation turn-record read failed keeper=%s: %s"
       keeper_name
-      (Printexc.to_string exn);
-    Turn_record_read_failed
+      detail;
+    Turn_record_read_failed detail
 ;;
 
 (* The provider's same-turn report is the actual usable window. The configured
@@ -160,13 +162,24 @@ let observed_context_fields (record : Turn_record.t) =
   ]
 ;;
 
-let context_fields ~config ~keeper_name ~current_trace_id =
-  match latest_turn_observation ~config ~keeper_name with
+type context_observation = {
+  fields : (string * Yojson.Safe.t) list;
+  completeness : Dashboard_projection_read.completeness;
+}
+
+let context_observation ~config ~keeper_name ~current_trace_id =
+  let observation = latest_turn_observation ~config ~keeper_name in
+  let completeness = match observation with
+    | Turn_record_read_failed detail ->
+        Dashboard_projection_read.Partial
+          (Printf.sprintf "Keeper %s context TurnRecord read: %s" keeper_name detail)
+    | No_turn_record | Undecodable_turn_record | Observed _ -> Complete in
+  let fields = match observation with
   | No_turn_record ->
     context_fields_unavailable (not_observed_json ~reason:reason_measurement_missing ())
   | Undecodable_turn_record ->
     context_fields_unavailable (not_observed_json ~reason:reason_undecodable ())
-  | Turn_record_read_failed ->
+  | Turn_record_read_failed _ ->
     context_fields_unavailable (not_observed_json ~reason:reason_read_failed ())
   | Observed record ->
     (* A reseeded identity starts a new trace while the per-name store keeps
@@ -211,7 +224,12 @@ let context_fields ~config ~keeper_name ~current_trace_id =
              ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)
              ?raw_input_tokens:tokens
              ?context_window:window
-             ()))
+             ())) in
+  {fields; completeness}
+;;
+
+let context_fields ~config ~keeper_name ~current_trace_id =
+  (context_observation ~config ~keeper_name ~current_trace_id).fields
 ;;
 
 let last_turn_usage_json_of_meta

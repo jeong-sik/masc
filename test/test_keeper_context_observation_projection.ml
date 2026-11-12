@@ -121,8 +121,47 @@ let check_not_observed fields ~reason =
 
 let test_missing_store_is_typed_absence () =
   with_temp_workspace (fun config ->
-    let fields = Projection.context_fields ~config ~keeper_name:"nobody" ~current_trace_id:sample_trace in
-    check_not_observed fields ~reason:"context_measurement_missing")
+    let observation = Projection.context_observation ~config ~keeper_name:"nobody" ~current_trace_id:sample_trace in
+    check_not_observed observation.fields ~reason:"context_measurement_missing";
+    check bool "missing measurement is a complete absence" true
+      (observation.completeness = Masc.Dashboard_projection_read.Complete))
+;;
+
+let test_storage_read_failure_and_raw_repair_keep_same_read_completeness () =
+  with_temp_workspace (fun config ->
+    append_record config (sample_record ());
+    let store = Masc.Keeper_types_support.keeper_turn_record_store config "beta" in
+    Dated_jsonl.close store;
+    let base_dir = Dated_jsonl.base_dir store in
+    let held_dir = base_dir ^ ".fixture-held" in
+    Sys.rename base_dir held_dir;
+    let restored = ref false in
+    let restore () =
+      if not !restored then (
+        if Sys.file_exists base_dir then Sys.remove base_dir;
+        Sys.rename held_dir base_dir;
+        restored := true) in
+    Fun.protect ~finally:restore (fun () ->
+      let channel = open_out_bin base_dir in
+      output_string channel "not a directory";
+      close_out channel;
+      let failed = Projection.context_observation ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
+      check_not_observed failed.fields ~reason:"turn_record_read_failed";
+      (match failed.completeness with
+       | Masc.Dashboard_projection_read.Partial detail ->
+           check bool "storage failure retains its actual diagnostic" true (String.length detail > 0)
+       | Complete -> fail "strict tail I/O failure was reported as complete");
+      (* Restore only the original bytes. No append, metadata write or source
+         notification supplies a different observation. *)
+      restore ();
+      let repaired = Projection.context_observation ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
+      check bool "raw repair is complete" true
+        (repaired.completeness = Masc.Dashboard_projection_read.Complete);
+      check int "raw repair recovers the original measurement" 18_000
+        (match field repaired.fields "context_tokens" with
+         | `Int tokens -> tokens | _ -> fail "repaired context_tokens is not an int");
+      check bool "raw repair clears the typed absence" true
+        (field repaired.fields "context_metrics_unavailable" = `Null)))
 ;;
 
 let test_measured_record_projects () =
@@ -175,15 +214,19 @@ let test_newest_record_wins () =
 let test_record_without_usage_is_typed () =
   with_temp_workspace (fun config ->
     append_record config (sample_record ~input_tokens:None ());
-    let fields = Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
-    check_not_observed fields ~reason:"turn_record_without_usage")
+    let observation = Projection.context_observation ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
+    check_not_observed observation.fields ~reason:"turn_record_without_usage";
+    check bool "unmeasured usage is a complete absence" true
+      (observation.completeness = Masc.Dashboard_projection_read.Complete))
 ;;
 
 let test_undecodable_newest_line_is_typed () =
   with_temp_workspace (fun config ->
     append_raw config ~keeper_name:"beta" (`Assoc [ "schema", `String "future" ]);
-    let fields = Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
-    check_not_observed fields ~reason:"turn_record_undecodable")
+    let observation = Projection.context_observation ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
+    check_not_observed observation.fields ~reason:"turn_record_undecodable";
+    check bool "undecodable measurement retains complete absence semantics" true
+      (observation.completeness = Masc.Dashboard_projection_read.Complete))
 ;;
 
 (* Raw non-JSON tail: the permissive reader would silently skip it and serve
@@ -367,6 +410,8 @@ let () =
     [ ( "projection"
       , [ test_case "missing store is typed absence" `Quick
             test_missing_store_is_typed_absence
+        ; test_case "strict tail I/O failure and raw repair keep same-read completeness" `Quick
+            test_storage_read_failure_and_raw_repair_keep_same_read_completeness
         ; test_case "measured record projects tokens/window/provenance" `Quick
             test_measured_record_projects
         ; test_case "newest record wins" `Quick test_newest_record_wins

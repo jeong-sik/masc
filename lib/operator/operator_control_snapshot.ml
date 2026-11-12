@@ -374,8 +374,8 @@ let keepers_json
                         | Some p -> `String (Keeper_state_machine.phase_to_string p)
                         | None -> `Null
                     in
-                    let context_snapshot_fields =
-                      Keeper_context_observation_projection.context_fields
+                    let context_snapshot =
+                      Keeper_context_observation_projection.context_observation
                         ~config
                         ~keeper_name:meta.name
                         ~current_trace_id:
@@ -484,7 +484,7 @@ let keepers_json
                                dt_activity := Time_compat.now () -. t_act;
                                result )
                            ]
-                         @ context_snapshot_fields
+                         @ context_snapshot.fields
                          @ [ ( "last_turn_usage"
                              , Keeper_context_observation_projection
                                .last_turn_usage_json
@@ -499,7 +499,9 @@ let keepers_json
                     Keeper_row {json = row;
                       next_deadline_unix = earlier_deadline diagnostic_observation.next_deadline_unix runtime_trust_observation.next_deadline_unix;
                       completeness = Dashboard_projection_read.combine_completeness
-                        runtime_trust_observation.completeness attention_completeness})
+                        context_snapshot.completeness
+                        (Dashboard_projection_read.combine_completeness
+                          runtime_trust_observation.completeness attention_completeness)})
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->

@@ -6,12 +6,26 @@ val missing_context_fields :
 (** Null context fields plus the typed missing-measurement reason. Checkpoint inventory
     is a separate endpoint and is not loaded by fleet context observation. *)
 
+type context_observation = {
+  fields : (string * Yojson.Safe.t) list;
+  completeness : Dashboard_projection_read.completeness;
+}
+
+val context_observation :
+  config:Workspace.config -> keeper_name:string -> current_trace_id:string ->
+  context_observation
+(** One strict TurnRecord tail read supplies both the original context fields
+    and its typed completeness. A storage/listing read failure is [Partial];
+    the other typed non-measurements retain their original absence semantics.
+    No elapsed-time deadline or second store read is introduced. *)
+
 val context_fields :
   config:Workspace.config ->
   keeper_name:string ->
   current_trace_id:string ->
   (string * Yojson.Safe.t) list
-(** Context occupancy projected from the keeper's newest TurnRecord
+(** The fields of {!context_observation}, for display consumers. Context
+    occupancy is projected from the keeper's newest TurnRecord
     (RFC-0233), the measurement SSOT: [context_tokens] is the
     provider-reported prompt total of the last completed turn,
     [context_max] its provider-reported usable window (or the configured

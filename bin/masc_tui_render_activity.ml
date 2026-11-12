@@ -417,8 +417,8 @@ let render_keeper_calls (state : state) =
     | Some snapshot when state.keeper_calls_loading ->
         heading
           ~readings:
-            [ Masc_tui_message_layout.count_noun
-                (List.length snapshot.Masc.Tui_decode.kcs_entries) "call"
+            [ count_reading state Masc_tui_value.Count.Call
+                (List.length snapshot.Masc.Tui_decode.kcs_entries)
             ; ui_text state ~ko:"다시 읽는 중" ~en:"refreshing" ]
     | None when state.keeper_calls_loading ->
         heading ~readings:[ ui_text state ~ko:"읽는 중" ~en:"loading" ]
@@ -452,8 +452,8 @@ let render_keeper_calls (state : state) =
         in
         heading
           ~readings:
-            [ Masc_tui_message_layout.count_noun
-                (List.length snapshot.Masc.Tui_decode.kcs_entries) "call"
+            [ count_reading state Masc_tui_value.Count.Call
+                (List.length snapshot.Masc.Tui_decode.kcs_entries)
             ; freshness ]
   in
   box_top buf cols;

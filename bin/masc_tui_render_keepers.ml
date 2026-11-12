@@ -4915,7 +4915,7 @@ let render_keeper_logs (state : state) =
       | Loading -> "reading metrics"
       | Failed _ -> "unavailable"
       | Ready _ | Stale _ ->
-          Masc_tui_message_layout.count_noun ~plural:"entries" total_entries "entry" in
+          count_reading state Masc_tui_value.Count.Entry total_entries in
 
     (* Header *)
     let header =

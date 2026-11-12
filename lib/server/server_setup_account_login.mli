@@ -21,9 +21,8 @@ type owner =
           (plan D1-4). The home goes under [accounts/<namespace>] of the
           workspace's masc directory, and a confirmed login links the account,
           whose id is the login id, to [user_id] in the authorization log. A
-          person always makes a new account: [account_ref] is refused, and so
-          is Antigravity, whose credential copy lives in the setup registry,
-          which has no owner. *)
+          person always makes a new account: [account_ref] is refused. A
+          person logs in only where {!person_target} allows. *)
 
 (** The CORS headers of the event stream that {!start} answers. A person's
     stream has none: the page of the account server reads it from the same
@@ -32,10 +31,31 @@ type owner =
     as the single-user server does ({!Server_auth.cors_headers}). *)
 val stream_cors_headers : owner -> Httpun.Request.t -> (string * string) list
 
-(** Whether a person may log in to an account of this client: every client
-    but Antigravity, whose credential copy lives in the setup registry, which
-    has no owner. The error is the sentence {!start} answers a person with. *)
-val person_may_connect : Runtime_setup_login_client.client -> (unit, string) result
+(** Why a person may not log in to an integration. *)
+type person_refusal =
+  | Not_declared
+      (** No provider of runtime.toml has the id. The account a person makes
+          is used only through the provider its login names
+          ({!Runtime_account_runtime.of_template}). *)
+  | No_login of Server_runtime_setup_actions.error
+      (** The provider has no official-client login, as a server over HTTP. *)
+  | Copy_without_owner
+      (** Antigravity: its credential copy lives in the setup registry, which
+          has no owner. *)
+
+(** The sentence {!start} answers a person with. *)
+val person_refusal_message : person_refusal -> string
+
+(** The login a person may start for [integration_id]: a provider runtime.toml
+    declares, whose login target resolves, of a client that keeps its
+    credential in the home of the account. {!start} asks this of a person
+    before any login starts, and the list of what a person may connect
+    ({!Server_person_integrations.of_config}) holds the providers it allows.
+    An operator's login is not judged by it. *)
+val person_target :
+  Runtime_schema.config ->
+  integration_id:string ->
+  (Server_runtime_setup_actions.login_target, person_refusal) result
 
 val start : owner:owner -> base_path:string -> body:string ->
   Httpun.Request.t -> Http_reqd.t -> unit

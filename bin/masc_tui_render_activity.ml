@@ -396,9 +396,13 @@ let render_keeper_calls (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
+  (* The name is a string the server sent. It is drawn as a step ahead of
+     the last one, which the row lays out as given, so it is made printable
+     here: as the id of the title this row replaced it was made printable by
+     the title itself. *)
   let keeper_name =
     match List.nth_opt state.keepers state.keeper_cursor with
-    | Some keeper -> keeper.k_name
+    | Some keeper -> Terminal_text.single_line keeper.k_name
     | None -> Masc_tui_theme.Glyph.no_value
   in
   let heading ~readings =

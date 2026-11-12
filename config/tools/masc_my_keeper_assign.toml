@@ -1,0 +1,24 @@
+name = "masc_my_keeper_assign"
+title = "Assign My Keeper A Runtime"
+description = """
+Give one of your Keepers one of your Runtimes, on which its turns run. The \
+answer is JSON with record "assigned", or "existing" when the Keeper \
+already has that Runtime. A Keeper or a Runtime that is not yours is \
+answered as one that is not there."""
+additional_properties = false
+
+[[params]]
+name = "keeper_id"
+type = "string"
+required = true
+min_length = 1
+description = """
+The name of your Keeper, as masc_my_keepers lists it."""
+
+[[params]]
+name = "runtime_id"
+type = "string"
+required = true
+min_length = 1
+description = """
+The id of your Runtime, as masc_my_runtimes lists it."""

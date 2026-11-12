@@ -355,7 +355,11 @@ let person_mcp (t : R.t) request reqd =
   with_authority reqd (fun request_authority ->
     on_trusted t reqd (fun trusted ->
       let caller =
-        { Server_person_mcp.trusted; now_ms = now_ms t; gate = gate_request ~request_authority request }
+        { Server_person_mcp.zone = t.zone
+        ; trusted
+        ; now_ms = now_ms t
+        ; gate = gate_request ~request_authority request
+        }
       in
       match Server_person_mcp.admitted caller with
       | Error answer -> respond reqd answer

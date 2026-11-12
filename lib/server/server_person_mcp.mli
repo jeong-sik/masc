@@ -18,7 +18,18 @@
     The methods are [server/discover], [initialize], [ping], [tools/list]
     and [tools/call]. A tool calls the function that the person's route
     calls, with the judgment that route makes, so the endpoint lets nothing
-    through that the route refuses. *)
+    through that the route refuses.
+
+    The tools, each with its route and the judgment of that route:
+    - [masc_whoami]: [GET /api/v1/auth/whoami], [Read_auth]
+    - [masc_my_runtimes]: [GET /api/v1/auth/provider-accounts],
+      [Manage_own_provider] ({!Auth_preview.person})
+    - [masc_my_keepers], [masc_my_keeper_create], [masc_my_keeper_assign]:
+      [GET] and [POST /api/v1/auth/keepers] and
+      [POST /api/v1/auth/keepers/assign], [Manage_own_keeper]
+      ({!Auth_preview.keeper_owner}). A PAT whose scope lacks the effect is
+      refused, and a Keeper or a Runtime of another person is answered as
+      one that is not there. *)
 
 (** [/mcp]. *)
 val path : string
@@ -27,9 +38,12 @@ val path : string
 val max_message_bytes : int
 
 (** What a request is judged with: one snapshot the zone could be trusted
-    for, the time, and what the server read of the credential. *)
+    for, the time, and what the server read of the credential. [zone] is the
+    zone of the snapshot, where a tool that makes or changes a record of the
+    person commits it. *)
 type caller =
-  { trusted : Authz_zone.trusted
+  { zone : Authz_zone.t
+  ; trusted : Authz_zone.trusted
   ; now_ms : int
   ; gate : Auth_gate.request
   }

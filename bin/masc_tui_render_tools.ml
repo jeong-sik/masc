@@ -899,10 +899,8 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
                    ets_native_posture;
                    ets_skill_snapshot_revision;
                    ets_skill_resource_read_max_bytes;
-                   ets_instruction_skills;
                    ets_skills_left_out;
                    ets_unavailable_skill_names;
-                   ets_composition_skills;
                    ets_skill_profiles;
                    ets_tool_surface_bytes;
                    ets_skill_tool_surface_bytes;
@@ -928,26 +926,6 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
           | Some bytes -> Printf.sprintf "%dB" bytes
           | None -> "?"
         in
-        (* Names, not the wire form. These were serialised to JSON and then
-           cut to the width of the line, so the header read
-           [{"identity":{"source_id":"project-masc","package_id"~] -- sixty
-           characters that answer nothing, in the place a reader looks first.
-
-           The skills are listed by name a few rows below, so the header's
-           job is the count and which ones, and it can say both in less room
-           than the envelope of the first one took. *)
-        let skill_names refs =
-          match refs with
-          | [] -> "none"
-          | xs ->
-            Printf.sprintf "%d · %s" (List.length xs)
-              (xs
-               |> List.map (fun reference ->
-                    reference.Skill_reference.identity.Skill_reference.name)
-               |> String.concat " ")
-        in
-        let instruction = skill_names ets_instruction_skills in
-        let composition = skill_names ets_composition_skills in
         let digest =
           match ets_tool_surface_sha256 with
           | None -> "n/a (Agent Core owns the turn)"
@@ -1346,10 +1324,6 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
             native ]
         @ performance_card
         @ [ delivery_tone, "   Runtime 도구 전달: " ^ delivery;
-          Ansi.dim,
-          Printf.sprintf "   instruction skills=%s  composition skills=%s"
-            (Terminal_text.single_line instruction)
-            (Terminal_text.single_line composition);
           Ansi.dim,
           "   skill snapshot="
           ^ Terminal_text.single_line ets_skill_snapshot_revision;

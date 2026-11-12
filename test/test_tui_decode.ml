@@ -4171,7 +4171,6 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                { ets_keeper_name;
                  ets_native_posture = Some native;
                  ets_skill_resource_read_max_bytes = Some resource_bound;
-                 ets_instruction_skills;
                  ets_skill_profiles = [ profile ];
                  ets_tool_surface_bytes;
                  ets_skill_tool_surface_bytes;
@@ -4185,11 +4184,6 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check string) "Keeper" "codex-mcp-client" ets_keeper_name;
       Alcotest.(check string) "native posture" "read" native;
       Alcotest.(check int) "resource read bound" 65536 resource_bound;
-      Alcotest.(check string)
-        "declared instruction skill"
-        (Yojson.Safe.to_string (`List [ exact_reference "ocaml-coding" 'a' ]))
-        (Skill_reference.list_to_yojson ets_instruction_skills
-         |> Yojson.Safe.to_string);
       (* The Tools screen draws "composition_skill:<source_id>" from this, so
          a skill tool says which configured source it came from. *)
       Alcotest.(check bool)

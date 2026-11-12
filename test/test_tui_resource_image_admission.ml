@@ -138,8 +138,8 @@ let test_skill_image_owner () =
       ets_keeper_name="keeper-a"; ets_runtime_id="runtime"; ets_official_client_kind="client";
       ets_tool_delivery=Effective_tools_delivered; ets_native_posture=None;
       ets_skill_snapshot_revision="snapshot"; ets_skill_resource_read_max_bytes=None;
-      ets_instruction_skills=[]; ets_skills_left_out=left_out; ets_unavailable_skill_names=[];
-      ets_composition_skills=[]; ets_skill_profiles=List.map profile selected;
+      ets_skills_left_out=left_out; ets_unavailable_skill_names=[];
+      ets_skill_profiles=List.map profile selected;
       ets_tool_surface_bytes=None; ets_skill_tool_surface_bytes=None; ets_skill_discovery_bytes=0;
       ets_skill_body_bytes=None; ets_tools=[]; ets_tool_surface_sha256=None });
     ts_usage=None; ts_volume_gc_report=None;

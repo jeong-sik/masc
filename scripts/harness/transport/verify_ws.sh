@@ -73,10 +73,14 @@ auth_token = os.environ.get("WS_AUTH_TOKEN", "")
 
 sock = socket.create_connection((host, port), timeout=5)
 key = base64.b64encode(os.urandom(16)).decode()
+# The upgrade passes the credential check of POST /mcp, so the bearer rides
+# on it; the Origin alone admits nothing.
+auth_header = f"Authorization: Bearer {auth_token}\r\n" if auth_token else ""
 request = (
     f"GET {path} HTTP/1.1\r\n"
     f"Host: {host}:{port}\r\n"
     f"Origin: http://{host}:{port}\r\n"
+    f"{auth_header}"
     "Upgrade: websocket\r\n"
     "Connection: Upgrade\r\n"
     f"Sec-WebSocket-Key: {key}\r\n"

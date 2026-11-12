@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | 현황판, wallboard, read-mostly viewer | `observer SSE` (`GET /mcp?sse_kind=observer`) | 브라우저 친화적이고 단방향 freshness에 충분함 | `SSE observer`, `queue max`, `broadcast avg` |
 | agent heartbeat, subscribe, fast fanout | `gRPC` (`:8936`) | 양방향 스트림, backlog replay, typed contract | `gRPC subscribers`, `active streams` |
-| browser/operator duplex bridge | `WebSocket` (`/ws` same-origin upgrade) **Experimental** | request/response를 한 socket에서 처리하기 좋음 | `WebSocket sessions` |
+| operator·script duplex bridge | `WebSocket` (`/ws` upgrade, 업그레이드 요청에 bearer) **Experimental** | request/response를 한 socket에서 처리하기 좋음. 브라우저 WebSocket 은 header 를 못 실어서 token 이 필요한 workspace 에서는 열지 못함 | `WebSocket sessions` |
 | stateless scripting, queue trigger, worker bootstrap | `Streamable HTTP` (`POST /mcp`) | curl/harness에서 가장 단순하고 canonical | `primary path`, `recent messages`, `active ops` |
 | 브라우저 다중 탭 / 다중 stream | `HTTPS :8938` (TLS, ALPN h2) | 브라우저는 TLS 에서만 HTTP/2 를 말한다. 한 연결에 SSE 스트림 여럿, origin 당 6연결 상한 밖 | `https_listener.status`, `https_listener.alpn_h2_total` |
 | 스크립트·harness 의 HTTP/2 | `h2c` (8935, `--http2-prior-knowledge`) | TLS 없이 한 연결 멀티플렉스. 경로 표는 8938 과 같다 | `HTTP listener_mode` |

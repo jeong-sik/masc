@@ -563,14 +563,34 @@ let expect_ws_refused label = function
       (Masc_domain.masc_error_to_string other)
 
 (* Strict auth: the server is reachable from outside, so an upgrade carries
-   the bearer like every other request. Writing this server's own origin is
-   not a credential. *)
-let test_ws_upgrade_strict_refuses_same_origin_without_bearer () =
-  with_temp_auth_workspace (fun base_path ->
+   the bearer like every other request. The workspace has auth off, so the
+   strict check is the only one that can refuse this same-origin upgrade. *)
+let test_ws_upgrade_strict_refuses_same_origin_on_auth_off_workspace () =
+  with_auth_off_workspace (fun base_path ->
     with_strict_auth (fun () ->
+      match
+        ws_gate_on ~base_path
+          [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
+      with
+      | Error
+          (Masc_domain.Auth
+             (Masc_domain.Auth_error.Unauthorized
+                { reason = Masc_domain.Auth_error.Generic; _ })) -> ()
+      | Ok () -> fail "expected deny: strict same-origin upgrade on an auth-off workspace"
+      | Error other ->
+        failf "expected the strict-auth refusal, got %s"
+          (Masc_domain.masc_error_to_string other)))
+
+(* A bearer that does not verify is refused even when the Origin names this
+   server: nothing falls back to the Origin. *)
+let test_ws_upgrade_invalid_bearer_same_origin_refused () =
+  with_temp_auth_workspace (fun base_path ->
+    with_non_strict_auth (fun () ->
       ws_gate_on ~base_path
-        [ ("host", "127.0.0.1:8935"); ("origin", "http://127.0.0.1:8935") ]
-      |> expect_ws_refused "strict same-origin upgrade without a bearer"))
+        [ ("host", "127.0.0.1:8935");
+          ("origin", "http://127.0.0.1:8935");
+          ("authorization", "Bearer not-a-token") ]
+      |> expect_ws_refused "same-origin upgrade with a bearer that does not verify"))
 
 let test_ws_upgrade_strict_admits_bearer () =
   with_temp_auth_workspace (fun base_path ->
@@ -612,19 +632,35 @@ let test_ws_upgrade_auth_off_refuses_cross_site_browser () =
         failf "expected SameOriginBlocked, got %s"
           (Masc_domain.masc_error_to_string other)))
 
-let test_ws_upgrade_allows_authenticated_cross_origin () =
+let expect_same_origin_blocked label = function
+  | Error (Masc_domain.Auth Masc_domain.Auth_error.SameOriginBlocked) -> ()
+  | Ok () -> failf "expected deny: %s" label
+  | Error other ->
+    failf "expected SameOriginBlocked for %s, got %s" label
+      (Masc_domain.masc_error_to_string other)
+
+(* The /mcp ingress refuses another site's Origin before it reads a
+   credential, so a bearer does not let the upgrade through either. *)
+let test_ws_upgrade_refuses_cross_site_with_valid_bearer () =
   with_temp_auth_workspace (fun base_path ->
     let token = worker_token base_path in
-    match
+    with_non_strict_auth (fun () ->
       ws_gate_on ~base_path
         [ ("host", "127.0.0.1:8935");
           ("origin", "http://evil.example:8935");
           ("authorization", "Bearer " ^ token) ]
-    with
-    | Ok () -> ()
-    | Error err ->
-      failf "expected authenticated cross-origin upgrade to pass, got %s"
-        (Masc_domain.masc_error_to_string err))
+      |> expect_same_origin_blocked "cross-site upgrade with a valid bearer"))
+
+(* With workspace auth off the verdict never reads the token, so a header
+   that only looks like a credential must not skip the Origin check. *)
+let test_ws_upgrade_auth_off_refuses_cross_site_junk_bearer () =
+  with_auth_off_workspace (fun base_path ->
+    with_non_strict_auth (fun () ->
+      ws_gate_on ~base_path
+        [ ("host", "127.0.0.1:8935");
+          ("origin", "http://evil.example:8935");
+          ("authorization", "Bearer junk") ]
+      |> expect_same_origin_blocked "cross-site upgrade with a junk bearer and auth off"))
 
 let () =
   Eio_main.run @@ fun env ->
@@ -666,10 +702,12 @@ let () =
             test_ws_upgrade_same_origin_does_not_replace_the_bearer;
           test_case "denies cross-origin upgrade without token" `Quick
             test_ws_upgrade_denies_cross_origin;
-          test_case "allows authenticated cross-origin upgrade" `Quick
-            test_ws_upgrade_allows_authenticated_cross_origin;
-          test_case "strict refuses same-origin upgrade without bearer" `Quick
-            test_ws_upgrade_strict_refuses_same_origin_without_bearer;
+          test_case "refuses cross-site upgrade with a valid bearer" `Quick
+            test_ws_upgrade_refuses_cross_site_with_valid_bearer;
+          test_case "strict refuses same-origin upgrade on auth-off workspace" `Quick
+            test_ws_upgrade_strict_refuses_same_origin_on_auth_off_workspace;
+          test_case "invalid bearer with same-origin is refused" `Quick
+            test_ws_upgrade_invalid_bearer_same_origin_refused;
           test_case "strict admits upgrade with bearer" `Quick
             test_ws_upgrade_strict_admits_bearer;
           test_case "auth off admits same-origin browser" `Quick
@@ -678,5 +716,7 @@ let () =
             test_ws_upgrade_auth_off_admits_native_client;
           test_case "auth off refuses cross-site browser" `Quick
             test_ws_upgrade_auth_off_refuses_cross_site_browser;
+          test_case "auth off refuses cross-site junk bearer" `Quick
+            test_ws_upgrade_auth_off_refuses_cross_site_junk_bearer;
         ] );
     ]

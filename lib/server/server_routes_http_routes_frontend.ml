@@ -68,19 +68,20 @@ let websocket_upgrade_unavailable_reason () =
   else None
 
 (* HIGH-RISK-UNREVIEWED: decides who may open the MCP transport on /ws.
-   An upgrade gets the credential verdict a POST to /mcp gets: an Origin
-   header is written by the client, so it never stands in for a bearer.
-   When the verdict admits a request that carries no credential (workspace
-   auth off, or no token required), the upgrade must still not come from
-   another site's page: a browser opens a WebSocket without a preflight, so
-   that page could otherwise drive this transport through the operator's
-   browser. A native client sends no Origin and passes, as it does on /mcp. *)
+   An upgrade passes the two checks a POST to /mcp passes, in the same order.
+   First the Origin: a request that names another site is refused, with or
+   without a credential, as the ingress refuses it on /mcp. A browser opens a
+   WebSocket without a preflight, so another site's page could otherwise drive
+   this transport through the operator's browser. A native client sends no
+   Origin and passes. Then the credential verdict of /mcp: an Origin header is
+   written by the client, so a same-origin one never stands in for a bearer. *)
 let websocket_upgrade_authorized ~base_path ~request_authority request =
-  match verify_mcp_auth_for_authority ~base_path ~request_authority request with
-  | Error refusal -> Error refusal
-  | Ok (_ : _ option) ->
-    if request_carries_auth_credential request then Ok ()
-    else ensure_same_origin_if_browser_request ~request_authority request
+  let ( let* ) = Result.bind in
+  let* () = ensure_same_origin_if_browser_request ~request_authority request in
+  let* (_ : _ option) =
+    verify_mcp_auth_for_authority ~base_path ~request_authority request
+  in
+  Ok ()
 
 let websocket_handler ?clock ~upgrade request reqd =
   if is_websocket_upgrade_request request then

@@ -368,12 +368,13 @@ let age_text ~now at =
   | Some text -> text
   | None -> Masc_tui_theme.Glyph.no_value
 
-let ago_text ~now at =
+let ago_text ~ko ~now at =
   match Layout.elapsed_text (now -. at) with
-  | Some text -> text ^ " ago"
+  | Some text -> text ^ say ko " 전" " ago"
   | None -> Masc_tui_theme.Glyph.no_value
 
-let last_event_text ~now at = "last event " ^ age_text ~now at
+let last_event_text ~ko ~now at =
+  say ko "마지막 이벤트 " "last event " ^ age_text ~now at
 
 
 (* Input and output as two parts, for the focus block. The input part is what
@@ -386,18 +387,22 @@ let last_event_text ~now at = "last event " ^ age_text ~now at
    One operator asked what 73.9k+358 added up to. *)
 (* An input with a cache split names its parts even without an output
    beside it: "3.72M tok" alone is the figure that read as all new. *)
-let tokens_text = function
+let token_unit ~ko = say ko " 토큰" " tok"
+
+let tokens_text ~ko = function
   | None, None -> ""
   | Some input, Some o ->
-    Acting.turn_input_text input ^ middle_dot ^ "out " ^ Layout.compact_count o
-  | Some (Acting.Input_split _ as input), None -> Acting.turn_input_text input
-  | Some (Acting.Input_whole n), None | None, Some n -> Layout.compact_count n ^ " tok"
+    Acting.turn_input_text ~ko input ^ middle_dot ^ Acting.output_text ~ko o
+  | Some (Acting.Input_split _ as input), None -> Acting.turn_input_text ~ko input
+  | Some (Acting.Input_whole n), None | None, Some n ->
+    Layout.compact_count n ^ token_unit ~ko
 
-let tokens_sum_text = function
+let tokens_sum_text ~ko = function
   | None, None -> ""
-  | Some input, Some o -> Layout.compact_count (Acting.turn_input_total input + o) ^ " tok"
-  | Some input, None -> Layout.compact_count (Acting.turn_input_total input) ^ " tok"
-  | None, Some n -> Layout.compact_count n ^ " tok"
+  | Some input, Some o ->
+    Layout.compact_count (Acting.turn_input_total input + o) ^ token_unit ~ko
+  | Some input, None -> Layout.compact_count (Acting.turn_input_total input) ^ token_unit ~ko
+  | None, Some n -> Layout.compact_count n ^ token_unit ~ko
 
 (* The fleet row's figure: the tokens the turn processed new, without a unit,
    since the heading above it says what the figure counts and repeating "tok"
@@ -1017,10 +1022,10 @@ let schedule_text ~ko (tool : Acting.chunk_tool) =
           mode schedule.Agent_core.Tool_contract.batch_size
       else mode
 
-let disposition_span (tool : Acting.chunk_tool) =
+let disposition_span ~ko (tool : Acting.chunk_tool) =
   match tool.Acting.ct_disposition with
   | None -> None
-  | Some (Error _) -> Some { text = "disposition ?"; tone = Warn }
+  | Some (Error _) -> Some { text = say ko "처리 결과 ?" "disposition ?"; tone = Warn }
   | Some (Ok disposition) ->
       let tone =
         match disposition with
@@ -1058,12 +1063,12 @@ let call_detail_line ~ko ~cols ~now (tool : Acting.chunk_tool) part =
   match part with
   | Detail_facts ->
       let facts =
-        { text = join [ ago_text ~now tool.Acting.ct_at; schedule_text ~ko tool ]
+        { text = join [ ago_text ~ko ~now tool.Acting.ct_at; schedule_text ~ko tool ]
         ; tone = Dim
         }
       in
       let disposition =
-        match disposition_span tool with
+        match disposition_span ~ko tool with
         | Some span -> [ span; { text = middle_dot; tone = Dim } ]
         | None -> []
       in
@@ -1076,15 +1081,15 @@ let call_detail_line ~ko ~cols ~now (tool : Acting.chunk_tool) part =
    its state instead, whatever number an observation gave it. A settle that
    carried no number settles the chunk without naming it, and the pane draws
    no name at all rather than one standing for a number it does not have. *)
-let turn_name (chunk : Acting.chunk) =
+let turn_name ~ko (chunk : Acting.chunk) =
   match (chunk.Acting.ck_turn, chunk.Acting.ck_settled) with
-  | Some turn, true -> Some (Acting.turn_number_text turn)
+  | Some turn, true -> Some (Acting.turn_number_text ~ko turn)
   | Some _, false | None, (true | false) -> None
 
 let turn_summary_line ~ko ~cols ~health (chunk : Acting.chunk) =
   let state = record_state ~health chunk in
   let named =
-    match turn_name chunk with
+    match turn_name ~ko chunk with
     | Some text -> [ { text; tone = Plain } ]
     | None -> []
   in
@@ -1117,11 +1122,11 @@ let turn_summary_line ~ko ~cols ~health (chunk : Acting.chunk) =
   let candidates =
     match chunk.Acting.ck_tokens with
     | Some (Acting.Input_split { fresh; cached }), out ->
-      let fresh = Acting.fresh_input_text fresh
-      and cached = Acting.cached_input_text cached
+      let fresh = Acting.fresh_input_text ~ko fresh
+      and cached = Acting.cached_input_text ~ko cached
       and out =
         match out with
-        | Some o -> "out " ^ Layout.compact_count o
+        | Some o -> Acting.output_text ~ko o
         | None -> ""
       in
       [ line ~tokens:(join [ fresh; cached; out ]) ~cost
@@ -1130,7 +1135,7 @@ let turn_summary_line ~ko ~cols ~health (chunk : Acting.chunk) =
       ; line ~tokens:(join [ fresh; out ]) ~cost:""
       ]
     | ((Some (Acting.Input_whole _) | None), (Some _ | None)) as tokens ->
-      let parts = tokens_text tokens and sum = tokens_sum_text tokens in
+      let parts = tokens_text ~ko tokens and sum = tokens_sum_text ~ko tokens in
       [ line ~tokens:parts ~cost; line ~tokens:parts ~cost:""; line ~tokens:sum ~cost:"" ]
   in
   fit_line ~cols (first_fitting ~room:cols candidates)
@@ -1193,14 +1198,14 @@ let focus_header_line ~ko ~cols ~now ~health name current =
   | Some (current : Acting.chunk) ->
       let state = record_state ~health current in
       let clock =
-        { text = middle_dot ^ last_event_text ~now current.Acting.ck_at; tone = Dim }
+        { text = middle_dot ^ last_event_text ~ko ~now current.Acting.ck_at; tone = Dim }
       in
       (* A named turn is a done one, since only the end event names it: the
          number says what the word would, and the word pushed the clock off
          the row behind a sixteen-cell name. Every other record spells its
          state, the long form first, and gives that up before the clock. *)
       let states =
-        match turn_name current with
+        match turn_name ~ko current with
         | Some turn when state = Record_done -> [ [ { text = middle_dot ^ turn; tone = Plain } ] ]
         | Some _ | None ->
             List.map
@@ -1217,7 +1222,7 @@ let focus_header_line ~ko ~cols ~now ~health name current =
         | Some text ->
             let now_span = { text = middle_dot ^ text; tone = Info } in
             let named =
-              match turn_name current with
+              match turn_name ~ko current with
               | Some turn when state = Record_done ->
                   [ [ now_span; { text = middle_dot ^ turn; tone = Plain } ] ]
               | Some _ | None -> []
@@ -1238,11 +1243,11 @@ let focus_header_line ~ko ~cols ~now ~health name current =
              }
            ])
 
-let approval_line ~cols tool =
+let approval_line ~ko ~cols tool =
   fit_line ~cols
     (with_border
        [ { text = attention_glyph ^ " "; tone = Warn }
-       ; { text = "waiting on approval" ^ middle_dot ^ tool; tone = Warn }
+       ; { text = say ko "승인 대기" "waiting on approval" ^ middle_dot ^ tool; tone = Warn }
        ])
 
 (* The calls in the order the heading names. Receipt order is what the fold
@@ -1618,8 +1623,8 @@ let file_glyph file =
 
 (* One file: its kind, the address cut in the middle so the file name and
    the repository both stay readable, the range when known, the age. *)
-let file_line ~cols ~now index file =
-  let age = { text = ago_text ~now file.file_at; tone = Dim } in
+let file_line ~ko ~cols ~now index file =
+  let age = { text = ago_text ~ko ~now file.file_at; tone = Dim } in
   let where = Option.value ~default:"" file.file_where in
   let inner = cols - border_cells - mark_cells in
   let right = Layout.display_width age.text in
@@ -1665,7 +1670,7 @@ let changes_status_lines ~cols input =
                 ^ join
                     [ files_text ~ko:input.ko files
                     ; window_text r.window_hours
-                    ; ago_text ~now:input.now r.fetched_at
+                    ; ago_text ~ko:input.ko ~now:input.now r.fetched_at
                     ]
             ; tone = Dim
             }
@@ -1705,19 +1710,43 @@ let changes_status_lines ~cols input =
       let refresh_failed =
         match r.refresh_failed with
         | Some why ->
-            one [ { text = "refresh failed" ^ middle_dot ^ why; tone = Bad } ]
+            one
+              [ { text = say input.ko "갱신 실패" "refresh failed" ^ middle_dot ^ why
+                ; tone = Bad
+                }
+              ]
         | None -> []
       in
       let authority =
         match r.authority with
         | Changes_current -> []
         | Changes_workspace_unconfirmed ->
-            one [ { text = "workspace unconfirmed; files cannot be opened"; tone = Warn } ]
+            one
+              [ { text =
+                    say input.ko "작업 공간 미확인 · 파일을 열 수 없음"
+                      "workspace unconfirmed; files cannot be opened"
+                ; tone = Warn
+                }
+              ]
         | Changes_revalidating ->
-            one [ { text = "rechecking changes; files cannot be opened yet"; tone = Warn } ]
+            one
+              [ { text =
+                    say input.ko "변경 다시 확인 중 · 아직 파일을 열 수 없음"
+                      "rechecking changes; files cannot be opened yet"
+                ; tone = Warn
+                }
+              ]
         | Changes_needs_revalidation ->
-            one [ { text = "changes need a current read"; tone = Warn } ]
-            @ one [ { text = "retry: /activity changes"; tone = Warn } ]
+            one
+              [ { text = say input.ko "변경을 새로 읽어야 함" "changes need a current read"
+                ; tone = Warn
+                }
+              ]
+            @ one
+                [ { text = say input.ko "다시 시도: /activity changes" "retry: /activity changes"
+                  ; tone = Warn
+                  }
+                ]
       in
       head @ authority @ refresh_failed @ dropped @ empty
 
@@ -1748,7 +1777,7 @@ let materialize_row ~cols input = function
   | Fleet_row (keeper, chunk) -> fleet_row ~cols input keeper chunk
   | Focus_header (name, current, health) ->
       focus_header_line ~ko:input.ko ~cols ~now:input.now ~health name current, Target_none
-  | Approval_row tool -> approval_line ~cols tool, Target_none
+  | Approval_row tool -> approval_line ~ko:input.ko ~cols tool, Target_none
   | Calls_heading responses ->
       calls_heading_line ~ko:input.ko ~cols input.call_order responses, Target_call_order
   | Tool_row (chunk, tool, state, place, run) ->
@@ -1765,7 +1794,7 @@ let materialize_row ~cols input = function
       let arrow = match direction with Above -> up_arrow | Below -> down_arrow in
       indicator_line ~ko:input.ko ~cols arrow n
   | File_row (index, file) ->
-      let line, target = file_line ~cols ~now:input.now index file in
+      let line, target = file_line ~ko:input.ko ~cols ~now:input.now index file in
       (match input.changes with
        | Changes_ready { authority = Changes_current; _ } -> line, target
        | Changes_ready { authority = (Changes_workspace_unconfirmed | Changes_revalidating

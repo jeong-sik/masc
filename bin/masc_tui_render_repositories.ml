@@ -534,7 +534,7 @@ let render_repository_changes (state : state) =
       in
       let recorded_changes = current_keeper_chat_file_changes state in
       surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repository-changes"
-        ~title ~hints:Masc_tui_keys.footer_hints_git_changes
+        ~title ~hints:(Masc_tui_keys.footer_hints_git_changes ~lang:state.ui_language)
         ~body:(fun ~budget c ->
           let geometry = repository_changes_geometry state ~cols ~budget
               ~cursor:state.repository_changes_cursor in

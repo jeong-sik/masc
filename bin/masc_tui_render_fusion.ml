@@ -1190,7 +1190,7 @@ let render_fusion_detail (state : state) run_id =
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~position
-       ~hints:Masc_tui_keys.footer_hints_fusion_detail);
+       ~hints:(Masc_tui_keys.footer_hints_fusion_detail ~lang:state.ui_language));
   finish_surface state ~clamped:(Fusion_detail_scroll scroll)
     ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf
 

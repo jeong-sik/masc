@@ -2223,9 +2223,9 @@ let render_config (state : state) =
          Masc_tui_keys.footer_hints_runtime_account_saved ~lang:state.ui_language
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ~lang:state.ui_language
        | None when Option.is_some state.memory_recall_form ->
-         Masc_tui_keys.footer_hints_memory_recall_form ()
+         Masc_tui_keys.footer_hints_memory_recall_form ~lang:state.ui_language
        | None when Option.is_some state.typesafeai_exclusion_form ->
-         Masc_tui_keys.footer_hints_typesafeai_exclusion_form ()
+         Masc_tui_keys.footer_hints_typesafeai_exclusion_form ~lang:state.ui_language
        | None -> Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:state.config_pane)
     ~body:(fun ~budget:_ c ->
       List.iter (c.push_styled ~style:(Theme.recede ()))

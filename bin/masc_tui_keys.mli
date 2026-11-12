@@ -145,14 +145,16 @@ val footer_hints_planning_goal_detail : lang:Masc_tui_types.ui_language -> strin
 (** The Goal detail has a separate Candle read key: its [r] may mean Resume. *)
 
 val footer_hints :
-  ?lang:Masc_tui_types.ui_language ->
+  lang:Masc_tui_types.ui_language ->
   ?detail_open:bool ->
   ?has_rows:bool ->
   ?has_reading:bool ->
   Masc_tui_types.surface ->
   string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
-    Meta order.
+    Meta order. [lang] is required here and on every other row of this
+    module: a row built without the screen's language has no value to fall
+    back to, so a caller that leaves it out does not compile.
 
     [detail_open] is how a surface that owns a detail says which of its two
     states is on screen, so the footer drops the key the dispatcher refuses
@@ -265,12 +267,12 @@ val footer_hints_runtime_account_form : lang:Masc_tui_types.ui_language -> strin
     save and the way out. The form takes every other key as typing, so the
     pane's row would name keys that no longer do what it says. *)
 
-val footer_hints_memory_recall_form : unit -> string
+val footer_hints_memory_recall_form : lang:Masc_tui_types.ui_language -> string
 (** The runtime.toml recall form's row: the rows, the range, the pick, the
     save and the way out. The form takes every key, so the pane's row would
     name keys that no longer do what it says. *)
 
-val footer_hints_typesafeai_exclusion_form : unit -> string
+val footer_hints_typesafeai_exclusion_form : lang:Masc_tui_types.ui_language -> string
 (** The runtime.toml exclusion form's row: the rows, the pick, the save and
     the way out. The form takes every key, so the pane's row would name keys
     that no longer do what it says. *)
@@ -360,7 +362,7 @@ val footer_hints_runtime :
     to the query and only the picker's navigation and confirmation are shown. *)
 
 val footer_hints_runtime_parent :
-  ko:bool -> parent:Masc_tui_types.runtime_parent -> string
+  lang:Masc_tui_types.ui_language -> parent:Masc_tui_types.runtime_parent -> string
 (** The active media-order editor or lane prompt replaces the Runtime listing.
     Name fields own printable keys; their footer does not advertise listing
     actions or [v]. Their [PgUp] opens the full draft/context reader; its Esc
@@ -373,7 +375,7 @@ val footer_hints_resources :
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
 
-val footer_hints_resource_save : pending:bool -> string
+val footer_hints_resource_save : lang:Masc_tui_types.ui_language -> pending:bool -> string
 (** The path form owns printable keys, including q. Enter creates a file only
     while no matching save is pending; Esc closes input and does not cancel an
     issued write. Page keys read the retained result below the form. *)
@@ -401,7 +403,7 @@ val footer_hints_board_pending : lang:Masc_tui_types.ui_language -> string
 (** Board read controls while the post is loading, missing, or failed.
     Projects the live [r], [Left / Esc], and [Tab] bindings. *)
 
-val footer_hints_fusion_detail : string
+val footer_hints_fusion_detail : lang:Masc_tui_types.ui_language -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because the
     surface is a drill-down the static per-surface table does not name. The
     window the renderer drew travels beside these as
@@ -425,10 +427,10 @@ val footer_hints_lanes_run_detail_for :
 (** The Lanes lane-notice footer. The pane is static, so it keeps only the
     way back plus the shared tail. *)
 
-val footer_hints_git_changes : string
+val footer_hints_git_changes : lang:Masc_tui_types.ui_language -> string
 (** The shared Git changes list under Repositories, Code, and Chat. *)
 
-val footer_hints_git_diff : string
+val footer_hints_git_diff : lang:Masc_tui_types.ui_language -> string
 (** The Git diff view for a changed file in repository changes. *)
 
 val footer_hints_memory_facts : lang:Masc_tui_types.ui_language -> cols:int -> has_rows:bool -> string
@@ -463,7 +465,7 @@ val bindings_acting_evidence : binding list
     Separate from {!for_surface} [Acting] because it scrolls a pinned event
     snapshot instead of filtering or stepping the live feed. *)
 
-val acting_evidence_hints : string
+val acting_evidence_hints : lang:Masc_tui_types.ui_language -> string
 (** The Activity event-evidence footer hints, projected from
     {!bindings_acting_evidence} so the footer and [?] agree. *)
 
@@ -505,11 +507,11 @@ val help_sections_for_state :
 (** Put the active nested reader's own keys first, ahead of surface reference
     sections. This is the help sheet's state-aware entry point. *)
 
-val footer_hints_patch_review : unit -> string
-val footer_hints_about : unit -> string
+val footer_hints_patch_review : lang:Masc_tui_types.ui_language -> string
+val footer_hints_about : lang:Masc_tui_types.ui_language -> string
 val footer_hints_queue : Masc_tui_types.state -> Masc_tui_types.queue_panel -> string
 val footer_hints_context : cols:int -> Masc_tui_types.state -> string
-val footer_hints_runtime_detail : ?ko:bool -> ?routes:bool -> unit -> string
+val footer_hints_runtime_detail : lang:Masc_tui_types.ui_language -> routes:bool -> string
 
 val help_sections :
   ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list
@@ -533,4 +535,4 @@ val reference_sections : unit -> reference_section list
     sheet's order, plus the paragraphs a section's surface keeps for the
     document. The [?] sheet does not draw those paragraphs. *)
 
-val footer_hints_browser_lane : string
+val footer_hints_browser_lane : lang:Masc_tui_types.ui_language -> string

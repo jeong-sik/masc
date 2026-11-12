@@ -741,7 +741,7 @@ let render_acting_evidence (state : state) entry =
        (Masc_tui_scroll.window_text ~scroll ~height:content_height (List.length lines)));
   box_bottom buf cols;
   Buffer.add_string buf (footer_line state ~max_cells:cols
-      ~hints:Masc_tui_keys.acting_evidence_hints);
+      ~hints:(Masc_tui_keys.acting_evidence_hints ~lang:state.ui_language));
   finish_surface state ~clamped:(Acting_detail_scroll scroll)
     ~surface_key:"acting-evidence" ~rows:terminal_rows ~cols buf
 

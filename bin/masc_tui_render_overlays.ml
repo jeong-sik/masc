@@ -30,7 +30,7 @@ let render_about (state : state) =
   surface_chrome ~overflow:Fits ~frame:Chrome_overlay state ~terminal_rows ~cols
     ~help_door:true
     ~surface_key:"about" ~title:(screen_title " MASC")
-    ~hints:(Masc_tui_keys.footer_hints_about ())
+    ~hints:(Masc_tui_keys.footer_hints_about ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       Masc_tui_emblem_screen.about_body
         ~cols:(framed_inner_width cols) ~rows:budget
@@ -683,7 +683,7 @@ let render_patch_modal (state : state) =
     ~title:
       (screen_title " MASC Patch review" ^ "  " ^ Ansi.bold
        ^ Terminal_text.single_line path_label ^ Ansi.reset)
-    ~hints:(Masc_tui_keys.footer_hints_patch_review ())
+    ~hints:(Masc_tui_keys.footer_hints_patch_review ~lang:state.ui_language)
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.recede ())
         (Printf.sprintf "  old / new · col %d/%d" (hscroll + 1) (limit + 1));

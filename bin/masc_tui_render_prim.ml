@@ -4132,7 +4132,7 @@ let render_repository_changes_diff (state : state) ~path =
     ; ds_hscroll = state.repository_changes_diff_hscroll
     ; ds_unchanged = "  (this file matches its last commit, or is untracked)"
     ; ds_esc_hint = "esc back to files"
-    ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff
+    ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff ~lang:state.ui_language
     ; ds_surface_key = "repository-changes-diff"
     ; ds_clamped = (fun scroll -> Repository_changes_diff_scroll scroll)
     }

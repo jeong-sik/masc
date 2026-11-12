@@ -21,7 +21,7 @@ let action_state view =
 
 let render_action state width =
   Masc_tui_render_prim.footer_line state ~max_cells:width
-    ~hints:(Masc_tui_keys.footer_hints state.Masc_tui_types.view)
+    ~hints:(Masc_tui_keys.footer_hints ~lang:Masc_tui_types.Lang_en state.Masc_tui_types.view)
   |> Masc_tui_theme.strip_sgr
 
 let test_action_text_is_not_dropped_as_a_key () =
@@ -34,7 +34,7 @@ let test_action_text_is_not_dropped_as_a_key () =
       check_bool ("the diagnosis preserves " ^ key) true
         (contains ~needle:(Masc_tui_theme.strip_sgr key) row))
       (Masc_tui_footer.undroppable_keys
-         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints view)));
+         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints ~lang:Masc_tui_types.Lang_en view)));
     check_string "rendering keeps the complete outcome in state" action_message
       (Option.get (Masc_tui_action_notice.ordinary state.last_action) |> fst);
     let narrow = render_action state 60 in
@@ -44,7 +44,7 @@ let test_action_text_is_not_dropped_as_a_key () =
       check_bool ("the narrow diagnosis preserves " ^ key) true
         (contains ~needle:(Masc_tui_theme.strip_sgr key) narrow))
       (Masc_tui_footer.undroppable_keys
-         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints view))))
+         (Masc_tui_footer.prepare_hints (Masc_tui_keys.footer_hints ~lang:Masc_tui_types.Lang_en view))))
     [ Masc_tui_types.Tools; Masc_tui_types.Repositories ]
 
 let test_build_mismatch_names_the_older_side () =
@@ -150,7 +150,7 @@ let plain_surface_state view =
 
 let surface_row state view width =
   Masc_tui_render_prim.footer_line state ~max_cells:width
-    ~hints:(Masc_tui_keys.footer_hints view)
+    ~hints:(Masc_tui_keys.footer_hints ~lang:Masc_tui_types.Lang_en view)
   |> Masc_tui_theme.strip_sgr
 
 let test_help_item_is_stamped_on_every_surface_row () =
@@ -209,7 +209,7 @@ let test_help_item_waits_when_keys_are_claimed () =
   typing.preset_save_draft <- Some "name";
   let typing_row =
     Masc_tui_render_prim.footer_line typing ~max_cells:140
-      ~hints:(Masc_tui_keys.footer_hints Masc_tui_types.Config)
+      ~hints:(Masc_tui_keys.footer_hints ~lang:Masc_tui_types.Lang_en Masc_tui_types.Config)
     |> Masc_tui_theme.strip_sgr
   in
   check_bool "a row whose keys a field holds is not stamped" false

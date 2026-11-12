@@ -571,8 +571,8 @@ let render_runtime_detail (state : state) target =
     (footer_line state ~max_cells:cols ?position
        ~hints:
          (Masc_tui_keys.footer_hints_runtime_detail
-            ~ko:(state.ui_language = Lang_ko)
-            ~routes:(target = Runtime_routes) ()));
+            ~lang:state.ui_language
+            ~routes:(target = Runtime_routes)));
   finish_surface state ~clamped:(Runtime_detail_scroll scroll)
     ~surface_key:"runtime-detail" ~rows:terminal_rows ~cols buf
 
@@ -1074,7 +1074,7 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
     | None -> ""
     | Some position -> Printf.sprintf "[%s]  " position in
   let hints = position ^ Masc_tui_keys.footer_hints_runtime_parent
-      ~ko ~parent:projection.rpp_parent in
+      ~lang:state.ui_language ~parent:projection.rpp_parent in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
     ~surface_key:"runtime-parent"
     ~title:header ~hints

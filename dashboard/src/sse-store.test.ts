@@ -110,7 +110,7 @@ async function loadSseStore() {
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
   const operatorSignals = await import('./operator-signals')
-  const wsState = await import('./dashboard-ws-state')
+  const wsState = await import('./dashboard-observer-state')
   return { sseStore, wsState, compositeTick, operatorSignals }
 }
 
@@ -175,9 +175,9 @@ describe('setupServerPushReaction reconnect hydration', () => {
     const { sseStore, wsState } = await loadSseStore()
     const cleanup = sseStore.setupServerPushReaction()
 
-    wsState.dashboardWsReady.value = true
-    wsState.dashboardWsLastDisconnectedAt.value = Date.now() - 1_000
-    wsState.dashboardWsReconnectCount.value += 1
+    wsState.dashboardObserverReady.value = true
+    wsState.dashboardObserverLastDisconnectedAt.value = Date.now() - 1_000
+    wsState.dashboardObserverAdmissionCount.value = 2
     await flushAsyncWork()
 
     expect(showToast).toHaveBeenCalled()
@@ -197,9 +197,9 @@ describe('setupServerPushReaction reconnect hydration', () => {
     const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
     sseStore.registerGateRefresh(refreshGate)
 
-    wsState.dashboardWsReady.value = true
-    wsState.dashboardWsLastDisconnectedAt.value = Date.now() - 1_000
-    wsState.dashboardWsReconnectCount.value += 1
+    wsState.dashboardObserverReady.value = true
+    wsState.dashboardObserverLastDisconnectedAt.value = Date.now() - 1_000
+    wsState.dashboardObserverAdmissionCount.value = 2
     await flushAsyncWork()
 
     // Approvals can arrive/resolve during a disconnect; the always-visible
@@ -214,9 +214,9 @@ describe('setupServerPushReaction reconnect hydration', () => {
     const { sseStore, wsState } = await loadSseStore()
     const cleanup = sseStore.setupServerPushReaction()
 
-    wsState.dashboardWsReady.value = true
-    wsState.dashboardWsLastDisconnectedAt.value = Date.now() - 1_000
-    wsState.dashboardWsReconnectCount.value += 1
+    wsState.dashboardObserverReady.value = true
+    wsState.dashboardObserverLastDisconnectedAt.value = Date.now() - 1_000
+    wsState.dashboardObserverAdmissionCount.value = 2
     await flushAsyncWork()
 
     // keeper_chat_appended events dropped outside the server replay buffer are
@@ -235,9 +235,9 @@ describe('setupServerPushReaction reconnect hydration', () => {
     const { sseStore, wsState } = await loadSseStore()
     const cleanup = sseStore.setupServerPushReaction()
 
-    wsState.dashboardWsReady.value = true
-    wsState.dashboardWsLastDisconnectedAt.value = Date.now() - 1_000
-    wsState.dashboardWsReconnectCount.value += 1
+    wsState.dashboardObserverReady.value = true
+    wsState.dashboardObserverLastDisconnectedAt.value = Date.now() - 1_000
+    wsState.dashboardObserverAdmissionCount.value = 2
     await flushAsyncWork()
 
     expect(refreshKnownKeeperChatHistories).toHaveBeenCalledWith()
@@ -424,18 +424,18 @@ describe('setupServerPushReaction reconnect hydration', () => {
       available_actions: [],
     }
 
-    sseStore.hydrateDashboardSlice('operator', {
+    sseStore.routeServerPushEvent({ type: 'operator_snapshot', payload: {
       keepers: [],
       snapshot_epoch: 'epoch-invalid-envelope',
       snapshot_generation: 1,
       snapshot_compute_sequence: 1,
       snapshot_terminal_sequence: 1,
-    }, 'operator_snapshot')
+    } })
 
     expect(operatorSignals.operatorSnapshot.value).toBeNull()
     expect(operatorSignals.operatorError.value).toBe('invalid pending_confirm_envelope')
 
-    sseStore.hydrateDashboardSlice('operator', {
+    sseStore.routeServerPushEvent({ type: 'operator_snapshot', payload: {
       snapshot_epoch: 'epoch-recovered',
       snapshot_generation: 1,
       snapshot_compute_sequence: 2,
@@ -452,7 +452,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
           confirm_required_actions: [],
         },
       },
-    }, 'operator_snapshot')
+    } })
 
     expect(operatorSignals.operatorSnapshot.value).not.toBeNull()
     expect(operatorSignals.operatorError.value).toBeNull()
@@ -481,7 +481,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
       available_actions: [],
     }
 
-    sseStore.hydrateDashboardSlice('operator', null, 'operator_snapshot')
+    sseStore.routeServerPushEvent({ type: 'operator_snapshot', payload: null } as unknown as Parameters<typeof sseStore.routeServerPushEvent>[0])
 
     expect(operatorSignals.operatorSnapshot.value).toBeNull()
     expect(operatorSignals.operatorError.value).toBe('operator snapshot payload is invalid')
@@ -1213,8 +1213,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
         payload: { name: 'alpha', ts_unix: 1 } },
     ]
 
-    for (const { eventType, slice, payload } of deltas) {
-      expect(() => sseStore.hydrateDashboardSlice(slice, payload, eventType)).not.toThrow()
+    for (const { eventType, payload } of deltas) {
+      expect(() => sseStore.routeServerPushEvent({ type: eventType, payload } as Parameters<typeof sseStore.routeServerPushEvent>[0])).not.toThrow()
     }
     await flushAsyncWork()
 
@@ -1225,14 +1225,14 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(hydrateTransportHealthFromSSE).toHaveBeenCalledWith(transportPayload)
   })
 
-  it('routes websocket dashboard delta event types without treating payloads as snapshots', async () => {
+  it('routes SSE board changes without treating them as snapshots', async () => {
     const { sseStore } = await loadSseStore()
     route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
 
-    sseStore.hydrateDashboardSlice('board', {
+    sseStore.routeServerPushEvent({ type: 'comment_added',
       post_id: 'post-1',
       comment_id: 'comment-1',
-    }, 'comment_added')
+    })
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 

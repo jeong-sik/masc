@@ -63,7 +63,7 @@ import type { LogEntry, LogsData } from '../api/dashboard-logs'
 import { DashboardMain } from './dashboard-shell'
 import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route, navigate as navigateTo } from '../router'
-import { dashboardWsConnected } from '../dashboard-ws-state'
+import { dashboardObserverConnected } from '../dashboard-observer-state'
 import { tweaksDensity } from './tweaks-panel'
 import { notificationDeliveryError, notifyRules } from '../notifications'
 import {
@@ -2660,7 +2660,7 @@ describe('SettingsSurface shell route', () => {
     apiMock.fetchRuntimeProviders.mockReset()
     stubEmptyApi()
     dashboardLoading.value = false
-    dashboardWsConnected.value = true
+    dashboardObserverConnected.value = true
     namespaceTruthInitializing.value = false
     document.title = 'MASC Dashboard'
   })

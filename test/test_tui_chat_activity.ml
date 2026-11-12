@@ -47,6 +47,7 @@ let inflight ?(keeper_name = "alpha") ~request_id ~at () =
 
 let test_local_queue_is_not_server_admission () =
   let state = state () in
+  state.ui_language <- Tui.Lang_en;
   check bool "separate Enter sends stay separate by default" false state.coalesce_queued_input;
   check bool "new sends do not jump the queue by default" false state.user_input_priority_next;
   let add keeper_name request_id =
@@ -66,6 +67,7 @@ let test_local_queue_is_not_server_admission () =
 
 let test_esc_hint_follows_the_observed_turn () =
   let state = state () in
+  state.ui_language <- Tui.Lang_en;
   state.keeper_turns <- [running Turn_lane_chat_operation];
   check (option (pair (float 0.001) string)) "a running row is the target"
     (Some (1., "fixture-token")) (Tui.keeper_observed_turn state "alpha");

@@ -346,6 +346,9 @@ val here_row :
     cannot hold whole is folded in the middle, the longest first, so the last
     step stays on the row. The product name is not drawn. *)
 
+val reading_separator : string
+(** The mark between two readings of one row. *)
+
 val count_reading :
   Masc_tui_types.state -> Masc_tui_value.Count.noun -> int -> string
 (** {!Masc_tui_value.Count.reading} in the screen's language. *)

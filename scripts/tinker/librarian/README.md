@@ -162,19 +162,20 @@ endpoint applies its default.
    call log holds for its request, asked with the label note at the
    reasoning effort and output budget the pass lines set now, and the answer
    still passes the teacher's screen for that request. They stop at a record
-   that does not, and at a request with two records. Training renders the
-   examples at that effort with the answer as the model's whole message, so A
-   is trained to start its answer at once, where the base model writes a
-   thinking part first. It refuses a teacher run that did not ask every
-   request to the end (it stopped on its budget, or a request ended in an
-   HTTP error) and one that names no label audit. A record names its request
-   by item ID, so `sample`, `cases`, `apply` and training refuse requests of
-   which two share one. Run `train_sft.py` with `--dry-run` first: that
-   prints the number of examples, their tokens and the cost estimate, and
-   trains nothing. A run writes `summary.json`, which `verdict --train`
-   reads, then saves the weights with the optimizer state for seven days and
-   writes that checkpoint's path to `state.json`. A failure during the pass
-   leaves no checkpoint.
+   that does not, at a request with two records, and at a record file that
+   holds another number of records than the teacher's summary counts.
+   Training renders the examples at that effort with the answer as the
+   model's whole message, so A is trained to start its answer at once, where
+   the base model writes a thinking part first. It refuses a teacher run
+   that did not ask every request to the end (it stopped on its budget, or a
+   request ended in an HTTP error) and one that names no label audit. A
+   record names its request by item ID, so `sample`, `cases`, `apply` and
+   training refuse requests of which two share one. Run `train_sft.py` with
+   `--dry-run` first: that prints the number of examples, their tokens and
+   the cost estimate, and trains nothing. A run writes `summary.json`, which
+   `verdict --train` reads, then saves the weights with the optimizer state
+   for seven days and writes that checkpoint's path to `state.json`. A
+   failure during the pass leaves no checkpoint.
 5. Measure the base model and A in one run per set, from an empty `--out`.
 6. When a valid E-synth answer dropped a fact its label does not name (not
    planted stale, not a correction or complement target, not a fact of a

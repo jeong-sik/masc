@@ -35,6 +35,7 @@ from tinker_librarian_teacher_fixtures import (
     absorbing_m2,
     record,
     request_lines,
+    sampled_folder,
     train_folder,
 )
 
@@ -68,7 +69,8 @@ class EffortTest(unittest.TestCase):
 
 class ExamplesHashTest(unittest.TestCase):
     def test_the_hash_names_the_items_the_requests_the_answers_and_their_order(self) -> None:
-        a, b = X.Example("train-a-00-001", "request a", "answer a"), X.Example("train-b-00-001", "request b", "answer b")
+        a = X.Example("train-a-00-001", "request a", "answer a")
+        b = X.Example("train-b-00-001", "request b", "answer b")
         lines = [f"{e.item_id} {sha256(e.request)} {sha256(e.answer)}\n" for e in (a, b)]
         self.assertEqual(X.examples_sha256((a, b)), sha256("".join(lines)))
         others = ((b, a), (a,), (X.Example("train-a-00-002", a.request, a.answer), b),
@@ -201,10 +203,12 @@ class PlanTest(unittest.TestCase):
             self.plan()
 
     def test_a_folder_without_an_accepted_answer_is_refused(self) -> None:
-        T.write_jsonl(self.teacher / T.KEPT, [])
-        T.write_jsonl(self.teacher / T.PENDING, [])
-        with self.assertRaisesRegex(SystemExit, "holds no accepted answer"):
-            self.plan()
+        # The teacher's every answer to the one request is refused, so `sample` keeps none.
+        with tempfile.TemporaryDirectory() as tmp:
+            requests, teacher = sampled_folder(Path(tmp), [(self.made.kept[0], ("{}",) * T.ATTEMPTS)])
+            self.assertEqual((T.read_jsonl(teacher / T.KEPT), T.read_jsonl(teacher / T.PENDING)), ([], []))
+            with self.assertRaisesRegex(SystemExit, "holds no accepted answer"):
+                X.plan(requests, teacher)
 
 
 if __name__ == "__main__":

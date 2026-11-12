@@ -433,14 +433,18 @@ class TeacherMergeTest(unittest.TestCase):
     def test_decisions_are_read_only_for_the_waiting_answers_the_cases_were_made_from(self) -> None:
         self.cases()
         self.decide()
-        T.write_jsonl(self.out / T.PENDING, T.read_jsonl(self.out / T.PENDING)[:1])
+        # The same two records in the other order: other bytes than the cases were made from.
+        T.write_jsonl(self.out / T.PENDING, T.read_jsonl(self.out / T.PENDING)[::-1])
         with self.assertRaisesRegex(SystemExit, "were made from another pending.jsonl"):
             self.apply()
 
     def test_without_waiting_answers_apply_needs_no_judge(self) -> None:
-        T.write_jsonl(self.out / T.PENDING, [])
-        self.assertEqual(self.apply(), 0)
-        self.assertEqual(self.accepted_items(), [self.plain.item_id])
+        alone = self.folder / "alone"
+        alone.mkdir()
+        requests, out = sampled_folder(alone, [(self.plain, (label_answer(self.plain),))])
+        self.assertEqual(run_apply(requests, out), 0)
+        self.assertEqual([r["item"] for r in T.read_jsonl(out / T.ACCEPTED)], [self.plain.item_id])
+        self.assertFalse((out / T.MERGES).exists())
 
     def test_requests_other_than_the_sampled_ones_are_refused(self) -> None:
         self.requests.write_text(self.requests.read_text(encoding="utf-8") + "\n", encoding="utf-8")
@@ -463,17 +467,21 @@ class TeacherMergeTest(unittest.TestCase):
         [kept] = T.read_jsonl(self.out / T.KEPT)
         first, second = T.read_jsonl(self.out / T.PENDING)
         spaced = {"answer": cast(str, kept["answer"]) + " "}
+        why = "the answer in {} is not the teacher's logged reply to the request as it is asked now"
         self.refused((
             ("a kept answer the log does not hold", [{**kept, **spaced}], [first, second], ("apply",)),
             ("a kept answer the log holds for another attempt", [{**kept, "attempt": 1}], [first, second], ("apply",)),
-            ("a kept record without an answer", [{**kept, "attempt": 1, "answer": None}], [first, second], ("apply",)),
+            ("a kept record without an answer", [{**kept, "attempt": 1, "answer": None}], [first, second], ("apply",))),
+            why.format("kept.jsonl"), self.requests, self.out)
+        self.refused((
             ("a waiting answer the log does not hold", [kept],
              [{**first, "answer": cast(str, first["answer"]) + " "}, second], ("cases", "apply")),
             ("a waiting answer the log holds for another attempt", [kept], [{**first, "attempt": 1}, second],
              ("cases", "apply")),
-            # The log holds this answer, as the reply to another request.
-            ("a waiting answer of another request", [kept], [{**first, "item": self.off.item_id}], ("cases", "apply"))),
-            "is not the teacher's logged reply to the request as it is asked now", self.requests, self.out)
+            # The log holds each of these answers, as the reply to the other request.
+            ("waiting answers of each other's request", [kept],
+             [{**first, "answer": second["answer"]}, {**second, "answer": first["answer"]}], ("cases", "apply"))),
+            why.format("pending.jsonl"), self.requests, self.out)
 
     def test_a_reply_that_did_not_finish_is_no_answer(self) -> None:
         # `sample` reads no answer from such a reply, so a record cannot stand on one.
@@ -490,26 +498,40 @@ class TeacherMergeTest(unittest.TestCase):
         stale = teacher_answer(self.labeled, absorbs=("m1", "m4"), pair=True, dropped=())
         requests, out = sampled_folder(again, [(self.labeled, (stale, label_answer(self.labeled))),
                                                (self.plain, ("{}", label_answer(self.plain)))])
-        waits, kept = record(self.labeled, label_answer(self.labeled), 1), record(self.plain, label_answer(self.plain), 1)
+        waits = record(self.labeled, label_answer(self.labeled), 1)
+        kept = record(self.plain, label_answer(self.plain), 1)
         self.assertEqual((T.read_jsonl(out / T.PENDING), T.read_jsonl(out / T.KEPT)), ([waits], [kept]))
+        why = "the answer in {} is not a training target of that file any more"
         self.refused((
-            ("a kept answer that absorbs", [waits], [], ("apply",)),
-            ("a kept answer MASC refuses", [record(self.plain, "{}")], [], ("apply",)),
-            ("a waiting answer that absorbs nothing", [], [kept], ("cases", "apply")),
-            ("a waiting answer that absorbs a stale fact", [], [record(self.labeled, stale)], ("cases", "apply"))),
-            "is not a training target of that file any more", requests, out)
+            ("a kept answer that absorbs", [waits], [kept], ("apply",)),
+            ("a kept answer MASC refuses", [record(self.plain, "{}")], [waits], ("apply",))),
+            why.format("kept.jsonl"), requests, out)
+        self.refused((
+            ("a waiting answer that absorbs nothing", [waits], [kept], ("cases",)),
+            ("a waiting answer that absorbs a stale fact", [kept], [record(self.labeled, stale)], ("cases", "apply"))),
+            why.format("pending.jsonl"), requests, out)
 
     def test_a_request_with_two_records_and_a_record_of_no_sampled_request_are_refused(self) -> None:
         [kept] = T.read_jsonl(self.out / T.KEPT)
         first, second = T.read_jsonl(self.out / T.PENDING)
         elsewhere = "train-release-steward-00-009"
+        # Each file holds as many records as the summary counts for it.
         for name, item, kept_rows, pending_rows in (
-                ("two waiting records", self.labeled.item_id, [kept], [first, first, second]),
-                ("a kept and a waiting record", self.plain.item_id, [kept], [first, second, kept]),
-                ("a record of no sampled request", elsewhere, [kept, {**kept, "item": elsewhere}], [first, second])):
+                ("two waiting records", self.labeled.item_id, [kept], [first, first]),
+                ("a kept and a waiting record", self.plain.item_id, [kept], [first, kept]),
+                ("a record of no sampled request", elsewhere, [{**kept, "item": elsewhere}], [first, second])):
             self.refused(((name, kept_rows, pending_rows, ("cases", "apply")),),
                          f"1 items of kept.jsonl and pending.jsonl have two records or no sampled request, "
                          f"the first {item}", self.requests, self.out)
+
+    def test_a_record_file_that_holds_another_number_of_records_than_the_summary_counts_is_refused(self) -> None:
+        [kept] = T.read_jsonl(self.out / T.KEPT)
+        first, second = T.read_jsonl(self.out / T.PENDING)
+        for name, kept_rows, pending_rows, held in (("a kept record is gone", [], [first, second], "0 and 2"),
+                                                    ("a waiting record is gone", [kept], [first], "1 and 1")):
+            self.refused(((name, kept_rows, pending_rows, ("cases", "apply")),),
+                         f"kept.jsonl and pending.jsonl hold {held} records where summary.json counts 1 and 2",
+                         self.requests, self.out)
 
 
 class RowsTest(unittest.TestCase):

@@ -39,7 +39,6 @@ facts, so that loss is not the loss on memories the weights have not seen.
 from __future__ import annotations
 
 import hashlib
-import json
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -93,8 +92,7 @@ def one_pass(n: int, batch: int, seed: int) -> tuple[tuple[int, ...], ...]:
 
 def held_out_keepers(requests: Path) -> list[str]:
     """The Keepers of `requests` whose memories belong to E-synth."""
-    rows = (cast(JsonObject, cast(JsonObject, json.loads(line))["request"])
-            for line in requests.read_text(encoding="utf-8").splitlines())
+    rows = (cast(JsonObject, row["request"]) for row in T.read_jsonl(requests))
     return sorted({cast(str, cast(JsonObject, row["keeper"])["key"]) for row in rows} & S.EVAL_KEEPERS)
 
 

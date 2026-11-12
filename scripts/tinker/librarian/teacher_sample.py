@@ -59,7 +59,8 @@ decisions as `apply` does (`accepted`), not from accepted.jsonl. `cases`,
 `apply` and training take a record only when its answer is the reply the call
 log holds for its request, asked as `sample` asks it now, and the answer is
 still the target its file holds (`target_answer`). They stop at a record that
-is not, and at a request with two records.
+is not, at a request with two records, and at a record file that holds another
+number of records than the summary counts.
 """
 
 from __future__ import annotations
@@ -351,13 +352,18 @@ def sampling_of(requests: Path, out: Path) -> Sampling:
 
 def records(sampled: Sampling, out: Path) -> tuple[list[JsonObject], list[JsonObject]]:
     """The records of kept.jsonl and of pending.jsonl. SystemExit when a record names no sampled
-    request or two records name one: `sample` writes at most one record for a request."""
+    request, two records name one, or a file holds another number of records than the summary
+    counts for it: `sample` writes at most one record for a request, and the summary with them."""
     kept, pending = read_jsonl(out / KEPT), read_jsonl(out / PENDING)
     named = Counter(cast(str, record["item"]) for record in (*kept, *pending))
     odd = sorted(item for item, n in named.items() if n > 1 or item not in sampled.items)
     if odd:
         raise SystemExit(f"{len(odd)} items of {KEPT} and {PENDING} have two records or no sampled request, "
                          f"the first {odd[0]}")
+    counted = (sampled.summary["kept"], sampled.summary["pending"])
+    if (len(kept), len(pending)) != counted:
+        raise SystemExit(f"{KEPT} and {PENDING} hold {len(kept)} and {len(pending)} records where summary.json "
+                         f"counts {counted[0]} and {counted[1]}; run `sample` again with the same --out")
     return kept, pending
 
 

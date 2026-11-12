@@ -306,6 +306,36 @@ let test_update_keeps_the_receipt_key_of_a_pending_schedule () =
   check (option string) "the key is the one the first write issued" before after
 ;;
 
+let update_delivery config extra =
+  dispatch
+    config
+    ~name:update_name
+    ([ "schedule_id", `String "watched"
+     ; "keeper_name", `String wake_keeper
+     ; "message", `String "second"
+     ]
+     @ extra)
+;;
+
+(* An edit that makes a queue delivery a receipt is a new receipt, so it is
+   issued a key. One that makes a receipt a queue delivery takes the key away,
+   and the wait that named it ends without a receipt. *)
+let test_an_edit_can_issue_and_drop_the_receipt_key () =
+  with_config
+  @@ fun config ->
+  check_success
+    "create"
+    (dispatch config ~name:create_name (create_fields ~message:"first" ()));
+  check (option string) "a queue delivery holds no key" None
+    (receipt_key_of (stored_exn config "watched"));
+  check_success "to receipt" (update_delivery config [ "delivery", `String "receipt" ]);
+  check bool "the edit issued a key" true
+    (Option.is_some (receipt_key_of (stored_exn config "watched")));
+  check_success "to queue" (update_delivery config [ "delivery", `String "queue" ]);
+  check (option string) "the edit took the key away" None
+    (receipt_key_of (stored_exn config "watched"))
+;;
+
 let test_create_refuses_a_receipt_with_urgency_and_an_unknown_delivery () =
   with_config
   @@ fun config ->
@@ -975,6 +1005,7 @@ let () =
         ; test_case "a key carries the prefix a request id cannot hold" `Quick test_a_key_carries_the_prefix_a_request_id_cannot_hold
         ; test_case "two receipt schedules hold different keys" `Quick test_two_receipt_schedules_hold_different_keys
         ; test_case "update keeps the receipt key of a pending schedule" `Quick test_update_keeps_the_receipt_key_of_a_pending_schedule
+        ; test_case "an edit can issue and drop the receipt key" `Quick test_an_edit_can_issue_and_drop_the_receipt_key
         ; test_case "refuses a recurring receipt" `Quick test_create_refuses_a_recurring_receipt
         ; test_case "refuses a receipt with urgency and an unknown delivery" `Quick test_create_refuses_a_receipt_with_urgency_and_an_unknown_delivery
         ; test_case "refuses a URL that names no run" `Quick test_create_refuses_a_url_that_names_no_run

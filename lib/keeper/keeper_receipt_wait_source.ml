@@ -64,6 +64,7 @@ let find_receipt_state ~base_path ~keeper_name receipt_key =
       (* A row this server cannot read may be the one that holds the key. *)
       Some (Error detail)
   in
+  (* A key is drawn at random for one row, so at most one row holds it. *)
   let judged = List.filter_map holds_key state.Schedule_store.schedules in
   match List.find_map (function Ok state -> Some state | Error _ -> None) judged with
   | Some state -> Ok (Some state)

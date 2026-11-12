@@ -101,6 +101,19 @@ val keepalive_running_of_phase : Keeper_state_machine.phase option -> bool
     Failing), [false] for every other phase and for a keeper with no registry
     entry. *)
 
+val keeper_diagnostic_observation :
+  meta:keeper_meta ->
+  phase:Keeper_state_machine.phase option ->
+  history_items:Yojson.Safe.t list ->
+  now_ts:float ->
+  Dashboard_projection_read.observation
+(** Pure diagnostic and its actual next policy transition from the same
+    typed quiet reason, phase, metadata and clock. Only [Starting_up] with a
+    valid creation timestamp has a deadline: the first representable instant
+    after the existing inclusive startup window. Health remains clockless.
+    Invalid/absent creation time has no synthetic deadline; display ages do
+    not create read debt. Completeness is [Complete] (no I/O is performed). *)
+
 val keeper_diagnostic_json :
   meta:keeper_meta ->
   phase:Keeper_state_machine.phase option ->

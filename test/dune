@@ -1363,7 +1363,7 @@
 (test
  (name test_operator_control_snapshot)
  (modules test_operator_control_snapshot)
- (libraries masc_test_deps test_operator_control_support))
+ (libraries masc_test_deps test_operator_control_support eio.mock))
 
 ; The operator-control helper is shared by four executables in two different
 ; stanzas (the big tests group and the snapshot extraction), so it owns a

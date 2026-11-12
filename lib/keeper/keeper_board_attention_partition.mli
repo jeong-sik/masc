@@ -131,14 +131,14 @@ type state =
       (** Terminal: a judgment is on record. No transition leaves [Settled]. *)
   | Abandoned of { abandoned_at : float }
       (** Terminal for judgment purposes and never reached by [settle]: the
-          root gave up its candidate without ever recording one (e.g.
-          [reconcile_quarantines] abandoning a [Blocked] root whose candidate
-          is permanently absent from the ledger). [ensure_roots] reopens an
-          [Abandoned] root back to [Ready] (same deterministic identity, next
-          generation) when the matching candidate is still [Resumable_pending]
-          — nothing was ever judged. A [Resumable_judged] or
-          [Requeued_resumable] match leaves [Abandoned] alone; those belong to
-          [reconcile_quarantines]'s own bookkeeping instead. *)
+          root gave up its candidate without ever recording one (the worker
+          giving up a [Blocked] root whose candidate a fully decoded ledger
+          no longer holds, at process start or in the drain). [ensure_roots]
+          reopens an [Abandoned] root back to [Ready] (same deterministic
+          identity, next generation) when the matching candidate is still
+          [Resumable_pending] — nothing was ever judged. A [Resumable_judged] or
+          [Requeued_resumable] match leaves [Abandoned] alone, and
+          [reconcile_quarantines] passes over an [Abandoned] root as well. *)
   | Blocked of
       { reason : blocked_reason
       ; blocked_at : float

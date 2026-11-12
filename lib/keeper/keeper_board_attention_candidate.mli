@@ -328,6 +328,29 @@ val load_candidates_with_rejections
     obligation that the current decoder cannot reconstruct. Compaction resumes
     only after an explicit repair leaves a fully readable ledger. *)
 
+(** Whether the ledger holds a candidate, for a caller that acts on its
+    absence.
+
+    [Not_in_ledger] is an answer only a fully decoded ledger gives. A row the
+    decoder refused stays on disk and may be that candidate, carrying a
+    judgment or a quarantine this build cannot read. With any such row the
+    answer is [Behind_rejected_rows], and the caller does not treat the
+    candidate as gone. *)
+type ledger_lookup =
+  | In_ledger of candidate
+  | Not_in_ledger
+  | Behind_rejected_rows of { rejected_rows : int }
+
+val lookup
+  :  base_path:string
+  -> keeper_name:string
+  -> candidate_id:string
+  -> (ledger_lookup, string) result
+(** One read of the cached ledger state under the ledger lock: the readable
+    rows and the number of refused rows describe the same ledger revision.
+    {!load_candidates_with_rejections} names the refused rows and reads the
+    whole store. *)
+
 val ledger_path : base_path:string -> keeper_name:string -> string
 
 (** Purge the ledger and its cached view under the existing mutation and

@@ -154,7 +154,7 @@ implementation_prs: []
 
 사건의 조건이에요.
 - **Claim** 은 슬롯이 `free` 일 때만 해요. waiting 은 claim 하지 않아요.
-- **Wait(R)** 은 슬롯을 쥔 작업만 불러요. R 은 request 의 집합이고, 한 턴에 wait 도구를 여러 번 불러도 같은 transaction 에 모두 기록해요. R 의 영수증이 모두 이미 있으면 ready 가 되고, 하나라도 worker 가 도는 중이면 waiting 이 돼요. 도구를 부를 때 R 의 request 기록이 없으면 거절이고 턴은 이어져요. 다른 작업이 소유한 request 는 도구가 호출 때 거절해요. 도구는 도는 실행의 scope 와 owner 읽기로 소유자를 확인하고, 모델에게 보이는 거절 문구를 돌려줘요. 확인과 기록 사이에 틈이 남으므로 턴 끝 저장 transaction 이 한 번 더 거절해요(`Turn_continuation_unpersisted`, 최후 방어선). 턴이 끝나고 슬롯이 비는 것과 소유 기록은 같은 transaction 이에요.
+- **Wait(R)** 은 슬롯을 쥔 작업만 불러요. R 은 request 의 집합이고, 한 턴에 wait 도구를 여러 번 불러도 같은 transaction 에 모두 기록해요. R 의 영수증이 모두 이미 있으면 ready 가 되고, 하나라도 worker 가 도는 중이면 waiting 이 돼요. 도구를 부를 때 R 의 request 기록이 없으면 거절이고 턴은 이어져요. 다른 작업이 소유한 request 는 도구가 호출 때 거절해요. 도구는 도는 실행의 scope(도구 context 의 필수 필드)와 owner 읽기로 소유자를 확인하고, 모델에게 보이는 거절 문구를 돌려줘요. scope 가 없는 호출(채팅 실행을 섬기지 않는 run)은 거절해요. 이 도구는 합성 plan 에서 `Direct_only` 라 조합이 부르는 경로는 없어요. 확인과 기록 사이에 틈이 남으므로 턴 끝 저장 transaction 이 한 번 더 거절해요(`Turn_continuation_unpersisted`, 최후 방어선). 턴이 끝나고 슬롯이 비는 것과 소유 기록은 같은 transaction 이에요.
 - **Resolve** 는 영수증이 outbox 에 쓰였다는 통지예요. waiting 만 ready 로 바꿔요. 통지는 request 를 가리킬 뿐이라 안 기다린 queued 작업과 끝난 작업을 가르지 못해요. 같은 통지가 또 오거나, 그 request 를 기다리지 않는 작업이나 이미 끝난 작업에 오면 그대로예요(4.4).
 - **Fail** 은 도는 턴이 오류나 operator interrupt 로 끝난 거예요(2.2). 영수증은 지우지 않아요(2.7).
 - **Cancel** 은 도는 작업에는 없어요(2.2). 도는 작업은 Fail 로 끝나요.
@@ -301,7 +301,7 @@ type viewer =
 
 | 단계 | 지금 코드(2절) | 이 설계가 더하는 것 |
 |---|---|---|
-| 1. 모델이 wait 도구를 부름 | `Generic_deferred` 도구 결과가 턴을 체크포인트 길로 끝내요(`keeper_tools_agent_core_bundle.ml:248-257`, `keeper_tool_terminal_boundary.ml:1-5`) | 도구 하나. `Generic_deferred` 가 아니라 일반 도구예요. `Terminal` 서술자는 Agent Core 가 결과를 `Completed` 로 끝내서 못 써요. 도구 결과의 `terminal_effect_receipt` 에 `Receipt_wait_requested {request_id}` 를 실어 `keeper_turn.ml` 의 `defer` 까지 나르고, 왼쪽 줄 번호는 그 사이 바뀌었어요. 직접 작업이 아닌 턴(순찰, 자율, 검증)에는 `Keeper_run_tools_setup.descriptors_for_run` 이 도구를 빼서 모델이 보지 못해요. 한 batch 에 wait 을 여러 번 부르면 모두 같은 transaction 에 기록해요. `surface_post` 와 wait 은 한 batch 에 못 들어가요(Agent Core 가 `Rejected_terminal_mix` 로 batch 전체를 거절해요) |
+| 1. 모델이 wait 도구를 부름 | `Generic_deferred` 도구 결과가 턴을 체크포인트 길로 끝내요(`keeper_tools_agent_core_bundle.ml:248-257`, `keeper_tool_terminal_boundary.ml:1-5`) | 도구 하나. `Generic_deferred` 가 아니라 일반 도구예요. `Terminal` 서술자는 Agent Core 가 결과를 `Completed` 로 끝내서 못 써요. 도구 결과의 `terminal_effect_receipt` 에 `Receipt_wait_requested {request_id}` 를 실어 `keeper_turn.ml` 의 `defer` 까지 나르고, 왼쪽 줄 번호는 그 사이 바뀌었어요. 직접 작업이 아닌 턴(순찰, 자율, 검증)에는 `Keeper_run_tools_setup.descriptors_for_run` 이 도구를 빼서 모델이 보지 못해요. 도구 context 에 도는 실행의 scope 가 필수라 호출 때 소유 충돌을 거절할 수 있어요. 한 batch 에 wait 을 여러 번 부르면 모두 같은 transaction 에 기록해요. `surface_post` 와 wait 은 한 batch 에 못 들어가요(Agent Core 가 `Rejected_terminal_mix` 로 batch 전체를 거절해요) |
 | 2. 턴이 체크포인트로 끝남 | `keeper_turn.ml:1057-1081` 의 checkpoint 갈래 → `defer`, `defer_official`(`keeper_direct_checkpoint_continuation.ml:85-104`) | 없음. 새 갈래가 아니에요. `InputRequired` 갈래는 안 써요. 입력 대기는 체크포인트 재개가 아니에요(2.3). 기다림을 요청했는데 턴이 체크포인트로 끝나지 않거나 `InputRequired` 와 겹치면 기다림을 버리지 않고 에러로 끝내요 |
 | 3. 저장 | `defer_direct_checkpoint` 한 transaction: Suspend, 큐로 되돌림, 순서 이동(`keeper_chat_operation_store.ml:2616-2670`) | 같은 transaction 에 `receipt_obligations` 에 request 를 `Pending` 으로 더하는 한 단계. 다른 실행 기록이 이미 소유한 request 면 transaction 이 거절 |
 | 4. claim 못 함 | `blocked_queued_scopes`(`:1731-1753`) | 여섯째 이유: `Pending` 항목이 있다 |

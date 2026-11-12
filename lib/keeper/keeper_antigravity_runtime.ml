@@ -596,10 +596,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
        world context remains on the existing per-turn prompt path. *)
     let snapshot_messages = List.filter
         (fun message -> not (Host.is_carried_on_resume message)) prepared.messages in
-    let snapshot = `Assoc ["system_prompt", `String prepared.system_prompt;
-      "messages", `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)] in
-    let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
-      |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex in
+    let snapshot_sha256 = Keeper_official_client_context_codec.canonical_source_sha256
+      ~system_prompt:prepared.system_prompt ~messages:snapshot_messages ~rest:[] in
     let admission_error reason = config_error
         ~field:"official_client_session.context_admission"
         (Session_store.context_admission_error_to_string reason) in

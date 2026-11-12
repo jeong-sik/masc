@@ -88,3 +88,27 @@ let to_json message =
 ;;
 
 let encode message = to_json message |> Yojson.Safe.to_string
+
+(* The digest is taken over the whole canonical history as one JSON text, so
+   its cost follows the history's size: mapping every message, writing the
+   text and hashing it. A Keeper turn asks for it once when it starts, and
+   doing that on the turn's own fiber kept every other fiber of its domain
+   waiting -- on the server's main domain this one call site was 10% of the
+   bytes the domain allocated (2026-11-12, 45 s). The fiber hands the work to
+   the CPU pool and waits. It reads nothing but its arguments. A caller that
+   is not a fiber, or a process with no pool, digests where it is.
+
+   The text is the one both callers wrote before this function existed, field
+   for field: a stored session is compared against this digest, and another
+   spelling would read every stored session as a changed context. *)
+let canonical_source_sha256 ~system_prompt ~messages ~rest =
+  Domain_pool_ref.submit_cpu_or_inline ~name:"official-client-canonical-source-digest"
+    (fun () ->
+      `Assoc
+        (("system_prompt", `String system_prompt)
+         :: ("messages", `List (List.map to_json messages))
+         :: rest)
+      |> Yojson.Safe.to_string
+      |> Agent_core_sha256.digest_string
+      |> Agent_core_sha256.to_hex)
+;;

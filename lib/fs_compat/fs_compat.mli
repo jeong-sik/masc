@@ -255,7 +255,7 @@ val owned_inventory_entry_kind
 
 val load_single_link_regular_file_beneath
   : root:string -> ?excluded_directory:owned_relative_path -> owned_relative_path
-  -> (string option, owned_regular_file_read_error) result
+  -> (owned_regular_file_contents option, owned_regular_file_read_error) result
 (** Read a regular file through held, no-follow directory and file descriptors
     below [root]. Every leaf must have exactly one hard link. When supplied,
     [excluded_directory] names a directory beneath the root whose descriptor
@@ -263,8 +263,32 @@ val load_single_link_regular_file_beneath
     directory is allowed. An invalid or unreadable excluded directory fails
     closed. Unlike owned mutation helpers, this read does not require files
     to belong to the process UID. [None] means the entry was absent or vanished
-    during the read; other failures remain explicit. When the Eio filesystem is
-    active in a fiber, the whole blocking scope runs in a system thread. *)
+    during the read; other failures remain explicit. The snapshot is the one
+    of the opened descriptor, which the file still had after the read. When
+    the Eio filesystem is active in a fiber, the whole blocking scope runs in
+    a system thread. *)
+
+type owned_regular_file_reread =
+  | Same_file  (** The file has the snapshot the caller holds. Nothing was read. *)
+  | Read of owned_regular_file_contents
+  (** The file has another snapshot. These are its bytes and that snapshot. *)
+
+val reload_single_link_regular_file_beneath
+  : root:string -> ?excluded_directory:owned_relative_path
+  -> held:owned_regular_file_snapshot -> owned_relative_path
+  -> (owned_regular_file_reread option, owned_regular_file_read_error) result
+(** {!load_single_link_regular_file_beneath} for a caller that holds the bytes
+    of an earlier read and the snapshot they were read under. Every check of
+    the load runs: the root, each directory opened without following links,
+    the excluded directory, the single hard link, and the identities again
+    afterwards. Only the read of the bytes is skipped, when the opened file
+    has the snapshot [held].
+
+    A write that keeps the file's inode and size and leaves both its
+    modification and change time as they were is not seen: the result is
+    [Same_file] and the caller's bytes are the earlier ones. A file system
+    gives such a write the times of the write before it only when both fall
+    within one step of its file-time clock. *)
 
 val with_owned_inventory_regular_file
   : owner_uid:int -> owned_inventory_root -> owned_relative_path

@@ -27,7 +27,15 @@ let owned_inventory_entry_kind root relative =
     (fun _fd stat _parent -> Ok stat.Unix.st_kind)
 ;;
 
-let load_single_link_regular_file_beneath ~root ?excluded_directory relative =
+type owned_regular_file_reread =
+  | Same_file
+  | Read of owned_regular_file_contents
+
+(* The checks of one regular file beneath an owned root, shared by the load
+   and the reload: [of_regular_file] decides what to take from the opened
+   file, and its result is returned only when the entry chain and the file
+   still have the identity they were opened with. *)
+let with_single_link_regular_file_beneath ~root ?excluded_directory ~of_regular_file relative =
   let missing error = match error.close_failure with
     | Some _ -> false
     | None ->
@@ -45,7 +53,7 @@ let load_single_link_regular_file_beneath ~root ?excluded_directory relative =
           (fun fd stat _parent ->
             if stat.Unix.st_kind <> Unix.S_REG then
               owned_file_error (Path_is_not_regular_file {path;kind=stat.st_kind})
-            else Result.map Option.some (read_exact_file_descriptor ~path fd stat.st_size)) with
+            else Result.map Option.some (of_regular_file ~path fd stat)) with
         | Error error when missing error -> Ok None
         | Error error -> Error error
         | Ok body -> Ok body in
@@ -80,6 +88,32 @@ let load_single_link_regular_file_beneath ~root ?excluded_directory relative =
     let result = Fs_compat_internal.Systhread_host.run ~label:"fs-compat-read-beneath" read in
     Eio.Fiber.check ();
     result
+;;
+
+let read_regular_file_contents ~path fd (stat : Unix.stats) =
+  Result.map
+    (fun content : owned_regular_file_contents ->
+       { content; snapshot = owned_regular_file_snapshot_of_stats stat })
+    (read_exact_file_descriptor ~path fd stat.st_size)
+;;
+
+let load_single_link_regular_file_beneath ~root ?excluded_directory relative =
+  with_single_link_regular_file_beneath
+    ~root
+    ?excluded_directory
+    ~of_regular_file:read_regular_file_contents
+    relative
+;;
+
+let reload_single_link_regular_file_beneath ~root ?excluded_directory ~held relative =
+  with_single_link_regular_file_beneath
+    ~root
+    ?excluded_directory
+    ~of_regular_file:(fun ~path fd stat ->
+      if equal_owned_regular_file_snapshot held (owned_regular_file_snapshot_of_stats stat)
+      then Ok Same_file
+      else Result.map (fun contents -> Read contents) (read_regular_file_contents ~path fd stat))
+    relative
 ;;
 
 let with_owned_inventory_regular_file ~owner_uid root relative fn =

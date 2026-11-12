@@ -10,7 +10,8 @@ is whether the turn resumed the conversation. The request stays open \
 until the Runtime answers. A Keeper without a Runtime, a subscription \
 that is not signed in or has no quota left, a second call while one of \
 the same subscription runs, and a Keeper whose conversation began on \
-another subscription are refused."""
+another subscription are refused. masc_my_keeper_conversation_new starts \
+a new conversation."""
 additional_properties = false
 
 [[params]]

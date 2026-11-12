@@ -30,6 +30,7 @@ request, one JSON answer.
 | `masc_my_keeper_create` | Makes a Keeper you own. | `manage_own_keeper` |
 | `masc_my_keeper_assign` | Gives one of your Keepers one of your Runtimes. | `manage_own_keeper` |
 | `masc_my_keeper_turn` | Sends a Keeper a message and returns its answer. The Keeper goes on in its conversation. | `manage_own_keeper`, `invoke_model`, `use_tool` |
+| `masc_my_keeper_conversation_new` | Starts a new conversation of a Keeper. | `manage_own_keeper` |
 
 Each tool calls the function behind the matching control of the person's
 page (`/`), after the same check. The text of a tool result is the JSON
@@ -111,11 +112,15 @@ what you asked before and what it answered. The answer of
   directory.
 - **One subscription per conversation.** A conversation stays on the
   subscription it began on. When you give the Keeper a Runtime of another
-  subscription, its next turn is refused until the Keeper is back on the
-  first subscription.
+  subscription, its next turn is refused. Start a new conversation with
+  `masc_my_keeper_conversation_new`, or give the Keeper a Runtime of the
+  first subscription again.
+- **A new conversation is yours to start.** `masc_my_keeper_conversation_new`
+  starts one. The Keeper's next turn has read none of the earlier turns.
+  The earlier conversations stay recorded, and no turn goes on in them.
 - **A failed turn is not sent again.** The server does not start the turn
-  over in a new conversation. Send the message again when you want it
-  answered.
+  over, and it starts no new conversation in place of one whose turn
+  failed. Send the message again when you want it answered.
 
 ## Limits
 

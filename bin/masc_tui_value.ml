@@ -130,6 +130,7 @@ module Count = struct
     | Entry
     | Row
     | Event
+    | Image
 
   (* Singular, plural. *)
   let english = function
@@ -140,6 +141,7 @@ module Count = struct
     | Entry -> "entry", "entries"
     | Row -> "row", "rows"
     | Event -> "event", "events"
+    | Image -> "image", "images"
 
   (* The thing, then the figure with its counter. A row is counted by the
      word that names it. *)
@@ -152,6 +154,7 @@ module Count = struct
     | Entry -> "기록 " ^ figure ^ "건"
     | Row -> figure ^ "줄"
     | Event -> "이벤트 " ^ figure ^ "개"
+    | Image -> "그림 " ^ figure ^ "장"
 
   let reading ~ko noun count =
     let figure = grouped count in

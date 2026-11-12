@@ -82,11 +82,12 @@ val listen_key : string
     letter without taking it from typing. Ctrl-Y is the one control code this
     TUI does not already spend. *)
 
-val prompt : t -> string
+val prompt : ko:bool -> t -> string
 (** The label before the draft: who the message would reach, or why it could
-    not be sent. Plain text — the caller styles and fits it. *)
+    not be sent, in the screen's language. Plain text — the caller styles and
+    fits it. *)
 
-val reading_note : reading -> string option
+val reading_note : ko:bool -> reading -> string option
 (** Current source observation, including retained failure during retry. [None]
     means locally observed metadata without a pending read. Plain text: terminal
     callers must escape it. It is appended outside the editable prompt so the

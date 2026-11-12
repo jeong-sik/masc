@@ -443,8 +443,12 @@ let voice_meter_text (state : state) =
 
 ;;
 
-let composer_prompt_text ?(voice = "") composer =
-  Printf.sprintf " %s %s%s " "\xe2\x80\xba" voice (Composer.prompt composer)
+(* The fewest cells between what the composer row says and the key at its
+   right end. *)
+let composer_hint_gap_cells = 2
+
+let composer_prompt_text ?(voice = "") ~ko composer =
+  Printf.sprintf " %s %s%s " "\xe2\x80\xba" voice (Composer.prompt ~ko composer)
 
 
 (* Unfocused the row is dim and says which key opens it; focused it is drawn in
@@ -471,14 +475,24 @@ let awaiting_approval_notice (state : state) =
             | Memory | Schedules | Verification | Harness | Fusion
             | Repositories | Code | Changes | Connectors | Runtime | Config
             | Resources | Tools | System_logs ->
-                "  (2 then m to answer)"
+                (* The keys are read from the key table: this line went on
+                   saying [2 then m] after Keepers moved to [3] and the chat
+                   to [c]. *)
+                let screen = Masc_tui_keys.keepers_jump.Masc_tui_keys.key
+                and chat = Masc_tui_keys.keeper_chat_key in
+                ui_text state
+                  ~ko:(Printf.sprintf "  (%s 다음 %s 에서 답하기)" screen chat)
+                  ~en:(Printf.sprintf "  (%s then %s to answer)" screen chat)
+          in
+          let keeper =
+            Terminal_text.single_line (Masc_tui_types.turn_log_keeper_name live)
+          and tool =
+            Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name
           in
           Some
-            (Printf.sprintf "  %s is holding %s%s"
-               (Terminal_text.single_line
-                  (Masc_tui_types.turn_log_keeper_name live))
-               (Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name)
-               where))
+            (ui_text state
+               ~ko:(Printf.sprintf "  %s · %s 호출이 답을 기다림%s" keeper tool where)
+               ~en:(Printf.sprintf "  %s is holding %s%s" keeper tool where)))
 
 ;;
 
@@ -853,11 +867,16 @@ let slash_hint_text ~restore draft =
 (* One synchronous frame owns the recipient, prompt and fitted draft used by
    both its row and caret. Nothing survives to the next frame or key handler. *)
 let composer_row state ~rows ~cols =
+  let ko = state.ui_language = Lang_ko in
+  let focus_hint word = Composer.focus_key ^ ":" ^ word in
   if state.view = Overview && not state.composer_focused then
-    let note=match Composer.reading_note (Composer_projection.source_reading state) with
-      | None -> "Choose a Keeper before writing"
+    let note=match Composer.reading_note ~ko (Composer_projection.source_reading state) with
+      | None ->
+          ui_text state ~ko:"쓰기 전에 키퍼를 고르세요"
+            ~en:"Choose a Keeper before writing"
       | Some note -> Terminal_text.single_line note in
-    (Theme.recede () ^ fit_width (" " ^ note ^ " · i:choose") cols ^ Ansi.reset,
+    let choose = focus_hint (ui_text state ~ko:"고르기" ~en:"choose") in
+    (Theme.recede () ^ fit_width (" " ^ note ^ " · " ^ choose) cols ^ Ansi.reset,
      Frame_presenter.Hidden)
   else match browser_lane_on_screen state with
   (* The page reader owns the keys here, so there is no composer to draw. The
@@ -867,7 +886,7 @@ let composer_row state ~rows ~cols =
   | Some _ -> (Theme.recede () ^ fit_width "" cols ^ Ansi.reset, Frame_presenter.Hidden)
   | None ->
   let composer = Composer_projection.of_state state in
-  let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
+  let prompt = composer_prompt_text ~voice:(voice_meter_text state) ~ko composer in
   (* The caret uses exactly the prompt the row draws, including the voice
      meter, and exactly the escaped, grapheme-aligned draft window below. *)
   let prompt_cells = Message_layout.display_width prompt in
@@ -895,7 +914,7 @@ let composer_row state ~rows ~cols =
        sheet ([Masc_tui_keys], "…?"). *)
     | Composer.Focused, _ -> ""
     | Composer.Unfocused, Composer.Ready _ ->
-        Printf.sprintf "  (%s to write)" Composer.focus_key
+        focus_hint (ui_text state ~ko:"쓰기" ~en:"write")
     | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) -> ""
   in
   (* A slash command sent from this row runs as it does from the chat pane,
@@ -910,13 +929,27 @@ let composer_row state ~rows ~cols =
   in
   let body =
     match String.equal draft "", slash_hint with
-    | true, _ -> prompt ^ hint
+    | true, _ -> prompt
     | false, None -> prompt ^ draft
     | false, Some line -> prompt ^ draft ^ "   " ^ line
   in
-  let body=match Composer.reading_note composer.Composer.reading with
+  let body=match Composer.reading_note ~ko composer.Composer.reading with
     | None -> body
     | Some note -> body ^ "  · " ^ Terminal_text.single_line note in
+  (* The key that opens the row sits at the right end, one cell in from the
+     edge as the prompt is one cell in from the left. After the recipient it
+     moved with the length of every name the cursor passed. It is drawn only
+     beside an empty draft, and gives way whole when the row is too narrow
+     for the recipient, its note and the key. *)
+  let body =
+    let hint_cells = Message_layout.display_width hint in
+    let edge_cells = 1 in
+    let body_cells = cols - hint_cells - edge_cells in
+    if String.equal hint "" || not (String.equal draft "")
+       || Message_layout.display_width body + composer_hint_gap_cells > body_cells
+    then fit_width body cols
+    else fit_width body body_cells ^ hint ^ String.make edge_cells ' '
+  in
   (* A held tool call is drawn on whatever surface the operator is looking at.
      Its prompt lives in the chat pane, and a turn holding a call is denied
      when the wait runs out -- so an operator reading the Board would lose the

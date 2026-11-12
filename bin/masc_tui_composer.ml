@@ -51,38 +51,54 @@ let listen_key = "\025"
    compose owns text input. *)
 let continuous_key = "\001"
 
-let prompt composer =
+let prompt ~ko composer =
   match composer.target with
-  | No_target -> "no keeper selected"
+  | No_target -> if ko then "고른 키퍼 없음" else "no keeper selected"
   | Unreachable { keeper; reason } -> Printf.sprintf "%s — %s" keeper reason
   | Ready keeper ->
+    let recipient = if ko then keeper ^ " 에게" else "to " ^ keeper in
     if composer.staged_images = 0
-    then Printf.sprintf "to %s" keeper
-    else Printf.sprintf "to %s [%d image]" keeper composer.staged_images
+    then recipient
+    else
+      Printf.sprintf "%s [%s]" recipient
+        (Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Image
+           composer.staged_images)
 
-let metadata_step = function
-  | Masc_tui_local_read_observation.Awaiting_start -> "starting read"
-  | Io_queued -> "waiting to read"
-  | Io_running -> "reading metadata"
-  | Io_returning -> "receiving result"
-  | Preparing | Comparison_queued | Comparison_running | Comparison_returning -> "preparing result"
-  | Awaiting_ui -> "result awaiting state application"
-  | Masc_tui_local_read_observation.Read_failed Raised -> "read failed"
-  | Masc_tui_local_read_observation.Read_failed Interrupted -> "read interrupted"
-  | Read_not_started -> "read not started"
+let metadata_step ~ko phase =
+  let say korean english = if ko then korean else english in
+  match phase with
+  | Masc_tui_local_read_observation.Awaiting_start -> say "조회 시작 중" "starting read"
+  | Io_queued -> say "조회 대기" "waiting to read"
+  | Io_running -> say "조회 중" "reading metadata"
+  | Io_returning -> say "결과 받는 중" "receiving result"
+  | Preparing | Comparison_queued | Comparison_running | Comparison_returning ->
+      say "결과 준비 중" "preparing result"
+  | Awaiting_ui -> say "결과 반영 대기" "result awaiting state application"
+  | Masc_tui_local_read_observation.Read_failed Raised -> say "조회 실패" "read failed"
+  | Masc_tui_local_read_observation.Read_failed Interrupted -> say "조회 중단" "read interrupted"
+  | Read_not_started -> say "조회 시작 안 함" "read not started"
 
-let reading_note reading =
+let reading_note ~ko reading =
+  let say korean english = if ko then korean else english in
   match reading with
-  | Workspace_not_observed -> Some "Server workspace not observed"
-  | Workspace_unconfirmed -> Some "Server workspace awaiting confirmation"
-  | Different_workspace -> Some "Chat needs the server workspace"
+  | Workspace_not_observed -> Some (say "서버 작업 공간 미조회" "Server workspace not observed")
+  | Workspace_unconfirmed ->
+      Some (say "서버 작업 공간 확인 대기" "Server workspace awaiting confirmation")
+  | Different_workspace ->
+      Some (say "채팅하려면 서버 작업 공간이 필요함" "Chat needs the server workspace")
   | Metadata {status=Observed;pending=None} -> None
-  | Metadata {status=Not_observed;pending=None} -> Some "Keeper list not observed"
-  | Metadata {status=Not_observed;pending=Some phase} -> Some ("Keeper list: " ^ metadata_step phase)
-  | Metadata {status=Observed;pending=Some phase} -> Some ("Refreshing Keeper list: " ^ metadata_step phase)
-  | Metadata {status=Read_failed detail;pending=None} -> Some ("Keeper list unavailable: " ^ detail)
+  | Metadata {status=Not_observed;pending=None} ->
+      Some (say "키퍼 목록 미조회" "Keeper list not observed")
+  | Metadata {status=Not_observed;pending=Some phase} ->
+      Some (say "키퍼 목록: " "Keeper list: " ^ metadata_step ~ko phase)
+  | Metadata {status=Observed;pending=Some phase} ->
+      Some (say "키퍼 목록 새로 조회: " "Refreshing Keeper list: " ^ metadata_step ~ko phase)
+  | Metadata {status=Read_failed detail;pending=None} ->
+      Some (say "키퍼 목록 조회 실패: " "Keeper list unavailable: " ^ detail)
   | Metadata {status=Read_failed detail;pending=Some phase} ->
-      Some ("Keeper list: " ^ metadata_step phase ^ " · last read failed: " ^ detail)
+      Some
+        (say "키퍼 목록: " "Keeper list: " ^ metadata_step ~ko phase
+         ^ say " · 지난 조회 실패: " " · last read failed: " ^ detail)
 
 let accepts_input composer =
   match (composer.focus, composer.target) with

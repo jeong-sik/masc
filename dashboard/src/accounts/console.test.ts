@@ -5,7 +5,7 @@
 // puts things is not checked here: that is read in a browser.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { signal } from '@preact/signals'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import { ConsoleFrame, createConsole } from './console'
@@ -326,10 +326,19 @@ describe('the frame', () => {
     ])
   })
 
-  it('puts a new note on the page for a failure that follows another', async () => {
-    const { container, state } = drawn({ kind: 'failed', failure: { problem: refused, attempts: 1 }, retrying: false })
+  const failedTwice: ReadonlyArray<readonly [string, View, View]> = [
+    ['a reading',
+      { kind: 'failed', failure: { problem: refused, attempts: 1 }, retrying: false },
+      { kind: 'failed', failure: { problem: refused, attempts: 2 }, retrying: false }],
+    ['a sign-out',
+      { kind: 'signed_in', session, who, signOut: { kind: 'failed', failure: { problem: refused, attempts: 1 } } },
+      { kind: 'signed_in', session, who, signOut: { kind: 'failed', failure: { problem: refused, attempts: 2 } } }],
+  ]
+
+  it.each(failedTwice)('puts a new note on the page when %s fails again', async (_name, once, twice) => {
+    const { container, state } = drawn(once)
     const first = the(container, '[role=alert]')
-    state.value = { kind: 'failed', failure: { problem: refused, attempts: 2 }, retrying: false }
+    state.value = twice
     await waitFor(() => {
       expect(the(container, '[role=alert]')).not.toBe(first)
     })
@@ -362,10 +371,10 @@ describe('the frame', () => {
     const { send } = scripted([aSession(), aWho()])
     const model = createConsole({ send, leave: vi.fn() })
     const { container } = render(html`<${ConsoleFrame} model=${model} />`)
-    await model.load()
-    await waitFor(() => {
-      expect(container.querySelectorAll('header button')).toHaveLength(1)
-    })
+    // The frame moves the focus in an effect, which runs after the page is
+    // drawn; `act` runs the effects of the reading before the focus is read.
+    await act(() => model.load())
+    expect(container.querySelectorAll('header button')).toHaveLength(1)
     expect(document.activeElement).toBe(document.body)
   })
 })

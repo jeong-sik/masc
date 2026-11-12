@@ -158,11 +158,13 @@ that tip, so a branch that moved is refused and kept.
 
 At its next run the sweep reruns the worker on every scope that is still
 approved and ready (`ready` and `select` in
-`scripts/review/approval-merge-sweep.py`). A worker run that failed or ended at
-the quota therefore needs no follow-up while its pull request stays approved
-and ready. The sweep is scheduled every 30 minutes, and GitHub can start a
-scheduled run late or, under heavy load, drop it. To recheck an existing PR
-(any stack member) sooner, dispatch the worker by hand:
+`scripts/review/approval-merge-sweep.py`). A worker run that ended at the
+quota, or failed on a transient GitHub answer such as "Base branch was
+modified", therefore needs no follow-up. A refusal with a lasting reason, such
+as a failing required check on a native stack, comes back at every sweep until
+that reason is fixed. The sweep is scheduled every 30 minutes, and GitHub can
+start a scheduled run late or, under heavy load, drop it. To recheck an
+existing PR (any stack member) sooner, dispatch the worker by hand:
 
 ```bash
 gh workflow run approval-auto-merge.yml --ref main -f pr=NUMBER

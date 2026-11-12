@@ -6588,6 +6588,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_lane_addon_host_walk)
+ (modules test_lane_addon_host_walk)
+ (libraries masc_test_deps))
+
+(test
  (name test_lane_addon_exact)
  (modules test_lane_addon_exact)
  (libraries masc_test_deps eio eio_main yojson unix))

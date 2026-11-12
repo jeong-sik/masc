@@ -241,6 +241,86 @@ let test_partial_result_keeps_its_actual_semantic_deadline () =
       assert_settled clock))
 ;;
 
+(* A worker that reads the clock, with [interval_s] between change reads. *)
+let with_spaced_worker ?(next_deadline = fun _ -> None) check_worker =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    Eio_mock.Clock.set_time clock 0.0;
+    let changes = Eio.Stream.create 8 and results = Eio.Stream.create 8 in
+    let reads = ref 0 in
+    Eio.Switch.run (fun sw ->
+      Refresh.start_on_change_or_deadline ~sw
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~changes
+        ~config:{ (Refresh.default_config ~label:"spaced-read" ~interval_s) with
+                  change_read_spacing_s = interval_s }
+        ~compute:(fun () -> incr reads; Eio.Time.now clock)
+        ~next_deadline
+        ~on_result:(Eio.Stream.add results);
+      check (float 0.) "initial read" 0.0 (Eio.Stream.take results);
+      check_worker ~clock ~changes ~results ~reads))
+;;
+
+(* The first change after the initial read is read at once and opens the
+   spacing that the following changes wait out. *)
+let first_change_read ~clock ~changes ~results =
+  Eio_mock.Clock.set_time clock 1.0;
+  Eio.Stream.add changes ();
+  check (float 0.) "the first change is read at once" 1.0 (Eio.Stream.take results);
+  assert_settled clock
+;;
+
+let test_change_burst_is_one_read_per_spacing () =
+  with_spaced_worker (fun ~clock ~changes ~results ~reads ->
+    first_change_read ~clock ~changes ~results;
+    for window = 1 to 3 do
+      let previous_read = 1.0 +. (interval_s *. float_of_int (window - 1)) in
+      Eio_mock.Clock.set_time clock (previous_read +. 1.0);
+      for _ = 1 to 5 do
+        Eio.Stream.add changes ();
+        Eio.Fiber.yield ()
+      done;
+      check int "changes inside the spacing start no read" (window + 1) !reads;
+      check bool "the owed read waits for the spacing to pass" true
+        (Eio_mock.Clock.try_advance clock);
+      check (float 0.) "one read answers the burst when the spacing has passed"
+        (previous_read +. interval_s) (Eio.Stream.take results);
+      assert_settled clock;
+      check int "the burst cost one read" (window + 2) !reads
+    done)
+;;
+
+let test_change_after_spacing_reads_at_once () =
+  with_spaced_worker (fun ~clock ~changes ~results ~reads ->
+    first_change_read ~clock ~changes ~results;
+    let quiet_until = 1.0 +. (interval_s *. 2.5) in
+    Eio_mock.Clock.set_time clock quiet_until;
+    Eio.Stream.add changes ();
+    check (float 0.) "a quiet source is read on its next change, with no timer"
+      quiet_until (Eio.Stream.take results);
+    assert_settled clock;
+    check int "two changes, two reads" 3 !reads)
+;;
+
+let test_deadline_inside_spacing_keeps_its_time () =
+  let deadline = interval_s *. 0.4 in
+  with_spaced_worker
+    ~next_deadline:(fun observed -> if observed < deadline then Some deadline else None)
+    (fun ~clock ~changes ~results ~reads ->
+      Eio_mock.Clock.set_time clock 1.0;
+      Eio.Stream.add changes ();
+      check (float 0.) "the first change is read at once" 1.0 (Eio.Stream.take results);
+      Eio_mock.Clock.set_time clock 2.0;
+      Eio.Stream.add changes ();
+      Eio.Fiber.yield ();
+      check int "the change inside the spacing starts no read" 2 !reads;
+      check bool "the semantic deadline still owns its timer" true
+        (Eio_mock.Clock.try_advance clock);
+      check (float 0.) "the deadline read is not pushed out to the spacing" deadline
+        (Eio.Stream.take results);
+      assert_settled clock;
+      check int "that read also answers the change" 3 !reads)
+;;
+
 let () =
   run "change-driven refresh"
     [ "read debt",
@@ -254,4 +334,9 @@ let () =
       ; test_case "semantic deadline settles after its transition" `Quick test_semantic_deadline_is_consumed_once
       ; test_case "a deadline crossed during a read stays owed" `Quick test_deadline_crossed_by_read_stays_owed
       ; test_case "partial failure retains its actual earlier deadline" `Quick test_partial_result_keeps_its_actual_semantic_deadline
+      ]
+    ; "change read spacing",
+      [ test_case "a burst of changes is one read per spacing" `Quick test_change_burst_is_one_read_per_spacing
+      ; test_case "a change after the spacing reads at once" `Quick test_change_after_spacing_reads_at_once
+      ; test_case "a deadline inside the spacing keeps its time" `Quick test_deadline_inside_spacing_keeps_its_time
       ] ]

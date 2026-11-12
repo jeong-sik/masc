@@ -1572,9 +1572,10 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       (* An HTTP fill may have won before this subscription was installed. *)
       enqueue ();
       let latest_attempt = ref None in
+      let interval_s = 60.0 in
       Proactive_refresh.start_on_change_or_deadline ~sw ~clock ~changes
-        ~config:{(Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
-          timeout_s; warm_delay_s = 0.0;
+        ~config:{(Proactive_refresh.default_config ~label:"execution" ~interval_s) with
+          timeout_s; warm_delay_s = 0.0; change_read_spacing_s = interval_s;
           on_failure = Some (fun failure ->
             if is_current () then Option.iter (fun attempt ->
               ignore (publish_execution_attempt_failure_message attempt
@@ -1796,6 +1797,8 @@ let start_execution_trust_refresh_loop ~state ~sw ~clock =
                ~interval_s:Dashboard_http_keeper_types.execution_trust_refresh_interval_s)
             with
             timeout_s = Env_config_runtime.Dashboard.execution_trust_timeout_sec;
+            change_read_spacing_s =
+              Dashboard_http_keeper_types.execution_trust_refresh_interval_s;
             on_failure = Some (fun failure ->
                 Server_dashboard_http_cache.mark_cached_surface_error_message
                   cache (Proactive_refresh.failure_message failure);

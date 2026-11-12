@@ -249,6 +249,21 @@ let subscribe_execution_frames ~state ~sw ~id consume =
   Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external id)
 ;;
 
+(* Production workers space change-driven reads by their declared interval.
+   A second change inside that spacing is read when the worker's clock passes
+   it; the first try waits for the worker to take the change. *)
+let pass_change_read_spacing ~env clock =
+  let rec go tries =
+    Eio.Fiber.yield ();
+    if not (Eio_mock.Clock.try_advance clock) then
+      if tries = 0 then fail "a change inside the spacing left no owed read"
+      else (
+        Eio.Time.sleep (Eio.Stdenv.clock env) 0.005;
+        go (tries - 1))
+  in
+  go 400
+;;
+
 let test_actual_execution_worker_waits_for_original_store_writes () =
   with_execution_workspace (fun env state ->
     let config = Mcp_server.workspace_config state in
@@ -291,6 +306,7 @@ let test_actual_execution_worker_waits_for_original_store_writes () =
               ~title:"Original Todo source" ~priority:2 ~description:"Isolated store commit" with
             | Ok task -> task
             | Error error -> fail (Workspace.add_task_error_to_string error) in
+          pass_change_read_spacing ~env clock;
           (* The actual mutation emits a timestamped execution_snapshot with
              its compact tombstone under payload. A flattened decoder-only
              fixture would not exercise this producer contract. *)

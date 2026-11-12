@@ -77,9 +77,10 @@ let start ~state ~sw ~clock ~mono_clock =
        is installed; its canonical completion is still owed. *)
     publish_owed ();
     let latest_attempt = ref None in
+    let interval_s = 120.0 in
     Proactive_refresh.start_on_change_or_deadline ~sw ~clock ~changes
-      ~config:{(Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0) with
-        timeout_s = 60.0; warm_delay_s = 0.0;
+      ~config:{(Proactive_refresh.default_config ~label:"mission" ~interval_s) with
+        timeout_s = 60.0; warm_delay_s = 0.0; change_read_spacing_s = interval_s;
         on_failure = Some (fun failure ->
           if is_current () then Option.iter (fun attempt ->
             ignore (Owner.publish_failure_message attempt (Proactive_refresh.failure_message failure)))

@@ -51,7 +51,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock ~mono_clock =
     let interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s in
     Proactive_refresh.start_on_change_or_deadline ~sw ~clock ~changes
       ~config:{(Proactive_refresh.default_config ~label:"operator_digest" ~interval_s) with
-        timeout_s = interval_s *. 0.8; warm_delay_s = 0.0;
+        timeout_s = interval_s *. 0.8; warm_delay_s = 0.0; change_read_spacing_s = interval_s;
         on_failure = Some (fun failure ->
           if is_current () then Option.iter (fun attempt ->
             ignore (Owner.publish_failure_message attempt (Proactive_refresh.failure_message failure)))

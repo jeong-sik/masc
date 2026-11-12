@@ -271,6 +271,21 @@ let test_actual_default_request_wins_held_source_and_is_published () =
     Eio.Fiber.yield ();
     check bool "settled request handoff leaves no healthy timer" false (Eio_mock.Clock.try_advance mock_clock))
 
+(* Production workers space change-driven reads by their declared interval.
+   A second change inside that spacing is read when the worker's clock passes
+   it; the first try waits for the worker to take the change. *)
+let pass_change_read_spacing ~env clock =
+  let rec go tries =
+    Eio.Fiber.yield ();
+    if not (Eio_mock.Clock.try_advance clock) then
+      if tries = 0 then fail "a change inside the spacing left no owed read"
+      else (
+        Eio.Time.sleep (Eio.Stdenv.clock env) 0.005;
+        go (tries - 1))
+  in
+  go 400
+;;
+
 let test_actual_board_attention_commit_updates_quarantine_without_get () =
   with_runtime (fun ~env ~sw ~clock ~mock_clock ~state ~scope ->
     let module Candidate = Keeper_board_attention_candidate in
@@ -324,6 +339,7 @@ let test_actual_board_attention_commit_updates_quarantine_without_get () =
         |> member "quarantine_id" |> to_string);
     (match Candidate.purge ~base_path:scope.config.base_path ~keeper_name:meta.name with
      | Ok () -> () | Error detail -> fail detail);
+    pass_change_read_spacing ~env mock_clock;
     let removed = frame_after frames changed (fun payload -> ready payload
       && Yojson.Safe.Util.(inventory payload |> member "count" |> to_int) = 0) in
     check bool "actual purge also preserves complete read authority" true

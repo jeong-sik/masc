@@ -17,6 +17,11 @@ vi.mock('../api/dashboard', async original => ({
   fetchRuntimeProviders: api.fetchRuntimeProviders,
   fetchDashboardRuntimeProbe: api.fetchDashboardRuntimeProbe,
 }))
+vi.mock('../api/model-metrics-stream', async original => {
+  const { modelMetricsSubscriptionFixture } = await import('../lib/model-metrics.test-fixture')
+  return { ...await original<typeof import('../api/model-metrics-stream')>(),
+    subscribeModelMetricsStream: modelMetricsSubscriptionFixture((window, bucket, options) => api.fetchRuntimeModelMetrics(window, bucket, options)) }
+})
 import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { reloadRuntimeCatalog, resetRuntimeCatalog, runtimeCatalogState } from '../lib/runtime-catalog-resource'
 import { OverviewRuntimeStats } from './overview/runtime-stats'

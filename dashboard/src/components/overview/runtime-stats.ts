@@ -1,21 +1,18 @@
 import { html } from 'htm/preact'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import {
-  fetchRuntimeModelMetrics,
   fetchRuntimeResolved,
   probeOfficialClientLogin,
   type DashboardOfficialClientProbeResponse,
-  type DashboardRuntimeModelMetricsResponse,
   type DashboardRuntimeProviderSnapshot,
 } from '../../api/dashboard-runtime'
 import type { ProviderUsageScope, ProviderUsageWindow, RuntimeResolvedResponse } from '../../api/schemas/runtime-resolved'
 import { loadRuntimeCatalog, reloadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
 import { setupObservationRefresh } from '../../lib/observation-refresh'
+import { useModelMetrics } from '../../lib/use-model-metrics'
 import { RouteLink } from '../common/route-link'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../../store'
 
-type State = { kind: 'loading' } | { kind: 'error'; message: string }
-  | { kind: 'ready' | 'pending'; value: DashboardRuntimeModelMetricsResponse; receivedAt: Date }
 type UsageState = { kind: 'loading' } | { kind: 'error'; message: string }
   | { kind: 'ready'; value: RuntimeResolvedResponse }
 
@@ -127,16 +124,14 @@ export function OverviewRuntimeStats() {
   const authority = executionWorkspaceAuthority.value
   const [windowMinutes, setWindowMinutes] = useState(60)
   const [generation, setGeneration] = useState(0)
-  const [reading, setReading] = useState<{ authority: ExecutionWorkspaceAuthority; state: State } | null>(null)
+  const metrics = useModelMetrics({ windowMinutes, bucketMinutes: 0 })
   const [usageReading, setUsageReading] = useState<{
     authority: ExecutionWorkspaceAuthority; catalog: DashboardRuntimeProviderSnapshot[]; state: UsageState
   } | null>(null)
   useEffect(() => { loadRuntimeCatalog() }, [])
   const catalog = runtimeCatalogState.value
   const usageCatalog = catalog.status === 'loaded' ? catalog.data : null
-  const state: State = authority === null
-    ? { kind: 'error', message: '작업공간을 확인한 뒤 통계를 읽을 수 있습니다.' }
-    : reading?.authority === authority ? reading.state : { kind: 'loading' }
+  const state = metrics.state
   const usage: UsageState = usageReading?.authority === authority && usageReading?.catalog === usageCatalog
     ? usageReading.state : { kind: 'loading' }
   useEffect(() => {
@@ -159,29 +154,6 @@ export function OverviewRuntimeStats() {
     const stopRefresh = setupObservationRefresh(refresh, { topics: ['runtime_resolved'], resetRead: () => setUsageReading(null) })
     return () => { stopRefresh(); controller.abort() }
   }, [authority, usageCatalog, generation])
-  useEffect(() => {
-    if (authority === null) return
-    const controller = new AbortController()
-    const current = () => !controller.signal.aborted && executionWorkspaceAuthority.peek() === authority
-    const publish = (state: State) => { if (current()) setReading({ authority, state }) }
-    publish({ kind: 'loading' })
-    const refresh = async (signal: AbortSignal) => {
-      if (!current()) return
-      try {
-        const value = await fetchRuntimeModelMetrics(windowMinutes, 0, { signal: AbortSignal.any([signal, controller.signal]) })
-        if (!signal.aborted) publish({
-          kind: value.cost_ledger_read?.state === 'pending' ? 'pending' : 'ready',
-          value, receivedAt: new Date(),
-        })
-      } catch (error) {
-        if (signal.aborted) return
-        publish({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
-        throw error
-      }
-    }
-    const stopRefresh = setupObservationRefresh(refresh, { topics: ['model_metrics'], resetRead: () => setReading(null) })
-    return () => { stopRefresh(); controller.abort() }
-  }, [authority, windowMinutes, generation])
   const accounts = new Map<string, DashboardRuntimeProviderSnapshot>()
   if (catalog.status === 'loaded') {
     for (const provider of catalog.data) {
@@ -191,11 +163,12 @@ export function OverviewRuntimeStats() {
     }
   }
   const clients = [...accounts.values()]
-  const data = state.kind === 'ready' || state.kind === 'pending' ? state.value : null
+  const data = state.kind === 'ready' ? state.value : null
+  const readError = state.kind === 'ready' ? state.readError : state.kind === 'error' ? state.message : null
   const ledger = data?.cost_ledger_read
-  const cache = data?.cache
   const refresh = () => {
     setGeneration(value => value + 1)
+    metrics.refresh()
     // The catalog is shared across the dashboard and may have changed since
     // this screen first loaded. Its resource publishes a typed error on failure.
     void reloadRuntimeCatalog().catch(() => {})
@@ -222,23 +195,14 @@ export function OverviewRuntimeStats() {
       <p class="text-xs text-text-muted">로그인 확인은 지원되는 공식 CLI 계정에만 표시하며 CLI 자체 보고만 검사합니다. 제공자 사용량은 마지막 보고값이며 실행 가능 여부를 뜻하지 않습니다. 아래 토큰·지연 표는 모델명 기준 집계로, 같은 모델을 쓰는 계정들이 합쳐질 수 있습니다.</p>
     ` : null}
     ${state.kind === 'loading' ? html`<p role="status">런타임 통계를 읽고 있습니다.</p>` : null}
-    ${state.kind === 'error' ? html`<p role="alert">통계를 읽지 못했습니다: ${state.message}</p>` : null}
+    ${readError ? html`<p role="alert">통계를 읽지 못했습니다: ${readError}</p>` : null}
     ${data ? html`
-      <p class="text-sm">서버 집계 창: ${data.window_minutes == null ? '미보고' : `${number(data.window_minutes)}분`} · 응답 수신 ${state.kind === 'ready' || state.kind === 'pending' ? state.receivedAt.toLocaleString() : ''}</p>
-      <p class="text-sm" data-runtime-cache-state=${cache?.state ?? 'unreported'}>
-        ${cache?.state === 'stale_refreshing' ? '집계 갱신 중 · 이전 집계 표시'
-          : cache?.state === 'fresh' ? '서버가 최근 갱신한 집계'
-            : cache?.state === 'warming' ? '서버가 첫 집계를 준비 중'
-              : '집계 갱신 상태 미보고'}
-        ${cache && cache.state !== 'warming' ? html` · 응답 시점의 집계 경과 ${number(cache.age_s, '초')}` : null}
-      </p>
-      ${cache?.last_error ? html`<p role="alert">최근 집계 갱신 오류: ${cache.last_error}. 표시된 값은 마지막으로 읽은 집계입니다.</p>` : null}
+      <p class="text-sm">서버 집계 창: ${data.window_minutes == null ? '미보고' : `${number(data.window_minutes)}분`} · 응답 수신 ${state.kind === 'ready' ? state.receivedAt.toLocaleString() : ''}</p>
       <p class="text-xs text-text-muted">응답 수신 시각과 집계 갱신은 별개입니다. 결정 기록의 보존·읽기 누락은 API가 제공하지 않으며, 선택한 기간 전체가 관측되었다는 의미는 아닙니다.</p>
-      ${ledger?.state === 'pending' ? html`<p role="status">서버가 첫 집계를 준비하고 있습니다. 표시 중에는 자동으로 다시 읽습니다.</p>`
-        : ledger?.state === 'unavailable' ? html`<p role="alert">비용 원장을 읽지 못했습니다: ${ledger.detail ?? '상세 미보고'}. 아래 값은 읽을 수 있었던 결정 기록 기반입니다.</p>`
+      ${ledger?.state === 'unavailable' ? html`<p role="alert">비용 원장을 읽지 못했습니다: ${ledger.detail ?? '상세 미보고'}. 아래 값은 읽을 수 있었던 결정 기록 기반입니다.</p>`
         : ledger?.state === 'available' ? html`<p class="text-xs">비용 원장 읽기 완료 · 형식 오류 ${number(ledger.malformed_rows)} · 스키마 위반 ${number(ledger.schema_violation_rows)} · 식별 충돌 ${number(ledger.identity_conflict_rows)}행</p>`
           : html`<p class="text-xs">비용 원장 읽기 상태 미보고</p>`}
-      ${state.kind === 'pending' ? null : data.models.length === 0 ? html`<p role="status">${ledger ? '반환된 집계에 런타임 기록이 없습니다.' : '아직 관측할 런타임 집계가 반환되지 않았습니다. 초기 캐시 응답이거나 해당 기간의 기록이 없을 수 있습니다.'}</p>`
+      ${data.models.length === 0 ? html`<p role="status">반환된 집계에 런타임 기록이 없습니다.</p>`
         : html`<div class="max-w-full overflow-x-auto" tabIndex=${0} role="region" aria-label="런타임별 토큰·지연·결과">
           <table class="block w-full text-sm md:table"><thead class="hidden md:table-header-group"><tr class="border-b border-border">
             <th scope="col" class="p-2 text-left">런타임</th><th scope="col" class="p-2 text-left">기록 결과</th>

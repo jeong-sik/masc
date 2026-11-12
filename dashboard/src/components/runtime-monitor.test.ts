@@ -3,6 +3,7 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RuntimeMonitor } from './runtime-monitor'
+import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 
 const apiMocks = vi.hoisted(() => ({
   fetchDashboardRuntimeProbe: vi.fn(),
@@ -12,6 +13,11 @@ const apiMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../api/dashboard', () => apiMocks)
+vi.mock('../api/model-metrics-stream', async original => {
+  const { modelMetricsSubscriptionFixture } = await import('../lib/model-metrics.test-fixture')
+  return { ...await original<typeof import('../api/model-metrics-stream')>(),
+    subscribeModelMetricsStream: modelMetricsSubscriptionFixture((window, bucket, options) => apiMocks.fetchRuntimeModelMetrics(window, bucket, options)) }
+})
 
 async function waitFor(assertion: () => boolean, label: string): Promise<void> {
   for (let i = 0; i < 20; i += 1) {
@@ -34,6 +40,7 @@ describe('RuntimeMonitor', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
+    confirmRuntimeTestWorkspace()
     apiMocks.probeOfficialClientLogin.mockReset()
     apiMocks.fetchRuntimeProviders.mockReset().mockResolvedValue({
       updated_at: '2026-05-13T13:00:00Z',

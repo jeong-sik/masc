@@ -14,6 +14,11 @@
         --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
         --audit artifacts/tinker/librarian/e-synth-audit \
         --final artifacts/tinker/librarian/e-synth/requests.jsonl
+    # a set made in batches: `apply` writes each batch's own file, and `pool` joins them
+    uv run scripts/tinker/librarian/e_synth_audit.py pool \
+        --batch artifacts/tinker/librarian/e-synth-1/requests.jsonl \
+        --batch artifacts/tinker/librarian/e-synth-2/requests.jsonl \
+        --final artifacts/tinker/librarian/e-synth/requests.jsonl
     uv run scripts/tinker/librarian/e_synth_audit.py drops \
         --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
         --run artifacts/tinker/librarian/verdict-synth --out artifacts/tinker/librarian/verdict-drops
@@ -50,6 +55,13 @@ or a planted stale fact judged `keep`, means the memory itself is wrong, so
 every request on that memory goes (`audit_decisions.misfits`). Labels are never
 rewritten. The misfit rate of the sample estimates the label errors left in the
 requests nobody judged.
+
+`pool` joins the audited requests of several batches of one split into one
+file, in item ID order. Each batch is generated with its own seed and memory
+numbers (`synth_generate.py --first-memory`), run on the baseline and audited
+by itself. `pool` refuses batches that share a memory key: the key would name
+two different memories, and a fact misfit or an off-label drop on one would
+take the other's requests along.
 
 `drops` runs after the pass lines are fixed, on the verdict's E-synth run. It
 makes one case per request where a valid answer dropped a fact off label
@@ -158,6 +170,11 @@ def requests_of(path: Path) -> dict[str, Request]:
         item_id = cast(str, request["item_id"])
         out[item_id] = Request(item_id, cast(str, cast(JsonObject, request["keeper"])["role_material"]), *parts)
     return out
+
+
+def item_id_of(row: JsonObject) -> str:
+    """The item ID of a requests.jsonl row."""
+    return cast(str, cast(JsonObject, row["request"])["item_id"])
 
 
 def write_jsonl(path: Path, rows: list[JsonObject]) -> None:
@@ -380,8 +397,7 @@ def apply(args: argparse.Namespace) -> int:
         per_case.append({"case": case_id, "item": item, "picked": key["picked"],
                          "request_misfits": request, "memory_misfits": memory})
     rows = D.read_jsonl(Path(cast(str, args.requests)))
-    kept = [r for r in rows if (i := cast(str, cast(JsonObject, r["request"])["item_id"])) not in removed_items
-            and D.memory_of(i) not in removed_memories]
+    kept = [r for r in rows if (i := item_id_of(r)) not in removed_items and D.memory_of(i) not in removed_memories]
     write_jsonl(Path(cast(str, args.final)), kept)
     sampled = [c for c in per_case if c["picked"] == "sample"]
     summary = {"requests_in": len(rows), "requests_out": len(kept), "cases": len(per_case),
@@ -392,6 +408,27 @@ def apply(args: argparse.Namespace) -> int:
                "per_case": per_case}
     (audit / "audit.json").write_text(json.dumps(summary, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(json.dumps({k: v for k, v in summary.items() if k != "per_case"}))
+    return 0
+
+
+def pooled(batches: list[list[JsonObject]]) -> list[JsonObject]:
+    """The request rows of several audited batches as one set, in item ID order. SystemExit when two
+    batches hold a request on one memory key: a batch numbers its memories apart from the others
+    (synth_generate.py --first-memory), so a key in two batches names two different memories."""
+    batch_of: dict[str, int] = {}
+    for number, rows in enumerate(batches, start=1):
+        for memory in sorted({D.memory_of(item_id_of(r)) for r in rows}):
+            if batch_of.setdefault(memory, number) != number:
+                raise SystemExit(f"batches {batch_of[memory]} and {number} both hold requests on {memory}")
+    return sorted((r for rows in batches for r in rows), key=item_id_of)
+
+
+def pool(args: argparse.Namespace) -> int:
+    batches = [D.read_jsonl(Path(p)) for p in cast(list[str], args.batch)]
+    final = Path(cast(str, args.final))
+    write_jsonl(final, pooled(batches))
+    print(json.dumps({"batches": [len(rows) for rows in batches], "requests": sum(len(rows) for rows in batches),
+                      "requests_sha256": V.sha256_file(final)}))
     return 0
 
 
@@ -441,6 +478,10 @@ def main() -> int:
     a.add_argument("--requests", required=True)
     a.add_argument("--audit", required=True)
     a.add_argument("--final", required=True)
+    p = sub.add_parser("pool")
+    p.add_argument("--batch", action="append", required=True,
+                   help="the requests.jsonl `apply` wrote for one batch; give it once per batch")
+    p.add_argument("--final", required=True)
     d = sub.add_parser("drops")
     d.add_argument("--requests", required=True, help="the pinned E-synth requests.jsonl")
     d.add_argument("--run", required=True, help="the verdict's E-synth run")
@@ -451,6 +492,8 @@ def main() -> int:
             return cases(args)
         case "apply":
             return apply(args)
+        case "pool":
+            return pool(args)
         case "drops":
             return drops(args)
         case other:

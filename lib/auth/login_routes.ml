@@ -188,12 +188,22 @@ let json ?(cookies = []) status fields =
 
 let json_refused ?cookies failure text = json ?cookies (failure_status failure) [ "error", `String text ]
 
+(* The reason names a path of the server (issue #50018), so it goes to the
+   log and the person gets one fixed sentence. *)
+let zone_uncertain_message uncertain =
+  Log.Auth.warn
+    "a request was refused, because the authorization zone cannot be trusted: %s"
+    (Authz_zone.uncertain_detail uncertain);
+  "The server cannot read its accounts right now. Try again later."
+;;
+
+let zone_uncertain uncertain = json_refused Unavailable (zone_uncertain_message uncertain)
+
 (* ---- what the routes share ---- *)
 
 (* Milliseconds since the epoch. A float holds them exactly for the next few
    hundred thousand years. *)
 let ms_of instant = Float.to_int (Ptime.to_float_s instant *. 1000.)
-let state t = (Authz_zone.snapshot t.zone).Authz_zone.state
 
 type configured =
   | Google_login of google_login
@@ -237,14 +247,18 @@ let read_start_form fields =
     Ok (invite, return_to)
 ;;
 
-(* The session of the cookie, when the cookie acts. *)
+(* The session of the cookie, when the cookie acts. No cookie acts in a zone
+   that cannot be trusted, and the sign-in that follows is refused there. *)
 let session_of_browser t ~now_ms = function
   | None -> None
   | Some value ->
     Option.bind (Bs.Cookie.of_value value) (fun cookie ->
-      match Bs.authenticate (state t) ~now_ms cookie with
-      | Ok { Bs.session_id; user_id = _; expires_at_ms = _ } -> Some session_id
-      | Error (_ : Bs.refusal) -> None)
+      match Authz_zone.read t.zone with
+      | Error (_ : Authz_zone.uncertain) -> None
+      | Ok trusted ->
+        (match Bs.authenticate trusted ~now_ms cookie with
+         | Ok { Bs.session_id; user_id = _; expires_at_ms = _ } -> Some session_id
+         | Error (_ : Bs.refusal) -> None))
 ;;
 
 let begin_login t login ~invite ~return_to ~replaces =
@@ -253,13 +267,15 @@ let begin_login t login ~invite ~return_to ~replaces =
     (match
        Google_login_flow.start ~get:t.get cache t.transactions client ~now:t.now ~invite ~return_to ~replaces
      with
-     | Ok { Google_login_flow.id; authorization_url } -> Ok (id, authorization_url)
-     | Error (Google_login_flow.Google_unavailable (_ : Oidc_google_exchange.error)) -> Error Bad_gateway
-     | Error Google_login_flow.Transactions_full -> Error Unavailable)
+     | Ok { Google_login_flow.sealed; authorization_url } -> Ok (sealed, authorization_url)
+     | Error (Google_login_flow.Google_unavailable error) ->
+       Log.Auth.warn "login: Google did not start a login: %s" (Oidc_google_exchange.error_to_string error);
+       Error Bad_gateway
+     | Error Google_login_flow.Return_path_too_long -> Error Bad_request)
   | Github_login client ->
     (match Github_login_flow.start t.transactions client ~now:t.now ~invite ~return_to ~replaces with
-     | Ok { Github_login_flow.id; authorization_url } -> Ok (id, authorization_url)
-     | Error T.Full -> Error Unavailable)
+     | Ok { Github_login_flow.sealed; authorization_url } -> Ok (sealed, authorization_url)
+     | Error T.Too_long -> Error Bad_request)
 ;;
 
 let start t provider ~origin ~session_cookie ~fields =
@@ -276,10 +292,10 @@ let start t provider ~origin ~session_cookie ~fields =
   in
   match started with
   | Error failure -> refused_page failure
-  | Ok (id, authorization_url) ->
+  | Ok (sealed, authorization_url) ->
     { status = See_other_303
     ; headers =
-        [ "location", authorization_url; set_cookie (Q.set_transaction_cookie id); no_store; no_referrer ]
+        [ "location", authorization_url; set_cookie (Q.set_transaction_cookie sealed); no_store; no_referrer ]
     ; body = ""
     }
 ;;
@@ -291,16 +307,16 @@ type returned =
   | Refused
 
 let read_callback ~transaction_cookie ~query =
-  let* id =
-    Option.to_result ~none:Unauthorized (Option.bind transaction_cookie T.Id.of_string)
+  let* sealed =
+    Option.to_result ~none:Unauthorized (Option.bind transaction_cookie T.Sealed.of_string)
   in
   let* state = single query "state" in
   let* state = Option.to_result ~none:Bad_request state in
   let* code = single query "code" in
   let* error = single query "error" in
   match code, error with
-  | Some code, None -> Ok (id, state, Code code)
-  | None, Some (_ : string) -> Ok (id, state, Refused)
+  | Some code, None -> Ok (sealed, state, Code code)
+  | None, Some (_ : string) -> Ok (sealed, state, Refused)
   | None, None | Some _, Some _ -> Error Bad_request
 ;;
 
@@ -349,7 +365,7 @@ let user_of = function
   | Authz_login.Admitted { user_id; role = _; previously_deleted = _ } -> user_id
 ;;
 
-let complete t login id ~state returned =
+let complete t login sealed ~state returned =
   match login with
   | Google_login { client; cache } ->
     let answer =
@@ -367,14 +383,16 @@ let complete t login id ~state returned =
          client
          ~now:t.now
          ~draw:t.draw
-         id
+         sealed
          ~state
          answer
      with
      | Ok { Google_login_flow.outcome; return_to; replaces } -> Ok (user_of outcome, return_to, replaces)
      | Error (Google_login_flow.Transaction_refused error) -> Error (transaction_failure error)
      | Error Google_login_flow.Refused_at_google -> Error Unauthorized
-     | Error (Google_login_flow.Exchange_failed error) -> Error (google_failure error)
+     | Error (Google_login_flow.Exchange_failed error) ->
+       Log.Auth.warn "login: the exchange with Google failed: %s" (Oidc_google_exchange.error_to_string error);
+       Error (google_failure error)
      | Error (Google_login_flow.Login_refused refusal) -> Error (login_failure refusal))
   | Github_login client ->
     let answer =
@@ -391,14 +409,16 @@ let complete t login id ~state returned =
          client
          ~now:t.now
          ~draw:t.draw
-         id
+         sealed
          ~state
          answer
      with
      | Ok { Github_login_flow.outcome; return_to; replaces } -> Ok (user_of outcome, return_to, replaces)
      | Error (Github_login_flow.Transaction_refused error) -> Error (transaction_failure error)
      | Error Github_login_flow.Refused_at_github -> Error Unauthorized
-     | Error (Github_login_flow.Exchange_failed error) -> Error (github_failure error)
+     | Error (Github_login_flow.Exchange_failed error) ->
+       Log.Auth.warn "login: the exchange with GitHub failed: %s" (Github_oauth.error_to_string error);
+       Error (github_failure error)
      | Error (Github_login_flow.Login_refused refusal) -> Error (login_failure refusal))
 ;;
 
@@ -409,9 +429,12 @@ let issue_failure = function
 
 (* The session that the start named is ended only while it still acts: one
    that was signed out, replaced or expired since the start needs no end, and
-   the session record would refuse to end it again. *)
+   the session record would refuse to end it again. The commit that issues
+   the new session judges the record that ends this one, so this reads what
+   the zone last published. *)
 let still_acting t ~now_ms session_id =
-  match Authz_session_state.find_active (state t).Authz_state.sessions session_id ~now_ms with
+  let sessions = (Authz_zone.snapshot t.zone).Authz_zone.state.Authz_state.sessions in
+  match Authz_session_state.find_active sessions session_id ~now_ms with
   | Ok (_ : Authz_session_state.session) -> Some session_id
   | Error (Authz_session_state.Unknown | Authz_session_state.Ended | Authz_session_state.Expired) -> None
 ;;
@@ -419,8 +442,8 @@ let still_acting t ~now_ms session_id =
 let callback t provider ~transaction_cookie ~query =
   let completed =
     let* login = Option.to_result ~none:Not_found (configured t provider) in
-    let* id, state, returned = read_callback ~transaction_cookie ~query in
-    let* user_id, return_to, replaces = complete t login id ~state returned in
+    let* sealed, state, returned = read_callback ~transaction_cookie ~query in
+    let* user_id, return_to, replaces = complete t login sealed ~state returned in
     let now_ms = ms_of (t.now ()) in
     let replaces = Option.bind replaces (still_acting t ~now_ms) in
     let* cookie = Bs.issue t.zone ~user_id ~draw:t.draw ~replaces |> Result.map_error issue_failure in
@@ -453,23 +476,33 @@ let clears_the_cookie = function
 
 let no_session = "no session cookie came with the request"
 
+(* A zone that cannot be trusted says nothing of a session, so the cookie of
+   the request is kept: the session may still act once the files are read
+   again. *)
 let logout t request =
-  match Q.check (state t) ~now_ms:(ms_of (t.now ())) request with
-  | Error refusal ->
-    let cookies = if clears_the_cookie refusal then [ Q.clear_session_cookie ] else [] in
-    json_refused ~cookies (request_failure refusal) (Q.refusal_to_string refusal)
-  | Ok Q.No_session -> json_refused Unauthorized no_session
-  | Ok (Q.Session { cookie = _; signed_in = { Bs.user_id; session_id; expires_at_ms = _ } }) ->
-    (match Bs.sign_out t.zone ~user_id session_id with
-     | Ok () -> { status = No_content_204; headers = [ no_store; set_cookie Q.clear_session_cookie ]; body = "" }
-     | Error error -> json_refused (issue_failure error) (Bs.error_to_string error))
+  match Authz_zone.read t.zone with
+  | Error uncertain -> zone_uncertain uncertain
+  | Ok trusted ->
+    (match Q.check trusted ~now_ms:(ms_of (t.now ())) request with
+     | Error refusal ->
+       let cookies = if clears_the_cookie refusal then [ Q.clear_session_cookie ] else [] in
+       json_refused ~cookies (request_failure refusal) (Q.refusal_to_string refusal)
+     | Ok Q.No_session -> json_refused Unauthorized no_session
+     | Ok (Q.Session { cookie = _; signed_in = { Bs.user_id; session_id; expires_at_ms = _ } }) ->
+       (match Bs.sign_out t.zone ~user_id session_id with
+        | Ok () ->
+          { status = No_content_204; headers = [ no_store; set_cookie Q.clear_session_cookie ]; body = "" }
+        | Error error -> json_refused (issue_failure error) (Bs.error_to_string error)))
 ;;
 
 let acting t request =
-  match Q.check (state t) ~now_ms:(ms_of (t.now ())) request with
-  | Error refusal -> Error (json_refused (request_failure refusal) (Q.refusal_to_string refusal))
-  | Ok Q.No_session -> Error (json_refused Unauthorized no_session)
-  | Ok (Q.Session { cookie; signed_in }) -> Ok (cookie, signed_in)
+  match Authz_zone.read t.zone with
+  | Error uncertain -> Error (zone_uncertain uncertain)
+  | Ok trusted ->
+    (match Q.check trusted ~now_ms:(ms_of (t.now ())) request with
+     | Error refusal -> Error (json_refused (request_failure refusal) (Q.refusal_to_string refusal))
+     | Ok Q.No_session -> Error (json_refused Unauthorized no_session)
+     | Ok (Q.Session { cookie; signed_in }) -> Ok (cookie, signed_in))
 ;;
 
 let session t request =

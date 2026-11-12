@@ -22,7 +22,8 @@ let credential_file_error = function
   | Unrecognized_oauth_source _ -> Unrecognized_credential
   | Unrecognized_managed_oauth _ | Unrecognized_managed_keychain _ -> Unrecognized_managed_credential
   | Invalid_runtime_root _ | Invalid_owner_leaf _ | Unsafe_directory _ | Invalid_managed_oauth _
-  | Settings_write_failed _ | Mcp_config_write_failed _ | Mcp_config_cleanup_failed _ ->
+  | Settings_write_failed _ | Mcp_config_write_failed _ | Mcp_config_cleanup_failed _
+  | Native_tools_refused _ ->
     Private_home_unavailable
 let prepare_from_credential_file ~host ~runtime_root ~account_id ~oauth_source =
   Runtime_antigravity_home.prepare ~host ~runtime_root ~owner_leaf:account_id ~oauth_source

@@ -29,6 +29,11 @@ length leaves its band, is not kept. Every model call is cached in
 pays only for calls that have no answer yet. Output: <out>/requests.jsonl (one
 request per line; `synth_rows.label_of_row` reads its label) and <out>/summary.json.
 
+A split can be made in more than one batch, each with its own seed.
+`--first-memory` numbers a batch's memories from that number on, so a batch
+that starts where the last one ended shares no memory key or item ID with it,
+and the audited requests of the batches can go into one file.
+
 TINKER_API_KEY comes from the environment and is never written.
 """
 
@@ -172,6 +177,11 @@ class MemoryPlan:
     slots: tuple[FactSlot, ...]  # grouped by category, in writing order
     duplicate: DuplicateSlot | None
     seed: int
+
+
+def memory_homes(keepers: Sequence[S.KeeperProfile], per_keeper: int, first: int) -> list[tuple[S.KeeperProfile, int]]:
+    """Every memory of a batch: its Keeper and its number, `per_keeper` numbers from `first` on."""
+    return [(keeper, first + i) for keeper in keepers for i in range(per_keeper)]
 
 
 def plan_memory(rng: random.Random, keeper: S.KeeperProfile, index: int, duplicate: bool) -> MemoryPlan:
@@ -443,8 +453,11 @@ def main() -> int:
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--budget", type=float, required=True)
+    ap.add_argument("--first-memory", type=int, default=0,
+                    help="number of each Keeper's first memory; a later batch of a split starts where the last ended")
     args = ap.parse_args()
     split, seed, budget = cast(str, args.split), cast(int, args.seed), cast(float, args.budget)
+    first_memory = cast(int, args.first_memory)
     out = Path(cast(str, args.out))
     out.mkdir(parents=True, exist_ok=True)
     keepers_seeds, memories_per_keeper, n_requests = SPLITS[split]
@@ -462,7 +475,7 @@ def main() -> int:
         profiles = list(pool.map(profile_task, zip(keepers_seeds, profile_rngs, strict=True)))
         keepers = [p for p in profiles if p is not None]
         status["profiles_failed"] = len(profiles) - len(keepers)
-        homes = [(keeper, i) for keeper in keepers for i in range(memories_per_keeper)]
+        homes = memory_homes(keepers, memories_per_keeper, first_memory)
         paired = C.flags(rng, len(homes), S.DUPLICATE_PAIR_SHARE)
         plans = [plan_memory(rng, keeper, i, pair) for (keeper, i), pair in zip(homes, paired, strict=True)]
         memories = list(pool.map(memory_task, plans))
@@ -492,7 +505,7 @@ def main() -> int:
         for request in sorted(done, key=lambda r: r.item_id):
             fh.write(request_json(request) + "\n")
     kinds = Counter(c.kind.value for r in done for c in r.candidates)
-    summary = {"split": split, "seed": seed, "model": MODEL, "requests": len(done),
+    summary = {"split": split, "seed": seed, "first_memory": first_memory, "model": MODEL, "requests": len(done),
                "memories": len({r.item_id.rsplit("-", 1)[0] for r in done}), **status,
                "candidates_by_kind": dict(sorted(kinds.items())),
                "memories_with_duplicate": sum(any(f.duplicate_of is not None for f in facts) for _, facts in built),

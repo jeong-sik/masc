@@ -1315,33 +1315,51 @@ let kauto_group_label ~title parts =
    cursor and Enter; the run's id heads the detail, whole where the frame
    holds it and folded in the middle where it does not. *)
 
-let lane_started_width = 17
-let lane_subject_width = 16
-let lane_status_width = 11
-let lane_elapsed_width = 8
+module Instant = Masc_tui_value.Instant
 
-(* The slot takes what the other columns leave. The slots the lanes reported
-   on 2026-09-28 ran from 24 cells (glm-coding.glm-5.3-flash) to 45
+(* The start is a log stamp: runs of one lane land seconds apart and their
+   order is what the list is read for. *)
+let lane_started_precision = Instant.To_second
+let lane_started_width = Instant.cell_width lane_started_precision
+
+(* What the subject keeps when the row has nothing to spare. *)
+let lane_subject_floor = 16
+
+(* The mark, a gap, and the longest status word in either language: "review
+   cancelled" and "결과 저장 불확실", sixteen cells each. A status that folds
+   reads as a different status. *)
+let lane_status_width = 18
+
+(* The widest reading is seven cells ("120d04h"); the column is as wide as
+   its Korean name, nine, so the name is not the reading that folds. *)
+let lane_elapsed_width = 9
+
+(* The slots the lanes reported on 2026-09-28 ran from 24 cells
+   (glm-coding.glm-5.3-flash) to 45
    (ollama_cloud.ollama-cloud-deepseek-v4-1-flash). The floor holds the short
    one whole; a longer one folds in the middle, which keeps the provider at
    its head and the model at its tail. *)
 let lane_minimum_slot_width = 24
 
-type lane_run_row_values = {
-  lrow_started : string;
-  lrow_subject : string;
-  lrow_status : string;
-  lrow_elapsed : string;
-  lrow_slot : string;
+type lane_run_headers = {
+  lhead_started : string;
+  lhead_subject : string;
+  lhead_status : string;
+  lhead_elapsed : string;
+  lhead_slot : string;
 }
 
-let lane_run_no_values =
-  { lrow_started = ""
-  ; lrow_subject = ""
-  ; lrow_status = ""
-  ; lrow_elapsed = ""
-  ; lrow_slot = ""
-  }
+type lane_run_subject =
+  | Run_actor_name
+  | Run_subject_id
+
+type lane_run_row_values = {
+  lrow_started : float;
+  lrow_subject : string;
+  lrow_status : string;
+  lrow_elapsed : float option;
+  lrow_slot : string;
+}
 
 (* The run list's columns, named so a narrow list can say which it spares
    (workbench RFC section 5.4, #36347). *)
@@ -1360,52 +1378,117 @@ let lane_run_columns =
   ; Lane_slot
   ]
 
-(* The slot's entry is its floor: it is the flexible column and takes what
-   the others leave. *)
-let lane_run_column_width = function
+let lane_run_column_floor = function
   | Lane_started -> lane_started_width
-  | Lane_subject -> lane_subject_width
+  | Lane_subject -> lane_subject_floor
   | Lane_status -> lane_status_width
   | Lane_elapsed -> lane_elapsed_width
   | Lane_slot -> lane_minimum_slot_width
+
+(* The subject is as wide as the widest subject on the page, as far as the
+   frame has cells to give once every column holds its floor; the slot, as
+   the flexible column, takes what is left after it. The subject was sixteen
+   cells whatever the frame, so a two-hundred-column list cut
+   "kidsnote-incoming-dd-manager" to "kidsn…dd-manager" beside a hundred
+   empty cells. It is not wider than its widest reading either: cells added
+   there part the name from the status the reader looks up next. *)
+let lane_subject_width ~header ~subjects ~inner_width =
+  let floors =
+    List.fold_left
+      (fun sum column -> sum + lane_run_column_floor column)
+      0 lane_run_columns
+  in
+  let gaps = Table.cell_gap * (List.length lane_run_columns - 1) in
+  let spare = max 0 (inner_width - floors - gaps) in
+  let widest =
+    List.fold_left
+      (fun widest subject ->
+        max widest (Masc_tui_message_layout.display_width subject))
+      (Masc_tui_message_layout.display_width header)
+      subjects
+  in
+  min widest (lane_subject_floor + spare)
 
 (* What a narrow list gives up, first to go first (operator, 2026-09-28): the
    start, then the elapsed time. The subject, the status and the slot never
    go: what the run was for, how it ended, and the model that served it. *)
 let lane_run_drop_order = [ Lane_started; Lane_elapsed ]
 
-let lane_run_layout ~inner_width =
-  Table.fit ~inner_width ~width:lane_run_column_width ~flex:Lane_slot
-    ~drop_order:lane_run_drop_order lane_run_columns
+type lane_run_table = {
+  lrun_headers : lane_run_headers;
+  lrun_subject : lane_run_subject;
+  lrun_subject_width : int;
+  lrun_layout : lane_run_column Table.layout;
+}
 
-(* The identity column is named by the caller: the Verifier's runs are about a
-   task or a goal, every other lane's about who asked. *)
-let lane_run_cell ~identity_header ~status_style ~slot_width values = function
+let lane_run_table ~headers ~subject ~subjects ~inner_width =
+  let subject_width =
+    lane_subject_width ~header:headers.lhead_subject ~subjects ~inner_width
+  in
+  let width = function
+    | Lane_subject -> subject_width
+    | (Lane_started | Lane_status | Lane_elapsed | Lane_slot) as column ->
+        lane_run_column_floor column
+  in
+  { lrun_headers = headers
+  ; lrun_subject = subject
+  ; lrun_subject_width = subject_width
+  ; lrun_layout =
+      Table.fit ~inner_width ~width ~flex:Lane_slot
+        ~drop_order:lane_run_drop_order lane_run_columns
+  }
+
+(* A name is read from its head, so it gives way at the tail. An id is told
+   from its neighbours by both ends, so it gives way in the middle. *)
+let lane_run_subject_fold = function
+  | Run_actor_name -> Table.Fold_tail
+  | Run_subject_id -> Table.Fold_middle
+
+(* One column of the table; [reading] is empty for the header row, which
+   draws the names alone. *)
+let lane_run_cell table ~status_style column reading =
+  let headers = table.lrun_headers in
+  match column with
   | Lane_started ->
-      Table.cell ~header:"STARTED" ~width:lane_started_width values.lrow_started
+      Table.cell ~align:Table.Right ~header:headers.lhead_started
+        ~width:lane_started_width reading
   | Lane_subject ->
-      Table.cell ~header:identity_header ~width:lane_subject_width
-        values.lrow_subject
+      Table.cell
+        ~fold:(lane_run_subject_fold table.lrun_subject)
+        ~header:headers.lhead_subject ~width:table.lrun_subject_width reading
   | Lane_status ->
-      Table.cell ~style:status_style ~header:"STATUS" ~width:lane_status_width
-        values.lrow_status
+      Table.cell ~fold:Table.Fold_tail ~style:status_style
+        ~header:headers.lhead_status ~width:lane_status_width reading
   | Lane_elapsed ->
-      Table.cell ~align:Table.Right ~header:"ELAPSED" ~width:lane_elapsed_width
-        values.lrow_elapsed
-  | Lane_slot -> Table.cell ~header:"SLOT" ~width:slot_width values.lrow_slot
+      Table.cell ~align:Table.Right ~header:headers.lhead_elapsed
+        ~width:lane_elapsed_width reading
+  | Lane_slot ->
+      Table.cell ~header:headers.lhead_slot
+        ~width:table.lrun_layout.Table.flex_width reading
 
-let lane_run_cells ~identity_header ?(status_style = "")
-    ~(layout : lane_run_column Table.layout) values =
-  List.map
-    (lane_run_cell ~identity_header ~status_style
-       ~slot_width:layout.Table.flex_width values)
-    layout.Table.shown
+let lane_run_reading ~now values = function
+  | Lane_started -> Instant.cell_text lane_started_precision ~now values.lrow_started
+  | Lane_subject -> values.lrow_subject
+  | Lane_status -> values.lrow_status
+  | Lane_elapsed -> (
+      match Option.bind values.lrow_elapsed Masc_tui_message_layout.elapsed_text with
+      | Some text -> text
+      | None -> Masc_tui_theme.Glyph.no_value)
+  | Lane_slot -> values.lrow_slot
 
-let lane_run_header_row ~identity_header ~layout =
-  Table.header_row (lane_run_cells ~identity_header ~layout lane_run_no_values)
+let lane_run_header_row table =
+  Table.header_row
+    (List.map
+       (fun column -> lane_run_cell table ~status_style:"" column "")
+       table.lrun_layout.Table.shown)
 
-let lane_run_row ~identity_header ~status_style ~layout values =
-  Table.row (lane_run_cells ~identity_header ~status_style ~layout values)
+let lane_run_row table ~now ~status_style values =
+  Table.row
+    (List.map
+       (fun column ->
+         lane_run_cell table ~status_style column
+           (lane_run_reading ~now values column))
+       table.lrun_layout.Table.shown)
 
 (* File change columns.
 
@@ -1620,30 +1703,31 @@ let fusion_sidebar_label ~status ~time ~keeper ~run_id =
 let task_history_sidebar_label ~task_id ~apart =
   match apart with None -> task_id | Some apart -> task_id ^ "  " ^ apart
 
-let verdict_sidebar_labels rows =
+let verdict_sidebar_labels ~now rows =
+  let to_second = Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_second ~now in
+  let to_minute = Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now in
+  let clocked = List.map (fun (task_id, at) -> (task_id, to_second at, at)) rows in
   List.mapi
-    (fun index (task_id, clock) ->
-      let same (other_id, other_clock) =
+    (fun index (task_id, clock, at) ->
+      let same (other_id, other_clock, _) =
         String.equal task_id other_id && String.equal clock other_clock
       in
-      let siblings = List.length (List.filter same rows) in
+      let siblings = List.length (List.filter same clocked) in
       let apart =
         if siblings = 1 then clock
         else
           let earlier =
-            List.filteri (fun other_index row -> other_index < index && same row) rows
+            List.filteri
+              (fun other_index row -> other_index < index && same row)
+              clocked
             |> List.length
           in
           (* A second-resolution clock can name several verdicts. Keep the
              date and minute, then number those rows within this snapshot. *)
-          let minute =
-            if String.length clock > 3 then String.sub clock 0 (String.length clock - 3)
-            else clock
-          in
-          Printf.sprintf "%s#%d" minute (earlier + 1)
+          Printf.sprintf "%s#%d" (to_minute at) (earlier + 1)
       in
       task_history_sidebar_label ~task_id ~apart:(Some apart))
-    rows
+    clocked
 
 let fusion_pipeline_diagram
     ?(glyph_done = "●")

@@ -581,6 +581,15 @@ let excerpt text =
   else String_util.utf8_prefix ~max_bytes:excerpt_max_bytes text ^ "..."
 ;;
 
+(* HIGH-RISK-UNREVIEWED: the cloud key is an account of the host, so it is
+   read only with the proof that the access shares the accounts of the host
+   (plan D4d). The local backend sends no key. *)
+let cloud_headers (_ : Runtime_account_access.host_account) =
+  match Sys.getenv_opt cloud_key_env with
+  | Some key when key <> "" -> Ok [ ("Authorization", "Bearer " ^ String.trim key) ]
+  | Some _ | None -> Error ("cloud backend needs " ^ cloud_key_env ^ " in the environment")
+;;
+
 let decide ~timeout_sec (request : request) (backend : backend) :
     (Yojson.Safe.t, string) result =
   let* () = validate_request request in
@@ -588,10 +597,12 @@ let decide ~timeout_sec (request : request) (backend : backend) :
   let headers =
     match backend with
     | Local -> Ok []
-    | Cloud -> (
-        match Sys.getenv_opt cloud_key_env with
-        | Some key when key <> "" -> Ok [ ("Authorization", "Bearer " ^ String.trim key) ]
-        | _ -> Error ("cloud backend needs " ^ cloud_key_env ^ " in the environment"))
+    | Cloud ->
+        let* host =
+          Runtime_account_access.authorize_host Runtime_account_access.Systemone_cloud
+          |> Result.map_error Runtime_account_access.refusal_to_string
+        in
+        cloud_headers host
   in
   let* headers = headers in
   let body = Yojson.Safe.to_string (request_to_yojson request) in

@@ -52,7 +52,7 @@ let drawing values =
 let commit zone author kind body =
   match Z.commit zone { Z.author; kind; body } with
   | Ok (_ : Z.committed) -> ()
-  | Error error -> Alcotest.failf "record refused: %s" (Z.error_to_string error)
+  | Error error -> Alcotest.failf "record refused: %s" (Z.error_detail error)
 ;;
 
 let invite zone author ~id ~token role =
@@ -103,7 +103,8 @@ type credentials =
   ; service : string
   }
 
-(* Runs [f] on the state after every credential is issued. *)
+(* Runs [f] on the snapshot a decision rests on, taken after every credential
+   is issued. *)
 let with_credentials f =
   Eio_main.run (fun _env ->
     let root = Filename.temp_dir "auth-gate-" "" in
@@ -163,7 +164,10 @@ let with_credentials f =
             ; service
             }
           in
-          f (Z.snapshot zone).Z.state credentials))
+          match Z.read zone with
+          | Ok trusted -> f trusted credentials
+          | Error uncertain ->
+            Alcotest.failf "the zone cannot be trusted: %s" (Z.uncertain_to_string uncertain)))
 ;;
 
 type presented =
@@ -196,8 +200,8 @@ let refused reason =
   (if G.is_unauthenticated reason then "401 " else "403 ") ^ G.reason_to_string reason
 ;;
 
-let outcome state access request =
-  match G.decide state ~now_ms:start_ms access request with
+let outcome trusted access request =
+  match G.decide trusted ~now_ms:start_ms access request with
   | Ok G.Anonymous -> "anonymous"
   | Ok G.Judged_by_route -> "judged by its route"
   | Ok (G.Authenticated { G.role; binding; principal = _; pat_binding = _ }) ->
@@ -214,8 +218,11 @@ let outcome state access request =
 let add_task = Route_access.Tool { tool_name = "masc_add_task" }
 
 let each_kind_of_route_judges_the_request () =
-  with_credentials (fun state c ->
+  with_credentials (fun trusted c ->
     let legacy = "Bearer " ^ String.make 64 'f' in
+    (* The token of the MCP OAuth service, which no layer binds to a session
+       yet (plan C5). *)
+    let oauth_token = "Bearer mat_" ^ String.make 64 'f' in
     let rows =
       [ "public, nothing", Route_access.Always_public, request Nothing, "anonymous"
       ; ( "public, legacy bearer"
@@ -278,10 +285,22 @@ let each_kind_of_route_judges_the_request () =
         , Route_access.Self_authenticated Route_access.Oauth_protocol
         , request Nothing
         , refused (G.Not_served_in_multi_account Route_access.Oauth_protocol) )
+      ; ( "read, MCP OAuth token"
+        , Route_access.Read_auth
+        , request (Bearer oauth_token)
+        , refused G.Mcp_oauth_token_not_bound )
       ; ( "own provider, nothing"
         , Route_access.Manage_own_provider
         , request Nothing
         , refused G.Credential_required )
+      ; ( "own provider, session and PAT"
+        , Route_access.Manage_own_provider
+        , request (Cookie_and_bearer (c.admin_session, c.admin_pat))
+        , refused G.Several_credentials )
+      ; ( "own provider, MCP OAuth token"
+        , Route_access.Manage_own_provider
+        , request (Bearer oauth_token)
+        , refused G.Mcp_oauth_token_not_bound )
       ; ( "own provider, Member session"
         , Route_access.Manage_own_provider
         , request (Cookie c.member_session)
@@ -303,6 +322,14 @@ let each_kind_of_route_judges_the_request () =
         , Route_access.Manage_own_keeper
         , request Nothing
         , refused G.Credential_required )
+      ; ( "own keeper, session and PAT"
+        , Route_access.Manage_own_keeper
+        , request (Cookie_and_bearer (c.admin_session, c.admin_pat))
+        , refused G.Several_credentials )
+      ; ( "own keeper, MCP OAuth token"
+        , Route_access.Manage_own_keeper
+        , request (Bearer oauth_token)
+        , refused G.Mcp_oauth_token_not_bound )
       ; ( "own keeper, Member session"
         , Route_access.Manage_own_keeper
         , request (Cookie c.member_session)
@@ -320,16 +347,16 @@ let each_kind_of_route_judges_the_request () =
     in
     List.iter
       (fun (label, access, request, expected) ->
-        Alcotest.(check string) label expected (outcome state access request))
+        Alcotest.(check string) label expected (outcome trusted access request))
       rows)
 ;;
 
 (* The who-am-I route of the localhost preview reads the same gate. *)
 let the_preview_whoami_names_the_principal () =
-  with_credentials (fun state c ->
+  with_credentials (fun trusted c ->
     let answer presented =
       let { Login_routes.status; body; headers = _ } =
-        Auth_preview.whoami state ~now_ms:start_ms (request presented)
+        Auth_preview.whoami trusted ~now_ms:start_ms (request presented)
       in
       let json = Yojson.Safe.from_string body in
       let field name = Yojson.Safe.Util.member name json in

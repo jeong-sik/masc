@@ -1,5 +1,11 @@
 {
   "schema_version": 1,
   "usage": "Cutting over a red ancestor nightly requires an explicit entry: the run_id and exact head_sha of the scheduled nightly Test run a release owner reviewed. An empty list keeps a cut refuse-closed while the nightly is red.",
-  "allowed_failure_runs": []
+  "allowed_failure_runs": [
+    {
+      "run_id": 42867864778,
+      "head_sha": "0e9718ca67e6132531614d5133cd836a2dc7aabc",
+      "issue": 51357
+    }
+  ]
 }

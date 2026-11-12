@@ -10,6 +10,9 @@ module Mode = Authz_mode_state
 module R = Authz_record
 module S = Authz_state
 
+(* The replay keeps the state and counts the changes ([S.apply]); these cases read only the state. *)
+let step state record = Result.map (fun (applied : S.applied) -> applied.S.state) (S.apply state record)
+
 let id_of_string of_string text =
   match of_string text with
   | Ok id -> id
@@ -80,7 +83,7 @@ let step_label = function
 ;;
 
 let step_ok state record =
-  match S.step state record with
+  match step state record with
   | Ok state -> state
   | Error refusal -> Alcotest.failf "the fixture record was refused: %s" (S.refusal_to_string refusal)
 ;;
@@ -200,14 +203,14 @@ let test_bootstrap_record () =
 ;;
 
 let test_mode_event_out_of_order () =
-  match S.step S.empty (mode_record M.Off workspace) with
+  match step S.empty (mode_record M.Off workspace) with
   | Error (S.Mode (Mode.Out_of_order _)) -> ()
   | other -> Alcotest.failf "expected an out-of-order refusal, got %s" (step_label other)
 ;;
 
 let test_mode_event_unreadable () =
   let body = body_of_json (`Assoc [ "event", `String "fresh_bootstrap" ]) in
-  match S.step S.empty (record K.Mode_event body) with
+  match step S.empty (record K.Mode_event body) with
   | Error (S.Mode_event_unreadable _) -> ()
   | other -> Alcotest.failf "expected an unreadable mode event, got %s" (step_label other)
 ;;
@@ -219,12 +222,12 @@ let test_kinds_not_read () =
   List.iter
     (fun kind ->
       let name = K.to_string kind in
-      (match S.step S.empty (record kind body) with
+      (match step S.empty (record kind body) with
        | Error (S.Before_bootstrap refused) when refused = kind -> ()
        | other -> Alcotest.failf "%s before the bootstrap: %s" name (step_label other));
       List.iter
         (fun (mode_name, state) ->
-          match S.step state (record kind body) with
+          match step state (record kind body) with
           | Error (S.Kind_not_read refused) when refused = kind -> ()
           | other -> Alcotest.failf "%s while %s: %s" name mode_name (step_label other))
         after)
@@ -333,17 +336,17 @@ let test_a_revocation_is_an_intent () =
 ;;
 
 let test_an_invitation_by_mode () =
-  (match S.step S.empty (invite_record ()) with
+  (match step S.empty (invite_record ()) with
    | Error (S.Before_bootstrap K.Invite) -> ()
    | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
-  match S.step (switched_off ()) (invite_record ()) with
+  match step (switched_off ()) (invite_record ()) with
   | Error (S.Accounts_off K.Invite) -> ()
   | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
 ;;
 
 let test_an_invitation_that_is_refused () =
   let refused label record expected =
-    match S.step (bootstrapped ()) record with
+    match step (bootstrapped ()) record with
     | Error refusal when expected refusal -> ()
     | other -> Alcotest.failf "%s: %s" label (step_label other)
   in
@@ -466,7 +469,7 @@ let test_an_admission_through_an_admin_invitation () =
 let test_an_admission_that_is_refused () =
   let admitted = step_ok (invited ()) (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) in
   let refused label state record expected =
-    match S.step state record with
+    match step state record with
     | Error refusal -> Alcotest.(check string) label expected (S.refusal_to_string refusal)
     | Ok _ -> Alcotest.failf "%s: the admission was taken" label
   in
@@ -497,14 +500,14 @@ let test_an_admission_that_is_refused () =
     (admission_record ~user_id:bob ~identity:alice_identity ~invite:second_invite ())
     "the identity google:111 is bound to user-1";
   (match
-     S.step
+     step
        (S.hold_revocations (invited ()) [ held (Authz_records.Subject.Invite invite_id) ])
        (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ())
    with
    | Error (S.Revocation_pending subject) ->
      Alcotest.(check string) "a revocation given up" "invite:invite-1" (Authz_records.Subject.to_string subject)
    | other -> Alcotest.failf "an invitation whose revocation was given up: %s" (step_label other));
-  (match S.step S.empty (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) with
+  (match step S.empty (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) with
    | Error (S.Before_bootstrap K.Admission) -> ()
    | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
   refused "an admission before a record already read"
@@ -514,7 +517,7 @@ let test_an_admission_that_is_refused () =
        "the admission is at %d ms, before a record of the log at %d ms: the clock went back"
        (at_ms + 4)
        (at_ms + 5));
-  match S.step (step_ok (invited ()) (mode_record M.Off workspace))
+  match step (step_ok (invited ()) (mode_record M.Off workspace))
           (admission_record ~user_id:user ~identity:alice_identity ~invite:invite_id ()) with
   | Error (S.Accounts_off K.Admission) -> ()
   | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
@@ -566,7 +569,7 @@ let test_an_admin_revokes_an_admin () =
       (Some "revoke of principal:human:user-2")
       (Option.map Authz_external_store.Change.to_string high_water);
     Alcotest.(check bool) "bob is no longer an Admin" false (People.is_admin state.S.principals bob);
-    (match S.step state (admin_record ~by:user ~user_id:user) with
+    (match step state (admin_record ~by:user ~user_id:user) with
      | Error refusal ->
        Alcotest.(check string)
          "the last Admin"
@@ -652,7 +655,7 @@ let test_closes_that_name_no_block_of_the_change_are_refused () =
   let other = held ~aborted:(String.make 64 'c') (Authz_records.Subject.Invite second_invite) in
   let state = S.hold_revocations (invited ()) [ first; other ] in
   let refused label record expected =
-    match S.step state record with
+    match step state record with
     | Error refusal -> Alcotest.(check string) label expected (S.refusal_to_string refusal)
     | Ok _ -> Alcotest.failf "%s: the record was read" label
   in
@@ -679,11 +682,11 @@ let test_a_principal_whose_revocation_was_given_up_writes_nothing () =
       (two_admins ())
       [ held (Authz_records.Subject.Principal (Authz_types.Principal.Human bob)) ]
   in
-  match S.step held (admin_record ~by:bob ~user_id:user) with
+  match step held (admin_record ~by:bob ~user_id:user) with
   | Error (S.Revocation_pending subject) ->
     Alcotest.(check string) "the author" "principal:human:user-2" (Authz_records.Subject.to_string subject);
     Alcotest.(check bool) "user is still an Admin" true (People.is_admin held.S.principals user);
-    (match S.step held (admin_record ~by:user ~user_id:user) with
+    (match step held (admin_record ~by:user ~user_id:user) with
      | Error refusal ->
        Alcotest.(check string)
          "bob does not count as the Admin that remains"
@@ -718,7 +721,7 @@ let test_an_admin_invites_a_member () =
        | Ok record -> record
        | Error _ -> Alcotest.fail "fixture invite record refused")
   in
-  (match S.step (invited ()) member_invite with
+  (match step (invited ()) member_invite with
    | Error (S.Invite (Invites.Author_is_not_an_admin _)) -> ()
    | other -> Alcotest.failf "before user is an Admin: %s" (step_label other));
   let state = step_ok admitted member_invite in
@@ -728,10 +731,10 @@ let test_an_admin_invites_a_member () =
 ;;
 
 let test_an_admin_assignment_by_mode () =
-  (match S.step S.empty (admin_record ~by:user ~user_id:bob) with
+  (match step S.empty (admin_record ~by:user ~user_id:bob) with
    | Error (S.Before_bootstrap K.Admin_assignment) -> ()
    | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
-  match S.step (step_ok (two_admins ()) (mode_record M.Off workspace)) (admin_record ~by:user ~user_id:bob) with
+  match step (step_ok (two_admins ()) (mode_record M.Off workspace)) (admin_record ~by:user ~user_id:bob) with
   | Error (S.Accounts_off K.Admin_assignment) -> ()
   | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
 ;;
@@ -768,7 +771,7 @@ let applied_change label state record expected =
 ;;
 
 let check_inactive label state record =
-  match S.step state record with
+  match step state record with
   | Error (S.Author_inactive id) ->
     Alcotest.(check string) label "user-2" (Authz_types.User_id.to_string id)
   | other -> Alcotest.failf "%s: %s" label (step_label other)
@@ -785,7 +788,7 @@ let test_a_principal_record () =
       (Some "disable of principal:human:user-2")
   in
   check_inactive "bob writes while disabled" disabled (admin_record ~by:bob ~user_id:user);
-  (match S.step disabled (admin_record ~by:user ~user_id:user) with
+  (match step disabled (admin_record ~by:user ~user_id:user) with
    | Error refusal ->
      Alcotest.(check string)
        "a disabled Admin does not count as the one that remains"
@@ -813,10 +816,10 @@ let test_a_principal_record () =
 
 let test_a_principal_record_by_mode () =
   let disable = principal_record ~by:user (Pe.Disabled { user_id = bob }) in
-  (match S.step S.empty disable with
+  (match step S.empty disable with
    | Error (S.Before_bootstrap K.Principal) -> ()
    | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
-  match S.step (step_ok (two_admins ()) (mode_record M.Off workspace)) disable with
+  match step (step_ok (two_admins ()) (mode_record M.Off workspace)) disable with
   | Error (S.Accounts_off K.Principal) -> ()
   | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
 ;;
@@ -856,7 +859,7 @@ let test_fresh_bootstrap_log () =
          with
          | Ok _ -> ()
          | Error error -> Alcotest.failf "bootstrap refused: %s" (Authz_bootstrap.error_to_string error));
-        match L.open_at_start ~path:(L.path_of_base_path ~base_path) ~init:S.empty ~step:S.step with
+        match L.open_at_start ~path:(L.path_of_base_path ~base_path) ~init:S.empty ~step:step with
         | Error error -> Alcotest.failf "the log did not fold: %s" (L.open_error_to_string S.refusal_to_string error)
         | Ok (_log, state, _recovered) ->
           Alcotest.check mode "the workspace of the bootstrap" (Mode.Multi_account workspace) state.S.mode))
@@ -1026,11 +1029,11 @@ let test_a_cancel_that_is_refused () =
 
 let test_a_cancel_by_mode () =
   let carol_held = held (principal_subject carol) in
-  (match S.step S.empty (cancel_record carol_held) with
+  (match step S.empty (cancel_record carol_held) with
    | Error (S.Before_bootstrap K.Revocation_cancel) -> ()
    | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
   let off = S.hold_revocations (step_ok (three_admins ()) (mode_record M.Off workspace)) [ carol_held ] in
-  match S.step off (cancel_record carol_held) with
+  match step off (cancel_record carol_held) with
   | Error (S.Accounts_off K.Revocation_cancel) -> ()
   | other -> Alcotest.failf "with the accounts off: %s" (step_label other)
 ;;
@@ -1142,10 +1145,10 @@ let test_a_registration_that_is_refused () =
 ;;
 
 let test_a_registration_by_mode () =
-  (match S.step S.empty (registered_by ~by:user dana_identity) with
+  (match step S.empty (registered_by ~by:user dana_identity) with
    | Error (S.Before_bootstrap K.Registration) -> ()
    | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
-  match S.step (step_ok (three_admins ()) (mode_record M.Off workspace)) (registered_by ~by:user dana_identity) with
+  match step (step_ok (three_admins ()) (mode_record M.Off workspace)) (registered_by ~by:user dana_identity) with
   | Error (S.Accounts_off K.Registration) -> ()
   | other -> Alcotest.failf "with the accounts off: %s" (step_label other)
 ;;
@@ -1301,7 +1304,7 @@ let test_sessions_and_their_intents () =
 ;;
 
 let step_word state record =
-  match S.step state record with
+  match step state record with
   | Ok (_ : S.t) -> "taken"
   | Error refusal -> S.refusal_to_string refusal
 ;;
@@ -1324,7 +1327,7 @@ let test_a_session_record_that_is_refused () =
       , S.Session (Sessions.Already_issued first_session) )
     ];
   let disabled = step_ok state (principal_record ~by:bob (Pe.Disabled { user_id = user })) in
-  match S.step disabled (session_record ~by:user (Se.Revoked { session_id = first_session })) with
+  match step disabled (session_record ~by:user (Se.Revoked { session_id = first_session })) with
   | Error (S.Author_inactive id) ->
     Alcotest.(check string) "a disabled principal writes no session record" "user-1" (Authz_types.User_id.to_string id)
   | other -> Alcotest.failf "a disabled principal: %s" (step_label other)
@@ -1332,10 +1335,10 @@ let test_a_session_record_that_is_refused () =
 
 let test_a_session_record_by_mode () =
   let record = session_record ~by:user (issued ~by:user first_session) in
-  (match S.step S.empty record with
+  (match step S.empty record with
    | Error (S.Before_bootstrap K.Session) -> ()
    | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
-  match S.step (step_ok (two_admins ()) (mode_record M.Off workspace)) record with
+  match step (step_ok (two_admins ()) (mode_record M.Off workspace)) record with
   | Error (S.Accounts_off K.Session) -> ()
   | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
 ;;
@@ -1493,7 +1496,7 @@ let test_service_credentials_and_their_intents () =
     revoked
     (credential_record (Sc.Revoked { credential_id = first_credential }))
     (S.Service_credential (Scs.Already_revoked first_credential));
-  match S.step S.empty (credential_record (Sc.Revoked { credential_id = first_credential })) with
+  match step S.empty (credential_record (Sc.Revoked { credential_id = first_credential })) with
   | Error (S.Before_bootstrap K.Internal_service_credential) -> ()
   | other -> Alcotest.failf "before the bootstrap: %s" (step_label other)
 ;;

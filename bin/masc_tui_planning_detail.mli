@@ -138,11 +138,21 @@ val split_embedded_json : string -> (string * string * string) option
     holding JSON-looking text stays a quoted string. Shared with the keeper
     detail's current-failure block, which reads the same wire summaries. *)
 
+val moment_text : now:float -> string -> string
+(** A moment the wire spells as ISO-8601 text, where it has a line or a clause
+    to itself: the clock alone today, month and day first inside this year,
+    the year too in another one, all in the operator's zone
+    ({!Masc_tui_value.Instant.detail_text}). The Goal screens printed the wire
+    text itself, so "Created" read [2026-11-11T10:39:49Z] -- UTC, nine hours
+    off every moment the other screens draw, with only a trailing Z to say
+    so. Text that
+    does not parse is returned as it arrived. *)
+
 val timeline_unavailability_detail : Tui_decode.goal_timeline_unavailability -> string
 (** Preserve the typed source failure's cause at the history read boundary. *)
 
 val timeline :
-  ko:bool -> width:int ->
+  ko:bool -> now:float -> width:int ->
   goal_id:string ->
   (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t ->
   line list
@@ -151,7 +161,9 @@ val timeline :
     loading, store unavailable, load failed, stale answer for another goal)
     says what it is instead of rendering as an empty history. Refresh failures
     retain the last observed rows with their stale reason; they do not certify
-    the goal's current work or turn a source-unavailable result into success. *)
+    the goal's current work or turn a source-unavailable result into success.
+    Each row's stamp is drawn in the operator's time zone; [now] decides how
+    much of its date the row still needs. *)
 
 val criterion_review_lines :
   width:int -> ko:bool -> Tui_decode.goal_criterion_review -> line list

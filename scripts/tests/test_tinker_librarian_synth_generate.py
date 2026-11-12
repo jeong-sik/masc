@@ -182,6 +182,14 @@ def mean(values: list[float]) -> float:
 
 
 class PlanTest(unittest.TestCase):
+    def test_a_batch_that_starts_where_the_last_ended_shares_no_memory_key_with_it(self) -> None:
+        per_keeper = 3
+        first = G.memory_homes([KEEPER], per_keeper, 0)
+        second = G.memory_homes([KEEPER], per_keeper, per_keeper)
+        self.assertEqual([i for _, i in first + second], list(range(2 * per_keeper)))
+        keys = [G.plan_memory(random.Random(i), keeper, i, False).memory_key for keeper, i in first + second]
+        self.assertEqual(keys, [f"{KEEPER.key}-{i:02d}" for i in range(2 * per_keeper)])
+
     def test_no_category_holds_more_than_the_cap(self) -> None:
         full = 0
         for seed in range(600):

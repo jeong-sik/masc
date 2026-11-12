@@ -56,12 +56,15 @@ type provider_error =
   | Server of string     (* endpoint returned a non-200 status or no status *)
   | Config of string     (* missing credentials / invalid configuration *)
   | Parse of string      (* payload could not be parsed into hits *)
+  | Account_refused of Runtime_account_access.refusal
+      (* the process does not send with the keys of its host *)
 
 let provider_error_to_string = function
   | Transport msg -> "transport: " ^ msg
   | Server msg -> "server: " ^ msg
   | Config msg -> "config: " ^ msg
   | Parse msg -> "parse: " ^ msg
+  | Account_refused refusal -> "account: " ^ Runtime_account_access.refusal_to_string refusal
 
 type simulated_provider_outcome =
   [ `Error of string
@@ -260,9 +263,12 @@ let parse_provider_csv raw =
    [masc web-search-setup] reports credentials through the same table. *)
 let provider_has_credentials = Web_search_provider.has_credentials
 
-(* The credential a fetcher sends, looked up through the table that admitted
-   the provider, so the variable a failure names is the one that was read. *)
-let credential provider =
+(* HIGH-RISK-UNREVIEWED: the credential a fetcher sends, looked up through the
+   table that admitted the provider, so the variable a failure names is the
+   one that was read. The key is an account of the host, so it is read only
+   with the proof that the access shares the accounts of the host (plan
+   D4d). *)
+let credential (_ : Runtime_account_access.host_account) provider =
   match Web_search_provider.credential provider with
   | Some value -> Ok value
   | None ->
@@ -480,8 +486,8 @@ let brave_response_of_body ~search_url ~limit payload =
   let* parsed = parse_brave_json payload in
   response_of_parsed Brave ~search_url ~limit parsed
 
-let fetch_brave ~timeout_sec ~query ~limit =
-  match credential Brave with
+let fetch_brave ~host ~timeout_sec ~query ~limit =
+  match credential host Brave with
   | Error error -> Error error
   | Ok api_key ->
       let search_url =
@@ -497,8 +503,8 @@ let fetch_brave ~timeout_sec ~query ~limit =
       |> settle_provider_response
            ~on_ok:(brave_response_of_body ~search_url ~limit)
 
-let fetch_tavily ~timeout_sec ~query ~limit =
-  match credential Tavily with
+let fetch_tavily ~host ~timeout_sec ~query ~limit =
+  match credential host Tavily with
   | Error error -> Error error
   | Ok api_key ->
       let search_url = "https://api.tavily.com/search" in
@@ -521,8 +527,8 @@ let fetch_tavily ~timeout_sec ~query ~limit =
              let* parsed = parse_tavily_json payload in
              response_of_parsed Tavily ~search_url ~limit parsed)
 
-let fetch_exa ~timeout_sec ~query ~limit =
-  match credential Exa with
+let fetch_exa ~host ~timeout_sec ~query ~limit =
+  match credential host Exa with
   | Error error -> Error error
   | Ok api_key ->
       let search_url = "https://api.exa.ai/search" in
@@ -545,8 +551,8 @@ let fetch_exa ~timeout_sec ~query ~limit =
              let* parsed = parse_exa_json payload in
              response_of_parsed Exa ~search_url ~limit parsed)
 
-let fetch_bing_api ~timeout_sec ~query ~limit =
-  match credential Bing_api with
+let fetch_bing_api ~host ~timeout_sec ~query ~limit =
+  match credential host Bing_api with
   | Error error -> Error error
   | Ok key ->
       let search_url =
@@ -572,8 +578,8 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
    (maximum_number_of_tokens, provider default 8192); [limit] maps to
    maximum_number_of_urls. A valid response with zero grounded items
    stays Ok so the chain records it as "no results". *)
-let fetch_brave_llm_context ~timeout_sec ~query ~limit =
-  match credential Brave_llm_context with
+let fetch_brave_llm_context ~host ~timeout_sec ~query ~limit =
+  match credential host Brave_llm_context with
   | Error error -> Error error
   | Ok api_key ->
       let search_url =
@@ -597,8 +603,8 @@ let fetch_brave_llm_context ~timeout_sec ~query ~limit =
 (* Contract: https://docs.ollama.com/capabilities/web-search
    POST /api/web_search with {query, max_results (default 5, max 10)}
    answers {results: [{title, url, content}]}. *)
-let fetch_ollama ~timeout_sec ~query ~limit =
-  match credential Ollama with
+let fetch_ollama ~host ~timeout_sec ~query ~limit =
+  match credential host Ollama with
   | Error error -> Error error
   | Ok api_key ->
       let search_url = "https://ollama.com/api/web_search" in
@@ -747,14 +753,21 @@ let curl_mcp_post ~timeout_sec =
 
 let curl_mcp_post_with_for_test = curl_mcp_post_with
 
-let fetch_zai ~timeout_sec ~query ~limit =
-  match credential Zai with
+let fetch_zai ~host ~timeout_sec ~query ~limit =
+  match credential host Zai with
   | Error error -> Error error
   | Ok api_key ->
       search_via_zai ~post:(curl_mcp_post ~timeout_sec) ~api_key ~query ~limit
 
-let fetch_provider ~query ~limit provider =
+(* [host] is the access the search took once. A provider that needs a key is
+   called only with its proof; SearXNG needs none. *)
+let fetch_provider ~host ~query ~limit provider =
   let timeout_sec = Env_config.Tools.web_search_timeout_sec () in
+  let keyed fetch =
+    match host with
+    | Error refusal -> Error (Account_refused refusal)
+    | Ok host -> fetch host
+  in
   match provider with
   | Searxng -> (
       match fetch_searxng ~timeout_sec ~query with
@@ -767,25 +780,25 @@ let fetch_provider ~query ~limit provider =
           in
           Ok (Hits { engine = provider_to_string Searxng; search_url; hits }))
   | Brave ->
-      fetch_brave ~timeout_sec ~query ~limit
+      keyed (fun host -> fetch_brave ~host ~timeout_sec ~query ~limit)
       |> Result.map (fun response -> Hits response)
   | Brave_llm_context ->
-      fetch_brave_llm_context ~timeout_sec ~query ~limit
+      keyed (fun host -> fetch_brave_llm_context ~host ~timeout_sec ~query ~limit)
       |> Result.map (fun context -> Grounded context)
   | Tavily ->
-      fetch_tavily ~timeout_sec ~query ~limit
+      keyed (fun host -> fetch_tavily ~host ~timeout_sec ~query ~limit)
       |> Result.map (fun response -> Hits response)
   | Exa ->
-      fetch_exa ~timeout_sec ~query ~limit
+      keyed (fun host -> fetch_exa ~host ~timeout_sec ~query ~limit)
       |> Result.map (fun response -> Hits response)
   | Bing_api ->
-      fetch_bing_api ~timeout_sec ~query ~limit
+      keyed (fun host -> fetch_bing_api ~host ~timeout_sec ~query ~limit)
       |> Result.map (fun response -> Hits response)
   | Ollama ->
-      fetch_ollama ~timeout_sec ~query ~limit
+      keyed (fun host -> fetch_ollama ~host ~timeout_sec ~query ~limit)
       |> Result.map (fun response -> Hits response)
   | Zai ->
-      fetch_zai ~timeout_sec ~query ~limit
+      keyed (fun host -> fetch_zai ~host ~timeout_sec ~query ~limit)
       |> Result.map (fun response -> Hits response)
 
 let cache_key ~query ~limit =
@@ -876,6 +889,9 @@ let cache_store key answer now =
 type search_failure =
   | No_provider_configured
   | All_providers_failed of string
+  | Host_keys_refused of Runtime_account_access.refusal
+      (* The process sends nothing with the keys of its host, and the
+         provider order holds no provider that needs none. *)
 
 let no_provider_configured_message =
   let names =
@@ -919,13 +935,24 @@ let search_chain ~fetch providers =
   in
   loop None [] providers
 
+(* A multi-account process sends nothing with the keys of its host (plan
+   D4d). It still asks a provider without a key; a provider with one fails in
+   the chain with the refusal, so a served answer lists it in its errors.
+   When no provider of the order can answer there, the search ends with the
+   refusal, not with the chain's failures. *)
 let search_impl ~query ~limit =
-  search_chain (provider_order ())
-    ~fetch:(fun provider ->
-      fetch_provider ~query ~limit provider
-      |> Result.map_error (fun error ->
-          { provider = provider_to_string provider
-          ; detail = provider_error_to_string error }))
+  let host = Runtime_account_access.authorize_host Runtime_account_access.Web_search in
+  let providers = provider_order () in
+  let keyless provider = not (Web_search_provider.needs_credential_to_call provider) in
+  match host with
+  | Error refusal when not (List.exists keyless providers) -> Error (Host_keys_refused refusal)
+  | Ok _ | Error _ ->
+      search_chain providers
+        ~fetch:(fun provider ->
+          fetch_provider ~host ~query ~limit provider
+          |> Result.map_error (fun error ->
+              { provider = provider_to_string provider
+              ; detail = provider_error_to_string error }))
 
 let search_impl_cell = Atomic.make search_impl
 
@@ -982,6 +1009,10 @@ let with_simulated_search_for_test ~outcomes f =
      This boundary stays [Runtime_failure] because blind-retry is
      not guaranteed safe (some providers may have returned 4xx).
 
+   - [Policy_rejection]: the process sends nothing with the keys of
+     its host and no provider of the order needs none
+     ([Host_keys_refused]). The same search stays refused.
+
    The two used to share [Runtime_failure]. A tool that says "it
    crashed" when it means "you have not configured me" tells the
    model to retry something no retry can fix.
@@ -1000,6 +1031,27 @@ let dependency_err ~tool_name ~start_time message =
   Tool_result.error ~failure_class:Tool_result.Dependency_unavailable ~tool_name
     ~start_time message
 
+let host_keys_refused_message refusal =
+  Printf.sprintf
+    "%s. Only a provider without a key searches in this process: SearXNG \
+     (MASC_SEARXNG_URL). `masc web-search-setup` shows what each provider needs."
+    (Runtime_account_access.refusal_to_string refusal)
+
+let failure_message = function
+  | No_provider_configured -> no_provider_configured_message
+  | All_providers_failed detail -> detail
+  | Host_keys_refused refusal -> host_keys_refused_message refusal
+
+(* One boundary for the tool and its simulator. *)
+let failure_result ~tool_name ~start_time failure =
+  let message = failure_message failure in
+  match failure with
+  | No_provider_configured -> dependency_err ~tool_name ~start_time message
+  | All_providers_failed _ -> runtime_err ~tool_name ~start_time message
+  | Host_keys_refused _ ->
+      Tool_result.error ~failure_class:Tool_result.Policy_rejection ~tool_name ~start_time
+        message
+
 let handle ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in
   match validate_query query with
@@ -1016,10 +1068,7 @@ let handle ~tool_name ~start_time args : Tool_result.result =
            let answer = answer_of ~query response in
            cache_store key answer now;
            data_ok ~tool_name ~start_time answer.data
-         | Error No_provider_configured ->
-             dependency_err ~tool_name ~start_time no_provider_configured_message
-         | Error (All_providers_failed detail) ->
-             runtime_err ~tool_name ~start_time detail)
+         | Error failure -> failure_result ~tool_name ~start_time failure)
 
 (* Lane Add-on web-search port (task-2527 E11): the secret-free projection of
    the same chain the tool dispatches. Validation, cache identity/window and
@@ -1049,16 +1098,11 @@ let addon_search_runner ~query ~limit =
              let answer = answer_of ~query response in
              cache_store key answer now;
              Ok (envelope answer)
-         | Error No_provider_configured -> Error no_provider_configured_message
-         | Error (All_providers_failed detail) -> Error detail)
+         | Error failure -> Error (failure_message failure))
 
 let simulate_for_test ~query ~limit outcomes : Tool_result.result =
   let start_time = Tool_timing.start () in
   match simulated_search_impl ~outcomes ~query ~limit with
   | Ok response ->
       data_ok ~tool_name:"masc_web_search" ~start_time (answer_of ~query response).data
-  | Error No_provider_configured ->
-      dependency_err ~tool_name:"masc_web_search" ~start_time
-        no_provider_configured_message
-  | Error (All_providers_failed detail) ->
-      runtime_err ~tool_name:"masc_web_search" ~start_time detail
+  | Error failure -> failure_result ~tool_name:"masc_web_search" ~start_time failure

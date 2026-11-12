@@ -100,18 +100,7 @@ let binding_json binding = `Assoc ["installation_id",`String binding.installatio
 (* Full health is readable without operator credentials. Provider bodies and
    host failure details remain in the authenticated Lane inventory; this
    surface carries typed categories and original IDs, never those bodies. *)
-let not_final_json reason =
-  let code = match reason with
-    | Exact.Lane_unavailable Lane_unconfigured -> "lane_unconfigured"
-    | Lane_unavailable Lane_off -> "lane_off"
-    | Lane_unavailable No_admitted_slots -> "no_admitted_slots"
-    | Lane_unavailable (Lane_registry_unavailable _) -> "lane_registry_unavailable"
-    | Lane_unavailable (Every_slot_held _) -> "every_slot_held"
-    | Provider_refused (Provider_unavailable _) -> "provider_unavailable"
-    | Provider_refused (Provider_auth_refused _) -> "provider_auth_refused"
-    | Provider_refused (Provider_configuration_refused _) -> "provider_configuration_refused"
-    | Attempt_in_progress -> "attempt_in_progress" in
-  `Assoc ["reason",`String code]
+let not_final_json reason = `Assoc ["reason",`String (Exact.not_final_reason reason)]
 let host_issue_json issue =
   let code,request = match issue with
     | Runtime.Listing_failed _ -> "listing_failed",None

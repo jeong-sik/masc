@@ -134,6 +134,14 @@ let hour_key_of_record record =
 
 module String_map = Map.Make (String)
 
+(* One hour of the trend: its calls and successes, and the bytes of the
+   results those calls returned (the ledger rows' [result_bytes]). *)
+type hour_entry =
+  { hour_calls : int
+  ; hour_successes : int
+  ; hour_result_bytes : int
+  }
+
 type rate_entry =
   { calls : int
   ; successes : int
@@ -168,6 +176,20 @@ let update_rate_map map key ok =
     }
     map
 
+let update_hour_map map key ok result_bytes =
+  let cur =
+    String_map.find_opt key map
+    |> Option.value
+         ~default:{ hour_calls = 0; hour_successes = 0; hour_result_bytes = 0 }
+  in
+  String_map.add
+    key
+    { hour_calls = cur.hour_calls + 1
+    ; hour_successes = cur.hour_successes + (if ok then 1 else 0)
+    ; hour_result_bytes = cur.hour_result_bytes + result_bytes
+    }
+    map
+
 let render_rate_map ~field map =
   String_map.fold
     (fun name ({ calls; successes } : rate_entry) acc ->
@@ -189,7 +211,7 @@ let render_rate_map ~field map =
 type summary_acc =
   { total : int
   ; success : int
-  ; hourly_trend : rate_entry String_map.t
+  ; hourly_trend : hour_entry String_map.t
   ; tool_stats : tool_entry String_map.t
   ; keeper_stats : rate_entry String_map.t
   ; runtime_stats : rate_entry String_map.t
@@ -363,7 +385,8 @@ let summarize ~sampling records : Yojson.Safe.t =
         in
         { total = acc.total + 1
         ; success = acc.success + (if ok then 1 else 0)
-        ; hourly_trend = update_rate_map acc.hourly_trend hour_key ok
+        ; hourly_trend =
+            update_hour_map acc.hourly_trend hour_key ok output_chars
         ; tool_stats
         ; keeper_stats = update_rate_map acc.keeper_stats keeper ok
         ; runtime_stats =
@@ -448,17 +471,20 @@ let summarize ~sampling records : Yojson.Safe.t =
   in
   let hourly =
     String_map.fold
-      (fun hour ({ calls; successes } : rate_entry) out ->
+      (fun hour
+           ({ hour_calls; hour_successes; hour_result_bytes } : hour_entry)
+           out ->
         let pct =
-          if calls > 0
-          then Float.of_int successes /. Float.of_int calls *. 100.0
+          if hour_calls > 0
+          then Float.of_int hour_successes /. Float.of_int hour_calls *. 100.0
           else 0.0
         in
         (hour, `Assoc [
           ("hour", `String hour);
-          ("calls", `Int calls);
-          ("success", `Int successes);
+          ("calls", `Int hour_calls);
+          ("success", `Int hour_successes);
           ("success_rate", `Float (Float.round (pct *. 10.0) /. 10.0));
+          ("result_bytes", `Int hour_result_bytes);
         ]) :: out)
       acc.hourly_trend
       []

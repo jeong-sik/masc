@@ -27,7 +27,10 @@
     carries the credentials of the process environment. For a Keeper turn
     that person is the owner of the Keeper, and the log decides the turn
     ({!Authz_keeper_turn.decide}) and names the Runtime and the account. No
-    operator owns the account of a person, so an operator call is refused. *)
+    operator owns the account of a person, so an operator call is refused.
+    Each request is judged on one snapshot that the zone could be trusted for
+    ({!Authz_zone.read}); a zone whose files stopped or disagree refuses every
+    request ({!Zone_uncertain}). *)
 
 (** An account captured from a declaration. No CLI starts on it, and it
     gives no environment: the runtime table holds this, so a reader of the
@@ -117,6 +120,15 @@ type host_client =
       (** The exact-output targets of the full replacement catalog
           [AGENT_CORE_MODEL_CATALOG] names, which carries its own providers
           and their credentials (plan D4b). *)
+  | Web_search
+      (** A provider of [masc_web_search] that needs a key: Brave, Tavily,
+          Exa, Bing, Ollama or Z.AI (plan D4d). SearXNG needs none. *)
+  | Systemone_cloud
+      (** The cloud backend of the SystemOne tool, called with
+          [OLLAMA_CLOUD_API_KEY] (plan D4d). The local backend needs none. *)
+  | Voice_endpoint
+      (** A voice endpoint whose adapter names a key variable, such as
+          ElevenLabs (plan D4d). An endpoint that names none needs no key. *)
 
 (** A start of a host client that the published access allows. Only
     {!authorize_host} makes one. *)
@@ -125,7 +137,10 @@ type host_account
 (** The access of a process. *)
 type t =
   | Single_user of Authz_boot_mode_read.single_user
-      (** The boot judged the base path a single-user boot. *)
+      (** The boot judged the base path a single-user boot. After the accounts
+          were turned off ({!Authz_boot_mode_read.turned_off}), their records
+          stay read-only: {!authorize} refuses a run on their Keepers, their
+          Runtimes and the homes of their persons. *)
   | Multi_account of
       { zone : Authz_zone.t  (** The authorization zone of [base_path]. *)
       ; base_path : string
@@ -173,6 +188,11 @@ type request =
 type refusal =
   | Not_published  (** The process has not published its access. *)
   | No_operator  (** An operator call in a multi-account process. *)
+  | Zone_uncertain of Authz_zone.uncertain
+      (** A file of the authorization zone is stopped, or the files disagree
+          ({!Authz_zone.read}): nothing is decided on its state, so no client
+          starts for a person or for a turn. The text says which file it is
+          and names no path ({!Authz_zone.uncertain_to_string}). *)
   | Not_a_keeper_id of string  (** The name of the Keeper is not an id of the log. *)
   | Turn_refused of Authz_keeper_turn.refusal
   | Not_the_assigned_runtime of
@@ -191,6 +211,16 @@ type refusal =
   | Host_account of host_client
       (** A host client in a multi-account process, which shares no account
           of its host. *)
+  | Off_keeper of Authz_types.Keeper_id.t
+      (** A turn of a Keeper of the log, after the accounts were turned off. *)
+  | Off_runtime of Authz_types.Runtime_id.t
+      (** A turn on a Runtime of the log, after the accounts were turned off. *)
+  | Off_person_home
+      (** A start on a home under the runtime roots of the persons
+          ({!Runtime_account_home_layout.under_persons}), after the accounts
+          were turned off. *)
+  | Off_own_account of Authz_types.User_id.t
+      (** A person's own account, after the accounts were turned off. *)
 
 val refusal_to_string : refusal -> string
 
@@ -201,8 +231,18 @@ val authorize : request -> 'client sealed -> ('client authorized, refusal) resul
     published, by the rule of {!authorize}. *)
 val authorize_muse : request -> 'where muse_account -> ('where muse_authorized, refusal) result
 
-(** Allows a start of a host client in a single-user process, and refuses it
-    in a multi-account process with {!Host_account}. *)
+(** Why the accounts of the host are not allowed. *)
+type host_refusal =
+  | Host_unpublished  (** The process has not published its access. *)
+  | Host_not_shared  (** A multi-account process shares no account of its host. *)
+
+(** Allows the accounts of the host in a single-user process. The decision
+    does not depend on who asks or for which client: phase 1 shares them with
+    nobody in a multi-account process. *)
+val host_access : unit -> (host_account, host_refusal) result
+
+(** {!host_access} for a start of [client]: a refusal is {!Not_published} or
+    {!Host_account} naming [client]. *)
 val authorize_host : host_client -> (host_account, refusal) result
 
 (** {1 API providers}
@@ -251,17 +291,35 @@ val api_admission_snapshot : api_sealed -> Llm_provider.Slot_scheduler.snapshot 
     own files, so a multi-account process runs a model turn only without
     native tools (plan D3c). Codex and Muse cannot drop their native tools,
     so their model turns are refused there until a measurement opens a
-    posture. Calls that run no model turn (a login check, a usage read, a
-    model list) take no native tools and are not judged here. *)
+    posture. A single-user process whose workspace keeps runtime roots of
+    persons is in the same place for those roots (plan F3a-3). Calls that run
+    no model turn (a login check, a usage read, a model list) take no native
+    tools and are not judged here. *)
 
 type native_refusal =
   | Native_unpublished  (** The process has not published its access. *)
   | Native_tools_reach_other_homes of Runtime_native_tools.posture
       (** A model turn with native tools in a multi-account process. *)
+  | Native_tools_reach_person_homes of Runtime_native_tools.posture
+      (** A model turn with native tools in a single-user process whose
+          workspace keeps runtime roots of persons
+          ({!Runtime_account_home_layout.persons_remain}). *)
+  | Person_homes_unread of
+      { posture : Runtime_native_tools.posture
+      ; unread : Unix.error
+      }
+      (** A single-user process could not read whether such roots remain. *)
 
 val native_refusal_to_string : native_refusal -> string
 
-(** Whether a model turn may run with the native tools of [posture]: every
-    posture in a single-user process, and only
-    {!Runtime_native_tools.Native_none} in a multi-account process. *)
+(** Whether a model turn may run with the native tools of [posture].
+    {!Runtime_native_tools.Native_none} runs in either mode. The other
+    postures run only in a single-user process whose workspace keeps no
+    runtime root of a person: after the accounts were turned off, or after
+    their log was removed, the logins of the persons stay under
+    [.masc/accounts] until the operator removes that directory, and the
+    native tools of a CLI could read them (plan F3a-3). Whether it is there is
+    read at each call, and the client starts after the answer: a directory
+    that appears between the two is seen by the next turn, not by this
+    one. *)
 val authorize_native : Runtime_native_tools.posture -> (unit, native_refusal) result

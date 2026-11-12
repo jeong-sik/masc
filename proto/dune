@@ -1,13 +1,31 @@
-;; Protobuf code generation for MASC workspace protocol.
-;; Uses ocaml-protoc-plugin to generate OCaml types with binary serialization.
+;; Protobuf types for the MASC workspace protocol.
+;;
+;; masc_workspace.ml is what ocaml-protoc-plugin generates from
+;; masc_workspace.proto, and it is committed. A build compiles the committed
+;; file and does not call protoc: protoc comes from the system package
+;; manager, and a build that needs it fails whenever that package cannot be
+;; fetched (issue #51372, every PR type-check for hours on 2026-11-11).
 
 (library
  (name masc_proto)
  (public_name masc.proto)
  (libraries ocaml-protoc-plugin))
 
+;; `dune build @proto/generated` generates the file again and compares it
+;; with the committed one. After a change to masc_workspace.proto it fails
+;; with the diff; `dune build @proto/generated --auto-promote` writes the
+;; generated file into the source tree. This is the only rule that calls
+;; protoc, and .github/workflows/proto-generated.yml runs it on a pull
+;; request that changes this directory or the pinned plugin.
+;;
+;; protoc writes <name>.ml into the directory it is given, so the generated
+;; copy gets a directory of its own next to the committed file.
 (rule
- (targets masc_workspace.ml)
+ (alias generated)
  (deps masc_workspace.proto)
  (action
-  (run protoc --ocaml_out=int64_as_int=false:. -I . masc_workspace.proto)))
+  (progn
+   (run mkdir -p regenerated)
+   (run protoc --ocaml_out=int64_as_int=false:regenerated -I .
+     masc_workspace.proto)
+   (diff? masc_workspace.ml regenerated/masc_workspace.ml))))

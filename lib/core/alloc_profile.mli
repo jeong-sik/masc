@@ -10,6 +10,12 @@
     words that reached the major heap (promoted, or allocated there
     directly), and words still live now.
 
+    A fourth table counts, of the words allocated, those allocated on the
+    domain that called {!start}. The server starts the profile on its main
+    domain, so that table says which call stacks allocate there: the code a
+    main-domain fiber runs itself instead of handing to a pool. It covers
+    that domain's system threads too.
+
     Every word count is an estimate that includes block headers: the rate
     is samples per word including the header, so a block of [s] words
     carries [(s + 1) * rate] samples in expectation and [samples / rate]
@@ -64,10 +70,15 @@ type report =
   ; live : site_totals list  (** sampled blocks not yet deallocated, largest first *)
   ; major : site_totals list  (** reached the major heap, cumulative, largest first *)
   ; allocated : site_totals list  (** cumulative, largest first *)
+  ; starting_domain_allocated : site_totals list
+  (** of [allocated], what the domain that called {!start} allocated,
+      cumulative, largest first *)
   ; live_samples : int
   ; live_words : int
   ; allocated_samples : int
   ; allocated_words : int
+  ; starting_domain_allocated_samples : int
+  ; starting_domain_allocated_words : int
   ; major_samples : int
   ; major_words : int
   ; direct_major_samples : int  (** of [major_samples], allocated in the major heap directly *)
@@ -103,6 +114,9 @@ module For_testing : sig
   type block
 
   val observe_alloc : key:string -> n_samples:int -> block
+  (** An allocation on a domain other than the starting one. *)
+
+  val observe_alloc_on_starting_domain : key:string -> n_samples:int -> block
   val observe_alloc_in_major : key:string -> n_samples:int -> block
   val observe_promote : block -> unit
   val observe_dealloc : block -> unit

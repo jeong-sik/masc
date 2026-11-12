@@ -955,4 +955,9 @@ val resolve_native_posture :
     gate). The effective posture returned is unchanged in both branches.
     The approval stance is in-memory by design; after a restart that means
     a [full] keeper runs degraded-to-[read] turns, each one recorded,
-    until an operator re-arms [Yolo]. *)
+    until an operator re-arms [Yolo].
+
+    The posture that results is then judged against the accounts of the
+    process ({!Runtime_account_access.authorize_native}). A refusal is a
+    config error of [keeper.tools.native]: a turn ends before it claims its
+    session, and the effective tool surface reports the reason. *)

@@ -9,6 +9,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -332,6 +333,90 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                            env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
             self.assertTrue((workspace / '.masc/config').is_dir())
             self.assertFalse((root / 'config/masc/default-base-path').exists())
+
+    def test_scripted_setup_stops_before_initializing_a_workspace_that_asks_for_accounts(self):
+        # A boot of this workspace runs the account server. Setup prepares imp
+        # for the server of a single user, so it stops before the
+        # initialization the case above reaches.
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-setup-accounts-') as tmp:
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            config = workspace / '.masc/auth/config.json'
+            config.parent.mkdir(parents=True)
+            asked = '{"enabled":true,"require_token":true,"account_mode":"Multi_account"}'
+            config.write_text(asked)
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'XDG_CONFIG_HOME': str(root / 'config')}
+            result = subprocess.run([BINARY, 'setup', '--base-path', str(workspace), '--no-tui', '--port', '1'],
+                                    env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn('asks for Multi_account', result.stderr)
+            self.assertIn('No workspace files were changed and no server was started.', result.stderr)
+            self.assertEqual(sorted(str(path.relative_to(workspace)) for path in workspace.rglob('*')),
+                             ['.masc', '.masc/auth', '.masc/auth/config.json'])
+            self.assertEqual(config.read_text(), asked)
+
+    @staticmethod
+    def unused_port():
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            return str(listener.getsockname()[1])
+
+    def test_a_workspace_nothing_started_in_is_read_and_refused_without_a_lease(self):
+        # `setup-server` only reads, and the stop refuses before it signs a
+        # local operator in. Where no server ever held the workspace neither
+        # makes its lease.
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-setup-unheld-') as tmp:
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            workspace.mkdir()
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'XDG_CONFIG_HOME': str(root / 'config')}
+            port = self.unused_port()
+            observed = subprocess.run([BINARY, 'setup-server', '--base-path', str(workspace), '--port', port],
+                                      env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+            self.assertEqual(observed.returncode, 0, observed.stderr)
+            self.assertEqual(json.loads(observed.stdout)['status'], 'free')
+            stopped = subprocess.run([BINARY, 'setup-stop-previous-owner', '--base-path', str(workspace),
+                                      '--port', port, '--expected-version', '0.0.0'],
+                                     env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+            self.assertEqual(stopped.returncode, 1, stopped.stderr)
+            receipt = json.loads(stopped.stdout)
+            self.assertEqual(receipt['schema'], 'masc.setup_server_error.v1')
+            self.assertIs(receipt['termination_requested'], False)
+            self.assertIn('No process holds the lease', receipt['error'])
+            self.assertEqual(sorted(path.name for path in workspace.iterdir()), [])
+
+    def test_an_owner_that_cannot_be_read_gives_no_status_where_the_config_asks_for_accounts(self):
+        # Whether an account server holds the workspace is not known then, and
+        # a port named free would be taken for a workspace with no server.
+        # Where the config asks for no accounts the port answers as before.
+        assert BINARY is not None
+        asks = '{"enabled":true,"require_token":true,"account_mode":"Multi_account"}'
+        for config, code in ((asks, 1), ('{"enabled":true,"require_token":true}', 0), (None, 0)):
+            with self.subTest(config=config), tempfile.TemporaryDirectory(prefix='masc-setup-unread-') as tmp:
+                root = Path(tmp)
+                workspace = root / 'workspace'
+                (workspace / '.masc/auth').mkdir(parents=True)
+                if config is not None:
+                    (workspace / '.masc/auth/config.json').write_text(config)
+                # The lease root of a workspace is this directory; a file in
+                # its place holds no lease that could be read.
+                (workspace / '.masc-owner').write_text('')
+                env = {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'XDG_CONFIG_HOME': str(root / 'config')}
+                observed = subprocess.run(
+                    [BINARY, 'setup-server', '--base-path', str(workspace), '--port', self.unused_port()],
+                    env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+                self.assertEqual(observed.returncode, code, observed.stderr)
+                document = json.loads(observed.stdout)
+                if code:
+                    self.assertEqual(document['schema'], 'masc.setup_server_unread.v1')
+                    self.assertIs(document['read_only'], True)
+                    self.assertIsInstance(document['error'], str)
+                    self.assertNotIn('status', document)
+                else:
+                    self.assertEqual((document['schema'], document['status']), ('masc.setup_server.v1', 'free'))
+                self.assertEqual((workspace / '.masc-owner').read_text(), '')
 
     def test_recording_does_not_overwrite_a_preexisting_partial_file(self):
         assert BINARY is not None

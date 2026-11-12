@@ -1,0 +1,61 @@
+{
+  "hours": 72.0,
+  "calls": 142925,
+  "result_bytes": 618621662,
+  "repeated_calls": 5498,
+  "repeated_calls_pct": 3.8,
+  "repeated_bytes": 22139562,
+  "repeated_bytes_pct": 3.6,
+  "repeated_bytes_per_day": 7379854,
+  "result_bytes_per_day": 206207221,
+  "top_by_repeated_bytes": [
+    {
+      "tool": "masc_dos_screen",
+      "repeated_calls": 90,
+      "repeated_bytes": 7150723,
+      "tool_result_bytes": 164957352
+    },
+    {
+      "tool": "keeper_skill",
+      "repeated_calls": 416,
+      "repeated_bytes": 2697389,
+      "tool_result_bytes": 4654970
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "repeated_calls": 195,
+      "repeated_bytes": 2595912,
+      "tool_result_bytes": 63708114
+    },
+    {
+      "tool": "Execute",
+      "repeated_calls": 2655,
+      "repeated_bytes": 2265257,
+      "tool_result_bytes": 188140716
+    },
+    {
+      "tool": "masc_ask_status",
+      "repeated_calls": 142,
+      "repeated_bytes": 1621840,
+      "tool_result_bytes": 6797853
+    },
+    {
+      "tool": "keeper_tools_list",
+      "repeated_calls": 92,
+      "repeated_bytes": 893247,
+      "tool_result_bytes": 1678817
+    },
+    {
+      "tool": "keeper_wiki_read",
+      "repeated_calls": 15,
+      "repeated_bytes": 730341,
+      "tool_result_bytes": 2923888
+    },
+    {
+      "tool": "masc_board_post_get",
+      "repeated_calls": 159,
+      "repeated_bytes": 715688,
+      "tool_result_bytes": 21581612
+    }
+  ]
+}

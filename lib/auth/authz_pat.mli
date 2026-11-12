@@ -50,12 +50,16 @@ type refusal =
           (design 8.3). *)
   | Principal_inactive of Authz_types.User_id.t
       (** The Human of the PAT is disabled or deleted. *)
+  | Principal_revocation_pending of Authz_types.User_id.t
+      (** A revocation of the Human of the PAT was given up before it reached
+          the log (design 8.3). *)
 
 val refusal_to_string : refusal -> string
 
-(** What a token acts as at [now_ms], in the state of one snapshot. *)
+(** What a token acts as at [now_ms], in the state of one snapshot that the
+    zone could be trusted for ({!Authz_zone.read}). *)
 val authenticate
-  :  Authz_state.t
+  :  Authz_zone.trusted
   -> now_ms:int
   -> Authz_credential_token.Pat.t
   -> (signed_in, refusal) result

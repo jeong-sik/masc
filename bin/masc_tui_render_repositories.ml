@@ -88,16 +88,22 @@ let workspace_activity_cells ~cols ~date ~keeper ~task ~result ~path =
 let render_workspace_activity (state : state) repo_id =
   let terminal_rows, cols = get_terminal_size () in
   let rows, cursor, selected = workspace_activity_selection state in
+  let activity_path =
+    [ ui_text state ~ko:"활동" ~en:"activity"; Terminal_text.single_line repo_id ]
+  in
   let title = match state.workspace_activity_context_scroll with
-    | None -> " MASC Workspace / Activity · " ^ Terminal_text.single_line repo_id
+    | None -> here_row ~cols state ~path:activity_path ~readings:[] ~position:None
     | Some requested ->
         let count = List.length (workspace_activity_context_lines state ~cols) in
         let height = workspace_activity_context_height state
           ~surface_rows:(surface_body_rows state ~terminal_rows) in
         let scroll = max 0 (min requested (max 0 (count - height))) in
-        " Context [" ^ Masc_tui_scroll.window_text ~scroll ~height count ^ "]" in
+        here_row ~cols state
+          ~path:(activity_path @ [ ui_text state ~ko:"맥락" ~en:"context" ])
+          ~readings:[ Masc_tui_scroll.window_text ~scroll ~height count ]
+          ~position:None in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"workspace-activity"
-    ~title:(screen_title title)
+    ~title
     ~hints:(match state.workspace_activity_context_scroll with
       | None -> "v:context  j/k:select  PgUp/PgDn:page  Enter:file  r:refresh  Esc:back"
       | Some _ -> "j/k:scroll  PgUp/PgDn:page  Home/End:edges  Enter:file  r:refresh  Esc:list")
@@ -305,9 +311,8 @@ let render_repository_list (state : state) =
   in
   let shown = List.length repos in
   let title =
-    badge_row ~cols
-      ~lead:(screen_title (ui_text state ~ko:" MASC 워크스페이스" ~en:" MASC Workspace"))
-      ~label:(Terminal_text.single_line state.workspace) ~badge:(connection_badge state)
+    here_row ~cols state ~path:[]
+      ~readings:[ Terminal_text.single_line state.workspace ] ~position:None
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
     ~title
@@ -509,15 +514,23 @@ let render_repository_changes (state : state) =
         | None, _ -> "Git workspace"
       in
       let title =
-        detail_heading ~cols ~lead:(Lead_text " MASC Git Changes — ")
-          ~id:scope_name
-          ~after:[ Printf.sprintf " (%d)%s%s" (List.length changes)
-            (match state.repository_changes with
-             | Some snapshot ->
-                 " · " ^ repository_branch_label snapshot.Masc.Tui_decode.rcs_branch
-             | None -> "")
-            (if Option.is_some state.repository_changes_error then " · read failed" else "") ]
-          ~tail:(connection_badge state)
+        here_row ~cols state ~path:[ git_changes_step state; scope_name ]
+          ~readings:
+            [ (match state.repository_changes with
+               | Some snapshot ->
+                   repository_branch_label snapshot.Masc.Tui_decode.rcs_branch
+               | None -> "")
+            ; (if Option.is_some state.repository_changes_error then
+                 ui_text state ~ko:"조회 실패" ~en:"read failed"
+               else "") ]
+          ~position:
+            (match changes with
+             | [] -> None
+             | _ :: _ ->
+                 Some
+                   (Masc_tui_value.Position.Row
+                      { at = state.repository_changes_cursor + 1
+                      ; total = List.length changes }))
       in
       let recorded_changes = current_keeper_chat_file_changes state in
       surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repository-changes"
@@ -714,10 +727,10 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let removed, added = prepared.removed, prepared.added in
   let total = prepared.count in
   let header =
-    detail_heading ~cols ~lead:(Lead_text (screen_title " MASC Change" ^ " "))
-      ~id:(change_row_address change)
-      ~after:[ Printf.sprintf "  -%d +%d" removed added ]
-      ~tail:(connection_badge state)
+    here_row ~cols state
+      ~path:[ ui_text state ~ko:"변경" ~en:"changes"; change_row_address change ]
+      ~readings:[ Printf.sprintf "-%d +%d" removed added ]
+      ~position:None
   in
   box_top buf cols;
   box_line buf cols header;
@@ -802,34 +815,28 @@ let render_changes_list (state : state) =
     | Some s -> s.Masc.Tui_decode.fcs_changes
   in
   let shown = List.length changes in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
   let whose =
     match state.changes_keeper with
     | None -> "(no keeper selected)"
     | Some name -> name
   in
-  let heading ~after =
-    detail_heading ~cols
-      ~lead:(Lead_text (screen_title " MASC Changes" ^ " "))
-      ~id:whose ~after:[ after ]
-      ~tail:(timestamp ^ "  " ^ connection_badge state)
+  let heading ~reading =
+    here_row ~cols state
+      ~path:[ ui_text state ~ko:"변경" ~en:"changes"; whose ]
+      ~readings:[ reading ] ~position:None
   in
   let header =
     match state.changes with
     | None ->
         heading
-          ~after:("  " ^ title_missing_reading ~error:state.changes_error)
+          ~reading:(String.trim (title_missing_reading ~error:state.changes_error))
     | Some s ->
         (* The window and the call count are stated because the list alone
            does not say what was looked at: no changes in a window and no
            calls in a window are different facts. *)
         heading
-          ~after:
-            (Printf.sprintf " (%d in %.0fh of %s)" shown
+          ~reading:
+            (Printf.sprintf "%d in %.0fh of %s" shown
                s.Masc.Tui_decode.fcs_window_hours
                (Masc_tui_message_layout.count_noun
                   s.Masc.Tui_decode.fcs_calls_in_window "call"))
@@ -989,7 +996,7 @@ let render_changes_list (state : state) =
     (* The footer is the key table's (for_surface Changes); never a literal here. *)
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
+         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false ~has_rows:(shown > 0)
             Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
@@ -1001,7 +1008,9 @@ let render_changes_list (state : state) =
 let render_changes_tree_diff (state : state)
     (change : Masc.Tui_decode.file_change) =
   render_diff_surface state
-    { ds_title = " MASC Tree"
+    { ds_path =
+        [ ui_text state ~ko:"변경" ~en:"changes"
+        ; ui_text state ~ko:"파일 상태" ~en:"tree" ]
     ; ds_address = Terminal_text.single_line (change_row_address change)
     ; ds_context_lines = []
     ; ds_diff = state.changes_tree_diff

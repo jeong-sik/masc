@@ -2,7 +2,8 @@
    multi-account installation and prints the one link that lets the first
    Admin in. *)
 
-(** [masc auth bootstrap], [masc auth invite] and [masc auth preview]. *)
+(** [masc auth bootstrap], [masc auth invite], [masc auth off] and
+    [masc auth preview]. *)
 
 (** [masc auth bootstrap]: activates a multi-account installation on a base
     path where no server runs (design 5.1-1, 8.4, plan B3d-1).
@@ -40,6 +41,19 @@ val service_credential_revoke : base_path:string -> credential:string -> int
     the time it was issued and whether it is open. No secret is printed. *)
 val service_credential_list : base_path:string -> int
 
+(** [masc auth off]: turns the accounts of an activated workspace off with
+    {!Authz_off.turn_off}, under the lease of {!bootstrap}, and prints the
+    workspace (design 10.5, plan F3a-2). It reads neither [MASC_HTTP_BASE_URL]
+    nor the anonymous-mutation setting: the Off depends on the log and the
+    external store alone. Returns [0] once the Off is committed, [1] otherwise,
+    with the reason on standard error. *)
+val off : base_path:string -> int
+
+(** What a server does with an activated workspace, as a clause that follows
+    "From now on" or "Once the command succeeds,": the success of {!bootstrap}
+    and its help say the same sentence. *)
+val account_server_line : string
+
 (** The environment variable that holds the client secret of the GitHub OAuth
     App of {!preview}: [MASC_GITHUB_CLIENT_SECRET]. *)
 val github_client_secret_env : string
@@ -54,7 +68,7 @@ val default_preview_port : int
     It goes on only where {!invite} would: a boot finds [Multi_account] with
     an external store that matches the log. It holds the BasePath lease while
     it runs, so no server runs on the base path meanwhile. It serves the login
-    routes and the routes of {!Server_login_http.add_preview_routes}, and none
+    routes and the routes of {!Server_login_http.add_person_routes}, and none
     of the Keeper, Runtime, MCP or Board routes of the server. The GitHub
     client is
     {!Login_client.loopback} with [github_client_id] and the secret of

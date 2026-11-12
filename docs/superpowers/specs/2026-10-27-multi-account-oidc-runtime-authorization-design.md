@@ -286,7 +286,7 @@ Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어�
 Authorization Code + PKCE(S256), state, nonce, exact redirect URI를 사용하고 ID Token의 signature/iss/aud/exp/nonce를 검증한다. 도메인 정책(§5.1-7)이 있으면 `hd`와 `email_verified`는 미등록 사용자가 입장 요청을 만들 때의 필수 조건이다. 그러나 이 조건만으로 입장하지 않는다. 입장은 §5.1-2의 세 경로뿐이다.
 
 - `__Host-masc_session`: Secure, HttpOnly, host-only, Path=/, SameSite=Strict.
-- `__Host-masc_oidc_txn`: Secure, HttpOnly, host-only, Path=/, SameSite=Lax. state/nonce/PKCE와 서버 transaction에 결속한다.
+- `__Host-masc_oidc_txn`: Secure, HttpOnly, host-only, Path=/, SameSite=Lax. 진행 중인 로그인의 state/nonce/PKCE verifier를 서버 프로세스의 키로 봉인(AEAD)한 값이다. 서버는 진행 중인 로그인을 저장하지 않는다. 그래서 인증 없이 받는 로그인 시작이 다른 사람의 로그인을 막지 못한다. 봉인은 10분 뒤 열리지 않고, 서버가 다시 시작하면 그 전의 봉인도 열리지 않는다. 같은 callback이 두 번 오면 provider가 일회용 code를 거절하고, 초대는 로그에서 한 번만 소비된다.
 - `__Host-masc_mcp_session`: Secure, HttpOnly, host-only, Path=/, SameSite=Strict. `mcp-session-id` 헤더와 별개이며 **인증 수단이 아니다.**
 
 세션은 `authz.jsonl` 레코드다(계획 C3, 2026-11-07 사용자 결정). 그래서 서버가 다시 시작해도 남는다. 레코드에는 세션 secret의 digest만 둔다. 세션은 발급하고 7일 뒤 끝나고, 쓰는 동안 늘리지 않는다. 세션을 읽을 때 그 principal이 Active인지 함께 본다.
@@ -339,7 +339,7 @@ ProviderLink {
 1. `owner`는 인증 principal에서 결정하고 클라이언트가 지정하지 못한다. 시작 시 서버 저장소의 활성 membership과 namespace를 확인한다. workspace는 공유일 수 있으므로 단일 소유자 개념은 쓰지 않는다.
 2. 시작·SSE·resume·로그인 코드 입력·취소·receipt 조회마다 **요청 값이 아니라 저장소의 현재 membership record**와 owner·workspace·namespace·auth_binding을 대조한다. 다른 사람의 workspace_id·namespace는 거부한다.
 3. 모든 `account_ref` resolve는 `ManageOwnProvider + workspace + integration + CLI + owner + namespace`를 검사한다. account_ref·login_id는 권한이 아니다.
-4. official-client OAuth와 MASC Google OIDC transaction은 다른 흐름이다. 각각 state/PKCE와 단회 소비를 검증하고, 완료 시 ProviderAccount.owner와 격리된 account-home을 결속한다. provider email은 소유권 키가 아니다.
+4. official-client OAuth와 MASC Google OIDC transaction은 다른 흐름이다. 각각 state/PKCE를 검증한다. official-client OAuth는 단회 소비도 검증하고, MASC 로그인 transaction의 재사용은 provider의 일회용 code가 막는다(§5.2). 완료 시 ProviderAccount.owner와 격리된 account-home을 결속한다. provider email은 소유권 키가 아니다.
 5. OAuth code·provider token·credential 본문은 로그·응답에 남기지 않는다. 로그인 완료와 실제 호출 성공은 구분한다. 현재 `CanAdmin`은 일반 사용자의 `ManageOwnProvider`로 분리한다.
 6. 연결 때 lane이 CLI가 실제로 읽는 credential 저장소 종류(`file | keychain | 그 밖`)를 확인해 기록한다. CLI의 자기 신고는 증거가 아니다. 이 값은 §7.2의 증명 묶음에 넣어 lease에 기록하고, dispatch 때 다르면 `NoAuthorizedRuntime`이다. `file` 밖의 저장소는 MASC가 읽는 경로가 증명되기 전까지 `Sign_in_required`로 거부한다. keychain 지원은 이 문서의 범위 밖이며 미검증이다. 같은 구분이 `Runtime_muse_home`의 `sign_in_gap`에 있다.
 
@@ -634,7 +634,7 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 - `lib/runtime`에서 string만으로 실행 객체를 얻는 경로의 잔존 0
 - Provider 두 계정 호출과 제3자 거부. 다른 owner의 Runtime을 Keeper에 배정하거나 실행하려는 시도의 거부를 포함한다.
 - Keeper 실행 lane 종류(호스트 프로세스, container, microVM)마다 다른 owner의 account-home을 읽으려다 거절되는 시험. §7.2의 attestation이 아니라 lane마다 한 번 시도한 결과다.
-- 호스트 프로세스 lane은 서버와 같은 OS 사용자로 돌아서 다른 owner의 account-home을 읽을 수 있다. 위 시험을 통과하지 못하는 lane은 `Multi_account`에서 Keeper에 배정하지 못한다.
+- 호스트 프로세스 lane은 서버와 같은 OS 사용자로 돌아서 다른 owner의 account-home을 읽을 수 있다. 위 시험을 통과하지 못하는 lane은 `Multi_account`에서 턴을 시작하지 못한다. 남의 홈이 읽히는 것은 실행할 때이므로 판정은 턴이 시작될 때 한다. 그런 lane의 Runtime을 Keeper에 배정하는 것은 막지 않는다(2026-11-12 사용자 결정).
 
 복구 리허설, official lane attestation, Single_flight 대기 시간은 1단계 조건이 아니다. 그 기능을 내는 2단계 층이 증거를 만들고, 그때 §11의 요구 목록으로 돌아간다.
 

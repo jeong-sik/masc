@@ -128,19 +128,14 @@ let preflight_file_unix ?(allow_missing_ancestors=false) path =
   | (Unix.Unix_error _ | Sys_error _) as exn -> Error (path ^ ": " ^ Printexc.to_string exn)
 
 let preflight_file ?(allow_missing_ancestors=false) path =
-  try
-    let result =
-      Systhread_host.run ~label:"memory-current-observe-file" (fun () ->
-        preflight_file_unix ~allow_missing_ancestors path)
-    in
-    (match Eio_guard.execution_context () with
-     | Eio_guard.Eio_fiber -> Eio.Fiber.check ()
-     | Eio_guard.Non_eio -> ());
-    result
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Systhread_host.Host_failed exn ->
-    Error (path ^ ": observation worker failed: " ^ Printexc.to_string exn)
+  let result =
+    Systhread_host.run ~label:"memory-current-observe-file" (fun () ->
+      preflight_file_unix ~allow_missing_ancestors path)
+  in
+  (match Eio_guard.execution_context () with
+   | Eio_guard.Eio_fiber -> Eio.Fiber.check ()
+   | Eio_guard.Non_eio -> ());
+  result
 
 let quarantine_regular_path path =
   try match (Unix.lstat path).Unix.st_kind with

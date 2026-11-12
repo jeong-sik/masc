@@ -61,7 +61,8 @@ type context_pane_body =
     }
 
 type diff_surface =
-  { ds_title : string  (** the screen title *)
+  { ds_path : string list
+        (** the steps from the top-row screen to this reading's list *)
   ; ds_address : string  (** what the header names beside "vs HEAD" *)
   ; ds_context_lines : string list
         (** drawn under the header, each followed by a divider *)
@@ -322,16 +323,26 @@ val surface_chrome :
     A complete recovery notice may use the existing bottom row. *)
 
 val connection_badge : Masc_tui_types.state -> string
+(** What a title row adds to the top row's connection word: that the event
+    feed lost events, and which reads are under way or failed. Empty while
+    the feed is whole and nothing is being read. The connection and the
+    workspace it serves are named once, on the row above every screen. *)
 
-val surface_title_row :
-  cols:int -> Masc_tui_types.state -> lead:string -> readings:string list -> string
-(** The title row of a surface drawn in [cols] columns: [lead], the [readings]
-    (each carrying its own leading gap) and the connection status last. The
-    full badge is kept when it fits; otherwise prioritized workspace/read,
-    observer-loss and HTTP notices are kept whole as space permits, with an
-    ellipsis for omitted context. A width too small for the first notice
-    shows [!] instead; a frame without a cell for status cannot show it.
-    Readings give way whole from the end, and the lead is cut last. *)
+val here_row :
+  cols:int ->
+  Masc_tui_types.state ->
+  path:string list ->
+  readings:string list ->
+  position:Masc_tui_value.Position.t option ->
+  string
+(** The row under the top row: the top-row screen this one belongs to, each
+    step in [path] taken into it, the screen's own [readings], then
+    {!reading_connection_notice} -- nothing while reads merely come and go --
+    and the [position] at the right-hand end. Readings are set off from the
+    path by a gap and from each other by {!reading_separator}; an empty one
+    is not drawn. The last
+    step folds first when the row is narrow, readings give way whole from the
+    end, and the position is never cut. The product name is not drawn. *)
 
 type compact_connection_state =
   | Compact_workspace_mismatch
@@ -347,18 +358,11 @@ type compact_connection_state =
 val compact_connection_state : Masc_tui_types.state -> compact_connection_state
 (** Select the highest-priority current workspace, read or HTTP observation. *)
 
-val usage_connection_badge : Masc_tui_types.state -> string
-
 val reading_connection_notice : Masc_tui_types.state -> string option
-(** Exceptional transport, workspace, refresh or observer-loss evidence.
-    Healthy HTTP and ordinary pending reads return [None]; each view keeps
-    its own pending-read indication. The notice retains the full context. *)
-
-val feature_child_heading : Masc_tui_types.state -> cols:int -> title:string -> string
-(** Short identity for a Features child, followed by exceptional connection
-    evidence. Overflow uses the bounded typed summary and preserves observer
-    loss. The family strip supplies its parent; no clock or Runtime menu
-    competes with the child name. Read notices remain owned by each body. *)
+(** The particulars behind an exceptional transport, workspace or refresh
+    state, and observer loss. Healthy HTTP and ordinary pending reads return
+    [None], as does an exceptional state with nothing to add to the top row's
+    word; each view keeps its own pending-read indication. *)
 
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)
@@ -367,22 +371,12 @@ val reading_connection_summary : width:int -> Masc_tui_types.state -> string
 (** Bounded connection/read state, retaining observer loss as a separate fact.
     Shared by child headings and Board's existing overflow fallback. *)
 
-val badge_row : cols:int -> lead:string -> label:string -> badge:string -> string
-(** A header row of [lead], a bracketed [label] and [badge] for a surface drawn
-    in [cols] columns. The label is cut with an ellipsis to the cells left after
-    [lead] and [badge], and its brackets go when none are left, so the badge is
-    drawn whole whenever [lead] and [badge] fit in the row; a row too narrow for
-    those two is cut at its end like any other. *)
+val runtime_step : Masc_tui_types.state -> string
+(** The step the Runtime screens take from System. *)
 
-val lane_run_detail_title : string
-val measurement_detail_title : string
-val fusion_title : string
-val runtime_detail_title : string
 val keeper_calls_lead : string
 (** What the headings laid out by {!Masc_tui_ansi.detail_heading} draw before
-    the id: a lane run, a measurement artifact, a Fusion run (its list and
-    launch form carry the same title), one runtime's detail, and one keeper's
-    calls. *)
+    the id: one keeper's calls. *)
 
 val coordinator_status_row :
   Masc_tui_types.state -> style:string -> string -> string
@@ -680,6 +674,9 @@ val tree_diff_gutter : Masc.Tui_decode.git_diff_row -> string
 val tree_diff_row_span :
   ?hscroll:int -> width:int -> Masc.Tui_decode.git_diff_row -> Span.t
 
+val git_changes_step : Masc_tui_types.state -> string
+(** The step the Git Changes list and its diffs take from Workspace. *)
+
 val render_diff_surface :
   Masc_tui_types.state ->
   diff_surface ->
@@ -725,22 +722,27 @@ val config_pane_title_head :
     off it. The reading is cut with a mark; the name is drawn whole or not at
     all, and when it does not fit the head is [""]. *)
 
+val here_path : Masc_tui_types.state -> path:string list -> string
+(** The path half of {!here_row}: the top-row screen the current one belongs
+    to, then each step of [path], none of them folded. For a row that lays out
+    what follows the path itself. *)
+
 val config_pane_title :
   cols:int ->
-  name:string ->
+  ?path:string list ->
   ?reading:string ->
   ?note:string ->
-  ?clock:string ->
   Masc_tui_types.state ->
   string
-(** The whole title row a Config pane draws: its name, the strip, and the badge,
-    with the file it is reading and the clock between them where the pane has
-    those. [reading] is whatever the pane adds beside its name -- a count, a
+(** The whole title row a Config pane draws: where it is, the strip, and the
+    badge, with the file it is reading between them where the pane has one.
+    The strip marks the pane, so [path] is empty for a pane and names only the
+    steps taken past one ({!here_path}). [reading] is whatever the pane adds beside its name -- a count, a
     warning -- and is the part that gives way. Ten panes spelled this row and
     nine of them spelled it identically, which is also why none could tell the
     strip to leave room for the badge. When those optional names and shortcuts
-    cannot leave room for the active pane, the existing localized pane name
-    precedes them and the connection observation. *)
+    cannot leave room for the active pane, the path names that pane in the
+    strip's place, ahead of the connection observation. *)
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list
@@ -795,7 +797,7 @@ val answering_preview_rows : int
 
 (** Common title and content geometry for surfaces with two panes. *)
 val pane_surface_header : Buffer.t -> int -> Masc_tui_types.state ->
-  name:string -> split:bool -> unit
+  path:string list -> split:bool -> unit
 val pane_surface_content_height : rows:int -> int
 
 val models_account_reading : provider:string -> overview_account_emails_reading -> string option * string list
@@ -808,8 +810,6 @@ val models_source_account_reading : provider:string -> runtime_config_reading op
 val studio_panel : width:int -> title:string -> lines:string list -> string list
 (** Framed sub-panel box with a middle-truncated title header and cell-fitted rows. *)
 
-val lane_run_clock : float -> string
-(** Local [MM-DD HH:MM:SS] timestamp for lane run and harness verdict sidebars. *)
 
 val detail_section_heading : ?first:bool -> string -> (string * string) list
 (** Numbered/grouped section header [  [ Title ]] in [(style, text)] pairs for

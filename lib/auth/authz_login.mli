@@ -4,11 +4,14 @@
 (** What the callback of a login decides with the writer zone, once the
     identity is known (design 5.1-2 to 5.1-6, plans C2a-4 and C2d).
 
+    The decision starts on one snapshot that the zone could be trusted for
+    ({!Authz_zone.read}). A zone whose file stopped, or whose files disagree,
+    gives none, and every login is then refused as uncertain, whatever the
+    identity.
+
     - An identity bound to an active principal signs in as it. A disabled one
       is refused (design 4.1), and so is one whose revocation the external
-      store gave up and is still blocked (design 8.3). When the zone cannot
-      tell, because a file stopped or the files disagree, the login is
-      refused as uncertain.
+      store gave up and is still blocked (design 8.3).
     - An identity with no principal joins through the invitation whose token
       came with the login: one admission record spends the invitation, binds
       the identity, and makes the principal and its membership (design 5.1-3).
@@ -51,7 +54,9 @@ type refusal =
   | Disabled of Authz_types.User_id.t
   | Blocked of Authz_types.User_id.t
       (** A revocation of this principal that the store gave up is held. *)
-  | Uncertain  (** The zone cannot say whether the principal is blocked. *)
+  | Uncertain
+      (** The zone cannot be trusted now ({!Authz_zone.read}): nobody signs in
+          and nobody joins. *)
   | Already_joined of Authz_types.User_id.t
       (** An invitation came with an identity bound to this principal, or
           another admission bound the identity before this one was written. *)

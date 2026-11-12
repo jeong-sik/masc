@@ -2,13 +2,17 @@
  "schema": "masc.tinker.librarian.e_real_manifest.v1",
  "declaration": "keeper-librarian",
  "output": "admission",
- "created_at": "2026-11-10T01:49:40Z",
- "selection": "every record whose final.status is answered with an object output",
+ "created_at": "2026-11-11T14:05:39Z",
+ "selection": "the records of the manifest `of` names that the store still held with the bytes it pins",
+ "of": {
+  "manifest_sha256": "d22c1150474a8d5bf261dbeb288d0b3b532245f545ee36099862262519594293",
+  "items": 52,
+  "gone": [
+   "09b541f69bc4b622efa4e96f2cf39a55d57088a5dfebdaea75ed57777a4666b3",
+   "957b47926576ba7d07548d475d9401da39a32b0fcd38017ae93fbce7b8d35981"
+  ]
+ },
  "items": [
-  {
-   "digest": "09b541f69bc4b622efa4e96f2cf39a55d57088a5dfebdaea75ed57777a4666b3",
-   "sha256": "b6b51f3f2da9b66399c8f6bf1f20ed3024d7658b8e09cf3cf35f2d0f00386504"
-  },
   {
    "digest": "0b4b5ac7ae64551238dc28109f22cf7e93e7d7657a1fcbd2e242e39a59b510f0",
    "sha256": "62241376f174e920757acc962da37f2d7df371e9751ae70e2b964ef574aab73f"
@@ -132,10 +136,6 @@
   {
    "digest": "93d34824703890ee57f1fe9d97ff74d2a80318d5cedf1bcce62e9ac0299a402c",
    "sha256": "80dc12153e6fa6759d25c1e0610f692bdfc22dfcd29e45525900c1599d56181e"
-  },
-  {
-   "digest": "957b47926576ba7d07548d475d9401da39a32b0fcd38017ae93fbce7b8d35981",
-   "sha256": "405188c186b879f4fb93b6b1db600f0e88d45f234abce3160e425fab92360c68"
   },
   {
    "digest": "9c52ff4fb46165e151ef4d8b0b77f39b9641d6ccf39e92676be386d56f0c3d46",

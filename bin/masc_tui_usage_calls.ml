@@ -88,16 +88,7 @@ let level_of ~maximum value =
 let every_call_failed (calls : Series.tool_series_calls) =
   calls.Series.tsc_failures = calls.Series.tsc_calls
 
-let grouped_digits value =
-  let digits = string_of_int value in
-  let length = String.length digits in
-  let output = Buffer.create (length + (length / 3)) in
-  String.iteri
-    (fun index digit ->
-      if index > 0 && (length - index) mod 3 = 0 then Buffer.add_char output ',';
-      Buffer.add_char output digit)
-    digits;
-  Buffer.contents output
+let grouped_digits = Masc_tui_value.Count.grouped
 
 let milliseconds_text ms =
   if ms >= 1000.0 then Printf.sprintf "%.1f s" (ms /. 1000.0)

@@ -255,7 +255,7 @@ val footer_hints_voice_agent : lang:Masc_tui_types.ui_language -> ?saving:bool -
     write and the way out. Its keys are not the Config pane's, so the row is
     the screen's rather than the pane's. *)
 
-val footer_hints_runtime_account_form : unit -> string
+val footer_hints_runtime_account_form : lang:Masc_tui_types.ui_language -> string
 (** The runtime.toml account form's row: the provider axis, the fields, the
     save and the way out. The form takes every other key as typing, so the
     pane's row would name keys that no longer do what it says. *)
@@ -270,7 +270,7 @@ val footer_hints_typesafeai_exclusion_form : unit -> string
     the way out. The form takes every key, so the pane's row would name keys
     that no longer do what it says. *)
 
-val footer_hints_runtime_account_saved : unit -> string
+val footer_hints_runtime_account_saved : lang:Masc_tui_types.ui_language -> string
 (** The account form's row after a save: the copy of the sign-in command
     and the way out. *)
 
@@ -333,10 +333,10 @@ val code_pane_of : Masc_tui_types.state -> code_pane
     {!code_back_step} answers [Leave_code_for_workspace] with the tree focused,
     so the footer names Left only where Left has a step to take. *)
 
-val footer_hints_code_hover : string
+val footer_hints_code_hover : lang:Masc_tui_types.ui_language -> string
 (** Keys for the full hover reading over the current Code file. *)
 
-val footer_hints_code : pane:code_pane -> string
+val footer_hints_code : lang:Masc_tui_types.ui_language -> pane:code_pane -> string
 (** The Code footer, narrowed to what [pane] answers.
 
     Separate from {!footer_hints} because this surface has three modes and a
@@ -346,6 +346,7 @@ val footer_hints_code : pane:code_pane -> string
     the row search did not either when they arrived. *)
 
 val footer_hints_runtime :
+  lang:Masc_tui_types.ui_language ->
   mode:Masc_tui_types.runtime_mode ->
   picker:Masc_tui_types.runtime_picker_projection option ->
   string
@@ -362,7 +363,8 @@ val footer_hints_runtime_parent :
     above the preserved editor. The removal arm retains its existing
     second-[D] confirmation. *)
 
-val footer_hints_resources : detail_focus:bool -> string
+val footer_hints_resources :
+  lang:Masc_tui_types.ui_language -> detail_focus:bool -> string
 (** The Resources footer, with [j/k] relabelled for the focused pane. All
     other keys still project from {!for_surface}. *)
 
@@ -402,13 +404,15 @@ val footer_hints_fusion_detail : string
     fitter gives up key items from the back, and a position is the one item
     on the row that [?] cannot recover. *)
 
-val footer_hints_lanes_run_list : has_runs:bool -> has_older:bool -> string
+val footer_hints_lanes_run_list :
+  lang:Masc_tui_types.ui_language -> has_runs:bool -> has_older:bool -> string
 (** The Lanes run-list footer: the drill-down under a standalone lane row. A
     key is drawn only while it can act: [j/k] and [Right / Enter] need a loaded
-    run, and [\]] needs the server to have named an older page. *)
+    run, and [>] needs the server to have named an older page. The [?] sheet
+    opens on the same bindings while this screen is up. *)
 
-val footer_hints_lanes_run_detail : string
-val footer_hints_lanes_run_detail_for : preflight:bool -> string
+val footer_hints_lanes_run_detail_for :
+  lang:Masc_tui_types.ui_language -> preflight:bool -> string
 (** The Lanes run-detail footer. The window the stacked Input/Output list drew
     travels the way the Fusion detail footer's does; the split panes name
     theirs in their own titles and pass none. *)

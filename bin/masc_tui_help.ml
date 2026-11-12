@@ -81,6 +81,28 @@ let sheet ?(header = []) ~cols lines =
   in
   header @ body
 
+(* Blank to the eye and not to [sections], which parts columns at an empty
+   line: it stands where the heading stands in the first column, so the two
+   columns' first keys sit on one row. *)
+let continuation_row = " "
+
+let one_section ~cols ~heading entries =
+  if cols < two_column_minimum_cols then heading :: List.concat entries
+  else begin
+    let total = List.fold_left (fun sum entry -> sum + List.length entry) 0 entries in
+    let half = (total + 1) / 2 in
+    let rec first_column taken count = function
+      | entry :: rest when count < half ->
+          first_column (entry :: taken) (count + List.length entry) rest
+      | rest -> (List.rev taken, rest)
+    in
+    match first_column [] 0 entries with
+    | left, [] -> heading :: List.concat left
+    | left, (_ :: _ as right) ->
+        (heading :: List.concat left)
+        @ ("" :: continuation_row :: List.concat right)
+  end
+
 let filter_sections ~query ~heading sections =
   if String.equal query "" then sections
   else
@@ -103,8 +125,18 @@ let filter_query = function
   | Off -> ""
   | Typing query | Kept query -> query
 
+type scope =
+  | Here
+  | Everything
+
+let shows_everything filter scope =
+  match scope with
+  | Everything -> true
+  | Here -> not (String.equal (filter_query filter) "")
+
 type step =
   | Set_filter of { filter : filter; scroll_to_top : bool }
+  | Widen
   | Close
   | Toggle_hints
   | Scroll of Masc_tui_scroll.key_move
@@ -123,7 +155,7 @@ let scrolled key =
   | Some move -> Scroll move
   | None -> Ignore
 
-let step filter ~key =
+let step filter ~scope ~key =
   match filter with
   | Typing query -> (
       match key with
@@ -143,6 +175,7 @@ let step filter ~key =
       match key with
       | "/" ->
           Set_filter { filter = Typing (filter_query filter); scroll_to_top = false }
-      | "?" | "esc" -> Close
+      | "?" -> if shows_everything filter scope then Close else Widen
+      | "esc" -> Close
       | "h" -> Toggle_hints
       | _ -> scrolled key)

@@ -80,7 +80,8 @@ let refusal_to_string = function
     "a revocation of the Service credential of the token was given up before it reached the log"
 ;;
 
-let authenticate (state : Authz_state.t) token =
+let authenticate (trusted : Authz_zone.trusted) token =
+  let state = (trusted :> Authz_zone.snapshot).state in
   let credential_id = Token.id token in
   match Authz_service_credential_state.find_active state.service_credentials credential_id with
   | Error Authz_service_credential_state.Unknown -> Error Unknown

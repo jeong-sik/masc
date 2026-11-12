@@ -24,26 +24,22 @@
     - Runtime and ProviderAccount status: the log of phase 1 has no record
       that disables, blocks, quarantines or purges either one, so a Runtime
       or an account the log has is [Active] (plan D2, D5 adds the records).
-    - [revocation]: the gate of the zone ({!Authz_zone.revocation}). A
-      stopped log or store answers [Unreadable].
+    - [revocation]: the reductions the state holds
+      ({!Authz_state.revocation}).
     - [dependencies]: [Cleared]. Phase 1 has no restore window (F2 is phase 2)
       and a restored log is refused when the zone opens (plan A2).
     - The request carries no PAT, and no durable work stores a scope in phase
       1, so the stored scope puts no limit.
 
-    {b One snapshot.} The facts read one snapshot of the zone. The gate is
-    read after it, so the decision stands only when the head of the log is
-    the same after the decision as before it: a reduction that ends between
-    the two appends a record. Otherwise the decision runs again, up to
-    {!attempts} times. *)
+    {b One snapshot.} The facts and the gate read one snapshot, the one the
+    caller took with {!Authz_zone.read}, so no record separates what they
+    read, and a zone whose files stopped or disagree has no snapshot to
+    decide on: its caller refuses the turn before this decision. *)
 
 open Authz_types
 
 (** The effects a turn asks for: it calls the model and uses tools. *)
 val requested : Effect_request.t
-
-(** How many times a decision runs while records keep being appended. *)
-val attempts : int
 
 type refusal =
   | Not_bootstrapped  (** The log was never bootstrapped: it has no workspace. *)
@@ -52,8 +48,6 @@ type refusal =
       (** The owner gave the Keeper no Runtime. It falls back to none (user
           decision 2026-11-08). *)
   | Denied of Authz_decision.deny_reason
-  | Log_kept_moving
-      (** A record was appended during each of the {!attempts} decisions. *)
 
 val refusal_to_string : refusal -> string
 
@@ -68,9 +62,9 @@ type turn = private
   }
 
 (** Decides one turn of [keeper_id] on [channel] at [now] (seconds since the
-    epoch). *)
+    epoch), in the state of one trusted snapshot. *)
 val decide
-  :  Authz_zone.t
+  :  Authz_zone.trusted
   -> keeper_id:Keeper_id.t
   -> channel:Channel.t
   -> now:float

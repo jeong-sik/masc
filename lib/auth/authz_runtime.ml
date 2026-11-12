@@ -10,10 +10,10 @@ type error =
   | Body_not_built of Authz_body.error
   | Commit_failed of Authz_zone.error
 
-let error_to_string = function
+let error_detail = function
   | Id_not_drawn error -> "a drawn grant id was refused: " ^ Authz_id.error_to_string error
   | Body_not_built error -> "the Runtime body was not built: " ^ Authz_body.error_to_string error
-  | Commit_failed error -> Authz_zone.error_to_string error
+  | Commit_failed error -> Authz_zone.error_detail error
 ;;
 
 let make zone ~user_id ~provider_account_id ~runtime_id ~self_effects ~draw =

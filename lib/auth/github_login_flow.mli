@@ -5,21 +5,21 @@
 
     The routes of C3 call it: {!start} for [POST /auth/github/start] and
     {!callback} for [GET /auth/github/callback]. The routes carry the
-    transaction ID in a cookie; this module never sees the cookie.
+    sealed transaction in a cookie; this module never sees the cookie.
 
     The transport, the clock and the draws are arguments. This module does no
     I/O of its own; the zone writes the admission. *)
 
-(** What a start gives the route: the ID for the cookie, and where to send the
-    browser. *)
+(** What a start gives the route: the sealed transaction for the cookie, and
+    where to send the browser. *)
 type started =
-  { id : Oidc_login_transaction.Id.t
+  { sealed : Oidc_login_transaction.Sealed.t
   ; authorization_url : string
   }
 
-(** Holds a GitHub transaction. GitHub has no discovery document, so a start
-    reads nothing first and fails only when as many logins as the store
-    holds are under way. [invite] is the token that the invitation link
+(** Seals a GitHub transaction. GitHub has no discovery document, so a start
+    reads nothing first and fails only when the sealed transaction does not
+    fit a cookie. [invite] is the token that the invitation link
     posted, if any. [replaces] is the session of the browser that started,
     which the sign-in ends. *)
 val start
@@ -47,7 +47,7 @@ type completed =
   }
 
 type callback_error =
-  | Transaction_refused of Oidc_login_transaction.take_error
+  | Transaction_refused of Oidc_login_transaction.open_error
   | Refused_at_github
   | Exchange_failed of Github_oauth.error
   | Login_refused of Authz_login.refusal
@@ -68,7 +68,7 @@ val callback
   -> Login_client.t
   -> now:(unit -> Ptime.t)
   -> draw:(unit -> string)
-  -> Oidc_login_transaction.Id.t
+  -> Oidc_login_transaction.Sealed.t
   -> state:string
   -> answer
   -> (completed, callback_error) result

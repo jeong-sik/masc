@@ -14,6 +14,11 @@ writes the server's store.
 
 The E-real manifest names records by digest and pins each file's bytes with
 sha256. It holds no request or answer text, so it can be committed.
+
+A snapshot is the only copy of its records once the server removed their text.
+When a snapshot is lost, `snapshot` can take the records of its manifest again
+from a store that still holds them (`EarlierManifest`): the new manifest lists
+the records found with their pinned bytes and names the ones that are gone.
 """
 
 from __future__ import annotations
@@ -30,6 +35,8 @@ import yojson_wire as W
 DECLARATION = "keeper-librarian"
 OUTPUT = "admission"
 MANIFEST_SCHEMA = "masc.tinker.librarian.e_real_manifest.v1"
+SELECTION_ANSWERED = "every record whose final.status is answered with an object output"
+SELECTION_OF_EARLIER = "the records of the manifest `of` names that the store still held with the bytes it pins"
 
 type JsonDict = dict[str, object]  # the manifest, which this module writes
 
@@ -42,6 +49,15 @@ class AnsweredAdmission:
     schema: W.JsonObject  # the output JSON Schema MASC sent
     answer: W.JsonObject  # the answer MASC accepted
     slot: str  # the slot that answered
+
+
+@dataclass(frozen=True, slots=True)
+class EarlierManifest:
+    """A manifest whose records a later snapshot takes again: its file's sha256 and its records'
+    (digest, sha256) pairs, in its order."""
+
+    sha256: str
+    items: tuple[tuple[str, str], ...]
 
 
 def base_path(arg: str | None) -> Path:
@@ -115,45 +131,79 @@ def answered_admissions(base: Path) -> list[AnsweredAdmission]:
     return sorted((r for r in found if r is not None), key=lambda r: r.digest)
 
 
-def snapshot(live: Path, base: Path) -> list[AnsweredAdmission]:
+def snapshot(live: Path, base: Path, earlier: EarlierManifest | None = None) -> list[AnsweredAdmission]:
     """Copy each answered admission record of `live`'s store into `base`'s store, the bytes it was
     read with under the same scope and name, and return the copies as `answered_admissions(base)`
-    reads them. Other records are not copied. `base` is readable by its owner alone: the copies
-    hold Keeper memory. SystemExit when `base`'s store already holds a record, since a manifest
-    pins the records of one snapshot."""
+    reads them. Other records are not copied. With `earlier`, only the records that manifest lists
+    are copied. `base` is readable by its owner alone: the copies hold Keeper memory. SystemExit
+    when `base`'s store already holds a record, since a manifest pins the records of one snapshot,
+    and when a record `earlier` lists holds other bytes than it pins. Nothing is written then."""
     target = store_dir(base)
     if any(target.glob("*/*.json")):
         raise SystemExit(f"{target} already holds records")
-    base.mkdir(parents=True, exist_ok=True)
-    base.chmod(0o700)
+    pinned = None if earlier is None else dict(earlier.items)
+    copies: list[tuple[Path, bytes]] = []
     for path in sorted(store_dir(live).glob("*/*.json")):
         raw = path.read_bytes()
-        if record_of(raw, path.name) is None:
+        record = record_of(raw, path.name)
+        if record is None or (pinned is not None and record.digest not in pinned):
             continue
-        copy = target / path.parent.name / path.name
+        if pinned is not None and record.sha256 != pinned[record.digest]:
+            raise SystemExit(f"{path.name}: record {record.digest!r} holds other bytes than the earlier manifest pins")
+        copies.append((target / path.parent.name / path.name, raw))
+    base.mkdir(parents=True, exist_ok=True)
+    base.chmod(0o700)
+    for copy, raw in copies:
         copy.parent.mkdir(parents=True, exist_ok=True)
         copy.write_bytes(raw)
     return answered_admissions(base)
 
 
-def manifest_of(records: list[AnsweredAdmission], created_at: str) -> JsonDict:
-    return {"schema": MANIFEST_SCHEMA, "declaration": DECLARATION, "output": OUTPUT, "created_at": created_at,
-            "selection": "every record whose final.status is answered with an object output",
-            "items": [{"digest": r.digest, "sha256": r.sha256} for r in records]}
+def manifest_of(records: list[AnsweredAdmission], created_at: str,
+                earlier: EarlierManifest | None = None) -> JsonDict:
+    """The manifest of a snapshot's `records`. With `earlier`, the manifest the snapshot took its
+    records from, it also names that manifest and the digests of its records that are not among
+    `records`: the store no longer held them."""
+    manifest: JsonDict = {"schema": MANIFEST_SCHEMA, "declaration": DECLARATION, "output": OUTPUT,
+                          "created_at": created_at,
+                          "selection": SELECTION_ANSWERED if earlier is None else SELECTION_OF_EARLIER}
+    if earlier is not None:
+        held = {r.digest for r in records}
+        manifest["of"] = {"manifest_sha256": earlier.sha256, "items": len(earlier.items),
+                          "gone": [digest for digest, _ in earlier.items if digest not in held]}
+    manifest["items"] = [{"digest": r.digest, "sha256": r.sha256} for r in records]
+    return manifest
+
+
+def _pins(raw: bytes, path: Path) -> tuple[tuple[str, str], ...]:
+    """The (digest, sha256) pairs the manifest bytes `raw` pin, in their order. SystemExit when
+    they are not an E-real manifest."""
+    manifest = _object(json.loads(raw))
+    items = manifest.get("items") if manifest is not None and manifest.get("schema") == MANIFEST_SCHEMA else None
+    if not isinstance(items, list):
+        raise SystemExit(f"{path}: not an E-real manifest")
+    pairs: list[tuple[str, str]] = []
+    for item in cast(list[object], items):
+        entry = _object(item)
+        digest, sha = (entry.get("digest"), entry.get("sha256")) if entry is not None else (None, None)
+        if not isinstance(digest, str) or not isinstance(sha, str):
+            raise SystemExit(f"{path}: not an E-real manifest")
+        pairs.append((digest, sha))
+    return tuple(pairs)
+
+
+def earlier_manifest(path: Path) -> EarlierManifest:
+    """The manifest file at `path` as the one a later snapshot takes its records from."""
+    raw = path.read_bytes()
+    return EarlierManifest(hashlib.sha256(raw).hexdigest(), _pins(raw, path))
 
 
 def records_for(manifest_path: Path, base: Path) -> list[AnsweredAdmission]:
     """The manifest's records, in manifest order. A missing or changed record stops the run."""
-    manifest = _object(json.loads(manifest_path.read_text(encoding="utf-8")))
-    items = manifest.get("items") if manifest is not None and manifest.get("schema") == MANIFEST_SCHEMA else None
-    if not isinstance(items, list):
-        raise SystemExit(f"{manifest_path}: not an E-real manifest")
     by_digest = {r.digest: r for r in answered_admissions(base)}
     out: list[AnsweredAdmission] = []
-    for item in cast(list[object], items):
-        entry = _object(item)
-        digest, sha = (entry.get("digest"), entry.get("sha256")) if entry is not None else (None, None)
-        record = by_digest.get(digest) if isinstance(digest, str) else None
+    for digest, sha in _pins(manifest_path.read_bytes(), manifest_path):
+        record = by_digest.get(digest)
         if record is None or record.sha256 != sha:
             raise SystemExit(f"{manifest_path}: record {digest!r} is missing or changed")
         out.append(record)

@@ -342,6 +342,7 @@ let panel_failure ~runtime_id = function
   | Vibe_failure
       (Vibe_run_failed
          (( Runtime_vibe_cli.Invalid_config _
+          | Runtime_vibe_cli.Native_tools_refused _
           | Runtime_vibe_cli.Process_runtime_unavailable
           | Runtime_vibe_cli.Call_dir_failed _
           | Runtime_vibe_cli.Spawn_refused _

@@ -34,6 +34,9 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 
 설치 선언의 필수 최상위 필드는 `id`, `run_id`, `manifest_path`, `[binding]` 네 가지다.
 선택적인 `tool_hooks`와 `exact_outputs`는 아래에서 각각 설정한다.
+선택 필드 `max_exact_in_flight`는 host가 이 설치의 exact 요청을 함께 실행하는 수다. 1 이상의 정수이고,
+없으면 1이다. 이 수를 바꿔도 worker는 다시 뜨지 않는다. 이 키를 모르는 서버 빌드는 그 선언을
+거절하므로, 그 선언 파일을 읽는 서버가 모두 이 키를 아는 빌드일 때 넣고 되돌릴 때는 키부터 지운다.
 패키지의 `lane.toml`은 image·command·contributions·worker 자원 한도를 정의하는 별도 문서다.
 설치 선언의 `id`는 유지할 설치의 식별자이며, 패키지 ID나 실행 인스턴스 ID와 구분한다.
 
@@ -397,7 +400,8 @@ host가 호출하지 않는다.
   다시 검사하며, 결과가 불확실했던 호출은 재전송하지 않는다.
 - 지금 host 가 아는 종류는 `exact_output`, `read_records`, `read_file`, `read_result`, `ask`, `withdraw_ask` 다. 모르는 종류가 하나라도 있거나, 같은 `request_id` 가 두 번 나오면 그 목록 전체를 읽지 않고 instance 에 `listing_refused` 를 보인다.
 - host 는 다섯 사건에만 묻고 시계로 묻지 않는다. 지금 걸린 사건은 넷이다: worker 초기화가 끝났을 때, 그 instance 의 action 이 끝난 receipt 를 남겼을 때, 그 설치의 add-on lane 표가 바뀌어 게시됐을 때, 설치 질문에 운영자가 답했을 때. 선언이 바뀌면 worker 가 다시 떠서 첫 사건이 된다.
-- 한 주기는 목록을 받아 순서대로 처리한다. host 가 이미 최종 결과를 가진 요청은 모델을 부르지 않고 그 결과를 준다. 없으면 한 번 시도하고, 결과가 최종이면 준다. 최종이 아니면 다음 사건까지 기다린다. 결과를 준 목록이 있으면 다시 목록을 받고, 아무것도 주지 않은 목록에서 끝난다. 끝나면 관측을 한 번 한다.
+- 한 주기는 목록을 받아 순서대로 처리한다. host 가 이미 최종 결과를 가진 요청은 모델을 부르지 않고 그 결과를 준다. 없으면 한 번 시도하고, 결과가 최종이면 준다. 최종이 아니면 다음 사건까지 기다린다. 목록의 요청이 모두 끝난 뒤, 결과를 준 목록이면 다시 목록을 받고 아무것도 주지 않은 목록이면 끝난다. 끝나면 관측을 한 번 한다.
+- `exact_output` 요청은 걷는 자리 옆에서 실행한다. 실행 중인 exact 요청이 설치 선언의 `max_exact_in_flight` 개면 하나가 끝날 때까지 다음 요청으로 가지 않는다. 1이면 요청마다 끝나기를 기다린다. 그 밖의 요청은 걷는 자리에서 처리한다.
 - 같은 주기에 이미 준 요청이 다시 나오면 주기를 끝내고 `relisted_delivered_request` 를 보인다.
 - 결과를 담은 전체 인자가 `max_reply_bytes` 보다 크면 원래 결과 JSON 바이트와 요청·instance·현재 grant 권한을 먼저 디스크에 저장한다. 성공한 뒤에만 `{"status": "result_exceeds_frame", "original_request_id", "source_id", "retained_sha256", "bytes", "encoding": "json-utf8", "complete": false}` 를 준다. 기록 페이지의 `next_cursor` 도 이 응답에 남는다. 저장 실패는 instance 의 `result_delivery_failed` 이며 참조를 보내지 않는다.
 - 최종 결과의 `status` 는 `answered`(`output`, `slot`, 선택 `usage`), `invalid_output`, `input_refused`(`kind`), `outcome_unknown`, `not_allowed`, `request_id_reused` 다. 자세한 뜻은 [운영자 퀴즈 RFC](../rfc/RFC-operator-quiz-lane.md) §4.3–4.4 에 있다.

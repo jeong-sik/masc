@@ -309,7 +309,9 @@ let watch_of_payload payload =
   | Some (_, body) -> watch_of_body body
 ;;
 
-let settle_payload payload target settled =
+let keeper_wake_body payload = Option.map snd (keeper_wake_parts payload)
+
+let settle_body_payload payload ~field ~message =
   match keeper_wake_parts payload with
   | None -> Error "the payload is not a Keeper wake"
   | Some (fields, body) ->
@@ -318,10 +320,10 @@ let settle_payload payload target settled =
        let body =
          List.filter_map
            (fun (key, value) ->
-             if String.equal key watch_field
+             if String.equal key field
              then None
              else if String.equal key "message"
-             then Some (key, `String (wake_message target settled ~original))
+             then Some (key, `String (message original))
              else Some (key, value))
            body
        in
@@ -332,6 +334,11 @@ let settle_payload payload target settled =
                 if String.equal key "body" then key, `Assoc body else key, value)
               fields))
      | Some _ | None -> Error "the Keeper wake payload has no message string")
+;;
+
+let settle_payload payload target settled =
+  settle_body_payload payload ~field:watch_field ~message:(fun original ->
+    wake_message target settled ~original)
 ;;
 
 (* --- One pass --- *)
@@ -348,22 +355,23 @@ type outcome =
   ; verdict : verdict
   }
 
+let one_shot_scheduled (request : Schedule_domain.schedule_request) =
+  match request.status, request.recurrence with
+  | Schedule_domain.Scheduled, Schedule_domain.One_shot -> true
+  | ( Schedule_domain.Scheduled
+    , (Schedule_domain.Interval _ | Schedule_domain.Daily _ | Schedule_domain.Cron _) ) ->
+    false
+  | ( ( Schedule_domain.Due
+      | Schedule_domain.Running
+      | Schedule_domain.Succeeded
+      | Schedule_domain.Failed
+      | Schedule_domain.Cancelled
+      | Schedule_domain.Expired )
+    , _ ) -> false
+;;
+
 let watched_row (request : Schedule_domain.schedule_request) =
-  let one_shot_scheduled =
-    match request.status, request.recurrence with
-    | Schedule_domain.Scheduled, Schedule_domain.One_shot -> true
-    | ( Schedule_domain.Scheduled
-      , (Schedule_domain.Interval _ | Schedule_domain.Daily _ | Schedule_domain.Cron _) ) ->
-      false
-    | ( ( Schedule_domain.Due
-        | Schedule_domain.Running
-        | Schedule_domain.Succeeded
-        | Schedule_domain.Failed
-        | Schedule_domain.Cancelled
-        | Schedule_domain.Expired )
-      , _ ) -> false
-  in
-  if not one_shot_scheduled
+  if not (one_shot_scheduled request)
   then None
   else (
     match watch_of_payload (Schedule_domain.payload_to_yojson request.payload) with
@@ -380,66 +388,75 @@ let watched_row (request : Schedule_domain.schedule_request) =
    due time is the current second, or the stored one when that is earlier: a
    row whose time has passed and that the runner has not taken yet is not
    pushed later. *)
+let make_due config ~now ~runner_tick_sec (scanned : Schedule_domain.schedule_request) ~payload =
+  match
+    Schedule_service.update
+      config
+      ~authority:Schedule_store.Operator_authority
+      ~now
+      ~runner_tick_sec
+      ~timing_update:Schedule_store.Replace_timing
+      ~expected_instance_id:scanned.schedule_instance_id
+      ~schedule_id:scanned.schedule_id
+      ~requested_at:scanned.requested_at
+      ?expires_at:scanned.expires_at
+      ~requested_by:scanned.requested_by
+      ~scheduled_by:scanned.scheduled_by
+      ~due_at:(Float.min scanned.due_at (Float.floor now))
+      ~payload
+      ~source:scanned.source
+      ~recurrence:scanned.recurrence
+      ()
+  with
+  | Ok _ -> Ok ()
+  | Error failure -> Error (Schedule_service.service_error_to_string failure)
+;;
+
 let wake config ~now ~runner_tick_sec (scanned : Schedule_domain.schedule_request) target settled =
   match settle_payload (Schedule_domain.payload_to_yojson scanned.payload) target settled with
   | Error detail -> Not_woken detail
   | Ok payload ->
-    (match
-       Schedule_service.update
-         config
-         ~authority:Schedule_store.Operator_authority
-         ~now
-         ~runner_tick_sec
-         ~timing_update:Schedule_store.Replace_timing
-         ~expected_instance_id:scanned.schedule_instance_id
-         ~schedule_id:scanned.schedule_id
-         ~requested_at:scanned.requested_at
-         ?expires_at:scanned.expires_at
-         ~requested_by:scanned.requested_by
-         ~scheduled_by:scanned.scheduled_by
-         ~due_at:(Float.min scanned.due_at (Float.floor now))
-         ~payload
-         ~source:scanned.source
-         ~recurrence:scanned.recurrence
-         ()
-     with
-     | Ok _ -> Woken settled
-     | Error failure -> Not_woken (Schedule_service.service_error_to_string failure))
+    (match make_due config ~now ~runner_tick_sec scanned ~payload with
+     | Ok () -> Woken settled
+     | Error detail -> Not_woken detail)
+;;
+
+let reads_once ~key ~read =
+  let answers = Hashtbl.create 8 in
+  let limited = ref None in
+  fun target ->
+    let key = key target in
+    match Hashtbl.find_opt answers key with
+    | Some answer -> answer
+    | None ->
+      let answer =
+        match !limited with
+        | Some failure -> Error failure
+        | None ->
+          let answer = read target in
+          (match answer with
+           | Error (Rate_limited _ as failure) -> limited := Some failure
+           | Error
+               ( Not_visible
+               | Token_rejected
+               | Forbidden
+               | Http_status _
+               | Transport_failed _
+               | Response_unreadable _
+               | Reader_unavailable _
+               | Reader_not_ready _ )
+           | Ok _ -> ());
+          answer
+      in
+      Hashtbl.add answers key answer;
+      answer
 ;;
 
 let tick config ~now ~runner_tick_sec ~read =
   match Schedule_store.read_state_result config with
   | Error failure -> Error (Schedule_store.read_error_to_string failure)
   | Ok state ->
-    let answers = Hashtbl.create 8 in
-    let limited = ref None in
-    let read_once target =
-      let key = target_url target in
-      match Hashtbl.find_opt answers key with
-      | Some answer -> answer
-      | None ->
-        let answer =
-          match !limited with
-          | Some failure -> Error failure
-          | None ->
-            let answer = read target in
-            (match answer with
-             | Error (Rate_limited _ as failure) -> limited := Some failure
-             | Error
-                 ( Not_visible
-                 | Token_rejected
-                 | Forbidden
-                 | Http_status _
-                 | Transport_failed _
-                 | Response_unreadable _
-                 | Reader_unavailable _
-                 | Reader_not_ready _ )
-             | Ok _ -> ());
-            answer
-        in
-        Hashtbl.add answers key answer;
-        answer
-    in
+    let read_once = reads_once ~key:target_url ~read in
     let judge ((request : Schedule_domain.schedule_request), watch) =
       match watch with
       | Error detail ->

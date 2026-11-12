@@ -34,10 +34,12 @@ type log_mode =
       (** No log, or a log with no lines. A log that holds records and no mode
           event is {!Log_unreadable}: a [Fresh_bootstrap] is its first record. *)
   | Made_multi_account  (** The last mode event is [Fresh_bootstrap] or [Reactivate]. *)
-  | Made_off  (** The last mode event is [Off]. *)
+  | Made_off of Authz_state.t
+      (** The last mode event is [Off]. The state is the one the log replayed
+          to: what the accounts recorded before they were turned off. *)
 
 (** What the mode of a log that opened says. *)
-val of_mode_state : Authz_mode_state.t -> log_mode
+val of_state : Authz_state.t -> log_mode
 
 (** The external high-water mark. *)
 type high_water =
@@ -68,6 +70,11 @@ type input =
 
 type mode =
   | Single_user  (** The behavior without accounts, as before this module. *)
+  | Single_user_after_off of Authz_state.t
+      (** The log made [Off], the external store matches it, and the config
+          does not ask for [Multi_account] (row 4): the behavior without
+          accounts, with the records of the accounts in this state kept
+          read-only (design 10.5). *)
   | Activation_requested
       (** [Multi_account] is asked for and nothing was set up yet. Only the
           host-local [Fresh_bootstrap] may run. *)
@@ -84,10 +91,6 @@ type refusal =
           a restore took the log back to before the bootstrap. *)
   | Downgraded_from_multi_account
       (** The log made [Multi_account] and the config does not ask for it. *)
-  | Off_mode_not_supported
-      (** The log made [Off] and the external store matches. Booting a
-          single-user installation with multi-owned records read-only comes with
-          the [Off] event itself, which nothing writes yet. *)
   | Reactivation_not_ready
       (** The log made [Off] and the config asks for [Multi_account]: a
           reactivation, which needs the recovery procedure of design 10.5. *)

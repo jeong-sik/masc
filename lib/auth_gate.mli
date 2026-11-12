@@ -6,8 +6,10 @@
 
     [decide] reads the credential the request presents
     ({!Authz_credential_presentation}), authenticates it against one snapshot
-    of the authorization state, and judges it against the kind of the route
-    ({!Route_access.t}). It answers [Ok] or [Error]; there is no third answer
+    of the authorization state that the zone could be trusted for
+    ({!Authz_zone.read}), and judges it against the kind of the route
+    ({!Route_access.t}). A zone whose files stopped or disagree gives no such
+    snapshot, so its caller answers before the gate. It answers [Ok] or [Error]; there is no third answer
     that logs and lets through (design 5.3). Single-user requests do not come
     here: their own functions judge them (user decision 2026-11-07).
 
@@ -107,7 +109,7 @@ type request =
   }
 
 val decide
-  :  Authz_state.t
+  :  Authz_zone.trusted
   -> now_ms:int
   -> Route_access.t
   -> request

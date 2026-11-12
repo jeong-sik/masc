@@ -1151,26 +1151,25 @@ let track_connection ~wire connection =
   Eio.Resource.T ((), operations)
 ;;
 
-(* A fiber that only yields takes one turn each time the fiber beside it
-   yields, so its turn count is the other fiber's yield count. *)
-let turns_beside work =
-  let finished = ref false in
-  let turns = ref 0 in
-  Eio.Fiber.both
-    (fun () ->
-       work ();
-       finished := true)
-    (fun () ->
-       while not !finished do
-         incr turns;
-         Eio.Fiber.yield ()
-       done);
-  !turns
-;;
 
 let%test "a large write reaches the connection in slices with a yield between them" =
   Eio_main.run
   @@ fun _env ->
+  (* A fiber that only yields takes one turn each time the fiber beside it
+     yields, so its turn count is the other fiber's yield count. *)
+  let turns_beside work =
+    let finished = ref false in
+    let turns = ref 0 in
+    Eio.Fiber.both
+      (fun () ->
+         work ();
+         finished := true)
+      (fun () ->
+         while not !finished do
+           incr turns;
+           Eio.Fiber.yield ()
+         done);
+    !turns in
   let writes = ref [] in
   let received = Buffer.create 0 in
   let module Peer = struct

@@ -248,17 +248,20 @@ let read_start_form fields =
 ;;
 
 (* The session of the cookie, when the cookie acts. No cookie acts in a zone
-   that cannot be trusted, and the sign-in that follows is refused there. *)
+   that cannot be trusted, and the sign-in that follows is refused there.
+   Several cookies name no one session to end, so the start is refused. *)
 let session_of_browser t ~now_ms = function
-  | None -> None
-  | Some value ->
-    Option.bind (Bs.Cookie.of_value value) (fun cookie ->
-      match Authz_zone.read t.zone with
-      | Error (_ : Authz_zone.uncertain) -> None
-      | Ok trusted ->
-        (match Bs.authenticate trusted ~now_ms cookie with
-         | Ok { Bs.session_id; user_id = _; expires_at_ms = _ } -> Some session_id
-         | Error (_ : Bs.refusal) -> None))
+  | Q.No_cookie -> Ok None
+  | Q.Several_cookies -> Error Unauthorized
+  | Q.One_cookie value ->
+    Ok
+      (Option.bind (Bs.Cookie.of_value value) (fun cookie ->
+         match Authz_zone.read t.zone with
+         | Error (_ : Authz_zone.uncertain) -> None
+         | Ok trusted ->
+           (match Bs.authenticate trusted ~now_ms cookie with
+            | Ok { Bs.session_id; user_id = _; expires_at_ms = _ } -> Some session_id
+            | Error (_ : Bs.refusal) -> None)))
 ;;
 
 let begin_login t login ~invite ~return_to ~replaces =
@@ -287,7 +290,7 @@ let start t provider ~origin ~session_cookie ~fields =
       | Q.Other_origin | Q.No_origin -> Error Forbidden
     in
     let* invite, return_to = read_start_form fields in
-    let replaces = session_of_browser t ~now_ms:(ms_of (t.now ())) session_cookie in
+    let* replaces = session_of_browser t ~now_ms:(ms_of (t.now ())) session_cookie in
     begin_login t login ~invite ~return_to ~replaces
   in
   match started with
@@ -468,6 +471,7 @@ let clears_the_cookie = function
   | Q.Not_a_session_cookie | Q.Session_refused (_ : Bs.refusal) -> true
   | Q.Query_credential
   | Q.Session_and_bearer
+  | Q.Several_session_cookies
   | Q.Cross_origin
   | Q.Origin_missing
   | Q.Csrf_missing

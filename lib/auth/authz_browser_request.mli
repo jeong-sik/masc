@@ -42,9 +42,21 @@ type origin =
   | Other_origin  (** Another origin, several [Origin] fields, or one that does not parse. *)
   | No_origin
 
+(** The values of {!session_cookie} that came with the request, over every
+    [Cookie] field. A browser keeps one cookie of a [__Host-] name for a
+    host, so several come only from a request that was written by hand. *)
+type session_cookies =
+  | No_cookie
+  | One_cookie of string
+  | Several_cookies
+
+(** Counts the values the server read. It does not compare them: the same
+    value twice is {!Several_cookies}. *)
+val session_cookies_of_values : string list -> session_cookies
+
 type request =
   { method_ : method_
-  ; session_cookie : string option  (** The value of {!session_cookie}, if any. *)
+  ; session_cookie : session_cookies
   ; bearer : bool  (** An [Authorization] or an internal token header is there. *)
   ; query_credential : bool
         (** A credential in the query string: [token], [sse_kind=observer], or
@@ -60,6 +72,9 @@ type refusal =
   | Session_and_bearer
       (** Two credentials: the cookie does not win over the bearer, nor the
           bearer over the cookie (design 5.2). *)
+  | Several_session_cookies
+      (** Two session cookies or more: the first does not win over the
+          second (design 5.3). *)
   | Not_a_session_cookie  (** The cookie is there, and its value is not one. *)
   | Cross_origin
   | Origin_missing  (** A request that changes something names no origin. *)
@@ -83,8 +98,8 @@ type verdict =
       ; signed_in : Authz_browser_session.signed_in
       }
 
-(** The checks run in this order: a query credential, a bearer beside the
-    cookie, the cookie value, the origin, and for an {!Unsafe} request the
+(** The checks run in this order: a query credential, several session
+    cookies, a bearer beside the cookie, the cookie value, the origin, and for an {!Unsafe} request the
     origin again (it must be there) and the CSRF token, and last the session
     in the trusted snapshot at [now_ms]. A request with the cookie needs the token whether
     or not it also carries a bearer (design 5.3), and a {!Safe} request with

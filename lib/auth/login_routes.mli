@@ -74,14 +74,15 @@ type t =
 
     A [session_cookie] that acts names the session that the sign-in ends
     ({!Oidc_login_transaction.taken}); one that does not act is not read
-    further. The answer is a 303 to the provider with the transaction
+    further. Several session cookies are a 401: they name no one session
+    to end. The answer is a 303 to the provider with the transaction
     cookie. A return path too long for that cookie
     ({!Oidc_login_transaction.max_sealed_length}) is a 400. *)
 val start
   :  t
   -> provider
   -> origin:Authz_browser_request.origin
-  -> session_cookie:string option
+  -> session_cookie:Authz_browser_request.session_cookies
   -> fields:(string * string) list
   -> answer
 

@@ -23,6 +23,14 @@
   --info-line: #46c6f0;
   --radius-m: 6px;
   --radius-l: 10px;
+  /* The box of a button and of the line that names the place. A sheet that
+     adds them up, as the console does for the height of its header, takes
+     them by these names. */
+  --button-least: 44px;
+  --button-pad-block: 8px;
+  --button-border: 1px;
+  --header-pad-block: 12px;
+  --header-rule: 1px;
   --font: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -47,8 +55,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: var(--header-pad-block) 16px;
+  border-bottom: var(--header-rule) solid var(--line);
   background: var(--bg-panel);
 }
 .brand { color: var(--accent); font-weight: 700; letter-spacing: 0.08em; }
@@ -97,9 +105,9 @@ button, a.button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 44px;
-  padding: 8px 16px;
-  border: 1px solid var(--line-field);
+  min-height: var(--button-least);
+  padding: var(--button-pad-block) 16px;
+  border: var(--button-border) solid var(--line-field);
   border-radius: var(--radius-m);
   background: transparent;
   color: var(--text-bright);

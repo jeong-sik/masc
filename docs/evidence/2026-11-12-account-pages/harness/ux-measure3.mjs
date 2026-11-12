@@ -46,10 +46,10 @@ await page.cdp("Page.addScriptToEvaluateOnNewDocument", {
 });
 
 // A page with a status line is ready when the line has left "reading". The
-// console draws into #app and shows a status line of its own while it reads
-// the session or leaves for the sign-in page: it is ready when it has drawn
-// and that line is gone. The question is asked again and again, so a page
-// that leaves for another one is waited for at the page it arrives at.
+// console draws into #app, and every state of it but the reading and the
+// leaving for the sign-in page has a control to press: it is ready once it
+// has drawn one. The question is asked again and again, so a page that
+// leaves for another one is waited for at the page it arrives at.
 async function ready() {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   for (;;) {
@@ -58,7 +58,7 @@ async function ready() {
       settled = await page.evaluate(() => {
         if (document.readyState !== "complete") return false;
         const app = document.getElementById("app");
-        if (app !== null && (app.childElementCount === 0 || app.querySelector("[role=status]") !== null)) return false;
+        if (app !== null && app.querySelector("button") === null) return false;
         const out = document.getElementById("out");
         return out === null || out.textContent !== "reading";
       });

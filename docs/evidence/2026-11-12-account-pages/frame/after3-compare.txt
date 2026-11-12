@@ -1,0 +1,99 @@
+# Comparisons of ed8976270ee4 (after3) with the readings before it. They ran
+# over the output folders of the runs, whose styles/ hold the values behind
+# each digest; those values are not in the repository. Each section names
+# the two committed JSON files that stand for the two folders.
+
+## the sign-in pages: console/sheet-after-measure.json and frame/after3-sheet-measure.json
+## python3 harness/ux-compare.py --added=--button-least,--button-pad-block,--button-border,--header-pad-block,--header-rule BEFORE AFTER
+home_signed_out	27 values	86 elements	f3ee0c5ad1752733/42f3ff6b9fc83cd6 d10ceb3aa0dd6e8d/57c0cde6b7f35ce9	same
+    styles1280: same but for 1290 values of the added properties
+    styles320: same but for 1290 values of the added properties
+home_no_client	27 values	87 elements	a07b2c97d4b67ac6/7ccc119b0cd91fa2 5e697871d36cabaf/9ecc7d9543ccefb6	same
+    styles1280: same but for 1305 values of the added properties
+    styles320: same but for 1305 values of the added properties
+invite_token	27 values	26 elements	84fd236bda3e0853/77a943b12281f2ad 61988aab340b73cb/4997b857f84e5ac0	same
+    styles1280: same but for 390 values of the added properties
+    styles320: same but for 390 values of the added properties
+invite_no_token	27 values	26 elements	ad6cfa47763b1b0e/5625483ad8576482 8968af99946f15cb/97ec51682ba62166	same
+    styles1280: same but for 390 values of the added properties
+    styles320: same but for 390 values of the added properties
+invite_no_client	27 values	27 elements	9b4fe3c3316fd345/9fb4ca360a740c5b e15ec8cd50082827/2f97ca3503606110	same
+    styles1280: same but for 405 values of the added properties
+    styles320: same but for 405 values of the added properties
+member_new	27 values	86 elements	b4932077726d05a3/f48ddbb8e72dc2af 6382a11f6b850299/86c1e82ce3cc5bff	same
+    styles1280: same but for 1290 values of the added properties
+    styles320: same but for 1290 values of the added properties
+member_full	27 values	90 elements	0f5e05d1dc4bcc6e/e9f3c2fa535bfece 51bde2fddf056007/72a6dd0c1d64b074	same
+    styles1280: same but for 1350 values of the added properties
+    styles320: same but for 1350 values of the added properties
+admin_full	27 values	90 elements	67e0d449f4402444/82ad891f7ba7e3d6 7afb55da5dab6f59/03c1bb132db46bd5	same
+    styles1280: same but for 1350 values of the added properties
+    styles320: same but for 1350 values of the added properties
+refused_401	27 values	20 elements	238ebe198349b575/c75892590daeef43 a8e409dc25aac2ce/60f4c052ec0941a3	same
+    styles1280: same but for 300 values of the added properties
+    styles320: same but for 300 values of the added properties
+refused_404_no_client	27 values	20 elements	238ebe198349b575/c75892590daeef43 a8e409dc25aac2ce/60f4c052ec0941a3	same
+    styles1280: same but for 300 values of the added properties
+    styles320: same but for 300 values of the added properties
+done_held	27 values	18 elements	1755988224065900/2fb310ef3fe6d6c9 c4acc2dc63389b88/c77ee4196c76f110	same
+    styles1280: same but for 270 values of the added properties
+    styles320: same but for 270 values of the added properties
+control_other_style_nonce	27 values	86 elements	6d61364791b3c2dc/6d61364791b3c2dc 3f26b255b1a710f0/3f26b255b1a710f0	same
+exit 0
+
+## the console: frame/after-measure.json and frame/after3-measure.json
+## python3 harness/ux-compare.py --added=--button-least,--button-pad-block,--button-border,--header-pad-block,--header-rule BEFORE AFTER
+console_signed_out	27 values	86 elements	f3ee0c5ad1752733/42f3ff6b9fc83cd6 d10ceb3aa0dd6e8d/57c0cde6b7f35ce9	same
+    styles1280: same but for 1290 values of the added properties
+    styles320: same but for 1290 values of the added properties
+console_no_bundle	27 values	17 elements	1941ba2dcc53e039/1995c74ea053e72d 0cbe5c28ab30eeb1/a60b7ffe20806832	same
+    styles1280: same but for 255 values of the added properties
+    styles320: same but for 255 values of the added properties
+console_member	27 values	23 elements	c45fd07faa3f1a57/5be0c457df670752 70888459b880a02b/5916f98d79cdce38	same
+    styles1280: same but for 345 values of the added properties
+    styles320: same but for 345 values of the added properties
+console_admin	27 values	23 elements	c45fd07faa3f1a57/5be0c457df670752 70888459b880a02b/5916f98d79cdce38	same
+    styles1280: same but for 345 values of the added properties
+    styles320: same but for 345 values of the added properties
+console_session_unread	27 values	24 elements	8cee9206b8b1369b/8827dba9ca5704ef a4eb0f067a6f5cdf/a695e20b1821f83a	same
+    styles1280: same but for 360 values of the added properties
+    styles320: same but for 360 values of the added properties
+console_account_changed	27 values	22 elements	e52d481b2b6f3f52/366fd623a96daa80 1a301ffd0195fbfa/516e0e90c980aac7	same
+    styles1280: same but for 330 values of the added properties
+    styles320: same but for 330 values of the added properties
+control_no_style_source	27 values	23 elements	ef4df6526e702670/bfb1dc172d184692 4d00e0770aaf7f6c/4d00e0770aaf7f6c	DIFFERS in policyViolations, policyViolationsBeforeAxe, styles320
+    policyViolations: ['style-src-elem http://127.0.0.1:19072/accounts/console/base.css', 'style-src-elem http://127.0.0.1:19072/accounts/console/assets/index-BAPNFRJQ.css', 'style-src-elem inline', 'style-src-elem inline'] -> ['style-src-elem http://127.0.0.1:19082/accounts/console/base.css', 'style-src-elem http://127.0.0.1:19082/accounts/console/assets/index-Dj10NMKr.css', 'style-src-elem inline', 'style-src-elem inline']
+    policyViolationsBeforeAxe: ['style-src-elem http://127.0.0.1:19072/accounts/console/base.css', 'style-src-elem http://127.0.0.1:19072/accounts/console/assets/index-BAPNFRJQ.css'] -> ['style-src-elem http://127.0.0.1:19082/accounts/console/base.css', 'style-src-elem http://127.0.0.1:19082/accounts/console/assets/index-Dj10NMKr.css']
+    styles320: 1 properties differ
+      HTML[0]/BODY[1]/DIV[0]#app/HEADER[0]/DIV[2]/BUTTON[1] outline-color: rgb(0, 95, 204) -> rgb(229, 151, 0)
+exit 1
+
+## the console measured again with the same binary and bundle: frame/after3-measure.json and frame/after3-recheck-measure.json
+## python3 harness/ux-compare.py BEFORE AFTER
+console_signed_out	27 values	86 elements	42f3ff6b9fc83cd6/42f3ff6b9fc83cd6 57c0cde6b7f35ce9/57c0cde6b7f35ce9	same
+console_no_bundle	27 values	17 elements	1995c74ea053e72d/1995c74ea053e72d a60b7ffe20806832/a60b7ffe20806832	same
+console_member	27 values	23 elements	5be0c457df670752/5be0c457df670752 5916f98d79cdce38/5916f98d79cdce38	same
+console_admin	27 values	23 elements	5be0c457df670752/5be0c457df670752 5916f98d79cdce38/5916f98d79cdce38	same
+console_session_unread	27 values	24 elements	8827dba9ca5704ef/8827dba9ca5704ef a695e20b1821f83a/a695e20b1821f83a	same
+console_account_changed	27 values	22 elements	366fd623a96daa80/366fd623a96daa80 516e0e90c980aac7/516e0e90c980aac7	same
+control_no_style_source	27 values	23 elements	bfb1dc172d184692/ef4df6526e702670 4d00e0770aaf7f6c/4d00e0770aaf7f6c	DIFFERS in policyViolations, policyViolationsBeforeAxe, styles320
+    policyViolations: ['style-src-elem http://127.0.0.1:19082/accounts/console/base.css', 'style-src-elem http://127.0.0.1:19082/accounts/console/assets/index-Dj10NMKr.css', 'style-src-elem inline', 'style-src-elem inline'] -> ['style-src-elem http://127.0.0.1:19102/accounts/console/base.css', 'style-src-elem http://127.0.0.1:19102/accounts/console/assets/index-Dj10NMKr.css', 'style-src-elem inline', 'style-src-elem inline']
+    policyViolationsBeforeAxe: ['style-src-elem http://127.0.0.1:19082/accounts/console/base.css', 'style-src-elem http://127.0.0.1:19082/accounts/console/assets/index-Dj10NMKr.css'] -> ['style-src-elem http://127.0.0.1:19102/accounts/console/base.css', 'style-src-elem http://127.0.0.1:19102/accounts/console/assets/index-Dj10NMKr.css']
+    styles320: 1 properties differ
+      HTML[0]/BODY[1]/DIV[0]#app/HEADER[0]/DIV[2]/BUTTON[1] outline-color: rgb(229, 151, 0) -> rgb(0, 95, 204)
+exit 1
+
+## the frame of the console: frame/after-frame.json and frame/after3-frame.json
+## python3 harness/frame-compare.py BEFORE AFTER
+[0] geometry 1548: same
+[1] geometry 1280: same
+[2] geometry 320: same
+[3] geometry_letters 1280: same
+[4] geometry_letters 1280: same
+[5] first_reading : same
+[6] sign_out_refused_twice : same
+[7] sign_out_signed_in_again : same
+[8] sign_out_another_person : same
+[9] retry_failed_again : same
+every row is the same
+exit 0

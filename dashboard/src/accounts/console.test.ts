@@ -5,16 +5,21 @@
 // puts things is not checked here: that is read in a browser.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { signal } from '@preact/signals'
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import { ConsoleFrame, createConsole } from './console'
-import type { ConsoleModel, View } from './console'
+import type { ConsoleModel, Shown, View } from './console'
 import { csrfHeader, paths } from './wire'
 import type { Send } from './wire'
 
 interface Sent { readonly path: string; readonly init: RequestInit }
 type Scripted = Response | 'no answer' | Promise<Response>
+
+/** Requests that came after the answers of a list ran out. The console reads
+    a failed request as no answer, so a test would not see one; each test
+    checks at its end that there was none. */
+const unscripted: string[] = []
 
 /** A `send` that answers from a list, in order, and keeps what was sent. */
 function scripted(answers: readonly Scripted[]): { readonly send: Send; readonly sent: Sent[] } {
@@ -23,18 +28,24 @@ function scripted(answers: readonly Scripted[]): { readonly send: Send; readonly
   const send: Send = (path, init) => {
     sent.push({ path, init })
     const next = left.shift()
-    if (next === undefined) throw new Error(`no answer was scripted for ${path}`)
+    if (next === undefined) {
+      unscripted.push(path)
+      return Promise.reject(new Error(`no answer was scripted for ${path}`))
+    }
     return next === 'no answer' ? Promise.reject(new TypeError('fetch failed')) : Promise.resolve(next)
   }
   return { send, sent }
 }
 
+const person = 'usr_0123456789'
 const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
-const aSession = (): Response => json(200, { user_id: 'usr_0123456789', expires_at_ms: 1, csrf_token: 'token' })
-const aWho = (role = 'worker'): Response => json(200, { principal: { kind: 'human', id: 'usr_0123456789' }, role, binding: { kind: 'session', id: 's' } })
+const aSession = (csrf = 'token', user = person): Response => json(200, { user_id: user, expires_at_ms: 1, csrf_token: csrf })
+const aWho = (role = 'worker', id = person): Response => json(200, { principal: { kind: 'human', id }, role, binding: { kind: 'session', id: 's' } })
 const noSession = (): Response => json(401, { error: 'no session cookie came with the request' })
 const notReady = (): Response => json(503, { error: 'the files are being read again' })
+const staleToken = (): Response => json(403, { error: 'the CSRF token is not the one of the session' })
+const signedOut = (): Response => new Response(null, { status: 204 })
 
 function start(answers: readonly Scripted[]): { readonly model: ConsoleModel; readonly sent: Sent[]; readonly leave: ReturnType<typeof vi.fn> } {
   const { send, sent } = scripted(answers)
@@ -43,6 +54,9 @@ function start(answers: readonly Scripted[]): { readonly model: ConsoleModel; re
 }
 
 const kinds = (model: ConsoleModel): string => model.view.value.kind
+const sentPaths = (sent: readonly Sent[]): string[] => sent.map((one) => one.path)
+const tokens = (sent: readonly Sent[]): Array<string | null> =>
+  sent.filter((one) => one.path === paths.signOut).map((one) => new Headers(one.init.headers).get(csrfHeader))
 
 /** The one element of `container` that `selector` names. */
 function the(container: Element, selector: string): HTMLElement {
@@ -52,9 +66,13 @@ function the(container: Element, selector: string): HTMLElement {
   return first
 }
 
+/** Longer than any wait the console announces or times. */
+const longMs = 1000
+
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
+  expect(unscripted.splice(0), 'requests that no answer was scripted for').toEqual([])
 })
 
 describe('reading the session', () => {
@@ -64,11 +82,11 @@ describe('reading the session', () => {
     await model.load()
     expect(model.view.value).toEqual({
       kind: 'signed_in',
-      session: { userId: 'usr_0123456789', csrfToken: 'token' },
-      who: { id: 'usr_0123456789', role: 'admin' },
+      session: { userId: person, csrfToken: 'token' },
+      who: { id: person, role: 'admin' },
       signOut: { kind: 'idle' },
     })
-    expect(sent.map((one) => one.path)).toEqual([paths.session, paths.who])
+    expect(sentPaths(sent)).toEqual([paths.session, paths.who])
     expect(leave).not.toHaveBeenCalled()
   })
 
@@ -77,7 +95,7 @@ describe('reading the session', () => {
     await model.load()
     expect(kinds(model)).toBe('leaving')
     expect(leave).toHaveBeenCalledTimes(1)
-    expect(sent.map((one) => one.path)).toEqual([paths.session])
+    expect(sentPaths(sent)).toEqual([paths.session])
   })
 
   it('leaves when the session ended between the two requests', async () => {
@@ -88,13 +106,24 @@ describe('reading the session', () => {
   })
 
   it.each([
-    ['a refusal', notReady(), { kind: 'refused', status: 503, reason: 'the files are being read again' }],
-    ['no answer', 'no answer', { kind: 'unreachable' }],
-    ['an answer of another shape', json(200, {}), { kind: 'unreadable' }],
-  ] as const)('stays and shows the problem of %s', async (_name, answer, problem) => {
-    const { model, leave } = start([answer])
+    ['a refusal of the session', [notReady()], { kind: 'refused', status: 503, reason: 'the files are being read again' }],
+    ['no answer', ['no answer'], { kind: 'unreachable' }],
+    ['an answer of another shape', [json(200, {})], { kind: 'unreadable' }],
+    ['a refusal of whose the session is', [aSession(), notReady()], { kind: 'refused', status: 503, reason: 'the files are being read again' }],
+  ] as const)('stays and shows the problem of %s', async (_name, answers, problem) => {
+    const { model, leave } = start(answers)
     await model.load()
-    expect(model.view.value).toEqual({ kind: 'failed', problem, retrying: false })
+    expect(model.view.value).toEqual({ kind: 'failed', failure: { problem, attempts: 1 }, next: 'idle' })
+    expect(leave).not.toHaveBeenCalled()
+  })
+
+  it('says the account changed when the two answers name two people, and reads the one of now on a retry', async () => {
+    const { model, sent, leave } = start([aSession(), aWho('worker', 'usr_someone_else'), aSession('t2', 'usr_someone_else'), aWho('worker', 'usr_someone_else')])
+    await model.load()
+    expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
+    await model.load()
+    expect(model.view.value).toMatchObject({ kind: 'signed_in', session: { userId: 'usr_someone_else' } })
+    expect(sentPaths(sent)).toEqual([paths.session, paths.who, paths.session, paths.who])
     expect(leave).not.toHaveBeenCalled()
   })
 
@@ -104,7 +133,47 @@ describe('reading the session', () => {
     const { model } = start([notReady(), later, aWho()])
     await model.load()
     const retry = model.load()
-    expect(model.view.value).toMatchObject({ kind: 'failed', retrying: true })
+    expect(model.view.value).toMatchObject({ kind: 'failed', next: 'reading' })
+    answer(aSession())
+    await retry
+    expect(kinds(model)).toBe('signed_in')
+  })
+
+  it('keeps the page of a failed reading while it leaves after a retry finds no session', async () => {
+    const { model, leave } = start([notReady(), noSession()])
+    await model.load()
+    await model.load()
+    expect(model.view.value).toMatchObject({ kind: 'failed', failure: { attempts: 1 }, next: 'leaving' })
+    expect(leave).toHaveBeenCalledTimes(1)
+    await model.load()
+    expect(leave).toHaveBeenCalledTimes(1)
+  })
+
+  it('counts the readings that failed in a row', async () => {
+    const { model } = start([notReady(), 'no answer'])
+    await model.load()
+    await model.load()
+    expect(model.view.value).toEqual({ kind: 'failed', failure: { problem: { kind: 'unreachable' }, attempts: 2 }, next: 'idle' })
+  })
+
+  it('reads nothing while someone is signed in', async () => {
+    const { model, sent } = start([aSession(), aWho()])
+    await model.load()
+    const before = model.view.value
+    await model.load()
+    expect(model.view.value).toBe(before)
+    expect(sentPaths(sent)).toEqual([paths.session, paths.who])
+  })
+
+  it('keeps what failed on the page while a long retry runs', async () => {
+    vi.useFakeTimers()
+    let answer: (response: Response) => void = () => {}
+    const later = new Promise<Response>((resolve) => { answer = resolve })
+    const { model } = start([notReady(), later, aWho()])
+    await model.load()
+    const retry = model.load()
+    await vi.advanceTimersByTimeAsync(longMs)
+    expect(model.view.value).toMatchObject({ kind: 'failed', next: 'reading' })
     answer(aSession())
     await retry
     expect(kinds(model)).toBe('signed_in')
@@ -113,7 +182,7 @@ describe('reading the session', () => {
   it('joins a reading that is under way', async () => {
     const { model, sent } = start([aSession(), aWho()])
     await Promise.all([model.load(), model.load()])
-    expect(sent.map((one) => one.path)).toEqual([paths.session, paths.who])
+    expect(sentPaths(sent)).toEqual([paths.session, paths.who])
   })
 
   it('says it is waiting only once the wait is long', async () => {
@@ -124,7 +193,6 @@ describe('reading the session', () => {
     const reading = model.load()
     // A tenth of a second passes before a person notices a wait.
     const unnoticedMs = 100
-    const longMs = 1000
     await vi.advanceTimersByTimeAsync(unnoticedMs)
     expect(model.view.value).toEqual({ kind: 'reading', slow: false })
     await vi.advanceTimersByTimeAsync(longMs)
@@ -136,12 +204,18 @@ describe('reading the session', () => {
 })
 
 describe('signing out', () => {
-  it('sends the CSRF token of the session and leaves', async () => {
-    const { model, sent, leave } = start([aSession(), aWho(), new Response(null, { status: 204 })])
-    await model.load()
+  /** A model that has read the session of `person` with the token `token`. */
+  async function signedIn(after: readonly Scripted[]) {
+    const started = start([aSession(), aWho(), ...after])
+    await started.model.load()
+    return started
+  }
+
+  it('sends the CSRF token of the session and leaves, with the page as it was', async () => {
+    const { model, sent, leave } = await signedIn([signedOut()])
     await model.signOut()
-    expect(kinds(model)).toBe('leaving')
     expect(leave).toHaveBeenCalledTimes(1)
+    expect(model.view.value).toMatchObject({ kind: 'signed_in', session: { userId: person }, signOut: { kind: 'out' } })
     expect(sent.map((one) => [one.path, new Headers(one.init.headers).get(csrfHeader)])).toEqual([
       [paths.session, null],
       [paths.who, null],
@@ -150,28 +224,96 @@ describe('signing out', () => {
   })
 
   it('leaves when no session was left to end', async () => {
-    const { model, leave } = start([aSession(), aWho(), noSession()])
-    await model.load()
+    const { model, leave } = await signedIn([noSession()])
     await model.signOut()
+    expect(leave).toHaveBeenCalledTimes(1)
+    expect(model.view.value).toMatchObject({ signOut: { kind: 'out' } })
+  })
+
+  it('sends nothing more once the person is out', async () => {
+    const { model, sent, leave } = await signedIn([signedOut()])
+    await model.signOut()
+    await model.signOut()
+    expect(tokens(sent)).toEqual(['token'])
     expect(leave).toHaveBeenCalledTimes(1)
   })
 
-  it('stays signed in and shows the problem when the server refuses', async () => {
-    const { model, leave } = start([aSession(), aWho(), notReady()])
-    await model.load()
+  it.each([
+    ['no answer, and none to the reading after it', ['no answer', 'no answer'], { kind: 'unreachable' }],
+    ['an answer it cannot read', [json(200, { ended: true }), aSession()], { kind: 'unreadable' }],
+  ] as const)('stays and shows the failure when the sign-out gets %s', async (_name, after, problem) => {
+    const { model, leave } = await signedIn(after)
     await model.signOut()
-    expect(model.view.value).toMatchObject({
-      kind: 'signed_in',
-      signOut: { kind: 'failed', problem: { kind: 'refused', status: 503 } },
-    })
+    expect(model.view.value).toMatchObject({ kind: 'signed_in', signOut: { kind: 'failed', failure: { problem, attempts: 1 } } })
     expect(leave).not.toHaveBeenCalled()
   })
 
+  it('stays signed in and shows the problem when the server refuses', async () => {
+    const { model, sent, leave } = await signedIn([notReady(), aSession()])
+    await model.signOut()
+    expect(model.view.value).toMatchObject({
+      kind: 'signed_in',
+      signOut: { kind: 'failed', failure: { problem: { kind: 'refused', status: 503 }, attempts: 1 } },
+    })
+    expect(sentPaths(sent).slice(2)).toEqual([paths.signOut, paths.session])
+    expect(leave).not.toHaveBeenCalled()
+  })
+
+  it('sends again, and counts the refusals', async () => {
+    const { model, sent } = await signedIn([notReady(), aSession(), notReady(), aSession()])
+    await model.signOut()
+    await model.signOut()
+    expect(model.view.value).toMatchObject({ signOut: { kind: 'failed', failure: { attempts: 2 } } })
+    expect(tokens(sent)).toEqual(['token', 'token'])
+  })
+
+  it('sends the token of now when another tab signed in again', async () => {
+    const { model, sent, leave } = await signedIn([staleToken(), aSession('token-of-now'), signedOut()])
+    await model.signOut()
+    expect(tokens(sent)).toEqual(['token', 'token-of-now'])
+    expect(leave).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the token of now for the next press when that one is refused too', async () => {
+    const { model, sent } = await signedIn([staleToken(), aSession('token-of-now'), notReady(), notReady(), aSession('token-of-now')])
+    await model.signOut()
+    expect(model.view.value).toMatchObject({
+      session: { csrfToken: 'token-of-now' },
+      signOut: { kind: 'failed', failure: { problem: { status: 503 } } },
+    })
+    await model.signOut()
+    expect(tokens(sent)).toEqual(['token', 'token-of-now', 'token-of-now'])
+  })
+
+  it('leaves when the server refuses and the session ended meanwhile', async () => {
+    const { model, sent, leave } = await signedIn([staleToken(), noSession()])
+    await model.signOut()
+    expect(leave).toHaveBeenCalledTimes(1)
+    expect(tokens(sent)).toEqual(['token'])
+    expect(model.view.value).toMatchObject({ session: { userId: person }, signOut: { kind: 'out' } })
+  })
+
+  it('says the account changed, and ends no session, when another person signed in meanwhile', async () => {
+    const { model, sent, leave } = await signedIn([staleToken(), aSession('token-of-them', 'usr_someone_else')])
+    await model.signOut()
+    expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
+    expect(tokens(sent)).toEqual(['token'])
+    expect(leave).not.toHaveBeenCalled()
+  })
+
+  it('shows the refusal when the session cannot be read again', async () => {
+    const { model } = await signedIn([notReady(), 'no answer'])
+    await model.signOut()
+    expect(model.view.value).toMatchObject({
+      session: { csrfToken: 'token' },
+      signOut: { kind: 'failed', failure: { problem: { kind: 'refused', status: 503 } } },
+    })
+  })
+
   it('sends once when it is asked twice', async () => {
-    const { model, sent } = start([aSession(), aWho(), new Response(null, { status: 204 })])
-    await model.load()
+    const { model, sent } = await signedIn([signedOut()])
     await Promise.all([model.signOut(), model.signOut()])
-    expect(sent.filter((one) => one.path === paths.signOut)).toHaveLength(1)
+    expect(tokens(sent)).toHaveLength(1)
   })
 
   it('does nothing before anyone is signed in', async () => {
@@ -182,32 +324,39 @@ describe('signing out', () => {
 })
 
 it('keeps nothing of a session in web storage', async () => {
-  const { model } = start([aSession(), aWho(), new Response(null, { status: 204 })])
+  const { model } = start([aSession(), aWho(), signedOut()])
   await model.load()
   await model.signOut()
   expect([localStorage.length, sessionStorage.length]).toEqual([0, 0])
 })
 
 describe('the frame', () => {
-  const who = { id: 'usr_0123456789', role: 'member' } as const
-  const session = { userId: 'usr_0123456789', csrfToken: 'token' } as const
-  const refused = { kind: 'refused', status: 503, reason: 'the files are being read again' } as const
+  const who = { id: person, role: 'member' } as const
+  const session = { userId: person, csrfToken: 'token' } as const
+  const refused: Shown = { kind: 'refused', status: 503, reason: 'the files are being read again' }
   const views: ReadonlyArray<readonly [string, View]> = [
     ['reading', { kind: 'reading', slow: false }],
     ['a long reading', { kind: 'reading', slow: true }],
-    ['a reading that failed', { kind: 'failed', problem: refused, retrying: false }],
-    ['a retry under way', { kind: 'failed', problem: { kind: 'unreachable' }, retrying: true }],
+    ['leaving', { kind: 'leaving' }],
+    ['a reading that failed', { kind: 'failed', failure: { problem: refused, attempts: 1 }, next: 'idle' }],
+    ['a retry under way', { kind: 'failed', failure: { problem: { kind: 'unreachable' }, attempts: 2 }, next: 'reading' }],
+    ['a retry that found no session', { kind: 'failed', failure: { problem: refused, attempts: 1 }, next: 'leaving' }],
+    ['an account that changed', { kind: 'changed', next: 'idle' }],
+    ['a reading of the account of now', { kind: 'changed', next: 'reading' }],
     ['signed in', { kind: 'signed_in', session, who, signOut: { kind: 'idle' } }],
     ['signing out', { kind: 'signed_in', session, who, signOut: { kind: 'sending' } }],
-    ['a sign-out that failed', { kind: 'signed_in', session, who, signOut: { kind: 'failed', problem: refused } }],
-    ['leaving', { kind: 'leaving' }],
+    ['a sign-out that failed', { kind: 'signed_in', session, who, signOut: { kind: 'failed', failure: { problem: refused, attempts: 3 } } }],
+    ['signed out', { kind: 'signed_in', session, who, signOut: { kind: 'out' } }],
   ]
+  const named = (...names: string[]) => views.map(([name]) => [name, names.includes(name) ? 1 : 0])
 
   /** The frame of one state, over a model that only counts what it is asked. */
   const drawn = (view: View) => {
-    const model = { view: signal(view), load: vi.fn(() => Promise.resolve()), signOut: vi.fn(() => Promise.resolve()) } satisfies ConsoleModel
-    return { container: render(html`<${ConsoleFrame} model=${model} />`).container, model }
+    const state = signal(view)
+    const model = { view: state, load: vi.fn(() => Promise.resolve()), signOut: vi.fn(() => Promise.resolve()) } satisfies ConsoleModel
+    return { container: render(html`<${ConsoleFrame} model=${model} />`).container, model, state }
   }
+  const count = (selector: string) => views.map(([name, view]) => [name, drawn(view).container.querySelectorAll(selector).length])
 
   it.each(views)('passes the accessibility rules while %s', async (_name, view) => {
     expect(await axe(drawn(view).container)).toHaveNoViolations()
@@ -219,32 +368,96 @@ describe('the frame', () => {
   })
 
   it('offers the way out only to someone signed in', () => {
-    const buttons = views.map(([name, view]) => [name, drawn(view).container.querySelectorAll('header button').length])
-    expect(buttons).toEqual([
-      ['reading', 0], ['a long reading', 0], ['a reading that failed', 0], ['a retry under way', 0],
-      ['signed in', 1], ['signing out', 1], ['a sign-out that failed', 1], ['leaving', 0],
-    ])
+    expect(count('header button')).toEqual(named('signed in', 'signing out', 'a sign-out that failed', 'signed out'))
   })
 
   it('says a problem where a screen reader announces it', () => {
-    const alerts = views.map(([name, view]) => [name, drawn(view).container.querySelectorAll('[role=alert]').length])
-    expect(alerts.filter(([, count]) => count !== 0)).toEqual([['a reading that failed', 1], ['a retry under way', 1], ['a sign-out that failed', 1]])
+    expect(count('[role=alert]')).toEqual(named(
+      'a reading that failed', 'a retry under way', 'a retry that found no session',
+      'an account that changed', 'a reading of the account of now', 'a sign-out that failed'))
+  })
+
+  it('has one line a screen reader reads out, which is filled while the page waits or moves', () => {
+    expect(count('[role=status]')).toEqual(named(...views.map(([name]) => name)))
+    const filled = views.map(([name, view]) => [name, the(drawn(view).container, '[role=status]').textContent === '' ? 0 : 1])
+    expect(filled).toEqual(named(
+      'a long reading', 'leaving', 'a retry under way', 'a retry that found no session', 'a reading of the account of now', 'signed out'))
+  })
+
+  it('marks the button whose request runs, and no other', () => {
+    expect(count('button[aria-disabled=true]')).toEqual(named(
+      'a retry under way', 'a retry that found no session', 'a reading of the account of now', 'signing out', 'signed out'))
   })
 
   it('asks the model to sign out and to read again', () => {
     const signedIn = drawn({ kind: 'signed_in', session, who, signOut: { kind: 'idle' } })
     fireEvent.click(the(signedIn.container, 'header button'))
     expect(signedIn.model.signOut).toHaveBeenCalledTimes(1)
-    const failed = drawn({ kind: 'failed', problem: refused, retrying: false })
-    fireEvent.click(the(failed.container, 'main button'))
-    expect(failed.model.load).toHaveBeenCalledTimes(1)
+    for (const view of [
+      { kind: 'failed', failure: { problem: refused, attempts: 1 }, next: 'idle' },
+      { kind: 'changed', next: 'idle' },
+    ] as const) {
+      const shown = drawn(view)
+      fireEvent.click(the(shown.container, 'main button'))
+      expect(shown.model.load).toHaveBeenCalledTimes(1)
+    }
+  })
+
+  /** The frame over a model that answers from a list. */
+  const live = (answers: readonly Scripted[]) => {
+    const { send } = scripted(answers)
+    const model = createConsole({ send, leave: vi.fn() })
+    return { model, container: render(html`<${ConsoleFrame} model=${model} />`).container }
+  }
+
+  it('puts a new note on the page when a reading fails again', async () => {
+    const { model, container } = live([notReady(), notReady()])
+    await act(() => model.load())
+    const first = the(container, '[role=alert]')
+    await act(() => model.load())
+    expect(the(container, '[role=alert]')).not.toBe(first)
+  })
+
+  it('puts a new note on the page when a sign-out fails again', async () => {
+    const { model, container } = live([aSession(), aWho(), notReady(), aSession(), notReady(), aSession()])
+    await act(() => model.load())
+    await act(() => model.signOut())
+    const first = the(container, '[role=alert]')
+    await act(() => model.signOut())
+    expect(the(container, '[role=alert]')).not.toBe(first)
+  })
+
+  it('keeps the focus on the sign-out button while the browser leaves', async () => {
+    const { model, container } = live([aSession(), aWho(), signedOut()])
+    await act(() => model.load())
+    const button = the(container, 'header button')
+    button.focus()
+    await act(() => model.signOut())
+    expect(document.activeElement).toBe(button)
+  })
+
+  it('moves the focus to the heading when a sign-out finds that the account changed', async () => {
+    const { model, container } = live([aSession(), aWho(), staleToken(), aSession('token-of-them', 'usr_someone_else')])
+    await act(() => model.load())
+    the(container, 'header button').focus()
+    await act(() => model.signOut())
+    expect(container.querySelectorAll('header button')).toHaveLength(0)
+    expect(document.activeElement).toBe(the(container, 'h1'))
+  })
+
+  it('keeps the focus on the button when a retry finds that the account changed', async () => {
+    const { model, container } = live([notReady(), aSession(), aWho('worker', 'usr_someone_else')])
+    await act(() => model.load())
+    const button = the(container, 'main button')
+    button.focus()
+    await act(() => model.load())
+    expect(model.view.value.kind).toBe('changed')
+    expect(document.activeElement).toBe(button)
   })
 
   it('moves the focus to the heading after a retry that worked', async () => {
-    const { send } = scripted([notReady(), aSession(), aWho()])
-    const model = createConsole({ send, leave: vi.fn() })
-    await model.load()
-    const { container } = render(html`<${ConsoleFrame} model=${model} />`)
+    const { model, container } = live([notReady(), aSession(), aWho()])
+    await act(() => model.load())
     const retry = the(container, 'main button')
     retry.focus()
     expect(document.activeElement).toBe(retry)
@@ -252,5 +465,14 @@ describe('the frame', () => {
     await waitFor(() => {
       expect(document.activeElement).toBe(the(container, 'h1'))
     })
+  })
+
+  it('leaves the focus alone when the first reading ends', async () => {
+    const { model, container } = live([aSession(), aWho()])
+    // The frame moves the focus in an effect, which runs after the page is
+    // drawn; `act` runs the effects of the reading before the focus is read.
+    await act(() => model.load())
+    expect(container.querySelectorAll('header button')).toHaveLength(1)
+    expect(document.activeElement).toBe(document.body)
   })
 })

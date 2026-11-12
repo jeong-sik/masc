@@ -2,16 +2,34 @@
    sheet of the account pages before this one and takes its colours, fields
    and buttons from it, so they are the ones of the sign-in page. This file
    adds no colour. */
-main { width: 100%; max-width: 1072px; margin: 0 auto; padding: 24px 16px 48px; }
+:root { --column: 1072px; --gutter: 16px; }
+
+/* The column of the page. The line that names the place keeps to the same
+   column, so its two ends stand over the edges of what is under it. */
+main { width: 100%; max-width: var(--column); margin: 0 auto; padding: 24px var(--gutter) 48px; }
+.site-header { padding-inline: max(var(--gutter), calc((100% - var(--column)) / 2 + var(--gutter))); }
 
 /* One gap between the parts of a page. The rule weighs nothing and comes
    after the margin reset of the base, so it wins by its place and any rule
-   below changes a margin. */
-:where(main, section, div) > * + * { margin-top: 16px; }
+   below changes a margin. It names the boxes whose children stand one under
+   another: the line of who is signed in is a row, and is not one of them. */
+:where(main, section, .callout) > * + * { margin-top: 16px; }
 
 /* Who is signed in and the way out sit at the end of the line that names the
-   place. On a narrow window they move under it together. */
-.site-header { flex-wrap: wrap; row-gap: 8px; }
+   place. On a narrow window they move under it together. The line is as tall
+   before the session is read as after, at any size of the letters: a button
+   of the base is its line of text with its padding and border above and
+   below, and no less than its least height; the line adds its own padding
+   above and below and its rule. The sizes are the ones account_base.css
+   names, so a change there moves this height with it. */
+.site-header {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  min-height: calc(
+    max(var(--button-least), 1lh + 2 * var(--button-pad-block) + 2 * var(--button-border))
+    + 2 * var(--header-pad-block) + var(--header-rule)
+  );
+}
 .account { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 
 .callout-title { color: var(--text-bright); font-weight: 600; }

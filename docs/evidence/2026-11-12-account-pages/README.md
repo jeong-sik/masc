@@ -2,7 +2,7 @@
 
 계정 서버가 직접 쓰는 화면을 층마다 그 층의 바이너리로 띄워 실제 브라우저에서 잰 기록이에요. 화면 문구와 배치는 시험으로 고정하지 않아서(constitution `execution_protocol`), 이 폴더의 수치와 캡처가 근거예요.
 
-로그인한 사람의 콘솔(`/accounts/console`)을 계정 서버가 답하는 경로와, sheet 를 두 파일로 나눈 전후의 비교는 `console/README.md` 에 있어요.
+로그인한 사람의 콘솔(`/accounts/console`)을 계정 서버가 답하는 경로와, sheet 를 두 파일로 나눈 전후의 비교는 `console/README.md` 에 있어요. 그 콘솔 틀의 로그아웃 흐름과 머리줄을 고친 전후는 `frame/README.md` 에 있어요.
 
 ## 방법
 

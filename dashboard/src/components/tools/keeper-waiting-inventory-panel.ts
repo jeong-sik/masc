@@ -3,17 +3,10 @@ import { useState } from 'preact/hooks'
 import type {
   DashboardKeeperWaitingInventory,
   DashboardKeeperWaitingKeeper,
-  DashboardKeeperWaitingRow,
 } from '../../api'
 import { formatDateTimeKo } from '../../lib/format-time'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
-import {
-  LaneAgeAxis,
-  LaneWaitingRow,
-  ageMinutes,
-  DAY_MINUTES,
-  waitingRowsOldestFirst,
-} from '../keeper-workspace/keeper-lane-strip'
+import { LaneWaitingRows } from '../keeper-workspace/keeper-lane-strip'
 
 // Exported for the keeper workspace lane strip (#23507): the lane
 // state/source palettes stay single-sourced here instead of growing a
@@ -93,37 +86,6 @@ function SourceCounts({ counts }: { counts: Record<string, number> | null | unde
   `
 }
 
-/** The shared V2 waiting-row block (#29473): rows oldest first on a log age
- *  axis, each row the server's operator sentence (`what`) with the raw wire
- *  vocabulary behind the 기술 상세 toggle. Reused by the keeper workspace
- *  lane strip and the fleet surfaces so both draw the same row component.
- *  No client-side cap: the server's own truncation flag is the only bound. */
-function LaneRows({ rows, dev }: { rows: DashboardKeeperWaitingRow[]; dev: boolean }) {
-  const sorted = waitingRowsOldestFirst(rows)
-  const nowMs = Date.now()
-  const ages = sorted.map(row => ageMinutes(row, nowMs))
-  const axisMax = Math.max(DAY_MINUTES, ...ages.filter((age): age is number => age != null))
-  if (sorted.length === 0) return null
-  return html`
-    <div class="grid gap-1">
-      <div class="font-mono text-3xs uppercase tracking-wide text-[var(--color-fg-muted)]">오래 기다린 순서</div>
-      <${LaneAgeAxis} axisMax=${axisMax} />
-      <div class="grid max-h-[30rem] gap-1 overflow-y-auto pr-1" data-testid="keeper-lane-graph" aria-label="대기 나이순 작업 흐름">
-        ${sorted.map((row, index) => html`
-          <${LaneWaitingRow}
-            key=${`${row.source}:${row.waiting_on}:${index}`}
-            row=${row}
-            age=${ages[index] ?? null}
-            axisMax=${axisMax}
-            dev=${dev}
-            actions=${null}
-          />
-        `)}
-      </div>
-    </div>
-  `
-}
-
 function KeeperRow({ keeper, dev }: { keeper: DashboardKeeperWaitingKeeper; dev: boolean }) {
   const rows = keeper.waiting_on ?? []
   const waitingCount = keeper.waiting_count ?? 0
@@ -138,7 +100,7 @@ function KeeperRow({ keeper, dev }: { keeper: DashboardKeeperWaitingKeeper; dev:
       </div>
       <${SourceCounts} counts=${keeper.sources} />
       <div class="mt-2">
-        <${LaneRows} rows=${rows} dev=${dev} />
+        <${LaneWaitingRows} rows=${rows} dev=${dev} actions=${null} />
       </div>
     </div>
   `
@@ -190,7 +152,7 @@ export function KeeperWaitingInventoryPanel({
         ? html`
             <div class="border-t border-[var(--color-border-subtle)] pt-3">
               <div class="mb-1 text-xs font-medium text-[var(--color-fg-secondary)]">Global waiting</div>
-              <${LaneRows} rows=${globalRows} dev=${dev} />
+              <${LaneWaitingRows} rows=${globalRows} dev=${dev} actions=${null} />
             </div>
           `
         : null}
@@ -251,7 +213,7 @@ function LaneEvidenceCard({ keeper, dev }: { keeper: DashboardKeeperWaitingKeepe
       </div>
       <div class="mt-2">
         ${rows.length > 0
-          ? html`<${LaneRows} rows=${rows} dev=${dev} />`
+          ? html`<${LaneWaitingRows} rows=${rows} dev=${dev} actions=${null} />`
           : html`<div class="border-t border-[var(--color-border-subtle)] pt-2 text-xs text-[var(--color-fg-muted)]">no keeper-specific waiting rows</div>`}
       </div>
     </article>
@@ -300,7 +262,7 @@ export function KeeperLaneInventoryPanel({
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
               <div class="mb-1 text-xs font-medium text-[var(--color-fg-secondary)]">Global lane evidence</div>
-              <${LaneRows} rows=${globalRows} dev=${dev} />
+              <${LaneWaitingRows} rows=${globalRows} dev=${dev} actions=${null} />
             </div>
           `
         : null}

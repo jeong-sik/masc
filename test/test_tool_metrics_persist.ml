@@ -102,7 +102,7 @@ let test_retained_metric_time_windows () =
       let row : Tool_metrics_store.row =
         { record_id; ts; tool_name = "windowed"; disposition = "completed"; duration_ms = 1.0 }
       in
-      Tool_metrics_store.insert ~masc_root:root row |> get_ok "insert window fixture")
+      Tool_metrics_store.insert ~masc_root:root ~result_bytes:0 row |> get_ok "insert window fixture")
       ["older", 10.; "same-a", 20.; "same-b", 20.; "newer", 30.];
     let read ?since_ts ?until_ts ?(n = 10) () =
       Tool_metrics_store.read_recent ~masc_root:root ?since_ts ?until_ts ~n ()
@@ -169,6 +169,7 @@ let insert_old_row ~base_path =
   P.reset_for_testing ();
   Tool_metrics_store.insert
     ~masc_root:(masc_root base_path)
+    ~result_bytes:0
     { record_id = "old-record"
     ; ts = 1.0
     ; tool_name = "expired"
@@ -198,6 +199,71 @@ let test_hydrate_prunes_expired_rows () =
       1
       (Tool_metrics_store.summary ~masc_root:(masc_root base_path)
        |> get_ok "summary after prune").entry_count)
+
+let count_rows ~masc_root table =
+  let db = Sqlite3.db_open ~mode:`READONLY (Tool_metrics_store.database_path ~masc_root) in
+  let count = ref (-1) in
+  let rc =
+    Sqlite3.exec
+      db
+      ~cb:(fun row _ ->
+        match row.(0) with
+        | Some value -> count := int_of_string value
+        | None -> ())
+      ("SELECT COUNT(*) FROM " ^ table)
+  in
+  let closed = Sqlite3.db_close db in
+  if not (Sqlite3.Rc.is_success rc && closed)
+  then Alcotest.failf "count %s: %s" table (Sqlite3.Rc.to_string rc);
+  !count
+
+let test_hydrate_prunes_the_sizes_of_expired_rows () =
+  with_tmp_dir (fun base_path ->
+    let masc_root = masc_root base_path in
+    P.enqueue ~masc_root (make_result ~name:"current" ~success:true ~duration_ms:2.0);
+    insert_old_row ~base_path;
+    Alcotest.(check int) "a size for each row before pruning" 2 (count_rows ~masc_root "tool_metric_result_sizes");
+    ignore (P.hydrate ~masc_root ~retention_days:30 |> get_ok "hydrate after prune");
+    Alcotest.(check int) "events after pruning" 1 (count_rows ~masc_root "tool_metric_events");
+    Alcotest.(check int) "sizes after pruning" 1 (count_rows ~masc_root "tool_metric_result_sizes"))
+
+let test_enqueue_stores_the_size_of_the_result_message () =
+  with_tmp_dir (fun base_path ->
+    let masc_root = masc_root base_path in
+    let message = "twelve bytes" in
+    let result =
+      R.Failed
+        { R.class_ = Runtime_failure
+        ; effect_disposition = R.Effect_outcome_unknown
+        ; message
+        ; data_source = R.Explicit_data `Null
+        ; metadata = None
+        ; tool_name = "sized"
+        ; duration_ms = 1.0
+        }
+    in
+    Alcotest.(check string) "the message the size is taken from" message (R.message result);
+    P.enqueue ~masc_root result;
+    P.enqueue ~masc_root (make_result ~name:"empty" ~success:false ~duration_ms:1.0);
+    let now = Time_compat.now () in
+    let window =
+      Tool_metrics_series.window
+        ~since:(now -. 3600.0)
+        ~until:(now +. 3600.0)
+        ~width:Tool_metrics_series.Hour
+        ~utc_offset_min:0
+      |> get_ok "window"
+    in
+    let read tool_name =
+      Tool_metrics_store.read_series ~masc_root ~window ~tool_name ()
+      |> get_ok "read series"
+    in
+    let sized = read "sized" in
+    Alcotest.(check int) "bytes of the message" (String.length message) sized.total.result_bytes_total;
+    Alcotest.(check int) "one sized call" 1 sized.total.result_observed_count;
+    let empty = read "empty" in
+    Alcotest.(check int) "an empty message is a size of zero, observed" 1 empty.total.result_observed_count;
+    Alcotest.(check int) "and adds no bytes" 0 empty.total.result_bytes_total)
 
 let test_multidomain_writes_are_serialized () =
   with_tmp_dir (fun base_path ->
@@ -233,9 +299,9 @@ let test_duplicate_record_id_is_idempotent () =
       ; duration_ms = 1.0
       }
     in
-    Tool_metrics_store.insert ~masc_root:(masc_root base_path) row
+    Tool_metrics_store.insert ~masc_root:(masc_root base_path) ~result_bytes:0 row
     |> get_ok "first insert";
-    Tool_metrics_store.insert ~masc_root:(masc_root base_path) row
+    Tool_metrics_store.insert ~masc_root:(masc_root base_path) ~result_bytes:0 row
     |> get_ok "duplicate insert";
     Alcotest.(check int)
       "duplicate record id keeps one row"
@@ -323,6 +389,12 @@ let () =
           ; eio_test
               "startup hydration prunes expired rows"
               test_hydrate_prunes_expired_rows
+          ; eio_test
+              "startup hydration prunes the sizes of expired rows"
+              test_hydrate_prunes_the_sizes_of_expired_rows
+          ; eio_test
+              "enqueue stores the size of the result message"
+              test_enqueue_stores_the_size_of_the_result_message
           ; eio_test
               "writes from multiple domains are serialized"
               test_multidomain_writes_are_serialized

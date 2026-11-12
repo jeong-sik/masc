@@ -129,6 +129,12 @@ def top_pull(repo, number):
     # Include a closed, unmerged top as a blocker. Never silently merge just
     # the lower open portion of a stack whose top was closed.
     for member in reversed(live['pull_requests']):
+        # The listing dates each merged layer, so only a layer it does not
+        # call merged is read. Reading every layer cost one request per layer
+        # in every run that woke for a stack that had already landed: 86 for
+        # stack #51256, in each of the runs its last push had queued.
+        if member['state'] == 'closed' and member.get('merged_at') is not None:
+            continue
         current = pull(repo, member['number'])
         if current['merged'] is not True:
             return current

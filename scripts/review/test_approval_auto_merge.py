@@ -74,6 +74,7 @@ class FakeGitHub:
             self.stack = {'id': 7, 'number': 900, 'base': {'ref': 'main'},
                           'pull_requests': [
                               {'number': number, 'state': row['state'],
+                               'merged_at': T1 if row['merged'] else None,
                                'head': {'sha': row['head']['sha']}}
                               for number, row in self.pulls.items()]}
 
@@ -180,6 +181,27 @@ class AutomaticMergeAdmission(unittest.TestCase):
             selected, _, scope = MERGE.prepare(REPO, 102)
         self.assertEqual(selected, 103)
         self.assertEqual([member['number'] for member in scope['scope']], [101, 102, 103])
+
+    def test_a_landed_stack_is_recognized_without_reading_its_layers(self):
+        with FakeGitHub(['merged', 'merged', 'merged']) as github:
+            with self.assertRaisesRegex(MERGE.Hold, 'already merged'):
+                MERGE.prepare(REPO, 102)
+        member_reads = {path: count for path, count in github.counts.items()
+                        if path.startswith(PREFIX + '/pulls/')}
+        self.assertEqual(member_reads, {PREFIX + '/pulls/102': 1})
+
+    def test_only_the_first_unmerged_layer_from_the_top_is_read_to_find_the_top(self):
+        with FakeGitHub(['merged', 'open', 'open']) as github:
+            top = MERGE.top_pull(REPO, 102)
+        self.assertEqual(top['number'], 103)
+        self.assertNotIn(PREFIX + '/pulls/101', github.counts)
+
+    def test_a_layer_that_merged_after_the_listing_is_passed_over(self):
+        with FakeGitHub(['open', 'open']) as github:
+            assert github.stack is not None
+            github.pulls[102].update(state='closed', merged=True)
+            top = MERGE.top_pull(REPO, 101)
+        self.assertEqual(top['number'], 101)
 
     def test_closed_unmerged_middle_and_top_block_the_whole_stack(self):
         for states in (['open', 'closed', 'open'], ['open', 'open', 'closed']):

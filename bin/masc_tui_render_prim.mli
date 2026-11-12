@@ -372,11 +372,8 @@ val reading_connection_summary : width:int -> Masc_tui_types.state -> string
     Shared by child headings and Board's existing overflow fallback. *)
 
 val runtime_step : Masc_tui_types.state -> string
-(** The step the Runtime screens take from System. *)
-
-val keeper_calls_lead : string
-(** What the headings laid out by {!Masc_tui_ansi.detail_heading} draw before
-    the id: one keeper's calls. *)
+(** The step the Runtime screens take from System, and a keeper's runtime
+    takes from that keeper. *)
 
 val coordinator_status_row :
   Masc_tui_types.state -> style:string -> string -> string

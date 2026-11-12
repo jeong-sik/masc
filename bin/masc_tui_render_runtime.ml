@@ -1676,10 +1676,12 @@ let render_runtime_pick (state : state) =
   let current_id = Masc_tui_types.runtime_pick_current_id state in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime-pick"
     ~title:
-      (Printf.sprintf "%s  %scurrent: %s%s"
-         (screen_title
-            (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 runtime" keeper_name))
-         Ansi.dim current Ansi.reset)
+      (here_row ~cols state
+         ~path:[ keeper_name; runtime_step state ]
+         ~readings:
+           [ Ansi.dim ^ ui_text state ~ko:"지금: " ~en:"current: " ^ current
+             ^ Ansi.reset ]
+         ~position:None)
     ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language (Keepers Keeper_runtime_pick))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())

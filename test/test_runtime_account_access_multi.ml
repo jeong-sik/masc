@@ -175,9 +175,41 @@ let muse_refused (type where) label request (account : where Access.muse_account
       Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
 ;;
 
-let turn (who : person) ?(channel = Channel.Autonomous) ?(runtime = who.runtime) () =
+let turn
+      (who : person)
+      ?(channel = Channel.Autonomous)
+      ?(pat = Pat_binding.Not_pat)
+      ?(runtime = who.runtime)
+      ()
+  =
   Access.Keeper_turn
-    { keeper_name = who.keeper; channel; runtime_id = Runtime_id.to_string runtime }
+    { keeper_name = who.keeper; channel; pat; runtime_id = Runtime_id.to_string runtime }
+;;
+
+(* A personal access token whose scope covers a direct turn of [who]'s Keeper:
+   the Runtime, the [Direct] channel, and the effects a turn asks for. Each
+   argument replaces one dimension. *)
+let turn_pat
+      (who : person)
+      ?(runtimes = Runtime_scope.only (Runtime_id.Set.singleton who.runtime))
+      ?(channels = Channel_scope.only (Channel.Set.singleton Channel.Direct))
+      ?(effects = Effect.[ Invoke_model; Use_tool ])
+      ?expires_at
+      ()
+  =
+  Pat_binding.Pat
+    { Pat_scope.scope =
+        { Authorization_scope.runtimes
+        ; channels
+        ; allowed_effects = Effect_scope.only (Effect.Set.of_list effects)
+        }
+    ; expires_at
+    }
+;;
+
+let denied expected = function
+  | Access.Turn_refused (Authz_keeper_turn.Denied reason) -> expected reason
+  | _ -> false
 ;;
 
 let own (who : person) ?(account = who.account) () =
@@ -320,6 +352,56 @@ let test_multi_account () =
         (* A Keeper turn runs on the account of the Runtime its owner gave it. *)
         allowed "a turn of the person's Keeper" (turn alice ()) alice_account;
         allowed "a direct turn" (turn alice ~channel:Channel.Direct ()) alice_account;
+        (* A turn that a personal access token asked for runs inside the scope
+           of that token. *)
+        let by_pat pat = turn alice ~channel:Channel.Direct ~pat () in
+        allowed "a direct turn by a token that covers it" (by_pat (turn_pat alice ())) alice_account;
+        allowed
+          "a token of every Runtime"
+          (by_pat (turn_pat alice ~runtimes:Runtime_scope.all ()))
+          alice_account;
+        refused
+          "a token that manages Keepers and calls no model"
+          (by_pat (turn_pat alice ~effects:Effect.[ Manage_own_keeper; Read_state ] ()))
+          alice_account
+          (denied (function
+             | Authz_decision.Effects_out_of_scope missing ->
+               Effect.Set.equal missing (Effect.Set.of_list Effect.[ Invoke_model; Use_tool ])
+             | _ -> false));
+        refused
+          "a token that calls the model and uses no tool"
+          (by_pat (turn_pat alice ~effects:Effect.[ Invoke_model ] ()))
+          alice_account
+          (denied (function
+             | Authz_decision.Effects_out_of_scope missing ->
+               Effect.Set.equal missing (Effect.Set.singleton Effect.Use_tool)
+             | _ -> false));
+        refused
+          "a token of another channel"
+          (by_pat
+             (turn_pat
+                alice
+                ~channels:(Channel_scope.only (Channel.Set.singleton Channel.Schedule))
+                ()))
+          alice_account
+          (denied (function
+             | Authz_decision.Channel_out_of_scope -> true
+             | _ -> false));
+        refused
+          "a token of another Runtime"
+          (by_pat
+             (turn_pat alice ~runtimes:(Runtime_scope.only (Runtime_id.Set.singleton bob.runtime)) ()))
+          alice_account
+          (denied (function
+             | Authz_decision.Runtime_out_of_scope -> true
+             | _ -> false));
+        refused
+          "a token that expired"
+          (by_pat (turn_pat alice ~expires_at:(Float.of_int start_ms /. 1000.) ()))
+          alice_account
+          (denied (function
+             | Authz_decision.Pat_expired -> true
+             | _ -> false));
         refused "a turn of another person's Keeper" (turn bob ()) alice_account (function
           | Access.Not_the_account_home _ -> true
           | _ -> false);
@@ -342,6 +424,7 @@ let test_multi_account () =
           (Access.Keeper_turn
              { keeper_name = "keeper-nobody"
              ; channel = Channel.Autonomous
+             ; pat = Pat_binding.Not_pat
              ; runtime_id = Runtime_id.to_string alice.runtime
              })
           alice_account
@@ -353,6 +436,7 @@ let test_multi_account () =
           (Access.Keeper_turn
              { keeper_name = "not an id"
              ; channel = Channel.Autonomous
+             ; pat = Pat_binding.Not_pat
              ; runtime_id = Runtime_id.to_string alice.runtime
              })
           alice_account

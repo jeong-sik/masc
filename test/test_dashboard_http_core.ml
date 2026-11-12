@@ -3782,6 +3782,49 @@ let test_execution_parameterized_payload_separates_workspace_scope () =
   check string "runtime base metadata is current" other_base
     Yojson.Safe.Util.(other.json |> member "retention" |> member "workspace_root" |> to_string)
 
+let test_execution_prepared_payload_keeps_captured_workspace () =
+  with_execution_payload_env @@ fun ~env ~sw ~state ->
+  let module Surface = Server_dashboard_http_execution_surfaces in
+  let scope = Lib.Mcp_server.workspace_scope state in
+  let original_instance = Server_observer_scope.instance_id scope in
+  let next_config = { scope.config with
+    workspace_path = Filename.concat scope.config.base_path "replacement-workspace" } in
+  let context = Surface.execution_http_request ~state
+      (request_with_headers "/api/v1/dashboard/execution?full=1"
+        ["x-masc-agent", "original-observer"]) in
+  let prepared = ref [] in
+  let response = Dashboard_cache.For_testing.with_payload_prepared_hook
+      (fun payload ->
+        prepared := payload :: !prepared;
+        match Lib.Mcp_server.set_workspace_config state next_config with
+        | Ok () -> ()
+        | Error error -> fail (Lib.Mcp_server.workspace_switch_error_to_string error))
+      (fun () -> Surface.dashboard_execution_http_response
+        ~sw ~clock:(Eio.Stdenv.clock env) context) in
+  let expected = match !prepared with
+    | [payload] -> payload
+    | _ -> fail "one original request must prepare one scoped payload" in
+  let actual = match response with
+    | Surface.Execution_payload payload -> payload
+    | Surface.Execution_json _ -> fail "same captured instance discarded prepared bytes" in
+  check bool "completed response retains original prepared JSON" true (actual.json == expected.json);
+  check bool "completed response retains original prepared bytes" true (actual.raw_json == expected.raw_json);
+  check string "completed response retains original validator" expected.etag actual.etag;
+  check string "delayed response still attests its original workspace" original_instance
+    Yojson.Safe.Util.(actual.json |> member "observer_instance_id" |> to_string);
+  check string "delayed response retains original workspace metadata" scope.config.workspace_path
+    Yojson.Safe.Util.(actual.json |> member "retention" |> member "workspace_path" |> to_string);
+  check bool "replacement scope really has another instance" true
+    (not (String.equal original_instance
+      (Server_observer_scope.instance_id (Lib.Mcp_server.workspace_scope state))));
+  let replacement = execution_payload ~state ~sw ~clock:(Eio.Stdenv.clock env)
+      (request "/api/v1/dashboard/execution?full=1") in
+  check string "a new read attests the replacement workspace"
+    (Server_observer_scope.instance_id (Lib.Mcp_server.workspace_scope state))
+    Yojson.Safe.Util.(replacement.json |> member "observer_instance_id" |> to_string);
+  check bool "the new read cannot borrow original bytes" true
+    (replacement.raw_json != actual.raw_json)
+
 let test_execution_parameterized_payload_changes_after_invalidation () =
   with_execution_payload_env @@ fun ~env ~sw ~state ->
   let clock = Eio.Stdenv.clock env in
@@ -8238,6 +8281,8 @@ let () =
             test_execution_parameterized_payload_separates_request_queries;
           test_case "execution parameterized responses separate workspace scopes" `Quick
             test_execution_parameterized_payload_separates_workspace_scope;
+          test_case "execution prepared response retains captured workspace after replacement" `Quick
+            test_execution_prepared_payload_keeps_captured_workspace;
           test_case "execution parameterized response follows invalidation" `Quick
             test_execution_parameterized_payload_changes_after_invalidation;
           test_case "execution parameterized timeout keeps request metadata" `Quick

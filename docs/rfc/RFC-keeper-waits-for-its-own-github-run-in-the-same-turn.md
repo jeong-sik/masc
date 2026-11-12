@@ -146,6 +146,11 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 **[확인 필요]** (나-1b)를 구현하기 전에 정할 것이 둘이에요. 두 가지 모두 읽지 않았고, (나-1b)의 크기는 여기에 달려 있어요.
 - 누가 영수증을 쓰는가. 후보는 일정 러너가 일정을 깨울 때 `call_id = schedule_instance_id` 영수증을 쓰는 것이에요. 새 writer 가 하나 생기고, `response` 는 `wake_message` 와 같은 글이에요.
 - 깨움이 두 번 가지 않게 하는 방법. 일정 러너의 깨움은 Keeper 를 깨우고, 대기 중인 실행은 영수증으로 이어가요. 대기가 걸린 일정의 깨움을 영수증 하나로 합치지 못하면 Keeper 가 같은 결과를 두 번 받아요. 깨움이 대기 중인 실행에 어떻게 닿는지는 읽지 않았어요.
+
+**[사실]** 일정에는 payload kind 가 둘 있어요: `masc.keeper_wake`, `masc.lane_act`(`lib/schedule/schedule_supported_kinds.ml`). kind 를 더하려면 그 파일의 목록, `Tool_schedule.validate_known_payload_request` 의 검증 갈래, `server_schedule_consumers.ml` 의 dispatch 가 모두 필요해요(같은 파일 머리말). 일정 틱은 Keeper wake 본문의 `until_github_run` 만 스캔해요(`watch_of_payload` 는 Keeper wake 가 아닌 payload 에 `Ok None`).
+
+**[제안]** 위 두 가지를 한 번에 푸는 후보는 kind 를 하나 더하는 거예요(`masc.keeper_receipt`, 이름은 정하지 않았어요). 이 kind 의 consumer 는 일정이 due 가 되면 Keeper 를 깨우지 않고 outbox 에 `call_id = schedule_instance_id` 영수증을 쓰고 Owner 에게 알려요(`keeper_receipt_wait_resolution.ml` 의 `tell_owner`). 깨움이 없으니 같은 결과를 두 번 받지 않고, 영수증을 쓰는 자리가 consumer 한 곳이에요. 대가는 세 가지예요. 일정 틱이 새 kind 도 스캔하게 넓혀야 하고, `keeper_receipt_wait` 의 `waitable` 이 `schedule_instance_id` 를 받아야 하고, 5.2 의 합타입에 일정 행을 읽는 갈래가 들어가요.
+- **[확인 필요]** outbox 에 영수증을 쓰는 입구(`Keeper_client_tool_outbox.retain`·`retain_host_result`)를 일정 consumer 의 맥락(실행 scope 가 없어요)에서 쓸 수 있는지, 영수증의 `thread_id`·`turn_id` 를 무엇으로 채울지는 읽지 않았어요.
 - **[확인 필요]** (나-2)에서 읽기를 일정 틱과 나누는 구조의 크기는 읽지 않았어요.
 
 ### 5.3 (다) 서버가 한 번 호출에서 끝까지 기다렸다가 돌려주는 방법

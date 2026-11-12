@@ -708,13 +708,16 @@ let test_absent_destination_ends_the_original_and_is_judged_again ()=
   check (list string) "the candidate enters Memory from the second answer" ["Durable A"]
     (io (fun () -> claims fixture.keepers_dir));
   check int "the second answer ACKs the candidate" 0 (io (fun () -> List.length (pending_rows fixture.keepers_dir)));
-  (* #51485: the Conflicted original stays retained, and the next pass reads
-     it after the replacement committed the candidate it handed over. *)
+  (* #51485: the next pass reads the Conflicted original after the
+     replacement committed the candidate it handed over. *)
   (match run_worker fixture with
    | Worker.Unavailable detail -> fail ("the pass after the replacement commit is unavailable: " ^ detail)
    | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ -> ());
-  (* A later candidate is admitted through a second replacement root while the
-     Conflicted original is still retained under the superseded root. *)
+  (* The replacement took the candidate over and committed it, so the forest
+     that holds the Conflicted original is complete and that pass closed it. *)
+  check int "the forest that holds the Conflicted original closes together" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length));
+  (* A later candidate starts a root of its own. *)
   io (fun () -> ignore (append fixture.keepers_dir "new-tail" "Durable tail"));
   drive_until fixture settled |> assert_settled;
   check (list string) "the later candidate enters Memory" ["Durable A";"Durable tail"]

@@ -973,18 +973,20 @@ export type GetOptions = AbortableRequestOptions & {
   timeoutMs?: number
   includeActorHeader?: boolean
   extraHeaders?: Record<string, string>
+  /** Keep the GET deadline and caller abort connected through JSON consumption; defaults to true. */
   consumeWithinTimeout?: boolean
   reportCredentialRefusal?: boolean
 }
 
 async function getRequest<T>(path: string, opts: GetOptions, anonymous: boolean): Promise<T> {
+  const consumeWithinTimeout = opts.consumeWithinTimeout ?? true
   const consume = async (res: Response): Promise<T> => {
     if (!res.ok) {
       const warmPayload = await bootstrapWarmPayload(path, res.clone())
       if (warmPayload !== null) return warmPayload as T
-      throw await apiRequestErrorFromResponse('GET', path, res, opts.consumeWithinTimeout)
+      throw await apiRequestErrorFromResponse('GET', path, res, consumeWithinTimeout)
     }
-    const data = await parseJsonResponse<T>('GET', path, res, opts.consumeWithinTimeout)
+    const data = await parseJsonResponse<T>('GET', path, res, consumeWithinTimeout)
     if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
       const payload = bootstrapInitializingPayload(path)
       if (payload !== null) return payload as T
@@ -999,7 +1001,7 @@ async function getRequest<T>(path: string, opts: GetOptions, anonymous: boolean)
     reportCredentialRefusal: opts.reportCredentialRefusal,
   }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
-  if (opts.consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
+  if (consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
   return consume(await fetchWithTimeout(path, init, timeoutMs))
 }
 
@@ -1028,20 +1030,21 @@ export async function getWithResponse<T>(
     rejectDuplicateJsonMembers?: boolean
   } = {},
 ): Promise<{ readonly data: T; readonly headers: Headers }> {
+  const consumeWithinTimeout = opts.consumeWithinTimeout ?? true
   const consume = async (res: Response): Promise<{ readonly data: T; readonly headers: Headers }> => {
     if (opts.beforeResponseBody) {
       try { opts.beforeResponseBody(res) }
       catch (reason) {
-        if (opts.consumeWithinTimeout) throw new ResponseHeaderRejected(reason)
+        if (consumeWithinTimeout) throw new ResponseHeaderRejected(reason)
         throw reason
       }
     }
     if (!res.ok) {
       const warmPayload = await bootstrapWarmPayload(path, res.clone())
       if (warmPayload !== null) return { data: warmPayload as T, headers: new Headers() }
-      throw await apiRequestErrorFromResponse('GET', path, res, opts.consumeWithinTimeout, opts.preserveErrorBodyFailure)
+      throw await apiRequestErrorFromResponse('GET', path, res, consumeWithinTimeout, opts.preserveErrorBodyFailure)
     }
-    const data = await parseJsonResponse<T>('GET', path, res, opts.consumeWithinTimeout, opts.rejectDuplicateJsonMembers)
+    const data = await parseJsonResponse<T>('GET', path, res, consumeWithinTimeout, opts.rejectDuplicateJsonMembers)
     if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
       const payload = bootstrapInitializingPayload(path)
       if (payload !== null) return { data: payload as T, headers: new Headers() }
@@ -1055,7 +1058,7 @@ export async function getWithResponse<T>(
     reportCredentialRefusal: opts.reportCredentialRefusal,
   }
   const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
-  if (opts.consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
+  if (consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
   return consume(await fetchWithTimeout(path, init, timeoutMs))
 }
 

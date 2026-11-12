@@ -670,7 +670,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
      is made of. *)
   let door_answers = Option.value help_door
       ~default:(help_key_answers ~compact_viewport:false state) in
-  let help_hint = ui_text state ~ko:"?:도움말" ~en:Masc_tui_footer.help_hint_item in
+  let help_hint = Masc_tui_footer.help_hint ~ko:(state.ui_language = Lang_ko) in
   let hints =
     if not state.hints_visible then
       if door_answers then help_hint else ""

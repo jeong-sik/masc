@@ -67,7 +67,9 @@ let render_keeper_navigation (state : state) =
     ~cursor:Frame_presenter.Hidden ~rows:terminal_rows ~cols
     ~footer:
       (Footer_hints
-         { hints = Masc_tui_keys.keeper_navigation_hints; position = None })
+         { hints = Masc_tui_keys.keeper_navigation_hints ~lang:state.ui_language
+         ; position = None
+         })
     buf
 
 let context_split_lines ~cols ~left_width ~left ~right =

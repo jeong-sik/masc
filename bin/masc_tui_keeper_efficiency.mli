@@ -27,4 +27,5 @@ type tone =
   | Bad
 
 (** The Info tab's lines for one Keeper, from the month last asked for. *)
-val lines : (string, month_view) Masc_tui_fetched.t -> keeper_name:string -> (tone * string) list
+val lines :
+  ko:bool -> (string, month_view) Masc_tui_fetched.t -> keeper_name:string -> (tone * string) list

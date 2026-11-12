@@ -36,7 +36,7 @@ type tone =
   | Bad
 
 val category_words :
-  Masc.Keeper_board_attention_candidate.quarantine_failure_category -> string
+  ko:bool -> Masc.Keeper_board_attention_candidate.quarantine_failure_category -> string
 (** What stopped the partition, in words an operator reads. *)
 
 val waiting :
@@ -100,6 +100,7 @@ val requeue_all :
     transport and the outcome classification. *)
 
 val lines :
+  ko:bool ->
   now:float ->
   (string, t) Masc_tui_fetched.t ->
   keeper_name:string ->

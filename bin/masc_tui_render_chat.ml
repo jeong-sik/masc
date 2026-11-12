@@ -774,7 +774,9 @@ let keeper_message_identity ~max_cells state keeper_name =
         match Keeper_control.next_action reading with
         | None -> text
         | Some _ ->
-            let clause = " \xc2\xb7 next: " ^ keeper_suggested_action reading in
+            let clause =
+              ui_text state ~ko:" \xc2\xb7 다음: " ~en:" \xc2\xb7 next: "
+              ^ keeper_suggested_action ~ko:(state.ui_language = Lang_ko) reading in
             if Message_layout.display_width text + Message_layout.display_width clause
                <= max_cells then text ^ clause else text
       in

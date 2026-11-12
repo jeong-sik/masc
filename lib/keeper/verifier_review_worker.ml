@@ -4,6 +4,7 @@ module O = Verifier_review_owner
 module V = Verifier_review_original
 module Authority = Verification_authority_tools
 module Progress = Lane_addon_request_progress
+module Walk_result = Verifier_review_walk_result
 open Result.Syntax
 
 type error =
@@ -105,18 +106,21 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
     let unknown = ref false in
     let provider_reached = ref false in
     let observations = ref [] in
+    let failed_candidates = ref [] in
     let execution_bound = ref false in
     let on_execution = function
       | AR.Admission_refused -> observations := `Assoc ["fact",`String "admission_refused"] :: !observations
       | Reply_received {runtime_id} -> provider_reached := true;
         observations := `Assoc ["fact",`String "reply_received";"runtime_id",`String runtime_id] :: !observations
-      | Attempt_failed {runtime_id;certainty;error} ->
-        let fact=match certainty with
-          | AR.Outcome_unknown -> unknown:=true;provider_reached:=true;"outcome_unknown"
-          | Definite_refusal -> provider_reached:=true;"definite_refusal"
-          | Before_dispatch -> "before_dispatch" in
-        observations := `Assoc ["fact",`String fact;"runtime_id",`String runtime_id;
-          "error_category",`String Agent_core.Error.(category error |> category_label)] :: !observations in
+      | Attempt_failed {runtime_id;certainty;error;failure} ->
+        (match certainty with
+          | AR.Outcome_unknown -> unknown:=true;provider_reached:=true
+          | Definite_refusal -> provider_reached:=true
+          | Before_dispatch -> ());
+        let error_category=Agent_core.Error.(category error |> category_label) in
+        observations := `Assoc ["fact",`String (Walk_result.certainty_label certainty);
+          "runtime_id",`String runtime_id;"error_category",`String error_category] :: !observations;
+        failed_candidates := {Walk_result.runtime_id;certainty;error_category;failure} :: !failed_candidates in
     let exception Retention_failed of error in
     let* keeper_name = Verifier_review_execution.keeper_name original
       |> Result.map_error (fun detail -> Original_corrupt detail) in
@@ -135,8 +139,10 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
           let judgment=O.judgment_to_json ~original ~notes:(prepare_notes result) result in
           (match judgment with Ok judgment -> Progress.Judgment_retained judgment
            | Error detail -> raise (Retention_failed (Original_corrupt detail)))
+        (* The walk emptied its retry list for the unknown outcome, so each
+           failed candidate's classification is kept beside the result. *)
         | None when !unknown -> Progress.Execution_observed (Progress.Outcome_unknown
-            (`Assoc ["schema",`String "verifier_review_unknown/v1";"result",json]))
+            (Walk_result.to_json ~candidates:(List.rev !failed_candidates) ~result:json))
         | None when not !provider_reached && not !execution_bound -> Progress.Admission_declined (`Assoc [
             "schema",`String "verifier_admission_refusal/v1";
             "observations",`List (List.rev !observations);"result",json])

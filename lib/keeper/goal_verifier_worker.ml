@@ -653,7 +653,7 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
       | AR.Admission_refused -> facts := `Assoc ["fact", `String "admission_refused"] :: !facts
       | Reply_received {runtime_id} -> reached := true;
         facts := `Assoc ["fact", `String "reply_received"; "runtime_id", `String runtime_id] :: !facts
-      | Attempt_failed {runtime_id; certainty; error} ->
+      | Attempt_failed {runtime_id; certainty; error; failure=_} ->
         let fact = match certainty with
           | AR.Before_dispatch -> "before_dispatch"
           | Definite_refusal -> reached := true; "definite_refusal"

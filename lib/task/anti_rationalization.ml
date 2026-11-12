@@ -590,7 +590,12 @@ type failure_certainty = Before_dispatch | Definite_refusal | Outcome_unknown
 
 type execution_observation =
   | Admission_refused
-  | Attempt_failed of { runtime_id:string; certainty:failure_certainty; error:Agent_core.Error.t }
+  | Attempt_failed of
+      { runtime_id:string
+      ; certainty:failure_certainty
+      ; error:Agent_core.Error.t
+      ; failure:candidate_failure
+      }
   | Reply_received of { runtime_id:string }
 
 let failure_certainty ~dispatch error =
@@ -789,11 +794,17 @@ let run_with_execution_policy ~execution_policy
        in
        let unknown_dispatch = ref false in
        let must_preserve_original () = execution_policy=Retained_original && !unknown_dispatch in
+       (* The observation carries the same classification the walk keeps for
+          its own result, read once here. A walk that ends with an unknown
+          outcome empties its retry list, so the observation is the only place
+          a host can retain why each candidate failed. *)
        let observe_failure ~runtime_id ~dispatch error =
          let certainty = failure_certainty ~dispatch error in
          (match certainty with Outcome_unknown -> unknown_dispatch := true
           | Before_dispatch | Definite_refusal -> ());
-         on_execution (Attempt_failed {runtime_id;certainty;error})
+         let failure = candidate_failure ~provider_rest ~runtime_id error in
+         on_execution (Attempt_failed {runtime_id;certainty;error;failure});
+         failure
        in
        let run_attempt (slot, candidate_kind) =
          let prior_evidence = List.concat (List.rev !lookup_observations) in
@@ -828,8 +839,7 @@ let run_with_execution_policy ~execution_policy
                  | Retained_original,(Before_dispatch | Definite_refusal) -> Runtime_attempt_dispatch.Next_may_dispatch)
                ~on_runtime_attempt_error:
                  (fun ~runtime_id ~attempt:_ ~dispatch error ->
-                    observe_failure ~runtime_id ~dispatch error;
-                    let failure = candidate_failure ~provider_rest ~runtime_id error in
+                    let failure = observe_failure ~runtime_id ~dispatch error in
                     attempt_failures := !attempt_failures @ [ runtime_id, failure ])
                ()
            with
@@ -913,16 +923,18 @@ let run_with_execution_policy ~execution_policy
                 ; model_absent_runtimes
                 })
          | Error error, nested_retryable_runtimes, nested_model_absent, attempt_observed ->
-           if not attempt_observed then (
-             let dispatch = match error with
-               | Agent_core.Error.Config _ -> Runtime_attempt_dispatch.Rejected_before_dispatch
-               | Agent_core.Error.Api _ | Provider _ | Agent _ | Mcp _ | Serialization _
-               | Io _ | Orchestration _ | Media _ | Internal _ | Internal_carried _ -> Runtime_attempt_dispatch.Dispatched in
-             observe_failure ~runtime_id:slot ~dispatch error);
+           let slot_failure =
+             if attempt_observed then candidate_failure ~provider_rest ~runtime_id:slot error
+             else (
+               let dispatch = match error with
+                 | Agent_core.Error.Config _ -> Runtime_attempt_dispatch.Rejected_before_dispatch
+                 | Agent_core.Error.Api _ | Provider _ | Agent _ | Mcp _ | Serialization _
+                 | Io _ | Orchestration _ | Media _ | Internal _ | Internal_carried _ -> Runtime_attempt_dispatch.Dispatched in
+               observe_failure ~runtime_id:slot ~dispatch error)
+           in
            let remaining = if must_preserve_original () then [] else remaining in
            let nested_retryable_runtimes = if must_preserve_original () then [] else nested_retryable_runtimes in
            let detail = Agent_core.Error.to_string error in
-           let slot_failure = candidate_failure ~provider_rest ~runtime_id:slot error in
            let slot_model_absent =
              match slot_failure with
              | Model_absent -> [ slot ]

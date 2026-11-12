@@ -96,7 +96,7 @@ let process ?(sw=None) config ~goal_id =
           flush_observation config saved in
       let on_execution = function
         | AR.Admission_refused | Reply_received _ -> ()
-        | Attempt_failed {runtime_id; certainty=AR.Outcome_unknown; error} ->
+        | Attempt_failed {runtime_id; certainty=AR.Outcome_unknown; error; failure=_} ->
           unknown := Some (runtime_id ^ ": " ^ Agent_core.Error.to_string error)
         | Attempt_failed {certainty=(AR.Before_dispatch | Definite_refusal); _} -> () in
       let on_tool_result ~input result =

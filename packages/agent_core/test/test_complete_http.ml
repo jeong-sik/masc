@@ -4738,7 +4738,8 @@ let test_vertex_native_transport () =
 ;;
 
 let transport_request config observer : Llm_transport.completion_request =
-  { config; messages; tools=[]; capture_id=None; observe_http_status=None
+  { config; messages; tools=[]; admitted_http_body=None; capture_id=None
+  ; observe_http_status=None
   ; observe_wire_chunk=None; request_wire_observer=observer
   ; stream_idle_timeout_s=None; first_event_timeout_s=None; body_timeout_s=None }
 ;;
@@ -4948,6 +4949,78 @@ let test_prepared_wrong_mode_retains_serialization () =
       fail "wrong mode rejection discarded the supplied serialization") [false; true]
 ;;
 
+(* A consumer wraps the built-in HTTP transport to observe or rewrite the
+   request before forwarding it. The wrapper that forwards the request as it
+   came gets the admitted bytes on the wire and the admitted serialization
+   fact at the observer, the same value and not a rebuilt one. The wrapper
+   that replaces the messages gets a body built from its own messages. *)
+let test_http_transport_sends_the_admitted_body () =
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    List.iter (fun stream ->
+      List.iter (fun replace_messages ->
+        let captured = ref None in
+        let url =
+          if stream then
+            start_sse_server ~sw ~net:env#net ~capture_body:captured
+              (anthropic_sse_response "ok")
+          else start_mock_server ~sw ~net:env#net ~capture_body:captured
+              (anthropic_response "ok") in
+        let config = make_config url in
+        let http = Complete.make_http_transport ~sw ~net:env#net () in
+        let handed = ref None in
+        let replacement = "replaced by the wrapper" in
+        let forwarded (request : Llm_transport.completion_request) =
+          handed := request.admitted_http_body;
+          if replace_messages
+          then { request with messages = [ Types.user_msg replacement ] }
+          else request in
+        let transport =
+          { Llm_transport.invoke_sync = (fun request -> http.invoke_sync (forwarded request))
+          ; invoke_stream = (fun ?on_telemetry ~on_event request ->
+              http.invoke_stream ?on_telemetry ~on_event (forwarded request)) } in
+        let observed = ref None in
+        let request_wire_observer observation = observed := Some observation; Ok () in
+        let serialized =
+          match Complete.admit_request_body ~stream
+                  (Complete.prepare_request ~config ~messages ()) with
+          | Ok serialized -> serialized
+          | Error _ -> fail "fixture serialization failed" in
+        let outcome =
+          if stream then
+            Complete.complete_stream_serialized ~sw ~net:env#net ~transport
+              ~request_wire_observer serialized ~on_event:(fun _ -> ()) ()
+          else
+            Complete.complete_serialized ~sw ~net:env#net ~transport
+              ~request_wire_observer serialized () in
+        (match outcome.result with
+         | Ok _ -> ()
+         | Error _ -> fail "the wrapped HTTP transport did not complete");
+        let admitted = match !handed with Some body -> body
+          | None -> fail "the transport was handed no admitted body" in
+        let sent = match !captured with Some body -> body
+          | None -> fail "peer did not receive the generation body" in
+        let observed = match !observed with Some observation -> observation
+          | None -> fail "the serialization was not observed" in
+        if replace_messages then begin
+          check bool "the wrapper's messages are on the wire" true
+            (Agent_core_strings.contains_substring ~needle:replacement ~haystack:sent);
+          check bool "the earlier bytes are not sent for a replaced request" false
+            (String.equal admitted.serialized_request.body sent);
+          check bool "a replaced request is observed as its own serialization" false
+            (observed == admitted.evidence)
+        end else begin
+          check string "peer received the admitted bytes"
+            admitted.serialized_request.body sent;
+          check bool "the observer received the admitted serialization fact" true
+            (observed == admitted.evidence)
+        end)
+        [false; true])
+      [false; true];
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
 let test_prepared_work_timeout_retains_serialization () =
   Eio_main.run @@ fun env ->
   try Eio.Switch.run @@ fun sw ->
@@ -5076,6 +5149,8 @@ let () =
             `Quick test_prepared_rejection_retains_serialization
         ; test_case "wrong mode rejection preserves prepared evidence"
             `Quick test_prepared_wrong_mode_retains_serialization
+        ; test_case "wrapped HTTP transport sends the admitted body"
+            `Quick test_http_transport_sends_the_admitted_body
         ; test_case "work timeout preserves prepared evidence"
             `Quick test_prepared_work_timeout_retains_serialization
         ; test_case "failed serialization invents no receipt"

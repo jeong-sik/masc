@@ -241,7 +241,9 @@ let complete_prepared_sync
        let dispatch () =
          match transport with
          | Some t ->
-           let run_transport () = t.invoke_sync request in
+           let run_transport () =
+             t.invoke_sync { request with admitted_http_body = admitted_body }
+           in
            (match body_deadline with
             | Http_client.Unbounded ->
               Http_client.with_explicit_deadline body_deadline run_transport
@@ -646,7 +648,11 @@ let complete_prepared_stream
     let request = { request with observe_http_status = Some metrics.on_http_status } in
     let dispatch () =
       match transport with
-      | Some t -> t.invoke_stream ?on_telemetry:transport_on_telemetry ~on_event request
+      | Some t ->
+        t.invoke_stream
+          ?on_telemetry:transport_on_telemetry
+          ~on_event
+          { request with admitted_http_body = admitted_body }
       | None ->
         complete_stream_http
           ~sw
@@ -884,6 +890,7 @@ let make_http_transport
             ?connection_cache
             ?capture_id:req.capture_id
             ?request_wire_observer:req.request_wire_observer
+            ?admitted_body:(Llm_transport.admitted_http_body_of_request req)
             ~config:req.config
             ~messages:req.messages
             ~tools:req.tools
@@ -903,6 +910,7 @@ let make_http_transport
           ?observe_wire_chunk:req.observe_wire_chunk
           ?capture_id:req.capture_id
           ?request_wire_observer:req.request_wire_observer
+          ?admitted_body:(Llm_transport.admitted_http_body_of_request req)
           ?connection_cache
           ?latency_counter
           ~config:req.config

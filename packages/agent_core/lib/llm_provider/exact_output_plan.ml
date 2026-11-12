@@ -466,7 +466,7 @@ let freeze_serialization
         })
   else (
     match
-      Complete_common.serialize_http_request_with_thinking_control
+      Complete_common.serialize_http_request_body_with_thinking_control
         ~stream:false
         ~anthropic_thinking_control
         ~config
@@ -474,9 +474,9 @@ let freeze_serialization
         ~tools:request.tools
     with
     | Error error -> Error (Request_serialization_rejected error)
-    | Ok serialized ->
-      Ok { response_codec = serialized.Complete_common.http_codec
-         ; body = serialized.body; exact_completion_artifact = None })
+    | Ok body ->
+      Ok { response_codec = Provider_http_codec.of_config config
+         ; body; exact_completion_artifact = None })
 ;;
 
 let preflight

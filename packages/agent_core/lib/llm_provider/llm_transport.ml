@@ -2,10 +2,19 @@
 
     @since 0.78.0 *)
 
+type admitted_http_body =
+  { serialized_request : Complete_common.serialized_http_request
+  ; evidence : Request_wire_observer.observation
+  ; config : Provider_config.t
+  ; messages : Types.message list
+  ; tools : Yojson.Safe.t list
+  }
+
 type completion_request =
   { config : Provider_config.t
   ; messages : Types.message list
   ; tools : Yojson.Safe.t list
+  ; admitted_http_body : admitted_http_body option
   ; capture_id : string option
   ; observe_http_status :
       (provider:string -> model_id:string -> status:int -> unit) option
@@ -62,6 +71,24 @@ type t =
       -> completion_request
       -> stream_result Completion_outcome.t
   }
+
+let admit_http_body ~serialized_request ~evidence ~config ~messages ~tools =
+  { serialized_request; evidence; config; messages; tools }
+;;
+
+(* The body was built from three immutable values. A request that still holds
+   those same values gets the same bytes from a second serialisation, so the
+   body stands for it; physical equality decides that without walking the
+   history. A request whose config, messages or tools were replaced is a
+   different request and has no admitted body. *)
+let admitted_http_body_of_request (request : completion_request) =
+  match request.admitted_http_body with
+  | Some body
+    when body.config == request.config
+         && body.messages == request.messages
+         && body.tools == request.tools -> Some body
+  | Some _ | None -> None
+;;
 
 let custom (callbacks : callbacks) : t =
   { invoke_sync = (fun request ->

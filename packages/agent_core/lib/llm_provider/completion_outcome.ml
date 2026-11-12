@@ -21,7 +21,7 @@ let before_serialization result = { result; request_provenance = Not_serialized 
 let seal_request (request : Complete_common.serialized_http_request) =
   { output_token_receipt = request.output_token_receipt
   ; body_bytes = String.length request.body
-  ; body_sha256 = Agent_core_sha256.(digest_string request.body |> to_hex)
+  ; body_sha256 = request.body_sha256
   }
 ;;
 

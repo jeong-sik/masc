@@ -1,0 +1,45 @@
+(* The same six runs through the table as it stands on main: the start from
+   lane_run_clock's format, the status in its wire spelling. *)
+let now = 1794379380.0
+let day = 86400.0
+
+let clock at =
+  let tm = Unix.localtime at in
+  Printf.sprintf "%02d-%02d %02d:%02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let elapsed = function
+  | None -> "\xe2\x80\x94"
+  | Some seconds -> (
+      match Masc_tui_message_layout.elapsed_text seconds with
+      | Some text -> text
+      | None -> "\xe2\x80\x94")
+
+let rows =
+  [ now -. 407.0, "wkbl-front", "succeeded", Some 195.2, "glm-coding.glm-5.3-flash"
+  ; now -. 725.0, "kidsnote-incoming-dd-manager", "succeeded", Some 426.0, "glm-coding.glm-5.3-flash"
+  ; now -. 1024.0, "sangsu", "completion_durability_unknown", Some 0.243, "\xe2\x80\x94"
+  ; now -. 2717.0, "wkbl-growth", "review_cancelled", Some 29.2, "\xe2\x80\x94"
+  ; now -. day, "code-reviewer-father", "running", None, "ollama_cloud.ollama-cloud-deepseek-v4-1-flash"
+  ; now -. (400.0 *. day), "e-mas-the-leader", "brand_new_status", Some 4000.0, "glm-coding.glm-5.3-flash"
+  ]
+
+let draw ~inner_width =
+  let layout = Run_table.lane_run_layout ~inner_width in
+  Printf.printf "-- inner width %d\n" inner_width;
+  print_endline ("  " ^ Run_table.lane_run_header_row ~identity_header:"ACTOR" ~layout);
+  List.iter
+    (fun (started, subject, status, seconds, slot) ->
+      print_endline
+        ("  "
+        ^ Run_table.lane_run_row ~identity_header:"ACTOR" ~status_style:"" ~layout
+            { Run_table.lrow_started = clock started
+            ; lrow_subject = subject
+            ; lrow_status = status
+            ; lrow_elapsed = elapsed seconds
+            ; lrow_slot = slot
+            }))
+    rows;
+  print_newline ()
+
+let () = List.iter (fun inner_width -> draw ~inner_width) [ 196; 116; 76; 56 ]

@@ -2383,7 +2383,7 @@ let native_posture_static_contradiction_gate : (string, unit) Hashtbl.t =
   Hashtbl.create 16
 ;;
 
-let resolve_native_posture ~posture_source ~base_path ~keeper_name ~client_label
+let resolve_declared_native_posture ~posture_source ~base_path ~keeper_name ~client_label
     ~default ~none_supported =
   let approval_mode =
     Keeper_tool_approval_mode.resolve
@@ -2483,4 +2483,31 @@ let resolve_native_posture ~posture_source ~base_path ~keeper_name ~client_label
               ~effective:(Runtime_native_tools.to_string effective)
               ~reason:detail;
           Ok effective))
+;;
+
+(* HIGH-RISK-UNREVIEWED: the posture a turn would run with is judged against
+   the accounts of the process here, before the turn claims its session (plans
+   D3c and F3a-3). The runtimes judge it again where the client starts; a
+   refusal there ends a claimed turn as a protocol failure, and this one ends
+   it as a config error with nothing claimed. *)
+let resolve_native_posture ~posture_source ~base_path ~keeper_name ~client_label
+    ~default ~none_supported =
+  match
+    resolve_declared_native_posture
+      ~posture_source
+      ~base_path
+      ~keeper_name
+      ~client_label
+      ~default
+      ~none_supported
+  with
+  | Error _ as refused -> refused
+  | Ok posture ->
+    (match Runtime_account_access.authorize_native posture with
+     | Ok () -> Ok posture
+     | Error refusal ->
+       Error
+         (config_error
+            ~field:"keeper.tools.native"
+            (Runtime_account_access.native_refusal_to_string refusal)))
 ;;

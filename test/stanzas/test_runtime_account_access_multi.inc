@@ -24,5 +24,7 @@
   masc.masc_eio_context
   masc.runtime
   masc.server
+  masc.tool_types
+  masc.voice_config
   unix
   yojson))

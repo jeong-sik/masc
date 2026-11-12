@@ -335,7 +335,7 @@ let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
   let split = cols >= keeper_split_threshold_cols in
-  pane_surface_header buf cols state ~name:"Workspace / Code" ~split;
+  pane_surface_header buf cols state ~path:[ ui_text state ~ko:"코드" ~en:"code" ] ~split;
   let list_rows_budget = code_pane_content_height state in
   let entries = code_entries state in
   let total = List.length entries in
@@ -959,6 +959,6 @@ let render_code (state : state) =
   let code_pane = Masc_tui_keys.code_pane_of state in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(if Option.is_some (current_code_hover state) then Masc_tui_keys.footer_hints_code_hover
-               else Masc_tui_keys.footer_hints_code ~pane:code_pane));
+       ~hints:(if Option.is_some (current_code_hover state) then Masc_tui_keys.footer_hints_code_hover ~lang:state.ui_language
+               else Masc_tui_keys.footer_hints_code ~lang:state.ui_language ~pane:code_pane));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf

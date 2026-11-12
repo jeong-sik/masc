@@ -25,6 +25,7 @@ let unattributed_marker = "<no masc frame in the sampled window>\n"
 type block =
   { site_key : string
   ; n_samples : int
+  ; on_starting_domain : bool
   }
 
 (* What a callback records. Callbacks push; only the reader pops. *)
@@ -41,6 +42,12 @@ let pending_count = Atomic.make 0
 let dropped_samples = Atomic.make 0
 let rate = Atomic.make 0.0
 let profile : Gc.Memprof.t option Atomic.t = Atomic.make None
+
+(* The domain that called [start]: the server's main domain. An allocation
+   callback runs on the thread that allocated, so [Domain.self] there is the
+   allocating domain. No domain has this id before [start]. *)
+let no_domain = -1
+let starting_domain = Atomic.make no_domain
 
 let push event =
   let rec attempt () =
@@ -131,7 +138,10 @@ let key_of_callstack callstack =
 ;;
 
 let block_of (allocation : Gc.Memprof.allocation) =
-  { site_key = key_of_callstack allocation.callstack; n_samples = allocation.n_samples }
+  { site_key = key_of_callstack allocation.callstack
+  ; n_samples = allocation.n_samples
+  ; on_starting_domain = (Domain.self () :> int) = Atomic.get starting_domain
+  }
 ;;
 
 let tracker : (block, block) Gc.Memprof.tracker =
@@ -150,6 +160,7 @@ let tracker : (block, block) Gc.Memprof.tracker =
 
 let start ~sampling_rate =
   Atomic.set rate sampling_rate;
+  Atomic.set starting_domain (Domain.self () :> int);
   Atomic.set
     profile
     (Some (Gc.Memprof.start ~sampling_rate ~callstack_size:callstack_frames tracker))
@@ -170,6 +181,7 @@ let stop () =
 type site =
   { site_key : string
   ; mutable allocated_samples : int
+  ; mutable starting_domain_samples : int
   ; mutable major_samples : int
   ; mutable direct_major_samples : int
   ; mutable live_samples : int
@@ -181,6 +193,7 @@ let sites_mutex = Stdlib.Mutex.create ()
 let new_site site_key =
   { site_key
   ; allocated_samples = 0
+  ; starting_domain_samples = 0
   ; major_samples = 0
   ; direct_major_samples = 0
   ; live_samples = 0
@@ -200,14 +213,20 @@ let site_for key =
        site)
 ;;
 
+let count_allocation site block =
+  site.allocated_samples <- site.allocated_samples + block.n_samples;
+  if block.on_starting_domain
+  then site.starting_domain_samples <- site.starting_domain_samples + block.n_samples
+;;
+
 let apply = function
   | Allocated block ->
     let site = site_for block.site_key in
-    site.allocated_samples <- site.allocated_samples + block.n_samples;
+    count_allocation site block;
     site.live_samples <- site.live_samples + block.n_samples
   | Allocated_in_major block ->
     let site = site_for block.site_key in
-    site.allocated_samples <- site.allocated_samples + block.n_samples;
+    count_allocation site block;
     site.live_samples <- site.live_samples + block.n_samples;
     site.major_samples <- site.major_samples + block.n_samples;
     site.direct_major_samples <- site.direct_major_samples + block.n_samples
@@ -241,10 +260,13 @@ type report =
   ; live : site_totals list
   ; major : site_totals list
   ; allocated : site_totals list
+  ; starting_domain_allocated : site_totals list
   ; live_samples : int
   ; live_words : int
   ; allocated_samples : int
   ; allocated_words : int
+  ; starting_domain_allocated_samples : int
+  ; starting_domain_allocated_words : int
   ; major_samples : int
   ; major_words : int
   ; direct_major_samples : int
@@ -277,6 +299,7 @@ let report ~top =
           (fun _ site acc ->
              { site_key = site.site_key
              ; allocated_samples = site.allocated_samples
+             ; starting_domain_samples = site.starting_domain_samples
              ; major_samples = site.major_samples
              ; direct_major_samples = site.direct_major_samples
              ; live_samples = site.live_samples
@@ -290,15 +313,21 @@ let report ~top =
   let live_samples = sum (fun site -> site.live_samples) in
   let allocated_samples = sum (fun site -> site.allocated_samples) in
   let major_samples = sum (fun site -> site.major_samples) in
+  let starting_domain_allocated_samples = sum (fun site -> site.starting_domain_samples) in
   { sampling_rate
   ; sampling = is_sampling ()
   ; live = top_sites ~top ~sampling_rate (fun site -> site.live_samples) snapshot
   ; major = top_sites ~top ~sampling_rate (fun site -> site.major_samples) snapshot
   ; allocated = top_sites ~top ~sampling_rate (fun site -> site.allocated_samples) snapshot
+  ; starting_domain_allocated =
+      top_sites ~top ~sampling_rate (fun site -> site.starting_domain_samples) snapshot
   ; live_samples
   ; live_words = estimate_words ~sampling_rate live_samples
   ; allocated_samples
   ; allocated_words = estimate_words ~sampling_rate allocated_samples
+  ; starting_domain_allocated_samples
+  ; starting_domain_allocated_words =
+      estimate_words ~sampling_rate starting_domain_allocated_samples
   ; major_samples
   ; major_words = estimate_words ~sampling_rate major_samples
   ; direct_major_samples = sum (fun site -> site.direct_major_samples)
@@ -326,6 +355,9 @@ let report_to_yojson report : Yojson.Safe.t =
     ; "live_bytes", `Int (Heap_roots.words_to_bytes report.live_words)
     ; "allocated_samples", `Int report.allocated_samples
     ; "allocated_bytes", `Int (Heap_roots.words_to_bytes report.allocated_words)
+    ; "starting_domain_allocated_samples", `Int report.starting_domain_allocated_samples
+    ; ( "starting_domain_allocated_bytes"
+      , `Int (Heap_roots.words_to_bytes report.starting_domain_allocated_words) )
     ; "major_samples", `Int report.major_samples
     ; "major_bytes", `Int (Heap_roots.words_to_bytes report.major_words)
     ; "direct_major_samples", `Int report.direct_major_samples
@@ -337,6 +369,7 @@ let report_to_yojson report : Yojson.Safe.t =
     ; "live", table report.live
     ; "major", table report.major
     ; "allocated", table report.allocated
+    ; "starting_domain_allocated", table report.starting_domain_allocated
     ]
 ;;
 
@@ -344,13 +377,19 @@ module For_testing = struct
   type nonrec block = block
 
   let observe_alloc ~key ~n_samples =
-    let block = { site_key = key; n_samples } in
+    let block = { site_key = key; n_samples; on_starting_domain = false } in
+    push (Allocated block);
+    block
+  ;;
+
+  let observe_alloc_on_starting_domain ~key ~n_samples =
+    let block = { site_key = key; n_samples; on_starting_domain = true } in
     push (Allocated block);
     block
   ;;
 
   let observe_alloc_in_major ~key ~n_samples =
-    let block = { site_key = key; n_samples } in
+    let block = { site_key = key; n_samples; on_starting_domain = false } in
     push (Allocated_in_major block);
     block
   ;;
@@ -366,6 +405,7 @@ module For_testing = struct
       Atomic.set pending_count 0;
       Atomic.set dropped_samples 0;
       Hashtbl.reset sites);
+    Atomic.set starting_domain no_domain;
     Atomic.set rate 0.0
   ;;
 end

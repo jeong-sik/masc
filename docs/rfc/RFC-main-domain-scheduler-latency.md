@@ -220,7 +220,13 @@ fiber 12개가 "파일 읽기 → JSON 파싱 → 한 줄 append → fsync" 를 
 
 1. **S1 `Fs_compat`**: `run_blocking_private_file_transaction` 과 load·save·append 의 `Eio_unix.run_in_systhread` 33곳이 한 함수로 모이고, 그 함수가 host 로 보낸다. `fs_compat` 은 `masc_core` 아래 라이브러리라 `Systhread_host` 를 볼 수 없다. `Systhread_host` 를 `eio`·`eio.unix`·`eio_main` 만 쓰는 leaf 라이브러리로 내리고, 지금 쓰는 `Eio_guard.execution_context`·`Executor_pool_ref.in_worker_context`·`Log`·`Minor_heap.tune` 은 leaf 로 같이 내리거나 `start` 의 인자로 받는다. 메인이 내보내는 작업의 약 53% 다.
 2. **S2 `Eio_guard.run_in_systhread`**: 본문이 `Systhread_host.run` 을 부른다. 호출부 146곳은 안 고친다. 약 28% 다.
-3. **S3 Eio 가 스스로 띄우는 것**: `Eio.Path` 호출을 `Fs_compat` 으로 바꾸는 일이라 S1·S2 의 결과를 본 뒤에 정한다.
+3. **S2b `Eio_unix.run_in_systhread` 직접 호출**: S1 뒤 운영 서버(build `e0f124c927a5`, 11-12)에서 남은 긴 메인 실행을 재니 이 호출들이었다. 래퍼를 거치지 않아 S1·S2 가 닿지 않는다. main 에 122줄이 있다: lane add-on 의 `offload` 한 줄을 쓰는 69곳과 직접 호출 30곳, server 20, keeper 13, 그 밖. 본문이 JSON 을 해석·직렬화하고 SHA-256 을 계산하므로 스레드가 OCaml 코드를 오래 돈다.
+   - 추적 60초와 1초 `sample` 55개를 같이 떴다. 메인 스레드의 락 대기 297표본 중 235표본이 두 1초 구간에 몰렸고, 자리는 모두 `caml_thread_leave_blocking_section` 이었다. 같은 구간에 system thread 가 `Yojson`·`sha256` 을 80~126표본씩 돌았다.
+   - 라벨 없는 `systhread` 대기 합(도메인 0, 45초당)과 50 ms 넘는 메인 실행 수가 같이 움직였다: 0.14초에 1번, 2.2초에 13번, 4.8초에 28번, 12.2초에 83번.
+   - 메인 스레드는 syscall 에서 돌아올 때마다 락을 다시 잡는다. 다른 스레드가 OCaml 코드를 돌고 있으면 스레드 tick(50 ms)까지 기다린다.
+   - 고치는 법은 S2 와 같다: 호출을 `Systhread_host.run ~label` 로 바꾼다. 여기서는 호출부의 함수 이름이 바뀐다. 본문은 안 고친다. 진입점 단위로 옮기고, 옮기는 PR 마다 본문 분류를 싣는다.
+   - 벤치 `bench_systhread_cpu_work`: 2 MB JSON 을 해석·직렬화하는 작업을 fiber 셋이 맡길 때 같은 도메인 fiber 의 늦음이 p50 26~30 ms·p99 69~80 ms 에서 p50 1.26 ms·p99 4.0~5.1 ms 가 된다(작업 없는 바닥 p50 1.27·p99 3.0, load 44~54).
+4. **S3 Eio 가 스스로 띄우는 것**: `Eio.Path` 호출을 `Fs_compat` 으로 바꾸는 일이라 S1·S2 의 결과를 본 뒤에 정한다.
 
 7.3 의 닫힌 syscall 타입(`Blocking_syscall.t`)은 이 순서 뒤에 다시 본다. 클로저가 메인 도메인의 락을 쥐지 않게 되면 그 타입이 막으려던 것이 메인 도메인에서는 사라진다.
 
@@ -233,7 +239,7 @@ fiber 12개가 "파일 읽기 → JSON 파싱 → 한 줄 append → fsync" 를 
 
 #### 하지 않는 것
 
-- 클로저를 고치지 않는다. 호출부도 고치지 않는다.
+- 클로저를 고치지 않는다. S1·S2 는 호출부도 고치지 않는다. S2b 는 호출부에서 부르는 함수만 바꾼다.
 - systhread 수나 동시 실행 수에 상한을 두지 않는다. `Systhread_host` 는 지금처럼 받은 작업마다 바로 스레드를 준다.
 - `auth-credential-io` 가 요청마다 인증 파일을 읽는 것(45초에 2,071번)은 이 절에서 줄이지 않는다. 인증 코드라 따로 설계하고 사람이 리뷰한다.
 

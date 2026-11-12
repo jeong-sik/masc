@@ -80,9 +80,9 @@ let a_code_becomes_the_numeric_user_id () =
 ;;
 
 let the_authorization_url_asks_for_this_login () =
-  let store = T.create ~capacity:1 in
-  match T.start store ~now_ms:0 T.Github ~invite:None ~return_to:T.Local_path.root ~replaces:None with
-  | Error T.Full -> Alcotest.fail "full"
+  let key = T.create () in
+  match T.start key ~now_ms:0 T.Github ~invite:None ~return_to:T.Local_path.root ~replaces:None with
+  | Error T.Too_long -> Alcotest.fail "too long"
   | Ok started ->
     Alcotest.(check string)
       "the URL, with no scope"

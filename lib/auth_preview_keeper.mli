@@ -39,11 +39,14 @@ val list : Authz_state.t -> Authz_types.User_id.t -> Login_routes.answer
 (** The body is [{"keeper_id": <name>}], a name of the Keeper grammar
     ({!Keeper_id.Keeper_name}). A 200 JSON
     [{"keeper_id":...,"record":"made"}], or ["existing"] when the person
-    made it before; a 409 when another person did. *)
+    made it before; a 409 when another person did. ["existing"] is read in a
+    state the zone can be trusted for; a zone that cannot gets the 503 of
+    {!Login_routes.zone_uncertain}. *)
 val make : Authz_zone.t -> Authz_types.User_id.t -> body:string -> Login_routes.answer
 
 (** The body is [{"keeper_id": <name>, "runtime_id": <id>}]. A 200 JSON
     [{"keeper_id":...,"runtime_id":...,"record":"assigned"}], or ["existing"]
     when the Keeper already has that Runtime; a 404 when the Keeper or the
-    Runtime is not the person's. *)
+    Runtime is not the person's, and the 503 of {!make} for a zone that
+    cannot be trusted. *)
 val assign : Authz_zone.t -> Authz_types.User_id.t -> body:string -> Login_routes.answer

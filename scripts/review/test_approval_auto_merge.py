@@ -40,6 +40,7 @@ class FakeGitHub:
     def __init__(self, states=None):
         self.pulls, self.reviews, self.counts = {}, {}, {}
         self.mutations = []
+        self.list_page_size = 100
         self.merge_returncode = 0
         self.hook = lambda path, count: None
         self.rules = [{'type': 'pull_request', 'parameters': {
@@ -74,10 +75,20 @@ class FakeGitHub:
         path = next(part for part in command[2:] if part.startswith(PREFIX + '/'))
         self.counts[path] = self.counts.get(path, 0) + 1
         self.hook(path, self.counts[path])
+        link = ''
         if path == PREFIX + '/rules/branches/main':
             value = self.rules
         elif path == PREFIX + '/stacks/900':
             value = self.stack
+        elif path.startswith(PREFIX + '/pulls?'):
+            query = dict(part.split('=') for part in path.split('?', 1)[1].split('&'))
+            assert query['state'] == 'open' and query['per_page'] == '100', path
+            page = int(query.get('page', '1'))
+            opened = [row for _, row in sorted(self.pulls.items()) if row['state'] == 'open']
+            value = opened[(page - 1) * self.list_page_size:page * self.list_page_size]
+            if page * self.list_page_size < len(opened):
+                link = ('\nLink: <https://api.github.com/' + PREFIX + '/pulls?state=open'
+                        f'&per_page=100&page={page + 1}>; rel="next"')
         else:
             suffix = path.removeprefix(PREFIX + '/pulls/').split('/')
             number = int(suffix[0])
@@ -87,7 +98,7 @@ class FakeGitHub:
                 assert suffix[1] == 'reviews?per_page=100', path
                 value = self.reviews[number]
         body = json.dumps(value)
-        return ('HTTP/2.0 200 OK\nContent-Type: application/json\n\n' + body
+        return ('HTTP/2.0 200 OK\nContent-Type: application/json' + link + '\n\n' + body
                 if '--include' in command else body)
 
     def run(self, command, **kwargs):
@@ -241,6 +252,40 @@ class DefaultAutoMergeReservation(unittest.TestCase):
             ['gh', 'pr', 'merge', '101', '--repo', REPO, '--disable-auto']])
         self.assertFalse(any('--auto' in command for command in github.mutations))
 
+    def test_stack_reads_do_not_grow_with_the_number_of_layers(self):
+        reads = {}
+        for layers in (3, 12):
+            with self.subTest(layers=layers), FakeGitHub(['open'] * layers) as github:
+                self.assertIsNone(MERGE.auto_merge_default(REPO, 101 + layers - 1))
+                reads[layers] = sum(github.counts.values())
+                single = [path for path in github.counts if path.startswith(PREFIX + '/pulls/')]
+                self.assertEqual(single, [f'{PREFIX}/pulls/{100 + layers}'])
+                self.assertEqual(github.counts[PREFIX + '/pulls?state=open&per_page=100'], 1)
+        self.assertEqual(reads[3], reads[12])
+
+    def test_reservations_on_every_page_of_the_open_list_are_disabled(self):
+        with FakeGitHub(['open'] * 5) as github:
+            github.list_page_size = 2
+            for number in (102, 105):
+                github.pulls[number]['auto_merge'] = {'merge_method': 'squash'}
+            self.assertIsNone(MERGE.auto_merge_default(REPO, 103))
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '102', '--repo', REPO, '--disable-auto'],
+            ['gh', 'pr', 'merge', '105', '--repo', REPO, '--disable-auto']])
+        pages_read = [path for path in github.counts if path.startswith(PREFIX + '/pulls?')]
+        self.assertEqual(len(pages_read), 3)
+
+    def test_merged_and_closed_layers_are_never_read_or_disabled(self):
+        with FakeGitHub(['merged', 'open', 'closed', 'open']) as github:
+            for number in (102, 103, 104):
+                github.pulls[number]['auto_merge'] = {'merge_method': 'squash'}
+            self.assertIsNone(MERGE.auto_merge_default(REPO, 104))
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '102', '--repo', REPO, '--disable-auto'],
+            ['gh', 'pr', 'merge', '104', '--repo', REPO, '--disable-auto']])
+        self.assertNotIn(PREFIX + '/pulls/101', github.counts)
+        self.assertNotIn(PREFIX + '/pulls/103', github.counts)
+
     def test_excluded_prs_drop_an_existing_reservation(self):
         for excluded in ('draft', 'non-main', 'release'):
             with self.subTest(excluded=excluded), FakeGitHub() as github:
@@ -297,18 +342,46 @@ class AutomaticMergeReceipts(unittest.TestCase):
     def operation(self, returncode=0):
         return subprocess.CompletedProcess([], returncode, json.dumps(self.receipt), '')
 
-    def test_pending_conflict_observes_the_existing_receipt_without_resubmitting(self):
+    def test_pending_conflict_reports_the_existing_receipt_without_following_or_resubmitting(self):
         with patch.object(MERGE.subprocess, 'run', return_value=self.operation(1)) as command, \
-             patch.object(MERGE, 'read', return_value={'status': 'pending'}) as read, \
-             patch.object(MERGE, 'pull', return_value={'merged': False}), \
-             redirect_stdout(io.StringIO()):
+             patch.object(MERGE, 'read') as read, \
+             patch.object(MERGE, 'pull') as pull, \
+             patch.object(MERGE, 'follow') as follow, \
+             patch.object(MERGE, 'hand_off') as hand_off, \
+             redirect_stdout(io.StringIO()) as output:
             result = MERGE.submit(REPO, 102, sha(102), self.scope)
         self.assertEqual(command.call_count, 1)
         self.assertIn(PREFIX + '/pulls/102/merge-async', command.call_args.args[0])
         self.assertIn('-F', command.call_args.args[0])
         self.assertIn('bypass_rules=false', command.call_args.args[0])
-        read.assert_called_once_with(PREFIX + f'/pulls/102/merge-async/{UUID}')
-        self.assertIn(UUID, json.dumps(result))
+        for forbidden in (read, pull, follow, hand_off):
+            forbidden.assert_not_called()
+        self.assertEqual(result['status'], 'following_elsewhere')
+        self.assertEqual(result['uuid'], UUID)
+        self.assertIn(UUID, output.getvalue())
+
+    def test_a_fresh_acceptance_still_follows_its_own_receipt(self):
+        with patch.object(MERGE.subprocess, 'run', return_value=self.operation(0)), \
+             patch.object(MERGE, 'follow', return_value={'status': 'merged'}) as follow, \
+             redirect_stdout(io.StringIO()):
+            result = MERGE.submit(REPO, 102, sha(102), self.scope)
+        follow.assert_called_once()
+        self.assertEqual(result['status'], 'merged')
+
+    def test_following_elsewhere_is_not_a_red_run(self):
+        self.assertIn('following_elsewhere', MERGE.SUCCESS)
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': ''}
+        with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'auto_merge_default', return_value=None), \
+             patch.object(MERGE, 'prepare', return_value=(102, sha(102), self.scope)), \
+             patch.object(MERGE.subprocess, 'run', return_value=self.operation(1)), \
+             patch.object(MERGE, 'follow') as follow, \
+             redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+            code = MERGE.main()
+        follow.assert_not_called()
+        self.assertEqual(code, 0)
+        self.assertIn('following_elsewhere', output.getvalue())
 
     def test_receipt_is_visible_before_a_readback_failure(self):
         output = io.StringIO()
@@ -352,6 +425,15 @@ class FollowingAcceptedMerges(unittest.TestCase):
         patcher = patch.object(MERGE, 'time', clock)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # An empty open list means every member is read once, as before.
+        self.open_list = []
+        self.open_reads = 0
+        def listing(repo):
+            self.open_reads += 1
+            return self.open_list
+        patcher = patch.object(MERGE, 'open_pulls', side_effect=listing)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.puts = []
 
     def advance(self, seconds):
@@ -368,6 +450,57 @@ class FollowingAcceptedMerges(unittest.TestCase):
     @staticmethod
     def landed(number):
         return {'merged': True, 'merge_commit_sha': sha(number + 5000)}
+
+    def receipt_for(self, members):
+        return {'uuid': UUID, 'pr': members[-1], 'head': sha(members[-1]),
+                'members': members, 'since': 1.0}
+
+    def test_a_poll_reads_the_open_list_and_no_member_while_every_layer_is_open(self):
+        reads = {}
+        for layers in (3, 12):
+            members = list(range(101, 101 + layers))
+            self.now, self.open_reads = 0.0, 0
+            self.open_list = [{'number': number} for number in members]
+            with self.subTest(layers=layers), \
+                 patch.object(MERGE, 'read', return_value={'status': 'pending'}) as read, \
+                 patch.object(MERGE, 'pull') as pull, patch.object(MERGE, 'WAIT_SECONDS', 30):
+                result = MERGE.resume(REPO, self.receipt_for(members), dispatch=False)
+            self.assertEqual(result['status'], 'still_pending')
+            pull.assert_not_called()
+            reads[layers] = (self.open_reads, read.call_count)
+        self.assertGreaterEqual(reads[3][0], 3)
+        self.assertEqual(reads[3], reads[12])
+
+    def test_only_a_member_that_left_the_open_list_is_read_and_only_once(self):
+        lists = [[{'number': 101}, {'number': 102}], [{'number': 102}], [], []]
+        seen = []
+        def pull(repo, number):
+            seen.append(number)
+            if number == 102 and seen.count(102) < 2:  # the first read of 102 is not final yet
+                return {'merged': False, 'state': 'open'}
+            return {'merged': True, 'state': 'closed', 'merge_commit_sha': sha(number + 5000)}
+        with patch.object(MERGE, 'open_pulls', side_effect=lists) as listing, \
+             patch.object(MERGE, 'read', return_value={'status': 'enqueued'}), \
+             patch.object(MERGE, 'pull', side_effect=pull):
+            result = MERGE.resume(REPO, self.receipt_for([101, 102]), dispatch=False)
+        self.assertEqual(result['status'], 'merged')
+        self.assertEqual(listing.call_count, 4)
+        # 101 left the list on poll 2 and was settled; it is never read again.
+        # 102 is read on every poll after it left until its closed answer is final.
+        self.assertEqual(seen, [101, 102, 102])
+
+    def test_a_member_missing_from_a_stale_list_but_still_open_is_read_again(self):
+        seen = []
+        def pull(repo, number):
+            seen.append(number)
+            if seen.count(number) < 3:
+                return {'merged': False, 'state': 'open'}
+            return {'merged': True, 'state': 'closed', 'merge_commit_sha': sha(number + 5000)}
+        with patch.object(MERGE, 'read', return_value={'status': 'enqueued'}), \
+             patch.object(MERGE, 'pull', side_effect=pull):
+            result = MERGE.resume(REPO, self.receipt_for([101]), dispatch=False)
+        self.assertEqual(result['status'], 'merged')
+        self.assertEqual(seen, [101, 101, 101])
 
     def test_pending_then_enqueued_is_final_and_members_decide_completion(self):
         statuses = iter([{'status': 'pending'}, {'status': 'pending'}, {'status': 'enqueued'}])
@@ -571,10 +704,24 @@ class FollowingAcceptedMerges(unittest.TestCase):
             old = MERGE.hand_off(REPO, outcome)  # submitted 50 hours ago in this test
         self.assertEqual(old['status'], 'resume_dispatched')
         self.assertEqual(run.call_count, 1)
-        with patch.object(MERGE.subprocess, 'run', side_effect=OSError('gh missing')):
+        with patch.object(MERGE.subprocess, 'run', side_effect=OSError('gh missing')) as run, \
+             patch.object(MERGE.time, 'sleep') as pause:
             failed = MERGE.hand_off(REPO, outcome)
         self.assertEqual(failed['status'], 'still_pending')
         self.assertIn('dispatch_failed', failed['resume'])
+        # One bounded retry after a pause, never an open loop.
+        self.assertEqual(run.call_count, 2)
+        pause.assert_called_once_with(MERGE.HAND_OFF_RETRY_SECONDS)
+
+    def test_a_dispatch_that_fails_once_is_retried_and_lands(self):
+        outcome = {'status': 'still_pending', 'uuid': UUID, 'pr': 102, 'head': sha(102),
+                   'members': [101, 102], 'since': 0}
+        ok = subprocess.CompletedProcess([], 0, '', '')
+        with patch.object(MERGE.subprocess, 'run', side_effect=[OSError('flaky'), ok]) as run, \
+             patch.object(MERGE.time, 'sleep') as pause:
+            result = MERGE.hand_off(REPO, outcome)
+        self.assertEqual(result['status'], 'resume_dispatched')
+        self.assertEqual((run.call_count, pause.call_count), (2, 1))
 
     def resume_environment(self, **extra):
         receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1.0}
@@ -745,6 +892,8 @@ class QuotaGetIntegration(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0,
                     json.dumps({'status': 'pending', 'details': {'uuid': UUID}}), '')
             reads.append(command[-1])
+            if '/pulls?state=open' in command[-1]:
+                return http_response(200, [])  # nobody is on the open list: read each member once
             if command[-1] == endpoint:
                 return (http_response(429, {'message': 'limited'}, {'Retry-After': '12'})
                         if reads.count(endpoint) == 1 else http_response(200, {'status': 'enqueued'}))
@@ -795,6 +944,8 @@ class QuotaGetIntegration(unittest.TestCase):
                         return subprocess.CompletedProcess(command, 0,
                             json.dumps({'status': 'pending', 'details': {'uuid': UUID}}), '')
                     reads.append(command[-1])
+                    if '/pulls?state=open' in command[-1]:
+                        return http_response(200, [])  # nobody is on the open list: read each member once
                     limited = ((quota_path == 'endpoint' and command[-1] == endpoint) or
                                (quota_path == 'member' and command[-1] == member))
                     if limited:
@@ -843,6 +994,8 @@ class QuotaGetIntegration(unittest.TestCase):
                         return subprocess.CompletedProcess(command, 0,
                             json.dumps({'status': 'pending', 'details': {'uuid': UUID}}), '')
                     self.assertEqual(method, 'GET')
+                    if '/pulls?state=open' in command[-1]:
+                        return http_response(200, [])  # nobody is on the open list
                     if quotas:
                         self.assertGreaterEqual(clock.now, quotas[-1]['retry_at'])
                     reads.append((clock.now, command[-1]))

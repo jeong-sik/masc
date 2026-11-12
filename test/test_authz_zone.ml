@@ -204,6 +204,8 @@ let open_error_name : Z.open_error -> string = function
   | Z.Log_not_opened _ -> "Log_not_opened"
   | Z.Not_bootstrapped _ -> "Not_bootstrapped"
   | Z.Log_not_checked _ -> "Log_not_checked"
+  | Z.Store_not_there _ -> "Store_not_there"
+  | Z.Store_not_checked _ -> "Store_not_checked"
 ;;
 
 let open_zone dirs =
@@ -311,6 +313,7 @@ let reason_name : H.reason -> string = function
   | H.Digest_differs _ -> "Digest_differs"
   | H.Commit_not_in_log _ -> "Commit_not_in_log"
   | H.Intent_unplaced _ -> "Intent_unplaced"
+  | H.Answers_differ _ -> "Answers_differ"
 ;;
 
 let reasons_name first rest = String.concat "," (List.map reason_name (first :: rest))
@@ -379,6 +382,13 @@ let error_name : Z.error -> string = function
     "Answer_not_written " ^ store_append_error_name error
 ;;
 
+let uncertain_name : Z.uncertain -> string = function
+  | Z.Log_is_stopped _ -> "log stopped"
+  | Z.Store_is_stopped _ -> "store stopped"
+  | Z.Files_disagree _ -> "files disagree"
+  | Z.Store_answers_nothing -> "store holds no answer"
+;;
+
 let intent_name (intent : S.intent) =
   Printf.sprintf
     "%s>%s %s"
@@ -403,13 +413,24 @@ let commit zone { at_ms; draft } =
 let commit_ok zone timed =
   match commit zone timed with
   | Ok committed -> committed
-  | Error error -> Alcotest.failf "commit refused: %s" (Z.error_to_string error)
+  | Error error -> Alcotest.failf "commit refused: %s" (Z.error_detail error)
 ;;
 
 let check_error label expected zone timed =
   match commit zone timed with
   | Ok _ -> Alcotest.failf "%s: the commit succeeded" label
   | Error error -> Alcotest.(check string) label expected (error_name error)
+;;
+
+(* Whether a decision may rest on the zone. The published state is the same
+   one either way, and only [read] says that a file stopped. *)
+let check_decision label expected zone =
+  Alcotest.(check string)
+    label
+    expected
+    (match Z.read zone with
+     | Ok (_ : Z.trusted) -> "trusted"
+     | Error uncertain -> uncertain_name uncertain)
 ;;
 
 let check_settled label expected (committed : Z.committed) =
@@ -520,7 +541,7 @@ let commits_from_fibers_take_turns () =
       List.map
         (function
           | Ok committed -> committed
-          | Error error -> Alcotest.failf "a commit was refused: %s" (Z.error_to_string error))
+          | Error error -> Alcotest.failf "a commit was refused: %s" (Z.error_detail error))
         results
     in
     Alcotest.(check int) "every commit went in" (List.length events) (List.length committed);
@@ -559,28 +580,37 @@ let refused_records_write_nothing () =
 ;;
 
 (* The first record of a log goes through [Z.install], once the install record
-   names the store. A zone opened from paths does not open a log without it. *)
+   names the store. A zone opened from paths does not open a log without it,
+   and opens neither file while one of the two is not there. *)
 let the_zone_opens_only_a_bootstrapped_log () =
   with_dirs (fun dirs ->
-    let check_refused label =
+    let check_refused label expected =
       match Z.open_at_start ~now_ms ~log_path:(log_file dirs) ~store_path:dirs.store_file with
       | Ok (_ : Z.t) -> Alcotest.failf "%s: a zone was opened" label
       | Error error ->
-        Alcotest.(check string) (label ^ ": the refusal") "Not_bootstrapped" (open_error_name error)
+        Alcotest.(check string) (label ^ ": the refusal") expected (open_error_name error)
     in
-    check_refused "no log";
-    Alcotest.(check bool)
-      "no log: no store directory"
-      false
-      (Sys.file_exists (Filename.dirname dirs.store_file));
+    let store_dir = Filename.dirname dirs.store_file in
+    let empty_file path =
+      Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 path ignore
+    in
+    check_refused "no log" "Not_bootstrapped";
+    Alcotest.(check bool) "no log: no store directory" false (Sys.file_exists store_dir);
     Alcotest.(check bool)
       "no log: no log directory"
       false
       (Sys.file_exists (Filename.dirname (log_file dirs)));
     make_dirs (Filename.dirname (log_file dirs));
-    Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 (log_file dirs) ignore;
-    check_refused "an empty log";
-    Alcotest.(check bool) "an empty log: no store file" false (Sys.file_exists dirs.store_file);
+    empty_file (log_file dirs);
+    check_refused "an empty log and no store" "Store_not_there";
+    Alcotest.(check bool)
+      "an empty log and no store: no store directory"
+      false
+      (Sys.file_exists store_dir);
+    make_dirs store_dir;
+    empty_file dirs.store_file;
+    check_refused "an empty log" "Not_bootstrapped";
+    Alcotest.(check string) "an empty log: the store" "" (read_file dirs.store_file);
     Alcotest.(check string) "an empty log: the log" "" (read_file (log_file dirs)))
 ;;
 
@@ -602,32 +632,190 @@ let a_log_that_cannot_be_checked_is_not_opened () =
    answer for it reads [Absent], which design 5.1 does not let a writer go on
    from. *)
 let a_store_with_no_answer_refuses_every_commit () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    Unix.truncate dirs.store_file 0;
+    check_judgment "what the files say" dirs "Absent";
+    let zone = open_zone dirs in
+    let log_before = read_file (log_file dirs) in
+    check_decision "no decision rests on it" "store holds no answer" zone;
+    check_error "a commit" "Store_holds_no_answer" zone (mode_draft M.Off);
+    check_error "a commit, again" "Store_holds_no_answer" zone (mode_draft ~at_ms:(at_ms + 2) M.Off);
+    Alcotest.(check string) "the log" log_before (read_file (log_file dirs));
+    Alcotest.(check string) "the store" "" (read_file dirs.store_file);
+    check_judgment "a restart" dirs "Absent")
+;;
+
+(* A store that is not there is not opened, whether its file or its whole
+   directory is gone: opening it makes the directory and the lock file, and a
+   volume that is mounted again finds its mount point as it left it. *)
+let a_store_that_is_not_there_is_not_opened () =
   List.iter
-    (fun (label, empty_the_store, store_after) ->
+    (fun (label, lose_the_store) ->
       with_dirs (fun dirs ->
         ignore (bootstrap dirs : B.completed);
-        empty_the_store dirs.store_file;
-        check_judgment (label ^ ": what the files say") dirs "Absent";
-        let zone = open_zone dirs in
+        let store_dir = Filename.dirname dirs.store_file in
+        lose_the_store dirs.store_file;
+        let where_the_store_was () =
+          if Sys.file_exists store_dir
+          then Some (List.sort String.compare (Array.to_list (Sys.readdir store_dir)))
+          else None
+        in
+        let before = where_the_store_was () in
         let log_before = read_file (log_file dirs) in
-        check_error label "Store_holds_no_answer" zone (mode_draft M.Off);
-        check_error
-          (label ^ ", again")
-          "Store_holds_no_answer"
-          zone
-          (mode_draft ~at_ms:(at_ms + 2) M.Off);
-        Alcotest.(check string) (label ^ ": the log") log_before (read_file (log_file dirs));
-        Alcotest.(check (option string))
-          (label ^ ": the store")
-          store_after
-          (if Sys.file_exists dirs.store_file then Some (read_file dirs.store_file) else None);
-        check_judgment (label ^ ": a restart") dirs "Absent"))
-    [ "an emptied store", (fun path -> Unix.truncate path 0), Some ""
-    ; "a store that is not there", Sys.remove, None
+        (match Z.open_at_start ~now_ms ~log_path:(log_file dirs) ~store_path:dirs.store_file with
+         | Ok (_ : Z.t) -> Alcotest.failf "%s: a zone was opened" label
+         | Error error ->
+           Alcotest.(check string) (label ^ ": the refusal") "Store_not_there" (open_error_name error));
+        Alcotest.(check (option (list string)))
+          (label ^ ": where the store was")
+          before
+          (where_the_store_was ());
+        Alcotest.(check string) (label ^ ": the log") log_before (read_file (log_file dirs))))
+    [ "the file is gone", Sys.remove
+    ; "the directory is gone", (fun path -> remove_tree (Filename.dirname path))
     ]
 ;;
 
+(* A store path that cannot be looked at is not taken for a store that is not
+   there, and is not opened either. *)
+let a_store_that_cannot_be_checked_is_not_opened () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    match Z.open_at_start ~now_ms ~log_path:(log_file dirs) ~store_path:(dirs.store_file ^ "\000") with
+    | Ok (_ : Z.t) -> Alcotest.fail "a zone was opened"
+    | Error error ->
+      Alcotest.(check string) "the refusal" "Store_not_checked" (open_error_name error))
+;;
+
 (* ---- failures ---- *)
+
+(* The seq of the newest line of the log ring. The first line of a ring has
+   seq 0, and [Log.Ring.recent ~since_seq] gives the lines after a seq, so an
+   empty ring answers the seq before the first one. *)
+let latest_ring_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | entry :: _ -> entry.Log.Ring.seq
+  | [] -> -1
+;;
+
+(* The lines that the zone wrote about a commit that failed, after [since_seq]. *)
+let failed_commit_lines ~since_seq =
+  List.filter
+    (fun (entry : Log.Ring.entry) ->
+      String_util.contains_substring entry.message "was not committed to the authorization zone")
+    (Log.Ring.recent ~limit:50 ~module_filter:"Auth" ~since_seq ())
+;;
+
+(* What a person is told of every failure of the zone. *)
+let not_recorded = "The server could not finish recording this. Try again later."
+
+(* The reason of a failure names paths of the server. The text a caller gives
+   to a person has none, the detail has them, and the zone writes the detail
+   to the log when the commit fails. A record that was turned down says why
+   in both texts. *)
+let a_failure_is_told_without_the_paths_of_the_server () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let zone = open_zone dirs in
+    let root = Filename.dirname dirs.base in
+    let names_a_path text = String_util.contains_substring text root in
+    let before_the_refusal = latest_ring_seq () in
+    (match commit zone (mode_draft M.Fresh_bootstrap) with
+     | Ok (_ : Z.committed) -> Alcotest.fail "a second bootstrap was committed"
+     | Error error ->
+       Alcotest.(check string) "a record that was turned down" "Refused Mode" (error_name error);
+       Alcotest.(check string)
+         "it says why in both texts"
+         (Z.error_detail error)
+         (Z.error_to_string error));
+    Alcotest.(check int)
+      "a record that was turned down is not written to the log"
+      0
+      (List.length (failed_commit_lines ~since_seq:before_the_refusal));
+    let other = open_files dirs in
+    let head = other.replay.Z.Replay.head in
+    append_log_outside other [ record_at ~head (mode_draft ~at_ms:(at_ms + 1) M.Off) ];
+    let before_the_failure = latest_ring_seq () in
+    (match commit zone (mode_draft ~at_ms:(at_ms + 2) M.Off) with
+     | Ok (_ : Z.committed) -> Alcotest.fail "the commit wrote over a log that moved"
+     | Error error ->
+       Alcotest.(check string) "a failure" "Record_not_appended Diverged" (error_name error);
+       Alcotest.(check string) "what a person is told" not_recorded (Z.error_to_string error);
+       Alcotest.(check bool) "the detail names the log" true (names_a_path (Z.error_detail error)));
+    (match failed_commit_lines ~since_seq:before_the_failure with
+     | [ line ] ->
+       Alcotest.(check bool) "the line of the zone names the log" true (names_a_path line.message)
+     | lines ->
+       Alcotest.failf "the zone wrote %d lines about the failed commit" (List.length lines));
+    match Z.read zone with
+    | Ok (_ : Z.trusted) -> Alcotest.fail "a decision rests on a log that stopped"
+    | Error uncertain ->
+      Alcotest.(check string)
+        "why no decision rests on the zone"
+        "the authorization log is stopped"
+        (Z.uncertain_to_string uncertain);
+      Alcotest.(check bool)
+        "the detail names the log"
+        true
+        (names_a_path (Z.uncertain_detail uncertain)))
+;;
+
+(* Every error of the zone, built by hand, the failures around a path where
+   they carry one. A failure tells a person the one sentence, and its detail
+   has the path. A record that was turned down says the same in both texts.
+   [Authz_zone] names every constructor where it tells the two apart, so the
+   compiler asks about a new one there; this is where its texts are read. *)
+let the_texts_of_each_error () =
+  let path = "/srv/masc-under-test/.masc/auth/authz.jsonl" in
+  let names_the_path text = String_util.contains_substring text path in
+  let hash = R.head_hash R.genesis in
+  let log_stop = { L.path; reason = "the file was replaced" } in
+  let store_stop = { S.path; reason = "the file was replaced" } in
+  let failures_around_a_path =
+    [ Z.Store_stopped store_stop
+    ; Z.Log_stopped log_stop
+    ; Z.Abort_not_confirmed (L.End_moved { path })
+    ; Z.Settlement_not_written (S.Write_failed { path; detail = "No space left on device" })
+    ; Z.Intent_not_written (S.Write_locked { path })
+    ; Z.Record_not_appended (L.Diverged { path })
+    ; Z.Answer_not_written { record_hash = hash; error = S.Stopped store_stop }
+    ]
+  in
+  let failures_without_a_path =
+    [ Z.Uncertain { first = H.Commit_not_in_log hash; rest = [] }
+    ; Z.Store_holds_no_answer
+    ; Z.Store_entry_refused
+        { entry = S.Committed { record_hash = hash }; violation = S.Committed_without_intent }
+    ]
+  in
+  let turned_down =
+    [ Z.Log_holds_records { next_seq = 1 }
+    ; Z.Record_not_built (R.Author_not_admitted { kind = R.Kind.Mode_event; author = user })
+    ]
+  in
+  List.iter
+    (fun error ->
+      Alcotest.(check string)
+        (error_name error ^ ": what a person is told")
+        not_recorded
+        (Z.error_to_string error))
+    (failures_around_a_path @ failures_without_a_path);
+  List.iter
+    (fun error ->
+      Alcotest.(check bool)
+        (error_name error ^ ": the detail names the path")
+        true
+        (names_the_path (Z.error_detail error)))
+    failures_around_a_path;
+  List.iter
+    (fun error ->
+      Alcotest.(check string)
+        (error_name error ^ ": both texts say why")
+        (Z.error_detail error)
+        (Z.error_to_string error))
+    turned_down
+;;
 
 let a_locked_store_writes_nothing_and_stops_nothing () =
   with_dirs (fun dirs ->
@@ -913,18 +1101,18 @@ let check_blocked label expected (state : Authz_state.t) =
     (List.map (fun held -> Subject.to_string held.Authz_state.subject) state.Authz_state.revocation_pending)
 ;;
 
-(* What the gate reads for a subject. *)
+(* What the gate reads for a subject: the state a decision may rest on, and
+   in it the reduction that holds the subject. *)
 let check_gate label expected zone subject =
   Alcotest.(check string)
     label
     expected
-    (match Z.revocation zone subject with
-     | Z.Known Authz_records.Revocation_state.Pending -> "pending"
-     | Z.Known Authz_records.Revocation_state.Not_pending -> "clear"
-     | Z.Unknown_log_stopped _ -> "log stopped"
-     | Z.Unknown_store_stopped _ -> "store stopped"
-     | Z.Unknown_files_disagree _ -> "files disagree"
-     | Z.Unknown_store_holds_no_answer -> "store holds no answer")
+    (match Z.read zone with
+     | Error uncertain -> uncertain_name uncertain
+     | Ok trusted ->
+       (match Authz_state.revocation (trusted :> Z.snapshot).Z.state subject with
+        | Authz_records.Revocation_state.Pending -> "pending"
+        | Authz_records.Revocation_state.Not_pending -> "clear"))
 ;;
 
 (* A revocation whose append failed leaves its intent, and its invitation is
@@ -1460,6 +1648,7 @@ let a_failed_store_write_stops_every_commit () =
           (mode_draft M.Off));
     check_files "both files are as they were" before dirs;
     check_snapshot "the published state" ~mode:on ~head:completed.B.record_hash (Z.snapshot zone);
+    check_decision "no decision rests on the stopped store" "store stopped" zone;
     check_error "the next commit" "Store_stopped" zone (mode_draft ~at_ms:(at_ms + 2) M.Off);
     check_files "the next commit wrote nothing" before dirs;
     ignore (check_restart "a restart" dirs ~mode:on ~head:completed.B.record_hash : opened))
@@ -1565,6 +1754,30 @@ let another_handle_on_the_log_stops_the_log () =
       (Some (intent_name left))
       (Option.map intent_name (S.State.pending opened.store_state));
     check_judgment "a restart" dirs "Mismatch Digest_differs")
+;;
+
+(* A mode event that was appended with no zone took no intent, so the store
+   answers one record fewer than the log holds of those that take one: the
+   epochs of the two files differ (design 5.1). A start reads a mismatch, and
+   a zone that is opened over these files does not write and does not know
+   its revocations. *)
+let an_event_appended_with_no_intent_is_a_mismatch () =
+  with_dirs (fun dirs ->
+    ignore (bootstrap dirs : B.completed);
+    let other = open_files dirs in
+    let head = other.replay.Z.Replay.head in
+    check_judgment "before the append" dirs "Matches";
+    append_log_outside other [ record_at ~head (mode_draft ~at_ms:(at_ms + 1) M.Off) ];
+    check_judgment "a restart" dirs "Mismatch Answers_differ";
+    let zone = open_zone dirs in
+    let before = files dirs in
+    check_error
+      "a commit"
+      "Uncertain Answers_differ"
+      zone
+      (mode_draft ~at_ms:(at_ms + 2) M.Reactivate);
+    check_files "the commit wrote nothing" before dirs;
+    check_gate "the gate" "files disagree" zone (Subject.Invite invite_id))
 ;;
 
 (* Answers for two records that the log does not hold, which the store takes
@@ -1693,7 +1906,7 @@ let install opened { at_ms; draft } =
 let install_ok opened timed =
   match install opened timed with
   | Ok installed -> installed
-  | Error error -> Alcotest.failf "install refused: %s" (Z.error_to_string error)
+  | Error error -> Alcotest.failf "install refused: %s" (Z.error_detail error)
 ;;
 
 let check_install_error label expected opened timed =
@@ -1946,9 +2159,22 @@ let () =
             "a store with no answer refuses every commit"
             `Quick
             a_store_with_no_answer_refuses_every_commit
+        ; Alcotest.test_case
+            "a store that is not there is not opened"
+            `Quick
+            a_store_that_is_not_there_is_not_opened
+        ; Alcotest.test_case
+            "a store that cannot be checked is not opened"
+            `Quick
+            a_store_that_cannot_be_checked_is_not_opened
         ] )
     ; ( "failures"
       , [ Alcotest.test_case
+            "a failure is told without the paths of the server"
+            `Quick
+            a_failure_is_told_without_the_paths_of_the_server
+        ; Alcotest.test_case "the texts of each error" `Quick the_texts_of_each_error
+        ; Alcotest.test_case
             "a locked store writes nothing and stops nothing"
             `Quick
             a_locked_store_writes_nothing_and_stops_nothing
@@ -1973,6 +2199,10 @@ let () =
             "another handle on the log stops the log"
             `Quick
             another_handle_on_the_log_stops_the_log
+        ; Alcotest.test_case
+            "an event appended with no intent is a mismatch"
+            `Quick
+            an_event_appended_with_no_intent_is_a_mismatch
         ; Alcotest.test_case
             "another handle on the store stops the store"
             `Quick

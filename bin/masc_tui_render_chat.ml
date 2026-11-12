@@ -4416,7 +4416,7 @@ let render_keeper_message (state : state) =
       ~help_door ~rows ~cols
       ~footer:
         (Footer_hints
-           { hints = Masc_tui_keys.footer_hints state.view; position = None })
+           { hints = Masc_tui_keys.footer_hints ~lang:state.ui_language state.view; position = None })
       buf
   | Some keeper_name ->
     let chat_theme = Chat_theme.snapshot () in

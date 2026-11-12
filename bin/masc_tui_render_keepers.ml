@@ -2150,11 +2150,22 @@ let keeper_observation_reading (state : state) =
         (List.map (fun (heading, body) ->
           ({heading; body} : Masc_tui_detail_reading.section)) errors))
 
+(* The selected row among the rows the list draws, counted from one. A group
+   heading or the World row selects no Keeper. *)
+let keeper_list_position ~stop rows : Masc_tui_value.Position.t option =
+  match rows with
+  | [] -> None
+  | _ :: _ ->
+      let at =
+        match stop with
+        | Some (Keeper_list_model.Stop_row position) -> position + 1
+        | Some (Keeper_list_model.Stop_world | Keeper_list_model.Stop_heading _)
+        | None -> 0
+      in
+      Some (Row { at; total = List.length rows })
+
 let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pulse_headers =
   let text ko en = ui_text state ~ko ~en in
-  let heading = screen_title (text " MASC Keepers · 일과 도움" " MASC Keepers · work and help") in
-  let badge = connection_badge state in
-  let gap = max 1 (inner - Message_layout.display_width heading - Message_layout.display_width badge) in
   let warning prefix reason = Theme.warn () ^ "  " ^ prefix ^ Terminal_text.single_line reason ^ Ansi.reset in
   (* One failing read at most names itself with its reason; several at once
      fold into a single summary line. Either way the header grows by one line
@@ -2206,9 +2217,15 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
                 ("waiting refresh pending · showing last observation · " ^ elapsed ^ "s"))]
          | None -> [])
   in
-  [(if errors <> [] || roster <> [] || waiting <> [] then
-      Theme.warn () ^ text "일부 관측 미확인 · " "some observations unknown · " ^ Ansi.reset else "")
-   ^ heading ^ String.make gap ' ' ^ badge]
+  [ here_row ~cols state
+      ~path:[ text "일과 도움" "work and help" ]
+      ~readings:
+        (if errors <> [] || roster <> [] || waiting <> [] then
+           [ Theme.warn () ^ text "일부 관측 미확인" "some observations unknown" ^ Ansi.reset ]
+         else [])
+      ~position:
+        (keeper_list_position ~stop:(keeper_list_stop state)
+           (keeper_list_reading state).klr_rows) ]
   @ keeper_plain_fleet_lines state ~now ~inner
   @ errors @ roster @ waiting
   @ [keeper_view_tabs ~cols state.keeper_list_view]
@@ -2452,29 +2469,19 @@ let render_keeper_axes (state : state) =
   (* One observation time for stale fleet readings and roster turn ages. *)
   let now_unix = Unix.gettimeofday () in
   let grid = Grid.layout ~cols:inner in
-  let heading =
-    screen_title
-      (Printf.sprintf " MASC Keepers %s"
-         (match state.keepers, keeper_rows_page state ~error:keepers_error with
-          | _ :: _, _ | [], Page_empty ->
-              Printf.sprintf "(%d)" (List.length state.keepers)
-          | [], (Page_unread | Page_failed) ->
-              title_missing_reading ~error:keepers_error))
-  in
   (* The roster is the surface an operator watches to see which keepers are
-     up, and it was the one top-level surface whose title never said whether
-     the reading was live: "1 healthy · 1 idle" read the same over a dead
-     coordinator as over a live one. The badge also carries the workspace
-     mismatch, which this screen could not report at all. *)
-  let badge = connection_badge state in
-  (* Style bytes are zero-width to [display_width], so the gap is measured on
-     the styled string rather than on a plain copy that could drift from it. *)
-  let gap =
-    max 1
-      (inner - Message_layout.display_width heading
-       - Message_layout.display_width badge)
+     up. Whether the reading is live is the top row's word; a list that could
+     not be read says so here, and the position counts the rows drawn. *)
+  let heading =
+    here_row ~cols state ~path:[]
+      ~readings:
+        (match state.keepers, keeper_rows_page state ~error:keepers_error with
+         | _ :: _, _ | [], Page_empty -> []
+         | [], (Page_unread | Page_failed) ->
+             [ String.trim (title_missing_reading ~error:keepers_error) ])
+      ~position:(keeper_list_position ~stop model_rows)
   in
-  box_line buf cols (heading ^ String.make gap ' ' ^ badge);
+  box_line buf cols heading;
   box_line buf cols (keeper_view_tabs ~cols state.keeper_list_view);
   List.iter (box_line buf cols)
     (keeper_pulse_headers state ~now:now_unix ~inner ~grid ~selected_row all_rows);
@@ -4328,7 +4335,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | Render_schedule.Page_capped { shown; total } ->
                 let of_total =
                   match total with
-                  | Some total -> Printf.sprintf " -- %d of %d requests" shown total
+                  | Some total ->
+                      Printf.sprintf " -- %s of %s requests"
+                        (Masc_tui_value.Count.grouped shown)
+                        (Masc_tui_value.Count.grouped total)
                   | None -> ""
                 in
                 let next_step = match state.keeper_schedules_page with
@@ -4801,7 +4811,7 @@ let render_keeper_detail (state : state) =
         (Printf.sprintf "%s  %s"
            (screen_title " Keepers \xe2\x96\xb8 detail")
            (connection_badge state))
-      ~hints:(Masc_tui_keys.footer_hints state.view)
+      ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
       ~body:(fun ~budget:_ c ->
         c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
   end else begin
@@ -4879,7 +4889,7 @@ let render_keeper_logs (state : state) =
         (Printf.sprintf "%s  %s"
            (screen_title " Keepers \xe2\x96\xb8 logs")
            (connection_badge state))
-      ~hints:(Masc_tui_keys.footer_hints state.view)
+      ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
       ~body:(fun ~budget:_ c ->
         c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
   end else begin
@@ -4942,7 +4952,7 @@ let render_keeper_logs (state : state) =
 
     Buffer.add_string buf
       (footer_line state ~max_cells:cols
-         ~hints:(Masc_tui_keys.footer_hints state.view));
+         ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view));
 
     finish_surface state ~clamped:(Keeper_logs_scroll { scroll; cols })
       ~surface_key:"keeper-logs" ~rows:terminal_rows

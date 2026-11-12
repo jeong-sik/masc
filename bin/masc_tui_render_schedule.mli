@@ -541,40 +541,59 @@ val kauto_group_label : title:string -> string list -> string
 
 (** {1 Lane run columns} *)
 
+type lane_run_headers = {
+  lhead_started : string;
+  lhead_subject : string;
+  lhead_status : string;
+  lhead_elapsed : string;
+  lhead_slot : string;
+}
+(** The column names, in the language the screen is drawn in. *)
+
+(** What the subject column carries. The Verifier's runs are about a task or
+    a goal; every other lane's are about who asked. *)
+type lane_run_subject =
+  | Run_actor_name  (** Read from its head, so it folds at the tail. *)
+  | Run_subject_id  (** Told apart by both ends, so it folds in the middle. *)
+
 type lane_run_row_values = {
-  lrow_started : string;
+  lrow_started : float;  (** Seconds since the epoch. *)
   lrow_subject : string;
   lrow_status : string;
-  lrow_elapsed : string;
+  lrow_elapsed : float option;
+      (** Seconds. [None], or a span no clock reads, draws the no-value mark. *)
   lrow_slot : string;
 }
+(** One run as the values the wire gave. The table turns the start and the
+    elapsed time into text, so every row of every lane writes them one way. *)
 
-(** The run list's columns, named so a narrow list can say which it spares. *)
-type lane_run_column =
-  | Lane_started
-  | Lane_subject
-  | Lane_status
-  | Lane_elapsed
-  | Lane_slot
+type lane_run_table
+(** The run list's columns fitted to one frame width. *)
 
-val lane_run_layout : inner_width:int -> lane_run_column Masc_tui_table.layout
-(** The columns the run list draws in [inner_width] and the slot's share of
-    it. When the row is narrow the start goes first, then the elapsed time;
-    the subject, the status and the slot stay, and the slot takes what the
-    others leave, never below its floor. *)
+val lane_run_table :
+  headers:lane_run_headers ->
+  subject:lane_run_subject ->
+  subjects:string list ->
+  inner_width:int ->
+  lane_run_table
+(** The columns the run list draws in [inner_width]. When the row is narrow
+    the start goes first, then the elapsed time; the subject, the status and
+    the slot stay. [subjects] is every subject on the page, not the rows in
+    view alone, so scrolling does not move a column: the subject column is as
+    wide as the widest of them where the frame has the cells, and the slot
+    takes the rest. *)
 
-val lane_run_header_row :
-  identity_header:string -> layout:lane_run_column Masc_tui_table.layout -> string
+val lane_run_header_row : lane_run_table -> string
 
 val lane_run_row :
-  identity_header:string ->
+  lane_run_table ->
+  now:float ->
   status_style:string ->
-  layout:lane_run_column Masc_tui_table.layout ->
   lane_run_row_values ->
   string
-(** One run, on the same columns as {!lane_run_header_row}. [identity_header]
-    names the subject column: the Verifier's runs are about a task or a goal,
-    every other lane's about who asked. *)
+(** One run, on the same columns as {!lane_run_header_row}. [now] decides how
+    much of the start's date the row still needs; [status_style] dresses the
+    status cell alone. *)
 
 (** {1 File change columns} *)
 
@@ -666,10 +685,11 @@ val task_history_sidebar_label : task_id:string -> apart:string option -> string
     than a reading of one. A row with nothing to part it keeps the id
     alone. *)
 
-val verdict_sidebar_labels : (string * string) list -> string list
-(** Task id and local clock for each Verdicts row. Rows whose displayed
-    clock is identical receive a snapshot-local ordinal, so two verdicts
-    recorded in the same second do not read as the same row. *)
+val verdict_sidebar_labels : now:float -> (string * float) list -> string list
+(** Task id and the moment of each Verdicts row, in seconds since the epoch,
+    drawn as the run list draws a start. Rows whose displayed clock is
+    identical receive a snapshot-local ordinal after the minute, so two
+    verdicts recorded in the same second do not read as the same row. *)
 
 val fusion_pipeline_diagram :
   ?glyph_done:string ->

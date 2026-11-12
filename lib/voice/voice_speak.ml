@@ -10,7 +10,17 @@ include Voice_bridge_core
 open Result.Syntax
 
 let make_audio_file = Voice_bridge_transport.make_audio_file
-let speak_via_http_tts_to_file = Voice_bridge_transport.speak_via_http_tts_to_file
+let speak_via_http_tts_to_file endpoint ~agent_id ~message ~voice ~model ~output_file =
+  let* api_key = Voice_endpoint_key.resolve endpoint in
+  Voice_bridge_transport.speak_via_http_tts_to_file
+    endpoint
+    ~api_key
+    ~agent_id
+    ~message
+    ~voice
+    ~model
+    ~output_file
+;;
 let cleanup_old_audio_files = Voice_player.cleanup_old_audio_files
 
 let clip_format_for_kind (kind : Voice_config.endpoint_kind) =

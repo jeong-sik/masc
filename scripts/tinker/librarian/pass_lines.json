@@ -1,6 +1,6 @@
 {
  "schema": "masc.tinker.librarian.pass_lines.v1",
- "fixed_on": "2026-11-09",
+ "fixed_on": "2026-11-12",
  "scope": "keeper-librarian admission output",
  "request": {
   "reasoning_effort": "low",
@@ -21,17 +21,50 @@
  },
  "e_synth": {
   "generator_split": "eval",
-  "seed": 20261110,
-  "audit_seed": 20261110,
-  "requests_sha256": "f9e1441c6a39e28e3ca6673e262ae11f5d1f187aa3dd48d2df4bc437f2bbc49f",
-  "items": 67,
-  "audit": {
-   "requests_in": 137,
-   "requests_out": 67,
-   "cases": 137,
-   "sample_cases": 70,
-   "sample_misfit_rate": 0.3142857142857143
-  }
+  "batches": [
+   {
+    "seed": 20261112,
+    "first_memory": 0,
+    "audits": [
+     {
+      "cases_seed": 20261112,
+      "rules_sha256": "1975c43eb09be9f5b1814faa27ce15684b0c714e48b5e8c9a2505b1f628ac387",
+      "requests_in": 134,
+      "requests_out": 57,
+      "cases": 134,
+      "sample_cases": 59,
+      "sample_misfit_rate": 0.2033898305084746
+     },
+     {
+      "cases_seed": 20261112,
+      "rules_sha256": "575a68497f00d3171d00a298d816e6ade8c0a5b7c4e2329364e725e90861d623",
+      "requests_in": 57,
+      "requests_out": 37,
+      "cases": 57,
+      "sample_cases": 29,
+      "sample_misfit_rate": 0.10344827586206896
+     }
+    ]
+   },
+   {
+    "seed": 20261113,
+    "first_memory": 10,
+    "audits": [
+     {
+      "cases_seed": 20261113,
+      "rules_sha256": "575a68497f00d3171d00a298d816e6ade8c0a5b7c4e2329364e725e90861d623",
+      "requests_in": 136,
+      "requests_out": 53,
+      "cases": 136,
+      "sample_cases": 57,
+      "sample_misfit_rate": 0.3684210526315789
+     }
+    ]
+   }
+  ],
+  "audit_seed": 20261113,
+  "requests_sha256": "8aa43fde4bd0edc2ca7c272da94dc205ab24f858bf0d8c297cd81ce8a9b1e473",
+  "items": 90
  },
  "instruction_sha256": "b5eaa8abf5138b1e0fd494757a1562097c9ea6841712f5ffa2cb78c38e882631",
  "gates": {
@@ -57,23 +90,23 @@
   "admission_template.py": "34f87be744f7cc23ca07de52701ebac381ba6032e0518ba971e58e11740604a2",
   "admission_validator.py": "05ce32b4a3468578bf20a65facda4b7fac26e4c905ee70ea7d606b31ef7ba546",
   "audit_decisions.py": "88b508aa5ef572bb151df87d674f7a36c8b8db7d27d15087872b650d5a1b7416",
-  "e_synth_audit.py": "28d5e563bc907b15000bd406299d2faa76a9a75315f84954f7bd338f01179139",
-  "eval_admission.py": "fab591c9c31b2bbc5a31129e21fd7f570c55c85a1250f761494ee15d1890d9a0",
-  "exact_store.py": "1bd812c01c679890c70b264e04319f1028d4c25c89c53f7c94dc0cbd0f8a7df8",
+  "e_synth_audit.py": "62de88c4046f9a54d25a4cf7a3f852a1a01e191f481ed12604d4bcc5cdf3ea4b",
+  "eval_admission.py": "394063c6cb550e5dd5083b04b3d0113a8d2bd85c5e9b8152287487e009c2f9f7",
+  "exact_store.py": "2b6144676b971fd01b349491a0b396541b823014c28ff83551dabd278ebcb2ec",
   "glm_chat.py": "b02ff93b68ccf8e4ff7b9e848724b20e14c0480d9b59131946028eb6e2b4ae8c",
   "lane_addon_checks.py": "d4f50ecd293243c9af6edb9612cb54ac6cd2771e48704ed86d1d3e22b53f1ccd",
   "librarian_selection.py": "2847371ccabb72031bb4f4dad8cef8b6f80ea17c3d3e94f9f72f1483cb9ed6de",
-  "memory_scores.py": "57a1d86add95c061bf9577ef7bf66b7745196abb699b21877671ee389f801852",
+  "memory_scores.py": "a9b1bdd25c30873172a0526774a2c3696f2a2460c6ee66f11d96d1721e60e2df",
   "memory_variables.py": "ece02069c7334a99b92dbe2a48816fae048b2010f6c029f1b53385efd02b9f66",
   "merge_cases.py": "2da68e6254c349fef3c8bf6a64f6bcfdd8b391584a9efb4d9c25f88d7cc829e9",
   "merge_decisions.py": "081e3be63bf7b2af65efe2ef7ecff606931fc02ca3bbab63bebca64de470f0ac",
   "ocaml_text.py": "639f93bc85d667cdc6e95d597fa3a41413e1ed6da24309e940d6a3a41cbc057f",
   "prompt_facts.py": "3f20f4f61312b214e04e562b2be97e147f82b43952f6f64ff6c8ec33e97ed44b",
   "synth_render.py": "6a657c0ccb1b7dec02930a3e9fa8d0f90314ef1ab255cad8a86764a62aecc357",
-  "synth_rows.py": "3118665c6bc2061db411bf6ea5851138f263c0c7d97ae474eac061a258371a85",
-  "synth_spec.py": "3fdaf8d77a2d9bf4a8daffe43594184b84360dbb7e5dabb4a749d206c888e021",
-  "tinker_oai.py": "a848a2bd133e11e069100bab5acc9a60a6e02aaf80a180743ba8b094d050b9d1",
+  "synth_rows.py": "acfa59661badac7b3ca4678a572a4296b63857d2c20582c0538c9dba1c584f4f",
+  "synth_spec.py": "828c502723c76d6823950d05e88edafc6a1f28bbfd480c914b9db2669dcf3b9c",
+  "tinker_oai.py": "fff62a1a186e4a342f288c9be50d92deb5b3268a8c0ff627d06aaec6733acbfa",
   "yojson_wire.py": "e852563d1e82f1c98cbfc8239295a525e8a6335e3ea96db999eb124be13e7c8f",
-  "../../../config/prompts/librarian.md": "ec5cb66fa5a17d1c78844642123edc4e095aa0bc065d98c4e841162b3cd099c7"
+  "../../../config/prompts/librarian.md": "575a68497f00d3171d00a298d816e6ade8c0a5b7c4e2329364e725e90861d623"
  }
 }

@@ -72,6 +72,26 @@ type base_path_lock_rejection =
       ; path : string
       ; reason : string
       }
+  | Announcement_port_invalid of { port : int }
+      (** An account server announcement was asked for, or about, a number
+          outside 1..65535. *)
+  | Announcement_already_made of
+      { path : string
+      ; port : int
+      }
+      (** This process already announces [port] on the file; it announces
+          once. *)
+  | Announcement_lease_not_active of { path : string }
+      (** The handle is not the active lease of this process: it was
+          released, or it never was. *)
+  | Announcement_port_locked of
+      { path : string
+      ; port : int
+      ; holder : int option
+      }
+      (** Another process holds a lock over the byte of [port]. [holder] is
+          that process when its lock is the write lock of that one byte,
+          the shape of an announcement. *)
 
 (* Only the process-local table establishes ownership identity. The recorded
    number is written after locking and may describe a previous owner or a
@@ -208,9 +228,111 @@ type owner_capture_error =
   | Owner_lease_rejected of base_path_lock_rejection
   | Owner_identity_unavailable of Owner_process_identity.error
   | Current_process_owner
+
+val owner_capture_error_to_string : owner_capture_error -> string
+(** Why the owner of a lease was not captured, as a clause for the sentence
+    of a command: the rejection of the lease in its own words, or what the
+    kernel did not give of the process that holds it. *)
+
 val capture_existing_owner :
   run_dir:string -> base_path:string -> (Owner_process_identity.t, owner_capture_error) result
 (** Validate the selected workspace's private lease and capture its kernel lock
     owner. This never signals a process or trusts the PID file. Before using the
-    returned handle, the caller must authenticate as that workspace's admin and
-    obtain explicit restart selection. Does not close this process's own lease. *)
+    returned handle to signal, the caller must have an explicit restart
+    selection and the authority the server takes its stop from. For the server
+    of a single user that is authentication as the admin of that workspace.
+    For the account server of a multi-account installation it is the
+    authority of the host, the effective UID that could open this private
+    lease ({!Server_upgrade_preparation.stop_account_server}). Does not close
+    this process's own lease. *)
+
+val lease_file_present :
+  Host_config.base_path_lease_root -> base_path:string -> (bool, base_path_lock_rejection) result
+(** Whether the lease file of [base_path] is there for the effective user,
+    read without making anything. {!lease_run_dir} makes the run directory,
+    and {!capture_existing_owner} makes the private lease directory and an
+    empty lease file. A BasePath whose lease file was never made was never
+    held, so a command that must leave a BasePath as it found it asks this
+    first and reads the owner only on [true].
+
+    [false] when the BasePath, the run directory, the private lease directory
+    or the lease file is not there. [true] when the lease file is there, and
+    when an entry on the way is there and is no directory: the capture that
+    follows refuses such an entry in its own words. After a [true] the
+    capture finds nothing left to make. An [Error] when an entry could not be
+    read. The path is the one {!lease_run_dir} and the capture spell, and
+    nothing of an entry is judged here. *)
+
+(** {1 The account server announcement}
+
+    Which port the account server of a workspace serves, told to the host
+    through the lock table of the kernel. The probes of that server say
+    nothing of the process or of the workspace
+    ({!Server_accounts}), so no HTTP answer tells a command line which
+    workspace a port belongs to. The server locks one byte of
+    [<lease>.account-server], a file beside its lease that stays empty: the
+    byte whose position is the port. Another process asks the kernel with
+    [F_GETLK] who holds the byte of a port.
+
+    The record is the lock, so no number is left on disk to go stale. It
+    ends when its holder exits, gives the lease up
+    ({!release_base_path_lease}), or execs: the descriptor that holds it does
+    not cross an exec, and {!prepare_base_path_lease_exec_handoff} carries
+    the lease alone. The empty file stays.
+
+    A process of the same effective UID can lock bytes of the file without
+    the lease, as it can signal the server. So a lock says nothing by
+    itself: a reader compares its holder with a process it knows by other
+    means, the kernel owner of the lease ({!capture_existing_owner}) or a
+    child it started. A write lock on a byte has one holder, so while a
+    server announces a port no other process holds that byte, and a lock
+    another process took there first stops the boot of the server
+    ({!announce_account_server}). *)
+
+val announce_account_server : base_path_lease -> port:int -> (unit, base_path_lock_rejection) result
+(** Announce [port] until the lease is released, or the process exits or
+    execs. Call it once, with the port bound. Each refusal says why, and
+    after one nothing more is announced than before the call: a [port]
+    outside 1..65535 ([Announcement_port_invalid]), a handle that is not the
+    active lease of this process ([Announcement_lease_not_active]), a second
+    call ([Announcement_already_made], and the first announcement stays), a
+    byte that another process holds a lock on ([Announcement_port_locked]),
+    a lease path that no longer names the lease this process holds
+    ([Lease_identity_changed]), and an announcement file that is not a
+    regular file of this user with one name (the [Lease_file_*] refusals).
+    The file is made when it is missing, and is never removed. The directory
+    is not validated again as {!acquire_base_path_lock} validated it (the
+    boundary of #24344). *)
+
+val account_server_port_holder :
+  run_dir:string -> base_path:string -> port:int -> (int option, base_path_lock_rejection) result
+(** The process that holds the announcement lock of [port] for [base_path],
+    as the kernel names it now. This is the read to decide on: no lock on
+    another byte of the file hides or changes its answer. [Ok None] when no
+    process holds a write lock on exactly that byte: no announcement file, a
+    server on another port, or no account server. The pid proves nothing
+    until the caller compares it (see above).
+
+    The file is opened with the checks of the lease file, and a read makes
+    no file. The announcing process is found by the identity of the file,
+    under any spelling of [run_dir], and is answered through the descriptor
+    that holds its lock, since closing a second one would drop the
+    announcement. A [port] outside 1..65535 is an
+    [Announcement_port_invalid], and a kernel that cannot be asked a
+    [Lease_io_failed]. *)
+
+type account_server_announcement =
+  { pid : int  (** The holder of the lock, as the kernel names it. *)
+  ; port : int
+  }
+
+val account_server_announcement :
+  run_dir:string -> base_path:string -> (account_server_announcement option, base_path_lock_rejection) result
+(** An announcement on the file of [base_path], for a caller that does not
+    know the port: the kernel is asked about the whole file. It names one
+    lock, and does not say which when several processes hold locks there, so
+    an announcement can stay unseen behind the lock of another process. Use
+    it to tell an operator which port to ask about, and decide with
+    {!account_server_port_holder}. [Ok None] when the kernel names no lock,
+    or one that is not the write lock of one byte at a port. The file is
+    read as {!account_server_port_holder} reads it. *)

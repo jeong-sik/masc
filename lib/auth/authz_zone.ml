@@ -55,11 +55,15 @@ module Replay = struct
           List.exists (R.Hash.equal held.Authz_state.aborted) closed)
         replay.unreached
     in
-    match Authz_state.step (Authz_state.hold_revocations replay.state (helds named)) record with
-    | Ok state ->
+    match Authz_state.apply (Authz_state.hold_revocations replay.state (helds named)) record with
+    | Ok { Authz_state.state; high_water } ->
       Ok
         (reach
-           { state; unreached; probe = H.Probe.add replay.probe record; head = R.head_after record })
+           { state
+           ; unreached
+           ; probe = H.Probe.add replay.probe record ~high_water
+           ; head = R.head_after record
+           })
     | Error refusal -> Error refusal
   ;;
 
@@ -105,6 +109,11 @@ type open_error =
       { path : string
       ; detail : string
       }
+  | Store_not_there of { path : string }
+  | Store_not_checked of
+      { path : string
+      ; detail : string
+      }
 
 let open_error_to_string = function
   | Store_not_opened error -> S.open_error_to_string S.violation_to_string error
@@ -113,6 +122,12 @@ let open_error_to_string = function
     Printf.sprintf "the authorization log %s is not there or holds no Fresh_bootstrap" path
   | Log_not_checked { path; detail } ->
     Printf.sprintf "whether the authorization log %s is there cannot be told: %s" path detail
+  | Store_not_there { path } ->
+    Printf.sprintf
+      "the authorization log is there and the external store %s is not, so neither is opened"
+      path
+  | Store_not_checked { path; detail } ->
+    Printf.sprintf "whether the external store %s is there cannot be told: %s" path detail
 ;;
 
 let open_files ~now_ms ~log_path ~store_path =
@@ -135,42 +150,69 @@ let open_files ~now_ms ~log_path ~store_path =
             }))
 ;;
 
-(* Opening a file makes its directory and its lock file, so a log that is not
-   there is refused before either file is opened. *)
+(* Opening a file makes its directory and its lock file, so a log or a store
+   that is not there is refused before either file is opened. *)
 let open_at_start ~now_ms ~log_path ~store_path =
   match P.of_path log_path with
   | P.Not_there -> Error (Not_bootstrapped { path = log_path })
   | P.Cannot_check detail -> Error (Log_not_checked { path = log_path; detail })
-  | P.There -> open_files ~now_ms ~log_path ~store_path
+  | P.There ->
+    (match P.of_path store_path with
+     | P.Not_there -> Error (Store_not_there { path = store_path })
+     | P.Cannot_check detail -> Error (Store_not_checked { path = store_path; detail })
+     | P.There -> open_files ~now_ms ~log_path ~store_path)
 ;;
 
 let snapshot t = Atomic.get t.current
 
-type revocation =
-  | Known of Authz_records.Revocation_state.t
-  | Unknown_log_stopped of L.stop
-  | Unknown_store_stopped of S.stop
-  | Unknown_files_disagree of
+type uncertain =
+  | Log_is_stopped of L.stop
+  | Store_is_stopped of S.stop
+  | Files_disagree of
       { first : H.reason
       ; rest : H.reason list
       }
-  | Unknown_store_holds_no_answer
+  | Store_answers_nothing
+
+(* Which of the four it is, and nothing a file said. *)
+let uncertain_to_string = function
+  | Log_is_stopped (_ : L.stop) -> "the authorization log is stopped"
+  | Store_is_stopped (_ : S.stop) -> "the external store is stopped"
+  | Files_disagree { first = _; rest = _ } ->
+    "the external store and the authorization log do not agree"
+  | Store_answers_nothing ->
+    "the external store holds no answer, and the authorization log holds a Fresh_bootstrap"
+;;
+
+let uncertain_detail = function
+  | Log_is_stopped { L.path; reason } ->
+    Printf.sprintf "the authorization log %s is stopped: %s" path reason
+  | Store_is_stopped { S.path; reason } ->
+    Printf.sprintf "the external store %s is stopped: %s" path reason
+  | Files_disagree { first; rest } ->
+    "the external store and the log do not agree: "
+    ^ String.concat "; " (List.map H.reason_to_string (first :: rest))
+  | Store_answers_nothing as uncertain -> uncertain_to_string uncertain
+;;
+
+type trusted = snapshot
 
 (* A stopped file is not in the published state (plan B3b), and a zone that
-   cannot write cannot close or add a block either, so the gate asks the files
-   first. A zone whose files disagree, or whose store holds no answer, refuses
-   every commit, so it cannot close or add a block either (design 8.2-4 and
-   8.2-5). *)
-let revocation t subject =
+   cannot write cannot close or add a block either, so a decision asks the
+   files first. A zone whose files disagree, or whose store holds no answer,
+   refuses every commit, so it cannot close or add a block either (design
+   8.2-4 and 8.2-5). The probe is read first and the state after it, each as
+   the zone set it whole, so the state is the one published when the probe was
+   read, or a later one. *)
+let read t =
   match L.stopped t.log, S.stopped t.store with
-  | Some stop, (_ : S.stop option) -> Unknown_log_stopped stop
-  | None, Some stop -> Unknown_store_stopped stop
+  | Some stop, (_ : S.stop option) -> Error (Log_is_stopped stop)
+  | None, Some stop -> Error (Store_is_stopped stop)
   | None, None ->
     (match H.settle_on_entry (Atomic.get t.probe) with
-     | Error (first, rest) -> Unknown_files_disagree { first; rest }
-     | Ok H.Nothing_answered -> Unknown_store_holds_no_answer
-     | Ok (H.Answered (_ : H.settlement)) ->
-       Known (Authz_state.revocation (Atomic.get t.current).state subject))
+     | Error (first, rest) -> Error (Files_disagree { first; rest })
+     | Ok H.Nothing_answered -> Error Store_answers_nothing
+     | Ok (H.Answered (_ : H.settlement)) -> Ok (Atomic.get t.current))
 ;;
 
 type draft =
@@ -221,15 +263,11 @@ let entry_label = function
   | S.Aborted_intent _ -> "an aborted intent"
 ;;
 
-let error_to_string = function
-  | Store_stopped { S.path; reason } -> Printf.sprintf "the external store %s is stopped: %s" path reason
-  | Log_stopped { L.path; reason } ->
-    Printf.sprintf "the authorization log %s is stopped: %s" path reason
-  | Uncertain { first; rest } ->
-    "the external store and the log do not agree: "
-    ^ String.concat "; " (List.map H.reason_to_string (first :: rest))
-  | Store_holds_no_answer ->
-    "the external store holds no answer, and the authorization log holds a Fresh_bootstrap"
+let error_detail = function
+  | Store_stopped stop -> uncertain_detail (Store_is_stopped stop)
+  | Log_stopped stop -> uncertain_detail (Log_is_stopped stop)
+  | Uncertain { first; rest } -> uncertain_detail (Files_disagree { first; rest })
+  | Store_holds_no_answer -> uncertain_detail Store_answers_nothing
   | Log_holds_records { next_seq } ->
     Printf.sprintf
       "the authorization log is to be installed and holds records: the next one is %d"
@@ -258,6 +296,37 @@ let error_to_string = function
       "the record %s is in the log and its answer was not written: %s"
       (R.Hash.to_hex record_hash)
       (S.append_error_to_string error)
+;;
+
+(* A record that was turned down says why to whoever sent it. A failure is
+   the zone's own: whoever sent the record cannot act on its reason, and the
+   reason can name paths of the server. *)
+type cause =
+  | Refusal
+  | Failure
+
+let cause = function
+  | Log_holds_records { next_seq = _ }
+  | Record_not_built (_ : R.make_error)
+  | Refused (_ : Authz_state.refusal) -> Refusal
+  | Store_stopped (_ : S.stop)
+  | Log_stopped (_ : L.stop)
+  | Uncertain { first = _; rest = _ }
+  | Store_holds_no_answer
+  | Store_entry_refused { entry = _; violation = _ }
+  | Abort_not_confirmed (_ : L.end_error)
+  | Settlement_not_written (_ : S.append_error)
+  | Intent_not_written (_ : S.append_error)
+  | Record_not_appended (_ : L.append_error)
+  | Answer_not_written { record_hash = _; error = _ } -> Failure
+;;
+
+let not_recorded = "The server could not finish recording this. Try again later."
+
+let error_to_string error =
+  match cause error with
+  | Refusal -> error_detail error
+  | Failure -> not_recorded
 ;;
 
 (* The probe takes the entry before the store does, so an entry that the probe
@@ -379,7 +448,7 @@ let in_zone t draft store_writer log_writer head settlement =
         (Option.bind intent Authz_state.held_of_intent);
       Error (Record_not_appended error)
   in
-  Atomic.set t.probe (H.Probe.add (Atomic.get t.probe) record);
+  Atomic.set t.probe (H.Probe.add (Atomic.get t.probe) record ~high_water);
   let snapshot = { state; head } in
   Atomic.set t.current snapshot;
   let* () =
@@ -405,10 +474,25 @@ let in_both_zones ~store ~log f =
 ;;
 
 let commit t draft =
-  in_both_zones ~store:t.store ~log:t.log (fun store_writer (_ : S.State.t) log_writer head ->
-    let* settled = entered_to_add (H.settle_on_entry (Atomic.get t.probe)) in
-    let* snapshot, record_hash = in_zone t draft store_writer log_writer head settled in
-    Ok { snapshot; record_hash; settled })
+  let result =
+    in_both_zones ~store:t.store ~log:t.log (fun store_writer (_ : S.State.t) log_writer head ->
+      let* settled = entered_to_add (H.settle_on_entry (Atomic.get t.probe)) in
+      let* snapshot, record_hash = in_zone t draft store_writer log_writer head settled in
+      Ok { snapshot; record_hash; settled })
+  in
+  (* A caller that answers a person gives [error_to_string], which leaves the
+     reason of a failure out. The operator reads it here, written once, after
+     both zones are left. *)
+  (match result with
+   | Ok (_ : committed) -> ()
+   | Error error ->
+     (match cause error with
+      | Refusal -> ()
+      | Failure ->
+        Log.Auth.warn
+          "a record was not committed to the authorization zone: %s"
+          (error_detail error)));
+  result
 ;;
 
 (* The handles are the caller's, and the log they show holds no record, so the

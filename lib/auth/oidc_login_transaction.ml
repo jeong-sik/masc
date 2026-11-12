@@ -68,15 +68,32 @@ module Local_path = struct
   let root = "/"
 end
 
-(* 32 bytes for the ID, the state, the nonce, and the PKCE verifier. The
-   verifier is then 64 characters, inside the 43 to 128 of RFC 7636
-   section 4.1. *)
+(* 32 bytes for the state, the nonce, and the PKCE verifier. The verifier is
+   then 64 characters, inside the 43 to 128 of RFC 7636 section 4.1. *)
 let random_bytes = 32
 
-module Id = struct
+(* RFC 6265 section 6.1 has a browser keep at least 4096 bytes of a cookie:
+   its name, its value and its attributes. The name and the attributes of
+   the transaction cookie are under 96 bytes
+   ([Authz_browser_request.set_transaction_cookie], whose test holds the
+   sum). *)
+let max_sealed_length = 4000
+
+module Sealed = struct
   type t = string
 
-  let of_string text = if is_lower_hex_of ~length:(2 * random_bytes) text then Some text else None
+  let is_base64url = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' -> true
+    | _ -> false
+  ;;
+
+  let of_string text =
+    let length = String.length text in
+    if length >= 1 && length <= max_sealed_length && String.for_all is_base64url text
+    then Some text
+    else None
+  ;;
+
   let to_string text = text
 end
 
@@ -101,7 +118,7 @@ let same_flow : type a b. a flow -> b flow -> (a, b) same option =
 ;;
 
 type 'held started =
-  { id : Id.t
+  { sealed : Sealed.t
   ; state : string
   ; code_challenge : string
   ; held : 'held
@@ -110,37 +127,177 @@ type 'held started =
 type 'held taken =
   { held : 'held
   ; code_verifier : string
-  ; invite : Invite_token.t option
+  ; invite : Authz_invite_event.Token_digest.t option
   ; return_to : Local_path.t
   ; replaces : Authz_types.Session_id.t option
   }
 
-type entry =
-  | Entry :
+(* ChaCha20-Poly1305 (RFC 8439): a 32-byte key and a 12-byte nonce that must
+   not come twice under one key. *)
+module Aead = Mirage_crypto.Chacha20
+
+let key_bytes = 32
+let nonce_bytes = 12
+let count_bytes = 8
+
+(* The key is drawn once for the process and the count goes up by one for
+   every seal, so no nonce comes twice under the key: the count is the last
+   eight bytes of the nonce. *)
+type t =
+  { key : Aead.key
+  ; sealed_so_far : int Atomic.t
+  }
+
+let create () =
+  { key = Aead.of_secret (Crypto_rng.generate key_bytes); sealed_so_far = Atomic.make 0 }
+;;
+
+(* What the tag covers beside the bytes: a text of another purpose that was
+   sealed with this key does not open as a login. *)
+let purpose = "masc-login-transaction-v1"
+
+let nonce_of count =
+  let nonce = Bytes.make nonce_bytes '\000' in
+  Bytes.set_int64_be nonce (nonce_bytes - count_bytes) (Int64.of_int count);
+  Bytes.unsafe_to_string nonce
+;;
+
+let flow_field = "flow"
+let started_at_field = "started_at_ms"
+let state_field = "state"
+let code_verifier_field = "code_verifier"
+let nonce_field = "nonce"
+let invite_field = "invite"
+let return_to_field = "return_to"
+let replaces_field = "replaces"
+let google_label = "google"
+let github_label = "github"
+
+let optional_string = function
+  | None -> `Null
+  | Some text -> `String text
+;;
+
+let json_of
+  : type held. held flow -> started_at_ms:int -> state:string -> held taken -> Yojson.Safe.t
+  =
+  fun flow ~started_at_ms ~state taken ->
+  let label, nonce =
+    match flow with
+    | Google -> google_label, Some taken.held.nonce
+    | Github -> github_label, None
+  in
+  `Assoc
+    [ flow_field, `String label
+    ; started_at_field, `Int started_at_ms
+    ; state_field, `String state
+    ; code_verifier_field, `String taken.code_verifier
+    ; nonce_field, optional_string nonce
+    ; ( invite_field
+      , optional_string (Option.map Authz_invite_event.Token_digest.to_hex taken.invite) )
+    ; return_to_field, `String (Local_path.to_string taken.return_to)
+    ; ( replaces_field
+      , optional_string (Option.map Authz_types.Session_id.to_string taken.replaces) )
+    ]
+;;
+
+type opened =
+  | Opened :
       { flow : 'held flow
       ; started_at_ms : int
       ; state : string
       ; taken : 'held taken
       }
-      -> entry
+      -> opened
 
-module Id_map = Map.Make (String)
-
-type t =
-  { mutex : Mutex.t
-  ; capacity : int
-  ; mutable entries : entry Id_map.t
-  }
-
-let create ~capacity =
-  if capacity < 1 then invalid_arg "Oidc_login_transaction.create: capacity below 1";
-  { mutex = Mutex.create (); capacity; entries = Id_map.empty }
+(* [Some None] for no value, [Some (Some _)] for one that reads, and [None]
+   for one that does not. *)
+let optional read : Yojson.Safe.t -> _ option option = function
+  | `Null -> Some None
+  | `String text -> Option.map Option.some (read text)
+  | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
 ;;
 
-let is_live ~now_ms (Entry entry) = now_ms - entry.started_at_ms < lifetime_ms
-let live_entries t ~now_ms = Id_map.filter (fun _ entry -> is_live ~now_ms entry) t.entries
+let ( let* ) = Option.bind
 
-type start_error = Full
+(* Only the bytes that [json_of] wrote open under the key, so a shape that
+   is not read here is a text of another build. *)
+let opened_of_json : Yojson.Safe.t -> opened option = function
+  | `Assoc
+      [ (flow_name, `String label)
+      ; (started_at_name, `Int started_at_ms)
+      ; (state_name, `String state)
+      ; (code_verifier_name, `String code_verifier)
+      ; (nonce_name, nonce)
+      ; (invite_name, invite)
+      ; (return_to_name, `String return_to)
+      ; (replaces_name, replaces)
+      ]
+    when String.equal flow_name flow_field
+         && String.equal started_at_name started_at_field
+         && String.equal state_name state_field
+         && String.equal code_verifier_name code_verifier_field
+         && String.equal nonce_name nonce_field
+         && String.equal invite_name invite_field
+         && String.equal return_to_name return_to_field
+         && String.equal replaces_name replaces_field ->
+    let* invite = optional Authz_invite_event.Token_digest.of_hex invite in
+    let* return_to = Local_path.of_string return_to in
+    let* replaces =
+      optional (fun text -> Result.to_option (Authz_types.Session_id.of_string text)) replaces
+    in
+    let* nonce = optional Option.some nonce in
+    (match nonce with
+     | Some nonce when String.equal label google_label ->
+       Some
+         (Opened
+            { flow = Google
+            ; started_at_ms
+            ; state
+            ; taken = { held = { nonce }; code_verifier; invite; return_to; replaces }
+            })
+     | None when String.equal label github_label ->
+       Some
+         (Opened
+            { flow = Github
+            ; started_at_ms
+            ; state
+            ; taken = { held = (); code_verifier; invite; return_to; replaces }
+            })
+     | Some (_ : string) | None -> None)
+  | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+;;
+
+let base64url = Base64.uri_safe_alphabet
+
+let seal t json =
+  let nonce = nonce_of (Atomic.fetch_and_add t.sealed_so_far 1) in
+  let sealed =
+    Aead.authenticate_encrypt ~key:t.key ~nonce ~adata:purpose (Yojson.Safe.to_string json)
+  in
+  Base64.encode_string ~pad:false ~alphabet:base64url (nonce ^ sealed)
+;;
+
+(* The decoder passes a text with a trailing character it does not read, and
+   one whose last character differs in the bits it does not read. Those are
+   other texts of the same bytes: only the text that [seal] wrote opens. *)
+let unsealed_json t sealed =
+  match Base64.decode ~pad:false ~alphabet:base64url sealed with
+  | Error (`Msg (_ : string)) -> None
+  | Ok bytes ->
+    if String.length bytes < nonce_bytes + Aead.tag_size
+       || not (String.equal (Base64.encode_string ~pad:false ~alphabet:base64url bytes) sealed)
+    then None
+    else (
+      let nonce = String.sub bytes 0 nonce_bytes in
+      let sealed = String.sub bytes nonce_bytes (String.length bytes - nonce_bytes) in
+      let* text = Aead.authenticate_decrypt ~key:t.key ~nonce ~adata:purpose sealed in
+      match Yojson.Safe.from_string text with
+      | json -> Some json
+      | exception Yojson.Json_error (_ : string) -> None)
+;;
+
+type start_error = Too_long
 
 let draw_held : type held. held flow -> held = function
   | Google -> { nonce = Random_id.hex ~bytes:random_bytes }
@@ -158,53 +315,45 @@ let start
     -> (held started, start_error) result
   =
   fun t ~now_ms flow ~invite ~return_to ~replaces ->
-  Mutex.protect t.mutex (fun () ->
-    let live = live_entries t ~now_ms in
-    t.entries <- live;
-    if Id_map.cardinal live >= t.capacity
-    then Error Full
-    else (
-      let id = Random_id.hex ~bytes:random_bytes in
-      let state = Random_id.hex ~bytes:random_bytes in
-      let code_verifier = Random_id.hex ~bytes:random_bytes in
-      let held = draw_held flow in
-      let taken = { held; code_verifier; invite; return_to; replaces } in
-      t.entries <- Id_map.add id (Entry { flow; started_at_ms = now_ms; state; taken }) live;
-      Ok { id; state; code_challenge = Auth_oauth.pkce_s256 code_verifier; held }))
+  let state = Random_id.hex ~bytes:random_bytes in
+  let code_verifier = Random_id.hex ~bytes:random_bytes in
+  let held = draw_held flow in
+  let taken =
+    { held; code_verifier; invite = Option.map Invite_token.digest invite; return_to; replaces }
+  in
+  match Sealed.of_string (seal t (json_of flow ~started_at_ms:now_ms ~state taken)) with
+  | None -> Error Too_long
+  | Some sealed ->
+    Ok { sealed; state; code_challenge = Auth_oauth.pkce_s256 code_verifier; held }
 ;;
 
-type take_error =
+type open_error =
   | Unknown
   | Other_flow
   | Expired
   | State_differs
 
-let take_error_to_string = function
-  | Unknown -> "no login is in flight with this transaction"
+let open_error_to_string = function
+  | Unknown -> "this server did not start a login with this transaction"
   | Other_flow -> "this transaction belongs to a login with another provider"
   | Expired -> "the login took too long and has to start again"
   | State_differs -> "the state does not belong to this login"
 ;;
 
-let take
+let open_
   : type held.
-    t -> now_ms:int -> held flow -> Id.t -> state:string -> (held taken, take_error) result
+    t -> now_ms:int -> held flow -> Sealed.t -> state:string -> (held taken, open_error) result
   =
-  fun t ~now_ms flow id ~state ->
-  Mutex.protect t.mutex (fun () ->
-    match Id_map.find_opt id t.entries with
-    | None -> Error Unknown
-    | Some (Entry entry as found) ->
-      t.entries <- Id_map.remove id t.entries;
-      (match same_flow flow entry.flow with
-       | None -> Error Other_flow
-       | Some Same ->
-         if not (is_live ~now_ms found)
-         then Error Expired
-         else if not (Eqaf.equal entry.state state)
-         then Error State_differs
-         else Ok entry.taken
-        : (held taken, take_error) result))
+  fun t ~now_ms flow sealed ~state ->
+  match Option.bind (unsealed_json t sealed) opened_of_json with
+  | None -> Error Unknown
+  | Some (Opened opened) ->
+    (match same_flow flow opened.flow with
+     | None -> Error Other_flow
+     | Some Same ->
+       if now_ms - opened.started_at_ms >= lifetime_ms
+       then Error Expired
+       else if not (Eqaf.equal opened.state state)
+       then Error State_differs
+       else Ok opened.taken)
 ;;
-
-let live t ~now_ms = Mutex.protect t.mutex (fun () -> Id_map.cardinal (live_entries t ~now_ms))

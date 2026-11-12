@@ -49,14 +49,22 @@ let page ~nonce ~title ~body ~script =
   }
 ;;
 
-let start_form ~invite =
+(* The form is the same whether the server has a GitHub login client or
+   not, so the scripts of the pages find its elements either way. Without a
+   client the start is a 404, and the button cannot be pressed. *)
+let no_github_login = "This server has no GitHub login."
+
+let start_form ~invite ~github =
   String.concat
     "\n"
     [ "<form method=\"post\" action=\"/auth/github/start\">"
     ; (if invite then "<input type=\"hidden\" id=\"invite\" name=\"invite\">" else "")
     ; "<input type=\"hidden\" name=\"return_to\" value=\"/\">"
-    ; "<button id=\"go\">Sign in with GitHub</button>"
+    ; (if github
+       then "<button id=\"go\">Sign in with GitHub</button>"
+       else "<button id=\"go\" disabled>Sign in with GitHub</button>")
     ; "</form>"
+    ; (if github then "" else "<p>" ^ no_github_login ^ "</p>")
     ]
 ;;
 
@@ -72,13 +80,13 @@ if (token === "") {
 }|}
 ;;
 
-let invite_page ~nonce =
+let invite_page ~nonce ~github =
   page
     ~nonce
     ~title:"Invitation"
     ~body:
       ("<h1>Invitation</h1>\n<p id=\"note\">Sign in with GitHub to join this workspace.</p>\n"
-       ^ start_form ~invite:true)
+       ^ start_form ~invite:true ~github)
     ~script:invite_script
 ;;
 
@@ -297,13 +305,13 @@ show().then(listAccounts).then(listKeepers).then(listPats);|}
     Authz_browser_request.csrf_header
 ;;
 
-let home_page ~nonce =
+let home_page ~nonce ~github =
   page
     ~nonce
-    ~title:"Multi-account preview"
+    ~title:"MASC accounts"
     ~body:
-      ("<h1>Multi-account preview</h1>\n<pre id=\"out\">reading</pre>\n"
-       ^ start_form ~invite:false
+      ("<h1>MASC accounts</h1>\n<pre id=\"out\">reading</pre>\n"
+       ^ start_form ~invite:false ~github
        ^ "\n<button id=\"signout\" hidden>Sign out</button>\n"
        ^ String.concat
            "\n"
@@ -366,8 +374,8 @@ let refused reason =
     [ "error", `String (Auth_gate.reason_to_string reason) ]
 ;;
 
-let whoami state ~now_ms request =
-  match Auth_gate.decide state ~now_ms Route_access.Read_auth request with
+let whoami trusted ~now_ms request =
+  match Auth_gate.decide trusted ~now_ms Route_access.Read_auth request with
   | Ok (Auth_gate.Authenticated { Auth_gate.principal; binding; role; pat_binding = _ }) ->
     R.json
       R.Ok_200
@@ -388,8 +396,8 @@ type person =
   }
 
 (* The human a [Manage_own_*] route lets through. *)
-let human state ~now_ms access ~service_refused request =
-  match Auth_gate.decide state ~now_ms access request with
+let human trusted ~now_ms access ~service_refused request =
+  match Auth_gate.decide trusted ~now_ms access request with
   | Error reason -> Error (refused reason)
   | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Human user_id; _ }) -> Ok user_id
   | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Service service_id; _ }) ->
@@ -403,10 +411,11 @@ let human state ~now_ms access ~service_refused request =
 
 (* The human a [Manage_own_*] route lets through, with the namespace their
    admission fixed. *)
-let member state ~now_ms access ~service_refused request =
-  match human state ~now_ms access ~service_refused request with
+let member (trusted : Authz_zone.trusted) ~now_ms access ~service_refused request =
+  match human trusted ~now_ms access ~service_refused request with
   | Error _ as refused -> refused
   | Ok user_id ->
+    let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
     (match Authz_principal_state.find_membership state.Authz_state.principals user_id with
      | Some { Authz_principal_state.account_home_namespace = namespace; workspace_id = _ } ->
        Ok { user_id; namespace }
@@ -416,27 +425,27 @@ let member state ~now_ms access ~service_refused request =
        Error (R.json R.Internal_error_500 [ "error", `String "the principal has no membership" ]))
 ;;
 
-let person state ~now_ms request =
+let person trusted ~now_ms request =
   member
-    state
+    trusted
     ~now_ms
     Route_access.Manage_own_provider
     ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_provider service_id)
     request
 ;;
 
-let keeper_owner state ~now_ms request =
+let keeper_owner trusted ~now_ms request =
   human
-    state
+    trusted
     ~now_ms
     Route_access.Manage_own_keeper
     ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_keeper service_id)
     request
 ;;
 
-let keeper_owner_person state ~now_ms request =
+let keeper_owner_person trusted ~now_ms request =
   member
-    state
+    trusted
     ~now_ms
     Route_access.Manage_own_keeper
     ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_keeper service_id)

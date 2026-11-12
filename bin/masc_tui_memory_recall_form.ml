@@ -412,13 +412,15 @@ let wrapped ~width ~lead text =
 ;;
 
 (* Short, because a reason shares a row with a Keeper's name and its other
-   marks, and the pane cuts a row at its edge. Exhaustive on purpose: a seventh
+   marks, and the pane cuts a row at its edge. Exhaustive on purpose: a new
    reason stops the build here. *)
 let reason_label = function
   | Standing.Environment_switch_off -> "환경 스위치 꺼짐"
   | Standing.Recall_not_switched_on -> "스위치 꺼짐 · 범위 밖"
   | Standing.Keeper_excluded -> "제외 목록"
   | Standing.Lane_disabled -> "Jev 길 꺼짐"
+  | Standing.Access_unpublished -> "Jev 계정 판정 전"
+  | Standing.Host_account_not_shared -> "다계정 · Jev 키 안 씀"
   | Standing.No_armed_destination -> "Jev 키 없음"
   | Standing.Refused_by_another_gate -> "다른 게이트가 닫음"
 ;;
@@ -437,7 +439,8 @@ let environment_switch_is_off (reading : Reading.memory_recall_reading) =
        | Standing.Judged
        | Standing.Not_judged
            ( Standing.Recall_not_switched_on | Standing.Keeper_excluded
-           | Standing.Lane_disabled | Standing.No_armed_destination
+           | Standing.Lane_disabled | Standing.Access_unpublished
+           | Standing.Host_account_not_shared | Standing.No_armed_destination
            | Standing.Refused_by_another_gate ) -> false)
     reading.Reading.mrr_keepers
 ;;

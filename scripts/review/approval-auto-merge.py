@@ -49,7 +49,10 @@ POLL_SECONDS = 10
 # members themselves, because the receipt never changes afterwards.
 IN_FLIGHT = frozenset({'pending'})
 ACCEPTED = frozenset({'merged', 'enqueued'})
-SUCCESS = frozenset({'merged', 'eligible_dry_run', 'resume_dispatched'})
+SUCCESS = frozenset({'merged', 'eligible_dry_run', 'resume_dispatched', 'following_elsewhere'})
+# A hand-off that cannot dispatch is tried once more after this pause. The chain
+# is the only reader of its receipt, so one lost dispatch would leave it unread.
+HAND_OFF_RETRY_SECONDS = 5
 UNSETTLED = frozenset({'still_pending', 'observation_unavailable'})
 UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SHA = re.compile(r'[0-9a-f]{40}')
@@ -127,7 +130,13 @@ def reservation_reads(repo, number):
     stack = current.get('stack')
     if stack is not None:
         live = read(f'repos/{repo}/stacks/{stack["number"]}')
-        return None, [pull(repo, member['number']) for member in live['pull_requests']]
+        members = {member['number'] for member in live['pull_requests']}
+        # One walk of the open list carries each member's state and
+        # reservation, so the cost does not grow with the number of layers.
+        # `disable_reservation` acts only on an open pull request, so a
+        # merged or closed layer that the list omits needs no read at all.
+        opened = pages(f'repos/{repo}/pulls?state=open&per_page=100')
+        return None, [row for row in opened if row['number'] in members]
     if (current['state'] != 'open' or current['draft'] is not False or
             current['base']['ref'] != 'main' or current['head']['ref'].startswith('release/')):
         return None, [current]
@@ -231,6 +240,37 @@ def member_states(repo, scope):
     return states
 
 
+def open_pulls(repo):
+    return pages(f'repos/{repo}/pulls?state=open&per_page=100')
+
+
+def watched_member_states(repo, scope, settled):
+    """Poll a scope with one walk of the open list instead of one read per member.
+
+    A member still on the open list is not merged. Only a member that left the
+    list is read, once; a closed or merged answer is final and is kept in
+    `settled` so no later poll reads it again. The cost of a poll no longer
+    grows with the number of layers.
+    """
+    opened = {row['number'] for row in open_pulls(repo)}
+    states = {}
+    for member in scope['scope']:
+        number = member['number']
+        if number in settled:
+            states[number] = settled[number]
+        elif number in opened:
+            states[number] = {'merged': False, 'state': 'open', 'merge_commit_sha': None}
+        else:
+            row = pull(repo, number)
+            states[number] = {'merged': row['merged'] is True, 'state': row.get('state'),
+                              'merge_commit_sha': row.get('merge_commit_sha')}
+            final = row.get('state') == 'closed' and (
+                row['merged'] is not True or bool(row.get('merge_commit_sha')))
+            if final:
+                settled[number] = states[number]
+    return states
+
+
 def all_landed(states):
     return bool(states) and all(row['merged'] and row['merge_commit_sha']
                                 for row in states.values())
@@ -256,6 +296,7 @@ def follow(repo, result_endpoint, receipt, scope):
     try:
         observation = states = None
         error = None
+        settled = {}  # members whose closed or merged answer is already final
         if retry_at is not None:
             try:
                 CLIENT.wait_for_quota(GET.QuotaLimited(
@@ -279,7 +320,7 @@ def follow(repo, result_endpoint, receipt, scope):
                     return dict(receipt, status=status, observation=observation,
                                 member_states=states, reason=observation.get('details'))
                 try:
-                    states = member_states(repo, scope)
+                    states = watched_member_states(repo, scope, settled)
                 except GET.QuotaWaitCutShort as failure:
                     return dict(receipt, status='observation_unavailable', error=str(failure),
                                 retry_at=failure.retry_at, observation=observation, member_states=states)
@@ -314,10 +355,15 @@ def hand_off(repo, outcome):
     command = ['gh', 'workflow', 'run', 'approval-auto-merge.yml', '--repo', repo,
                '--ref', 'main', '-f', f'pr={receipt["pr"]}',
                '-f', f'receipt={json.dumps(receipt, separators=(",", ":"))}']
-    try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
-    except (subprocess.CalledProcessError, OSError) as error:
-        return dict(outcome, resume=f'dispatch_failed: {error}')
+    for attempt in range(2):
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            break
+        except (subprocess.CalledProcessError, OSError) as error:
+            if attempt == 0:
+                time.sleep(HAND_OFF_RETRY_SECONDS)
+                continue
+            return dict(outcome, resume=f'dispatch_failed: {error}')
     return dict(outcome, status='resume_dispatched', previous=outcome['status'],
                 resume='dispatched')
 
@@ -399,6 +445,12 @@ def submit(repo, selected, head, scope):
                'members': [member['number'] for member in scope['scope']],
                'since': time.time(), 'result_endpoint': result_endpoint}
     emit(receipt)  # Preserve the external effect before any fallible readback.
+    if operation.returncode:
+        # HTTP 409: an earlier run owns this request and follows it, and its
+        # hand-off chain carries the receipt until a terminal answer. A second
+        # chain would poll the same members for nothing, and every event that
+        # arrives while the merge is pending would start another one.
+        return dict(receipt, status='following_elsewhere')
     outcome = follow(repo, result_endpoint, receipt, scope)
     return hand_off(repo, outcome) if outcome['status'] in UNSETTLED else outcome
 

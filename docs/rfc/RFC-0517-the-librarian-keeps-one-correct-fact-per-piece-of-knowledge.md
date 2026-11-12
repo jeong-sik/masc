@@ -3,7 +3,7 @@ rfc: "0517"
 title: "librarian 은 지식마다 맞는 fact 하나를 남긴다"
 status: Draft
 created: 2026-11-09
-updated: 2026-11-10
+updated: 2026-11-12
 author: claude
 supersedes: []
 superseded_by: null
@@ -13,7 +13,7 @@ related: ["librarian-absorb-gate", "0463", "keeper-recall-reaches-the-turn", "05
 # RFC-0517 — librarian 은 지식마다 맞는 fact 하나를 남긴다
 
 - Status: **Draft.** 사용자가 2026-11-09 에 방향을 정했다. "틀리는건 지우거나 흡수, 병합되어서 맞는 사실 1개만 남기고 그리고 문장을 정리해서 올바르게 기억을 남기는게 중요함". 같은 날 librarian 프롬프트와 기능도 같이 고치라고 했다.
-- 근거: [연구 문서](../research/2026-11-09-librarian-keeps-one-correct-fact.md)와 [측정 기록](../evidence/research/2026-11-09-librarian-memory-state/README.md). 이 RFC 의 숫자는 모두 연구 문서에 출처가 있다.
+- 근거: [연구 문서](../research/2026-11-09-librarian-keeps-one-correct-fact.md)와 [측정 기록](../evidence/research/2026-11-09-librarian-memory-state/README.md). 이 RFC 의 숫자는 연구 문서에 출처가 있다. §2.1 의 교사와 학습 split 숫자는 [2026-11-12 측정 기록](../evidence/research/2026-11-12-librarian-teacher-label-note/README.md)에 있다.
 - 하네스 쪽 구현은 T 스택이 한다. #50290 이 계약 안에서 맞힐 수 있는 라벨을, #50325 가 남는 기억 채점을 넣는다.
 - §7 의 세 가지는 사용자가 고른다. 고르기 전에는 그 부분을 구현하지 않는다.
 - 2026-11-10 에 사용자가 F1 두 가지를 정했다. `pass` 는 커밋 함수의 필수 인자로 받는다. 흡수 게이트 판정은 두 길에서 슬롯 라벨 없이 센다(§2.2).
@@ -97,7 +97,7 @@ related: ["librarian-absorb-gate", "0463", "keeper-recall-reaches-the-turn", "05
 | 심은 중복 쌍 | fact 하나만 남는다 |
 | 심은 낡은 상태 | `dropped` 로 빠진다. 흡수로 빠지면 안 지운 것으로 센다(librarian.md 133-135행) |
 
-- 라벨은 MASC 계약 안에서 맞힐 수 있는 답만 요구한다. 지지 후보가 없는 요청에는 낡은 상태를 심지 않는다.
+- 라벨은 MASC 계약 안에서 맞힐 수 있는 답만 요구한다. 지지 후보가 없는 요청은 기억을 바꾸지 않는 답이 맞다. 그 기억에 심긴 낡은 상태와 중복 쌍도 그대로 둔다.
   §7.1 에서 A1 을 고르면 계약이 바뀌니 이 규칙도 따라 바뀐다.
 - 합친 claim 이 지식을 잃지 않는지는 블라인드 판정자가 본다.
   분류는 라이브 Jev 와 같은 네 갈래(mergeable·different_context·loses_knowledge·uncertain)이고, mergeable 만 맞다. 라벨이 바란 흡수와 라벨 밖 흡수를 모두 판정한다.
@@ -106,6 +106,15 @@ related: ["librarian-absorb-gate", "0463", "keeper-recall-reaches-the-turn", "05
   G6 값과 새 프롬프트 기준 G2 는 기본 모델을 잰 뒤, 학습 전에 사용자가 정한다.
 - 판정 단어 정확도는 기록만 한다. 옛 G3 를 읽는 코드는 남기지 않는다.
 - 교사도 effort `low` 로 답한다. `high` 는 유효 답 정확도가 같았고(0.750, 기본 0.751) 토큰·시간이 p50 기준 약 5.2배였다.
+- 교사에게는 요청과 스키마 안내 사이에 그 요청의 라벨을 적은 글을 보낸다.
+  글은 후보마다 라벨의 종류와 대상 기억을 적고, 기억에서는 심은 낡은 상태, 쓸 날이 지난 기록, 쓸 날이 남은 기록, 중복 쌍을 적는다.
+  라벨을 모르고 답하면 필터를 통과하는 답이 지울 것도 합칠 것도 없는 요청에 몰린다. 합친 E-synth 90건의 기준선 두 번에서, 후보가 기억 변경을 지지하는 71건 중 낡은 상태나 중복 쌍이 심긴 52건은 3건씩만 통과했다. 심긴 것이 없는 19건은 16건과 14건이 통과했다([측정 기록](../evidence/research/2026-11-12-librarian-teacher-label-note/README.md)).
+  학습 예시에는 요청, 스키마 안내, 답만 들어간다. 라벨 글은 들어가지 않는다.
+- 학습 split 도 E-synth 와 같은 블라인드 라벨 감사를 거친 뒤 교사에게 간다. 교사가 라벨을 따라 답하므로 틀린 라벨은 틀린 학습 목표가 된다.
+  `teacher_sample.py sample` 은 감사에 case 가 없는 요청을 받지 않는다. 감사가 뺀 요청과 감사가 뺀 기억의 요청도 받지 않는다.
+  감사를 여럿 주면 한 감사가 뺀 요청은 다른 감사가 남겼어도 받지 않는다. 요청과 case 는 item ID 로 맞춘다. 감사 기록에는 판정한 요청 파일의 sha256 이 없다.
+  고정되지 않은 세트(감사 전 E-synth 배치, 학습 split)의 기본 답은 `audit_baseline.py` 가 받는다. `eval_admission.py run` 은 고정된 E-synth 만 받는다.
+  기본 답이 라벨과 같아도 라벨이 맞다는 근거는 못 된다. E-synth 배치 2 감사에서 기본 답이 라벨과 같았거나 무효였던 57건 중 21건의 라벨이 판정과 어긋났다(같은 측정 기록).
 
 ### 2.2 D2 — 기억이 바뀌는 모습을 보인다 (F1)
 
@@ -278,6 +287,7 @@ admission 은 대화·도구·continuity 칸을 빈 값으로 그린다. 그 칸
 ## 8. 참고
 
 - [연구 문서](../research/2026-11-09-librarian-keeps-one-correct-fact.md), [측정 기록](../evidence/research/2026-11-09-librarian-memory-state/README.md)
+- [교사에게 라벨을 보여 주는 변경의 측정 기록](../evidence/research/2026-11-12-librarian-teacher-label-note/README.md)
 - T 스택: #50181(라벨 밖 지우기를 블라인드로 판정), #50290(계약 안 라벨), #50325(남는 기억 채점)
 - [librarian-absorb-gate](RFC-librarian-absorb-gate.md): 흡수 게이트. [RFC-0463](RFC-0463-librarian-absorb-rewrite-round.md): 흡수 2단계
 - [keeper-recall-reaches-the-turn](RFC-keeper-recall-reaches-the-turn.md): 틀린 fact 가 Keeper 턴에 들어가는 길

@@ -70,6 +70,7 @@ let error_name : A.error -> string = function
   | A.Not_asked -> "Not_asked"
   | A.Config_unreadable _ -> "Config_unreadable"
   | A.Already_active -> "Already_active"
+  | A.Turned_off -> "Turned_off"
   | A.Boot_stops _ -> "Boot_stops"
   | A.Workspace_id_not_built _ -> "Workspace_id_not_built"
   | A.Bootstrap_failed _ -> "Bootstrap_failed"
@@ -228,6 +229,7 @@ let invite dirs =
 
 let invite_error_name : A.invite_error -> string = function
   | A.Not_activated -> "Not_activated"
+  | A.Accounts_turned_off -> "Accounts_turned_off"
   | A.Not_served_as_active _ -> "Not_served_as_active"
   | A.Store_not_located _ -> "Store_not_located"
   | A.Invite_not_written _ -> "Invite_not_written"
@@ -286,6 +288,30 @@ let an_invite_needs_an_active_installation () =
     Alcotest.(check bool) "no store is made" false (Sys.file_exists dirs.store))
 ;;
 
+(* The local operator commits Off through the zone, as masc auth off does. *)
+(* masc auth off. *)
+let turn_off dirs =
+  match Authz_off.turn_off ~base_path:dirs.base ~config_dir:(Some dirs.config) ~now_ms with
+  | Ok (_ : Authz_types.Workspace_id.t) -> ()
+  | Error error -> Alcotest.failf "Off was refused: %s" (Authz_off.error_to_string error)
+;;
+
+(* Design 10.5: after Off a boot starts a single user, and neither a bootstrap
+   nor an invitation writes anything. *)
+let nothing_is_written_after_off () =
+  with_dirs (fun dirs ->
+    ask_for_multi_account dirs;
+    let (_ : A.activated) = activated_exn dirs in
+    turn_off dirs;
+    write_file (Auth.auth_config_file dirs.base) {|{"enabled":true,"require_token":true}|};
+    let log = read_file (log_path dirs) in
+    let store = read_file dirs.store in
+    check_refused "an activation" "Turned_off" (activate dirs);
+    check_invite_refused "an invitation" "Accounts_turned_off" (invite dirs);
+    Alcotest.(check string) "the log is as it was" log (read_file (log_path dirs));
+    Alcotest.(check string) "the store is as it was" store (read_file dirs.store))
+;;
+
 let () =
   Alcotest.run
     "authz_activation"
@@ -320,5 +346,6 @@ let () =
             `Quick
             an_invite_needs_an_active_installation
         ] )
+    ; "after Off", [ Alcotest.test_case "nothing is written" `Quick nothing_is_written_after_off ]
     ]
 ;;

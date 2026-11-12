@@ -211,6 +211,8 @@ def main() -> None:
         env = dict(os.environ, TYPESAFEAI_API_KEY="synthetic-fixture-key")
         command = [
             str(args.binary.resolve()),
+            "--base-path",
+            str(root),
             "--input",
             str(dataset),
             "--output",
@@ -223,8 +225,35 @@ def main() -> None:
             str(root / "published"),
         ]
         try:
+            # An ambient account workspace must refuse before either HTTP
+            # endpoint is called. Report publication remains a separate copy.
+            account_base = root / "accounts"
+            auth_dir = account_base / ".masc" / "auth"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "config.json").write_text(
+                json.dumps({"account_mode": "Multi_account"})
+            )
+            ambient_command = list(command)
+            base_index = ambient_command.index("--base-path")
+            del ambient_command[base_index : base_index + 2]
+            refused = subprocess.run(
+                ambient_command,
+                env=dict(env, MASC_BASE_PATH=str(account_base)),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert refused.returncode == 2, (refused.returncode, refused.stderr)
+            assert not output.exists() and not requests
+
+            # An explicitly selected single-user measurement workspace takes
+            # precedence over the ambient workspace through the shared resolver.
             run = subprocess.run(
-                command, env=env, capture_output=True, text=True, timeout=120
+                command,
+                env=dict(env, MASC_BASE_PATH=str(account_base)),
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             (root / "stdout.log").write_text(run.stdout)
             (root / "stderr.log").write_text(run.stderr)

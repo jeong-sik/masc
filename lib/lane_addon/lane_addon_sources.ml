@@ -311,7 +311,7 @@ let fusion_run ~access ~store ~max_bytes ~id ~run_id =
       (* Include the evidence address and source metadata before retaining bytes.
          A discarded capture owns no blob; existing content-addressed evidence
          can already belong to another observation and must not be removed. *)
-      let captured, size = Eio_unix.run_in_systhread (fun () ->
+      let captured, size = Systhread_host.run ~label:"addon-source-capture-encode" (fun () ->
         let reference = Lane_addon_store.blob_reference bytes in
         let observation = `Assoc [
           "id",`String reference.Lane_addon_types.uri;"kind",`String "fusion_run";
@@ -324,7 +324,7 @@ let fusion_run ~access ~store ~max_bytes ~id ~run_id =
       let* () = if size > max_bytes then
         Error "Fusion observation exceeds the available source ingress envelope"
         else Ok () in
-      let* _ = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store bytes) in
+      let* _ = Systhread_host.run ~label:"addon-source-blob-write" (fun () -> Lane_addon_store.write_blob store bytes) in
       Ok captured
 let read_bounded ~max_bytes path =
   try
@@ -360,7 +360,7 @@ let unique_snapshot_keys json =
     | _ :: rest -> walk rest in
   walk [json]
 let snapshot_file ~store ~max_bytes ~id path =
-  let* bytes = Eio_unix.run_in_systhread (fun () -> read_bounded ~max_bytes path) in
+  let* bytes = Systhread_host.run ~label:"addon-source-file-read" (fun () -> read_bounded ~max_bytes path) in
   try
     let json = Yojson.Safe.from_string bytes in
     let* () = unique_snapshot_keys json in
@@ -371,7 +371,7 @@ let snapshot_file ~store ~max_bytes ~id path =
     else match List.assoc_opt "cursor" fields, List.assoc_opt "complete" fields,
                List.assoc_opt "detail" fields, List.assoc_opt "observations" fields with
       | Some (`Null | `String _), Some (`Bool _), Some (`Null | `String _), Some (`List observations) ->
-          let* reference = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store bytes) in
+          let* reference = Systhread_host.run ~label:"addon-source-blob-write" (fun () -> Lane_addon_store.write_blob store bytes) in
           let own_evidence = evidence_json reference in
           let rec retain acc = function
             | [] -> Ok (List.rev acc)
@@ -479,7 +479,7 @@ let browser_document ~store ~max_bytes ~read_browser_document ~id ~selection ~ta
   let body_bytes = Yojson.Safe.to_string body in
   let* () = if String.length body_bytes > max_bytes
     then Error "document capture exceeds package ingress envelope" else Ok () in
-  let* evidence = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store body_bytes) in
+  let* evidence = Systhread_host.run ~label:"addon-source-blob-write" (fun () -> Lane_addon_store.write_blob store body_bytes) in
   let observation = `Assoc ["id", `String (Printf.sprintf "%s/%d/%s/%.6f" client tab_id document_id observed_at);
     "kind", `String "browser"; "observed_at", `Float observed_at;
     "actor", `String ("browser:" ^ client); "evidence", `List [evidence_json evidence];
@@ -514,14 +514,14 @@ let lane_output ~store ~max_bytes ~resolve_lane_output ~id ~installation_id ~out
     "output_id", Option.fold ~none:`Null ~some:(fun name -> `String name) output_id;
     "output_selection", Lane_addon_types.output_selection_to_json selection;
     "coverage_scope", `String "whole_producer"] in
-  let* sampling_receipts = Eio_unix.run_in_systhread (fun () ->
+  let* sampling_receipts = Systhread_host.run ~label:"addon-source-sampling-receipts" (fun () ->
     Lane_addon_sampling.retained_receipts ~store ~instance_id:captured.instance_id ~max_bytes selected) in
   let sampling_receipts = `List sampling_receipts in
   let output = Lane_addon_types.output_to_json selected in
   let bytes = Yojson.Safe.to_string (`Assoc ["producer", producer; "output", output; "sampling_receipts",sampling_receipts]) in
   if String.length bytes > max_bytes then Error "upstream output exceeds the remaining ingress envelope"
   else
-    let* reference = Eio_unix.run_in_systhread (fun () -> Lane_addon_store.write_blob store bytes) in
+    let* reference = Systhread_host.run ~label:"addon-source-blob-write" (fun () -> Lane_addon_store.write_blob store bytes) in
     let complete = captured.status.complete
       && List.for_all (fun (c : Lane_addon_types.coverage) -> c.complete) captured.output.coverage in
     let detail = if complete then None else Some "latest completed output has incomplete source or worker coverage" in

@@ -134,7 +134,7 @@ let with_installation f =
           in
           let routes =
             { R.zone
-            ; transactions = Oidc_login_transaction.create ~capacity:1
+            ; transactions = Oidc_login_transaction.create ()
             ; google = None
             ; github = None
             ; get = unreachable
@@ -193,11 +193,15 @@ let issued (answer : R.answer) =
   | _ -> Alcotest.failf "no PAT in %S" answer.body
 ;;
 
-(* What the request gate reads: the token against the state now. *)
+(* What the request gate reads: the token against the state now, on a snapshot
+   the zone could be trusted for. A zone that cannot be trusted gives no scope. *)
 let acts t token =
-  match Authz_pat.authenticate (Z.snapshot t.zone).Z.state ~now_ms:!(t.clock) token with
-  | Ok { Authz_pat.pat_scope = { Pat_scope.scope; _ }; _ } -> Ok scope
-  | Error refusal -> Error (Authz_pat.refusal_to_string refusal)
+  match Z.read t.zone with
+  | Error uncertain -> Error ("no decision: " ^ Z.uncertain_to_string uncertain)
+  | Ok trusted ->
+    (match Authz_pat.authenticate trusted ~now_ms:!(t.clock) token with
+     | Ok { Authz_pat.pat_scope = { Pat_scope.scope; _ }; _ } -> Ok scope
+     | Error refusal -> Error (Authz_pat.refusal_to_string refusal))
 ;;
 
 (* Each listed PAT as (id, status, expiry), after the members are checked. *)

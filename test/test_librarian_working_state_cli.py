@@ -151,6 +151,8 @@ def main() -> None:
         command = [
             str(args.binary.resolve()),
             "compare",
+            "--base-path",
+            str(root),
             "--input",
             str(dataset),
             "--output",
@@ -161,6 +163,22 @@ def main() -> None:
             "ollama_cloud.deepseek-v4.1-flash",
         ]
         try:
+            account_base = root / "accounts"
+            auth_dir = account_base / ".masc" / "auth"
+            auth_dir.mkdir(parents=True)
+            (auth_dir / "config.json").write_text(
+                json.dumps({"account_mode": "Multi_account"})
+            )
+            account_command = list(command)
+            account_command[account_command.index("--base-path") + 1] = str(account_base)
+            account_refused = subprocess.run(
+                account_command, capture_output=True, text=True, timeout=30
+            )
+            assert account_refused.returncode == 2, (
+                account_refused.returncode, account_refused.stderr
+            )
+            assert not output.exists() and not requests
+
             orphan = Path(
                 str(output)
                 + ".snapshot-"

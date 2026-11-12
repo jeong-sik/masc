@@ -38,8 +38,8 @@ let markdown () =
      bin/masc_tui_keys_doc_cli.exe > docs/guides/TUI-KEYS.md -->\n";
   Buffer.add_string buf
     "\n# TUI key reference\n\n\
-     Press `?` in the TUI to read this sheet on screen; the surface you are\n\
-     on is the first section there. Every footer row names `?:help` where the\n\
+     Press `?` in the TUI to read the keys of the surface you are on, and\n\
+     `?` again to read this whole sheet. Every footer row names `?:help` where the\n\
      key answers. In a chat, `?` opens the sheet only while the draft is\n\
      empty -- once a sentence has started it is an ordinary question mark.\n\
      The command palette is `:`.\n";

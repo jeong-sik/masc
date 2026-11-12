@@ -26,7 +26,7 @@ let for_worker t ~package ~instance_id =
   else Error "host sampling broker belongs to another package or installation"
 
 let with_observation t ~binding ~sources ~on_error run =
-  let digest = Eio_unix.run_in_systhread (fun () ->
+  let digest = Systhread_host.run ~label:"addon-sampling-digest" (fun () ->
     Store.digest (Yojson.Safe.to_string (`Assoc ["binding",binding;"sources",sources]))) in
   match !(t.observation) with
   | Observing _ -> Error (on_error "host sampling observation already active")
@@ -34,7 +34,7 @@ let with_observation t ~binding ~sources ~on_error run =
       t.observation := Observing digest;
       Fun.protect ~finally:(fun () -> t.observation := Outside_observation) (fun () ->
         let* (output : Types.output) = run () in
-        let* () = Eio_unix.run_in_systhread (fun () ->
+        let* () = Systhread_host.run ~label:"addon-sampling-sources-read" (fun () ->
           let budget = Store.read_budget ~max_bytes:(Lane_addon_types.max_reply_bytes t.package) in
           List.fold_left (fun result (reference : Types.evidence) ->
             let* () = result in
@@ -126,7 +126,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     | Types.Model_disabled -> Error "package does not declare host sampling" in
   let* () = if String.trim instance_id<>"" && String.trim route<>"" then Ok ()
     else Error "sampling requires an exact instance and nonblank host route" in
-  let retain fields = Eio_unix.run_in_systhread (fun () ->
+  let retain fields = Systhread_host.run ~label:"addon-sampling-retain" (fun () ->
     let* bytes = encode_unbounded (`Assoc fields) in
     Store.write_blob store bytes)
     |> Result.map_error (fun _ -> "sampling request could not be retained") in
@@ -155,7 +155,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       "package",`Assoc ["id",`String package.id;"revision",`String package.revision];
       "state",`String state;"request",Types.evidence_to_json request;
       "outcome",Option.fold ~none:`Null ~some:Types.evidence_to_json outcome] in
-    let save state = Eio_unix.run_in_systhread (fun () ->
+    let save state = Systhread_host.run ~label:"addon-sampling-request-save" (fun () ->
       Store.save_sampling_request store ~instance_id ~request_id (record state)) in
     let* () = save Pending |> Result.map_error (fun _ -> "sampling request could not be indexed") in
     let outcome = try match invoke ~route ~request params with
@@ -168,7 +168,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
     let retained = Eio.Cancel.protect (fun () ->
     let outcome = match outcome with
       | Answer answer ->
-          (match Eio_unix.run_in_systhread (fun () ->
+          (match Systhread_host.run ~label:"addon-sampling-response-validate" (fun () ->
             validate_response ~max_bytes:(Lane_addon_types.max_reply_bytes package) answer) with
            | Error detail -> Invalid_response (answer, detail)
            | Ok _ when String.trim answer.S.model = "" ->
@@ -186,7 +186,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
       | Invocation_exception detail -> ["status",`String "outcome_unknown";"error",`String detail]) in
     (* Once invocation has returned, cancellation must not orphan a known
        result between its immutable blob and the durable recovery index. *)
-    let retained = Eio_unix.run_in_systhread (fun () ->
+    let retained = Systhread_host.run ~label:"addon-sampling-outcome-save" (fun () ->
         let outcome, bytes = match encode_unbounded (`Assoc fields) with
           | Ok bytes -> outcome, Ok bytes
           | Error detail ->
@@ -252,7 +252,7 @@ let create ~store ~(package : Types.package) ~instance_id ~route ~invoke () =
           | Host_error _ -> "host_error" | Invalid_response _ -> "invalid_response"
           | Invocation_exception _ -> "outcome_unknown" | Answer _ -> "answered" in
         let reply = `Assoc ["status",`String status;"evidence",references] in
-        (match Eio_unix.run_in_systhread (fun () ->
+        (match Systhread_host.run ~label:"addon-sampling-reply-encode" (fun () ->
            encode_bounded ~max_bytes:(Lane_addon_types.max_reply_bytes package) reply) with
          | Ok bytes -> Error bytes
          | Error _ -> Error "sampling failed; outcome retained") in

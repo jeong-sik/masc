@@ -535,9 +535,8 @@ let render_runtime_detail (state : state) target =
   in
   box_top buf cols;
   box_line buf cols
-    (detail_heading ~cols
-       ~lead:(Lead_text (screen_title (if state.ui_language = Lang_ko then " MASC 시스템 / 런타임 상세" else runtime_detail_title) ^ "  "))
-       ~id:target_label ~after:[] ~tail:(connection_badge state));
+    (here_row ~cols state ~path:[ runtime_step state; target_label ]
+       ~readings:[] ~position:None);
   box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (framed_inner_width cols - 4)) in
   let total = List.length lines in
@@ -706,9 +705,8 @@ let render_runtime_reading (state : state) =
           | None -> title_missing_reading ~error:None
           | Some _ -> ""
         in
-        Printf.sprintf "%s  %s  %s  %s"
-          (screen_title (if ko then " MASC 시스템 / 런타임" else " MASC System / Runtime")) reading_note timestamp
-          (connection_badge state)
+        here_row ~cols state ~path:[ runtime_step state ]
+          ~readings:[ String.trim reading_note; timestamp ] ~position:None
     | Some snapshot ->
         let probe_status =
           match snapshot.Masc.Tui_decode.rss_probe with
@@ -728,7 +726,7 @@ let render_runtime_reading (state : state) =
           | Masc_tui_types.Runtime_all -> `Runtime_all
         in
         runtime_substrate_heading state ~cols
-          ~title:(screen_title (if ko then " MASC 시스템 / 런타임" else " MASC System / Runtime"))
+          ~title:(here_path state ~path:[ runtime_step state ])
           ~current
           ~after:[ Printf.sprintf "  %s%s" probe_status probe_read; "  " ^ timestamp ]
   in
@@ -767,7 +765,9 @@ let render_runtime_reading (state : state) =
     else ""
   in
   let hints =
-    scroll_hint ^ Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode ~picker:None
+    scroll_hint
+    ^ Masc_tui_keys.footer_hints_runtime ~lang:state.ui_language
+        ~mode:state.runtime_mode ~picker:None
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
     ~body:(fun ~budget:_ c ->
@@ -1041,7 +1041,7 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
     | Runtime_prompt_parent (Lane_remove_prompt lane) ->
         text "제거 확인 / " "Remove / " ^ Terminal_text.single_line lane in
   let header = if projection.rpp_notices = 0 then
-    feature_child_heading state ~cols ~title
+    here_row ~cols state ~path:[ title ] ~readings:[] ~position:None
   else
     let door = match projection.rpp_parent with
       | Runtime_media_parent | Runtime_prompt_parent (Lane_remove_prompt _) -> "v"
@@ -1091,8 +1091,8 @@ let render_runtime (state : state) =
       let notices = runtime_picker_notices state in
       let notes = runtime_picker_notice_rows ~cols state in
       let hints =
-        Masc_tui_keys.footer_hints_runtime ~mode:state.runtime_mode
-          ~picker:(Some picker)
+        Masc_tui_keys.footer_hints_runtime ~lang:state.ui_language
+          ~mode:state.runtime_mode ~picker:(Some picker)
       in
       surface_chrome ~overflow:Fits state ~terminal_rows ~cols
         ~surface_key:"runtime" ~title:(runtime_picker_title ~ko ~notices picker.rlp_pick)
@@ -1130,8 +1130,9 @@ let render_tools (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let header =
-    feature_child_heading state ~cols
-      ~title:(ui_text state ~ko:"도구·스킬" ~en:"Tools & Skills")
+    here_row ~cols state
+      ~path:[ ui_text state ~ko:"도구·스킬" ~en:"tools & skills" ]
+      ~readings:[] ~position:None
   in
   box_top buf cols;
   box_line buf cols header;
@@ -1332,16 +1333,7 @@ let usage_lines ~cols ~rows (state : state) =
         let token_value row = Option.map float_of_int row.kur_tokens in
         let cost_value row = row.kur_cost_usd in
         let valid value = Float.is_finite value && value >= 0. in
-        let grouped_digits digits =
-          let start = if String.starts_with ~prefix:"-" digits then 1 else 0 in
-          let length = String.length digits in
-          let output = Buffer.create (length + length / 3) in
-          String.iteri (fun index digit ->
-            if index > start && (length - index) mod 3 = 0 then Buffer.add_char output ',';
-            Buffer.add_char output digit) digits;
-          Buffer.contents output
-        in
-        let count value = grouped_digits (string_of_int value) in
+        let count = Masc_tui_value.Count.grouped in
         let largest value = List.fold_left
             (fun highest row ->
               if readable row then
@@ -1398,7 +1390,7 @@ let usage_lines ~cols ~rows (state : state) =
         ; " Bars: relative to largest read value per metric; not quota."
         ; " Partial rows: no bars. Missing values can understate totals."
         ; Printf.sprintf " Scale: tokens %s · cost %s"
-            (scale token_value (fun value -> grouped_digits (Printf.sprintf "%.0f" value)) token_max)
+            (scale token_value (fun value -> count (Float.to_int (Float.round value))) token_max)
             (scale cost_value (Printf.sprintf "$%.4f") cost_max)
         ; "" ]
         @ (if kuw_rows = [] then [ "   No Keepers in the returned roster" ]
@@ -1511,7 +1503,7 @@ let render_metrics (state : state) =
          ui_text state ~ko:" 운영 · 사용량 · 진단" ~en:" Operations · Usage · Telemetry"
        else ui_text state ~ko:" 운영 · 사용량" ~en:" Operations · Usage")
   in
-  let connection = usage_connection_badge state in
+  let connection = connection_badge state in
   let full_title = Printf.sprintf "%s  %s" heading connection in
   let width = framed_inner_width cols in
   let title, connection_rows =
@@ -1678,7 +1670,7 @@ let render_runtime_pick (state : state) =
          (screen_title
             (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 runtime" keeper_name))
          Ansi.dim current Ansi.reset)
-    ~hints:(Masc_tui_keys.footer_hints (Keepers Keeper_runtime_pick))
+    ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language (Keepers Keeper_runtime_pick))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())
         ("  " ^ Masc_tui_types.keeper_runtime_picker_summary view

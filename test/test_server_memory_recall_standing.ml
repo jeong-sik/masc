@@ -201,6 +201,8 @@ let test_the_words_are_distinct_and_read_back () =
     ; "memory_recall_disabled"
     ; "keeper_excluded"
     ; "lane_disabled"
+    ; "access_unpublished"
+    ; "host_account_not_shared"
     ; "no_armed_destination"
     ; "another_gate_refused"
     ]
@@ -238,6 +240,8 @@ let test_a_refusal_of_the_gate_keeps_its_word () =
     [ Typesafeai_config.Memory_recall_disabled
     ; Typesafeai_config.Keeper_excluded
     ; Typesafeai_config.Lane_disabled
+    ; Typesafeai_config.Access_unpublished
+    ; Typesafeai_config.Host_account_not_shared
     ; Typesafeai_config.No_armed_destination
     ]
 ;;
@@ -275,7 +279,12 @@ let test_the_reason_of_another_gate_is_named_as_such () =
     [ Typesafeai_config.Memory_recall_disabled; Typesafeai_config.Keeper_excluded ];
   Alcotest.(check (list string))
     "the reasons a lane can give"
-    [ "lane_disabled"; "no_armed_destination"; "another_gate_refused" ]
+    [ "lane_disabled"
+    ; "access_unpublished"
+    ; "host_account_not_shared"
+    ; "no_armed_destination"
+    ; "another_gate_refused"
+    ]
     (List.map
        Standing.reason_to_string
        (List.filter Standing.is_lane_reason Standing.all_reasons))
@@ -346,7 +355,12 @@ let test_the_tui_refuses_what_it_does_not_know () =
          ("the lane is told " ^ word)
          true
          (Result.is_ok (Reading.decode_memory_recall_reading (response ~lane:(`String word) ()))))
-    [ "lane_disabled"; "no_armed_destination"; "another_gate_refused" ];
+    [ "lane_disabled"
+    ; "access_unpublished"
+    ; "host_account_not_shared"
+    ; "no_armed_destination"
+    ; "another_gate_refused"
+    ];
   refused "a standing word that is nothing"
     (response ~keepers:(`List [ keeper "a" "quota_exceeded" ]) ());
   refused "armed is a word of the lane, not of a Keeper"

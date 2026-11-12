@@ -6,6 +6,14 @@ module T = Server_startup_takeover
 let ( let* ) = Result.bind
 let now_ms () = int_of_float (Unix.gettimeofday () *. 1000.)
 
+let account_server_line =
+  "a server boots the workspace as a multi-account installation: the account server, which \
+   answers the health probes (GET /health, /health/live and /health/ready), the login routes \
+   of the login clients in config.json, and the pages where a person connects their own \
+   subscription and runs their own Keepers. It answers no route that reads the credentials \
+   of a single user"
+;;
+
 let with_lease ~base_path f =
   match Unix.realpath base_path with
   | exception Unix.Unix_error (error, _, _) ->
@@ -102,11 +110,11 @@ let bootstrap ~base_path ~external_store =
   | Ok (base_url, { A.workspace_id; invitation }) ->
     Printf.printf
       "The installation is activated for multi-account use, workspace %s.\n\
-       This build does not serve multi-account yet, so a server stops at boot on this \
-       workspace. No command undoes the activation; %s. The external store is %s.\n\
+       From now on %s. %s. The external store is %s.\n\
        The first Admin is invited.\n"
       (Authz_types.Workspace_id.to_string workspace_id)
-      Authz_boot_mode_read.single_user_again
+      account_server_line
+      (String.capitalize_ascii Authz_boot_mode_read.turn_off_line)
       external_store;
     print_link ~command:"bootstrap" ~base_url invitation
 ;;
@@ -220,14 +228,34 @@ let service_credential_list ~base_path =
     0
 ;;
 
+(* The Off depends on the log and the external store alone, so neither the
+   public address nor the anonymous-mutation setting is read. *)
+let off ~base_path =
+  let turn_off base_path =
+    Eio_main.run (fun _env ->
+      Result.map_error
+        Authz_off.error_to_string
+        (Authz_off.turn_off ~base_path ~config_dir:(Env_config_core.masc_config_dir_opt ()) ~now_ms))
+  in
+  match with_lease ~base_path turn_off with
+  | Error reason -> refused "off" reason
+  | Ok workspace_id ->
+    Printf.printf
+      "The accounts of workspace %s are turned off.\n\
+       Once config.json does not ask for Multi_account (take account_mode out), a server \
+       boots a single user. The records of the accounts stay read-only: no turn runs for a \
+       Keeper or on a Runtime of the log, and no client starts on a home under \
+       .masc/accounts. This build does not turn the accounts on again.\n"
+      (Authz_types.Workspace_id.to_string workspace_id);
+    0
+;;
+
 (* ---- masc auth preview (plan, preview scope P3) ---- *)
 
 let github_client_secret_env = "MASC_GITHUB_CLIENT_SECRET"
 let default_preview_port = 8940
 let preview_host = "127.0.0.1"
 let preview_backlog = 16
-let login_transaction_capacity = 16
-let draw_bytes = 32
 
 (* The listener admits only the authority it binds, as the server does
    before it routes (Server_request_authority). *)
@@ -281,26 +309,27 @@ let serve_preview ~base_path ~store ~port github =
              ~explicit_base_url:None)
       in
       let routes =
-        { Login_routes.zone
-        ; transactions = Oidc_login_transaction.create ~capacity:login_transaction_capacity
-        ; google = None
-        ; github = Some github
-        ; get = Server_login_http.get ~clock
-        ; post = Server_login_http.post ~clock
-        ; now = Ptime_clock.now
-        ; draw = (fun () -> Random_id.hex ~bytes:draw_bytes)
-        }
+        Server_account_login.routes
+          ~clock
+          ~zone
+          { Server_account_login.google = None; github = Some github }
       in
       let router =
         Masc.Http_server_eio.Router.create ()
         |> Server_login_http.add_routes routes
-        |> Server_login_http.add_preview_routes routes ~env ~base_path
+        |> Server_login_http.add_person_routes routes ~env ~base_path
       in
       let address = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
-      match Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:preview_backlog address with
-      | exception (Eio.Io _ as exn) ->
-        Error (Printf.sprintf "%s:%d is not listened on: %s" preview_host port (Printexc.to_string exn))
-      | socket ->
+      match
+        Server_bootstrap_http.listen_tcp_result
+          ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~backlog:preview_backlog
+          address
+      with
+      | Error reason ->
+        Error (Printf.sprintf "%s:%d is not listened on: %s" preview_host port reason)
+      | Ok socket ->
         let base_url = Printf.sprintf "http://%s:%d" preview_host port in
         Printf.printf
           "The multi-account preview listens on %s. Open %s/ in a browser, or the link of \

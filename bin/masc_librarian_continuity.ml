@@ -11,25 +11,28 @@ type options =
   ; output_path : string
   ; config_path : string
   ; runtime_id : string
+  ; base_path : string
   ; publish_base_path : string option
   ; prompt_dir : string option
   }
 
 let usage =
   "masc-librarian-continuity --input DATASET.json --output REPORT.json \
-   --config runtime.toml --runtime EXACT_ID [--publish-base-path DIR]\n\n\
+   --config runtime.toml --runtime EXACT_ID [--base-path DIR] [--publish-base-path DIR]\n\n\
    Production comparison: compare-production --prompts-dir config/prompts [same options]\n\n\
    Storage experiments: masc-librarian-continuity capture --help | restore --help"
 
 let parse_options ?(start = 0) () =
   let input = ref None and output = ref None and config = ref None in
   let runtime = ref None and publish = ref None and prompts = ref None in
+  let base = ref None in
   let set target value = target := Some value in
   Arg.parse_argv ~current:(ref start) Sys.argv
     [ "--input", Arg.String (set input), "Explicit synthetic dataset JSON"
     ; "--output", Arg.String (set output), "Authoritative report JSON"
     ; "--config", Arg.String (set config), "Runtime TOML configuration"
     ; "--runtime", Arg.String (set runtime), "Exact Agent Core runtime ID"
+    ; "--base-path", Arg.String (set base), "Workspace whose account access governs the measurement"
     ; "--publish-base-path", Arg.String (set publish), "Publish a blob copy under this base path"
     ; "--prompts-dir", Arg.String (set prompts), "Production comparison: explicit production prompt directory"
     ]
@@ -43,11 +46,14 @@ let parse_options ?(start = 0) () =
   let* output_path = required "--output" !output in
   let* config_path = required "--config" !config in
   let* runtime_id = required "--runtime" !runtime in
+  let* workspace = Workspace_root.resolve_current ~flag:!base
+    |> Result.map_error Workspace_root.error_message in
   Ok
     { input_path = Config_dir_resolver.absolute_path input_path
     ; output_path = Config_dir_resolver.absolute_path output_path
     ; config_path = Config_dir_resolver.absolute_path config_path
     ; runtime_id
+    ; base_path = workspace.root
     ; publish_base_path = Option.map Config_dir_resolver.absolute_path !publish
     ; prompt_dir = Option.map Config_dir_resolver.absolute_path !prompts
     }
@@ -70,6 +76,15 @@ let check_output options =
     | Fs_compat.Exact_missing -> Ok ()
     | Fs_compat.Exact_kind _ -> Error ("Output already exists: " ^ options.output_path)
     | Fs_compat.Exact_unknown -> Error ("Cannot inspect output path: " ^ options.output_path)
+
+(* HIGH-RISK-UNREVIEWED: host credentials are admitted by the selected
+   workspace, before provider or Jev initialization (plan D2-5). A temporary
+   comparison store and an optional report copy do not choose that authority.
+   An intentionally independent measurement names its workspace explicitly. *)
+let publish_access options =
+  Runtime_account_access.publish_host_tool ~base_path:options.base_path
+    ~config_dir:(Env_config_core.masc_config_dir_opt ())
+  |> Result.map_error (fun (first, rest) -> String.concat "; " (first :: rest))
 
 let prepare_runtime ?(prepare_exact_lane = false) options =
   let* observation =
@@ -317,6 +332,7 @@ let publish options report bytes =
 let run options =
   let* () = check_output options in
   let* input_bytes, dataset = read_dataset options.input_path in
+  let* () = publish_access options in
   let* config_revision, provider_cfg = prepare_runtime options in
   let identity = Masc.Build_identity.current () in
   let report : R.t =
@@ -445,6 +461,7 @@ let arm_scored = function
 
 let run_comparison options =
   let module M = Masc.Librarian_working_state_evaluation in
+  let* () = publish_access options in
   let parse_dataset json = Result.map (fun (dataset : M.dataset) ->
     dataset.provenance,dataset.cases) (M.parse_dataset json) in
   run_paired options ~schema:"masc.librarian-working-state.v1" ~extra_fields:[] ~prepare_exact_lane:false
@@ -460,6 +477,7 @@ let run_production_comparison options =
     | None -> Error "compare-production requires --prompts-dir for the actual production templates" in
   let* () = check_output options in
   let* _ = read_dataset_with M.parse_dataset options.input_path in
+  let* () = publish_access options in
   (* New isolated workspace, never the operator's live runtime root. Keep the
      directory with the measurement so failures retain their diagnostics. *)
   let* base_path = try
@@ -473,14 +491,6 @@ let run_production_comparison options =
     | Ok () -> Ok ()
     | Error Masc.Exact_lane_run_registry.Already_installed ->
       Error "Production comparison requires its own isolated run registry" in
-  (* HIGH-RISK-UNREVIEWED: a librarian slot is a call of the operator. This
-     host tool publishes its account access after its judgment of the
-     isolated base path, or every official-client slot is refused before its
-     CLI starts (plan D2-5). *)
-  let* () =
-    Runtime_account_access.publish_host_tool ~base_path
-      ~config_dir:(Env_config_core.masc_config_dir_opt ())
-    |> Result.map_error (fun (first, rest) -> String.concat "; " (first :: rest)) in
   Prompt_registry.set_markdown_dir prompt_dir;
   let infer ~previous_state ~unread_messages (input : Masc.Keeper_librarian.input) =
     Masc.Keeper_librarian_runtime.infer_working_state ~base_path ~keepers_dir

@@ -66,7 +66,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `glm_chat.py` | Capped calls to Z.AI's GLM coding endpoint in the request MASC's GLM slot sends, cached for resume |
 | `eval_admission.py` | Measures targets on E-real and E-synth, then applies the gates |
 | `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
-| `teacher_sample.py` | Keeps teacher answers that leave the memory their training labels ask for, and those that absorb a memory once the merge judge finds each absorb mergeable |
+| `audit_baseline.py` | Answers requests the pass lines do not pin with the base model, for their blind label audit |
+| `teacher_sample.py` | Shows the teacher what each audited training label says and keeps the answers that leave the memory the label asks for, those that absorb a memory once the merge judge finds each absorb mergeable |
 | `train_sft.py` | Trains the candidate A on the teacher's answers |
 | `prompt_lines.json` | A prompt draft's comparison, fixed before the draft runs: the baseline runs, the runs per side and the noise widths |
 | `prompt_compare.py` | Decides whether a prompt draft goes in, from runs of the pinned template and of the draft |
@@ -120,8 +121,9 @@ endpoint applies its default.
    E-synth numbers add `scheduled_ahead_keep_rate` and
    `scheduled_past_drop_recall`. A record still ahead that an answer drops is
    also an off-label drop (step 6).
-2. Run the base model on E-synth, audit the labels with a judge that sees
-   neither the labels nor the answers, and keep the requests it confirms.
+2. Run the base model on E-synth (`audit_baseline.py`: the set is not pinned
+   yet), audit the labels with a judge that sees neither the labels nor the
+   answers, and keep the requests it confirms.
    E-synth can be made in batches. Generate each batch with its own seed and
    with `--first-memory` at the number where the last batch's memories ended,
    run and audit it by itself, and join the audited batches with
@@ -134,12 +136,23 @@ endpoint applies its default.
    (steps 6 and 7) have classed that run's answers. It reads no gate, choice
    or trained run. `verdict` and `train_sft.py` refuse while a gate has no
    number.
-4. Generate the training split and sample the teacher (`teacher_sample.py
-   sample`). An answer that absorbs a memory waits for the merge judge, also
-   when its label expects the merge: `teacher_sample.py cases` gives the judge
-   the absorb gate's question as `merge_cases.py` does, and `apply` keeps the
-   answer only when every absorb is judged mergeable. Train A on the
-   `accepted.jsonl` that `apply` writes.
+4. Generate the training split and audit its labels as step 2 audits
+   E-synth's, with `--sample` above the number of requests, so that the judge
+   sees every request. Sample the teacher on the requests the audit keeps
+   (`teacher_sample.py sample`). The teacher is the base model at the
+   reasoning effort and output budget `pass_lines.json` sets for a request.
+   Besides the request and the schema instruction it gets a note of what the
+   request's label says, so it follows the label, and a label no judge
+   confirmed would become a wrong training target: `sample` refuses a request
+   no `--audit` folder holds a case for, and one an audit took out alone or
+   with its memory, whatever another audit says of it. A request is tied to
+   its case by item ID: an audit records no sha256 of the requests it judged.
+   A training example holds the request, the schema instruction and the
+   answer, without the note. An answer that absorbs a memory waits for the
+   merge judge, also when its label expects the merge:
+   `teacher_sample.py cases` gives the judge the absorb gate's question as
+   `merge_cases.py` does, and `apply` keeps the answer only when every absorb
+   is judged mergeable. Train A on the `accepted.jsonl` that `apply` writes.
 5. Measure the base model and A in one run per set, from an empty `--out`.
 6. When a valid E-synth answer dropped a fact its label does not name (not
    planted stale, not a correction or complement target, not a fact of a
@@ -164,12 +177,16 @@ endpoint applies its default.
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/e_real_manifest.py \
   --snapshot artifacts/tinker/librarian/e-real-snapshot \
   --out scripts/tinker/librarian/e_real_manifest.json
-uv run scripts/tinker/librarian/synth_generate.py --split eval --seed 20261110 \
+# The pinned E-synth is two batches: --seed 20261112, then --seed 20261113 --first-memory 10.
+uv run scripts/tinker/librarian/synth_generate.py --split eval --seed 20261112 \
   --out artifacts/tinker/librarian/synth-eval --budget 6
+uv run scripts/tinker/librarian/audit_baseline.py \
+  --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
+  --out artifacts/tinker/librarian/eval-base-synth --budget 3
 uv run scripts/tinker/librarian/e_synth_audit.py cases \
   --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
   --run artifacts/tinker/librarian/eval-base-synth --baseline base \
-  --sample 1000 --seed 20261110 --out artifacts/tinker/librarian/e-synth-audit
+  --sample 1000 --seed 20261112 --out artifacts/tinker/librarian/e-synth-audit
 uv run scripts/tinker/librarian/e_synth_audit.py apply \
   --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
   --audit artifacts/tinker/librarian/e-synth-audit \
@@ -179,6 +196,28 @@ uv run scripts/tinker/librarian/e_synth_audit.py pool \
   --batch artifacts/tinker/librarian/e-synth-1/requests.jsonl \
   --batch artifacts/tinker/librarian/e-synth-2/requests.jsonl \
   --final artifacts/tinker/librarian/e-synth/requests.jsonl
+# The training split (step 4): the same audit, then the teacher on the requests it keeps.
+uv run scripts/tinker/librarian/synth_generate.py --split train --seed 20261114 \
+  --out artifacts/tinker/librarian/synth-train --budget 12
+uv run scripts/tinker/librarian/audit_baseline.py \
+  --requests artifacts/tinker/librarian/synth-train/requests.jsonl \
+  --out artifacts/tinker/librarian/train-base --budget 6
+uv run scripts/tinker/librarian/e_synth_audit.py cases \
+  --requests artifacts/tinker/librarian/synth-train/requests.jsonl \
+  --run artifacts/tinker/librarian/train-base --baseline base \
+  --sample 1000 --seed 20261114 --out artifacts/tinker/librarian/train-audit
+uv run scripts/tinker/librarian/e_synth_audit.py apply \
+  --requests artifacts/tinker/librarian/synth-train/requests.jsonl \
+  --audit artifacts/tinker/librarian/train-audit \
+  --final artifacts/tinker/librarian/train-audited/requests.jsonl
+uv run scripts/tinker/librarian/teacher_sample.py sample \
+  --requests artifacts/tinker/librarian/train-audited/requests.jsonl \
+  --audit artifacts/tinker/librarian/train-audit \
+  --out artifacts/tinker/librarian/teacher --budget 10
+uv run scripts/tinker/librarian/teacher_sample.py cases \
+  --requests artifacts/tinker/librarian/train-audited/requests.jsonl --out artifacts/tinker/librarian/teacher
+uv run scripts/tinker/librarian/teacher_sample.py apply \
+  --requests artifacts/tinker/librarian/train-audited/requests.jsonl --out artifacts/tinker/librarian/teacher
 MASC_BASE_PATH=artifacts/tinker/librarian/e-real-snapshot \
   uv run scripts/tinker/librarian/eval_admission.py run --set real \
   --target base=thinkingmachines/Inkling-2-Small:peft:262144 \

@@ -10,9 +10,15 @@ include Voice_bridge_core
 
 open Result.Syntax
 
-let transcribe_via_http_stt = Voice_bridge_transport.transcribe_via_http_stt
+let transcribe_via_http_stt ?deadline endpoint ~audio_file ~model =
+  let* api_key = Voice_endpoint_key.resolve endpoint in
+  Voice_bridge_transport.transcribe_via_http_stt ?deadline endpoint ~api_key ~audio_file ~model
+;;
 let transcribe_via_command = Voice_bridge_transport.transcribe_via_command
-let list_voices_via_http = Voice_bridge_transport.list_voices_via_http
+let list_voices_via_http endpoint =
+  let* api_key = Voice_endpoint_key.resolve endpoint in
+  Voice_bridge_transport.list_voices_via_http endpoint ~api_key
+;;
 let list_voices_via_command = Voice_bridge_transport.list_voices_via_command
 
 (* Catalogue aliases: [transcriber_of_kind] and the transcript reader are pure

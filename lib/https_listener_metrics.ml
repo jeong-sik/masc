@@ -117,6 +117,11 @@ let notify_source_changed () =
 
 let with_source_change update = Fun.protect ~finally:notify_source_changed update
 
+(* Writes a state cell and says whether its value moved; see
+   [Transport_metrics.cell_moved]. A connection notifies only when it moved
+   the listener's status or last error. *)
+let cell_moved cell value = Atomic.exchange cell value <> value
+
 let set_active_gauge value =
   Otel_metric_store.set_gauge metric_active_connections (float_of_int (max 0 value))
 ;;
@@ -138,13 +143,13 @@ let record_started () = with_source_change (fun () -> Atomic.set status_cell Lis
 let record_stopped () = with_source_change (fun () -> Atomic.set status_cell Stopped)
 
 let record_accept () =
-  with_source_change (fun () ->
-    Atomic.set status_cell Listening;
-    Atomic.set last_accept_unix (Some (Unix.gettimeofday ()));
-    Atomic.set last_error None;
-    ignore (Atomic.fetch_and_add accepted 1);
-    Otel_metric_store.inc_counter metric_accepts ();
-    set_active_gauge (Atomic.fetch_and_add active 1 + 1))
+  let status_moved = cell_moved status_cell Listening in
+  let error_cleared = cell_moved last_error None in
+  Atomic.set last_accept_unix (Some (Unix.gettimeofday ()));
+  ignore (Atomic.fetch_and_add accepted 1);
+  Otel_metric_store.inc_counter metric_accepts ();
+  set_active_gauge (Atomic.fetch_and_add active 1 + 1);
+  if status_moved || error_cleared then notify_source_changed ()
 ;;
 
 let rec dec_active () =
@@ -153,35 +158,33 @@ let rec dec_active () =
   if Atomic.compare_and_set active before after then after else dec_active ()
 ;;
 
-let record_connection_closed () = with_source_change (fun () -> set_active_gauge (dec_active ()))
+let record_connection_closed () = set_active_gauge (dec_active ())
 
 let record_negotiated negotiated =
-  with_source_change (fun () ->
-    let cell =
-      match negotiated with
-      | Alpn_h2 -> alpn_h2
-      | Alpn_http1 -> alpn_http1
-      | Alpn_none -> alpn_none
-    in
-    ignore (Atomic.fetch_and_add cell 1);
-    Otel_metric_store.inc_counter
-      metric_alpn
-      ~labels:[ "protocol", negotiated_label negotiated ]
-      ())
+  let cell =
+    match negotiated with
+    | Alpn_h2 -> alpn_h2
+    | Alpn_http1 -> alpn_http1
+    | Alpn_none -> alpn_none
+  in
+  ignore (Atomic.fetch_and_add cell 1);
+  Otel_metric_store.inc_counter
+    metric_alpn
+    ~labels:[ "protocol", negotiated_label negotiated ]
+    ()
 ;;
 
 let record_handshake_failure () =
-  with_source_change (fun () ->
-    ignore (Atomic.fetch_and_add handshake_failures 1);
-    Otel_metric_store.inc_counter metric_handshake_failures ())
+  ignore (Atomic.fetch_and_add handshake_failures 1);
+  Otel_metric_store.inc_counter metric_handshake_failures ()
 ;;
 
 let record_accept_error ~error =
-  with_source_change (fun () ->
-    Atomic.set status_cell Accept_error;
-    Atomic.set last_error (Some error);
-    ignore (Atomic.fetch_and_add accept_errors 1);
-    Otel_metric_store.inc_counter metric_accept_errors ())
+  let status_moved = cell_moved status_cell Accept_error in
+  let error_moved = cell_moved last_error (Some error) in
+  ignore (Atomic.fetch_and_add accept_errors 1);
+  Otel_metric_store.inc_counter metric_accept_errors ();
+  if status_moved || error_moved then notify_source_changed ()
 ;;
 
 let status () = Atomic.get status_cell

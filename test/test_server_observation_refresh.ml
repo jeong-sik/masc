@@ -70,6 +70,31 @@ let test_exact_dependency_matrix () =
     ; Input.Board ]
 ;;
 
+(* Transport health reads in-memory transport state. Only a transition of
+   that state is a reason to read it again; what Keepers and the Board write
+   moves delivery counts, which an explicit HTTP read computes. *)
+let test_transport_health_dependency_matrix () =
+  let affects = Refresh.affects Refresh.Transport_health in
+  check bool "a transport state transition is admitted" true (affects Input.Transport_state);
+  List.iter (fun input -> check bool "a workspace write is not a transport read" false (affects input))
+    [ Input.Keeper_tool_call {keeper = "piano"}
+    ; Input.Keeper_approval_audit {keeper = "piano"; event = Keeper_approval.Audit.Gate_allowed}
+    ; Input.Keeper {keeper = "piano"; change = Input.Row}
+    ; Input.Keeper {keeper = "piano"; change = Input.Chat}
+    ; Input.Every_keeper_row
+    ; Input.Board
+    ; Input.Board_attention {keeper = "piano"; source = Keeper_board_attention_change.Candidate}
+    ; Input.Agent_core {keeper = Some "piano"; change = Input.Tool_called}
+    ; Input.Workspace_agent_signal {agent = "source-agent"}
+    ; Input.Telemetry_sample
+    ; Input.Telemetry_gap {source = Some Telemetry_unified_source.Execution_receipt; keeper = None}
+    ; Input.Dataset Workspace_dataset_event.Runtime_metrics
+    ; Input.Dataset (Workspace_dataset_event.Dashboard_observation {topic = `Telemetry; scope = `Workspace})
+    ; Input.Execution_invalidated
+    ; Input.Operator_judgment Operator_judgment.Command_namespace
+    ; Input.Tool_host_attention ]
+;;
+
 let test_execution_dependency_matrix () =
   let affects = Refresh.affects Refresh.Execution in
   List.iter (fun input -> check bool "execution source is admitted" true (affects input))
@@ -642,6 +667,8 @@ let () =
   run "workspace source refresh"
     [ "policy", [test_case "receipt health deadline" `Quick test_source_health_deadline;
                   test_case "closed source dependencies" `Quick test_exact_dependency_matrix;
+                  test_case "transport health reads on transport transitions only" `Quick
+                    test_transport_health_dependency_matrix;
                   test_case "execution original dependencies" `Quick test_execution_dependency_matrix;
                   test_case "Snapshot original dependencies" `Quick test_snapshot_dependency_matrix]
     ; "mission policy", [test_case "closed Mission source dependencies" `Quick test_mission_dependency_matrix;

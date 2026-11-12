@@ -738,12 +738,32 @@ let test_source_lifecycle_and_mirror_boundary () =
     TM.record_http_listener_started ~mode:"h1";
     check string "committed listener state precedes the notification" "listening"
       (List.hd !received |> U.member "status" |> U.to_string);
-    let before = List.length !received in
+    (* Ends any accept error an earlier case left on this process's listener. *)
     TM.record_http_accept ~mode:"h1";
-    check int "a real connection acceptance is a source" (before + 1) (List.length !received);
-    let accepted = List.hd !received |> U.member "accepted_total" |> U.to_int in
-    check int "notification sees the committed acceptance counter" accepted
-      (TM.http_listener_json () |> U.member "accepted_total" |> U.to_int);
+    let before = List.length !received in
+    let accepted () = TM.http_listener_json () |> U.member "accepted_total" |> U.to_int in
+    let accepted_before = accepted () in
+    TM.record_http_accept ~mode:"h1";
+    check int "a connection on a listening listener is a count, not a source" before
+      (List.length !received);
+    check int "the next read sees the acceptance" (accepted_before + 1) (accepted ());
+    TM.record_http_accept_error ~mode:"h1" ~error:"accept failed";
+    check int "the listener leaving its listening state is a source" (before + 1)
+      (List.length !received);
+    check string "the notification sees the committed accept error" "accept_error"
+      (List.hd !received |> U.member "status" |> U.to_string);
+    TM.record_http_accept_error ~mode:"h1" ~error:"accept failed";
+    check int "the same accept error again is a count, not a source" (before + 1)
+      (List.length !received);
+    TM.record_http_accept ~mode:"h1";
+    check int "the acceptance that ends the error state is a source" (before + 2)
+      (List.length !received);
+    TM.record_http_connection_closed ~mode:"h1";
+    TM.record_http_connection_closed ~mode:"h1";
+    TM.record_http_connection_closed ~mode:"h1";
+    TM.inc_mcp_auth_reject ~endpoint:"/mcp" ~reason:"invalid_token";
+    check int "closed connections and authentication rejects are counts, not sources"
+      (before + 2) (List.length !received);
     let before = List.length !received in
     TM.set_sse_sessions ~kind:TM.Observer 0;
     TM.observe_broadcast_duration 0.001;
@@ -756,7 +776,7 @@ let test_source_lifecycle_and_mirror_boundary () =
     TM.set_grpc_active_streams (streams + 1);
     check int "maintenance of an unchanged gauge is not a source" (before + 1) (List.length !received);
     remove (); remove ();
-    TM.record_http_connection_closed ~mode:"h1";
+    TM.set_grpc_active_streams (streams + 2);
     check int "release is idempotent and removes only this subscriber" (before + 1) (List.length !received))
 ;;
 
@@ -774,9 +794,21 @@ let test_https_source_and_listener_failure () =
       (Https.json () |> U.member "source_notification_failures" |> U.to_int);
     ignore (Https.json ());
     check int "reading HTTPS state cannot feed back" 1 (List.length !received);
+    Https.record_accept ();
+    Https.record_negotiated Https.Alpn_h2;
+    Https.record_handshake_failure ();
+    Https.record_connection_closed ();
+    check int "connections on a listening HTTPS listener are counts, not sources" 1
+      (List.length !received);
+    Https.record_accept_error ~error:"accept failed";
+    check bool "an HTTPS accept error is a source" true
+      (!received = [Https.Accept_error; Https.Listening]);
+    Https.record_accept_error ~error:"accept failed";
+    check int "the same HTTPS accept error again is a count, not a source" 2
+      (List.length !received);
     remove (); remove ();
     Https.record_stopped ();
-    check int "normal release removes the HTTPS listener" 1 (List.length !received))
+    check int "normal release removes the HTTPS listener" 2 (List.length !received))
 ;;
 
 let () =

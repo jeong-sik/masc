@@ -7404,6 +7404,7 @@
 (include stanzas/test_authz_credential_presentation.inc)
 (include stanzas/test_authz_principal_event.inc)
 (include stanzas/test_authz_cancel_event.inc)
+(include stanzas/test_authz_purge_event.inc)
 (include stanzas/test_authz_registration_event.inc)
 (include stanzas/test_authz_registration_state.inc)
 

@@ -92,6 +92,7 @@ export type HubState = {
 }
 
 export type HubAction =
+  | { type: 'owner_reset'; keeperName: string }
   | { type: 'fetch_started'; keeperName: string }
   | { type: 'fetch_succeeded'; keeperName: string; snapshot: KeeperCompositeSnapshot; fetchedAt: number }
   | { type: 'fetch_failed'; keeperName: string; error: string; failedAt: number }

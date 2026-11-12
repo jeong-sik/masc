@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks'
+import { Effect, Either } from 'effect'
 import { InlineSpinner } from './common/inline-spinner'
 import { DialogOverlay } from './common/dialog'
 import { TextInput } from './common/input'
@@ -12,10 +13,11 @@ import {
   type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
 import { fetchGateKeepers } from '../api/gate-keepers'
-import { dashboardRuntime } from '../api/effect-http'
+import { dashboardRuntime, DashboardTransportError } from '../api/effect-http'
 import { ApiRequestError } from '../api/core'
 import { executionLoaded, keepers, refreshExecution } from '../store'
 import { setupObservationRefresh } from '../lib/observation-refresh'
+import { subscribeDashboardObservationOwnerChanges } from '../lib/observation-read-owner'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
 import { useGlobalShortcut } from '../lib/use-global-shortcut'
 import { isImeComposing } from '../lib/keyboard'
@@ -279,6 +281,8 @@ function reduceHubState(state: HubState, action: HubAction): HubState {
         }
 
   switch (action.type) {
+    case 'owner_reset':
+      return { ...initialHubState, keeperName: action.keeperName }
     case 'fetch_started': {
       // Preserve `'fresh'` payload across a refetch only as `'stale'`.
       // The previous reducer kept `snapshot` populated and merely
@@ -374,7 +378,7 @@ export interface FsmHubProps {
   mode?: 'fleet' | 'detail'
   /** RFC-0046 §7 #2 follow-up: parent-supplied composite snapshot.
    *  When the prop is present (not `undefined`), this hub stops
-   *  issuing its own /composite poll and feeds the parent value into
+   *  issuing its own /composite read and feeds the parent value into
    *  its reducer as a `fetch_succeeded` event. `null` means the
    *  parent is loading — wait, do not race a duplicate fetch.
    *  Only honoured in `mode='detail'`; in `'fleet'` mode the keeper
@@ -516,10 +520,8 @@ export function FsmHub(props: FsmHubProps = {}) {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  // Primary source: the event-hydrated dashboard shell store.
-  // Fallback: direct gate fetch — the shell endpoint omits keeper
-  // details (only sends configured_keepers count), so without this
-  // fallback the FsmHub sees zero keepers and renders empty state.
+  // Accepted execution rows own the directory. Before the first execution
+  // observation, the current Gate directory supplies the cold read.
   const storeKeeperList = keepers.value
   const executionLoadedValue = executionLoaded.value
   const storeNames = useMemo(
@@ -530,7 +532,11 @@ export function FsmHub(props: FsmHubProps = {}) {
     if (!shouldUseGateKeeperFallback(executionLoadedValue, storeNames)) return
     return setupObservationRefresh(async signal => {
       try {
-        const data = await dashboardRuntime.runPromise(fetchGateKeepers(), { signal })
+        const result = await dashboardRuntime.runPromise(Effect.either(fetchGateKeepers()), { signal })
+        if (Either.isLeft(result)) {
+          throw result.left instanceof DashboardTransportError ? result.left.cause : result.left
+        }
+        const data = result.right
         if (signal.aborted) return
         const next = data.keepers.map(k => k.name).sort()
         setGateKeeperNames(prev =>
@@ -541,7 +547,7 @@ export function FsmHub(props: FsmHubProps = {}) {
       } catch (error) {
         if (!signal.aborted) throw error
       }
-    }, { topics: ['keeper_composite', 'gate'] })
+    }, { topics: ['keeper_composite', 'gate'], resetRead: () => setGateKeeperNames([]) })
   }, [executionLoadedValue, storeNames, refreshKey])
 
   const keeperNames = shouldUseGateKeeperFallback(executionLoadedValue, storeNames)
@@ -555,6 +561,13 @@ export function FsmHub(props: FsmHubProps = {}) {
     if (selected && keeperNames.includes(selected)) return selected
     return keeperNames[0] ?? null
   }, [keeperNames, selected])
+
+  useEffect(() => {
+    if (!activeSelected || externalSnapshot === undefined) return
+    const reset = () => dispatch({ type: 'owner_reset', keeperName: activeSelected })
+    reset()
+    return subscribeDashboardObservationOwnerChanges(reset)
+  }, [activeSelected, externalSnapshot !== undefined])
 
   useEffect(() => {
     if (!activeSelected) return
@@ -611,7 +624,8 @@ export function FsmHub(props: FsmHubProps = {}) {
         })
         throw err
       }
-    }, { topics: ['keeper_composite'], keeperName: activeSelected })
+    }, { topics: ['keeper_composite'], keeperName: activeSelected,
+      resetRead: () => dispatch({ type: 'owner_reset', keeperName: activeSelected }) })
   }, [activeSelected, refreshKey, externalSnapshot])
 
   useGlobalShortcut(

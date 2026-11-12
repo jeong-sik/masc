@@ -3,7 +3,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import type { ComponentType } from 'preact'
-import { useEffect, useMemo } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { RouteState, TabId } from '../types'
 import type { DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
 import {
@@ -56,8 +56,6 @@ import { keepersNotRunning } from './fleet-health-panel'
 import { ShieldAlert } from 'lucide-preact'
 
 const buildIdentityOpen = signal(false)
-const shellRuntimeProviderProbe = signal<DashboardRuntimeProbePayload | null>(null)
-const shellRuntimeProviderProbeError = signal<string | null>(null)
 
 function BuildInfoRow({ label, children }: { label: string; children: unknown }) {
   return html`
@@ -591,29 +589,33 @@ function healthChipClass(tone: DashboardHealthChipTone): string {
 }
 
 export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
+  const [runtimeProviderProbe, setRuntimeProviderProbe] = useState<DashboardRuntimeProbePayload | null>(null)
+  const [runtimeProviderProbeError, setRuntimeProviderProbeError] = useState<string | null>(null)
   useEffect(() => {
     return setupObservationRefresh(async signal => {
       try {
         const response = await fetchDashboardRuntimeProbe(false, { signal })
         if (signal.aborted) return
-        shellRuntimeProviderProbe.value = response.probe
-        shellRuntimeProviderProbeError.value = null
+        setRuntimeProviderProbe(response.probe)
+        setRuntimeProviderProbeError(null)
       } catch (error) {
         if (signal.aborted) return
-        shellRuntimeProviderProbe.value = null
-        shellRuntimeProviderProbeError.value = error instanceof Error ? error.message : String(error)
+        setRuntimeProviderProbe(null)
+        setRuntimeProviderProbeError(error instanceof Error ? error.message : String(error))
         throw error
       }
-    }, { topics: ['runtime_probe'], resetRead: () => { shellRuntimeProviderProbe.value = null; shellRuntimeProviderProbeError.value = null } })
+    }, { topics: ['runtime_probe'], resetRead: () => {
+      setRuntimeProviderProbe(null)
+      setRuntimeProviderProbeError(null)
+    } })
   }, [])
 
   const live = dashboardObserverReady.value
   // dashboardHealthChips does 2 keeper filter passes + resolveRuntimeCounts +
   // up to ~12 chip objects. The input object below is a fresh literal every
   // render, so memoizing on the object would always miss — instead list the
-  // individual signal values as deps. DashboardHealthStrip re-renders on the
-  // 30s runtime probe tick and ws event counts, which are unrelated to most
-  // of these inputs; the chip rebuild is skipped when they are unchanged.
+  // individual signal values as deps. The chip rebuild is skipped when these
+  // inputs are unchanged.
   const chips = useMemo(
     () => dashboardHealthChips({
       connected: live,
@@ -623,8 +625,8 @@ export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
       keepers: keepers.value,
       runtimeResolution: shellRuntimeResolution.value,
       runtimeGeneratedAt: shellRuntimeResolution.value?.generated_at ?? null,
-      runtimeProviderProbe: shellRuntimeProviderProbe.value,
-      runtimeProviderProbeError: shellRuntimeProviderProbeError.value,
+      runtimeProviderProbe,
+      runtimeProviderProbeError,
       executionError: executionError.value,
       loading: dashboardLoading.value || namespaceTruthInitializing.value,
       pendingVerificationCount: tasksByStatus.value.awaitingVerification.length,
@@ -636,8 +638,8 @@ export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
       namespaceTruth.value?.root.configured_keepers,
       keepers.value,
       shellRuntimeResolution.value,
-      shellRuntimeProviderProbe.value,
-      shellRuntimeProviderProbeError.value,
+      runtimeProviderProbe,
+      runtimeProviderProbeError,
       executionError.value,
       dashboardLoading.value || namespaceTruthInitializing.value,
       tasksByStatus.value.awaitingVerification.length,

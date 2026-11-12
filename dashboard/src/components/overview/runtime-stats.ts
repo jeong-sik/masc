@@ -9,6 +9,8 @@ import {
 import type { ProviderUsageScope, ProviderUsageWindow, RuntimeResolvedResponse } from '../../api/schemas/runtime-resolved'
 import { loadRuntimeCatalog, reloadRuntimeCatalog, runtimeCatalogState } from '../../lib/runtime-catalog-resource'
 import { setupObservationRefresh } from '../../lib/observation-refresh'
+import { captureDashboardObservationOwner, dashboardObservationOwnerIsCurrent, readDashboardObservationOwner,
+  type DashboardObservationOwner } from '../../lib/observation-read-owner'
 import { useModelMetrics } from '../../lib/use-model-metrics'
 import { RouteLink } from '../common/route-link'
 import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '../../store'
@@ -122,37 +124,35 @@ function ProviderAccount({ client, usage, authority }: {
 
 export function OverviewRuntimeStats() {
   const authority = executionWorkspaceAuthority.value
+  void readDashboardObservationOwner()
   const [windowMinutes, setWindowMinutes] = useState(60)
   const [generation, setGeneration] = useState(0)
   const metrics = useModelMetrics({ windowMinutes, bucketMinutes: 0 })
   const [usageReading, setUsageReading] = useState<{
-    authority: ExecutionWorkspaceAuthority; catalog: DashboardRuntimeProviderSnapshot[]; state: UsageState
+    owner: DashboardObservationOwner; catalog: DashboardRuntimeProviderSnapshot[]; state: UsageState
   } | null>(null)
   useEffect(() => { loadRuntimeCatalog() }, [])
   const catalog = runtimeCatalogState.value
   const usageCatalog = catalog.status === 'loaded' ? catalog.data : null
   const state = metrics.state
-  const usage: UsageState = usageReading?.authority === authority && usageReading?.catalog === usageCatalog
+  const usage: UsageState = usageReading !== null && dashboardObservationOwnerIsCurrent(usageReading.owner) && usageReading.catalog === usageCatalog
     ? usageReading.state : { kind: 'loading' }
   useEffect(() => {
     if (authority === null || usageCatalog === null || !usageCatalog.some(reportsUsageWindows)) return
-    const controller = new AbortController()
-    const current = () => !controller.signal.aborted && executionWorkspaceAuthority.peek() === authority
-    const publish = (state: UsageState) => { if (current()) setUsageReading({ authority, catalog: usageCatalog, state }) }
-    publish({ kind: 'loading' })
     const refresh = async (signal: AbortSignal) => {
-      if (!current()) return
+      const owner = captureDashboardObservationOwner()
+      const current = () => !signal.aborted && dashboardObservationOwnerIsCurrent(owner)
+      const publish = (state: UsageState) => { if (current()) setUsageReading({ owner, catalog: usageCatalog, state }) }
       try {
-        const value = await fetchRuntimeResolved({ signal: AbortSignal.any([signal, controller.signal]) })
-        if (!signal.aborted) publish({ kind: 'ready', value })
+        const value = await fetchRuntimeResolved({ signal })
+        publish({ kind: 'ready', value })
       } catch (error) {
-        if (signal.aborted) return
+        if (!current()) return
         publish({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
         throw error
       }
     }
-    const stopRefresh = setupObservationRefresh(refresh, { topics: ['runtime_resolved'], resetRead: () => setUsageReading(null) })
-    return () => { stopRefresh(); controller.abort() }
+    return setupObservationRefresh(refresh, { topics: ['runtime_resolved'], resetRead: () => setUsageReading(null) })
   }, [authority, usageCatalog, generation])
   const accounts = new Map<string, DashboardRuntimeProviderSnapshot>()
   if (catalog.status === 'loaded') {

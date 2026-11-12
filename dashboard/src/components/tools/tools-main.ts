@@ -151,7 +151,11 @@ export function Tools() {
     }
     const stopRefresh = setupObservationRefresh(refresh, {
       topics: ['tools', 'skill_activations'], keeperName: selectedKeeper,
-      resetRead: () => { setKeeperReceipt(null); setKeeperReceiptError(null); setKeeperReceiptLoading(true) },
+      resetRead: () => {
+        setKeeperReceipt(null)
+        setKeeperReceiptError(null)
+        setKeeperReceiptLoading(true)
+      },
     })
     return () => {
       stopRefresh()

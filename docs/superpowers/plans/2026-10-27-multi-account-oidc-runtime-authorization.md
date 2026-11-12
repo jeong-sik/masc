@@ -1249,22 +1249,25 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 대상은 `Keeper_conversation {owner, conversation_id}`다. 지우기 상태는 그 대상의 마지막 Purge 사건이다(설계 §8.5-6). 사건은 셋이다.
     - `Purge_pending {target}`. 지우기를 시작한다. authz append 하나이고 §8.2의 `Purge` 사건이라 Intent/Committed 규칙과 외부 저장소를 따른다.
     - `Purged {target, vendor_copy}`. 폴더를 지웠다.
-    - `Purge_failed {target, reason, vendor_copy}`. 폴더를 지우지 못했다. 사람에게 보이는 종단이다(설계 §8.5-5). `reason`은 `Folder_not_removed` 하나다.
+    - `Purge_failed {target, failed_stage, vendor_copy}`. 폴더를 지우지 못했다. 사람에게 보이는 종단이다(설계 §8.5-5). `failed_stage`는 `Folder_not_removed` 하나다.
+    - 설계 §8.5의 `Purged {target, deleted_count}`와 `Purge_failed {target, failed_stage: Writer_not_terminated}`는 F1이 표시로 정하는 대상의 모양이다. 대화 대상은 폴더 하나라서 `deleted_count`를 싣지 않고, vendor 사본의 결과(`vendor_copy`)를 싣는다. 실패 단계는 `Folder_not_removed`를 더한다. `Writer_not_terminated`가 이 대상에 생기지 않는 까닭은 아래 「순서」에 있다. 설계 §8.5에 같은 문장을 적었다.
   - 인증(#51616 리뷰 P3). Active인 owner만 자기 대화를 지운다. 판정은 `Manage_own_keeper`다. PAT는 범위에 `manage_own_keeper`가 있어야 하고, `read_state`만 있는 PAT는 지우지 못한다. 브라우저는 same-origin과 CSRF token을 낸다. 대상은 부른 사람의 namespace 안의 대화뿐이다. Admin도 다른 사람의 대화를 지우지 못한다.
-  - 순서. 판정부터 마지막 append까지 그 대화의 계정 잠금(`one_call_of`) 안에서 한다. 잠금은 계정 단위라서 같은 계정의 다른 Keeper 턴이 돌 때도 409다. vendor 사본 정리가 그 계정 홈의 파일을 고치므로, 같은 홈에서 CLI가 동시에 돌지 않게 하려는 것이다.
-    1. 판정. 자기 Keeper의 대화(index의 `started`)가 아니면 404다. 마지막 사건이 `Purged`이면 404다. 사건이 없거나 `Purge_failed`이면 다음으로 간다.
+  - 순서. 판정부터 마지막 append까지 그 대화를 시작한 계정의 잠금(`one_call_of`) 안에서 한다. 잠금은 계정 단위라서 같은 계정의 다른 Keeper 턴이 돌 때도 409다. vendor 사본 정리가 그 계정 홈의 파일을 고치므로, 같은 홈에서 CLI가 동시에 돌지 않게 하려는 것이다.
+    - 이 잠금이 설계 §8.5-3의 writer 종단 대기를 대신한다. 그 대화에 쓰는 것은 그 대화의 턴과, 그 대화 뒤에 새 대화를 시작하는 일(앞 대화 파일의 반쪽 줄을 자른다, #51720)뿐이다. 둘 다 같은 잠금 안에서 돈다. 그래서 지우기가 잠금을 잡은 순간 쓰는 주체가 없다. 잠금이 잡혀 있으면 기다리지 않고 409로 돌려보낸다. `Purge_pending`을 쓰기 전이라 사건이 남지 않는다. 이 대상에 `Writer_not_terminated`가 생기지 않는 까닭이다.
+    1. 판정. 자기 Keeper의 대화(index의 `started`)가 아니면 404다. 마지막 사건이 `Purged`이면 404다. 사건이 없거나 `Purge_failed`이면 2번으로 간다. 마지막 사건이 `Purge_pending`이면 `Purge_pending`을 다시 쓰지 않고 3번부터 이어서 한다. 서버가 지우다 멈춘 뒤 재기동 복구보다 `DELETE`가 먼저 온 경우다. 재기동 복구도 같은 잠금 안에서 해서 둘이 겹치지 않는다.
     2. `Purge_pending`을 쓴다. 이때부터 그 대화는 읽히지 않고 턴도 돌지 않는다.
     3. vendor 사본을 먼저 지운다(#51616 리뷰 P2). 그 대화에서 CLI가 물음을 받았을 수 있는 턴(`answered`, `model_may_have_read`인 `failed`, 끝 줄이 없는 턴)이 있으면, 그 대화를 시작한 계정 홈을 `CLAUDE_CONFIG_DIR`로 주고 `claude purge --yes <그 대화 작업 폴더의 실제 경로>`를 부른다. 대화마다 작업 폴더가 따로라서 이 명령은 그 대화 하나에 맞는다. exit 0이면 `vendor_copy = removed`, 그 밖은 `may_remain`이다. 출력 글자를 읽어 가르지 않는다. CLI가 2.1.288보다 옛 것이면 부르지 않고 `may_remain`이다(`--version`으로 묻는다). 그런 턴이 없으면 부르지 않고 `none`이다. 맞는 상태가 없을 때의 exit 1을 실패와 가를 수 없어서다. 앞 시도의 `Purge_failed`가 `removed`를 적었으면 다시 부르지 않는다. 대화 id와 index의 계정만으로 다시 만들 수 있는 값이라 handle을 따로 남기지 않는다.
     4. 대화 폴더(`<conversation_id>/`)를 지운다. 링크를 따라가지 않는다.
-    5. 지웠으면 `Purged {vendor_copy}`, 못 지웠으면 `Purge_failed {Folder_not_removed, vendor_copy}`를 쓴다.
+    5. 지웠으면 `Purged {vendor_copy}`, 못 지웠으면 `Purge_failed {failed_stage = Folder_not_removed, vendor_copy}`를 쓴다.
   - 답. 지웠으면 200 `{"conversation_id", "vendor_copy"}`다. 204를 쓰지 않는다. vendor 사본이 남을 수 있다는 것을 실어야 해서다(#51616 리뷰 P2). `removed`여도 CLI의 `backups/`에 옛 `.claude.json` 사본이 그 project 항목을 갖고 있을 수 있다. 화면과 도구 설명이 이것을 밝힌다. 폴더를 못 지웠으면 503이고 `Purge_failed`가 남는다. 같은 대화에 `DELETE`를 다시 부르면 1번부터 다시 한다. `Purged` 뒤에는 404다.
-  - 재기동. 남은 `Purge_pending`은 3~5번을 이어서 한다(설계 §8.5-5). `Purged`인데 폴더가 다시 있으면 폴더를 지우고 `Purged`를 한 번 더 쓴다(설계 §8.5-6). 복원이 폴더만 되살린 경우다. 그 사이 읽기와 턴은 authz 상태로 거절된다.
+  - 재기동. 남은 `Purge_pending`은 3~5번을 이어서 한다(설계 §8.5-5). `Purged`인데 폴더가 다시 있으면 3~5번을 다시 하고 `Purged`를 한 번 더 쓴다(설계 §8.5-6). 복원이 폴더를 되살린 경우다. 그 사이 읽기와 턴은 authz 상태로 거절된다.
+    - 다시 쓰는 `Purged`의 `vendor_copy`는 이번 실행의 값이다. 앞 `Purged`의 값을 잇지 않는다. 복원이 계정 홈도 되감았으면 vendor 사본이 돌아왔을 수 있어서, 되살아난 폴더의 턴을 보고 3번의 규칙대로 purge를 다시 부른다. 계정 홈이 돌아오지 않았으면 CLI가 상태를 찾지 못해 `may_remain`이 된다. 서버가 exit 0을 보지 못한 지우기를 `removed`라고 적지 않는다.
   - 복원이 authz 로그까지 되감으면 부팅 판정(설계 §5.1)이 외부 고수위와 달라 부팅을 거부한다. 복원 창(F2)이 들어오면 설계 §10.5의 대조가 같은 대상을 다시 지정한다.
-  - 읽기, 턴, "지금 대화", 목록은 index를 읽은 뒤 Purge 상태로 거른다. 목록은 `Purged`와 `Purge_pending` 대화를 빼고, `Purge_failed` 대화에는 `"deletion": "failed"`를 붙인다. `Purge_failed` 대화의 턴은 읽히지 않는다.
+  - 읽기, 턴, "지금 대화", 목록은 index를 읽은 뒤 Purge 상태로 거른다. 목록은 `Purged`와 `Purge_pending` 대화를 빼고, `Purge_failed` 대화에는 `"deletion": "failed"`를 붙인다. `Purge_failed` 대화는 목록에만 보인다. 그 id로 턴을 읽으면 404다. 사람은 그 id로 `DELETE`를 다시 부른다.
   - 사람 자체를 지우는 purge(F1)는 이 폴더 전체를 대상에 넣는다.
 - 경로와 도구.
   - `POST /api/v1/auth/keepers/turn`. 본문은 그대로다. 지금 대화가 없으면 시작한다. 답에 `conversation_id`와 `continued`(이번 턴이 session을 이어받았는지)를 더한다.
-  - `POST /api/v1/auth/keepers/conversation`. 본문은 `{"keeper_id"}`다. 새 대화를 시작한다. 앞 대화의 기록은 남는다.
+  - `POST /api/v1/auth/keepers/conversation`. 본문은 `{"keeper_id"}`다. 새 대화를 시작한다. 앞 대화의 기록은 남는다. 앞 대화에는 이 뒤로 턴이 오지 않으므로 이것이 앞 대화의 마지막 쓰기다. 앞 대화를 시작한 계정의 잠금 안에서 앞 대화 턴 파일의 반쪽 줄을 자르고 새 대화를 적는다. 그 계정 호출이 돌면 409다(#51720).
   - `GET /api/v1/auth/keepers/conversation?keeper_id=<이름>`. 지금 대화의 id와 턴을 순서대로 답한다. 그 Keeper의 대화 목록(`conversations`)도 함께 답한다. 목록의 항목은 id, 시작한 구독(`provider_account_id`), 시작한 시각이고 `index.jsonl`에서 읽는다. 지우다 실패한 대화에는 `deletion`이 붙는다. 본문은 없다. 사람은 지울 대화의 id를 여기서 얻는다.
   - 같은 경로에 `conversation_id=<id>`를 더하면 그 Keeper의 그 대화의 턴을 답한다. Purge 사건이 있는 대화와 자기 것이 아닌 id는 404다.
   - `DELETE /api/v1/auth/keepers/conversation/<conversation_id>`. 그 대화를 지운다. 답은 200 `{"conversation_id", "vendor_copy"}`다. 자기 것이 아니거나 없는 id는 404다.

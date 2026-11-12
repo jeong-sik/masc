@@ -24,7 +24,7 @@
 
 ### 1.1 1단계와 2단계
 
-1단계는 초대한 사람이 Google이나 GitHub으로 로그인해 자기 Runtime으로 자기 Keeper를 쓰는 데까지다(2026-11-04 사용자 결정). 1단계는 목표 1·2·4를 지키고, 목표 3에서는 credential과 Runtime을 공유하지 않는 쪽만 지킨다. Runtime의 `Use` 공유(Delegated·MachineShared), 입장 요청(§5.1-2c), MCP OAuth 결속, purge(§8.5), 복원 창과 다시 켜기(§10), official lane attestation(§7.2의 증명)은 2단계다. 모드 끄기(`off`)는 서버가 없을 때 받는 것만 1단계에 넣고 1단계를 여는 S1보다 먼저 만든다(2026-11-08 사용자 결정, 계획 §6 결정 10). 켜는 길만 열면 실제 설치가 되돌릴 수 없이 다계정으로 넘어가기 때문이다. 1단계를 여는 조건은 §11.1이고, 2단계 기능이 들어오면 그 기능의 증거가 §11의 요구 목록에 다시 들어간다. 1단계에서도 백업 복원은 §5.1 표의 부팅 판정을 거친다.
+1단계는 초대한 사람이 Google이나 GitHub으로 로그인해 자기 Runtime으로 자기 Keeper를 쓰는 데까지다(2026-11-04 사용자 결정). 1단계는 목표 1·2·4를 지키고, 목표 3에서는 credential과 Runtime을 공유하지 않는 쪽만 지킨다. Runtime의 `Use` 공유(Delegated·MachineShared), 입장 요청(§5.1-2c), MCP OAuth 결속, purge(§8.5), 복원 창과 다시 켜기(§10), official lane attestation(§7.2의 증명)은 2단계다. 다만 purge 가운데 사람이 자기 Keeper 대화 하나를 지우는 조각은 1단계에 넣는다(2026-11-12 사용자 결정, 계획 S1b-3c). 모드 끄기(`off`)는 서버가 없을 때 받는 것만 1단계에 넣고 1단계를 여는 S1보다 먼저 만든다(2026-11-08 사용자 결정, 계획 §6 결정 10). 켜는 길만 열면 실제 설치가 되돌릴 수 없이 다계정으로 넘어가기 때문이다. 1단계를 여는 조건은 §11.1이고, 2단계 기능이 들어오면 그 기능의 증거가 §11의 요구 목록에 다시 들어간다. 1단계에서도 백업 복원은 §5.1 표의 부팅 판정을 거친다.
 
 ## 2. 목표·비목표·반목표
 
@@ -536,6 +536,7 @@ purge는 **두 단계**(`Purge_pending`, 삭제 뒤 `Purged`)로 나뉜다 — �
 4. 삭제가 실패하면 `Purge_failed {target, failed_stage}`를 append하고 대상은 읽을 수 없는 채로 둔다. `Purge_failed`는 Dashboard와 `/health`에 보이고, 다음 재기동이나 Local_operator의 명시 재실행으로만 다시 한다.
 5. 재기동 때 남은 `Purge_pending`은 모두 이어서 삭제한다. `Purge_pending`은 `Purged` 아니면 눈에 보이는 `Purge_failed`로만 끝나며 무기한 남지 않는다.
 6. `Purge_pending`과 `Purged`는 target 단위로 멱등이다. 복원이 지운 데이터를 되살려 같은 target을 다시 지정하면(§10.5) `Purged`가 한 번 더 나가고, 읽는 쪽은 target의 마지막 사건을 현재 상태로 본다.
+7. `Purged`와 `Purge_failed`의 필드는 target 종류를 따른다. 위의 `deleted_count`와 `Writer_not_terminated`는 표시로 정하는 대상의 것이다. 사람의 Keeper 대화 하나(계획 S1b-3c)는 폴더 하나라서 `Purged {target, vendor_copy}`를 쓰고, 실패 단계에 `Folder_not_removed`를 더한다. 그 대화에 쓰는 주체는 모두 그 대화 계정의 호출 잠금 안에서 돌아서, 3항의 종단 대기를 그 잠금이 대신한다.
 
 ## 9. worker·account-home·취소
 
@@ -636,6 +637,7 @@ Single_user 모드의 현재 동작은 바꾸지 않는다. 계정당 동시 dis
 - Provider 두 계정 호출과 제3자 거부. 다른 owner의 Runtime을 Keeper에 배정하거나 실행하려는 시도의 거부를 포함한다.
 - Keeper 실행 lane 종류(호스트 프로세스, container, microVM)마다 다른 owner의 account-home을 읽으려다 거절되는 시험. §7.2의 attestation이 아니라 lane마다 한 번 시도한 결과다.
 - 호스트 프로세스 lane은 서버와 같은 OS 사용자로 돌아서 다른 owner의 account-home을 읽을 수 있다. 위 시험을 통과하지 못하는 lane은 `Multi_account`에서 턴을 시작하지 못한다. 남의 홈이 읽히는 것은 실행할 때이므로 판정은 턴이 시작될 때 한다. 그런 lane의 Runtime을 Keeper에 배정하는 것은 막지 않는다(2026-11-12 사용자 결정).
+- 사람이 지운 자기 Keeper 대화가 다시 읽히지 않는다는 시험(계획 S1b-3c). 지운 뒤 읽기와 턴이 거절되고, 폴더만 되살린 뒤 다시 띄우면 그 폴더가 다시 지워진다.
 
 복구 리허설, official lane attestation, Single_flight 대기 시간은 1단계 조건이 아니다. 그 기능을 내는 2단계 층이 증거를 만들고, 그때 §11의 요구 목록으로 돌아간다.
 

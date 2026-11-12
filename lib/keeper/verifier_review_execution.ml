@@ -89,14 +89,13 @@ type observation =
   | No_verdict of (string * Verifier_review_ending.t) list
   | Verdict of AR.review_result
 
-let report_tool_name = "report_review_verdict"
-
 type call_reading =
   | Call_awaiting
   | Call_repair of string
   | Call_ended of
       { ending : Verifier_review_ending.t
       ; reports : Agent.Execution_projection.settled_tool_invocation list
+      ; unsettled_reports : int
       }
 
 let read_call ~base_path ~original reference =
@@ -109,20 +108,22 @@ let read_call ~base_path ~original reference =
     ~keeper_name:reference.keeper_name ~call_id in
   let* projection = Keeper_request_execution.projection journal in
   let map_error result = Result.map_error Agent.Execution_projection.error_to_string result in
-  (* How the execution ended and which report calls it settled are read apart:
+  (* How the execution ended and which report calls it holds are read apart:
      a report the handler settled stays a report whatever ended the run.
      [Retire] means no admitted Tool attempt is left without a result, so a
-     report call missing from the settled list never reached its handler. *)
+     report call that holds no result never reached its handler. *)
   let ended ~recovery ending =
     match recovery with
     | Agent.Operator_repair_required Effect_outcome_unknown ->
       Ok (Call_repair "original execution has an unsettled effect")
     | Retire ->
-      let* invocations = Agent.Execution_projection.settled_tool_invocations projection |> map_error in
+      let* invocations = Agent.Execution_projection.tool_invocations projection |> map_error in
       let reports = List.filter
         (fun (invocation : Agent.Execution_projection.settled_tool_invocation) ->
-           String.equal invocation.tool_name report_tool_name) invocations in
-      Ok (Call_ended {ending; reports}) in
+           String.equal invocation.tool_name AR.report_tool_name) invocations.settled in
+      let unsettled_reports = List.length
+        (List.filter (String.equal AR.report_tool_name) invocations.unsettled_tool_names) in
+      Ok (Call_ended {ending; reports; unsettled_reports}) in
   let* observation = Agent.observe_execution projection |> map_error in
   match observation with
   | Agent.Execution_awaiting -> Ok Call_awaiting
@@ -164,17 +165,24 @@ let observe ~base_path ~original progress =
     | Some detail -> Ok (Repair_required detail)
     | None ->
       let ended = List.filter_map (function
-        | reference,Call_ended {ending;reports} -> Some (reference,ending,reports)
+        | reference,Call_ended {ending;reports;unsettled_reports} ->
+          Some (reference,ending,reports,unsettled_reports)
         | _,(Call_awaiting | Call_repair _) -> None) readings in
-      (* Settled report calls are counted over the whole attempt. *)
-      match List.concat_map (fun (reference,_,reports) ->
-        List.map (fun report -> reference,report) reports) ended with
-      | [] -> Ok (No_verdict (List.map (fun (reference,ending,_) -> reference.runtime_id,ending) ended))
-      | [reference,report] ->
+      (* Report calls are counted over the whole attempt. One that never
+         started recorded nothing: alone it leaves the attempt without a
+         verdict, and beside a settled report it shows the reviewer asked to
+         report more than once. *)
+      let settled = List.concat_map (fun (reference,_,reports,_) ->
+        List.map (fun report -> reference,report) reports) ended in
+      let unsettled = List.fold_left (fun total (_,_,_,count) -> total + count) 0 ended in
+      match settled,unsettled with
+      | [],_ -> Ok (No_verdict (List.map (fun (reference,ending,_,_) -> reference.runtime_id,ending) ended))
+      | [reference,report],0 ->
         (match verdict_of_report report with
          | Error detail -> Ok (Repair_required detail)
          | Ok verdict -> Ok (Verdict {
              AR.verdict=Some verdict;evaluator_runtime=reference.runtime_id;
              generator_runtime=V.generator_runtime original;evaluator_execution=None;
              gate=AR.Structured_tool;fallback_reason=None;retryable_runtimes=[];model_absent_runtimes=[]}))
-      | _ :: _ :: _ -> Ok (Repair_required "original report history cannot establish one accepted verdict")
+      | [_],_ | _ :: _ :: _,_ ->
+        Ok (Repair_required "original report history cannot establish one accepted verdict")

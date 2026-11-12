@@ -14,7 +14,8 @@ type observation =
   | Repair_required of string
   | No_verdict of (string * Verifier_review_ending.t) list
       (** Every recorded execution has ended with its effects settled, and
-          none settled a report invocation. Each execution's runtime and
+          none settled a report invocation; a report invocation that never
+          started may remain. Each execution's runtime and
           ending, in the order the executions were recorded. Whether the
           original is reviewed again is the caller's reading of what the walk
           left; this module only establishes that no verdict was produced. *)
@@ -23,15 +24,17 @@ type observation =
 val observe : base_path:string -> original:Verifier_review_original.t ->
   Lane_addon_request_progress.t -> (observation, string) result
 (** Validate all recorded call bindings and read their exact root journals.
-    An execution's ending and its settled report invocations are read apart,
-    and the settled report invocations are counted over every recorded
-    execution. Exactly one, admitted and settled successfully, supplies the
-    verdict whatever ended its execution afterwards: the handler had already
-    recorded it. A report invocation that was opened and never admitted did
-    not reach its handler and is not counted. Any other settled report
-    history, an admitted Tool attempt without a settled result, an
-    official-client session and a missing historical locator are
-    [Repair_required]; none of them authorizes execution.
+    An execution's ending and its report invocations are read apart, and the
+    report invocations are counted over every recorded execution. Exactly
+    one, admitted and settled successfully, supplies the verdict whatever
+    ended its execution afterwards: the handler had already recorded it.
+    A report invocation that holds no result never reached its handler. With
+    no settled report it leaves the attempt without a verdict; beside a
+    settled one it shows the reviewer asked to report more than once. That,
+    any other settled report history (a report the pre-execution gate refused
+    is settled without an attempt), an admitted Tool attempt without a
+    settled result, an official-client session and a missing historical
+    locator are [Repair_required]; none of them authorizes execution.
     A live or contended writer without a terminal remains [Awaiting]. Confirmed
     writer loss without a canonical terminal is an ending like the others: its
     tree is read as the lost writer last committed it. *)

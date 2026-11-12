@@ -34,6 +34,11 @@ type settled_tool_invocation =
   ; settlement_seq : int
   }
 
+type tool_invocations =
+  { settled : settled_tool_invocation list
+  ; unsettled_tool_names : string list
+  }
+
 type output_block_kind =
   | Text_block
   | Thinking_block
@@ -741,7 +746,7 @@ let latest_checkpoint t =
     None view.updates)
 ;;
 
-let settled_tool_invocations t =
+let tool_invocations t =
   let* snapshot = refresh t in
   let invalid detail =
     Error (Semantic_failure { seq = Durable.last_seq snapshot.durable; detail })
@@ -770,25 +775,28 @@ let settled_tool_invocations t =
     | [sequence] -> Ok sequence
     | [] | _ :: _ :: _ -> invalid "settled invocation has no unique result event"
   in
-  let rec visit records = function
-    | [] -> Ok (List.sort (fun a b -> Int.compare a.settlement_seq b.settlement_seq) records)
+  let rec visit records unsettled = function
+    | [] ->
+      Ok { settled = List.sort (fun a b -> Int.compare a.settlement_seq b.settlement_seq) records
+         ; unsettled_tool_names = List.rev unsettled }
     | (id, turn) :: rest ->
       Eio.Fiber.yield ();
       let* view = read id in
       if not (Event.Run_id.equal (Event.node_run_id view.node) t.locator_run_id)
-      then visit records rest
+      then visit records unsettled rest
       else
         let children turn =
           List.map (fun (child : Event.node Journal.event_record) ->
             Event.node_id child.value, turn) view.children @ rest
         in
         match Event.node_kind view.node with
-        | Event.Agent_turn {ordinal} -> visit records (children (Some ordinal))
-        | Event.Agent_run _ | Event.Provider_attempt _ -> visit records (children turn)
-        | Event.Output_block _ | Event.Tool_attempt -> visit records rest
+        | Event.Agent_turn {ordinal} -> visit records unsettled (children (Some ordinal))
+        | Event.Agent_run _ | Event.Provider_attempt _ -> visit records unsettled (children turn)
+        | Event.Output_block _ | Event.Tool_attempt -> visit records unsettled rest
         | Event.Tool_invocation {tool_name; schedule; completion; _} ->
           match view.materialized with
-          | Journal.Tool_invocation_state {result=None; _} -> visit records rest
+          | Journal.Tool_invocation_state {result=None; _} ->
+            visit records (tool_name :: unsettled) rest
           | Journal.Tool_invocation_state {input=Some (Llm_provider.Types.ToolUse use);
                                           result=Some (Llm_provider.Types.ToolResult result as block)} ->
             let* turn = match turn with
@@ -812,7 +820,7 @@ let settled_tool_invocations t =
             let invocation = Tool_contract.Invocation.of_occurrence occurrence
                 ~tool_use_id:use.id ~turn ~schedule ~completion in
             visit ({invocation; tool_name; input=use.input; result=block;
-                    attempt_admitted; settlement_seq} :: records) rest
+                    attempt_admitted; settlement_seq} :: records) unsettled rest
           | Journal.Tool_invocation_state {input=None; result=Some _}
           | Journal.Tool_invocation_state
               {input=Some (Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _
@@ -827,7 +835,11 @@ let settled_tool_invocations t =
           | Journal.Tool_attempt_state ->
             invalid "settled invocation has invalid canonical input or result"
   in
-  visit [] [root, None]
+  visit [] [] [root, None]
+;;
+
+let settled_tool_invocations t =
+  Result.map (fun invocations -> invocations.settled) (tool_invocations t)
 ;;
 
 let tree_recovery_evidence snapshot run ~missing =

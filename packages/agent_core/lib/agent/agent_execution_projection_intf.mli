@@ -274,6 +274,18 @@ module type S = sig
       pre-execution gate from an admitted attempt; admitted validation errors
       can still precede the handler. This is observation, not replay authority. *)
 
+  type tool_invocations =
+    { settled : settled_tool_invocation list
+    ; unsettled_tool_names : string list
+    }
+
+  val tool_invocations : t -> (tool_invocations, error) result
+  (** Every invocation of this root run, read from one snapshot. [settled] is
+      what {!settled_tool_invocations} returns. [unsettled_tool_names] names,
+      in tree order, the invocations that hold no result; whether one of them
+      was attempted is the recovery evidence's reading, not this list's. This
+      is observation, not replay authority. *)
+
   val beginning_cursor : t -> cursor
   val current_cursor : t -> (cursor, error) result
 

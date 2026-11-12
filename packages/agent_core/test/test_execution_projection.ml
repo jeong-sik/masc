@@ -463,7 +463,9 @@ let test_settled_invocation_projection () =
     locator)) in
   let reopened = projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
   check int "restart projection retains the same settled occurrences" 3
-    (List.length (projection_value (Projection.settled_tool_invocations reopened)))
+    (List.length (projection_value (Projection.settled_tool_invocations reopened)));
+  check (list string) "an invocation without a result is listed by its tool name" ["unsettled-tool"]
+    (projection_value (Projection.tool_invocations reopened)).unsettled_tool_names
 ;;
 
 let test_cursor_codec_is_closed_and_versioned () =

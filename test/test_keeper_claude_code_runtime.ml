@@ -6198,6 +6198,7 @@ let completed_record ~messages ~transmitted : Turn_record.t =
             ; model_input_front = Model_input_front.At_atom model_input_front
             }
         }
+  ; refused_model_input = None
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }

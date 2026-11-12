@@ -2118,6 +2118,7 @@ let run_named
     ?on_official_client_usage_report
     ?on_model_input_window_observation
     ?on_response_observed_model_input
+    ?on_refused_model_input
     ?carried_front_seed
     ?runtime_manifest_context
     ?runtime_manifest_append
@@ -2839,9 +2840,10 @@ let run_named
         let on_observation =
           match
             on_model_input_window_observation,
-            on_response_observed_model_input
+            on_response_observed_model_input,
+            on_refused_model_input
           with
-          | None, None -> None
+          | None, None, None -> None
           | _ ->
             Some
               (fun observation ->
@@ -2860,6 +2862,27 @@ let run_named
             transmitted_observation := !attempted
           | Keeper_official_client_host.Held_by_client_session ->
             transmitted_observation := None
+        in
+        (* A typed refusal answers the seed this attempt handed over. A
+           resumed session sent none, so its refusal names no range
+           (RFC-librarian-lifecycle §4.10). *)
+        let record_refused_model_input refusal =
+          let refused = !transmitted_observation in
+          transmitted_observation := None;
+          match on_refused_model_input, refused with
+          | ( Some observe
+            , Some (window : Runtime_model_input_tail_window.window_observation) ) ->
+            observe
+              { Turn_record.runtime_profile = attempt_runtime_id
+              ; window =
+                  { Turn_record.transmitted_atoms = window.transmitted_atoms
+                  ; total_atoms = window.total_atoms
+                  ; measurement = Turn_record.Durable_shape
+                  ; model_input_front = window.model_input_front
+                  }
+              ; refusal
+              }
+          | None, (Some _ | None) | Some _, None -> ()
         in
         let hooks =
           match on_response_observed_model_input with
@@ -2915,6 +2938,7 @@ let run_named
             official_prompt_sent_at := None)
         , on_observation
         , on_transmitted_model_input
+        , record_refused_model_input
         , hooks )
       in
       let inference_policy =
@@ -2959,6 +2983,7 @@ let run_named
         let ( reset_model_input_observation
             , on_model_input_window_observation
             , record_transmitted_model_input
+            , _record_refused_model_input
             , hooks ) =
           official_model_input_observation hooks
         in
@@ -3137,6 +3162,7 @@ let run_named
         let ( reset_model_input_observation
             , on_model_input_window_observation
             , record_transmitted_model_input
+            , _record_refused_model_input
             , hooks ) =
           official_model_input_observation hooks
         in
@@ -3273,6 +3299,7 @@ let run_named
         let ( reset_model_input_observation
             , on_model_input_window_observation
             , record_transmitted_model_input
+            , record_refused_model_input
             , hooks ) =
           official_model_input_observation hooks
         in
@@ -3306,6 +3333,7 @@ let run_named
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
           | Ok (workspace_root, native_context) ->
           Keeper_muse_runtime.run ~on_guidance_prepared ~input_source ~media_store
+            ~on_model_input_refused:record_refused_model_input
             ?on_native_tool_completion
             ?argument_source:official_argument_source
             ?on_tool_execution
@@ -3423,6 +3451,7 @@ let run_named
         let ( reset_model_input_observation
             , on_model_input_window_observation
             , record_transmitted_model_input
+            , _record_refused_model_input
             , hooks ) =
           official_model_input_observation hooks
         in

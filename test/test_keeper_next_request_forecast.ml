@@ -280,6 +280,7 @@ max-concurrent = 1
       ~price_input_per_million:None ~price_output_per_million:None
       ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
       ~model_input_window:(Some window) ~response_observed_model_input
+      ~refused_model_input:None
       ~raw_trace_run_ref:None
       ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
       ~turn_output_tokens:None
@@ -737,6 +738,7 @@ let test_the_librarian_gap_is_read_from_small_files () =
       ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
       ~model_input_window:(Some window)
       ~response_observed_model_input:(Some { Turn_record.runtime_profile = "librarian-gap"; window })
+      ~refused_model_input:None
       ~raw_trace_run_ref:None
       ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
       ~usage:

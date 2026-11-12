@@ -264,7 +264,7 @@ let test_each_store_write_tells_the_signal () =
         ~runtime_profile:"announce.fixture" ~selected_model:None ~finish_reason:None
         ~context_window:None ~price_input_per_million:None ~price_output_per_million:None
         ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
-        ~model_input_window:None ~response_observed_model_input:None ~raw_trace_run_ref:None
+        ~model_input_window:None ~response_observed_model_input:None ~refused_model_input:None ~raw_trace_run_ref:None
         ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
         ~turn_output_tokens:None
         ~usage:
@@ -436,7 +436,7 @@ let test_a_notification_reloads_the_warm_row () =
               ~runtime_profile:"announce.fixture" ~selected_model:None ~finish_reason:None
               ~context_window:None ~price_input_per_million:None ~price_output_per_million:None
               ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
-              ~model_input_window:None ~response_observed_model_input:None ~raw_trace_run_ref:None
+              ~model_input_window:None ~response_observed_model_input:None ~refused_model_input:None ~raw_trace_run_ref:None
               ~sampling:{ temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
               ~turn_output_tokens:None
               ~usage:

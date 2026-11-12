@@ -29,6 +29,7 @@ let record ?finish_reason ~turn ~ts () : Turn_record.t =
   ; request_wire_observation = None
   ; model_input_window = None
   ; response_observed_model_input = None
+  ; refused_model_input = None
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = Some 0.2

@@ -8479,7 +8479,7 @@ name = "content"
          ~selected_model:None ~finish_reason:None ~context_window:None
          ~price_input_per_million:None ~price_output_per_million:None
          ~request_latency_ms:None ~ttfrc_ms:None ~request_wire_observation:None
-         ~model_input_window:None ~response_observed_model_input:None ~raw_trace_run_ref:None
+         ~model_input_window:None ~response_observed_model_input:None ~refused_model_input:None ~raw_trace_run_ref:None
          ~request_observations:[]
          ~sampling:{temperature=None;top_p=None;max_tokens=None;enable_thinking=None}
          ~usage:{input_tokens=None;output_tokens=None;cache_creation_input_tokens=None;

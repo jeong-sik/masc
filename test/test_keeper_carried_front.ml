@@ -77,6 +77,7 @@ let record
                }
            }
        | true, None | false, _ -> None)
+  ; refused_model_input = None
   ; raw_trace_run_ref = None
   ; sampling = { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
   ; usage =

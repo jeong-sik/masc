@@ -58,6 +58,7 @@ let sample_record
       Some { runtime_profile = "glm-coding.glm-5-turbo"; body_bytes = 560_513 }
   ; model_input_window = None
   ; response_observed_model_input = None
+  ; refused_model_input = None
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = None

@@ -78,6 +78,7 @@ val run :
   model_input_projection:Keeper_history_projection.t option ->
   on_transmitted_model_input:
     (Keeper_official_client_host.transmitted_model_input -> unit) ->
+  ?on_model_input_refused:(Turn_record.model_input_refusal -> unit) ->
   hooks:Agent_core.Hooks.hooks option ->
   context_injector:Agent_core.Hooks.context_injector option ->
   context:Agent_core.Context.t option ->
@@ -152,6 +153,9 @@ module For_testing : sig
 
   val catalog_checked_model :
     configured_model:string option -> Runtime_muse_serve.error -> string option
+
+  val model_input_refusal_of_error :
+    Runtime_muse_serve.error -> Turn_record.model_input_refusal option
 
   val usage_reports
     :  turn_count:int

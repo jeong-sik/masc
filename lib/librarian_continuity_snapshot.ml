@@ -158,7 +158,7 @@ let of_json = function
   | _ -> Error (Invalid_snapshot "expected object")
 ;;
 
-let source_range ~trace_id ~lines ~messages =
+let source_range_on_caller ~trace_id ~lines ~messages =
   match R.select ~trace_id ~lines ~progress:None ~messages R.All_unread with
   | R.Read { range; _ } when range.start_atom = 0 -> Ok range
   | R.Stop error -> Error (Range_stopped error)
@@ -171,7 +171,7 @@ let source_range ~trace_id ~lines ~messages =
 
 (* A baseline identifies a real completed checkpoint endpoint; it does not
    certify that Memory ever read it. This source explicitly reads its prefix. *)
-let checkpoint_prefix_range ~trace_id ~lines ~messages =
+let checkpoint_prefix_range_on_caller ~trace_id ~lines ~messages =
   match R.select ~trace_id ~lines ~progress:None ~messages R.All_unread with
   | R.Baseline baseline ->
     let progress = { Keeper_librarian_progress.position = baseline.position;
@@ -197,7 +197,22 @@ let checkpoint_prefix_range ~trace_id ~lines ~messages =
      | R.Position_in_other_trace _ -> Error Trace_mismatch
      | R.Baseline _ -> Error Uncovered_history)
   | R.Read _ | R.Nothing_to_read | R.Position_in_other_trace _ | R.Stop _ ->
-    source_range ~trace_id ~lines ~messages
+    source_range_on_caller ~trace_id ~lines ~messages
+;;
+
+(* Selecting a range labels every message of the history and digests the
+   message that opens each atom a boundary line states, and a capture or a
+   restore labels the history again for its own checks. On a live Keeper turn
+   that was 64 ms and 84 ms of the main domain before the prefix digest below
+   was even submitted (2026-11-12). The entry points of this module hand the
+   whole computation to the shared CPU pool; it reads the arguments alone,
+   which are immutable values. Inside a pool job the submit runs inline, so
+   {!prefix_digest} does not wait on the pool it is already in. *)
+let off_caller ~name work = Domain_pool_ref.submit_cpu_or_inline ~name work
+
+let checkpoint_prefix_range ~trace_id ~lines ~messages =
+  off_caller ~name:__FUNCTION__ (fun () ->
+    checkpoint_prefix_range_on_caller ~trace_id ~lines ~messages)
 ;;
 
 let empty_prefix_digest =
@@ -298,19 +313,23 @@ let capture_range ?prefix ~origin ?end_atom ~unread_messages ~catch_up_end_atom 
 ;;
 
 let capture ~unread_messages ~trace_id ~lines ~messages ~working_state =
-  let* range = source_range ~trace_id ~lines ~messages in
-  capture_range ~origin:Witnessed_history ~unread_messages ~catch_up_end_atom:None ~trace_id ~lines ~messages ~working_state range
+  off_caller ~name:__FUNCTION__ (fun () ->
+    let* range = source_range_on_caller ~trace_id ~lines ~messages in
+    capture_range ~origin:Witnessed_history ~unread_messages ~catch_up_end_atom:None ~trace_id ~lines ~messages ~working_state range)
 ;;
 
 let capture_checkpoint_prefix ?prefix ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state () =
-  let* range = checkpoint_prefix_range ~trace_id ~lines ~messages in
-  capture_range ?prefix ~origin:Captured_checkpoint_prefix ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range
+  off_caller ~name:__FUNCTION__ (fun () ->
+    let* range = checkpoint_prefix_range_on_caller ~trace_id ~lines ~messages in
+    capture_range ?prefix ~origin:Captured_checkpoint_prefix ?end_atom ~unread_messages ~catch_up_end_atom ~trace_id ~lines ~messages ~working_state range)
 ;;
 
-let restore ?prefix ~trace_id ~lines ~messages (snapshot : t) =
+let restore_on_caller ?prefix ~trace_id ~lines ~messages (snapshot : t) =
   if not (String.equal trace_id snapshot.trace_id) then Error Trace_mismatch
   else
-    let source = match snapshot.origin with Witnessed_history -> source_range | Captured_checkpoint_prefix -> checkpoint_prefix_range in
+    let source = match snapshot.origin with
+      | Witnessed_history -> source_range_on_caller
+      | Captured_checkpoint_prefix -> checkpoint_prefix_range_on_caller in
     let* range = source ~trace_id ~lines ~messages in
     let boundary_present =
       match
@@ -348,6 +367,11 @@ let restore ?prefix ~trace_id ~lines ~messages (snapshot : t) =
           | Window.Atom atom -> if atom >= snapshot.end_atom then Some message else None) labelled in
         Ok { working_state = snapshot.working_state; unread_messages = snapshot.unread_messages; messages;
              covered_prefix }
+;;
+
+let restore ?prefix ~trace_id ~lines ~messages snapshot =
+  off_caller ~name:__FUNCTION__ (fun () ->
+    restore_on_caller ?prefix ~trace_id ~lines ~messages snapshot)
 ;;
 
 let save ~path snapshot =

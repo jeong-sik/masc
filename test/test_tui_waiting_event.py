@@ -480,7 +480,12 @@ class WaitingEventTest(unittest.TestCase):
                         gamma_event_start, b"gamma", b"waiting unavailable"
                     )
                 )
-                self.assertTrue(latest_rendered_row_contains(b"gamma", b"gamma-before"))
+                # The last row naming gamma may be another pane's row (the
+                # activity pane draws one for it), so look for the kept
+                # observation anywhere since the baseline.
+                self.assertTrue(
+                    rendered_row_contains(gamma_baseline_start, b"gamma", b"gamma-before")
+                )
                 self.assertEqual(server.count("queued", TURNS_PATH), 0)
                 server.release_held_read.set()
                 wait_until(

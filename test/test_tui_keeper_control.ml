@@ -177,7 +177,7 @@ let test_unobserved_offers_confirmed_delete () =
   check_actions "only confirmed delete without a roster" [ Control.Delete ] (Control.available r);
   Alcotest.(check (option action_testable))
     "no primary without a roster" None (Control.primary r);
-  Alcotest.(check string) "health is unread" "unread" (Control.health_label r)
+  Alcotest.(check string) "health is unread" "unread" (Control.health_label ~ko:false r)
 
 let test_absent_offers_boot () =
   let r = reading ~liveness:Control.Absent "analyst" in
@@ -185,7 +185,7 @@ let test_absent_offers_boot () =
       [ Control.Boot; Control.Delete ]
       (Control.available r);
   Alcotest.(check string) "an absent keeper reads absent, not unread" "absent"
-    (Control.health_label r)
+    (Control.health_label ~ko:false r)
 
 (* A keeper the operator paused and then shut down is absent from the roster.
    Pause is its own field, so it still reads even where health cannot. *)
@@ -203,7 +203,7 @@ let test_live_running_offers_pause () =
     (Control.available r);
   Alcotest.(check (option action_testable))
     "primary is pause" (Some Control.Pause) (Control.primary r);
-  Alcotest.(check string) "healthy" "healthy" (Control.health_label r)
+  Alcotest.(check string) "healthy" "healthy" (Control.health_label ~ko:false r)
 
 let test_live_paused_offers_resume () =
   let r =
@@ -242,9 +242,9 @@ let test_pause_and_health_are_read_separately () =
   let stopped = reading ~paused:true ~liveness:(Control.Present live) "analyst" in
   Alcotest.(check string)
     "health reads the same either way" "offline"
-    (Control.health_label resting);
+    (Control.health_label ~ko:false resting);
   Alcotest.(check string)
-    "pause does not overwrite it" "offline" (Control.health_label stopped);
+    "pause does not overwrite it" "offline" (Control.health_label ~ko:false stopped);
   Alcotest.(check bool) "and pause is still readable" true stopped.Control.paused
 
 (* A row can be in the roster with its keepalive fiber stopped. Pause has
@@ -608,7 +608,7 @@ let test_short_roster_reads_unread_not_offline () =
           ; liveness = Control.liveness_of_roster roster "analyst" }
   in
   Alcotest.(check string) "unread, not offline" "unread"
-    (Control.health_label r);
+    (Control.health_label ~ko:false r);
   check_actions "only deletion on an unread keeper" [ Control.Delete ] (Control.available r)
 
 (* A refusal is two situations. Only one of them is fixed by providing a
@@ -696,7 +696,7 @@ let test_partial_roster_still_confirms_what_it_holds () =
     ; liveness = Control.liveness_of_roster roster "analyst" }
   in
   Alcotest.(check string) "the observed keeper reports its health" "healthy"
-    (Control.health_label present);
+    (Control.health_label ~ko:false present);
   check_actions "and it can be paused"
     [ Control.Pause; Control.Wakeup; Control.Shutdown; Control.Delete ]
     (Control.available present)
@@ -716,7 +716,7 @@ let test_full_roster_is_complete () =
       (* "absent", not "unread": the roster answered and this keeper was not
          in it, which says no fiber is running it. *)
       Alcotest.(check string) "a name a complete roster omits is absent"
-        "absent" (Control.health_label absent)
+        "absent" (Control.health_label ~ko:false absent)
   | Control.Roster_invalid _ | Control.Roster_partial _ ->
       Alcotest.fail "a roster matching its own total is complete"
   | Control.Roster_unobserved -> Alcotest.fail "the route did answer"
@@ -1482,7 +1482,7 @@ let test_pause_does_not_hide_health () =
   Alcotest.(check string)
     "a paused keeper still reports the health underneath"
     "offline"
-    (Control.health_label paused_offline);
+    (Control.health_label ~ko:false paused_offline);
   Alcotest.(check bool) "and still reports being paused" true
     paused_offline.Control.paused
 
@@ -1535,7 +1535,7 @@ let test_roster_decode_reads_a_failing_keeper () =
         { Control.name = "retro"; paused = false; liveness = Control.Present row }
       in
       Alcotest.(check string) "the column says failing" "failing"
-        (Control.health_label r);
+        (Control.health_label ~ko:false r);
       check_actions "a running keeper's actions"
         [ Control.Pause; Control.Wakeup; Control.Shutdown; Control.Delete ]
         (Control.available r)
@@ -1601,7 +1601,7 @@ let test_configuration_error_isolated_and_deletable () =
       Alcotest.(check (option action_testable)) "p never becomes delete" None
         (Control.primary broken);
       Alcotest.(check string) "configuration failure is visible" "config error"
-        (Control.health_label broken);
+        (Control.health_label ~ko:false broken);
       Alcotest.(check (list (pair string string))) "exact error retained"
         [ "probe", "sandbox_profile is required" ] errors
 

@@ -771,9 +771,15 @@ type keeper_health_reading =
 val keeper_health_reading : keeper_health -> keeper_health_reading
 (** The health reading as a variant a surface can match.
 
-    {!keeper_health_to_string} is for showing a person a word. A surface that
+    {!keeper_health_word} is for showing a person a word. A surface that
     branches on health matched that word instead, which put a renamed label
     one edit away from silently reading as the healthy case. *)
+
+val keeper_health_word : ko:bool -> keeper_health option -> string
+(** The word a screen draws for a keeper's health, Korean when [ko]: 정상,
+    대기 중, 실패, 오프라인, and 미확인 when there is no reading. The English
+    words are the wire words ([healthy], [idle], [failing], [offline]) and
+    [unread]. *)
 
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous

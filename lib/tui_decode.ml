@@ -102,6 +102,18 @@ let keeper_health_reading : keeper_health -> keeper_health_reading = function
   | Keeper_types.KH_failing -> Health_failing
   | Keeper_types.KH_offline -> Health_offline
 
+(* The Keepers screen's own words for these states (정상, 대기 중, 실패,
+   오프라인), so a health word and a state word for the same keeper agree.
+   English keeps the wire words it showed. *)
+let keeper_health_word ~ko = function
+  | None -> if ko then "미확인" else "unread"
+  | Some health ->
+    (match keeper_health_reading health with
+     | Health_running -> if ko then "정상" else "healthy"
+     | Health_idle -> if ko then "대기 중" else "idle"
+     | Health_failing -> if ko then "실패" else "failing"
+     | Health_offline -> if ko then "오프라인" else "offline")
+
 let keeper_next_action_of_string =
   Keeper_status_runtime.keeper_next_action_path_of_string_opt
 let keeper_phase_to_string = Keeper_state_machine.phase_to_string

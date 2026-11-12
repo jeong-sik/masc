@@ -216,12 +216,12 @@ let next_action reading =
 
 (* Failed configuration, unread status and observed absence are distinct
    readings; none supplies an invented heartbeat state. *)
-let health_label reading =
+let health_label ~ko reading =
   match reading.liveness with
-  | Invalid _ -> "config error"
-  | Unobserved -> "unread"
-  | Absent -> "absent"
-  | Present runtime -> Decode.keeper_health_to_string runtime.Decode.kr_health
+  | Invalid _ -> if ko then "설정 오류" else "config error"
+  | Unobserved -> Decode.keeper_health_word ~ko None
+  | Absent -> if ko then "목록에 없음" else "absent"
+  | Present runtime -> Decode.keeper_health_word ~ko (Some runtime.Decode.kr_health)
 
 type action =
   | Pause

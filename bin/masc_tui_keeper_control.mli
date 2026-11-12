@@ -152,10 +152,10 @@ val next_action : reading -> Masc.Keeper_status_runtime.keeper_next_action_path 
     every surface shows the same severity for the same keeper instead of each
     inventing a mapping from the word. *)
 
-val health_label : reading -> string
-(** Terminal label for {!health}, with two words {!health} has no value for:
-    ["unread"] when the roster was never read, and ["absent"] when it answered
-    and left this keeper out. The second is not a health reading but it is not
+val health_label : ko:bool -> reading -> string
+(** Terminal label for {!health}, Korean when [ko], with two words {!health}
+    has no value for: ["unread"] (미확인) when the roster was never read, and
+    ["absent"] (목록에 없음) when it answered and left this keeper out. The second is not a health reading but it is not
     the lack of one either - a complete roster without the keeper means no
     fiber is running it. *)
 

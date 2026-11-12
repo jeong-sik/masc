@@ -211,7 +211,8 @@ function Body({ view, onRetry }: { readonly view: View; readonly onRetry: () => 
         ${view.signOut.kind === 'failed'
           ? html`<${ProblemNote} key=${view.signOut.failure.attempts} title="로그아웃하지 못했어요" failure=${view.signOut.failure} />`
           : null}
-        <p>구독, Keeper, 토큰은 아직 <a href="/">처음 화면</a>에서 다뤄요.</p>
+        <p>구독, Keeper, 토큰은 아직 처음 화면에서 다뤄요.</p>
+        <p><a class="button" href="/">처음 화면으로</a></p>
       `
   }
 }

@@ -61,6 +61,9 @@ val github_callback_path : string
 
     - [GET /api/v1/auth/provider-accounts], the subscriptions of the person
       ({!Auth_preview.provider_accounts})
+    - [GET /api/v1/auth/integrations], what the person may connect and
+      whether its models are called here ({!Server_person_integrations},
+      plan L2a)
     - [POST /api/v1/setup/accounts/login] and [GET] and [POST] under
       [/api/v1/setup/accounts/login/], the subscription connect route of the
       server ({!Server_setup_account_login}) for the person, with the account
@@ -85,9 +88,10 @@ val github_callback_path : string
     files disagree, gives none, and the request gets the 503 of
     {!Login_routes.zone_uncertain} before a credential is read.
 
-    The subscription routes are judged as [Manage_own_provider] by
-    {!Auth_preview.person} on that snapshot, and a request that does
-    not pass gets its 401 or 403 before the connect handler reads anything.
+    The subscription routes and the integrations are judged as
+    [Manage_own_provider] by {!Auth_preview.person} on that snapshot, and a
+    request that does not pass gets its 401 or 403 before its handler reads
+    anything.
     The Keeper routes are judged the same way as [Manage_own_keeper] by
     {!Auth_preview.keeper_owner}, and the turn by
     {!Auth_preview.keeper_turn_caller}, which gives the namespace of the

@@ -74,7 +74,12 @@ class KeeperCompositeSignalTest(unittest.TestCase):
         def opened(server: owed.ChatServer, step: Callable[..., None]) -> None:
             composite = cast(CompositeServer, server)
             composite.set_phase("open")
+            # Enter on a Keeper row opens the Story window of the list, which
+            # reads no composite (RFC-0515); Right from it opens the detail,
+            # whose Info tab does.
             step("keys", "\r")
+            step("drain", 0.5)
+            step("sequence", "\x1b[C")
             step(
                 "wait",
                 lambda: composite.response_count("open", COMPOSITE_PATH) >= 1,

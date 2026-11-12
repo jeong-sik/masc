@@ -86,6 +86,10 @@ let person_antigravity_refused =
   "Antigravity is not connected in multi-account mode: its credential is a copy in the \
    setup registry, which has no owner."
 
+let person_may_connect = function
+  | Client.Antigravity -> Error person_antigravity_refused
+  | Client.Codex | Claude | Muse -> Ok ()
+
 (* What a confirmed login leaves behind. An operator's account is published to
    the setup registry, from which setup selects it. A person's account is
    linked to them in the authorization log, and the registry, which has no
@@ -112,10 +116,9 @@ let start ~owner ~base_path ~body request reqd =
     let* target = Server_runtime_setup_actions.login_target ~base_path ~integration_id
       |> Result.map_error Server_runtime_setup_actions.error_message in
     let Server_runtime_setup_actions.{client; cli_path; spawn_path} = target in
-    let* () = match owner, client with
-      | Person _, Client.Antigravity -> Error person_antigravity_refused
-      | Person _, (Client.Codex | Claude | Muse)
-      | Operator _, (Client.Codex | Claude | Antigravity | Muse) -> Ok () in
+    let* () = match owner with
+      | Person _ -> person_may_connect client
+      | Operator _ -> Ok () in
     let* existing = match owner, reference with
       | (Operator _ | Person _), None -> Ok None
       | Person _, Some _ -> Error person_reference_refused

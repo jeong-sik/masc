@@ -38,6 +38,8 @@ val login_target : base_path:string -> integration_id:string -> (login_target, e
 (** Resolve the official client and executable from the current server catalog.
     [spawn_path] is resolved in the server working directory, before the login
     process moves to the account home. *)
+val login_target_of_config : Runtime_schema.config -> integration_id:string -> (login_target, error) result
+(** {!login_target} on a runtime.toml already read with {!config}. *)
 
 val config : base_path:string -> (Runtime_schema.config, error) result
 (** The runtime.toml of the workspace, parsed. A missing or unparsable file is

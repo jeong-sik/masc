@@ -18,10 +18,10 @@ name: PR type-check (dune build @check)
 # branch ruleset.
 #
 # The filter is deliberately fail-closed (review P2-1 on #51155): the file
-# listing is captured with its exit status, so an API failure fails this
-# job red instead of producing an empty list that would read as "no
-# sources" and skip the check. A PR at the 3000-file listing cap cannot be
-# filtered reliably and is checked in full.
+# list is read under `set -e`, so a failed fetch or diff fails this job red
+# instead of producing an empty list that would read as "no sources" and
+# skip the check. The list comes from git, not the REST listing, so it has
+# no 3000-file cap and spends none of the Actions token's API budget.
 #
 # Stage-2 pairing: when this workflow's checks become required, `changes`
 # must be required together with `type-check`. GitHub counts a skipped
@@ -50,20 +50,21 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      # GET /pulls/{n}/files needs Pull requests read; the repo's other
-      # workflows declare the same permission for this call.
-      pull-requests: read
     outputs:
       src: ${{ steps.filter.outputs.src }}
     steps:
-      # No checkout: the PR file list comes from the API, so an out-of-scope
-      # PR costs one short job instead of a toolchain build.
+      # No checkout and no REST call. The file list is the difference between
+      # the pull request's merge commit and its first parent (the base branch,
+      # lower stack layers included), read with a blobless two-commit fetch:
+      # about one second and one megabyte. The REST listing this replaced
+      # spent the Actions token's hourly budget on every push, and when that
+      # budget ran out this required check went red on pull requests whose
+      # code was fine (nine open pull requests on 2026-11-12T01:34Z).
       - name: Match PR files against source patterns
         id: filter
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
         shell: bash
         run: |
           set -euo pipefail
@@ -72,20 +73,17 @@ jobs:
             echo "src=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # The files listing caps at 3000 entries; at or beyond the cap the
-          # list is truncated and cannot prove "no sources". Fail toward
-          # more checking, never less.
-          if [ "${PR_CHANGED_FILES:-0}" -ge 3000 ]; then
-            echo "PR lists ${PR_CHANGED_FILES} changed files (API cap 3000) — running the check"
-            echo "src=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Fail closed: command substitution propagates the API call's exit
-          # status to set -e, so a 403/rate-limit/network failure fails this
-          # job red rather than silently skipping the type-check.
-          files="$(gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
-            --jq '.[].filename')"
+          # Fail closed: a fetch or diff that fails stops the script under
+          # set -e, so this job goes red rather than skipping the type-check.
+          # --no-renames lists a moved file under both names and needs no
+          # file contents, which the blobless fetch does not have.
+          work="$RUNNER_TEMP/pr-changes"
+          git init -q "$work"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -C "$work" -c "http.extraheader=AUTHORIZATION: basic $auth" \
+            fetch -q --depth=2 --filter=blob:none \
+            "https://github.com/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA"
+          files="$(git -C "$work" diff --name-only --no-renames FETCH_HEAD^1 FETCH_HEAD)"
           src=false
           while IFS= read -r f; do
             case "$f" in

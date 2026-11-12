@@ -2,14 +2,15 @@ import { batch } from '@preact/signals'
 import { ApiRequestError, extractApiError, fetchOperatorSnapshot } from './api/core'
 import { UI_REFRESH_TTL_MS } from './config/constants'
 import { captureDashboardObservationOwner, dashboardObservationOwnerHasWorkspace,
-  dashboardObservationOwnerIsCurrent, subscribeDashboardObservationOwnerChanges } from './lib/observation-read-owner'
+  dashboardObservationOwnerIsCurrent, dashboardObservationRequestIdentityIsCurrent,
+  subscribeDashboardObservationOwnerChanges, type DashboardObservationOwner } from './lib/observation-read-owner'
 import { subscribeDashboardObservation } from './lib/observation-refresh'
 import { createReadRecovery } from './lib/read-recovery'
 import { projectionReadOutcome, type ProjectionReadOutcome } from './lib/projection-read-outcome'
 import { isRecord } from './lib/type-guards'
 import { normalizeOperatorSnapshot } from './operator-normalizers'
 import { operatorError, operatorErrorStatus, operatorLoading } from './operator-signals'
-import { clearOperatorSnapshot, publishOperatorSnapshot } from './operator-snapshot-state'
+import { clearOperatorSnapshot, operatorSnapshot, publishOperatorSnapshot } from './operator-snapshot-state'
 import { hasOperatorSnapshotPublication, operatorSnapshotPublication, operatorSnapshotQuery, sameOperatorSnapshotQuery,
   type OperatorSnapshotPublication, type OperatorSnapshotQuery } from './operator-snapshot-contract'
 
@@ -71,6 +72,14 @@ function readFailed(original: Owner, cause: unknown) {
   original.recovery.failed(() => readAgain(original), !original.refused)
 }
 
+function sourceReadFailed(original: Owner, cause: unknown) {
+  // A Current read admitted before this failed observation cannot settle its
+  // debt. This is only a local read fence; no source watermark is admitted.
+  original.displayRevision++
+  cancelRead(original)
+  readFailed(original, cause)
+}
+
 function validateOutcome(state: OperatorSnapshotPublication['state'], outcome: ProjectionReadOutcome | null) {
   if (state === 'ready' && outcome?.kind !== 'complete') throw new Error('Operator Snapshot omitted its complete read outcome')
   if (state === 'error' && outcome?.kind === 'complete'
@@ -79,31 +88,58 @@ function validateOutcome(state: OperatorSnapshotPublication['state'], outcome: P
   }
 }
 
-function installBody(original: Owner, raw: unknown, state: OperatorSnapshotPublication['state'], outcome: ProjectionReadOutcome | null) {
+function prepareBody(raw: unknown, state: OperatorSnapshotPublication['state'], outcome: ProjectionReadOutcome | null) {
+  validateOutcome(state, outcome)
   // Tombstones and no-result failures contain no approval rows to normalize.
   const value = state === 'ready' || outcome?.kind === 'partial' ? normalizeOperatorSnapshot(raw) : null
   const diagnostics = isRecord(raw) && isRecord(raw.projection_diagnostics) ? raw.projection_diagnostics : null
+  const error = state === 'error' ? outcome?.kind === 'partial' ? outcome.error
+    : typeof diagnostics?.stale_reason === 'string' ? diagnostics.stale_reason : 'Operator Snapshot source read failed' : null
+  return { value, error }
+}
+
+function installBody(original: Owner, prepared: ReturnType<typeof prepareBody>) {
   batch(() => {
-    if (value !== null) publishOperatorSnapshot(original.authority, value)
+    if (prepared.value !== null) publishOperatorSnapshot(original.authority, prepared.value)
     else clearOperatorSnapshot()
     operatorLoading.value = false
     operatorErrorStatus.value = null
-    operatorError.value = state === 'error' ? outcome?.kind === 'partial' ? outcome.error
-      : typeof diagnostics?.stale_reason === 'string' ? diagnostics.stale_reason : 'Operator Snapshot source read failed' : null
+    operatorError.value = prepared.error
   })
 }
 
-/** A hard mutation withdraws approval rows immediately. Source completion at
- * the same generation leaves an active private read useful, with one trailing read. */
-function advance(original: Owner, next: OperatorSnapshotPublication): boolean {
+export interface OperatorSnapshotObservationSource {
+  readonly authority: DashboardObservationOwner
+  readonly instance: string
+}
+
+/** Malformed metadata cannot supply an authority or watermark. Attribute only
+ * a known Snapshot frame on its original admitted stream and request identity. */
+export function rejectOperatorSnapshotFrame(raw: unknown, source: OperatorSnapshotObservationSource): void {
+  const original = owner
+  if (original === null || !current(original) || original.refused
+    || !dashboardObservationRequestIdentityIsCurrent(source.authority)
+    || source.instance !== original.instance || !isRecord(raw) || raw.observer_instance_id !== source.instance) return
+  sourceReadFailed(original, new Error('Operator Snapshot observation envelope is invalid'))
+}
+
+function publicationOrder(original: Owner, next: OperatorSnapshotPublication): 'older' | 'same' | 'new' {
   const previous = original.publication
-  if (original.retiredEpochs.has(next.epoch)) return false
+  if (original.retiredEpochs.has(next.epoch)) return 'older'
   if (previous !== null && next.epoch === previous.epoch) {
-    if (next.generation < previous.generation) return false
+    if (next.generation < previous.generation) return 'older'
     if (next.generation === previous.generation && (next.computeSequence < previous.computeSequence
-      || next.terminalSequence < previous.terminalSequence
-      || next.computeSequence === previous.computeSequence && next.terminalSequence === previous.terminalSequence)) return false
+      || next.terminalSequence < previous.terminalSequence)) return 'older'
+    if (next.generation === previous.generation && next.computeSequence === previous.computeSequence
+      && next.terminalSequence === previous.terminalSequence) return 'same'
   }
+  return 'new'
+}
+
+/** Commit only a validated body/tombstone. Hard mutation still withdraws rows
+ * immediately; same-generation source completion keeps an active private read. */
+function advance(original: Owner, next: OperatorSnapshotPublication): void {
+  const previous = original.publication
   const hard = next.state === 'invalidated' || previous !== null
     && (next.epoch !== previous.epoch || next.generation > previous.generation)
   if (previous !== null && next.epoch !== previous.epoch) original.retiredEpochs.add(previous.epoch)
@@ -114,7 +150,6 @@ function advance(original: Owner, next: OperatorSnapshotPublication): boolean {
     clearOperatorSnapshot()
     cancelRead(original)
   }
-  return true
 }
 
 /** Only the actual Current query can replace its rows with default SSE data. */
@@ -123,17 +158,21 @@ export function hydrateOperatorSnapshot(raw: unknown): boolean {
   const publication = operatorSnapshotPublication(raw)
   const original = admittedOwner()
   if (publication === null || original === null || original.refused || publication.instance !== original.instance) return false
-  if (!advance(original, publication)) return false
-  if (original.query === null || !sameOperatorSnapshotQuery(original.query, publication.query)) {
+  if (publicationOrder(original, publication) !== 'new') return false
+  const matchingQuery = original.query !== null && sameOperatorSnapshotQuery(original.query, publication.query)
+  let prepared: ReturnType<typeof prepareBody>
+  try { prepared = prepareBody(raw, publication.state, projectionReadOutcome(raw)) }
+  catch (cause) {
+    if (matchingQuery) sourceReadFailed(original, cause)
+    else readAgain(original)
+    return false
+  }
+  advance(original, publication)
+  if (!matchingQuery) {
     if (publication.state !== 'initializing') readAgain(original)
     return true
   }
-  try {
-    const outcome = projectionReadOutcome(raw)
-    validateOutcome(publication.state, outcome)
-    installBody(original, raw, publication.state, outcome)
-  }
-  catch (cause) { readFailed(original, cause); return false }
+  installBody(original, prepared)
   original.displayRevision++
   original.lastReadAt = publication.state === 'ready' ? Date.now() : null
   // A canonical partial/error is the source owner's failed read, not a new
@@ -183,17 +222,20 @@ export async function refreshOperatorSnapshot(options?: { force?: boolean }): Pr
       if (publication === null && hasOperatorSnapshotPublication(raw)) throw new Error('Operator Snapshot publication metadata is invalid')
       const outcome = projectionReadOutcome(raw)
       const state = publication?.state ?? (outcome?.kind === 'partial' ? 'error' : 'ready')
-      validateOutcome(state, outcome)
+      const prepared = prepareBody(raw, state, outcome)
       // HTTP may repeat the immutable canonical identity; a newer installed
       // body or mutation has already fenced this flight by displayRevision.
-      if (publication !== null && original.publication !== null) {
-        const previous = original.publication
-        if (original.retiredEpochs.has(publication.epoch)
-          || publication.epoch === previous.epoch && (publication.generation < previous.generation
-            || publication.generation === previous.generation && (publication.computeSequence < previous.computeSequence
-              || publication.terminalSequence < previous.terminalSequence))) return
+      if (publication !== null && publicationOrder(original, publication) === 'older') {
+        if (operatorSnapshot.peek() !== null) {
+          // This response cannot replace accepted rows. Keep the owed read
+          // alive without treating an older replica as a new source failure.
+          original.lastReadAt = null
+          original.recovery.failed(() => readAgain(original))
+          return
+        }
+        throw new Error('Operator Snapshot response precedes the accepted publication')
       }
-      installBody(original, raw, state, outcome)
+      installBody(original, prepared)
       original.query = query
       if (publication !== null) {
         const previous = original.publication

@@ -43,11 +43,22 @@ export function readDashboardObservationOwner(): DashboardObservationOwner {
   return captureDashboardObservationOwner()
 }
 
-export function dashboardObservationOwnerIsCurrent(owner: DashboardObservationOwner): boolean {
-  const current = captureDashboardObservationOwner()
-  return owner.workspace === current.workspace && owner.token === current.token
+function sameRequestIdentity(owner: DashboardObservationOwner, current: DashboardObservationOwner): boolean {
+  return owner.token === current.token
     && owner.tokenRevision === current.tokenRevision && owner.actor === current.actor
     && owner.actorRevision === current.actorRevision && owner.managed === current.managed
+}
+
+/** An admitted stream carries its original workspace instance in its headers;
+ * that scope can precede execution admission. Keep its request identity fenced
+ * without substituting a later workspace into the original owner. */
+export function dashboardObservationRequestIdentityIsCurrent(owner: DashboardObservationOwner): boolean {
+  return sameRequestIdentity(owner, captureDashboardObservationOwner())
+}
+
+export function dashboardObservationOwnerIsCurrent(owner: DashboardObservationOwner): boolean {
+  const current = captureDashboardObservationOwner()
+  return owner.workspace === current.workspace && sameRequestIdentity(owner, current)
 }
 
 export function dashboardObservationOwnerHasWorkspace(

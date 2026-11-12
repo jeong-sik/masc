@@ -27,8 +27,10 @@ const held = () => {
   return { promise, resolve }
 }
 let stop: (() => void) | undefined
+let stopObserver: (() => void) | undefined
 beforeEach(() => { vi.resetModules(); vi.useFakeTimers(); sessionStorage.clear(); localStorage.clear() })
 afterEach(async () => {
+  stopObserver?.(); stopObserver = undefined
   stop?.(); stop = undefined; await flush()
   vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
@@ -42,6 +44,43 @@ async function surface(admit = true) {
   const { SSEMessageSchema } = await import('./schemas/sse')
   return { ...workspace, ...actions, ...signals, ...observation,
     push: (payload: unknown) => hydrateServerPushEvent(SSEMessageSchema.parse({ type: 'operator_snapshot', payload })) }
+}
+
+
+async function streamSurface(admit = true, streamInstance = 'snapshot-A') {
+  const { setStoredToken } = await import('./api/core')
+  setStoredToken('manual transport fixture')
+  let source!: ReadableStreamDefaultController<Uint8Array>
+  let reads = 0, streams = 0
+  let next: unknown = publication('baseline', 1, 1)
+  let nextResponse: Promise<Response> | null = null
+  const fetch = vi.fn((path: RequestInfo | URL) => {
+    if (path === '/mcp?sse_kind=observer') {
+      streams++
+      return Promise.resolve(new Response(new ReadableStream<Uint8Array>({ start(controller) { source = controller } }), {
+        headers: { 'content-type': 'text/event-stream', 'x-masc-sse-instance-id': streamInstance,
+          'x-masc-sse-replay': 'fresh', 'x-masc-sse-idle-timeout-ms': '90000' },
+      }))
+    }
+    if (path !== '/api/v1/operator') throw new Error(`Unexpected fixture request ${String(path)}`)
+    reads++
+    if (nextResponse !== null) { const response = nextResponse; nextResponse = null; return response }
+    return Promise.resolve(json(next))
+  })
+  vi.stubGlobal('fetch', fetch)
+  const s = await surface(admit)
+  stop = s.setupOperatorSnapshotObservation()
+  await flush()
+  const transport = await import('./dashboard-observer')
+  const counters = await import('./dashboard-observer-state')
+  stopObserver = transport.disconnectDashboardObserver
+  transport.connectDashboardObserver()
+  await flush()
+  return { ...s, counters, reads: () => reads, streams: () => streams,
+    nextBody: (body: unknown) => { next = body },
+    nextResponse: (response: Promise<Response>) => { nextResponse = response },
+    emit: (event: unknown) => source.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`)),
+    keepalive: () => source.enqueue(new TextEncoder().encode(': healthy keepalive\n\n')) }
 }
 
 describe('Operator Snapshot actual HTTP and SSE ownership', () => {
@@ -202,6 +241,196 @@ describe('Operator Snapshot actual HTTP and SSE ownership', () => {
     expect(s.operatorSnapshot.value?.root.project).toBe('repaired')
     expect(s.operatorError.value).toBeNull()
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['same epoch', 'different epoch'])('does not admit a malformed high watermark or retire its %s before body validation', async epoch => {
+    const fetch = vi.fn().mockResolvedValueOnce(json(publication('baseline', 1, 1)))
+      .mockImplementation(() => json(publication('normal HTTP recovered', 1, 2)))
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    stop = s.setupOperatorSnapshotObservation()
+    await flush()
+    s.push({ ...publication('malformed high watermark', 100, 100),
+      snapshot_epoch: epoch === 'same epoch' ? 'snapshot-process' : 'unadmitted-process',
+      pending_confirm_envelope: undefined })
+    expect(s.operatorSnapshot.value).toBeNull()
+    expect(s.operatorError.value).toBe('invalid pending_confirm_envelope')
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(s.operatorSnapshot.value?.root.project).toBe('normal HTTP recovered')
+    expect(s.operatorError.value).toBeNull()
+    s.push(publication('normal SSE recovered', 1, 3))
+    expect(s.operatorSnapshot.value?.root.project).toBe('normal SSE recovered')
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['older', 'same'])('ignores a malformed %s publication before it can withdraw current approved rows', async order => {
+    const fetch = vi.fn().mockImplementation(() => json(publication('current rows', 2, 3)))
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    stop = s.setupOperatorSnapshotObservation()
+    await flush()
+    s.push({ ...publication('unadmitted stale body', order === 'same' ? 2 : 1, 3),
+      pending_confirm_envelope: undefined })
+    expect(s.operatorSnapshot.value?.root.project).toBe('current rows')
+    expect(s.operatorError.value).toBeNull()
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it.each(['generation', 'compute sequence', 'terminal sequence', 'retired epoch'] as const)(
+    'preserves displayed approvals and retries when HTTP has an older %s', async order => {
+      const current = publication('current approvals', 2, 7)
+      const stale = { ...current, root: { project: 'stale approvals' } }
+      if (order === 'generation') stale.snapshot_generation = 1
+      if (order === 'compute sequence') stale.snapshot_compute_sequence = 6
+      if (order === 'terminal sequence') stale.snapshot_terminal_sequence = 6
+      const epoch = order === 'retired epoch' ? 'replacement epoch' : current.snapshot_epoch
+      const fetch = vi.fn().mockResolvedValueOnce(json(current))
+        .mockResolvedValueOnce(json(stale))
+        .mockResolvedValue(json({ ...publication('recovered approvals', 2, 8), snapshot_epoch: epoch }))
+      vi.stubGlobal('fetch', fetch)
+      const s = await surface()
+      stop = s.setupOperatorSnapshotObservation()
+      await flush()
+      if (order === 'retired epoch') s.push({ ...current, snapshot_epoch: epoch })
+      await s.refreshOperatorSnapshot({ force: true })
+      expect(s.operatorSnapshot.value?.root.project).toBe('current approvals')
+      expect(s.operatorError.value).toBeNull()
+      expect(s.operatorErrorStatus.value).toBeNull()
+      expect(vi.getTimerCount()).toBe(1)
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(fetch).toHaveBeenCalledTimes(3)
+      expect(s.operatorSnapshot.value?.root.project).toBe('recovered approvals')
+      expect(s.operatorError.value).toBeNull()
+      await vi.advanceTimersByTimeAsync(300_000)
+      expect(fetch).toHaveBeenCalledTimes(3)
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
+  it('retains owed recovery when a Current HTTP body precedes an accepted hard mutation', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(json(publication('baseline', 1, 1)))
+      .mockResolvedValueOnce(json(publication('older HTTP', 1, 2)))
+      .mockImplementation(() => json(publication('current HTTP', 2, 3)))
+    vi.stubGlobal('fetch', fetch)
+    const s = await surface()
+    stop = s.setupOperatorSnapshotObservation()
+    await flush()
+    s.push(publication('', 2, 0, 'invalidated'))
+    expect(s.operatorSnapshot.value).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+    await s.refreshOperatorSnapshot({ force: true })
+    expect(s.operatorSnapshot.value).toBeNull()
+    expect(s.operatorError.value).toContain('precedes the accepted publication')
+    expect(vi.getTimerCount()).toBe(1)
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(s.operatorSnapshot.value?.root.project).toBe('current HTTP')
+    expect(s.operatorError.value).toBeNull()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('settles a known current-instance invalid envelope from the actual admitted transport and recovers on quiet keepalive bytes', async () => {
+    const s = await streamSurface()
+    expect(s.reads()).toBe(2)
+    s.nextBody(publication('Current recovered', 1, 2))
+    s.emit({ type: 'operator_snapshot', payload: { observer_instance_id: 'snapshot-A' } })
+    await flush()
+    expect(s.operatorSnapshot.value).toBeNull()
+    expect(s.operatorError.value).toContain('envelope is invalid')
+    expect(s.counters.dashboardObserverRejectedFrameCount.peek()).toBe(1)
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(s.reads()).toBe(3)
+    expect(s.operatorSnapshot.value?.root.project).toBe('Current recovered')
+    expect(s.operatorError.value).toBeNull()
+    for (let i = 0; i < 5; i++) {
+      s.keepalive()
+      await vi.advanceTimersByTimeAsync(60_000)
+    }
+    expect(s.reads()).toBe(3)
+    expect(s.streams()).toBe(1)
+  })
+
+  it('does not let a read admitted before a malformed frame settle that frame\'s failed-read debt', async () => {
+    const s = await streamSurface()
+    const old = held()
+    s.nextResponse(old.promise)
+    const pending = s.refreshOperatorSnapshot({ force: true })
+    s.emit({ type: 'operator_snapshot', payload: { observer_instance_id: 'snapshot-A' } })
+    await flush()
+    expect(s.operatorSnapshot.value).toBeNull()
+    old.resolve(json(publication('read admitted before invalidation', 1, 1)))
+    await pending; await flush()
+    expect(s.operatorSnapshot.value).toBeNull()
+    expect(s.operatorError.value).toContain('envelope is invalid')
+    s.nextBody(publication('read after invalidation', 1, 2))
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(s.reads()).toBe(4)
+    expect(s.operatorSnapshot.value?.root.project).toBe('read after invalidation')
+    expect(s.operatorError.value).toBeNull()
+  })
+
+  it.each(['other payload instance', 'other admitted instance'])('does not attribute %s to the current rows or failure debt', async mode => {
+    const s = await streamSurface(true, mode === 'other admitted instance' ? 'snapshot-B' : 'snapshot-A')
+    const reads = s.reads()
+    s.emit({ type: 'operator_snapshot', payload: {
+      observer_instance_id: mode === 'other payload instance' ? 'snapshot-B' : 'snapshot-A' } })
+    await flush()
+    expect(s.operatorSnapshot.value?.root.project).toBe('baseline')
+    expect(s.operatorError.value).toBeNull()
+    expect(s.counters.dashboardObserverRejectedFrameCount.peek()).toBe(1)
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(s.reads()).toBe(reads)
+  })
+
+  it('keeps unknown scope GET0, then uses the same admitted stream only after its instance is accepted', async () => {
+    const s = await streamSurface(false)
+    s.emit({ type: 'operator_snapshot', payload: { observer_instance_id: 'snapshot-A' } })
+    await flush()
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(s.reads()).toBe(0)
+    expect(s.operatorError.value).toBeNull()
+    s.acceptedExecutionWorkspace.value = authority()
+    await flush()
+    expect(s.reads()).toBe(1)
+    s.nextBody(publication('scope accepted', 1, 2))
+    s.emit({ type: 'operator_snapshot', payload: { observer_instance_id: 'snapshot-A' } })
+    await flush()
+    expect(s.operatorSnapshot.value).toBeNull()
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(s.reads()).toBe(2)
+    expect(s.operatorSnapshot.value?.root.project).toBe('scope accepted')
+  })
+
+  it('does not let an old stream request identity poison replacement actor rows, including actor ABA', async () => {
+    const s = await streamSurface()
+    const { currentDashboardActor } = await import('./api/core')
+    const { setCanonicalDashboardActor } = await import('./lib/dashboard-session-actor')
+    const originalActor = currentDashboardActor()
+    s.nextBody(publication('replacement actor', 1, 2))
+    setCanonicalDashboardActor('replacement-snapshot-actor')
+    await flush()
+    const replacementReads = s.reads()
+    s.emit({ type: 'operator_snapshot', payload: { observer_instance_id: 'snapshot-A' } })
+    await flush()
+    expect(s.operatorSnapshot.value?.root.project).toBe('replacement actor')
+    expect(s.operatorError.value).toBeNull()
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(s.reads()).toBe(replacementReads)
+    s.nextBody(publication('ABA actor', 1, 3))
+    setCanonicalDashboardActor(originalActor)
+    await flush()
+    const abaReads = s.reads()
+    s.emit({ type: 'operator_snapshot', payload: { observer_instance_id: 'snapshot-A' } })
+    await flush()
+    expect(s.operatorSnapshot.value?.root.project).toBe('ABA actor')
+    expect(s.operatorError.value).toBeNull()
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(s.reads()).toBe(abaReads)
   })
 
   it('retains private partial failure debt and increases retry delay until actual complete success', async () => {

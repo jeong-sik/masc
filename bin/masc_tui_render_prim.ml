@@ -1606,6 +1606,7 @@ let acting_pane_input (state : state) =
   ; changes
   ; call_order = state.acting_pane_call_order
   ; expanded = state.acting_pane_expanded
+  ; ko = state.ui_language = Lang_ko
   }, source)
 
 

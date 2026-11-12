@@ -93,6 +93,7 @@ module Count : sig
     | Row  (** One row a list draws. *)
     | Event
     | Image  (** One picture staged on a message. *)
+    | File  (** One file a keeper wrote. *)
 
   val reading : ko:bool -> noun -> int -> string
   (** The count and what it counts, in the screen's language: [3 keepers],

@@ -44,6 +44,7 @@ let observations = function
   | Execution_invalidated -> workspace [`Verification_requests; `Ide_presence]
   | Workspace_agent_signal _ -> workspace [`Ide_presence]
   | Workspace_messages _ -> []
+  | Transport_state -> []
   | Board -> []
   | Agent_core { keeper = name; change =
       Started | Completed | Failed | Yielded | Input_required | Tool_called

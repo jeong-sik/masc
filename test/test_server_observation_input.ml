@@ -341,6 +341,53 @@ let test_source_to_change_worker_without_output_feedback () =
           (Eio_mock.Clock.try_advance clock)))
 ;;
 
+let test_transport_lifecycle_to_worker_without_delivery_feedback () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let changes = Eio.Stream.create 1 and reads = Eio.Stream.create 4 in
+    let never, _ = Eio.Promise.create () in
+    let calls = ref 0 and source_inputs = ref 0 in
+    let module TM = Masc.Transport_metrics in
+    Eio.Fiber.first
+      (fun () -> Eio.Switch.run (fun sw ->
+        Input.subscribe ~sw ~base_path:root (fun input ->
+          if Server_observation_refresh.affects Server_observation_refresh.Transport_health input then (
+            if input = Input.Transport_state then incr source_inputs;
+            if Eio.Stream.is_empty changes then Eio.Stream.add changes ()));
+        Proactive_refresh.start_on_change_or_deadline ~sw
+          ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~changes
+          ~config:(Proactive_refresh.default_config ~label:"transport-source-to-reader" ~interval_s:30.0)
+          ~compute:(fun () -> incr calls; TM.transport_health_json ())
+          ~next_deadline:(fun _ -> None)
+          ~on_result:(fun json ->
+            Sse.sync_transport_snapshot ();
+            TM.observe_broadcast_duration 0.001;
+            Sse.broadcast_to_sse_runtime_observers authority
+              (`Assoc ["type", `String "transport_health_snapshot"; "payload", json]);
+            Eio.Stream.add reads json);
+        Eio.Promise.await never))
+      (fun () ->
+        let initial = Eio.Stream.take reads in
+        Eio.Fiber.yield ();
+        check bool "healthy transport observation arms no timer" false (Eio_mock.Clock.try_advance clock);
+        let open Yojson.Safe.Util in
+        let accepted json = json |> member "http_listener" |> member "accepted_total" |> to_int in
+        TM.record_http_accept ~mode:"h1";
+        let updated = Eio.Stream.take reads in
+        check int "actual connection commit reaches the production input" (accepted initial + 1) (accepted updated);
+        Masc.Https_listener_metrics.record_started ();
+        let tls = Eio.Stream.take reads in
+        check string "HTTPS lifecycle reaches the same typed input" "listening"
+          (tls |> member "https_listener" |> member "status" |> to_string);
+        Eio.Fiber.yield ();
+        check int "computed snapshots and mirror updates do not feed back" 3 !calls;
+        check bool "the quiet worker has no periodic deadline" false (Eio_mock.Clock.try_advance clock));
+    let before = !source_inputs in
+    TM.record_http_connection_closed ~mode:"h1";
+    Masc.Https_listener_metrics.record_stopped ();
+    check int "normal switch release unsubscribes both source leaves" before !source_inputs)
+;;
+
 let () =
   run "server observation inputs"
     [ "wire", [ test_case "exact scoped identities" `Quick test_exact_input_identities
@@ -353,6 +400,7 @@ let () =
                      ; test_case "listener failure keeps receipt" `Quick test_listener_failure_cannot_replace_publication
                      ; test_case "actual caller cancellation remains" `Quick test_listener_preserves_the_callers_actual_cancellation
                      ; test_case "source to worker excludes feedback" `Quick test_source_to_change_worker_without_output_feedback
+                     ; test_case "transport lifecycle reaches worker without delivery feedback" `Quick test_transport_lifecycle_to_worker_without_delivery_feedback
                      ; test_case "real Board write wakes the scoped worker" `Quick test_real_board_writer_to_observation_worker
                      ; test_case "real MCP tool notification is decoded" `Quick test_real_tools_notification_is_an_input
                      ; test_case "real telemetry collector sample is decoded" `Quick test_real_telemetry_sample_is_an_input ] ]

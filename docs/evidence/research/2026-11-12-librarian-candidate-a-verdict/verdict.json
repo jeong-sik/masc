@@ -1,0 +1,489 @@
+{
+ "A": {
+  "pass": false,
+  "G1": false,
+  "G2": false,
+  "G3": false,
+  "G4": false,
+  "G5": true,
+  "G6": false,
+  "paired": {
+   "items": 33,
+   "candidates": 52,
+   "agreement": 0.5,
+   "baseline_agreement": 0.7115384615384616,
+   "lead": -0.21153846153846154
+  },
+  "widest_gap_s": 615.2,
+  "valid_rate_in_reach": 0.7755102040816326,
+  "dropped_not_in_live": {
+   "733f4e83be59b76b": [
+    "m1",
+    "m11",
+    "m30",
+    "m35"
+   ],
+   "93d34824703890ee": [
+    "m91"
+   ],
+   "ab4ee9e6adb40c88": [
+    "m57"
+   ],
+   "b26fca7357319359": [
+    "m26",
+    "m6"
+   ],
+   "fbc5eb1a29867206": [
+    "m10",
+    "m16"
+   ]
+  }
+ },
+ "e_real_refused": [
+  "7ac0f0a0dd5ae910"
+ ],
+ "e_synth_drops": {
+  "off_label_drops": [
+   {
+    "item": "eval-docs-gardener-00-035",
+    "memory_id": "m16",
+    "targets": [
+     "base"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-docs-gardener-00-070",
+    "memory_id": "m16",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-docs-gardener-06-075",
+    "memory_id": "m28",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-docs-gardener-06-075",
+    "memory_id": "m3",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-docs-gardener-06-075",
+    "memory_id": "m9",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-docs-gardener-15-113",
+    "memory_id": "m4",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-docs-gardener-17-079",
+    "memory_id": "m5",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-infra-cost-watch-02-089",
+    "memory_id": "m1",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-infra-cost-watch-02-089",
+    "memory_id": "m10",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-infra-cost-watch-02-089",
+    "memory_id": "m11",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-infra-cost-watch-02-089",
+    "memory_id": "m24",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-infra-cost-watch-02-089",
+    "memory_id": "m6",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-qa-coordinator-06-031",
+    "memory_id": "m18",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-qa-coordinator-06-031",
+    "memory_id": "m8",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-qa-coordinator-06-066",
+    "memory_id": "m18",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-qa-coordinator-06-066",
+    "memory_id": "m21",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-qa-coordinator-06-066",
+    "memory_id": "m25",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-qa-coordinator-06-066",
+    "memory_id": "m8",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-qa-coordinator-06-136",
+    "memory_id": "m18",
+    "targets": [
+     "base"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-qa-coordinator-06-136",
+    "memory_id": "m8",
+    "targets": [
+     "base"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-qa-coordinator-13-138",
+    "memory_id": "m88",
+    "targets": [
+     "base"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-support-triage-02-046",
+    "memory_id": "m11",
+    "targets": [
+     "base"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-support-triage-02-046",
+    "memory_id": "m20",
+    "targets": [
+     "base"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-support-triage-08-052",
+    "memory_id": "m11",
+    "targets": [
+     "base"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-support-triage-08-052",
+    "memory_id": "m23",
+    "targets": [
+     "base"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-support-triage-11-011",
+    "memory_id": "m12",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-support-triage-11-083",
+    "memory_id": "m80",
+    "targets": [
+     "A"
+    ],
+    "judged": "keep"
+   },
+   {
+    "item": "eval-support-triage-17-052",
+    "memory_id": "m66",
+    "targets": [
+     "base"
+    ],
+    "judged": "keep"
+   }
+  ],
+  "excluded_memories": [],
+  "wrong_outside": {},
+  "items_scored": 90,
+  "judge_files": {
+   "cases.jsonl": "24ebb67c384d29db335e2a24d1e3aaa20b9f86309e08cd55216ca9d7cab6e3d5",
+   "config/prompts/librarian.md": "575a68497f00d3171d00a298d816e6ade8c0a5b7c4e2329364e725e90861d623",
+   "judge.md": "90f7d5bc9843a0c93ccde36e2772e8a73b393c27a0e6ae74f8120e37ac440876"
+  }
+ },
+ "e_synth_merges": {
+  "absorbs": [
+   {
+    "item": "eval-docs-gardener-06-075",
+    "target": "A",
+    "memory_id": "m44",
+    "judged": "different_context"
+   },
+   {
+    "item": "eval-docs-gardener-06-075",
+    "target": "A",
+    "memory_id": "m6",
+    "judged": "different_context"
+   },
+   {
+    "item": "eval-docs-gardener-06-075",
+    "target": "A",
+    "memory_id": "m7",
+    "judged": "different_context"
+   },
+   {
+    "item": "eval-docs-gardener-06-145",
+    "target": "A",
+    "memory_id": "m54",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-docs-gardener-11-145",
+    "target": "A",
+    "memory_id": "m29",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-docs-gardener-11-145",
+    "target": "A",
+    "memory_id": "m33",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-docs-gardener-11-145",
+    "target": "base",
+    "memory_id": "m29",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-docs-gardener-11-145",
+    "target": "base",
+    "memory_id": "m33",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-docs-gardener-14-040",
+    "target": "A",
+    "memory_id": "m13",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-docs-gardener-14-148",
+    "target": "base",
+    "memory_id": "m3",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-docs-gardener-15-005",
+    "target": "base",
+    "memory_id": "m4",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-docs-gardener-15-113",
+    "target": "A",
+    "memory_id": "m14",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-docs-gardener-15-113",
+    "target": "base",
+    "memory_id": "m14",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-docs-gardener-15-113",
+    "target": "base",
+    "memory_id": "m5",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-docs-gardener-17-115",
+    "target": "A",
+    "memory_id": "m65",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-infra-cost-watch-13-093",
+    "target": "base",
+    "memory_id": "m44",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-infra-cost-watch-15-059",
+    "target": "base",
+    "memory_id": "m18",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-infra-cost-watch-16-024",
+    "target": "base",
+    "memory_id": "m24",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-infra-cost-watch-16-060",
+    "target": "A",
+    "memory_id": "m18",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-infra-cost-watch-16-060",
+    "target": "base",
+    "memory_id": "m10",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-qa-coordinator-08-033",
+    "target": "base",
+    "memory_id": "m29",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-qa-coordinator-13-138",
+    "target": "base",
+    "memory_id": "m8",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-qa-coordinator-13-138",
+    "target": "base",
+    "memory_id": "m9",
+    "judged": "different_context"
+   },
+   {
+    "item": "eval-qa-coordinator-17-070",
+    "target": "A",
+    "memory_id": "m50",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-support-triage-02-011",
+    "target": "base",
+    "memory_id": "m3",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-support-triage-02-046",
+    "target": "A",
+    "memory_id": "m1",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-support-triage-09-018",
+    "target": "A",
+    "memory_id": "m15",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-support-triage-09-018",
+    "target": "base",
+    "memory_id": "m15",
+    "judged": "mergeable"
+   },
+   {
+    "item": "eval-support-triage-19-018",
+    "target": "A",
+    "memory_id": "m42",
+    "judged": "loses_knowledge"
+   },
+   {
+    "item": "eval-support-triage-19-018",
+    "target": "base",
+    "memory_id": "m42",
+    "judged": "loses_knowledge"
+   }
+  ],
+  "judge_files": {
+   "cases.jsonl": "7e77b7c61878cba08d65f6deefeebfada54c898176c83f1645d5ef0df5d1a568",
+   "config/prompts/librarian.md": "575a68497f00d3171d00a298d816e6ade8c0a5b7c4e2329364e725e90861d623",
+   "judge.md": "c1aba268628dc140d2f077908ede18b3d2918e27aa0615abc7ae68c9a374dcbe"
+  },
+  "by_target": {
+   "base": {
+    "absorbs": 16,
+    "absorbs_mergeable": 8,
+    "absorb_precision": 0.5,
+    "merges": 37,
+    "merges_mergeable": 6,
+    "judged_merge_recall": 0.16216216216216217
+   },
+   "A": {
+    "absorbs": 14,
+    "absorbs_mergeable": 5,
+    "absorb_precision": 0.35714285714285715,
+    "merges": 37,
+    "merges_mergeable": 3,
+    "judged_merge_recall": 0.08108108108108109
+   }
+  }
+ },
+ "choice": null
+}

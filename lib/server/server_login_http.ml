@@ -332,6 +332,26 @@ let assign_keeper (t : R.t) request reqd =
     with_body reqd (fun body -> respond reqd (Auth_preview_keeper.assign t.zone user_id ~body)))
 ;;
 
+(* A conversation is recorded under the namespace of the person, so the gate
+   that gives it judges the request. The token is not read: starting a
+   conversation calls no model. *)
+let new_keeper_conversation t ~env ~base_path request reqd =
+  as_gated
+    t
+    ~gate:Auth_preview.keeper_turn_caller
+    request
+    reqd
+    (fun (_ : Authz_state.t) { Auth_preview.person; pat = (_ : Authz_types.Pat_binding.t) } ->
+       with_body reqd (fun body ->
+         respond
+           reqd
+           (Server_preview_keeper_turn.start_conversation
+              ~env
+              ~person:(person_of t person)
+              ~base_path
+              ~body)))
+;;
+
 (* A turn starts the client of the person's account on a home under their
    namespace, inside the scope of the token that authenticated the request,
    so its gate gives both. *)
@@ -385,6 +405,10 @@ let add_person_routes t ~env ~base_path router =
   |> Server_route.post access Auth_preview_keeper.keepers_path (make_keeper t)
   |> Server_route.post access Auth_preview_keeper.assign_path (assign_keeper t)
   |> Server_route.post access Auth_preview_keeper.turn_path (keeper_turn t ~env ~base_path)
+  |> Server_route.post
+       access
+       Auth_preview_keeper.conversation_path
+       (new_keeper_conversation t ~env ~base_path)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
   |> Server_route.post mcp_access Server_person_mcp.path (person_mcp t ~env ~base_path)

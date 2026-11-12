@@ -1,0 +1,18 @@
+name = "masc_my_keeper_conversation_new"
+title = "Start A New Conversation With My Keeper"
+description = """
+Start a new conversation of one of your Keepers. Its next turn begins \
+there and has read none of the earlier turns. The conversations the \
+Keeper had stay recorded, and no turn goes on in them. Use it when a \
+turn is refused because the conversation began on another subscription, \
+or when you want the Keeper to start over. The answer is JSON: keeper_id \
+and conversation_id. A Keeper without a Runtime is refused."""
+additional_properties = false
+
+[[params]]
+name = "keeper_id"
+type = "string"
+required = true
+min_length = 1
+description = """
+The name of your Keeper, as masc_my_keepers lists it."""

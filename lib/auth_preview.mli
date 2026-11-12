@@ -23,8 +23,10 @@
 val invite_page : nonce:string -> github:bool -> Login_routes.answer
 
 (** [GET /]: for a browser with no session, a form that starts a GitHub
-    login and no answer of a route. For a signed-in browser, the session and
-    who the server takes it for, and a sign-out button. Below them, the
+    login and no answer of a route. When the session routes do not say whether
+    a session is open, the page says so in place of that form. For a signed-in
+    browser, the session and who the server takes it for, and a sign-out
+    button. Below them, the
     subscriptions the person owns, a form that connects one through
     {!connect_path} and answers its login, and a form that calls one through
     {!verify_path}. Last, the person's Runtimes and Keepers, a form that

@@ -19,37 +19,30 @@
     observation: game writes and explicit disconnect are refused. Reload then
     requires the original link. Partial DOS text receipts retain the unpressed
     suffix; unknown byte counts or an edited draft retain the full draft.
-    One viewer switches between [dos_capture] and [msx_capture] on
-    [GET /api/v1/lane-addons/live?source_kind=...]. Switching views clears the
-    prior frame and prevents a late response from repainting the new view.
-    DOS controls send keys, text and hand-offs to [POST /api/v1/dos/*]; MSX is
-    observation only. Idle DOS seat reads use a slower cadence than frame
-    polling; new activity and opening handoff targets refresh immediately.
-    A pending seat read disables moves until it answers. New activity, a newer
-    read or a retired machine cancels the read in flight and one follow-up runs
-    when it settles; the frame read waits for queued input to drain. Stalled
-    seat reads are replaced at the recovery cadence. Disconnect drains
-    admitted writes without waiting for projection reads.
-    Participation is checked at the idle cadence even with a free controller or
-    MSX selected, so another client can depart and rejoin without game activity.
-    Observed participation changes suspend/resume chat independently of a local
-    confirmed disconnect. Departed controllers are discovered without game activity. When the
-    loaded program has a masc pad layout ([GET /api/v1/play/pad]) it draws
-    that pad in place of the plain keys row, and reads a physical gamepad in
-    the standard mapping onto the same buttons. A pad read that fails shows the keys row and a
-    status line, and the next poll reads it again. Each button press carries
-    the saves name its layout was read for. A stalled layout read is replaced
-    at the slower seat recovery cadence without stopping frame polling.
+    An authenticated fetch stream on [GET /api/v1/play/events] carries only
+    public Play invalidations. Its subscription precedes the initial read;
+    every reconnect resynchronizes frame, seat, pad and room without a replay
+    cursor. The bearer is sent only in the Authorization header. View switches
+    cancel the old stream and its reads. There is no status-polling fallback.
+    DOS writes keep their exact authority/operation receipts. A pending seat
+    disables moves. Repeated seat/roster invalidations preserve a healthy read
+    and retain one fresh follow-up; the older seat cannot re-enable moves.
+    Keeper lifecycle hints carry their public roster identity; unrelated fleet
+    activity does not retire an otherwise current holder observation.
+    Machine identity changes and transport replacement cancel obsolete reads. Unknown
+    writes remain unsettled; observation cannot acknowledge or replay them.
+    Pad failures are retried by observation/reconnection, with the original
+    saves-name binding. User-focused handoff selection refreshes its roster.
 
     [POST /api/v1/play/room] provides one public conversation shared by the
     workspace's MSX/DOS viewers, invited participants, operators and Keepers.
     History, chat and presence are independent of game input and controller
     ownership; a spectator can speak while another participant controls DOS.
-    Room polling starts independently of the first seat read and continues
-    on its own timer when a game read remains pending. It
-    replaces a stalled read at the seat recovery cadence without retrying a
-    pending message. Every room receipt must include its authenticated [viewer]; self marks use that identity
-    independently of the DOS seat response.
+    Room invalidations refresh history independently of frame/seat reads.
+    The stream owns the exact authenticated presence lease and renews it on
+    transport keepalive. Departure, revocation, expiry and stream cancellation
+    release that lease; ordinary reads and speech never renew it.
+    Every room receipt includes its authenticated [viewer]; self marks use it.
     Each page instance has its own presence client. Session storage preserves
     the chat draft and any unconfirmed message's client/message identifiers
     with its exact payload for retry after reload, bound to the invitation.
@@ -63,7 +56,7 @@
     A current document's confirmed disconnect or settled credential rejection
     first removes the bearer-bearing draft, then the saved invitation. Any
     removal failure keeps the local session retryable. Confirmed departure
-    stops room polling and chat even when storage deletion fails. Document
+    stops room observation and chat even when storage deletion fails. Document
     identity guards apply independently to room requests, drafts and receipts;
     an unknown game operation does not stop a current document's conversation.
     Presence leave is dispatched before forgetting the bearer, with no wait

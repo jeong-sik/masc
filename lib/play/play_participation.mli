@@ -11,6 +11,7 @@ val read : transaction:Auth.credential_transaction -> base_path:string ->
   Masc_domain.agent_credential -> (t, string) result
 val write : transaction:Auth.credential_transaction -> base_path:string ->
   Masc_domain.agent_credential -> t -> (unit, string) result
+(** A committed participation write announces Play seat invalidation. *)
 val current : transaction:Auth.credential_transaction -> base_path:string ->
   name:string -> (t, string) result
 (** A principal without a named credential has no browser departure marker.

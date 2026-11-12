@@ -137,7 +137,7 @@ jobs:
         shell: bash
         run: |
           echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache" >> "$GITHUB_ENV"
-          echo "prefix=main-dune-v1-${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+          echo "prefix=main-dune-v2-${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
 
       - uses: ./.github/actions/setup-ocaml-toolchain
       - uses: ./.github/actions/pin-ocaml-deps

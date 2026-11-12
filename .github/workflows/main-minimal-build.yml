@@ -78,7 +78,10 @@ jobs:
           PY
           )
           echo "receipt=main-build-receipt-v2-${ImageOS}-${ImageVersion}-${digest}" >> "$GITHUB_OUTPUT"
-          echo "dune=main-dune-v1-${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+          # v2: entries saved under v1 are empty (about 400 bytes, #51365) and
+          # merge-compile.yml still saves under v1. A pull request that matched
+          # one of them would restore nothing, so the names must differ.
+          echo "dune=main-dune-v2-${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
           echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache" >> "$GITHUB_ENV"
 
       - name: Look for a successful build of these inputs

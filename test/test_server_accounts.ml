@@ -683,6 +683,27 @@ let test_stops_before_it_announces_when_the_trust_policy_refuses () =
     Alcotest.(check (option int)) "no port is recorded" None (recorded_port ~base))
 ;;
 
+(* Whether the page holds a login button that can be pressed. The check reads
+   that fact from the opening tag of the button, not from its words. *)
+let login_can_start body =
+  let rec from start =
+    match String.index_from_opt body start '<' with
+    | None -> false
+    | Some first ->
+      (match String.index_from_opt body first '>' with
+       | None -> false
+       | Some last ->
+         let tag = String.sub body first (last - first + 1) in
+         if String_util.contains_substring tag {| id="go"|}
+         then
+           not
+             (String_util.contains_substring tag " disabled "
+              || String_util.contains_substring tag " disabled>")
+         else from (last + 1))
+  in
+  from 0
+;;
+
 let json_of label body =
   match Yojson.Safe.from_string body with
   | json -> json
@@ -801,7 +822,7 @@ let test_serves_its_table_alone () =
           Alcotest.(check bool)
             ("the GitHub login can be started from " ^ path)
             true
-            (String_util.contains_substring body {|<button id="go">Sign in with GitHub</button>|}))
+            (login_can_start body))
         [ "/"; Authz_activation.invitation_path ];
       (* The routes of a person are in the table, and a request with no
          credential is refused by the route. *)

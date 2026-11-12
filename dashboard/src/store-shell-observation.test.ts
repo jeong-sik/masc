@@ -7,6 +7,7 @@ vi.mock('./api/dev-token', async original => ({
   recoverFromRejectedCredential: effects.recoverCredential,
 }))
 
+const completeRead = { read_completeness: 'complete', read_error: null }
 const flush = async () => { for (let i = 0; i < 24; i++) await Promise.resolve() }
 const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } })
 const item = (path: string) => ({ path, source: 'workspace', exists: true })
@@ -208,14 +209,14 @@ describe('App-owned Shell observation', () => {
     const pending = kind === 'shell' ? store.refreshShell({ force: true }) : store.refreshDashboard({ force: true })
     await flush()
     const { hydrateServerPushEvent } = await import('./sse-store')
-    hydrateServerPushEvent({ type: 'project_snapshot', payload: { root: {
+    hydrateServerPushEvent({ type: 'project_snapshot', payload: { projection_diagnostics: completeRead, root: {
       status: { project: 'canonical', workspace_root: '/workspace' },
       counts: { agents: 5, tasks: 9, keepers: 7 }, configured_keepers: 13,
     } } })
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(store.shellCounts.value).toEqual({ agents: 5, tasks: 9, keepers: 7, total_runtimes: 12, configured_keepers: 13 })
     const old = shell('old-http')
-    held.resolve(json(kind === 'shell' ? old : { shell: old, execution: {}, namespace_truth: { root: old } }))
+    held.resolve(json(kind === 'shell' ? old : { shell: old, execution: { projection_diagnostics: completeRead }, namespace_truth: { projection_diagnostics: completeRead, root: old } }))
     await pending
     expect(store.serverStatus.value?.project).toBe('canonical')
     expect(store.shellCounts.value?.tasks).toBe(9)
@@ -252,12 +253,12 @@ describe('App-owned Shell observation', () => {
       project: 'fixture-project', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:01Z',
     }, counts: { agents: 5, tasks: 9, keepers: 7 }, configured_keepers: 13 }
     const acceptOlder = async () => {
-      older.resolve(json(kind === 'shell' ? old : { shell: old, execution: execution(2), namespace_truth: { root: old } }))
+      older.resolve(json(kind === 'shell' ? old : { shell: old, execution: execution(2), namespace_truth: { projection_diagnostics: completeRead, root: old } }))
       const result = await pending
       if (kind === 'shell') expect(result).toBe(true)
     }
     const acceptNamespace = async () => {
-      namespace.resolve(json({ root: current }))
+      namespace.resolve(json({ projection_diagnostics: completeRead, root: current }))
       await namespaceRead
     }
     if (order === 'namespace-first') {
@@ -335,7 +336,7 @@ describe('App-owned Shell observation', () => {
     const old = { ...shell('older-shell'), status: {
       project: 'fixture-project', workspace_root: '/workspace', generated_at: '2026-11-10T00:00:00Z',
     } }
-    bootstrap.resolve(json({ shell: old, execution: execution(2), namespace_truth: { root: current } }))
+    bootstrap.resolve(json({ shell: old, execution: execution(2), namespace_truth: { projection_diagnostics: completeRead, root: current } }))
     await bootstrapRead
     expect(store.executionWorkspaceAuthority.peek()).toBe(owner)
     expect(store.tasks.peek().find(task => task.id === 'task-bootstrap-observation')?.title).toBe('execution-body-2')
@@ -359,9 +360,9 @@ describe('App-owned Shell observation', () => {
     const { store } = await surface()
     const pending = kind === 'shell' ? store.refreshShell({ force: true }) : store.refreshDashboard({ force: true })
     const { hydrateServerPushEvent } = await import('./sse-store')
-    hydrateServerPushEvent({ type: 'project_snapshot', payload: { root: current } })
+    hydrateServerPushEvent({ type: 'project_snapshot', payload: { projection_diagnostics: completeRead, root: current } })
     const old = { status: { project: 'initializing' }, counts: { agents: 0, tasks: 0, keepers: 0 }, auth: null }
-    held.resolve(json(kind === 'shell' ? old : { shell: old, execution: {}, namespace_truth: { status: 'initializing' } }))
+    held.resolve(json(kind === 'shell' ? old : { shell: old, execution: { projection_diagnostics: completeRead }, namespace_truth: { status: 'initializing' } }))
     await pending
     await flush()
     expect(fetch).toHaveBeenCalledTimes(2)
@@ -389,11 +390,12 @@ describe('App-owned Shell observation', () => {
     if (boundary === 'token') core.setStoredToken('replacement')
     else if (boundary === 'connection') store.resetExecutionSnapshotGeneration()
     else store.hydrateExecutionSnapshot({
+      projection_diagnostics: completeRead,
       execution_publication_epoch: 'replacement-process', execution_publication_generation: 1,
       observer_instance_id: 'instance-B', status: { project: 'B', workspace_root: '/B' },
     })
     const { hydrateServerPushEvent } = await import('./sse-store')
-    hydrateServerPushEvent({ type: 'project_snapshot', payload: { root: {
+    hydrateServerPushEvent({ type: 'project_snapshot', payload: { projection_diagnostics: completeRead, root: {
       status: { project: 'B' }, counts: { tasks: 9 }, configured_keepers: 13,
     } } })
     expect(await store.refreshShell({ force: true })).toBe(false)
@@ -518,6 +520,7 @@ describe('App-owned Shell observation', () => {
     observation.publishDashboardObservationChange({ topic: 'runtime_resolved' })
     await flush()
     store.hydrateExecutionSnapshot({
+      projection_diagnostics: completeRead,
       execution_publication_epoch: 'process', execution_publication_generation: 1,
       observer_instance_id: 'instance-B', status: { project: 'B', workspace_root: '/B' },
     })
@@ -547,6 +550,7 @@ describe('App-owned Shell observation', () => {
     if (boundary === 'token') core.setStoredToken('replacement')
     else if (boundary === 'actor') actor.setCanonicalDashboardActor('replacement')
     else store.hydrateExecutionSnapshot({
+      projection_diagnostics: completeRead,
       execution_publication_epoch: 'process', execution_publication_generation: 1,
       observer_instance_id: 'instance-B', status: { project: 'B', workspace_root: '/B' },
     })

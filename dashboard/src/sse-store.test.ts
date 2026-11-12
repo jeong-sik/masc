@@ -89,6 +89,11 @@ async function loadSseStore() {
     namespaceTruthError,
     normalizeNamespaceTruth: vi.fn((value: unknown) => value),
   }))
+  vi.doMock('./namespace-truth-signals', async original => ({
+    ...(await original<typeof import('./namespace-truth-signals')>()),
+    namespaceTruth,
+    namespaceTruthError,
+  }))
   vi.doMock('./tab-refresh', () => ({ refreshForRoute }))
   vi.doMock('./components/common/toast', () => ({ showToast }))
   vi.doMock('./agent-core-runtime-store', () => ({
@@ -393,6 +398,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     sseStore.routeServerPushEvent({
       type: 'project_snapshot',
       payload: {
+        projection_diagnostics: { read_completeness: 'complete', read_error: null },
         root: {
           status: {
             project: 'default',
@@ -402,7 +408,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     })
     await flushAsyncWork()
 
-    expect(namespaceTruth.value).toEqual({
+    expect(namespaceTruth.value).toMatchObject({
       root: {
         status: {
           project: 'default',
@@ -410,7 +416,9 @@ describe('setupServerPushReaction reconnect hydration', () => {
       },
     })
     expect(requestNamespaceTruthNow).not.toHaveBeenCalled()
-    expect(hydrateShellRootSnapshot).toHaveBeenCalledWith({ status: { project: 'default' } }, true)
+    expect(hydrateShellRootSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ status: expect.objectContaining({ project: 'default' }) }), true,
+    )
 
   })
 

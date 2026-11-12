@@ -16,7 +16,7 @@ async function surface() {
   dispose = actions.disposeNamespaceTruthScheduler
   const publish = () => {
     const event = parseSSEMessage({ type: 'project_snapshot', ts_unix: 1,
-      payload: { root: { status: { project: 'ready', workspace_root: '/ready' } } } })
+      payload: { projection_diagnostics: { read_completeness: 'complete', read_error: null }, root: { status: { project: 'ready', workspace_root: '/ready' } } } })
     if (event === null) throw new Error('canonical project snapshot was refused')
     push.hydrateServerPushEvent(event)
   }

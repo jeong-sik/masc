@@ -47,8 +47,8 @@ import {
   requestNamespaceTruthNow,
   namespaceTruth,
   namespaceTruthError,
-  normalizeNamespaceTruth,
 } from './namespace-truth-store'
+import { hydrateNamespaceTruthObservation } from './namespace-truth-observation'
 import { normalizeOperatorSnapshot } from './operator-normalizers'
 import { operatorError, operatorSnapshot } from './operator-signals'
 import { compositeTick } from './composite-signals'
@@ -73,7 +73,7 @@ import {
   SSE_KEEPER_OPERATOR_DEBOUNCE_MS,
   SSE_KEEPER_THREAD_DEBOUNCE_MS,
 } from './config/constants'
-import { namespaceTruthInitializing, namespaceTruthLoading, namespaceTruthReadRecovery } from './namespace-truth-signals'
+import { namespaceTruthReadRecovery } from './namespace-truth-signals'
 import { subscribeStoredTokenChanges } from './api/core'
 import { hydrateMissionSnapshot, setupMissionObservation } from './mission-actions'
 import { hydrateOperatorDigest, setupOperatorDigestObservation } from './operator-digest-observation'
@@ -362,12 +362,8 @@ function normalizeMascEventType(type: string): string {
 /** Hydrate project-snapshot signals directly from a push payload — zero HTTP fetch. */
 function handleNamespaceTruthSnapshot(payload: unknown): void {
   try {
-    const normalized = normalizeNamespaceTruth(payload)
-    namespaceTruth.value = normalized
-    namespaceTruthError.value = null
-    namespaceTruthInitializing.value = false
-    namespaceTruthLoading.value = false
-    namespaceTruthReadRecovery.succeeded()
+    const normalized = hydrateNamespaceTruthObservation(payload, 'canonical')
+    if (normalized === null) return
     recoverShellReadDebt()
     hydrateShellRootSnapshot(normalized.root, true)
   } catch (err) {

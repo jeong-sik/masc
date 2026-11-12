@@ -218,6 +218,7 @@ describe('manual execution refresh completion through the actual HTTP reader', (
   function execution(generation: number) {
     return {
       generated_at: '2026-09-30T00:00:00Z',
+      projection_diagnostics: { read_completeness: 'complete', read_error: null },
       execution_publication_epoch: 'manual-refresh-fixture',
       execution_publication_generation: generation,
       status: { project: 'same-project', workspace_root: '/fixture/workspace-a' },

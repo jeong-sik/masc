@@ -253,7 +253,9 @@ it('withdraws retained partial metrics when the query or workspace changes befor
   await vi.waitFor(() => expect(view.container.textContent).toContain('workspace-A-partial-row'))
   invalidateExecutionSnapshotGeneration('partial-workspace-B', 0)
   await act(async () => {
-    hydrateExecutionSnapshot({ execution_publication_epoch: 'partial-workspace-B', execution_publication_generation: 1,
+    hydrateExecutionSnapshot({ projection_diagnostics: { read_completeness: 'complete', read_error: null },
+      observer_instance_id: 'partial-workspace-B-instance',
+      execution_publication_epoch: 'partial-workspace-B', execution_publication_generation: 1,
       status: { project: 'B', workspace_root: '/partial-B' } } as Parameters<typeof hydrateExecutionSnapshot>[0])
     await flush()
   })

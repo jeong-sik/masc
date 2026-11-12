@@ -42,6 +42,7 @@ import { normalizeKeepers } from './keeper-store-normalize'
 import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
 import { createReadRecovery } from './lib/read-recovery'
+import { projectionReadOutcome } from './lib/projection-read-outcome'
 import { ObservationPending, retainObservationReadFailure, setupObservationRefresh } from './lib/observation-refresh'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { currentCanonicalDashboardActor, managedCredentialNeedsRevalidation, managedDashboardRefusal, setCanonicalDashboardActor } from './lib/dashboard-session-actor'
@@ -60,8 +61,8 @@ import {
 } from './api/core'
 import { recoverFromRejectedCredential } from './api/dev-token'
 import { timeBoardRequest } from './board-metrics'
-import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing, namespaceTruthReadRecovery } from './namespace-truth-signals'
-import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
+import { namespaceTruthReadRecovery } from './namespace-truth-signals'
+import { hydrateNamespaceTruthObservation } from './namespace-truth-observation'
 import {
   goalTreeData,
   advanceGoalTreeObservation,
@@ -720,6 +721,7 @@ let pendingGoalRefresh: symbol | null = null
 function hydrateDashboardBootstrap(
   data: DashboardBootstrapResponse,
   executionRequestGeneration: number,
+  executionReadRevision: number,
   goalOwnerAtStart: symbol,
   authOwner: DashboardCredentialOwner,
   shellRootRevision: number,
@@ -735,17 +737,15 @@ function hydrateDashboardBootstrap(
   }
 
   hydrateShellSnapshot(data.shell, { light: true, sentToken: authOwner.token, authOwner, rootRevision: shellRootRevision })
-  hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration, rootRevision: shellRootRevision })
+  if (executionReadRecovery.revision === executionReadRevision) {
+    hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration, rootRevision: shellRootRevision })
+  }
 
   if (data.namespace_truth && !bootstrapSliceError(data.namespace_truth)
     && namespaceTruthReadRecovery.revision === namespaceRevision
     && !namespaceTruthReadRecovery.isReading) {
-    const normalized = normalizeNamespaceTruth(data.namespace_truth)
-    namespaceTruth.value = normalized
-    namespaceTruthError.value = null
-    namespaceTruthInitializing.value = false
-    namespaceTruthReadRecovery.succeeded()
-    hydrateShellRootSnapshot(normalized.root, true)
+    const normalized = hydrateNamespaceTruthObservation(data.namespace_truth, 'http')
+    if (normalized !== null) hydrateShellRootSnapshot(normalized.root, true)
   }
   // A bootstrap may omit Goal slices. Such a response must not take ownership
   // away from an explicit refresh already loading the combined Goal snapshot.
@@ -811,11 +811,13 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
       try {
         const shellRootRevision = shellRootCompletionRevision
         const namespaceRevision = namespaceTruthReadRecovery.revision
+        const executionReadRevision = executionReadRecovery.revision
         const data = await fetchDashboardBootstrap()
         if (!current()) return
         hydrateDashboardBootstrap(
           data,
           executionRequestGeneration,
+          executionReadRevision,
           goalOwnerAtStart,
           authOwner,
           shellRootRevision,
@@ -1329,6 +1331,16 @@ export function hydrateExecutionSnapshot(
   if (identity !== null && identity.epoch === executionPublicationEpoch
     && candleObservationSequenceWatermark >= 0
     && (candleSequence === undefined || candleSequence < candleObservationSequenceWatermark)) return false
+  if (isInitializingExecutionPayload(data)) {
+    acceptedExecutionWorkspace.value = null
+    executionLoaded.value = false
+    candleObservation.value = { status: 'unavailable', reason: 'Server is initializing' }
+    if (opts?.requestGeneration === undefined) executionReadRecovery.succeeded()
+    else executionReadRecovery.waiting(() => { void executionScheduler.requestNow() })
+    return false
+  }
+  const outcome = projectionReadOutcome(data)
+  if (outcome === null) throw new Error('Execution projection omitted its read outcome')
   if (identity !== null) {
     if (executionPublicationEpoch === null) {
       executionWorkspaceRevision.value += 1
@@ -1405,7 +1417,14 @@ export function hydrateExecutionSnapshot(
     .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
   setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name, stableValueEqual)
   executionLoaded.value = true
-  executionReadRecovery.succeeded()
+  executionError.value = outcome.kind === 'partial' ? outcome.error : null
+  const producerOwnsRead = opts?.requestGeneration === undefined
+    || isRecord(data) && isRecord(data.query) && data.query.default_light_request === true
+  if (outcome.kind === 'partial' && !producerOwnsRead) {
+    executionReadRecovery.failed(() => { void executionScheduler.requestNow() })
+  } else {
+    executionReadRecovery.succeeded()
+  }
   return true
 }
 
@@ -1430,6 +1449,7 @@ async function doFetchExecution(): Promise<void> {
   nextExecutionForce = false
   const requestGeneration = executionSnapshotRequestGeneration()
   const rootRevision = shellRootCompletionRevision
+  const readRevision = executionReadRecovery.revision
   const requestEpoch = executionPublicationEpoch
   const requestPublicationGeneration = executionPublicationGenerationWatermark
   const requestCandleSequence = candleObservationSequenceWatermark
@@ -1440,6 +1460,9 @@ async function doFetchExecution(): Promise<void> {
     const data = await fetchDashboardExecution({ force })
     if (!dashboardCredentialOwnerIsCurrent(authOwner)) {
       throw new ExecutionRefreshUnavailable('Execution credential was superseded by a newer observation')
+    }
+    if (readRevision !== executionReadRecovery.revision) {
+      throw new ExecutionRefreshUnavailable('Execution response was superseded by a newer observation')
     }
     if (isInitializingExecutionPayload(data)) {
       if (requestGeneration !== executionHydrationRequestGeneration
@@ -1461,6 +1484,7 @@ async function doFetchExecution(): Promise<void> {
     // overwrite the newer accepted authority or turn into successful refresh.
     if (err instanceof ExecutionRefreshUnavailable) throw err
     if (requestGeneration !== executionHydrationRequestGeneration
+      || readRevision !== executionReadRecovery.revision
       || requestEpoch !== executionPublicationEpoch
       || requestPublicationGeneration !== executionPublicationGenerationWatermark
       || requestCandleSequence !== candleObservationSequenceWatermark

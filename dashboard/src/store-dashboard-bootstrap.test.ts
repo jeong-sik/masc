@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+const completeRead = { read_completeness: 'complete', read_error: null }
+
 const apiMocks = vi.hoisted(() => ({
   fetchDashboardBootstrap: vi.fn(),
   fetchDashboardShell: vi.fn(),
@@ -98,7 +100,7 @@ describe('refreshDashboard bootstrap', () => {
   }
   function bootstrapGoals(failed: boolean) {
     return { shell: { generated_at: 'now', status: {}, counts: {}, providers: {} },
-      execution: { generated_at: 'now', status: {}, agents: [], tasks: [], messages: [], keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [] },
+      execution: { projection_diagnostics: completeRead, generated_at: 'now', status: {}, agents: [], tasks: [], messages: [], keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [] },
       planning: failed ? sourceFailure : readyPlanning, goals: failed ? sourceFailure : readyTree }
   }
 
@@ -211,6 +213,7 @@ describe('refreshDashboard bootstrap', () => {
         runtime_resolution: null,
       },
       execution: {
+        projection_diagnostics: completeRead,
         generated_at: '2026-05-14T06:00:00Z',
         status: { project: 'default' },
         agents: [],
@@ -227,6 +230,7 @@ describe('refreshDashboard bootstrap', () => {
         rollup: {},
       },
       namespace_truth: {
+        projection_diagnostics: completeRead,
         generated_at: '2026-05-14T06:00:02Z',
         root: {
           status: { project: 'default', version: '2.200.0' },
@@ -274,7 +278,7 @@ describe('refreshDashboard bootstrap', () => {
     }
     apiMocks.fetchDashboardBootstrap.mockResolvedValue({
       shell: { generated_at: '2026-09-09', status: {}, counts: {}, providers: {} },
-      execution: { generated_at: '2026-09-09', status: {}, agents: [], tasks: [],
+      execution: { projection_diagnostics: completeRead, generated_at: '2026-09-09', status: {}, agents: [], tasks: [],
         messages: [], keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [] },
       planning: failure,
       goals: failure,
@@ -298,7 +302,7 @@ describe('refreshDashboard bootstrap', () => {
   it('refuses a malformed Goal store failure envelope instead of reading it as a planning snapshot', async () => {
     apiMocks.fetchDashboardBootstrap.mockResolvedValue({
       shell: { generated_at: '2026-09-09', status: {}, counts: {}, providers: {} },
-      execution: { generated_at: '2026-09-09', status: {}, agents: [], tasks: [],
+      execution: { projection_diagnostics: completeRead, generated_at: '2026-09-09', status: {}, agents: [], tasks: [],
         messages: [], keepers: [], execution_queue: [], worker_support_briefs: [], continuity_briefs: [] },
       planning: { ...sourceFailure, reason: 'corrupt' },
       goals: readyTree,
@@ -327,6 +331,7 @@ describe('refreshDashboard bootstrap', () => {
         runtime_resolution: null,
       },
       execution: {
+        projection_diagnostics: completeRead,
         generated_at: '2026-06-26T00:00:00Z',
         status: { project: 'default' },
         agents: [],
@@ -343,6 +348,7 @@ describe('refreshDashboard bootstrap', () => {
         rollup: {},
       },
       namespace_truth: {
+        projection_diagnostics: completeRead,
         generated_at: '2026-06-26T00:00:02Z',
         root: {
           status: { project: 'default', version: '2.200.0' },
@@ -517,6 +523,7 @@ describe('refreshDashboard bootstrap', () => {
       runtime_resolution: null,
     })
     apiMocks.fetchDashboardExecution.mockResolvedValue({
+      projection_diagnostics: completeRead,
       generated_at: '2026-05-14T06:01:00Z',
       status: { project: 'fallback' },
       agents: [],
@@ -551,6 +558,7 @@ describe('refreshKeeperRuntimeStatus', () => {
       runtime_resolution: null,
     })
     apiMocks.fetchDashboardExecution.mockResolvedValue({
+      projection_diagnostics: completeRead,
       generated_at: '2026-06-25T12:00:00Z',
       status: { project: 'ws' },
       agents: [],
@@ -581,6 +589,7 @@ describe('refreshKeeperRuntimeStatus', () => {
       runtime_resolution: null,
     })
     apiMocks.fetchDashboardExecution.mockResolvedValue({
+      projection_diagnostics: completeRead,
       generated_at: '2026-06-25T12:00:00Z',
       status: { project: 'ws' },
       agents: [],
@@ -628,6 +637,7 @@ describe('refreshKeeperRuntimeStatus', () => {
       },
     })
     apiMocks.fetchDashboardExecution.mockResolvedValue({
+      projection_diagnostics: completeRead,
       generated_at: '2026-06-25T12:00:00Z',
       status: { project: 'ws' },
       agents: [],

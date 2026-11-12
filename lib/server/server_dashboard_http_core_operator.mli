@@ -41,7 +41,7 @@ val mark_operator_snapshot_error_if_current :
   exn ->
   operator_snapshot_publication option
 
-val operator_digest_cache : Server_dashboard_http_cache.cached_surface
+val operator_digest_cache : state:Mcp_server.server_state -> Server_dashboard_http_cache.cached_surface
 val operator_refresh_interval_s : float
 val operator_snapshot_extra : unit -> (string * Yojson.Safe.t) list
 

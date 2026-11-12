@@ -9,17 +9,20 @@
 let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso
 let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
 
-let operator_retention_json ~(config : Workspace.config) ~scope ~producer =
+type refresh_policy = Periodic of float | Source_and_deadline
+
+let operator_retention_json ~(config : Workspace.config) ~scope ~producer ~refresh_policy =
+  let interval, policy = match refresh_policy with
+    | Periodic interval -> `Float interval, "default publication refreshes synchronously when stale"
+    | Source_and_deadline -> `Null, "default publication follows source changes and policy deadlines" in
   `Assoc
     [ "scope", `String scope
     ; "workspace_root", `String config.base_path
     ; "workspace_path", `String config.workspace_path
     ; "producer", `String producer
     ; "store_kind", `String "process_cache"
-    ; "background_refresh_interval_s", `Float operator_refresh_interval_s
-    ; ( "cache_policy"
-      , `String "default publication refreshes synchronously when stale"
-      )
+    ; "background_refresh_interval_s", interval
+    ; "cache_policy", `String policy
     ]
 ;;
 
@@ -60,6 +63,7 @@ let with_operator_surface_metadata
     ~source
     ~scope
     ~producer
+    ~refresh_policy
     ~query
     json =
   match json with
@@ -69,7 +73,7 @@ let with_operator_surface_metadata
       [ "dashboard_surface", `String dashboard_surface
       ; "source", `String source
       ; "generated_at_iso", `String generated_at
-      ; "retention", operator_retention_json ~config ~scope ~producer
+      ; "retention", operator_retention_json ~config ~scope ~producer ~refresh_policy
       ; "query", query
       ]
     in
@@ -95,6 +99,7 @@ let with_operator_snapshot_metadata ~config ~query json =
     ~source:"operator_snapshot_read_model"
     ~scope:"operator_snapshot"
     ~producer:"Operator_control.snapshot_json"
+    ~refresh_policy:(Periodic operator_refresh_interval_s)
     ~query
     json
 ;;
@@ -105,7 +110,8 @@ let with_operator_digest_metadata ~config ~query json =
     ~dashboard_surface:"/api/v1/operator/digest"
     ~source:"operator_digest_read_model"
     ~scope:"operator_digest"
-    ~producer:"Operator_control.digest_json"
+    ~producer:"Operator_control.observe"
+    ~refresh_policy:Source_and_deadline
     ~query
     json
 ;;

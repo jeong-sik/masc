@@ -256,12 +256,10 @@ let mark_operator_snapshot_error_if_current ~compute exn =
     else None)
 ;;
 
-let operator_digest_cache =
-  create_cached_surface
-    (`Assoc
-        [ "health", `String "initializing"
-        ; "generated_at", `String (Masc_domain.now_iso ())
-        ])
+let operator_digest_cache ~state =
+  Server_dashboard_operator_digest_observation.cache
+    (Server_dashboard_operator_digest_observation.owner_for_scope ~state
+      (Mcp_server.workspace_scope state))
 ;;
 
 let operator_refresh_interval_s =

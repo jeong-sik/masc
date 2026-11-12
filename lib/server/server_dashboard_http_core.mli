@@ -79,7 +79,7 @@ val start_operator_digest_refresh_loop :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  broadcast_digest:(Yojson.Safe.t -> unit) ->
+  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   unit
 
 val operator_snapshot_http_json :

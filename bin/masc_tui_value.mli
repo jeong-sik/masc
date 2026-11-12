@@ -90,6 +90,8 @@ module Count : sig
     | Call
     | Post
     | Entry  (** One record of a log. *)
+    | Row  (** One row a list draws. *)
+    | Event
 
   val reading : ko:bool -> noun -> int -> string
   (** The count and what it counts, in the screen's language: [3 keepers],

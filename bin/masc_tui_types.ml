@@ -21314,6 +21314,15 @@ let title_missing_reading ~error =
 let field_missing_reading ~error =
   if Option.is_some error then field_failed else field_unread
 
+(* The same answer in the here row. The row's gap sets a reading off from the
+   path, so it takes no brackets, and it reads in the screen's language like
+   the path beside it. Four rows each wrote this Korean pair by hand and the
+   rest drew the bracketed English on a Korean screen. *)
+let here_missing_reading (state : state) ~error =
+  ui_text state
+    ~ko:(if Option.is_some error then "조회 실패" else "미조회")
+    ~en:(field_missing_reading ~error)
+
 (* The Activity feed's title reading. A count is a reading only once the feed
    has answered. With no server on the port the feed never opens, and a title
    reading "(0 rows \xc2\xb7 0 events held)" there states a measurement of
@@ -21329,17 +21338,19 @@ let field_missing_reading ~error =
    Held frames outlive the stream that delivered them, so a closed feed, or one
    switched back off, with frames in hand still has a reading to report. Only
    the state before any answer, with nothing held, has none. *)
+type activity_title_reading =
+  | Activity_unanswered of { error : string option }
+  | Activity_counted of { shown : int; held : int }
+
 let activity_title_reading ~observer ~shown ~held =
   match observer, held with
-  | (Observer_off | Observer_opening), 0 -> title_missing_reading ~error:None
+  | (Observer_off | Observer_opening), 0 -> Activity_unanswered { error = None }
   | Observer_closed_before_answer { reason; _ }, 0 ->
-    title_missing_reading ~error:(Some reason)
+    Activity_unanswered { error = Some reason }
   | ( ( Observer_off | Observer_opening | Observer_live _
       | Observer_closed_before_answer _ | Observer_closed_after_live _ ),
       _ ) ->
-    Printf.sprintf "(%s \xc2\xb7 %s held)"
-      (Masc_tui_message_layout.count_noun shown "row")
-      (Masc_tui_message_layout.count_noun held "event")
+    Activity_counted { shown; held }
 
 (* The same answer for a pane whose reading is a [Masc_tui_fetched] view: the
    count once it has answered, and otherwise which of the two it is. Asked and

@@ -1,106 +1,24 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { useStoreSubscription } from './use-signal-value'
-import { get } from '../../api/core'
 import { fetchIdePresence } from '../../api/ide'
 import { KeeperBadge } from '../keeper-badge'
 import {
   createKeeperPresenceStore,
   disconnectedSnapshot,
   globalPresenceSnapshot,
+  LOADING_SNAPSHOT,
   normalizeKeeperPresenceSnapshot,
   type KeeperPresenceEntry,
   type KeeperPresenceSnapshot,
 } from './keeper-presence-store'
-import { parseAgentStatus } from '../../lib/agent-status'
 import { setupObservationRefresh } from '../../lib/observation-refresh'
 
-export interface ApiAgent {
-  readonly name: string
-  readonly status: string
-  readonly current_task: string | null
-  readonly model: string | null
-}
-
-export interface ApiStatus {
-  readonly project?: string | null
-  readonly paused?: boolean
-}
-
-function mapAgentStatus(status: string): KeeperPresenceEntry['status'] {
-  const parsed = parseAgentStatus(status)
-  return parsed === 'active' || parsed === 'busy' ? 'active' : 'idle'
-}
-
-/** A status body that arrived means the runtime answered; its project names
-    the runtime in the strip.
-    @internal — exported only so {@link ./ide-presence-strip.test.ts}
-    can pin the disconnected/live branch behaviour. */
-export function agentsToPresence(
-  agents: ReadonlyArray<ApiAgent>,
-  status: ApiStatus | undefined,
-): KeeperPresenceSnapshot {
-  if (status === undefined) {
-    return disconnectedSnapshot('runtime_unknown')
-  }
-  if (agents.length === 0) {
-    return disconnectedSnapshot('no_agents')
-  }
-  const now = Date.now()
-  return {
-    kind: 'live',
-    runtime_id: status.project?.trim() ?? '',
-    entries: agents.map((agent, idx) => ({
-      keeper_id: agent.name,
-      workspace_label: agent.name,
-      role: 'agent',
-      status: mapAgentStatus(agent.status),
-      last_seen_ms: now - idx * 1000,
-    })),
-  }
-}
-
-/** The standard MASC API endpoints ([/api/v1/status], [/api/v1/agents]) wrap
-    their payload in an [{ ok, data }] envelope, unlike the dashboard-specific
-    [/api/v1/providers] which returns its payload at the top level. [get()]
-    returns the raw parsed body without unwrapping, so a consumer must pull
-    [.data] out. Reading the envelope's absent top-level fields (e.g.
-    [status.project], which actually lives at [status.data.project]) is what
-    made this strip render a permanent [disconnected (runtime_unknown)]
-    regardless of the live runtime. Falls back to the raw value when no [data]
-    key is present, so an un-enveloped response still works.
-    @internal — exported for {@link ./ide-presence-strip.test.ts}. */
-export function unwrapEnvelope<T>(raw: unknown): T | undefined {
-  if (raw === null || typeof raw !== 'object') return undefined
-  if ('data' in raw) return (raw as { data: T }).data
-  return raw as T
-}
-
 async function fetchPresence(signal: AbortSignal): Promise<KeeperPresenceSnapshot> {
-  const [idePresence, agentsResponse, statusResponse] = await Promise.allSettled([
-    fetchIdePresence({ signal }),
-    get<unknown>('/api/v1/agents?limit=20', { signal }),
-    get<unknown>('/api/v1/status', { signal }),
-  ])
-
-  // The IDE endpoint is the only source that has the runtime/branch and
-  // keeper-presence contract together. Prefer it when valid; the generic
-  // agents/status pair remains a compatibility fallback for older servers.
-  if (idePresence.status === 'fulfilled') {
-    const snapshot = normalizeKeeperPresenceSnapshot(idePresence.value)
-    if (snapshot !== null) return snapshot
-  }
-
-  if (agentsResponse.status === 'fulfilled' && statusResponse.status === 'fulfilled') {
-    const agentsRaw = agentsResponse.value
-    const statusRaw = statusResponse.value
-    const agentsData = unwrapEnvelope<{ agents?: ApiAgent[] }>(agentsRaw)
-    const statusData = unwrapEnvelope<ApiStatus>(statusRaw)
-    const agents: ApiAgent[] = Array.isArray(agentsData?.agents) ? agentsData.agents : []
-    return agentsToPresence(agents, statusData)
-  }
-
-  return disconnectedSnapshot('fetch_failed')
+  const raw = await fetchIdePresence({ signal })
+  const snapshot = normalizeKeeperPresenceSnapshot(raw)
+  if (snapshot === null) throw new Error('IDE presence returned an invalid snapshot')
+  return snapshot
 }
 
 function presenceHeader(snap: KeeperPresenceSnapshot) {
@@ -158,18 +76,24 @@ function samePresence(a: KeeperPresenceSnapshot, b: KeeperPresenceSnapshot): boo
 export function IdePresenceStrip({
   compact = false,
 }: { readonly compact?: boolean } = {}) {
-  const presenceStore = useMemo(() => createKeeperPresenceStore(globalPresenceSnapshot.value), [])
+  const presenceStore = useMemo(() => createKeeperPresenceStore(), [])
 
   useEffect(() => setupObservationRefresh(async signal => {
-    const snapshot = await fetchPresence(signal)
-    // Unchanged observations leave every downstream presence consumer alone.
-    if (!signal.aborted && !samePresence(globalPresenceSnapshot.value, snapshot)) {
-      globalPresenceSnapshot.value = snapshot
+    try {
+      const snapshot = await fetchPresence(signal)
+      // Unchanged observations leave every downstream presence consumer alone.
+      if (!signal.aborted && !samePresence(globalPresenceSnapshot.value, snapshot)) {
+        globalPresenceSnapshot.value = snapshot
+      }
+    } catch (error) {
+      if (signal.aborted) return
+      globalPresenceSnapshot.value = disconnectedSnapshot('fetch_failed')
+      throw error
     }
-    if (!signal.aborted && snapshot.kind === 'disconnected' && snapshot.reason === 'fetch_failed') {
-      throw new Error('IDE presence is unavailable')
-    }
-  }, { topics: ['ide_presence'] }), [])
+  }, { topics: ['ide_presence'], resetRead: () => {
+    globalPresenceSnapshot.value = LOADING_SNAPSHOT
+    presenceStore.reset()
+  } }), [presenceStore])
 
   useEffect(() => {
     const unsub = globalPresenceSnapshot.subscribe(() => {

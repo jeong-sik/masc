@@ -126,6 +126,7 @@ type run =
 
 type error =
   | Invalid_config of string
+  | Native_tools_refused of Runtime_account_access.native_refusal
   | Process_runtime_unavailable
   | Call_dir_failed of string
   | Spawn_refused of Process_eio.spawn_refusal
@@ -166,6 +167,7 @@ let reported_usage = function
   | Exit_code_mismatch { usage; _ }
   | Outcome_exit_mismatch { usage; _ } -> usage
   | Invalid_config _
+  | Native_tools_refused _
   | Process_runtime_unavailable
   | Call_dir_failed _
   | Spawn_refused _
@@ -178,6 +180,8 @@ let reported_usage = function
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Vibe config: " ^ detail
+  | Native_tools_refused refusal ->
+    "Vibe did not start: " ^ Runtime_account_access.native_refusal_to_string refusal
   | Process_runtime_unavailable -> "Eio process runtime is not initialized"
   | Call_dir_failed detail -> "Vibe call directory failed: " ^ detail
   | Spawn_refused refusal ->
@@ -311,11 +315,18 @@ let remove_call_dir call_dir =
       (Printexc.to_string exn)
 ;;
 
+(* HIGH-RISK-UNREVIEWED: a Vibe agent runs the tools its own configuration
+   gives it, and MASC sets none of them, so a run is judged as the widest
+   native posture (plans D3c and F3a-3). *)
+let agent_posture = Runtime_native_tools.Native_full
+
 let run ~host:(_ : Runtime_account_access.host_account) config ~prompt =
-  match validate_config config with
-  | Error detail -> Error (Invalid_config detail)
-  | Ok () when not (Process_eio.is_initialized ()) -> Error Process_runtime_unavailable
-  | Ok () ->
+  match validate_config config, Runtime_account_access.authorize_native agent_posture with
+  | Error detail, (Ok () | Error (_ : Runtime_account_access.native_refusal)) ->
+    Error (Invalid_config detail)
+  | Ok (), Error refusal -> Error (Native_tools_refused refusal)
+  | Ok (), Ok () when not (Process_eio.is_initialized ()) -> Error Process_runtime_unavailable
+  | Ok (), Ok () ->
     (* The directory is made inside the switch and its removal registered
        with no effect in between: [Switch.run] can raise [Cancelled] before
        its callback runs, and Eio runs release hooks with cancellation off. *)

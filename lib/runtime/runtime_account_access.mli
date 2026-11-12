@@ -291,17 +291,33 @@ val api_admission_snapshot : api_sealed -> Llm_provider.Slot_scheduler.snapshot 
     own files, so a multi-account process runs a model turn only without
     native tools (plan D3c). Codex and Muse cannot drop their native tools,
     so their model turns are refused there until a measurement opens a
-    posture. Calls that run no model turn (a login check, a usage read, a
-    model list) take no native tools and are not judged here. *)
+    posture. A single-user process whose workspace keeps runtime roots of
+    persons is in the same place for those roots (plan F3a-3). Calls that run
+    no model turn (a login check, a usage read, a model list) take no native
+    tools and are not judged here. *)
 
 type native_refusal =
   | Native_unpublished  (** The process has not published its access. *)
   | Native_tools_reach_other_homes of Runtime_native_tools.posture
       (** A model turn with native tools in a multi-account process. *)
+  | Native_tools_reach_person_homes of Runtime_native_tools.posture
+      (** A model turn with native tools in a single-user process whose
+          workspace keeps runtime roots of persons
+          ({!Runtime_account_home_layout.persons_remain}). *)
+  | Person_homes_unread of
+      { posture : Runtime_native_tools.posture
+      ; unread : Unix.error
+      }
+      (** A single-user process could not read whether such roots remain. *)
 
 val native_refusal_to_string : native_refusal -> string
 
-(** Whether a model turn may run with the native tools of [posture]: every
-    posture in a single-user process, and only
-    {!Runtime_native_tools.Native_none} in a multi-account process. *)
+(** Whether a model turn may run with the native tools of [posture].
+    {!Runtime_native_tools.Native_none} runs in either mode. The other
+    postures run only in a single-user process whose workspace keeps no
+    runtime root of a person: after the accounts were turned off, or after
+    their log was removed, the logins of the persons stay under
+    [.masc/accounts] until the operator removes that directory, and the
+    native tools of a CLI could read them (plan F3a-3). Whether it is there is
+    read at each call. *)
 val authorize_native : Runtime_native_tools.posture -> (unit, native_refusal) result

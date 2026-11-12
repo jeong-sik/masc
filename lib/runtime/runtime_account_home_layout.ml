@@ -61,6 +61,14 @@ let under_persons ~base_path home =
     (spellings persons)
 ;;
 
+let persons_remain ~base_path =
+  let persons = Filename.concat (Common.masc_dir_from_base_path ~base_path) accounts_dir in
+  match Unix.lstat persons with
+  | (_ : Unix.stats) -> Ok true
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (error, _, _) -> Error error
+;;
+
 let home ~runtime_root client ~account_id =
   if not (Fs_compat.is_capability_leaf account_id)
   then Error "Invalid login account identity."

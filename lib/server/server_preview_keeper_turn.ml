@@ -206,8 +206,12 @@ let native_answer posture =
   | Ok () -> Ok ()
   | Error (Runtime_account_access.Native_tools_reach_other_homes _ as refusal) ->
     Error (error R.Forbidden_403 (Runtime_account_access.native_refusal_to_string refusal))
-  | Error (Runtime_account_access.Native_unpublished as refusal) ->
-    (* The preview publishes its access before it listens. *)
+  | Error
+      (( Runtime_account_access.Native_unpublished
+       | Runtime_account_access.Native_tools_reach_person_homes _
+       | Runtime_account_access.Person_homes_unread _ ) as refusal) ->
+    (* The preview publishes its access before it listens, and it is a
+       multi-account process: the two refusals of a single user do not occur. *)
     Log.Server.warn
       "A Keeper turn was refused: %s"
       (Runtime_account_access.native_refusal_to_string refusal);

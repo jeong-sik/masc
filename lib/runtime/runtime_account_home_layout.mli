@@ -44,6 +44,14 @@ val person_runtime_root
     and makes nothing. *)
 val under_persons : base_path:string -> string -> bool
 
+(** Whether {!accounts_dir} of [base_path] is there: a login of a person made
+    it for the runtime roots of the persons, and only the operator removes
+    it. Whatever has that name counts, an empty directory, a link or a file,
+    so the answer needs no listing, which could end early on a read error and
+    look empty. [Ok false] only when the name is not there. [Error] when the
+    path to it could not be read. It reads one name and makes nothing. *)
+val persons_remain : base_path:string -> (bool, Unix.error) result
+
 (** The home of [account_id] of [client] under [runtime_root], spelled from the
     real path of [runtime_root]. It reads only that real path and makes
     nothing. [runtime_root] is absolute and [account_id] is one path leaf. *)

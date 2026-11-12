@@ -399,6 +399,11 @@ let api_admission_snapshot config = Llm_provider.Provider_admission.snapshot_for
 type native_refusal =
   | Native_unpublished
   | Native_tools_reach_other_homes of Runtime_native_tools.posture
+  | Native_tools_reach_person_homes of Runtime_native_tools.posture
+  | Person_homes_unread of
+      { posture : Runtime_native_tools.posture
+      ; unread : Unix.error
+      }
 
 let native_refusal_to_string = function
   | Native_unpublished ->
@@ -411,14 +416,45 @@ let native_refusal_to_string = function
        supports the posture none runs here with keeper.tools.native = \"none\" in its \
        profile; a client without it runs no model turn here"
       (Runtime_native_tools.to_string posture)
+  | Native_tools_reach_person_homes posture ->
+    Printf.sprintf
+      "this workspace keeps .masc/accounts, where the runtime roots of persons are, and a \
+       model turn runs beside it only without native tools. This turn asks for the native \
+       posture %S: the CLI runs as the user of the server process, so its own tools could \
+       read the logins kept there. A Keeper whose client supports the posture none runs \
+       with keeper.tools.native = \"none\" in its profile; the other turns run once \
+       .masc/accounts is removed"
+      (Runtime_native_tools.to_string posture)
+  | Person_homes_unread { posture; unread } ->
+    Printf.sprintf
+      "whether .masc/accounts, where the runtime roots of persons are, remains could not \
+       be read (%s), so no model turn with native tools starts, and this turn asks for the \
+       native posture %S"
+      (Unix.error_message unread)
+      (Runtime_native_tools.to_string posture)
 ;;
 
+(* HIGH-RISK-UNREVIEWED: the one decision on the native tools of a model turn.
+   Without them a turn reads through MASC tools only, in either mode. With them
+   it reads what the user of the server process can read: in a multi-account
+   process the homes of the other persons (plan D3c), and in a single-user one
+   the homes that persons left under the workspace, after Off or after their
+   log was removed (plan F3a-3). Whether they remain is read from the
+   workspace at each start, so a removal or a first login counts at the next one. *)
 let authorize_native posture =
   match Atomic.get state, posture with
   | Unpublished, (Runtime_native_tools.Native_none | Native_read | Native_full) ->
     Error Native_unpublished
-  | ( Published (Single_user (_ : Authz_boot_mode_read.single_user))
-    , (Runtime_native_tools.Native_none | Native_read | Native_full) ) -> Ok ()
+  | Published (Single_user (_ : Authz_boot_mode_read.single_user)), Runtime_native_tools.Native_none
+    -> Ok ()
+  | Published (Single_user single_user), (Runtime_native_tools.Native_read | Native_full) ->
+    (match
+       Layout.persons_remain
+         ~base_path:(Authz_boot_mode_read.single_user_base_path single_user)
+     with
+     | Ok false -> Ok ()
+     | Ok true -> Error (Native_tools_reach_person_homes posture)
+     | Error unread -> Error (Person_homes_unread { posture; unread }))
   | Published (Multi_account { zone = _; base_path = _; now = _ }), Runtime_native_tools.Native_none
     -> Ok ()
   | ( Published (Multi_account { zone = _; base_path = _; now = _ })

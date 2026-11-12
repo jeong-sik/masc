@@ -766,6 +766,12 @@ let test_multi_account () =
                 (Runtime_native_tools.to_string refused)
             | Error Access.Native_unpublished ->
               Alcotest.fail "the multi-account access was not published"
+            | Error
+                ((Access.Native_tools_reach_person_homes _ | Access.Person_homes_unread _) as
+                 refusal) ->
+              Alcotest.failf
+                "a multi-account process got the refusal of a single user: %s"
+                (Access.native_refusal_to_string refusal)
             | Ok () ->
               Alcotest.failf
                 "a turn with native %s tools was allowed"

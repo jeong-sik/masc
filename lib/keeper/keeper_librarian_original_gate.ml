@@ -83,11 +83,13 @@ type reading = {
   load : scope:string -> request_id:string -> (Owner.retained option, string) result;
   records : scope:string -> (Owner.retained list, string) result;
   successor : scope:string -> Progress.successor -> (Yojson.Safe.t, string) result;
+  mutable confirmed_parents : (Yojson.Safe.t * Owner.retained) list;
 }
 let current_reading store = {
   load=(fun ~scope ~request_id -> owned (Owner.load ~store ~scope ~request_id));
   records=(fun ~scope -> owned (Owner.load_scope ~store ~scope));
   successor=(fun ~scope successor -> owned (Owner.load_successor_request ~store ~scope successor));
+  confirmed_parents=[];
 }
 let parent_final_with ~decode ~capture ~proposal (parent:Owner.retained) =
   let* () = equal parent.request (Capture.to_json capture) "Gate parent capture differs" in
@@ -112,11 +114,25 @@ let parent_final ~capture ~proposal (parent:Owner.retained) =
       Error "Gate requires the original answered proposal"
     | Error _ -> Exact.original_consumer_answer_payload exact judgment in
   equal output proposal "Gate proposal differs from the original answered judgment"
+(* A reading serves one call about one capture, so the parent it confirmed
+   for a proposal stays confirmed for the rest of that call. Every attempt and
+   every successor of a chain names that parent, and confirming it reads the
+   parent's body and its latest execution proofs. *)
+let confirmed_parent read ~proposal =
+  List.find_map (fun (confirmed, parent) ->
+    match same confirmed proposal with
+    | Ok true -> Some parent
+    | Ok false | Error _ -> None) read.confirmed_parents
 let load_parent_with ~read ~store ~owner ~capture ~proposal =
-  let* parent = read.load ~scope:(Capture.scope owner) ~request_id:(Capture.request_id capture) in
-  let* parent = Option.to_result ~none:"Original gate execution parent is absent" parent in
-  let* final = parent_final_with ~decode:(Capture.decode_final ~store capture) ~capture ~proposal parent in
-  let+ () = Capture.confirm_final ~store capture final in parent
+  match confirmed_parent read ~proposal with
+  | Some parent -> Ok parent
+  | None ->
+    let* parent = read.load ~scope:(Capture.scope owner) ~request_id:(Capture.request_id capture) in
+    let* parent = Option.to_result ~none:"Original gate execution parent is absent" parent in
+    let* final = parent_final_with ~decode:(Capture.decode_final ~store capture) ~capture ~proposal parent in
+    let+ () = Capture.confirm_final ~store capture final in
+    read.confirmed_parents <- (proposal, parent) :: read.confirmed_parents;
+    parent
 let load_parent ~store ~owner ~capture ~proposal =
   load_parent_with ~read:(current_reading store) ~store ~owner ~capture ~proposal
 
@@ -445,8 +461,8 @@ let root ~store ~owner ~capture =
   match List.filter (fun (_,predecessor) -> Option.is_none predecessor) matching with
   | [] -> Ok None | [(record,_)] -> Ok (Some record)
   | _::_::_ -> Error "Original gate history has multiple roots"
-let latest ~store ~owner ~capture =
-  let* matching = read_chain ~store ~owner ~capture in
+let latest_with ~read ~store ~owner ~capture =
+  let* matching = read_chain_with ~read ~store ~owner ~capture in
   let* () = require (not (List.exists (fun ((record:Owner.retained),_) ->
     match Progress.phase record.progress with
     | Progress.Subdividing _ -> true
@@ -457,6 +473,8 @@ let latest ~store ~owner ~capture =
   match List.filter (fun ((record:Owner.retained),_) -> not (List.mem record.request_id predecessors)) matching with
   | [] -> Ok None | [(record,_)] -> Ok (Some record)
   | _::_::_ -> Error "Original gate history has multiple latest attempts"
+let latest ~store ~owner ~capture =
+  latest_with ~read:(current_reading store) ~store ~owner ~capture
 let recover_retries ~store ~owner ~capture =
   let* matching = read_chain ~store ~owner ~capture in
   let* () = List.fold_left (fun result ((record:Owner.retained),_) ->
@@ -480,11 +498,12 @@ let recover_retries ~store ~owner ~capture =
   validate_chain ~store ~owner ~capture
 
 let restore_latest_result ~store ~owner ~parent_execution ~gate_request_id =
-  let* record = latest ~store ~owner ~capture:parent_execution in
+  let read = current_reading store in
+  let* record = latest_with ~read ~store ~owner ~capture:parent_execution in
   let* record = Option.to_result ~none:"Original gate is absent" record in
   let* () = require (record.request_id=gate_request_id)
     "Earlier gate evidence cannot replace the latest original attempt" in
-  let* restored = restore_record ~store ~owner ~capture:parent_execution ~visited:[] record in
+  let* restored = restore_record_with ~read ~store ~owner ~capture:parent_execution ~visited:[] record in
   Option.to_result ~none:"Original gate has no completed terminal" restored.complete
 
 let prepare_root ~store ~owner ~capture ~(parent:Owner.retained) ~proposal ~request_id ~authority =
@@ -596,6 +615,7 @@ module Inventory = struct
           (* An unpublished pending successor still names its durable body.
              Read that exact digest; absence never authorizes a new child. *)
           owned (Owner.load_successor_request ~store ~scope:requested successor));
+      confirmed_parents=[];
     } in
     let* matching = read_chain_with ~read ~store ~owner ~capture in
     let* root = match List.filter (fun (_,predecessor) -> Option.is_none predecessor) matching with

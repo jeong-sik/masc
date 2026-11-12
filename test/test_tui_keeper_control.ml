@@ -184,7 +184,7 @@ let test_absent_offers_boot () =
   check_actions "boot, then delete"
       [ Control.Boot; Control.Delete ]
       (Control.available r);
-  Alcotest.(check string) "an absent keeper reads absent, not unread" "absent"
+  Alcotest.(check string) "an absent keeper reads absent, not unread" "absent from live roster"
     (Control.health_label ~ko:false r)
 
 (* A keeper the operator paused and then shut down is absent from the roster.
@@ -716,7 +716,7 @@ let test_full_roster_is_complete () =
       (* "absent", not "unread": the roster answered and this keeper was not
          in it, which says no fiber is running it. *)
       Alcotest.(check string) "a name a complete roster omits is absent"
-        "absent" (Control.health_label ~ko:false absent)
+        "absent from live roster" (Control.health_label ~ko:false absent)
   | Control.Roster_invalid _ | Control.Roster_partial _ ->
       Alcotest.fail "a roster matching its own total is complete"
   | Control.Roster_unobserved -> Alcotest.fail "the route did answer"

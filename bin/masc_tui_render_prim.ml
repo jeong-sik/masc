@@ -2379,9 +2379,8 @@ let keeper_action_color
 let keeper_suggested_action ~ko reading =
   let say korean english = if ko then korean else english in
   match reading.Keeper_control.liveness with
-  | Keeper_control.Unobserved -> say "미관측" "not observed"
-  | Keeper_control.Invalid _ -> say "읽기 오류" "read error"
-  | Keeper_control.Absent -> say "해당 없음" "unavailable"
+  | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Absent ->
+      Keeper_control.health_label ~ko reading
   | Keeper_control.Present runtime ->
       match runtime.kr_next_action with
       | None -> say "보고 없음" "not reported"

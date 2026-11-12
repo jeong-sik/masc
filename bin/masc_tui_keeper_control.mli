@@ -153,11 +153,14 @@ val next_action : reading -> Masc.Keeper_status_runtime.keeper_next_action_path 
     inventing a mapping from the word. *)
 
 val health_label : ko:bool -> reading -> string
-(** Terminal label for {!health}, Korean when [ko], with two words {!health}
-    has no value for: ["unread"] (미조회) when the roster was never read, and
-    ["absent"] (목록에 없음) when it answered and left this keeper out. The second is not a health reading but it is not
-    the lack of one either - a complete roster without the keeper means no
-    fiber is running it. *)
+(** Terminal label for {!health}, Korean when [ko], with three words for the
+    readings {!health} has no value for: ["unread"] (미조회) when the roster
+    was never read, ["absent from live roster"] (실시간 목록에 없음) when it
+    answered and left this keeper out, and ["config error"] (설정 오류) when it
+    reported the keeper's configuration as an error. The second is not a
+    health reading but it is not the lack of one either - a complete roster
+    without the keeper means no fiber is running it. Every keeper surface
+    names these readings with this label. *)
 
 (** A lifecycle action the operator can take on one keeper.
 

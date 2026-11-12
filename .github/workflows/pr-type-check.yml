@@ -56,7 +56,11 @@ jobs:
       # No checkout and no REST call. The file list is the difference between
       # the pull request's merge commit and its first parent (the base branch,
       # lower stack layers included), read with a blobless two-commit fetch:
-      # about one second and one megabyte. The REST listing this replaced
+      # about one second and one megabyte. A native stack is checked once, at
+      # its top pull request: a lower layer answers false without reading a
+      # diff, and the top reads the difference from the stack's base, one more
+      # commit to fetch (scripts/ci/pr_source_changes.py; RFC
+      # stack-type-check-runs-at-the-top). The REST listing this replaced
       # spent the Actions token's hourly budget on every push, and when that
       # budget ran out this required check went red on pull requests whose
       # code was fine (nine open pull requests on 2026-11-12T01:34Z).
@@ -65,11 +69,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          # Logged only; the filter below does not read these. GitHub adds
-          # `stack` to the pull_request payload of a native stack member, and
-          # its documentation does not list the fields. RFC
-          # stack-type-check-runs-at-the-top needs number, position, size and
-          # base.sha from the payload, because this job makes no REST call.
+          # GitHub adds `stack` to the pull_request payload of a native
+          # stack member, and its documentation does not list the fields. The
+          # decision script reads number, position, size and base.sha from
+          # it; a stack of any other shape is decided as if there were none.
+          # The action and base.sha are logged only.
           EVENT_ACTION: ${{ github.event.action }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           STACK_JSON: ${{ toJSON(github.event.pull_request.stack) }}
@@ -84,34 +88,30 @@ jobs:
             echo "src=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Fail closed: a fetch or diff that fails stops the script under
-          # set -e, so this job goes red rather than skipping the type-check.
-          # --no-renames lists a moved file under both names and needs no
-          # file contents, which the blobless fetch does not have.
+          # Fail closed: a fetch, a diff or the decision script that fails
+          # stops this script under set -e, so this job goes red rather than
+          # skipping the type-check.
           work="$RUNNER_TEMP/pr-changes"
           git init -q "$work"
+          git -C "$work" remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          # The environment carries the token to every git call below, the
+          # decision script's included, and keeps it out of argument lists.
           auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -C "$work" -c "http.extraheader=AUTHORIZATION: basic $auth" \
-            fetch -q --depth=2 --filter=blob:none \
-            "https://github.com/${GITHUB_REPOSITORY}.git" "$GITHUB_SHA"
-          files="$(git -C "$work" diff --name-only --no-renames FETCH_HEAD^1 FETCH_HEAD)"
-          src=false
-          while IFS= read -r f; do
-            case "$f" in
-              # docs/evidence keeps .ml snapshots as data. No dune file under
-              # docs/ builds them, so a docs-only PR needs no type-check.
-              docs/*) continue ;;
-              # The root `dune` file builds every tracked directory, so
-              # sources are matched repository-wide (#48323).
-              *.ml|*.mli|*.inc) src=true; break ;;
-              dune|*/dune|dune-project) src=true; break ;;
-              *.opam) src=true; break ;;
-              # A change to the reusable actions or to this workflow itself
-              # must be checked by this workflow.
-              .github/actions/*) src=true; break ;;
-              .github/workflows/pr-type-check.yml) src=true; break ;;
-            esac
-          done <<< "$files"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          git -C "$work" fetch -q --depth=2 --filter=blob:none origin "$GITHUB_SHA"
+          # The decision lives in a script so that it has tests
+          # (scripts/ci/test_pr_source_changes.py). It is read from the merge
+          # commit, as this workflow file is; the filtered fetch made origin a
+          # promisor remote, so git fetches this one file's contents here.
+          decide="$RUNNER_TEMP/pr_source_changes.py"
+          git -C "$work" show "$GITHUB_SHA:scripts/ci/pr_source_changes.py" > "$decide"
+          src="$(python3 -I "$decide" --git-dir "$work" --remote origin --merge "$GITHUB_SHA")"
+          case "$src" in
+            true|false) ;;
+            *) echo "unexpected answer from the decision script: $src" >&2; exit 1 ;;
+          esac
           echo "src=$src" >> "$GITHUB_OUTPUT"
 
   type-check:
@@ -140,6 +140,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # The tests of the script that decided to run this job. They run here
+      # because this is the one pull request job with a checkout; the script
+      # counts itself and these tests as sources, so a change to either
+      # starts this job. About six seconds, before the toolchain is set up.
+      - name: Test the type-check decision script
+        run: python3 -I scripts/ci/test_pr_source_changes.py
 
       # The path and the key prefix are the ones main-minimal-build.yml
       # saves under; a different path would never match its cache entry.

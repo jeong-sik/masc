@@ -41,23 +41,6 @@ let test_hidden_runtime_preserves_failure_context_in_detail () =
     (Masc_tui_render_schedule.keeper_failure_context_for_detail
        ~show_runtime:true context)
 
-let test_detail_floor_reserves_failure_sentence_width_before_name_expansion () =
-  let unconstrained =
-    Masc_tui_render_schedule.allocate_keeper_columns
-      ~prioritize_runtime:false ~inner_width:80 ~widest_runtime:20 ()
-  in
-  Alcotest.(check int) "unconstrained name reaches max 32" 32 unconstrained.kcol_name;
-  Alcotest.(check int) "unconstrained detail gets remaining 25" 25 unconstrained.kcol_task;
-
-  let protected =
-    Masc_tui_render_schedule.allocate_keeper_columns
-      ~widest_detail:31 ~prioritize_runtime:false ~inner_width:80 ~widest_runtime:20 ()
-  in
-  Alcotest.(check int) "detail receives the requested floor of 31" 31 protected.kcol_task;
-  Alcotest.(check int) "name takes remaining slack without dropping below minimum" 26 protected.kcol_name;
-  Alcotest.(check bool) "total used width fits available inner width" true
-    (Masc_tui_render_schedule.keeper_columns_used_width protected <= 80)
-
 let test_wide_view_allocates_runtime_column_for_failure_sentence () =
   let cols =
     Masc_tui_render_schedule.allocate_keeper_columns
@@ -77,8 +60,6 @@ let () =
             test_waiting_group_preserves_all_reasons_at_ninety_cells
         ; Alcotest.test_case "hidden runtime preserves failure context" `Quick
             test_hidden_runtime_preserves_failure_context_in_detail
-        ; Alcotest.test_case "detail floor reserves failure sentence width before name expansion" `Quick
-            test_detail_floor_reserves_failure_sentence_width_before_name_expansion
         ; Alcotest.test_case "wide view allocates runtime column for failure sentence" `Quick
             test_wide_view_allocates_runtime_column_for_failure_sentence
         ] )

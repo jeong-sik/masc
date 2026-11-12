@@ -6901,7 +6901,7 @@
 (test
  (name test_tui_exact_activity)
  (modules test_tui_exact_activity)
- (libraries masc.runtime masc_tui_exact_activity masc_tui_page_line masc_tui_runtime_config_edit
+ (libraries masc.runtime masc_tui_activity_notice masc_tui_exact_activity masc_tui_page_line masc_tui_runtime_config_edit
   masc_tui_runtime_config_receipt alcotest))
 
 (test
@@ -6919,7 +6919,7 @@
  (name test_tui_machine_activity)
  (modules test_tui_machine_activity)
  (libraries alcotest otoml masc masc.machine_configuration
-  masc_tui_machine_activity masc_tui_page_line masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
+  masc_tui_activity_notice masc_tui_machine_activity masc_tui_page_line masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
 
 (test
  (name test_tui_model_form)

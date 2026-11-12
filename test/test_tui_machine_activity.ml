@@ -1,6 +1,9 @@
 module A = Masc_tui_machine_activity
 module R = Masc_tui_runtime_config_receipt
 let ok = function Ok value -> value | Error detail -> Alcotest.fail detail
+let admitted = function
+  | Ok value -> value
+  | Error notice -> Alcotest.fail (Masc_tui_activity_notice.text ~ko:false notice)
 let some = function Some value -> value | None -> Alcotest.fail "request refused"
 let rejected = function Error _ -> () | Ok _ -> Alcotest.fail "unexpectedly admitted"
 let owner ?(machine=Masc.Machine_lane.Msx) workspace = A.{workspace=(workspace,workspace ^ "/.masc");machine}
@@ -23,7 +26,7 @@ let same expected actual = Alcotest.(check string) "source" expected actual
 let has needle lines = List.exists (fun line ->
   let n=String.length needle in
   let rec scan i = i+n<=String.length line && (String.sub line i n=needle || scan (i+1)) in scan 0) lines
-let lines session = List.map Masc_tui_page_line.text (A.lines session)
+let lines session = List.map Masc_tui_page_line.text (A.lines ~ko:false session)
 let shows needle session = Alcotest.(check bool) needle true (has needle (lines session))
 
 let draft_and_save () =
@@ -31,7 +34,7 @@ let draft_and_save () =
   rejected (A.start_save ~generation:2 session);
   let session=A.toggle session in
   shows "Activity draft: Off" session;
-  let pending,request,write=A.start_save ~generation:2 session |> ok in
+  let pending,request,write=A.start_save ~generation:2 session |> admitted in
   same off write.source_text; same "original" write.expected_source_revision; same "/workspace/runtime.toml" write.expected_source_path;
   Alcotest.(check bool) "busy" true (A.busy pending);
   rejected (A.start_save ~generation:3 pending);
@@ -41,15 +44,15 @@ let draft_and_save () =
   rejected (A.start_save ~generation:3 session);
   let session=read ~generation:4 (doc ~revision:"saved" off) session in
   rejected (A.start_save ~generation:5 session);
-  let _,_,write=A.start_save ~generation:6 (A.toggle session) |> ok in
+  let _,_,write=A.start_save ~generation:6 (A.toggle session) |> admitted in
   same source write.source_text; same "saved" write.expected_source_revision
 
 let conflict_reapply () =
-  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> admitted in
   let current=String.concat "" ["# someone else's change\n";source;"new_setting = 9\n"] in
   let session=A.finish_save request (A.Conflict (doc ~revision:"concurrent" current)) pending in
   shows "Activity draft: Off" session; rejected (A.start_save ~generation:3 session);
-  let _,_,write=A.start_save ~generation:4 (A.reapply session) |> ok in
+  let _,_,write=A.start_save ~generation:4 (A.reapply session) |> admitted in
   same ("# someone else's change\n" ^ off ^ "new_setting = 9\n") write.source_text;
   same "concurrent" write.expected_source_revision
 
@@ -68,27 +71,27 @@ let clean_read_follows_changed_flag () =
   let session=loaded (doc source) |> A.suspend |> read ~generation:2 (doc ~revision:"fresh" current) in
   shows "Activity draft: Off" session;
   Alcotest.(check bool) "clean draft has no conflict" false (has "File changed" (lines session));
-  let _,_,write=A.start_save ~generation:3 (A.toggle session) |> ok in
+  let _,_,write=A.start_save ~generation:3 (A.toggle session) |> admitted in
   same "fresh" write.expected_source_revision;
   same (source ^ "concurrent = 7\n") write.source_text
 
 let clean_read_follows_unrelated_edit () =
   let current=source ^ "concurrent = 9\n" in
   let session=loaded (doc source) |> read ~generation:2 (doc ~revision:"fresh" current) in
-  let _,_,write=A.start_save ~generation:3 (A.toggle session) |> ok in
+  let _,_,write=A.start_save ~generation:3 (A.toggle session) |> admitted in
   same "fresh" write.expected_source_revision;
   same (off ^ "concurrent = 9\n") write.source_text
 
 let durable_save_follows_next_file_without_losing_receipt () =
-  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> admitted in
   let session=A.finish_save request (A.Saved (receipt ~registry:(R.Exact_output_registry_kept {reason="registry kept"}) ())) pending in
   let session=read ~generation:3 (doc ~revision:"later-writer" source) session in
   shows "Activity draft: On" session; shows "registry kept" session;
-  let _,_,write=A.start_save ~generation:4 (A.toggle session) |> ok in
+  let _,_,write=A.start_save ~generation:4 (A.toggle session) |> admitted in
   same "later-writer" write.expected_source_revision; same off write.source_text
 
 let uncertain_drafts_require_explicit_reapply () =
-  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> admitted in
   List.iter (fun session ->
     let reread=read ~generation:3 (doc ~revision:"observed" off) session in
     shows "Activity draft: Off" reread; shows "Based on revision: original" reread;
@@ -103,13 +106,13 @@ let clean_draft_does_not_adopt_different_path () =
   shows "Activity draft: On" session; shows "Based on revision: original" session;
   let attempted=A.toggle session in
   shows "file path changed" attempted; rejected (A.start_save ~generation:3 attempted);
-  let _,_,write=A.start_save ~generation:4 (A.discard session |> A.toggle) |> ok in
+  let _,_,write=A.start_save ~generation:4 (A.discard session |> A.toggle) |> admitted in
   same "fresh" write.expected_source_revision; same source write.source_text
 
 let independent_machines () =
   List.iter (fun machine ->
     let initial=loaded ~machine (doc "[runtime]\nvalue = 1\n") in
-    let _,_,write=A.start_save ~generation:2 (A.toggle initial) |> ok in
+    let _,_,write=A.start_save ~generation:2 (A.toggle initial) |> admitted in
     let config=Otoml.Parser.from_string_result write.source_text |> ok |> Machine_configuration.parse |> ok in
     let selected,other=match machine with Masc.Machine_lane.Msx -> config.msx_enabled,config.dos_enabled
       | Dos -> config.dos_enabled,config.msx_enabled in
@@ -136,7 +139,7 @@ let observed_state_is_separate () =
   shows "Current file: unverified" unavailable;
   shows "Server activity: On" unavailable;
   rejected (A.start_save ~generation:4 unavailable);
-  let pending,request,_=A.start_save ~generation:3 (A.toggle session) |> ok in
+  let pending,request,_=A.start_save ~generation:3 (A.toggle session) |> admitted in
   shows "Server activity read failed: inventory offline" pending;
   let refused=A.finish_save request (A.Refused "preview rejected") pending in
   shows "Server activity read failed: inventory offline" refused;
@@ -161,7 +164,7 @@ let workspace_roundtrip () =
   Alcotest.(check bool) "old read ignored" true (A.matches new_read ignored);
   let session=A.finish_read new_read (Ok A.{document=Ok (doc source);activity=Ok Machine_configuration.Enabled}) ignored in
   shows "Activity draft: Off" session;
-  let pending,old_save,_=A.start_save ~generation:4 session |> ok in
+  let pending,old_save,_=A.start_save ~generation:4 session |> admitted in
   let pending,new_read=A.start_read ~generation:5 (A.suspend pending) |> some in
   let ignored=A.finish_save old_save (A.Saved (receipt ())) pending in
   Alcotest.(check bool) "old save ignored" true (A.matches new_read ignored);
@@ -170,7 +173,7 @@ let workspace_roundtrip () =
   shows "Current file: unverified" (A.finish_read new_read (Ok A.{document=Ok (doc source);activity=Ok Machine_configuration.Enabled}) other)
 
 let ambiguous_write_and_refusal () =
-  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> ok in
+  let pending,request,_=A.start_save ~generation:2 (A.toggle (loaded (doc source))) |> admitted in
   let unanswered=A.finish_save request (A.Unconfirmed "connection lost") pending in
   shows "Activity draft: Off" unanswered; rejected (A.start_save ~generation:3 unanswered);
   let uncertain=A.finish_save request (A.Saved (receipt ~durability:(R.Durability_unconfirmed "fixture fsync uncertainty") ())) pending in
@@ -181,17 +184,17 @@ let ambiguous_write_and_refusal () =
   rejected (A.start_save ~generation:6 (A.reapply reread));
   let refused=A.finish_save request (A.Refused "preview failed") pending in
   shows "preview failed" refused;
-  let _,_,write=A.start_save ~generation:3 refused |> ok in same "original" write.expected_source_revision
+  let _,_,write=A.start_save ~generation:3 refused |> admitted in same "original" write.expected_source_revision
 
 let changed_path () =
   let session=A.toggle (loaded (doc source)) |> read ~generation:2 (doc ~path:"/new/runtime.toml" source) in
   rejected (A.start_save ~generation:3 (A.reapply session));
-  let _,_,write=A.start_save ~generation:4 (A.toggle (A.discard session)) |> ok in
+  let _,_,write=A.start_save ~generation:4 (A.toggle (A.discard session)) |> admitted in
   same off write.source_text
 
 let table_shapes () =
   let quoted="[machines.\"msx\"] # header\n# retained comment\n" in
-  let _,_,write=A.start_save ~generation:2 (A.toggle (loaded (doc quoted))) |> ok in
+  let _,_,write=A.start_save ~generation:2 (A.toggle (loaded (doc quoted))) |> admitted in
   shows "Activity draft: Off" (loaded (doc write.source_text));
   Alcotest.(check bool) "header retained" true (String.starts_with ~prefix:quoted write.source_text);
   let fake="note = '''\n[machines.msx]\n'''\n[machines]\nmsx = { enabled = true }\n" in
@@ -204,7 +207,7 @@ let draft_tone session =
       | Masc_tui_page_line.Fact { label = "Activity draft"; tone; _ } -> Some tone
       | Masc_tui_page_line.Fact _ | Masc_tui_page_line.Title _ | Masc_tui_page_line.Note _
       | Masc_tui_page_line.Items _ -> None)
-    (A.lines session)
+    (A.lines ~ko:false session)
 
 let unsaved_draft_is_marked () =
   let session=loaded (doc source) in

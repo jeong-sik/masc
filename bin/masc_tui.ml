@@ -7450,7 +7450,9 @@ let launch_machine_activity_save state ~mailbox session =
   let module Activity = Masc_tui_machine_activity in
   state.machine_activity_generation <- state.machine_activity_generation + 1;
   match Activity.start_save ~generation:state.machine_activity_generation session with
-  | Error detail -> report_action state "error" detail
+  | Error notice ->
+    report_action state "error"
+      (Masc_tui_activity_notice.text ~ko:(state.ui_language = Lang_ko) notice)
   | Ok (session,request,write) ->
     Masc_tui_types.put_machine_activity state session;
     let authority=state.workspace_authority and identity=state.server_identity in
@@ -7501,7 +7503,9 @@ let launch_exact_activity_save state ~mailbox session =
   let module Activity = Masc_tui_exact_activity in
   state.exact_activity_generation <- state.exact_activity_generation + 1;
   match Activity.start_save ~generation:state.exact_activity_generation session with
-  | Error detail -> report_action state "error" detail
+  | Error notice ->
+    report_action state "error"
+      (Masc_tui_activity_notice.text ~ko:(state.ui_language = Lang_ko) notice)
   | Ok (session,request,write) ->
     Masc_tui_types.put_exact_activity state session;
     let authority=state.workspace_authority and identity=state.server_identity in

@@ -1,14 +1,14 @@
 ---
 rfc: "keeper-world-state-shows-open-work"
-title: "Keeper 의 World State 에 열린 PR 과 할 일을 제목과 함께 보여 준다"
+title: "Keeper 의 World State 에 열린 PR 과 할 일을 보여 준다"
 status: Draft
 created: 2026-09-27
-updated: 2026-11-09
+updated: 2026-11-12
 author: dancer + claude
 supersedes: []
 superseded_by: null
 related: ["0465", "keeper-github-apps", "0385", "0462", "connector-ambient-attention-wake", "prompts-and-tool-definitions-outside-ocaml", "every-durable-store-has-one-boot-policy"]
-implementation_prs: [50213, 50214, 50259]
+implementation_prs: [50213, 50214, 50259, 51695, 51712]
 ---
 
 # RFC: Keeper 는 World State 에서 열린 일을 본다
@@ -29,8 +29,8 @@ Goal 은 Task 를 쥔 Keeper 에게만 보인다.
    자기가 커밋한 PR 은 둘과 상관없이 늘 보인다(§4.1). 이 기준은 2026-09-28 운영자가 정했다(D1).
 4. **GitHub 변화로 깨우는 것은 그 PR 에 마지막으로 커밋한 Keeper 한 명뿐이다.** 한 번 보낸 깨우기는 durable 기록으로 남겨
    중복과 유실을 막는다. 스택의 마지막 단계이고, 켤지는 측정 뒤에 정한다(§5).
-5. **Task 행에 제목을 싣고, 보여 주는 순서만 "진행 중인 Goal 에 이어진 것 → 우선순위 → 최근 것"으로 바꾼다.**
-   task_id 없이 부르는 claim 이 고르는 순서(`claim_next_r`)는 바꾸지 않는다. 진행 중인 Goal 은 Task 가 없는 Keeper 에게도 보인다(§6).
+5. **Task 행에 타입 있는 값(우선순위, 나이, 반납 횟수, 이어진 Goal id)을 싣고, 보여 주는 순서를 "진행 중인 Goal 에 이어진 것 → 우선순위 → 최근 것"으로 바꾼다.**
+   제목은 지금처럼 도구로 읽는다(D8). task_id 없이 부르는 claim 이 고르는 순서(`claim_next_r`)는 바꾸지 않는다. 진행 중인 Goal 은 Task 가 없는 Keeper 에게도 보인다(§6).
 6. **옛 표시 방식과 쓰이지 않는 variant 를 지운다(§7).**
 
 모두 투영이다. 배정도, 게이트도, 예약 규칙도 아니다. 무엇을 할지는 Keeper 가 고른다.
@@ -572,20 +572,25 @@ ACK 된 뒤 같은 변화가 다시 보이면 다시 들어간다. CI 재실행�
 
 ## 6. Task 목록과 Goal
 
-### 6.1 Task 행에 제목
+### 6.1 Task 행의 칸
 
-[제안] 행은 한 줄이고 폭이 정해져 있다.
+행은 한 줄이다. Task 에 적힌 자유 글자(제목, 만든 이, 반납 사유)는 싣지 않는다(D8).
+`goals` 의 Goal id 는 Goal 을 만든 쪽이 정한 글자다. 빈칸과 앞뒤 공백만 막는다(`lib/goal/goal_store.ml` `validate_goal_id`).
+진행 중인 Goal 의 id 와 제목은 Active Goals 절에 이미 나간다. 그래서 이 칸이 프롬프트에 새로 싣는 글자는 없다.
 
 | 칸 | 값 |
 |---|---|
-| id, 우선순위, 나이(일) | `task-1787 P2 3d` |
-| 제목 | `short_preview ~max_len:80`. [사실] 라이브 todo 제목 중앙값 98바이트, p90 135바이트 |
-| 만든 이 | `created_by` |
-| 이어진 Goal | 진행 중인 Goal 에 이어져 있으면 그 Goal 제목(짧게) |
-| 마지막 반납 | `handoff_context` 가 있으면 `updated_by` 와 `reason`(짧게). [사실] todo 84개에 있다(`lib/types/types_core.ml:542-551`) |
+| `task_id` | 검증된 Task id |
+| `priority` | 작성자가 적은 우선순위(정수) |
+| `age_days` | 만든 지 며칠인지. backlog 를 읽은 시각 기준으로 온전한 날 수 |
+| `returns` | 맡았던 쪽이 pool 로 돌려보낸 횟수(`cycle_count`) |
+| `goals` | 이어진 진행 중 Goal 의 id |
+
+제목·설명·만든 이·반납 사유는 싣지 않는다. Task 는 외부 에이전트도 만들기 때문에, 그 글자가 프롬프트로 넘어가면 지시문으로 읽힐 수 있다(#27546).
+Keeper 는 지금처럼 `keeper_tasks_list` 로 제목을 읽는다.
 
 "누가 이미 하고 있나"는 claimable Task 에는 해당하지 않는다(맡은 사람이 없는 Task 만 claimable 이다).
-대신 누가 왜 놓았는지가 같은 물음에 답한다.
+여러 번 돌아온 Task 인지는 `returns` 가 말한다. 누가 왜 놓았는지는 도구로 읽는다.
 
 ### 6.2 "관련 있는 것 먼저"의 뜻
 
@@ -601,10 +606,11 @@ ACK 된 뒤 같은 변화가 다시 보이면 다시 들어간다. CI 재실행�
 
 **읽기 실패.**
 - `created_at` 은 문자열이다(`lib/types/types_core.mli:226`). 경계에서 한 번 시각으로 읽는다.
-  못 읽은 Task 는 3번 순서에서 읽은 Task 뒤에 오고, 행에 "만든 시각을 못 읽음"이 보인다. 0 이나 지금 시각으로 채우지 않는다.
-- Goal 링크는 `read_goal_task_links_r`(Result)로, Goal 은 `Goal_store.list_goals_result` 로 읽는다.
-  [사실] 지금 `build_task_goal_index_for_config` 는 못 읽은 링크 파일을 `[]` 로 바꾼다(`lib/workspace/workspace_goal_index.ml:598-599`).
-  이 절은 그 함수를 쓰지 않는다. 둘 중 하나라도 `Error` 면 1번 순서를 빼고 2~4번으로만 줄 세우고, "Goal 링크를 못 읽어 Goal 순서를 쓰지 않음: <이유>" 한 줄을 쓴다.
+  못 읽은 Task 는 3번 순서에서 읽은 Task 뒤에 오고, 행의 `age_days` 가 `"unreadable"` 이다. 0 이나 지금 시각으로 채우지 않는다.
+- Goal 링크는 `read_goal_task_links_authoritative_r`(Result)로, Goal 은 `Goal_store.list_goals_result` 로 읽는다. 턴의 Task 맥락이 쓰는 읽기와 같다.
+  [사실] 지금 `build_task_goal_index_for_config` 는 못 읽은 링크 파일을 빈 링크로 바꾼다(`lib/workspace/workspace_goal_index.ml` `build_task_goal_map_for_config`).
+  이 절은 그 함수를 쓰지 않는다. 둘 중 하나라도 `Error` 면 1번 순서를 빼고 2~4번으로만 줄 세우고, 모든 행의 `goals` 가 `"unread"` 이다.
+  이유 글자는 프롬프트에 싣지 않고 로그에 남긴다.
 
 Keeper 한 명에게만 해당하는 관계는 지금 없다.
 - [사실] `task.skills`(Task 가 요구하는 Skill)는 Keeper 의 Skill 과 타입으로 맞출 수 있는 유일한 칸인데, todo 595개 모두 비어 있다.
@@ -616,11 +622,11 @@ Keeper 한 명에게만 해당하는 관계는 지금 없다.
 
 [제안] 이 RFC 는 보여 주는 순서만 바꾼다. task_id 없이 부르는 claim 이 쓰는 `Workspace.claim_next_r` 은
 지금처럼 우선순위 안에서 먼저 만든 것부터 고른다(`lib/workspace/workspace_task_schedule.ml:145`).
-외부 에이전트의 `masc_claim_next`(`lib/task/tool_task_handlers.ml:652`)도 그대로다.
+외부 에이전트의 `masc_claim_next`(`lib/task/tool_task_handlers.ml` `handle_claim_next`)도 그대로다.
 
 그러면 #29101 이 맞춰 둔 "읽는 첫 행 = task_id 없는 claim 이 잡을 첫 행"은 더 이상 참이 아니다.
-[제안] Task 목록 조각이 이 차이를 한 문장으로 적는다. "task_id 없이 claim 하면 이 목록이 아니라 우선순위 안에서 먼저 만든 순서로 고른다."
-`keeper_world_observation_inputs.ml:214-217` 의 #29101 주석은 새 정렬의 이유로 바꿔 쓴다.
+Task 목록 조각(`world.namespace_state.claimable_rows`)이 이 차이를 한 문장으로 적는다. "task_id 없이 claim 하면 이 목록이 아니라 우선순위 안에서 먼저 만든 순서로 고른다."
+`keeper_world_observation_inputs.ml` 의 정렬 주석은 #29101 이 맞춘 순서 대신 새 정렬의 이유를 적는다.
 
 Keeper 쪽 task_id 없는 claim 을 없앨지는 D2 로 둔다. 이 RFC 의 스택에는 넣지 않는다.
 
@@ -689,12 +695,13 @@ TUI 표시 부분은 열린 #38801 이 이미 다른 RFC 로 넘긴다.
 | S3b | `Github_slug.t` 와 `watch_repositories` 칸: TOML 파서·필드 종류 목록·profile·meta·저장 쓰기, config endpoint 허용 칸과 저장 전 파싱, `GET` 응답, TUI 편집 표, 웹 대시보드 패널, `masc_keeper_up` 인자. `github_slug_of_remote` 가 `Github_slug.t` 를 낸다 | 왕복: `watch_repositories = ["jeong-sik/masc", "jeong-sik/masc"]` 를 읽고 저장하면 `["jeong-sik/masc"]` 가 다시 읽힌다. `"jeong-sik"`, `"a/b/c"`, `"jeong-sik/masc.git"`, `" jeong-sik/masc"` 는 각각 그 keeper 파일의 로드 오류이고 오류가 틀린 값을 말한다. 같은 값을 config endpoint 로 보내면 400 이고 저장된 값은 그대로다. TUI·대시보드는 `GET` 의 `workspace.watch_repositories` 를 그린다 |
 | S4 | `layer_id.Pull_requests`, `placement`·순서·상한, `config/prompts/keeper.md` 의 `### world.pull_requests.*` 조각, `keeper_unified_turn.ml` 과 대시보드 미리보기 배선, checkout 으로 대상 고르기 | fixture World State: CI 빨강 PR, CR PR, head 에 리뷰 없는 초록 PR, 옛 head 에만 승인이 있는 PR, CI 가 빨간 draft, 리뷰 목록이 잘리고 본 범위에 현재 head 리뷰가 없는 초록 PR, `Pulls_failed` 저장소, 이 Keeper 가 커밋한 PR 6개(상한보다 많음)를 담은 스냅숏. 확인하는 것은 구조다(묶음 머리의 "N개 중 k개", 행 번호, 순서, `yours`, 실패 줄). 문구는 고정하지 않는다. 자기 PR 6개가 모두 보이고 남의 행은 5개다. 빨간 draft 는 묶음에 들지 않는다. 잘린 리뷰 목록의 PR 은 `Unreviewed_on_head` 에 들지 않고 `Review_history_incomplete` 수로 센다. checkout 도 선언도 없는 Keeper 는 자기 PR 줄만 받는다. checkout 이 없고 `watch_repositories` 에 그 저장소를 적은 Keeper 는 묶음 행을 받는다. checkout 측정이 `Error` 인 Keeper 는 이유 줄, 선언한 저장소의 행, 자기 PR 줄을 받는다. 선언했지만 스냅숏에 없는 slug 는 그 한 줄을 받는다. 새 조각이 모두 그려진다 |
 | S5 | `keeper_pull_requests_list` 도구 | 도구 결과가 같은 스냅숏의 행과 같다. checkout 없는 Keeper 도 모든 행을 읽는다. `Pulls_failed` 는 실패로 돌아온다 |
-| S6 | Task 행 칸과 보여 주는 순서, Goal 을 모두에게, Goal 진행 줄을 Namespace State 로 | fixture backlog: 진행 중 Goal 에 이어진 P3 Task, 오래된 P1, 새 P1, `created_at` 을 못 읽는 Task. 목록 순서가 §6.2 대로다. 같은 fixture 에서 `claim_next_r` 은 오래된 P1 을 고른다(바뀌지 않음). Goal 링크 파일을 못 읽는 fixture 에서 이유 줄이 나오고 Goal 순서가 빠진다. Task 없는 Keeper 의 World State 에 진행 중 Goal 이 나온다 |
+| S6a | Task 행 칸과 보여 주는 순서, 순서와 claim 의 차이를 적는 조각 | fixture backlog: 진행 중 Goal 에 이어진 P3 Task, 오래된 P1, 새 P1, `created_at` 을 못 읽는 Task. 목록 순서가 §6.2 대로다. 같은 fixture 에서 `claim_next_r` 은 오래된 P1 을 고른다(바뀌지 않음). Goal 링크 파일을 못 읽는 fixture 에서 모든 행의 `goals` 가 `"unread"` 이고 Goal 순서가 빠진다 |
+| S6b | Goal 을 모두에게, Goal 진행 줄을 Namespace State 로 | Task 없는 Keeper 의 World State 에 진행 중 Goal 이 나온다 |
 | S7 | §7 의 `Task_backlog`, 쓰지 않게 된 함수, `Webhook`(서버·TUI) 제거 | exhaustive match 가 컴파일을 통과한다. 지운 이름이 lib·bin·test 에서 `rg` 로 0건이다 |
 | S8 | (D4 가 켜면) 깨우기 기록 저장소, `Pull_request_changed` 자극, `Own_pull_request_changed_pending` | Keeper K 가 커밋한 PR 이 `Checks_failing` 인 스냅숏 → K 에게 자극 1개와 기록 1개. 같은 스냅숏을 다시 넣으면 0개. 넣기를 `Error` 로 만든 경우 기록이 없고, 다음 스냅숏에서 다시 1개. `Pulls_failed` 사이에 끼어도 기록이 지워지지 않는다. 기록을 남긴 채 재시작하면 0개. head 가 바뀌면 1개. PR 이 목록에서 빠지면 그 기록이 지워진다. 다른 Keeper 에게는 0개 |
 
-S1 → S2 → S4 → S5 는 차례로 의존한다. S3a 와 S3b 는 main 기준으로 따로 가고 S4 앞에 병합된다. S3b 는 S1 이 `masc` 쪽으로 옮긴 `github_slug_of_remote` 를 `Github_slug.t` 를 내도록 바꾸므로 S1 뒤다. `Github_slug` 는 S3b 가 새로 만든다(지금 같은 이름의 모듈은 없다). S6 은 main 기준으로 따로 간다.
-S7 은 S6 뒤, S8 은 S4 뒤다.
+S1 → S2 → S4 → S5 는 차례로 의존한다. S3a 와 S3b 는 main 기준으로 따로 가고 S4 앞에 병합된다. S3b 는 S1 이 `masc` 쪽으로 옮긴 `github_slug_of_remote` 를 `Github_slug.t` 를 내도록 바꾸므로 S1 뒤다. `Github_slug` 는 S3b 가 새로 만든다(지금 같은 이름의 모듈은 없다). S6a 와 S6b 는 main 기준으로 따로 간다.
+S7 은 S6a 와 S6b 뒤, S8 은 S4 뒤다.
 
 ## 9. 배포 뒤 확인
 
@@ -735,16 +742,17 @@ D4(깨우기)는 S4 만 배포된 7일의 M3 을 보고 정한다. `Autonomous` 
 |---|---|---|
 | #38801 TUI measured home | `bin/masc_tui_repository_pulls.ml` 삭제, `docs/rfc/RFC-0465-…` 머리 수정 | S1 은 OCaml 타입을 옮기지만 HTTP JSON 은 그대로라 TUI decode 와 부딪히지 않는다. 이 RFC 는 RFC-0465 파일을 고치지 않는다. #38801 이 먼저 병합되면 스냅숏 소비자는 World State·도구·HTTP 만 남는다 |
 | #39442 예약 문구 | `config/prompts/keeper.md` | S4 가 같은 파일에 `### world.pull_requests.*` 조각을 더한다. 고치는 절이 달라 글자 충돌은 작다. S4 는 #39442 뒤에 연다 |
-| #39392 backlog snapshot 인코딩 | workspace backlog | S6 과 파일이 가깝다. 파일 목록상 직접 겹침은 없다 |
+| #39392 backlog snapshot 인코딩 | workspace backlog | S6a 와 파일이 가깝다. 파일 목록상 직접 겹침은 없다 |
 
 `lib/keeper/keeper_context_layers.*`, `lib/keeper/keeper_unified_prompt.ml`, `lib/server/server_repository_pulls.*`,
 `lib/keeper/keeper_sandbox_control.*`, `lib/keeper_runtime/keeper_event_queue*` 를 고치는 열린 PR 은 없었다.
 
 ## 11. 운영자 결정
 
-2026-09-28 운영자가 모두 정했다. D1 은 제안과 다르게, D4 는 측정 뒤로 정했다. 나머지는 제안대로다.
+D1~D7 은 2026-09-28 운영자가 정했다. D1 은 제안과 다르게, D4 는 측정 뒤로 정했다. 나머지는 제안대로다.
+D8 은 2026-11-12 운영자가 정했다.
 
-| # | 물음 | 결정 (2026-09-28, 운영자) |
+| # | 물음 | 결정 (운영자) |
 |---|---|---|
 | D1 | 묶음 행을 누구에게 보이나. [사실] 조사 시각에 Keeper 11명이 checkout 0개였고, 그중 masc PR 을 판정하는 Keeper 가 있다 | checkout 관계 + Keeper 별 저장소 선언(`watch_repositories`). §4.1 |
 | D2 | Keeper 의 task_id 없는 claim 을 없애나 (§6.3 표) | 제안대로: 이 RFC 에서는 하지 않는다 |
@@ -753,6 +761,7 @@ D4(깨우기)는 S4 만 배포된 7일의 M3 을 보고 정한다. `Autonomous` 
 | D5 | Task 를 만들 때 Skill 을 붙이게 하나 (지금 todo 595개 모두 비어 있다) | 제안대로: 붙기 시작하면 Skill 관계를 순서 맨 앞에 두는 것을 따로 제안한다 |
 | D6 | PR 을 읽는 계정을 Keeper 공유 계정(anyang-keepers)에서 떼나 | 제안대로: 지금 계정 유지. rate limit 은 기존 `Rate_limited` 경로가 받는다 |
 | D7 | Keeper 별 GitHub 신원(RFC keeper-github-apps)을 진행하나 | 제안대로: 이 RFC 는 계정 단위로 동작하고, 리뷰 계정 종류로 순서를 정하지 않는다. 신원 전환은 그 RFC 에서 따로 정한다 |
+| D8 | Task 행에 제목·만든 이·반납 사유 같은 자유 글자를 싣나 (§6.1) | 싣지 않는다. 타입 있는 값만 싣고 제목은 도구로 읽는다. 제목 경계(#27546)를 유지한다 |
 
 ## 12. 하지 않는 것
 

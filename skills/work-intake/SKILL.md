@@ -37,7 +37,7 @@ Keeper 에게 보이는 설명은 아래 fence 의 `description` 뿐이다. 이 
   `running`을 `due`로 돌린다(`schedule_store.ml` `retry_running`, `recover_running_on_startup`).
 - `status` 없이 `owner = "self"`만 주면 종료된 예약도 `schedule_id` 순서의 첫 페이지에
   포함될 수 있다. 2026-09-15 저장소에서 `code-reviewer`는 자기 행 256건 중 `due`가 1건이었다.
-- claim 할 수 있는 todo 는 턴 프레임의 Namespace State 가 이미 보여 준다. 진행 중 Goal 에 이어진 것, 우선순위, 최근에 만든 것 순으로 열 행이다.
+- claim 할 수 있는 todo 는 턴 프레임의 Namespace State 가 이미 보여 준다. 진행 중 Goal 에 이어진 것, 우선순위, 최근에 만든 것 순이다. 상한(`keeper_unified_prompt.ml` `claimable_task_render_budget_rows`)을 넘는 행은 그 아래 줄에 남은 개수만 적는다.
 - `masc_ask_status` 는 `include_resolved = true` 면 열린 질문 다음에 답이 끝난 질문을
   최신순으로 돌려주고, 결과가 인라인 상한(`Common.max_tool_result_wire_bytes`)에 닿는 곳에서
   행을 멈춘다(`matching` 이 전체 수). 행에 못 담은 질문의 id 는 `omitted_ask_ids` 에 같은

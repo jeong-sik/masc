@@ -242,6 +242,40 @@ let ids rows =
     rows
 ;;
 
+(* The claimable row of [task_id] in a rendered frame, decoded: rows are the
+   lines "  - {...}" that hold one JSON object each. *)
+let frame_row rendered ~task_id =
+  let prefix = "  - " in
+  String.split_on_char '\n' rendered
+  |> List.find_map (fun line ->
+    if String.starts_with ~prefix:"  - {" line
+    then (
+      let json =
+        String.sub line (String.length prefix) (String.length line - String.length prefix)
+      in
+      match Yojson.Safe.from_string json with
+      | row ->
+        if Yojson.Safe.equal (Yojson.Safe.Util.member "task_id" row) (`String task_id)
+        then Some row
+        else None
+      | exception Yojson.Json_error _ -> None)
+    else None)
+;;
+
+let check_frame_row rendered ~task_id fields =
+  match frame_row rendered ~task_id with
+  | None -> failf "the frame has no row for %s. frame was:\n%s" task_id rendered
+  | Some row ->
+    List.iter
+      (fun (field, expected) ->
+         check
+           string
+           (Printf.sprintf "%s of %s in the frame" field task_id)
+           (Yojson.Safe.to_string expected)
+           (Yojson.Safe.to_string (Yojson.Safe.Util.member field row)))
+      fields
+;;
+
 (* Rewrite the stored [created_at] of the named Tasks; the others keep theirs. *)
 let pin_created_at config pins =
   let backlog = Workspace.read_backlog config in
@@ -380,6 +414,10 @@ let test_rows_are_goal_first_and_the_claim_order_is_unchanged () =
         | Keeper_world_observation_inputs.Age_days _ ->
           fail "an unreadable creation time was given an age")
      | _ -> fail "expected five claimable rows");
+    let rendered = frame config meta in
+    check_frame_row rendered ~task_id:goal_p3 [ "goals", `List [ `String "goal-executing" ] ];
+    check_frame_row rendered ~task_id:undated_p1 [ "age_days", `String "unreadable" ];
+    check_frame_row rendered ~task_id:done_goal_p3 [ "goals", `List [] ];
     match Workspace.claim_next_r config ~agent_name:"claimable-probe" () with
     | Workspace.Claim_next_claimed { task_id; _ } ->
       check string "a claim without a task id picks the oldest P1" old_p1 task_id
@@ -387,9 +425,22 @@ let test_rows_are_goal_first_and_the_claim_order_is_unchanged () =
     | Workspace.Claim_next_error detail -> fail detail)
 ;;
 
-(* An unreadable link registry is not "nothing is linked": every row says the
-   links were not read, and the order falls back to priority, then newest. *)
-let test_unreadable_goal_links_leave_goal_order_out () =
+let corrupt_goal_links config =
+  Workspace.write_json
+    config
+    (Workspace_goal_index.goal_task_links_path config)
+    (`Assoc [ "links", `String "corrupt" ])
+;;
+
+let corrupt_goal_store config =
+  Out_channel.with_open_bin (Goal_store.goals_path config) (fun channel ->
+    Out_channel.output_string channel "not json")
+;;
+
+(* An unreadable Goal store or link registry is not "nothing is linked": every
+   row says the Goals were not read, and the order falls back to priority, then
+   newest. *)
+let unread_goals_leave_goal_order_out ~break_read () =
   with_config (fun config meta ->
     let add_p priority title =
       Keeper_id.Task_id.to_string
@@ -401,23 +452,24 @@ let test_unreadable_goal_links_leave_goal_order_out () =
     Workspace_goal_index.write_goal_task_links config [ "goal-executing", [ goal_p3 ] ];
     check
       (list string)
-      "readable links put the Goal-linked row first"
+      "readable Goals and links put the Goal-linked row first"
       [ goal_p3; p2 ]
       (ids (snapshot config meta).claimable_tasks);
-    Workspace.write_json
-      config
-      (Workspace_goal_index.goal_task_links_path config)
-      (`Assoc [ "links", `String "corrupt" ]);
+    break_read config;
     let rows = (snapshot config meta).claimable_tasks in
-    check (list string) "priority decides when the links are unreadable" [ p2; goal_p3 ]
+    check (list string) "priority decides when the Goals are unread" [ p2; goal_p3 ]
       (ids rows);
     List.iter
       (fun (row : Keeper_world_observation_inputs.claimable_task_identity) ->
          match row.goal_links with
          | Keeper_world_observation_inputs.Goal_links_unread -> ()
          | Keeper_world_observation_inputs.Active_goals _ ->
-           fail "an unreadable link registry read as a known link set")
-      rows)
+           fail "an unreadable read was taken as a known link set")
+      rows;
+    let rendered = frame config meta in
+    List.iter
+      (fun task_id -> check_frame_row rendered ~task_id [ "goals", `String "unread" ])
+      [ p2; goal_p3 ])
 ;;
 
 (* The row carries typed values and no stored text: the age in whole days at
@@ -453,14 +505,21 @@ let test_a_row_carries_age_returns_and_goals_as_values () =
      | [ { age = Keeper_world_observation_inputs.Created_at_unreadable; _ } ] ->
        fail "a readable creation time was not read"
      | rows -> failf "expected exactly one claimable row, got %d" (List.length rows));
-    check bool
-      "the frame row is the typed values"
-      true
-      (contains
-         (frame config meta)
-         (Printf.sprintf
-            {|{"task_id":"%s","priority":2,"age_days":3,"returns":2,"goals":[]}|}
-            task_id)))
+    let rendered = frame config meta in
+    check_frame_row
+      rendered
+      ~task_id
+      [ "priority", `Int 2; "age_days", `Int 3; "returns", `Int 2; "goals", `List [] ];
+    (* A field beyond these could carry a Task's stored free text, such as its
+       title, into the system context (#27546). *)
+    match frame_row rendered ~task_id with
+    | Some (`Assoc fields) ->
+      check
+        (list string)
+        "the row holds only these fields"
+        [ "age_days"; "goals"; "priority"; "returns"; "task_id" ]
+        (List.sort String.compare (List.map fst fields))
+    | Some _ | None -> failf "the frame has no object row for %s" task_id)
 ;;
 
 let () =
@@ -488,7 +547,9 @@ let () =
         ; test_case "rows are Goal first and the claim order is unchanged" `Quick
             test_rows_are_goal_first_and_the_claim_order_is_unchanged
         ; test_case "unreadable Goal links leave Goal order out" `Quick
-            test_unreadable_goal_links_leave_goal_order_out
+            (unread_goals_leave_goal_order_out ~break_read:corrupt_goal_links)
+        ; test_case "an unreadable Goal store leaves Goal order out" `Quick
+            (unread_goals_leave_goal_order_out ~break_read:corrupt_goal_store)
         ; test_case "a row carries age, returns and Goals as values" `Quick
             test_a_row_carries_age_returns_and_goals_as_values
         ] )

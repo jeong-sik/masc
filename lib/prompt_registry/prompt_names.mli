@@ -309,6 +309,7 @@ val keeper_world_namespace_state_backlog_empty : string
 val keeper_world_namespace_state_backlog_revision : string
 val keeper_world_namespace_state_unclaimed : string
 val keeper_world_namespace_state_claimable : string
+val keeper_world_namespace_state_claimable_rows : string
 val keeper_world_namespace_state_claimable_more : string
 val keeper_world_namespace_state_unclaimed_not_offered : string
 val keeper_world_namespace_state_failed : string

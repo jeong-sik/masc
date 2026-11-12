@@ -21,8 +21,9 @@ type current_task_observation =
       }
 
 (** How long ago a claimable Task was created, in whole days at the time of
-    the backlog read. A stored [created_at] that is not an ISO 8601 timestamp
-    is [Created_at_unreadable]; it is not replaced with zero. *)
+    the backlog read; negative when the stored time is ahead of the reading
+    clock. A stored [created_at] that is not a strict RFC 3339 timestamp is
+    [Created_at_unreadable]; it is not replaced with zero. *)
 type task_age =
   | Age_days of int
   | Created_at_unreadable

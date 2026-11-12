@@ -55,6 +55,9 @@ type observation =
   | Answered
   | Rate_limited of { retry_after : float option }
   | Hard_quota of { resets_at : float option }
+  | Credential_refused of { noted_at : float }
+      (** The provider refused the credential itself. Shown to operators
+          ({!Runtime_credential_refusal}); it orders nothing. *)
 
 val observe :
   candidate:Runtime_candidate_backpressure.candidate option ->
@@ -62,7 +65,8 @@ val observe :
 (** Record only facts about the actual dispatched frozen candidate/scope.
     [Answered] precedes syntax/domain validation, clears candidate evidence and
     undated quota, and preserves provider-stated reset windows. A rate limit
-    never exhausts sibling credentials. No ownerless failed-attempt is created.
+    never exhausts sibling credentials. [Answered] also clears a credential
+    refusal noted on the scope. No ownerless failed-attempt is created.
     [None] means the attempt did not retain that identity, not a live lookup. *)
 
 val observe_http_error :

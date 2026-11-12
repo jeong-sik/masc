@@ -81,6 +81,10 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
   let quota_exhausted = Runtime_quota_window.is_exhausted ~scope:quota_scope ~now in
   let quota_resets_at = Runtime_quota_window.active_until ~scope:quota_scope ~now in
   let quota_scope_label = scope_label quota_scope in
+  (* The provider refused this runtime's credential and no call on it has
+     been answered since. It is not a rest: nothing waits on it, and only a
+     replaced credential ends it. *)
+  let credential_refused_at = Runtime_credential_refusal.refused_at ~scope:quota_scope in
   (* A rate limit is a separate fact from the quota window: it is this
      process's own observation of a 429 on this runtime. The provider's stated
      Retry-After deadline or a successful answer clears it. A limit without a
@@ -133,6 +137,8 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
     ; "quota_exhausted", `Bool quota_exhausted
     ; "quota_resets_at", (match quota_resets_at with Some t -> `Float t | None -> `Null)
     ; "quota_scope", `String quota_scope_label
+    ; ( "credential_refused_at"
+      , match credential_refused_at with Some t -> `Float t | None -> `Null )
     ; "rate_limited", `Bool rate_limited
     ; ( "rate_limit_resets_at"
       , match rate_limit_resets_at with Some t -> `Float t | None -> `Null )

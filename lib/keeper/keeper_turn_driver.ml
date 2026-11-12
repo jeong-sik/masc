@@ -1116,9 +1116,16 @@ let attempt_runtime_candidates
            answered, which it never gets to do while a sibling answers, so
            every new turn starts again from the head. *)
         | Keeper_runtime_failure_route.Rotate_now
+            { rotate = Keeper_runtime_failure_route.Auth_failed } ->
+          (* The denial is still no ordering evidence, for the reason below.
+             The moment is kept for the runtime list only, where it stays
+             until a call on the same credential is answered. *)
+          observe_standing
+            (Runtime_candidate_standing.Credential_refused
+               { noted_at = Unix.gettimeofday () })
+        | Keeper_runtime_failure_route.Rotate_now
             { rotate =
-                ( Keeper_runtime_failure_route.Auth_failed
-                | Keeper_runtime_failure_route.Model_unavailable
+                ( Keeper_runtime_failure_route.Model_unavailable
                 | Keeper_runtime_failure_route.Resumable_cli_session
                 | Keeper_runtime_failure_route.Candidates_filtered
                 | Keeper_runtime_failure_route.Runtime_exhausted

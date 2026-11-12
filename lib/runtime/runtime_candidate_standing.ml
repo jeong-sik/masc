@@ -114,11 +114,17 @@ type observation =
   | Answered
   | Rate_limited of { retry_after : float option }
   | Hard_quota of { resets_at : float option }
+  | Credential_refused of { noted_at : float }
 
 let observe ~candidate ~quota_scope = function
   | Answered ->
     Option.iter (fun candidate -> Backpressure.note_candidate_success ~candidate) candidate;
-    Option.iter (fun scope -> Runtime_quota_window.note_succeeded ~scope) quota_scope
+    Option.iter (fun scope ->
+      Runtime_quota_window.note_succeeded ~scope;
+      Runtime_credential_refusal.note_answered ~scope) quota_scope
+  | Credential_refused {noted_at} ->
+    Option.iter (fun scope ->
+      Runtime_credential_refusal.note_refused ~scope ~at:noted_at) quota_scope
   | Rate_limited {retry_after} ->
     Option.iter (fun candidate -> Backpressure.note_rate_limit ~candidate ~retry_after) candidate
   | Hard_quota {resets_at} ->

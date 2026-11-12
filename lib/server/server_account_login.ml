@@ -10,6 +10,11 @@ type refusal =
       ; callback_path : string
       ; redirect_path : string
       }
+  | Redirect_not_on_the_base_url of
+      { provider : Login_routes.provider
+      ; base_url_origin : string
+      ; redirect_origin : string
+      }
 
 let provider_name = function
   | Login_routes.Google -> "google"
@@ -30,6 +35,14 @@ let refusal_to_string = function
       (provider_name provider)
       redirect_path
       callback_path
+  | Redirect_not_on_the_base_url { provider; base_url_origin; redirect_origin } ->
+    Printf.sprintf
+      "the redirect_uri of the %s login client of config.json is on %s; the base URL of this \
+       server (%s) is on %s"
+      (provider_name provider)
+      redirect_origin
+      Env_config_core.http_base_url_env_key
+      base_url_origin
 ;;
 
 type clients =
@@ -80,6 +93,56 @@ let clients_of_config ~getenv (configured : Authz_boot_mode_read.login_clients) 
        | Error error -> Error (Github_client_refused error))
   in
   Ok { google; github }
+;;
+
+type redirect_check =
+  | Compared_with_the_base_url
+  | No_base_url
+
+(* The scheme, the host and the port of a URL, as an origin is written. *)
+let origin_text uri =
+  Uri.to_string (Uri.make ?scheme:(Uri.scheme uri) ?host:(Uri.host uri) ?port:(Uri.port uri) ())
+;;
+
+let on_the_base_url authority provider client =
+  let redirect_origin = origin_text (Uri.of_string (Login_client.redirect_uri client)) in
+  let on_it =
+    match Server_request_authority.parse_serialized_origin redirect_origin with
+    | Ok origin -> Server_request_authority.serialized_origin_matches_authority origin authority
+    | Error `Malformed -> false
+  in
+  if on_it
+  then Ok ()
+  else
+    Error
+      (Redirect_not_on_the_base_url
+         { provider
+         ; base_url_origin =
+             Printf.sprintf
+               "%s://%s"
+               (Server_request_authority.scheme_to_string
+                  (Server_request_authority.scheme authority))
+               (Server_request_authority.rendered authority)
+         ; redirect_origin
+         })
+;;
+
+let redirects_on_the_server ~base_url { google; github } =
+  match base_url with
+  | None -> Ok No_base_url
+  | Some authority ->
+    let* () =
+      match google with
+      | None -> Ok ()
+      | Some { Login_routes.client; cache = _ } ->
+        on_the_base_url authority Login_routes.Google client
+    in
+    let* () =
+      match github with
+      | None -> Ok ()
+      | Some client -> on_the_base_url authority Login_routes.Github client
+    in
+    Ok Compared_with_the_base_url
 ;;
 
 let draw_bytes = 32

@@ -20,6 +20,13 @@ type refusal =
       }
       (** The provider would send the browser back to a path this server
           does not answer the callback on. *)
+  | Redirect_not_on_the_base_url of
+      { provider : Login_routes.provider
+      ; base_url_origin : string  (** The origin of the base URL of the server. *)
+      ; redirect_origin : string  (** The origin of the [redirect_uri] of the member. *)
+      }
+      (** The provider would send the browser back to an origin that is not
+          the one the operator configured as the base URL of this server. *)
 
 (** Names the provider, and the variable, the field or the path that was
     refused. The value of a secret is in no refusal. *)
@@ -36,8 +43,9 @@ type clients =
     the variable the member names, and the redirect has to be an [https]
     URL whose path is the callback of its provider
     ({!Server_login_http.google_callback_path},
-    {!Server_login_http.github_callback_path}). The host of the redirect is
-    not compared with an address of the server. A member that is there and whose client is refused stops the boot:
+    {!Server_login_http.github_callback_path}). The origin of the redirect is
+    compared by {!redirects_on_the_server}, once the server knows its own
+    address. A member that is there and whose client is refused stops the boot:
     a server that left it out would answer 404 on a login the operator
     configured. A member that is not there gives [None], and its routes
     answer 404 ({!Login_routes.t}). The Google client gets an empty cache of
@@ -46,6 +54,28 @@ val clients_of_config
   :  getenv:(string -> string option)
   -> Authz_boot_mode_read.login_clients
   -> (clients, refusal) result
+
+(** Whether the redirects were compared with the address of the server. *)
+type redirect_check =
+  | Compared_with_the_base_url
+  | No_base_url
+      (** The operator configured no base URL, so the server knows no public
+          address of its own and compares nothing. It does not take the
+          address it binds for one: a server behind a proxy or a tunnel binds
+          another. *)
+
+(** Compares the origin (scheme, host and effective port) of the redirect of
+    every client with [base_url], the identity of the base URL the operator
+    configured; [None] when they configured none. A redirect on another
+    origin is refused: the provider would send the browser of every login to
+    a server that is not this one. The caller gives [None] and not the
+    address the listener binds, which {!Server_bootstrap_http.make_http_config}
+    writes into the variable of the base URL when the operator left it
+    unset. *)
+val redirects_on_the_server
+  :  base_url:Server_request_authority.authority option
+  -> clients
+  -> (redirect_check, refusal) result
 
 (** The shared value of the routes over [zone]: a new key that seals the
     logins in flight ({!Oidc_login_transaction.create}), the transport of

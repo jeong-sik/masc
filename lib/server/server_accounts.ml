@@ -217,6 +217,10 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
       (fun refusal -> Route_of_another_kind refusal)
       (Table.checked (register ~login ~env ~base_path zone))
   in
+  (* Read before [make_http_config], which writes the address the listener
+     binds into this variable when the operator left it unset: after it, a
+     base URL of the operator and that address read the same. *)
+  let operator_base_url = Env_config_core.masc_http_base_url_opt () in
   let config = Server_bootstrap_http.make_http_config ~address ~port in
   let* https =
     Result.map_error
@@ -247,6 +251,30 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
          ~bind_port:config.port
          ~https_port
          ~explicit_base_url:(Env_config_core.masc_http_base_url_opt ()))
+  in
+  let* () =
+    match
+      Server_account_login.redirects_on_the_server
+        ~base_url:
+          (* [make_http_config] keeps a base URL that is set, so the
+             identity the policy projects is the operator's. *)
+          (Option.map
+             (fun (_ : string) -> Server_request_authority.projection_context trust_policy)
+             operator_base_url)
+        login_clients
+    with
+    | Error refusal -> Error (Login_client_refused refusal)
+    | Ok Server_account_login.Compared_with_the_base_url -> Ok ()
+    | Ok Server_account_login.No_base_url ->
+      (match login_clients with
+       | { Server_account_login.google = None; github = None } -> ()
+       | { Server_account_login.google = Some _; github = Some _ | None }
+       | { Server_account_login.google = None; github = Some _ } ->
+         Log.Server.info
+           "%s is not set: the redirect_uri of a login client is not compared with the address \
+            of this server"
+           Env_config_core.http_base_url_env_key);
+      Ok ()
   in
   (* The host reads the port of this server from the kernel
      ([Server_startup_takeover.announce_account_server]). The probes say

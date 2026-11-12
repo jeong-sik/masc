@@ -49,10 +49,14 @@
     configured, and its start and its callback answer 404; with neither
     member nobody logs in, and the boot says so in the log. A redirect whose
     path is not the callback of its provider stops the boot too
-    ({!Server_account_login.Redirect_not_the_callback}). The host of a
-    redirect is not compared with an address of the server: a redirect that
-    names another host fails at the provider or at the callback of the
-    first login.
+    ({!Server_account_login.Redirect_not_the_callback}). When the operator
+    configured the base URL of the server ([MASC_HTTP_BASE_URL]), a redirect
+    whose origin (scheme, host and port) is not that of the base URL stops
+    the boot as well ({!Server_account_login.Redirect_not_on_the_base_url}).
+    Without a base URL the server knows no public address of its own: it
+    compares nothing and says so in the log, and a redirect that names
+    another host fails at the provider or at the callback of the first
+    login.
 
     {b The probes.} They are answered with no credential, to a request whose
     Host is an identity of the server ({!Server_http_ingress.serve_table}),

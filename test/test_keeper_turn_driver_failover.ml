@@ -4345,6 +4345,32 @@ let test_payment_required_still_exhausts_the_quota_scope () =
            ~now:(Unix.gettimeofday ()))))
 ;;
 
+(* A refused credential is kept for the runtime list until a call on the same
+   credential is answered. It is not a rest: the scope stays callable. *)
+let test_a_refused_credential_is_shown_until_the_scope_answers () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let id = "other.test_model" in
+      let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
+      let before = Unix.gettimeofday () in
+      let (_ : (unit, Agent_core.Error.t) result) =
+        walk_once
+          (fun _ ->
+             Error (Agent_core.Error.Api (Agent_core.Retry.AuthError { message = "invalid x-api-key" })))
+          [ id ]
+      in
+      (match Runtime_credential_refusal.refused_at ~scope with
+       | Some at -> Alcotest.(check bool) "noted at the refusal" true (Float.compare at before >= 0)
+       | None -> Alcotest.fail "the refused credential left no observation");
+      Alcotest.(check bool) "a refused credential rests nothing" false
+        (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()));
+      Runtime_candidate_standing.observe ~candidate:None ~quota_scope:(Some scope)
+        Runtime_candidate_standing.Answered;
+      Alcotest.(check (option (float 0.))) "an answer clears it" None
+        (Runtime_credential_refusal.refused_at ~scope)))
+;;
+
 (* A hint that names no time -- zero, negative, NaN -- must not be planted as
    a reset: that window is already over, and it replaces the observation the
    scope was carrying, leaving an exhausted account looking available. *)
@@ -7858,6 +7884,8 @@ let () =
             test_a_path_that_only_failed_walks_before_one_told_to_rest;
           Alcotest.test_case "402 still exhausts the quota scope" `Quick
             test_payment_required_still_exhausts_the_quota_scope;
+          Alcotest.test_case "a refused credential is shown until the scope answers" `Quick
+            test_a_refused_credential_is_shown_until_the_scope_answers;
           Alcotest.test_case "a quota hint that names no time is recorded as observed" `Quick
             test_a_quota_hint_that_names_no_time_is_recorded_as_observed;
           Alcotest.test_case "a deferred suffix waits only while its walk head rests" `Quick

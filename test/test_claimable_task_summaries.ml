@@ -235,56 +235,88 @@ let test_the_stated_revision_moves_with_the_backlog () =
       (Option.equal String.equal before after))
 ;;
 
-(* #29101: the claim-order rows are oldest-first within a priority, so a task
-   created minutes ago sorts behind every older sibling and past the render
-   budget. The frame must name it anyway, or the keeper never sees the work a
-   turn just added. *)
-let test_a_new_task_reaches_the_frame () =
+let ids rows =
+  List.map
+    (fun (row : Keeper_world_observation_inputs.claimable_task_identity) ->
+       Keeper_id.Task_id.to_string row.task_id)
+    rows
+;;
+
+(* Rewrite the stored [created_at] of the named Tasks; the others keep theirs. *)
+let pin_created_at config pins =
+  let backlog = Workspace.read_backlog config in
+  let tasks =
+    List.map
+      (fun (task : Masc_domain.task) ->
+         match List.assoc_opt task.id pins with
+         | Some created_at -> { task with created_at }
+         | None -> task)
+      backlog.tasks
+  in
+  Workspace.write_backlog config { backlog with tasks }
+;;
+
+let goal_in phase id =
+  let ts = Masc_domain.now_iso () in
+  { Goal_store.id
+  ; criterion_revision = "fixture-" ^ id
+  ; title = "title of " ^ id
+  ; metric = None
+  ; target_value = None
+  ; due_date = None
+  ; priority = 3
+  ; phase
+  ; last_review_note = None
+  ; last_review_at = None
+  ; created_at = ts
+  ; updated_at = ts
+  }
+;;
+
+let write_goals config goals =
+  Goal_store.write_state
+    config
+    { pending_events = []
+    ; pending_notifications = []
+    ; version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals
+    }
+;;
+
+(* Within one priority the newest row comes first, so a Task a turn just added
+   is not pushed past the render budget by its older siblings (#29101). *)
+let test_the_newest_task_of_a_priority_is_the_first_row () =
   with_config (fun config meta ->
-    (* More claimable rows than the claim window, so the newest window is
-       active and the fresh task would otherwise fall past the budget. *)
-    for index = 1 to 15 do
-      ignore
-        (add config ~title:(Printf.sprintf "Older %d" index) ~created_by:"someone-else")
-    done;
-    let fresh = add config ~title:"Fresh" ~created_by:"someone-else" in
-    (* Pin created_at so "newest" is unambiguous regardless of clock
-       resolution: every older task is strictly earlier than the fresh one. *)
-    let backlog = Workspace.read_backlog config in
-    let fresh_id = Keeper_id.Task_id.to_string fresh in
-    let tasks =
-      List.mapi
-        (fun index (task : Masc_domain.task) ->
-          let created_at =
-            if String.equal task.id fresh_id
-            then "2026-08-08T00:01:00Z"
-            else Printf.sprintf "2026-08-08T00:00:%02dZ" (index mod 60)
-          in
-          { task with created_at })
-        backlog.tasks
+    (* More claimable rows than the frame renders. *)
+    let older =
+      List.init 15 (fun index ->
+        add config ~title:(Printf.sprintf "Older %d" index) ~created_by:"someone-else")
     in
-    Workspace.write_backlog config { backlog with tasks };
-    let rendered = frame config meta in
+    let fresh = add config ~title:"Fresh" ~created_by:"someone-else" in
+    let fresh_id = Keeper_id.Task_id.to_string fresh in
+    pin_created_at
+      config
+      ((fresh_id, "2026-08-08T00:01:00Z")
+       :: List.mapi
+            (fun index task_id ->
+               ( Keeper_id.Task_id.to_string task_id
+               , Printf.sprintf "2026-08-08T00:00:%02dZ" index ))
+            older);
+    (match ids (snapshot config meta).claimable_tasks with
+     | first :: _ -> check string "the newest Task is the first row" fresh_id first
+     | [] -> fail "no claimable rows");
     check bool
       "the frame names the newest task"
       true
-      (contains rendered fresh_id);
-    check bool "the frame labels the newest window" true (contains rendered "Newly added"))
+      (contains (frame config meta) fresh_id))
 ;;
 
-(* The frame's "next to claim" rows are the head of [claimable_tasks], so that
-   list must be in the scheduler's own order -- priority, then created_at, then
-   id -- not the backlog's insertion order. *)
-let test_claimable_rows_are_in_claim_order () =
+let test_priority_orders_rows_before_age () =
   with_config (fun config meta ->
     let low = add_with_priority config ~title:"Low" ~created_by:"someone-else" ~priority:3 in
     let high = add_with_priority config ~title:"High" ~created_by:"someone-else" ~priority:1 in
     let mid = add_with_priority config ~title:"Mid" ~created_by:"someone-else" ~priority:2 in
-    let ids =
-      (snapshot config meta).claimable_tasks
-      |> List.map (fun (row : Keeper_world_observation_inputs.claimable_task_identity) ->
-        Keeper_id.Task_id.to_string row.task_id)
-    in
     check
       (list string)
       "priority orders the rows, not insertion order"
@@ -292,7 +324,143 @@ let test_claimable_rows_are_in_claim_order () =
       ; Keeper_id.Task_id.to_string mid
       ; Keeper_id.Task_id.to_string low
       ]
-      ids)
+      (ids (snapshot config meta).claimable_tasks))
+;;
+
+(* The rows are shown with Tasks linked to an in-progress Goal first, then by
+   priority, then newest. A claim without a task id keeps its own order:
+   priority, then oldest. *)
+let test_rows_are_goal_first_and_the_claim_order_is_unchanged () =
+  with_config (fun config meta ->
+    let add_p priority title =
+      Keeper_id.Task_id.to_string
+        (add_with_priority config ~title ~created_by:"someone-else" ~priority)
+    in
+    let old_p1 = add_p 1 "Old P1" in
+    let new_p1 = add_p 1 "New P1" in
+    let undated_p1 = add_p 1 "Undated P1" in
+    let goal_p3 = add_p 3 "Goal P3" in
+    let done_goal_p3 = add_p 3 "P3 of a finished Goal" in
+    pin_created_at
+      config
+      [ old_p1, "2026-08-01T00:00:00Z"
+      ; new_p1, "2026-08-08T00:00:00Z"
+      ; undated_p1, "not a timestamp"
+      ; goal_p3, "2026-08-02T00:00:00Z"
+      ; done_goal_p3, "2026-08-03T00:00:00Z"
+      ];
+    write_goals
+      config
+      [ goal_in Goal_phase.Executing "goal-executing"
+      ; goal_in Goal_phase.Completed "goal-completed"
+      ];
+    Workspace_goal_index.write_goal_task_links
+      config
+      [ "goal-executing", [ goal_p3 ]; "goal-completed", [ done_goal_p3 ] ];
+    let rows = (snapshot config meta).claimable_tasks in
+    check
+      (list string)
+      "Goal-linked first, then priority, then newest; an unreadable creation time last in its priority"
+      [ goal_p3; new_p1; old_p1; undated_p1; done_goal_p3 ]
+      (ids rows);
+    (match rows with
+     | [ linked; _; _; undated; finished ] ->
+       (match linked.goal_links with
+        | Keeper_world_observation_inputs.Active_goals [ "goal-executing" ] -> ()
+        | Keeper_world_observation_inputs.Active_goals _
+        | Keeper_world_observation_inputs.Goal_links_unread ->
+          fail "the linked row does not name its in-progress Goal");
+       (match finished.goal_links with
+        | Keeper_world_observation_inputs.Active_goals [] -> ()
+        | Keeper_world_observation_inputs.Active_goals (_ :: _)
+        | Keeper_world_observation_inputs.Goal_links_unread ->
+          fail "a finished Goal counted as an in-progress one");
+       (match undated.age with
+        | Keeper_world_observation_inputs.Created_at_unreadable -> ()
+        | Keeper_world_observation_inputs.Age_days _ ->
+          fail "an unreadable creation time was given an age")
+     | _ -> fail "expected five claimable rows");
+    match Workspace.claim_next_r config ~agent_name:"claimable-probe" () with
+    | Workspace.Claim_next_claimed { task_id; _ } ->
+      check string "a claim without a task id picks the oldest P1" old_p1 task_id
+    | Workspace.Claim_next_no_unclaimed -> fail "expected a claim, got none"
+    | Workspace.Claim_next_error detail -> fail detail)
+;;
+
+(* An unreadable link registry is not "nothing is linked": every row says the
+   links were not read, and the order falls back to priority, then newest. *)
+let test_unreadable_goal_links_leave_goal_order_out () =
+  with_config (fun config meta ->
+    let add_p priority title =
+      Keeper_id.Task_id.to_string
+        (add_with_priority config ~title ~created_by:"someone-else" ~priority)
+    in
+    let p2 = add_p 2 "P2" in
+    let goal_p3 = add_p 3 "Goal P3" in
+    write_goals config [ goal_in Goal_phase.Executing "goal-executing" ];
+    Workspace_goal_index.write_goal_task_links config [ "goal-executing", [ goal_p3 ] ];
+    check
+      (list string)
+      "readable links put the Goal-linked row first"
+      [ goal_p3; p2 ]
+      (ids (snapshot config meta).claimable_tasks);
+    Workspace.write_json
+      config
+      (Workspace_goal_index.goal_task_links_path config)
+      (`Assoc [ "links", `String "corrupt" ]);
+    let rows = (snapshot config meta).claimable_tasks in
+    check (list string) "priority decides when the links are unreadable" [ p2; goal_p3 ]
+      (ids rows);
+    List.iter
+      (fun (row : Keeper_world_observation_inputs.claimable_task_identity) ->
+         match row.goal_links with
+         | Keeper_world_observation_inputs.Goal_links_unread -> ()
+         | Keeper_world_observation_inputs.Active_goals _ ->
+           fail "an unreadable link registry read as a known link set")
+      rows)
+;;
+
+(* The row carries typed values and no stored text: the age in whole days at
+   the read, the number of returns, and the linked Goal ids. *)
+let test_a_row_carries_age_returns_and_goals_as_values () =
+  with_config (fun config meta ->
+    let task_id =
+      Keeper_id.Task_id.to_string
+        (add config ~title:"Returned once" ~created_by:"someone-else")
+    in
+    let three_and_a_half_days_ago = Unix.gettimeofday () -. (3.5 *. 86_400.0) in
+    pin_created_at
+      config
+      [ task_id, Masc_domain.iso8601_of_unix_seconds three_and_a_half_days_ago ];
+    let backlog = Workspace.read_backlog config in
+    Workspace.write_backlog
+      config
+      { backlog with
+        tasks =
+          List.map
+            (fun (task : Masc_domain.task) -> { task with cycle_count = 2 })
+            backlog.tasks
+      };
+    (match (snapshot config meta).claimable_tasks with
+     | [ { age = Keeper_world_observation_inputs.Age_days days; returns; goal_links; _ } ] ->
+       check int "whole days since creation" 3 days;
+       check int "returns to the pool" 2 returns;
+       (match goal_links with
+        | Keeper_world_observation_inputs.Active_goals [] -> ()
+        | Keeper_world_observation_inputs.Active_goals (_ :: _)
+        | Keeper_world_observation_inputs.Goal_links_unread ->
+          fail "a Task with no Goal was given one")
+     | [ { age = Keeper_world_observation_inputs.Created_at_unreadable; _ } ] ->
+       fail "a readable creation time was not read"
+     | rows -> failf "expected exactly one claimable row, got %d" (List.length rows));
+    check bool
+      "the frame row is the typed values"
+      true
+      (contains
+         (frame config meta)
+         (Printf.sprintf
+            {|{"task_id":"%s","priority":2,"age_days":3,"returns":2,"goals":[]}|}
+            task_id)))
 ;;
 
 let () =
@@ -313,10 +481,16 @@ let () =
             test_recovery_snapshot_is_not_claimable
         ; test_case "invalid stored task id makes snapshot non-authoritative" `Quick
             test_invalid_stored_task_id_makes_snapshot_non_authoritative
-        ; test_case "claimable rows are in claim order" `Quick
-            test_claimable_rows_are_in_claim_order
-        ; test_case "a new task reaches the frame" `Quick
-            test_a_new_task_reaches_the_frame
+        ; test_case "priority orders rows before age" `Quick
+            test_priority_orders_rows_before_age
+        ; test_case "the newest task of a priority is the first row" `Quick
+            test_the_newest_task_of_a_priority_is_the_first_row
+        ; test_case "rows are Goal first and the claim order is unchanged" `Quick
+            test_rows_are_goal_first_and_the_claim_order_is_unchanged
+        ; test_case "unreadable Goal links leave Goal order out" `Quick
+            test_unreadable_goal_links_leave_goal_order_out
+        ; test_case "a row carries age, returns and Goals as values" `Quick
+            test_a_row_carries_age_returns_and_goals_as_values
         ] )
     ]
 ;;

@@ -1010,9 +1010,6 @@ let combine_prompt_sections sections =
    completion, so hiding any admitted row would claim the Keeper saw input that
    never reached its prompt. *)
 let claimable_task_render_budget_rows = 10
-let claimable_task_newly_added_rows = 3
-let claimable_task_next_to_claim_rows =
-  claimable_task_render_budget_rows - claimable_task_newly_added_rows
 
 let take n xs = List.filteri (fun i _ -> i < n) xs
 
@@ -1693,11 +1690,30 @@ let prepare_prompt_internal
                         [ ( "task_id"
                           , `String (Keeper_id.Task_id.to_string summary.task_id)
                           )
+                        ; "priority", `Int summary.priority
+                        ; ( "age_days"
+                          , match summary.age with
+                            | Keeper_world_observation_inputs.Age_days days -> `Int days
+                            | Keeper_world_observation_inputs.Created_at_unreadable ->
+                              `String "unreadable" )
+                        ; "returns", `Int summary.returns
+                        ; ( "goals"
+                          , match summary.goal_links with
+                            | Keeper_world_observation_inputs.Active_goals goal_ids ->
+                              `List (List.map (fun goal_id -> `String goal_id) goal_ids)
+                            | Keeper_world_observation_inputs.Goal_links_unread ->
+                              `String "unread" )
                         ]))
              in
-             let next_to_claim = take claimable_task_next_to_claim_rows summaries in
-             Buffer.add_string ubuf (String.concat "" (List.map row next_to_claim));
-             if List.length summaries > List.length next_to_claim
+             (* One list in the order the observation carries: Tasks linked to
+                an in-progress Goal first, then priority, then newest. Within
+                one priority a Task just added is ahead of its older siblings
+                (#29101). It can still fall past the budget behind Goal-linked
+                or higher-priority rows; the line below counts the rows left
+                out. *)
+             let shown = take claimable_task_render_budget_rows summaries in
+             Buffer.add_string ubuf (String.concat "" (List.map row shown));
+             if List.length summaries > List.length shown
              then
                Buffer.add_string
                  ubuf
@@ -1706,35 +1722,9 @@ let prepare_prompt_internal
                  ("  "
                   ^ render_fragment
                       Prompt_names.keeper_world_namespace_state_claimable_more
-                      [ "count", string_of_int (List.length summaries - List.length next_to_claim)
+                      [ "count", string_of_int (List.length summaries - List.length shown)
                       ]
-                  ^ "\n");
-             (* The rows above are claim order -- oldest-first within a
-                priority -- so a task created minutes ago sits behind every
-                older sibling and past the budget. Name the newest rows too, or
-                the keeper never sees the work this turn just added (#29101).
-                Only when the backlog is larger than the claim window: a short
-                backlog already shows every row above. *)
-             if List.length summaries > claimable_task_next_to_claim_rows
-             then (
-               let newest_first
-                     (left : Keeper_world_observation_inputs.claimable_task_identity)
-                     (right : Keeper_world_observation_inputs.claimable_task_identity)
-                 =
-                 match String.compare right.created_at left.created_at with
-                 | 0 ->
-                   String.compare
-                     (Keeper_id.Task_id.to_string right.task_id)
-                     (Keeper_id.Task_id.to_string left.task_id)
-                 | order -> order
-               in
-               let newly_added =
-                 summaries
-                 |> List.sort newest_first
-                 |> take claimable_task_newly_added_rows
-               in
-               Buffer.add_string ubuf "  Newly added (most recent):\n";
-               Buffer.add_string ubuf (String.concat "" (List.map row newly_added))));
+                  ^ "\n"));
          if observation.unclaimed_task_count > 0 && claimable_task_count = 0
          then
            Buffer.add_string

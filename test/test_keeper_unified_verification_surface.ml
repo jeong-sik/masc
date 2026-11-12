@@ -391,7 +391,9 @@ let test_task_claim_present_for_claimable_backlog () =
         [ { Masc.Keeper_world_observation_inputs.task_id =
               Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
           ; priority = 2
-          ; created_at = "2026-08-08T00:00:00Z"
+          ; age = Masc.Keeper_world_observation_inputs.Age_days 0
+          ; returns = 0
+          ; goal_links = Masc.Keeper_world_observation_inputs.Active_goals []
           }
         ];
     }
@@ -408,7 +410,9 @@ let test_backlog_trigger_split () =
         [ { Masc.Keeper_world_observation_inputs.task_id =
               Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
           ; priority = 2
-          ; created_at = "2026-08-08T00:00:00Z"
+          ; age = Masc.Keeper_world_observation_inputs.Age_days 0
+          ; returns = 0
+          ; goal_links = Masc.Keeper_world_observation_inputs.Active_goals []
           }
         ];
     }

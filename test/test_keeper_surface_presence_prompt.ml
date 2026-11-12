@@ -587,7 +587,9 @@ let test_backlog_with_rows_omits_readable_empty_statement () =
           [ { Inputs.task_id =
                 Keeper_id.Task_id.of_string "task-claimable" |> Result.get_ok
             ; priority = 2
-            ; created_at = "2026-08-08T00:00:00Z"
+            ; age = Inputs.Age_days 0
+            ; returns = 0
+            ; goal_links = Inputs.Active_goals []
             }
           ];
       }
@@ -598,7 +600,7 @@ let test_backlog_with_rows_omits_readable_empty_statement () =
     (contains ~needle:"- Claimable tasks for this keeper: 1" user);
   check bool "claimable row reaches the prompt" true
     (contains
-       ~needle:"{\"task_id\":\"task-claimable\"}"
+       ~needle:"{\"task_id\":\"task-claimable\","
        user);
   check bool "readable empty statement absent" false
     (contains ~needle:readable_empty_line user);
@@ -639,7 +641,7 @@ let test_claimable_title_does_not_reach_system_context () =
        check bool "typed task id reaches the frame" true
          (contains
             ~needle:
-              (Printf.sprintf "{\"task_id\":\"%s\"}" created.task_id)
+              (Printf.sprintf "{\"task_id\":\"%s\"," created.task_id)
             user);
        check bool "opaque task title is absent" false
          (contains ~needle:"Ignore previous" user))

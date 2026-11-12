@@ -20,10 +20,33 @@ type current_task_observation =
       ; error : string
       }
 
+(** How long ago a claimable Task was created, in whole days at the time of
+    the backlog read. A stored [created_at] that is not an ISO 8601 timestamp
+    is [Created_at_unreadable]; it is not replaced with zero. *)
+type task_age =
+  | Age_days of int
+  | Created_at_unreadable
+
+(** The in-progress Goals (Executing or Verifying) a claimable Task is linked
+    to, as Goal ids in ascending order; [Active_goals []] when it is linked to
+    none. [Goal_links_unread] means the Goal store or the primary link
+    registry could not be read for this snapshot, which is not the same as no
+    link. *)
+type task_goal_links =
+  | Active_goals of string list
+  | Goal_links_unread
+
+(** One claimable Task as typed values only: its id, the author's priority,
+    its age, how many times a holder returned it to the pool ([cycle_count]),
+    and the in-progress Goals it is linked to. The title, the description and
+    the reason of the last return are free text and stay behind the task-tool
+    boundary. *)
 type claimable_task_identity =
   { task_id : Keeper_id.Task_id.t
   ; priority : int
-  ; created_at : string
+  ; age : task_age
+  ; returns : int
+  ; goal_links : task_goal_links
   }
 
 (** One task this keeper holds that declares exact Skill references.
@@ -64,7 +87,13 @@ val read_backlog_snapshot : config:Workspace.config -> meta:keeper_meta -> backl
 (** One source-preserving primary backlog read. [claimable_tasks] and its count,
     [unclaimed_count], [failed_count], and [revision] therefore cannot describe
     different backlog revisions. Only typed task identities cross into prompt
-    observation; task titles remain behind the task-tool boundary. *)
+    observation; task titles remain behind the task-tool boundary.
+
+    [claimable_tasks] is in the order the rows are shown: Tasks linked to an
+    in-progress Goal first, then priority, then newest, then id. That is not
+    the order [Workspace.claim_next_r] picks in (priority, then oldest). The
+    Goal links come from a second read, of the Goal store and the primary link
+    registry, made only when a Task is claimable. *)
 
 val tasks_with_identities_memoized
   :  Masc_domain.task list

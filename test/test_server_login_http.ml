@@ -62,6 +62,35 @@ let split_once ~on text =
   find 0
 ;;
 
+(* The opening tag of the element that has this id, as the page wrote it. A
+   check of a page reads a fact from it (an attribute is there), not its
+   words. *)
+let opening_tag ~id body =
+  let attribute = Printf.sprintf {| id="%s"|} id in
+  let rec from start =
+    match String.index_from_opt body start '<' with
+    | None -> None
+    | Some first ->
+      (match String.index_from_opt body first '>' with
+       | None -> None
+       | Some last ->
+         let tag = String.sub body first (last - first + 1) in
+         if contains ~sub:attribute tag then Some tag else from (last + 1))
+  in
+  from 0
+;;
+
+(* An attribute that HTML writes with no value, as [disabled] is. *)
+let has_bare_attribute name tag =
+  contains ~sub:(Printf.sprintf " %s " name) tag || contains ~sub:(Printf.sprintf " %s>" name) tag
+;;
+
+let attribute_value name tag =
+  Option.bind
+    (split_once ~on:(Printf.sprintf {| %s="|} name) tag)
+    (fun (_, rest) -> Option.map fst (split_once ~on:{|"|} rest))
+;;
+
 (* ---- GitHub, as the test plays it ---- *)
 
 type github =
@@ -497,14 +526,23 @@ let the_preview_follows_a_login () =
        (fun path ->
          let page = send (fresh_browser ()) no_github ~meth:"GET" ~path in
          Alcotest.(check int) ("with no GitHub client, " ^ path) 200 page.status;
+         let button =
+           match opening_tag ~id:"go" page.body with
+           | Some tag -> tag
+           | None -> Alcotest.failf "no login button on %s" path
+         in
          Alcotest.(check bool)
            ("the button is disabled on " ^ path)
            true
-           (contains ~sub:{|<button id="go" disabled>Sign in with GitHub</button>|} page.body);
+           (has_bare_attribute "disabled" button);
+         (* The page says why: the button names an element of the page as
+            its description. *)
          Alcotest.(check bool)
            ("the page says so on " ^ path)
            true
-           (contains ~sub:"This server has no GitHub login." page.body))
+           (match attribute_value "aria-describedby" button with
+            | Some id -> Option.is_some (opening_tag ~id page.body)
+            | None -> false))
        [ "/"; "/accounts/invite" ]);
     Alcotest.(check string)
       "nobody yet"

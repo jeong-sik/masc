@@ -192,14 +192,14 @@ let seconds_per_day = 86_400.0
    within its priority. Its age is [Created_at_unreadable], not zero. When the
    Goal links cannot be read every row is [Goal_links_unread] and step 1 does
    not apply. *)
-let claimable_rows ~(config : Workspace.config) ~now = function
+let claimable_rows ~(config : Workspace.config) ~keeper_name ~now = function
   | [] -> []
   | claimable ->
     let goal_links_of =
       match active_goals_by_task ~config with
       | Ok active_goals -> fun ~task_id -> Active_goals (active_goals ~task_id)
       | Error detail ->
-        Log.Keeper.warn "claimable tasks: Goal links unreadable: %s" detail;
+        Log.Keeper.warn ~keeper_name "claimable tasks: Goal links unreadable: %s" detail;
         fun ~task_id:(_ : string) -> Goal_links_unread
     in
     let goal_rank (row : claimable_task_identity) =
@@ -298,6 +298,7 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
        let claimable_tasks =
          claimable_rows
            ~config
+           ~keeper_name:meta.name
            ~now:(Time_compat.now ())
            (List.filter
               (fun ((task : Masc_domain.task), _) ->

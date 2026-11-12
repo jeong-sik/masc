@@ -344,6 +344,10 @@ let keeper_world_namespace_state_backlog_revision =
 let keeper_world_namespace_state_unclaimed = "keeper.world.namespace_state.unclaimed"
 let keeper_world_namespace_state_claimable = "keeper.world.namespace_state.claimable"
 
+let keeper_world_namespace_state_claimable_rows =
+  "keeper.world.namespace_state.claimable_rows"
+;;
+
 let keeper_world_namespace_state_claimable_more =
   "keeper.world.namespace_state.claimable_more"
 ;;

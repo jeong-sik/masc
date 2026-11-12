@@ -1712,6 +1712,13 @@ let prepare_prompt_internal
                 or higher-priority rows; the line below counts the rows left
                 out. *)
              let shown = take claimable_task_render_budget_rows summaries in
+             Buffer.add_string
+               ubuf
+               ("  "
+                ^ render_fragment
+                    Prompt_names.keeper_world_namespace_state_claimable_rows
+                    []
+                ^ "\n");
              Buffer.add_string ubuf (String.concat "" (List.map row shown));
              if List.length summaries > List.length shown
              then

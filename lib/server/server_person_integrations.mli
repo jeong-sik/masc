@@ -23,8 +23,11 @@ type integration =
   { integration_id : string  (** The id the connect request names. *)
   ; display_name : string
   ; models : string list
-      (** The models of the bindings of this provider in runtime.toml: the
-          [model] a verification names. *)
+      (** The models of the bindings of this provider in runtime.toml that a
+          verification calls: the [model] a verification names. A model the
+          verification refuses before any client starts
+          ({!Runtime_verification.model_refusal}) is left out, so a provider
+          may have none. *)
   ; calls : calls
   }
 

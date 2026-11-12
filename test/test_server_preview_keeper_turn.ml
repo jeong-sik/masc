@@ -224,6 +224,11 @@ max-context = 1000000
 tools-support = true
 streaming = true
 
+[models.claude-notools]
+api-name = "claude-notools"
+max-context = 200000
+streaming = true
+
 [models."gpt-5.5"]
 api-name = "gpt-5.5"
 max-context = 400000
@@ -245,6 +250,8 @@ streaming = true
 [claude_code."claude-sonnet-5"]
 
 [claude_code."claude-opus-5"]
+
+[claude_code.claude-notools]
 
 [local.local-model]
 
@@ -541,12 +548,15 @@ let test_turn () =
         (* A person logs in to the official clients that keep their
            credential in the home of the account. Antigravity keeps a copy in
            the setup registry, and a server over HTTP has no login: neither is
-           offered. Of the three, only Claude Code calls a model here. *)
-        let offered =
+           offered. A model that declares no tool calling is not offered
+           either: its verification ends before the client starts. Of the
+           three, only Claude Code calls a model here. *)
+        let every_kind =
           match Runtime_toml.parse_string offered_toml with
-          | Ok offered -> Server_person_integrations.of_config offered
+          | Ok config -> config
           | Error _ -> Alcotest.fail "the runtime.toml of every kind does not parse"
         in
+        let offered = Server_person_integrations.of_config every_kind in
         Alcotest.(check (list (pair string (list string))))
           "the providers a person may connect, in declared order, with their models"
           [ "claude_code", [ "claude-sonnet-5"; "claude-opus-5" ]
@@ -571,6 +581,43 @@ let test_turn () =
                    offer.integration_id
                    (Access.native_refusal_to_string refusal))
              offered);
+        (* The model left out is the one a verification of her account
+           refuses before any client starts. The window is never reached. *)
+        (let left_out =
+           match
+             Runtime_account_runtime.of_template
+               every_kind
+               ~template:"claude_code"
+               ~provider_id:alice.account_id
+               ~account_home:(home_of ~base_path alice)
+               ~binding:(Runtime_account_runtime.Model "claude-notools")
+           with
+           | Ok runtime -> runtime
+           | Error error -> Alcotest.fail (Runtime_account_runtime.error_to_string error)
+         in
+         let window_s = 60. in
+         let verdict =
+           Eio.Switch.run (fun sw ->
+             Runtime_verification.verify
+               ~secure_random:(Eio.Stdenv.secure_random env)
+               ~sw
+               ~net:(Eio.Stdenv.net env)
+               ~mgr:(Eio.Stdenv.process_mgr env)
+               ~clock:(Eio.Stdenv.clock env)
+               ~cwd:Eio.Path.(Eio.Stdenv.fs env / root)
+               ~cwd_path:root
+               ~timeout_s:window_s
+               ~account_request:
+                 (Access.Own_account
+                    { user_id = alice.person.user_id
+                    ; provider_account_id = get (Provider_account_id.of_string alice.account_id)
+                    })
+               left_out)
+         in
+         Alcotest.(check (option string))
+           "the verification of the model left out"
+           (Some "tools_not_declared")
+           (Option.map Runtime_verification.failure_code verdict.Runtime_verification.failure));
         (* The answer of a turn of [keeper] on [runtime]: its fields in
            order, [text], and whether the turn resumed. The conversation it
            names is the value. *)

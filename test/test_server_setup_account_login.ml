@@ -70,15 +70,19 @@ let boundaries () = Eio_main.run (fun env ->
          {|{"integration_id":"codex","account_ref":"bad"}|}];
       check string "invalid recovery reference refused" "404"
         (request router ~token:(Some admin) ~method_:"GET" ~path:"/api/v1/setup/accounts/login/invalid" ~body:"");
-      (* An operator logs in to a client the workspace has not declared yet.
-         The login gets past the choice of client and stops where it would
-         start one: this process has no environment to start it in. A
-         person's login of it is refused before that, with 400. *)
+      (* An operator logs in to a client the workspace has not declared yet,
+         and to Antigravity. The login gets past the choice of client and
+         stops where it would start one: this process has no environment to
+         start it in, the one reason a start answers 503. A person's login of
+         either is refused before that, with 400. *)
       let config = Filename.concat (Common.masc_dir_from_base_path ~base_path:base) "config" in
       Fs_compat.mkdir_p config;
       Out_channel.with_open_bin (Filename.concat config Config_dir_resolver.runtime_toml_filename)
         (fun out -> output_string out declared_toml);
-      check string "an operator's login of an undeclared client" "503"
-        (request router ~token:(Some admin) ~method_:"POST" ~path:"/api/v1/setup/accounts/login"
-           ~body:{|{"integration_id":"codex"}|}))))
+      check bool "no environment to start a client in" true (Option.is_none (Eio_context.get_env_opt ()));
+      List.iter (fun integration ->
+        check string ("an operator's login of " ^ integration) "503"
+          (request router ~token:(Some admin) ~method_:"POST" ~path:"/api/v1/setup/accounts/login"
+             ~body:(Printf.sprintf {|{"integration_id":%S}|} integration)))
+        ["codex"; "antigravity"])))
 let () = run "setup-account-login-routes" ["boundaries", [test_case "admin and request boundaries" `Quick boundaries]]

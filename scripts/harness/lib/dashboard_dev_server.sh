@@ -48,19 +48,17 @@ harness_dashboard_dev_server_job=""
 # harness_dashboard_dev_server_job to the number of its job. Fails once bash
 # has seen the server exit, and before the first start.
 #
-# Only a listing that arrived whole says the server is gone. The subshell that
-# fetches it can be killed, so the listing counts when it ends with the line
-# added here, and is fetched again otherwise. It is matched in one piece: read
-# line by line from a here-string, it would pass through a file under bash
-# 3.2, and that file can fail to be written.
+# Only a question that ran to its end says the server is gone. The subshell
+# that asks can be killed; its status then says so, and the question is asked
+# again. The listing is matched in one piece: read line by line from a
+# here-string, it would pass through a file under bash 3.2, and that file can
+# fail to be written.
 harness_dashboard_dev_server_runs() {
-  local listing="" last_line="end of the listing"
+  local listing
   # A line of `jobs -l`: "[1]+ 12345 Running    command".
   local entry=$'\n''\[([0-9]+)\][-+ ]? +'"${harness_dashboard_dev_server_pid}"' '
   [[ -n "${harness_dashboard_dev_server_pid}" ]] || return 1
-  until [[ "${listing}" == *$'\n'"${last_line}" ]]; do
-    listing=$'\n'"$(jobs -lr; echo "${last_line}")"
-  done
+  until listing=$'\n'"$(jobs -lr)"; do :; done
   [[ "${listing}" =~ ${entry} ]] || return 1
   harness_dashboard_dev_server_job="${BASH_REMATCH[1]}"
 }

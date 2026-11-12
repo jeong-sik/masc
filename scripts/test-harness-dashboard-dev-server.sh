@@ -282,15 +282,19 @@ start || fail "the server did not start"
 jobs() {
   if [[ -e "${fixture}/cut" ]]; then
     rm -f "${fixture}/cut"
-    # The parent of this `sh` is the subshell that asks.
-    # shellcheck disable=SC2016 # `sh` expands it
-    sh -c 'kill -KILL "$PPID"'
+    # Kills the subshell that asks, the parent of this `sh`, and then marks the
+    # cut. `sh` outlives that subshell, and the question returns only once `sh`
+    # ends, since `sh` holds its output. Where bash runs `sh` in place of that
+    # subshell, the parent is this test: it is left alone, and the check below
+    # fails.
+    # shellcheck disable=SC2016 # `sh` expands them
+    sh -c '[ "$PPID" = "$1" ] || { kill -KILL "$PPID" && : >"$2"; }' sh "${test_pid}" "${fixture}/was-cut"
   fi
   builtin jobs "$@"
 }
 harness_dashboard_dev_server_stop
 unset -f jobs
-[[ ! -e "${fixture}/cut" ]] || fail "the stop never asked bash about its jobs, so no question was cut short"
+[[ -e "${fixture}/was-cut" ]] || fail "no question of the stop was cut short"
 nothing_runs || fail "a stop whose question was cut short left the server: $(running)"
 printf 'ok: a question that is cut short is not taken for a server that exited\n'
 

@@ -941,8 +941,11 @@ let plan_arguments argument_projection ~measure_message_bytes messages =
            same turn boundary, so one range leaves at one size on both lanes
            (RFC-tool-results-age-out-of-context). The client receives the
            text this module encodes, so that encoding is the wire size.
-           The boundary is an index into the raw seed; only a seed that bound
-           to this request vouches that it is an index into [messages] too. *)
+           The boundary was verified on this turn's admitted history. The
+           raw seed differs from it only by the Tool results admission
+           synthesized, which open no atom, so the boundary names the same
+           atoms in the raw seed, that history and [messages]. A seed that
+           does not bind leaves the results verbatim with the arguments. *)
         let demote_before = match arguments with
           | Some _ -> source.completed_before
           | None -> 0 in

@@ -634,8 +634,10 @@ val compose_librarian_range
     own error. Other positions are composed once, as given. *)
 
 type argument_source
-(** One official attempt's frozen raw completed argument authority and address
-    memo. It never authorizes changing a remote client-held conversation. *)
+(** One official attempt's frozen raw completed authority and address memo:
+    the raw seed and completed-turn boundary that decide which tool-call
+    arguments and finished-turn results a Start sends by reference. It never
+    authorizes changing a remote client-held conversation. *)
 
 val create_argument_source :
   base_path:string -> keeper_name:string ->
@@ -681,13 +683,25 @@ val start_range_projection :
     Source-specific projection runs after this range. Antigravity and Muse
     Code can use the same projection with unbounded capacity.
 
-    With [argument_projection], only verified closed raw-seed arguments are
-    planned before measuring capacity. Seed/Librarian validation and observation
-    still use the original source and atom coordinates. Summary selection is
-    pure with respect to blobs; only retained slots are materialized once.
-    Actual success/failure outcomes are replayed, every unmaterialized slot is
-    restored, and the full range/summary decision is repeated without I/O.
-    Custom source projection must run after this function returns. *)
+    With [argument_projection], verified closed raw-seed arguments and
+    finished-turn tool results are planned before measuring capacity. A result
+    can be planned only when its atom is below the completed-turn boundary and
+    its text is at least
+    {!Keeper_turn_driver_try_provider.aged_result_min_bytes} bytes, the floor
+    the Agent Core request uses; {!Keeper_model_input_demotion.plan} then
+    plans it only where its marker makes the message smaller. The current
+    turn's results stay verbatim. The boundary was verified on the turn's
+    admitted history, whose atoms are the raw seed's: admission adds only Tool
+    results, which open no atom. When the raw seed does not bind
+    ({!Keeper_model_input_demotion.bind_completed_arguments}), arguments and
+    results both stay verbatim. A Resume passes no projection
+    ({!argument_projection}). Seed/Librarian validation, digests and
+    observation still use the original source and atom coordinates. Summary
+    selection is pure with respect to blobs; only retained slots are
+    materialized once. Actual success/failure outcomes are replayed, every
+    unmaterialized slot is restored, and the full range/summary decision is
+    repeated without I/O. Custom source projection must run after this
+    function returns. *)
 
 val carried_history_projection :
   input_source:Keeper_request_source.t ->

@@ -660,10 +660,14 @@ let planning_open_note (state : state) (goal : planning_goal) =
   let ko = state.ui_language = Lang_ko in
   let missing mark = (if ko then "작업 " else "tasks ") ^ mark in
   match state.goal_task_links, state.task_reading with
-  | Goal_links_not_read, _ | Goal_links_read _, Overview_tasks.Rows_unread ->
-      missing "◌", Theme.recede ()
-  | Goal_links_read_failed _, _ | Goal_links_read _, Rows_unavailable _ ->
+  (* A failed reading on either side is a failure whatever the other side
+     holds: a backlog that cannot be read leaves the links not read too
+     (Masc_tui_loader). *)
+  | Goal_links_read_failed _, (Overview_tasks.Rows_unread | Rows_read _ | Rows_unavailable _)
+  | (Goal_links_not_read | Goal_links_read _), Rows_unavailable _ ->
       missing "✕", Theme.warn ()
+  | Goal_links_not_read, (Rows_unread | Rows_read _) | Goal_links_read _, Rows_unread ->
+      missing "◌", Theme.recede ()
   | Goal_links_read _, Rows_read _ ->
       let tasks = List.filter (fun (task : Tui_decode.task) -> List.mem goal.pg_id task.goal_ids) state.tasks in
       let partial = Option.is_some state.tasks_error in

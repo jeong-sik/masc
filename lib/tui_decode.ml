@@ -1547,22 +1547,15 @@ type keeper_call_disposition =
   | Keeper_call_deferred
   | Keeper_call_failed
 
-(* The wire word is what [Tool_result.string_of_disposition] writes, and
-   the two functions are each other's inverse so a reader that shows the
-   word back shows the one the ledger wrote. *)
-let keeper_call_disposition_to_string = function
-  | Keeper_call_completed -> "completed"
-  | Keeper_call_deferred -> "deferred"
-  | Keeper_call_failed -> "failed"
-
 (* The words the Keeper list and the chat's skill rows use for a tool's
-   outcome. The wire word above is for the ledger; a screen does not draw
-   typed state in its wire spelling (RFC tui-one-screen-grammar §7.1). *)
+   outcome. A screen does not draw typed state in its wire spelling (RFC
+   tui-one-screen-grammar §7.1); the wire word is only read, below. *)
 let keeper_call_disposition_word ~ko = function
   | Keeper_call_completed -> if ko then "실행 완료" else "completed"
   | Keeper_call_deferred -> if ko then "실행 보류" else "deferred"
   | Keeper_call_failed -> if ko then "실행 실패" else "failed"
 
+(* The wire word is what [Tool_result.string_of_disposition] writes. *)
 let keeper_call_disposition_of_string = function
   | "completed" -> Ok Keeper_call_completed
   | "deferred" -> Ok Keeper_call_deferred

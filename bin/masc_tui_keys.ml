@@ -3186,3 +3186,130 @@ let footer_hints_browser_lane ~lang =
     ; b ~ko:"새로 조회" Act "r" "refresh"
     ; b ~ko:"레인 숨기기" Navigate "Ctrl-^ / Esc" "hide lane"
     ]
+
+(* The rows the renderers used to spell by hand, each a string in English
+   only. They are bindings like every other row now, so each key has both
+   names. The order is the one the string had: these rows are short and lead
+   with what the reader does first, so the group sort is not applied. *)
+let scroll_binding = b ~ko:"스크롤" Navigate "j/k" "scroll"
+let page_binding = b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+let close_binding = b ~ko:"닫기" Act "Esc" "close"
+
+let footer_hints_browser_lane_reading ~lang =
+  footer_hints_browser_lane ~lang ^ "  "
+  ^ hints_in_order ~lang
+      [ b ~ko:"장면" Navigate "s" "scene"
+      ; b ~ko:"영역" Navigate "v" "regions"
+      ; b ~ko:"관측" Navigate "h" "observations"
+      ]
+
+let footer_hints_browser_picker ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"고르기" Navigate "\xe2\x86\x91/\xe2\x86\x93" "choose"
+    ; b ~ko:"이 브라우저 쓰기" Act "Enter" "use browser"
+    ; b ~ko:"연결 다시 읽기" Act "r" "reload connections"
+    ; b ~ko:"고급" Navigate "A" "advanced"
+    ; b ~ko:"취소" Act "Esc" "cancel"
+    ]
+
+let browser_choose = b ~ko:"브라우저 고르기" Navigate "b" "choose browser"
+let browser_main = b ~ko:"본문으로" Navigate "m" "main"
+let browser_page_scroll = b ~ko:"페이지 스크롤" Navigate "J/K" "page scroll"
+let browser_observations = b ~ko:"관측" Navigate "h" "observations"
+let browser_image = b ~ko:"그림" Act "Ctrl-O" "image"
+
+(* [enter] is what Enter does to the element under the cursor, and is absent
+   where the cursor is on nothing that takes it. *)
+let footer_hints_browser_scene ~lang ~(enter : Browser_lane_view.scene_action option) ~articles =
+  hints_in_order ~lang
+    ([ browser_choose ]
+     @ (match enter with
+        | Some Browser_lane_view.Read_region -> [ b ~ko:"영역 읽기" Act "Enter" "read region" ]
+        | Some Browser_lane_view.Follow_link -> [ b ~ko:"링크 따라가기" Act "Enter" "follow link" ]
+        | Some Browser_lane_view.Click_control -> [ b ~ko:"누르기" Act "Enter" "click" ]
+        | None -> [])
+     @ [ browser_main
+       ; browser_page_scroll
+       ; b ~ko:"동작" Navigate "Tab/Shift-Tab" "action"
+       ]
+     @ (if articles then [ b ~ko:"글" Navigate "N/P" "article" ] else [])
+     @ [ b ~ko:"요소" Navigate "n/p" "element"
+       ; b ~ko:"영역" Navigate "v" "regions"
+       ; b ~ko:"본문" Navigate "s" "text"
+       ; b ~ko:"복사" Act "y" "copy"
+       ; browser_observations
+       ; browser_image
+       ])
+
+let footer_hints_browser_scene_guard ~lang =
+  hints_in_order ~lang
+    [ browser_choose
+    ; browser_main
+    ; browser_page_scroll
+    ; b ~ko:"따라간 곳 다시 확인" Act "r" "recheck followed destination"
+    ; b ~ko:"본문 다시 확인" Act "s" "recheck text"
+    ; browser_observations
+    ; browser_image
+    ]
+
+let footer_hints_browser_observations ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"관측" Navigate "[/]" "observation"
+    ; scroll_binding
+    ; b ~ko:"기록 복사" Act "y" "copy record"
+    ; b ~ko:"목록 다시 읽기" Act "r" "reload list"
+    ; b ~ko:"작업 공간 다시 확인" Act "R" "recheck workspace"
+    ; b ~ko:"브라우저로" Navigate "h/Esc" "back to browser"
+    ]
+
+let footer_hints_client_detail ~lang =
+  hints_in_order ~lang
+    [ scroll_binding
+    ; page_binding
+    ; b ~ko:"처음/끝" Navigate "g/G" "first/last"
+    ; b ~ko:"클라이언트" Navigate "Esc" "clients"
+    ]
+
+let footer_hints_lane_activity ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"초안" Act "Space" "draft"
+    ; b ~ko:"저장" Act "s" "save"
+    ; b ~ko:"읽기" Act "r" "read"
+    ; b ~ko:"다시 적용" Act "u" "reapply"
+    ; b ~ko:"버리기" Act "x" "discard"
+    ; b ~ko:"도움말" Meta "?" "help"
+    ; b ~ko:"뒤로" Navigate "Esc" "back"
+    ]
+
+let footer_hints_lane_inventory_detail ~lang =
+  hints_in_order ~lang
+    [ scroll_binding
+    ; page_binding
+    ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+    ; b ~ko:"새로 조회" Meta "r" "refresh"
+    ; b ~ko:"목록" Navigate "Esc/Left" "inventory"
+    ]
+
+let footer_hints_link_preview_empty ~lang = hints_in_order ~lang [ close_binding ]
+
+let footer_hints_play_invite ~lang =
+  hints_in_order ~lang
+    [ scroll_binding; b ~ko:"링크 복사" Act "y" "copy link"; close_binding ]
+
+let footer_hints_answering ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"선택" Navigate "j/k" "move"
+    ; page_binding
+    ; b ~ko:"처음/끝" Navigate "Home/End" "edges"
+    ; b ~ko:"채팅" Act "Enter" "chat"
+    ; close_binding
+    ]
+
+let footer_hints_changes_diff ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"좌우 이동" Navigate "Shift-Left / Shift-Right" "pan"
+    ; scroll_binding
+    ; b ~ko:"뒤로" Act "Left / Esc" "back"
+    ; b ~ko:"편집기에서 열기" Act "o" "open in editor"
+    ; listing_quit
+    ]

@@ -1153,10 +1153,19 @@ let host_status_json status =
    reason it waits for the next event. *)
 type host_attempt = Deliver of Yojson.Safe.t | Restore of Yojson.Safe.t | Wait of Yojson.Safe.t
 
+(* Results of an ended exact attempt that are not an Exact outcome: the
+   instance retired while the call ran, or the host could not keep its record. *)
+let exact_attempt_stopped = "stopped"
+let exact_attempt_record_failed = "record_failed"
+(* What the line shows for an output the package does not declare. A declared
+   name is a-z, 0-9 and _ (Lane_addon_manifest), so this is never one. *)
+let exact_attempt_undeclared_output = "-"
+
 let run_host_cycle m e (port : host_port) =
   let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
   let waiting = ref [] in
   let exact_waiting = ref [] in
+  let exact_running = ref 0 in
   let request_issue = ref None in
   let check_live () = if e.stopping then raise Host_cycle_stopped in
   let current_owner () : Lane_addon_host_delivery.owner = {
@@ -1184,18 +1193,43 @@ let run_host_cycle m e (port : host_port) =
               Ok (Lane_addon_exact.Not_final (Lane_addon_exact.Lane_unavailable Lane_addon_exact.Lane_unconfigured))
           | Some _, None -> Error No_exact_runner
           | Some owner, Some (runner, authorize_request) ->
+             (* One line per ended attempt (RFC host-cycle-runs-exact-requests-
+                side-by-side 3.6): hourly throughput, time per request and
+                overlap are counted from it. It carries no request body. *)
+             let running_at_start = !exact_running in
+             let stopwatch = Monotonic_deadline.start () in
+             (* The output name comes from the worker and can be any text, so
+                the line carries it only when the package declares it. *)
+             let output =
+               match List.find_opt
+                 (fun (declared : Lane_addon_types.exact_output) -> String.equal declared.name exact.output)
+                 e.package.exact_outputs with
+               | Some declared -> declared.name
+               | None -> exact_attempt_undeclared_output in
+             let ended result =
+               Log.Misc.info
+                 "Lane Add-on exact attempt ended installation=%s output=%s result=%s elapsed_ms=%.0f running_at_start=%d"
+                 owner.id output result
+                 (Monotonic_deadline.elapsed_seconds stopwatch *. 1000.) running_at_start in
+             incr exact_running;
              let result =
-               try Eio.Cancel.sub (fun cancellation ->
-                 e.cancel_exact <- Some (Eio.Cancel.cancel cancellation);
-                 Fun.protect ~finally:(fun () -> e.cancel_exact <- None) (fun () ->
-                   check_live ();
-                   Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package
-                     ~runner ~authorize_request exact))
-               with Eio.Cancel.Cancelled Worker_detached ->
-                 (* Consume only retirement of this exact call. Worker/root
-                    cancellation must still propagate through this boundary. *)
-                 Eio.Fiber.check ();
-                 raise Host_cycle_stopped in
+               Fun.protect ~finally:(fun () -> decr exact_running) (fun () ->
+                 try Eio.Cancel.sub (fun cancellation ->
+                   e.cancel_exact <- Some (Eio.Cancel.cancel cancellation);
+                   Fun.protect ~finally:(fun () -> e.cancel_exact <- None) (fun () ->
+                     check_live ();
+                     Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package
+                       ~runner ~authorize_request exact))
+                 with Eio.Cancel.Cancelled Worker_detached ->
+                   (* Consume only retirement of this exact call. Worker/root
+                      cancellation must still propagate through this boundary. *)
+                   Eio.Fiber.check ();
+                   ended exact_attempt_stopped;
+                   raise Host_cycle_stopped) in
+             ended (match result with
+               | Ok (Lane_addon_exact.Final final) -> Lane_addon_exact.final_status final
+               | Ok (Lane_addon_exact.Not_final reason) -> Lane_addon_exact.not_final_reason reason
+               | Error (_ : string) -> exact_attempt_record_failed);
              result
               |> Result.map_error (fun detail ->
                 Exact_record_failed {request_id = exact.Lane_addon_exact.request_id; detail}) in

@@ -28907,9 +28907,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  (max 0. (Unix.gettimeofday () -. at)) ^ " 전" in
            let cause = Option.bind librarian.mlh_state
              Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause in
-           let admission = Option.map (fun worker ->
-             "명시적 메모리 후보: " ^ Masc.Keeper_librarian_pending.description
-               (Masc.Keeper_librarian_pending.Worker worker)) librarian.mlh_admission_wait in
+           let admission = Option.map (fun admission ->
+             "명시적 메모리 후보: " ^ Masc.Keeper_librarian_pending.admission_description admission)
+             librarian.mlh_admission_wait in
            let reading_age = "상태 조회 " ^ Masc_tui_message_layout.span_text
              (max 0. (Unix.gettimeofday () -. mhr_generated_at)) ^ " 전" in
            notice ~kind:Notice_reply (String.concat " · "

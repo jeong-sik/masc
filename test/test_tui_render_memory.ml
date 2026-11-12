@@ -449,9 +449,12 @@ let test_memory_keeper_search_accepts_display_words () =
     ; "recovery", P.Local_failure "read failed"
     ] in
   let admission = { ready with mkh_keeper_id = "admission";
-    mkh_librarian = { ready.mkh_librarian with mlh_admission_wait = Some (worker P.Capacity) } } in
+    mkh_librarian = { ready.mkh_librarian with mlh_admission_wait = Some (P.Admission_waiting (worker P.Capacity)) } } in
+  let refused = { ready with mkh_keeper_id = "refused-pass";
+    mkh_librarian = { ready.mkh_librarian with
+      mlh_admission_wait = Some (P.Admission_failed "pass refused") } } in
   state.memory_health <- Some { (make_fleet_health ready) with
-    mhs_keepers = admission :: List.map (fun (id, pending) ->
+    mhs_keepers = admission :: refused :: List.map (fun (id, pending) ->
       with_pass id (H.Pass_pending pending)) pending };
   List.iter (fun language ->
     state.ui_language <- language;
@@ -466,6 +469,7 @@ let test_memory_keeper_search_accepts_display_words () =
         ; "원문 변경됨", ["basis"]; "source changed", ["basis"]
         ; "나누어 읽는 중", ["parts"]; "reading parts", ["parts"]
         ; "복구 실패", ["recovery"]; "recovery failed", ["recovery"]
+        ; "접수 실패", ["refused-pass"]; "admission failed", ["refused-pass"]
         ]) [true; false])
     [Types.Lang_ko; Types.Lang_en]
 ;;

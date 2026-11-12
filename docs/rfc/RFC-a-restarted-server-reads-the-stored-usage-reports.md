@@ -23,7 +23,7 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 - 올린 값은 원래 관측 시각을 그대로 갖는다. 화면은 그 시각을 보여 준다.
 - 보고가 「창이 다 찼고 풀리는 시각이 아직 앞에 있다」고 하면, 살아 있는 보고와 똑같이 그 계정을 그 시각까지 쉬게 한다.
 - 풀리는 시각 없이 찼다는 보고는 쉬게 하지 않는다. 화면에만 올린다.
-- 새 저장소, 새 필드, 새 파일 형식은 없다.
+- 새 저장소는 없다. 저장 행에 필드 하나(`role`)가 는다(R0).
 
 ## 1. 지금 동작
 
@@ -53,10 +53,13 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 - 표 둘 다 프로세스 메모리다. `runtime_quota_window.mli` 는 「a restart forgets it and the next refusal teaches it again」이라고 적는다.
 - `/api/v1/runtime/resolved` 는 `provider_usage_windows_since`(프로세스 시작 시각)와 계정별 `state` 를 낸다. 시작 뒤 보고가 없으면 `not_reported_since_start` 다.
 
+- 저장 행에는 창의 `role` 이 없다. `role`(`gates_model_calls` · `counts_other_use` · `unclassified_limit`)은 provider 응답의 다른 값에서 정해진다: Z.AI 는 `type`, Ollama 는 구매 잔액이 0보다 큰지. source 와 창 종류만으로는 되살릴 수 없다. `rest_scope` 는 `gates_model_calls` 창만 읽는다.
+
 저장은 이미 하고, 읽기는 14일 추이 화면(`Server_provider_usage_history.read`)만 한다. 시작할 때 표로 되읽는 길이 없다.
 
 ## 2. 규칙
 
+- **R0** 저장 행에 `role` 을 적는다(`record_json`). 되읽기는 `role` 이 있는 행만 고른다. `role` 없는 옛 행을 위한 추정이나 변환은 두지 않는다: R0 이 설치되기 전에 저장된 행은 되읽지 않는다. 14일 추이 읽기는 이 필드를 보지 않는다.
 - **R1** `install` 은 관측자를 달기 전에 저장 기록을 읽는다. 지금 설정에 있는 quota scope 마다, `scope_id` 가 같은 행을 source 와 창 종류(`kind`, `limit_id`)별로 나누고 각각 `observed_at` 이 가장 늦은 행을 고른다. 계정 하나에서 가장 늦은 행 하나를 고르지 않는다: 자주 보고되는 창이 오래된 소진 창을 가린다. 더 늦은 `complete_snapshot` 보고가 싣지 않은 창은 고르지 않는다(`read` 가 하루치를 접는 규칙과 같다). 범위는 `read` 가 이미 접는 14일이다.
 - **R2** 고른 행들을 각자의 원래 `observed_at` 으로 메모리 표에 올린다. 이때 관측자는 부르지 않는다(같은 보고를 다시 저장하지 않는다).
 - **R3** 올린 창 전체에 `rest_scope` 를 지금 시각으로 적용한다. `Spent_until t` 이고 `t` 가 앞이면 `note_exhausted` 다. 살아 있는 보고가 타는 것과 같은 함수다.
@@ -75,6 +78,8 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 
 ## 4. 대가
 
+- R0 이 설치된 뒤 첫 재시작은 그 사이에 보고된 창만 되읽는다. 그 전의 행은 `role` 이 없다.
+
 - 시작할 때 날짜 파일을 최대 14일치 읽는다. 2026-11-11 하루 파일이 1.7 MB 였다. `read` 가 이미 같은 파일을 접어 두므로, 같은 접힌 결과를 쓰면 추가 읽기는 없다.
 - 재시작 전에 계정 주인이 한도를 올렸거나 credential 을 바꿨으면, 저장된 「찼다」가 틀릴 수 있다. R3 은 provider 가 말한 시각까지만 쉬게 하고, Keeper walk 는 쉬는 후보도 남은 후보가 없으면 부른다(`Runtime_quota_window`: ordering preference). exact lane 은 그 시각까지 기다린다(RFC-exact-lane-waits-for-a-stated-reset). 살아 있는 보고가 틀렸을 때와 같은 대가다.
 - scope 는 credential 위치의 digest 다. 같은 위치에 다른 계정의 키를 넣으면 옛 계정의 보고가 새 계정에 올라간다. 지금도 14일 추이가 같은 방식으로 섞인다.
@@ -87,6 +92,7 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 
 ## 6. 구현 순서
 
+0. `record_json` 이 `role` 을 적는다(R0). 이 층만 먼저 설치돼도 된다.
 1. `Server_provider_usage_history`: 접힌 14일 결과에서 scope 별 최신 보고를 꺼내는 읽기. 시험: 날짜 파일 둘을 쓴 뒤 서버 상태를 새로 만들어 표와 한도 표를 읽는다. 한 계정에 창이 둘이고 더 오래 전에 보고된 창이 소진인 경우를 넣는다.
 2. `Runtime_provider_usage_window`: 관측자를 부르지 않고 올리는 진입점, `state` 의 세 번째 값, `/api/v1/runtime/resolved` 와 TUI·Dashboard 디코더.
 3. 설치 뒤 실측: 서버를 다시 시작하고 1분 안에 `/api/v1/runtime/resolved` 를 읽어, 저장 기록에 「찼고 풀리는 시각 앞」이 있던 계정이 `quota_exhausted: true` 인지 본다.

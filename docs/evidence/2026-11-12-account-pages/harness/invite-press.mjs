@@ -12,24 +12,35 @@
 // In each case the stand-in holds the answer of the next invitation page for
 // holdMs. The second link is opened from the page (location.href), which
 // changes the fragment alone, as the address bar does. With Page.navigate
-// the press came only after the hold and hit the page that was loaded again. pressAtMs after the link is opened the mouse
-// presses where the button of the first link was, with no question to the
-// page before it. The last case presses nothing: the screen is captured at
-// pressAtMs, and the capture is kept only when it came within the hold. The
-// page is not asked what it shows then. A record the page wrote into
-// window.name while its reload waited did not reach the page that was loaded
-// next, and one written in one run was read in the next run. A row says when
-// the press or the capture came, and which binary answered.
+// the press came only after the hold and hit the page that was loaded again.
+// pressAtMs after the link is opened the case acts, with no question to the
+// page before it:
+//   mouse    the mouse presses where the button of the first link was;
+//   Enter,   the key goes to the button of the first link, which took the
+//   Space    focus before the second link was opened;
+//   capture  nothing is pressed and the screen is captured. The capture is
+//            kept only when it came within the hold.
+// The page is not asked what it shows while it waits. A record the page wrote
+// into window.name while its reload waited did not reach the page that was
+// loaded next, and one written in one run was read in the next run. A row
+// says when the act came, and which binary answered.
 const SPACE = __SPACE__;
 const LABEL = "__LABEL__";
 const OUT = "__OUT__";
 const BASE = "__BASE__";
 const BINARY = "__BINARY__";
 const CASES = [
-  { holdMs: 300, pressAtMs: 150, press: true },
-  { holdMs: 2000, pressAtMs: 400, press: true },
-  { holdMs: 2000, pressAtMs: 400, press: false },
+  { holdMs: 300, pressAtMs: 150, act: "mouse" },
+  { holdMs: 2000, pressAtMs: 400, act: "mouse" },
+  { holdMs: 2000, pressAtMs: 400, act: "Enter" },
+  { holdMs: 2000, pressAtMs: 400, act: "Space" },
+  { holdMs: 2000, pressAtMs: 400, act: "capture" },
 ];
+// The events of a key as a keyboard sends them; the text makes the key press.
+const KEYS = {
+  Enter: { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: "\r" },
+  Space: { key: " ", code: "Space", windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32, text: " " },
+};
 // Longer than the longest hold.
 const SETTLE_MS = 5000;
 const fs = await import("node:fs/promises");
@@ -92,15 +103,31 @@ async function settled() {
 }
 const open = (url) => page.cdp("Page.navigate", { url });
 const openFromThePage = (url) => page.cdp("Runtime.evaluate", { expression: `location.href = ${JSON.stringify(url)}` });
-const press = async ({ x, y }) => {
+const click = async ({ x, y }) => {
   await page.cdp("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
   await page.cdp("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
   await page.cdp("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
 };
+const type = async (name) => {
+  const { text, ...key } = KEYS[name];
+  await page.cdp("Input.dispatchKeyEvent", { type: "keyDown", ...key, text, unmodifiedText: text });
+  await page.cdp("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+};
+// Gives the button the focus, as a person who tabs to it; runs in a loaded page.
+const focusButton = async () => {
+  const focused = await page.evaluate(() => {
+    document.getElementById("go").focus();
+    return document.activeElement === null ? null : document.activeElement.id;
+  });
+  if (focused !== "go") throw new Error(`the button did not take the focus: ${focused}`);
+};
+const press = (act, middle) => (act === "mouse" ? click(middle) : type(act));
 const startsSince = (before, after) => after.starts.slice(before.starts.length).map(named);
 
 const rows = [];
-for (const { holdMs, pressAtMs, press: pressing } of CASES) {
+for (const { holdMs, pressAtMs, act } of CASES) {
+  const pressing = act !== "capture";
+  const byKey = act in KEYS;
   await page.goto("about:blank");
   await mark();
   await open(link(first));
@@ -109,6 +136,7 @@ for (const { holdMs, pressAtMs, press: pressing } of CASES) {
   if (firstPage.middle === null || named(firstPage.invite) !== "the first link") {
     throw new Error(`the first link did not open the form of the invitation page: ${firstLoad}, ${firstPage.page}`);
   }
+  if (byKey) await focusButton();
   await standIn(`/__stand_in/hold?ms=${holdMs}`);
   const before = await standIn("/__stand_in");
   await mark();
@@ -117,7 +145,7 @@ for (const { holdMs, pressAtMs, press: pressing } of CASES) {
   const openReturnedAfterMs = Date.now() - openedAt;
   const left = pressAtMs - openReturnedAfterMs;
   if (left > 0) await page.waitForTimeout(left);
-  if (pressing) await press(firstPage.middle);
+  if (pressing) await press(act, firstPage.middle);
   const shot = pressing ? null : await page.cdp("Page.captureScreenshot", { format: "png" });
   const actedAfterMs = Date.now() - openedAt;
   if (shot !== null && actedAfterMs < holdMs) await fs.writeFile(CAPTURE_FILE, Buffer.from(shot.data, "base64"));
@@ -129,8 +157,9 @@ for (const { holdMs, pressAtMs, press: pressing } of CASES) {
   let laterPress = "no button";
   if (then.buttonShown && then.middle !== null) {
     const middle = then.middle;
+    if (byKey) await focusButton();
     await mark();
-    await press(middle);
+    await press(pressing ? act : "mouse", middle);
     await settled();
     laterPress = startsSince(afterPress, await standIn("/__stand_in"));
   }
@@ -139,7 +168,7 @@ for (const { holdMs, pressAtMs, press: pressing } of CASES) {
     binary: BINARY,
     holdMs,
     atMs: pressAtMs,
-    pressed: pressing,
+    act,
     firstLoad,
     openReturnedAfterMs,
     // The press or the capture must come while the stand-in holds the page.

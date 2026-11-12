@@ -5,7 +5,9 @@ Each NAME heads one column, in the order given, and each case is one row.
 """
 import json
 import sys
-from typing import TypedDict, cast
+from typing import Literal, TypedDict, cast
+
+type Act = Literal["mouse", "Enter", "Space", "capture"]
 
 
 class Then(TypedDict):
@@ -19,7 +21,7 @@ class Row(TypedDict):
     label: str
     holdMs: int
     atMs: int
-    pressed: bool
+    act: Act
     firstLoad: str
     openReturnedAfterMs: int
     actedAfterMs: int
@@ -55,7 +57,13 @@ def sent(value: list[str] | str | None) -> str:
 
 
 def case(row: Row) -> str:
-    acted = "누름" if row["pressed"] else "화면만 찍음"
+    match row["act"]:
+        case "mouse":
+            acted = "마우스로 누름"
+        case "Enter" | "Space":
+            acted = f"focus 를 둔 단추에 {row['act']}"
+        case "capture":
+            acted = "화면만 찍음"
     return f"{row['holdMs']}ms 붙잡음, {row['atMs']}ms 에 {acted}"
 
 
@@ -64,11 +72,14 @@ def cell(row: Row) -> str:
     after = word(then["page"])
     if then["page"] == "/accounts/invite":
         after += f" · 양식 {word(then['invite'])}"
-    late = "" if row["actedInTime"] else ", 붙잡은 시간이 지난 뒤"
-    if row["pressed"]:
-        pressed = f"누름({row['actedAfterMs']}ms{late}): {sent(row['firstPressSent'])}"
-        return f"{pressed} → {after} → 다시 누름: {sent(row['pressThenSent'])}"
-    return f"찍음({row['actedAfterMs']}ms{late}) → {after}"
+    acted = f"({row['actedAfterMs']}ms{'' if row['actedInTime'] else ', 붙잡은 시간이 지난 뒤'})"
+    match row["act"]:
+        case "mouse" | "Enter" | "Space":
+            name = "누름" if row["act"] == "mouse" else row["act"]
+            pressed = f"{name}{acted}: {sent(row['firstPressSent'])}"
+            return f"{pressed} → {after} → 다시 누름: {sent(row['pressThenSent'])}"
+        case "capture":
+            return f"찍음{acted} → {after}"
 
 
 columns: list[tuple[str, list[Row]]] = []
@@ -83,7 +94,7 @@ print("| --- | " + " | ".join("---" for _ in columns) + " |")
 for index in range(count):
     first = columns[0][1][index]
     assert all(
-        (rows[index]["holdMs"], rows[index]["atMs"], rows[index]["pressed"]) == (first["holdMs"], first["atMs"], first["pressed"])
+        (rows[index]["holdMs"], rows[index]["atMs"], rows[index]["act"]) == (first["holdMs"], first["atMs"], first["act"])
         for _, rows in columns
     ), "the cases must be in the same order"
     print(f"| {case(first)} | " + " | ".join(cell(rows[index]) for _, rows in columns) + " |")

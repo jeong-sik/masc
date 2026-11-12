@@ -119,6 +119,9 @@ async function loadPanel(mocks?: {
   fetchToolQuality?: (opts?: { n?: number; windowHours?: number; signal?: AbortSignal }) => Promise<ToolQualityResponse>
 }) {
   vi.resetModules()
+  const { acceptedExecutionWorkspace } = await import('../execution-workspace-authority')
+  acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/fixture',
+    connectionGeneration: 0, observerInstanceId: 'fixture-instance' })
   if (mocks?.fetchToolQuality) {
     vi.doMock('../api/dashboard', async () => {
       const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
@@ -135,8 +138,11 @@ describe('ToolQualityPanel', () => {
   let container: HTMLDivElement
   const originalVisibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers()
+    const { acceptedExecutionWorkspace } = await import('../execution-workspace-authority')
+    acceptedExecutionWorkspace.value = Object.freeze({ epoch: 'fixture', workspaceRoot: '/fixture',
+      connectionGeneration: 0, observerInstanceId: 'fixture-instance' })
     container = document.createElement('div')
     document.body.appendChild(container)
     Object.defineProperty(document, 'visibilityState', {

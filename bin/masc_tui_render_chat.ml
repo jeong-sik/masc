@@ -813,7 +813,7 @@ let keeper_message_identity ~max_cells state keeper_name =
           [ status_color
           ; keeper_state_glyph ~paused:reading.Keeper_control.paused ~health
           ; " "
-          ; Tui_decode.keeper_health_word ~ko:(state.ui_language = Lang_ko) health
+          ; Keeper_control.health_label ~ko:(state.ui_language = Lang_ko) reading
           ; Ansi.reset
           ; stance
           ]
@@ -828,7 +828,8 @@ let keeper_message_identity ~max_cells state keeper_name =
                   Keeper's AUTO/YOLO mode and gate, so the absent label keeps
                   that stance. *)
                | Persisted_keeper | Remote_keeper ->
-                   ui_text state ~ko:"없음" ~en:"absent" ^ stance)
+                   Keeper_control.health_label ~ko:(state.ui_language = Lang_ko) reading
+                   ^ stance)
           | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
         with_suggested_action (fit_identity (compact_status ^ Ansi.reset))
       else (match runtime with

@@ -36,13 +36,15 @@ let schedule_status_is_terminal = Masc_tui_render_work.schedule_status_is_termin
 
 (* Healthy keepers stay quiet beside their NOW activity. A health deviation
    remains available to the secondary detail row instead of repeating a
-   separate health word in every compact row. *)
-let keeper_health_deviation_word ~ko (health : Tui_decode.keeper_health option) =
-  match Option.map Tui_decode.keeper_health_reading health with
+   separate health word in every compact row. A keeper with no health is
+   named by why it has none: the roster was not read, it left the keeper
+   out, or it reported the keeper's configuration as an error. *)
+let keeper_health_deviation_word ~ko (reading : Keeper_control.reading) =
+  match Option.map Tui_decode.keeper_health_reading (Keeper_control.health reading) with
   | Some Tui_decode.Health_running -> None
   | None
   | Some (Tui_decode.Health_idle | Tui_decode.Health_failing | Tui_decode.Health_offline) ->
-      Some (Tui_decode.keeper_health_word ~ko health)
+      Some (Keeper_control.health_label ~ko reading)
 
 (* [runtime_id] is the producer-owned runtime identity. Keep it whole instead
    of deriving a model by splitting its spelling: the phase is a separate
@@ -364,7 +366,7 @@ let keeper_detail_text ~ko ?now (row : Keeper_list_model.row) =
   let health =
     Option.map
       (fun word -> (if ko then "상태 " else "health ") ^ word)
-      (keeper_health_deviation_word ~ko (Keeper_control.health row.reading))
+      (keeper_health_deviation_word ~ko row.reading)
   in
   List.map (keeper_badge_text ~ko) (Keeper_list_model.badges_of_row row)
   @ List.filter_map Fun.id

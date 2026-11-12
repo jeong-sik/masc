@@ -22,6 +22,8 @@ related: ["0518"]
 3. 신원이 다르면 지금처럼 읽고, 표 항목을 바꾼다.
 4. 표에서 본문 비교(`String.equal`)가 없어진다.
 
+구현은 #51545 다. 정한 것 셋은 §8 에 있다.
+
 launch manifest 로 묶인 실행과 설치 release 는 바꾸지 않는다. 그쪽은 읽을 때마다 SHA-256 을 확인한다는 계약이 있다.
 
 ## 1. 배경
@@ -94,27 +96,30 @@ OCaml 5.5.2 는 GC 일감을 도메인마다 따로 계산해 전역 카운터�
 
 이 신원은 5번 검사가 이미 믿는 것이다. 지금 코드도 "읽는 동안 파일이 그대로였다"를 같은 필드로 판정한다.
 
-### D4. 함수 하나를 바꾸고, 결과는 합타입으로 준다
+### D4. load 와 reload 두 함수로 나누고, 결과는 합타입으로 준다
 
-호출처는 둘이다(`lib/web_dashboard.ml` 하나, 시험 하나). 함수를 새로 더하지 않고 지금 함수를 바꾼다.
+`load_single_link_regular_file_beneath` 의 호출처는 둘이다(`lib/web_dashboard.ml` 하나, 시험 하나). 이 함수가 본문과 함께 snapshot 을 주게 바꾸고, reload 를 하나 더한다.
 
 ```ocaml
-type reread =
-  | Same_file  (** The file has the snapshot the caller holds. Nothing was read. *)
-  | Read of owned_regular_file_contents  (** The bytes and the snapshot they were read under. *)
-
 val load_single_link_regular_file_beneath
-  :  root:string
-  -> ?excluded_directory:owned_relative_path
-  -> held:owned_regular_file_snapshot option
-  -> owned_relative_path
-  -> (reread option, owned_regular_file_read_error) result
+  : root:string -> ?excluded_directory:owned_relative_path -> owned_relative_path
+  -> (owned_regular_file_contents option, owned_regular_file_read_error) result
+
+type owned_regular_file_reread =
+  | Same_file  (** The file has the snapshot the caller holds. Nothing was read. *)
+  | Read of owned_regular_file_contents
+
+val reload_single_link_regular_file_beneath
+  : root:string -> ?excluded_directory:owned_relative_path
+  -> held:owned_regular_file_snapshot -> owned_relative_path
+  -> (owned_regular_file_reread option, owned_regular_file_read_error) result
 ```
 
-- `held:None` 이면 언제나 읽는다. `Same_file` 은 `held:(Some _)` 일 때만 나온다.
-- `Read` 의 snapshot 은 3번의 `fstat` 이다. 5번이 통과한 뒤에만 돌려준다.
+- 처음 판은 `held:option` 을 받는 함수 하나였다. 그러면 `held:None` 인데 `Same_file` 을 받는 갈래가 타입에 생기고, 표가 없는 호출자(`index.html` 을 읽는 곳들)가 일어날 수 없는 갈래를 다뤄야 한다. 그래서 둘로 나눴다.
+- 두 함수는 검사 코드 하나를 같이 쓴다. 다른 것은 연 파일에서 무엇을 가져오는가뿐이다.
+- snapshot 은 3번의 `fstat` 이다. 5번이 통과한 뒤에만 돌려준다.
 
-`Web_dashboard.loaded_asset` 과 표 항목도 같은 모양으로 바꾼다. #51488 의 `manifest_sha256 : string option` 은 "None 이면 본문을 견준다"는 뜻을 타입 밖에 두었다. 이것을 없앤다.
+`Web_dashboard` 도 같은 모양으로 바꾼다. #51488 의 `manifest_sha256 : string option` 은 "None 이면 본문을 견준다"는 뜻을 타입 밖에 두었다. 이것을 없앤다.
 
 ```ocaml
 (* web_dashboard.mli *)
@@ -122,15 +127,19 @@ type asset_version =
   | Manifest_sha256 of string
   | File_snapshot of Fs_compat.owned_regular_file_snapshot
 
-type loaded_asset =
-  | Loaded of { body : string; version : asset_version }
-  | Unchanged  (** The file has the version the caller holds. *)
+type loaded_asset = { body : string; version : asset_version }
 
-val load_dashboard_asset
-  : held:asset_version option -> string -> (loaded_asset, asset_load_error) result
+val load_dashboard_asset : string -> (loaded_asset, asset_load_error) result
+
+type reloaded_asset =
+  | Unchanged  (** The file has the version the caller holds. *)
+  | Reloaded of loaded_asset
+
+val reload_dashboard_asset
+  : held:asset_version -> string -> (reloaded_asset, asset_load_error) result
 ```
 
-- manifest 가 있는 두 경로는 `held` 를 보지 않고 언제나 `Loaded { version = Manifest_sha256 _ }` 를 준다.
+- manifest 가 있는 두 경로는 `held` 를 보지 않고 언제나 읽고 검증한 뒤 `Reloaded { version = Manifest_sha256 _ }` 를 준다.
 - 표 항목은 `version : asset_version` 을 가진다. 표의 비교는 `asset_version` 끼리의 비교 하나다. `String.equal` 로 본문을 견주는 줄은 없어진다.
 
 ### D5. 표를 쓰는 순서
@@ -138,13 +147,13 @@ val load_dashboard_asset
 `serve_dashboard_static` 은 이렇게 한다.
 
 1. lock 을 잡고 표에서 이름의 항목을 꺼낸다. 항목을 값으로 쥔다.
-2. lock 밖에서 `load_dashboard_asset ~held:(항목의 version)` 을 부른다.
+2. lock 밖에서 `reload_dashboard_asset ~held:(항목의 version)` 을 부른다. 항목이 없으면 `load_dashboard_asset` 을 부른다.
 3. `Unchanged` 면 1번에서 쥔 항목의 본문을 보낸다.
-4. `Loaded` 면 지금처럼 표 항목을 바꾸고 그 본문을 보낸다. 표에 자리가 없으면 지금처럼 요청의 본문으로 보낸다.
+4. `Reloaded` 면 지금처럼 표 항목을 바꾸고 그 본문을 보낸다. 표에 자리가 없으면 지금처럼 요청의 본문으로 보낸다.
 
 2번을 하는 동안 다른 요청이 표 항목을 바꿔도 된다. 3번이 보내는 본문은 1번에서 쥔 항목의 것이고, 그 항목의 version 이 방금 파일에서 확인한 것이다.
 
-표에 항목이 없는 이름(자리가 없어 못 넣은 asset)은 `held:None` 이라 매번 읽는다. 지금과 같다.
+표에 항목이 없는 이름(자리가 없어 못 넣은 asset)은 매번 읽는다. 지금과 같다.
 
 ### D6. 읽기는 지금 도는 곳에서 돈다
 
@@ -212,15 +221,14 @@ manifest 없는 경로에 SHA-256 을 더하면 표 비교는 64자가 되지만
 
 | 층 | 내용 | 파일 |
 |---|---|---|
-| L1 | `load_single_link_regular_file_beneath` 가 `held` 를 받고 `reread` 를 준다. 시험 | `lib/fs_compat/fs_compat_owned_reader.ml/.mli`, `lib/fs_compat/fs_compat.mli`, `lib/fs_compat/fs_compat.ml`, 시험 |
-| L2 | `asset_version`, `load_dashboard_asset ~held`, 표 항목의 `version`, `serve_dashboard_static` 의 순서. 시험 | `lib/web_dashboard.ml/.mli`, `lib/server/server_routes_http_pages.ml`, 시험 |
-| L3 | 설치 뒤 측정 결과 | `docs/evidence/research/2026-11-09-h2-sse-tls/` |
+| L1 | `Fs_compat` 의 load·reload, `Web_dashboard` 의 `asset_version` 과 reload, 표 항목의 `version`, `serve_dashboard_static` 의 순서, 시험. PR #51545 | `lib/fs_compat/fs_compat_owned_reader.ml/.mli`, `lib/fs_compat/fs_compat.mli`, `lib/web_dashboard.ml/.mli`, `lib/server/server_routes_http_pages.ml`, `test/test_http_pages_asset_read.ml` |
+| L2 | 설치 뒤 측정 결과 | `docs/evidence/research/2026-11-09-h2-sse-tls/` |
 
-L1 은 L2 가 부르기 전에는 쓰는 곳이 없다. 두 층을 한 스택으로 올리고 같이 병합한다.
+`Fs_compat` 의 reload 는 표가 부르기 전에는 쓰는 곳이 없다. 그래서 일곱 파일을 한 PR 로 낸다.
 
-## 8. 정할 것
+## 8. 정한 것 (2026-11-12, 사용자)
 
-| # | 정할 것 | 권하는 쪽 | 근거 | 대가 |
+| # | 물은 것 | 정한 것 | 근거 | 대가 |
 |---|---|---|---|---|
 | 1 | §4 의 한계를 받아들이는가 | 받아들인다 | 두 장비에서 20,000번 중 0건이다. 같은 필드를 5번 검사와 `File_version_cache` 가 이미 믿는다. 이 경로에는 내용 보증 계약이 없다 | 시각 눈금이 굵은 파일 시스템에서 개발자가 같은 크기로 제자리 수정하면 예전 asset 이 보일 수 있다 |
 | 2 | 범위를 manifest 없는 경로로 한정하는가 | 한정한다 | 잰 장면이 이 경로다. 나머지 두 경로는 계약이 있고 잰 값이 없다 | 설치 release 의 요청당 읽기·해시는 남는다 |

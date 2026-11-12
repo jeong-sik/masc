@@ -481,7 +481,7 @@ let label_of_event ~ko (event : Observer.event) =
           let word =
             match disposition with
             | Ok disposition ->
-                Masc.Tui_decode.keeper_call_disposition_to_string disposition
+                Masc.Tui_decode.keeper_call_disposition_word ~ko disposition
             | Error _ -> say "처리 결과 불명" "unknown disposition"
           in
           if skill then say "스킬 \xc2\xb7 " "skill \xc2\xb7 " ^ word else word
@@ -1555,7 +1555,7 @@ let evidence_fields ~ko (entry : entry) =
          | None -> field (say "처리 결과" "Disposition") None
          | Some (Ok disposition) ->
              some (say "처리 결과" "Disposition")
-               (Masc.Tui_decode.keeper_call_disposition_to_string disposition)
+               (Masc.Tui_decode.keeper_call_disposition_word ~ko disposition)
          | Some (Error error) -> some (say "처리 결과 오류" "Disposition error") error)
       ; field "Tool use ID" call.kt_tool_use_id
       ; some (say "입출력" "Input/output") (say "아래는 보낸 쪽이 가린 관측 · 전체 내용은 보장되지 않음" "producer-redacted observations below; full payload not guaranteed")

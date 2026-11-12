@@ -1555,6 +1555,14 @@ let keeper_call_disposition_to_string = function
   | Keeper_call_deferred -> "deferred"
   | Keeper_call_failed -> "failed"
 
+(* The words the Keeper list and the chat's skill rows use for a tool's
+   outcome. The wire word above is for the ledger; a screen does not draw
+   typed state in its wire spelling (RFC tui-one-screen-grammar §7.1). *)
+let keeper_call_disposition_word ~ko = function
+  | Keeper_call_completed -> if ko then "실행 완료" else "completed"
+  | Keeper_call_deferred -> if ko then "실행 보류" else "deferred"
+  | Keeper_call_failed -> if ko then "실행 실패" else "failed"
+
 let keeper_call_disposition_of_string = function
   | "completed" -> Ok Keeper_call_completed
   | "deferred" -> Ok Keeper_call_deferred

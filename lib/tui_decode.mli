@@ -339,6 +339,11 @@ val keeper_call_disposition_of_string :
 val keeper_call_disposition_to_string : keeper_call_disposition -> string
 (** The inverse of {!keeper_call_disposition_of_string}. *)
 
+val keeper_call_disposition_word : ko:bool -> keeper_call_disposition -> string
+(** The disposition in the screen's words, Korean when [ko]: the words the
+    Keeper list uses for a tool's outcome. Not the wire word; use
+    {!keeper_call_disposition_to_string} to write the ledger's word back. *)
+
 type keeper_call_original =
   | Original_not_read
   | Original_pending

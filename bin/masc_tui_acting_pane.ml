@@ -1033,7 +1033,7 @@ let disposition_span ~ko (tool : Acting.chunk_tool) =
         | Reading.Keeper_call_deferred -> Info
         | Reading.Keeper_call_failed -> Bad
       in
-      Some { text = Reading.keeper_call_disposition_to_string disposition; tone }
+      Some { text = Reading.keeper_call_disposition_word ~ko disposition; tone }
 
 (* One of an opened call's three rows. The facts row is the disposition,
    the receipt age and the schedule -- the words behind the marks on the

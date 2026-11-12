@@ -233,19 +233,25 @@ let original_capture ~store ~owner ~inventory ~(parent:part) execution_id =
   let* schema=match request.Exact.schema with Some schema -> Ok schema | None -> Error "Original Librarian execution schema missing" in
   let+ declaration_id=declaration_id (Capture.destination capture) in
   original,capture,request,schema,declaration_id
-let original_execution ~store ~owner ~inventory ~parent execution_id =
-  let* _original,capture,request,schema,declaration_id=original_capture ~store ~owner ~inventory ~parent execution_id in
-  let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema request in
-  let* ordinal,execution=match latest with
+(* An original execution as one read found it: its record, the capture that
+   record restores to and its latest attempt. What a frontier asks of the
+   execution is answered from this one reading. *)
+type observed_execution = {record:Owner.retained;capture:Capture.t;request:Exact.request;
+  schema:Yojson.Safe.t;latest:Exact.latest_original_execution}
+let observe_execution ~store ~owner ~inventory ~parent execution_id =
+  let* record,capture,request,schema,declaration_id=original_capture ~store ~owner ~inventory ~parent execution_id in
+  let+ latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema request in
+  {record;capture;request;schema;latest}
+let confirmed_execution ~store (observed:observed_execution) =
+  let* ordinal,execution=match observed.latest with
     | Exact.No_completed_latest -> Error "Original latest execution proof is incomplete"
     | Exact.Completed_latest {attempt_ordinal;execution} -> Ok (attempt_ordinal,execution) in
   let* ()=match execution.Exact.outcome with
-    | Exact.Call_ended final -> Capture.confirm_final ~store capture (Exact.Call_final final)
+    | Exact.Call_ended final -> Capture.confirm_final ~store observed.capture (Exact.Call_final final)
     | Call_refused _ -> Error "Original refused execution cannot prove an admission terminal" in
-  Ok (capture,request,schema,ordinal,execution)
-let check_size ~store ~owner ~inventory ~(parent:part) source =
-  let execution_id=match source with Exact_source id -> id in
-  let* capture,request,schema,ordinal,(execution:Exact.execution_result)=original_execution ~store ~owner ~inventory ~parent execution_id in
+  Ok (ordinal,execution)
+let size_evidence_of ~store ~(parent:part) source ({request;schema;_} as observed:observed_execution) =
+  let* ordinal,(execution:Exact.execution_result)=confirmed_execution ~store observed in
   let* outcome=match source,execution.outcome with
     | Exact_source _,Exact.Call_ended (Exact.Input_refused (Input_capacity | Context_overflow | Request_body_refused) as final) ->
       let failure=Keeper_exact_walk_receipt.failure_evidence execution.receipt in
@@ -262,6 +268,10 @@ let check_size ~store ~owner ~inventory ~(parent:part) source =
     "schema",schema;"attempt_ordinal",`Int ordinal;
     "receipt",Keeper_exact_walk_receipt.to_json execution.receipt;"outcome",outcome] in
   Ok {parent_id=parent.id;source;proof}
+let check_size ~store ~owner ~inventory ~(parent:part) source =
+  let execution_id=match source with Exact_source id -> id in
+  let* observed=observe_execution ~store ~owner ~inventory ~parent execution_id in
+  size_evidence_of ~store ~parent source observed
 let execution_size_evidence ~store ~owner ~inventory ~parent ~execution_id =
   check_size ~store ~owner ~inventory ~parent (Exact_source execution_id)
 let partition_json ~owner ~id ~parent_id ~(left:part) ~(right:part) ~(evidence:size_evidence) : Yojson.Safe.t =
@@ -369,9 +379,7 @@ let original_judgment (record:Owner.retained) = match Progress.phase record.prog
   | Progress.Judged judgment -> Some judgment
   | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) -> Some commit.judgment
   | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ -> None
-let answered_original ~store ~owner ~inventory ~parent execution_id =
-  let* record,capture,request,schema,declaration_id=original_capture ~store ~owner ~inventory ~parent execution_id in
-  let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema request in
+let answered_original ~store ({record;capture;latest;_}:observed_execution) =
   let* final,authority=match latest with
     | Exact.No_completed_latest -> Error "Original terminal judgment has no completed latest host proof"
     | Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended call_final;receipt}} ->
@@ -397,16 +405,15 @@ let terminal_witness ~store ~owner ~inventory ~committed reference =
   let singleton=List.length (Queue.candidates parent.original_batch)=1 in
   let* capture,kind,authority=match reference with
     | Original_execution {execution_id;_} ->
-      let* _record,capture,request,schema,declaration_id=original_capture ~store ~owner ~inventory ~parent execution_id in
-      let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema request in
-      (match latest with
+      let* observed=observe_execution ~store ~owner ~inventory ~parent execution_id in
+      (match observed.latest with
        | Exact.Completed_latest {execution={outcome=Exact.Call_ended (Input_refused _);_};_} ->
          let* ()=require singleton "A divisible size frontier must retain its original two-child partition" in
-         let+ evidence=execution_size_evidence ~store ~owner ~inventory ~parent ~execution_id in
-         capture,"singleton_capacity",evidence.proof
+         let+ evidence=size_evidence_of ~store ~parent (Exact_source execution_id) observed in
+         observed.capture,"singleton_capacity",evidence.proof
        | Completed_latest {execution={outcome=Call_ended (Answered _ | Invalid_output _ | Output_limit_reached _)
            | Call_refused _;_};_} | No_completed_latest ->
-         let* record,capture,proposal,authority=answered_original ~store ~owner ~inventory ~parent execution_id in
+         let* record,capture,proposal,authority=answered_original ~store observed in
          match proposal with
          | Keeper_librarian_runtime.Deferred -> Ok (capture,"semantic_deferred",authority)
          | Accepted accepted ->

@@ -23,9 +23,13 @@
       compressed as the single-user server does the assets of the dashboard
       ({!Server_routes_http_pages.serve_dashboard_asset}). The answer lets a
       browser keep the file for a year: the build names a file after a hash
-      of its bytes, and this module does not check that a name does. A path
-      that is no plain relative path is a 404, and so is a file the build
-      does not hold.
+      of its bytes, and this module does not check that a name does. The
+      answer carries {!policy}, so a file a browser opens as a document runs
+      under the limits of the page. A path that is no plain relative path is
+      a 404, and so is a name the bundle holds no file of. A bundle read from
+      a directory ([MASC_ASSETS_DIR]) answers a 503 instead when its reader
+      refuses a name for another reason, such as a part of the path that is
+      a file (issue #51705).
     - [GET /accounts/console/base.css]: {!Account_page.base_sheet}, which the
       page links so that it looks like the pages the server writes itself. A
       browser asks for it again on every use, with the entity tag it holds. *)

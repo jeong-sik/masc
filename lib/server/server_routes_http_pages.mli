@@ -122,9 +122,11 @@ val serve_dashboard_index :
 (** Serves the legacy dashboard's [index.html]. *)
 
 val serve_dashboard_asset :
+  headers:(string * string) list ->
   unavailable:(Http_reqd.t -> unit) -> string -> Httpun.Request.t -> Http_reqd.t -> unit
-(** Serves one file of the dashboard bundle by its name in the bundle. A file
-    the bundle does not hold is a 404. [unavailable] answers when the bundle
+(** Serves one file of the dashboard bundle by its name in the bundle, with
+    [headers] after those of caching and encoding. A file the bundle does not
+    hold is a 404. [unavailable] answers when the bundle
     cannot give the file for another reason
     ({!Web_dashboard.asset_error_http_status}). Negotiated compression may
     suspend on the CPU pool; the response is written on the calling fiber. *)

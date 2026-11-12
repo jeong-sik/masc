@@ -691,12 +691,13 @@ let json_of label body =
 
 (* ---- the console ---- *)
 
-(* Runs [f] while the dashboard bundle of the process is a directory of the
-   case that holds [files], each under its name in the bundle. The checkout
-   the suite runs in then decides no answer. An empty value of the variable
-   reads as no value ([Host_config]), so the bundle the suite was started
-   with comes back afterwards. *)
-let with_bundle files f =
+(* Runs [f root] while the assets of the process are read from the
+   directory [root] of the case. [bundle] is the files of its dashboard
+   bundle, each under its name in the bundle, or [None] for a directory that
+   holds no bundle. The checkout the suite runs in then decides no answer. An
+   empty value of the variable reads as no value ([Host_config]), so the
+   bundle the suite was started with comes back afterwards. *)
+let with_assets_directory bundle f =
   let variable = "MASC_ASSETS_DIR" in
   let inherited = Option.value (Sys.getenv_opt variable) ~default:"" in
   let root = Filename.temp_dir "server-accounts-bundle-" "" in
@@ -705,12 +706,17 @@ let with_bundle files f =
       Unix.putenv variable inherited;
       remove_tree root)
     (fun () ->
-      let bundle = Filename.concat root "dashboard" in
-      Unix.mkdir bundle 0o700;
-      List.iter (fun (name, bytes) -> write_file (Filename.concat bundle name) bytes) files;
+      (match bundle with
+       | None -> ()
+       | Some files ->
+         let dashboard = Filename.concat root "dashboard" in
+         Unix.mkdir dashboard 0o700;
+         List.iter (fun (name, bytes) -> write_file (Filename.concat dashboard name) bytes) files);
       Unix.putenv variable root;
-      f ())
+      f root)
 ;;
+
+let with_bundle files f = with_assets_directory (Some files) (fun (_ : string) -> f ())
 
 let holds ~part text =
   let part_length = String.length part in
@@ -760,6 +766,21 @@ let directives policy =
 ;;
 
 let console_page = "<!doctype html><title>the console of the case</title>"
+
+(* The policy of the console, as [directives] reads it. The whole policy is
+   named: a directive that opens the page to another origin, or to inline
+   code, does not come in unnoticed. *)
+let console_directives =
+  [ "base-uri 'none'"
+  ; "connect-src 'self'"
+  ; "default-src 'none'"
+  ; "form-action 'none'"
+  ; "frame-ancestors 'none'"
+  ; "script-src 'self'"
+  ; "style-src 'self'"
+  ; "style-src-attr 'none'"
+  ]
+;;
 let console_script = "export const built = 'the console of the case';\n"
 let operator_page = "<!doctype html><title>the operator dashboard of the case</title>"
 let operator_script = "export const built = 'the operator dashboard of the case';\n"
@@ -883,10 +904,23 @@ let test_serves_its_table_alone () =
          build: the page says so with a 503 and runs nothing, and the rest of
          the table answers as it does. *)
       with_bundle [] (fun () ->
-        let status, headers, (_ : string) =
+        let status, headers, body =
           exchange ~net ~port ~meth:"GET" Server_account_console.page_path
         in
         Alcotest.(check int) "the console of a bundle that does not hold it" 503 status;
+        (* The reason goes to the log of the server, not to whoever reaches
+           the listener. *)
+        (match Server_account_console.unreadable () with
+         | None -> Alcotest.fail "a bundle without the console reads as one that has it"
+         | Some reason ->
+           Alcotest.(check bool)
+             "the page that stands in does not say why"
+             false
+             (holds ~part:reason body));
+        Alcotest.(check (option string))
+          "a link of the page that stands in carries no address of this server"
+          (Some "same-origin")
+          (header "referrer-policy" headers);
         Alcotest.(check (option (list string)))
           "the page that stands in applies its own sheet and runs no script"
           (Some
@@ -909,6 +943,18 @@ let test_serves_its_table_alone () =
           "the home page of a server whose bundle holds no console"
           200
           (fst (request ~net ~port ~meth:"GET" "/")));
+      (* A directory that holds no bundle: the page and the files of the
+         build are a 503, and no answer names where the server looked. *)
+      with_assets_directory None (fun root ->
+        List.iter
+          (fun path ->
+            let status, body = request ~net ~port ~meth:"GET" path in
+            Alcotest.(check int) ("GET " ^ path ^ " without a bundle") 503 status;
+            Alcotest.(check bool)
+              ("the answer of " ^ path ^ " names no directory of the server")
+              false
+              (holds ~part:root body))
+          [ Server_account_console.page_path; Server_account_console.page_path ^ "/assets/app.js" ]);
       (* A bundle that holds the build of the console beside the operator
          dashboard. *)
       with_bundle
@@ -923,20 +969,9 @@ let test_serves_its_table_alone () =
           in
           Alcotest.(check int) "the console" 200 status;
           Alcotest.(check string) "it is the page of the build, byte for byte" console_page body;
-          (* The whole policy is named: a directive that opens the page to
-             another origin, or to inline code, does not come in unnoticed. *)
           Alcotest.(check (option (list string)))
             "the policy of the console"
-            (Some
-               [ "base-uri 'none'"
-               ; "connect-src 'self'"
-               ; "default-src 'none'"
-               ; "form-action 'none'"
-               ; "frame-ancestors 'none'"
-               ; "script-src 'self'"
-               ; "style-src 'self'"
-               ; "style-src-attr 'none'"
-               ])
+            (Some console_directives)
             (Option.map directives (header "content-security-policy" headers));
           Alcotest.(check (option string))
             "a browser does not keep the page"
@@ -956,7 +991,17 @@ let test_serves_its_table_alone () =
            Alcotest.(check (option string))
              "it is answered as a script"
              (Some "application/javascript; charset=utf-8")
-             (header "content-type" headers));
+             (header "content-type" headers);
+           (* A file of the build that a browser opens as a document runs
+              under the limits of the page. *)
+           Alcotest.(check (option (list string)))
+             "a file of the build carries the policy of the console"
+             (Some console_directives)
+             (Option.map directives (header "content-security-policy" headers));
+           Alcotest.(check (option string))
+             "a browser keeps a file of the build, which is named after its bytes"
+             (Some "public, max-age=31536000, immutable")
+             (header "cache-control" headers));
           (* Nothing else of the bundle has an address on this server: not
              below the assets of the console, by any spelling of the way up,
              and not at the addresses of the single-user server. *)

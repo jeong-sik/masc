@@ -485,7 +485,7 @@ let read_dashboard_asset name =
       (Web_dashboard.reload_dashboard_asset ~held:asset.version name)
 ;;
 
-let serve_dashboard_asset ~unavailable name request reqd =
+let serve_dashboard_asset ~headers ~unavailable name request reqd =
   match read_dashboard_asset name with
   | Ok read ->
       let content_type = asset_content_type name in
@@ -502,7 +502,7 @@ let serve_dashboard_asset ~unavailable name request reqd =
           ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
           read
       in
-      let headers = ("cache-control", cache_control) :: encoding_headers in
+      let headers = (("cache-control", cache_control) :: encoding_headers) @ headers in
       (match final_body with
        | Shared shared -> Http.Response.shared ~headers ~content_type shared reqd
        | Owned owned -> Http.Response.bytes ~headers ~content_type owned reqd)
@@ -513,6 +513,7 @@ let serve_dashboard_asset ~unavailable name request reqd =
 
 let serve_dashboard_static name request reqd =
   serve_dashboard_asset
+    ~headers:[]
     ~unavailable:(fun reqd ->
       Http.Response.text
         ~status:`Service_unavailable

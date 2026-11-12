@@ -41,8 +41,10 @@ let unreadable () =
 ;;
 
 (* The page that stands in for the console when the bundle cannot give it.
-   It names no file and no reason: anyone who reaches the listener reads it,
-   and the reason is in the log of the server. *)
+   It names no file and no reason: anyone who reaches the listener reads it.
+   The server writes the reason to its log once, when it starts
+   ([Server_accounts.run]); a request to this open route writes none, so a
+   bundle that breaks after the start leaves no line. *)
 let unavailable ~nonce reqd =
   Http.Response.html
     ~status:`Service_unavailable
@@ -83,9 +85,8 @@ let page ~draw (_ : Httpun.Request.t) reqd =
   | Error (_ : Web_dashboard.asset_load_error) -> unavailable ~nonce:(draw ()) reqd
 ;;
 
-(* A file of the build that the bundle lists and cannot give. The answer of
-   the operator dashboard points at a health field this server does not
-   have. *)
+(* A file the bundle cannot give now. The answer of the operator dashboard
+   points at a health field this server does not have. *)
 let asset_unavailable reqd =
   Http.Response.text ~status:`Service_unavailable "This file cannot be read now." reqd
 ;;
@@ -93,7 +94,9 @@ let asset_unavailable reqd =
 (* The path of a request is the target as it came, not decoded
    ([Http.Request.path]), and the check takes it as a list of segments: a
    segment that is empty, "." or ".." is refused, so the name stays below the
-   assets of the console. *)
+   assets of the console. A file of the build carries the policy of the page:
+   a browser that opens one as a document (an .html or .svg of a later build)
+   runs on this origin under the same limits as the page. *)
 let asset request reqd =
   let path = Http.Request.path request in
   let prefix = String.length assets_prefix in
@@ -101,6 +104,7 @@ let asset request reqd =
   if Web_dashboard.is_public_asset_relative_path relative
   then
     Server_routes_http_pages.serve_dashboard_asset
+      ~headers:[ "content-security-policy", policy ]
       ~unavailable:asset_unavailable
       relative
       request

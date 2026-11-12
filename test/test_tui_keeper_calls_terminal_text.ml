@@ -9,17 +9,11 @@ let contains = String_util.contains_substring
 
 let test_runtime_keeper_name_is_terminal_text () =
   let state = Types.create_state ~workspace:"" ~port:0 () in
-  state.Types.keepers <-
-    [ { Masc.Tui_decode.k_origin = Masc.Tui_decode.Remote_keeper
-      ; k_name = "alpha\n\027]0;owned\007"
-      ; k_paused = false
-      ; k_identity = Error "not read"
-      ; k_activity = None
-      }
-    ];
-  state.Types.keeper_cursor <- 0;
-  let frame, _ = Masc_tui_render_activity.render_keeper_calls state in
-  let rows = List.map Masc_tui_theme.strip_sgr frame.Masc_tui_frame_presenter.lines in
+  let rendered =
+    Masc_tui_render_prim.keeper_calls_heading ~cols:120 state
+      ~keeper_name:"alpha\n\027]0;owned\007" ~readings:[]
+  in
+  let rows = [ Masc_tui_theme.strip_sgr rendered ] in
   List.iter
     (fun row ->
       check bool "no roster control byte reaches a terminal row" false

@@ -50,15 +50,34 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
     match observation with
     | Verifier_review_execution.Awaiting -> Error (Execution_pending "original execution has no terminal observation")
     | Repair_required detail -> Error (Execution_repair_required detail)
-    | Cancelled_without_verdict result ->
-      (* The journals settle every effect, so the refusal is definite and the
-         owner's successor walk may run the next attempt. *)
-      let evidence = `Assoc ["schema",`String "verifier_review_refusal/v1";"certainty",`String "definite";
-        "observations",`List (List.map (fun runtime_id ->
-          `Assoc ["fact",`String "cancelled";"runtime_id",`String runtime_id]) result.AR.retryable_runtimes);
-        "result",O.result_to_json result] in
-      let* _ = save retained (Progress.Refused {stage=Progress.Execution;evidence}) in
-      Ok result
+    | No_verdict {first;later} ->
+      let endings = first :: later in
+      let lost_writer = List.exists (function
+        | _,Verifier_review_ending.Owner_lost -> true
+        | _,(Verifier_review_ending.Succeeded | Failed | Cancelled) -> false) endings in
+      let cancelled = List.fold_left (fun runtimes (runtime_id,ending) ->
+        match ending with
+        | Verifier_review_ending.Cancelled when not (List.mem runtime_id runtimes) ->
+          runtimes @ [runtime_id]
+        | Cancelled | Succeeded | Failed | Owner_lost -> runtimes) [] endings in
+      (match lost_writer,List.rev cancelled with
+       | true,_ -> Error (Execution_repair_required
+           "original execution lost its writer without a terminal settlement; operator reconciliation is required")
+       | false,[] -> Error (Execution_repair_required "original executions have no retained verdict")
+       | false,last :: _ ->
+         (* The journals settle every effect, so the refusal is definite and
+            the owner's successor walk may run the next attempt. *)
+         let result = {AR.verdict=None;evaluator_runtime=last;
+           generator_runtime=V.generator_runtime original;evaluator_execution=None;
+           gate=AR.Evaluator_unavailable;
+           fallback_reason=Some "original reviewer was cancelled before it reported a verdict";
+           retryable_runtimes=cancelled;model_absent_runtimes=[]} in
+         let evidence = `Assoc ["schema",`String "verifier_review_refusal/v1";"certainty",`String "definite";
+           "observations",`List (List.map (fun runtime_id ->
+             `Assoc ["fact",`String "cancelled";"runtime_id",`String runtime_id]) cancelled);
+           "result",O.result_to_json result] in
+         let* _ = save retained (Progress.Refused {stage=Progress.Execution;evidence}) in
+         Ok result)
     | Verdict result ->
       let* _ = retain_judgment retained result in
       Ok result in

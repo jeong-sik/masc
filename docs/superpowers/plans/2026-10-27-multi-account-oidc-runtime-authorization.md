@@ -626,7 +626,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 봉인된 값은 홈 문자열(`Runtime_account_access.home`)과 같은 캡처인지(`Runtime_account_access.same`)만 내준다. quota 창과 다시 읽기 비교가 이것을 쓴다. 환경은 인가된 계정에서만 나온다.
     - 테이블을 읽는 호출처는 봉인된 값을 그대로 `authorize`에 넘긴다. 읽자마자 봉인하던 일이 없어졌다. 계정을 잡자마자 인가받는 곳(setup의 로그인 확인, `masc runtime-codex-models`)만 직접 봉인한다.
   - D2-8 미리보기 "내 Keeper 한 번 돌리기". 사람이 브라우저로 확인한다. 2026-11-09 D2-6·D2-7보다 먼저 했다. Claude Code는 D2-5부터 인가된 계정으로만 뜨므로, Codex를 기다리지 않고 사람의 구독으로 Keeper 턴이 도는지 먼저 확인할 수 있다.
-    - 라우트는 `POST /api/v1/auth/keepers/turn`이다. 본문은 `{"keeper_id","message"}`이고 메시지는 4096바이트까지다. 게이트는 `Manage_own_keeper`에 membership을 더한다(`Auth_preview.keeper_owner_person`). 턴이 그 사람 namespace 아래 홈에서 CLI를 띄우기 때문이다.
+    - 라우트는 `POST /api/v1/auth/keepers/turn`이다. 본문은 `{"keeper_id","message"}`이고 메시지는 4096바이트까지다. 게이트는 `Manage_own_keeper`에 membership을 더한다(`Auth_preview.keeper_turn_caller`). 턴이 그 사람 namespace 아래 홈에서 CLI를 띄우기 때문이다. 게이트는 요청을 인증한 PAT도 넘긴다. 턴 판정(`Authz_keeper_turn.decide`)이 그 PAT의 범위를 `pat_scope`로 읽어서, 범위에 그 Runtime, `Direct` 채널, 턴이 청하는 effect(`invoke_model`, `use_tool`)가 모두 있어야 턴이 돈다(2026-11-12 사용자 결정). 세션으로 온 요청과 서버가 스스로 시작하는 턴은 PAT가 없다.
     - 라우트는 기록만 읽는다. Keeper 기록이 Runtime을, Runtime 기록이 계정을 정한다. 런타임은 그 계정의 login receipt가 이름 붙인 workspace provider에 그 계정 홈과 binding 하나를 얹은 것이다(`Server_setup_account_login.person_runtime`). binding은 이 계정에서 만드는 Runtime id가 Keeper 기록의 id와 같은 것이다(`Runtime_account_runtime.Runtime`). id를 자르지 않고 binding마다 만든 id와 통째로 비교한다.
     - 판정은 `authorize (Keeper_turn {channel = Direct; ...})` 하나다. 로그로 판정하고, 인가된 계정만 CLI를 띄운다. 남의 Keeper는 다른 Keeper 라우트처럼 404다.
     - 한 계정에서는 한 호출만 돈다(`Server_setup_account_login.one_call_of`). verify와 턴이 같은 잠금을 쓴다. 한 홈의 자격 증명을 두 CLI가 동시에 갱신하지 않게 하기 위해서다. 다른 계정의 호출은 기다리지 않는다.
@@ -1180,7 +1180,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 층.
   - S1b-1a 경로 종류와 뼈대. `Mcp_request_admission`을 단일 사용자의 처리기에서 뽑는다. `POST /mcp`가 위 method를 답한다. 도구는 내 정보(`masc_whoami`) 하나다.
   - S1b-1b Runtime과 Keeper 도구. `masc_my_runtimes`(구독과 Runtime 목록, `Manage_own_provider`), `masc_my_keepers`, `masc_my_keeper_create`, `masc_my_keeper_assign`(`Manage_own_keeper`)이다. Runtime 목록은 배정에 넣을 `runtime_id`를 MCP만으로 알 수 있게 하려고 넣는다. 사람의 화면이 `GET /api/v1/auth/provider-accounts`로 읽는 것과 같다. 도구는 인자를 경로 함수가 읽는 본문으로 다시 써서 넘긴다. 인자의 순서는 답을 바꾸지 않는다.
-  - S1b-1c Keeper의 한 턴. `masc_my_keeper_turn`이 `Server_preview_keeper_turn.run`을 부른다. 판정은 경로와 같은 `Auth_preview.keeper_owner_person`이다. 시간 제한, 메시지 길이, 계정마다 한 번에 한 호출은 그 함수의 것이다. 요청은 Runtime이 답할 때까지 열려 있다. 답을 나눠 보내는 일(progress, SSE)은 하지 않는다.
+  - S1b-1c Keeper의 한 턴. `masc_my_keeper_turn`이 `Server_preview_keeper_turn.run`을 부른다. 판정은 경로와 같은 `Auth_preview.keeper_turn_caller`이고, 요청을 인증한 PAT의 범위가 턴을 제한한다(D2-8). 시간 제한, 메시지 길이, 계정마다 한 번에 한 호출은 그 함수의 것이다. 요청은 Runtime이 답할 때까지 열려 있다. 답을 나눠 보내는 일(progress, SSE)은 하지 않는다.
   - S1b-1d 사용 안내와 실제 MCP client로 붙여 본 기록. 안내는 `docs/guides/account-server-mcp.md`다. 기록은 GitHub 로그인과 구독 로그인이 있는 설치에서만 남길 수 있다. PAT를 받으려면 로그인한 세션이 있어야 하고, 한 턴은 실제 구독으로 돈다. 그래서 안내를 먼저 넣고, 기록은 사람이 로그인한 설치에서 잰 뒤에 더한다. 잴 것은 `initialize`부터 `masc_my_keeper_turn`까지의 답과, client의 요청 timeout이 턴보다 짧을 때의 동작이다.
 - 시험(S1b-1a).
   - credential 없음, 단일 사용자의 bearer, 폐기된 PAT가 각각 who-am-I 경로와 같은 답으로 거절된다.

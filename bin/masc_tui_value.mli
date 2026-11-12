@@ -80,6 +80,23 @@ module Count : sig
       ([-1,250]). Three screens each carried a copy of this, and the titles
       that count a long list -- [(50 of 8347)] -- carried none (RFC
       tui-one-screen-grammar, section 6.3). *)
+
+  (** What a reading counts. A noun carries both languages, so a count
+      cannot be written in one: the readings built with an English-only
+      helper stayed English on a Korean screen ([0 runs], [0 entries]). *)
+  type noun =
+    | Keeper
+    | Run
+    | Call
+    | Post
+    | Entry  (** One record of a log. *)
+
+  val reading : ko:bool -> noun -> int -> string
+  (** The count and what it counts, in the screen's language: [3 keepers],
+      [1 entry], [8,347 posts]; [키퍼 3명], [기록 1건], [글 8,347개]. English
+      names one thing in the singular and any other number in the plural.
+      Korean names the thing first and counts it with the counter that
+      thing takes. The figure is {!grouped}. *)
 end
 
 (** Where the reader is in what the screen holds. *)

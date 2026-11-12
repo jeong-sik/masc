@@ -374,7 +374,7 @@ let render_memory (state : state) =
         memory_title [ String.trim reading_note ]
     | Some s ->
         memory_title
-          [ (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
+          [ count_reading state Masc_tui_value.Count.Keeper shown
           ; (match current_memory_starving_count s with
              | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
              | None -> if ko then "기억 필요 ? (일부 미조회)" else "? need memory (unread rows)")

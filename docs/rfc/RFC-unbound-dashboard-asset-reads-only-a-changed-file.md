@@ -115,7 +115,7 @@ val reload_single_link_regular_file_beneath
   -> (owned_regular_file_reread option, owned_regular_file_read_error) result
 ```
 
-- 처음 판은 `held:option` 을 받는 함수 하나였다. 그러면 `held:None` 인데 `Same_file` 을 받는 갈래가 타입에 생기고, 표가 없는 호출자(`index.html` 을 읽는 곳들)가 일어날 수 없는 갈래를 다뤄야 한다. 그래서 둘로 나눴다.
+- 함수 하나가 `held:option` 을 받게 하지 않는다. 그러면 `held:None` 인데 `Same_file` 을 받는 갈래가 타입에 생기고, 표가 없는 호출자(`index.html` 을 읽는 곳들)가 일어날 수 없는 갈래를 다뤄야 한다.
 - 두 함수는 검사 코드 하나를 같이 쓴다. 다른 것은 연 파일에서 무엇을 가져오는가뿐이다.
 - snapshot 은 3번의 `fstat` 이다. 5번이 통과한 뒤에만 돌려준다.
 

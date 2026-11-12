@@ -198,7 +198,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
       in
       Mark.activation_letter row.kr_activation_mode ^ gap ^ sandbox
 
-let keeper_activity_word ?(ko = false) (activity : Keeper_list_model.activity) =
+let keeper_activity_word ~ko (activity : Keeper_list_model.activity) =
   let text korean english = if ko then korean else english in
   match activity with
   | Held_call -> text "승인 대기" "held call"
@@ -423,7 +423,7 @@ let shift_motion ~prefix = function
 
 (* The NOW cell: the activity's mark and word, or the receipt's operator
    disposition where nothing on the row is newer than the receipt. *)
-let keeper_now_cell ?(ko = false) ?(padded = true) ~frame (row : Keeper_list_model.row) =
+let keeper_now_cell ~ko ?(padded = true) ~frame (row : Keeper_list_model.row) =
   let activity = Keeper_list_model.primary_activity_of_row row in
   let runtime = keeper_row_runtime row in
   let operator_disposition =
@@ -470,7 +470,7 @@ let keeper_now_cell ?(ko = false) ?(padded = true) ~frame (row : Keeper_list_mod
         | Idle | Paused | Offline | Unknown) -> Masc_tui_answering.Still in
   { text; motion }
 
-let keeper_row_content ~(columns : Render_schedule.keeper_columns)
+let keeper_row_content ~ko ~(columns : Render_schedule.keeper_columns)
     ~now ~frame ~yolo ~selected (row : Keeper_list_model.row) =
   let runtime = keeper_row_runtime row in
   let failure_context =
@@ -484,7 +484,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
   in
   let prefix = keeper_row_marker ~selected
     ^ keeper_row_name ~width:columns.kcol_name ~yolo row ^ " " in
-  let now_cell = keeper_now_cell ~frame row in
+  let now_cell = keeper_now_cell ~ko ~frame row in
   let text = String.concat ""
     [ prefix
     ; now_cell.text
@@ -978,7 +978,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          { gutter
          ; name
          ; pulse = pulse ()
-         ; now_cell = keeper_now_cell ~frame row
+         ; now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko) ~frame row
          ; strip = grid_wake_strip state grid ~now verdict ~keeper_name
          ; due = grid_due ~now verdict (Masc_tui_keeper_axis.next_run state ~keeper_name)
          ; right = grid_lag_cell grid ~peak_lag memory
@@ -1698,7 +1698,8 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
   let detail = keeper_detail_text ~now row in
   let now_entries =
     [ keeper_activity_style activity
-      ^ Masc_tui_keeper_mark.activity_glyph activity ^ " " ^ keeper_activity_word activity
+      ^ Masc_tui_keeper_mark.activity_glyph activity ^ " "
+      ^ keeper_activity_word ~ko:(state.ui_language = Lang_ko) activity
       ^ Ansi.reset
       ^ (if String.equal detail "" then "" else dim (" · " ^ detail))
     ; dim (Render_schedule.keeper_flags_header ^ " ")
@@ -1743,10 +1744,10 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
   @ labelled_lines "▹ next" next_entries
 
 (* The Keeper's name and what it is doing, at the left of the window's title. *)
-let keeper_story_lead (row : Keeper_list_model.row) =
+let keeper_story_lead ~ko (row : Keeper_list_model.row) =
   let activity = Keeper_list_model.primary_activity_of_row row in
   "  " ^ Ansi.bold ^ Terminal_text.single_line row.keeper.Tui_decode.k_name ^ Ansi.reset ^ "  "
-  ^ keeper_activity_style activity ^ keeper_activity_word activity ^ Ansi.reset
+  ^ keeper_activity_style activity ^ keeper_activity_word ~ko activity ^ Ansi.reset
 
 let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
     (row : Keeper_list_model.row option) =
@@ -1762,7 +1763,7 @@ let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
         , [ Ansi.dim ^ "  no Keeper under the cursor" ^ Ansi.reset ] )
     | Masc_tui_keeper_story.(Story | Schedule | Memory), Some row ->
         let keeper_name = row.keeper.Tui_decode.k_name in
-        ( keeper_story_lead row
+        ( keeper_story_lead ~ko:(state.ui_language = Lang_ko) row
         , (match page with
            | Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World ->
                keeper_story_lines state ~now ~inner
@@ -1837,7 +1838,7 @@ let matrix_legend ~inner matrix =
   "✗ failed in last walk · ▹ next head · ◌ resting head · ? unread head"
   :: Message_layout.wrap_words ~max_cells:inner (String.concat " · " (ids @ omitted))
 
-let proactive_outcome_word ?(ko = false) =
+let proactive_outcome_word ~ko =
   let text korean english = if ko then korean else english in
   function
   | Masc.Keeper_meta_contract.Proactive_never_started -> text "아직 시작하지 않음" "never started"
@@ -2919,7 +2920,7 @@ let render_keeper_axes (state : state) =
                   ~cols:inner ~now:now_unix
                   ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row))
             | None, Axis_row.List_columns ->
-                keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
+                keeper_row_content ~ko:(state.ui_language = Lang_ko) ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
                   ~selected row
             | None, Axis_row.Grid grid_columns ->
                 grid_keeper_row state grid grid_columns ~view:state.keeper_list_view ~peak_lag
@@ -3772,7 +3773,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          | None -> "not observed"
          | Some activity ->
            (match activity.k_last_proactive_outcome with
-            | Some outcome -> proactive_outcome_word outcome
+            | Some outcome -> proactive_outcome_word ~ko:(state.ui_language = Lang_ko) outcome
             | None -> Masc_tui_theme.Glyph.no_value));
       (* Recent activity, folded from the metrics rows already read for this
          Keeper. The window is bounded by row count, so it can fall short of the

@@ -59,7 +59,7 @@ let ask ?(asked_at = asked_at_1155) ?(timeout_sec = 300.0)
 ;;
 
 let strip_of ?(now = at_2026_08_26_0300z) ?(cols = 80) t =
-  Agenda.strip ~now ~localtime:seoul ~cols t
+  Agenda.strip ~ko:false ~now ~localtime:seoul ~cols t
 ;;
 
 let contains ~needle haystack =
@@ -115,7 +115,7 @@ let test_wire_status_parsing () =
 ;;
 
 let overlay_of ?(now = at_2026_08_26_0300z) ?(cols = 78) t =
-  Agenda.overlay ~now ~localtime:seoul ~cols t
+  Agenda.overlay ~ko:false ~now ~localtime:seoul ~cols t
 ;;
 
 let texts lines = List.map (fun (l : Agenda.line) -> l.Agenda.text) lines
@@ -316,7 +316,7 @@ let test_a_goal_to_confirm_is_waiting_on_the_operator () =
   let t = with_goals [ goal ~goal_id:"goal-9" "v0.38.0 release" ] in
   check int "a goal to confirm is counted" 1 (Agenda.waiting t);
   check bool "and the badge has something to say" true
-    (Agenda.waiting_label ~cells:80 t <> "");
+    (Agenda.waiting_label ~ko:false ~cells:80 t <> "");
   let lines = overlay_of t in
   match Agenda.target_indexes lines with
   | [ index ] -> (
@@ -590,7 +590,7 @@ let test_the_strip_count_adds_the_questions () =
    words. It reads what the badge is for: nothing waiting says nothing, each
    kind reads differently from the others, and the count comes from the rows. *)
 let test_the_badge_tells_the_kinds_apart () =
-  let label = Agenda.waiting_label ~cells:80 in
+  let label = Agenda.waiting_label ~ko:false ~cells:80 in
   check string "nothing waiting says nothing" "" (label (with_stuck []));
   let one_question = label (with_questions [ open_question "ask-1" ]) in
   let one_stuck = label (with_stuck [ stuck "work nobody holds" ]) in
@@ -614,7 +614,7 @@ let test_the_badge_tells_the_kinds_apart () =
 let test_an_open_question_keeps_the_badge_up_until_answered () =
   let state = agenda_state () in
   set_asks state [ ask_row "ask-1" ];
-  let label () = Agenda.waiting_label ~cells:80 (Masc_tui_types.agenda state) in
+  let label () = Agenda.waiting_label ~ko:false ~cells:80 (Masc_tui_types.agenda state) in
   check bool "an open question is on the badge" true (label () <> "");
   check int "and takes no row above the composer" 0
     (Masc_tui_types.agenda_chrome_rows state);

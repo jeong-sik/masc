@@ -412,7 +412,7 @@ let test_cli_probe_is_a_note () =
     (runtime_probe_annotation ~status:Runtime_provider_skipped_cli (Some detail)
      = Some (Runtime_probe_note detail));
   Alcotest.(check string) "human-readable excluded probe status" "CLI not probed"
-    (runtime_probe_status_label Runtime_provider_skipped_cli);
+    (runtime_probe_status_label ~ko:false Runtime_provider_skipped_cli);
   List.iter (fun status ->
     Alcotest.(check bool) "the same words cannot disguise a real failure" true
       (runtime_probe_annotation ~status (Some detail) = Some (Runtime_probe_failure detail)))
@@ -425,7 +425,7 @@ let test_cli_probe_is_a_note () =
     (runtime_probe_annotation ~status:Runtime_provider_skipped_native_auth (Some adc)
      = Some (Runtime_probe_note adc));
   Alcotest.(check string) "human-readable native-auth skip" "ADC not probed"
-    (runtime_probe_status_label Runtime_provider_skipped_native_auth)
+    (runtime_probe_status_label ~ko:false Runtime_provider_skipped_native_auth)
 
 let test_search_follows_the_runtime_mode () =
   let state = state () in

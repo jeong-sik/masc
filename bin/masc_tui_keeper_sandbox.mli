@@ -97,7 +97,7 @@ val decode_for_keeper :
 (** Require both the status and inventory Keeper names to match the requested
     Keeper before accepting the observation. *)
 
-val view_lines : ?ko:bool -> width:int -> t -> string list
+val view_lines : ko:bool -> width:int -> t -> string list
 (** Render an operator-facing observation, configured resources and filesystem
     locations, then CPU/memory/network facts when an instance was observed.
     Internal projection names and server explanations are deliberately absent.
@@ -123,7 +123,7 @@ val decode_logs :
     carries the server's sentence saying where the logs are. A state whose
     backend or instance list contradicts it is refused. *)
 
-val logs_view_lines : ?ko:bool -> width:int -> logs -> string list
+val logs_view_lines : ko:bool -> width:int -> logs -> string list
 (** Render the log pane for one Keeper, distinct from Keeper activity and
     tool-call history: Docker or Apple Container stdout/stderr when a local
     stream exists, and otherwise the sentence saying where the logs are.

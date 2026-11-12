@@ -23,6 +23,7 @@
   masc.auth
   masc.fs_compat
   masc.masc_eio_context
+  masc.masc_types
   masc.server
   masc.string_util
   masc.workspace_connection

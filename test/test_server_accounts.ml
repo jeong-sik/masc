@@ -366,6 +366,14 @@ let refusal_label : Server_accounts.refusal -> string = function
       (Server_account_login.Redirect_not_the_callback
          { provider = Login_routes.Google; callback_path = _; redirect_path = _ }) ->
     "google redirect not on the callback"
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Redirect_not_on_the_base_url
+         { provider = Login_routes.Github; base_url_origin; redirect_origin }) ->
+    Printf.sprintf "github redirect on %s, the base URL is on %s" redirect_origin base_url_origin
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Redirect_not_on_the_base_url
+         { provider = Login_routes.Google; base_url_origin = _; redirect_origin = _ }) ->
+    "google redirect not on the base URL"
   | Server_accounts.Route_of_another_kind _ -> "route of another kind"
   | Server_accounts.Https_listener_refused _ -> "HTTPS listener refused"
   | Server_accounts.Listener_not_bound { host; port = _; reason = _ } ->
@@ -510,6 +518,85 @@ let test_stops_when_a_login_client_is_refused () =
           ~client_secret_env:github_secret_env
       , "github redirect on /auth/github/callback/, the callback is /auth/github/callback" )
     ]
+;;
+
+(* The operator told the server its public address. A login client whose
+   redirect is on another origin would send every login to another server.
+   With no base URL the server knows no public address and compares nothing
+   ([test_serves_its_table_alone] boots that way). *)
+let redirect_check_label = function
+  | Ok Server_account_login.Compared_with_the_base_url -> "compared"
+  | Ok Server_account_login.No_base_url -> "no base URL"
+  | Error refusal -> refusal_label (Server_accounts.Login_client_refused refusal)
+;;
+
+let test_compares_a_redirect_with_the_base_url () =
+  let clients =
+    match
+      Server_account_login.clients_of_config
+        ~getenv:(fun (_ : string) -> Some "secret-of-the-case")
+        { Read.google = None
+        ; github =
+            Some
+              { Masc_domain.client_id = "client-of-the-case"
+              ; redirect_uri = https_redirect
+              ; client_secret_env = github_secret_env
+              }
+        }
+    with
+    | Ok clients -> clients
+    | Error refusal -> Alcotest.fail (Server_account_login.refusal_to_string refusal)
+  in
+  List.iter
+    (fun (explicit_base_url, expected) ->
+      let base_url =
+        Option.map
+          (fun (_ : string) ->
+            match
+              Server_request_authority.make_trust_policy
+                ~bind_host:"127.0.0.1"
+                ~bind_port:8935
+                ~https_port:None
+                ~explicit_base_url
+            with
+            | Ok policy -> Server_request_authority.projection_context policy
+            | Error error ->
+              Alcotest.fail (Server_request_authority.trust_policy_error_to_string error))
+          explicit_base_url
+      in
+      Alcotest.(check string)
+        ("under the base URL " ^ Option.value explicit_base_url ~default:"(none)")
+        expected
+        (redirect_check_label (Server_account_login.redirects_on_the_server ~base_url clients)))
+    [ None, "no base URL"
+    ; Some "https://masc.example", "compared"
+    ; Some "https://masc.example:443", "compared"
+    ; Some "https://MASC.example", "compared"
+    ; ( Some "https://other.example"
+      , "github redirect on https://masc.example, the base URL is on https://other.example" )
+    ; ( Some "https://masc.example:8443"
+      , "github redirect on https://masc.example, the base URL is on https://masc.example:8443" )
+    ; ( Some "http://masc.example"
+      , "github redirect on https://masc.example, the base URL is on http://masc.example" )
+    ]
+;;
+
+(* The boot makes that comparison before it announces its port. *)
+let test_stops_when_a_redirect_is_not_on_the_base_url () =
+  Unix.putenv github_secret_env "secret-of-the-case";
+  with_installation
+    ~auth_config:
+      (with_github_client ~redirect_uri:https_redirect ~client_secret_env:github_secret_env)
+    (fun env { base; config = _; store = _; multi_account } ->
+      Unix.putenv "MASC_HTTP_BASE_URL" "https://other.example";
+      Fun.protect
+        ~finally:(fun () -> Unix.putenv "MASC_HTTP_BASE_URL" "")
+        (fun () ->
+          Alcotest.(check string)
+            "the boot under a base URL the redirect is not on"
+            "github redirect on https://masc.example, the base URL is on https://other.example"
+            (boot_outcome env ~port:(free_port ()) multi_account);
+          Alcotest.(check (option int)) "no port is recorded for the CLI" None (recorded_port ~base)))
 ;;
 
 let test_stops_on_an_http_mode_outside_its_vocabulary () =
@@ -833,6 +920,14 @@ let () =
             `Quick
             test_stops_when_a_login_client_is_refused
         ; Alcotest.test_case "the boot stops when the port is taken" `Quick test_stops_when_the_port_is_taken
+        ; Alcotest.test_case
+            "a redirect is compared with the base URL"
+            `Quick
+            test_compares_a_redirect_with_the_base_url
+        ; Alcotest.test_case
+            "the boot stops when a redirect is not on the base URL"
+            `Quick
+            test_stops_when_a_redirect_is_not_on_the_base_url
         ; Alcotest.test_case
             "the boot stops when the port cannot be announced"
             `Quick

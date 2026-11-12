@@ -20,6 +20,28 @@ let health_from_attention_items (items : attention_item list) =
   else "ok"
 
 let tool_host_attention_window_sec = 900.0
+let tool_host_attention_limit = 12
+
+let is_tool_host_entry (entry : Log.Ring.entry) =
+  String.equal (String.lowercase_ascii entry.module_name)
+    (String.lowercase_ascii Failure_envelope.tool_host_log_module_name)
+
+let recent_tool_host_entries () =
+  Log.Ring.recent ~limit:tool_host_attention_limit
+    ~module_filter:Failure_envelope.tool_host_log_module_name ()
+
+let tool_host_ring_change_affects_attention (change : Log.Ring.entry_change) =
+  if is_tool_host_entry change.entry then true else
+    match change.overwritten with
+    | Some previous when is_tool_host_entry previous ->
+        (* A profile log produced by this reader can overwrite a very old
+           ToolHost row. If twelve newer rows still own the module window,
+           that overwrite cannot change the selected projection or feed back
+           into another read. This is an in-memory scan, never writer I/O. *)
+        let retained = recent_tool_host_entries () in
+        List.length retained < tool_host_attention_limit
+        || List.exists (fun (entry : Log.Ring.entry) -> entry.seq < previous.seq) retained
+    | Some _ | None -> false
 
 let earlier_deadline left right = match left, right with
   | None, deadline | deadline, None -> deadline
@@ -31,8 +53,7 @@ let tool_host_attention_observation ~now entries =
     | (entry : Log.Ring.entry) :: rest ->
         match Masc_domain.parse_iso8601_opt entry.ts with
         | Some ts when now -. ts <= tool_host_attention_window_sec
-            && String.equal (String.lowercase_ascii entry.module_name)
-                 (String.lowercase_ascii Failure_envelope.tool_host_log_module_name) ->
+            && is_tool_host_entry entry ->
           (match Failure_envelope.find_in_json entry.details with
           | None -> dedup seen acc deadline rest
           | Some envelope ->
@@ -73,7 +94,7 @@ let tool_host_attention_observation ~now entries =
   dedup [] [] None entries
 
 let recent_tool_host_failure_observation ~now () =
-  Log.Ring.recent ~limit:12 ~module_filter:Failure_envelope.tool_host_log_module_name ()
+  recent_tool_host_entries ()
   |> tool_host_attention_observation ~now
 
 let build_workspace_attention_observation ~now config =

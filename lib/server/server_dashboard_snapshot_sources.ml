@@ -29,7 +29,7 @@ let components_of_input input =
     | Dataset _ | Chat_operation _ | Store _ | Board
     | Agent_core _ | Telemetry_sample | Telemetry_gap _ | Keeper_tool_call _
     | Keeper_approval_audit _ | Workspace_agent_signal _ | Workspace_messages _
-    | Transport_state -> []
+    | Transport_state | Operator_judgment _ | Tool_host_attention -> []
   in
   Server_dashboard_observation_broadcast.observations input
   |> List.concat_map (fun payload -> components_of_topic payload.Sse_event.Types.topic)

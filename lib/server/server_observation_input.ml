@@ -38,6 +38,8 @@ type t =
       request_id : string;
       mention_delivery : Masc_domain.message_mention_delivery;
     }
+  | Operator_judgment of Operator_judgment.surface
+  | Tool_host_attention
 
 let ( let* ) = Option.bind
 let field fields name = List.assoc_opt name fields
@@ -278,8 +280,14 @@ let subscribe ~sw ~base_path ?observer_instance_id notify =
   let unsubscribe_agents = Workspace_agent_record.subscribe_signal_changed (fun change ->
     if String.equal canonical_masc_root change.canonical_masc_root then
       notify (Workspace_agent_signal {agent = change.agent_name})) in
+  let unsubscribe_judgments = Operator_judgment.subscribe_written (fun change ->
+    if String.equal canonical_masc_root change.canonical_masc_root then
+      notify (Operator_judgment change.surface)) in
+  let unsubscribe_tool_host = Log.Ring.subscribe_published (fun change ->
+    if Operator_digest.tool_host_ring_change_affects_attention change
+    then notify Tool_host_attention) in
   Eio.Switch.on_release sw (fun () ->
     unsubscribe (); unsubscribe_transport (); unsubscribe_https ();
     unsubscribe_gaps (); unsubscribe_tools (); unsubscribe_audits ();
-    unsubscribe_agents ())
+    unsubscribe_agents (); unsubscribe_judgments (); unsubscribe_tool_host ())
 ;;

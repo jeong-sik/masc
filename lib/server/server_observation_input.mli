@@ -1,4 +1,4 @@
-(** Original committed inputs shared by server freshness workers and mounted
+(** Original source inputs shared by server freshness workers and mounted
     Dashboard readers. Snapshot output is never another input. *)
 
 type keeper_change =
@@ -82,6 +82,12 @@ type t =
       mention_delivery : Masc_domain.message_mention_delivery;
     }
       (** The existing committed message/delivery notification, without text. *)
+  | Operator_judgment of Operator_judgment.surface
+      (** An exact-workspace judgment append attempt; no decision/action text. *)
+  | Tool_host_attention
+      (** Process-ring selection input changed: a ToolHost row was published
+          or a selected row overwritten, including a non-failure row displacing a selected
+          failure from the digest's bounded module window. *)
 
 val of_event : Sse.external_event -> t option
 (** Validate exact wire names and input identities. Unknown or malformed
@@ -102,7 +108,9 @@ val subscribe :
     Scope and visibility selection belong to {!Sse.subscribe_publication_inputs}.
     Non-external observer publications (Schedule, Goal, pending confirms and
     exports included) use that same exact publication boundary. Coverage gaps
-    additionally use their exact after-append hook, comparing roots resolved
-    before the append and before subscription. Callbacks are
+    additionally use their exact after-append hook. Judgment append attempts
+    use their after-attempt hook, comparing roots resolved before writing and
+    before subscription. ToolHost selection reads the process ring, so its
+    actual slot publication/overwrite is a process input. Callbacks are
     synchronous and must not block or yield. Switch release unsubscribes only
     this listener. *)

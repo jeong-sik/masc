@@ -53,6 +53,11 @@ val summary_of_recommendations : actor:string -> recommended_action list -> Yojs
 
 val build_workspace_attention_items : Workspace.config -> attention_item list
 
+val tool_host_ring_change_affects_attention : Log.Ring.entry_change -> bool
+(** Non-I/O classifier for this projection's actual bounded module window.
+    A new ToolHost row changes its selection even without a failure envelope;
+    overwriting an older unselected ToolHost row does not. *)
+
 val normalize_digest_target_type :
   string option -> (string, string) result
 

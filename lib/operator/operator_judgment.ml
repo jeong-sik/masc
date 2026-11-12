@@ -40,6 +40,27 @@ type record = {
   disagreement_with_truth : bool;
 }
 
+type written = {canonical_masc_root : string; surface : surface}
+type write_listener = {notify : written -> unit}
+let write_listeners : write_listener list Atomic.t = Atomic.make []
+let write_notification_failures = Atomic.make 0
+
+let subscribe_written notify =
+  let listener = {notify} in
+  Lockfree_atomic.update write_listeners (fun listeners -> listener :: listeners);
+  fun () -> Lockfree_atomic.update write_listeners
+    (List.filter (fun current -> current != listener))
+
+let failed_write_notifications () = Atomic.get write_notification_failures
+
+let notify_written change =
+  List.iter (fun listener ->
+    try listener.notify change with
+    (* cancel-guard-ok: non-I/O after-attempt metadata cannot replace the
+       writer's result or original cancellation. *)
+    | _ -> ignore (Atomic.fetch_and_add write_notification_failures 1))
+    (Atomic.get write_listeners)
+
 let target_type_to_string = function
   | Workspace -> Operator_action_constants.workspace_target_type
 
@@ -246,11 +267,15 @@ let load_all config =
   |> List.rev
 
 let append config values =
+  let canonical_masc_root = Fs_compat.realpath_lenient (Workspace.masc_dir config) in
   Fs_compat.mkdir_p (operator_dir config);
   let path = judgments_path config in
   List.iter
     (fun value ->
-      Fs_compat.append_jsonl path (to_yojson value))
+      let json = to_yojson value in
+      let change = {canonical_masc_root; surface = value.surface} in
+      Fun.protect ~finally:(fun () -> notify_written change)
+        (fun () -> Fs_compat.append_jsonl path json))
     values
 
 module Key_map = Map.Make (String)
@@ -258,7 +283,7 @@ module Key_map = Map.Make (String)
 let latest_by_key config =
   load_all config
   |> List.fold_left
-       (fun table value ->
+       (fun table (value : record) ->
           let key =
             key_of ~surface:value.surface ~target_type:value.target_type
               ~target_id:value.target_id

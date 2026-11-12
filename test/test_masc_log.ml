@@ -250,10 +250,54 @@ let test_sink_line_stays_valid_utf8_json () =
          entry.message
          Yojson.Safe.Util.(json |> member "message" |> to_string))
 
+let test_publication_hook_observes_actual_ring_overwrite () =
+  Console_sink.For_testing.set_writer (Some (fun _ -> ()));
+  let module_name = Masc.Failure_envelope.tool_host_log_module_name in
+  let original = ref None and overwritten = ref [] and selected_overwrites = ref 0 in
+  let unsubscribe = Log.Ring.subscribe_published (fun change ->
+    if String.equal change.entry.module_name module_name
+       && String.equal change.entry.message "original retained slot" then original := Some change.entry;
+    match !original, change.overwritten with
+    | Some original, Some previous when previous.seq = original.seq ->
+        overwritten := (previous, change.entry,
+          Operator_digest.tool_host_ring_change_affects_attention change) :: !overwritten
+    | Some original, Some previous when previous.seq > original.seq
+        && String.equal previous.module_name module_name
+        && Operator_digest.tool_host_ring_change_affects_attention change ->
+          incr selected_overwrites
+    | (Some _ | None), (Some _ | None) -> ()) in
+  Fun.protect ~finally:(fun () ->
+    unsubscribe (); Console_sink.For_testing.set_writer None) (fun () ->
+    (* Only the convenience console mirror is suppressed. The actual log
+       producer and ring capacity/overwrite path remain in use. *)
+    Log.legacy_stderr ~level:Log.Info ~module_name "original retained slot";
+    let original = match !original with
+      | Some original -> original | None -> Alcotest.fail "actual ring publication was not observed" in
+    for _ = 1 to 12 do
+      Log.legacy_stderr ~level:Log.Info ~module_name "newer module-window entry"
+    done;
+    for _ = 1 to Log.Ring.capacity - 12 do
+      Log.legacy_stderr ~level:Log.Info ~module_name:"RingCapacityFill" "later ring entry"
+    done;
+    match !overwritten with
+    | [previous, replacing, affects] ->
+        Alcotest.(check int) "the source hook retains the exact overwritten incarnation" original.seq previous.seq;
+        Alcotest.(check int) "the actual capacity wrap replaces this slot" (original.seq + Log.Ring.capacity) replacing.seq;
+        Alcotest.(check bool) "overwriting an older unselected ToolHost row cannot feed back" false affects;
+        for _ = 1 to 12 do
+          Log.legacy_stderr ~level:Log.Info ~module_name:"RingCapacityFill" "overwrite selected module row"
+        done;
+        Alcotest.(check int) "the actual selected window overwrites retain source debt" 12 !selected_overwrites;
+        Alcotest.(check int) "all overwritten module rows have actually left the retained ring" 0
+          (List.length (Log.Ring.recent ~module_filter:module_name ()))
+    | rows -> Alcotest.failf "expected one actual overwrite, got %d" (List.length rows))
+
 let () =
   Alcotest.run "Masc_log" [
     ( "ring",
       [
+        Alcotest.test_case "publication hook observes the actual capacity overwrite" `Quick
+          test_publication_hook_observes_actual_ring_overwrite;
         Alcotest.test_case "legacy traceln records metadata" `Quick
           test_legacy_traceln_records_metadata;
         Alcotest.test_case "recent since_seq returns only new entries" `Quick

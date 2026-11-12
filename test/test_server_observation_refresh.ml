@@ -64,6 +64,8 @@ let test_exact_dependency_matrix () =
     ; Input.Keeper {keeper = "piano"; change = Input.Turn_preview}
     ; Input.Agent_core {keeper = Some "piano"; change = Input.Tool_called}
     ; Input.Telemetry_gap {source = Some Telemetry_unified_source.Goal_event; keeper = None}
+    ; Input.Operator_judgment Operator_judgment.Command_namespace
+    ; Input.Tool_host_attention
     ; Input.Board ]
 ;;
 
@@ -81,7 +83,9 @@ let test_execution_dependency_matrix () =
     ; Input.Dataset Workspace_dataset_event.Play_seats
     ; Input.Dataset (Workspace_dataset_event.Dashboard_observation {topic = `Telemetry; scope = `Workspace})
     ; Input.Agent_core {keeper = Some "piano"; change = Input.Tool_called}
-    ; Input.Telemetry_sample ]
+    ; Input.Telemetry_sample
+    ; Input.Operator_judgment Operator_judgment.Command_namespace
+    ; Input.Tool_host_attention ]
 ;;
 
 let test_execution_owner_rejects_a_retired_request () =
@@ -488,6 +492,68 @@ let test_actual_commit_inputs_and_listener_failure () =
     check int "normal switch release removes the source listeners" count (List.length !inputs))
 ;;
 
+let test_actual_mission_source_inputs_preserve_writer_outcomes () =
+  with_workspace (fun _env state ->
+    let config = Mcp_server.workspace_config state in
+    let other_base = Filename.concat config.base_path "other-judgment-store" in
+    let own = ref [] and other = ref [] in
+    let confidence = match Operator_judgment.Confidence.of_float 0.91 with
+      | Some confidence -> confidence | None -> fail "invalid fixture confidence" in
+    let write config surface = Operator_judgment.record config ~surface
+        ~target_type:Operator_judgment.Workspace ~target_id:None
+        ~summary:"Isolated actual source commit" ~confidence
+        ~generated_at:"1970-01-01T00:01:40Z" ~generated_at_unix:100.0
+        ~fresh_until:"1970-01-01T00:01:50Z" ~fresh_until_unix:110.0
+        ~keeper_name:"source-judge" () in
+    Eio.Switch.run (fun sw ->
+      Input.subscribe ~sw ~base_path:config.base_path (fun input -> own := input :: !own);
+      Input.subscribe ~sw ~base_path:other_base (fun input -> other := input :: !other);
+      let bad_judgment = Operator_judgment.subscribe_written (fun _ -> raise Exit) in
+      let bad_log = Log.Ring.subscribe_published (fun change ->
+        if String.equal change.entry.module_name Failure_envelope.tool_host_log_module_name then raise Exit) in
+      Eio.Switch.on_release sw (fun () -> bad_judgment (); bad_log ());
+      let failed_judgments = Operator_judgment.failed_write_notifications ()
+      and failed_logs = Log.Ring.failed_publication_notifications () in
+      let written = write config Operator_judgment.Command_namespace in
+      check bool "actual judgment append reaches its original workspace" true
+        (List.mem (Input.Operator_judgment Operator_judgment.Command_namespace) !own);
+      check int "another workspace does not receive the judgment" 0 (List.length !other);
+      check bool "listener failure cannot erase the exact stored judgment" true
+        (List.exists (fun row -> String.equal row.Operator_judgment.judgment_id written.judgment_id)
+          (Operator_judgment.load_all config));
+      let own_count = List.length !own in
+      ignore (write (Workspace.default_config other_base) Operator_judgment.Intervene);
+      check int "a foreign append cannot wake the original workspace" own_count (List.length !own);
+      check bool "the foreign append retains its own exact source surface" true
+        (List.mem (Input.Operator_judgment Operator_judgment.Intervene) !other);
+      let failed_config = Workspace.default_config (Filename.concat config.base_path "failed-judgment-store") in
+      Fs_compat.mkdir_p (Filename.dirname (Operator_judgment.judgments_path failed_config));
+      Fs_compat.mkdir_p (Operator_judgment.judgments_path failed_config);
+      let failed_inputs = ref [] in
+      Input.subscribe ~sw ~base_path:failed_config.base_path
+        (fun input -> failed_inputs := input :: !failed_inputs);
+      let append_error = try ignore (write failed_config Operator_judgment.Command_namespace); None with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Some exn in
+      check bool "an actual pre-append read failure retains its original exception" true (Option.is_some append_error);
+      check int "a read rejected before append creates no writer notification" 0 (List.length !failed_inputs);
+      Log.legacy_stderr ~level:Log.Info ~module_name:"UnrelatedMissionLog" "unrelated source";
+      check int "unrelated process logging does not feed back to Mission" own_count (List.length !own);
+      Log.legacy_stderr ~level:Log.Error
+        ~module_name:Failure_envelope.tool_host_log_module_name "original process selection source";
+      check bool "ToolHost ring selection is an actual process input" true
+        (List.mem Input.Tool_host_attention !own && List.mem Input.Tool_host_attention !other);
+      check int "judgment observer failures are counted without changing either append"
+        (failed_judgments + 2) (Operator_judgment.failed_write_notifications ());
+      check int "ring observer failure is counted without changing the log operation"
+        (failed_logs + 1) (Log.Ring.failed_publication_notifications ()));
+    let count = List.length !own in
+    ignore (write config Operator_judgment.Command_namespace);
+    Log.legacy_stderr ~level:Log.Error
+      ~module_name:Failure_envelope.tool_host_log_module_name "after subscriber release";
+    check int "normal release removes both actual source subscriptions" count (List.length !own))
+;;
+
 let test_async_tool_commit_keeps_its_store_owner () =
   with_workspace (fun _env state ->
     let config = Mcp_server.workspace_config state in
@@ -532,6 +598,7 @@ let () =
     ; "consumer", [test_case "actual trust cache completion and scope cell" `Quick test_actual_cache_completion_and_scope_cell;
                     test_case "replacement cancels the retired read" `Quick test_replaced_read_is_cancelled_before_new_generation;
                     test_case "actual commits preserve writer outcomes" `Quick test_actual_commit_inputs_and_listener_failure;
+                    test_case "actual Mission inputs preserve original writer outcomes" `Quick test_actual_mission_source_inputs_preserve_writer_outcomes;
                     test_case "async tool commit preserves its workspace owner" `Quick test_async_tool_commit_keeps_its_store_owner;
                     test_case "retired execution request cannot replace current scope" `Quick test_execution_owner_rejects_a_retired_request;
                     test_case "actual execution worker follows original store writes" `Quick test_actual_execution_worker_waits_for_original_store_writes;

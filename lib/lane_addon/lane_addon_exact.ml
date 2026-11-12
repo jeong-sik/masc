@@ -970,10 +970,10 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
   else Fun.protect ~finally:(fun () -> release key) (fun () ->
     let digest = digest request in
     let save record =
-      Eio_unix.run_in_systhread (fun () ->
+      Systhread_host.run ~label:"addon-exact-request-save" (fun () ->
         Lane_addon_store.save_exact_request store ~declaration_id ~request_id
           (record_to_json ~declaration_id ~request_id record)) in
-    let* retained = Eio_unix.run_in_systhread (fun () ->
+    let* retained = Systhread_host.run ~label:"addon-exact-request-load" (fun () ->
       Lane_addon_store.load_exact_request store ~declaration_id ~request_id) in
     let* retained = match retained with
       | None -> Ok None
@@ -991,7 +991,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
       let previous = match retained with
         | Some record -> record
         | None -> {digest; request = request_to_json request; attempts = []; final = None} in
-      let* proofs=Eio_unix.run_in_systhread (fun () ->
+      let* proofs=Systhread_host.run ~label:"addon-exact-proofs-load" (fun () ->
         bound_proofs ~store ~declaration_id request previous) in
       let finish = finish_record in
       let* previous, recovered = match previous.final with
@@ -1114,7 +1114,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                      that ended without a generation dispatch writes the
                      marker before its proof. *)
                   let* () = mark_started () in
-                  Eio_unix.run_in_systhread (fun () ->
+                  Systhread_host.run ~label:"addon-exact-proof-retain" (fun () ->
                     retain_proof ~store ~declaration_id request ~schema
                       ~attempt_ordinal:(List.length previous.attempts + 1) execution) in
               (* Optional observations have their own proof-bound link. A
@@ -1123,7 +1123,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                | Some execution,Some observations ->
                  let attempt_ordinal=List.length previous.attempts+1 in
                  let proof=proof_to_json ~store ~declaration_id request ~schema ~attempt_ordinal execution in
-                 (match Eio_unix.run_in_systhread (fun () ->
+                 (match Systhread_host.run ~label:"addon-exact-observation-retain" (fun () ->
                     Lane_addon_exact_observation.retain ~store ~declaration_id
                       ~request_id:request.request_id ~attempt_ordinal ~proof observations) with
                   | Ok () -> ()

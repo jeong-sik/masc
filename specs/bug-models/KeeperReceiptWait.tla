@@ -36,6 +36,9 @@
 (*                         |   (store :2404-2444)                          *)
 (*   Fail on Restart       | a Running row without a continuation fails    *)
 (*                         |   (store :3456-3459)                          *)
+(*   Restart of a resumed  | a Running row with a continuation goes back to *)
+(*   task                  |   Queued and keeps what it owns               *)
+(*                         |   (store :3415, requeue_continuation_with_db) *)
 (*   req running           | Keeper_msg_async request, worker on the       *)
 (*                         |   server-lifetime switch                      *)
 (*                         |   (keeper_execute_background.ml:253-271)      *)
@@ -94,11 +97,12 @@ VARIABLES
     loaded,     \* the receipts the slot holder's run carries
     finished,   \* history: the terminal state a task reached
     lastwait,   \* history: the last request a task waited for
+    requeued,   \* history: tasks a restart returned to the queue while running
     restarts,
     patrols
 
 vars == << task, awaiting, owns, req, slot, loaded, finished, lastwait,
-           restarts, patrols >>
+           restarts, patrols, requeued >>
 
 TypeOK ==
     /\ task \in [Tasks -> TaskStates]
@@ -109,6 +113,7 @@ TypeOK ==
     /\ loaded \subseteq Requests
     /\ finished \in [Tasks -> Terminal \cup {None}]
     /\ lastwait \in [Tasks -> Requests \cup {None}]
+    /\ requeued \subseteq Tasks
     /\ restarts \in 0..MaxRestarts
     /\ patrols \in 0..MaxPatrols
 
@@ -121,6 +126,7 @@ Init ==
     /\ loaded = {}
     /\ finished = [t \in Tasks |-> None]
     /\ lastwait = [t \in Tasks |-> None]
+    /\ requeued = {}
     /\ restarts = 0
     /\ patrols = 0
 
@@ -146,7 +152,7 @@ Claim(t) ==
     /\ awaiting' = [awaiting EXCEPT ![t] = None]
     /\ slot' = t
     /\ loaded' = {r \in Requests : Visible(r, t)}
-    /\ UNCHANGED << owns, req, finished, lastwait, restarts, patrols >>
+    /\ UNCHANGED << owns, req, finished, lastwait, restarts, patrols, requeued >>
 
 \* The holder of the slot starts a background run.
 StartRun(r) ==
@@ -154,7 +160,7 @@ StartRun(r) ==
     /\ req[r] = "idle"
     /\ req' = [req EXCEPT ![r] = "running"]
     /\ UNCHANGED << task, awaiting, owns, slot, loaded, finished, lastwait,
-                    restarts, patrols >>
+                    restarts, patrols, requeued >>
 
 \* The worker ends and its receipt is retained. A raised or cancelled worker
 \* retains an unfinished receipt, so this one step covers all of them.
@@ -162,7 +168,7 @@ Retain(r) ==
     /\ req[r] = "running"
     /\ req' = [req EXCEPT ![r] = "written"]
     /\ UNCHANGED << task, awaiting, owns, slot, loaded, finished, lastwait,
-                    restarts, patrols >>
+                    restarts, patrols, requeued >>
 
 \* After a restart, boot writes the unfinished receipt of a request whose
 \* worker died with the server.
@@ -170,7 +176,7 @@ RecoverUnfinished(r) ==
     /\ req[r] = "orphaned"
     /\ req' = [req EXCEPT ![r] = "written"]
     /\ UNCHANGED << task, awaiting, owns, slot, loaded, finished, lastwait,
-                    restarts, patrols >>
+                    restarts, patrols, requeued >>
 
 \* The running task asks to wait for a request. Its turn ends in the same
 \* step. The request must have a source, and no task may own it yet. A
@@ -186,7 +192,7 @@ Wait(t, r) ==
     /\ lastwait' = [lastwait EXCEPT ![t] = r]
     /\ slot' = "free"
     /\ loaded' = {}
-    /\ UNCHANGED << req, finished, restarts, patrols >>
+    /\ UNCHANGED << req, finished, restarts, patrols, requeued >>
 
 \* The receipt of the awaited request exists, so the wait is resolved. The
 \* guard on the task state is the compare-and-set of the store row.
@@ -195,7 +201,7 @@ Resolve(t) ==
     /\ req[awaiting[t]] = "written"
     /\ task' = [task EXCEPT ![t] = "ready"]
     /\ UNCHANGED << awaiting, owns, req, slot, loaded, finished, lastwait,
-                    restarts, patrols >>
+                    restarts, patrols, requeued >>
 
 \* The turn completes: its receipts are removed, and the task releases what
 \* it owns.
@@ -208,7 +214,7 @@ Complete(t) ==
     /\ req' = Ack(loaded)
     /\ slot' = "free"
     /\ loaded' = {}
-    /\ UNCHANGED << awaiting, lastwait, restarts, patrols >>
+    /\ UNCHANGED << awaiting, lastwait, restarts, patrols, requeued >>
 
 \* The turn fails or an operator interrupts it. Nothing is removed. The task
 \* releases what it owns, so the receipts go to the next run.
@@ -220,7 +226,7 @@ Fail(t) ==
     /\ owns' = [owns EXCEPT ![t] = {}]
     /\ slot' = "free"
     /\ loaded' = {}
-    /\ UNCHANGED << awaiting, req, lastwait, restarts, patrols >>
+    /\ UNCHANGED << awaiting, req, lastwait, restarts, patrols, requeued >>
 
 \* A task that is not running is cancelled, and it releases what it owns in
 \* the same step.
@@ -230,7 +236,7 @@ Cancel(t) ==
     /\ finished' = [finished EXCEPT ![t] = "cancelled"]
     /\ awaiting' = [awaiting EXCEPT ![t] = None]
     /\ owns' = [owns EXCEPT ![t] = {}]
-    /\ UNCHANGED << req, slot, loaded, lastwait, restarts, patrols >>
+    /\ UNCHANGED << req, slot, loaded, lastwait, restarts, patrols, requeued >>
 
 PatrolStart ==
     /\ slot = "free"
@@ -238,29 +244,44 @@ PatrolStart ==
     /\ slot' = "patrol"
     /\ loaded' = {r \in Requests : Visible(r, "patrol")}
     /\ patrols' = patrols + 1
-    /\ UNCHANGED << task, awaiting, owns, req, finished, lastwait, restarts >>
+    /\ UNCHANGED << task, awaiting, owns, req, finished, lastwait, restarts, requeued >>
 
 PatrolEnd ==
     /\ slot = "patrol"
     /\ req' = Ack(loaded)
     /\ slot' = "free"
     /\ loaded' = {}
-    /\ UNCHANGED << task, awaiting, owns, finished, lastwait, restarts, patrols >>
+    /\ UNCHANGED << task, awaiting, owns, finished, lastwait, restarts, patrols, requeued >>
+
+\* A running task that was claimed after a wait carries the continuation it
+\* resumed from. A running task that never waited has none.
+Resumed(t) == task[t] = "running" /\ lastwait[t] # None
+NoContinuation(t) == task[t] = "running" /\ lastwait[t] = None
 
 \* The server restarts. Rows and receipts are durable. A running turn, its
-\* snapshot and the workers are not. A running row has no continuation, so it
-\* fails and releases what it owns. A worker's request stays active until
-\* boot writes its receipt.
-Restart ==
+\* snapshot and the workers are not. A running row without a continuation
+\* fails and releases what it owns. A running row with one goes back to the
+\* queue and keeps what it owns, as Requeue_continuation does (store :3415).
+\* It could only be claimed because every request it owns had its receipt,
+\* so it is ready, not waiting. A worker's request stays active until boot
+\* writes its receipt. [lost] is the state a running request gets.
+RestartWith(lost) ==
     /\ restarts < MaxRestarts
-    /\ task' = [t \in Tasks |-> IF task[t] = "running" THEN "failed" ELSE task[t]]
-    /\ finished' = [t \in Tasks |-> IF task[t] = "running" THEN "failed" ELSE finished[t]]
-    /\ owns' = [t \in Tasks |-> IF task[t] = "running" THEN {} ELSE owns[t]]
-    /\ req' = [r \in Requests |-> IF req[r] = "running" THEN "orphaned" ELSE req[r]]
+    /\ task' = [t \in Tasks |->
+                  IF Resumed(t) THEN "ready"
+                  ELSE IF NoContinuation(t) THEN "failed"
+                  ELSE task[t]]
+    /\ awaiting' = [t \in Tasks |-> IF Resumed(t) THEN lastwait[t] ELSE awaiting[t]]
+    /\ finished' = [t \in Tasks |-> IF NoContinuation(t) THEN "failed" ELSE finished[t]]
+    /\ owns' = [t \in Tasks |-> IF NoContinuation(t) THEN {} ELSE owns[t]]
+    /\ requeued' = requeued \cup {t \in Tasks : Resumed(t)}
+    /\ req' = [r \in Requests |-> IF req[r] = "running" THEN lost ELSE req[r]]
     /\ slot' = "free"
     /\ loaded' = {}
     /\ restarts' = restarts + 1
-    /\ UNCHANGED << awaiting, lastwait, patrols >>
+    /\ UNCHANGED << lastwait, patrols >>
+
+Restart == RestartWith("orphaned")
 
 Next ==
     \/ \E t \in Tasks : Claim(t)
@@ -363,6 +384,11 @@ LateReceiptAfterCancelUnreachable ==
         ~(finished[t] = "cancelled" /\ lastwait[t] # None
           /\ req[lastwait[t]] = "written")
 
+\* A task waits and is claimed with its receipt, a restart returns it to the
+\* queue with what it owns, and it is claimed again and completes.
+RestartRequeueThenSucceedUnreachable ==
+    \A t \in Tasks : ~(finished[t] = "succeeded" /\ t \in requeued)
+
 (*---------------------------- bug models ------------------------------*)
 
 \* B1. The Keeper claims a task that still waits. The receipt is pending
@@ -374,7 +400,7 @@ ClaimWhileWaiting(t) ==
     /\ awaiting' = [awaiting EXCEPT ![t] = None]
     /\ slot' = t
     /\ loaded' = {r \in Requests : Visible(r, t)}
-    /\ UNCHANGED << owns, req, finished, lastwait, restarts, patrols >>
+    /\ UNCHANGED << owns, req, finished, lastwait, restarts, patrols, requeued >>
 
 NextClaimBuggy == Next \/ (\E t \in Tasks : ClaimWhileWaiting(t))
 SpecClaimBuggy == Init /\ [][NextClaimBuggy]_vars
@@ -392,7 +418,7 @@ DuplicateWait(t, r) ==
     /\ lastwait' = [lastwait EXCEPT ![t] = r]
     /\ slot' = "free"
     /\ loaded' = {}
-    /\ UNCHANGED << req, finished, restarts, patrols >>
+    /\ UNCHANGED << req, finished, restarts, patrols, requeued >>
 
 NextDuplicateWaitBuggy == Next \/ (\E t \in Tasks, r \in Requests : DuplicateWait(t, r))
 SpecDuplicateWaitBuggy == Init /\ [][NextDuplicateWaitBuggy]_vars
@@ -406,7 +432,7 @@ PatrolStartLoadsAll ==
     /\ slot' = "patrol"
     /\ loaded' = {r \in Requests : req[r] = "written"}
     /\ patrols' = patrols + 1
-    /\ UNCHANGED << task, awaiting, owns, req, finished, lastwait, restarts >>
+    /\ UNCHANGED << task, awaiting, owns, req, finished, lastwait, restarts, requeued >>
 
 NextUnfilteredLoadBuggy == Next \/ PatrolStartLoadsAll
 SpecUnfilteredLoadBuggy == Init /\ [][NextUnfilteredLoadBuggy]_vars
@@ -420,7 +446,7 @@ ReviveFromStaleIndex(t) ==
     /\ task' = [task EXCEPT ![t] = "ready"]
     /\ awaiting' = [awaiting EXCEPT ![t] = lastwait[t]]
     /\ owns' = [owns EXCEPT ![t] = @ \cup {lastwait[t]}]
-    /\ UNCHANGED << req, slot, loaded, finished, lastwait, restarts, patrols >>
+    /\ UNCHANGED << req, slot, loaded, finished, lastwait, restarts, patrols, requeued >>
 
 NextReviveBuggy == Next \/ (\E t \in Tasks : ReviveFromStaleIndex(t))
 SpecReviveBuggy == Init /\ [][NextReviveBuggy]_vars
@@ -432,7 +458,7 @@ CancelKeepsOwner(t) ==
     /\ task' = [task EXCEPT ![t] = "cancelled"]
     /\ finished' = [finished EXCEPT ![t] = "cancelled"]
     /\ awaiting' = [awaiting EXCEPT ![t] = None]
-    /\ UNCHANGED << owns, req, slot, loaded, lastwait, restarts, patrols >>
+    /\ UNCHANGED << owns, req, slot, loaded, lastwait, restarts, patrols, requeued >>
 
 NextCancelKeepsOwnerBuggy == Next \/ (\E t \in Tasks : CancelKeepsOwner(t))
 SpecCancelKeepsOwnerBuggy == Init /\ [][NextCancelKeepsOwnerBuggy]_vars
@@ -440,16 +466,7 @@ SpecCancelKeepsOwnerBuggy == Init /\ [][NextCancelKeepsOwnerBuggy]_vars
 \* B6. A restart loses a request that has no durable record, as when the
 \* active inventory cannot be read. No worker and no receipt remain, and the
 \* waiting task waits for nothing.
-RestartLoses ==
-    /\ restarts < MaxRestarts
-    /\ task' = [t \in Tasks |-> IF task[t] = "running" THEN "failed" ELSE task[t]]
-    /\ finished' = [t \in Tasks |-> IF task[t] = "running" THEN "failed" ELSE finished[t]]
-    /\ owns' = [t \in Tasks |-> IF task[t] = "running" THEN {} ELSE owns[t]]
-    /\ req' = [r \in Requests |-> IF req[r] = "running" THEN "lost" ELSE req[r]]
-    /\ slot' = "free"
-    /\ loaded' = {}
-    /\ restarts' = restarts + 1
-    /\ UNCHANGED << awaiting, lastwait, patrols >>
+RestartLoses == RestartWith("lost")
 
 NextRestartLosesBuggy == Next \/ RestartLoses
 SpecRestartLosesBuggy == Init /\ [][NextRestartLosesBuggy]_vars
@@ -462,7 +479,7 @@ DuplicateResolveRequeues(t) ==
     /\ \E r \in owns[t] : req[r] = "written"
     /\ task' = [task EXCEPT ![t] = "ready"]
     /\ awaiting' = [awaiting EXCEPT ![t] = CHOOSE r \in owns[t] : req[r] = "written"]
-    /\ UNCHANGED << owns, req, slot, loaded, finished, lastwait, restarts, patrols >>
+    /\ UNCHANGED << owns, req, slot, loaded, finished, lastwait, restarts, patrols, requeued >>
 
 NextDuplicateResolveBuggy == Next \/ (\E t \in Tasks : DuplicateResolveRequeues(t))
 SpecDuplicateResolveBuggy == Init /\ [][NextDuplicateResolveBuggy]_vars

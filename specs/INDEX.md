@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-11-11T14:43:35Z (HEAD: 1f8eb30e4a87)
+Generated: 2026-11-12T02:23:58Z (HEAD: a7be2adafa8b)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -17,8 +17,8 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | Manual specs | 39 |
 | TTrace (auto-generated) | 0 |
 | Directories | 9 |
-| Total .cfg files | 138 |
-| Buggy .cfg (bug-model pair) | 93 |
+| Total .cfg files | 139 |
+| Buggy .cfg (bug-model pair) | 94 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -52,7 +52,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | DispatchHookChain.tla | DispatchHookChain | manual | 2 | 1 | clean={inv:ShortCircuitSkipsHandler, inv:ObserversAfterHandler, inv:HandlerRequiresNoReject} buggy={inv:ShortCircuitSkipsHandler} | a56f7e91e5c2 |
 | FileLockStarvation.tla | FileLockStarvation | manual | 2 | 1 | clean={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} buggy={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} | 60a4f68df073 |
 | KeeperOwnerOperation.tla | KeeperOwnerOperation | manual | 2 | 1 | clean={inv:TypeOK, inv:SingleRunning, inv:TerminalImmutable, inv:RestartNoRequeue, inv:FifoExceptMove, inv:ExecutionUsesLatestInput} buggy={inv:TypeOK, inv:SingleRunning, inv:TerminalImmutable, inv:RestartNoRequeue, inv:FifoExceptMove, inv:ExecutionUsesLatestInput} | 6c83a9ef70fd |
-| KeeperReceiptWait.tla | KeeperReceiptWait | manual | 13 | 12 | clean={inv:Safety, prop:WaiterResolves} buggy={inv:Safety} cancel-keeps-owner-buggy={inv:OwnerIsLive} claim-while-waiting-buggy={inv:ClaimedHasReceipt} duplicate-resolve-buggy={inv:SlotMatchesTask} duplicate-wait-buggy={inv:OneOwner} late-receipt-reachable-buggy={inv:LateReceiptAfterCancelUnreachable} orphan-wait-reachable-buggy={inv:WaitOnOrphanUnreachable} restart-loses-request-buggy={inv:WaitingHasSource} resume-reachable-buggy={inv:WaitThenSucceedUnreachable} revive-cancelled-buggy={inv:TerminalIsFinal} unfiltered-load-buggy={inv:ReadyHasReceipt} wake-never-delivered-buggy={prop:WaiterResolves} | efbdebb05222 |
+| KeeperReceiptWait.tla | KeeperReceiptWait | manual | 14 | 13 | clean={inv:Safety, prop:WaiterResolves} buggy={inv:Safety} cancel-keeps-owner-buggy={inv:OwnerIsLive} claim-while-waiting-buggy={inv:ClaimedHasReceipt} duplicate-resolve-buggy={inv:SlotMatchesTask} duplicate-wait-buggy={inv:OneOwner} late-receipt-reachable-buggy={inv:LateReceiptAfterCancelUnreachable} orphan-wait-reachable-buggy={inv:WaitOnOrphanUnreachable} restart-loses-request-buggy={inv:WaitingHasSource} restart-requeue-reachable-buggy={inv:RestartRequeueThenSucceedUnreachable} resume-reachable-buggy={inv:WaitThenSucceedUnreachable} revive-cancelled-buggy={inv:TerminalIsFinal} unfiltered-load-buggy={inv:ReadyHasReceipt} wake-never-delivered-buggy={prop:WaiterResolves} | 471bf83fbc60 |
 | KeeperTurnSingleFlight.tla | KeeperTurnSingleFlight | manual | 2 | 1 | clean={inv:TypeOK, inv:SingleFlight} buggy={inv:TypeOK, inv:SingleFlight} | 3729df26b85a |
 | KeeperWorktreeContainment.tla | KeeperWorktreeContainment | manual | 3 | 2 | clean={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} other-playground-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} server-root-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} | fc57677b6dc2 |
 | LibrarianContinuityWidth.tla | LibrarianContinuityWidth | manual | 5 | 4 | clean={inv:TypeOK, inv:NoRefusedUnitOffered, inv:LearnedWidthHolds} narrow-on-other-buggy={inv:TypeOK} no-carry-buggy={inv:TypeOK} release-on-commit-buggy={inv:TypeOK, inv:LearnedWidthHolds} release-on-unreadable-buggy={inv:TypeOK, inv:LearnedWidthHolds} | f23a79f08a08 |

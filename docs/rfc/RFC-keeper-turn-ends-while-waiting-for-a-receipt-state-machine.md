@@ -23,7 +23,7 @@ implementation_prs: []
 - **[제안]** 채팅 작업의 상태는 일곱이에요. queued, waiting, ready, running, succeeded, failed, cancelled 예요. 새 상태는 waiting 과 ready 둘이고, 둘 다 reducer 에서는 지금처럼 `Queued` 예요(3.2).
 - **[제안]** 영수증은 기다리기로 한 작업이 소유해요. 소유는 작업이 끝날 때까지 이어지고, 끝나면(성공, 실패, 취소, 재시작 실패) 같은 전이에서 풀려요. 소유 기록은 실행 기록(semantic record)의 새 필드예요(4절). 이어받는 길은 지금 있는 체크포인트 재개예요(6절).
 - **[사실]** 영수증을 읽는 곳은 처음 센 여섯보다 많아요. 구현(L1)에서 `load` 호출처는 열이에요(2.7). 모델은 소유를 안 보는 run 하나만 있어도 기다리는 작업의 영수증이 그 run 에 지워지는 반례를 내요(8.4).
-- **[사실]** TLC 는 정상 설정에서 위반을 찾지 못했어요(생성 58,645 상태, 서로 다른 19,218 상태, 깊이 18). 버그 설정 12개는 모두 의도한 불변식이나 속성을 깨는 반례를 내요(8.4).
+- **[사실]** TLC 는 정상 설정에서 위반을 찾지 못했어요(생성 75,517 상태, 서로 다른 26,970 상태, 깊이 20). 버그·가드 설정 13개는 모두 의도한 불변식이나 속성을 깨는 반례를 내요(8.4). 재개한 작업의 재시작(소유를 지킨 채 ready 로 돌아가는 길)도 모델에 들어 있어요.
 - **[제안]** hard cut 은 둘이에요. 실행 기록 형식이 `v2` 에서 `v3` 로 바뀌어요. 부모 RFC 가 둘로 센 저장소 스키마와 소유 기록이 같은 필드 하나로 모여요. 영수증의 `arguments` 를 모를 때 빈 값으로 채우지 않고 typed 부재로 적는 선택(9절 3) 때문에 outbox 영수증 형식도 바뀌어요(7절). 옛 형식을 읽는 코드는 없어요.
 - 사용자가 정할 것은 9절에 있어요.
 
@@ -355,7 +355,7 @@ type viewer =
 
 ### 8.4 TLA+ 모델
 
-**[사실]** 파일은 `specs/bug-models/KeeperReceiptWait.tla` 와 cfg 열세 개예요. `Spec` 은 정상(`Next`)이에요. 버그 설정은 행동 하나를 `Next` 에 더한 `NextBuggy == Next \/ BugAction` 이고, 각 버그 cfg 는 그 버그를 혼자 잡을 불변식이나 속성 하나만 켜요(기존 규칙: `specs/bug-models/` 의 다른 모델과 같아요). 모델 머리말에 코드 대응표와 추상화가 있어요.
+**[사실]** 파일은 `specs/bug-models/KeeperReceiptWait.tla` 와 cfg 열네 개예요. `Spec` 은 정상(`Next`)이에요. 버그 설정은 행동 하나를 `Next` 에 더한 `NextBuggy == Next \/ BugAction` 이고, 각 버그 cfg 는 그 버그를 혼자 잡을 불변식이나 속성 하나만 켜요(기존 규칙: `specs/bug-models/` 의 다른 모델과 같아요). 모델 머리말에 코드 대응표와 추상화가 있어요.
 
 **[사실]** 모델 크기는 작업 2개, request 2개, 재시작 최대 1번, 순찰 run 최대 2번이에요. 표의 값은 `tla2tools-1.8.0.jar`(TLC2 Version 2026.05.26.235334)를 `specs/Makefile` 과 같은 옵션(`-XX:+UseParallelGC -Xmx2g`, `-Dtlc2.TLC.stopAfter=180`)에 `-workers 1` 로 돌려서 cfg 마다 한 번씩 읽은 거예요. 반례 길이는 초기 상태를 포함한 상태 수예요. 한 cfg 를 다시 돌리는 명령은 이래요.
 
@@ -365,7 +365,7 @@ cd specs && java -XX:+UseParallelGC -Xmx2g -cp ~/.local/lib/tla/tla2tools-1.8.0.
 
 | cfg(`KeeperReceiptWait` 뒤) | 모델링한 실패 | 결과 | 생성 | 서로 다른 | 깊이·반례 길이 |
 |---|---|---|---:|---:|---:|
-| (없음) | 정상 | 위반 없음(`Safety`, `WaiterResolves`) | 58,645 | 19,218 | 깊이 18 |
+| (없음) | 정상 | 위반 없음(`Safety`, `WaiterResolves`) | 75,517 | 26,970 | 깊이 20 |
 | `-claim-while-waiting-buggy` | B1. waiting 인 작업을 claim | `ClaimedHasReceipt` 위반 | 175 | 130 | 5 |
 | `-duplicate-wait-buggy` | B2. 소유된 request 를 또 기다림 | `OneOwner` 위반 | 615 | 388 | 6 |
 | `-unfiltered-load-buggy` | B3. 소유를 안 보고 읽는 run | `ReadyHasReceipt` 위반 | 1,960 | 1,013 | 7 |
@@ -373,22 +373,24 @@ cd specs && java -XX:+UseParallelGC -Xmx2g -cp ~/.local/lib/tla/tla2tools-1.8.0.
 | `-cancel-keeps-owner-buggy` | B5. 취소가 소유를 안 풀음 | `OwnerIsLive` 위반 | 213 | 130 | 5 |
 | `-restart-loses-request-buggy` | B6. 재시작이 request 의 출처를 잃음 | `WaitingHasSource` 위반 | 199 | 137 | 5 |
 | `-duplicate-resolve-buggy` | B7. 같은 통지가 running 작업을 되돌림 | `SlotMatchesTask` 위반 | 1,756 | 983 | 7 |
-| `-wake-never-delivered-buggy` | B8. 통지가 영영 안 옴(공정성 제거) | `WaiterResolves` 위반(liveness) | 58,645 | 19,218 | 깊이 18, 반례 13 |
+| `-wake-never-delivered-buggy` | B8. 통지가 영영 안 옴(공정성 제거) | `WaiterResolves` 위반(liveness) | 71,709 | 25,906 | 깊이 17, 반례 13 |
 | `-buggy` | B1~B7 한꺼번에 | `Safety` 위반 | 252 | 137 | 5 |
 | `-resume-reachable-buggy` | 가드. 기다린 작업이 재개해 성공함 | 도달함(위반이 맞아요) | 1,752 | 979 | 7 |
 | `-orphan-wait-reachable-buggy` | 가드. worker 가 죽은 request 를 기다림 | 도달함 | 174 | 129 | 5 |
 | `-late-receipt-reachable-buggy` | 가드. 취소된 작업의 영수증이 도착함 | 도달함 | 589 | 369 | 6 |
+| `-restart-requeue-reachable-buggy` | 가드. 재개한 작업이 재시작으로 큐에 돌아가 다시 claim 되어 성공함 | 도달함 | 9,382 | 4,205 | 9 |
 
-- 표의 가드 셋(`-resume-reachable`, `-orphan-wait-reachable`, `-late-receipt-reachable`)은 정상 모델이 그 길에 닿는다는 것을 보여요. 길이 막히면 불변식이 아무것도 안 지키는데 통과해요. 가드가 먼저 빨개져요.
+- **[사실]** `Restart` 는 두 갈래예요. 대기를 한 번 거쳐 claim 된 running 작업(모델의 `lastwait` 가 있는 작업)은 continuation 을 쥔 것으로 보고 소유를 지킨 채 ready 로 돌려요. 대기한 적 없는 running 작업은 continuation 이 없다고 보고 failed 로 만들고 소유를 비워요(3.2, 2.8). 돌려보낼 때 모델이 끝난 작업의 이력 변수 `requeued` 에 적어요. 소유를 비우는 쪽으로 바꾼 변이를 임시로 돌려 보면 `Safety` 가 위반돼요(저장소에 없어요).
+- 표의 가드 넷(`-resume-reachable`, `-orphan-wait-reachable`, `-late-receipt-reachable`, `-restart-requeue-reachable`)은 정상 모델이 그 길에 닿는다는 것을 보여요. 길이 막히면 불변식이 아무것도 안 지키는데 통과해요. 가드가 먼저 빨개져요.
 - 종료 코드는 정상 0, 버그 cfg 는 12(불변식 위반) 또는 13(속성 위반)이에요. `specs/Makefile` 의 `check-buggy` 가 같은 규칙으로 읽어요.
-- **[사실]** `specs/Makefile` 의 `check-others` 샤드가 `bug-models/` 를 포함해요(`:143-149`). CI 가 그 target 을 부르는지는 workflow 를 읽지 않았어요(10절).
+- **[사실]** `specs/Makefile` 의 `check-others` 샤드가 `bug-models/` 를 포함해요(`:143-149`). `.github/workflows` 에서 `check-others` 를 부르는 곳은 없어요. `model-check.yml` 은 `workflow_dispatch` 로만 돌고 `scripts/tla-check.sh` 를 부르는데, 그 스크립트는 `bug-models/` 를 다루지 않아요. 이 모델은 사람이 `make -C specs check-others` 를 돌릴 때만 돌아요. 구현 PR 이 모델과 어긋나도 CI 가 알려 주지 않아요. 모델을 PR 검사로 돌리는 일은 이 RFC 범위 밖이에요.
 - 이 모델이 못 보는 것은 10절에 있어요.
 
 ## 9. 사용자가 정할 것
 
 정석 쪽을 근거와 대가를 달아 먼저 써요.
 
-**결정(사용자, 2026-11-12).** 1, 2, 3, 5번은 아래 추천대로 정했어요: 소유 기록은 실행 기록의 새 필드(`receipt_obligations`), `load` 의 `~viewer` 는 필수 인자, 출처 없는 request 는 typed `Source_lost`, wait 는 별도 도구예요. 3번에서 영수증의 `arguments` 를 모를 때는 typed 부재(`Known | Unknown`)로 적기로 했어요. 4, 6, 7번은 아직 정하지 않았고 추천이 기본이에요.
+**결정(사용자, 2026-11-12, AskUserQuestion 응답).** 1, 2, 3, 5번은 아래 추천대로 정했어요: 소유 기록은 실행 기록의 새 필드(`receipt_obligations`), `load` 의 `~viewer` 는 필수 인자, 출처 없는 request 는 typed `Source_lost`, wait 는 별도 도구예요. 3번에서 영수증의 `arguments` 를 모를 때는 typed 부재(`Known | Unknown`)로 적기로 했어요. 4, 6, 7번은 아직 정하지 않았고 추천이 기본이에요.
 
 1. **소유 기록을 어디에 적나.**
    - 추천: (i) 실행 기록의 새 필드(4.2).
@@ -423,7 +425,6 @@ cd specs && java -XX:+UseParallelGC -Xmx2g -cp ~/.local/lib/tla/tla2tools-1.8.0.
 **읽지 않은 코드.**
 - `recover_lost_disk_records` 의 동작은 자세히 읽지 않았어요(5.2).
 - 공식 클라이언트에서 긴 기다림 뒤 벤더 세션 Resume 이 되는지. Muse 와 Antigravity 의 resume 은 읽지 않았어요(6절).
-- CI workflow 가 `check-others` 를 부르는지(8.4).
 - `finish_operation_child` 와 `start_child_if_needed` 가 `blocked_queued_scopes` 를 읽는 비용. drain 마다 실행 기록 전체를 읽어요(`keeper_chat_operation_store.ml:1731-1753`). 이 설계는 항목 하나를 더할 뿐이라고 보지만 재지 않았어요.
 - #51302 RFC 가 직접 작업을 열어 두는지(9절 6).
 - `rg -c Input_wait` 의 51줄은 줄 수예요. 고쳐야 할 match 갈래의 수가 아니에요.
@@ -433,6 +434,7 @@ cd specs && java -XX:+UseParallelGC -Xmx2g -cp ~/.local/lib/tla/tla2tools-1.8.0.
 - 한 request 에 영수증 둘이 쓰이는 경우(5.3). 영수증은 모델에서 id 이고 내용이 없어요.
 - request 확인과 outbox 쓰기가 둘인 코드를 모델은 한 단계로 봐요. `Retain` 과 `Resolve` 사이만 한 단계로 떼어 놨어요. `Complete` 는 ACK 와 settle 을 한 단계로 해요.
 - Claim 이 아무 claim 가능한 작업을 골라요. FIFO 순서, `defer_direct_checkpoint` 의 순서 이동, 편집, batch member 는 없어요.
+- continuation 은 모델에서 「대기를 한 번 거쳐 claim 된 running 작업」으로 근사해요. 대기 없이 체크포인트나 runtime retry 로 끝난 작업의 continuation 은 모델에 없어요.
 - 영수증을 받은 작업이 Gate 나 입력 대기 같은 다른 이유(2.4)로 다시 막히는 경우는 모델에 없어요. 3.2 의 ready 는 그런 이유가 없을 때의 뜻이에요.
 - 부팅 복구가 영수증을 쓴다고 가정해요. 안 쓰는 경우는 B6 이에요.
 - 재시작 직후 orphaned request 에 Wait 을 부르는 경우는 모델이 거절해요. 코드에서 그런 호출이 가능한지 읽지 않았어요.

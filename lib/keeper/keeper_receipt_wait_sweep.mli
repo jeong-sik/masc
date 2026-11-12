@@ -24,7 +24,8 @@ val settle_lost : base_path:string -> keeper_name:string -> (unit, string) resul
     request id cannot. A wake that holds the key, delivers a receipt and has not
     ended is left alone, like a run a worker may still own. One that has ended
     without its receipt, and a key no row holds any more (the schedule was
-    pruned, or an edit gave it a new key), gets an [unfinished] receipt from
+    pruned, or an edit made it deliver to the queue), gets an [unfinished]
+    receipt from
     {!Keeper_schedule_receipt.retain_unfinished}. *)
 
 val after_wait : base_path:string -> keeper_name:string -> (unit, string) result

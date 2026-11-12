@@ -97,24 +97,30 @@ let keeper_wake_delivery_of_string value =
    writes and the id a wait is recorded under. [schedule_id] cannot be that name.
    A Keeper may pick it, so the same text can name an Execute request or a
    schedule created again after the first was pruned, and a receipt still in the
-   outbox would answer the wrong one. The key is issued when the row is created
-   and is in the row's body, so a run watch that settles keeps it. *)
+   outbox would answer the wrong one. The key is issued when the row is written
+   and is in the row's body, so an edit and a run watch that settles keep it. *)
 type receipt_key = string
 
+(* The colon is one a request id cannot hold. The receipt wait sweep tells a
+   schedule's key from a request id by the request store refusing the id, so a
+   key must never be a valid request id. Every key starts with the prefix, which
+   [receipt_key_of_string] insists on, and a test holds the prefix and the
+   request id rule together. *)
+let receipt_key_prefix = "schedule-receipt:"
+
 let receipt_key_of_string value =
-  if String.equal value ""
-  then Error "receipt_key is empty"
+  if not (String.starts_with ~prefix:receipt_key_prefix value)
+  then Error (Printf.sprintf "receipt_key must start with %s" receipt_key_prefix)
+  else if String.length value = String.length receipt_key_prefix
+  then Error "receipt_key is empty after its prefix"
   else Ok value
 ;;
 
 let receipt_key_to_string key = key
 
-(* The colon is one a request id cannot hold. The receipt wait sweep tells a
-   schedule's key from a request id by the request store refusing the id, so a
-   key must never be a valid request id. A test holds the two together.
-   NDT-OK: a key must differ from every other key ever issued, so it is drawn
+(* NDT-OK: a key must differ from every other key ever issued, so it is drawn
    from the process random source when the schedule is written. *)
-let fresh_receipt_key () = Random_id.prefixed ~prefix:"schedule-receipt:" ~bytes:16
+let fresh_receipt_key () = Random_id.prefixed ~prefix:receipt_key_prefix ~bytes:16
 
 let valid_keeper_wake_target_name =
   Safe_identifier.is_portable_name

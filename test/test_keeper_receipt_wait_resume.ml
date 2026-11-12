@@ -700,8 +700,8 @@ let test_a_schedule_that_ended_without_a_receipt_is_settled () =
   settles_an_ended_schedule ~schedule_id:"sched-ended-without-receipt" ~prune:false
 ;;
 
-(* The row that held the key was pruned, or an edit gave the schedule a new key.
-   Nothing will write the receipt, and the Keeper's schedule id may be any text. *)
+(* The row that held the key was pruned. Nothing will write the receipt, and the
+   Keeper's schedule id may be any text. *)
 let test_a_key_no_schedule_holds_any_more_is_settled () =
   settles_an_ended_schedule ~schedule_id:"배포 결과 #12" ~prune:true
 ;;

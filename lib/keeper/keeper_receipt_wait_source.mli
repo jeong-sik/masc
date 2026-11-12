@@ -6,8 +6,8 @@
     a Keeper wake of delivery [receipt] writes ({!Keeper_schedule_receipt}). The
     schedule id cannot be the wait's id: a Keeper may pick it, so it can equal
     an Execute request id, or name a schedule created again after the first was
-    pruned while the first one's receipt is still in the outbox. An edit of a
-    schedule that has not ended and the settling of a run watch keep the key.
+    pruned while the first one's receipt is still in the outbox. An edit and the
+    settling of a run watch keep the key.
     This module reads the schedule row for either name. The row is the only
     record of the schedule: the wait keeps none. *)
 
@@ -44,6 +44,6 @@ val find_receipt_state :
   Schedule_supported_kinds.receipt_key ->
   (receipt_state option, string) result
 (** The state of the wake of this Keeper that holds this key; [None] when no
-    row does: it was pruned, or an edit gave the schedule a new key. [Error]
+    row does: it was pruned, or an edit made it deliver to the queue. [Error]
     when the schedule store cannot be read, or when no row holds the key and a
     row of this Keeper cannot be decoded, because that row may be the one. *)

@@ -244,6 +244,23 @@ let test_create_stores_no_receipt_key_for_a_queue_delivery () =
     (receipt_key_of (stored_exn config "watched"))
 ;;
 
+(* The sweep tells a key from a request id by the request store refusing the id.
+   The type insists on the prefix that makes it so. *)
+let test_a_key_carries_the_prefix_a_request_id_cannot_hold () =
+  let prefix = Schedule_supported_kinds.receipt_key_prefix in
+  check bool "the prefix cannot begin a request id" false
+    (Keeper_msg_async.For_testing.is_safe_request_id prefix);
+  check bool "a bare string is not a key" true
+    (Result.is_error (Schedule_supported_kinds.receipt_key_of_string "k1"));
+  check bool "the prefix alone is not a key" true
+    (Result.is_error (Schedule_supported_kinds.receipt_key_of_string prefix));
+  check bool "a fresh key is a key" true
+    (Result.is_ok
+       (Schedule_supported_kinds.receipt_key_of_string
+          (Schedule_supported_kinds.receipt_key_to_string
+             (Schedule_supported_kinds.fresh_receipt_key ()))))
+;;
+
 let test_two_receipt_schedules_hold_different_keys () =
   with_config
   @@ fun config ->
@@ -955,6 +972,7 @@ let () =
         ; test_case "keeps a named attempt" `Quick test_create_keeps_a_named_attempt
         ; test_case "stores a receipt delivery" `Quick test_create_stores_a_receipt_delivery
         ; test_case "stores no receipt key for a queue delivery" `Quick test_create_stores_no_receipt_key_for_a_queue_delivery
+        ; test_case "a key carries the prefix a request id cannot hold" `Quick test_a_key_carries_the_prefix_a_request_id_cannot_hold
         ; test_case "two receipt schedules hold different keys" `Quick test_two_receipt_schedules_hold_different_keys
         ; test_case "update keeps the receipt key of a pending schedule" `Quick test_update_keeps_the_receipt_key_of_a_pending_schedule
         ; test_case "refuses a recurring receipt" `Quick test_create_refuses_a_recurring_receipt

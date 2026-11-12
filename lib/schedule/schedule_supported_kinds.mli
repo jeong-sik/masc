@@ -52,8 +52,13 @@ type receipt_key = private string
     after the first was pruned while the first one's receipt is still in the
     outbox. *)
 
+val receipt_key_prefix : string
+(** Every key starts with it. It holds a character a request id cannot, which is
+    how the receipt wait sweep tells a key from a request id. *)
+
 val receipt_key_of_string : string -> (receipt_key, string) result
-(** [Error] for an empty key. *)
+(** [Error] for a string that does not start with {!receipt_key_prefix}, or that
+    holds nothing after it. *)
 
 val receipt_key_to_string : receipt_key -> string
 

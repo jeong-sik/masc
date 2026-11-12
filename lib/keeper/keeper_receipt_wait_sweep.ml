@@ -16,9 +16,8 @@ type record =
   | Ended of Outbox.arguments
   | Schedule_ended
 
-(* A key with no row is a schedule that was pruned, or that an edit gave a new
-   key: it will not write this receipt. A wake that delivers a queue message
-   never writes one either, and holds no key, so it is the same case. *)
+(* A key with no row is a schedule that was pruned, or that an edit made deliver
+   to the queue: it will not write this receipt. *)
 let record_of_receipt_state = function
   | Some Source.Waiting -> Worker_may_exist
   | Some Source.Ended | None -> Schedule_ended

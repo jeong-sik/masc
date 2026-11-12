@@ -338,12 +338,16 @@ let test_an_ended_schedule_is_waited_for_only_while_its_receipt_is_there () =
       (call config (schedule_args "sched-ended")))
 ;;
 
-(* A receipt that an earlier occurrence left under the schedule id is not this
-   schedule's receipt. The wait is recorded under the key, so it neither names
-   that receipt nor takes it for the schedule's own. *)
-let test_a_schedule_wait_is_recorded_under_the_key_not_the_schedule_id () =
+(* The schedule ended without writing a receipt of its own, and a receipt of
+   another producer carries the same text as its schedule id. That receipt is
+   not this schedule's, so there is nothing to wait for. Under the schedule id
+   alone it would have been taken for the schedule's own. *)
+let test_a_receipt_under_the_schedule_id_is_not_the_schedules () =
   with_workspace (fun ~sw:_ ~clock:_ config ->
     let base_path = config.Workspace.base_path in
+    create_schedule config ~schedule_id:"sched-again" ~keeper:keeper_name
+      ~delivery:"receipt" ~receipt_key:(Some (receipt_key_of "sched-again"));
+    cancel_schedule config ~schedule_id:"sched-again";
     get
       (Outbox.retain
          ~base_path
@@ -355,10 +359,20 @@ let test_a_schedule_wait_is_recorded_under_the_key_not_the_schedule_id () =
          ; arguments = Outbox.Unknown
          ; response = `Assoc [ "request_id", `String "sched-again" ]
          });
-    create_schedule config ~schedule_id:"sched-again" ~keeper:keeper_name
-      ~delivery:"receipt" ~receipt_key:(Some (receipt_key_of "sched-again"));
+    expect_refused
+      ~class_:Tool_result.Workflow_rejection
+      "an ended wake whose outbox holds only another producer's receipt"
+      (call config (schedule_args "sched-again"));
+    get
+      (Outbox.retain
+         ~base_path
+         ~keeper_name
+         (Keeper_schedule_receipt.receipt
+            ~receipt_key:(typed_key "sched-again")
+            (Keeper_schedule_receipt.Delivered
+               { schedule_id = "sched-again"; message = "done" })));
     expect_wait ~request_id:(receipt_key_of "sched-again")
-      "a schedule whose id an older receipt carries"
+      "the same wake once its own receipt is there"
       (call config (schedule_args "sched-again")))
 ;;
 
@@ -564,8 +578,8 @@ let () =
             test_a_schedule_is_waited_for_while_it_can_write_a_receipt
         ; test_case "an ended schedule is waited for only while its receipt is there" `Quick
             test_an_ended_schedule_is_waited_for_only_while_its_receipt_is_there
-        ; test_case "a schedule wait is recorded under the key, not the schedule id" `Quick
-            test_a_schedule_wait_is_recorded_under_the_key_not_the_schedule_id
+        ; test_case "a receipt under the schedule id is not the schedule's" `Quick
+            test_a_receipt_under_the_schedule_id_is_not_the_schedules
         ; test_case "a call without a chat execution is refused" `Quick
             test_a_call_without_a_chat_execution_is_refused
         ; test_case "an ended run is waited for only while its receipt is there" `Quick

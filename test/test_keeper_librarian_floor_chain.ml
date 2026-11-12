@@ -131,6 +131,35 @@ let first_attempt_id inventory ((record : Owner.retained), (_ : Step.header)) =
   | [ gate ] -> gate.request_id
   | [] | _ :: _ :: _ -> fail "a step's gate journal has exactly one first attempt"
 
+let allocated_by work =
+  let before = Gc.allocated_bytes () in
+  ignore (work () |> get);
+  Gc.allocated_bytes () -. before
+
+(* Every attempt of a journal names the same step. Confirming that step reads
+   its body and its execution proofs, which is most of what reading a journal
+   allocates. A journal read that confirmed the step once per attempt would
+   allocate several times the one-attempt journal; the steps of this fixture
+   carry bodies of the same size. *)
+let check_a_journal_confirms_its_step_once fixture ~owner ~inventory steps =
+  let attempts ((record : Owner.retained), (_ : Step.header)) =
+    List.length (Gate.Inventory.execution_records inventory ~execution_id:record.request_id) in
+  let step_of ((record : Owner.retained), (_ : Step.header)) = Step.restore ~owner record |> get in
+  let latest step () = Gate.latest ~store:fixture.store ~owner ~capture:step in
+  match List.partition (fun step -> attempts step = 1) steps with
+  | single :: _, retried :: _ ->
+    let single = step_of single and retried = step_of retried in
+    let one_attempt = allocated_by (latest single) in
+    check bool "a retried journal confirms its step once" true
+      (allocated_by (latest retried) < 2. *. one_attempt);
+    let gate = Gate.latest ~store:fixture.store ~owner ~capture:single |> get |> Option.get in
+    check bool "restoring the latest result confirms its step once" true
+      (allocated_by (fun () ->
+         Gate.restore_latest_result ~store:fixture.store ~owner ~parent_execution:single
+           ~gate_request_id:gate.request_id)
+       < 1.5 *. one_attempt)
+  | [], _ | _, [] -> fail "the fixture has a step judged once and a step judged again"
+
 let test_a_chain_runs_each_step_once_and_a_restart_replays_it () = with_fixture (fun fixture ->
   fixture.respond := answering ();
   let owner = owner fixture and range = range_link (owner fixture) in
@@ -492,6 +521,7 @@ let test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_in
     let inventory = Gate.Inventory.read ~store:fixture.store ~owner |> get in
     check bool "the retry left more than one attempt for the first step" true
       (Gate.Inventory.record_count inventory > List.length steps);
+    check_a_journal_confirms_its_step_once fixture ~owner ~inventory steps;
     without_gate_scope fixture ~owner (fun () ->
       check (list string) "the inventory names each decision by the first attempt of its journal"
         (List.map (first_attempt_id inventory) steps)

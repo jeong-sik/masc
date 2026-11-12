@@ -36,7 +36,7 @@ type settled_tool_invocation =
 
 type tool_invocations =
   { settled : settled_tool_invocation list
-  ; unsettled_tool_names : string list
+  ; requested_tool_names : string list
   }
 
 type output_block_kind =
@@ -775,28 +775,43 @@ let tool_invocations t =
     | [sequence] -> Ok sequence
     | [] | _ :: _ :: _ -> invalid "settled invocation has no unique result event"
   in
-  let rec visit records unsettled = function
+  (* The tool uses one recorded provider response asked for. *)
+  let requested_by (view : Journal.node_view) =
+    match view.materialized with
+    | Journal.Provider_attempt_state {response=None; _} -> Ok []
+    | Journal.Provider_attempt_state {response=Some response; _} ->
+      Ok (List.filter_map (function
+        | Llm_provider.Types.ToolUse use -> Some use.name
+        | Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+        | ToolResult _ | Image _ | Document _ | Audio _ -> None) response.content)
+    | Journal.Agent_run_state | Journal.Agent_turn_state | Journal.Output_block_state _
+    | Journal.Tool_invocation_state _ | Journal.Tool_attempt_state ->
+      invalid "provider attempt holds another node's state"
+  in
+  let rec visit records requested = function
     | [] ->
       Ok { settled = List.sort (fun a b -> Int.compare a.settlement_seq b.settlement_seq) records
-         ; unsettled_tool_names = List.rev unsettled }
+         ; requested_tool_names = List.rev requested }
     | (id, turn) :: rest ->
       Eio.Fiber.yield ();
       let* view = read id in
       if not (Event.Run_id.equal (Event.node_run_id view.node) t.locator_run_id)
-      then visit records unsettled rest
+      then visit records requested rest
       else
         let children turn =
           List.map (fun (child : Event.node Journal.event_record) ->
             Event.node_id child.value, turn) view.children @ rest
         in
         match Event.node_kind view.node with
-        | Event.Agent_turn {ordinal} -> visit records unsettled (children (Some ordinal))
-        | Event.Agent_run _ | Event.Provider_attempt _ -> visit records unsettled (children turn)
-        | Event.Output_block _ | Event.Tool_attempt -> visit records unsettled rest
+        | Event.Agent_turn {ordinal} -> visit records requested (children (Some ordinal))
+        | Event.Agent_run _ -> visit records requested (children turn)
+        | Event.Provider_attempt _ ->
+          let* asked = requested_by view in
+          visit records (List.rev_append asked requested) (children turn)
+        | Event.Output_block _ | Event.Tool_attempt -> visit records requested rest
         | Event.Tool_invocation {tool_name; schedule; completion; _} ->
           match view.materialized with
-          | Journal.Tool_invocation_state {result=None; _} ->
-            visit records (tool_name :: unsettled) rest
+          | Journal.Tool_invocation_state {result=None; _} -> visit records requested rest
           | Journal.Tool_invocation_state {input=Some (Llm_provider.Types.ToolUse use);
                                           result=Some (Llm_provider.Types.ToolResult result as block)} ->
             let* turn = match turn with
@@ -820,7 +835,7 @@ let tool_invocations t =
             let invocation = Tool_contract.Invocation.of_occurrence occurrence
                 ~tool_use_id:use.id ~turn ~schedule ~completion in
             visit ({invocation; tool_name; input=use.input; result=block;
-                    attempt_admitted; settlement_seq} :: records) unsettled rest
+                    attempt_admitted; settlement_seq} :: records) requested rest
           | Journal.Tool_invocation_state {input=None; result=Some _}
           | Journal.Tool_invocation_state
               {input=Some (Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _

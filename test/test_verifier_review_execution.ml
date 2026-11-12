@@ -92,9 +92,10 @@ type cancel_point =
   | Before_later_report_starts
 
 (* Where the reviewer's process ends, leaving its journal without a terminal:
-   on its first provider request, inside its report handler, or on the
-   provider request that follows a settled report. *)
-type process_end = Before_any_report | Inside_the_report | After_the_report
+   on its first provider request, inside its report handler, after the first
+   of two reports one reply asked for has settled and before the second
+   starts, or on the provider request that follows a settled report. *)
+type process_end = Before_any_report | Inside_the_report | Between_two_reports | After_the_report
 let lost_writer_exit = 87
 
 (* The first provider reply carries [calls] and every later one [later_calls].
@@ -110,7 +111,7 @@ let run_native ?(refuse_publication=false) ?refuse_from ?(block_report=false) ?(
       match process_end with
       | Some Before_any_report -> Unix._exit lost_writer_exit
       | Some After_the_report when !provider_calls > 1 -> Unix._exit lost_writer_exit
-      | Some (Inside_the_report | After_the_report) | None -> ())
+      | Some (Inside_the_report | Between_two_reports | After_the_report) | None -> ())
     (Exact_output_fixture.Reply_with (fun _ _ ->
       match cancel_at with
       | Some While_provider_answers -> Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
@@ -134,7 +135,7 @@ let run_native ?(refuse_publication=false) ?refuse_from ?(block_report=false) ?(
     incr handler_calls;
     (match process_end with
      | Some Inside_the_report -> Unix._exit lost_writer_exit
-     | Some (Before_any_report | After_the_report) | None -> ());
+     | Some (Before_any_report | Between_two_reports | After_the_report) | None -> ());
     match cancel_at with
     | Some While_report_runs -> Eio.Promise.resolve cancel_now ();Eio.Fiber.await_cancel ()
     | Some (While_provider_answers | After_report_settles | Before_later_report_starts) | None ->
@@ -156,7 +157,15 @@ let run_native ?(refuse_publication=false) ?refuse_from ?(block_report=false) ?(
     | Some (While_provider_answers | While_report_runs | After_report_settles | Before_later_report_starts) | None ->
       if block_report then Agent_core.Hooks.Block "the fixture gate refuses the report"
       else Agent_core.Hooks.Continue in
-  let config = {config with hooks=Some {Agent_core.Hooks.empty with pre_tool_use=Some gate}} in
+  (* The post hook runs once its call's result is settled, and the next call
+     of the same reply has no invocation yet. *)
+  let after_settlement _ =
+    (match process_end with
+     | Some Between_two_reports -> Unix._exit lost_writer_exit
+     | Some (Before_any_report | Inside_the_report | After_the_report) | None -> ());
+    Agent_core.Hooks.Continue in
+  let config = {config with hooks=Some {Agent_core.Hooks.empty with
+    pre_tool_use=Some gate;post_tool_use=Some after_settlement}} in
   let journal,config = Keeper_request_execution.prepare ~base_path:(X.session_root ~base_path original |> get)
     ~keeper_name:(X.keeper_name original |> get) ~config
     ~on_scope_ready:(fun ~call_id ->
@@ -225,7 +234,7 @@ let test_cancelled_reviewer_without_report_retries_as_a_successor () = with_fixt
   Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
     ignore (run_native ~cancel_at:While_provider_answers env sw ~base_path ~store ~original ~current []));
   (match X.observe ~base_path ~original (O.progress !current) |> get with
-   | No_verdict [runtime_id,Verifier_review_ending.Cancelled] ->
+   | No_verdict {first=runtime_id,Verifier_review_ending.Cancelled;later=[]} ->
      Alcotest.(check string) "the cancelled execution is named by its runtime" model_id runtime_id
    | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
      Alcotest.fail "a settled cancellation without a report was not read as one ending without a verdict");
@@ -308,10 +317,11 @@ let test_reports_from_two_executions_cannot_recover () = with_fixture (fun env s
     Alcotest.fail "one report from each of two executions supplied a verdict or a retry")
 
 let lost_writer_flag = "--reviewer-process-ends"
-let process_ends = [Before_any_report;Inside_the_report;After_the_report]
+let process_ends = [Before_any_report;Inside_the_report;Between_two_reports;After_the_report]
 let process_end_label = function
   | Before_any_report -> "before-any-report"
   | Inside_the_report -> "inside-the-report"
+  | Between_two_reports -> "between-two-reports"
   | After_the_report -> "after-the-report"
 
 (* Runs in a separate process: retains the original, starts its reviewer, and
@@ -320,7 +330,8 @@ let lost_writer_child process_end base_path = with_runtime (fun env sw ->
   let store,original,current = retain_original ~base_path in
   let calls = match process_end with
     | Before_any_report -> []
-    | Inside_the_report | After_the_report -> [tool_call "report" valid] in
+    | Inside_the_report | After_the_report -> [tool_call "report" valid]
+    | Between_two_reports -> [tool_call "first-report" valid;tool_call "second-report" valid] in
   ignore (run_native ~process_end env sw ~base_path ~store ~original ~current calls);
   (* Reached only when the fixture did not end the process. *)
   exit 1)
@@ -343,7 +354,7 @@ let after_reviewer_process_ends process_end f = with_runtime (fun env sw ->
 
 let test_reviewer_process_ending_before_any_report_ends_without_a_verdict () =
   after_reviewer_process_ends Before_any_report (fun ~base_path:_ ~store:_ -> function
-    | X.No_verdict [runtime_id,Verifier_review_ending.Owner_lost] ->
+    | X.No_verdict {first=runtime_id,Verifier_review_ending.Owner_lost;later=[]} ->
       Alcotest.(check string) "the lost execution is named by its runtime" model_id runtime_id
     | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
       Alcotest.fail "a journal whose writer is gone was not read as an ending without a verdict")
@@ -355,6 +366,15 @@ let test_reviewer_process_ending_inside_its_report_stays_a_repair () =
     | X.Repair_required _ -> ()
     | Awaiting | No_verdict _ | Verdict _ ->
       Alcotest.fail "a report whose handler was running when its process ended authorized a retry or a verdict")
+
+(* One reply asked for two reports. The first settled; the second has no
+   invocation, because an invocation is opened only when its tool is about to
+   run. The recorded reply still shows that the reviewer asked twice. *)
+let test_reviewer_process_ending_between_two_reports_is_not_a_verdict () =
+  after_reviewer_process_ends Between_two_reports (fun ~base_path:_ ~store:_ -> function
+    | X.Repair_required _ -> ()
+    | Awaiting | No_verdict _ | Verdict _ ->
+      Alcotest.fail "the first of two requested reports supplied a verdict or a retry")
 
 let test_reviewer_process_ending_after_its_report_keeps_the_verdict () =
   after_reviewer_process_ends After_the_report (fun ~base_path:_ ~store:_ -> function
@@ -437,6 +457,7 @@ let () =
     Alcotest.test_case "reports from two executions cannot recover" `Quick test_reports_from_two_executions_cannot_recover;
     Alcotest.test_case "reviewer process ending before any report ends without a verdict" `Quick test_reviewer_process_ending_before_any_report_ends_without_a_verdict;
     Alcotest.test_case "reviewer process ending inside its report stays a repair" `Quick test_reviewer_process_ending_inside_its_report_stays_a_repair;
+    Alcotest.test_case "reviewer process ending between two reports is not a verdict" `Quick test_reviewer_process_ending_between_two_reports_is_not_a_verdict;
     Alcotest.test_case "reviewer process ending after its report keeps the verdict" `Quick test_reviewer_process_ending_after_its_report_keeps_the_verdict;
     Alcotest.test_case "unknown and malformed execution bindings are refused" `Quick test_reference_bindings_are_strict;
     Alcotest.test_case "pending original cannot change physical workspace" `Quick test_pending_cannot_change_its_physical_workspace;

@@ -50,7 +50,8 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
     match observation with
     | Verifier_review_execution.Awaiting -> Error (Execution_pending "original execution has no terminal observation")
     | Repair_required detail -> Error (Execution_repair_required detail)
-    | No_verdict endings ->
+    | No_verdict {first;later} ->
+      let endings = first :: later in
       let lost_writer = List.exists (function
         | _,Verifier_review_ending.Owner_lost -> true
         | _,(Verifier_review_ending.Succeeded | Failed | Cancelled) -> false) endings in

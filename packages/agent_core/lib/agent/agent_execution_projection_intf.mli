@@ -276,15 +276,18 @@ module type S = sig
 
   type tool_invocations =
     { settled : settled_tool_invocation list
-    ; unsettled_tool_names : string list
+    ; requested_tool_names : string list
     }
 
   val tool_invocations : t -> (tool_invocations, error) result
-  (** Every invocation of this root run, read from one snapshot. [settled] is
-      what {!settled_tool_invocations} returns. [unsettled_tool_names] names,
-      in tree order, the invocations that hold no result; whether one of them
-      was attempted is the recovery evidence's reading, not this list's. This
-      is observation, not replay authority. *)
+  (** The tool calls of this root run, read from one snapshot. [settled] is
+      what {!settled_tool_invocations} returns. [requested_tool_names] names,
+      in tree order, every tool use the recorded provider responses of this
+      run asked for. A response is recorded before its first tool runs, and an
+      invocation is opened only when its tool is about to run, so a requested
+      tool use may have no invocation. Whether a requested tool was attempted
+      is the recovery evidence's reading, not this list's. This is
+      observation, not replay authority. *)
 
   val beginning_cursor : t -> cursor
   val current_cursor : t -> (cursor, error) result

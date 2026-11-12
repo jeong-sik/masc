@@ -453,8 +453,14 @@ let test_settled_invocation_projection () =
      | [first; second; third] -> check bool "canonical settlement order" true
          (first.settlement_seq < second.settlement_seq && second.settlement_seq < third.settlement_seq)
      | [] | _ :: _ -> fail "expected three settled root occurrences");
-    (* Unsettled admission never becomes an executed observation. *)
-    let (_turn, _provider, _pending) = open_call root 4 "unsettled-tool" in
+    (* Unsettled admission never becomes an executed observation. The reply
+       that asked for it also asked for a tool whose invocation never opened. *)
+    let (_turn, provider, _pending) = open_call root 4 "unsettled-tool" in
+    let asked name = Llm_provider.Types.ToolUse {id="asked-" ^ name; name; input=`Assoc []} in
+    scope_value (Scope.record_provider_response provider
+      {Types.id="reply-4"; model="fixture"; stop_reason=Types.StopToolUse;
+       content=[asked "unsettled-tool"; asked "never-opened-tool"];
+       unreadable_tool_uses=[]; usage=None; telemetry=None});
     check int "unsettled result is absent" 3
       (List.length (projection_value (Projection.settled_tool_invocations projection)));
     scope_value (Scope.abort root (Scope.Cancelled
@@ -464,8 +470,9 @@ let test_settled_invocation_projection () =
   let reopened = projection_value (Agent.open_execution_projection ~runtime ~dir locator) in
   check int "restart projection retains the same settled occurrences" 3
     (List.length (projection_value (Projection.settled_tool_invocations reopened)));
-  check (list string) "an invocation without a result is listed by its tool name" ["unsettled-tool"]
-    (projection_value (Projection.tool_invocations reopened)).unsettled_tool_names
+  check (list string) "every tool a recorded reply asked for is listed, opened or not"
+    ["unsettled-tool"; "never-opened-tool"]
+    (projection_value (Projection.tool_invocations reopened)).requested_tool_names
 ;;
 
 let test_cursor_codec_is_closed_and_versioned () =

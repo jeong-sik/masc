@@ -86,17 +86,23 @@ let references ~original progress =
 type observation =
   | Awaiting
   | Repair_required of string
-  | No_verdict of (string * Verifier_review_ending.t) list
+  | No_verdict of
+      { first : string * Verifier_review_ending.t
+      ; later : (string * Verifier_review_ending.t) list
+      }
   | Verdict of AR.review_result
+
+type ended_call =
+  { reference : reference
+  ; ending : Verifier_review_ending.t
+  ; reports : Agent.Execution_projection.settled_tool_invocation list
+  ; requested_reports : int
+  }
 
 type call_reading =
   | Call_awaiting
   | Call_repair of string
-  | Call_ended of
-      { ending : Verifier_review_ending.t
-      ; reports : Agent.Execution_projection.settled_tool_invocation list
-      ; unsettled_reports : int
-      }
+  | Call_ended of ended_call
 
 let read_call ~base_path ~original reference =
   match reference.execution with
@@ -111,7 +117,11 @@ let read_call ~base_path ~original reference =
   (* How the execution ended and which report calls it holds are read apart:
      a report the handler settled stays a report whatever ended the run.
      [Retire] means no admitted Tool attempt is left without a result, so a
-     report call that holds no result never reached its handler. *)
+     report call that was requested and holds no result never reached its
+     handler. The requests are counted from the recorded provider responses:
+     an invocation is opened only when its tool is about to run, so a second
+     report of the same response leaves no invocation when the run is cut
+     after the first. *)
   let ended ~recovery ending =
     match recovery with
     | Agent.Operator_repair_required Effect_outcome_unknown ->
@@ -121,9 +131,9 @@ let read_call ~base_path ~original reference =
       let reports = List.filter
         (fun (invocation : Agent.Execution_projection.settled_tool_invocation) ->
            String.equal invocation.tool_name AR.report_tool_name) invocations.settled in
-      let unsettled_reports = List.length
-        (List.filter (String.equal AR.report_tool_name) invocations.unsettled_tool_names) in
-      Ok (Call_ended {ending; reports; unsettled_reports}) in
+      let requested_reports = List.length
+        (List.filter (String.equal AR.report_tool_name) invocations.requested_tool_names) in
+      Ok (Call_ended {reference; ending; reports; requested_reports}) in
   let* observation = Agent.observe_execution projection |> map_error in
   match observation with
   | Agent.Execution_awaiting -> Ok Call_awaiting
@@ -151,33 +161,32 @@ let observe ~base_path ~original progress =
   let* () = if V.output_contract original = V.canonical_output_contract () then Ok ()
     else Error "original output contract differs from the review protocol" in
   let* references = references ~original progress in
-  if references=[] then Ok (Repair_required "historical original has no durable execution locator")
-  else
-    let* readings = List.fold_left (fun acc reference ->
-      let* readings = acc in
-      let* reading = read_call ~base_path ~original reference in
-      Ok ((reference,reading)::readings)) (Ok []) references in
-    let readings = List.rev readings in
-    if List.exists (function _,Call_awaiting -> true | _,(Call_repair _ | Call_ended _) -> false) readings
-    then Ok Awaiting
-    else match List.find_map (function _,Call_repair detail -> Some detail
-      | _,(Call_awaiting | Call_ended _) -> None) readings with
-    | Some detail -> Ok (Repair_required detail)
-    | None ->
-      let ended = List.filter_map (function
-        | reference,Call_ended {ending;reports;unsettled_reports} ->
-          Some (reference,ending,reports,unsettled_reports)
-        | _,(Call_awaiting | Call_repair _) -> None) readings in
-      (* Report calls are counted over the whole attempt. One that never
-         started recorded nothing: alone it leaves the attempt without a
-         verdict, and beside a settled report it shows the reviewer asked to
-         report more than once. *)
-      let settled = List.concat_map (fun (reference,_,reports,_) ->
-        List.map (fun report -> reference,report) reports) ended in
-      let unsettled = List.fold_left (fun total (_,_,_,count) -> total + count) 0 ended in
-      match settled,unsettled with
-      | [],_ -> Ok (No_verdict (List.map (fun (reference,ending,_,_) -> reference.runtime_id,ending) ended))
-      | [reference,report],0 ->
+  let* readings = List.fold_left (fun acc reference ->
+    let* readings = acc in
+    let* reading = read_call ~base_path ~original reference in
+    Ok (reading::readings)) (Ok []) references in
+  let readings = List.rev readings in
+  if List.exists (function Call_awaiting -> true | Call_repair _ | Call_ended _ -> false) readings
+  then Ok Awaiting
+  else match List.find_map (function Call_repair detail -> Some detail
+    | Call_awaiting | Call_ended _ -> None) readings with
+  | Some detail -> Ok (Repair_required detail)
+  | None ->
+    match List.filter_map (function Call_ended call -> Some call
+      | Call_awaiting | Call_repair _ -> None) readings with
+    | [] -> Ok (Repair_required "historical original has no durable execution locator")
+    | first :: later as ended ->
+      (* Report calls are counted over the whole attempt. A requested report
+         that was never settled recorded nothing: with no settled report it
+         leaves the attempt without a verdict, and beside a settled one it
+         shows the reviewer asked to report more than once. *)
+      let settled = List.concat_map (fun call ->
+        List.map (fun report -> call.reference,report) call.reports) ended in
+      let requested = List.fold_left (fun total call -> total + call.requested_reports) 0 ended in
+      let ending call = call.reference.runtime_id,call.ending in
+      match settled,requested with
+      | [],_ -> Ok (No_verdict {first=ending first;later=List.map ending later})
+      | [reference,report],1 ->
         (match verdict_of_report report with
          | Error detail -> Ok (Repair_required detail)
          | Ok verdict -> Ok (Verdict {

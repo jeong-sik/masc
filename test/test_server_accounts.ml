@@ -59,6 +59,12 @@ let test_table_kinds () =
             "/auth/logout"
             nothing));
   Alcotest.(check string)
+    "the MCP endpoint of a person, which judges every request itself"
+    "served"
+    (kind_label (fun router ->
+       public router
+       |> Server_route.post (Server_route.Self_authenticated Route_access.Person_mcp) Server_person_mcp.path nothing));
+  Alcotest.(check string)
     "a route behind a wrapper of the single-user server"
     {|/api/v1/status is {"kind":"read_auth"}|}
     (kind_label (fun router ->
@@ -678,11 +684,18 @@ let test_serves_its_table_alone () =
           Alcotest.(check int) (meth ^ " " ^ path) 404 (fst (request ~net ~port ~meth path)))
         [ "GET", "/api/v1/dashboard/dev-token"
         ; "GET", "/api/v1/status"
-        ; "POST", "/mcp"
-        ; "DELETE", "/mcp"
         ; "GET", "/ws"
         ; "GET", "/api/v1/keepers"
         ];
+      (* The MCP endpoint of a person takes one message for one answer: the
+         table holds no stream and no session to close on its path. *)
+      List.iter
+        (fun meth ->
+          Alcotest.(check int)
+            (meth ^ " " ^ Server_person_mcp.path)
+            405
+            (fst (request ~net ~port ~meth Server_person_mcp.path)))
+        [ "GET"; "DELETE" ];
       (* The pages of a person are in the table, open, and each answer has
          a script nonce of its own. GitHub is the client of config.json, so
          the button of its login can be pressed. *)
@@ -712,6 +725,10 @@ let test_serves_its_table_alone () =
             401
             (fst (request ~net ~port ~meth:"GET" path)))
         [ "/api/v1/auth/whoami"; Auth_preview.provider_accounts_path; Auth_preview_keeper.keepers_path ];
+      Alcotest.(check int)
+        "an MCP message with no credential"
+        401
+        (fst (request ~net ~port ~meth:"POST" Server_person_mcp.path));
       (* The login routes are in the table. GitHub is the client of
          config.json: a start with no Origin gets as far as the route, which
          refuses it. Google has no member, so its start is the 404 of the
@@ -760,7 +777,7 @@ let test_serves_its_table_alone () =
        Alcotest.(check bool)
          "the 404 is the answer of the login route and not of the router"
          false
-         (String.equal body (snd (request ~net ~port ~meth:"POST" "/mcp"))));
+         (String.equal body (snd (request ~net ~port ~meth:"POST" "/api/v1/status"))));
       Alcotest.(check int)
         "a method the table does not hold for a path it holds"
         405

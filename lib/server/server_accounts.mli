@@ -22,7 +22,8 @@
     {b The table.} The routes this module registers are everything the
     server answers. A route is
     [Always_public], or it authenticates the request in its own code against
-    the authorization zone ([Self_authenticated Browser_session]).
+    the authorization zone ([Self_authenticated Browser_session], and
+    [Self_authenticated Person_mcp] for the MCP endpoint of a person).
     {!run} makes the table with {!Server_account_table.checked} before it
     listens ({!Route_of_another_kind}), so a registration of another kind
     stops the boot and is not served.
@@ -94,7 +95,7 @@ type refusal =
           redirect is not the callback of its provider. *)
   | Route_of_another_kind of Server_account_table.refusal
       (** The table holds a route that is neither [Always_public] nor
-          [Self_authenticated Browser_session]. *)
+          [Self_authenticated] with [Browser_session] or [Person_mcp]. *)
   | Https_listener_refused of string
       (** {!Server_bootstrap_http.https_listener_of_env} refused. *)
   | Listener_not_bound of

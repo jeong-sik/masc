@@ -70,6 +70,10 @@ val github_callback_path : string
       ({!Auth_preview_keeper}, plan D1-5)
     - [POST /api/v1/auth/keepers/turn], one turn of the person's Keeper on
       the Runtime they gave it ({!Server_preview_keeper_turn}, plan D2-8)
+    - [POST /mcp], the MCP endpoint of the person ({!Server_person_mcp},
+      plan S1b-1), registered as [Self_authenticated Person_mcp]. It is
+      judged as [Read_auth] before its body is read, and each tool makes
+      the judgment of the route it stands for
 
     Each of these routes is judged on one snapshot that the zone could be
     trusted for ({!Authz_zone.read}). A zone whose file stopped, or whose

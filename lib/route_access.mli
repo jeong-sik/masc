@@ -29,6 +29,12 @@ type self_authenticated_reason =
           session, and the others check the session cookie, the origin and the
           CSRF token in their own code ([Authz_browser_request.check]),
           answering 401 or 403. *)
+  | Person_mcp
+      (** The MCP endpoint of a person on the account server ([POST /mcp],
+          plan S1b): the handler judges the credential of every request by
+          [Auth_gate.decide], a browser session or a scoped PAT, for the
+          method or the tool that the request names. It keeps no MCP session
+          and takes no caller name from the request. *)
   | Loopback_dev_token
       (** [/api/v1/dashboard/dev-token]: the handler answers 404 unless the bind
           is loopback and strict auth is off. Past that it runs [with_public_read]

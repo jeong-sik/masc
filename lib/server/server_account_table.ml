@@ -12,7 +12,7 @@ type refusal =
 let refusal_to_string { path; access } =
   Printf.sprintf
     "the route %s is registered as %s, and the account server serves only routes that are \
-     public or that authenticate a browser session themselves"
+     public or that judge a browser session or a personal access token themselves"
     path
     (Yojson.Safe.to_string (Route_access.to_json access))
 ;;
@@ -21,7 +21,7 @@ let refusal_to_string { path; access } =
    a wrapper of [Server_auth] or in its own handler. *)
 let served : Route_access.t -> bool = function
   | Route_access.Always_public
-  | Route_access.Self_authenticated Route_access.Browser_session -> true
+  | Route_access.Self_authenticated (Route_access.Browser_session | Route_access.Person_mcp) -> true
   | Route_access.Public_read
       (Route_access.Credential_when_strict | Route_access.Open_when_strict)
   | Route_access.Read_auth

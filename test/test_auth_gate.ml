@@ -281,6 +281,10 @@ let each_kind_of_route_judges_the_request () =
         , Route_access.Self_authenticated Route_access.Browser_session
         , request Nothing
         , "judged by its route" )
+      ; ( "MCP endpoint of a person, nothing"
+        , Route_access.Self_authenticated Route_access.Person_mcp
+        , request Nothing
+        , "judged by its route" )
       ; ( "OAuth route, nothing"
         , Route_access.Self_authenticated Route_access.Oauth_protocol
         , request Nothing

@@ -3,6 +3,7 @@ type self_authenticated_reason =
   | Oauth_protocol
   | Websocket_upgrade
   | Browser_session
+  | Person_mcp
   | Loopback_dev_token
   | Subpath_dispatch
 
@@ -29,6 +30,7 @@ let reason_to_string = function
   | Oauth_protocol -> "oauth_protocol"
   | Websocket_upgrade -> "websocket_upgrade"
   | Browser_session -> "browser_session"
+  | Person_mcp -> "person_mcp"
   | Loopback_dev_token -> "loopback_dev_token"
   | Subpath_dispatch -> "subpath_dispatch"
 ;;

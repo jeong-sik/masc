@@ -120,10 +120,10 @@ let with_authority reqd f =
   | None -> Http.Response.internal_error "the request has no admitted authority" reqd
 ;;
 
-let with_body reqd f =
+let with_body ?(max_bytes = max_request_bytes) reqd f =
   Http.Request.read_body_async_with_limit
     reqd
-    ~max_bytes:max_request_bytes
+    ~max_bytes
     ~on_body:f
     ~on_error:(function
       | Http.Request.Too_large max_bytes ->
@@ -230,6 +230,7 @@ let add_routes t router =
 
 let whoami_path = "/api/v1/auth/whoami"
 let ms_per_second = 1000.
+let now_ms (t : R.t) = int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second)
 
 let gate_request ~request_authority (request : Httpun.Request.t) =
   { Auth_gate.credentials =
@@ -263,10 +264,7 @@ let whoami (t : R.t) request reqd =
     on_trusted t reqd (fun trusted ->
       respond
         reqd
-        (Auth_preview.whoami
-           trusted
-           ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
-           (gate_request ~request_authority request))))
+        (Auth_preview.whoami trusted ~now_ms:(now_ms t) (gate_request ~request_authority request))))
 ;;
 
 (* The one a route of a person acts for, judged by [gate]. [f] gets the state
@@ -274,12 +272,7 @@ let whoami (t : R.t) request reqd =
 let as_gated (t : R.t) ~gate request reqd f =
   with_authority reqd (fun request_authority ->
     on_trusted t reqd (fun trusted ->
-      match
-        gate
-          trusted
-          ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
-          (gate_request ~request_authority request)
-      with
+      match gate trusted ~now_ms:(now_ms t) (gate_request ~request_authority request) with
       | Error answer -> respond reqd answer
       | Ok who -> f (trusted :> Authz_zone.snapshot).Authz_zone.state who))
 ;;
@@ -347,6 +340,30 @@ let keeper_turn t ~env ~base_path request reqd =
       respond reqd (Server_preview_keeper_turn.run ~env ~person:(person_of t person) ~base_path ~body)))
 ;;
 
+(* ---- the MCP endpoint of a person (plan S1b-1) ---- *)
+
+let mcp_access = Server_route.Self_authenticated Route_access.Person_mcp
+
+let respond_mcp reqd { Server_person_mcp.status; headers; body } =
+  let headers = headers @ [ "content-length", string_of_int (String.length body) ] in
+  Http_reqd.respond_with_string reqd (Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status) body
+;;
+
+(* The credential is judged before the body is read, and the tools judge the
+   same request on the same snapshot. *)
+let person_mcp (t : R.t) request reqd =
+  with_authority reqd (fun request_authority ->
+    on_trusted t reqd (fun trusted ->
+      let caller =
+        { Server_person_mcp.trusted; now_ms = now_ms t; gate = gate_request ~request_authority request }
+      in
+      match Server_person_mcp.admitted caller with
+      | Error answer -> respond reqd answer
+      | Ok () ->
+        with_body ~max_bytes:Server_person_mcp.max_message_bytes reqd (fun body ->
+          respond_mcp reqd (Server_person_mcp.answer caller request ~body))))
+;;
+
 let add_person_routes t ~env ~base_path router =
   router
   |> Server_route.get Server_route.Always_public "/" (page Auth_preview.home_page t)
@@ -361,4 +378,5 @@ let add_person_routes t ~env ~base_path router =
   |> Server_route.post access Auth_preview_keeper.turn_path (keeper_turn t ~env ~base_path)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
+  |> Server_route.post mcp_access Server_person_mcp.path (person_mcp t)
 ;;

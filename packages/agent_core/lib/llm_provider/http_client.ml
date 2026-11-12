@@ -818,6 +818,7 @@ type cache = Http_client_cache.t
 
 type cache_close_counts = Http_client_cache.close_counts =
   { request_failed : int
+  ; request_not_delivered : int
   ; not_persistent : int
   ; body_not_drained : int
   ; transport_ended : int
@@ -1006,7 +1007,54 @@ let make_connection ~sw ~net ~origin : (connection, http_error) result =
   | Failure msg -> Error (unknown_network_error msg)
 ;;
 
-let track_connection_eof ~eof_seen connection =
+(* True when the transport itself named the peer's close: an errno that
+   [classify_unix_error] sends to [Connection_reset] or [End_of_file]. The
+   default [classify_eio_error] gives a reset whose backend error is not an
+   errno (tls-eio's [Tls_socket_closed], which tls_eio.mli does not export) is
+   a guess. A guess does not count: [Request_wire.Not_delivered] is the fact
+   that later lets a request be sent again (RFC-0492 §3.3 condition 2). *)
+let backend_named_peer_close backend =
+  match classify_eio_backend_error backend with
+  | Some (Connection_reset | End_of_file) -> true
+  | Some
+      ( Connection_refused
+      | Dns_failure
+      | Tls_error
+      | Timeout
+      | Local_resource_exhaustion
+      | Unknown )
+  | None -> false
+;;
+
+let transport_named_peer_close = function
+  | Unix.Unix_error (code, _, _) ->
+    (match classify_unix_error code with
+     | Connection_reset | End_of_file -> true
+     | Connection_refused
+     | Dns_failure
+     | Tls_error
+     | Timeout
+     | Local_resource_exhaustion
+     | Unknown -> false)
+  | Eio.Io (Eio.Net.E net_error, _) ->
+    (match net_error with
+     | Eio.Net.Connection_reset backend -> backend_named_peer_close backend
+     | Eio.Net.Connection_failure _ -> false)
+  | Eio.Io (Eio.Exn.X backend, _) -> backend_named_peer_close backend
+  | _ -> false
+;;
+
+(* The reason a request that failed before it had an answer ends its
+   connection. A request is [Request_not_delivered] only on the evidence of
+   [Request_wire.delivery]; every other failure may have reached the server. *)
+let failure_close_reason wire : Reuse_verdict.close_reason =
+  match Request_wire.delivery ~names_peer_close:transport_named_peer_close wire with
+  | Request_wire.Not_delivered -> Request_not_delivered
+  | Request_wire.Possibly_delivered -> Request_failed
+;;
+
+let track_connection ~wire connection =
+  let eof_seen = Request_wire.eof_seen wire in
   let module Flow = struct
     type t = unit
 
@@ -1016,14 +1064,33 @@ let track_connection_eof ~eof_seen connection =
 
     let single_read () buffer =
       match Eio.Flow.single_read connection buffer with
-      | count -> count
+      | count ->
+        Request_wire.bytes_read wire count;
+        count
       | exception End_of_file ->
         eof_seen := true;
         raise End_of_file
     ;;
 
-    let single_write () buffers = Eio.Flow.single_write connection buffers
-    let copy () ~src = Eio.Flow.copy src connection
+    (* Every write passes through here so an error a write raises is seen
+       where it is raised, not guessed from the exception that finally
+       escapes (tls-eio stores an error from one side and raises it again on
+       the other). Cancellation is not a write failure. *)
+    let observed_write write =
+      Request_wire.write_began wire;
+      try write () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        Request_wire.write_raised wire exn;
+        Printexc.raise_with_backtrace exn backtrace
+    ;;
+
+    let single_write () buffers =
+      observed_write (fun () -> Eio.Flow.single_write connection buffers)
+    ;;
+
+    let copy () ~src = observed_write (fun () -> Eio.Flow.copy src connection)
     let shutdown () command = Eio.Flow.shutdown connection command
   end
   in
@@ -1048,7 +1115,7 @@ let track_connection_eof ~eof_seen connection =
    the keeper's crash threshold, so a provider hanging up walked keepers toward
    termination (masc#29951; 185 occurrences over 2026-08-18/20/24).
 
-   The evidence here is structural, not textual. [track_connection_eof] routes
+   The evidence here is structural, not textual. [track_connection] routes
    every transport read through one [single_read], and nothing but a real
    [End_of_file] on the socket sets the flag, so a set flag at the moment an
    unclassified exception surfaces means the read that failed is the close. The
@@ -1057,10 +1124,12 @@ let eof_error exn =
   NetworkError { message = Printexc.to_string exn; kind = End_of_file }
 ;;
 
-(* A cohttp client whose requests all go over [conn]. [eof_seen] is set once
-   a read on [conn] met the transport's end of file. *)
-let tracked_client ~eof_seen conn =
-  let tracked = track_connection_eof ~eof_seen conn in
+(* A cohttp client whose requests all go over [conn]. [wire] records what
+   this request's reads and writes on [conn] showed: whether a read met the
+   transport's end of file, whether a write raised, how many response bytes
+   came back. *)
+let tracked_client ~wire conn =
+  let tracked = track_connection ~wire conn in
   Cohttp_eio.Client.make_generic (fun ~sw:_ _uri -> tracked)
 ;;
 
@@ -1131,8 +1200,9 @@ let with_client ?cache ~sw ~net ~origin f =
          Ok result)
   | Some cache ->
     let* conn = open_connection (Some cache) ~sw ~net ~origin in
-    let eof_seen = ref false in
-    let client = tracked_client ~eof_seen (held_flow conn) in
+    let wire = Request_wire.create () in
+    let eof_seen = Request_wire.eof_seen wire in
+    let client = tracked_client ~wire (held_flow conn) in
     let verdict = ref (Reuse_verdict.Close Request_failed) in
     Fun.protect
       ~finally:(fun () ->
@@ -1148,9 +1218,12 @@ let with_client ?cache ~sw ~net ~origin f =
          | Ok (result, reuse) ->
            verdict := if !eof_seen then Close Transport_ended else reuse;
            Ok result
-         | Error error -> Error error
+         | Error error ->
+           verdict := Close (failure_close_reason wire);
+           Error error
          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
          | exception exn ->
+           verdict := Close (failure_close_reason wire);
            (match classify_network_exn exn with
             | Some error -> Error error
             | None when !eof_seen -> Error (eof_error exn)
@@ -1356,7 +1429,8 @@ let post_sync_once_after_validation
   let phase = ref Before_dispatch in
   let status = ref None in
   let connection = ref None in
-  let transport_eof_seen = ref false in
+  let wire = Request_wire.create () in
+  let transport_eof_seen = Request_wire.eof_seen wire in
   let fail error =
     match !phase, !status with
     | Before_dispatch, None -> Error (Before_dispatch_error error)
@@ -1398,7 +1472,7 @@ let post_sync_once_after_validation
     match classify_network_exn exn with
     | Some error -> error
     | None ->
-      release_connection Request_failed;
+      end_request_connection (Close (failure_close_reason wire));
       Reserved_exn.reraise_if_reserved exn;
       if !transport_eof_seen
       then eof_error exn
@@ -1457,7 +1531,7 @@ let post_sync_once_after_validation
       with_headers_deadline (fun () ->
         let* conn = open_connection cache ~sw ~net ~origin in
         connection := Some conn;
-        let client = tracked_client ~eof_seen:transport_eof_seen (held_flow conn) in
+        let client = tracked_client ~wire (held_flow conn) in
         phase := Dispatch_started;
         Http_client_phase_observer.observe Http_client_phase_observer.Dispatch_started;
         Http_request_observer.dispatch_entered observation;
@@ -1494,7 +1568,7 @@ let post_sync_once_after_validation
   in
   match post_result with
   | Error error ->
-    release_connection Request_failed;
+    end_request_connection (Close (failure_close_reason wire));
     fail error
   | Ok
       ( response
@@ -1800,20 +1874,21 @@ let with_post_stream
       (* Held outside the window for the cancellation that comes from
          outside it, at the handoff. *)
       let connection = ref None in
+      let wire = Request_wire.create () in
       let close_connection () =
         match !connection with
         | None -> ()
         | Some conn ->
           connection := None;
-          end_connection conn (Close Request_failed)
+          end_connection conn (Close (failure_close_reason wire))
       in
       let* answer =
         match
           under_the_window (fun () ->
             let* conn = open_connection cache ~sw ~net ~origin in
             connection := Some conn;
-            let transport_eof_seen = ref false in
-            let client = tracked_client ~eof_seen:transport_eof_seen (held_flow conn) in
+            let transport_eof_seen = Request_wire.eof_seen wire in
+            let client = tracked_client ~wire (held_flow conn) in
             Http_request_observer.dispatch_entered observation;
             match
               Cohttp_eio.Client.post

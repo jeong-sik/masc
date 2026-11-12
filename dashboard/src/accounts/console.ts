@@ -23,30 +23,47 @@ export interface Failure {
   readonly attempts: number
 }
 
+/** What a page with a button that reads again does: nothing yet, a reading,
+    or the way to the sign-in page after a reading found no session. The
+    button stays on the page while the browser leaves, so the focus of the
+    person who pressed it stays where it was. */
+export type Next = 'idle' | 'reading' | 'leaving'
+
 export type SignOut =
   | { readonly kind: 'idle' }
   | { readonly kind: 'sending' }
   | { readonly kind: 'failed'; readonly failure: Failure }
+  /** The person is out: the session ended, or none was left to end. The
+      browser leaves, and the page stays as it was while it does. */
+  | { readonly kind: 'out' }
 
 export type View =
   /** The first reading of the session. `slow` once it has lasted long
       enough that the page says it is waiting. */
   | { readonly kind: 'reading'; readonly slow: boolean }
-  /** The session could not be read. `retrying` while another reading runs. */
-  | { readonly kind: 'failed'; readonly failure: Failure; readonly retrying: boolean }
-  | { readonly kind: 'signed_in'; readonly session: Session; readonly who: Who; readonly signOut: SignOut }
-  /** The browser is on its way to the sign-in page. */
+  /** The first reading found no session, and the browser is on its way to
+      the sign-in page. */
   | { readonly kind: 'leaving' }
+  /** The session could not be read. */
+  | { readonly kind: 'failed'; readonly failure: Failure; readonly next: Next }
+  /** The browser holds the session of another person than the one the page
+      read or showed: another tab signed in. The page shows neither, and
+      sends nothing for the person it showed. */
+  | { readonly kind: 'changed'; readonly next: Next }
+  | { readonly kind: 'signed_in'; readonly session: Session; readonly who: Who; readonly signOut: SignOut }
 
 export interface Deps {
   readonly send: Send
-  /** Takes the browser to the sign-in page. */
+  /** Takes the browser to the sign-in page. The console calls it only when
+      the browser holds no session. */
   readonly leave: () => void
 }
 
 export interface ConsoleModel {
   readonly view: ReadonlySignal<View>
-  /** Reads the session and whose it is. A call during a reading joins it. */
+  /** Reads the session and whose it is. A call during a reading joins it. A
+      call while someone is signed in, or after a reading found no session,
+      does nothing. */
   readonly load: () => Promise<void>
   readonly signOut: () => Promise<void>
 }
@@ -59,16 +76,21 @@ interface SignedIn {
   readonly who: Who
 }
 
-/** The session and whose it is. The two come from two requests, and a cookie
-    that changed between them makes them name two people; the frame shows
-    one person, so it shows neither. */
-async function readSignedIn(send: Send): Promise<Answer<SignedIn>> {
+/** What a reading found: the session and whose it is, two people, or a
+    problem. The two come from two requests, and another tab that signs in
+    between them makes them name two people. */
+type Found =
+  | { readonly kind: 'signed_in'; readonly value: SignedIn }
+  | { readonly kind: 'changed' }
+  | { readonly kind: 'problem'; readonly problem: Problem }
+
+async function readSignedIn(send: Send): Promise<Found> {
   const session = await readSession(send)
-  if (!session.ok) return session
+  if (!session.ok) return { kind: 'problem', problem: session.problem }
   const who = await readWho(send)
-  if (!who.ok) return who
-  if (who.value.id !== session.value.userId) return { ok: false, problem: { kind: 'unreadable' } }
-  return { ok: true, value: { session: session.value, who: who.value } }
+  if (!who.ok) return { kind: 'problem', problem: who.problem }
+  if (who.value.id !== session.value.userId) return { kind: 'changed' }
+  return { kind: 'signed_in', value: { session: session.value, who: who.value } }
 }
 
 /** What a sign-out came to: the person is out (the session ended, or none
@@ -83,20 +105,30 @@ export function createConsole({ send, leave }: Deps): ConsoleModel {
 
   const read = async (): Promise<void> => {
     const before = view.value
+    // Someone is signed in, or the browser leaves: there is nothing to read.
+    if (before.kind === 'signed_in' || before.kind === 'leaving') return
+    if (before.kind !== 'reading' && before.next === 'leaving') return
     const failedBefore = before.kind === 'failed' ? before.failure.attempts : 0
-    if (before.kind === 'failed') view.value = { ...before, retrying: true }
+    if (before.kind !== 'reading') view.value = { ...before, next: 'reading' }
     const slow = setTimeout(() => {
       if (view.value.kind === 'reading') view.value = { kind: 'reading', slow: true }
     }, slowAfterMs)
-    const answer = await readSignedIn(send)
+    const found = await readSignedIn(send)
     clearTimeout(slow)
-    if (answer.ok) {
-      view.value = { kind: 'signed_in', ...answer.value, signOut: { kind: 'idle' } }
-    } else if (answer.problem.kind === 'signed_out') {
-      view.value = { kind: 'leaving' }
-      leave()
-    } else {
-      view.value = { kind: 'failed', failure: { problem: answer.problem, attempts: failedBefore + 1 }, retrying: false }
+    switch (found.kind) {
+      case 'signed_in':
+        view.value = { kind: 'signed_in', ...found.value, signOut: { kind: 'idle' } }
+        return
+      case 'changed':
+        view.value = { kind: 'changed', next: 'idle' }
+        return
+      case 'problem':
+        if (found.problem.kind === 'signed_out') {
+          view.value = before.kind === 'reading' ? { kind: 'leaving' } : { ...before, next: 'leaving' }
+          leave()
+          return
+        }
+        view.value = { kind: 'failed', failure: { problem: found.problem, attempts: failedBefore + 1 }, next: 'idle' }
     }
   }
 
@@ -106,27 +138,33 @@ export function createConsole({ send, leave }: Deps): ConsoleModel {
     return reading
   }
 
-  // When the person is out, the page stays as it is while the browser
-  // leaves, so the focus stays on the button that was pressed.
   const signOut = async (): Promise<void> => {
     const before = view.value
-    if (before.kind !== 'signed_in' || before.signOut.kind === 'sending') return
+    if (before.kind !== 'signed_in' || before.signOut.kind === 'sending' || before.signOut.kind === 'out') return
     const refusedBefore = before.signOut.kind === 'failed' ? before.signOut.failure.attempts : 0
     view.value = { ...before, signOut: { kind: 'sending' } }
+    const out = (): void => {
+      view.value = { ...before, signOut: { kind: 'out' } }
+      leave()
+    }
     const first = ended(await endSession(send, before.session.csrfToken))
-    if (first.kind === 'out') return leave()
+    if (first.kind === 'out') return out()
     // The server refuses a token that is not the one of the session, which
-    // is what a page holds when another tab signed in again. The session is
-    // read again: a session that ended, or that is another person's, leaves
-    // the person of this page out; a token that changed is sent once more.
+    // is what a page holds when another tab signed in. The session is read
+    // again. A session that ended leaves the person out. Another person's
+    // session is not ended: the page says the account changed. A token of
+    // the same person that changed is sent once more.
     const now = await readSession(send)
-    if (!now.ok && now.problem.kind === 'signed_out') return leave()
-    if (now.ok && now.value.userId !== before.session.userId) return leave()
+    if (!now.ok && now.problem.kind === 'signed_out') return out()
+    if (now.ok && now.value.userId !== before.session.userId) {
+      view.value = { kind: 'changed', next: 'idle' }
+      return
+    }
     const session = now.ok ? now.value : before.session
     const last = session.csrfToken === before.session.csrfToken
       ? first
       : ended(await endSession(send, session.csrfToken))
-    if (last.kind === 'out') return leave()
+    if (last.kind === 'out') return out()
     view.value = { ...before, session, signOut: { kind: 'failed', failure: { problem: last.problem, attempts: refusedBefore + 1 } } }
   }
 
@@ -148,6 +186,15 @@ function problemWords(problem: Shown): string {
       return problem.status === serviceUnavailable
         ? '서버가 잠시 준비되지 않았어요. 잠시 뒤 다시 해 주세요.'
         : '서버가 요청을 받아들이지 않았어요.'
+  }
+}
+
+/** What the status line under a button that reads again says. */
+function nextWords(next: Next): string {
+  switch (next) {
+    case 'idle': return ''
+    case 'reading': return '다시 불러오고 있어요…'
+    case 'leaving': return '세션이 끝났어요. 로그인 화면으로 이동해요…'
   }
 }
 
@@ -184,8 +231,18 @@ function Account({ who, signOut, onSignOut }: { readonly who: Who; readonly sign
   return html`
     <div class="account">
       <span class="hint">${roleWords(who.role)} …${who.id.slice(-idTailLength)}</span>
-      <button type="button" aria-disabled=${signOut.kind === 'sending'} onClick=${onSignOut}>로그아웃</button>
+      <button type="button" aria-disabled=${signOut.kind === 'sending' || signOut.kind === 'out'} onClick=${onSignOut}>로그아웃</button>
     </div>
+  `
+}
+
+/** A button that reads the session again, and the line that says what it
+    does. Each line is on the page from the start of its state and fills
+    when something happens, which is when a screen reader says it. */
+function Retry({ label, next, onRetry }: { readonly label: string; readonly next: Next; readonly onRetry: () => void }): VNode {
+  return html`
+    <p><button type="button" class="primary" aria-disabled=${next !== 'idle'} onClick=${onRetry}>${label}</button></p>
+    <p class="hint" role="status">${nextWords(next)}</p>
   `
 }
 
@@ -195,16 +252,21 @@ function Account({ who, signOut, onSignOut }: { readonly who: Who; readonly sign
 function Body({ view, onRetry }: { readonly view: View; readonly onRetry: () => void }): VNode {
   switch (view.kind) {
     case 'reading':
-      // The line is on the page from the start and fills when the wait is
-      // long, which is when a screen reader says it.
       return html`<p class="hint" role="status">${view.slow ? '내 계정을 불러오고 있어요…' : ''}</p>`
     case 'leaving':
       return html`<p class="hint" role="status">로그인 화면으로 이동해요…</p>`
     case 'failed':
       return html`
         <${ProblemNote} key=${view.failure.attempts} title="내 계정을 불러오지 못했어요" failure=${view.failure} />
-        <p><button type="button" class="primary" aria-disabled=${view.retrying} onClick=${onRetry}>다시 시도</button></p>
-        <p class="hint" role="status">${view.retrying ? '다시 불러오고 있어요…' : ''}</p>
+        <${Retry} label="다시 시도" next=${view.next} onRetry=${onRetry} />
+      `
+    case 'changed':
+      return html`
+        <div class="callout" role="alert">
+          <p class="callout-title">다른 탭에서 계정이 바뀌었어요</p>
+          <p>이 브라우저에는 지금 다른 계정이 로그인되어 있어요. 이 화면은 그 계정을 불러오기 전에는 아무것도 보내지 않아요.</p>
+        </div>
+        <${Retry} label="지금 계정 불러오기" next=${view.next} onRetry=${onRetry} />
       `
     case 'signed_in':
       return html`
@@ -213,18 +275,25 @@ function Body({ view, onRetry }: { readonly view: View; readonly onRetry: () => 
           : null}
         <p>구독, Keeper, 토큰은 아직 처음 화면에서 다뤄요.</p>
         <p><a class="button" href="/">처음 화면으로</a></p>
+        <p class="hint" role="status">${view.signOut.kind === 'out' ? '로그아웃했어요. 로그인 화면으로 이동해요…' : ''}</p>
       `
   }
 }
+
+/** Whether a move from one state to another takes away the button the person
+    pressed: the retry of a failed or changed page when the session is read,
+    and the sign-out when the page finds that the account changed. */
+const takesThePressedButton = (from: View['kind'], to: View['kind']): boolean =>
+  ((from === 'failed' || from === 'changed') && to === 'signed_in') || (from === 'signed_in' && to === 'changed')
 
 export function ConsoleFrame({ model }: { readonly model: ConsoleModel }): VNode {
   const view = model.view.value
   const heading = useRef<HTMLHeadingElement>(null)
   const shown = useRef(view.kind)
-  // A retry that worked takes away the button the person pressed. The focus
-  // goes to the heading of the page, not to nothing.
+  // The focus goes to the heading of the page when the pressed button goes
+  // away, not to nothing.
   useEffect(() => {
-    if (shown.current === 'failed' && view.kind === 'signed_in') heading.current?.focus()
+    if (takesThePressedButton(shown.current, view.kind)) heading.current?.focus()
     shown.current = view.kind
   }, [view.kind])
   return html`

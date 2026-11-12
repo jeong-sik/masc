@@ -399,6 +399,13 @@ let recover_keeper_msg_requests_on_startup ~base_path =
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
+  Server_dashboard_snapshot_sources.install ~state ~sw ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~on_shell_published:(fun ~scope ~shell ~shell_light ->
+      Server_dashboard_http_execution_surfaces.publish_shell_cache_success
+        ~state ~scope ~light:false shell;
+      Server_dashboard_http_execution_surfaces.publish_shell_cache_success
+        ~state ~scope ~light:true shell_light);
   Server_keeper_build_maintenance.start ~sw ~clock ~config;
   Server_keeper_volume_maintenance.start ~sw ~clock ~config;
   Server_sandbox_volume_gc_report.start ~sw ~clock ~config;

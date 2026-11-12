@@ -22,9 +22,11 @@ let components_of_input input =
         | Gate_settings | Event_queue | Waiting_inventory _; _}
     | Gate _ | Connector _ -> [Tools]
     | Execution_invalidated -> [Shell; Telemetry]
-    | Keeper {change = Phase _ | Composite | Row | Turn | Turn_preview | Chat
+    | Keeper {change = Phase _ | Composite | Row; _}
+    | Every_keeper_row -> [Telemetry]
+    | Keeper {change = Turn | Turn_preview | Chat
         | Native_tasks | Child_content | Memory_journal | Async_requests; _}
-    | Dataset _ | Every_keeper_row | Chat_operation _ | Store _ | Board
+    | Dataset _ | Chat_operation _ | Store _ | Board
     | Agent_core _ | Telemetry_sample | Telemetry_gap _ | Keeper_tool_call _
     | Keeper_approval_audit _ | Workspace_agent_signal _ | Workspace_messages _
     | Transport_state -> []

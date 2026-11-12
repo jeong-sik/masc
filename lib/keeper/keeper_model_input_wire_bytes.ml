@@ -50,9 +50,9 @@ let measurer ~config message =
   | Error (_ : Agent_core.History.media_error) -> None
   | Ok messages ->
     (match
-       Agent_core.Llm_provider.Complete_common.serialize_http_request
+       Agent_core.Llm_provider.Complete_common.serialize_http_request_body
          ~stream:false ~config ~messages ~tools:[]
      with
-     | Ok serialized -> Some (String.length serialized.body)
+     | Ok body -> Some (String.length body)
      | Error (_ : Agent_core.Llm_provider.Http_client.http_error) -> None)
 ;;

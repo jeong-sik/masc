@@ -814,7 +814,13 @@ let maybe_add_connection_close ?cache headers =
 
 (* ── Connection cache ──────────────────────────────────────── *)
 
-type cache = Http_client_cache.t
+(* [tls_config] belongs to the cache because a parked connection was verified
+   under it: a request that leased the connection under another trust
+   configuration would skip that configuration's check. *)
+type cache =
+  { pool : Http_client_cache.t
+  ; tls_config : Tls.Config.client option
+  }
 
 type cache_close_counts = Http_client_cache.close_counts =
   { request_failed : int
@@ -833,8 +839,14 @@ type cache_stats = Http_client_cache.stats =
   ; closed_after_reuse : cache_close_counts
   }
 
-let create_cache = Http_client_cache.create
-let cache_stats = Http_client_cache.stats
+let create_cache ~sw ~mono_clock ?max_idle_per_host ?idle_ttl_seconds ?tls_config () =
+  { pool =
+      Http_client_cache.create ~sw ~mono_clock ?max_idle_per_host ?idle_ttl_seconds ()
+  ; tls_config
+  }
+;;
+
+let cache_stats cache = Http_client_cache.stats cache.pool
 
 let cache_key_of_origin (origin : validated_uri) : Http_client_cache.Key.t =
   { Http_client_cache.Key.scheme = http_scheme_to_string origin.scheme
@@ -867,7 +879,7 @@ let%test "cache_key_of_origin preserves explicit port" =
 
 (** Resolve [origin] and prepare the TLS wrapper if needed.
     The result is reused by both one-shot clients and cached connections. *)
-let resolve_origin net (origin : validated_uri) =
+let resolve_origin ?tls_config net (origin : validated_uri) =
   let net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t) in
   let service = Int.to_string origin.port in
   let* addresses =
@@ -900,7 +912,9 @@ let resolve_origin net (origin : validated_uri) =
           ; kind = https_init_error_network_kind reason
           }
       in
-      let* wrap = Result.map_error wrap_error (Api_common.make_https_result ()) in
+      let* wrap =
+        Result.map_error wrap_error (Api_common.make_https_result ?tls_config ())
+      in
       let+ peer =
         Result.map_error
           (fun reason ->
@@ -983,8 +997,8 @@ let make_client ~net ~origin =
 
 (** Create a single transport connection bound to [sw]. This is the unit
     stored in the connection cache and reused across requests. *)
-let make_connection ~sw ~net ~origin : (connection, http_error) result =
-  let* net, addresses, tls_wrap = resolve_origin net origin in
+let make_connection ?tls_config ~sw ~net ~origin () : (connection, http_error) result =
+  let* net, addresses, tls_wrap = resolve_origin ?tls_config net origin in
   try
     let sock = Tcp_address_race.connect ~sw ~net addresses in
     let conn : connection =
@@ -1053,6 +1067,30 @@ let failure_close_reason wire : Reuse_verdict.close_reason =
   | Request_wire.Possibly_delivered -> Request_failed
 ;;
 
+(* A provider request body is megabytes of JSON. cohttp-eio copies it into the
+   connection's write buffer in one go, and the buffer's flusher then hands
+   everything that accumulated to one write, which TLS encrypts without
+   suspending: one request held its domain for the whole encryption (64-125 ms
+   at a time on a live server). A write is passed down this many bytes at a
+   time, and the flusher yields between slices so the other fibers on the
+   domain run. The bytes on the wire and their order are unchanged.
+
+   The slicing sits in the flusher, not in the body source. cohttp-eio closes
+   the write buffer as soon as it has read the response head, and the fiber
+   copying the body would then write to a closed buffer if it had suspended
+   mid-copy. The flusher drains what is buffered after the close. *)
+let request_slice_bytes = 65_536
+
+(* The leading [limit] bytes of [buffers]; [limit] is positive. *)
+let rec leading_bytes limit = function
+  | [] -> []
+  | buffer :: rest ->
+    let length = Cstruct.length buffer in
+    if length >= limit
+    then [ Cstruct.sub buffer 0 limit ]
+    else buffer :: leading_bytes (limit - length) rest
+;;
+
 let track_connection ~wire connection =
   let eof_seen = Request_wire.eof_seen wire in
   let module Flow = struct
@@ -1086,8 +1124,19 @@ let track_connection ~wire connection =
         Printexc.raise_with_backtrace exn backtrace
     ;;
 
+    (* The previous call left part of its batch unwritten, so this call
+       continues it. The yield comes before the write: a cancellation there
+       leaves this call with nothing written. *)
+    let batch_continues = ref false
+
     let single_write () buffers =
-      observed_write (fun () -> Eio.Flow.single_write connection buffers)
+      if !batch_continues then Eio.Fiber.yield ();
+      let slice = leading_bytes request_slice_bytes buffers in
+      let written =
+        observed_write (fun () -> Eio.Flow.single_write connection slice)
+      in
+      batch_continues := written < Cstruct.lenv buffers;
+      written
     ;;
 
     let copy () ~src = observed_write (fun () -> Eio.Flow.copy src connection)
@@ -1100,6 +1149,67 @@ let track_connection ~wire connection =
        :: Eio.Resource.bindings (Eio.Flow.Pi.two_way (module Flow)))
   in
   Eio.Resource.T ((), operations)
+;;
+
+(* A fiber that only yields takes one turn each time the fiber beside it
+   yields, so its turn count is the other fiber's yield count. *)
+let turns_beside work =
+  let finished = ref false in
+  let turns = ref 0 in
+  Eio.Fiber.both
+    (fun () ->
+       work ();
+       finished := true)
+    (fun () ->
+       while not !finished do
+         incr turns;
+         Eio.Fiber.yield ()
+       done);
+  !turns
+;;
+
+let%test "a large write reaches the connection in slices with a yield between them" =
+  Eio_main.run
+  @@ fun _env ->
+  let writes = ref [] in
+  let received = Buffer.create 0 in
+  let module Peer = struct
+    type t = unit
+
+    let read_methods = []
+    let single_read () _ = raise End_of_file
+
+    let single_write () buffers =
+      writes := Cstruct.lenv buffers :: !writes;
+      List.iter
+        (fun buffer -> Buffer.add_string received (Cstruct.to_string buffer))
+        buffers;
+      Cstruct.lenv buffers
+    ;;
+
+    let copy () ~src = Eio.Flow.Pi.simple_copy ~single_write () ~src
+    let shutdown () _ = ()
+  end
+  in
+  let connection : connection =
+    Eio.Resource.T
+      ( ()
+      , Eio.Resource.handler
+          (Eio.Resource.H (Eio.Resource.Close, fun () -> ())
+           :: Eio.Resource.bindings (Eio.Flow.Pi.two_way (module Peer))) )
+  in
+  let tracked = track_connection ~wire:(Request_wire.create ()) connection in
+  let slices = 4 in
+  let payload =
+    String.init ((slices * request_slice_bytes) + 5) (fun i -> Char.chr (i mod 251))
+  in
+  let turns =
+    turns_beside (fun () -> Eio.Flow.write tracked [ Cstruct.of_string payload ])
+  in
+  String.equal (Buffer.contents received) payload
+  && List.for_all (fun length -> length <= request_slice_bytes) !writes
+  && List.length !writes = slices + 1
+  && turns >= slices
 ;;
 
 (* The peer closed and something upstream reported it as prose.
@@ -1148,12 +1258,12 @@ let held_flow = function
 let open_connection cache ~sw ~net ~origin =
   match cache with
   | None ->
-    let* connection = make_connection ~sw ~net ~origin in
+    let* connection = make_connection ~sw ~net ~origin () in
     Ok (One_shot connection)
-  | Some cache ->
+  | Some { pool; tls_config } ->
     let* lease =
-      Http_client_cache.checkout cache (cache_key_of_origin origin) ~create:(fun ~sw ->
-        make_connection ~sw ~net ~origin)
+      Http_client_cache.checkout pool (cache_key_of_origin origin) ~create:(fun ~sw ->
+        make_connection ?tls_config ~sw ~net ~origin ())
     in
     Ok (Leased lease)
 ;;
@@ -1177,7 +1287,10 @@ let end_connection held verdict =
 
     [f] receives the caller switch and returns its result with the
     {!Reuse_verdict.t} for the exchange it read. [Error] and exceptions close
-    the connection as [Request_failed]. A cached connection whose transport
+    the connection as [Request_not_delivered] when a write call raised an error
+    the transport named as the peer's close and no response byte came back
+    ({!Request_wire.delivery}), and as [Request_failed] otherwise. A cached
+    connection whose transport
     reported end of file closes as [Transport_ended] even when [f] answered:
     cohttp ends a body at the peer's close without an error. An exception
     raised after that end of file is the peer's close, and is returned as

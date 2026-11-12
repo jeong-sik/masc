@@ -5,9 +5,16 @@
 """Server CPU per MB sent, per TLS 1.3 suite, against an owned masc server.
 
 Client: tls_client.py in a subprocess per run (homebrew Python, OpenSSL 3 on
-arm64, suite fixed with OPENSSL_CONF). Server CPU: `ps -o time` of the server
-process before and after each run, minus the idle rate measured first.
+arm64, suite fixed with OPENSSL_CONF). Server CPU: the process CPU time before
+and after each run, minus the idle rate measured first. The clock is `ps -o
+time` on macOS, in 0.01 s steps, and /proc/<pid>/stat on Linux, in steps of
+1/SC_CLK_TCK s (0.01 s where SC_CLK_TCK is 100). The step read is kept in the
+result as "cpu_clock_step_s". Linux `ps -o time` counts whole seconds, so one
+step of it is 3.8 ms/MB at --n 300. Neither clock counts the CPU of child
+processes of the server.
 Each run: C parallel connections x N pipelined GETs of the dashboard bundle.
+Every run's MB, wall time and server CPU are kept under "runs" in the result,
+so a reader can see how many clock steps a median stands on.
 """
 from __future__ import annotations
 
@@ -33,13 +40,43 @@ Ciphersuites = {suite}
 """
 
 
+# Fields 14 (utime) and 15 (stime) of /proc/<pid>/stat, counted from the field
+# after the command name. The name is in parentheses and may hold spaces and
+# parentheses itself, so the fields are read after its last ")".
+PROC_STAT_UTIME = 11
+PROC_STAT_STIME = 12
+
+
+def cpu_s_of_proc_stat(text: str, ticks_per_s: int) -> float:
+    fields = text.rsplit(")", 1)[1].split()
+    return (int(fields[PROC_STAT_UTIME]) + int(fields[PROC_STAT_STIME])) / ticks_per_s
+
+
+# The last digit `ps -o time` prints on macOS.
+MACOS_PS_TIME_STEP_S = 0.01
+
+
+def cpu_clock_step_s() -> float:
+    if sys.platform.startswith("linux"):
+        return 1 / os.sysconf("SC_CLK_TCK")
+    if sys.platform == "darwin":
+        return MACOS_PS_TIME_STEP_S
+    raise SystemExit(f"no process CPU clock known for platform {sys.platform}")
+
+
+def cpu_s_of_ps_time(text: str) -> float:
+    """macOS `ps -o time`: minutes:seconds.hundredths, with no hour or day field."""
+    minutes, seconds = text.strip().split(":")
+    return int(minutes) * 60 + float(seconds)
+
+
 def cpu_s(pid: int) -> float:
-    text = subprocess.run(["ps", "-o", "time=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
-    parts = [float(p) for p in text.replace("-", ":").split(":")]
-    total = 0.0
-    for p in parts:
-        total = total * 60 + p
-    return total
+    if sys.platform.startswith("linux"):
+        return cpu_s_of_proc_stat(Path(f"/proc/{pid}/stat").read_text(), os.sysconf("SC_CLK_TCK"))
+    if sys.platform == "darwin":
+        return cpu_s_of_ps_time(
+            subprocess.run(["ps", "-o", "time=", "-p", str(pid)], capture_output=True, text=True, check=True).stdout)
+    raise SystemExit(f"no process CPU clock known for platform {sys.platform}")
 
 
 def main() -> int:
@@ -73,6 +110,7 @@ def main() -> int:
         time.sleep(10)
         idle = (cpu_s(pid) - c0) / (time.monotonic() - t0)
         result["idle_cpu_s_per_s"] = round(idle, 3)
+        result["cpu_clock_step_s"] = cpu_clock_step_s()
         rows = {}
         for parallel in (1, 4):
             for mode in ("cleartext", *SUITES):
@@ -95,7 +133,9 @@ def main() -> int:
                 rows[f"{mode} x{parallel}"] = {
                     "MB_s_median": round(statistics.median(r["MB"] / r["wall_s"] for r in runs), 1),
                     "server_cpu_ms_per_MB_median": round(statistics.median(1000 * r["server_cpu_s"] / r["MB"] for r in runs), 2),
-                    "ciphers": runs[0]["ciphers"]}
+                    "ciphers": runs[0]["ciphers"],
+                    "runs": [{"MB": round(r["MB"], 2), "wall_s": round(r["wall_s"], 3),
+                              "server_cpu_s": round(r["server_cpu_s"], 3)} for r in runs]}
                 print(f"{mode} x{parallel}", rows[f"{mode} x{parallel}"], flush=True)
         result["rows"] = rows
     (args.out / "tls-cpu.json").write_text(json.dumps(result, indent=1) + "\n")

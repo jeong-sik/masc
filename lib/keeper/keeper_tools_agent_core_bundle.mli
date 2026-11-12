@@ -28,6 +28,9 @@ val make_tool_bundle_for_capability_surface
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> ?checkpoint_owner:(unit -> Runtime_execution.checkpoint_owner option)
   -> ?tool_result_inline_ceiling_bytes:(unit -> int)
+  -> ?execution_scope:Keeper_execution_scope_id.t
+     (** The chat execution this turn serves. [keeper_receipt_wait] reads it to
+         tell a request another execution already waits for. *)
   -> capability_surface:Keeper_capability_surface.t
   -> unit
   -> (Keeper_tools_agent_core.tool_bundle, Tool_bridge.schema_error) result
@@ -68,6 +71,7 @@ module For_testing : sig
     -> ?capability_surface:Keeper_capability_surface.t
     -> ?skill_catalog:Keeper_skill_catalog.t
     -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
+    -> ?execution_scope:Keeper_execution_scope_id.t
     -> unit
     -> Keeper_tools_agent_core.tool_bundle
 

@@ -34,6 +34,19 @@ type gate_obligation = private
   { approval_id : string; tool_name : string; input_hash : string }
 val gate_obligation : approval_id:string -> tool_name:string -> input_hash:string ->
   (gate_obligation, string) result
+type receipt_resolution =
+  | Receipt_in_outbox  (** The request's receipt is in the Keeper's outbox. *)
+  | Source_lost
+      (** The request has neither a worker nor a receipt, so the Owner settled
+          it with an [Unfinished] receipt of its own. *)
+type receipt_state =
+  | Pending  (** The request's receipt has not been observed. *)
+  | Arrived of receipt_resolution
+type receipt_obligation = private { request_id : string; state : receipt_state }
+(** A background-run request this execution owns until it settles. [request_id]
+    is the [call_id] of the receipt the request ends with. *)
+val receipt_obligation : request_id:string -> state:receipt_state ->
+  (receipt_obligation, string) result
 type runtime_suffix = private { assignment_id:string; failed_runtime_id:string; next_runtime_id:string; later_runtime_ids:string list }
 val runtime_suffix : assignment_id:string -> failed_runtime_id:string -> next_runtime_id:string -> later_runtime_ids:string list -> (runtime_suffix, string) result
 type official_client_kind = Codex | Claude_code | Antigravity | Muse
@@ -147,6 +160,14 @@ type t = private
   ; input : Yojson.Safe.t option
   ; input_sha256 : string
   ; gate_obligations : gate_obligation list
+  ; receipt_obligations : receipt_obligation list
+      (** The requests whose receipts only this execution may read. A request
+          is owned by one execution at a time. [Settle] empties the list in the
+          same transition, whatever its terminal, and so does a
+          [Require_reconciliation] that leaves a running execution in
+          [Interrupted_execution], which no action resumes: a restart that
+          fails the operation ends here. No other action removes an entry. A
+          settled or interrupted record holds none. *)
   ; sources : source_member list
   ; current_sources : source_member list
   ; frame : Keeper_repetition_snapshot.t
@@ -200,6 +221,15 @@ type action =
   | Resolve_gate of gate_resolution
   | Resume_gate of gate_wait * gate_resolution
   | Discharge_gate of gate_obligation
+  | Await_receipt of receipt_obligation
+      (** Adds the request to the execution that holds the slot. The phase does
+          not change. A request the execution already owns keeps its entry and
+          state. The caller ends the turn in the same transaction. *)
+  | Resolve_receipt of { request_id : string; resolution : receipt_resolution }
+      (** Moves a [Pending] entry to [Arrived resolution]. An entry that is
+          already [Arrived], or no entry, leaves the record as it is, so a
+          notification that arrives twice or after the execution settled
+          changes nothing. The phase does not change. *)
   | Settle of terminal
 
 val error_to_string : error -> string

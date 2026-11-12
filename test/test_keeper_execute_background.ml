@@ -113,7 +113,8 @@ let test_receipt_names_the_producer_and_the_request () =
   check string "turn_id" "req-1" receipt.Outbox.turn_id;
   check string "call_id" "req-1" receipt.Outbox.call_id;
   check string "tool_name" "tool_execute" receipt.Outbox.tool_name;
-  check bool "arguments are the call's own" true (receipt.Outbox.arguments = arguments)
+  check bool "arguments are the call's own" true
+    (receipt.Outbox.arguments = Outbox.Known arguments)
 ;;
 
 let test_finished_run_carries_the_foreground_payload () =
@@ -193,7 +194,7 @@ let test_outbox_keeps_the_receipt () =
   get (Outbox.retain ~base_path ~keeper_name unfinished);
   (* The same receipt again leaves one file: the name is the content digest. *)
   get (Outbox.retain ~base_path ~keeper_name unfinished);
-  let snapshot = get (Outbox.load ~base_path ~keeper_name) in
+  let snapshot = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt) in
   check int "two receipts" 2 (List.length (Outbox.receipt_ids snapshot));
   let context = String.concat "\n" (Outbox.developer_context snapshot) in
   check bool "first request id is readable" true (String_util.contains_substring context "req-1");
@@ -210,6 +211,125 @@ let test_outbox_keeps_the_receipt () =
     "an unwritten request is not held"
     false
     (get (Background.holds_receipt ~base_path ~keeper_name ~request_id:"req-3"))
+;;
+
+(* The receipt names its arguments as [Known] or [Unknown], and the file reads
+   back as what was written. An [Unknown] one is the receipt of a run whose
+   request record held no command: the model reads that they are unknown, and
+   no empty arguments stand in for them. *)
+let outbox_directory ~base_path =
+  get (Keeper_official_client_paths.outbox_dir ~base_path ~keeper_name)
+;;
+
+let stored_receipts ~base_path =
+  let directory = outbox_directory ~base_path in
+  List.map
+    (fun name ->
+       Yojson.Safe.from_string
+         (In_channel.with_open_bin (Filename.concat directory name) In_channel.input_all))
+    (List.filter
+       (fun name -> Filename.check_suffix name ".json")
+       (Array.to_list (Sys.readdir directory)))
+;;
+
+let test_receipt_names_known_and_unknown_arguments () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  let base_path = Filename.temp_dir "execute-background-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some keeper_name));
+  get
+    (Outbox.retain
+       ~base_path
+       ~keeper_name
+       (Background.receipt_of_unfinished
+          ~request_id:"req-known"
+          ~arguments
+          ~cause:Background.restart_cause));
+  get
+    (Keeper_execute_background.retain_source_lost_receipt
+       ~base_path
+       ~keeper_name
+       ~request_id:"req-unknown"
+       ~arguments:Outbox.Unknown);
+  let decoded =
+    List.map
+      (fun json ->
+         ( text (member "call_id" json)
+         , get (Keeper_client_tool_outbox_codec.arguments_of_json (member "arguments" json)) ))
+      (stored_receipts ~base_path)
+  in
+  check bool "a recorded command reads back as known" true
+    (List.assoc "req-known" decoded = Keeper_client_tool_outbox_codec.Known arguments);
+  check bool "a missing command reads back as unknown" true
+    (List.assoc "req-unknown" decoded = Keeper_client_tool_outbox_codec.Unknown);
+  let snapshot = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt) in
+  let context = String.concat "\n" (Outbox.developer_context snapshot) in
+  check bool "the model reads that the arguments are unknown" true
+    (String_util.contains_substring context {|"arguments":{"unknown":true}|});
+  check bool "the unknown receipt says the command is not held" true
+    (String_util.contains_substring context "does not hold its command");
+  check bool "no empty arguments stand in for them" false
+    (String_util.contains_substring context {|"arguments":{}|})
+;;
+
+(* A receipt written before the arguments had a type has the bare value in
+   [arguments]. It is refused, not read as [Known], so a build that finds one
+   stops at the outbox and the receipt has to be removed. *)
+let test_a_receipt_with_bare_arguments_is_refused () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  let base_path = Filename.temp_dir "execute-background-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some keeper_name));
+  get
+    (Outbox.retain
+       ~base_path
+       ~keeper_name
+       (Background.receipt_of_unfinished
+          ~request_id:"req-new"
+          ~arguments
+          ~cause:Background.restart_cause));
+  check bool "the new format loads" true
+    (Result.is_ok (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt));
+  let old_receipt =
+    `Assoc
+      [ "thread_id", `String "execute_background"
+      ; "turn_id", `String "req-old"
+      ; "call_id", `String "req-old"
+      ; "tool_name", `String "tool_execute"
+      ; "arguments", arguments
+      ; "response", `Assoc [ "outcome", `String "unfinished" ]
+      ]
+  in
+  Out_channel.with_open_bin
+    (Filename.concat (outbox_directory ~base_path) (Keeper_client_tool_outbox_codec.filename old_receipt))
+    (fun channel -> Out_channel.output_string channel (Yojson.Safe.to_string old_receipt));
+  (match Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt with
+   | Ok _ -> fail "a receipt with bare arguments was read"
+   | Error detail ->
+     check bool "the refusal names the arguments" true
+       (String_util.contains_substring detail "invalid tool outbox arguments"));
+  List.iter
+    (fun field ->
+       check bool "only the two encodings decode" true
+         (Result.is_error (Keeper_client_tool_outbox_codec.arguments_of_json field)))
+    [ arguments
+    ; `Null
+    ; `Assoc [ "unknown", `Bool false ]
+    ; `Assoc [ "known", arguments; "unknown", `Bool true ]
+    ; `Assoc []
+    ]
 ;;
 
 (* The arrival line points at a receipt by the SHA-256 of its file. The model
@@ -247,7 +367,7 @@ let test_summary_names_the_request_and_the_outcome () =
   List.iter
     (fun receipt -> get (Outbox.retain ~base_path ~keeper_name receipt))
     [ finished; failed; unfinished ];
-  let snapshot = get (Outbox.load ~base_path ~keeper_name) in
+  let snapshot = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt) in
   let summaries =
     List.filter_map
       (fun receipt_id -> Outbox.receipt_summary snapshot ~receipt_id)
@@ -274,7 +394,7 @@ let test_summary_names_the_request_and_the_outcome () =
      is not in it, and a lookup of an identity it does not hold is [None]. *)
   let unavailable = ref [] in
   let reader =
-    Outbox.summary_reader ~base_path ~keeper_name ~on_unavailable:(fun detail ->
+    Outbox.summary_reader ~base_path ~keeper_name ~viewer:Outbox.Unowned_only ~on_unavailable:(fun detail ->
       unavailable := detail :: !unavailable)
   in
   let first_id =
@@ -305,7 +425,7 @@ let test_summary_reader_reports_an_unreadable_outbox_once () =
   Fs_compat.save_file outbox "a file where the directory belongs";
   let reported = ref [] in
   let reader =
-    Outbox.summary_reader ~base_path ~keeper_name ~on_unavailable:(fun detail ->
+    Outbox.summary_reader ~base_path ~keeper_name ~viewer:Outbox.Unowned_only ~on_unavailable:(fun detail ->
       reported := detail :: !reported)
   in
   check bool "no summary" true (Option.is_none (reader "abc"));
@@ -342,6 +462,14 @@ let () =
         ] )
     ; ( "outbox"
       , [ test_case "outbox keeps the receipt" `Quick test_outbox_keeps_the_receipt
+        ; test_case
+            "a receipt names known and unknown arguments"
+            `Quick
+            test_receipt_names_known_and_unknown_arguments
+        ; test_case
+            "a receipt with bare arguments is refused"
+            `Quick
+            test_a_receipt_with_bare_arguments_is_refused
         ; test_case
             "summary names the request and the outcome"
             `Quick

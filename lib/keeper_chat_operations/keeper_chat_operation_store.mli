@@ -79,6 +79,25 @@ val inspect_pending_inputs : path:string -> (Operation.t list option, error) res
     Does not scan terminal history or run a whole-database integrity audit.
     [None] means no database, distinct from an empty validated snapshot. *)
 
+type receipt_owners
+(** Which unsettled execution owns each background-run request whose receipt
+    it waits for, at one read. *)
+
+val inspect_receipt_owners : path:string -> (receipt_owners, error) result
+(** Read-only, schema-checked transaction over the unsettled semantic
+    executions. A missing database is an empty set: nothing was admitted, so
+    nothing is owned. A request that two executions list is an integrity
+    error, never an arbitrary pick. Never creates, upgrades or recovers a
+    store, and runs no whole-database integrity audit. *)
+
+val receipt_owner : receipt_owners -> request_id:string -> Keeper_execution_scope_id.t option
+(** [None] when no unsettled execution owns the request. *)
+
+val inspect_pending_receipt_requests : path:string -> (string list, error) result
+(** The requests whose receipt an unsettled execution still waits for, from the
+    same read-only transaction as {!inspect_receipt_owners}. A missing database
+    is an empty list. *)
+
 type native_history =
   { execution_operation_id : Operation.Operation_id.t
       (** The execution leader, including when a batch member was requested. *)
@@ -413,8 +432,37 @@ val resolve_direct_input_wait : t -> now:float -> operation_id:Operation.Operati
     responses refuse; uncertain commit acknowledgement stays
     Error and grants no retry or retained-file deletion authority. *)
 
-val defer_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t -> execution_digest:string ->
+val defer_direct_checkpoint : ?receipt_waits:Keeper_semantic_execution.receipt_obligation list -> t -> now:float ->
+  operation_id:Operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint -> (Operation.t, error) result
+(** With [receipt_waits], the same transaction first adds each of those requests
+    to the execution (Await_receipt) and then ends the turn, so the turn waits
+    for all of them. A request another active execution owns is
+    [Invalid_input] and nothing changes, so the turn continues. A repeated call
+    after an uncertain commit confirms only when the execution holds every
+    request. Without them the call is the plain cooperative yield. *)
+
+type receipt_resolution_outcome =
+  | Receipt_resolved
+      (** A [Pending] entry became [Arrived], so the task may be claimable. *)
+  | Receipt_already_arrived
+      (** The owner's entry was not [Pending]. Nothing changed. *)
+  | Receipt_without_owner
+      (** No active execution owns the request. Nothing changed. *)
+
+type receipt_entry =
+  | Receipt_entry_pending  (** An active execution owns the request and waits for it. *)
+  | Receipt_entry_arrived  (** An active execution owns the request and its receipt arrived. *)
+  | Receipt_entry_absent  (** No active execution owns the request. *)
+
+val receipt_entry : t -> request_id:string -> (receipt_entry, error) result
+(** What the active executions hold for the request. Read only. *)
+
+val resolve_receipt : t -> now:float -> request_id:string ->
+  resolution:Keeper_semantic_execution.receipt_resolution -> (receipt_resolution_outcome, error) result
+(** Records that the request's receipt arrived, in one transaction that reads
+    every active execution. The owner is found by the request, not named by the
+    caller, because the notification knows only the receipt. *)
 val resume_direct_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->
   observed:Keeper_semantic_execution.gate_checkpoint -> (unit, error) result
 

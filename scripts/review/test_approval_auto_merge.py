@@ -34,11 +34,19 @@ def review(rid, account=2, state='APPROVED', *, head=sha(101), when=T1):
             'user': {'id': account, 'login': f'reviewer-{account}'}, 'body': ''}
 
 
+def type_check(rid, head, conclusion='skipped', *, status='completed', app='github-actions'):
+    return {'id': rid, 'name': 'type-check', 'head_sha': head, 'status': status,
+            'conclusion': conclusion if status == 'completed' else None, 'app': {'slug': app}}
+
+
 class FakeGitHub:
     """Only the gh process boundary is replaced; both source helpers run."""
 
     def __init__(self, states=None):
         self.pulls, self.reviews, self.counts = {}, {}, {}
+        # Head SHA -> its type-check runs, and -> the files `main...head` lists.
+        # A comparison no test prepared is a read the worker should not make.
+        self.type_checks, self.compared = {}, {}
         self.mutations = []
         self.list_page_size = 100
         self.merge_returncode = 0
@@ -66,6 +74,7 @@ class FakeGitHub:
             self.stack = {'id': 7, 'number': 900, 'base': {'ref': 'main'},
                           'pull_requests': [
                               {'number': number, 'state': row['state'],
+                               'merged_at': T1 if row['merged'] else None,
                                'head': {'sha': row['head']['sha']}}
                               for number, row in self.pulls.items()]}
 
@@ -80,6 +89,16 @@ class FakeGitHub:
             value = self.rules
         elif path == PREFIX + '/stacks/900':
             value = self.stack
+        elif path.startswith(PREFIX + '/commits/'):
+            head, rest = path.removeprefix(PREFIX + '/commits/').split('/', 1)
+            assert rest == 'check-runs?check_name=type-check&filter=all&per_page=100', path
+            runs = self.type_checks.get(head, [])
+            value = {'total_count': len(runs), 'check_runs': runs}
+        elif path.startswith(PREFIX + '/compare/'):
+            base, head = path.removeprefix(PREFIX + '/compare/').split('...')
+            assert base == 'main', path
+            value = {'files': [{'filename': name} if isinstance(name, str) else name
+                               for name in self.compared[head]]}
         elif path.startswith(PREFIX + '/pulls?'):
             query = dict(part.split('=') for part in path.split('?', 1)[1].split('&'))
             assert query['state'] == 'open' and query['per_page'] == '100', path
@@ -163,6 +182,27 @@ class AutomaticMergeAdmission(unittest.TestCase):
         self.assertEqual(selected, 103)
         self.assertEqual([member['number'] for member in scope['scope']], [101, 102, 103])
 
+    def test_a_landed_stack_is_recognized_without_reading_its_layers(self):
+        with FakeGitHub(['merged', 'merged', 'merged']) as github:
+            with self.assertRaisesRegex(MERGE.Hold, 'already merged'):
+                MERGE.prepare(REPO, 102)
+        member_reads = {path: count for path, count in github.counts.items()
+                        if path.startswith(PREFIX + '/pulls/')}
+        self.assertEqual(member_reads, {PREFIX + '/pulls/102': 1})
+
+    def test_only_the_first_unmerged_layer_from_the_top_is_read_to_find_the_top(self):
+        with FakeGitHub(['merged', 'open', 'open']) as github:
+            top = MERGE.top_pull(REPO, 102)
+        self.assertEqual(top['number'], 103)
+        self.assertNotIn(PREFIX + '/pulls/101', github.counts)
+
+    def test_a_layer_that_merged_after_the_listing_is_passed_over(self):
+        with FakeGitHub(['open', 'open']) as github:
+            assert github.stack is not None
+            github.pulls[102].update(state='closed', merged=True)
+            top = MERGE.top_pull(REPO, 101)
+        self.assertEqual(top['number'], 101)
+
     def test_closed_unmerged_middle_and_top_block_the_whole_stack(self):
         for states in (['open', 'closed', 'open'], ['open', 'open', 'closed']):
             with self.subTest(states=states), FakeGitHub(states):
@@ -208,6 +248,123 @@ class AutomaticMergeAdmission(unittest.TestCase):
                     github.rules = []
                 with self.assertRaises(MERGE.Hold):
                     MERGE.prepare(REPO, 101)
+
+
+class SkippedTypeCheck(unittest.TestCase):
+    """`skipped` satisfies the required check. The worker trusts it only when
+    the scope it is about to merge changes no source."""
+
+    CHECKS = PREFIX + f'/commits/{sha(101)}/check-runs?check_name=type-check&filter=all&per_page=100'
+    COMPARE = PREFIX + f'/compare/main...{sha(101)}'
+    ARM = ['gh', 'pr', 'merge', '101', '--repo', REPO,
+           '--auto', '--squash', '--match-head-commit', sha(101)]
+
+    def test_a_skip_on_a_scope_without_sources_is_admitted_and_armed(self):
+        with FakeGitHub() as github, redirect_stdout(io.StringIO()):
+            github.type_checks[sha(101)] = [type_check(1, sha(101))]
+            github.compared[sha(101)] = ['dashboard/a.ts', 'docs/evidence/run/a.ml', 'changelog.d/101.md']
+            MERGE.prepare(REPO, 101)
+            MERGE.auto_merge_default(REPO, 101)
+        self.assertEqual(github.mutations, [self.ARM])
+
+    def test_a_skip_on_a_scope_with_sources_is_held_and_never_armed(self):
+        scopes = {
+            'source file': ['dashboard/a.ts', 'lib/a.ml'],
+            'build file': ['test/dune'],
+            'moved away from a source path': [
+                {'filename': 'docs/old.ml', 'previous_filename': 'lib/old.ml'}],
+        }
+        for label, files in scopes.items():
+            with self.subTest(label), FakeGitHub() as github, redirect_stdout(io.StringIO()):
+                github.type_checks[sha(101)] = [type_check(1, sha(101))]
+                github.compared[sha(101)] = files
+                with self.assertRaisesRegex(MERGE.Hold, 'type-check was skipped but the scope changes'):
+                    MERGE.prepare(REPO, 101)
+                self.assertIsNone(MERGE.auto_merge_default(REPO, 101))
+                self.assertEqual(github.mutations, [])
+
+    def test_an_earlier_reservation_is_dropped_when_the_skip_is_unproven(self):
+        with FakeGitHub() as github:
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            github.type_checks[sha(101)] = [type_check(1, sha(101))]
+            github.compared[sha(101)] = ['lib/a.ml']
+            self.assertIsNone(MERGE.auto_merge_default(REPO, 101))
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '101', '--repo', REPO, '--disable-auto']])
+
+    def test_a_file_list_at_the_comparison_limit_proves_nothing(self):
+        with FakeGitHub() as github:
+            github.type_checks[sha(101)] = [type_check(1, sha(101))]
+            github.compared[sha(101)] = [f'dashboard/{n}.ts' for n in range(MERGE.COMPARE_FILE_LIMIT)]
+            with self.assertRaisesRegex(MERGE.Hold, 'too many to list'):
+                MERGE.prepare(REPO, 101)
+            github.compared[sha(101)].pop()
+            MERGE.prepare(REPO, 101)
+
+    def test_only_a_completed_skip_makes_the_worker_read_the_scope(self):
+        left_to_github = {
+            'no run yet': [],
+            'queued': [type_check(1, sha(101), status='queued')],
+            'running': [type_check(1, sha(101), status='in_progress')],
+            'success': [type_check(1, sha(101), 'success')],
+            'failure': [type_check(1, sha(101), 'failure')],
+            'a later dispatched run compiled it': [
+                type_check(1, sha(101)), type_check(2, sha(101), 'success')],
+            'a skip reported by another app': [type_check(1, sha(101), app='someone-else')],
+            'a skip of another commit': [type_check(1, sha(99))],
+        }
+        for label, runs in left_to_github.items():
+            with self.subTest(label), FakeGitHub() as github, redirect_stdout(io.StringIO()):
+                github.type_checks[sha(101)] = runs
+                MERGE.prepare(REPO, 101)
+                MERGE.auto_merge_default(REPO, 101)
+                self.assertNotIn(self.COMPARE, github.counts)
+                self.assertEqual(github.mutations, [self.ARM])
+
+    def test_the_newest_run_decides_when_a_skip_follows_a_success(self):
+        with FakeGitHub() as github:
+            github.type_checks[sha(101)] = [type_check(2, sha(101)), type_check(1, sha(101), 'success')]
+            github.compared[sha(101)] = ['lib/a.ml']
+            with self.assertRaisesRegex(MERGE.Hold, 'type-check was skipped'):
+                MERGE.prepare(REPO, 101)
+
+    def test_more_runs_than_one_page_are_not_guessed_at(self):
+        with FakeGitHub() as github:
+            github.type_checks[sha(101)] = [type_check(1, sha(101), 'success')]
+            real = github.output
+
+            def cut(command):
+                body = real(command)
+                return body.replace('"total_count": 1', '"total_count": 101')
+            with patch.object(github, 'output', side_effect=cut):
+                with self.assertRaisesRegex(MERGE.Hold, 'more than 100 type-check runs'):
+                    MERGE.prepare(REPO, 101)
+
+    def test_a_stack_is_read_once_at_the_head_of_its_top(self):
+        top = sha(103)
+        with FakeGitHub(['merged', 'open', 'open']) as github:
+            github.type_checks[top] = [type_check(1, top)]
+            # The lower layer was skipped because the top checks the stack.
+            github.type_checks[sha(102)] = [type_check(2, sha(102))]
+            github.compared[top] = ['dashboard/a.ts', 'lib/a.ml']
+            with self.assertRaisesRegex(MERGE.Hold, '#103: type-check was skipped'):
+                MERGE.prepare(REPO, 102)
+            github.type_checks[top].append(type_check(3, top, 'success'))
+            selected, _, _ = MERGE.prepare(REPO, 102)
+        self.assertEqual(selected, 103)
+        self.assertFalse(any(sha(102) in path for path in github.counts if '/commits/' in path))
+
+    def test_a_scope_change_during_the_reads_still_refuses(self):
+        with FakeGitHub() as github:
+            github.type_checks[sha(101)] = [type_check(1, sha(101))]
+            github.compared[sha(101)] = ['dashboard/a.ts']
+
+            def push(path, count):
+                if path == self.COMPARE:
+                    github.pulls[101]['head']['sha'] = sha(9001)
+            github.hook = push
+            with self.assertRaises(ValueError):
+                MERGE.prepare(REPO, 101)
 
 
 class DefaultAutoMergeReservation(unittest.TestCase):
@@ -1281,6 +1438,7 @@ class ClosingLinkedIssues(unittest.TestCase):
         self.assertEqual(data, {'ok': 1})
         self.assertEqual(run.call_args.args[0], [
             'gh', 'api', 'graphql', '-f', 'query=query { ok }', '-f', 'owner=o', '-f', 'name=r'])
+        self.assertEqual(run.call_args.kwargs['timeout'], MERGE.GRAPHQL_TIMEOUT_SECONDS)
 
     def test_a_refused_unstartable_or_slow_call_is_a_value_error(self):
         refused = subprocess.CompletedProcess([], 1, '{"errors": []}', 'gh: not accessible')
@@ -1298,14 +1456,15 @@ class ClosingLinkedIssues(unittest.TestCase):
         linked = {'totalCount': 1, 'nodes': [
             {'id': 'I_7', 'url': f'https://github.com/{REPO}/issues/7', 'state': 'OPEN'}]}
         read = {'repository': {'defaultBranchRef': {'name': 'main'}, 'p102': {
-            'merged': True, 'baseRefName': 'main', 'mergeCommit': {'oid': sha(102)},
-            'closingIssuesReferences': linked}}}
+            'merged': True, 'mergedAt': '2026-11-12T02:09:02Z', 'baseRefName': 'main',
+            'mergeCommit': {'oid': sha(102)}, 'closingIssuesReferences': linked}}}
+        never_reopened = {'i0': {'state': 'OPEN', 'timelineItems': {'nodes': []}}}
         close = {'closeIssue': {'issue': {'state': 'CLOSED'}}}
         commands = []
 
         def gh(command, **_):
             commands.append(command)
-            data = close if 'id=I_7' in command else read
+            data = close if 'id=I_7' in command else never_reopened if 'i0=I_7' in command else read
             return subprocess.CompletedProcess(command, 0, json.dumps({'data': data}), '')
 
         with patch.object(MERGE.subprocess, 'run', side_effect=gh):
@@ -1314,13 +1473,20 @@ class ClosingLinkedIssues(unittest.TestCase):
             {'pr': 102, 'issue': f'https://github.com/{REPO}/issues/7', 'closed': True}])
         self.assertEqual([command[-4:] for command in commands], [
             ['-f', 'owner=owner', '-f', 'name=repo'],
+            ['-f', f'query={MERGE.ISSUES.check_query([], 1)}', '-f', 'i0=I_7'],
             ['-f', f'query={MERGE.ISSUES.CLOSE_ISSUE}', '-f', 'id=I_7']])
 
-    def test_a_failed_read_is_one_record_that_names_the_pull_requests(self):
+    def test_a_read_that_fails_or_answers_nothing_is_one_record_that_names_the_pull_requests(self):
+        failures = {'refused': {'side_effect': ValueError('rate limited')},
+                    'empty': {'return_value': {'repository': None}},
+                    'without the default branch': {'return_value': {'repository': {}}}}
+        for name, behaviour in failures.items():
+            with self.subTest(name), patch.object(MERGE, 'graphql', **behaviour):
+                records = MERGE.close_linked_issues(REPO, [101, 102])
+                self.assertEqual([(row['prs'], row['closed']) for row in records],
+                                 [([101, 102], False)])
         with patch.object(MERGE, 'graphql', side_effect=ValueError('rate limited')):
-            records = MERGE.close_linked_issues(REPO, [101, 102])
-        self.assertEqual([(row['prs'], row['closed']) for row in records], [([101, 102], False)])
-        self.assertIn('rate limited', records[0]['reason'])
+            self.assertIn('rate limited', MERGE.close_linked_issues(REPO, [101])[0]['reason'])
 
 
 if __name__ == '__main__':

@@ -229,6 +229,45 @@ let test_fiber_with_a_domain_pool_loads_the_same_record () = with_store (fun roo
     (error (Owner.load ~store ~scope ~request_id))
     (on_fiber_with_pool (fun () -> error (Owner.load ~store ~scope ~request_id))))
 
+(* Decoding the records of a scope is a job of the domain pool: with the pool's
+   one worker held busy the fiber's discover and observe wait for it, and what
+   they return is what a caller outside Eio gets. *)
+let test_fiber_with_a_domain_pool_decodes_records_on_the_pool () = with_store (fun _root store ->
+  owned (retain store);
+  let discovered () = owned (Owner.discover ~store ~scope) in
+  let observed () = (owned (Owner.observe ~store ~scope)).Owner.records in
+  let outside = discovered () in
+  Alcotest.(check int) "one record outside Eio" 1 (List.length outside);
+  Alcotest.(check bool) "observe agrees outside Eio" true (observed () = outside);
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
+    Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+      let beside_a_busy_worker read =
+        let occupied, occupied_u = Eio.Promise.create () in
+        let release, release_u = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+            Eio.Promise.resolve occupied_u ();
+            Eio.Promise.await release));
+        Eio.Promise.await occupied;
+        let returned = ref None in
+        Eio.Fiber.both
+          (fun () -> returned := Some (read ()))
+          (fun () ->
+            let rec wait polls =
+              if polls > 0 && Option.is_none !returned
+              then (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; wait (polls - 1)) in
+            wait 30;
+            Alcotest.(check bool) "the read waits for the busy worker" true (Option.is_none !returned);
+            Eio.Promise.resolve release_u ());
+        match !returned with
+        | Some records -> records
+        | None -> Alcotest.fail "the read never finished" in
+      Alcotest.(check bool) "discover returns the same records" true
+        (beside_a_busy_worker discovered = outside);
+      Alcotest.(check bool) "observe returns the same records" true
+        (beside_a_busy_worker observed = outside)))))
+
 module Receipt = Lane_addon_request_receipt
 let receipt time payload = get (Receipt.make ~observed_at:time ~payload)
 let observe store record event = stored store record (Progress.Observer event)
@@ -667,6 +706,8 @@ let () = Alcotest.run "Original Add-on request progress" ["owner",[
   Alcotest.test_case "missing original cannot be recreated" `Quick test_missing_original_cannot_be_recreated_by_update;
   Alcotest.test_case "a fiber with a domain pool loads the same record" `Quick
     test_fiber_with_a_domain_pool_loads_the_same_record;
+  Alcotest.test_case "a fiber with a domain pool decodes records on the pool" `Quick
+    test_fiber_with_a_domain_pool_decodes_records_on_the_pool;
   Alcotest.test_case "only explicit capacity permits original admission retry" `Quick
     test_explicit_capacity_preserves_original_admission_without_replaying_unknown;
   Alcotest.test_case "observer intents survive domain completion and restart" `Quick

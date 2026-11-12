@@ -524,6 +524,9 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_job_start", keeper_shard_write);
     ("keeper_job_status", keeper_shard_write);
     ("keeper_job_cancel", keeper_shard_write);
+    (* Ending the turn on a background receipt records the wait in the
+       conversation's execution record, so the call is a write. *)
+    ("keeper_receipt_wait", keeper_shard_write);
     ("keeper_context_status", keeper_shard_read);
     ("keeper_artifact_read", keeper_shard_read);
     ("keeper_artifact_publish", keeper_shard_write);

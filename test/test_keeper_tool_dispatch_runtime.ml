@@ -10074,7 +10074,7 @@ default = "official.primary"
         | Runtime_execution.Codex_app_server config -> config
         | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
           fail "native Gate fixture runtime missing" in
-      Masc.Keeper_codex_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id })
+      Masc.Keeper_codex_runtime.run ~outbox_viewer:Masc.Keeper_client_tool_outbox.Unowned_only ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id })
         ~context_window:(Some (Runtime_instance.max_context_of_runtime native_runtime))
         ~configured_reasoning_effort:native_runtime.model.reasoning_effort
         ~turn_timeout_s:native_runtime.model.turn_timeout_s

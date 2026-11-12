@@ -13,9 +13,14 @@
     gives their own Keeper no Runtime of another person. A service, the local
     operator, and the system authors write none.
 
-    {b One name.} A Keeper id names one Keeper for good: once made, a Keeper
-    keeps its owner, and no record makes it again, for its owner or for anyone
-    else. A later assignment replaces the Runtime of an earlier one. A Keeper
+    {b One name per person.} A Keeper is named by its owner and its id (user
+    decision 2026-11-12, issue #51073). Two persons may each make a Keeper of
+    one id, and they are two Keepers: neither person reads, takes or changes
+    the other's. Once made, a Keeper keeps its owner, and no record of that
+    owner makes it again. An assignment names no person, so the Keeper it
+    names is its author's. A Keeper of the operator, which a TOML of the
+    installation names, is no Keeper of the log, whatever its name. A later
+    assignment replaces the Runtime of an earlier one. A Keeper
     with no assignment has no Runtime and falls back to none (user decision
     2026-11-08). A policy id names one Keeper's policy for good: no other
     Keeper record names it again. *)
@@ -33,29 +38,24 @@ type t
 
 val empty : t
 
-(** The Keeper, if it was made. *)
-val find : t -> Authz_types.Keeper_id.t -> keeper option
+(** The Keeper of this id that [owner] made, if they made one. *)
+val find : t -> owner:Authz_types.User_id.t -> Authz_types.Keeper_id.t -> keeper option
 
 (** The Keepers this person owns, in the order of their ids. *)
 val owned_by : t -> Authz_types.User_id.t -> (Authz_types.Keeper_id.t * keeper) list
 
 type refusal =
-  | Already_made of Authz_types.Keeper_id.t
+  | Already_made of Authz_types.Keeper_id.t  (** Its owner made it before. *)
   | Policy_named_before of Authz_types.Policy_id.t
       (** Another Keeper's record named this policy id. *)
   | Not_made of Authz_types.Keeper_id.t
-      (** An assignment to a Keeper no record made. *)
+      (** An assignment to a Keeper its author never made. A Keeper of that
+          id that another person made is not theirs to give a Runtime. *)
   | Made_for_another of
       { author : Authz_types.User_id.t
       ; user_id : Authz_types.User_id.t
       }
       (** A principal makes a Keeper only for themselves, an Admin too. *)
-  | Assigned_by_another of
-      { author : Authz_types.User_id.t
-      ; keeper_id : Authz_types.Keeper_id.t
-      ; owner : Authz_types.User_id.t
-      }
-      (** Only the owner gives a Keeper a Runtime, not an Admin. *)
   | Runtime_not_made of Authz_types.Runtime_id.t
   | Not_the_owners_runtime of
       { keeper_id : Authz_types.Keeper_id.t

@@ -207,6 +207,7 @@ let run_call ~scenario root =
          ignore (Registry.defer_direct_checkpoint ~base_path:root ~keeper_name ~operation_id
                    ~execution_digest:operation.execution_digest
                    ~checkpoint:(Keeper_semantic_execution.Agent_core first.checkpoint)
+                   ~receipt_waits:[]
                  |> require "suspend" : Keeper_chat_operation.t);
          check (list string) "the suspension keeps only the checkpoint it names"
            [sha first.checkpoint] (retained_files session_dir);

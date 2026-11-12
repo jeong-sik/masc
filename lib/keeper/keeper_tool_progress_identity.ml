@@ -193,6 +193,7 @@ let memory_identity ~tool_name ~input ~evidence =
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_masc_schedule_dispatch)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_keeper_code_query_dispatch)
+  | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_receipt_wait)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_keeper_job_dispatch)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_masc_keeper_dispatch)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_masc_fusion_dispatch)

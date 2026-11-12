@@ -1,0 +1,16 @@
+name = "keeper_receipt_wait"
+description = """
+Wait for the receipt of a background Execute run. The turn ends when this call \
+succeeds. Calls in the same turn wait for every run they name, and a later run of \
+this conversation starts with their receipts once all of them have arrived. A receipt \
+that is already waiting is read by the next run at once. A request_id that Execute \
+did not return is refused."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "request_id"
+type = "string"
+min_length = 1
+required = true
+description = "The request_id that Execute returned for a run started with run_in_background true."

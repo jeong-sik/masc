@@ -8,11 +8,28 @@
     @stability Internal
     @since 0.93.1 *)
 
+(** The built-in HTTP serialization admitted for one request, with the
+    [config], [messages] and [tools] it was built from. *)
+type admitted_http_body = private
+  { serialized_request : Complete_common.serialized_http_request
+  ; evidence : Request_wire_observer.observation
+  ; config : Provider_config.t
+  ; messages : Types.message list
+  ; tools : Yojson.Safe.t list
+  }
+
 (** A completion request: everything needed to produce a response. *)
 type completion_request =
   { config : Provider_config.t
   ; messages : Types.message list
   ; tools : Yojson.Safe.t list
+  ; admitted_http_body : admitted_http_body option
+    (** The body admitted for this request before dispatch, when there is one.
+        {!Complete} sets it on the request it hands a transport. The built-in
+        HTTP transport sends these bytes instead of serializing [config],
+        [messages] and [tools] a second time; it reads the field through
+        {!admitted_http_body_of_request}. A transport with its own request
+        projection leaves it unused. *)
   ; capture_id : string option
     (** Exact caller-owned request/run identity for raw wire observation.
         [None] never triggers identity inference. *)
@@ -104,6 +121,23 @@ type t =
       -> completion_request
       -> stream_result Completion_outcome.t
   }
+
+(** Pair a serialized body with the values it was built from. [config],
+    [messages] and [tools] are the ones the serializer read. *)
+val admit_http_body
+  :  serialized_request:Complete_common.serialized_http_request
+  -> evidence:Request_wire_observer.observation
+  -> config:Provider_config.t
+  -> messages:Types.message list
+  -> tools:Yojson.Safe.t list
+  -> admitted_http_body
+
+(** The request's admitted body while the request still holds the very
+    [config], [messages] and [tools] the body was built from (physical
+    equality). [None] when no body was admitted, or when a wrapper replaced
+    one of the three: that request is serialized afresh, never sent with the
+    earlier bytes. *)
+val admitted_http_body_of_request : completion_request -> admitted_http_body option
 
 (** Construct an injected transport from simple callbacks. Its returned values
     are explicitly unobserved: neither config nor provider response is used to

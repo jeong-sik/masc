@@ -241,12 +241,9 @@ type lane_terminal_error =
    retry it, so it records no failed-attempt mark (timeout, 5xx, 529, network).
    Its 429 and 402 evidence is recorded as any walk's, and an answer it
    receives clears the candidate's evidence (RFC-0458 §3.4 rule 5). An
-   official CLI starts for a fleet turn as that Keeper's turn on the channel
-   that started it, and for a one-shot walk as an operator call (plan D2-5). *)
-type fleet_turn =
-  { keeper_name : string
-  ; channel : Authz_types.Channel.t
-  }
+   official CLI starts for a fleet turn as a turn of that operator Keeper,
+   and for a one-shot walk as an operator call (plan D2-5). *)
+type fleet_turn = { keeper_name : string }
 
 type walk_owner =
   | Fleet_keeper_turn of fleet_turn
@@ -265,17 +262,16 @@ type walk_start = Runtime_candidate_standing.walk_start =
   | Every_mark_demotes
 
 let fresh_walk_of = function
-  | Fleet_keeper_turn { keeper_name; channel = _ } ->
+  | Fleet_keeper_turn { keeper_name } ->
     Fresh_walk_by (Runtime_candidate_backpressure.keeper_recorder ~keeper_name)
   | One_shot_walk -> Every_mark_demotes
 
 let account_request walk_owner ~runtime_id =
   match walk_owner with
-  | Fleet_keeper_turn { keeper_name; channel } ->
-    (* A Keeper lane starts its turns itself: no request with a personal
-       access token stands behind one. *)
-    Runtime_account_access.Keeper_turn
-      { keeper_name; channel; pat = Authz_types.Pat_binding.Not_pat; runtime_id }
+  | Fleet_keeper_turn { keeper_name } ->
+    (* A lane runs the Keepers that the TOMLs of the installation name: the
+       operator's, not a person's of the authorization log. *)
+    Runtime_account_access.Operator_keeper_turn { keeper_name; runtime_id }
   | One_shot_walk -> Runtime_account_access.Operator_call
 
 (* HIGH-RISK-UNREVIEWED: an attempt starts an official CLI, Claude Code (plan
@@ -1011,7 +1007,7 @@ let attempt_runtime_candidates
        in
        let note_failed_attempt failure =
          match walk_owner with
-         | Fleet_keeper_turn { keeper_name; channel = _ } ->
+         | Fleet_keeper_turn { keeper_name } ->
            Option.iter
              (fun candidate ->
                 Runtime_candidate_backpressure.note_failed_attempt
@@ -1112,20 +1108,19 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Rotate_now
             { rotate = Keeper_runtime_failure_route.Authorization_refused } ->
           read_usage_after_account_refusal candidate
-        (* These candidates answered, or the failure says nothing durable
-           about their ability to answer a later turn (RFC-0458 §3.4, §6).
-           A credential denial rotates to the next candidate within this
-           turn only. Held as evidence it would stay until the head itself
-           answered, which it never gets to do while a sibling answers, so
-           every new turn starts again from the head. *)
+        (* A credential denial rotates to the next candidate within this
+           turn only. Held as ordering evidence it would stay until the head
+           itself answered, which it never gets to do while a sibling
+           answers, so every new turn starts again from the head. The moment
+           is kept for the runtime list only, where it stays until a call on
+           the same credential is answered. *)
         | Keeper_runtime_failure_route.Rotate_now
             { rotate = Keeper_runtime_failure_route.Auth_failed } ->
-          (* The denial is still no ordering evidence, for the reason below.
-             The moment is kept for the runtime list only, where it stays
-             until a call on the same credential is answered. *)
           observe_standing
             (Runtime_candidate_standing.Credential_refused
                { noted_at = Unix.gettimeofday () })
+        (* These candidates answered, or the failure says nothing durable
+           about their ability to answer a later turn (RFC-0458 §3.4, §6). *)
         | Keeper_runtime_failure_route.Rotate_now
             { rotate =
                 ( Keeper_runtime_failure_route.Model_unavailable
@@ -2109,6 +2104,7 @@ let run_named
     ?official_client_continuation
     ?on_checkpoint_prepared
     ?official_task_reference
+    ?direct_scope
     ?official_client_composed_context
     ?on_official_client_tool_boundary
     ?on_child_content_observation
@@ -2144,6 +2140,10 @@ let run_named
   : (named_run_result, Agent_core.Error.t) result =
   Runtime_response_identity_scope.without_identity (fun () ->
   let session_id = Keeper_request_source.trace_id input_source in
+  (* A run that serves no chat execution has no owner among the receipts. *)
+  let outbox_viewer = match direct_scope with
+    | None -> Keeper_client_tool_outbox.Unowned_only
+    | Some scope -> Keeper_client_tool_outbox.Owner_and_unowned scope in
   let tool_requirement = match output_contract with
     | Tool_verdict -> Keeper_required_tools.Required
     | Provider_default -> tool_requirement in
@@ -3001,6 +3001,7 @@ let run_named
             ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
             ~pre_tool_rejects
             ~base_path
+            ~outbox_viewer
             ~goal
             ~goal_blocks
             ~system_prompt
@@ -3177,6 +3178,7 @@ let run_named
               on_model_input_window_observation
             ~pre_tool_rejects
             ~base_path
+            ~outbox_viewer
             ~goal
             ~goal_blocks
             ~system_prompt
@@ -3327,6 +3329,7 @@ let run_named
               on_model_input_window_observation
             ~pre_tool_rejects
             ~base_path
+            ~outbox_viewer
             ~goal
             ~goal_blocks
             ~native_workspace_context:native_context
@@ -3474,6 +3477,7 @@ let run_named
             ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
             ~pre_tool_rejects
             ~base_path
+            ~outbox_viewer
             ~goal
             ~goal_blocks
             ~system_prompt
@@ -3667,6 +3671,7 @@ let run_named
             ; hold_carried_front = (fun seed -> refused_carried_front := Some seed)
             ; restore_carried_front = (fun prior -> refused_carried_front := prior)
             ; base_path
+            ; outbox_viewer
             ; media_store
             ; keeper_name
             ; name

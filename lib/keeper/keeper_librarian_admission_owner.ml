@@ -377,8 +377,9 @@ let completed_forest ~store ~owner inventory =
         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
         | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false in
     if not (List.for_all finished leaves) then Ok None else
-    (* Superseded semantic gaps and actual partition-size refusals may be
-       historical ancestors. Unknown/cut or ordinary failed work never closes. *)
+    (* Superseded semantic gaps, superseded destination-absent conflicts and
+       actual partition-size refusals may be historical ancestors. Unknown/cut
+       or ordinary failed work never closes. *)
     let* terminal=List.fold_left (fun result original ->
       let* terminal=result in if not terminal then Ok false else
       match Progress.phase original.record.progress with
@@ -391,8 +392,13 @@ let completed_forest ~store ~owner inventory =
         let* parent=Parts.find inventory.parts ~part_id:(Capture.parent_part_id original.capture) in
         Ok (Result.is_ok (Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
           ~parent ~execution_id:original.record.request_id))
+      (* Every runnable leaf is Finished here and a part has one execution,
+         so this conflict is on no runnable leaf: a replacement root took its
+         candidates over. The receipt and ACK check below covers every one of
+         them. *)
+      | Conflicted _ -> Ok true
       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
-      | Conflicted _ | Subdividing _ | Subdivided _ -> Ok false) (Ok true) inventory.executions in
+      | Subdividing _ | Subdivided _ -> Ok false) (Ok true) inventory.executions in
     if not terminal then Ok None else
     let+ complete=committed_and_acknowledged ~owner ids in if complete then Some ids else None
 let closure_ports ~store =

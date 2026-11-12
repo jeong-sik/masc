@@ -53,7 +53,7 @@ let to_json (r : retained) = `Assoc ["schema", `String schema;
 let with_request (r : Record.t) request : retained =
   {scope=r.scope; request_id=r.request_id; installation_id=r.installation_id; package_id=r.package_id;
    tool=r.tool; request_digest=r.request_digest; summary=r.summary; request; progress=r.progress}
-let decode ~scope ~request_id json =
+let decode_record ~scope ~request_id json =
   let* fields = match json with
     | `Assoc fields when List.sort String.compare (List.map fst fields) =
         List.sort String.compare ["schema"; "scope"; "request_id";
@@ -81,6 +81,18 @@ let decode ~scope ~request_id json =
     else Error "original request summary is not canonical" in
   let* progress = Lane_addon_request_progress.of_json (List.assoc "progress" fields) in
   Ok ({Record.scope; request_id; installation_id; package_id; tool; request_digest; summary; progress} : Record.t)
+(* Decoding a record checks its summary and every receipt of its progress by
+   writing them canonical again and hashing them, so it costs CPU in proportion
+   to what the record carries. On the server's main domain this was the largest
+   allocator (7.1% of the domain's samples, with the canonical walk another
+   5.2%; 2026-11-12, twelve minutes after a start). A fiber hands the decode to
+   the CPU pool and waits; it reads nothing but its arguments. A caller that is
+   not a fiber, a job of the pool itself, or a process with no pool decodes
+   where it is. *)
+let decode_job = "lane-addon-original-request-record-decode"
+let decode ~scope ~request_id json =
+  Domain_pool_ref.submit_cpu_or_inline ~name:decode_job (fun () ->
+    decode_record ~scope ~request_id json)
 (* The body a record names: present, its bytes named by that digest, and the
    canonical JSON of the request. *)
 let check_body ~request_digest bytes =
@@ -140,9 +152,10 @@ let discover ~store ~scope =
         | _ -> Error "invalid original request record") |> unavailable in
       let* () = if String.equal name (Lane_addon_store.digest request_id ^ ".json") then Ok ()
         else Error (Store_unavailable "original request filename does not match its ID") in
-      let* record = decode ~scope ~request_id json |> unavailable in
+      let* record = decode_record ~scope ~request_id json |> unavailable in
       decode_all (record :: records) rest in
-  decode_all [] rows
+  (* One job for the whole inventory, not one per record. *)
+  Domain_pool_ref.submit_cpu_or_inline ~name:decode_job (fun () -> decode_all [] rows)
 let decode_published ~directory_name ~file_name json =
   let field key = match json with
     | `Assoc fields -> (match List.assoc_opt key fields with
@@ -194,12 +207,12 @@ let observe ~store ~scope =
       then Error (Store_unavailable "observed original metadata does not match its scope or filename")
       else (match field "scope" json, field "request_id" json with
        | Some _, Some request_id ->
-         (match decode ~scope ~request_id json with
+         (match decode_record ~scope ~request_id json with
            | Ok record -> collect (record::records) issues rest
            | Error _ -> collect records (Malformed_owner_metadata::issues) rest)
        | None, (Some _ | None) | Some _, None ->
          collect records (Malformed_owner_metadata::issues) rest) in
-  collect [] [] entries
+  Domain_pool_ref.submit_cpu_or_inline ~name:decode_job (fun () -> collect [] [] entries)
 
 module Published_reader = struct
   type verified = { bytes : string; request : Yojson.Safe.t }

@@ -258,8 +258,9 @@ let join zone ~base_path ~name ~hex ~integration ~client ~model =
 ;;
 
 (* The person makes a Keeper as the preview makes one, and gives it
-   [runtime] when there is one. *)
-let keeper zone (who : someone) name ?runtime () =
+   [runtime] when there is one. [policy] is the id its policy gets, which no
+   other Keeper of the log may have. *)
+let keeper zone (who : someone) name ?(policy = "policy-" ^ name) ?runtime () =
   let keeper_id = get (Keeper_id.of_string name) in
   let turn_scope =
     { Authorization_scope.runtimes = Runtime_scope.all
@@ -268,8 +269,7 @@ let keeper zone (who : someone) name ?runtime () =
     }
   in
   (match
-     Authz_keeper.make zone ~user_id:who.person.user_id ~keeper_id ~turn_scope ~draw:(fun () ->
-       "policy-" ^ name)
+     Authz_keeper.make zone ~user_id:who.person.user_id ~keeper_id ~turn_scope ~draw:(fun () -> policy)
    with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
@@ -399,6 +399,9 @@ let test_turn () =
         keeper zone alice "keeper-alice-second" ~runtime:alice_runtime ();
         keeper zone alice "keeper-alice-idle" ();
         keeper zone bob "keeper-bob" ~runtime:bob_runtime ();
+        (* A Keeper name is a person's own: he has a Keeper of the name of
+           hers (issue #51073). *)
+        keeper zone bob "keeper-alice" ~policy:"policy-bob-keeper-alice" ~runtime:bob_runtime ();
         keeper zone carol "keeper-carol" ~runtime:carol_runtime ();
         (match
            Access.publish
@@ -557,6 +560,16 @@ let test_turn () =
           (answered "keeper-bob" bob_runtime "echo: hi")
           (reply bob (body ~keeper:"keeper-bob" ~message:"hi"));
         Alcotest.(check string) "on the home of his account" (home_of ~base_path bob) (text_of (seen claude) "home");
+        (* Her turns above ran her Keeper of that name on her home. His Keeper
+           of the same name runs on his Runtime and his home. *)
+        check_reply
+          "his Keeper of her Keeper's name answers"
+          (answered "keeper-alice" bob_runtime "echo: his")
+          (reply bob (body ~keeper:"keeper-alice" ~message:"his"));
+        Alcotest.(check string)
+          "on his home, not hers"
+          (home_of ~base_path bob)
+          (text_of (seen claude) "home");
         Alcotest.(check bool)
           "a home of its own"
           false

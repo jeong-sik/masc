@@ -45,13 +45,13 @@ default = "codex.codex"
 
 let receipt turn_id : Keeper_client_tool_outbox.receipt =
   {thread_id="thread-original";turn_id;call_id="call-original";
-   tool_name="Execute";arguments=`Assoc ["command",`String "effect-already-completed"];
+   tool_name="Execute";arguments=Keeper_client_tool_outbox.Known (`Assoc ["command",`String "effect-already-completed"]);
    response=`String "private-completed-result"}
 
 let retain config result =
   get (Keeper_client_tool_outbox.retain ~base_path:config.Workspace.base_path ~keeper_name result)
 let snapshot config =
-  get (Keeper_client_tool_outbox.load ~base_path:config.Workspace.base_path ~keeper_name)
+  get (Keeper_client_tool_outbox.load ~base_path:config.Workspace.base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt)
 let pending config =
   get (Keeper_registry_event_queue.pending_selections_result
     ~base_path:config.Workspace.base_path keeper_name)
@@ -61,7 +61,9 @@ let notify config =
   get (Keeper_client_tool_outbox_wake.notify ~base_path:config.Workspace.base_path ~keeper_name)
 let pulse config =
   Eio.Switch.run (fun sw ->
-    let recovery = Keeper_client_tool_outbox_wake.create ~config in
+    let recovery =
+      Keeper_client_tool_outbox_wake.create ~config
+        ~settle_lost_waits:Keeper_receipt_wait_sweep.settle_lost in
     Keeper_client_tool_outbox_wake.pulse ~sw recovery;
     Keeper_client_tool_outbox_wake.pulse ~sw recovery)
 

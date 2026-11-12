@@ -1158,7 +1158,7 @@ let run_turn_with ?on_guidance_prepared ?raw_trace ?composed_context ?goal_block
     }
   in
   let outcome =
-    Keeper_muse_runtime.run ?on_guidance_prepared ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+    Keeper_muse_runtime.run ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ?on_guidance_prepared ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
       ?argument_source ?librarian_front
       ?composed_context
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
@@ -3820,10 +3820,10 @@ let test_original_result_crosses_checkpoint_and_fresh_session () =
     ignore (settle_first_turn ~base_path ~tool);
     let receipt : Keeper_client_tool_outbox.receipt =
       {thread_id="original-codex-thread";turn_id="original-result-turn";call_id="original-call";
-       tool_name="Execute";arguments=`Assoc ["command",`String "original-effect-no-replay"];
+       tool_name="Execute";arguments=Keeper_client_tool_outbox.Known (`Assoc ["command",`String "original-effect-no-replay"]);
        response=`String "ORIGINAL_CROSS_RUNTIME_RESULT"} in
     Keeper_client_tool_outbox.retain ~base_path ~keeper_name receipt |> get;
-    let load () = Keeper_client_tool_outbox.load ~base_path ~keeper_name |> get in
+    let load () = Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt |> get in
     let project messages = Ok (List.filter
       (fun message -> not (Keeper_client_tool_outbox.is_context_message message)) messages) in
     write_fixture ~base_path (scenario "stop_before_ack");
@@ -3874,7 +3874,7 @@ let test_ordinary_result_is_acknowledged_only_after_accepted_completion () =
      | false, Error error -> fail (Agent_core.Error.to_string error)
      | false, Ok _ | true, Ok _ -> fail "unexpected completion acceptance");
     check int "real adapter executes the effect once" 1 !effects;
-    let pending = match Keeper_client_tool_outbox.load ~base_path ~keeper_name with
+    let pending = match Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt with
       | Ok snapshot -> snapshot | Error detail -> fail detail in
     check int "only accepted natural completion consumes its original physical result"
       (if fail_after_turn then 1 else 0)
@@ -3943,7 +3943,7 @@ let test_durable_view_reconciles_answer_before_result_ack () =
           | _ -> fail "expected exactly one known aggregate despite failed reconciliation")
        | None ->
          if not succeeds then check int "unproven live call sums stay unknown" 0 (List.length run.reports));
-      let pending = Keeper_client_tool_outbox.load ~base_path ~keeper_name |> Result.get_ok in
+      let pending = Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt |> Result.get_ok in
       check int "only proven completion consumes original result" (if succeeds then 0 else 1)
         (List.length (Keeper_client_tool_outbox.receipt_ids pending));
       if succeeds then (
@@ -3986,7 +3986,7 @@ let test_original_result_retention_failure_cannot_yield () =
            the tool's effect, at the actual producer/host-stop boundary. *)
         Fs_compat.save_file blocked_path "blocked after completed fixture effect";
         Ok {Agent_core.Types.content="ORIGINAL_EFFECT_RESULT";content_blocks=None;_meta=None}) in
-    let initial = Keeper_client_tool_outbox.load ~base_path ~keeper_name |> get in
+    let initial = Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt |> get in
     check int "original store is readable before the tool executes" 0
       (List.length (Keeper_client_tool_outbox.receipt_ids initial));
     let run = run_turn_with ~base_path ~tool
@@ -4006,7 +4006,7 @@ let test_original_result_retention_failure_cannot_yield () =
     check int "retention refusal executes the effect exactly once" 1 !effects;
     check string "the post-effect storage refusal remains observable"
       "blocked after completed fixture effect" (read_text blocked_path);
-    match Keeper_client_tool_outbox.load ~base_path ~keeper_name with
+    match Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt with
     | Error _ -> ()
     | Ok _ -> fail "unavailable original results were converted into an empty outbox")
 ;;

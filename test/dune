@@ -3445,6 +3445,7 @@
 
 (include stanzas/test_keeper_official_argument_window.inc)
 (include stanzas/test_keeper_official_client_host.inc)
+(include stanzas/test_official_client_canonical_source_digest.inc)
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_keeper_codex_tool_outbox_wake.inc)
@@ -3452,6 +3453,9 @@
 (include stanzas/test_keeper_agent_core_retained_carrier.inc)
 (include stanzas/test_keeper_execute_background.inc)
 (include stanzas/test_keeper_host_result_retention.inc)
+(include stanzas/test_keeper_receipt_ownership_reads.inc)
+(include stanzas/test_keeper_receipt_wait_tool.inc)
+(include stanzas/test_keeper_receipt_wait_resume.inc)
 (include stanzas/test_keeper_arrived_preview_readership.inc)
 (include stanzas/test_keeper_result_producer_liveness.inc)
 (include stanzas/test_runtime_claude_code.inc)

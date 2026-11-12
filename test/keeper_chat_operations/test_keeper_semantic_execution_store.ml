@@ -82,6 +82,195 @@ let resume_checkpoint store ~now (operation : Chat.t) reference =
     ~observed:(Execution.Agent_core reference) |> store_ok
 let direct_scope (operation : Chat.t) = Scope.direct_operation operation.operation_id
 
+(* Nothing creates a receipt obligation yet, so these tests read one in from a
+   record they patched. *)
+let pending_obligation request_id =
+  `Assoc ["request_id", `String request_id; "state", `Assoc ["kind", `String "pending"]]
+let arrived_obligation request_id resolution =
+  `Assoc ["request_id", `String request_id;
+          "state", `Assoc ["kind", `String "arrived"; "resolution", `String resolution]]
+let with_receipt_obligations obligations (execution : Execution.t) =
+  match Execution.to_json execution with
+  | `Assoc fields ->
+    `Assoc (("receipt_obligations", `List obligations) :: List.remove_assoc "receipt_obligations" fields)
+  | _ -> fail "execution JSON is not an object"
+(* The store refuses a record whose text is not the canonical encoding. *)
+let canonical json =
+  match Chat.canonical_json_string json with
+  | Ok text -> text
+  | Error detail -> fail detail
+let exec_ok = function Ok value -> value | Error error -> fail (Execution.error_to_string error)
+let decoded json = Execution.of_json json |> exec_ok
+let request_ids (execution : Execution.t) =
+  List.map (fun (obligation : Execution.receipt_obligation) -> obligation.request_id)
+    execution.receipt_obligations
+let running_with obligations =
+  let created = Execution.create ~id:(scope_id 301) ~input:fixture_input ~sources:[] ~now:1. |> exec_ok in
+  let running = Execution.apply ~now:2. Execution.Confirm_sources created |> exec_ok
+    |> Execution.apply ~now:3. Execution.Begin_execution |> exec_ok in
+  decoded (with_receipt_obligations obligations running)
+let set_receipt_obligations path (id : Scope.t) obligations =
+  with_db path (fun db ->
+    let found = List.find_map (function
+      | [Some key; Some text] ->
+        (match Execution.of_json (Yojson.Safe.from_string text) with
+         | Ok record when Scope.equal record.id id -> Some (key, record)
+         | Ok _ | Error _ -> None)
+      | _ -> None) (rows db "SELECT scope_key, record_json FROM semantic_executions") in
+    match found with
+    | None -> fail "execution row not found"
+    | Some (key, record) ->
+      let stmt = Sqlite3.prepare db "UPDATE semantic_executions SET record_json=? WHERE scope_key=?" in
+      Fun.protect ~finally:(fun () -> check bool "statement finalized" true (Sqlite3.finalize stmt = Sqlite3.Rc.OK))
+        (fun () ->
+          check bool "record bound" true
+            (Sqlite3.bind_text stmt 1 (canonical (with_receipt_obligations obligations record)) = Sqlite3.Rc.OK);
+          check bool "key bound" true (Sqlite3.bind_text stmt 2 key = Sqlite3.Rc.OK);
+          check bool "record stored" true (Sqlite3.step stmt = Sqlite3.Rc.DONE)))
+
+let test_settle_and_interruption_release_receipt_obligations () =
+  let running = running_with [pending_obligation "request-a"; arrived_obligation "request-b" "receipt_in_outbox"] in
+  check (list string) "the record carries both requests" ["request-a"; "request-b"] (request_ids running);
+  List.iter (fun terminal ->
+    let settled = Execution.apply ~now:4. (Execution.Settle terminal) running |> exec_ok in
+    check (list string) "settling releases every request" [] (request_ids settled);
+    check int64 "in the settling transition" (Int64.succ running.revision) settled.revision)
+    [Execution.Completed; Execution.Cancelled; Execution.Failed "operation failed"];
+  let interrupted = Execution.apply ~now:4.
+    (Execution.Require_reconciliation "process restarted during semantic execution") running |> exec_ok in
+  (match interrupted.phase with
+   | Execution.Recovering {origin = Execution.Interrupted_execution; _} -> ()
+   | _ -> fail "a running execution did not become interrupted");
+  check (list string) "an interrupted execution releases every request" [] (request_ids interrupted);
+  let suspended = Execution.apply ~now:4. (Execution.Suspend (checkpoint ())) running |> exec_ok in
+  check (list string) "ending the turn keeps ownership" ["request-a"; "request-b"] (request_ids suspended);
+  let recovering = Execution.apply ~now:5. (Execution.Require_reconciliation "reconcile") suspended |> exec_ok in
+  check (list string) "a resumable recovery keeps ownership" ["request-a"; "request-b"] (request_ids recovering);
+  let resumed = Execution.apply ~now:5. (Execution.Resume_checkpoint (checkpoint ())) suspended |> exec_ok in
+  check (list string) "resuming keeps ownership" ["request-a"; "request-b"] (request_ids resumed)
+
+let test_receipt_obligations_are_exact_v3_fields () =
+  let created = Execution.create ~id:(scope_id 301) ~input:fixture_input ~sources:[] ~now:1. |> exec_ok in
+  let json = Execution.to_json created in
+  check string "the record format is v3" "masc.keeper_semantic_execution.v3"
+    Yojson.Safe.Util.(json |> member "schema" |> to_string);
+  check bool "an empty list is written, not omitted" true
+    (Yojson.Safe.Util.member "receipt_obligations" json = `List []);
+  let owned = running_with
+    [pending_obligation "p"; arrived_obligation "a" "receipt_in_outbox"; arrived_obligation "l" "source_lost"] in
+  check bool "every state round-trips" true (Execution.to_json owned = Execution.to_json (decoded (Execution.to_json owned)));
+  let replaced name value = match Execution.to_json owned with
+    | `Assoc fields -> `Assoc ((name, value) :: List.remove_assoc name fields)
+    | _ -> fail "execution JSON is not an object" in
+  let without name = match Execution.to_json owned with
+    | `Assoc fields -> `Assoc (List.remove_assoc name fields)
+    | _ -> fail "execution JSON is not an object" in
+  let settled = Execution.apply ~now:4. (Execution.Settle Execution.Cancelled) owned |> exec_ok in
+  let interrupted = Execution.apply ~now:4. (Execution.Require_reconciliation "restart") owned |> exec_ok in
+  List.iter (fun (label, json) -> match Execution.of_json json with
+    | Error _ -> ()
+    | Ok _ -> fail (label ^ " was accepted"))
+    [ "the v2 format", replaced "schema" (`String "masc.keeper_semantic_execution.v2")
+    ; "a record without the field", without "receipt_obligations"
+    ; "a duplicate request", with_receipt_obligations [pending_obligation "x"; pending_obligation "x"] owned
+    ; "a blank request", with_receipt_obligations [pending_obligation " "] owned
+    ; "an unknown resolution", with_receipt_obligations [arrived_obligation "x" "unknown"] owned
+    ; "a pending state with a resolution",
+      with_receipt_obligations [`Assoc ["request_id", `String "x";
+        "state", `Assoc ["kind", `String "pending"; "resolution", `String "source_lost"]]] owned
+    ; "an arrived state without a resolution",
+      with_receipt_obligations [`Assoc ["request_id", `String "x";
+        "state", `Assoc ["kind", `String "arrived"]]] owned
+    ; "a settled record that owns a request", with_receipt_obligations [pending_obligation "x"] settled
+    ; "an interrupted record that owns a request", with_receipt_obligations [pending_obligation "x"] interrupted ]
+
+let test_receipt_owners_are_read_without_the_owner_and_cancel_releases_them () =
+  with_store (fun path store ->
+    submit store ~now:1. "waits" fixture_input;
+    let waiting = claim store ~now:2. in
+    ignore (defer_checkpoint store ~now:3. waiting (checkpoint ()));
+    let id = direct_scope waiting in
+    Store.close store |> store_ok;
+    set_receipt_obligations path id [pending_obligation "request-a"; arrived_obligation "request-b" "source_lost"];
+    let before = raw_file path in
+    let owners = Store.inspect_receipt_owners ~path |> store_ok in
+    let owner request_id = Store.receipt_owner owners ~request_id in
+    check bool "a pending request is owned by its execution" true (Option.equal Scope.equal (owner "request-a") (Some id));
+    check bool "an arrived request is owned by its execution" true (Option.equal Scope.equal (owner "request-b") (Some id));
+    check bool "another request has no owner" true (Option.is_none (owner "request-c"));
+    check string "reading the owners leaves the database bytes alone" before (raw_file path);
+    with_open path (fun reopened ->
+      check (list string) "the reopened store keeps the requests" ["request-a"; "request-b"] (request_ids (get reopened id));
+      ignore (Store.cancel_queued reopened ~now:4. ~operation_id:waiting.operation_id |> store_ok);
+      let cancelled = get reopened id in
+      check bool "cancelling settled the execution" true (Execution.is_terminal cancelled);
+      check (list string) "cancelling released the requests" [] (request_ids cancelled));
+    let owners = Store.inspect_receipt_owners ~path |> store_ok in
+    check bool "a settled execution owns nothing" true
+      (Option.is_none (Store.receipt_owner owners ~request_id:"request-a")))
+
+let obligation request_id state = Execution.receipt_obligation ~request_id ~state |> string_ok
+
+let entry_states (execution : Execution.t) =
+  List.map (fun (entry : Execution.receipt_obligation) -> entry.request_id, entry.state) execution.receipt_obligations
+
+let test_await_and_resolve_receipt_actions () =
+  let running = running_with [] in
+  let awaiting = Execution.apply ~now:4. (Execution.Await_receipt (obligation "request-a" Execution.Pending)) running |> exec_ok in
+  check (list string) "waiting adds the request" ["request-a"] (request_ids awaiting);
+  check string "and leaves the phase to the suspend that follows" (Execution.phase_name running.phase) (Execution.phase_name awaiting.phase);
+  let repeated = Execution.apply ~now:5.
+    (Execution.Await_receipt (obligation "request-a" (Execution.Arrived Execution.Receipt_in_outbox))) awaiting |> exec_ok in
+  check bool "a request the execution owns keeps its entry and state" true
+    (entry_states repeated = ["request-a", Execution.Pending] && repeated.revision = awaiting.revision);
+  let two = Execution.apply ~now:5. (Execution.Await_receipt (obligation "request-b" Execution.Pending)) awaiting |> exec_ok in
+  check (list string) "another request is appended" ["request-a"; "request-b"] (request_ids two);
+  let resolved = Execution.apply ~now:6.
+    (Execution.Resolve_receipt {request_id = "request-a"; resolution = Execution.Source_lost}) two |> exec_ok in
+  check bool "a pending entry arrives with the resolution it was given" true
+    (entry_states resolved = ["request-a", Execution.Arrived Execution.Source_lost; "request-b", Execution.Pending]);
+  let again = Execution.apply ~now:7.
+    (Execution.Resolve_receipt {request_id = "request-a"; resolution = Execution.Receipt_in_outbox}) resolved |> exec_ok in
+  check bool "an arrived entry is not resolved again" true
+    (entry_states again = entry_states resolved && again.revision = resolved.revision);
+  let missing = Execution.apply ~now:7.
+    (Execution.Resolve_receipt {request_id = "request-z"; resolution = Execution.Receipt_in_outbox}) resolved |> exec_ok in
+  check bool "a request with no entry changes nothing" true (missing.revision = resolved.revision);
+  let settled = Execution.apply ~now:8. (Execution.Settle Execution.Completed) running |> exec_ok in
+  let late = Execution.apply ~now:9.
+    (Execution.Resolve_receipt {request_id = "request-a"; resolution = Execution.Receipt_in_outbox}) settled |> exec_ok in
+  check bool "a notice after the execution settled changes nothing" true (late.revision = settled.revision)
+
+let test_await_receipt_is_admitted_only_while_the_execution_holds_the_slot () =
+  let running = running_with [] in
+  let created = Execution.create ~id:(scope_id 302) ~input:fixture_input ~sources:[] ~now:1. |> exec_ok in
+  let ready = Execution.apply ~now:2. Execution.Confirm_sources created |> exec_ok in
+  let suspended = Execution.apply ~now:4. (Execution.Suspend (checkpoint ())) running |> exec_ok in
+  let settled = Execution.apply ~now:4. (Execution.Settle Execution.Cancelled) running |> exec_ok in
+  let wait = Execution.Await_receipt (obligation "request-a" Execution.Pending) in
+  List.iter (fun (label, execution) ->
+    check bool (label ^ " refuses a wait") true (Result.is_error (Execution.apply ~now:5. wait execution)))
+    ["a prepared execution", created; "a ready execution", ready; "a suspended execution", suspended; "a settled execution", settled];
+  check bool "a running execution admits it" true (Result.is_ok (Execution.apply ~now:5. wait running))
+
+let test_receipt_owners_of_a_missing_store_is_empty_and_double_ownership_is_refused () =
+  with_path (fun path ->
+    let owners = Store.inspect_receipt_owners ~path |> store_ok in
+    check bool "a journal that was never created owns nothing" true
+      (Option.is_none (Store.receipt_owner owners ~request_id:"request-a")));
+  with_store (fun path store ->
+    submit store ~now:1. "first" fixture_input;
+    let first = claim store ~now:2. in
+    ignore (defer_checkpoint store ~now:3. first (checkpoint ()));
+    let second = prepare store 7 [source 7] in
+    Store.close store |> store_ok;
+    set_receipt_obligations path (direct_scope first) [pending_obligation "request-x"];
+    set_receipt_obligations path second.id [pending_obligation "request-x"];
+    match Store.inspect_receipt_owners ~path with
+    | Error (Store.Integrity_error _) -> ()
+    | Error error -> fail (Store.error_to_string error)
+    | Ok _ -> fail "a request listed by two executions had an owner")
+
 let test_identity_frame_and_membership_commit_together () =
   with_store (fun path store ->
     let first = prepare store 1 [source 1; source 2] in
@@ -914,6 +1103,13 @@ let () =
         test_case "identity frame and sources commit together" `Quick test_identity_frame_and_membership_commit_together;
         test_case "admission failure and uncertain commit reopen by identity" `Quick test_admission_commit_faults;
         test_case "terminal record stays immutable" `Quick test_terminal_record_is_immutable ];
+      "receipt ownership", [
+        test_case "settling and an interrupting restart release the requests, other transitions keep them" `Quick test_settle_and_interruption_release_receipt_obligations;
+        test_case "the record format is exact v3" `Quick test_receipt_obligations_are_exact_v3_fields;
+        test_case "owners are read without the Owner and cancelling releases them" `Quick test_receipt_owners_are_read_without_the_owner_and_cancel_releases_them;
+        test_case "a missing journal owns nothing and double ownership is refused" `Quick test_receipt_owners_of_a_missing_store_is_empty_and_double_ownership_is_refused;
+        test_case "waiting adds a request and resolving moves a pending entry once" `Quick test_await_and_resolve_receipt_actions;
+        test_case "waiting is admitted only while the execution holds the slot" `Quick test_await_receipt_is_admitted_only_while_the_execution_holds_the_slot ];
       "owner isolation", [
         test_case "startup marks an interrupted execution and releases the running slot" `Quick test_restart_interrupted_execution_releases_the_running_slot;
         test_case "readonly inventory includes every unsettled phase" `Quick test_readonly_inventory_includes_every_unsettled_phase;

@@ -1679,9 +1679,11 @@ let owned_keepers state user_id =
 ;;
 
 (* Plan D1-5: a person makes a Keeper for themselves, once, and gives it only
-   a Runtime they own. Both people here are Admins: an Admin makes no Keeper
-   for another person, gives no Runtime to the Keeper of another person, and
-   gives their own Keeper no Runtime of another person. *)
+   a Runtime they own. A Keeper name is a person's own (issue #51073): another
+   person makes a Keeper of the same name, and it is another Keeper. Both
+   people here are Admins: an Admin makes no Keeper for another person, gives
+   no Runtime to the Keeper of another person, and gives their own Keeper no
+   Runtime of another person. *)
 let test_keepers () =
   let state =
     applied_change "a Keeper" (two_admins ()) (keeper_record ~author:(human user) (keeper_made ~by:user ())) None
@@ -1702,7 +1704,11 @@ let test_keepers () =
         ^ Authz_types.User_id.to_string user
         ^ {|","policy_id":"policy-1","turn_scope":{"runtimes":"all","channels":["autonomous","direct"],"allowed_effects":"all"}}|})
        (Authz_body.to_string body));
-  (match Ks.find state.S.keepers first_keeper with
+  Alcotest.(check bool)
+    "the name is no Keeper of another person"
+    true
+    (Option.is_none (Ks.find state.S.keepers ~owner:bob first_keeper));
+  (match Ks.find state.S.keepers ~owner:user first_keeper with
    | None -> Alcotest.fail "the Keeper is not in the state"
    | Some keeper ->
      Alcotest.(check string)
@@ -1723,11 +1729,28 @@ let test_keepers () =
     state
     (keeper_record ~author:(human user) (keeper_made ~keeper_id:second_keeper ~by:user ()))
     (S.Keeper (Ks.Policy_named_before first_policy));
-  refused_as
-    "made again by another"
-    state
-    (keeper_record ~author:(human bob) (keeper_made ~policy_id:second_policy ~by:bob ()))
-    (S.Keeper (Ks.Already_made first_keeper));
+  let both =
+    applied_change
+      "a Keeper of the same name by another person"
+      state
+      (keeper_record ~author:(human bob) (keeper_made ~policy_id:second_policy ~by:bob ()))
+      None
+  in
+  Alcotest.(check (list (pair string (option string))))
+    "the other person owns their Keeper of that name"
+    [ Authz_types.Keeper_id.to_string first_keeper, None ]
+    (owned_keepers both bob);
+  Alcotest.(check (list (pair string (option string))))
+    "and the first person still owns theirs"
+    [ Authz_types.Keeper_id.to_string first_keeper, None ]
+    (owned_keepers both user);
+  (match Ks.find both.S.keepers ~owner:bob first_keeper with
+   | None -> Alcotest.fail "the other person's Keeper is not in the state"
+   | Some keeper ->
+     Alcotest.(check string)
+       "with its own policy"
+       (Authz_types.Policy_id.to_string second_policy)
+       (Authz_types.Policy_id.to_string keeper.Ks.policy_id));
   refused_as
     "an Admin makes one for another"
     (two_admins ())
@@ -1799,7 +1822,7 @@ let test_keepers () =
     "an Admin gives a Runtime to the Keeper of another"
     state
     (keeper_record ~author:(human bob) (assigned bob_runtime))
-    (S.Keeper (Ks.Assigned_by_another { author = bob; keeper_id = first_keeper; owner = user }));
+    (S.Keeper (Ks.Not_made first_keeper));
   let state =
     applied_change
       "a Runtime of the owner"

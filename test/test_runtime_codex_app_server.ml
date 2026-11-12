@@ -5605,7 +5605,7 @@ let test_delivered_host_result_settlement ~confirmation ~completed () =
          | true, Ok _ | false, Error _ -> ()
          | true, Error error -> fail (Agent_core.Error.to_string error)
          | false, Ok _ -> fail "a failed vendor turn was accepted");
-        let pending = match Keeper_client_tool_outbox.load ~base_path ~keeper_name with
+        let pending = match Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt with
           | Ok snapshot -> Keeper_client_tool_outbox.receipt_ids snapshot
           | Error detail -> fail detail in
         check int "only an accepted turn with the exact confirmed result settles it"
@@ -5643,7 +5643,7 @@ let test_cancelled_item_before_tool_write_remains_retained () =
             ~cli_path ~model:"gpt-fixture" () with
          | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
         check bool "the server cancellation was processed before the tool returned" true !released;
-        let pending = match Keeper_client_tool_outbox.load ~base_path ~keeper_name with
+        let pending = match Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt with
           | Ok snapshot -> Keeper_client_tool_outbox.receipt_ids snapshot
           | Error detail -> fail detail in
         check int "the late result is still retained" 1 (List.length pending)))
@@ -5659,8 +5659,8 @@ let test_tool_outbox_reaches_the_next_keeper_turn ?(refuse_input = false) ~refus
       ~retain:(fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
         Keeper_client_tool_outbox.retain ~base_path ~keeper_name
           {thread_id=receipt.thread_id;turn_id=receipt.turn_id;call_id=receipt.call_id;
-           tool_name=receipt.tool_name;arguments=receipt.arguments;response=receipt.response}) ();
-    let pending = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name) in
+           tool_name=receipt.tool_name;arguments=Keeper_client_tool_outbox.Known receipt.arguments;response=receipt.response}) ();
+    let pending = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt) in
     check int "one retained context batch" 1
       (List.length (Keeper_client_tool_outbox.developer_context pending));
     with_fixture ~capture_path ~inject_items:true ~close_after_injection:refuse_dispatch
@@ -5675,7 +5675,7 @@ let test_tool_outbox_reaches_the_next_keeper_turn ?(refuse_input = false) ~refus
          | false, Ok _ | true, Error _ -> ()
          | false, Error error -> fail (Agent_core.Error.to_string error)
          | true, Ok _ -> fail "a refused input cannot acknowledge receipt delivery");
-        let pending = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name) in
+        let pending = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt) in
         check int "ACK follows successful dispatch only" (if refuse_dispatch || refuse_input then 1 else 0)
           (List.length (Keeper_client_tool_outbox.developer_context pending));
         let frames = In_channel.with_open_bin capture_path In_channel.input_lines
@@ -5694,17 +5694,17 @@ let test_tool_outbox_acknowledges_only_its_snapshot () =
   let get = function Ok value -> value | Error detail -> fail detail in
   let first : Keeper_client_tool_outbox.receipt =
     {thread_id = "thread-1"; turn_id = "turn-1"; call_id = "call-1";
-     tool_name = "probe"; arguments = `Null; response = `String "first-result"} in
+     tool_name = "probe"; arguments = Keeper_client_tool_outbox.Known `Null; response = `String "first-result"} in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     get (Keeper_client_tool_outbox.retain ~base_path ~keeper_name first);
     let session_path = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
     let staging = Filename.concat (Filename.dirname session_path) ".undelivered-tools-staging" in
     Fs_compat.save_file (Filename.concat staging "interrupted-write.tmp") "{partial";
-    let original = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name) in
+    let original = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt) in
     get (Keeper_client_tool_outbox.retain ~base_path ~keeper_name
       {first with turn_id = "turn-2"; response = `String "later-result"});
     get (Keeper_client_tool_outbox.acknowledge original);
-    let remaining = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name)
+    let remaining = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt)
       |> Keeper_client_tool_outbox.developer_context in
     match remaining with
     | [text] -> check bool "same call id in a newer turn remains pending" true
@@ -8368,7 +8368,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
             | Ok result -> check int "initial context turn" 1 result.turns);
        check int "the first turn ran the effect once" 1 !effect_count;
        let pending =
-         match Keeper_client_tool_outbox.load ~base_path ~keeper_name:"codex-fixture" with
+         match Keeper_client_tool_outbox.load ~base_path ~keeper_name:"codex-fixture" ~viewer:Keeper_client_tool_outbox.Every_receipt with
          | Ok snapshot -> Keeper_client_tool_outbox.receipt_ids snapshot
          | Error detail -> fail detail
        in

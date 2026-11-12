@@ -108,6 +108,7 @@ val run :
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
+  outbox_viewer:Keeper_client_tool_outbox.viewer ->
   goal:string ->
   goal_blocks:Agent_core.Types.content_block list option ->
   system_prompt:string ->

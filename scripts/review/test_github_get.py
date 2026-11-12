@@ -177,5 +177,74 @@ class GitHubGet(unittest.TestCase):
         self.assertEqual(client.pauses, 1)
 
 
+    def test_a_wait_that_ends_on_the_reset_second_retries_the_old_window_briefly(self):
+        spent = {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1030'}
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            # The window has not rolled over yet at the reset second itself.
+            return (response(403, {'message': 'limited'}, spent) if len(calls) <= 2
+                    else response(200, {'ok': True}))
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        self.assertEqual(client.read('repos/o/r/pulls/1'), {'ok': True})
+        self.assertEqual(calls, [1000.0, 1030.0, 1032.0])
+        self.assertEqual(clock.sleeps, [30.0, GET.BOUNDARY_PAUSE_SECONDS])
+        self.assertEqual((client.pauses, client.boundary_retries), (1, 1))
+
+    def test_the_boundary_retry_is_bounded_and_then_a_visible_failure(self):
+        spent = {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1030'}
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return response(403, {'message': 'limited'}, spent)
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        with self.assertRaises(GET.ApiFailure) as raised:
+            client.read('repos/o/r/pulls/1')
+        self.assertNotIsInstance(raised.exception, GET.QuotaLimited)
+        # Its own type and state, so it is told apart from any other refusal.
+        self.assertIsInstance(raised.exception, GET.QuotaBoundaryExhausted)
+        self.assertEqual(raised.exception.status, 403)
+        self.assertEqual(raised.exception.details['quota_state'], 'boundary_retries_exhausted')
+        self.assertEqual(raised.exception.details['boundary_retries'], GET.BOUNDARY_RETRIES)
+        self.assertIn('retries exhausted', str(raised.exception))
+        # First request, the post-wait request, then the bounded retries.
+        self.assertEqual(len(calls), 2 + GET.BOUNDARY_RETRIES)
+        self.assertEqual(client.boundary_retries, GET.BOUNDARY_RETRIES)
+
+    def test_other_refusals_do_not_carry_the_boundary_state(self):
+        clock = Clock()
+        client = GET.Client(run=lambda *a, **k: response(403, {'message': 'forbidden'}),
+                            clock=lambda: clock.now, sleep=clock.sleep)
+        with self.assertRaises(GET.ApiFailure) as raised:
+            client.read('repos/o/r/pulls/1')
+        self.assertNotIsInstance(raised.exception, GET.QuotaBoundaryExhausted)
+        self.assertNotIn('quota_state', raised.exception.details)
+
+    def test_an_elapsed_reset_without_a_prior_wait_stays_a_visible_failure(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return response(403, {'message': 'limited'},
+                            {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '900'})
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        with self.assertRaises(GET.ApiFailure):
+            client.read('repos/o/r/pulls/1')
+        self.assertEqual((len(calls), clock.sleeps, client.boundary_retries), (1, [], 0))
+
+    def test_a_refusal_after_a_wait_is_not_retried_when_quota_is_not_spent(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return (response(429, {'message': 'limited'}, {'Retry-After': '10'})
+                    if len(calls) == 1 else
+                    response(403, {'message': 'forbidden'},
+                             {'X-RateLimit-Remaining': '9', 'X-RateLimit-Reset': '900'}))
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        with self.assertRaises(GET.ApiFailure) as raised:
+            client.read('repos/o/r/pulls/1')
+        self.assertEqual(raised.exception.status, 403)
+        self.assertEqual((len(calls), client.boundary_retries), (2, 0))
+
+
 if __name__ == '__main__':
     unittest.main()

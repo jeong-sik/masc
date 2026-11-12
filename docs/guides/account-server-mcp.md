@@ -37,7 +37,8 @@ that page reads. A refusal comes back as a tool result with `isError: true`
 and the sentence of the refusal.
 
 A Keeper or a Runtime of another person is answered as one that is not
-there.
+there. A Keeper name is your own: another person can have a Keeper of the
+same name, and each of you lists, assigns and runs only your own.
 
 ## Connect a client
 

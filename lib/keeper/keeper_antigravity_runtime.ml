@@ -411,7 +411,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     ~librarian_front
     ~on_carried_front
     ~turn_start
-    ~pre_tool_rejects ~base_path ~goal ~goal_blocks
+    ~pre_tool_rejects ~base_path ~outbox_viewer ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
@@ -582,7 +582,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
         ~model_input_projection:None
         ~hooks:(Some hooks)
     in
-    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+    let* tool_outbox =
+      Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:outbox_viewer
       |> Result.map_error internal_error in
     (* Hooks may replace the system prompt or append an ordinary Nudge. Bind
        the final non-carried composition, and retain the mandatory workspace
@@ -596,10 +597,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
        world context remains on the existing per-turn prompt path. *)
     let snapshot_messages = List.filter
         (fun message -> not (Host.is_carried_on_resume message)) prepared.messages in
-    let snapshot = `Assoc ["system_prompt", `String prepared.system_prompt;
-      "messages", `List (List.map Keeper_official_client_context_codec.to_json snapshot_messages)] in
-    let snapshot_sha256 = snapshot |> Yojson.Safe.to_string
-      |> Agent_core_sha256.digest_string |> Agent_core_sha256.to_hex in
+    let snapshot_sha256 = Keeper_official_client_context_codec.canonical_source_sha256
+      ~system_prompt:prepared.system_prompt ~messages:snapshot_messages ~rest:[] in
     let admission_error reason = config_error
         ~field:"official_client_session.context_admission"
         (Session_store.context_admission_error_to_string reason) in
@@ -1323,7 +1322,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                   recovery_detail))))
 ;;
 
-let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~host ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~host ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1362,6 +1361,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
+        ~outbox_viewer
         ~required_native_posture
         ~runtime_id
         ~host

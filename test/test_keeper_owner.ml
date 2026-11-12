@@ -6847,10 +6847,100 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
   Owner.begin_stopping owner |> owner_ok |> ignore)
 ;;
 
+(* A task that ended its turn on a background request is not claimed until the
+   request's receipt arrives, even after the slot frees and the drain wakes. A
+   notice for another request changes nothing. The notice for its own request
+   makes it claimable and the Owner starts that claim. *)
+let test_owner_receipt_wait_holds_the_claim_until_the_receipt_arrives () =
+  Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
+  let id = operation_id "kmsg-receipt-wait" in
+  let other = operation_id "kmsg-receipt-independent" in
+  let input = operation_input "Wait for a background request" in
+  let request_id = "request-awaited" in
+  let owner_p, owner_resolver = Eio.Promise.create () in
+  let deferred, deferred_resolver = Eio.Promise.create () in
+  let independent, independent_resolver = Eio.Promise.create () in
+  let finished, finished_resolver = Eio.Promise.create () in
+  let attempts = ref 0 in
+  let scope = Keeper_execution_scope_id.direct_operation id in
+  let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+      (Keeper_repetition_snapshot.Fresh scope) |> Result.get_ok in
+  let checkpoint = Keeper_semantic_execution.Official_client
+      {client_kind=Muse;runtime_id="muse.owner";session_id="receipt-session";turn_id="receipt-turn";
+       tool_surface_sha256=Keeper_checkpoint_ref.sha256_of_canonical_bytes "receipt tools";frame} in
+  let wait = Keeper_semantic_execution.receipt_obligation ~request_id
+      ~state:Keeper_semantic_execution.Pending |> Result.get_ok in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let owner = Eio.Promise.await owner_p in
+    let operation : Chat_operation.t = claim () |> owner_ok |> Option.get in
+    if Chat_operation.Operation_id.equal id operation.operation_id then (
+      incr attempts;
+      match !attempts with
+      | 1 ->
+        Owner.defer_direct_checkpoint ~receipt_waits:[wait] owner ~operation_id:id
+          ~execution_digest:operation.execution_digest ~checkpoint |> owner_ok |> ignore;
+        Eio.Promise.resolve deferred_resolver ();
+        Owner.Operation_deferred
+      | 2 ->
+        Owner.resume_direct_checkpoint owner ~operation_id:id ~observed:checkpoint |> owner_ok;
+        Owner.enter_direct_preparation owner ~operation_id:id
+          ~execution_digest:operation.execution_digest |> owner_ok;
+        Owner.Operation_succeeded {outcome_ref="resumed after its receipt"}
+      | _ -> fail "the waiting task was claimed again")
+    else Owner.Operation_succeeded {outcome_ref="independent finished"} in
+  let path = Filename.temp_file "keeper-owner-receipt-wait-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
+  let owner = Owner.start ~base_path:(Filename.dirname path) ~sw
+      ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
+      ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
+      ~now:(fun () -> 42.) ~keeper_name:"receipt-wait-owner"
+      ~initial_meta:(Some (make_meta "receipt-wait-owner"))
+      ~on_turn_slot_released:None
+      ~operation_runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true);execute;
+        on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id ~operations:_ ~execution:_ ->
+          match claimed_operation_id with
+          | Some current when Chat_operation.Operation_id.equal current id ->
+            if !attempts=2 then Eio.Promise.resolve finished_resolver ()
+          | Some current when Chat_operation.Operation_id.equal current other ->
+            Eio.Promise.resolve independent_resolver ()
+          | Some _ | None -> ())}) |> owner_ok in
+  Eio.Promise.resolve owner_resolver owner;
+  Owner.submit_operation owner ~operation_id:id ~source:operation_source ~input |> owner_ok |> ignore;
+  Eio.Promise.await deferred;
+  Owner.wake_operation_drain owner |> owner_ok;
+  Owner.submit_operation owner ~operation_id:other ~source:operation_source
+    ~input:(operation_input "Independent steering") |> owner_ok |> ignore;
+  Eio.Promise.await independent;
+  check int "the slot freed and the drain woke, but the waiting task was not claimed" 1 !attempts;
+  let unrelated = Owner.receipt_arrived owner ~request_id:"request-unrelated"
+      ~resolution:Keeper_semantic_execution.Receipt_in_outbox |> owner_ok in
+  check bool "a notice for another request finds no owner" true
+    (unrelated = Keeper_chat_operation_store.Receipt_without_owner);
+  Owner.wake_operation_drain owner |> owner_ok;
+  check int "and starts nothing" 1 !attempts;
+  let arrived = Owner.receipt_arrived owner ~request_id
+      ~resolution:Keeper_semantic_execution.Receipt_in_outbox |> owner_ok in
+  check bool "the notice for its request resolves the entry" true
+    (arrived = Keeper_chat_operation_store.Receipt_resolved);
+  Eio.Promise.await finished;
+  check int "the Owner claimed the task once after the receipt arrived" 2 !attempts;
+  let terminal = Owner.exact_operation owner id |> owner_ok |> Option.get in
+  check string "the task completes" "succeeded" (Chat_operation.state_to_string terminal.state);
+  let late = Owner.receipt_arrived owner ~request_id
+      ~resolution:Keeper_semantic_execution.Receipt_in_outbox |> owner_ok in
+  check bool "a notice after the task ended finds no owner" true
+    (late = Keeper_chat_operation_store.Receipt_without_owner);
+  Owner.begin_stopping owner |> owner_ok |> ignore
+;;
+
 let () =
   run
     "keeper owner"
-    [ ( "preparation wait", [
+    [ ( "receipt wait", [
+        test_case "a task waiting for a receipt is claimed only after it arrives" `Quick
+          test_owner_receipt_wait_holds_the_claim_until_the_receipt_arrives ] )
+    ; ( "preparation wait", [
         test_case "generic Config settlement cannot gain preparation retry authority" `Quick
           (test_owner_preparation_wait_and_explicit_retry ~generic_failure:true None);
         test_case "exact retained operation retries only explicitly" `Quick

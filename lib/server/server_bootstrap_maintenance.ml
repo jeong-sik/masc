@@ -780,7 +780,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     let reconcile_owned_job_completions () =
       Keeper_owned_job_completion_wake.pulse ~sw owned_job_completions
     in
-    let unread_tool_results = Keeper_client_tool_outbox_wake.create ~config in
+    let unread_tool_results =
+      Keeper_client_tool_outbox_wake.create ~config
+        ~settle_lost_waits:Keeper_receipt_wait_sweep.settle_lost in
     let reconcile_unread_tool_results () =
       Keeper_client_tool_outbox_wake.pulse ~sw unread_tool_results
     in

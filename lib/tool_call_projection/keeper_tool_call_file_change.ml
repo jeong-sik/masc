@@ -292,6 +292,7 @@ let kind_of_row ~(handler : Keeper_tool_descriptor.runtime_handler) row =
   | Keeper_tool_descriptor.Tool_keeper_job_dispatch
   | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
   | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+  | Keeper_tool_descriptor.Tool_receipt_wait
   | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_status

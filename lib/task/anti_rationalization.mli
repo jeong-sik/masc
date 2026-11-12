@@ -155,12 +155,35 @@ type provider_rest =
   | Rests_until_stated_end
   | No_stated_rest
 
+(** What one candidate's failure says about reviewing the same submission
+    again with nothing changed by a producer or an operator.
+    [Reviews_again]: the failure passes with time — a transient error
+    ({!Agent_core.Error.is_retryable}) or a path that rests until a time the
+    provider stated ({!provider_rest}). [Model_absent]: a retired or unknown
+    model, permanent for the unchanged request. [Producer_must_act]: nothing
+    that time alone changes. The walk reads this once, when the failure is
+    reported, and names the [Reviews_again] candidates in
+    [retryable_runtimes] unless it ends with an unknown outcome. *)
+type candidate_failure =
+  | Reviews_again
+  | Model_absent
+  | Producer_must_act
+
 (** Whether the typed candidate failure establishes that no reviewer remains
     in flight. Dispatch alone never proves a response was received. *)
 type failure_certainty = Before_dispatch | Definite_refusal | Outcome_unknown
+
+(** [Attempt_failed.failure] is the classification the walk computed for that
+    candidate. A walk that ends with an unknown outcome empties
+    [retryable_runtimes], so this observation is where a host retains it. *)
 type execution_observation =
   | Admission_refused
-  | Attempt_failed of { runtime_id:string; certainty:failure_certainty; error:Agent_core.Error.t }
+  | Attempt_failed of
+      { runtime_id:string
+      ; certainty:failure_certainty
+      ; error:Agent_core.Error.t
+      ; failure:candidate_failure
+      }
   | Reply_received of { runtime_id:string }
 
 val failure_certainty : dispatch:Runtime_attempt_dispatch.t -> Agent_core.Error.t -> failure_certainty

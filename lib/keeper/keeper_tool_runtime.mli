@@ -49,6 +49,10 @@ type context =
         job ownership never substitutes the Keeper current task. *)
   ; owned_job_replay : Keeper_owned_job_invocation.replay option
     (** Sealed original source for Existing-only interrupted launch recovery. *)
+  ; execution_scope : Keeper_execution_scope_id.t option
+    (** The chat execution this call runs for: the one whose turn would end on
+        a wait the call asks for. [None] on callers that serve no chat
+        execution (composition sub-calls, tests, direct dispatch). *)
   ; result_projection : Tool_output.model_projection option
     (** The projection this call's result crosses on its way to the model,
         resolved for the lane running the call. [None] when the caller did

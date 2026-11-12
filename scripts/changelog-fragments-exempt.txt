@@ -31,3 +31,4 @@
 51437  # CI script only: approval-auto-merge no longer starts a second follow chain when a merge request is already pending; no user-facing behavior
 51438  # CI script only: approval-auto-merge polls a pending stack merge through the open pull list instead of one read per layer; no user-facing behavior
 51473  # CI workflow only: approval-merge-request runs are folded per PR with concurrency so duplicate review events no longer exhaust the installation rate limit; no user-facing behavior
+51562  # CI script only: the review GitHub reader retries a quota 403 whose reset second has just elapsed, a few times after its own wait; no user-facing behavior

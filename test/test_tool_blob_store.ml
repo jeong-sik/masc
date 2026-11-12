@@ -1304,7 +1304,8 @@ let test_maintenance_opaque_payloads_preserve_fail_closed_boundaries () =
 ;;
 
 let outbox_vendor_receipt arguments response : Masc.Keeper_client_tool_outbox.receipt =
-  {thread_id="thread";turn_id="turn";call_id="call";tool_name="fixture";arguments;response}
+  {thread_id="thread";turn_id="turn";call_id="call";tool_name="fixture";
+   arguments=Masc.Keeper_client_tool_outbox.Known arguments;response}
 ;;
 
 let test_maintenance_outbox_payloads_are_tool_data () =
@@ -1336,7 +1337,7 @@ let test_maintenance_outbox_payloads_are_tool_data () =
     let producer = require (Outbox.host_producer ~base_path ~keeper_name:"reviewer"
         ~runtime_label:"host fixture" ~turn_count:1) in
     require (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
-      ~tool_name:"fixture" ~arguments:payload ~response:payload);
+      ~tool_name:"fixture" ~arguments:(Outbox.Known payload) ~response:payload);
     ignore (save_maintenance_source base_path "messages/outbox-media-owner.json"
       (Agent_core.History.content_block_to_json
         (Agent_core.Types.Image {media_type="image/png";source=Agent_core.Types.Stored media})));
@@ -1375,7 +1376,7 @@ let test_maintenance_keeps_host_receipt_blob_addresses () =
           Llm_provider.Types.Document {media_type=O.artifact_manifest_mime;
           source=Llm_provider.Types.Base64 (Base64.encode_string document)}])) in
     require (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
-      ~tool_name:"fixture" ~arguments:`Null ~response);
+      ~tool_name:"fixture" ~arguments:(Outbox.Known `Null) ~response);
     let unnamed = B.put_durable store ~bytes:"bytes no receipt names" ~mime:"text/plain" in
     let first = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
     Alcotest.(check int) "only the unnamed bytes become a candidate" 1 first.candidates_recorded;
@@ -1400,13 +1401,13 @@ let test_maintenance_outbox_opacity_requires_complete_receipt_authority () =
     let before = snapshot () in
     let partial = `Assoc ["type",`String "stored";"sha256",`String survivor.sha256] in
     let vendor = Codec.to_json {thread_id="thread";turn_id="turn";call_id="call";
-      tool_name="fixture";arguments=partial;response=`Null} in
+      tool_name="fixture";arguments=Codec.Known partial;response=`Null} in
     let change f = match vendor with `Assoc fields -> `Assoc (f fields)
       | _ -> Alcotest.fail "vendor encoder must return an object" in
     let host ?(producer_id="019a0000-0000-7000-8000-000000000001")
         ?(invocation_index=0) ?(turn_count=1) () =
       Codec.host_to_json ~producer_id ~runtime_label:"host fixture" ~turn_count
-        ~invocation_index ~call_id:"host-call" ~tool_name:"fixture" ~arguments:partial ~response:`Null in
+        ~invocation_index ~call_id:"host-call" ~tool_name:"fixture" ~arguments:(Codec.Known partial) ~response:`Null in
     let json = match shape with
       | `Missing_identity -> change (List.remove_assoc "thread_id")
       | `Empty_identity -> change (fun fields -> ("thread_id",`String " ") :: List.remove_assoc "thread_id" fields)
@@ -1445,7 +1446,7 @@ let test_maintenance_outbox_payloads_preserve_reserved_reference_failures () =
       let producer = require (Outbox.host_producer ~base_path ~keeper_name:"reviewer"
           ~runtime_label:"host fixture" ~turn_count:1) in
       require (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
-        ~tool_name:"fixture" ~arguments:`Null ~response:payload))
+        ~tool_name:"fixture" ~arguments:(Outbox.Known `Null) ~response:payload))
     else require (Outbox.retain ~base_path ~keeper_name:"reviewer"
       (outbox_vendor_receipt payload `Null));
     (match M.run ~base_path ~scope ~mode:M.Delete_previous_candidates with
@@ -1469,10 +1470,10 @@ let test_maintenance_receipt_shaped_messages_keep_history_ownership () =
       let producer = require (Outbox.host_producer ~base_path ~keeper_name:"reviewer"
           ~runtime_label:"host fixture" ~turn_count:1) in
       require (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
-        ~tool_name:"fixture" ~arguments:payload ~response:payload))
+        ~tool_name:"fixture" ~arguments:(Outbox.Known payload) ~response:payload))
     else require (Outbox.retain ~base_path ~keeper_name:"reviewer"
       (outbox_vendor_receipt payload payload));
-    let snapshot = require (Outbox.load ~base_path ~keeper_name:"reviewer") in
+    let snapshot = require (Outbox.load ~base_path ~keeper_name:"reviewer" ~viewer:Outbox.Every_receipt) in
     let receipt_id = match Outbox.receipt_ids snapshot with
       | [id] -> id | _ -> Alcotest.fail "one retained receipt required" in
     let directory = require (Keeper_official_client_paths.outbox_dir ~base_path ~keeper_name:"reviewer") in
@@ -1495,7 +1496,7 @@ let test_maintenance_outbox_source_authority_is_exact_and_top_level () =
     let media = media_put_ok (Tool_blob_media_store.create store) ~media_type:"image/png" ~raw in
     let payload = Agent_core.History.stored_source_to_json ~media_type:"image/png" media in
     let json = Codec.to_json {thread_id="thread";turn_id="turn";call_id="call";
-      tool_name="fixture";arguments=payload;response=`Null} in
+      tool_name="fixture";arguments=Codec.Known payload;response=`Null} in
     let filename = Codec.filename json in
     let directory = match shape with
       | `Wrong_root -> "messages/reviewer/official-client-runtime/undelivered-tools/"

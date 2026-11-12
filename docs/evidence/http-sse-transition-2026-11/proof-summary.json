@@ -1,0 +1,180 @@
+{
+  "schema": "masc.http-sse.retained-proof-summary.v1",
+  "recorded_at": "2026-11-10T14:21:35.238436+00:00",
+  "artifact_kind": "derived minimal summary; raw hashes identify original local evidence, not this rewritten summary",
+  "baseline": "b9d9b8090285ea1039b515ebbe4e427a6e55d36e",
+  "executed_native_source": "f85f180b668563d68eefd4a92499c1015b024c45",
+  "connector_source_fix": "ca1ad99f7ce02de504089e6e5010ef1c6ae675ad",
+  "native_workflow": {
+    "name": "Test",
+    "run_id": 42818931537,
+    "head": "f85f180b668563d68eefd4a92499c1015b024c45",
+    "ref": "sse/all-native-terminal-fixtures-integrated-20261110",
+    "conclusion": "success",
+    "selected_suites": 32,
+    "executed_suites": 32,
+    "failed_suites": 0,
+    "full_regression": false
+  },
+  "native_artifact": {
+    "workflow": "Manual probe artifacts",
+    "run_id": 42818936279,
+    "head": "f85f180b668563d68eefd4a92499c1015b024c45",
+    "ref": "sse/all-native-terminal-fixtures-integrated-20261110",
+    "conclusion": "success",
+    "checksums_verified": 14,
+    "server_sha256": "0183ad768a4eaa2842c4cf6a0083699a37320b30522bca82911ee3b81ef84941",
+    "tui_sha256": "b6ad83e3d50d85529dfaa445d27b5317ed26a533949fa8dfbfb6e00db06ba671"
+  },
+  "source_census": {
+    "dashboard": 44,
+    "inline_play": 4,
+    "tui": 26,
+    "backend": 32,
+    "total_classifications": 106,
+    "individual_runtime_passes": null,
+    "counts_are_not_pollers_or_completion_percentages": true
+  },
+  "http_private_case": {
+    "requests": 12,
+    "findings": 0,
+    "cleanup_verified": true,
+    "scope": "retained Partial, unique diagnostics, gzip round-trip, ETag/304; fresh query Complete is separate"
+  },
+  "dashboard": {
+    "task_creation_calls": 1,
+    "original_creation_id": "browser-sse-f85-20261110-original-1",
+    "task_title_in_actual_execution_snapshot": true,
+    "task001_original_title_and_backlog1_in_later_work_DOM": true,
+    "quiet_ms": 185835,
+    "quiet_gets": 24,
+    "health_gets": 0,
+    "upstream_runtime_probe_source_retained": true,
+    "zero_http_claim": false
+  },
+  "actual_owned_restart": {
+    "new_runtime_instance": true,
+    "task_and_auth_store_preserved": true,
+    "browser_post_replays": 0,
+    "no_old_frame_after_recorded_pre_signal_initiation": true,
+    "late_old_frame_injection_tested": false
+  },
+  "connector_before_fix": {
+    "quiet_ms": 214669,
+    "gets": 49,
+    "short_self_feedback_reproduced": false,
+    "continuous_unrelated_event_starvation_still_possible": true,
+    "baseline_component_blob_unchanged_at_f85": true
+  },
+  "connector_fix": {
+    "product_files": 1,
+    "test_files": 1,
+    "focused_suites": 5,
+    "tests_passed": 126,
+    "typecheck_exit": 0,
+    "starvation_regression": "RED before fix then GREEN",
+    "partial_rows_and_original_refusal_causes_preserved": true,
+    "runtime_at_this_source": false
+  },
+  "tui": {
+    "source": "f85f180b668563d68eefd4a92499c1015b024c45",
+    "quiet_seconds": 75.02,
+    "quiet_gets": 12,
+    "all_quiet_gets_follow_actual_runtime_probe": true,
+    "min_source_to_get_ms": 15.1,
+    "max_source_to_get_ms": 72.9,
+    "observer_and_fleet_streams_each": {
+      "initial": 1,
+      "resumed_after_deliberate_relay_cut": 1
+    },
+    "early_dataset_received": 15,
+    "local_read_received": 10,
+    "process_exit": 0,
+    "relay_faults": 0,
+    "extra_task_or_chat_or_game_calls": 0,
+    "all26_screen_runtime_pass_claim": false
+  },
+  "play": {
+    "actual_cached_package_version": "0.2.2",
+    "actual_shared_worker_initialized_and_observed": true,
+    "first_observation_sequence": 1,
+    "machine_loaded": false,
+    "seat_status": 200,
+    "live_status": 200,
+    "live_state": "no_machine",
+    "quiet_ms": 173181,
+    "quiet_requests": 0,
+    "quiet_new_streams": 0,
+    "initial_recorded_requests": 8,
+    "initial_superseded_seat_abort": 1,
+    "frames": 3,
+    "dropped": 0,
+    "game_chat_model_calls": 0,
+    "scope": "healthy unloaded observation only; no loaded PNG or controller/gameplay proof",
+    "measurement_timeout": "all(status200) incorrectly included the initial superseded seat AbortError; no actual quiet request storm",
+    "exact_created_container_and_new_volume_cleaned": true
+  },
+  "limits": [
+    "Focused evidence only, not full regression/Release or all106 runtime permutations",
+    "Production8935 last observed embedded f5876874; candidate not installed or restarted there",
+    "Successful source-triggered HTTP reads and failed-read recovery remain",
+    "No image relabel/pin bypass, new download, production state mount or loaded-game proof"
+  ],
+  "original_local_evidence_digests": {
+    "native32": {
+      "retained_locally": true,
+      "bytes": 3313,
+      "sha256": "e20cf23513c56e0fc23d930ff656c987df52723fbc96da8c54aaaa5625f5aa6d"
+    },
+    "native32_selection": {
+      "retained_locally": true,
+      "bytes": 3340,
+      "sha256": "bc0fc2295019950f4dc093f90eb8f6bd50330c0e9d38b9d0d8a10adc1d39531d"
+    },
+    "work_quiet": {
+      "retained_locally": true,
+      "bytes": 26021,
+      "sha256": "62151b4657ca976690f3eb8dc09f0aa0841850086babf160e37d54f53d145f06"
+    },
+    "connector_sparse_before_fix": {
+      "retained_locally": true,
+      "bytes": 36014,
+      "sha256": "4a354126fa2fe956694ea99c14c81db31038a36649aa5a81025f0d9ccac79fd5"
+    },
+    "restart": {
+      "retained_locally": true,
+      "bytes": 395,
+      "sha256": "0f8dbda516abee25473c91e529d1e3c74fefe92b70877d64530794b8ceb1f581"
+    },
+    "play_initial": {
+      "retained_locally": true,
+      "bytes": 3438,
+      "sha256": "50b59a5ceb097f69b55a32433c6522606b66b0fa1ddf539ecd5ccbec325a7468"
+    },
+    "play_quiet": {
+      "retained_locally": true,
+      "bytes": 3835,
+      "sha256": "63429b023a454f513a657ed73f77e7fefb8762e14ce733cb72101a8a3bc2e8c4"
+    },
+    "tui_final": {
+      "retained_locally": true,
+      "bytes": 32953,
+      "sha256": "92fa9786e225874f6cf60be3878b955506a28040cb6961b3a0298e4c387a5a57"
+    },
+    "connector_fixture": {
+      "retained_locally": true,
+      "bytes": 1290,
+      "sha256": "5d1c4129888c9f0052da15a0d17abc90d7c85501af4002a5cd114b56f39b5762"
+    },
+    "play_addon": {
+      "retained_locally": true,
+      "bytes": 4513,
+      "sha256": "a68de225dec246569a1050c547e7ad8096f43c7c51a021752f957de68e8cbe86"
+    },
+    "play_cleanup": {
+      "retained_locally": true,
+      "bytes": 1447,
+      "sha256": "1798666de4d85b26dce27b5ddff91f145c1d3efee8f3d4b38590dce0263b2069"
+    }
+  }
+}

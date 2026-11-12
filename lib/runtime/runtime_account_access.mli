@@ -170,6 +170,11 @@ type request =
   | Keeper_turn of
       { keeper_name : string  (** The name of the Keeper, which is the name of its TOML. *)
       ; channel : Authz_types.Channel.t  (** What started the turn. *)
+      ; pat : Authz_types.Pat_binding.t
+            (** The personal access token that authenticated the request the
+                turn answers: its scope narrows the turn
+                ({!Authz_keeper_turn.decide}). [Not_pat] for a session and
+                for a turn the server starts itself. *)
       ; runtime_id : string  (** The Runtime of the runtime table that runs the turn. *)
       }
   | Own_account of

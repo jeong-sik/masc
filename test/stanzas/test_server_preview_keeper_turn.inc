@@ -17,6 +17,7 @@
   alcotest
   eio
   eio_main
+  httpun
   masc
   masc.auth
   masc.config_dir_resolver

@@ -119,6 +119,18 @@ let connect_prefix = connect_path ^ "/"
 let provider_accounts_path = "/api/v1/auth/provider-accounts"
 let verify_path = "/api/v1/setup/accounts/verify"
 
+(* The session routes answer one of three things, and the page has a view for
+   each: a session (200), no session (401), and anything else, which leaves
+   that unknown. The sign-in is shown for a 401 alone. Shown for a server that
+   cannot tell, it would say to a signed-in person that the session is over.
+
+   A sign-out ends the session when the server says so (204) or finds none
+   (401). The page loads itself again then, so nothing that it listed for the
+   person stays in it. After any other answer the page reads the session
+   again: a session that is still open is told that the sign-out did not
+   happen, and the next request carries the CSRF token that was read last. A
+   session that cannot be read hides the button that was pressed, so the
+   focus moves to the link that opens the page again. *)
 let home_script =
   Printf.sprintf
     {|const out = document.getElementById("out");
@@ -145,6 +157,8 @@ const patId = document.getElementById("pat-id");
 const patVerdict = document.getElementById("pat-verdict");
 const signin = document.getElementById("signin");
 const signedIn = document.getElementById("signed-in");
+const unread = document.getElementById("unread");
+const reopen = document.getElementById("reopen");
 const allowSection = document.getElementById("allowlist");
 const allowProvider = document.getElementById("allow-provider");
 const allowIdentity = document.getElementById("allow-identity");
@@ -157,25 +171,34 @@ async function read(path) {
   const text = await answer.text();
   try { return [answer, JSON.parse(text)]; } catch (_) { return [answer, { error: text }]; }
 }
+const unanswered = [{ ok: false, status: 0 }, { error: "the server did not answer" }];
 async function show() {
-  const [session, s] = await read("/auth/session");
-  const [who, w] = await read("/api/v1/auth/whoami");
+  const [session, s] = await read("/auth/session").catch(() => unanswered);
+  const [who, w] = await read("/api/v1/auth/whoami").catch(() => unanswered);
+  const view = session.ok ? "signed_in" : (session.status === 401 ? "signed_out" : "unknown");
   csrf = session.ok ? s.csrf_token : null;
   signout.hidden = !session.ok;
-  signin.hidden = session.ok;
-  signedIn.hidden = !session.ok;
+  signin.hidden = view !== "signed_out";
+  unread.hidden = view !== "unknown";
+  signedIn.hidden = view !== "signed_in";
   allowSection.hidden = !(session.ok && w.role === "admin");
   out.textContent =
     (session.ok
       ? "session of " + s.user_id + " until " + new Date(s.expires_at_ms).toISOString()
-      : "no session (" + session.status + "): " + s.error) +
+      : view + " (" + session.status + "): " + s.error) +
     "\nwhoami (" + who.status + "): " + JSON.stringify(w);
-  return session.ok;
+  return view;
 }
 signout.addEventListener("click", async () => {
-  const answer = await fetch("/auth/logout", { method: "POST", headers: { "%s": csrf } });
-  out.textContent = "sign-out: " + answer.status;
-  await show();
+  const status = await fetch("/auth/logout", { method: "POST", headers: { "%s": csrf } })
+    .then((answer) => answer.status, () => "no answer");
+  const view = status === 204 || status === 401 ? "signed_out" : await show();
+  if (view === "signed_out") location.reload();
+  if (view === "unknown") reopen.focus();
+  if (view === "signed_in") {
+    out.textContent =
+      "The sign-out did not happen (" + status + "), and the session is still open.\n" + out.textContent;
+  }
 });
 async function listAccounts() {
   const [answer, json] = await read("%s");
@@ -370,8 +393,8 @@ document.getElementById("allow-remove").addEventListener("click", async () => {
     ? "Removed."
     : "remove (" + answer.status + "): " + await answer.text();
 });
-show().then(async (signedInNow) => {
-  if (signedInNow) {
+show().then(async (view) => {
+  if (view === "signed_in") {
     await listAccounts();
     await listKeepers();
     await listPats();
@@ -422,6 +445,18 @@ let home_page ~nonce ~github =
          ; start_form ~invite:false ~github ~label:"GitHub로 계속하기"
          ; "</div>"
          ; "<p class=\"hint center\">초대 링크를 받았다면 그 링크를 먼저 열어 주세요. 초대는 이 서버를 운영하는 사람에게 요청할 수 있어요.</p>"
+         ; "</div>"
+           (* Shown in place of the sign-in when the session routes did not
+              say whether a session is open. It replaces what the page showed
+              first, so it is an alert: a screen reader says it as it
+              appears. *)
+         ; "<div id=\"unread\" class=\"narrow\" role=\"alert\" hidden>"
+         ; "<div class=\"card\">"
+         ; "<h1>로그인 상태를 확인하지 못했어요</h1>"
+         ; "<p>서버가 지금 로그인 상태를 알려 주지 못해요. 로그인은 그대로일 수 있어요. 잠시 뒤에 다시 열어 주세요.</p>"
+         ; "<p><a id=\"reopen\" class=\"button block\" href=\"/\">다시 열기</a></p>"
+         ; "</div>"
+         ; "<p class=\"hint center\">계속 이러면 이 서버를 운영하는 사람에게 알려 주세요.</p>"
          ; "</div>"
            (* What a signed-in person uses, in English. The line that shows
               what the session routes answered is inside it, so a browser with

@@ -158,14 +158,28 @@ type open_error =
       }
       (** {!Authz_presence} cannot tell whether the log is there. Neither file
           was opened. *)
+  | Store_not_there of { path : string }
+      (** The log is there and the external store is not: a store on a volume
+          that is not mounted, or a file that was removed. Neither file was
+          opened, so nothing is made where the store was, not its directory
+          and not its lock file. *)
+  | Store_not_checked of
+      { path : string
+      ; detail : string
+      }
+      (** {!Authz_presence} cannot tell whether the store is there. Neither
+          file was opened. *)
 
 val open_error_to_string : open_error -> string
 
-(** Asks {!Authz_presence} whether the log at [log_path] is there. If it is,
-    opens the external store at [store_path], then the log, folded with
-    {!Replay} from the state of the store. Opening a file makes its directory
-    and its lock file, so a store that is not there gets both, and not the
-    store file. [now_ms] is the wall clock in milliseconds. A {!commit} that
+(** Asks {!Authz_presence} whether the log at [log_path] and the external
+    store at [store_path] are there. If both are, opens the store, then the
+    log, folded with {!Replay} from the state of the store. Opening a file
+    makes its directory and its lock file, so a file that is not there is
+    refused before either is opened. A store that goes away between the
+    question and the open is opened as an empty one, with its directory and
+    its lock file made. [now_ms] is the wall clock in
+    milliseconds. A {!commit} that
     gets past the judgment of the entry reads it once, for the time of its
     record. *)
 val open_at_start

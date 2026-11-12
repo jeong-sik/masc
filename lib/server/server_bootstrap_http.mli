@@ -27,6 +27,26 @@ val make_http_config :
     is [address] written out by {!Ipaddr.to_string}. Other config fields
     default via {!Http_server_eio.default_config}. *)
 
+val listen_tcp_result :
+  sw:Eio.Switch.t ->
+  net:[> `Network | `Platform of [> `Generic ] as 'a ] Eio.Resource.t ->
+  backlog:int ->
+  Eio.Net.Sockaddr.stream ->
+  ('a Eio.Net.listening_socket_ty Eio.Resource.t, string) result
+(** Binds and listens on a TCP address via {!Eio.Net.listen}. A listener
+    that does not bind is an [Error] that names the call and the Unix error
+    (a port in use is [bind: Address already in use]). The account server
+    and [masc auth preview] bind through this function. *)
+
+val listen_socket_result :
+  sw:Eio.Switch.t ->
+  net:[> `Network | `Platform of [> `Generic ] as 'a ] Eio.Resource.t ->
+  address:Ipaddr.t ->
+  Http_server_eio.config ->
+  ('a Eio.Net.listening_socket_ty Eio.Resource.t, string) result
+(** {!listen_tcp_result} on [address:config.port] with the backlog of
+    [config]. *)
+
 val listen_socket :
   sw:Eio.Switch.t ->
   net:[> `Network | `Platform of [> `Generic ] as 'a ] Eio.Resource.t ->

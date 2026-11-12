@@ -735,7 +735,9 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 | S1a-0 | 외부 저장소와 로그를 답의 수로도 맞춰 본다. 세부는 B2c 범위의 S1a-0 항목이다. | §5.1, §8.2 | B3, F3a |
 | S1a-1 | 서버 부팅이 7행(`Multi_account`)을 계정 서버로 넘긴다. 계정 서버는 구역을 열어 쥐고 자기 표만 서빙한다. 이 층의 표는 `GET /health` 하나다. 세부는 표 아래 S1a-1 범위다. | §5.1, §8.2 | S1a-0, D4 |
 | S1a-2 | 구역을 읽는 곳이 구역의 멈춤을 본다. 로그가 멈췄거나 저장소와 어긋난 구역에서는 세션·PAT 인증과 나머지 읽기가 거절한다. | §5.1, §8.2 | S1a-1 |
-| S1a-3 | C3의 로그인 경로와 사람의 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. login client는 서버 설정에서 읽는다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-2, F3a-3 |
+| S1a-2b | 계정 서버가 연 구역을 한 번 더 읽고, 믿을 수 없으면 부팅을 멈춘다. 준비 상태를 probe로 답한다. 표는 검사를 거친 타입으로만 ingress에 간다. 세부는 표 아래 S1a-2b 범위다. | §5.1, §8.2 | S1a-2 |
+| S1a-2c | 운영 명령(`masc restart`·`stop`·`setup`)이 다계정 설치를 알아본다. 계정 서버는 base path lease의 주인으로 알아보고 멈춘다. 부팅 판정을 단일 사용자 정리보다 앞에 둔다. | §5.1 | S1a-2b |
+| S1a-3 | C3의 로그인 경로와 사람의 경로(초대 입장, 구독 연결, Runtime·Keeper, Keeper에게 묻기)를 계정 서버의 표에 단다. login client는 서버 설정에서 읽는다. 설계 §11.1의 1단계 개시 증거를 이 층에서 모은다. | §5.1, §11.1 | S1a-2c, F3a-3 |
 | S1b | 사람에게 MCP·Board·WebSocket 경로를 연다. | §11.1 | S1a-3, C4-11, C4-12, C6 |
 
 - S1이 D4 뒤인 까닭: 계정 층 없이 다계정 설치를 서빙하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙한다. 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 다계정 설치를 서빙하면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
@@ -746,7 +748,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 
 - 판정과 넘기기. `Authz_boot_mode_read.boot`가 `Single_user`나 `Multi_account`를 돌려준다. `Multi_account`는 base path와, 판정이 읽은 외부 저장소의 경로를 싣는다. `Server_runtime_bootstrap.run`이 그 값으로 갈라, 단일 사용자는 `run_single_user`로, 다계정은 `Server_accounts.run`으로 보낸다.
 - 계정 서버가 따로인 까닭. 단일 사용자 서버의 경로는 `Server_auth`의 래퍼로 인증하고, 그 래퍼는 단일 사용자의 credential을 읽는다. 부팅 거부만 거두면 그 경로가 전부 단일 사용자의 token으로 열린다. 경로 등록 호출이 `lib/server`에 409개라서(2026-11-10 `rg` 집계) 하나씩 닫으면 빠뜨린 곳을 컴파일러가 잡지 못한다. 계정 서버는 표를 따로 가진다. 달지 않은 경로는 router의 404다.
-- 표에 들어가는 종류. `Always_public`과 `Self_authenticated Browser_session`뿐이다. 나머지 종류는 `Server_auth`의 래퍼를 거친다. `Server_accounts.run`은 듣기 전에 표를 검사하고(`route_of_another_kind`), 다른 종류가 있으면 부팅을 멈춘다. 검사는 `Route_access.t`의 생성자를 모두 적은 `match`다. 종류가 늘면 컴파일러가 이 판정을 다시 묻는다.
+- 표에 들어가는 종류. `Always_public`과 `Self_authenticated Browser_session`뿐이다. 나머지 종류는 단일 사용자의 credential을 읽는다(`Server_auth`의 래퍼를 거치거나 handler가 직접 읽는다). `Server_accounts.run`은 듣기 전에 표를 검사하고(`Server_account_table.checked`), 다른 종류가 있으면 부팅을 멈춘다. 검사는 `Route_access.t`의 생성자를 모두 적은 `match`다. 종류가 늘면 컴파일러가 이 판정을 다시 묻는다.
 - 요청이 지나는 길. HTTP/1.1과 HTTP/2가 같은 표를 같은 ingress로 거친다(`Server_http_ingress.serve_table`). Host 검사와 주소별 rate limit은 단일 사용자 서버와 같은 코드다. agent별 rate limit, MCP 검사, workspace 전제 검사는 걸지 않는다. 셋 다 단일 사용자의 credential이나 owner 상태를 읽는다. 처리 중 예외가 나면 500의 본문에 예외 글을 싣지 않는다. 예외 글에 서버의 파일 경로가 들어갈 수 있다.
 - 띄우지 않는 것. owner 상태(`Mcp_server.server_state`), Keeper, 단일 사용자 서버의 경로다. 그래서 단일 사용자로 쓰던 설치를 다계정으로 켜면 그 설치의 Keeper는 돌지 않는다. 운영자의 Keeper를 사람에게 귀속하는 층이 생기기 전에는 base path를 따로 둔 설치로 다계정을 시작한다.
 - 8행(`Multi_account_uncertain`)은 부팅을 멈춘다(`Authorization_uncertain`). 설계 §5.1 표는 이 행을 "`AuthorizationUncertain`으로 시작한다"고 적는다. 그 상태에서 서빙할 것은 recovery(F3b)이고 2단계다. 그때까지는 열 경로가 없어서 듣지 않는다.
@@ -786,6 +788,37 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 실제 바이너리(2026-11-10): 임시 설치에 `masc auth preview`를 띄워 믿을 수 있는 구역의 답이 전과 같은지 봤다. credential 없는 사람의 경로는 401, 첫 화면은 200, 다른 Host는 400이다. 멈춘 구역은 실제 바이너리로 만들지 못했다. 구역은 자기가 쓸 때 멈춤을 알고, 로그인 없이는 쓰게 할 길이 없다.
 - 남는 한계. 다른 프로세스가 파일에 쓴 것은 구역이 그 파일에 다음으로 쓸 때 안다. 그 전까지 `read`는 snapshot을 준다. 읽을 때마다 파일을 보는 일은 이 층이 하지 않는다.
 - 하지 않는 것: `commit`이 읽기·판정·쓰기를 한 잠금 안에서 하게 바꾸는 일(읽은 뒤 commit까지의 경합은 지금처럼 다시 읽어서 푼다), 계정 서버의 표에 경로를 다는 일(S1a-3).
+
+**S1a-2b 범위**
+
+- 연 구역을 한 번 더 읽는다. 부팅 판정은 파일을 읽고 손잡이를 버린다. 계정 서버는 같은 경로로 구역을 다시 연다. 그 사이에 외부 저장소나 로그가 바뀌면, 다시 판정했을 때 멈출 설치가 그대로 듣는다. `Server_accounts.run`은 구역을 연 뒤 `Authz_zone.read`로 읽는다. 믿을 수 없으면 `Zone_not_trusted`로, 로그의 모드가 `Multi_account`가 아니면 `Zone_not_multi_account`로 멈춘다. 포트를 묶기 전이고 access를 발행하기 전이다. 다시 보는 것은 로그와 외부 저장소다. install record와 `config.json`은 다시 읽지 않는다. 구역은 판정이 읽은 저장소 경로로 열고, 모드는 로그의 모드를 따른다.
+- 없는 저장소는 열지 않는다. 로그는 있고 저장소가 없으면 `Authz_zone.open_at_start`가 `Store_not_there`로 거절한다. 파일을 여는 쪽은 폴더와 lock 파일을 만들기 때문에, 열기 전에 `Authz_presence`에 묻는다. 빠진 볼륨의 mount point에 아무것도 남기지 않는다. 비어 있는 저장소는 열리고 `Zone_not_trusted`로 멈춘다. 물어본 뒤 여는 사이에 저장소가 사라지면 여는 쪽이 폴더와 lock 파일을 만든다. 그 구역은 빈 저장소로 열리고 같은 사유로 멈춘다. 이 틈은 함수 호출 몇 번 길이이고, 부팅 판정의 읽기에도 있다.
+- `run`의 순서. HTTP mode 읽기 → 구역 열기 → 구역 다시 읽기 → 표 검사 → HTTPS 재료 → 포트 묶기 → access 발행 → HTTPS 포트 묶기 → trust policy → 포트 기록 → 준비 알림 → 받기 시작. `refusal`의 생성자 순서가 이 순서다. 거절은 모두 연결을 받기 전이고 포트를 기록하기 전이다. access는 요청을 처리하기 전에 발행된다. 묶인 포트에 먼저 온 연결은 받기 시작할 때까지 backlog에서 기다린다. 거절된 부팅이 디스크에 남기는 것은 하나다. 표 검사 뒤의 HTTPS 재료 단계는 HTTPS listener가 켜져 있고 인증서 파일을 지정하지 않았을 때, `<base>/.masc/tls/`의 자체 서명 짝이 없거나 읽을 수 없거나 갱신할 때가 됐으면 새로 만들어 쓴다. 프로세스에 남는 것은 넷이다. HTTP 설정 단계가 쓴 환경 변수(`MASC_HOST`, `MASC_HTTP_PORT`, `MASC_URL`, 없거나 공백뿐이면 `MASC_HTTP_BASE_URL`), HTTPS listener의 metrics, 스위치가 끝날 때까지 묶여 있는 소켓, `Trust_policy_refused`일 때 이미 발행된 access다. 부르는 쪽은 거절에서 프로세스를 끝낸다.
+- 표의 타입. `Server_account_table.t`는 검사를 통과한 표이고 `checked`만 만든다. router는 등록이 제자리에서 바꾸는 공용 표이고, 등록 함수는 받은 router를 쥘 수 있다. 그래서 `checked`는 경로를 본 뒤 router의 사본(`Http_server_eio.Router.copy`)을 표로 삼는다. 사본은 이 모듈 밖에서 쥔 곳이 없다. 검사 뒤에 등록한 경로는 종류가 무엇이든 표에 없고, 표의 경로를 바꾸지도 못한다. 종류는 등록이 적은 값이다. 받는 종류로 적은 handler가 다른 router로 다시 dispatch하면, 그 router의 경로는 검사를 지나지 않는다. 표 ingress(`Server_http_ingress.serve_table`, `http1_table_handler`, `Server_h2_gateway.make_table_request_handler`)는 이 타입을 받고, 단일 사용자 ingress는 router를 받는다. listener를 다른 쪽 ingress에 묶은 코드는 컴파일되지 않는다.
+- probe. 표에 `GET /health/live`와 `GET /health/ready`가 더해진다. live는 listener가 답하면 200이다. ready는 구역을 믿을 수 있으면 200이고 아니면 503이다. 구역을 믿을 수 없으면 사람의 경로가 전부 503이므로(S1a-2), probe를 읽는 쪽이 이 서버를 빼게 한다. 두 답은 host나 프로세스의 것을 싣지 않는다. 단일 사용자 서버의 ready가 싣는 pid도 없다.
+- 설정 오류의 자리. HTTP mode(`MASC_USE_H2`)를 `run` 첫머리에서 읽는다. 어휘에 없는 값이면 파일을 열기 전에 `Http_mode_refused`로 멈춘다.
+- listener. cleartext listener가 묶이지 않으면 `Listener_not_bound`로 멈춘다. Eio의 posix backend와 linux backend는 TCP bind의 `Unix.Unix_error`를 그대로 올린다(설치된 `eio_posix/net.ml`과 같은 소스의 `eio_linux.ml`에서 확인). 그래서 그 예외를 잡는다. Eio의 인터페이스는 어떤 예외를 올리는지 약속하지 않는다. 그래서 잡는 곳을 함수 하나(`Server_bootstrap_http.listen_tcp_result`)에 두고, `masc auth preview`의 bind도 그 함수를 지난다. 포트가 쓰이는 중인 사례가 그 함수를 지나므로, Eio가 올리는 예외가 바뀌면 그 사례가 실패한다. 거절이 다 지난 뒤 포트를 기록한다(`Workspace_connection.save`). workspace의 CLI가 포트를 받지 않아도 찾는다. `Trust_policy_refused`는 묶은 뒤에 난다. 정책이 실제로 묶인 HTTPS 포트를 이름으로 삼는다.
+- 문구. bootstrap의 성공 문구와 도움말이 문장 하나(`Masc_cli_auth.account_server_line`)를 같이 쓴다. 계정 서버와 단일 사용자 서버가 같이 쓰는 것(listener 코드, Host·Origin 입장, 주소별 제한, HTTP 설정)을 `Server_accounts`의 인터페이스가 이름으로 적는다.
+- 시험.
+  - `test_server_accounts`: 판정이 끝난 설치로 계정 서버를 띄운다.
+    - `MASC_USE_H2`가 어휘 밖이면 `Http_mode_refused`로 멈추고, 포트가 기록되지 않는다. 저장소를 지운 설치로 재서, 구역을 열기 전에 멈추는 것을 본다. 이 값은 한 번 읽히면 프로세스에 고정되고(`configure_h2_from_env`), 어휘 밖의 값은 고정되지 않는다. 그래서 이 사례가 mode를 읽는 사례들보다 앞에 온다.
+    - 외부 저장소가 없으면 `Zone_not_opened`(저장소가 없음)로 멈추고, 그 자리에 폴더가 생기지 않는다.
+    - 외부 저장소가 비어 있으면 `Zone_not_trusted`(저장소에 답이 없음)로 멈춘다.
+    - 멈춰야 할 부팅이 듣기 시작하면 기다림이 30초에 끝나고 시험이 실패한다.
+    - Off를 기록하면 `Zone_not_multi_account`(off)로 멈춘다.
+    - 다른 소켓이 듣는 포트면 `Listener_not_bound`로 멈추고, 포트가 기록되지 않는다.
+    - 뜬 서버는 `/health/live`에 `{"live":true}`, `/health/ready`에 `{"ready":true}`로 답하고, 답 전체를 비교한다. workspace가 기록한 포트가 listener의 포트다.
+    - 표 종류 검사는 `Server_account_table.checked`로 본다. 검사 뒤에 router에 등록한 경로는 표에 없다. 그 경로는 `GET`도 `POST`도 404이고, 표의 경로와 같은 자리에 등록해도 표의 경로가 그대로 답한다.
+  - `test_authz_boot_mode_read`: 단일 사용자 진입은 `Single_user`이고 꺼진 계정이 없다. 거절은 사유의 글을 비교한다(활성화 요청, 익명 쓰기). 8행은 `boot` 진입으로도 판정이 내는 줄 전부로 멈춘다. 8행의 문구는 어긋난 사유마다 한 줄이다.
+  - `test_authz_zone`: 저장소 파일이나 그 폴더가 없으면 `Store_not_there`로 거절하고, 그 자리와 로그가 그대로다. 저장소 경로를 볼 수 없으면 `Store_not_checked`다. 비운 저장소는 열리고 commit을 모두 거절한다.
+- 남는 한계. ready의 503은 이 층의 계정 서버에서 나지 않는다. 구역은 자기가 쓸 때 멈춤을 알고, 이 층의 표에는 쓰는 경로가 없다. 쓰는 경로는 S1a-3이 단다.
+- 하지 않는 것.
+  - listener 오류 처리기가 예외 글을 본문에 싣는 것. 두 서버가 같이 쓰는 코드이고, HTTP/2 쪽은 `test_h2_response_window`가 그 글의 길이에 기댄다. 계정 서버는 handler 예외에 고정 문구를 답하므로, 남는 길은 입장 단계에서 난 예외다. 이슈 #50613에 적었고, S1a-3 전에 정한다.
+  - 연결 수 상한과 첫 바이트 제한 시간(#51096).
+  - `Boot_multi_account`가 저장소 경로를 싣게 하는 일. 판정표가 파일 값을 알게 된다. 표가 내지 않는 짝(`Multi_account`인데 저장소를 못 읽음)은 부팅 거절로 남는다.
+  - 운영 명령과 부팅 순서(S1a-2c).
+  - 받기 고리와 포트 기록을 한 벌로 합치는 일. `Server_accounts`의 `serve`·`record_port`는 단일 사용자 부팅의 `run_serving`과 같은 줄이다. 단일 사용자 쪽은 HTTP 서빙을 다른 도메인으로 옮기는 작업이 고치는 중이라 지금 합치지 않는다. 연결 수 상한(#51096)을 넣을 때 한 함수로 합친다.
+  - 설정만으로 아는 trust policy 거절(`MASC_HTTP_BASE_URL`의 형식)을 포트를 묶기 전에 보는 일.
 
 ### E. official client 격리
 

@@ -2,31 +2,43 @@
 
 module Http = Http_server_eio
 module M = Authz_boot_mode_read
+module Table = Server_account_table
 
 let ( let* ) = Result.bind
 let ms_per_second = 1000.
 
 type refusal =
+  | Http_mode_refused of string
   | Zone_not_opened of Authz_zone.open_error
-  | Access_not_published of Runtime_account_access.publish_error
-  | Route_of_another_kind of
-      { path : string
-      ; access : Route_access.t
-      }
+  | Zone_not_trusted of Authz_zone.uncertain
+  | Zone_not_multi_account of Authz_mode_state.t
+  | Route_of_another_kind of Table.refusal
   | Https_listener_refused of string
+  | Listener_not_bound of
+      { host : string
+      ; port : int
+      ; reason : string
+      }
+  | Access_not_published of Runtime_account_access.publish_error
   | Trust_policy_refused of Server_request_authority.trust_policy_error
 
 let refusal_to_string = function
+  | Http_mode_refused reason -> reason
   | Zone_not_opened error ->
     "the authorization zone is not opened: " ^ Authz_zone.open_error_to_string error
-  | Access_not_published error -> Runtime_account_access.publish_error_to_string error
-  | Route_of_another_kind { path; access } ->
+  | Zone_not_trusted uncertain ->
+    "the authorization zone changed since the boot judged it, and cannot be trusted \
+     (AuthorizationUncertain): "
+    ^ Authz_zone.uncertain_to_string uncertain
+  | Zone_not_multi_account mode ->
     Printf.sprintf
-      "the route %s is registered as %s, and the account server serves only routes that are \
-       public or that authenticate a browser session themselves"
-      path
-      (Yojson.Safe.to_string (Route_access.to_json access))
+      "the authorization log changed since the boot judged it Multi_account: its mode is now %s"
+      (Authz_mode_state.to_string mode)
+  | Route_of_another_kind refusal -> Table.refusal_to_string refusal
   | Https_listener_refused reason -> "HTTPS listener: " ^ reason
+  | Listener_not_bound { host; port; reason } ->
+    Printf.sprintf "%s:%d is not listened on: %s" host port reason
+  | Access_not_published error -> Runtime_account_access.publish_error_to_string error
   | Trust_policy_refused error -> Server_request_authority.trust_policy_error_to_string error
 ;;
 
@@ -46,54 +58,69 @@ let health (_ : Httpun.Request.t) reqd =
     reqd
 ;;
 
-let routes () =
-  Http.Router.create ()
+(* The listener answers. Nothing of the process or of the host. *)
+let liveness (_ : Httpun.Request.t) reqd =
+  Http.Response.json_value (`Assoc [ "live", `Bool true ]) reqd
+;;
+
+(* Ready while a decision can rest on the zone: without that every route of a
+   person is a 503 ([Login_routes.zone_uncertain]). The reason names paths of
+   the server, so the probe says only that the server is not ready. *)
+let readiness zone (_ : Httpun.Request.t) reqd =
+  match Authz_zone.read zone with
+  | Ok (_ : Authz_zone.trusted) -> Http.Response.json_value (`Assoc [ "ready", `Bool true ]) reqd
+  | Error (_ : Authz_zone.uncertain) ->
+    Http.Response.json_value
+      ~status:`Service_unavailable
+      (`Assoc [ "ready", `Bool false ])
+      reqd
+;;
+
+let register zone router =
+  router
   |> Server_route.get Server_route.Always_public Server_health_paths.health health
+  |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness
+  |> Server_route.get Server_route.Always_public Server_health_paths.readiness (readiness zone)
 ;;
 
-(* Every other kind is applied through a wrapper of [Server_auth], which
-   reads the credentials of a single user. *)
-let served : Route_access.t -> bool = function
-  | Route_access.Always_public
-  | Route_access.Self_authenticated Route_access.Browser_session -> true
-  | Route_access.Public_read
-      (Route_access.Credential_when_strict | Route_access.Open_when_strict)
-  | Route_access.Read_auth
-  | Route_access.Permission (_ : Masc_domain.permission)
-  | Route_access.Token_permission (_ : Masc_domain.permission)
-  | Route_access.Private_token_permission (_ : Masc_domain.permission)
-  | Route_access.Tool { tool_name = _ }
-  | Route_access.Tool_observation { tool_name = _ }
-  | Route_access.Tool_actor { tool_name = _ }
-  | Route_access.Manage_own_provider
-  | Route_access.Manage_own_keeper
-  | Route_access.Self_authenticated
-      ( Route_access.Mcp_transport
-      | Route_access.Oauth_protocol
-      | Route_access.Websocket_upgrade
-      | Route_access.Loopback_dev_token
-      | Route_access.Subpath_dispatch ) -> false
+(* A value of the HTTP mode that is not in its vocabulary stops the boot here,
+   before [run] opens a file or binds a port. *)
+let http_mode () =
+  match Env_config.Transport.configure_h2_from_env () with
+  | mode -> Ok mode
+  | exception Env_config_core.Config_error reason -> Error (Http_mode_refused reason)
 ;;
 
-let route_of_another_kind router =
-  List.find_map
-    (fun (route : Http.Router.route) ->
-      if served route.access
-      then None
-      else Some (Route_of_another_kind { path = route.path; access = route.access }))
-    (Http.Router.routes router)
+(* The zone that is served is the one the boot judged. The judgment read the
+   files and the zone read them again when it opened: a file that changed
+   between the two leaves a zone that cannot be trusted, or a log in another
+   mode, and the boot stops. The install record and config.json are not read
+   again: the zone is opened over the store path the judgment read, and the
+   mode is the mode of the log. *)
+let judged_again zone =
+  match Authz_zone.read zone with
+  | Error uncertain -> Error (Zone_not_trusted uncertain)
+  | Ok trusted ->
+    (match (trusted :> Authz_zone.snapshot).Authz_zone.state.Authz_state.mode with
+     | Authz_mode_state.Multi_account (_ : Authz_types.Workspace_id.t) -> Ok ()
+     | (Authz_mode_state.Not_bootstrapped | Authz_mode_state.Off (_ : Authz_types.Workspace_id.t))
+       as mode -> Error (Zone_not_multi_account mode))
 ;;
 
-let checked_routes () =
-  let router = routes () in
-  match route_of_another_kind router with
-  | Some refusal -> Error refusal
-  | None -> Ok router
+(* The port the CLI of the workspace reads when none is given
+   ([Workspace_connection.resolve]): what was asked for, not a readiness. *)
+let record_port ~base_path (config : Http.config) =
+  match Workspace_connection.port config.port with
+  | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)
+  | Ok port ->
+    (match Workspace_connection.save ~base_path ~port with
+     | Ok () -> ()
+     | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error))
 ;;
 
-let serve ~sw ~clock ~(config : Http.config) ~socket ~https_listener ~trust_policy router =
-  let request_handler = Server_http_ingress.http1_table_handler ~trust_policy router in
-  let h2_request_handler = Server_h2_gateway.make_table_request_handler ~trust_policy ~router in
+let serve ~sw ~clock ~http_mode ~(config : Http.config) ~socket ~https_listener ~trust_policy table =
+  let request_handler = Server_http_ingress.http1_table_handler ~trust_policy table in
+  let h2_request_handler = Server_h2_gateway.make_table_request_handler ~trust_policy ~table in
   let h2_error_handler = Server_h2_gateway.make_error_handler () in
   Option.iter
     (fun ((https : Server_bootstrap_http.https_listener), https_socket) ->
@@ -109,7 +136,7 @@ let serve ~sw ~clock ~(config : Http.config) ~socket ~https_listener ~trust_poli
           ~h2_error_handler))
     https_listener;
   let addr_label = Printf.sprintf "%s:%d" config.host config.port in
-  match Env_config.Transport.configure_h2_from_env () with
+  match http_mode with
   | Env_config.Transport.H2_only ->
     Server_bootstrap_http.serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handler
   | Env_config.Transport.H1_only ->
@@ -129,7 +156,7 @@ let run ~sw ~env ~address ~port ?on_ready multi_account =
   let clock = Eio.Stdenv.clock env in
   let net = Eio.Stdenv.net env in
   let base_path = M.multi_account_base_path multi_account in
-  let* router = checked_routes () in
+  let* http_mode = http_mode () in
   let* zone =
     Result.map_error
       (fun error -> Zone_not_opened error)
@@ -138,12 +165,9 @@ let run ~sw ~env ~address ~port ?on_ready multi_account =
          ~log_path:(Authz_log.path_of_base_path ~base_path)
          ~store_path:(M.multi_account_external_store multi_account))
   in
-  let* () =
-    Result.map_error
-      (fun error -> Access_not_published error)
-      (Runtime_account_access.publish
-         (Runtime_account_access.Multi_account
-            { zone; base_path; now = (fun () -> Eio.Time.now clock) }))
+  let* () = judged_again zone in
+  let* table =
+    Result.map_error (fun refusal -> Route_of_another_kind refusal) (Table.checked (register zone))
   in
   let config = Server_bootstrap_http.make_http_config ~address ~port in
   let* https =
@@ -151,8 +175,19 @@ let run ~sw ~env ~address ~port ?on_ready multi_account =
       (fun reason -> Https_listener_refused reason)
       (Server_bootstrap_http.https_listener_of_env ~base_path ~bind_host:config.host)
   in
-  Rate_limit.start_global_cleanup_loop ~sw ~clock;
-  let socket = Server_bootstrap_http.listen_socket ~sw ~net ~address config in
+  (* The port is bound here and accepted on in [serve], below. *)
+  let* socket =
+    Result.map_error
+      (fun reason -> Listener_not_bound { host = config.host; port = config.port; reason })
+      (Server_bootstrap_http.listen_socket_result ~sw ~net ~address config)
+  in
+  let* () =
+    Result.map_error
+      (fun error -> Access_not_published error)
+      (Runtime_account_access.publish
+         (Runtime_account_access.Multi_account
+            { zone; base_path; now = (fun () -> Eio.Time.now clock) }))
+  in
   let https_listener =
     Server_bootstrap_http.listen_https_socket ~sw ~net ~address ~config https
   in
@@ -172,16 +207,21 @@ let run ~sw ~env ~address ~port ?on_ready multi_account =
          ~https_port
          ~explicit_base_url:(Env_config_core.masc_http_base_url_opt ()))
   in
+  (* Nothing below refuses: a boot that stops records no port and leaves no
+     fiber behind. *)
+  record_port ~base_path config;
+  Rate_limit.start_global_cleanup_loop ~sw ~clock;
   Log.Server.info
     "the account server of the multi-account installation listens on %s:%d (https port %s); it \
-     serves %d route(s), and none of the single-user server"
+     serves the %d route(s) of its own table, and no route that reads the credentials of a \
+     single user"
     config.host
     config.port
     (match https_port with
      | Some port -> string_of_int port
      | None -> "off")
-    (Http.Router.route_count router);
+    (Table.route_count table);
   Option.iter (fun on_ready -> on_ready ()) on_ready;
-  serve ~sw ~clock ~config ~socket ~https_listener ~trust_policy router;
+  serve ~sw ~clock ~http_mode ~config ~socket ~https_listener ~trust_policy table;
   Ok ()
 ;;

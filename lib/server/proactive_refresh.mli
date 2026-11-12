@@ -34,13 +34,22 @@ type config = {
       (** Fixed leading-edge window after a wake signal. Signals observed at
           its end are coalesced before one compute; any signal left queued can
           trigger the next pass. *)
+  change_read_spacing_s : float;
+      (** Change-driven workers only. A read caused by an input change starts
+          no sooner than this long after the previous read caused by an input
+          change started; [0.0] applies no spacing. A change that arrives
+          after the spacing has passed starts its read at once, so a quiet
+          source is still read on its first change. The initial read, a
+          semantic deadline and a failure retry keep their own times and open
+          no spacing. *)
   warm_delay_s : float;    (** Delay before cold-start warm-cache compute (0.0 = immediate). *)
   warn_first_failure : bool;  (** Log a warning on the very first refresh failure. *)
 }
 
 val default_config : label:string -> interval_s:float -> config
 (** [default_config ~label ~interval_s] returns a config with
-    [max_backoff_s = 60.0], [failure_threshold = 3], [timeout_s = 10.0]. *)
+    [max_backoff_s = 60.0], [failure_threshold = 3], [timeout_s = 10.0] and
+    no change-read spacing. *)
 
 module For_testing : sig
   val should_warn_refresh_failure :
@@ -83,8 +92,10 @@ val start_on_change :
     refresh. A signal during a read remains owed after that read finishes.
 
     [warm_delay_s] delays only the initial read; an input change can bring it
-    forward. Subsequent changes use [wakeup_coalesce_s]'s bounded leading
-    window. Failure retains a retry, using [interval_s] and the existing
+    forward. A subsequent change first waits out [change_read_spacing_s]
+    measured from the start of the previous change-driven read, then uses
+    [wakeup_coalesce_s]'s bounded leading window; every change observed by
+    then is answered by the one read that follows. Failure retains a retry, using [interval_s] and the existing
     exponential backoff; a new input can bring that retry forward. Every
     attempt keeps [timeout_s], and switch cancellation ends both reads and
     waits. The worker is a daemon, so a normal [Switch.run] return also retires

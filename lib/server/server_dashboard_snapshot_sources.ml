@@ -127,8 +127,9 @@ let install ~state ~sw ~clock ~mono_clock ~on_shell_published =
       let announce topic = if is_current () then
         Workspace_dataset_event.announce_dashboard_observation ~base_path ~scope:`Workspace topic in
       let worker_config label timeout_s =
-        { (Proactive_refresh.default_config ~label
-            ~interval_s:Server_observation_retry.initial_delay_s) with timeout_s } in
+        let interval_s = Server_observation_retry.initial_delay_s in
+        { (Proactive_refresh.default_config ~label ~interval_s) with
+          timeout_s; change_read_spacing_s = interval_s } in
       let offload work = Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ work) in
       Proactive_refresh.start_on_change ~sw ~clock ~changes:shell_changes
         ~config:(worker_config "dashboard Shell sources" Env_config_runtime.Dashboard.shell_timeout_sec)

@@ -48,6 +48,7 @@ type config = {
   on_failure : (failure -> unit) option;
   wakeup : unit Eio.Stream.t option;
   wakeup_coalesce_s : float;
+  change_read_spacing_s : float;
   warm_delay_s : float;
   warn_first_failure : bool;
 }
@@ -62,6 +63,7 @@ let default_config ~label ~interval_s =
     on_failure = None;
     wakeup = None;
     wakeup_coalesce_s = 0.0;
+    change_read_spacing_s = 0.0;
     warm_delay_s = 0.0;
     warn_first_failure = true;
   }
@@ -132,9 +134,30 @@ let start_on_change_or_deadline ~sw ~clock ~changes ~config ~next_deadline
     Eio.Switch.run ~name:(config.label ^ " observation") (fun _ ->
       let consecutive_failures = ref 0 in
       let current_interval = ref config.interval_s in
+      let previous_changed_read_started = ref None in
+      (* A change has been taken. Its read starts once the spacing from the
+         previous change-driven read has passed, or at [before] (a deadline or
+         retry that is already due to read) when that comes first. Changes
+         that arrive in the meantime are answered by the same read. The
+         initial read and reads owed to a deadline or retry do not open a
+         spacing: they are not caused by input pressure. *)
+      let admit_changed_read ?before () =
+        let spaced_start =
+          match !previous_changed_read_started with
+          | Some started when config.change_read_spacing_s > 0.0 ->
+              Some (started +. config.change_read_spacing_s)
+          | Some _ | None -> None
+        in
+        (match spaced_start, before with
+         | None, _ -> ()
+         | Some at, None -> Eio.Time.sleep_until clock at
+         | Some at, Some before -> Eio.Time.sleep_until clock (Float.min at before));
+        coalesce_changes ~clock ~config changes;
+        previous_changed_read_started := Some (Eio.Time.now clock)
+      in
       let take_change () =
         Eio.Stream.take changes;
-        coalesce_changes ~clock ~config changes
+        admit_changed_read ()
       in
       let wait_for_observation_deadline = function
         | None -> take_change ()
@@ -144,7 +167,7 @@ let start_on_change_or_deadline ~sw ~clock ~changes ~config ~next_deadline
              (fun () -> Eio.Stream.take changes; `Changed)
            with
            | `Deadline -> ()
-           | `Changed -> coalesce_changes ~clock ~config changes)
+           | `Changed -> admit_changed_read ~before:deadline ())
       in
       let wait_for_retry_or_change observed_deadline =
         let retry_at = Eio.Time.now clock +. !current_interval in
@@ -155,7 +178,7 @@ let start_on_change_or_deadline ~sw ~clock ~changes ~config ~next_deadline
           (fun () -> Eio.Stream.take changes; `Changed)
         with
         | `Retry -> ()
-        | `Changed -> coalesce_changes ~clock ~config changes
+        | `Changed -> admit_changed_read ~before:retry_at ()
       in
       let initial () =
         let changed =

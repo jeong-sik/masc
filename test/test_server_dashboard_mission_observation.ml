@@ -134,6 +134,21 @@ let test_failure_keeps_last_good_rows_and_callback_outcome () = with_owner (fun 
     check (option string) "cache diagnostic retains the original cause" (Some "isolated read failure")
       publication.source.last_error))
 
+(* Production workers space change-driven reads by their declared interval.
+   A second change inside that spacing is read when the worker's clock passes
+   it; the first try waits for the worker to take the change. *)
+let pass_change_read_spacing ~env clock =
+  let rec go tries =
+    Eio.Fiber.yield ();
+    if not (Eio_mock.Clock.try_advance clock) then
+      if tries = 0 then fail "a change inside the spacing left no owed read"
+      else (
+        Eio.Time.sleep (Eio.Stdenv.clock env) 0.005;
+        go (tries - 1))
+  in
+  go 400
+;;
+
 let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun env ->
   let previous_fs = Fs_compat.get_fs_opt () in
   let previous_context = Eio_context.snapshot_state () in
@@ -231,6 +246,7 @@ let test_actual_worker_follows_store_and_policy_inputs () = Eio_main.run (fun en
             current_task = None; session_bound_at = stamp; last_seen = stamp; meta = None} in
           Workspace_agent_record.write config (Filename.concat (Workspace.agents_dir config) "actual-mission-agent.json")
             ~previous:None agent;
+          pass_change_read_spacing ~env clock;
           let live = ready_after ~previous:expired ~source_changed:true in
           let truth payload = match Yojson.Safe.Util.(payload |> member "agent_briefs" |> to_list) with
             | [row] -> Yojson.Safe.Util.(row |> member "signal_truth" |> to_string)

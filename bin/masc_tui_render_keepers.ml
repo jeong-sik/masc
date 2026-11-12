@@ -3073,38 +3073,43 @@ let render_keeper_list (state : state) =
    read and none before any read are the same absence. *)
 let secret_lines (state : state) (k : keeper) =
   let dim line = Ansi.dim ^ line ^ Ansi.reset in
+  let t korean english = ui_text state ~ko:korean ~en:english in
   match keeper_composite_of state ~keeper_name:k.k_name with
   | None | Some { kcr_secret = None; _ } -> None
   | Some { kcr_secret = Some p; _ } ->
       let status = Masc.Tui_decode.keeper_secret_status_to_string p.ksp_status in
+      let status_label = t "  상태:    " "  Status:  " in
       let status_line =
         match p.ksp_status with
         | Masc.Tui_decode.Secret_ready ->
-            "  Status:  " ^ (Theme.ok ()) ^ status ^ Ansi.reset
+            status_label ^ (Theme.ok ()) ^ status ^ Ansi.reset
         | Masc.Tui_decode.Secret_error ->
-            "  Status:  " ^ (Theme.bad ()) ^ status ^ Ansi.reset
+            status_label ^ (Theme.bad ()) ^ status ^ Ansi.reset
         | Masc.Tui_decode.Secret_empty | Masc.Tui_decode.Secret_absent
         | Masc.Tui_decode.Secret_status_unknown _ ->
-            "  Status:  " ^ Ansi.dim ^ status ^ Ansi.reset
+            status_label ^ Ansi.dim ^ status ^ Ansi.reset
       in
       let entry_lines label = function
         | [] -> [ dim (Printf.sprintf "  %s  -" label) ]
         | names ->
             List.mapi
               (fun index name ->
-                let lead = if index = 0 then label else String.make (String.length label) ' ' in
+                let lead =
+                  if index = 0 then label
+                  else String.make (Message_layout.display_width label) ' '
+                in
                 Printf.sprintf "  %s  %s" lead (Terminal_text.single_line name))
               names
       in
-      detail_section_lines ~first:true "1. 시크릿 상태 · 루트 경로 (Status & Root)"
+      detail_section_lines ~first:true (t "1. 시크릿 상태 · 루트 경로" "1. Status & Root")
       @ [ status_line
-        ; Printf.sprintf "  Root:    %s" (Terminal_text.single_line p.ksp_root)
+        ; t "  루트:    " "  Root:    " ^ Terminal_text.single_line p.ksp_root
         ]
-      @ detail_section_lines "2. 환경변수 · 시크릿 파일 (Env & Files)"
-      @ entry_lines "Env: " p.ksp_env_names
+      @ detail_section_lines (t "2. 환경변수 · 시크릿 파일" "2. Env & Files")
+      @ entry_lines (t "환경변수:" "Env: ") p.ksp_env_names
       @ (match p.ksp_file_paths with
          | [] -> []
-         | paths -> "" :: entry_lines "Files:" paths)
+         | paths -> "" :: entry_lines (t "파일:    " "Files:") paths)
       @ (match p.ksp_error with
          | None -> []
          | Some detail ->
@@ -3112,8 +3117,11 @@ let secret_lines (state : state) (k : keeper) =
       @ [ ""
         ; dim
             (if p.ksp_values_validated then
-               "  Values were read and validated. They are never sent here."
-             else "  Values were not validated on the last read.")
+               t "  값을 읽고 검증했음. 값은 여기로 보내지지 않음."
+                 "  Values were read and validated. They are never sent here."
+             else
+               t "  마지막 읽기에서 값을 검증하지 못함."
+                 "  Values were not validated on the last read.")
         ]
       |> Option.some
 
@@ -4039,6 +4047,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            | Some _, (Some _ | None) | None, Some _ -> failure @ progress)
     in
     let channel_lines () =
+      let ko = state.ui_language = Lang_ko in
+      let t korean english = if ko then korean else english in
+      (* The kind column of the learned names: "channel", the widest word. *)
+      let mapping_kind_cells = 7 in
       let rows = match state.connectors_error, state.connectors with
       | Some detail, None ->
           [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
@@ -4046,7 +4058,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | None, None ->
           (match Connector_read.view state.connectors_read with
            | Connector_read.Quiet ->
-               [ Ansi.dim ^ "  Channel transports not observed" ^ Ansi.reset ]
+               [ Ansi.dim ^ t "  채널 커넥터 미관측" "  Channel transports not observed" ^ Ansi.reset ]
            | Reading _ | Waiting_after_write | Failed_to_start ->
                (* The existing typed-source notice below owns pending,
                   held recheck and failed-start guidance; none is a value. *)
@@ -4085,7 +4097,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                         connector.cn_bindings)
                  in
                  let tail =
-                   Printf.sprintf "  %d here / %d total" here_count
+                   Printf.sprintf
+                     (if ko then "  여기 %d / 전체 %d" else "  %d here / %d total")
+                     here_count
                      (List.length connector.cn_bindings)
                  in
                  (* Two cells of indent, two for the cursor mark, two between
@@ -4094,7 +4108,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  let name_cells =
                    Masc_tui_connector_state.list_row_name_cells
                      ~inner:(framed_inner_width cols) ~fixed_cells:6
-                     ~tail_cells:(String.length tail)
+                     ~tail_cells:(Message_layout.display_width tail)
                  in
                  let line =
                    "  " ^ (if index = selected_index then "▸ " else "  ")
@@ -4120,14 +4134,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    | Some id -> Terminal_text.single_line id
                    | None -> Printf.sprintf "connectors[%d]" refusal.cr_row
                  in
-                 (Theme.bad ()) ^ "    " ^ name ^ "  unreadable: "
+                 (Theme.bad ()) ^ "    " ^ name ^ t "  읽지 못함: " "  unreadable: "
                  ^ Terminal_text.single_line refusal.cr_reason ^ Ansi.reset)
               snapshot.cs_refused
           in
           let selected_lines =
             match List.nth_opt connectors selected_index, snapshot.cs_refused with
             | None, [] ->
-                [ Ansi.dim ^ "  (no channel transports registered)" ^ Ansi.reset ]
+                [ Ansi.dim ^ t "  (등록된 채널 커넥터 없음)" "  (no channel transports registered)" ^ Ansi.reset ]
             | None, _ :: _ -> []
             | Some connector, _ ->
                 let field label value =
@@ -4141,7 +4155,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 in
                 let optional_bool_row label value =
                   optional_row label
-                    (Option.map (fun present -> if present then "yes" else "no") value)
+                    (Option.map (fun present -> if present then t "예" "yes" else t "아니오" "no") value)
                 in
                 let optional_int_row label value =
                   optional_row label (Option.map string_of_int value)
@@ -4162,8 +4176,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 in
                 let store_state =
                   match connector.cn_binding_store_read_ok with
-                  | Some true -> Some "readable"
-                  | Some false -> Some "UNREADABLE"
+                  | Some true -> Some (t "읽힘" "readable")
+                  | Some false -> Some (t "읽지 못함" "UNREADABLE")
                   | None -> None
                 in
                 let binding_lines =
@@ -4179,9 +4193,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                           (if selected then Masc_tui_theme.Glyph.current_entry else " ")
                           (binding_reference binding)
                           (Terminal_text.single_line binding.cb_keeper_name)
-                          (if here then "  (this Keeper)"
+                          (if here then t "  (이 Keeper)" "  (this Keeper)"
                            else if missing_keeper then
-                             "  (MISSING KEEPER · e reassign · u u remove)"
+                             t "  (없는 Keeper · e 다시 배정 · u u 제거)"
+                               "  (MISSING KEEPER · e reassign · u u remove)"
                            else "")
                       in
                       if selected then Ansi.reverse ^ line ^ Ansi.reset
@@ -4190,111 +4205,114 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                       else line)
                     connector.cn_bindings
                   |> function
-                  | [] -> [ Ansi.dim ^ "    (no channel bindings)" ^ Ansi.reset ]
+                  | [] -> [ Ansi.dim ^ t "    (채널 바인딩 없음)" "    (no channel bindings)" ^ Ansi.reset ]
                   | lines -> lines
                 in
                 [ ""
-                ; Ansi.bold ^ "  Selected · "
+                ; Ansi.bold ^ t "  선택 · " "  Selected · "
                   ^ Terminal_text.single_line connector.cn_display_name
                   ^ Ansi.reset
                 ]
-                @ detail_section_lines "1. 연결 상태 · 트리거 및 응답 정책 (Connection & Routing Policy)"
-                @ field "Binding target"
+                @ detail_section_lines (t "1. 연결 상태 · 트리거 및 응답 정책" "1. Connection & Routing Policy")
+                @ field (t "바인딩 대상" "Binding target")
                     (match selected_binding with
-                     | None -> "(no binding selected)"
+                     | None -> t "(고른 바인딩 없음)" "(no binding selected)"
                      | Some binding -> binding_reference binding)
                   (* The badge is read from the status the row would print
                      beside it ([decode_connector_connection] takes status,
                      available and connected), so the word never differs from
                      the badge and the row said the same thing twice. *)
-                @ field "Connection"
+                @ field (t "연결" "Connection")
                     (connection_label connector)
                 @ field "MASC API"
                     (Printf.sprintf "%s:%d"
                        Masc_network_defaults.masc_http_loopback_peer state.port)
-                @ field "Channel type"
+                @ field (t "채널 종류" "Channel type")
                     (Terminal_text.single_line_or
                        ~default:Masc_tui_theme.Glyph.no_value connector.cn_channel)
-                @ optional_row "Runtime state"
+                @ optional_row (t "런타임 상태" "Runtime state")
                     (Masc_tui_connector_state.runtime_state_to_draw connector)
-                @ optional_row "Status source" connector.cn_status_source
-                @ optional_row "Remote endpoint" connector.cn_endpoint
-                @ optional_row "Status file" connector.cn_status_path
-                @ optional_row "Binding store" connector.cn_binding_store_path
-                @ optional_row "Store state" store_state
-                @ optional_row "Binding source" connector.cn_binding_source
-                @ optional_row "Trigger policy" connector.cn_trigger_policy
-                @ optional_row "Reply mode" connector.cn_reply_mode
-                @ optional_row "Chat database" connector.cn_chat_db_path
-                @ detail_section_lines "2. 봇 자격증명 · 프로세스 상태 (Bot Credentials & Process)"
-                @ optional_row "Bot user" connector.cn_bot_user_name
-                @ optional_row "Bot user id" connector.cn_bot_user_id
-                @ optional_bool_row "Bot token ready" connector.cn_bot_token_present
-                @ optional_bool_row "App token ready" connector.cn_app_token_present
-                @ optional_bool_row "Gate healthy" connector.cn_gate_healthy
-                @ optional_int_row "Server pid" connector.cn_pid
-                @ optional_int_row "Guilds" connector.cn_guild_count
-                @ detail_section_lines "3. 디렉토리 동기화 · 이름 매핑 파일 (Directory & Name Mapping)"
-                @ optional_row "Directory state"
+                @ optional_row (t "상태 출처" "Status source") connector.cn_status_source
+                @ optional_row (t "원격 endpoint" "Remote endpoint") connector.cn_endpoint
+                @ optional_row (t "상태 파일" "Status file") connector.cn_status_path
+                @ optional_row (t "바인딩 저장소" "Binding store") connector.cn_binding_store_path
+                @ optional_row (t "저장소 상태" "Store state") store_state
+                @ optional_row (t "바인딩 출처" "Binding source") connector.cn_binding_source
+                @ optional_row (t "트리거 정책" "Trigger policy") connector.cn_trigger_policy
+                @ optional_row (t "응답 방식" "Reply mode") connector.cn_reply_mode
+                @ optional_row (t "채팅 DB" "Chat database") connector.cn_chat_db_path
+                @ detail_section_lines (t "2. 봇 자격증명 · 프로세스 상태" "2. Bot Credentials & Process")
+                @ optional_row (t "봇 사용자" "Bot user") connector.cn_bot_user_name
+                @ optional_row (t "봇 사용자 id" "Bot user id") connector.cn_bot_user_id
+                @ optional_bool_row (t "봇 토큰 준비" "Bot token ready") connector.cn_bot_token_present
+                @ optional_bool_row (t "앱 토큰 준비" "App token ready") connector.cn_app_token_present
+                @ optional_bool_row (t "Gate 정상" "Gate healthy") connector.cn_gate_healthy
+                @ optional_int_row (t "서버 pid" "Server pid") connector.cn_pid
+                @ optional_int_row (t "길드 수" "Guilds") connector.cn_guild_count
+                @ detail_section_lines (t "3. 디렉토리 동기화 · 이름 매핑 파일" "3. Directory & Name Mapping")
+                @ optional_row (t "디렉토리 상태" "Directory state")
                     (Option.map
                        (function
                          | Masc.Tui_decode_connectors.Connector_directory_not_started ->
-                           "not started"
-                         | Connector_directory_refreshing -> "refreshing"
-                         | Connector_directory_complete -> "complete"
-                         | Connector_directory_partial -> "partial")
+                           t "시작 전" "not started"
+                         | Connector_directory_refreshing -> t "갱신 중" "refreshing"
+                         | Connector_directory_complete -> t "완료" "complete"
+                         | Connector_directory_partial -> t "일부만" "partial")
                        connector.cn_directory_state)
-                @ optional_int_row "Servers learned"
+                @ optional_int_row (t "알게 된 서버" "Servers learned")
                     connector.cn_directory_server_count
-                @ optional_int_row "Channels learned"
+                @ optional_int_row (t "알게 된 채널" "Channels learned")
                     connector.cn_directory_channel_count
-                @ optional_int_row "People learned"
+                @ optional_int_row (t "알게 된 사람" "People learned")
                     connector.cn_directory_person_count
                 @ (match connector.cn_directory_authentication_failed with
                    | [] -> []
                    | values ->
-                     field "Authentication"
+                     field (t "인증 실패" "Authentication")
                          (String.concat ", "
                             (List.map Terminal_text.single_line values))
                      )
                 @ (match connector.cn_directory_permission_denied with
                    | [] -> []
                    | values ->
-                     field "Permission limits"
+                     field (t "권한 제한" "Permission limits")
                          (String.concat ", "
                             (List.map Terminal_text.single_line values))
                      )
                 @ (match connector.cn_directory_errors with
                    | [] -> []
                    | values ->
-                     field "Directory errors"
+                     field (t "디렉토리 오류" "Directory errors")
                          (String.concat "; "
                             (List.map Terminal_text.single_line values))
                      )
-                @ optional_row "Directory updated"
+                @ optional_row (t "디렉토리 갱신" "Directory updated")
                     connector.cn_directory_updated_at
-                @ optional_row "Workspace id" connector.cn_workspace_id
-                @ optional_row "Server names" connector.cn_server_names_path
-                @ optional_row "Channel names" connector.cn_channel_names_path
-                @ optional_row "People names" connector.cn_people_names_path
-                @ optional_row "Mapping scope" connector.cn_name_mapping_scope
-                @ optional_row "Names read error" connector.cn_names_error
-                @ optional_row "Updated" connector.cn_updated_at
-                @ optional_row "Connection error" connector.cn_error
-                @ optional_row "Store error" connector.cn_binding_store_error
-                @ detail_section_lines "4. 채널 → 키퍼 바인딩 (Channel → Keeper Bindings)"
+                @ optional_row (t "워크스페이스 id" "Workspace id") connector.cn_workspace_id
+                @ optional_row (t "서버 이름 파일" "Server names") connector.cn_server_names_path
+                @ optional_row (t "채널 이름 파일" "Channel names") connector.cn_channel_names_path
+                @ optional_row (t "사람 이름 파일" "People names") connector.cn_people_names_path
+                @ optional_row (t "매핑 범위" "Mapping scope") connector.cn_name_mapping_scope
+                @ optional_row (t "이름 읽기 오류" "Names read error") connector.cn_names_error
+                @ optional_row (t "갱신" "Updated") connector.cn_updated_at
+                @ optional_row (t "연결 오류" "Connection error") connector.cn_error
+                @ optional_row (t "저장소 오류" "Store error") connector.cn_binding_store_error
+                @ detail_section_lines (t "4. 채널 → 키퍼 바인딩" "4. Channel → Keeper Bindings")
                 @ binding_lines
                 @ (match connector.cn_name_mappings with
                    | [] -> []
                    | mappings ->
-                       [ ""; Ansi.bold ^ "  Known ID ↔ names" ^ Ansi.reset ]
+                       [ ""; Ansi.bold ^ t "  알려진 ID ↔ 이름" "  Known ID ↔ names" ^ Ansi.reset ]
                        @ List.concat_map
                            (fun (mapping : Masc.Tui_decode_connectors.connector_name_mapping) ->
-                              Printf.sprintf "%-7s %s ↔ %s"
-                                (match mapping.cnm_kind with
-                                 | Masc.Tui_decode_connectors.Connector_channel_name -> "channel"
-                                 | Connector_person_name -> "person"
-                                 | Connector_server_name -> "server")
+                              Printf.sprintf "%s %s ↔ %s"
+                                (fit_width
+                                   (match mapping.cnm_kind with
+                                    | Masc.Tui_decode_connectors.Connector_channel_name ->
+                                        t "채널" "channel"
+                                    | Connector_person_name -> t "사람" "person"
+                                    | Connector_server_name -> t "서버" "server")
+                                   mapping_kind_cells)
                                 (Terminal_text.single_line mapping.cnm_id)
                                 (Terminal_text.single_line mapping.cnm_name)
                               |> Message_layout.wrap_styled_words ~max_cells:(max 1 (inner - 4))
@@ -4302,23 +4320,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                            mappings)
                 @ [ ""
                   ; Ansi.dim
-                    ^ "  j/k transport · J/K binding · b bind · e reassign · u u remove"
+                    ^ t "  j/k 커넥터 · J/K 바인딩 · b 연결 · e 다시 배정 · u u 제거"
+                        "  j/k transport · J/K binding · b bind · e reassign · u u remove"
                     ^ Ansi.reset
                   ; Ansi.dim
-                    ^ "  These actions change channel routing, not the connector process."
+                    ^ t "  이 동작은 채널 라우팅만 바꾸고 커넥터 프로세스는 건드리지 않음."
+                        "  These actions change channel routing, not the connector process."
                     ^ Ansi.reset
-                  ; Ansi.dim ^ "  PgUp/PgDn scrolls this detail" ^ Ansi.reset
-                  ; Ansi.dim ^ "  r reloads bindings and learned names" ^ Ansi.reset
+                  ; Ansi.dim ^ t "  PgUp/PgDn 으로 이 상세를 넘김" "  PgUp/PgDn scrolls this detail" ^ Ansi.reset
+                  ; Ansi.dim ^ t "  r 로 바인딩과 알게 된 이름을 다시 읽음" "  r reloads bindings and learned names" ^ Ansi.reset
                   ]
           in
-          [ Printf.sprintf "  %d transports · %d available · actions target %s"
+          [ Printf.sprintf
+              (if ko then "  커넥터 %d개 · 사용 가능 %d개 · 동작 대상 %s"
+               else "  %d transports · %d available · actions target %s")
               snapshot.cs_total snapshot.cs_active
               (Terminal_text.single_line k.k_name)
           ]
           @ (match error with
              | None -> []
              | Some detail ->
-                 [ (Theme.bad ()) ^ "  STALE · "
+                 [ (Theme.bad ()) ^ t "  이전 관측 · " "  STALE · "
                    ^ Terminal_text.single_line detail ^ Ansi.reset
                  ])
           @ transport_rows @ refused_rows @ selected_lines

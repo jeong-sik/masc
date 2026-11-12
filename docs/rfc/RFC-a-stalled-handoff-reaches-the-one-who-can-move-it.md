@@ -481,7 +481,7 @@ L2a 배포 뒤 측정(8절)에서 찾았어요.
 **[사실]** 지금 코드가 하는 일.
 
 - `Lane_addon_tool_request_owner.load_listed`(`lib/lane_addon/lane_addon_tool_request_owner.ml:245-250`)는 목록에서 본 레코드를 다시 읽고 `same_listed`(`:118-122`)로 같은지 봐요. 같다는 조건에 `progress` 까지 들어가요.
-- `load_scope`(`:270-277`)와 `fold_all_with`(`:278-292`)가 레코드마다 이 함수를 불러요. 하나라도 다르면 목록 전체가 `Store_unavailable` 이에요. `load_scope` 를 부르는 곳은 lib 에 14곳이에요.
+- `load_scope`(`:270-277`)와 `fold_all_with`(`:278-292`)가 레코드마다 이 함수를 불러요. 하나라도 다르면 목록 전체가 `Store_unavailable` 이에요. 이 목록 읽기를 쓰는 곳은 lib 에 17곳이에요. `load_scope` 14곳, `fold_all` 1곳(Librarian wake), `load_listed` 를 바로 부르는 2곳(시작 때 정산 보관 sweep, Goal 검증 worker)이에요.
 - 목록 읽기, 레코드 읽기, 진행 쓰기는 모두 스코프 직렬화(`with_tool_request_owner_serialization`, `lib/lane_addon/lane_addon_store.ml:348`)를 잡아요. 셋은 저마다 따로 그 잠금을 잡았다 놓아요. 그래서 목록은 한 시점이에요. `load_scope` 는 목록 한 번과 레코드 읽기 N 번을 따로 잡아서, 그 사이에 진행 쓰기가 끼어들 수 있어요.
 - 진행 쓰기(`advance_events_with`, `:336`)는 그 레코드를 다시 읽어 `expected` 와 같을 때만 저장해요. 진행은 이벤트를 뒤에 붙이기만 해요(`Lane_addon_request_progress.append`).
 - 운영 설치의 `verifier-reviews` 스코프는 레코드 416개(19.8MB)와 본문 570개(39.6MB)예요(2026-11-12). 리뷰마다 이것을 통째로 다시 읽고 본문 해시를 확인해요. 읽는 동안이 길어서 경합 창도 길어요.
@@ -505,10 +505,10 @@ L2a 배포 뒤 측정(8절)에서 찾았어요.
 
 - **[사실]** 이 저장소의 쓰기는 모두 compare-and-set 이에요. 진행 쓰기는 저장된 레코드가 `expected` 와 같을 때만 쓰고 아니면 `State_conflict` 예요(`:351-360`). `settle` 은 같은 레코드일 때만 옮기고 아니면 `Settle_changed` 예요(`:383-387`).
 - 그래서 읽은 뒤에 바뀐 레코드에 쓰려는 결정은 쓰는 순간 거부돼요. 지금은 그 결정을 내리기도 전에 읽기 전체가 실패해요.
-- 다른 레코드의 값을 보고 이 레코드에 쓰는 결정은 그렇게 잡히지 않아요. 그런 자리가 있는지가 아래 13곳의 확인이에요.
+- 다른 레코드의 값을 보고 이 레코드에 쓰는 결정은 그렇게 잡히지 않아요. 그런 자리가 있는지가 아래 16곳의 확인이에요.
 - **[사실]** `load_scope` 와 `fold_all` 을 부르는 쪽은 목록에서 본 진행을 받지 않아요. 다시 읽은 레코드만 받아요. 받는 값의 모양은 그대로예요.
 - **[사실]** 검증은 자기 검증의 레코드로만 결정해요. 한 검증은 한 번에 한 리뷰만 맡아요(`claim_review`, `completion_authority_agent.ml:80-90`). 그래서 검증 쪽은 다른 검증 레코드의 시점과 상관이 없어요.
-- 나머지 13곳(Librarian 12, Goal 검증 1)이 스코프 한 시점을 전제로 하는지는 구현 PR 이 본문에 호출처마다 한 줄씩 표로 적어요. 그 표가 없으면 구현 PR 은 끝난 것이 아니에요.
+- 나머지 16곳(Librarian 13, Goal 검증 2, 정산 보관 sweep 1)이 스코프 한 시점을 전제로 하는지는 구현 PR 이 본문에 호출처마다 한 줄씩 표로 적어요. 그 표가 없으면 구현 PR 은 끝난 것이 아니에요.
 
 고르지 않은 길도 적어요.
 
@@ -564,7 +564,7 @@ L2a 배포 뒤 측정(8절)에서 찾았어요.
 | L1 | `keeper_board_attention_fanout.ml`, `keeper_board_attention_partition.ml(i)`, `keeper_board_attention_candidate.ml`, `keeper_board_attention_worker.ml`, `keeper_board_attention_quarantine_command.ml`, 그 시험 | `ensure_current_roots` 와 `judgment_delivery_outcome` 을 `match` 하는 곳을 모두 고친다. fanout 의 `claim` 마다 후보 원장을 한 번 더 읽는다 |
 | L2a | `anti_rationalization.ml(i)`(실패 관측에 판정을 싣는 것과 보고 도구 이름), `goal_criterion_agent.ml`·`goal_verifier_worker.ml`(패턴 한 줄씩), `verifier_review_worker.ml`, `verifier_review_walk_result.ml(i)`·`verifier_review_ending.ml(i)`(새 파일), `agent_execution_projection.ml`, `agent_execution_projection_intf.mli`, `agent.ml(i)`, `verifier_review_execution.ml(i)`, `verifier_review_owner.ml(i)`, `completion_authority_agent.ml`(주석), 그 시험, `docs/verification-pipeline-policy.md`, `docs/constitution.xml` | 끊긴 리뷰가 다시 돈다. 리뷰 한 번의 토큰이 다시 든다. 연결 실패가 이어지면 그 리뷰에 pulse 마다 시도 하나가 쌓인다(5.2). 헌법 invariant 와 검증 정책 문서의 문장이 바뀐다 |
 | L2b | `operator_task_attention.ml` 과 그 목록을 그리는 곳 | 운영자 목록에 판정을 기다리는 제출이 모두 실린다. 지금 20행이고, L2a 뒤에는 돌고 있는 리뷰와 남은 10건이다 |
-| L2c | `lane_addon_tool_request_owner.ml`(`load_listed` 와 신원 비교), `completion_authority_agent.ml`(실패 상세), 그 시험 | `load_scope` 를 부르는 14곳과 `fold_all` 에서 목록 읽기 실패가 줄어든다. 공용 층이라, 그 자리들이 목록에서 본 진행에 기대지 않는지 리뷰가 봐야 한다 |
+| L2c | `lane_addon_tool_request_owner.ml`(`load_listed` 와 신원 비교), `completion_authority_agent.ml`(실패 상세), 그 시험 | 목록 읽기를 쓰는 17곳(`load_scope` 14, `fold_all` 1, `load_listed` 직접 2)에서 목록 읽기 실패가 줄어든다. 공용 층이라, 그 자리들이 목록에서 본 진행에 기대지 않는지 리뷰가 봐야 한다 |
 | 미디어 거절 | `keeper_turn_driver.ml` 의 미디어 갈래 | 7일 로그에 0줄이라 맨 뒤다 |
 | L3 | 그 RFC 의 8절 | 그 RFC 에 적혀 있다 |
 | L4 | 그 RFC 의 L3 | 그 RFC 에 적혀 있다 |
@@ -637,7 +637,7 @@ L2a 배포 뒤 측정(8절)에서 찾았어요.
 | 2 | 멈춘 검증과 L2a | 2026-11-12 에 정했다: L2a 를 한다. 실행 기록이 "판정 보고가 없었다"를 확정한 시도는 확정된 거절이 되고, 걸음이 결론을 남겼으면 헌법대로 실패의 typed 판정이 다시 돌지 정한다. 취소나 프로세스 종료로 결론을 남기지 못한 시도는 다음 시도로 간다. 정산된 판정 보고가 하나 있으면 그 판정을 읽는다. 근거는 1.2 의 실행 기록 959개와 5.2 다 | #47278 이 정한 "writer 가 사라지면 자동 재시도 없음"이 걸음이 결론을 남기지 못한 리뷰 시도에 한해 바뀐다. 헌법 invariant 와 검증 정책 문서에 문장이 더해진다. 리뷰가 다시 도는 만큼 토큰이 든다. 리뷰 실행이 서버를 끝내는 경우에는 다시 시작할 때마다 그 리뷰가 다시 돈다(표본에 없음). 지금 멈춘 19건 중 10건은 그대로 남는다. 다른 쪽은 지금 규칙을 두고 L2b 만 하는 것이다. 그러면 같은 멈춤이 8일에 35번꼴로 계속 생기고 운영자가 하나씩 판정한다 |
 | 3 | Keeper 별 GitHub 신원(#46691 의 좌) | 지금 하지 않는다. L3 의 S4 가 배포된 뒤 "현재 head 에 리뷰 없는 Ready PR" 을 다시 잰다 | 어느 Keeper 가 리뷰했는지는 계속 계정 단위로만 남는다 |
 | 4 | L2b 를 `task-lifecycle` RFC 의 3단계에서 떼어 먼저 낼지 | 2026-11-12 에 정했다: 먼저 낸다(PR #51525). L2a 뒤에 남는 제출을 볼 곳이 운영자 목록뿐이다 | 그 RFC 의 단계 순서가 바뀐다. 그 RFC 3.7 은 목록이 짧다는 전제를 1단계 뒤로 잡았다. 먼저 내면 그때까지 목록에 돌고 있는 리뷰도 같이 보인다 |
-| 5 | L2a 배포 뒤 남은 목록 읽기 경합 | 2026-11-12 에 정했다: RFC 절(L2c)부터 쓰고 구현한다. 규칙은 "목록 읽기는 레코드의 신원만 대조하고, 진행 값은 지금 읽은 레코드를 따른다"이다 | 공용 층(`load_scope` 14곳, `fold_all`)의 실패 조건이 바뀐다. 다른 쪽은 검증 lane 의 선택만 바꾸는 것인데, 그러면 Librarian 의 같은 경합이 남는다 |
+| 5 | L2a 배포 뒤 남은 목록 읽기 경합 | 2026-11-12 에 정했다: RFC 절(L2c)부터 쓰고 구현한다. 규칙은 "목록 읽기는 레코드의 신원만 대조하고, 진행 값은 지금 읽은 레코드를 따른다"이다 | 공용 층(목록 읽기를 쓰는 17곳)의 실패 조건이 바뀐다. 다른 쪽은 검증 lane 의 선택만 바꾸는 것인데, 그러면 Librarian 의 같은 경합이 남는다 |
 
 ## 11. 확인하지 못한 것
 

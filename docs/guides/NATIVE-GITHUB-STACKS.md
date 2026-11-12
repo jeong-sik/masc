@@ -156,8 +156,9 @@ and any branch a protection rule or ruleset applies to stay. The open pull
 requests are read again just before deleting, and the push carries a lease on
 that tip, so a branch that moved is refused and kept.
 
-When enabling the worker, or after a transient read/merge failure, recheck an
-existing PR (any stack member) explicitly:
+The sweep reruns the worker on an approved scope within 30 minutes, so a
+failed or quota-ended worker run needs no follow-up. To recheck an existing PR
+(any stack member) sooner, dispatch the worker by hand:
 
 ```bash
 gh workflow run approval-auto-merge.yml --ref main -f pr=NUMBER

@@ -77,7 +77,8 @@ import { FLEET_KEEPER_FILTERS, fleetKeeperFilterFromRoute } from '../lib/fleet-k
 import { FL_TONE_LABEL, PHASE_LABEL_KO, type FleetTone } from '../lib/fleet-tone'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
-import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
+import { buildCompositeByKeeperKey } from '../composite-signals'
+import { useFleetComposite } from '../lib/use-fleet-composite'
 import { hashForRoute, navigate, route } from '../router'
 import { finishGlowFor, keeperFinishes, keeperTurns, runningTurnFor, subscribeKeeperTurnsRefresh } from './keeper-turns-state'
 import { operatorSnapshot } from '../operator-store'
@@ -860,12 +861,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     [runtimeKeeperList],
   )
 
-  // RFC-0135 PR-4: index the fleet-wide composite snapshot stream by
-  // keeper identity so each roster row can read the same conditioning
-  // signals (`runtime_attention.execution_current` etc.) the detail
-  // panel already uses. `.value` access here auto-subscribes the
-  // component to SSE-driven updates from `hydrateFleetCompositeSnapshot`.
-  const fleetSnapshot = fleetCompositeSnapshot.value
+  // The shared current query supplies the same composite conditioning
+  // fields used by the keeper detail surface.
+  const fleetSnapshot = useFleetComposite().data
   const compositeByKeeperKey = useMemo(() => buildCompositeByKeeperKey(fleetSnapshot), [fleetSnapshot])
 
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)

@@ -25,8 +25,8 @@ import type { Keeper } from '../../types'
 import { navigate, route } from '../../router'
 import {
   buildCompositeByKeeperKey,
-  fleetCompositeSnapshot,
 } from '../../composite-signals'
+import { useFleetComposite } from '../../lib/use-fleet-composite'
 import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
 import {
   deriveKeeperOperationalState,
@@ -108,7 +108,7 @@ export function RegistrySurface() {
   const keeperParam = route.value.params.keeper as string | undefined
 
   const roster = keepers.value
-  const fleetSnapshot = fleetCompositeSnapshot.value
+  const fleetSnapshot = useFleetComposite().data
   const compositeByKeeperKey = useMemo(
     () => buildCompositeByKeeperKey(fleetSnapshot),
     [fleetSnapshot],

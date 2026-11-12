@@ -1226,14 +1226,9 @@ export async function fetchKeeperComposite(
 export async function fetchKeepersComposite(
   opts?: { signal?: AbortSignal },
 ): Promise<FleetCompositeSnapshot> {
-  const resp = await fetchWithTimeout(
-    `/api/v1/keepers/composite`,
-    { headers: jsonHeaders(), signal: opts?.signal },
-    DEFAULT_GET_TIMEOUT_MS,
-  )
-  if (!resp.ok) throw new Error(`fleet composite fetch failed: ${resp.status}`)
+  const raw = await get<unknown>('/api/v1/keepers/composite', opts)
   const { parseFleetCompositeSnapshot } = await import('./schemas/keeper-composite')
-  return parseFleetCompositeSnapshot(await resp.json())
+  return parseFleetCompositeSnapshot(raw)
 }
 
 // --- Eval Quality (RFC-MASC-005 Phase 3) ---

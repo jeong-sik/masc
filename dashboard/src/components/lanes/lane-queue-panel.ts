@@ -2,7 +2,7 @@ import { setupObservationRefresh } from '../../lib/observation-refresh'
 // Lane · Queue panel — the lanes.jsx Monitor surface, wired to live data.
 //
 //   · 진행 타임라인 (sw-*): composite observations accumulated from the fleet
-//     composite stream/poll (`fetchKeepersComposite`, one call for the whole
+//     shared fleet composite read (one call for the whole
 //     roster — the same payload fleet-fsm-matrix.ts consumes), clipped to the
 //     design's 20-minute window. Buffers accumulate while the panel is
 //     mounted, exactly like the FSM hub's SwimlaneTimeline.
@@ -19,14 +19,15 @@ import { setupObservationRefresh } from '../../lib/observation-refresh'
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { signal } from '@preact/signals'
+import { computed, signal } from '@preact/signals'
 import type { VNode } from 'preact'
 
 import { keepers } from '../../store'
-import { fleetCompositeSnapshot } from '../../composite-signals'
+import { useFleetComposite } from '../../lib/use-fleet-composite'
+import { captureDashboardObservationOwner, dashboardObservationOwnerHasWorkspace,
+  dashboardObservationOwnerIsCurrent, readDashboardObservationOwner, type DashboardObservationOwner } from '../../lib/observation-read-owner'
 import {
   fetchKeeperLifecycle,
-  fetchKeepersComposite,
   type KeeperLifecycleEvent,
 } from '../../api/keeper'
 import type { FleetCompositeSnapshot, KeeperCompositeSnapshot } from '../../api/schemas/keeper-composite'
@@ -94,13 +95,29 @@ const LIFECYCLE_EVENT_LIMIT = 30
 
 /* ── Observation buffers (module-level so tab switches keep history) ───── */
 
-const laneObservationBuffers = signal<Record<string, CompositeObservation[]>>({})
-const laneLatestSnapshots = signal<Record<string, KeeperCompositeSnapshot>>({})
+const ownedLaneState = signal<{
+  readonly owner: DashboardObservationOwner
+  readonly buffers: Record<string, CompositeObservation[]>
+  readonly snapshots: Record<string, KeeperCompositeSnapshot>
+} | null>(null)
+const EMPTY_BUFFERS: Record<string, CompositeObservation[]> = {}
+const EMPTY_SNAPSHOTS: Record<string, KeeperCompositeSnapshot> = {}
+function currentLaneState() {
+  const held = ownedLaneState.value
+  return held !== null && dashboardObservationOwnerIsCurrent(held.owner) ? held : null
+}
+const laneObservationBuffers = computed(() => {
+  void readDashboardObservationOwner()
+  return currentLaneState()?.buffers ?? EMPTY_BUFFERS
+})
+const laneLatestSnapshots = computed(() => {
+  void readDashboardObservationOwner()
+  return currentLaneState()?.snapshots ?? EMPTY_SNAPSHOTS
+})
 
-/** Test hook — drop accumulated buffers/snapshots between cases. */
+/** Drop retained observations for a new read lifetime. */
 export function resetLaneQueueObservations(): void {
-  laneObservationBuffers.value = {}
-  laneLatestSnapshots.value = {}
+  ownedLaneState.value = null
 }
 
 function snapshotName(snapshot: KeeperCompositeSnapshot): string | null {
@@ -109,14 +126,15 @@ function snapshotName(snapshot: KeeperCompositeSnapshot): string | null {
 }
 
 /** Fold every keeper in a fleet snapshot into the per-keeper observation
- *  buffers. appendCompositeObservation dedupes unchanged values, so a poll
+ *  buffers. appendCompositeObservation dedupes unchanged values, so a read
  *  that returns the same states does not fabricate transitions. */
-export function ingestLaneQueueFleetSnapshot(snapshot: FleetCompositeSnapshot | null): void {
-  if (!snapshot) return
+export function ingestLaneQueueFleetSnapshot(snapshot: FleetCompositeSnapshot | null, owner: DashboardObservationOwner): void {
+  if (!snapshot || !dashboardObservationOwnerHasWorkspace(owner) || !dashboardObservationOwnerIsCurrent(owner)) return
   const fallbackTs = nowSecondsSignal.value
   let buffersChanged = false
-  const nextBuffers = { ...laneObservationBuffers.value }
-  const nextSnapshots = { ...laneLatestSnapshots.value }
+  const previousState = currentLaneState()
+  const nextBuffers = { ...previousState?.buffers }
+  const nextSnapshots = { ...previousState?.snapshots }
   for (const snap of snapshot.snapshots) {
     const name = snapshotName(snap)
     if (!name) continue
@@ -129,8 +147,8 @@ export function ingestLaneQueueFleetSnapshot(snapshot: FleetCompositeSnapshot | 
     }
     nextSnapshots[name] = snap
   }
-  laneObservationBuffers.value = buffersChanged ? nextBuffers : laneObservationBuffers.value
-  laneLatestSnapshots.value = nextSnapshots
+  ownedLaneState.value = { owner, buffers: buffersChanged ? nextBuffers : previousState?.buffers ?? EMPTY_BUFFERS,
+    snapshots: nextSnapshots }
 }
 
 /* ── 스윔레인 ─────────────────────────────────────────────────────────── */
@@ -542,7 +560,8 @@ export interface LaneQueuePanelProps {
 export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
   useNowSecondsTicker()
   const nowSec = nowSecondsSignal.value
-  const fetchFleet = useMemo(() => props.fetchFleet ?? fetchKeepersComposite, [props.fetchFleet])
+  const fetchFleet = props.fetchFleet
+  const shared = useFleetComposite(fetchFleet === undefined)
   const fetchLifecycle = useMemo(() => props.fetchLifecycle ?? fetchKeeperLifecycle, [props.fetchLifecycle])
 
   const roster = keepers.value
@@ -563,19 +582,18 @@ export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
   const [focus, setFocus] = useState<LaneKey>('turn')
   const [dev, setDev] = useState(false)
 
-  // Both pushed snapshots and authoritative event-triggered reads feed the
-  // same deduplicating ingestion, so unchanged state creates no transition.
   useEffect(() => {
-    ingestLaneQueueFleetSnapshot(fleetCompositeSnapshot.value)
-    const unsubscribe = fleetCompositeSnapshot.subscribe(ingestLaneQueueFleetSnapshot)
-    const dispose = setupObservationRefresh(async signal => {
-      const snapshot = await fetchFleet({ signal })
-      if (!signal.aborted) ingestLaneQueueFleetSnapshot(snapshot)
-    }, { topics: ['keeper_composite'], onError: () => undefined })
-    return () => {
-      dispose()
-      unsubscribe()
+    if (fetchFleet === undefined && shared.observation !== null) {
+      ingestLaneQueueFleetSnapshot(shared.observation.value, shared.observation.owner)
     }
+  }, [fetchFleet, shared.observation])
+  useEffect(() => {
+    if (fetchFleet === undefined) return
+    return setupObservationRefresh(async signal => {
+      const owner = captureDashboardObservationOwner()
+      const snapshot = await fetchFleet({ signal })
+      if (!signal.aborted) ingestLaneQueueFleetSnapshot(snapshot, owner)
+    }, { topics: ['keeper_composite'], onError: () => undefined, resetRead: resetLaneQueueObservations })
   }, [fetchFleet])
 
   // Waiting inventory: one shared keeper-scoped subscription per tab keeper

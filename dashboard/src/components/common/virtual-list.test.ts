@@ -392,4 +392,72 @@ describe('VirtualList', () => {
       global.ResizeObserver = OriginalResizeObserver
     }
   })
+
+  // What the next frame paints: microtasks have run, timers and animation
+  // frames have not. The passive effects wait for those.
+  async function beforeNextFrame() {
+    await Promise.resolve()
+    await Promise.resolve()
+  }
+
+  describe.each([
+    ['fixed', { itemHeight: 40 }],
+    ['measured', { estimatedItemHeight: 40 }],
+  ])('with %s row heights, before the next frame', (_mode, heights) => {
+    const ROW_PX = 40
+    const VIEWPORT_PX = 400
+    const many = Array.from({ length: 300 }, (_, i) => ({ id: `item-${i}`, name: `Name ${i}` }))
+
+    function mount() {
+      const container = document.createElement('div')
+      const draw = (list: Item[]) => render(
+        h(VirtualList<Item>, {
+          items: list,
+          ...heights,
+          renderItem: (item) => h('div', null, item.name),
+          getKey: (item) => item.id,
+        }),
+        container,
+      )
+      draw(many)
+      const el = container.querySelector('.virtual-list-spacer')?.parentElement as HTMLElement
+      Object.defineProperty(el, 'clientHeight', { value: VIEWPORT_PX, configurable: true })
+      /** Where a browser leaves the scroll position of a list this long that sat at its end. */
+      const scrollToEndOf = (count: number) => {
+        el.scrollTop = count * ROW_PX - VIEWPORT_PX
+      }
+      return { container, draw, el, scrollToEndOf }
+    }
+
+    it('shows the rows at the scroll position after a list scrolled to its end shrinks', async () => {
+      const { container, draw, el, scrollToEndOf } = mount()
+      scrollToEndOf(many.length)
+      el.dispatchEvent(new Event('scroll'))
+      await vi.waitFor(() => { expect(container.textContent).toContain('Name 299') })
+
+      const fewer = many.slice(200)
+      scrollToEndOf(fewer.length)
+      draw(fewer)
+      await beforeNextFrame()
+      expect(container.textContent).toContain('Name 299')
+    })
+
+    it('shows the rows at the scroll position when the list crosses the threshold again', async () => {
+      const { container, draw, el, scrollToEndOf } = mount()
+      scrollToEndOf(many.length)
+      el.dispatchEvent(new Event('scroll'))
+      await vi.waitFor(() => { expect(container.textContent).toContain('Name 299') })
+
+      // Below the threshold every row is in the DOM and the range goes unused.
+      draw(many.slice(0, 30))
+      await vi.waitFor(() => { expect(container.querySelector('.virtual-list-spacer')).toBeNull() })
+      const short = container.firstElementChild as HTMLElement
+      Object.defineProperty(short, 'clientHeight', { value: VIEWPORT_PX, configurable: true })
+      short.scrollTop = 0
+
+      draw(many.slice(0, 45))
+      await beforeNextFrame()
+      expect(container.textContent).toContain('Name 0')
+    })
+  })
 })

@@ -14,6 +14,7 @@ try {
 
   const graph = page.getByTestId('keeper-lane-graph')
   await graph.waitFor()
+  const list = graph.locator('[aria-label="대기 나이순 작업 흐름"]')
   const rows = page.getByTestId('keeper-lane-waiting-row')
   if (await rows.count() !== 3) throw new Error('the fixture did not render all queue rows')
 
@@ -36,7 +37,7 @@ try {
   // The operator sentence is the default reading; the wire enum is not.
   const firstBar = bars.first()
   await firstBar.getByText('discord:incident-room 멘션', { exact: true }).waitFor()
-  if (await firstRow.getByText('external_attention_store', { exact: true }).count()) {
+  if (await firstRow.getByText('connector_attention_hook', { exact: true }).count()) {
     throw new Error('the wake producer leaked into the default reading')
   }
 
@@ -48,8 +49,8 @@ try {
   }
   await firstRow.locator('[data-testid="keeper-lane-waiting-time"] time').waitFor()
   await page.getByTestId('keeper-lane-dev-toggle').click()
-  await firstRow.getByText('external_attention_store', { exact: true }).waitFor()
-  await firstRow.getByText('keeper_process_external_attention', { exact: true }).waitFor()
+  await firstRow.getByText('connector_attention_hook', { exact: true }).waitFor()
+  await firstRow.getByText('keeper_drain_event_queue', { exact: true }).waitFor()
   await page.screenshot({ path: desktopScreenshot, fullPage: true })
 
   for (const width of [390, 360, 320]) {
@@ -57,9 +58,15 @@ try {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
     if (overflow > 1) throw new Error(`the page overflows the ${width}px viewport by ${overflow}px`)
 
-    const internalOverflow = await graph.evaluate((node) => node.scrollWidth - node.clientWidth)
-    if (internalOverflow > 1) {
-      throw new Error(`the timeline overflows its graph at ${width}px by ${internalOverflow}px`)
+    // A short list clips each row to its own box, so a row wider than the
+    // list is cut off instead of scrolling it. Compare the edges themselves.
+    const cutOffRow = await list.evaluate((node) => {
+      const edge = node.getBoundingClientRect().left + node.clientLeft + node.clientWidth
+      return [...node.querySelectorAll('[data-testid="keeper-lane-waiting-row"]')]
+        .findIndex((row) => row.getBoundingClientRect().right - edge > 1)
+    })
+    if (cutOffRow !== -1) {
+      throw new Error(`queue row ${cutOffRow} extends past the timeline at ${width}px`)
     }
 
     const overflowingRow = await rows.evaluateAll((nodes) =>

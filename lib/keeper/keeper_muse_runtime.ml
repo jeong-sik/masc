@@ -1037,23 +1037,17 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
        is reconciled separately against the acknowledged delivery frontier. *)
     let canonical_messages = List.filter
       (fun message -> not (Host.is_carried_on_resume message)) prepared.messages in
-    let snapshot =
-      `Assoc
-        [ "system_prompt", `String prepared.system_prompt
-        ; ( "messages"
-          , `List (List.map Keeper_official_client_context_codec.to_json canonical_messages) )
-        ; ( "model"
-          , match config.model with
-            | Some model -> `String model
-            | None -> `Null )
-        ; "workspace_root", `String workspace_root
-        ]
-    in
     let snapshot_sha256 =
-      snapshot
-      |> Yojson.Safe.to_string
-      |> Agent_core_sha256.digest_string
-      |> Agent_core_sha256.to_hex
+      Keeper_official_client_context_codec.canonical_source_sha256
+        ~system_prompt:prepared.system_prompt
+        ~messages:canonical_messages
+        ~rest:
+          [ ( "model"
+            , match config.model with
+              | Some model -> `String model
+              | None -> `Null )
+          ; "workspace_root", `String workspace_root
+          ]
     in
     let admission_error reason =
       config_error

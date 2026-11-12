@@ -3444,6 +3444,7 @@
 
 (include stanzas/test_keeper_official_argument_window.inc)
 (include stanzas/test_keeper_official_client_host.inc)
+(include stanzas/test_official_client_canonical_source_digest.inc)
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_keeper_codex_tool_outbox_wake.inc)

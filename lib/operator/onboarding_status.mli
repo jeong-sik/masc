@@ -21,12 +21,21 @@ type check_id =
           history, which the server of a single user runs on, are not read.
           It is [Needs_verification]: whether the workspace is activated is
           judged by a boot, under the lease. *)
+  | Person_account_homes
+      (** A single-user workspace keeps [.masc/accounts], the runtime roots
+          that persons left when its accounts were turned off or their log
+          was removed ({!Runtime_account_home_layout.persons_remain}). The
+          check is there only then: [Needs_setup] with the sentence of
+          {!Runtime_account_access.person_homes_notice}, which names the
+          model turns the server refuses and what opens them again, or
+          [Needs_verification] when the directory could not be read. A
+          workspace without the directory has no such check. *)
 
 (** Whether an [Invalid] check keeps the workspace's existing history from opening.
     [Required_to_open]: the workspace, a loadable runtime.toml and Keeper
     metadata the boot admits. [Advisory] checks — imp's model binding,
-    declaration and sandbox — are reported but never
-    send the operator back into setup. A request for accounts is
+    declaration and sandbox, and runtime roots that persons left behind — are
+    reported but never send the operator back into setup. A request for accounts is
     [Required_to_open]: it decides which server boots. *)
 type role = Required_to_open | Advisory
 

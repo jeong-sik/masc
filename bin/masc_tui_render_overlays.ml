@@ -765,7 +765,7 @@ let render_link_preview_modal (state : state) =
         ~title:
           (screen_title " MASC Link preview" ^ "  " ^ Ansi.dim ^ "(no links)"
            ^ Ansi.reset)
-        ~hints:"Esc:close"
+        ~hints:(Masc_tui_keys.footer_hints_link_preview_empty ~lang:state.ui_language)
         ~body:(fun ~budget:_ c ->
           c.push "  (no web links found in this conversation to preview)")
   | Some (_url, preview, total_links, content_height, content_lines) ->
@@ -814,7 +814,7 @@ let render_play_card (state : state) card =
     state ~terminal_rows ~cols ~surface_key:"play-invite"
     ~frame:Chrome_overlay
     ~title:(screen_title " MASC Play invite")
-    ~hints:"j/k:scroll  y:copy link  Esc:close"
+    ~hints:(Masc_tui_keys.footer_hints_play_invite ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let width = framed_inner_width cols - String.length play_card_indent in
       List.iter
@@ -1276,7 +1276,7 @@ let render_answering (state : state) =
     ~frame:Chrome_overlay
     (* Enter and Esc are in the footer row below this overlay. *)
     ~title:(screen_title " MASC Answering")
-    ~hints:"j/k:move  PgUp/PgDn:page  Home/End  Enter:chat  Esc:close"
+    ~hints:(Masc_tui_keys.footer_hints_answering ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let content_height = max 1 (budget - answering_preview_rows) in
       let scroll =

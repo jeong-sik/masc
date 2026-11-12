@@ -539,3 +539,32 @@ val reference_sections : unit -> reference_section list
     document. The [?] sheet does not draw those paragraphs. *)
 
 val footer_hints_browser_lane : lang:Masc_tui_types.ui_language -> string
+
+(** {1 Rows a renderer used to spell by hand}
+
+    Each was an English string in a renderer. They project from bindings like
+    every other row, in the order the string had. *)
+
+val footer_hints_browser_lane_reading : lang:Masc_tui_types.ui_language -> string
+(** {!footer_hints_browser_lane} followed by the scene, region and observation
+    readers, for the lane with no scene open. *)
+
+val footer_hints_browser_picker : lang:Masc_tui_types.ui_language -> string
+
+val footer_hints_browser_scene :
+  lang:Masc_tui_types.ui_language ->
+  enter:Masc_tui_types.Browser_lane_view.scene_action option ->
+  articles:bool ->
+  string
+(** The open scene's row. [enter] is what Enter does to the element under the
+    cursor; [articles] adds the article step where the scene has articles. *)
+
+val footer_hints_browser_scene_guard : lang:Masc_tui_types.ui_language -> string
+val footer_hints_browser_observations : lang:Masc_tui_types.ui_language -> string
+val footer_hints_client_detail : lang:Masc_tui_types.ui_language -> string
+val footer_hints_lane_activity : lang:Masc_tui_types.ui_language -> string
+val footer_hints_lane_inventory_detail : lang:Masc_tui_types.ui_language -> string
+val footer_hints_link_preview_empty : lang:Masc_tui_types.ui_language -> string
+val footer_hints_play_invite : lang:Masc_tui_types.ui_language -> string
+val footer_hints_answering : lang:Masc_tui_types.ui_language -> string
+val footer_hints_changes_diff : lang:Masc_tui_types.ui_language -> string

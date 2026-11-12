@@ -2128,7 +2128,7 @@ let render_client_detail state (client : Masc.Tui_decode.client_row) =
          ~path:[ ui_text state ~ko:"클라이언트" ~en:"clients"
                ; Terminal_text.single_line client.cr_name ]
          ~readings:[] ~position:None)
-    ~hints:"j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:clients"
+    ~hints:(Masc_tui_keys.footer_hints_client_detail ~lang:state.ui_language)
     ~overflow:(Scrolled {scroll=state.client_detail_scroll;
                         report=(fun scroll -> Client_detail_scroll scroll)})
     ~body:(fun ~budget:_ c -> List.iter c.push lines)
@@ -2338,9 +2338,6 @@ let render_lane_scrollable_reading (state : state) ~terminal_rows ~cols
 (* The same words as the key that opens the reading ([Space] in the list). *)
 let lane_activity_step state = ui_text state ~ko:"켜고 끄기" ~en:"activity"
 
-let lane_activity_hints =
-  "Space:draft  s:save  r:read  u:reapply  x:discard  ?:help  Esc:back"
-
 let render_lane_inventory_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
   let width = max 1 (framed_inner_width cols - 2) in
@@ -2405,7 +2402,7 @@ let render_lane_inventory_detail (state : state) target =
   in
   render_lane_scrollable_styled_reading state ~terminal_rows ~cols
     ~surface_key:"lane-inventory-detail" ~path
-    ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End:top/bottom  r:refresh  Esc/Left:inventory"
+    ~hints:(Masc_tui_keys.footer_hints_lane_inventory_detail ~lang:state.ui_language)
     content
 
 let render_machine_activity (state : state) session =
@@ -2414,7 +2411,7 @@ let render_machine_activity (state : state) session =
     ~surface_key:"machine-activity"
     ~path:[ Masc.Machine_lane.to_wire (Masc_tui_machine_activity.owner session).machine
           ; lane_activity_step state ]
-    ~hints:lane_activity_hints
+    ~hints:(Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language)
     (Masc_tui_machine_activity.lines session)
 
 let render_exact_activity (state : state) session =
@@ -2423,7 +2420,7 @@ let render_exact_activity (state : state) session =
     ~surface_key:"exact-activity"
     ~path:[ Standalone_lane.to_id (Masc_tui_exact_activity.owner session).lane
           ; lane_activity_step state ]
-    ~hints:lane_activity_hints
+    ~hints:(Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language)
     (Masc_tui_exact_activity.lines session)
 
 let render_lanes (state : state) =

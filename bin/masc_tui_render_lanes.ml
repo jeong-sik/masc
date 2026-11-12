@@ -436,7 +436,7 @@ let inventory_row_detail_lines ~ko ~width ~selected_output
   let t korean english = if ko then korean else english in
   let max_cells = max 1 (width - 2) in
   let output_lines =
-    match Masc_tui_lane_inventory.exact_output_lines ~selected:selected_output row with
+    match Masc_tui_lane_inventory.exact_output_lines ~ko ~selected:selected_output row with
     | [] -> []
     | outputs ->
       detail_section_heading (t "2. 출력 스키마 바인딩" "2. Exact Output")
@@ -444,7 +444,7 @@ let inventory_row_detail_lines ~ko ~width ~selected_output
   in
   Page_reading.rows ~max_cells [ Page_line.Title (row.label ^ " · " ^ row.purpose) ]
   @ detail_section_heading (t "1. 설정 · 관측 상세" "1. Configuration & Observation")
-  @ Page_reading.rows ~max_cells (Masc_tui_lane_inventory.detail_lines row)
+  @ Page_reading.rows ~max_cells (Masc_tui_lane_inventory.detail_lines ~ko row)
   @ output_lines
 
 let rec take_rows remaining acc = function
@@ -2416,7 +2416,7 @@ let render_lane_inventory_detail (state : state) target =
         (match target with
          | None ->
              wrap Ansi.bold (t "목록 읽기 진단" "Inventory diagnostics")
-             @ (match Masc_tui_lane_inventory.snapshot_notices snapshot with
+             @ (match Masc_tui_lane_inventory.snapshot_notices ~ko snapshot with
                 | [] ->
                     wrap (Theme.recede ())
                       (t "목록을 읽다 생긴 문제가 관측되지 않았습니다."

@@ -23511,16 +23511,22 @@ let runtime_lane_stale_lines (state : state) =
 let lane_inventory_notice_lines ~cols state =
   let notices = match state.lane_inventory with
     | None -> []
-    | Some snapshot -> Masc_tui_lane_inventory.overview_notices snapshot in
+    | Some snapshot ->
+        Masc_tui_lane_inventory.overview_notices ~ko:(state.ui_language = Lang_ko) snapshot in
   let selection_notice = match state.lane_inventory, state.lanes_selection with
     | Some _, Some _ ->
         if Option.is_none (selected_inventory_lane state) then
-          ["Selected feature is absent or replaced in this reading. Use the arrow keys to select a current feature."]
+          [ui_text state
+             ~ko:"고른 기능이 이번 관측에 없거나 바뀌었습니다. 화살표 키로 지금 있는 기능을 고르세요."
+             ~en:"Selected feature is absent or replaced in this reading. Use the arrow keys to select a current feature."]
         else []
     | None, None | None, Some _ | Some _, None -> [] in
   let notices = notices @ selection_notice @ (match state.standalone_lanes_error with
     | None -> []
-    | Some detail -> [(if Option.is_some state.lane_inventory then "STALE · " else "") ^ detail]) in
+    | Some detail ->
+        [(if Option.is_some state.lane_inventory
+          then ui_text state ~ko:"이전 관측 · " ~en:"STALE · "
+          else "") ^ detail]) in
   List.concat_map (fun line -> Masc.Tui_terminal_text.sanitize_terminal_text line
     |> Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))) notices
 

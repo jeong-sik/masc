@@ -124,12 +124,13 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
          ~keeper_id:(Capture.keeper_id owner) proposal.explicit_candidate_ids in
        require settled "Finished original admission lacks actual committed candidate receipts"
      | Conflicted (_,conflict) ->
+       (* The candidates' receipts are not read here. The frontier hands them
+          to a replacement root, which commits them, and this record stays
+          retained. The replacement's proof holds that they were uncommitted
+          when it was made ([Parts.terminal_witness]). *)
        let* memory_id=destination_absent_of_json record conflict in
-       let* ()=require (List.mem memory_id proposal.required_memory_ids)
-         "Original admission conflict names a Memory its proposal does not write into" in
-       let* settled=receipt_state ~keepers_dir:(Capture.keepers_dir owner)
-         ~keeper_id:(Capture.keeper_id owner) proposal.explicit_candidate_ids in
-       require (not settled) "Conflicted original admission has committed candidate receipts"
+       require (List.mem memory_id proposal.required_memory_ids)
+         "Original admission conflict names a Memory its proposal does not write into"
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
      | Rejected _ | Subdividing _ | Subdivided _ -> Ok ())
   | Rejected {stage=Progress.Execution;evidence} ->

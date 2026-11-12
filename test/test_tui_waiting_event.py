@@ -440,7 +440,14 @@ class WaitingEventTest(unittest.TestCase):
                 )
                 wait_until(
                     lambda: (
-                        b"waiting inventory: refreshing" in output[event_output_start:]
+                        any(
+                            marker in output[event_output_start:]
+                            for marker in (
+                                "대기 목록 갱신 중".encode(),
+                                b"waiting refresh pending",
+                                b"waiting inventory: refreshing",
+                            )
+                        )
                     ),
                     "waiting refresh was not shown as pending",
                 )

@@ -1,0 +1,117 @@
+[
+  {
+    "label": "after",
+    "binary": "085741658e67",
+    "holdMs": 300,
+    "atMs": 150,
+    "act": "mouse",
+    "firstLoad": "a document was loaded",
+    "openReturnedAfterMs": 5,
+    "actedAfterMs": 163,
+    "actedInTime": true,
+    "firstPressSent": [],
+    "invitationPagesAsked": 1,
+    "load": "a document was loaded",
+    "then": {
+      "page": "/accounts/invite",
+      "fragmentLength": 0,
+      "buttonShown": true,
+      "invite": "the second link"
+    },
+    "pressThenSent": [
+      "the second link"
+    ]
+  },
+  {
+    "label": "after",
+    "binary": "085741658e67",
+    "holdMs": 2000,
+    "atMs": 400,
+    "act": "mouse",
+    "firstLoad": "a document was loaded",
+    "openReturnedAfterMs": 4,
+    "actedAfterMs": 408,
+    "actedInTime": true,
+    "firstPressSent": [],
+    "invitationPagesAsked": 1,
+    "load": "a document was loaded",
+    "then": {
+      "page": "/accounts/invite",
+      "fragmentLength": 0,
+      "buttonShown": true,
+      "invite": "the second link"
+    },
+    "pressThenSent": [
+      "the second link"
+    ]
+  },
+  {
+    "label": "after",
+    "binary": "085741658e67",
+    "holdMs": 2000,
+    "atMs": 400,
+    "act": "Enter",
+    "firstLoad": "a document was loaded",
+    "openReturnedAfterMs": 3,
+    "actedAfterMs": 407,
+    "actedInTime": true,
+    "firstPressSent": [],
+    "invitationPagesAsked": 1,
+    "load": "a document was loaded",
+    "then": {
+      "page": "/accounts/invite",
+      "fragmentLength": 0,
+      "buttonShown": true,
+      "invite": "the second link"
+    },
+    "pressThenSent": [
+      "the second link"
+    ]
+  },
+  {
+    "label": "after",
+    "binary": "085741658e67",
+    "holdMs": 2000,
+    "atMs": 400,
+    "act": "Space",
+    "firstLoad": "a document was loaded",
+    "openReturnedAfterMs": 4,
+    "actedAfterMs": 405,
+    "actedInTime": true,
+    "firstPressSent": [],
+    "invitationPagesAsked": 1,
+    "load": "a document was loaded",
+    "then": {
+      "page": "/accounts/invite",
+      "fragmentLength": 0,
+      "buttonShown": true,
+      "invite": "the second link"
+    },
+    "pressThenSent": [
+      "the second link"
+    ]
+  },
+  {
+    "label": "after",
+    "binary": "085741658e67",
+    "holdMs": 2000,
+    "atMs": 400,
+    "act": "capture",
+    "firstLoad": "a document was loaded",
+    "openReturnedAfterMs": 4,
+    "actedAfterMs": 463,
+    "actedInTime": true,
+    "firstPressSent": null,
+    "invitationPagesAsked": 1,
+    "load": "a document was loaded",
+    "then": {
+      "page": "/accounts/invite",
+      "fragmentLength": 0,
+      "buttonShown": true,
+      "invite": "the second link"
+    },
+    "pressThenSent": [
+      "the second link"
+    ]
+  }
+]

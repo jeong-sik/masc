@@ -274,6 +274,9 @@ type outcome =
       (** 409 — the durable owner state refuses this step. For [Boot] this is
           the answer {!recovers_from_conflict} exists for. *)
   | Rejected of { status : int; detail : string }
+  | Unbound_purge_receipt of { status : int }
+      (** A 2xx purge answer that does not name the exact keeper and a
+          durable operation. Nothing confirms what it accepted. *)
 
 val classify_response : status:int -> body:string -> outcome
 
@@ -303,6 +306,8 @@ type failure =
   | Refused of { status : int; detail : string }
       (** The server refused a step, including a 409 that no recovery
           follows. Carries the status and the server's detail. *)
+  | Unbound_receipt of int
+      (** The purge answered {!Unbound_purge_receipt} with this status. *)
   | No_answer of string
       (** No HTTP answer was read: the workspace check withdrew the request,
           the transport failed, or an exception escaped. Carries that text. *)
@@ -375,3 +380,9 @@ val decode_deletion_inventory : Yojson.Safe.t -> (deletion_inventory, string) re
 val deletion_keeper_name : deletion_row -> string
 val deletion_operation_id : deletion_row -> Masc.Keeper_shutdown_types.Operation_id.t
 val deletion_json : deletion_row -> Yojson.Safe.t
+
+val deletion_status : ko:bool -> deletion_row -> string
+(** Where a deletion record stands, in words, Korean when [ko]. A shutdown
+    phase is named by meaning, not by its wire spelling; the words follow the
+    web dashboard's (dashboard/src/api/keeper-lifecycle.ts). A failure or a
+    configuration error carries its detail after [": "]. *)

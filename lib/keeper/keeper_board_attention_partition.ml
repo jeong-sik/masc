@@ -719,7 +719,10 @@ let advance_state partition state =
     Ok { partition with generation; state }
 ;;
 
-let ensure_roots_with_reader ~base_path ~keeper_name ~candidates read_candidates =
+(* [decide] runs under the partition mutation lock. It receives
+   [missing_roots], which computes the roots [candidates] still lack in the
+   locked view, and returns the rows to append with its own result. *)
+let ensure_roots_under_lock ~base_path ~keeper_name ~candidates decide =
   (* Board reads take Eio mutexes. Observe pending comments in the caller's
      fiber, before [update] offloads its serialized filesystem transaction to
      a system thread. The transaction still rereads/validates its candidates. *)
@@ -733,8 +736,7 @@ let ensure_roots_with_reader ~base_path ~keeper_name ~candidates read_candidates
         (Candidate.Resumable_judged _ | Candidate.Resumable_consumed _)
     | Candidate.Requeued_resumable _ | Candidate.Suspended_quarantine _ -> ()) candidates;
   update ~base_path ~keeper_name (fun view ->
-    let* candidates = read_candidates () in
-    let* roots =
+    let missing_roots () =
       candidates
       |> List.sort compare_candidate
       |> List.fold_left
@@ -882,23 +884,34 @@ let ensure_roots_with_reader ~base_path ~keeper_name ~candidates read_candidates
            (Ok [])
       |> Result.map List.rev
     in
-    Ok (roots, List.length roots))
+    decide ~missing_roots)
 ;;
 
 let ensure_roots ~base_path ~keeper_name candidates =
-  ensure_roots_with_reader ~base_path ~keeper_name ~candidates (fun () -> Ok candidates)
+  ensure_roots_under_lock ~base_path ~keeper_name ~candidates (fun ~missing_roots ->
+    let* roots = missing_roots () in
+    Ok (roots, List.length roots))
 ;;
 
+type root_restoration =
+  | Roots_ensured of int
+  | Candidates_changed
+
 let ensure_current_roots ~base_path ~keeper_name candidates =
-  ensure_roots_with_reader ~base_path ~keeper_name ~candidates (fun () ->
+  ensure_roots_under_lock ~base_path ~keeper_name ~candidates (fun ~missing_roots ->
     (* The partition mutation lock encloses this candidate read and the root
        append. Purge removes candidates before partitions: a stale request
        either finishes before partition purge or sees the missing candidate.
-       Re-reading before taking the partition lock would leave that race open. *)
+       Re-reading before taking the partition lock would leave that race open.
+       The settled-receipt prune holds the same lock and drops a receipt only
+       once its candidate is consumed or gone, so a candidate read here with
+       the caller's value never had its receipt dropped. *)
     let* current = Candidate.load_candidates ~base_path ~keeper_name in
     if List.for_all (fun candidate -> List.mem candidate current) candidates
-    then Ok candidates
-    else Error "Board attention candidates changed before root restoration")
+    then (
+      let* roots = missing_roots () in
+      Ok (roots, Roots_ensured (List.length roots)))
+    else Ok ([], Candidates_changed))
 ;;
 
 type settled_receipt_gate =

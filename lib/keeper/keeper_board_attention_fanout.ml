@@ -16,19 +16,28 @@ let wake candidate ~base_path =
 
 let claim ~base_path ~worker_epoch candidate =
   let keeper_name = candidate.Candidate.keeper_name in
-  let* _ = Partition.ensure_roots ~base_path ~keeper_name [candidate] in
-  let* partitions = Partition.load ~base_path ~keeper_name in
-  match List.find_opt (fun (p : Partition.t) ->
-    String.equal p.candidate_id candidate.candidate_id
-    && match p.state with
-       | Partition.Ready -> true
-       | Partition.Running _ | Partition.Completed _ | Partition.Settled _
-       | Partition.Abandoned _ | Partition.Blocked _ -> false) partitions with
-  | None -> Ok None
-  | Some partition ->
-    Partition.claim_ready_exact ~now:(Time_compat.now ()) ~worker_epoch
-      ~base_path ~keeper_name ~partition_id:partition.partition_id
-      ~generation:partition.generation
+  (* The event holds the candidate value it recorded. The worker can judge
+     and settle that candidate, and prune its settled receipt, before this
+     claim runs. A root made from the held value would then be judged a
+     second time, and the consumed candidate refuses that judgment. The
+     restoration rereads the candidate under the partition lock; a changed
+     candidate stays with the worker. *)
+  let* restoration = Partition.ensure_current_roots ~base_path ~keeper_name [candidate] in
+  match restoration with
+  | Partition.Candidates_changed -> Ok None
+  | Partition.Roots_ensured (_ : int) ->
+    let* partitions = Partition.load ~base_path ~keeper_name in
+    (match List.find_opt (fun (p : Partition.t) ->
+       String.equal p.candidate_id candidate.candidate_id
+       && match p.state with
+          | Partition.Ready -> true
+          | Partition.Running _ | Partition.Completed _ | Partition.Settled _
+          | Partition.Abandoned _ | Partition.Blocked _ -> false) partitions with
+     | None -> Ok None
+     | Some partition ->
+       Partition.claim_ready_exact ~now:(Time_compat.now ()) ~worker_epoch
+         ~base_path ~keeper_name ~partition_id:partition.partition_id
+         ~generation:partition.generation)
 
 let confirm_completed ~base_path (transition : Partition.exact_transition) =
   match transition.write_outcome with

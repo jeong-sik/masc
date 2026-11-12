@@ -200,13 +200,25 @@ val ensure_roots :
     while unavailable detail is not fabricated. Existing live membership must
     remain one-to-one. *)
 
+(** What a root restoration that rereads its candidates found. *)
+type root_restoration =
+  | Roots_ensured of int
+      (** Every given candidate is still in the candidate ledger with
+          exactly the observed value. The payload is the number of roots
+          appended. *)
+  | Candidates_changed
+      (** A given candidate is gone from the candidate ledger or holds
+          another value there. Nothing was appended. *)
+
 (** Restore only candidates still present with exactly the observed value.
     The durable candidate read and root append share the partition mutation
     lock, so candidate-then-partition purge cannot be undone by an earlier
-    recovery request's snapshot. *)
+    recovery request's snapshot. The settled-receipt prune holds the same
+    lock, so a candidate consumed after the caller observed it gets no new
+    root once its receipt is dropped. *)
 val ensure_current_roots :
   base_path:string -> keeper_name:string -> Candidate.candidate list ->
-  (int, string) result
+  (root_restoration, string) result
 
 val recover_for_process_start :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result

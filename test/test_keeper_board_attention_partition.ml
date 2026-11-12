@@ -1719,12 +1719,10 @@ let test_current_root_restore_rejects_a_purged_candidate () =
    | Ok () -> ()
    | Error detail -> Alcotest.failf "candidate purge failed: %s" detail);
   (match P.ensure_current_roots ~base_path ~keeper_name:"alpha" [ pending ] with
-   | Error detail ->
-     Alcotest.(check string)
-       "stale root restoration is rejected"
-       "Board attention candidates changed before root restoration"
-       detail
-   | Ok count -> Alcotest.failf "stale root restoration appended %d roots" count);
+   | Ok P.Candidates_changed -> ()
+   | Ok (P.Roots_ensured count) ->
+     Alcotest.failf "stale root restoration appended %d roots" count
+   | Error detail -> Alcotest.failf "stale root restoration failed: %s" detail);
   Alcotest.(check (list string))
     "rejected restoration writes no partition"
     []

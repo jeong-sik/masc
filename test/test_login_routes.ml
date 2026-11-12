@@ -420,32 +420,92 @@ let clears_the_transaction answer =
   Alcotest.(check (option string)) "the transaction cookie is cleared" (Some "") (cookie_set ~name:Q.transaction_cookie answer)
 ;;
 
-(* A refused page applies the one sheet of its frame and runs nothing: its
-   policy names one source, the nonce that the sheet of the page carries. *)
-let applies_only_its_sheet label (answer : R.answer) =
+(* The value of a source ['nonce-<value>'] when the value is one the draw of
+   the installation gives: hex digits, never empty. *)
+let drawn_nonce source =
+  let prefix = "nonce-" in
+  if String.starts_with ~prefix source
+  then (
+    let value = String.sub source (String.length prefix) (String.length source - String.length prefix) in
+    if value <> "" && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) value
+    then Some value
+    else None)
+  else None
+;;
+
+(* The page a person's sign-in ends on runs the one script of the page, and
+   every other page the routes write runs nothing. *)
+type page =
+  | Refused
+  | Completed
+
+(* A page of the routes applies the sheet of its frame and runs at most the
+   script of a completed sign-in: its policy names nothing but the nonce that
+   the sheet and that script carry, and the limits that every page has. The
+   sheet is not empty; what it says is not read here. *)
+let page_nonce label page (answer : R.answer) =
   match headers "content-security-policy" answer with
   | [ policy ] ->
-    (match String.split_on_char '\'' policy with
-     | [ "default-src "
-       ; "none"
-       ; "; style-src "
-       ; source
-       ; "; base-uri "
-       ; "none"
-       ; "; form-action "
-       ; "none"
-       ; "; frame-ancestors "
-       ; "none"
-       ; ""
-       ]
-       when String.starts_with ~prefix:"nonce-" source ->
-       let nonce = String.sub source 6 (String.length source - 6) in
+    let nonce =
+      match page, String.split_on_char '\'' policy with
+      | ( Refused
+        , [ "default-src "
+          ; "none"
+          ; "; style-src "
+          ; style
+          ; "; base-uri "
+          ; "none"
+          ; "; form-action "
+          ; "none"
+          ; "; frame-ancestors "
+          ; "none"
+          ; ""
+          ] ) -> drawn_nonce style
+      | ( Completed
+        , [ "default-src "
+          ; "none"
+          ; "; script-src "
+          ; script
+          ; "; style-src "
+          ; style
+          ; "; base-uri "
+          ; "none"
+          ; "; form-action "
+          ; "none"
+          ; "; frame-ancestors "
+          ; "none"
+          ; ""
+          ] )
+        when String.equal script style -> drawn_nonce style
+      | (Refused | Completed), _ -> None
+    in
+    (match nonce with
+     | None -> Alcotest.failf "%s: a page under the policy %S" label policy
+     | Some nonce ->
+       let sheet = Printf.sprintf {|<style nonce="%s">|} nonce in
        Alcotest.(check bool)
-         (label ^ ": the sheet is under the nonce of the policy")
+         (label ^ ": a sheet is under the nonce of the policy")
          true
-         (contains ~sub:(Printf.sprintf {|<style nonce="%s">|} nonce) answer.body)
-     | _ -> Alcotest.failf "%s: a refused page under the policy %S" label policy)
+         (contains ~sub:sheet answer.body && not (contains ~sub:(sheet ^ "</style>") answer.body));
+       (match page with
+        | Refused -> Alcotest.(check bool) (label ^ ": no script") false (contains ~sub:"<script" answer.body)
+        | Completed ->
+          Alcotest.(check bool)
+            (label ^ ": the script is under the nonce of the policy")
+            true
+            (contains ~sub:(Printf.sprintf {|<script nonce="%s">|} nonce) answer.body));
+       nonce)
   | [] | _ :: _ :: _ -> Alcotest.failf "%s: no single policy" label
+;;
+
+let applies_only_its_sheet label answer = page_nonce label Refused answer
+
+(* No two answers share a nonce: each is drawn for its answer. *)
+let each_drawn_once label nonces =
+  Alcotest.(check int)
+    (label ^ ": no nonce is used twice")
+    (List.length nonces)
+    (List.length (List.sort_uniq String.compare nonces))
 ;;
 
 (* ---- the cases ---- *)
@@ -469,17 +529,7 @@ let a_google_sign_in_gives_a_session_until_the_sign_out () =
     Alcotest.(check string) "the session is open" "open" (session_status t value);
     Alcotest.(check bool) "the page goes back where it started" true (contains ~sub:{|href="/keepers?tab=board"|} back.body);
     Alcotest.(check (list string)) "no referrer" [ "no-referrer" ] (headers "referrer-policy" back);
-    let nonce =
-      match headers "content-security-policy" back with
-      | [ policy ] ->
-        (match String.split_on_char '\'' policy with
-         | _ :: _ :: _ :: nonce :: _ when String.starts_with ~prefix:"nonce-" nonce ->
-           String.sub nonce 6 (String.length nonce - 6)
-         | _ -> Alcotest.failf "no nonce in %S" policy)
-      | [] | _ :: _ :: _ -> Alcotest.fail "no single policy"
-    in
-    Alcotest.(check bool) "the script carries the nonce" true (contains ~sub:(Printf.sprintf {|<script nonce="%s">|} nonce) back.body);
-    Alcotest.(check bool) "the sheet carries the nonce" true (contains ~sub:(Printf.sprintf {|<style nonce="%s">|} nonce) back.body);
+    let (_ : string) = page_nonce "the completed sign-in" Completed back in
     Alcotest.(check bool) "the page holds no secret" false (contains ~sub:value back.body);
     let read = read_session t b in
     Alcotest.(check int) "the session reads" 200 (code read);
@@ -542,11 +592,12 @@ let starts_in_a_row = 64
 
 let a_start_that_is_refused () =
   with_installation (fun t ->
+    let nonces = ref [] in
     let refused label ?(origin = Q.Same_origin) ?(routes = t.routes) ?(fields = []) provider expected =
       let answer = R.start routes provider ~origin ~session_cookie:Q.No_cookie ~fields in
       Alcotest.(check int) label expected (code answer);
       Alcotest.(check (list string)) (label ^ ": no cookie") [] (headers "set-cookie" answer);
-      applies_only_its_sheet label answer;
+      nonces := applies_only_its_sheet label answer :: !nonces;
       Alcotest.(check bool) (label ^ ": no token in the page") false (contains ~sub:admin_token answer.body)
     in
     refused "from another origin" ~origin:Q.Other_origin ~fields:invited R.Google 403;
@@ -564,7 +615,8 @@ let a_start_that_is_refused () =
           R.start t.routes provider ~origin:Q.Same_origin ~session_cookie:Q.Several_cookies ~fields:[]
         in
         Alcotest.(check int) "several session cookies" 401 (code answer);
-        Alcotest.(check (list string)) "several session cookies: no cookie" [] (headers "set-cookie" answer))
+        Alcotest.(check (list string)) "several session cookies: no cookie" [] (headers "set-cookie" answer);
+        nonces := applies_only_its_sheet "several session cookies" answer :: !nonces)
       [ R.Google; R.Github ];
     t.providers.discovery_up := false;
     refused "Google does not answer" R.Google 502;
@@ -577,15 +629,17 @@ let a_start_that_is_refused () =
     done;
     let too_long = [ "return_to", "/" ^ String.make T.max_sealed_length 'a' ] in
     refused "a return path longer than a cookie (Google)" ~fields:too_long R.Google 400;
-    refused "a return path longer than a cookie (GitHub)" ~fields:too_long R.Github 400)
+    refused "a return path longer than a cookie (GitHub)" ~fields:too_long R.Github 400;
+    each_drawn_once "a start that is refused" !nonces)
 ;;
 
 let a_callback_that_is_refused () =
   with_installation (fun t ->
+    let nonces = ref [] in
     let check label answer expected =
       Alcotest.(check int) label expected (code answer);
       clears_the_transaction answer;
-      applies_only_its_sheet label answer;
+      nonces := applies_only_its_sheet label answer :: !nonces;
       List.iter
         (fun secret -> Alcotest.(check bool) (label ^ ": nothing private in the page") false (contains ~sub:secret answer.body))
         [ admin_token; client_secret; github_client_secret ]
@@ -627,7 +681,8 @@ let a_callback_that_is_refused () =
     Alcotest.(check int) "the first joins" 200 (code (callback t first R.Google [ "state", state; "code", code_ ]));
     let code_, state = sign_in_at_google t.providers ~sub:"google-sub-2" second_url in
     check "the invitation is spent" (callback t second R.Google [ "state", state; "code", code_ ]) 409;
-    Alcotest.(check (option string)) "no session for the second" None second.session)
+    Alcotest.(check (option string)) "no session for the second" None second.session;
+    each_drawn_once "a callback that is refused" !nonces)
 ;;
 
 let a_sign_out_or_a_read_that_is_refused () =

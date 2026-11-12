@@ -14,7 +14,10 @@ type summary = {
 }
 
 val database_path : masc_root:string -> string
-val insert : masc_root:string -> row -> (unit, string) result
+val insert : masc_root:string -> result_bytes:int -> row -> (unit, string) result
+(** [insert ~masc_root ~result_bytes row] stores the call and the size of the
+    result it returned in one transaction. A [record_id] already stored is left
+    as it is, size included. It returns [Error] for a negative [result_bytes]. *)
 val prune : masc_root:string -> retention_days:int -> (int, string) result
 
 val iter_all :
@@ -38,7 +41,11 @@ val read_series :
   (Tool_metrics_series.t, string) result
 (** [read_series ~masc_root ~window ()] groups the stored calls inside
     [window] into its buckets. [tool_name] keeps only that tool's calls.
-    A store that does not exist yet gives a series with no calls.
+    A store that does not exist yet gives a series with no calls. A call stored
+    without a size, as every call was before sizes were kept, is counted as a
+    call and adds nothing to the byte totals. The sizes live in a table that
+    opening the store through {!insert}, {!prune} or {!iter_all} creates, so
+    a database file that this version has not opened yet cannot be read here.
 
     It reads on a connection of its own, so it does not wait for the store
     lock or hold it, and an [insert] on another thread is not delayed by it.

@@ -18,6 +18,9 @@ const busy = {
   max_ms: 150,
   long_count: 0,
   long_total_ms: 0,
+  result_observed_count: 4,
+  result_bytes_total: 4_000,
+  result_bytes_max: 2_000,
 }
 const idle = {
   call_count: 0,
@@ -29,6 +32,9 @@ const idle = {
   max_ms: null,
   long_count: 0,
   long_total_ms: 0,
+  result_observed_count: 0,
+  result_bytes_total: 0,
+  result_bytes_max: null,
 }
 
 function series(overrides: Partial<ToolMetricsSeriesResponse> = {}): ToolMetricsSeriesResponse {
@@ -224,6 +230,10 @@ describe('loading the picked window', () => {
 describe('subscribeToolSeriesRefresh', () => {
   it('refreshes the selected request only when its source changes and stops on disposal', async () => {
     const { publishDashboardObservationChange } = await import('../../lib/observation-refresh')
+    // The observation refresh reads nothing until an execution workspace is accepted. The signal belongs
+    // to the module registry that `beforeEach` reset, so it is seeded in that registry.
+    const { acceptedExecutionWorkspace } = await import('../../execution-workspace-authority')
+    acceptedExecutionWorkspace.value = { epoch: 'fixture', workspaceRoot: '/fixture/workspace', connectionGeneration: 1 }
     fetchToolMetricsSeries.mockResolvedValue(series())
     const dispose = state.subscribeToolSeriesRefresh()
     try {

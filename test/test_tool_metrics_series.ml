@@ -26,7 +26,7 @@ let window_exn ~since ~until ~width ~offset =
 ;;
 
 let sample ?(disposition = S.Completed) ~ts ~tool duration_ms : S.sample =
-  { ts; tool_name = tool; disposition; duration_ms }
+  { ts; tool_name = tool; disposition; duration_ms; result_bytes = None }
 ;;
 
 let add_exn builder sample =
@@ -421,6 +421,103 @@ let test_json_counts_long_calls_in_every_row_and_names_the_line () =
   | other -> Alcotest.failf "expected one tool row, got %d" (List.length other)
 ;;
 
+let sized ?bytes ~ts ~tool duration_ms : S.sample =
+  { (sample ~ts ~tool duration_ms) with result_bytes = bytes }
+;;
+
+let byte_totals (series : S.t) =
+  List.map (fun (bucket : S.bucket) -> bucket.summary.result_bytes_total) series.buckets
+;;
+
+let observed_counts (series : S.t) =
+  List.map (fun (bucket : S.bucket) -> bucket.summary.result_observed_count) series.buckets
+;;
+
+let byte_maxes (series : S.t) =
+  List.map (fun (bucket : S.bucket) -> bucket.summary.result_bytes_max) series.buckets
+;;
+
+let tool_usage (series : S.t) name =
+  match List.find_opt (fun (tool : S.tool_usage) -> String.equal tool.name name) series.top_by_time with
+  | Some tool -> tool.usage
+  | None -> Alcotest.failf "no row for tool %s" name
+;;
+
+let test_result_sizes_are_summed_where_they_are_known () =
+  let window =
+    window_exn ~since:utc_midnight ~until:(utc_midnight +. (3.0 *. hour)) ~width:S.Hour ~offset:0
+  in
+  let series =
+    series_of
+      window
+      [ sized ~bytes:100 ~ts:utc_midnight ~tool:"a" 10.0
+      ; sized ~bytes:300 ~ts:utc_midnight ~tool:"a" 10.0
+      ; sized ~ts:utc_midnight ~tool:"b" 10.0
+      ; sized ~bytes:0 ~ts:(utc_midnight +. (2.0 *. hour)) ~tool:"b" 10.0
+      ]
+  in
+  Alcotest.(check (list int)) "calls per hour" [ 3; 0; 1 ] (calls series);
+  Alcotest.(check (list int)) "calls with a size per hour" [ 2; 0; 1 ] (observed_counts series);
+  Alcotest.(check (list int)) "bytes per hour" [ 400; 0; 0 ] (byte_totals series);
+  (* An hour whose only size is 0 is observed; an hour with no size is not. *)
+  Alcotest.(check (list (option int)))
+    "largest result per hour"
+    [ Some 300; None; Some 0 ]
+    (byte_maxes series);
+  Alcotest.(check int) "calls with a size in the window" 3 series.total.result_observed_count;
+  Alcotest.(check int) "bytes in the window" 400 series.total.result_bytes_total;
+  let a = tool_usage series "a" in
+  Alcotest.(check (pair int int)) "tool a: sized calls and bytes" (2, 400) (a.result_observed_count, a.result_bytes_total);
+  let b = tool_usage series "b" in
+  Alcotest.(check (pair int int)) "tool b: sized calls and bytes" (1, 0) (b.result_observed_count, b.result_bytes_total);
+  Alcotest.(check (option int)) "tool b: a size of zero is a largest result of zero" (Some 0) b.result_bytes_max
+;;
+
+let test_a_negative_result_size_is_refused () =
+  let window =
+    window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
+  in
+  let builder = S.builder window in
+  (match S.add builder (sized ~bytes:(-1) ~ts:utc_midnight ~tool:"a" 1.0) with
+   | Error _ -> ()
+   | Ok () -> Alcotest.fail "a negative size was counted");
+  let series = S.finish builder in
+  Alcotest.(check int) "nothing counted" 0 series.total.call_count
+;;
+
+let test_json_carries_result_sizes_and_null_for_unsized_buckets () =
+  let window =
+    window_exn ~since:utc_midnight ~until:(utc_midnight +. (2.0 *. hour)) ~width:S.Hour ~offset:0
+  in
+  let series =
+    series_of
+      window
+      [ sized ~bytes:40 ~ts:(utc_midnight +. hour) ~tool:"a" 1.0
+      ; sized ~bytes:60 ~ts:(utc_midnight +. hour) ~tool:"a" 1.0
+      ; sized ~ts:(utc_midnight +. hour) ~tool:"a" 1.0
+      ]
+  in
+  let json = S.to_json ~generated_at:utc_midnight series in
+  let open Yojson.Safe.Util in
+  let json_value = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal in
+  let size_fields row =
+    ( member "result_observed_count" row
+    , member "result_bytes_total" row
+    , member "result_bytes_max" row )
+  in
+  let triple = Alcotest.triple json_value json_value json_value in
+  let busy = `Int 2, `Int 100, `Int 60 in
+  Alcotest.check triple "window total" busy (size_fields (member "total" json));
+  (match json |> member "buckets" |> to_list with
+   | [ idle; busy_hour ] ->
+     Alcotest.check triple "an hour with no call has no size, not a zero size" (`Int 0, `Int 0, `Null) (size_fields idle);
+     Alcotest.check triple "an hour with sized calls" busy (size_fields busy_hour)
+   | other -> Alcotest.failf "expected two buckets, got %d" (List.length other));
+  match json |> member "top_by_time" |> to_list with
+  | [ row ] -> Alcotest.check triple "a tool row" busy (size_fields row)
+  | other -> Alcotest.failf "expected one tool row, got %d" (List.length other)
+;;
+
 (* The store: rows written by [insert] come back through [read_series]. *)
 
 let rec rm_rf path =
@@ -447,10 +544,11 @@ let with_masc_root f =
            f ~masc_root:(Filename.concat base ".masc"))))
 ;;
 
-let insert_exn ~masc_root ~record_id ~ts ~tool_name ~disposition duration_ms =
+let insert_exn ?(result_bytes = 0) ~masc_root ~record_id ~ts ~tool_name ~disposition duration_ms =
   match
     Tool_metrics_store.insert
       ~masc_root
+      ~result_bytes
       { Tool_metrics_store.record_id; ts; tool_name; disposition; duration_ms }
   with
   | Ok () -> ()
@@ -503,6 +601,76 @@ let test_read_series_counts_the_stored_long_calls () =
     let series = read_series_exn ~masc_root ~window () in
     Alcotest.(check (list int)) "long calls per hour" [ 1; 1 ] (long_counts series);
     Alcotest.(check (float 0.0)) "time inside the long calls" (11.0 *. minute_ms) series.total.long_total_ms)
+;;
+
+(* A row written before sizes were kept, as the live database holds 800,000 of:
+   an event without a row in the size table. *)
+let insert_unsized_row_exn ~masc_root ~record_id ~ts ~tool_name duration_ms =
+  let db = Sqlite3.db_open (Tool_metrics_store.database_path ~masc_root) in
+  let sql =
+    Printf.sprintf
+      "INSERT INTO tool_metric_events (record_id, ts, tool_name, disposition, duration_ms) \
+       VALUES ('%s', %f, '%s', 'completed', %f)"
+      record_id
+      ts
+      tool_name
+      duration_ms
+  in
+  let rc = Sqlite3.exec db sql in
+  let closed = Sqlite3.db_close db in
+  if not (Sqlite3.Rc.is_success rc && closed)
+  then Alcotest.failf "insert unsized row: %s" (Sqlite3.Rc.to_string rc)
+;;
+
+let test_read_series_sums_stored_sizes_and_leaves_old_rows_unsized () =
+  with_masc_root (fun ~masc_root ->
+    insert_exn ~result_bytes:1000 ~masc_root ~record_id:"read-1" ~ts:(utc_midnight +. 10.0) ~tool_name:"read" ~disposition:"completed" 5.0;
+    insert_exn ~result_bytes:50 ~masc_root ~record_id:"write-1" ~ts:(utc_midnight +. 20.0) ~tool_name:"write" ~disposition:"completed" 5.0;
+    insert_unsized_row_exn ~masc_root ~record_id:"read-old" ~ts:(utc_midnight +. 30.0) ~tool_name:"read" 5.0;
+    let window =
+      window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
+    in
+    let all = read_series_exn ~masc_root ~window () in
+    Alcotest.(check int) "all three calls are counted" 3 all.total.call_count;
+    Alcotest.(check int) "two calls have a size" 2 all.total.result_observed_count;
+    Alcotest.(check int) "bytes of the sized calls" 1050 all.total.result_bytes_total;
+    Alcotest.(check (option int)) "largest result" (Some 1000) all.total.result_bytes_max;
+    let only_read = read_series_exn ~masc_root ~window ~tool_name:"read" () in
+    Alcotest.(check int) "read: both calls" 2 only_read.total.call_count;
+    Alcotest.(check int) "read: one call has a size" 1 only_read.total.result_observed_count;
+    Alcotest.(check int) "read: bytes" 1000 only_read.total.result_bytes_total)
+;;
+
+let test_insert_keeps_the_first_size_of_a_record_id () =
+  with_masc_root (fun ~masc_root ->
+    let insert result_bytes =
+      insert_exn ~result_bytes ~masc_root ~record_id:"same" ~ts:(utc_midnight +. 10.0) ~tool_name:"read" ~disposition:"completed" 5.0
+    in
+    insert 7;
+    insert 99;
+    let window =
+      window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
+    in
+    let series = read_series_exn ~masc_root ~window () in
+    Alcotest.(check int) "one call" 1 series.total.call_count;
+    Alcotest.(check int) "the first size stays" 7 series.total.result_bytes_total)
+;;
+
+let test_insert_refuses_a_negative_size () =
+  with_masc_root (fun ~masc_root ->
+    match
+      Tool_metrics_store.insert
+        ~masc_root
+        ~result_bytes:(-1)
+        { Tool_metrics_store.record_id = "negative"
+        ; ts = utc_midnight
+        ; tool_name = "read"
+        ; disposition = "completed"
+        ; duration_ms = 1.0
+        }
+    with
+    | Error _ -> ()
+    | Ok () -> Alcotest.fail "a negative size was stored")
 ;;
 
 let test_read_series_without_a_database_is_empty_and_creates_none () =
@@ -560,10 +728,28 @@ let () =
             "json counts long calls in every row and names the line"
             `Quick
             test_json_counts_long_calls_in_every_row_and_names_the_line
+        ; Alcotest.test_case
+            "result sizes are summed where they are known"
+            `Quick
+            test_result_sizes_are_summed_where_they_are_known
+        ; Alcotest.test_case "a negative result size is refused" `Quick test_a_negative_result_size_is_refused
+        ; Alcotest.test_case
+            "json carries result sizes and null for unsized buckets"
+            `Quick
+            test_json_carries_result_sizes_and_null_for_unsized_buckets
         ] )
     ; ( "store"
       , [ Alcotest.test_case "read_series groups the stored calls" `Quick test_read_series_groups_the_stored_calls
         ; Alcotest.test_case "read_series counts the stored long calls" `Quick test_read_series_counts_the_stored_long_calls
+        ; Alcotest.test_case
+            "read_series sums stored sizes and leaves old rows unsized"
+            `Quick
+            test_read_series_sums_stored_sizes_and_leaves_old_rows_unsized
+        ; Alcotest.test_case
+            "insert keeps the first size of a record id"
+            `Quick
+            test_insert_keeps_the_first_size_of_a_record_id
+        ; Alcotest.test_case "insert refuses a negative size" `Quick test_insert_refuses_a_negative_size
         ; Alcotest.test_case
             "read_series without a database is empty and creates none"
             `Quick

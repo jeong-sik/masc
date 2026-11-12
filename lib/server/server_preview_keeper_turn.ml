@@ -270,7 +270,7 @@ let call_codex
     |> Result.map_error (codex_failure_answer ~keeper_id))
 ;;
 
-let run ~env ~(person : Login.person) ~base_path ~body =
+let run ~env ~(person : Login.person) ~pat ~base_path ~body =
   let answer =
     let* name, message = request_of body in
     let* keeper_id = Auth_preview_keeper.keeper_id_of name in
@@ -289,6 +289,7 @@ let run ~env ~(person : Login.person) ~base_path ~body =
       Runtime_account_access.Keeper_turn
         { keeper_name = Authz_types.Keeper_id.to_string keeper_id
         ; channel = Authz_types.Channel.Direct
+        ; pat
         ; runtime_id = Authz_types.Runtime_id.to_string prepared.Login.runtime_id
         }
     in

@@ -31,8 +31,11 @@
       refused, and a Keeper or a Runtime of another person is answered as
       one that is not there.
     - [masc_my_keeper_turn]: [POST /api/v1/auth/keepers/turn],
-      [Manage_own_keeper] with the namespace of the person
-      ({!Auth_preview.keeper_owner_person}). The request stays open until the
+      [Manage_own_keeper] with the namespace of the person and the token
+      that authenticated the request ({!Auth_preview.keeper_turn_caller}).
+      The scope of a PAT must cover the turn: its Runtime, the [Direct]
+      channel, and the effects [invoke_model] and [use_tool]
+      ({!Authz_keeper_turn.decide}). The request stays open until the
       Runtime answers or {!Server_preview_keeper_turn} gives the turn up, and
       the result is the JSON of that route. *)
 

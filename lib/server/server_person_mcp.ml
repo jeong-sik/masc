@@ -143,15 +143,20 @@ let run installation caller tool ~arguments =
       with_body [ "keeper_id"; "runtime_id" ] arguments (Auth_preview_keeper.assign installation.zone user_id))
   | Keeper_turn ->
     (* The turn starts the client of the person's account on a home under
-       their namespace, so its judgment gives the namespace too. *)
-    judged Auth_preview.keeper_owner_person caller (fun { Auth_preview.user_id; namespace } ->
-      with_body
-        [ "keeper_id"; "message" ]
-        arguments
-        (Server_preview_keeper_turn.run
-           ~env:installation.env
-           ~person:{ Server_setup_account_login.zone = installation.zone; user_id; namespace }
-           ~base_path:installation.base_path))
+       their namespace, inside the scope of the token that authenticated the
+       request, so its judgment gives both. *)
+    judged
+      Auth_preview.keeper_turn_caller
+      caller
+      (fun { Auth_preview.person = { Auth_preview.user_id; namespace }; pat } ->
+         with_body
+           [ "keeper_id"; "message" ]
+           arguments
+           (Server_preview_keeper_turn.run
+              ~env:installation.env
+              ~person:{ Server_setup_account_login.zone = installation.zone; user_id; namespace }
+              ~pat
+              ~base_path:installation.base_path))
 ;;
 
 let succeeded = function

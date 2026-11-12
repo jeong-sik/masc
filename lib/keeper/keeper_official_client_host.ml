@@ -1644,7 +1644,7 @@ let retain_original_result producer ~invocation ~call_id ~tool_name ~input
       ~content_blocks:original.content_blocks in
   Keeper_client_tool_outbox.retain_host_result_with_delivery producer
     ~invocation_index:(Agent_core.Tool_contract.Invocation.planned_index invocation)
-    ~call_id ~tool_name ~arguments:input ~response
+    ~call_id ~tool_name ~arguments:(Keeper_client_tool_outbox.Known input) ~response
 
 (* A queue is read when a turn starts, so a row that reaches it while an
    official client runs the turn waits for the turn to end
@@ -2011,8 +2011,15 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                          ; detail = failure.detail
                          }
                    })
-            | Keeper_tools_agent_core.Terminal_effect_completed _ ->
+            | Keeper_tools_agent_core.Terminal_effect_completed
+                (Keeper_tool_execution.Surface_post_completed _) ->
               when_terminal_after_success Terminal_completed
+            (* A wait is an ordinary tool, so the tool contract does not end
+               the turn; the wait does, as a deferral the checkpoint carries. *)
+            | Keeper_tools_agent_core.Terminal_effect_completed
+                (Keeper_tool_execution.Receipt_wait_requested _) ->
+              Some (Terminal_tool_boundary
+                { tool_name = tool.schema.name; outcome = Durable_stimulus_deferred })
             (* A Gate deferral parks one call and nothing has happened
                yet, so a terminal tool is no exception: the turn keeps
                going and the host replays the call once the approval

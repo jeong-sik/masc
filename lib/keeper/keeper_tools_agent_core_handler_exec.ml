@@ -40,6 +40,7 @@ let execute_with_observers_with_authority
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?execution_scope
       ?agent_core_invocation
       ?result_projection
       ~(input : Yojson.Safe.t)
@@ -103,6 +104,7 @@ let execute_with_observers_with_authority
             ?gate_grant
             ?tool_use_id:parent_tool_use_id
             ?result_projection
+            ?execution_scope
             ~name
             ~input
             ()
@@ -131,6 +133,7 @@ let execute_with_observers_with_authority
             ?gate_grant
             ?tool_use_id:parent_tool_use_id
             ?result_projection
+            ?execution_scope
             ~descriptor
             ~input
             ()
@@ -158,6 +161,7 @@ let execute_with_observers_with_authority
             ?gate_grant
             ?tool_use_id:parent_tool_use_id
             ?result_projection
+            ?execution_scope
             ~name
             ~input
             ()
@@ -185,6 +189,7 @@ let execute_with_observers_with_authority
             ?gate_grant
             ?tool_use_id:parent_tool_use_id
             ?result_projection
+            ?execution_scope
             ~descriptor
             ~input
             ())

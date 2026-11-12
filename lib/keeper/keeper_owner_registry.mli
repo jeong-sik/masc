@@ -227,10 +227,14 @@ val terminal_direct_native_call : base_path:string -> keeper_name:string -> oper
   call_id:string -> disposition:Agent_core.Agent.execution_terminal_disposition -> (unit, command_error) result
 val defer_direct_checkpoint : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t -> execution_digest:string ->
   checkpoint:Keeper_semantic_execution.gate_checkpoint ->
-  receipt_wait:Keeper_semantic_execution.receipt_obligation option -> (Keeper_owner.Chat_operation.t, command_error) result
+  receipt_waits:Keeper_semantic_execution.receipt_obligation list -> (Keeper_owner.Chat_operation.t, command_error) result
 val receipt_arrived : base_path:string -> keeper_name:string -> request_id:string ->
   resolution:Keeper_semantic_execution.receipt_resolution ->
   (Keeper_chat_operation_store.receipt_resolution_outcome, command_error) result
+val settle_lost_receipt : base_path:string -> keeper_name:string -> request_id:string ->
+  retain:(unit -> (unit, string) result) ->
+  (Keeper_chat_operation_store.receipt_resolution_outcome, command_error) result
+(** See {!Keeper_owner.settle_lost_receipt}. *)
 type input_response_error =
   | Response_owner_lookup_failed of lookup_error
   | Response_owner_failed of Keeper_owner.input_response_error

@@ -66,20 +66,36 @@ let notify ~base_path ~keeper_name =
     (* Retry a lost hint for the same still-pending queue row. Receipt ACK is
        the stopping condition, not a count of hints or model turn starts. *)
     (match receipt_ids with [] -> () | _ :: _ -> wake_hint ~base_path ~keeper_name);
-    Ok ()
+    (* A receipt an execution owns is not offered to any run, so it gets no
+       stimulus. The Owner is told instead, and it starts the execution's
+       claim. *)
+    Keeper_receipt_wait_resolution.arrived ~base_path ~keeper_name
 
-type t = {config : Workspace.config; mutable discovering : bool}
-let create ~config = {config;discovering=false}
+type settle_lost_waits = base_path:string -> keeper_name:string -> (unit, string) result
+
+type t =
+  { config : Workspace.config
+  ; settle_lost_waits : settle_lost_waits
+  ; mutable discovering : bool
+  }
+
+let create ~config ~settle_lost_waits = {config;settle_lost_waits;discovering=false}
 
 let reconcile supervisor =
   let* names = Keeper_meta_store.retained_keeper_names_read_only_result supervisor.config in
   List.iter (fun keeper_name ->
-    match notify ~base_path:supervisor.config.base_path ~keeper_name with
+    (match notify ~base_path:supervisor.config.base_path ~keeper_name with
     | Ok () -> ()
     | Error detail -> Log.Keeper.warn ~keeper_name "unread tool result retained: %s" detail
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn -> Log.Keeper.warn ~keeper_name "unread tool result recovery raised: %s"
-        (Printexc.to_string exn)) names;
+        (Printexc.to_string exn));
+    (match supervisor.settle_lost_waits ~base_path:supervisor.config.base_path ~keeper_name with
+    | Ok () -> ()
+    | Error detail -> Log.Keeper.warn ~keeper_name "receipt wait not settled: %s" detail
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception exn -> Log.Keeper.warn ~keeper_name "receipt wait settlement raised: %s"
+        (Printexc.to_string exn))) names;
   Ok ()
 
 let pulse ~sw supervisor =

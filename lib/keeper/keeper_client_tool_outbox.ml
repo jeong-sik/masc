@@ -4,12 +4,16 @@ type entry = { path : string; json : Yojson.Safe.t }
 type snapshot = { directory : string; entries : entry list }
 module Producer_map = Map.Make(String)
 
+type arguments = Keeper_client_tool_outbox_codec.arguments =
+  | Known of Yojson.Safe.t
+  | Unknown
+
 type receipt = Keeper_client_tool_outbox_codec.receipt =
   { thread_id : string
   ; turn_id : string
   ; call_id : string
   ; tool_name : string
-  ; arguments : Yojson.Safe.t
+  ; arguments : arguments
   ; response : Yojson.Safe.t
   }
 

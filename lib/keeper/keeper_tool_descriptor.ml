@@ -150,6 +150,7 @@ type runtime_handler =
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
+  | Tool_receipt_wait
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -284,6 +285,7 @@ let runtime_handler_to_string = function
   | Tool_keeper_job_dispatch -> "tool_keeper_job_dispatch"
   | Tool_keeper_composition_result_dispatch -> "tool_keeper_composition_result_dispatch"
   | Tool_keeper_code_query_dispatch -> "tool_keeper_code_query_dispatch"
+  | Tool_receipt_wait -> "tool_receipt_wait"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
@@ -347,6 +349,7 @@ let lane_addon_export = function
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
+  | Tool_receipt_wait
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -559,6 +562,7 @@ let descriptor
       | Tool_constitution_remove
       | Tool_keeper_composition_result_dispatch
       | Tool_keeper_code_query_dispatch
+      | Tool_receipt_wait
       | Tool_search_files
       | Tool_read_file
       | Tool_edit_file
@@ -2343,6 +2347,25 @@ let keeper_code_query_descriptor () =
     ()
 ;;
 
+(* The turn ends once the wait is recorded, and the record is written when the
+   turn's checkpoint is retained, so the call is a write and runs alone in
+   order. It is never a composition leaf: a composition has no turn to end. *)
+let keeper_receipt_wait_descriptor () =
+  let schema : Masc_domain.tool_schema = Tool_schemas_receipt_wait.schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:"keeper.receipt.wait"
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_receipt_wait
+    ~ordinary_execution_mode:Serial
+    ~readonly:false
+    ()
+;;
+
 let masc_keeper_descriptor
     ?(polling_read = false)
     ?ordinary_execution_mode
@@ -3152,6 +3175,7 @@ let internal_descriptors : t list =
   @ [ keeper_composition_result_descriptor () ]
   (* ── RFC a-language-server-the-keeper-can-ask (1 entry) ───────── *)
   @ [ keeper_code_query_descriptor () ]
+  @ [ keeper_receipt_wait_descriptor () ]
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
     masc_keeper_descriptor ~keeper_model_projection:Internal_name
@@ -3407,6 +3431,7 @@ let prepared_leaf_admission descriptor =
         | Tool_masc_schedule_dispatch
         | Tool_keeper_composition_result_dispatch
         | Tool_keeper_code_query_dispatch
+        | Tool_receipt_wait
         | Tool_masc_keeper_dispatch
         | Tool_masc_fusion_dispatch
         | Tool_masc_fusion_status

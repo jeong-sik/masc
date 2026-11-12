@@ -639,6 +639,7 @@ let handler_activity_kind handler =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_code_query_dispatch
+  | Tool_receipt_wait
   | Tool_masc_file_dispatch
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch

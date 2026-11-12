@@ -26,7 +26,7 @@ let scenario () =
         turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None; net = None;
         mcp_session_id = None; continuation_channel = None; gate_context = None;
         turn_ref = Some frozen; gate_grant = None; tool_use_id = None; trace_id = None;
-        source_context = None; owned_job_replay = None; result_projection = None;
+        source_context = None; owned_job_replay = None; execution_scope = None; result_projection = None;
         artifact_draft_scope = None; capability_authority = Runtime.Compatibility_meta }
     in
     let descriptor = match Runtime.descriptor_for_internal "keeper_surface_post" with
@@ -72,6 +72,8 @@ let scenario () =
     let target=match posted.terminal_effect_receipt with
       | Some (Masc.Keeper_tool_execution.Surface_post_completed target) ->
           Masc.Keeper_surface_post.delivery_target_of_post_target target
+      | Some (Masc.Keeper_tool_execution.Receipt_wait_requested _) ->
+          fail "actual post left a receipt wait, not its delivery receipt"
       | None -> fail "actual post lost its terminal receipt" in
     let dashboard_effect=Events.External_effect_completed {target} in
     let verdict=Alcotest.testable Audit.pp_verdict Audit.equal_verdict in

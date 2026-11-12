@@ -25,7 +25,7 @@ let receipt : Outbox.receipt =
   ; turn_id = "previous-turn"
   ; call_id = "board-read"
   ; tool_name = "masc_board_list"
-  ; arguments = `Assoc []
+  ; arguments = Outbox.Known (`Assoc [])
   ; response = `Assoc [ "content", `String "two posts"; "isError", `Bool false ]
   }
 ;;

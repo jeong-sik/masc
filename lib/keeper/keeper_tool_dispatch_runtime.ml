@@ -222,6 +222,7 @@ let runtime_context
       ?tool_use_id
       ?trace_id
       ?result_projection
+      ?execution_scope
       ~capability_authority
       ()
   =
@@ -232,6 +233,7 @@ let runtime_context
     ; ctx_work
     ; source_context
     ; owned_job_replay
+    ; execution_scope
     ; turn_sandbox_factory
     ; artifact_draft_scope
     ; sw
@@ -276,6 +278,7 @@ let execute_keeper_tool_descriptor_with_authority
       ?tool_use_id
       ?trace_id
       ?result_projection
+      ?execution_scope
       ~(descriptor : Keeper_tool_descriptor.t)
       ~(input : Yojson.Safe.t)
       ()
@@ -316,6 +319,7 @@ let execute_keeper_tool_descriptor_with_authority
         ?tool_use_id
         ?trace_id
         ?result_projection
+        ?execution_scope
         ~capability_authority
         ()
     in
@@ -376,6 +380,7 @@ let execute_keeper_tool_call_with_authority
       ?tool_use_id
       ?trace_id
       ?result_projection
+      ?execution_scope
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -408,6 +413,7 @@ let execute_keeper_tool_call_with_authority
            ?tool_use_id
            ?trace_id
            ?result_projection
+           ?execution_scope
            ~capability_authority
            ()
        in

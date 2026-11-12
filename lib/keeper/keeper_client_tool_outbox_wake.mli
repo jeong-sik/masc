@@ -9,7 +9,9 @@ val notify : base_path:string -> keeper_name:string -> (unit, string) result
     An absent/paused owner is never started or unpaused. Recovery currently
     requires a nonempty resolved route: every reachable candidate must
     deliver original result context. Unavailable and unknown routes
-    retain receipts without initiating model turns that cannot consume them. *)
+    retain receipts without initiating model turns that cannot consume them.
+    A receipt that an unsettled execution owns gets no stimulus; the Owner is
+    told it arrived ({!Keeper_receipt_wait_resolution.arrived}). *)
 
 val route_can_consume : Keeper_meta_contract.keeper_meta -> bool
 (** Every candidate in the current route must resolve to original-result
@@ -18,7 +20,13 @@ val route_can_consume : Keeper_meta_contract.keeper_meta -> bool
     missing or unavailable candidates retain their unread receipts. *)
 
 type t
-val create : config:Workspace.config -> t
+
+type settle_lost_waits = base_path:string -> keeper_name:string -> (unit, string) result
+(** Settles the conversations that wait for a run with no worker and no
+    receipt. Passed in because it writes a receipt through the background
+    Execute module, which wakes through this one. *)
+
+val create : config:Workspace.config -> settle_lost_waits:settle_lost_waits -> t
 val pulse : sw:Eio.Switch.t -> t -> unit
 (** Startup and existing maintenance entrypoint. Reserve one yielding discovery
     child, coalescing only overlapping scans. Cancellation releases reservations

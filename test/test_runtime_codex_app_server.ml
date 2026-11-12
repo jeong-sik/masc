@@ -5659,7 +5659,7 @@ let test_tool_outbox_reaches_the_next_keeper_turn ?(refuse_input = false) ~refus
       ~retain:(fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
         Keeper_client_tool_outbox.retain ~base_path ~keeper_name
           {thread_id=receipt.thread_id;turn_id=receipt.turn_id;call_id=receipt.call_id;
-           tool_name=receipt.tool_name;arguments=receipt.arguments;response=receipt.response}) ();
+           tool_name=receipt.tool_name;arguments=Keeper_client_tool_outbox.Known receipt.arguments;response=receipt.response}) ();
     let pending = get (Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt) in
     check int "one retained context batch" 1
       (List.length (Keeper_client_tool_outbox.developer_context pending));
@@ -5694,7 +5694,7 @@ let test_tool_outbox_acknowledges_only_its_snapshot () =
   let get = function Ok value -> value | Error detail -> fail detail in
   let first : Keeper_client_tool_outbox.receipt =
     {thread_id = "thread-1"; turn_id = "turn-1"; call_id = "call-1";
-     tool_name = "probe"; arguments = `Null; response = `String "first-result"} in
+     tool_name = "probe"; arguments = Keeper_client_tool_outbox.Known `Null; response = `String "first-result"} in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
     get (Keeper_client_tool_outbox.retain ~base_path ~keeper_name first);
     let session_path = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in

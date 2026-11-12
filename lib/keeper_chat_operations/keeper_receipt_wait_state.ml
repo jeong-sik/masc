@@ -66,11 +66,11 @@ type outcome =
    - Claim: [Keeper_chat_operation_store.claim_next]. [blocked_queued_scopes]
      skips an execution with a pending entry. Nothing is claimed otherwise
      when the slot is taken or the row is not [Queued].
-   - Wait: [Keeper_chat_operation_store.defer_direct_checkpoint ~receipt_wait].
-     Only a [Running] row is deferred; any other row is refused. A request
-     another active execution owns is refused in the same transaction. A
-     repeat of the exact earlier call confirms that commit and is not a new
-     Wait.
+   - Wait: [Keeper_chat_operation_store.defer_direct_checkpoint ~receipt_waits].
+     Only a [Running] row is deferred; any other row is refused. A turn that
+     waits for several requests records them in one transaction, and a
+     request another active execution owns refuses all of them. A repeat of
+     the exact earlier call confirms that commit and is not a new Wait.
    - Resolve: [Keeper_chat_operation_store.resolve_receipt]. It finds the
      execution by the request. A request nobody owns changes nothing. RFC 3.2
      writes Rejected for a task that never waited, but a notification names a

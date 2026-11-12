@@ -4,12 +4,18 @@
 
 type snapshot
 
-type receipt =
+(** The arguments of the call a receipt answers. [Unknown] is a receipt for a
+    call whose arguments were not recorded; no value stands in for them. *)
+type arguments = Keeper_client_tool_outbox_codec.arguments =
+  | Known of Yojson.Safe.t
+  | Unknown
+
+type receipt = Keeper_client_tool_outbox_codec.receipt =
   { thread_id : string
   ; turn_id : string
   ; call_id : string
   ; tool_name : string
-  ; arguments : Yojson.Safe.t
+  ; arguments : arguments
   ; response : Yojson.Safe.t
   }
 (** Original producer coordinates and complete returned data. [thread_id] is
@@ -64,7 +70,7 @@ val start_host_producer :
 type host_delivery
 val retain_host_result_with_delivery :
   host_producer -> invocation_index:int -> call_id:string -> tool_name:string ->
-  arguments:Yojson.Safe.t -> response:Yojson.Safe.t -> (host_delivery, string) result
+  arguments:arguments -> response:Yojson.Safe.t -> (host_delivery, string) result
 (** An opaque token for this exact durably retained physical result. *)
 val mark_response_sent : host_delivery -> unit
 (** Pure per-producer state update, after complete original response write.
@@ -82,7 +88,7 @@ val retain_confirmed_calls : snapshot -> call_ids:string list -> snapshot
 
 val retain_host_result :
   host_producer ->
-  invocation_index:int -> call_id:string -> tool_name:string -> arguments:Yojson.Safe.t ->
+  invocation_index:int -> call_id:string -> tool_name:string -> arguments:arguments ->
   response:Yojson.Safe.t -> (unit, string) result
 (** Retain original returned data before a host stop can discard the provider
     invocation. Host and vendor receipts have distinct, strict source shapes

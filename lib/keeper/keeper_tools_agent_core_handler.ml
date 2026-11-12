@@ -29,6 +29,7 @@ let make_keeper_tool_handler_with_authority
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?execution_scope
       ?record_gate_result
       ?observe_execution_evidence
       ?on_completed
@@ -291,6 +292,7 @@ let make_keeper_tool_handler_with_authority
                 ?continuation_channel
                 ?gate_context
                 ?gate_grant
+                ?execution_scope
                 ?agent_core_invocation
                 ?result_projection
                 ~input

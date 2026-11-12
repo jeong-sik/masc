@@ -79,7 +79,7 @@ let claim store ~now =
 
 let defer store ~now (operation : Chat.t) request_id state =
   Store.defer_direct_checkpoint
-    ~receipt_wait:(obligation request_id state)
+    ~receipt_waits:[ obligation request_id state ]
     store
     ~now
     ~operation_id:operation.operation_id
@@ -346,6 +346,38 @@ let test_waiting_again_on_a_received_request_does_not_wait () =
     check int "one entry" 1 (List.length execution.receipt_obligations))
 ;;
 
+(* The table's Running row is a task that holds no continuation, and a restart
+   fails it. A running task that was claimed from a retained checkpoint still
+   holds that continuation, so a restart queues it again with its entry kept
+   and the same claim resumes it. *)
+let test_a_restart_queues_a_running_task_that_holds_a_continuation () =
+  with_store (fun store ->
+    submit store ~now:1. "waiter";
+    let waiter = claim store ~now:2. in
+    ignore (defer store ~now:3. waiter awaited Execution.Pending |> store_ok);
+    ignore
+      (Store.resolve_receipt store ~now:4. ~request_id:awaited ~resolution:Execution.Receipt_in_outbox
+       |> store_ok);
+    ignore (claim store ~now:5.);
+    check string "the task runs from its checkpoint" "running"
+      (Wait.task_to_string (current_task store waiter));
+    ignore
+      (Store.settle_running_without_executor store ~cause:Store.After_process_restart ~now:6.
+       |> store_ok);
+    check string "a restart queues it again, ready" "ready"
+      (Wait.task_to_string (current_task store waiter));
+    let execution =
+      Option.get (Store.semantic_get store (Scope.direct_operation waiter.operation_id) |> semantic_ok)
+    in
+    check bool "the entry is kept" true
+      (List.map
+         (fun (entry : Execution.receipt_obligation) -> entry.request_id, entry.state)
+         execution.receipt_obligations
+       = [ awaited, Execution.Arrived Execution.Receipt_in_outbox ]);
+    check string "the same task is claimed again" "waiter"
+      (Chat.Operation_id.to_string (claim store ~now:7.).operation_id))
+;;
+
 let () =
   let pairs =
     List.concat_map
@@ -384,6 +416,10 @@ let () =
             "waiting again on a received request does not wait"
             `Quick
             test_waiting_again_on_a_received_request_does_not_wait
+        ; test_case
+            "a restart queues a running task that holds a continuation"
+            `Quick
+            test_a_restart_queues_a_running_task_that_holds_a_continuation
         ] )
     ]
 ;;

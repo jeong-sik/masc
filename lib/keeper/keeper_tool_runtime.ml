@@ -52,6 +52,10 @@ type context =
     (** Immutable context captured for this invocation. None means unavailable;
         job ownership never substitutes the Keeper current task. *)
   ; owned_job_replay : Keeper_owned_job_invocation.replay option
+  ; execution_scope : Keeper_execution_scope_id.t option
+    (* The chat execution this call runs for: the one whose turn would end on a
+       wait the call asks for. [None] on callers that serve no chat execution
+       (composition sub-calls, tests, direct dispatch). *)
   ; result_projection : Tool_output.model_projection option
     (* The projection this call's result crosses on its way to the model,
        resolved for the lane running the call. [None] when the caller did not
@@ -155,6 +159,7 @@ let handle_filesystem ?prepared_read ?prepared_edit ?prepared_write ctx descript
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
+  | Tool_receipt_wait
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -262,6 +267,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_keeper_job_dispatch
   | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
+  | Tool_receipt_wait
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -555,6 +561,13 @@ let handle_in_process ctx descriptor args =
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
+         ~args)
+  | Tool_receipt_wait ->
+    Some
+      (Keeper_tool_receipt_wait.handle
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~execution_scope:ctx.execution_scope
          ~args)
   | Tool_masc_schedule_dispatch ->
     Some

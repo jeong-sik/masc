@@ -103,7 +103,7 @@ let with_carrier_run ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
     get (Outbox.retain ~base_path ~keeper_name
       {thread_id="overflow-thread";turn_id="overflow-turn";
        call_id=Printf.sprintf "overflow-call-%d" index;tool_name="Read";
-       arguments=`String "no-effect-replay";
+       arguments=Outbox.Known (`String "no-effect-replay");
        response=`String (overflow_label index ^ String.make 32_768 'r')}))
     overflow_indices;
   let pending () = get (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt) in
@@ -119,7 +119,7 @@ let with_carrier_run ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
          | [_] ->
            get (Outbox.retain ~base_path ~keeper_name
              {thread_id="late-thread";turn_id="late-turn";call_id="late-call";
-              tool_name="Read";arguments=`String "no-effect-replay";
+              tool_name="Read";arguments=Outbox.Known (`String "no-effect-replay");
               response=`String late_label})
          | [] | _ :: _ :: _ -> ());
         if String.length body > carrier_window_bytes

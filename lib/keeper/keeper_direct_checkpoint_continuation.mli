@@ -14,14 +14,14 @@ val consume : base_path:string -> keeper_name:string -> operation_id:Keeper_chat
     Official checkpoints enter durable preparation before guidance renders. *)
 val defer : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   session_dir:string -> session_id:string -> checkpoint:Agent_core.Checkpoint.t ->
-  receipt_wait:Keeper_semantic_execution.receipt_obligation option -> (unit, string) result
-(** [receipt_wait] is the request the turn ended to wait for. The operation
-    joins the owner record of that request in the same transaction that ends
-    the turn. [None] is the plain cooperative yield. *)
+  receipt_waits:Keeper_semantic_execution.receipt_obligation list -> (unit, string) result
+(** [receipt_waits] are the requests the turn ended to wait for. The operation
+    joins the owner record of each in the same transaction that ends the turn.
+    [[]] is the plain cooperative yield. *)
 
 val defer_official : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
   settled_session:Keeper_official_client_session_store.t -> frame:Keeper_repetition_snapshot.t ->
-  receipt_wait:Keeper_semantic_execution.receipt_obligation option -> (unit, string) result
+  receipt_waits:Keeper_semantic_execution.receipt_obligation list -> (unit, string) result
 module For_testing : sig
   val prepare_official_resume : observed:Keeper_semantic_execution.official_client_checkpoint ->
     expected:Keeper_official_client_session_store.t option -> (Keeper_semantic_execution.official_client_checkpoint, string) result

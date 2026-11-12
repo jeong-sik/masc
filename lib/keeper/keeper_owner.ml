@@ -294,10 +294,13 @@ type _ command =
   | Defer_direct_checkpoint :
       { operation_id : Operation_id.t; execution_digest : string;
         checkpoint : Keeper_semantic_execution.gate_checkpoint;
-        receipt_wait : Keeper_semantic_execution.receipt_obligation option } ->
+        receipt_waits : Keeper_semantic_execution.receipt_obligation list } ->
       (Chat_operation.t, error) result command
   | Receipt_arrived :
       { request_id : string; resolution : Keeper_semantic_execution.receipt_resolution } ->
+      (Chat_operation_store.receipt_resolution_outcome, error) result command
+  | Settle_lost_receipt :
+      { request_id : string; retain : unit -> (unit, string) result } ->
       (Chat_operation_store.receipt_resolution_outcome, error) result command
   | Resume_direct_checkpoint :
       { operation_id : Operation_id.t; observed : Keeper_semantic_execution.gate_checkpoint } ->
@@ -692,6 +695,7 @@ let answer : type response. response command -> answer = function
   | Update_direct_native_call _ | Bind_retired_input_cut _ -> In_its_drain_step
   | Defer_direct_checkpoint _ -> In_its_drain_step
   | Receipt_arrived _ -> In_its_drain_step
+  | Settle_lost_receipt _ -> In_its_drain_step
   | Resume_direct_checkpoint _ -> In_its_drain_step
   | Direct_runtime_retry _ -> In_its_drain_step
   | Defer_direct_runtime_retry _ -> In_its_drain_step
@@ -2473,9 +2477,9 @@ let start
                 "input waiting requires its original executing direct child")) in
           Eio.Promise.resolve resolve response;
           loop state
-        | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint; receipt_wait}, resolve) ->
+        | Command (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint; receipt_waits}, resolve) ->
           let response = run_operation_command t ~label:"defer direct cooperative checkpoint" (fun () ->
-            Chat_operation_store.defer_direct_checkpoint ?receipt_wait t.operation_store ~now:(t.now ())
+            Chat_operation_store.defer_direct_checkpoint ~receipt_waits t.operation_store ~now:(t.now ())
               ~operation_id ~execution_digest ~checkpoint) |> Result.map fst in
           Eio.Promise.resolve resolve response;
           loop state
@@ -2486,6 +2490,40 @@ let start
           Eio.Promise.resolve resolve response;
           (* A task whose last pending receipt arrived is claimable now. Any
              other outcome changed nothing, so no claim is newly possible. *)
+          (match response with
+           | Ok Chat_operation_store.Receipt_resolved -> start_child_if_needed state shutdown_operation_id
+           | Ok (Chat_operation_store.Receipt_already_arrived | Chat_operation_store.Receipt_without_owner)
+           | Error _ -> ());
+          loop state
+        | Command (Settle_lost_receipt {request_id; retain}, resolve) ->
+          (* The entry is read, the receipt written and the entry resolved in
+             this one command, so no arrival, claim or second settlement runs
+             between the read and the write. The write is outside the store's
+             transaction, and a failed write is not a store fault. *)
+          let response =
+            match run_operation_read t ~label:"read a receipt wait" (fun () ->
+              Chat_operation_store.receipt_entry t.operation_store ~request_id) with
+            | Error _ as error -> error
+            | Ok Chat_operation_store.Receipt_entry_absent ->
+              Ok Chat_operation_store.Receipt_without_owner
+            | Ok Chat_operation_store.Receipt_entry_arrived ->
+              Ok Chat_operation_store.Receipt_already_arrived
+            | Ok Chat_operation_store.Receipt_entry_pending ->
+              (* An exception from the caller's write must not leave the loop:
+                 the Owner would answer no later command. *)
+              let written =
+                try retain () with
+                | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+                | exn ->
+                  Error (Printf.sprintf "writing the lost receipt raised: %s" (Printexc.to_string exn)) in
+              (match written with
+               | Error detail -> Error (Store_unavailable detail)
+               | Ok () ->
+                 run_operation_command t ~label:"record a lost receipt source" (fun () ->
+                   Chat_operation_store.resolve_receipt t.operation_store ~now:(t.now ())
+                     ~request_id ~resolution:Keeper_semantic_execution.Source_lost)
+                 |> Result.map fst) in
+          Eio.Promise.resolve resolve response;
           (match response with
            | Ok Chat_operation_store.Receipt_resolved -> start_child_if_needed state shutdown_operation_id
            | Ok (Chat_operation_store.Receipt_already_arrived | Chat_operation_store.Receipt_without_owner)
@@ -3129,11 +3167,12 @@ let wait_direct_preparation t ~operation_id ~execution_digest ~observed ~failure
 let retry_direct_preparation t ~operation_id ~expected_revision ~execution_digest =
   request t (Retry_direct_preparation {operation_id;expected_revision;execution_digest})
 let direct_checkpoint t ~operation_id = request t (Direct_checkpoint operation_id)
-let defer_direct_checkpoint ?receipt_wait t ~operation_id ~execution_digest ~checkpoint =
-  request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint; receipt_wait})
+let defer_direct_checkpoint ?(receipt_waits = []) t ~operation_id ~execution_digest ~checkpoint =
+  request t (Defer_direct_checkpoint {operation_id; execution_digest; checkpoint; receipt_waits})
 
 let receipt_arrived t ~request_id ~resolution =
   request t (Receipt_arrived {request_id; resolution})
+let settle_lost_receipt t ~request_id ~retain = request t (Settle_lost_receipt {request_id; retain})
 let direct_input_wait t ~operation_id = request t (Direct_input_wait operation_id)
 let defer_direct_input_wait t ~operation_id ~request:visible_request =
   match Keeper_turn_preview_owner.current () with

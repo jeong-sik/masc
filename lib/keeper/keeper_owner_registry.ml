@@ -791,12 +791,15 @@ let direct_checkpoint ~base_path ~keeper_name ~operation_id =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.direct_checkpoint owner ~operation_id)
 ;;
-let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_digest ~checkpoint ~receipt_wait =
+let defer_direct_checkpoint ~base_path ~keeper_name ~operation_id ~execution_digest ~checkpoint ~receipt_waits =
   with_owner_command ~base_path ~keeper_name (fun owner ->
-    Keeper_owner.defer_direct_checkpoint ?receipt_wait owner ~operation_id ~execution_digest ~checkpoint)
+    Keeper_owner.defer_direct_checkpoint ~receipt_waits owner ~operation_id ~execution_digest ~checkpoint)
 let receipt_arrived ~base_path ~keeper_name ~request_id ~resolution =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.receipt_arrived owner ~request_id ~resolution)
+let settle_lost_receipt ~base_path ~keeper_name ~request_id ~retain =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.settle_lost_receipt owner ~request_id ~retain)
 let respond_direct_input_wait ~base_path ~keeper_name ~net ~operation_id ~observed ~response =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Response_owner_lookup_failed error)

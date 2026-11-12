@@ -127,7 +127,11 @@ let set_with_rewrite ~rewrite ~base_path ~actor (request : Check.request) = prot
         | Invalid_transaction_suffix | Private_jsonl_operation_failed _
         | Rewrite_stage_failed _ | Transaction_append_failed _) as error ->
         Error (Unavailable (Fs_compat.private_jsonl_transaction_error_to_string error)) in
-    match rewrite file ~expected:snapshot.cursor (Yojson.Safe.to_string (Check.to_json check) ^ "\n") with
+    let outcome = Fun.protect ~finally:(fun () ->
+      Dashboard_observation_commit.written ~base_path
+        ~scope:`Workspace `Artifact_checks)
+      (fun () -> rewrite file ~expected:snapshot.cursor (Yojson.Safe.to_string (Check.to_json check) ^ "\n")) in
+    match outcome with
     | Ok _ -> Ok check
     | Error error -> failed error)
 

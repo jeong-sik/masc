@@ -198,7 +198,11 @@ let forget_listed path = List.iter (fun forget -> forget path) (Atomic.get listi
 
 (* A write that fails part way may already have replaced the file, so the
    listings drop their entry for it however the write ends. *)
-let forgetting_after path write = Fun.protect ~finally:(fun () -> forget_listed path) write
+let forgetting_after ~base_path path write =
+  Fun.protect ~finally:(fun () ->
+    forget_listed path;
+    Dashboard_observation_commit.written ~base_path
+      ~scope:`Workspace `Verification_requests) write
 
 let save_request base_path req =
   try
@@ -208,7 +212,7 @@ let save_request base_path req =
     Fs_compat.mkdir_p dir;
     let path = request_path base_path req.id in
     let* () =
-      forgetting_after path (fun () ->
+      forgetting_after ~base_path path (fun () ->
         Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json))
     in
     Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Verification_requests;
@@ -230,8 +234,10 @@ let delete_request base_path req_id =
   try
     let path = request_path base_path req_id in
     let removed =
-      forgetting_after path (fun () ->
-        Sys.file_exists path && (Sys.remove path; true))
+      if Sys.file_exists path then (
+        forgetting_after ~base_path path (fun () -> Sys.remove path);
+        true)
+      else (forget_listed path; false)
     in
     if removed then Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Verification_requests;
     Ok ()

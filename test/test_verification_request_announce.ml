@@ -42,9 +42,39 @@ let test_writes_and_removals_announce () =
       check int "removing a request that is gone announces nothing" 2 !heard))
 ;;
 
+let test_typed_commit_refreshes_cached_reader () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Unix.realpath (Filename.temp_dir "verification-typed-commit-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let changes = ref [] in
+    let unsubscribe = Dashboard_observation_commit.subscribe (function
+      | Dashboard_observation_commit.Workspace { base_path; payload } when payload.topic = `Verification_requests ->
+        changes := (base_path, payload.scope) :: !changes
+      | Dashboard_observation_commit.Workspace _ | Dashboard_observation_commit.Process _ -> ()) in
+    Fun.protect ~finally:unsubscribe (fun () ->
+      let create output = Verification.create_request ~base_path ~request_id:"typed-cache-request"
+          ~task_id:"task-observed" ~output:(`String output) ~criteria:[] ~worker:"producer" () |> ok_or_fail in
+      let listing = Verification.listing ~project:(fun request -> Ok request.Verification.output) () in
+      let request = create "old" in
+      let read () = (Verification.list_projected listing base_path |> ok_or_fail).readable in
+      check bool "first committed reader result" true (read () = [`String "old"]);
+      ignore (create "new");
+      check int "create and replacement notify" 2 (List.length !changes);
+      check bool "a notified reader cannot retain the preceding projection" true (read () = [`String "new"]);
+      ok_or_fail (Verification.delete_request base_path request.id);
+      check int "removal notifies" 3 (List.length !changes);
+      check bool "reader sees removal" true (read () = []);
+      ok_or_fail (Verification.delete_request base_path request.id);
+      check int "an absent request is no write notification" 3 (List.length !changes);
+      check bool "notification retains workspace authority" true
+        (List.for_all (fun (source, scope) -> String.equal source base_path && scope = `Workspace) !changes)))
+;;
+
 let () =
   run "verification_request_announce"
     [ ( "store"
-      , [ test_case "writes and removals announce" `Quick test_writes_and_removals_announce ] )
+      , [ test_case "writes and removals announce" `Quick test_writes_and_removals_announce
+        ; test_case "typed commits refresh a cached reader" `Quick test_typed_commit_refreshes_cached_reader ] )
     ]
 ;;

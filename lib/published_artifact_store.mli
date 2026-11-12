@@ -1,4 +1,7 @@
-(** Durable publication authority. No chat or Board messages are emitted. *)
+(** Durable publication authority. No chat or Board messages are emitted.
+    Atomic publication/share metadata attempts notify the typed Dashboard
+    commit hook after settlement, including an uncertain visible rename.
+    Notification cannot change the operation's result. *)
 type error =
   | Invalid of string
   | Missing

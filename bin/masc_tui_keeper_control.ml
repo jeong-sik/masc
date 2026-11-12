@@ -223,6 +223,11 @@ let health_label ~ko reading =
   | Absent -> if ko then "실시간 목록에 없음" else "absent from live roster"
   | Present runtime -> Decode.keeper_health_word ~ko (Some runtime.Decode.kr_health)
 
+let status_label ~ko reading =
+  let health = health_label ~ko reading in
+  if reading.paused then (if ko then "일시정지 · " else "paused · ") ^ health
+  else health
+
 type action =
   | Pause
   | Resume
@@ -272,18 +277,21 @@ let action_gerund ~ko = function
    mirrors the server's own plan. Written out rather than fetched: the
    confirmation has to name what it removes before the request is sent, and
    there is no route that answers "what would a purge take". *)
-let purge_artifacts =
-  [ "metrics store"
-  ; "decision, feedback and state-transition logs including rotations"
-  ; "runtime directory"
-  ; "Memory OS snapshots and journal"
-  ; "turn boundary log and Librarian read position"
-  ; "sandbox workspaces"
-  ; "runtime assignment and Keeper egress configuration"
-  ; "TOML configuration"
-  ; "chat history"
-  ; "agent files and auth tokens"
-  ]
+let purge_artifacts ~ko =
+  List.map
+    (fun (korean, english) -> if ko then korean else english)
+    [ ("지표 기록", "metrics store")
+    ; ( "결정·피드백·상태 전이 로그(로테이션 파일 포함)"
+      , "decision, feedback and state-transition logs including rotations" )
+    ; ("런타임 디렉터리", "runtime directory")
+    ; ("Memory OS 스냅샷과 저널", "Memory OS snapshots and journal")
+    ; ("턴 경계 로그와 Librarian 읽기 위치", "turn boundary log and Librarian read position")
+    ; ("sandbox 작업 디렉터리", "sandbox workspaces")
+    ; ("런타임 배정과 키퍼 egress 설정", "runtime assignment and Keeper egress configuration")
+    ; ("TOML 설정", "TOML configuration")
+    ; ("대화 기록", "chat history")
+    ; ("agent 파일과 인증 토큰", "agent files and auth tokens")
+    ]
 
 let requires_confirmation = function
   | Shutdown | Delete -> true
@@ -417,6 +425,25 @@ let classify_purge_response ~keeper_name ~status ~body =
        | _ -> invalid ())
     | _ -> invalid ()
     | exception Yojson.Json_error _ -> invalid ()
+
+type failure =
+  | Workspace_unbound
+  | Empty_plan
+  | Followup_failed of string
+  | Refused of { status : int; detail : string }
+  | No_answer of string
+
+let failure_text ~ko = function
+  | Workspace_unbound ->
+      if ko then "공간 정보 없음 · 보내지 않음"
+      else "workspace identity is unavailable; nothing was sent"
+  | Empty_plan -> if ko then "보낼 요청 없음" else "no request to send"
+  | Followup_failed detail ->
+      (if ko then "저장된 일시정지 해제됨 · 실행 재개 실패: "
+       else "durable pause cleared, but live resume failed: ")
+      ^ detail
+  | Refused { status; detail } -> Printf.sprintf "HTTP %d: %s" status detail
+  | No_answer text -> text
 
 type pending = {
   pending_keeper : string;

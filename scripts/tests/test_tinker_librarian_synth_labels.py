@@ -16,11 +16,9 @@ which imports openai, so this file runs with `uv run`.
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
 import itertools
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -35,10 +33,9 @@ import admission_validator as AV
 import audit_decisions as D
 import eval_admission as V
 import memory_scores as M
-import synth_rows as RW
+import merge_decisions as MD
 import synth_spec as S
 import teacher_sample as T
-import tinker_oai as O
 from tinker_librarian_synth_fixtures import (
     KINDS,
     PLANTED,
@@ -53,6 +50,23 @@ from tinker_librarian_synth_fixtures import (
     prompt_of,
     request,
 )
+from tinker_librarian_teacher_fixtures import (
+    OFF_KINDS,
+    Reply,
+    absorbing_m2,
+    log_calls,
+    record,
+    request_lines,
+    run_apply,
+    run_cases,
+    run_sample,
+    sampled_folder,
+    train_request,
+    write_audit,
+    write_decisions,
+    write_requests,
+)
+
 
 class LabelTest(unittest.TestCase):
     def test_a_label_names_the_planted_facts_and_asks_for_them_only_with_support(self) -> None:
@@ -248,64 +262,30 @@ class TeacherNoteTest(unittest.TestCase):
             T.label_note(M.SynthItem(req.item_id, prompt_of(req), "", elsewhere))
 
 
-type Reply = tuple[list[str], int, str]
-
-
 class TeacherSampleTest(unittest.TestCase):
     """`sample` over a call log that already holds the teacher's replies. The budget is 0, so a call
     the log does not hold stops the run and nothing is sent."""
 
     def setUp(self) -> None:
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        self.folder = Path(tmp.name)
+        self.folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.out = self.folder / "teacher"
         self.req = dataclasses.replace(
             request(SCHEDULED, candidates_of((S.CandidateKind.CORRECTION, S.CandidateKind.NEW_DURABLE))),
             item_id="train-docs-gardener-00-001")
-        self.requests = self.write_requests(self.req)
+        self.requests = write_requests(self.folder / "requests.jsonl", self.req)
         [self.item] = V.synth_items(self.requests)
-        self.audits = [self.write_audit([self.req.item_id])]
-        pinned = cast(dict[str, object], V.load_pass_lines()["request"])
-        self.effort, self.max_tokens = cast(str, pinned["reasoning_effort"]), cast(int, pinned["max_tokens"])
-        # The caller builds its client from the variable; a logged reply is returned before the client is used.
-        env = mock.patch.dict(os.environ, {"TINKER_API_KEY": "not-a-key"})
-        env.start()
-        self.addCleanup(env.stop)
-
-    def write_requests(self, *reqs: S.SynthRequest) -> Path:
-        path = self.folder / "requests.jsonl"
-        path.write_text("".join(json.dumps({"request": RW.row_of(r)}, ensure_ascii=False) + "\n" for r in reqs),
-                        encoding="utf-8")
-        return path
-
-    def write_audit(self, judged: list[str], items: tuple[str, ...] = (), memories: tuple[str, ...] = (),
-                    name: str = "audit") -> Path:
-        """An audit folder with what `sample` reads of the audit.json `e_synth_audit.py apply` writes:
-        a case per judged item, and the items and memories the audit took out."""
-        audit = self.folder / name
-        audit.mkdir(exist_ok=True)
-        (audit / "audit.json").write_text(json.dumps({
-            "removed_items": list(items), "removed_memories": list(memories),
-            "per_case": [{"case": f"c{n:03d}", "item": item} for n, item in enumerate(judged, start=1)]}),
-            encoding="utf-8")
-        return audit
+        self.audits = [write_audit(self.folder / "audit", [self.req.item_id])]
+        self.effort, self.max_tokens = request_lines()
 
     def noted(self, item: M.SynthItem) -> list[str]:
         return [item.text, T.label_note(item), V.schema_instruction()]
 
     def log(self, *replies: Reply) -> None:
-        """Write the call log: `content` as the reply to `messages` on that attempt, at the test's effort and budget."""
-        calls = [O.Call(O.call_key(T.TEACHER, self.effort, self.max_tokens, attempt, messages), "teacher", O.HTTP_OK,
-                        "stop", content, None, 10, 0, 1, 0.1, 1.0) for messages, attempt, content in replies]
-        self.out.mkdir(exist_ok=True)
-        (self.out / "calls.jsonl").write_text(
-            "".join(json.dumps(dataclasses.asdict(c), ensure_ascii=False) + "\n" for c in calls), encoding="utf-8")
+        """Write the call log: each reply as asked at the test's effort and output budget."""
+        log_calls(self.out, self.effort, self.max_tokens, *replies)
 
     def sample(self) -> tuple[int, dict[str, object]]:
-        code = T.sample(argparse.Namespace(requests=str(self.requests), audit=[str(a) for a in self.audits],
-                                           out=str(self.out), budget=0.0))
-        return code, cast(dict[str, object], json.loads((self.out / "summary.json").read_text(encoding="utf-8")))
+        return run_sample(self.requests, self.audits, self.out)
 
     def test_the_teacher_is_asked_with_the_label_note_before_the_instruction(self) -> None:
         self.log((self.noted(self.item), 0, label_answer(self.req)))
@@ -315,7 +295,7 @@ class TeacherSampleTest(unittest.TestCase):
         self.assertEqual((summary["label_note"], summary["audits_sha256"]),
                          (True, [V.sha256_file(self.audits[0] / "audit.json")]))
         # A record holds the answer and where it came from, not the note.
-        self.assertEqual(D.read_jsonl(self.out / T.PENDING),
+        self.assertEqual(T.read_jsonl(self.out / T.PENDING),
                          [{"item": self.req.item_id, "attempt": 0, "answer": label_answer(self.req)}])
 
     def test_a_reply_to_the_request_without_the_note_is_not_the_teachers(self) -> None:
@@ -345,18 +325,18 @@ class TeacherSampleTest(unittest.TestCase):
             ("its memory taken out", [item], (), (memory,)))
         for name, judged, items, memories in audits:
             with self.subTest(name):
-                self.audits = [self.write_audit(judged, items, memories)]
+                self.audits = [write_audit(self.folder / "audit", judged, items, memories)]
                 with self.assertRaisesRegex(SystemExit, "no audit confirmed the labels of 1 requests"):
                     self.sample()
                 self.assertFalse(self.out.exists())
 
     def test_an_audit_that_kept_a_request_does_not_overrule_one_that_took_it_out(self) -> None:
         item, memory = self.req.item_id, D.memory_of(self.req.item_id)
-        kept = self.write_audit([item])
+        kept = write_audit(self.folder / "audit", [item])
         taken: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
             ("the request", (item,), ()), ("its memory", (), (memory,)))
         for name, items, memories in taken:
-            took_out = self.write_audit([item], items, memories, name="later")
+            took_out = write_audit(self.folder / "later", [item], items, memories)
             for audits in ([kept, took_out], [took_out, kept]):
                 with self.subTest(name, first=audits[0].name):
                     self.audits = audits
@@ -366,102 +346,204 @@ class TeacherSampleTest(unittest.TestCase):
     def test_requests_two_audits_judged_between_them_are_sampled(self) -> None:
         other = dataclasses.replace(request(PLANTED, candidates_of((S.CandidateKind.NEW_DURABLE,))),
                                     item_id="train-docs-gardener-01-002")
-        self.requests = self.write_requests(self.req, other)
+        self.requests = write_requests(self.folder / "requests.jsonl", self.req, other)
         first, second = V.synth_items(self.requests)
-        self.audits = [self.write_audit([self.req.item_id]), self.write_audit([other.item_id], name="second")]
+        self.audits = [write_audit(self.folder / "audit", [self.req.item_id]),
+                       write_audit(self.folder / "second", [other.item_id])]
         self.log((self.noted(first), 0, label_answer(self.req)), (self.noted(second), 0, label_answer(other)))
         code, summary = self.sample()
         self.assertEqual((code, summary["pending"], summary["rejections"]), (0, 2, {}))
         self.assertEqual(summary["audits_sha256"], [V.sha256_file(a / "audit.json") for a in self.audits])
 
-    def test_rows_that_share_an_item_id_are_each_asked_with_their_own_messages(self) -> None:
+    def test_requests_that_share_an_item_id_are_not_sampled(self) -> None:
+        # A record names its request by item ID, so neither answer could be told from the other.
         other = dataclasses.replace(request(PLANTED, candidates_of((S.CandidateKind.NEW_DURABLE,))),
                                     item_id=self.req.item_id)
-        self.requests = self.write_requests(self.req, other)
-        first, second = V.synth_items(self.requests)
-        self.log((self.noted(first), 0, label_answer(self.req)), (self.noted(second), 0, label_answer(other)))
-        code, summary = self.sample()
-        self.assertEqual((code, summary["pending"], summary["rejections"]), (0, 2, {}))
+        self.requests = write_requests(self.folder / "requests.jsonl", self.req, other)
+        with self.assertRaisesRegex(SystemExit, "1 item IDs name more than one request"):
+            self.sample()
+        self.assertFalse(self.out.exists())
 
 
-def record(req: S.SynthRequest, answer: str) -> dict[str, object]:
-    return {"item": req.item_id, "attempt": 0, "answer": answer}
+# (what was changed, kept.jsonl, pending.jsonl, the commands that read the changed file)
+type Changed = tuple[str, list[dict[str, object]], list[dict[str, object]], tuple[str, ...]]
+COMMANDS = {"cases": run_cases, "apply": run_apply}
 
 
 class TeacherMergeTest(unittest.TestCase):
-    """`cases` and `apply` over a sampled folder: one answer without absorbs, one that absorbs as its
-    label asks, and one that also absorbs m2 into the complement's claim."""
+    """`cases` and `apply` over a folder `sample` left: an answer without absorbs (`plain`), one that
+    absorbs as its label asks (`labeled`), and one that also absorbs m2 into the complement's claim
+    (`off`)."""
 
     def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory()
-        folder = Path(self.tmp.name)
-        self.out = folder / "teacher"
-        self.out.mkdir()
-        both = request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE)))
-        self.labeled = dataclasses.replace(both, item_id="train-docs-gardener-00-001")
-        self.off = dataclasses.replace(both, item_id="train-docs-gardener-00-002")
-        self.plain = dataclasses.replace(
-            request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))),
-            item_id="train-docs-gardener-00-003")
-        self.requests = folder / "requests.jsonl"
-        self.requests.write_text("".join(json.dumps({"request": RW.row_of(r)}, ensure_ascii=False) + "\n"
-                                         for r in (self.labeled, self.off, self.plain)), encoding="utf-8")
-        T.write_jsonl(self.out / T.KEPT, [record(self.plain, label_answer(self.plain))])
-        T.write_jsonl(self.out / T.PENDING, [
-            record(self.labeled, label_answer(self.labeled)),
-            record(self.off, teacher_answer(self.off, absorbs=("m1", "m2"), pair=True, dropped=("m4",)))])
-        (self.out / "summary.json").write_text(json.dumps({"requests_sha256": D.file_sha256(self.requests)}),
-                                               encoding="utf-8")
+        self.folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.labeled = train_request(
+            request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE))), 1)
+        self.off = train_request(request(PLANTED, candidates_of(OFF_KINDS)), 2)
+        self.plain = train_request(
+            request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))), 3)
+        self.requests, self.out = sampled_folder(self.folder, [
+            (self.labeled, (label_answer(self.labeled),)), (self.off, (absorbing_m2(self.off),)),
+            (self.plain, (label_answer(self.plain),))])
 
-    def tearDown(self) -> None:
-        self.tmp.cleanup()
+    def cases(self) -> int:
+        return run_cases(self.requests, self.out)
 
-    def args(self) -> argparse.Namespace:
-        return argparse.Namespace(requests=str(self.requests), out=str(self.out))
+    def apply(self) -> int:
+        return run_apply(self.requests, self.out)
 
-    def decide(self) -> None:
-        """m2's absorb loses knowledge; every other absorb is mergeable."""
-        folder = self.out / T.MERGES
-        decisions: list[str] = []
-        for key in D.read_jsonl(folder / "key.jsonl"):
-            off = [self.off.item_id, T.TARGET, "m2"] in cast(list[list[str]], key["absorbs"])
-            decisions.append(json.dumps({"case": key["case"], "reason": "r",
-                                         "decision": "loses_knowledge" if off else "mergeable"}))
-        (folder / D.JUDGE_DIR / D.DECISIONS).write_text("\n".join(decisions) + "\n", encoding="utf-8")
+    def decide(self, verdict: str = "loses_knowledge") -> None:
+        """The judge's class for the case of m2's absorb; every other absorb is mergeable."""
+        write_decisions(self.out, (self.off.item_id, "m2"), verdict)
 
     def accepted_items(self) -> list[object]:
-        return [r["item"] for r in D.read_jsonl(self.out / T.ACCEPTED)]
+        return [r["item"] for r in T.read_jsonl(self.out / T.ACCEPTED)]
+
+    def refused(self, changed: tuple[Changed, ...], why: str, requests: Path, out: Path) -> None:
+        """Each command that reads a changed file stops with `why`."""
+        for name, kept, pending, readers in changed:
+            T.write_jsonl(out / T.KEPT, kept)
+            T.write_jsonl(out / T.PENDING, pending)
+            for reader in readers:
+                with self.subTest(name, command=reader), self.assertRaisesRegex(SystemExit, why):
+                    COMMANDS[reader](requests, out)
+
+    def test_the_folder_holds_one_kept_answer_and_two_waiting_ones(self) -> None:
+        self.assertEqual(T.read_jsonl(self.out / T.KEPT), [record(self.plain, label_answer(self.plain))])
+        self.assertEqual(T.read_jsonl(self.out / T.PENDING), [
+            record(self.labeled, label_answer(self.labeled)), record(self.off, absorbing_m2(self.off))])
 
     def test_an_answer_with_absorbs_is_kept_only_when_the_judge_finds_each_mergeable(self) -> None:
-        self.assertEqual(T.cases(self.args()), 0)
+        self.assertEqual(self.cases(), 0)
         keys = D.read_jsonl(self.out / T.MERGES / "key.jsonl")
         self.assertEqual(sorted(tuple(a) for k in keys for a in cast(list[list[str]], k["absorbs"])),
                          sorted((r.item_id, T.TARGET, m) for r, ms in ((self.labeled, ("m1", "m6")),
                                                                       (self.off, ("m1", "m2", "m6")))
                                 for m in ms))
-        self.decide()
-        self.assertEqual(T.apply(self.args()), 0)
-        self.assertEqual(self.accepted_items(), [self.plain.item_id, self.labeled.item_id])
-        summary = json.loads((self.out / "accepted-summary.json").read_text(encoding="utf-8"))
-        self.assertEqual((summary["kept"], summary["pending"], summary["merged"]), (1, 2, 1))
+        for verdict in MD.CONSOLIDATIONS:
+            with self.subTest(verdict=verdict):
+                self.decide(verdict)
+                self.assertEqual(self.apply(), 0)
+                merged_items = [self.labeled.item_id, *([self.off.item_id] if verdict == "mergeable" else [])]
+                self.assertEqual(self.accepted_items(), [self.plain.item_id, *merged_items])
+                summary = json.loads((self.out / "accepted-summary.json").read_text(encoding="utf-8"))
+                self.assertEqual((summary["kept"], summary["pending"], summary["merged"], summary["accepted"]),
+                                 (1, 2, len(merged_items), 1 + len(merged_items)))
 
     def test_decisions_are_read_only_for_the_waiting_answers_the_cases_were_made_from(self) -> None:
-        T.cases(self.args())
+        self.cases()
         self.decide()
-        T.write_jsonl(self.out / T.PENDING, D.read_jsonl(self.out / T.PENDING)[:1])
+        # The same two records in the other order: other bytes than the cases were made from.
+        T.write_jsonl(self.out / T.PENDING, T.read_jsonl(self.out / T.PENDING)[::-1])
         with self.assertRaisesRegex(SystemExit, "were made from another pending.jsonl"):
-            T.apply(self.args())
+            self.apply()
 
     def test_without_waiting_answers_apply_needs_no_judge(self) -> None:
-        T.write_jsonl(self.out / T.PENDING, [])
-        self.assertEqual(T.apply(self.args()), 0)
-        self.assertEqual(self.accepted_items(), [self.plain.item_id])
+        alone = self.folder / "alone"
+        alone.mkdir()
+        requests, out = sampled_folder(alone, [(self.plain, (label_answer(self.plain),))])
+        self.assertEqual(run_apply(requests, out), 0)
+        self.assertEqual([r["item"] for r in T.read_jsonl(out / T.ACCEPTED)], [self.plain.item_id])
+        self.assertFalse((out / T.MERGES).exists())
 
     def test_requests_other_than_the_sampled_ones_are_refused(self) -> None:
         self.requests.write_text(self.requests.read_text(encoding="utf-8") + "\n", encoding="utf-8")
-        for command in (T.cases, T.apply):
+        for command in (self.cases, self.apply):
             with self.subTest(command=command.__name__), self.assertRaisesRegex(SystemExit, "other requests"):
-                command(self.args())
+                command()
+
+    def test_sampled_requests_that_share_an_item_id_are_refused(self) -> None:
+        rows = self.requests.read_text(encoding="utf-8")
+        self.requests.write_text(rows + rows.split("\n")[0] + "\n", encoding="utf-8")
+        summary = cast(dict[str, object], json.loads((self.out / "summary.json").read_text(encoding="utf-8")))
+        (self.out / "summary.json").write_text(
+            json.dumps({**summary, "requests_sha256": D.file_sha256(self.requests)}), encoding="utf-8")
+        for command in (self.cases, self.apply):
+            with (self.subTest(command=command.__name__),
+                  self.assertRaisesRegex(SystemExit, "1 item IDs name more than one request")):
+                command()
+
+    def test_an_answer_that_is_not_the_logged_reply_of_its_attempt_is_refused(self) -> None:
+        [kept] = T.read_jsonl(self.out / T.KEPT)
+        first, second = T.read_jsonl(self.out / T.PENDING)
+        spaced = {"answer": cast(str, kept["answer"]) + " "}
+        why = "the answer in {} is not the teacher's logged reply to the request as it is asked now"
+        self.refused((
+            ("a kept answer the log does not hold", [{**kept, **spaced}], [first, second], ("apply",)),
+            ("a kept answer the log holds for another attempt", [{**kept, "attempt": 1}], [first, second], ("apply",)),
+            ("a kept record without an answer", [{**kept, "attempt": 1, "answer": None}], [first, second], ("apply",))),
+            why.format("kept.jsonl"), self.requests, self.out)
+        self.refused((
+            ("a waiting answer the log does not hold", [kept],
+             [{**first, "answer": cast(str, first["answer"]) + " "}, second], ("cases", "apply")),
+            ("a waiting answer the log holds for another attempt", [kept], [{**first, "attempt": 1}, second],
+             ("cases", "apply")),
+            # The log holds each of these answers, as the reply to the other request.
+            ("waiting answers of each other's request", [kept],
+             [{**first, "answer": second["answer"]}, {**second, "answer": first["answer"]}], ("cases", "apply"))),
+            why.format("pending.jsonl"), self.requests, self.out)
+
+    def test_a_reply_that_did_not_finish_is_no_answer(self) -> None:
+        # `sample` reads no answer from such a reply, so a record cannot stand on one.
+        T.write_jsonl(self.out / T.CALLS, [{**row, "finish": "length"} for row in T.read_jsonl(self.out / T.CALLS)])
+        for command in (self.cases, self.apply):
+            with (self.subTest(command=command.__name__),
+                  self.assertRaisesRegex(SystemExit, "is not the teacher's logged reply to the request")):
+                command()
+
+    def test_a_logged_answer_that_is_not_the_target_its_file_holds_is_refused(self) -> None:
+        # The log holds two answers of each request: one `sample` refused, then the one it took.
+        again = self.folder / "again"
+        again.mkdir()
+        stale = teacher_answer(self.labeled, absorbs=("m1", "m4"), pair=True, dropped=())
+        requests, out = sampled_folder(again, [(self.labeled, (stale, label_answer(self.labeled))),
+                                               (self.plain, ("{}", label_answer(self.plain)))])
+        waits = record(self.labeled, label_answer(self.labeled), 1)
+        kept = record(self.plain, label_answer(self.plain), 1)
+        self.assertEqual((T.read_jsonl(out / T.PENDING), T.read_jsonl(out / T.KEPT)), ([waits], [kept]))
+        why = "the answer in {} is not a training target of that file any more"
+        self.refused((
+            ("a kept answer that absorbs", [waits], [kept], ("apply",)),
+            ("a kept answer MASC refuses", [record(self.plain, "{}")], [waits], ("apply",))),
+            why.format("kept.jsonl"), requests, out)
+        self.refused((
+            ("a waiting answer that absorbs nothing", [waits], [kept], ("cases",)),
+            ("a waiting answer that absorbs a stale fact", [kept], [record(self.labeled, stale)], ("cases", "apply"))),
+            why.format("pending.jsonl"), requests, out)
+
+    def test_a_request_with_two_records_and_a_record_of_no_sampled_request_are_refused(self) -> None:
+        [kept] = T.read_jsonl(self.out / T.KEPT)
+        first, second = T.read_jsonl(self.out / T.PENDING)
+        elsewhere = "train-release-steward-00-009"
+        # Each file holds as many records as the summary counts for it.
+        for name, item, kept_rows, pending_rows in (
+                ("two waiting records", self.labeled.item_id, [kept], [first, first]),
+                ("a kept and a waiting record", self.plain.item_id, [kept], [first, kept]),
+                ("a record of no sampled request", elsewhere, [{**kept, "item": elsewhere}], [first, second])):
+            self.refused(((name, kept_rows, pending_rows, ("cases", "apply")),),
+                         f"1 items of kept.jsonl and pending.jsonl have two records or no sampled request, "
+                         f"the first {item}", self.requests, self.out)
+
+    def test_a_record_file_that_holds_another_number_of_records_than_the_summary_counts_is_refused(self) -> None:
+        [kept] = T.read_jsonl(self.out / T.KEPT)
+        first, second = T.read_jsonl(self.out / T.PENDING)
+        for name, kept_rows, pending_rows, held in (("a kept record is gone", [], [first, second], "0 and 2"),
+                                                    ("a waiting record is gone", [kept], [first], "1 and 1")):
+            self.refused(((name, kept_rows, pending_rows, ("cases", "apply")),),
+                         f"kept.jsonl and pending.jsonl hold {held} records where summary.json counts 1 and 2",
+                         self.requests, self.out)
+
+
+class RowsTest(unittest.TestCase):
+    def test_rows_are_read_back_as_written_though_an_answer_holds_a_line_separator(self) -> None:
+        # str.splitlines breaks a line at each of these; json.dumps writes them as they are.
+        rows: list[dict[str, object]] = [{"item": "a", "attempt": 0, "answer": "one two three\u0085four"},
+                                         {"item": "b", "attempt": 1, "answer": "five"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rows.jsonl"
+            T.write_jsonl(path, rows)
+            self.assertEqual(T.read_jsonl(path), rows)
+            self.assertEqual(len(path.read_text(encoding="utf-8").split("\n")), 3)
 
 
 if __name__ == "__main__":

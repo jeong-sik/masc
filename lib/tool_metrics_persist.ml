@@ -32,7 +32,10 @@ let enqueue ~masc_root (result : Tool_result.result) =
     ; duration_ms = Tool_result.duration_ms result
     }
   in
-  match Tool_metrics_store.insert ~masc_root row with
+  (* The size of the message the dispatcher returned. The keeper tool ledger's
+     [result_bytes] is this same message's length. *)
+  let result_bytes = String.length (Tool_result.message result) in
+  match Tool_metrics_store.insert ~masc_root ~result_bytes row with
   | Ok () -> ()
   | Error error ->
     Otel_metric_store.inc_counter

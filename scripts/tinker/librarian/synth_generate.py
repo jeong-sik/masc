@@ -89,7 +89,7 @@ USE_PAST_AFTER = dt.timedelta(hours=1)
 SPLITS = {
     # split: (keepers, memories per keeper, requests)
     "eval": (tuple(k for k in S.KEEPER_SEEDS if k.key in S.EVAL_KEEPERS), 10, 150),
-    # The teacher kept 51 of 96 answered requests on 11-09; the pilot trains on 200.
+    # Sized on 11-09 for about 200 training examples, when the teacher kept 51 of 96 answered requests.
     "train": (tuple(k for k in S.KEEPER_SEEDS if k.key not in S.EVAL_KEEPERS), 9, 420),
 }
 

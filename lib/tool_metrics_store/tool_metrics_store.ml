@@ -140,6 +140,17 @@ CREATE TABLE IF NOT EXISTS tool_metric_events (
 )
 |}
 
+(* The bytes of the result a call returned. It is a table of its own: the 800,000
+   rows written before it existed have no size, and a row without a size is a
+   call whose size was not observed, which is not a call of size zero. *)
+let result_sizes_schema_sql =
+  {|
+CREATE TABLE IF NOT EXISTS tool_metric_result_sizes (
+  record_id TEXT PRIMARY KEY NOT NULL,
+  result_bytes INTEGER NOT NULL CHECK (result_bytes >= 0)
+) WITHOUT ROWID
+|}
+
 let busy_timeout_ms = 5000
 let busy_timeout_sql = Printf.sprintf "PRAGMA busy_timeout=%d" busy_timeout_ms
 
@@ -161,6 +172,12 @@ let configure db =
     else
       let* () = exec db ~operation:"set busy timeout" busy_timeout_sql in
       let* () = exec db ~operation:"create tool metric table" schema_sql in
+      let* () =
+        exec
+          db
+          ~operation:"create tool metric result size table"
+          result_sizes_schema_sql
+      in
       exec
         db
         ~operation:"create tool metric timestamp index"
@@ -236,28 +253,72 @@ let with_store ~masc_root f =
 let reset_for_testing () =
   Cross_context_mutex.with_lock store_lock close_current_store_locked
 
-let insert ~masc_root row =
-  with_store ~masc_root (fun store ->
-    with_statement
-      store.db
-      ~operation:"insert tool metric"
-      "INSERT OR IGNORE INTO tool_metric_events \
-       (record_id, ts, tool_name, disposition, duration_ms) \
-       VALUES (?1, ?2, ?3, ?4, ?5)"
-      (fun statement ->
+(* Runs [f] between BEGIN and COMMIT on the connection [with_store] holds, so
+   a call's event and its size are written together or not at all. *)
+let in_transaction db ~operation f =
+  let* () = exec db ~operation:(operation ^ ": begin") "BEGIN IMMEDIATE" in
+  let rollback () = ignore (Sqlite3.exec db "ROLLBACK" : Sqlite3.Rc.t) in
+  match f () with
+  | Ok value ->
+    (match exec db ~operation:(operation ^ ": commit") "COMMIT" with
+     | Ok () -> Ok value
+     | Error _ as error ->
+       rollback ();
+       error)
+  | Error _ as error ->
+    rollback ();
+    error
+  | exception exn ->
+    rollback ();
+    raise exn
+
+let insert ~masc_root ~result_bytes row =
+  if result_bytes < 0
+  then Error (Printf.sprintf "tool metric %s has a negative result size" row.record_id)
+  else
+    with_store ~masc_root (fun store ->
+      in_transaction store.db ~operation:"insert tool metric" (fun () ->
         let* () =
-          bind_all
+          with_statement
             store.db
-            statement
-            ~operation:"bind tool metric row"
-            [ Sqlite3.Data.TEXT row.record_id
-            ; Sqlite3.Data.FLOAT row.ts
-            ; Sqlite3.Data.TEXT row.tool_name
-            ; Sqlite3.Data.TEXT row.disposition
-            ; Sqlite3.Data.FLOAT row.duration_ms
-            ]
+            ~operation:"insert tool metric"
+            "INSERT OR IGNORE INTO tool_metric_events \
+             (record_id, ts, tool_name, disposition, duration_ms) \
+             VALUES (?1, ?2, ?3, ?4, ?5)"
+            (fun statement ->
+              let* () =
+                bind_all
+                  store.db
+                  statement
+                  ~operation:"bind tool metric row"
+                  [ Sqlite3.Data.TEXT row.record_id
+                  ; Sqlite3.Data.FLOAT row.ts
+                  ; Sqlite3.Data.TEXT row.tool_name
+                  ; Sqlite3.Data.TEXT row.disposition
+                  ; Sqlite3.Data.FLOAT row.duration_ms
+                  ]
+              in
+              expect_done store.db statement ~operation:"insert tool metric")
         in
-        expect_done store.db statement ~operation:"insert tool metric"))
+        with_statement
+          store.db
+          ~operation:"insert tool metric result size"
+          "INSERT OR IGNORE INTO tool_metric_result_sizes (record_id, result_bytes) \
+           VALUES (?1, ?2)"
+          (fun statement ->
+            let* () =
+              bind_all
+                store.db
+                statement
+                ~operation:"bind tool metric result size"
+                [ Sqlite3.Data.TEXT row.record_id
+                ; Sqlite3.Data.INT (Int64.of_int result_bytes)
+                ]
+            in
+            expect_done
+              store.db
+              statement
+              ~operation:"insert tool metric result size")))
 
 let prune ~masc_root ~retention_days =
   if retention_days <= 0
@@ -268,11 +329,8 @@ let prune ~masc_root ~retention_days =
         Unix.gettimeofday ()
         -. (Float.of_int retention_days *. Masc_time_constants.day)
       in
-      with_statement
-        store.db
-        ~operation:"prune tool metrics"
-        "DELETE FROM tool_metric_events WHERE ts < ?1"
-        (fun statement ->
+      let delete ~operation sql =
+        with_statement store.db ~operation sql (fun statement ->
           let* () =
             bind_all
               store.db
@@ -280,10 +338,19 @@ let prune ~masc_root ~retention_days =
               ~operation:"bind tool metric retention cutoff"
               [ Sqlite3.Data.FLOAT cutoff ]
           in
-          let* () =
-            expect_done store.db statement ~operation:"prune tool metrics"
-          in
-          Ok (Sqlite3.changes store.db)))
+          let* () = expect_done store.db statement ~operation in
+          Ok (Sqlite3.changes store.db))
+      in
+      in_transaction store.db ~operation:"prune tool metrics" (fun () ->
+        let* _sizes =
+          delete
+            ~operation:"prune tool metric result sizes"
+            "DELETE FROM tool_metric_result_sizes WHERE record_id IN \
+             (SELECT record_id FROM tool_metric_events WHERE ts < ?1)"
+        in
+        delete
+          ~operation:"prune tool metrics"
+          "DELETE FROM tool_metric_events WHERE ts < ?1"))
 
 let row_of_statement statement =
   { record_id = Sqlite3.column_text statement 0
@@ -435,24 +502,36 @@ let fold_statement db statement ~operation ~f =
 ;;
 
 let series_select =
-  "SELECT ts, tool_name, disposition, duration_ms FROM tool_metric_events \
-   WHERE ts >= ?1 AND ts < ?2"
+  "SELECT e.ts, e.tool_name, e.disposition, e.duration_ms, s.result_bytes \
+   FROM tool_metric_events e \
+   LEFT JOIN tool_metric_result_sizes s ON s.record_id = e.record_id \
+   WHERE e.ts >= ?1 AND e.ts < ?2"
 ;;
 
 let series_sql = function
   | None -> series_select
-  | Some _ -> series_select ^ " AND tool_name = ?3"
+  | Some _ -> series_select ^ " AND e.tool_name = ?3"
 ;;
 
 let sample_of_statement statement =
   let* disposition =
     Tool_metrics_series.disposition_of_string (Sqlite3.column_text statement 2)
   in
+  (* NULL is a call whose size was not recorded, not a call of size zero. *)
+  let* result_bytes =
+    match Sqlite3.column statement 4 with
+    | Sqlite3.Data.NULL -> Ok None
+    | Sqlite3.Data.INT bytes -> Ok (Some (Int64.to_int bytes))
+    | (Sqlite3.Data.NONE | Sqlite3.Data.FLOAT _ | Sqlite3.Data.TEXT _ | Sqlite3.Data.BLOB _) as other ->
+      Error
+        ("tool metric result size is not an integer: " ^ Sqlite3.Data.to_string_debug other)
+  in
   Ok
     { Tool_metrics_series.ts = Sqlite3.column_double statement 0
     ; tool_name = Sqlite3.column_text statement 1
     ; disposition
     ; duration_ms = Sqlite3.column_double statement 3
+    ; result_bytes
     }
 ;;
 

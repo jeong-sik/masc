@@ -46,6 +46,7 @@ let system_log_optional_fact label = function
 let system_log_detail_section = detail_section_heading
 
 let system_log_detail_lines (state : state) ~seq ~width =
+  let t korean english = ui_text state ~ko:korean ~en:english in
   let entry =
     Option.bind (system_logs_page state).lp_snapshot (fun snapshot ->
         List.find_opt
@@ -55,27 +56,28 @@ let system_log_detail_lines (state : state) ~seq ~width =
   match entry with
   | None ->
       [ Theme.warn (),
-        "  This log entry is no longer present in the retained page; reload or return to the list."
+        t "  이 로그 줄은 보관 중인 쪽에 더 없음 · 다시 읽거나 목록으로 돌아가기"
+          "  This log entry is no longer present in the retained page; reload or return to the list."
       ]
   | Some entry ->
       let core_facts =
-        [ system_log_fact "Message" entry.sl_message
-        ; Page_line.fact ~tone:(system_log_level_tone entry.sl_level) "Level"
+        [ system_log_fact (t "메시지" "Message") entry.sl_message
+        ; Page_line.fact ~tone:(system_log_level_tone entry.sl_level) (t "수준" "Level")
             (system_log_level_mark entry.sl_level ^ " "
              ^ String.trim (Masc.Tui_decode.system_log_level_label entry.sl_level))
-        ; system_log_fact "Timestamp" entry.sl_ts
-        ; system_log_optional_fact "Category" entry.sl_category
+        ; system_log_fact (t "시각" "Timestamp") entry.sl_ts
+        ; system_log_optional_fact (t "분류" "Category") entry.sl_category
         ]
       in
       let metadata_facts =
-        [ system_log_optional_fact "Keeper" entry.sl_keeper
-        ; system_log_optional_fact "Turn" (Option.map string_of_int entry.sl_turn)
-        ; system_log_fact "Module" entry.sl_module
-        ; system_log_fact "Source"
+        [ system_log_optional_fact (t "Keeper" "Keeper") entry.sl_keeper
+        ; system_log_optional_fact (t "턴" "Turn") (Option.map string_of_int entry.sl_turn)
+        ; system_log_fact (t "모듈" "Module") entry.sl_module
+        ; system_log_fact (t "출처" "Source")
             (Masc.Tui_decode.system_log_source_label entry.sl_source)
-        ; system_log_fact "Origin"
+        ; system_log_fact (t "읽은 곳" "Origin")
             (System_logs_view.source_label (System_logs_view.source state.system_logs))
-        ; system_log_fact "Sequence" (string_of_int entry.sl_seq)
+        ; system_log_fact (t "순번" "Sequence") (string_of_int entry.sl_seq)
         ]
       in
       let blocks =
@@ -84,15 +86,15 @@ let system_log_detail_lines (state : state) ~seq ~width =
          | Some error ->
              [ ui_text state ~ko:"이전 관측 · 조회 실패" ~en:"Last read · refresh failed",
                [ Page_line.note ~tone:Page_line.Failure error ] ])
-        @ [ "1. 로그 메시지 · 핵심 상태 (Message & Severity)", core_facts
-        ; "2. 발생 위치 · 메타데이터 (Origin & Context)", metadata_facts
+        @ [ t "1. 로그 메시지 · 핵심 상태" "1. Message & Severity", core_facts
+        ; t "2. 발생 위치 · 메타데이터" "2. Origin & Context", metadata_facts
         ]
       in
-      let details_title = "3. 구조화 상세 (STRUCTURED DETAILS)" in
+      let details_title = t "3. 구조화 상세" "3. Structured Details" in
       (match entry.sl_details with
        | `Null ->
            detail_page ~width
-             (blocks @ [ details_title, [ Page_line.note ~tone:Page_line.Quiet "none" ] ])
+             (blocks @ [ details_title, [ Page_line.note ~tone:Page_line.Quiet (t "없음" "none") ] ])
        | json ->
            detail_page ~width blocks
            @ system_log_detail_section details_title

@@ -18306,7 +18306,8 @@ let launch_local_source_followup state ~mailbox source =
     match source with
     | Local_keepers -> launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
     | Local_work ->
-        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
+        launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh
+          state.local_base_path
 
 let observe_local_source state ~source ~is_observed request result =
   let observation = Masc_tui_types.take_local_workspace_read state ~source ~is_observed request result in
@@ -24409,10 +24410,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            Recover only those local observations; successful reads need no
            followup and replayed events owe their own reads. *)
         if Masc_tui_types.observer_replay_is_complete handshake then begin
-          List.iter (fun source ->
-              note_local_source_observer_resume state source;
-              launch_local_source_followup state ~mailbox source)
-            [Local_keepers; Local_work]
+          note_local_source_observer_resume state Local_keepers;
+          launch_local_source_followup state ~mailbox Local_keepers;
+          (* A Resumed replay can still miss a same-stat task replacement:
+             the backlog file keeps its size and mtime, so the backlog cache
+             serves the old rows and no event is owed. The resume itself is
+             the "file may have changed underneath us" moment, so re-read
+             the work sources fresh regardless of followup state. Keeper
+             metadata has no same-stat writer and keeps followup-only
+             recovery. *)
+          launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh
+            state.local_base_path
         end else begin
           launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
           owe_agenda_revalidation state;

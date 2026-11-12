@@ -281,7 +281,11 @@ let test_prefix_hash_leaves_the_callers_domain () =
   in
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  let select_range () =
+    S.checkpoint_prefix_range ~trace_id ~lines:long_lines ~messages:long_history |> require
+  in
   let in_place = capture_long () in
+  let range_in_place = select_range () in
   let previous = Domain_pool_ref.get () in
   Fun.protect
     ~finally:(fun () ->
@@ -307,7 +311,10 @@ let test_prefix_hash_leaves_the_callers_domain () =
           let _, during_restore =
             runs_beside (fun () -> restore ~lines:long_lines long_history pooled |> require)
           in
+          let pooled_range, during_range = runs_beside select_range in
           finished := true;
+          check bool "the pool selects the same range" true (range_in_place = pooled_range);
+          check bool "range selection lets the fiber beside it run" true (during_range > 0);
           check string "the pool computes the same digest"
             in_place.S.prefix_sha256 pooled.S.prefix_sha256;
           check bool "capture lets the fiber beside it run" true (during_capture > 0);

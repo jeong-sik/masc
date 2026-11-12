@@ -17,9 +17,11 @@ main { width: 100%; max-width: var(--column); margin: 0 auto; padding: 24px var(
 
 /* Who is signed in and the way out sit at the end of the line that names the
    place. On a narrow window they move under it together. The line is as tall
-   before the session is read as after: a button of the base is 44px, and the
-   line has 12px above and below it and a 1px rule (account_base.css). */
-.site-header { flex-wrap: wrap; row-gap: 8px; min-height: calc(44px + 2 * 12px + 1px); }
+   before the session is read as after, at any size of the letters: a button
+   of the base is its line of text, 8px above and below and a 1px border on
+   each side, and no less than 44px; the line has 12px above and below the
+   button and a 1px rule (account_base.css). */
+.site-header { flex-wrap: wrap; row-gap: 8px; min-height: calc(max(44px, 1lh + 2 * 8px + 2 * 1px) + 2 * 12px + 1px); }
 .account { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 
 .callout-title { color: var(--text-bright); font-weight: 600; }

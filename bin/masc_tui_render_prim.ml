@@ -2179,6 +2179,10 @@ let fit_here_steps ~cells:room steps =
   in
   shrink steps (List.fold_left (fun sum step -> sum + cells step) 0 steps - room)
 
+(* A count and what it counts, in the screen's language. *)
+let count_reading (state : state) noun count =
+  Masc_tui_value.Count.reading ~ko:(state.ui_language = Lang_ko) noun count
+
 (* The cells the steps of a path share on a row [cols] wide: what the screen
    name, one separator a step, and the [after] cells the row must keep leave. *)
 let here_steps_room ~cols (state : state) ~steps ~after =

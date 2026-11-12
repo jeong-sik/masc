@@ -10,12 +10,14 @@ compare (`files_sha256`), and for each model how many runs a side takes and its 
                              "prompt_counts_sha256": ...,
                              "counts": {"synth_valid_rate": [hits, chances], ...},
                              "real_record": [{"agree": ..., "candidates": ..., "dropped_not_in_live": ...}, ...],
-                             "synth_rows_sha256": [...], "real_rows_sha256": [...]}}
+                             "synth_rows_sha256": [...], "real_rows_sha256": [...],
+                             "answered_sha256": [[...], ...]}}
 
 A baseline is what the model's runs of the pinned template counted, kept as numbers: each metric's
-hits over chances summed over the runs and, for each run in order, its E-real record and the sha256
-of its E-synth and E-real rows. `prompt_compare.py baseline` prints it. It is null until the model's
-runs are counted.
+hits over chances summed over the runs and, for each run in order, its E-real record, the sha256 of
+its E-synth and E-real rows, and the answered calls it counted (`prompt_counts.call_sha256`). No
+answered call is counted by two pinned runs. `prompt_compare.py baseline` prints a baseline. It is
+null until the model's runs are counted.
 
 A baseline names what it was counted for and under: the provider and the model, the pass lines, the
 template and the prompt_counts.py. When the file names another of them the baseline is stale and the
@@ -28,8 +30,8 @@ The template of the baseline is config/prompts/librarian.md as the pass lines pi
 names another template is refused (`pinned_lines`), so pass lines pinned again for a new template
 leave the file refused until it names that template and its baselines are counted again.
 
-The file is read as written: a key the comparison does not read, a key written twice in one object,
-or a value of another shape is refused.
+The file is read as written (`as_written`, `lines_of`): a key the comparison does not read, a key
+written twice in one object, or a value of another shape is refused.
 """
 
 from __future__ import annotations
@@ -50,7 +52,7 @@ type JsonObject = dict[str, object]
 
 HERE = Path(__file__).resolve().parent
 PROMPT_LINES = HERE / "prompt_lines.json"
-SCHEMA = "masc.tinker.librarian.prompt_lines.v2"
+SCHEMA = "masc.tinker.librarian.prompt_lines.v3"
 COUNTS = "prompt_counts.py"
 # The files prompt_lines.json pins by sha256: what counts a run, what reads the file, what compares.
 PINNED_FILES = (COUNTS, "prompt_lines.py", "prompt_compare.py")
@@ -59,7 +61,7 @@ LINES_KEYS = frozenset({"schema", "pass_lines_sha256", "baseline_template_sha256
                         "better_sigmas", "better_from", "models"})
 MODEL_KEYS = frozenset({"provider", "model", "runs", "baseline"})
 BASELINE_KEYS = frozenset({"provider", "model", "pass_lines_sha256", "template_sha256", "prompt_counts_sha256",
-                           "counts", "real_record", "synth_rows_sha256", "real_rows_sha256"})
+                           "counts", "real_record", "synth_rows_sha256", "real_rows_sha256", "answered_sha256"})
 REAL_RECORD_KEYS = ("agree", "candidates", "dropped_not_in_live")
 
 
@@ -67,8 +69,8 @@ REAL_RECORD_KEYS = ("agree", "candidates", "dropped_not_in_live")
 class Baseline:
     """What a model's runs of the pinned template counted, and what they were counted for and under:
     the provider and the model, the pass lines, the template and the prompt_counts.py, each metric
-    summed over the runs, and for each run in order its E-real record and the sha256 of its E-synth
-    and E-real rows."""
+    summed over the runs, and for each run in order its E-real record, the sha256 of its E-synth and
+    E-real rows, and the answered calls it counted."""
 
     provider: str
     model: str
@@ -79,6 +81,7 @@ class Baseline:
     real_record: tuple[RealRecord, ...]
     synth_rows_sha256: tuple[str, ...]
     real_rows_sha256: tuple[str, ...]
+    answered: tuple[frozenset[str], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +133,14 @@ def hashes_of(raw: object, n: int) -> tuple[str, ...] | None:
     return tuple(cast(list[str], items))
 
 
+def calls_of(raw: object) -> frozenset[str] | None:
+    """`raw` as the answered calls one run counted: a list of sha256 digests, not empty, none twice;
+    None when it is anything else."""
+    listed = cast(list[object], raw) if isinstance(raw, list) else []
+    calls = hashes_of(listed, len(listed)) if listed else None
+    return None if calls is None or len(set(calls)) != len(calls) else frozenset(calls)
+
+
 def width_of(raw: JsonObject, key: str) -> float:
     """The noise width prompt_lines.json holds under `key`, a distance in σ. SystemExit unless it is a
     finite number of at least zero."""
@@ -153,7 +164,8 @@ def real_record_from(raw: object) -> RealRecord | None:
 def baseline_from(name: str, runs: int, raw: object) -> Baseline:
     """The baseline prompt_lines.json holds for the model `name`, which takes `runs` runs a side.
     SystemExit unless it names what it was counted for and under, counts every metric as hits within
-    chances, and holds an E-real record and the sha256 of each set's rows for each run, no rows twice."""
+    chances, and holds an E-real record, the sha256 of each set's rows and the answered calls for each
+    run, no rows twice."""
 
     def refused(why: str) -> SystemExit:
         return SystemExit(f"prompt_lines.json: the {name} baseline {why}")
@@ -177,15 +189,19 @@ def baseline_from(name: str, runs: int, raw: object) -> Baseline:
         if pair is None or pair[0] > pair[1]:
             raise refused(f"does not count {metric.value} as hits within chances")
         counts[metric] = Count(pair[0], pair[1])
-    raw_records = held["real_record"]
+    raw_records, raw_answered = held["real_record"], held["answered_sha256"]
     records = [real_record_from(r) for r in cast(list[object], raw_records)] if isinstance(raw_records, list) else []
     known = tuple(r for r in records if r is not None)
+    calls = [calls_of(r) for r in cast(list[object], raw_answered)] if isinstance(raw_answered, list) else []
+    answered = tuple(c for c in calls if c is not None)
     synth, real = hashes_of(held["synth_rows_sha256"], runs), hashes_of(held["real_rows_sha256"], runs)
-    if len(known) != runs or len(records) != runs or synth is None or real is None:
-        raise refused(f"does not hold an E-real record and the sha256 of each set's rows for each of its {runs} runs")
+    if (len(known) != runs or len(records) != runs or len(answered) != runs or len(calls) != runs
+            or synth is None or real is None):
+        raise refused("does not hold an E-real record, the sha256 of each set's rows and the answered calls for "
+                      f"each of its {runs} runs")
     if len({*synth, *real}) != 2 * runs:
         raise refused("names the rows of one run twice")
-    return Baseline(provider, model, under[0], under[1], under[2], counts, known, synth, real)
+    return Baseline(provider, model, under[0], under[1], under[2], counts, known, synth, real, answered)
 
 
 def baseline_json(baseline: Baseline) -> JsonObject:
@@ -196,7 +212,8 @@ def baseline_json(baseline: Baseline) -> JsonObject:
             "counts": {m.value: [baseline.counts[m].hits, baseline.counts[m].chances] for m in Metric},
             "real_record": [asdict(r) for r in baseline.real_record],
             "synth_rows_sha256": list(baseline.synth_rows_sha256),
-            "real_rows_sha256": list(baseline.real_rows_sha256)}
+            "real_rows_sha256": list(baseline.real_rows_sha256),
+            "answered_sha256": [sorted(run) for run in baseline.answered]}
 
 
 def model_from(name: str, raw: object, under: tuple[str, str, str]) -> ModelLines:
@@ -234,7 +251,8 @@ def lines_of(raw: object) -> Lines:
     """prompt_lines.json as the comparison reads it. SystemExit when it is of another schema, holds a
     key the comparison does not read, does not name by sha256 the pass lines, the template and exactly
     the pinned files, a width is not a finite number of at least zero, it holds no model or a model
-    `model_from` refuses, or `better_from` does not list, each once, models the file holds."""
+    `model_from` refuses, two pinned runs count the same answered call, or `better_from` does not
+    list, each once, models the file holds."""
     held = object_of(raw)
     if held is None or held.get("schema") != SCHEMA:
         raise SystemExit(f"prompt_lines.json is not of schema {SCHEMA}")
@@ -255,6 +273,9 @@ def lines_of(raw: object) -> Lines:
     if not raw_models:
         raise SystemExit("prompt_lines.json holds no model")
     models = {name: model_from(name, m, (pass_lines, template, files_sha256[COUNTS])) for name, m in raw_models.items()}
+    counted = [call for m in models.values() if m.baseline is not None for run in m.baseline.answered for call in run]
+    if len(set(counted)) != len(counted):
+        raise SystemExit("prompt_lines.json: two pinned runs count the same answered call")
     raw_better = held.get("better_from")
     better = [name_of(v) for v in cast(list[object], raw_better)] if isinstance(raw_better, list) else []
     better_from = frozenset(name for name in better if name is not None)
@@ -264,24 +285,29 @@ def lines_of(raw: object) -> Lines:
                  better_from, models)
 
 
-def once(pairs: list[tuple[str, object]]) -> JsonObject:
-    """A JSON object of `pairs`. SystemExit when a key is written twice: the later value would be the
-    one read, and the earlier one would stay in the file unread."""
-    held = dict(pairs)
-    if len(held) != len(pairs):
-        raise SystemExit("prompt_lines.json writes a key twice in one object")
-    return held
+def as_written(text: str, name: str) -> object:
+    """The JSON that `text`, the contents of the file `name`, holds. SystemExit when it is not JSON, or
+    when it writes a key twice in one object: the later value would be the one read, and the earlier
+    one would stay in the file unread."""
+
+    def once(pairs: list[tuple[str, object]]) -> JsonObject:
+        held = dict(pairs)
+        if len(held) != len(pairs):
+            raise SystemExit(f"{name} writes a key twice in one object")
+        return held
+
+    try:
+        return cast(object, json.loads(text, object_pairs_hook=once))
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"{name} is not JSON: {error}") from error
 
 
 def pinned_lines() -> Lines:
     """prompt_lines.json, read once it pins the present files of the comparison, was fixed under the
     present pass lines and names the present config/prompts/librarian.md as the template of the
     baseline. The pass lines pin that template, and `eval_admission.load_pass_lines` holds the file to
-    their pin. SystemExit otherwise, and when the file is not JSON."""
-    try:
-        lines = lines_of(json.loads(PROMPT_LINES.read_text(encoding="utf-8"), object_pairs_hook=once))
-    except json.JSONDecodeError as error:
-        raise SystemExit(f"prompt_lines.json is not JSON: {error}") from error
+    their pin. SystemExit otherwise."""
+    lines = lines_of(as_written(PROMPT_LINES.read_text(encoding="utf-8"), "prompt_lines.json"))
     changed = [name for name, pinned in lines.files_sha256.items() if pinned != sha256_file(HERE / name)]
     if changed:
         raise SystemExit("prompt_lines.json pins another version of " + ", ".join(changed))

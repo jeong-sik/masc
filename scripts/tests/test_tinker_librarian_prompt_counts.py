@@ -25,7 +25,19 @@ import e_synth_audit as A
 import eval_admission as V
 import merge_decisions as MD
 import prompt_counts as C
-from tinker_librarian_prompt_fixtures import DRAFT_T, OTHER_T, PIN, Row, measured, real_row, synth_row, write_run
+from tinker_librarian_prompt_fixtures import (
+    DRAFT_T,
+    OTHER_T,
+    PIN,
+    Row,
+    measured,
+    real_row,
+    sha,
+    synth_row,
+    write_run,
+)
+
+NO_CALL = "holds a row that does not name its call's key and the time it was sent"
 
 
 class CountsTest(unittest.TestCase):
@@ -70,6 +82,35 @@ class CountsTest(unittest.TestCase):
                 self.assertIn("a run names its synth and real folders", str(caught.exception))
 
 
+class CallTest(unittest.TestCase):
+    def test_a_call_is_its_key_and_the_time_it_was_sent(self) -> None:
+        where = Path("run")
+        call = C.call_sha256({"call_key": "k", "sent_at": 1762939200.25}, where)
+        self.assertEqual(call, sha("k 1762939200.25"))
+        for other in ({"call_key": "k", "sent_at": 1762939200.5}, {"call_key": "j", "sent_at": 1762939200.25}):
+            with self.subTest(other=other):
+                self.assertNotEqual(C.call_sha256(cast(Row, other), where), call)
+
+    def test_a_row_written_another_way_names_the_same_call(self) -> None:
+        # Other key order and spacing, the time in another number format, and another field's value.
+        where = Path("run")
+        row = cast(Row, json.loads('{"call_key": "k", "sent_at": 1762939200.0, "valid": true}'))
+        for text in ('{ "valid" : false ,\t"sent_at" : 1762939200 , "call_key" : "k" }',
+                     '{"sent_at":1.7629392e9,"call_key":"k"}'):
+            with self.subTest(text=text):
+                self.assertEqual(C.call_sha256(cast(Row, json.loads(text)), where), C.call_sha256(row, where))
+
+    def test_a_row_that_names_no_key_or_no_time_is_refused(self) -> None:
+        cases: list[Row] = [{"sent_at": 1.0}, {"call_key": "k"}, {"call_key": "k", "sent_at": None},
+                            {"call_key": None, "sent_at": 1.0}, {"call_key": 7, "sent_at": 1.0},
+                            {"call_key": "k", "sent_at": "1.0"}, {"call_key": "k", "sent_at": True}]
+        for row in cases:
+            with self.subTest(row=row):
+                with self.assertRaises(SystemExit) as caught:
+                    C.call_sha256(row, Path("run"))
+                self.assertEqual(str(caught.exception), f"run {NO_CALL}")
+
+
 class MeasureTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -97,8 +138,54 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual((got.template_sha256, got.synth_rows_sha256, got.real_rows_sha256),
                          (DRAFT_T, C.sha256_file(run.synth / "rows.jsonl"), C.sha256_file(run.real / "rows.jsonl")))
         self.assertEqual(got.real_record, C.RealRecord(1, 2, 1))
-        self.assertEqual(got.answered, frozenset({("key-m1-01", 1.0), ("key-m2-01", 1.0),
-                                                  ("key-e1", 2.0), ("key-e2", 2.0)}))
+        self.assertEqual(got.answered, frozenset({sha("key-m1-01 1.0"), sha("key-m2-01 1.0"),
+                                                  sha("key-e1 2.0"), sha("key-e2 2.0")}))
+
+    def test_rows_written_again_with_other_spacing_and_key_order_count_the_same_calls(self) -> None:
+        run = self.run_()
+        first = self.measure(run)
+        for folder in (run.synth, run.real):
+            rows = folder / "rows.jsonl"
+            held = [cast(Row, json.loads(line)) for line in rows.read_text(encoding="utf-8").splitlines()]
+            rows.write_text("".join(json.dumps(dict(reversed(row.items())), separators=(",", ":")) + "\n" for row in held),
+                            encoding="utf-8")
+        again = self.measure(run)
+        self.assertNotEqual(again.synth_rows_sha256, first.synth_rows_sha256)
+        self.assertNotEqual(again.real_rows_sha256, first.real_rows_sha256)
+        self.assertEqual((again.answered, again.counts, again.real_record),
+                         (first.answered, first.counts, first.real_record))
+
+    def test_a_folder_that_holds_another_targets_rows_is_counted_for_the_models_own(self) -> None:
+        # The other target's rows come first in both sets and count other numbers.
+        targets = {"again": "another-model", "base": "inkling-model"}
+        synth = write_run(self.root, "synth", "synth",
+                          [synth_row("m1-01", target="again", call_key="key-again", valid=False, candidates=5,
+                                     state_correct=1, planted=3, planted_dropped=3, dropped=3, dropped_expected=3),
+                           synth_row("m1-01", planted=2, planted_dropped=1)], targets=targets)
+        real = write_run(self.root, "real", "real",
+                         [real_row("e1", target="again", call_key="key-again-e1", agree=2, candidates=5,
+                                   dropped_not_in_live=["m9"]),
+                          real_row("e1")], targets=targets)
+        got = self.measure(C.Run(synth, real, None, None), (1, 1))
+        self.assertEqual({metric.value: got.counts[metric] for metric in C.Metric},
+                         {"synth_valid_rate": C.Count(1, 1), "real_valid_rate": C.Count(1, 1),
+                          "memory_state_accuracy": C.Count(2, 2), "stale_drop_recall": C.Count(1, 2),
+                          "judged_merge_recall": C.Count(0, 0), "drop_precision": C.Count(0, 0),
+                          "absorb_precision": C.Count(0, 0)})
+        self.assertEqual(got.real_record, C.RealRecord(1, 2, 0))
+        self.assertEqual(got.answered, frozenset({sha("key-m1-01 1.0"), sha("key-e1 2.0")}))
+
+    def test_a_row_that_does_not_name_its_call_stops_it_under_its_folders_name(self) -> None:
+        for kind in ("synth", "real"):
+            with self.subTest(kind=kind):
+                self.tearDown()
+                self.setUp()
+                synth = write_run(self.root, "synth", "synth",
+                                  [synth_row("m1-01", sent_at=None if kind == "synth" else 1.0)])
+                real = write_run(self.root, "real", "real", [real_row("e1", sent_at=None if kind == "real" else 2.0)])
+                with self.assertRaises(SystemExit) as caught:
+                    self.measure(C.Run(synth, real, None, None), (1, 1))
+                self.assertEqual(str(caught.exception), f"{self.root / kind} {NO_CALL}")
 
     def test_each_set_is_read_under_the_name_its_own_summary_gives_the_model(self) -> None:
         synth = write_run(self.root, "synth", "synth", [synth_row("m1-01")])
@@ -106,7 +193,7 @@ class MeasureTest(unittest.TestCase):
                          targets={"again": "inkling-model", "base": "another-model"})
         got = self.measure(C.Run(synth, real, None, None), (1, 1))
         self.assertEqual((got.counts[C.Metric.REAL_VALID], got.real_record), (C.Count(1, 1), C.RealRecord(1, 2, 0)))
-        self.assertEqual(got.answered, frozenset({("key-m1-01", 1.0), ("key-e1", 2.0)}))
+        self.assertEqual(got.answered, frozenset({sha("key-m1-01 1.0"), sha("key-e1 2.0")}))
 
     def test_refuses_runs_it_cannot_count(self) -> None:
         cases: list[tuple[str, dict[str, object], dict[str, object], tuple[int, int]]] = [
@@ -168,10 +255,11 @@ class JudgedMeasureTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def run_(self, m7: str, rows: list[Row] | None = None) -> C.Run:
-        """The run of `rows`, all three unless given, with a drop judge that classes m7 as `m7`."""
+    def run_(self, m7: str, rows: list[Row] | None = None, targets: dict[str, str] | None = None) -> C.Run:
+        """The run of `rows`, all three unless given, with a drop judge that classes m7 as `m7`. Its
+        E-synth summary names `targets`, inkling-model as `base` unless given."""
         rows = self.rows if rows is None else rows
-        synth = write_run(self.root, "synth", "synth", rows)
+        synth = write_run(self.root, "synth", "synth", rows, targets=targets or {"base": "inkling-model"})
         real = write_run(self.root, "real", "real", [real_row("e1")])
         drops, merges = self.root / "drops", self.root / "merges"
         key: Row = {"case": "d001", "item": "eval-k-0", "candidates": {"k1": "new"},
@@ -179,7 +267,8 @@ class JudgedMeasureTest(unittest.TestCase):
         A.write_cases(drops, [{"case": "d001"}], [key], A.JUDGE)
         decision: Row = {"case": "d001", "candidates": {"k1": "new"}, "facts": {"m2": "drop", "m7": m7}}
         (drops / D.JUDGE_DIR / D.DECISIONS).write_text(json.dumps(decision) + "\n", encoding="utf-8")
-        absorbs = [[cast(str, r["item"]), "base", mid] for r in rows for mid in cast(dict[str, str], r["absorbs"])]
+        absorbs = [[cast(str, r["item"]), cast(str, r["target"]), mid]
+                   for r in rows for mid in cast(dict[str, str], r["absorbs"])]
         keys: list[Row] = [{"case": f"g{n:03}", "absorbs": [absorb]} for n, absorb in enumerate(absorbs)]
         A.write_cases(merges, [{"case": k["case"]} for k in keys], keys, "Class each absorb.")
         MD.record_run_files(merges, synth)
@@ -208,6 +297,24 @@ class JudgedMeasureTest(unittest.TestCase):
                           "memory_state_accuracy": C.Count(7, 8), "stale_drop_recall": C.Count(1, 4),
                           "judged_merge_recall": C.Count(1, 2), "drop_precision": C.Count(1, 3),
                           "absorb_precision": C.Count(1, 2)})
+
+    def test_another_targets_rows_in_the_folder_leave_the_models_counts_as_they_were(self) -> None:
+        # The other target's rows come first. On the memory the judge can leave out it drops two facts
+        # the label asks to absorb. Its one absorb is not mergeable and is of no merge the label expects.
+        others = [synth_row("eval-k-0", target="other", call_key="key-other-k-0"),
+                  synth_row("eval-k-1", target="other", call_key="key-other-k-1", dropped_unmerged=["m3", "m4"]),
+                  synth_row("eval-j-0", target="other", call_key="key-other-j-0", valid=False, candidates=9,
+                            state_correct=0, planted=5, planted_dropped=5, dropped=7, dropped_expected=7,
+                            absorbs={"m5": "duplicate"})]
+        targets = {"other": "another-model", "base": "inkling-model"}
+        for m7 in ("drop", "keep"):
+            with self.subTest(m7=m7):
+                self.tearDown()
+                self.setUp()
+                alone = self.counts(self.run_(m7))
+                self.tearDown()
+                self.setUp()
+                self.assertEqual(self.counts(self.run_(m7, [*others, *self.rows], targets)), alone)
 
     def test_a_judge_that_leaves_no_row_to_score_stops_it(self) -> None:
         with self.assertRaises(SystemExit) as caught:

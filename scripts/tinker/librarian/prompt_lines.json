@@ -1,5 +1,5 @@
 {
- "schema": "masc.tinker.librarian.prompt_lines.v2",
+ "schema": "masc.tinker.librarian.prompt_lines.v3",
  "pass_lines_sha256": "94c12b7943d1109ab07d85b0043cbd10cb5f255ac125ce00c771c341df72d2cd",
  "baseline_template_sha256": "575a68497f00d3171d00a298d816e6ade8c0a5b7c4e2329364e725e90861d623",
  "worse_sigmas": 2.5,
@@ -22,8 +22,8 @@
   }
  },
  "files_sha256": {
-  "prompt_counts.py": "3229fbd6cb613ddd59c3f4890cff33b376621d8edd79cc7a8102d7644089c889",
-  "prompt_lines.py": "f821f8af0a289091ef410ea171e6f3aab468d2cb13951ca895b6ac3ab2da79f1",
-  "prompt_compare.py": "52ef86aa31a3ae947638babb6911c39018948e7f77df045ff708231290a61e01"
+  "prompt_counts.py": "254577def9c8091af28778d2ca743e7a286f93c955527e5f7df3c0473820ebdf",
+  "prompt_lines.py": "b69dbb05b61d3bb134dab2f68cb8f54aa4b6c8bbc56f3a9f336d9660da3876bd",
+  "prompt_compare.py": "316be1fb1d82a022dd9386971ed865c0fea747f3f4d60ad19875ca8b473fb446"
  }
 }

@@ -11,8 +11,9 @@ holds another target's rows too.
 
 A baseline in prompt_lines.json is such counts kept as numbers. It names the sha256 of this file,
 so a change here leaves every pinned baseline stale until its runs are counted again. The sha256 of
-a run's rows that a baseline keeps says which rows files the counts came from. The judges'
-decisions are not kept, so the pinned counts are the record.
+a run's rows that a baseline keeps says which rows files the counts came from, and the answered
+calls it keeps (`call_sha256`) say which answers were counted, so a later run that counts one of
+them again can be refused. The judges' decisions are not kept, so the pinned counts are the record.
 """
 
 from __future__ import annotations
@@ -75,19 +76,29 @@ class Run:
 @dataclass(frozen=True, slots=True)
 class Measured:
     """One run's counts for the model's target, the template it drew its prompts with, its rows'
-    sha256, its E-real record, and the answered calls it counts. A call is its key and the time it
-    was sent: two runs of one prompt share keys, never a sent call."""
+    sha256, its E-real record, and the answered calls it counts, each as `call_sha256` names it."""
 
     counts: Mapping[Metric, Count]
     template_sha256: str
     synth_rows_sha256: str
     real_rows_sha256: str
     real_record: RealRecord
-    answered: frozenset[tuple[str, float]]
+    answered: frozenset[str]
 
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def call_sha256(row: JsonObject, where: Path) -> str:
+    """The answered call the row of `where` counts, as one sha256 of the call's key and the time it
+    was sent. Two runs of one prompt share keys, never a sent call. The row is read as parsed, so a
+    row written again with other spacing, key order or number format names the same call.
+    SystemExit when the row names no key or no time."""
+    key, sent = row.get("call_key"), row.get("sent_at")
+    if not isinstance(key, str) or isinstance(sent, bool) or not isinstance(sent, (int, float)):
+        raise SystemExit(f"{where} holds a row that does not name its call's key and the time it was sent")
+    return hashlib.sha256(f"{key} {float(sent)!r}".encode()).hexdigest()
 
 
 def total(key: str, rows: list[JsonObject]) -> int:
@@ -152,8 +163,8 @@ def measure(run: Run, *, provider: str, model: str, pin: str, items: tuple[int, 
     if len(real_rows) != items[1]:
         raise SystemExit(f"{run.real} does not hold one row for each of the {items[1]} E-real items")
     counts[Metric.REAL_VALID] = Count(sum(bool(r["valid"]) for r in real_rows), len(real_rows))
-    answered = frozenset((cast(str, r["call_key"]), cast(float, r["sent_at"]))
-                         for r in [*(r for r in rows if r["target"] == target), *real_rows])
+    answered = frozenset([*(call_sha256(r, run.synth) for r in rows if r["target"] == target),
+                          *(call_sha256(r, run.real) for r in real_rows)])
     return Measured(counts, cast(str, synth_summary["template_sha256"]), sha256_file(run.synth / "rows.jsonl"),
                     sha256_file(run.real / "rows.jsonl"), real_record(real_rows), answered)
 

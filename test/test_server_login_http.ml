@@ -62,34 +62,9 @@ let split_once ~on text =
   find 0
 ;;
 
-(* The opening tag of the element that has this id, as the page wrote it. A
-   check of a page reads a fact from it (an attribute is there), not its
-   words. *)
-let opening_tag ~id body =
-  let attribute = Printf.sprintf {| id="%s"|} id in
-  let rec from start =
-    match String.index_from_opt body start '<' with
-    | None -> None
-    | Some first ->
-      (match String.index_from_opt body first '>' with
-       | None -> None
-       | Some last ->
-         let tag = String.sub body first (last - first + 1) in
-         if contains ~sub:attribute tag then Some tag else from (last + 1))
-  in
-  from 0
-;;
-
-(* An attribute that HTML writes with no value, as [disabled] is. *)
-let has_bare_attribute name tag =
-  contains ~sub:(Printf.sprintf " %s " name) tag || contains ~sub:(Printf.sprintf " %s>" name) tag
-;;
-
-let attribute_value name tag =
-  Option.bind
-    (split_once ~on:(Printf.sprintf {| %s="|} name) tag)
-    (fun (_, rest) -> Option.map fst (split_once ~on:{|"|} rest))
-;;
+(* What a page lets a person do about a GitHub login, read from the page as
+   a browser parses it. *)
+let login_of page = Account_page_reading.login ~start:"/auth/github/start" page
 
 (* ---- GitHub, as the test plays it ---- *)
 
@@ -524,10 +499,18 @@ let the_preview_follows_a_login () =
     Alcotest.(check string) "the form posts with its origin" "same-origin" (one "referrer-policy" home);
     let invitation = send admin router ~meth:"GET" ~path:"/accounts/invite" in
     Alcotest.(check int) "the invitation page" 200 invitation.status;
-    Alcotest.(check bool)
-      "it starts a GitHub login"
-      true
-      (contains ~sub:{|action="/auth/github/start"|} invitation.body);
+    (* On each page a person can press the one submit button of the form that
+       posts to the start route. *)
+    Alcotest.check
+      Account_page_reading.outcome
+      "the home page starts a GitHub login"
+      (Ok Account_page_reading.Open)
+      (login_of home.body);
+    Alcotest.check
+      Account_page_reading.outcome
+      "the invitation page starts one"
+      (Ok Account_page_reading.Open)
+      (login_of invitation.body);
     (* A server with no GitHub login client serves the same pages, and the
        button of the login cannot be pressed. *)
     (let no_github =
@@ -541,23 +524,13 @@ let the_preview_follows_a_login () =
        (fun path ->
          let page = send (fresh_browser ()) no_github ~meth:"GET" ~path in
          Alcotest.(check int) ("with no GitHub client, " ^ path) 200 page.status;
-         let button =
-           match opening_tag ~id:"go" page.body with
-           | Some tag -> tag
-           | None -> Alcotest.failf "no login button on %s" path
-         in
-         Alcotest.(check bool)
-           ("the button is disabled on " ^ path)
-           true
-           (has_bare_attribute "disabled" button);
-         (* The page says why: the button names an element of the page as
-            its description. *)
-         Alcotest.(check bool)
-           ("the page says so on " ^ path)
-           true
-           (match attribute_value "aria-describedby" button with
-            | Some id -> Option.is_some (opening_tag ~id page.body)
-            | None -> false))
+         (* The same button, disabled, and the page says why: the button
+            names its description, which is on the page and holds text. *)
+         Alcotest.check
+           Account_page_reading.outcome
+           ("the login is closed and the page says why on " ^ path)
+           (Ok Account_page_reading.Closed)
+           (login_of page.body))
        [ "/"; "/accounts/invite" ]);
     Alcotest.(check string)
       "nobody yet"

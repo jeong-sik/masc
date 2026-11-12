@@ -13,4 +13,4 @@
 (test
  (name test_server_login_http)
  (modules test_server_login_http)
- (libraries masc_test_deps masc.mcp_transport_protocol digestif ptime))
+ (libraries masc_test_deps account_page_reading masc.mcp_transport_protocol digestif ptime))

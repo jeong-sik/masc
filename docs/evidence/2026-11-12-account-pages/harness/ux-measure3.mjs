@@ -10,11 +10,18 @@
 // Next to ux-measure2: the status and the policy come from a request of the
 // script itself, the page counts the policy violations a browser reports, and
 // the first Tab stop is recorded.
+// Since the sign-in layer: a state whose measurement runs into a timeout of
+// the browser tool is measured again from a fresh navigation, three times at
+// most, and its row says how many attempts it took (what a row holds does not
+// depend on timing); and a row holds the login as the browser holds it.
 const SPACE = __SPACE__;
 const LABEL = "__LABEL__";
 const OUT = "__OUT__";
 const STATES = __STATES__;
 const AXE = "__AXE__";
+const ATTEMPTS = 3;
+const READY_TIMEOUT_MS = 60000;
+const AXE_TIMEOUT_MS = 120000;
 const fs = await import("node:fs/promises");
 const axeSource = await fs.readFile(AXE, "utf8");
 await fs.mkdir(OUT, { recursive: true });
@@ -28,8 +35,8 @@ await page.cdp("Page.addScriptToEvaluateOnNewDocument", {
   source:
     "window.__violations = []; document.addEventListener('securitypolicyviolation', (e) => window.__violations.push(e.effectiveDirective + ' ' + (e.blockedURI || 'inline')));",
 });
-const results = [];
-for (const [name, base, scenario, path] of STATES) {
+
+async function measure([name, base, scenario, path]) {
   if (scenario !== null) await fetch(`${base}/__scenario/${scenario}`);
   const head = await fetch(`${base}${path.split("#")[0]}`, { redirect: "manual" });
   const policy = (head.headers.get("content-security-policy") || "").replace(/nonce-[0-9a-f]+/g, "nonce-N");
@@ -45,21 +52,35 @@ for (const [name, base, scenario, path] of STATES) {
       return out === null || out.textContent !== "reading";
     },
     undefined,
-    { timeout: 10000 },
+    { timeout: READY_TIMEOUT_MS },
   );
   await page.waitForTimeout(300);
   await page.screenshot({ path: `${OUT}/${LABEL}-${name}-desktop.png`, fullPage: true });
 
+  // The run is started in the page and its result is waited for, so that no
+  // single call into the page lasts as long as the run does.
   await page.evaluate(axeSource);
-  const axe = await page.evaluate(async () => {
-    const run = await window.axe.run(document, {
-      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"] },
-    });
-    return {
-      violations: run.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, first: v.nodes[0].target.join(" ") })),
-      incomplete: run.incomplete.map((v) => `${v.id}(${v.nodes.length})`),
-    };
+  await page.evaluate(() => {
+    window.__axe = null;
+    window.axe
+      .run(document, {
+        runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"] },
+      })
+      .then(
+        (run) => {
+          window.__axe = {
+            violations: run.violations.map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, first: v.nodes[0].target.join(" ") })),
+            incomplete: run.incomplete.map((v) => `${v.id}(${v.nodes.length})`),
+          };
+        },
+        (error) => {
+          window.__axe = { failed: String(error) };
+        },
+      );
   });
+  await page.waitForFunction(() => window.__axe !== null, undefined, { timeout: AXE_TIMEOUT_MS });
+  const axe = await page.evaluate(() => window.__axe);
+  if (axe.failed !== undefined) throw new Error(`axe did not run on ${name}: ${axe.failed}`);
 
   const structure = await page.evaluate(() => {
     const visible = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
@@ -68,6 +89,18 @@ for (const [name, base, scenario, path] of STATES) {
     const small = controls.filter((e) => { const r = e.getBoundingClientRect(); return r.width < 24 || r.height < 24; });
     const raw = [...document.querySelectorAll("pre")].filter(visible).map((e) => e.textContent).filter((t) => /\(\d{3}\)|\{"/.test(t));
     const heights = controls.map((e) => Math.round(e.getBoundingClientRect().height));
+    // The login as the browser holds it: the submit buttons of the form that
+    // posts to the start route, the `disabled` property of each, and how
+    // much text a person sees in what a button names as its description.
+    const startForm = [...document.forms].find((f) => f.getAttribute("action") === "/auth/github/start" && f.method === "post") || null;
+    const startButtons = startForm === null ? [] : [...startForm.elements].filter((e) => e.tagName === "BUTTON" && e.type === "submit");
+    const describedChars = (e) =>
+      (e.getAttribute("aria-describedby") || "")
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((id) => document.getElementById(id))
+        .filter((target) => target !== null && visible(target))
+        .reduce((n, target) => n + target.innerText.trim().length, 0);
     return {
       landmarks: document.querySelectorAll("main, nav, header, footer, [role=main]").length,
       liveRegions: document.querySelectorAll("[role=status], [role=alert], [role=log], [aria-live]").length,
@@ -80,6 +113,15 @@ for (const [name, base, scenario, path] of STATES) {
       styleAttributes: document.querySelectorAll("[style]").length,
       bodyBackground: getComputedStyle(document.body).backgroundColor,
       policyViolations: window.__violations === undefined ? "not counted" : window.__violations,
+      login:
+        startForm === null
+          ? null
+          : {
+              rendered: visible(startForm),
+              submitButtons: startButtons.length,
+              disabled: startButtons.map((b) => b.disabled),
+              describedVisibleChars: startButtons.map(describedChars),
+            },
       lang: document.documentElement.lang,
       title: document.title,
     };
@@ -110,7 +152,7 @@ for (const [name, base, scenario, path] of STATES) {
   await page.screenshot({ path: `${OUT}/${LABEL}-${name}-320.png`, fullPage: true });
   await page.cdp("Emulation.clearDeviceMetricsOverride");
 
-  const row = {
+  return {
     label: LABEL,
     state: name,
     httpStatus: head.status,
@@ -122,7 +164,25 @@ for (const [name, base, scenario, path] of STATES) {
     firstTabStop,
     horizontalScrollAt320: reflow.scrollWidth > reflow.clientWidth ? `${reflow.scrollWidth}px wide in ${reflow.clientWidth}px` : "none",
   };
+}
+
+const results = [];
+for (const state of STATES) {
+  let row = null;
+  let last = null;
+  let attempts = 0;
+  while (row === null && attempts < ATTEMPTS) {
+    attempts += 1;
+    try {
+      row = await measure(state);
+    } catch (error) {
+      last = error;
+      console.error(`attempt ${attempts} of ${state[0]} stopped: ${String(error).slice(0, 200)}`);
+    }
+  }
+  if (row === null) throw last;
+  row.attempts = attempts;
   results.push(row);
   console.log(JSON.stringify(row));
+  await fs.writeFile(`${OUT}/${LABEL}-measure.json`, JSON.stringify(results, null, 2));
 }
-await fs.writeFile(`${OUT}/${LABEL}-measure.json`, JSON.stringify(results, null, 2));

@@ -6103,6 +6103,22 @@
  (name runtest)
  (deps (alias runtest-test_install_local_build_guest_shim)))
 
+; A local install refreshes the Pele helper its prefix already holds
+; (#47301). The suite borrows the build fixtures of test_install_local_build.py.
+(rule
+ (alias runtest-test_install_local_build_pele)
+ (deps
+  test_install_local_build_pele.py
+  test_install_local_build.py
+  ../scripts/install-local-build.sh
+  ../scripts/lib/install-workspace-dashboard.sh)
+ (action
+  (run python3 %{dep:test_install_local_build_pele.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_install_local_build_pele)))
+
 ; Download verification uses trusted candidate Git objects; extraction refuses
 ; traversal, links, duplicate members and overwrite before writing any member.
 (rule

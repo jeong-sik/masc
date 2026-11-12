@@ -2207,9 +2207,10 @@ The selected source is frozen before fetching or rendering. At capture, a
 draft's existing priority relative to conversation arrivals also applies to
 number `1`; Ctrl-O continues to choose from the current conversation and draft.
 Structured Mermaid outputs use the same actions. Install Pele with
-`scripts/install-pele.sh` (Node.js 22+ and pnpm); the companion runs offline and
-renders charts, mindmaps, class diagrams and other Mermaid types as terminal
-images. The preview uses the available terminal width and observed colors;
+`scripts/install-pele.sh` (Node.js 22+ and pnpm). After that,
+`scripts/install-local-build.sh` replaces it with the checkout's Pele on every
+install. The companion runs offline and renders charts, mindmaps, class
+diagrams and other Mermaid types as terminal images. The preview uses the available terminal width and observed colors;
 without a color observation it uses a standalone light canvas. Any key returns.
 The chat keeps its text diagram or source fallback, including when Pele is
 missing or rejects the syntax. An unfinished streaming fence is not opened.

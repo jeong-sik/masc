@@ -14,6 +14,10 @@ pnpm --dir tools/pele install --frozen-lockfile
 pnpm --dir tools/pele test
 ```
 
+`scripts/install-local-build.sh` runs the installer again when its prefix
+already holds `masc-pele`, so a local masc install leaves masc-tui and the
+helper on one checkout. A prefix without `masc-pele` gets none.
+
 The helper reads one JSON request from stdin and writes PNG bytes to stdout.
 `format` is `mermaid` or `svg`; unknown and missing formats fail explicitly.
 `source` is the retained markup and `maxWidth` is the current available pixel

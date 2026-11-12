@@ -35,6 +35,11 @@
 # build-dashboard-if-needed.sh (make build) last built; this script does not
 # build it.
 #
+# Pele, the TUI's Mermaid and SVG renderer, goes with masc-tui (#47301). A
+# prefix that holds masc-pele gets this checkout's tools/pele through
+# scripts/install-pele.sh. A prefix with none is given none, because Pele needs
+# Node.js 22 and pnpm. A failed Pele install is a warning, not a failed install.
+#
 # Usage: scripts/install-local-build.sh [--prefix DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
 #                                       [--no-guest-shim]
@@ -461,6 +466,23 @@ else
   echo "installed masc, masc-tui, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix (no browser Add-on)"
 fi
 echo "install-local-build: a running server keeps its old build; masc restart replaces it with this one"
+
+# The TUI draws graphs and charts with the masc-pele that PATH finds, and drops
+# an answer without the protocol receipt it expects. An install that replaced
+# masc-tui and kept an older helper broke every graph and chart until somebody
+# ran scripts/install-pele.sh by hand (#47301). The step never fails the
+# install: the binaries are in place by now.
+if [ -e "$prefix/masc-pele" ]; then
+  pele_status=0
+  sh "$repo/scripts/install-pele.sh" --prefix "$prefix" || pele_status=$?
+  if [ "$pele_status" -eq 0 ]; then
+    echo "install-local-build: refreshed Pele in $prefix from $repo/tools/pele"
+  else
+    echo "install-local-build: WARN Pele in $prefix was not refreshed: scripts/install-pele.sh exited with status $pele_status; run it again once the cause above is fixed" >&2
+  fi
+else
+  echo "install-local-build: no Pele in $prefix; none installed (scripts/install-pele.sh installs it)"
+fi
 
 # The dashboard bundle the workspace serves is not part of the binaries, and
 # the server picks it up on the next request without a restart (#49980). The

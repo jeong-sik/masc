@@ -220,10 +220,10 @@ let count_rows ~masc_root table =
 let test_hydrate_prunes_the_sizes_of_expired_rows () =
   with_tmp_dir (fun base_path ->
     let masc_root = masc_root base_path in
-    P.enqueue ~masc_root (make_result ~name:"current" ~success:true ~duration_ms:2.0);
+    P.enqueue ~base_path (make_result ~name:"current" ~success:true ~duration_ms:2.0);
     insert_old_row ~base_path;
     Alcotest.(check int) "a size for each row before pruning" 2 (count_rows ~masc_root "tool_metric_result_sizes");
-    ignore (P.hydrate ~masc_root ~retention_days:30 |> get_ok "hydrate after prune");
+    ignore (P.hydrate ~base_path ~retention_days:30 |> get_ok "hydrate after prune");
     Alcotest.(check int) "events after pruning" 1 (count_rows ~masc_root "tool_metric_events");
     Alcotest.(check int) "sizes after pruning" 1 (count_rows ~masc_root "tool_metric_result_sizes"))
 
@@ -243,8 +243,8 @@ let test_enqueue_stores_the_size_of_the_result_message () =
         }
     in
     Alcotest.(check string) "the message the size is taken from" message (R.message result);
-    P.enqueue ~masc_root result;
-    P.enqueue ~masc_root (make_result ~name:"empty" ~success:false ~duration_ms:1.0);
+    P.enqueue ~base_path result;
+    P.enqueue ~base_path (make_result ~name:"empty" ~success:false ~duration_ms:1.0);
     let now = Time_compat.now () in
     let window =
       Tool_metrics_series.window

@@ -12,8 +12,14 @@
 # `pnpm exec vite` itself runs. It replaces itself with node, which makes `$!`
 # the server: a signal to it ends the server, and esbuild exits with it. The
 # server stays in the script's process group, so a signal sent to the group
-# reaches it without the script's help. SIGKILL sent to the script alone still
-# leaves the server running.
+# reaches it without the script's help. A script that is ended alone leaves
+# the server running when the signal gives it no chance to stop it: SIGKILL,
+# and SIGQUIT under bash 3.2.
+#
+# Whether the server still runs is asked of bash, and a signal goes to it as
+# a job of this shell (`kill %N`). Bash signals a job only while it has not
+# seen the job exit. A pid alone does not tell: once the server is gone, the
+# number can name another process.
 #
 # An answer counts only while the server this run started is the one process
 # that listens on the port. `lsof` reports the listeners it may see; another
@@ -36,26 +42,28 @@ HARNESS_DASHBOARD_DEV_SERVER_STOP_INTERVAL_SEC=0.1
 # Pid of the server this shell started last; empty before the first start.
 harness_dashboard_dev_server_pid=""
 
-# True while that server has not exited. Bash lists the children it has not
-# seen exit. The pid alone does not tell: once the server is gone, the number
-# can name another process.
-harness_dashboard_dev_server_runs() {
-  local job
-  for job in $(jobs -pr); do
-    if [[ "${job}" == "${harness_dashboard_dev_server_pid}" ]]; then
+# Prints the job number of that server while bash lists it as running. Fails
+# once bash has seen it exit, and before the first start.
+harness_dashboard_dev_server_job() {
+  local line
+  # A line of `jobs -l`: "[1]+ 12345 Running    command".
+  local entry='^\[([0-9]+)\][-+ ]? +([0-9]+) '
+  while IFS= read -r line; do
+    if [[ "${line}" =~ ${entry} && "${BASH_REMATCH[2]}" == "${harness_dashboard_dev_server_pid}" ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
       return 0
     fi
-  done
+  done <<<"$(jobs -lr)"
   return 1
 }
 
 # Starts Vite in DASHBOARD_DIR and returns once READY_URL answers. Returns 1,
-# with nothing left running, when the server exits, does not answer in time,
-# or shares the port with another process.
+# with nothing left running, when the server exits, does not listen or answer
+# in time, or shares the port with another process.
 harness_dashboard_dev_server_start() {
   local dashboard_dir="$1" host="$2" port="$3" ready_url="$4" server_log="$5"
   local deadline listener listening
-  local failure="the server did not answer ${ready_url} in time"
+  local failure="no process was seen to listen on port ${port} in time"
   if ! command -v lsof >/dev/null 2>&1; then
     printf 'dashboard dev server: lsof is needed to tell which process listens on port %s\n' "${port}" >&2
     return 1
@@ -65,7 +73,7 @@ harness_dashboard_dev_server_start() {
   harness_dashboard_dev_server_pid="$!"
   deadline=$((SECONDS + HARNESS_DASHBOARD_DEV_SERVER_READY_TIMEOUT_SEC))
   while ((SECONDS < deadline)); do
-    if ! harness_dashboard_dev_server_runs; then
+    if ! harness_dashboard_dev_server_job >/dev/null; then
       failure="the server exited before it answered ${ready_url}"
       break
     fi
@@ -77,9 +85,11 @@ harness_dashboard_dev_server_start() {
       fi
       listening=1
     done
-    if ((listening)) && curl -fsS --max-time "${HARNESS_DASHBOARD_DEV_SERVER_READY_TIMEOUT_SEC}" \
-      "${ready_url}" >/dev/null 2>&1; then
-      return 0
+    if ((listening)); then
+      failure="the server did not answer ${ready_url} in time"
+      if curl -fsS --max-time "${HARNESS_DASHBOARD_DEV_SERVER_READY_TIMEOUT_SEC}" "${ready_url}" >/dev/null 2>&1; then
+        return 0
+      fi
     fi
     sleep "${HARNESS_DASHBOARD_DEV_SERVER_READY_INTERVAL_SEC}"
   done
@@ -92,24 +102,30 @@ harness_dashboard_dev_server_start() {
 # Ends the server: SIGTERM, then SIGKILL when it is still running. Returns
 # once it is gone. Does nothing when no server is running.
 harness_dashboard_dev_server_stop() {
-  local pid="${harness_dashboard_dev_server_pid}"
-  local signal attempt
-  if ! harness_dashboard_dev_server_runs; then
+  local job signal attempt traps
+  if ! harness_dashboard_dev_server_job >/dev/null; then
     return 0
   fi
-  # The subshell ignores the signals that end a script. A second one, sent
-  # while this waits, then cannot end the stop between SIGTERM and SIGKILL.
-  (
-    trap '' HUP INT TERM
-    for signal in TERM KILL; do
-      kill "-${signal}" "${pid}" 2>/dev/null || true
-      for ((attempt = 0; attempt < HARNESS_DASHBOARD_DEV_SERVER_STOP_ATTEMPTS; attempt++)); do
-        if ! kill -0 "${pid}" 2>/dev/null; then
-          exit 0
-        fi
-        sleep "${HARNESS_DASHBOARD_DEV_SERVER_STOP_INTERVAL_SEC}"
-      done
+  # The signals that end a script are ignored until the server is gone. One
+  # that arrives while this waits would otherwise end the script between
+  # SIGTERM and SIGKILL, and the server would stay.
+  traps="$(trap -p HUP INT TERM)"
+  trap '' HUP INT TERM
+  for signal in TERM KILL; do
+    if job="$(harness_dashboard_dev_server_job)"; then
+      kill "-${signal}" "%${job}" 2>/dev/null || true
+    fi
+    for ((attempt = 0; attempt < HARNESS_DASHBOARD_DEV_SERVER_STOP_ATTEMPTS; attempt++)); do
+      if ! harness_dashboard_dev_server_job >/dev/null; then
+        break 2
+      fi
+      sleep "${HARNESS_DASHBOARD_DEV_SERVER_STOP_INTERVAL_SEC}"
     done
-    printf 'dashboard dev server: process %s is still running after SIGKILL\n' "${pid}" >&2
-  )
+  done
+  if harness_dashboard_dev_server_job >/dev/null; then
+    printf 'dashboard dev server: process %s is still running after SIGKILL\n' \
+      "${harness_dashboard_dev_server_pid}" >&2
+  fi
+  trap - HUP INT TERM
+  eval "${traps}"
 }

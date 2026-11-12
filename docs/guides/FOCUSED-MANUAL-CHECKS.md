@@ -65,15 +65,16 @@ bash scripts/harness_dashboard_keeper_chat_control_status_dom_smoke.sh
 
 These commands start their own local Vite process and stop it when they end.
 The server stays in the script's process group, so a signal sent to the group
-ends both. A script that is killed alone with SIGKILL leaves its server
-running. They require pnpm, the dashboard dependencies, `lsof` and installed
-Playwright Chromium; the failure and control-status scripts additionally use
-Python's Playwright package. Their default ports are 5186, 5187 and 5188; set
-`PORT` for an unused port if needed. A run fails when another process listens
-on its port, because it would otherwise test that process's pages. Each prints
-its fixture URL and screenshot paths. The scripts use the configured dashboard
-proxy target (default localhost:8935), so record that target if investigating
-any network-backed component behavior.
+ends both. A script that is ended alone leaves its server running when the
+signal gives it no chance to stop it: SIGKILL, and SIGQUIT under bash 3.2
+(`/bin/bash` on macOS). They require pnpm, the dashboard dependencies, `lsof`
+and installed Playwright Chromium; the failure and control-status scripts
+additionally use Python's Playwright package. Their default ports are 5186,
+5187 and 5188; set `PORT` for an unused port if needed. A run fails when
+another process listens on its port, because it would otherwise test that
+process's pages. Each prints its fixture URL and screenshot paths. The scripts
+use the configured dashboard proxy target (default localhost:8935), so record
+that target if investigating any network-backed component behavior.
 
 Seven dashboard harness scripts, these three among them, start and stop Vite
 through `scripts/harness/lib/dashboard_dev_server.sh`. When changing that file,

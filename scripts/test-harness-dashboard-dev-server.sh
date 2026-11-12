@@ -76,13 +76,24 @@ import sys
 import time
 
 host, port = sys.argv[1], int(sys.argv[2])
+ended = os.environ.get("FAKE_VITE_ENDED")
+
+
+def end(*_):
+    if ended:
+        # A server that needs a moment to end, and leaves a mark once it has.
+        time.sleep(0.5)
+        open(ended, "w").close()
+    # Vite exits with status 143 when it gets SIGTERM.
+    sys.exit(143)
+
+
 if os.environ.get("FAKE_VITE_IGNORES_SIGNALS"):
     # A server that is stuck: it does not exit when it is told to.
     for name in ("SIGHUP", "SIGINT", "SIGTERM"):
         signal.signal(getattr(signal, name), signal.SIG_IGN)
 else:
-    # Vite exits with a status when it is told to end.
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    signal.signal(signal.SIGTERM, end)
 if os.environ.get("FAKE_VITE_NEVER_ANSWERS"):
     # Connections are taken by the kernel and no request gets an answer.
     listener = socket.socket()
@@ -138,6 +149,26 @@ start || fail "the port was not free for a second server"
 harness_dashboard_dev_server_stop
 nothing_runs || fail "processes outlive the second stop: $(running)"
 printf 'ok: a stopped server leaves no process and frees the port\n'
+
+: >"${pids}"
+FAKE_VITE_ENDED="${fixture}/ended" start || fail "the server that ends slowly did not start"
+harness_dashboard_dev_server_stop
+[[ -e "${fixture}/ended" ]] || fail "the server was killed before it had ended by itself"
+nothing_runs || fail "processes outlive the stop of the server that ends slowly: $(running)"
+printf 'ok: a server gets the time to end by itself\n'
+
+# The stop ignores the signals that end a script while it waits. A script that
+# goes on after a stop has its own handling of them back.
+: >"${pids}"
+trap ': a trap of the caller' HUP
+handling="$(trap -p HUP INT TERM)"
+start || fail "the server did not start"
+harness_dashboard_dev_server_stop
+handling_now="$(trap -p HUP INT TERM)"
+[[ "${handling_now}" == "${handling}" ]] ||
+  fail "stop changed how the script handles HUP, INT or TERM: ${handling_now//$'\n'/; }"
+trap - HUP
+printf 'ok: stop gives the script its handling of signals back\n'
 
 : >"${pids}"
 if FAKE_VITE_EXITS=1 start 2>"${fixture}/start.err"; then
@@ -267,12 +298,12 @@ for ending in 'INT to its process group, as Ctrl-C sends it' \
 done
 printf 'ok: a script that is ended leaves no server\n'
 
-# The server is stuck and the script is told to end again while it waits for
-# the server to exit.
+# The server is stuck and the script is told to end again, in each way that
+# ends a script, while it waits for the server to exit.
 FAKE_VITE_IGNORES_SIGNALS=1 run_harness
 await harness_started 120 || fail "the script never started the server that ignores signals"
-for _ in 1 2 3 4; do
-  kill -INT -- "-${harness_pid}" 2>/dev/null || true
+for signal in INT TERM HUP INT; do
+  kill "-${signal}" -- "-${harness_pid}" 2>/dev/null || true
   sleep 0.5
 done
 await nothing_runs 60 || fail "a second signal ended the stop before the server was killed: $(running)"

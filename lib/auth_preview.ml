@@ -67,10 +67,15 @@ let start_form ~invite ~github ~label =
 (* The script takes the token from the fragment and drops the fragment from
    the address bar, so the token is in no request line and no history entry.
    An address with no token cannot start a login that takes an invitation, so
-   the page shows how to open the invitation again in place of the form. *)
+   the page shows how to open the invitation again in place of the form.
+
+   A link that is opened in a tab that already shows this page changes only
+   the fragment, and a browser does not load the document again for that. The
+   page loads itself again then, so it reads the link wherever it is opened. *)
 let invite_script =
   {|const token = location.hash.slice(1);
 history.replaceState(null, "", location.pathname);
+addEventListener("hashchange", () => location.reload());
 document.getElementById("invite").value = token;
 if (token === "") {
   document.title = "이 주소에는 초대 정보가 없어요";

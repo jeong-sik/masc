@@ -310,6 +310,7 @@ pass ():
 - 그래서 exact fiber 의 예외와 걷기 자신의 예외를 모두 잡아 둔다. 걷기는 새 요청을 시작하지 않는다. 실행 중인 호출이 끝나 전달된 뒤에 처음 잡은 예외를 다시 던진다. instance 가 Failed 가 되는 것은 지금과 같다.
 - 취소(`Eio.Cancel.Cancelled`)와 `Host_cycle_stopped` 는 잡지 않는다. `Host_cycle_stopped` 는 instance 가 물러날 때만 난다(`stopping` 을 켜는 곳은 `retire_admission` 하나다). 그때는 3.4 가 실행 중인 호출을 이미 취소했다. 전달 중이던 옆 fiber 도 취소되고 worker 연결이 끊긴다. instance 가 물러나는 중이라 결과는 지금과 같다.
 - scope 밖으로 서로 다른 예외 둘이 나가면 Eio 는 `Eio.Exn.Multiple` 로 묶는다. 지금의 `with Host_cycle_stopped`(1346행)는 그것을 받지 못한다. 걷기는 fiber 의 끝을 값으로 모으고, scope 밖으로는 예외 하나만 내보낸다.
+- 예외 하나를 고르는 규칙은 이렇다. 잡아 둔 예외가 있으면 그 뒤에 난 `Host_cycle_stopped` 는 버리고, 실행 중인 호출이 끝난 뒤 잡아 둔 예외를 던진다. `Host_cycle_stopped` 가 먼저 나가는 중이면 취소된 호출이 던진 것은 버린다. 어느 쪽이든 instance 는 물러나거나 Failed 가 되고, 실행 중인 호출은 3.4 가 취소한다.
 
 ### 3.6 host 가 적는 것
 
@@ -477,8 +478,8 @@ revision 이 바뀌어 물러나는 경우다. 운영자가 package 를 올리�
 |---|---|---|
 | 선행 | #51269(#51250): 시작 표시를 첫 생성 요청 직전에 저장한다 | 첫 생성 요청의 허가를 기다리다 끊긴 요청이 다시 실행된다 |
 | L0 | exact 시도가 끝날 때 로그 한 줄 (3.6) | 없음 |
-| L1 | 설치 선언의 `max_exact_in_flight` 를 parse 하고, attach 와 reconcile 이 instance 에 옮긴다 (3.2) | 없음. 이 키를 모르는 빌드는 그 선언을 거절한다 |
-| L2 | `lane_addon_host_walk.ml`, 호출별 취소 표, 예외 규칙 (3.3~3.5) | 키를 2 이상으로 선언한 설치만 |
+| L1 | 설치 선언의 `max_exact_in_flight` 를 parse 한다 (3.2) | 없음. 이 키를 모르는 빌드는 그 선언을 거절한다 |
+| L2 | attach 와 reconcile 이 수를 instance 에 옮긴다 (3.2). `lane_addon_host_walk.ml`, 호출별 취소 표, 예외 규칙 (3.3~3.5) | 키를 2 이상으로 선언한 설치만 |
 | 문서 | `RFC-operator-quiz-lane.md` §4.4, `docs/guides/lane-addon-toml.md` 의 설치 필드와 "한 주기" 문단, `docs/guides/keeper-memory-execution.md` 의 keeper-librarian 선언 안내 | — |
 
 시험은 L2 에 붙인다. 부르는 곳이 없는 L1 에는 parse 시험만 둔다.

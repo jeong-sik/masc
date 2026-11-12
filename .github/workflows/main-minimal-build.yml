@@ -17,12 +17,22 @@ permissions:
   issues: write
 
 # Serialize before the receipt lookup. A queued run rechecks the successful
-# receipt after the previous build finishes. Push runs cancel their
-# predecessors: only the latest main matters, and intermediate mains are
-# stale signal. Scheduled runs never cancel a working build.
+# receipt after the previous build finishes.
+#
+# No run cancels a build that has started. Push runs used to cancel their
+# predecessors, and main moves faster than one build: of 88 push runs between
+# 2026-11-10T13:30Z and 2026-11-12T01:18Z, 62 were cancelled part-way (median
+# 112s each, 252 runner-minutes) and 20 finished. A started build now
+# finishes and the next one builds whatever main is by then. GitHub keeps
+# only the newest waiting run of a group, so a burst of merges costs one
+# build, not one per merge.
+#
+# Push and the merge worker's dispatch share a group: both mean "main moved",
+# and separate groups built the same commit twice side by side. The schedule
+# keeps its own group so a waiting scheduled run is never replaced.
 concurrency:
-  group: main-minimal-build-${{ github.event_name }}
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  group: main-minimal-build-${{ github.event_name == 'schedule' && 'schedule' || 'main-moved' }}
+  cancel-in-progress: false
 
 jobs:
   build:
